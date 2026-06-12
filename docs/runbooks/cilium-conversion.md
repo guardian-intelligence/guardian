@@ -1,25 +1,26 @@
-# Converting a live site to Cilium (flannel → Cilium wipe drill)
+# Cilium version bumps (the per-site wipe drill)
 
 Cilium ships as machine-config substrate (`src/infrastructure-components/
 cilium/`, applied by Talos as an inline bootstrap manifest). Talos applies
-inline manifests **at bootstrap only**, and a hot re-converge of a flannel
-site would stack Cilium on top of the running CNI — so conversion is a
-deliberate **wipe drill** per site, and so is every future Cilium version
-bump. Dev converted 2026-06-12 (drill-proven); this runbook promotes
-gamma, then prod.
+inline manifests **at bootstrap only** — a hot re-converge never updates
+them — so every Cilium **version bump** is a deliberate wipe drill per
+site, dev first. (Same-version config deltas can instead live-apply the
+re-render alongside the machine-config update — see
+`docs/architecture/gateway.md`.) All sites run Cilium today; this runbook
+is the standing procedure.
 
 Conventions from `docs/runbooks/aisucks-release.md` apply (KUBECONFIG,
 RUNFILES_DIR, site IPs, the verself no-touch caution). SLA: the box must
 be back to fully serving within **4 minutes** of `guardian up` against a
-maintenance-mode node (dev measured 1m56s cold, ~3min reboot recovery).
+maintenance-mode node.
 
 ## 0. Preconditions (all must hold)
 
-- Dev soaked green on Cilium + ingress firewall: node Ready, all pods
-  Running, gate battery green, reboot drills PASS within SLA.
+- Dev soaked green on the new Cilium: node Ready, all pods Running, gate
+  battery green, reboot drills PASS within SLA.
 - The site's `site.yaml` lists the three patches (commit them together):
   `cni-none.yaml`, `src/infrastructure-components/cilium/talos/cilium-inline.yaml`,
-  `ingress-firewall.yaml` (copy dev's; fix the pod-allow lesson is already in it).
+  `ingress-firewall.yaml`.
 - Let's Encrypt budget: the wipe destroys the site's cert cache → one
   duplicate-cert issuance for that domain (limit 5/week/domain). Check the
   week's count for the domain before proceeding.
@@ -83,27 +84,24 @@ kubectl get pods -A --no-headers | grep -vE 'Running|Completed' || echo all-runn
 ```
 
 Gamma additionally runs the canary submission. Watch the agent and
-operator logs for Kubernetes API deprecation warnings (k8s 1.36 is newer
-than Cilium 1.19's tested matrix — record findings in the release notes).
+operator logs for Kubernetes API deprecation warnings (the k8s version can
+run ahead of Cilium's tested matrix).
 
 ## 5. Rollback
 
-`git revert` the site.yaml patch commit, then repeat the wipe drill at the
-reverted commit (flannel returns via Talos bundled manifests), restore the
-dump again. The dump from step 1 is the invariant either way.
+`git revert` the version-bump commit, then repeat the wipe drill at the
+reverted commit, restore the dump again. The dump from step 1 is the
+invariant either way.
 
-## Conversion record (2026-06-12, commit 40eba8a)
+## Measured behavior to plan around
 
-| Site | Drill | Site serving (TLS) | Full recovery | Gate |
-|---|---|---|---|---|
-| dev | wipe ×2, reboot ×5, 26 pod kills, 240/240 rolling hammer | 2m01s / 2m02s | 178s (SLA PASS); reboots 181–207s, 5/5 PASS | green |
-| gamma | wipe-convert | +171s | 241s — FAIL by 1s on the hubble-relay certgen tail; user-facing path inside SLA | green (canary LOGGED, restore exact) |
-| prod | wipe-convert | +121s | 212s SLA PASS | green (corpus restored 2/6 exact, canary LOGGED, 0 deprecation warnings) |
-
-Dump with `--clean --if-exists` (plain dumps emit benign schema-exists
-errors against migrate-on-start). The hubble-relay certgen round-trip is
-the recovery tail everywhere (~40-70s after the site is already serving);
-if the SLA must cover it, pre-mint via the certgen CronJob schedule.
+- Dump with `--clean --if-exists` (plain dumps emit benign schema-exists
+  errors against migrate-on-start).
+- The hubble-relay certgen round-trip is the recovery tail everywhere
+  (~40–70s after the site is already serving); if the SLA must cover it,
+  pre-mint via the certgen CronJob schedule.
+- Reboot anatomy on these boxes: ~110s of firmware POST before Talos even
+  starts — the 4-minute SLA spends nearly half its budget in the BIOS.
 
 ## Known gaps / follow-ups
 
@@ -111,11 +109,9 @@ if the SLA must cover it, pre-mint via the certgen CronJob schedule.
   cold boot — converge depends on quay.io reachability. Refill the cache
   (`talosctl image cache-create` with the digest refs from
   cilium-inline.yaml) before relying on WAN-less cold boot.
-- Hubble flow export stays OFF until the charter amendment on client-IP
-  retention ships (flows carry visitor IPs).
-- A Cilium upgrade = re-vendor (values.yaml header) + this same wipe
-  drill per site, dev first. Objects dropped by a re-render need manual
-  pruning (Talos never deletes).
+- Hubble flow export stays OFF until an abuse/compliance ClickHouse domain
+  exists for it (flows carry visitor IPs).
+- Objects dropped by a re-render need manual pruning (Talos never deletes).
 - Graceful reboots (talosctl reboot) leave Deployment pod corpses in
   phase=Failed that never GC (kube-controller-manager's
   terminated-pod-gc-threshold defaults to 12500 — never trips on a
@@ -123,6 +119,3 @@ if the SLA must cover it, pre-mint via the certgen CronJob schedule.
   check. Purge with `kubectl delete pods -A
   --field-selector=status.phase=Failed`; follow-up: set the KCM
   threshold low (~20) via machine config so the cluster self-cleans.
-- Reboot anatomy on these boxes (dev, measured): ~110s of firmware POST
-  before Talos even starts — the 4-minute SLA spends nearly half its
-  budget in the BIOS. Recovery to fully-serving measured at +191s.

@@ -3,50 +3,35 @@
 Status: 2026-06-12, ratified direction. Monitoring, releases, and platform
 over product (operator decision; product capability already proven at
 verself). Each milestone names its verification — the brick isn't laid until
-the check passes. Specs referenced: `docs/architecture/{metrics,slo,observability}.md`,
+the check passes. Specs referenced:
+`docs/architecture/{metrics,slo,observability,gateway,topology}.md`,
 `docs/runbooks/aisucks-release.md`.
 
 ## Dependency shape
 
 ```
-M0 (survival, calendar-driven)
-M1 instruments ──► M2 SLO layer ──► M6 rollout judgment
+M1 instruments (done) ──► M2 SLO layer ──► M6 rollout judgment
+T fleet topology (3+2 clusters) ──► M3 prod conversion
 M3 gateway (keystone) ──► M4 status v0
                      ├──► M7 public registry / Phase-1 exit
                      ├──► app egress lockdown, replicas:2
                      └──► (with M5) weighted canaries
-M5 ledger (independent track, pairs with M1)
+M5 ledger (independent track)
 M8 paved-road proof (capstone, needs M1–M7)
 ```
 
-## M0 — survival floor (do first; small; deadline-driven)
+## M0 — survival floor
 
-STATUS 2026-06-12: artifacts staged and age-encrypted (identity in the
-operator's sops store); restore drill PASSED — prod dump into a scratch
-postgres on dev, counts matched prod exactly; `guardian-vault` bucket
-created. Upload + MacBook second copy PENDING one thing: a working
-R2-flow token trio in secret.env (the measured why is in
-`docs/runbooks/survival-floor.md`).
+DONE. Cluster CA roots + prod corpus live age-encrypted in R2
+`guardian-vault`; restore drill passed. Procedure, auth matrix, and record:
+`docs/runbooks/survival-floor.md` (one operator action remains there: the
+MacBook second copy).
 
-The VPS controller disappears in weeks; the prod corpus is single-copy on
-one NVMe. Not the deferred custody system — just the one-time floor:
-age-encrypted export of `~/.local/state/guardian/` to R2 + MacBook
-(identity in the operator's sops); a pg_dump of prod to R2 (manual is fine
-until M5's CronJob). VERIFY: decrypt + `talosctl version` against a site
-from a second machine; restore the dump into a scratch postgres and count
-reports.
+## M1 — instruments
 
-## M1 — instruments (metrics.md D1–D4; one app release + converge)
-
-SHIPPED 2026-06-12 as aisucks/v8 — digest byte-identical gamma → prod; all
-VERIFY clauses met, including the D4.v3 drill. The text below stands as the
-spec it was.
-
-App RED + funnel + fetch/parse drift + pgxpool; Converged events from
-`guardian up`; deploy dashboard; AppErrorRate + UpstreamFetchDegraded rules.
-VERIFY: per metrics.md (pinned-surface test, label-leak canary test,
-synthetic-series rule drill via VM /api/v1/import, Converged event visible,
-marker on dashboard).
+DONE. App RED + funnel + dependency + pool metrics, Converged events,
+deploy dashboard, AppErrorRate/UpstreamFetchDegraded rules — spec and
+verification clauses: `docs/architecture/metrics.md`.
 
 ## M2 — SLO layer (ratify + rules; needs days of M1 data)
 
@@ -56,19 +41,19 @@ remaining; burn-rate alerts replace crude thresholds when data matures.
 VERIFY: budget arithmetic spot-checked against a known induced outage
 window; rules load clean; numbers stable across a week.
 
-## M3 — the Gateway keystone (design session, then dev pilot)
+## M3 — the Gateway keystone (design ratified; dev pilot next)
 
-The highest-risk remaining work; five dependents (registry, status listener,
-app egress lockdown, replicas:2, weighted canaries). Own design session
-FIRST (listener handover vs zero-downtime story is the hard part), then the
-dev pilot: re-vendor Cilium with Gateway API, alpha CRDs before render, TLS
-passthrough (TLSRoute) SNI-routing — services keep certmagic; no
-cert-manager. Wipe drill on dev; gamma/prod convert only after the gate
-passes through the new path repeatedly. Conversion to pod-network also
-dissolves the SO_REUSEPORT scrape-aliasing blocker — per-pod IPs mean
-replicas:2 no longer waits on the OTLP SDK. Fallback decision if TLSRoute
-(experimental channel) disappoints: HTTPRoute termination at the Gateway —
-a trade brought back to the operator, not made silently.
+Five dependents (registry, status listener, app egress lockdown,
+replicas:2, weighted canaries). Design: `docs/architecture/gateway.md` —
+Cilium Gateway API in hostNetwork mode on the existing node Envoy; TLS
+passthrough default (TLSRoute is GA since Gateway API v1.5; pin the CRD
+bundle Cilium 1.19.4 is tested against), termination available
+per-hostname once M7 provides key custody; conversion is live-apply +
+SO_REUSEPORT listener handover, with the drilled wipe as fallback. Order:
+dev pilot → gamma with the release gate run repeatedly through Envoy →
+prod, where the conversion lands inside the topology migration
+(`docs/architecture/topology.md`) — 3-node prod changes the ingress path
+to a BGP floating IP, and prod edge surgery happens once, not twice.
 VERIFY: dev passes the full release gate through Envoy; induced pod kill
 shows the page's zero-downtime story intact; firewall posture unchanged
 (admin plane untouched — CNPs never police 6443/50000).
@@ -142,5 +127,8 @@ everywhere a service should, then is removed as cleanly (yank drill).
 - Cred custody system (Zitadel + SpiceDB era; M0 is the floor until then).
 - Prod billing thread (operator-owned).
 - ntfy topic rotation before the repo goes public.
-- Charter v2 page copy: SHIPPED in v8.
 - Hubble flow export stays off until an abuse/compliance CH domain exists.
+- Verself subsumption + workload plane (QEMU warm pools, the workload
+  agent): direction in AGENTS.md "Compute doctrine" and
+  `docs/architecture/topology.md`; per-box wipes wait on explicit operator
+  go.

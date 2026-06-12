@@ -12,6 +12,26 @@ holds gamma+prod cluster credentials: treat the host as a prod credential
 store. When the GitHub-App forge lands, this moves to an ephemeral in-cluster
 runner; this runbook is the v0.
 
+## Publishing model
+
+`github.com/guardian-intelligence/guardian` is public and is what the runner
+serves; full development history lives ONLY on the operator workstation. Its
+`main` carries parented squash snapshots — one commit per publish, each a
+child of the previous public commit, so pushes fast-forward. To publish (and
+trigger a release):
+
+```sh
+git fetch origin
+SNAP=$(git commit-tree 'HEAD^{tree}' -p origin/main -m "publish: <one-line summary>")
+git push origin "$SNAP:main"
+# expect: a fast-forward push, then a `release` run on the new commit
+```
+
+**Never `git push origin main` and never `--force` a real branch** — the
+private branch's history must not reach the public repo. A plain
+`git push origin main` is rejected as non-fast-forward (unrelated histories);
+that rejection is the guardrail, not an error to work around.
+
 ## 0. Preconditions
 
 ```sh
@@ -53,8 +73,8 @@ tar xzf actions-runner-linux-x64-2.335.1.tar.gz
 ## 2. Register (repo-scoped, labeled, no self-update)
 
 ```sh
-TOKEN=$(gh api -X POST repos/Anveio/guardian/actions/runners/registration-token -q .token)
-./config.sh --url https://github.com/Anveio/guardian --token "$TOKEN" \
+TOKEN=$(gh api -X POST repos/guardian-intelligence/guardian/actions/runners/registration-token -q .token)
+./config.sh --url https://github.com/guardian-intelligence/guardian --token "$TOKEN" \
   --name guardian-release-0 --labels guardian-release \
   --disableupdate --unattended
 # expect: √ Runner successfully added / √ Settings Saved.
@@ -77,10 +97,10 @@ sudo ./svc.sh status   # expect: active (running)
 ## 4. Lock the repo down (one-time)
 
 - Repo → Settings → Actions → General → Fork pull request workflows: require
-  approval for **all** outside collaborators. While the repo is private GitHub
-  rejects this setting (422) because fork PR workflows cannot run at all —
-  already stricter than required. **If the repo ever goes public, apply it that
-  day:** `gh api -X PUT repos/Anveio/guardian/actions/permissions/fork-pr-contributor-approval -f approval_policy=all_external_contributors`
+  approval for **all** outside collaborators. The repo is public and the
+  runner holds prod credentials — this setting is load-bearing. Applied
+  2026-06-12; verify or re-apply with:
+  `gh api -X PUT repos/guardian-intelligence/guardian/actions/permissions/fork-pr-contributor-approval -f approval_policy=all_external_contributors`
 - Never add a `pull_request` trigger to any workflow with
   `runs-on: guardian-release`. PR code is untrusted and this runner can
   converge prod — the AGENTS.md trust-boundary axis is exactly this line.
@@ -88,8 +108,8 @@ sudo ./svc.sh status   # expect: active (running)
 ## 5. Verify end-to-end
 
 ```sh
-gh workflow run release --repo Anveio/guardian --ref main
-gh run watch --repo Anveio/guardian
+gh workflow run release --repo guardian-intelligence/guardian --ref main
+gh run watch --repo guardian-intelligence/guardian
 # expect: test → converge gamma → gate gamma → promote prod → gate prod → tag
 git fetch --tags && git tag -n1 -l 'aisucks/v*' | tail -1
 # expect: the new tag, annotated with aisucks@sha256:<digest>

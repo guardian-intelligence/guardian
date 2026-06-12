@@ -103,21 +103,16 @@ kubectl -n aisucks delete pod scratch-pg
 
 ## Record
 
-Status 2026-06-12: bucket exists, artifacts staged + encrypted, restore
-drill PASSED (counts matched prod exactly); uploads PENDING the R2-flow
-token trio in `secret.env`.
+Floor in place: both artifacts uploaded to guardian-vault (state/ and
+corpus/ keys), verified by download + decrypt + sha256 match; restore drill
+passed (counts matched prod exactly). The decryption identity lives only in
+the operator's sops store, the payloads only in R2 — nothing remains on the
+controller. Remaining operator action: pull a second copy onto the MacBook
+(the snippet above with download_file).
+Note: secret.env also carries cloudflare_r2_s3_api_endpoint (the dashboard
+shows it at token creation); the upload snippet prefers it when present.
 
 | date | artifact | plaintext sha256 | counts |
 |---|---|---|---|
 | 2026-06-12 | guardian-state-2026-06-12.tar.gz | `a11dd42325a52ea6cecd5a4f9f33097fa148441658a14107e026b5dd2d5c27df` | 3 site dirs |
 | 2026-06-12 | aisucks-prod-2026-06-12.sql | `b7de18b942da9b358f141c21debf9ca40af4b3f75aa96575795101055ff8299f` | reports=2, turns=6 (restore-drilled, matched) |
-
-Upload status 2026-06-12 (later): DONE. Both artifacts uploaded to
-guardian-vault (state/ and corpus/ keys) with a fresh R2-flow token trio and
-verified by download + decrypt + sha256 match against the recorded values.
-The /tmp identity file and staging artifacts were then deleted from the
-controller — the identity now lives only in the operator's sops store, the
-payloads only in R2. Remaining operator action: pull a second copy onto the
-MacBook (the snippet above with download_file).
-Note: secret.env also carries cloudflare_r2_s3_api_endpoint (the dashboard
-shows it at token creation); the upload snippet prefers it when present.

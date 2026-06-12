@@ -41,11 +41,32 @@ use fn 1):
 | gamma | gd-gamma-w0 | 45.250.254.119 | sv_nPRbajqEB5koM | gamma.aisucks.app | cluster `guardian-gamma`; release gate (canary submissions); monthly billing |
 | prod | gd-prod-w0 | 67.213.115.113 | sv_BDXM5E4QLNrpk | aisucks.app | cluster `guardian-prod`; reserved/yearly billing (support ticket open to convert) |
 
-NOT ours to touch: `vs-gamma-w0` (206.223.228.87) and `vs-prod-w0`
+NOT ours to touch yet: `vs-gamma-w0` (206.223.228.87) and `vs-prod-w0`
 (206.223.228.99) run live Verself production under Nomad (ClickHouse,
 TigerBeetle, Temporal, 384GB of data on gamma). Never wipe, reinstall, or
-reconfigure them without an explicit fresh decision from the operator — they are
-the Phase 2 assimilation targets, not spare capacity.
+reconfigure them without an explicit fresh decision from the operator.
+2026-06-12: Verself has zero customers and subsumption is the ratified
+direction (Compute doctrine below) — but each box's wipe still waits on the
+explicit per-box operator go.
+
+Compute doctrine (ratified 2026-06-12): all Verself compute is subsumed — the
+whole fleet is guardian fleet, one pool. Spare dev/staging capacity IS workload
+capacity: idle boxes run customer workloads instead of sitting as cold spares.
+Customer/untrusted work never runs as a k8s pod — it runs in QEMU microVMs
+drawn from a per-host **warm pool** (booted before the work exists; "launch" =
+bind a late-loaded rootfs to a waiting VM, which is what makes start time
+constant and placement locality-free). The pool is owned by a single
+**workload-agent binary**: hosts know nothing except "run the agent"; the agent
+boots/recycles VMs, binds work, supervises the full lifecycle, and heartbeats
+capacity. Kubernetes schedules the *agent*, not the sandboxes — sandbox
+placement is verself-v2 control-plane logic (power-of-two-choices over
+eventually-consistent capacity heartbeats; lock-free, tolerant of stale state).
+QEMU over Kata: Kata would put the k8s scheduler in the sandbox path and boot
+VMs at pod-create (defeating the warm pool); plain QEMU keeps the agent in
+charge and the PCI/TEE/GPU passthrough path open for the rs4 era. Agent
+upgrades ship like any release: quiesce is a first-class verb (drain a host's
+pool without disrupting running work), and load tests across the nonprod fleet
+gate promotion.
 
 Offsite survival floor: the cluster CA roots (`~/.local/state/guardian/`) and the
 prod corpus live age-encrypted in the R2 bucket `guardian-vault` (decryption
