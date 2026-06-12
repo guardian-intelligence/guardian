@@ -1,0 +1,5 @@
+alias(
+    name = "talosctl",
+    actual = "@talosctl_linux_amd64//file",
+    visibility = ["//src/guardian-cli:__subpackages__"],
+)

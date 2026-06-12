@@ -1,0 +1,40 @@
+"""aspect dev install|uninstall — controller development symlinks.
+
+Thin wrappers over `guardian tools install|uninstall`. The guardian binary
+owns the symlink contract (tool names pointing at itself, dispatched on
+argv[0]); these tasks only make it reachable before any symlinks exist.
+"""
+
+load(".aspect/lib/helpers.axl", "GUARDIAN_TARGET", "bazel_run")
+
+def _tools_args(ctx, verb):
+    args = ["tools", verb]
+    if ctx.args.bin_dir != "":
+        args += ["--bin-dir", ctx.args.bin_dir]
+    return args
+
+def _install_impl(ctx):
+    return bazel_run(ctx, GUARDIAN_TARGET, _tools_args(ctx, "install"))
+
+def _uninstall_impl(ctx):
+    return bazel_run(ctx, GUARDIAN_TARGET, _tools_args(ctx, "uninstall"))
+
+_BIN_DIR_ARG = {
+    "bin_dir": args.string(default = "", description = "Symlink directory (default ~/.local/bin)."),
+}
+
+install = task(
+    implementation = _install_impl,
+    name = "install",
+    group = ["dev"],
+    summary = "Symlink pinned tools (bazel, talosctl, kubectl, guardian) at the guardian binary.",
+    args = _BIN_DIR_ARG,
+)
+
+uninstall = task(
+    implementation = _uninstall_impl,
+    name = "uninstall",
+    group = ["dev"],
+    summary = "Remove guardian-owned tool symlinks.",
+    args = _BIN_DIR_ARG,
+)

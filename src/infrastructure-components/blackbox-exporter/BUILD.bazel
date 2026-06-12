@@ -1,0 +1,16 @@
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
+
+# Re-export the pulled blackbox-exporter layout under a stable in-repo
+# runfiles path, same pattern as gatus and postgres: a base-only oci_image
+# copies the single-manifest layout verbatim.
+oci_image(
+    name = "image",
+    base = "@blackbox_exporter",
+    visibility = ["//visibility:public"],
+)
+
+oci_load(
+    name = "load",
+    image = ":image",
+    repo_tags = ["guardian/blackbox-exporter:dev"],
+)

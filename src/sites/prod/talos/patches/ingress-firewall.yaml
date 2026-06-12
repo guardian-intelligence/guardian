@@ -1,0 +1,45 @@
+# Talos host ingress firewall: default-block, with the serving and
+# management planes explicitly allowed. Closes the listeners the Cilium
+# change added to the host netns on a public-only NIC (hubble metrics :9965
+# plaintext, envoy metrics :9964, hubble peer :4244, agent health :4240)
+# without touching them — the OTel Collector will scrape them as a
+# hostNetwork peer over loopback, which nftables ingress rules do not
+# police. Pod-originated traffic to host ports IS host ingress (it traverses
+# the INPUT chain after Cilium hands it to the host stack), so pods are
+# ALLOWED on the same ports plus hubble peer :4244 — never `except`-ed out
+# of the allow: that reads like an exemption but is a block, and it cut
+# coredns off from the apiserver on the first post-firewall reboot (cluster
+# DNS died -> app could not resolve postgres -> site down; conntrack had
+# masked it until the reboot dropped established flows).
+#
+# Landed after wipe drill #1 proved the Cilium baseline; validated by its
+# own reboot drill, then wipe drill #2 proved the composed state. Lockout
+# math: apid :50000 and the apiserver :6443 are allowed below; worst case
+# is the BMC/SOL path (AGENTS.md — confirmed available via the Latitude
+# API) or rescue re-image.
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: ingress-allow
+portSelector:
+  ports:
+    - 80    # ACME HTTP-01 + healthz + redirect
+    - 443   # the site
+    - 6443  # kube-apiserver (operator workstation)
+    - 50000 # Talos apid (talosctl — the management lifeline)
+  protocol: tcp
+ingress:
+  - subnet: 0.0.0.0/0
+---
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: ingress-allow-pods
+portSelector:
+  ports:
+    - 4244  # hubble peer: relay (pod net) -> agent on the node address
+  protocol: tcp
+ingress:
+  - subnet: 10.244.0.0/16
+---
+apiVersion: v1alpha1
+kind: NetworkDefaultActionConfig
+ingress: block

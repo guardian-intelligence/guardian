@@ -1,0 +1,16 @@
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
+
+# Re-export the pulled victoria-metrics layout under a stable in-repo
+# runfiles path, same pattern as postgres and gatus: a base-only oci_image
+# copies the single-manifest layout verbatim.
+oci_image(
+    name = "image",
+    base = "@victoria_metrics",
+    visibility = ["//visibility:public"],
+)
+
+oci_load(
+    name = "load",
+    image = ":image",
+    repo_tags = ["guardian/victoria-metrics:dev"],
+)

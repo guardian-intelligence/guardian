@@ -1,0 +1,55 @@
+# Dev site definition consumed by the guardian CLI. Paths are repo-root
+# relative; run guardian from the repo root.
+cluster:
+  name: guardian-dev
+  endpoint: https://206.223.228.101:6443
+
+node:
+  address: 206.223.228.101
+  hostname: vs-dev-w0
+  # Latitude assigns the address statically (no DHCP): /31 point-to-point
+  # with the gateway on the paired address.
+  prefixLength: 31
+  gateway: 206.223.228.100
+  # The external X550 port, selected by MAC (a physical fact, like the disk
+  # serials below; Latitude reports it as the `external` interface). Never
+  # select by name: names are derived per kernel policy and per board (this
+  # one has no SMBIOS onboard labels, so Talos says enp1s0f1 where site.yaml
+  # once said eno1 — the 2026-06-10 network-dark "boot wedge"). `up` verifies
+  # this MAC against the maintenance node's link inventory before installing.
+  interfaceMac: "90:5a:08:33:ba:9f"
+  # Two identical 894GB Micron NVMes, distinguishable only by serial. Select
+  # by serial because device enumeration order is not stable across boots and
+  # installing to the wrong one would wipe the ZFS pool.
+  installDiskSerial: "362510FCEFB8" # nvme0n1, Talos system disk
+  zfsDiskSerial: "362510FD7C47" # nvme1n1, reserved for the ZFS pool
+
+talos:
+  schematic: src/sites/dev/talos/schematic.yaml
+  patches:
+    - src/sites/dev/talos/patches/single-node.yaml
+    - src/sites/dev/talos/patches/registry-mirror.yaml
+    - src/sites/dev/talos/patches/image-cache.yaml
+    - src/sites/dev/talos/patches/zfs-module.yaml
+    - src/sites/dev/talos/patches/cni-none.yaml
+    # Shared vendored render, deliberately not copied per-site: one Cilium
+    # version across the fleet, one file to re-vendor on upgrade.
+    - src/infrastructure-components/cilium/talos/cilium-inline.yaml
+    - src/sites/dev/talos/patches/ingress-firewall.yaml
+
+# Per-site values for the aisucks component. dev.aisucks.app serves PR
+# preview branches: deploying a preview = converging dev from that branch
+# (`git checkout <branch> && guardian up src/sites/dev/site.yaml`) — the
+# workspace build IS the preview. One preview at a time; the box serves
+# whatever was converged last. Ingest open for development.
+aisucks:
+  domain: dev.aisucks.app
+  ingest: "on"
+  backup: false
+  # Gatus pages this ntfy.sh topic (subscribe in the ntfy app). Unguessable
+  # but checked in; rotate before the repo goes public.
+  ntfyTopic: "aisucks-ops-1ebda4d035e83ac0"
+  # Dev is the outside watcher for the public sites.
+  watch:
+    - https://aisucks.app/healthz
+    - https://gamma.aisucks.app/healthz

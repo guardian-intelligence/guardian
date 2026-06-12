@@ -1,0 +1,128 @@
+# Converting a live site to Cilium (flannel → Cilium wipe drill)
+
+Cilium ships as machine-config substrate (`src/infrastructure-components/
+cilium/`, applied by Talos as an inline bootstrap manifest). Talos applies
+inline manifests **at bootstrap only**, and a hot re-converge of a flannel
+site would stack Cilium on top of the running CNI — so conversion is a
+deliberate **wipe drill** per site, and so is every future Cilium version
+bump. Dev converted 2026-06-12 (drill-proven); this runbook promotes
+gamma, then prod.
+
+Conventions from `docs/runbooks/aisucks-release.md` apply (KUBECONFIG,
+RUNFILES_DIR, site IPs, the verself no-touch caution). SLA: the box must
+be back to fully serving within **4 minutes** of `guardian up` against a
+maintenance-mode node (dev measured 1m56s cold, ~3min reboot recovery).
+
+## 0. Preconditions (all must hold)
+
+- Dev soaked green on Cilium + ingress firewall: node Ready, all pods
+  Running, gate battery green, reboot drills PASS within SLA.
+- The site's `site.yaml` lists the three patches (commit them together):
+  `cni-none.yaml`, `src/infrastructure-components/cilium/talos/cilium-inline.yaml`,
+  `ingress-firewall.yaml` (copy dev's; fix the pod-allow lesson is already in it).
+- Let's Encrypt budget: the wipe destroys the site's cert cache → one
+  duplicate-cert issuance for that domain (limit 5/week/domain). Check the
+  week's count for the domain before proceeding.
+- BMC/OOB path confirmed reachable via the Latitude API (AGENTS.md) — the
+  lifeline if the firewall ever locks the management plane out.
+- `bazelisk test //...` green on the exact commit being converged.
+
+## 1. Back up the database FIRST (prod especially — the corpus)
+
+The wipe destroys PGDATA (hostPath on EPHEMERAL). No automated backups
+exist yet (M5), so this dump is the only copy:
+
+```sh
+TS=$(date -u +%Y%m%dT%H%M%SZ)
+kubectl -n aisucks exec postgres-0 -- pg_dump --clean --if-exists -U aisucks aisucks > /tmp/aisucks-$SITE-$TS.sql
+sha256sum /tmp/aisucks-$SITE-$TS.sql | tee /tmp/aisucks-$SITE-$TS.sql.sha256
+grep -c 'INSERT\|COPY' /tmp/aisucks-$SITE-$TS.sql   # expect: > 0
+kubectl -n aisucks exec postgres-0 -- psql -U aisucks -t -c \
+  'select count(*) from reports;'                    # record the number
+```
+
+STOP if the dump is empty but the count is not.
+
+## 2. Convert (the wipe drill)
+
+```sh
+guardian down --yes src/sites/$SITE/site.yaml   # → maintenance mode
+guardian up src/sites/$SITE/site.yaml           # Talos installs, Cilium inline
+```
+
+The node goes Ready only after Cilium runs — that wait is the CNI gate.
+Immediately after the apiserver answers, recreate the db secret
+(runbook §0 of aisucks-release.md); the password is new, which is fine —
+the fresh postgres initializes with it.
+
+## 3. Restore (sites with data)
+
+```sh
+kubectl -n aisucks cp /tmp/aisucks-$SITE-$TS.sql postgres-0:/tmp/restore.sql
+kubectl -n aisucks exec postgres-0 -- psql -U aisucks -d aisucks -f /tmp/restore.sql
+kubectl -n aisucks exec postgres-0 -- psql -U aisucks -t -c \
+  'select count(*) from reports;'   # expect: the recorded number
+```
+
+Restart aisucks once so migrate-on-start reconciles against the restored
+schema: `kubectl -n aisucks rollout restart deploy/aisucks`.
+
+## 4. Gate
+
+The release-runbook gate battery, plus the Cilium-specific checks:
+
+```sh
+H=https://$DOMAIN
+curl -fsS -o /dev/null -w 'healthz %{http_code} in %{time_total}s\n' $H/healthz   # 200
+curl -fsS $H/ | grep -q 'never be sold' && echo page ok
+curl -s -o /dev/null -w 'garbage -> %{http_code}\n' -X POST -d 'link=https://evil.example/share/x' $H/report  # 422
+kubectl -n kube-system exec ds/cilium -c cilium-agent -- cilium-dbg status --brief  # OK
+kubectl -n kube-system exec ds/cilium -c cilium-agent -- cilium-dbg status --verbose | grep 'Socket LB'  # Enabled
+for p in 9965 9964 4244 4240; do timeout 2 bash -c "</dev/tcp/$IP/$p" 2>/dev/null && echo "$p OPEN (BAD)" || echo "$p blocked"; done
+kubectl get pods -A --no-headers | grep -vE 'Running|Completed' || echo all-running
+```
+
+Gamma additionally runs the canary submission. Watch the agent and
+operator logs for Kubernetes API deprecation warnings (k8s 1.36 is newer
+than Cilium 1.19's tested matrix — record findings in the release notes).
+
+## 5. Rollback
+
+`git revert` the site.yaml patch commit, then repeat the wipe drill at the
+reverted commit (flannel returns via Talos bundled manifests), restore the
+dump again. The dump from step 1 is the invariant either way.
+
+## Conversion record (2026-06-12, commit 40eba8a)
+
+| Site | Drill | Site serving (TLS) | Full recovery | Gate |
+|---|---|---|---|---|
+| dev | wipe ×2, reboot ×5, 26 pod kills, 240/240 rolling hammer | 2m01s / 2m02s | 178s (SLA PASS); reboots 181–207s, 5/5 PASS | green |
+| gamma | wipe-convert | +171s | 241s — FAIL by 1s on the hubble-relay certgen tail; user-facing path inside SLA | green (canary LOGGED, restore exact) |
+| prod | wipe-convert | +121s | 212s SLA PASS | green (corpus restored 2/6 exact, canary LOGGED, 0 deprecation warnings) |
+
+Dump with `--clean --if-exists` (plain dumps emit benign schema-exists
+errors against migrate-on-start). The hubble-relay certgen round-trip is
+the recovery tail everywhere (~40-70s after the site is already serving);
+if the SLA must cover it, pre-mint via the certgen CronJob schedule.
+
+## Known gaps / follow-ups
+
+- IMAGECACHE predates Cilium: the six quay.io images are cache misses on
+  cold boot — converge depends on quay.io reachability. Refill the cache
+  (`talosctl image cache-create` with the digest refs from
+  cilium-inline.yaml) before relying on WAN-less cold boot.
+- Hubble flow export stays OFF until the charter amendment on client-IP
+  retention ships (flows carry visitor IPs).
+- A Cilium upgrade = re-vendor (values.yaml header) + this same wipe
+  drill per site, dev first. Objects dropped by a re-render need manual
+  pruning (Talos never deletes).
+- Graceful reboots (talosctl reboot) leave Deployment pod corpses in
+  phase=Failed that never GC (kube-controller-manager's
+  terminated-pod-gc-threshold defaults to 12500 — never trips on a
+  single-node fleet). Cosmetic, but they poison any "all pods Ready"
+  check. Purge with `kubectl delete pods -A
+  --field-selector=status.phase=Failed`; follow-up: set the KCM
+  threshold low (~20) via machine config so the cluster self-cleans.
+- Reboot anatomy on these boxes (dev, measured): ~110s of firmware POST
+  before Talos even starts — the 4-minute SLA spends nearly half its
+  budget in the BIOS. Recovery to fully-serving measured at +191s.

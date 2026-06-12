@@ -1,0 +1,46 @@
+# Prod site definition consumed by the guardian CLI. Paths are repo-root
+# relative; run guardian from the repo root. Box: Latitude sv_BDXM5E4QLNrpk
+# (gd-prod-w0, f4.metal.small, Ashburn), provisioned 2026-06-11.
+cluster:
+  name: guardian-prod
+  endpoint: https://67.213.115.113:6443
+
+node:
+  address: 67.213.115.113
+  hostname: gd-prod-w0
+  # Latitude assigns the address statically (no DHCP): /31 point-to-point
+  # with the gateway on the paired address.
+  prefixLength: 31
+  gateway: 67.213.115.112
+  # Physical facts derived from the maintenance node on 2026-06-11. The
+  # external port is X550 function 0 on THIS box — flipped from dev/gamma;
+  # an f1-bound install booted network-dark, and maintenance showed the
+  # public /31 alive on f0. Per-box wiring is a physical fact: derive it,
+  # never copy it from a sibling. Two identical 960GB Samsung NVMes.
+  interfaceMac: "7c:c2:55:6e:90:36"
+  installDiskSerial: "S64FNN0Y900069" # nvme0n1, Talos system disk
+  zfsDiskSerial: "S64FNN0Y900073" # nvme1n1, reserved for the ZFS pool
+
+talos:
+  schematic: src/sites/prod/talos/schematic.yaml
+  patches:
+    - src/sites/prod/talos/patches/single-node.yaml
+    - src/sites/prod/talos/patches/registry-mirror.yaml
+    - src/sites/prod/talos/patches/zfs-module.yaml
+    - src/sites/prod/talos/patches/cni-none.yaml
+    # Shared vendored render, deliberately not copied per-site: one Cilium
+    # version across the fleet, one file to re-vendor on upgrade.
+    - src/infrastructure-components/cilium/talos/cilium-inline.yaml
+    - src/sites/prod/talos/patches/ingress-firewall.yaml
+
+# Prod serves aisucks.app. Backups stay off until the R2 CronJob lands (M5).
+aisucks:
+  domain: aisucks.app
+  ingest: "on"
+  backup: false
+  ntfyTopic: "aisucks-ops-1ebda4d035e83ac0"
+  # Every site probes its siblings' public surfaces (the one permitted
+  # cross-site act): a site-local stack cannot report its own node's death.
+  watch:
+    - https://dev.aisucks.app/healthz
+    - https://gamma.aisucks.app/healthz

@@ -1,0 +1,44 @@
+# Gamma site definition consumed by the guardian CLI. Paths are repo-root
+# relative; run guardian from the repo root. Box: Latitude sv_nPRbajqEB5koM
+# (gd-gamma-w0, f4.metal.small, Ashburn), provisioned 2026-06-11.
+cluster:
+  name: guardian-gamma
+  endpoint: https://45.250.254.119:6443
+
+node:
+  address: 45.250.254.119
+  hostname: gd-gamma-w0
+  # Latitude assigns the address statically (no DHCP): /31 point-to-point
+  # with the gateway on the paired address.
+  prefixLength: 31
+  gateway: 45.250.254.118
+  # Physical facts derived from the maintenance node on 2026-06-11
+  # (talosctl get links/disks/addresses --insecure): the public /31 sits on
+  # enp1s0f1 (X550 function 1, the higher MAC), same wiring as dev. Two
+  # identical 960GB Micron NVMes, distinguishable only by serial.
+  interfaceMac: "7c:c2:55:6e:92:1b"
+  installDiskSerial: "352410A4E051" # nvme0n1, Talos system disk
+  zfsDiskSerial: "352410A4E0A6" # nvme1n1, reserved for the ZFS pool
+
+talos:
+  schematic: src/sites/gamma/talos/schematic.yaml
+  patches:
+    - src/sites/gamma/talos/patches/single-node.yaml
+    - src/sites/gamma/talos/patches/registry-mirror.yaml
+    - src/sites/gamma/talos/patches/zfs-module.yaml
+    - src/sites/gamma/talos/patches/cni-none.yaml
+    # Shared vendored render, deliberately not copied per-site: one Cilium
+    # version across the fleet, one file to re-vendor on upgrade.
+    - src/infrastructure-components/cilium/talos/cilium-inline.yaml
+    - src/sites/gamma/talos/patches/ingress-firewall.yaml
+
+# Gamma serves gamma.aisucks.app with ingest open (it is the release gate,
+# exercised with canary submissions). Watches prod from outside.
+aisucks:
+  domain: gamma.aisucks.app
+  ingest: "on"
+  backup: false
+  ntfyTopic: "aisucks-ops-1ebda4d035e83ac0"
+  watch:
+    - https://aisucks.app/healthz
+    - https://dev.aisucks.app/healthz

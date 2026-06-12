@@ -1,0 +1,104 @@
+# Automated form of docs/runbooks/aisucks-release.md — step names below cite
+# its step numbers, and the commands are kept verbatim where possible so the
+# runbook stays grep-able as the spec. Per AGENTS.md Phase 2: every merge to
+# main converges gamma, the gate decides promotion to prod.
+#
+# Two deliberate inversions from the manual runbook:
+#   - The tag is cut AFTER the prod gate, not before step 2: only green
+#     releases get tags ("never ship a tag that didn't gate green"), and the
+#     digest is known by then, so the annotated tag is created in one shot.
+#   - "Same tag, same workspace, no commits in between" (step 4) holds by
+#     construction: one checkout of one commit serves both converges.
+#
+# Rollback (runbook step 5) stays manual. A prod gate failure here means prod
+# is converged but unreleased: the job fails loudly, no tag is pushed.
+#
+# SECURITY: the guardian-release runner holds gamma+prod credentials
+# (docs/runbooks/release-runner.md). Never add pull_request triggers to this
+# file — PR code is untrusted (AGENTS.md trust-boundary axis).
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One release at a time. A run mid-promote is never cancelled; the newest
+# queued merge runs next (GitHub keeps only the latest pending run).
+concurrency:
+  group: aisucks-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write # push the annotated aisucks/v<N> tag
+
+defaults:
+  run:
+    # Explicit bash gives `-eo pipefail`; the default shell omits pipefail and
+    # would let a failed `guardian up` hide behind tee.
+    shell: bash
+
+env:
+  # Real share link, deliberately not a secret — docs/runbooks/canaries.md is
+  # the registry of record; it must stay live.
+  CANARY_CHATGPT: https://chatgpt.com/share/6a2a4ce7-8e14-83e8-acef-fd7cf9a144fe
+
+jobs:
+  release:
+    runs-on: [self-hosted, guardian-release]
+    timeout-minutes: 90 # each converge may poll node Ready up to 15m
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0 # tag numbering reads the full aisucks/v* list
+
+      - name: Test (step 1)
+        run: bazelisk test //...
+
+      - name: Converge gamma (step 2)
+        run: |
+          bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/sites/gamma/site.yaml | tee gamma-up.log
+          DIGEST=$(grep $'^pushed\t' gamma-up.log | grep '/aisucks@' | sed 's/.*@//')
+          test -n "$DIGEST"
+          echo "GAMMA_DIGEST=$DIGEST" >> "$GITHUB_ENV"
+
+      - name: Gate gamma (step 3)
+        run: |
+          export KUBECONFIG="$HOME/.local/state/guardian/guardian-gamma/kubeconfig"
+          export RUNFILES_DIR="$(bazelisk info bazel-bin)/src/guardian-cli/cmd/guardian/guardian_/guardian.runfiles"
+          H=https://gamma.aisucks.app
+          # Converge applies manifests but does not wait on the aisucks
+          # rollout; bound the settle (3 min) instead of trusting timing.
+          for _ in $(seq 36); do curl -fsS -o /dev/null "$H/healthz" && break; sleep 5; done
+          curl -fsS -o /dev/null -w 'healthz %{http_code} in %{time_total}s\n' "$H/healthz"
+          curl -fsS "$H/" | grep -q 'never be sold' && echo page ok
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -d 'link=https://evil.example/share/x' "$H/report")" = 422 && echo garbage ok
+          curl -s -X POST --data-urlencode "link=$CANARY_CHATGPT" "$H/report" | grep -q 'LOGGED' && echo canary ok
+          test "$("$HOME/.local/bin/kubectl" -n aisucks exec postgres-0 -- psql -U aisucks -t -c 'select count(*) from reports;' | tr -d '[:space:]')" -ge 1 && echo reports ok
+
+      - name: Promote prod (step 4)
+        run: |
+          bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/sites/prod/site.yaml | tee prod-up.log
+          PROD_DIGEST=$(grep $'^pushed\t' prod-up.log | grep '/aisucks@' | sed 's/.*@//')
+          if [ "$PROD_DIGEST" != "$GAMMA_DIGEST" ]; then
+            echo "STOP: build not reproducible — gamma pushed $GAMMA_DIGEST, prod pushed $PROD_DIGEST" >&2
+            exit 1
+          fi
+
+      - name: Gate prod (step 4, first three checks)
+        run: |
+          H=https://aisucks.app
+          for _ in $(seq 36); do curl -fsS -o /dev/null "$H/healthz" && break; sleep 5; done
+          curl -fsS -o /dev/null -w 'healthz %{http_code} in %{time_total}s\n' "$H/healthz"
+          curl -fsS "$H/" | grep -q 'never be sold' && echo page ok
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -d 'link=https://evil.example/share/x' "$H/report")" = 422 && echo garbage ok
+
+      - name: Tag the release (steps 1 + 2)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          LAST=$(git tag -l 'aisucks/v*' | sed 's|aisucks/v||' | sort -n | tail -1)
+          TAG="aisucks/v$(( ${LAST:-0} + 1 ))"
+          git tag -a "$TAG" -m "aisucks@$GAMMA_DIGEST"
+          git push origin "$TAG"
+          echo "released $TAG -> aisucks@$GAMMA_DIGEST"

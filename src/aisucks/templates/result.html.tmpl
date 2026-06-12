@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aisucks.app — verdict</title>
+<style>
+  body{background:#fff;color:#171717;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+       margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;box-sizing:border-box}
+  .frame{max-width:560px;width:100%}
+  .card{border:1px solid #e5e5e5;border-radius:16px;padding:28px;font-size:15px;line-height:1.6;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+  .big{display:block;font-size:18px;font-weight:600;margin-bottom:10px}
+  .ok{color:#15803d}.bad{color:#b91c1c}.meh{color:#a16207}
+  .fine{color:#737373;font-size:13px}
+  a{color:#171717}
+  .back{text-align:center;font-size:13px;margin-top:20px}
+</style>
+</head>
+<body>
+<div class="frame">
+<div class="card">
+{{if eq .Kind "logged"}}
+  <span class="big ok">✔ LOGGED.</span>
+  if there's a checkable claim in there, it gets fact-checked when the
+  verification engine comes online — and the confirmed lies go on the wall.<br><br>
+  <span class="fine">we kept the conversation text. we kept nothing about you — there is nothing about you to keep, and we don't tell anyone what's in the locker.</span>
+{{else if eq .Kind "rejected"}}
+  <span class="big bad">✘ THAT'S NOT A SHARE LINK.</span>
+  we take exactly one thing right now: <b>chatgpt.com/share/…</b>.
+  open your conversation, hit share, copy the link, come back.
+  (claude &amp; friends are coming.)
+{{else if eq .Kind "gone"}}
+  <span class="big bad">✘ THAT LINK DOESN'T ANSWER.</span>
+  the share page 404s, redirects to a login wall, or otherwise plays dead.
+  fake links bounce — that's the whole anti-abuse system. if you just created
+  it, wait a few seconds and try again.
+{{else if eq .Kind "ratelimited"}}
+  <span class="big bad">✘ EASY THERE.</span>
+  too many reports too fast from your address. wait a bit. (we count this in
+  RAM and forget it minutes later — nothing is written down.)
+{{else if eq .Kind "closed"}}
+  <span class="big meh">⚠ REPORTING OPENS SOON.</span>
+  the locker is still being welded shut. come back shortly.
+{{else}}
+  <span class="big bad">✘ SOMETHING BROKE ON OUR END.</span>
+  not your fault. try again in a minute.
+{{end}}
+</div>
+<p class="back"><a href="/">&larr; back to the front</a></p>
+</div>
+</body>
+</html>

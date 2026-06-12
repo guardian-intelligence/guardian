@@ -1,0 +1,103 @@
+# Gatus: blackbox monitoring + paging for aisucks. Probes go out to the
+# node's public address — the same path a visitor takes — so a dead hostPort,
+# a wedged pod, or a node off the network all look like what they are: down.
+# Alerts page via ntfy.sh (push topic; subscribe in the ntfy app). The topic
+# is unguessable but lives in site.yaml — rotate it before the repo goes
+# public (charter: open code). Cross-site watch targets come from
+# site.yaml aisucks.watch once more sites enroll.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gatus-config
+  namespace: aisucks
+data:
+  config.yaml: |
+{{- if .Site.Aisucks.NtfyTopic}}
+    alerting:
+      ntfy:
+        url: "https://ntfy.sh"
+        topic: "{{.Site.Aisucks.NtfyTopic}}"
+        priority: 4
+        default-alert:
+          enabled: true
+          failure-threshold: 3
+          success-threshold: 2
+          send-on-resolved: true
+{{- end}}
+    endpoints:
+{{- /* With a domain, :80 only redirects to HTTPS; probe the real serving
+       path a visitor takes. Without one (dev, pre-DNS), probe the node. */}}
+{{- $base := printf "http://%s" .Site.Node.Address}}
+{{- if .Site.Aisucks.Domain}}{{$base = printf "https://%s" .Site.Aisucks.Domain}}{{end}}
+      - name: aisucks-healthz ({{.Site.Cluster.Name}})
+        url: "{{$base}}/healthz"
+        interval: 30s
+        conditions:
+          - "[STATUS] == 200"
+{{- if .Site.Aisucks.NtfyTopic}}
+        alerts:
+          - type: ntfy
+{{- end}}
+      - name: aisucks-page ({{.Site.Cluster.Name}})
+        url: "{{$base}}/"
+        interval: 30s
+        conditions:
+          - "[STATUS] == 200"
+          # Match the charter-locked promise text, not marketing copy: it is
+          # verbatim and changes only by charter amendment, so a page redesign
+          # can't silently break the monitor (it did once — the old
+          # "EVIDENCE LOCKER" marker vanished in the TanStack rewrite).
+          - "[BODY] == pat(*never be sold*)"
+{{- if .Site.Aisucks.NtfyTopic}}
+        alerts:
+          - type: ntfy
+{{- end}}
+{{- range $i, $target := .Site.Aisucks.Watch}}
+      - name: watch-{{$i}}
+        url: "{{$target}}"
+        interval: 30s
+        conditions:
+          - "[STATUS] == 200"
+{{- if $.Site.Aisucks.NtfyTopic}}
+        alerts:
+          - type: ntfy
+{{- end}}
+{{- end}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gatus
+  namespace: aisucks
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gatus
+  template:
+    metadata:
+      labels:
+        app: gatus
+    spec:
+      containers:
+        - name: gatus
+          image: {{.Image}}
+          env:
+            - name: GATUS_CONFIG_PATH
+              value: /config/config.yaml
+          ports:
+            - name: web
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: config
+              mountPath: /config
+      volumes:
+        - name: config
+          configMap:
+            name: gatus-config

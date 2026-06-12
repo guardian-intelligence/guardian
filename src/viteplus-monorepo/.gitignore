@@ -1,0 +1,24 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+node_modules
+.pnpm-store/
+**/.pnpm-store/
+dist
+dist-ssr
+.output
+.tanstack
+.vinxi
+coverage
+test-results
+*.tsbuildinfo
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store

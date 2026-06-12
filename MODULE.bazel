@@ -1,0 +1,127 @@
+module(
+    name = "guardian",
+    version = "0.0.0",
+)
+
+bazel_dep(name = "gazelle", version = "0.51.0", repo_name = "bazel_gazelle")
+bazel_dep(name = "platforms", version = "1.1.0")
+bazel_dep(name = "rules_go", version = "0.61.1", repo_name = "io_bazel_rules_go")
+bazel_dep(name = "rules_oci", version = "2.3.0")
+bazel_dep(name = "rules_pkg", version = "1.2.0")
+
+include("//src/infrastructure-components/openbao:openbao.MODULE.bazel")
+include("//src/guardian-cli/tools/kubectl:kubectl.MODULE.bazel")
+include("//src/guardian-cli/tools/talosctl:talosctl.MODULE.bazel")
+
+# Per-module go.mod files live next to their code under src/; the work file
+# is the only root-level Go entry point. The SDK version comes from the CLI
+# module's go.mod (go_sdk.from_file rejects work files not named `go.work`).
+go_sdk = use_extension("@io_bazel_rules_go//go:extensions.bzl", "go_sdk")
+go_sdk.from_file(go_mod = "//src/guardian-cli:go.mod")
+
+go_deps = use_extension("@bazel_gazelle//:extensions.bzl", "go_deps")
+go_deps.from_file(go_work = "//:bazel.go.work")
+use_repo(go_deps, "com_github_caddyserver_certmagic", "com_github_google_go_containerregistry", "com_github_jackc_pgx_v5", "com_github_prometheus_client_golang", "in_gopkg_yaml_v3", "org_golang_x_sys")
+
+# Mozilla CA bundle for images whose workloads make outbound TLS (ACME,
+# share-link liveness fetches). The ubuntu base image ships no CA store.
+# Dated release URL: immutable, so the pin can't rot under us.
+http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+
+http_file(
+    name = "cacert_pem",
+    sha256 = "86a1f3366afac7c6f8ae9f3c779ac221129328c43f0ab2b8817eb2f362a5025c",
+    url = "https://curl.se/ca/cacert-2026-05-14.pem",
+)
+
+# Base for infrastructure-component images. Pinned by the ubuntu:24.04
+# multi-arch index digest; linux/amd64 is the only fleet platform today.
+oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
+oci.pull(
+    name = "ubuntu_noble_base",
+    digest = "sha256:786a8b558f7be160c6c8c4a54f9a57274f3b4fb1491cf65146521ae77ff1dc54",
+    image = "docker.io/library/ubuntu",
+    platforms = ["linux/amd64"],
+)
+oci.pull(
+    name = "postgres_17",
+    digest = "sha256:1f39badce3634f8fd434ce3a8d028fddfe5dae9fbb8f907f91819b205c88522d",
+    image = "docker.io/library/postgres",
+    platforms = ["linux/amd64"],
+)
+
+# Gatus v5.36.0: blackbox monitor driving the aisucks paging pipeline.
+oci.pull(
+    name = "gatus",
+    digest = "sha256:c5f210d095fa78e6efaa20ffeb14803f2ba4f10615e16a6d12087697149617f0",
+    image = "docker.io/twinproduction/gatus",
+    platforms = ["linux/amd64"],
+)
+
+# VictoriaMetrics v1.145.0: single-node TSDB backing the observability stack.
+oci.pull(
+    name = "victoria_metrics",
+    digest = "sha256:c014fb5a711d38cb24fd0673197592cd1394bb903dbb16aea565620c9c8a3d70",
+    image = "docker.io/victoriametrics/victoria-metrics",
+    platforms = ["linux/amd64"],
+)
+
+# kube-state-metrics v2.19.0: API-server object state as metrics (the
+# restart counter that blackbox probing cannot see).
+oci.pull(
+    name = "kube_state_metrics",
+    digest = "sha256:6b2f0b6f2f86ac5b1aa883a033a8dd55bb96c16d191ec973393bdaadaddac914",
+    image = "registry.k8s.io/kube-state-metrics/kube-state-metrics",
+    platforms = ["linux/amd64"],
+)
+
+# OpenTelemetry Collector contrib v0.154.0: the metrics spine — scrapes
+# every per-node exporter on loopback and remote-writes to VictoriaMetrics.
+oci.pull(
+    name = "otel_collector_contrib",
+    digest = "sha256:b3079f45e19bdb7326bf49cdddce6cf60dfd865138db39f2733ea48ab17bc4cb",
+    image = "docker.io/otel/opentelemetry-collector-contrib",
+    platforms = ["linux/amd64"],
+)
+
+# vmalert v1.145.0: PromQL alert-rule evaluation for the observability hot
+# plane (same release train as victoria-metrics).
+oci.pull(
+    name = "vmalert",
+    digest = "sha256:5f241da926a531c11f870e7fec6dfa29fc7e34a0bd9ac573d2c9200dd9ab5f36",
+    image = "docker.io/victoriametrics/vmalert",
+    platforms = ["linux/amd64"],
+)
+
+# Alertmanager v0.32.2: alert routing for the observability stack; delivers
+# to ntfy.sh via ntfy's built-in server-side alertmanager webhook template.
+oci.pull(
+    name = "alertmanager",
+    digest = "sha256:b85533a2eb45865835315810315f6951331b2dbc8c93a6cf9a51e156a006a706",
+    image = "quay.io/prometheus/alertmanager",
+    platforms = ["linux/amd64"],
+)
+oci.pull(
+    name = "blackbox_exporter",
+    digest = "sha256:e753ff9f3fc458d02cca5eddab5a77e1c175eee484a8925ac7d524f04366c2fc",
+    image = "quay.io/prometheus/blackbox-exporter",
+    platforms = ["linux/amd64"],
+)
+
+# Grafana v13.0.2 (OSS): dashboards over VictoriaMetrics.
+oci.pull(
+    name = "grafana",
+    digest = "sha256:5dad0df181cb644a14e13617b913b261a54f7d4fd4510721dba420929f35bea2",
+    image = "docker.io/grafana/grafana",
+    platforms = ["linux/amd64"],
+)
+
+# ClickHouse 26.3.12.3 LTS: logs/traces ledger for the observability stack.
+# (26.3.13.31-lts is tagged upstream 2026-06-08 but not yet on Docker Hub.)
+oci.pull(
+    name = "clickhouse",
+    digest = "sha256:1f7cd090d5c4e2b8bfe0ea5d8ae6125937e1d932c6371b4d25fbd6088829dc9c",
+    image = "docker.io/clickhouse/clickhouse-server",
+    platforms = ["linux/amd64"],
+)
+use_repo(oci, "alertmanager", "alertmanager_linux_amd64", "blackbox_exporter", "blackbox_exporter_linux_amd64", "clickhouse", "clickhouse_linux_amd64", "gatus", "gatus_linux_amd64", "grafana", "grafana_linux_amd64", "kube_state_metrics", "kube_state_metrics_linux_amd64", "otel_collector_contrib", "otel_collector_contrib_linux_amd64", "postgres_17", "postgres_17_linux_amd64", "ubuntu_noble_base", "ubuntu_noble_base_linux_amd64", "victoria_metrics", "victoria_metrics_linux_amd64", "vmalert", "vmalert_linux_amd64")

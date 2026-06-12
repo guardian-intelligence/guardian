@@ -1,0 +1,68 @@
+# Seed registry: transport for workspace-built OCI artifacts onto the node.
+# guardian pushes Bazel-built layouts here through a kubectl port-forward;
+# containerd pulls them back through the registry.guardian.internal mirror
+# (src/sites/<site>/talos/patches/registry-mirror.yaml). The fixed ClusterIP
+# keeps the mirror endpoint stable across re-creates and is never reachable
+# from outside the cluster; push happens only over the port-forward.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: seed-registry
+  labels:
+    # hostPath volumes are forbidden at Talos's default "baseline" PSA level.
+    pod-security.kubernetes.io/enforce: privileged
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: seed-registry
+  namespace: seed-registry
+spec:
+  # Inside the default Talos service CIDR (10.96.0.0/12); containerd reaches
+  # ClusterIPs from the host netns via kube-proxy (flannel-era sites) or
+  # Cilium's socket-LB (Cilium sites — bpf-lb-sock is load-bearing there).
+  clusterIP: 10.96.0.100
+  selector:
+    app: seed-registry
+  ports:
+    - name: api
+      port: 5000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: seed-registry
+  namespace: seed-registry
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: seed-registry
+  template:
+    metadata:
+      labels:
+        app: seed-registry
+    spec:
+      containers:
+        - name: registry
+          # CNCF distribution, pinned by index digest.
+          image: docker.io/library/registry:3@sha256:85347ed2ecde64161c7a4788a4d7d3dcc9d6f86f7be95834022e3c6a423a945a
+          ports:
+            - name: api
+              containerPort: 5000
+          readinessProbe:
+            httpGet:
+              path: /v2/
+              port: 5000
+            initialDelaySeconds: 1
+            periodSeconds: 3
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/registry
+      volumes:
+        - name: data
+          hostPath:
+            # /var is the writable persistent tree on Talos; pushed artifacts
+            # survive pod churn and reboots, so re-converge needs no re-push.
+            path: /var/lib/seed-registry
+            type: DirectoryOrCreate

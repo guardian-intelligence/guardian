@@ -1,0 +1,65 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+
+go_library(
+    name = "guardian_lib",
+    srcs = [
+        "config.go",
+        "devtools.go",
+        "down.go",
+        "main.go",
+        "push.go",
+        "render.go",
+        "restore.go",
+        "run.go",
+        "schematic.go",
+        "site.go",
+        "tools.go",
+        "up.go",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/guardian-cli/cmd/guardian",
+    visibility = ["//visibility:private"],
+    deps = [
+        "@com_github_google_go_containerregistry//pkg/name",
+        "@com_github_google_go_containerregistry//pkg/v1:pkg",
+        "@com_github_google_go_containerregistry//pkg/v1/layout",
+        "@com_github_google_go_containerregistry//pkg/v1/remote",
+        "@in_gopkg_yaml_v3//:yaml_v3",
+        "@io_bazel_rules_go//go/runfiles",
+    ],
+)
+
+go_binary(
+    name = "guardian",
+    data = [
+        "//src/aisucks:image",
+        "//src/guardian-cli/tools/kubectl",
+        "//src/guardian-cli/tools/talosctl",
+        "//src/infrastructure-components/alertmanager:image",
+        "//src/infrastructure-components/blackbox-exporter:image",
+        "//src/infrastructure-components/gatus:image",
+        "//src/infrastructure-components/grafana:image",
+        "//src/infrastructure-components/kube-state-metrics:image",
+        "//src/infrastructure-components/openbao:image",
+        "//src/infrastructure-components/otel-collector:image",
+        "//src/infrastructure-components/postgres:image",
+        "//src/infrastructure-components/victoria-metrics:image",
+        "//src/infrastructure-components/vmalert:image",
+    ],
+    embed = [":guardian_lib"],
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "guardian_test",
+    srcs = [
+        "push_test.go",
+        "restore_test.go",
+    ],
+    data = ["//src/infrastructure-components/openbao:image"],
+    embed = [":guardian_lib"],
+    deps = [
+        "@com_github_google_go_containerregistry//pkg/name",
+        "@com_github_google_go_containerregistry//pkg/registry",
+        "@com_github_google_go_containerregistry//pkg/v1/remote",
+    ],
+)

@@ -1,0 +1,125 @@
+# Helm values for the vendored Cilium render (talos/cilium-inline.yaml).
+# This file is the input of record: re-vendor with
+#
+#   helm repo add cilium https://helm.cilium.io
+#   helm template cilium cilium/cilium --version 1.19.4 -n kube-system \
+#     -f src/infrastructure-components/cilium/values.yaml > /tmp/cilium.yaml
+#   python3 - <<'PY'   # wrap as a Talos inlineManifests patch (yaml-in-yaml)
+#   body = open('/tmp/cilium.yaml').read()
+#   head = open('src/infrastructure-components/cilium/talos/cilium-inline.yaml').read()
+#   head = head[:head.index('      contents: |') + len('      contents: |')]
+#   ind = '\n'.join(('        ' + l) if l.strip() else '' for l in body.splitlines())
+#   open('src/infrastructure-components/cilium/talos/cilium-inline.yaml', 'w').write(head + '\n' + ind + '\n')
+#   PY
+#
+# Cilium replaces Flannel (CNI) and kube-proxy (eBPF service handling) on
+# every site; the sites' cni-none.yaml patch disables both, and the
+# cilium-inline.yaml patch bakes the render into the machine config as a
+# Talos inline bootstrap manifest — Talos applies the CNI itself, exactly
+# as it applied flannel; guardian knows nothing about it.
+#
+# UPGRADES ARE WIPE DRILLS: Talos applies inline manifests at bootstrap
+# only — it never updates or deletes existing objects on a config change,
+# so re-vendoring + plain re-converge is a silent no-op. A Cilium version
+# bump ships as `guardian down --yes && guardian up` per site (dev gates,
+# as ever), and objects dropped from a re-render must be pruned by hand.
+#
+# It is SUBSTRATE,
+# not a workspace component: it cannot ride the seed registry (the registry
+# pod needs a pod IP and a working ClusterIP route — both require the CNI),
+# so images are digest-pinned upstream quay.io refs, the same layer
+# flannel/coredns/kubelet already live at.
+
+# API server via Talos KubePrism (localhost load balancer, enabled by
+# default). With kube-proxy gone there is no kubernetes.default route until
+# Cilium itself programs one — pointing at 10.96.0.1 would deadlock.
+k8sServiceHost: localhost
+k8sServicePort: 7445
+
+# Full kube-proxy replacement. Socket-LB is load-bearing twice over:
+# containerd resolves the registry mirror's ClusterIP from the host netns
+# through it, and the hostNetwork aisucks pod reaches postgres/coredns
+# ClusterIPs through it. KPR mode implies socket-LB, but the chart still
+# renders bpf-lb-sock from socketLB.enabled — pin it true so the config
+# states what the cluster depends on. Never set hostNamespaceOnly.
+kubeProxyReplacement: true
+socketLB:
+  enabled: true
+
+# Per-node PodCIDR from Kubernetes (10.244.0.0/16 lives in the machine
+# config). The chart's cluster-pool default would carve from 10.0.0.0/8 and
+# collide with the service CIDR (the seed registry's fixed ClusterIP).
+ipam:
+  mode: kubernetes
+
+# Talos-required capability lists (Talos "Deploying Cilium" guide, v1.13).
+# SYS_MODULE is deliberately absent: Talos forbids workloads loading kernel
+# modules, and everything Cilium needs is built into the Talos kernel.
+# Re-check these lists against the Talos guide on every Cilium upgrade.
+securityContext:
+  capabilities:
+    ciliumAgent:
+      - CHOWN
+      - KILL
+      - NET_ADMIN
+      - NET_RAW
+      - IPC_LOCK
+      - SYS_ADMIN
+      - SYS_RESOURCE
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    cleanCiliumState:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - SYS_RESOURCE
+
+# Talos mounts cgroup2 at /sys/fs/cgroup itself; the chart's auto-mount
+# attempt fails against the immutable host.
+cgroup:
+  autoMount:
+    enabled: false
+  hostRoot: /sys/fs/cgroup
+
+# Single-node sites: the default 2 replicas + anti-affinity leaves one
+# operator Pending forever and wedges upgrades.
+operator:
+  replicas: 1
+
+# Hubble: metrics with namespace+workload context only (pod-level labels
+# explode cardinality), OpenMetrics for the future OTel Collector scrape.
+# Flow export to disk stays OFF pending the charter amendment on client-IP
+# retention (flows carry visitor IPs; docs/aisucks/charter.md value 2).
+hubble:
+  enabled: true
+  metrics:
+    enableOpenMetrics: true
+    enabled:
+      - drop:labelsContext=source_namespace,source_workload,destination_namespace,destination_workload,traffic_direction
+      - dns:labelsContext=source_namespace,source_workload,destination_namespace,destination_workload
+      - tcp:labelsContext=source_namespace,source_workload,destination_namespace,destination_workload,traffic_direction
+      - flow:labelsContext=source_namespace,source_workload,destination_namespace,destination_workload,traffic_direction
+      - port-distribution:labelsContext=source_namespace,source_workload,destination_namespace,destination_workload
+  relay:
+    enabled: true
+  ui:
+    enabled: true
+  # In-cluster certgen (CronJob) instead of the chart default that bakes
+  # helm-generated TLS material into the render: the default put the hubble
+  # CA *private key* into git (charter: code goes public) and one-year leaf
+  # certs into a static manifest that Talos installs verbatim forever —
+  # every wipe-converge after the expiry would deploy dead certs. cronJob
+  # mints and renews them in-cluster; nothing secret is vendored.
+  tls:
+    auto:
+      enabled: true
+      method: cronJob
+
+# Deliberately defaulted (do not "fix"):
+# - bpf.masquerade=false — eBPF masquerade + Talos forwardKubeDNSToHost is a
+#   documented CoreDNS breakage; iptables masquerade until that changes.
+# - Gateway API off — enabling later needs the CRDs applied BEFORE the
+#   render picks it up, and a listener strategy that doesn't fight the app
+#   for host :80/:443.
+# - MTU auto-detected (standard 1500 underlay).

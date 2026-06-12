@@ -1,0 +1,16 @@
+# No Talos-managed CNI and no kube-proxy: Cilium replaces both, delivered by
+# the sibling cilium-inline.yaml patch (src/infrastructure-components/cilium/
+# render baked into the machine config as a Talos inline bootstrap manifest —
+# Talos applies it at bootstrap, the same way it applied flannel; guardian
+# never touches the CNI).
+#
+# NOTE: takes full effect on a bootstrap (wipe-converge). On an already-
+# bootstrapped cluster this patch alone does not remove a running flannel or
+# kube-proxy — converting a live site is a deliberate wipe drill, never a
+# plain re-converge (which would stack Cilium on top of flannel).
+cluster:
+  network:
+    cni:
+      name: none
+  proxy:
+    disabled: true

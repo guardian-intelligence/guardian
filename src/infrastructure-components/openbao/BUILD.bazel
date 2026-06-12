@@ -1,0 +1,59 @@
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
+load("@rules_pkg//pkg:mappings.bzl", "pkg_attributes", "pkg_mkdirs")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+
+genrule(
+    name = "bao_bin",
+    srcs = ["@openbao_deb//file"],
+    outs = ["bao"],
+    cmd = """
+set -euo pipefail
+tmp="$$(mktemp -d)"
+trap 'rm -rf "$$tmp"' EXIT
+dpkg-deb -x "$(location @openbao_deb//file)" "$$tmp"
+install -m 0755 "$$tmp/usr/bin/bao" "$@"
+""",
+)
+
+# Raft's bolt store does not create its parent directory; the image must
+# carry the mount point.
+pkg_mkdirs(
+    name = "data_dir",
+    attributes = pkg_attributes(mode = "0700"),
+    dirs = ["openbao/data"],
+)
+
+pkg_tar(
+    name = "openbao_layer",
+    srcs = [":data_dir"],
+    files = {
+        ":bao_bin": "usr/bin/bao",
+        "config/openbao.hcl": "etc/openbao/openbao.hcl",
+    },
+    modes = {
+        "usr/bin/bao": "0755",
+        "etc/openbao/openbao.hcl": "0644",
+    },
+)
+
+oci_image(
+    name = "image",
+    base = "@ubuntu_noble_base",
+    entrypoint = [
+        "/usr/bin/bao",
+        "server",
+        "-config=/etc/openbao/openbao.hcl",
+    ],
+    exposed_ports = [
+        "8200/tcp",
+        "8201/tcp",
+    ],
+    tars = [":openbao_layer"],
+    visibility = ["//visibility:public"],
+)
+
+oci_load(
+    name = "load",
+    image = ":image",
+    repo_tags = ["guardian/openbao:dev"],
+)

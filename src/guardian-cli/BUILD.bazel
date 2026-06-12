@@ -1,0 +1,2 @@
+# Package marker so //src/guardian-cli:go.mod is addressable by the
+# go_deps/go_sdk module extensions. Build targets live under cmd/.

@@ -1,0 +1,213 @@
+# OTel Collector: the metrics spine. One collector per node scrapes every
+# exporter and remote-writes to the site's VictoriaMetrics. It runs
+# hostNetwork because most of its targets only exist in the host netns on
+# loopback (aisucks :9090, hubble :9965, kubelet :10250, its own :8888) —
+# the Talos ingress firewall does not police loopback, so scraping localhost
+# needs no firewall change and exposes nothing. ClusterIP targets
+# (kube-state-metrics, blackbox-exporter, victoria-metrics) still resolve
+# and route from the host netns via Cilium socket-LB + ClusterFirstWithHostNet.
+#
+# The observability Namespace (privileged PSA) is owned by the
+# victoria-metrics manifest; this component assumes it exists.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: otel-collector
+  namespace: observability
+---
+# Kubelet authorizes scrapes of /metrics/cadvisor via SubjectAccessReview:
+# the bearer token's subject needs get on nodes/metrics (nodes/proxy covers
+# the other kubelet paths). pods/namespaces/nodes get/list/watch is for the
+# prometheus receiver's k8s metadata needs; targets themselves are static.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: otel-collector
+rules:
+  # Every scrape target is a static_config; the only API-authorized path is
+  # the kubelet's /metrics/cadvisor, which authorizes as get on
+  # nodes/metrics. Re-add discovery resources if kubernetes_sd ever lands.
+  - apiGroups: [""]
+    resources:
+      - nodes/metrics
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: otel-collector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: otel-collector
+subjects:
+  - kind: ServiceAccount
+    name: otel-collector
+    namespace: observability
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: observability
+data:
+  config.yaml: |
+    # NO OTLP receivers in this release: under hostNetwork they would bind
+    # real host ports (4317/4318) on the public NIC — dead weight behind the
+    # default-block firewall and a standing invitation to "just open a
+    # port". They arrive with the app SDK in the ledger release, bound to
+    # loopback like everything else here.
+    receivers:
+      prometheus:
+        config:
+          global:
+            scrape_interval: 15s
+            # Stamp every series with the site so dashboards and recording
+            # rules stay portable when per-site metrics are later federated.
+            external_labels:
+              cluster: "{{.Site.Cluster.Name}}"
+          scrape_configs:
+            - job_name: aisucks
+              static_configs:
+                - targets: ["127.0.0.1:9090"]
+            # Hubble metrics: hostPort 9965 from the Cilium agent (set in
+            # src/infrastructure-components/cilium/values.yaml). The agent's
+            # own prometheus endpoint (:9962) is NOT in this render —
+            # values.yaml never sets prometheus.enabled, so the vendored
+            # configmap has no prometheus-serve-addr; scraping it would only
+            # produce up=0 noise. Add the job when Cilium is re-vendored
+            # with agent metrics on (a wipe drill, per the values.yaml note).
+            - job_name: hubble
+              static_configs:
+                - targets: ["127.0.0.1:9965"]
+            - job_name: kube-state-metrics
+              static_configs:
+                - targets: ["kube-state-metrics.observability.svc:8080"]
+{{- /* One probe target per cross-site watch URL; the relabel trio sends
+       the actual request to the blackbox exporter with the URL as the
+       ?target param. Skip the job entirely when nothing is watched (dev). */}}
+{{- if .Site.Aisucks.Watch}}
+            - job_name: blackbox
+              metrics_path: /probe
+              params:
+                module: [http_2xx]
+              static_configs:
+                - targets:
+{{- range .Site.Aisucks.Watch}}
+                    - "{{.}}"
+{{- end}}
+              relabel_configs:
+                - source_labels: [__address__]
+                  target_label: __param_target
+                - source_labels: [__param_target]
+                  target_label: instance
+                - target_label: __address__
+                  replacement: blackbox-exporter.observability.svc:9115
+{{- end}}
+            # Container CPU/memory from the kubelet's embedded cAdvisor.
+            # The kubelet serving cert is self-signed on Talos, hence
+            # insecure_skip_verify; auth is the mounted SA token + the
+            # nodes/metrics RBAC above. Loopback, so unfirewalled.
+            - job_name: cadvisor
+              scheme: https
+              metrics_path: /metrics/cadvisor
+              bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+              tls_config:
+                insecure_skip_verify: true
+              static_configs:
+                - targets: ["127.0.0.1:10250"]
+            - job_name: otelcol-self
+              static_configs:
+                - targets: ["127.0.0.1:8888"]
+            - job_name: victoria-metrics-self
+              static_configs:
+                - targets: ["victoria-metrics.observability.svc:8428"]
+    processors:
+      # memory_limiter must be FIRST in the pipeline so backpressure hits
+      # the receivers before allocation, not after. 256MiB + 64 spike sits
+      # under the container's 384MiB limit with headroom for the runtime.
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 256
+        spike_limit_mib: 64
+      batch: {}
+    exporters:
+      prometheusremotewrite:
+        endpoint: http://victoria-metrics.observability.svc:8428/api/v1/write
+    service:
+      telemetry:
+        # Pin the self-telemetry identity. The SDK defaults are
+        # service.name=otelcol-contrib plus a service.instance.id UUID minted
+        # per process; those resource attributes override the scrape job's
+        # job/instance downstream, so the otelcol-self job surfaced in VM as
+        # job=otelcol-contrib with an instance that churned on every pod
+        # restart, fragmenting the otelcol_* series the collector
+        # self-monitoring rules query. Stable values keep one series identity
+        # across restarts (verify after the next converge: up{job="otelcol-self"}).
+        resource:
+          service.name: otelcol-self
+          service.instance.id: "{{.Site.Cluster.Name}}"
+        metrics:
+          # Own metrics on loopback only: hostNetwork means any other bind
+          # address would be a real host listener on the public NIC.
+          readers:
+            - pull:
+                exporter:
+                  prometheus:
+                    host: "127.0.0.1"
+                    port: 8888
+      pipelines:
+        metrics:
+          receivers: [prometheus]
+          processors: [memory_limiter, batch]
+          exporters: [prometheusremotewrite]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: observability
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate: under hostNetwork old and new pods would
+  # race for 127.0.0.1:8888 and the new one would crashloop, wedging the
+  # rollout (the aisucks binary dodges this with SO_REUSEPORT; the collector
+  # has no such mechanism). A scrape-interval-sized metrics gap per deploy
+  # is the accepted cost.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      serviceAccountName: otel-collector
+      hostNetwork: true
+      # Cluster DNS must keep resolving *.observability.svc from the host
+      # network namespace.
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: otel-collector
+          image: {{.Image}}
+          args:
+            - --config=/conf/config.yaml
+          # No ports block: under hostNetwork declared containerPorts count
+          # as host-port claims against the scheduler (see the aisucks
+          # manifest for the gamma incident). The only listener is
+          # 127.0.0.1:8888 (telemetry above).
+          resources:
+            requests:
+              cpu: 100m
+              memory: 192Mi
+            limits:
+              memory: 384Mi
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+      volumes:
+        - name: config
+          configMap:
+            name: otel-collector-config

@@ -1,0 +1,17 @@
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
+
+# Re-export the pulled postgres layout under a stable in-repo runfiles path
+# (_main/src/infrastructure-components/postgres/image) for the component
+# push. A base-only oci_image copies the single-manifest layout verbatim;
+# os/arch come from the pull and may not be overridden here.
+oci_image(
+    name = "image",
+    base = "@postgres_17",
+    visibility = ["//visibility:public"],
+)
+
+oci_load(
+    name = "load",
+    image = ":image",
+    repo_tags = ["guardian/postgres:dev"],
+)

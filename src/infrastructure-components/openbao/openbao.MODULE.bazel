@@ -1,0 +1,8 @@
+http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+
+http_file(
+    name = "openbao_deb",
+    downloaded_file_path = "openbao_2.5.4_linux_amd64.deb",
+    sha256 = "dd807d5adeb72552472f8b886a46fd59ff8836b299cc21df88f134527df15110",
+    url = "https://github.com/openbao/openbao/releases/download/v2.5.4/openbao_2.5.4_linux_amd64.deb",
+)

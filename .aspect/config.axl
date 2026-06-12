@@ -1,0 +1,33 @@
+"""Guardian Aspect CLI workspace config.
+
+`def config(ctx)` is the single registration point Aspect calls when it loads
+the workspace. Every task lives under `.aspect/tasks/` (subdirectories are NOT
+auto-discovered) and is registered explicitly here. Helpers live under
+`.aspect/lib/` and are imported via `load(".aspect/lib/<file>", ...)`.
+
+This file is the source of truth for the durable command surface. Ad-hoc
+`bazel build|test|query` stays raw bazel; tasks exist only for workflows with
+shape worth documenting.
+"""
+
+load(
+    ".aspect/tasks/bazel.axl",
+    bazel_bzlmod = "bzlmod",
+    bazel_gazelle = "gazelle",
+    bazel_update = "update",
+)
+load(
+    ".aspect/tasks/dev.axl",
+    dev_install = "install",
+    dev_uninstall = "uninstall",
+)
+
+def config(ctx):
+    # aspect bazel ...
+    ctx.tasks.add(bazel_gazelle)
+    ctx.tasks.add(bazel_bzlmod)
+    ctx.tasks.add(bazel_update)
+
+    # aspect dev ...
+    ctx.tasks.add(dev_install)
+    ctx.tasks.add(dev_uninstall)
