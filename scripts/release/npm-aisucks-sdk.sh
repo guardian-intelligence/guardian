@@ -64,8 +64,6 @@ if [[ "$package_name" != "@guardian-intelligence/aisucks" ]]; then
   exit 1
 fi
 
-(cd "$workspace_dir" && node scripts/check-release-hygiene.mjs --package "$package_name")
-
 view_err="$(mktemp)"
 pack_dir="$(mktemp -d)"
 cleanup() {
@@ -75,6 +73,7 @@ cleanup() {
 trap cleanup EXIT
 
 bazelisk build //src/viteplus-monorepo:workspace_build
+(cd "$workspace_dir" && ./node_modules/.bin/tsx scripts/check-release-hygiene.ts --package "$package_name")
 test -f "$package_dir/dist/index.js"
 test -f "$package_dir/dist/index.d.ts"
 

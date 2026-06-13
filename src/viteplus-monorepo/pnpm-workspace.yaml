@@ -9,8 +9,10 @@ catalog:
   "@bufbuild/protobuf": 2.12.0
   "@bufbuild/protoc-gen-es": 2.12.0
   "@changesets/cli": 2.31.0
+  "@changesets/read": 0.6.7
   "@connectrpc/connect": 2.1.1
   "@connectrpc/connect-web": 2.1.1
+  "@manypkg/get-packages": 1.1.3
   "@tailwindcss/vite": ^4
   # Exact TanStack pins are intentional. Move them as a reviewed set with
   # lockfile evidence because install-time malware has landed in this family.
@@ -25,6 +27,7 @@ catalog:
   react: ^19.0.0
   react-dom: ^19.0.0
   tailwindcss: ^4
+  tsx: 4.21.0
   typescript: ^5.9.3
   # Pinned to specific versions so the on-host Verdaccio mirror does not
   # have to keep up with @latest publish drift on every install.

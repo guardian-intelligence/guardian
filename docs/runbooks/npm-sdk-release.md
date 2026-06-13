@@ -36,10 +36,12 @@ cd src/viteplus-monorepo
 vp run -w lint
 ```
 
-This runs VitePlus linting plus the workspace release hygiene check. The
-top-level Bazel build also reaches it through
-`//src/viteplus-monorepo:workspace_lint`, so repo-level build orchestration
-does not need to know Changesets semantics.
+This runs VitePlus linting plus the TypeScript workspace release hygiene
+check. The check uses `@changesets/read` to parse pending Changesets and
+`@manypkg/get-packages` to discover publishable workspace packages, so it does
+not carry a handwritten frontmatter parser. The top-level Bazel build also
+reaches it through `//src/viteplus-monorepo:workspace_lint`, so repo-level
+build orchestration does not need to know Changesets semantics.
 
 ## Local probe
 
