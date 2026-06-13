@@ -133,6 +133,33 @@ Expected:
 - npmjs.com shows the provenance badge for versions published through trusted
   publishing or `npm publish --provenance`.
 
+The Sigstore search UI is a convenience surface only. If
+`https://search.sigstore.dev/?logIndex=<index>` reports a browser
+`NetworkError`, verify the npm attestations directly:
+
+```sh
+PKG='@guardian-intelligence/aisucks@0.1.<N>'
+
+npm view "$PKG" \
+  --registry=https://registry.npmjs.org/ \
+  dist.attestations.url dist.attestations.provenance.predicateType
+
+curl -fsS "https://registry.npmjs.org/-/npm/v1/attestations/%40guardian-intelligence%2Faisucks@0.1.<N>" \
+  | jq -r '.attestations[] | [.predicateType, .bundle.verificationMaterial.tlogEntries[0].logIndex] | @tsv'
+```
+
+Expected:
+
+- One attestation is npm publish metadata:
+  `https://github.com/npm/attestation/tree/main/specs/publish/v0.1`.
+- One attestation is SLSA provenance: `https://slsa.dev/provenance/v1`.
+- The SLSA attestation's `logIndex` is retrievable from Rekor:
+
+```sh
+curl -fsS "https://rekor.sigstore.dev/api/v1/log/entries?logIndex=<logIndex>" \
+  | jq .
+```
+
 ## Later Fleet Admission
 
 Do not enforce this in-cluster yet. The eventual admission rule is:
