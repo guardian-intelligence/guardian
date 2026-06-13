@@ -1,6 +1,7 @@
 go 1.26.4
 
 use (
-	./src/aisucks
 	./src/guardian-cli
+	./src/products/aisucks/services/api
+	./src/status
 )

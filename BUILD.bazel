@@ -3,3 +3,24 @@ load("@bazel_gazelle//:def.bzl", "gazelle")
 exports_files(["bazel.go.work"])
 
 gazelle(name = "gazelle")
+
+filegroup(
+    name = "build",
+    srcs = [
+        "//src/guardian-cli/cmd/guardian:guardian",
+        "//src/products/aisucks/api:models",
+        "//src/products/aisucks/services/api:image",
+        "//src/viteplus-monorepo:workspace_build",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "dev_check",
+    tests = [
+        "//src/guardian-cli/cmd/guardian:guardian_test",
+        "//src/products/aisucks/services/api:api_test",
+        "//src/status:status_test",
+    ],
+    visibility = ["//visibility:public"],
+)

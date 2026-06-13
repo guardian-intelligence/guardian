@@ -35,8 +35,8 @@ verification clauses: `docs/architecture/metrics.md`.
 
 ## M2 — SLO layer (ratify + rules; needs days of M1 data)
 
-Operator ratifies the three targets in slo.md (99.9% avail / 99% <500ms /
-99.5% submit — RATIFY pending). Recording rules compute SLI ratios + budget
+Targets RATIFIED 2026-06-12 (99.9% avail / 99% <500ms / 99.5% submit —
+slo.md). Recording rules compute SLI ratios + budget
 remaining; burn-rate alerts replace crude thresholds when data matures.
 VERIFY: budget arithmetic spot-checked against a known induced outage
 window; rules load clean; numbers stable across a week.
@@ -57,6 +57,19 @@ to a BGP floating IP, and prod edge surgery happens once, not twice.
 VERIFY: dev passes the full release gate through Envoy; induced pod kill
 shows the page's zero-downtime story intact; firewall posture unchanged
 (admin plane untouched — CNPs never police 6443/50000).
+STATUS: Phases 0–3 DONE (2026-06-13). Dev is converted and serving through
+the Gateway: Envoy owns :80/:443, aisucks pod-network replicas:2 behind the
+TLSRoute, per-pod scrape identity in VM, no-SNI drops at the edge, firewall
+posture byte-identical, wipe drill converged the converted state from
+bootstrap unattended (guardian up 129s; serving SLA missed at +621s due to
+an ACME failed-authorization 429 inherited from the pilot's mis-ordered
+flip — see the dated pilot record in gateway.md for the numbers, the
+arm-then-flip ordering rule, the pod→gateway hairpin finding + Gatus
+probe-alias fix, and the pre-wipe cert-cache backup rule). Open for gamma
+(Phase 4): the SO_REUSEPORT overlap measurement (never coexisted on dev),
+forced ACME renewal through passthrough, and the ~2-request pod-kill drop
+window (SIGTERM listener-close vs endpoint-removal race) before "zero-drop"
+can be claimed.
 
 ## M4 — status v0 (after M3; non-critical by declaration)
 
@@ -79,36 +92,57 @@ path + Gatus probing Alertmanager for its presence) — Gatus narrows to
 meta-monitoring, stops double-paging. PII redaction stays deferred under
 the source-discipline rule (no new log emitter without a what-it-logs
 review; pgx extended protocol keeps statements parameter-free).
-VERIFY: canary trace visible end-to-end in CH with its log lines by trace
-ID; restore drill produces a counted, queryable corpus copy; killing
+VERIFY: application trace visible end-to-end in CH with its log lines by
+trace ID; restore drill produces a counted, queryable corpus copy; killing
 vmalert pages via the dead-man within its window.
+STATUS 2026-06-12: first two sub-items landed on dev+gamma — per-site
+ClickHouse in push.go behind the site-gated `clickhouse.enabled` flag (OFF
+on prod until its clickhouse-admin Secret exists) and the filelog +
+k8sobjects Events pipeline (docs/runbooks/ledger.md). OTLP/app SDK, R2
+backups + restore drill, and the dead-man heartbeat remain open; M5 is NOT
+done.
 
-## M6 — rollout judgment (needs M1–M2; workflow changes only)
+## M6 — rollout judgment (needs M1–M2; design: docs/architecture/release.md)
 
-Gamma gate gains the soak verdict (alerts quiet + probes clean + restart
-delta zero + 5xx zero over 10m, queried from VM); prod gains a 15m
-post-promote watch with bounded auto-rollback (inside the window only;
-manual after — automation blast radius stays capped); deep ingest canary
-goes hourly (the seed of the Phase-1 hourly-drill cadence); budget gate
-lands (M2's error budget exhausted → feature releases freeze, reliability
-fixes only).
-VERIFY: a deliberately broken release (failing canary) is refused at gamma;
-a synthetic budget exhaustion blocks a feature release; auto-rollback drill
-on gamma restores N-1 unattended.
+Ratified 2026-06-12: build/deploy authority split. GitHub builds, signs
+provenance keyless, pushes to ghcr, advances the edge channel — and holds
+zero cluster credentials; per-cluster **Flux** (source + kustomize
+controllers) pulls, verifies, applies; a small **release judge** runs the
+gamma soak (alerts quiet + probes clean + restart delta zero + 5xx zero
+over 10m, queried from VM), Transit-signs the gate-pass, advances stable;
+on prod it admits (provenance ∧ gate-pass ∧ ¬tainted ∧ budget), watches
+15m post-promote, and rolls back by pointer move — fail-open on missing
+telemetry (operator amendment). The self-hosted runner POC retires. The
+hello API probe becomes the first release-judge synthetic and later expands
+to product-write drills once the database/verifier slice exists;
+budget gate lands (M2's error budget exhausted → feature releases freeze,
+reliability fixes only).
+VERIFY: a deliberately broken release (failing synthetic) is refused at
+gamma; a synthetic budget exhaustion blocks a feature release; auto-rollback
+drill on gamma restores N-1 unattended.
 
 ## M7 — provenance + public vending (Phase-1 exit gate)
 
-Signing now: bao Transit (init on the signing site), cosign via
-hashivault://, in-toto SLSA-provenance-v1 per pushed digest, the CUE release
-manifest (release → component digests → commit, signed; status page data
-source; channels stable/edge as signed pointers). Vending after M3: zot
-behind the Gateway at oci.guardianintelligence.org (domain spelling .org vs
-.com to be settled in AGENTS.md), publishing images + attestations +
-manifests. Reproducibility remains the backstop: anyone rebuilds the commit
+Signing split per docs/architecture/release.md: build provenance is cosign
+**keyless** (GitHub OIDC, identity-pinned) — no long-lived key in CI; bao
+Transit (init on gamma first, the gate's signer) signs the fleet artifacts:
+gate verdicts, the stable pointer, deployed attestations. in-toto
+SLSA-provenance-v1 per pushed digest; the CUE release manifest (release →
+component digests → commit, signed; status page data source; channels
+stable/edge as signed pointers). Vending after M3: zot (no Harbor) behind
+the Gateway at oci.guardianintelligence.org (domain spelling .org vs .com
+to be settled in AGENTS.md), publishing images + attestations + manifests;
+zot also serves each site as a pull-through mirror. Reproducibility remains the backstop: anyone rebuilds the commit
 and matches the digest — we already prove this on every release.
 VERIFY: `cosign verify` documented and passing from a machine that has only
 the public key and the registry URL; a third party can rebuild and match a
 digest following only public docs. THIS IS THE PHASE-1 EXIT.
+STATUS 2026-06-13: first public-vending bridge exists for aisucks. A
+GitHub-hosted tag workflow pushes `ghcr.io/guardian-intelligence/aisucks`,
+signs it keyless, attaches SLSA/in-toto provenance, and has a gated npm SDK
+publish step. Remaining before M7 is done: package bootstrap + trusted
+publisher verification, release manifest/channel artifacts, gate-pass
+attestations, and clean-machine verification of a real public digest.
 
 ## M8 — the paved-road proof (capstone)
 
@@ -131,4 +165,6 @@ everywhere a service should, then is removed as cleanly (yank drill).
 - Verself subsumption + workload plane (QEMU warm pools, the workload
   agent): direction in AGENTS.md "Compute doctrine" and
   `docs/architecture/topology.md`; per-box wipes wait on explicit operator
-  go.
+  go. First verification drill: a 1000-microVM burst stress test across
+  workload capacity — its own workstream, designed separately (never on
+  the prod box).

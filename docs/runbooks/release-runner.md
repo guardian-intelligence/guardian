@@ -9,8 +9,14 @@ command with an expected outcome.
 hosts run commit-pinned release artifacts and never build from source
 (AGENTS.md constraints), and this host runs Bazel on every release. The runner
 holds gamma+prod cluster credentials: treat the host as a prod credential
-store. When the GitHub-App forge lands, this moves to an ephemeral in-cluster
-runner; this runbook is the v0.
+store.
+
+**STATUS: interim POC, retirement ratified 2026-06-12.** The target design
+(`docs/architecture/release.md`) splits authority: GitHub keeps build only
+(build, keyless-sign, push to ghcr, advance the edge channel — zero cluster
+credentials); deploys are pulled by per-cluster Flux plus the release judge.
+This runner and its standing credentials retire when that lands; until then
+it is what ships releases.
 
 ## Publishing model
 

@@ -1,0 +1,102 @@
+{{- if .Site.Status.Domains}}
+# Guardian status page. Pod network, NOT hostNetwork: the pod sits behind the
+# Cilium Gateway's TLS passthrough (docs/architecture/gateway.md) — the
+# Service below is the TLSRoute backendRef, Envoy SNI-routes the status
+# hostnames to it, and certmagic in the pod keeps key custody (TLS-ALPN-01
+# rides the passthrough; HTTP-01 is disabled in the binary). A site whose
+# site.yaml has no status.domains renders this whole manifest empty and
+# deploys nothing (prod, until the Gateway round exposes a hostname there).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: status
+  labels:
+    # hostPath (the certmagic cert cache below) is forbidden at PSA baseline;
+    # the pod is otherwise unprivileged — pod network, no host ports.
+    pod-security.kubernetes.io/enforce: privileged
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: status
+  namespace: status
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: status
+  template:
+    metadata:
+      labels:
+        app: status
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: status
+          image: {{.Image}}
+          env:
+            - name: SITE
+              value: "{{.Site.Cluster.Name}}"
+            - name: DOMAINS
+              value: "{{range $i, $d := .Site.Status.Domains}}{{if $i}},{{end}}{{$d}}{{end}}"
+            - name: ACME_EMAIL
+              value: "im.shovonhasan@gmail.com"
+            - name: CERT_DIR
+              value: /var/lib/status-certs
+            - name: VM_URL
+              value: http://victoria-metrics.observability.svc:8428
+            # ~80% of the 512Mi memory limit: the Go runtime GCs harder as it
+            # nears this instead of hitting the cgroup wall and getting
+            # OOM-killed (same practice as aisucks).
+            - name: GOMEMLIMIT
+              value: "410MiB"
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: https
+              containerPort: 8443
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          # Ready once the first snapshot exists. The collector publishes
+          # even when VictoriaMetrics is down (the page says n/a, honestly),
+          # so readiness means "the page exists", not "the fleet is green".
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          volumeMounts:
+            - name: certs
+              mountPath: /var/lib/status-certs
+      volumes:
+        # Certs survive pod replacement; certmagic FileStorage locks, so a
+        # surge pod sharing the cache during a rolling update is safe.
+        - name: certs
+          hostPath:
+            path: /var/lib/status-certs
+            type: DirectoryOrCreate
+---
+# The TLSRoute backendRef: Envoy forwards the raw TLS bytes for the status
+# hostnames here. Port 443 -> the pod's TLS listener; port 80 stays for
+# in-cluster plain-HTTP consumers and a future HTTPRoute.
+apiVersion: v1
+kind: Service
+metadata:
+  name: status
+  namespace: status
+spec:
+  selector:
+    app: status
+  ports:
+    - name: https
+      port: 443
+      targetPort: 8443
+    - name: http
+      port: 80
+      targetPort: 8080
+{{- end}}

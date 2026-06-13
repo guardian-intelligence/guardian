@@ -52,12 +52,39 @@ data:
         alerts:
           - type: ntfy
 {{- end}}
+      # SDK-sized API probe for the v2 skeleton. This is deliberately read
+      # only: product writes return in the database + verifier slice.
+      - name: aisucks-hello ({{.Site.Cluster.Name}})
+        url: "{{$base}}/api/v1/hello"
+        interval: 30s
+        conditions:
+          - "[STATUS] == 200"
+          - "[BODY] == pat(*hello from aisucks*)"
+{{- if .Site.Aisucks.NtfyTopic}}
+        alerts:
+          - type: ntfy
+{{- end}}
 {{- range $i, $target := .Site.Aisucks.Watch}}
       - name: watch-{{$i}}
         url: "{{$target}}"
         interval: 30s
         conditions:
           - "[STATUS] == 200"
+{{- if $.Site.Aisucks.NtfyTopic}}
+        alerts:
+          - type: ntfy
+{{- end}}
+{{- end}}
+{{- range $i, $target := .Site.Aisucks.WatchPages}}
+      # Cross-site page checks carry the charter marker, not only status:
+      # otherwise a healthy-DB, broken-page state is seen by no watcher but
+      # the site's own.
+      - name: watch-page-{{$i}}
+        url: "{{$target}}"
+        interval: 30s
+        conditions:
+          - "[STATUS] == 200"
+          - "[BODY] == pat(*never be sold*)"
 {{- if $.Site.Aisucks.NtfyTopic}}
         alerts:
           - type: ntfy
@@ -79,6 +106,18 @@ spec:
       labels:
         app: gatus
     spec:
+{{- if and .Site.Aisucks.PodNetwork .Site.Aisucks.Domain}}
+      # Pod-network sites: the public-URL self-probes cannot hairpin through
+      # the hostNetwork Envoy listener (cilium/cilium#36004 — see the
+      # aisucks-probe Service in the aisucks manifest, whose ClusterIP this
+      # alias pins). Same URLs, same SNI, full TLS verification — measuring
+      # app + certificate from in-cluster; the edge listener is the sibling
+      # watchers' job.
+      hostAliases:
+        - ip: 10.96.111.43
+          hostnames:
+            - "{{.Site.Aisucks.Domain}}"
+{{- end}}
       containers:
         - name: gatus
           image: {{.Image}}

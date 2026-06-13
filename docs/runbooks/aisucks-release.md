@@ -6,11 +6,19 @@ a pure function of the commit, and step 4 verifies that instead of trusting it.
 
 Automated form: `.github/workflows/release.yml` runs steps 1–4 end-to-end on
 every merge to main (self-hosted runner: docs/runbooks/release-runner.md) and
-cuts the tag after the prod gate, so only green releases get tags. The steps
-below remain the spec the workflow apes, and the manual path when GitHub or
-the runner is down. Rollback (step 5) is manual either way. The release
+cuts the tag after the prod gate, so only green releases get tags. The runner
+is an interim POC — the ratified successor (`docs/architecture/release.md`)
+moves deploys to per-cluster Flux + a release judge, with GitHub holding no
+cluster credentials; the gate criteria below carry over as the judge's soak
+spec. The steps below remain the spec the workflow apes, and the manual path
+when GitHub or the runner is down. Rollback (step 5) is manual either way. The release
 record IS the annotated tag set: `git tag -n1 -l 'aisucks/v*'` lists every
 release with its digest.
+
+After this workflow pushes the green tag, `.github/workflows/public-release.yml`
+runs on GitHub-hosted infrastructure to publish public artifacts: GHCR image,
+cosign keyless signature, SLSA/in-toto attestation, and the npm SDK once npm
+publishing is enabled. See `docs/runbooks/public-release.md`.
 
 Sites: dev `206.223.228.101` (vs-dev-w0) · gamma `45.250.254.119` (gd-gamma-w0)
 · prod `67.213.115.113` (gd-prod-w0). CAUTION: `206.223.228.87` and
@@ -40,19 +48,6 @@ forge with PRs exists, the hook is exactly this command.
 
 ## 0. One-time per site (operator)
 
-```sh
-kubectl create namespace aisucks --dry-run=client -o yaml | kubectl apply -f -
-kubectl label namespace aisucks pod-security.kubernetes.io/enforce=privileged --overwrite
-PASS=$(openssl rand -hex 24)
-kubectl -n aisucks create secret generic aisucks-db \
-  --from-literal=password="$PASS" \
-  --from-literal=url="postgres://aisucks:$PASS@postgres.aisucks.svc.cluster.local:5432/aisucks"
-```
-
-The password is never written anywhere else; losing it means recreating the
-secret and restarting both pods (postgres keeps the old credential in PGDATA —
-`ALTER USER` via `kubectl exec` if the database must be kept).
-
 The observability stack needs its own one-time secret (grafana sits in
 CreateContainerConfigError until it exists — PodNotReady will page):
 
@@ -78,8 +73,9 @@ git tag aisucks/v<N>
 ```
 
 Migrations discipline (checked at review, enforced by no one else):
-**additive-only** — the previous binary must run against the new schema,
-or step 5 (rollback) is a lie.
+the hello-world skeleton has no product database. When product state returns,
+schema changes must be additive-only — the previous binary must run against
+the new schema, or step 5 (rollback) is a lie.
 
 ## 2. Converge gamma
 
@@ -102,11 +98,7 @@ curl -fsS -o /dev/null -w 'healthz %{http_code} in %{time_total}s\n' $H/healthz 
 # Match the charter-locked promise text (verbatim, changes only by charter
 # amendment) — never a marketing string a redesign can drop.
 curl -fsS $H/ | grep -q 'never be sold' && echo page ok                            # expect: page ok
-curl -s -o /dev/null -w 'garbage -> %{http_code}\n' -X POST -d 'link=https://evil.example/share/x' $H/report   # expect: 422
-# Canary submission (requires the canary share links, docs/runbooks/canaries.md).
-# Resubmits render the same LOGGED page as first submits (membership-oracle defense).
-curl -s -X POST --data-urlencode "link=$CANARY_CHATGPT" $H/report | grep -q 'LOGGED' && echo canary ok
-kubectl -n aisucks exec postgres-0 -- psql -U aisucks -t -c 'select count(*) from reports;'  # expect: >= 1
+curl -fsS $H/api/v1/hello | grep -q 'hello from aisucks' && echo hello ok          # expect: hello ok
 ```
 
 Any failed expectation stops the release. Fix forward on dev; never ship a
@@ -123,7 +115,7 @@ bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/sites/prod/site.
 
 **Assert the pushed aisucks digest is byte-identical to gamma's.** If it
 differs, STOP: the build is not reproducible — that is a bug to fix before
-anything ships. Re-run the gate's first three checks against prod.
+anything ships. Re-run the gate checks against prod.
 
 ## 5. Rollback
 
@@ -133,5 +125,5 @@ bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/sites/prod/site.
 git checkout main
 ```
 
-Works because migrations are additive-only (step 1) and the previous tag's
-digest re-derives from its commit.
+Works because the previous tag's digest re-derives from its commit. Once
+product state returns, the additive-migrations rule in step 1 is also required.

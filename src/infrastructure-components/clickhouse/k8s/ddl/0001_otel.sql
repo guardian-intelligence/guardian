@@ -1,6 +1,6 @@
 -- 0001_otel.sql — otel logs/traces schema for the observability ledger.
 --
--- NOT applied automatically. The release-3 runbook applies it by hand:
+-- NOT applied automatically. docs/runbooks/ledger.md applies it by hand:
 --   clickhouse-client --password "$CLICKHOUSE_ADMIN_PASSWORD" \
 --     --multiquery < 0001_otel.sql
 -- and the collector's clickhouse exporter runs with create_schema: false.

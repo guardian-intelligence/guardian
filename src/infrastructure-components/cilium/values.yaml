@@ -116,10 +116,51 @@ hubble:
       enabled: true
       method: cronJob
 
+# Gateway API on the node Envoy (cilium-envoy DaemonSet), hostNetwork mode:
+# listeners are plain host sockets on whatever port each Gateway's
+# spec.listeners declares — no LoadBalancer Service, no NodePort path (the
+# chart auto-disables the Service mode). The CRDs the operator watches ship
+# as their own inline manifest (talos/gateway-api-crds-inline.yaml), listed
+# before this render in every site.yaml; pin and channel rationale live in
+# that file's header. Enabling this only arms the operator: nothing binds a
+# port until a Gateway object exists (a later phase), so the app keeps host
+# :80/:443 today.
+#
+# The chart's default `gatewayClass.create: auto` probes the live cluster
+# for the GatewayClass API (.Capabilities.APIVersions.Has) — always false
+# under offline `helm template`, so the vendored render would silently omit
+# the GatewayClass and nothing else creates it (the operator RBAC has no
+# create verb on gatewayclasses). Force it so a fresh bootstrap converges
+# with no operator in the loop: the CRDs ride the inline manifest listed
+# above this render, and Talos applies CRDs before all non-CRD objects.
+gatewayAPI:
+  enabled: true
+  gatewayClass:
+    create: "true"
+  hostNetwork:
+    enabled: true
+
+# Envoy stays the standalone DaemonSet (chart default since 1.16). For
+# Gateway listeners on ports <1024 the starter wrapper must pass
+# NET_BIND_SERVICE through to the forked Envoy: the cap goes on the
+# container AND keepCapNetBindService=true (the wrapper drops every other
+# cap). Setting the list REPLACES the chart default [NET_ADMIN, SYS_ADMIN]
+# — keep those. Re-check against the chart values on every Cilium upgrade,
+# as with the agent lists above.
+envoy:
+  enabled: true
+  securityContext:
+    capabilities:
+      envoy:
+        - NET_ADMIN
+        - SYS_ADMIN
+        - NET_BIND_SERVICE
+      keepCapNetBindService: true
+
 # Deliberately defaulted (do not "fix"):
 # - bpf.masquerade=false — eBPF masquerade + Talos forwardKubeDNSToHost is a
 #   documented CoreDNS breakage; iptables masquerade until that changes.
-# - Gateway API off — enabling later needs the CRDs applied BEFORE the
-#   render picks it up, and a listener strategy that doesn't fight the app
-#   for host :80/:443.
+# - Gateway API CRDs-before-render (was: Gateway API off pending exactly
+#   this): resolved by vendoring the CRDs as a separate inline manifest
+#   ordered ahead of this render — see the gatewayAPI block above.
 # - MTU auto-detected (standard 1500 underlay).

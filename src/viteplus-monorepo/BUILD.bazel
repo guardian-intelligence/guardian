@@ -1,0 +1,140 @@
+load("@npm//:defs.bzl", "npm_link_all_packages")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    ".npmrc",
+    "package.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "tsconfig.base.json",
+    "tsconfig.json",
+    "vite.config.ts",
+])
+
+npm_link_all_packages()
+
+genrule(
+    name = "vp_node",
+    srcs = ["@rules_nodejs//nodejs:current_node_runtime"],
+    outs = ["node"],
+    cmd = """
+set -euo pipefail
+node=""
+for candidate in $(locations @rules_nodejs//nodejs:current_node_runtime); do
+  case "$$candidate" in
+    */bin/node)
+      node="$$candidate"
+      ;;
+  esac
+done
+test -n "$$node"
+install -m 0755 "$$node" "$@"
+""",
+)
+
+filegroup(
+    name = "workspace_install_inputs",
+    srcs = [
+        ".npmrc",
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "//src/products/aisucks/web:package_manifest",
+        "//src/viteplus-monorepo/packages/aisucks-sdk:package_manifest",
+    ] + glob(["patches/**/*"]),
+)
+
+filegroup(
+    name = "workspace_sources",
+    srcs = [
+        ".npmrc",
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "tsconfig.base.json",
+        "tsconfig.json",
+        "vite.config.ts",
+        "//src/products/aisucks/web:sources",
+        "//src/viteplus-monorepo/packages/aisucks-sdk:sources",
+    ] + glob(["patches/**/*"]),
+)
+
+genrule(
+    name = "workspace_install",
+    srcs = [
+        ":workspace_install_inputs",
+        ":vp_node",
+        ":node_modules/vite-plus",
+    ],
+    outs = ["workspace_install.stamp"],
+    cmd = """
+set -euo pipefail
+execroot="$$(pwd)"
+node="$$execroot/$(location :vp_node)"
+vp=""
+for candidate in $(locations :node_modules/vite-plus); do
+  case "$$candidate" in
+    */node_modules/vite-plus)
+      candidate_abs="$$execroot/$$candidate"
+      if [ -x "$$candidate_abs/bin/vp" ]; then
+        vp="$$candidate_abs/bin/vp"
+      fi
+      ;;
+  esac
+done
+test -n "$$vp"
+export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
+export CI=true
+cd src/viteplus-monorepo
+"$$node" "$$vp" install --frozen-lockfile --prefer-offline
+printf 'viteplus install ok\\n' > "$$execroot/$@"
+""",
+    local = True,
+    tags = [
+        "local",
+        "no-remote",
+        "no-sandbox",
+    ],
+)
+
+genrule(
+    name = "workspace_build",
+    srcs = [
+        ":workspace_sources",
+        ":workspace_install",
+        ":vp_node",
+        ":node_modules/vite-plus",
+    ],
+    outs = ["workspace_build.stamp"],
+    cmd = """
+set -euo pipefail
+execroot="$$(pwd)"
+node="$$execroot/$(location :vp_node)"
+vp=""
+for candidate in $(locations :node_modules/vite-plus); do
+  case "$$candidate" in
+    */node_modules/vite-plus)
+      candidate_abs="$$execroot/$$candidate"
+      if [ -x "$$candidate_abs/bin/vp" ]; then
+        vp="$$candidate_abs/bin/vp"
+      fi
+      ;;
+  esac
+done
+test -n "$$vp"
+export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
+export CI=true
+cd src/products/aisucks/web
+"$$node" "$$vp" build
+cd "$$execroot/src/viteplus-monorepo"
+"$$node" "$$vp" run @guardian-intelligence/aisucks#build
+printf 'viteplus build ok\\n' > "$$execroot/$@"
+""",
+    local = True,
+    tags = [
+        "local",
+        "no-remote",
+        "no-sandbox",
+    ],
+)

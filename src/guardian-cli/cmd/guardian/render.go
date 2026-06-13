@@ -12,7 +12,11 @@ import (
 // site, so per-site values (domains, feature toggles) come from site.yaml
 // instead of forked manifests.
 func renderManifest(manifestPath, image string, site *Site) ([]byte, error) {
-	path := resolvePath(manifestPath)
+	return renderComponentManifest(component{manifest: manifestPath}, image, site)
+}
+
+func renderComponentManifest(c component, image string, site *Site) ([]byte, error) {
+	path := resolvePath(c.manifest)
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("render: %w", err)
@@ -23,9 +27,10 @@ func renderManifest(manifestPath, image string, site *Site) ([]byte, error) {
 	}
 	var buf bytes.Buffer
 	data := struct {
-		Image string
-		Site  *Site
-	}{Image: image, Site: site}
+		Image   string
+		Site    *Site
+		Service *publicHTTPServiceRender
+	}{Image: image, Site: site, Service: c.publicHTTPServiceRender(site)}
 	if err := tmpl.Execute(&buf, data); err != nil {
 		return nil, fmt.Errorf("render %s: %w", path, err)
 	}

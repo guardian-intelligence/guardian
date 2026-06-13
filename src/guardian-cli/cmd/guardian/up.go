@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -227,6 +228,11 @@ func runUp(args []string) error {
 	digests := make(map[string]string, len(components))
 	err = withPortForward(kubectl, kubeconfig, "seed-registry", "deploy/seed-registry", pushLocalPort, 5000, 2*time.Minute, func(endpoint string) error {
 		for _, c := range components {
+			// Manifest-only components have nothing to push; site-gated
+			// components push nothing for sites they do not converge on.
+			if c.layout == "" || (c.enabled != nil && !c.enabled(site)) {
+				continue
+			}
 			dir, terr := toolPath(c.layout)
 			if terr != nil {
 				return terr
@@ -245,9 +251,23 @@ func runUp(args []string) error {
 		return err
 	}
 	for _, c := range components {
-		manifest, rerr := renderManifest(c.manifest, images[c.name], site)
+		if c.enabled != nil && !c.enabled(site) {
+			fmt.Fprintf(os.Stderr, "skipping %s: disabled for this site\n", c.name)
+			continue
+		}
+		// images[c.name] is "" for a manifest-only component; its template
+		// never references .Image (the components-table test pins the gate,
+		// the render test pins the manifest).
+		manifest, rerr := renderComponentManifest(c, images[c.name], site)
 		if rerr != nil {
 			return rerr
+		}
+		// A component may guard its entire manifest on site values (status
+		// renders nothing on sites without status.domains); kubectl rejects
+		// empty input, so an empty render means "not deployed here".
+		if len(bytes.TrimSpace(manifest)) == 0 {
+			fmt.Fprintf(os.Stderr, "skipping %s: manifest renders empty for this site\n", c.name)
+			continue
 		}
 		if err := runToolInput(manifest, kubectl, "--kubeconfig", kubeconfig, "apply", "-f", "-"); err != nil {
 			return err
@@ -320,6 +340,11 @@ func runUp(args []string) error {
 func emitConvergedEvent(kubectl, kubeconfig, nodeName string, digests map[string]string) error {
 	lines := make([]string, 0, len(components))
 	for _, c := range components {
+		// The event documents image digests pushed this run; manifest-only
+		// and site-disabled components pushed nothing and are omitted.
+		if digests[c.name] == "" {
+			continue
+		}
 		lines = append(lines, c.name+"@"+digests[c.name])
 	}
 	now := time.Now().UTC().Format(time.RFC3339)

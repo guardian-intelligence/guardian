@@ -1,0 +1,10 @@
+apiVersion: products.guardian.dev/v1alpha1
+kind: AisucksProduct
+metadata:
+  namespace: aisucks
+  name: default
+spec:
+  domain: aisucks.app
+  image: registry.guardian.internal/aisucks@sha256:REPLACE_WITH_RELEASE_DIGEST
+  observability:
+    profile: standard

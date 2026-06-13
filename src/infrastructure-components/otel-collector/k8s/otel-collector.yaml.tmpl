@@ -1,5 +1,10 @@
-# OTel Collector: the metrics spine. One collector per node scrapes every
-# exporter and remote-writes to the site's VictoriaMetrics. It runs
+# OTel Collector: the metrics spine, plus — on ledger sites
+# (clickhouse.enabled) — the log/event tee into the per-site ClickHouse
+# (filelog + k8sobjects → clickhouse exporter; docs/runbooks/ledger.md).
+# Every ledger addition in this file branches on that flag so a non-ledger
+# site renders byte-identical to the metrics-only spine. One collector per
+# node scrapes every exporter and remote-writes to the site's
+# VictoriaMetrics. It runs
 # hostNetwork because most of its targets only exist in the host netns on
 # loopback (aisucks :9090, hubble :9965, kubelet :10250, its own :8888) —
 # the Talos ingress firewall does not police loopback, so scraping localhost
@@ -24,13 +29,31 @@ kind: ClusterRole
 metadata:
   name: otel-collector
 rules:
-  # Every scrape target is a static_config; the only API-authorized path is
-  # the kubelet's /metrics/cadvisor, which authorizes as get on
-  # nodes/metrics. Re-add discovery resources if kubernetes_sd ever lands.
+  # Almost every scrape target is a static_config; the only API-authorized
+  # path is the kubelet's /metrics/cadvisor, which authorizes as get on
+  # nodes/metrics.
   - apiGroups: [""]
     resources:
       - nodes/metrics
     verbs: ["get"]
+{{- if .Site.Aisucks.PodNetwork}}
+  # Pod discovery for the aisucks job's kubernetes_sd below (pod-network
+  # sites only): role: pod needs list/watch, get for completeness.
+  - apiGroups: [""]
+    resources:
+      - pods
+    verbs: ["get", "list", "watch"]
+{{- end}}
+{{- if .Site.Clickhouse.Enabled}}
+  # k8sobjects receiver: watch mode does an initial list then watches.
+  # Events only — the ledger remembers what etcd forgets after 1h. Modern
+  # Events live in events.k8s.io; core "" covers v1 Events like guardian's
+  # Converged marker.
+  - apiGroups: ["", "events.k8s.io"]
+    resources:
+      - events
+    verbs: ["get", "list", "watch"]
+{{- end}}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -52,10 +75,18 @@ metadata:
   namespace: observability
 data:
   config.yaml: |
+{{- if .Site.Clickhouse.Enabled}}
+    extensions:
+      # filelog checkpoints: survive pod restarts so logs are neither
+      # re-ingested nor dropped across a deploy. hostPath, EPHEMERAL —
+      # same wipe-drill posture as the ledger itself.
+      file_storage:
+        directory: /var/lib/otel-collector
+{{- end}}
     # NO OTLP receivers in this release: under hostNetwork they would bind
     # real host ports (4317/4318) on the public NIC — dead weight behind the
     # default-block firewall and a standing invitation to "just open a
-    # port". They arrive with the app SDK in the ledger release, bound to
+    # port". They arrive with the app OTel SDK (the M5 remainder), bound to
     # loopback like everything else here.
     receivers:
       prometheus:
@@ -67,9 +98,47 @@ data:
             external_labels:
               cluster: "{{.Site.Cluster.Name}}"
           scrape_configs:
+{{- if .Site.Aisucks.PodNetwork}}
+            # Pod-network aisucks: discover the pods (replicas: 2) and
+            # scrape each at <podIP>:9090 (the app binds DIAG_ADDR=":9090").
+            # instance = pod name gives per-pod scrape identity, so the two
+            # replicas' counters never interleave under one series identity
+            # (the observability.md constraint that kept replicas at 1
+            # under hostNetwork). MUST land in the same converge as the
+            # podNetwork flip: the static 127.0.0.1:9090 target goes dark
+            # the moment the app leaves the host netns, and ScrapeTargetDown
+            # pages 10 minutes later.
+            - job_name: aisucks
+              kubernetes_sd_configs:
+                - role: pod
+                  namespaces:
+                    names: [aisucks]
+              relabel_configs:
+                - source_labels: [__meta_kubernetes_pod_label_app]
+                  regex: aisucks
+                  action: keep
+                # Surge pods have no IP yet; an empty address would scrape
+                # ":9090" (the collector's own host netns) — drop them until
+                # they are running and addressable.
+                - source_labels: [__meta_kubernetes_pod_phase]
+                  regex: Running
+                  action: keep
+                - source_labels: [__meta_kubernetes_pod_ip]
+                  regex: (.+)
+                  target_label: __address__
+                  # $${1}: the collector's confmap resolver expands ${...}
+                  # as env-var syntax before prometheus ever sees the
+                  # config; $$ escapes it so prometheus receives a literal
+                  # ${1} capture reference. Unescaped, the collector fails
+                  # at startup: environment variable "1" has invalid name.
+                  replacement: $${1}:9090
+                - source_labels: [__meta_kubernetes_pod_name]
+                  target_label: instance
+{{- else}}
             - job_name: aisucks
               static_configs:
                 - targets: ["127.0.0.1:9090"]
+{{- end}}
             # Hubble metrics: hostPort 9965 from the Cilium agent (set in
             # src/infrastructure-components/cilium/values.yaml). The agent's
             # own prometheus endpoint (:9962) is NOT in this render —
@@ -86,7 +155,7 @@ data:
 {{- /* One probe target per cross-site watch URL; the relabel trio sends
        the actual request to the blackbox exporter with the URL as the
        ?target param. Skip the job entirely when nothing is watched (dev). */}}
-{{- if .Site.Aisucks.Watch}}
+{{- if or .Site.Aisucks.Watch .Site.Status.Monitor}}
             - job_name: blackbox
               metrics_path: /probe
               params:
@@ -95,6 +164,15 @@ data:
                 - targets:
 {{- range .Site.Aisucks.Watch}}
                     - "{{.}}"
+{{- end}}
+{{- /* Status hostnames join the probe set only behind status.monitor
+       (default OFF): a pre-DNS hostname would emit probe_success == 0 and
+       vmalert's SiteProbeFailed pages on 2m of that. Flip per site after
+       DNS resolves and the Gateway routes the hostname. */}}
+{{- if .Site.Status.Monitor}}
+{{- range .Site.Status.Domains}}
+                    - "https://{{.}}/healthz"
+{{- end}}
 {{- end}}
               relabel_configs:
                 - source_labels: [__address__]
@@ -122,19 +200,80 @@ data:
             - job_name: victoria-metrics-self
               static_configs:
                 - targets: ["victoria-metrics.observability.svc:8428"]
+{{- if .Site.Clickhouse.Enabled}}
+      filelog:
+        include: [/var/log/pods/*/*/*.log]
+        # Never ingest our own stdout: an export error would log a line we
+        # then try to export — bounded, but a standing noise loop.
+        exclude: [/var/log/pods/observability_otel-collector*/*/*.log]
+        storage: file_storage
+        # Required by the container operator's add_metadata_from_filepath
+        # (the path IS the metadata source); without it every entry fails
+        # with "log.file.path is missing" and the pipeline ships nothing.
+        include_file_path: true
+        operators:
+          # The container operator (M5: "container parser, no
+          # k8sattributes"): parses containerd CRI format, reassembles
+          # partial lines, and lifts k8s.{namespace,pod,container}.name +
+          # k8s.pod.uid from the file path into resource attributes — no
+          # API-server round trip, no extra RBAC.
+          - type: container
+      k8sobjects:
+        auth_type: serviceAccount
+        objects:
+          - name: events
+            mode: watch
+{{- end}}
     processors:
       # memory_limiter must be FIRST in the pipeline so backpressure hits
-      # the receivers before allocation, not after. 256MiB + 64 spike sits
-      # under the container's 384MiB limit with headroom for the runtime.
+      # the receivers before allocation, not after. The cap + spike pair
+      # sits under the container memory limit with headroom for the runtime
+      # (ledger sites carry two extra receivers and an exporter queue, so
+      # both tiers move together: 384+96 under 512Mi vs 256+64 under 384Mi).
       memory_limiter:
         check_interval: 1s
+{{- if .Site.Clickhouse.Enabled}}
+        limit_mib: 384
+        spike_limit_mib: 96
+{{- else}}
         limit_mib: 256
         spike_limit_mib: 64
+{{- end}}
       batch: {}
+{{- if .Site.Clickhouse.Enabled}}
+      # Stamp site identity; the otel_logs MATERIALIZED columns key on these.
+      resource/site:
+        attributes:
+          - key: k8s.cluster.name
+            value: "{{.Site.Cluster.Name}}"
+            action: upsert
+          - key: k8s.node.name
+            value: "{{.Site.Node.Hostname}}"
+            action: upsert
+{{- end}}
     exporters:
       prometheusremotewrite:
         endpoint: http://victoria-metrics.observability.svc:8428/api/v1/write
+{{- if .Site.Clickhouse.Enabled}}
+      clickhouse:
+        # Native protocol via the ClusterIP Service; cluster-local only,
+        # nothing crosses the ingress firewall.
+        endpoint: tcp://clickhouse.observability.svc:9000
+        database: otel
+        username: default
+        # Optional secret + default-empty: the metrics spine must never be
+        # held hostage by ledger secret presence (a missing env var would
+        # otherwise fail config resolution at startup).
+        password: ${env:CLICKHOUSE_ADMIN_PASSWORD:-}
+        # The schema is the reviewed DDL in clickhouse/k8s/ddl/, applied by
+        # the ledger runbook — never whatever the exporter would CREATE.
+        create_schema: false
+        timeout: 10s
+{{- end}}
     service:
+{{- if .Site.Clickhouse.Enabled}}
+      extensions: [file_storage]
+{{- end}}
       telemetry:
         # Pin the self-telemetry identity. The SDK defaults are
         # service.name=otelcol-contrib plus a service.instance.id UUID minted
@@ -161,6 +300,12 @@ data:
           receivers: [prometheus]
           processors: [memory_limiter, batch]
           exporters: [prometheusremotewrite]
+{{- if .Site.Clickhouse.Enabled}}
+        logs:
+          receivers: [filelog, k8sobjects]
+          processors: [memory_limiter, resource/site, batch]
+          exporters: [clickhouse]
+{{- end}}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -194,20 +339,70 @@ spec:
           image: {{.Image}}
           args:
             - --config=/conf/config.yaml
+{{- if .Site.Clickhouse.Enabled}}
+          # filelog reads /var/log/pods, which the kubelet writes root-owned
+          # 0640; the contrib image's default uid (10001) cannot read them.
+          # A real privilege increase on a hostNetwork pod — bounded by the
+          # read-only mount, the namespace's already-privileged PSA (label
+          # owned by the victoria-metrics manifest), the single-node
+          # cluster, and this being the standard posture for node log
+          # agents.
+          securityContext:
+            runAsUser: 0
+          env:
+            # optional: the metrics spine must start (and keep alerting
+            # alive) whether or not the ledger secret exists yet; the
+            # exporter config defaults the password empty to match.
+            - name: CLICKHOUSE_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-admin
+                  key: password
+                  optional: true
+{{- end}}
           # No ports block: under hostNetwork declared containerPorts count
           # as host-port claims against the scheduler (see the aisucks
           # manifest for the gamma incident). The only listener is
           # 127.0.0.1:8888 (telemetry above).
           resources:
+{{- if .Site.Clickhouse.Enabled}}
+            # Ledger tier: two extra receivers + the clickhouse exporter
+            # queue over the metrics-only 192Mi/384Mi.
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+{{- else}}
             requests:
               cpu: 100m
               memory: 192Mi
             limits:
               memory: 384Mi
+{{- end}}
           volumeMounts:
             - name: config
               mountPath: /conf
+{{- if .Site.Clickhouse.Enabled}}
+            - name: varlogpods
+              mountPath: /var/log/pods
+              readOnly: true
+            - name: checkpoints
+              mountPath: /var/lib/otel-collector
+{{- end}}
       volumes:
         - name: config
           configMap:
             name: otel-collector-config
+{{- if .Site.Clickhouse.Enabled}}
+        - name: varlogpods
+          hostPath:
+            path: /var/log/pods
+        - name: checkpoints
+          hostPath:
+            # EPHEMERAL, like /var/lib/clickhouse-data: a wipe drill erases
+            # checkpoints and ledger together, so post-wipe re-ingest cannot
+            # duplicate into surviving data.
+            path: /var/lib/otel-collector
+            type: DirectoryOrCreate
+{{- end}}

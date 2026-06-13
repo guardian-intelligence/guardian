@@ -1,0 +1,43 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: aisucksproducts.products.guardian.dev
+spec:
+  group: products.guardian.dev
+  names:
+    kind: AisucksProduct
+    plural: aisucksproducts
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - domain
+                - image
+              properties:
+                domain:
+                  type: string
+                image:
+                  type: string
+                  description: Digest-pinned aisucks API image.
+                observability:
+                  type: object
+                  properties:
+                    profile:
+                      type: string
+                      enum: [standard]
+                      default: standard
+            status:
+              type: object
+              properties:
+                publicHttpService:
+                  type: string
+                url:
+                  type: string

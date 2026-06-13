@@ -76,16 +76,29 @@ The release-runbook gate battery, plus the Cilium-specific checks:
 H=https://$DOMAIN
 curl -fsS -o /dev/null -w 'healthz %{http_code} in %{time_total}s\n' $H/healthz   # 200
 curl -fsS $H/ | grep -q 'never be sold' && echo page ok
-curl -s -o /dev/null -w 'garbage -> %{http_code}\n' -X POST -d 'link=https://evil.example/share/x' $H/report  # 422
+curl -fsS $H/api/v1/hello | grep -q 'hello from aisucks' && echo hello ok
 kubectl -n kube-system exec ds/cilium -c cilium-agent -- cilium-dbg status --brief  # OK
 kubectl -n kube-system exec ds/cilium -c cilium-agent -- cilium-dbg status --verbose | grep 'Socket LB'  # Enabled
 for p in 9965 9964 4244 4240; do timeout 2 bash -c "</dev/tcp/$IP/$p" 2>/dev/null && echo "$p OPEN (BAD)" || echo "$p blocked"; done
 kubectl get pods -A --no-headers | grep -vE 'Running|Completed' || echo all-running
 ```
 
-Gamma additionally runs the canary submission. Watch the agent and
-operator logs for Kubernetes API deprecation warnings (the k8s version can
-run ahead of Cilium's tested matrix).
+Watch the agent and operator logs for Kubernetes API deprecation warnings
+(the k8s version can run ahead of Cilium's tested matrix).
+
+On a Gateway-converted site (site.yaml `gateway.enabled`, currently dev),
+:443 is SNI-routed and `curl -k https://<node IP>/...` dies at the edge BY
+DESIGN — no SNI, no route, connection dropped. That failure is a positive
+check, not a breakage. To test a specific node while presenting SNI, pin
+resolution instead of dropping the hostname:
+
+```sh
+curl --resolve $DOMAIN:443:$IP -fsS -o /dev/null -w 'healthz %{http_code}\n' https://$DOMAIN/healthz  # 200
+curl -k --max-time 5 https://$IP/healthz && echo 'raw-IP :443 ANSWERED (BAD)' || echo 'no-SNI dropped (good)'
+```
+
+Raw-IP **:80** keeps working on purpose: the HTTPRoute is hostname-less so
+the gatus no-domain fallback and ACME HTTP-01 never depend on Host.
 
 ## 5. Rollback
 

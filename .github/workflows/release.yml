@@ -38,11 +38,6 @@ defaults:
     # would let a failed `guardian up` hide behind tee.
     shell: bash
 
-env:
-  # Real share link, deliberately not a secret — docs/runbooks/canaries.md is
-  # the registry of record; it must stay live.
-  CANARY_CHATGPT: https://chatgpt.com/share/6a2a4ce7-8e14-83e8-acef-fd7cf9a144fe
-
 jobs:
   release:
     runs-on: [self-hosted, guardian-release]
@@ -51,6 +46,9 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0 # tag numbering reads the full aisucks/v* list
+
+      - name: Build (step 1)
+        run: bazelisk build //:build
 
       - name: Test (step 1)
         run: bazelisk test //...
@@ -72,9 +70,7 @@ jobs:
           for _ in $(seq 36); do curl -fsS -o /dev/null "$H/healthz" && break; sleep 5; done
           curl -fsS -o /dev/null -w 'healthz %{http_code} in %{time_total}s\n' "$H/healthz"
           curl -fsS "$H/" | grep -q 'never be sold' && echo page ok
-          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -d 'link=https://evil.example/share/x' "$H/report")" = 422 && echo garbage ok
-          curl -s -X POST --data-urlencode "link=$CANARY_CHATGPT" "$H/report" | grep -q 'LOGGED' && echo canary ok
-          test "$("$HOME/.local/bin/kubectl" -n aisucks exec postgres-0 -- psql -U aisucks -t -c 'select count(*) from reports;' | tr -d '[:space:]')" -ge 1 && echo reports ok
+          curl -fsS "$H/api/v1/hello" | grep -q 'hello from aisucks' && echo hello ok
 
       - name: Promote prod (step 4)
         run: |
@@ -91,7 +87,7 @@ jobs:
           for _ in $(seq 36); do curl -fsS -o /dev/null "$H/healthz" && break; sleep 5; done
           curl -fsS -o /dev/null -w 'healthz %{http_code} in %{time_total}s\n' "$H/healthz"
           curl -fsS "$H/" | grep -q 'never be sold' && echo page ok
-          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -d 'link=https://evil.example/share/x' "$H/report")" = 422 && echo garbage ok
+          curl -fsS "$H/api/v1/hello" | grep -q 'hello from aisucks' && echo hello ok
 
       - name: Tag the release (steps 1 + 2)
         run: |

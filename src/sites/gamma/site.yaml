@@ -27,18 +27,37 @@ talos:
     - src/sites/gamma/talos/patches/registry-mirror.yaml
     - src/sites/gamma/talos/patches/zfs-module.yaml
     - src/sites/gamma/talos/patches/cni-none.yaml
+    # Gateway API CRDs MUST stay listed above cilium: list order is
+    # inlineManifests order, and the CRDs have to exist before the Cilium
+    # render that watches them (render_order_test.go pins this).
+    - src/infrastructure-components/cilium/talos/gateway-api-crds-inline.yaml
     # Shared vendored render, deliberately not copied per-site: one Cilium
     # version across the fleet, one file to re-vendor on upgrade.
     - src/infrastructure-components/cilium/talos/cilium-inline.yaml
     - src/sites/gamma/talos/patches/ingress-firewall.yaml
 
-# Gamma serves gamma.aisucks.app with ingest open (it is the release gate,
-# exercised with canary submissions). Watches prod from outside.
+# Gamma serves gamma.aisucks.app as the release gate. Watches prod from outside.
 aisucks:
   domain: gamma.aisucks.app
-  ingest: "on"
-  backup: false
   ntfyTopic: "aisucks-ops-1ebda4d035e83ac0"
   watch:
     - https://aisucks.app/healthz
     - https://dev.aisucks.app/healthz
+  # Page checks carry the charter marker; healthz alone misses a broken page.
+  watchPages:
+    - https://aisucks.app/
+    - https://dev.aisucks.app/
+
+# Observability ledger (src/infrastructure-components/clickhouse): per-site
+# ClickHouse plus the collector's logs tee (filelog + k8sobjects Events).
+# Gamma follows the dev pilot. Pre-converge prerequisite per site: the
+# clickhouse-admin Secret must exist (docs/runbooks/ledger.md).
+clickhouse:
+  enabled: true
+
+# Status page (src/status): gamma's vantage of the fleet, served behind the
+# Gateway's TLS passthrough. No status.domains = no status pod (prod stays
+# without one until the Gateway round exposes a hostname there).
+status:
+  domains:
+    - status.gamma.guardianintelligence.org

@@ -1,0 +1,7 @@
+# Vendored Talos inline-manifest patches as test data for the ordering
+# regression test in //src/guardian-cli/cmd/guardian:guardian_test.
+filegroup(
+    name = "talos-patches",
+    srcs = glob(["talos/*.yaml"]),
+    visibility = ["//src/guardian-cli:__subpackages__"],
+)

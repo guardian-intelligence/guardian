@@ -16,11 +16,23 @@ import (
 // component pairs a Bazel-built OCI layout (riding in the guardian binary's
 // runfiles) with the manifest template it feeds. Workload image references
 // are computed as registry.guardian.internal/<name>@<built digest>: what runs
-// is byte-for-byte what the workspace built.
+// is byte-for-byte what the workspace built. Zero values of the two optional
+// fields preserve the default behavior: an image is pushed and the manifest
+// converges on every site.
 type component struct {
-	name     string
-	layout   string // runfiles path of the rules_oci OCI layout directory
+	name string
+	// layout is the runfiles path of the rules_oci OCI layout directory.
+	// Empty means manifest-only: nothing to push, no image ref — the
+	// manifest template must never reference .Image (gateway: the listener
+	// is the cilium-envoy DaemonSet already on the node).
+	layout   string
 	manifest string // repo-root-relative manifest template
+	// enabled gates the component per site; nil converges on every site.
+	// A manifest-only component MUST be gated (TestComponentsTable pins
+	// this): with no image and no site gate there would be nothing
+	// deliberate about where its objects land.
+	enabled           func(*Site) bool
+	publicHTTPService *publicHTTPService
 }
 
 var components = []component{{
@@ -28,15 +40,25 @@ var components = []component{{
 	layout:   "_main/src/infrastructure-components/openbao/image",
 	manifest: "src/infrastructure-components/openbao/k8s/openbao.yaml.tmpl",
 }, {
-	// postgres before aisucks: the service retries its DB connection, but
-	// there is no reason to start the race with the database behind.
-	name:     "postgres",
-	layout:   "_main/src/infrastructure-components/postgres/image",
-	manifest: "src/infrastructure-components/postgres/k8s/postgres.yaml.tmpl",
-}, {
 	name:     "aisucks",
-	layout:   "_main/src/aisucks/image",
-	manifest: "src/aisucks/k8s/aisucks.yaml.tmpl",
+	layout:   "_main/src/products/aisucks/services/api/image",
+	manifest: "src/platform/public-http-service/k8s/public-http-service.yaml.tmpl",
+	publicHTTPService: &publicHTTPService{
+		namespace:       "aisucks",
+		app:             "aisucks",
+		domain:          func(s *Site) string { return s.Aisucks.Domain },
+		podNetwork:      func(s *Site) bool { return s.Aisucks.PodNetwork },
+		certDir:         "/var/lib/aisucks-certs",
+		acmeEmail:       "im.shovonhasan@gmail.com",
+		probeClusterIP:  "10.96.111.43",
+		networkLabelKey: "platform.guardian.dev/network",
+		memoryRequest:   "128Mi",
+		memoryLimit:     "512Mi",
+		goMemoryLimit:   "410MiB",
+		cpuRequest:      "100m",
+		healthPath:      "/healthz",
+		readinessPeriod: 5,
+	},
 }, {
 	name:     "gatus",
 	layout:   "_main/src/infrastructure-components/gatus/image",
@@ -52,6 +74,21 @@ var components = []component{{
 	name:     "kube-state-metrics",
 	layout:   "_main/src/infrastructure-components/kube-state-metrics/image",
 	manifest: "src/infrastructure-components/kube-state-metrics/k8s/kube-state-metrics.yaml.tmpl",
+}, {
+	// clickhouse after victoria-metrics (the observability Namespace owner)
+	// and before otel-collector: the collector's clickhouse exporter
+	// retries, but there is no reason to start the logs pipeline with its
+	// ledger behind. List order is apply order and no test pins this pair —
+	// this comment carries the invariant. Site-gated like gateway (the
+	// ledger ratchet: dev → gamma → prod); the otel-collector template
+	// branches on the same flag, so a non-ledger site's collector renders
+	// byte-identical to the metrics-only spine. The otel schema is NOT
+	// applied here: docs/runbooks/ledger.md applies k8s/ddl/ by hand and
+	// the exporter runs create_schema: false.
+	name:     "clickhouse",
+	layout:   "_main/src/infrastructure-components/clickhouse/image",
+	manifest: "src/infrastructure-components/clickhouse/k8s/clickhouse.yaml.tmpl",
+	enabled:  func(s *Site) bool { return s.Clickhouse.Enabled },
 }, {
 	name:     "otel-collector",
 	layout:   "_main/src/infrastructure-components/otel-collector/image",
@@ -80,7 +117,110 @@ var components = []component{{
 	name:     "grafana",
 	layout:   "_main/src/infrastructure-components/grafana/image",
 	manifest: "src/infrastructure-components/grafana/k8s/grafana.yaml.tmpl",
+}, {
+	// status after victoria-metrics: the page is rendered from queries
+	// against the site-local VM. Sites without status.domains in site.yaml
+	// render an empty manifest and deploy nothing (the apply loop skips
+	// empty renders).
+	name:     "status",
+	layout:   "_main/src/status/image",
+	manifest: "src/status/k8s/status.yaml.tmpl",
+}, {
+	// Manifest-only: the edge Gateway + routes. No image — the listener is
+	// the cilium-envoy DaemonSet already on the node. Gated per site:
+	// applying a Gateway binds host :80/:443, which is the per-site
+	// conversion itself (dev → gamma → prod; docs/architecture/gateway.md).
+	// LAST in the table, after every component whose namespace its routes
+	// live in: the aisucks TLSRoute/HTTPRoute land in namespace aisucks and
+	// the status TLSRoute in namespace status, and applying a route into a
+	// namespace that does not exist yet fails the converge. App-then-gateway
+	// also gives the cutover its overlap ordering.
+	name:     "gateway",
+	manifest: "src/infrastructure-components/gateway/k8s/gateway.yaml.tmpl",
+	enabled:  func(s *Site) bool { return s.Gateway.Enabled },
 }}
+
+type publicHTTPService struct {
+	namespace       string
+	app             string
+	domain          func(*Site) string
+	podNetwork      func(*Site) bool
+	certDir         string
+	acmeEmail       string
+	probeClusterIP  string
+	networkLabelKey string
+	memoryRequest   string
+	memoryLimit     string
+	goMemoryLimit   string
+	cpuRequest      string
+	healthPath      string
+	readinessPeriod int
+}
+
+type publicHTTPServiceRender struct {
+	Namespace       string
+	App             string
+	Domain          string
+	PodNetwork      bool
+	Replicas        int
+	ListenHTTP      string
+	ListenTLS       string
+	DiagAddr        string
+	HTTPPort        int
+	HTTPSPort       int
+	MetricsPort     int
+	CertDir         string
+	ACMEEmail       string
+	ProbeClusterIP  string
+	NetworkLabelKey string
+	NetworkLabelVal string
+	MemoryRequest   string
+	MemoryLimit     string
+	GoMemoryLimit   string
+	CPURequest      string
+	HealthPath      string
+	ReadinessPeriod int
+}
+
+func (c component) publicHTTPServiceRender(site *Site) *publicHTTPServiceRender {
+	if c.publicHTTPService == nil {
+		return nil
+	}
+	svc := c.publicHTTPService
+	out := &publicHTTPServiceRender{
+		Namespace:       svc.namespace,
+		App:             svc.app,
+		Domain:          svc.domain(site),
+		PodNetwork:      svc.podNetwork(site),
+		Replicas:        1,
+		ListenHTTP:      ":80",
+		ListenTLS:       ":443",
+		DiagAddr:        "127.0.0.1:9090",
+		HTTPPort:        80,
+		HTTPSPort:       443,
+		MetricsPort:     9090,
+		CertDir:         svc.certDir,
+		ACMEEmail:       svc.acmeEmail,
+		ProbeClusterIP:  svc.probeClusterIP,
+		NetworkLabelKey: svc.networkLabelKey,
+		NetworkLabelVal: "pod",
+		MemoryRequest:   svc.memoryRequest,
+		MemoryLimit:     svc.memoryLimit,
+		GoMemoryLimit:   svc.goMemoryLimit,
+		CPURequest:      svc.cpuRequest,
+		HealthPath:      svc.healthPath,
+		ReadinessPeriod: svc.readinessPeriod,
+	}
+	if out.PodNetwork {
+		out.Replicas = 2
+		out.ListenHTTP = ":8080"
+		out.ListenTLS = ":8443"
+		out.DiagAddr = ":9090"
+		out.HTTPPort = 8080
+		out.HTTPSPort = 8443
+	}
+	return out
+}
 
 // seedRegistryManifest is substrate applied by `up` before any component:
 // the in-cluster registry that workspace artifacts are pushed through.

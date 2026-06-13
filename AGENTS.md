@@ -7,6 +7,7 @@ Objectives for this iteration:
 We're maximizing for safe operations (disaster-recovery from wiped box + offsite backups as priority 1, behind ongoing security checks + hardening) and highly continuous rapidly delivered software to external vendors like NPM/PyPi/Crates.io and so on.
 After doing some financial calculation I also realize I need to make provisioning N workload nodes (rs4.metal.xlarge CPU: AMD 9554P, 64 Cores @ 3.1 GHz / RAM: 1.5 TB / Storage: 2 x 480 GB NVME + 4 x 8 TB NVME / NIC: 2 x 100 Gbps) a first class concept as well, otherwise we don't break even.
 
+Important context:
 - All dependencies version/commit pinned. Nothing during runtime, dev time, test time, or build time should require external non-version-pinned tooling, or shell out to binaries outside this repo or its build artifacts. All binaries are available under `guardian run`. E.g. `guardian run talosctl image k8s-bundle`
 - Dev tools: `aspect`
 - 1p configuration schemas in CUE, always. Read/Render-out YAML/JSON/TOML. Output must support all 3.
@@ -14,6 +15,8 @@ After doing some financial calculation I also realize I need to make provisionin
 - All operations must run unattended, no human-in-the-loop.
 - Invent nothing. Glue code over existing libraries and aping reference implementations of solutions to problems only. Always do the boring industry-standard thing. We are modeling our approach after the Zarf/UDS/Defense Unicorns "air-gapped seed" pattern, but we know the machine we're deploying to and we control more layers.
 - Code is not the truth for how the system works. Traces are.
+- Use SQLC.
+- Do not provide time estimates
 
 Constraints:
 - Installing dependencies when building from source is OK. Doing so on a traffic-serving host (prod/gamma/dev et. al) is not. Traffic-serving hosts use a commit-pinned release artifact of this repo.
@@ -41,13 +44,18 @@ use fn 1):
 | gamma | gd-gamma-w0 | 45.250.254.119 | sv_nPRbajqEB5koM | gamma.aisucks.app | cluster `guardian-gamma`; release gate (canary submissions); monthly billing |
 | prod | gd-prod-w0 | 67.213.115.113 | sv_BDXM5E4QLNrpk | aisucks.app | cluster `guardian-prod`; reserved/yearly billing (support ticket open to convert) |
 
-NOT ours to touch yet: `vs-gamma-w0` (206.223.228.87) and `vs-prod-w0`
-(206.223.228.99) run live Verself production under Nomad (ClickHouse,
-TigerBeetle, Temporal, 384GB of data on gamma). Never wipe, reinstall, or
-reconfigure them without an explicit fresh decision from the operator.
-2026-06-12: Verself has zero customers and subsumption is the ratified
-direction (Compute doctrine below) — but each box's wipe still waits on the
-explicit per-box operator go.
+Verself boxes (run live Verself under Nomad — ClickHouse, TigerBeetle,
+Temporal): subsumption is the ratified direction (Compute doctrine below);
+per-box status differs:
+
+- `vs-gamma-w0` (206.223.228.87, sv_8mop5gZo8Njxv): **RELEASED for takeover**
+  — explicit operator go 2026-06-12, including the data: the 384GB Verself
+  dataset on it is discardable (operator confirmed Verself keeps its own
+  backups in a separate R2 bucket). Wipe and enroll freely; converge its
+  boot chain to the gd-style ipxe OS-of-record when enrolling.
+- `vs-prod-w0` (206.223.228.99, sv_EvjLaBxRQNoqy): NOT ours to touch yet.
+  Stays Verself prod until a separate explicit go. Never wipe, reinstall, or
+  reconfigure it.
 
 Compute doctrine (ratified 2026-06-12): all Verself compute is subsumed — the
 whole fleet is guardian fleet, one pool. Spare dev/staging capacity IS workload

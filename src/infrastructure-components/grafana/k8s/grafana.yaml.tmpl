@@ -116,35 +116,34 @@ data:
         {
           "id": 3,
           "type": "timeseries",
-          "title": "p95 latency by handler",
+          "title": "hello request rate by code",
           "datasource": {"type": "prometheus", "uid": "victoriametrics"},
           "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
-          "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+          "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
           "targets": [
-            {"refId": "A", "expr": "histogram_quantile(0.95, sum(rate(aisucks_http_request_duration_seconds_bucket[5m])) by (le, handler))", "legendFormat": "{{handler}}"}
+            {"refId": "A", "expr": "sum(rate(aisucks_http_requests_total{handler=\"GET /api/v1/hello\"}[5m])) by (code)", "legendFormat": "{{code}}"}
           ]
         },
         {
           "id": 4,
           "type": "timeseries",
-          "title": "report funnel by outcome",
+          "title": "in-flight public requests",
           "datasource": {"type": "prometheus", "uid": "victoriametrics"},
           "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
-          "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
           "targets": [
-            {"refId": "A", "expr": "sum(rate(aisucks_reports_total[15m])) by (outcome)", "legendFormat": "{{outcome}}"}
+            {"refId": "A", "expr": "aisucks_http_inflight_requests", "legendFormat": "{{instance}}"}
           ]
         },
         {
           "id": 5,
           "type": "timeseries",
-          "title": "upstream fetch: failure share and p95",
+          "title": "build info scrape presence",
           "datasource": {"type": "prometheus", "uid": "victoriametrics"},
           "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
           "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
           "targets": [
-            {"refId": "A", "expr": "sum(rate(aisucks_fetch_total{reason!=\"ok\"}[15m])) / sum(rate(aisucks_fetch_total[15m]))", "legendFormat": "failure share"},
-            {"refId": "B", "expr": "histogram_quantile(0.95, sum(rate(aisucks_fetch_duration_seconds_bucket[15m])) by (le))", "legendFormat": "p95 seconds"}
+            {"refId": "A", "expr": "max(aisucks_build_info) by (version)", "legendFormat": "{{version}}"}
           ]
         },
         {

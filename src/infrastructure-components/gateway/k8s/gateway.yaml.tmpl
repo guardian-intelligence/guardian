@@ -1,0 +1,108 @@
+# Edge gateway: SNI routing on host :80/:443 via the cilium-envoy DaemonSet
+# (docs/architecture/gateway.md). Manifest-only — no image; guardian renders
+# and applies these objects when site.yaml sets gateway.enabled, and applying
+# the Gateway IS the per-site conversion (Envoy binds the host ports). The
+# Gateway lives in its own namespace: the listener is a platform resource
+# decoupled from app lifecycle; apps attach routes in their own namespaces
+# (same-namespace backendRefs, so no ReferenceGrant), which is why this
+# component applies LAST — every route's namespace must already exist.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gateway
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: edge
+  namespace: gateway
+spec:
+  gatewayClassName: cilium
+  listeners:
+    # TLS passthrough: Envoy never decrypts — services keep in-process
+    # certmagic and their own key custody, and TLS-ALPN-01 issuance rides
+    # through natively. No-SNI and unmatched-SNI connections drop at the
+    # edge by design (raw-IP curls need
+    # curl --resolve <host>:443:<node IP> https://<host>/...). No listener
+    # hostname — each TLSRoute declares its own SNI hostname(s).
+    - name: tls
+      port: 443
+      protocol: TLS
+      tls:
+        mode: Passthrough
+      allowedRoutes:
+        namespaces: { from: All }
+    # :80 — ACME HTTP-01 + healthz + the HTTPS redirect, all implemented by
+    # the backend itself; this listener only forwards.
+    - name: http
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces: { from: All }
+{{- if .Site.Aisucks.Domain}}
+---
+# One TLSRoute per SNI hostname. v1alpha2 is the pin of record: Cilium 1.19
+# consumes TLSRoute at v1alpha2 only (gateway-api-crds-inline.yaml header —
+# do NOT bump to v1 outside a Cilium upgrade).
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: TLSRoute
+metadata:
+  name: aisucks
+  namespace: aisucks
+spec:
+  parentRefs:
+    - name: edge
+      namespace: gateway
+      sectionName: tls
+  hostnames:
+    - "{{.Site.Aisucks.Domain}}"
+  rules:
+    - backendRefs:
+        - name: aisucks
+          port: 443
+{{- end}}
+---
+# No `hostnames`: :80 must answer raw-IP Host headers too — the gatus
+# no-domain fallback probes http://<node IP>/healthz, and ACME HTTP-01 /
+# operator curls must not depend on Host. The app's :80 mux already does
+# acme-challenge precedence, /healthz, /livez, and the redirect. Do NOT add
+# hostnames here without revisiting the gatus raw-IP branch
+# (gatus.yaml.tmpl's $base).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: aisucks-http
+  namespace: aisucks
+spec:
+  parentRefs:
+    - name: edge
+      namespace: gateway
+      sectionName: http
+  rules:
+    - backendRefs:
+        - name: aisucks
+          port: 80
+{{- if .Site.Status.Domains}}
+---
+# Status hostnames -> the status Service (the backendRef the status manifest
+# declares; src/status/k8s/status.yaml.tmpl). Passthrough like aisucks:
+# certmagic in the status pod keeps key custody, issuance via TLS-ALPN-01.
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: TLSRoute
+metadata:
+  name: status
+  namespace: status
+spec:
+  parentRefs:
+    - name: edge
+      namespace: gateway
+      sectionName: tls
+  hostnames:
+{{- range .Site.Status.Domains}}
+    - "{{.}}"
+{{- end}}
+  rules:
+    - backendRefs:
+        - name: status
+          port: 443
+{{- end}}

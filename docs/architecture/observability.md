@@ -2,10 +2,12 @@
 
 The app-side floor and the hot plane are live fleet-wide and page-proven by
 drill (induced crash-loop and induced cross-site outage both paged). The
-forensics tier (ClickHouse + logs/traces pipelines) is authored
-(`src/infrastructure-components/clickhouse/`, held out of push.go) and
-deploys in the ledger release (roadmap M5). This doc is the core primitive
-set; it changes by amendment.
+forensics tier's first slice is deployed (amended 2026-06-12): per-site
+ClickHouse (`src/infrastructure-components/clickhouse/`, in push.go behind
+the site-gated `clickhouse.enabled` flag — ON dev+gamma, OFF prod until its
+Secret exists) with container logs + k8s Events flowing
+(docs/runbooks/ledger.md); OTLP/app-SDK traces and R2 backups remain M5.
+This doc is the core primitive set; it changes by amendment.
 
 ## Values that constrain the design
 

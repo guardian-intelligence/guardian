@@ -1,5 +1,14 @@
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
 
+# Manifest template as test data: the CLI's render test pins the
+# pod-network hostAliases branch (the self-probe vantage device — see
+# render_gatus_test.go).
+filegroup(
+    name = "manifest",
+    srcs = ["k8s/gatus.yaml.tmpl"],
+    visibility = ["//src/guardian-cli:__subpackages__"],
+)
+
 # Re-export the pulled gatus layout under a stable in-repo runfiles path,
 # same pattern as postgres: a base-only oci_image copies the single-manifest
 # layout verbatim.

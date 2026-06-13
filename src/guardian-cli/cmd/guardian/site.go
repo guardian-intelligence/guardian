@@ -48,11 +48,6 @@ type Site struct {
 		// Domain switches the service to ACME HTTPS; empty serves plain
 		// HTTP on :80 (dev, or any site before DNS exists).
 		Domain string `yaml:"domain"`
-		// Ingest "off" serves the page with the form closed — the skeleton
-		// release mode. Any other value (including empty) accepts reports.
-		Ingest string `yaml:"ingest"`
-		// Backup enables the nightly pg_dump CronJob (prod only).
-		Backup bool `yaml:"backup"`
 		// NtfyTopic routes this site's Gatus alerts to ntfy.sh/<topic>;
 		// empty renders Gatus without alerting. Unguessable, but checked
 		// in — rotate before the repo goes public.
@@ -60,7 +55,53 @@ type Site struct {
 		// Watch adds cross-site probe URLs to this site's Gatus, so the
 		// watchers watch each other once multiple sites exist.
 		Watch []string `yaml:"watch"`
+		// WatchPages adds cross-site page probes (status + charter marker).
+		// Watch covers /healthz only — a site whose DB is healthy while its
+		// page is broken would otherwise be seen by no one but itself.
+		WatchPages []string `yaml:"watchPages"`
+		// PodNetwork moves aisucks off hostNetwork behind the Gateway: pod
+		// network, replicas 2, a Service the routes target. Requires
+		// gateway.enabled — without Envoy on :443 nothing would answer.
+		PodNetwork bool `yaml:"podNetwork"`
 	} `yaml:"aisucks"`
+	// Gateway holds the per-site values for the edge-gateway component
+	// (src/infrastructure-components/gateway).
+	Gateway struct {
+		// Enabled converges the edge Gateway + routes onto this site,
+		// putting Envoy on host :80/:443. The per-site conversion ratchet:
+		// dev pilots, gamma repeats, prod converts last
+		// (docs/architecture/gateway.md Phase 5).
+		Enabled bool `yaml:"enabled"`
+	} `yaml:"gateway"`
+	// Clickhouse holds the per-site values for the clickhouse component
+	// (src/infrastructure-components/clickhouse) — the observability ledger.
+	Clickhouse struct {
+		// Enabled converges the per-site ClickHouse ledger AND tees the
+		// otel-collector's logs pipeline (filelog + k8sobjects Events) into
+		// it; off, the collector renders byte-identical to the metrics-only
+		// spine. The per-site ratchet: dev pilots, gamma repeats, prod last
+		// — and prod MUST have the clickhouse-admin Secret created before
+		// this flips (docs/runbooks/ledger.md): the clickhouse pod's
+		// secretKeyRef is required, and converging without the Secret
+		// parks the pod in CreateContainerConfigError, which pages.
+		Enabled bool `yaml:"enabled"`
+	} `yaml:"clickhouse"`
+	// Status holds the per-site values for the status-page component
+	// (src/status).
+	Status struct {
+		// Domains the status pod's certmagic manages (TLS-ALPN-01 through
+		// the Gateway's TLS passthrough). An empty list disables the
+		// component: the manifest template guards on it and renders
+		// nothing, so the site deploys no status pod (prod, until the
+		// Gateway round exposes a status hostname there).
+		Domains []string `yaml:"domains"`
+		// Monitor adds the status hostnames to this site's blackbox probe
+		// targets. Default OFF, and it MUST stay off until the hostnames
+		// resolve and serve: vmalert's SiteProbeFailed pages on
+		// probe_success == 0 sustained 2m, so flipping this pre-DNS is a
+		// guaranteed page.
+		Monitor bool `yaml:"monitor"`
+	} `yaml:"status"`
 }
 
 // resolveSite resolves the site from an explicit positional arg, else the
@@ -118,6 +159,16 @@ func loadSite(path string) (*Site, error) {
 	}
 	if len(s.Talos.Patches) == 0 {
 		return nil, fmt.Errorf("site %s: talos.patches is required", resolved)
+	}
+	// Pod-network aisucks serves only through the edge Gateway's routes;
+	// without gateway.enabled nothing answers on host :80/:443.
+	if s.Aisucks.PodNetwork && !s.Gateway.Enabled {
+		return nil, fmt.Errorf("site %s: aisucks.podNetwork requires gateway.enabled", resolved)
+	}
+	// Monitoring status hostnames with none declared would render a
+	// blackbox job with an empty target list.
+	if s.Status.Monitor && len(s.Status.Domains) == 0 {
+		return nil, fmt.Errorf("site %s: status.monitor requires status.domains", resolved)
 	}
 	return &s, nil
 }

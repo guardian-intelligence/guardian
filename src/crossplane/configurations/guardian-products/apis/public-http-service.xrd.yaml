@@ -1,0 +1,58 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: publichttpservices.platform.guardian.dev
+spec:
+  group: platform.guardian.dev
+  names:
+    kind: PublicHttpService
+    plural: publichttpservices
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - app
+                - domain
+                - image
+              properties:
+                app:
+                  type: string
+                domain:
+                  type: string
+                image:
+                  type: string
+                  description: Digest-pinned OCI image reference.
+                podNetwork:
+                  type: boolean
+                  default: true
+                certDir:
+                  type: string
+                  default: /var/lib/guardian-certs
+                observability:
+                  type: object
+                  properties:
+                    profile:
+                      type: string
+                      enum: [standard]
+                      default: standard
+                    metricsPort:
+                      type: integer
+                      default: 9090
+                    healthPath:
+                      type: string
+                      default: /healthz
+            status:
+              type: object
+              properties:
+                url:
+                  type: string
+                image:
+                  type: string

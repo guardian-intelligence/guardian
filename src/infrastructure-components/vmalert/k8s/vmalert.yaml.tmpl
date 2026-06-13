@@ -138,31 +138,7 @@ data:
             labels:
               severity: page
             annotations:
-              summary: 'App 5xx outside healthz: {{ $value }} errors/s sustained for 5m'
-
-          # The dead-intake class. The v6 soft-404 incident parked bad rows
-          # for a day before a human noticed; an upstream challenge or block
-          # would silently kill intake the same way. Two arms (metrics.md
-          # D4): failure share > 50%, or fetch p95 > 10s — a slowdown that
-          # stays under the 20s client timeout is reason="ok" and only the
-          # p95 arm sees it (the grafana fetch panel plots this exact p95).
-          # Fetches happen only on user submissions — no canary fetch
-          # exists — so at zero traffic the share is 0/0 over the
-          # pre-created counters (NaN, filtered by the comparison) and the
-          # rule is blind until someone submits; that gap is accepted until
-          # a periodic canary fetch ships. The > 4/900 floor (more than 4
-          # fetches in the window) keeps one user's single dead link from
-          # paging as a 100% share.
-          - alert: UpstreamFetchDegraded
-            expr: >-
-              ((sum(rate(aisucks_fetch_total{reason!="ok"}[15m])) / sum(rate(aisucks_fetch_total[15m]))) > 0.5
-              and sum(rate(aisucks_fetch_total[15m])) > 4/900)
-              or histogram_quantile(0.95, sum(rate(aisucks_fetch_duration_seconds_bucket[15m])) by (le)) > 10
-            for: 15m
-            labels:
-              severity: page
-            annotations:
-              summary: 'Upstream fetch degraded ({{ $value }}): failure share > 50% or p95 > 10s over 15m; chatgpt.com intake is degraded'`}}
+              summary: 'App 5xx outside healthz: {{ $value }} errors/s sustained for 5m'`}}
 ---
 apiVersion: apps/v1
 kind: Deployment
