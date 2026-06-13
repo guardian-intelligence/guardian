@@ -1,9 +1,8 @@
 # Release architecture
 
-Status: design ratified 2026-06-12 (operator). Supersedes the self-hosted
-runner POC (`.github/workflows/release.yml` + `docs/runbooks/release-runner.md`),
-which keeps releases flowing until this lands, then retires with its standing
-credentials. Companions: `docs/roadmap.md` (M6/M7),
+Status: design ratified 2026-06-12 (operator). The workflow-owned release POC
+has been removed; release decisions move into repo-owned Go binaries invoked
+through `aspect`. Companions: `docs/roadmap.md` (M6/M7),
 `docs/runbooks/aisucks-release.md` (the gate spec the judge automates). This
 doc changes by amendment.
 
@@ -11,12 +10,12 @@ doc changes by amendment.
 
 Build authority and deploy authority never meet:
 
-- **GitHub builds.** CI on the public mirror builds hermetically (Bazel),
-  pushes images + a CUE release manifest to ghcr.io by digest, signs
-  provenance with cosign **keyless** (GitHub OIDC; verifiers pin
-  repo + workflow + ref), and advances the **edge** channel. GitHub holds a
-  ghcr write token and nothing else — no cluster credential exists there,
-  not "scoped", none.
+- **A hosted builder builds.** CI on the public mirror builds hermetically
+  (Bazel), pushes images + a CUE release manifest by digest, signs provenance
+  with cosign **keyless** or a future Transit-backed builder identity, and
+  advances the **edge** channel. The hosted builder holds artifact-publisher
+  authority and nothing else — no cluster credential exists there, not
+  "scoped", none.
 - **The fleet deploys.** Each cluster runs Flux (source-controller +
   kustomize-controller only) pulling its channel: dev follows **edge**
   (continuous — dev tracking edge IS the "every site has a dev version"
@@ -127,16 +126,13 @@ VictoriaMetrics queries against the M2 recording rules.
 
 ## Sequencing
 
-1. **CI lane**: `oci_push` targets, CUE manifest, keyless signing, edge
-   pointer. First bridge landed for aisucks:
-   `.github/workflows/public-release.yml` publishes the fleet-gated
-   `//src/products/aisucks/services/api:publish_ghcr` image to GHCR by
-   digest, cosign-signs it keyless, and attaches SLSA/in-toto provenance.
-   The npm SDK uses `.github/workflows/npm-sdk-release.yml`, which delegates
-   the publish/no-op decision to `scripts/release/npm-aisucks-sdk.sh` and
-   `aspect release npm-sdk` instead of GitHub Actions path filters. VERIFY:
-   `cosign verify` of a real release from a clean machine (pulls part of
-   M7's exit criteria forward).
+1. **Release target lane**: repo-owned Go release tooling normalizes release
+   subjects, runs `oci_push` targets, emits a CUE/JSON release manifest, signs
+   provenance, and advances edge pointers. The npm SDK has the first thin
+   `aspect release npm-sdk` surface: publish/no-op logic lives in
+   `scripts/release/npm-aisucks-sdk.sh`, not in GitHub Actions path filters.
+   VERIFY: `cosign verify` of a real release from a clean machine (pulls part
+   of M7's exit criteria forward).
 2. **Flux on dev** following edge; the template→kustomize conversion lands
    here. VERIFY: a merge reaches dev converged in minutes, hands-off.
 3. **Judge, gate role on gamma.** Prerequisite: bao Transit init on gamma

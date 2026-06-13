@@ -1,10 +1,12 @@
 # Public artifact release
 
-This is the public vending lane that runs after the fleet release gate.
-`.github/workflows/release.yml` still deploys gamma/prod on the self-hosted
-runner and cuts `aisucks/v<N>` only after prod is green. The tag push triggers
-`.github/workflows/public-release.yml` on a GitHub-hosted runner, which holds
-no cluster credentials.
+Status: target runbook. The old workflow-owned public release bridge has been
+removed. Public vending should be reintroduced as repo-owned Go release tooling
+executed through `aspect`, with any GitHub YAML reduced to an executor shim.
+
+This lane runs after the fleet release gate. It should publish immutable
+artifacts, signatures, attestations, and release metadata for selected release
+targets. The release tool owns the target tuple and all publish/no-op logic.
 
 ## What Ships
 
@@ -13,7 +15,7 @@ no cluster credentials.
 - Cosign keyless signature over the digest
 - Cosign in-toto/SLSA provenance attestation over the digest
 
-The OCI digest still comes from `bazelisk build //:build`; the public workflow
+The OCI digest still comes from `bazelisk build //:build`; the release tool
 pushes the already-built layout with:
 
 ```sh
@@ -22,18 +24,19 @@ bazelisk run //src/products/aisucks/services/api:publish_ghcr -- --tag v<N>
 
 `rules_oci` pushes the image by digest first, then applies tags.
 
-## Required Repository Setup
+## Required Setup
 
-GitHub:
+Executor:
 
-- `public-release.yml` must stay on a GitHub-hosted runner. Cosign keyless
-  signing depends on GitHub OIDC.
-- The workflow needs `contents: read`, `packages: write`, and
-  `id-token: write`.
+- Any hosted executor used for cosign keyless signing needs GitHub OIDC
+  permissions or an equivalent configured identity provider.
+- Workflow files must not encode release matrices, publisher fan-out, signing,
+  attestation, verification, or no-op decisions. Those belong in the release
+  binary invoked by `aspect`.
 
 GHCR:
 
-- The workflow uses `GITHUB_TOKEN` to push `ghcr.io/guardian-intelligence/aisucks`.
+- The release tool needs authority to push `ghcr.io/guardian-intelligence/aisucks`.
 - The package should be made public in the GitHub Packages UI after the first
   publish if GitHub defaults it to private.
 
@@ -42,18 +45,20 @@ The npm SDK release lane is intentionally separate and package-scoped. See
 
 ## Verify OCI Signature
 
-Use the digest printed by the workflow:
+Use the digest printed by the release tool:
 
 ```sh
 IMAGE='ghcr.io/guardian-intelligence/aisucks@sha256:<digest>'
 
 cosign verify "$IMAGE" \
-  --certificate-identity-regexp '^https://github.com/guardian-intelligence/guardian/.github/workflows/public-release.yml@refs/tags/aisucks/v[0-9]+$' \
+  --certificate-identity-regexp '<expected release builder identity>' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 ```
 
 Expected: cosign reports the certificate identity checks and emits the verified
-signature payload.
+signature payload. Historical bridge releases used the deleted public release
+workflow identity; future releases should pin the replacement release-builder
+identity recorded in provenance.
 
 ## Verify OCI Provenance Attestation
 
@@ -62,7 +67,7 @@ IMAGE='ghcr.io/guardian-intelligence/aisucks@sha256:<digest>'
 
 cosign verify-attestation "$IMAGE" \
   --type slsaprovenance \
-  --certificate-identity-regexp '^https://github.com/guardian-intelligence/guardian/.github/workflows/public-release.yml@refs/tags/aisucks/v[0-9]+$' \
+  --certificate-identity-regexp '<expected release builder identity>' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
   | jq -r '.payload' \
   | base64 -d \
@@ -76,15 +81,15 @@ Expected predicate facts:
   `https://github.com/guardian-intelligence/guardian`.
 - `predicate.invocation.parameters.bazelTarget` is
   `//src/products/aisucks/services/api:publish_ghcr`.
-- `predicate.builder.id` names `public-release.yml` at the release
-  tag ref.
+- `predicate.builder.id` names the repo-owned release builder and exact
+  source ref.
 
 ## Later Fleet Admission
 
 Do not enforce this in-cluster yet. The eventual admission rule is:
 
 - Image digest is the exact digest selected by the release pointer.
-- Cosign certificate identity matches `public-release.yml` on a release tag.
+- Cosign certificate identity matches the approved release-builder identity.
 - OIDC issuer is `https://token.actions.githubusercontent.com`.
 - SLSA provenance subject digest matches the image digest.
 - A fleet-signed `gate-pass` attestation exists for that digest.
