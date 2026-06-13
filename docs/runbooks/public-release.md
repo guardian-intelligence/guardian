@@ -106,11 +106,11 @@ cosign verify-attestation "$IMAGE" \
 Expected predicate facts:
 
 - `predicateType` is SLSA provenance.
-- `predicate.buildDefinition.externalParameters.repository` is
+- `predicate.invocation.parameters.repository` is
   `https://github.com/guardian-intelligence/guardian`.
-- `predicate.buildDefinition.externalParameters.bazelTarget` is
+- `predicate.invocation.parameters.bazelTarget` is
   `//src/products/aisucks/services/api:publish_ghcr`.
-- `predicate.runDetails.builder.id` names `public-release.yml` at the release
+- `predicate.builder.id` names `public-release.yml` at the release
   tag ref.
 
 ## Verify npm Package

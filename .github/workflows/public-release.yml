@@ -102,42 +102,49 @@ jobs:
       - name: Attach SLSA provenance
         run: |
           set -euo pipefail
-          image_sha="${IMAGE_DIGEST#sha256:}"
           cat > slsa-provenance-predicate.json <<JSON
           {
-            "buildDefinition": {
-              "buildType": "https://github.com/guardian-intelligence/guardian/.github/workflows/public-release.yml",
-              "externalParameters": {
+            "builder": {
+              "id": "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/public-release.yml@${GITHUB_REF}"
+            },
+            "buildType": "https://github.com/guardian-intelligence/guardian/bazel-oci-push@v1",
+            "invocation": {
+              "configSource": {
+                "uri": "git+https://github.com/${GITHUB_REPOSITORY}@${GITHUB_REF}",
+                "digest": {
+                  "sha1": "${GITHUB_SHA}"
+                },
+                "entryPoint": ".github/workflows/public-release.yml:${OCI_PUBLISH_TARGET}"
+              },
+              "parameters": {
                 "repository": "https://github.com/${GITHUB_REPOSITORY}",
                 "ref": "${GITHUB_REF}",
                 "sha": "${GITHUB_SHA}",
                 "workflow": "${GITHUB_WORKFLOW_REF}",
                 "bazelTarget": "${OCI_PUBLISH_TARGET}"
               },
-              "internalParameters": {},
-              "resolvedDependencies": [
-                {
-                  "uri": "git+https://github.com/${GITHUB_REPOSITORY}@${GITHUB_REF}",
-                  "digest": {
-                    "sha1": "${GITHUB_SHA}"
-                  }
-                },
-                {
-                  "uri": "${OCI_REPOSITORY}",
-                  "digest": {
-                    "sha256": "${image_sha}"
-                  }
-                }
-              ]
-            },
-            "runDetails": {
-              "builder": {
-                "id": "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/public-release.yml@${GITHUB_REF}"
-              },
-              "metadata": {
-                "invocationId": "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}"
+              "environment": {
+                "githubRunId": "${GITHUB_RUN_ID}",
+                "githubRunAttempt": "${GITHUB_RUN_ATTEMPT}"
               }
-            }
+            },
+            "metadata": {
+              "buildInvocationId": "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}",
+              "completeness": {
+                "parameters": true,
+                "environment": true,
+                "materials": false
+              },
+              "reproducible": true
+            },
+            "materials": [
+              {
+                "uri": "git+https://github.com/${GITHUB_REPOSITORY}@${GITHUB_REF}",
+                "digest": {
+                  "sha1": "${GITHUB_SHA}"
+                }
+              }
+            ]
           }
           JSON
           cosign attest --yes --predicate slsa-provenance-predicate.json --type slsaprovenance "$IMAGE_REF"
