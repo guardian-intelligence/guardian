@@ -1,4 +1,4 @@
-#!/usr/bin/env tsx
+#!/usr/bin/env node
 import readChangesets from "@changesets/read";
 import { getPackages } from "@manypkg/get-packages";
 

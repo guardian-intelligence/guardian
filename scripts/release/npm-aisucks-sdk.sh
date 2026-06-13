@@ -73,7 +73,9 @@ cleanup() {
 trap cleanup EXIT
 
 bazelisk build //src/viteplus-monorepo:workspace_build
-(cd "$workspace_dir" && ./node_modules/.bin/tsx scripts/check-release-hygiene.ts --package "$package_name")
+pinned_node="$repo_root/bazel-bin/src/viteplus-monorepo/node"
+test -x "$pinned_node"
+(cd "$workspace_dir" && "$pinned_node" scripts/check-release-hygiene.ts --package "$package_name")
 test -f "$package_dir/dist/index.js"
 test -f "$package_dir/dist/index.d.ts"
 
