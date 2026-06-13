@@ -7,31 +7,31 @@ or recorded result that a clean machine can verify.
 
 ## Current Focus
 
-The next implementation PR should deliver the **Contract slice**:
+The Contract slice is delivered by the Connect/RPC Health contract work:
 
 - Connect/RPC-first `AisucksService.Health`.
 - Operation policy attached to the operation contract.
 - Reproducible Go and TypeScript generated surfaces from repo tooling.
 - SDK source surface exposes only `health()`.
 
-This slice does not publish, deploy, or gate. It creates the contract and
-generation foundation the runtime, release, synthetic, and Crossplane slices can
-consume.
+The next implementation PR should deliver the **Runtime slice**: serve Connect
+Health publicly while keeping `/healthz` and `/livez` as raw operational
+endpoints.
 
 ## Todo
 
 ### Contract
 
-- [ ] `aisucks.proto` defines only `AisucksService.Health`.
-- [ ] Operation policy is attached or generated:
-  - [ ] auth requirement
-  - [ ] audit level
-  - [ ] risk tier
-  - [ ] request body limit
-  - [ ] rate limit
-  - [ ] idempotency requirement
-- [ ] Generated Go server/client bindings are reproducible from repo tooling.
-- [ ] Generated TypeScript SDK surface exposes only `health()`.
+- [x] `aisucks.proto` defines only `AisucksService.Health`.
+- [x] Operation policy is attached or generated:
+  - [x] auth requirement
+  - [x] audit level
+  - [x] risk tier
+  - [x] request body limit
+  - [x] rate limit
+  - [x] idempotency requirement
+- [x] Generated Go server/client bindings are reproducible from repo tooling.
+- [x] Generated TypeScript SDK surface exposes only `health()`.
 
 ### Service Artifact
 
@@ -232,9 +232,8 @@ truth before runtime, release, and Crossplane layers depend on it.
      `src/viteplus-monorepo` package catalog.
    - Generate or wrap the generated client so the public SDK exposes only
      `health()`.
-   - Remove the handwritten `hello()` public SDK API in this slice. The old
-     service endpoint can be removed separately during the runtime slice if it
-     still exists.
+   - Remove the handwritten legacy public SDK API and old service endpoint in
+     this slice.
 
 6. Add deterministic build checks.
    - Add Bazel targets that fail if generated outputs drift from the contract.

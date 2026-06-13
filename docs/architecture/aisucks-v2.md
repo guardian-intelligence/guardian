@@ -3,8 +3,9 @@
 Status: scratch-rewrite target, 2026-06-13.
 
 `aisucks` is the first Guardian product surface to move behind a platform API.
-The first slice is intentionally tiny: a charter page, `/healthz`, `/livez`,
-`/api/v1/hello`, and an npm SDK that calls the hello endpoint.
+The current runtime surface is intentionally tiny: a charter page, `/healthz`,
+and `/livez`. The public SDK contract is moving to Connect/RPC Health before
+the runtime exposes product writes.
 
 ## Platform Contract
 
@@ -91,11 +92,12 @@ runtime and its databases.
 
 ```text
 src/products/aisucks/
+  api/                    # Protobuf contract and operation policy metadata
   web/                    # TanStack source for the page
   services/api/           # Go API, OCI image
 
 src/viteplus-monorepo/packages/aisucks-sdk/
-  src/index.ts            # npm SDK
+  src/index.ts            # npm SDK wrapper over generated Connect client
 
 src/platform/public-http-service/
   k8s/public-http-service.yaml.tmpl

@@ -76,7 +76,6 @@ The release-runbook gate battery, plus the Cilium-specific checks:
 H=https://$DOMAIN
 curl -fsS -o /dev/null -w 'healthz %{http_code} in %{time_total}s\n' $H/healthz   # 200
 curl -fsS $H/ | grep -q 'never be sold' && echo page ok
-curl -fsS $H/api/v1/hello | grep -q 'hello from aisucks' && echo hello ok
 kubectl -n kube-system exec ds/cilium -c cilium-agent -- cilium-dbg status --brief  # OK
 kubectl -n kube-system exec ds/cilium -c cilium-agent -- cilium-dbg status --verbose | grep 'Socket LB'  # Enabled
 for p in 9965 9964 4244 4240; do timeout 2 bash -c "</dev/tcp/$IP/$p" 2>/dev/null && echo "$p OPEN (BAD)" || echo "$p blocked"; done

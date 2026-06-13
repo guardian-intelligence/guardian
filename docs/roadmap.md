@@ -113,8 +113,8 @@ over 10m, queried from VM), Transit-signs the gate-pass, advances stable;
 on prod it admits (provenance ∧ gate-pass ∧ ¬tainted ∧ budget), watches
 15m post-promote, and rolls back by pointer move — fail-open on missing
 telemetry (operator amendment). The self-hosted runner POC retires. The
-hello API probe becomes the first release-judge synthetic and later expands
-to product-write drills once the database/verifier slice exists;
+Connect Health probe becomes the first release-judge synthetic and later
+expands to product-write drills once the database/verifier slice exists;
 budget gate lands (M2's error budget exhausted → feature releases freeze,
 reliability fixes only).
 VERIFY: a deliberately broken release (failing synthetic) is refused at
@@ -148,14 +148,14 @@ clean-machine verification of a real public digest.
 
 ## M8 — the paved-road proof (capstone)
 
-Make "perfect hello world" literal: add `src/hello/` (a trivial service)
-through the conventions — Smithy contract, component entry, manifest. It
+Make "perfect service slice" literal: add a trivial service through the
+conventions — Protobuf/Connect contract, component entry, manifest. It
 must inherit scrape, RED dashboard, SLO rows, deploy markers, gated
 release, rollback, status presence, signed provenance, with near-zero
-bespoke wiring. The diff IS the measure: if hello-world needs more than a
+bespoke wiring. The diff IS the measure: if the service needs more than a
 contract + a manifest + a components entry, the road isn't paved — fix the
 platform, not the tenant.
-VERIFY: hello-world ships through the full pipeline to prod and appears
+VERIFY: the service ships through the full pipeline to prod and appears
 everywhere a service should, then is removed as cleanly (yank drill).
 
 ## Standing items outside the milestones

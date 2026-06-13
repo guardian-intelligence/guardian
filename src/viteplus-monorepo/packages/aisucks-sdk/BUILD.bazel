@@ -15,3 +15,9 @@ filegroup(
     ]),
     visibility = ["//visibility:public"],
 )
+
+filegroup(
+    name = "generated_sources",
+    srcs = glob(["src/gen/**/*.ts"]),
+    visibility = ["//visibility:public"],
+)

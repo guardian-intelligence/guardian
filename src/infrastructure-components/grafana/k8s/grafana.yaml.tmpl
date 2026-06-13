@@ -116,12 +116,12 @@ data:
         {
           "id": 3,
           "type": "timeseries",
-          "title": "hello request rate by code",
+          "title": "healthz request rate by code",
           "datasource": {"type": "prometheus", "uid": "victoriametrics"},
           "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
           "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
           "targets": [
-            {"refId": "A", "expr": "sum(rate(aisucks_http_requests_total{handler=\"GET /api/v1/hello\"}[5m])) by (code)", "legendFormat": "{{code}}"}
+            {"refId": "A", "expr": "sum(rate(aisucks_http_requests_total{handler=\"GET /healthz\"}[5m])) by (code)", "legendFormat": "{{code}}"}
           ]
         },
         {

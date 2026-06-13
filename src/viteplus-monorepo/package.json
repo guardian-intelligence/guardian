@@ -18,6 +18,7 @@
     "ready": "vp check && vp test run && vp run -r typecheck && vp run -w typecheck:scripts && vp run -r build"
   },
   "devDependencies": {
+    "@bufbuild/protoc-gen-es": "catalog:",
     "@changesets/cli": "catalog:",
     "@types/node": "catalog:",
     "typescript": "catalog:",

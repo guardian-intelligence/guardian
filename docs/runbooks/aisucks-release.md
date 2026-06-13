@@ -70,7 +70,7 @@ git tag aisucks/v<N>
 ```
 
 Migrations discipline (checked at review, enforced by no one else):
-the hello-world skeleton has no product database. When product state returns,
+the current aisucks skeleton has no product database. When product state returns,
 schema changes must be additive-only — the previous binary must run against
 the new schema, or step 5 (rollback) is a lie.
 
@@ -95,7 +95,6 @@ curl -fsS -o /dev/null -w 'healthz %{http_code} in %{time_total}s\n' $H/healthz 
 # Match the charter-locked promise text (verbatim, changes only by charter
 # amendment) — never a marketing string a redesign can drop.
 curl -fsS $H/ | grep -q 'never be sold' && echo page ok                            # expect: page ok
-curl -fsS $H/api/v1/hello | grep -q 'hello from aisucks' && echo hello ok          # expect: hello ok
 ```
 
 Any failed expectation stops the release. Fix forward on dev; never ship a

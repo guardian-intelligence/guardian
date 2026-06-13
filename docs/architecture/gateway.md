@@ -218,8 +218,8 @@ vantage (which stayed green-on-truth throughout). This replaces the
 hairpin is dead, the alias is the mechanism.
 
 **Battery results (post-conversion, re-run post-wipe).** Release gate
-through Envoy: healthz 200 (0.05–0.20s), page marker present, hello API
-returns the expected payload. No-SNI
+through Envoy: healthz 200 (0.05–0.20s), page marker present, and the
+then-current API probe returned the expected payload. No-SNI
 connections drop with no certificate leaked; bogus SNI resets; matched SNI
 presents CN=dev.aisucks.app. :80 — raw-IP healthz 200 (hostname-less
 HTTPRoute), domain 308→https, stale ACME token 308 fallthrough. Scrape
@@ -257,7 +257,7 @@ listeners `Programmed=False/Pending` while the datapath fully serves
 acceptance must read GatewayClass Accepted + listener Accepted +
 attachedRoutes + the socket census — not Gateway Programmed.
 
-**Exit state (2026-06-13 00:03Z).** Gatus all green including the hello
+**Exit state (2026-06-13 00:03Z).** Gatus all green including the API
 probe; vmalert quiet except PodRestartStorm aging out on the two deleted
 crash-loop pods; both replicas scraped per-pod and receiving traffic;
 status.toml/.json/ + HTML serve over verified TLS. Gamma's conversion
