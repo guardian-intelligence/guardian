@@ -1,0 +1,6 @@
+alias(
+    name = "format",
+    actual = "//:buf_format",
+    tags = ["guardian-format"],
+    visibility = ["//visibility:public"],
+)

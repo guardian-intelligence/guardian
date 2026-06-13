@@ -1,7 +1,10 @@
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 
-import { AisucksService, type HealthResponse } from "./gen/guardian/products/aisucks/v1/aisucks_pb.js";
+import {
+  AisucksService,
+  type HealthResponse,
+} from "./gen/guardian/products/aisucks/v1/aisucks_pb.js";
 
 export type { HealthResponse };
 

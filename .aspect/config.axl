@@ -25,6 +25,10 @@ load(
     ".aspect/tasks/release.axl",
     release_sdk_oci = "sdk_oci",
 )
+load(
+    ".aspect/tasks/tidy.axl",
+    tidy = "tidy",
+)
 
 def config(ctx):
     # aspect bazel ...
@@ -38,3 +42,6 @@ def config(ctx):
 
     # aspect release ...
     ctx.tasks.add(release_sdk_oci)
+
+    # aspect tidy
+    ctx.tasks.add(tidy)

@@ -41,10 +41,10 @@ go_binary(
         "//src/infrastructure-components/kube-state-metrics:image",
         "//src/infrastructure-components/openbao:image",
         "//src/infrastructure-components/otel-collector:image",
-        "//src/platform/public-http-service:manifest",
-        "//src/products/aisucks/services/api:image",
         "//src/infrastructure-components/victoria-metrics:image",
         "//src/infrastructure-components/vmalert:image",
+        "//src/platform/public-http-service:manifest",
+        "//src/products/aisucks/services/api:image",
         "//src/status:image",
     ],
     embed = [":guardian_lib"],
@@ -66,7 +66,10 @@ go_test(
         "restore_test.go",
         "site_test.go",
     ],
-    data = glob(["testdata/**"], allow_empty = True) + [
+    data = glob(
+        ["testdata/**"],
+        allow_empty = True,
+    ) + [
         "//src/guardian-cli/tools/talosctl",
         "//src/infrastructure-components/cilium:talos-patches",
         "//src/infrastructure-components/clickhouse:manifest",

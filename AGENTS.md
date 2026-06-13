@@ -10,6 +10,7 @@ After doing some financial calculation I also realize I need to make provisionin
 Important context:
 - All dependencies version/commit pinned. Nothing during runtime, dev time, test time, or build time should require external non-version-pinned tooling, or shell out to binaries outside this repo or its build artifacts. All binaries are available under `guardian run`. E.g. `guardian run talosctl image k8s-bundle`
 - Dev tools: `aspect`
+- Run `aspect tidy` to format the codebase.
 - 1p configuration schemas in CUE, always. Read/Render-out YAML/JSON/TOML. Output must support all 3.
 - API IDL in Protobuf/Connect. Define IAM, audit, risk, request-size, rate
   limit, and idempotency metadata as explicit operation policy on the RPC
