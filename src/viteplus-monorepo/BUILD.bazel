@@ -44,7 +44,11 @@ filegroup(
         "pnpm-workspace.yaml",
         "//src/products/aisucks/web:package_manifest",
         "//src/viteplus-monorepo/packages/aisucks-sdk:package_manifest",
-    ] + glob(["patches/**/*"]),
+    ] + glob([
+        ".changeset/*.md",
+        "patches/**/*",
+        "scripts/**/*",
+    ], allow_empty = True),
 )
 
 filegroup(
@@ -60,7 +64,11 @@ filegroup(
         "vite.config.ts",
         "//src/products/aisucks/web:sources",
         "//src/viteplus-monorepo/packages/aisucks-sdk:sources",
-    ] + glob(["patches/**/*"]),
+    ] + glob([
+        ".changeset/*.md",
+        "patches/**/*",
+        "scripts/**/*",
+    ], allow_empty = True),
 )
 
 genrule(
@@ -102,10 +110,50 @@ printf 'viteplus install ok\\n' > "$$execroot/$@"
 )
 
 genrule(
+    name = "workspace_lint",
+    srcs = [
+        ":workspace_sources",
+        ":workspace_install",
+        ":vp_node",
+        ":node_modules/vite-plus",
+    ],
+    outs = ["workspace_lint.stamp"],
+    cmd = """
+set -euo pipefail
+execroot="$$(pwd)"
+node="$$execroot/$(location :vp_node)"
+vp=""
+for candidate in $(locations :node_modules/vite-plus); do
+  case "$$candidate" in
+    */node_modules/vite-plus)
+      candidate_abs="$$execroot/$$candidate"
+      if [ -x "$$candidate_abs/bin/vp" ]; then
+        vp="$$candidate_abs/bin/vp"
+      fi
+      ;;
+  esac
+done
+test -n "$$vp"
+export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
+export CI=true
+cd src/viteplus-monorepo
+"$$node" "$$vp" run -w lint
+printf 'viteplus lint ok\\n' > "$$execroot/$@"
+""",
+    local = True,
+    tags = [
+        "local",
+        "no-remote",
+        "no-sandbox",
+    ],
+)
+
+genrule(
     name = "workspace_build",
     srcs = [
         ":workspace_sources",
         ":workspace_install",
+        ":workspace_lint",
         ":vp_node",
         ":node_modules/vite-plus",
     ],

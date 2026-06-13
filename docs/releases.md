@@ -120,7 +120,7 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 
 ### Release Notes
 
-- [ ] Changesets produces package changelog for SDK changes.
+- [x] Changesets produces package changelog for SDK changes.
 - [ ] Release command extracts notes for the SDK release target.
 - [ ] Manifest links notes to the exact npm package/version.
 

@@ -29,6 +29,18 @@ package is releasable only after SDK-specific `.changeset/*.md` files have
 been applied by the version step; the release task refuses to hide pending SDK
 release intent behind a no-op.
 
+Package-owned static checks catch this before merge:
+
+```sh
+cd src/viteplus-monorepo
+vp run -w lint
+```
+
+This runs VitePlus linting plus the workspace release hygiene check. The
+top-level Bazel build also reaches it through
+`//src/viteplus-monorepo:workspace_lint`, so PR CI does not need to know
+Changesets semantics.
+
 ## Local probe
 
 From the repo root:

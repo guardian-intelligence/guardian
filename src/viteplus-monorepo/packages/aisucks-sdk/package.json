@@ -1,6 +1,6 @@
 {
   "name": "@guardian-intelligence/aisucks",
-  "version": "0.1.15",
+  "version": "0.2.0",
   "description": "Tiny SDK for the aisucks.app public API.",
   "type": "module",
   "sideEffects": false,

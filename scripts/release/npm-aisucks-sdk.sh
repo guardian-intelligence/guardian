@@ -45,7 +45,6 @@ done
 repo_root="$(git rev-parse --show-toplevel)"
 workspace_dir="$repo_root/src/viteplus-monorepo"
 package_dir="$workspace_dir/packages/aisucks-sdk"
-changeset_dir="$workspace_dir/.changeset"
 
 if ! command -v node >/dev/null 2>&1; then
   echo "node is required to read package.json" >&2
@@ -65,18 +64,7 @@ if [[ "$package_name" != "@guardian-intelligence/aisucks" ]]; then
   exit 1
 fi
 
-pending_changesets=()
-while IFS= read -r -d '' changeset_file; do
-  if grep -Eq '^[[:space:]]*["'\'']?@guardian-intelligence/aisucks["'\'']?:[[:space:]]*(patch|minor|major)[[:space:]]*$' "$changeset_file"; then
-    pending_changesets+=("$changeset_file")
-  fi
-done < <(find "$changeset_dir" -maxdepth 1 -type f -name '*.md' ! -name 'README.md' -print0)
-
-if ((${#pending_changesets[@]} > 0)); then
-  echo "unapplied SDK Changesets remain; run the Changesets version step before releasing $package_ref:" >&2
-  printf '  %s\n' "${pending_changesets[@]#$repo_root/}" >&2
-  exit 1
-fi
+(cd "$workspace_dir" && node scripts/check-release-hygiene.mjs --package "$package_name")
 
 view_err="$(mktemp)"
 pack_dir="$(mktemp -d)"
