@@ -1,0 +1,17 @@
+load("@rules_oci//oci:defs.bzl", "oci_image")
+
+# k8s/external-secrets.yaml.tmpl is rendered from the upstream
+# external-secrets-2.6.0 Helm chart asset
+# (sha256:f3659c0085a41e1be5c016cf186b80aac262ef249a91b1b770b941f18296ef3f)
+# with installCRDs=true, scopedRBAC=true, and scopedNamespace=observability.
+filegroup(
+    name = "manifest",
+    srcs = ["k8s/external-secrets.yaml.tmpl"],
+    visibility = ["//src/guardian-cli:__subpackages__"],
+)
+
+oci_image(
+    name = "image",
+    base = "@external_secrets",
+    visibility = ["//visibility:public"],
+)

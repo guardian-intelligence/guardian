@@ -7,6 +7,37 @@ metadata:
     pod-security.kubernetes.io/enforce: privileged
 ---
 apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao
+  namespace: openbao
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: openbao-tokenreview
+rules:
+  - apiGroups:
+      - authentication.k8s.io
+    resources:
+      - tokenreviews
+    verbs:
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: openbao-tokenreview
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: openbao-tokenreview
+subjects:
+  - kind: ServiceAccount
+    name: openbao
+    namespace: openbao
+---
+apiVersion: v1
 kind: Service
 metadata:
   name: openbao
@@ -37,6 +68,8 @@ spec:
       labels:
         app: openbao
     spec:
+      serviceAccountName: openbao
+      automountServiceAccountToken: true
       containers:
         - name: openbao
           image: {{ .Image }}

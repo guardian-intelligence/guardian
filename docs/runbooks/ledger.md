@@ -18,29 +18,18 @@ export KUBECONFIG=~/.local/state/guardian/guardian-<site>/kubeconfig
 export RUNFILES_DIR="$(bazelisk info bazel-bin 2>/dev/null)/src/guardian-cli/cmd/guardian/guardian_/guardian.runfiles"
 ```
 
-## 1. Pre-converge, once per site: create the admin Secret
+## 1. Converge
 
-The clickhouse pod's `secretKeyRef` is REQUIRED — converging a
-ledger-enabled site without this Secret parks the pod in
-CreateContainerConfigError, and the restart alerting pages. Same
-manual-secret philosophy as aisucks-db/OpenBao init. Never echo the value.
+`guardian up` owns the admin Secret path. On a fresh OpenBao it generates
+`kv/guardian/<site>/observability/clickhouse-admin`, installs External
+Secrets Operator, applies the projection, and waits for the Kubernetes
+`clickhouse-admin` Secret before applying ClickHouse. On a restored OpenBao
+the value must already exist in the restored snapshot; missing restored
+paths are a schema migration, not a hand-created Kubernetes Secret.
 
-```sh
-kubectl -n observability create secret generic clickhouse-admin \
-  --from-literal=password="$(openssl rand -base64 24)"
-```
-
-The `observability` Namespace is owned by the victoria-metrics manifest; on
-an already-converged site it exists. On a cold site, converge once first
-(step 2 — clickhouse will sit in CreateContainerConfigError), create the
-Secret, then `kubectl -n observability rollout restart deploy/clickhouse`.
-
-The otel-collector deliberately does NOT require the Secret (`optional:
-true` + a default-empty `${env:...:-}` in its config): the metrics spine —
-the thing alerting rides on — must never be held hostage by ledger secret
-presence. Only the clickhouse pod itself hard-requires it.
-
-## 2. Converge
+Never run `kubectl create secret generic clickhouse-admin` by hand. That
+would split truth between Kubernetes and OpenBao and would be lost on a
+wipe/restore.
 
 ```sh
 bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/sites/<site>/site.yaml
@@ -52,7 +41,7 @@ nothing approaches the 3×30s gatus threshold. clickhouse is new, so nothing
 alerts on it yet. First collector start ingests the kubelet's retained log
 backlog (~10Mi × containers); memory_limiter backpressures the brief blip.
 
-## 3. Apply the DDL by hand
+## 2. Apply the DDL by hand
 
 The exporter runs `create_schema: false`; the schema is the reviewed,
 vendored DDL in `src/infrastructure-components/clickhouse/k8s/ddl/`, never
@@ -68,7 +57,7 @@ kubectl -n observability exec -i deploy/clickhouse -- \
 DDL-after-collector is fine: the exporter retries; allow ~1 minute after
 this step before judging the verify queries.
 
-## 4. Verify
+## 3. Verify
 
 Query helper (used by everything below):
 
@@ -92,7 +81,7 @@ chq() { kubectl -n observability exec -i deploy/clickhouse -- \
   observed on the dev bring-up: keep the ScopeName filter (ClickHouse's own
   console logs are ingested, so an unscoped `Body LIKE '%Converged%'`
   matches the verify query itself), and remember watch mode only emits
-  events created AFTER the collector started — if the step-2 converge
+  events created AFTER the collector started — if the step-1 converge
   finished before the collector's first clean start, re-run the (idempotent)
   converge to mint a fresh Converged event.
 - Identity stamp —
@@ -107,15 +96,14 @@ chq() { kubectl -n observability exec -i deploy/clickhouse -- \
   but ClickHouse's own console logging is itself ingested) —
   `chq "SELECT formatReadableSize(sum(bytes_on_disk)) FROM system.parts WHERE database='otel'"`.
 
-## 5. Prod note (the standing trap)
+## 4. Prod note
 
 Prod's `clickhouse.enabled` is `false` and its converge is deferred to the
-M5 prod step. Before EVER flipping it: create the `clickhouse-admin` Secret
-on prod first (step 1 — a prod mutation, an explicit operator act), or the
-next prod converge pages with the clickhouse pod in
-CreateContainerConfigError. With the flag off, prod's collector renders
-byte-identical to the metrics-only spine and prod deploys no clickhouse
-objects.
+M5 prod step. Before flipping it, confirm the OpenBao snapshot/restore path
+contains `kv/guardian/guardian-prod/observability/clickhouse-admin` or run
+the explicit Bao schema migration path. Do not pre-create the Kubernetes
+Secret. With the flag off, prod's collector renders byte-identical to the
+metrics-only spine and prod deploys no clickhouse objects.
 
 ## Standing rules
 

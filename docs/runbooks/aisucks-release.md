@@ -43,15 +43,13 @@ bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/sites/dev/site.y
 One preview at a time; converging main puts dev back. No CI hook yet — when a
 forge with PRs exists, the hook is exactly this command.
 
-## 0. One-time per site (operator)
+## 0. Secret projection
 
-The observability stack needs its own one-time secret (grafana sits in
-CreateContainerConfigError until it exists — PodNotReady will page):
-
-```sh
-kubectl -n observability create secret generic grafana-admin \
-  --from-literal=password="$(openssl rand -hex 24)"
-```
+The observability stack's `grafana-admin` Kubernetes Secret is projected
+from `kv/guardian/<site>/observability/grafana-admin` in OpenBao. `guardian
+up` generates the value on a fresh Bao and waits for the projection before
+applying Grafana. Never run `kubectl create secret generic grafana-admin`
+by hand.
 
 Config-bearing observability components (otel-collector, alertmanager) do
 NOT restart on ConfigMap-only changes — after editing site.yaml watch lists

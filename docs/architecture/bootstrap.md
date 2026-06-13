@@ -17,12 +17,19 @@ one declarative machine config applied over the Talos API
 (`talosctl apply-config`), generated from per-site patches under
 `src/sites/<site>/talos/patches/`.
 
-**Layer 1 — secrets.** OpenBao with raft integrated storage, deployed as a
-StatefulSet from the OCI image built at
-`//src/infrastructure-components/openbao:image`. Initialization, unseal, and
-restore are reconciled by an operator (bank-vaults is the reference shape);
-the founder-held site root key is injected at bootstrap and never stored in
-the cluster.
+**Layer 1 — secrets.** Talos owns Kubernetes Secret encryption-at-rest via
+the generated `cluster.secretboxEncryptionSecret`; Guardian must not add a
+separate kube-apiserver `EncryptionConfiguration` path unless Talos drops
+that contract. OpenBao with raft integrated storage is the durable secret
+authority above Kubernetes, deployed as a StatefulSet from the OCI image
+built at `//src/infrastructure-components/openbao:image`. External Secrets
+Operator projects the small set of workload Kubernetes Secrets from OpenBao;
+workloads never get broad Secret read permissions, and the projected
+Kubernetes Secrets stay under Talos-owned encryption-at-rest. Fresh Bao
+initialization is performed by `guardian up` so a wiped dev node can
+converge unattended. Restored Bao reuses the values in the snapshot; missing
+restored paths are explicit schema migrations. Shamir unseal-key custody is
+still secret-zero and must not be hidden in a Kubernetes Secret.
 
 **Layer 2 — everything else.** GitOps reconciliation from OCI artifacts with
 cosign verification at pull time. Not yet present in this repo.
@@ -59,18 +66,24 @@ the component manifests are repo-root relative.
 2. `guardian up [site.yaml]` converges from runtime truth. It generates or
    reuses the site's Talos secrets bundle (under
    `${XDG_STATE_HOME:-~/.local/state}/guardian/<cluster>/`, never in the
-   repo), regenerates machine config from the pinned installer image and
-   checked-in patches, then probes the node: a configured node gets the
-   config re-applied; a maintenance-mode node gets its disk inventory
-   verified against both `node.installDiskSerial` and `node.zfsDiskSerial`,
-   the first install, and a one-time etcd bootstrap. The install disk is
-   selected by serial through a generated `machine.install.diskSelector`
-   patch, so the reserved ZFS disk is never an install target even when two
-   identical NVMes re-enumerate. Both paths end with the seed registry up,
-   workspace
-   artifacts pushed into it, components applied, and rollouts awaited. A
-   sealed or uninitialized OpenBao counts as converged; init, restore, and
-   unseal are operator actions.
+   repo), including Talos's `secretboxEncryptionSecret` for Kubernetes
+   Secret encryption-at-rest. It regenerates machine config from the pinned
+   installer image and checked-in patches, then probes the node: a
+   configured node gets the config re-applied; a maintenance-mode node gets
+   its disk inventory verified against both `node.installDiskSerial` and
+   `node.zfsDiskSerial`, the first install, and a one-time etcd bootstrap.
+   The install disk is selected by serial through a generated
+   `machine.install.diskSelector` patch, so the reserved ZFS disk is never
+   an install target even when two identical NVMes re-enumerate. Both paths
+   end with the seed registry up, workspace artifacts pushed into it,
+   and the secrets substrate converged first: OpenBao applies and becomes
+   reachable; Bao is restored or fresh-initialized/unsealed; `kv/` and
+   Kubernetes auth are configured; External Secrets Operator is installed;
+   observability projections are applied; and `guardian up` waits for
+   `clickhouse-admin` and `grafana-admin` before applying ClickHouse or
+   Grafana. An already-sealed restored Bao must be unsealed with injected
+   Shamir keys (`GUARDIAN_OPENBAO_UNSEAL_KEY` or
+   `GUARDIAN_OPENBAO_UNSEAL_KEYS`) before the projection gate can pass.
 
 Version pins consumed by the CLI are compile-time constants, and `talosctl`
 and `kubectl` ride in the binary's runfiles; changing what the fleet runs is

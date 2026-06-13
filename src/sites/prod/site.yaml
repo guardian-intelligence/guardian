@@ -51,11 +51,10 @@ aisucks:
     - https://dev.aisucks.app/
     - https://gamma.aisucks.app/
 
-# Observability ledger: OFF until the M5 prod step. Before flipping, create
-# the clickhouse-admin Secret on prod (docs/runbooks/ledger.md) — the
-# clickhouse pod's secretKeyRef is required, and a converge without the
-# Secret parks the pod in CreateContainerConfigError, which pages. With the
-# flag off, prod's otel-collector renders byte-identical to today's
-# metrics-only spine and no clickhouse objects are applied.
+# Observability ledger: OFF until the M5 prod step. When it flips, guardian
+# up configures the OpenBao path and waits for the projected clickhouse-admin
+# Kubernetes Secret before applying ClickHouse. With the flag off, prod's
+# otel-collector renders byte-identical to today's metrics-only spine and no
+# clickhouse objects are applied.
 clickhouse:
   enabled: false

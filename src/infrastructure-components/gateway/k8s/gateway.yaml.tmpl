@@ -16,24 +16,50 @@ kind: Gateway
 metadata:
   name: edge
   namespace: gateway
+  labels:
+    platform.guardian.dev/gateway: edge
 spec:
   gatewayClassName: cilium
   listeners:
-    # TLS passthrough: Envoy never decrypts — services keep in-process
-    # certmagic and their own key custody, and TLS-ALPN-01 issuance rides
-    # through natively. No-SNI and unmatched-SNI connections drop at the
-    # edge by design (raw-IP curls need
-    # curl --resolve <host>:443:<node IP> https://<host>/...). No listener
-    # hostname — each TLSRoute declares its own SNI hostname(s).
-    - name: tls
+{{- if .Site.Aisucks.Domain}}
+    # Product TLS passthrough: Envoy never decrypts; aisucks keeps in-process
+    # certmagic and key custody.
+    - name: tls-aisucks
+      hostname: "{{.Site.Aisucks.Domain}}"
       port: 443
       protocol: TLS
       tls:
         mode: Passthrough
       allowedRoutes:
         namespaces: { from: All }
-    # :80 — ACME HTTP-01 + healthz + the HTTPS redirect, all implemented by
-    # the backend itself; this listener only forwards.
+{{- end}}
+{{- range $i, $d := .Site.Status.Domains}}
+    - name: tls-status-{{$i}}
+      hostname: "{{$d}}"
+      port: 443
+      protocol: TLS
+      tls:
+        mode: Passthrough
+      allowedRoutes:
+        namespaces: { from: All }
+{{- end}}
+{{- if .Site.OCI.Domain}}
+    # Platform TLS termination: Envoy holds the public cert and forwards
+    # cleartext HTTP to the in-cluster platform backend.
+    - name: https-oci
+      hostname: "{{.Site.OCI.Domain}}"
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: oci-guardianintelligence-org-tls
+      allowedRoutes:
+        namespaces: { from: All }
+{{- end}}
+    # :80 — healthz + the HTTPS redirect, implemented by backends. Platform
+    # certificates use DNS-01; product passthrough services may still use
+    # their own ACME challenge handling behind this listener.
     - name: http
       port: 80
       protocol: HTTP
@@ -53,7 +79,7 @@ spec:
   parentRefs:
     - name: edge
       namespace: gateway
-      sectionName: tls
+      sectionName: tls-aisucks
   hostnames:
     - "{{.Site.Aisucks.Domain}}"
   rules:
@@ -94,9 +120,11 @@ metadata:
   namespace: status
 spec:
   parentRefs:
+{{- range $i, $_ := .Site.Status.Domains}}
     - name: edge
       namespace: gateway
-      sectionName: tls
+      sectionName: tls-status-{{$i}}
+{{- end}}
   hostnames:
 {{- range .Site.Status.Domains}}
     - "{{.}}"
@@ -105,4 +133,56 @@ spec:
     - backendRefs:
         - name: status
           port: 443
+{{- end}}
+{{- if .Site.OCI.Domain}}
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-production
+spec:
+  acme:
+    email: im.shovonhasan@gmail.com
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-production-account-key
+    solvers:
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-guardianintelligence-org-dns-token
+              key: api-token
+        selector:
+          dnsZones:
+            - guardianintelligence.org
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: oci-guardianintelligence-org-tls
+  namespace: gateway
+spec:
+  secretName: oci-guardianintelligence-org-tls
+  dnsNames:
+    - "{{.Site.OCI.Domain}}"
+  issuerRef:
+    name: letsencrypt-production
+    kind: ClusterIssuer
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: guardian-oci
+  namespace: guardian-oci
+spec:
+  parentRefs:
+    - name: edge
+      namespace: gateway
+      sectionName: https-oci
+  hostnames:
+    - "{{.Site.OCI.Domain}}"
+  rules:
+    - backendRefs:
+        - name: oci-placeholder
+          port: 80
 {{- end}}

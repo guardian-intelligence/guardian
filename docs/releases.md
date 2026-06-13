@@ -26,8 +26,10 @@ commit; unstamped local builds record a deterministic zero commit placeholder.
 
 The next implementation PR should deliver the **Runtime slice**: serve Connect
 Health publicly while keeping `/healthz` and `/livez` as raw operational
-endpoints, or the **Public OCI slice**: stand up `oci.gi.org`/zot so the SDK
-artifact can be pulled from the public registry by digest.
+endpoints, or the **Platform TLS slice**: define the Cilium/Crossplane-native
+TLS capability that lets `oci.guardianintelligence.org` use Gateway-terminated
+TLS without adding a second public proxy. The Public OCI slice depends on that
+TLS boundary before zot can be considered publicly verifiable.
 
 ## Todo
 
@@ -92,6 +94,10 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 
 ### OCI Distribution
 
+- [x] Platform TLS for `oci.guardianintelligence.org` is solved through
+  Cilium Gateway termination with product TLS passthrough preserved. Current
+  implementation is the direct-render bridge; Crossplane-owned `EdgeGateway`
+  remains the future API shape.
 - [ ] zot stores release artifacts by immutable digest.
 - [ ] zot serves OCI Distribution v1.1 referrers.
 - [ ] Each release target has subject digest plus referrers:
@@ -310,12 +316,15 @@ vp run -w lint
 
 1. Runtime slice: serve Connect Health publicly while keeping `/healthz` and
    `/livez` raw.
-2. SDK OCI slice: build the generated Health SDK tarball and publish it as
+2. Platform TLS slice: Cilium Gateway terminates TLS for
+   `oci.guardianintelligence.org` from a cert-manager-managed Secret while
+   product hostnames remain passthrough.
+3. SDK OCI slice: build the generated Health SDK tarball and publish it as
    `guardian/aisucks/sdk/npm` by digest.
-3. npm projection slice: publish the verified SDK OCI subject to npm `edge`.
-4. Synthetic slice: install npm `edge` and call gamma/prod Health.
-5. Gate slice: emit `synthetic-result.v1` and `gate-result.v1`.
-6. Release manifest slice: record API image digest, SDK OCI digest, and npm
+4. npm projection slice: publish the verified SDK OCI subject to npm `edge`.
+5. Synthetic slice: install npm `edge` and call gamma/prod Health.
+6. Gate slice: emit `synthetic-result.v1` and `gate-result.v1`.
+7. Release manifest slice: record API image digest, SDK OCI digest, and npm
    integrity in a machine-readable manifest.
-7. Distribution slice: attach provenance/SBOM/gate referrers and advance signed
+8. Distribution slice: attach provenance/SBOM/gate referrers and advance signed
    channel pointers.

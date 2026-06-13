@@ -230,47 +230,69 @@ func runUp(args []string) error {
 		for _, c := range components {
 			// Manifest-only components have nothing to push; site-gated
 			// components push nothing for sites they do not converge on.
-			if c.layout == "" || (c.enabled != nil && !c.enabled(site)) {
+			if len(c.imageLayouts()) == 0 || (c.enabled != nil && !c.enabled(site)) {
 				continue
 			}
-			dir, terr := toolPath(c.layout)
-			if terr != nil {
-				return terr
+			for _, img := range c.imageLayouts() {
+				dir, terr := toolPath(img.layout)
+				if terr != nil {
+					return terr
+				}
+				digest, perr := pushLayout(dir, endpoint, img.name)
+				if perr != nil {
+					return perr
+				}
+				digests[img.name] = digest.String()
+				images[img.name] = fmt.Sprintf("%s/%s@%s", mirrorHost, img.name, digest)
+				fmt.Printf("pushed\t%s\n", images[img.name])
 			}
-			digest, perr := pushLayout(dir, endpoint, c.name)
-			if perr != nil {
-				return perr
-			}
-			digests[c.name] = digest.String()
-			images[c.name] = fmt.Sprintf("%s/%s@%s", mirrorHost, c.name, digest)
-			fmt.Printf("pushed\t%s\n", images[c.name])
 		}
 		return nil
 	})
 	if err != nil {
 		return err
 	}
+	apply := func(name string) error {
+		c, ok := lookupComponent(name)
+		if !ok {
+			return fmt.Errorf("component %s missing from components table", name)
+		}
+		return applyComponent(kubectl, kubeconfig, c, images, site)
+	}
+	if err := apply("openbao"); err != nil {
+		return err
+	}
+	if err := waitOpenBao(kubectl, kubeconfig); err != nil {
+		return err
+	}
+	if err := reconcileOpenBao(kubectl, kubeconfig, site, restoring, *restoreRef, *wantSHA, snapPath); err != nil {
+		return err
+	}
+	if err := apply("victoria-metrics"); err != nil {
+		return err
+	}
+	if err := apply("external-secrets"); err != nil {
+		return err
+	}
+	if err := waitExternalSecrets(kubectl, kubeconfig); err != nil {
+		return err
+	}
 	for _, c := range components {
-		if c.enabled != nil && !c.enabled(site) {
-			fmt.Fprintf(os.Stderr, "skipping %s: disabled for this site\n", c.name)
+		switch c.name {
+		case "openbao", "victoria-metrics", "external-secrets":
 			continue
-		}
-		// images[c.name] is "" for a manifest-only component; its template
-		// never references .Image (the components-table test pins the gate,
-		// the render test pins the manifest).
-		manifest, rerr := renderComponentManifest(c, images[c.name], site)
-		if rerr != nil {
-			return rerr
-		}
-		// A component may guard its entire manifest on site values (status
-		// renders nothing on sites without status.domains); kubectl rejects
-		// empty input, so an empty render means "not deployed here".
-		if len(bytes.TrimSpace(manifest)) == 0 {
-			fmt.Fprintf(os.Stderr, "skipping %s: manifest renders empty for this site\n", c.name)
+		case "guardian-secrets":
+			if err := applyComponent(kubectl, kubeconfig, c, images, site); err != nil {
+				return err
+			}
+			if err := waitProjectedSecrets(kubectl, kubeconfig); err != nil {
+				return err
+			}
 			continue
-		}
-		if err := runToolInput(manifest, kubectl, "--kubeconfig", kubeconfig, "apply", "-f", "-"); err != nil {
-			return err
+		default:
+			if err := applyComponent(kubectl, kubeconfig, c, images, site); err != nil {
+				return err
+			}
 		}
 	}
 	// Mark the converge with a node-scoped Event — the k8s-native deploy
@@ -280,17 +302,102 @@ func runUp(args []string) error {
 	if eerr := emitConvergedEvent(kubectl, kubeconfig, site.Node.Hostname, digests); eerr != nil {
 		fmt.Fprintf(os.Stderr, "warning: converged event not recorded: %v\n", eerr)
 	}
-	if err := runTool(kubectl, "--kubeconfig", kubeconfig, "-n", "openbao", "rollout", "status", "statefulset/openbao", "--timeout=10m"); err != nil {
+	fmt.Printf("\nconverged: %s is up; kubeconfig at %s\n", site.Cluster.Name, kubeconfig)
+	return nil
+}
+
+func lookupComponent(name string) (component, bool) {
+	for _, c := range components {
+		if c.name == name {
+			return c, true
+		}
+	}
+	return component{}, false
+}
+
+func applyComponent(kubectl, kubeconfig string, c component, images map[string]string, site *Site) error {
+	if c.enabled != nil && !c.enabled(site) {
+		fmt.Fprintf(os.Stderr, "skipping %s: disabled for this site\n", c.name)
+		return nil
+	}
+	// images[c.name] is "" for a manifest-only component; its template
+	// never references .Image (the components-table test pins the gate,
+	// the render test pins the manifest).
+	manifest, rerr := renderComponentManifest(c, images[c.name], images, site)
+	if rerr != nil {
+		return rerr
+	}
+	// A component may guard its entire manifest on site values (status
+	// renders nothing on sites without status.domains); kubectl rejects
+	// empty input, so an empty render means "not deployed here".
+	if len(bytes.TrimSpace(manifest)) == 0 {
+		fmt.Fprintf(os.Stderr, "skipping %s: manifest renders empty for this site\n", c.name)
+		return nil
+	}
+	applyArgs := []string{"--kubeconfig", kubeconfig, "apply", "-f", "-"}
+	if c.name == "external-secrets" {
+		// ESO CRDs are large enough that client-side apply's
+		// last-applied-configuration annotation exceeds Kubernetes' 256 KiB
+		// annotation limit. Server-side apply avoids that annotation.
+		applyArgs = []string{"--kubeconfig", kubeconfig, "apply", "--server-side=true", "-f", "-"}
+	}
+	if err := runToolInput(manifest, kubectl, applyArgs...); err != nil {
 		return err
 	}
+	if c.name == "cert-manager" {
+		for _, deploy := range []string{"cert-manager", "cert-manager-cainjector", "cert-manager-webhook"} {
+			if err := runTool(kubectl, "--kubeconfig", kubeconfig, "-n", "cert-manager", "rollout", "status", "deployment/"+deploy, "--timeout=5m"); err != nil {
+				return err
+			}
+		}
+		if err := applyCloudflareDNSTokenSecret(kubectl, kubeconfig); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
+func waitOpenBao(kubectl, kubeconfig string) error {
+	return runTool(kubectl, "--kubeconfig", kubeconfig, "-n", "openbao", "rollout", "status", "statefulset/openbao", "--timeout=10m")
+}
+
+func waitExternalSecrets(kubectl, kubeconfig string) error {
+	for _, crd := range []string{
+		"clustersecretstores.external-secrets.io",
+		"externalsecrets.external-secrets.io",
+		"secretstores.external-secrets.io",
+	} {
+		if err := runTool(kubectl, "--kubeconfig", kubeconfig, "wait", "--for=condition=Established", "crd/"+crd, "--timeout=2m"); err != nil {
+			return err
+		}
+	}
+	for _, deploy := range []string{"external-secrets", "external-secrets-webhook", "external-secrets-cert-controller"} {
+		if err := runTool(kubectl, "--kubeconfig", kubeconfig, "-n", "external-secrets", "rollout", "status", "deployment/"+deploy, "--timeout=5m"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func waitProjectedSecrets(kubectl, kubeconfig string) error {
+	for _, name := range []string{"clickhouse-admin", "grafana-admin"} {
+		if err := runTool(kubectl, "--kubeconfig", kubeconfig, "-n", "observability", "wait", "--for=condition=Ready", "externalsecret/"+name, "--timeout=3m"); err != nil {
+			return err
+		}
+		if err := runTool(kubectl, "--kubeconfig", kubeconfig, "-n", "observability", "get", "secret", name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func reconcileOpenBao(kubectl, kubeconfig string, site *Site, restoring bool, restoreRef, wantSHA, snapPath string) error {
 	// Probe OpenBao's seal/init state over its HTTP API through a port-forward
 	// (the bao CLI hits these same endpoints) and dispatch on probed truth
 	// crossed with operator intent — never on recorded state, the same
-	// philosophy as the Talos mode probe above. The dance, restore-over-data
-	// refusal, and unseal guidance all live in this closure.
+	// philosophy as the Talos mode probe above.
 	baoExec := fmt.Sprintf("kubectl --kubeconfig %s -n openbao exec -it openbao-0 -- env BAO_ADDR=http://127.0.0.1:8200 bao", kubeconfig)
-	err = withPortForward(kubectl, kubeconfig, "openbao", "pod/openbao-0", baoLocalPort, 8200, 2*time.Minute, func(addr string) error {
+	return withPortForward(kubectl, kubeconfig, "openbao", "pod/openbao-0", baoLocalPort, 8200, 2*time.Minute, func(addr string) error {
 		st, herr := probeBaoHealth(addr)
 		if herr != nil {
 			return fmt.Errorf("up: %w (last: %v); inspect: kubectl --kubeconfig %s -n openbao logs openbao-0", errBaoUnreachable, herr, kubeconfig)
@@ -299,7 +406,7 @@ func runUp(args []string) error {
 		switch {
 		case errors.Is(derr, errRestoreOverData):
 			return fmt.Errorf("up: %w: openbao is %s — restore is only legal into a fresh vault; wipe first:\n  guardian down --yes && guardian up --restore %s --sha256 %s",
-				errRestoreOverData, st, *restoreRef, *wantSHA)
+				errRestoreOverData, st, restoreRef, wantSHA)
 		case derr != nil:
 			return fmt.Errorf("up: %w", derr)
 		}
@@ -307,28 +414,48 @@ func runUp(args []string) error {
 			if rerr := restoreSnapshot(addr, snapPath); rerr != nil {
 				return rerr
 			}
-			fmt.Printf("\nrestored %s; unseal with the site's original shares:\n  %s operator unseal\n", *wantSHA, baoExec)
-			return nil
+			st = baoSealed
+			fmt.Fprintf(os.Stderr, "restored OpenBao snapshot %s; unsealing restored vault\n", wantSHA)
 		}
 		switch st {
 		case baoFresh:
-			fmt.Println("\nopenbao is uninitialized. choose one:")
-			fmt.Printf("  new site:  %s operator init\n", baoExec)
-			fmt.Println("  recovery:  guardian up --restore <file|https URL> --sha256 <digest>")
+			initResp, ierr := initFreshBao(addr)
+			if ierr != nil {
+				return ierr
+			}
+			if uerr := unsealBao(addr, initResp.KeysB64); uerr != nil {
+				return uerr
+			}
+			if cerr := configureBaoForProjection(addr, initResp.RootToken, site, true); cerr != nil {
+				return cerr
+			}
+			fmt.Fprintln(os.Stderr, "initialized, unsealed, and configured fresh OpenBao")
 		case baoSealed:
-			fmt.Println("\nopenbao is initialized but sealed — unseal to resume:")
-			fmt.Printf("  %s operator unseal\n", baoExec)
+			keys := openBaoUnsealKeysFromEnv()
+			if len(keys) == 0 {
+				return fmt.Errorf("up: openbao is sealed; set %s or %s for unattended unseal, or run:\n  %s operator unseal", baoUnsealKeyEnv, baoUnsealKeysEnv, baoExec)
+			}
+			if uerr := unsealBao(addr, keys); uerr != nil {
+				return uerr
+			}
+			if token := strings.TrimSpace(os.Getenv(baoRootTokenEnv)); token != "" {
+				if cerr := configureBaoForProjection(addr, token, site, allowBaoSecretMigrationFromEnv()); cerr != nil {
+					return cerr
+				}
+			}
+			fmt.Fprintln(os.Stderr, "unsealed OpenBao")
 		case baoUnsealed:
-			fmt.Println("\nopenbao is initialized and unsealed — healthy.")
+			if token := strings.TrimSpace(os.Getenv(baoRootTokenEnv)); token != "" {
+				if cerr := configureBaoForProjection(addr, token, site, allowBaoSecretMigrationFromEnv()); cerr != nil {
+					return cerr
+				}
+				fmt.Fprintln(os.Stderr, "verified OpenBao projection configuration")
+			} else {
+				fmt.Fprintln(os.Stderr, "openbao is initialized and unsealed")
+			}
 		}
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("\nconverged: %s is up; kubeconfig at %s\n", site.Cluster.Name, kubeconfig)
-	return nil
 }
 
 // emitConvergedEvent records one core/v1 Event per converge on the site's
