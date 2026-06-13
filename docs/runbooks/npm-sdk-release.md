@@ -46,16 +46,24 @@ The SDK artifact lane starts locally and uses the same envelope that the public
 registry will vend:
 
 ```sh
-aspect release sdk-oci
-oras pull --oci-layout dist/release/aisucks-sdk-oci:edge -o ./dist
+bazelisk build //src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci
+oras pull --oci-layout bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.oci:edge -o ./dist
 ```
 
-The Aspect task builds `//src/viteplus-monorepo/packages/aisucks-sdk:npm_package`
-and runs the repo-owned Go publisher at `//src/release/cmd/sdkoci`. It writes a
-machine-readable result:
+The Bazel target builds `//src/viteplus-monorepo/packages/aisucks-sdk:npm_package`
+and runs the repo-owned Go artifact builder at `//src/release/cmd/sdkoci`. It
+writes a machine-readable result:
 
 ```sh
-jq . dist/release/aisucks-sdk-oci-result.json
+jq . bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.json
+```
+
+For release-grade commit annotations, build with Bazel's embed label set to
+the source commit. Without an embed label, the local artifact remains
+deterministic and records the zero commit placeholder:
+
+```sh
+bazelisk build --embed_label=<40-char-git-sha> //src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci
 ```
 
 Remote publication is explicit:
@@ -135,10 +143,10 @@ Trusted Publishing configuration:
 Local layout verification:
 
 ```sh
-aspect release sdk-oci
-oras pull --oci-layout dist/release/aisucks-sdk-oci:edge -o ./dist
+bazelisk build //src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci
+oras pull --oci-layout bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.oci:edge -o ./dist
 sha256sum ./dist/guardian-intelligence-aisucks-<version>.tgz
-jq -r '.tarball_sha256' dist/release/aisucks-sdk-oci-result.json
+jq -r '.tarball_sha256' bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.json
 ```
 
 Public registry verification once `oci.gi.org` is live:

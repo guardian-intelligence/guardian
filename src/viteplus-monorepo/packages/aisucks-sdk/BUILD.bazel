@@ -1,6 +1,15 @@
+load("//src/release:sdk_oci.bzl", "guardian_sdk_oci_layout")
+
 filegroup(
     name = "package_manifest",
     srcs = ["package.json"],
+    visibility = ["//visibility:public"],
+)
+
+guardian_sdk_oci_layout(
+    name = "sdk_oci",
+    pack_json = ":aisucks-sdk.npm-pack.json",
+    tarball = ":aisucks-sdk.tgz",
     visibility = ["//visibility:public"],
 )
 

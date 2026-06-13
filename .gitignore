@@ -1,4 +1,3 @@
 /bazel-*
-/dist/
 secret.env
 /src/aisucks/aisucks

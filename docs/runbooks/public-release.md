@@ -30,8 +30,8 @@ bazelisk run //src/products/aisucks/services/api:publish_ghcr -- --tag v<N>
 The SDK OCI subject is built through Aspect:
 
 ```sh
-aspect release sdk-oci
-oras pull --oci-layout dist/release/aisucks-sdk-oci:edge -o ./dist
+bazelisk build //src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci
+oras pull --oci-layout bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.oci:edge -o ./dist
 ```
 
 When the public registry exists and write credentials are present, the remote

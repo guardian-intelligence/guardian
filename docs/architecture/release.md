@@ -129,7 +129,7 @@ VictoriaMetrics queries against the M2 recording rules.
 1. **Release target lane**: repo-owned Go release tooling normalizes release
    subjects, runs `oci_push` targets, emits a CUE/JSON release manifest, signs
    provenance, and advances edge pointers. The npm SDK first becomes an OCI
-   subject at `guardian/aisucks/sdk/npm`; `aspect release sdk-oci` already
+   subject at `guardian/aisucks/sdk/npm`; `//src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci` already
    builds the local OCI artifact envelope, and the npmjs publish step is a
    later Trusted Publishing projection from that subject, not a push-on-main
    rule in GitHub Actions YAML.

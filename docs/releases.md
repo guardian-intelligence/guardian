@@ -16,11 +16,13 @@ The Contract slice is delivered by the Connect/RPC Health contract work:
 - Buf lint and breaking-change checks run through Bazel with a pinned local
   toolchain and no remote plugins.
 
-The SDK OCI artifact-builder slice is delivered by `aspect release sdk-oci`.
+The SDK OCI artifact-builder slice is delivered by `//src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci`.
 It builds the generated Health SDK tarball, writes it as an OCI artifact
 subject in a local OCI layout, and records the OCI manifest digest, tarball
 sha256, npm integrity, package version, and source commit in
-`dist/release/aisucks-sdk-oci-result.json`.
+`bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.json`.
+Stamped builds use Bazel's `--embed_label=<40-char-git-sha>` as the source
+commit; unstamped local builds record a deterministic zero commit placeholder.
 
 The next implementation PR should deliver the **Runtime slice**: serve Connect
 Health publicly while keeping `/healthz` and `/livez` as raw operational
@@ -78,8 +80,8 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 - [x] npm package tarball is built from repo source.
 - [x] SDK OCI reference forms are documented:
   `oci.gi.org/guardian/aisucks/sdk/npm[:tag|@sha256:<digest>]`.
-- [x] Repo-owned `aspect release sdk-oci` writes the npm package tarball as an
-  OCI artifact subject in a local OCI layout.
+- [x] Repo-owned `//src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci` writes the npm package tarball as an
+  OCI artifact subject in a declared local OCI layout.
 - [ ] npm package tarball is pushed to the public OCI registry by digest.
 - [x] Package integrity is recorded.
 - [ ] npm publication is executed as a downstream projection from the verified
@@ -102,7 +104,7 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 - [ ] Public reads are digest-addressed; mutable tags are channel convenience
   only.
 - [x] SDK can be pulled from the local OCI layout with
-  `oras pull --oci-layout dist/release/aisucks-sdk-oci:edge -o ./dist`.
+  `oras pull --oci-layout bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.oci:edge -o ./dist`.
 - [ ] SDK can be pulled from the public OCI registry with
   `oras pull oci.gi.org/guardian/aisucks/sdk/npm@sha256:<manifest>`.
 
@@ -212,8 +214,8 @@ cosign verify <zot-or-ghcr-image>@sha256:...
 cosign verify-attestation --type slsaprovenance <image>@sha256:...
 npm view @guardian-intelligence/aisucks@edge dist.integrity
 npm install @guardian-intelligence/aisucks@edge
-aspect release sdk-oci
-oras pull --oci-layout dist/release/aisucks-sdk-oci:edge -o ./dist
+bazelisk build //src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci
+oras pull --oci-layout bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.oci:edge -o ./dist
 oras pull oci.gi.org/guardian/aisucks/sdk/npm@sha256:<manifest> -o ./dist
 guardian/repo tool verify release-manifest <digest-or-file>
 guardian/repo tool synthetic health --base-url=https://gamma.aisucks.app

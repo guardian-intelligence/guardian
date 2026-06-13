@@ -25,7 +25,7 @@ jobs:
       - uses: bazelbuild/setup-bazelisk@b39c379c82683a5f25d34f0d062761f62693e0b2 # v3.0.0
 
       - name: Build
-        run: bazelisk build //:build
+        run: bazelisk build --embed_label="$GITHUB_SHA" //:build
 
       - name: Test
         run: bazelisk test //:dev_check

@@ -123,16 +123,21 @@ Those are tags, release-manifest fields, annotations, or referrer payloads.
 
 ## Verification Shape
 
-The local builder can create the same artifact envelope without a registry:
+The Bazel build graph creates the same artifact envelope without a registry:
 
 ```sh
-aspect release sdk-oci
-oras pull --oci-layout dist/release/aisucks-sdk-oci:edge -o ./dist
+bazelisk build //src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci
+oras pull --oci-layout bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.oci:edge -o ./dist
 ```
 
-The command writes `dist/release/aisucks-sdk-oci-result.json` with the OCI
+The target writes `bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.json` with the OCI
 manifest digest, tarball sha256, npm integrity, package version, and source
 commit.
+
+When Bazel is invoked with `--embed_label=<40-char-git-sha>`, that commit is
+recorded in the OCI annotations and result JSON. Unstamped local builds use a
+deterministic zero commit placeholder so repeated builds produce the same
+manifest digest.
 
 A clean machine should eventually verify the public SDK by digest:
 

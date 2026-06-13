@@ -17,7 +17,7 @@ filegroup(
         "//src/products/aisucks/api:models",
         "//src/products/aisucks/services/api:image",
         "//src/release/cmd/sdkoci:sdkoci",
-        "//src/viteplus-monorepo/packages/aisucks-sdk:npm_package",
+        "//src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci",
         "//src/viteplus-monorepo:workspace_lint",
         "//src/viteplus-monorepo:workspace_build",
     ],
