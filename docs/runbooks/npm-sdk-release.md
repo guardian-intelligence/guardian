@@ -38,8 +38,8 @@ vp run -w lint
 
 This runs VitePlus linting plus the workspace release hygiene check. The
 top-level Bazel build also reaches it through
-`//src/viteplus-monorepo:workspace_lint`, so PR CI does not need to know
-Changesets semantics.
+`//src/viteplus-monorepo:workspace_lint`, so repo-level build orchestration
+does not need to know Changesets semantics.
 
 ## Local probe
 
