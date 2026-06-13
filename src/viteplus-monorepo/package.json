@@ -16,7 +16,6 @@
     "test": "vp test run",
     "build": "vp run -r build",
     "release:check": "node scripts/check-release-hygiene.ts --package @guardian-intelligence/aisucks",
-    "release:aisucks-sdk": "bash ../../scripts/release/npm-aisucks-sdk.sh",
     "ready": "vp run -w lint && vp test run && vp run -r typecheck && vp run -w typecheck:scripts && vp run -r build"
   },
   "devDependencies": {

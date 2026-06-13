@@ -14,7 +14,7 @@ annotated tag set: `git tag -n1 -l 'aisucks/v*'` lists every release with its
 digest.
 
 Public OCI vending is a separate release target; see
-`docs/runbooks/public-release.md`. The npm SDK uses the package-scoped lane in
+`docs/runbooks/public-release.md`. The npm SDK uses the OCI-first projection lane in
 `docs/runbooks/npm-sdk-release.md`.
 
 Sites: dev `206.223.228.101` (vs-dev-w0) · gamma `45.250.254.119` (gd-gamma-w0)

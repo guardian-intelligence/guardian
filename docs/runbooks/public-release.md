@@ -27,6 +27,24 @@ bazelisk run //src/products/aisucks/services/api:publish_ghcr -- --tag v<N>
 
 `rules_oci` pushes the image by digest first, then applies tags.
 
+The SDK OCI subject is built through Aspect:
+
+```sh
+aspect release sdk-oci
+oras pull --oci-layout dist/release/aisucks-sdk-oci:edge -o ./dist
+```
+
+When the public registry exists and write credentials are present, the remote
+publish form is:
+
+```sh
+aspect release sdk-oci \
+  --publish \
+  --ref oci.gi.org/guardian/aisucks/sdk/npm:edge \
+  --username guardian-release \
+  --password-env GUARDIAN_OCI_PASSWORD
+```
+
 ## Required Setup
 
 Executor:

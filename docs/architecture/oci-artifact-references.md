@@ -123,7 +123,18 @@ Those are tags, release-manifest fields, annotations, or referrer payloads.
 
 ## Verification Shape
 
-A clean machine should eventually verify the SDK by digest:
+The local builder can create the same artifact envelope without a registry:
+
+```sh
+aspect release sdk-oci
+oras pull --oci-layout dist/release/aisucks-sdk-oci:edge -o ./dist
+```
+
+The command writes `dist/release/aisucks-sdk-oci-result.json` with the OCI
+manifest digest, tarball sha256, npm integrity, package version, and source
+commit.
+
+A clean machine should eventually verify the public SDK by digest:
 
 ```sh
 oras pull oci.gi.org/guardian/aisucks/sdk/npm@sha256:<manifest> -o ./dist

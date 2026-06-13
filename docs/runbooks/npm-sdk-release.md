@@ -42,6 +42,32 @@ does not need to know Changesets semantics.
 
 ## Canonical Artifact
 
+The SDK artifact lane starts locally and uses the same envelope that the public
+registry will vend:
+
+```sh
+aspect release sdk-oci
+oras pull --oci-layout dist/release/aisucks-sdk-oci:edge -o ./dist
+```
+
+The Aspect task builds `//src/viteplus-monorepo/packages/aisucks-sdk:npm_package`
+and runs the repo-owned Go publisher at `//src/release/cmd/sdkoci`. It writes a
+machine-readable result:
+
+```sh
+jq . dist/release/aisucks-sdk-oci-result.json
+```
+
+Remote publication is explicit:
+
+```sh
+aspect release sdk-oci \
+  --publish \
+  --ref oci.gi.org/guardian/aisucks/sdk/npm:edge \
+  --username guardian-release \
+  --password-env GUARDIAN_OCI_PASSWORD
+```
+
 The SDK artifact lane must produce:
 
 - npm package tarball built from repo source
@@ -90,6 +116,10 @@ OIDC. When the executor shim is reintroduced, required setup is:
   environment.
 - The workflow runs a single `aspect` task that receives the selected OCI
   digest and npm tag. The workflow YAML must not encode release policy.
+- OCI registry write credentials are explicit task inputs, such as
+  `--username guardian-release --password-env GUARDIAN_OCI_PASSWORD` or
+  `--access-token-env GUARDIAN_OCI_ACCESS_TOKEN`; the release task does not
+  depend on host Docker credential-helper state.
 
 Trusted Publishing configuration:
 
@@ -101,6 +131,17 @@ Trusted Publishing configuration:
 - Allowed action: `npm publish`
 
 ## Verify OCI Subject
+
+Local layout verification:
+
+```sh
+aspect release sdk-oci
+oras pull --oci-layout dist/release/aisucks-sdk-oci:edge -o ./dist
+sha256sum ./dist/guardian-intelligence-aisucks-<version>.tgz
+jq -r '.tarball_sha256' dist/release/aisucks-sdk-oci-result.json
+```
+
+Public registry verification once `oci.gi.org` is live:
 
 ```sh
 SDK='oci.gi.org/guardian/aisucks/sdk/npm@sha256:<manifest>'
