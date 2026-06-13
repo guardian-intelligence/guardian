@@ -9,10 +9,9 @@
 # manifest; this component assumes it exists (push order puts
 # victoria-metrics first).
 #
-# The grafana-admin Secret is created once per site by the operator — same
-# manual-secret philosophy as aisucks-db:
-#   kubectl -n observability create secret generic grafana-admin \
-#     --from-literal=password="$(openssl rand -base64 24)"
+# The grafana-admin Secret is projected from OpenBao by External Secrets
+# Operator. Do not create it by hand; `guardian up` configures the Bao path and
+# waits for the projected Kubernetes Secret before applying Grafana.
 #
 # /var/lib/grafana is an emptyDir on purpose: dashboards arrive as code
 # (the provisioning ConfigMaps below), so anything clicked together in the

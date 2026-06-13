@@ -2,7 +2,7 @@ load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
 
 # Manifest template as test data: the CLI's render test pins the
 # clickhouse.enabled site gate (dev+gamma deploy the ledger, prod does not
-# until its clickhouse-admin Secret exists — docs/runbooks/ledger.md).
+# until its ledger ratchet flips — docs/runbooks/ledger.md).
 filegroup(
     name = "manifest",
     srcs = ["k8s/clickhouse.yaml.tmpl"],

@@ -50,8 +50,8 @@ aisucks:
 
 # Observability ledger (src/infrastructure-components/clickhouse): per-site
 # ClickHouse plus the collector's logs tee (filelog + k8sobjects Events).
-# Gamma follows the dev pilot. Pre-converge prerequisite per site: the
-# clickhouse-admin Secret must exist (docs/runbooks/ledger.md).
+# Gamma follows the dev pilot. The clickhouse-admin Kubernetes Secret is
+# projected from OpenBao during guardian up; never create it by hand.
 clickhouse:
   enabled: true
 

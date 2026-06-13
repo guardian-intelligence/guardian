@@ -42,6 +42,12 @@ everything else is a route.
   termination (HTTPRoute) is a later, reversible, per-hostname choice —
   revisit when key custody exists (M7's bao Transit), e.g. a status page
   terminating at the Gateway while aisucks stays passthrough.
+- **Platform TLS is Gateway-terminated by amendment.** Product services that
+  intentionally own keys stay on passthrough. Platform APIs such as
+  `oci.guardianintelligence.org` terminate TLS at Cilium Gateway using
+  cert-manager-managed Secrets and route to in-cluster HTTP backends. The
+  implementation handoff is `docs/architecture/tls.md`; do not add a Caddy,
+  nginx, or bespoke TLS proxy to solve this.
 - **CRD pin = a function of the Cilium version.** Cilium 1.19 consumes
   TLSRoute as v1alpha2, so we vendor the exact Gateway API release the
   Cilium 1.19.4 docs declare conformance against (v1.4.1 at this writing;
@@ -52,9 +58,9 @@ everything else is a route.
   serving v1alpha2 — bumping the CRDs alone would silently disable the path
   everything routes through. Adopt v1 at the Cilium bump that does, as one
   change.
-- **:80 listener**: HTTPRoute forwarding `/.well-known/acme-challenge/`
-  (HTTP-01) plus the HTTPS redirect. TLS-ALPN-01 rides passthrough
-  natively.
+- **:80 listener**: HTTPRoute forwarding health/redirect traffic and any
+  product-owned HTTP-01 paths. Platform TLS for `guardianintelligence.org`
+  uses Cloudflare DNS-01, not HTTP-01. TLS-ALPN-01 rides passthrough natively.
 
 ## The bootstrap invariant (the acceptance bar)
 
@@ -154,6 +160,12 @@ hostNetwork Envoy listener is a plain host socket — there is nothing on
 that path for XDP to accelerate.
 
 ## Risks and open threads
+
+- **Platform TLS is direct-rendered until EdgeGateway exists.**
+  `oci.guardianintelligence.org` now uses a cert-manager-managed Secret and a
+  Gateway-terminated HTTPS listener while product hostnames stay on TLSRoute
+  passthrough. Crossplane-owned `EdgeGateway` remains the API shape to adopt
+  once Crossplane is pinned, mirrored, and installed by `guardian up`.
 
 - **Gatus probes dev by raw IP** — no SNI, so a fully SNI-routed :443
   would drop the prober that watches the pilot. Dev routes stay

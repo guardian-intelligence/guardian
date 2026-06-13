@@ -71,10 +71,16 @@ aisucks:
 gateway:
   enabled: true
 
+# Public OCI bootstrap placeholder: Gateway-terminated TLS at
+# oci.guardianintelligence.org, cleartext to the in-cluster placeholder until
+# zot lands.
+oci:
+  domain: oci.guardianintelligence.org
+
 # Observability ledger (src/infrastructure-components/clickhouse): per-site
 # ClickHouse plus the collector's logs tee (filelog + k8sobjects Events).
-# Dev pilots the ledger ratchet. Pre-converge prerequisite per site: the
-# clickhouse-admin Secret must exist (docs/runbooks/ledger.md).
+# Dev pilots the ledger ratchet. The clickhouse-admin Kubernetes Secret is
+# projected from OpenBao during guardian up; never create it by hand.
 clickhouse:
   enabled: true
 

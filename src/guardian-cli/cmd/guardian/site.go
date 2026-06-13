@@ -73,6 +73,12 @@ type Site struct {
 		// (docs/architecture/gateway.md Phase 5).
 		Enabled bool `yaml:"enabled"`
 	} `yaml:"gateway"`
+	// OCI holds the public registry/bootstrap placeholder surface. A non-empty
+	// domain enables cert-manager, the guardian-oci placeholder, and a
+	// Gateway-terminated HTTPS listener for that hostname.
+	OCI struct {
+		Domain string `yaml:"domain"`
+	} `yaml:"oci"`
 	// Clickhouse holds the per-site values for the clickhouse component
 	// (src/infrastructure-components/clickhouse) — the observability ledger.
 	Clickhouse struct {
@@ -80,10 +86,8 @@ type Site struct {
 		// otel-collector's logs pipeline (filelog + k8sobjects Events) into
 		// it; off, the collector renders byte-identical to the metrics-only
 		// spine. The per-site ratchet: dev pilots, gamma repeats, prod last
-		// — and prod MUST have the clickhouse-admin Secret created before
-		// this flips (docs/runbooks/ledger.md): the clickhouse pod's
-		// secretKeyRef is required, and converging without the Secret
-		// parks the pod in CreateContainerConfigError, which pages.
+		// — guardian up now configures the OpenBao path and waits for the
+		// projected clickhouse-admin Secret before applying ClickHouse.
 		Enabled bool `yaml:"enabled"`
 	} `yaml:"clickhouse"`
 	// Status holds the per-site values for the status-page component
@@ -164,6 +168,9 @@ func loadSite(path string) (*Site, error) {
 	// without gateway.enabled nothing answers on host :80/:443.
 	if s.Aisucks.PodNetwork && !s.Gateway.Enabled {
 		return nil, fmt.Errorf("site %s: aisucks.podNetwork requires gateway.enabled", resolved)
+	}
+	if s.OCI.Domain != "" && !s.Gateway.Enabled {
+		return nil, fmt.Errorf("site %s: oci.domain requires gateway.enabled", resolved)
 	}
 	// Monitoring status hostnames with none declared would render a
 	// blackbox job with an empty target list.

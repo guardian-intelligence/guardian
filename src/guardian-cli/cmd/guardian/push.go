@@ -27,12 +27,21 @@ type component struct {
 	// is the cilium-envoy DaemonSet already on the node).
 	layout   string
 	manifest string // repo-root-relative manifest template
+	// images is for components that render several image refs into one
+	// manifest, such as cert-manager. Keys are the seed-registry repository
+	// names and are exposed to templates as .Images.
+	images []componentImage
 	// enabled gates the component per site; nil converges on every site.
 	// A manifest-only component MUST be gated (TestComponentsTable pins
 	// this): with no image and no site gate there would be nothing
 	// deliberate about where its objects land.
 	enabled           func(*Site) bool
 	publicHTTPService *publicHTTPService
+}
+
+type componentImage struct {
+	name   string
+	layout string
 }
 
 var components = []component{{
@@ -60,6 +69,26 @@ var components = []component{{
 		readinessPeriod: 5,
 	},
 }, {
+	name:     "cert-manager",
+	manifest: "src/infrastructure-components/cert-manager/k8s/cert-manager.yaml.tmpl",
+	enabled:  func(s *Site) bool { return s.OCI.Domain != "" },
+	images: []componentImage{{
+		name:   "cert-manager-cainjector",
+		layout: "_main/src/infrastructure-components/cert-manager/cainjector",
+	}, {
+		name:   "cert-manager-controller",
+		layout: "_main/src/infrastructure-components/cert-manager/controller",
+	}, {
+		name:   "cert-manager-webhook",
+		layout: "_main/src/infrastructure-components/cert-manager/webhook",
+	}, {
+		name:   "cert-manager-startupapicheck",
+		layout: "_main/src/infrastructure-components/cert-manager/startupapicheck",
+	}, {
+		name:   "cert-manager-acmesolver",
+		layout: "_main/src/infrastructure-components/cert-manager/acmesolver",
+	}},
+}, {
 	name:     "gatus",
 	layout:   "_main/src/infrastructure-components/gatus/image",
 	manifest: "src/infrastructure-components/gatus/k8s/gatus.yaml.tmpl",
@@ -70,6 +99,20 @@ var components = []component{{
 	name:     "victoria-metrics",
 	layout:   "_main/src/infrastructure-components/victoria-metrics/image",
 	manifest: "src/infrastructure-components/victoria-metrics/k8s/victoria-metrics.yaml.tmpl",
+}, {
+	// Scoped to the observability namespace, so it applies after the
+	// victoria-metrics manifest creates that namespace.
+	name:     "external-secrets",
+	layout:   "_main/src/infrastructure-components/external-secrets/image",
+	manifest: "src/infrastructure-components/external-secrets/k8s/external-secrets.yaml.tmpl",
+}, {
+	// Manifest-only: ESO store + projections for observability secrets.
+	// After victoria-metrics because that manifest owns the observability
+	// Namespace; before ClickHouse/Grafana because their pods require the
+	// projected Secrets at container config time.
+	name:     "guardian-secrets",
+	manifest: "src/infrastructure-components/guardian-secrets/k8s/guardian-secrets.yaml.tmpl",
+	enabled:  func(*Site) bool { return true },
 }, {
 	name:     "kube-state-metrics",
 	layout:   "_main/src/infrastructure-components/kube-state-metrics/image",
@@ -126,6 +169,11 @@ var components = []component{{
 	layout:   "_main/src/status/image",
 	manifest: "src/status/k8s/status.yaml.tmpl",
 }, {
+	name:     "guardian-oci",
+	layout:   "_main/src/platform/oci-placeholder/image",
+	manifest: "src/infrastructure-components/guardian-oci/k8s/guardian-oci.yaml.tmpl",
+	enabled:  func(s *Site) bool { return s.OCI.Domain != "" },
+}, {
 	// Manifest-only: the edge Gateway + routes. No image — the listener is
 	// the cilium-envoy DaemonSet already on the node. Gated per site:
 	// applying a Gateway binds host :80/:443, which is the per-site
@@ -139,6 +187,15 @@ var components = []component{{
 	manifest: "src/infrastructure-components/gateway/k8s/gateway.yaml.tmpl",
 	enabled:  func(s *Site) bool { return s.Gateway.Enabled },
 }}
+
+func (c component) imageLayouts() []componentImage {
+	out := make([]componentImage, 0, 1+len(c.images))
+	if c.layout != "" {
+		out = append(out, componentImage{name: c.name, layout: c.layout})
+	}
+	out = append(out, c.images...)
+	return out
+}
 
 type publicHTTPService struct {
 	namespace       string
