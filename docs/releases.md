@@ -13,6 +13,8 @@ The Contract slice is delivered by the Connect/RPC Health contract work:
 - Operation policy attached to the operation contract.
 - Reproducible Go and TypeScript generated surfaces from repo tooling.
 - SDK source surface exposes only `health()`.
+- Buf lint and breaking-change checks run through Bazel with a pinned local
+  toolchain and no remote plugins.
 
 The next implementation PR should deliver the **Runtime slice**: serve Connect
 Health publicly while keeping `/healthz` and `/livez` as raw operational
@@ -32,6 +34,24 @@ endpoints.
   - [x] idempotency requirement
 - [x] Generated Go server/client bindings are reproducible from repo tooling.
 - [x] Generated TypeScript SDK surface exposes only `health()`.
+- [x] Buf lint runs through Bazel with the repo-pinned `rules_buf` toolchain.
+- [x] Buf breaking-change detection compares against a checked-in baseline
+  image.
+- [x] Protobuf generation/check wiring is hidden behind repo Starlark wrappers,
+  not product-owned raw `protoc` shell commands.
+
+Verification:
+
+```sh
+bazelisk test //src/products/aisucks/api:buf_lint_test //src/products/aisucks/api:buf_breaking_test
+bazelisk build //src/products/aisucks/api:ts_sdk_codegen_check
+```
+
+Baseline refresh command, for intentional public API changes:
+
+```sh
+bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/testdata/buf/aisucks-api.binpb .
+```
 
 ### Service Artifact
 
@@ -205,6 +225,9 @@ truth before runtime, release, and Crossplane layers depend on it.
    - Prefer Bazel-owned generation or a repo-pinned generator invoked through
      `aspect`; do not depend on host-global protoc, buf, npm binaries, or Go
      tools.
+   - Buf is the schema governance tool: lint, format, and breaking checks run
+     through Bazel with local pinned toolchains. Remote plugins are not used in
+     build, test, or release paths.
 
 2. Add Guardian operation policy options.
    - Define a small `guardian.policy.v1` Protobuf options package.

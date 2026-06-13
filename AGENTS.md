@@ -14,6 +14,10 @@ Important context:
 - API IDL in Protobuf/Connect. Define IAM, audit, risk, request-size, rate
   limit, and idempotency metadata as explicit operation policy on the RPC
   contract.
+- Protobuf governance uses the repo-pinned Buf toolchain through Bazel:
+  linting, formatting, and breaking-change checks run from `rules_buf`; code
+  generation uses local pinned generators only. Do not use Buf remote plugins
+  in build/test/release paths.
 - All operations must run unattended, no human-in-the-loop.
 - Invent nothing. Glue code over existing libraries and aping reference implementations of solutions to problems only. Always do the boring industry-standard thing. We are modeling our approach after the Zarf/UDS/Defense Unicorns "air-gapped seed" pattern, but we know the machine we're deploying to and we control more layers.
 - Code is not the truth for how the system works. Traces are.
