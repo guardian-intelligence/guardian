@@ -82,6 +82,9 @@ Required GitHub setup:
 - Permissions: `contents: read`, `id-token: write`.
 - Environment: `npm-release`.
 - npm Trusted Publishing is configured for this workflow/environment.
+- `actions/setup-node` does not set `registry-url`: that writes an
+  `_authToken=${NODE_AUTH_TOKEN}` npmrc entry, which can make npm attempt
+  legacy token auth instead of OIDC Trusted Publishing.
 
 Trusted Publishing configuration:
 
