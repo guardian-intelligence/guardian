@@ -124,8 +124,8 @@ objects.
   IPs, no chat/transcript content, ever — fix the emitter, never add a
   scrubber. Any NEW component needs a what-it-logs review before it lands.
 - Product services must not log request bodies, client IPs, user-provided
-  URLs, or SDK payloads. The hello-world skeleton has no product database and
-  no user-write path; reintroducing either requires a what-it-logs review.
+  URLs, or SDK payloads. The current aisucks skeleton has no product database
+  and no user-write path; reintroducing either requires a what-it-logs review.
 - Wipe drills erase `/var/lib/otel-collector` (filelog checkpoints) and
   `/var/lib/clickhouse-data` together — both EPHEMERAL by design; ledger
   history dies with the drill until the R2 backup sub-item lands. Collector

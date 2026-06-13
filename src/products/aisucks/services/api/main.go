@@ -1,6 +1,6 @@
-// aisucks.app minimal public API. This first v2 slice deliberately exposes
-// only health, liveness, the charter page, and a hello endpoint for SDK and
-// release-pipeline proof. Product writes return in a later database slice.
+// aisucks.app minimal public API. This v2 slice deliberately exposes only
+// health, liveness, and the charter page. Product writes return in a later
+// database slice.
 package main
 
 import (

@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package guardian.policy.v1;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "github.com/guardian-intelligence/guardian/src/products/aisucks/api/guardian/policy/v1;policyv1";
+
+extend google.protobuf.MethodOptions {
+  OperationPolicy operation = 51000;
+}
+
+message OperationPolicy {
+  AuthRequirement auth = 1;
+  AuditLevel audit_level = 2;
+  RiskTier risk_tier = 3;
+  uint32 max_request_bytes = 4;
+  RateLimit rate_limit = 5;
+  Idempotency idempotency = 6;
+}
+
+message RateLimit {
+  uint32 requests = 1;
+  string window = 2;
+}
+
+enum AuthRequirement {
+  AUTH_REQUIREMENT_UNSPECIFIED = 0;
+  AUTH_REQUIREMENT_NONE = 1;
+  AUTH_REQUIREMENT_REQUIRED = 2;
+}
+
+enum AuditLevel {
+  AUDIT_LEVEL_UNSPECIFIED = 0;
+  AUDIT_LEVEL_OPERATIONAL = 1;
+  AUDIT_LEVEL_SECURITY = 2;
+  AUDIT_LEVEL_FINANCIAL = 3;
+}
+
+enum RiskTier {
+  RISK_TIER_UNSPECIFIED = 0;
+  RISK_TIER_LOW = 1;
+  RISK_TIER_MEDIUM = 2;
+  RISK_TIER_HIGH = 3;
+}
+
+enum Idempotency {
+  IDEMPOTENCY_UNSPECIFIED = 0;
+  IDEMPOTENCY_IDEMPOTENT = 1;
+  IDEMPOTENCY_NON_IDEMPOTENT = 2;
+}

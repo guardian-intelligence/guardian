@@ -11,7 +11,9 @@ Important context:
 - All dependencies version/commit pinned. Nothing during runtime, dev time, test time, or build time should require external non-version-pinned tooling, or shell out to binaries outside this repo or its build artifacts. All binaries are available under `guardian run`. E.g. `guardian run talosctl image k8s-bundle`
 - Dev tools: `aspect`
 - 1p configuration schemas in CUE, always. Read/Render-out YAML/JSON/TOML. Output must support all 3.
-- API IDL in Smithy to define IAM policies around operations, audit trails
+- API IDL in Protobuf/Connect. Define IAM, audit, risk, request-size, rate
+  limit, and idempotency metadata as explicit operation policy on the RPC
+  contract.
 - All operations must run unattended, no human-in-the-loop.
 - Invent nothing. Glue code over existing libraries and aping reference implementations of solutions to problems only. Always do the boring industry-standard thing. We are modeling our approach after the Zarf/UDS/Defense Unicorns "air-gapped seed" pattern, but we know the machine we're deploying to and we control more layers.
 - Code is not the truth for how the system works. Traces are.
@@ -26,11 +28,11 @@ Constraints:
 
 Service architecture:
 
-- One control plane: Kubernetes + the guardian reconcilers/operators (CRDs like a future `SoftwareCompany`/`WorkloadNode`). Individual services do NOT each get their own control-plane/data-plane — that's rebuilding K8s inside a service. The CP/DP split exists once, at the platform level, and we express "control plane" as the operator pattern (CRD + controller), which maps onto the Smithy IDL for IAM/audit.
-- Default to a module behind a Smithy contract, not a service. Enforce module boundaries with Bazel visibility so the module is the staging ground for a future service: it lifts out into its own Deployment cheaply because its contract was already explicit.
+- One control plane: Kubernetes + the guardian reconcilers/operators (CRDs like a future `SoftwareCompany`/`WorkloadNode`). Individual services do NOT each get their own control-plane/data-plane — that's rebuilding K8s inside a service. The CP/DP split exists once, at the platform level, and we express "control plane" as the operator pattern (CRD + controller), which maps onto the Protobuf/Connect contract for IAM/audit.
+- Default to a module behind a Protobuf/Connect contract, not a service. Enforce module boundaries with Bazel visibility so the module is the staging ground for a future service: it lifts out into its own Deployment cheaply because its contract was already explicit.
 - Promote a module to its own Deployment the moment it earns it on one axis: independent rollout cadence, a different scaling profile, a trust boundary (internet-facing or runs untrusted code, e.g. CI), or hard resource needs (GPU, the 1.5 TB box, TEE). Otherwise it stays a module.
 - The floor on "smaller" is the bounded context / control loop that owns its own data. Never split two things that change together — that's a distributed monolith (every cost of services, every cost of the monolith, deploys slower and riskier than either).
-- Guardian legitimately runs smaller/more services than a normal app: it's a platform of control loops (one per capability), and SPIRE (identity) + Smithy (contracts/audit) + Bazel (hermetic builds) pre-pay the per-service tax that usually makes microservices too expensive. Cheaper, not free — every service is still its own SLO, on-call surface, and data-ownership decision.
+- Guardian legitimately runs smaller/more services than a normal app: it's a platform of control loops (one per capability), and SPIRE (identity) + Protobuf/Connect (contracts/audit) + Bazel (hermetic builds) pre-pay the per-service tax that usually makes microservices too expensive. Cheaper, not free — every service is still its own SLO, on-call surface, and data-ownership decision.
 - Webhook handlers (Stripe, GitHub) are dumb edge adapters, not services: verify signature, persist the raw event idempotently (redelivery happens), ack 200 fast, hand off for processing. Default to a route in the app; break into its own pod only to keep ingestion alive across an app deploy, and even then the processing logic does not move out with it.
 
 Release doctrine:

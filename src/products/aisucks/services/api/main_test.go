@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,7 +20,6 @@ func TestPublicSurface(t *testing.T) {
 		{name: "page", method: http.MethodGet, path: "/", wantStatus: http.StatusOK, wantBody: "never be sold"},
 		{name: "health", method: http.MethodGet, path: "/healthz", wantStatus: http.StatusOK, wantBody: "ok"},
 		{name: "live", method: http.MethodGet, path: "/livez", wantStatus: http.StatusOK, wantBody: "ok"},
-		{name: "hello", method: http.MethodGet, path: "/api/v1/hello", wantStatus: http.StatusOK, wantBody: "hello from aisucks"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -35,21 +33,6 @@ func TestPublicSurface(t *testing.T) {
 				t.Fatalf("body %q does not contain %q", rec.Body.String(), tt.wantBody)
 			}
 		})
-	}
-}
-
-func TestHelloShape(t *testing.T) {
-	srv := newServer([]byte("page"), newMetrics(), "aisucks.test")
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/hello", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-
-	var body map[string]string
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if body["message"] != "hello from aisucks" || body["service"] != "aisucks" {
-		t.Fatalf("unexpected hello response: %#v", body)
 	}
 }
 
@@ -77,14 +60,14 @@ func TestMetricsEndpoint(t *testing.T) {
 	m := newMetrics()
 	srv := newServer([]byte("page"), m, "aisucks.test")
 	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/hello", nil))
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 
 	metrics := httptest.NewRecorder()
 	m.ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	out := metrics.Body.String()
 	for _, want := range []string{
 		"aisucks_build_info",
-		`aisucks_http_requests_total{handler="GET /api/v1/hello",method="GET",code="200"} 1`,
+		`aisucks_http_requests_total{handler="GET /healthz",method="GET",code="200"} 1`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("metrics missing %q:\n%s", want, out)

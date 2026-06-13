@@ -8,7 +8,7 @@ This directory defines the product API shape Guardian is moving toward:
   public HTTP workload: namespace, deployment, service, TLS custody, probes,
   metrics scrape identity, and alert profile.
 - `products.guardian.dev/AisucksProduct` is a thin product declaration that
-  composes one `PublicHttpService` in this hello-world slice.
+  composes one `PublicHttpService` in this first product slice.
 
 The live implementation for this iteration is the direct-rendered platform
 template at `src/platform/public-http-service/`. That is intentional: the

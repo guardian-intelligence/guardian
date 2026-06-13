@@ -1,6 +1,139 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+load("@io_bazel_rules_go//proto:compiler.bzl", "go_proto_compiler")
+load("@io_bazel_rules_go//proto:def.bzl", "go_proto_library")
+load("@rules_proto//proto:defs.bzl", "proto_library")
+
 package(default_visibility = ["//visibility:public"])
 
 filegroup(
     name = "models",
-    srcs = ["aisucks.smithy"],
+    srcs = [
+        "guardian/policy/v1/policy.proto",
+        "guardian/products/aisucks/v1/aisucks.proto",
+    ],
+)
+
+proto_library(
+    name = "policy_proto",
+    srcs = ["guardian/policy/v1/policy.proto"],
+    strip_import_prefix = "/src/products/aisucks/api",
+    deps = ["@protobuf//:descriptor_proto"],
+)
+
+go_proto_library(
+    name = "policy_go_proto",
+    importpath = "github.com/guardian-intelligence/guardian/src/products/aisucks/api/guardian/policy/v1",
+    proto = ":policy_proto",
+)
+
+go_proto_compiler(
+    name = "connect_go_proto",
+    deps = ["@com_connectrpc_connect//:connect"],
+    options = ["package_suffix"],
+    plugin = "@com_connectrpc_connect//cmd/protoc-gen-connect-go",
+    suffix = ".connect.go",
+    visibility = ["//visibility:private"],
+)
+
+proto_library(
+    name = "aisucks_proto",
+    srcs = ["guardian/products/aisucks/v1/aisucks.proto"],
+    strip_import_prefix = "/src/products/aisucks/api",
+    deps = [":policy_proto"],
+)
+
+go_proto_library(
+    name = "aisucks_go_proto",
+    compilers = [
+        "@io_bazel_rules_go//proto:go_proto",
+        ":connect_go_proto",
+    ],
+    deps = [":policy_go_proto"],
+    importpath = "github.com/guardian-intelligence/guardian/src/products/aisucks/api/guardian/products/aisucks/v1",
+    proto = ":aisucks_proto",
+)
+
+go_library(
+    name = "aisucks_go",
+    srcs = ["guardian/products/aisucks/v1/operation_policy.go"],
+    embed = [":aisucks_go_proto"],
+    importpath = "github.com/guardian-intelligence/guardian/src/products/aisucks/api/guardian/products/aisucks/v1",
+    deps = [
+        ":policy_go_proto",
+        "@org_golang_google_protobuf//proto:go_default_library",
+        "@org_golang_google_protobuf//reflect/protoreflect:go_default_library",
+    ],
+)
+
+go_test(
+    name = "aisucks_go_test",
+    srcs = ["guardian/products/aisucks/v1/operation_policy_test.go"],
+    embed = [":aisucks_go"],
+)
+
+genrule(
+    name = "ts_sdk_codegen_check",
+    srcs = [
+        ":models",
+        "//src/viteplus-monorepo/packages/aisucks-sdk:generated_sources",
+        "@protobuf//:descriptor_proto_srcs",
+    ],
+    outs = ["ts_sdk_codegen_check.stamp"],
+    tools = [
+        "//src/viteplus-monorepo:node_modules/@bufbuild/protoc-gen-es",
+        "//src/viteplus-monorepo:vp_node",
+        "@protobuf//:protoc",
+    ],
+    cmd = """
+set -euo pipefail
+execroot="$$(pwd)"
+node="$$execroot/$(location //src/viteplus-monorepo:vp_node)"
+protoc="$$execroot/$(location @protobuf//:protoc)"
+descriptor="$(location @protobuf//:descriptor_proto_srcs)"
+proto_include="$${descriptor%/google/protobuf/descriptor.proto}"
+plugin=""
+for candidate in $(locations //src/viteplus-monorepo:node_modules/@bufbuild/protoc-gen-es); do
+  case "$$candidate" in
+    */bin/protoc-gen-es)
+      plugin="$$execroot/$$candidate"
+      ;;
+    */node_modules/@bufbuild/protoc-gen-es)
+      plugin="$$execroot/$$candidate/bin/protoc-gen-es"
+      ;;
+  esac
+done
+test -n "$$plugin"
+export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
+out="$(@D)/ts-sdk-generated"
+rm -rf "$$out"
+mkdir -p "$$out"
+"$$protoc" \
+  --proto_path=src/products/aisucks/api \
+  --proto_path="$$proto_include" \
+  --plugin=protoc-gen-es="$$plugin" \
+  --es_out="$$out" \
+  --es_opt=target=ts,import_extension=js \
+  src/products/aisucks/api/guardian/policy/v1/policy.proto \
+  src/products/aisucks/api/guardian/products/aisucks/v1/aisucks.proto
+find "$$out" -type f -name '*.ts' -exec sh -c '
+for file do
+  tmp="$$file.tmp"
+  awk '"'"'
+    { lines[NR] = $$0 }
+    END {
+      n = NR
+      while (n > 0 && lines[n] == "") {
+        n--
+      }
+      for (i = 1; i <= n; i++) {
+        print lines[i]
+      }
+    }
+  '"'"' "$$file" > "$$tmp"
+  mv "$$tmp" "$$file"
+done
+' sh {} +
+diff -ru src/viteplus-monorepo/packages/aisucks-sdk/src/gen "$$out"
+printf 'aisucks ts sdk generated code is current\\n' > "$@"
+""",
 )

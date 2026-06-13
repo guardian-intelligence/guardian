@@ -1,22 +1,13 @@
+import { createClient } from "@connectrpc/connect";
+import { createConnectTransport } from "@connectrpc/connect-web";
+
+import { AisucksService, type HealthResponse } from "./gen/guardian/products/aisucks/v1/aisucks_pb.js";
+
+export type { HealthResponse };
+
 export interface AisucksClientOptions {
   baseUrl?: string;
   fetch?: typeof globalThis.fetch;
-}
-
-export interface HelloResponse {
-  message: string;
-  service: "aisucks";
-  version: string;
-}
-
-export class AisucksError extends Error {
-  readonly status: number;
-
-  constructor(message: string, status: number) {
-    super(message);
-    this.name = "AisucksError";
-    this.status = status;
-  }
 }
 
 export class AisucksClient {
@@ -31,23 +22,16 @@ export class AisucksClient {
     }
   }
 
-  async hello(): Promise<HelloResponse> {
-    return this.getJSON<HelloResponse>("/api/v1/hello");
-  }
-
-  private async getJSON<T>(path: string): Promise<T> {
-    const url = new URL(path, this.baseUrl);
-    const response = await this.fetch(url, {
-      method: "GET",
-      headers: { Accept: "application/json" },
+  async health(): Promise<HealthResponse> {
+    const transport = createConnectTransport({
+      baseUrl: this.baseUrl.toString(),
+      fetch: this.fetch,
     });
-    if (!response.ok) {
-      throw new AisucksError(`aisucks request failed with HTTP ${response.status}`, response.status);
-    }
-    return (await response.json()) as T;
+    const client = createClient(AisucksService, transport);
+    return client.health({});
   }
 }
 
-export function hello(options?: AisucksClientOptions): Promise<HelloResponse> {
-  return new AisucksClient(options).hello();
+export function health(options?: AisucksClientOptions): Promise<HealthResponse> {
+  return new AisucksClient(options).health();
 }

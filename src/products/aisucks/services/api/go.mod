@@ -2,9 +2,15 @@ module github.com/guardian-intelligence/guardian/src/products/aisucks/services/a
 
 go 1.26.4
 
+tool (
+	connectrpc.com/connect/cmd/protoc-gen-connect-go
+	google.golang.org/protobuf/cmd/protoc-gen-go
+)
+
 require github.com/caddyserver/certmagic v0.25.3
 
 require (
+	connectrpc.com/connect v1.20.0 // indirect
 	github.com/caddyserver/zerossl v0.1.5 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/libdns/libdns v1.1.1 // indirect
@@ -21,4 +27,5 @@ require (
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
 	golang.org/x/tools v0.44.0 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 )

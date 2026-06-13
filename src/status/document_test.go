@@ -25,7 +25,7 @@ func sampleDocument() Document {
 				{Key: "healthz", Value: "up"},
 				{Key: "availability_30d_pct", Value: 97.636},
 				{Key: "tls_cert_days_remaining", Value: 89.0},
-				{Key: "hello_last_pass_seconds", Value: "n/a", Comment: "app metrics never cross sites"},
+				{Key: "health_last_pass_seconds", Value: "n/a", Comment: "app metrics never cross sites"},
 			}},
 			{Name: "fleet.dev", Entries: []Entry{
 				{Key: "healthz", Value: "up", Comment: "self-reported"},

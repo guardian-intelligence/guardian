@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 )
@@ -17,7 +16,6 @@ func newServer(page []byte, metrics *metrics, domain string) *server {
 	s.mux.HandleFunc("GET /{$}", metrics.wrap("GET /{$}", s.handleIndex))
 	s.mux.HandleFunc("GET /healthz", metrics.wrap("GET /healthz", s.handleHealthz))
 	s.mux.HandleFunc("GET /livez", metrics.wrap("GET /livez", s.handleLivez))
-	s.mux.HandleFunc("GET /api/v1/hello", metrics.wrap("GET /api/v1/hello", s.handleHello))
 	return s
 }
 
@@ -45,14 +43,4 @@ func (s *server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleLivez(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	fmt.Fprintln(w, "ok")
-}
-
-func (s *server) handleHello(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"message": "hello from aisucks",
-		"service": "aisucks",
-		"version": "0.1.0",
-	})
 }

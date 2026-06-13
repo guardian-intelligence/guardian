@@ -52,18 +52,6 @@ data:
         alerts:
           - type: ntfy
 {{- end}}
-      # SDK-sized API probe for the v2 skeleton. This is deliberately read
-      # only: product writes return in the database + verifier slice.
-      - name: aisucks-hello ({{.Site.Cluster.Name}})
-        url: "{{$base}}/api/v1/hello"
-        interval: 30s
-        conditions:
-          - "[STATUS] == 200"
-          - "[BODY] == pat(*hello from aisucks*)"
-{{- if .Site.Aisucks.NtfyTopic}}
-        alerts:
-          - type: ntfy
-{{- end}}
 {{- range $i, $target := .Site.Aisucks.Watch}}
       - name: watch-{{$i}}
         url: "{{$target}}"

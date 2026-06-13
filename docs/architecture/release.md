@@ -79,7 +79,7 @@ VictoriaMetrics queries against the M2 recording rules.
 
 - **gamma (gate):** when Flux reports the edge candidate healthy, run the
   soak — 10m, from local VM: alerts quiet · probe_success == 1 · restart
-  delta 0 · 5xx == 0 · hello synthetic passes → Transit-sign `gate-pass` →
+  delta 0 · 5xx == 0 · Connect Health synthetic passes → Transit-sign `gate-pass` →
   advance stable. Fail → pointer back, attest `gate-fail`, page. A newer
   edge during a soak aborts it without a verdict — latest wins on gamma.
 - **prod (promote):** admit only a digest carrying provenance ∧ gate-pass ∧
