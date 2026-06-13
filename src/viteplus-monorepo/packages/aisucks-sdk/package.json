@@ -2,46 +2,46 @@
   "name": "@guardian-intelligence/aisucks",
   "version": "0.2.0",
   "description": "Tiny SDK for the aisucks.app public API.",
-  "type": "module",
-  "sideEffects": false,
+  "homepage": "https://github.com/guardian-intelligence/guardian/tree/main/src/viteplus-monorepo/packages/aisucks-sdk#readme",
+  "bugs": {
+    "url": "https://github.com/guardian-intelligence/guardian/issues"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/guardian-intelligence/guardian.git",
     "directory": "src/viteplus-monorepo/packages/aisucks-sdk"
   },
-  "bugs": {
-    "url": "https://github.com/guardian-intelligence/guardian/issues"
-  },
-  "homepage": "https://github.com/guardian-intelligence/guardian/tree/main/src/viteplus-monorepo/packages/aisucks-sdk#readme",
   "files": [
     "CHANGELOG.md",
     "dist",
     "README.md"
   ],
+  "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     }
   },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "build": "tsc -p tsconfig.build.json",
     "pack:dry-run": "npm pack --dry-run"
-  },
-  "engines": {
-    "node": ">=22.12.0"
   },
   "dependencies": {
     "@bufbuild/protobuf": "catalog:",
     "@connectrpc/connect": "catalog:",
     "@connectrpc/connect-web": "catalog:"
   },
-  "publishConfig": {
-    "access": "public",
-    "registry": "https://registry.npmjs.org/"
-  },
   "devDependencies": {
     "typescript": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

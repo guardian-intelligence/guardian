@@ -48,4 +48,3 @@ func registerSchematic(path string) (string, error) {
 func installerImage(schematicID string) string {
 	return fmt.Sprintf("factory.talos.dev/installer/%s:%s", schematicID, talosVersion)
 }
-

@@ -15,6 +15,15 @@ exports_files([
 
 npm_link_all_packages()
 
+alias(
+    name = "format",
+    actual = ":vp_node",
+    tags = [
+        "guardian-format",
+        "guardian-format-viteplus",
+    ],
+)
+
 genrule(
     name = "vp_node",
     srcs = ["@rules_nodejs//nodejs:current_node_runtime"],
@@ -37,25 +46,28 @@ install -m 0755 "$$node" "$@"
 filegroup(
     name = "workspace_install_inputs",
     srcs = [
-        ".npmrc",
         ".changeset/config.json",
+        ".npmrc",
         "package.json",
         "pnpm-lock.yaml",
         "pnpm-workspace.yaml",
         "//src/products/aisucks/web:package_manifest",
         "//src/viteplus-monorepo/packages/aisucks-sdk:package_manifest",
-    ] + glob([
-        ".changeset/*.md",
-        "patches/**/*",
-        "scripts/**/*",
-    ], allow_empty = True),
+    ] + glob(
+        [
+            ".changeset/*.md",
+            "patches/**/*",
+            "scripts/**/*",
+        ],
+        allow_empty = True,
+    ),
 )
 
 filegroup(
     name = "workspace_sources",
     srcs = [
-        ".npmrc",
         ".changeset/config.json",
+        ".npmrc",
         "package.json",
         "pnpm-lock.yaml",
         "pnpm-workspace.yaml",
@@ -64,11 +76,14 @@ filegroup(
         "vite.config.ts",
         "//src/products/aisucks/web:sources",
         "//src/viteplus-monorepo/packages/aisucks-sdk:sources",
-    ] + glob([
-        ".changeset/*.md",
-        "patches/**/*",
-        "scripts/**/*",
-    ], allow_empty = True),
+    ] + glob(
+        [
+            ".changeset/*.md",
+            "patches/**/*",
+            "scripts/**/*",
+        ],
+        allow_empty = True,
+    ),
 )
 
 genrule(

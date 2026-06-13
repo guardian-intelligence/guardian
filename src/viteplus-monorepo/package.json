@@ -9,6 +9,7 @@
     "changeset:version": "changeset version",
     "dev": "vp run @guardian/aisucks-web#dev",
     "generate": "vp run -r generate",
+    "format": "vp fmt . --write",
     "check": "vp check",
     "lint": "vp lint && node scripts/check-release-hygiene.ts",
     "typecheck": "vp run -r typecheck && vp run -w typecheck:scripts",

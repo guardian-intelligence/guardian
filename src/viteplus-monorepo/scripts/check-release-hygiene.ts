@@ -58,7 +58,9 @@ const targetPackages =
 
 for (const packageName of targetPackages) {
   if (!publishablePackages.has(packageName)) {
-    throw new Error(`release hygiene target is not a publishable workspace package: ${packageName}`);
+    throw new Error(
+      `release hygiene target is not a publishable workspace package: ${packageName}`,
+    );
   }
 }
 

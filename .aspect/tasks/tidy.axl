@@ -1,0 +1,133 @@
+"""aspect tidy — run package-owned formatter targets.
+
+Formattable packages opt in with a runnable target tagged `guardian-format`.
+Aspect only discovers and runs those targets; formatter ownership stays in the
+package BUILD files.
+"""
+
+load(".aspect/lib/helpers.axl", "checked_spawn", "ws_path")
+
+FORMAT_QUERY = 'filter(":format$", attr("tags", "guardian-format", //...))'
+GOFMT_QUERY = 'filter(":format$", attr("tags", "guardian-format-gofmt", //...))'
+VITEPLUS_QUERY = 'filter(":format$", attr("tags", "guardian-format-viteplus", //...))'
+DEFAULT_PROCESS_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+def _capture_stdout(ctx, program, args, cwd = None, label = None):
+    label_str = label if label != None else program
+    cmd = ctx.std.process.command(program).args(args)
+    if cwd != None:
+        cmd = cmd.current_dir(cwd)
+    if ctx.std.io.stderr.is_tty:
+        ctx.std.io.stderr.write("$ " + label_str + "\n")
+    r = cmd.stdout("piped").stderr("piped").spawn().wait_with_output()
+    if r.status.code != 0:
+        ctx.std.io.stderr.write("ERROR: " + label_str + " failed\n")
+        if r.stderr != "":
+            ctx.std.io.stderr.write(r.stderr)
+        return None
+    return r.stdout.strip()
+
+def _query(ctx, expr):
+    raw = _capture_stdout(
+        ctx,
+        "bazelisk",
+        ["query", expr],
+        cwd = ws_path(ctx),
+        label = "bazelisk query " + expr,
+    )
+    if raw == None:
+        return None
+    out = []
+    for line in raw.split("\n"):
+        clean = line.strip()
+        if clean != "":
+            out.append(clean)
+    return out
+
+def _contains(items, needle):
+    for item in items:
+        if item == needle:
+            return True
+    return False
+
+def _label_package(label):
+    without_repo = label
+    if without_repo.startswith("@@"):
+        parts = without_repo.split("//", 1)
+        if len(parts) == 2:
+            without_repo = "//" + parts[1]
+    if not without_repo.startswith("//"):
+        return ""
+    body = without_repo[2:]
+    colon = body.find(":")
+    if colon == -1:
+        return body
+    return body[:colon]
+
+def _run_viteplus(ctx, target):
+    pkg = _label_package(target)
+    if pkg == "":
+        ctx.std.io.stderr.write("ERROR: viteplus formatter target must be in a package: " + target + "\n")
+        return 1
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        ["build", target, "//" + pkg + ":workspace_install"],
+        cwd = ws_path(ctx),
+        label = "bazelisk build " + target + " //" + pkg + ":workspace_install",
+    )
+    if rc != 0:
+        return rc
+    node = ws_path(ctx, "bazel-bin", pkg, "node")
+    return checked_spawn(
+        ctx,
+        node,
+        [ws_path(ctx, pkg, "node_modules/vite-plus/bin/vp"), "run", "-w", "format"],
+        cwd = ws_path(ctx, pkg),
+        env = {
+            "CI": "true",
+            "PATH": ws_path(ctx, "bazel-bin", pkg) + ":" + DEFAULT_PROCESS_PATH,
+        },
+        label = target + " package format",
+    )
+
+def _impl(ctx):
+    targets = _query(ctx, FORMAT_QUERY)
+    if targets == None:
+        return 1
+    gofmt_targets = _query(ctx, GOFMT_QUERY)
+    if gofmt_targets == None:
+        return 1
+    viteplus_targets = _query(ctx, VITEPLUS_QUERY)
+    if viteplus_targets == None:
+        return 1
+    if len(targets) == 0:
+        ctx.std.io.stderr.write("ERROR: no formatter targets tagged guardian-format\n")
+        return 1
+    for target in targets:
+        if _contains(viteplus_targets, target):
+            rc = _run_viteplus(ctx, target)
+            if rc != 0:
+                return rc
+            continue
+        pkg = _label_package(target)
+        cwd = ws_path(ctx, pkg) if pkg != "" else ws_path(ctx)
+        args = ["run", target]
+        if _contains(gofmt_targets, target):
+            args = args + ["--", "-w", "."]
+        rc = checked_spawn(
+            ctx,
+            "bazelisk",
+            args,
+            cwd = cwd,
+            label = "bazelisk " + " ".join(args),
+        )
+        if rc != 0:
+            return rc
+    return 0
+
+tidy = task(
+    implementation = _impl,
+    name = "tidy",
+    summary = "Run repo-wide source formatters through Bazel-pinned tools.",
+)
