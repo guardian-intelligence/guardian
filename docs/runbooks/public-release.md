@@ -52,13 +52,15 @@ npm:
 
 First publish options:
 
-1. Preferred for provenance: create a temporary granular npm token scoped to
-   `@guardian-intelligence/aisucks`, allow publish, allow 2FA bypass, store it
-   as the `NPM_TOKEN` secret on the `npm-release` environment, set
-   `NPM_PUBLISH_ENABLED=true`, run one tagged release, then revoke the token.
+1. Preferred bootstrap: create a temporary granular npm token scoped to
+   `@guardian-intelligence/aisucks`, store it as the `NPM_TOKEN` secret on the
+   `npm-release` environment, set `NPM_PUBLISH_ENABLED=true`, run one tagged
+   release with `npm publish --access public --provenance`, then revoke the
+   token after trusted publishing is configured.
 2. Manual fallback: publish once interactively from the package directory with
    `npm publish --access public`, then configure trusted publishing. This does
-   not produce GitHub Actions provenance for that first version.
+   not produce GitHub Actions provenance for that first version unless published
+   from a trusted CI environment with `--provenance`.
 
 After the package exists, configure npm trusted publishing:
 
