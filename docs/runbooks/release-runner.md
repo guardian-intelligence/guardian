@@ -1,9 +1,13 @@
 # Release runner runbook
 
-Provisions the self-hosted GitHub Actions runner that executes
-`.github/workflows/release.yml` (the automated form of
-docs/runbooks/aisucks-release.md). Customer-grade: every step is a copy-paste
-command with an expected outcome.
+Status: retired. The workflow-owned release runner bridge has been removed in
+favor of repo-owned Go release tooling executed through `aspect`. This file is
+kept only as historical context for the self-hosted runner POC until the
+release-target tooling fully replaces it.
+
+This previously provisioned the self-hosted GitHub Actions runner that executed
+the deleted release workflow. The commands below are retained only for forensic
+context; do not use them as the active release path.
 
 **Placement:** an operator workstation — never dev/gamma/prod. Traffic-serving
 hosts run commit-pinned release artifacts and never build from source

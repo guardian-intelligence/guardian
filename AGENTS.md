@@ -33,6 +33,19 @@ Service architecture:
 - Guardian legitimately runs smaller/more services than a normal app: it's a platform of control loops (one per capability), and SPIRE (identity) + Smithy (contracts/audit) + Bazel (hermetic builds) pre-pay the per-service tax that usually makes microservices too expensive. Cheaper, not free — every service is still its own SLO, on-call surface, and data-ownership decision.
 - Webhook handlers (Stripe, GitHub) are dumb edge adapters, not services: verify signature, persist the raw event idempotently (redelivery happens), ack 200 fast, hand off for processing. Default to a route in the app; break into its own pod only to keep ingestion alive across an app deploy, and even then the processing logic does not move out with it.
 
+Release doctrine:
+
+- A release is a typed operation over a release target, not a workflow file. The release target is the tuple of distributable, source commit, package/ecosystem version or coordinate, publisher, platform, build flavor, and channel intent.
+- Promotion preserves source lineage and release intent. Bit identity is package/ecosystem-specific: OCI images may promote the same digest, while npm/crates/iOS/Electron may rebuild because version, signing, or channel metadata changes bytes.
+- Inside the Bazel monorepo, the only internal version is the commit. Ecosystem versions, dist-tags, app versions, OCI tags, and channel pointers are external projections of a commit and artifact evidence; Guardian code must not depend on internal semver between repo modules.
+- Package-owned release tooling owns release semantics: version derivation, release notes, build targets, supported platforms/flavors/publishers, publisher-specific packaging, and retry behavior. Shared release infrastructure owns source resolution, subject normalization, provenance shape, signing hooks, idempotency, audit events, and result records.
+- Workflow YAML is only an executor shim: checkout, obtain repo-pinned tools, and run an Aspect task. Release decisions, matrices, publisher fan-out, signing, attestation, verification, and no-op logic belong in purpose-built Go binaries executed through `aspect`.
+- `aspect release ...` is the durable operator surface and should stay thin. It builds/runs the package release binary and passes flags through; it does not encode package policy itself.
+- Every release target must be idempotent and retryable. If an external artifact/version already exists with matching bytes or digest, no-op; if it exists with different bytes, fail loudly. Partial release runs must resume by verifying already-published targets before continuing.
+- Gate results are first-class artifacts. Synthetic checks and SLO evaluation should emit machine-readable gate-result records; signing them as in-toto/SLSA-style attestations is the natural next step, not a bespoke release ledger.
+- Distribution/admission services, when present, admit immutable digests, verify standard OCI/in-toto/SLSA evidence, gate public reads, and move channel pointers. They do not build artifacts and they do not know package-specific Bazel labels.
+- API operation policy should live with the operation contract where practical: auth, audit level, risk tier, request body limit, rate limit, and idempotency requirements should be generated into Connect/Go interceptors or equivalent boring enforcement code.
+
 Fleet (all Latitude.sh ASH, f4.metal.small; per-box physical facts — MACs, disk
 serials, gateways — live in `src/sites/<site>/site.yaml` and are derived from the
 box, never copied between boxes: prod's external NIC is X550 fn 0 where dev/gamma

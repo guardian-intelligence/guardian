@@ -4,21 +4,18 @@ Customer-grade: every step is a copy-paste command with an expected outcome.
 The release artifact is a **git tag** — hermetic Bazel makes the image digest
 a pure function of the commit, and step 4 verifies that instead of trusting it.
 
-Automated form: `.github/workflows/release.yml` runs steps 1–4 end-to-end on
-every merge to main (self-hosted runner: docs/runbooks/release-runner.md) and
-cuts the tag after the prod gate, so only green releases get tags. The runner
-is an interim POC — the ratified successor (`docs/architecture/release.md`)
+The old workflow-owned automated form has been removed. The steps below are the
+manual release spec until repo-owned Go release tooling, invoked through
+`aspect`, replaces them. The ratified successor (`docs/architecture/release.md`)
 moves deploys to per-cluster Flux + a release judge, with GitHub holding no
 cluster credentials; the gate criteria below carry over as the judge's soak
-spec. The steps below remain the spec the workflow apes, and the manual path
-when GitHub or the runner is down. Rollback (step 5) is manual either way. The release
-record IS the annotated tag set: `git tag -n1 -l 'aisucks/v*'` lists every
-release with its digest.
+spec. Rollback (step 5) is manual either way. The release record IS the
+annotated tag set: `git tag -n1 -l 'aisucks/v*'` lists every release with its
+digest.
 
-After this workflow pushes the green tag, `.github/workflows/public-release.yml`
-runs on GitHub-hosted infrastructure to publish public artifacts: GHCR image,
-cosign keyless signature, SLSA/in-toto attestation, and the npm SDK once npm
-publishing is enabled. See `docs/runbooks/public-release.md`.
+Public OCI vending is a separate release target; see
+`docs/runbooks/public-release.md`. The npm SDK uses the package-scoped lane in
+`docs/runbooks/npm-sdk-release.md`.
 
 Sites: dev `206.223.228.101` (vs-dev-w0) · gamma `45.250.254.119` (gd-gamma-w0)
 · prod `67.213.115.113` (gd-prod-w0). CAUTION: `206.223.228.87` and
