@@ -44,11 +44,11 @@ versions. A release task may publish an external projection from HEAD, but other
 Guardian code still consumes HEAD through the build graph.
 
 For npm specifically, Changesets records user-facing release intent for public
-packages only. The release task packs the SDK from HEAD, compares its integrity
-against npm, and no-ops only when the already-published package version is the
-same tarball. If HEAD would produce different package bytes under an existing
-npm version, the task fails instead of silently hiding a missing external
-version bump.
+packages only. The canonical SDK candidate is the npm tarball stored as an OCI
+artifact subject under `guardian/aisucks/sdk/npm`; npm publication is a
+downstream projection from that verified subject. If the same npm external
+version would map to different tarball bytes, the publisher fails instead of
+silently hiding a missing external version bump.
 
 ## Data model
 
@@ -128,9 +128,10 @@ VictoriaMetrics queries against the M2 recording rules.
 
 1. **Release target lane**: repo-owned Go release tooling normalizes release
    subjects, runs `oci_push` targets, emits a CUE/JSON release manifest, signs
-   provenance, and advances edge pointers. The npm SDK has the first thin
-   `aspect release npm-sdk` surface: publish/no-op logic lives in
-   `scripts/release/npm-aisucks-sdk.sh`, not in GitHub Actions path filters.
+   provenance, and advances edge pointers. The npm SDK first becomes an OCI
+   subject at `guardian/aisucks/sdk/npm`; the npmjs publish step is a later
+   Trusted Publishing projection from that subject, not a push-on-main rule in
+   GitHub Actions YAML.
    VERIFY: `cosign verify` of a real release from a clean machine (pulls part
    of M7's exit criteria forward).
 2. **Flux on dev** following edge; the template→kustomize conversion lands

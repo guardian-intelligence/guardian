@@ -7,11 +7,14 @@ executed through `aspect`, with any GitHub YAML reduced to an executor shim.
 This lane runs after the fleet release gate. It should publish immutable
 artifacts, signatures, attestations, and release metadata for selected release
 targets. The release tool owns the target tuple and all publish/no-op logic.
+Reference naming is defined in `docs/architecture/oci-artifact-references.md`.
 
 ## What Ships
 
-- OCI image: `ghcr.io/guardian-intelligence/aisucks@sha256:<digest>`
-- OCI tags: `v<N>` and `git-<12-char-sha>`
+- API OCI image: `ghcr.io/guardian-intelligence/aisucks@sha256:<digest>`
+- SDK OCI artifact:
+  `oci.gi.org/guardian/aisucks/sdk/npm@sha256:<manifest>`
+- OCI tags: `edge`, `nightly`, `stable`, `v<N>`, and `git-<12-char-sha>`
 - Cosign keyless signature over the digest
 - Cosign in-toto/SLSA provenance attestation over the digest
 
@@ -40,8 +43,8 @@ GHCR:
 - The package should be made public in the GitHub Packages UI after the first
   publish if GitHub defaults it to private.
 
-The npm SDK release lane is intentionally separate and package-scoped. See
-`docs/runbooks/npm-sdk-release.md`.
+The npm SDK release lane is intentionally a downstream projection from the SDK
+OCI artifact. See `docs/runbooks/npm-sdk-release.md`.
 
 ## Verify OCI Signature
 
