@@ -24,7 +24,7 @@ func TestAisucksPublicHTTPServiceRender(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			rendered, err := renderComponentManifest(c, aisucksTestImage, site)
+			rendered, err := renderComponentManifest(c, aisucksTestImage, nil, site)
 			if err != nil {
 				t.Fatal(err)
 			}

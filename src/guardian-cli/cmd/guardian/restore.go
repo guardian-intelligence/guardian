@@ -180,6 +180,17 @@ func isHex(s string) bool {
 // baoAPI calls the OpenBao HTTP API and decodes a 2xx JSON body into out (nil
 // to ignore). It uses http.DefaultClient with no timeout: snapshot-force
 // streams the whole snapshot as the request body and may be large.
+type baoHTTPError struct {
+	method string
+	path   string
+	status int
+	body   string
+}
+
+func (e *baoHTTPError) Error() string {
+	return fmt.Sprintf("%s %s: status %d: %s", e.method, e.path, e.status, e.body)
+}
+
 func baoAPI(addr, method, path, token string, body io.Reader, out any) error {
 	req, err := http.NewRequest(method, "http://"+addr+path, body)
 	if err != nil {
@@ -195,7 +206,7 @@ func baoAPI(addr, method, path, token string, body io.Reader, out any) error {
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("%s %s: status %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(data)))
+		return &baoHTTPError{method: method, path: path, status: resp.StatusCode, body: strings.TrimSpace(string(data))}
 	}
 	if out != nil {
 		if err := json.Unmarshal(data, out); err != nil {

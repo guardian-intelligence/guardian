@@ -19,6 +19,7 @@ filegroup(
         "//src/guardian-cli/cmd/guardian",
         "//src/products/aisucks/api:models",
         "//src/products/aisucks/services/api:image",
+        "//src/platform/oci-placeholder:image",
         "//src/release/cmd/sdkoci",
         "//src/viteplus-monorepo:workspace_build",
         "//src/viteplus-monorepo:workspace_lint",

@@ -1,0 +1,51 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_cross_binary", "go_library")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+load("//tools/format:defs.bzl", "go_format")
+
+go_format()
+
+go_library(
+    name = "oci_placeholder_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/platform/oci-placeholder",
+    visibility = ["//visibility:private"],
+)
+
+go_binary(
+    name = "oci-placeholder",
+    embed = [":oci_placeholder_lib"],
+    pure = "on",
+    visibility = ["//visibility:public"],
+)
+
+go_cross_binary(
+    name = "oci-placeholder_linux_amd64",
+    platform = "@io_bazel_rules_go//go/toolchain:linux_amd64",
+    target = ":oci-placeholder",
+)
+
+pkg_tar(
+    name = "oci_placeholder_layer",
+    files = {
+        ":oci-placeholder_linux_amd64": "usr/bin/oci-placeholder",
+    },
+    modes = {
+        "usr/bin/oci-placeholder": "0755",
+    },
+)
+
+oci_image(
+    name = "image",
+    base = "@ubuntu_noble_base",
+    entrypoint = ["/usr/bin/oci-placeholder"],
+    exposed_ports = ["8080/tcp"],
+    tars = [":oci_placeholder_layer"],
+    visibility = ["//visibility:public"],
+)
+
+oci_load(
+    name = "load",
+    image = ":image",
+    repo_tags = ["guardian/oci-placeholder:dev"],
+)

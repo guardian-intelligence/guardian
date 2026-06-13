@@ -7,11 +7,9 @@ import (
 
 // TestClickhouseSiteGate pins the ledger ratchet across the real site.yamls:
 // clickhouse.enabled is ON for dev and gamma and OFF for prod — prod must
-// not grow a clickhouse Deployment (its required clickhouse-admin
-// secretKeyRef would park the pod in CreateContainerConfigError until the
-// operator pre-creates the Secret, docs/runbooks/ledger.md), and prod's
-// otel-collector must render byte-identical to the metrics-only spine (no
-// logs pipeline, no hostPath log mounts, no runAsUser: 0).
+// not grow a clickhouse Deployment until the ledger ratchet flips, and
+// prod's otel-collector must render byte-identical to the metrics-only spine
+// (no logs pipeline, no hostPath log mounts, no runAsUser: 0).
 func TestClickhouseSiteGate(t *testing.T) {
 	chTmpl, err := toolPath("_main/src/infrastructure-components/clickhouse/k8s/clickhouse.yaml.tmpl")
 	if err != nil {
@@ -38,7 +36,7 @@ func TestClickhouseSiteGate(t *testing.T) {
 				t.Fatal(err)
 			}
 			if site.Clickhouse.Enabled != wantEnabled[siteName] {
-				t.Fatalf("site %s clickhouse.enabled = %v, want %v (the ledger ratchet: dev+gamma on, prod off until its Secret exists)",
+				t.Fatalf("site %s clickhouse.enabled = %v, want %v (the ledger ratchet: dev+gamma on, prod off)",
 					siteName, site.Clickhouse.Enabled, wantEnabled[siteName])
 			}
 

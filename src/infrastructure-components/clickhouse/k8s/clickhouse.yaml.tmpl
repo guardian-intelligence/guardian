@@ -9,10 +9,10 @@
 # create_schema: false — the schema is a reviewed, versioned fact, not
 # whatever an exporter upgrade decides.
 #
-# The clickhouse-admin Secret (key: password) is created once per site by the
-# operator — same manual-secret philosophy as aisucks-db/OpenBao init:
-#   kubectl -n observability create secret generic clickhouse-admin \
-#     --from-literal=password="$(openssl rand -base64 24)"
+# The clickhouse-admin Secret (key: password) is projected from OpenBao by
+# External Secrets Operator. Do not create it by hand; `guardian up`
+# configures the Bao path and waits for the projected Kubernetes Secret before
+# applying ClickHouse.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -43,7 +43,7 @@ data:
     </clickhouse>
   # Dropped into /etc/clickhouse-server/users.d/. The default user is the
   # ONLY user: the image ships it with an empty password and this override
-  # replaces that with the operator-created clickhouse-admin Secret, injected
+  # replaces that with the Bao-projected clickhouse-admin Secret, injected
   # as an env var by the Deployment (from_env resolves at server start).
   guardian-users.xml: |
     <clickhouse>

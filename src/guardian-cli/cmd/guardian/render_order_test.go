@@ -12,12 +12,17 @@ import (
 
 // TestGatewayCRDsPrecedeCilium renders each site's machine config with the
 // pinned talosctl — the same `gen config` invocation up.go issues, site
-// patches in site.yaml list order — and asserts cluster.inlineManifests
-// lists gateway-api-crds before cilium. The CRDs must exist before the
-// Cilium render that watches them, and list position in talos.patches is
-// the only thing ordering them: nothing in Go enforces it, so this test is
-// what a careless site.yaml edit (or a new site copied from a stale
-// template) trips.
+// patches in site.yaml list order — and asserts the machine-config
+// invariants that Talos owns for us:
+//
+//   - cluster.secretboxEncryptionSecret is present, so Kubernetes Secret
+//     encryption-at-rest is wired by Talos instead of a custom
+//     EncryptionConfiguration path;
+//   - cluster.inlineManifests lists gateway-api-crds before cilium. The
+//     CRDs must exist before the Cilium render that watches them, and list
+//     position in talos.patches is the only thing ordering them: nothing in
+//     Go enforces it, so this test is what a careless site.yaml edit (or a
+//     new site copied from a stale template) trips.
 //
 // up.go appends three programmatic --config-patch flags after the site
 // patches (disk selector, static network, HostnameConfig delete); they are
@@ -65,6 +70,10 @@ func TestGatewayCRDsPrecedeCilium(t *testing.T) {
 				t.Fatalf("gen config: %v\n%s", err, out)
 			}
 
+			if !hasSecretboxEncryptionSecret(t, rendered) {
+				t.Fatal("generated controlplane config is missing cluster.secretboxEncryptionSecret; Kubernetes Secrets must be encrypted at rest by Talos")
+			}
+
 			names := inlineManifestNames(t, rendered)
 			crds := slices.Index(names, "gateway-api-crds")
 			cilium := slices.Index(names, "cilium")
@@ -108,4 +117,30 @@ func inlineManifestNames(t *testing.T, path string) []string {
 		}
 	}
 	return names
+}
+
+func hasSecretboxEncryptionSecret(t *testing.T, path string) bool {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	dec := yaml.NewDecoder(f)
+	for {
+		var doc struct {
+			Cluster struct {
+				SecretboxEncryptionSecret string `yaml:"secretboxEncryptionSecret"`
+			} `yaml:"cluster"`
+		}
+		if err := dec.Decode(&doc); err == io.EOF {
+			break
+		} else if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		if doc.Cluster.SecretboxEncryptionSecret != "" {
+			return true
+		}
+	}
+	return false
 }
