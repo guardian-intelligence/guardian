@@ -12,8 +12,6 @@ no cluster credentials.
 - OCI tags: `v<N>` and `git-<12-char-sha>`
 - Cosign keyless signature over the digest
 - Cosign in-toto/SLSA provenance attestation over the digest
-- npm package: `@guardian-intelligence/aisucks@0.1.<N>` when npm publishing is
-  enabled
 
 The OCI digest still comes from `bazelisk build //:build`; the public workflow
 pushes the already-built layout with:
@@ -28,14 +26,10 @@ bazelisk run //src/products/aisucks/services/api:publish_ghcr -- --tag v<N>
 
 GitHub:
 
-- `public-release.yml` must stay on a GitHub-hosted runner. npm trusted
-  publishing and cosign keyless signing both depend on GitHub OIDC.
+- `public-release.yml` must stay on a GitHub-hosted runner. Cosign keyless
+  signing depends on GitHub OIDC.
 - The workflow needs `contents: read`, `packages: write`, and
   `id-token: write`.
-- Environment: `npm-release`.
-- Variable: `NPM_PUBLISH_ENABLED=true` enables npm publishing. Leave it unset
-  until the npm package exists and either trusted publishing or the temporary
-  bootstrap token is ready.
 
 GHCR:
 
@@ -43,38 +37,8 @@ GHCR:
 - The package should be made public in the GitHub Packages UI after the first
   publish if GitHub defaults it to private.
 
-npm:
-
-- Org: `guardian-intelligence`.
-- Package: `@guardian-intelligence/aisucks`.
-- Trusted publishing cannot be configured until the package already exists on
-  npm. That is npm's current rule for `npm trust`.
-
-First publish options:
-
-1. Preferred bootstrap: create a temporary granular npm token scoped to
-   `@guardian-intelligence/aisucks`, store it as the `NPM_TOKEN` secret on the
-   `npm-release` environment, set `NPM_PUBLISH_ENABLED=true`, run one tagged
-   release with `npm publish --access public --provenance`, then revoke the
-   token after trusted publishing is configured.
-2. Manual fallback: publish once interactively from the package directory with
-   `npm publish --access public`, then configure trusted publishing. This does
-   not produce GitHub Actions provenance for that first version unless published
-   from a trusted CI environment with `--provenance`.
-
-After the package exists, configure npm trusted publishing:
-
-- Provider: GitHub Actions
-- Organization/user: `guardian-intelligence`
-- Repository: `guardian`
-- Workflow filename: `public-release.yml`
-- Environment: `npm-release`
-- Allowed action: `npm publish`
-
-Then remove `NPM_TOKEN`, keep `NPM_PUBLISH_ENABLED=true`, and set the npm
-package's publishing access to disallow token publishing if desired. Trusted
-publishing generates npm provenance automatically for public packages from a
-public GitHub repository.
+The npm SDK release lane is intentionally separate and package-scoped. See
+`docs/runbooks/npm-sdk-release.md`.
 
 ## Verify OCI Signature
 
@@ -114,51 +78,6 @@ Expected predicate facts:
   `//src/products/aisucks/services/api:publish_ghcr`.
 - `predicate.builder.id` names `public-release.yml` at the release
   tag ref.
-
-## Verify npm Package
-
-After npm publishing is enabled:
-
-```sh
-npm view @guardian-intelligence/aisucks@0.1.<N> \
-  --registry=https://registry.npmjs.org/ \
-  name version dist.integrity repository.url
-```
-
-Expected:
-
-- `name` is `@guardian-intelligence/aisucks`.
-- `version` is `0.1.<N>`.
-- `repository.url` is `git+https://github.com/guardian-intelligence/guardian.git`.
-- npmjs.com shows the provenance badge for versions published through trusted
-  publishing or `npm publish --provenance`.
-
-The Sigstore search UI is a convenience surface only. If
-`https://search.sigstore.dev/?logIndex=<index>` reports a browser
-`NetworkError`, verify the npm attestations directly:
-
-```sh
-PKG='@guardian-intelligence/aisucks@0.1.<N>'
-
-npm view "$PKG" \
-  --registry=https://registry.npmjs.org/ \
-  dist.attestations.url dist.attestations.provenance.predicateType
-
-curl -fsS "https://registry.npmjs.org/-/npm/v1/attestations/%40guardian-intelligence%2Faisucks@0.1.<N>" \
-  | jq -r '.attestations[] | [.predicateType, .bundle.verificationMaterial.tlogEntries[0].logIndex] | @tsv'
-```
-
-Expected:
-
-- One attestation is npm publish metadata:
-  `https://github.com/npm/attestation/tree/main/specs/publish/v0.1`.
-- One attestation is SLSA provenance: `https://slsa.dev/provenance/v1`.
-- The SLSA attestation's `logIndex` is retrievable from Rekor:
-
-```sh
-curl -fsS "https://rekor.sigstore.dev/api/v1/log/entries?logIndex=<logIndex>" \
-  | jq .
-```
 
 ## Later Fleet Admission
 

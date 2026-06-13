@@ -6,6 +6,7 @@ allowBuilds:
   esbuild: true
 
 catalog:
+  "@changesets/cli": 2.31.0
   "@tailwindcss/vite": ^4
   # Exact TanStack pins are intentional. Move them as a reviewed set with
   # lockfile evidence because install-time malware has landed in this family.

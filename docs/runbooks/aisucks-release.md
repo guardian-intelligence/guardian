@@ -16,9 +16,10 @@ record IS the annotated tag set: `git tag -n1 -l 'aisucks/v*'` lists every
 release with its digest.
 
 After this workflow pushes the green tag, `.github/workflows/public-release.yml`
-runs on GitHub-hosted infrastructure to publish public artifacts: GHCR image,
-cosign keyless signature, SLSA/in-toto attestation, and the npm SDK once npm
-publishing is enabled. See `docs/runbooks/public-release.md`.
+runs on GitHub-hosted infrastructure to publish the public OCI artifact, cosign
+keyless signature, and SLSA/in-toto attestation. The npm SDK uses the separate
+package-scoped lane in `.github/workflows/npm-sdk-release.yml`; see
+`docs/runbooks/npm-sdk-release.md`.
 
 Sites: dev `206.223.228.101` (vs-dev-w0) · gamma `45.250.254.119` (gd-gamma-w0)
 · prod `67.213.115.113` (gd-prod-w0). CAUTION: `206.223.228.87` and

@@ -1,0 +1,27 @@
+"""aspect release — release publication checks and helpers."""
+
+load(".aspect/lib/helpers.axl", "checked_spawn", "ws_path")
+
+def _npm_sdk_impl(ctx):
+    cli_args = []
+    if ctx.args.publish:
+        cli_args.append("--publish")
+    cli_args.extend(["--registry", ctx.args.registry])
+    return checked_spawn(
+        ctx,
+        "bash",
+        [ws_path(ctx, "scripts/release/npm-aisucks-sdk.sh")] + cli_args,
+        cwd = ws_path(ctx),
+        label = "npm-aisucks-sdk release",
+    )
+
+npm_sdk = task(
+    implementation = _npm_sdk_impl,
+    name = "npm-sdk",
+    group = ["release"],
+    summary = "Build/probe/publish the aisucks npm SDK by package@version.",
+    args = {
+        "publish": args.boolean(default = False, description = "Publish a new package version instead of doing a local dry run."),
+        "registry": args.string(default = "https://registry.npmjs.org/", description = "npm registry base URL."),
+    },
+)

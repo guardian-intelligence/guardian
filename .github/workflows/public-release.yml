@@ -2,8 +2,8 @@
 #
 # The self-hosted release workflow owns deploy credentials and cuts the
 # aisucks/v<N> tag only after prod gates green. This workflow runs on
-# GitHub-hosted runners because npm trusted publishing and cosign keyless
-# signing both depend on GitHub OIDC and must not run on the fleet runner.
+# GitHub-hosted runners because cosign keyless signing depends on GitHub OIDC
+# and must not run on the fleet runner.
 name: public-release
 
 on:
@@ -28,13 +28,10 @@ defaults:
 env:
   OCI_REPOSITORY: ghcr.io/guardian-intelligence/aisucks
   OCI_PUBLISH_TARGET: //src/products/aisucks/services/api:publish_ghcr
-  SDK_DIR: src/viteplus-monorepo/packages/aisucks-sdk
-  NPM_PUBLISH_ENABLED: ${{ vars.NPM_PUBLISH_ENABLED }}
 
 jobs:
   release:
     runs-on: ubuntu-latest
-    environment: npm-release
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -42,12 +39,6 @@ jobs:
           fetch-depth: 0
 
       - uses: bazelbuild/setup-bazelisk@b39c379c82683a5f25d34f0d062761f62693e0b2 # v3.0.0
-
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "24.15.0"
-          registry-url: "https://registry.npmjs.org"
-          package-manager-cache: false
 
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
@@ -65,7 +56,6 @@ jobs:
             echo "RELEASE_SEQ=$seq"
             echo "OCI_TAG=v$seq"
             echo "OCI_GIT_TAG=git-${GITHUB_SHA::12}"
-            echo "NPM_VERSION=0.1.$seq"
           } >> "$GITHUB_ENV"
 
       - name: Build
@@ -161,39 +151,3 @@ jobs:
             --type slsaprovenance \
             --certificate-identity-regexp "$identity" \
             --certificate-oidc-issuer "$issuer" >/tmp/cosign-attestation.json
-
-      - name: Publish SDK to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
-        run: |
-          set -euo pipefail
-          if [[ "${NPM_PUBLISH_ENABLED:-}" != "true" ]]; then
-            echo "::notice::Skipping npm publish; set NPM_PUBLISH_ENABLED=true after package bootstrap/trusted publishing is ready."
-            {
-              echo
-              echo "### npm"
-              echo
-              echo "- Skipped: \`NPM_PUBLISH_ENABLED\` is not \`true\`."
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
-          cd "$SDK_DIR"
-          node --version
-          npm --version
-          node - <<'NODE'
-          const fs = require("node:fs");
-          const path = "package.json";
-          const pkg = JSON.parse(fs.readFileSync(path, "utf8"));
-          pkg.version = process.env.NPM_VERSION;
-          fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + "\n");
-          NODE
-          test -f dist/index.js
-          npm publish --access public --provenance
-          {
-            echo
-            echo "### npm"
-            echo
-            echo "- Package: \`@guardian-intelligence/aisucks@$NPM_VERSION\`"
-          } >> "$GITHUB_STEP_SUMMARY"

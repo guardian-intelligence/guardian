@@ -1,6 +1,6 @@
 {
   "name": "@guardian-intelligence/aisucks",
-  "version": "0.1.0",
+  "version": "0.1.15",
   "description": "Tiny SDK for the aisucks.app public API.",
   "type": "module",
   "sideEffects": false,
@@ -14,6 +14,7 @@
   },
   "homepage": "https://github.com/guardian-intelligence/guardian/tree/main/src/viteplus-monorepo/packages/aisucks-sdk#readme",
   "files": [
+    "CHANGELOG.md",
     "dist",
     "README.md"
   ],

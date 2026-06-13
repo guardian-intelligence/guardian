@@ -21,6 +21,10 @@ load(
     dev_install = "install",
     dev_uninstall = "uninstall",
 )
+load(
+    ".aspect/tasks/release.axl",
+    release_npm_sdk = "npm_sdk",
+)
 
 def config(ctx):
     # aspect bazel ...
@@ -31,3 +35,6 @@ def config(ctx):
     # aspect dev ...
     ctx.tasks.add(dev_install)
     ctx.tasks.add(dev_uninstall)
+
+    # aspect release ...
+    ctx.tasks.add(release_npm_sdk)

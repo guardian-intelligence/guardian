@@ -139,10 +139,11 @@ the public key and the registry URL; a third party can rebuild and match a
 digest following only public docs. THIS IS THE PHASE-1 EXIT.
 STATUS 2026-06-13: first public-vending bridge exists for aisucks. A
 GitHub-hosted tag workflow pushes `ghcr.io/guardian-intelligence/aisucks`,
-signs it keyless, attaches SLSA/in-toto provenance, and has a gated npm SDK
-publish step. Remaining before M7 is done: package bootstrap + trusted
-publisher verification, release manifest/channel artifacts, gate-pass
-attestations, and clean-machine verification of a real public digest.
+signs it keyless, and attaches SLSA/in-toto provenance. The npm SDK has a
+separate Trusted Publishing lane with repo-owned publish/no-op logic. Remaining
+before M7 is done: trusted-publisher verification, release manifest/channel
+artifacts, gate-pass attestations, and clean-machine verification of a real
+public digest.
 
 ## M8 — the paved-road proof (capstone)
 

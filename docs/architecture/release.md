@@ -31,6 +31,26 @@ Build authority and deploy authority never meet:
   review + reproducibility (anyone rebuilds the commit and matches the
   digest; proven on every release).
 
+## Versioning rule
+
+Inside the Bazel monorepo, the only version is the commit. Guardian code
+depends on Bazel labels and source at that commit, not on internal semver
+coordinates. Runtime identity is the artifact digest produced from that commit
+and recorded in provenance.
+
+External versions are projections for ecosystems that require coordinates:
+npm package versions, Kubernetes API versions, database migration order, OCI
+tags, and signed channel pointers. They do not become internal dependency
+versions. A release task may publish an external projection from HEAD, but other
+Guardian code still consumes HEAD through the build graph.
+
+For npm specifically, Changesets records user-facing release intent for public
+packages only. The release task packs the SDK from HEAD, compares its integrity
+against npm, and no-ops only when the already-published package version is the
+same tarball. If HEAD would produce different package bytes under an existing
+npm version, the task fails instead of silently hiding a missing external
+version bump.
+
 ## Data model
 
 - **Release manifest** (CUE → signed OCI artifact): monotonic `seq`
@@ -111,10 +131,12 @@ VictoriaMetrics queries against the M2 recording rules.
    pointer. First bridge landed for aisucks:
    `.github/workflows/public-release.yml` publishes the fleet-gated
    `//src/products/aisucks/services/api:publish_ghcr` image to GHCR by
-   digest, cosign-signs it keyless, attaches SLSA/in-toto provenance, and
-   can publish the npm SDK after package bootstrap. VERIFY: `cosign verify`
-   of a real release from a clean machine (pulls part of M7's exit criteria
-   forward).
+   digest, cosign-signs it keyless, and attaches SLSA/in-toto provenance.
+   The npm SDK uses `.github/workflows/npm-sdk-release.yml`, which delegates
+   the publish/no-op decision to `scripts/release/npm-aisucks-sdk.sh` and
+   `aspect release npm-sdk` instead of GitHub Actions path filters. VERIFY:
+   `cosign verify` of a real release from a clean machine (pulls part of
+   M7's exit criteria forward).
 2. **Flux on dev** following edge; the template→kustomize conversion lands
    here. VERIFY: a merge reaches dev converged in minutes, hands-off.
 3. **Judge, gate role on gamma.** Prerequisite: bao Transit init on gamma
