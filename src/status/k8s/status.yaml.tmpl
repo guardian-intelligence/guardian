@@ -99,4 +99,29 @@ spec:
     - name: http
       port: 80
       targetPort: 8080
+{{- if .Site.Gateway.Enabled}}
+---
+# Status owns its passthrough TLSRoute; the platform EdgeGateway owns only the
+# shared listener that this route attaches to.
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: TLSRoute
+metadata:
+  name: status
+  namespace: status
+spec:
+  parentRefs:
+{{- range $i, $_ := .Site.Status.Domains}}
+    - name: edge
+      namespace: gateway
+      sectionName: tls-status-{{$i}}
+{{- end}}
+  hostnames:
+{{- range .Site.Status.Domains}}
+    - "{{.}}"
+{{- end}}
+  rules:
+    - backendRefs:
+        - name: status
+          port: 443
+{{- end}}
 {{- end}}

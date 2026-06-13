@@ -1,14 +1,14 @@
 # Edge gateway (roadmap M3)
 
-Record of decision, ratified 2026-06-12. Phase 0 (CRD vendoring, values
-delta, re-render, machine-config wiring, ordering regression test) is in
-the tree; nothing is deployed — inline manifests are bootstrap-only, so the
-working-tree state is inert for every running site. Companions:
+Record of decision, ratified 2026-06-12. The Cilium Gateway API substrate is
+generated as Talos inline manifests from pinned upstream artifacts, and the
+shared edge object is now owned by
+the Crossplane `EdgeGateway` platform substrate installed by `guardian up` on
+Gateway-enabled sites. Companions:
 `docs/architecture/topology.md` (gates the prod conversion),
 `docs/runbooks/cilium-conversion.md` (the drilled wipe fallback). This doc
-changes by amendment — the dev pilot record at the bottom (2026-06-12/13)
-supersedes "nothing is deployed": dev is converted and serving through the
-Gateway.
+changes by amendment; the dev pilot record at the bottom (2026-06-12/13)
+records the converted dev baseline.
 
 ## Why the Gateway is the keystone
 
@@ -25,11 +25,9 @@ everything else is a route.
 ## Decisions
 
 - **Cilium Gateway API, served by the node Envoy** (the `cilium-envoy`
-  DaemonSet already running). One control plane, no sidecars, no
-  cert-manager, no separate gateway fleet. The values delta is
-  `gatewayAPI.enabled` + `hostNetwork.enabled` plus `NET_BIND_SERVICE` on
-  the Envoy wrapper (`src/infrastructure-components/cilium/values.yaml`,
-  which records each constraint inline).
+  DaemonSet already running). One control plane, no sidecars, no separate
+  gateway fleet. Cilium supplies the controller/Envoy; Crossplane
+  `EdgeGateway` owns `GatewayClass/cilium` and `Gateway gateway/edge`.
 - **hostNetwork mode on the /31.** Single-node sites with a routed
   point-to-point /31 have no shared L2 and no LB to program — the
   LB-IPAM / BGP menu returns only with the 3-node topology (topology.md).
@@ -45,14 +43,14 @@ everything else is a route.
 - **Platform TLS is Gateway-terminated by amendment.** Product services that
   intentionally own keys stay on passthrough. Platform APIs such as
   `oci.guardianintelligence.org` terminate TLS at Cilium Gateway using
-  cert-manager-managed Secrets and route to in-cluster HTTP backends. The
-  implementation handoff is `docs/architecture/tls.md`; do not add a Caddy,
-  nginx, or bespoke TLS proxy to solve this.
+  cert-manager-managed Secrets and route to in-cluster HTTP backends. zot is
+  the first such backend. Do not add a Caddy, nginx, or bespoke TLS proxy to
+  solve this.
 - **CRD pin = a function of the Cilium version.** Cilium 1.19 consumes
   TLSRoute as v1alpha2, so we vendor the exact Gateway API release the
   Cilium 1.19.4 docs declare conformance against (v1.4.1 at this writing;
-  the pin of record, channel rationale, and per-file sha256s live in the
-  header of
+  the pin of record is the `gateway_api_source` SHA in `MODULE.bazel`, and
+  Bazel generates
   `src/infrastructure-components/cilium/talos/gateway-api-crds-inline.yaml`).
   Gateway API v1.5 graduated TLSRoute to v1 and its standard CRD stops
   serving v1alpha2 — bumping the CRDs alone would silently disable the path
@@ -120,11 +118,15 @@ the error budget), or the **drilled wipe-convert** (212s measured,
   `render_order_test.go` green for all three sites; `bazelisk test //...`
   green; the re-render diff touches only inline manifests (inert for
   running sites).
-- **Phase 1 — gateway component + routes.** Gateway + TLSRoute/HTTPRoute
-  objects as a guardian component; push.go grows manifest-only component
-  support (every current component pairs an image with its manifest; the
-  gateway is objects only). VERIFY: unit tests; `kubectl --dry-run=server`
-  against dev validates every object against the pinned CRDs.
+- **Phase 1 — EdgeGateway substrate + product routes.** `guardian up`
+  installs pinned Crossplane, provider-kubernetes, function-go-templating,
+  cert-manager where needed, and the `EdgeGateway` XRD/Composition. Sites
+  declare the concrete `EdgeGateway` objects in `gateway.manifests`; the
+  platform composition owns GatewayClass/Gateway/listeners/cert refs, and
+  products own their same-namespace `TLSRoute`/`HTTPRoute` objects. VERIFY:
+  unit tests;
+  `kubectl --dry-run=server` or live dev apply validates every object against
+  the pinned CRDs.
 - **Phase 2 — app to pod network.** Drop hostNetwork, add the Service,
   `replicas: 2`. The hostPath cert cache stays correct while sites are
   single-node (certmagic file-locks across pods on one box); the 3-node
@@ -160,12 +162,6 @@ hostNetwork Envoy listener is a plain host socket — there is nothing on
 that path for XDP to accelerate.
 
 ## Risks and open threads
-
-- **Platform TLS is direct-rendered until EdgeGateway exists.**
-  `oci.guardianintelligence.org` now uses a cert-manager-managed Secret and a
-  Gateway-terminated HTTPS listener while product hostnames stay on TLSRoute
-  passthrough. Crossplane-owned `EdgeGateway` remains the API shape to adopt
-  once Crossplane is pinned, mirrored, and installed by `guardian up`.
 
 - **Gatus probes dev by raw IP** — no SNI, so a fully SNI-routed :443
   would drop the prober that watches the pilot. Dev routes stay

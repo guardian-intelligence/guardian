@@ -1,5 +1,0 @@
-filegroup(
-    name = "manifest",
-    srcs = ["k8s/guardian-oci.yaml.tmpl"],
-    visibility = ["//src/guardian-cli:__subpackages__"],
-)

@@ -5,6 +5,7 @@
 filegroup(
     name = "sites",
     srcs = glob([
+        "*/k8s/*.yaml",
         "*/site.yaml",
         "*/talos/patches/*.yaml",
     ]),

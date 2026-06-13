@@ -1,16 +1,6 @@
-# Helm values for the vendored Cilium render (talos/cilium-inline.yaml).
-# This file is the input of record: re-vendor with
-#
-#   helm repo add cilium https://helm.cilium.io
-#   helm template cilium cilium/cilium --version 1.19.4 -n kube-system \
-#     -f src/infrastructure-components/cilium/values.yaml > /tmp/cilium.yaml
-#   python3 - <<'PY'   # wrap as a Talos inlineManifests patch (yaml-in-yaml)
-#   body = open('/tmp/cilium.yaml').read()
-#   head = open('src/infrastructure-components/cilium/talos/cilium-inline.yaml').read()
-#   head = head[:head.index('      contents: |') + len('      contents: |')]
-#   ind = '\n'.join(('        ' + l) if l.strip() else '' for l in body.splitlines())
-#   open('src/infrastructure-components/cilium/talos/cilium-inline.yaml', 'w').write(head + '\n' + ind + '\n')
-#   PY
+# Helm values for the generated Cilium Talos inline manifest
+# (talos/cilium-inline.yaml). This file is the input of record; the chart
+# tarball and SHA live in MODULE.bazel, and Bazel renders the Talos patch.
 #
 # Cilium replaces Flannel (CNI) and kube-proxy (eBPF service handling) on
 # every site; the sites' cni-none.yaml patch disables both, and the
@@ -20,7 +10,7 @@
 #
 # UPGRADES ARE WIPE DRILLS: Talos applies inline manifests at bootstrap
 # only — it never updates or deletes existing objects on a config change,
-# so re-vendoring + plain re-converge is a silent no-op. A Cilium version
+# so regenerating + plain re-converge is a silent no-op. A Cilium version
 # bump ships as `guardian down --yes && guardian up` per site (dev gates,
 # as ever), and objects dropped from a re-render must be pruned by hand.
 #
@@ -121,22 +111,17 @@ hubble:
 # spec.listeners declares — no LoadBalancer Service, no NodePort path (the
 # chart auto-disables the Service mode). The CRDs the operator watches ship
 # as their own inline manifest (talos/gateway-api-crds-inline.yaml), listed
-# before this render in every site.yaml; pin and channel rationale live in
-# that file's header. Enabling this only arms the operator: nothing binds a
-# port until a Gateway object exists (a later phase), so the app keeps host
-# :80/:443 today.
+# before this render in every site.yaml. The chart/source pins and SHAs live
+# in MODULE.bazel, and Bazel generates both inline manifests. Enabling this
+# only arms the operator: nothing binds a port until a Gateway object exists
+# (a later phase), so the app keeps host :80/:443 today.
 #
-# The chart's default `gatewayClass.create: auto` probes the live cluster
-# for the GatewayClass API (.Capabilities.APIVersions.Has) — always false
-# under offline `helm template`, so the vendored render would silently omit
-# the GatewayClass and nothing else creates it (the operator RBAC has no
-# create verb on gatewayclasses). Force it so a fresh bootstrap converges
-# with no operator in the loop: the CRDs ride the inline manifest listed
-# above this render, and Talos applies CRDs before all non-CRD objects.
+# Cilium supplies the Gateway controller and Envoy only. The platform
+# EdgeGateway Crossplane substrate owns GatewayClass/Gateway objects.
 gatewayAPI:
   enabled: true
   gatewayClass:
-    create: "true"
+    create: "false"
   hostNetwork:
     enabled: true
 

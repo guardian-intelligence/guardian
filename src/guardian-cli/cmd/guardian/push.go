@@ -23,10 +23,13 @@ type component struct {
 	name string
 	// layout is the runfiles path of the rules_oci OCI layout directory.
 	// Empty means manifest-only: nothing to push, no image ref — the
-	// manifest template must never reference .Image (gateway: the listener
-	// is the cilium-envoy DaemonSet already on the node).
+	// manifest template must never reference .Image.
 	layout   string
 	manifest string // repo-root-relative manifest template
+	// rawManifest skips Guardian's Go-template renderer. This is for manifests
+	// that intentionally contain another controller's template language, such
+	// as Crossplane function-go-templating compositions.
+	rawManifest bool
 	// images is for components that render several image refs into one
 	// manifest, such as cert-manager. Keys are the seed-registry repository
 	// names and are exposed to templates as .Images.
@@ -49,6 +52,44 @@ var components = []component{{
 	layout:   "_main/src/infrastructure-components/openbao/image",
 	manifest: "src/infrastructure-components/openbao/k8s/openbao.yaml.tmpl",
 }, {
+	name:     "crossplane",
+	layout:   "_main/src/infrastructure-components/crossplane/image",
+	manifest: "src/infrastructure-components/crossplane/k8s/crossplane.yaml.tmpl",
+	enabled:  siteUsesEdgeGateway,
+}, {
+	name:     "cert-manager",
+	manifest: "src/infrastructure-components/cert-manager/k8s/cert-manager.yaml.tmpl",
+	enabled:  siteUsesPlatformTLS,
+	images: []componentImage{{
+		name:   "cert-manager-cainjector",
+		layout: "_main/src/infrastructure-components/cert-manager/cainjector",
+	}, {
+		name:   "cert-manager-controller",
+		layout: "_main/src/infrastructure-components/cert-manager/controller",
+	}, {
+		name:   "cert-manager-webhook",
+		layout: "_main/src/infrastructure-components/cert-manager/webhook",
+	}, {
+		name:   "cert-manager-startupapicheck",
+		layout: "_main/src/infrastructure-components/cert-manager/startupapicheck",
+	}, {
+		name:   "cert-manager-acmesolver",
+		layout: "_main/src/infrastructure-components/cert-manager/acmesolver",
+	}},
+}, {
+	name:     "provider-kubernetes",
+	manifest: "src/infrastructure-components/crossplane-provider-kubernetes/k8s/provider-kubernetes.yaml",
+	enabled:  siteUsesEdgeGateway,
+}, {
+	name:     "provider-kubernetes-config",
+	manifest: "src/infrastructure-components/crossplane-provider-kubernetes/k8s/provider-kubernetes-config.yaml",
+	enabled:  siteUsesEdgeGateway,
+}, {
+	name:        "edge-gateway-platform",
+	manifest:    "src/platform/edge-gateway/k8s/edge-gateway-platform.yaml",
+	rawManifest: true,
+	enabled:     siteUsesEdgeGateway,
+}, {
 	name:     "aisucks",
 	layout:   "_main/src/products/aisucks/services/api/image",
 	manifest: "src/platform/public-http-service/k8s/public-http-service.yaml.tmpl",
@@ -68,26 +109,6 @@ var components = []component{{
 		healthPath:      "/healthz",
 		readinessPeriod: 5,
 	},
-}, {
-	name:     "cert-manager",
-	manifest: "src/infrastructure-components/cert-manager/k8s/cert-manager.yaml.tmpl",
-	enabled:  func(s *Site) bool { return s.OCI.Domain != "" },
-	images: []componentImage{{
-		name:   "cert-manager-cainjector",
-		layout: "_main/src/infrastructure-components/cert-manager/cainjector",
-	}, {
-		name:   "cert-manager-controller",
-		layout: "_main/src/infrastructure-components/cert-manager/controller",
-	}, {
-		name:   "cert-manager-webhook",
-		layout: "_main/src/infrastructure-components/cert-manager/webhook",
-	}, {
-		name:   "cert-manager-startupapicheck",
-		layout: "_main/src/infrastructure-components/cert-manager/startupapicheck",
-	}, {
-		name:   "cert-manager-acmesolver",
-		layout: "_main/src/infrastructure-components/cert-manager/acmesolver",
-	}},
 }, {
 	name:     "gatus",
 	layout:   "_main/src/infrastructure-components/gatus/image",
@@ -169,24 +190,19 @@ var components = []component{{
 	layout:   "_main/src/status/image",
 	manifest: "src/status/k8s/status.yaml.tmpl",
 }, {
-	name:     "guardian-oci",
-	layout:   "_main/src/platform/oci-placeholder/image",
-	manifest: "src/infrastructure-components/guardian-oci/k8s/guardian-oci.yaml.tmpl",
-	enabled:  func(s *Site) bool { return s.OCI.Domain != "" },
-}, {
-	// Manifest-only: the edge Gateway + routes. No image — the listener is
-	// the cilium-envoy DaemonSet already on the node. Gated per site:
-	// applying a Gateway binds host :80/:443, which is the per-site
-	// conversion itself (dev → gamma → prod; docs/architecture/gateway.md).
-	// LAST in the table, after every component whose namespace its routes
-	// live in: the aisucks TLSRoute/HTTPRoute land in namespace aisucks and
-	// the status TLSRoute in namespace status, and applying a route into a
-	// namespace that does not exist yet fails the converge. App-then-gateway
-	// also gives the cutover its overlap ordering.
-	name:     "gateway",
-	manifest: "src/infrastructure-components/gateway/k8s/gateway.yaml.tmpl",
-	enabled:  func(s *Site) bool { return s.Gateway.Enabled },
+	name:     "zot",
+	layout:   "_main/src/infrastructure-components/zot/image",
+	manifest: "src/infrastructure-components/zot/k8s/zot.yaml.tmpl",
+	enabled:  siteUsesPlatformTLS,
 }}
+
+func siteUsesEdgeGateway(s *Site) bool {
+	return s.Gateway.Enabled
+}
+
+func siteUsesPlatformTLS(s *Site) bool {
+	return s.OCI.Domain != ""
+}
 
 func (c component) imageLayouts() []componentImage {
 	out := make([]componentImage, 0, 1+len(c.images))
@@ -237,6 +253,14 @@ type publicHTTPServiceRender struct {
 	CPURequest      string
 	HealthPath      string
 	ReadinessPeriod int
+	Gateway         struct {
+		Enabled            bool
+		Name               string
+		Namespace          string
+		TLSSectionName     string
+		HTTPSectionName    string
+		TLSRouteAPIVersion string
+	}
 }
 
 func (c component) publicHTTPServiceRender(site *Site) *publicHTTPServiceRender {
@@ -268,6 +292,12 @@ func (c component) publicHTTPServiceRender(site *Site) *publicHTTPServiceRender 
 		HealthPath:      svc.healthPath,
 		ReadinessPeriod: svc.readinessPeriod,
 	}
+	out.Gateway.Enabled = site.Gateway.Enabled
+	out.Gateway.Name = "edge"
+	out.Gateway.Namespace = "gateway"
+	out.Gateway.TLSSectionName = "tls-" + svc.app
+	out.Gateway.HTTPSectionName = "http"
+	out.Gateway.TLSRouteAPIVersion = "gateway.networking.k8s.io/v1alpha2"
 	if out.PodNetwork {
 		out.Replicas = 2
 		out.ListenHTTP = ":8080"

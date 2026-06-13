@@ -5,12 +5,12 @@ import (
 	"testing"
 )
 
-func TestGuardianOCIRender(t *testing.T) {
-	const image = "registry.guardian.internal/guardian-oci@sha256:deadbeef"
-	c := componentByName(t, "guardian-oci")
-	tmpl, err := toolPath("_main/src/infrastructure-components/guardian-oci/k8s/guardian-oci.yaml.tmpl")
+func TestZotRender(t *testing.T) {
+	const image = "registry.guardian.internal/zot@sha256:deadbeef"
+	c := componentByName(t, "zot")
+	tmpl, err := toolPath("_main/src/infrastructure-components/zot/k8s/zot.yaml.tmpl")
 	if err != nil {
-		t.Fatalf("locate guardian-oci manifest: %v", err)
+		t.Fatalf("locate zot manifest: %v", err)
 	}
 	c.manifest = tmpl
 	for _, tc := range []struct {
@@ -37,18 +37,27 @@ func TestGuardianOCIRender(t *testing.T) {
 			out := string(rendered)
 			if !tc.want {
 				if strings.TrimSpace(out) != "" {
-					t.Fatalf("guardian-oci should render empty for %s, got:\n%s", tc.siteName, out)
+					t.Fatalf("zot should render empty for %s, got:\n%s", tc.siteName, out)
 				}
 				return
 			}
 			for _, want := range []string{
 				"namespace: guardian-oci",
-				"name: oci-placeholder",
+				"name: zot",
+				"type: Recreate",
 				"image: " + image,
-				"containerPort: 8080",
+				`command: ["/usr/local/bin/zot-linux-amd64"]`,
+				`"search": {`,
+				`"ui": {`,
+				`"enable": true`,
+				`"port": "5000"`,
+				"containerPort: 5000",
+				"kind: HTTPRoute",
+				"sectionName: https-oci",
+				"port: 5000",
 			} {
 				if !strings.Contains(out, want) {
-					t.Errorf("guardian-oci render missing %q", want)
+					t.Errorf("zot render missing %q", want)
 				}
 			}
 		})

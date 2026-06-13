@@ -64,18 +64,21 @@ type Site struct {
 		// gateway.enabled — without Envoy on :443 nothing would answer.
 		PodNetwork bool `yaml:"podNetwork"`
 	} `yaml:"aisucks"`
-	// Gateway holds the per-site values for the edge-gateway component
-	// (src/infrastructure-components/gateway).
+	// Gateway holds the per-site values for the platform EdgeGateway
+	// (src/platform/edge-gateway). The CLI installs the substrate, then
+	// applies the checked-in site manifests listed here; it does not synthesize
+	// a site's Gateway listeners from Go.
 	Gateway struct {
 		// Enabled converges the edge Gateway + routes onto this site,
 		// putting Envoy on host :80/:443. The per-site conversion ratchet:
 		// dev pilots, gamma repeats, prod converts last
 		// (docs/architecture/gateway.md Phase 5).
-		Enabled bool `yaml:"enabled"`
+		Enabled   bool     `yaml:"enabled"`
+		Manifests []string `yaml:"manifests"`
 	} `yaml:"gateway"`
-	// OCI holds the public registry/bootstrap placeholder surface. A non-empty
-	// domain enables cert-manager, the guardian-oci placeholder, and a
-	// Gateway-terminated HTTPS listener for that hostname.
+	// OCI holds the public registry/bootstrap surface. A non-empty domain
+	// enables cert-manager, zot, and a Gateway-terminated HTTPS listener for
+	// that hostname.
 	OCI struct {
 		Domain string `yaml:"domain"`
 	} `yaml:"oci"`
@@ -171,6 +174,9 @@ func loadSite(path string) (*Site, error) {
 	}
 	if s.OCI.Domain != "" && !s.Gateway.Enabled {
 		return nil, fmt.Errorf("site %s: oci.domain requires gateway.enabled", resolved)
+	}
+	if s.Gateway.Enabled && len(s.Gateway.Manifests) == 0 {
+		return nil, fmt.Errorf("site %s: gateway.enabled requires gateway.manifests", resolved)
 	}
 	// Monitoring status hostnames with none declared would render a
 	// blackbox job with an empty target list.

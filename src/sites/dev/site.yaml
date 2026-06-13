@@ -36,8 +36,8 @@ talos:
     # inlineManifests order, and the CRDs have to exist before the Cilium
     # render that watches them (render_order_test.go pins this).
     - src/infrastructure-components/cilium/talos/gateway-api-crds-inline.yaml
-    # Shared vendored render, deliberately not copied per-site: one Cilium
-    # version across the fleet, one file to re-vendor on upgrade.
+    # Shared generated render, deliberately not copied per-site: one Cilium
+    # version across the fleet, one Bazel target to update on upgrade.
     - src/infrastructure-components/cilium/talos/cilium-inline.yaml
     - src/sites/dev/talos/patches/ingress-firewall.yaml
 
@@ -65,15 +65,15 @@ aisucks:
   # battery passes.
   podNetwork: true
 
-# Edge Gateway (src/infrastructure-components/gateway): Envoy on host
-# :80/:443, SNI passthrough routing. Dev converts first — applying the
-# Gateway IS the conversion (docs/architecture/gateway.md).
+# Platform EdgeGateway (src/platform/edge-gateway): Crossplane owns the shared
+# GatewayClass/Gateway and apps attach their own routes. Dev converts first.
 gateway:
   enabled: true
+  manifests:
+    - src/sites/dev/k8s/edge-gateway.yaml
 
-# Public OCI bootstrap placeholder: Gateway-terminated TLS at
-# oci.guardianintelligence.org, cleartext to the in-cluster placeholder until
-# zot lands.
+# Public OCI registry: Gateway-terminated TLS at oci.guardianintelligence.org,
+# cleartext HTTP to in-cluster zot.
 oci:
   domain: oci.guardianintelligence.org
 

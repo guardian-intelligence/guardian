@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -28,14 +31,64 @@ func lookupCloudflareDNSToken(getenv func(string) string) (string, string) {
 	return "", ""
 }
 
+func lookupCloudflareDNSTokenSecretEnv(path string) (string, string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", "", nil
+		}
+		return "", "", err
+	}
+	values := parseSecretEnv(raw)
+	for _, key := range cloudflareDNSTokenEnvVars {
+		if token := strings.TrimSpace(values[key]); token != "" {
+			return token, path + ":" + key, nil
+		}
+	}
+	return "", "", nil
+}
+
+func parseSecretEnv(raw []byte) map[string]string {
+	values := map[string]string{}
+	scanner := bufio.NewScanner(bytes.NewReader(raw))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" {
+			continue
+		}
+		if unquoted, err := strconv.Unquote(value); err == nil {
+			value = unquoted
+		}
+		values[key] = value
+	}
+	return values
+}
+
 func applyCloudflareDNSTokenSecret(kubectl, kubeconfig string) error {
 	token, source := lookupCloudflareDNSToken(os.Getenv)
+	if token == "" {
+		fileToken, fileSource, err := lookupCloudflareDNSTokenSecretEnv(resolvePath("secret.env"))
+		if err != nil {
+			return fmt.Errorf("read secret.env: %w", err)
+		}
+		token, source = fileToken, fileSource
+	}
 	if token == "" {
 		if _, err := outputTool(kubectl, "--kubeconfig", kubeconfig, "-n", "cert-manager", "get", "secret", cloudflareDNSTokenSecretName); err == nil {
 			fmt.Fprintf(os.Stderr, "using existing cert-manager Cloudflare DNS token secret %s/%s\n", "cert-manager", cloudflareDNSTokenSecretName)
 			return nil
 		}
-		return fmt.Errorf("up: oci.domain requires Cloudflare DNS-01 credentials; export one of: %s", strings.Join(cloudflareDNSTokenEnvVars, ", "))
+		return fmt.Errorf("up: oci.domain requires Cloudflare DNS-01 credentials; export one of %s or set it in ./secret.env", strings.Join(cloudflareDNSTokenEnvVars, ", "))
 	}
 	secret := map[string]any{
 		"apiVersion": "v1",

@@ -1,9 +1,0 @@
-# Manifest-only component: the edge Gateway + routes
-# (docs/architecture/gateway.md). No image — the listener is the
-# cilium-envoy DaemonSet already on the node. The filegroup feeds the CLI's
-# render tests, same pattern as //src/status:manifest.
-filegroup(
-    name = "manifest",
-    srcs = ["k8s/gateway.yaml.tmpl"],
-    visibility = ["//src/guardian-cli:__subpackages__"],
-)

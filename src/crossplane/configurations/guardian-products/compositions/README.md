@@ -1,4 +1,4 @@
-# Composition placeholders
+# Composition Sketch
 
 The intended composition graph for this slice is:
 
@@ -16,6 +16,6 @@ products.guardian.dev/AisucksProduct
 ```
 
 `guardian up` currently renders `PublicHttpService` directly via the
-repo-owned platform template. Do not introduce a Crossplane composition
-function or provider here until its package digest is pinned and mirrored into
-Guardian's release artifacts.
+repo-owned platform template. The platform EdgeGateway substrate has a pinned
+Crossplane/provider/function path; this product composition should move only
+when it can reuse that pinned substrate or ship as its own pinned package.

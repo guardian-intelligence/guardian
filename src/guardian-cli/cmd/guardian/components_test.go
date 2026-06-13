@@ -10,10 +10,8 @@ import "testing"
 //     nothing deliberate about where its objects land;
 //   - OpenBao and ESO apply before the ExternalSecret projections, and the
 //     projections apply before the pods that require the projected Secrets;
-//   - the gateway entry applies after every component whose namespace its
-//     routes live in (aisucks, status) — applying a route into a namespace
-//     that does not exist yet fails the converge, and app-then-gateway is
-//     also the cutover's overlap ordering (docs/architecture/gateway.md).
+//   - the Crossplane substrate applies before the EdgeGateway platform
+//     contract, and product route owners apply after the platform substrate.
 func TestComponentsTable(t *testing.T) {
 	indexOf := make(map[string]int, len(components))
 	for i, c := range components {
@@ -28,24 +26,18 @@ func TestComponentsTable(t *testing.T) {
 			t.Errorf("component %q is manifest-only (no image layouts) but ungated: manifest-only components must set enabled", c.name)
 		}
 	}
-	gw, ok := indexOf["gateway"]
-	if !ok {
-		t.Fatal("components: gateway entry missing")
-	}
-	for _, dep := range []string{"aisucks", "cert-manager", "guardian-oci", "status"} {
-		di, ok := indexOf[dep]
-		if !ok {
-			t.Fatalf("components: %s entry missing", dep)
-		}
-		if gw < di {
-			t.Errorf("components: gateway (index %d) must apply after %s (index %d): its routes live in the %s namespace", gw, dep, di, dep)
-		}
-	}
 	for _, rel := range []struct {
 		before string
 		after  string
 		why    string
 	}{
+		{"crossplane", "provider-kubernetes", "Crossplane package CRDs and controllers must exist before provider packages"},
+		{"cert-manager", "edge-gateway-platform", "platform TLS certificates require cert-manager CRDs"},
+		{"provider-kubernetes", "provider-kubernetes-config", "ProviderConfig requires provider-kubernetes CRDs"},
+		{"provider-kubernetes-config", "edge-gateway-platform", "the EdgeGateway composition emits provider-kubernetes Objects"},
+		{"edge-gateway-platform", "aisucks", "product routes attach to the platform Gateway listener"},
+		{"edge-gateway-platform", "status", "product routes attach to the platform Gateway listener"},
+		{"edge-gateway-platform", "zot", "product routes attach to the platform Gateway listener"},
 		{"openbao", "external-secrets", "ESO authenticates to Bao"},
 		{"victoria-metrics", "external-secrets", "ESO is scoped to the observability namespace"},
 		{"external-secrets", "guardian-secrets", "CRDs and controllers must exist before ExternalSecret resources"},

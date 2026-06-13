@@ -46,8 +46,8 @@ drill is `guardian down --yes && guardian up`. Both verbs also accept an
 explicit `<site.yaml>` positional argument, which overrides the configured
 site. `guardian config` with no arguments prints the config file path and
 contents. Run both verbs from the repo root: only the configured site path
-is stored absolute; the paths inside `site.yaml` (schematic, patches) and
-the component manifests are repo-root relative.
+is stored absolute; the paths inside `site.yaml` (schematic, patches, site
+manifests) and the component manifests are repo-root relative.
 
 1. `guardian down --yes [site.yaml]` takes the node to Talos maintenance
    mode with a wiped system disk, from whichever state it is in. A node

@@ -53,7 +53,14 @@ func TestStatusManifestGuard(t *testing.T) {
 				t.Errorf("rendered manifest missing image %s", image)
 			}
 			kinds := decodeKinds(t, rendered)
-			for _, want := range []string{"Namespace", "Deployment", "Service"} {
+			wantKinds := []string{"Namespace", "Deployment", "Service"}
+			if site.Gateway.Enabled {
+				wantKinds = append(wantKinds, "TLSRoute")
+				if !strings.Contains(string(rendered), "sectionName: tls-status-0") {
+					t.Error("status route missing tls-status-0 parent section")
+				}
+			}
+			for _, want := range wantKinds {
 				if !strings.Contains(strings.Join(kinds, ","), want) {
 					t.Errorf("rendered manifest kinds = %v; missing %s", kinds, want)
 				}

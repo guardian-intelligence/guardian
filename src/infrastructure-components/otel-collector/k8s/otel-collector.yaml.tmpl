@@ -144,7 +144,7 @@ data:
             # own prometheus endpoint (:9962) is NOT in this render —
             # values.yaml never sets prometheus.enabled, so the vendored
             # configmap has no prometheus-serve-addr; scraping it would only
-            # produce up=0 noise. Add the job when Cilium is re-vendored
+            # produce up=0 noise. Add the job when Cilium is regenerated
             # with agent metrics on (a wipe drill, per the values.yaml note).
             - job_name: hubble
               static_configs:
