@@ -77,8 +77,13 @@ jobs:
         run: |
           set -euo pipefail
           printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          bazelisk run "$OCI_PUBLISH_TARGET" -- --tag "$OCI_TAG" --tag "$OCI_GIT_TAG"
-          digest="$(cat bazel-bin/src/products/aisucks/services/api/image.json.sha256)"
+          push_log="$(mktemp)"
+          bazelisk run "$OCI_PUBLISH_TARGET" -- --tag "$OCI_TAG" --tag "$OCI_GIT_TAG" | tee "$push_log"
+          digest="$(sed -n "s|.*$OCI_REPOSITORY@\\(sha256:[0-9a-f]\\{64\\}\\).*|\\1|p" "$push_log" | head -1)"
+          if [[ -z "$digest" ]]; then
+            echo "could not find pushed image digest in oci_push output" >&2
+            exit 1
+          fi
           image_ref="$OCI_REPOSITORY@$digest"
           {
             echo "IMAGE_DIGEST=$digest"

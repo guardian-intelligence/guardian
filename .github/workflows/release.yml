@@ -31,6 +31,7 @@ concurrency:
 
 permissions:
   contents: write # push the annotated aisucks/v<N> tag
+  actions: write # dispatch public-release after the green fleet gate
 
 defaults:
   run:
@@ -89,7 +90,9 @@ jobs:
           curl -fsS "$H/" | grep -q 'never be sold' && echo page ok
           curl -fsS "$H/api/v1/hello" | grep -q 'hello from aisucks' && echo hello ok
 
-      - name: Tag the release (steps 1 + 2)
+      - name: Tag and dispatch the release (steps 1 + 2)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -98,3 +101,10 @@ jobs:
           git tag -a "$TAG" -m "aisucks@$GAMMA_DIGEST"
           git push origin "$TAG"
           echo "released $TAG -> aisucks@$GAMMA_DIGEST"
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/public-release.yml/dispatches" \
+            -d "{\"ref\":\"$TAG\"}"
+          echo "dispatched public-release for $TAG"
