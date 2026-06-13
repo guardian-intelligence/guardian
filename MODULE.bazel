@@ -3,7 +3,7 @@ module(
     version = "0.0.0",
 )
 
-bazel_dep(name = "gazelle", version = "0.51.0", repo_name = "bazel_gazelle")
+bazel_dep(name = "gazelle", version = "0.51.3", repo_name = "bazel_gazelle")
 bazel_dep(name = "aspect_rules_js", version = "3.1.2")
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "protobuf", version = "33.4")
@@ -12,6 +12,7 @@ bazel_dep(name = "rules_nodejs", version = "6.7.4")
 bazel_dep(name = "rules_oci", version = "2.3.0")
 bazel_dep(name = "rules_pkg", version = "1.2.0")
 bazel_dep(name = "rules_proto", version = "7.1.0")
+bazel_dep(name = "rules_buf", version = "0.5.4")
 
 include("//src/infrastructure-components/openbao:openbao.MODULE.bazel")
 include("//src/guardian-cli/tools/kubectl:kubectl.MODULE.bazel")
@@ -179,3 +180,10 @@ npm.npm_translate_lock(
     pnpm_lock = "//src/viteplus-monorepo:pnpm-lock.yaml",
 )
 use_repo(npm, "npm")
+
+buf = use_extension("@rules_buf//buf:extensions.bzl", "buf")
+buf.toolchains(
+    sha256 = "ce4a14aeff08a01585c6ffd2a7743473ab3354275181de0ee10f792a21f7d56e",
+    version = "v1.70.0",
+)
+use_repo(buf, "rules_buf_toolchains")

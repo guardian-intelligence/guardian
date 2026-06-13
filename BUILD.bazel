@@ -1,8 +1,14 @@
 load("@bazel_gazelle//:def.bzl", "gazelle")
+load("@rules_buf//buf:defs.bzl", "buf_format")
 
-exports_files(["bazel.go.work"])
+exports_files([
+    "bazel.go.work",
+    "buf.yaml",
+])
 
 gazelle(name = "gazelle")
+
+buf_format(name = "buf_format")
 
 filegroup(
     name = "build",
@@ -19,6 +25,8 @@ test_suite(
     name = "dev_check",
     tests = [
         "//src/guardian-cli/cmd/guardian:guardian_test",
+        "//src/products/aisucks/api:buf_breaking_test",
+        "//src/products/aisucks/api:buf_lint_test",
         "//src/products/aisucks/services/api:api_test",
         "//src/status:status_test",
     ],

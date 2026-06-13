@@ -1,0 +1,9 @@
+version: v2
+modules:
+  - path: src/products/aisucks/api
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - FILE
