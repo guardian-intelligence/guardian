@@ -23,7 +23,7 @@ load(
 )
 load(
     ".aspect/tasks/release.axl",
-    release_npm_sdk = "npm_sdk",
+    release_sdk_oci = "sdk_oci",
 )
 
 def config(ctx):
@@ -37,4 +37,4 @@ def config(ctx):
     ctx.tasks.add(dev_uninstall)
 
     # aspect release ...
-    ctx.tasks.add(release_npm_sdk)
+    ctx.tasks.add(release_sdk_oci)

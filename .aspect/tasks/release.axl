@@ -2,26 +2,67 @@
 
 load(".aspect/lib/helpers.axl", "checked_spawn", "ws_path")
 
-def _npm_sdk_impl(ctx):
-    cli_args = []
-    if ctx.args.publish:
-        cli_args.append("--publish")
-    cli_args.extend(["--registry", ctx.args.registry])
+def _sdk_oci_impl(ctx):
+    if not ctx.args.publish:
+        return checked_spawn(
+            ctx,
+            "bazelisk",
+            ["build", "//src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci"],
+            cwd = ws_path(ctx),
+            label = "bazelisk build //src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci",
+        )
+
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        [
+            "build",
+            "//src/viteplus-monorepo/packages/aisucks-sdk:npm_package",
+            "//src/release/cmd/sdkoci",
+        ],
+        cwd = ws_path(ctx),
+        label = "bazelisk build SDK OCI publisher inputs",
+    )
+    if rc != 0:
+        return rc
+
+    binary = ws_path(ctx, "bazel-bin/src/release/cmd/sdkoci/sdkoci_/sdkoci")
+    tarball = ws_path(ctx, "bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/aisucks-sdk.tgz")
+    pack_json = ws_path(ctx, "bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/aisucks-sdk.npm-pack.json")
+
+    cli_args = [
+        "--tarball", tarball,
+        "--pack-json", pack_json,
+        "--ref", ctx.args.ref,
+    ]
+    if ctx.args.plain_http:
+        cli_args.append("--plain-http")
+    if ctx.args.username != "":
+        cli_args.extend(["--username", ctx.args.username])
+    if ctx.args.password_env != "":
+        cli_args.extend(["--password-env", ctx.args.password_env])
+    if ctx.args.access_token_env != "":
+        cli_args.extend(["--access-token-env", ctx.args.access_token_env])
+
     return checked_spawn(
         ctx,
-        "bash",
-        [ws_path(ctx, "scripts/release/npm-aisucks-sdk.sh")] + cli_args,
+        binary,
+        cli_args,
         cwd = ws_path(ctx),
-        label = "npm-aisucks-sdk release",
+        label = "sdk OCI artifact release",
     )
 
-npm_sdk = task(
-    implementation = _npm_sdk_impl,
-    name = "npm-sdk",
+sdk_oci = task(
+    implementation = _sdk_oci_impl,
+    name = "sdk-oci",
     group = ["release"],
-    summary = "Build/probe/publish the aisucks npm SDK by package@version.",
+    summary = "Build the aisucks npm SDK tarball as an OCI artifact.",
     args = {
-        "publish": args.boolean(default = False, description = "Publish a new package version instead of doing a local dry run."),
-        "registry": args.string(default = "https://registry.npmjs.org/", description = "npm registry base URL."),
+        "publish": args.boolean(default = False, description = "Push to a remote OCI registry instead of writing a local OCI layout."),
+        "ref": args.string(default = "oci.gi.org/guardian/aisucks/sdk/npm:edge", description = "Remote OCI reference used with --publish."),
+        "plain_http": args.boolean(default = False, description = "Use plain HTTP for the remote registry."),
+        "username": args.string(default = "", description = "Registry username used with --publish and --password-env."),
+        "password_env": args.string(default = "", description = "Environment variable containing a registry password used with --publish."),
+        "access_token_env": args.string(default = "", description = "Environment variable containing a registry bearer token used with --publish."),
     },
 )

@@ -16,9 +16,18 @@ The Contract slice is delivered by the Connect/RPC Health contract work:
 - Buf lint and breaking-change checks run through Bazel with a pinned local
   toolchain and no remote plugins.
 
+The SDK OCI artifact-builder slice is delivered by `//src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci`.
+It builds the generated Health SDK tarball, writes it as an OCI artifact
+subject in a local OCI layout, and records the OCI manifest digest, tarball
+sha256, npm integrity, package version, and source commit in
+`bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.json`.
+Stamped builds use Bazel's `--embed_label=<40-char-git-sha>` as the source
+commit; unstamped local builds record a deterministic zero commit placeholder.
+
 The next implementation PR should deliver the **Runtime slice**: serve Connect
 Health publicly while keeping `/healthz` and `/livez` as raw operational
-endpoints.
+endpoints, or the **Public OCI slice**: stand up `oci.gi.org`/zot so the SDK
+artifact can be pulled from the public registry by digest.
 
 ## Todo
 
@@ -68,11 +77,18 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 
 ### SDK Artifact
 
-- [ ] npm package tarball is built from repo source.
-- [ ] Package integrity is recorded.
+- [x] npm package tarball is built from repo source.
+- [x] SDK OCI reference forms are documented:
+  `oci.gi.org/guardian/aisucks/sdk/npm[:tag|@sha256:<digest>]`.
+- [x] Repo-owned `//src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci` writes the npm package tarball as an
+  OCI artifact subject in a declared local OCI layout.
+- [ ] npm package tarball is pushed to the public OCI registry by digest.
+- [x] Package integrity is recorded.
+- [ ] npm publication is executed as a downstream projection from the verified
+  OCI subject.
 - [ ] Package is published to npm with Trusted Publishing provenance.
 - [ ] `edge` dist-tag points at the intended SDK version.
-- [ ] Package contents contain generated Connect client only for Health.
+- [x] Package contents contain generated Connect client only for Health.
 
 ### OCI Distribution
 
@@ -87,6 +103,10 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
   - [ ] gate result
 - [ ] Public reads are digest-addressed; mutable tags are channel convenience
   only.
+- [x] SDK can be pulled from the local OCI layout with
+  `oras pull --oci-layout bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.oci:edge -o ./dist`.
+- [ ] SDK can be pulled from the public OCI registry with
+  `oras pull oci.gi.org/guardian/aisucks/sdk/npm@sha256:<manifest>`.
 
 ### Release Tuple Manifest
 
@@ -104,6 +124,7 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 - [ ] Example targets for this slice are represented:
   - [ ] `aisucks-api-image / linux-amd64 / default / zot-internal / edge`
   - [ ] `aisucks-api-image / linux-amd64 / default / ghcr-public / edge`
+  - [ ] `aisucks-ts-sdk / any / default / oci-public / edge`
   - [ ] `aisucks-ts-sdk / any / default / npm-public / edge`
 
 ### Build Provenance
@@ -193,6 +214,9 @@ cosign verify <zot-or-ghcr-image>@sha256:...
 cosign verify-attestation --type slsaprovenance <image>@sha256:...
 npm view @guardian-intelligence/aisucks@edge dist.integrity
 npm install @guardian-intelligence/aisucks@edge
+bazelisk build //src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci
+oras pull --oci-layout bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.oci:edge -o ./dist
+oras pull oci.gi.org/guardian/aisucks/sdk/npm@sha256:<manifest> -o ./dist
 guardian/repo tool verify release-manifest <digest-or-file>
 guardian/repo tool synthetic health --base-url=https://gamma.aisucks.app
 ```
@@ -204,12 +228,14 @@ The smallest meaningful release slice is:
 1. Proto Health.
 2. Generated Go service + generated TS SDK.
 3. API image pushed to zot by digest.
-4. SDK published to npm edge.
-5. SLSA/in-toto provenance attached to the API image.
-6. Release manifest records image digest + npm package integrity.
-7. Synthetic installs npm edge and calls gamma Health.
-8. Gate result JSON emitted.
-9. `nightly` pointer advances only after gate pass.
+4. SDK tarball pushed to OCI as `guardian/aisucks/sdk/npm` by digest.
+5. SDK published to npm edge from the verified OCI subject.
+6. SLSA/in-toto provenance attached to the API image and SDK OCI subject.
+7. Release manifest records image digest, SDK OCI digest, and npm package
+   integrity.
+8. Synthetic installs npm edge and calls gamma Health.
+9. Gate result JSON emitted.
+10. `nightly` pointer advances only after gate pass.
 
 ## First Deliverable: Contract Slice
 
@@ -266,7 +292,7 @@ truth before runtime, release, and Crossplane layers depend on it.
 ```sh
 bazelisk build //src/products/aisucks/api:all
 bazelisk build //src/viteplus-monorepo:workspace_build
-aspect release npm-sdk
+vp run -w lint
 ```
 
 ### Acceptance Criteria
@@ -284,10 +310,12 @@ aspect release npm-sdk
 
 1. Runtime slice: serve Connect Health publicly while keeping `/healthz` and
    `/livez` raw.
-2. SDK edge slice: publish the generated Health SDK to npm `edge`.
-3. Synthetic slice: install npm `edge` and call gamma/prod Health.
-4. Gate slice: emit `synthetic-result.v1` and `gate-result.v1`.
-5. Release manifest slice: record API image digest + npm integrity in a
-   machine-readable manifest.
-6. Distribution slice: attach provenance/SBOM/gate referrers and advance signed
+2. SDK OCI slice: build the generated Health SDK tarball and publish it as
+   `guardian/aisucks/sdk/npm` by digest.
+3. npm projection slice: publish the verified SDK OCI subject to npm `edge`.
+4. Synthetic slice: install npm `edge` and call gamma/prod Health.
+5. Gate slice: emit `synthetic-result.v1` and `gate-result.v1`.
+6. Release manifest slice: record API image digest, SDK OCI digest, and npm
+   integrity in a machine-readable manifest.
+7. Distribution slice: attach provenance/SBOM/gate referrers and advance signed
    channel pointers.

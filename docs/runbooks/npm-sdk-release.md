@@ -1,20 +1,19 @@
-# npm SDK release
+# npm SDK Projection
 
-The aisucks SDK release is package-scoped. GitHub Actions is only the runner;
-the release decision lives in repo tooling:
+Status: target runbook. npm is not the source artifact store for Guardian
+releases. The canonical SDK candidate is the npm package tarball stored as an
+OCI artifact at:
 
-```sh
-aspect release npm-sdk
+```text
+oci.gi.org/guardian/aisucks/sdk/npm@sha256:<manifest>
 ```
 
-CI runs the same command in publish mode after installing Guardian's pinned tool
-shims. The Aspect task delegates to `scripts/release/npm-aisucks-sdk.sh`, which
-reads `src/viteplus-monorepo/packages/aisucks-sdk`, checks whether
-`@guardian-intelligence/aisucks@<package.json version>` already exists on npm
-with the same tarball integrity, and exits 0 when it does. It never decides
-from GitHub Actions `paths`.
+npm publication is a downstream projection from that verified OCI subject. The
+GitHub-hosted OIDC requirement for npm Trusted Publishing is real, but GitHub
+Actions remains an executor shim only. It must not own release selection,
+publisher fan-out, no-op policy, SLO gates, or channel promotion.
 
-## Release intent
+## Release Intent
 
 Use Changesets for user-facing SDK changes:
 
@@ -26,76 +25,147 @@ vp run -w changeset:version
 
 Review the generated `CHANGELOG.md` and `package.json` version bump. The
 package is releasable only after SDK-specific `.changeset/*.md` files have
-been applied by the version step; the release task refuses to hide pending SDK
-release intent behind a no-op.
-
-Package-owned static checks catch this before merge:
+been applied by the version step; package-owned static checks refuse to hide
+pending SDK release intent behind a release no-op:
 
 ```sh
 cd src/viteplus-monorepo
 vp run -w lint
 ```
 
-This runs VitePlus linting plus the TypeScript workspace release hygiene
-check. The check uses `@changesets/read` to parse pending Changesets and
-`@manypkg/get-packages` to discover publishable workspace packages, so it does
-not carry a handwritten frontmatter parser. The top-level Bazel build also
-reaches it through `//src/viteplus-monorepo:workspace_lint`, so repo-level
-build orchestration does not need to know Changesets semantics.
+This runs VitePlus linting plus the TypeScript workspace release hygiene check.
+The check uses `@changesets/read` to parse pending Changesets and
+`@manypkg/get-packages` to discover publishable workspace packages. The
+top-level Bazel build reaches it through
+`//src/viteplus-monorepo:workspace_lint`, so repo-level build orchestration
+does not need to know Changesets semantics.
 
-## Local probe
+## Canonical Artifact
 
-From the repo root:
-
-```sh
-aspect release npm-sdk
-```
-
-Expected outcomes:
-
-- If the exact package version already exists on npm and the locally packed
-  tarball integrity matches, the task prints a no-op and exits 0.
-- If the package version exists but HEAD packs different bytes, the task fails:
-  apply an SDK Changeset so npm receives a new external version, or restore the
-  package bytes.
-- If the version is new, the task builds
-  `//src/viteplus-monorepo:workspace_build`, runs `npm pack`, and prints that
-  the package is publishable.
-
-## CI publish
-
-`.github/workflows/npm-sdk-release.yml` runs on every merge to main and on
-manual dispatch. It has no path filter. The publish step is:
+The SDK artifact lane starts locally and uses the same envelope that the public
+registry will vend:
 
 ```sh
-aspect release npm-sdk --publish
+bazelisk build //src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci
+oras pull --oci-layout bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.oci:edge -o ./dist
 ```
 
-The script publishes only when the package version is missing from npm. A
-service-only change under the same SDK version therefore packs the same SDK
-tarball and no-ops for npm while the service release lane can still publish its
-own artifact.
+The Bazel target builds `//src/viteplus-monorepo/packages/aisucks-sdk:npm_package`
+and runs the repo-owned Go artifact builder at `//src/release/cmd/sdkoci`. It
+writes a machine-readable result:
 
-Required GitHub setup:
+```sh
+jq . bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.json
+```
 
-- Workflow runs on a GitHub-hosted runner.
+For release-grade commit annotations, build with Bazel's embed label set to
+the source commit. Without an embed label, the local artifact remains
+deterministic and records the zero commit placeholder:
+
+```sh
+bazelisk build --embed_label=<40-char-git-sha> //src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci
+```
+
+Remote publication is explicit:
+
+```sh
+aspect release sdk-oci \
+  --publish \
+  --ref oci.gi.org/guardian/aisucks/sdk/npm:edge \
+  --username guardian-release \
+  --password-env GUARDIAN_OCI_PASSWORD
+```
+
+The SDK artifact lane must produce:
+
+- npm package tarball built from repo source
+- OCI subject at `oci.gi.org/guardian/aisucks/sdk/npm@sha256:<manifest>`
+- tarball digest and npm `dist.integrity`
+- SLSA/in-toto provenance naming the source commit, Bazel target, builder
+  identity, and release tuple
+- release manifest entry linking the OCI subject to the npm package coordinate
+
+The OCI reference forms are defined in
+`docs/architecture/oci-artifact-references.md`.
+
+## npm Projection
+
+The npm publisher takes an already selected OCI subject and performs only the
+npm-specific projection:
+
+```text
+verify OCI subject
+  -> pull guardian-intelligence-aisucks-<version>.tgz
+  -> confirm package name/version/integrity
+  -> npm publish ./guardian-intelligence-aisucks-<version>.tgz --tag <tag> --provenance
+  -> attach publish-result referrer to the OCI subject
+```
+
+Expected no-op behavior:
+
+- If npm already has the exact package version and the tarball integrity
+  matches the OCI subject, projection exits 0.
+- If npm already has the version but the tarball bytes differ, projection
+  fails. Apply an SDK Changeset so npm receives a new external version, or
+  restore the package bytes.
+- If npm is missing the version, projection publishes with npm Trusted
+  Publishing provenance.
+
+## Executor Requirements
+
+npm Trusted Publishing currently requires a GitHub-hosted Actions runner with
+OIDC. When the executor shim is reintroduced, required setup is:
+
+- Workflow is manually invoked or called by the repo-owned release controller;
+  it does not run on every merge to main.
 - Permissions: `contents: read`, `id-token: write`.
 - Environment: `npm-release`.
-- npm Trusted Publishing is configured for this workflow/environment.
-- `actions/setup-node` does not set `registry-url`: that writes an
-  `_authToken=${NODE_AUTH_TOKEN}` npmrc entry, which can make npm attempt
-  legacy token auth instead of OIDC Trusted Publishing.
+- npm Trusted Publishing is configured for the exact workflow filename and
+  environment.
+- The workflow runs a single `aspect` task that receives the selected OCI
+  digest and npm tag. The workflow YAML must not encode release policy.
+- OCI registry write credentials are explicit task inputs, such as
+  `--username guardian-release --password-env GUARDIAN_OCI_PASSWORD` or
+  `--access-token-env GUARDIAN_OCI_ACCESS_TOKEN`; the release task does not
+  depend on host Docker credential-helper state.
 
 Trusted Publishing configuration:
 
 - Provider: GitHub Actions
 - Organization/user: `guardian-intelligence`
 - Repository: `guardian`
-- Workflow filename: `npm-sdk-release.yml`
+- Workflow filename: to be defined by the projection shim
 - Environment: `npm-release`
 - Allowed action: `npm publish`
 
-## Verify package
+## Verify OCI Subject
+
+Local layout verification:
+
+```sh
+bazelisk build //src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci
+oras pull --oci-layout bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.oci:edge -o ./dist
+sha256sum ./dist/guardian-intelligence-aisucks-<version>.tgz
+jq -r '.tarball_sha256' bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.json
+```
+
+Public registry verification once `oci.gi.org` is live:
+
+```sh
+SDK='oci.gi.org/guardian/aisucks/sdk/npm@sha256:<manifest>'
+
+oras pull "$SDK" -o ./dist
+cosign verify "$SDK"
+cosign verify-attestation --type slsaprovenance "$SDK"
+```
+
+Expected:
+
+- `oras pull` writes exactly one npm `.tgz` payload.
+- cosign verifies the release-builder identity.
+- SLSA provenance subject digest matches the OCI subject digest.
+
+## Verify npm Projection
 
 ```sh
 PKG='@guardian-intelligence/aisucks@<version>'
@@ -108,7 +178,9 @@ npm view "$PKG" \
 Expected:
 
 - `name` is `@guardian-intelligence/aisucks`.
-- `repository.url` is `git+https://github.com/guardian-intelligence/guardian.git`.
+- `repository.url` is
+  `git+https://github.com/guardian-intelligence/guardian.git`.
+- `dist.integrity` matches the integrity recorded in the release manifest.
 - npmjs.com shows the provenance badge for versions published with
   `npm publish --provenance`.
 
