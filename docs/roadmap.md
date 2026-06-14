@@ -139,10 +139,10 @@ digest following only public docs. THIS IS THE PHASE-1 EXIT.
 STATUS 2026-06-13: first public-vending bridge was proven for aisucks. A
 GitHub-hosted tag workflow proved `ghcr.io/guardian-intelligence/aisucks`
 pushes, keyless signing, and SLSA/in-toto provenance; that workflow bridge has
-now been removed in favor of repo-owned release binaries executed through
-`aspect`. The npm SDK moves to the same shape: first publish the tarball as
+now been removed in favor of release tooling executed through `aspect`. The npm
+SDK moves to the same shape: first publish the tarball as
 `guardian/aisucks/sdk/npm` in OCI, then project the verified subject to npm
-with Trusted Publishing. `//src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci` now builds the npm tarball
+with Trusted Publishing. `aspect release sdk-oci` now builds and admits the npm tarball
 and declared local OCI artifact envelope. Remaining before M7 is done: public SDK OCI
 subject publish, trusted-publisher projection verification, release
 manifest/channel artifacts, gate-pass attestations, and clean-machine

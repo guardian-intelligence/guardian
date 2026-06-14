@@ -44,48 +44,51 @@ does not need to know Changesets semantics.
 
 ## Canonical Artifact
 
-The SDK artifact lane starts locally and uses the same envelope that the public
-registry will vend:
+The SDK artifact lane is package-owned. The durable command surface is Aspect,
+but the release policy and state machine live in
+`src/viteplus-monorepo/packages/aisucks-sdk/release/`.
+
+Local check mode builds the package through Bazel, creates a local OCI layout,
+creates DSSE/in-toto SLSA evidence, runs admission, and stops before public
+writes:
 
 ```sh
-bazelisk build //src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci
-oras pull --oci-layout bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.oci:edge -o ./dist
+aspect release sdk-oci
 ```
 
-The Bazel target builds `//src/viteplus-monorepo/packages/aisucks-sdk:npm_package`
-and runs the repo-owned Go artifact builder at `//src/release/cmd/sdkoci`. It
-writes a machine-readable result:
-
-```sh
-jq . bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.json
-```
-
-For release-grade commit annotations, build with Bazel's embed label set to
-the source commit. Without an embed label, the local artifact remains
-deterministic and records the zero commit placeholder:
-
-```sh
-bazelisk build --embed_label=<40-char-git-sha> //src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci
-```
-
-Remote publication is explicit:
+Publish mode requires a trusted executor with OIDC and registry write
+credentials:
 
 ```sh
 aspect release sdk-oci \
   --publish \
-  --ref oci.guardianintelligence.org/guardian/aisucks/sdk/npm:edge \
-  --username guardian-release \
-  --password-env GUARDIAN_OCI_PASSWORD
+  --channel edge \
+  --ref oci.guardianintelligence.org/guardian/aisucks/sdk/npm:edge
 ```
+
+The package release script builds these inputs through Bazel:
+
+- `//src/viteplus-monorepo:vp_node`
+- `//src/viteplus-monorepo/packages/aisucks-sdk:npm_package`
+- `//src/release/cmd/sdkoci`
+
+It writes `release-result.json` in the selected output directory. Check mode
+defaults to a temporary directory; pass `--output-dir <dir>` to keep the local
+OCI layout and evidence files.
+
+`sdkoci` is the low-level OCI pack/push helper. It does not decide whether a
+release should happen; it only writes the package tarball payload as an OCI
+artifact and, in publish mode, attaches the admitted in-toto JSONL bundle as an
+OCI referrer.
 
 The SDK artifact lane must produce:
 
 - npm package tarball built from repo source
 - OCI subject at `oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>`
 - tarball digest and npm `dist.integrity`
-- SLSA/in-toto provenance naming the source commit, Bazel target, builder
-  identity, and release tuple
-- release manifest entry linking the OCI subject to the npm package coordinate
+- DSSE envelope over an in-toto Statement with SLSA provenance predicate
+- JSONL in-toto bundle attached to the OCI subject as a referrer
+- npm Trusted Publishing provenance when the npm projection runs
 
 The OCI reference forms are defined in
 `docs/architecture/oci-artifact-references.md`.
@@ -116,28 +119,25 @@ Expected no-op behavior:
 ## Executor Requirements
 
 npm Trusted Publishing currently requires a GitHub-hosted Actions runner with
-OIDC. When the executor shim is reintroduced, required setup is:
+OIDC. The executor shim is `.github/workflows/npm-sdk-release.yml`.
+Required setup:
 
-- Workflow is manually invoked or called by the repo-owned release controller;
-  it does not run on every merge to main.
 - Permissions: `contents: read`, `id-token: write`.
-- Environment: `npm-release`.
 - npm Trusted Publishing is configured for the exact workflow filename and
-  environment.
-- The workflow runs a single `aspect` task that receives the selected OCI
-  digest and npm tag. The workflow YAML must not encode release policy.
-- OCI registry write credentials are explicit task inputs, such as
-  `--username guardian-release --password-env GUARDIAN_OCI_PASSWORD` or
-  `--access-token-env GUARDIAN_OCI_ACCESS_TOKEN`; the release task does not
-  depend on host Docker credential-helper state.
+  repository.
+- The workflow runs one `aspect release sdk-oci --publish ...` task.
+- The workflow YAML must not encode release policy, package matrices,
+  publisher fan-out, signing, attestation, verification, or no-op decisions.
+- `GUARDIAN_OCI_PASSWORD` gives the release task zot write authority. If
+  `GUARDIAN_OCI_ACCESS_TOKEN` is set, bearer-token auth is used instead.
+- No `NPM_TOKEN` is used; npm issues publish authority from GitHub OIDC.
 
 Trusted Publishing configuration:
 
 - Provider: GitHub Actions
 - Organization/user: `guardian-intelligence`
 - Repository: `guardian`
-- Workflow filename: to be defined by the projection shim
-- Environment: `npm-release`
+- Workflow filename: `npm-sdk-release.yml`
 - Allowed action: `npm publish`
 
 ## Verify OCI Subject
@@ -145,10 +145,10 @@ Trusted Publishing configuration:
 Local layout verification:
 
 ```sh
-bazelisk build //src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci
-oras pull --oci-layout bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.oci:edge -o ./dist
-sha256sum ./dist/guardian-intelligence-aisucks-<version>.tgz
-jq -r '.tarball_sha256' bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.json
+aspect release sdk-oci --output-dir /tmp/guardian-sdk-release
+oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist
+oras discover --oci-layout /tmp/guardian-sdk-release/oci-layout:edge
+jq . /tmp/guardian-sdk-release/release-result.json
 ```
 
 Public registry verification once `oci.guardianintelligence.org` is live:
@@ -157,15 +157,21 @@ Public registry verification once `oci.guardianintelligence.org` is live:
 SDK='oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>'
 
 oras pull "$SDK" -o ./dist
-cosign verify "$SDK"
-cosign verify-attestation --type slsaprovenance "$SDK"
+oras discover "$SDK"
 ```
 
 Expected:
 
 - `oras pull` writes exactly one npm `.tgz` payload.
-- cosign verifies the release-builder identity.
-- SLSA provenance subject digest matches the OCI subject digest.
+- `oras discover` shows the
+  `application/vnd.guardian.release.in-toto.bundle.v1` referrer.
+- The JSONL bundle contains one DSSE envelope whose payload is an in-toto
+  Statement with SLSA provenance predicate.
+
+Cosign-compatible OCI signatures are not yet emitted by this lane. The current
+release evidence is the DSSE/in-toto JSONL bundle plus npm Trusted Publishing
+provenance. Adding a cosign signature referrer over the OCI subject is the next
+verification hardening step.
 
 ## Verify npm Projection
 

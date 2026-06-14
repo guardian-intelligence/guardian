@@ -47,7 +47,7 @@ digest:
 | Gated candidate | `oci.guardianintelligence.org/guardian/aisucks/sdk/npm:nightly` | Resolve to digest; require gate result. |
 | Stable user channel | `oci.guardianintelligence.org/guardian/aisucks/sdk/npm:stable` | Resolve to digest; require stable pointer/provenance. |
 | Commit convenience | `oci.guardianintelligence.org/guardian/aisucks/sdk/npm:git-<12-char-sha>` | Debugging/rebuild correlation only. |
-| Ecosystem version | `oci.guardianintelligence.org/guardian/aisucks/sdk/npm:npm-v0.2.0` | Ties the OCI subject to the npm external coordinate. |
+| Ecosystem version | `oci.guardianintelligence.org/guardian/aisucks/sdk/npm:npm-v0.3.0` | Ties the OCI subject to the npm external coordinate. |
 
 Tags are convenience selectors. They are not the trust anchor. The digest,
 signature, provenance, release manifest, and gate/publish referrers are the
@@ -76,7 +76,7 @@ bytes to npm:
 Bazel package build
   -> npm .tgz
   -> OCI artifact subject
-  -> signatures / provenance / release metadata as referrers
+  -> DSSE / in-toto / release metadata as referrers
   -> npm publisher pulls and verifies the OCI subject
   -> npm publish ./guardian-intelligence-aisucks-<version>.tgz --tag <tag>
 ```
@@ -87,7 +87,7 @@ Every release fact that is about the SDK artifact attaches to the OCI subject
 digest as a referrer:
 
 - cosign signature
-- SLSA/in-toto provenance
+- DSSE envelope over an in-toto Statement with SLSA provenance predicate
 - SBOM
 - release manifest
 - gate result
@@ -123,16 +123,18 @@ Those are tags, release-manifest fields, annotations, or referrer payloads.
 
 ## Verification Shape
 
-The Bazel build graph creates the same artifact envelope without a registry:
+The package-owned release check creates the same artifact envelope without a
+registry:
 
 ```sh
-bazelisk build //src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci
-oras pull --oci-layout bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.oci:edge -o ./dist
+aspect release sdk-oci --output-dir /tmp/guardian-sdk-release
+oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist
+oras discover --oci-layout /tmp/guardian-sdk-release/oci-layout:edge
 ```
 
-The target writes `bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.json` with the OCI
-manifest digest, tarball sha256, npm integrity, package version, and source
-commit.
+The release state machine writes `/tmp/guardian-sdk-release/release-result.json`
+with the OCI manifest digest, tarball sha256, npm integrity, package version,
+source commit, DSSE/in-toto evidence paths, and event log.
 
 When Bazel is invoked with `--embed_label=<40-char-git-sha>`, that commit is
 recorded in the OCI annotations and result JSON. Unstamped local builds use a
@@ -143,12 +145,13 @@ A clean machine should eventually verify the public SDK by digest:
 
 ```sh
 oras pull oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest> -o ./dist
-cosign verify oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>
-cosign verify-attestation \
-  --type slsaprovenance \
-  oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>
+oras discover oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>
 npm install ./dist/guardian-intelligence-aisucks-<version>.tgz
 ```
+
+Cosign-compatible signatures are still the expected long-term signature
+referrer for OCI subjects. The current SDK lane emits DSSE/in-toto JSONL
+evidence and npm Trusted Publishing provenance first.
 
 A blackbox canary that starts from a channel should resolve the tag to a
 digest, verify the digest, pull the tarball, install it, call Connect Health,

@@ -16,20 +16,16 @@ The Contract slice is delivered by the Connect/RPC Health contract work:
 - Buf lint and breaking-change checks run through Bazel with a pinned local
   toolchain and no remote plugins.
 
-The SDK OCI artifact-builder slice is delivered by `//src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci`.
-It builds the generated Health SDK tarball, writes it as an OCI artifact
-subject in a local OCI layout, and records the OCI manifest digest, tarball
-sha256, npm integrity, package version, and source commit in
-`bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.json`.
-Stamped builds use Bazel's `--embed_label=<40-char-git-sha>` as the source
-commit; unstamped local builds record a deterministic zero commit placeholder.
+The SDK release slice is delivered by `aspect release sdk-oci`, which delegates
+to the package-owned Effect/TypeScript release state machine under
+`src/viteplus-monorepo/packages/aisucks-sdk/release/`. Check mode builds the
+generated Health SDK tarball, writes it as an OCI artifact subject in a local
+OCI layout, creates DSSE/in-toto SLSA evidence, validates admission before any
+public write, and records the event log in `release-result.json`.
 
-The next implementation PR should deliver the **Runtime slice**: serve Connect
-Health publicly while keeping `/healthz` and `/livez` as raw operational
-endpoints, or the **Platform TLS slice**: define the Cilium/Crossplane-native
-TLS capability that lets `oci.guardianintelligence.org` use Gateway-terminated
-TLS without adding a second public proxy. The Public OCI slice depends on that
-TLS boundary before zot can be considered publicly verifiable.
+The next release-system work should make the live public publish verifiable
+from a clean machine, then add the runtime synthetic/gate slice that installs
+the published SDK and calls Connect Health against gamma and prod.
 
 ## Todo
 
@@ -82,11 +78,11 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 - [x] npm package tarball is built from repo source.
 - [x] SDK OCI reference forms are documented:
   `oci.guardianintelligence.org/guardian/aisucks/sdk/npm[:tag|@sha256:<digest>]`.
-- [x] Repo-owned `//src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci` writes the npm package tarball as an
-  OCI artifact subject in a declared local OCI layout.
+- [x] Package-owned `aspect release sdk-oci` writes the npm package tarball as
+  an OCI artifact subject in a declared local OCI layout.
 - [ ] npm package tarball is pushed to the public OCI registry by digest.
 - [x] Package integrity is recorded.
-- [ ] npm publication is executed as a downstream projection from the verified
+- [x] npm publication is implemented as a downstream projection from the verified
   OCI subject.
 - [ ] Package is published to npm with Trusted Publishing provenance.
 - [ ] `edge` dist-tag points at the intended SDK version.
@@ -102,15 +98,16 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 - [ ] zot serves OCI Distribution v1.1 referrers.
 - [ ] Each release target has subject digest plus referrers:
   - [ ] cosign/keyless or Transit signature
-  - [ ] SLSA provenance
-  - [ ] in-toto statement
+  - [x] SLSA provenance
+  - [x] in-toto statement
+  - [x] DSSE JSONL bundle
   - [ ] SBOM, even minimal at first
   - [ ] release manifest / metadata
   - [ ] gate result
 - [ ] Public reads are digest-addressed; mutable tags are channel convenience
   only.
 - [x] SDK can be pulled from the local OCI layout with
-  `oras pull --oci-layout bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.oci:edge -o ./dist`.
+  `oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist`.
 - [ ] SDK can be pulled from the public OCI registry with
   `oras pull oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>`.
 
@@ -135,14 +132,14 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 
 ### Build Provenance
 
-- [ ] SLSA provenance names:
-  - [ ] source repository
-  - [ ] source commit
-  - [ ] Bazel target
-  - [ ] builder identity
-  - [ ] build type
-  - [ ] parameters: distributable, platform, flavor, publisher, channel
-- [ ] Provenance subject digest matches the published artifact digest or npm
+- [x] SLSA provenance names:
+  - [x] source repository
+  - [x] source commit
+  - [x] Bazel target
+  - [x] builder identity
+  - [x] build type
+  - [x] parameters: distributable, package, version, channel, OCI ref
+- [x] Provenance subject digest matches the admitted SDK OCI digest and npm
   integrity.
 
 ### Release Notes
@@ -220,8 +217,9 @@ cosign verify <zot-or-ghcr-image>@sha256:...
 cosign verify-attestation --type slsaprovenance <image>@sha256:...
 npm view @guardian-intelligence/aisucks@edge dist.integrity
 npm install @guardian-intelligence/aisucks@edge
-bazelisk build //src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci
-oras pull --oci-layout bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.oci:edge -o ./dist
+aspect release sdk-oci --output-dir /tmp/guardian-sdk-release
+oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist
+oras discover --oci-layout /tmp/guardian-sdk-release/oci-layout:edge
 oras pull oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest> -o ./dist
 guardian/repo tool verify release-manifest <digest-or-file>
 guardian/repo tool synthetic health --base-url=https://gamma.aisucks.app

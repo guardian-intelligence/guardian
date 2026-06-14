@@ -1,0 +1,48 @@
+name: npm sdk release
+
+on:
+  workflow_run:
+    workflows: [build]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-sdk-release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: bazelbuild/setup-bazelisk@b39c379c82683a5f25d34f0d062761f62693e0b2 # v3.0.0
+
+      - name: Install repo-pinned tools
+        run: |
+          bazelisk run //src/guardian-cli/cmd/guardian -- tools install --bin-dir "$RUNNER_TEMP/guardian-bin"
+          echo "$RUNNER_TEMP/guardian-bin" >> "$GITHUB_PATH"
+
+      - name: Release SDK
+        run: |
+          aspect release sdk-oci \
+            --publish \
+            --channel edge \
+            --ref oci.guardianintelligence.org/guardian/aisucks/sdk/npm:edge
+        env:
+          GUARDIAN_OCI_USERNAME: guardian-release
+          GUARDIAN_OCI_PASSWORD: ${{ secrets.GUARDIAN_OCI_PASSWORD }}

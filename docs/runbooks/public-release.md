@@ -1,8 +1,9 @@
 # Public artifact release
 
-Status: target runbook. The old workflow-owned public release bridge has been
-removed. Public vending should be reintroduced as repo-owned Go release tooling
-executed through `aspect`, with any GitHub YAML reduced to an executor shim.
+Status: current runbook for the SDK lane, target runbook for later service
+images. The old workflow-owned public release bridge has been removed. Public
+vending is reintroduced as package-owned release tooling executed through
+`aspect`, with any GitHub YAML reduced to an executor shim.
 
 This lane runs after the fleet release gate. It should publish immutable
 artifacts, signatures, attestations, and release metadata for selected release
@@ -23,8 +24,10 @@ The split is deliberate:
 - SDK OCI artifact:
   `oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>`
 - OCI tags: `edge`, `nightly`, `stable`, `v<N>`, and `git-<12-char-sha>`
-- Cosign keyless signature over the digest
-- Cosign in-toto/SLSA provenance attestation over the digest
+- DSSE/in-toto JSONL bundle over the SDK OCI subject
+- npm Trusted Publishing provenance for the npm projection
+- Cosign-compatible signature referrers over OCI subjects are still follow-up
+  work.
 
 The OCI digest still comes from `bazelisk build //:build`; the release tool
 pushes the already-built layout with:
@@ -35,11 +38,12 @@ bazelisk run //src/products/aisucks/services/api:publish_ghcr -- --tag v<N>
 
 `rules_oci` pushes the image by digest first, then applies tags.
 
-The SDK OCI subject is built through Aspect:
+The SDK OCI subject is built and admitted through Aspect:
 
 ```sh
-bazelisk build //src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci
-oras pull --oci-layout bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.oci:edge -o ./dist
+aspect release sdk-oci --output-dir /tmp/guardian-sdk-release
+oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist
+oras discover --oci-layout /tmp/guardian-sdk-release/oci-layout:edge
 ```
 
 The public zot registry allows anonymous reads and requires the
@@ -53,13 +57,15 @@ When write credentials are present, the remote publish form is:
 ```sh
 aspect release sdk-oci \
   --publish \
-  --ref oci.guardianintelligence.org/guardian/aisucks/sdk/npm:edge \
-  --username guardian-release \
-  --password-env GUARDIAN_OCI_PASSWORD
+  --channel edge \
+  --ref oci.guardianintelligence.org/guardian/aisucks/sdk/npm:edge
 ```
 
-`aspect release sdk-oci --publish` defaults to the ref, username, and password
-environment variable shown above.
+`aspect release sdk-oci --publish` defaults to the ref above, the
+`guardian-release` OCI registry username, and `GUARDIAN_OCI_PASSWORD`.
+If `GUARDIAN_OCI_ACCESS_TOKEN` is set, the release task uses bearer-token auth
+instead. npm publish authority comes from GitHub OIDC Trusted Publishing, not
+from `NPM_TOKEN`.
 
 ## Required Setup
 
@@ -69,7 +75,7 @@ Executor:
   permissions or an equivalent configured identity provider.
 - Workflow files must not encode release matrices, publisher fan-out, signing,
   attestation, verification, or no-op decisions. Those belong in the release
-  binary invoked by `aspect`.
+  package invoked by `aspect`.
 
 GHCR:
 
@@ -80,7 +86,23 @@ GHCR:
 The npm SDK release lane is intentionally a downstream projection from the SDK
 OCI artifact. See `docs/runbooks/npm-sdk-release.md`.
 
-## Verify OCI Signature
+## Verify Current SDK OCI Evidence
+
+Use the digest printed by the release tool:
+
+```sh
+SDK='oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<digest>'
+
+oras pull "$SDK" -o ./dist
+oras discover "$SDK"
+```
+
+Expected: `oras pull` writes the npm tarball payload and `oras discover` shows
+the `application/vnd.guardian.release.in-toto.bundle.v1` referrer. The referrer
+payload is a JSONL bundle containing a DSSE envelope around an in-toto
+Statement with SLSA provenance predicate.
+
+## Verify Future OCI Signature
 
 Use the digest printed by the release tool:
 
@@ -92,10 +114,10 @@ cosign verify "$IMAGE" \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 ```
 
-Expected: cosign reports the certificate identity checks and emits the verified
-signature payload. Historical bridge releases used the deleted public release
-workflow identity; future releases should pin the replacement release-builder
-identity recorded in provenance.
+Expected after the follow-up signature work: cosign reports the certificate
+identity checks and emits the verified signature payload. Historical bridge
+releases used the deleted public release workflow identity; future releases
+should pin the replacement release-builder identity recorded in provenance.
 
 ## Verify OCI Provenance Attestation
 

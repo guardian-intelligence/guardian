@@ -19,6 +19,7 @@ filegroup(
         "CHANGELOG.md",
         "README.md",
         "package.json",
+        "release/**/*",
         "src/**/*",
         "tsconfig*.json",
     ]),
