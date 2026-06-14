@@ -367,7 +367,6 @@ func pushLayout(ctx context.Context, path, tag string, entry packEntry, payload 
 
 type pusher interface {
 	oras.Target
-	Tag(context.Context, ocispec.Descriptor, string) error
 }
 
 func pushToTarget(ctx context.Context, target pusher, tag string, entry packEntry, payload []byte, annotations map[string]string, payloadMediaType, artifactType string, attestation []byte, attestationTitle string) (ocispec.Descriptor, *ocispec.Descriptor, error) {
@@ -389,6 +388,10 @@ func pushToTarget(ctx context.Context, target pusher, tag string, entry packEntr
 	}
 	if err := target.Tag(ctx, manifest, tag); err != nil {
 		return ocispec.Descriptor{}, nil, fmt.Errorf("tag OCI artifact %s: %w", tag, err)
+	}
+	manifest, err = resolveTaggedDescriptor(ctx, target, tag, manifest)
+	if err != nil {
+		return ocispec.Descriptor{}, nil, err
 	}
 	attestationManifest, err := attachAttestation(ctx, target, tag, manifest, attestation, attestationTitle)
 	if err != nil {
@@ -426,10 +429,41 @@ func attachAttestation(ctx context.Context, target pusher, tag string, subject o
 	if err := target.Tag(ctx, manifest, attestationTag(tag)); err != nil {
 		return nil, fmt.Errorf("tag attestation OCI artifact %s: %w", attestationTag(tag), err)
 	}
+	manifest, err = resolveTaggedDescriptor(ctx, target, attestationTag(tag), manifest)
+	if err != nil {
+		return nil, err
+	}
 	return &manifest, nil
 }
 
 func attestationTag(tag string) string { return tag + ".attestation" }
+
+type resolver interface {
+	Resolve(context.Context, string) (ocispec.Descriptor, error)
+}
+
+func resolveTaggedDescriptor(ctx context.Context, target resolver, tag string, pushed ocispec.Descriptor) (ocispec.Descriptor, error) {
+	resolved, err := target.Resolve(ctx, tag)
+	if err != nil {
+		return ocispec.Descriptor{}, fmt.Errorf("resolve tagged OCI artifact %s: %w", tag, err)
+	}
+	if resolved.Digest.String() == "" {
+		return ocispec.Descriptor{}, fmt.Errorf("resolved tagged OCI artifact %s has empty digest", tag)
+	}
+	if pushed.Digest.String() != "" && resolved.Digest != pushed.Digest {
+		return ocispec.Descriptor{}, fmt.Errorf("resolved tagged OCI artifact %s digest %s does not match pushed digest %s", tag, resolved.Digest, pushed.Digest)
+	}
+	if resolved.MediaType == "" {
+		resolved.MediaType = pushed.MediaType
+	}
+	if resolved.ArtifactType == "" {
+		resolved.ArtifactType = pushed.ArtifactType
+	}
+	if resolved.Annotations == nil {
+		resolved.Annotations = pushed.Annotations
+	}
+	return resolved, nil
+}
 
 func pushBytes(ctx context.Context, target pusher, mediaType string, data []byte) (ocispec.Descriptor, error) {
 	desc := content.NewDescriptorFromBytes(mediaType, data)

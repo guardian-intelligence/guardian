@@ -11,6 +11,7 @@ import {
 
 const stringRecord = Schema.Record({ key: Schema.String, value: Schema.String });
 const unknownRecord = Schema.Record({ key: Schema.String, value: Schema.Unknown });
+const nonEmptyString = Schema.NonEmptyString;
 
 export const PackageJsonSchema = Schema.Struct({
   name: Schema.optional(Schema.String),
@@ -29,21 +30,21 @@ export const NpmPackEntrySchema = Schema.Struct({
 export const NpmPackEntriesSchema = Schema.Array(NpmPackEntrySchema);
 
 export const SdkOciResultSchema = Schema.Struct({
-  distributable: Schema.String,
-  payload_form: Schema.String,
-  channel: Schema.String,
-  oci_digest: Schema.String,
-  oci_ref: Schema.String,
-  attestation_digest: Schema.optional(Schema.String),
-  attestation_ref: Schema.optional(Schema.String),
-  payload_sha256: Schema.optional(Schema.String),
-  tarball_sha256: Schema.String,
-  npm_integrity: Schema.String,
-  package: Schema.String,
-  version: Schema.String,
-  source_repo: Schema.String,
-  source_commit: Schema.String,
-  layer_title: Schema.String,
+  distributable: nonEmptyString,
+  payload_form: nonEmptyString,
+  channel: nonEmptyString,
+  oci_digest: nonEmptyString,
+  oci_ref: nonEmptyString,
+  attestation_digest: Schema.optional(nonEmptyString),
+  attestation_ref: Schema.optional(nonEmptyString),
+  payload_sha256: Schema.optional(nonEmptyString),
+  tarball_sha256: nonEmptyString,
+  npm_integrity: nonEmptyString,
+  package: nonEmptyString,
+  version: nonEmptyString,
+  source_repo: nonEmptyString,
+  source_commit: nonEmptyString,
+  layer_title: nonEmptyString,
 });
 
 export const InTotoSubjectSchema = Schema.Struct({

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/content/oci"
 )
 
@@ -276,6 +277,47 @@ func TestRunWritesDeterministicManifestDigest(t *testing.T) {
 	if first != second {
 		t.Fatalf("manifest digest changed across identical inputs: %s != %s", first, second)
 	}
+}
+
+func TestResolveTaggedDescriptorUsesResolvedDigest(t *testing.T) {
+	resolved := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2}`))
+	got, err := resolveTaggedDescriptor(context.Background(), staticResolver{desc: resolved}, "edge", ocispec.Descriptor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Digest != resolved.Digest {
+		t.Fatalf("digest = %q; want %q", got.Digest, resolved.Digest)
+	}
+}
+
+func TestResolveTaggedDescriptorRejectsEmptyDigest(t *testing.T) {
+	_, err := resolveTaggedDescriptor(context.Background(), staticResolver{desc: ocispec.Descriptor{}}, "edge", ocispec.Descriptor{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "empty digest") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestResolveTaggedDescriptorRejectsDigestMismatch(t *testing.T) {
+	pushed := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2}`))
+	resolved := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2,"different":true}`))
+	_, err := resolveTaggedDescriptor(context.Background(), staticResolver{desc: resolved}, "edge", pushed)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "does not match pushed digest") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+type staticResolver struct {
+	desc ocispec.Descriptor
+}
+
+func (r staticResolver) Resolve(context.Context, string) (ocispec.Descriptor, error) {
+	return r.desc, nil
 }
 
 func writePackFixture(t *testing.T, dir string) (string, string, []byte) {

@@ -3,14 +3,16 @@ load("@rules_oci//oci:defs.bzl", "oci_image")
 genrule(
     name = "manifest",
     srcs = [
-        "@crossplane_chart//file",
+        "@crossplane_source//:chart",
+        "@crossplane_source//:chart_yaml",
         "@crossplane_source//:crds",
     ],
     outs = ["k8s/crossplane.yaml.tmpl"],
     cmd = """
 set -euo pipefail
+chart_dir="$$(dirname "$(location @crossplane_source//:chart_yaml)")"
 {
-  printf '# Generated from Crossplane Helm chart v2.3.2 (sha256:25204020c240bb6280bfa5ba091c3550eacdc1d681b44136113a0d1b4f98e1c6) and source tag v2.3.2 (sha256:7b2ca515347700ce5468782b1c27b4e784214b9cfabebb5d1c548e53904c1137).\\n'
+  printf '# Generated from Crossplane source tag v2.3.2 (sha256:7b2ca515347700ce5468782b1c27b4e784214b9cfabebb5d1c548e53904c1137).\\n'
   printf '# Do not edit this output; edit the Bazel rule and upstream pins in MODULE.bazel.\\n'
   printf -- '---\\n'
   printf 'apiVersion: v1\\nkind: Namespace\\nmetadata:\\n  name: crossplane-system\\n'
@@ -20,7 +22,7 @@ set -euo pipefail
     printf '\\n'
   done
   printf -- '---\\n'
-  "$(execpath @helm_linux_amd64//:helm)" template crossplane "$(location @crossplane_chart//file)" \
+  "$(execpath @helm_linux_amd64//:helm)" template crossplane "$$chart_dir" \
     --namespace crossplane-system \
     --set image.repository=xpkg.crossplane.io/crossplane/crossplane \
     --set image.tag=v2.3.2
