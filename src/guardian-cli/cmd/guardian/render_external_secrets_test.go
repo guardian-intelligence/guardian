@@ -32,9 +32,8 @@ func TestExternalSecretsRenderUsesSeedRegistryImage(t *testing.T) {
 		"namespace: external-secrets",
 		"external-secrets-webhook.external-secrets.svc",
 		"image: " + image,
-		"--namespace=observability",
-		"kind: Role",
-		`namespace: "observability"`,
+		"kind: ClusterRole",
+		"name: external-secrets-controller",
 		"name: externalsecrets.external-secrets.io",
 		"name: secretstores.external-secrets.io",
 	} {
@@ -46,7 +45,8 @@ func TestExternalSecretsRenderUsesSeedRegistryImage(t *testing.T) {
 		"namespace: default",
 		"external-secrets-webhook.default.svc",
 		"ghcr.io/external-secrets/external-secrets",
-		"kind: ClusterRole\nmetadata:\n  name: external-secrets-controller",
+		"--namespace=observability",
+		`namespace: "observability"`,
 	} {
 		if strings.Contains(out, banned) {
 			t.Errorf("external-secrets render must not contain %q", banned)

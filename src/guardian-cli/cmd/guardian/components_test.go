@@ -40,7 +40,6 @@ func TestComponentsTable(t *testing.T) {
 		{"edge-gateway-platform", "status", "product routes attach to the platform Gateway listener"},
 		{"edge-gateway-platform", "zot", "product routes attach to the platform Gateway listener"},
 		{"openbao", "external-secrets", "ESO authenticates to Bao"},
-		{"victoria-metrics", "external-secrets", "ESO is scoped to the observability namespace"},
 		{"external-secrets", "guardian-secrets", "CRDs and controllers must exist before ExternalSecret resources"},
 		{"victoria-metrics", "guardian-secrets", "victoria-metrics owns the observability namespace"},
 		{"guardian-secrets", "clickhouse", "ClickHouse requires clickhouse-admin at pod config time"},
