@@ -1,5 +1,11 @@
 # @guardian-intelligence/aisucks
 
+## 0.3.0
+
+### Minor Changes
+
+- Add the package-owned release state machine for admitted OCI publication and npm trusted publishing.
+
 ## 0.2.0
 
 ### Minor Changes

@@ -1,9 +1,10 @@
 # Release runner runbook
 
 Status: retired. The workflow-owned release runner bridge has been removed in
-favor of repo-owned Go release tooling executed through `aspect`. This file is
-kept only as historical context for the self-hosted runner POC until the
-release-target tooling fully replaces it.
+favor of release tooling executed through `aspect`. Package-owned release
+state machines own package policy; shared release infrastructure owns common
+admission/evidence shape. This file is kept only as historical context for the
+self-hosted runner POC until the release-target tooling fully replaces it.
 
 This previously provisioned the self-hosted GitHub Actions runner that executed
 the deleted release workflow. The commands below are retained only for forensic

@@ -126,15 +126,16 @@ VictoriaMetrics queries against the M2 recording rules.
 
 ## Sequencing
 
-1. **Release target lane**: repo-owned Go release tooling normalizes release
-   subjects, runs `oci_push` targets, emits a CUE/JSON release manifest, signs
-   provenance, and advances edge pointers. The npm SDK first becomes an OCI
-   subject at `guardian/aisucks/sdk/npm`; `//src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci` already
-   builds the local OCI artifact envelope, and the npmjs publish step is a
-   later Trusted Publishing projection from that subject, not a push-on-main
-   rule in GitHub Actions YAML.
-   VERIFY: `cosign verify` of a real release from a clean machine (pulls part
-   of M7's exit criteria forward).
+1. **Release target lane**: release tooling invoked through `aspect`
+   normalizes release subjects, emits release records, attaches evidence, and
+   advances edge pointers. Package-owned state machines own package projection
+   details; shared release infrastructure owns source resolution, subject
+   normalization, provenance shape, admission checks, and result records. The
+   npm SDK first becomes an OCI subject at `guardian/aisucks/sdk/npm`; the
+   npmjs publish step is a later Trusted Publishing projection from that
+   subject, not a push-on-main rule in GitHub Actions YAML. VERIFY: pull the
+   real SDK release from a clean machine with `oras pull`/`oras discover`;
+   cosign-compatible OCI signatures are the follow-up hardening step.
 2. **Flux on dev** following edge; the template→kustomize conversion lands
    here. VERIFY: a merge reaches dev converged in minutes, hands-off.
 3. **Judge, gate role on gamma.** Prerequisite: bao Transit init on gamma

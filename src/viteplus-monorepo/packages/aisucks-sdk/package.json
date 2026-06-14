@@ -1,6 +1,6 @@
 {
   "name": "@guardian-intelligence/aisucks",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Tiny SDK for the aisucks.app public API.",
   "homepage": "https://github.com/guardian-intelligence/guardian/tree/main/src/viteplus-monorepo/packages/aisucks-sdk#readme",
   "bugs": {
@@ -29,9 +29,11 @@
     "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.release.json",
     "build": "tsc -p tsconfig.build.json",
-    "pack:dry-run": "npm pack --dry-run"
+    "pack:dry-run": "npm pack --dry-run",
+    "release": "tsx ./release/main.ts",
+    "release:check": "tsx ./release/main.ts --mode check"
   },
   "dependencies": {
     "@bufbuild/protobuf": "catalog:",
@@ -39,6 +41,11 @@
     "@connectrpc/connect-web": "catalog:"
   },
   "devDependencies": {
+    "@sigstore/bundle": "catalog:",
+    "effect": "catalog:",
+    "npm": "catalog:",
+    "sigstore": "catalog:",
+    "tsx": "catalog:",
     "typescript": "catalog:"
   },
   "engines": {

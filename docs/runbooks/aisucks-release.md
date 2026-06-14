@@ -5,13 +5,14 @@ The release artifact is a **git tag** — hermetic Bazel makes the image digest
 a pure function of the commit, and step 4 verifies that instead of trusting it.
 
 The old workflow-owned automated form has been removed. The steps below are the
-manual release spec until repo-owned Go release tooling, invoked through
-`aspect`, replaces them. The ratified successor (`docs/architecture/release.md`)
-moves deploys to per-cluster Flux + a release judge, with GitHub holding no
-cluster credentials; the gate criteria below carry over as the judge's soak
-spec. Rollback (step 5) is manual either way. The release record IS the
-annotated tag set: `git tag -n1 -l 'aisucks/v*'` lists every release with its
-digest.
+manual service-image release spec until release tooling invoked through
+`aspect` replaces them. Package-owned release state machines own package
+projection details, while shared release infrastructure owns evidence and
+admission shape. The ratified successor (`docs/architecture/release.md`) moves
+deploys to per-cluster Flux + a release judge, with GitHub holding no cluster
+credentials; the gate criteria below carry over as the judge's soak spec.
+Rollback (step 5) is manual either way. The release record IS the annotated tag
+set: `git tag -n1 -l 'aisucks/v*'` lists every release with its digest.
 
 Public OCI vending is a separate release target; see
 `docs/runbooks/public-release.md`. The npm SDK uses the OCI-first projection lane in
