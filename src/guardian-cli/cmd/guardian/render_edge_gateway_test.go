@@ -22,6 +22,7 @@ func TestEdgeGatewayPlatformRender(t *testing.T) {
 		"name: edgegateways.platform.guardian.dev",
 		"kind: Composition",
 		"name: edge-gateway-cilium",
+		"name: function-auto-ready",
 		"kind: GatewayClass",
 		"kind: Gateway",
 		"kind: ClusterIssuer",

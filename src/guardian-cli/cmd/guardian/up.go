@@ -488,6 +488,7 @@ func waitProviderKubernetes(kubectl, kubeconfig string) error {
 	for _, pkg := range []string{
 		"providers.pkg.crossplane.io/provider-kubernetes",
 		"functions.pkg.crossplane.io/function-go-templating",
+		"functions.pkg.crossplane.io/function-auto-ready",
 	} {
 		if err := runTool(kubectl, "--kubeconfig", kubeconfig, "wait", "--for=condition=Healthy", pkg, "--timeout=5m"); err != nil {
 			return err

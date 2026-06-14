@@ -1,4 +1,5 @@
-# Crossplane provider-kubernetes v1.2.1 and function-go-templating v0.12.1.
+# Crossplane provider-kubernetes v1.2.1, function-go-templating v0.12.1, and
+# function-auto-ready v0.6.5.
 # The package references are digest-pinned. Crossplane's package manager pulls
 # these xpkgs during bootstrap; this is the remaining external package root
 # until the seed registry can mirror xpkg packages.
@@ -29,6 +30,13 @@ metadata:
   name: function-go-templating
 spec:
   package: xpkg.crossplane.io/crossplane-contrib/function-go-templating@sha256:86f02d0b0e22725015d4be7f4d25bebee47e27300f496ad55630bc64be5f8c9a
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: function-auto-ready
+spec:
+  package: xpkg.crossplane.io/crossplane-contrib/function-auto-ready@sha256:49cc4de717311b589c0ad9ae6d8d2256e2754ab4884391a5655b71df29bc3684
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
