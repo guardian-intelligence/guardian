@@ -157,12 +157,59 @@ export const ReleaseSummarySchema = Schema.Struct({
 
 export const NpmIntegrityViewSchema = Schema.String;
 
+export const GithubOidcTokenResponseSchema = Schema.Struct({
+  value: Schema.String,
+});
+
+export const GithubOidcClaimsSchema = Schema.Struct({
+  iss: Schema.String,
+  sub: Schema.String,
+  aud: Schema.Union(Schema.String, Schema.Array(Schema.String)),
+  repository: Schema.optional(Schema.String),
+  repository_owner: Schema.optional(Schema.String),
+  repository_visibility: Schema.optional(Schema.String),
+  workflow: Schema.optional(Schema.String),
+  workflow_ref: Schema.optional(Schema.String),
+  job_workflow_ref: Schema.optional(Schema.String),
+  event_name: Schema.optional(Schema.String),
+  ref: Schema.optional(Schema.String),
+  sha: Schema.optional(Schema.String),
+  runner_environment: Schema.optional(Schema.String),
+});
+
+export const GithubOidcLogDetailsSchema = Schema.Struct({
+  iss: Schema.String,
+  sub: Schema.String,
+  aud: Schema.Union(Schema.String, Schema.Array(Schema.String)),
+  repository: Schema.optional(Schema.String),
+  repository_owner: Schema.optional(Schema.String),
+  repository_visibility: Schema.optional(Schema.String),
+  workflow: Schema.optional(Schema.String),
+  workflow_ref: Schema.optional(Schema.String),
+  job_workflow_ref: Schema.optional(Schema.String),
+  event_name: Schema.optional(Schema.String),
+  ref: Schema.optional(Schema.String),
+  sha: Schema.optional(Schema.String),
+  runner_environment: Schema.optional(Schema.String),
+});
+
+export const NpmOidcExchangeResponseSchema = Schema.Struct({
+  token: Schema.String,
+});
+
+export const NpmOidcExchangeLogDetailsSchema = Schema.Struct({
+  packageName: Schema.String,
+  registry: Schema.String,
+  tokenIssued: Schema.Boolean,
+});
+
 export type PackageJson = Schema.Schema.Type<typeof PackageJsonSchema>;
 export type NpmPackEntryFromSchema = Schema.Schema.Type<typeof NpmPackEntrySchema>;
 export type SdkOciResultFromSchema = Schema.Schema.Type<typeof SdkOciResultSchema>;
 export type InTotoStatementFromSchema = Schema.Schema.Type<typeof InTotoStatementSchema>;
 export type DsseEnvelope = Schema.Schema.Type<typeof DsseEnvelopeSchema>;
 export type ReleaseResultFromSchema = Schema.Schema.Type<typeof ReleaseResultSchema>;
+export type GithubOidcClaims = Schema.Schema.Type<typeof GithubOidcClaimsSchema>;
 
 export function decodeUnknown<A, I>(
   schema: Schema.Schema<A, I, never>,
