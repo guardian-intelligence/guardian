@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"io"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestGuardianSecretsRenderProjectsObservabilitySecrets(t *testing.T) {
@@ -53,5 +57,51 @@ func TestGuardianSecretsRenderProjectsObservabilitySecrets(t *testing.T) {
 	}
 	if strings.Contains(out, "ClusterSecretStore") {
 		t.Error("observability projection should stay namespace-scoped through SecretStore")
+	}
+	if strings.Contains(out, "guardian-oci") || strings.Contains(out, "zot-publisher") {
+		t.Error("guardian-secrets should only render observability projections; zot is Crossplane-managed")
+	}
+	assertExternalSecretData(t, rendered, "clickhouse-admin", "grafana-admin")
+}
+
+func assertExternalSecretData(t *testing.T, manifest []byte, names ...string) {
+	t.Helper()
+	want := map[string]bool{}
+	for _, name := range names {
+		want[name] = false
+	}
+	dec := yaml.NewDecoder(bytes.NewReader(manifest))
+	for {
+		var doc struct {
+			Kind     string `yaml:"kind"`
+			Metadata struct {
+				Name string `yaml:"name"`
+			} `yaml:"metadata"`
+			Spec struct {
+				Data []struct {
+					SecretKey string `yaml:"secretKey"`
+				} `yaml:"data"`
+			} `yaml:"spec"`
+		}
+		if err := dec.Decode(&doc); err == io.EOF {
+			break
+		} else if err != nil {
+			t.Fatalf("decode guardian-secrets manifest: %v", err)
+		}
+		if doc.Kind != "ExternalSecret" {
+			continue
+		}
+		if _, ok := want[doc.Metadata.Name]; !ok {
+			continue
+		}
+		if len(doc.Spec.Data) == 0 {
+			t.Fatalf("ExternalSecret %s has no spec.data entries", doc.Metadata.Name)
+		}
+		want[doc.Metadata.Name] = true
+	}
+	for name, found := range want {
+		if !found {
+			t.Fatalf("ExternalSecret %s not found", name)
+		}
 	}
 }

@@ -1,7 +1,7 @@
 # OCI Artifact References
 
-Status: target convention. Examples use `oci.gi.org` as the short public
-registry hostname; the deployed hostname is selected by site/domain config.
+Status: target convention. Examples use the deployed public registry hostname
+`oci.guardianintelligence.org`.
 
 Guardian's public artifact surface is the OCI Distribution API. Object storage
 is an implementation detail behind the registry. Clients pull OCI references
@@ -18,7 +18,7 @@ The repository path is the collapsed release tuple for the bytes being served:
 For the aisucks TypeScript SDK:
 
 ```text
-oci.gi.org/guardian/aisucks/sdk/npm
+oci.guardianintelligence.org/guardian/aisucks/sdk/npm
 ```
 
 Tuple fields:
@@ -42,12 +42,12 @@ digest:
 
 | Use | Reference | Trust rule |
 | --- | --- | --- |
-| Canonical subject | `oci.gi.org/guardian/aisucks/sdk/npm@sha256:<manifest>` | Verification target. |
-| Fast candidate | `oci.gi.org/guardian/aisucks/sdk/npm:edge` | Resolve to digest, then verify. |
-| Gated candidate | `oci.gi.org/guardian/aisucks/sdk/npm:nightly` | Resolve to digest; require gate result. |
-| Stable user channel | `oci.gi.org/guardian/aisucks/sdk/npm:stable` | Resolve to digest; require stable pointer/provenance. |
-| Commit convenience | `oci.gi.org/guardian/aisucks/sdk/npm:git-<12-char-sha>` | Debugging/rebuild correlation only. |
-| Ecosystem version | `oci.gi.org/guardian/aisucks/sdk/npm:npm-v0.2.0` | Ties the OCI subject to the npm external coordinate. |
+| Canonical subject | `oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>` | Verification target. |
+| Fast candidate | `oci.guardianintelligence.org/guardian/aisucks/sdk/npm:edge` | Resolve to digest, then verify. |
+| Gated candidate | `oci.guardianintelligence.org/guardian/aisucks/sdk/npm:nightly` | Resolve to digest; require gate result. |
+| Stable user channel | `oci.guardianintelligence.org/guardian/aisucks/sdk/npm:stable` | Resolve to digest; require stable pointer/provenance. |
+| Commit convenience | `oci.guardianintelligence.org/guardian/aisucks/sdk/npm:git-<12-char-sha>` | Debugging/rebuild correlation only. |
+| Ecosystem version | `oci.guardianintelligence.org/guardian/aisucks/sdk/npm:npm-v0.2.0` | Ties the OCI subject to the npm external coordinate. |
 
 Tags are convenience selectors. They are not the trust anchor. The digest,
 signature, provenance, release manifest, and gate/publish referrers are the
@@ -59,7 +59,7 @@ The npm SDK subject is an OCI manifest used as a generic artifact, not a
 runnable container image. The initial payload is deliberately boring:
 
 ```text
-OCI subject: oci.gi.org/guardian/aisucks/sdk/npm@sha256:<manifest>
+OCI subject: oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>
 artifactType: application/vnd.guardian.sdk.npm.package.v1
 
 layers:
@@ -108,14 +108,14 @@ The initial SDK is pure TypeScript, so the release tuple records
 If the bytes become platform-specific, add the platform segment:
 
 ```text
-oci.gi.org/guardian/aisucks/sdk/npm/linux-amd64:edge
-oci.gi.org/guardian/aisucks/sdk/npm/darwin-arm64:edge
+oci.guardianintelligence.org/guardian/aisucks/sdk/npm/linux-amd64:edge
+oci.guardianintelligence.org/guardian/aisucks/sdk/npm/darwin-arm64:edge
 ```
 
 If the bytes vary by build flavor, add the flavor after platform:
 
 ```text
-oci.gi.org/guardian/aisucks/sdk/npm/linux-amd64/fips:edge
+oci.guardianintelligence.org/guardian/aisucks/sdk/npm/linux-amd64/fips:edge
 ```
 
 Do not add publisher, channel, source commit, or version as path segments.
@@ -142,11 +142,11 @@ manifest digest.
 A clean machine should eventually verify the public SDK by digest:
 
 ```sh
-oras pull oci.gi.org/guardian/aisucks/sdk/npm@sha256:<manifest> -o ./dist
-cosign verify oci.gi.org/guardian/aisucks/sdk/npm@sha256:<manifest>
+oras pull oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest> -o ./dist
+cosign verify oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>
 cosign verify-attestation \
   --type slsaprovenance \
-  oci.gi.org/guardian/aisucks/sdk/npm@sha256:<manifest>
+  oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>
 npm install ./dist/guardian-intelligence-aisucks-<version>.tgz
 ```
 

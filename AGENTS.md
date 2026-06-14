@@ -1,35 +1,34 @@
 Bazel polyglot hermetically sealed monorepo for Guardian, a free open-source self-hostable cloud. Currently just a CLI that takes a node from stock ubuntu -> Talos installed + running OpenBao
 
-See ~/Projects/verself-sh for reference https://github.com/guardian-intelligence/verself
+Domain: guardianintelligence.org (abbr gi.org)
 
-Objectives for this iteration:
+Optimize for BYOC on-prem
+
+See ~/Projects/verself-sh for reference https://github.com/guardian-intelligence/verself which was a Nomad-based version of this approach.
+
+Objectives:
 
 We're maximizing for safe operations (disaster-recovery from wiped box + offsite backups as priority 1, behind ongoing security checks + hardening) and highly continuous rapidly delivered software to external vendors like NPM/PyPi/Crates.io and so on.
 After doing some financial calculation I also realize I need to make provisioning N workload nodes (rs4.metal.xlarge CPU: AMD 9554P, 64 Cores @ 3.1 GHz / RAM: 1.5 TB / Storage: 2 x 480 GB NVME + 4 x 8 TB NVME / NIC: 2 x 100 Gbps) a first class concept as well, otherwise we don't break even.
 
 Important context:
 - All dependencies version/commit pinned. Nothing during runtime, dev time, test time, or build time should require external non-version-pinned tooling, or shell out to binaries outside this repo or its build artifacts. All binaries are available under `guardian run`. E.g. `guardian run talosctl image k8s-bundle`
-- Dev tools: `aspect`
-- Run `aspect tidy` to format the codebase.
+- Dev tools: `aspect`. Run `aspect tidy` to format the codebase.
 - 1p configuration schemas in CUE, always. Read/Render-out YAML/JSON/TOML. Output must support all 3.
-- API IDL in Protobuf/Connect. Define IAM, audit, risk, request-size, rate
-  limit, and idempotency metadata as explicit operation policy on the RPC
-  contract.
-- Protobuf governance uses the repo-pinned Buf toolchain through Bazel:
-  linting, formatting, and breaking-change checks run from `rules_buf`; code
-  generation uses local pinned generators only. Do not use Buf remote plugins
-  in build/test/release paths.
+- API IDL in Protobuf/Connect. Define IAM, audit, risk, request-size, rate limit, and idempotency metadata as explicit operation policy on the RPC contract.
+- Protobuf governance uses the repo-pinned Buf toolchain through Bazel: linting, formatting, and breaking-change checks run from `rules_buf`; code generation uses local pinned generators only. Do not use Buf remote plugins in build/test/release paths.
 - All operations must run unattended, no human-in-the-loop.
 - Invent nothing. Glue code over existing libraries and aping reference implementations of solutions to problems only. Always do the boring industry-standard thing. We are modeling our approach after the Zarf/UDS/Defense Unicorns "air-gapped seed" pattern, but we know the machine we're deploying to and we control more layers.
 - Code is not the truth for how the system works. Traces are.
 - Use SQLC.
-- Do not provide time estimates
+- Do not provide time estimates.
 
 Constraints:
 - Installing dependencies when building from source is OK. Doing so on a traffic-serving host (prod/gamma/dev et. al) is not. Traffic-serving hosts use a commit-pinned release artifact of this repo.
 - We don't do sidecars.
 - ClickHouse wide events / Observability 2.0. We don't separate metrics, logs, and traces. Time series data lives in ClickHouse as Wide Events except for float values that we care about for monitoring which go into VictoriaMetrics
 - Cross-site isolation. 
+- Secrets must be autoprovisioned/autorotated. Use OpenBao as the source of truth and K8s Secrets as the delivery mechanism.
 
 Service architecture:
 
@@ -43,6 +42,7 @@ Service architecture:
 Release doctrine:
 
 - A release is a typed operation over a release target, not a workflow file. The release target is the tuple of distributable, source commit, package/ecosystem version or coordinate, publisher, platform, build flavor, and channel intent.
+- In OCI artifact paths, `npm` means the npm package/tarball format, not npmjs.com as publisher; npmjs publication is a downstream projection.
 - Promotion preserves source lineage and release intent. Bit identity is package/ecosystem-specific: OCI images may promote the same digest, while npm/crates/iOS/Electron may rebuild because version, signing, or channel metadata changes bytes.
 - Inside the Bazel monorepo, the only internal version is the commit. Ecosystem versions, dist-tags, app versions, OCI tags, and channel pointers are external projections of a commit and artifact evidence; Guardian code must not depend on internal semver between repo modules.
 - Package-owned release tooling owns release semantics: version derivation, release notes, build targets, supported platforms/flavors/publishers, publisher-specific packaging, and retry behavior. Shared release infrastructure owns source resolution, subject normalization, provenance shape, signing hooks, idempotency, audit events, and result records.
@@ -130,7 +130,7 @@ Product Surfaces:
 
 Current Objectives
 
-Phase 1 - Lay the groundwork: "the goal is "You just provisioned a box on latitude. Run the guardian CLI from your laptop to turn it into a functional software company (a leapfrog version of Verself) in under 4 minutes" (we'll get as fast as physically possible without a warm pool, and then do a warm pool + managed/billed approach to get it under 4 minutes). We ship this capability via the `guardian` CLI, which is also what we dogfood to provision OUR own servers and execute disaster-recovery drills (required). We're out of this phase when we have oci.guardianintelligence.com stood up vending in-toto attested binaries that users can run `cosign verify` on. No TEE because all code is open-source. See https://github.com/guardian-intelligence/verself/pull/150 for a previous attempt. This also doubles as our own disaster recovery procedure, which we will execute on an hourly basis.
+Phase 1 - Lay the groundwork: "the goal is "You just provisioned a box on latitude. Run the guardian CLI from your laptop to turn it into a functional software company (a leapfrog version of Verself) in under 4 minutes" (we'll get as fast as physically possible without a warm pool, and then do a warm pool + managed/billed approach to get it under 4 minutes). We ship this capability via the `guardian` CLI, which is also what we dogfood to provision OUR own servers and execute disaster-recovery drills (required). We're out of this phase when we have oci.guardianintelligence.org stood up vending in-toto attested binaries that users can run `cosign verify` on. No TEE because all code is open-source. See https://github.com/guardian-intelligence/verself/pull/150 for a previous attempt. This also doubles as our own disaster recovery procedure, which we will execute on an hourly basis.
 
 Phase 2 - We assimilate the gamma and prod boxes from Verself and then figure out a GitOps pipeline: development boxes ship a single-box version of Guardian. Merges to main continuously deploy to Gamma. Synthetics canaries continuously run against all environments. On Gamma they gate promotion to Prod. on Prod they trigger alerts/rollbacks. This is the critical phase. We get confidence in our release process and then we rapidly release software, create a pipeline to automate announcements to the guardianintelligence.org/news, begin getting publicity, traction, contributing useful free open source software. Gate: we have automated or nearly automated releases/yank-drills practiced for
 

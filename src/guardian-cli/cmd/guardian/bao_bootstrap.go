@@ -9,36 +9,58 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 const (
-	baoKVMountPath             = "kv"
-	baoKubernetesAuthMountPath = "kubernetes"
-	baoObservabilityPolicyName = "observability-secrets"
-	baoObservabilityRoleName   = "observability-secrets"
-	baoExternalSecretsSAName   = "external-secrets-observability"
-	baoExternalSecretsSANs     = "observability"
-	baoExternalSecretsAudience = "openbao"
-	baoRootTokenEnv            = "GUARDIAN_OPENBAO_TOKEN"
-	baoUnsealKeyEnv            = "GUARDIAN_OPENBAO_UNSEAL_KEY"
-	baoUnsealKeysEnv           = "GUARDIAN_OPENBAO_UNSEAL_KEYS"
-	baoAllowSecretMigrationEnv = "GUARDIAN_OPENBAO_ALLOW_SECRET_MIGRATION"
+	baoKVMountPath              = "kv"
+	baoKubernetesAuthMountPath  = "kubernetes"
+	baoObservabilityPolicyName  = "observability-secrets"
+	baoObservabilityRoleName    = "observability-secrets"
+	baoObservabilitySAName      = "external-secrets-observability"
+	baoObservabilitySANamespace = "observability"
+	baoOCIPolicyName            = "guardian-oci-secrets"
+	baoOCIRoleName              = "guardian-oci-secrets"
+	baoOCISAName                = "external-secrets-guardian-oci"
+	baoOCISANamespace           = "guardian-oci"
+	baoExternalSecretsAudience  = "openbao"
+	baoZotPublisherUsername     = "guardian-release"
+	baoRootTokenEnv             = "GUARDIAN_OPENBAO_TOKEN"
+	baoUnsealKeyEnv             = "GUARDIAN_OPENBAO_UNSEAL_KEY"
+	baoUnsealKeysEnv            = "GUARDIAN_OPENBAO_UNSEAL_KEYS"
+	baoAllowSecretMigrationEnv  = "GUARDIAN_OPENBAO_ALLOW_SECRET_MIGRATION"
 )
 
 type baoRequiredSecret struct {
-	name string
-	path func(*Site) string
+	name     string
+	path     func(*Site) string
+	required []string
+	generate func() (map[string]string, error)
+	enabled  func(*Site) bool
 }
 
 var requiredBaoSecrets = []baoRequiredSecret{{
-	name: "clickhouse-admin",
+	name:     "clickhouse-admin",
+	required: []string{"password"},
+	generate: passwordSecretData,
 	path: func(site *Site) string {
 		return "guardian/" + site.Cluster.Name + "/observability/clickhouse-admin"
 	},
 }, {
-	name: "grafana-admin",
+	name:     "grafana-admin",
+	required: []string{"password"},
+	generate: passwordSecretData,
 	path: func(site *Site) string {
 		return "guardian/" + site.Cluster.Name + "/observability/grafana-admin"
+	},
+}, {
+	name:     "zot-publisher",
+	required: []string{"username", "password", "htpasswd"},
+	generate: zotPublisherSecretData,
+	enabled:  siteUsesPlatformTLS,
+	path: func(site *Site) string {
+		return "guardian/" + site.Cluster.Name + "/oci/zot-publisher"
 	},
 }}
 
@@ -116,6 +138,9 @@ func configureBaoForProjection(addr, token string, site *Site, allowCreateMissin
 		return err
 	}
 	for _, secret := range requiredBaoSecrets {
+		if secret.enabled != nil && !secret.enabled(site) {
+			continue
+		}
 		if err := ensureBaoRequiredSecret(addr, token, secret, site, allowCreateMissing); err != nil {
 			return err
 		}
@@ -165,23 +190,40 @@ func ensureBaoKubernetesAuth(addr, token string, site *Site) error {
 	}, nil); err != nil {
 		return fmt.Errorf("openbao configure kubernetes auth: %w", err)
 	}
-	policy := fmt.Sprintf(`path "%s/data/guardian/%s/observability/*" {
+	observabilityPolicy := fmt.Sprintf(`path "%s/data/guardian/%s/observability/*" {
   capabilities = ["read"]
 }
 `, baoKVMountPath, site.Cluster.Name)
-	if err := baoJSON(addr, "PUT", "/v1/sys/policies/acl/"+baoObservabilityPolicyName, token, map[string]string{"policy": policy}, nil); err != nil {
+	if err := baoJSON(addr, "PUT", "/v1/sys/policies/acl/"+baoObservabilityPolicyName, token, map[string]string{"policy": observabilityPolicy}, nil); err != nil {
 		return fmt.Errorf("openbao write %s policy: %w", baoObservabilityPolicyName, err)
 	}
+	if err := ensureBaoKubernetesRole(addr, token, baoObservabilityRoleName, baoObservabilitySAName, baoObservabilitySANamespace, baoObservabilityPolicyName); err != nil {
+		return err
+	}
+	if !siteUsesPlatformTLS(site) {
+		return nil
+	}
+	ociPolicy := fmt.Sprintf(`path "%s/data/guardian/%s/oci/*" {
+  capabilities = ["read"]
+}
+`, baoKVMountPath, site.Cluster.Name)
+	if err := baoJSON(addr, "PUT", "/v1/sys/policies/acl/"+baoOCIPolicyName, token, map[string]string{"policy": ociPolicy}, nil); err != nil {
+		return fmt.Errorf("openbao write %s policy: %w", baoOCIPolicyName, err)
+	}
+	return ensureBaoKubernetesRole(addr, token, baoOCIRoleName, baoOCISAName, baoOCISANamespace, baoOCIPolicyName)
+}
+
+func ensureBaoKubernetesRole(addr, token, roleName, serviceAccountName, serviceAccountNamespace, policyName string) error {
 	role := map[string]any{
-		"bound_service_account_names":      []string{baoExternalSecretsSAName},
-		"bound_service_account_namespaces": []string{baoExternalSecretsSANs},
+		"bound_service_account_names":      []string{serviceAccountName},
+		"bound_service_account_namespaces": []string{serviceAccountNamespace},
 		"audience":                         baoExternalSecretsAudience,
-		"token_policies":                   []string{baoObservabilityPolicyName},
+		"token_policies":                   []string{policyName},
 		"token_ttl":                        "1h",
 		"token_max_ttl":                    "1h",
 	}
-	if err := baoJSON(addr, "POST", "/v1/auth/"+baoKubernetesAuthMountPath+"/role/"+baoObservabilityRoleName, token, role, nil); err != nil {
-		return fmt.Errorf("openbao write %s role: %w", baoObservabilityRoleName, err)
+	if err := baoJSON(addr, "POST", "/v1/auth/"+baoKubernetesAuthMountPath+"/role/"+roleName, token, role, nil); err != nil {
+		return fmt.Errorf("openbao write %s role: %w", roleName, err)
 	}
 	return nil
 }
@@ -197,8 +239,13 @@ func ensureBaoRequiredSecret(addr, token string, secret baoRequiredSecret, site 
 			return fmt.Errorf("openbao secret %s has no data", path)
 		}
 		data, ok := out.Data["data"].(map[string]any)
-		if !ok || data["password"] == "" {
-			return fmt.Errorf("openbao secret %s missing password", path)
+		if !ok {
+			return fmt.Errorf("openbao secret %s has invalid data", path)
+		}
+		for _, key := range secret.required {
+			if data[key] == "" {
+				return fmt.Errorf("openbao secret %s missing %s", path, key)
+			}
 		}
 		return nil
 	}
@@ -209,15 +256,11 @@ func ensureBaoRequiredSecret(addr, token string, secret baoRequiredSecret, site 
 	if !allowCreateMissing {
 		return fmt.Errorf("openbao required secret %s is absent; restore should reuse backed-up values, or set %s=1 for an intentional schema migration", path, baoAllowSecretMigrationEnv)
 	}
-	password, err := randomSecretString()
+	data, err := secret.generate()
 	if err != nil {
-		return fmt.Errorf("generate %s password: %w", secret.name, err)
+		return fmt.Errorf("generate %s secret: %w", secret.name, err)
 	}
-	body := map[string]any{
-		"data": map[string]string{
-			"password": password,
-		},
-	}
+	body := map[string]any{"data": data}
 	if err := baoJSON(addr, "POST", "/v1/"+baoKVMountPath+"/data/"+path, token, body, nil); err != nil {
 		return fmt.Errorf("openbao write %s: %w", path, err)
 	}
@@ -264,6 +307,30 @@ func randomSecretString() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(raw), nil
+}
+
+func passwordSecretData() (map[string]string, error) {
+	password, err := randomSecretString()
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{"password": password}, nil
+}
+
+func zotPublisherSecretData() (map[string]string, error) {
+	password, err := randomSecretString()
+	if err != nil {
+		return nil, err
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{
+		"username": baoZotPublisherUsername,
+		"password": password,
+		"htpasswd": baoZotPublisherUsername + ":" + string(hash) + "\n",
+	}, nil
 }
 
 func allowBaoSecretMigrationFromEnv() bool {

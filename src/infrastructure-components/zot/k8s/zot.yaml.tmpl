@@ -20,7 +20,26 @@ data:
       },
       "http": {
         "address": "0.0.0.0",
-        "port": "5000"
+        "port": "5000",
+        "auth": {
+          "failDelay": 2,
+          "htpasswd": {
+            "path": "/zot-auth/htpasswd"
+          }
+        },
+        "accessControl": {
+          "repositories": {
+            "**": {
+              "anonymousPolicy": ["read"],
+              "policies": [
+                {
+                  "users": ["guardian-release"],
+                  "actions": ["read", "create", "update"]
+                }
+              ]
+            }
+          }
+        }
       },
       "log": {
         "level": "info"
@@ -90,6 +109,9 @@ spec:
             - name: config
               mountPath: /zot-config
               readOnly: true
+            - name: auth
+              mountPath: /zot-auth
+              readOnly: true
             - name: storage
               mountPath: /var/lib/zot
       volumes:
@@ -99,6 +121,12 @@ spec:
             items:
               - key: config.json
                 path: config.json
+        - name: auth
+          secret:
+            secretName: zot-publisher
+            items:
+              - key: htpasswd
+                path: htpasswd
         - name: storage
           hostPath:
             path: /var/lib/guardian/zot

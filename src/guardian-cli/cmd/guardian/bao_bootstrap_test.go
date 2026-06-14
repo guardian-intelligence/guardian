@@ -68,30 +68,32 @@ func (b *fakeBaoConfig) handler() http.Handler {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux.HandleFunc("/v1/sys/policies/acl/observability-secrets", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/sys/policies/acl/", func(w http.ResponseWriter, r *http.Request) {
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		if r.Method != http.MethodPut {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
+		name := strings.TrimPrefix(r.URL.Path, "/v1/sys/policies/acl/")
 		var body struct {
 			Policy string `json:"policy"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		b.policies["observability-secrets"] = body.Policy
+		b.policies[name] = body.Policy
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux.HandleFunc("/v1/auth/kubernetes/role/observability-secrets", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/auth/kubernetes/role/", func(w http.ResponseWriter, r *http.Request) {
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
+		name := strings.TrimPrefix(r.URL.Path, "/v1/auth/kubernetes/role/")
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		b.roles["observability-secrets"] = body
+		b.roles[name] = body
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("/v1/kv/data/", func(w http.ResponseWriter, r *http.Request) {
@@ -148,15 +150,34 @@ func TestConfigureBaoForProjectionCreatesFreshSecrets(t *testing.T) {
 	if !strings.Contains(b.policies["observability-secrets"], "kv/data/guardian/"+site.Cluster.Name+"/observability/*") {
 		t.Fatalf("observability policy = %q", b.policies["observability-secrets"])
 	}
+	if !strings.Contains(b.policies["guardian-oci-secrets"], "kv/data/guardian/"+site.Cluster.Name+"/oci/*") {
+		t.Fatalf("guardian-oci policy = %q", b.policies["guardian-oci-secrets"])
+	}
 	role := b.roles["observability-secrets"]
 	if role["audience"] != "openbao" {
 		t.Fatalf("role audience = %v, want openbao", role["audience"])
 	}
+	ociRole := b.roles["guardian-oci-secrets"]
+	if ociRole["audience"] != "openbao" {
+		t.Fatalf("oci role audience = %v, want openbao", ociRole["audience"])
+	}
 	for _, secret := range requiredBaoSecrets {
-		path := secret.path(site)
-		if b.secrets[path]["password"] == "" {
-			t.Fatalf("secret %s has no generated password", path)
+		if secret.enabled != nil && !secret.enabled(site) {
+			continue
 		}
+		path := secret.path(site)
+		for _, key := range secret.required {
+			if b.secrets[path][key] == "" {
+				t.Fatalf("secret %s has no generated %s", path, key)
+			}
+		}
+	}
+	zotPath := "guardian/" + site.Cluster.Name + "/oci/zot-publisher"
+	if b.secrets[zotPath]["username"] != "guardian-release" {
+		t.Fatalf("zot username = %q, want guardian-release", b.secrets[zotPath]["username"])
+	}
+	if !strings.HasPrefix(b.secrets[zotPath]["htpasswd"], "guardian-release:$2") {
+		t.Fatalf("zot htpasswd = %q, want bcrypt htpasswd entry", b.secrets[zotPath]["htpasswd"])
 	}
 }
 

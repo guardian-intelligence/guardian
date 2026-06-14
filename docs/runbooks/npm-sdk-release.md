@@ -5,13 +5,15 @@ releases. The canonical SDK candidate is the npm package tarball stored as an
 OCI artifact at:
 
 ```text
-oci.gi.org/guardian/aisucks/sdk/npm@sha256:<manifest>
+oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>
 ```
 
 npm publication is a downstream projection from that verified OCI subject. The
 GitHub-hosted OIDC requirement for npm Trusted Publishing is real, but GitHub
 Actions remains an executor shim only. It must not own release selection,
 publisher fan-out, no-op policy, SLO gates, or channel promotion.
+In OCI paths, `npm` names the npm package tarball format; it does not mean
+npmjs.com is the artifact's source of truth.
 
 ## Release Intent
 
@@ -71,7 +73,7 @@ Remote publication is explicit:
 ```sh
 aspect release sdk-oci \
   --publish \
-  --ref oci.gi.org/guardian/aisucks/sdk/npm:edge \
+  --ref oci.guardianintelligence.org/guardian/aisucks/sdk/npm:edge \
   --username guardian-release \
   --password-env GUARDIAN_OCI_PASSWORD
 ```
@@ -79,7 +81,7 @@ aspect release sdk-oci \
 The SDK artifact lane must produce:
 
 - npm package tarball built from repo source
-- OCI subject at `oci.gi.org/guardian/aisucks/sdk/npm@sha256:<manifest>`
+- OCI subject at `oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>`
 - tarball digest and npm `dist.integrity`
 - SLSA/in-toto provenance naming the source commit, Bazel target, builder
   identity, and release tuple
@@ -149,10 +151,10 @@ sha256sum ./dist/guardian-intelligence-aisucks-<version>.tgz
 jq -r '.tarball_sha256' bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.json
 ```
 
-Public registry verification once `oci.gi.org` is live:
+Public registry verification once `oci.guardianintelligence.org` is live:
 
 ```sh
-SDK='oci.gi.org/guardian/aisucks/sdk/npm@sha256:<manifest>'
+SDK='oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>'
 
 oras pull "$SDK" -o ./dist
 cosign verify "$SDK"

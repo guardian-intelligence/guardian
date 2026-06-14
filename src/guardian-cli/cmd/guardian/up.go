@@ -323,7 +323,15 @@ func runUp(args []string) error {
 			if err := applyComponent(kubectl, kubeconfig, c, images, site); err != nil {
 				return err
 			}
-			if err := waitProjectedSecrets(kubectl, kubeconfig); err != nil {
+			if err := waitObservabilitySecrets(kubectl, kubeconfig); err != nil {
+				return err
+			}
+			continue
+		case "zot-secrets":
+			if err := applyComponent(kubectl, kubeconfig, c, images, site); err != nil {
+				return err
+			}
+			if err := waitZotPublisherSecret(kubectl, kubeconfig, site); err != nil {
 				return err
 			}
 			continue
@@ -538,12 +546,49 @@ func waitEdgeGateway(kubectl, kubeconfig string, site *Site) error {
 	return runTool(kubectl, "--kubeconfig", kubeconfig, "-n", "gateway", "get", "gateway", "edge")
 }
 
-func waitProjectedSecrets(kubectl, kubeconfig string) error {
-	for _, name := range []string{"clickhouse-admin", "grafana-admin"} {
-		if err := runTool(kubectl, "--kubeconfig", kubeconfig, "-n", "observability", "wait", "--for=condition=Ready", "externalsecret/"+name, "--timeout=3m"); err != nil {
+type projectedSecret struct {
+	namespace string
+	name      string
+}
+
+func waitObservabilitySecrets(kubectl, kubeconfig string) error {
+	return waitExternalSecretProjections(kubectl, kubeconfig, []projectedSecret{
+		{namespace: "observability", name: "clickhouse-admin"},
+		{namespace: "observability", name: "grafana-admin"},
+	})
+}
+
+func waitZotPublisherSecret(kubectl, kubeconfig string, site *Site) error {
+	if !siteUsesPlatformTLS(site) {
+		return nil
+	}
+	for _, obj := range []string{
+		"zot-publisher-namespace",
+		"zot-publisher-external-secrets-service-account",
+		"zot-publisher-secret-store",
+		"zot-publisher-external-secret",
+	} {
+		if err := poll("provider-kubernetes object "+obj, 3*time.Minute, 2*time.Second, func() error {
+			_, err := outputTool(kubectl, "--kubeconfig", kubeconfig, "get", "objects.kubernetes.crossplane.io/"+obj)
+			return err
+		}); err != nil {
 			return err
 		}
-		if err := runTool(kubectl, "--kubeconfig", kubeconfig, "-n", "observability", "get", "secret", name); err != nil {
+		if err := runTool(kubectl, "--kubeconfig", kubeconfig, "wait", "--for=condition=Ready", "objects.kubernetes.crossplane.io/"+obj, "--timeout=3m"); err != nil {
+			return err
+		}
+	}
+	return waitExternalSecretProjections(kubectl, kubeconfig, []projectedSecret{
+		{namespace: "guardian-oci", name: "zot-publisher"},
+	})
+}
+
+func waitExternalSecretProjections(kubectl, kubeconfig string, secrets []projectedSecret) error {
+	for _, secret := range secrets {
+		if err := runTool(kubectl, "--kubeconfig", kubeconfig, "-n", secret.namespace, "wait", "--for=condition=Ready", "externalsecret/"+secret.name, "--timeout=3m"); err != nil {
+			return err
+		}
+		if err := runTool(kubectl, "--kubeconfig", kubeconfig, "-n", secret.namespace, "get", "secret", secret.name); err != nil {
 			return err
 		}
 	}
