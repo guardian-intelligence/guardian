@@ -62,18 +62,23 @@ http_file(
     url = "https://helm.cilium.io/cilium-1.19.4.tgz",
 )
 
-http_file(
-    name = "crossplane_chart",
-    downloaded_file_path = "crossplane-2.3.2.tgz",
-    sha256 = "25204020c240bb6280bfa5ba091c3550eacdc1d681b44136113a0d1b4f98e1c6",
-    url = "https://charts.crossplane.io/stable/crossplane-2.3.2.tgz",
-)
-
 http_archive(
     name = "crossplane_source",
     build_file_content = """filegroup(
     name = "crds",
     srcs = glob(["cluster/crds/*.yaml"]),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "chart",
+    srcs = glob(["cluster/charts/crossplane/**"]),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "chart_yaml",
+    srcs = ["cluster/charts/crossplane/Chart.yaml"],
     visibility = ["//visibility:public"],
 )""",
     sha256 = "7b2ca515347700ce5468782b1c27b4e784214b9cfabebb5d1c548e53904c1137",
