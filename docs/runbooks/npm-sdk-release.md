@@ -125,6 +125,11 @@ Required setup:
 - Release job permissions: `contents: read`, `id-token: write`.
 - npm Trusted Publishing is configured for the exact workflow filename and
   repository.
+- `package.json` `repository.url` is the exact GitHub repository URL:
+  `https://github.com/guardian-intelligence/guardian`.
+- Publish preflight requests a GitHub OIDC token for
+  `npm:registry.npmjs.org` and verifies npm accepts it for the package before
+  public writes.
 - The workflow runs one `aspect release sdk-oci --publish ...` task.
 - The workflow YAML must not encode release policy, package matrices,
   publisher fan-out, signing, attestation, verification, or no-op decisions.

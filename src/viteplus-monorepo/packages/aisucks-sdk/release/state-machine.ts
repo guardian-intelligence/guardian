@@ -14,14 +14,21 @@ import { FileProvider, LoggerProvider, ProcessProvider, type CommandInput } from
 import { retryTransient } from "./retry.js";
 import {
   decodeJson,
+  decodeUnknown,
   encodeJson,
   fileJson,
+  GithubOidcClaimsSchema,
+  GithubOidcLogDetailsSchema,
+  GithubOidcTokenResponseSchema,
   invalidJson,
+  NpmOidcExchangeLogDetailsSchema,
+  NpmOidcExchangeResponseSchema,
   NpmIntegrityViewSchema,
   PackageJsonSchema,
   ReleaseResultSchema,
   SdkOciResultSchema,
   verificationJson,
+  type GithubOidcClaims,
 } from "./schemas.js";
 import {
   sdkPackageName,
@@ -38,6 +45,7 @@ import {
 const commandTimeoutMs = 120_000;
 const buildTimeoutMs = 600_000;
 const publishTimeoutMs = 180_000;
+const npmRegistry = "https://registry.npmjs.org/";
 
 export function runRelease(
   config: ReleaseConfig,
@@ -121,7 +129,9 @@ export function runRelease(
   });
 }
 
-function preflight(config: ReleaseConfig): Effect.Effect<void, ReleaseError, FileProvider> {
+function preflight(
+  config: ReleaseConfig,
+): Effect.Effect<void, ReleaseError, FileProvider | LoggerProvider> {
   return Effect.gen(function* () {
     if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(config.version)) {
       return yield* Effect.fail(
@@ -142,20 +152,7 @@ function preflight(config: ReleaseConfig): Effect.Effect<void, ReleaseError, Fil
       );
     }
     if (config.mode === "publish" && config.publishNpm && process.env.GITHUB_ACTIONS === "true") {
-      if (
-        process.env.ACTIONS_ID_TOKEN_REQUEST_URL === undefined ||
-        process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN === undefined
-      ) {
-        return yield* Effect.fail(
-          new InvalidReleaseTarget({
-            reason: "npm trusted publishing requires GitHub Actions OIDC",
-            details: {
-              requiredPermission: "id-token: write",
-              workflow: ".github/workflows/npm-sdk-release.yml",
-            },
-          }),
-        );
-      }
+      yield* requireGitHubActionsOidcForNpmPublish(sdkPackageName);
     }
 
     const files = yield* FileProvider;
@@ -178,6 +175,137 @@ function preflight(config: ReleaseConfig): Effect.Effect<void, ReleaseError, Fil
         }),
       );
     }
+  });
+}
+
+function requireGitHubActionsOidcForNpmPublish(
+  packageName: string,
+): Effect.Effect<void, ReleaseError, LoggerProvider> {
+  return Effect.gen(function* () {
+    const requestUrl = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+    const requestToken = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+    if (requestUrl === undefined || requestToken === undefined) {
+      return yield* Effect.fail(
+        new InvalidReleaseTarget({
+          reason: "npm trusted publishing requires GitHub Actions OIDC",
+          details: {
+            requiredPermission: "id-token: write",
+            workflow: ".github/workflows/npm-sdk-release.yml",
+          },
+        }),
+      );
+    }
+
+    const url = new URL(requestUrl);
+    url.searchParams.append("audience", "npm:registry.npmjs.org");
+    const responseText = yield* Effect.tryPromise({
+      try: async () => {
+        const response = await fetch(url, {
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${requestToken}`,
+          },
+        });
+        const body = await response.text();
+        if (!response.ok) {
+          throw new Error(`GitHub OIDC token request failed with HTTP ${response.status}: ${body}`);
+        }
+        return body;
+      },
+      catch: (error) =>
+        new InvalidReleaseTarget({
+          reason: "failed to fetch GitHub OIDC token for npm trusted publishing",
+          details: { error: error instanceof Error ? error.message : String(error) },
+        }),
+    });
+    const tokenResponse = yield* decodeJson(GithubOidcTokenResponseSchema, responseText, (reason) =>
+      invalidJson("GitHub OIDC token response does not match release schema", { reason }),
+    );
+    const claims = yield* decodeGithubOidcClaims(tokenResponse.value);
+    const claimDetails = yield* decodeUnknown(GithubOidcLogDetailsSchema, claims, (reason) =>
+      invalidJson("GitHub OIDC claim details do not match release schema", { reason }),
+    );
+    const logger = yield* LoggerProvider;
+    yield* logger.log({
+      stage: "oidc",
+      status: "ok",
+      message: "observed GitHub OIDC claims for npm trusted publishing",
+      details: claimDetails,
+    });
+    yield* validateNpmOidcExchange(packageName, tokenResponse.value);
+  });
+}
+
+function decodeGithubOidcClaims(token: string): Effect.Effect<GithubOidcClaims, ReleaseError> {
+  return Effect.gen(function* () {
+    const payload = token.split(".")[1];
+    if (payload === undefined || payload === "") {
+      return yield* Effect.fail(
+        new InvalidReleaseTarget({
+          reason: "GitHub OIDC token is not a JWT",
+        }),
+      );
+    }
+    const claimsJson = Buffer.from(payload, "base64url").toString("utf8");
+    return yield* decodeJson(GithubOidcClaimsSchema, claimsJson, (reason) =>
+      invalidJson("GitHub OIDC token claims do not match release schema", { reason }),
+    );
+  });
+}
+
+function validateNpmOidcExchange(
+  packageName: string,
+  idToken: string,
+): Effect.Effect<void, ReleaseError, LoggerProvider> {
+  return Effect.gen(function* () {
+    const exchangeUrl = new URL(
+      `/-/npm/v1/oidc/token/exchange/package/${encodeURIComponent(packageName)}`,
+      npmRegistry,
+    );
+    const responseText = yield* Effect.tryPromise({
+      try: async () => {
+        const response = await fetch(exchangeUrl, {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${idToken}`,
+          },
+        });
+        const body = await response.text();
+        if (!response.ok) {
+          throw new Error(`npm OIDC token exchange failed with HTTP ${response.status}: ${body}`);
+        }
+        return body;
+      },
+      catch: (error) =>
+        new InvalidReleaseTarget({
+          reason: "npm rejected GitHub OIDC token for trusted publishing",
+          details: {
+            packageName,
+            registry: npmRegistry,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        }),
+    });
+    const exchange = yield* decodeJson(NpmOidcExchangeResponseSchema, responseText, (reason) =>
+      invalidJson("npm OIDC token exchange response does not match release schema", { reason }),
+    );
+    const details = yield* decodeUnknown(
+      NpmOidcExchangeLogDetailsSchema,
+      {
+        packageName,
+        registry: npmRegistry,
+        tokenIssued: exchange.token !== "",
+      },
+      (reason) => invalidJson("npm OIDC exchange details do not match release schema", { reason }),
+    );
+    const logger = yield* LoggerProvider;
+    yield* logger.log({
+      stage: "oidc",
+      status: "ok",
+      message: "npm accepted GitHub OIDC token for trusted publishing",
+      details,
+    });
   });
 }
 
@@ -413,6 +541,8 @@ function publishNpm(
           "--access",
           "public",
           "--provenance",
+          "--loglevel",
+          "verbose",
         ],
         publishTimeoutMs,
       ),
