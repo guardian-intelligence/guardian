@@ -120,7 +120,8 @@ the error budget), or the **drilled wipe-convert** (212s measured,
   running sites).
 - **Phase 1 — EdgeGateway substrate + product routes.** `guardian up`
   installs pinned Crossplane, provider-kubernetes, function-go-templating,
-  cert-manager where needed, and the `EdgeGateway` XRD/Composition. Sites
+  function-auto-ready, cert-manager where needed, and the `EdgeGateway`
+  XRD/Composition. Sites
   declare the concrete `EdgeGateway` objects in `gateway.manifests`; the
   platform composition owns GatewayClass/Gateway/listeners/cert refs, and
   products own their same-namespace `TLSRoute`/`HTTPRoute` objects. VERIFY:

@@ -32,6 +32,9 @@ radius tradeoff.
   a digest-pinned xpkg.
 - `function-go-templating` v0.12.1 is installed by Crossplane package manager
   with a digest-pinned xpkg.
+- `function-auto-ready` v0.6.5 is installed by Crossplane package manager with
+  a digest-pinned xpkg so the `EdgeGateway` composite Ready condition follows
+  the composed provider-kubernetes `Object`s.
 - `platform.guardian.dev/EdgeGateway` is a cluster-scoped XRD.
 
 The `EdgeGateway` composition owns:
@@ -63,8 +66,8 @@ Fresh bootstrap order for a Gateway-enabled site:
 4. OpenBao is converged and unsealed/configured.
 5. Crossplane is applied and its CRDs/controllers are waited on.
 6. cert-manager is applied if platform TLS is requested.
-7. provider-kubernetes and function-go-templating packages are applied and
-   waited on.
+7. provider-kubernetes, function-go-templating, and function-auto-ready
+   packages are applied and waited on.
 8. ProviderConfig and the EdgeGateway XRD/Composition are applied.
 9. `guardian up` applies the checked-in manifests listed in
    `gateway.manifests`, including the site's concrete EdgeGateway.
