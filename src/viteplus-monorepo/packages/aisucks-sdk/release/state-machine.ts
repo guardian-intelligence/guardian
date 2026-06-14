@@ -141,6 +141,22 @@ function preflight(config: ReleaseConfig): Effect.Effect<void, ReleaseError, Fil
         }),
       );
     }
+    if (config.mode === "publish" && config.publishNpm && process.env.GITHUB_ACTIONS === "true") {
+      if (
+        process.env.ACTIONS_ID_TOKEN_REQUEST_URL === undefined ||
+        process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN === undefined
+      ) {
+        return yield* Effect.fail(
+          new InvalidReleaseTarget({
+            reason: "npm trusted publishing requires GitHub Actions OIDC",
+            details: {
+              requiredPermission: "id-token: write",
+              workflow: ".github/workflows/npm-sdk-release.yml",
+            },
+          }),
+        );
+      }
+    }
 
     const files = yield* FileProvider;
     const packageJsonPath = path.join(config.paths.packageRoot, "package.json");

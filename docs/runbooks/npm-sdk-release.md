@@ -122,7 +122,7 @@ npm Trusted Publishing currently requires a GitHub-hosted Actions runner with
 OIDC. The executor shim is `.github/workflows/npm-sdk-release.yml`.
 Required setup:
 
-- Permissions: `contents: read`, `id-token: write`.
+- Release job permissions: `contents: read`, `id-token: write`.
 - npm Trusted Publishing is configured for the exact workflow filename and
   repository.
 - The workflow runs one `aspect release sdk-oci --publish ...` task.
