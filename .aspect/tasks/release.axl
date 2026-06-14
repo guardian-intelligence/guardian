@@ -42,7 +42,14 @@ def _sdk_oci_impl(ctx):
     if ctx.args.password_env != "":
         cli_args.extend(["--password-env", ctx.args.password_env])
     if ctx.args.access_token_env != "":
-        cli_args.extend(["--access-token-env", ctx.args.access_token_env])
+        cli_args = [
+            "--tarball", tarball,
+            "--pack-json", pack_json,
+            "--ref", ctx.args.ref,
+            "--access-token-env", ctx.args.access_token_env,
+        ]
+        if ctx.args.plain_http:
+            cli_args.append("--plain-http")
 
     return checked_spawn(
         ctx,
@@ -59,10 +66,10 @@ sdk_oci = task(
     summary = "Build the aisucks npm SDK tarball as an OCI artifact.",
     args = {
         "publish": args.boolean(default = False, description = "Push to a remote OCI registry instead of writing a local OCI layout."),
-        "ref": args.string(default = "oci.gi.org/guardian/aisucks/sdk/npm:edge", description = "Remote OCI reference used with --publish."),
+        "ref": args.string(default = "oci.guardianintelligence.org/guardian/aisucks/sdk/npm:edge", description = "Remote OCI reference used with --publish."),
         "plain_http": args.boolean(default = False, description = "Use plain HTTP for the remote registry."),
-        "username": args.string(default = "", description = "Registry username used with --publish and --password-env."),
-        "password_env": args.string(default = "", description = "Environment variable containing a registry password used with --publish."),
+        "username": args.string(default = "guardian-release", description = "Registry username used with --publish and --password-env."),
+        "password_env": args.string(default = "GUARDIAN_OCI_PASSWORD", description = "Environment variable containing a registry password used with --publish."),
         "access_token_env": args.string(default = "", description = "Environment variable containing a registry bearer token used with --publish."),
     },
 )

@@ -130,8 +130,7 @@ gate verdicts, the stable pointer, deployed attestations. in-toto
 SLSA-provenance-v1 per pushed digest; the CUE release manifest (release →
 component digests → commit, signed; status page data source; channels
 stable/edge as signed pointers). Vending after M3: zot (no Harbor) behind
-the Gateway at oci.guardianintelligence.org (domain spelling .org vs .com
-to be settled in AGENTS.md), publishing images + attestations + manifests;
+the Gateway at oci.guardianintelligence.org, publishing images + attestations + manifests;
 zot also serves each site as a pull-through mirror. Reproducibility remains the backstop: anyone rebuilds the commit
 and matches the digest — we already prove this on every release.
 VERIFY: `cosign verify` documented and passing from a machine that has only

@@ -35,6 +35,7 @@ func TestComponentsTable(t *testing.T) {
 		{"cert-manager", "edge-gateway-platform", "platform TLS certificates require cert-manager CRDs"},
 		{"provider-kubernetes", "provider-kubernetes-config", "ProviderConfig requires provider-kubernetes CRDs"},
 		{"provider-kubernetes-config", "edge-gateway-platform", "the EdgeGateway composition emits provider-kubernetes Objects"},
+		{"provider-kubernetes-config", "zot-secrets", "zot secret projection is managed through provider-kubernetes Objects"},
 		{"edge-gateway-platform", "aisucks", "product routes attach to the platform Gateway listener"},
 		{"edge-gateway-platform", "status", "product routes attach to the platform Gateway listener"},
 		{"edge-gateway-platform", "zot", "product routes attach to the platform Gateway listener"},
@@ -44,6 +45,8 @@ func TestComponentsTable(t *testing.T) {
 		{"victoria-metrics", "guardian-secrets", "victoria-metrics owns the observability namespace"},
 		{"guardian-secrets", "clickhouse", "ClickHouse requires clickhouse-admin at pod config time"},
 		{"guardian-secrets", "grafana", "Grafana requires grafana-admin at pod config time"},
+		{"external-secrets", "zot-secrets", "zot secret projection emits ExternalSecret resources"},
+		{"zot-secrets", "zot", "zot requires the OpenBao-projected htpasswd file at pod config time"},
 	} {
 		bi, ok := indexOf[rel.before]
 		if !ok {

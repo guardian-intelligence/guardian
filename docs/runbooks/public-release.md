@@ -9,11 +9,19 @@ artifacts, signatures, attestations, and release metadata for selected release
 targets. The release tool owns the target tuple and all publish/no-op logic.
 Reference naming is defined in `docs/architecture/oci-artifact-references.md`.
 
+The split is deliberate:
+
+- Build produces local bytes and a digest. It has no public side effects.
+- Publish copies that digest to `oci.guardianintelligence.org` and attaches
+  evidence as OCI referrers.
+- Distribute resolves, pulls, and verifies the digest, or projects the verified
+  subject into provider-specific systems such as npm, crates.io, PyPI, or Zig.
+
 ## What Ships
 
 - API OCI image: `ghcr.io/guardian-intelligence/aisucks@sha256:<digest>`
 - SDK OCI artifact:
-  `oci.gi.org/guardian/aisucks/sdk/npm@sha256:<manifest>`
+  `oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>`
 - OCI tags: `edge`, `nightly`, `stable`, `v<N>`, and `git-<12-char-sha>`
 - Cosign keyless signature over the digest
 - Cosign in-toto/SLSA provenance attestation over the digest
@@ -34,16 +42,24 @@ bazelisk build //src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci
 oras pull --oci-layout bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.oci:edge -o ./dist
 ```
 
-When the public registry exists and write credentials are present, the remote
-publish form is:
+The public zot registry allows anonymous reads and requires the
+`guardian-release` htpasswd identity for writes. `guardian up` generates that
+credential in OpenBao at `kv/guardian/<site>/oci/zot-publisher`; Crossplane
+owns the namespace-scoped ESO projection to the Kubernetes Secret
+`guardian-oci/zot-publisher`.
+
+When write credentials are present, the remote publish form is:
 
 ```sh
 aspect release sdk-oci \
   --publish \
-  --ref oci.gi.org/guardian/aisucks/sdk/npm:edge \
+  --ref oci.guardianintelligence.org/guardian/aisucks/sdk/npm:edge \
   --username guardian-release \
   --password-env GUARDIAN_OCI_PASSWORD
 ```
+
+`aspect release sdk-oci --publish` defaults to the ref, username, and password
+environment variable shown above.
 
 ## Required Setup
 

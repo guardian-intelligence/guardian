@@ -28,7 +28,7 @@ const (
 	npmTarballMediaType   = "application/gzip"
 	deterministicCreated  = "1970-01-01T00:00:00Z"
 	expectedPackageName   = "@guardian-intelligence/aisucks"
-	defaultRepositoryPath = "oci.gi.org/guardian/aisucks/sdk/npm:edge"
+	defaultRepositoryPath = "oci.guardianintelligence.org/guardian/aisucks/sdk/npm:edge"
 )
 
 type cliConfig struct {

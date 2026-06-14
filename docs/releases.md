@@ -81,7 +81,7 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 
 - [x] npm package tarball is built from repo source.
 - [x] SDK OCI reference forms are documented:
-  `oci.gi.org/guardian/aisucks/sdk/npm[:tag|@sha256:<digest>]`.
+  `oci.guardianintelligence.org/guardian/aisucks/sdk/npm[:tag|@sha256:<digest>]`.
 - [x] Repo-owned `//src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci` writes the npm package tarball as an
   OCI artifact subject in a declared local OCI layout.
 - [ ] npm package tarball is pushed to the public OCI registry by digest.
@@ -112,7 +112,7 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 - [x] SDK can be pulled from the local OCI layout with
   `oras pull --oci-layout bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.oci:edge -o ./dist`.
 - [ ] SDK can be pulled from the public OCI registry with
-  `oras pull oci.gi.org/guardian/aisucks/sdk/npm@sha256:<manifest>`.
+  `oras pull oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>`.
 
 ### Release Tuple Manifest
 
@@ -222,7 +222,7 @@ npm view @guardian-intelligence/aisucks@edge dist.integrity
 npm install @guardian-intelligence/aisucks@edge
 bazelisk build //src/viteplus-monorepo/packages/aisucks-sdk:sdk_oci
 oras pull --oci-layout bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/sdk_oci.oci:edge -o ./dist
-oras pull oci.gi.org/guardian/aisucks/sdk/npm@sha256:<manifest> -o ./dist
+oras pull oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest> -o ./dist
 guardian/repo tool verify release-manifest <digest-or-file>
 guardian/repo tool synthetic health --base-url=https://gamma.aisucks.app
 ```

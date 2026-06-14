@@ -190,6 +190,14 @@ var components = []component{{
 	layout:   "_main/src/status/image",
 	manifest: "src/status/k8s/status.yaml.tmpl",
 }, {
+	// Crossplane-managed ESO projection for zot's publisher credentials.
+	// The OpenBao values and auth role are reconciled earlier by guardian
+	// up; this component only owns the Kubernetes resources that deliver
+	// the credential to the zot pod.
+	name:     "zot-secrets",
+	manifest: "src/infrastructure-components/zot/k8s/zot-publisher-secrets.yaml.tmpl",
+	enabled:  siteUsesPlatformTLS,
+}, {
 	name:     "zot",
 	layout:   "_main/src/infrastructure-components/zot/image",
 	manifest: "src/infrastructure-components/zot/k8s/zot.yaml.tmpl",

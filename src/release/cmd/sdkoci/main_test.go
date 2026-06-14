@@ -28,14 +28,14 @@ func TestParseTaggedRefAllowsRegistryPort(t *testing.T) {
 }
 
 func TestParseTaggedRefRejectsDigestPush(t *testing.T) {
-	_, err := parseTaggedRef("oci.gi.org/guardian/aisucks/sdk/npm@sha256:abc")
+	_, err := parseTaggedRef("oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:abc")
 	if err == nil {
 		t.Fatal("expected error")
 	}
 }
 
 func TestCredentialFuncRequiresExplicitPair(t *testing.T) {
-	_, err := credentialFunc("oci.gi.org", credentialConfig{username: "guardian"})
+	_, err := credentialFunc("oci.guardianintelligence.org", credentialConfig{username: "guardian"})
 	if err == nil {
 		t.Fatal("expected error")
 	}

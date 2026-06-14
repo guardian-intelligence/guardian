@@ -5,6 +5,7 @@ go 1.26.4
 require (
 	github.com/bazelbuild/rules_go v0.61.1
 	github.com/google/go-containerregistry v0.21.6
+	golang.org/x/crypto v0.50.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
