@@ -49,6 +49,16 @@ func runDown(args []string) error {
 		fmt.Fprint(os.Stderr, warn)
 	}
 
+	kubectl, kerr := kubectlPath()
+	if kerr == nil {
+		kubeconfig := filepath.Join(state, "kubeconfig")
+		if _, err := os.Stat(kubeconfig); err == nil {
+			if err := backupPlatformTLSSecrets(kubectl, kubeconfig, state, site); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: platform TLS survival backup skipped: %v\n", err)
+			}
+		}
+	}
+
 	talosctl, err := talosctlPath()
 	if err != nil {
 		return err

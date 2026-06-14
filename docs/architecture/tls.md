@@ -109,6 +109,12 @@ survival set is:
 - The checked-in site `EdgeGateway` manifest that lets Crossplane and
   cert-manager adopt or renew the restored Secret.
 
+`guardian down --yes` best-effort snapshots those Kubernetes Secrets into the
+site-local state directory, and `guardian up` restores any saved copies before
+cert-manager is applied. A fresh host with no saved cert material can still
+issue through DNS-01, but routine wipe drills should not consume duplicate
+certificate issuance quota.
+
 ## ListenerSet
 
 Gateway API `ListenerSet` remains future state. It is the right eventual
