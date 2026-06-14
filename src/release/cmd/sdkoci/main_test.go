@@ -44,6 +44,22 @@ func TestCredentialFuncRequiresExplicitPair(t *testing.T) {
 	}
 }
 
+func TestCredentialFuncRejectsEmptyPasswordEnv(t *testing.T) {
+	env := "GUARDIAN_SDKOCI_TEST_EMPTY_PASSWORD"
+	t.Setenv(env, "")
+
+	_, err := credentialFunc("oci.guardianintelligence.org", credentialConfig{
+		username:    "guardian-release",
+		passwordEnv: env,
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), env+" is empty") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestRunWritesOCILayout(t *testing.T) {
 	dir := t.TempDir()
 	tarballPath, packPath, tarball := writePackFixture(t, dir)
@@ -312,6 +328,101 @@ func TestResolveTaggedDescriptorRejectsDigestMismatch(t *testing.T) {
 	}
 }
 
+func TestValidateDescriptorRejectsEmptyDescriptor(t *testing.T) {
+	err := validateDescriptor("test OCI descriptor", ocispec.Descriptor{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "empty digest") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestValidateDescriptorRejectsMissingMediaType(t *testing.T) {
+	desc := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2}`))
+	desc.MediaType = ""
+	err := validateDescriptor("test OCI descriptor", desc)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "empty media type") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestValidateDescriptorRejectsZeroSize(t *testing.T) {
+	desc := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, nil)
+	err := validateDescriptor("test OCI descriptor", desc)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "non-positive size") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestWriteResultRejectsEmptyOCIDigest(t *testing.T) {
+	outputPath := filepath.Join(t.TempDir(), "sdk-oci.json")
+	var out strings.Builder
+	result := validNPMResult()
+	result.OCIDigest = ""
+	result.OCIRef = "oci.guardianintelligence.org/guardian/aisucks/sdk/npm@"
+
+	err := writeResult(result, outputPath, &out)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "empty oci_digest") {
+		t.Fatalf("error = %v", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q", out.String())
+	}
+	if _, statErr := os.Stat(outputPath); !os.IsNotExist(statErr) {
+		t.Fatalf("output file exists or unexpected stat error: %v", statErr)
+	}
+}
+
+func TestWriteResultRejectsRefDigestMismatch(t *testing.T) {
+	result := validNPMResult()
+	result.OCIRef = "oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+
+	err := writeResult(result, "", io.Discard)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "does not point at digest") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestWriteResultRejectsAttestationDigestWithoutRef(t *testing.T) {
+	result := validNPMResult()
+	result.AttestationDigest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+	err := writeResult(result, "", io.Discard)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "attestation digest without attestation ref") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestWriteResultRejectsAttestationRefDigestMismatch(t *testing.T) {
+	result := validNPMResult()
+	result.AttestationDigest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	result.AttestationRef = "oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+
+	err := writeResult(result, "", io.Discard)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "attestation ref") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 type staticResolver struct {
 	desc ocispec.Descriptor
 }
@@ -343,4 +454,22 @@ func writePackFixture(t *testing.T, dir string) (string, string, []byte) {
 		t.Fatal(err)
 	}
 	return tarballPath, packPath, tarball
+}
+
+func validNPMResult() artifactResult {
+	return artifactResult{
+		Distributable: "aisucks-ts-sdk",
+		PayloadForm:   "npm",
+		Channel:       "edge",
+		OCIDigest:     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		OCIRef:        "oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		PayloadDigest: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+		TarballDigest: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+		NPMIntegrity:  "sha512-example",
+		Package:       defaultExpectedPackageName,
+		Version:       "0.3.0",
+		SourceRepo:    "https://github.com/guardian-intelligence/guardian",
+		SourceCommit:  strings.Repeat("a", 40),
+		LayerTitle:    "guardian-intelligence-aisucks-0.3.0.tgz",
+	}
 }

@@ -386,6 +386,9 @@ func pushToTarget(ctx context.Context, target pusher, tag string, entry packEntr
 	if err != nil {
 		return ocispec.Descriptor{}, nil, fmt.Errorf("pack OCI artifact manifest: %w", err)
 	}
+	if err := validateDescriptor("packed OCI artifact manifest", manifest); err != nil {
+		return ocispec.Descriptor{}, nil, err
+	}
 	if err := target.Tag(ctx, manifest, tag); err != nil {
 		return ocispec.Descriptor{}, nil, fmt.Errorf("tag OCI artifact %s: %w", tag, err)
 	}
@@ -426,6 +429,9 @@ func attachAttestation(ctx context.Context, target pusher, tag string, subject o
 	if err != nil {
 		return nil, fmt.Errorf("pack attestation OCI artifact manifest: %w", err)
 	}
+	if err := validateDescriptor("packed attestation OCI artifact manifest", manifest); err != nil {
+		return nil, err
+	}
 	if err := target.Tag(ctx, manifest, attestationTag(tag)); err != nil {
 		return nil, fmt.Errorf("tag attestation OCI artifact %s: %w", attestationTag(tag), err)
 	}
@@ -459,10 +465,29 @@ func resolveTaggedDescriptor(ctx context.Context, target resolver, tag string, p
 	if resolved.ArtifactType == "" {
 		resolved.ArtifactType = pushed.ArtifactType
 	}
+	if resolved.Size <= 0 {
+		resolved.Size = pushed.Size
+	}
 	if resolved.Annotations == nil {
 		resolved.Annotations = pushed.Annotations
 	}
+	if err := validateDescriptor("resolved tagged OCI artifact "+tag, resolved); err != nil {
+		return ocispec.Descriptor{}, err
+	}
 	return resolved, nil
+}
+
+func validateDescriptor(kind string, desc ocispec.Descriptor) error {
+	if desc.Digest.String() == "" {
+		return fmt.Errorf("%s has empty digest", kind)
+	}
+	if desc.MediaType == "" {
+		return fmt.Errorf("%s %s has empty media type", kind, desc.Digest)
+	}
+	if desc.Size <= 0 {
+		return fmt.Errorf("%s %s has non-positive size %d", kind, desc.Digest, desc.Size)
+	}
+	return nil
 }
 
 func pushBytes(ctx context.Context, target pusher, mediaType string, data []byte) (ocispec.Descriptor, error) {
@@ -561,6 +586,9 @@ func normalizeSHA256(value string) string {
 }
 
 func writeResult(result artifactResult, outputPath string, stdout io.Writer) error {
+	if err := validateResult(result); err != nil {
+		return err
+	}
 	raw, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
 		return err
@@ -576,6 +604,52 @@ func writeResult(result artifactResult, outputPath string, stdout io.Writer) err
 	}
 	_, err = stdout.Write(raw)
 	return err
+}
+
+func validateResult(result artifactResult) error {
+	required := map[string]string{
+		"distributable": result.Distributable,
+		"payload_form":  result.PayloadForm,
+		"channel":       result.Channel,
+		"oci_digest":    result.OCIDigest,
+		"oci_ref":       result.OCIRef,
+		"package":       result.Package,
+		"version":       result.Version,
+		"source_repo":   result.SourceRepo,
+		"source_commit": result.SourceCommit,
+		"layer_title":   result.LayerTitle,
+	}
+	for field, value := range required {
+		if value == "" {
+			return fmt.Errorf("release result has empty %s", field)
+		}
+	}
+	if !strings.HasSuffix(result.OCIRef, "@"+result.OCIDigest) {
+		return fmt.Errorf("release result OCI ref %q does not point at digest %s", result.OCIRef, result.OCIDigest)
+	}
+	switch result.PayloadForm {
+	case "npm":
+		if result.TarballDigest == "" {
+			return errors.New("release result has empty tarball_sha256")
+		}
+		if result.NPMIntegrity == "" {
+			return errors.New("release result has empty npm_integrity")
+		}
+	case "python-wheel":
+		if result.WheelDigest == "" {
+			return errors.New("release result has empty wheel_sha256")
+		}
+	}
+	if result.AttestationDigest == "" && result.AttestationRef != "" {
+		return errors.New("release result has attestation ref without attestation digest")
+	}
+	if result.AttestationDigest != "" && result.AttestationRef == "" {
+		return errors.New("release result has attestation digest without attestation ref")
+	}
+	if result.AttestationDigest != "" && !strings.HasSuffix(result.AttestationRef, "@"+result.AttestationDigest) {
+		return fmt.Errorf("release result attestation ref %q does not point at digest %s", result.AttestationRef, result.AttestationDigest)
+	}
+	return nil
 }
 
 func layoutRef(path, tag, digest string) string {
