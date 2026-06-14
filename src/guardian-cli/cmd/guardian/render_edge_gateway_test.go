@@ -73,6 +73,16 @@ func TestEdgeGatewaySiteManifests(t *testing.T) {
 					t.Errorf("edge gateway instance render missing %q", want)
 				}
 			}
+			if site.Company.Domain != "" {
+				for _, want := range []string{
+					"name: tls-company-site",
+					"hostname: \"" + site.Company.Domain + "\"",
+				} {
+					if !strings.Contains(out, want) {
+						t.Errorf("edge gateway instance render missing %q", want)
+					}
+				}
+			}
 			if strings.Contains(out, "HTTPRoute") || strings.Contains(out, "TLSRoute") {
 				t.Error("EdgeGateway instance must not render product routes")
 			}

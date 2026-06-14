@@ -1,5 +1,11 @@
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
 
+filegroup(
+    name = "manifest",
+    srcs = ["k8s/vmalert.yaml.tmpl"],
+    visibility = ["//src/guardian-cli:__subpackages__"],
+)
+
 # Re-export the pulled vmalert layout under a stable in-repo runfiles path,
 # same pattern as postgres/gatus: a base-only oci_image copies the
 # single-manifest layout verbatim.

@@ -31,6 +31,9 @@ spec:
         app: {{$s.App}}
 {{- if $s.PodNetwork}}
         {{$s.NetworkLabelKey}}: {{$s.NetworkLabelVal}}
+        platform.guardian.dev/metrics-scrape: "true"
+        platform.guardian.dev/metrics-port: "{{$s.MetricsPort}}"
+        platform.guardian.dev/slo-surface: public-http
 {{- end}}
     spec:
 {{- if not $s.PodNetwork}}
@@ -167,6 +170,12 @@ spec:
     - name: {{$s.Gateway.Name}}
       namespace: {{$s.Gateway.Namespace}}
       sectionName: {{$s.Gateway.HTTPSectionName}}
+{{- if $s.HTTPRouteHostnames}}
+  hostnames:
+{{- range $hostname := $s.HTTPRouteHostnames}}
+    - "{{$hostname}}"
+{{- end}}
+{{- end}}
   rules:
     - backendRefs:
         - name: {{$s.App}}

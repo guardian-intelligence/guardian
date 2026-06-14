@@ -72,6 +72,12 @@ gateway:
   manifests:
     - src/sites/dev/k8s/edge-gateway.yaml
 
+# Guardian Intelligence company site. Dev gets the preview hostname; prod can
+# point guardianintelligence.org only after DNS and the gateway ratchet are
+# ready there.
+company:
+  domain: dev.guardianintelligence.org
+
 # Public OCI registry: Gateway-terminated TLS at oci.guardianintelligence.org,
 # cleartext HTTP to in-cluster zot.
 oci:

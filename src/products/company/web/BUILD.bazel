@@ -1,0 +1,16 @@
+filegroup(
+    name = "package_manifest",
+    srcs = ["package.json"],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "sources",
+    srcs = glob([
+        "package.json",
+        "scripts/**/*",
+        "src/**/*",
+        "vite.config.ts",
+    ]),
+    visibility = ["//visibility:public"],
+)

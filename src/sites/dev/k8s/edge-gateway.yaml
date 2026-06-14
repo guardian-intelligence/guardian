@@ -16,6 +16,12 @@ spec:
       protocol: TLS
       tls:
         mode: Passthrough
+    - name: tls-company-site
+      hostname: "dev.guardianintelligence.org"
+      port: 443
+      protocol: TLS
+      tls:
+        mode: Passthrough
     - name: tls-status-0
       hostname: "status.guardianintelligence.org"
       port: 443

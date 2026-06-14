@@ -64,6 +64,13 @@ type Site struct {
 		// gateway.enabled — without Envoy on :443 nothing would answer.
 		PodNetwork bool `yaml:"podNetwork"`
 	} `yaml:"aisucks"`
+	// Company holds the per-site values for the Guardian Intelligence
+	// company site. Empty domain disables it.
+	Company struct {
+		// Domain is the public company-site hostname certmagic manages. The
+		// site is pod-network only and is routed through the EdgeGateway.
+		Domain string `yaml:"domain"`
+	} `yaml:"company"`
 	// Gateway holds the per-site values for the platform EdgeGateway
 	// (src/platform/edge-gateway). The CLI installs the substrate, then
 	// applies the checked-in site manifests listed here; it does not synthesize
@@ -174,6 +181,9 @@ func loadSite(path string) (*Site, error) {
 	}
 	if s.OCI.Domain != "" && !s.Gateway.Enabled {
 		return nil, fmt.Errorf("site %s: oci.domain requires gateway.enabled", resolved)
+	}
+	if s.Company.Domain != "" && !s.Gateway.Enabled {
+		return nil, fmt.Errorf("site %s: company.domain requires gateway.enabled", resolved)
 	}
 	if s.Gateway.Enabled && len(s.Gateway.Manifests) == 0 {
 		return nil, fmt.Errorf("site %s: gateway.enabled requires gateway.manifests", resolved)

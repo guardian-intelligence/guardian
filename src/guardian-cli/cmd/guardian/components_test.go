@@ -37,6 +37,7 @@ func TestComponentsTable(t *testing.T) {
 		{"provider-kubernetes-config", "edge-gateway-platform", "the EdgeGateway composition emits provider-kubernetes Objects"},
 		{"provider-kubernetes-config", "zot-secrets", "zot secret projection is managed through provider-kubernetes Objects"},
 		{"edge-gateway-platform", "aisucks", "product routes attach to the platform Gateway listener"},
+		{"edge-gateway-platform", "company-site", "product routes attach to the platform Gateway listener"},
 		{"edge-gateway-platform", "status", "product routes attach to the platform Gateway listener"},
 		{"edge-gateway-platform", "zot", "product routes attach to the platform Gateway listener"},
 		{"openbao", "external-secrets", "ESO authenticates to Bao"},

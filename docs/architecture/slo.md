@@ -21,7 +21,7 @@ Rolling 30-day windows once recording rules land.
 |---|---|---|---|---|
 | 1 | Page availability | The page answers. | non-5xx ratio for `GET /{$}` plus sibling `probe_success` | server + sibling |
 | 2 | Runtime health | Health endpoints answer. | non-5xx ratio for `GET /healthz` plus Gatus health probe | server + sibling |
-| 3 | Rollout health | The deployed workload converges. | Kubernetes rollout state, `up{job="aisucks"}`, restart delta | site-local |
+| 3 | Rollout health | The deployed workload converges. | Kubernetes rollout state, `up{job="public-http"}` for pod-network public services, restart delta | site-local |
 
 ## Targets
 

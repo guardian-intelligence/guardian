@@ -5,16 +5,14 @@ import (
 	"testing"
 )
 
-// TestOtelAisucksScrapeBranch pins the prober co-change that MUST ride the
-// same converge as aisucks.podNetwork: the collector's aisucks job scrapes
-// host loopback (127.0.0.1:9090) under hostNetwork, and discovers pods
-// (kubernetes_sd, <podIP>:9090, instance = pod name) once the app leaves
-// the host netns — without the branch, up{job="aisucks"} goes 0 at the flip
-// and ScrapeTargetDown pages 10 minutes later. The pods RBAC follows the
-// same flag. It also pins the status.monitor gate: status hostnames join
-// the blackbox targets only behind the (default-off) flag — pre-DNS they
-// would emit probe_success == 0 and SiteProbeFailed pages on 2m of that.
-func TestOtelAisucksScrapeBranch(t *testing.T) {
+// TestOtelPublicHttpScrape pins the generic Server -> VictoriaMetrics path:
+// pod-network PublicHttpService workloads opt in with bounded labels, the
+// collector discovers those pods, and metrics flow through the prometheus
+// receiver to VictoriaMetrics. Legacy host-network aisucks keeps its loopback
+// scrape until it moves behind the generic public-http job. The test also pins
+// the status.monitor gate: status hostnames join blackbox targets only behind
+// the default-off flag.
+func TestOtelPublicHttpScrape(t *testing.T) {
 	tmpl, err := toolPath("_main/src/infrastructure-components/otel-collector/k8s/otel-collector.yaml.tmpl")
 	if err != nil {
 		t.Fatalf("locate otel-collector manifest: %v", err)
@@ -37,28 +35,27 @@ func TestOtelAisucksScrapeBranch(t *testing.T) {
 			out := string(rendered)
 			decodeKinds(t, rendered) // structural validity
 
-			if site.Aisucks.PodNetwork {
-				for _, want := range []string{
-					"kubernetes_sd_configs",
-					"__meta_kubernetes_pod_label_app",
-					"__meta_kubernetes_pod_name",
-					"- pods", // RBAC resource for pod discovery
-				} {
-					if !strings.Contains(out, want) {
-						t.Errorf("pod-network otel render missing %q", want)
-					}
+			for _, want := range []string{
+				"job_name: public-http",
+				"kubernetes_sd_configs",
+				"__meta_kubernetes_pod_label_platform_guardian_dev_metrics_scrape",
+				"__meta_kubernetes_pod_label_platform_guardian_dev_metrics_port",
+				"__meta_kubernetes_pod_label_platform_guardian_dev_slo_surface",
+				"target_label: slo_surface",
+				"- pods", // RBAC resource for pod discovery
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("otel render missing public-http scrape primitive %q", want)
 				}
+			}
+
+			if site.Aisucks.PodNetwork {
 				if strings.Contains(out, `targets: ["127.0.0.1:9090"]`) {
 					t.Error("pod-network otel render must drop the static loopback aisucks target (it goes dark at the flip)")
 				}
 			} else {
 				if !strings.Contains(out, `targets: ["127.0.0.1:9090"]`) {
 					t.Error("hostNetwork otel render must keep the static loopback aisucks target")
-				}
-				for _, banned := range []string{"kubernetes_sd_configs", "- pods"} {
-					if strings.Contains(out, banned) {
-						t.Errorf("hostNetwork otel render must not contain %q", banned)
-					}
 				}
 			}
 

@@ -110,6 +110,28 @@ var components = []component{{
 		readinessPeriod: 5,
 	},
 }, {
+	name:     "company-site",
+	layout:   "_main/src/products/company/services/site/image",
+	manifest: "src/platform/public-http-service/k8s/public-http-service.yaml.tmpl",
+	enabled:  func(s *Site) bool { return s.Company.Domain != "" },
+	publicHTTPService: &publicHTTPService{
+		namespace:          "company",
+		app:                "company-site",
+		domain:             func(s *Site) string { return s.Company.Domain },
+		podNetwork:         func(s *Site) bool { return true },
+		certDir:            "/var/lib/company-site-certs",
+		acmeEmail:          "im.shovonhasan@gmail.com",
+		probeClusterIP:     "10.96.111.44",
+		networkLabelKey:    "platform.guardian.dev/network",
+		memoryRequest:      "128Mi",
+		memoryLimit:        "512Mi",
+		goMemoryLimit:      "410MiB",
+		cpuRequest:         "100m",
+		healthPath:         "/healthz",
+		readinessPeriod:    5,
+		httpRouteHostnames: true,
+	},
+}, {
 	name:     "gatus",
 	layout:   "_main/src/infrastructure-components/gatus/image",
 	manifest: "src/infrastructure-components/gatus/k8s/gatus.yaml.tmpl",
@@ -237,32 +259,37 @@ type publicHTTPService struct {
 	cpuRequest      string
 	healthPath      string
 	readinessPeriod int
+	// httpRouteHostnames scopes :80 routing to the service domain. Keep this
+	// off for aisucks: raw-IP health probes and HTTP-01 fallback depend on its
+	// hostname-less HTTPRoute.
+	httpRouteHostnames bool
 }
 
 type publicHTTPServiceRender struct {
-	Namespace       string
-	App             string
-	Domain          string
-	PodNetwork      bool
-	Replicas        int
-	ListenHTTP      string
-	ListenTLS       string
-	DiagAddr        string
-	HTTPPort        int
-	HTTPSPort       int
-	MetricsPort     int
-	CertDir         string
-	ACMEEmail       string
-	ProbeClusterIP  string
-	NetworkLabelKey string
-	NetworkLabelVal string
-	MemoryRequest   string
-	MemoryLimit     string
-	GoMemoryLimit   string
-	CPURequest      string
-	HealthPath      string
-	ReadinessPeriod int
-	Gateway         struct {
+	Namespace          string
+	App                string
+	Domain             string
+	PodNetwork         bool
+	Replicas           int
+	ListenHTTP         string
+	ListenTLS          string
+	DiagAddr           string
+	HTTPPort           int
+	HTTPSPort          int
+	MetricsPort        int
+	CertDir            string
+	ACMEEmail          string
+	ProbeClusterIP     string
+	NetworkLabelKey    string
+	NetworkLabelVal    string
+	MemoryRequest      string
+	MemoryLimit        string
+	GoMemoryLimit      string
+	CPURequest         string
+	HealthPath         string
+	ReadinessPeriod    int
+	HTTPRouteHostnames []string
+	Gateway            struct {
 		Enabled            bool
 		Name               string
 		Namespace          string
@@ -300,6 +327,9 @@ func (c component) publicHTTPServiceRender(site *Site) *publicHTTPServiceRender 
 		CPURequest:      svc.cpuRequest,
 		HealthPath:      svc.healthPath,
 		ReadinessPeriod: svc.readinessPeriod,
+	}
+	if svc.httpRouteHostnames && out.Domain != "" {
+		out.HTTPRouteHostnames = []string{out.Domain}
 	}
 	out.Gateway.Enabled = site.Gateway.Enabled
 	out.Gateway.Name = "edge"
