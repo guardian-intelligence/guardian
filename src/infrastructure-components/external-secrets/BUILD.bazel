@@ -16,8 +16,6 @@ set -euo pipefail
     --namespace external-secrets \
     --include-crds \
     --set installCRDs=true \
-    --set scopedRBAC=true \
-    --set scopedNamespace=observability \
     --set image.repository=ghcr.io/external-secrets/external-secrets \
     --set image.tag=v2.6.0 \
     --set certController.image.repository=ghcr.io/external-secrets/external-secrets \

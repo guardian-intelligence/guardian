@@ -121,8 +121,9 @@ var components = []component{{
 	layout:   "_main/src/infrastructure-components/victoria-metrics/image",
 	manifest: "src/infrastructure-components/victoria-metrics/k8s/victoria-metrics.yaml.tmpl",
 }, {
-	// Scoped to the observability namespace, so it applies after the
-	// victoria-metrics manifest creates that namespace.
+	// Cluster-wide controller: Guardian projects secrets into observability
+	// and platform namespaces. Source access stays scoped by namespace
+	// SecretStores plus OpenBao policies.
 	name:     "external-secrets",
 	layout:   "_main/src/infrastructure-components/external-secrets/image",
 	manifest: "src/infrastructure-components/external-secrets/k8s/external-secrets.yaml.tmpl",
