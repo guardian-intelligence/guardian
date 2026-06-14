@@ -31,12 +31,98 @@ use_repo(go_deps, "com_connectrpc_connect", "com_github_burntsushi_toml", "com_g
 # Mozilla CA bundle for images whose workloads make outbound TLS (ACME,
 # share-link liveness fetches). The ubuntu base image ships no CA store.
 # Dated release URL: immutable, so the pin can't rot under us.
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
 
 http_file(
     name = "cacert_pem",
     sha256 = "86a1f3366afac7c6f8ae9f3c779ac221129328c43f0ab2b8817eb2f362a5025c",
     url = "https://curl.se/ca/cacert-2026-05-14.pem",
+)
+
+http_archive(
+    name = "helm_linux_amd64",
+    build_file_content = """exports_files(["helm"])""",
+    sha256 = "966bed9b1e0dda11268f59bd7268c3cd3e308b37b070546e1d78a02526ff63f2",
+    strip_prefix = "linux-amd64",
+    url = "https://get.helm.sh/helm-v3.19.1-linux-amd64.tar.gz",
+)
+
+http_file(
+    name = "cert_manager_chart",
+    downloaded_file_path = "cert-manager-v1.20.2.tgz",
+    sha256 = "d2a50bd44a09d838c2576a8f3dfca1524597c7393cf8d82ab3ec8a465b9eeb79",
+    url = "https://quay.io/v2/jetstack/charts/cert-manager/blobs/sha256:d2a50bd44a09d838c2576a8f3dfca1524597c7393cf8d82ab3ec8a465b9eeb79",
+)
+
+http_file(
+    name = "cilium_chart",
+    downloaded_file_path = "cilium-1.19.4.tgz",
+    sha256 = "c6a788e6bd74598a235f7987930860f554c2dd8048154d1aba8a532bcde90cd6",
+    url = "https://helm.cilium.io/cilium-1.19.4.tgz",
+)
+
+http_file(
+    name = "crossplane_chart",
+    downloaded_file_path = "crossplane-2.3.2.tgz",
+    sha256 = "25204020c240bb6280bfa5ba091c3550eacdc1d681b44136113a0d1b4f98e1c6",
+    url = "https://charts.crossplane.io/stable/crossplane-2.3.2.tgz",
+)
+
+http_archive(
+    name = "crossplane_source",
+    build_file_content = """filegroup(
+    name = "crds",
+    srcs = glob(["cluster/crds/*.yaml"]),
+    visibility = ["//visibility:public"],
+)""",
+    sha256 = "7b2ca515347700ce5468782b1c27b4e784214b9cfabebb5d1c548e53904c1137",
+    strip_prefix = "crossplane-2.3.2",
+    url = "https://github.com/crossplane/crossplane/archive/refs/tags/v2.3.2.tar.gz",
+)
+
+http_file(
+    name = "external_secrets_chart",
+    downloaded_file_path = "external-secrets-2.6.0.tgz",
+    sha256 = "f3659c0085a41e1be5c016cf186b80aac262ef249a91b1b770b941f18296ef3f",
+    url = "https://github.com/external-secrets/external-secrets/releases/download/helm-chart-2.6.0/external-secrets-2.6.0.tgz",
+)
+
+http_archive(
+    name = "gateway_api_source",
+    build_file_content = """filegroup(
+    name = "gatewayclasses_crd",
+    srcs = ["config/crd/standard/gateway.networking.k8s.io_gatewayclasses.yaml"],
+    visibility = ["//visibility:public"],
+)
+filegroup(
+    name = "gateways_crd",
+    srcs = ["config/crd/standard/gateway.networking.k8s.io_gateways.yaml"],
+    visibility = ["//visibility:public"],
+)
+filegroup(
+    name = "httproutes_crd",
+    srcs = ["config/crd/standard/gateway.networking.k8s.io_httproutes.yaml"],
+    visibility = ["//visibility:public"],
+)
+filegroup(
+    name = "referencegrants_crd",
+    srcs = ["config/crd/standard/gateway.networking.k8s.io_referencegrants.yaml"],
+    visibility = ["//visibility:public"],
+)
+filegroup(
+    name = "grpcroutes_crd",
+    srcs = ["config/crd/standard/gateway.networking.k8s.io_grpcroutes.yaml"],
+    visibility = ["//visibility:public"],
+)
+filegroup(
+    name = "tlsroutes_crd",
+    srcs = ["config/crd/experimental/gateway.networking.k8s.io_tlsroutes.yaml"],
+    visibility = ["//visibility:public"],
+)""",
+    sha256 = "00cfc4ca8948dd6b073fa6e7c3b716a7eaa874028c7f0fb387e2413eb422a77b",
+    strip_prefix = "gateway-api-1.4.1",
+    url = "https://github.com/kubernetes-sigs/gateway-api/archive/refs/tags/v1.4.1.tar.gz",
 )
 
 # Base for infrastructure-component images. Pinned by the ubuntu:24.04
@@ -173,7 +259,27 @@ oci.pull(
     image = "ghcr.io/external-secrets/external-secrets",
     platforms = ["linux/amd64"],
 )
-use_repo(oci, "alertmanager", "alertmanager_linux_amd64", "blackbox_exporter", "blackbox_exporter_linux_amd64", "cert_manager_acmesolver", "cert_manager_acmesolver_linux_amd64", "cert_manager_cainjector", "cert_manager_cainjector_linux_amd64", "cert_manager_controller", "cert_manager_controller_linux_amd64", "cert_manager_startupapicheck", "cert_manager_startupapicheck_linux_amd64", "cert_manager_webhook", "cert_manager_webhook_linux_amd64", "clickhouse", "clickhouse_linux_amd64", "external_secrets", "external_secrets_linux_amd64", "gatus", "gatus_linux_amd64", "grafana", "grafana_linux_amd64", "kube_state_metrics", "kube_state_metrics_linux_amd64", "otel_collector_contrib", "otel_collector_contrib_linux_amd64", "postgres_17", "postgres_17_linux_amd64", "ubuntu_noble_base", "ubuntu_noble_base_linux_amd64", "victoria_metrics", "victoria_metrics_linux_amd64", "vmalert", "vmalert_linux_amd64")
+
+# Crossplane v2.3.2: platform substrate controller. The chart manifest is
+# vendored under src/infrastructure-components/crossplane; the controller image
+# is pulled by digest and pushed through the seed registry.
+oci.pull(
+    name = "crossplane",
+    digest = "sha256:884a235ea0fac77cb87870e282c05bc9814ebaded89bcc46e97a7c1967060d20",
+    image = "ghcr.io/crossplane/crossplane",
+    platforms = ["linux/amd64"],
+)
+
+# zot v2.1.17: first public OCI registry surface. TLS terminates at the
+# platform Gateway; zot serves plain HTTP inside the cluster.
+oci.pull(
+    name = "zot",
+    digest = "sha256:48b0c11c8c61a07246e047f22e02aad615816683fd8d8073b2862fb7ed0a3cc0",
+    image = "ghcr.io/project-zot/zot",
+    platforms = ["linux/amd64"],
+)
+
+use_repo(oci, "alertmanager", "alertmanager_linux_amd64", "blackbox_exporter", "blackbox_exporter_linux_amd64", "cert_manager_acmesolver", "cert_manager_acmesolver_linux_amd64", "cert_manager_cainjector", "cert_manager_cainjector_linux_amd64", "cert_manager_controller", "cert_manager_controller_linux_amd64", "cert_manager_startupapicheck", "cert_manager_startupapicheck_linux_amd64", "cert_manager_webhook", "cert_manager_webhook_linux_amd64", "clickhouse", "clickhouse_linux_amd64", "crossplane", "crossplane_linux_amd64", "external_secrets", "external_secrets_linux_amd64", "gatus", "gatus_linux_amd64", "grafana", "grafana_linux_amd64", "kube_state_metrics", "kube_state_metrics_linux_amd64", "otel_collector_contrib", "otel_collector_contrib_linux_amd64", "postgres_17", "postgres_17_linux_amd64", "ubuntu_noble_base", "ubuntu_noble_base_linux_amd64", "victoria_metrics", "victoria_metrics_linux_amd64", "vmalert", "vmalert_linux_amd64", "zot", "zot_linux_amd64")
 
 node = use_extension("@rules_nodejs//nodejs:extensions.bzl", "node")
 node.toolchain(

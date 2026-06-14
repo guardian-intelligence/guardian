@@ -1,0 +1,8 @@
+filegroup(
+    name = "manifest",
+    srcs = [
+        "k8s/provider-kubernetes.yaml",
+        "k8s/provider-kubernetes-config.yaml",
+    ],
+    visibility = ["//src/guardian-cli:__subpackages__"],
+)

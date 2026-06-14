@@ -1,0 +1,306 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: edgegateways.platform.guardian.dev
+spec:
+  scope: Cluster
+  group: platform.guardian.dev
+  names:
+    kind: EdgeGateway
+    plural: edgegateways
+  defaultCompositionRef:
+    name: edge-gateway-cilium
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                gatewayClass:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    controllerName:
+                      type: string
+                  required:
+                    - name
+                    - controllerName
+                gateway:
+                  type: object
+                  properties:
+                    namespace:
+                      type: string
+                    name:
+                      type: string
+                  required:
+                    - namespace
+                    - name
+                listeners:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      hostname:
+                        type: string
+                      port:
+                        type: integer
+                      protocol:
+                        type: string
+                      tls:
+                        type: object
+                        properties:
+                          mode:
+                            type: string
+                          certificateRefName:
+                            type: string
+                    required:
+                      - name
+                      - port
+                      - protocol
+                acme:
+                  type: object
+                  properties:
+                    email:
+                      type: string
+                    server:
+                      type: string
+                    privateKeySecretName:
+                      type: string
+                    dns01CloudflareSecretName:
+                      type: string
+                    dns01CloudflareSecretKey:
+                      type: string
+                    dnsZones:
+                      type: array
+                      items:
+                        type: string
+                  required:
+                    - email
+                    - server
+                    - privateKeySecretName
+                    - dns01CloudflareSecretName
+                    - dns01CloudflareSecretKey
+                    - dnsZones
+                certificates:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                      secretName:
+                        type: string
+                      dnsNames:
+                        type: array
+                        items:
+                          type: string
+                      issuerRefName:
+                        type: string
+                    required:
+                      - name
+                      - namespace
+                      - secretName
+                      - dnsNames
+                      - issuerRefName
+              required:
+                - gatewayClass
+                - gateway
+                - listeners
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: edge-gateway-cilium
+spec:
+  compositeTypeRef:
+    apiVersion: platform.guardian.dev/v1alpha1
+    kind: EdgeGateway
+  mode: Pipeline
+  pipeline:
+    - step: render-edge-gateway
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              name: edge-gateway-namespace
+              annotations:
+                {{ setResourceNameAnnotation "gateway-namespace" }}
+            spec:
+              providerConfigRef:
+                name: edge-gateway
+              forProvider:
+                manifest:
+                  apiVersion: v1
+                  kind: Namespace
+                  metadata:
+                    name: {{ $spec.gateway.namespace }}
+                    labels:
+                      platform.guardian.dev/layer: platform
+            ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              name: edge-gateway-class
+              annotations:
+                {{ setResourceNameAnnotation "gateway-class" }}
+            spec:
+              providerConfigRef:
+                name: edge-gateway
+              forProvider:
+                manifest:
+                  apiVersion: gateway.networking.k8s.io/v1
+                  kind: GatewayClass
+                  metadata:
+                    name: {{ $spec.gatewayClass.name }}
+                    labels:
+                      platform.guardian.dev/layer: platform
+                  spec:
+                    controllerName: {{ $spec.gatewayClass.controllerName }}
+                    description: Guardian platform edge GatewayClass
+            {{- with $spec.acme }}
+            ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              name: edge-gateway-clusterissuer
+              annotations:
+                {{ setResourceNameAnnotation "clusterissuer" }}
+            spec:
+              providerConfigRef:
+                name: edge-gateway
+              forProvider:
+                manifest:
+                  apiVersion: cert-manager.io/v1
+                  kind: ClusterIssuer
+                  metadata:
+                    name: letsencrypt-production
+                    labels:
+                      platform.guardian.dev/layer: platform
+                  spec:
+                    acme:
+                      email: {{ .email }}
+                      server: {{ .server }}
+                      privateKeySecretRef:
+                        name: {{ .privateKeySecretName }}
+                      solvers:
+                        - dns01:
+                            cloudflare:
+                              apiTokenSecretRef:
+                                name: {{ .dns01CloudflareSecretName }}
+                                key: {{ .dns01CloudflareSecretKey }}
+                          selector:
+                            dnsZones:
+                              {{- range .dnsZones }}
+                              - {{ . }}
+                              {{- end }}
+            {{- end }}
+            {{- range $cert := $spec.certificates }}
+            ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              name: edge-gateway-certificate-{{ $cert.name }}
+              annotations:
+                {{ setResourceNameAnnotation (print "certificate-" $cert.name) }}
+            spec:
+              references:
+                - dependsOn:
+                    apiVersion: kubernetes.crossplane.io/v1alpha2
+                    kind: Object
+                    name: edge-gateway-namespace
+                - dependsOn:
+                    apiVersion: kubernetes.crossplane.io/v1alpha2
+                    kind: Object
+                    name: edge-gateway-clusterissuer
+              providerConfigRef:
+                name: edge-gateway
+              forProvider:
+                manifest:
+                  apiVersion: cert-manager.io/v1
+                  kind: Certificate
+                  metadata:
+                    name: {{ $cert.name }}
+                    namespace: {{ $cert.namespace }}
+                    labels:
+                      platform.guardian.dev/layer: platform
+                  spec:
+                    secretName: {{ $cert.secretName }}
+                    dnsNames:
+                      {{- range $cert.dnsNames }}
+                      - {{ . }}
+                      {{- end }}
+                    issuerRef:
+                      name: {{ $cert.issuerRefName }}
+                      kind: ClusterIssuer
+            {{- end }}
+            ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              name: edge-gateway
+              annotations:
+                {{ setResourceNameAnnotation "gateway" }}
+            spec:
+              references:
+                - dependsOn:
+                    apiVersion: kubernetes.crossplane.io/v1alpha2
+                    kind: Object
+                    name: edge-gateway-namespace
+                - dependsOn:
+                    apiVersion: kubernetes.crossplane.io/v1alpha2
+                    kind: Object
+                    name: edge-gateway-class
+              providerConfigRef:
+                name: edge-gateway
+              forProvider:
+                manifest:
+                  apiVersion: gateway.networking.k8s.io/v1
+                  kind: Gateway
+                  metadata:
+                    name: {{ $spec.gateway.name }}
+                    namespace: {{ $spec.gateway.namespace }}
+                    labels:
+                      platform.guardian.dev/gateway: {{ $spec.gateway.name }}
+                      platform.guardian.dev/layer: platform
+                  spec:
+                    gatewayClassName: {{ $spec.gatewayClass.name }}
+                    listeners:
+                      {{- range $listener := $spec.listeners }}
+                      - name: {{ $listener.name }}
+                        {{- if $listener.hostname }}
+                        hostname: {{ $listener.hostname }}
+                        {{- end }}
+                        port: {{ $listener.port }}
+                        protocol: {{ $listener.protocol }}
+                        {{- with $listener.tls }}
+                        tls:
+                          mode: {{ .mode }}
+                          {{- if .certificateRefName }}
+                          certificateRefs:
+                            - name: {{ .certificateRefName }}
+                          {{- end }}
+                        {{- end }}
+                        allowedRoutes:
+                          namespaces:
+                            from: All
+                      {{- end }}

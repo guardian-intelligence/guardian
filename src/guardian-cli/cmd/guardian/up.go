@@ -90,7 +90,11 @@ func runUp(args []string) error {
 		"--force",
 	}
 	for _, p := range site.Talos.Patches {
-		genArgs = append(genArgs, "--config-patch", "@"+resolvePath(p))
+		patchPath, err := resolveRepoInputPath(p)
+		if err != nil {
+			return err
+		}
+		genArgs = append(genArgs, "--config-patch", "@"+patchPath)
 	}
 	// Select the install disk by serial; diskSelector takes precedence over
 	// the default install.disk path, so the ZFS disk is never a target.
@@ -268,6 +272,40 @@ func runUp(args []string) error {
 	if err := reconcileOpenBao(kubectl, kubeconfig, site, restoring, *restoreRef, *wantSHA, snapPath); err != nil {
 		return err
 	}
+	if siteUsesEdgeGateway(site) {
+		if err := apply("crossplane"); err != nil {
+			return err
+		}
+		if err := waitCrossplane(kubectl, kubeconfig); err != nil {
+			return err
+		}
+		if siteUsesPlatformTLS(site) {
+			if err := apply("cert-manager"); err != nil {
+				return err
+			}
+		}
+		if err := apply("provider-kubernetes"); err != nil {
+			return err
+		}
+		if err := waitProviderKubernetes(kubectl, kubeconfig); err != nil {
+			return err
+		}
+		if err := apply("provider-kubernetes-config"); err != nil {
+			return err
+		}
+		if err := apply("edge-gateway-platform"); err != nil {
+			return err
+		}
+		if err := waitEdgeGatewayPlatform(kubectl, kubeconfig); err != nil {
+			return err
+		}
+		if err := applySiteManifests(kubectl, kubeconfig, "gateway", site.Gateway.Manifests); err != nil {
+			return err
+		}
+		if err := waitEdgeGateway(kubectl, kubeconfig, site); err != nil {
+			return err
+		}
+	}
 	if err := apply("victoria-metrics"); err != nil {
 		return err
 	}
@@ -279,7 +317,7 @@ func runUp(args []string) error {
 	}
 	for _, c := range components {
 		switch c.name {
-		case "openbao", "victoria-metrics", "external-secrets":
+		case "openbao", "crossplane", "cert-manager", "provider-kubernetes", "provider-kubernetes-config", "edge-gateway-platform", "victoria-metrics", "external-secrets":
 			continue
 		case "guardian-secrets":
 			if err := applyComponent(kubectl, kubeconfig, c, images, site); err != nil {
@@ -315,6 +353,53 @@ func lookupComponent(name string) (component, bool) {
 	return component{}, false
 }
 
+func applySiteManifests(kubectl, kubeconfig, group string, paths []string) error {
+	for _, path := range paths {
+		manifest, err := readSiteManifest(path)
+		if err != nil {
+			return err
+		}
+		if len(bytes.TrimSpace(manifest)) == 0 {
+			fmt.Fprintf(os.Stderr, "skipping %s manifest %s: empty\n", group, path)
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "applying %s manifest %s\n", group, path)
+		if err := runToolInput(manifest, kubectl, "--kubeconfig", kubeconfig, "apply", "-f", "-"); err != nil {
+			return fmt.Errorf("apply %s manifest %s: %w", group, path, err)
+		}
+	}
+	return nil
+}
+
+func readSiteManifest(path string) ([]byte, error) {
+	resolved, err := resolveRepoInputPath(path)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := os.ReadFile(resolved)
+	if err != nil {
+		return nil, fmt.Errorf("read site manifest %s: %w", resolved, err)
+	}
+	return raw, nil
+}
+
+func resolveRepoInputPath(path string) (string, error) {
+	resolved := resolvePath(path)
+	if _, err := os.Stat(resolved); err == nil {
+		return resolved, nil
+	} else if !os.IsNotExist(err) || filepath.IsAbs(path) {
+		return "", fmt.Errorf("resolve repo input %s: %w", resolved, err)
+	}
+	runfile, rerr := toolPath("_main/" + path)
+	if rerr != nil {
+		return "", fmt.Errorf("resolve repo input %s: %w", resolved, rerr)
+	}
+	if _, err := os.Stat(runfile); err != nil {
+		return "", fmt.Errorf("resolve repo input %s: %w", runfile, err)
+	}
+	return runfile, nil
+}
+
 func applyComponent(kubectl, kubeconfig string, c component, images map[string]string, site *Site) error {
 	if c.enabled != nil && !c.enabled(site) {
 		fmt.Fprintf(os.Stderr, "skipping %s: disabled for this site\n", c.name)
@@ -335,10 +420,11 @@ func applyComponent(kubectl, kubeconfig string, c component, images map[string]s
 		return nil
 	}
 	applyArgs := []string{"--kubeconfig", kubeconfig, "apply", "-f", "-"}
-	if c.name == "external-secrets" {
+	if c.name == "external-secrets" || c.name == "crossplane" {
 		// ESO CRDs are large enough that client-side apply's
 		// last-applied-configuration annotation exceeds Kubernetes' 256 KiB
-		// annotation limit. Server-side apply avoids that annotation.
+		// annotation limit. Crossplane's v2 CRDs have the same shape.
+		// Server-side apply avoids that annotation.
 		applyArgs = []string{"--kubeconfig", kubeconfig, "apply", "--server-side=true", "-f", "-"}
 	}
 	if err := runToolInput(manifest, kubectl, applyArgs...); err != nil {
@@ -377,6 +463,78 @@ func waitExternalSecrets(kubectl, kubeconfig string) error {
 		}
 	}
 	return nil
+}
+
+func waitCrossplane(kubectl, kubeconfig string) error {
+	for _, crd := range []string{
+		"compositeresourcedefinitions.apiextensions.crossplane.io",
+		"compositions.apiextensions.crossplane.io",
+		"functions.pkg.crossplane.io",
+		"providers.pkg.crossplane.io",
+	} {
+		if err := runTool(kubectl, "--kubeconfig", kubeconfig, "wait", "--for=condition=Established", "crd/"+crd, "--timeout=2m"); err != nil {
+			return err
+		}
+	}
+	for _, deploy := range []string{"crossplane", "crossplane-rbac-manager"} {
+		if err := runTool(kubectl, "--kubeconfig", kubeconfig, "-n", "crossplane-system", "rollout", "status", "deployment/"+deploy, "--timeout=5m"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func waitProviderKubernetes(kubectl, kubeconfig string) error {
+	for _, pkg := range []string{
+		"providers.pkg.crossplane.io/provider-kubernetes",
+		"functions.pkg.crossplane.io/function-go-templating",
+	} {
+		if err := runTool(kubectl, "--kubeconfig", kubeconfig, "wait", "--for=condition=Healthy", pkg, "--timeout=5m"); err != nil {
+			return err
+		}
+	}
+	for _, crd := range []string{
+		"objects.kubernetes.crossplane.io",
+		"providerconfigs.kubernetes.crossplane.io",
+	} {
+		if err := runTool(kubectl, "--kubeconfig", kubeconfig, "wait", "--for=condition=Established", "crd/"+crd, "--timeout=2m"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func waitEdgeGatewayPlatform(kubectl, kubeconfig string) error {
+	if err := runTool(kubectl, "--kubeconfig", kubeconfig, "wait", "--for=condition=Established", "compositeresourcedefinition/edgegateways.platform.guardian.dev", "--timeout=2m"); err != nil {
+		return err
+	}
+	return runTool(kubectl, "--kubeconfig", kubeconfig, "wait", "--for=condition=Established", "crd/edgegateways.platform.guardian.dev", "--timeout=2m")
+}
+
+func waitEdgeGateway(kubectl, kubeconfig string, site *Site) error {
+	objects := []string{
+		"edge-gateway-namespace",
+		"edge-gateway-class",
+		"edge-gateway",
+	}
+	if siteUsesPlatformTLS(site) {
+		objects = append(objects,
+			"edge-gateway-clusterissuer",
+			"edge-gateway-certificate-oci-guardianintelligence-org-tls",
+		)
+	}
+	for _, obj := range objects {
+		if err := poll("provider-kubernetes object "+obj, 3*time.Minute, 2*time.Second, func() error {
+			_, err := outputTool(kubectl, "--kubeconfig", kubeconfig, "get", "objects.kubernetes.crossplane.io/"+obj)
+			return err
+		}); err != nil {
+			return err
+		}
+		if err := runTool(kubectl, "--kubeconfig", kubeconfig, "wait", "--for=condition=Ready", "objects.kubernetes.crossplane.io/"+obj, "--timeout=3m"); err != nil {
+			return err
+		}
+	}
+	return runTool(kubectl, "--kubeconfig", kubeconfig, "-n", "gateway", "get", "gateway", "edge")
 }
 
 func waitProjectedSecrets(kubectl, kubeconfig string) error {

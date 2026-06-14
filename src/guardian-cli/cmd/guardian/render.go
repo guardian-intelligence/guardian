@@ -16,10 +16,16 @@ func renderManifest(manifestPath, image string, site *Site) ([]byte, error) {
 }
 
 func renderComponentManifest(c component, image string, images map[string]string, site *Site) ([]byte, error) {
-	path := resolvePath(c.manifest)
+	path, err := resolveRepoInputPath(c.manifest)
+	if err != nil {
+		return nil, fmt.Errorf("render: %w", err)
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("render: %w", err)
+	}
+	if c.rawManifest {
+		return raw, nil
 	}
 	tmpl, err := template.New("manifest").Option("missingkey=error").Parse(string(raw))
 	if err != nil {

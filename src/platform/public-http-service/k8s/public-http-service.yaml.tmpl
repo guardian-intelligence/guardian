@@ -132,3 +132,43 @@ spec:
       port: 80
       targetPort: http
 {{- end}}
+{{- if $s.Gateway.Enabled}}
+{{- if $s.Domain}}
+---
+# Product-owned TLS passthrough route. The platform EdgeGateway owns the
+# listener; this package owns the route to its Service.
+apiVersion: {{$s.Gateway.TLSRouteAPIVersion}}
+kind: TLSRoute
+metadata:
+  name: {{$s.App}}
+  namespace: {{$s.Namespace}}
+spec:
+  parentRefs:
+    - name: {{$s.Gateway.Name}}
+      namespace: {{$s.Gateway.Namespace}}
+      sectionName: {{$s.Gateway.TLSSectionName}}
+  hostnames:
+    - "{{$s.Domain}}"
+  rules:
+    - backendRefs:
+        - name: {{$s.App}}
+          port: 443
+{{- end}}
+---
+# No `hostnames`: :80 must answer raw-IP Host headers too. The app's :80 mux
+# owns ACME challenge precedence, /healthz, /livez, and redirect behavior.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{$s.App}}-http
+  namespace: {{$s.Namespace}}
+spec:
+  parentRefs:
+    - name: {{$s.Gateway.Name}}
+      namespace: {{$s.Gateway.Namespace}}
+      sectionName: {{$s.Gateway.HTTPSectionName}}
+  rules:
+    - backendRefs:
+        - name: {{$s.App}}
+          port: 80
+{{- end}}

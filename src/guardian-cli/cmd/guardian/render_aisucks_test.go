@@ -56,8 +56,26 @@ func TestAisucksPublicHTTPServiceRender(t *testing.T) {
 			if site.Aisucks.PodNetwork {
 				wantKinds = "Namespace,Deployment,Service,Service"
 			}
+			if site.Gateway.Enabled {
+				wantKinds += ",TLSRoute,HTTPRoute"
+			}
 			if got := strings.Join(kinds, ","); got != wantKinds {
 				t.Errorf("kinds = %s; want %s", got, wantKinds)
+			}
+			if site.Gateway.Enabled {
+				for _, want := range []string{
+					"kind: TLSRoute",
+					"sectionName: tls-aisucks",
+					"kind: HTTPRoute",
+					"name: aisucks-http",
+					"sectionName: http",
+				} {
+					if !strings.Contains(out, want) {
+						t.Errorf("gateway route render missing %q", want)
+					}
+				}
+			} else if strings.Contains(out, "TLSRoute") || strings.Contains(out, "HTTPRoute") {
+				t.Error("site without gateway.enabled must not render Gateway API routes")
 			}
 
 			if site.Aisucks.PodNetwork {

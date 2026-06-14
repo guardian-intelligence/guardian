@@ -1,0 +1,55 @@
+apiVersion: platform.guardian.dev/v1alpha1
+kind: EdgeGateway
+metadata:
+  name: edge
+spec:
+  gatewayClass:
+    name: cilium
+    controllerName: io.cilium/gateway-controller
+  gateway:
+    namespace: gateway
+    name: edge
+  listeners:
+    - name: tls-aisucks
+      hostname: "dev.aisucks.app"
+      port: 443
+      protocol: TLS
+      tls:
+        mode: Passthrough
+    - name: tls-status-0
+      hostname: "status.guardianintelligence.org"
+      port: 443
+      protocol: TLS
+      tls:
+        mode: Passthrough
+    - name: tls-status-1
+      hostname: "status.dev.guardianintelligence.org"
+      port: 443
+      protocol: TLS
+      tls:
+        mode: Passthrough
+    - name: https-oci
+      hostname: "oci.guardianintelligence.org"
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefName: oci-guardianintelligence-org-tls
+    - name: http
+      port: 80
+      protocol: HTTP
+  acme:
+    email: im.shovonhasan@gmail.com
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretName: letsencrypt-production-account-key
+    dns01CloudflareSecretName: cloudflare-guardianintelligence-org-dns-token
+    dns01CloudflareSecretKey: api-token
+    dnsZones:
+      - guardianintelligence.org
+  certificates:
+    - name: oci-guardianintelligence-org-tls
+      namespace: gateway
+      secretName: oci-guardianintelligence-org-tls
+      dnsNames:
+        - "oci.guardianintelligence.org"
+      issuerRefName: letsencrypt-production

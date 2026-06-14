@@ -45,7 +45,7 @@ func TestLoadSiteFlagValidation(t *testing.T) {
 		wantErr: "aisucks.podNetwork requires gateway.enabled",
 	}, {
 		name:  "podNetwork with gateway",
-		extra: "aisucks:\n  podNetwork: true\ngateway:\n  enabled: true\n",
+		extra: "aisucks:\n  podNetwork: true\ngateway:\n  enabled: true\n  manifests:\n    - src/sites/dev/k8s/edge-gateway.yaml\n",
 	}, {
 		name:    "monitor requires domains",
 		extra:   "status:\n  monitor: true\n",

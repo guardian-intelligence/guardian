@@ -1,0 +1,37 @@
+load("@rules_oci//oci:defs.bzl", "oci_image")
+
+genrule(
+    name = "manifest",
+    srcs = [
+        "@crossplane_chart//file",
+        "@crossplane_source//:crds",
+    ],
+    outs = ["k8s/crossplane.yaml.tmpl"],
+    cmd = """
+set -euo pipefail
+{
+  printf '# Generated from Crossplane Helm chart v2.3.2 (sha256:25204020c240bb6280bfa5ba091c3550eacdc1d681b44136113a0d1b4f98e1c6) and source tag v2.3.2 (sha256:7b2ca515347700ce5468782b1c27b4e784214b9cfabebb5d1c548e53904c1137).\\n'
+  printf '# Do not edit this output; edit the Bazel rule and upstream pins in MODULE.bazel.\\n'
+  printf -- '---\\n'
+  printf 'apiVersion: v1\\nkind: Namespace\\nmetadata:\\n  name: crossplane-system\\n'
+  for crd in $(locations @crossplane_source//:crds); do
+    printf -- '---\\n'
+    cat "$$crd"
+    printf '\\n'
+  done
+  printf -- '---\\n'
+  "$(execpath @helm_linux_amd64//:helm)" template crossplane "$(location @crossplane_chart//file)" \
+    --namespace crossplane-system \
+    --set image.repository=xpkg.crossplane.io/crossplane/crossplane \
+    --set image.tag=v2.3.2
+} | sed 's#image: "xpkg.crossplane.io/crossplane/crossplane:v2.3.2"#image: {{index .Images "crossplane"}}#g' > "$@"
+""",
+    tools = ["@helm_linux_amd64//:helm"],
+    visibility = ["//src/guardian-cli:__subpackages__"],
+)
+
+oci_image(
+    name = "image",
+    base = "@crossplane",
+    visibility = ["//visibility:public"],
+)

@@ -95,9 +95,9 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 ### OCI Distribution
 
 - [x] Platform TLS for `oci.guardianintelligence.org` is solved through
-  Cilium Gateway termination with product TLS passthrough preserved. Current
-  implementation is the direct-render bridge; Crossplane-owned `EdgeGateway`
-  remains the future API shape.
+  Cilium Gateway termination with product TLS passthrough preserved.
+  Crossplane owns the `EdgeGateway` platform substrate; each enabled site
+  declares its concrete `EdgeGateway` object in checked-in site manifests.
 - [ ] zot stores release artifacts by immutable digest.
 - [ ] zot serves OCI Distribution v1.1 referrers.
 - [ ] Each release target has subject digest plus referrers:

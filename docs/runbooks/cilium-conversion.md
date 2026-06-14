@@ -19,7 +19,9 @@ maintenance-mode node.
 - Dev soaked green on the new Cilium: node Ready, all pods Running, gate
   battery green, reboot drills PASS within SLA.
 - The site's `site.yaml` lists the three patches (commit them together):
-  `cni-none.yaml`, `src/infrastructure-components/cilium/talos/cilium-inline.yaml`,
+  `cni-none.yaml`, the Bazel-generated Cilium inline manifest
+  (`src/infrastructure-components/cilium/talos/cilium-inline.yaml` from
+  `//src/infrastructure-components/cilium:cilium-inline`), and
   `ingress-firewall.yaml`.
 - Let's Encrypt budget: the wipe destroys the site's cert cache → one
   duplicate-cert issuance for that domain (limit 5/week/domain). Check the
@@ -119,8 +121,8 @@ invariant either way.
 
 - IMAGECACHE predates Cilium: the six quay.io images are cache misses on
   cold boot — converge depends on quay.io reachability. Refill the cache
-  (`talosctl image cache-create` with the digest refs from
-  cilium-inline.yaml) before relying on WAN-less cold boot.
+  (`talosctl image cache-create` with the digest refs from the Bazel-generated
+  `cilium-inline.yaml`) before relying on WAN-less cold boot.
 - Hubble flow export stays OFF until an abuse/compliance ClickHouse domain
   exists for it (flows carry visitor IPs).
 - Objects dropped by a re-render need manual pruning (Talos never deletes).

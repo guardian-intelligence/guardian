@@ -32,8 +32,8 @@ talos:
     # inlineManifests order, and the CRDs have to exist before the Cilium
     # render that watches them (render_order_test.go pins this).
     - src/infrastructure-components/cilium/talos/gateway-api-crds-inline.yaml
-    # Shared vendored render, deliberately not copied per-site: one Cilium
-    # version across the fleet, one file to re-vendor on upgrade.
+    # Shared generated render, deliberately not copied per-site: one Cilium
+    # version across the fleet, one Bazel target to update on upgrade.
     - src/infrastructure-components/cilium/talos/cilium-inline.yaml
     - src/sites/prod/talos/patches/ingress-firewall.yaml
 

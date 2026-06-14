@@ -1,12 +1,32 @@
 load("@rules_oci//oci:defs.bzl", "oci_image")
 
-# k8s/external-secrets.yaml.tmpl is rendered from the upstream
-# external-secrets-2.6.0 Helm chart asset
-# (sha256:f3659c0085a41e1be5c016cf186b80aac262ef249a91b1b770b941f18296ef3f)
-# with installCRDs=true, scopedRBAC=true, and scopedNamespace=observability.
-filegroup(
+genrule(
     name = "manifest",
-    srcs = ["k8s/external-secrets.yaml.tmpl"],
+    srcs = ["@external_secrets_chart//file"],
+    outs = ["k8s/external-secrets.yaml.tmpl"],
+    cmd = """
+set -euo pipefail
+{
+  printf '# Generated from external-secrets Helm chart 2.6.0 (sha256:f3659c0085a41e1be5c016cf186b80aac262ef249a91b1b770b941f18296ef3f).\\n'
+  printf '# Do not edit this output; edit the Bazel rule and upstream pins in MODULE.bazel.\\n'
+  printf -- '---\\n'
+  printf 'apiVersion: v1\\nkind: Namespace\\nmetadata:\\n  name: external-secrets\\n'
+  printf -- '---\\n'
+  "$(execpath @helm_linux_amd64//:helm)" template external-secrets "$(location @external_secrets_chart//file)" \
+    --namespace external-secrets \
+    --include-crds \
+    --set installCRDs=true \
+    --set scopedRBAC=true \
+    --set scopedNamespace=observability \
+    --set image.repository=ghcr.io/external-secrets/external-secrets \
+    --set image.tag=v2.6.0 \
+    --set certController.image.repository=ghcr.io/external-secrets/external-secrets \
+    --set certController.image.tag=v2.6.0 \
+    --set webhook.image.repository=ghcr.io/external-secrets/external-secrets \
+    --set webhook.image.tag=v2.6.0
+} | sed 's#image: ghcr.io/external-secrets/external-secrets:v2.6.0#image: {{.Image}}#g' > "$@"
+""",
+    tools = ["@helm_linux_amd64//:helm"],
     visibility = ["//src/guardian-cli:__subpackages__"],
 )
 
