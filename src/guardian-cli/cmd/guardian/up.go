@@ -218,6 +218,10 @@ func runUp(args []string) error {
 		return err
 	}
 
+	if err := restorePlatformTLSSecrets(kubectl, kubeconfig, state, site); err != nil {
+		return err
+	}
+
 	// Seed registry first: it is the transport for every other component.
 	if err := runTool(kubectl, "--kubeconfig", kubeconfig, "apply", "-f", resolvePath(seedRegistryManifest)); err != nil {
 		return err

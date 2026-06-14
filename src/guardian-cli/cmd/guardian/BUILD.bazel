@@ -8,6 +8,7 @@ go_library(
         "devtools.go",
         "down.go",
         "main.go",
+        "platform_tls.go",
         "push.go",
         "render.go",
         "restore.go",
@@ -76,6 +77,7 @@ go_test(
     srcs = [
         "bao_bootstrap_test.go",
         "components_test.go",
+        "platform_tls_test.go",
         "push_test.go",
         "render_aisucks_test.go",
         "render_cert_manager_test.go",
