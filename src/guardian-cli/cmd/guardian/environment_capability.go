@@ -76,6 +76,8 @@ func environmentCapabilityResource(kind string) (string, bool) {
 		return "companysites.products.guardian.dev", true
 	case "DirectusInstance":
 		return "directusinstances.platform.guardian.dev", true
+	case "OCIRegistry":
+		return "ociregistries.platform.guardian.dev", true
 	default:
 		return "", false
 	}
@@ -98,6 +100,11 @@ func environmentCapabilityRollouts(kind, namespace string, waitForRollout bool) 
 			{namespace: namespace, resource: "statefulset/directus-postgres"},
 			{namespace: namespace, resource: "deployment/directus"},
 		}, nil
+	case "OCIRegistry":
+		if namespace == "" {
+			return nil, fmt.Errorf("spec.namespace is required")
+		}
+		return []environmentRollout{{namespace: namespace, resource: "deployment/zot"}}, nil
 	default:
 		return nil, nil
 	}

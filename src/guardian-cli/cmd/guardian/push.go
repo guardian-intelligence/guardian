@@ -109,6 +109,11 @@ var components = []component{{
 	rawManifest: true,
 	enabled:     siteUsesCrossplane,
 }, {
+	name:        "oci-registry-platform",
+	manifest:    "src/crossplane/packages/guardian-platform/oci-registry.yaml",
+	rawManifest: true,
+	enabled:     siteUsesCrossplane,
+}, {
 	name:        "aisucks-product-api",
 	manifest:    "src/crossplane/packages/guardian-products/aisucks-product.yaml",
 	rawManifest: true,
@@ -210,7 +215,7 @@ var components = []component{{
 }, {
 	name:     "zot",
 	layout:   "_main/src/infrastructure-components/zot/image",
-	manifest: "src/infrastructure-components/zot/k8s/zot.yaml.tmpl",
+	pushOnly: true,
 	enabled:  siteUsesPlatformOCI,
 }}
 

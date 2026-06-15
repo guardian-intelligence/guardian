@@ -1,11 +1,5 @@
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
 
-filegroup(
-    name = "manifest",
-    srcs = ["k8s/zot.yaml.tmpl"],
-    visibility = ["//src/guardian-cli:__subpackages__"],
-)
-
 oci_image(
     name = "image",
     base = "@zot",

@@ -192,6 +192,9 @@ func loadSite(path string) (*Site, error) {
 	if err != nil {
 		return nil, err
 	}
+	if _, err := ociRegistries(s); err != nil {
+		return nil, err
+	}
 	if err := validateCompanySiteSpec(s, envResolved, companyXR); err != nil {
 		return nil, err
 	}

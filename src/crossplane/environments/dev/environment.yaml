@@ -214,6 +214,26 @@ spec:
         - "dev.guardianintelligence.org"
       issuerRefName: letsencrypt-production
 ---
+apiVersion: platform.guardian.dev/v1alpha1
+kind: OCIRegistry
+metadata:
+  name: zot
+spec:
+  site: dev
+  namespace: guardian-oci
+  image: '{{ index .Images "zot" }}'
+  domain: oci.guardianintelligence.org
+  storagePath: /var/lib/guardian/zot
+  publisherSecret:
+    name: zot-publisher
+    htpasswdKey: htpasswd
+  gateway:
+    name: edge
+    namespace: gateway
+    httpsSectionName: https-oci
+  readiness:
+    waitForRollout: true
+---
 apiVersion: products.guardian.dev/v1alpha1
 kind: AisucksProduct
 metadata:

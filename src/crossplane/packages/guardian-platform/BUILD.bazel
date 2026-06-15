@@ -3,6 +3,7 @@ filegroup(
     srcs = [
         "directus-instance.yaml",
         "edge-gateway.yaml",
+        "oci-registry.yaml",
         "public-http-service.yaml",
         "secret-projection.yaml",
         "slo-profile.yaml",

@@ -88,6 +88,7 @@ func testProductImages() map[string]string {
 		"company-site": companyTestImage,
 		"directus":     directusTestImage,
 		"postgres":     postgresTestImage,
+		"zot":          zotTestImage,
 	}
 }
 

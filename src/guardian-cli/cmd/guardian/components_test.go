@@ -45,17 +45,17 @@ func TestComponentsTable(t *testing.T) {
 		{"provider-kubernetes-config", "public-http-service-platform", "the PublicHttpService composition emits provider-kubernetes Objects"},
 		{"provider-kubernetes-config", "directus-platform", "the DirectusInstance composition emits provider-kubernetes Objects"},
 		{"provider-kubernetes-config", "slo-profile-platform", "the SLOProfile/SyntheticCheck compositions use Crossplane functions"},
+		{"provider-kubernetes-config", "oci-registry-platform", "the OCIRegistry composition emits provider-kubernetes Objects"},
 		{"slo-profile-platform", "aisucks-product-api", "SLO and synthetic APIs are part of the platform package"},
 		{"public-http-service-platform", "aisucks-product-api", "product APIs compose PublicHttpService"},
 		{"public-http-service-platform", "company-site-product-api", "product APIs compose PublicHttpService"},
+		{"oci-registry-platform", "zot", "the zot image is consumed by the OCIRegistry XR"},
 		{"aisucks-product-api", "aisucks", "product images are consumed by product XRs"},
 		{"company-site-product-api", "company-site", "product images are consumed by product XRs"},
 		{"edge-gateway-platform", "status", "product routes attach to the platform Gateway listener"},
-		{"edge-gateway-platform", "zot", "product routes attach to the platform Gateway listener"},
 		{"openbao", "external-secrets", "ESO authenticates to Bao"},
 		{"external-secrets", "clickhouse", "ClickHouse requires clickhouse-admin at pod config time"},
 		{"external-secrets", "grafana", "Grafana requires grafana-admin at pod config time"},
-		{"external-secrets", "zot", "zot requires the OpenBao-projected htpasswd file at pod config time"},
 	} {
 		bi, ok := indexOf[rel.before]
 		if !ok {
