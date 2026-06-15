@@ -5,8 +5,8 @@
 # kernel's SO_REUSEPORT balancing hides one dead listener), and only the
 # restart counter exposes it. Everything else KSM emits is a bonus.
 #
-# The observability Namespace is OWNED by the victoria-metrics manifest
-# (first observability component applied); this manifest assumes it exists.
+# The observability Namespace is owned by the ObservabilityStack XR; this
+# manifest assumes it exists.
 apiVersion: v1
 kind: ServiceAccount
 metadata:

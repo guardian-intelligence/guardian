@@ -5,9 +5,8 @@
 # which rides loopback on the operator's machine (the Talos firewall does
 # not police loopback either, but a forward never touches the node's NIC).
 #
-# The observability Namespace object is owned by the victoria-metrics
-# manifest; this component assumes it exists (push order puts
-# victoria-metrics first).
+# The observability Namespace object and VictoriaMetrics Service are owned by
+# the ObservabilityStack XR; this component assumes they exist.
 #
 # The grafana-admin Secret is delivered by the site's SecretProjection. Do not
 # create it by hand; OpenBao remains the source.

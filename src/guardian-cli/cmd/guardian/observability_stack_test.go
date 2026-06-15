@@ -33,6 +33,18 @@ func TestObservabilityStackSiteManifests(t *testing.T) {
 			if stack.Spec.Clickhouse.Enabled != wantClickHouse[siteName] {
 				t.Fatalf("ObservabilityStack clickhouse.enabled = %v, want %v", stack.Spec.Clickhouse.Enabled, wantClickHouse[siteName])
 			}
+			if stack.Spec.VictoriaMetrics.Image == "" {
+				t.Fatal("ObservabilityStack victoriaMetrics.image is required")
+			}
+			if stack.Spec.VictoriaMetrics.StoragePath != "/var/lib/victoria-metrics" {
+				t.Fatalf("ObservabilityStack victoriaMetrics.storagePath = %q, want /var/lib/victoria-metrics", stack.Spec.VictoriaMetrics.StoragePath)
+			}
+			if stack.Spec.VictoriaMetrics.RetentionPeriod != "13" {
+				t.Fatalf("ObservabilityStack victoriaMetrics.retentionPeriod = %q, want 13", stack.Spec.VictoriaMetrics.RetentionPeriod)
+			}
+			if stack.Spec.VictoriaMetrics.Ports.HTTP != 8428 {
+				t.Fatalf("ObservabilityStack victoriaMetrics.ports.http = %d, want 8428", stack.Spec.VictoriaMetrics.Ports.HTTP)
+			}
 			if site.Clickhouse.Enabled != stack.Spec.Clickhouse.Enabled {
 				t.Fatalf("site clickhouse.enabled = %v, want ObservabilityStack value %v", site.Clickhouse.Enabled, stack.Spec.Clickhouse.Enabled)
 			}
@@ -51,6 +63,12 @@ func TestObservabilityStackPlatformRender(t *testing.T) {
 		"name: observabilitystacks.platform.guardian.dev",
 		"kind: ObservabilityStack",
 		"name: observability-stack-status",
+		"kind: Object",
+		"name: observability-stack-{{ $spec.namespace }}-victoria-metrics",
+		"image: {{ $spec.victoriaMetrics.image }}",
+		"- -retentionPeriod={{ $spec.victoriaMetrics.retentionPeriod }}",
+		"name: observability-stack-{{ $spec.namespace }}-victoria-metrics-service",
+		"victoriaMetricsURL",
 		"name: function-environment-configs",
 		"name: function-auto-ready",
 		"clickhouseEnabled",
@@ -58,5 +76,36 @@ func TestObservabilityStackPlatformRender(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("ObservabilityStack platform render missing %q", want)
 		}
+	}
+}
+
+func TestObservabilityStackEnvironmentBundleInstances(t *testing.T) {
+	for _, siteName := range []string{"dev", "gamma", "prod"} {
+		t.Run(siteName, func(t *testing.T) {
+			site := loadTestSite(t, siteName)
+			rendered, err := renderEnvironmentBundle(site, testProductImages())
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := string(rendered)
+			for _, want := range []string{
+				"kind: ObservabilityStack",
+				"name: observability",
+				"site: " + siteName,
+				"namespace: observability",
+				victoriaMetricsTestImage,
+				"storagePath: /var/lib/victoria-metrics",
+				"retentionPeriod: \"13\"",
+				"memoryAllowedBytes: 256MiB",
+				"http: 8428",
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("ObservabilityStack environment render missing %q", want)
+				}
+			}
+			if strings.Contains(out, "{{ index .Images") {
+				t.Error("environment bundle render left image template placeholders unresolved")
+			}
+		})
 	}
 }

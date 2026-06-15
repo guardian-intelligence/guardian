@@ -3,9 +3,10 @@
 # Alertmanager, which owns grouping/routing (so lockstep storms page once).
 # Pod network only: it dials ClusterIPs and its :8880 UI is reached by
 # kubectl port-forward, so the ingress firewall never sees it. The
-# observability Namespace object is owned by the victoria-metrics manifest;
-# this file assumes it exists. remoteWrite/remoteRead point back at VM so
-# ALERTS state survives a vmalert restart instead of resetting `for:` timers.
+# observability Namespace object and VictoriaMetrics Service are owned by the
+# ObservabilityStack XR; this file assumes they exist. remoteWrite/remoteRead
+# point back at VM so ALERTS state survives a vmalert restart instead of
+# resetting `for:` timers.
 #
 # Templating note: TWO template languages share this file. guardian renders
 # the .yaml.tmpl with Go text/template (missingkey=error) FIRST, and vmalert

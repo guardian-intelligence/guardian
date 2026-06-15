@@ -155,17 +155,19 @@ func waitSecretProjections(kubectl, kubeconfig string, site *Site) error {
 	}
 	for _, projection := range projections {
 		name := projection.Metadata.Name
+		namespace := projection.Spec.Target.Namespace
+		if !projection.createsNamespace() {
+			if err := waitNamespaceExists(kubectl, kubeconfig, namespace); err != nil {
+				return err
+			}
+		}
 		if err := waitSecretProjectionExists(kubectl, kubeconfig, name); err != nil {
 			return err
 		}
 		if err := runTool(kubectl, "--kubeconfig", kubeconfig, "wait", "--for=condition=Ready", "secretprojections.platform.guardian.dev/"+name, "--timeout=3m"); err != nil {
 			return err
 		}
-		namespace := projection.Spec.Target.Namespace
-		if err := poll("secret projection namespace "+namespace, 3*time.Minute, 2*time.Second, func() error {
-			_, err := outputTool(kubectl, "--kubeconfig", kubeconfig, "get", "namespace", namespace)
-			return err
-		}); err != nil {
+		if err := waitNamespaceExists(kubectl, kubeconfig, namespace); err != nil {
 			return err
 		}
 		if !projection.waitForSecrets() {
@@ -189,6 +191,13 @@ func waitSecretProjections(kubectl, kubeconfig string, site *Site) error {
 		}
 	}
 	return nil
+}
+
+func waitNamespaceExists(kubectl, kubeconfig, namespace string) error {
+	return poll("namespace "+namespace, 3*time.Minute, 2*time.Second, func() error {
+		_, err := outputTool(kubectl, "--kubeconfig", kubeconfig, "get", "namespace", namespace)
+		return err
+	})
 }
 
 func waitSecretProjectionExists(kubectl, kubeconfig, name string) error {

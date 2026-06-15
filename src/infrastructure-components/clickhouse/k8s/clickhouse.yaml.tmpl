@@ -1,8 +1,8 @@
 # ClickHouse: the logs/traces ledger of the observability stack. Pod network
 # only — reachability is the ClusterIP Service below; nothing here touches the
 # host netns, so the node ingress firewall never sees these ports. The
-# "observability" Namespace object is owned by the victoria-metrics manifest;
-# this manifest assumes it already exists.
+# "observability" Namespace object is owned by the ObservabilityStack XR; this
+# manifest assumes it already exists.
 #
 # The otel schema is NOT created here: k8s/ddl/0001_otel.sql is vendored DDL
 # docs/runbooks/ledger.md applies by hand, and the collector runs with

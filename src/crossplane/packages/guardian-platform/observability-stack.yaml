@@ -29,6 +29,46 @@ spec:
                   type: object
                   additionalProperties:
                     type: string
+                victoriaMetrics:
+                  type: object
+                  properties:
+                    image:
+                      type: string
+                      description: Digest-pinned VictoriaMetrics OCI image reference.
+                    storagePath:
+                      type: string
+                    retentionPeriod:
+                      type: string
+                    memoryAllowedBytes:
+                      type: string
+                    ports:
+                      type: object
+                      properties:
+                        http:
+                          type: integer
+                      required:
+                        - http
+                    resources:
+                      type: object
+                      properties:
+                        requests:
+                          type: object
+                          additionalProperties:
+                            type: string
+                        limits:
+                          type: object
+                          additionalProperties:
+                            type: string
+                      required:
+                        - requests
+                        - limits
+                  required:
+                    - image
+                    - storagePath
+                    - retentionPeriod
+                    - memoryAllowedBytes
+                    - ports
+                    - resources
                 clickhouse:
                   type: object
                   properties:
@@ -38,11 +78,16 @@ spec:
               required:
                 - site
                 - namespace
+                - victoriaMetrics
                 - clickhouse
             status:
               type: object
               properties:
                 namespace:
+                  type: string
+                victoriaMetricsURL:
+                  type: string
+                victoriaMetricsImage:
                   type: string
                 clickhouseEnabled:
                   type: boolean
@@ -84,10 +129,125 @@ spec:
             {{- $xr := .observed.composite.resource -}}
             {{- $spec := $xr.spec -}}
             ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              name: observability-stack-{{ $spec.namespace }}-namespace
+              annotations:
+                {{ setResourceNameAnnotation "namespace" }}
+            spec:
+              providerConfigRef:
+                name: platform
+              forProvider:
+                manifest:
+                  apiVersion: v1
+                  kind: Namespace
+                  metadata:
+                    name: {{ $spec.namespace }}
+                    labels:
+                      {{- range $key, $value := $spec.namespaceLabels }}
+                      {{ $key }}: {{ $value }}
+                      {{- end }}
+            ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              name: observability-stack-{{ $spec.namespace }}-victoria-metrics
+              annotations:
+                {{ setResourceNameAnnotation "victoria-metrics" }}
+            spec:
+              references:
+                - dependsOn:
+                    apiVersion: kubernetes.crossplane.io/v1alpha2
+                    kind: Object
+                    name: observability-stack-{{ $spec.namespace }}-namespace
+              providerConfigRef:
+                name: platform
+              forProvider:
+                manifest:
+                  apiVersion: apps/v1
+                  kind: Deployment
+                  metadata:
+                    name: victoria-metrics
+                    namespace: {{ $spec.namespace }}
+                  spec:
+                    replicas: 1
+                    strategy:
+                      type: Recreate
+                    selector:
+                      matchLabels:
+                        app: victoria-metrics
+                    template:
+                      metadata:
+                        labels:
+                          app: victoria-metrics
+                      spec:
+                        containers:
+                          - name: victoria-metrics
+                            image: {{ $spec.victoriaMetrics.image }}
+                            args:
+                              - -retentionPeriod={{ $spec.victoriaMetrics.retentionPeriod }}
+                              - -storageDataPath=/storage
+                              - -memory.allowedBytes={{ $spec.victoriaMetrics.memoryAllowedBytes }}
+                            ports:
+                              - name: http
+                                containerPort: {{ $spec.victoriaMetrics.ports.http }}
+                            readinessProbe:
+                              httpGet:
+                                path: /health
+                                port: {{ $spec.victoriaMetrics.ports.http }}
+                              initialDelaySeconds: 2
+                              periodSeconds: 5
+                            resources:
+                              requests:
+                                cpu: {{ index $spec.victoriaMetrics.resources.requests "cpu" }}
+                                memory: {{ index $spec.victoriaMetrics.resources.requests "memory" }}
+                              limits:
+                                memory: {{ index $spec.victoriaMetrics.resources.limits "memory" }}
+                            volumeMounts:
+                              - name: storage
+                                mountPath: /storage
+                        volumes:
+                          - name: storage
+                            hostPath:
+                              path: {{ $spec.victoriaMetrics.storagePath }}
+                              type: DirectoryOrCreate
+            ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              name: observability-stack-{{ $spec.namespace }}-victoria-metrics-service
+              annotations:
+                {{ setResourceNameAnnotation "victoria-metrics-service" }}
+            spec:
+              references:
+                - dependsOn:
+                    apiVersion: kubernetes.crossplane.io/v1alpha2
+                    kind: Object
+                    name: observability-stack-{{ $spec.namespace }}-namespace
+              providerConfigRef:
+                name: platform
+              forProvider:
+                manifest:
+                  apiVersion: v1
+                  kind: Service
+                  metadata:
+                    name: victoria-metrics
+                    namespace: {{ $spec.namespace }}
+                  spec:
+                    selector:
+                      app: victoria-metrics
+                    ports:
+                      - name: http
+                        port: {{ $spec.victoriaMetrics.ports.http }}
+                        targetPort: {{ $spec.victoriaMetrics.ports.http }}
+            ---
             apiVersion: platform.guardian.dev/v1alpha1
             kind: ObservabilityStack
             status:
               namespace: {{ $spec.namespace }}
+              victoriaMetricsURL: http://victoria-metrics.{{ $spec.namespace }}.svc:{{ $spec.victoriaMetrics.ports.http }}
+              victoriaMetricsImage: {{ $spec.victoriaMetrics.image }}
               clickhouseEnabled: {{ $spec.clickhouse.enabled }}
     - step: mark-ready
       functionRef:

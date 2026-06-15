@@ -108,6 +108,11 @@ func environmentCapabilityRollouts(kind, namespace string, waitForRollout bool) 
 			{namespace: namespace, resource: "statefulset/directus-postgres"},
 			{namespace: namespace, resource: "deployment/directus"},
 		}, nil
+	case "ObservabilityStack":
+		if namespace == "" {
+			return nil, fmt.Errorf("spec.namespace is required")
+		}
+		return []environmentRollout{{namespace: namespace, resource: "deployment/victoria-metrics"}}, nil
 	case "OCIRegistry":
 		if namespace == "" {
 			return nil, fmt.Errorf("spec.namespace is required")

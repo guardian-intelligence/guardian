@@ -7,9 +7,8 @@
 # Gatus pages (environment alerts.ntfyTopic): one phone subscription covers
 # both alert paths.
 #
-# The observability Namespace object is OWNED by the victoria-metrics
-# manifest; this component assumes it exists, so it must converge after
-# victoria-metrics.
+# The observability Namespace and VictoriaMetrics Service are owned by the
+# ObservabilityStack XR; this component assumes they exist.
 #
 # Alertmanager only re-reads its config on SIGHUP or restart; `kubectl apply`
 # of this ConfigMap alone (e.g. a topic rotation with an unchanged image)

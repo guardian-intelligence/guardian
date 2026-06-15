@@ -59,6 +59,12 @@ func TestSecretProjectionSiteManifests(t *testing.T) {
 			if observability.Spec.Target.Namespace != "observability" {
 				t.Fatalf("observability namespace = %q", observability.Spec.Target.Namespace)
 			}
+			if observability.Spec.Target.CreateNamespace == nil || *observability.Spec.Target.CreateNamespace {
+				t.Fatal("observability SecretProjection should not create the ObservabilityStack namespace")
+			}
+			if len(observability.Spec.Target.NamespaceLabels) != 0 {
+				t.Fatalf("observability SecretProjection namespaceLabels = %#v, want none", observability.Spec.Target.NamespaceLabels)
+			}
 			if observability.Spec.OpenBao.Role != "observability-secrets" {
 				t.Fatalf("observability role = %q", observability.Spec.OpenBao.Role)
 			}
