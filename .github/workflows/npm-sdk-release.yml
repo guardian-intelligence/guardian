@@ -2,6 +2,16 @@ name: npm sdk release
 
 on:
   workflow_dispatch:
+    inputs:
+      source-ref:
+        description: "Git ref to build; defaults to the workflow dispatch ref."
+        required: false
+        type: string
+      skip-npm:
+        description: "Publish/sign OCI only; useful for restoring an already-published npm version."
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -26,7 +36,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ inputs.source-ref || github.event.workflow_run.head_sha || github.sha }}
 
       - uses: bazelbuild/setup-bazelisk@b39c379c82683a5f25d34f0d062761f62693e0b2 # v3.0.0
 
@@ -37,10 +47,19 @@ jobs:
 
       - name: Release SDK
         run: |
-          aspect release sdk-oci \
-            --publish \
-            --channel edge \
-            --ref oci.guardianintelligence.org/guardian/aisucks/sdk/npm:edge
+          args=(
+            release
+            sdk-oci
+            --publish
+            --channel
+            edge
+            --ref
+            oci.guardianintelligence.org/guardian/aisucks/sdk/npm:edge
+          )
+          if [[ "${{ inputs.skip-npm }}" == "true" ]]; then
+            args+=(--skip-npm)
+          fi
+          aspect "${args[@]}"
         env:
           GUARDIAN_OCI_USERNAME: guardian-release
           GUARDIAN_OCI_PASSWORD: ${{ secrets.GUARDIAN_OCI_PASSWORD }}

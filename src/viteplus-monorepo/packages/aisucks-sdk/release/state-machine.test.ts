@@ -1,7 +1,27 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { cosignReleaseEnv, npmReleaseEnv, ociManifestDeleteArgs } from "./state-machine.js";
+import { Cause, Effect, Exit, Layer, Option } from "effect";
+
+import { CommandFailed } from "./errors.js";
+import { ProcessProvider, type CommandInput } from "./providers.js";
+import {
+  cosignReleaseEnv,
+  npmReleaseEnv,
+  ociManifestDeleteArgs,
+  validateNpmProjection,
+} from "./state-machine.js";
+import {
+  defaultChannel,
+  defaultOciRef,
+  defaultReleasePaths,
+  distributable,
+  payloadForm,
+  sdkPackageName,
+  sourceRepo,
+  type ReleaseCandidate,
+  type ReleaseConfig,
+} from "./types.js";
 
 void test("npm release commands always target the public npm registry", () => {
   assert.deepEqual(npmReleaseEnv(), {
@@ -35,3 +55,133 @@ void test("OCI rollback deletes the exact manifest ref with password on stdin", 
     ],
   );
 });
+
+void test("validateNpmProjection accepts an already-published matching package", async () => {
+  const candidate = releaseCandidate();
+  const got = await Effect.runPromise(
+    validateNpmProjection(releaseConfig(), candidate).pipe(
+      Effect.provide(npmViewLayer(JSON.stringify(candidate.npmIntegrity))),
+    ),
+  );
+
+  assert.equal(got, "already-published");
+});
+
+void test("validateNpmProjection treats npm 404 as available", async () => {
+  const got = await Effect.runPromise(
+    validateNpmProjection(releaseConfig(), releaseCandidate()).pipe(
+      Effect.provide(npmNotFoundLayer()),
+    ),
+  );
+
+  assert.equal(got, "available");
+});
+
+void test("validateNpmProjection rejects an existing package with different integrity", async () => {
+  const candidate = releaseCandidate();
+  const exit = await Effect.runPromiseExit(
+    validateNpmProjection(releaseConfig(), candidate).pipe(
+      Effect.provide(npmViewLayer(JSON.stringify("sha512-different"))),
+    ),
+  );
+
+  assert.equal(Exit.isFailure(exit), true);
+  if (Exit.isSuccess(exit)) {
+    return;
+  }
+  const failure = Cause.failureOption(exit.cause);
+  assert.equal(Option.isSome(failure), true);
+  if (Option.isNone(failure)) {
+    return;
+  }
+  assert.equal(failure.value._tag, "PublishConflict");
+  if (failure.value._tag !== "PublishConflict") {
+    return;
+  }
+  assert.equal(failure.value.reason, "npm version already exists with different integrity");
+});
+
+function releaseConfig(): ReleaseConfig {
+  return {
+    mode: "publish",
+    version: "0.3.0",
+    channel: defaultChannel,
+    ociRef: defaultOciRef,
+    publishNpm: true,
+    publishOci: true,
+    allowUnsignedDev: false,
+    outputDir: undefined,
+    paths: defaultReleasePaths(),
+  };
+}
+
+function releaseCandidate(): ReleaseCandidate {
+  const integrity = "sha512-match";
+  return {
+    target: {
+      packageName: sdkPackageName,
+      version: "0.3.0",
+      channel: defaultChannel,
+      sourceRepo,
+      sourceCommit: "7699c753ec8a4338078b28c92941f5b4875782e6",
+      ociRef: defaultOciRef,
+    },
+    pack: {
+      name: sdkPackageName,
+      version: "0.3.0",
+      filename: "guardian-intelligence-aisucks-0.3.0.tgz",
+      integrity,
+      size: 1024,
+    },
+    oci: {
+      distributable,
+      payload_form: payloadForm,
+      channel: defaultChannel,
+      oci_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      oci_ref:
+        "oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      payload_sha256: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      tarball_sha256: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      npm_integrity: integrity,
+      package: sdkPackageName,
+      version: "0.3.0",
+      source_repo: sourceRepo,
+      source_commit: "7699c753ec8a4338078b28c92941f5b4875782e6",
+      layer_title: "guardian-intelligence-aisucks-0.3.0.tgz",
+    },
+    tarballSha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    npmIntegrity: integrity,
+    localLayout: "/tmp/guardian-sdk-release/oci-layout",
+  };
+}
+
+function npmViewLayer(stdout: string): Layer.Layer<ProcessProvider> {
+  return Layer.succeed(ProcessProvider, {
+    run: (input: CommandInput) =>
+      Effect.succeed({
+        program: input.program,
+        args: input.args,
+        cwd: input.cwd,
+        exitCode: 0,
+        stdout,
+        stderr: "",
+        durationMs: 1,
+      }),
+  });
+}
+
+function npmNotFoundLayer(): Layer.Layer<ProcessProvider> {
+  return Layer.succeed(ProcessProvider, {
+    run: (input: CommandInput) =>
+      Effect.fail(
+        new CommandFailed({
+          program: input.program,
+          args: input.args,
+          cwd: input.cwd,
+          exitCode: 1,
+          stdout: "",
+          stderr: "npm ERR! code E404\nnpm ERR! 404 Not Found",
+        }),
+      ),
+  });
+}

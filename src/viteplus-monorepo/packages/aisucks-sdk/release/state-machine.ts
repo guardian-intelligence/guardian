@@ -85,6 +85,11 @@ export function runRelease(
       "validate candidate and evidence before public writes",
       admitRelease(config, candidate, evidence),
     );
+    yield* stage(
+      "npm-projection",
+      "validate npm package projection before public writes",
+      validateNpmProjection(config, candidate),
+    );
     const admittedCandidate = yield* stage(
       "local-evidence",
       "attach admitted evidence to local OCI layout",
@@ -776,17 +781,7 @@ function publishNpm(
       if (existing === candidate.npmIntegrity) {
         return "already-published";
       }
-      return yield* Effect.fail(
-        new PublishConflict({
-          reason: "npm version already exists with different integrity",
-          details: {
-            package: candidate.pack.name,
-            version: candidate.pack.version,
-            expected: candidate.npmIntegrity,
-            actual: existing,
-          },
-        }),
-      );
+      return yield* Effect.fail(npmIntegrityConflict(candidate, existing));
     }
 
     yield* retryTransient(
@@ -808,6 +803,49 @@ function publishNpm(
       isTransientReleaseError,
     );
     return "published";
+  });
+}
+
+export function validateNpmProjection(
+  config: ReleaseConfig,
+  candidate: ReleaseCandidate,
+): Effect.Effect<
+  "not-requested" | "available" | "already-published",
+  ReleaseError,
+  ProcessProvider
+> {
+  if (!config.publishNpm) {
+    return Effect.succeed("not-requested");
+  }
+
+  return Effect.gen(function* () {
+    const existing = yield* npmViewIntegrity(config, candidate.pack).pipe(
+      Effect.catchAll((error) => {
+        if (error._tag === "CommandFailed" && isNpmNotFound(error.stderr)) {
+          return Effect.succeed(undefined);
+        }
+        return Effect.fail(error);
+      }),
+    );
+    if (existing === undefined) {
+      return "available";
+    }
+    if (existing === candidate.npmIntegrity) {
+      return "already-published";
+    }
+    return yield* Effect.fail(npmIntegrityConflict(candidate, existing));
+  });
+}
+
+function npmIntegrityConflict(candidate: ReleaseCandidate, existing: string): PublishConflict {
+  return new PublishConflict({
+    reason: "npm version already exists with different integrity",
+    details: {
+      package: candidate.pack.name,
+      version: candidate.pack.version,
+      expected: candidate.npmIntegrity,
+      actual: existing,
+    },
   });
 }
 
