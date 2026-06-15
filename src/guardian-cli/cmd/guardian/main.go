@@ -34,6 +34,8 @@ const usage = `usage:
   guardian down --yes [bootstrap.yaml]
                                      wipe the node to Talos maintenance mode via talosctl reset
   guardian config [bootstrap <path>] print config, or set the default bootstrap facts file
+  guardian gate public-http [--window 15m] [bootstrap.yaml]
+                                     evaluate the public HTTP SLO gate against Kubernetes and VictoriaMetrics
   guardian run <tool> [args...]      run a version-pinned tool (aspect, bazel, talosctl, kubectl, oras, cosign)
   guardian tools install|uninstall   manage tool symlinks pointing at this binary (--bin-dir, default ~/.local/bin)
   guardian version                   print pinned component versions`
@@ -60,6 +62,8 @@ func main() {
 		err = runDown(os.Args[2:])
 	case "config":
 		err = runConfigCmd(os.Args[2:])
+	case "gate":
+		err = runGateCmd(os.Args[2:])
 	case "run":
 		err = runRunCmd(os.Args[2:])
 	case "tools":
