@@ -6,6 +6,7 @@ import (
 )
 
 const aisucksTestImage = "registry.guardian.internal/aisucks@sha256:deadbeef"
+const statusTestImage = "registry.guardian.internal/status@sha256:deadbeef"
 
 func TestAisucksProductAPIRender(t *testing.T) {
 	c := componentByName(t, "aisucks-product-api")
@@ -88,6 +89,7 @@ func testProductImages() map[string]string {
 		"company-site": companyTestImage,
 		"directus":     directusTestImage,
 		"postgres":     postgresTestImage,
+		"status":       statusTestImage,
 		"zot":          zotTestImage,
 	}
 }

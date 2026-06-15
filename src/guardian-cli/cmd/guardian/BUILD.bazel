@@ -103,7 +103,7 @@ go_test(
         "render_gatus_test.go",
         "render_order_test.go",
         "render_otel_test.go",
-        "render_status_test.go",
+        "render_test_helpers_test.go",
         "render_vmalert_test.go",
         "render_zot_test.go",
         "restore_test.go",
@@ -136,7 +136,6 @@ go_test(
         "//src/infrastructure-components/vmalert:manifest",
         "//src/products/company/services/site:image",
         "//src/sites",
-        "//src/status:manifest",
     ],
     embed = [":guardian_lib"],
     deps = [

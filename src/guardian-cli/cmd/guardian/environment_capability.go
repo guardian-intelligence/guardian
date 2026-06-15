@@ -30,7 +30,8 @@ func environmentCapabilities(site *Site) ([]environmentCapability, error) {
 				Name string `yaml:"name"`
 			} `yaml:"metadata"`
 			Spec struct {
-				Namespace string `yaml:"namespace"`
+				Namespace string   `yaml:"namespace"`
+				Domains   []string `yaml:"domains"`
 				Readiness struct {
 					WaitForRollout *bool `yaml:"waitForRollout"`
 				} `yaml:"readiness"`
@@ -54,6 +55,9 @@ func environmentCapabilities(site *Site) ([]environmentCapability, error) {
 		}
 		suspended := doc.Spec.Runtime.Suspend != nil && *doc.Spec.Runtime.Suspend
 		waitForRollout := (doc.Spec.Readiness.WaitForRollout == nil || *doc.Spec.Readiness.WaitForRollout) && !suspended
+		if doc.Kind == "StatusSurface" && len(doc.Spec.Domains) == 0 {
+			waitForRollout = false
+		}
 		rollouts, err := environmentCapabilityRollouts(doc.Kind, doc.Spec.Namespace, waitForRollout)
 		if err != nil {
 			return nil, fmt.Errorf("environment %s %s: %w", doc.Kind, doc.Metadata.Name, err)
@@ -109,6 +113,11 @@ func environmentCapabilityRollouts(kind, namespace string, waitForRollout bool) 
 			return nil, fmt.Errorf("spec.namespace is required")
 		}
 		return []environmentRollout{{namespace: namespace, resource: "deployment/zot"}}, nil
+	case "StatusSurface":
+		if namespace == "" {
+			return nil, fmt.Errorf("spec.namespace is required")
+		}
+		return []environmentRollout{{namespace: namespace, resource: "deployment/status"}}, nil
 	default:
 		return nil, nil
 	}

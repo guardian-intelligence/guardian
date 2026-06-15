@@ -100,10 +100,28 @@ metadata:
   name: status
 spec:
   site: dev
+  namespace: status
+  image: '{{ index .Images "status" }}'
   domains:
     - status.guardianintelligence.org
     - status.dev.guardianintelligence.org
   monitor: false
+  replicas: 1
+  acmeEmail: im.shovonhasan@gmail.com
+  certDir: /var/lib/status-certs
+  victoriaMetricsURL: http://victoria-metrics.observability.svc:8428
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+      goMemory: 410MiB
+  gateway:
+    name: edge
+    namespace: gateway
+    tlsRouteAPIVersion: gateway.networking.k8s.io/v1alpha2
+    tlsSectionNamePrefix: tls-status
 ---
 apiVersion: platform.guardian.dev/v1alpha1
 kind: SecretProjection

@@ -16,9 +16,28 @@ type statusSurfaceManifest struct {
 }
 
 type statusSurfaceSpec struct {
-	Site    string   `yaml:"site"`
-	Domains []string `yaml:"domains"`
-	Monitor bool     `yaml:"monitor"`
+	Site               string   `yaml:"site"`
+	Namespace          string   `yaml:"namespace"`
+	Image              string   `yaml:"image"`
+	Domains            []string `yaml:"domains"`
+	Monitor            bool     `yaml:"monitor"`
+	Replicas           int      `yaml:"replicas"`
+	ACMEEmail          string   `yaml:"acmeEmail"`
+	CertDir            string   `yaml:"certDir"`
+	VictoriaMetricsURL string   `yaml:"victoriaMetricsURL"`
+	Resources          struct {
+		Requests map[string]string `yaml:"requests"`
+		Limits   map[string]string `yaml:"limits"`
+	} `yaml:"resources"`
+	Gateway struct {
+		Name                 string `yaml:"name"`
+		Namespace            string `yaml:"namespace"`
+		TLSRouteAPIVersion   string `yaml:"tlsRouteAPIVersion"`
+		TLSSectionNamePrefix string `yaml:"tlsSectionNamePrefix"`
+	} `yaml:"gateway"`
+	Readiness struct {
+		WaitForRollout *bool `yaml:"waitForRollout"`
+	} `yaml:"readiness"`
 }
 
 func statusSurfaces(site *Site) ([]statusSurfaceManifest, error) {
@@ -57,11 +76,35 @@ func validateStatusSurface(site *Site, surface statusSurfaceManifest) error {
 	if name == "" {
 		return fmt.Errorf("environment %s: StatusSurface metadata.name is required", site.EnvironmentBundle.Path)
 	}
-	if spec.Site == "" {
-		return fmt.Errorf("environment %s: StatusSurface %s spec.site is required", site.EnvironmentBundle.Path, name)
+	required := map[string]string{
+		"spec.site":                         spec.Site,
+		"spec.namespace":                    spec.Namespace,
+		"spec.image":                        spec.Image,
+		"spec.acmeEmail":                    spec.ACMEEmail,
+		"spec.certDir":                      spec.CertDir,
+		"spec.victoriaMetricsURL":           spec.VictoriaMetricsURL,
+		"spec.resources.requests.cpu":       spec.Resources.Requests["cpu"],
+		"spec.resources.requests.memory":    spec.Resources.Requests["memory"],
+		"spec.resources.limits.memory":      spec.Resources.Limits["memory"],
+		"spec.resources.limits.goMemory":    spec.Resources.Limits["goMemory"],
+		"spec.gateway.name":                 spec.Gateway.Name,
+		"spec.gateway.namespace":            spec.Gateway.Namespace,
+		"spec.gateway.tlsRouteAPIVersion":   spec.Gateway.TLSRouteAPIVersion,
+		"spec.gateway.tlsSectionNamePrefix": spec.Gateway.TLSSectionNamePrefix,
+	}
+	for field, value := range required {
+		if value == "" {
+			return fmt.Errorf("environment %s: StatusSurface %s %s is required", site.EnvironmentBundle.Path, name, field)
+		}
 	}
 	if spec.Site != site.Name {
 		return fmt.Errorf("environment %s: StatusSurface %s spec.site = %q, want %q", site.EnvironmentBundle.Path, name, spec.Site, site.Name)
+	}
+	if spec.Replicas < 0 {
+		return fmt.Errorf("environment %s: StatusSurface %s spec.replicas must be non-negative", site.EnvironmentBundle.Path, name)
+	}
+	if len(spec.Domains) > 0 && spec.Replicas < 1 {
+		return fmt.Errorf("environment %s: StatusSurface %s spec.replicas must be positive when spec.domains is non-empty", site.EnvironmentBundle.Path, name)
 	}
 	seen := map[string]bool{}
 	for _, domain := range spec.Domains {

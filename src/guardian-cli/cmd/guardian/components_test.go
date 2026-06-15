@@ -55,7 +55,7 @@ func TestComponentsTable(t *testing.T) {
 		{"oci-registry-platform", "zot", "the zot image is consumed by the OCIRegistry XR"},
 		{"aisucks-product-api", "aisucks", "product images are consumed by product XRs"},
 		{"company-site-product-api", "company-site", "product images are consumed by product XRs"},
-		{"edge-gateway-platform", "status", "product routes attach to the platform Gateway listener"},
+		{"status-surface-platform", "status", "the status image is consumed by the StatusSurface XR"},
 		{"openbao", "external-secrets", "ESO authenticates to Bao"},
 		{"external-secrets", "clickhouse", "ClickHouse requires clickhouse-admin at pod config time"},
 		{"external-secrets", "grafana", "Grafana requires grafana-admin at pod config time"},
