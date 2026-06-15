@@ -147,10 +147,15 @@ func TestConfigureBaoForProjectionCreatesFreshSecrets(t *testing.T) {
 	if b.auths["kubernetes/"].Type != "kubernetes" {
 		t.Fatalf("kubernetes auth = %#v, want kubernetes", b.auths["kubernetes/"])
 	}
-	if !strings.Contains(b.policies["observability-secrets"], "kv/data/guardian/"+site.Cluster.Name+"/observability/*") {
-		t.Fatalf("observability policy = %q", b.policies["observability-secrets"])
+	for _, path := range []string{
+		"kv/data/guardian/" + site.Cluster.Name + "/observability/clickhouse-admin",
+		"kv/data/guardian/" + site.Cluster.Name + "/observability/grafana-admin",
+	} {
+		if !strings.Contains(b.policies["observability-secrets"], path) {
+			t.Fatalf("observability policy = %q, missing %s", b.policies["observability-secrets"], path)
+		}
 	}
-	if !strings.Contains(b.policies["guardian-oci-secrets"], "kv/data/guardian/"+site.Cluster.Name+"/oci/*") {
+	if !strings.Contains(b.policies["guardian-oci-secrets"], "kv/data/guardian/"+site.Cluster.Name+"/oci/zot-publisher") {
 		t.Fatalf("guardian-oci policy = %q", b.policies["guardian-oci-secrets"])
 	}
 	role := b.roles["observability-secrets"]
@@ -161,11 +166,12 @@ func TestConfigureBaoForProjectionCreatesFreshSecrets(t *testing.T) {
 	if ociRole["audience"] != "openbao" {
 		t.Fatalf("oci role audience = %v, want openbao", ociRole["audience"])
 	}
-	for _, secret := range requiredBaoSecrets {
-		if secret.enabled != nil && !secret.enabled(site) {
-			continue
-		}
-		path := secret.path(site)
+	projections, err := secretProjections(site)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range baoRequiredSecretsFromProjections(projections) {
+		path := secret.path
 		for _, key := range secret.required {
 			if b.secrets[path][key] == "" {
 				t.Fatalf("secret %s has no generated %s", path, key)

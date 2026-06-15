@@ -84,10 +84,10 @@ repo-root relative.
    reachable; Bao is restored or fresh-initialized/unsealed; `kv/` and
    Kubernetes auth are configured; Crossplane, provider-kubernetes, and pinned
    functions are installed; the site's Crossplane environment bundle is
-   applied; External Secrets Operator is installed; observability projections
-   are applied; and `guardian up` waits for `clickhouse-admin` and
-   `grafana-admin` before applying ClickHouse or Grafana. An already-sealed
-   restored Bao must be unsealed with injected Shamir keys
+   applied; External Secrets Operator is installed; declared SecretProjection
+   XRs reconcile; and `guardian up` waits for their ExternalSecrets and
+   Kubernetes Secrets before applying consumers. An already-sealed restored Bao
+   must be unsealed with injected Shamir keys
    (`GUARDIAN_OPENBAO_UNSEAL_KEY` or `GUARDIAN_OPENBAO_UNSEAL_KEYS`) before the
    projection gate can pass.
 

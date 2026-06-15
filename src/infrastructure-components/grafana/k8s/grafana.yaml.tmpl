@@ -9,9 +9,8 @@
 # manifest; this component assumes it exists (push order puts
 # victoria-metrics first).
 #
-# The grafana-admin Secret is projected from OpenBao by External Secrets
-# Operator. Do not create it by hand; `guardian up` configures the Bao path and
-# waits for the projected Kubernetes Secret before applying Grafana.
+# The grafana-admin Secret is delivered by the site's SecretProjection. Do not
+# create it by hand; OpenBao remains the source.
 #
 # /var/lib/grafana is an emptyDir on purpose: dashboards arrive as code
 # (the provisioning ConfigMaps below), so anything clicked together in the

@@ -9,10 +9,8 @@
 # create_schema: false — the schema is a reviewed, versioned fact, not
 # whatever an exporter upgrade decides.
 #
-# The clickhouse-admin Secret (key: password) is projected from OpenBao by
-# External Secrets Operator. Do not create it by hand; `guardian up`
-# configures the Bao path and waits for the projected Kubernetes Secret before
-# applying ClickHouse.
+# The clickhouse-admin Secret (key: password) is delivered by the site's
+# SecretProjection. Do not create it by hand; OpenBao remains the source.
 apiVersion: v1
 kind: ConfigMap
 metadata:

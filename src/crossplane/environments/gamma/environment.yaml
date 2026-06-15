@@ -33,6 +33,32 @@ data:
         - status.gamma.guardianintelligence.org
 ---
 apiVersion: platform.guardian.dev/v1alpha1
+kind: SecretProjection
+metadata:
+  name: observability-admin-secrets
+spec:
+  target:
+    namespace: observability
+    namespaceLabels:
+      pod-security.kubernetes.io/enforce: privileged
+  openbao:
+    role: observability-secrets
+    serviceAccountName: external-secrets-observability
+  secrets:
+    - name: clickhouse-admin
+      type: Opaque
+      remotePath: guardian/guardian-gamma/observability/clickhouse-admin
+      data:
+        - secretKey: password
+          property: password
+    - name: grafana-admin
+      type: Opaque
+      remotePath: guardian/guardian-gamma/observability/grafana-admin
+      data:
+        - secretKey: password
+          property: password
+---
+apiVersion: platform.guardian.dev/v1alpha1
 kind: EdgeGateway
 metadata:
   name: edge
