@@ -19,6 +19,11 @@ type platformTLSSecretRef struct {
 	name      string
 }
 
+type edgeGatewayCertificateRef struct {
+	namespace string
+	name      string
+}
+
 type edgeGatewayTLSManifest struct {
 	Kind string `yaml:"kind"`
 	Spec struct {
@@ -176,6 +181,40 @@ func edgeGatewayCertificateObjectNames(site *Site) ([]string, error) {
 		}
 	}
 	sort.Strings(out)
+	return out, nil
+}
+
+func edgeGatewayCertificateRefs(site *Site) ([]edgeGatewayCertificateRef, error) {
+	refs := map[edgeGatewayCertificateRef]struct{}{}
+	dec := yaml.NewDecoder(bytes.NewReader(site.EnvironmentBundle.Raw))
+	for {
+		var doc edgeGatewayTLSManifest
+		if err := dec.Decode(&doc); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, fmt.Errorf("decode %s: %w", site.EnvironmentBundle.Path, err)
+		}
+		if doc.Kind != "EdgeGateway" {
+			continue
+		}
+		for _, cert := range doc.Spec.Certificates {
+			if cert.Name == "" || cert.Namespace == "" {
+				return nil, fmt.Errorf("edge gateway certificate in %s must set name and namespace", site.EnvironmentBundle.Path)
+			}
+			refs[edgeGatewayCertificateRef{namespace: cert.Namespace, name: cert.Name}] = struct{}{}
+		}
+	}
+	out := make([]edgeGatewayCertificateRef, 0, len(refs))
+	for ref := range refs {
+		out = append(out, ref)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].namespace != out[j].namespace {
+			return out[i].namespace < out[j].namespace
+		}
+		return out[i].name < out[j].name
+	})
 	return out, nil
 }
 

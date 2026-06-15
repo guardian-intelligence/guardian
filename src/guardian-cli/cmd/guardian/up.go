@@ -602,6 +602,24 @@ func waitEdgeGateway(kubectl, kubeconfig string, site *Site) error {
 			return err
 		}
 	}
+	if siteUsesPlatformTLS(site) {
+		certs, err := edgeGatewayCertificateRefs(site)
+		if err != nil {
+			return err
+		}
+		for _, cert := range certs {
+			certResource := "certificate.cert-manager.io/" + cert.name
+			if err := poll(certResource, 3*time.Minute, 2*time.Second, func() error {
+				_, err := outputTool(kubectl, "--kubeconfig", kubeconfig, "-n", cert.namespace, "get", certResource)
+				return err
+			}); err != nil {
+				return err
+			}
+			if err := runTool(kubectl, "--kubeconfig", kubeconfig, "-n", cert.namespace, "wait", "--for=condition=Ready", certResource, "--timeout=10m"); err != nil {
+				return err
+			}
+		}
+	}
 	return runTool(kubectl, "--kubeconfig", kubeconfig, "-n", "gateway", "get", "gateway", "edge")
 }
 
