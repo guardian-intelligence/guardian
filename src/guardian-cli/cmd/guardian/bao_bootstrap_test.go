@@ -160,6 +160,15 @@ func TestConfigureBaoForProjectionCreatesFreshSecrets(t *testing.T) {
 	if !strings.Contains(b.policies["guardian-oci-secrets"], "kv/data/guardian/"+site.Cluster.Name+"/oci/zot-publisher") {
 		t.Fatalf("guardian-oci policy = %q", b.policies["guardian-oci-secrets"])
 	}
+	for _, path := range []string{
+		"kv/data/guardian/" + site.Cluster.Name + "/directus/runtime",
+		"kv/data/guardian/" + site.Cluster.Name + "/directus/admin",
+		"kv/data/guardian/" + site.Cluster.Name + "/directus/postgres",
+	} {
+		if !strings.Contains(b.policies["directus-secrets"], path) {
+			t.Fatalf("directus policy = %q, missing %s", b.policies["directus-secrets"], path)
+		}
+	}
 	role := b.roles["observability-secrets"]
 	if role["audience"] != "openbao" {
 		t.Fatalf("role audience = %v, want openbao", role["audience"])
@@ -167,6 +176,10 @@ func TestConfigureBaoForProjectionCreatesFreshSecrets(t *testing.T) {
 	ociRole := b.roles["guardian-oci-secrets"]
 	if ociRole["audience"] != "openbao" {
 		t.Fatalf("oci role audience = %v, want openbao", ociRole["audience"])
+	}
+	directusRole := b.roles["directus-secrets"]
+	if directusRole["audience"] != "openbao" {
+		t.Fatalf("directus role audience = %v, want openbao", directusRole["audience"])
 	}
 	projections, err := secretProjections(site)
 	if err != nil {

@@ -30,6 +30,18 @@ type directusInstanceSpec struct {
 		Limits   map[string]string `yaml:"limits"`
 	} `yaml:"resources"`
 	Secrets struct {
+		Projection struct {
+			WaitForSecrets *bool `yaml:"waitForSecrets"`
+			OpenBao        struct {
+				Role               string `yaml:"role"`
+				ServiceAccountName string `yaml:"serviceAccountName"`
+			} `yaml:"openbao"`
+			RemotePaths struct {
+				Runtime  string `yaml:"runtime"`
+				Admin    string `yaml:"admin"`
+				Database string `yaml:"database"`
+			} `yaml:"remotePaths"`
+		} `yaml:"projection"`
 		RuntimeSecretName   string `yaml:"runtimeSecretName"`
 		RuntimeSecretKey    string `yaml:"runtimeSecretKey"`
 		AdminSecretName     string `yaml:"adminSecretName"`
@@ -102,46 +114,47 @@ func directusInstances(site *Site) ([]directusInstanceManifest, error) {
 }
 
 func validateDirectusInstances(site *Site, instances []directusInstanceManifest) error {
-	projectedSecrets, err := projectedSecretsByNamespace(site)
-	if err != nil {
-		return err
-	}
 	for _, instance := range instances {
-		if err := validateDirectusInstance(site, instance, projectedSecrets); err != nil {
+		if err := validateDirectusInstance(site, instance); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func validateDirectusInstance(site *Site, instance directusInstanceManifest, projectedSecrets map[string]map[string]bool) error {
+func validateDirectusInstance(site *Site, instance directusInstanceManifest) error {
 	name := instance.Metadata.Name
 	spec := instance.Spec
 	if name == "" {
 		return fmt.Errorf("environment %s: DirectusInstance metadata.name is required", site.EnvironmentBundle.Path)
 	}
 	required := map[string]string{
-		"site":                        spec.Site,
-		"namespace":                   spec.Namespace,
-		"image":                       spec.Image,
-		"postgresImage":               spec.PostgresImage,
-		"secrets.runtimeSecretName":   spec.Secrets.RuntimeSecretName,
-		"secrets.runtimeSecretKey":    spec.Secrets.RuntimeSecretKey,
-		"secrets.adminSecretName":     spec.Secrets.AdminSecretName,
-		"secrets.adminPasswordKey":    spec.Secrets.AdminPasswordKey,
-		"secrets.databaseSecretName":  spec.Secrets.DatabaseSecretName,
-		"secrets.databasePasswordKey": spec.Secrets.DatabasePasswordKey,
-		"admin.email":                 spec.Admin.Email,
-		"database.name":               spec.Database.Name,
-		"database.user":               spec.Database.User,
-		"database.storagePath":        spec.Database.StoragePath,
-		"uploadsPath":                 spec.UploadsPath,
-		"gateway.name":                spec.Gateway.Name,
-		"gateway.namespace":           spec.Gateway.Namespace,
-		"gateway.httpSectionName":     spec.Gateway.HTTPSectionName,
-		"resources.requests.cpu":      spec.Resources.Requests["cpu"],
-		"resources.requests.memory":   spec.Resources.Requests["memory"],
-		"resources.limits.memory":     spec.Resources.Limits["memory"],
+		"site":                            spec.Site,
+		"namespace":                       spec.Namespace,
+		"image":                           spec.Image,
+		"postgresImage":                   spec.PostgresImage,
+		"secrets.projection.openbao.role": spec.Secrets.Projection.OpenBao.Role,
+		"secrets.projection.openbao.serviceAccountName": spec.Secrets.Projection.OpenBao.ServiceAccountName,
+		"secrets.projection.remotePaths.runtime":        spec.Secrets.Projection.RemotePaths.Runtime,
+		"secrets.projection.remotePaths.admin":          spec.Secrets.Projection.RemotePaths.Admin,
+		"secrets.projection.remotePaths.database":       spec.Secrets.Projection.RemotePaths.Database,
+		"secrets.runtimeSecretName":                     spec.Secrets.RuntimeSecretName,
+		"secrets.runtimeSecretKey":                      spec.Secrets.RuntimeSecretKey,
+		"secrets.adminSecretName":                       spec.Secrets.AdminSecretName,
+		"secrets.adminPasswordKey":                      spec.Secrets.AdminPasswordKey,
+		"secrets.databaseSecretName":                    spec.Secrets.DatabaseSecretName,
+		"secrets.databasePasswordKey":                   spec.Secrets.DatabasePasswordKey,
+		"admin.email":                                   spec.Admin.Email,
+		"database.name":                                 spec.Database.Name,
+		"database.user":                                 spec.Database.User,
+		"database.storagePath":                          spec.Database.StoragePath,
+		"uploadsPath":                                   spec.UploadsPath,
+		"gateway.name":                                  spec.Gateway.Name,
+		"gateway.namespace":                             spec.Gateway.Namespace,
+		"gateway.httpSectionName":                       spec.Gateway.HTTPSectionName,
+		"resources.requests.cpu":                        spec.Resources.Requests["cpu"],
+		"resources.requests.memory":                     spec.Resources.Requests["memory"],
+		"resources.limits.memory":                       spec.Resources.Limits["memory"],
 	}
 	for field, value := range required {
 		if value == "" {
@@ -181,28 +194,65 @@ func validateDirectusInstance(site *Site, instance directusInstanceManifest, pro
 		}
 		secretNames = append(secretNames, s3.SecretName)
 	}
+	projection := directusSecretProjection(instance)
+	if err := validateSecretProjection(site, projection); err != nil {
+		return err
+	}
+	projectedSecrets := map[string]bool{}
+	for _, secret := range projection.Spec.Secrets {
+		projectedSecrets[secret.Name] = true
+	}
 	for _, secretName := range secretNames {
-		if !projectedSecrets[spec.Namespace][secretName] {
-			return fmt.Errorf("environment %s: DirectusInstance %s secret %s/%s is not declared by a SecretProjection", site.EnvironmentBundle.Path, name, spec.Namespace, secretName)
+		if !projectedSecrets[secretName] {
+			return fmt.Errorf("environment %s: DirectusInstance %s secret %s/%s is not declared by the DirectusInstance SecretProjection", site.EnvironmentBundle.Path, name, spec.Namespace, secretName)
 		}
 	}
 	return nil
 }
 
-func projectedSecretsByNamespace(site *Site) (map[string]map[string]bool, error) {
-	projections, err := secretProjections(site)
-	if err != nil {
-		return nil, err
+func directusSecretProjection(instance directusInstanceManifest) secretProjectionManifest {
+	spec := instance.Spec
+	waitForSecrets := false
+	if spec.Secrets.Projection.WaitForSecrets != nil {
+		waitForSecrets = *spec.Secrets.Projection.WaitForSecrets
 	}
-	out := map[string]map[string]bool{}
-	for _, projection := range projections {
-		namespace := projection.Spec.Target.Namespace
-		if out[namespace] == nil {
-			out[namespace] = map[string]bool{}
-		}
-		for _, secret := range projection.Spec.Secrets {
-			out[namespace][secret.Name] = true
-		}
+	createNamespace := false
+	projection := secretProjectionManifest{
+		Kind:            "SecretProjection",
+		DerivedFromKind: "DirectusInstance",
+		DerivedFromName: instance.Metadata.Name,
 	}
-	return out, nil
+	projection.Metadata.Name = instance.Metadata.Name + "-secrets"
+	projection.Spec.WaitForSecrets = &waitForSecrets
+	projection.Spec.Target.Namespace = spec.Namespace
+	projection.Spec.Target.CreateNamespace = &createNamespace
+	projection.Spec.OpenBao.Role = spec.Secrets.Projection.OpenBao.Role
+	projection.Spec.OpenBao.ServiceAccountName = spec.Secrets.Projection.OpenBao.ServiceAccountName
+	projection.Spec.Secrets = []secretProjectionSecret{
+		{
+			Name:       spec.Secrets.RuntimeSecretName,
+			Type:       "Opaque",
+			RemotePath: spec.Secrets.Projection.RemotePaths.Runtime,
+			Data: []secretProjectionData{
+				{SecretKey: spec.Secrets.RuntimeSecretKey, Property: spec.Secrets.RuntimeSecretKey},
+			},
+		},
+		{
+			Name:       spec.Secrets.AdminSecretName,
+			Type:       "Opaque",
+			RemotePath: spec.Secrets.Projection.RemotePaths.Admin,
+			Data: []secretProjectionData{
+				{SecretKey: spec.Secrets.AdminPasswordKey, Property: spec.Secrets.AdminPasswordKey},
+			},
+		},
+		{
+			Name:       spec.Secrets.DatabaseSecretName,
+			Type:       "Opaque",
+			RemotePath: spec.Secrets.Projection.RemotePaths.Database,
+			Data: []secretProjectionData{
+				{SecretKey: spec.Secrets.DatabasePasswordKey, Property: spec.Secrets.DatabasePasswordKey},
+			},
+		},
+	}
+	return projection
 }

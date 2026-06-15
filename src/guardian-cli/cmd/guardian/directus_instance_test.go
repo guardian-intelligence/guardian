@@ -43,11 +43,11 @@ func TestDirectusInstanceRejectsIncompleteS3Storage(t *testing.T) {
 	}
 }
 
-func TestDirectusInstanceRejectsUnprojectedSecrets(t *testing.T) {
-	site := siteWithEnvironment(strings.Replace(directusEnvironment("dev", "directus", ""), "runtimeSecretName: directus-runtime", "runtimeSecretName: manual-runtime", 1))
+func TestDirectusInstanceRequiresProjectionPaths(t *testing.T) {
+	site := siteWithEnvironment(strings.Replace(directusEnvironment("dev", "directus", ""), "runtime: guardian/guardian-dev/directus/runtime", "runtime: ''", 1))
 	_, err := directusInstances(site)
-	if err == nil || !strings.Contains(err.Error(), "manual-runtime is not declared by a SecretProjection") {
-		t.Fatalf("directusInstances error = %v, want unprojected secret error", err)
+	if err == nil || !strings.Contains(err.Error(), "secrets.projection.remotePaths.runtime is required") {
+		t.Fatalf("directusInstances error = %v, want missing projection path error", err)
 	}
 }
 
@@ -72,36 +72,6 @@ func siteWithEnvironment(raw string) *Site {
 
 func directusEnvironment(siteName, directusName, extra string) string {
 	return `apiVersion: platform.guardian.dev/v1alpha1
-kind: SecretProjection
-metadata:
-  name: directus-secrets
-spec:
-  target:
-    namespace: directus
-  openbao:
-    role: directus-secrets
-    serviceAccountName: external-secrets-directus
-  secrets:
-    - name: directus-runtime
-      type: Opaque
-      remotePath: guardian/guardian-dev/directus/runtime
-      data:
-        - secretKey: secret
-          property: secret
-    - name: directus-admin
-      type: Opaque
-      remotePath: guardian/guardian-dev/directus/admin
-      data:
-        - secretKey: password
-          property: password
-    - name: directus-postgres
-      type: Opaque
-      remotePath: guardian/guardian-dev/directus/postgres
-      data:
-        - secretKey: password
-          property: password
----
-apiVersion: platform.guardian.dev/v1alpha1
 kind: DirectusInstance
 metadata:
   name: ` + directusName + `
@@ -112,6 +82,14 @@ spec:
   postgresImage: registry.guardian.internal/postgres@sha256:deadbeef
   publicAdminRoute: false
   secrets:
+    projection:
+      openbao:
+        role: directus-secrets
+        serviceAccountName: external-secrets-directus
+      remotePaths:
+        runtime: guardian/guardian-dev/directus/runtime
+        admin: guardian/guardian-dev/directus/admin
+        database: guardian/guardian-dev/directus/postgres
     runtimeSecretName: directus-runtime
     runtimeSecretKey: secret
     adminSecretName: directus-admin
