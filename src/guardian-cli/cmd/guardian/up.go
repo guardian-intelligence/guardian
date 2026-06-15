@@ -329,6 +329,9 @@ func runUp(args []string) error {
 	if err := waitEdgeGateway(kubectl, kubeconfig, site); err != nil {
 		return err
 	}
+	if err := backupPlatformTLSSecrets(kubectl, kubeconfig, state, site); err != nil {
+		return err
+	}
 	if err := apply("victoria-metrics"); err != nil {
 		return err
 	}
