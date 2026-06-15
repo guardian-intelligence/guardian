@@ -43,6 +43,44 @@ func TestDirectusInstanceRejectsIncompleteS3Storage(t *testing.T) {
 	}
 }
 
+func TestDirectusInstanceProjectsS3StorageSecrets(t *testing.T) {
+	site := siteWithEnvironment(directusEnvironment("dev", "directus", `
+  storage:
+    s3:
+      enabled: true
+      bucket: guardian-directus
+      region: auto
+      endpoint: https://example.r2.cloudflarestorage.com
+      remotePath: guardian/guardian-dev/directus/uploads
+      secretName: directus-uploads
+      accessKeyIDKey: access-key-id
+      secretAccessKeyKey: secret-access-key
+`))
+	instances, err := directusInstances(site)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection := directusSecretProjection(instances[0])
+	secret := projectedSecretByName(t, projection, "directus-uploads")
+	if secret.RemotePath != "guardian/guardian-dev/directus/uploads" {
+		t.Fatalf("s3 remotePath = %q", secret.RemotePath)
+	}
+	if len(secret.Data) != 2 {
+		t.Fatalf("s3 data length = %d, want 2", len(secret.Data))
+	}
+	for _, want := range []string{"access-key-id", "secret-access-key"} {
+		var found bool
+		for _, item := range secret.Data {
+			if item.SecretKey == want && item.Property == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("s3 data missing %s mapping: %#v", want, secret.Data)
+		}
+	}
+}
+
 func TestDirectusInstanceRequiresProjectionPaths(t *testing.T) {
 	site := siteWithEnvironment(strings.Replace(directusEnvironment("dev", "directus", ""), "runtime: guardian/guardian-dev/directus/runtime", "runtime: ''", 1))
 	_, err := directusInstances(site)

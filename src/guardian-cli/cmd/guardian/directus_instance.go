@@ -73,6 +73,7 @@ type directusS3Storage struct {
 	Bucket             string `yaml:"bucket"`
 	Region             string `yaml:"region"`
 	Endpoint           string `yaml:"endpoint"`
+	RemotePath         string `yaml:"remotePath"`
 	SecretName         string `yaml:"secretName"`
 	AccessKeyIDKey     string `yaml:"accessKeyIDKey"`
 	SecretAccessKeyKey string `yaml:"secretAccessKeyKey"`
@@ -183,6 +184,7 @@ func validateDirectusInstance(site *Site, instance directusInstanceManifest) err
 			"storage.s3.bucket":             s3.Bucket,
 			"storage.s3.region":             s3.Region,
 			"storage.s3.endpoint":           s3.Endpoint,
+			"storage.s3.remotePath":         s3.RemotePath,
 			"storage.s3.secretName":         s3.SecretName,
 			"storage.s3.accessKeyIDKey":     s3.AccessKeyIDKey,
 			"storage.s3.secretAccessKeyKey": s3.SecretAccessKeyKey,
@@ -249,6 +251,17 @@ func directusSecretProjection(instance directusInstanceManifest) secretProjectio
 				{SecretKey: spec.Secrets.DatabasePasswordKey, Property: spec.Secrets.DatabasePasswordKey},
 			},
 		},
+	}
+	if s3 := spec.Storage.S3; s3 != nil && s3.Enabled {
+		projection.Spec.Secrets = append(projection.Spec.Secrets, secretProjectionSecret{
+			Name:       s3.SecretName,
+			Type:       "Opaque",
+			RemotePath: s3.RemotePath,
+			Data: []secretProjectionData{
+				{SecretKey: s3.AccessKeyIDKey, Property: s3.AccessKeyIDKey},
+				{SecretKey: s3.SecretAccessKeyKey, Property: s3.SecretAccessKeyKey},
+			},
+		})
 	}
 	return projection
 }

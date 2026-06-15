@@ -86,6 +86,7 @@ func TestDirectusPlatformRender(t *testing.T) {
 		"STORAGE_S3_BUCKET",
 		"STORAGE_S3_KEY",
 		"STORAGE_S3_SECRET",
+		"remotePath: {{ $spec.storage.s3.remotePath }}",
 		"/server/ping",
 		"/directus/uploads",
 		"hostPath:",
