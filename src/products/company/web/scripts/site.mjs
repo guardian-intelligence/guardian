@@ -6,7 +6,8 @@ import { marked } from "marked";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
-const contentDir = resolve(root, "src/content/letters");
+const lettersDir = resolve(root, "src/content/letters");
+const newsDir = resolve(root, "src/content/news");
 const siteUrl = "https://guardianintelligence.org";
 
 const css = `
@@ -29,12 +30,26 @@ h1{margin:0;font-size:clamp(2.5rem,8vw,5.8rem);line-height:.96;font-weight:650;l
 .button{display:inline-flex;align-items:center;min-height:2.75rem;padding:.72rem 1rem;border:1px solid var(--ink);font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:.92rem;text-decoration:none;background:var(--ink);color:#fff}
 .button.secondary{background:transparent;color:var(--ink);border-color:var(--line)}
 .section-title{font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:.82rem;font-weight:700;text-transform:uppercase;color:var(--accent-2)}
-.letters{list-style:none;margin:2rem 0 0;padding:0;border-top:1px solid var(--line)}
-.letter-row{border-bottom:1px solid var(--line)}
-.letter-link{display:block;padding:1.35rem 0 1.45rem;text-decoration:none}
+.content-list{list-style:none;margin:2rem 0 0;padding:0;border-top:1px solid var(--line)}
+.content-row{border-bottom:1px solid var(--line)}
+.content-link{display:block;padding:1.35rem 0 1.45rem;text-decoration:none}
 .date{margin:0 0 .4rem;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:.82rem;color:var(--muted)}
-.letter-title{margin:0;font-size:clamp(1.55rem,4vw,2.45rem);line-height:1.08;font-weight:620;letter-spacing:0}
+.item-title{margin:0;font-size:clamp(1.55rem,4vw,2.45rem);line-height:1.08;font-weight:620;letter-spacing:0}
 .summary{max-width:48rem;margin:.7rem 0 0;color:var(--muted);font-size:1.02rem;line-height:1.6}
+.news-bulletin{display:flex;position:relative;min-height:clamp(17rem,38vw,35rem);align-items:center;justify-content:center;padding:clamp(1.5rem,5vw,4.5rem);background:#f97316;color:#111;text-decoration:none}
+.news-bulletin h2{max-width:18ch;margin:0;text-align:center;font-size:clamp(2rem,7vw,6.5rem);line-height:.98;font-weight:520;letter-spacing:0}
+.news-bulletin .date{position:absolute;left:1.4rem;top:1.4rem;margin:0;color:rgba(17,17,17,.72);font-weight:650;text-transform:uppercase}
+.news-bulletin .read{position:absolute;right:1.4rem;bottom:1.4rem;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:.78rem;font-weight:700;text-transform:uppercase;color:rgba(17,17,17,.72)}
+.news-meta{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:1rem 3rem;margin-top:1.5rem;border-top:1px solid var(--line);padding-top:1.25rem}
+.news-meta h2{margin:0;font-size:clamp(1.4rem,3vw,1.9rem);line-height:1.1;font-weight:560;letter-spacing:0}
+.news-meta p{margin:0;color:var(--muted);font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:1rem;line-height:1.55}
+.news-hero{background:#f97316;color:#111;border-bottom:1px solid rgba(17,17,17,.16)}
+.news-hero-inner{width:min(100%,74rem);min-height:clamp(22rem,36vw,32rem);margin:0 auto;padding:clamp(3.5rem,8vw,6rem) clamp(1rem,4vw,2rem);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.2rem;text-align:center}
+.news-hero .section-title{color:rgba(17,17,17,.72);margin:0}
+.news-hero h1{max-width:22ch;font-size:clamp(2.5rem,6.4vw,5.5rem);line-height:1}
+.news-hero .lede{margin:0;max-width:56ch;color:rgba(17,17,17,.72);font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:clamp(1rem,1.6vw,1.25rem);line-height:1.5}
+.byline{display:flex;flex-direction:column;gap:.15rem;margin:2.4rem 0 0;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--muted)}
+.byline strong{color:var(--ink);font-weight:600}
 .reading{max-width:46rem}
 .back{display:inline-flex;margin-bottom:2rem;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:.88rem;color:var(--muted)}
 article .date{margin-bottom:1rem}
@@ -42,7 +57,7 @@ article .date{margin-bottom:1rem}
 .prose p{margin:0 0 1.25rem}
 .prose a{color:var(--accent)}
 .foot{margin-top:auto;border-top:1px solid var(--line);padding:1rem clamp(1rem,4vw,2rem);font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:.82rem;color:var(--muted);text-align:center}
-@media(max-width:42rem){.mast-inner{align-items:flex-start;flex-direction:column}.nav{width:100%;justify-content:flex-start}.wrap{padding-top:3rem}h1{font-size:clamp(2.25rem,13vw,4rem)}}
+@media(max-width:42rem){.mast-inner{align-items:flex-start;flex-direction:column}.nav{width:100%;justify-content:flex-start}.wrap{padding-top:3rem}h1{font-size:clamp(2.25rem,13vw,4rem)}.news-meta{grid-template-columns:1fr}.news-bulletin .date,.news-bulletin .read{position:static}.news-bulletin{flex-direction:column;gap:1.2rem;text-align:center}.news-bulletin h2{font-size:clamp(2.1rem,13vw,4rem)}}
 `.trim();
 
 marked.use({ gfm: true, breaks: false });
@@ -73,11 +88,19 @@ function requireString(data, field, file) {
   throw new Error(`${file}: frontmatter ${field} must be a non-empty string`);
 }
 
+function optionalString(data, field) {
+  const value = data[field];
+  if (value === undefined || value === null) return "";
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (typeof value === "string") return value.trim();
+  throw new Error(`frontmatter ${field} must be a string`);
+}
+
 function loadLetters() {
-  return readdirSync(contentDir)
+  return readdirSync(lettersDir)
     .filter((name) => name.endsWith(".md"))
     .map((name) => {
-      const file = join(contentDir, name);
+      const file = join(lettersDir, name);
       const parsed = matter(readFileSync(file, "utf8"));
       const html = marked.parse(parsed.content);
       const letter = {
@@ -96,6 +119,42 @@ function loadLetters() {
       return letter;
     })
     .sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : -1));
+}
+
+function loadNews() {
+  return readdirSync(newsDir)
+    .filter((name) => name.endsWith(".md"))
+    .map((name) => {
+      const file = join(newsDir, name);
+      const parsed = matter(readFileSync(file, "utf8"));
+      const html = marked.parse(parsed.content);
+      const item = {
+        slug: requireString(parsed.data, "slug", name),
+        kicker: requireString(parsed.data, "kicker", name),
+        category: requireString(parsed.data, "category", name),
+        title: requireString(parsed.data, "title", name),
+        deck: requireString(parsed.data, "deck", name),
+        date: requireString(parsed.data, "date", name),
+        publishedAt: requireString(parsed.data, "publishedAt", name),
+        authorName: requireString(parsed.data, "authorName", name),
+        authorRole: requireString(parsed.data, "authorRole", name),
+        ctaLabel: optionalString(parsed.data, "ctaLabel"),
+        ctaHref: optionalString(parsed.data, "ctaHref"),
+        html,
+      };
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(item.slug)) {
+        throw new Error(`${name}: slug must be lowercase kebab-case`);
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(item.publishedAt)) {
+        throw new Error(`${name}: publishedAt must be YYYY-MM-DD`);
+      }
+      return item;
+    })
+    .sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : -1));
+}
+
+function newsHref(item) {
+  return item.ctaHref || `/news/${item.slug}`;
 }
 
 function head({ title, description, path, ogPath }) {
@@ -130,7 +189,7 @@ ${head({ title, description, path, ogPath })}
 </head>
 <body>
 <div class="site">
-<header class="mast"><div class="mast-inner"><a class="brand" href="/">Guardian Intelligence</a><nav class="nav" aria-label="Primary"><a href="/letters">Letters</a></nav></div></header>
+<header class="mast"><div class="mast-inner"><a class="brand" href="/">Guardian Intelligence</a><nav class="nav" aria-label="Primary"><a href="/letters">Letters</a><a href="/news">News</a></nav></div></header>
 ${body}
 <footer class="foot">Guardian Intelligence Inc.</footer>
 </div>
@@ -145,7 +204,7 @@ function home() {
     description: "Free open-source self-hostable cloud for agent-era software companies.",
     path: "/",
     ogPath: "/og/home.svg",
-    body: `<main class="wrap"><section class="hero"><p class="eyebrow">BYOC on-prem</p><h1>Guardian Intelligence</h1><p class="lede">A free open-source self-hostable cloud for turning bare metal into a software company.</p><div class="actions"><a class="button" href="/letters">Read letters</a><a class="button secondary" href="https://github.com/guardian-intelligence/guardian">GitHub</a></div></section></main>`,
+    body: `<main class="wrap"><section class="hero"><p class="eyebrow">BYOC on-prem</p><h1>Guardian Intelligence</h1><p class="lede">A free open-source self-hostable cloud for turning bare metal into a software company.</p><div class="actions"><a class="button" href="/letters">Read letters</a><a class="button secondary" href="/news">News</a><a class="button secondary" href="https://github.com/guardian-intelligence/guardian">GitHub</a></div></section></main>`,
   });
 }
 
@@ -155,10 +214,10 @@ function lettersIndex(letters) {
     description: "Long-form letters from Guardian Intelligence.",
     path: "/letters",
     ogPath: "/og/letters.svg",
-    body: `<main class="wrap"><p class="section-title">Letters</p><h1>Letters</h1><p class="lede">Long-form from Guardian Intelligence. Published when we have something to say, not on a calendar.</p><ul class="letters">${letters
+    body: `<main class="wrap"><p class="section-title">Letters</p><h1>Letters</h1><p class="lede">Long-form from Guardian Intelligence. Published when we have something to say, not on a calendar.</p><ul class="content-list">${letters
       .map(
         (letter) =>
-          `<li class="letter-row"><a class="letter-link" href="/letters/${letter.slug}"><p class="date">${escapeHtml(letter.publishedAt)}</p><h2 class="letter-title">${escapeHtml(letter.title)}</h2><p class="summary">${escapeHtml(letter.summary)}</p></a></li>`,
+          `<li class="content-row"><a class="content-link" href="/letters/${letter.slug}"><p class="date">${escapeHtml(letter.publishedAt)}</p><h2 class="item-title">${escapeHtml(letter.title)}</h2><p class="summary">${escapeHtml(letter.summary)}</p></a></li>`,
       )
       .join("")}</ul></main>`,
   });
@@ -171,6 +230,30 @@ function letterPage(letter) {
     path: `/letters/${letter.slug}`,
     ogPath: `/og/letters/${letter.slug}.svg`,
     body: `<main class="wrap reading"><a class="back" href="/letters">Back to letters</a><article><p class="date">${escapeHtml(letter.publishedAt)}</p><h1>${escapeHtml(letter.title)}</h1><div class="prose">${letter.html}</div></article></main>`,
+  });
+}
+
+function newsIndex(news) {
+  const current = news[0];
+  const body = current
+    ? `<main class="wrap"><section aria-label="Featured bulletin"><a class="news-bulletin" href="${escapeHtml(newsHref(current))}"><p class="date">${escapeHtml(current.date)}</p><h2>${escapeHtml(current.title)}</h2><span class="read">${escapeHtml(current.ctaLabel || "Read")}</span></a></section><section class="news-meta"><div><p class="date">${escapeHtml(current.kicker)}</p><h2>${escapeHtml(current.title)}</h2></div><p>${escapeHtml(current.deck)}</p></section></main>`
+    : `<main class="wrap"><section class="news-bulletin"><h2>Quiet on the wire.</h2></section></main>`;
+  return layout({
+    title: "News - Guardian Intelligence",
+    description: "News, milestones, and public notes from Guardian Intelligence.",
+    path: "/news",
+    ogPath: "/og/news.svg",
+    body,
+  });
+}
+
+function newsPage(item) {
+  return layout({
+    title: `${item.title} - Guardian News`,
+    description: item.deck,
+    path: `/news/${item.slug}`,
+    ogPath: `/og/news/${item.slug}.svg`,
+    body: `<article><section class="news-hero"><div class="news-hero-inner"><p class="section-title">${escapeHtml(item.category)} - ${escapeHtml(item.date)}</p><h1>${escapeHtml(item.title)}</h1><p class="lede">${escapeHtml(item.deck)}</p></div></section><main class="wrap reading"><a class="back" href="/news">Back to news</a><div class="byline"><strong>${escapeHtml(item.authorName)}</strong><span>${escapeHtml(item.authorRole)}</span></div><div class="prose">${item.html}</div></main></article>`,
   });
 }
 
@@ -220,9 +303,11 @@ ${descText}
 
 export function renderSite() {
   const letters = loadLetters();
+  const news = loadNews();
   const files = new Map([
     ["index.html", home()],
     ["letters/index.html", lettersIndex(letters)],
+    ["news/index.html", newsIndex(news)],
     [
       "og/home.svg",
       ogSvg({
@@ -239,6 +324,14 @@ export function renderSite() {
         description: "Long-form from Guardian Intelligence.",
       }),
     ],
+    [
+      "og/news.svg",
+      ogSvg({
+        eyebrow: "News",
+        title: "News from Guardian Intelligence",
+        description: "News, milestones, and public notes from Guardian Intelligence.",
+      }),
+    ],
   ]);
   for (const letter of letters) {
     files.set(`letters/${letter.slug}/index.html`, letterPage(letter));
@@ -248,6 +341,17 @@ export function renderSite() {
         eyebrow: letter.publishedAt,
         title: letter.title,
         description: textOf(letter.summary),
+      }),
+    );
+  }
+  for (const item of news) {
+    files.set(`news/${item.slug}/index.html`, newsPage(item));
+    files.set(
+      `og/news/${item.slug}.svg`,
+      ogSvg({
+        eyebrow: item.kicker,
+        title: item.title,
+        description: textOf(item.deck),
       }),
     );
   }

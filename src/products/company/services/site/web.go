@@ -59,11 +59,13 @@ func assetKey(rawPath string) (key string, redirect string) {
 		return "index.html", ""
 	case "/letters":
 		return "letters/index.html", ""
+	case "/news":
+		return "news/index.html", ""
 	}
 	if strings.HasSuffix(rawPath, "/") {
 		return "", strings.TrimRight(clean, "/")
 	}
-	if strings.HasPrefix(clean, "/letters/") {
+	if strings.HasPrefix(clean, "/letters/") || strings.HasPrefix(clean, "/news/") {
 		return strings.TrimPrefix(clean, "/") + "/index.html", ""
 	}
 	return strings.TrimPrefix(clean, "/"), ""

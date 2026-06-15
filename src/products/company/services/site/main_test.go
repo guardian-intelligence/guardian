@@ -19,7 +19,10 @@ func TestPublicSurface(t *testing.T) {
 		{name: "home", path: "/", wantStatus: http.StatusOK, wantBody: "Guardian Intelligence", contentType: "text/html"},
 		{name: "letters", path: "/letters", wantStatus: http.StatusOK, wantBody: "The Coding Agent is the Next Smartphone", contentType: "text/html"},
 		{name: "letter", path: "/letters/the-coding-agent-is-the-next-smartphone", wantStatus: http.StatusOK, wantBody: "call them guardians", contentType: "text/html"},
+		{name: "news", path: "/news", wantStatus: http.StatusOK, wantBody: "Guardian Intelligence Inc. announces private beta of Verself.", contentType: "text/html"},
+		{name: "news article", path: "/news/guardian-intelligence-announces-verself-private-beta", wantStatus: http.StatusOK, wantBody: "persistent developer environments", contentType: "text/html"},
 		{name: "og", path: "/og/letters/the-coding-agent-is-the-next-smartphone.svg", wantStatus: http.StatusOK, wantBody: "<svg", contentType: "image/svg+xml"},
+		{name: "news og", path: "/og/news/guardian-intelligence-announces-verself-private-beta.svg", wantStatus: http.StatusOK, wantBody: "<svg", contentType: "image/svg+xml"},
 		{name: "health", path: "/healthz", wantStatus: http.StatusOK, wantBody: "ok", contentType: "text/plain"},
 		{name: "missing", path: "/missing", wantStatus: http.StatusNotFound},
 	}
