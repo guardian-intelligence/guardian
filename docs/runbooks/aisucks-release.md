@@ -89,15 +89,12 @@ git tag -f -a aisucks/v<N> -m "aisucks@sha256:<digest>"
 ## 3. Gate (against gamma)
 
 ```sh
-H=https://gamma.aisucks.app
-curl -fsS -o /dev/null -w 'healthz %{http_code} in %{time_total}s\n' $H/healthz   # expect: 200
-# Match the charter-locked promise text (verbatim, changes only by charter
-# amendment) — never a marketing string a redesign can drop.
-curl -fsS $H/ | grep -q 'never be sold' && echo page ok                            # expect: page ok
+bazelisk run //src/guardian-cli/cmd/guardian:guardian -- \
+  gate public-http src/sites/gamma/bootstrap.yaml
 ```
 
-Any failed expectation stops the release. Fix forward on dev; never ship a
-tag that didn't gate green.
+Expect `"passed": true` in the JSON result. Any failed check stops the release.
+Fix forward on dev; never ship a tag that didn't gate green.
 
 ## 4. Promote to prod
 
@@ -110,7 +107,12 @@ bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/sites/prod/boots
 
 **Assert the pushed aisucks digest is byte-identical to gamma's.** If it
 differs, STOP: the build is not reproducible — that is a bug to fix before
-anything ships. Re-run the gate checks against prod.
+anything ships. Re-run the public HTTP gate against prod:
+
+```sh
+bazelisk run //src/guardian-cli/cmd/guardian:guardian -- \
+  gate public-http src/sites/prod/bootstrap.yaml
+```
 
 ## 5. Rollback
 
