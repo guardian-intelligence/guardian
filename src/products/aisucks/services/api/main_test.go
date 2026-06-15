@@ -36,26 +36,6 @@ func TestPublicSurface(t *testing.T) {
 	}
 }
 
-func TestHTTPRedirectKeepsHealthLocal(t *testing.T) {
-	srv := newServer([]byte("page"), newMetrics(), "aisucks.test")
-	h := redirectingHTTP(srv, "aisucks.test")
-
-	health := httptest.NewRecorder()
-	h.ServeHTTP(health, httptest.NewRequest(http.MethodGet, "/healthz", nil))
-	if health.Code != http.StatusOK {
-		t.Fatalf("health status = %d; want 200", health.Code)
-	}
-
-	page := httptest.NewRecorder()
-	h.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/", nil))
-	if page.Code != http.StatusMovedPermanently {
-		t.Fatalf("page status = %d; want 301", page.Code)
-	}
-	if loc := page.Header().Get("Location"); loc != "https://aisucks.test/" {
-		t.Fatalf("redirect location = %q", loc)
-	}
-}
-
 func TestMetricsEndpoint(t *testing.T) {
 	m := newMetrics()
 	srv := newServer([]byte("page"), m, "aisucks.test")

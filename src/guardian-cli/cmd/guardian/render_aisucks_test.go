@@ -39,6 +39,17 @@ func TestAisucksProductAPIRender(t *testing.T) {
 			t.Errorf("AisucksProduct API render missing %q", want)
 		}
 	}
+	for _, reject := range []string{
+		"certDir:",
+		"acmeEmail:",
+		"https: 8443",
+		"https: \"{{ $httpsListen }}\"",
+		"tlsMode: Passthrough",
+	} {
+		if strings.Contains(out, reject) {
+			t.Errorf("AisucksProduct API render retained app-local TLS field %q", reject)
+		}
+	}
 }
 
 func TestAisucksEnvironmentBundleInstances(t *testing.T) {

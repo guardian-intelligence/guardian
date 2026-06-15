@@ -15,7 +15,6 @@ go_library(
     embedsrcs = ["web/index.html"],
     importpath = "github.com/guardian-intelligence/guardian/src/products/aisucks/services/api",
     visibility = ["//visibility:private"],
-    deps = ["@com_github_caddyserver_certmagic//:certmagic"],
 )
 
 go_binary(
@@ -55,7 +54,6 @@ oci_image(
     entrypoint = ["/usr/bin/aisucks-api"],
     exposed_ports = [
         "8080/tcp",
-        "8443/tcp",
         "9090/tcp",
     ],
     tars = [":api_layer"],
