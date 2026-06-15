@@ -26,7 +26,13 @@ func TestEnvironmentCapabilities(t *testing.T) {
 				},
 				"DirectusInstance/directus":        nil,
 				"ObservabilityStack/observability": nil,
-				"StatusSurface/status":             nil,
+			}
+			if siteName == "prod" {
+				wantRollouts["StatusSurface/status"] = nil
+			} else {
+				wantRollouts["StatusSurface/status"] = []environmentRollout{
+					{namespace: "status", resource: "deployment/status"},
+				}
 			}
 			if siteName == "dev" {
 				want["OCIRegistry/zot"] = "ociregistries.platform.guardian.dev"

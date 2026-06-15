@@ -28,6 +28,12 @@ func TestStatusSurfaceSiteManifests(t *testing.T) {
 			if surface.Spec.Site != siteName {
 				t.Fatalf("StatusSurface site = %q, want %q", surface.Spec.Site, siteName)
 			}
+			if surface.Spec.Namespace != "status" {
+				t.Fatalf("StatusSurface namespace = %q, want status", surface.Spec.Namespace)
+			}
+			if surface.Spec.Image == "" {
+				t.Fatal("StatusSurface image is required")
+			}
 			if strings.Join(surface.Spec.Domains, ",") != strings.Join(wantDomains[siteName], ",") {
 				t.Fatalf("StatusSurface domains = %#v, want %#v", surface.Spec.Domains, wantDomains[siteName])
 			}
@@ -52,13 +58,48 @@ func TestStatusSurfacePlatformRender(t *testing.T) {
 		"name: statussurfaces.platform.guardian.dev",
 		"kind: StatusSurface",
 		"name: status-surface-status",
+		"kind: Object",
+		"name: status-surface-{{ $spec.namespace }}-deployment",
+		"image: {{ $spec.image }}",
+		"name: status-surface-{{ $spec.namespace }}-tls-route",
+		"sectionName: {{ $spec.gateway.tlsSectionNamePrefix }}-{{ $i }}",
+		"domainCount",
 		"name: function-environment-configs",
 		"name: function-auto-ready",
-		"domainCount",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("StatusSurface platform render missing %q", want)
 		}
+	}
+}
+
+func TestStatusSurfaceEnvironmentBundleInstances(t *testing.T) {
+	for _, siteName := range []string{"dev", "gamma", "prod"} {
+		t.Run(siteName, func(t *testing.T) {
+			site := loadTestSite(t, siteName)
+			rendered, err := renderEnvironmentBundle(site, testProductImages())
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := string(rendered)
+			for _, want := range []string{
+				"kind: StatusSurface",
+				"name: status",
+				"site: " + siteName,
+				"namespace: status",
+				statusTestImage,
+				"certDir: /var/lib/status-certs",
+				"victoriaMetricsURL: http://victoria-metrics.observability.svc:8428",
+				"tlsSectionNamePrefix: tls-status",
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("StatusSurface environment render missing %q", want)
+				}
+			}
+			if strings.Contains(out, "{{ index .Images") {
+				t.Error("environment bundle render left image template placeholders unresolved")
+			}
+		})
 	}
 }
 
@@ -71,8 +112,26 @@ metadata:
   name: status
 spec:
   site: dev
+  namespace: status
+  image: registry.guardian.internal/status@sha256:deadbeef
   domains: []
   monitor: true
+  replicas: 0
+  acmeEmail: ops@example.com
+  certDir: /var/lib/status-certs
+  victoriaMetricsURL: http://victoria-metrics.observability.svc:8428
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+      goMemory: 410MiB
+  gateway:
+    name: edge
+    namespace: gateway
+    tlsRouteAPIVersion: gateway.networking.k8s.io/v1alpha2
+    tlsSectionNamePrefix: tls-status
 `)
 	_, err := statusSurfaces(site)
 	if err == nil || !strings.Contains(err.Error(), "spec.monitor requires spec.domains") {

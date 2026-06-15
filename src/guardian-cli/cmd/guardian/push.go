@@ -215,13 +215,12 @@ var components = []component{{
 	layout:   "_main/src/infrastructure-components/grafana/image",
 	manifest: "src/infrastructure-components/grafana/k8s/grafana.yaml.tmpl",
 }, {
-	// status after victoria-metrics: the page is rendered from queries
-	// against the site-local VM. Sites without StatusSurface domains in
-	// their environment bundle render an empty manifest and deploy nothing
-	// (the apply loop skips empty renders).
+	// StatusSurface consumes this image from the environment bundle and owns
+	// the status Namespace/Deployment/Service/TLSRoute objects through
+	// Crossplane.
 	name:     "status",
 	layout:   "_main/src/status/image",
-	manifest: "src/status/k8s/status.yaml.tmpl",
+	pushOnly: true,
 }, {
 	name:     "zot",
 	layout:   "_main/src/infrastructure-components/zot/image",

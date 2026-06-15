@@ -5,15 +5,6 @@ load("//tools/format:defs.bzl", "go_format")
 
 go_format()
 
-# Manifest template as test data: the CLI's render test pins that the
-# whole manifest guards on StatusSurface domains (a site without
-# domains deploys no status pod).
-filegroup(
-    name = "manifest",
-    srcs = ["k8s/status.yaml.tmpl"],
-    visibility = ["//src/guardian-cli:__subpackages__"],
-)
-
 go_library(
     name = "status_lib",
     srcs = [
