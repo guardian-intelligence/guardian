@@ -35,6 +35,8 @@ go_library(
 go_binary(
     name = "guardian",
     data = [
+        "//src/crossplane/environments",
+        "//src/crossplane/packages/guardian-platform:manifests",
         "//src/guardian-cli/tools/kubectl",
         "//src/guardian-cli/tools/talosctl",
         "//src/infrastructure-components/alertmanager:image",
@@ -62,8 +64,6 @@ go_binary(
         "//src/infrastructure-components/vmalert:image",
         "//src/infrastructure-components/zot:image",
         "//src/infrastructure-components/zot:publisher_secrets_manifest",
-        "//src/crossplane/environments",
-        "//src/crossplane/packages/guardian-platform:manifests",
         "//src/platform/public-http-service:manifest",
         "//src/products/aisucks/services/api:image",
         "//src/products/company/services/site:image",
@@ -103,6 +103,8 @@ go_test(
         ["testdata/**"],
         allow_empty = True,
     ) + [
+        "//src/crossplane/environments",
+        "//src/crossplane/packages/guardian-platform:manifests",
         "//src/guardian-cli/tools/talosctl",
         "//src/infrastructure-components/cert-manager:manifest",
         "//src/infrastructure-components/cilium:talos-patches",
@@ -117,8 +119,6 @@ go_test(
         "//src/infrastructure-components/vmalert:manifest",
         "//src/infrastructure-components/zot:manifest",
         "//src/infrastructure-components/zot:publisher_secrets_manifest",
-        "//src/crossplane/environments",
-        "//src/crossplane/packages/guardian-platform:manifests",
         "//src/platform/public-http-service:manifest",
         "//src/products/company/services/site:image",
         "//src/sites",

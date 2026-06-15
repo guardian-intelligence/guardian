@@ -492,6 +492,65 @@ func TestValidateDescriptorRejectsZeroSize(t *testing.T) {
 	}
 }
 
+func TestValidatePushedDescriptorsRejectsEmptyManifest(t *testing.T) {
+	err := validatePushedDescriptors("remote", ocispec.Descriptor{}, nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "remote OCI artifact manifest has empty digest") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestValidatePushedDescriptorsRejectsInvalidManifest(t *testing.T) {
+	manifest := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2}`))
+	manifest.MediaType = ""
+
+	err := validatePushedDescriptors("remote", manifest, nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "remote OCI artifact manifest") || !strings.Contains(err.Error(), "empty media type") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestValidatePushedDescriptorsRejectsEmptyAttestationManifest(t *testing.T) {
+	manifest := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2}`))
+	attestation := ocispec.Descriptor{}
+
+	err := validatePushedDescriptors("remote", manifest, &attestation)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "remote attestation OCI artifact manifest has empty digest") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestValidatePushedDescriptorsRejectsInvalidAttestationManifest(t *testing.T) {
+	manifest := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2}`))
+	attestation := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2}`))
+	attestation.Size = 0
+
+	err := validatePushedDescriptors("remote", manifest, &attestation)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "remote attestation OCI artifact manifest") || !strings.Contains(err.Error(), "non-positive size") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestValidatePushedDescriptorsAcceptsValidManifestAndAttestation(t *testing.T) {
+	manifest := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2}`))
+	attestation := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2,"attestation":true}`))
+
+	if err := validatePushedDescriptors("remote", manifest, &attestation); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWriteResultRejectsEmptyOCIDigest(t *testing.T) {
 	outputPath := filepath.Join(t.TempDir(), "sdk-oci.json")
 	var out strings.Builder
