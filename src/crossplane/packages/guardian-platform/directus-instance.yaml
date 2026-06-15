@@ -152,6 +152,8 @@ spec:
                           type: string
                         endpoint:
                           type: string
+                        remotePath:
+                          type: string
                         forcePathStyle:
                           type: boolean
                           default: true
@@ -162,8 +164,8 @@ spec:
                         secretAccessKeyKey:
                           type: string
                       x-kubernetes-validations:
-                        - rule: "!has(self.enabled) || self.enabled == false || (has(self.bucket) && self.bucket != '' && has(self.region) && self.region != '' && has(self.endpoint) && self.endpoint != '' && has(self.secretName) && self.secretName != '' && has(self.accessKeyIDKey) && self.accessKeyIDKey != '' && has(self.secretAccessKeyKey) && self.secretAccessKeyKey != '')"
-                          message: "storage.s3.enabled requires bucket, region, endpoint, secretName, accessKeyIDKey, and secretAccessKeyKey"
+                        - rule: "!has(self.enabled) || self.enabled == false || (has(self.bucket) && self.bucket != '' && has(self.region) && self.region != '' && has(self.endpoint) && self.endpoint != '' && has(self.remotePath) && self.remotePath != '' && has(self.secretName) && self.secretName != '' && has(self.accessKeyIDKey) && self.accessKeyIDKey != '' && has(self.secretAccessKeyKey) && self.secretAccessKeyKey != '')"
+                          message: "storage.s3.enabled requires bucket, region, endpoint, remotePath, secretName, accessKeyIDKey, and secretAccessKeyKey"
                 gateway:
                   type: object
                   properties:
@@ -329,6 +331,16 @@ spec:
                   data:
                     - secretKey: {{ $spec.secrets.databasePasswordKey }}
                       property: {{ $spec.secrets.databasePasswordKey }}
+                {{ if $s3Storage }}
+                - name: {{ $spec.storage.s3.secretName }}
+                  type: Opaque
+                  remotePath: {{ $spec.storage.s3.remotePath }}
+                  data:
+                    - secretKey: {{ $spec.storage.s3.accessKeyIDKey }}
+                      property: {{ $spec.storage.s3.accessKeyIDKey }}
+                    - secretKey: {{ $spec.storage.s3.secretAccessKeyKey }}
+                      property: {{ $spec.storage.s3.secretAccessKeyKey }}
+                {{ end }}
             ---
             apiVersion: kubernetes.crossplane.io/v1alpha2
             kind: Object
