@@ -218,9 +218,7 @@ func directusSecretProjection(instance directusInstanceManifest) secretProjectio
 	}
 	createNamespace := false
 	projection := secretProjectionManifest{
-		Kind:            "SecretProjection",
-		DerivedFromKind: "DirectusInstance",
-		DerivedFromName: instance.Metadata.Name,
+		Kind: "SecretProjection",
 	}
 	projection.Metadata.Name = instance.Metadata.Name + "-secrets"
 	projection.Spec.WaitForSecrets = &waitForSecrets
