@@ -8,61 +8,29 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 )
 
 const (
-	baoKVMountPath              = "kv"
-	baoKubernetesAuthMountPath  = "kubernetes"
-	baoObservabilityPolicyName  = "observability-secrets"
-	baoObservabilityRoleName    = "observability-secrets"
-	baoObservabilitySAName      = "external-secrets-observability"
-	baoObservabilitySANamespace = "observability"
-	baoOCIPolicyName            = "guardian-oci-secrets"
-	baoOCIRoleName              = "guardian-oci-secrets"
-	baoOCISAName                = "external-secrets-guardian-oci"
-	baoOCISANamespace           = "guardian-oci"
-	baoExternalSecretsAudience  = "openbao"
-	baoZotPublisherUsername     = "guardian-release"
-	baoRootTokenEnv             = "GUARDIAN_OPENBAO_TOKEN"
-	baoUnsealKeyEnv             = "GUARDIAN_OPENBAO_UNSEAL_KEY"
-	baoUnsealKeysEnv            = "GUARDIAN_OPENBAO_UNSEAL_KEYS"
-	baoAllowSecretMigrationEnv  = "GUARDIAN_OPENBAO_ALLOW_SECRET_MIGRATION"
+	baoKVMountPath             = "kv"
+	baoKubernetesAuthMountPath = "kubernetes"
+	baoExternalSecretsAudience = "openbao"
+	baoZotPublisherUsername    = "guardian-release"
+	baoRootTokenEnv            = "GUARDIAN_OPENBAO_TOKEN"
+	baoUnsealKeyEnv            = "GUARDIAN_OPENBAO_UNSEAL_KEY"
+	baoUnsealKeysEnv           = "GUARDIAN_OPENBAO_UNSEAL_KEYS"
+	baoAllowSecretMigrationEnv = "GUARDIAN_OPENBAO_ALLOW_SECRET_MIGRATION"
 )
 
 type baoRequiredSecret struct {
 	name     string
-	path     func(*Site) string
+	path     string
 	required []string
 	generate func() (map[string]string, error)
-	enabled  func(*Site) bool
 }
-
-var requiredBaoSecrets = []baoRequiredSecret{{
-	name:     "clickhouse-admin",
-	required: []string{"password"},
-	generate: passwordSecretData,
-	path: func(site *Site) string {
-		return "guardian/" + site.Cluster.Name + "/observability/clickhouse-admin"
-	},
-}, {
-	name:     "grafana-admin",
-	required: []string{"password"},
-	generate: passwordSecretData,
-	path: func(site *Site) string {
-		return "guardian/" + site.Cluster.Name + "/observability/grafana-admin"
-	},
-}, {
-	name:     "zot-publisher",
-	required: []string{"username", "password", "htpasswd"},
-	generate: zotPublisherSecretData,
-	enabled:  siteUsesPlatformTLS,
-	path: func(site *Site) string {
-		return "guardian/" + site.Cluster.Name + "/oci/zot-publisher"
-	},
-}}
 
 type baoInitResult struct {
 	KeysB64   []string `json:"keys_base64"`
@@ -131,17 +99,18 @@ func configureBaoForProjection(addr, token string, site *Site, allowCreateMissin
 	if token == "" {
 		return errors.New("openbao configuration requires a token")
 	}
+	projections, err := secretProjections(site)
+	if err != nil {
+		return err
+	}
 	if err := ensureBaoKVMount(addr, token); err != nil {
 		return err
 	}
-	if err := ensureBaoKubernetesAuth(addr, token, site); err != nil {
+	if err := ensureBaoKubernetesAuth(addr, token, projections); err != nil {
 		return err
 	}
-	for _, secret := range requiredBaoSecrets {
-		if secret.enabled != nil && !secret.enabled(site) {
-			continue
-		}
-		if err := ensureBaoRequiredSecret(addr, token, secret, site, allowCreateMissing); err != nil {
+	for _, secret := range baoRequiredSecretsFromProjections(projections) {
+		if err := ensureBaoRequiredSecret(addr, token, secret, allowCreateMissing); err != nil {
 			return err
 		}
 	}
@@ -171,7 +140,7 @@ func ensureBaoKVMount(addr, token string) error {
 	return nil
 }
 
-func ensureBaoKubernetesAuth(addr, token string, site *Site) error {
+func ensureBaoKubernetesAuth(addr, token string, projections []secretProjectionManifest) error {
 	auths, err := baoAuths(addr, token)
 	if err != nil {
 		return err
@@ -190,27 +159,26 @@ func ensureBaoKubernetesAuth(addr, token string, site *Site) error {
 	}, nil); err != nil {
 		return fmt.Errorf("openbao configure kubernetes auth: %w", err)
 	}
-	observabilityPolicy := fmt.Sprintf(`path "%s/data/guardian/%s/observability/*" {
-  capabilities = ["read"]
-}
-`, baoKVMountPath, site.Cluster.Name)
-	if err := baoJSON(addr, "PUT", "/v1/sys/policies/acl/"+baoObservabilityPolicyName, token, map[string]string{"policy": observabilityPolicy}, nil); err != nil {
-		return fmt.Errorf("openbao write %s policy: %w", baoObservabilityPolicyName, err)
-	}
-	if err := ensureBaoKubernetesRole(addr, token, baoObservabilityRoleName, baoObservabilitySAName, baoObservabilitySANamespace, baoObservabilityPolicyName); err != nil {
+	roles, err := baoProjectionRoles(projections)
+	if err != nil {
 		return err
 	}
-	if !siteUsesPlatformTLS(site) {
-		return nil
+	names := make([]string, 0, len(roles))
+	for name := range roles {
+		names = append(names, name)
 	}
-	ociPolicy := fmt.Sprintf(`path "%s/data/guardian/%s/oci/*" {
-  capabilities = ["read"]
-}
-`, baoKVMountPath, site.Cluster.Name)
-	if err := baoJSON(addr, "PUT", "/v1/sys/policies/acl/"+baoOCIPolicyName, token, map[string]string{"policy": ociPolicy}, nil); err != nil {
-		return fmt.Errorf("openbao write %s policy: %w", baoOCIPolicyName, err)
+	sort.Strings(names)
+	for _, name := range names {
+		role := roles[name]
+		policy := baoProjectionPolicy(role.paths)
+		if err := baoJSON(addr, "PUT", "/v1/sys/policies/acl/"+name, token, map[string]string{"policy": policy}, nil); err != nil {
+			return fmt.Errorf("openbao write %s policy: %w", name, err)
+		}
+		if err := ensureBaoKubernetesRole(addr, token, name, role.serviceAccountName, role.serviceAccountNamespace, name); err != nil {
+			return err
+		}
 	}
-	return ensureBaoKubernetesRole(addr, token, baoOCIRoleName, baoOCISAName, baoOCISANamespace, baoOCIPolicyName)
+	return nil
 }
 
 func ensureBaoKubernetesRole(addr, token, roleName, serviceAccountName, serviceAccountNamespace, policyName string) error {
@@ -228,8 +196,99 @@ func ensureBaoKubernetesRole(addr, token, roleName, serviceAccountName, serviceA
 	return nil
 }
 
-func ensureBaoRequiredSecret(addr, token string, secret baoRequiredSecret, site *Site, allowCreateMissing bool) error {
-	path := secret.path(site)
+type baoProjectionRole struct {
+	serviceAccountName      string
+	serviceAccountNamespace string
+	paths                   []string
+}
+
+func baoProjectionRoles(projections []secretProjectionManifest) (map[string]baoProjectionRole, error) {
+	roles := map[string]baoProjectionRole{}
+	pathSets := map[string]map[string]struct{}{}
+	for _, projection := range projections {
+		roleName := projection.Spec.OpenBao.Role
+		role, ok := roles[roleName]
+		if !ok {
+			role = baoProjectionRole{
+				serviceAccountName:      projection.Spec.OpenBao.ServiceAccountName,
+				serviceAccountNamespace: projection.Spec.Target.Namespace,
+			}
+			roles[roleName] = role
+			pathSets[roleName] = map[string]struct{}{}
+		}
+		if role.serviceAccountName != projection.Spec.OpenBao.ServiceAccountName || role.serviceAccountNamespace != projection.Spec.Target.Namespace {
+			return nil, fmt.Errorf("SecretProjection role %s is bound to multiple service accounts", roleName)
+		}
+		for _, secret := range projection.Spec.Secrets {
+			pathSets[roleName][secret.RemotePath] = struct{}{}
+		}
+	}
+	for roleName, paths := range pathSets {
+		role := roles[roleName]
+		for path := range paths {
+			role.paths = append(role.paths, path)
+		}
+		sort.Strings(role.paths)
+		roles[roleName] = role
+	}
+	return roles, nil
+}
+
+func baoProjectionPolicy(paths []string) string {
+	var b strings.Builder
+	for _, path := range paths {
+		fmt.Fprintf(&b, "path %q {\n  capabilities = [\"read\"]\n}\n", baoKVMountPath+"/data/"+path)
+	}
+	return b.String()
+}
+
+func baoRequiredSecretsFromProjections(projections []secretProjectionManifest) []baoRequiredSecret {
+	byPath := map[string]*baoRequiredSecret{}
+	for _, projection := range projections {
+		for _, secret := range projection.Spec.Secrets {
+			req, ok := byPath[secret.RemotePath]
+			if !ok {
+				req = &baoRequiredSecret{name: secret.Name, path: secret.RemotePath}
+				byPath[secret.RemotePath] = req
+			}
+			for _, item := range secret.Data {
+				if !containsString(req.required, item.Property) {
+					req.required = append(req.required, item.Property)
+				}
+			}
+		}
+	}
+	out := make([]baoRequiredSecret, 0, len(byPath))
+	for _, req := range byPath {
+		sort.Strings(req.required)
+		req.generate = generatorForRequiredSecret(req.name, req.required)
+		out = append(out, *req)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].path < out[j].path })
+	return out
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func generatorForRequiredSecret(name string, required []string) func() (map[string]string, error) {
+	if name == "zot-publisher" {
+		return zotPublisherSecretData
+	}
+	if len(required) == 1 && required[0] == "password" {
+		return passwordSecretData
+	}
+	return nil
+}
+
+func ensureBaoRequiredSecret(addr, token string, secret baoRequiredSecret, allowCreateMissing bool) error {
+	path := secret.path
 	var out struct {
 		Data map[string]any `json:"data"`
 	}
@@ -255,6 +314,9 @@ func ensureBaoRequiredSecret(addr, token string, secret baoRequiredSecret, site 
 	}
 	if !allowCreateMissing {
 		return fmt.Errorf("openbao required secret %s is absent; restore should reuse backed-up values, or set %s=1 for an intentional schema migration", path, baoAllowSecretMigrationEnv)
+	}
+	if secret.generate == nil {
+		return fmt.Errorf("openbao required secret %s is absent and has no bootstrap generator", path)
 	}
 	data, err := secret.generate()
 	if err != nil {

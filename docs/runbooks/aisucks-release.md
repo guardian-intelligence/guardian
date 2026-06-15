@@ -47,8 +47,8 @@ forge with PRs exists, the hook is exactly this command.
 ## 0. Secret projection
 
 The observability stack's `grafana-admin` Kubernetes Secret is projected
-from `kv/guardian/<site>/observability/grafana-admin` in OpenBao. `guardian
-up` generates the value on a fresh Bao and waits for the projection before
+from `kv/guardian/<site>/observability/grafana-admin` in OpenBao by the site's
+`SecretProjection`. `guardian up` generates the value on a fresh Bao and waits for the projection before
 applying Grafana. Never run `kubectl create secret generic grafana-admin`
 by hand.
 

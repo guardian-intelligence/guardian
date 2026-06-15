@@ -6,12 +6,6 @@ filegroup(
     visibility = ["//src/guardian-cli:__subpackages__"],
 )
 
-filegroup(
-    name = "publisher_secrets_manifest",
-    srcs = ["k8s/zot-publisher-secrets.yaml.tmpl"],
-    visibility = ["//src/guardian-cli:__subpackages__"],
-)
-
 oci_image(
     name = "image",
     base = "@zot",

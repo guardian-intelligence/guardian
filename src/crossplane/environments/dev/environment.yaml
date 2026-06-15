@@ -36,6 +36,56 @@ data:
         - status.dev.guardianintelligence.org
 ---
 apiVersion: platform.guardian.dev/v1alpha1
+kind: SecretProjection
+metadata:
+  name: observability-admin-secrets
+spec:
+  target:
+    namespace: observability
+    namespaceLabels:
+      pod-security.kubernetes.io/enforce: privileged
+  openbao:
+    role: observability-secrets
+    serviceAccountName: external-secrets-observability
+  secrets:
+    - name: clickhouse-admin
+      type: Opaque
+      remotePath: guardian/guardian-dev/observability/clickhouse-admin
+      data:
+        - secretKey: password
+          property: password
+    - name: grafana-admin
+      type: Opaque
+      remotePath: guardian/guardian-dev/observability/grafana-admin
+      data:
+        - secretKey: password
+          property: password
+---
+apiVersion: platform.guardian.dev/v1alpha1
+kind: SecretProjection
+metadata:
+  name: zot-publisher-secrets
+spec:
+  target:
+    namespace: guardian-oci
+    namespaceLabels:
+      pod-security.kubernetes.io/enforce: privileged
+  openbao:
+    role: guardian-oci-secrets
+    serviceAccountName: external-secrets-guardian-oci
+  secrets:
+    - name: zot-publisher
+      type: Opaque
+      remotePath: guardian/guardian-dev/oci/zot-publisher
+      data:
+        - secretKey: username
+          property: username
+        - secretKey: password
+          property: password
+        - secretKey: htpasswd
+          property: htpasswd
+---
+apiVersion: platform.guardian.dev/v1alpha1
 kind: EdgeGateway
 metadata:
   name: edge

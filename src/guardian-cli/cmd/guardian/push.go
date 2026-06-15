@@ -89,6 +89,11 @@ var components = []component{{
 	rawManifest: true,
 	enabled:     siteUsesCrossplane,
 }, {
+	name:        "secret-projection-platform",
+	manifest:    "src/crossplane/packages/guardian-platform/secret-projection.yaml",
+	rawManifest: true,
+	enabled:     siteUsesCrossplane,
+}, {
 	name:     "aisucks",
 	layout:   "_main/src/products/aisucks/services/api/image",
 	manifest: "src/platform/public-http-service/k8s/public-http-service.yaml.tmpl",
@@ -142,20 +147,12 @@ var components = []component{{
 	layout:   "_main/src/infrastructure-components/victoria-metrics/image",
 	manifest: "src/infrastructure-components/victoria-metrics/k8s/victoria-metrics.yaml.tmpl",
 }, {
-	// Cluster-wide controller: Guardian projects secrets into observability
-	// and platform namespaces. Source access stays scoped by namespace
-	// SecretStores plus OpenBao policies.
+	// Cluster-wide controller for SecretProjection's namespace-scoped
+	// SecretStores and ExternalSecrets. Source access remains bounded by
+	// per-projection OpenBao policies and Kubernetes auth roles.
 	name:     "external-secrets",
 	layout:   "_main/src/infrastructure-components/external-secrets/image",
 	manifest: "src/infrastructure-components/external-secrets/k8s/external-secrets.yaml.tmpl",
-}, {
-	// Manifest-only: ESO store + projections for observability secrets.
-	// After victoria-metrics because that manifest owns the observability
-	// Namespace; before ClickHouse/Grafana because their pods require the
-	// projected Secrets at container config time.
-	name:     "guardian-secrets",
-	manifest: "src/infrastructure-components/guardian-secrets/k8s/guardian-secrets.yaml.tmpl",
-	enabled:  func(*Site) bool { return true },
 }, {
 	name:     "kube-state-metrics",
 	layout:   "_main/src/infrastructure-components/kube-state-metrics/image",
@@ -211,14 +208,6 @@ var components = []component{{
 	name:     "status",
 	layout:   "_main/src/status/image",
 	manifest: "src/status/k8s/status.yaml.tmpl",
-}, {
-	// Crossplane-managed ESO projection for zot's publisher credentials.
-	// The OpenBao values and auth role are reconciled earlier by guardian
-	// up; this component only owns the Kubernetes resources that deliver
-	// the credential to the zot pod.
-	name:     "zot-secrets",
-	manifest: "src/infrastructure-components/zot/k8s/zot-publisher-secrets.yaml.tmpl",
-	enabled:  siteUsesPlatformTLS,
 }, {
 	name:     "zot",
 	layout:   "_main/src/infrastructure-components/zot/image",

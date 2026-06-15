@@ -47,8 +47,8 @@ guardian run oras discover --oci-layout /tmp/guardian-sdk-release/oci-layout:edg
 
 The public zot registry allows anonymous reads and requires the
 `guardian-release` htpasswd identity for writes. `guardian up` generates that
-credential in OpenBao at `kv/guardian/<site>/oci/zot-publisher`; Crossplane
-owns the namespace-scoped ESO projection to the Kubernetes Secret
+credential in OpenBao at `kv/guardian/<site>/oci/zot-publisher`; the site's
+`SecretProjection` owns the namespace-scoped ESO projection to the Kubernetes Secret
 `guardian-oci/zot-publisher`.
 
 When write credentials are present, the remote publish form is:

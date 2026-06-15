@@ -240,12 +240,16 @@ fragments.
 
 Owns only Kubernetes delivery of OpenBao-backed secrets:
 
-- SecretStore or ClusterSecretStore.
+- namespace-scoped SecretStore objects.
 - ExternalSecret objects.
 - target namespace and key names.
 - optional readiness checks.
 
 It never owns secret values. OpenBao remains the source of truth.
+Source: `src/crossplane/packages/guardian-platform/secret-projection.yaml`;
+bootstrap-side Bao policy/value preparation:
+`src/guardian-cli/cmd/guardian/secret_projection.go` and
+`src/guardian-cli/cmd/guardian/bao_bootstrap.go`.
 
 ### `OCIRegistry`
 
