@@ -6,8 +6,8 @@ import (
 )
 
 // TestClickhouseSiteGate pins the ledger ratchet across the real site inputs:
-// clickhouse.enabled is ON for dev and gamma and OFF for prod — prod must
-// not grow a clickhouse Deployment until the ledger ratchet flips, and
+// ObservabilityStack spec.clickhouse.enabled is ON for dev/gamma and OFF for
+// prod. Prod must not grow a clickhouse Deployment until the ledger ratchet flips, and
 // prod's otel-collector must render byte-identical to the metrics-only spine
 // (no logs pipeline, no hostPath log mounts, no runAsUser: 0).
 func TestClickhouseSiteGate(t *testing.T) {
@@ -36,7 +36,7 @@ func TestClickhouseSiteGate(t *testing.T) {
 				t.Fatal(err)
 			}
 			if site.Clickhouse.Enabled != wantEnabled[siteName] {
-				t.Fatalf("site %s clickhouse.enabled = %v, want %v (the ledger ratchet: dev+gamma on, prod off)",
+				t.Fatalf("site %s ObservabilityStack clickhouse.enabled = %v, want %v (the ledger ratchet: dev+gamma on, prod off)",
 					siteName, site.Clickhouse.Enabled, wantEnabled[siteName])
 			}
 
@@ -76,7 +76,7 @@ func TestClickhouseSiteGate(t *testing.T) {
 			}
 			for _, marker := range ledgerMarkers {
 				if site.Clickhouse.Enabled != strings.Contains(out, marker) {
-					t.Errorf("site %s (clickhouse.enabled=%v): otel render marker %q presence mismatch",
+					t.Errorf("site %s (ObservabilityStack clickhouse.enabled=%v): otel render marker %q presence mismatch",
 						siteName, site.Clickhouse.Enabled, marker)
 				}
 			}

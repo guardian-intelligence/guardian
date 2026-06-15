@@ -104,6 +104,11 @@ var components = []component{{
 	rawManifest: true,
 	enabled:     siteUsesCrossplane,
 }, {
+	name:        "observability-stack-platform",
+	manifest:    "src/crossplane/packages/guardian-platform/observability-stack.yaml",
+	rawManifest: true,
+	enabled:     siteUsesCrossplane,
+}, {
 	name:        "slo-profile-platform",
 	manifest:    "src/crossplane/packages/guardian-platform/slo-profile.yaml",
 	rawManifest: true,

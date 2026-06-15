@@ -96,8 +96,8 @@ VERIFY: application trace visible end-to-end in CH with its log lines by
 trace ID; restore drill produces a counted, queryable corpus copy; killing
 vmalert pages via the dead-man within its window.
 STATUS 2026-06-12: first two sub-items landed on dev+gamma — per-site
-ClickHouse in push.go behind the site-gated `clickhouse.enabled` flag (OFF
-on prod until its ledger ratchet flips) and the filelog + k8sobjects Events
+ClickHouse in push.go behind `ObservabilityStack.spec.clickhouse.enabled`
+(OFF on prod until its ledger ratchet flips) and the filelog + k8sobjects Events
 pipeline (docs/runbooks/ledger.md). `guardian up` now owns the OpenBao path
 and ESO projection for clickhouse-admin. OTLP/app SDK, R2 backups + restore
 drill, and the dead-man heartbeat remain open; M5 is NOT done.

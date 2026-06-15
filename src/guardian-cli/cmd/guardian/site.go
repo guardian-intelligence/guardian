@@ -72,9 +72,6 @@ type Environment struct {
 		OCI struct {
 			Domain string `yaml:"domain"`
 		} `yaml:"oci"`
-		Clickhouse struct {
-			Enabled bool `yaml:"enabled"`
-		} `yaml:"clickhouse"`
 		Status struct {
 			Domains []string `yaml:"domains"`
 			Monitor bool     `yaml:"monitor"`
@@ -179,9 +176,13 @@ func loadSite(path string) (*Site, error) {
 	}
 	s.Gateway.Enabled = env.Gateway.Enabled
 	s.OCI.Domain = env.Platform.OCI.Domain
-	s.Clickhouse.Enabled = env.Platform.Clickhouse.Enabled
 	s.Status.Domains = env.Platform.Status.Domains
 	s.Status.Monitor = env.Platform.Status.Monitor
+	observability, err := observabilityStacks(s)
+	if err != nil {
+		return nil, err
+	}
+	s.Clickhouse.Enabled = observability[0].Spec.Clickhouse.Enabled
 	if err := applySLOAndSyntheticConfig(s); err != nil {
 		return nil, err
 	}

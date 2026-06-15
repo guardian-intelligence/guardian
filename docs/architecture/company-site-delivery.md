@@ -231,8 +231,9 @@ Owns the per-site telemetry substrate:
 - optional ClickHouse ledger.
 - optional Gatus until the cross-site blackbox path fully replaces it.
 
-Environment config supplies the site name, sibling probe targets, ClickHouse
-enabled flag, alert routing, and retention/capacity choices. Product services
+Environment config supplies shared bag values such as site name, sibling probe
+targets, alert routing, and retention/capacity defaults. `ObservabilityStack`
+owns the ClickHouse ledger switch. Product services
 should not edit collector or vmalert YAML directly; they should declare SLO
 intent that the observability composition renders into scrape config and rule
 fragments.

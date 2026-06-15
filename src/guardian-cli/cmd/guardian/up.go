@@ -311,6 +311,9 @@ func runUp(args []string) error {
 	if err := apply("directus-platform"); err != nil {
 		return err
 	}
+	if err := apply("observability-stack-platform"); err != nil {
+		return err
+	}
 	if err := apply("slo-profile-platform"); err != nil {
 		return err
 	}
@@ -355,7 +358,7 @@ func runUp(args []string) error {
 	}
 	for _, c := range components {
 		switch c.name {
-		case "openbao", "crossplane", "cert-manager", "provider-kubernetes", "provider-kubernetes-config", "edge-gateway-platform", "secret-projection-platform", "public-http-service-platform", "directus-platform", "slo-profile-platform", "oci-registry-platform", "aisucks-product-api", "company-site-product-api", "victoria-metrics", "external-secrets":
+		case "openbao", "crossplane", "cert-manager", "provider-kubernetes", "provider-kubernetes-config", "edge-gateway-platform", "secret-projection-platform", "public-http-service-platform", "directus-platform", "observability-stack-platform", "slo-profile-platform", "oci-registry-platform", "aisucks-product-api", "company-site-product-api", "victoria-metrics", "external-secrets":
 			continue
 		default:
 			if err := applyComponent(kubectl, kubeconfig, c, images, site); err != nil {
@@ -559,6 +562,7 @@ func waitGuardianPlatform(kubectl, kubeconfig string) error {
 		"secretprojections.platform.guardian.dev",
 		"publichttpservices.platform.guardian.dev",
 		"directusinstances.platform.guardian.dev",
+		"observabilitystacks.platform.guardian.dev",
 		"sloprofiles.platform.guardian.dev",
 		"syntheticchecks.platform.guardian.dev",
 		"ociregistries.platform.guardian.dev",
