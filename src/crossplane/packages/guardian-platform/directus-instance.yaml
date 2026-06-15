@@ -25,6 +25,10 @@ spec:
                   type: string
                 namespace:
                   type: string
+                namespaceLabels:
+                  type: object
+                  additionalProperties:
+                    type: string
                 image:
                   type: string
                   description: Digest-pinned Directus OCI image reference.
@@ -233,10 +237,38 @@ spec:
             apiVersion: kubernetes.crossplane.io/v1alpha2
             kind: Object
             metadata:
+              name: directus-{{ $spec.namespace }}-namespace
+              annotations:
+                {{ setResourceNameAnnotation "namespace" }}
+            spec:
+              deletionPolicy: Orphan
+              providerConfigRef:
+                name: platform
+              forProvider:
+                manifest:
+                  apiVersion: v1
+                  kind: Namespace
+                  metadata:
+                    name: {{ $spec.namespace }}
+                    {{- with $spec.namespaceLabels }}
+                    labels:
+                      {{- range $key, $value := . }}
+                      {{ $key }}: {{ $value }}
+                      {{- end }}
+                    {{- end }}
+            ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
               name: directus-{{ $spec.namespace }}-postgres-service
               annotations:
                 {{ setResourceNameAnnotation "postgres-service" }}
             spec:
+              references:
+                - dependsOn:
+                    apiVersion: kubernetes.crossplane.io/v1alpha2
+                    kind: Object
+                    name: directus-{{ $spec.namespace }}-namespace
               providerConfigRef:
                 name: platform
               forProvider:
@@ -261,6 +293,11 @@ spec:
               annotations:
                 {{ setResourceNameAnnotation "postgres" }}
             spec:
+              references:
+                - dependsOn:
+                    apiVersion: kubernetes.crossplane.io/v1alpha2
+                    kind: Object
+                    name: directus-{{ $spec.namespace }}-namespace
               providerConfigRef:
                 name: platform
               forProvider:
@@ -344,6 +381,11 @@ spec:
               annotations:
                 {{ setResourceNameAnnotation "service" }}
             spec:
+              references:
+                - dependsOn:
+                    apiVersion: kubernetes.crossplane.io/v1alpha2
+                    kind: Object
+                    name: directus-{{ $spec.namespace }}-namespace
               providerConfigRef:
                 name: platform
               forProvider:
