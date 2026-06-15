@@ -16,12 +16,6 @@ data:
   products:
     aisucks:
       domain: dev.aisucks.app
-      watch:
-        - https://aisucks.app/healthz
-        - https://gamma.aisucks.app/healthz
-      watchPages:
-        - https://aisucks.app/
-        - https://gamma.aisucks.app/
     company:
       domain: dev.guardianintelligence.org
   platform:
@@ -33,6 +27,66 @@ data:
       domains:
         - status.guardianintelligence.org
         - status.dev.guardianintelligence.org
+---
+apiVersion: platform.guardian.dev/v1alpha1
+kind: SLOProfile
+metadata:
+  name: public-http
+spec:
+  site: dev
+  surface: public-http
+  window: 15m
+  apps:
+    - name: aisucks
+      namespace: aisucks
+      deployment: aisucks
+      metric: aisucks_http_requests_total
+    - name: company-site
+      namespace: company
+      deployment: company-site
+      metric: company_site_http_requests_total
+  signals:
+    publicScrape: true
+    errorRate: true
+    restartDelta: true
+    pageAlerts: true
+    synthetic: true
+    directHTTP: true
+---
+apiVersion: platform.guardian.dev/v1alpha1
+kind: SyntheticCheck
+metadata:
+  name: public-http-cross-site
+spec:
+  site: dev
+  surface: public-http
+  targets:
+    - name: prod-aisucks-healthz
+      product: aisucks
+      kind: health
+      url: https://aisucks.app/healthz
+      expectedStatus: 200
+      gate: true
+    - name: gamma-aisucks-healthz
+      product: aisucks
+      kind: health
+      url: https://gamma.aisucks.app/healthz
+      expectedStatus: 200
+      gate: true
+    - name: prod-aisucks-page
+      product: aisucks
+      kind: page
+      url: https://aisucks.app/
+      expectedStatus: 200
+      bodyContains: never be sold
+      gate: true
+    - name: gamma-aisucks-page
+      product: aisucks
+      kind: page
+      url: https://gamma.aisucks.app/
+      expectedStatus: 200
+      bodyContains: never be sold
+      gate: true
 ---
 apiVersion: platform.guardian.dev/v1alpha1
 kind: SecretProjection

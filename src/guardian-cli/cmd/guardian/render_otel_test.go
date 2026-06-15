@@ -53,12 +53,13 @@ func TestOtelPublicHttpScrape(t *testing.T) {
 					t.Errorf("otel render missing company blackbox target %q", target)
 				}
 			}
-			if len(site.Company.WatchDomains) == 0 {
-				if strings.Contains(out, "guardianintelligence.org/letters") {
-					t.Errorf("site %s must not self-probe company routes through blackbox", siteName)
+			for _, target := range site.Aisucks.WatchPages {
+				if !strings.Contains(out, `- "`+target+`"`) {
+					t.Errorf("otel render missing aisucks page blackbox target %q", target)
 				}
-			} else if len(site.Company.ProbeURLs) == 0 {
-				t.Errorf("site %s must derive company blackbox targets from watchDomains and the CompanySite XR", siteName)
+			}
+			if siteName != "dev" && len(site.Company.ProbeURLs) == 0 {
+				t.Errorf("site %s must derive company blackbox targets from SyntheticCheck", siteName)
 			}
 			if !regexp.MustCompile(`guardian\.dev/render-sha256: "[0-9a-f]{64}"`).MatchString(out) {
 				t.Error("otel render must include a render hash pod-template annotation so ConfigMap changes roll the collector")
