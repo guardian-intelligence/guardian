@@ -5,6 +5,7 @@ import {
   defaultChannel,
   defaultOciRef,
   defaultReleasePaths,
+  releasePathsForRepoRoot,
   type ReleaseConfig,
   type ReleaseMode,
 } from "./types.js";
@@ -18,13 +19,13 @@ export function parseReleaseConfig(args: readonly string[], packageVersion: stri
   let publishOci: boolean | undefined;
   let allowUnsignedDev = true;
   let outputDir: string | undefined;
-  const defaultPaths = defaultReleasePaths();
-  let bazelisk = defaultPaths.bazelisk;
-  let sdkoci = defaultPaths.sdkoci;
-  let cosign = defaultPaths.cosign;
-  let oras = defaultPaths.oras;
-  let npm = defaultPaths.npm;
-  let node = defaultPaths.node;
+  let sourceRoot: string | undefined;
+  let bazelisk: string | undefined;
+  let sdkoci: string | undefined;
+  let cosign: string | undefined;
+  let oras: string | undefined;
+  let npm: string | undefined;
+  let node: string | undefined;
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -69,6 +70,10 @@ export function parseReleaseConfig(args: readonly string[], packageVersion: stri
         outputDir = path.resolve(requireValue(args, i, arg));
         i += 1;
         break;
+      case "--source-root":
+        sourceRoot = path.resolve(requireValue(args, i, arg));
+        i += 1;
+        break;
       case "--bazelisk":
         bazelisk = requireValue(args, i, arg);
         i += 1;
@@ -101,6 +106,9 @@ export function parseReleaseConfig(args: readonly string[], packageVersion: stri
     }
   }
 
+  const basePaths =
+    sourceRoot === undefined ? defaultReleasePaths() : releasePathsForRepoRoot(sourceRoot);
+
   return {
     mode,
     version,
@@ -111,13 +119,13 @@ export function parseReleaseConfig(args: readonly string[], packageVersion: stri
     allowUnsignedDev,
     outputDir,
     paths: {
-      ...defaultPaths,
-      bazelisk,
-      sdkoci,
-      cosign,
-      oras,
-      npm,
-      node,
+      ...basePaths,
+      bazelisk: bazelisk ?? basePaths.bazelisk,
+      sdkoci: sdkoci ?? basePaths.sdkoci,
+      cosign: cosign ?? basePaths.cosign,
+      oras: oras ?? basePaths.oras,
+      npm: npm ?? basePaths.npm,
+      node: node ?? basePaths.node,
     },
   };
 }
