@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -40,6 +41,8 @@ const (
 	defaultRepositoryPath        = "oci.guardianintelligence.org/guardian/aisucks/sdk/npm:edge"
 	defaultAttestationLayerTitle = "guardian-release.intoto.jsonl"
 )
+
+var sha256DigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 type cliConfig struct {
 	tarballPath      string
@@ -218,6 +221,9 @@ func run(ctx context.Context, cfg cliConfig, stdout io.Writer) error {
 		if err != nil {
 			return err
 		}
+		if err := validateRemoteCredentialConfig(cfg.credentials); err != nil {
+			return err
+		}
 		manifest, attestationManifest, err = pushRemote(ctx, target, cfg.plainHTTP, cfg.credentials, entry, payload, annotations, cfg.payloadMediaType, cfg.artifactType, attestation, cfg.attestationTitle)
 		ref = target.repository + "@" + manifest.Digest.String()
 		if attestationManifest != nil {
@@ -345,9 +351,15 @@ func pushRemote(ctx context.Context, target targetRef, plainHTTP bool, creds cre
 		return ocispec.Descriptor{}, nil, fmt.Errorf("remote repository %s: %w", target.repository, err)
 	}
 	repo.PlainHTTP = plainHTTP
+	if err := validateRemoteCredentialConfig(creds); err != nil {
+		return ocispec.Descriptor{}, nil, err
+	}
 	credFn, err := credentialFunc(target.registry, creds)
 	if err != nil {
 		return ocispec.Descriptor{}, nil, err
+	}
+	if credFn == nil {
+		return ocispec.Descriptor{}, nil, errors.New("remote OCI push requires --access-token-env or --username/--password-env")
 	}
 	repo.Client = &auth.Client{
 		Client:     retry.DefaultClient,
@@ -355,6 +367,28 @@ func pushRemote(ctx context.Context, target targetRef, plainHTTP bool, creds cre
 		Credential: credFn,
 	}
 	return pushToTarget(ctx, repo, target.tag, entry, payload, annotations, payloadMediaType, artifactType, attestation, attestationTitle)
+}
+
+func validateRemoteCredentialConfig(cfg credentialConfig) error {
+	if cfg.accessTokenEnv != "" {
+		if cfg.username != "" || cfg.passwordEnv != "" {
+			return errors.New("--access-token-env cannot be combined with --username or --password-env")
+		}
+		if os.Getenv(cfg.accessTokenEnv) == "" {
+			return fmt.Errorf("%s is empty", cfg.accessTokenEnv)
+		}
+		return nil
+	}
+	if cfg.username == "" && cfg.passwordEnv == "" {
+		return errors.New("remote OCI push requires --access-token-env or --username/--password-env")
+	}
+	if cfg.username == "" || cfg.passwordEnv == "" {
+		return errors.New("--username and --password-env must be set together")
+	}
+	if os.Getenv(cfg.passwordEnv) == "" {
+		return fmt.Errorf("%s is empty", cfg.passwordEnv)
+	}
+	return nil
 }
 
 func pushLayout(ctx context.Context, path, tag string, entry packEntry, payload []byte, annotations map[string]string, payloadMediaType, artifactType string, attestation []byte, attestationTitle string) (ocispec.Descriptor, *ocispec.Descriptor, error) {
@@ -478,14 +512,31 @@ func resolveTaggedDescriptor(ctx context.Context, target resolver, tag string, p
 }
 
 func validateDescriptor(kind string, desc ocispec.Descriptor) error {
-	if desc.Digest.String() == "" {
-		return fmt.Errorf("%s has empty digest", kind)
+	if err := validateSHA256Digest(kind, desc.Digest.String()); err != nil {
+		return err
 	}
 	if desc.MediaType == "" {
 		return fmt.Errorf("%s %s has empty media type", kind, desc.Digest)
 	}
 	if desc.Size <= 0 {
 		return fmt.Errorf("%s %s has non-positive size %d", kind, desc.Digest, desc.Size)
+	}
+	return nil
+}
+
+func validateSHA256Digest(kind string, value string) error {
+	if value == "" {
+		return fmt.Errorf("%s has empty digest", kind)
+	}
+	if !strings.HasPrefix(value, "sha256:") {
+		algorithm := value
+		if idx := strings.Index(value, ":"); idx >= 0 {
+			algorithm = value[:idx]
+		}
+		return fmt.Errorf("%s has unsupported digest algorithm %s", kind, algorithm)
+	}
+	if !sha256DigestPattern.MatchString(value) {
+		return fmt.Errorf("%s has invalid digest %q", kind, value)
 	}
 	return nil
 }
@@ -613,6 +664,7 @@ func validateResult(result artifactResult) error {
 		"channel":       result.Channel,
 		"oci_digest":    result.OCIDigest,
 		"oci_ref":       result.OCIRef,
+		"payload_sha256": result.PayloadDigest,
 		"package":       result.Package,
 		"version":       result.Version,
 		"source_repo":   result.SourceRepo,
@@ -624,6 +676,15 @@ func validateResult(result artifactResult) error {
 			return fmt.Errorf("release result has empty %s", field)
 		}
 	}
+	if err := validateSHA256Digest("release result oci_digest", result.OCIDigest); err != nil {
+		return err
+	}
+	if err := validateSHA256Digest("release result payload_sha256", result.PayloadDigest); err != nil {
+		return err
+	}
+	if !isFullSHA(result.SourceCommit) {
+		return fmt.Errorf("release result source_commit is not a full 40-character hex SHA: %q", result.SourceCommit)
+	}
 	if !strings.HasSuffix(result.OCIRef, "@"+result.OCIDigest) {
 		return fmt.Errorf("release result OCI ref %q does not point at digest %s", result.OCIRef, result.OCIDigest)
 	}
@@ -632,6 +693,12 @@ func validateResult(result artifactResult) error {
 		if result.TarballDigest == "" {
 			return errors.New("release result has empty tarball_sha256")
 		}
+		if err := validateSHA256Digest("release result tarball_sha256", result.TarballDigest); err != nil {
+			return err
+		}
+		if result.TarballDigest != result.PayloadDigest {
+			return fmt.Errorf("release result tarball_sha256 %s does not match payload_sha256 %s", result.TarballDigest, result.PayloadDigest)
+		}
 		if result.NPMIntegrity == "" {
 			return errors.New("release result has empty npm_integrity")
 		}
@@ -639,12 +706,23 @@ func validateResult(result artifactResult) error {
 		if result.WheelDigest == "" {
 			return errors.New("release result has empty wheel_sha256")
 		}
+		if err := validateSHA256Digest("release result wheel_sha256", result.WheelDigest); err != nil {
+			return err
+		}
+		if result.WheelDigest != result.PayloadDigest {
+			return fmt.Errorf("release result wheel_sha256 %s does not match payload_sha256 %s", result.WheelDigest, result.PayloadDigest)
+		}
 	}
 	if result.AttestationDigest == "" && result.AttestationRef != "" {
 		return errors.New("release result has attestation ref without attestation digest")
 	}
 	if result.AttestationDigest != "" && result.AttestationRef == "" {
 		return errors.New("release result has attestation digest without attestation ref")
+	}
+	if result.AttestationDigest != "" {
+		if err := validateSHA256Digest("release result attestation_digest", result.AttestationDigest); err != nil {
+			return err
+		}
 	}
 	if result.AttestationDigest != "" && !strings.HasSuffix(result.AttestationRef, "@"+result.AttestationDigest) {
 		return fmt.Errorf("release result attestation ref %q does not point at digest %s", result.AttestationRef, result.AttestationDigest)

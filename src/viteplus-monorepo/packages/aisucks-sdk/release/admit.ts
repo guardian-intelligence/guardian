@@ -77,6 +77,22 @@ export function admitRelease(
       },
     );
     yield* expect(
+      candidate.oci.oci_ref.endsWith(`@${candidate.oci.oci_digest}`),
+      "OCI result ref/digest mismatch",
+      {
+        ociRef: candidate.oci.oci_ref,
+        digest: candidate.oci.oci_digest,
+      },
+    );
+    yield* expect(
+      candidate.oci.payload_sha256 === `sha256:${candidate.tarballSha256}`,
+      "OCI result payload sha256 mismatch",
+      {
+        actual: candidate.oci.payload_sha256,
+        expected: `sha256:${candidate.tarballSha256}`,
+      },
+    );
+    yield* expect(
       candidate.oci.tarball_sha256 === `sha256:${candidate.tarballSha256}`,
       "OCI result tarball sha256 mismatch",
       {

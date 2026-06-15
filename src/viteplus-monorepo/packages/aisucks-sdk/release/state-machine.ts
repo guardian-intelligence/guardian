@@ -460,15 +460,7 @@ function publishOci(
 
   return Effect.gen(function* () {
     const resultPath = path.join(outputDir, "sdk-oci.public.json");
-    const authArgs =
-      process.env.GUARDIAN_OCI_ACCESS_TOKEN !== undefined
-        ? ["--access-token-env", "GUARDIAN_OCI_ACCESS_TOKEN"]
-        : [
-            "--username",
-            process.env.GUARDIAN_OCI_USERNAME ?? "guardian-release",
-            "--password-env",
-            "GUARDIAN_OCI_PASSWORD",
-          ];
+    const authArgs = yield* ociAuthArgs();
 
     yield* runSdkOci(config, [
       "--tarball",
@@ -490,6 +482,39 @@ function publishOci(
 
     return yield* readSdkOciResult(resultPath);
   });
+}
+
+function ociAuthArgs(): Effect.Effect<readonly string[], ReleaseError> {
+  const accessToken = process.env.GUARDIAN_OCI_ACCESS_TOKEN;
+  if (accessToken !== undefined) {
+    if (accessToken === "") {
+      return Effect.fail(
+        new InvalidReleaseTarget({
+          reason: "GUARDIAN_OCI_ACCESS_TOKEN is set but empty",
+        }),
+      );
+    }
+    return Effect.succeed(["--access-token-env", "GUARDIAN_OCI_ACCESS_TOKEN"]);
+  }
+
+  const password = process.env.GUARDIAN_OCI_PASSWORD;
+  if (password === undefined || password === "") {
+    return Effect.fail(
+      new InvalidReleaseTarget({
+        reason: "OCI publication requires GUARDIAN_OCI_PASSWORD or GUARDIAN_OCI_ACCESS_TOKEN",
+      }),
+    );
+  }
+
+  const username = process.env.GUARDIAN_OCI_USERNAME ?? "guardian-release";
+  if (username === "") {
+    return Effect.fail(
+      new InvalidReleaseTarget({
+        reason: "GUARDIAN_OCI_USERNAME is set but empty",
+      }),
+    );
+  }
+  return Effect.succeed(["--username", username, "--password-env", "GUARDIAN_OCI_PASSWORD"]);
 }
 
 function publishNpm(

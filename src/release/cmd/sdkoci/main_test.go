@@ -60,6 +60,113 @@ func TestCredentialFuncRejectsEmptyPasswordEnv(t *testing.T) {
 	}
 }
 
+func TestValidateRemoteCredentialConfigRejectsMixedAuthModes(t *testing.T) {
+	env := "GUARDIAN_SDKOCI_TEST_ACCESS_TOKEN"
+	t.Setenv(env, "token")
+
+	err := validateRemoteCredentialConfig(credentialConfig{
+		username:       "guardian-release",
+		passwordEnv:    "GUARDIAN_OCI_PASSWORD",
+		accessTokenEnv: env,
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestValidateRemoteCredentialConfigRejectsEmptyAccessTokenEnv(t *testing.T) {
+	env := "GUARDIAN_SDKOCI_TEST_EMPTY_ACCESS_TOKEN"
+	t.Setenv(env, "")
+
+	err := validateRemoteCredentialConfig(credentialConfig{accessTokenEnv: env})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), env+" is empty") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestPushRemoteRequiresExplicitCredentials(t *testing.T) {
+	_, _, err := pushRemote(
+		context.Background(),
+		targetRef{
+			registry:   "oci.guardianintelligence.org",
+			repository: "oci.guardianintelligence.org/guardian/aisucks/sdk/npm",
+			tag:        "edge",
+		},
+		false,
+		credentialConfig{},
+		packEntry{},
+		[]byte("payload"),
+		nil,
+		defaultPayloadMediaType,
+		defaultArtifactType,
+		nil,
+		defaultAttestationLayerTitle,
+	)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "remote OCI push requires") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestPushRemoteRejectsEmptyPasswordEnv(t *testing.T) {
+	env := "GUARDIAN_SDKOCI_TEST_REMOTE_EMPTY_PASSWORD"
+	t.Setenv(env, "")
+
+	_, _, err := pushRemote(
+		context.Background(),
+		targetRef{
+			registry:   "oci.guardianintelligence.org",
+			repository: "oci.guardianintelligence.org/guardian/aisucks/sdk/npm",
+			tag:        "edge",
+		},
+		false,
+		credentialConfig{
+			username:    "guardian-release",
+			passwordEnv: env,
+		},
+		packEntry{},
+		[]byte("payload"),
+		nil,
+		defaultPayloadMediaType,
+		defaultArtifactType,
+		nil,
+		defaultAttestationLayerTitle,
+	)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), env+" is empty") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestRunRemoteRequiresExplicitCredentials(t *testing.T) {
+	dir := t.TempDir()
+	tarballPath, packPath, _ := writePackFixture(t, dir)
+
+	err := run(context.Background(), cliConfig{
+		tarballPath:  tarballPath,
+		packJSON:     packPath,
+		ref:          "oci.guardianintelligence.org/guardian/aisucks/sdk/npm:edge",
+		sourceCommit: strings.Repeat("a", 40),
+		sourceRepo:   "https://github.com/guardian-intelligence/guardian",
+	}, io.Discard)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "remote OCI push requires") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestRunWritesOCILayout(t *testing.T) {
 	dir := t.TempDir()
 	tarballPath, packPath, tarball := writePackFixture(t, dir)
@@ -350,6 +457,30 @@ func TestValidateDescriptorRejectsMissingMediaType(t *testing.T) {
 	}
 }
 
+func TestValidateDescriptorRejectsInvalidDigestSyntax(t *testing.T) {
+	desc := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2}`))
+	desc.Digest = "sha256:not-hex"
+	err := validateDescriptor("test OCI descriptor", desc)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "invalid digest") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestValidateDescriptorRejectsUnsupportedDigestAlgorithm(t *testing.T) {
+	desc := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2}`))
+	desc.Digest = "sha512:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	err := validateDescriptor("test OCI descriptor", desc)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "unsupported digest algorithm") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestValidateDescriptorRejectsZeroSize(t *testing.T) {
 	desc := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, nil)
 	err := validateDescriptor("test OCI descriptor", desc)
@@ -383,6 +514,59 @@ func TestWriteResultRejectsEmptyOCIDigest(t *testing.T) {
 	}
 }
 
+func TestWriteResultRejectsInvalidOCIDigest(t *testing.T) {
+	result := validNPMResult()
+	result.OCIDigest = "sha256:not-hex"
+	result.OCIRef = "oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:not-hex"
+
+	err := writeResult(result, "", io.Discard)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "invalid digest") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestWriteResultRejectsMissingPayloadDigest(t *testing.T) {
+	result := validNPMResult()
+	result.PayloadDigest = ""
+
+	err := writeResult(result, "", io.Discard)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "empty payload_sha256") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestWriteResultRejectsPayloadDigestMismatch(t *testing.T) {
+	result := validNPMResult()
+	result.TarballDigest = "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
+	err := writeResult(result, "", io.Discard)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "does not match payload_sha256") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestWriteResultRejectsInvalidSourceCommit(t *testing.T) {
+	result := validNPMResult()
+	result.SourceCommit = "not-a-full-sha"
+
+	err := writeResult(result, "", io.Discard)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "source_commit is not a full 40-character hex SHA") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestWriteResultRejectsRefDigestMismatch(t *testing.T) {
 	result := validNPMResult()
 	result.OCIRef = "oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -405,6 +589,20 @@ func TestWriteResultRejectsAttestationDigestWithoutRef(t *testing.T) {
 		t.Fatal("expected error")
 	}
 	if !strings.Contains(err.Error(), "attestation digest without attestation ref") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestWriteResultRejectsInvalidAttestationDigest(t *testing.T) {
+	result := validNPMResult()
+	result.AttestationDigest = "sha256:not-hex"
+	result.AttestationRef = "oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:not-hex"
+
+	err := writeResult(result, "", io.Discard)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "invalid digest") {
 		t.Fatalf("error = %v", err)
 	}
 }
