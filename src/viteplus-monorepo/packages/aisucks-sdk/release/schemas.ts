@@ -12,6 +12,9 @@ import {
 const stringRecord = Schema.Record({ key: Schema.String, value: Schema.String });
 const unknownRecord = Schema.Record({ key: Schema.String, value: Schema.Unknown });
 const nonEmptyString = Schema.NonEmptyString;
+const sha256Digest = Schema.String.pipe(Schema.pattern(/^sha256:[0-9a-f]{64}$/));
+const digestRef = Schema.String.pipe(Schema.pattern(/@sha256:[0-9a-f]{64}$/));
+const fullGitSha = Schema.String.pipe(Schema.pattern(/^[0-9a-f]{40}$/));
 
 export const PackageJsonSchema = Schema.Struct({
   name: Schema.optional(Schema.String),
@@ -33,17 +36,17 @@ export const SdkOciResultSchema = Schema.Struct({
   distributable: nonEmptyString,
   payload_form: nonEmptyString,
   channel: nonEmptyString,
-  oci_digest: nonEmptyString,
-  oci_ref: nonEmptyString,
-  attestation_digest: Schema.optional(nonEmptyString),
-  attestation_ref: Schema.optional(nonEmptyString),
-  payload_sha256: Schema.optional(nonEmptyString),
-  tarball_sha256: nonEmptyString,
+  oci_digest: sha256Digest,
+  oci_ref: digestRef,
+  attestation_digest: Schema.optional(sha256Digest),
+  attestation_ref: Schema.optional(digestRef),
+  payload_sha256: sha256Digest,
+  tarball_sha256: sha256Digest,
   npm_integrity: nonEmptyString,
   package: nonEmptyString,
   version: nonEmptyString,
   source_repo: nonEmptyString,
-  source_commit: nonEmptyString,
+  source_commit: fullGitSha,
   layer_title: nonEmptyString,
 });
 
