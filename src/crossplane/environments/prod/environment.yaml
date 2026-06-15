@@ -12,7 +12,7 @@ data:
   alerts:
     ntfyTopic: "aisucks-ops-1ebda4d035e83ac0"
   gateway:
-    enabled: false
+    enabled: true
   products:
     aisucks:
       domain: aisucks.app
@@ -22,9 +22,39 @@ data:
       watchPages:
         - https://dev.aisucks.app/
         - https://gamma.aisucks.app/
-    company: {}
+      podNetwork: true
+    company:
+      domain: guardianintelligence.com
   platform:
     oci: {}
     clickhouse:
       enabled: false
     status: {}
+---
+apiVersion: platform.guardian.dev/v1alpha1
+kind: EdgeGateway
+metadata:
+  name: edge
+spec:
+  gatewayClass:
+    name: cilium
+    controllerName: io.cilium/gateway-controller
+  gateway:
+    namespace: gateway
+    name: edge
+  listeners:
+    - name: tls-aisucks
+      hostname: "aisucks.app"
+      port: 443
+      protocol: TLS
+      tls:
+        mode: Passthrough
+    - name: tls-company-site
+      hostname: "guardianintelligence.com"
+      port: 443
+      protocol: TLS
+      tls:
+        mode: Passthrough
+    - name: http
+      port: 80
+      protocol: HTTP
