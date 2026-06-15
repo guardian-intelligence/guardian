@@ -167,6 +167,6 @@ openssl s_client -connect oci.guardianintelligence.org:443 \
 OCI checks:
 
 ```sh
-oras discover oci.guardianintelligence.org/<repo>@sha256:<manifest>
-cosign verify oci.guardianintelligence.org/<repo>@sha256:<manifest>
+guardian run oras discover oci.guardianintelligence.org/<repo>@sha256:<manifest>
+guardian run cosign verify oci.guardianintelligence.org/<repo>@sha256:<manifest>
 ```

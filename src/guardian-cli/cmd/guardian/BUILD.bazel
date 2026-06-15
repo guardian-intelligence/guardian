@@ -96,6 +96,7 @@ go_test(
         "render_vmalert_test.go",
         "render_zot_test.go",
         "restore_test.go",
+        "run_test.go",
         "site_test.go",
         "tls_test.go",
     ],

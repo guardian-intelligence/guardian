@@ -88,6 +88,7 @@ The SDK artifact lane must produce:
 - tarball digest and npm `dist.integrity`
 - DSSE envelope over an in-toto Statement with SLSA provenance predicate
 - JSONL in-toto bundle attached to the OCI subject as a referrer
+- cosign keyless signature over the OCI subject digest
 - npm Trusted Publishing provenance when the npm projection runs
 
 The OCI reference forms are defined in
@@ -133,8 +134,10 @@ Required setup:
 - The workflow runs one `aspect release sdk-oci --publish ...` task.
 - The workflow YAML must not encode release policy, package matrices,
   publisher fan-out, signing, attestation, verification, or no-op decisions.
-- `GUARDIAN_OCI_PASSWORD` gives the release task zot write authority. If
-  `GUARDIAN_OCI_ACCESS_TOKEN` is set, bearer-token auth is used instead.
+- `GUARDIAN_OCI_PASSWORD` gives the release task zot write authority and lets
+  cosign log in before keyless signing. `GUARDIAN_OCI_ACCESS_TOKEN` is
+  rejected for signed SDK publication until cosign token-stdin support is
+  wired.
 - No `NPM_TOKEN` is used; npm issues publish authority from GitHub OIDC.
 
 Trusted Publishing configuration:
@@ -151,8 +154,8 @@ Local layout verification:
 
 ```sh
 aspect release sdk-oci --output-dir /tmp/guardian-sdk-release
-oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist
-oras discover --oci-layout /tmp/guardian-sdk-release/oci-layout:edge
+guardian run oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist
+guardian run oras discover --oci-layout /tmp/guardian-sdk-release/oci-layout:edge
 jq . /tmp/guardian-sdk-release/release-result.json
 ```
 
@@ -161,8 +164,11 @@ Public registry verification once `oci.guardianintelligence.org` is live:
 ```sh
 SDK='oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>'
 
-oras pull "$SDK" -o ./dist
-oras discover "$SDK"
+guardian run oras pull "$SDK" -o ./dist
+guardian run oras discover "$SDK"
+guardian run cosign verify "$SDK" \
+  --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml@refs/heads/main' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 ```
 
 Expected:
@@ -170,13 +176,10 @@ Expected:
 - `oras pull` writes exactly one npm `.tgz` payload.
 - `oras discover` shows the
   `application/vnd.guardian.release.in-toto.bundle.v1` referrer.
+- `cosign verify` reports one verified keyless signature for the release
+  workflow identity above.
 - The JSONL bundle contains one DSSE envelope whose payload is an in-toto
   Statement with SLSA provenance predicate.
-
-Cosign-compatible OCI signatures are not yet emitted by this lane. The current
-release evidence is the DSSE/in-toto JSONL bundle plus npm Trusted Publishing
-provenance. Adding a cosign signature referrer over the OCI subject is the next
-verification hardening step.
 
 ## Verify npm Projection
 

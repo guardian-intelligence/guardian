@@ -142,6 +142,7 @@ export const ReleaseResultSchema = Schema.Struct({
   candidate: ReleaseCandidateSchema,
   evidence: EvidenceBundleSchema,
   publishedOci: Schema.optional(SdkOciResultSchema),
+  ociSignatureStatus: Schema.Literal("not-requested", "signed"),
   npmStatus: Schema.Literal("not-requested", "published", "already-published"),
   eventLog: Schema.Array(ReleaseEventSchema),
   outputDir: Schema.String,
@@ -156,6 +157,7 @@ export const ReleaseSummarySchema = Schema.Struct({
   outputDir: Schema.String,
   ociDigest: Schema.String,
   publishedOciDigest: Schema.optional(Schema.String),
+  ociSignatureStatus: Schema.Literal("not-requested", "signed"),
   npmStatus: Schema.Literal("not-requested", "published", "already-published"),
 });
 

@@ -319,6 +319,11 @@ func readPackEntry(path string) (packEntry, error) {
 }
 
 func validatePackEntry(entry packEntry, cfg cliConfig) error {
+	switch cfg.payloadForm {
+	case "npm", "python-wheel":
+	default:
+		return fmt.Errorf("unsupported payload form %q", cfg.payloadForm)
+	}
 	if cfg.expectedPackage != "" && entry.Name != cfg.expectedPackage {
 		return fmt.Errorf("unexpected package name %q", entry.Name)
 	}
@@ -502,6 +507,15 @@ func resolveTaggedDescriptor(ctx context.Context, target resolver, tag string, p
 	if pushed.Digest.String() != "" && resolved.Digest != pushed.Digest {
 		return ocispec.Descriptor{}, fmt.Errorf("resolved tagged OCI artifact %s digest %s does not match pushed digest %s", tag, resolved.Digest, pushed.Digest)
 	}
+	if pushed.MediaType != "" && resolved.MediaType != "" && resolved.MediaType != pushed.MediaType {
+		return ocispec.Descriptor{}, fmt.Errorf("resolved tagged OCI artifact %s media type %s does not match pushed media type %s", tag, resolved.MediaType, pushed.MediaType)
+	}
+	if pushed.ArtifactType != "" && resolved.ArtifactType != "" && resolved.ArtifactType != pushed.ArtifactType {
+		return ocispec.Descriptor{}, fmt.Errorf("resolved tagged OCI artifact %s artifact type %s does not match pushed artifact type %s", tag, resolved.ArtifactType, pushed.ArtifactType)
+	}
+	if pushed.Size > 0 && resolved.Size > 0 && resolved.Size != pushed.Size {
+		return ocispec.Descriptor{}, fmt.Errorf("resolved tagged OCI artifact %s size %d does not match pushed size %d", tag, resolved.Size, pushed.Size)
+	}
 	if resolved.MediaType == "" {
 		resolved.MediaType = pushed.MediaType
 	}
@@ -526,6 +540,12 @@ func validateDescriptor(kind string, desc ocispec.Descriptor) error {
 	}
 	if desc.MediaType == "" {
 		return fmt.Errorf("%s %s has empty media type", kind, desc.Digest)
+	}
+	if desc.MediaType != ocispec.MediaTypeImageManifest {
+		return fmt.Errorf("%s %s has unsupported media type %s", kind, desc.Digest, desc.MediaType)
+	}
+	if desc.ArtifactType == "" {
+		return fmt.Errorf("%s %s has empty artifact type", kind, desc.Digest)
 	}
 	if desc.Size <= 0 {
 		return fmt.Errorf("%s %s has non-positive size %d", kind, desc.Digest, desc.Size)
@@ -733,6 +753,8 @@ func validateResult(result artifactResult) error {
 		if result.WheelDigest != result.PayloadDigest {
 			return fmt.Errorf("release result wheel_sha256 %s does not match payload_sha256 %s", result.WheelDigest, result.PayloadDigest)
 		}
+	default:
+		return fmt.Errorf("release result has unsupported payload_form %q", result.PayloadForm)
 	}
 	if result.AttestationDigest == "" && result.AttestationRef != "" {
 		return errors.New("release result has attestation ref without attestation digest")

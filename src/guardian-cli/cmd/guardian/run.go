@@ -1,6 +1,8 @@
 package main
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -26,7 +28,19 @@ import (
 
 // managedTools is the full set of names `guardian run` accepts and
 // `guardian tools install` symlinks (plus "guardian" itself).
-var managedTools = []string{"aspect", "bazel", "talosctl", "kubectl"}
+var managedTools = []string{"aspect", "bazel", "talosctl", "kubectl", "oras", "cosign"}
+
+const (
+	orasVersion              = "1.3.0"
+	orasLinuxAMD64ArchiveURL = "https://github.com/oras-project/oras/releases/download/v1.3.0/oras_1.3.0_linux_amd64.tar.gz"
+	orasLinuxAMD64ArchiveSHA = "6cdc692f929100feb08aa8de584d02f7bcc30ec7d88bc2adc2054d782db57c64"
+	orasLinuxAMD64BinarySHA  = "040e140304b7dbdd9b40dacd798e2303cea44ad84eeb210750afdf15f1dcf8b4"
+
+	cosignVersion           = "2.6.1"
+	cosignLinuxAMD64URL     = "https://github.com/sigstore/cosign/releases/download/v2.6.1/cosign-linux-amd64"
+	cosignLinuxAMD64SHA256  = "064954c5d8c7e3b28188eee5b1727b31c411550bc5fefd41aa672d3c761d103a"
+	cosignLinuxAMD64PinName = "src/guardian-cli/cmd/guardian/run.go (cosignLinuxAMD64SHA256)"
+)
 
 func isManagedTool(name string) bool {
 	for _, t := range managedTools {
@@ -62,6 +76,10 @@ func runNamedTool(tool string, args []string) error {
 		bin, err = talosctlPath()
 	case "kubectl":
 		bin, err = kubectlPath()
+	case "oras":
+		bin, err = ensurePinnedOras()
+	case "cosign":
+		bin, err = ensurePinnedCosign()
 	default:
 		return fmt.Errorf("run: unknown tool %q (one of %s)", tool, strings.Join(managedTools, ", "))
 	}
@@ -182,6 +200,22 @@ func ensurePinnedAspect() (string, error) {
 	return ensurePinnedTool("aspect", version, url, sum, root+"/.aspect/version.axl (guardian-sha256)")
 }
 
+func ensurePinnedOras() (string, error) {
+	return ensurePinnedArchiveTool(
+		"oras",
+		orasVersion,
+		orasLinuxAMD64ArchiveURL,
+		orasLinuxAMD64ArchiveSHA,
+		orasLinuxAMD64BinarySHA,
+		"oras",
+		"src/guardian-cli/cmd/guardian/run.go (orasLinuxAMD64ArchiveSHA/orasLinuxAMD64BinarySHA)",
+	)
+}
+
+func ensurePinnedCosign() (string, error) {
+	return ensurePinnedTool("cosign", cosignVersion, cosignLinuxAMD64URL, cosignLinuxAMD64SHA256, cosignLinuxAMD64PinName)
+}
+
 // ensurePinnedTool returns ~/.cache/guardian/tools/<tool>/<version>/<tool>,
 // downloading it from url on first use. The cached file is re-hashed against
 // the pinned sum on every run so the cache cannot drift from the pin;
@@ -216,6 +250,49 @@ func ensurePinnedTool(tool, version, url, sum, pinSource string) (string, error)
 	return bin, nil
 }
 
+func ensurePinnedArchiveTool(tool, version, url, archiveSum, binarySum, member, pinSource string) (string, error) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		return "", fmt.Errorf("%s: unsupported platform %s/%s (linux/amd64 is the only controller platform today)", tool, runtime.GOOS, runtime.GOARCH)
+	}
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(cache, "guardian", "tools", tool, version)
+	bin := filepath.Join(dir, tool)
+	archive := filepath.Join(dir, filepath.Base(url))
+
+	if _, err := os.Stat(bin); err != nil {
+		if err := downloadFile(url, archive); err != nil {
+			return "", fmt.Errorf("%s %s: %w", tool, version, err)
+		}
+		gotArchive, err := fileSHA256(archive)
+		if err != nil {
+			return "", err
+		}
+		if gotArchive != archiveSum {
+			return "", fmt.Errorf("%s %s archive: sha256 mismatch: pinned %s, downloaded file %s (delete %s to re-download)", tool, version, archiveSum, gotArchive, archive)
+		}
+		if err := extractTarGzMember(archive, member, bin); err != nil {
+			return "", fmt.Errorf("%s %s: %w", tool, version, err)
+		}
+		fmt.Fprintf(os.Stderr, "guardian: downloaded %s %s\n", tool, version)
+	}
+
+	if binarySum == "" {
+		fmt.Fprintf(os.Stderr, "guardian: warning: no binary sha256 pin in %s; running %s %s unverified\n", pinSource, tool, version)
+		return bin, nil
+	}
+	gotBinary, err := fileSHA256(bin)
+	if err != nil {
+		return "", err
+	}
+	if gotBinary != binarySum {
+		return "", fmt.Errorf("%s %s: sha256 mismatch: pinned %s, cached file %s (delete %s to re-download)", tool, version, binarySum, gotBinary, bin)
+	}
+	return bin, nil
+}
+
 func downloadFile(url, dest string) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
@@ -244,6 +321,56 @@ func downloadFile(url, dest string) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), dest)
+}
+
+func extractTarGzMember(archive, member, dest string) error {
+	f, err := os.Open(archive)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return err
+	}
+	defer gz.Close()
+
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return fmt.Errorf("archive member %q not found", member)
+		}
+		if err != nil {
+			return err
+		}
+		if hdr.Name != member {
+			continue
+		}
+		if hdr.Typeflag != tar.TypeReg {
+			return fmt.Errorf("archive member %q is not a regular file", member)
+		}
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			return err
+		}
+		tmp, err := os.CreateTemp(filepath.Dir(dest), ".extract-*")
+		if err != nil {
+			return err
+		}
+		defer os.Remove(tmp.Name())
+		if _, err := io.Copy(tmp, tr); err != nil {
+			tmp.Close()
+			return err
+		}
+		if err := tmp.Close(); err != nil {
+			return err
+		}
+		if err := os.Chmod(tmp.Name(), 0o755); err != nil {
+			return err
+		}
+		return os.Rename(tmp.Name(), dest)
+	}
 }
 
 func fileSHA256(path string) (string, error) {

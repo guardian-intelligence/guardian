@@ -167,6 +167,31 @@ func TestRunRemoteRequiresExplicitCredentials(t *testing.T) {
 	}
 }
 
+func TestRunRejectsUnsupportedPayloadFormBeforeWritingLayout(t *testing.T) {
+	dir := t.TempDir()
+	tarballPath, packPath, _ := writePackFixture(t, dir)
+	layoutPath := filepath.Join(dir, "layout")
+
+	err := run(context.Background(), cliConfig{
+		tarballPath:  tarballPath,
+		packJSON:     packPath,
+		payloadForm:  "ruby-gem",
+		ociLayout:    layoutPath,
+		tag:          "edge",
+		sourceCommit: strings.Repeat("a", 40),
+		sourceRepo:   "https://github.com/guardian-intelligence/guardian",
+	}, io.Discard)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), `unsupported payload form "ruby-gem"`) {
+		t.Fatalf("error = %v", err)
+	}
+	if _, statErr := os.Stat(layoutPath); !os.IsNotExist(statErr) {
+		t.Fatalf("layout was written or unexpected stat error: %v", statErr)
+	}
+}
+
 func TestRunWritesOCILayout(t *testing.T) {
 	dir := t.TempDir()
 	tarballPath, packPath, tarball := writePackFixture(t, dir)
@@ -403,7 +428,7 @@ func TestRunWritesDeterministicManifestDigest(t *testing.T) {
 }
 
 func TestResolveTaggedDescriptorUsesResolvedDigest(t *testing.T) {
-	resolved := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2}`))
+	resolved := validManifestDescriptor(`{"schemaVersion":2}`)
 	got, err := resolveTaggedDescriptor(context.Background(), staticResolver{desc: resolved}, "edge", ocispec.Descriptor{})
 	if err != nil {
 		t.Fatal(err)
@@ -424,13 +449,55 @@ func TestResolveTaggedDescriptorRejectsEmptyDigest(t *testing.T) {
 }
 
 func TestResolveTaggedDescriptorRejectsDigestMismatch(t *testing.T) {
-	pushed := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2}`))
-	resolved := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2,"different":true}`))
+	pushed := validManifestDescriptor(`{"schemaVersion":2}`)
+	resolved := validManifestDescriptor(`{"schemaVersion":2,"different":true}`)
 	_, err := resolveTaggedDescriptor(context.Background(), staticResolver{desc: resolved}, "edge", pushed)
 	if err == nil {
 		t.Fatal("expected error")
 	}
 	if !strings.Contains(err.Error(), "does not match pushed digest") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestResolveTaggedDescriptorRejectsMediaTypeMismatch(t *testing.T) {
+	pushed := validManifestDescriptor(`{"schemaVersion":2}`)
+	resolved := pushed
+	resolved.MediaType = "application/vnd.docker.distribution.manifest.v2+json"
+
+	_, err := resolveTaggedDescriptor(context.Background(), staticResolver{desc: resolved}, "edge", pushed)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "media type") || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestResolveTaggedDescriptorRejectsArtifactTypeMismatch(t *testing.T) {
+	pushed := validManifestDescriptor(`{"schemaVersion":2}`)
+	resolved := pushed
+	resolved.ArtifactType = "application/vnd.guardian.sdk.python.wheel.v1"
+
+	_, err := resolveTaggedDescriptor(context.Background(), staticResolver{desc: resolved}, "edge", pushed)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "artifact type") || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestResolveTaggedDescriptorRejectsSizeMismatch(t *testing.T) {
+	pushed := validManifestDescriptor(`{"schemaVersion":2}`)
+	resolved := pushed
+	resolved.Size++
+
+	_, err := resolveTaggedDescriptor(context.Background(), staticResolver{desc: resolved}, "edge", pushed)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "size") || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("error = %v", err)
 	}
 }
@@ -446,7 +513,7 @@ func TestValidateDescriptorRejectsEmptyDescriptor(t *testing.T) {
 }
 
 func TestValidateDescriptorRejectsMissingMediaType(t *testing.T) {
-	desc := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2}`))
+	desc := validManifestDescriptor(`{"schemaVersion":2}`)
 	desc.MediaType = ""
 	err := validateDescriptor("test OCI descriptor", desc)
 	if err == nil {
@@ -457,8 +524,32 @@ func TestValidateDescriptorRejectsMissingMediaType(t *testing.T) {
 	}
 }
 
+func TestValidateDescriptorRejectsUnsupportedMediaType(t *testing.T) {
+	desc := validManifestDescriptor(`{"schemaVersion":2}`)
+	desc.MediaType = "application/vnd.docker.distribution.manifest.v2+json"
+	err := validateDescriptor("test OCI descriptor", desc)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "unsupported media type") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestValidateDescriptorRejectsMissingArtifactType(t *testing.T) {
+	desc := validManifestDescriptor(`{"schemaVersion":2}`)
+	desc.ArtifactType = ""
+	err := validateDescriptor("test OCI descriptor", desc)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "empty artifact type") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestValidateDescriptorRejectsInvalidDigestSyntax(t *testing.T) {
-	desc := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2}`))
+	desc := validManifestDescriptor(`{"schemaVersion":2}`)
 	desc.Digest = "sha256:not-hex"
 	err := validateDescriptor("test OCI descriptor", desc)
 	if err == nil {
@@ -470,7 +561,7 @@ func TestValidateDescriptorRejectsInvalidDigestSyntax(t *testing.T) {
 }
 
 func TestValidateDescriptorRejectsUnsupportedDigestAlgorithm(t *testing.T) {
-	desc := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2}`))
+	desc := validManifestDescriptor(`{"schemaVersion":2}`)
 	desc.Digest = "sha512:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	err := validateDescriptor("test OCI descriptor", desc)
 	if err == nil {
@@ -483,11 +574,72 @@ func TestValidateDescriptorRejectsUnsupportedDigestAlgorithm(t *testing.T) {
 
 func TestValidateDescriptorRejectsZeroSize(t *testing.T) {
 	desc := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, nil)
+	desc.ArtifactType = defaultArtifactType
 	err := validateDescriptor("test OCI descriptor", desc)
 	if err == nil {
 		t.Fatal("expected error")
 	}
 	if !strings.Contains(err.Error(), "non-positive size") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestPushToTargetRejectsInvalidResolvedManifestDescriptor(t *testing.T) {
+	target := &recordingTarget{
+		resolve: func(reference string, desc ocispec.Descriptor) ocispec.Descriptor {
+			if reference == "edge" {
+				desc.Digest = ""
+			}
+			return desc
+		},
+	}
+
+	_, _, err := pushToTarget(
+		context.Background(),
+		target,
+		"edge",
+		packEntry{Filename: "guardian-intelligence-aisucks-0.3.0.tgz"},
+		[]byte("payload"),
+		nil,
+		defaultPayloadMediaType,
+		defaultArtifactType,
+		nil,
+		defaultAttestationLayerTitle,
+	)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "resolved tagged OCI artifact edge has empty digest") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestPushToTargetRejectsInvalidResolvedAttestationDescriptor(t *testing.T) {
+	target := &recordingTarget{
+		resolve: func(reference string, desc ocispec.Descriptor) ocispec.Descriptor {
+			if reference == "edge.attestation" {
+				desc.Digest = ""
+			}
+			return desc
+		},
+	}
+
+	_, _, err := pushToTarget(
+		context.Background(),
+		target,
+		"edge",
+		packEntry{Filename: "guardian-intelligence-aisucks-0.3.0.tgz"},
+		[]byte("payload"),
+		nil,
+		defaultPayloadMediaType,
+		defaultArtifactType,
+		[]byte(`{"bundle":true}`),
+		defaultAttestationLayerTitle,
+	)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "resolved tagged OCI artifact edge.attestation has empty digest") {
 		t.Fatalf("error = %v", err)
 	}
 }
@@ -503,7 +655,7 @@ func TestValidatePushedDescriptorsRejectsEmptyManifest(t *testing.T) {
 }
 
 func TestValidatePushedDescriptorsRejectsInvalidManifest(t *testing.T) {
-	manifest := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2}`))
+	manifest := validManifestDescriptor(`{"schemaVersion":2}`)
 	manifest.MediaType = ""
 
 	err := validatePushedDescriptors("remote", manifest, nil)
@@ -516,7 +668,7 @@ func TestValidatePushedDescriptorsRejectsInvalidManifest(t *testing.T) {
 }
 
 func TestValidatePushedDescriptorsRejectsEmptyAttestationManifest(t *testing.T) {
-	manifest := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2}`))
+	manifest := validManifestDescriptor(`{"schemaVersion":2}`)
 	attestation := ocispec.Descriptor{}
 
 	err := validatePushedDescriptors("remote", manifest, &attestation)
@@ -529,8 +681,8 @@ func TestValidatePushedDescriptorsRejectsEmptyAttestationManifest(t *testing.T) 
 }
 
 func TestValidatePushedDescriptorsRejectsInvalidAttestationManifest(t *testing.T) {
-	manifest := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2}`))
-	attestation := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2}`))
+	manifest := validManifestDescriptor(`{"schemaVersion":2}`)
+	attestation := validAttestationDescriptor(`{"schemaVersion":2}`)
 	attestation.Size = 0
 
 	err := validatePushedDescriptors("remote", manifest, &attestation)
@@ -543,8 +695,8 @@ func TestValidatePushedDescriptorsRejectsInvalidAttestationManifest(t *testing.T
 }
 
 func TestValidatePushedDescriptorsAcceptsValidManifestAndAttestation(t *testing.T) {
-	manifest := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2}`))
-	attestation := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(`{"schemaVersion":2,"attestation":true}`))
+	manifest := validManifestDescriptor(`{"schemaVersion":2}`)
+	attestation := validAttestationDescriptor(`{"schemaVersion":2,"attestation":true}`)
 
 	if err := validatePushedDescriptors("remote", manifest, &attestation); err != nil {
 		t.Fatal(err)
@@ -613,6 +765,21 @@ func TestWriteResultRejectsPayloadDigestMismatch(t *testing.T) {
 	}
 }
 
+func TestWriteResultRejectsUnsupportedPayloadForm(t *testing.T) {
+	result := validNPMResult()
+	result.PayloadForm = "ruby-gem"
+	result.TarballDigest = ""
+	result.NPMIntegrity = ""
+
+	err := writeResult(result, "", io.Discard)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), `unsupported payload_form "ruby-gem"`) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestWriteResultRejectsInvalidSourceCommit(t *testing.T) {
 	result := validNPMResult()
 	result.SourceCommit = "not-a-full-sha"
@@ -652,6 +819,19 @@ func TestWriteResultRejectsAttestationDigestWithoutRef(t *testing.T) {
 	}
 }
 
+func TestWriteResultRejectsAttestationRefWithoutDigest(t *testing.T) {
+	result := validNPMResult()
+	result.AttestationRef = "oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+	err := writeResult(result, "", io.Discard)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "attestation ref without attestation digest") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestWriteResultRejectsInvalidAttestationDigest(t *testing.T) {
 	result := validNPMResult()
 	result.AttestationDigest = "sha256:not-hex"
@@ -686,6 +866,52 @@ type staticResolver struct {
 
 func (r staticResolver) Resolve(context.Context, string) (ocispec.Descriptor, error) {
 	return r.desc, nil
+}
+
+type recordingTarget struct {
+	tags    map[string]ocispec.Descriptor
+	resolve func(string, ocispec.Descriptor) ocispec.Descriptor
+}
+
+func (t *recordingTarget) Push(_ context.Context, _ ocispec.Descriptor, content io.Reader) error {
+	_, err := io.Copy(io.Discard, content)
+	return err
+}
+
+func (t *recordingTarget) Fetch(context.Context, ocispec.Descriptor) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("")), nil
+}
+
+func (t *recordingTarget) Exists(context.Context, ocispec.Descriptor) (bool, error) {
+	return false, nil
+}
+
+func (t *recordingTarget) Tag(_ context.Context, desc ocispec.Descriptor, reference string) error {
+	if t.tags == nil {
+		t.tags = make(map[string]ocispec.Descriptor)
+	}
+	t.tags[reference] = desc
+	return nil
+}
+
+func (t *recordingTarget) Resolve(_ context.Context, reference string) (ocispec.Descriptor, error) {
+	desc := t.tags[reference]
+	if t.resolve != nil {
+		return t.resolve(reference, desc), nil
+	}
+	return desc, nil
+}
+
+func validManifestDescriptor(data string) ocispec.Descriptor {
+	desc := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(data))
+	desc.ArtifactType = defaultArtifactType
+	return desc
+}
+
+func validAttestationDescriptor(data string) ocispec.Descriptor {
+	desc := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(data))
+	desc.ArtifactType = attestationArtifactType
+	return desc
 }
 
 func writePackFixture(t *testing.T, dir string) (string, string, []byte) {

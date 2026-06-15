@@ -107,9 +107,9 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 - [ ] Public reads are digest-addressed; mutable tags are channel convenience
   only.
 - [x] SDK can be pulled from the local OCI layout with
-  `oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist`.
+  `guardian run oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist`.
 - [ ] SDK can be pulled from the public OCI registry with
-  `oras pull oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>`.
+  `guardian run oras pull oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>`.
 
 ### Release Tuple Manifest
 
@@ -213,14 +213,15 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 A clean machine should eventually be able to run:
 
 ```sh
-cosign verify <zot-or-ghcr-image>@sha256:...
-cosign verify-attestation --type slsaprovenance <image>@sha256:...
+guardian run cosign verify <zot-or-ghcr-image>@sha256:...
+guardian run cosign verify-attestation --type slsaprovenance <image>@sha256:...
 npm view @guardian-intelligence/aisucks@edge dist.integrity
 npm install @guardian-intelligence/aisucks@edge
 aspect release sdk-oci --output-dir /tmp/guardian-sdk-release
-oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist
-oras discover --oci-layout /tmp/guardian-sdk-release/oci-layout:edge
-oras pull oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest> -o ./dist
+guardian run oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist
+guardian run oras discover --oci-layout /tmp/guardian-sdk-release/oci-layout:edge
+guardian run oras pull oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest> -o ./dist
+guardian run cosign verify oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>
 guardian/repo tool verify release-manifest <digest-or-file>
 guardian/repo tool synthetic health --base-url=https://gamma.aisucks.app
 ```
