@@ -144,8 +144,7 @@ spec:
   waitForSecrets: false
   target:
     namespace: directus
-    namespaceLabels:
-      pod-security.kubernetes.io/enforce: privileged
+    createNamespace: false
   openbao:
     role: directus-secrets
     serviceAccountName: external-secrets-directus

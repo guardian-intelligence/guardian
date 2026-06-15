@@ -24,8 +24,9 @@ type secretProjectionManifest struct {
 
 type secretProjectionSpec struct {
 	WaitForSecrets *bool `yaml:"waitForSecrets"`
-	Target struct {
+	Target         struct {
 		Namespace       string            `yaml:"namespace"`
+		CreateNamespace *bool             `yaml:"createNamespace"`
 		NamespaceLabels map[string]string `yaml:"namespaceLabels"`
 	} `yaml:"target"`
 	OpenBao struct {
@@ -49,6 +50,10 @@ type secretProjectionData struct {
 
 func (p secretProjectionManifest) waitForSecrets() bool {
 	return p.Spec.WaitForSecrets == nil || *p.Spec.WaitForSecrets
+}
+
+func (p secretProjectionManifest) createsNamespace() bool {
+	return p.Spec.Target.CreateNamespace == nil || *p.Spec.Target.CreateNamespace
 }
 
 func secretProjections(site *Site) ([]secretProjectionManifest, error) {
@@ -95,6 +100,9 @@ func validateSecretProjection(site *Site, projection secretProjectionManifest) e
 	if spec.Target.Namespace == "" {
 		return fmt.Errorf("environment %s: SecretProjection %s target.namespace is required", site.EnvironmentBundle.Path, name)
 	}
+	if !projection.createsNamespace() && len(spec.Target.NamespaceLabels) > 0 {
+		return fmt.Errorf("environment %s: SecretProjection %s target.namespaceLabels require target.createNamespace", site.EnvironmentBundle.Path, name)
+	}
 	if spec.OpenBao.Role == "" {
 		return fmt.Errorf("environment %s: SecretProjection %s openbao.role is required", site.EnvironmentBundle.Path, name)
 	}
@@ -137,6 +145,11 @@ func waitSecretProjections(kubectl, kubeconfig string, site *Site) error {
 			return err
 		}
 		namespace := projection.Spec.Target.Namespace
+		if !projection.createsNamespace() {
+			if err := cleanupOrphanedSecretProjectionNamespaceObject(kubectl, kubeconfig, name); err != nil {
+				return err
+			}
+		}
 		if err := poll("secret projection namespace "+namespace, 3*time.Minute, 2*time.Second, func() error {
 			_, err := outputTool(kubectl, "--kubeconfig", kubeconfig, "get", "namespace", namespace)
 			return err
@@ -164,4 +177,36 @@ func waitSecretProjections(kubectl, kubeconfig string, site *Site) error {
 		}
 	}
 	return nil
+}
+
+func cleanupOrphanedSecretProjectionNamespaceObject(kubectl, kubeconfig, projectionName string) error {
+	objectName := "secret-projection-" + projectionName + "-namespace"
+	raw, err := outputTool(kubectl, "--kubeconfig", kubeconfig, "get", "object", objectName, "-o", "jsonpath={.metadata.deletionTimestamp}|{.spec.deletionPolicy}|{.metadata.finalizers}")
+	if err != nil {
+		if strings.Contains(err.Error(), "NotFound") || strings.Contains(err.Error(), "not found") {
+			return nil
+		}
+		return err
+	}
+	parts := strings.SplitN(strings.TrimSpace(raw), "|", 3)
+	if len(parts) != 3 {
+		return fmt.Errorf("unexpected legacy namespace object state for %s: %q", objectName, raw)
+	}
+	deletionTimestamp := strings.TrimSpace(parts[0])
+	deletionPolicy := strings.TrimSpace(parts[1])
+	finalizers := strings.TrimSpace(parts[2])
+	if deletionTimestamp == "" {
+		return nil
+	}
+	if deletionPolicy != "Orphan" {
+		return fmt.Errorf("refusing to clean up %s with deletionPolicy %q", objectName, deletionPolicy)
+	}
+	if finalizers == "" {
+		return nil
+	}
+	if strings.Contains(finalizers, "finalizer.managedresource.crossplane.io") {
+		return fmt.Errorf("refusing to clean up %s while managed resource finalizer remains: %s", objectName, finalizers)
+	}
+	fmt.Fprintf(os.Stderr, "cleaning up orphan-safe SecretProjection namespace object %s\n", objectName)
+	return runTool(kubectl, "--kubeconfig", kubeconfig, "patch", "object", objectName, "--type=merge", "-p", `{"metadata":{"finalizers":[]}}`)
 }

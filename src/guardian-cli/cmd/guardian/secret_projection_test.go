@@ -24,6 +24,7 @@ func TestSecretProjectionPlatformRender(t *testing.T) {
 		"name: secret-projection-openbao",
 		"kind: SecretStore",
 		"kind: ExternalSecret",
+		"createNamespace",
 		"deletionPolicy: Orphan",
 		"providerConfigRef:\n                name: platform",
 		"server: http://openbao.openbao.svc:8200",
@@ -86,6 +87,12 @@ func TestSecretProjectionSiteManifests(t *testing.T) {
 			if directus.Spec.Target.Namespace != "directus" {
 				t.Fatalf("directus namespace = %q", directus.Spec.Target.Namespace)
 			}
+			if directus.Spec.Target.CreateNamespace == nil || *directus.Spec.Target.CreateNamespace {
+				t.Fatal("directus SecretProjection should not create the Directus namespace")
+			}
+			if len(directus.Spec.Target.NamespaceLabels) != 0 {
+				t.Fatalf("directus SecretProjection namespaceLabels = %#v, want none", directus.Spec.Target.NamespaceLabels)
+			}
 			if directus.waitForSecrets() {
 				t.Fatal("directus secrets should not gate public site converge")
 			}
@@ -108,6 +115,18 @@ func TestSecretProjectionSiteManifests(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSecretProjectionCreatesNamespaceDefault(t *testing.T) {
+	var projection secretProjectionManifest
+	if !projection.createsNamespace() {
+		t.Fatal("SecretProjection should create target namespaces by default")
+	}
+	disabled := false
+	projection.Spec.Target.CreateNamespace = &disabled
+	if projection.createsNamespace() {
+		t.Fatal("SecretProjection createNamespace=false should disable namespace creation")
 	}
 }
 
