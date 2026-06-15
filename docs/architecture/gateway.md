@@ -35,11 +35,11 @@ everything else is a route.
 - **Platform TLS is Gateway-terminated by amendment.** Public product and
   platform hostnames that do not intentionally own keys terminate TLS at
   Cilium Gateway using cert-manager-managed Secrets and route to in-cluster
-  HTTP backends. This includes `guardianintelligence.org` and
-  `oci.guardianintelligence.org`. Surfaces that intentionally own keys, or
-  whose DNS/cert custody is not yet in the platform secret set, stay on
-  passthrough; `aisucks.app` is currently in this group. Do not add a Caddy,
-  nginx, or bespoke TLS proxy to solve this.
+  HTTP backends. This includes `guardianintelligence.org`,
+  `oci.guardianintelligence.org`, and `aisucks.app`. App-local CertMagic state
+  is not wipe-safe for multi-replica public services. Surfaces that
+  intentionally own keys stay on passthrough. Do not add a Caddy, nginx, or
+  bespoke TLS proxy to solve this.
 - **CRD pin = a function of the Cilium version.** Cilium 1.19 consumes
   TLSRoute as v1alpha2, so we vendor the exact Gateway API release the
   Cilium 1.19.4 docs declare conformance against (v1.4.1 at this writing;
@@ -50,9 +50,9 @@ everything else is a route.
   serving v1alpha2 — bumping the CRDs alone would silently disable the path
   everything routes through. Adopt v1 at the Cilium bump that does, as one
   change.
-- **:80 listener**: HTTPRoute forwarding redirect traffic and
-  `guardianintelligence.org` ACME challenge paths where needed. Platform TLS
-  for `guardianintelligence.org` uses Cloudflare DNS-01.
+- **:80 listener**: HTTPRoute forwarding redirect traffic and ACME challenge
+  paths where needed. Platform TLS for `guardianintelligence.org` uses
+  Cloudflare DNS-01; other public names can use the Gateway HTTP-01 solver.
 
 ## The bootstrap invariant (the acceptance bar)
 

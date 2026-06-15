@@ -130,12 +130,13 @@ spec:
     namespace: gateway
     name: edge
   listeners:
-    - name: tls-aisucks
+    - name: https-aisucks
       hostname: "dev.aisucks.app"
       port: 443
-      protocol: TLS
+      protocol: HTTPS
       tls:
-        mode: Passthrough
+        mode: Terminate
+        certificateRefName: aisucks-tls
     - name: https-company-site
       hostname: "dev.guardianintelligence.org"
       port: 443
@@ -174,6 +175,12 @@ spec:
     dnsZones:
       - guardianintelligence.org
   certificates:
+    - name: aisucks-tls
+      namespace: gateway
+      secretName: aisucks-tls
+      dnsNames:
+        - "dev.aisucks.app"
+      issuerRefName: letsencrypt-production
     - name: oci-guardianintelligence-org-tls
       namespace: gateway
       secretName: oci-guardianintelligence-org-tls

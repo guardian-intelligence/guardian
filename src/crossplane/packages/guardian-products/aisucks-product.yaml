@@ -133,7 +133,8 @@ spec:
               gateway:
                 name: edge
                 namespace: gateway
-                tlsSectionName: tls-aisucks
+                tlsSectionName: https-aisucks
+                tlsMode: Terminate
                 httpSectionName: http
                 tlsRouteAPIVersion: gateway.networking.k8s.io/v1alpha2
                 httpRouteHostnames:
