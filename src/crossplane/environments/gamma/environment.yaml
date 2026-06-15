@@ -137,38 +137,6 @@ spec:
           property: password
 ---
 apiVersion: platform.guardian.dev/v1alpha1
-kind: SecretProjection
-metadata:
-  name: directus-secrets
-spec:
-  waitForSecrets: false
-  target:
-    namespace: directus
-    createNamespace: false
-  openbao:
-    role: directus-secrets
-    serviceAccountName: external-secrets-directus
-  secrets:
-    - name: directus-runtime
-      type: Opaque
-      remotePath: guardian/guardian-gamma/directus/runtime
-      data:
-        - secretKey: secret
-          property: secret
-    - name: directus-admin
-      type: Opaque
-      remotePath: guardian/guardian-gamma/directus/admin
-      data:
-        - secretKey: password
-          property: password
-    - name: directus-postgres
-      type: Opaque
-      remotePath: guardian/guardian-gamma/directus/postgres
-      data:
-        - secretKey: password
-          property: password
----
-apiVersion: platform.guardian.dev/v1alpha1
 kind: EdgeGateway
 metadata:
   name: edge
@@ -269,6 +237,15 @@ spec:
   readiness:
     waitForRollout: false
   secrets:
+    projection:
+      waitForSecrets: false
+      openbao:
+        role: directus-secrets
+        serviceAccountName: external-secrets-directus
+      remotePaths:
+        runtime: guardian/guardian-gamma/directus/runtime
+        admin: guardian/guardian-gamma/directus/admin
+        database: guardian/guardian-gamma/directus/postgres
     runtimeSecretName: directus-runtime
     runtimeSecretKey: secret
     adminSecretName: directus-admin

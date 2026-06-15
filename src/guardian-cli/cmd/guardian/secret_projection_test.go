@@ -84,6 +84,9 @@ func TestSecretProjectionSiteManifests(t *testing.T) {
 				}
 			}
 			directus := secretProjectionByName(t, projections, "directus-secrets")
+			if directus.DerivedFromKind != "DirectusInstance" || directus.DerivedFromName != "directus" {
+				t.Fatalf("directus projection source = %s/%s, want DirectusInstance/directus", directus.DerivedFromKind, directus.DerivedFromName)
+			}
 			if directus.Spec.Target.Namespace != "directus" {
 				t.Fatalf("directus namespace = %q", directus.Spec.Target.Namespace)
 			}

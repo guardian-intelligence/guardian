@@ -62,6 +62,38 @@ spec:
                 secrets:
                   type: object
                   properties:
+                    projection:
+                      type: object
+                      properties:
+                        waitForSecrets:
+                          type: boolean
+                          default: false
+                        openbao:
+                          type: object
+                          properties:
+                            role:
+                              type: string
+                            serviceAccountName:
+                              type: string
+                          required:
+                            - role
+                            - serviceAccountName
+                        remotePaths:
+                          type: object
+                          properties:
+                            runtime:
+                              type: string
+                            admin:
+                              type: string
+                            database:
+                              type: string
+                          required:
+                            - runtime
+                            - admin
+                            - database
+                      required:
+                        - openbao
+                        - remotePaths
                     runtimeSecretName:
                       type: string
                     runtimeSecretKey:
@@ -75,6 +107,7 @@ spec:
                     databasePasswordKey:
                       type: string
                   required:
+                    - projection
                     - runtimeSecretName
                     - runtimeSecretKey
                     - adminSecretName
@@ -213,8 +246,14 @@ spec:
             {{- $gatewayEnabled := index $env "gateway" "enabled" -}}
             {{- $publicURL := printf "http://directus.%s.svc:8055" $spec.namespace -}}
             {{- $s3Storage := false -}}
+            {{- $waitForSecrets := false -}}
             {{- if $spec.adminDomain -}}
             {{- $publicURL = printf "https://%s" $spec.adminDomain -}}
+            {{- end -}}
+            {{- with $spec.secrets.projection.waitForSecrets -}}
+            {{- if . -}}
+            {{- $waitForSecrets = true -}}
+            {{- end -}}
             {{- end -}}
             {{- with $spec.storage -}}
             {{- with .s3 -}}
@@ -256,6 +295,40 @@ spec:
                       {{ $key }}: {{ $value }}
                       {{- end }}
                     {{- end }}
+            ---
+            apiVersion: platform.guardian.dev/v1alpha1
+            kind: SecretProjection
+            metadata:
+              name: {{ $xr.metadata.name }}-secrets
+              annotations:
+                {{ setResourceNameAnnotation "secret-projection" }}
+            spec:
+              waitForSecrets: {{ $waitForSecrets }}
+              target:
+                namespace: {{ $spec.namespace }}
+                createNamespace: false
+              openbao:
+                role: {{ $spec.secrets.projection.openbao.role }}
+                serviceAccountName: {{ $spec.secrets.projection.openbao.serviceAccountName }}
+              secrets:
+                - name: {{ $spec.secrets.runtimeSecretName }}
+                  type: Opaque
+                  remotePath: {{ $spec.secrets.projection.remotePaths.runtime }}
+                  data:
+                    - secretKey: {{ $spec.secrets.runtimeSecretKey }}
+                      property: {{ $spec.secrets.runtimeSecretKey }}
+                - name: {{ $spec.secrets.adminSecretName }}
+                  type: Opaque
+                  remotePath: {{ $spec.secrets.projection.remotePaths.admin }}
+                  data:
+                    - secretKey: {{ $spec.secrets.adminPasswordKey }}
+                      property: {{ $spec.secrets.adminPasswordKey }}
+                - name: {{ $spec.secrets.databaseSecretName }}
+                  type: Opaque
+                  remotePath: {{ $spec.secrets.projection.remotePaths.database }}
+                  data:
+                    - secretKey: {{ $spec.secrets.databasePasswordKey }}
+                      property: {{ $spec.secrets.databasePasswordKey }}
             ---
             apiVersion: kubernetes.crossplane.io/v1alpha2
             kind: Object
