@@ -66,8 +66,10 @@ and digest-pinned image rollout.
 - Pin the Directus image by digest and manage it through Bazel/OCI plumbing.
 - Use Postgres for Directus data. Back it up and restore it through Guardian's
   normal offsite survival floor.
-- Use S3-compatible object storage for uploads. Do not store public assets only
-  on a pod filesystem.
+- Use S3-compatible object storage for uploads before public authoring depends
+  on uploaded assets. Early private authoring may use the platform's local
+  Directus storage mode, but public assets must not live only on a pod
+  filesystem.
 - Use Redis when Directus runs more than one replica or when cache/session/
   websocket coordination matters. A single Directus replica is acceptable for
   early authoring because the public site must keep serving without Directus.

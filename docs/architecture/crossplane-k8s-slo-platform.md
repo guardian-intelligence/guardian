@@ -105,8 +105,8 @@ kube-state-metrics, optional ClickHouse, and temporary Gatus while the
 cross-site blackbox path finishes replacing it.
 
 `DirectusInstance` owns the authoring backend: Directus, Postgres binding,
-initial hostPath uploads, future object storage references, optional Redis,
-admin route policy, backup/restore hooks, and OpenBao secret projections. It
+initial hostPath uploads, optional S3-compatible object storage references,
+optional Redis, admin route policy, backup/restore hooks, and OpenBao secret projections. It
 must not become the public read path.
 
 `SyntheticCheck` and `SLOProfile` describe the routes and metrics that gate
