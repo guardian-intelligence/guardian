@@ -24,6 +24,12 @@ func TestEnvironmentCapabilities(t *testing.T) {
 				},
 				"DirectusInstance/directus": nil,
 			}
+			if siteName == "dev" {
+				want["OCIRegistry/zot"] = "ociregistries.platform.guardian.dev"
+				wantRollouts["OCIRegistry/zot"] = []environmentRollout{
+					{namespace: "guardian-oci", resource: "deployment/zot"},
+				}
+			}
 			got := map[string]string{}
 			gotRollouts := map[string][]environmentRollout{}
 			for _, cap := range caps {

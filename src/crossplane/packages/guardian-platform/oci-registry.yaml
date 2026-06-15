@@ -1,0 +1,341 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: ociregistries.platform.guardian.dev
+spec:
+  scope: Cluster
+  group: platform.guardian.dev
+  names:
+    kind: OCIRegistry
+    plural: ociregistries
+  defaultCompositionRef:
+    name: oci-registry-kubernetes
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                site:
+                  type: string
+                namespace:
+                  type: string
+                image:
+                  type: string
+                  description: Digest-pinned zot OCI image reference.
+                domain:
+                  type: string
+                storagePath:
+                  type: string
+                publisherSecret:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    htpasswdKey:
+                      type: string
+                  required:
+                    - name
+                    - htpasswdKey
+                gateway:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                    httpsSectionName:
+                      type: string
+                  required:
+                    - name
+                    - namespace
+                    - httpsSectionName
+                readiness:
+                  type: object
+                  properties:
+                    waitForRollout:
+                      type: boolean
+                      default: true
+              required:
+                - site
+                - namespace
+                - image
+                - domain
+                - storagePath
+                - publisherSecret
+                - gateway
+            status:
+              type: object
+              properties:
+                url:
+                  type: string
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: oci-registry-kubernetes
+spec:
+  compositeTypeRef:
+    apiVersion: platform.guardian.dev/v1alpha1
+    kind: OCIRegistry
+  mode: Pipeline
+  pipeline:
+    - step: load-environment
+      functionRef:
+        name: function-environment-configs
+      input:
+        apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+        kind: Input
+        spec:
+          environmentConfigs:
+            - type: Selector
+              selector:
+                mode: Single
+                matchLabels:
+                  - key: guardian.dev/site
+                    type: FromCompositeFieldPath
+                    valueFromFieldPath: spec.site
+    - step: render-oci-registry
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
+            {{- $gatewayEnabled := index $env "gateway" "enabled" -}}
+            ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              name: oci-registry-{{ $spec.namespace }}-config
+              annotations:
+                {{ setResourceNameAnnotation "config" }}
+            spec:
+              providerConfigRef:
+                name: platform
+              forProvider:
+                manifest:
+                  apiVersion: v1
+                  kind: ConfigMap
+                  metadata:
+                    name: zot
+                    namespace: {{ $spec.namespace }}
+                  data:
+                    config.json: |
+                      {
+                        "distSpecVersion": "1.1.1",
+                        "storage": {
+                          "rootDirectory": "/var/lib/zot"
+                        },
+                        "http": {
+                          "address": "0.0.0.0",
+                          "port": "5000",
+                          "auth": {
+                            "failDelay": 2,
+                            "htpasswd": {
+                              "path": "/zot-auth/htpasswd"
+                            }
+                          },
+                          "accessControl": {
+                            "repositories": {
+                              "**": {
+                                "anonymousPolicy": ["read"],
+                                "policies": [
+                                  {
+                                    "users": ["guardian-release"],
+                                    "actions": ["read", "create", "update", "delete"]
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        "log": {
+                          "level": "info"
+                        },
+                        "extensions": {
+                          "search": {
+                            "enable": true
+                          },
+                          "ui": {
+                            "enable": true
+                          }
+                        }
+                      }
+            ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              name: oci-registry-{{ $spec.namespace }}-deployment
+              annotations:
+                {{ setResourceNameAnnotation "deployment" }}
+            spec:
+              references:
+                - dependsOn:
+                    apiVersion: kubernetes.crossplane.io/v1alpha2
+                    kind: Object
+                    name: oci-registry-{{ $spec.namespace }}-config
+              providerConfigRef:
+                name: platform
+              forProvider:
+                manifest:
+                  apiVersion: apps/v1
+                  kind: Deployment
+                  metadata:
+                    name: zot
+                    namespace: {{ $spec.namespace }}
+                  spec:
+                    replicas: 1
+                    strategy:
+                      type: Recreate
+                    selector:
+                      matchLabels:
+                        app: zot
+                    template:
+                      metadata:
+                        labels:
+                          app: zot
+                      spec:
+                        securityContext:
+                          seccompProfile:
+                            type: RuntimeDefault
+                        containers:
+                          - name: zot
+                            image: {{ $spec.image }}
+                            command: ["/usr/local/bin/zot-linux-amd64"]
+                            args: ["serve", "/zot-config/config.json"]
+                            ports:
+                              - name: http
+                                containerPort: 5000
+                            securityContext:
+                              allowPrivilegeEscalation: false
+                              capabilities:
+                                drop:
+                                  - ALL
+                            resources:
+                              requests:
+                                cpu: 100m
+                                memory: 128Mi
+                              limits:
+                                memory: 512Mi
+                            readinessProbe:
+                              httpGet:
+                                path: /v2/
+                                port: http
+                              initialDelaySeconds: 2
+                              periodSeconds: 5
+                            livenessProbe:
+                              httpGet:
+                                path: /v2/
+                                port: http
+                              initialDelaySeconds: 10
+                              periodSeconds: 10
+                            volumeMounts:
+                              - name: config
+                                mountPath: /zot-config
+                                readOnly: true
+                              - name: auth
+                                mountPath: /zot-auth
+                                readOnly: true
+                              - name: storage
+                                mountPath: /var/lib/zot
+                        volumes:
+                          - name: config
+                            configMap:
+                              name: zot
+                              items:
+                                - key: config.json
+                                  path: config.json
+                          - name: auth
+                            secret:
+                              secretName: {{ $spec.publisherSecret.name }}
+                              items:
+                                - key: {{ $spec.publisherSecret.htpasswdKey }}
+                                  path: htpasswd
+                          - name: storage
+                            hostPath:
+                              path: {{ $spec.storagePath }}
+                              type: DirectoryOrCreate
+            ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              name: oci-registry-{{ $spec.namespace }}-service
+              annotations:
+                {{ setResourceNameAnnotation "service" }}
+            spec:
+              references:
+                - dependsOn:
+                    apiVersion: kubernetes.crossplane.io/v1alpha2
+                    kind: Object
+                    name: oci-registry-{{ $spec.namespace }}-deployment
+              providerConfigRef:
+                name: platform
+              forProvider:
+                manifest:
+                  apiVersion: v1
+                  kind: Service
+                  metadata:
+                    name: zot
+                    namespace: {{ $spec.namespace }}
+                  spec:
+                    selector:
+                      app: zot
+                    ports:
+                      - name: http
+                        port: 5000
+                        targetPort: http
+            {{- if and $gatewayEnabled $spec.domain }}
+            ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              name: oci-registry-{{ $spec.namespace }}-route
+              annotations:
+                {{ setResourceNameAnnotation "route" }}
+            spec:
+              references:
+                - dependsOn:
+                    apiVersion: kubernetes.crossplane.io/v1alpha2
+                    kind: Object
+                    name: oci-registry-{{ $spec.namespace }}-service
+              providerConfigRef:
+                name: platform
+              watch: true
+              forProvider:
+                manifest:
+                  apiVersion: gateway.networking.k8s.io/v1
+                  kind: HTTPRoute
+                  metadata:
+                    name: zot
+                    namespace: {{ $spec.namespace }}
+                  spec:
+                    parentRefs:
+                      - name: {{ $spec.gateway.name }}
+                        namespace: {{ $spec.gateway.namespace }}
+                        sectionName: {{ $spec.gateway.httpsSectionName }}
+                    hostnames:
+                      - "{{ $spec.domain }}"
+                    rules:
+                      - backendRefs:
+                          - name: zot
+                            port: 5000
+            {{- end }}
+            ---
+            apiVersion: platform.guardian.dev/v1alpha1
+            kind: OCIRegistry
+            status:
+              url: https://{{ $spec.domain }}
+    - step: mark-ready
+      functionRef:
+        name: function-auto-ready
