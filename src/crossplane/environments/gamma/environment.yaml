@@ -144,6 +144,7 @@ spec:
       dnsNames:
         - "gamma.aisucks.app"
       issuerRefName: letsencrypt-production
+      privateKeyAlgorithm: ECDSA
     - name: company-site-tls
       namespace: gateway
       secretName: company-site-tls

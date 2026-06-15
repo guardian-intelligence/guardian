@@ -54,6 +54,9 @@ func TestEdgeGatewaySiteManifests(t *testing.T) {
 				}
 				return
 			}
+			if siteName == "gamma" && !strings.Contains(out, "privateKeyAlgorithm: ECDSA") {
+				t.Error("gamma EdgeGateway should preserve restored ECDSA aisucks certificate")
+			}
 			for _, want := range []string{
 				"kind: EdgeGateway",
 				"name: https-aisucks",
