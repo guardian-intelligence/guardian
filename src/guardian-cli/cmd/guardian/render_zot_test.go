@@ -27,9 +27,9 @@ func TestZotRender(t *testing.T) {
 		{siteName: "prod", want: false},
 	} {
 		t.Run(tc.siteName, func(t *testing.T) {
-			sitePath, err := toolPath("_main/src/sites/" + tc.siteName + "/site.yaml")
+			sitePath, err := toolPath("_main/src/sites/" + tc.siteName + "/bootstrap.yaml")
 			if err != nil {
-				t.Fatalf("locate site.yaml: %v", err)
+				t.Fatalf("locate bootstrap.yaml: %v", err)
 			}
 			site, err := loadSite(sitePath)
 			if err != nil {
@@ -96,9 +96,9 @@ func TestZotPublisherSecretsRender(t *testing.T) {
 		{siteName: "prod", want: false},
 	} {
 		t.Run(tc.siteName, func(t *testing.T) {
-			sitePath, err := toolPath("_main/src/sites/" + tc.siteName + "/site.yaml")
+			sitePath, err := toolPath("_main/src/sites/" + tc.siteName + "/bootstrap.yaml")
 			if err != nil {
-				t.Fatalf("locate site.yaml: %v", err)
+				t.Fatalf("locate bootstrap.yaml: %v", err)
 			}
 			site, err := loadSite(sitePath)
 			if err != nil {

@@ -36,34 +36,38 @@ cosign verification at pull time. Not yet present in this repo.
 
 ## guardian CLI
 
-`guardian` owns the controller-side, human-initiated steps. Each site is one
-checked-in `site.yaml` (`src/sites/<site>/site.yaml`) naming the node, its
-static addressing facts, and the Talos schematic and patches. The bootstrap surface
-is two verbs plus operator config: run
-`guardian config site src/sites/dev/site.yaml` once (the path is stored
-absolute in `${XDG_CONFIG_HOME:-~/.config}/guardian/config.yaml`), then a
-drill is `guardian down --yes && guardian up`. Both verbs also accept an
-explicit `<site.yaml>` positional argument, which overrides the configured
-site. `guardian config` with no arguments prints the config file path and
-contents. Run both verbs from the repo root: only the configured site path
-is stored absolute; the paths inside `site.yaml` (schematic, patches, site
-manifests) and the component manifests are repo-root relative.
+`guardian` owns the controller-side, human-initiated steps. Each site has a
+checked-in `bootstrap.yaml` (`src/sites/<site>/bootstrap.yaml`) naming the
+node, its static addressing facts, and the Talos schematic and patches.
+Post-Kubernetes desired state lives separately in
+`src/crossplane/environments/<site>/environment.yaml` as an
+`EnvironmentConfig` plus any site XR instances. The bootstrap surface is two
+verbs plus operator config: run
+`guardian config bootstrap src/sites/dev/bootstrap.yaml` once (the path is
+stored absolute in `${XDG_CONFIG_HOME:-~/.config}/guardian/config.yaml`), then
+a drill is `guardian down --yes && guardian up`. Both verbs also accept an
+explicit `<bootstrap.yaml>` positional argument, which overrides the configured
+bootstrap path. `guardian config` with no arguments prints the config file path
+and contents. Run both verbs from the repo root: only the configured bootstrap
+path is stored absolute; the paths inside `bootstrap.yaml` (schematic and
+patches), the Crossplane environment bundle, and component manifests are
+repo-root relative.
 
-1. `guardian down --yes [site.yaml]` takes the node to Talos maintenance
+1. `guardian down --yes [bootstrap.yaml]` takes the node to Talos maintenance
    mode with a wiped system disk, from whichever state it is in. A node
    running configured Talos is reset over its authenticated API
    (`talosctl reset`, non-graceful because a single-node etcd cannot leave
    its own cluster). A node running any other Linux is kexec'd into the
    Talos maintenance image over SSH: the node downloads the factory's boot
    assets directly (its datacenter route to the factory is the one that
-   matters), guardian appends static `ip=` addressing from `site.yaml` to
-   the pinned metal command line (sites have no DHCP), loads with
+   matters), guardian appends static `ip=` addressing from `bootstrap.yaml`
+   to the pinned metal command line (sites have no DHCP), loads with
    kexec-tools, and `systemctl kexec`.
    SSH authentication is the caller's ambient setup; guardian never holds
    credentials. No provider API is involved; provisioning compute is outside
    guardian's scope. The `--yes` acknowledgement is required because this
    destroys everything on the node.
-2. `guardian up [site.yaml]` converges from runtime truth. It generates or
+2. `guardian up [bootstrap.yaml]` converges from runtime truth. It generates or
    reuses the site's Talos secrets bundle (under
    `${XDG_STATE_HOME:-~/.local/state}/guardian/<cluster>/`, never in the
    repo), including Talos's `secretboxEncryptionSecret` for Kubernetes
@@ -76,14 +80,16 @@ manifests) and the component manifests are repo-root relative.
    `machine.install.diskSelector` patch, so the reserved ZFS disk is never
    an install target even when two identical NVMes re-enumerate. Both paths
    end with the seed registry up, workspace artifacts pushed into it,
-   and the secrets substrate converged first: OpenBao applies and becomes
+   and the secrets substrate converged first. OpenBao applies and becomes
    reachable; Bao is restored or fresh-initialized/unsealed; `kv/` and
-   Kubernetes auth are configured; External Secrets Operator is installed;
-   observability projections are applied; and `guardian up` waits for
-   `clickhouse-admin` and `grafana-admin` before applying ClickHouse or
-   Grafana. An already-sealed restored Bao must be unsealed with injected
-   Shamir keys (`GUARDIAN_OPENBAO_UNSEAL_KEY` or
-   `GUARDIAN_OPENBAO_UNSEAL_KEYS`) before the projection gate can pass.
+   Kubernetes auth are configured; Crossplane, provider-kubernetes, and pinned
+   functions are installed; the site's Crossplane environment bundle is
+   applied; External Secrets Operator is installed; observability projections
+   are applied; and `guardian up` waits for `clickhouse-admin` and
+   `grafana-admin` before applying ClickHouse or Grafana. An already-sealed
+   restored Bao must be unsealed with injected Shamir keys
+   (`GUARDIAN_OPENBAO_UNSEAL_KEY` or `GUARDIAN_OPENBAO_UNSEAL_KEYS`) before the
+   projection gate can pass.
 
 Version pins consumed by the CLI are compile-time constants, and `talosctl`
 and `kubectl` ride in the binary's runfiles; changing what the fleet runs is

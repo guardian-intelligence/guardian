@@ -1,6 +1,6 @@
 # blackbox-exporter: the probe engine for cross-site watching. This config
 # holds prober MODULES only (how to probe); the probe TARGETS live in the
-# otel-collector's scrape config, rendered there from site.yaml watch lists —
+# otel-collector's scrape config, rendered there from environment watch lists —
 # do not add a second target list here. Together with the SiteProbeFailed
 # alert rule this is the Gatus-retirement path; Gatus stays deployed in
 # parallel until a drill-induced cross-site page proves this pipeline.
@@ -22,7 +22,7 @@ data:
         prober: http
         timeout: 5s
         http:
-          # Watch targets are full URLs from site.yaml and include https://
+          # Watch targets are full URLs from the environment and include https://
           # (sites with domains) as well as http:// (dev, pre-DNS); a plain
           # HTTP probe must not fail merely for lacking TLS.
           fail_if_not_ssl: false

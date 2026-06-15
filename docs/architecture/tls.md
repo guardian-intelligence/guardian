@@ -69,8 +69,8 @@ Fresh bootstrap order for a Gateway-enabled site:
 7. provider-kubernetes, function-go-templating, and function-auto-ready
    packages are applied and waited on.
 8. ProviderConfig and the EdgeGateway XRD/Composition are applied.
-9. `guardian up` applies the checked-in manifests listed in
-   `gateway.manifests`, including the site's concrete EdgeGateway.
+9. `guardian up` applies the site's Crossplane environment bundle, including
+   the concrete EdgeGateway XR.
 10. Product components apply their Deployments/Services/routes.
 
 `guardian up` may wait for Kubernetes objects and controllers to converge, but

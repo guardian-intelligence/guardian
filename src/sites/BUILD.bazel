@@ -1,12 +1,11 @@
-# Site definitions and Talos patches as test data: the inline-manifest
+# Bootstrap definitions and Talos patches as test data: the inline-manifest
 # ordering test (//src/guardian-cli/cmd/guardian:guardian_test) renders the
-# real machine config from the real talos.patches lists — the order it pins
-# is the order written in each site.yaml.
+# real machine config from the real talos.patches lists -- the order it pins
+# is the order written in each bootstrap.yaml.
 filegroup(
     name = "sites",
     srcs = glob([
-        "*/k8s/*.yaml",
-        "*/site.yaml",
+        "*/bootstrap.yaml",
         "*/talos/patches/*.yaml",
     ]),
     visibility = ["//src/guardian-cli:__subpackages__"],

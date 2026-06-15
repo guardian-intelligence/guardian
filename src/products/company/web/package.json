@@ -1,0 +1,22 @@
+{
+  "name": "@guardian/company-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "scripts": {
+    "build": "vp build",
+    "generate": "node scripts/generate.mjs",
+    "typecheck": "vp build --mode check"
+  },
+  "dependencies": {
+    "gray-matter": "catalog:",
+    "marked": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

@@ -100,7 +100,7 @@ func runUp(args []string) error {
 	// the default install.disk path, so the ZFS disk is never a target.
 	genArgs = append(genArgs, "--config-patch",
 		fmt.Sprintf(`{"machine":{"install":{"diskSelector":{"serial":%q}}}}`, site.Node.InstallDiskSerial))
-	// The site has no DHCP: static addressing comes from site.yaml, the same
+	// The site has no DHCP: static addressing comes from bootstrap.yaml, the same
 	// facts `down` passes to the maintenance kernel. Without this patch the
 	// installed node boots unreachable. The link is selected by MAC
 	// (deviceSelector), never by name: a dangling name fails silently — the
@@ -276,39 +276,37 @@ func runUp(args []string) error {
 	if err := reconcileOpenBao(kubectl, kubeconfig, site, restoring, *restoreRef, *wantSHA, snapPath); err != nil {
 		return err
 	}
-	if siteUsesEdgeGateway(site) {
-		if err := apply("crossplane"); err != nil {
+	if err := apply("crossplane"); err != nil {
+		return err
+	}
+	if err := waitCrossplane(kubectl, kubeconfig); err != nil {
+		return err
+	}
+	if siteUsesPlatformTLS(site) {
+		if err := apply("cert-manager"); err != nil {
 			return err
 		}
-		if err := waitCrossplane(kubectl, kubeconfig); err != nil {
-			return err
-		}
-		if siteUsesPlatformTLS(site) {
-			if err := apply("cert-manager"); err != nil {
-				return err
-			}
-		}
-		if err := apply("provider-kubernetes"); err != nil {
-			return err
-		}
-		if err := waitProviderKubernetes(kubectl, kubeconfig); err != nil {
-			return err
-		}
-		if err := apply("provider-kubernetes-config"); err != nil {
-			return err
-		}
-		if err := apply("edge-gateway-platform"); err != nil {
-			return err
-		}
-		if err := waitEdgeGatewayPlatform(kubectl, kubeconfig); err != nil {
-			return err
-		}
-		if err := applySiteManifests(kubectl, kubeconfig, "gateway", site.Gateway.Manifests); err != nil {
-			return err
-		}
-		if err := waitEdgeGateway(kubectl, kubeconfig, site); err != nil {
-			return err
-		}
+	}
+	if err := apply("provider-kubernetes"); err != nil {
+		return err
+	}
+	if err := waitProviderKubernetes(kubectl, kubeconfig); err != nil {
+		return err
+	}
+	if err := apply("provider-kubernetes-config"); err != nil {
+		return err
+	}
+	if err := apply("edge-gateway-platform"); err != nil {
+		return err
+	}
+	if err := waitEdgeGatewayPlatform(kubectl, kubeconfig); err != nil {
+		return err
+	}
+	if err := applyEnvironmentBundle(kubectl, kubeconfig, site); err != nil {
+		return err
+	}
+	if err := waitEdgeGateway(kubectl, kubeconfig, site); err != nil {
+		return err
 	}
 	if err := apply("victoria-metrics"); err != nil {
 		return err
@@ -365,25 +363,18 @@ func lookupComponent(name string) (component, bool) {
 	return component{}, false
 }
 
-func applySiteManifests(kubectl, kubeconfig, group string, paths []string) error {
-	for _, path := range paths {
-		manifest, err := readSiteManifest(path)
-		if err != nil {
-			return err
-		}
-		if len(bytes.TrimSpace(manifest)) == 0 {
-			fmt.Fprintf(os.Stderr, "skipping %s manifest %s: empty\n", group, path)
-			continue
-		}
-		fmt.Fprintf(os.Stderr, "applying %s manifest %s\n", group, path)
-		if err := runToolInput(manifest, kubectl, "--kubeconfig", kubeconfig, "apply", "-f", "-"); err != nil {
-			return fmt.Errorf("apply %s manifest %s: %w", group, path, err)
-		}
+func applyEnvironmentBundle(kubectl, kubeconfig string, site *Site) error {
+	if len(bytes.TrimSpace(site.EnvironmentBundle.Raw)) == 0 {
+		return fmt.Errorf("environment bundle %s is empty", site.EnvironmentBundle.Path)
+	}
+	fmt.Fprintf(os.Stderr, "applying environment bundle %s\n", site.EnvironmentBundle.Path)
+	if err := runToolInput(site.EnvironmentBundle.Raw, kubectl, "--kubeconfig", kubeconfig, "apply", "-f", "-"); err != nil {
+		return fmt.Errorf("apply environment bundle %s: %w", site.EnvironmentBundle.Path, err)
 	}
 	return nil
 }
 
-func readSiteManifest(path string) ([]byte, error) {
+func readRepoManifest(path string) ([]byte, error) {
 	resolved, err := resolveRepoInputPath(path)
 	if err != nil {
 		return nil, err
@@ -424,9 +415,8 @@ func applyComponent(kubectl, kubeconfig string, c component, images map[string]s
 	if rerr != nil {
 		return rerr
 	}
-	// A component may guard its entire manifest on site values (status
-	// renders nothing on sites without status.domains); kubectl rejects
-	// empty input, so an empty render means "not deployed here".
+	// A component may guard its entire manifest on environment values; kubectl
+	// rejects empty input, so an empty render means "not deployed here".
 	if len(bytes.TrimSpace(manifest)) == 0 {
 		fmt.Fprintf(os.Stderr, "skipping %s: manifest renders empty for this site\n", c.name)
 		return nil
@@ -481,6 +471,7 @@ func waitCrossplane(kubectl, kubeconfig string) error {
 	for _, crd := range []string{
 		"compositeresourcedefinitions.apiextensions.crossplane.io",
 		"compositions.apiextensions.crossplane.io",
+		"environmentconfigs.apiextensions.crossplane.io",
 		"functions.pkg.crossplane.io",
 		"providers.pkg.crossplane.io",
 	} {
@@ -525,6 +516,9 @@ func waitEdgeGatewayPlatform(kubectl, kubeconfig string) error {
 }
 
 func waitEdgeGateway(kubectl, kubeconfig string, site *Site) error {
+	if !siteUsesEdgeGateway(site) {
+		return nil
+	}
 	objects := []string{
 		"edge-gateway-namespace",
 		"edge-gateway-class",

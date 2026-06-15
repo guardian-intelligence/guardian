@@ -1,7 +1,8 @@
 // Command guardian is the controller-side bootstrap CLI. It turns a checked
-// out workspace plus a site definition into a converged site: provider
-// reinstall into Talos, machine config, etcd bootstrap, workspace-built OCI
-// artifacts pushed through the in-cluster seed registry, components applied.
+// out workspace plus bootstrap/environment YAML into a converged site:
+// provider reinstall into Talos, machine config, etcd bootstrap,
+// workspace-built OCI artifacts pushed through the in-cluster seed registry,
+// components applied.
 // It is a client that watches control loops converge; it is not a resident
 // daemon.
 package main
@@ -27,11 +28,12 @@ const (
 )
 
 const usage = `usage:
-  guardian up [--restore <file|url> --sha256 <hex>] [site.yaml]
+  guardian up [--restore <file|url> --sha256 <hex>] [bootstrap.yaml]
                                      converge the node: machine config, etcd, seed registry, push artifacts, components;
                                      with --restore, force-restore OpenBao from the verified snapshot into a fresh vault
-  guardian down --yes [site.yaml]    wipe the node to Talos maintenance mode via talosctl reset
-  guardian config [site <path>]      print config, or set the default site
+  guardian down --yes [bootstrap.yaml]
+                                     wipe the node to Talos maintenance mode via talosctl reset
+  guardian config [bootstrap <path>] print config, or set the default bootstrap facts file
   guardian run <tool> [args...]      run a version-pinned tool (aspect, bazel, talosctl, kubectl)
   guardian tools install|uninstall   manage tool symlinks pointing at this binary (--bin-dir, default ~/.local/bin)
   guardian version                   print pinned component versions`

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestClickhouseSiteGate pins the ledger ratchet across the real site.yamls:
+// TestClickhouseSiteGate pins the ledger ratchet across the real site inputs:
 // clickhouse.enabled is ON for dev and gamma and OFF for prod — prod must
 // not grow a clickhouse Deployment until the ledger ratchet flips, and
 // prod's otel-collector must render byte-identical to the metrics-only spine
@@ -27,9 +27,9 @@ func TestClickhouseSiteGate(t *testing.T) {
 	wantEnabled := map[string]bool{"dev": true, "gamma": true, "prod": false}
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
-			sitePath, err := toolPath("_main/src/sites/" + siteName + "/site.yaml")
+			sitePath, err := toolPath("_main/src/sites/" + siteName + "/bootstrap.yaml")
 			if err != nil {
-				t.Fatalf("locate site.yaml: %v", err)
+				t.Fatalf("locate bootstrap.yaml: %v", err)
 			}
 			site, err := loadSite(sitePath)
 			if err != nil {

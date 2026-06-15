@@ -38,6 +38,7 @@ Connect runtime and database/verifier slices.
   host-network sites.
 - Fleet gates check `/healthz` and the charter page marker until Connect
   Health is publicly served.
-- After converge, VictoriaMetrics must show `up{job="aisucks"}` for the
-  expected pod identity: per-pod on pod-network sites, loopback on host-network
-  sites.
+- After converge, VictoriaMetrics must show `up{job="public-http"}` for
+  pod-network `PublicHttpService` pods. Legacy host-network surfaces keep
+  their explicit loopback jobs until they move behind the public service
+  envelope.

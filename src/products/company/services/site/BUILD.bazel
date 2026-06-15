@@ -1,0 +1,113 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_cross_binary", "go_library", "go_test")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+load("//tools/format:defs.bzl", "go_format")
+
+go_format()
+
+genrule(
+    name = "site_assets_go",
+    srcs = [
+        "//src/products/company/web:sources",
+        "//src/viteplus-monorepo:node_modules/vite-plus",
+        "//src/viteplus-monorepo:vp_node",
+        "//src/viteplus-monorepo:workspace_install",
+    ],
+    outs = ["site_assets_gen.go"],
+    cmd = """
+set -euo pipefail
+execroot="$$(pwd)"
+node="$$execroot/$(location //src/viteplus-monorepo:vp_node)"
+vp=""
+for candidate in $(locations //src/viteplus-monorepo:node_modules/vite-plus); do
+  case "$$candidate" in
+    */node_modules/vite-plus)
+      candidate_abs="$$execroot/$$candidate"
+      if [ -x "$$candidate_abs/bin/vp" ]; then
+        vp="$$candidate_abs/bin/vp"
+      fi
+      ;;
+  esac
+done
+test -n "$$vp"
+tmpout="$$(mktemp -d)"
+trap 'rm -rf "$$tmpout"' EXIT
+export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
+export CI=true
+export GUARDIAN_COMPANY_GO_OUT="$$execroot/$@"
+cd src/viteplus-monorepo
+"$$node" "$$vp" install --frozen-lockfile --prefer-offline
+cd "$$execroot/src/products/company/web"
+"$$node" "$$vp" build --outDir "$$tmpout"
+test -s "$$execroot/$@"
+""",
+    local = True,
+    tags = [
+        "local",
+        "no-remote",
+        "no-sandbox",
+    ],
+)
+
+go_library(
+    name = "site_lib",
+    srcs = [
+        "main.go",
+        "metrics.go",
+        "site_assets_gen.go",
+        "web.go",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/products/company/services/site",
+    visibility = ["//visibility:private"],
+    deps = ["@com_github_caddyserver_certmagic//:certmagic"],
+)
+
+go_binary(
+    name = "site",
+    embed = [":site_lib"],
+    pure = "on",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "site_test",
+    srcs = ["main_test.go"],
+    embed = [":site_lib"],
+)
+
+go_cross_binary(
+    name = "site_linux_amd64",
+    platform = "@io_bazel_rules_go//go/toolchain:linux_amd64",
+    target = ":site",
+)
+
+pkg_tar(
+    name = "site_layer",
+    files = {
+        ":site_linux_amd64": "usr/bin/company-site",
+        "@cacert_pem//file": "etc/ssl/certs/ca-certificates.crt",
+    },
+    modes = {
+        "usr/bin/company-site": "0755",
+        "etc/ssl/certs/ca-certificates.crt": "0644",
+    },
+)
+
+oci_image(
+    name = "image",
+    base = "@ubuntu_noble_base",
+    entrypoint = ["/usr/bin/company-site"],
+    exposed_ports = [
+        "8080/tcp",
+        "8443/tcp",
+        "9090/tcp",
+    ],
+    tars = [":site_layer"],
+    visibility = ["//visibility:public"],
+)
+
+oci_load(
+    name = "load",
+    image = ":image",
+    repo_tags = ["guardian/company-site:dev"],
+)

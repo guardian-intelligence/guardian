@@ -38,28 +38,21 @@ func TestEdgeGatewayPlatformRender(t *testing.T) {
 func TestEdgeGatewaySiteManifests(t *testing.T) {
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
-			sitePath, err := toolPath("_main/src/sites/" + siteName + "/site.yaml")
+			sitePath, err := toolPath("_main/src/sites/" + siteName + "/bootstrap.yaml")
 			if err != nil {
-				t.Fatalf("locate site.yaml: %v", err)
+				t.Fatalf("locate bootstrap.yaml: %v", err)
 			}
 			site, err := loadSite(sitePath)
 			if err != nil {
 				t.Fatal(err)
 			}
+			out := string(site.EnvironmentBundle.Raw)
 			if !site.Gateway.Enabled {
-				if len(site.Gateway.Manifests) != 0 {
-					t.Fatalf("gateway manifests should be empty for %s, got %v", siteName, site.Gateway.Manifests)
+				if strings.Contains(out, "kind: EdgeGateway") {
+					t.Fatalf("gateway-disabled site should not declare an EdgeGateway XR")
 				}
 				return
 			}
-			if len(site.Gateway.Manifests) != 1 {
-				t.Fatalf("gateway-enabled site should declare one EdgeGateway manifest, got %v", site.Gateway.Manifests)
-			}
-			raw, err := readSiteManifest(site.Gateway.Manifests[0])
-			if err != nil {
-				t.Fatal(err)
-			}
-			out := string(raw)
 			for _, want := range []string{
 				"kind: EdgeGateway",
 				"name: tls-aisucks",
@@ -71,6 +64,16 @@ func TestEdgeGatewaySiteManifests(t *testing.T) {
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("edge gateway instance render missing %q", want)
+				}
+			}
+			if site.Company.Domain != "" {
+				for _, want := range []string{
+					"name: tls-company-site",
+					"hostname: \"" + site.Company.Domain + "\"",
+				} {
+					if !strings.Contains(out, want) {
+						t.Errorf("edge gateway instance render missing %q", want)
+					}
 				}
 			}
 			if strings.Contains(out, "HTTPRoute") || strings.Contains(out, "TLSRoute") {

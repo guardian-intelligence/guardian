@@ -4,7 +4,7 @@
 #
 # No DHCP at the site: static addressing is baked into the boot assets, or a
 # disk/PXE-booted maintenance node comes up unreachable. The same facts live
-# in site.yaml for the machine config. Gateway is the /31 pair address.
+# in bootstrap.yaml for the machine config. Gateway is the /31 pair address.
 customization:
   extraKernelArgs:
     # external is X550 function 0 on THIS box — flipped from dev/gamma.

@@ -12,7 +12,7 @@ import (
 
 // TestGatewayCRDsPrecedeCilium renders each site's machine config with the
 // pinned talosctl — the same `gen config` invocation up.go issues, site
-// patches in site.yaml list order — and asserts the machine-config
+// patches in bootstrap.yaml list order — and asserts the machine-config
 // invariants that Talos owns for us:
 //
 //   - cluster.secretboxEncryptionSecret is present, so Kubernetes Secret
@@ -21,7 +21,7 @@ import (
 //   - cluster.inlineManifests lists gateway-api-crds before cilium. The
 //     CRDs must exist before the Cilium render that watches them, and list
 //     position in talos.patches is the only thing ordering them: nothing in
-//     Go enforces it, so this test is what a careless site.yaml edit (or a
+//     Go enforces it, so this test is what a careless bootstrap.yaml edit (or a
 //     new site copied from a stale template) trips.
 //
 // up.go appends three programmatic --config-patch flags after the site
@@ -41,9 +41,9 @@ func TestGatewayCRDsPrecedeCilium(t *testing.T) {
 
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
-			sitePath, err := toolPath("_main/src/sites/" + siteName + "/site.yaml")
+			sitePath, err := toolPath("_main/src/sites/" + siteName + "/bootstrap.yaml")
 			if err != nil {
-				t.Fatalf("locate site.yaml: %v", err)
+				t.Fatalf("locate bootstrap.yaml: %v", err)
 			}
 			site, err := loadSite(sitePath)
 			if err != nil {

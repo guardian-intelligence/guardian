@@ -55,7 +55,6 @@ var components = []component{{
 	name:     "crossplane",
 	layout:   "_main/src/infrastructure-components/crossplane/image",
 	manifest: "src/infrastructure-components/crossplane/k8s/crossplane.yaml.tmpl",
-	enabled:  siteUsesEdgeGateway,
 }, {
 	name:     "cert-manager",
 	manifest: "src/infrastructure-components/cert-manager/k8s/cert-manager.yaml.tmpl",
@@ -79,16 +78,16 @@ var components = []component{{
 }, {
 	name:     "provider-kubernetes",
 	manifest: "src/infrastructure-components/crossplane-provider-kubernetes/k8s/provider-kubernetes.yaml",
-	enabled:  siteUsesEdgeGateway,
+	enabled:  siteUsesCrossplane,
 }, {
 	name:     "provider-kubernetes-config",
 	manifest: "src/infrastructure-components/crossplane-provider-kubernetes/k8s/provider-kubernetes-config.yaml",
-	enabled:  siteUsesEdgeGateway,
+	enabled:  siteUsesCrossplane,
 }, {
 	name:        "edge-gateway-platform",
-	manifest:    "src/platform/edge-gateway/k8s/edge-gateway-platform.yaml",
+	manifest:    "src/crossplane/packages/guardian-platform/edge-gateway.yaml",
 	rawManifest: true,
-	enabled:     siteUsesEdgeGateway,
+	enabled:     siteUsesCrossplane,
 }, {
 	name:     "aisucks",
 	layout:   "_main/src/products/aisucks/services/api/image",
@@ -108,6 +107,28 @@ var components = []component{{
 		cpuRequest:      "100m",
 		healthPath:      "/healthz",
 		readinessPeriod: 5,
+	},
+}, {
+	name:     "company-site",
+	layout:   "_main/src/products/company/services/site/image",
+	manifest: "src/platform/public-http-service/k8s/public-http-service.yaml.tmpl",
+	enabled:  func(s *Site) bool { return s.Company.Domain != "" },
+	publicHTTPService: &publicHTTPService{
+		namespace:          "company",
+		app:                "company-site",
+		domain:             func(s *Site) string { return s.Company.Domain },
+		podNetwork:         func(s *Site) bool { return true },
+		certDir:            "/var/lib/company-site-certs",
+		acmeEmail:          "im.shovonhasan@gmail.com",
+		probeClusterIP:     "10.96.111.44",
+		networkLabelKey:    "platform.guardian.dev/network",
+		memoryRequest:      "128Mi",
+		memoryLimit:        "512Mi",
+		goMemoryLimit:      "410MiB",
+		cpuRequest:         "100m",
+		healthPath:         "/healthz",
+		readinessPeriod:    5,
+		httpRouteHostnames: true,
 	},
 }, {
 	name:     "gatus",
@@ -184,9 +205,9 @@ var components = []component{{
 	manifest: "src/infrastructure-components/grafana/k8s/grafana.yaml.tmpl",
 }, {
 	// status after victoria-metrics: the page is rendered from queries
-	// against the site-local VM. Sites without status.domains in site.yaml
-	// render an empty manifest and deploy nothing (the apply loop skips
-	// empty renders).
+	// against the site-local VM. Sites without platform.status.domains in
+	// their environment bundle render an empty manifest and deploy nothing
+	// (the apply loop skips empty renders).
 	name:     "status",
 	layout:   "_main/src/status/image",
 	manifest: "src/status/k8s/status.yaml.tmpl",
@@ -207,6 +228,10 @@ var components = []component{{
 
 func siteUsesEdgeGateway(s *Site) bool {
 	return s.Gateway.Enabled
+}
+
+func siteUsesCrossplane(*Site) bool {
+	return true
 }
 
 func siteUsesPlatformTLS(s *Site) bool {
@@ -237,32 +262,37 @@ type publicHTTPService struct {
 	cpuRequest      string
 	healthPath      string
 	readinessPeriod int
+	// httpRouteHostnames scopes :80 routing to the service domain. Keep this
+	// off for aisucks: raw-IP health probes and HTTP-01 fallback depend on its
+	// hostname-less HTTPRoute.
+	httpRouteHostnames bool
 }
 
 type publicHTTPServiceRender struct {
-	Namespace       string
-	App             string
-	Domain          string
-	PodNetwork      bool
-	Replicas        int
-	ListenHTTP      string
-	ListenTLS       string
-	DiagAddr        string
-	HTTPPort        int
-	HTTPSPort       int
-	MetricsPort     int
-	CertDir         string
-	ACMEEmail       string
-	ProbeClusterIP  string
-	NetworkLabelKey string
-	NetworkLabelVal string
-	MemoryRequest   string
-	MemoryLimit     string
-	GoMemoryLimit   string
-	CPURequest      string
-	HealthPath      string
-	ReadinessPeriod int
-	Gateway         struct {
+	Namespace          string
+	App                string
+	Domain             string
+	PodNetwork         bool
+	Replicas           int
+	ListenHTTP         string
+	ListenTLS          string
+	DiagAddr           string
+	HTTPPort           int
+	HTTPSPort          int
+	MetricsPort        int
+	CertDir            string
+	ACMEEmail          string
+	ProbeClusterIP     string
+	NetworkLabelKey    string
+	NetworkLabelVal    string
+	MemoryRequest      string
+	MemoryLimit        string
+	GoMemoryLimit      string
+	CPURequest         string
+	HealthPath         string
+	ReadinessPeriod    int
+	HTTPRouteHostnames []string
+	Gateway            struct {
 		Enabled            bool
 		Name               string
 		Namespace          string
@@ -300,6 +330,9 @@ func (c component) publicHTTPServiceRender(site *Site) *publicHTTPServiceRender 
 		CPURequest:      svc.cpuRequest,
 		HealthPath:      svc.healthPath,
 		ReadinessPeriod: svc.readinessPeriod,
+	}
+	if svc.httpRouteHostnames && out.Domain != "" {
+		out.HTTPRouteHostnames = []string{out.Domain}
 	}
 	out.Gateway.Enabled = site.Gateway.Enabled
 	out.Gateway.Name = "edge"

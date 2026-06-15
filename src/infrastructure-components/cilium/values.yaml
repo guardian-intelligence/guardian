@@ -111,7 +111,7 @@ hubble:
 # spec.listeners declares — no LoadBalancer Service, no NodePort path (the
 # chart auto-disables the Service mode). The CRDs the operator watches ship
 # as their own inline manifest (talos/gateway-api-crds-inline.yaml), listed
-# before this render in every site.yaml. The chart/source pins and SHAs live
+# before this render in every environment bundle. The chart/source pins and SHAs live
 # in MODULE.bazel, and Bazel generates both inline manifests. Enabling this
 # only arms the operator: nothing binds a port until a Gateway object exists
 # (a later phase), so the app keeps host :80/:443 today.

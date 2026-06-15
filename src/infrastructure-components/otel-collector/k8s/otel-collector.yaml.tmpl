@@ -21,9 +21,9 @@ metadata:
   namespace: observability
 ---
 # Kubelet authorizes scrapes of /metrics/cadvisor via SubjectAccessReview:
-# the bearer token's subject needs get on nodes/metrics (nodes/proxy covers
-# the other kubelet paths). pods/namespaces/nodes get/list/watch is for the
-# prometheus receiver's k8s metadata needs; targets themselves are static.
+# the bearer token's subject needs get on nodes/metrics. Pods get/list/watch
+# is for the prometheus receiver's PublicHttpService pod discovery; most
+# remaining targets are static.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -36,14 +36,13 @@ rules:
     resources:
       - nodes/metrics
     verbs: ["get"]
-{{- if .Site.Aisucks.PodNetwork}}
-  # Pod discovery for the aisucks job's kubernetes_sd below (pod-network
-  # sites only): role: pod needs list/watch, get for completeness.
+  # Pod discovery for PublicHttpService metrics. Pod-network public services
+  # opt in with platform.guardian.dev/metrics-scrape=true; host-network
+  # legacy surfaces keep explicit loopback scrape jobs below.
   - apiGroups: [""]
     resources:
       - pods
     verbs: ["get", "list", "watch"]
-{{- end}}
 {{- if .Site.Clickhouse.Enabled}}
   # k8sobjects receiver: watch mode does an initial list then watches.
   # Events only — the ledger remembers what etcd forgets after 1h. Modern
@@ -98,24 +97,16 @@ data:
             external_labels:
               cluster: "{{.Site.Cluster.Name}}"
           scrape_configs:
-{{- if .Site.Aisucks.PodNetwork}}
-            # Pod-network aisucks: discover the pods (replicas: 2) and
-            # scrape each at <podIP>:9090 (the app binds DIAG_ADDR=":9090").
-            # instance = pod name gives per-pod scrape identity, so the two
-            # replicas' counters never interleave under one series identity
-            # (the observability.md constraint that kept replicas at 1
-            # under hostNetwork). MUST land in the same converge as the
-            # podNetwork flip: the static 127.0.0.1:9090 target goes dark
-            # the moment the app leaves the host netns, and ScrapeTargetDown
-            # pages 10 minutes later.
-            - job_name: aisucks
+            # Pod-network public HTTP services: discover every opted-in pod
+            # and scrape <podIP>:<metrics-port>. This is the generic
+            # Server -> VictoriaMetrics path for TanStack/Nitro servers and
+            # other public web surfaces behind PublicHttpService.
+            - job_name: public-http
               kubernetes_sd_configs:
                 - role: pod
-                  namespaces:
-                    names: [aisucks]
               relabel_configs:
-                - source_labels: [__meta_kubernetes_pod_label_app]
-                  regex: aisucks
+                - source_labels: [__meta_kubernetes_pod_label_platform_guardian_dev_metrics_scrape]
+                  regex: "true"
                   action: keep
                 # Surge pods have no IP yet; an empty address would scrape
                 # ":9090" (the collector's own host netns) — drop them until
@@ -123,18 +114,28 @@ data:
                 - source_labels: [__meta_kubernetes_pod_phase]
                   regex: Running
                   action: keep
-                - source_labels: [__meta_kubernetes_pod_ip]
-                  regex: (.+)
+                # $${1}/$${2}: the collector's confmap resolver expands ${...}
+                # as env-var syntax before prometheus ever sees the config;
+                # $$ escapes it so prometheus receives literal capture refs.
+                - source_labels:
+                    - __meta_kubernetes_pod_ip
+                    - __meta_kubernetes_pod_label_platform_guardian_dev_metrics_port
+                  separator: ":"
+                  regex: (.+):(.+)
                   target_label: __address__
-                  # $${1}: the collector's confmap resolver expands ${...}
-                  # as env-var syntax before prometheus ever sees the
-                  # config; $$ escapes it so prometheus receives a literal
-                  # ${1} capture reference. Unescaped, the collector fails
-                  # at startup: environment variable "1" has invalid name.
-                  replacement: $${1}:9090
+                  replacement: $${1}:$${2}
+                - source_labels: [__meta_kubernetes_namespace]
+                  target_label: namespace
+                - source_labels: [__meta_kubernetes_pod_label_app]
+                  target_label: app
+                - source_labels: [__meta_kubernetes_pod_label_platform_guardian_dev_slo_surface]
+                  target_label: slo_surface
                 - source_labels: [__meta_kubernetes_pod_name]
                   target_label: instance
-{{- else}}
+{{- if not .Site.Aisucks.PodNetwork}}
+            # Legacy hostNetwork aisucks: scrape loopback from the
+            # host-network collector. This disappears when all public HTTP
+            # services are pod-networked and labeled for the generic job.
             - job_name: aisucks
               static_configs:
                 - targets: ["127.0.0.1:9090"]

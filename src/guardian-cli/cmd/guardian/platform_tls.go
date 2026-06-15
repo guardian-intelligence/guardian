@@ -115,35 +115,29 @@ func restorePlatformTLSSecrets(kubectl, kubeconfig, state string, site *Site) er
 
 func platformTLSSurvivalSecretRefs(site *Site) ([]platformTLSSecretRef, error) {
 	refs := map[platformTLSSecretRef]struct{}{}
-	for _, manifestPath := range site.Gateway.Manifests {
-		raw, err := readSiteManifest(manifestPath)
-		if err != nil {
-			return nil, err
+	dec := yaml.NewDecoder(bytes.NewReader(site.EnvironmentBundle.Raw))
+	for {
+		var doc edgeGatewayTLSManifest
+		if err := dec.Decode(&doc); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, fmt.Errorf("decode %s: %w", site.EnvironmentBundle.Path, err)
 		}
-		dec := yaml.NewDecoder(bytes.NewReader(raw))
-		for {
-			var doc edgeGatewayTLSManifest
-			if err := dec.Decode(&doc); err != nil {
-				if err == io.EOF {
-					break
-				}
-				return nil, fmt.Errorf("decode %s: %w", manifestPath, err)
+		if doc.Kind != "EdgeGateway" {
+			continue
+		}
+		if doc.Spec.ACME.PrivateKeySecretName != "" {
+			refs[platformTLSSecretRef{namespace: "cert-manager", name: doc.Spec.ACME.PrivateKeySecretName}] = struct{}{}
+		}
+		if doc.Spec.ACME.DNS01CloudflareSecretName != "" {
+			refs[platformTLSSecretRef{namespace: "cert-manager", name: doc.Spec.ACME.DNS01CloudflareSecretName}] = struct{}{}
+		}
+		for _, cert := range doc.Spec.Certificates {
+			if cert.Namespace == "" || cert.SecretName == "" {
+				return nil, fmt.Errorf("edge gateway certificate in %s must set namespace and secretName", site.EnvironmentBundle.Path)
 			}
-			if doc.Kind != "EdgeGateway" {
-				continue
-			}
-			if doc.Spec.ACME.PrivateKeySecretName != "" {
-				refs[platformTLSSecretRef{namespace: "cert-manager", name: doc.Spec.ACME.PrivateKeySecretName}] = struct{}{}
-			}
-			if doc.Spec.ACME.DNS01CloudflareSecretName != "" {
-				refs[platformTLSSecretRef{namespace: "cert-manager", name: doc.Spec.ACME.DNS01CloudflareSecretName}] = struct{}{}
-			}
-			for _, cert := range doc.Spec.Certificates {
-				if cert.Namespace == "" || cert.SecretName == "" {
-					return nil, fmt.Errorf("edge gateway certificate in %s must set namespace and secretName", manifestPath)
-				}
-				refs[platformTLSSecretRef{namespace: cert.Namespace, name: cert.SecretName}] = struct{}{}
-			}
+			refs[platformTLSSecretRef{namespace: cert.Namespace, name: cert.SecretName}] = struct{}{}
 		}
 	}
 	out := make([]platformTLSSecretRef, 0, len(refs))

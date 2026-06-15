@@ -1,3 +1,40 @@
+apiVersion: apiextensions.crossplane.io/v1beta1
+kind: EnvironmentConfig
+metadata:
+  name: guardian-dev
+  labels:
+    guardian.dev/site: dev
+data:
+  site:
+    name: dev
+    clusterName: guardian-dev
+    nodeHostname: vs-dev-w0
+  alerts:
+    ntfyTopic: "aisucks-ops-1ebda4d035e83ac0"
+  gateway:
+    enabled: true
+  products:
+    aisucks:
+      domain: dev.aisucks.app
+      watch:
+        - https://aisucks.app/healthz
+        - https://gamma.aisucks.app/healthz
+      watchPages:
+        - https://aisucks.app/
+        - https://gamma.aisucks.app/
+      podNetwork: true
+    company:
+      domain: dev.guardianintelligence.org
+  platform:
+    oci:
+      domain: oci.guardianintelligence.org
+    clickhouse:
+      enabled: true
+    status:
+      domains:
+        - status.guardianintelligence.org
+        - status.dev.guardianintelligence.org
+---
 apiVersion: platform.guardian.dev/v1alpha1
 kind: EdgeGateway
 metadata:
@@ -12,6 +49,12 @@ spec:
   listeners:
     - name: tls-aisucks
       hostname: "dev.aisucks.app"
+      port: 443
+      protocol: TLS
+      tls:
+        mode: Passthrough
+    - name: tls-company-site
+      hostname: "dev.guardianintelligence.org"
       port: 443
       protocol: TLS
       tls:

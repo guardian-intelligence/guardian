@@ -11,10 +11,8 @@ import type { Message } from "@bufbuild/protobuf";
 /**
  * Describes the file guardian/policy/v1/policy.proto.
  */
-export const file_guardian_policy_v1_policy: GenFile /*@__PURE__*/ = fileDesc(
-  "Ch9ndWFyZGlhbi9wb2xpY3kvdjEvcG9saWN5LnByb3RvEhJndWFyZGlhbi5wb2xpY3kudjEirgIKD09wZXJhdGlvblBvbGljeRIxCgRhdXRoGAEgASgOMiMuZ3VhcmRpYW4ucG9saWN5LnYxLkF1dGhSZXF1aXJlbWVudBIzCgthdWRpdF9sZXZlbBgCIAEoDjIeLmd1YXJkaWFuLnBvbGljeS52MS5BdWRpdExldmVsEi8KCXJpc2tfdGllchgDIAEoDjIcLmd1YXJkaWFuLnBvbGljeS52MS5SaXNrVGllchIZChFtYXhfcmVxdWVzdF9ieXRlcxgEIAEoDRIxCgpyYXRlX2xpbWl0GAUgASgLMh0uZ3VhcmRpYW4ucG9saWN5LnYxLlJhdGVMaW1pdBI0CgtpZGVtcG90ZW5jeRgGIAEoDjIfLmd1YXJkaWFuLnBvbGljeS52MS5JZGVtcG90ZW5jeSItCglSYXRlTGltaXQSEAoIcmVxdWVzdHMYASABKA0SDgoGd2luZG93GAIgASgJKm0KD0F1dGhSZXF1aXJlbWVudBIgChxBVVRIX1JFUVVJUkVNRU5UX1VOU1BFQ0lGSUVEEAASGQoVQVVUSF9SRVFVSVJFTUVOVF9OT05FEAESHQoZQVVUSF9SRVFVSVJFTUVOVF9SRVFVSVJFRBACKnsKCkF1ZGl0TGV2ZWwSGwoXQVVESVRfTEVWRUxfVU5TUEVDSUZJRUQQABIbChdBVURJVF9MRVZFTF9PUEVSQVRJT05BTBABEhgKFEFVRElUX0xFVkVMX1NFQ1VSSVRZEAISGQoVQVVESVRfTEVWRUxfRklOQU5DSUFMEAMqYgoIUmlza1RpZXISGQoVUklTS19USUVSX1VOU1BFQ0lGSUVEEAASEQoNUklTS19USUVSX0xPVxABEhQKEFJJU0tfVElFUl9NRURJVU0QAhISCg5SSVNLX1RJRVJfSElHSBADKmYKC0lkZW1wb3RlbmN5EhsKF0lERU1QT1RFTkNZX1VOU1BFQ0lGSUVEEAASGgoWSURFTVBPVEVOQ1lfSURFTVBPVEVOVBABEh4KGklERU1QT1RFTkNZX05PTl9JREVNUE9URU5UEAI6YwoJb3BlcmF0aW9uEh4uZ29vZ2xlLnByb3RvYnVmLk1ldGhvZE9wdGlvbnMYuI4DIAEoCzIjLmd1YXJkaWFuLnBvbGljeS52MS5PcGVyYXRpb25Qb2xpY3lSCW9wZXJhdGlvbkJgWl5naXRodWIuY29tL2d1YXJkaWFuLWludGVsbGlnZW5jZS9ndWFyZGlhbi9zcmMvcHJvZHVjdHMvYWlzdWNrcy9hcGkvZ3VhcmRpYW4vcG9saWN5L3YxO3BvbGljeXYxYgZwcm90bzM",
-  [file_google_protobuf_descriptor],
-);
+export const file_guardian_policy_v1_policy: GenFile = /*@__PURE__*/
+  fileDesc("Ch9ndWFyZGlhbi9wb2xpY3kvdjEvcG9saWN5LnByb3RvEhJndWFyZGlhbi5wb2xpY3kudjEirgIKD09wZXJhdGlvblBvbGljeRIxCgRhdXRoGAEgASgOMiMuZ3VhcmRpYW4ucG9saWN5LnYxLkF1dGhSZXF1aXJlbWVudBIzCgthdWRpdF9sZXZlbBgCIAEoDjIeLmd1YXJkaWFuLnBvbGljeS52MS5BdWRpdExldmVsEi8KCXJpc2tfdGllchgDIAEoDjIcLmd1YXJkaWFuLnBvbGljeS52MS5SaXNrVGllchIZChFtYXhfcmVxdWVzdF9ieXRlcxgEIAEoDRIxCgpyYXRlX2xpbWl0GAUgASgLMh0uZ3VhcmRpYW4ucG9saWN5LnYxLlJhdGVMaW1pdBI0CgtpZGVtcG90ZW5jeRgGIAEoDjIfLmd1YXJkaWFuLnBvbGljeS52MS5JZGVtcG90ZW5jeSItCglSYXRlTGltaXQSEAoIcmVxdWVzdHMYASABKA0SDgoGd2luZG93GAIgASgJKm0KD0F1dGhSZXF1aXJlbWVudBIgChxBVVRIX1JFUVVJUkVNRU5UX1VOU1BFQ0lGSUVEEAASGQoVQVVUSF9SRVFVSVJFTUVOVF9OT05FEAESHQoZQVVUSF9SRVFVSVJFTUVOVF9SRVFVSVJFRBACKnsKCkF1ZGl0TGV2ZWwSGwoXQVVESVRfTEVWRUxfVU5TUEVDSUZJRUQQABIbChdBVURJVF9MRVZFTF9PUEVSQVRJT05BTBABEhgKFEFVRElUX0xFVkVMX1NFQ1VSSVRZEAISGQoVQVVESVRfTEVWRUxfRklOQU5DSUFMEAMqYgoIUmlza1RpZXISGQoVUklTS19USUVSX1VOU1BFQ0lGSUVEEAASEQoNUklTS19USUVSX0xPVxABEhQKEFJJU0tfVElFUl9NRURJVU0QAhISCg5SSVNLX1RJRVJfSElHSBADKmYKC0lkZW1wb3RlbmN5EhsKF0lERU1QT1RFTkNZX1VOU1BFQ0lGSUVEEAASGgoWSURFTVBPVEVOQ1lfSURFTVBPVEVOVBABEh4KGklERU1QT1RFTkNZX05PTl9JREVNUE9URU5UEAI6YwoJb3BlcmF0aW9uEh4uZ29vZ2xlLnByb3RvYnVmLk1ldGhvZE9wdGlvbnMYuI4DIAEoCzIjLmd1YXJkaWFuLnBvbGljeS52MS5PcGVyYXRpb25Qb2xpY3lSCW9wZXJhdGlvbkJgWl5naXRodWIuY29tL2d1YXJkaWFuLWludGVsbGlnZW5jZS9ndWFyZGlhbi9zcmMvcHJvZHVjdHMvYWlzdWNrcy9hcGkvZ3VhcmRpYW4vcG9saWN5L3YxO3BvbGljeXYxYgZwcm90bzM", [file_google_protobuf_descriptor]);
 
 /**
  * @generated from message guardian.policy.v1.OperationPolicy
@@ -55,10 +53,8 @@ export type OperationPolicy = Message<"guardian.policy.v1.OperationPolicy"> & {
  * Describes the message guardian.policy.v1.OperationPolicy.
  * Use `create(OperationPolicySchema)` to create a new message.
  */
-export const OperationPolicySchema: GenMessage<OperationPolicy> /*@__PURE__*/ = messageDesc(
-  file_guardian_policy_v1_policy,
-  0,
-);
+export const OperationPolicySchema: GenMessage<OperationPolicy> = /*@__PURE__*/
+  messageDesc(file_guardian_policy_v1_policy, 0);
 
 /**
  * @generated from message guardian.policy.v1.RateLimit
@@ -79,10 +75,8 @@ export type RateLimit = Message<"guardian.policy.v1.RateLimit"> & {
  * Describes the message guardian.policy.v1.RateLimit.
  * Use `create(RateLimitSchema)` to create a new message.
  */
-export const RateLimitSchema: GenMessage<RateLimit> /*@__PURE__*/ = messageDesc(
-  file_guardian_policy_v1_policy,
-  1,
-);
+export const RateLimitSchema: GenMessage<RateLimit> = /*@__PURE__*/
+  messageDesc(file_guardian_policy_v1_policy, 1);
 
 /**
  * @generated from enum guardian.policy.v1.AuthRequirement
@@ -107,10 +101,8 @@ export enum AuthRequirement {
 /**
  * Describes the enum guardian.policy.v1.AuthRequirement.
  */
-export const AuthRequirementSchema: GenEnum<AuthRequirement> /*@__PURE__*/ = enumDesc(
-  file_guardian_policy_v1_policy,
-  0,
-);
+export const AuthRequirementSchema: GenEnum<AuthRequirement> = /*@__PURE__*/
+  enumDesc(file_guardian_policy_v1_policy, 0);
 
 /**
  * @generated from enum guardian.policy.v1.AuditLevel
@@ -140,10 +132,8 @@ export enum AuditLevel {
 /**
  * Describes the enum guardian.policy.v1.AuditLevel.
  */
-export const AuditLevelSchema: GenEnum<AuditLevel> /*@__PURE__*/ = enumDesc(
-  file_guardian_policy_v1_policy,
-  1,
-);
+export const AuditLevelSchema: GenEnum<AuditLevel> = /*@__PURE__*/
+  enumDesc(file_guardian_policy_v1_policy, 1);
 
 /**
  * @generated from enum guardian.policy.v1.RiskTier
@@ -173,10 +163,8 @@ export enum RiskTier {
 /**
  * Describes the enum guardian.policy.v1.RiskTier.
  */
-export const RiskTierSchema: GenEnum<RiskTier> /*@__PURE__*/ = enumDesc(
-  file_guardian_policy_v1_policy,
-  2,
-);
+export const RiskTierSchema: GenEnum<RiskTier> = /*@__PURE__*/
+  enumDesc(file_guardian_policy_v1_policy, 2);
 
 /**
  * @generated from enum guardian.policy.v1.Idempotency
@@ -201,15 +189,11 @@ export enum Idempotency {
 /**
  * Describes the enum guardian.policy.v1.Idempotency.
  */
-export const IdempotencySchema: GenEnum<Idempotency> /*@__PURE__*/ = enumDesc(
-  file_guardian_policy_v1_policy,
-  3,
-);
+export const IdempotencySchema: GenEnum<Idempotency> = /*@__PURE__*/
+  enumDesc(file_guardian_policy_v1_policy, 3);
 
 /**
  * @generated from extension: guardian.policy.v1.OperationPolicy operation = 51000;
  */
-export const operation: GenExtension<MethodOptions, OperationPolicy> /*@__PURE__*/ = extDesc(
-  file_guardian_policy_v1_policy,
-  0,
-);
+export const operation: GenExtension<MethodOptions, OperationPolicy> = /*@__PURE__*/
+  extDesc(file_guardian_policy_v1_policy, 0);

@@ -1,0 +1,8 @@
+filegroup(
+    name = "manifests",
+    srcs = glob([
+        "apis/*.yaml",
+        "examples/*.yaml",
+    ]),
+    visibility = ["//visibility:public"],
+)

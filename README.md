@@ -64,15 +64,15 @@ A full from-zero convergence of the dev site. The only inputs are the
 workspace clone and the ability to authenticate to the box; no provider
 API, no registry credentials, and no Guardian-hosted infrastructure.
 
-Run drills from the repo root: the configured site path is stored absolute,
-but the paths inside `site.yaml` (schematic, patches) and the component
-manifests are repo-root relative.
+Run drills from the repo root: the configured bootstrap path is stored
+absolute, but the paths inside `bootstrap.yaml` (schematic, patches), the
+Crossplane environment bundle, and component manifests are repo-root relative.
 
 ```bash
-# One-time: point guardian at the site definition. The path is stored
+# One-time: point guardian at the site's bootstrap facts. The path is stored
 # absolute in ${XDG_CONFIG_HOME:-~/.config}/guardian/config.yaml; inspect
 # with `guardian config`.
-guardian config site src/sites/dev/site.yaml
+guardian config bootstrap src/sites/dev/bootstrap.yaml
 
 # Down: wipe to Talos maintenance mode; waits until the Talos API answers.
 # A configured Talos node is reset over its API; a generic Linux node is
@@ -84,8 +84,8 @@ guardian config site src/sites/dev/site.yaml
 guardian down --yes && guardian up
 ```
 
-Both verbs also accept an explicit `<site.yaml>` positional argument, which
-overrides the configured site.
+Both verbs also accept an explicit `<bootstrap.yaml>` positional argument,
+which overrides the configured bootstrap path.
 
 `up` probes runtime truth rather than recorded state: a node answering the
 authenticated Talos API gets its regenerated config re-applied; a node in
