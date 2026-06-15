@@ -74,6 +74,18 @@ func TestSecretProjectionSiteManifests(t *testing.T) {
 			}
 			if site.OCI.Domain != "" {
 				zot := secretProjectionByName(t, projections, "zot-publisher-secrets")
+				if zot.Spec.Target.Namespace != "guardian-oci" {
+					t.Fatalf("zot namespace = %q, want guardian-oci", zot.Spec.Target.Namespace)
+				}
+				if zot.Spec.Target.NamespaceLabels["pod-security.kubernetes.io/enforce"] != "privileged" {
+					t.Fatalf("zot namespaceLabels = %#v, want privileged PSA", zot.Spec.Target.NamespaceLabels)
+				}
+				if !zot.waitForSecrets() {
+					t.Fatal("zot publisher secrets should gate registry converge")
+				}
+				if zot.Spec.OpenBao.Role != "guardian-oci-secrets" {
+					t.Fatalf("zot role = %q, want guardian-oci-secrets", zot.Spec.OpenBao.Role)
+				}
 				secret := projectedSecretByName(t, zot, "zot-publisher")
 				wantPath := "guardian/" + site.Cluster.Name + "/oci/zot-publisher"
 				if secret.RemotePath != wantPath {
