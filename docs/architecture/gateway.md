@@ -10,15 +10,15 @@ the bottom (2026-06-12/13) records the converted dev baseline.
 
 ## Why the Gateway is the keystone
 
-:443 has been app-owned: the aisucks binary binds the host port via
-hostNetwork and is the only thing that can answer on a site's address. SNI
-routing turns the port into a platform resource, and five roadmap items
-queue behind exactly that: the OCI registry hostname (M7), the status page
-(M4), weighted canary backends (M6), `replicas: 2` (ends the SO_REUSEPORT
-scrape-aliasing constraint recorded in observability.md), and the app's
-move to pod network — which is what gives it a pod identity the `toFQDNs`
-egress lockdown can police. One listener decoupled from app lifecycle;
-everything else is a route.
+Before Gateway conversion, :443 was app-owned: the public app binary bound the
+host port via hostNetwork and was the only thing that could answer on a site's
+address. SNI routing turns the port into a platform resource, and five roadmap
+items queue behind exactly that: the OCI registry hostname (M7), the status
+page (M4), weighted canary backends (M6), `replicas: 2` (ends the
+SO_REUSEPORT scrape-aliasing constraint recorded in observability.md), and
+the app's move to pod network — which is what gives it a pod identity the
+`toFQDNs` egress lockdown can police. One listener decoupled from app
+lifecycle; everything else is a route.
 
 ## Decisions
 
@@ -90,9 +90,8 @@ teeth, and the dev pilot exists to answer two empirical questions:
    `reuse_port` by default. If both hold, the kernel splits new
    connections across app and Envoy during coexistence: the old
    hostNetwork pod serves its share directly while Envoy SNI-routes its
-   share to the new pod-network pods (same hostPath cert cache; certmagic
-   file-locks). Scale the old Deployment to zero → handover completes with
-   zero drops. Hypothesis, not fact, until measured.
+   share to the new pod-network pods. Scale the old Deployment to zero →
+   handover completes with zero drops. Hypothesis, not fact, until measured.
 2. **The proxy loop during overlap.** While the old pod is hostNetwork, an
    Envoy passthrough backend at nodeIP:443 lands back in Envoy's own
    reuseport group — a connection Envoy forwards can be accepted by Envoy
@@ -123,12 +122,10 @@ recorded below) as the standing fallback either way.
   `kubectl --dry-run=server` or live dev apply validates every object against
   the pinned CRDs.
 - **Phase 2 — app to pod network.** Drop hostNetwork, add the Service,
-  `replicas: 2`. The hostPath cert cache stays correct while sites are
-  single-node (certmagic file-locks across pods on one box); the 3-node
-  era needs shared custody — bao Transit or Gateway termination — noted
-  here so topology growth doesn't rediscover it. VERIFY: per-pod scrape
-  identity in VM (no counter interleaving); both replicas serve through
-  Envoy.
+  `replicas: 2`. Gateway termination removes public key custody from
+  product pods; the 3-node era must keep that invariant instead of
+  rediscovering app-owned certificates. VERIFY: per-pod scrape identity in
+  VM (no counter interleaving); both replicas serve through Envoy.
 - **Phase 3 — dev pilot.** Convert dev; one deliberate wipe proving a
   fresh bootstrap converges with the Gateway live; verify no-SNI
   connections drop at the edge; curl-flood measurement of the overlap
@@ -241,16 +238,13 @@ gateway converged from bootstrap with **zero manual kubectl**: GatewayClass
 :80/:443, no-SNI drop verified. Postgres dump/restore invariant held.
 Ledger: DDL re-applied, Converged marker durable in ClickHouse,
 `k8s.cluster.name = guardian-dev`. But the 4-minute serving SLA was
-**missed: first 200 at +621s** — root cause is an ACME rate limit, not the
-bootstrap: the morning outage left 5 failed TLS-ALPN authorizations/hour
-for dev.aisucks.app (pods retried issuance while :443 was dead), so the
-fresh pods' issuance got HTTP 429 and aisucks treats certificate failure
-as fatal (CrashLoopBackOff, PodRestartStorm fired). Recovered by restoring
-the pre-wipe cert-cache tarball into the hostPath via a helper pod —
-serving 17s later, no issuance spent. Standing rule for every wipe drill:
-**tar /var/lib/aisucks-certs and /var/lib/status-certs before `down`**;
-the failed-authorization limit (5/h) is the sharp cert budget, not just
-duplicate-certs 5/week.
+**missed: first 200 at +621s** — root cause was an ACME rate limit, not the
+bootstrap: the morning outage left 5 failed TLS authorizations/hour for
+dev.aisucks.app while :443 was dead. The durable fix is platform-managed
+Gateway TLS with secret survival state, not product-pod issuance. Standing
+rule for every wipe drill while status still owns keys:
+**tar /var/lib/status-certs before `down`**; ACME rate limits are a sharp
+cert budget, not just duplicate-certs 5/week.
 
 **Status quirk, recorded.** In hostNetwork mode Cilium 1.19.4 never
 populates a Gateway address: `Programmed=False / AddressNotAssigned` and
