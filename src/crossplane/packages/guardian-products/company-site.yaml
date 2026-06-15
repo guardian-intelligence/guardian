@@ -118,8 +118,6 @@ spec:
               image: {{ $spec.image }}
               podNetwork: true
               replicas: {{ $spec.replicas }}
-              certDir: /var/lib/company-site-certs
-              acmeEmail: im.shovonhasan@gmail.com
               probeClusterIP: 10.96.111.44
               networkLabelKey: platform.guardian.dev/network
               memoryRequest: 128Mi
@@ -130,11 +128,9 @@ spec:
               readinessPeriod: 5
               ports:
                 http: 8080
-                https: 8443
                 metrics: 9090
               listen:
                 http: ":8080"
-                https: ":8443"
                 diagnostics: ":9090"
               gateway:
                 name: edge
