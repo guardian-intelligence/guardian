@@ -38,7 +38,7 @@ mechanism. To preview a branch:
 
 ```sh
 git checkout <branch>
-bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/sites/dev/site.yaml
+bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/sites/dev/bootstrap.yaml
 ```
 
 One preview at a time; converging main puts dev back. No CI hook yet — when a
@@ -53,7 +53,7 @@ applying Grafana. Never run `kubectl create secret generic grafana-admin`
 by hand.
 
 Config-bearing observability components (otel-collector, alertmanager) do
-NOT restart on ConfigMap-only changes — after editing site.yaml watch lists
+NOT restart on ConfigMap-only changes — after editing environment watch lists
 or rotating the ntfy topic, `kubectl -n observability rollout restart
 deploy/otel-collector deploy/alertmanager`. vmalert reloads rule files
 itself (-configCheckInterval).
@@ -76,7 +76,7 @@ the new schema, or step 5 (rollback) is a lie.
 ## 2. Converge gamma
 
 ```sh
-bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/sites/gamma/site.yaml
+bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/sites/gamma/bootstrap.yaml
 ```
 
 Record the line `pushed registry.guardian.internal/aisucks@sha256:…` —
@@ -105,7 +105,7 @@ Same tag, same workspace, no commits in between:
 
 ```sh
 git describe --exact-match --tags   # expect: aisucks/v<N>
-bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/sites/prod/site.yaml
+bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/sites/prod/bootstrap.yaml
 ```
 
 **Assert the pushed aisucks digest is byte-identical to gamma's.** If it
@@ -116,7 +116,7 @@ anything ships. Re-run the gate checks against prod.
 
 ```sh
 git checkout aisucks/v<N-1>
-bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/sites/prod/site.yaml
+bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/sites/prod/bootstrap.yaml
 git checkout main
 ```
 

@@ -14,7 +14,7 @@ import (
 // guardianConfig is the operator-local config file. Stored paths are
 // absolute so they bypass resolvePath's BUILD_WORKING_DIRECTORY concern.
 type guardianConfig struct {
-	Site string `yaml:"site,omitempty"`
+	Bootstrap string `yaml:"bootstrap,omitempty"`
 }
 
 func configPath() (string, error) {
@@ -49,8 +49,8 @@ func loadConfig() (*guardianConfig, error) {
 	}
 	// Stored paths must be absolute; a relative path would quietly resolve
 	// against the invoking cwd.
-	if c.Site != "" && !filepath.IsAbs(c.Site) {
-		return nil, fmt.Errorf("config %s: site must be an absolute path, got %q", path, c.Site)
+	if c.Bootstrap != "" && !filepath.IsAbs(c.Bootstrap) {
+		return nil, fmt.Errorf("config %s: bootstrap must be an absolute path, got %q", path, c.Bootstrap)
 	}
 	return &c, nil
 }
@@ -98,8 +98,8 @@ func runConfigCmd(args []string) error {
 		return nil
 	}
 	key := args[0]
-	if key != "site" {
-		return fmt.Errorf("config: unknown key %q; the only key is site", key)
+	if key != "bootstrap" {
+		return fmt.Errorf("config: unknown key %q; the only key is bootstrap", key)
 	}
 	if len(args) != 2 {
 		return fmt.Errorf("config: usage: guardian config %s <path>", key)
@@ -119,7 +119,7 @@ func runConfigCmd(args []string) error {
 	if err != nil {
 		return err
 	}
-	c.Site = abs
+	c.Bootstrap = abs
 	if err := saveConfig(c); err != nil {
 		return err
 	}

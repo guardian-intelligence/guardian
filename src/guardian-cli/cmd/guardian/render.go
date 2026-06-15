@@ -9,8 +9,8 @@ import (
 
 // renderManifest renders a component manifest template with the computed
 // in-cluster image reference (mirror host + workspace-built digest) and the
-// site, so per-site values (domains, feature toggles) come from site.yaml
-// instead of forked manifests.
+// assembled site view, so per-site platform values come from the environment
+// bundle instead of forked manifests.
 func renderManifest(manifestPath, image string, site *Site) ([]byte, error) {
 	return renderComponentManifest(component{manifest: manifestPath}, image, nil, site)
 }

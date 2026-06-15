@@ -1,6 +1,8 @@
-# Prod site definition consumed by the guardian CLI. Paths are repo-root
+# Prod bootstrap facts consumed before Kubernetes exists. Paths are repo-root
 # relative; run guardian from the repo root. Box: Latitude sv_BDXM5E4QLNrpk
 # (gd-prod-w0, f4.metal.small, Ashburn), provisioned 2026-06-11.
+site: prod
+
 cluster:
   name: guardian-prod
   endpoint: https://67.213.115.113:6443
@@ -13,10 +15,7 @@ node:
   prefixLength: 31
   gateway: 67.213.115.112
   # Physical facts derived from the maintenance node on 2026-06-11. The
-  # external port is X550 function 0 on THIS box — flipped from dev/gamma;
-  # an f1-bound install booted network-dark, and maintenance showed the
-  # public /31 alive on f0. Per-box wiring is a physical fact: derive it,
-  # never copy it from a sibling. Two identical 960GB Samsung NVMes.
+  # external port is X550 function 0 on THIS box, flipped from dev/gamma.
   interfaceMac: "7c:c2:55:6e:90:36"
   installDiskSerial: "S64FNN0Y900069" # nvme0n1, Talos system disk
   zfsDiskSerial: "S64FNN0Y900073" # nvme1n1, reserved for the ZFS pool
@@ -30,31 +29,9 @@ talos:
     - src/sites/prod/talos/patches/cni-none.yaml
     # Gateway API CRDs MUST stay listed above cilium: list order is
     # inlineManifests order, and the CRDs have to exist before the Cilium
-    # render that watches them (render_order_test.go pins this).
+    # render that watches them.
     - src/infrastructure-components/cilium/talos/gateway-api-crds-inline.yaml
     # Shared generated render, deliberately not copied per-site: one Cilium
     # version across the fleet, one Bazel target to update on upgrade.
     - src/infrastructure-components/cilium/talos/cilium-inline.yaml
     - src/sites/prod/talos/patches/ingress-firewall.yaml
-
-# Prod serves aisucks.app.
-aisucks:
-  domain: aisucks.app
-  ntfyTopic: "aisucks-ops-1ebda4d035e83ac0"
-  # Every site probes its siblings' public surfaces (the one permitted
-  # cross-site act): a site-local stack cannot report its own node's death.
-  watch:
-    - https://dev.aisucks.app/healthz
-    - https://gamma.aisucks.app/healthz
-  # Page checks carry the charter marker; healthz alone misses a broken page.
-  watchPages:
-    - https://dev.aisucks.app/
-    - https://gamma.aisucks.app/
-
-# Observability ledger: OFF until the M5 prod step. When it flips, guardian
-# up configures the OpenBao path and waits for the projected clickhouse-admin
-# Kubernetes Secret before applying ClickHouse. With the flag off, prod's
-# otel-collector renders byte-identical to today's metrics-only spine and no
-# clickhouse objects are applied.
-clickhouse:
-  enabled: false

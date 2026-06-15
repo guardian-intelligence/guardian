@@ -6,9 +6,9 @@ import (
 )
 
 func TestCertManagerRenderUsesSeedRegistryImages(t *testing.T) {
-	sitePath, err := toolPath("_main/src/sites/dev/site.yaml")
+	sitePath, err := toolPath("_main/src/sites/dev/bootstrap.yaml")
 	if err != nil {
-		t.Fatalf("locate site.yaml: %v", err)
+		t.Fatalf("locate bootstrap.yaml: %v", err)
 	}
 	site, err := loadSite(sitePath)
 	if err != nil {

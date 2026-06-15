@@ -27,7 +27,7 @@ data:
         rules:
           # THE cross-site death-detection rule. A site-local stack cannot
           # report its own node's death, so each site's blackbox probes the
-          # OTHER sites' public healthz (site.yaml aisucks.watch) and this
+          # OTHER sites' public healthz (environment products.aisucks.watch) and this
           # fires when a sibling looks dead from outside its failure domain.
           # for: 2m rides out one flaky probe round without sitting on a
           # real outage.

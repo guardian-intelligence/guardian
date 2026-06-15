@@ -10,7 +10,7 @@ import (
 )
 
 // TestStatusManifestGuard renders the status component's manifest for each
-// real site.yaml and pins the deployment guard: a site with status.domains
+// real bootstrap.yaml and pins the deployment guard: a site with status.domains
 // gets the Namespace/Deployment/Service trio (with the Service selector
 // matching the pod labels — it is the TLSRoute backendRef), and a site
 // without (prod) renders nothing at all, which the apply loop skips.
@@ -28,9 +28,9 @@ func TestStatusManifestGuard(t *testing.T) {
 	}
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
-			sitePath, err := toolPath("_main/src/sites/" + siteName + "/site.yaml")
+			sitePath, err := toolPath("_main/src/sites/" + siteName + "/bootstrap.yaml")
 			if err != nil {
-				t.Fatalf("locate site.yaml: %v", err)
+				t.Fatalf("locate bootstrap.yaml: %v", err)
 			}
 			site, err := loadSite(sitePath)
 			if err != nil {

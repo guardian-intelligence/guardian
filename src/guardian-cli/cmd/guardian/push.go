@@ -55,7 +55,6 @@ var components = []component{{
 	name:     "crossplane",
 	layout:   "_main/src/infrastructure-components/crossplane/image",
 	manifest: "src/infrastructure-components/crossplane/k8s/crossplane.yaml.tmpl",
-	enabled:  siteUsesEdgeGateway,
 }, {
 	name:     "cert-manager",
 	manifest: "src/infrastructure-components/cert-manager/k8s/cert-manager.yaml.tmpl",
@@ -79,16 +78,16 @@ var components = []component{{
 }, {
 	name:     "provider-kubernetes",
 	manifest: "src/infrastructure-components/crossplane-provider-kubernetes/k8s/provider-kubernetes.yaml",
-	enabled:  siteUsesEdgeGateway,
+	enabled:  siteUsesCrossplane,
 }, {
 	name:     "provider-kubernetes-config",
 	manifest: "src/infrastructure-components/crossplane-provider-kubernetes/k8s/provider-kubernetes-config.yaml",
-	enabled:  siteUsesEdgeGateway,
+	enabled:  siteUsesCrossplane,
 }, {
 	name:        "edge-gateway-platform",
-	manifest:    "src/platform/edge-gateway/k8s/edge-gateway-platform.yaml",
+	manifest:    "src/crossplane/packages/guardian-platform/edge-gateway.yaml",
 	rawManifest: true,
-	enabled:     siteUsesEdgeGateway,
+	enabled:     siteUsesCrossplane,
 }, {
 	name:     "aisucks",
 	layout:   "_main/src/products/aisucks/services/api/image",
@@ -206,9 +205,9 @@ var components = []component{{
 	manifest: "src/infrastructure-components/grafana/k8s/grafana.yaml.tmpl",
 }, {
 	// status after victoria-metrics: the page is rendered from queries
-	// against the site-local VM. Sites without status.domains in site.yaml
-	// render an empty manifest and deploy nothing (the apply loop skips
-	// empty renders).
+	// against the site-local VM. Sites without platform.status.domains in
+	// their environment bundle render an empty manifest and deploy nothing
+	// (the apply loop skips empty renders).
 	name:     "status",
 	layout:   "_main/src/status/image",
 	manifest: "src/status/k8s/status.yaml.tmpl",
@@ -229,6 +228,10 @@ var components = []component{{
 
 func siteUsesEdgeGateway(s *Site) bool {
 	return s.Gateway.Enabled
+}
+
+func siteUsesCrossplane(*Site) bool {
+	return true
 }
 
 func siteUsesPlatformTLS(s *Site) bool {

@@ -84,30 +84,24 @@ cleanly in template input.
 
 ## Site configuration refactor
 
-`src/sites/<site>/site.yaml` currently mixes two concerns:
-
-- pre-Kubernetes bootstrap facts: cluster endpoint, node address, NIC MAC, disk
-  serials, Talos schematic, and Talos patches;
-- post-Kubernetes desired state: Gateway, product routes, company site,
-  observability, status page, ClickHouse, and registry.
-
-Crossplane can own only the second group. It runs after Kubernetes exists. The
-durable split is:
+Site configuration is split across pre-Kubernetes bootstrap facts and
+post-Kubernetes desired state. Crossplane can own only the second group because
+it runs after Kubernetes exists. The durable split is:
 
 ```text
 src/sites/<site>/
-  bootstrap.cue          # physical facts and Talos input
-  environment.cue        # post-Kubernetes platform/product config
-  generated/
-    environment.yaml     # EnvironmentConfig plus XR instances
+  bootstrap.yaml         # physical facts and Talos input
+
+src/crossplane/environments/<site>/
+  environment.yaml       # EnvironmentConfig plus XR instances
 ```
 
-`bootstrap.cue` is consumed by `guardian up` before the API server exists. It
+`bootstrap.yaml` is consumed by `guardian up` before the API server exists. It
 contains physical facts that must never be copied across boxes: MAC addresses,
 disk serials, gateways, hostnames, endpoints, and Talos patch lists.
 
-`environment.cue` is the "bag of composition configuration" for a site. It
-renders into:
+`environment.yaml` is the "bag of composition configuration" for a site. It
+contains:
 
 - one `EnvironmentConfig` labeled with `guardian.dev/site=<site>`;
 - root platform XRs such as `GuardianSite`, `ObservabilityStack`,
@@ -116,18 +110,14 @@ renders into:
 - SLO/synthetic declarations consumed by the observability compositions and
   release judge.
 
-CUE remains the first-party schema language. Generate YAML, JSON, and TOML from
-CUE. Hand-authored YAML should be limited to vendored upstream manifests or
-small bootstrap shims that cannot yet be generated.
-
 `guardian up` should shrink to this sequence:
 
-1. Read `bootstrap.cue`.
+1. Read `bootstrap.yaml`.
 2. Generate/apply Talos machine config.
 3. Ensure the seed registry, OpenBao, Crossplane, provider-kubernetes, and
    pinned composition functions are installed.
 4. Push Bazel-built OCI layouts to the seed registry by digest.
-5. Apply the rendered site environment bundle.
+5. Apply the site environment bundle.
 6. Wait for root XRs and required capability XRs to report ready.
 
 The important consequence: environments differ by XR specs and
@@ -143,14 +133,12 @@ monorepo:
 src/crossplane/
   packages/
     guardian-platform/
-      cue/                 # source schemas/defaults
-      apis/                # generated or reviewed XRDs
+      apis/                # XRDs
       compositions/        # Composition pipelines
       examples/            # small XR examples
       tests/               # render/schema tests
       crossplane.yaml      # package metadata
     guardian-products/
-      cue/
       apis/
       compositions/
       examples/

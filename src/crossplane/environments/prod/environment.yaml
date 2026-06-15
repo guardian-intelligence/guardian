@@ -1,0 +1,30 @@
+apiVersion: apiextensions.crossplane.io/v1beta1
+kind: EnvironmentConfig
+metadata:
+  name: guardian-prod
+  labels:
+    guardian.dev/site: prod
+data:
+  site:
+    name: prod
+    clusterName: guardian-prod
+    nodeHostname: gd-prod-w0
+  alerts:
+    ntfyTopic: "aisucks-ops-1ebda4d035e83ac0"
+  gateway:
+    enabled: false
+  products:
+    aisucks:
+      domain: aisucks.app
+      watch:
+        - https://dev.aisucks.app/healthz
+        - https://gamma.aisucks.app/healthz
+      watchPages:
+        - https://dev.aisucks.app/
+        - https://gamma.aisucks.app/
+    company: {}
+  platform:
+    oci: {}
+    clickhouse:
+      enabled: false
+    status: {}

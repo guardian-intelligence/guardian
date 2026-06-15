@@ -67,11 +67,11 @@ Cilium firewall + gateway. Concretely:
 
 - **CRDs apply before Cilium, provably.** The CRDs ship as their own
   Talos inline manifest listed immediately above `cilium-inline.yaml` in
-  every site.yaml; list order is `cluster.inlineManifests` order.
+  every `bootstrap.yaml`; list order is `talos.patches` order.
   `src/guardian-cli/cmd/guardian/render_order_test.go` renders each site's
   machine config with the pinned talosctl — the same `gen config` up.go
   issues — and fails if `gateway-api-crds` does not precede `cilium`.
-  Nothing in Go enforces the order; the test is what a careless site.yaml
+  Nothing in Go enforces the order; the test is what a careless bootstrap edit
   edit trips.
 - **Inert by construction.** Talos applies inline manifests at bootstrap
   only; a config-only re-render is a no-op for a running site. So Phase 0
@@ -114,15 +114,15 @@ the error budget), or the **drilled wipe-convert** (212s measured,
 ## Phases
 
 - **Phase 0 — vendoring + ordering (in tree).** CRD inline manifest,
-  values delta, re-render, site.yaml wiring, regression test. VERIFY:
+  values delta, re-render, bootstrap patch wiring, regression test. VERIFY:
   `render_order_test.go` green for all three sites; `bazelisk test //...`
   green; the re-render diff touches only inline manifests (inert for
   running sites).
 - **Phase 1 — EdgeGateway substrate + product routes.** `guardian up`
   installs pinned Crossplane, provider-kubernetes, function-go-templating,
   function-auto-ready, cert-manager where needed, and the `EdgeGateway`
-  XRD/Composition. Sites
-  declare the concrete `EdgeGateway` objects in `gateway.manifests`; the
+  XRD/Composition. Sites declare concrete `EdgeGateway` objects in their
+  Crossplane environment bundles; the
   platform composition owns GatewayClass/Gateway/listeners/cert refs, and
   products own their same-namespace `TLSRoute`/`HTTPRoute` objects. VERIFY:
   unit tests;

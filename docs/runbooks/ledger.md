@@ -2,7 +2,7 @@
 
 Brings up the per-site ledger — ClickHouse plus the otel-collector's logs
 tee (filelog container logs + k8sobjects k8s Events) — on a site whose
-`site.yaml` sets `clickhouse.enabled: true`. Customer-grade: every step is a
+environment bundle sets `platform.clickhouse.enabled: true`. Customer-grade: every step is a
 command against the real site, in order, with its verification. The ratchet
 is dev → gamma → prod; never start a site before the previous one's verify
 section passes.
@@ -32,7 +32,7 @@ would split truth between Kubernetes and OpenBao and would be lost on a
 wipe/restore.
 
 ```sh
-bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/sites/<site>/site.yaml
+bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/sites/<site>/bootstrap.yaml
 ```
 
 Paging hygiene: the converge restarts the collector (`Recreate` strategy) —

@@ -1,0 +1,32 @@
+apiVersion: apiextensions.crossplane.io/v1beta1
+kind: EnvironmentConfig
+metadata:
+  name: guardian-gamma
+  labels:
+    guardian.dev/site: gamma
+data:
+  site:
+    name: gamma
+    clusterName: guardian-gamma
+    nodeHostname: gd-gamma-w0
+  alerts:
+    ntfyTopic: "aisucks-ops-1ebda4d035e83ac0"
+  gateway:
+    enabled: false
+  products:
+    aisucks:
+      domain: gamma.aisucks.app
+      watch:
+        - https://aisucks.app/healthz
+        - https://dev.aisucks.app/healthz
+      watchPages:
+        - https://aisucks.app/
+        - https://dev.aisucks.app/
+    company: {}
+  platform:
+    oci: {}
+    clickhouse:
+      enabled: true
+    status:
+      domains:
+        - status.gamma.guardianintelligence.org

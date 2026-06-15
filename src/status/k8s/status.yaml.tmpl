@@ -3,9 +3,9 @@
 # Cilium Gateway's TLS passthrough (docs/architecture/gateway.md) — the
 # Service below is the TLSRoute backendRef, Envoy SNI-routes the status
 # hostnames to it, and certmagic in the pod keeps key custody (TLS-ALPN-01
-# rides the passthrough; HTTP-01 is disabled in the binary). A site whose
-# site.yaml has no status.domains renders this whole manifest empty and
-# deploys nothing (prod, until the Gateway round exposes a hostname there).
+# rides the passthrough; HTTP-01 is disabled in the binary). If the
+# environment has no platform.status.domains this whole manifest renders empty
+# and deploys nothing (prod, until the Gateway round exposes a hostname there).
 apiVersion: v1
 kind: Namespace
 metadata:

@@ -20,9 +20,9 @@ func TestOtelPublicHttpScrape(t *testing.T) {
 	const image = "registry.guardian.internal/otel-collector@sha256:deadbeef"
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
-			sitePath, err := toolPath("_main/src/sites/" + siteName + "/site.yaml")
+			sitePath, err := toolPath("_main/src/sites/" + siteName + "/bootstrap.yaml")
 			if err != nil {
-				t.Fatalf("locate site.yaml: %v", err)
+				t.Fatalf("locate bootstrap.yaml: %v", err)
 			}
 			site, err := loadSite(sitePath)
 			if err != nil {

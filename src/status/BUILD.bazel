@@ -6,7 +6,7 @@ load("//tools/format:defs.bzl", "go_format")
 go_format()
 
 # Manifest template as test data: the CLI's render test pins that the
-# whole manifest guards on site.yaml's status.domains (a site without
+# whole manifest guards on environment platform.status.domains (a site without
 # domains deploys no status pod).
 filegroup(
     name = "manifest",

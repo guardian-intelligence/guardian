@@ -19,7 +19,7 @@ guardian up
 
 The current implementation direct-renders the `PublicHttpService` envelope from
 `src/platform/public-http-service/`. The Crossplane shape lives in
-`src/crossplane/configurations/guardian-products/` and becomes live once the
+`src/crossplane/packages/guardian-products/` and becomes live once the
 Configuration package and any required functions/providers are pinned and
 mirrored.
 
@@ -102,7 +102,7 @@ src/viteplus-monorepo/packages/aisucks-sdk/
 src/platform/public-http-service/
   k8s/public-http-service.yaml.tmpl
 
-src/crossplane/configurations/guardian-products/
+src/crossplane/packages/guardian-products/
   apis/
   compositions/
   examples/

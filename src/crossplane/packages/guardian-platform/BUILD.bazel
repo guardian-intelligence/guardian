@@ -1,5 +1,5 @@
 filegroup(
     name = "manifests",
-    srcs = ["k8s/edge-gateway-platform.yaml"],
+    srcs = ["edge-gateway.yaml"],
     visibility = ["//src/guardian-cli:__subpackages__"],
 )
