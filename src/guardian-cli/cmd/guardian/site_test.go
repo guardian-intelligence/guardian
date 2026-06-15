@@ -108,24 +108,17 @@ func TestEnvironmentValidation(t *testing.T) {
 		},
 		wantErr: "site.name",
 	}, {
-		name: "podNetwork requires gateway",
-		mutate: func(site *Site, _ *Environment, _ *environmentConfigMetadata) {
-			site.Aisucks.PodNetwork = true
-		},
-		wantErr: "products.aisucks.podNetwork requires gateway.enabled",
-	}, {
 		name: "company requires gateway",
 		mutate: func(site *Site, _ *Environment, _ *environmentConfigMetadata) {
 			site.Company.Domain = "guardianintelligence.org"
 		},
 		wantErr: "products.company.domain requires gateway.enabled",
 	}, {
-		name: "gateway requires aisucks pod network",
+		name: "aisucks requires gateway",
 		mutate: func(site *Site, _ *Environment, _ *environmentConfigMetadata) {
-			site.Gateway.Enabled = true
 			site.Aisucks.Domain = "aisucks.app"
 		},
-		wantErr: "gateway.enabled requires products.aisucks.podNetwork",
+		wantErr: "products.aisucks.domain requires gateway.enabled",
 	}, {
 		name: "status monitor requires domains",
 		mutate: func(site *Site, _ *Environment, _ *environmentConfigMetadata) {

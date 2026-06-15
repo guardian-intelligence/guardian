@@ -136,7 +136,7 @@ spec:
       labels:
         app: gatus
     spec:
-{{- if and .Site.Aisucks.PodNetwork .Site.Aisucks.Domain}}
+{{- if .Site.Aisucks.Domain}}
       # Pod-network sites: the public-URL self-probes cannot hairpin through
       # the hostNetwork Envoy listener (cilium/cilium#36004 — see the
       # probe Services rendered by PublicHttpService, whose ClusterIPs these

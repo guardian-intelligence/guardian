@@ -1,9 +1,7 @@
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
 
-# Manifest template as test data: the CLI's render test pins the aisucks
-# scrape job's branch on aisucks.podNetwork (static loopback target vs
-# kubernetes_sd pod discovery) and the status.monitor gate on blackbox
-# targets.
+# Manifest template as test data: the CLI's render test pins PublicHttpService
+# pod discovery and the status.monitor gate on blackbox targets.
 filegroup(
     name = "manifest",
     srcs = ["k8s/otel-collector.yaml.tmpl"],

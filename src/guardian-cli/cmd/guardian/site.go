@@ -66,7 +66,6 @@ type Environment struct {
 			Domain     string   `yaml:"domain"`
 			Watch      []string `yaml:"watch"`
 			WatchPages []string `yaml:"watchPages"`
-			PodNetwork bool     `yaml:"podNetwork"`
 		} `yaml:"aisucks"`
 		Company struct {
 			Domain       string   `yaml:"domain"`
@@ -107,7 +106,6 @@ type Site struct {
 		NtfyTopic  string
 		Watch      []string
 		WatchPages []string
-		PodNetwork bool
 	}
 	Company struct {
 		Domain       string
@@ -176,7 +174,6 @@ func loadSite(path string) (*Site, error) {
 	s.Aisucks.NtfyTopic = env.Alerts.NtfyTopic
 	s.Aisucks.Watch = env.Products.Aisucks.Watch
 	s.Aisucks.WatchPages = env.Products.Aisucks.WatchPages
-	s.Aisucks.PodNetwork = env.Products.Aisucks.PodNetwork
 	s.Company.Domain = env.Products.Company.Domain
 	s.Company.WatchDomains = env.Products.Company.WatchDomains
 	if companyXR != nil {
@@ -339,13 +336,8 @@ func validateSite(s *Site, bootstrapPath, envPath string, env *Environment, envM
 	if env.Site.NodeHostname != "" && env.Site.NodeHostname != s.Node.Hostname {
 		return fmt.Errorf("environment %s: site.nodeHostname = %q, want %q from bootstrap %s", envPath, env.Site.NodeHostname, s.Node.Hostname, bootstrapPath)
 	}
-	// Pod-network aisucks serves only through the edge Gateway's routes;
-	// without gateway.enabled nothing answers on host :80/:443.
-	if s.Aisucks.PodNetwork && !s.Gateway.Enabled {
-		return fmt.Errorf("environment %s: products.aisucks.podNetwork requires gateway.enabled", envPath)
-	}
-	if s.Gateway.Enabled && s.Aisucks.Domain != "" && !s.Aisucks.PodNetwork {
-		return fmt.Errorf("environment %s: gateway.enabled requires products.aisucks.podNetwork", envPath)
+	if s.Aisucks.Domain != "" && !s.Gateway.Enabled {
+		return fmt.Errorf("environment %s: products.aisucks.domain requires gateway.enabled", envPath)
 	}
 	if s.OCI.Domain != "" && !s.Gateway.Enabled {
 		return fmt.Errorf("environment %s: platform.oci.domain requires gateway.enabled", envPath)
