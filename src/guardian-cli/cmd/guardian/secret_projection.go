@@ -15,10 +15,8 @@ import (
 // delivery. This file handles bootstrap-side Bao prep and convergence waits;
 // the XRD/Composition lives in src/crossplane/packages/guardian-platform.
 type secretProjectionManifest struct {
-	Kind            string `yaml:"kind"`
-	DerivedFromKind string `yaml:"-"`
-	DerivedFromName string `yaml:"-"`
-	Metadata        struct {
+	Kind     string `yaml:"kind"`
+	Metadata struct {
 		Name string `yaml:"name"`
 	} `yaml:"metadata"`
 	Spec secretProjectionSpec `yaml:"spec"`
@@ -157,11 +155,6 @@ func waitSecretProjections(kubectl, kubeconfig string, site *Site) error {
 	}
 	for _, projection := range projections {
 		name := projection.Metadata.Name
-		if projection.DerivedFromKind != "" {
-			if err := cleanupSupersededTopLevelSecretProjection(kubectl, kubeconfig, projection); err != nil {
-				return err
-			}
-		}
 		if err := waitSecretProjectionExists(kubectl, kubeconfig, name); err != nil {
 			return err
 		}
@@ -203,25 +196,4 @@ func waitSecretProjectionExists(kubectl, kubeconfig, name string) error {
 		_, err := outputTool(kubectl, "--kubeconfig", kubeconfig, "get", "secretprojection", name)
 		return err
 	})
-}
-
-func cleanupSupersededTopLevelSecretProjection(kubectl, kubeconfig string, projection secretProjectionManifest) error {
-	name := projection.Metadata.Name
-	raw, err := outputTool(kubectl, "--kubeconfig", kubeconfig, "get", "secretprojection", name, "-o", "jsonpath={range .metadata.ownerReferences[*]}{.kind}{\"/\"}{.name}{\"\\n\"}{end}")
-	if err != nil {
-		if strings.Contains(err.Error(), "NotFound") || strings.Contains(err.Error(), "not found") {
-			return nil
-		}
-		return err
-	}
-	owners := strings.TrimSpace(raw)
-	expectedOwner := projection.DerivedFromKind + "/" + projection.DerivedFromName
-	if owners == expectedOwner {
-		return nil
-	}
-	if owners != "" {
-		return fmt.Errorf("refusing to replace SecretProjection %s owned by %s", name, owners)
-	}
-	fmt.Fprintf(os.Stderr, "retiring top-level SecretProjection %s; %s now owns it\n", name, expectedOwner)
-	return runTool(kubectl, "--kubeconfig", kubeconfig, "delete", "secretprojection", name, "--wait=true", "--timeout=3m")
 }
