@@ -34,7 +34,7 @@ const usage = `usage:
   guardian down --yes [bootstrap.yaml]
                                      wipe the node to Talos maintenance mode via talosctl reset
   guardian config [bootstrap <path>] print config, or set the default bootstrap facts file
-  guardian run <tool> [args...]      run a version-pinned tool (aspect, bazel, talosctl, kubectl)
+  guardian run <tool> [args...]      run a version-pinned tool (aspect, bazel, talosctl, kubectl, oras, cosign)
   guardian tools install|uninstall   manage tool symlinks pointing at this binary (--bin-dir, default ~/.local/bin)
   guardian version                   print pinned component versions`
 

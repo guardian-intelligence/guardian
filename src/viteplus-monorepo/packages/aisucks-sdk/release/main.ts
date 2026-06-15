@@ -49,6 +49,7 @@ if (Exit.isSuccess(exit)) {
         outputDir: result.outputDir,
         ociDigest: result.candidate.oci.oci_digest,
         publishedOciDigest: result.publishedOci?.oci_digest,
+        ociSignatureStatus: result.ociSignatureStatus,
         npmStatus: result.npmStatus,
       },
       { pretty: true },

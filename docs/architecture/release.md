@@ -134,8 +134,8 @@ VictoriaMetrics queries against the M2 recording rules.
    npm SDK first becomes an OCI subject at `guardian/aisucks/sdk/npm`; the
    npmjs publish step is a later Trusted Publishing projection from that
    subject, not a push-on-main rule in GitHub Actions YAML. VERIFY: pull the
-   real SDK release from a clean machine with `oras pull`/`oras discover`;
-   cosign-compatible OCI signatures are the follow-up hardening step.
+   real SDK release from a clean machine with `guardian run oras pull`,
+   `guardian run oras discover`, and `guardian run cosign verify`.
 2. **Flux on dev** following edge; the template→kustomize conversion lands
    here. VERIFY: a merge reaches dev converged in minutes, hands-off.
 3. **Judge, gate role on gamma.** Prerequisite: bao Transit init on gamma

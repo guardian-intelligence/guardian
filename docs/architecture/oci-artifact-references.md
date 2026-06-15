@@ -128,8 +128,8 @@ registry:
 
 ```sh
 aspect release sdk-oci --output-dir /tmp/guardian-sdk-release
-oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist
-oras discover --oci-layout /tmp/guardian-sdk-release/oci-layout:edge
+guardian run oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist
+guardian run oras discover --oci-layout /tmp/guardian-sdk-release/oci-layout:edge
 ```
 
 The release state machine writes `/tmp/guardian-sdk-release/release-result.json`
@@ -144,14 +144,20 @@ manifest digest.
 A clean machine should eventually verify the public SDK by digest:
 
 ```sh
-oras pull oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest> -o ./dist
-oras discover oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>
+SDK='oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>'
+
+guardian run oras pull "$SDK" -o ./dist
+guardian run oras discover "$SDK"
+guardian run cosign verify "$SDK" \
+  --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml@refs/heads/main' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 npm install ./dist/guardian-intelligence-aisucks-<version>.tgz
 ```
 
-Cosign-compatible signatures are still the expected long-term signature
-referrer for OCI subjects. The current SDK lane emits DSSE/in-toto JSONL
-evidence and npm Trusted Publishing provenance first.
+For the SDK lane, publish mode emits both the DSSE/in-toto JSONL evidence
+referrer and a cosign keyless signature over the OCI subject. npm Trusted
+Publishing provenance is still a downstream ecosystem receipt for the npmjs
+projection, not the OCI subject's trust anchor.
 
 A blackbox canary that starts from a channel should resolve the tag to a
 digest, verify the digest, pull the tarball, install it, call Connect Health,

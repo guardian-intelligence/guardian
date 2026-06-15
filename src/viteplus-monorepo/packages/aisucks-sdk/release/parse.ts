@@ -21,6 +21,7 @@ export function parseReleaseConfig(args: readonly string[], packageVersion: stri
   const defaultPaths = defaultReleasePaths();
   let bazelisk = defaultPaths.bazelisk;
   let sdkoci = defaultPaths.sdkoci;
+  let cosign = defaultPaths.cosign;
   let npm = defaultPaths.npm;
   let node = defaultPaths.node;
 
@@ -75,6 +76,10 @@ export function parseReleaseConfig(args: readonly string[], packageVersion: stri
         sdkoci = path.resolve(requireValue(args, i, arg));
         i += 1;
         break;
+      case "--cosign":
+        cosign = requireValue(args, i, arg);
+        i += 1;
+        break;
       case "--npm":
         npm = path.resolve(requireValue(args, i, arg));
         i += 1;
@@ -104,6 +109,7 @@ export function parseReleaseConfig(args: readonly string[], packageVersion: stri
       ...defaultPaths,
       bazelisk,
       sdkoci,
+      cosign,
       npm,
       node,
     },

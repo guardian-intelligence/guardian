@@ -25,9 +25,8 @@ The split is deliberate:
   `oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>`
 - OCI tags: `edge`, `nightly`, `stable`, `v<N>`, and `git-<12-char-sha>`
 - DSSE/in-toto JSONL bundle over the SDK OCI subject
+- Cosign keyless signature over the SDK OCI subject digest
 - npm Trusted Publishing provenance for the npm projection
-- Cosign-compatible signature referrers over OCI subjects are still follow-up
-  work.
 
 The OCI digest still comes from `bazelisk build //:build`; the release tool
 pushes the already-built layout with:
@@ -42,8 +41,8 @@ The SDK OCI subject is built and admitted through Aspect:
 
 ```sh
 aspect release sdk-oci --output-dir /tmp/guardian-sdk-release
-oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist
-oras discover --oci-layout /tmp/guardian-sdk-release/oci-layout:edge
+guardian run oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist
+guardian run oras discover --oci-layout /tmp/guardian-sdk-release/oci-layout:edge
 ```
 
 The public zot registry allows anonymous reads and requires the
@@ -63,9 +62,12 @@ aspect release sdk-oci \
 
 `aspect release sdk-oci --publish` defaults to the ref above, the
 `guardian-release` OCI registry username, and `GUARDIAN_OCI_PASSWORD`.
-If `GUARDIAN_OCI_ACCESS_TOKEN` is set, the release task uses bearer-token auth
-instead. npm publish authority comes from GitHub OIDC Trusted Publishing, not
-from `NPM_TOKEN`.
+Publish mode signs the pushed SDK subject with cosign keyless signing, so it
+currently requires `GUARDIAN_OCI_USERNAME`/`GUARDIAN_OCI_PASSWORD` basic auth.
+Bearer-token OCI push works for unsigned pushes, but signed SDK publication
+rejects `GUARDIAN_OCI_ACCESS_TOKEN` until cosign token-stdin support is wired.
+npm publish authority comes from GitHub OIDC Trusted Publishing, not from
+`NPM_TOKEN`.
 
 ## Required Setup
 
@@ -93,38 +95,25 @@ Use the digest printed by the release tool:
 ```sh
 SDK='oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<digest>'
 
-oras pull "$SDK" -o ./dist
-oras discover "$SDK"
+guardian run oras pull "$SDK" -o ./dist
+guardian run oras discover "$SDK"
+guardian run cosign verify "$SDK" \
+  --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml@refs/heads/main' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 ```
 
 Expected: `oras pull` writes the npm tarball payload and `oras discover` shows
 the `application/vnd.guardian.release.in-toto.bundle.v1` referrer. The referrer
 payload is a JSONL bundle containing a DSSE envelope around an in-toto
-Statement with SLSA provenance predicate.
-
-## Verify Future OCI Signature
-
-Use the digest printed by the release tool:
-
-```sh
-IMAGE='ghcr.io/guardian-intelligence/aisucks@sha256:<digest>'
-
-cosign verify "$IMAGE" \
-  --certificate-identity-regexp '<expected release builder identity>' \
-  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
-```
-
-Expected after the follow-up signature work: cosign reports the certificate
-identity checks and emits the verified signature payload. Historical bridge
-releases used the deleted public release workflow identity; future releases
-should pin the replacement release-builder identity recorded in provenance.
+Statement with SLSA provenance predicate. `cosign verify` reports one verified
+keyless signature for the npm SDK release workflow identity.
 
 ## Verify OCI Provenance Attestation
 
 ```sh
 IMAGE='ghcr.io/guardian-intelligence/aisucks@sha256:<digest>'
 
-cosign verify-attestation "$IMAGE" \
+guardian run cosign verify-attestation "$IMAGE" \
   --type slsaprovenance \
   --certificate-identity-regexp '<expected release builder identity>' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \

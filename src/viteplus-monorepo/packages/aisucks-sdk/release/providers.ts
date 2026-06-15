@@ -16,8 +16,10 @@ import type { CommandResult, ReleaseEvent } from "./types.js";
 export type CommandInput = {
   readonly program: string;
   readonly args: readonly string[];
+  readonly redactedArgs?: readonly string[];
   readonly cwd: string;
   readonly env?: Readonly<Record<string, string>>;
+  readonly stdin?: string | Buffer;
   readonly timeoutMs: number;
 };
 
@@ -150,8 +152,12 @@ function runCommand(input: CommandInput): Promise<CommandResult> {
     const child = spawn(input.program, [...input.args], {
       cwd: input.cwd,
       env: { ...process.env, ...input.env },
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [input.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
+    const loggedArgs = input.redactedArgs ?? input.args;
+    const childStdout = child.stdout;
+    const childStderr = child.stderr;
+    const childStdin = child.stdin;
 
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
@@ -163,15 +169,49 @@ function runCommand(input: CommandInput): Promise<CommandResult> {
       setTimeout(() => child.kill("SIGKILL"), 2_000).unref();
     }, input.timeoutMs);
 
-    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
-    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    if (childStdout === null || childStderr === null) {
+      clearTimeout(timer);
+      child.kill("SIGTERM");
+      reject(
+        new CommandFailed({
+          program: input.program,
+          args: loggedArgs,
+          cwd: input.cwd,
+          exitCode: null,
+          stdout: "",
+          stderr: "failed to open subprocess stdio pipes",
+        }),
+      );
+      return;
+    }
+
+    childStdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+    childStderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    if (input.stdin !== undefined) {
+      if (childStdin === null) {
+        clearTimeout(timer);
+        child.kill("SIGTERM");
+        reject(
+          new CommandFailed({
+            program: input.program,
+            args: loggedArgs,
+            cwd: input.cwd,
+            exitCode: null,
+            stdout: "",
+            stderr: "failed to open subprocess stdin pipe",
+          }),
+        );
+        return;
+      }
+      childStdin.end(input.stdin);
+    }
 
     child.on("error", (error) => {
       clearTimeout(timer);
       reject(
         new CommandFailed({
           program: input.program,
-          args: input.args,
+          args: loggedArgs,
           cwd: input.cwd,
           exitCode: null,
           stdout: Buffer.concat(stdout).toString("utf8"),
@@ -184,7 +224,7 @@ function runCommand(input: CommandInput): Promise<CommandResult> {
       clearTimeout(timer);
       const result = {
         program: input.program,
-        args: input.args,
+        args: loggedArgs,
         cwd: input.cwd,
         exitCode: code ?? 0,
         stdout: Buffer.concat(stdout).toString("utf8"),
@@ -196,7 +236,7 @@ function runCommand(input: CommandInput): Promise<CommandResult> {
         reject(
           new CommandTimedOut({
             program: input.program,
-            args: input.args,
+            args: loggedArgs,
             cwd: input.cwd,
             timeoutMs: input.timeoutMs,
             stdout: result.stdout,

@@ -94,6 +94,11 @@ export function runRelease(
       "publish admitted OCI subject",
       publishOci(config, admittedCandidate, evidence, outputDir),
     );
+    const ociSignatureStatus = yield* stage(
+      "sign-oci",
+      "sign published OCI subject",
+      signOci(config, publishedOci),
+    );
     const npmStatus = yield* stage(
       "publish-npm",
       "publish npm package projection",
@@ -112,6 +117,7 @@ export function runRelease(
       candidate: admittedCandidate,
       evidence,
       publishedOci,
+      ociSignatureStatus,
       npmStatus,
       eventLog: logger.events(),
       outputDir,
@@ -162,6 +168,10 @@ function preflight(
         }),
       );
     }
+    if (config.mode === "publish" && config.publishOci) {
+      yield* requireGitHubActionsOidcForOciSigning();
+      yield* ociBasicAuth().pipe(Effect.asVoid);
+    }
     if (config.mode === "publish" && config.publishNpm && process.env.GITHUB_ACTIONS === "true") {
       yield* requireGitHubActionsOidcForNpmPublish(sdkPackageName);
     }
@@ -187,6 +197,25 @@ function preflight(
       );
     }
   });
+}
+
+function requireGitHubActionsOidcForOciSigning(): Effect.Effect<void, ReleaseError> {
+  if (
+    process.env.GITHUB_ACTIONS === "true" &&
+    process.env.ACTIONS_ID_TOKEN_REQUEST_URL !== undefined &&
+    process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN !== undefined
+  ) {
+    return Effect.void;
+  }
+  return Effect.fail(
+    new InvalidReleaseTarget({
+      reason: "OCI signing requires GitHub Actions OIDC",
+      details: {
+        requiredPermission: "id-token: write",
+        workflow: ".github/workflows/npm-sdk-release.yml",
+      },
+    }),
+  );
 }
 
 function requireGitHubActionsOidcForNpmPublish(
@@ -528,6 +557,86 @@ function ociAuthArgs(): Effect.Effect<readonly string[], ReleaseError> {
   return Effect.succeed(["--username", username, "--password-env", "GUARDIAN_OCI_PASSWORD"]);
 }
 
+function ociBasicAuth(): Effect.Effect<
+  { readonly username: string; readonly password: string },
+  ReleaseError
+> {
+  if (process.env.GUARDIAN_OCI_ACCESS_TOKEN !== undefined) {
+    return Effect.fail(
+      new InvalidReleaseTarget({
+        reason:
+          "cosign OCI signing requires GUARDIAN_OCI_USERNAME/GUARDIAN_OCI_PASSWORD; bearer token signing is not wired",
+      }),
+    );
+  }
+
+  const password = process.env.GUARDIAN_OCI_PASSWORD;
+  if (password === undefined || password === "") {
+    return Effect.fail(
+      new InvalidReleaseTarget({
+        reason: "OCI signing requires GUARDIAN_OCI_PASSWORD",
+      }),
+    );
+  }
+
+  const username = process.env.GUARDIAN_OCI_USERNAME ?? "guardian-release";
+  if (username === "") {
+    return Effect.fail(
+      new InvalidReleaseTarget({
+        reason: "GUARDIAN_OCI_USERNAME is set but empty",
+      }),
+    );
+  }
+  return Effect.succeed({ username, password });
+}
+
+function signOci(
+  config: ReleaseConfig,
+  publishedOci: SdkOciResult | undefined,
+): Effect.Effect<"not-requested" | "signed", ReleaseError, ProcessProvider> {
+  if (publishedOci === undefined) {
+    return Effect.succeed("not-requested");
+  }
+
+  return Effect.gen(function* () {
+    const auth = yield* ociBasicAuth();
+    const registry = ociRegistryFromRef(publishedOci.oci_ref);
+    yield* retryTransient(
+      runCommand({
+        program: config.paths.cosign,
+        args: ["login", registry, "--username", auth.username, "--password-stdin"],
+        redactedArgs: ["login", registry, "--username", auth.username, "--password-stdin"],
+        stdin: `${auth.password}\n`,
+        cwd: config.paths.repoRoot,
+        timeoutMs: commandTimeoutMs,
+      }),
+      isTransientReleaseError,
+    );
+    yield* retryTransient(
+      runCommand({
+        program: config.paths.cosign,
+        args: [
+          "sign",
+          "--yes",
+          "--oidc-provider",
+          "github-actions",
+          "--registry-referrers-mode",
+          "oci-1-1",
+          publishedOci.oci_ref,
+        ],
+        cwd: config.paths.repoRoot,
+        timeoutMs: publishTimeoutMs,
+      }),
+      isTransientReleaseError,
+    );
+    return signedOciStatus();
+  });
+}
+
+function signedOciStatus(): "signed" {
+  return "signed";
+}
+
 function publishNpm(
   config: ReleaseConfig,
   candidate: ReleaseCandidate,
@@ -586,6 +695,11 @@ function publishNpm(
     );
     return "published";
   });
+}
+
+function ociRegistryFromRef(ref: string): string {
+  const firstSlash = ref.indexOf("/");
+  return firstSlash < 0 ? ref : ref.slice(0, firstSlash);
 }
 
 function verifyRelease(
