@@ -114,6 +114,11 @@ var components = []component{{
 	rawManifest: true,
 	enabled:     siteUsesCrossplane,
 }, {
+	name:        "status-surface-platform",
+	manifest:    "src/crossplane/packages/guardian-platform/status-surface.yaml",
+	rawManifest: true,
+	enabled:     siteUsesCrossplane,
+}, {
 	name:        "oci-registry-platform",
 	manifest:    "src/crossplane/packages/guardian-platform/oci-registry.yaml",
 	rawManifest: true,
@@ -211,7 +216,7 @@ var components = []component{{
 	manifest: "src/infrastructure-components/grafana/k8s/grafana.yaml.tmpl",
 }, {
 	// status after victoria-metrics: the page is rendered from queries
-	// against the site-local VM. Sites without platform.status.domains in
+	// against the site-local VM. Sites without StatusSurface domains in
 	// their environment bundle render an empty manifest and deploy nothing
 	// (the apply loop skips empty renders).
 	name:     "status",

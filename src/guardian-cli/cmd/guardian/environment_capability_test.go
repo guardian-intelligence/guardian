@@ -15,6 +15,7 @@ func TestEnvironmentCapabilities(t *testing.T) {
 				"CompanySite/company-site":         "companysites.products.guardian.dev",
 				"DirectusInstance/directus":        "directusinstances.platform.guardian.dev",
 				"ObservabilityStack/observability": "observabilitystacks.platform.guardian.dev",
+				"StatusSurface/status":             "statussurfaces.platform.guardian.dev",
 			}
 			wantRollouts := map[string][]environmentRollout{
 				"AisucksProduct/aisucks": {
@@ -25,6 +26,7 @@ func TestEnvironmentCapabilities(t *testing.T) {
 				},
 				"DirectusInstance/directus":        nil,
 				"ObservabilityStack/observability": nil,
+				"StatusSurface/status":             nil,
 			}
 			if siteName == "dev" {
 				want["OCIRegistry/zot"] = "ociregistries.platform.guardian.dev"

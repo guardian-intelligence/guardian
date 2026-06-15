@@ -10,7 +10,7 @@ import (
 )
 
 // TestStatusManifestGuard renders the status component's manifest for each
-// real bootstrap.yaml and pins the deployment guard: a site with status.domains
+// real bootstrap.yaml and pins the deployment guard: a site with StatusSurface domains
 // gets the Namespace/Deployment/Service trio (with the Service selector
 // matching the pod labels — it is the TLSRoute backendRef), and a site
 // without (prod) renders nothing at all, which the apply loop skips.
@@ -42,7 +42,7 @@ func TestStatusManifestGuard(t *testing.T) {
 			}
 			if wantDomains[siteName] == "" {
 				if len(bytes.TrimSpace(rendered)) != 0 {
-					t.Fatalf("site %s has no status.domains but the manifest rendered non-empty:\n%s", siteName, rendered)
+					t.Fatalf("site %s has no StatusSurface domains but the manifest rendered non-empty:\n%s", siteName, rendered)
 				}
 				return
 			}

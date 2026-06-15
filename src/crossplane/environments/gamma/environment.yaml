@@ -20,9 +20,6 @@ data:
       domain: gamma.guardianintelligence.org
   platform:
     oci: {}
-    status:
-      domains:
-        - status.gamma.guardianintelligence.org
 ---
 apiVersion: platform.guardian.dev/v1alpha1
 kind: SLOProfile
@@ -119,6 +116,16 @@ spec:
     pod-security.kubernetes.io/enforce: privileged
   clickhouse:
     enabled: true
+---
+apiVersion: platform.guardian.dev/v1alpha1
+kind: StatusSurface
+metadata:
+  name: status
+spec:
+  site: gamma
+  domains:
+    - status.gamma.guardianintelligence.org
+  monitor: false
 ---
 apiVersion: platform.guardian.dev/v1alpha1
 kind: SecretProjection
