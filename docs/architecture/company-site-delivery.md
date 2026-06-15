@@ -28,7 +28,7 @@ Layer the site like this:
 | - | - | - | - |
 | Talos/Kubernetes | `guardian up` | live | Node bootstrap, Cilium, seed registry, OpenBao, pinned component manifests. |
 | Platform substrate | Crossplane + provider-kubernetes | live for `EdgeGateway` | GatewayClass/Gateway/listeners, shared edge policy, future common platform envelopes. |
-| Public service envelope | `platform.guardian.dev/PublicHttpService` | Crossplane XRD/Composition | Namespace, Deployment, Service, TLSRoute, HTTPRoute, health probes, metrics labels, rollout defaults. |
+| Public service envelope | `platform.guardian.dev/PublicHttpService` | Crossplane XRD/Composition | Namespace, Deployment, Service, Gateway routes, health probes, metrics labels, rollout defaults. |
 | Product declaration | `products.guardian.dev/CompanySite` | Crossplane XRD/Composition | Chooses image/content digest/domain and composes the public service envelope plus content backend references. |
 | Release judge | release architecture M6 | design ratified | Reads artifact evidence and SLO gates, then advances channel pointers or rolls back. |
 
@@ -203,7 +203,8 @@ Owns the standard public workload envelope:
 - Deployment.
 - Service.
 - optional probe Service for in-cluster checks.
-- TLSRoute and HTTPRoute.
+- Gateway routes: `HTTPRoute` for platform termination, or `TLSRoute` plus
+  `HTTPRoute` when a product owns TLS.
 - health and readiness probes.
 - resource requests, memory limits, and `GOMEMLIMIT`.
 - rollout strategy.
@@ -377,11 +378,14 @@ For the company site, the desired runtime objects are:
 - `Deployment company-site`, pod-network only, at least two replicas on public
   serving sites.
 - `Service company-site` for Gateway backends.
-- `Service company-site-probe` for in-cluster TLS/self probes that cannot
-  hairpin through the host-network Gateway path.
-- `TLSRoute company-site` for SNI passthrough when the app owns its certs.
-- `HTTPRoute company-site-http` for `:80`, ACME HTTP-01 where applicable,
-  health, and redirects.
+- `Service company-site-probe` for in-cluster probes that cannot hairpin
+  through the host-network Gateway path.
+- `HTTPRoute company-site-https` for platform-terminated HTTPS.
+- `TLSRoute company-site` only when the app-owned certificate mode is selected.
+- `HTTPRoute company-site-http-redirect` for platform-terminated `:80`
+  redirects.
+- `HTTPRoute company-site-http` for passthrough `:80` forwarding when the app
+  owns redirects.
 - Pod labels:
   - `platform.guardian.dev/metrics-scrape: "true"`
   - `platform.guardian.dev/metrics-port: "9090"`
@@ -401,13 +405,21 @@ Run it as ordinary Kubernetes components when introduced:
 - `Deployment directus`, digest-pinned.
 - Postgres for Directus state, backed up through Guardian's normal survival
   floor.
-- Initial single-node uploads use an explicit hostPath; the durable target is
-  S3-compatible object storage before public authoring depends on uploads.
+- Initial single-node uploads use an explicit hostPath. `DirectusInstance`
+  also accepts S3-compatible storage references, backed by OpenBao-projected
+  credentials, for the R2/object-store migration before public authoring
+  depends on uploads.
 - Redis only when Directus needs multi-replica coordination, websocket
   coordination, or cache/session sharing.
 - R2/S3-compatible object storage for uploads and generated public images.
 - OpenBao as source of truth for database, admin, storage, and webhook secrets,
   projected to Kubernetes Secrets.
+
+If a site declares Directus secrets as nonblocking and those secrets have not
+been admitted yet, the `DirectusInstance` may set `runtime.suspend: true`.
+That keeps Services and desired state declared while scaling Directus/Postgres
+to zero, so missing CMS secrets do not make public-site convergence look green
+while alerts are red.
 
 Public pages should read from a published snapshot in the web image or an
 app-local cache that can serve stale content. Directus webhooks should create a

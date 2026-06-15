@@ -37,8 +37,8 @@ Use this request path for public pages:
 The current Go static service is a scaffold for the first public deployment. Do
 not deepen it into a second web framework. When TanStack Start lands, replace
 the static Go asset server with a Start server image while preserving the same
-Kubernetes envelope: `Deployment`, `Service`, `TLSRoute`, `HTTPRoute`, probes,
-metrics, and digest-pinned image rollout.
+Kubernetes envelope: `Deployment`, `Service`, Gateway routes, probes, metrics,
+and digest-pinned image rollout.
 
 ## Directus Contract
 
@@ -66,8 +66,10 @@ metrics, and digest-pinned image rollout.
 - Pin the Directus image by digest and manage it through Bazel/OCI plumbing.
 - Use Postgres for Directus data. Back it up and restore it through Guardian's
   normal offsite survival floor.
-- Use S3-compatible object storage for uploads. Do not store public assets only
-  on a pod filesystem.
+- Use S3-compatible object storage for uploads before public authoring depends
+  on uploaded assets. Early private authoring may use the platform's local
+  Directus storage mode, but public assets must not live only on a pod
+  filesystem.
 - Use Redis when Directus runs more than one replica or when cache/session/
   websocket coordination matters. A single Directus replica is acceptable for
   early authoring because the public site must keep serving without Directus.

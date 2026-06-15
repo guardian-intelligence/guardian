@@ -93,6 +93,11 @@ spec:
                       type: string
                     tlsSectionName:
                       type: string
+                    tlsMode:
+                      type: string
+                      enum:
+                        - Passthrough
+                        - Terminate
                     httpSectionName:
                       type: string
                     tlsRouteAPIVersion:
@@ -173,6 +178,10 @@ spec:
             {{- $spec := $xr.spec -}}
             {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
             {{- $gatewayEnabled := index $env "gateway" "enabled" -}}
+            {{- $tlsMode := "Passthrough" -}}
+            {{- with $spec.gateway.tlsMode -}}
+            {{- $tlsMode = . -}}
+            {{- end -}}
             {{- $networkLabelValue := "pod" -}}
             {{- if not $spec.podNetwork -}}
             {{- $networkLabelValue = "host" -}}
@@ -276,6 +285,10 @@ spec:
                                 value: "{{ $spec.listen.diagnostics }}"
                               - name: GOMEMLIMIT
                                 value: "{{ $spec.goMemoryLimit }}"
+                              - name: ENABLE_APP_TLS
+                                value: "{{ if eq $tlsMode "Terminate" }}false{{ else }}true{{ end }}"
+                              - name: REDIRECT_HTTP
+                                value: "{{ if eq $tlsMode "Terminate" }}false{{ else }}true{{ end }}"
                             ports:
                               - name: http
                                 containerPort: {{ $spec.ports.http }}
@@ -371,7 +384,7 @@ spec:
                         port: 80
                         targetPort: http
             {{- end }}
-            {{- if and $gatewayEnabled $spec.domain }}
+            {{- if and $gatewayEnabled $spec.domain (ne $tlsMode "Terminate") }}
             ---
             apiVersion: kubernetes.crossplane.io/v1alpha2
             kind: Object
@@ -387,6 +400,7 @@ spec:
                     name: public-http-{{ $spec.app }}-service
               providerConfigRef:
                 name: platform
+              watch: true
               forProvider:
                 manifest:
                   apiVersion: {{ $spec.gateway.tlsRouteAPIVersion }}
@@ -406,7 +420,78 @@ spec:
                           - name: {{ $spec.app }}
                             port: 443
             {{- end }}
-            {{- if $gatewayEnabled }}
+            {{- if and $gatewayEnabled (eq $tlsMode "Terminate") }}
+            ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              name: public-http-{{ $spec.app }}-https-route
+              annotations:
+                {{ setResourceNameAnnotation "https-route" }}
+            spec:
+              references:
+                - dependsOn:
+                    apiVersion: kubernetes.crossplane.io/v1alpha2
+                    kind: Object
+                    name: public-http-{{ $spec.app }}-service
+              providerConfigRef:
+                name: platform
+              watch: true
+              forProvider:
+                manifest:
+                  apiVersion: gateway.networking.k8s.io/v1
+                  kind: HTTPRoute
+                  metadata:
+                    name: {{ $spec.app }}-https
+                    namespace: {{ $spec.namespace }}
+                  spec:
+                    parentRefs:
+                      - name: {{ $spec.gateway.name }}
+                        namespace: {{ $spec.gateway.namespace }}
+                        sectionName: {{ $spec.gateway.tlsSectionName }}
+                    hostnames:
+                      - "{{ $spec.domain }}"
+                    rules:
+                      - backendRefs:
+                          - name: {{ $spec.app }}
+                            port: 80
+            ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              name: public-http-{{ $spec.app }}-http-redirect
+              annotations:
+                {{ setResourceNameAnnotation "http-redirect" }}
+            spec:
+              references:
+                - dependsOn:
+                    apiVersion: kubernetes.crossplane.io/v1alpha2
+                    kind: Object
+                    name: public-http-{{ $spec.app }}-service
+              providerConfigRef:
+                name: platform
+              watch: true
+              forProvider:
+                manifest:
+                  apiVersion: gateway.networking.k8s.io/v1
+                  kind: HTTPRoute
+                  metadata:
+                    name: {{ $spec.app }}-http-redirect
+                    namespace: {{ $spec.namespace }}
+                  spec:
+                    parentRefs:
+                      - name: {{ $spec.gateway.name }}
+                        namespace: {{ $spec.gateway.namespace }}
+                        sectionName: {{ $spec.gateway.httpSectionName }}
+                    hostnames:
+                      - "{{ $spec.domain }}"
+                    rules:
+                      - filters:
+                          - type: RequestRedirect
+                            requestRedirect:
+                              scheme: https
+                              statusCode: 301
+            {{- else if $gatewayEnabled }}
             ---
             apiVersion: kubernetes.crossplane.io/v1alpha2
             kind: Object
@@ -422,6 +507,7 @@ spec:
                     name: public-http-{{ $spec.app }}-service
               providerConfigRef:
                 name: platform
+              watch: true
               forProvider:
                 manifest:
                   apiVersion: gateway.networking.k8s.io/v1

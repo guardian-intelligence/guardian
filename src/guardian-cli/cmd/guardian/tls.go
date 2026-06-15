@@ -88,7 +88,7 @@ func applyCloudflareDNSTokenSecret(kubectl, kubeconfig string) error {
 			fmt.Fprintf(os.Stderr, "using existing cert-manager Cloudflare DNS token secret %s/%s\n", "cert-manager", cloudflareDNSTokenSecretName)
 			return nil
 		}
-		return fmt.Errorf("up: oci.domain requires Cloudflare DNS-01 credentials; export one of %s or set it in ./secret.env", strings.Join(cloudflareDNSTokenEnvVars, ", "))
+		return fmt.Errorf("up: platform TLS certificates require Cloudflare DNS-01 credentials; export one of %s or set it in ./secret.env", strings.Join(cloudflareDNSTokenEnvVars, ", "))
 	}
 	secret := map[string]any{
 		"apiVersion": "v1",

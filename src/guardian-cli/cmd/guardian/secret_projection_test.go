@@ -85,6 +85,9 @@ func TestSecretProjectionSiteManifests(t *testing.T) {
 			if directus.Spec.Target.Namespace != "directus" {
 				t.Fatalf("directus namespace = %q", directus.Spec.Target.Namespace)
 			}
+			if directus.waitForSecrets() {
+				t.Fatal("directus secrets should not gate public site converge")
+			}
 			for _, tc := range []struct {
 				name string
 				path string

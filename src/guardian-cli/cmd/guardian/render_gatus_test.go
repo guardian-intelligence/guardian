@@ -61,22 +61,23 @@ func TestGatusProbeAliasBranch(t *testing.T) {
 			}
 			if site.Company.Domain != "" {
 				for _, want := range []string{
-					"ip: 10.96.111.44", // must match the company-site-probe Service pin
-					`- "` + site.Company.Domain + `"`,
 					"company-healthz (" + site.Cluster.Name + ")",
-					"https://" + site.Company.Domain + "/healthz",
+					"http://company-site-probe.company.svc/healthz",
 					"company-home (" + site.Cluster.Name + ")",
-					"https://" + site.Company.Domain + "/",
+					"http://company-site-probe.company.svc/",
 					"company-letters (" + site.Cluster.Name + ")",
-					"https://" + site.Company.Domain + "/letters",
+					"http://company-site-probe.company.svc/letters",
 					"The Coding Agent is the Next Smartphone",
 					"company-news (" + site.Cluster.Name + ")",
-					"https://" + site.Company.Domain + "/news",
+					"http://company-site-probe.company.svc/news",
 					"Guardian Intelligence Inc. announces private beta of Verself.",
 				} {
 					if !strings.Contains(out, want) {
 						t.Errorf("company gatus render missing %q", want)
 					}
+				}
+				if strings.Contains(out, `- "`+site.Company.Domain+`"`) {
+					t.Error("Gateway-terminated company self-checks must not alias the public hostname to the HTTP probe Service")
 				}
 			}
 		})

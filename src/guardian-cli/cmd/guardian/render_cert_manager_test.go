@@ -43,4 +43,10 @@ func TestCertManagerRenderUsesSeedRegistryImages(t *testing.T) {
 	if !strings.Contains(out, "enableGatewayAPI: true") {
 		t.Error("cert-manager controller config must enable Gateway API support")
 	}
+	if !strings.Contains(out, "pod-security.kubernetes.io/enforce: privileged") {
+		t.Error("cert-manager namespace must allow the hostNetwork controller")
+	}
+	if !strings.Contains(out, "hostNetwork: true") {
+		t.Error("cert-manager controller must run hostNetwork for Gateway API certificate watches")
+	}
 }

@@ -40,6 +40,18 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
+func envBool(key string, fallback bool) bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	switch v {
+	case "":
+		return fallback
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
+}
+
 func drainOnShutdown(ctx context.Context, servers ...*http.Server) {
 	<-ctx.Done()
 	shCtx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
@@ -85,42 +97,48 @@ func run() error {
 		}
 	}()
 
-	certmagic.DefaultACME.Agreed = true
-	certmagic.DefaultACME.Email = os.Getenv("ACME_EMAIL")
-	certmagic.DefaultACME.DisableHTTPChallenge = true
-	if dir := os.Getenv("CERT_DIR"); dir != "" {
-		certmagic.Default.Storage = &certmagic.FileStorage{Path: dir}
-	}
-	cfg := certmagic.NewDefault()
-	if err := cfg.ManageAsync(ctx, []string{domain}); err != nil {
-		return fmt.Errorf("certmagic manage %s: %w", domain, err)
-	}
-	tlsCfg := cfg.TLSConfig()
-	tlsCfg.NextProtos = append([]string{"h2", "http/1.1"}, tlsCfg.NextProtos...)
-	tlsLn, err := net.Listen("tcp", envOr("LISTEN_TLS", ":8443"))
-	if err != nil {
-		return err
-	}
-	https := &http.Server{
-		Handler:           app,
-		TLSConfig:         tlsCfg,
-		ReadHeaderTimeout: 10 * time.Second,
-		ErrorLog:          silenced,
-	}
-	go drainOnShutdown(ctx, https)
-	go func() {
-		if err := https.ServeTLS(tlsLn, "", ""); err != http.ErrServerClosed {
-			logger.Error("tls listener", "error", err)
-			os.Exit(1)
+	if envBool("ENABLE_APP_TLS", true) {
+		certmagic.DefaultACME.Agreed = true
+		certmagic.DefaultACME.Email = os.Getenv("ACME_EMAIL")
+		certmagic.DefaultACME.DisableHTTPChallenge = true
+		if dir := os.Getenv("CERT_DIR"); dir != "" {
+			certmagic.Default.Storage = &certmagic.FileStorage{Path: dir}
 		}
-	}()
+		cfg := certmagic.NewDefault()
+		if err := cfg.ManageAsync(ctx, []string{domain}); err != nil {
+			return fmt.Errorf("certmagic manage %s: %w", domain, err)
+		}
+		tlsCfg := cfg.TLSConfig()
+		tlsCfg.NextProtos = append([]string{"h2", "http/1.1"}, tlsCfg.NextProtos...)
+		tlsLn, err := net.Listen("tcp", envOr("LISTEN_TLS", ":8443"))
+		if err != nil {
+			return err
+		}
+		https := &http.Server{
+			Handler:           app,
+			TLSConfig:         tlsCfg,
+			ReadHeaderTimeout: 10 * time.Second,
+			ErrorLog:          silenced,
+		}
+		go drainOnShutdown(ctx, https)
+		go func() {
+			if err := https.ServeTLS(tlsLn, "", ""); err != http.ErrServerClosed {
+				logger.Error("tls listener", "error", err)
+				os.Exit(1)
+			}
+		}()
+	}
 
 	httpLn, err := net.Listen("tcp", envOr("LISTEN_HTTP", ":8080"))
 	if err != nil {
 		return err
 	}
+	handler := http.Handler(app)
+	if envBool("REDIRECT_HTTP", true) {
+		handler = redirectingHTTP(app, domain)
+	}
 	httpServer := &http.Server{
-		Handler:           redirectingHTTP(app, domain),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ErrorLog:          silenced,
 	}

@@ -32,18 +32,14 @@ everything else is a route.
   Gateway and Route objects survive that growth unchanged: BGP becomes a
   layer that attracts a floating IP to a node where the same hostNetwork
   Envoy listens — IP attraction, not a redesign.
-- **TLS passthrough by default** (TLSRoute, SNI routing). Envoy never
-  decrypts; services keep in-process certmagic and their own key custody.
-  Connections with no matching SNI drop at the edge. Per-hostname
-  termination (HTTPRoute) is a later, reversible, per-hostname choice —
-  revisit when key custody exists (M7's bao Transit), e.g. a status page
-  terminating at the Gateway while aisucks stays passthrough.
-- **Platform TLS is Gateway-terminated by amendment.** Product services that
-  intentionally own keys stay on passthrough. Platform APIs such as
-  `oci.guardianintelligence.org` terminate TLS at Cilium Gateway using
-  cert-manager-managed Secrets and route to in-cluster HTTP backends. zot is
-  the first such backend. Do not add a Caddy, nginx, or bespoke TLS proxy to
-  solve this.
+- **Platform TLS is Gateway-terminated by amendment.** Public product and
+  platform hostnames that do not intentionally own keys terminate TLS at
+  Cilium Gateway using cert-manager-managed Secrets and route to in-cluster
+  HTTP backends. This includes `guardianintelligence.org` and
+  `oci.guardianintelligence.org`. Surfaces that intentionally own keys, or
+  whose DNS/cert custody is not yet in the platform secret set, stay on
+  passthrough; `aisucks.app` is currently in this group. Do not add a Caddy,
+  nginx, or bespoke TLS proxy to solve this.
 - **CRD pin = a function of the Cilium version.** Cilium 1.19 consumes
   TLSRoute as v1alpha2, so we vendor the exact Gateway API release the
   Cilium 1.19.4 docs declare conformance against (v1.4.1 at this writing;
@@ -54,9 +50,9 @@ everything else is a route.
   serving v1alpha2 — bumping the CRDs alone would silently disable the path
   everything routes through. Adopt v1 at the Cilium bump that does, as one
   change.
-- **:80 listener**: HTTPRoute forwarding health/redirect traffic and any
-  product-owned HTTP-01 paths. Platform TLS for `guardianintelligence.org`
-  uses Cloudflare DNS-01, not HTTP-01. TLS-ALPN-01 rides passthrough natively.
+- **:80 listener**: HTTPRoute forwarding redirect traffic and
+  `guardianintelligence.org` ACME challenge paths where needed. Platform TLS
+  for `guardianintelligence.org` uses Cloudflare DNS-01.
 
 ## The bootstrap invariant (the acceptance bar)
 
@@ -166,10 +162,9 @@ that path for XDP to accelerate.
   would drop the prober that watches the pilot. Dev routes stay
   host-unrestricted (or Gatus moves to hostname probes) until the
   cross-site blackbox migration retires Gatus (observability.md).
-- **ACME renewal is the late-fuse failure.** A passthrough misroute of
-  TLS-ALPN-01 or the :80 HTTP-01 path stays invisible until certs age —
-  hence the forced-renewal gate in Phase 4, on gamma, before prod ever
-  converts.
+- **ACME renewal is the late-fuse failure.** A DNS-01 or Gateway HTTP-01
+  route regression can stay invisible until certs age — hence the
+  forced-renewal gate in Phase 4, on gamma, before prod ever converts.
 - **The proxy loop** (above) is hypothesized bounded, not proven
   acceptable; the brief-gap mode is the pre-agreed exit if the measurement
   is ugly.

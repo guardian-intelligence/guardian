@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ type secretProjectionManifest struct {
 }
 
 type secretProjectionSpec struct {
+	WaitForSecrets *bool `yaml:"waitForSecrets"`
 	Target struct {
 		Namespace       string            `yaml:"namespace"`
 		NamespaceLabels map[string]string `yaml:"namespaceLabels"`
@@ -43,6 +45,10 @@ type secretProjectionSecret struct {
 type secretProjectionData struct {
 	SecretKey string `yaml:"secretKey"`
 	Property  string `yaml:"property"`
+}
+
+func (p secretProjectionManifest) waitForSecrets() bool {
+	return p.Spec.WaitForSecrets == nil || *p.Spec.WaitForSecrets
 }
 
 func secretProjections(site *Site) ([]secretProjectionManifest, error) {
@@ -136,6 +142,17 @@ func waitSecretProjections(kubectl, kubeconfig string, site *Site) error {
 			return err
 		}); err != nil {
 			return err
+		}
+		if !projection.waitForSecrets() {
+			for _, secret := range projection.Spec.Secrets {
+				if _, err := outputTool(kubectl, "--kubeconfig", kubeconfig, "-n", namespace, "get", "externalsecret", secret.Name); err != nil {
+					return fmt.Errorf("get non-blocking ExternalSecret %s/%s: %w", namespace, secret.Name, err)
+				}
+				if _, err := outputTool(kubectl, "--kubeconfig", kubeconfig, "-n", namespace, "get", "secret", secret.Name); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: non-blocking SecretProjection %s has no ready Kubernetes Secret %s/%s yet; rerun with %s and %s=1 to create the missing OpenBao value\n", name, namespace, secret.Name, baoRootTokenEnv, baoAllowSecretMigrationEnv)
+				}
+			}
+			continue
 		}
 		for _, secret := range projection.Spec.Secrets {
 			if err := runTool(kubectl, "--kubeconfig", kubeconfig, "-n", namespace, "wait", "--for=condition=Ready", "externalsecret/"+secret.Name, "--timeout=3m"); err != nil {

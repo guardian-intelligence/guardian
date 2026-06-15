@@ -35,6 +35,12 @@ spec:
                   type: boolean
                 adminDomain:
                   type: string
+                runtime:
+                  type: object
+                  properties:
+                    suspend:
+                      type: boolean
+                      default: false
                 resources:
                   type: object
                   properties:
@@ -90,6 +96,31 @@ spec:
                     - storagePath
                 uploadsPath:
                   type: string
+                storage:
+                  type: object
+                  description: Optional Directus file storage configuration. Local upload storage is the default; S3 references are secret-backed.
+                  properties:
+                    s3:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                          default: false
+                        bucket:
+                          type: string
+                        region:
+                          type: string
+                        endpoint:
+                          type: string
+                        forcePathStyle:
+                          type: boolean
+                          default: true
+                        secretName:
+                          type: string
+                        accessKeyIDKey:
+                          type: string
+                        secretAccessKeyKey:
+                          type: string
                 gateway:
                   type: object
                   properties:
@@ -103,6 +134,12 @@ spec:
                     - name
                     - namespace
                     - httpSectionName
+                readiness:
+                  type: object
+                  properties:
+                    waitForRollout:
+                      type: boolean
+                      default: true
               required:
                 - site
                 - namespace
@@ -161,8 +198,26 @@ spec:
             {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
             {{- $gatewayEnabled := index $env "gateway" "enabled" -}}
             {{- $publicURL := printf "http://directus.%s.svc:8055" $spec.namespace -}}
+            {{- $s3Storage := false -}}
             {{- if $spec.adminDomain -}}
             {{- $publicURL = printf "https://%s" $spec.adminDomain -}}
+            {{- end -}}
+            {{- with $spec.storage -}}
+            {{- with .s3 -}}
+            {{- with .enabled -}}
+            {{- if . -}}
+            {{- $s3Storage = true -}}
+            {{- end -}}
+            {{- end -}}
+            {{- end -}}
+            {{- end -}}
+            {{- $replicas := 1 -}}
+            {{- with $spec.runtime -}}
+            {{- with .suspend -}}
+            {{- if . -}}
+            {{- $replicas = 0 -}}
+            {{- end -}}
+            {{- end -}}
             {{- end -}}
             ---
             apiVersion: kubernetes.crossplane.io/v1alpha2
@@ -207,7 +262,7 @@ spec:
                     namespace: {{ $spec.namespace }}
                   spec:
                     serviceName: directus-postgres
-                    replicas: 1
+                    replicas: {{ $replicas }}
                     selector:
                       matchLabels:
                         app: directus-postgres
@@ -322,7 +377,7 @@ spec:
                     name: directus
                     namespace: {{ $spec.namespace }}
                   spec:
-                    replicas: 1
+                    replicas: {{ $replicas }}
                     selector:
                       matchLabels:
                         app: directus
@@ -339,6 +394,7 @@ spec:
                         securityContext:
                           seccompProfile:
                             type: RuntimeDefault
+                        {{ if not $s3Storage }}
                         initContainers:
                           - name: prepare-uploads-dir
                             image: {{ $spec.image }}
@@ -353,6 +409,7 @@ spec:
                             volumeMounts:
                               - name: uploads
                                 mountPath: /directus/uploads
+                        {{ end }}
                         containers:
                           - name: directus
                             image: {{ $spec.image }}
@@ -398,26 +455,61 @@ spec:
                                   secretKeyRef:
                                     name: {{ $spec.secrets.databaseSecretName }}
                                     key: {{ $spec.secrets.databasePasswordKey }}
+                              {{ if $s3Storage }}
+                              - name: STORAGE_LOCATIONS
+                                value: s3
+                              - name: STORAGE_S3_DRIVER
+                                value: s3
+                              - name: STORAGE_S3_BUCKET
+                                value: "{{ $spec.storage.s3.bucket }}"
+                              - name: STORAGE_S3_REGION
+                                value: "{{ $spec.storage.s3.region }}"
+                              - name: STORAGE_S3_ENDPOINT
+                                value: "{{ $spec.storage.s3.endpoint }}"
+                              - name: STORAGE_S3_FORCE_PATH_STYLE
+                                value: "{{ $spec.storage.s3.forcePathStyle }}"
+                              - name: STORAGE_S3_KEY
+                                valueFrom:
+                                  secretKeyRef:
+                                    name: {{ $spec.storage.s3.secretName }}
+                                    key: {{ $spec.storage.s3.accessKeyIDKey }}
+                              - name: STORAGE_S3_SECRET
+                                valueFrom:
+                                  secretKeyRef:
+                                    name: {{ $spec.storage.s3.secretName }}
+                                    key: {{ $spec.storage.s3.secretAccessKeyKey }}
+                              {{ else }}
+                              - name: STORAGE_LOCATIONS
+                                value: local
+                              - name: STORAGE_LOCAL_DRIVER
+                                value: local
+                              - name: STORAGE_LOCAL_ROOT
+                                value: /directus/uploads
+                              {{ end }}
                             readinessProbe:
                               httpGet:
                                 path: /server/ping
                                 port: http
                               initialDelaySeconds: 10
                               periodSeconds: 10
+                            {{ if not $s3Storage }}
                             volumeMounts:
                               - name: uploads
                                 mountPath: /directus/uploads
+                            {{ end }}
                             resources:
                               requests:
                                 cpu: {{ index $spec.resources.requests "cpu" }}
                                 memory: {{ index $spec.resources.requests "memory" }}
                               limits:
                                 memory: {{ index $spec.resources.limits "memory" }}
+                        {{ if not $s3Storage }}
                         volumes:
                           - name: uploads
                             hostPath:
                               path: {{ $spec.uploadsPath }}
                               type: DirectoryOrCreate
+                        {{ end }}
             {{- if and $gatewayEnabled $spec.publicAdminRoute $spec.adminDomain }}
             ---
             apiVersion: kubernetes.crossplane.io/v1alpha2

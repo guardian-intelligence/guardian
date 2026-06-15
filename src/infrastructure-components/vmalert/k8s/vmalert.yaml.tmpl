@@ -39,9 +39,10 @@ data:
             annotations:
               summary: 'Sibling site down: probe of {{ $labels.instance }} (job {{ $labels.job }}) failing for 2m from this site'
 
-          # 14 days is half the ACME renewal window: if certmagic has not
-          # renewed by then, renewal is broken, not merely pending. for: 1h
-          # so a renewal landing mid-evaluation clears it without a page.
+          # 14 days is half the ACME renewal window: if cert-manager or a
+          # remaining product-owned issuer has not renewed by then, renewal is
+          # broken, not merely pending. for: 1h so a renewal landing
+          # mid-evaluation clears it without a page.
           - alert: SiteCertExpiringSoon
             expr: probe_ssl_earliest_cert_expiry - time() < 14*86400
             for: 1h
@@ -64,12 +65,18 @@ data:
 
           # The wedged-not-crashing class: a pod that stops being ready but
           # never restarts produces zero restart-count signal. min by()
-          # collapses kube-state-metrics' per-uid series; the unless arm
+          # collapses kube-state-metrics' per-uid series; the timestamp guard
+          # ignores stale samples for deleted pods after scale-down/suspend
+          # while ScrapeTargetDown covers dead exporters; the unless arm
           # exempts completed pods (backup Jobs sit not-ready forever by
           # design). for: 10m outlasts normal deploy churn.
           - alert: PodNotReady
             expr: >-
-              min by (namespace, pod) (kube_pod_status_ready{condition="true"}) == 0
+              min by (namespace, pod) (
+                (kube_pod_status_ready{condition="true"} == 0)
+                and on (namespace, pod)
+                (time() - timestamp(kube_pod_status_ready{condition="true"}) < 120)
+              )
               unless on (namespace, pod) (kube_pod_status_phase{phase="Succeeded"} == 1)
             for: 10m
             labels:

@@ -30,6 +30,8 @@ func TestAisucksProductAPIRender(t *testing.T) {
 		"metrics: 9090",
 		"diagnostics: \"{{ $metricsAddr }}\"",
 		"tlsSectionName: tls-aisucks",
+		"httpRouteHostnames:",
+		"- {{ $spec.domain }}",
 		"name: function-auto-ready",
 	} {
 		if !strings.Contains(out, want) {

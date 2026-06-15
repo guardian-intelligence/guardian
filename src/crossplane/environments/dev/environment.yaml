@@ -90,6 +90,7 @@ kind: SecretProjection
 metadata:
   name: directus-secrets
 spec:
+  waitForSecrets: false
   target:
     namespace: directus
     namespaceLabels:
@@ -135,12 +136,13 @@ spec:
       protocol: TLS
       tls:
         mode: Passthrough
-    - name: tls-company-site
+    - name: https-company-site
       hostname: "dev.guardianintelligence.org"
       port: 443
-      protocol: TLS
+      protocol: HTTPS
       tls:
-        mode: Passthrough
+        mode: Terminate
+        certificateRefName: company-site-tls
     - name: tls-status-0
       hostname: "status.guardianintelligence.org"
       port: 443
@@ -177,6 +179,12 @@ spec:
       secretName: oci-guardianintelligence-org-tls
       dnsNames:
         - "oci.guardianintelligence.org"
+      issuerRefName: letsencrypt-production
+    - name: company-site-tls
+      namespace: gateway
+      secretName: company-site-tls
+      dnsNames:
+        - "dev.guardianintelligence.org"
       issuerRefName: letsencrypt-production
 ---
 apiVersion: products.guardian.dev/v1alpha1
@@ -218,6 +226,8 @@ spec:
   image: '{{ index .Images "directus" }}'
   postgresImage: '{{ index .Images "postgres" }}'
   publicAdminRoute: false
+  readiness:
+    waitForRollout: false
   secrets:
     runtimeSecretName: directus-runtime
     runtimeSecretKey: secret

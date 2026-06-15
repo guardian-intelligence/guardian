@@ -12,12 +12,12 @@ attach to that edge.
 Guardian has two public TLS modes:
 
 - Product passthrough: Cilium `TLSRoute` routes by SNI, the backend terminates
-  TLS, and the product keeps certificate/key custody. This is the aisucks and
-  status model.
+  TLS, and the product keeps certificate/key custody. This is the `aisucks.app`
+  and status model today.
 - Platform termination: Cilium `HTTPS` listeners terminate TLS at the edge,
   cert-manager owns certificate lifecycle, and `HTTPRoute` sends cleartext HTTP
-  to the in-cluster platform service. This is the
-  `oci.guardianintelligence.org` model.
+  to the in-cluster service. This is the `oci.guardianintelligence.org` and
+  `guardianintelligence.org` model.
 
 Platform termination uses automated per-host certificates. Do not use a
 wildcard or shared SAN certificate unless the owning surface records that blast
@@ -106,7 +106,7 @@ cert material and let cert-manager renew asynchronously. The platform TLS
 survival set is:
 
 - The cert-manager ACME account key Secret.
-- The per-host TLS Secret in `gateway`.
+- Each per-host TLS Secret in `gateway`.
 - The Cloudflare DNS-01 token Secret in `cert-manager`, or the operator
   environment needed for `guardian up` to recreate it.
 - The checked-in site `EdgeGateway` manifest that lets Crossplane and

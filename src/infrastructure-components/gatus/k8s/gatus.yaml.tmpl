@@ -53,7 +53,7 @@ data:
           - type: ntfy
 {{- end}}
 {{- if .Site.Company.Domain}}
-{{- $companyBase := printf "https://%s" .Site.Company.Domain}}
+{{- $companyBase := "http://company-site-probe.company.svc"}}
       - name: company-healthz ({{.Site.Cluster.Name}})
         url: "{{$companyBase}}/healthz"
         interval: 30s
@@ -136,7 +136,7 @@ spec:
       labels:
         app: gatus
     spec:
-{{- if or (and .Site.Aisucks.PodNetwork .Site.Aisucks.Domain) .Site.Company.Domain}}
+{{- if and .Site.Aisucks.PodNetwork .Site.Aisucks.Domain}}
       # Pod-network sites: the public-URL self-probes cannot hairpin through
       # the hostNetwork Envoy listener (cilium/cilium#36004 — see the
       # probe Services rendered by PublicHttpService, whose ClusterIPs these
@@ -144,16 +144,9 @@ spec:
       # + certificate from in-cluster; the edge listener is the sibling watchers'
       # job.
       hostAliases:
-{{- if and .Site.Aisucks.PodNetwork .Site.Aisucks.Domain}}
         - ip: 10.96.111.43
           hostnames:
             - "{{.Site.Aisucks.Domain}}"
-{{- end}}
-{{- if .Site.Company.Domain}}
-        - ip: 10.96.111.44
-          hostnames:
-            - "{{.Site.Company.Domain}}"
-{{- end}}
 {{- end}}
       containers:
         - name: gatus

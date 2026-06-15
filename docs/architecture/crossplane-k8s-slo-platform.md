@@ -105,8 +105,8 @@ kube-state-metrics, optional ClickHouse, and temporary Gatus while the
 cross-site blackbox path finishes replacing it.
 
 `DirectusInstance` owns the authoring backend: Directus, Postgres binding,
-initial hostPath uploads, future object storage references, optional Redis,
-admin route policy, backup/restore hooks, and OpenBao secret projections. It
+initial hostPath uploads, optional S3-compatible object storage references,
+optional Redis, admin route policy, backup/restore hooks, and OpenBao secret projections. It
 must not become the public read path.
 
 `SyntheticCheck` and `SLOProfile` describe the routes and metrics that gate
@@ -127,8 +127,12 @@ The public site should run as pod-network workloads behind Cilium Gateway:
 - `Service company-site` for Gateway backends.
 - `Service company-site-probe` for in-cluster probes that should not hairpin
   through the node's host-network path.
-- `TLSRoute company-site` for SNI passthrough while the app owns certs.
-- `HTTPRoute company-site-http` for port 80, redirects, and health/ACME paths.
+- `HTTPRoute company-site-https` for platform-terminated HTTPS.
+- `TLSRoute company-site` only when the app-owned certificate mode is selected.
+- `HTTPRoute company-site-http-redirect` for platform-terminated port 80
+  redirects.
+- `HTTPRoute company-site-http` for passthrough port 80 forwarding when the app
+  owns redirects.
 - Standard scrape labels:
   - `platform.guardian.dev/metrics-scrape: "true"`
   - `platform.guardian.dev/metrics-port: "9090"`

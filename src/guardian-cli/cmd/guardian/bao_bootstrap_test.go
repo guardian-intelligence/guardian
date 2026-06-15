@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -206,6 +208,68 @@ func TestConfigureBaoForProjectionRefusesMissingRestoredSecret(t *testing.T) {
 	err = configureBaoForProjection(addr, "root", site, false)
 	if err == nil || !strings.Contains(err.Error(), baoAllowSecretMigrationEnv) {
 		t.Fatalf("configureBaoForProjection missing restored secret = %v, want %s guidance", err, baoAllowSecretMigrationEnv)
+	}
+}
+
+func TestLookupBaoRootTokenSecretEnv(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secret.env")
+	if err := os.WriteFile(path, []byte(`GUARDIAN_OPENBAO_TOKEN="root-token"
+GUARDIAN_OPENBAO_ALLOW_SECRET_MIGRATION=1
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	token, source, err := lookupBaoRootToken(func(string) string { return "" }, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "root-token" {
+		t.Fatalf("token = %q, want root-token", token)
+	}
+	if !strings.HasSuffix(source, "secret.env:"+baoRootTokenEnv) {
+		t.Fatalf("source = %q, want secret.env source", source)
+	}
+	allowed, source, err := lookupBaoSecretMigrationAllowed(func(string) string { return "" }, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !allowed {
+		t.Fatal("migration flag = false, want true")
+	}
+	if !strings.HasSuffix(source, "secret.env:"+baoAllowSecretMigrationEnv) {
+		t.Fatalf("source = %q, want secret.env source", source)
+	}
+}
+
+func TestLookupBaoRootTokenEnvWins(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secret.env")
+	if err := os.WriteFile(path, []byte(`GUARDIAN_OPENBAO_TOKEN=file-token
+GUARDIAN_OPENBAO_ALLOW_SECRET_MIGRATION=1
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	getenv := func(key string) string {
+		switch key {
+		case baoRootTokenEnv:
+			return "env-token"
+		case baoAllowSecretMigrationEnv:
+			return "0"
+		default:
+			return ""
+		}
+	}
+	token, source, err := lookupBaoRootToken(getenv, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "env-token" || source != baoRootTokenEnv {
+		t.Fatalf("token/source = %q/%q, want env-token/%s", token, source, baoRootTokenEnv)
+	}
+	allowed, source, err := lookupBaoSecretMigrationAllowed(getenv, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allowed || source != baoAllowSecretMigrationEnv {
+		t.Fatalf("allowed/source = %v/%q, want false/%s", allowed, source, baoAllowSecretMigrationEnv)
 	}
 }
 

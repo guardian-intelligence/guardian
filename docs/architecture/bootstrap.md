@@ -84,9 +84,12 @@ repo-root relative.
    reachable; Bao is restored or fresh-initialized/unsealed; `kv/` and
    Kubernetes auth are configured; Crossplane, provider-kubernetes, and pinned
    functions are installed; the site's Crossplane environment bundle is
-   applied; External Secrets Operator is installed; declared SecretProjection
-   XRs reconcile; and `guardian up` waits for their ExternalSecrets and
-   Kubernetes Secrets before applying consumers. An already-sealed restored Bao
+   applied; External Secrets Operator is installed; and declared
+   SecretProjection XRs reconcile. Blocking projections must have ready
+   ExternalSecrets and Kubernetes Secrets before their consumers are treated as
+   converged. Nonblocking projections, such as early Directus authoring
+   secrets, keep the desired state visible and warn on missing Bao values
+   without blocking public serving convergence. An already-sealed restored Bao
    must be unsealed with injected Shamir keys
    (`GUARDIAN_OPENBAO_UNSEAL_KEY` or `GUARDIAN_OPENBAO_UNSEAL_KEYS`) before the
    projection gate can pass.
