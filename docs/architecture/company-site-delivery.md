@@ -28,7 +28,7 @@ Layer the site like this:
 | - | - | - | - |
 | Talos/Kubernetes | `guardian up` | live | Node bootstrap, Cilium, seed registry, OpenBao, pinned component manifests. |
 | Platform substrate | Crossplane + provider-kubernetes | live for `EdgeGateway` | GatewayClass/Gateway/listeners, shared edge policy, future common platform envelopes. |
-| Public service envelope | `platform.guardian.dev/PublicHttpService` | Crossplane XRD/Composition | Namespace, Deployment, Service, TLSRoute, HTTPRoute, health probes, metrics labels, rollout defaults. |
+| Public service envelope | `platform.guardian.dev/PublicHttpService` | Crossplane XRD/Composition | Namespace, Deployment, Service, Gateway routes, health probes, metrics labels, rollout defaults. |
 | Product declaration | `products.guardian.dev/CompanySite` | Crossplane XRD/Composition | Chooses image/content digest/domain and composes the public service envelope plus content backend references. |
 | Release judge | release architecture M6 | design ratified | Reads artifact evidence and SLO gates, then advances channel pointers or rolls back. |
 
@@ -203,7 +203,8 @@ Owns the standard public workload envelope:
 - Deployment.
 - Service.
 - optional probe Service for in-cluster checks.
-- TLSRoute and HTTPRoute.
+- Gateway routes: `HTTPRoute` for platform termination, or `TLSRoute` plus
+  `HTTPRoute` when a product owns TLS.
 - health and readiness probes.
 - resource requests, memory limits, and `GOMEMLIMIT`.
 - rollout strategy.

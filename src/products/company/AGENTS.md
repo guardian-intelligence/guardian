@@ -37,8 +37,8 @@ Use this request path for public pages:
 The current Go static service is a scaffold for the first public deployment. Do
 not deepen it into a second web framework. When TanStack Start lands, replace
 the static Go asset server with a Start server image while preserving the same
-Kubernetes envelope: `Deployment`, `Service`, `TLSRoute`, `HTTPRoute`, probes,
-metrics, and digest-pinned image rollout.
+Kubernetes envelope: `Deployment`, `Service`, Gateway routes, probes, metrics,
+and digest-pinned image rollout.
 
 ## Directus Contract
 
