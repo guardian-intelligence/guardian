@@ -329,6 +329,11 @@ spec:
     metadata:
       labels:
         app: otel-collector
+      annotations:
+        # The collector does not reload its ConfigMap in place. Roll the pod
+        # whenever the rendered manifest inputs change so `guardian up`
+        # converges config changes without a manual restart.
+        guardian.dev/render-sha256: "{{.RenderHash}}"
     spec:
       serviceAccountName: otel-collector
       hostNetwork: true
