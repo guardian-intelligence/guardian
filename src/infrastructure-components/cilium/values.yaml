@@ -28,10 +28,10 @@ k8sServicePort: 7445
 
 # Full kube-proxy replacement. Socket-LB is load-bearing twice over:
 # containerd resolves the registry mirror's ClusterIP from the host netns
-# through it, and the hostNetwork aisucks pod reaches postgres/coredns
-# ClusterIPs through it. KPR mode implies socket-LB, but the chart still
-# renders bpf-lb-sock from socketLB.enabled — pin it true so the config
-# states what the cluster depends on. Never set hostNamespaceOnly.
+# through it, and host-network substrate pods reach ClusterIP services
+# through it. KPR mode implies socket-LB, but the chart still renders
+# bpf-lb-sock from socketLB.enabled — pin it true so the config states what
+# the cluster depends on. Never set hostNamespaceOnly.
 kubeProxyReplacement: true
 socketLB:
   enabled: true

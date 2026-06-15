@@ -4,11 +4,10 @@
 # Every ledger addition in this file branches on that flag so a non-ledger
 # site renders byte-identical to the metrics-only spine. One collector per
 # node scrapes every exporter and remote-writes to the site's
-# VictoriaMetrics. It runs
-# hostNetwork because most of its targets only exist in the host netns on
-# loopback (aisucks :9090, hubble :9965, kubelet :10250, its own :8888) —
-# the Talos ingress firewall does not police loopback, so scraping localhost
-# needs no firewall change and exposes nothing. ClusterIP targets
+# VictoriaMetrics. It runs hostNetwork because most substrate targets only
+# exist in the host netns on loopback (hubble :9965, kubelet :10250, its own
+# :8888) — the Talos ingress firewall does not police loopback, so scraping
+# localhost needs no firewall change and exposes nothing. ClusterIP targets
 # (kube-state-metrics, blackbox-exporter, victoria-metrics) still resolve
 # and route from the host netns via Cilium socket-LB + ClusterFirstWithHostNet.
 #
@@ -37,8 +36,7 @@ rules:
       - nodes/metrics
     verbs: ["get"]
   # Pod discovery for PublicHttpService metrics. Pod-network public services
-  # opt in with platform.guardian.dev/metrics-scrape=true; host-network
-  # legacy surfaces keep explicit loopback scrape jobs below.
+  # opt in with platform.guardian.dev/metrics-scrape=true.
   - apiGroups: [""]
     resources:
       - pods
@@ -132,14 +130,6 @@ data:
                   target_label: slo_surface
                 - source_labels: [__meta_kubernetes_pod_name]
                   target_label: instance
-{{- if not .Site.Aisucks.PodNetwork}}
-            # Legacy hostNetwork aisucks: scrape loopback from the
-            # host-network collector. This disappears when all public HTTP
-            # services are pod-networked and labeled for the generic job.
-            - job_name: aisucks
-              static_configs:
-                - targets: ["127.0.0.1:9090"]
-{{- end}}
             # Hubble metrics: hostPort 9965 from the Cilium agent (set in
             # src/infrastructure-components/cilium/values.yaml). The agent's
             # own prometheus endpoint (:9962) is NOT in this render —

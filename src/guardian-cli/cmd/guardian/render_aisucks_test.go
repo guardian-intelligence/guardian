@@ -25,10 +25,10 @@ func TestAisucksProductAPIRender(t *testing.T) {
 		"app: aisucks",
 		"domain: {{ $spec.domain }}",
 		"image: {{ $spec.image }}",
-		"podNetwork: {{ $spec.podNetwork }}",
+		"podNetwork: true",
 		"replicas: {{ $spec.replicas }}",
 		"metrics: 9090",
-		"diagnostics: \"{{ $metricsAddr }}\"",
+		"diagnostics: \":9090\"",
 		"tlsSectionName: https-aisucks",
 		"tlsMode: Terminate",
 		"httpRouteHostnames:",
@@ -67,7 +67,6 @@ func TestAisucksEnvironmentBundleInstances(t *testing.T) {
 				"site: " + siteName,
 				"domain: " + site.Aisucks.Domain,
 				aisucksTestImage,
-				"podNetwork: true",
 				"replicas: 2",
 			} {
 				if !strings.Contains(out, want) {

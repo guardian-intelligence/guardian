@@ -22,7 +22,6 @@ data:
       watchPages:
         - https://aisucks.app/
         - https://gamma.aisucks.app/
-      podNetwork: true
     company:
       domain: dev.guardianintelligence.org
   platform:
@@ -202,7 +201,6 @@ spec:
   site: dev
   domain: dev.aisucks.app
   image: '{{ index .Images "aisucks" }}'
-  podNetwork: true
   replicas: 2
 ---
 apiVersion: products.guardian.dev/v1alpha1

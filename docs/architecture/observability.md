@@ -133,13 +133,11 @@ injects `traceparent`); then propagation is automatic and no ID is hand-rolled.
   and per-namespace restart counts sit side by side on the first dashboard —
   lockstep restarts across namespaces mean the node, not a workload.
   Blackbox-only monitoring once mis-attributed a node fault to the app.
-- **`replicas` stays 1 until the Gateway lands** — two hostNetwork pods
-  would share 127.0.0.1:9090 via SO_REUSEPORT, scrapes would interleave two
-  counter sets under one series identity, and `rate()` reads the flips as
-  resets. The edge gateway (`docs/architecture/gateway.md`) moves the app to
-  pod network with per-pod scrape identity, which unblocks `replicas: 2`;
-  OTLP push with per-pod resource attributes (ledger release) is the other
-  path.
+- **Public services use pod-network replicas behind Gateway** — the
+  `PublicHttpService` envelope labels each pod for the `public-http` scrape
+  job, so VictoriaMetrics sees per-pod series identity instead of shared
+  loopback counters. Host-network workloads must not use shared loopback
+  metrics ports for replicated serving paths.
 - Still open from the Cilium workstream: Gateway API, default-deny
   CiliumNetworkPolicies, and the `toFQDNs` egress lockdown — design in
   `docs/architecture/gateway.md`, deferral notes in

@@ -36,7 +36,6 @@ spec:
   site: prod
   domain: aisucks.app
   image: registry.guardian.internal/aisucks@sha256:...
-  podNetwork: true
   replicas: 2
 ```
 

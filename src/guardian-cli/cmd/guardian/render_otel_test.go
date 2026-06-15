@@ -9,10 +9,8 @@ import (
 // TestOtelPublicHttpScrape pins the generic Server -> VictoriaMetrics path:
 // pod-network PublicHttpService workloads opt in with bounded labels, the
 // collector discovers those pods, and metrics flow through the prometheus
-// receiver to VictoriaMetrics. Legacy host-network aisucks keeps its loopback
-// scrape until it moves behind the generic public-http job. The test also pins
-// the status.monitor gate: status hostnames join blackbox targets only behind
-// the default-off flag.
+// receiver to VictoriaMetrics. The test also pins the status.monitor gate:
+// status hostnames join blackbox targets only behind the default-off flag.
 func TestOtelPublicHttpScrape(t *testing.T) {
 	tmpl, err := toolPath("_main/src/infrastructure-components/otel-collector/k8s/otel-collector.yaml.tmpl")
 	if err != nil {
@@ -64,16 +62,6 @@ func TestOtelPublicHttpScrape(t *testing.T) {
 			}
 			if !regexp.MustCompile(`guardian\.dev/render-sha256: "[0-9a-f]{64}"`).MatchString(out) {
 				t.Error("otel render must include a render hash pod-template annotation so ConfigMap changes roll the collector")
-			}
-
-			if site.Aisucks.PodNetwork {
-				if strings.Contains(out, `targets: ["127.0.0.1:9090"]`) {
-					t.Error("pod-network otel render must drop the static loopback aisucks target (it goes dark at the flip)")
-				}
-			} else {
-				if !strings.Contains(out, `targets: ["127.0.0.1:9090"]`) {
-					t.Error("hostNetwork otel render must keep the static loopback aisucks target")
-				}
 			}
 
 			// status.monitor is OFF fleet-wide until the status hostnames
