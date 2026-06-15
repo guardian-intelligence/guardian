@@ -191,7 +191,14 @@ func loadSite(path string) (*Site, error) {
 	if err := validateSite(s, resolved, envResolved, env, envMeta); err != nil {
 		return nil, err
 	}
+	directus, err := directusInstances(s)
+	if err != nil {
+		return nil, err
+	}
 	if err := validateCompanySiteSpec(s, envResolved, companyXR); err != nil {
+		return nil, err
+	}
+	if err := validateCompanySiteDirectusBinding(s, envResolved, companyXR, directus); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -276,8 +283,14 @@ func loadEnvironment(path string) (*Environment, *environmentConfigMetadata, []b
 }
 
 type companySiteSpec struct {
-	Site   string   `yaml:"site"`
-	Domain string   `yaml:"domain"`
+	Site        string `yaml:"site"`
+	Domain      string `yaml:"domain"`
+	DirectusRef struct {
+		Name string `yaml:"name"`
+	} `yaml:"directusRef"`
+	ContentSnapshot struct {
+		Digest string `yaml:"digest"`
+	} `yaml:"contentSnapshot"`
 	Routes []string `yaml:"routes"`
 }
 
@@ -380,6 +393,24 @@ func validateCompanySiteSpec(s *Site, envPath string, xr *companySiteSpec) error
 		}
 	}
 	return nil
+}
+
+func validateCompanySiteDirectusBinding(s *Site, envPath string, xr *companySiteSpec, directusInstances []directusInstanceManifest) error {
+	if s.Company.Domain == "" || xr == nil {
+		return nil
+	}
+	if xr.ContentSnapshot.Digest == "" {
+		return fmt.Errorf("environment %s: CompanySite spec.contentSnapshot.digest is required", envPath)
+	}
+	if xr.DirectusRef.Name == "" {
+		return fmt.Errorf("environment %s: CompanySite spec.directusRef.name is required", envPath)
+	}
+	for _, instance := range directusInstances {
+		if instance.Metadata.Name == xr.DirectusRef.Name {
+			return nil
+		}
+	}
+	return fmt.Errorf("environment %s: CompanySite spec.directusRef.name = %q does not match any DirectusInstance", envPath, xr.DirectusRef.Name)
 }
 
 func companyProbeURLs(domains []string, routes []string) []string {

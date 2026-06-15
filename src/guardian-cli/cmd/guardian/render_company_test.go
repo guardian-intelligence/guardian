@@ -69,6 +69,8 @@ func TestDirectusPlatformRender(t *testing.T) {
 		"replicas: {{ $replicas }}",
 		"prepare-data-dir",
 		"chown -R postgres:postgres /var/lib/postgresql/data",
+		"wait-for-postgres",
+		"pg_isready -h directus-postgres",
 		"prepare-uploads-dir",
 		"chown -R node:node /directus/uploads",
 		"PUBLIC_URL",
