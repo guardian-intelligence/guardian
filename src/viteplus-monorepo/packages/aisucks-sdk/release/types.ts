@@ -112,22 +112,28 @@ export type EvidenceBundle = {
 export type ReleaseResult = ReleaseResultFromSchema;
 
 export function defaultReleasePaths(): ReleasePaths {
+  return releasePathsForRepoRoot(repoRoot);
+}
+
+export function releasePathsForRepoRoot(root: string): ReleasePaths {
+  const packageRootForRepo = path.join(root, "src/viteplus-monorepo/packages/aisucks-sdk");
+  const viteplusRootForRepo = path.join(root, "src/viteplus-monorepo");
   return {
-    repoRoot,
-    packageRoot,
-    viteplusRoot,
+    repoRoot: root,
+    packageRoot: packageRootForRepo,
+    viteplusRoot: viteplusRootForRepo,
     bazelisk: "bazelisk",
-    sdkoci: path.join(repoRoot, "bazel-bin/src/release/cmd/sdkoci/sdkoci_/sdkoci"),
+    sdkoci: path.join(root, "bazel-bin/src/release/cmd/sdkoci/sdkoci_/sdkoci"),
     cosign: "cosign",
     oras: "oras",
-    npm: path.join(packageRoot, "node_modules/npm/bin/npm-cli.js"),
-    node: path.join(repoRoot, "bazel-bin/src/viteplus-monorepo/node"),
+    npm: path.join(packageRootForRepo, "node_modules/npm/bin/npm-cli.js"),
+    node: path.join(root, "bazel-bin/src/viteplus-monorepo/node"),
     tarball: path.join(
-      repoRoot,
+      root,
       "bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/aisucks-sdk.tgz",
     ),
     packJson: path.join(
-      repoRoot,
+      root,
       "bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/aisucks-sdk.npm-pack.json",
     ),
   };
