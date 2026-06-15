@@ -1,0 +1,147 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: aisucksproducts.products.guardian.dev
+spec:
+  scope: Cluster
+  group: products.guardian.dev
+  names:
+    kind: AisucksProduct
+    plural: aisucksproducts
+  defaultCompositionRef:
+    name: aisucks-product-public-http
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                site:
+                  type: string
+                domain:
+                  type: string
+                image:
+                  type: string
+                  description: Digest-pinned aisucks API image.
+                podNetwork:
+                  type: boolean
+                replicas:
+                  type: integer
+                  minimum: 1
+              required:
+                - site
+                - domain
+                - image
+                - podNetwork
+                - replicas
+            status:
+              type: object
+              properties:
+                publicHttpService:
+                  type: string
+                url:
+                  type: string
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: aisucks-product-public-http
+spec:
+  compositeTypeRef:
+    apiVersion: products.guardian.dev/v1alpha1
+    kind: AisucksProduct
+  mode: Pipeline
+  pipeline:
+    - step: load-environment
+      functionRef:
+        name: function-environment-configs
+      input:
+        apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+        kind: Input
+        spec:
+          environmentConfigs:
+            - type: Selector
+              selector:
+                mode: Single
+                matchLabels:
+                  - key: guardian.dev/site
+                    type: FromCompositeFieldPath
+                    valueFromFieldPath: spec.site
+    - step: render-aisucks-product
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            {{- $httpPort := 80 -}}
+            {{- $httpsPort := 443 -}}
+            {{- $metricsAddr := "127.0.0.1:9090" -}}
+            {{- $httpListen := ":80" -}}
+            {{- $httpsListen := ":443" -}}
+            {{- if $spec.podNetwork -}}
+            {{- $httpPort = 8080 -}}
+            {{- $httpsPort = 8443 -}}
+            {{- $metricsAddr = ":9090" -}}
+            {{- $httpListen = ":8080" -}}
+            {{- $httpsListen = ":8443" -}}
+            {{- end -}}
+            ---
+            apiVersion: platform.guardian.dev/v1alpha1
+            kind: PublicHttpService
+            metadata:
+              name: aisucks
+              annotations:
+                {{ setResourceNameAnnotation "public-http-service" }}
+              labels:
+                products.guardian.dev/product: aisucks
+            spec:
+              site: {{ $spec.site }}
+              namespace: aisucks
+              app: aisucks
+              domain: {{ $spec.domain }}
+              image: {{ $spec.image }}
+              podNetwork: {{ $spec.podNetwork }}
+              replicas: {{ $spec.replicas }}
+              certDir: /var/lib/aisucks-certs
+              acmeEmail: im.shovonhasan@gmail.com
+              probeClusterIP: 10.96.111.43
+              networkLabelKey: platform.guardian.dev/network
+              memoryRequest: 128Mi
+              memoryLimit: 512Mi
+              goMemoryLimit: 410MiB
+              cpuRequest: 100m
+              healthPath: /healthz
+              readinessPeriod: 5
+              ports:
+                http: {{ $httpPort }}
+                https: {{ $httpsPort }}
+                metrics: 9090
+              listen:
+                http: "{{ $httpListen }}"
+                https: "{{ $httpsListen }}"
+                diagnostics: "{{ $metricsAddr }}"
+              gateway:
+                name: edge
+                namespace: gateway
+                tlsSectionName: tls-aisucks
+                httpSectionName: http
+                tlsRouteAPIVersion: gateway.networking.k8s.io/v1alpha2
+            ---
+            apiVersion: products.guardian.dev/v1alpha1
+            kind: AisucksProduct
+            status:
+              publicHttpService: aisucks
+              url: https://{{ $spec.domain }}
+    - step: mark-ready
+      functionRef:
+        name: function-auto-ready

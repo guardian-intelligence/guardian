@@ -1,7 +1,9 @@
 filegroup(
     name = "manifests",
     srcs = [
+        "directus-instance.yaml",
         "edge-gateway.yaml",
+        "public-http-service.yaml",
         "secret-projection.yaml",
     ],
     visibility = ["//src/guardian-cli:__subpackages__"],

@@ -28,8 +28,8 @@ Layer the site like this:
 | - | - | - | - |
 | Talos/Kubernetes | `guardian up` | live | Node bootstrap, Cilium, seed registry, OpenBao, pinned component manifests. |
 | Platform substrate | Crossplane + provider-kubernetes | live for `EdgeGateway` | GatewayClass/Gateway/listeners, shared edge policy, future common platform envelopes. |
-| Public service envelope | `src/platform/public-http-service` now; future `platform.guardian.dev/PublicHttpService` | direct-rendered template + skeleton XRD | Namespace, Deployment, Service, TLSRoute, HTTPRoute, health probes, metrics labels, rollout defaults. |
-| Product declaration | future `products.guardian.dev/CompanySite` or equivalent | not implemented | Chooses image/content digest/domain and composes the public service envelope plus content backend references. |
+| Public service envelope | `platform.guardian.dev/PublicHttpService` | Crossplane XRD/Composition | Namespace, Deployment, Service, TLSRoute, HTTPRoute, health probes, metrics labels, rollout defaults. |
+| Product declaration | `products.guardian.dev/CompanySite` | Crossplane XRD/Composition | Chooses image/content digest/domain and composes the public service envelope plus content backend references. |
 | Release judge | release architecture M6 | design ratified | Reads artifact evidence and SLO gates, then advances channel pointers or rolls back. |
 
 The key rule is that `PublicHttpService` is the lift-out boundary. The current
@@ -401,6 +401,8 @@ Run it as ordinary Kubernetes components when introduced:
 - `Deployment directus`, digest-pinned.
 - Postgres for Directus state, backed up through Guardian's normal survival
   floor.
+- Initial single-node uploads use an explicit hostPath; the durable target is
+  S3-compatible object storage before public authoring depends on uploads.
 - Redis only when Directus needs multi-replica coordination, websocket
   coordination, or cache/session sharing.
 - R2/S3-compatible object storage for uploads and generated public images.
@@ -530,20 +532,16 @@ site, app, status class, method, and surface are enough for the hot plane.
 1. Split site config into bootstrap facts and Crossplane environment bags.
 2. Package the existing EdgeGateway composition as the first
    `guardian-platform` package.
-3. Move the direct-rendered `PublicHttpService` template into a
-   `PublicHttpService` XRD/Composition.
-4. Move `company.domain` into a `CompanySite` XR that composes
-   `PublicHttpService`.
-5. Move observability site flags into `ObservabilityStack`,
+3. Move observability site flags into `ObservabilityStack`,
    `SyntheticCheck`, and `SLOProfile` XRs, including the `public-http`
    scrape path, company-site vmalert rules, and blackbox targets after
    public DNS/routes are stable.
-6. Mirror Crossplane packages, provider-kubernetes, and composition functions
+4. Mirror Crossplane packages, provider-kubernetes, and composition functions
    into the seed registry.
-7. Replace the static service image with a TanStack Start/Nitro server image
+5. Replace the static service image with a TanStack Start/Nitro server image
    that preserves `/healthz`, `/livez`, `/metrics`, and the same Gateway shape.
-8. Introduce Directus as CMS/admin with Postgres, object storage, OpenBao
+6. Expand Directus CMS/admin with object storage, preview routes, OpenBao
    secrets, and publish webhooks.
-9. Move content publication from markdown edits to a typed snapshot-producing
+7. Move content publication from markdown edits to a typed snapshot-producing
    release operation.
-10. Wire release judge promotion from dev to gamma to prod using the SLO gates.
+8. Wire release judge promotion from dev to gamma to prod using the SLO gates.

@@ -49,18 +49,28 @@ func secretProjections(site *Site) ([]secretProjectionManifest, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(site.EnvironmentBundle.Raw))
 	var out []secretProjectionManifest
 	for {
-		var doc secretProjectionManifest
-		if err := dec.Decode(&doc); err != nil {
+		var node yaml.Node
+		if err := dec.Decode(&node); err != nil {
 			if err == io.EOF {
 				break
 			}
 			return nil, fmt.Errorf("decode %s: %w", site.EnvironmentBundle.Path, err)
 		}
-		if doc.Kind == "" {
+		if node.Kind == 0 {
 			continue
 		}
-		if doc.Kind != "SecretProjection" {
+		var header struct {
+			Kind string `yaml:"kind"`
+		}
+		if err := node.Decode(&header); err != nil {
+			return nil, fmt.Errorf("decode %s document header: %w", site.EnvironmentBundle.Path, err)
+		}
+		if header.Kind != "SecretProjection" {
 			continue
+		}
+		var doc secretProjectionManifest
+		if err := node.Decode(&doc); err != nil {
+			return nil, fmt.Errorf("decode %s SecretProjection: %w", site.EnvironmentBundle.Path, err)
 		}
 		if err := validateSecretProjection(site, doc); err != nil {
 			return nil, err
@@ -129,7 +139,7 @@ func waitSecretProjections(kubectl, kubeconfig string, site *Site) error {
 		}
 		for _, secret := range projection.Spec.Secrets {
 			if err := runTool(kubectl, "--kubeconfig", kubeconfig, "-n", namespace, "wait", "--for=condition=Ready", "externalsecret/"+secret.Name, "--timeout=3m"); err != nil {
-				return err
+				return fmt.Errorf("wait for ExternalSecret %s/%s: %w; if this projection is new on an existing unsealed OpenBao, rerun with %s and %s=1 so guardian can create the required Bao secret", namespace, secret.Name, err, baoRootTokenEnv, baoAllowSecretMigrationEnv)
 			}
 			if err := runTool(kubectl, "--kubeconfig", kubeconfig, "-n", namespace, "get", "secret", secret.Name); err != nil {
 				return err

@@ -34,6 +34,7 @@ export type ReleasePaths = {
   readonly bazelisk: string;
   readonly sdkoci: string;
   readonly cosign: string;
+  readonly oras: string;
   readonly npm: string;
   readonly node: string;
   readonly tarball: string;
@@ -118,6 +119,7 @@ export function defaultReleasePaths(): ReleasePaths {
     bazelisk: "bazelisk",
     sdkoci: path.join(repoRoot, "bazel-bin/src/release/cmd/sdkoci/sdkoci_/sdkoci"),
     cosign: "cosign",
+    oras: "oras",
     npm: path.join(packageRoot, "node_modules/npm/bin/npm-cli.js"),
     node: path.join(repoRoot, "bazel-bin/src/viteplus-monorepo/node"),
     tarball: path.join(

@@ -1,0 +1,149 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: companysites.products.guardian.dev
+spec:
+  scope: Cluster
+  group: products.guardian.dev
+  names:
+    kind: CompanySite
+    plural: companysites
+  defaultCompositionRef:
+    name: company-site-public-http
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                site:
+                  type: string
+                domain:
+                  type: string
+                image:
+                  type: string
+                  description: Digest-pinned company site OCI image.
+                directusRef:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                contentSnapshot:
+                  type: object
+                  properties:
+                    digest:
+                      type: string
+                routes:
+                  type: array
+                  items:
+                    type: string
+                replicas:
+                  type: integer
+                  minimum: 1
+              required:
+                - site
+                - domain
+                - image
+                - routes
+                - replicas
+            status:
+              type: object
+              properties:
+                publicHttpService:
+                  type: string
+                url:
+                  type: string
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: company-site-public-http
+spec:
+  compositeTypeRef:
+    apiVersion: products.guardian.dev/v1alpha1
+    kind: CompanySite
+  mode: Pipeline
+  pipeline:
+    - step: load-environment
+      functionRef:
+        name: function-environment-configs
+      input:
+        apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+        kind: Input
+        spec:
+          environmentConfigs:
+            - type: Selector
+              selector:
+                mode: Single
+                matchLabels:
+                  - key: guardian.dev/site
+                    type: FromCompositeFieldPath
+                    valueFromFieldPath: spec.site
+    - step: render-company-site
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            ---
+            apiVersion: platform.guardian.dev/v1alpha1
+            kind: PublicHttpService
+            metadata:
+              name: company-site
+              annotations:
+                {{ setResourceNameAnnotation "public-http-service" }}
+              labels:
+                products.guardian.dev/product: company-site
+            spec:
+              site: {{ $spec.site }}
+              namespace: company
+              app: company-site
+              domain: {{ $spec.domain }}
+              image: {{ $spec.image }}
+              podNetwork: true
+              replicas: {{ $spec.replicas }}
+              certDir: /var/lib/company-site-certs
+              acmeEmail: im.shovonhasan@gmail.com
+              probeClusterIP: 10.96.111.44
+              networkLabelKey: platform.guardian.dev/network
+              memoryRequest: 128Mi
+              memoryLimit: 512Mi
+              goMemoryLimit: 410MiB
+              cpuRequest: 100m
+              healthPath: /healthz
+              readinessPeriod: 5
+              ports:
+                http: 8080
+                https: 8443
+                metrics: 9090
+              listen:
+                http: ":8080"
+                https: ":8443"
+                diagnostics: ":9090"
+              gateway:
+                name: edge
+                namespace: gateway
+                tlsSectionName: tls-company-site
+                httpSectionName: http
+                tlsRouteAPIVersion: gateway.networking.k8s.io/v1alpha2
+                httpRouteHostnames:
+                  - {{ $spec.domain }}
+            ---
+            apiVersion: products.guardian.dev/v1alpha1
+            kind: CompanySite
+            status:
+              publicHttpService: company-site
+              url: https://{{ $spec.domain }}
+    - step: mark-ready
+      functionRef:
+        name: function-auto-ready

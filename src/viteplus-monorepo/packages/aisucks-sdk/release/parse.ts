@@ -22,6 +22,7 @@ export function parseReleaseConfig(args: readonly string[], packageVersion: stri
   let bazelisk = defaultPaths.bazelisk;
   let sdkoci = defaultPaths.sdkoci;
   let cosign = defaultPaths.cosign;
+  let oras = defaultPaths.oras;
   let npm = defaultPaths.npm;
   let node = defaultPaths.node;
 
@@ -80,6 +81,10 @@ export function parseReleaseConfig(args: readonly string[], packageVersion: stri
         cosign = requireValue(args, i, arg);
         i += 1;
         break;
+      case "--oras":
+        oras = requireValue(args, i, arg);
+        i += 1;
+        break;
       case "--npm":
         npm = path.resolve(requireValue(args, i, arg));
         i += 1;
@@ -110,6 +115,7 @@ export function parseReleaseConfig(args: readonly string[], packageVersion: stri
       bazelisk,
       sdkoci,
       cosign,
+      oras,
       npm,
       node,
     },

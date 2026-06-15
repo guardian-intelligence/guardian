@@ -5,64 +5,167 @@ import (
 	"testing"
 )
 
-const companyTestImage = "registry.guardian.internal/company-site@sha256:deadbeef"
+const (
+	companyTestImage  = "registry.guardian.internal/company-site@sha256:deadbeef"
+	directusTestImage = "registry.guardian.internal/directus@sha256:deadbeef"
+	postgresTestImage = "registry.guardian.internal/postgres@sha256:deadbeef"
+)
 
-func TestCompanyPublicHTTPServiceRender(t *testing.T) {
-	c := componentByName(t, "company-site")
-	tmpl, err := toolPath("_main/" + c.manifest)
-	if err != nil {
-		t.Fatalf("locate public HTTP service manifest: %v", err)
-	}
-	c.manifest = tmpl
-
-	sitePath, err := toolPath("_main/src/sites/dev/bootstrap.yaml")
-	if err != nil {
-		t.Fatalf("locate bootstrap.yaml: %v", err)
-	}
-	site, err := loadSite(sitePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	site.Company.Domain = "guardianintelligence.org"
-
-	rendered, err := renderComponentManifest(c, companyTestImage, nil, site)
+func TestPublicHTTPServicePlatformRender(t *testing.T) {
+	c := componentByName(t, "public-http-service-platform")
+	rendered, err := renderComponentManifest(c, "", nil, &Site{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	out := string(rendered)
 	for _, want := range []string{
+		"kind: CompositeResourceDefinition",
+		"name: publichttpservices.platform.guardian.dev",
+		"kind: Composition",
+		"name: public-http-service-kubernetes",
 		"kind: Namespace",
-		"name: company",
 		"kind: Deployment",
-		"name: company-site",
-		"image: " + companyTestImage,
-		`value: "guardianintelligence.org"`,
-		`value: /var/lib/company-site-certs`,
-		"replicas: 2",
+		"kind: Service",
+		"kind: TLSRoute",
+		"kind: HTTPRoute",
 		"type: RollingUpdate",
 		"maxUnavailable: 0",
 		"maxSurge: 1",
-		"platform.guardian.dev/network: pod",
 		`platform.guardian.dev/metrics-scrape: "true"`,
-		`platform.guardian.dev/metrics-port: "9090"`,
+		`platform.guardian.dev/metrics-port: "{{ $spec.ports.metrics }}"`,
 		"platform.guardian.dev/slo-surface: public-http",
-		"name: company-site-probe",
-		"clusterIP: 10.96.111.44",
-		"kind: TLSRoute",
-		"sectionName: tls-company-site",
-		"kind: HTTPRoute",
-		"name: company-site-http",
-		"hostnames:\n    - \"guardianintelligence.org\"",
+		"allowPrivilegeEscalation: false",
+		"type: RuntimeDefault",
+		"name: function-auto-ready",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("render missing %q", want)
+			t.Errorf("PublicHttpService platform render missing %q", want)
 		}
 	}
-	kinds := strings.Join(decodeKinds(t, rendered), ",")
-	if kinds != "Namespace,Deployment,Service,Service,TLSRoute,HTTPRoute" {
-		t.Errorf("kinds = %s; want Namespace,Deployment,Service,Service,TLSRoute,HTTPRoute", kinds)
+}
+
+func TestDirectusPlatformRender(t *testing.T) {
+	c := componentByName(t, "directus-platform")
+	rendered, err := renderComponentManifest(c, "", nil, &Site{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(out, "hostNetwork: true") {
-		t.Error("company site must stay pod-network only")
+	out := string(rendered)
+	for _, want := range []string{
+		"kind: CompositeResourceDefinition",
+		"name: directusinstances.platform.guardian.dev",
+		"kind: Composition",
+		"name: directus-instance-kubernetes",
+		"kind: StatefulSet",
+		"kind: Deployment",
+		"kind: Service",
+		"initContainers:",
+		"prepare-data-dir",
+		"chown -R postgres:postgres /var/lib/postgresql/data",
+		"prepare-uploads-dir",
+		"chown -R node:node /directus/uploads",
+		"PUBLIC_URL",
+		"/server/ping",
+		"/directus/uploads",
+		"hostPath:",
+		"name: function-environment-configs",
+		"name: function-auto-ready",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("DirectusInstance platform render missing %q", want)
+		}
+	}
+}
+
+func TestCompanySiteProductAPIRender(t *testing.T) {
+	c := componentByName(t, "company-site-product-api")
+	rendered, err := renderComponentManifest(c, "", nil, &Site{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(rendered)
+	for _, want := range []string{
+		"kind: CompositeResourceDefinition",
+		"name: companysites.products.guardian.dev",
+		"kind: Composition",
+		"name: company-site-public-http",
+		"kind: PublicHttpService",
+		"name: company-site",
+		"namespace: company",
+		"app: company-site",
+		"domain: {{ $spec.domain }}",
+		"image: {{ $spec.image }}",
+		"podNetwork: true",
+		"replicas: {{ $spec.replicas }}",
+		"metrics: 9090",
+		"diagnostics: \":9090\"",
+		"tlsSectionName: tls-company-site",
+		"httpRouteHostnames:",
+		"- {{ $spec.domain }}",
+		"name: function-auto-ready",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("CompanySite API render missing %q", want)
+		}
+	}
+}
+
+func TestCompanySiteEnvironmentBundleInstances(t *testing.T) {
+	for _, siteName := range []string{"dev", "gamma", "prod"} {
+		t.Run(siteName, func(t *testing.T) {
+			site := loadTestSite(t, siteName)
+			rendered, err := renderEnvironmentBundle(site, testProductImages())
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := string(rendered)
+			for _, want := range []string{
+				"kind: CompanySite",
+				"name: company-site",
+				"site: " + siteName,
+				"domain: " + site.Company.Domain,
+				companyTestImage,
+				"directusRef:",
+				"name: directus",
+				"contentSnapshot:",
+				"digest: workspace",
+				"- /letters",
+				"- /news",
+				"replicas: 2",
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("CompanySite environment render missing %q", want)
+				}
+			}
+		})
+	}
+}
+
+func TestDirectusEnvironmentBundleInstances(t *testing.T) {
+	for _, siteName := range []string{"dev", "gamma", "prod"} {
+		t.Run(siteName, func(t *testing.T) {
+			site := loadTestSite(t, siteName)
+			rendered, err := renderEnvironmentBundle(site, testProductImages())
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := string(rendered)
+			for _, want := range []string{
+				"kind: DirectusInstance",
+				"name: directus",
+				"namespace: directus",
+				directusTestImage,
+				postgresTestImage,
+				"publicAdminRoute: false",
+				"runtimeSecretName: directus-runtime",
+				"databaseSecretName: directus-postgres",
+				"storagePath: /var/lib/guardian/directus/postgres",
+				"uploadsPath: /var/lib/guardian/directus/uploads",
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("DirectusInstance environment render missing %q", want)
+				}
+			}
+		})
 	}
 }

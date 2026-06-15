@@ -67,7 +67,7 @@ func TestLoadBootstrapValidation(t *testing.T) {
 }
 
 func TestEnvironmentValidation(t *testing.T) {
-	base := func() (*Site, *Environment) {
+	base := func() (*Site, *Environment, *environmentConfigMetadata) {
 		site := &Site{Name: "test"}
 		site.Cluster.Name = "guardian-test"
 		site.Node.Hostname = "test-w0"
@@ -75,53 +75,71 @@ func TestEnvironmentValidation(t *testing.T) {
 		env.Site.Name = "test"
 		env.Site.ClusterName = "guardian-test"
 		env.Site.NodeHostname = "test-w0"
-		return site, env
+		meta := &environmentConfigMetadata{
+			Name: "guardian-test",
+			Labels: map[string]string{
+				"guardian.dev/site": "test",
+			},
+		}
+		return site, env, meta
 	}
 	cases := []struct {
 		name    string
-		mutate  func(*Site, *Environment)
+		mutate  func(*Site, *Environment, *environmentConfigMetadata)
 		wantErr string
 	}{{
 		name: "valid",
 	}, {
+		name: "environment name must match bootstrap cluster",
+		mutate: func(_ *Site, _ *Environment, meta *environmentConfigMetadata) {
+			meta.Name = "guardian-other"
+		},
+		wantErr: "metadata.name",
+	}, {
+		name: "environment selector label must match bootstrap site",
+		mutate: func(_ *Site, _ *Environment, meta *environmentConfigMetadata) {
+			meta.Labels["guardian.dev/site"] = "other"
+		},
+		wantErr: "metadata.labels[guardian.dev/site]",
+	}, {
 		name: "site identity must match",
-		mutate: func(_ *Site, env *Environment) {
+		mutate: func(_ *Site, env *Environment, _ *environmentConfigMetadata) {
 			env.Site.Name = "other"
 		},
 		wantErr: "site.name",
 	}, {
 		name: "podNetwork requires gateway",
-		mutate: func(site *Site, _ *Environment) {
+		mutate: func(site *Site, _ *Environment, _ *environmentConfigMetadata) {
 			site.Aisucks.PodNetwork = true
 		},
 		wantErr: "products.aisucks.podNetwork requires gateway.enabled",
 	}, {
 		name: "company requires gateway",
-		mutate: func(site *Site, _ *Environment) {
+		mutate: func(site *Site, _ *Environment, _ *environmentConfigMetadata) {
 			site.Company.Domain = "guardianintelligence.org"
 		},
 		wantErr: "products.company.domain requires gateway.enabled",
 	}, {
 		name: "gateway requires aisucks pod network",
-		mutate: func(site *Site, _ *Environment) {
+		mutate: func(site *Site, _ *Environment, _ *environmentConfigMetadata) {
 			site.Gateway.Enabled = true
 			site.Aisucks.Domain = "aisucks.app"
 		},
 		wantErr: "gateway.enabled requires products.aisucks.podNetwork",
 	}, {
 		name: "status monitor requires domains",
-		mutate: func(site *Site, _ *Environment) {
+		mutate: func(site *Site, _ *Environment, _ *environmentConfigMetadata) {
 			site.Status.Monitor = true
 		},
 		wantErr: "platform.status.monitor requires platform.status.domains",
 	}}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			site, env := base()
+			site, env, meta := base()
 			if tc.mutate != nil {
-				tc.mutate(site, env)
+				tc.mutate(site, env, meta)
 			}
-			err := validateSite(site, "bootstrap.yaml", "environment.yaml", env)
+			err := validateSite(site, "bootstrap.yaml", "environment.yaml", env, meta)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("validateSite: %v", err)

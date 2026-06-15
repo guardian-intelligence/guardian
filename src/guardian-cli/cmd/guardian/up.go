@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"text/template"
 	"time"
 )
 
@@ -302,10 +303,25 @@ func runUp(args []string) error {
 	if err := apply("secret-projection-platform"); err != nil {
 		return err
 	}
+	if err := apply("public-http-service-platform"); err != nil {
+		return err
+	}
+	if err := apply("directus-platform"); err != nil {
+		return err
+	}
 	if err := waitGuardianPlatform(kubectl, kubeconfig); err != nil {
 		return err
 	}
-	if err := applyEnvironmentBundle(kubectl, kubeconfig, site); err != nil {
+	if err := apply("aisucks-product-api"); err != nil {
+		return err
+	}
+	if err := apply("company-site-product-api"); err != nil {
+		return err
+	}
+	if err := waitGuardianProducts(kubectl, kubeconfig); err != nil {
+		return err
+	}
+	if err := applyEnvironmentBundle(kubectl, kubeconfig, site, images); err != nil {
 		return err
 	}
 	if err := waitEdgeGateway(kubectl, kubeconfig, site); err != nil {
@@ -323,9 +339,12 @@ func runUp(args []string) error {
 	if err := waitSecretProjections(kubectl, kubeconfig, site); err != nil {
 		return err
 	}
+	if err := waitEnvironmentCapabilities(kubectl, kubeconfig, site); err != nil {
+		return err
+	}
 	for _, c := range components {
 		switch c.name {
-		case "openbao", "crossplane", "cert-manager", "provider-kubernetes", "provider-kubernetes-config", "edge-gateway-platform", "secret-projection-platform", "victoria-metrics", "external-secrets":
+		case "openbao", "crossplane", "cert-manager", "provider-kubernetes", "provider-kubernetes-config", "edge-gateway-platform", "secret-projection-platform", "public-http-service-platform", "directus-platform", "aisucks-product-api", "company-site-product-api", "victoria-metrics", "external-secrets":
 			continue
 		default:
 			if err := applyComponent(kubectl, kubeconfig, c, images, site); err != nil {
@@ -353,15 +372,35 @@ func lookupComponent(name string) (component, bool) {
 	return component{}, false
 }
 
-func applyEnvironmentBundle(kubectl, kubeconfig string, site *Site) error {
+func applyEnvironmentBundle(kubectl, kubeconfig string, site *Site, images map[string]string) error {
 	if len(bytes.TrimSpace(site.EnvironmentBundle.Raw)) == 0 {
 		return fmt.Errorf("environment bundle %s is empty", site.EnvironmentBundle.Path)
 	}
+	rendered, err := renderEnvironmentBundle(site, images)
+	if err != nil {
+		return err
+	}
 	fmt.Fprintf(os.Stderr, "applying environment bundle %s\n", site.EnvironmentBundle.Path)
-	if err := runToolInput(site.EnvironmentBundle.Raw, kubectl, "--kubeconfig", kubeconfig, "apply", "-f", "-"); err != nil {
+	if err := runToolInput(rendered, kubectl, "--kubeconfig", kubeconfig, "apply", "-f", "-"); err != nil {
 		return fmt.Errorf("apply environment bundle %s: %w", site.EnvironmentBundle.Path, err)
 	}
 	return nil
+}
+
+func renderEnvironmentBundle(site *Site, images map[string]string) ([]byte, error) {
+	tmpl, err := template.New("environment").Option("missingkey=error").Parse(string(site.EnvironmentBundle.Raw))
+	if err != nil {
+		return nil, fmt.Errorf("render environment bundle %s: %w", site.EnvironmentBundle.Path, err)
+	}
+	var buf bytes.Buffer
+	data := struct {
+		Site   *Site
+		Images map[string]string
+	}{Site: site, Images: images}
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return nil, fmt.Errorf("render environment bundle %s: %w", site.EnvironmentBundle.Path, err)
+	}
+	return buf.Bytes(), nil
 }
 
 func readRepoManifest(path string) ([]byte, error) {
@@ -396,6 +435,10 @@ func resolveRepoInputPath(path string) (string, error) {
 func applyComponent(kubectl, kubeconfig string, c component, images map[string]string, site *Site) error {
 	if c.enabled != nil && !c.enabled(site) {
 		fmt.Fprintf(os.Stderr, "skipping %s: disabled for this site\n", c.name)
+		return nil
+	}
+	if c.pushOnly {
+		fmt.Fprintf(os.Stderr, "skipping %s: image is consumed by the environment bundle\n", c.name)
 		return nil
 	}
 	// images[c.name] is "" for a manifest-only component; its template
@@ -481,6 +524,7 @@ func waitProviderKubernetes(kubectl, kubeconfig string) error {
 	for _, pkg := range []string{
 		"providers.pkg.crossplane.io/provider-kubernetes",
 		"functions.pkg.crossplane.io/function-go-templating",
+		"functions.pkg.crossplane.io/function-environment-configs",
 		"functions.pkg.crossplane.io/function-auto-ready",
 	} {
 		if err := runTool(kubectl, "--kubeconfig", kubeconfig, "wait", "--for=condition=Healthy", pkg, "--timeout=5m"); err != nil {
@@ -502,6 +546,23 @@ func waitGuardianPlatform(kubectl, kubeconfig string) error {
 	for _, xrd := range []string{
 		"edgegateways.platform.guardian.dev",
 		"secretprojections.platform.guardian.dev",
+		"publichttpservices.platform.guardian.dev",
+		"directusinstances.platform.guardian.dev",
+	} {
+		if err := runTool(kubectl, "--kubeconfig", kubeconfig, "wait", "--for=condition=Established", "compositeresourcedefinition/"+xrd, "--timeout=2m"); err != nil {
+			return err
+		}
+		if err := runTool(kubectl, "--kubeconfig", kubeconfig, "wait", "--for=condition=Established", "crd/"+xrd, "--timeout=2m"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func waitGuardianProducts(kubectl, kubeconfig string) error {
+	for _, xrd := range []string{
+		"aisucksproducts.products.guardian.dev",
+		"companysites.products.guardian.dev",
 	} {
 		if err := runTool(kubectl, "--kubeconfig", kubeconfig, "wait", "--for=condition=Established", "compositeresourcedefinition/"+xrd, "--timeout=2m"); err != nil {
 			return err

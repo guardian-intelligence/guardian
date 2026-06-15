@@ -81,6 +81,28 @@ func TestSecretProjectionSiteManifests(t *testing.T) {
 					t.Fatalf("zot data length = %d, want 3", len(secret.Data))
 				}
 			}
+			directus := secretProjectionByName(t, projections, "directus-secrets")
+			if directus.Spec.Target.Namespace != "directus" {
+				t.Fatalf("directus namespace = %q", directus.Spec.Target.Namespace)
+			}
+			for _, tc := range []struct {
+				name string
+				path string
+				key  string
+			}{
+				{name: "directus-runtime", path: "runtime", key: "secret"},
+				{name: "directus-admin", path: "admin", key: "password"},
+				{name: "directus-postgres", path: "postgres", key: "password"},
+			} {
+				secret := projectedSecretByName(t, directus, tc.name)
+				wantPath := "guardian/" + site.Cluster.Name + "/directus/" + tc.path
+				if secret.RemotePath != wantPath {
+					t.Fatalf("%s remotePath = %q, want %q", tc.name, secret.RemotePath, wantPath)
+				}
+				if len(secret.Data) != 1 || secret.Data[0].SecretKey != tc.key || secret.Data[0].Property != tc.key {
+					t.Fatalf("%s data = %#v, want %s mapping", tc.name, secret.Data, tc.key)
+				}
+			}
 		})
 	}
 }

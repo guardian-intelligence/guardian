@@ -1,0 +1,466 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: directusinstances.platform.guardian.dev
+spec:
+  scope: Cluster
+  group: platform.guardian.dev
+  names:
+    kind: DirectusInstance
+    plural: directusinstances
+  defaultCompositionRef:
+    name: directus-instance-kubernetes
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                site:
+                  type: string
+                namespace:
+                  type: string
+                image:
+                  type: string
+                  description: Digest-pinned Directus OCI image reference.
+                postgresImage:
+                  type: string
+                  description: Digest-pinned Postgres OCI image reference.
+                publicAdminRoute:
+                  type: boolean
+                adminDomain:
+                  type: string
+                resources:
+                  type: object
+                  properties:
+                    requests:
+                      type: object
+                      additionalProperties:
+                        type: string
+                    limits:
+                      type: object
+                      additionalProperties:
+                        type: string
+                secrets:
+                  type: object
+                  properties:
+                    runtimeSecretName:
+                      type: string
+                    runtimeSecretKey:
+                      type: string
+                    adminSecretName:
+                      type: string
+                    adminPasswordKey:
+                      type: string
+                    databaseSecretName:
+                      type: string
+                    databasePasswordKey:
+                      type: string
+                  required:
+                    - runtimeSecretName
+                    - runtimeSecretKey
+                    - adminSecretName
+                    - adminPasswordKey
+                    - databaseSecretName
+                    - databasePasswordKey
+                admin:
+                  type: object
+                  properties:
+                    email:
+                      type: string
+                  required:
+                    - email
+                database:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    user:
+                      type: string
+                    storagePath:
+                      type: string
+                  required:
+                    - name
+                    - user
+                    - storagePath
+                uploadsPath:
+                  type: string
+                gateway:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                    httpSectionName:
+                      type: string
+                  required:
+                    - name
+                    - namespace
+                    - httpSectionName
+              required:
+                - site
+                - namespace
+                - image
+                - postgresImage
+                - publicAdminRoute
+                - secrets
+                - admin
+                - database
+                - uploadsPath
+                - gateway
+            status:
+              type: object
+              properties:
+                internalURL:
+                  type: string
+                adminURL:
+                  type: string
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: directus-instance-kubernetes
+spec:
+  compositeTypeRef:
+    apiVersion: platform.guardian.dev/v1alpha1
+    kind: DirectusInstance
+  mode: Pipeline
+  pipeline:
+    - step: load-environment
+      functionRef:
+        name: function-environment-configs
+      input:
+        apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+        kind: Input
+        spec:
+          environmentConfigs:
+            - type: Selector
+              selector:
+                mode: Single
+                matchLabels:
+                  - key: guardian.dev/site
+                    type: FromCompositeFieldPath
+                    valueFromFieldPath: spec.site
+    - step: render-directus-instance
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
+            {{- $gatewayEnabled := index $env "gateway" "enabled" -}}
+            {{- $publicURL := printf "http://directus.%s.svc:8055" $spec.namespace -}}
+            {{- if $spec.adminDomain -}}
+            {{- $publicURL = printf "https://%s" $spec.adminDomain -}}
+            {{- end -}}
+            ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              name: directus-{{ $spec.namespace }}-postgres-service
+              annotations:
+                {{ setResourceNameAnnotation "postgres-service" }}
+            spec:
+              providerConfigRef:
+                name: platform
+              forProvider:
+                manifest:
+                  apiVersion: v1
+                  kind: Service
+                  metadata:
+                    name: directus-postgres
+                    namespace: {{ $spec.namespace }}
+                  spec:
+                    selector:
+                      app: directus-postgres
+                    ports:
+                      - name: postgres
+                        port: 5432
+                        targetPort: postgres
+            ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              name: directus-{{ $spec.namespace }}-postgres
+              annotations:
+                {{ setResourceNameAnnotation "postgres" }}
+            spec:
+              providerConfigRef:
+                name: platform
+              forProvider:
+                manifest:
+                  apiVersion: apps/v1
+                  kind: StatefulSet
+                  metadata:
+                    name: directus-postgres
+                    namespace: {{ $spec.namespace }}
+                  spec:
+                    serviceName: directus-postgres
+                    replicas: 1
+                    selector:
+                      matchLabels:
+                        app: directus-postgres
+                    template:
+                      metadata:
+                        labels:
+                          app: directus-postgres
+                      spec:
+                        securityContext:
+                          seccompProfile:
+                            type: RuntimeDefault
+                        initContainers:
+                          - name: prepare-data-dir
+                            image: {{ $spec.postgresImage }}
+                            command:
+                              - sh
+                              - -ec
+                              - mkdir -p /var/lib/postgresql/data && chown -R postgres:postgres /var/lib/postgresql/data
+                            securityContext:
+                              runAsUser: 0
+                              runAsGroup: 0
+                              allowPrivilegeEscalation: false
+                            volumeMounts:
+                              - name: data
+                                mountPath: /var/lib/postgresql/data
+                        containers:
+                          - name: postgres
+                            image: {{ $spec.postgresImage }}
+                            ports:
+                              - name: postgres
+                                containerPort: 5432
+                            env:
+                              - name: POSTGRES_DB
+                                value: "{{ $spec.database.name }}"
+                              - name: POSTGRES_USER
+                                value: "{{ $spec.database.user }}"
+                              - name: POSTGRES_PASSWORD
+                                valueFrom:
+                                  secretKeyRef:
+                                    name: {{ $spec.secrets.databaseSecretName }}
+                                    key: {{ $spec.secrets.databasePasswordKey }}
+                            volumeMounts:
+                              - name: data
+                                mountPath: /var/lib/postgresql/data
+                            readinessProbe:
+                              exec:
+                                command:
+                                  - pg_isready
+                                  - -U
+                                  - {{ $spec.database.user }}
+                              initialDelaySeconds: 5
+                              periodSeconds: 5
+                            resources:
+                              requests:
+                                cpu: 100m
+                                memory: 256Mi
+                              limits:
+                                memory: 1Gi
+                        volumes:
+                          - name: data
+                            hostPath:
+                              path: {{ $spec.database.storagePath }}
+                              type: DirectoryOrCreate
+            ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              name: directus-{{ $spec.namespace }}-service
+              annotations:
+                {{ setResourceNameAnnotation "service" }}
+            spec:
+              providerConfigRef:
+                name: platform
+              forProvider:
+                manifest:
+                  apiVersion: v1
+                  kind: Service
+                  metadata:
+                    name: directus
+                    namespace: {{ $spec.namespace }}
+                  spec:
+                    selector:
+                      app: directus
+                    ports:
+                      - name: http
+                        port: 8055
+                        targetPort: http
+            ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              name: directus-{{ $spec.namespace }}-deployment
+              annotations:
+                {{ setResourceNameAnnotation "deployment" }}
+            spec:
+              references:
+                - dependsOn:
+                    apiVersion: kubernetes.crossplane.io/v1alpha2
+                    kind: Object
+                    name: directus-{{ $spec.namespace }}-postgres-service
+                - dependsOn:
+                    apiVersion: kubernetes.crossplane.io/v1alpha2
+                    kind: Object
+                    name: directus-{{ $spec.namespace }}-postgres
+              providerConfigRef:
+                name: platform
+              forProvider:
+                manifest:
+                  apiVersion: apps/v1
+                  kind: Deployment
+                  metadata:
+                    name: directus
+                    namespace: {{ $spec.namespace }}
+                  spec:
+                    replicas: 1
+                    selector:
+                      matchLabels:
+                        app: directus
+                    strategy:
+                      type: RollingUpdate
+                      rollingUpdate:
+                        maxUnavailable: 0
+                        maxSurge: 1
+                    template:
+                      metadata:
+                        labels:
+                          app: directus
+                      spec:
+                        securityContext:
+                          seccompProfile:
+                            type: RuntimeDefault
+                        initContainers:
+                          - name: prepare-uploads-dir
+                            image: {{ $spec.image }}
+                            command:
+                              - sh
+                              - -ec
+                              - mkdir -p /directus/uploads && chown -R node:node /directus/uploads
+                            securityContext:
+                              runAsUser: 0
+                              runAsGroup: 0
+                              allowPrivilegeEscalation: false
+                            volumeMounts:
+                              - name: uploads
+                                mountPath: /directus/uploads
+                        containers:
+                          - name: directus
+                            image: {{ $spec.image }}
+                            securityContext:
+                              allowPrivilegeEscalation: false
+                              capabilities:
+                                drop:
+                                  - ALL
+                            ports:
+                              - name: http
+                                containerPort: 8055
+                            env:
+                              - name: HOST
+                                value: "0.0.0.0"
+                              - name: PORT
+                                value: "8055"
+                              - name: PUBLIC_URL
+                                value: "{{ $publicURL }}"
+                              - name: SECRET
+                                valueFrom:
+                                  secretKeyRef:
+                                    name: {{ $spec.secrets.runtimeSecretName }}
+                                    key: {{ $spec.secrets.runtimeSecretKey }}
+                              - name: ADMIN_EMAIL
+                                value: "{{ $spec.admin.email }}"
+                              - name: ADMIN_PASSWORD
+                                valueFrom:
+                                  secretKeyRef:
+                                    name: {{ $spec.secrets.adminSecretName }}
+                                    key: {{ $spec.secrets.adminPasswordKey }}
+                              - name: DB_CLIENT
+                                value: pg
+                              - name: DB_HOST
+                                value: directus-postgres
+                              - name: DB_PORT
+                                value: "5432"
+                              - name: DB_DATABASE
+                                value: "{{ $spec.database.name }}"
+                              - name: DB_USER
+                                value: "{{ $spec.database.user }}"
+                              - name: DB_PASSWORD
+                                valueFrom:
+                                  secretKeyRef:
+                                    name: {{ $spec.secrets.databaseSecretName }}
+                                    key: {{ $spec.secrets.databasePasswordKey }}
+                            readinessProbe:
+                              httpGet:
+                                path: /server/ping
+                                port: http
+                              initialDelaySeconds: 10
+                              periodSeconds: 10
+                            volumeMounts:
+                              - name: uploads
+                                mountPath: /directus/uploads
+                            resources:
+                              requests:
+                                cpu: {{ index $spec.resources.requests "cpu" }}
+                                memory: {{ index $spec.resources.requests "memory" }}
+                              limits:
+                                memory: {{ index $spec.resources.limits "memory" }}
+                        volumes:
+                          - name: uploads
+                            hostPath:
+                              path: {{ $spec.uploadsPath }}
+                              type: DirectoryOrCreate
+            {{- if and $gatewayEnabled $spec.publicAdminRoute $spec.adminDomain }}
+            ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              name: directus-{{ $spec.namespace }}-admin-route
+              annotations:
+                {{ setResourceNameAnnotation "admin-route" }}
+            spec:
+              references:
+                - dependsOn:
+                    apiVersion: kubernetes.crossplane.io/v1alpha2
+                    kind: Object
+                    name: directus-{{ $spec.namespace }}-service
+              providerConfigRef:
+                name: platform
+              forProvider:
+                manifest:
+                  apiVersion: gateway.networking.k8s.io/v1
+                  kind: HTTPRoute
+                  metadata:
+                    name: directus-admin
+                    namespace: {{ $spec.namespace }}
+                  spec:
+                    parentRefs:
+                      - name: {{ $spec.gateway.name }}
+                        namespace: {{ $spec.gateway.namespace }}
+                        sectionName: {{ $spec.gateway.httpSectionName }}
+                    hostnames:
+                      - "{{ $spec.adminDomain }}"
+                    rules:
+                      - backendRefs:
+                          - name: directus
+                            port: 8055
+            {{- end }}
+            ---
+            apiVersion: platform.guardian.dev/v1alpha1
+            kind: DirectusInstance
+            status:
+              internalURL: http://directus.{{ $spec.namespace }}.svc:8055
+              {{- if $spec.adminDomain }}
+              adminURL: https://{{ $spec.adminDomain }}
+              {{- end }}
+    - step: mark-ready
+      functionRef:
+        name: function-auto-ready

@@ -7,125 +7,85 @@ import (
 
 const aisucksTestImage = "registry.guardian.internal/aisucks@sha256:deadbeef"
 
-func TestAisucksPublicHTTPServiceRender(t *testing.T) {
-	c := componentByName(t, "aisucks")
-	tmpl, err := toolPath("_main/" + c.manifest)
+func TestAisucksProductAPIRender(t *testing.T) {
+	c := componentByName(t, "aisucks-product-api")
+	rendered, err := renderComponentManifest(c, "", nil, &Site{})
 	if err != nil {
-		t.Fatalf("locate public HTTP service manifest: %v", err)
+		t.Fatal(err)
 	}
-	c.manifest = tmpl
+	out := string(rendered)
+	for _, want := range []string{
+		"kind: CompositeResourceDefinition",
+		"name: aisucksproducts.products.guardian.dev",
+		"kind: Composition",
+		"name: aisucks-product-public-http",
+		"kind: PublicHttpService",
+		"name: aisucks",
+		"namespace: aisucks",
+		"app: aisucks",
+		"domain: {{ $spec.domain }}",
+		"image: {{ $spec.image }}",
+		"podNetwork: {{ $spec.podNetwork }}",
+		"replicas: {{ $spec.replicas }}",
+		"metrics: 9090",
+		"diagnostics: \"{{ $metricsAddr }}\"",
+		"tlsSectionName: tls-aisucks",
+		"name: function-auto-ready",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("AisucksProduct API render missing %q", want)
+		}
+	}
+}
+
+func TestAisucksEnvironmentBundleInstances(t *testing.T) {
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
-			sitePath, err := toolPath("_main/src/sites/" + siteName + "/bootstrap.yaml")
-			if err != nil {
-				t.Fatalf("locate bootstrap.yaml: %v", err)
-			}
-			site, err := loadSite(sitePath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			rendered, err := renderComponentManifest(c, aisucksTestImage, nil, site)
+			site := loadTestSite(t, siteName)
+			rendered, err := renderEnvironmentBundle(site, testProductImages())
 			if err != nil {
 				t.Fatal(err)
 			}
 			out := string(rendered)
-
 			for _, want := range []string{
-				"kind: Namespace",
+				"kind: AisucksProduct",
 				"name: aisucks",
-				"kind: Deployment",
-				"kind: Service",
-				"image: " + aisucksTestImage,
-				`name: DOMAIN`,
-				`value: "` + site.Aisucks.Domain + `"`,
-				`value: /var/lib/aisucks-certs`,
-				"containerPort: 9090",
-				"path: /healthz",
-				"allowPrivilegeEscalation: false",
-				"drop:\n                - ALL",
-				"add:\n                - NET_BIND_SERVICE",
-				"type: RuntimeDefault",
+				"site: " + siteName,
+				"domain: " + site.Aisucks.Domain,
+				aisucksTestImage,
+				"podNetwork: true",
+				"replicas: 2",
 			} {
 				if !strings.Contains(out, want) {
-					t.Errorf("render missing %q", want)
+					t.Errorf("AisucksProduct environment render missing %q", want)
 				}
 			}
-
-			kinds := decodeKinds(t, rendered)
-			wantKinds := "Namespace,Deployment,Service"
-			if site.Aisucks.PodNetwork {
-				wantKinds = "Namespace,Deployment,Service,Service"
-			}
-			if site.Gateway.Enabled {
-				wantKinds += ",TLSRoute,HTTPRoute"
-			}
-			if got := strings.Join(kinds, ","); got != wantKinds {
-				t.Errorf("kinds = %s; want %s", got, wantKinds)
-			}
-			if site.Gateway.Enabled {
-				for _, want := range []string{
-					"kind: TLSRoute",
-					"sectionName: tls-aisucks",
-					"kind: HTTPRoute",
-					"name: aisucks-http",
-					"sectionName: http",
-				} {
-					if !strings.Contains(out, want) {
-						t.Errorf("gateway route render missing %q", want)
-					}
-				}
-			} else if strings.Contains(out, "TLSRoute") || strings.Contains(out, "HTTPRoute") {
-				t.Error("site without gateway.enabled must not render Gateway API routes")
-			}
-
-			if site.Aisucks.PodNetwork {
-				for _, want := range []string{
-					"replicas: 2",
-					"type: RollingUpdate",
-					"maxUnavailable: 0",
-					"maxSurge: 1",
-					"platform.guardian.dev/network: pod",
-					`value: ":8080"`,
-					`value: ":8443"`,
-					`value: ":9090"`,
-					"name: aisucks-probe",
-					"clusterIP: 10.96.111.43",
-				} {
-					if !strings.Contains(out, want) {
-						t.Errorf("pod-network render missing %q", want)
-					}
-				}
-				for _, banned := range []string{
-					"hostNetwork: true",
-					"ClusterFirstWithHostNet",
-					`value: "127.0.0.1:9090"`,
-				} {
-					if strings.Contains(out, banned) {
-						t.Errorf("pod-network render must not contain %q", banned)
-					}
-				}
-				if strings.Contains(out, "type: Recreate") {
-					t.Error("pod-network render must not use the host-network Recreate strategy")
-				}
-			} else {
-				for _, want := range []string{
-					"replicas: 1",
-					"type: Recreate",
-					"hostNetwork: true",
-					"ClusterFirstWithHostNet",
-					`value: ":80"`,
-					`value: ":443"`,
-					`value: "127.0.0.1:9090"`,
-				} {
-					if !strings.Contains(out, want) {
-						t.Errorf("host-network render missing %q", want)
-					}
-				}
-				if strings.Contains(out, "aisucks-probe") {
-					t.Error("host-network render must not create the pod-network probe Service")
-				}
+			if strings.Contains(out, "{{ index .Images") {
+				t.Error("environment bundle render left image template placeholders unresolved")
 			}
 		})
+	}
+}
+
+func loadTestSite(t *testing.T, siteName string) *Site {
+	t.Helper()
+	sitePath, err := toolPath("_main/src/sites/" + siteName + "/bootstrap.yaml")
+	if err != nil {
+		t.Fatalf("locate bootstrap.yaml: %v", err)
+	}
+	site, err := loadSite(sitePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return site
+}
+
+func testProductImages() map[string]string {
+	return map[string]string{
+		"aisucks":      aisucksTestImage,
+		"company-site": companyTestImage,
+		"directus":     directusTestImage,
+		"postgres":     postgresTestImage,
 	}
 }
 

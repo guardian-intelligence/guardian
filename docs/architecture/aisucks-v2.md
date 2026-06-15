@@ -13,15 +13,15 @@ the runtime exposes product writes.
 guardian up
   -> bootstrap Talos + Cilium + seed registry
   -> push workspace-built OCI images by digest
-  -> render the platform PublicHttpService envelope
-  -> converge aisucks as the first product consumer
+  -> apply Guardian platform/product Crossplane APIs
+  -> apply the site's environment bundle
+  -> converge AisucksProduct through PublicHttpService
 ```
 
-The current implementation direct-renders the `PublicHttpService` envelope from
-`src/platform/public-http-service/`. The Crossplane shape lives in
-`src/crossplane/packages/guardian-products/` and becomes live once the
-Configuration package and any required functions/providers are pinned and
-mirrored.
+The current implementation declares `AisucksProduct` in the site environment
+bundle. `AisucksProduct` composes
+`platform.guardian.dev/PublicHttpService`, which renders the Kubernetes
+workload envelope.
 
 ## APIs
 
@@ -31,13 +31,13 @@ Top-level product API:
 apiVersion: products.guardian.dev/v1alpha1
 kind: AisucksProduct
 metadata:
-  namespace: aisucks
-  name: default
+  name: aisucks
 spec:
+  site: prod
   domain: aisucks.app
   image: registry.guardian.internal/aisucks@sha256:...
-  observability:
-    profile: standard
+  podNetwork: true
+  replicas: 2
 ```
 
 Reusable platform API:
@@ -46,15 +46,15 @@ Reusable platform API:
 apiVersion: platform.guardian.dev/v1alpha1
 kind: PublicHttpService
 metadata:
-  namespace: aisucks
   name: aisucks
 spec:
+  site: prod
+  namespace: aisucks
   app: aisucks
   domain: aisucks.app
   image: registry.guardian.internal/aisucks@sha256:...
   podNetwork: true
-  observability:
-    profile: standard
+  replicas: 2
 ```
 
 `AisucksProduct` composes `PublicHttpService`. `PublicHttpService` owns the
@@ -99,19 +99,15 @@ src/products/aisucks/
 src/viteplus-monorepo/packages/aisucks-sdk/
   src/index.ts            # npm SDK wrapper over generated Connect client
 
-src/platform/public-http-service/
-  k8s/public-http-service.yaml.tmpl
-
 src/crossplane/packages/guardian-products/
-  apis/
-  compositions/
-  examples/
+  aisucks-product.yaml
+
+src/crossplane/packages/guardian-platform/
+  public-http-service.yaml
 ```
 
 ## Next Slices
 
-1. Package and install pinned Crossplane + `guardian-products`.
-2. Replace the direct renderer with `AisucksProduct` XR apply.
-3. Add product state with operator-managed Postgres and SQLC.
-4. Add verifier and reviewer workflows behind explicit APIs.
-5. Add Electric/TanStack DB read sync only after the write path is explicit.
+1. Add product state with operator-managed Postgres and SQLC.
+2. Add verifier and reviewer workflows behind explicit APIs.
+3. Add Electric/TanStack DB read sync only after the write path is explicit.

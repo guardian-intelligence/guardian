@@ -86,6 +86,38 @@ spec:
           property: htpasswd
 ---
 apiVersion: platform.guardian.dev/v1alpha1
+kind: SecretProjection
+metadata:
+  name: directus-secrets
+spec:
+  target:
+    namespace: directus
+    namespaceLabels:
+      pod-security.kubernetes.io/enforce: privileged
+  openbao:
+    role: directus-secrets
+    serviceAccountName: external-secrets-directus
+  secrets:
+    - name: directus-runtime
+      type: Opaque
+      remotePath: guardian/guardian-dev/directus/runtime
+      data:
+        - secretKey: secret
+          property: secret
+    - name: directus-admin
+      type: Opaque
+      remotePath: guardian/guardian-dev/directus/admin
+      data:
+        - secretKey: password
+          property: password
+    - name: directus-postgres
+      type: Opaque
+      remotePath: guardian/guardian-dev/directus/postgres
+      data:
+        - secretKey: password
+          property: password
+---
+apiVersion: platform.guardian.dev/v1alpha1
 kind: EdgeGateway
 metadata:
   name: edge
@@ -146,3 +178,67 @@ spec:
       dnsNames:
         - "oci.guardianintelligence.org"
       issuerRefName: letsencrypt-production
+---
+apiVersion: products.guardian.dev/v1alpha1
+kind: AisucksProduct
+metadata:
+  name: aisucks
+spec:
+  site: dev
+  domain: dev.aisucks.app
+  image: '{{ index .Images "aisucks" }}'
+  podNetwork: true
+  replicas: 2
+---
+apiVersion: products.guardian.dev/v1alpha1
+kind: CompanySite
+metadata:
+  name: company-site
+spec:
+  site: dev
+  domain: dev.guardianintelligence.org
+  image: '{{ index .Images "company-site" }}'
+  directusRef:
+    name: directus
+  contentSnapshot:
+    digest: workspace
+  routes:
+    - /
+    - /letters
+    - /news
+  replicas: 2
+---
+apiVersion: platform.guardian.dev/v1alpha1
+kind: DirectusInstance
+metadata:
+  name: directus
+spec:
+  site: dev
+  namespace: directus
+  image: '{{ index .Images "directus" }}'
+  postgresImage: '{{ index .Images "postgres" }}'
+  publicAdminRoute: false
+  secrets:
+    runtimeSecretName: directus-runtime
+    runtimeSecretKey: secret
+    adminSecretName: directus-admin
+    adminPasswordKey: password
+    databaseSecretName: directus-postgres
+    databasePasswordKey: password
+  admin:
+    email: im.shovonhasan@gmail.com
+  database:
+    name: directus
+    user: directus
+    storagePath: /var/lib/guardian/directus/postgres
+  uploadsPath: /var/lib/guardian/directus/uploads
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+  gateway:
+    name: edge
+    namespace: gateway
+    httpSectionName: http
