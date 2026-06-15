@@ -1,10 +1,11 @@
 # Release architecture
 
-Status: design ratified 2026-06-12 (operator). The workflow-owned release POC
-has been removed; release decisions move into repo-owned Go binaries invoked
-through `aspect`. Companions: `docs/roadmap.md` (M6/M7),
-`docs/runbooks/aisucks-release.md` (the gate spec the judge automates). This
-doc changes by amendment.
+Status: design ratified 2026-06-12 (operator), amended 2026-06-15 for
+version declarations and the edge/nightly/rc/stable channel ladder. The
+workflow-owned release POC has been removed; release decisions move into
+repo-owned Go binaries invoked through `aspect`. Companions:
+`docs/roadmap.md` (M6/M7), `docs/runbooks/aisucks-release.md` (the gate spec
+the judge automates). This doc changes by amendment.
 
 ## The authority split
 
@@ -13,18 +14,19 @@ Build authority and deploy authority never meet:
 - **A hosted builder builds.** CI on the public mirror builds hermetically
   (Bazel), pushes images + a CUE release manifest by digest, signs provenance
   with cosign **keyless** or a future Transit-backed builder identity, and
-  advances the **edge** channel. The hosted builder holds artifact-publisher
-  authority and nothing else — no cluster credential exists there, not
-  "scoped", none.
+  advances the **edge** channel for every buildable commit. The hosted builder
+  holds artifact-publisher authority and nothing else — no cluster credential
+  exists there, not "scoped", none.
 - **The fleet deploys.** Each cluster runs Flux (source-controller +
-  kustomize-controller only) pulling its channel: dev follows **edge**
-  (continuous — dev tracking edge IS the "every site has a dev version"
-  convention), gamma follows edge with judgment, prod follows **stable**.
-  Flux verifies cosign signatures natively: keyless identity for edge, the
-  fleet's pinned Transit public key for stable.
-- Only the fleet's OpenBao Transit key advances stable or attests a gate
-  verdict, so a fully compromised GitHub reaches gamma at worst — the
-  designed sacrificial environment.
+  kustomize-controller only) pulling signed channel pointers: dev follows
+  **edge** (continuous — dev tracking edge IS the "every site has a dev
+  version" convention), deeper nonprod promotion lanes exercise **nightly**
+  and **rc**, and prod follows **stable**. Flux verifies cosign signatures
+  natively: keyless identity for edge, the fleet's pinned Transit public key
+  for promoted channels.
+- Only the fleet's OpenBao Transit key advances nightly, rc, stable, or
+  attests a gate verdict, so a fully compromised GitHub reaches edge/dev at
+  worst — the designed sacrificial path.
 - Residual, recorded honestly: a malicious-but-*healthy* build that survives
   review passes gamma's soak — soak judges health, not intent. Backstop:
   review + reproducibility (anyone rebuilds the commit and matches the
@@ -50,44 +52,101 @@ downstream projection from that verified subject. If the same npm external
 version would map to different tarball bytes, the publisher fails instead of
 silently hiding a missing external version bump.
 
+External release versions are explicit source declarations, not inferred from
+promotion. A repo-owned release command records that a commit maps to an
+external version and release track:
+
+```sh
+aspect release declare --product aisucks --version 1.2.3-rc.1 --commit <sha> --track rc
+```
+
+The declaration creates or requires the ecosystem-specific version state
+needed for that artifact. If npm, PyPI, Cargo, generated docs, container
+labels, or embedded binary metadata change between rc and stable, stable is a
+new release subject and must earn its own evidence. If promotion only moves a
+channel pointer or external dist-tag without changing bytes or metadata, the
+same subject may advance.
+
+Git tags are source/version declarations and human handles. They are not the
+release ledger, not the evidence store, and not the channel mechanism. RC and
+stable source tags are expected; edge and nightly source tags are optional and
+should not be required for every commit. Evidence lives as OCI referrers on
+the release subject.
+
 ## Data model
 
-- **Release manifest** (CUE → signed OCI artifact): monotonic `seq`
+- **Release declaration** (source record): product, external version, source
+  commit/ref, release track (`edge | nightly | rc | stable`), and package
+  projection intent. It may be represented by a Git tag for rc/stable source
+  handles, but the tag is only one projection of the declaration.
+- **Release subject / manifest** (CUE → signed OCI artifact): monotonic `seq`
   (consumers refuse regressions — the pointer-replay defense; full TUF
   deliberately not adopted: the accepted residual is that a frozen registry
-  can hide *new* releases, never serve old ones), tag, commit,
-  `kind: feature | reliability` (budget-gate input), per-component image +
+  can hide *new* releases, never serve old ones), source commit/ref,
+  declaration reference if versioned, track, `kind: feature | reliability`
+  (budget-gate input), per-component image + package + content snapshot +
   manifest-bundle digests, notes.
-- **Channels** = two tiny signed pointer artifacts: `edge` (CI-signed),
-  `stable` (Transit-signed).
+- **Channels** = signed pointer artifacts: `edge` (CI-signed), plus
+  `nightly`, `rc`, and `stable` (Transit-signed). A channel points to a
+  release subject digest, never directly to a mutable tag.
 - **Attestations** (in-toto predicates via cosign referrers on the manifest
-  digest): SLSA provenance (CI); `gate-pass` / `gate-fail` (judge, Transit);
-  `rejected` (a taint, refused everywhere until explicit operator
-  forgiveness — never a timeout); `deployed` (per site; audit trail and the
-  status page's release-train source).
+  digest): SLSA provenance (CI); `test-result` (deep test runner);
+  `gate-pass` / `gate-fail` (judge, Transit); `rejected` (a taint, refused
+  everywhere until explicit operator forgiveness — never a timeout);
+  `deployed` (per site; audit trail and the status page's release-train
+  source).
 - **Manifests** move from Go templates to kustomize bases + three per-site
   overlays, substituting from a bootstrap-laid site ConfigMap; secrets stay
   in-cluster. guardian-up's render/push path retires for components Flux
   owns.
+
+## Channel ladder
+
+The release process is a state machine over immutable release subjects:
+
+1. **edge**: every buildable commit. Requirements: hermetic build succeeds,
+   OCI artifacts are pushed by digest, SLSA provenance is attached, and the
+   CI-signed edge pointer advances.
+2. **nightly**: a selected edge subject after deep SLO checks pass.
+   Requirements: dev/nonprod convergence, declared SLOProfile and
+   SyntheticCheck inputs, active test plan execution, enough observation
+   window to prove health, and a Transit-signed gate result.
+3. **rc**: a nightly subject or a newly declared versioned subject after
+   deeper checks pass. Requirements: longer soak, browser/API E2E, package
+   install tests, content/publish workflow checks when applicable, and
+   rollback/yank drill coverage where risk warrants it.
+4. **stable**: an rc subject or a new stable-declared subject after the
+   deepest release criteria pass. Requirements: provenance, required prior
+   gate results, no taint, budget/admission policy, prod preflight, prod
+   post-promote watch, and a `deployed` attestation.
+
+The safe fast path is subject reuse: if rc and stable are byte-identical, the
+stable gate can rely on accumulated rc evidence plus prod-specific watch. The
+safe slow path is subject replacement: if the stable version declaration
+changes artifact bytes or material metadata, it starts as a new subject and
+must repeat the required gates for its track.
 
 ## The release judge (the only bespoke code)
 
 One small per-site binary — a few hundred lines of policy; role from site
 config. Everything mechanical (pull, verify, apply, health, prune) is Flux;
 everything cryptographic is cosign/Transit; metric evaluation is
-VictoriaMetrics queries against the M2 recording rules.
+VictoriaMetrics queries against the M2 recording rules. The judge orchestrates
+or reads test runners; it does not embed product-specific browser, load, or
+package tests.
 
-- **gamma (gate):** when Flux reports the edge candidate healthy, run the
-  soak — 10m, from local VM: alerts quiet · probe_success == 1 · restart
-  delta 0 · 5xx == 0 · Connect Health synthetic passes → Transit-sign `gate-pass` →
-  advance stable. Fail → pointer back, attest `gate-fail`, page. A newer
-  edge during a soak aborts it without a verdict — latest wins on gamma.
-- **prod (promote):** admit only a digest carrying provenance ∧ gate-pass ∧
-  ¬tainted ∧ (budget remaining > 0 ∨ kind == reliability), strictly
-  serialized; then a 15m post-promote watch (same criteria, prod's VM).
-  Fail → pointer-move rollback to lastGood + taint + page; pass → attest
-  `deployed`. Auto-rollback fires only inside the window; after it, manual
-  only — automation blast radius stays capped.
+- **nightly/rc (gate):** when Flux reports the candidate healthy, run the
+  track's TestPlan and SLO window from nonprod. Pass → Transit-sign
+  `gate-pass` and advance the requested channel. Fail → attest `gate-fail`,
+  refuse the channel move, and page if the policy says the track is urgent.
+  A newer candidate during an edge-to-nightly soak aborts without a verdict —
+  latest wins until a release declaration pins a subject.
+- **prod (promote):** admit only a digest carrying provenance ∧ required
+  prior gate passes ∧ ¬tainted ∧ (budget remaining > 0 ∨ kind ==
+  reliability), strictly serialized; then a post-promote watch using prod's
+  VM and cold-plane evidence links. Fail → pointer-move rollback to lastGood
+  + taint + page; pass → attest `deployed`. Auto-rollback fires only inside
+  the window; after it, manual only — automation blast radius stays capped.
 - **Rollback is a pointer move.** Flux converges whatever the pointer
   names; lastGood images sit in the node image cache (and the per-site
   pull-through mirror once zot lands), so rollback never depends on ghcr
@@ -119,6 +178,13 @@ VictoriaMetrics queries against the M2 recording rules.
 - **Flagger** is the weighted-canary path once M3 routes exist — it speaks
   Gateway API, so M6's weighted canaries become configuration on the Cilium
   routes, not bespoke traffic logic.
+- **OpenSLO-compatible shape, not necessarily OpenSLO runtime.** Guardian
+  SLOProfile should stay close to OpenSLO's object model so SLOs remain
+  portable, but execution is through Guardian's release judge and telemetry
+  plane until a standard tool earns adoption.
+- **Deep tests as replaceable runners.** TestPlan is Guardian-owned input;
+  execution can be plain Kubernetes Jobs first, then Testkube, Playwright,
+  k6, or another runner when it removes more complexity than it adds.
 - **Flux and the judge deploy via bootstrap / guardian up, operator-only.**
   The pipeline never updates itself; the workstation is the second channel.
 - Migrations discipline is unchanged and unverifiable by the pipeline:
@@ -128,20 +194,26 @@ VictoriaMetrics queries against the M2 recording rules.
 
 1. **Release target lane**: release tooling invoked through `aspect`
    normalizes release subjects, emits release records, attaches evidence, and
-   advances edge pointers. Package-owned state machines own package projection
-   details; shared release infrastructure owns source resolution, subject
-   normalization, provenance shape, admission checks, and result records. The
-   npm SDK first becomes an OCI subject at `guardian/aisucks/sdk/npm`; the
-   npmjs publish step is a later Trusted Publishing projection from that
-   subject, not a push-on-main rule in GitHub Actions YAML. VERIFY: pull the
-   real SDK release from a clean machine with `guardian run oras pull`,
-   `guardian run oras discover`, and `guardian run cosign verify`.
+   advances edge pointers. Add `aspect release declare` for explicit
+   commit/version/track declarations. Package-owned state machines own
+   package projection details; shared release infrastructure owns source
+   resolution, subject normalization, provenance shape, admission checks, and
+   result records. The npm SDK first becomes an OCI subject at
+   `guardian/aisucks/sdk/npm`; the npmjs publish step is a later Trusted
+   Publishing projection from that subject, not a push-on-main rule in GitHub
+   Actions YAML. VERIFY: pull the real SDK release from a clean machine with
+   `guardian run oras pull`, `guardian run oras discover`, and `guardian run
+   cosign verify`.
 2. **Flux on dev** following edge; the template→kustomize conversion lands
    here. VERIFY: a merge reaches dev converged in minutes, hands-off.
-3. **Judge, gate role on gamma.** Prerequisite: bao Transit init on gamma
-   (operator unseal custody, same practice as dev).
-4. **Judge, promote role on prod** — the budget gate is M2's teeth arriving.
-5. **Retire the runner** workflow + runbook; run M6's drills: a
+3. **SLOProfile/TestPlan skeletons.** Define declarative inputs for
+   nightly/rc/stable policies before implementing judge decisions.
+4. **Judge, gate role on gamma.** Prerequisite: bao Transit init on gamma
+   (operator unseal custody, same practice as dev). First target is
+   edge→nightly; rc and stable reuse the same subject/evidence machinery with
+   stricter policies.
+5. **Judge, promote role on prod** — the budget gate is M2's teeth arriving.
+6. **Retire the runner** workflow + runbook; run M6's drills: a
    deliberately broken release refused at gamma, a synthetic budget
    exhaustion freezing a feature release, the auto-rollback drill restoring
    N-1 unattended, taint-and-forgive.
