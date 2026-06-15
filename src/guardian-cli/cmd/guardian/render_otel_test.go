@@ -1,6 +1,7 @@
 package main
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -38,6 +39,7 @@ func TestOtelPublicHttpScrape(t *testing.T) {
 			for _, want := range []string{
 				"job_name: public-http",
 				"kubernetes_sd_configs",
+				"guardian.dev/render-sha256:",
 				"__meta_kubernetes_pod_label_platform_guardian_dev_metrics_scrape",
 				"__meta_kubernetes_pod_label_platform_guardian_dev_metrics_port",
 				"__meta_kubernetes_pod_label_platform_guardian_dev_slo_surface",
@@ -47,6 +49,9 @@ func TestOtelPublicHttpScrape(t *testing.T) {
 				if !strings.Contains(out, want) {
 					t.Errorf("otel render missing public-http scrape primitive %q", want)
 				}
+			}
+			if !regexp.MustCompile(`guardian\.dev/render-sha256: "[0-9a-f]{64}"`).MatchString(out) {
+				t.Error("otel render must include a render hash pod-template annotation so ConfigMap changes roll the collector")
 			}
 
 			if site.Aisucks.PodNetwork {
