@@ -33,11 +33,15 @@ spec:
                   properties:
                     name:
                       type: string
+                  required:
+                    - name
                 contentSnapshot:
                   type: object
                   properties:
                     digest:
                       type: string
+                  required:
+                    - digest
                 routes:
                   type: array
                   items:
@@ -49,6 +53,8 @@ spec:
                 - site
                 - domain
                 - image
+                - directusRef
+                - contentSnapshot
                 - routes
                 - replicas
             status:

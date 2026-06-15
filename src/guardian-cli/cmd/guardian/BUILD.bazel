@@ -6,6 +6,7 @@ go_library(
         "bao_bootstrap.go",
         "config.go",
         "devtools.go",
+        "directus_instance.go",
         "down.go",
         "environment_capability.go",
         "main.go",
@@ -81,6 +82,7 @@ go_test(
     srcs = [
         "bao_bootstrap_test.go",
         "components_test.go",
+        "directus_instance_test.go",
         "environment_capability_test.go",
         "platform_tls_test.go",
         "push_test.go",
