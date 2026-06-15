@@ -211,6 +211,12 @@ func run(ctx context.Context, cfg cliConfig, stdout io.Writer) error {
 			return errors.New("--tag is required with --oci-layout")
 		}
 		manifest, attestationManifest, err = pushLayout(ctx, cfg.ociLayout, cfg.tag, entry, payload, annotations, cfg.payloadMediaType, cfg.artifactType, attestation, cfg.attestationTitle)
+		if err != nil {
+			return err
+		}
+		if err := validatePushedDescriptors("layout", manifest, attestationManifest); err != nil {
+			return err
+		}
 		ref = layoutRef(cfg.ociLayout, cfg.tag, manifest.Digest.String())
 		if attestationManifest != nil {
 			attestationRef = layoutRef(cfg.ociLayout, attestationTag(cfg.tag), attestationManifest.Digest.String())
@@ -225,14 +231,17 @@ func run(ctx context.Context, cfg cliConfig, stdout io.Writer) error {
 			return err
 		}
 		manifest, attestationManifest, err = pushRemote(ctx, target, cfg.plainHTTP, cfg.credentials, entry, payload, annotations, cfg.payloadMediaType, cfg.artifactType, attestation, cfg.attestationTitle)
+		if err != nil {
+			return err
+		}
+		if err := validatePushedDescriptors("remote", manifest, attestationManifest); err != nil {
+			return err
+		}
 		ref = target.repository + "@" + manifest.Digest.String()
 		if attestationManifest != nil {
 			attestationRef = target.repository + "@" + attestationManifest.Digest.String()
 		}
 		channel = target.tag
-	}
-	if err != nil {
-		return err
 	}
 
 	result := artifactResult{
@@ -537,6 +546,18 @@ func validateSHA256Digest(kind string, value string) error {
 	}
 	if !sha256DigestPattern.MatchString(value) {
 		return fmt.Errorf("%s has invalid digest %q", kind, value)
+	}
+	return nil
+}
+
+func validatePushedDescriptors(location string, manifest ocispec.Descriptor, attestationManifest *ocispec.Descriptor) error {
+	if err := validateDescriptor(location+" OCI artifact manifest", manifest); err != nil {
+		return err
+	}
+	if attestationManifest != nil {
+		if err := validateDescriptor(location+" attestation OCI artifact manifest", *attestationManifest); err != nil {
+			return err
+		}
 	}
 	return nil
 }
