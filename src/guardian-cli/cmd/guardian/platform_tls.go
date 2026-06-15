@@ -24,6 +24,12 @@ type edgeGatewayCertificateRef struct {
 	name      string
 }
 
+type edgeGatewayCertificateTarget struct {
+	namespace string
+	name      string
+	dnsNames  []string
+}
+
 type edgeGatewayTLSManifest struct {
 	Kind string `yaml:"kind"`
 	Spec struct {
@@ -35,6 +41,7 @@ type edgeGatewayTLSManifest struct {
 			Name       string `yaml:"name"`
 			Namespace  string `yaml:"namespace"`
 			SecretName string `yaml:"secretName"`
+			DNSNames   []string `yaml:"dnsNames"`
 		} `yaml:"certificates"`
 	} `yaml:"spec"`
 }
@@ -208,6 +215,63 @@ func edgeGatewayCertificateRefs(site *Site) ([]edgeGatewayCertificateRef, error)
 	out := make([]edgeGatewayCertificateRef, 0, len(refs))
 	for ref := range refs {
 		out = append(out, ref)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].namespace != out[j].namespace {
+			return out[i].namespace < out[j].namespace
+		}
+		return out[i].name < out[j].name
+	})
+	return out, nil
+}
+
+func edgeGatewayCertificateTargets(site *Site) ([]edgeGatewayCertificateTarget, error) {
+	targets := map[edgeGatewayCertificateRef]edgeGatewayCertificateTarget{}
+	dec := yaml.NewDecoder(bytes.NewReader(site.EnvironmentBundle.Raw))
+	for {
+		var doc edgeGatewayTLSManifest
+		if err := dec.Decode(&doc); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, fmt.Errorf("decode %s: %w", site.EnvironmentBundle.Path, err)
+		}
+		if doc.Kind != "EdgeGateway" {
+			continue
+		}
+		for _, cert := range doc.Spec.Certificates {
+			if cert.Name == "" || cert.Namespace == "" {
+				return nil, fmt.Errorf("edge gateway certificate in %s must set name and namespace", site.EnvironmentBundle.Path)
+			}
+			key := edgeGatewayCertificateRef{namespace: cert.Namespace, name: cert.Name}
+			target := targets[key]
+			if target.name == "" {
+				target = edgeGatewayCertificateTarget{
+					namespace: cert.Namespace,
+					name:      cert.Name,
+				}
+			}
+			seen := map[string]struct{}{}
+			for _, name := range target.dnsNames {
+				seen[name] = struct{}{}
+			}
+			for _, name := range cert.DNSNames {
+				if name == "" {
+					continue
+				}
+				if _, ok := seen[name]; ok {
+					continue
+				}
+				seen[name] = struct{}{}
+				target.dnsNames = append(target.dnsNames, name)
+			}
+			sort.Strings(target.dnsNames)
+			targets[key] = target
+		}
+	}
+	out := make([]edgeGatewayCertificateTarget, 0, len(targets))
+	for _, target := range targets {
+		out = append(out, target)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].namespace != out[j].namespace {

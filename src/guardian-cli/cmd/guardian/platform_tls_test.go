@@ -80,6 +80,29 @@ func TestEdgeGatewayCertificateRefs(t *testing.T) {
 	}
 }
 
+func TestEdgeGatewayCertificateTargets(t *testing.T) {
+	sitePath, err := toolPath("_main/src/sites/dev/bootstrap.yaml")
+	if err != nil {
+		t.Fatalf("locate bootstrap.yaml: %v", err)
+	}
+	site, err := loadSite(sitePath)
+	if err != nil {
+		t.Fatalf("load site: %v", err)
+	}
+	got, err := edgeGatewayCertificateTargets(site)
+	if err != nil {
+		t.Fatalf("certificate targets: %v", err)
+	}
+	want := []edgeGatewayCertificateTarget{
+		{namespace: "gateway", name: "aisucks-tls", dnsNames: []string{"dev.aisucks.app"}},
+		{namespace: "gateway", name: "company-site-tls", dnsNames: []string{"dev.guardianintelligence.org"}},
+		{namespace: "gateway", name: "oci-guardianintelligence-org-tls", dnsNames: []string{"oci.guardianintelligence.org"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("targets = %#v, want %#v", got, want)
+	}
+}
+
 func TestSanitizeSecretBackup(t *testing.T) {
 	raw := []byte(`{
 	  "apiVersion": "v1",
