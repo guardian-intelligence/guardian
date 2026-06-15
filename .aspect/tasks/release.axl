@@ -34,6 +34,8 @@ def _sdk_oci_impl(ctx):
     ]
     if ctx.args.output_dir != "":
         cli_args.extend(["--output-dir", ctx.args.output_dir])
+    if ctx.args.source_root != "":
+        cli_args.extend(["--source-root", ctx.args.source_root])
     if ctx.args.require_signature:
         cli_args.append("--require-signature")
     if ctx.args.skip_npm:
@@ -59,6 +61,7 @@ sdk_oci = task(
         "channel": args.string(default = "edge", description = "Release channel/dist-tag/OCI tag intent."),
         "ref": args.string(default = "oci.guardianintelligence.org/guardian/aisucks/sdk/npm:edge", description = "Remote OCI reference used with --publish."),
         "output_dir": args.string(default = "", description = "Directory for release records; defaults to a temporary directory."),
+        "source_root": args.string(default = "", description = "Repository root to build/package while running the current release orchestrator."),
         "require_signature": args.boolean(default = False, description = "Require real Sigstore signing even in local check mode."),
         "skip_npm": args.boolean(default = False, description = "Skip npm publication in publish mode."),
         "skip_oci": args.boolean(default = False, description = "Skip public OCI publication in publish mode."),
