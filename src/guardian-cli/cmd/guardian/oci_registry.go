@@ -147,11 +147,7 @@ func ociRegistrySecretProjection(registry ociRegistryManifest) secretProjectionM
 	if spec.Secrets.Projection.WaitForSecrets != nil {
 		waitForSecrets = *spec.Secrets.Projection.WaitForSecrets
 	}
-	projection := secretProjectionManifest{
-		Kind:            "SecretProjection",
-		DerivedFromKind: "OCIRegistry",
-		DerivedFromName: registry.Metadata.Name,
-	}
+	projection := secretProjectionManifest{Kind: "SecretProjection"}
 	projection.Metadata.Name = registry.Metadata.Name + "-publisher-secrets"
 	projection.Spec.WaitForSecrets = &waitForSecrets
 	projection.Spec.Target.Namespace = spec.Namespace
