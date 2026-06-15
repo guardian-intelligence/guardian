@@ -10,6 +10,7 @@ def _sdk_oci_impl(ctx):
             "build",
             "//src/viteplus-monorepo:workspace_install",
             "//src/viteplus-monorepo:vp_node",
+            "//src/release/cmd/sdkoci",
         ],
         cwd = ws_path(ctx),
         label = "bazelisk build SDK release runner inputs",
