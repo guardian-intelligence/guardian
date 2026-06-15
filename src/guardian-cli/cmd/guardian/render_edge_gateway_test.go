@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -57,19 +58,37 @@ func TestEdgeGatewaySiteManifests(t *testing.T) {
 				"kind: EdgeGateway",
 				"name: tls-aisucks",
 				"hostname: \"" + site.Aisucks.Domain + "\"",
-				"name: https-oci",
-				"hostname: \"" + site.OCI.Domain + "\"",
-				"name: oci-guardianintelligence-org-tls",
-				"dns01CloudflareSecretName: cloudflare-guardianintelligence-org-dns-token",
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("edge gateway instance render missing %q", want)
+				}
+			}
+			if site.OCI.Domain != "" {
+				for _, want := range []string{
+					"name: https-oci",
+					"hostname: \"" + site.OCI.Domain + "\"",
+					"name: oci-guardianintelligence-org-tls",
+					"dns01CloudflareSecretName: cloudflare-guardianintelligence-org-dns-token",
+				} {
+					if !strings.Contains(out, want) {
+						t.Errorf("edge gateway instance render missing %q", want)
+					}
 				}
 			}
 			if site.Company.Domain != "" {
 				for _, want := range []string{
 					"name: tls-company-site",
 					"hostname: \"" + site.Company.Domain + "\"",
+				} {
+					if !strings.Contains(out, want) {
+						t.Errorf("edge gateway instance render missing %q", want)
+					}
+				}
+			}
+			for i, domain := range site.Status.Domains {
+				for _, want := range []string{
+					"name: tls-status-" + strconv.Itoa(i),
+					"hostname: \"" + domain + "\"",
 				} {
 					if !strings.Contains(out, want) {
 						t.Errorf("edge gateway instance render missing %q", want)

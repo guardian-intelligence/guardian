@@ -81,6 +81,9 @@ func TestAisucksPublicHTTPServiceRender(t *testing.T) {
 			if site.Aisucks.PodNetwork {
 				for _, want := range []string{
 					"replicas: 2",
+					"type: RollingUpdate",
+					"maxUnavailable: 0",
+					"maxSurge: 1",
 					"platform.guardian.dev/network: pod",
 					`value: ":8080"`,
 					`value: ":8443"`,
