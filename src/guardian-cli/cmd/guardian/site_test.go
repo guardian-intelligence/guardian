@@ -102,6 +102,13 @@ func TestEnvironmentValidation(t *testing.T) {
 		},
 		wantErr: "products.company.domain requires gateway.enabled",
 	}, {
+		name: "gateway requires aisucks pod network",
+		mutate: func(site *Site, _ *Environment) {
+			site.Gateway.Enabled = true
+			site.Aisucks.Domain = "aisucks.app"
+		},
+		wantErr: "gateway.enabled requires products.aisucks.podNetwork",
+	}, {
 		name: "status monitor requires domains",
 		mutate: func(site *Site, _ *Environment) {
 			site.Status.Monitor = true

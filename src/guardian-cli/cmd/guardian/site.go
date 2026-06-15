@@ -267,6 +267,9 @@ func validateSite(s *Site, bootstrapPath, envPath string, env *Environment) erro
 	if s.Aisucks.PodNetwork && !s.Gateway.Enabled {
 		return fmt.Errorf("environment %s: products.aisucks.podNetwork requires gateway.enabled", envPath)
 	}
+	if s.Gateway.Enabled && s.Aisucks.Domain != "" && !s.Aisucks.PodNetwork {
+		return fmt.Errorf("environment %s: gateway.enabled requires products.aisucks.podNetwork", envPath)
+	}
 	if s.OCI.Domain != "" && !s.Gateway.Enabled {
 		return fmt.Errorf("environment %s: platform.oci.domain requires gateway.enabled", envPath)
 	}
