@@ -17,15 +17,28 @@ type ociRegistryManifest struct {
 }
 
 type ociRegistrySpec struct {
-	Site            string `yaml:"site"`
-	Namespace       string `yaml:"namespace"`
-	Image           string `yaml:"image"`
-	Domain          string `yaml:"domain"`
-	StoragePath     string `yaml:"storagePath"`
+	Site            string            `yaml:"site"`
+	Namespace       string            `yaml:"namespace"`
+	NamespaceLabels map[string]string `yaml:"namespaceLabels"`
+	Image           string            `yaml:"image"`
+	Domain          string            `yaml:"domain"`
+	StoragePath     string            `yaml:"storagePath"`
 	PublisherSecret struct {
 		Name        string `yaml:"name"`
+		UsernameKey string `yaml:"usernameKey"`
+		PasswordKey string `yaml:"passwordKey"`
 		HtpasswdKey string `yaml:"htpasswdKey"`
 	} `yaml:"publisherSecret"`
+	Secrets struct {
+		Projection struct {
+			WaitForSecrets *bool `yaml:"waitForSecrets"`
+			OpenBao        struct {
+				Role               string `yaml:"role"`
+				ServiceAccountName string `yaml:"serviceAccountName"`
+			} `yaml:"openbao"`
+			RemotePath string `yaml:"remotePath"`
+		} `yaml:"projection"`
+	} `yaml:"secrets"`
 	Gateway struct {
 		Name             string `yaml:"name"`
 		Namespace        string `yaml:"namespace"`
@@ -40,15 +53,28 @@ func ociRegistries(site *Site) ([]ociRegistryManifest, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(site.EnvironmentBundle.Raw))
 	var out []ociRegistryManifest
 	for {
-		var doc ociRegistryManifest
-		if err := dec.Decode(&doc); err != nil {
+		var node yaml.Node
+		if err := dec.Decode(&node); err != nil {
 			if err == io.EOF {
 				break
 			}
 			return nil, fmt.Errorf("decode %s: %w", site.EnvironmentBundle.Path, err)
 		}
-		if doc.Kind != "OCIRegistry" {
+		if node.Kind == 0 {
 			continue
+		}
+		var header struct {
+			Kind string `yaml:"kind"`
+		}
+		if err := node.Decode(&header); err != nil {
+			return nil, fmt.Errorf("decode %s document header: %w", site.EnvironmentBundle.Path, err)
+		}
+		if header.Kind != "OCIRegistry" {
+			continue
+		}
+		var doc ociRegistryManifest
+		if err := node.Decode(&doc); err != nil {
+			return nil, fmt.Errorf("decode %s OCIRegistry: %w", site.EnvironmentBundle.Path, err)
 		}
 		if err := validateOCIRegistryManifest(site, doc); err != nil {
 			return nil, err
@@ -74,7 +100,12 @@ func validateOCIRegistryManifest(site *Site, registry ociRegistryManifest) error
 		{field: "spec.domain", value: spec.Domain},
 		{field: "spec.storagePath", value: spec.StoragePath},
 		{field: "spec.publisherSecret.name", value: spec.PublisherSecret.Name},
+		{field: "spec.publisherSecret.usernameKey", value: spec.PublisherSecret.UsernameKey},
+		{field: "spec.publisherSecret.passwordKey", value: spec.PublisherSecret.PasswordKey},
 		{field: "spec.publisherSecret.htpasswdKey", value: spec.PublisherSecret.HtpasswdKey},
+		{field: "spec.secrets.projection.openbao.role", value: spec.Secrets.Projection.OpenBao.Role},
+		{field: "spec.secrets.projection.openbao.serviceAccountName", value: spec.Secrets.Projection.OpenBao.ServiceAccountName},
+		{field: "spec.secrets.projection.remotePath", value: spec.Secrets.Projection.RemotePath},
 		{field: "spec.gateway.name", value: spec.Gateway.Name},
 		{field: "spec.gateway.namespace", value: spec.Gateway.Namespace},
 		{field: "spec.gateway.httpsSectionName", value: spec.Gateway.HTTPSSectionName},
@@ -86,6 +117,9 @@ func validateOCIRegistryManifest(site *Site, registry ociRegistryManifest) error
 	}
 	if spec.Site != site.Name {
 		return fmt.Errorf("environment %s: OCIRegistry %s spec.site = %q, want %q", site.EnvironmentBundle.Path, name, spec.Site, site.Name)
+	}
+	if err := validateSecretProjection(site, ociRegistrySecretProjection(registry)); err != nil {
+		return err
 	}
 	return nil
 }
@@ -105,4 +139,36 @@ func validateOCIRegistryConfig(site *Site, registries []ociRegistryManifest) err
 		return fmt.Errorf("environment %s: OCIRegistry %s spec.domain = %q, want platform.oci.domain %q", site.EnvironmentBundle.Path, registry.Metadata.Name, registry.Spec.Domain, site.OCI.Domain)
 	}
 	return nil
+}
+
+func ociRegistrySecretProjection(registry ociRegistryManifest) secretProjectionManifest {
+	spec := registry.Spec
+	waitForSecrets := true
+	if spec.Secrets.Projection.WaitForSecrets != nil {
+		waitForSecrets = *spec.Secrets.Projection.WaitForSecrets
+	}
+	projection := secretProjectionManifest{
+		Kind:            "SecretProjection",
+		DerivedFromKind: "OCIRegistry",
+		DerivedFromName: registry.Metadata.Name,
+	}
+	projection.Metadata.Name = registry.Metadata.Name + "-publisher-secrets"
+	projection.Spec.WaitForSecrets = &waitForSecrets
+	projection.Spec.Target.Namespace = spec.Namespace
+	projection.Spec.Target.NamespaceLabels = spec.NamespaceLabels
+	projection.Spec.OpenBao.Role = spec.Secrets.Projection.OpenBao.Role
+	projection.Spec.OpenBao.ServiceAccountName = spec.Secrets.Projection.OpenBao.ServiceAccountName
+	projection.Spec.Secrets = []secretProjectionSecret{
+		{
+			Name:       spec.PublisherSecret.Name,
+			Type:       "Opaque",
+			RemotePath: spec.Secrets.Projection.RemotePath,
+			Data: []secretProjectionData{
+				{SecretKey: spec.PublisherSecret.UsernameKey, Property: spec.PublisherSecret.UsernameKey},
+				{SecretKey: spec.PublisherSecret.PasswordKey, Property: spec.PublisherSecret.PasswordKey},
+				{SecretKey: spec.PublisherSecret.HtpasswdKey, Property: spec.PublisherSecret.HtpasswdKey},
+			},
+		},
+	}
+	return projection
 }

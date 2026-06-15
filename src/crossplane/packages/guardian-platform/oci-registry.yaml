@@ -25,6 +25,10 @@ spec:
                   type: string
                 namespace:
                   type: string
+                namespaceLabels:
+                  type: object
+                  additionalProperties:
+                    type: string
                 image:
                   type: string
                   description: Digest-pinned zot OCI image reference.
@@ -37,11 +41,43 @@ spec:
                   properties:
                     name:
                       type: string
+                    usernameKey:
+                      type: string
+                    passwordKey:
+                      type: string
                     htpasswdKey:
                       type: string
                   required:
                     - name
+                    - usernameKey
+                    - passwordKey
                     - htpasswdKey
+                secrets:
+                  type: object
+                  properties:
+                    projection:
+                      type: object
+                      properties:
+                        waitForSecrets:
+                          type: boolean
+                          default: true
+                        openbao:
+                          type: object
+                          properties:
+                            role:
+                              type: string
+                            serviceAccountName:
+                              type: string
+                          required:
+                            - role
+                            - serviceAccountName
+                        remotePath:
+                          type: string
+                      required:
+                        - openbao
+                        - remotePath
+                  required:
+                    - projection
                 gateway:
                   type: object
                   properties:
@@ -68,6 +104,7 @@ spec:
                 - domain
                 - storagePath
                 - publisherSecret
+                - secrets
                 - gateway
             status:
               type: object
@@ -113,6 +150,37 @@ spec:
             {{- $spec := $xr.spec -}}
             {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
             {{- $gatewayEnabled := index $env "gateway" "enabled" -}}
+            ---
+            apiVersion: platform.guardian.dev/v1alpha1
+            kind: SecretProjection
+            metadata:
+              name: {{ $xr.metadata.name }}-publisher-secrets
+              annotations:
+                {{ setResourceNameAnnotation "publisher-secret-projection" }}
+            spec:
+              waitForSecrets: {{ if eq (printf "%v" $spec.secrets.projection.waitForSecrets) "false" }}false{{ else }}true{{ end }}
+              target:
+                namespace: {{ $spec.namespace }}
+                {{- with $spec.namespaceLabels }}
+                namespaceLabels:
+                  {{- range $key, $value := . }}
+                  {{ $key }}: {{ $value }}
+                  {{- end }}
+                {{- end }}
+              openbao:
+                role: {{ $spec.secrets.projection.openbao.role }}
+                serviceAccountName: {{ $spec.secrets.projection.openbao.serviceAccountName }}
+              secrets:
+                - name: {{ $spec.publisherSecret.name }}
+                  type: Opaque
+                  remotePath: {{ $spec.secrets.projection.remotePath }}
+                  data:
+                    - secretKey: {{ $spec.publisherSecret.usernameKey }}
+                      property: {{ $spec.publisherSecret.usernameKey }}
+                    - secretKey: {{ $spec.publisherSecret.passwordKey }}
+                      property: {{ $spec.publisherSecret.passwordKey }}
+                    - secretKey: {{ $spec.publisherSecret.htpasswdKey }}
+                      property: {{ $spec.publisherSecret.htpasswdKey }}
             ---
             apiVersion: kubernetes.crossplane.io/v1alpha2
             kind: Object
