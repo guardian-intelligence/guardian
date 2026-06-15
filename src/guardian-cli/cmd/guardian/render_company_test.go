@@ -124,6 +124,16 @@ func TestCompanySiteProductAPIRender(t *testing.T) {
 			t.Errorf("CompanySite API render missing %q", want)
 		}
 	}
+	for _, legacy := range []string{
+		"certDir:",
+		"acmeEmail:",
+		"https: 8443",
+		"https: \":8443\"",
+	} {
+		if strings.Contains(out, legacy) {
+			t.Errorf("CompanySite API render contains app-local TLS field %q", legacy)
+		}
+	}
 }
 
 func TestCompanySiteEnvironmentBundleInstances(t *testing.T) {

@@ -54,26 +54,6 @@ func TestNoRequiredJavaScript(t *testing.T) {
 	}
 }
 
-func TestHTTPRedirectKeepsHealthLocal(t *testing.T) {
-	srv := newServer(siteAssets, newMetrics())
-	h := redirectingHTTP(srv, "guardianintelligence.org")
-
-	health := httptest.NewRecorder()
-	h.ServeHTTP(health, httptest.NewRequest(http.MethodGet, "/healthz", nil))
-	if health.Code != http.StatusOK {
-		t.Fatalf("health status = %d; want 200", health.Code)
-	}
-
-	page := httptest.NewRecorder()
-	h.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/letters", nil))
-	if page.Code != http.StatusMovedPermanently {
-		t.Fatalf("page status = %d; want 301", page.Code)
-	}
-	if loc := page.Header().Get("Location"); loc != "https://guardianintelligence.org/letters" {
-		t.Fatalf("redirect location = %q", loc)
-	}
-}
-
 func TestMetricsEndpoint(t *testing.T) {
 	m := newMetrics()
 	srv := newServer(siteAssets, m)
