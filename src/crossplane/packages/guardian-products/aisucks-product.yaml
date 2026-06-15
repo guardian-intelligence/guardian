@@ -84,16 +84,12 @@ spec:
             {{- $xr := .observed.composite.resource -}}
             {{- $spec := $xr.spec -}}
             {{- $httpPort := 80 -}}
-            {{- $httpsPort := 443 -}}
             {{- $metricsAddr := "127.0.0.1:9090" -}}
             {{- $httpListen := ":80" -}}
-            {{- $httpsListen := ":443" -}}
             {{- if $spec.podNetwork -}}
             {{- $httpPort = 8080 -}}
-            {{- $httpsPort = 8443 -}}
             {{- $metricsAddr = ":9090" -}}
             {{- $httpListen = ":8080" -}}
-            {{- $httpsListen = ":8443" -}}
             {{- end -}}
             ---
             apiVersion: platform.guardian.dev/v1alpha1
@@ -112,8 +108,6 @@ spec:
               image: {{ $spec.image }}
               podNetwork: {{ $spec.podNetwork }}
               replicas: {{ $spec.replicas }}
-              certDir: /var/lib/aisucks-certs
-              acmeEmail: im.shovonhasan@gmail.com
               probeClusterIP: 10.96.111.43
               networkLabelKey: platform.guardian.dev/network
               memoryRequest: 128Mi
@@ -124,11 +118,9 @@ spec:
               readinessPeriod: 5
               ports:
                 http: {{ $httpPort }}
-                https: {{ $httpsPort }}
                 metrics: 9090
               listen:
                 http: "{{ $httpListen }}"
-                https: "{{ $httpsListen }}"
                 diagnostics: "{{ $metricsAddr }}"
               gateway:
                 name: edge
