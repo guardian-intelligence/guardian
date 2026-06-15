@@ -192,6 +192,46 @@ func TestRunRejectsUnsupportedPayloadFormBeforeWritingLayout(t *testing.T) {
 	}
 }
 
+func TestRunRejectsInvalidNPMIntegrityBeforeWritingLayout(t *testing.T) {
+	dir := t.TempDir()
+	tarballPath, packPath, _ := writePackFixture(t, dir)
+	raw, err := os.ReadFile(packPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pack []packEntry
+	if err := json.Unmarshal(raw, &pack); err != nil {
+		t.Fatal(err)
+	}
+	pack[0].Integrity = "sha512-not-base64"
+	raw, err = json.Marshal(pack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(packPath, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	layoutPath := filepath.Join(dir, "layout")
+
+	err = run(context.Background(), cliConfig{
+		tarballPath:  tarballPath,
+		packJSON:     packPath,
+		ociLayout:    layoutPath,
+		tag:          "edge",
+		sourceCommit: strings.Repeat("a", 40),
+		sourceRepo:   "https://github.com/guardian-intelligence/guardian",
+	}, io.Discard)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "not valid sha512 SRI") {
+		t.Fatalf("error = %v", err)
+	}
+	if _, statErr := os.Stat(layoutPath); !os.IsNotExist(statErr) {
+		t.Fatalf("layout was written or unexpected stat error: %v", statErr)
+	}
+}
+
 func TestRunWritesOCILayout(t *testing.T) {
 	dir := t.TempDir()
 	tarballPath, packPath, tarball := writePackFixture(t, dir)
@@ -694,6 +734,19 @@ func TestValidatePushedDescriptorsRejectsInvalidAttestationManifest(t *testing.T
 	}
 }
 
+func TestValidatePushedDescriptorsRejectsWrongAttestationArtifactType(t *testing.T) {
+	manifest := validManifestDescriptor(`{"schemaVersion":2}`)
+	attestation := validManifestDescriptor(`{"schemaVersion":2,"attestation":true}`)
+
+	err := validatePushedDescriptors("remote", manifest, &attestation)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "artifact type") || !strings.Contains(err.Error(), attestationArtifactType) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestValidatePushedDescriptorsAcceptsValidManifestAndAttestation(t *testing.T) {
 	manifest := validManifestDescriptor(`{"schemaVersion":2}`)
 	attestation := validAttestationDescriptor(`{"schemaVersion":2,"attestation":true}`)
@@ -806,6 +859,98 @@ func TestWriteResultRejectsRefDigestMismatch(t *testing.T) {
 	}
 }
 
+func TestWriteResultRejectsDigestRefWithoutRepository(t *testing.T) {
+	result := validNPMResult()
+	result.OCIRef = "@" + result.OCIDigest
+
+	err := writeResult(result, "", io.Discard)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "empty repository before digest") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestWriteResultRejectsRefWithMultipleDigestSeparators(t *testing.T) {
+	result := validNPMResult()
+	result.OCIRef = "oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff@" + result.OCIDigest
+
+	err := writeResult(result, "", io.Discard)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "multiple digest separators") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestWriteResultRejectsInvalidNPMIntegrity(t *testing.T) {
+	result := validNPMResult()
+	result.NPMIntegrity = "sha512-not-base64"
+
+	err := writeResult(result, "", io.Discard)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "not valid sha512 SRI") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestWriteResultRejectsNPMResultWithWheelDigest(t *testing.T) {
+	result := validNPMResult()
+	result.WheelDigest = result.PayloadDigest
+
+	err := writeResult(result, "", io.Discard)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "wheel_sha256 for npm payload") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestWriteResultRejectsPythonWheelMissingWheelDigest(t *testing.T) {
+	result := validPythonWheelResult()
+	result.WheelDigest = ""
+
+	err := writeResult(result, "", io.Discard)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "empty wheel_sha256") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestWriteResultRejectsPythonWheelDigestMismatch(t *testing.T) {
+	result := validPythonWheelResult()
+	result.WheelDigest = "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
+	err := writeResult(result, "", io.Discard)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "does not match payload_sha256") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestWriteResultRejectsPythonWheelWithNPMFields(t *testing.T) {
+	result := validPythonWheelResult()
+	result.TarballDigest = result.PayloadDigest
+	result.NPMIntegrity = npmIntegrity([]byte("npm payload"))
+
+	err := writeResult(result, "", io.Discard)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "tarball_sha256 for python-wheel payload") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestWriteResultRejectsAttestationDigestWithoutRef(t *testing.T) {
 	result := validNPMResult()
 	result.AttestationDigest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -856,6 +1001,20 @@ func TestWriteResultRejectsAttestationRefDigestMismatch(t *testing.T) {
 		t.Fatal("expected error")
 	}
 	if !strings.Contains(err.Error(), "attestation ref") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestWriteResultRejectsAttestationRefWithoutRepository(t *testing.T) {
+	result := validNPMResult()
+	result.AttestationDigest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	result.AttestationRef = "@" + result.AttestationDigest
+
+	err := writeResult(result, "", io.Discard)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "empty repository before digest") {
 		t.Fatalf("error = %v", err)
 	}
 }
@@ -948,11 +1107,28 @@ func validNPMResult() artifactResult {
 		OCIRef:        "oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		PayloadDigest: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
 		TarballDigest: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-		NPMIntegrity:  "sha512-example",
+		NPMIntegrity:  npmIntegrity([]byte("npm payload")),
 		Package:       defaultExpectedPackageName,
 		Version:       "0.3.0",
 		SourceRepo:    "https://github.com/guardian-intelligence/guardian",
 		SourceCommit:  strings.Repeat("a", 40),
 		LayerTitle:    "guardian-intelligence-aisucks-0.3.0.tgz",
+	}
+}
+
+func validPythonWheelResult() artifactResult {
+	return artifactResult{
+		Distributable: "aisucks-python-sdk",
+		PayloadForm:   "python-wheel",
+		Channel:       "edge",
+		OCIDigest:     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		OCIRef:        "oci.guardianintelligence.org/guardian/aisucks/sdk/python@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		PayloadDigest: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+		WheelDigest:   "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+		Package:       "guardian-intelligence-aisucks",
+		Version:       "0.3.0",
+		SourceRepo:    "https://github.com/guardian-intelligence/guardian",
+		SourceCommit:  strings.Repeat("a", 40),
+		LayerTitle:    "guardian_intelligence_aisucks-0.3.0-py3-none-any.whl",
 	}
 }

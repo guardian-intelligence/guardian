@@ -336,8 +336,10 @@ func validatePackEntry(entry packEntry, cfg cliConfig) error {
 	if cfg.filenameSuffix != "" && !strings.HasSuffix(entry.Filename, cfg.filenameSuffix) {
 		return fmt.Errorf("package filename %q does not end with %q", entry.Filename, cfg.filenameSuffix)
 	}
-	if cfg.payloadForm == "npm" && !strings.HasPrefix(entry.Integrity, "sha512-") {
-		return fmt.Errorf("npm pack integrity %q is not sha512 SRI", entry.Integrity)
+	if cfg.payloadForm == "npm" {
+		if err := validateNPMIntegrity("npm pack integrity", entry.Integrity); err != nil {
+			return err
+		}
 	}
 	if entry.Size <= 0 {
 		return fmt.Errorf("package size must be positive, got %d", entry.Size)
@@ -575,8 +577,12 @@ func validatePushedDescriptors(location string, manifest ocispec.Descriptor, att
 		return err
 	}
 	if attestationManifest != nil {
-		if err := validateDescriptor(location+" attestation OCI artifact manifest", *attestationManifest); err != nil {
+		kind := location + " attestation OCI artifact manifest"
+		if err := validateDescriptor(kind, *attestationManifest); err != nil {
 			return err
+		}
+		if attestationManifest.ArtifactType != attestationArtifactType {
+			return fmt.Errorf("%s %s has artifact type %s, want %s", kind, attestationManifest.Digest, attestationManifest.ArtifactType, attestationArtifactType)
 		}
 	}
 	return nil
@@ -726,11 +732,14 @@ func validateResult(result artifactResult) error {
 	if !isFullSHA(result.SourceCommit) {
 		return fmt.Errorf("release result source_commit is not a full 40-character hex SHA: %q", result.SourceCommit)
 	}
-	if !strings.HasSuffix(result.OCIRef, "@"+result.OCIDigest) {
-		return fmt.Errorf("release result OCI ref %q does not point at digest %s", result.OCIRef, result.OCIDigest)
+	if err := validateDigestRef("release result OCI ref", result.OCIRef, result.OCIDigest); err != nil {
+		return err
 	}
 	switch result.PayloadForm {
 	case "npm":
+		if result.WheelDigest != "" {
+			return errors.New("release result has wheel_sha256 for npm payload")
+		}
 		if result.TarballDigest == "" {
 			return errors.New("release result has empty tarball_sha256")
 		}
@@ -743,7 +752,16 @@ func validateResult(result artifactResult) error {
 		if result.NPMIntegrity == "" {
 			return errors.New("release result has empty npm_integrity")
 		}
+		if err := validateNPMIntegrity("release result npm_integrity", result.NPMIntegrity); err != nil {
+			return err
+		}
 	case "python-wheel":
+		if result.TarballDigest != "" {
+			return errors.New("release result has tarball_sha256 for python-wheel payload")
+		}
+		if result.NPMIntegrity != "" {
+			return errors.New("release result has npm_integrity for python-wheel payload")
+		}
 		if result.WheelDigest == "" {
 			return errors.New("release result has empty wheel_sha256")
 		}
@@ -767,8 +785,39 @@ func validateResult(result artifactResult) error {
 			return err
 		}
 	}
-	if result.AttestationDigest != "" && !strings.HasSuffix(result.AttestationRef, "@"+result.AttestationDigest) {
-		return fmt.Errorf("release result attestation ref %q does not point at digest %s", result.AttestationRef, result.AttestationDigest)
+	if result.AttestationDigest != "" {
+		if err := validateDigestRef("release result attestation ref", result.AttestationRef, result.AttestationDigest); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateDigestRef(kind string, ref string, digest string) error {
+	if err := validateSHA256Digest(kind+" digest", digest); err != nil {
+		return err
+	}
+	suffix := "@" + digest
+	if !strings.HasSuffix(ref, suffix) {
+		return fmt.Errorf("%s %q does not point at digest %s", kind, ref, digest)
+	}
+	prefix := strings.TrimSuffix(ref, suffix)
+	if prefix == "" {
+		return fmt.Errorf("%s %q has empty repository before digest %s", kind, ref, digest)
+	}
+	if strings.Contains(prefix, "@") {
+		return fmt.Errorf("%s %q has multiple digest separators", kind, ref)
+	}
+	return nil
+}
+
+func validateNPMIntegrity(kind string, value string) error {
+	if !strings.HasPrefix(value, "sha512-") {
+		return fmt.Errorf("%s %q is not sha512 SRI", kind, value)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(value, "sha512-"))
+	if err != nil || len(decoded) != sha512.Size {
+		return fmt.Errorf("%s %q is not valid sha512 SRI", kind, value)
 	}
 	return nil
 }

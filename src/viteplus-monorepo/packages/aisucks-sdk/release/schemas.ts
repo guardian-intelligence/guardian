@@ -1,3 +1,5 @@
+import { Buffer } from "node:buffer";
+
 import { Effect } from "effect";
 import * as Schema from "effect/Schema";
 
@@ -13,8 +15,11 @@ const stringRecord = Schema.Record({ key: Schema.String, value: Schema.String })
 const unknownRecord = Schema.Record({ key: Schema.String, value: Schema.Unknown });
 const nonEmptyString = Schema.NonEmptyString;
 const sha256Digest = Schema.String.pipe(Schema.pattern(/^sha256:[0-9a-f]{64}$/));
-const digestRef = Schema.String.pipe(Schema.pattern(/@sha256:[0-9a-f]{64}$/));
+const digestRef = Schema.String.pipe(Schema.pattern(/^[^@]+@sha256:[0-9a-f]{64}$/));
 const fullGitSha = Schema.String.pipe(Schema.pattern(/^[0-9a-f]{40}$/));
+const npmSha512Integrity = Schema.String.pipe(
+  Schema.filter((value) => isNpmSha512Integrity(value)),
+);
 
 export const PackageJsonSchema = Schema.Struct({
   name: Schema.optional(Schema.String),
@@ -32,9 +37,9 @@ export const NpmPackEntrySchema = Schema.Struct({
 
 export const NpmPackEntriesSchema = Schema.Array(NpmPackEntrySchema);
 
-export const SdkOciResultSchema = Schema.Struct({
+const SdkOciResultBaseSchema = Schema.Struct({
   distributable: nonEmptyString,
-  payload_form: nonEmptyString,
+  payload_form: Schema.Literal("npm"),
   channel: nonEmptyString,
   oci_digest: sha256Digest,
   oci_ref: digestRef,
@@ -42,13 +47,31 @@ export const SdkOciResultSchema = Schema.Struct({
   attestation_ref: Schema.optional(digestRef),
   payload_sha256: sha256Digest,
   tarball_sha256: sha256Digest,
-  npm_integrity: nonEmptyString,
+  npm_integrity: npmSha512Integrity,
   package: nonEmptyString,
   version: nonEmptyString,
   source_repo: nonEmptyString,
   source_commit: fullGitSha,
   layer_title: nonEmptyString,
 });
+
+export const SdkOciResultSchema = SdkOciResultBaseSchema.pipe(
+  Schema.filter((result) => result.oci_ref.endsWith(`@${result.oci_digest}`)),
+  Schema.filter((result) => result.tarball_sha256 === result.payload_sha256),
+  Schema.filter(
+    (result) =>
+      (result.attestation_digest === undefined) === (result.attestation_ref === undefined),
+  ),
+  Schema.filter((result) => {
+    if (result.attestation_digest === undefined) {
+      return true;
+    }
+    return (
+      result.attestation_ref !== undefined &&
+      result.attestation_ref.endsWith(`@${result.attestation_digest}`)
+    );
+  }),
+);
 
 export const InTotoSubjectSchema = Schema.Struct({
   name: Schema.String,
@@ -237,8 +260,26 @@ export function decodeJson<A, I>(
   );
 }
 
+export function decodeStrictJson<A, I>(
+  schema: Schema.Schema<A, I, never>,
+  input: string,
+  toError: (reason: string) => ReleaseError,
+): Effect.Effect<A, ReleaseError> {
+  return Schema.decode(Schema.parseJson(schema), {
+    exact: true,
+    onExcessProperty: "error",
+  })(input).pipe(Effect.mapError((error) => toError(renderParseError(error))));
+}
+
 export function decodeJsonSync<A, I>(schema: Schema.Schema<A, I, never>, input: string): A {
   return Schema.decodeSync(Schema.parseJson(schema))(input);
+}
+
+export function decodeStrictJsonSync<A, I>(schema: Schema.Schema<A, I, never>, input: string): A {
+  return Schema.decodeSync(Schema.parseJson(schema), {
+    exact: true,
+    onExcessProperty: "error",
+  })(input);
 }
 
 export function encodeJson<A, I>(
@@ -281,6 +322,17 @@ export function verificationJson(
   details?: Readonly<Record<string, unknown>>,
 ): ReleaseError {
   return new VerificationFailed(errorInput(reason, details));
+}
+
+function isNpmSha512Integrity(value: string): boolean {
+  if (!value.startsWith("sha512-")) {
+    return false;
+  }
+  const encoded = value.slice("sha512-".length);
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) {
+    return false;
+  }
+  return Buffer.from(encoded, "base64").length === 64;
 }
 
 export function fileJson(operation: string, filePath: string): (reason: string) => ReleaseError {
