@@ -60,7 +60,7 @@ func TestZotRender(t *testing.T) {
 				`"path": "/zot-auth/htpasswd"`,
 				`"anonymousPolicy": ["read"]`,
 				`"users": ["guardian-release"]`,
-				`"actions": ["read", "create", "update"]`,
+				`"actions": ["read", "create", "update", "delete"]`,
 				"containerPort: 5000",
 				"secretName: zot-publisher",
 				"key: htpasswd",
