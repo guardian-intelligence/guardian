@@ -32,6 +32,8 @@ radius tradeoff.
   a digest-pinned xpkg.
 - `function-go-templating` v0.12.1 is installed by Crossplane package manager
   with a digest-pinned xpkg.
+- `function-environment-configs` v0.7.1 is installed by Crossplane package
+  manager with a digest-pinned xpkg.
 - `function-auto-ready` v0.6.5 is installed by Crossplane package manager with
   a digest-pinned xpkg so the `EdgeGateway` composite Ready condition follows
   the composed provider-kubernetes `Object`s.
@@ -47,7 +49,8 @@ The `EdgeGateway` composition owns:
 
 Applications own routes in their own namespaces:
 
-- `src/platform/public-http-service/` owns aisucks `TLSRoute` and `HTTPRoute`.
+- `platform.guardian.dev/PublicHttpService` owns product `TLSRoute` and
+  `HTTPRoute` objects.
 - `src/status/` owns status `TLSRoute`.
 - `src/infrastructure-components/zot/` owns the OCI `HTTPRoute`.
 
@@ -66,12 +69,12 @@ Fresh bootstrap order for a Gateway-enabled site:
 4. OpenBao is converged and unsealed/configured.
 5. Crossplane is applied and its CRDs/controllers are waited on.
 6. cert-manager is applied if platform TLS is requested.
-7. provider-kubernetes, function-go-templating, and function-auto-ready
-   packages are applied and waited on.
-8. ProviderConfig and the EdgeGateway XRD/Composition are applied.
+7. provider-kubernetes and composition function packages are applied and waited
+   on.
+8. ProviderConfig and Guardian platform/product XRDs/Compositions are applied.
 9. `guardian up` applies the site's Crossplane environment bundle, including
-   the concrete EdgeGateway XR.
-10. Product components apply their Deployments/Services/routes.
+   concrete platform and product XRs.
+10. Crossplane reconciles product Deployments, Services, and routes.
 
 `guardian up` may wait for Kubernetes objects and controllers to converge, but
 fresh ACME issuance is not part of the four-minute host bootstrap SLA. Public

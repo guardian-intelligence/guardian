@@ -85,6 +85,11 @@ type Environment struct {
 	} `yaml:"platform"`
 }
 
+type environmentConfigMetadata struct {
+	Name   string            `yaml:"name"`
+	Labels map[string]string `yaml:"labels"`
+}
+
 // Site is the runtime view assembled from bootstrap facts plus the site's
 // Crossplane environment bundle. Component templates still receive this
 // strongly typed view while XRs take ownership incrementally.
@@ -148,7 +153,7 @@ func loadSite(path string) (*Site, error) {
 		return nil, err
 	}
 	envPath := environmentPathForSite(bootstrap.Site)
-	env, envRaw, envResolved, err := loadEnvironment(envPath)
+	env, envMeta, envRaw, envResolved, err := loadEnvironment(envPath)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +174,7 @@ func loadSite(path string) (*Site, error) {
 	s.Clickhouse.Enabled = env.Platform.Clickhouse.Enabled
 	s.Status.Domains = env.Platform.Status.Domains
 	s.Status.Monitor = env.Platform.Status.Monitor
-	if err := validateSite(s, resolved, envResolved, env); err != nil {
+	if err := validateSite(s, resolved, envResolved, env, envMeta); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -213,46 +218,56 @@ func loadBootstrap(path string) (*Bootstrap, string, error) {
 	return &b, resolved, nil
 }
 
-func loadEnvironment(path string) (*Environment, []byte, string, error) {
+func loadEnvironment(path string) (*Environment, *environmentConfigMetadata, []byte, string, error) {
 	resolved, err := resolveRepoInputPath(path)
 	if err != nil {
-		return nil, nil, "", err
+		return nil, nil, nil, "", err
 	}
 	raw, err := os.ReadFile(resolved)
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("environment: %w", err)
+		return nil, nil, nil, "", fmt.Errorf("environment: %w", err)
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	for {
 		var doc struct {
-			Kind string `yaml:"kind"`
-			Data any    `yaml:"data"`
+			Kind     string                    `yaml:"kind"`
+			Metadata environmentConfigMetadata `yaml:"metadata"`
+			Data     any                       `yaml:"data"`
 		}
 		if err := dec.Decode(&doc); err != nil {
 			if err == io.EOF {
 				break
 			}
-			return nil, nil, "", fmt.Errorf("environment %s: %w", resolved, err)
+			return nil, nil, nil, "", fmt.Errorf("environment %s: %w", resolved, err)
 		}
 		if doc.Kind != "EnvironmentConfig" {
 			continue
 		}
 		data, err := yaml.Marshal(doc.Data)
 		if err != nil {
-			return nil, nil, "", fmt.Errorf("environment %s: marshal data: %w", resolved, err)
+			return nil, nil, nil, "", fmt.Errorf("environment %s: marshal data: %w", resolved, err)
 		}
 		var env Environment
 		dataDec := yaml.NewDecoder(bytes.NewReader(data))
 		dataDec.KnownFields(true)
 		if err := dataDec.Decode(&env); err != nil {
-			return nil, nil, "", fmt.Errorf("environment %s data: %w", resolved, err)
+			return nil, nil, nil, "", fmt.Errorf("environment %s data: %w", resolved, err)
 		}
-		return &env, raw, resolved, nil
+		return &env, &doc.Metadata, raw, resolved, nil
 	}
-	return nil, nil, "", fmt.Errorf("environment %s: EnvironmentConfig document is required", resolved)
+	return nil, nil, nil, "", fmt.Errorf("environment %s: EnvironmentConfig document is required", resolved)
 }
 
-func validateSite(s *Site, bootstrapPath, envPath string, env *Environment) error {
+func validateSite(s *Site, bootstrapPath, envPath string, env *Environment, envMeta *environmentConfigMetadata) error {
+	if envMeta == nil {
+		return fmt.Errorf("environment %s: EnvironmentConfig metadata is required", envPath)
+	}
+	if envMeta.Name != s.Cluster.Name {
+		return fmt.Errorf("environment %s: metadata.name = %q, want %q from bootstrap %s", envPath, envMeta.Name, s.Cluster.Name, bootstrapPath)
+	}
+	if envMeta.Labels["guardian.dev/site"] != s.Name {
+		return fmt.Errorf("environment %s: metadata.labels[guardian.dev/site] = %q, want %q from bootstrap %s", envPath, envMeta.Labels["guardian.dev/site"], s.Name, bootstrapPath)
+	}
 	if env.Site.Name != s.Name {
 		return fmt.Errorf("environment %s: site.name = %q, want %q from bootstrap %s", envPath, env.Site.Name, s.Name, bootstrapPath)
 	}

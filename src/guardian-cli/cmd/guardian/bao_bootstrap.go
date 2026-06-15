@@ -281,6 +281,9 @@ func generatorForRequiredSecret(name string, required []string) func() (map[stri
 	if name == "zot-publisher" {
 		return zotPublisherSecretData
 	}
+	if len(required) == 1 && required[0] == "secret" {
+		return secretSecretData
+	}
 	if len(required) == 1 && required[0] == "password" {
 		return passwordSecretData
 	}
@@ -377,6 +380,14 @@ func passwordSecretData() (map[string]string, error) {
 		return nil, err
 	}
 	return map[string]string{"password": password}, nil
+}
+
+func secretSecretData() (map[string]string, error) {
+	secret, err := randomSecretString()
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{"secret": secret}, nil
 }
 
 func zotPublisherSecretData() (map[string]string, error) {

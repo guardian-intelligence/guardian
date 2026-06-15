@@ -34,11 +34,9 @@ Connect runtime and database/verifier slices.
 ## Verification
 
 - Unit tests drive the public handlers and metrics shape.
-- Render tests pin the `public-http-service` envelope for pod-network and
-  host-network sites.
+- Render tests pin the `PublicHttpService` Crossplane envelope for product
+  sites.
 - Fleet gates check `/healthz` and the charter page marker until Connect
   Health is publicly served.
 - After converge, VictoriaMetrics must show `up{job="public-http"}` for
-  pod-network `PublicHttpService` pods. Legacy host-network surfaces keep
-  their explicit loopback jobs until they move behind the public service
-  envelope.
+  pod-network `PublicHttpService` pods.

@@ -4,11 +4,9 @@ Record of decision, ratified 2026-06-12. The Cilium Gateway API substrate is
 generated as Talos inline manifests from pinned upstream artifacts, and the
 shared edge object is now owned by
 the Crossplane `EdgeGateway` platform substrate installed by `guardian up` on
-Gateway-enabled sites. Companions:
-`docs/architecture/topology.md` (gates the prod conversion),
-`docs/runbooks/cilium-conversion.md` (the drilled wipe fallback). This doc
-changes by amendment; the dev pilot record at the bottom (2026-06-12/13)
-records the converted dev baseline.
+Gateway-enabled sites. Companion: `docs/architecture/topology.md` gates
+the prod conversion. This doc changes by amendment; the dev pilot record at
+the bottom (2026-06-12/13) records the converted dev baseline.
 
 ## Why the Gateway is the keystone
 
@@ -109,7 +107,7 @@ teeth, and the dev pilot exists to answer two empirical questions:
 If either answer is bad: the **brief-gap alternative** (scale the app off
 :443, then route — a sub-minute cutover at a chosen hour, spent against
 the error budget), or the **drilled wipe-convert** (212s measured,
-`docs/runbooks/cilium-conversion.md`) as the standing fallback either way.
+recorded below) as the standing fallback either way.
 
 ## Phases
 
@@ -149,8 +147,8 @@ the error budget), or the **drilled wipe-convert** (212s measured,
 - **Phase 5 — prod.** Conversion mode (hitless / brief-gap / wipe) chosen
   from pilot data, sequenced with topology.md's migration gates — prod
   edge surgery happens once, inside the 1→3 growth, never before.
-  VERIFY: gate battery; corpus dump/restore invariant per the conversion
-  runbook.
+  VERIFY: gate battery; corpus dump/restore invariant per
+  `docs/runbooks/survival-floor.md`.
 - **Phase 6 — egress lockdown.** Default-deny CiliumNetworkPolicies with
   `toFQDNs` for the app's named upstreams; admin plane untouched by
   construction. VERIFY: app functions with the allowlist; a non-allowlisted

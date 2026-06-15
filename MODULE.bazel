@@ -146,6 +146,15 @@ oci.pull(
     platforms = ["linux/amd64"],
 )
 
+# Directus v12.0.2: company-site CMS/admin backend. Public site reads stay on
+# published snapshots; this image is for authoring and preview workflows.
+oci.pull(
+    name = "directus_12",
+    digest = "sha256:9c8470ea465cb78ff902221847f73c8516dadeff40b02fcb195065745e9d7874",
+    image = "docker.io/directus/directus",
+    platforms = ["linux/amd64"],
+)
+
 # Gatus v5.36.0: blackbox monitor driving the aisucks paging pipeline.
 oci.pull(
     name = "gatus",
@@ -284,7 +293,7 @@ oci.pull(
     platforms = ["linux/amd64"],
 )
 
-use_repo(oci, "alertmanager", "alertmanager_linux_amd64", "blackbox_exporter", "blackbox_exporter_linux_amd64", "cert_manager_acmesolver", "cert_manager_acmesolver_linux_amd64", "cert_manager_cainjector", "cert_manager_cainjector_linux_amd64", "cert_manager_controller", "cert_manager_controller_linux_amd64", "cert_manager_startupapicheck", "cert_manager_startupapicheck_linux_amd64", "cert_manager_webhook", "cert_manager_webhook_linux_amd64", "clickhouse", "clickhouse_linux_amd64", "crossplane", "crossplane_linux_amd64", "external_secrets", "external_secrets_linux_amd64", "gatus", "gatus_linux_amd64", "grafana", "grafana_linux_amd64", "kube_state_metrics", "kube_state_metrics_linux_amd64", "otel_collector_contrib", "otel_collector_contrib_linux_amd64", "postgres_17", "postgres_17_linux_amd64", "ubuntu_noble_base", "ubuntu_noble_base_linux_amd64", "victoria_metrics", "victoria_metrics_linux_amd64", "vmalert", "vmalert_linux_amd64", "zot", "zot_linux_amd64")
+use_repo(oci, "alertmanager", "alertmanager_linux_amd64", "blackbox_exporter", "blackbox_exporter_linux_amd64", "cert_manager_acmesolver", "cert_manager_acmesolver_linux_amd64", "cert_manager_cainjector", "cert_manager_cainjector_linux_amd64", "cert_manager_controller", "cert_manager_controller_linux_amd64", "cert_manager_startupapicheck", "cert_manager_startupapicheck_linux_amd64", "cert_manager_webhook", "cert_manager_webhook_linux_amd64", "clickhouse", "clickhouse_linux_amd64", "crossplane", "crossplane_linux_amd64", "directus_12", "directus_12_linux_amd64", "external_secrets", "external_secrets_linux_amd64", "gatus", "gatus_linux_amd64", "grafana", "grafana_linux_amd64", "kube_state_metrics", "kube_state_metrics_linux_amd64", "otel_collector_contrib", "otel_collector_contrib_linux_amd64", "postgres_17", "postgres_17_linux_amd64", "ubuntu_noble_base", "ubuntu_noble_base_linux_amd64", "victoria_metrics", "victoria_metrics_linux_amd64", "vmalert", "vmalert_linux_amd64", "zot", "zot_linux_amd64")
 
 node = use_extension("@rules_nodejs//nodejs:extensions.bzl", "node")
 node.toolchain(

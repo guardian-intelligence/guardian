@@ -16,16 +16,17 @@ import (
 // component pairs a Bazel-built OCI layout (riding in the guardian binary's
 // runfiles) with the manifest template it feeds. Workload image references
 // are computed as registry.guardian.internal/<name>@<built digest>: what runs
-// is byte-for-byte what the workspace built. Zero values of the two optional
-// fields preserve the default behavior: an image is pushed and the manifest
-// converges on every site.
+// is byte-for-byte what the workspace built.
 type component struct {
 	name string
 	// layout is the runfiles path of the rules_oci OCI layout directory.
 	// Empty means manifest-only: nothing to push, no image ref — the
 	// manifest template must never reference .Image.
-	layout   string
-	manifest string // repo-root-relative manifest template
+	layout string
+	// manifest is the repo-root-relative manifest template. Empty is valid only
+	// for push-only image inputs consumed by Crossplane environment bundles.
+	manifest string
+	pushOnly bool
 	// rawManifest skips Guardian's Go-template renderer. This is for manifests
 	// that intentionally contain another controller's template language, such
 	// as Crossplane function-go-templating compositions.
@@ -38,8 +39,7 @@ type component struct {
 	// A manifest-only component MUST be gated (TestComponentsTable pins
 	// this): with no image and no site gate there would be nothing
 	// deliberate about where its objects land.
-	enabled           func(*Site) bool
-	publicHTTPService *publicHTTPService
+	enabled func(*Site) bool
 }
 
 type componentImage struct {
@@ -94,47 +94,41 @@ var components = []component{{
 	rawManifest: true,
 	enabled:     siteUsesCrossplane,
 }, {
+	name:        "public-http-service-platform",
+	manifest:    "src/crossplane/packages/guardian-platform/public-http-service.yaml",
+	rawManifest: true,
+	enabled:     siteUsesCrossplane,
+}, {
+	name:        "directus-platform",
+	manifest:    "src/crossplane/packages/guardian-platform/directus-instance.yaml",
+	rawManifest: true,
+	enabled:     siteUsesCrossplane,
+}, {
+	name:        "aisucks-product-api",
+	manifest:    "src/crossplane/packages/guardian-products/aisucks-product.yaml",
+	rawManifest: true,
+	enabled:     siteUsesCrossplane,
+}, {
+	name:        "company-site-product-api",
+	manifest:    "src/crossplane/packages/guardian-products/company-site.yaml",
+	rawManifest: true,
+	enabled:     siteUsesCrossplane,
+}, {
 	name:     "aisucks",
 	layout:   "_main/src/products/aisucks/services/api/image",
-	manifest: "src/platform/public-http-service/k8s/public-http-service.yaml.tmpl",
-	publicHTTPService: &publicHTTPService{
-		namespace:       "aisucks",
-		app:             "aisucks",
-		domain:          func(s *Site) string { return s.Aisucks.Domain },
-		podNetwork:      func(s *Site) bool { return s.Aisucks.PodNetwork },
-		certDir:         "/var/lib/aisucks-certs",
-		acmeEmail:       "im.shovonhasan@gmail.com",
-		probeClusterIP:  "10.96.111.43",
-		networkLabelKey: "platform.guardian.dev/network",
-		memoryRequest:   "128Mi",
-		memoryLimit:     "512Mi",
-		goMemoryLimit:   "410MiB",
-		cpuRequest:      "100m",
-		healthPath:      "/healthz",
-		readinessPeriod: 5,
-	},
+	pushOnly: true,
 }, {
 	name:     "company-site",
 	layout:   "_main/src/products/company/services/site/image",
-	manifest: "src/platform/public-http-service/k8s/public-http-service.yaml.tmpl",
-	enabled:  func(s *Site) bool { return s.Company.Domain != "" },
-	publicHTTPService: &publicHTTPService{
-		namespace:          "company",
-		app:                "company-site",
-		domain:             func(s *Site) string { return s.Company.Domain },
-		podNetwork:         func(s *Site) bool { return true },
-		certDir:            "/var/lib/company-site-certs",
-		acmeEmail:          "im.shovonhasan@gmail.com",
-		probeClusterIP:     "10.96.111.44",
-		networkLabelKey:    "platform.guardian.dev/network",
-		memoryRequest:      "128Mi",
-		memoryLimit:        "512Mi",
-		goMemoryLimit:      "410MiB",
-		cpuRequest:         "100m",
-		healthPath:         "/healthz",
-		readinessPeriod:    5,
-		httpRouteHostnames: true,
-	},
+	pushOnly: true,
+}, {
+	name:     "postgres",
+	layout:   "_main/src/infrastructure-components/postgres/image",
+	pushOnly: true,
+}, {
+	name:     "directus",
+	layout:   "_main/src/infrastructure-components/directus/image",
+	pushOnly: true,
 }, {
 	name:     "gatus",
 	layout:   "_main/src/infrastructure-components/gatus/image",
@@ -233,110 +227,6 @@ func (c component) imageLayouts() []componentImage {
 		out = append(out, componentImage{name: c.name, layout: c.layout})
 	}
 	out = append(out, c.images...)
-	return out
-}
-
-type publicHTTPService struct {
-	namespace       string
-	app             string
-	domain          func(*Site) string
-	podNetwork      func(*Site) bool
-	certDir         string
-	acmeEmail       string
-	probeClusterIP  string
-	networkLabelKey string
-	memoryRequest   string
-	memoryLimit     string
-	goMemoryLimit   string
-	cpuRequest      string
-	healthPath      string
-	readinessPeriod int
-	// httpRouteHostnames scopes :80 routing to the service domain. Keep this
-	// off for aisucks: raw-IP health probes and HTTP-01 fallback depend on its
-	// hostname-less HTTPRoute.
-	httpRouteHostnames bool
-}
-
-type publicHTTPServiceRender struct {
-	Namespace          string
-	App                string
-	Domain             string
-	PodNetwork         bool
-	Replicas           int
-	ListenHTTP         string
-	ListenTLS          string
-	DiagAddr           string
-	HTTPPort           int
-	HTTPSPort          int
-	MetricsPort        int
-	CertDir            string
-	ACMEEmail          string
-	ProbeClusterIP     string
-	NetworkLabelKey    string
-	NetworkLabelVal    string
-	MemoryRequest      string
-	MemoryLimit        string
-	GoMemoryLimit      string
-	CPURequest         string
-	HealthPath         string
-	ReadinessPeriod    int
-	HTTPRouteHostnames []string
-	Gateway            struct {
-		Enabled            bool
-		Name               string
-		Namespace          string
-		TLSSectionName     string
-		HTTPSectionName    string
-		TLSRouteAPIVersion string
-	}
-}
-
-func (c component) publicHTTPServiceRender(site *Site) *publicHTTPServiceRender {
-	if c.publicHTTPService == nil {
-		return nil
-	}
-	svc := c.publicHTTPService
-	out := &publicHTTPServiceRender{
-		Namespace:       svc.namespace,
-		App:             svc.app,
-		Domain:          svc.domain(site),
-		PodNetwork:      svc.podNetwork(site),
-		Replicas:        1,
-		ListenHTTP:      ":80",
-		ListenTLS:       ":443",
-		DiagAddr:        "127.0.0.1:9090",
-		HTTPPort:        80,
-		HTTPSPort:       443,
-		MetricsPort:     9090,
-		CertDir:         svc.certDir,
-		ACMEEmail:       svc.acmeEmail,
-		ProbeClusterIP:  svc.probeClusterIP,
-		NetworkLabelKey: svc.networkLabelKey,
-		NetworkLabelVal: "pod",
-		MemoryRequest:   svc.memoryRequest,
-		MemoryLimit:     svc.memoryLimit,
-		GoMemoryLimit:   svc.goMemoryLimit,
-		CPURequest:      svc.cpuRequest,
-		HealthPath:      svc.healthPath,
-		ReadinessPeriod: svc.readinessPeriod,
-	}
-	if svc.httpRouteHostnames && out.Domain != "" {
-		out.HTTPRouteHostnames = []string{out.Domain}
-	}
-	out.Gateway.Enabled = site.Gateway.Enabled
-	out.Gateway.Name = "edge"
-	out.Gateway.Namespace = "gateway"
-	out.Gateway.TLSSectionName = "tls-" + svc.app
-	out.Gateway.HTTPSectionName = "http"
-	out.Gateway.TLSRouteAPIVersion = "gateway.networking.k8s.io/v1alpha2"
-	if out.PodNetwork {
-		out.Replicas = 2
-		out.ListenHTTP = ":8080"
-		out.ListenTLS = ":8443"
-		out.DiagAddr = ":9090"
-		out.HTTPPort = 8080
-		out.HTTPSPort = 8443
-	}
 	return out
 }
 

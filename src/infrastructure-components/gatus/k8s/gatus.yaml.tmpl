@@ -52,6 +52,48 @@ data:
         alerts:
           - type: ntfy
 {{- end}}
+{{- if .Site.Company.Domain}}
+{{- $companyBase := printf "https://%s" .Site.Company.Domain}}
+      - name: company-healthz ({{.Site.Cluster.Name}})
+        url: "{{$companyBase}}/healthz"
+        interval: 30s
+        conditions:
+          - "[STATUS] == 200"
+{{- if .Site.Aisucks.NtfyTopic}}
+        alerts:
+          - type: ntfy
+{{- end}}
+      - name: company-home ({{.Site.Cluster.Name}})
+        url: "{{$companyBase}}/"
+        interval: 30s
+        conditions:
+          - "[STATUS] == 200"
+          - "[BODY] == pat(*Guardian Intelligence*)"
+{{- if .Site.Aisucks.NtfyTopic}}
+        alerts:
+          - type: ntfy
+{{- end}}
+      - name: company-letters ({{.Site.Cluster.Name}})
+        url: "{{$companyBase}}/letters"
+        interval: 30s
+        conditions:
+          - "[STATUS] == 200"
+          - "[BODY] == pat(*The Coding Agent is the Next Smartphone*)"
+{{- if .Site.Aisucks.NtfyTopic}}
+        alerts:
+          - type: ntfy
+{{- end}}
+      - name: company-news ({{.Site.Cluster.Name}})
+        url: "{{$companyBase}}/news"
+        interval: 30s
+        conditions:
+          - "[STATUS] == 200"
+          - "[BODY] == pat(*Guardian Intelligence Inc. announces private beta of Verself.*)"
+{{- if .Site.Aisucks.NtfyTopic}}
+        alerts:
+          - type: ntfy
+{{- end}}
+{{- end}}
 {{- range $i, $target := .Site.Aisucks.Watch}}
       - name: watch-{{$i}}
         url: "{{$target}}"
@@ -94,17 +136,24 @@ spec:
       labels:
         app: gatus
     spec:
-{{- if and .Site.Aisucks.PodNetwork .Site.Aisucks.Domain}}
+{{- if or (and .Site.Aisucks.PodNetwork .Site.Aisucks.Domain) .Site.Company.Domain}}
       # Pod-network sites: the public-URL self-probes cannot hairpin through
       # the hostNetwork Envoy listener (cilium/cilium#36004 — see the
-      # aisucks-probe Service in the aisucks manifest, whose ClusterIP this
-      # alias pins). Same URLs, same SNI, full TLS verification — measuring
-      # app + certificate from in-cluster; the edge listener is the sibling
-      # watchers' job.
+      # probe Services rendered by PublicHttpService, whose ClusterIPs these
+      # aliases pin). Same URLs, same SNI, full TLS verification — measuring app
+      # + certificate from in-cluster; the edge listener is the sibling watchers'
+      # job.
       hostAliases:
+{{- if and .Site.Aisucks.PodNetwork .Site.Aisucks.Domain}}
         - ip: 10.96.111.43
           hostnames:
             - "{{.Site.Aisucks.Domain}}"
+{{- end}}
+{{- if .Site.Company.Domain}}
+        - ip: 10.96.111.44
+          hostnames:
+            - "{{.Site.Company.Domain}}"
+{{- end}}
 {{- end}}
       containers:
         - name: gatus

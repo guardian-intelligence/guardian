@@ -594,11 +594,38 @@ function ociBasicAuth(): Effect.Effect<
 function signOci(
   config: ReleaseConfig,
   publishedOci: SdkOciResult | undefined,
-): Effect.Effect<"not-requested" | "signed", ReleaseError, ProcessProvider> {
+): Effect.Effect<"not-requested" | "signed", ReleaseError, LoggerProvider | ProcessProvider> {
   if (publishedOci === undefined) {
     return Effect.succeed("not-requested");
   }
 
+  return signPublishedOci(config, publishedOci).pipe(
+    Effect.catchAll((signingError) =>
+      rollbackUnsignedOci(config, publishedOci).pipe(
+        Effect.matchEffect({
+          onFailure: (cleanupError) =>
+            Effect.fail(
+              new VerificationFailed({
+                reason: "OCI signing failed and unsigned OCI rollback failed",
+                details: {
+                  ociRef: publishedOci.oci_ref,
+                  attestationRef: publishedOci.attestation_ref,
+                  signingError: releaseErrorSummary(signingError),
+                  cleanupError: releaseErrorSummary(cleanupError),
+                },
+              }),
+            ),
+          onSuccess: () => Effect.fail(signingError),
+        }),
+      ),
+    ),
+  );
+}
+
+function signPublishedOci(
+  config: ReleaseConfig,
+  publishedOci: SdkOciResult,
+): Effect.Effect<"signed", ReleaseError, ProcessProvider> {
   return Effect.gen(function* () {
     const auth = yield* ociBasicAuth();
     const registry = ociRegistryFromRef(publishedOci.oci_ref);
@@ -609,6 +636,7 @@ function signOci(
         redactedArgs: ["login", registry, "--username", auth.username, "--password-stdin"],
         stdin: `${auth.password}\n`,
         cwd: config.paths.repoRoot,
+        env: cosignReleaseEnv(),
         timeoutMs: commandTimeoutMs,
       }),
       isTransientReleaseError,
@@ -626,12 +654,97 @@ function signOci(
           publishedOci.oci_ref,
         ],
         cwd: config.paths.repoRoot,
+        env: cosignReleaseEnv(),
         timeoutMs: publishTimeoutMs,
       }),
       isTransientReleaseError,
     );
     return signedOciStatus();
   });
+}
+
+function rollbackUnsignedOci(
+  config: ReleaseConfig,
+  publishedOci: SdkOciResult,
+): Effect.Effect<void, ReleaseError, LoggerProvider | ProcessProvider> {
+  return Effect.gen(function* () {
+    const logger = yield* LoggerProvider;
+    const started = Date.now();
+    yield* logger.log({
+      stage: "rollback-oci",
+      status: "start",
+      message: "delete unsigned OCI subject after signing failure",
+      details: {
+        ociRef: publishedOci.oci_ref,
+        attestationRef: publishedOci.attestation_ref,
+      },
+    });
+    yield* deleteOciRef(config, publishedOci.attestation_ref).pipe(
+      Effect.zipRight(deleteOciRef(config, publishedOci.oci_ref)),
+      Effect.tap(() =>
+        logger.log({
+          stage: "rollback-oci",
+          status: "ok",
+          message: "delete unsigned OCI subject after signing failure",
+          elapsedMs: Date.now() - started,
+        }),
+      ),
+      Effect.tapError((error) =>
+        logger.log({
+          stage: "rollback-oci",
+          status: "fail",
+          message: "delete unsigned OCI subject after signing failure",
+          elapsedMs: Date.now() - started,
+          details: { tag: error._tag },
+        }),
+      ),
+    );
+  });
+}
+
+function deleteOciRef(
+  config: ReleaseConfig,
+  ref: string | undefined,
+): Effect.Effect<void, ReleaseError, ProcessProvider> {
+  if (ref === undefined) {
+    return Effect.void;
+  }
+
+  return Effect.gen(function* () {
+    const auth = yield* ociBasicAuth();
+    yield* retryTransient(
+      runCommand({
+        program: config.paths.oras,
+        args: ociManifestDeleteArgs(ref, auth.username),
+        redactedArgs: ociManifestDeleteArgs(ref, auth.username),
+        stdin: `${auth.password}\n`,
+        cwd: config.paths.repoRoot,
+        timeoutMs: commandTimeoutMs,
+      }),
+      isTransientReleaseError,
+    );
+  });
+}
+
+export function ociManifestDeleteArgs(ref: string, username: string): readonly string[] {
+  return ["manifest", "delete", "--force", "--username", username, "--password-stdin", ref];
+}
+
+function releaseErrorSummary(error: ReleaseError): Readonly<Record<string, unknown>> {
+  const summary: Record<string, unknown> = { tag: error._tag };
+  if ("reason" in error) {
+    summary.reason = error.reason;
+  }
+  if ("program" in error) {
+    summary.program = error.program;
+  }
+  if ("exitCode" in error) {
+    summary.exitCode = error.exitCode;
+  }
+  if ("stderr" in error && error.stderr !== "") {
+    summary.stderr = error.stderr.slice(0, 500);
+  }
+  return summary;
 }
 
 function signedOciStatus(): "signed" {
@@ -790,8 +903,24 @@ function runNpm(
     program: config.paths.node,
     args: [config.paths.npm, ...args],
     cwd: config.paths.packageRoot,
+    env: npmReleaseEnv(),
     timeoutMs,
   });
+}
+
+export function npmReleaseEnv(): Readonly<Record<string, string>> {
+  return {
+    NPM_CONFIG_AUDIT: "false",
+    NPM_CONFIG_FUND: "false",
+    NPM_CONFIG_PROVENANCE: "true",
+    NPM_CONFIG_REGISTRY: npmRegistry,
+  };
+}
+
+export function cosignReleaseEnv(): Readonly<Record<string, string>> {
+  return {
+    COSIGN_EXPERIMENTAL: "1",
+  };
 }
 
 function runSdkOci(

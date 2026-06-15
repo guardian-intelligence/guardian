@@ -54,9 +54,29 @@ func TestGatusProbeAliasBranch(t *testing.T) {
 				if !strings.Contains(out, "https://"+site.Aisucks.Domain+"/healthz") {
 					t.Error("self-probe URL must stay the public domain (hostAliases redirects resolution)")
 				}
-			} else {
+			} else if site.Company.Domain == "" {
 				if strings.Contains(out, "hostAliases") {
 					t.Error("hostNetwork gatus render must not contain hostAliases (probes take the visitor path)")
+				}
+			}
+			if site.Company.Domain != "" {
+				for _, want := range []string{
+					"ip: 10.96.111.44", // must match the company-site-probe Service pin
+					`- "` + site.Company.Domain + `"`,
+					"company-healthz (" + site.Cluster.Name + ")",
+					"https://" + site.Company.Domain + "/healthz",
+					"company-home (" + site.Cluster.Name + ")",
+					"https://" + site.Company.Domain + "/",
+					"company-letters (" + site.Cluster.Name + ")",
+					"https://" + site.Company.Domain + "/letters",
+					"The Coding Agent is the Next Smartphone",
+					"company-news (" + site.Cluster.Name + ")",
+					"https://" + site.Company.Domain + "/news",
+					"Guardian Intelligence Inc. announces private beta of Verself.",
+				} {
+					if !strings.Contains(out, want) {
+						t.Errorf("company gatus render missing %q", want)
+					}
 				}
 			}
 		})
