@@ -20,7 +20,6 @@ data:
       domain: guardianintelligence.org
   platform:
     oci: {}
-    status: {}
 ---
 apiVersion: platform.guardian.dev/v1alpha1
 kind: SLOProfile
@@ -141,6 +140,15 @@ spec:
     pod-security.kubernetes.io/enforce: privileged
   clickhouse:
     enabled: false
+---
+apiVersion: platform.guardian.dev/v1alpha1
+kind: StatusSurface
+metadata:
+  name: status
+spec:
+  site: prod
+  domains: []
+  monitor: false
 ---
 apiVersion: platform.guardian.dev/v1alpha1
 kind: SecretProjection

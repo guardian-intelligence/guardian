@@ -124,7 +124,7 @@ func TestEnvironmentValidation(t *testing.T) {
 		mutate: func(site *Site, _ *Environment, _ *environmentConfigMetadata) {
 			site.Status.Monitor = true
 		},
-		wantErr: "platform.status.monitor requires platform.status.domains",
+		wantErr: "StatusSurface spec.monitor requires spec.domains",
 	}}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

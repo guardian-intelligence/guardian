@@ -72,10 +72,6 @@ type Environment struct {
 		OCI struct {
 			Domain string `yaml:"domain"`
 		} `yaml:"oci"`
-		Status struct {
-			Domains []string `yaml:"domains"`
-			Monitor bool     `yaml:"monitor"`
-		} `yaml:"status"`
 	} `yaml:"platform"`
 }
 
@@ -176,13 +172,17 @@ func loadSite(path string) (*Site, error) {
 	}
 	s.Gateway.Enabled = env.Gateway.Enabled
 	s.OCI.Domain = env.Platform.OCI.Domain
-	s.Status.Domains = env.Platform.Status.Domains
-	s.Status.Monitor = env.Platform.Status.Monitor
 	observability, err := observabilityStacks(s)
 	if err != nil {
 		return nil, err
 	}
 	s.Clickhouse.Enabled = observability[0].Spec.Clickhouse.Enabled
+	status, err := statusSurfaces(s)
+	if err != nil {
+		return nil, err
+	}
+	s.Status.Domains = append([]string(nil), status[0].Spec.Domains...)
+	s.Status.Monitor = status[0].Spec.Monitor
 	if err := applySLOAndSyntheticConfig(s); err != nil {
 		return nil, err
 	}
@@ -352,7 +352,7 @@ func validateSite(s *Site, bootstrapPath, envPath string, env *Environment, envM
 	// Monitoring status hostnames with none declared would render a
 	// blackbox job with an empty target list.
 	if s.Status.Monitor && len(s.Status.Domains) == 0 {
-		return fmt.Errorf("environment %s: platform.status.monitor requires platform.status.domains", envPath)
+		return fmt.Errorf("environment %s: StatusSurface spec.monitor requires spec.domains", envPath)
 	}
 	return nil
 }

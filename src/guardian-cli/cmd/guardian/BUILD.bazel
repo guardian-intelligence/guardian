@@ -22,6 +22,7 @@ go_library(
         "secret_projection.go",
         "site.go",
         "slo.go",
+        "status_surface.go",
         "tls.go",
         "tools.go",
         "up.go",
@@ -110,6 +111,7 @@ go_test(
         "secret_projection_test.go",
         "site_test.go",
         "slo_test.go",
+        "status_surface_test.go",
         "tls_test.go",
     ],
     data = glob(

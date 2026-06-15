@@ -46,6 +46,7 @@ func TestComponentsTable(t *testing.T) {
 		{"provider-kubernetes-config", "directus-platform", "the DirectusInstance composition emits provider-kubernetes Objects"},
 		{"provider-kubernetes-config", "observability-stack-platform", "the ObservabilityStack composition uses Crossplane functions"},
 		{"provider-kubernetes-config", "slo-profile-platform", "the SLOProfile/SyntheticCheck compositions use Crossplane functions"},
+		{"provider-kubernetes-config", "status-surface-platform", "the StatusSurface composition uses Crossplane functions"},
 		{"observability-stack-platform", "slo-profile-platform", "observability APIs load before SLO/synthetic APIs consume the stack shape"},
 		{"provider-kubernetes-config", "oci-registry-platform", "the OCIRegistry composition emits provider-kubernetes Objects"},
 		{"slo-profile-platform", "aisucks-product-api", "SLO and synthetic APIs are part of the platform package"},

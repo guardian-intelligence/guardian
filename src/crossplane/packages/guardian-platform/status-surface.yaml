@@ -1,0 +1,88 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: statussurfaces.platform.guardian.dev
+spec:
+  scope: Cluster
+  group: platform.guardian.dev
+  names:
+    kind: StatusSurface
+    plural: statussurfaces
+  defaultCompositionRef:
+    name: status-surface-status
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                site:
+                  type: string
+                domains:
+                  type: array
+                  items:
+                    type: string
+                monitor:
+                  type: boolean
+                  default: false
+              required:
+                - site
+                - domains
+            status:
+              type: object
+              properties:
+                domainCount:
+                  type: integer
+                monitor:
+                  type: boolean
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: status-surface-status
+spec:
+  compositeTypeRef:
+    apiVersion: platform.guardian.dev/v1alpha1
+    kind: StatusSurface
+  mode: Pipeline
+  pipeline:
+    - step: load-environment
+      functionRef:
+        name: function-environment-configs
+      input:
+        apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+        kind: Input
+        spec:
+          environmentConfigs:
+            - type: Selector
+              selector:
+                mode: Single
+                matchLabels:
+                  - key: guardian.dev/site
+                    type: FromCompositeFieldPath
+                    valueFromFieldPath: spec.site
+    - step: mark-status-surface
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            ---
+            apiVersion: platform.guardian.dev/v1alpha1
+            kind: StatusSurface
+            status:
+              domainCount: {{ len $spec.domains }}
+              monitor: {{ $spec.monitor }}
+    - step: mark-ready
+      functionRef:
+        name: function-auto-ready
