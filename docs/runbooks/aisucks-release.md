@@ -86,15 +86,17 @@ that digest is the release. Put it in the annotated tag:
 git tag -f -a aisucks/v<N> -m "aisucks@sha256:<digest>"
 ```
 
-## 3. Gate (against gamma)
+## 3. Record gamma evidence
 
-```sh
-bazelisk run //src/guardian-cli/cmd/guardian:guardian -- \
-  gate public-http src/sites/gamma/bootstrap.yaml
-```
+This runbook predates the release judge. The Guardian CLI does not evaluate
+product-specific SLO policy; it converges the node until Kubernetes and
+Crossplane can own the site. Promotion evidence belongs in the release system:
+candidate digest, SLOProfile/SyntheticCheck inputs, rollout state, hot-plane
+metrics, cold-plane forensic links, and a signed gate verdict.
 
-Expect `"passed": true` in the JSON result. Any failed check stops the release.
-Fix forward on dev; never ship a tag that didn't gate green.
+Until the release judge lands, inspect gamma from the observability plane and
+record the evidence with the release notes. Any failed signal stops the
+release. Fix forward on dev; never ship a digest that did not pass gamma.
 
 ## 4. Promote to prod
 
@@ -107,12 +109,8 @@ bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/sites/prod/boots
 
 **Assert the pushed aisucks digest is byte-identical to gamma's.** If it
 differs, STOP: the build is not reproducible — that is a bug to fix before
-anything ships. Re-run the public HTTP gate against prod:
-
-```sh
-bazelisk run //src/guardian-cli/cmd/guardian:guardian -- \
-  gate public-http src/sites/prod/bootstrap.yaml
-```
+anything ships. Prod admission should eventually require the gamma gate-pass
+artifact plus provenance for the same digest.
 
 ## 5. Rollback
 
