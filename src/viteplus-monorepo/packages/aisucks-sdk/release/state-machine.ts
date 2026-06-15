@@ -14,6 +14,7 @@ import { FileProvider, LoggerProvider, ProcessProvider, type CommandInput } from
 import { retryTransient } from "./retry.js";
 import {
   decodeJson,
+  decodeStrictJson,
   decodeUnknown,
   encodeJson,
   fileJson,
@@ -814,7 +815,7 @@ function readSdkOciResult(
   return Effect.gen(function* () {
     const files = yield* FileProvider;
     const raw = yield* files.readFile(filePath);
-    return yield* decodeJson(SdkOciResultSchema, raw.toString("utf8"), (reason) =>
+    return yield* decodeStrictJson(SdkOciResultSchema, raw.toString("utf8"), (reason) =>
       fileJson("decodeJson", filePath)(reason),
     );
   });
