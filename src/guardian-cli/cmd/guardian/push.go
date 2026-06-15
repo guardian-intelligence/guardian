@@ -104,6 +104,11 @@ var components = []component{{
 	rawManifest: true,
 	enabled:     siteUsesCrossplane,
 }, {
+	name:        "slo-profile-platform",
+	manifest:    "src/crossplane/packages/guardian-platform/slo-profile.yaml",
+	rawManifest: true,
+	enabled:     siteUsesCrossplane,
+}, {
 	name:        "aisucks-product-api",
 	manifest:    "src/crossplane/packages/guardian-products/aisucks-product.yaml",
 	rawManifest: true,

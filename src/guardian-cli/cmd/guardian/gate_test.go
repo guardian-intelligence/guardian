@@ -128,9 +128,17 @@ func gateTestSite() *Site {
 	site.Aisucks.Watch = []string{"https://dev.aisucks.app/healthz"}
 	site.Aisucks.WatchPages = []string{"https://dev.aisucks.app/"}
 	site.Company.Domain = "gamma.guardianintelligence.org"
-	site.Company.WatchDomains = []string{"dev.guardianintelligence.org"}
 	site.Company.Routes = []string{"/", "/letters", "/news"}
-	site.Company.ProbeURLs = companyProbeURLs(site.Company.WatchDomains, site.Company.Routes)
+	site.Company.ProbeURLs = companyProbeURLs([]string{"dev.guardianintelligence.org"}, site.Company.Routes)
+	site.SLO.PublicHTTP = &sloProfileSpec{
+		Site:    "gamma",
+		Surface: "public-http",
+		Window:  "15m",
+		Apps: []sloProfileApp{
+			{Name: "aisucks", Namespace: "aisucks", Deployment: "aisucks", Metric: "aisucks_http_requests_total"},
+			{Name: "company-site", Namespace: "company", Deployment: "company-site", Metric: "company_site_http_requests_total"},
+		},
+	}
 	return site
 }
 

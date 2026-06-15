@@ -69,7 +69,7 @@ func runGateCmd(args []string) error {
 func runPublicHTTPGate(args []string) error {
 	fs := flag.NewFlagSet("gate public-http", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	window := fs.Duration("window", 15*time.Minute, "Prometheus range window for restart and 5xx checks")
+	windowArg := fs.String("window", "", "Prometheus range window for restart and 5xx checks; defaults to the public-http SLOProfile")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fmt.Println(usage)
@@ -77,10 +77,11 @@ func runPublicHTTPGate(args []string) error {
 		}
 		return fmt.Errorf("gate public-http: %w: %v", errUsage, err)
 	}
-	if *window < time.Second {
-		return fmt.Errorf("gate public-http: %w: --window must be at least 1s", errUsage)
-	}
 	site, _, err := resolveSite(fs.Args())
+	if err != nil {
+		return fmt.Errorf("gate public-http: %w", err)
+	}
+	window, err := publicHTTPGateWindow(site, *windowArg)
 	if err != nil {
 		return fmt.Errorf("gate public-http: %w", err)
 	}
@@ -94,7 +95,7 @@ func runPublicHTTPGate(args []string) error {
 	}
 	kubeconfig := filepath.Join(state, "kubeconfig")
 	deps := kubernetesPublicHTTPGateDeps(kubectl, kubeconfig)
-	result := evaluatePublicHTTPGate(site, *window, deps)
+	result := evaluatePublicHTTPGate(site, window, deps)
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(result); err != nil {
@@ -153,6 +154,11 @@ func evaluatePublicHTTPGate(site *Site, window time.Duration, deps publicHTTPGat
 		err := deps.rollout(rollout.namespace, rollout.resource)
 		result.add("rollout "+rollout.namespace+"/"+rollout.resource, err == nil, "Kubernetes rollout is complete", err)
 	}
+	profile := site.SLO.PublicHTTP
+	if profile == nil {
+		result.add("slo profile public-http", false, "environment must declare SLOProfile surface=public-http", nil)
+		return result
+	}
 	for _, check := range []struct {
 		name  string
 		query string
@@ -161,30 +167,39 @@ func evaluatePublicHTTPGate(site *Site, window time.Duration, deps publicHTTPGat
 		{name: "victoria-metrics self scrape", query: `count(up{job="victoria-metrics-self"} == 1)`, want: 1},
 		{name: "otel collector self scrape", query: `count(up{job="otelcol-self"} == 1)`, want: 1},
 		{name: "kube-state-metrics scrape", query: `count(up{job="kube-state-metrics"} == 1)`, want: 1},
-		{name: "page alerts quiet", query: `sum(ALERTS{alertstate="firing",severity="page"}) or vector(0)`, want: 0},
 	} {
 		addPromEquals(&result, deps, check.name, check.query, check.want)
 	}
-	for _, app := range []publicHTTPGateApp{
-		{app: "aisucks", namespace: "aisucks", deployment: "aisucks", metric: "aisucks_http_requests_total"},
-		{app: "company-site", namespace: "company", deployment: "company-site", metric: "company_site_http_requests_total"},
-	} {
-		status, err := deps.deployment(app.namespace, app.deployment)
+	if signalEnabled(profile.Signals.PageAlerts) {
+		addPromEquals(&result, deps, "page alerts quiet", `sum(ALERTS{alertstate="firing",severity="page"}) or vector(0)`, 0)
+	}
+	for _, app := range profile.Apps {
+		status, err := deps.deployment(app.Namespace, app.Deployment)
 		if err != nil {
-			result.add("deployment "+app.namespace+"/"+app.deployment, false, "read deployment status", err)
+			result.add("deployment "+app.Namespace+"/"+app.Deployment, false, "read deployment status", err)
 			continue
 		}
-		result.add("deployment "+app.namespace+"/"+app.deployment, status.ready(), fmt.Sprintf("desired=%d available=%d updated=%d observedGeneration=%d generation=%d", status.Desired, status.Available, status.Updated, status.ObservedGeneration, status.Generation), nil)
-		addPromEquals(&result, deps, "public-http scrape "+app.app, fmt.Sprintf("count(up{job=\"public-http\",app=%s} == 1)", promString(app.app)), float64(status.Desired))
-		addPromEquals(&result, deps, "5xx budget "+app.app, fmt.Sprintf("sum(increase(%s{code=~\"5..\",handler!=\"GET /healthz\"}[%s])) or vector(0)", app.metric, promDuration(window)), 0)
+		result.add("deployment "+app.Namespace+"/"+app.Deployment, status.ready(), fmt.Sprintf("desired=%d available=%d updated=%d observedGeneration=%d generation=%d", status.Desired, status.Available, status.Updated, status.ObservedGeneration, status.Generation), nil)
+		if signalEnabled(profile.Signals.PublicScrape) {
+			addPromEquals(&result, deps, "public-http scrape "+app.Name, fmt.Sprintf("count(up{job=\"public-http\",app=%s} == 1)", promString(app.Name)), float64(status.Desired))
+		}
+		if signalEnabled(profile.Signals.ErrorRate) {
+			addPromEquals(&result, deps, "5xx budget "+app.Name, fmt.Sprintf("sum(increase(%s{code=~\"5..\",handler!=\"GET /healthz\"}[%s])) or vector(0)", app.Metric, promDuration(window)), 0)
+		}
 	}
-	addPromEquals(&result, deps, "product restart delta", fmt.Sprintf("sum(increase(kube_pod_container_status_restarts_total{namespace=~\"aisucks|company\"}[%s])) or vector(0)", promDuration(window)), 0)
-	for _, target := range publicHTTPGateBlackboxTargets(site) {
-		addPromEquals(&result, deps, "blackbox "+target, fmt.Sprintf("probe_success{job=\"blackbox\",instance=%s}", promString(target)), 1)
+	if signalEnabled(profile.Signals.RestartDelta) {
+		addPromEquals(&result, deps, "product restart delta", fmt.Sprintf("sum(increase(kube_pod_container_status_restarts_total{namespace=~\"aisucks|company\"}[%s])) or vector(0)", promDuration(window)), 0)
 	}
-	for _, target := range publicHTTPGateURLs(site) {
-		status, err := deps.getURL(target)
-		result.add("http "+target, err == nil && status == http.StatusOK, fmt.Sprintf("status=%d", status), err)
+	if signalEnabled(profile.Signals.Synthetic) {
+		for _, target := range publicHTTPGateBlackboxTargets(site) {
+			addPromEquals(&result, deps, "blackbox "+target, fmt.Sprintf("probe_success{job=\"blackbox\",instance=%s}", promString(target)), 1)
+		}
+	}
+	if signalEnabled(profile.Signals.DirectHTTP) {
+		for _, target := range publicHTTPGateURLs(site) {
+			status, err := deps.getURL(target)
+			result.add("http "+target, err == nil && status == http.StatusOK, fmt.Sprintf("status=%d", status), err)
+		}
 	}
 	return result
 }
@@ -314,6 +329,7 @@ func httpStatus(target string) (int, error) {
 func publicHTTPGateBlackboxTargets(site *Site) []string {
 	var targets []string
 	targets = append(targets, site.Aisucks.Watch...)
+	targets = append(targets, site.Aisucks.WatchPages...)
 	targets = append(targets, site.Company.ProbeURLs...)
 	return uniqueNonEmpty(targets)
 }
@@ -369,4 +385,22 @@ func promDuration(d time.Duration) string {
 
 func gateFloat(value float64) string {
 	return strconv.FormatFloat(value, 'f', -1, 64)
+}
+
+func publicHTTPGateWindow(site *Site, override string) (time.Duration, error) {
+	raw := override
+	if raw == "" && site.SLO.PublicHTTP != nil {
+		raw = site.SLO.PublicHTTP.Window
+	}
+	if raw == "" {
+		raw = "15m"
+	}
+	window, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("--window %q: %w", raw, err)
+	}
+	if window < time.Second {
+		return 0, fmt.Errorf("%w: --window must be at least 1s", errUsage)
+	}
+	return window, nil
 }

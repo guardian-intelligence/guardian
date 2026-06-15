@@ -5,6 +5,7 @@ filegroup(
         "edge-gateway.yaml",
         "public-http-service.yaml",
         "secret-projection.yaml",
+        "slo-profile.yaml",
     ],
     visibility = ["//src/guardian-cli:__subpackages__"],
 )

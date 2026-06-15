@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -63,13 +62,10 @@ type Environment struct {
 	} `yaml:"gateway"`
 	Products struct {
 		Aisucks struct {
-			Domain     string   `yaml:"domain"`
-			Watch      []string `yaml:"watch"`
-			WatchPages []string `yaml:"watchPages"`
+			Domain string `yaml:"domain"`
 		} `yaml:"aisucks"`
 		Company struct {
-			Domain       string   `yaml:"domain"`
-			WatchDomains []string `yaml:"watchDomains"`
+			Domain string `yaml:"domain"`
 		} `yaml:"company"`
 	} `yaml:"products"`
 	Platform struct {
@@ -108,10 +104,15 @@ type Site struct {
 		WatchPages []string
 	}
 	Company struct {
-		Domain       string
-		WatchDomains []string
-		Routes       []string
-		ProbeURLs    []string
+		Domain    string
+		Routes    []string
+		ProbeURLs []string
+	}
+	SLO struct {
+		PublicHTTP *sloProfileSpec
+	}
+	Synthetic struct {
+		PublicHTTPTargets []syntheticCheckTarget
 	}
 	Gateway struct {
 		Enabled bool
@@ -172,19 +173,18 @@ func loadSite(path string) (*Site, error) {
 	s.EnvironmentBundle.Raw = envRaw
 	s.Aisucks.Domain = env.Products.Aisucks.Domain
 	s.Aisucks.NtfyTopic = env.Alerts.NtfyTopic
-	s.Aisucks.Watch = env.Products.Aisucks.Watch
-	s.Aisucks.WatchPages = env.Products.Aisucks.WatchPages
 	s.Company.Domain = env.Products.Company.Domain
-	s.Company.WatchDomains = env.Products.Company.WatchDomains
 	if companyXR != nil {
 		s.Company.Routes = append([]string(nil), companyXR.Routes...)
-		s.Company.ProbeURLs = companyProbeURLs(env.Products.Company.WatchDomains, companyXR.Routes)
 	}
 	s.Gateway.Enabled = env.Gateway.Enabled
 	s.OCI.Domain = env.Platform.OCI.Domain
 	s.Clickhouse.Enabled = env.Platform.Clickhouse.Enabled
 	s.Status.Domains = env.Platform.Status.Domains
 	s.Status.Monitor = env.Platform.Status.Monitor
+	if err := applySLOAndSyntheticConfig(s); err != nil {
+		return nil, err
+	}
 	if err := validateSite(s, resolved, envResolved, env, envMeta); err != nil {
 		return nil, err
 	}
@@ -378,11 +378,6 @@ func validateCompanySiteSpec(s *Site, envPath string, xr *companySiteSpec) error
 			return fmt.Errorf("environment %s: CompanySite spec.routes contains duplicate route %q", envPath, route)
 		}
 		seen[route] = true
-	}
-	for _, domain := range s.Company.WatchDomains {
-		if domain == "" || strings.Contains(domain, "://") || strings.Contains(domain, "/") {
-			return fmt.Errorf("environment %s: products.company.watchDomains entries must be hostnames, got %q", envPath, domain)
-		}
 	}
 	return nil
 }

@@ -44,6 +44,8 @@ func TestComponentsTable(t *testing.T) {
 		{"provider-kubernetes-config", "secret-projection-platform", "the SecretProjection composition emits provider-kubernetes Objects"},
 		{"provider-kubernetes-config", "public-http-service-platform", "the PublicHttpService composition emits provider-kubernetes Objects"},
 		{"provider-kubernetes-config", "directus-platform", "the DirectusInstance composition emits provider-kubernetes Objects"},
+		{"provider-kubernetes-config", "slo-profile-platform", "the SLOProfile/SyntheticCheck compositions use Crossplane functions"},
+		{"slo-profile-platform", "aisucks-product-api", "SLO and synthetic APIs are part of the platform package"},
 		{"public-http-service-platform", "aisucks-product-api", "product APIs compose PublicHttpService"},
 		{"public-http-service-platform", "company-site-product-api", "product APIs compose PublicHttpService"},
 		{"aisucks-product-api", "aisucks", "product images are consumed by product XRs"},

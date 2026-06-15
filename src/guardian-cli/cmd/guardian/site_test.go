@@ -146,7 +146,7 @@ func TestEnvironmentValidation(t *testing.T) {
 	}
 }
 
-func TestCompanySiteSpecDerivesProbeURLs(t *testing.T) {
+func TestCompanyProbeURLs(t *testing.T) {
 	raw := []byte(`apiVersion: apiextensions.crossplane.io/v1beta1
 kind: EnvironmentConfig
 metadata:
@@ -172,11 +172,10 @@ spec:
 	}
 	site := &Site{Name: "dev"}
 	site.Company.Domain = "dev.guardianintelligence.org"
-	site.Company.WatchDomains = []string{"gamma.guardianintelligence.org"}
 	if err := validateCompanySiteSpec(site, "environment.yaml", xr); err != nil {
 		t.Fatal(err)
 	}
-	got := companyProbeURLs(site.Company.WatchDomains, xr.Routes)
+	got := companyProbeURLs([]string{"gamma.guardianintelligence.org"}, xr.Routes)
 	want := []string{
 		"https://gamma.guardianintelligence.org/healthz",
 		"https://gamma.guardianintelligence.org/",
