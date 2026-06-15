@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -603,24 +605,69 @@ func waitEdgeGateway(kubectl, kubeconfig string, site *Site) error {
 		}
 	}
 	if siteUsesPlatformTLS(site) {
-		certs, err := edgeGatewayCertificateRefs(site)
+		certs, err := edgeGatewayCertificateTargets(site)
 		if err != nil {
 			return err
 		}
 		for _, cert := range certs {
-			certResource := "certificate.cert-manager.io/" + cert.name
-			if err := poll(certResource, 3*time.Minute, 2*time.Second, func() error {
-				_, err := outputTool(kubectl, "--kubeconfig", kubeconfig, "-n", cert.namespace, "get", certResource)
-				return err
-			}); err != nil {
-				return err
-			}
-			if err := runTool(kubectl, "--kubeconfig", kubeconfig, "-n", cert.namespace, "wait", "--for=condition=Ready", certResource, "--timeout=10m"); err != nil {
+			if err := waitEdgeGatewayCertificate(kubectl, kubeconfig, cert); err != nil {
 				return err
 			}
 		}
 	}
 	return runTool(kubectl, "--kubeconfig", kubeconfig, "-n", "gateway", "get", "gateway", "edge")
+}
+
+func waitEdgeGatewayCertificate(kubectl, kubeconfig string, cert edgeGatewayCertificateTarget) error {
+	certResource := "certificate.cert-manager.io/" + cert.name
+	if err := poll(certResource, 3*time.Minute, 2*time.Second, func() error {
+		_, err := outputTool(kubectl, "--kubeconfig", kubeconfig, "-n", cert.namespace, "get", certResource)
+		return err
+	}); err != nil {
+		return err
+	}
+	return poll(certResource+" ready or public TLS verified", 10*time.Minute, 5*time.Second, func() error {
+		status, err := outputTool(kubectl, "--kubeconfig", kubeconfig, "-n", cert.namespace, "get", certResource, "-o", "jsonpath={.status.conditions[?(@.type==\"Ready\")].status}")
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(status) == "True" {
+			return nil
+		}
+		if len(cert.dnsNames) == 0 {
+			return fmt.Errorf("%s is not Ready", certResource)
+		}
+		var failures []string
+		for _, dnsName := range cert.dnsNames {
+			if err := verifyPublicTLSName(dnsName); err != nil {
+				failures = append(failures, dnsName+": "+err.Error())
+			}
+		}
+		if len(failures) == 0 {
+			fmt.Fprintf(os.Stderr, "%s is not Ready; public TLS verifies for %s\n", certResource, strings.Join(cert.dnsNames, ", "))
+			return nil
+		}
+		return fmt.Errorf("%s is not Ready; public TLS verification failed: %s", certResource, strings.Join(failures, "; "))
+	})
+}
+
+func verifyPublicTLSName(dnsName string) error {
+	dnsName = strings.TrimSuffix(strings.TrimSpace(dnsName), ".")
+	if dnsName == "" {
+		return fmt.Errorf("empty DNS name")
+	}
+	if strings.Contains(dnsName, "*") {
+		return fmt.Errorf("wildcard DNS name cannot be probed directly")
+	}
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	conn, err := tls.DialWithDialer(dialer, "tcp", net.JoinHostPort(dnsName, "443"), &tls.Config{
+		ServerName: dnsName,
+		MinVersion: tls.VersionTLS12,
+	})
+	if err != nil {
+		return err
+	}
+	return conn.Close()
 }
 
 func reconcileOpenBao(kubectl, kubeconfig string, site *Site, restoring bool, restoreRef, wantSHA, snapPath string) error {
