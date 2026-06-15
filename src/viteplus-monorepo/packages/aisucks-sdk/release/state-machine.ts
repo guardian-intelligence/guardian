@@ -151,6 +151,17 @@ function preflight(
         }),
       );
     }
+    if (config.mode === "publish" && config.publishNpm && !config.publishOci) {
+      return yield* Effect.fail(
+        new InvalidReleaseTarget({
+          reason: "npm publication requires OCI publication",
+          details: {
+            package: sdkPackageName,
+            ociRef: config.ociRef,
+          },
+        }),
+      );
+    }
     if (config.mode === "publish" && config.publishNpm && process.env.GITHUB_ACTIONS === "true") {
       yield* requireGitHubActionsOidcForNpmPublish(sdkPackageName);
     }

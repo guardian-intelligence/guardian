@@ -1,10 +1,6 @@
 name: npm sdk release
 
 on:
-  workflow_run:
-    workflows: [build]
-    branches: [main]
-    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -21,7 +17,6 @@ defaults:
 
 jobs:
   release:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
