@@ -152,3 +152,45 @@ func TestEnvironmentValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestCompanySiteSpecDerivesProbeURLs(t *testing.T) {
+	raw := []byte(`apiVersion: apiextensions.crossplane.io/v1beta1
+kind: EnvironmentConfig
+metadata:
+  name: guardian-dev
+---
+apiVersion: products.guardian.dev/v1alpha1
+kind: CompanySite
+metadata:
+  name: company-site
+spec:
+  site: dev
+  domain: dev.guardianintelligence.org
+  image: registry.guardian.internal/company-site@sha256:deadbeef
+  routes:
+    - /
+    - /letters
+    - /news
+  replicas: 2
+`)
+	xr, err := loadCompanySiteSpec(raw, "environment.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	site := &Site{Name: "dev"}
+	site.Company.Domain = "dev.guardianintelligence.org"
+	site.Company.WatchDomains = []string{"gamma.guardianintelligence.org"}
+	if err := validateCompanySiteSpec(site, "environment.yaml", xr); err != nil {
+		t.Fatal(err)
+	}
+	got := companyProbeURLs(site.Company.WatchDomains, xr.Routes)
+	want := []string{
+		"https://gamma.guardianintelligence.org/healthz",
+		"https://gamma.guardianintelligence.org/",
+		"https://gamma.guardianintelligence.org/letters",
+		"https://gamma.guardianintelligence.org/news",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("companyProbeURLs = %#v, want %#v", got, want)
+	}
+}

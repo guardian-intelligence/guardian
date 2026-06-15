@@ -39,9 +39,10 @@ data:
             annotations:
               summary: 'Sibling site down: probe of {{ $labels.instance }} (job {{ $labels.job }}) failing for 2m from this site'
 
-          # 14 days is half the ACME renewal window: if certmagic has not
-          # renewed by then, renewal is broken, not merely pending. for: 1h
-          # so a renewal landing mid-evaluation clears it without a page.
+          # 14 days is half the ACME renewal window: if cert-manager or a
+          # remaining product-owned issuer has not renewed by then, renewal is
+          # broken, not merely pending. for: 1h so a renewal landing
+          # mid-evaluation clears it without a page.
           - alert: SiteCertExpiringSoon
             expr: probe_ssl_earliest_cert_expiry - time() < 14*86400
             for: 1h

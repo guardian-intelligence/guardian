@@ -1,6 +1,6 @@
 import { defineConfig } from "vite-plus";
 
-const generatedIgnorePatterns = ["**/routeTree.gen.ts"] as const;
+const generatedIgnorePatterns = ["**/routeTree.gen.ts", "**/src/gen/**/*.ts"] as const;
 
 const buildOutputIgnorePatterns = [
   "**/dist/**",

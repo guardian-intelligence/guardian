@@ -206,7 +206,7 @@ var components = []component{{
 	name:     "zot",
 	layout:   "_main/src/infrastructure-components/zot/image",
 	manifest: "src/infrastructure-components/zot/k8s/zot.yaml.tmpl",
-	enabled:  siteUsesPlatformTLS,
+	enabled:  siteUsesPlatformOCI,
 }}
 
 func siteUsesEdgeGateway(s *Site) bool {
@@ -218,6 +218,10 @@ func siteUsesCrossplane(*Site) bool {
 }
 
 func siteUsesPlatformTLS(s *Site) bool {
+	return s.OCI.Domain != "" || s.Company.Domain != ""
+}
+
+func siteUsesPlatformOCI(s *Site) bool {
 	return s.OCI.Domain != ""
 }
 

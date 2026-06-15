@@ -58,6 +58,8 @@ func TestEdgeGatewaySiteManifests(t *testing.T) {
 				"kind: EdgeGateway",
 				"name: tls-aisucks",
 				"hostname: \"" + site.Aisucks.Domain + "\"",
+				"protocol: TLS",
+				"mode: Passthrough",
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("edge gateway instance render missing %q", want)
@@ -77,8 +79,11 @@ func TestEdgeGatewaySiteManifests(t *testing.T) {
 			}
 			if site.Company.Domain != "" {
 				for _, want := range []string{
-					"name: tls-company-site",
+					"name: https-company-site",
 					"hostname: \"" + site.Company.Domain + "\"",
+					"protocol: HTTPS",
+					"certificateRefName: company-site-tls",
+					"name: company-site-tls",
 				} {
 					if !strings.Contains(out, want) {
 						t.Errorf("edge gateway instance render missing %q", want)

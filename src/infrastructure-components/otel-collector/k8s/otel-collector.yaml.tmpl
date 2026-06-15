@@ -153,10 +153,11 @@ data:
             - job_name: kube-state-metrics
               static_configs:
                 - targets: ["kube-state-metrics.observability.svc:8080"]
-{{- /* One probe target per cross-site watch URL; the relabel trio sends
-       the actual request to the blackbox exporter with the URL as the
-       ?target param. Skip the job entirely when nothing is watched (dev). */}}
-{{- if or .Site.Aisucks.Watch .Site.Status.Monitor}}
+{{- /* One probe target per cross-site watch URL and company sibling route;
+       the relabel trio sends the actual request to the blackbox exporter with
+       the URL as the ?target param. Skip the job entirely when no probe
+       targets are declared. */}}
+{{- if or .Site.Aisucks.Watch .Site.Company.ProbeURLs .Site.Status.Monitor}}
             - job_name: blackbox
               metrics_path: /probe
               params:
@@ -164,6 +165,9 @@ data:
               static_configs:
                 - targets:
 {{- range .Site.Aisucks.Watch}}
+                    - "{{.}}"
+{{- end}}
+{{- range .Site.Company.ProbeURLs}}
                     - "{{.}}"
 {{- end}}
 {{- /* Status hostnames join the probe set only behind status.monitor

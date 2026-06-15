@@ -25,6 +25,9 @@ data:
       podNetwork: true
     company:
       domain: guardianintelligence.org
+      watchDomains:
+        - dev.guardianintelligence.org
+        - gamma.guardianintelligence.org
   platform:
     oci: {}
     clickhouse:
@@ -62,6 +65,7 @@ kind: SecretProjection
 metadata:
   name: directus-secrets
 spec:
+  waitForSecrets: false
   target:
     namespace: directus
     namespaceLabels:
@@ -107,15 +111,31 @@ spec:
       protocol: TLS
       tls:
         mode: Passthrough
-    - name: tls-company-site
+    - name: https-company-site
       hostname: "guardianintelligence.org"
       port: 443
-      protocol: TLS
+      protocol: HTTPS
       tls:
-        mode: Passthrough
+        mode: Terminate
+        certificateRefName: company-site-tls
     - name: http
       port: 80
       protocol: HTTP
+  acme:
+    email: im.shovonhasan@gmail.com
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretName: letsencrypt-production-account-key
+    dns01CloudflareSecretName: cloudflare-guardianintelligence-org-dns-token
+    dns01CloudflareSecretKey: api-token
+    dnsZones:
+      - guardianintelligence.org
+  certificates:
+    - name: company-site-tls
+      namespace: gateway
+      secretName: company-site-tls
+      dnsNames:
+        - "guardianintelligence.org"
+      issuerRefName: letsencrypt-production
 ---
 apiVersion: products.guardian.dev/v1alpha1
 kind: AisucksProduct
@@ -156,6 +176,10 @@ spec:
   image: '{{ index .Images "directus" }}'
   postgresImage: '{{ index .Images "postgres" }}'
   publicAdminRoute: false
+  runtime:
+    suspend: true
+  readiness:
+    waitForRollout: false
   secrets:
     runtimeSecretName: directus-runtime
     runtimeSecretKey: secret

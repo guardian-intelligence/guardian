@@ -22,10 +22,7 @@ func TestEnvironmentCapabilities(t *testing.T) {
 				"CompanySite/company-site": {
 					{namespace: "company", resource: "deployment/company-site"},
 				},
-				"DirectusInstance/directus": {
-					{namespace: "directus", resource: "statefulset/directus-postgres"},
-					{namespace: "directus", resource: "deployment/directus"},
-				},
+				"DirectusInstance/directus": nil,
 			}
 			got := map[string]string{}
 			gotRollouts := map[string][]environmentRollout{}
@@ -47,7 +44,7 @@ func TestEnvironmentCapabilities(t *testing.T) {
 }
 
 func TestEnvironmentCapabilityRolloutsRequireDirectusNamespace(t *testing.T) {
-	_, err := environmentCapabilityRollouts("DirectusInstance", "")
+	_, err := environmentCapabilityRollouts("DirectusInstance", "", true)
 	if err == nil {
 		t.Fatal("environmentCapabilityRollouts DirectusInstance with empty namespace succeeded")
 	}

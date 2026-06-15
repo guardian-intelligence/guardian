@@ -377,11 +377,14 @@ For the company site, the desired runtime objects are:
 - `Deployment company-site`, pod-network only, at least two replicas on public
   serving sites.
 - `Service company-site` for Gateway backends.
-- `Service company-site-probe` for in-cluster TLS/self probes that cannot
-  hairpin through the host-network Gateway path.
-- `TLSRoute company-site` for SNI passthrough when the app owns its certs.
-- `HTTPRoute company-site-http` for `:80`, ACME HTTP-01 where applicable,
-  health, and redirects.
+- `Service company-site-probe` for in-cluster probes that cannot hairpin
+  through the host-network Gateway path.
+- `HTTPRoute company-site-https` for platform-terminated HTTPS.
+- `TLSRoute company-site` only when the app-owned certificate mode is selected.
+- `HTTPRoute company-site-http-redirect` for platform-terminated `:80`
+  redirects.
+- `HTTPRoute company-site-http` for passthrough `:80` forwarding when the app
+  owns redirects.
 - Pod labels:
   - `platform.guardian.dev/metrics-scrape: "true"`
   - `platform.guardian.dev/metrics-port: "9090"`
@@ -408,6 +411,12 @@ Run it as ordinary Kubernetes components when introduced:
 - R2/S3-compatible object storage for uploads and generated public images.
 - OpenBao as source of truth for database, admin, storage, and webhook secrets,
   projected to Kubernetes Secrets.
+
+If a site declares Directus secrets as nonblocking and those secrets have not
+been admitted yet, the `DirectusInstance` may set `runtime.suspend: true`.
+That keeps Services and desired state declared while scaling Directus/Postgres
+to zero, so missing CMS secrets do not make public-site convergence look green
+while alerts are red.
 
 Public pages should read from a published snapshot in the web image or an
 app-local cache that can serve stale content. Directus webhooks should create a

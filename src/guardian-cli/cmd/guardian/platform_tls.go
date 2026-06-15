@@ -27,6 +27,7 @@ type edgeGatewayTLSManifest struct {
 			DNS01CloudflareSecretName string `yaml:"dns01CloudflareSecretName"`
 		} `yaml:"acme"`
 		Certificates []struct {
+			Name       string `yaml:"name"`
 			Namespace  string `yaml:"namespace"`
 			SecretName string `yaml:"secretName"`
 		} `yaml:"certificates"`
@@ -150,6 +151,31 @@ func platformTLSSurvivalSecretRefs(site *Site) ([]platformTLSSecretRef, error) {
 		}
 		return out[i].name < out[j].name
 	})
+	return out, nil
+}
+
+func edgeGatewayCertificateObjectNames(site *Site) ([]string, error) {
+	var out []string
+	dec := yaml.NewDecoder(bytes.NewReader(site.EnvironmentBundle.Raw))
+	for {
+		var doc edgeGatewayTLSManifest
+		if err := dec.Decode(&doc); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, fmt.Errorf("decode %s: %w", site.EnvironmentBundle.Path, err)
+		}
+		if doc.Kind != "EdgeGateway" {
+			continue
+		}
+		for _, cert := range doc.Spec.Certificates {
+			if cert.Name == "" {
+				return nil, fmt.Errorf("edge gateway certificate in %s must set name", site.EnvironmentBundle.Path)
+			}
+			out = append(out, "edge-gateway-certificate-"+cert.Name)
+		}
+	}
+	sort.Strings(out)
 	return out, nil
 }
 

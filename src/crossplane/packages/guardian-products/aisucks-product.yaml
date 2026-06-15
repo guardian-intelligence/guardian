@@ -136,6 +136,8 @@ spec:
                 tlsSectionName: tls-aisucks
                 httpSectionName: http
                 tlsRouteAPIVersion: gateway.networking.k8s.io/v1alpha2
+                httpRouteHostnames:
+                  - {{ $spec.domain }}
             ---
             apiVersion: products.guardian.dev/v1alpha1
             kind: AisucksProduct

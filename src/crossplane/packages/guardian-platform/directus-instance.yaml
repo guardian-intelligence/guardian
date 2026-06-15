@@ -35,6 +35,12 @@ spec:
                   type: boolean
                 adminDomain:
                   type: string
+                runtime:
+                  type: object
+                  properties:
+                    suspend:
+                      type: boolean
+                      default: false
                 resources:
                   type: object
                   properties:
@@ -103,6 +109,12 @@ spec:
                     - name
                     - namespace
                     - httpSectionName
+                readiness:
+                  type: object
+                  properties:
+                    waitForRollout:
+                      type: boolean
+                      default: true
               required:
                 - site
                 - namespace
@@ -164,6 +176,14 @@ spec:
             {{- if $spec.adminDomain -}}
             {{- $publicURL = printf "https://%s" $spec.adminDomain -}}
             {{- end -}}
+            {{- $replicas := 1 -}}
+            {{- with $spec.runtime -}}
+            {{- with .suspend -}}
+            {{- if . -}}
+            {{- $replicas = 0 -}}
+            {{- end -}}
+            {{- end -}}
+            {{- end -}}
             ---
             apiVersion: kubernetes.crossplane.io/v1alpha2
             kind: Object
@@ -207,7 +227,7 @@ spec:
                     namespace: {{ $spec.namespace }}
                   spec:
                     serviceName: directus-postgres
-                    replicas: 1
+                    replicas: {{ $replicas }}
                     selector:
                       matchLabels:
                         app: directus-postgres
@@ -322,7 +342,7 @@ spec:
                     name: directus
                     namespace: {{ $spec.namespace }}
                   spec:
-                    replicas: 1
+                    replicas: {{ $replicas }}
                     selector:
                       matchLabels:
                         app: directus

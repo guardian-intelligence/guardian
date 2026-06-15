@@ -10,24 +10,21 @@ import type { Message } from "@bufbuild/protobuf";
 /**
  * Describes the file guardian/products/aisucks/v1/aisucks.proto.
  */
-export const file_guardian_products_aisucks_v1_aisucks: GenFile /*@__PURE__*/ = fileDesc(
-  "CipndWFyZGlhbi9wcm9kdWN0cy9haXN1Y2tzL3YxL2Fpc3Vja3MucHJvdG8SHGd1YXJkaWFuLnByb2R1Y3RzLmFpc3Vja3MudjEiDwoNSGVhbHRoUmVxdWVzdCJCCg5IZWFsdGhSZXNwb25zZRIOCgZzdGF0dXMYASABKAkSDwoHc2VydmljZRgCIAEoCRIPCgd2ZXJzaW9uGAMgASgJMo4BCg5BaXN1Y2tzU2VydmljZRJ8CgZIZWFsdGgSKy5ndWFyZGlhbi5wcm9kdWN0cy5haXN1Y2tzLnYxLkhlYWx0aFJlcXVlc3QaLC5ndWFyZGlhbi5wcm9kdWN0cy5haXN1Y2tzLnYxLkhlYWx0aFJlc3BvbnNlIhfC8xgTCAEQARgBIIAIKgYIPBICMW0wAUJrWmlnaXRodWIuY29tL2d1YXJkaWFuLWludGVsbGlnZW5jZS9ndWFyZGlhbi9zcmMvcHJvZHVjdHMvYWlzdWNrcy9hcGkvZ3VhcmRpYW4vcHJvZHVjdHMvYWlzdWNrcy92MTthaXN1Y2tzdjFiBnByb3RvMw",
-  [file_guardian_policy_v1_policy],
-);
+export const file_guardian_products_aisucks_v1_aisucks: GenFile = /*@__PURE__*/
+  fileDesc("CipndWFyZGlhbi9wcm9kdWN0cy9haXN1Y2tzL3YxL2Fpc3Vja3MucHJvdG8SHGd1YXJkaWFuLnByb2R1Y3RzLmFpc3Vja3MudjEiDwoNSGVhbHRoUmVxdWVzdCJCCg5IZWFsdGhSZXNwb25zZRIOCgZzdGF0dXMYASABKAkSDwoHc2VydmljZRgCIAEoCRIPCgd2ZXJzaW9uGAMgASgJMo4BCg5BaXN1Y2tzU2VydmljZRJ8CgZIZWFsdGgSKy5ndWFyZGlhbi5wcm9kdWN0cy5haXN1Y2tzLnYxLkhlYWx0aFJlcXVlc3QaLC5ndWFyZGlhbi5wcm9kdWN0cy5haXN1Y2tzLnYxLkhlYWx0aFJlc3BvbnNlIhfC8xgTCAEQARgBIIAIKgYIPBICMW0wAUJrWmlnaXRodWIuY29tL2d1YXJkaWFuLWludGVsbGlnZW5jZS9ndWFyZGlhbi9zcmMvcHJvZHVjdHMvYWlzdWNrcy9hcGkvZ3VhcmRpYW4vcHJvZHVjdHMvYWlzdWNrcy92MTthaXN1Y2tzdjFiBnByb3RvMw", [file_guardian_policy_v1_policy]);
 
 /**
  * @generated from message guardian.products.aisucks.v1.HealthRequest
  */
-export type HealthRequest = Message<"guardian.products.aisucks.v1.HealthRequest"> & {};
+export type HealthRequest = Message<"guardian.products.aisucks.v1.HealthRequest"> & {
+};
 
 /**
  * Describes the message guardian.products.aisucks.v1.HealthRequest.
  * Use `create(HealthRequestSchema)` to create a new message.
  */
-export const HealthRequestSchema: GenMessage<HealthRequest> /*@__PURE__*/ = messageDesc(
-  file_guardian_products_aisucks_v1_aisucks,
-  0,
-);
+export const HealthRequestSchema: GenMessage<HealthRequest> = /*@__PURE__*/
+  messageDesc(file_guardian_products_aisucks_v1_aisucks, 0);
 
 /**
  * @generated from message guardian.products.aisucks.v1.HealthResponse
@@ -53,10 +50,8 @@ export type HealthResponse = Message<"guardian.products.aisucks.v1.HealthRespons
  * Describes the message guardian.products.aisucks.v1.HealthResponse.
  * Use `create(HealthResponseSchema)` to create a new message.
  */
-export const HealthResponseSchema: GenMessage<HealthResponse> /*@__PURE__*/ = messageDesc(
-  file_guardian_products_aisucks_v1_aisucks,
-  1,
-);
+export const HealthResponseSchema: GenMessage<HealthResponse> = /*@__PURE__*/
+  messageDesc(file_guardian_products_aisucks_v1_aisucks, 1);
 
 /**
  * @generated from service guardian.products.aisucks.v1.AisucksService
@@ -69,5 +64,6 @@ export const AisucksService: GenService<{
     methodKind: "unary";
     input: typeof HealthRequestSchema;
     output: typeof HealthResponseSchema;
-  };
-}> /*@__PURE__*/ = serviceDesc(file_guardian_products_aisucks_v1_aisucks, 0);
+  },
+}> = /*@__PURE__*/
+  serviceDesc(file_guardian_products_aisucks_v1_aisucks, 0);

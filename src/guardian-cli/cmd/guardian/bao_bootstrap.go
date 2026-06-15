@@ -25,6 +25,45 @@ const (
 	baoAllowSecretMigrationEnv = "GUARDIAN_OPENBAO_ALLOW_SECRET_MIGRATION"
 )
 
+func lookupBaoRootToken(getenv func(string) string, secretEnvPath string) (string, string, error) {
+	if token := strings.TrimSpace(getenv(baoRootTokenEnv)); token != "" {
+		return token, baoRootTokenEnv, nil
+	}
+	values, err := readSecretEnv(secretEnvPath)
+	if err != nil {
+		return "", "", err
+	}
+	if token := strings.TrimSpace(values[baoRootTokenEnv]); token != "" {
+		return token, secretEnvPath + ":" + baoRootTokenEnv, nil
+	}
+	return "", "", nil
+}
+
+func lookupBaoSecretMigrationAllowed(getenv func(string) string, secretEnvPath string) (bool, string, error) {
+	if value := strings.TrimSpace(getenv(baoAllowSecretMigrationEnv)); value != "" {
+		return value == "1", baoAllowSecretMigrationEnv, nil
+	}
+	values, err := readSecretEnv(secretEnvPath)
+	if err != nil {
+		return false, "", err
+	}
+	if value := strings.TrimSpace(values[baoAllowSecretMigrationEnv]); value != "" {
+		return value == "1", secretEnvPath + ":" + baoAllowSecretMigrationEnv, nil
+	}
+	return false, "", nil
+}
+
+func readSecretEnv(path string) (map[string]string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]string{}, nil
+		}
+		return nil, err
+	}
+	return parseSecretEnv(raw), nil
+}
+
 type baoRequiredSecret struct {
 	name     string
 	path     string
@@ -407,5 +446,6 @@ func zotPublisherSecretData() (map[string]string, error) {
 }
 
 func allowBaoSecretMigrationFromEnv() bool {
-	return os.Getenv(baoAllowSecretMigrationEnv) == "1"
+	allowed, _, err := lookupBaoSecretMigrationAllowed(os.Getenv, resolvePath("secret.env"))
+	return err == nil && allowed
 }

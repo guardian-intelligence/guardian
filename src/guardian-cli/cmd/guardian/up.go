@@ -584,10 +584,12 @@ func waitEdgeGateway(kubectl, kubeconfig string, site *Site) error {
 		"edge-gateway",
 	}
 	if siteUsesPlatformTLS(site) {
-		objects = append(objects,
-			"edge-gateway-clusterissuer",
-			"edge-gateway-certificate-oci-guardianintelligence-org-tls",
-		)
+		objects = append(objects, "edge-gateway-clusterissuer")
+		certs, err := edgeGatewayCertificateObjectNames(site)
+		if err != nil {
+			return err
+		}
+		objects = append(objects, certs...)
 	}
 	for _, obj := range objects {
 		if err := poll("provider-kubernetes object "+obj, 3*time.Minute, 2*time.Second, func() error {
@@ -650,18 +652,27 @@ func reconcileOpenBao(kubectl, kubeconfig string, site *Site, restoring bool, re
 			if uerr := unsealBao(addr, keys); uerr != nil {
 				return uerr
 			}
-			if token := strings.TrimSpace(os.Getenv(baoRootTokenEnv)); token != "" {
+			token, source, terr := lookupBaoRootToken(os.Getenv, resolvePath("secret.env"))
+			if terr != nil {
+				return fmt.Errorf("read secret.env: %w", terr)
+			}
+			if token != "" {
 				if cerr := configureBaoForProjection(addr, token, site, allowBaoSecretMigrationFromEnv()); cerr != nil {
 					return cerr
 				}
+				fmt.Fprintf(os.Stderr, "verified OpenBao projection configuration using token from %s\n", source)
 			}
 			fmt.Fprintln(os.Stderr, "unsealed OpenBao")
 		case baoUnsealed:
-			if token := strings.TrimSpace(os.Getenv(baoRootTokenEnv)); token != "" {
+			token, source, terr := lookupBaoRootToken(os.Getenv, resolvePath("secret.env"))
+			if terr != nil {
+				return fmt.Errorf("read secret.env: %w", terr)
+			}
+			if token != "" {
 				if cerr := configureBaoForProjection(addr, token, site, allowBaoSecretMigrationFromEnv()); cerr != nil {
 					return cerr
 				}
-				fmt.Fprintln(os.Stderr, "verified OpenBao projection configuration")
+				fmt.Fprintf(os.Stderr, "verified OpenBao projection configuration using token from %s\n", source)
 			} else {
 				fmt.Fprintln(os.Stderr, "openbao is initialized and unsealed")
 			}

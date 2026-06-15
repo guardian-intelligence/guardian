@@ -213,6 +213,12 @@ spec:
                               {{- range .dnsZones }}
                               - {{ . }}
                               {{- end }}
+                        - http01:
+                            gatewayHTTPRoute:
+                              parentRefs:
+                                - name: {{ $spec.gateway.name }}
+                                  namespace: {{ $spec.gateway.namespace }}
+                                  sectionName: http
             {{- end }}
             {{- range $cert := $spec.certificates }}
             ---

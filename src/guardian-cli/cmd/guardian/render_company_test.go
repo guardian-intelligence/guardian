@@ -35,6 +35,11 @@ func TestPublicHTTPServicePlatformRender(t *testing.T) {
 		`platform.guardian.dev/metrics-port: "{{ $spec.ports.metrics }}"`,
 		"platform.guardian.dev/slo-surface: public-http",
 		"allowPrivilegeEscalation: false",
+		"ENABLE_APP_TLS",
+		"REDIRECT_HTTP",
+		"RequestRedirect",
+		"name: {{ $spec.app }}-http-redirect",
+		"watch: true",
 		"type: RuntimeDefault",
 		"name: function-auto-ready",
 	} {
@@ -60,6 +65,8 @@ func TestDirectusPlatformRender(t *testing.T) {
 		"kind: Deployment",
 		"kind: Service",
 		"initContainers:",
+		"{{- $replicas := 1 -}}",
+		"replicas: {{ $replicas }}",
 		"prepare-data-dir",
 		"chown -R postgres:postgres /var/lib/postgresql/data",
 		"prepare-uploads-dir",
@@ -99,7 +106,8 @@ func TestCompanySiteProductAPIRender(t *testing.T) {
 		"replicas: {{ $spec.replicas }}",
 		"metrics: 9090",
 		"diagnostics: \":9090\"",
-		"tlsSectionName: tls-company-site",
+		"tlsSectionName: https-company-site",
+		"tlsMode: Terminate",
 		"httpRouteHostnames:",
 		"- {{ $spec.domain }}",
 		"name: function-auto-ready",
@@ -157,6 +165,7 @@ func TestDirectusEnvironmentBundleInstances(t *testing.T) {
 				directusTestImage,
 				postgresTestImage,
 				"publicAdminRoute: false",
+				"waitForRollout: false",
 				"runtimeSecretName: directus-runtime",
 				"databaseSecretName: directus-postgres",
 				"storagePath: /var/lib/guardian/directus/postgres",
@@ -164,6 +173,16 @@ func TestDirectusEnvironmentBundleInstances(t *testing.T) {
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("DirectusInstance environment render missing %q", want)
+				}
+			}
+			if siteName == "prod" {
+				for _, want := range []string{
+					"runtime:",
+					"suspend: true",
+				} {
+					if !strings.Contains(out, want) {
+						t.Errorf("prod DirectusInstance environment render missing %q", want)
+					}
 				}
 			}
 		})

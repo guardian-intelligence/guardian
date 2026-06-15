@@ -31,6 +31,12 @@ func environmentCapabilities(site *Site) ([]environmentCapability, error) {
 			} `yaml:"metadata"`
 			Spec struct {
 				Namespace string `yaml:"namespace"`
+				Readiness struct {
+					WaitForRollout *bool `yaml:"waitForRollout"`
+				} `yaml:"readiness"`
+				Runtime struct {
+					Suspend *bool `yaml:"suspend"`
+				} `yaml:"runtime"`
 			} `yaml:"spec"`
 		}
 		if err := dec.Decode(&doc); err != nil {
@@ -46,7 +52,9 @@ func environmentCapabilities(site *Site) ([]environmentCapability, error) {
 		if !ok {
 			continue
 		}
-		rollouts, err := environmentCapabilityRollouts(doc.Kind, doc.Spec.Namespace)
+		suspended := doc.Spec.Runtime.Suspend != nil && *doc.Spec.Runtime.Suspend
+		waitForRollout := (doc.Spec.Readiness.WaitForRollout == nil || *doc.Spec.Readiness.WaitForRollout) && !suspended
+		rollouts, err := environmentCapabilityRollouts(doc.Kind, doc.Spec.Namespace, waitForRollout)
 		if err != nil {
 			return nil, fmt.Errorf("environment %s %s: %w", doc.Kind, doc.Metadata.Name, err)
 		}
@@ -73,7 +81,10 @@ func environmentCapabilityResource(kind string) (string, bool) {
 	}
 }
 
-func environmentCapabilityRollouts(kind, namespace string) ([]environmentRollout, error) {
+func environmentCapabilityRollouts(kind, namespace string, waitForRollout bool) ([]environmentRollout, error) {
+	if !waitForRollout {
+		return nil, nil
+	}
 	switch kind {
 	case "AisucksProduct":
 		return []environmentRollout{{namespace: "aisucks", resource: "deployment/aisucks"}}, nil

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -68,7 +69,8 @@ type Environment struct {
 			PodNetwork bool     `yaml:"podNetwork"`
 		} `yaml:"aisucks"`
 		Company struct {
-			Domain string `yaml:"domain"`
+			Domain       string   `yaml:"domain"`
+			WatchDomains []string `yaml:"watchDomains"`
 		} `yaml:"company"`
 	} `yaml:"products"`
 	Platform struct {
@@ -108,7 +110,10 @@ type Site struct {
 		PodNetwork bool
 	}
 	Company struct {
-		Domain string
+		Domain       string
+		WatchDomains []string
+		Routes       []string
+		ProbeURLs    []string
 	}
 	Gateway struct {
 		Enabled bool
@@ -157,6 +162,10 @@ func loadSite(path string) (*Site, error) {
 	if err != nil {
 		return nil, err
 	}
+	companyXR, err := loadCompanySiteSpec(envRaw, envResolved)
+	if err != nil {
+		return nil, err
+	}
 	s := &Site{
 		Name:      bootstrap.Site,
 		Bootstrap: *bootstrap,
@@ -169,12 +178,20 @@ func loadSite(path string) (*Site, error) {
 	s.Aisucks.WatchPages = env.Products.Aisucks.WatchPages
 	s.Aisucks.PodNetwork = env.Products.Aisucks.PodNetwork
 	s.Company.Domain = env.Products.Company.Domain
+	s.Company.WatchDomains = env.Products.Company.WatchDomains
+	if companyXR != nil {
+		s.Company.Routes = append([]string(nil), companyXR.Routes...)
+		s.Company.ProbeURLs = companyProbeURLs(env.Products.Company.WatchDomains, companyXR.Routes)
+	}
 	s.Gateway.Enabled = env.Gateway.Enabled
 	s.OCI.Domain = env.Platform.OCI.Domain
 	s.Clickhouse.Enabled = env.Platform.Clickhouse.Enabled
 	s.Status.Domains = env.Platform.Status.Domains
 	s.Status.Monitor = env.Platform.Status.Monitor
 	if err := validateSite(s, resolved, envResolved, env, envMeta); err != nil {
+		return nil, err
+	}
+	if err := validateCompanySiteSpec(s, envResolved, companyXR); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -258,6 +275,38 @@ func loadEnvironment(path string) (*Environment, *environmentConfigMetadata, []b
 	return nil, nil, nil, "", fmt.Errorf("environment %s: EnvironmentConfig document is required", resolved)
 }
 
+type companySiteSpec struct {
+	Site   string   `yaml:"site"`
+	Domain string   `yaml:"domain"`
+	Routes []string `yaml:"routes"`
+}
+
+func loadCompanySiteSpec(raw []byte, path string) (*companySiteSpec, error) {
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	var found *companySiteSpec
+	for {
+		var doc struct {
+			Kind string          `yaml:"kind"`
+			Spec companySiteSpec `yaml:"spec"`
+		}
+		if err := dec.Decode(&doc); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, fmt.Errorf("environment %s: %w", path, err)
+		}
+		if doc.Kind != "CompanySite" {
+			continue
+		}
+		if found != nil {
+			return nil, fmt.Errorf("environment %s: multiple CompanySite documents are not supported", path)
+		}
+		spec := doc.Spec
+		found = &spec
+	}
+	return found, nil
+}
+
 func validateSite(s *Site, bootstrapPath, envPath string, env *Environment, envMeta *environmentConfigMetadata) error {
 	if envMeta == nil {
 		return fmt.Errorf("environment %s: EnvironmentConfig metadata is required", envPath)
@@ -297,6 +346,63 @@ func validateSite(s *Site, bootstrapPath, envPath string, env *Environment, envM
 		return fmt.Errorf("environment %s: platform.status.monitor requires platform.status.domains", envPath)
 	}
 	return nil
+}
+
+func validateCompanySiteSpec(s *Site, envPath string, xr *companySiteSpec) error {
+	if s.Company.Domain == "" {
+		return nil
+	}
+	if xr == nil {
+		return fmt.Errorf("environment %s: products.company.domain requires a CompanySite document", envPath)
+	}
+	if xr.Site != s.Name {
+		return fmt.Errorf("environment %s: CompanySite spec.site = %q, want %q", envPath, xr.Site, s.Name)
+	}
+	if xr.Domain != s.Company.Domain {
+		return fmt.Errorf("environment %s: CompanySite spec.domain = %q, want products.company.domain %q", envPath, xr.Domain, s.Company.Domain)
+	}
+	if len(xr.Routes) == 0 {
+		return fmt.Errorf("environment %s: CompanySite spec.routes is required", envPath)
+	}
+	seen := map[string]bool{}
+	for _, route := range xr.Routes {
+		if route == "" || route[0] != '/' {
+			return fmt.Errorf("environment %s: CompanySite spec.routes entries must start with /, got %q", envPath, route)
+		}
+		if seen[route] {
+			return fmt.Errorf("environment %s: CompanySite spec.routes contains duplicate route %q", envPath, route)
+		}
+		seen[route] = true
+	}
+	for _, domain := range s.Company.WatchDomains {
+		if domain == "" || strings.Contains(domain, "://") || strings.Contains(domain, "/") {
+			return fmt.Errorf("environment %s: products.company.watchDomains entries must be hostnames, got %q", envPath, domain)
+		}
+	}
+	return nil
+}
+
+func companyProbeURLs(domains []string, routes []string) []string {
+	if len(domains) == 0 {
+		return nil
+	}
+	urls := make([]string, 0, len(domains)*(1+len(routes)))
+	seen := map[string]bool{}
+	add := func(domain, path string) {
+		base := "https://" + domain
+		u := base + path
+		if !seen[u] {
+			urls = append(urls, u)
+			seen[u] = true
+		}
+	}
+	for _, domain := range domains {
+		add(domain, "/healthz")
+		for _, route := range routes {
+			add(domain, route)
+		}
+	}
+	return urls
 }
 
 func environmentPathForSite(site string) string {
