@@ -282,6 +282,8 @@ metadata:
 spec:
   site: dev
   namespace: directus
+  namespaceLabels:
+    pod-security.kubernetes.io/enforce: privileged
   image: '{{ index .Images "directus" }}'
   postgresImage: '{{ index .Images "postgres" }}'
   publicAdminRoute: false

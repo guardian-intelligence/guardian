@@ -24,6 +24,7 @@ func TestSecretProjectionPlatformRender(t *testing.T) {
 		"name: secret-projection-openbao",
 		"kind: SecretStore",
 		"kind: ExternalSecret",
+		"deletionPolicy: Orphan",
 		"providerConfigRef:\n                name: platform",
 		"server: http://openbao.openbao.svc:8200",
 		"mountPath: kubernetes",

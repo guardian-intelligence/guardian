@@ -18,12 +18,13 @@ type directusInstanceManifest struct {
 }
 
 type directusInstanceSpec struct {
-	Site             string `yaml:"site"`
-	Namespace        string `yaml:"namespace"`
-	Image            string `yaml:"image"`
-	PostgresImage    string `yaml:"postgresImage"`
-	PublicAdminRoute bool   `yaml:"publicAdminRoute"`
-	AdminDomain      string `yaml:"adminDomain"`
+	Site             string            `yaml:"site"`
+	Namespace        string            `yaml:"namespace"`
+	NamespaceLabels  map[string]string `yaml:"namespaceLabels"`
+	Image            string            `yaml:"image"`
+	PostgresImage    string            `yaml:"postgresImage"`
+	PublicAdminRoute bool              `yaml:"publicAdminRoute"`
+	AdminDomain      string            `yaml:"adminDomain"`
 	Resources        struct {
 		Requests map[string]string `yaml:"requests"`
 		Limits   map[string]string `yaml:"limits"`
