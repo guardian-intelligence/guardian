@@ -2,7 +2,7 @@
 
 Brings up the per-site ledger — ClickHouse plus the otel-collector's logs
 tee (filelog container logs + k8sobjects k8s Events) — on a site whose
-environment bundle sets `platform.clickhouse.enabled: true`. Customer-grade: every step is a
+environment bundle has `ObservabilityStack.spec.clickhouse.enabled: true`. Customer-grade: every step is a
 command against the real site, in order, with its verification. The ratchet
 is dev → gamma → prod; never start a site before the previous one's verify
 section passes.
@@ -98,11 +98,11 @@ chq() { kubectl -n observability exec -i deploy/clickhouse -- \
 
 ## 4. Prod note
 
-Prod's `clickhouse.enabled` is `false` and its converge is deferred to the
+Prod's `ObservabilityStack.spec.clickhouse.enabled` is `false` and its converge is deferred to the
 M5 prod step. Before flipping it, confirm the OpenBao snapshot/restore path
 contains `kv/guardian/guardian-prod/observability/clickhouse-admin` or run
 the explicit Bao schema migration path. Do not pre-create the Kubernetes
-Secret. With the flag off, prod's collector renders byte-identical to the
+Secret. With that field off, prod's collector renders byte-identical to the
 metrics-only spine and prod deploys no clickhouse objects.
 
 ## Standing rules

@@ -21,8 +21,6 @@ data:
   platform:
     oci:
       domain: oci.guardianintelligence.org
-    clickhouse:
-      enabled: true
     status:
       domains:
         - status.guardianintelligence.org
@@ -87,6 +85,18 @@ spec:
       expectedStatus: 200
       bodyContains: never be sold
       gate: true
+---
+apiVersion: platform.guardian.dev/v1alpha1
+kind: ObservabilityStack
+metadata:
+  name: observability
+spec:
+  site: dev
+  namespace: observability
+  namespaceLabels:
+    pod-security.kubernetes.io/enforce: privileged
+  clickhouse:
+    enabled: true
 ---
 apiVersion: platform.guardian.dev/v1alpha1
 kind: SecretProjection

@@ -1,7 +1,7 @@
 # OTel Collector: the metrics spine, plus — on ledger sites
-# (clickhouse.enabled) — the log/event tee into the per-site ClickHouse
+# (ObservabilityStack spec.clickhouse.enabled) — the log/event tee into the per-site ClickHouse
 # (filelog + k8sobjects → clickhouse exporter; docs/runbooks/ledger.md).
-# Every ledger addition in this file branches on that flag so a non-ledger
+# Every ledger addition in this file branches on that field so a non-ledger
 # site renders byte-identical to the metrics-only spine. One collector per
 # node scrapes every exporter and remote-writes to the site's
 # VictoriaMetrics. It runs hostNetwork because most substrate targets only

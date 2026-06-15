@@ -1,0 +1,94 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: observabilitystacks.platform.guardian.dev
+spec:
+  scope: Cluster
+  group: platform.guardian.dev
+  names:
+    kind: ObservabilityStack
+    plural: observabilitystacks
+  defaultCompositionRef:
+    name: observability-stack-status
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                site:
+                  type: string
+                namespace:
+                  type: string
+                namespaceLabels:
+                  type: object
+                  additionalProperties:
+                    type: string
+                clickhouse:
+                  type: object
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: false
+              required:
+                - site
+                - namespace
+                - clickhouse
+            status:
+              type: object
+              properties:
+                namespace:
+                  type: string
+                clickhouseEnabled:
+                  type: boolean
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: observability-stack-status
+spec:
+  compositeTypeRef:
+    apiVersion: platform.guardian.dev/v1alpha1
+    kind: ObservabilityStack
+  mode: Pipeline
+  pipeline:
+    - step: load-environment
+      functionRef:
+        name: function-environment-configs
+      input:
+        apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+        kind: Input
+        spec:
+          environmentConfigs:
+            - type: Selector
+              selector:
+                mode: Single
+                matchLabels:
+                  - key: guardian.dev/site
+                    type: FromCompositeFieldPath
+                    valueFromFieldPath: spec.site
+    - step: mark-observability-stack
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            ---
+            apiVersion: platform.guardian.dev/v1alpha1
+            kind: ObservabilityStack
+            status:
+              namespace: {{ $spec.namespace }}
+              clickhouseEnabled: {{ $spec.clickhouse.enabled }}
+    - step: mark-ready
+      functionRef:
+        name: function-auto-ready

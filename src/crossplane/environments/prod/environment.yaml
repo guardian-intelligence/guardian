@@ -20,8 +20,6 @@ data:
       domain: guardianintelligence.org
   platform:
     oci: {}
-    clickhouse:
-      enabled: false
     status: {}
 ---
 apiVersion: platform.guardian.dev/v1alpha1
@@ -131,6 +129,18 @@ spec:
       url: https://gamma.guardianintelligence.org/news
       expectedStatus: 200
       gate: true
+---
+apiVersion: platform.guardian.dev/v1alpha1
+kind: ObservabilityStack
+metadata:
+  name: observability
+spec:
+  site: prod
+  namespace: observability
+  namespaceLabels:
+    pod-security.kubernetes.io/enforce: privileged
+  clickhouse:
+    enabled: false
 ---
 apiVersion: platform.guardian.dev/v1alpha1
 kind: SecretProjection

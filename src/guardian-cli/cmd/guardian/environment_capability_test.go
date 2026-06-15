@@ -11,9 +11,10 @@ func TestEnvironmentCapabilities(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := map[string]string{
-				"AisucksProduct/aisucks":    "aisucksproducts.products.guardian.dev",
-				"CompanySite/company-site":  "companysites.products.guardian.dev",
-				"DirectusInstance/directus": "directusinstances.platform.guardian.dev",
+				"AisucksProduct/aisucks":           "aisucksproducts.products.guardian.dev",
+				"CompanySite/company-site":         "companysites.products.guardian.dev",
+				"DirectusInstance/directus":        "directusinstances.platform.guardian.dev",
+				"ObservabilityStack/observability": "observabilitystacks.platform.guardian.dev",
 			}
 			wantRollouts := map[string][]environmentRollout{
 				"AisucksProduct/aisucks": {
@@ -22,7 +23,8 @@ func TestEnvironmentCapabilities(t *testing.T) {
 				"CompanySite/company-site": {
 					{namespace: "company", resource: "deployment/company-site"},
 				},
-				"DirectusInstance/directus": nil,
+				"DirectusInstance/directus":        nil,
+				"ObservabilityStack/observability": nil,
 			}
 			if siteName == "dev" {
 				want["OCIRegistry/zot"] = "ociregistries.platform.guardian.dev"

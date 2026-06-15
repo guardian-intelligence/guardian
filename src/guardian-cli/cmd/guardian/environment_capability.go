@@ -76,6 +76,8 @@ func environmentCapabilityResource(kind string) (string, bool) {
 		return "companysites.products.guardian.dev", true
 	case "DirectusInstance":
 		return "directusinstances.platform.guardian.dev", true
+	case "ObservabilityStack":
+		return "observabilitystacks.platform.guardian.dev", true
 	case "OCIRegistry":
 		return "ociregistries.platform.guardian.dev", true
 	default:
