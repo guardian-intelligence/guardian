@@ -97,7 +97,7 @@ SDK='oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<digest>'
 
 guardian run oras pull "$SDK" -o ./dist
 guardian run oras discover "$SDK"
-guardian run cosign verify "$SDK" \
+COSIGN_EXPERIMENTAL=1 guardian run cosign verify --experimental-oci11=true "$SDK" \
   --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml@refs/heads/main' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 ```

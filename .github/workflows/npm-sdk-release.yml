@@ -167,9 +167,9 @@ jobs:
             "oci.guardianintelligence.org/guardian/aisucks/sdk/npm:${GATE_TO}"
             --output-dir
             "$promote_output"
-            --skip-npm
             --with-attestation
             --sign-oci
+            --npm-provenance
           )
           if [[ "${{ inputs.source-ref }}" != "" ]]; then
             args+=(--source-root "$GITHUB_WORKSPACE/release-source")

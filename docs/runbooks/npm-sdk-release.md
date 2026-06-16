@@ -77,8 +77,8 @@ OCI layout and release records.
 
 `sdkoci` is the low-level OCI pack/push helper. It does not decide whether a
 release should happen; it only writes the package tarball payload as an OCI
-artifact and, when later evidence flags are enabled, attaches the admitted
-in-toto JSONL bundle as an OCI referrer.
+artifact and, when evidence is requested by the package release operator,
+attaches the admitted in-toto JSONL bundle as an OCI referrer.
 
 This milestone must produce:
 
@@ -89,8 +89,10 @@ This milestone must produce:
   nightly→RC Health gates
 - npm dist-tags for the selected channel after the gate passes
 
-DSSE/in-toto, cosign signatures, and npm provenance are explicit later flags,
-not the default path for this milestone.
+Public release and promotion runs request DSSE/in-toto evidence, cosign signing,
+and npm Trusted Publishing provenance. Local check runs may omit those flags
+because they do not have GitHub OIDC identity or public registry write
+authority.
 
 The OCI reference forms are defined in
 `docs/architecture/oci-artifact-references.md`.
@@ -167,13 +169,18 @@ calls Connect Health through the installed SDK, and emits:
 
 - `synthetic-result.v1.json`
 - `gate-result.v1.json`
+- `promotion-vsa.v1.json`
+- `promotion-vsa.sigstore.bundle.json`
+- `promotion-vsa.intoto.jsonl`
 - `gate-summary.md`
 
 The current checks are synthetic success, required Health capability, p95
 latency, observed TPS, tarball bytes, and unpacked package bytes. A passing
-gate can then run `aspect release sdk-oci --publish --channel <to-channel> ...`
-to move the OCI tag and npm dist-tag through the same package-owned release
-logic.
+gate can then run `aspect release sdk-oci --publish --channel <to-channel>
+--with-attestation --sign-oci --npm-provenance ...` to move the OCI tag and npm
+dist-tag through the same package-owned release logic. If npm already has the
+exact package version and integrity, this is an idempotent dist-tag operation;
+if the bytes differ, the release fails.
 
 ## Verify OCI Subject
 
@@ -193,12 +200,12 @@ SDK='oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>'
 
 guardian run oras pull "$SDK" -o ./dist
 guardian run oras discover "$SDK"
-guardian run cosign verify "$SDK" \
+COSIGN_EXPERIMENTAL=1 guardian run cosign verify --experimental-oci11=true "$SDK" \
   --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml@refs/heads/main' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 ```
 
-Expected after the later evidence flags are enabled:
+Expected:
 
 - `oras pull` writes exactly one npm `.tgz` payload.
 - `oras discover` shows the
