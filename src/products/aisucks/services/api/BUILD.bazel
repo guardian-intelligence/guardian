@@ -8,12 +8,17 @@ go_format()
 go_library(
     name = "api_lib",
     srcs = [
+        "health_rpc.go",
         "main.go",
         "metrics.go",
         "web.go",
     ],
     embedsrcs = ["web/index.html"],
     importpath = "github.com/guardian-intelligence/guardian/src/products/aisucks/services/api",
+    deps = [
+        "//src/products/aisucks/api:aisucks_go",
+        "@com_connectrpc_connect//:connect",
+    ],
     visibility = ["//visibility:private"],
 )
 

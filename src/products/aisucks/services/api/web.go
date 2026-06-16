@@ -11,11 +11,13 @@ type server struct {
 	metrics *metrics
 }
 
-func newServer(page []byte, metrics *metrics, domain string) *server {
+func newServer(page []byte, metrics *metrics, domain string, apiVersion string) *server {
 	s := &server{mux: http.NewServeMux(), page: page, metrics: metrics}
 	s.mux.HandleFunc("GET /{$}", metrics.wrap("GET /{$}", s.handleIndex))
 	s.mux.HandleFunc("GET /healthz", metrics.wrap("GET /healthz", s.handleHealthz))
 	s.mux.HandleFunc("GET /livez", metrics.wrap("GET /livez", s.handleLivez))
+	healthPath, healthHandler := newHealthRPCHandler(apiVersion)
+	s.mux.Handle(healthPath, metrics.wrapHandler("AisucksService.Health", healthHandler))
 	return s
 }
 

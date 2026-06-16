@@ -43,6 +43,12 @@ def _sdk_oci_impl(ctx):
         cli_args.append("--skip-npm")
     if ctx.args.skip_oci:
         cli_args.append("--skip-oci")
+    if ctx.args.with_attestation:
+        cli_args.append("--with-attestation")
+    if ctx.args.sign_oci:
+        cli_args.append("--sign-oci")
+    if ctx.args.npm_provenance:
+        cli_args.append("--npm-provenance")
 
     return checked_spawn(
         ctx,
@@ -50,6 +56,61 @@ def _sdk_oci_impl(ctx):
         cli_args,
         cwd = ws_path(ctx),
         label = "aisucks SDK package release",
+    )
+
+def _sdk_gate_impl(ctx):
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        [
+            "build",
+            "//src/viteplus-monorepo:workspace_install",
+            "//src/viteplus-monorepo:vp_node",
+        ],
+        cwd = ws_path(ctx),
+        label = "bazelisk build SDK gate runner inputs",
+    )
+    if rc != 0:
+        return rc
+
+    node = ws_path(ctx, "bazel-bin/src/viteplus-monorepo/node")
+    npm = ws_path(ctx, "src/viteplus-monorepo/packages/aisucks-sdk/node_modules/npm/bin/npm-cli.js")
+    tsx = ws_path(ctx, "src/viteplus-monorepo/packages/aisucks-sdk/node_modules/tsx/dist/cli.mjs")
+    gate_main = ws_path(ctx, "src/viteplus-monorepo/packages/aisucks-sdk/release/gate.ts")
+
+    cli_args = [
+        tsx,
+        gate_main,
+        "--track", ctx.args.track,
+        "--from-channel", ctx.args.from_channel,
+        "--to-channel", ctx.args.to_channel,
+        "--endpoint", ctx.args.endpoint,
+        "--node", node,
+        "--npm", npm,
+    ]
+    if ctx.args.iterations != "":
+        cli_args.extend(["--iterations", ctx.args.iterations])
+    if ctx.args.concurrency != "":
+        cli_args.extend(["--concurrency", ctx.args.concurrency])
+    if ctx.args.max_p95_latency_ms != "":
+        cli_args.extend(["--max-p95-latency-ms", ctx.args.max_p95_latency_ms])
+    if ctx.args.min_tps != "":
+        cli_args.extend(["--min-tps", ctx.args.min_tps])
+    if ctx.args.max_tarball_bytes != "":
+        cli_args.extend(["--max-tarball-bytes", ctx.args.max_tarball_bytes])
+    if ctx.args.max_unpacked_bytes != "":
+        cli_args.extend(["--max-unpacked-bytes", ctx.args.max_unpacked_bytes])
+    if ctx.args.required_capability != "":
+        cli_args.extend(["--required-capability", ctx.args.required_capability])
+    if ctx.args.output_dir != "":
+        cli_args.extend(["--output-dir", ctx.args.output_dir])
+
+    return checked_spawn(
+        ctx,
+        node,
+        cli_args,
+        cwd = ws_path(ctx),
+        label = "aisucks SDK public Health gate",
     )
 
 sdk_oci = task(
@@ -66,5 +127,29 @@ sdk_oci = task(
         "require_signature": args.boolean(default = False, description = "Require real Sigstore signing even in local check mode."),
         "skip_npm": args.boolean(default = False, description = "Skip npm publication in publish mode."),
         "skip_oci": args.boolean(default = False, description = "Skip public OCI publication in publish mode."),
+        "with_attestation": args.boolean(default = False, description = "Create DSSE/in-toto evidence for later provenance milestones."),
+        "sign_oci": args.boolean(default = False, description = "Cosign-sign the published OCI subject."),
+        "npm_provenance": args.boolean(default = False, description = "Request npm provenance during npm publication."),
+    },
+)
+
+sdk_gate = task(
+    implementation = _sdk_gate_impl,
+    name = "sdk-gate",
+    group = ["release"],
+    summary = "Run the aisucks published SDK Health SLO gate.",
+    args = {
+        "track": args.string(default = "nightly", description = "Gate track: nightly or rc."),
+        "from_channel": args.string(default = "edge", description = "Published npm dist-tag/channel to install."),
+        "to_channel": args.string(default = "nightly", description = "Channel this gate would promote to on pass."),
+        "endpoint": args.string(default = "https://gamma.aisucks.app", description = "Aisucks endpoint to probe through the installed SDK."),
+        "iterations": args.string(default = "", description = "Override request count; track default is used when empty."),
+        "concurrency": args.string(default = "", description = "Override request concurrency; track default is used when empty."),
+        "max_p95_latency_ms": args.string(default = "", description = "Override p95 latency threshold in milliseconds; track default is used when empty."),
+        "min_tps": args.string(default = "", description = "Override minimum observed TPS; track default is used when empty."),
+        "max_tarball_bytes": args.string(default = "", description = "Override maximum npm tarball bytes; track default is used when empty."),
+        "max_unpacked_bytes": args.string(default = "", description = "Override maximum npm unpacked bytes; track default is used when empty."),
+        "required_capability": args.string(default = "", description = "Required Health capability marker."),
+        "output_dir": args.string(default = "", description = "Directory for synthetic/gate result JSON."),
     },
 )

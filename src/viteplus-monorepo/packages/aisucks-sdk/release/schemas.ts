@@ -163,9 +163,11 @@ export const ReleaseLogLineSchema = Schema.Struct({
 export const ReleaseResultSchema = Schema.Struct({
   target: ReleaseTargetSchema,
   candidate: ReleaseCandidateSchema,
-  evidence: EvidenceBundleSchema,
+  evidence: Schema.optional(EvidenceBundleSchema),
+  attestationStatus: Schema.Literal("not-requested", "created"),
   publishedOci: Schema.optional(SdkOciResultSchema),
   ociSignatureStatus: Schema.Literal("not-requested", "signed"),
+  npmProvenanceStatus: Schema.Literal("not-requested", "requested"),
   npmStatus: Schema.Literal("not-requested", "published", "already-published"),
   eventLog: Schema.Array(ReleaseEventSchema),
   outputDir: Schema.String,
@@ -180,7 +182,9 @@ export const ReleaseSummarySchema = Schema.Struct({
   outputDir: Schema.String,
   ociDigest: Schema.String,
   publishedOciDigest: Schema.optional(Schema.String),
+  attestationStatus: Schema.Literal("not-requested", "created"),
   ociSignatureStatus: Schema.Literal("not-requested", "signed"),
+  npmProvenanceStatus: Schema.Literal("not-requested", "requested"),
   npmStatus: Schema.Literal("not-requested", "published", "already-published"),
 });
 

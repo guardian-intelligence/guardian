@@ -24,6 +24,8 @@ var webFS embed.FS
 
 var logger = slog.New(slog.NewJSONHandler(os.Stderr, nil)).With("component", "aisucks-api")
 
+const defaultAPIVersion = "0.1.0"
+
 func main() {
 	if err := run(); err != nil {
 		logger.Error("fatal", "error", err)
@@ -61,8 +63,9 @@ func run() error {
 		return fmt.Errorf("read embedded page: %w", err)
 	}
 
-	metrics := newMetrics()
-	app := newServer(page, metrics, domain)
+	apiVersion := envOr("APP_VERSION", defaultAPIVersion)
+	metrics := newMetrics(apiVersion)
+	app := newServer(page, metrics, domain, apiVersion)
 
 	silenced := log.New(io.Discard, "", 0)
 

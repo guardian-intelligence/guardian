@@ -1,5 +1,11 @@
 # @guardian-intelligence/aisucks
 
+## 0.3.1
+
+### Patch Changes
+
+- Add Health capability reporting for release gate compatibility checks.
+
 ## 0.3.0
 
 ### Minor Changes

@@ -48,6 +48,9 @@ export type ReleaseConfig = {
   readonly ociRef: string;
   readonly publishNpm: boolean;
   readonly publishOci: boolean;
+  readonly createAttestation: boolean;
+  readonly signOci: boolean;
+  readonly npmProvenance: boolean;
   readonly allowUnsignedDev: boolean;
   readonly outputDir: string | undefined;
   readonly paths: ReleasePaths;
