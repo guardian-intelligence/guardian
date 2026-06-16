@@ -344,9 +344,6 @@ func runUp(args []string) error {
 	if err := backupPlatformTLSSecrets(kubectl, kubeconfig, state, site); err != nil {
 		return err
 	}
-	if err := apply("victoria-metrics"); err != nil {
-		return err
-	}
 	if err := apply("external-secrets"); err != nil {
 		return err
 	}
@@ -361,7 +358,7 @@ func runUp(args []string) error {
 	}
 	for _, c := range components {
 		switch c.name {
-		case "openbao", "crossplane", "cert-manager", "provider-kubernetes", "provider-kubernetes-config", "edge-gateway-platform", "secret-projection-platform", "public-http-service-platform", "directus-platform", "observability-stack-platform", "slo-profile-platform", "status-surface-platform", "oci-registry-platform", "aisucks-product-api", "company-site-product-api", "victoria-metrics", "external-secrets":
+		case "openbao", "crossplane", "cert-manager", "provider-kubernetes", "provider-kubernetes-config", "edge-gateway-platform", "secret-projection-platform", "public-http-service-platform", "directus-platform", "observability-stack-platform", "slo-profile-platform", "status-surface-platform", "oci-registry-platform", "aisucks-product-api", "company-site-product-api", "external-secrets":
 			continue
 		default:
 			if err := applyComponent(kubectl, kubeconfig, c, images, site); err != nil {

@@ -154,12 +154,11 @@ var components = []component{{
 	layout:   "_main/src/infrastructure-components/gatus/image",
 	manifest: "src/infrastructure-components/gatus/k8s/gatus.yaml.tmpl",
 }, {
-	// victoria-metrics first among observability components: its manifest
-	// owns the observability Namespace, which the rest of the stack
-	// assumes already exists.
+	// ObservabilityStack consumes this image from the environment bundle and
+	// owns the observability Namespace/Deployment/Service through Crossplane.
 	name:     "victoria-metrics",
 	layout:   "_main/src/infrastructure-components/victoria-metrics/image",
-	manifest: "src/infrastructure-components/victoria-metrics/k8s/victoria-metrics.yaml.tmpl",
+	pushOnly: true,
 }, {
 	// Cluster-wide controller for SecretProjection's namespace-scoped
 	// SecretStores and ExternalSecrets. Source access remains bounded by
@@ -172,16 +171,16 @@ var components = []component{{
 	layout:   "_main/src/infrastructure-components/kube-state-metrics/image",
 	manifest: "src/infrastructure-components/kube-state-metrics/k8s/kube-state-metrics.yaml.tmpl",
 }, {
-	// clickhouse after victoria-metrics (the observability Namespace owner)
-	// and before otel-collector: the collector's clickhouse exporter
-	// retries, but there is no reason to start the logs pipeline with its
-	// ledger behind. List order is apply order and no test pins this pair —
-	// this comment carries the invariant. Site-gated like gateway (the
-	// ledger ratchet: dev → gamma → prod); the otel-collector template
-	// branches on the same flag, so a non-ledger site's collector renders
-	// byte-identical to the metrics-only spine. The otel schema is NOT
-	// applied here: docs/runbooks/ledger.md applies k8s/ddl/ by hand and
-	// the exporter runs create_schema: false.
+	// clickhouse after ObservabilityStack (the observability Namespace and
+	// VictoriaMetrics owner) and before otel-collector: the collector's
+	// clickhouse exporter retries, but there is no reason to start the logs
+	// pipeline with its ledger behind. List order is apply order and no test
+	// pins this pair — this comment carries the invariant. Site-gated like
+	// gateway (the ledger ratchet: dev → gamma → prod); the otel-collector
+	// template branches on the same flag, so a non-ledger site's collector
+	// renders byte-identical to the metrics-only spine. The otel schema is
+	// NOT applied here: docs/runbooks/ledger.md applies k8s/ddl/ by hand
+	// and the exporter runs create_schema: false.
 	name:     "clickhouse",
 	layout:   "_main/src/infrastructure-components/clickhouse/image",
 	manifest: "src/infrastructure-components/clickhouse/k8s/clickhouse.yaml.tmpl",
@@ -191,15 +190,16 @@ var components = []component{{
 	layout:   "_main/src/infrastructure-components/otel-collector/image",
 	manifest: "src/infrastructure-components/otel-collector/k8s/otel-collector.yaml.tmpl",
 }, {
-	// After victoria-metrics: the observability Namespace object is owned
-	// by the victoria-metrics manifest and alertmanager assumes it exists.
+	// After ObservabilityStack: alertmanager assumes the observability
+	// Namespace and VictoriaMetrics service already exist.
 	name:     "alertmanager",
 	layout:   "_main/src/infrastructure-components/alertmanager/image",
 	manifest: "src/infrastructure-components/alertmanager/k8s/alertmanager.yaml.tmpl",
 }, {
-	// vmalert after victoria-metrics (owns the observability Namespace and
-	// is the datasource) and alertmanager (the notifier): it retries both,
-	// but there is no reason to start rule eval with its backends behind.
+	// vmalert after ObservabilityStack (owns the observability Namespace and
+	// VictoriaMetrics datasource) and alertmanager (the notifier): it retries
+	// both, but there is no reason to start rule eval with its backends
+	// behind.
 	name:     "vmalert",
 	layout:   "_main/src/infrastructure-components/vmalert/image",
 	manifest: "src/infrastructure-components/vmalert/k8s/vmalert.yaml.tmpl",
@@ -208,9 +208,8 @@ var components = []component{{
 	layout:   "_main/src/infrastructure-components/blackbox-exporter/image",
 	manifest: "src/infrastructure-components/blackbox-exporter/k8s/blackbox-exporter.yaml.tmpl",
 }, {
-	// grafana after victoria-metrics: the observability Namespace object is
-	// owned by the victoria-metrics manifest, and the datasource points at
-	// the VM service.
+	// grafana after ObservabilityStack: the observability Namespace object is
+	// owned by Crossplane, and the datasource points at the VM service.
 	name:     "grafana",
 	layout:   "_main/src/infrastructure-components/grafana/image",
 	manifest: "src/infrastructure-components/grafana/k8s/grafana.yaml.tmpl",

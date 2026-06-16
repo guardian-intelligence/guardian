@@ -138,6 +138,19 @@ spec:
   namespace: observability
   namespaceLabels:
     pod-security.kubernetes.io/enforce: privileged
+  victoriaMetrics:
+    image: '{{ index .Images "victoria-metrics" }}'
+    storagePath: /var/lib/victoria-metrics
+    retentionPeriod: "13"
+    memoryAllowedBytes: 256MiB
+    ports:
+      http: 8428
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
   clickhouse:
     enabled: false
 ---
@@ -177,8 +190,7 @@ metadata:
 spec:
   target:
     namespace: observability
-    namespaceLabels:
-      pod-security.kubernetes.io/enforce: privileged
+    createNamespace: false
   openbao:
     role: observability-secrets
     serviceAccountName: external-secrets-observability

@@ -7,6 +7,7 @@ import (
 
 const aisucksTestImage = "registry.guardian.internal/aisucks@sha256:deadbeef"
 const statusTestImage = "registry.guardian.internal/status@sha256:deadbeef"
+const victoriaMetricsTestImage = "registry.guardian.internal/victoria-metrics@sha256:deadbeef"
 
 func TestAisucksProductAPIRender(t *testing.T) {
 	c := componentByName(t, "aisucks-product-api")
@@ -85,12 +86,13 @@ func loadTestSite(t *testing.T, siteName string) *Site {
 
 func testProductImages() map[string]string {
 	return map[string]string{
-		"aisucks":      aisucksTestImage,
-		"company-site": companyTestImage,
-		"directus":     directusTestImage,
-		"postgres":     postgresTestImage,
-		"status":       statusTestImage,
-		"zot":          zotTestImage,
+		"aisucks":          aisucksTestImage,
+		"company-site":     companyTestImage,
+		"directus":         directusTestImage,
+		"postgres":         postgresTestImage,
+		"status":           statusTestImage,
+		"victoria-metrics": victoriaMetricsTestImage,
+		"zot":              zotTestImage,
 	}
 }
 

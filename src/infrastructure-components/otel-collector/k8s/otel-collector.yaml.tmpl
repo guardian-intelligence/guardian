@@ -11,8 +11,8 @@
 # (kube-state-metrics, blackbox-exporter, victoria-metrics) still resolve
 # and route from the host netns via Cilium socket-LB + ClusterFirstWithHostNet.
 #
-# The observability Namespace (privileged PSA) is owned by the
-# victoria-metrics manifest; this component assumes it exists.
+# The observability Namespace (privileged PSA) and VictoriaMetrics Service are
+# owned by the ObservabilityStack XR; this component assumes they exist.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -346,10 +346,9 @@ spec:
           # filelog reads /var/log/pods, which the kubelet writes root-owned
           # 0640; the contrib image's default uid (10001) cannot read them.
           # A real privilege increase on a hostNetwork pod — bounded by the
-          # read-only mount, the namespace's already-privileged PSA (label
-          # owned by the victoria-metrics manifest), the single-node
-          # cluster, and this being the standard posture for node log
-          # agents.
+          # read-only mount, the namespace's already-privileged PSA (owned
+          # by ObservabilityStack), the single-node cluster, and this being
+          # the standard posture for node log agents.
           securityContext:
             runAsUser: 0
           env:

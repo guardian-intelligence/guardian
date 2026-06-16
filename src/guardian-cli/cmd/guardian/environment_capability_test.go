@@ -24,8 +24,10 @@ func TestEnvironmentCapabilities(t *testing.T) {
 				"CompanySite/company-site": {
 					{namespace: "company", resource: "deployment/company-site"},
 				},
-				"DirectusInstance/directus":        nil,
-				"ObservabilityStack/observability": nil,
+				"DirectusInstance/directus": nil,
+				"ObservabilityStack/observability": {
+					{namespace: "observability", resource: "deployment/victoria-metrics"},
+				},
 			}
 			if siteName == "prod" {
 				wantRollouts["StatusSurface/status"] = nil
