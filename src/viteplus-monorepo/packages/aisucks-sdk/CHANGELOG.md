@@ -1,5 +1,11 @@
 # @guardian-intelligence/aisucks
 
+## 0.3.2
+
+### Patch Changes
+
+- Publish npm-installable dependency specifiers for release gate installation checks.
+
 ## 0.3.1
 
 ### Patch Changes
