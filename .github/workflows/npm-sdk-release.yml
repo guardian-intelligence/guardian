@@ -90,7 +90,7 @@ jobs:
 
       - name: Install repo-pinned tools
         run: |
-          bazelisk run //src/guardian-cli/cmd/guardian -- tools install --bin-dir "$RUNNER_TEMP/guardian-bin"
+          bazelisk run //src/guardian-cli/cmd/guardian:guardian_tools -- tools install --bin-dir "$RUNNER_TEMP/guardian-bin"
           echo "$RUNNER_TEMP/guardian-bin" >> "$GITHUB_PATH"
 
       - name: Release SDK

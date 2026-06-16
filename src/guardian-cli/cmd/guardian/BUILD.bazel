@@ -81,6 +81,12 @@ go_binary(
     visibility = ["//visibility:public"],
 )
 
+go_binary(
+    name = "guardian_tools",
+    embed = [":guardian_lib"],
+    visibility = ["//visibility:public"],
+)
+
 go_test(
     name = "guardian_test",
     srcs = [
