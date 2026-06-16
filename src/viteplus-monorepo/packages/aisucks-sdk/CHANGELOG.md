@@ -1,5 +1,12 @@
 # @guardian-intelligence/aisucks
 
+## 0.4.0
+
+### Minor Changes
+
+- Add release declaration admission for public SDK OCI subjects, verifying the
+  cosign signature and SLSA provenance contract before writing release metadata.
+
 ## 0.3.3
 
 ### Patch Changes

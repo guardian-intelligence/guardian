@@ -113,6 +113,48 @@ def _sdk_gate_impl(ctx):
         label = "aisucks SDK public Health gate",
     )
 
+def _declare_impl(ctx):
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        [
+            "build",
+            "//src/viteplus-monorepo:workspace_install",
+            "//src/viteplus-monorepo:vp_node",
+        ],
+        cwd = ws_path(ctx),
+        label = "bazelisk build release declaration runner inputs",
+    )
+    if rc != 0:
+        return rc
+
+    node = ws_path(ctx, "bazel-bin/src/viteplus-monorepo/node")
+    tsx = ws_path(ctx, "src/viteplus-monorepo/packages/aisucks-sdk/node_modules/tsx/dist/cli.mjs")
+    declare_main = ws_path(ctx, "src/viteplus-monorepo/packages/aisucks-sdk/release/declare.ts")
+
+    cli_args = [
+        tsx,
+        declare_main,
+        "--product", ctx.args.product,
+        "--version", ctx.args.version,
+        "--commit", ctx.args.commit,
+        "--track", ctx.args.track,
+    ]
+    if ctx.args.oci_ref != "":
+        cli_args.extend(["--oci-ref", ctx.args.oci_ref])
+    if ctx.args.output_dir != "":
+        cli_args.extend(["--output-dir", ctx.args.output_dir])
+    if ctx.args.source_root != "":
+        cli_args.extend(["--source-root", ctx.args.source_root])
+
+    return checked_spawn(
+        ctx,
+        node,
+        cli_args,
+        cwd = ws_path(ctx),
+        label = "Guardian release declaration admission",
+    )
+
 sdk_oci = task(
     implementation = _sdk_oci_impl,
     name = "sdk-oci",
@@ -130,6 +172,22 @@ sdk_oci = task(
         "with_attestation": args.boolean(default = False, description = "Create SLSA provenance and attach it to the public OCI subject in publish mode."),
         "sign_oci": args.boolean(default = False, description = "Cosign-sign the published OCI subject."),
         "npm_provenance": args.boolean(default = False, description = "Request npm provenance during npm publication."),
+    },
+)
+
+declare = task(
+    implementation = _declare_impl,
+    name = "declare",
+    group = ["release"],
+    summary = "Declare a release subject after public cosign/SLSA admission.",
+    args = {
+        "product": args.string(default = "", description = "Product being declared; currently aisucks."),
+        "version": args.string(default = "", description = "External release version, such as 1.2.3-rc.1."),
+        "commit": args.string(default = "", description = "Full source commit SHA expected in SLSA provenance."),
+        "track": args.string(default = "", description = "Release track: edge, nightly, rc, or stable."),
+        "oci_ref": args.string(default = "", description = "Optional SDK OCI reference; defaults to the npm-v<version> tag."),
+        "output_dir": args.string(default = "", description = "Directory for release-declaration.json."),
+        "source_root": args.string(default = "", description = "Repository root used for tool defaults."),
     },
 )
 

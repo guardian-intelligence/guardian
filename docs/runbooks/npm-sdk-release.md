@@ -223,6 +223,30 @@ Expected:
 - `cosign verify-attestation` verifies one DSSE envelope whose payload is an
   in-toto Statement with SLSA provenance predicate.
 
+## Declare Release Subject
+
+Release declaration is the first admission boundary for an external version. It
+resolves the SDK version tag to an immutable OCI digest, verifies the cosign v3
+signature and SLSA provenance against the pinned main workflow identity, checks
+that the provenance names the declared source commit, and only then writes
+`release-declaration.json`.
+
+```sh
+aspect release declare \
+  --product aisucks \
+  --version 1.2.3-rc.1 \
+  --commit <40-char-source-sha> \
+  --track rc
+```
+
+The default OCI input is
+`oci.guardianintelligence.org/guardian/aisucks/sdk/npm:npm-v<version>`. Use
+`--oci-ref <ref>` only when deliberately declaring a different already-published
+SDK subject. Admission fails before writing the declaration if `oras resolve`,
+`cosign verify`, `cosign verify-attestation`, the SLSA subject digest, the
+release target version/package, the source commit, or the builder id do not
+match the contract.
+
 ## Verify npm Projection
 
 ```sh

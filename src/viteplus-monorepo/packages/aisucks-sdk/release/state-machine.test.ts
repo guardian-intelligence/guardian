@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import { Cause, Effect, Exit, Layer, Option } from "effect";
 
+import { declareRelease, parseDeclarationConfig } from "./declare.js";
 import { CommandFailed } from "./errors.js";
-import { ProcessProvider, type CommandInput } from "./providers.js";
+import { LoggerProvider, NodeFileLayer, ProcessProvider, type CommandInput } from "./providers.js";
 import {
   cosignAttestArgs,
   cosignReleaseEnv,
@@ -21,9 +25,15 @@ import {
   defaultOciRef,
   defaultReleasePaths,
   distributable,
+  githubOidcIssuer,
+  inTotoStatementType,
   payloadForm,
   sdkPackageName,
+  sdkReleaseWorkflowIdentity,
+  slsaProvenancePredicateType,
   sourceRepo,
+  type CommandResult,
+  type InTotoStatement,
   type ReleaseCandidate,
   type ReleaseConfig,
 } from "./types.js";
@@ -98,6 +108,130 @@ void test("cosign verification pins the release workflow identity", () => {
     "--certificate-oidc-issuer",
     "https://token.actions.githubusercontent.com",
   ]);
+});
+
+void test("release declaration admits a verified public SDK OCI subject", async (t) => {
+  const outputDir = mkdtempSync(path.join(os.tmpdir(), "guardian-declare-test-"));
+  t.after(() => rmSync(outputDir, { force: true, recursive: true }));
+  const calls: CommandInput[] = [];
+  const config = parseDeclarationConfig([
+    "--product",
+    "aisucks",
+    "--version",
+    declarationVersion,
+    "--commit",
+    declarationCommit,
+    "--track",
+    "rc",
+    "--output-dir",
+    outputDir,
+    "--cosign",
+    "cosign",
+    "--oras",
+    "oras",
+  ]);
+
+  const result = await Effect.runPromise(
+    declareRelease(config).pipe(
+      Effect.provide(
+        declarationLayer(calls, {
+          attestationStdout: declarationDsseOutput(declarationStatement()),
+        }),
+      ),
+    ),
+  );
+
+  assert.equal(result.subjectRef, declarationDigestRef);
+  assert.equal(result.subjectDigest, declarationDigest);
+  assert.equal(existsSync(path.join(outputDir, "release-declaration.json")), true);
+  assert.deepEqual(
+    calls.map((call) => call.args),
+    [
+      ["resolve", "--full-reference", declarationVersionRef],
+      [
+        "verify",
+        declarationDigestRef,
+        "--certificate-identity",
+        sdkReleaseWorkflowIdentity,
+        "--certificate-oidc-issuer",
+        githubOidcIssuer,
+      ],
+      [
+        "verify-attestation",
+        "--type",
+        "slsaprovenance1",
+        declarationDigestRef,
+        "--certificate-identity",
+        sdkReleaseWorkflowIdentity,
+        "--certificate-oidc-issuer",
+        githubOidcIssuer,
+      ],
+    ],
+  );
+});
+
+void test("release declaration rejects when cosign cannot verify the SLSA attestation contract", async () => {
+  const calls: CommandInput[] = [];
+  const exit = await Effect.runPromiseExit(
+    declareRelease(
+      parseDeclarationConfig([
+        "--product",
+        "aisucks",
+        "--version",
+        declarationVersion,
+        "--commit",
+        declarationCommit,
+        "--track",
+        "rc",
+      ]),
+    ).pipe(
+      Effect.provide(
+        declarationLayer(calls, {
+          attestationFailure: "no matching attestations for certificate identity",
+        }),
+      ),
+    ),
+  );
+
+  const failure = releaseFailure(exit);
+  assert.equal(failure._tag, "VerificationFailed");
+  if (failure._tag === "VerificationFailed") {
+    assert.equal(failure.reason, "declared OCI SLSA attestation verification failed");
+  }
+});
+
+void test("release declaration rejects a verified SLSA statement for the wrong source commit", async () => {
+  const calls: CommandInput[] = [];
+  const exit = await Effect.runPromiseExit(
+    declareRelease(
+      parseDeclarationConfig([
+        "--product",
+        "aisucks",
+        "--version",
+        declarationVersion,
+        "--commit",
+        declarationCommit,
+        "--track",
+        "rc",
+      ]),
+    ).pipe(
+      Effect.provide(
+        declarationLayer(calls, {
+          attestationStdout: declarationDsseOutput(
+            declarationStatement({
+              commit: "cccccccccccccccccccccccccccccccccccccccc",
+            }),
+          ),
+        }),
+      ),
+    ),
+  );
+
+  const failure = releaseFailure(exit);
+  assert.equal(failure._tag, "AdmissionRejected");
+  if (failure._tag === "AdmissionRejected") {
+    assert.equal(failure.reason, "SLSA provenance source commit mismatch");
+  }
 });
 
 void test("OCI rollback deletes the exact manifest ref with password on stdin", () => {
@@ -294,4 +428,142 @@ function npmNotFoundLayer(): Layer.Layer<ProcessProvider> {
         }),
       ),
   });
+}
+
+const declarationVersion = "1.2.3-rc.1";
+const declarationCommit = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const declarationDigest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const declarationDigestRef = `oci.guardianintelligence.org/guardian/aisucks/sdk/npm@${declarationDigest}`;
+const declarationVersionRef = `oci.guardianintelligence.org/guardian/aisucks/sdk/npm:npm-v${declarationVersion}`;
+const declarationBuilderId =
+  "https://github.com/guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml";
+
+function declarationStatement(
+  overrides: {
+    readonly commit?: string;
+    readonly version?: string;
+    readonly subjectDigest?: string;
+  } = {},
+): InTotoStatement {
+  return {
+    _type: inTotoStatementType,
+    subject: [
+      {
+        name: declarationDigestRef,
+        digest: {
+          sha256: (overrides.subjectDigest ?? declarationDigest).replace(/^sha256:/, ""),
+        },
+      },
+    ],
+    predicateType: slsaProvenancePredicateType,
+    predicate: {
+      buildDefinition: {
+        externalParameters: {
+          releaseTarget: {
+            package: sdkPackageName,
+            version: overrides.version ?? declarationVersion,
+          },
+        },
+        resolvedDependencies: [
+          {
+            uri: sourceRepo,
+            digest: {
+              gitCommit: overrides.commit ?? declarationCommit,
+            },
+          },
+        ],
+      },
+      runDetails: {
+        builder: {
+          id: declarationBuilderId,
+        },
+      },
+    },
+  };
+}
+
+function declarationDsseOutput(statement: InTotoStatement): string {
+  return `${JSON.stringify({
+    payload: Buffer.from(JSON.stringify(statement), "utf8").toString("base64"),
+  })}\n`;
+}
+
+function declarationLayer(
+  calls: CommandInput[],
+  options: {
+    readonly attestationStdout?: string;
+    readonly attestationFailure?: string;
+  },
+) {
+  return Layer.mergeAll(
+    NodeFileLayer,
+    Layer.succeed(LoggerProvider, {
+      log: () => Effect.void,
+      events: () => [],
+    }),
+    Layer.succeed(ProcessProvider, {
+      run: (input: CommandInput) => {
+        calls.push(input);
+        if (input.program === "oras") {
+          return Effect.succeed(commandResult(input, `${declarationDigestRef}\n`));
+        }
+        if (input.args[0] === "verify") {
+          return Effect.succeed(commandResult(input, ""));
+        }
+        if (input.args[0] === "verify-attestation") {
+          if (options.attestationFailure !== undefined) {
+            return Effect.fail(
+              new CommandFailed({
+                program: input.program,
+                args: input.args,
+                cwd: input.cwd,
+                exitCode: 1,
+                stdout: "",
+                stderr: options.attestationFailure,
+              }),
+            );
+          }
+          return Effect.succeed(commandResult(input, options.attestationStdout ?? ""));
+        }
+        return Effect.fail(
+          new CommandFailed({
+            program: input.program,
+            args: input.args,
+            cwd: input.cwd,
+            exitCode: 127,
+            stdout: "",
+            stderr: `unexpected command: ${input.program} ${input.args.join(" ")}`,
+          }),
+        );
+      },
+    }),
+  );
+}
+
+function commandResult(input: CommandInput, stdout: string): CommandResult {
+  return {
+    program: input.program,
+    args: input.args,
+    cwd: input.cwd,
+    exitCode: 0,
+    stdout,
+    stderr: "",
+    durationMs: 1,
+  };
+}
+
+function releaseFailure(exit: Exit.Exit<unknown, unknown>): {
+  readonly _tag: string;
+  readonly reason?: string;
+} {
+  assert.equal(Exit.isFailure(exit), true);
+  if (Exit.isSuccess(exit)) {
+    throw new Error("expected failure");
+  }
+  const failure = Cause.failureOption(exit.cause);
+  assert.equal(Option.isSome(failure), true);
+  if (Option.isNone(failure)) {
+    throw new Error("expected typed failure");
+  }
+  return failure.value as { readonly _tag: string; readonly reason?: string };
 }
