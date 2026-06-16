@@ -171,6 +171,7 @@ jobs:
         env:
           GUARDIAN_OCI_USERNAME: guardian-release
           GUARDIAN_OCI_PASSWORD: ${{ secrets.GUARDIAN_OCI_PASSWORD }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Upload release records
         if: ${{ always() }}
