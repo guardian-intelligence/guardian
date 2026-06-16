@@ -7,6 +7,7 @@ import { CommandFailed } from "./errors.js";
 import { ProcessProvider, type CommandInput } from "./providers.js";
 import {
   cosignReleaseEnv,
+  npmOidcUserconfigContent,
   npmViewIntegrity,
   npmReleaseEnv,
   ociManifestDeleteArgs,
@@ -39,6 +40,17 @@ void test("npm provenance is opt-in for this release milestone", () => {
     NPM_CONFIG_PROVENANCE: "true",
     NPM_CONFIG_REGISTRY: "https://registry.npmjs.org/",
   });
+});
+
+void test("npm OIDC userconfig points release mutations at the public registry", () => {
+  assert.equal(
+    npmOidcUserconfigContent("npm_oidc_token"),
+    [
+      "registry=https://registry.npmjs.org/",
+      "//registry.npmjs.org/:_authToken=npm_oidc_token",
+      "",
+    ].join("\n"),
+  );
 });
 
 void test("cosign release commands opt into OCI referrers support", () => {
