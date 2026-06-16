@@ -933,7 +933,7 @@ function verifyRelease(
     }
 
     if (npmStatus !== "not-requested") {
-      const integrity = yield* npmViewIntegrity(config, candidate.pack);
+      const integrity = yield* npmViewIntegrity(config, candidate.pack, { retryNotFound: true });
       if (integrity !== candidate.npmIntegrity) {
         return yield* Effect.fail(
           new VerificationFailed({
@@ -951,10 +951,16 @@ function verifyRelease(
   });
 }
 
-function npmViewIntegrity(
+export function npmViewIntegrity(
   config: ReleaseConfig,
   pack: NpmPackEntry,
+  options: {
+    readonly retryNotFound?: boolean;
+    readonly attempts?: number;
+    readonly delayMs?: number;
+  } = {},
 ): Effect.Effect<string, ReleaseError, ProcessProvider> {
+  const retryNotFound = options.retryNotFound === true;
   return retryTransient(
     runNpm(
       config,
@@ -978,7 +984,11 @@ function npmViewIntegrity(
         }),
       ),
     ),
-    isTransientReleaseError,
+    (error) =>
+      isTransientReleaseError(error) ||
+      (retryNotFound && error._tag === "CommandFailed" && isNpmNotFound(releaseErrorText(error))),
+    options.attempts ?? (retryNotFound ? 12 : 3),
+    options.delayMs ?? (retryNotFound ? 1_000 : 500),
   );
 }
 
@@ -1083,7 +1093,18 @@ function stage<A, R>(
 }
 
 function isNpmNotFound(stderr: string): boolean {
-  return stderr.includes("E404") || stderr.includes("404 Not Found");
+  return (
+    stderr.includes("E404") ||
+    stderr.includes("404 Not Found") ||
+    stderr.includes("No match found for version")
+  );
+}
+
+function releaseErrorText(error: ReleaseError): string {
+  if (error._tag !== "CommandFailed" && error._tag !== "CommandTimedOut") {
+    return "";
+  }
+  return `${error.stderr}\n${error.stdout}`;
 }
 
 function isTransientReleaseError(error: ReleaseError): boolean {
