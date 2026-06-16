@@ -268,10 +268,11 @@ async function npmViewPackage(config: GateConfig, spec: string): Promise<NpmView
     "--json",
   ]);
   const parsed: unknown = JSON.parse(stdout);
-  if (!isNpmView(parsed)) {
+  const normalized = normalizeNpmView(parsed);
+  if (normalized === undefined) {
     throw new Error(`npm view returned unexpected shape: ${stdout}`);
   }
-  return parsed;
+  return normalized;
 }
 
 async function npmPack(config: GateConfig, spec: string, destination: string): Promise<NpmPackEntry> {
@@ -559,17 +560,35 @@ function parsePositiveNumber(value: string, flag: string): number {
   return parsed;
 }
 
-function isNpmView(value: unknown): value is NpmView {
-  if (!isRecord(value) || !isRecord(value.dist)) {
-    return false;
+function normalizeNpmView(value: unknown): NpmView | undefined {
+  if (!isRecord(value)) {
+    return undefined;
   }
-  return (
-    value.name === sdkPackageName &&
-    typeof value.version === "string" &&
-    typeof value.dist.integrity === "string" &&
-    typeof value.dist.unpackedSize === "number" &&
-    typeof value.dist.tarball === "string"
-  );
+  const dist = isRecord(value.dist)
+    ? value.dist
+    : {
+        integrity: value["dist.integrity"],
+        unpackedSize: value["dist.unpackedSize"],
+        tarball: value["dist.tarball"],
+      };
+  if (
+    value.name !== sdkPackageName ||
+    typeof value.version !== "string" ||
+    typeof dist.integrity !== "string" ||
+    typeof dist.unpackedSize !== "number" ||
+    typeof dist.tarball !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    name: value.name,
+    version: value.version,
+    dist: {
+      integrity: dist.integrity,
+      unpackedSize: dist.unpackedSize,
+      tarball: dist.tarball,
+    },
+  };
 }
 
 function isNpmPackEntry(value: unknown): value is NpmPackEntry {
