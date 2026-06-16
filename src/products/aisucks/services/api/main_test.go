@@ -8,7 +8,7 @@ import (
 )
 
 func TestPublicSurface(t *testing.T) {
-	srv := newServer([]byte("<!doctype html><p>never be sold</p>"), newMetrics(), "aisucks.test")
+	srv := newServer([]byte("<!doctype html><p>never be sold</p>"), newMetrics(defaultAPIVersion), "aisucks.test", defaultAPIVersion)
 
 	tests := []struct {
 		name       string
@@ -37,8 +37,8 @@ func TestPublicSurface(t *testing.T) {
 }
 
 func TestMetricsEndpoint(t *testing.T) {
-	m := newMetrics()
-	srv := newServer([]byte("page"), m, "aisucks.test")
+	m := newMetrics(defaultAPIVersion)
+	srv := newServer([]byte("page"), m, "aisucks.test", defaultAPIVersion)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 
@@ -51,6 +51,24 @@ func TestMetricsEndpoint(t *testing.T) {
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("metrics missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestConnectHealth(t *testing.T) {
+	srv := newServer([]byte("page"), newMetrics("test-version"), "aisucks.test", "test-version")
+	path, _ := newHealthRPCHandler("test-version")
+	req := httptest.NewRequest(http.MethodPost, path+"Health", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	for _, want := range []string{`"status":"ok"`, `"service":"aisucks-api"`, `"version":"test-version"`, `"health.capabilities.v1"`} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("body missing %q:\n%s", want, rec.Body.String())
 		}
 	}
 }

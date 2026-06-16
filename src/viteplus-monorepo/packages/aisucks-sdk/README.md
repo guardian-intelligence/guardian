@@ -7,4 +7,5 @@ import { AisucksClient } from "@guardian-intelligence/aisucks";
 
 const client = new AisucksClient();
 const health = await client.health();
+console.log(health.capabilities);
 ```

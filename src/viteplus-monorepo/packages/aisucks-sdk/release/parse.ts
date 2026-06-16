@@ -17,6 +17,9 @@ export function parseReleaseConfig(args: readonly string[], packageVersion: stri
   let ociRef = defaultOciRef;
   let publishNpm: boolean | undefined;
   let publishOci: boolean | undefined;
+  let createAttestation = false;
+  let signOci = false;
+  let npmProvenance = false;
   let allowUnsignedDev = true;
   let outputDir: string | undefined;
   let sourceRoot: string | undefined;
@@ -62,6 +65,15 @@ export function parseReleaseConfig(args: readonly string[], packageVersion: stri
         break;
       case "--skip-oci":
         publishOci = false;
+        break;
+      case "--with-attestation":
+        createAttestation = true;
+        break;
+      case "--sign-oci":
+        signOci = true;
+        break;
+      case "--npm-provenance":
+        npmProvenance = true;
         break;
       case "--require-signature":
         allowUnsignedDev = false;
@@ -116,6 +128,9 @@ export function parseReleaseConfig(args: readonly string[], packageVersion: stri
     ociRef,
     publishNpm: publishNpm ?? mode === "publish",
     publishOci: publishOci ?? mode === "publish",
+    createAttestation,
+    signOci,
+    npmProvenance,
     allowUnsignedDev,
     outputDir,
     paths: {

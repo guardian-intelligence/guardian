@@ -27,6 +27,14 @@ void test("npm release commands always target the public npm registry", () => {
   assert.deepEqual(npmReleaseEnv(), {
     NPM_CONFIG_AUDIT: "false",
     NPM_CONFIG_FUND: "false",
+    NPM_CONFIG_REGISTRY: "https://registry.npmjs.org/",
+  });
+});
+
+void test("npm provenance is opt-in for this release milestone", () => {
+  assert.deepEqual(npmReleaseEnv(true), {
+    NPM_CONFIG_AUDIT: "false",
+    NPM_CONFIG_FUND: "false",
     NPM_CONFIG_PROVENANCE: "true",
     NPM_CONFIG_REGISTRY: "https://registry.npmjs.org/",
   });
@@ -109,6 +117,9 @@ function releaseConfig(): ReleaseConfig {
     ociRef: defaultOciRef,
     publishNpm: true,
     publishOci: true,
+    createAttestation: false,
+    signOci: false,
+    npmProvenance: false,
     allowUnsignedDev: false,
     outputDir: undefined,
     paths: defaultReleasePaths(),

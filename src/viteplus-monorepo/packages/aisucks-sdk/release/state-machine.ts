@@ -77,8 +77,12 @@ export function runRelease(
     );
     const evidence = yield* stage(
       "attest",
-      "create DSSE in-toto/SLSA evidence",
-      createEvidenceBundle(config, candidate, outputDir),
+      config.createAttestation
+        ? "create DSSE in-toto/SLSA evidence"
+        : "skip DSSE in-toto/SLSA evidence",
+      config.createAttestation
+        ? createEvidenceBundle(config, candidate, outputDir)
+        : Effect.succeed(undefined),
     );
     yield* stage(
       "admit",
@@ -92,8 +96,12 @@ export function runRelease(
     );
     const admittedCandidate = yield* stage(
       "local-evidence",
-      "attach admitted evidence to local OCI layout",
-      attachLocalEvidence(config, candidate, evidence, outputDir),
+      evidence === undefined
+        ? "skip local evidence referrer"
+        : "attach admitted evidence to local OCI layout",
+      evidence === undefined
+        ? Effect.succeed(candidate)
+        : attachLocalEvidence(config, candidate, evidence, outputDir),
     );
     const publishedOci = yield* stage(
       "publish-oci",
@@ -121,9 +129,11 @@ export function runRelease(
     const result: ReleaseResult = {
       target,
       candidate: admittedCandidate,
-      evidence,
+      ...(evidence === undefined ? {} : { evidence }),
+      attestationStatus: evidence === undefined ? "not-requested" : "created",
       publishedOci,
       ociSignatureStatus,
+      npmProvenanceStatus: config.npmProvenance ? "requested" : "not-requested",
       npmStatus,
       eventLog: logger.events(),
       outputDir,
@@ -174,7 +184,21 @@ function preflight(
         }),
       );
     }
-    if (config.mode === "publish" && config.publishOci) {
+    if (config.signOci && !config.publishOci) {
+      return yield* Effect.fail(
+        new InvalidReleaseTarget({
+          reason: "OCI signing requires OCI publication",
+        }),
+      );
+    }
+    if (config.npmProvenance && !config.publishNpm) {
+      return yield* Effect.fail(
+        new InvalidReleaseTarget({
+          reason: "npm provenance requires npm publication",
+        }),
+      );
+    }
+    if (config.mode === "publish" && config.signOci) {
       yield* requireGitHubActionsOidcForOciSigning();
       yield* ociBasicAuth().pipe(Effect.asVoid);
     }
@@ -497,7 +521,7 @@ function attachLocalEvidence(
 function publishOci(
   config: ReleaseConfig,
   candidate: ReleaseCandidate,
-  evidence: EvidenceBundle,
+  evidence: EvidenceBundle | undefined,
   outputDir: string,
 ): Effect.Effect<SdkOciResult | undefined, ReleaseError, FileProvider | ProcessProvider> {
   if (!config.publishOci) {
@@ -507,6 +531,15 @@ function publishOci(
   return Effect.gen(function* () {
     const resultPath = path.join(outputDir, "sdk-oci.public.json");
     const authArgs = yield* ociAuthArgs();
+    const evidenceArgs =
+      evidence === undefined
+        ? []
+        : [
+            "--attestation-bundle",
+            evidence.intotoBundlePath,
+            "--attestation-title",
+            `${candidate.pack.filename}.intoto.jsonl`,
+          ];
 
     yield* runSdkOci(config, [
       "--tarball",
@@ -517,12 +550,9 @@ function publishOci(
       config.ociRef,
       "--source-commit",
       candidate.target.sourceCommit,
-      "--attestation-bundle",
-      evidence.intotoBundlePath,
-      "--attestation-title",
-      `${candidate.pack.filename}.intoto.jsonl`,
       "--output",
       resultPath,
+      ...evidenceArgs,
       ...authArgs,
     ]);
 
@@ -601,6 +631,9 @@ function signOci(
   publishedOci: SdkOciResult | undefined,
 ): Effect.Effect<"not-requested" | "signed", ReleaseError, LoggerProvider | ProcessProvider> {
   if (publishedOci === undefined) {
+    return Effect.succeed("not-requested");
+  }
+  if (!config.signOci) {
     return Effect.succeed("not-requested");
   }
 
@@ -779,31 +812,48 @@ function publishNpm(
     );
     if (existing !== undefined) {
       if (existing === candidate.npmIntegrity) {
+        yield* ensureNpmDistTag(config, candidate);
         return "already-published";
       }
       return yield* Effect.fail(npmIntegrityConflict(candidate, existing));
     }
 
-    yield* retryTransient(
-      runNpm(
-        config,
-        [
-          "publish",
-          config.paths.tarball,
-          "--tag",
-          candidate.target.channel,
-          "--access",
-          "public",
-          "--provenance",
-          "--loglevel",
-          "verbose",
-        ],
-        publishTimeoutMs,
-      ),
-      isTransientReleaseError,
-    );
+    const publishArgs = [
+      "publish",
+      config.paths.tarball,
+      "--tag",
+      candidate.target.channel,
+      "--access",
+      "public",
+      "--loglevel",
+      "verbose",
+    ];
+    if (config.npmProvenance) {
+      publishArgs.push("--provenance");
+    }
+    yield* retryTransient(runNpm(config, publishArgs, publishTimeoutMs), isTransientReleaseError);
+    yield* ensureNpmDistTag(config, candidate);
     return "published";
   });
+}
+
+function ensureNpmDistTag(
+  config: ReleaseConfig,
+  candidate: ReleaseCandidate,
+): Effect.Effect<void, ReleaseError, ProcessProvider> {
+  return retryTransient(
+    runNpm(
+      config,
+      [
+        "dist-tag",
+        "add",
+        `${candidate.pack.name}@${candidate.pack.version}`,
+        candidate.target.channel,
+      ],
+      publishTimeoutMs,
+    ),
+    isTransientReleaseError,
+  ).pipe(Effect.asVoid);
 }
 
 export function validateNpmProjection(
@@ -873,7 +923,7 @@ function verifyRelease(
           }),
         );
       }
-      if (publishedOci.attestation_digest === undefined) {
+      if (config.createAttestation && publishedOci.attestation_digest === undefined) {
         return yield* Effect.fail(
           new VerificationFailed({
             reason: "published OCI result did not include attestation referrer digest",
@@ -941,18 +991,21 @@ function runNpm(
     program: config.paths.node,
     args: [config.paths.npm, ...args],
     cwd: config.paths.packageRoot,
-    env: npmReleaseEnv(),
+    env: npmReleaseEnv(config.npmProvenance),
     timeoutMs,
   });
 }
 
-export function npmReleaseEnv(): Readonly<Record<string, string>> {
-  return {
+export function npmReleaseEnv(provenance = false): Readonly<Record<string, string>> {
+  const env: Record<string, string> = {
     NPM_CONFIG_AUDIT: "false",
     NPM_CONFIG_FUND: "false",
-    NPM_CONFIG_PROVENANCE: "true",
     NPM_CONFIG_REGISTRY: npmRegistry,
   };
+  if (provenance) {
+    env.NPM_CONFIG_PROVENANCE = "true";
+  }
+  return env;
 }
 
 export function cosignReleaseEnv(): Readonly<Record<string, string>> {

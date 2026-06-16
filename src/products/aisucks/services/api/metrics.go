@@ -16,22 +16,27 @@ type metricKey struct {
 }
 
 type metrics struct {
+	version  string
 	mu       sync.Mutex
 	requests map[metricKey]uint64
 	inflight atomic.Int64
 }
 
-func newMetrics() *metrics {
-	return &metrics{requests: make(map[metricKey]uint64)}
+func newMetrics(version string) *metrics {
+	return &metrics{version: version, requests: make(map[metricKey]uint64)}
 }
 
 func (m *metrics) wrap(handler string, next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	return m.wrapHandler(handler, next).ServeHTTP
+}
+
+func (m *metrics) wrapHandler(handler string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		m.inflight.Add(1)
 		defer m.inflight.Add(-1)
 
 		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-		next(rw, r)
+		next.ServeHTTP(rw, r)
 
 		method := r.Method
 		if r.Method == http.MethodHead {
@@ -40,14 +45,14 @@ func (m *metrics) wrap(handler string, next http.HandlerFunc) http.HandlerFunc {
 		m.mu.Lock()
 		m.requests[metricKey{handler: handler, method: method, code: rw.status}]++
 		m.mu.Unlock()
-	}
+	})
 }
 
 func (m *metrics) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	fmt.Fprintln(w, "# HELP aisucks_build_info Build metadata for the aisucks API.")
 	fmt.Fprintln(w, "# TYPE aisucks_build_info gauge")
-	fmt.Fprintln(w, `aisucks_build_info{version="0.1.0"} 1`)
+	fmt.Fprintf(w, "aisucks_build_info{version=%q} 1\n", m.version)
 	fmt.Fprintln(w, "# HELP aisucks_http_inflight_requests In-flight public HTTP requests.")
 	fmt.Fprintln(w, "# TYPE aisucks_http_inflight_requests gauge")
 	fmt.Fprintf(w, "aisucks_http_inflight_requests %d\n", m.inflight.Load())

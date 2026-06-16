@@ -14,6 +14,9 @@ void test("parseReleaseConfig rebases release paths under source root", () => {
   assert.equal(config.mode, "publish");
   assert.equal(config.publishNpm, false);
   assert.equal(config.publishOci, true);
+  assert.equal(config.createAttestation, false);
+  assert.equal(config.signOci, false);
+  assert.equal(config.npmProvenance, false);
   assert.equal(config.paths.repoRoot, sourceRoot);
   assert.equal(
     config.paths.packageRoot,
@@ -31,4 +34,15 @@ void test("parseReleaseConfig rebases release paths under source root", () => {
       "bazel-bin/src/viteplus-monorepo/packages/aisucks-sdk/aisucks-sdk.npm-pack.json",
     ),
   );
+});
+
+void test("parseReleaseConfig keeps evidence layers opt-in", () => {
+  const config = parseReleaseConfig(
+    ["--publish", "--with-attestation", "--sign-oci", "--npm-provenance"],
+    "0.3.0",
+  );
+
+  assert.equal(config.createAttestation, true);
+  assert.equal(config.signOci, true);
+  assert.equal(config.npmProvenance, true);
 });

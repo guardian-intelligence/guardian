@@ -29,7 +29,7 @@ import {
 export function admitRelease(
   config: ReleaseConfig,
   candidate: ReleaseCandidate,
-  evidence: EvidenceBundle,
+  evidence: EvidenceBundle | undefined,
 ): Effect.Effect<void, ReleaseError> {
   return Effect.gen(function* () {
     yield* expect(candidate.target.packageName === sdkPackageName, "unexpected release package", {
@@ -109,8 +109,10 @@ export function admitRelease(
       },
     );
 
-    yield* validateStatement(candidate, evidence.statement);
-    yield* validateJsonlEnvelope(config, evidence);
+    if (evidence !== undefined) {
+      yield* validateStatement(candidate, evidence.statement);
+      yield* validateJsonlEnvelope(config, evidence);
+    }
   });
 }
 

@@ -11,7 +11,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file guardian/products/aisucks/v1/aisucks.proto.
  */
 export const file_guardian_products_aisucks_v1_aisucks: GenFile = /*@__PURE__*/
-  fileDesc("CipndWFyZGlhbi9wcm9kdWN0cy9haXN1Y2tzL3YxL2Fpc3Vja3MucHJvdG8SHGd1YXJkaWFuLnByb2R1Y3RzLmFpc3Vja3MudjEiDwoNSGVhbHRoUmVxdWVzdCJCCg5IZWFsdGhSZXNwb25zZRIOCgZzdGF0dXMYASABKAkSDwoHc2VydmljZRgCIAEoCRIPCgd2ZXJzaW9uGAMgASgJMo4BCg5BaXN1Y2tzU2VydmljZRJ8CgZIZWFsdGgSKy5ndWFyZGlhbi5wcm9kdWN0cy5haXN1Y2tzLnYxLkhlYWx0aFJlcXVlc3QaLC5ndWFyZGlhbi5wcm9kdWN0cy5haXN1Y2tzLnYxLkhlYWx0aFJlc3BvbnNlIhfC8xgTCAEQARgBIIAIKgYIPBICMW0wAUJrWmlnaXRodWIuY29tL2d1YXJkaWFuLWludGVsbGlnZW5jZS9ndWFyZGlhbi9zcmMvcHJvZHVjdHMvYWlzdWNrcy9hcGkvZ3VhcmRpYW4vcHJvZHVjdHMvYWlzdWNrcy92MTthaXN1Y2tzdjFiBnByb3RvMw", [file_guardian_policy_v1_policy]);
+  fileDesc("CipndWFyZGlhbi9wcm9kdWN0cy9haXN1Y2tzL3YxL2Fpc3Vja3MucHJvdG8SHGd1YXJkaWFuLnByb2R1Y3RzLmFpc3Vja3MudjEiDwoNSGVhbHRoUmVxdWVzdCJYCg5IZWFsdGhSZXNwb25zZRIOCgZzdGF0dXMYASABKAkSDwoHc2VydmljZRgCIAEoCRIPCgd2ZXJzaW9uGAMgASgJEhQKDGNhcGFiaWxpdGllcxgEIAMoCTKOAQoOQWlzdWNrc1NlcnZpY2USfAoGSGVhbHRoEisuZ3VhcmRpYW4ucHJvZHVjdHMuYWlzdWNrcy52MS5IZWFsdGhSZXF1ZXN0GiwuZ3VhcmRpYW4ucHJvZHVjdHMuYWlzdWNrcy52MS5IZWFsdGhSZXNwb25zZSIXwvMYEwgBEAEYASCACCoGCDwSAjFtMAFCa1ppZ2l0aHViLmNvbS9ndWFyZGlhbi1pbnRlbGxpZ2VuY2UvZ3VhcmRpYW4vc3JjL3Byb2R1Y3RzL2Fpc3Vja3MvYXBpL2d1YXJkaWFuL3Byb2R1Y3RzL2Fpc3Vja3MvdjE7YWlzdWNrc3YxYgZwcm90bzM", [file_guardian_policy_v1_policy]);
 
 /**
  * @generated from message guardian.products.aisucks.v1.HealthRequest
@@ -44,6 +44,11 @@ export type HealthResponse = Message<"guardian.products.aisucks.v1.HealthRespons
    * @generated from field: string version = 3;
    */
   version: string;
+
+  /**
+   * @generated from field: repeated string capabilities = 4;
+   */
+  capabilities: string[];
 };
 
 /**

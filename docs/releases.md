@@ -20,12 +20,11 @@ The SDK release slice is delivered by `aspect release sdk-oci`, which delegates
 to the package-owned Effect/TypeScript release state machine under
 `src/viteplus-monorepo/packages/aisucks-sdk/release/`. Check mode builds the
 generated Health SDK tarball, writes it as an OCI artifact subject in a local
-OCI layout, creates DSSE/in-toto SLSA evidence, validates admission before any
-public write, and records the event log in `release-result.json`.
+OCI layout, validates admission before any public write, and records the event
+log in `release-result.json`.
 
-The next release-system work should make the live public publish verifiable
-from a clean machine, then add the runtime synthetic/gate slice that installs
-the published SDK and calls Connect Health against gamma and prod.
+The current release-system work makes live public publish, npm dist-tags, and
+Health gates permutations of the same package-owned release logic.
 
 ## Todo
 
@@ -75,17 +74,15 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 
 ### SDK Artifact
 
-- [x] npm package tarball is built from repo source.
-- [x] SDK OCI reference forms are documented:
-  `oci.guardianintelligence.org/guardian/aisucks/sdk/npm[:tag|@sha256:<digest>]`.
 - [x] Package-owned `aspect release sdk-oci` writes the npm package tarball as
   an OCI artifact subject in a declared local OCI layout.
 - [ ] npm package tarball is pushed to the public OCI registry by digest.
 - [x] Package integrity is recorded.
 - [x] npm publication is implemented as a downstream projection from the verified
   OCI subject.
-- [ ] Package is published to npm with Trusted Publishing provenance.
+- [ ] Package is published to npm through the GitHub executor shim.
 - [ ] `edge` dist-tag points at the intended SDK version.
+- [ ] `nightly` and `rc` dist-tags move only after matching gate passes.
 - [x] Package contents contain generated Connect client only for Health.
 
 ### OCI Distribution
@@ -98,9 +95,9 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 - [ ] zot serves OCI Distribution v1.1 referrers.
 - [ ] Each release target has subject digest plus referrers:
   - [ ] cosign/keyless or Transit signature
-  - [x] SLSA provenance
-  - [x] in-toto statement
-  - [x] DSSE JSONL bundle
+  - [ ] SLSA provenance
+  - [ ] in-toto statement
+  - [ ] DSSE JSONL bundle
   - [ ] SBOM, even minimal at first
   - [ ] release manifest / metadata
   - [ ] gate result
@@ -132,14 +129,14 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 
 ### Build Provenance
 
-- [x] SLSA provenance names:
-  - [x] source repository
-  - [x] source commit
-  - [x] Bazel target
-  - [x] builder identity
-  - [x] build type
-  - [x] parameters: distributable, package, version, channel, OCI ref
-- [x] Provenance subject digest matches the admitted SDK OCI digest and npm
+- [ ] SLSA provenance names:
+  - [ ] source repository
+  - [ ] source commit
+  - [ ] Bazel target
+  - [ ] builder identity
+  - [ ] build type
+  - [ ] parameters: distributable, package, version, channel, OCI ref
+- [ ] Provenance subject digest matches the admitted SDK OCI digest and npm
   integrity.
 
 ### Release Notes
@@ -155,40 +152,46 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 - [ ] prod either remains on the previous digest or receives promotion after
   gate.
 - [ ] `/healthz` and `/livez` remain raw operational endpoints.
-- [ ] Connect Health is publicly reachable.
+- [x] Connect Health is served by the API binary.
+- [ ] Connect Health is publicly reachable on gamma.
 
 ### Synthetic Result
 
-- [ ] Repo-owned synthetic installs `@guardian-intelligence/aisucks@edge`.
-- [ ] Synthetic calls Health against gamma and prod.
-- [ ] Synthetic emits `synthetic-result.v1` JSON:
-  - [ ] package/version installed
-  - [ ] endpoint URL
-  - [ ] operation full name
-  - [ ] status
-  - [ ] latency
-  - [ ] timestamp
+- [x] Repo-owned synthetic installs `@guardian-intelligence/aisucks@<channel>`.
+- [x] Synthetic calls Connect Health against the selected endpoint.
+- [x] Synthetic emits `synthetic-result.v1` JSON:
+  - [x] package/version installed
+  - [x] endpoint URL
+  - [x] operation full name
+  - [x] status
+  - [x] latency
+  - [x] timestamp
   - [ ] source commit or release manifest digest
 
 ### SLO Gate Result
 
-- [ ] Gate evaluator queries simple SLOs:
-  - [ ] synthetic success
+- [x] Gate evaluator checks simple SLOs:
+  - [x] synthetic success
+  - [x] required Health capability
+  - [x] p95 latency
+  - [x] observed TPS
+  - [x] package tarball/unpacked size
   - [ ] app 5xx == 0 over window
   - [ ] pod restart delta == 0 over window
   - [ ] health/liveness probe success
-- [ ] Gate evaluator emits `gate-result.v1` JSON:
+- [x] Gate evaluator emits `gate-result.v1` JSON:
   - [ ] candidate digest or manifest digest
-  - [ ] decision pass/fail
-  - [ ] checked queries
-  - [ ] observed values
+  - [x] decision pass/fail
+  - [x] checked queries
+  - [x] observed values
   - [ ] time window
 - [ ] Gate result is later signed as an in-toto attestation.
 
 ### Promotion / Channel Pointer
 
 - [ ] `edge` can point at every main candidate.
-- [ ] `nightly` is promoted only after gate passes.
+- [x] npm `nightly` and `rc` dist-tags can be promoted by the workflow only
+  after the gate step passes when `promote-on-pass` is selected.
 - [ ] Channel pointer is a signed object, not just a mutable tag.
 - [ ] Pointer records whether promotion used the same digest or
   package-specific rebuild lineage.
@@ -235,12 +238,14 @@ The smallest meaningful release slice is:
 3. API image pushed to zot by digest.
 4. SDK tarball pushed to OCI as `guardian/aisucks/sdk/npm` by digest.
 5. SDK published to npm edge from the verified OCI subject.
-6. SLSA/in-toto provenance attached to the API image and SDK OCI subject.
-7. Release manifest records image digest, SDK OCI digest, and npm package
+6. Release manifest records image digest, SDK OCI digest, and npm package
    integrity.
-8. Synthetic installs npm edge and calls gamma Health.
-9. Gate result JSON emitted.
-10. `nightly` pointer advances only after gate pass.
+7. Synthetic installs npm edge and calls gamma Health.
+8. Gate result JSON emitted.
+9. `nightly` pointer advances only after gate pass.
+
+SLSA/in-toto provenance and signatures are the next evidence layer, not part
+of this milestone's minimum slice.
 
 ## First Deliverable: Contract Slice
 
