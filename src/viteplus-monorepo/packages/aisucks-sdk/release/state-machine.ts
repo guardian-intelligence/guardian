@@ -203,8 +203,7 @@ function preflight(
       yield* ociBasicAuth().pipe(Effect.asVoid);
     }
     if (config.mode === "publish" && config.publishNpm && process.env.GITHUB_ACTIONS === "true") {
-      const npmToken = yield* requireGitHubActionsOidcForNpmPublish(sdkPackageName);
-      yield* installNpmOidcUserconfig(npmToken);
+      yield* requireGitHubActionsOidcForNpmPublish(sdkPackageName);
     }
 
     const files = yield* FileProvider;
@@ -251,7 +250,7 @@ function requireGitHubActionsOidcForOciSigning(): Effect.Effect<void, ReleaseErr
 
 function requireGitHubActionsOidcForNpmPublish(
   packageName: string,
-): Effect.Effect<string, ReleaseError, LoggerProvider> {
+): Effect.Effect<void, ReleaseError, LoggerProvider> {
   return Effect.gen(function* () {
     const requestUrl = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
     const requestToken = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
@@ -303,7 +302,7 @@ function requireGitHubActionsOidcForNpmPublish(
       message: "observed GitHub OIDC claims for npm trusted publishing",
       details: claimDetails,
     });
-    return yield* validateNpmOidcExchange(packageName, tokenResponse.value);
+    yield* validateNpmOidcExchange(packageName, tokenResponse.value);
   });
 }
 
@@ -327,7 +326,7 @@ function decodeGithubOidcClaims(token: string): Effect.Effect<GithubOidcClaims, 
 function validateNpmOidcExchange(
   packageName: string,
   idToken: string,
-): Effect.Effect<string, ReleaseError, LoggerProvider> {
+): Effect.Effect<void, ReleaseError, LoggerProvider> {
   return Effect.gen(function* () {
     const exchangeUrl = new URL(
       `/-/npm/v1/oidc/token/exchange/package/${encodeURIComponent(packageName)}`,
@@ -377,26 +376,7 @@ function validateNpmOidcExchange(
       message: "npm accepted GitHub OIDC token for trusted publishing",
       details,
     });
-    return exchange.token;
   });
-}
-
-function installNpmOidcUserconfig(token: string): Effect.Effect<void, ReleaseError, FileProvider> {
-  return Effect.gen(function* () {
-    const files = yield* FileProvider;
-    const npmConfigDir = yield* files.mkdtemp("guardian-aisucks-npm-");
-    const npmConfigPath = path.join(npmConfigDir, ".npmrc");
-    yield* files.writeFile(npmConfigPath, npmOidcUserconfigContent(token));
-    process.env.NPM_CONFIG_USERCONFIG = npmConfigPath;
-  });
-}
-
-export function npmOidcUserconfigContent(token: string): string {
-  return [
-    `registry=${npmRegistry}`,
-    `//registry.npmjs.org/:_authToken=${token}`,
-    "",
-  ].join("\n");
 }
 
 function resolveTarget(
