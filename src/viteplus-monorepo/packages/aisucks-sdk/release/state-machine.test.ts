@@ -7,6 +7,7 @@ import { CommandFailed } from "./errors.js";
 import { ProcessProvider, type CommandInput } from "./providers.js";
 import {
   cosignReleaseEnv,
+  npmViewIntegrity,
   npmReleaseEnv,
   ociManifestDeleteArgs,
   validateNpmProjection,
@@ -107,6 +108,51 @@ void test("validateNpmProjection rejects an existing package with different inte
     return;
   }
   assert.equal(failure.value.reason, "npm version already exists with different integrity");
+});
+
+void test("npm final verification retries registry 404 propagation", async () => {
+  const candidate = releaseCandidate();
+  let calls = 0;
+
+  const got = await Effect.runPromise(
+    npmViewIntegrity(releaseConfig(), candidate.pack, {
+      retryNotFound: true,
+      attempts: 2,
+      delayMs: 0,
+    }).pipe(
+      Effect.provide(
+        Layer.succeed(ProcessProvider, {
+          run: (input: CommandInput) => {
+            calls += 1;
+            if (calls === 1) {
+              return Effect.fail(
+                new CommandFailed({
+                  program: input.program,
+                  args: input.args,
+                  cwd: input.cwd,
+                  exitCode: 1,
+                  stdout: '{ "error": { "summary": "No match found for version 0.3.0" } }',
+                  stderr: "npm error code E404",
+                }),
+              );
+            }
+            return Effect.succeed({
+              program: input.program,
+              args: input.args,
+              cwd: input.cwd,
+              exitCode: 0,
+              stdout: JSON.stringify(candidate.npmIntegrity),
+              stderr: "",
+              durationMs: 1,
+            });
+          },
+        }),
+      ),
+    ),
+  );
+
+  assert.equal(got, candidate.npmIntegrity);
+  assert.equal(calls, 2);
 });
 
 function releaseConfig(): ReleaseConfig {
