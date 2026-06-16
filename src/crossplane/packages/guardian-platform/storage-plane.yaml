@@ -1,0 +1,192 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: storageplanes.platform.guardian.dev
+spec:
+  scope: Cluster
+  group: platform.guardian.dev
+  names:
+    kind: StoragePlane
+    plural: storageplanes
+  defaultCompositionRef:
+    name: storage-plane-local-static
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                site:
+                  type: string
+                nodeName:
+                  type: string
+                storageClassName:
+                  type: string
+                reclaimPolicy:
+                  type: string
+                  enum:
+                    - Retain
+                volumeBindingMode:
+                  type: string
+                  enum:
+                    - WaitForFirstConsumer
+                volumes:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      persistentVolumeName:
+                        type: string
+                      namespace:
+                        type: string
+                      claimName:
+                        type: string
+                      capacity:
+                        type: string
+                      localPath:
+                        type: string
+                    required:
+                      - name
+                      - persistentVolumeName
+                      - namespace
+                      - claimName
+                      - capacity
+                      - localPath
+              required:
+                - site
+                - nodeName
+                - storageClassName
+                - reclaimPolicy
+                - volumeBindingMode
+                - volumes
+            status:
+              type: object
+              properties:
+                storageClassName:
+                  type: string
+                volumeCount:
+                  type: integer
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: storage-plane-local-static
+spec:
+  compositeTypeRef:
+    apiVersion: platform.guardian.dev/v1alpha1
+    kind: StoragePlane
+  mode: Pipeline
+  pipeline:
+    - step: load-environment
+      functionRef:
+        name: function-environment-configs
+      input:
+        apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+        kind: Input
+        spec:
+          environmentConfigs:
+            - type: Selector
+              selector:
+                mode: Single
+                matchLabels:
+                  - key: guardian.dev/site
+                    type: FromCompositeFieldPath
+                    valueFromFieldPath: spec.site
+    - step: render-storage-plane
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource -}}
+            {{- $spec := $xr.spec -}}
+            ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              name: storage-plane-{{ $spec.storageClassName }}-class
+              annotations:
+                {{ setResourceNameAnnotation "storage-class" }}
+            spec:
+              providerConfigRef:
+                name: platform
+              forProvider:
+                manifest:
+                  apiVersion: storage.k8s.io/v1
+                  kind: StorageClass
+                  metadata:
+                    name: {{ $spec.storageClassName }}
+                    labels:
+                      guardian.dev/site: {{ $spec.site }}
+                      platform.guardian.dev/storage-plane: {{ $xr.metadata.name }}
+                  provisioner: kubernetes.io/no-provisioner
+                  reclaimPolicy: {{ $spec.reclaimPolicy }}
+                  volumeBindingMode: {{ $spec.volumeBindingMode }}
+            {{- range $volume := $spec.volumes }}
+            ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              name: storage-plane-{{ $volume.persistentVolumeName }}
+              annotations:
+                {{ setResourceNameAnnotation (print "persistent-volume-" $volume.name) }}
+            spec:
+              references:
+                - dependsOn:
+                    apiVersion: kubernetes.crossplane.io/v1alpha2
+                    kind: Object
+                    name: storage-plane-{{ $spec.storageClassName }}-class
+              providerConfigRef:
+                name: platform
+              forProvider:
+                manifest:
+                  apiVersion: v1
+                  kind: PersistentVolume
+                  metadata:
+                    name: {{ $volume.persistentVolumeName }}
+                    labels:
+                      guardian.dev/site: {{ $spec.site }}
+                      platform.guardian.dev/storage-plane: {{ $xr.metadata.name }}
+                      platform.guardian.dev/local-volume: {{ $volume.name }}
+                  spec:
+                    capacity:
+                      storage: {{ $volume.capacity }}
+                    volumeMode: Filesystem
+                    accessModes:
+                      - ReadWriteOnce
+                    persistentVolumeReclaimPolicy: {{ $spec.reclaimPolicy }}
+                    storageClassName: {{ $spec.storageClassName }}
+                    local:
+                      path: {{ $volume.localPath }}
+                    claimRef:
+                      namespace: {{ $volume.namespace }}
+                      name: {{ $volume.claimName }}
+                    nodeAffinity:
+                      required:
+                        nodeSelectorTerms:
+                          - matchExpressions:
+                              - key: kubernetes.io/hostname
+                                operator: In
+                                values:
+                                  - {{ $spec.nodeName }}
+            {{- end }}
+            ---
+            apiVersion: platform.guardian.dev/v1alpha1
+            kind: StoragePlane
+            status:
+              storageClassName: {{ $spec.storageClassName }}
+              volumeCount: {{ len $spec.volumes }}
+    - step: mark-ready
+      functionRef:
+        name: function-auto-ready

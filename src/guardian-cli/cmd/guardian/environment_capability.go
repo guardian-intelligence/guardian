@@ -84,6 +84,8 @@ func environmentCapabilityResource(kind string) (string, bool) {
 		return "observabilitystacks.platform.guardian.dev", true
 	case "OCIRegistry":
 		return "ociregistries.platform.guardian.dev", true
+	case "StoragePlane":
+		return "storageplanes.platform.guardian.dev", true
 	case "StatusSurface":
 		return "statussurfaces.platform.guardian.dev", true
 	default:

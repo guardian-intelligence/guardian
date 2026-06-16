@@ -51,7 +51,10 @@ metadata:
   name: provider-kubernetes-edge-gateway
 rules:
   - apiGroups: [""]
-    resources: ["namespaces", "serviceaccounts", "services", "events"]
+    resources: ["namespaces", "persistentvolumeclaims", "persistentvolumes", "serviceaccounts", "services", "events"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets"]

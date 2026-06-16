@@ -34,8 +34,28 @@ spec:
                   description: Digest-pinned zot OCI image reference.
                 domain:
                   type: string
-                storagePath:
-                  type: string
+                persistence:
+                  type: object
+                  properties:
+                    claimName:
+                      type: string
+                    storageClassName:
+                      type: string
+                    size:
+                      type: string
+                    volumeName:
+                      type: string
+                    accessModes:
+                      type: array
+                      minItems: 1
+                      items:
+                        type: string
+                  required:
+                    - claimName
+                    - storageClassName
+                    - size
+                    - volumeName
+                    - accessModes
                 publisherSecret:
                   type: object
                   properties:
@@ -102,7 +122,7 @@ spec:
                 - namespace
                 - image
                 - domain
-                - storagePath
+                - persistence
                 - publisherSecret
                 - secrets
                 - gateway
@@ -151,6 +171,29 @@ spec:
             {{- $env := index .context "apiextensions.crossplane.io/environment" -}}
             {{- $gatewayEnabled := index $env "gateway" "enabled" -}}
             ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
+              name: oci-registry-{{ $spec.namespace }}-namespace
+              annotations:
+                {{ setResourceNameAnnotation "namespace" }}
+            spec:
+              deletionPolicy: Orphan
+              providerConfigRef:
+                name: platform
+              forProvider:
+                manifest:
+                  apiVersion: v1
+                  kind: Namespace
+                  metadata:
+                    name: {{ $spec.namespace }}
+                    {{- with $spec.namespaceLabels }}
+                    labels:
+                      {{- range $key, $value := . }}
+                      {{ $key }}: {{ $value }}
+                      {{- end }}
+                    {{- end }}
+            ---
             apiVersion: platform.guardian.dev/v1alpha1
             kind: SecretProjection
             metadata:
@@ -161,12 +204,7 @@ spec:
               waitForSecrets: {{ if eq (printf "%v" $spec.secrets.projection.waitForSecrets) "false" }}false{{ else }}true{{ end }}
               target:
                 namespace: {{ $spec.namespace }}
-                {{- with $spec.namespaceLabels }}
-                namespaceLabels:
-                  {{- range $key, $value := . }}
-                  {{ $key }}: {{ $value }}
-                  {{- end }}
-                {{- end }}
+                createNamespace: false
               openbao:
                 role: {{ $spec.secrets.projection.openbao.role }}
                 serviceAccountName: {{ $spec.secrets.projection.openbao.serviceAccountName }}
@@ -189,6 +227,11 @@ spec:
               annotations:
                 {{ setResourceNameAnnotation "config" }}
             spec:
+              references:
+                - dependsOn:
+                    apiVersion: kubernetes.crossplane.io/v1alpha2
+                    kind: Object
+                    name: oci-registry-{{ $spec.namespace }}-namespace
               providerConfigRef:
                 name: platform
               forProvider:
@@ -244,6 +287,41 @@ spec:
             apiVersion: kubernetes.crossplane.io/v1alpha2
             kind: Object
             metadata:
+              name: oci-registry-{{ $spec.namespace }}-pvc
+              annotations:
+                {{ setResourceNameAnnotation "pvc" }}
+            spec:
+              references:
+                - dependsOn:
+                    apiVersion: kubernetes.crossplane.io/v1alpha2
+                    kind: Object
+                    name: oci-registry-{{ $spec.namespace }}-namespace
+              providerConfigRef:
+                name: platform
+              forProvider:
+                manifest:
+                  apiVersion: v1
+                  kind: PersistentVolumeClaim
+                  metadata:
+                    name: {{ $spec.persistence.claimName }}
+                    namespace: {{ $spec.namespace }}
+                    labels:
+                      guardian.dev/site: {{ $spec.site }}
+                      app: zot
+                  spec:
+                    accessModes:
+                      {{ range $mode := $spec.persistence.accessModes }}
+                      - {{ $mode }}
+                      {{ end }}
+                    storageClassName: {{ $spec.persistence.storageClassName }}
+                    volumeName: {{ $spec.persistence.volumeName }}
+                    resources:
+                      requests:
+                        storage: {{ $spec.persistence.size }}
+            ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
               name: oci-registry-{{ $spec.namespace }}-deployment
               annotations:
                 {{ setResourceNameAnnotation "deployment" }}
@@ -253,6 +331,10 @@ spec:
                     apiVersion: kubernetes.crossplane.io/v1alpha2
                     kind: Object
                     name: oci-registry-{{ $spec.namespace }}-config
+                - dependsOn:
+                    apiVersion: kubernetes.crossplane.io/v1alpha2
+                    kind: Object
+                    name: oci-registry-{{ $spec.namespace }}-pvc
               providerConfigRef:
                 name: platform
               forProvider:
@@ -331,9 +413,8 @@ spec:
                                 - key: {{ $spec.publisherSecret.htpasswdKey }}
                                   path: htpasswd
                           - name: storage
-                            hostPath:
-                              path: {{ $spec.storagePath }}
-                              type: DirectoryOrCreate
+                            persistentVolumeClaim:
+                              claimName: {{ $spec.persistence.claimName }}
             ---
             apiVersion: kubernetes.crossplane.io/v1alpha2
             kind: Object

@@ -1,0 +1,5 @@
+filegroup(
+    name = "manifest",
+    srcs = ["k8s/zfs-pool-init.yaml.tmpl"],
+    visibility = ["//src/guardian-cli:__subpackages__"],
+)

@@ -9,6 +9,7 @@ filegroup(
         "secret-projection.yaml",
         "slo-profile.yaml",
         "status-surface.yaml",
+        "storage-plane.yaml",
     ],
     visibility = ["//src/guardian-cli:__subpackages__"],
 )

@@ -35,8 +35,28 @@ spec:
                     image:
                       type: string
                       description: Digest-pinned VictoriaMetrics OCI image reference.
-                    storagePath:
-                      type: string
+                    persistence:
+                      type: object
+                      properties:
+                        claimName:
+                          type: string
+                        storageClassName:
+                          type: string
+                        size:
+                          type: string
+                        volumeName:
+                          type: string
+                        accessModes:
+                          type: array
+                          minItems: 1
+                          items:
+                            type: string
+                      required:
+                        - claimName
+                        - storageClassName
+                        - size
+                        - volumeName
+                        - accessModes
                     retentionPeriod:
                       type: string
                     memoryAllowedBytes:
@@ -64,7 +84,7 @@ spec:
                         - limits
                   required:
                     - image
-                    - storagePath
+                    - persistence
                     - retentionPeriod
                     - memoryAllowedBytes
                     - ports
@@ -152,6 +172,41 @@ spec:
             apiVersion: kubernetes.crossplane.io/v1alpha2
             kind: Object
             metadata:
+              name: observability-stack-{{ $spec.namespace }}-victoria-metrics-pvc
+              annotations:
+                {{ setResourceNameAnnotation "victoria-metrics-pvc" }}
+            spec:
+              references:
+                - dependsOn:
+                    apiVersion: kubernetes.crossplane.io/v1alpha2
+                    kind: Object
+                    name: observability-stack-{{ $spec.namespace }}-namespace
+              providerConfigRef:
+                name: platform
+              forProvider:
+                manifest:
+                  apiVersion: v1
+                  kind: PersistentVolumeClaim
+                  metadata:
+                    name: {{ $spec.victoriaMetrics.persistence.claimName }}
+                    namespace: {{ $spec.namespace }}
+                    labels:
+                      guardian.dev/site: {{ $spec.site }}
+                      app: victoria-metrics
+                  spec:
+                    accessModes:
+                      {{ range $mode := $spec.victoriaMetrics.persistence.accessModes }}
+                      - {{ $mode }}
+                      {{ end }}
+                    storageClassName: {{ $spec.victoriaMetrics.persistence.storageClassName }}
+                    volumeName: {{ $spec.victoriaMetrics.persistence.volumeName }}
+                    resources:
+                      requests:
+                        storage: {{ $spec.victoriaMetrics.persistence.size }}
+            ---
+            apiVersion: kubernetes.crossplane.io/v1alpha2
+            kind: Object
+            metadata:
               name: observability-stack-{{ $spec.namespace }}-victoria-metrics
               annotations:
                 {{ setResourceNameAnnotation "victoria-metrics" }}
@@ -161,6 +216,10 @@ spec:
                     apiVersion: kubernetes.crossplane.io/v1alpha2
                     kind: Object
                     name: observability-stack-{{ $spec.namespace }}-namespace
+                - dependsOn:
+                    apiVersion: kubernetes.crossplane.io/v1alpha2
+                    kind: Object
+                    name: observability-stack-{{ $spec.namespace }}-victoria-metrics-pvc
               providerConfigRef:
                 name: platform
               forProvider:
@@ -209,9 +268,8 @@ spec:
                                 mountPath: /storage
                         volumes:
                           - name: storage
-                            hostPath:
-                              path: {{ $spec.victoriaMetrics.storagePath }}
-                              type: DirectoryOrCreate
+                            persistentVolumeClaim:
+                              claimName: {{ $spec.victoriaMetrics.persistence.claimName }}
             ---
             apiVersion: kubernetes.crossplane.io/v1alpha2
             kind: Object

@@ -10,6 +10,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const talosKubeletStorageRoot = "/var/mnt"
+
 // Bootstrap is the checked-in pre-Kubernetes description of one site. It is
 // intentionally limited to physical facts and Talos inputs that guardian must
 // know before an API server exists.
@@ -40,10 +42,24 @@ type Bootstrap struct {
 		InstallDiskSerial string `yaml:"installDiskSerial"`
 		ZFSDiskSerial     string `yaml:"zfsDiskSerial"`
 	} `yaml:"node"`
-	Talos struct {
+	Storage BootstrapStorage `yaml:"storage"`
+	Talos   struct {
 		Schematic string   `yaml:"schematic"`
 		Patches   []string `yaml:"patches"`
 	} `yaml:"talos"`
+}
+
+type BootstrapStorage struct {
+	Pools []BootstrapStoragePool `yaml:"pools"`
+}
+
+type BootstrapStoragePool struct {
+	Name          string   `yaml:"name"`
+	Type          string   `yaml:"type"`
+	Role          string   `yaml:"role"`
+	DeviceSerials []string `yaml:"deviceSerials"`
+	WipePolicy    string   `yaml:"wipePolicy"`
+	Mountpoint    string   `yaml:"mountpoint"`
 }
 
 // Environment is the post-Kubernetes desired-state bag for one site. The
@@ -120,6 +136,10 @@ type Site struct {
 		Domains []string
 		Monitor bool
 	}
+	Storage struct {
+		ProductPool BootstrapStoragePool
+	}
+	StoragePlane *storagePlaneManifest
 }
 
 // resolveSite resolves the site from an explicit bootstrap path, else the
@@ -162,6 +182,11 @@ func loadSite(path string) (*Site, error) {
 		Name:      bootstrap.Site,
 		Bootstrap: *bootstrap,
 	}
+	productPool, err := productWorkloadStoragePool(*bootstrap)
+	if err != nil {
+		return nil, err
+	}
+	s.Storage.ProductPool = productPool
 	s.EnvironmentBundle.Path = envResolved
 	s.EnvironmentBundle.Raw = envRaw
 	s.Aisucks.Domain = env.Products.Aisucks.Domain
@@ -172,6 +197,11 @@ func loadSite(path string) (*Site, error) {
 	}
 	s.Gateway.Enabled = env.Gateway.Enabled
 	s.OCI.Domain = env.Platform.OCI.Domain
+	planes, err := storagePlanes(s)
+	if err != nil {
+		return nil, err
+	}
+	s.StoragePlane = &planes[0]
 	observability, err := observabilityStacks(s)
 	if err != nil {
 		return nil, err
@@ -240,7 +270,86 @@ func loadBootstrap(path string) (*Bootstrap, string, error) {
 	if len(b.Talos.Patches) == 0 {
 		return nil, "", fmt.Errorf("bootstrap %s: talos.patches is required", resolved)
 	}
+	if err := validateBootstrapStorage(resolved, b); err != nil {
+		return nil, "", err
+	}
 	return &b, resolved, nil
+}
+
+func validateBootstrapStorage(path string, b Bootstrap) error {
+	if b.Node.InstallDiskSerial == b.Node.ZFSDiskSerial {
+		return fmt.Errorf("bootstrap %s: node.installDiskSerial and node.zfsDiskSerial must be different", path)
+	}
+	if len(b.Storage.Pools) == 0 {
+		return fmt.Errorf("bootstrap %s: storage.pools is required", path)
+	}
+	var productPools int
+	for i, pool := range b.Storage.Pools {
+		prefix := fmt.Sprintf("storage.pools[%d]", i)
+		required := map[string]string{
+			prefix + ".name":       pool.Name,
+			prefix + ".type":       pool.Type,
+			prefix + ".role":       pool.Role,
+			prefix + ".wipePolicy": pool.WipePolicy,
+			prefix + ".mountpoint": pool.Mountpoint,
+		}
+		for field, value := range required {
+			if value == "" {
+				return fmt.Errorf("bootstrap %s: %s is required", path, field)
+			}
+		}
+		if pool.Type != "zfs" {
+			return fmt.Errorf("bootstrap %s: %s.type must be zfs, got %q", path, prefix, pool.Type)
+		}
+		if pool.WipePolicy != "never" {
+			return fmt.Errorf("bootstrap %s: %s.wipePolicy must be never, got %q", path, prefix, pool.WipePolicy)
+		}
+		if !filepath.IsAbs(pool.Mountpoint) {
+			return fmt.Errorf("bootstrap %s: %s.mountpoint must be absolute, got %q", path, prefix, pool.Mountpoint)
+		}
+		if len(pool.DeviceSerials) == 0 {
+			return fmt.Errorf("bootstrap %s: %s.deviceSerials is required", path, prefix)
+		}
+		seen := map[string]bool{}
+		var hasZFSDisk bool
+		for _, serial := range pool.DeviceSerials {
+			if serial == "" {
+				return fmt.Errorf("bootstrap %s: %s.deviceSerials cannot contain empty values", path, prefix)
+			}
+			if seen[serial] {
+				return fmt.Errorf("bootstrap %s: %s.deviceSerials contains duplicate serial %q", path, prefix, serial)
+			}
+			seen[serial] = true
+			if serial == b.Node.InstallDiskSerial {
+				return fmt.Errorf("bootstrap %s: %s.deviceSerials must not include install disk serial %s", path, prefix, serial)
+			}
+			if serial == b.Node.ZFSDiskSerial {
+				hasZFSDisk = true
+			}
+		}
+		if pool.Role == "product-workloads" {
+			productPools++
+			if !hasZFSDisk {
+				return fmt.Errorf("bootstrap %s: %s.deviceSerials must include node.zfsDiskSerial %s", path, prefix, b.Node.ZFSDiskSerial)
+			}
+			if !pathWithin(pool.Mountpoint, talosKubeletStorageRoot) {
+				return fmt.Errorf("bootstrap %s: %s.mountpoint %q must be under %s so Talos kubelet can see local PV paths", path, prefix, pool.Mountpoint, talosKubeletStorageRoot)
+			}
+		}
+	}
+	if productPools != 1 {
+		return fmt.Errorf("bootstrap %s: exactly one storage pool must have role product-workloads, found %d", path, productPools)
+	}
+	return nil
+}
+
+func productWorkloadStoragePool(b Bootstrap) (BootstrapStoragePool, error) {
+	for _, pool := range b.Storage.Pools {
+		if pool.Role == "product-workloads" {
+			return pool, nil
+		}
+	}
+	return BootstrapStoragePool{}, fmt.Errorf("bootstrap %s: product-workloads storage pool is required", b.Site)
 }
 
 func loadEnvironment(path string) (*Environment, *environmentConfigMetadata, []byte, string, error) {

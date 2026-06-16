@@ -20,6 +20,16 @@ node:
   installDiskSerial: "362510FCEFB8" # nvme0n1, Talos system disk
   zfsDiskSerial: "362510FD7C47" # nvme1n1, reserved for the ZFS pool
 
+storage:
+  pools:
+    - name: guardian
+      type: zfs
+      role: product-workloads
+      deviceSerials:
+        - "362510FD7C47"
+      wipePolicy: never
+      mountpoint: /var/mnt/guardian
+
 talos:
   schematic: src/sites/dev/talos/schematic.yaml
   patches:

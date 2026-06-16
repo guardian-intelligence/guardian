@@ -19,10 +19,10 @@ type observabilityStackSpec struct {
 	Namespace       string            `yaml:"namespace"`
 	NamespaceLabels map[string]string `yaml:"namespaceLabels"`
 	VictoriaMetrics struct {
-		Image              string `yaml:"image"`
-		StoragePath        string `yaml:"storagePath"`
-		RetentionPeriod    string `yaml:"retentionPeriod"`
-		MemoryAllowedBytes string `yaml:"memoryAllowedBytes"`
+		Image              string          `yaml:"image"`
+		Persistence        persistenceSpec `yaml:"persistence"`
+		RetentionPeriod    string          `yaml:"retentionPeriod"`
+		MemoryAllowedBytes string          `yaml:"memoryAllowedBytes"`
 		Ports              struct {
 			HTTP int `yaml:"http"`
 		} `yaml:"ports"`
@@ -87,7 +87,6 @@ func validateObservabilityStack(site *Site, stack observabilityStackManifest) er
 	vm := spec.VictoriaMetrics
 	vmRequired := map[string]string{
 		"victoriaMetrics.image":              vm.Image,
-		"victoriaMetrics.storagePath":        vm.StoragePath,
 		"victoriaMetrics.retentionPeriod":    vm.RetentionPeriod,
 		"victoriaMetrics.memoryAllowedBytes": vm.MemoryAllowedBytes,
 	}
@@ -104,6 +103,9 @@ func validateObservabilityStack(site *Site, stack observabilityStackManifest) er
 	}
 	if vm.Resources.Limits["memory"] == "" {
 		return fmt.Errorf("environment %s: ObservabilityStack %s spec.victoriaMetrics.resources.limits.memory is required", site.EnvironmentBundle.Path, name)
+	}
+	if err := validatePersistence(site, "ObservabilityStack "+name+" victoriaMetrics", spec.Namespace, vm.Persistence); err != nil {
+		return err
 	}
 	return nil
 }

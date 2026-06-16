@@ -26,6 +26,12 @@ func TestDirectusInstancesFromSiteBundles(t *testing.T) {
 			if instance.Spec.Storage.S3 != nil && instance.Spec.Storage.S3.Enabled {
 				t.Fatal("checked-in Directus instances should use local upload storage until object storage is admitted")
 			}
+			if instance.Spec.Database.Persistence.ClaimName != "directus-postgres-data" {
+				t.Fatalf("directus database claim = %q, want directus-postgres-data", instance.Spec.Database.Persistence.ClaimName)
+			}
+			if instance.Spec.Uploads.Persistence.ClaimName != "directus-uploads" {
+				t.Fatalf("directus uploads claim = %q, want directus-uploads", instance.Spec.Uploads.Persistence.ClaimName)
+			}
 		})
 	}
 }
@@ -103,6 +109,33 @@ func TestCompanySiteDirectusBindingMustMatchInstance(t *testing.T) {
 
 func siteWithEnvironment(raw string) *Site {
 	site := &Site{Name: "dev"}
+	site.Storage.ProductPool.Mountpoint = "/var/mnt/guardian"
+	plane := storagePlaneManifest{Kind: "StoragePlane"}
+	plane.Metadata.Name = "local-zfs"
+	plane.Spec.Site = "dev"
+	plane.Spec.NodeName = "dev-w0"
+	plane.Spec.StorageClassName = "guardian-local-retain"
+	plane.Spec.ReclaimPolicy = "Retain"
+	plane.Spec.VolumeBindingMode = "WaitForFirstConsumer"
+	plane.Spec.Volumes = []storagePlaneVolume{
+		{
+			Name:                 "directus-postgres",
+			PersistentVolumeName: "guardian-dev-directus-postgres",
+			Namespace:            "directus",
+			ClaimName:            "directus-postgres-data",
+			Capacity:             "20Gi",
+			LocalPath:            "/var/mnt/guardian/directus/postgres",
+		},
+		{
+			Name:                 "directus-uploads",
+			PersistentVolumeName: "guardian-dev-directus-uploads",
+			Namespace:            "directus",
+			ClaimName:            "directus-uploads",
+			Capacity:             "10Gi",
+			LocalPath:            "/var/mnt/guardian/directus/uploads",
+		},
+	}
+	site.StoragePlane = &plane
 	site.EnvironmentBundle.Path = "environment.yaml"
 	site.EnvironmentBundle.Raw = []byte(raw)
 	return site
@@ -139,8 +172,21 @@ spec:
   database:
     name: directus
     user: directus
-    storagePath: /var/lib/guardian/directus/postgres
-  uploadsPath: /var/lib/guardian/directus/uploads
+    persistence:
+      claimName: directus-postgres-data
+      storageClassName: guardian-local-retain
+      size: 20Gi
+      volumeName: guardian-dev-directus-postgres
+      accessModes:
+        - ReadWriteOnce
+  uploads:
+    persistence:
+      claimName: directus-uploads
+      storageClassName: guardian-local-retain
+      size: 10Gi
+      volumeName: guardian-dev-directus-uploads
+      accessModes:
+        - ReadWriteOnce
   resources:
     requests:
       cpu: 100m

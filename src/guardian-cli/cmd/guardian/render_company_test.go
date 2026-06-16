@@ -66,6 +66,9 @@ func TestDirectusPlatformRender(t *testing.T) {
 		"kind: SecretProjection",
 		"name: {{ $xr.metadata.name }}-secrets",
 		"createNamespace: false",
+		"kind: PersistentVolumeClaim",
+		"name: directus-{{ $spec.namespace }}-postgres-pvc",
+		"name: directus-{{ $spec.namespace }}-uploads-pvc",
 		"kind: StatefulSet",
 		"kind: Deployment",
 		"kind: Service",
@@ -89,7 +92,9 @@ func TestDirectusPlatformRender(t *testing.T) {
 		"remotePath: {{ $spec.storage.s3.remotePath }}",
 		"/server/ping",
 		"/directus/uploads",
-		"hostPath:",
+		"persistentVolumeClaim:",
+		"claimName: {{ $spec.database.persistence.claimName }}",
+		"claimName: {{ $spec.uploads.persistence.claimName }}",
 		"name: function-environment-configs",
 		"name: function-auto-ready",
 	} {
@@ -191,8 +196,10 @@ func TestDirectusEnvironmentBundleInstances(t *testing.T) {
 				"database: guardian/guardian-" + siteName + "/directus/postgres",
 				"runtimeSecretName: directus-runtime",
 				"databaseSecretName: directus-postgres",
-				"storagePath: /var/lib/guardian/directus/postgres",
-				"uploadsPath: /var/lib/guardian/directus/uploads",
+				"claimName: directus-postgres-data",
+				"claimName: directus-uploads",
+				"volumeName: guardian-" + siteName + "-directus-postgres",
+				"volumeName: guardian-" + siteName + "-directus-uploads",
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("DirectusInstance environment render missing %q", want)

@@ -94,6 +94,11 @@ var components = []component{{
 	rawManifest: true,
 	enabled:     siteUsesCrossplane,
 }, {
+	name:        "storage-plane-platform",
+	manifest:    "src/crossplane/packages/guardian-platform/storage-plane.yaml",
+	rawManifest: true,
+	enabled:     siteUsesCrossplane,
+}, {
 	name:        "public-http-service-platform",
 	manifest:    "src/crossplane/packages/guardian-platform/public-http-service.yaml",
 	rawManifest: true,
@@ -145,6 +150,10 @@ var components = []component{{
 	name:     "postgres",
 	layout:   "_main/src/infrastructure-components/postgres/image",
 	pushOnly: true,
+}, {
+	name:     "local-storage-bootstrap",
+	manifest: "src/infrastructure-components/local-storage/k8s/zfs-pool-init.yaml.tmpl",
+	enabled:  siteUsesLocalStorage,
 }, {
 	name:     "directus",
 	layout:   "_main/src/infrastructure-components/directus/image",
@@ -233,6 +242,10 @@ func siteUsesEdgeGateway(s *Site) bool {
 
 func siteUsesCrossplane(*Site) bool {
 	return true
+}
+
+func siteUsesLocalStorage(s *Site) bool {
+	return s.Storage.ProductPool.Name != ""
 }
 
 func siteUsesPlatformTLS(s *Site) bool {
