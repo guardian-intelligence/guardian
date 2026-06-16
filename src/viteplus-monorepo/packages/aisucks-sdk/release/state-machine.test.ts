@@ -6,7 +6,11 @@ import { Cause, Effect, Exit, Layer, Option } from "effect";
 import { CommandFailed } from "./errors.js";
 import { ProcessProvider, type CommandInput } from "./providers.js";
 import {
+  cosignAttestArgs,
   cosignReleaseEnv,
+  cosignSignArgs,
+  cosignVerifyArgs,
+  cosignVerifyAttestationArgs,
   npmViewIntegrity,
   npmReleaseEnv,
   ociManifestDeleteArgs,
@@ -41,10 +45,59 @@ void test("npm provenance is opt-in for this release milestone", () => {
   });
 });
 
-void test("cosign release commands opt into OCI referrers support", () => {
-  assert.deepEqual(cosignReleaseEnv(), {
-    COSIGN_EXPERIMENTAL: "1",
-  });
+void test("cosign release commands use stock v3 defaults", () => {
+  assert.deepEqual(cosignReleaseEnv(), {});
+});
+
+void test("cosign OCI signing uses stock keyless v3 arguments", () => {
+  const ref =
+    "oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:46b6566ec4c6320cfcebdfd76f2e2d07ec315e681a1f5edf5ed693c32abac8b8";
+  assert.deepEqual(cosignSignArgs(ref), [
+    "sign",
+    "--yes",
+    "--oidc-provider",
+    "github-actions",
+    ref,
+  ]);
+});
+
+void test("cosign OCI attestation uses stock keyless in-toto arguments", () => {
+  const ref =
+    "oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:46b6566ec4c6320cfcebdfd76f2e2d07ec315e681a1f5edf5ed693c32abac8b8";
+  assert.deepEqual(cosignAttestArgs(ref, "/tmp/aisucks-sdk.slsa-provenance.json"), [
+    "attest",
+    "--yes",
+    "--oidc-provider",
+    "github-actions",
+    "--type",
+    "slsaprovenance1",
+    "--statement",
+    "/tmp/aisucks-sdk.slsa-provenance.json",
+    ref,
+  ]);
+});
+
+void test("cosign verification pins the release workflow identity", () => {
+  const ref =
+    "oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:46b6566ec4c6320cfcebdfd76f2e2d07ec315e681a1f5edf5ed693c32abac8b8";
+  assert.deepEqual(cosignVerifyArgs(ref), [
+    "verify",
+    ref,
+    "--certificate-identity",
+    "https://github.com/guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml@refs/heads/main",
+    "--certificate-oidc-issuer",
+    "https://token.actions.githubusercontent.com",
+  ]);
+  assert.deepEqual(cosignVerifyAttestationArgs(ref), [
+    "verify-attestation",
+    "--type",
+    "slsaprovenance1",
+    ref,
+    "--certificate-identity",
+    "https://github.com/guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml@refs/heads/main",
+    "--certificate-oidc-issuer",
+    "https://token.actions.githubusercontent.com",
+  ]);
 });
 
 void test("OCI rollback deletes the exact manifest ref with password on stdin", () => {

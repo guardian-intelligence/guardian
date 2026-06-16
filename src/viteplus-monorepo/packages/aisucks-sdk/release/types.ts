@@ -19,6 +19,10 @@ export const inTotoStatementType = "https://in-toto.io/Statement/v1";
 export const slsaProvenancePredicateType = "https://slsa.dev/provenance/v1";
 export const guardianBuildType = "https://guardianintelligence.org/release/aisucks-sdk/npm/v1";
 export const githubOidcIssuer = "https://token.actions.githubusercontent.com";
+export const sdkReleaseWorkflowRef =
+  "guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml@refs/heads/main";
+export const sdkReleaseWorkflowIdentity =
+  "https://github.com/guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml@refs/heads/main";
 
 export const releaseDir = path.dirname(fileURLToPath(import.meta.url));
 export const packageRoot = path.resolve(releaseDir, "..");
@@ -105,11 +109,7 @@ export type InTotoStatement = InTotoStatementFromSchema;
 export type EvidenceBundle = {
   readonly statement: InTotoStatement;
   readonly statementJson: string;
-  readonly sigstoreBundleJson: string;
-  readonly intotoJsonl: string;
   readonly statementPath: string;
-  readonly sigstoreBundlePath: string;
-  readonly intotoBundlePath: string;
 };
 
 export type ReleaseResult = ReleaseResultFromSchema;

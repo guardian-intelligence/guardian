@@ -9,6 +9,9 @@ This lane runs after the fleet release gate. It should publish immutable
 artifacts, signatures, attestations, and release metadata for selected release
 targets. The release tool owns the target tuple and all publish/no-op logic.
 Reference naming is defined in `docs/architecture/oci-artifact-references.md`.
+The public verification contract is stock cosign v3: blob signatures ship as
+Sigstore bundle sidecars, and OCI signatures/attestations are discovered as
+standard OCI 1.1 referrers.
 
 The split is deliberate:
 
@@ -20,22 +23,27 @@ The split is deliberate:
 
 ## What Ships
 
-- API OCI image: `ghcr.io/guardian-intelligence/aisucks@sha256:<digest>`
+- CLI GitHub Release asset:
+  `guardian_<version>_linux_amd64.tar.gz`
+- CLI blob signature bundle:
+  `guardian_<version>_linux_amd64.tar.gz.sigstore.json`
+- CLI DSSE/in-toto SLSA attestation bundle:
+  `guardian_<version>_linux_amd64.tar.gz.intoto.sigstore.json`
+- API OCI image:
+  `oci.guardianintelligence.org/guardian/aisucks/api@sha256:<digest>`
 - SDK OCI artifact:
   `oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>`
 - OCI tags: `edge`, `nightly`, `stable`, `v<N>`, and `git-<12-char-sha>`
-- DSSE/in-toto JSONL bundle over the SDK OCI subject
-- Cosign keyless signature over the SDK OCI subject digest
+- Cosign keyless signatures over each exact blob or OCI subject digest
+- DSSE/in-toto SLSA provenance attestations over each exact blob or OCI
+  subject digest
 - npm Trusted Publishing provenance for the npm projection
 
-The OCI digest still comes from `bazelisk build //:build`; the release tool
-pushes the already-built layout with:
-
-```sh
-bazelisk run //src/products/aisucks/services/api:publish_ghcr -- --tag v<N>
-```
-
-`rules_oci` pushes the image by digest first, then applies tags.
+The legacy `//src/products/aisucks/services/api:publish_ghcr` helper is not
+the v0.4.0 public API lane. The target path is a package-owned release command
+executed through `aspect`, which pushes
+`oci.guardianintelligence.org/guardian/aisucks/api@sha256:<digest>`, signs the
+digest, attaches DSSE/in-toto provenance, and then applies convenience tags.
 
 The SDK OCI subject is built and admitted through Aspect:
 
@@ -79,14 +87,45 @@ Executor:
   attestation, verification, or no-op decisions. Those belong in the release
   package invoked by `aspect`.
 
-GHCR:
+OCI registry:
 
-- The release tool needs authority to push `ghcr.io/guardian-intelligence/aisucks`.
-- The package should be made public in the GitHub Packages UI after the first
-  publish if GitHub defaults it to private.
+- The release tool needs authority to push
+  `oci.guardianintelligence.org/guardian/aisucks/api`.
+- `oci.guardianintelligence.org` must allow anonymous digest reads and serve
+  cosign v3 signatures and attestations as standard OCI 1.1 referrers.
 
 The npm SDK release lane is intentionally a downstream projection from the SDK
 OCI artifact. See `docs/runbooks/npm-sdk-release.md`.
+
+## Verify CLI Release Asset
+
+Use the exact version and asset name from the GitHub Release:
+
+```sh
+VERSION=v0.4.0
+ASSET=guardian_${VERSION}_linux_amd64.tar.gz
+BASE=https://github.com/guardian-intelligence/guardian/releases/download/${VERSION}
+
+curl -fsSLO "$BASE/$ASSET"
+curl -fsSLO "$BASE/$ASSET.sigstore.json"
+curl -fsSLO "$BASE/$ASSET.intoto.sigstore.json"
+
+guardian run cosign verify-blob "$ASSET" \
+  --bundle "$ASSET.sigstore.json" \
+  --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/release.yml@refs/heads/main' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
+
+guardian run cosign verify-blob-attestation "$ASSET" \
+  --bundle "$ASSET.intoto.sigstore.json" \
+  --type slsaprovenance1 \
+  --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/release.yml@refs/heads/main' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
+```
+
+Expected: both commands verify the exact blob bytes, the signing certificate
+identity is the `release.yml` workflow on `refs/heads/main`, and the
+attestation payload is a DSSE envelope around an in-toto SLSA provenance
+statement.
 
 ## Verify Current SDK OCI Evidence
 
@@ -97,25 +136,33 @@ SDK='oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<digest>'
 
 guardian run oras pull "$SDK" -o ./dist
 guardian run oras discover "$SDK"
-COSIGN_EXPERIMENTAL=1 guardian run cosign verify --experimental-oci11=true "$SDK" \
+guardian run cosign verify "$SDK" \
+  --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml@refs/heads/main' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
+
+guardian run cosign verify-attestation "$SDK" \
+  --type slsaprovenance1 \
   --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml@refs/heads/main' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 ```
 
-Expected: `oras pull` writes the npm tarball payload and `oras discover` shows
-the `application/vnd.guardian.release.in-toto.bundle.v1` referrer. The referrer
-payload is a JSONL bundle containing a DSSE envelope around an in-toto
-Statement with SLSA provenance predicate. `cosign verify` reports one verified
-keyless signature for the npm SDK release workflow identity.
+Expected: `oras pull` writes the npm tarball payload. `cosign verify` reports
+one verified keyless signature for the npm SDK release workflow identity.
+`cosign verify-attestation` verifies the DSSE/in-toto SLSA provenance
+attestation attached to the same OCI subject digest.
 
 ## Verify OCI Provenance Attestation
 
 ```sh
-IMAGE='ghcr.io/guardian-intelligence/aisucks@sha256:<digest>'
+IMAGE='oci.guardianintelligence.org/guardian/aisucks/api@sha256:<digest>'
+
+guardian run cosign verify "$IMAGE" \
+  --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/release.yml@refs/heads/main' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 
 guardian run cosign verify-attestation "$IMAGE" \
-  --type slsaprovenance \
-  --certificate-identity-regexp '<expected release builder identity>' \
+  --type slsaprovenance1 \
+  --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/release.yml@refs/heads/main' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
   | jq -r '.payload' \
   | base64 -d \
@@ -127,8 +174,8 @@ Expected predicate facts:
 - `predicateType` is SLSA provenance.
 - `predicate.invocation.parameters.repository` is
   `https://github.com/guardian-intelligence/guardian`.
-- `predicate.invocation.parameters.bazelTarget` is
-  `//src/products/aisucks/services/api:publish_ghcr`.
+- `predicate.invocation.parameters.bazelTarget` names the package-owned API
+  OCI release target, not the legacy GHCR publish helper.
 - `predicate.builder.id` names the repo-owned release builder and exact
   source ref.
 

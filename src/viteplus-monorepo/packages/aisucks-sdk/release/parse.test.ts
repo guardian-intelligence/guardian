@@ -36,7 +36,7 @@ void test("parseReleaseConfig rebases release paths under source root", () => {
   );
 });
 
-void test("parseReleaseConfig keeps evidence layers opt-in", () => {
+void test("parseReleaseConfig keeps public provenance surfaces opt-in", () => {
   const config = parseReleaseConfig(
     ["--publish", "--with-attestation", "--sign-oci", "--npm-provenance"],
     "0.3.0",

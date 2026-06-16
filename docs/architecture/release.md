@@ -13,7 +13,7 @@ Build authority and deploy authority never meet:
 
 - **A hosted builder builds.** CI on the public mirror builds hermetically
   (Bazel), pushes images + a CUE release manifest by digest, signs provenance
-  with cosign **keyless** or a future Transit-backed builder identity, and
+  with cosign v3 **keyless** or a future Transit-backed builder identity, and
   advances the **edge** channel for every buildable commit. The hosted builder
   holds artifact-publisher authority and nothing else — no cluster credential
   exists there, not "scoped", none.
@@ -89,8 +89,9 @@ the release subject.
 - **Channels** = signed pointer artifacts: `edge` (CI-signed), plus
   `nightly`, `rc`, and `stable` (Transit-signed). A channel points to a
   release subject digest, never directly to a mutable tag.
-- **Attestations** (in-toto predicates via cosign referrers on the manifest
-  digest): SLSA provenance (CI); `test-result` (deep test runner);
+- **Attestations** (in-toto predicates via stock cosign v3 referrers on the
+  manifest digest, verifiable without experimental flags): SLSA provenance
+  (CI); `test-result` (deep test runner);
   `gate-pass` / `gate-fail` (judge, Transit); `rejected` (a taint, refused
   everywhere until explicit operator forgiveness — never a timeout);
   `deployed` (per site; audit trail and the status page's release-train
@@ -202,8 +203,8 @@ package tests.
    `guardian/aisucks/sdk/npm`; the npmjs publish step is a later Trusted
    Publishing projection from that subject, not a push-on-main rule in GitHub
    Actions YAML. VERIFY: pull the real SDK release from a clean machine with
-   `guardian run oras pull`, `guardian run oras discover`, and `guardian run
-   cosign verify`.
+   `guardian run oras pull`, `guardian run oras discover`, `guardian run
+   cosign verify`, and `guardian run cosign verify-attestation`.
 2. **Flux on dev** following edge; the template→kustomize conversion lands
    here. VERIFY: a merge reaches dev converged in minutes, hands-off.
 3. **SLOProfile/TestPlan skeletons.** Define declarative inputs for

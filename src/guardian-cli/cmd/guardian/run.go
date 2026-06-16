@@ -36,9 +36,9 @@ const (
 	orasLinuxAMD64ArchiveSHA = "6cdc692f929100feb08aa8de584d02f7bcc30ec7d88bc2adc2054d782db57c64"
 	orasLinuxAMD64BinarySHA  = "040e140304b7dbdd9b40dacd798e2303cea44ad84eeb210750afdf15f1dcf8b4"
 
-	cosignVersion           = "2.6.1"
-	cosignLinuxAMD64URL     = "https://github.com/sigstore/cosign/releases/download/v2.6.1/cosign-linux-amd64"
-	cosignLinuxAMD64SHA256  = "064954c5d8c7e3b28188eee5b1727b31c411550bc5fefd41aa672d3c761d103a"
+	cosignVersion           = "3.1.1"
+	cosignLinuxAMD64URL     = "https://github.com/sigstore/cosign/releases/download/v3.1.1/cosign-linux-amd64"
+	cosignLinuxAMD64SHA256  = "ae1ecd212663f3693ad9edf8b1a183900c9a52d3155ba6e354237f9a0f6463fc"
 	cosignLinuxAMD64PinName = "src/guardian-cli/cmd/guardian/run.go (cosignLinuxAMD64SHA256)"
 )
 

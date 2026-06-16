@@ -32,7 +32,10 @@ import {
   type GithubOidcClaims,
 } from "./schemas.js";
 import {
+  githubOidcIssuer,
   sdkPackageName,
+  sdkReleaseWorkflowRef,
+  sdkReleaseWorkflowIdentity,
   sourceRepo,
   type EvidenceBundle,
   type NpmPackEntry,
@@ -77,11 +80,9 @@ export function runRelease(
     );
     const evidence = yield* stage(
       "attest",
+      config.createAttestation ? "create in-toto/SLSA statement" : "skip in-toto/SLSA statement",
       config.createAttestation
-        ? "create DSSE in-toto/SLSA evidence"
-        : "skip DSSE in-toto/SLSA evidence",
-      config.createAttestation
-        ? createEvidenceBundle(config, candidate, outputDir)
+        ? createEvidenceBundle(candidate, outputDir)
         : Effect.succeed(undefined),
     );
     yield* stage(
@@ -94,45 +95,49 @@ export function runRelease(
       "validate npm package projection before public writes",
       validateNpmProjection(config, candidate),
     );
-    const admittedCandidate = yield* stage(
-      "local-evidence",
-      evidence === undefined
-        ? "skip local evidence referrer"
-        : "attach admitted evidence to local OCI layout",
-      evidence === undefined
-        ? Effect.succeed(candidate)
-        : attachLocalEvidence(config, candidate, evidence, outputDir),
-    );
     const publishedOci = yield* stage(
       "publish-oci",
       "publish admitted OCI subject",
-      publishOci(config, admittedCandidate, evidence, outputDir),
+      publishOci(config, candidate, outputDir),
     );
     const ociSignatureStatus = yield* stage(
       "sign-oci",
       "sign published OCI subject",
       signOci(config, publishedOci),
     );
+    const ociAttestationStatus = yield* stage(
+      "attest-oci",
+      "attest published OCI subject",
+      attestOci(config, publishedOci, evidence),
+    );
     const npmStatus = yield* stage(
       "publish-npm",
       "publish npm package projection",
-      publishNpm(config, admittedCandidate),
+      publishNpm(config, candidate),
     );
     yield* stage(
       "verify",
       "verify final release projections",
-      verifyRelease(config, admittedCandidate, publishedOci, npmStatus),
+      verifyRelease(
+        config,
+        candidate,
+        publishedOci,
+        ociSignatureStatus,
+        ociAttestationStatus,
+        npmStatus,
+      ),
     );
 
     const files = yield* FileProvider;
     const logger = yield* LoggerProvider;
     const result: ReleaseResult = {
       target,
-      candidate: admittedCandidate,
+      candidate,
       ...(evidence === undefined ? {} : { evidence }),
       attestationStatus: evidence === undefined ? "not-requested" : "created",
       publishedOci,
       ociSignatureStatus,
+      ociAttestationStatus,
       npmProvenanceStatus: config.npmProvenance ? "requested" : "not-requested",
       npmStatus,
       eventLog: logger.events(),
@@ -198,7 +203,8 @@ function preflight(
         }),
       );
     }
-    if (config.mode === "publish" && config.signOci) {
+    if (config.mode === "publish" && (config.signOci || config.createAttestation)) {
+      yield* requirePinnedReleaseWorkflowRef();
       yield* requireGitHubActionsOidcForOciSigning();
       yield* ociBasicAuth().pipe(Effect.asVoid);
     }
@@ -227,6 +233,24 @@ function preflight(
       );
     }
   });
+}
+
+function requirePinnedReleaseWorkflowRef(): Effect.Effect<void, ReleaseError> {
+  if (process.env.GITHUB_ACTIONS !== "true") {
+    return Effect.void;
+  }
+  if (process.env.GITHUB_WORKFLOW_REF === sdkReleaseWorkflowRef) {
+    return Effect.void;
+  }
+  return Effect.fail(
+    new InvalidReleaseTarget({
+      reason: "OCI signing requires the pinned npm SDK release workflow on main",
+      details: {
+        expectedWorkflowRef: sdkReleaseWorkflowRef,
+        actualWorkflowRef: process.env.GITHUB_WORKFLOW_REF,
+      },
+    }),
+  );
 }
 
 function requireGitHubActionsOidcForOciSigning(): Effect.Effect<void, ReleaseError> {
@@ -465,63 +489,9 @@ function createLocalCandidate(
   });
 }
 
-function attachLocalEvidence(
-  config: ReleaseConfig,
-  candidate: ReleaseCandidate,
-  evidence: EvidenceBundle,
-  outputDir: string,
-): Effect.Effect<ReleaseCandidate, ReleaseError, FileProvider | ProcessProvider> {
-  return Effect.gen(function* () {
-    const resultPath = path.join(outputDir, "sdk-oci.local.admitted.json");
-    yield* runSdkOci(config, [
-      "--tarball",
-      config.paths.tarball,
-      "--pack-json",
-      config.paths.packJson,
-      "--oci-layout",
-      candidate.localLayout,
-      "--tag",
-      candidate.target.channel,
-      "--source-commit",
-      candidate.target.sourceCommit,
-      "--attestation-bundle",
-      evidence.intotoBundlePath,
-      "--attestation-title",
-      `${candidate.pack.filename}.intoto.jsonl`,
-      "--output",
-      resultPath,
-    ]);
-
-    const oci = yield* readSdkOciResult(resultPath);
-    if (oci.oci_digest !== candidate.oci.oci_digest) {
-      return yield* Effect.fail(
-        new VerificationFailed({
-          reason: "local evidence attach changed the admitted OCI digest",
-          details: {
-            admitted: candidate.oci.oci_digest,
-            sealed: oci.oci_digest,
-          },
-        }),
-      );
-    }
-    if (oci.attestation_digest === undefined) {
-      return yield* Effect.fail(
-        new VerificationFailed({
-          reason: "local evidence attach did not produce an attestation referrer digest",
-        }),
-      );
-    }
-    return {
-      ...candidate,
-      oci,
-    };
-  });
-}
-
 function publishOci(
   config: ReleaseConfig,
   candidate: ReleaseCandidate,
-  evidence: EvidenceBundle | undefined,
   outputDir: string,
 ): Effect.Effect<SdkOciResult | undefined, ReleaseError, FileProvider | ProcessProvider> {
   if (!config.publishOci) {
@@ -531,15 +501,6 @@ function publishOci(
   return Effect.gen(function* () {
     const resultPath = path.join(outputDir, "sdk-oci.public.json");
     const authArgs = yield* ociAuthArgs();
-    const evidenceArgs =
-      evidence === undefined
-        ? []
-        : [
-            "--attestation-bundle",
-            evidence.intotoBundlePath,
-            "--attestation-title",
-            `${candidate.pack.filename}.intoto.jsonl`,
-          ];
 
     yield* runSdkOci(config, [
       "--tarball",
@@ -552,7 +513,6 @@ function publishOci(
       candidate.target.sourceCommit,
       "--output",
       resultPath,
-      ...evidenceArgs,
       ...authArgs,
     ]);
 
@@ -647,7 +607,6 @@ function signOci(
                 reason: "OCI signing failed and unsigned OCI rollback failed",
                 details: {
                   ociRef: publishedOci.oci_ref,
-                  attestationRef: publishedOci.attestation_ref,
                   signingError: releaseErrorSummary(signingError),
                   cleanupError: releaseErrorSummary(cleanupError),
                 },
@@ -665,8 +624,61 @@ function signPublishedOci(
   publishedOci: SdkOciResult,
 ): Effect.Effect<"signed", ReleaseError, ProcessProvider> {
   return Effect.gen(function* () {
+    yield* loginCosignRegistry(config, publishedOci.oci_ref);
+    yield* retryTransient(
+      runCommand({
+        program: config.paths.cosign,
+        args: cosignSignArgs(publishedOci.oci_ref),
+        cwd: config.paths.repoRoot,
+        env: cosignReleaseEnv(),
+        timeoutMs: publishTimeoutMs,
+      }),
+      isTransientReleaseError,
+    );
+    return signedOciStatus();
+  });
+}
+
+function attestOci(
+  config: ReleaseConfig,
+  publishedOci: SdkOciResult | undefined,
+  evidence: EvidenceBundle | undefined,
+): Effect.Effect<"not-requested" | "attested", ReleaseError, ProcessProvider> {
+  if (publishedOci === undefined || evidence === undefined) {
+    return Effect.succeed("not-requested");
+  }
+
+  return attestPublishedOci(config, publishedOci, evidence);
+}
+
+function attestPublishedOci(
+  config: ReleaseConfig,
+  publishedOci: SdkOciResult,
+  evidence: EvidenceBundle,
+): Effect.Effect<"attested", ReleaseError, ProcessProvider> {
+  return Effect.gen(function* () {
+    yield* loginCosignRegistry(config, publishedOci.oci_ref);
+    yield* retryTransient(
+      runCommand({
+        program: config.paths.cosign,
+        args: cosignAttestArgs(publishedOci.oci_ref, evidence.statementPath),
+        cwd: config.paths.repoRoot,
+        env: cosignReleaseEnv(),
+        timeoutMs: publishTimeoutMs,
+      }),
+      isTransientReleaseError,
+    );
+    return "attested" as const;
+  });
+}
+
+function loginCosignRegistry(
+  config: ReleaseConfig,
+  ociRef: string,
+): Effect.Effect<void, ReleaseError, ProcessProvider> {
+  return Effect.gen(function* () {
     const auth = yield* ociBasicAuth();
-    const registry = ociRegistryFromRef(publishedOci.oci_ref);
+    const registry = ociRegistryFromRef(ociRef);
     yield* retryTransient(
       runCommand({
         program: config.paths.cosign,
@@ -679,25 +691,6 @@ function signPublishedOci(
       }),
       isTransientReleaseError,
     );
-    yield* retryTransient(
-      runCommand({
-        program: config.paths.cosign,
-        args: [
-          "sign",
-          "--yes",
-          "--oidc-provider",
-          "github-actions",
-          "--registry-referrers-mode",
-          "oci-1-1",
-          publishedOci.oci_ref,
-        ],
-        cwd: config.paths.repoRoot,
-        env: cosignReleaseEnv(),
-        timeoutMs: publishTimeoutMs,
-      }),
-      isTransientReleaseError,
-    );
-    return signedOciStatus();
   });
 }
 
@@ -714,11 +707,9 @@ function rollbackUnsignedOci(
       message: "delete unsigned OCI subject after signing failure",
       details: {
         ociRef: publishedOci.oci_ref,
-        attestationRef: publishedOci.attestation_ref,
       },
     });
-    yield* deleteOciRef(config, publishedOci.attestation_ref).pipe(
-      Effect.zipRight(deleteOciRef(config, publishedOci.oci_ref)),
+    yield* deleteOciRef(config, publishedOci.oci_ref).pipe(
       Effect.tap(() =>
         logger.log({
           stage: "rollback-oci",
@@ -908,6 +899,8 @@ function verifyRelease(
   config: ReleaseConfig,
   candidate: ReleaseCandidate,
   publishedOci: SdkOciResult | undefined,
+  ociSignatureStatus: "not-requested" | "signed",
+  ociAttestationStatus: "not-requested" | "attested",
   npmStatus: "not-requested" | "published" | "already-published",
 ): Effect.Effect<void, ReleaseError, ProcessProvider> {
   return Effect.gen(function* () {
@@ -923,12 +916,11 @@ function verifyRelease(
           }),
         );
       }
-      if (config.createAttestation && publishedOci.attestation_digest === undefined) {
-        return yield* Effect.fail(
-          new VerificationFailed({
-            reason: "published OCI result did not include attestation referrer digest",
-          }),
-        );
+      if (ociSignatureStatus === "signed") {
+        yield* verifyOciSignature(config, publishedOci);
+      }
+      if (ociAttestationStatus === "attested") {
+        yield* verifyOciAttestation(config, publishedOci);
       }
     }
 
@@ -949,6 +941,38 @@ function verifyRelease(
       }
     }
   });
+}
+
+function verifyOciSignature(
+  config: ReleaseConfig,
+  publishedOci: SdkOciResult,
+): Effect.Effect<void, ReleaseError, ProcessProvider> {
+  return retryTransient(
+    runCommand({
+      program: config.paths.cosign,
+      args: cosignVerifyArgs(publishedOci.oci_ref),
+      cwd: config.paths.repoRoot,
+      env: cosignReleaseEnv(),
+      timeoutMs: commandTimeoutMs,
+    }),
+    isTransientReleaseError,
+  ).pipe(Effect.asVoid);
+}
+
+function verifyOciAttestation(
+  config: ReleaseConfig,
+  publishedOci: SdkOciResult,
+): Effect.Effect<void, ReleaseError, ProcessProvider> {
+  return retryTransient(
+    runCommand({
+      program: config.paths.cosign,
+      args: cosignVerifyAttestationArgs(publishedOci.oci_ref),
+      cwd: config.paths.repoRoot,
+      env: cosignReleaseEnv(),
+      timeoutMs: commandTimeoutMs,
+    }),
+    isTransientReleaseError,
+  ).pipe(Effect.asVoid);
 }
 
 export function npmViewIntegrity(
@@ -1019,9 +1043,49 @@ export function npmReleaseEnv(provenance = false): Readonly<Record<string, strin
 }
 
 export function cosignReleaseEnv(): Readonly<Record<string, string>> {
-  return {
-    COSIGN_EXPERIMENTAL: "1",
-  };
+  return {};
+}
+
+export function cosignSignArgs(ociRef: string): readonly string[] {
+  return ["sign", "--yes", "--oidc-provider", "github-actions", ociRef];
+}
+
+export function cosignAttestArgs(ociRef: string, statementPath: string): readonly string[] {
+  return [
+    "attest",
+    "--yes",
+    "--oidc-provider",
+    "github-actions",
+    "--type",
+    "slsaprovenance1",
+    "--statement",
+    statementPath,
+    ociRef,
+  ];
+}
+
+export function cosignVerifyArgs(ociRef: string): readonly string[] {
+  return [
+    "verify",
+    ociRef,
+    "--certificate-identity",
+    sdkReleaseWorkflowIdentity,
+    "--certificate-oidc-issuer",
+    githubOidcIssuer,
+  ];
+}
+
+export function cosignVerifyAttestationArgs(ociRef: string): readonly string[] {
+  return [
+    "verify-attestation",
+    "--type",
+    "slsaprovenance1",
+    ociRef,
+    "--certificate-identity",
+    sdkReleaseWorkflowIdentity,
+    "--certificate-oidc-issuer",
+    githubOidcIssuer,
+  ];
 }
 
 function runSdkOci(

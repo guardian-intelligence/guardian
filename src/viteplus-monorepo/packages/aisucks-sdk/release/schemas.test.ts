@@ -5,7 +5,7 @@ import { decodeStrictJsonSync, SdkOciResultSchema } from "./schemas.js";
 
 const manifestDigest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const payloadDigest = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
-const attestationDigest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const otherDigest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
 function validSdkOciResult(): Record<string, unknown> {
   return {
@@ -47,14 +47,14 @@ void test("SdkOciResultSchema rejects OCI refs without a repository", () => {
 void test("SdkOciResultSchema rejects OCI refs with multiple digest separators", () => {
   assertRejectsSdkOciResult({
     ...validSdkOciResult(),
-    oci_ref: `oci.guardianintelligence.org/guardian/aisucks/sdk/npm@${attestationDigest}@${manifestDigest}`,
+    oci_ref: `oci.guardianintelligence.org/guardian/aisucks/sdk/npm@${otherDigest}@${manifestDigest}`,
   });
 });
 
 void test("SdkOciResultSchema rejects OCI ref and digest mismatch", () => {
   assertRejectsSdkOciResult({
     ...validSdkOciResult(),
-    oci_ref: `oci.guardianintelligence.org/guardian/aisucks/sdk/npm@${attestationDigest}`,
+    oci_ref: `oci.guardianintelligence.org/guardian/aisucks/sdk/npm@${otherDigest}`,
   });
 });
 
@@ -77,7 +77,7 @@ void test("SdkOciResultSchema rejects short source commits", () => {
 void test("SdkOciResultSchema rejects payload and tarball digest mismatch", () => {
   assertRejectsSdkOciResult({
     ...validSdkOciResult(),
-    tarball_sha256: attestationDigest,
+    tarball_sha256: otherDigest,
   });
 });
 
@@ -92,28 +92,6 @@ void test("SdkOciResultSchema rejects non-npm payload forms", () => {
   assertRejectsSdkOciResult({
     ...validSdkOciResult(),
     payload_form: "python-wheel",
-  });
-});
-
-void test("SdkOciResultSchema rejects attestation digest without ref", () => {
-  assertRejectsSdkOciResult({
-    ...validSdkOciResult(),
-    attestation_digest: attestationDigest,
-  });
-});
-
-void test("SdkOciResultSchema rejects attestation ref without digest", () => {
-  assertRejectsSdkOciResult({
-    ...validSdkOciResult(),
-    attestation_ref: `oci.guardianintelligence.org/guardian/aisucks/sdk/npm@${attestationDigest}`,
-  });
-});
-
-void test("SdkOciResultSchema rejects attestation ref and digest mismatch", () => {
-  assertRejectsSdkOciResult({
-    ...validSdkOciResult(),
-    attestation_digest: attestationDigest,
-    attestation_ref: `oci.guardianintelligence.org/guardian/aisucks/sdk/npm@${manifestDigest}`,
   });
 });
 

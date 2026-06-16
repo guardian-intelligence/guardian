@@ -29,8 +29,6 @@ import (
 
 const (
 	defaultArtifactType          = "application/vnd.guardian.sdk.npm.package.v1"
-	attestationArtifactType      = "application/vnd.guardian.release.in-toto.bundle.v1"
-	attestationBundleMediaType   = "application/vnd.in-toto.bundle+jsonl"
 	defaultPayloadMediaType      = "application/gzip"
 	deterministicCreated         = "1970-01-01T00:00:00Z"
 	defaultDistributable         = "aisucks-ts-sdk"
@@ -39,7 +37,6 @@ const (
 	defaultExpectedPackageName   = "@guardian-intelligence/aisucks"
 	defaultFilenameSuffix        = ".tgz"
 	defaultRepositoryPath        = "oci.guardianintelligence.org/guardian/aisucks/sdk/npm:edge"
-	defaultAttestationLayerTitle = "guardian-release.intoto.jsonl"
 )
 
 var sha256DigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
@@ -54,8 +51,6 @@ type cliConfig struct {
 	description      string
 	expectedPackage  string
 	filenameSuffix   string
-	attestationPath  string
-	attestationTitle string
 	ref              string
 	ociLayout        string
 	tag              string
@@ -94,8 +89,6 @@ type artifactResult struct {
 	Channel           string `json:"channel"`
 	OCIDigest         string `json:"oci_digest"`
 	OCIRef            string `json:"oci_ref"`
-	AttestationDigest string `json:"attestation_digest,omitempty"`
-	AttestationRef    string `json:"attestation_ref,omitempty"`
 	PayloadDigest     string `json:"payload_sha256,omitempty"`
 	TarballDigest     string `json:"tarball_sha256,omitempty"`
 	WheelDigest       string `json:"wheel_sha256,omitempty"`
@@ -126,8 +119,6 @@ func parseFlags() cliConfig {
 	flag.StringVar(&cfg.description, "description", defaultDescription, "OCI manifest description")
 	flag.StringVar(&cfg.expectedPackage, "expected-package", defaultExpectedPackageName, "expected ecosystem package name; empty disables package-name validation")
 	flag.StringVar(&cfg.filenameSuffix, "filename-suffix", defaultFilenameSuffix, "required payload filename suffix; empty disables suffix validation")
-	flag.StringVar(&cfg.attestationPath, "attestation-bundle", "", "JSONL in-toto bundle to attach as an OCI referrer")
-	flag.StringVar(&cfg.attestationTitle, "attestation-title", defaultAttestationLayerTitle, "OCI layer title for --attestation-bundle")
 	flag.StringVar(&cfg.ref, "ref", defaultRepositoryPath, "remote OCI reference to push, including tag")
 	flag.StringVar(&cfg.ociLayout, "oci-layout", "", "write an OCI image layout instead of pushing a remote reference")
 	flag.StringVar(&cfg.tag, "tag", "", "tag to apply when --oci-layout is used")
@@ -195,32 +186,23 @@ func run(ctx context.Context, cfg cliConfig, stdout io.Writer) error {
 	if entry.Integrity != "" && entry.Integrity != npmIntegrity(payload) {
 		return fmt.Errorf("payload integrity mismatch: metadata=%s actual=%s", entry.Integrity, npmIntegrity(payload))
 	}
-	attestation, err := readAttestationBundle(cfg.attestationPath)
-	if err != nil {
-		return err
-	}
 
 	annotations := sdkAnnotations(entry, payloadSHA256, cfg)
 	channel := ""
 	var manifest ocispec.Descriptor
-	var attestationManifest *ocispec.Descriptor
 	var ref string
-	var attestationRef string
 	if cfg.ociLayout != "" {
 		if cfg.tag == "" {
 			return errors.New("--tag is required with --oci-layout")
 		}
-		manifest, attestationManifest, err = pushLayout(ctx, cfg.ociLayout, cfg.tag, entry, payload, annotations, cfg.payloadMediaType, cfg.artifactType, attestation, cfg.attestationTitle)
+		manifest, err = pushLayout(ctx, cfg.ociLayout, cfg.tag, entry, payload, annotations, cfg.payloadMediaType, cfg.artifactType)
 		if err != nil {
 			return err
 		}
-		if err := validatePushedDescriptors("layout", manifest, attestationManifest); err != nil {
+		if err := validatePushedDescriptor("layout", manifest); err != nil {
 			return err
 		}
 		ref = layoutRef(cfg.ociLayout, cfg.tag, manifest.Digest.String())
-		if attestationManifest != nil {
-			attestationRef = layoutRef(cfg.ociLayout, attestationTag(cfg.tag), attestationManifest.Digest.String())
-		}
 		channel = cfg.tag
 	} else {
 		target, err := parseTaggedRef(cfg.ref)
@@ -230,17 +212,14 @@ func run(ctx context.Context, cfg cliConfig, stdout io.Writer) error {
 		if err := validateRemoteCredentialConfig(cfg.credentials); err != nil {
 			return err
 		}
-		manifest, attestationManifest, err = pushRemote(ctx, target, cfg.plainHTTP, cfg.credentials, entry, payload, annotations, cfg.payloadMediaType, cfg.artifactType, attestation, cfg.attestationTitle)
+		manifest, err = pushRemote(ctx, target, cfg.plainHTTP, cfg.credentials, entry, payload, annotations, cfg.payloadMediaType, cfg.artifactType)
 		if err != nil {
 			return err
 		}
-		if err := validatePushedDescriptors("remote", manifest, attestationManifest); err != nil {
+		if err := validatePushedDescriptor("remote", manifest); err != nil {
 			return err
 		}
 		ref = target.repository + "@" + manifest.Digest.String()
-		if attestationManifest != nil {
-			attestationRef = target.repository + "@" + attestationManifest.Digest.String()
-		}
 		channel = target.tag
 	}
 
@@ -263,10 +242,6 @@ func run(ctx context.Context, cfg cliConfig, stdout io.Writer) error {
 		result.NPMIntegrity = entry.Integrity
 	case "python-wheel":
 		result.WheelDigest = "sha256:" + payloadSHA256
-	}
-	if attestationManifest != nil {
-		result.AttestationDigest = attestationManifest.Digest.String()
-		result.AttestationRef = attestationRef
 	}
 	return writeResult(result, cfg.outputPath, stdout)
 }
@@ -347,42 +322,28 @@ func validatePackEntry(entry packEntry, cfg cliConfig) error {
 	return nil
 }
 
-func readAttestationBundle(path string) ([]byte, error) {
-	if path == "" {
-		return nil, nil
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read attestation bundle: %w", err)
-	}
-	if len(raw) == 0 {
-		return nil, errors.New("attestation bundle is empty")
-	}
-	return raw, nil
-}
-
-func pushRemote(ctx context.Context, target targetRef, plainHTTP bool, creds credentialConfig, entry packEntry, payload []byte, annotations map[string]string, payloadMediaType, artifactType string, attestation []byte, attestationTitle string) (ocispec.Descriptor, *ocispec.Descriptor, error) {
+func pushRemote(ctx context.Context, target targetRef, plainHTTP bool, creds credentialConfig, entry packEntry, payload []byte, annotations map[string]string, payloadMediaType, artifactType string) (ocispec.Descriptor, error) {
 	repo, err := remote.NewRepository(target.repository)
 	if err != nil {
-		return ocispec.Descriptor{}, nil, fmt.Errorf("remote repository %s: %w", target.repository, err)
+		return ocispec.Descriptor{}, fmt.Errorf("remote repository %s: %w", target.repository, err)
 	}
 	repo.PlainHTTP = plainHTTP
 	if err := validateRemoteCredentialConfig(creds); err != nil {
-		return ocispec.Descriptor{}, nil, err
+		return ocispec.Descriptor{}, err
 	}
 	credFn, err := credentialFunc(target.registry, creds)
 	if err != nil {
-		return ocispec.Descriptor{}, nil, err
+		return ocispec.Descriptor{}, err
 	}
 	if credFn == nil {
-		return ocispec.Descriptor{}, nil, errors.New("remote OCI push requires --access-token-env or --username/--password-env")
+		return ocispec.Descriptor{}, errors.New("remote OCI push requires --access-token-env or --username/--password-env")
 	}
 	repo.Client = &auth.Client{
 		Client:     retry.DefaultClient,
 		Cache:      auth.NewCache(),
 		Credential: credFn,
 	}
-	return pushToTarget(ctx, repo, target.tag, entry, payload, annotations, payloadMediaType, artifactType, attestation, attestationTitle)
+	return pushToTarget(ctx, repo, target.tag, entry, payload, annotations, payloadMediaType, artifactType)
 }
 
 func validateRemoteCredentialConfig(cfg credentialConfig) error {
@@ -407,22 +368,22 @@ func validateRemoteCredentialConfig(cfg credentialConfig) error {
 	return nil
 }
 
-func pushLayout(ctx context.Context, path, tag string, entry packEntry, payload []byte, annotations map[string]string, payloadMediaType, artifactType string, attestation []byte, attestationTitle string) (ocispec.Descriptor, *ocispec.Descriptor, error) {
+func pushLayout(ctx context.Context, path, tag string, entry packEntry, payload []byte, annotations map[string]string, payloadMediaType, artifactType string) (ocispec.Descriptor, error) {
 	store, err := oci.New(path)
 	if err != nil {
-		return ocispec.Descriptor{}, nil, fmt.Errorf("oci layout %s: %w", path, err)
+		return ocispec.Descriptor{}, fmt.Errorf("oci layout %s: %w", path, err)
 	}
-	return pushToTarget(ctx, store, tag, entry, payload, annotations, payloadMediaType, artifactType, attestation, attestationTitle)
+	return pushToTarget(ctx, store, tag, entry, payload, annotations, payloadMediaType, artifactType)
 }
 
 type pusher interface {
 	oras.Target
 }
 
-func pushToTarget(ctx context.Context, target pusher, tag string, entry packEntry, payload []byte, annotations map[string]string, payloadMediaType, artifactType string, attestation []byte, attestationTitle string) (ocispec.Descriptor, *ocispec.Descriptor, error) {
+func pushToTarget(ctx context.Context, target pusher, tag string, entry packEntry, payload []byte, annotations map[string]string, payloadMediaType, artifactType string) (ocispec.Descriptor, error) {
 	layer, err := pushBytes(ctx, target, payloadMediaType, payload)
 	if err != nil {
-		return ocispec.Descriptor{}, nil, fmt.Errorf("push payload layer: %w", err)
+		return ocispec.Descriptor{}, fmt.Errorf("push payload layer: %w", err)
 	}
 	layer.Annotations = map[string]string{
 		ocispec.AnnotationTitle: entry.Filename,
@@ -434,65 +395,20 @@ func pushToTarget(ctx context.Context, target pusher, tag string, entry packEntr
 	}
 	manifest, err := oras.PackManifest(ctx, target, oras.PackManifestVersion1_1, artifactType, opts)
 	if err != nil {
-		return ocispec.Descriptor{}, nil, fmt.Errorf("pack OCI artifact manifest: %w", err)
+		return ocispec.Descriptor{}, fmt.Errorf("pack OCI artifact manifest: %w", err)
 	}
 	if err := validateDescriptor("packed OCI artifact manifest", manifest); err != nil {
-		return ocispec.Descriptor{}, nil, err
+		return ocispec.Descriptor{}, err
 	}
 	if err := target.Tag(ctx, manifest, tag); err != nil {
-		return ocispec.Descriptor{}, nil, fmt.Errorf("tag OCI artifact %s: %w", tag, err)
+		return ocispec.Descriptor{}, fmt.Errorf("tag OCI artifact %s: %w", tag, err)
 	}
 	manifest, err = resolveTaggedDescriptor(ctx, target, tag, manifest)
 	if err != nil {
-		return ocispec.Descriptor{}, nil, err
+		return ocispec.Descriptor{}, err
 	}
-	attestationManifest, err := attachAttestation(ctx, target, tag, manifest, attestation, attestationTitle)
-	if err != nil {
-		return ocispec.Descriptor{}, nil, err
-	}
-	return manifest, attestationManifest, nil
+	return manifest, nil
 }
-
-func attachAttestation(ctx context.Context, target pusher, tag string, subject ocispec.Descriptor, attestation []byte, title string) (*ocispec.Descriptor, error) {
-	if len(attestation) == 0 {
-		return nil, nil
-	}
-	if title == "" {
-		title = defaultAttestationLayerTitle
-	}
-	layer, err := pushBytes(ctx, target, attestationBundleMediaType, attestation)
-	if err != nil {
-		return nil, fmt.Errorf("push attestation bundle layer: %w", err)
-	}
-	layer.Annotations = map[string]string{
-		ocispec.AnnotationTitle: title,
-	}
-	opts := oras.PackManifestOptions{
-		Subject: &subject,
-		Layers:  []ocispec.Descriptor{layer},
-		ManifestAnnotations: map[string]string{
-			ocispec.AnnotationCreated:     deterministicCreated,
-			ocispec.AnnotationDescription: "Guardian release in-toto JSONL bundle",
-		},
-	}
-	manifest, err := oras.PackManifest(ctx, target, oras.PackManifestVersion1_1, attestationArtifactType, opts)
-	if err != nil {
-		return nil, fmt.Errorf("pack attestation OCI artifact manifest: %w", err)
-	}
-	if err := validateDescriptor("packed attestation OCI artifact manifest", manifest); err != nil {
-		return nil, err
-	}
-	if err := target.Tag(ctx, manifest, attestationTag(tag)); err != nil {
-		return nil, fmt.Errorf("tag attestation OCI artifact %s: %w", attestationTag(tag), err)
-	}
-	manifest, err = resolveTaggedDescriptor(ctx, target, attestationTag(tag), manifest)
-	if err != nil {
-		return nil, err
-	}
-	return &manifest, nil
-}
-
-func attestationTag(tag string) string { return tag + ".attestation" }
 
 type resolver interface {
 	Resolve(context.Context, string) (ocispec.Descriptor, error)
@@ -572,18 +488,9 @@ func validateSHA256Digest(kind string, value string) error {
 	return nil
 }
 
-func validatePushedDescriptors(location string, manifest ocispec.Descriptor, attestationManifest *ocispec.Descriptor) error {
+func validatePushedDescriptor(location string, manifest ocispec.Descriptor) error {
 	if err := validateDescriptor(location+" OCI artifact manifest", manifest); err != nil {
 		return err
-	}
-	if attestationManifest != nil {
-		kind := location + " attestation OCI artifact manifest"
-		if err := validateDescriptor(kind, *attestationManifest); err != nil {
-			return err
-		}
-		if attestationManifest.ArtifactType != attestationArtifactType {
-			return fmt.Errorf("%s %s has artifact type %s, want %s", kind, attestationManifest.Digest, attestationManifest.ArtifactType, attestationArtifactType)
-		}
 	}
 	return nil
 }
@@ -773,22 +680,6 @@ func validateResult(result artifactResult) error {
 		}
 	default:
 		return fmt.Errorf("release result has unsupported payload_form %q", result.PayloadForm)
-	}
-	if result.AttestationDigest == "" && result.AttestationRef != "" {
-		return errors.New("release result has attestation ref without attestation digest")
-	}
-	if result.AttestationDigest != "" && result.AttestationRef == "" {
-		return errors.New("release result has attestation digest without attestation ref")
-	}
-	if result.AttestationDigest != "" {
-		if err := validateSHA256Digest("release result attestation_digest", result.AttestationDigest); err != nil {
-			return err
-		}
-	}
-	if result.AttestationDigest != "" {
-		if err := validateDigestRef("release result attestation ref", result.AttestationRef, result.AttestationDigest); err != nil {
-			return err
-		}
 	}
 	return nil
 }
