@@ -85,6 +85,16 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 - [ ] `nightly` and `rc` dist-tags move only after matching gate passes.
 - [x] Package contents contain generated Connect client only for Health.
 
+### GitHub Release Assets
+
+- [ ] GitHub Release asset projection is owned by the distributable release
+  tool, not by the Guardian CLI or repo-wide release code.
+- [ ] Each uploaded asset has a digest in a signed release manifest.
+- [ ] Each uploaded executable/package-like asset has DSSE/in-toto SLSA
+  provenance and the full Sigstore bundle available beside the asset.
+- [ ] The GitHub Release body links verification commands and the release
+  manifest digest instead of treating the GitHub Release page as the ledger.
+
 ### OCI Distribution
 
 - [x] Platform TLS for `oci.guardianintelligence.org` is solved through
@@ -126,6 +136,27 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
   - [ ] `aisucks-api-image / linux-amd64 / default / ghcr-public / edge`
   - [ ] `aisucks-ts-sdk / any / default / oci-public / edge`
   - [ ] `aisucks-ts-sdk / any / default / npm-public / edge`
+
+### SLSA
+
+- [ ] Guardian release evidence schemas live in
+  `src/release/evidence/schemas.cue`. They define the Guardian-owned contract
+  around standards-owned in-toto/SLSA predicates before verifier code exists.
+- [ ] Every Guardian VSA uses `predicateType:
+  https://slsa.dev/verification_summary/v1`.
+- [ ] DSSE envelopes use `payloadType: application/vnd.in-toto+json`, base64
+  payload bytes, and at least one signature. Sigstore bundle verification
+  material remains tool-owned, not re-modeled by Guardian.
+- [ ] Every Guardian VSA carries `subject` digests, `resourceUri`, verifier
+  identity, policy URI + digest, input attestation digests, `PASSED`/`FAILED`,
+  verified levels, and the Guardian extension field
+  `https://guardianintelligence.org/evidence/v1`.
+- [ ] Minimal Guardian VSA policy surfaces are represented. The VSA `kind`
+  names the policy surface; `verificationResult` records pass/fail.
+  - [ ] `build`
+  - [ ] `license`
+  - [ ] `promotion` with `track: nightly | rc | stable`
+  - [ ] `deployment`
 
 ### Build Provenance
 
@@ -185,7 +216,9 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
   - [x] checked queries
   - [x] observed values
   - [ ] time window
-- [ ] Gate result is later signed as an in-toto attestation.
+- [x] Gate evaluator emits a SLSA VSA statement plus DSSE JSONL for the
+  promotion verdict.
+- [ ] Gate VSA is attached as an OCI referrer on the promoted release subject.
 
 ### Promotion / Channel Pointer
 

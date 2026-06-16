@@ -15,11 +15,11 @@ go_library(
     ],
     embedsrcs = ["web/index.html"],
     importpath = "github.com/guardian-intelligence/guardian/src/products/aisucks/services/api",
+    visibility = ["//visibility:private"],
     deps = [
         "//src/products/aisucks/api:aisucks_go",
         "@com_connectrpc_connect//:connect",
     ],
-    visibility = ["//visibility:private"],
 )
 
 go_binary(

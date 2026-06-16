@@ -1,5 +1,11 @@
 # @guardian-intelligence/aisucks
 
+## 0.3.3
+
+### Patch Changes
+
+- Refresh SDK release evidence for the public provenance chain drill.
+
 ## 0.3.2
 
 ### Patch Changes

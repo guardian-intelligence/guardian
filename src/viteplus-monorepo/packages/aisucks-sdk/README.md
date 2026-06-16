@@ -1,6 +1,7 @@
 # @guardian-intelligence/aisucks
 
-Tiny SDK for the aisucks.app public API.
+Tiny SDK for the aisucks.app public API. Release artifacts are built through
+Guardian's provenance-preserving release lane.
 
 ```ts
 import { AisucksClient } from "@guardian-intelligence/aisucks";

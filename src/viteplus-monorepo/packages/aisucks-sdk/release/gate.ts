@@ -1,15 +1,22 @@
 import { mkdtemp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
 import { performance } from "node:perf_hooks";
 import { promisify } from "node:util";
+import { attest } from "sigstore";
 
 import { sdkPackageName } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 const operation = "/guardian.products.aisucks.v1.AisucksService/Health";
+const inTotoStatementType = "https://in-toto.io/Statement/v1";
+const intotoPayloadType = "application/vnd.in-toto+json";
+const slsaVsaPredicateType = "https://slsa.dev/verification_summary/v1";
+const workflowBuilderId =
+  "https://github.com/guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml";
 
 type GateTrack = "nightly" | "rc";
 
@@ -116,8 +123,57 @@ type GateResult = {
   readonly syntheticResultPath: string;
 };
 
+type ResourceRef = {
+  readonly uri: string;
+  readonly digest: {
+    readonly sha256: string;
+  };
+};
+
+type VsaStatement = {
+  readonly _type: typeof inTotoStatementType;
+  readonly subject: readonly [
+    {
+      readonly name: string;
+      readonly digest: {
+        readonly sha256: string;
+      };
+    },
+  ];
+  readonly predicateType: typeof slsaVsaPredicateType;
+  readonly predicate: {
+    readonly verifier: {
+      readonly id: string;
+      readonly version: Readonly<Record<string, string>>;
+    };
+    readonly timeVerified: string;
+    readonly resourceUri: string;
+    readonly policy: ResourceRef;
+    readonly inputAttestations: readonly [ResourceRef];
+    readonly verificationResult: "PASSED" | "FAILED";
+    readonly verifiedLevels: readonly ["SLSA_BUILD_LEVEL_UNEVALUATED" | "FAILED"];
+    readonly slsaVersion: "1.2";
+    readonly "https://guardianintelligence.org/evidence/v1": {
+      readonly kind: "promotion";
+      readonly track: GateTrack;
+    };
+  };
+};
+
+type DsseEnvelope = {
+  readonly payloadType: typeof intotoPayloadType;
+  readonly payload: string;
+  readonly signatures: readonly [
+    {
+      readonly keyid?: string;
+      readonly sig: string;
+    },
+  ];
+};
+
 const config = parseGateConfig(process.argv.slice(2));
-const outputDir = config.outputDir ?? (await mkdtemp(path.join(tmpdir(), "guardian-aisucks-gate-")));
+const outputDir =
+  config.outputDir ?? (await mkdtemp(path.join(tmpdir(), "guardian-aisucks-gate-")));
 await mkdir(outputDir, { recursive: true });
 
 const packageSpec = `${sdkPackageName}@${config.fromChannel}`;
@@ -139,9 +195,12 @@ await writeJson(syntheticPath, synthetic);
 const gate = gateResult(config, npmView, synthetic, syntheticPath);
 const gatePath = path.join(outputDir, "gate-result.v1.json");
 await writeJson(gatePath, gate);
+await writePromotionVsa(config, gate, gatePath, tarballPath);
 await writeFile(path.join(outputDir, "gate-summary.md"), renderSummary(gate), "utf8");
 
-process.stdout.write(`${JSON.stringify({ status: gate.decision, outputDir, gatePath }, null, 2)}\n`);
+process.stdout.write(
+  `${JSON.stringify({ status: gate.decision, outputDir, gatePath }, null, 2)}\n`,
+);
 if (gate.decision !== "pass") {
   process.exitCode = 1;
 }
@@ -275,7 +334,11 @@ async function npmViewPackage(config: GateConfig, spec: string): Promise<NpmView
   return normalized;
 }
 
-async function npmPack(config: GateConfig, spec: string, destination: string): Promise<NpmPackEntry> {
+async function npmPack(
+  config: GateConfig,
+  spec: string,
+  destination: string,
+): Promise<NpmPackEntry> {
   const { stdout } = await runNpm(config, [
     "pack",
     spec,
@@ -291,7 +354,11 @@ async function npmPack(config: GateConfig, spec: string, destination: string): P
   return parsed[0];
 }
 
-async function npmInstall(config: GateConfig, tarballPath: string, installDir: string): Promise<void> {
+async function npmInstall(
+  config: GateConfig,
+  tarballPath: string,
+  installDir: string,
+): Promise<void> {
   await runNpm(config, [
     "install",
     "--prefix",
@@ -534,6 +601,172 @@ function round(value: number): number {
 async function writeJson(filePath: string, value: unknown): Promise<void> {
   await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   JSON.parse(await readFile(filePath, "utf8"));
+}
+
+async function writePromotionVsa(
+  config: GateConfig,
+  gate: GateResult,
+  gatePath: string,
+  tarballPath: string,
+): Promise<void> {
+  const statement = await promotionVsaStatement(config, gate, gatePath, tarballPath);
+  const statementPath = path.join(outputDir, "promotion-vsa.v1.json");
+  const statementJson = `${JSON.stringify(statement, null, 2)}\n`;
+  await writeFile(statementPath, statementJson, "utf8");
+
+  const statementBytes = Buffer.from(statementJson, "utf8");
+  const bundle = await signStatement(statementBytes);
+  await writeFile(
+    path.join(outputDir, "promotion-vsa.sigstore.bundle.json"),
+    `${JSON.stringify(bundle, null, 2)}\n`,
+    "utf8",
+  );
+  const dsse = dsseEnvelope(bundle);
+  await writeFile(path.join(outputDir, "promotion-vsa.intoto.jsonl"), `${JSON.stringify(dsse)}\n`);
+}
+
+async function promotionVsaStatement(
+  config: GateConfig,
+  gate: GateResult,
+  gatePath: string,
+  tarballPath: string,
+): Promise<VsaStatement> {
+  const packagePurl = npmPackagePurl(gate.package, gate.version);
+  const gateResultRef = await fileResourceRef(pathToFileURL(gatePath).toString(), gatePath);
+  return {
+    _type: inTotoStatementType,
+    subject: [
+      {
+        name: packagePurl,
+        digest: {
+          sha256: await fileSha256(tarballPath),
+        },
+      },
+    ],
+    predicateType: slsaVsaPredicateType,
+    predicate: {
+      verifier: {
+        id: workflowBuilderId,
+        version: {
+          "guardian.gate-result": "v1",
+        },
+      },
+      timeVerified: gate.checkedAt,
+      resourceUri: packagePurl,
+      policy: {
+        uri: `https://guardianintelligence.org/policies/aisucks-sdk/promotion/${config.track}/v1`,
+        digest: {
+          sha256: sha256Hex(
+            JSON.stringify({
+              track: config.track,
+              endpoint: config.endpoint,
+              iterations: config.iterations,
+              concurrency: config.concurrency,
+              maxP95LatencyMs: config.maxP95LatencyMs,
+              minTps: config.minTps,
+              maxTarballBytes: config.maxTarballBytes,
+              maxUnpackedBytes: config.maxUnpackedBytes,
+              requiredCapability: config.requiredCapability,
+            }),
+          ),
+        },
+      },
+      inputAttestations: [gateResultRef],
+      verificationResult: gate.decision === "pass" ? "PASSED" : "FAILED",
+      verifiedLevels: [gate.decision === "pass" ? "SLSA_BUILD_LEVEL_UNEVALUATED" : "FAILED"],
+      slsaVersion: "1.2",
+      "https://guardianintelligence.org/evidence/v1": {
+        kind: "promotion",
+        track: config.track,
+      },
+    },
+  };
+}
+
+async function fileResourceRef(uri: string, filePath: string): Promise<ResourceRef> {
+  return {
+    uri,
+    digest: {
+      sha256: await fileSha256(filePath),
+    },
+  };
+}
+
+async function fileSha256(filePath: string): Promise<string> {
+  return sha256Hex(await readFile(filePath));
+}
+
+function sha256Hex(data: string | Buffer): string {
+  return createHash("sha256").update(data).digest("hex");
+}
+
+async function signStatement(statementBytes: Buffer): Promise<unknown> {
+  if (process.env.GITHUB_ACTIONS === "true") {
+    return attest(statementBytes, intotoPayloadType, {
+      tlogUpload: true,
+    });
+  }
+  return devUnsignedBundle(statementBytes);
+}
+
+function dsseEnvelope(bundle: unknown): DsseEnvelope {
+  if (!isSigstoreBundleWithDsse(bundle)) {
+    throw new Error("Sigstore bundle did not contain a DSSE envelope");
+  }
+  return bundle.dsseEnvelope;
+}
+
+function isSigstoreBundleWithDsse(
+  bundle: unknown,
+): bundle is { readonly dsseEnvelope: DsseEnvelope } {
+  if (typeof bundle !== "object" || bundle === null || !("dsseEnvelope" in bundle)) {
+    return false;
+  }
+  const envelope = (bundle as { readonly dsseEnvelope?: unknown }).dsseEnvelope;
+  if (typeof envelope !== "object" || envelope === null) {
+    return false;
+  }
+  const candidate = envelope as {
+    readonly payloadType?: unknown;
+    readonly payload?: unknown;
+    readonly signatures?: unknown;
+  };
+  return (
+    candidate.payloadType === intotoPayloadType &&
+    typeof candidate.payload === "string" &&
+    Array.isArray(candidate.signatures)
+  );
+}
+
+function devUnsignedBundle(statementBytes: Buffer): unknown {
+  return {
+    mediaType: "application/vnd.dev.sigstore.bundle.v0.3+json",
+    verificationMaterial: {
+      publicKey: {
+        hint: "guardian-local-check-unsigned",
+      },
+      tlogEntries: [],
+      timestampVerificationData: undefined,
+    },
+    dsseEnvelope: {
+      payload: statementBytes.toString("base64"),
+      payloadType: intotoPayloadType,
+      signatures: [
+        {
+          keyid: "guardian-local-check-unsigned",
+          sig: "",
+        },
+      ],
+    },
+  };
+}
+
+function npmPackagePurl(packageName: string, version: string): string {
+  if (!packageName.startsWith("@")) {
+    return `pkg:npm/${encodeURIComponent(packageName)}@${version}`;
+  }
+  const [scope, name] = packageName.slice(1).split("/");
+  return `pkg:npm/%40${encodeURIComponent(scope ?? "")}/${encodeURIComponent(name ?? "")}@${version}`;
 }
 
 function requireValue(args: readonly string[], index: number, flag: string): string {

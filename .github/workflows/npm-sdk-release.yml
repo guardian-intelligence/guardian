@@ -107,12 +107,17 @@ jobs:
             "oci.guardianintelligence.org/guardian/aisucks/sdk/npm:${CHANNEL}"
             --output-dir
             "$release_output"
+            --with-attestation
+            --sign-oci
           )
           if [[ "${{ inputs.skip-npm }}" == "true" ]]; then
             args+=(--skip-npm)
           fi
           if [[ "${{ inputs.source-ref }}" != "" ]]; then
             args+=(--source-root "$GITHUB_WORKSPACE/release-source")
+          fi
+          if [[ "${{ inputs.skip-npm }}" != "true" ]]; then
+            args+=(--npm-provenance)
           fi
           aspect "${args[@]}"
           echo "RELEASE_OUTPUT=$release_output" >> "$GITHUB_ENV"
@@ -163,6 +168,8 @@ jobs:
             --output-dir
             "$promote_output"
             --skip-npm
+            --with-attestation
+            --sign-oci
           )
           if [[ "${{ inputs.source-ref }}" != "" ]]; then
             args+=(--source-root "$GITHUB_WORKSPACE/release-source")
