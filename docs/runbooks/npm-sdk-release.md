@@ -77,8 +77,8 @@ OCI layout and release records.
 
 `sdkoci` is the low-level OCI pack/push helper. It does not decide whether a
 release should happen; it only writes the package tarball payload as an OCI
-artifact and, when evidence is requested by the package release operator,
-attaches the admitted in-toto JSONL bundle as an OCI referrer.
+artifact. The release state machine signs and attests the pushed subject with
+stock cosign commands.
 
 This milestone must produce:
 
@@ -89,10 +89,11 @@ This milestone must produce:
   nightly→RC Health gates
 - npm dist-tags for the selected channel after the gate passes
 
-Public release and promotion runs request DSSE/in-toto evidence, cosign signing,
-and npm Trusted Publishing provenance. Local check runs may omit those flags
-because they do not have GitHub OIDC identity or public registry write
-authority.
+Public release and promotion runs request an in-toto/SLSA provenance statement,
+cosign v3 keyless OCI signing, cosign v3 keyless OCI attestation, and npm
+Trusted Publishing provenance. Local check runs may omit those flags because
+they do not have GitHub OIDC identity or public registry write authority.
+Public verification uses stock cosign commands.
 
 The OCI reference forms are defined in
 `docs/architecture/oci-artifact-references.md`.
@@ -129,6 +130,10 @@ Required setup:
 - Release job permissions: `contents: read`, `id-token: write`.
 - npm Trusted Publishing is configured for the exact workflow filename and
   repository.
+- Public signing and attestation are only valid when `GITHUB_WORKFLOW_REF` is
+  `guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml@refs/heads/main`.
+  Dispatch the workflow from `main`; use `source-ref` only when deliberately
+  releasing a selected source ref under the main workflow identity.
 - `package.json` `repository.url` is the exact GitHub repository URL:
   `https://github.com/guardian-intelligence/guardian`.
 - Publish preflight requests a GitHub OIDC token for
@@ -200,7 +205,12 @@ SDK='oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>'
 
 guardian run oras pull "$SDK" -o ./dist
 guardian run oras discover "$SDK"
-COSIGN_EXPERIMENTAL=1 guardian run cosign verify --experimental-oci11=true "$SDK" \
+guardian run cosign verify "$SDK" \
+  --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml@refs/heads/main' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
+
+guardian run cosign verify-attestation "$SDK" \
+  --type slsaprovenance1 \
   --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml@refs/heads/main' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 ```
@@ -208,12 +218,10 @@ COSIGN_EXPERIMENTAL=1 guardian run cosign verify --experimental-oci11=true "$SDK
 Expected:
 
 - `oras pull` writes exactly one npm `.tgz` payload.
-- `oras discover` shows the
-  `application/vnd.guardian.release.in-toto.bundle.v1` referrer.
 - `cosign verify` reports one verified keyless signature for the release
   workflow identity above.
-- The JSONL bundle contains one DSSE envelope whose payload is an in-toto
-  Statement with SLSA provenance predicate.
+- `cosign verify-attestation` verifies one DSSE envelope whose payload is an
+  in-toto Statement with SLSA provenance predicate.
 
 ## Verify npm Projection
 

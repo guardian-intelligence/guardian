@@ -127,7 +127,7 @@ sdk_oci = task(
         "require_signature": args.boolean(default = False, description = "Require real Sigstore signing even in local check mode."),
         "skip_npm": args.boolean(default = False, description = "Skip npm publication in publish mode."),
         "skip_oci": args.boolean(default = False, description = "Skip public OCI publication in publish mode."),
-        "with_attestation": args.boolean(default = False, description = "Create DSSE/in-toto evidence for later provenance milestones."),
+        "with_attestation": args.boolean(default = False, description = "Create SLSA provenance and attach it to the public OCI subject in publish mode."),
         "sign_oci": args.boolean(default = False, description = "Cosign-sign the published OCI subject."),
         "npm_provenance": args.boolean(default = False, description = "Request npm provenance during npm publication."),
     },

@@ -6,6 +6,8 @@ Status: target convention. Examples use the deployed public registry hostname
 Guardian's public artifact surface is the OCI Distribution API. Object storage
 is an implementation detail behind the registry. Clients pull OCI references
 and verify OCI subjects; they do not pull from S3/R2 buckets directly.
+The public verification contract assumes stock cosign v3: signatures and
+attestations are standard OCI 1.1 referrers discoverable by stock cosign.
 
 ## Naming Rule
 
@@ -76,7 +78,7 @@ bytes to npm:
 Bazel package build
   -> npm .tgz
   -> OCI artifact subject
-  -> DSSE / in-toto / release metadata as referrers
+  -> cosign signature, DSSE / in-toto attestation, release metadata as referrers
   -> npm publisher pulls and verifies the OCI subject
   -> npm publish ./guardian-intelligence-aisucks-<version>.tgz --tag <tag>
 ```
@@ -86,8 +88,9 @@ Bazel package build
 Every release fact that is about the SDK artifact attaches to the OCI subject
 digest as a referrer:
 
-- cosign signature
-- DSSE envelope over an in-toto Statement with SLSA provenance predicate
+- cosign v3 keyless signature
+- cosign v3 attestation carrying a DSSE envelope over an in-toto Statement
+  with SLSA provenance predicate
 - SBOM
 - release manifest
 - gate result
@@ -134,7 +137,8 @@ guardian run oras discover --oci-layout /tmp/guardian-sdk-release/oci-layout:edg
 
 The release state machine writes `/tmp/guardian-sdk-release/release-result.json`
 with the OCI manifest digest, tarball sha256, npm integrity, package version,
-source commit, DSSE/in-toto evidence paths, and event log.
+source commit, SLSA statement path when requested, and event log. Public
+provenance verification is `cosign verify-attestation` against the OCI subject.
 
 When Bazel is invoked with `--embed_label=<40-char-git-sha>`, that commit is
 recorded in the OCI annotations and result JSON. Unstamped local builds use a
@@ -151,13 +155,17 @@ guardian run oras discover "$SDK"
 guardian run cosign verify "$SDK" \
   --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml@refs/heads/main' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
+guardian run cosign verify-attestation "$SDK" \
+  --type slsaprovenance1 \
+  --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml@refs/heads/main' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 npm install ./dist/guardian-intelligence-aisucks-<version>.tgz
 ```
 
-For the SDK lane, publish mode emits both the DSSE/in-toto JSONL evidence
-referrer and a cosign keyless signature over the OCI subject. npm Trusted
-Publishing provenance is still a downstream ecosystem receipt for the npmjs
-projection, not the OCI subject's trust anchor.
+For the SDK lane, publish mode emits a cosign keyless signature and a stock
+cosign DSSE/in-toto attestation over the OCI subject. npm Trusted Publishing
+provenance is still a downstream ecosystem receipt for the npmjs projection,
+not the OCI subject's trust anchor.
 
 A blackbox canary that starts from a channel should resolve the tag to a
 digest, verify the digest, pull the tarball, install it, call Connect Health,

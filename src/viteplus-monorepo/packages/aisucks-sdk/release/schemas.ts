@@ -43,8 +43,6 @@ const SdkOciResultBaseSchema = Schema.Struct({
   channel: nonEmptyString,
   oci_digest: sha256Digest,
   oci_ref: digestRef,
-  attestation_digest: Schema.optional(sha256Digest),
-  attestation_ref: Schema.optional(digestRef),
   payload_sha256: sha256Digest,
   tarball_sha256: sha256Digest,
   npm_integrity: npmSha512Integrity,
@@ -58,19 +56,6 @@ const SdkOciResultBaseSchema = Schema.Struct({
 export const SdkOciResultSchema = SdkOciResultBaseSchema.pipe(
   Schema.filter((result) => result.oci_ref.endsWith(`@${result.oci_digest}`)),
   Schema.filter((result) => result.tarball_sha256 === result.payload_sha256),
-  Schema.filter(
-    (result) =>
-      (result.attestation_digest === undefined) === (result.attestation_ref === undefined),
-  ),
-  Schema.filter((result) => {
-    if (result.attestation_digest === undefined) {
-      return true;
-    }
-    return (
-      result.attestation_ref !== undefined &&
-      result.attestation_ref.endsWith(`@${result.attestation_digest}`)
-    );
-  }),
 );
 
 export const InTotoSubjectSchema = Schema.Struct({
@@ -83,36 +68,6 @@ export const InTotoStatementSchema = Schema.Struct({
   subject: Schema.Array(InTotoSubjectSchema),
   predicateType: Schema.String,
   predicate: unknownRecord,
-});
-
-export const DsseEnvelopeSchema = Schema.Struct({
-  payload: Schema.String,
-  payloadType: Schema.String,
-  signatures: Schema.Array(
-    Schema.Struct({
-      sig: Schema.String,
-      keyid: Schema.optional(Schema.String),
-    }),
-  ),
-});
-
-export const SigstoreBundleSchema = unknownRecord;
-
-export const SigstoreBundleForAdmissionSchema = Schema.Struct({
-  verificationMaterial: Schema.optional(
-    Schema.Struct({
-      tlogEntries: Schema.optional(Schema.Array(Schema.Unknown)),
-    }),
-  ),
-});
-
-export const SigstoreBundleWithDsseSchema = Schema.Struct({
-  dsseEnvelope: Schema.optional(DsseEnvelopeSchema),
-  verificationMaterial: Schema.optional(
-    Schema.Struct({
-      tlogEntries: Schema.optional(Schema.Array(Schema.Unknown)),
-    }),
-  ),
 });
 
 export const ReleaseTargetSchema = Schema.Struct({
@@ -136,11 +91,7 @@ export const ReleaseCandidateSchema = Schema.Struct({
 export const EvidenceBundleSchema = Schema.Struct({
   statement: InTotoStatementSchema,
   statementJson: Schema.String,
-  sigstoreBundleJson: Schema.String,
-  intotoJsonl: Schema.String,
   statementPath: Schema.String,
-  sigstoreBundlePath: Schema.String,
-  intotoBundlePath: Schema.String,
 });
 
 export const ReleaseEventSchema = Schema.Struct({
@@ -167,6 +118,7 @@ export const ReleaseResultSchema = Schema.Struct({
   attestationStatus: Schema.Literal("not-requested", "created"),
   publishedOci: Schema.optional(SdkOciResultSchema),
   ociSignatureStatus: Schema.Literal("not-requested", "signed"),
+  ociAttestationStatus: Schema.Literal("not-requested", "attested"),
   npmProvenanceStatus: Schema.Literal("not-requested", "requested"),
   npmStatus: Schema.Literal("not-requested", "published", "already-published"),
   eventLog: Schema.Array(ReleaseEventSchema),
@@ -184,6 +136,7 @@ export const ReleaseSummarySchema = Schema.Struct({
   publishedOciDigest: Schema.optional(Schema.String),
   attestationStatus: Schema.Literal("not-requested", "created"),
   ociSignatureStatus: Schema.Literal("not-requested", "signed"),
+  ociAttestationStatus: Schema.Literal("not-requested", "attested"),
   npmProvenanceStatus: Schema.Literal("not-requested", "requested"),
   npmStatus: Schema.Literal("not-requested", "published", "already-published"),
 });
@@ -240,7 +193,6 @@ export type PackageJson = Schema.Schema.Type<typeof PackageJsonSchema>;
 export type NpmPackEntryFromSchema = Schema.Schema.Type<typeof NpmPackEntrySchema>;
 export type SdkOciResultFromSchema = Schema.Schema.Type<typeof SdkOciResultSchema>;
 export type InTotoStatementFromSchema = Schema.Schema.Type<typeof InTotoStatementSchema>;
-export type DsseEnvelope = Schema.Schema.Type<typeof DsseEnvelopeSchema>;
 export type ReleaseResultFromSchema = Schema.Schema.Type<typeof ReleaseResultSchema>;
 export type GithubOidcClaims = Schema.Schema.Type<typeof GithubOidcClaimsSchema>;
 

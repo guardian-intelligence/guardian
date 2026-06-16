@@ -124,7 +124,7 @@ drill on gamma restores N-1 unattended.
 ## M7 — provenance + public vending (Phase-1 exit gate)
 
 Signing split per docs/architecture/release.md: build provenance is cosign
-**keyless** (GitHub OIDC, identity-pinned) — no long-lived key in CI; bao
+v3 **keyless** (GitHub OIDC, identity-pinned) — no long-lived key in CI; bao
 Transit (init on gamma first, the gate's signer) signs the fleet artifacts:
 gate verdicts, the stable pointer, deployed attestations. in-toto
 SLSA-provenance-v1 per pushed digest; the CUE release manifest (release →
@@ -133,9 +133,13 @@ stable/edge as signed pointers). Vending after M3: zot (no Harbor) behind
 the Gateway at oci.guardianintelligence.org, publishing images + attestations + manifests;
 zot also serves each site as a pull-through mirror. Reproducibility remains the backstop: anyone rebuilds the commit
 and matches the digest — we already prove this on every release.
-VERIFY: `cosign verify` documented and passing from a machine that has only
-the public key and the registry URL; a third party can rebuild and match a
-digest following only public docs. THIS IS THE PHASE-1 EXIT.
+VERIFY: stock `cosign verify`, `cosign verify-attestation`,
+`cosign verify-blob`, and `cosign verify-blob-attestation` are documented and
+passing from a machine that has only the public artifact reference or GitHub
+Release asset, the Sigstore bundle sidecar for blobs, and the expected
+certificate identity plus OIDC issuer. No experimental flags, no
+Guardian-specific verifier. A third party can rebuild and match a digest
+following only public docs. THIS IS THE PHASE-1 EXIT.
 STATUS 2026-06-13: first public-vending bridge was proven for aisucks. A
 GitHub-hosted tag workflow proved `ghcr.io/guardian-intelligence/aisucks`
 pushes, keyless signing, and SLSA/in-toto provenance; that workflow bridge has

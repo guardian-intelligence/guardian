@@ -1,20 +1,11 @@
-import { isDeepStrictEqual } from "node:util";
 import { Effect } from "effect";
 
 import { parseNpmIntegrity } from "./digest.js";
 import { AdmissionRejected, type ReleaseError } from "./errors.js";
 import {
-  admissionJson,
-  decodeJson,
-  DsseEnvelopeSchema,
-  InTotoStatementSchema,
-  SigstoreBundleForAdmissionSchema,
-} from "./schemas.js";
-import {
   distributable,
   canonicalOciSubjectName,
   inTotoStatementType,
-  intotoPayloadType,
   npmPackagePurl,
   payloadForm,
   sdkPackageName,
@@ -111,7 +102,6 @@ export function admitRelease(
 
     if (evidence !== undefined) {
       yield* validateStatement(candidate, evidence.statement);
-      yield* validateJsonlEnvelope(config, evidence);
     }
   });
 }
@@ -171,58 +161,6 @@ function validateStatement(
         expected: candidate.oci.oci_digest.replace(/^sha256:/, ""),
       },
     );
-  });
-}
-
-function validateJsonlEnvelope(
-  config: ReleaseConfig,
-  evidence: EvidenceBundle,
-): Effect.Effect<void, ReleaseError> {
-  return Effect.gen(function* () {
-    const lines = evidence.intotoJsonl
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line !== "");
-    yield* expect(
-      lines.length === 1,
-      "JSONL bundle must contain exactly one attestation for this release",
-      {
-        lines: lines.length,
-      },
-    );
-
-    const envelope = yield* decodeJson(DsseEnvelopeSchema, lines[0] ?? "{}", (reason) =>
-      admissionJson("DSSE JSONL line does not match schema", { reason }),
-    );
-    yield* expect(envelope.payloadType === intotoPayloadType, "DSSE payload type mismatch", {
-      actual: envelope.payloadType,
-      expected: intotoPayloadType,
-    });
-    const decodedStatement = Buffer.from(envelope.payload, "base64").toString("utf8");
-    const statement = yield* decodeJson(InTotoStatementSchema, decodedStatement, (reason) =>
-      admissionJson("DSSE payload is not an in-toto statement schema", { reason }),
-    );
-    yield* expect(
-      isDeepStrictEqual(statement, evidence.statement),
-      "DSSE payload does not match in-toto statement",
-    );
-
-    const nonEmptySignatures = envelope.signatures.filter((signature) => signature.sig !== "");
-    if (config.mode === "publish") {
-      yield* expect(
-        nonEmptySignatures.length > 0,
-        "publish mode requires a non-empty DSSE signature",
-      );
-      const bundle = yield* decodeJson(
-        SigstoreBundleForAdmissionSchema,
-        evidence.sigstoreBundleJson,
-        (reason) => admissionJson("Sigstore bundle does not match admission schema", { reason }),
-      );
-      yield* expect(
-        (bundle.verificationMaterial?.tlogEntries?.length ?? 0) > 0,
-        "publish mode requires a Sigstore transparency-log entry",
-      );
-    }
   });
 }
 

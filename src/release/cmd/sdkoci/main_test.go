@@ -91,7 +91,7 @@ func TestValidateRemoteCredentialConfigRejectsEmptyAccessTokenEnv(t *testing.T) 
 }
 
 func TestPushRemoteRequiresExplicitCredentials(t *testing.T) {
-	_, _, err := pushRemote(
+	_, err := pushRemote(
 		context.Background(),
 		targetRef{
 			registry:   "oci.guardianintelligence.org",
@@ -105,8 +105,6 @@ func TestPushRemoteRequiresExplicitCredentials(t *testing.T) {
 		nil,
 		defaultPayloadMediaType,
 		defaultArtifactType,
-		nil,
-		defaultAttestationLayerTitle,
 	)
 	if err == nil {
 		t.Fatal("expected error")
@@ -120,7 +118,7 @@ func TestPushRemoteRejectsEmptyPasswordEnv(t *testing.T) {
 	env := "GUARDIAN_SDKOCI_TEST_REMOTE_EMPTY_PASSWORD"
 	t.Setenv(env, "")
 
-	_, _, err := pushRemote(
+	_, err := pushRemote(
 		context.Background(),
 		targetRef{
 			registry:   "oci.guardianintelligence.org",
@@ -137,8 +135,6 @@ func TestPushRemoteRejectsEmptyPasswordEnv(t *testing.T) {
 		nil,
 		defaultPayloadMediaType,
 		defaultArtifactType,
-		nil,
-		defaultAttestationLayerTitle,
 	)
 	if err == nil {
 		t.Fatal("expected error")
@@ -371,71 +367,6 @@ func TestRunWritesPythonWheelOCILayout(t *testing.T) {
 	}
 }
 
-func TestRunWritesAttestationReferrer(t *testing.T) {
-	dir := t.TempDir()
-	tarballPath, packPath, _ := writePackFixture(t, dir)
-	attestationPath := filepath.Join(dir, "guardian-release.intoto.jsonl")
-	if err := os.WriteFile(attestationPath, []byte(`{"mediaType":"application/vnd.dev.sigstore.bundle.v0.3+json"}`+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	layoutPath := filepath.Join(dir, "layout")
-	var out strings.Builder
-	err := run(context.Background(), cliConfig{
-		tarballPath:     tarballPath,
-		packJSON:        packPath,
-		attestationPath: attestationPath,
-		ociLayout:       layoutPath,
-		tag:             "edge",
-		sourceCommit:    strings.Repeat("a", 40),
-		sourceRepo:      "https://github.com/guardian-intelligence/guardian",
-	}, &out)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var result artifactResult
-	if err := json.Unmarshal([]byte(out.String()), &result); err != nil {
-		t.Fatal(err)
-	}
-	if result.AttestationDigest == "" {
-		t.Fatal("expected attestation digest")
-	}
-
-	store, err := oci.New(layoutPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	desc, err := store.Resolve(context.Background(), "edge.attestation")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if desc.Digest.String() != result.AttestationDigest {
-		t.Fatalf("attestation digest = %q result = %q", desc.Digest, result.AttestationDigest)
-	}
-	rc, err := store.Fetch(context.Background(), desc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, err := io.ReadAll(rc)
-	if closeErr := rc.Close(); closeErr != nil {
-		t.Fatal(closeErr)
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	var manifest ocispec.Manifest
-	if err := json.Unmarshal(raw, &manifest); err != nil {
-		t.Fatal(err)
-	}
-	if manifest.Subject == nil {
-		t.Fatal("attestation manifest has no subject")
-	}
-	if manifest.Subject.Digest.String() != result.OCIDigest {
-		t.Fatalf("attestation subject = %q result = %q", manifest.Subject.Digest, result.OCIDigest)
-	}
-}
-
 func TestRunWritesDeterministicManifestDigest(t *testing.T) {
 	dir := t.TempDir()
 	tarballPath, packPath, _ := writePackFixture(t, dir)
@@ -634,7 +565,7 @@ func TestPushToTargetRejectsInvalidResolvedManifestDescriptor(t *testing.T) {
 		},
 	}
 
-	_, _, err := pushToTarget(
+	_, err := pushToTarget(
 		context.Background(),
 		target,
 		"edge",
@@ -643,8 +574,6 @@ func TestPushToTargetRejectsInvalidResolvedManifestDescriptor(t *testing.T) {
 		nil,
 		defaultPayloadMediaType,
 		defaultArtifactType,
-		nil,
-		defaultAttestationLayerTitle,
 	)
 	if err == nil {
 		t.Fatal("expected error")
@@ -654,38 +583,8 @@ func TestPushToTargetRejectsInvalidResolvedManifestDescriptor(t *testing.T) {
 	}
 }
 
-func TestPushToTargetRejectsInvalidResolvedAttestationDescriptor(t *testing.T) {
-	target := &recordingTarget{
-		resolve: func(reference string, desc ocispec.Descriptor) ocispec.Descriptor {
-			if reference == "edge.attestation" {
-				desc.Digest = ""
-			}
-			return desc
-		},
-	}
-
-	_, _, err := pushToTarget(
-		context.Background(),
-		target,
-		"edge",
-		packEntry{Filename: "guardian-intelligence-aisucks-0.3.0.tgz"},
-		[]byte("payload"),
-		nil,
-		defaultPayloadMediaType,
-		defaultArtifactType,
-		[]byte(`{"bundle":true}`),
-		defaultAttestationLayerTitle,
-	)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "resolved tagged OCI artifact edge.attestation has empty digest") {
-		t.Fatalf("error = %v", err)
-	}
-}
-
 func TestValidatePushedDescriptorsRejectsEmptyManifest(t *testing.T) {
-	err := validatePushedDescriptors("remote", ocispec.Descriptor{}, nil)
+	err := validatePushedDescriptor("remote", ocispec.Descriptor{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -698,7 +597,7 @@ func TestValidatePushedDescriptorsRejectsInvalidManifest(t *testing.T) {
 	manifest := validManifestDescriptor(`{"schemaVersion":2}`)
 	manifest.MediaType = ""
 
-	err := validatePushedDescriptors("remote", manifest, nil)
+	err := validatePushedDescriptor("remote", manifest)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -707,51 +606,10 @@ func TestValidatePushedDescriptorsRejectsInvalidManifest(t *testing.T) {
 	}
 }
 
-func TestValidatePushedDescriptorsRejectsEmptyAttestationManifest(t *testing.T) {
+func TestValidatePushedDescriptorsAcceptsValidManifest(t *testing.T) {
 	manifest := validManifestDescriptor(`{"schemaVersion":2}`)
-	attestation := ocispec.Descriptor{}
 
-	err := validatePushedDescriptors("remote", manifest, &attestation)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "remote attestation OCI artifact manifest has empty digest") {
-		t.Fatalf("error = %v", err)
-	}
-}
-
-func TestValidatePushedDescriptorsRejectsInvalidAttestationManifest(t *testing.T) {
-	manifest := validManifestDescriptor(`{"schemaVersion":2}`)
-	attestation := validAttestationDescriptor(`{"schemaVersion":2}`)
-	attestation.Size = 0
-
-	err := validatePushedDescriptors("remote", manifest, &attestation)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "remote attestation OCI artifact manifest") || !strings.Contains(err.Error(), "non-positive size") {
-		t.Fatalf("error = %v", err)
-	}
-}
-
-func TestValidatePushedDescriptorsRejectsWrongAttestationArtifactType(t *testing.T) {
-	manifest := validManifestDescriptor(`{"schemaVersion":2}`)
-	attestation := validManifestDescriptor(`{"schemaVersion":2,"attestation":true}`)
-
-	err := validatePushedDescriptors("remote", manifest, &attestation)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "artifact type") || !strings.Contains(err.Error(), attestationArtifactType) {
-		t.Fatalf("error = %v", err)
-	}
-}
-
-func TestValidatePushedDescriptorsAcceptsValidManifestAndAttestation(t *testing.T) {
-	manifest := validManifestDescriptor(`{"schemaVersion":2}`)
-	attestation := validAttestationDescriptor(`{"schemaVersion":2,"attestation":true}`)
-
-	if err := validatePushedDescriptors("remote", manifest, &attestation); err != nil {
+	if err := validatePushedDescriptor("remote", manifest); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -951,74 +809,6 @@ func TestWriteResultRejectsPythonWheelWithNPMFields(t *testing.T) {
 	}
 }
 
-func TestWriteResultRejectsAttestationDigestWithoutRef(t *testing.T) {
-	result := validNPMResult()
-	result.AttestationDigest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-
-	err := writeResult(result, "", io.Discard)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "attestation digest without attestation ref") {
-		t.Fatalf("error = %v", err)
-	}
-}
-
-func TestWriteResultRejectsAttestationRefWithoutDigest(t *testing.T) {
-	result := validNPMResult()
-	result.AttestationRef = "oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-
-	err := writeResult(result, "", io.Discard)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "attestation ref without attestation digest") {
-		t.Fatalf("error = %v", err)
-	}
-}
-
-func TestWriteResultRejectsInvalidAttestationDigest(t *testing.T) {
-	result := validNPMResult()
-	result.AttestationDigest = "sha256:not-hex"
-	result.AttestationRef = "oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:not-hex"
-
-	err := writeResult(result, "", io.Discard)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "invalid digest") {
-		t.Fatalf("error = %v", err)
-	}
-}
-
-func TestWriteResultRejectsAttestationRefDigestMismatch(t *testing.T) {
-	result := validNPMResult()
-	result.AttestationDigest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	result.AttestationRef = "oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-
-	err := writeResult(result, "", io.Discard)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "attestation ref") {
-		t.Fatalf("error = %v", err)
-	}
-}
-
-func TestWriteResultRejectsAttestationRefWithoutRepository(t *testing.T) {
-	result := validNPMResult()
-	result.AttestationDigest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	result.AttestationRef = "@" + result.AttestationDigest
-
-	err := writeResult(result, "", io.Discard)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "empty repository before digest") {
-		t.Fatalf("error = %v", err)
-	}
-}
-
 type staticResolver struct {
 	desc ocispec.Descriptor
 }
@@ -1064,12 +854,6 @@ func (t *recordingTarget) Resolve(_ context.Context, reference string) (ocispec.
 func validManifestDescriptor(data string) ocispec.Descriptor {
 	desc := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(data))
 	desc.ArtifactType = defaultArtifactType
-	return desc
-}
-
-func validAttestationDescriptor(data string) ocispec.Descriptor {
-	desc := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, []byte(data))
-	desc.ArtifactType = attestationArtifactType
 	return desc
 }
 

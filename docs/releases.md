@@ -90,8 +90,11 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 - [ ] GitHub Release asset projection is owned by the distributable release
   tool, not by the Guardian CLI or repo-wide release code.
 - [ ] Each uploaded asset has a digest in a signed release manifest.
+- [ ] Each uploaded executable/package-like asset has a cosign v3 Sigstore
+  signature bundle beside it as `<artifact>.sigstore.json`.
 - [ ] Each uploaded executable/package-like asset has DSSE/in-toto SLSA
-  provenance and the full Sigstore bundle available beside the asset.
+  provenance beside it as `<artifact>.intoto.sigstore.json`, verifiable with
+  stock `cosign verify-blob-attestation`.
 - [ ] The GitHub Release body links verification commands and the release
   manifest digest instead of treating the GitHub Release page as the ledger.
 
@@ -102,12 +105,13 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
   Crossplane owns the `EdgeGateway` platform substrate; each enabled site
   declares its concrete `EdgeGateway` object in checked-in site manifests.
 - [ ] zot stores release artifacts by immutable digest.
-- [ ] zot serves OCI Distribution v1.1 referrers.
+- [ ] zot serves OCI Distribution v1.1 referrers in the form consumed by
+  cosign v3 without experimental flags.
 - [ ] Each release target has subject digest plus referrers:
   - [ ] cosign/keyless or Transit signature
   - [ ] SLSA provenance
   - [ ] in-toto statement
-  - [ ] DSSE JSONL bundle
+  - [ ] DSSE envelope carried by stock cosign attestations
   - [ ] SBOM, even minimal at first
   - [ ] release manifest / metadata
   - [ ] gate result
@@ -147,6 +151,9 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 - [ ] DSSE envelopes use `payloadType: application/vnd.in-toto+json`, base64
   payload bytes, and at least one signature. Sigstore bundle verification
   material remains tool-owned, not re-modeled by Guardian.
+- [ ] Public DSSE verification uses stock cosign commands:
+  `verify-attestation` for OCI subjects and `verify-blob-attestation` for
+  GitHub Release blobs.
 - [ ] Every Guardian VSA carries `subject` digests, `resourceUri`, verifier
   identity, policy URI + digest, input attestation digests, `PASSED`/`FAILED`,
   verified levels, and the Guardian extension field
@@ -249,18 +256,42 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 A clean machine should eventually be able to run:
 
 ```sh
-guardian run cosign verify <zot-or-ghcr-image>@sha256:...
-guardian run cosign verify-attestation --type slsaprovenance <image>@sha256:...
+VERSION=v0.4.0
+ASSET=guardian_${VERSION}_linux_amd64.tar.gz
+BASE=https://github.com/guardian-intelligence/guardian/releases/download/${VERSION}
+curl -fsSLO "$BASE/$ASSET"
+curl -fsSLO "$BASE/$ASSET.sigstore.json"
+curl -fsSLO "$BASE/$ASSET.intoto.sigstore.json"
+guardian run cosign verify-blob "$ASSET" --bundle "$ASSET.sigstore.json" \
+  --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/release.yml@refs/heads/main' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
+guardian run cosign verify-blob-attestation "$ASSET" --bundle "$ASSET.intoto.sigstore.json" \
+  --type slsaprovenance1 \
+  --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/release.yml@refs/heads/main' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
+guardian run cosign verify oci.guardianintelligence.org/guardian/aisucks/api@sha256:... \
+  --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/release.yml@refs/heads/main' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
+guardian run cosign verify-attestation --type slsaprovenance1 oci.guardianintelligence.org/guardian/aisucks/api@sha256:... \
+  --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/release.yml@refs/heads/main' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 npm view @guardian-intelligence/aisucks@edge dist.integrity
 npm install @guardian-intelligence/aisucks@edge
 aspect release sdk-oci --output-dir /tmp/guardian-sdk-release
 guardian run oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist
 guardian run oras discover --oci-layout /tmp/guardian-sdk-release/oci-layout:edge
 guardian run oras pull oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest> -o ./dist
-guardian run cosign verify oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>
+guardian run cosign verify oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest> \
+  --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml@refs/heads/main' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
+guardian run cosign verify-attestation --type slsaprovenance1 oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest> \
+  --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml@refs/heads/main' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 guardian/repo tool verify release-manifest <digest-or-file>
 guardian/repo tool synthetic health --base-url=https://gamma.aisucks.app
 ```
+
+These public commands are the acceptance contract.
 
 ## Minimum Full Slice
 
@@ -277,8 +308,8 @@ The smallest meaningful release slice is:
 8. Gate result JSON emitted.
 9. `nightly` pointer advances only after gate pass.
 
-SLSA/in-toto provenance and signatures are the next evidence layer, not part
-of this milestone's minimum slice.
+SLSA/in-toto provenance and signatures are now part of the v0.4.0 public
+verification slice.
 
 ## First Deliverable: Contract Slice
 

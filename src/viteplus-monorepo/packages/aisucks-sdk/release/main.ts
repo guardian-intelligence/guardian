@@ -51,6 +51,7 @@ if (Exit.isSuccess(exit)) {
         publishedOciDigest: result.publishedOci?.oci_digest,
         attestationStatus: result.attestationStatus,
         ociSignatureStatus: result.ociSignatureStatus,
+        ociAttestationStatus: result.ociAttestationStatus,
         npmProvenanceStatus: result.npmProvenanceStatus,
         npmStatus: result.npmStatus,
       },

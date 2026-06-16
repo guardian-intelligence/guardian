@@ -13,7 +13,6 @@ import {
   defaultReleasePaths,
   distributable,
   inTotoStatementType,
-  intotoPayloadType,
   npmPackagePurl,
   payloadForm,
   sdkPackageName,
@@ -95,10 +94,7 @@ function validFixture(mode: ReleaseMode = "check"): AdmissionFixture {
       paths: defaultReleasePaths(),
     },
     candidate,
-    evidence: evidenceForStatement(statement, {
-      signed: mode === "publish",
-      tlog: mode === "publish",
-    }),
+    evidence: evidenceForStatement(statement),
   };
 }
 
@@ -129,29 +125,13 @@ function validStatement(candidate: ReleaseCandidate): InTotoStatement {
   };
 }
 
-function evidenceForStatement(
-  statement: InTotoStatement,
-  options: { readonly signed: boolean; readonly tlog: boolean } = { signed: false, tlog: false },
-): EvidenceBundle {
+function evidenceForStatement(statement: InTotoStatement): EvidenceBundle {
   const statementJson = `${JSON.stringify(statement)}\n`;
-  const envelope = {
-    payload: Buffer.from(statementJson, "utf8").toString("base64"),
-    payloadType: intotoPayloadType,
-    signatures: [{ sig: options.signed ? "signed" : "" }],
-  };
 
   return {
     statement,
     statementJson,
-    sigstoreBundleJson: JSON.stringify({
-      verificationMaterial: {
-        tlogEntries: options.tlog ? [{}] : [],
-      },
-    }),
-    intotoJsonl: `${JSON.stringify(envelope)}\n`,
     statementPath: "/tmp/guardian-sdk-release/aisucks-sdk.slsa-provenance.json",
-    sigstoreBundlePath: "/tmp/guardian-sdk-release/aisucks-sdk.sigstore.bundle.json",
-    intotoBundlePath: "/tmp/guardian-sdk-release/guardian-release.intoto.jsonl",
   };
 }
 
@@ -318,84 +298,5 @@ void test("admitRelease rejects an npm subject sha512 mismatch", async () => {
   await assertAdmissionRejected(
     withEvidence(fixture, evidenceForStatement(statement)),
     "npm subject sha512 mismatch",
-  );
-});
-
-void test("admitRelease rejects JSONL bundles with more than one attestation", async () => {
-  const fixture = validFixture();
-  const evidence = {
-    ...fixture.evidence,
-    intotoJsonl: `${fixture.evidence.intotoJsonl}${fixture.evidence.intotoJsonl}`,
-  };
-
-  await assertAdmissionRejected(
-    withEvidence(fixture, evidence),
-    "JSONL bundle must contain exactly one attestation for this release",
-  );
-});
-
-void test("admitRelease rejects DSSE envelopes with the wrong payload type", async () => {
-  const fixture = validFixture();
-  const statementJson = JSON.stringify(fixture.evidence.statement);
-  const envelope = {
-    payload: Buffer.from(statementJson, "utf8").toString("base64"),
-    payloadType: "application/vnd.example.not-intoto+json",
-    signatures: [{ sig: "" }],
-  };
-  const evidence = {
-    ...fixture.evidence,
-    intotoJsonl: `${JSON.stringify(envelope)}\n`,
-  };
-
-  await assertAdmissionRejected(withEvidence(fixture, evidence), "DSSE payload type mismatch");
-});
-
-void test("admitRelease rejects DSSE payloads that do not match the admitted statement", async () => {
-  const fixture = validFixture();
-  const differentStatement = {
-    ...fixture.evidence.statement,
-    predicate: {
-      tampered: true,
-    },
-  };
-  const envelope = {
-    payload: Buffer.from(JSON.stringify(differentStatement), "utf8").toString("base64"),
-    payloadType: intotoPayloadType,
-    signatures: [{ sig: "" }],
-  };
-  const evidence = {
-    ...fixture.evidence,
-    intotoJsonl: `${JSON.stringify(envelope)}\n`,
-  };
-
-  await assertAdmissionRejected(
-    withEvidence(fixture, evidence),
-    "DSSE payload does not match in-toto statement",
-  );
-});
-
-void test("admitRelease rejects unsigned DSSE evidence in publish mode", async () => {
-  const fixture = validFixture("publish");
-  const evidence = evidenceForStatement(fixture.evidence.statement, {
-    signed: false,
-    tlog: true,
-  });
-
-  await assertAdmissionRejected(
-    withEvidence(fixture, evidence),
-    "publish mode requires a non-empty DSSE signature",
-  );
-});
-
-void test("admitRelease rejects publish-mode evidence without a transparency log entry", async () => {
-  const fixture = validFixture("publish");
-  const evidence = evidenceForStatement(fixture.evidence.statement, {
-    signed: true,
-    tlog: false,
-  });
-
-  await assertAdmissionRejected(
-    withEvidence(fixture, evidence),
-    "publish mode requires a Sigstore transparency-log entry",
   );
 });
