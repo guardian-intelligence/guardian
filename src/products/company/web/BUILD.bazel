@@ -27,6 +27,7 @@ genrule(
         ":sources",
         "//src/viteplus-monorepo:node_modules/vite-plus",
         "//src/viteplus-monorepo:vp_node",
+        "//src/viteplus-monorepo:workspace_build",
         "//src/viteplus-monorepo:workspace_install",
     ],
     outs = ["company-site-output.tar"],
