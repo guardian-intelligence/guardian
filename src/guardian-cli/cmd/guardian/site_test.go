@@ -19,6 +19,15 @@ node:
   interfaceMac: "00:00:5e:00:53:01"
   installDiskSerial: "TESTINSTALL"
   zfsDiskSerial: "TESTZFS"
+storage:
+  pools:
+    - name: guardian
+      type: zfs
+      role: product-workloads
+      deviceSerials:
+        - TESTZFS
+      wipePolicy: never
+      mountpoint: /var/mnt/guardian
 talos:
   schematic: src/sites/dev/talos/schematic.yaml
   patches:
@@ -45,6 +54,14 @@ func TestLoadBootstrapValidation(t *testing.T) {
 		name:    "requires patches",
 		body:    strings.Replace(minimalBootstrap, "    - src/sites/dev/talos/patches/single-node.yaml\n", "", 1),
 		wantErr: "talos.patches is required",
+	}, {
+		name:    "requires storage pools",
+		body:    strings.Replace(minimalBootstrap, "storage:\n  pools:\n    - name: guardian\n      type: zfs\n      role: product-workloads\n      deviceSerials:\n        - TESTZFS\n      wipePolicy: never\n      mountpoint: /var/mnt/guardian\n", "", 1),
+		wantErr: "storage.pools is required",
+	}, {
+		name:    "storage cannot use install disk",
+		body:    strings.Replace(minimalBootstrap, "- TESTZFS", "- TESTINSTALL", 1),
+		wantErr: "must not include install disk",
 	}}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

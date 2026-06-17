@@ -406,10 +406,11 @@ Run it as ordinary Kubernetes components when introduced:
 - `Deployment directus`, digest-pinned.
 - Postgres for Directus state, backed up through Guardian's normal survival
   floor.
-- Initial single-node uploads use an explicit hostPath. `DirectusInstance`
-  also accepts S3-compatible storage references, backed by OpenBao-projected
-  credentials, for the R2/object-store migration before public authoring
-  depends on uploads.
+- Initial single-node uploads and Directus Postgres state use PVCs backed by
+  the site's `StoragePlane` static local PVs on the bootstrap-reserved ZFS
+  pool. `DirectusInstance` also accepts S3-compatible storage references,
+  backed by OpenBao-projected credentials, for the R2/object-store migration
+  before public authoring depends on uploads.
 - Redis only when Directus needs multi-replica coordination, websocket
   coordination, or cache/session sharing.
 - R2/S3-compatible object storage for uploads and generated public images.

@@ -112,6 +112,11 @@ func runUp(args []string) error {
 	genArgs = append(genArgs, "--config-patch",
 		fmt.Sprintf(`{"machine":{"network":{"hostname":%q,"interfaces":[{"deviceSelector":{"hardwareAddr":%q},"addresses":["%s/%d"],"routes":[{"network":"0.0.0.0/0","gateway":%q}]}]}}}`,
 			site.Node.Hostname, site.Node.InterfaceMac, site.Node.Address, site.Node.PrefixLength, site.Node.Gateway))
+	if siteUsesLocalStorage(site) {
+		genArgs = append(genArgs, "--config-patch",
+			fmt.Sprintf(`{"machine":{"kubelet":{"extraMounts":[{"destination":%q,"type":"bind","source":%q,"options":["rbind","rshared","rw"]}]}}}`,
+				talosKubeletStorageRoot, talosKubeletStorageRoot))
+	}
 	// gen config emits a HostnameConfig document (auto: stable) that fails
 	// validation against the static v1alpha1 hostname above; delete it.
 	genArgs = append(genArgs, "--config-patch", `{"apiVersion":"v1alpha1","kind":"HostnameConfig","$patch":"delete"}`)
@@ -270,6 +275,18 @@ func runUp(args []string) error {
 		}
 		return applyComponent(kubectl, kubeconfig, c, images, site)
 	}
+	if err := resetLocalStorageBootstrap(kubectl, kubeconfig, site); err != nil {
+		return err
+	}
+	if err := apply("local-storage-bootstrap"); err != nil {
+		return err
+	}
+	if err := waitLocalStorageBootstrap(kubectl, kubeconfig, site); err != nil {
+		return err
+	}
+	if err := restartKubeletAfterLocalStorageBootstrap(talosctl, talosArgs, kubectl, kubeconfig, site); err != nil {
+		return err
+	}
 	if err := apply("openbao"); err != nil {
 		return err
 	}
@@ -303,6 +320,9 @@ func runUp(args []string) error {
 		return err
 	}
 	if err := apply("secret-projection-platform"); err != nil {
+		return err
+	}
+	if err := apply("storage-plane-platform"); err != nil {
 		return err
 	}
 	if err := apply("public-http-service-platform"); err != nil {
@@ -358,7 +378,7 @@ func runUp(args []string) error {
 	}
 	for _, c := range components {
 		switch c.name {
-		case "openbao", "crossplane", "cert-manager", "provider-kubernetes", "provider-kubernetes-config", "edge-gateway-platform", "secret-projection-platform", "public-http-service-platform", "directus-platform", "observability-stack-platform", "slo-profile-platform", "status-surface-platform", "oci-registry-platform", "aisucks-product-api", "company-site-product-api", "external-secrets":
+		case "openbao", "crossplane", "cert-manager", "provider-kubernetes", "provider-kubernetes-config", "edge-gateway-platform", "secret-projection-platform", "storage-plane-platform", "public-http-service-platform", "directus-platform", "observability-stack-platform", "slo-profile-platform", "status-surface-platform", "oci-registry-platform", "aisucks-product-api", "company-site-product-api", "external-secrets", "local-storage-bootstrap":
 			continue
 		default:
 			if err := applyComponent(kubectl, kubeconfig, c, images, site); err != nil {
@@ -496,6 +516,43 @@ func waitOpenBao(kubectl, kubeconfig string) error {
 	return runTool(kubectl, "--kubeconfig", kubeconfig, "-n", "openbao", "rollout", "status", "statefulset/openbao", "--timeout=10m")
 }
 
+func waitLocalStorageBootstrap(kubectl, kubeconfig string, site *Site) error {
+	if !siteUsesLocalStorage(site) {
+		return nil
+	}
+	return runTool(kubectl, "--kubeconfig", kubeconfig, "-n", "guardian-storage", "wait", "--for=condition=complete", "job/zfs-pool-init", "--timeout=5m")
+}
+
+func restartKubeletAfterLocalStorageBootstrap(talosctl string, talosArgs func(...string) []string, kubectl, kubeconfig string, site *Site) error {
+	if !siteUsesLocalStorage(site) {
+		return nil
+	}
+	fmt.Fprintln(os.Stderr, "restarting kubelet so local ZFS mounts are visible to kubelet")
+	if err := runTool(talosctl, talosArgs("service", "kubelet", "restart")...); err != nil {
+		return err
+	}
+	return poll("kubernetes node Ready after local storage bootstrap", 5*time.Minute, 5*time.Second, func() error {
+		out, kerr := outputTool(kubectl, "--kubeconfig", kubeconfig, "get", "nodes", "--no-headers")
+		if kerr != nil {
+			return kerr
+		}
+		if !strings.Contains(out, " Ready") {
+			return fmt.Errorf("node not Ready yet:\n%s", out)
+		}
+		return nil
+	})
+}
+
+func resetLocalStorageBootstrap(kubectl, kubeconfig string, site *Site) error {
+	if !siteUsesLocalStorage(site) {
+		return nil
+	}
+	if _, err := outputTool(kubectl, "--kubeconfig", kubeconfig, "get", "namespace", "guardian-storage"); err != nil {
+		return nil
+	}
+	return runTool(kubectl, "--kubeconfig", kubeconfig, "-n", "guardian-storage", "delete", "job/zfs-pool-init", "--ignore-not-found=true")
+}
+
 func waitExternalSecrets(kubectl, kubeconfig string) error {
 	for _, crd := range []string{
 		"clustersecretstores.external-secrets.io",
@@ -560,6 +617,7 @@ func waitGuardianPlatform(kubectl, kubeconfig string) error {
 	for _, xrd := range []string{
 		"edgegateways.platform.guardian.dev",
 		"secretprojections.platform.guardian.dev",
+		"storageplanes.platform.guardian.dev",
 		"publichttpservices.platform.guardian.dev",
 		"directusinstances.platform.guardian.dev",
 		"observabilitystacks.platform.guardian.dev",

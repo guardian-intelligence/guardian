@@ -22,7 +22,7 @@ type ociRegistrySpec struct {
 	NamespaceLabels map[string]string `yaml:"namespaceLabels"`
 	Image           string            `yaml:"image"`
 	Domain          string            `yaml:"domain"`
-	StoragePath     string            `yaml:"storagePath"`
+	Persistence     persistenceSpec   `yaml:"persistence"`
 	PublisherSecret struct {
 		Name        string `yaml:"name"`
 		UsernameKey string `yaml:"usernameKey"`
@@ -98,7 +98,6 @@ func validateOCIRegistryManifest(site *Site, registry ociRegistryManifest) error
 		{field: "spec.namespace", value: spec.Namespace},
 		{field: "spec.image", value: spec.Image},
 		{field: "spec.domain", value: spec.Domain},
-		{field: "spec.storagePath", value: spec.StoragePath},
 		{field: "spec.publisherSecret.name", value: spec.PublisherSecret.Name},
 		{field: "spec.publisherSecret.usernameKey", value: spec.PublisherSecret.UsernameKey},
 		{field: "spec.publisherSecret.passwordKey", value: spec.PublisherSecret.PasswordKey},
@@ -117,6 +116,9 @@ func validateOCIRegistryManifest(site *Site, registry ociRegistryManifest) error
 	}
 	if spec.Site != site.Name {
 		return fmt.Errorf("environment %s: OCIRegistry %s spec.site = %q, want %q", site.EnvironmentBundle.Path, name, spec.Site, site.Name)
+	}
+	if err := validatePersistence(site, "OCIRegistry "+name, spec.Namespace, spec.Persistence); err != nil {
+		return err
 	}
 	if err := validateSecretProjection(site, ociRegistrySecretProjection(registry)); err != nil {
 		return err

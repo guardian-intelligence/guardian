@@ -78,19 +78,24 @@ repo-root relative.
    `node.zfsDiskSerial`, the first install, and a one-time etcd bootstrap.
    The install disk is selected by serial through a generated
    `machine.install.diskSelector` patch, so the reserved ZFS disk is never
-   an install target even when two identical NVMes re-enumerate. Both paths
-   end with the seed registry up, workspace artifacts pushed into it,
-   and the secrets substrate converged first. OpenBao applies and becomes
-   reachable; Bao is restored or fresh-initialized/unsealed; `kv/` and
-   Kubernetes auth are configured; Crossplane, provider-kubernetes, and pinned
-   functions are installed; the site's Crossplane environment bundle is
-   applied; External Secrets Operator is installed; and declared
-   SecretProjection XRs reconcile. Blocking projections must have ready
-   ExternalSecrets and Kubernetes Secrets before their consumers are treated as
-   converged. Nonblocking projections, such as early Directus authoring
-   secrets, keep the desired state visible and warn on missing Bao values
-   without blocking public serving convergence. An already-sealed restored Bao
-   must be unsealed with injected Shamir keys
+   an install target even when two identical NVMes re-enumerate. After the
+   seed registry is populated, `up` runs a one-shot privileged ZFS initializer
+   that creates or imports the checked-in product-workload pool from
+   `bootstrap.yaml` and creates the local PV directories declared by the
+   site's `StoragePlane`. Product workload pools mount under `/var/mnt`
+   because `guardian up` binds that Talos storage root into kubelet with
+   shared propagation before local PVs are scheduled. Both paths end with the
+   seed registry up, workspace artifacts pushed into it, and the secrets
+   substrate converged first. OpenBao applies and becomes reachable; Bao is
+   restored or fresh-initialized/unsealed; `kv/` and Kubernetes auth are
+   configured; Crossplane, provider-kubernetes, and pinned functions are
+   installed; the site's Crossplane environment bundle is applied; External
+   Secrets Operator is installed; and declared SecretProjection XRs reconcile.
+   Blocking projections must have ready ExternalSecrets and Kubernetes Secrets
+   before their consumers are treated as converged. Nonblocking projections,
+   such as early Directus authoring secrets, keep the desired state visible and
+   warn on missing Bao values without blocking public serving convergence. An
+   already-sealed restored Bao must be unsealed with injected Shamir keys
    (`GUARDIAN_OPENBAO_UNSEAL_KEY` or `GUARDIAN_OPENBAO_UNSEAL_KEYS`) before the
    projection gate can pass.
 
@@ -147,10 +152,11 @@ bootstrap and wiped from the host after unseal.
 
 ## Open questions for the tracer
 
-- ZFS pool creation and zvol churn. The `siderolabs/zfs` system extension is
-  in the dev schematic and the second NVMe (`node.zfsDiskSerial`) is reserved
-  from the installer, so the kernel module and an empty data disk are present;
-  creating the pool and driving it under vm-orchestrator churn is unbuilt.
+- Dynamic local storage provisioning and zvol churn. The first implemented
+  storage slice creates/imports one ZFS product-workload pool and exposes it
+  through Crossplane-rendered static local PVs. A CSI driver or Guardian
+  storage controller can replace the static PV bridge once workload churn
+  needs dynamic claims.
 - KubeSpan versus Cilium WireGuard encryption for WAN worker nodes; run one,
   never both.
 - TLS for the OpenBao listener: serving-cert issuance is part of the cluster

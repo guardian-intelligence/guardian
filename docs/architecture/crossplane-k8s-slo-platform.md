@@ -106,7 +106,7 @@ cross-site blackbox path finishes replacing it. The first implemented slice
 uses this XR as the source for the ClickHouse ledger ratchet.
 
 `DirectusInstance` owns the authoring backend: Directus, Postgres binding,
-initial hostPath uploads, optional S3-compatible object storage references,
+PVC-backed local uploads, optional S3-compatible object storage references,
 optional Redis, admin route policy, backup/restore hooks, and OpenBao secret projections. It
 must not become the public read path.
 

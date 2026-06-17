@@ -1,0 +1,166 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: guardian-storage
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zfs-pool-init
+  namespace: guardian-storage
+data:
+  init.sh: |
+    set -eu
+
+    pool="{{ .Site.Storage.ProductPool.Name }}"
+    mountpoint="{{ .Site.Storage.ProductPool.Mountpoint }}"
+    serial="{{ index .Site.Storage.ProductPool.DeviceSerials 0 }}"
+
+    zpool_bin=""
+    for candidate in /usr/local/sbin/zpool /sbin/zpool /usr/sbin/zpool; do
+      if [ -x "/host${candidate}" ]; then
+        zpool_bin="${candidate}"
+        break
+      fi
+    done
+    if [ -z "${zpool_bin}" ]; then
+      echo "zpool binary not found in host root" >&2
+      exit 1
+    fi
+    zfs_bin=""
+    for candidate in /usr/local/sbin/zfs /sbin/zfs /usr/sbin/zfs; do
+      if [ -x "/host${candidate}" ]; then
+        zfs_bin="${candidate}"
+        break
+      fi
+    done
+    if [ -z "${zfs_bin}" ]; then
+      echo "zfs binary not found in host root" >&2
+      exit 1
+    fi
+
+    zpool() {
+      nsenter --mount=/proc/1/ns/mnt -- "${zpool_bin}" "$@"
+    }
+    zfs() {
+      nsenter --mount=/proc/1/ns/mnt -- "${zfs_bin}" "$@"
+    }
+    unmount_pool_filesystems() {
+      target_pool="$1"
+      zfs list -H -r -o name -t filesystem "${target_pool}" 2>/dev/null \
+        | sort -r \
+        | while read -r dataset; do
+            [ -n "${dataset}" ] || continue
+            zfs unmount -f "${dataset}" >/dev/null 2>&1 || true
+          done
+    }
+
+    device="$(find /host/dev/disk/by-id -type l | grep "${serial}" | grep -v -- '-part' | head -n 1 || true)"
+    if [ -z "${device}" ]; then
+      echo "ZFS disk serial ${serial} not found under /dev/disk/by-id" >&2
+      find /host/dev/disk/by-id -maxdepth 1 -type l -print >&2 || true
+      exit 1
+    fi
+    device="${device#/host}"
+
+    if zpool list -H -o name "${pool}" >/dev/null 2>&1; then
+      unmount_pool_filesystems "${pool}"
+      zfs set mountpoint="${mountpoint}" "${pool}"
+      zfs mount "${pool}" >/dev/null 2>&1 || true
+    elif existing_pools="$(zpool list -H -o name 2>/dev/null)" && [ -n "${existing_pools}" ]; then
+      pool_count="$(printf '%s\n' "${existing_pools}" | sed '/^$/d' | wc -l | tr -d ' ')"
+      if [ "${pool_count}" != "1" ]; then
+        echo "declared pool ${pool} is absent and multiple existing pools are imported: ${existing_pools}" >&2
+        exit 1
+      fi
+      existing_pool="$(printf '%s\n' "${existing_pools}" | sed '/^$/d' | head -n 1)"
+      echo "renaming existing ZFS pool ${existing_pool} to ${pool}"
+      unmount_pool_filesystems "${existing_pool}"
+      zpool export "${existing_pool}"
+      zpool import -N -d /dev/disk/by-id "${existing_pool}" "${pool}"
+      zfs set mountpoint="${mountpoint}" "${pool}"
+      zfs mount "${pool}" >/dev/null 2>&1 || true
+    elif zpool import -d /dev/disk/by-id -N "${pool}" >/dev/null 2>&1; then
+      zfs set mountpoint="${mountpoint}" "${pool}"
+      zfs mount "${pool}" >/dev/null 2>&1 || true
+    else
+      zpool create -f \
+        -o ashift=12 \
+        -o autotrim=on \
+        -O compression=lz4 \
+        -O atime=off \
+        -O mountpoint="${mountpoint}" \
+        "${pool}" "${device}"
+    fi
+
+    ensure_dataset() {
+      local_path="$1"
+      rel="${local_path#${mountpoint}/}"
+      if [ "${rel}" = "${local_path}" ] || [ -z "${rel}" ]; then
+        echo "local path ${local_path} is not under ${mountpoint}" >&2
+        exit 1
+      fi
+      dataset="${pool}/${rel}"
+      if zfs list -H "${dataset}" >/dev/null 2>&1; then
+        zfs unmount -f "${dataset}" >/dev/null 2>&1 || true
+        zfs set mountpoint="${local_path}" "${dataset}"
+      else
+        zfs create -p -o mountpoint="${local_path}" "${dataset}"
+      fi
+      zfs mount "${dataset}" >/dev/null 2>&1 || true
+    }
+
+    {{- range .Site.StoragePlane.Spec.Volumes }}
+    ensure_dataset "{{ .LocalPath }}"
+    {{- end }}
+
+    echo "zfs pool ${pool} ready at ${mountpoint}"
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: zfs-pool-init
+  namespace: guardian-storage
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: zfs-pool-init
+    spec:
+      restartPolicy: Never
+      hostPID: true
+      containers:
+        - name: init
+          image: {{ index .Images "postgres" }}
+          command:
+            - /bin/sh
+            - /scripts/init.sh
+          securityContext:
+            privileged: true
+            runAsUser: 0
+            runAsGroup: 0
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+              readOnly: true
+            - name: host-root
+              mountPath: /host
+              mountPropagation: Bidirectional
+            - name: host-dev
+              mountPath: /host/dev
+      volumes:
+        - name: script
+          configMap:
+            name: zfs-pool-init
+            defaultMode: 0755
+        - name: host-root
+          hostPath:
+            path: /
+            type: Directory
+        - name: host-dev
+          hostPath:
+            path: /dev
+            type: Directory

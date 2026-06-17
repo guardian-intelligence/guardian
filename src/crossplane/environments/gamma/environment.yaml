@@ -22,6 +22,36 @@ data:
     oci: {}
 ---
 apiVersion: platform.guardian.dev/v1alpha1
+kind: StoragePlane
+metadata:
+  name: local-zfs
+spec:
+  site: gamma
+  nodeName: gd-gamma-w0
+  storageClassName: guardian-local-retain
+  reclaimPolicy: Retain
+  volumeBindingMode: WaitForFirstConsumer
+  volumes:
+    - name: victoria-metrics
+      persistentVolumeName: guardian-gamma-victoria-metrics
+      namespace: observability
+      claimName: victoria-metrics-storage
+      capacity: 20Gi
+      localPath: /var/mnt/guardian/victoria-metrics
+    - name: directus-postgres
+      persistentVolumeName: guardian-gamma-directus-postgres
+      namespace: directus
+      claimName: directus-postgres-data
+      capacity: 20Gi
+      localPath: /var/mnt/guardian/directus/postgres
+    - name: directus-uploads
+      persistentVolumeName: guardian-gamma-directus-uploads
+      namespace: directus
+      claimName: directus-uploads
+      capacity: 10Gi
+      localPath: /var/mnt/guardian/directus/uploads
+---
+apiVersion: platform.guardian.dev/v1alpha1
 kind: SLOProfile
 metadata:
   name: public-http
@@ -116,7 +146,13 @@ spec:
     pod-security.kubernetes.io/enforce: privileged
   victoriaMetrics:
     image: '{{ index .Images "victoria-metrics" }}'
-    storagePath: /var/lib/victoria-metrics
+    persistence:
+      claimName: victoria-metrics-storage
+      storageClassName: guardian-local-retain
+      size: 20Gi
+      volumeName: guardian-gamma-victoria-metrics
+      accessModes:
+        - ReadWriteOnce
     retentionPeriod: "13"
     memoryAllowedBytes: 256MiB
     ports:
@@ -304,8 +340,21 @@ spec:
   database:
     name: directus
     user: directus
-    storagePath: /var/lib/guardian/directus/postgres
-  uploadsPath: /var/lib/guardian/directus/uploads
+    persistence:
+      claimName: directus-postgres-data
+      storageClassName: guardian-local-retain
+      size: 20Gi
+      volumeName: guardian-gamma-directus-postgres
+      accessModes:
+        - ReadWriteOnce
+  uploads:
+    persistence:
+      claimName: directus-uploads
+      storageClassName: guardian-local-retain
+      size: 10Gi
+      volumeName: guardian-gamma-directus-uploads
+      accessModes:
+        - ReadWriteOnce
   resources:
     requests:
       cpu: 100m

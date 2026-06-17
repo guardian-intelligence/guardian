@@ -16,6 +16,7 @@ func TestEnvironmentCapabilities(t *testing.T) {
 				"DirectusInstance/directus":        "directusinstances.platform.guardian.dev",
 				"ObservabilityStack/observability": "observabilitystacks.platform.guardian.dev",
 				"StatusSurface/status":             "statussurfaces.platform.guardian.dev",
+				"StoragePlane/local-zfs":           "storageplanes.platform.guardian.dev",
 			}
 			wantRollouts := map[string][]environmentRollout{
 				"AisucksProduct/aisucks": {
@@ -28,6 +29,7 @@ func TestEnvironmentCapabilities(t *testing.T) {
 				"ObservabilityStack/observability": {
 					{namespace: "observability", resource: "deployment/victoria-metrics"},
 				},
+				"StoragePlane/local-zfs": nil,
 			}
 			if siteName == "prod" {
 				wantRollouts["StatusSurface/status"] = nil

@@ -23,6 +23,42 @@ data:
       domain: oci.guardianintelligence.org
 ---
 apiVersion: platform.guardian.dev/v1alpha1
+kind: StoragePlane
+metadata:
+  name: local-zfs
+spec:
+  site: dev
+  nodeName: vs-dev-w0
+  storageClassName: guardian-local-retain
+  reclaimPolicy: Retain
+  volumeBindingMode: WaitForFirstConsumer
+  volumes:
+    - name: victoria-metrics
+      persistentVolumeName: guardian-dev-victoria-metrics
+      namespace: observability
+      claimName: victoria-metrics-storage
+      capacity: 20Gi
+      localPath: /var/mnt/guardian/victoria-metrics
+    - name: directus-postgres
+      persistentVolumeName: guardian-dev-directus-postgres
+      namespace: directus
+      claimName: directus-postgres-data
+      capacity: 20Gi
+      localPath: /var/mnt/guardian/directus/postgres
+    - name: directus-uploads
+      persistentVolumeName: guardian-dev-directus-uploads
+      namespace: directus
+      claimName: directus-uploads
+      capacity: 10Gi
+      localPath: /var/mnt/guardian/directus/uploads
+    - name: zot
+      persistentVolumeName: guardian-dev-zot
+      namespace: guardian-oci
+      claimName: zot-storage
+      capacity: 50Gi
+      localPath: /var/mnt/guardian/zot
+---
+apiVersion: platform.guardian.dev/v1alpha1
 kind: SLOProfile
 metadata:
   name: public-http
@@ -93,7 +129,13 @@ spec:
     pod-security.kubernetes.io/enforce: privileged
   victoriaMetrics:
     image: '{{ index .Images "victoria-metrics" }}'
-    storagePath: /var/lib/victoria-metrics
+    persistence:
+      claimName: victoria-metrics-storage
+      storageClassName: guardian-local-retain
+      size: 20Gi
+      volumeName: guardian-dev-victoria-metrics
+      accessModes:
+        - ReadWriteOnce
     retentionPeriod: "13"
     memoryAllowedBytes: 256MiB
     ports:
@@ -248,7 +290,13 @@ spec:
     pod-security.kubernetes.io/enforce: privileged
   image: '{{ index .Images "zot" }}'
   domain: oci.guardianintelligence.org
-  storagePath: /var/lib/guardian/zot
+  persistence:
+    claimName: zot-storage
+    storageClassName: guardian-local-retain
+    size: 50Gi
+    volumeName: guardian-dev-zot
+    accessModes:
+      - ReadWriteOnce
   publisherSecret:
     name: zot-publisher
     usernameKey: username
@@ -331,8 +379,21 @@ spec:
   database:
     name: directus
     user: directus
-    storagePath: /var/lib/guardian/directus/postgres
-  uploadsPath: /var/lib/guardian/directus/uploads
+    persistence:
+      claimName: directus-postgres-data
+      storageClassName: guardian-local-retain
+      size: 20Gi
+      volumeName: guardian-dev-directus-postgres
+      accessModes:
+        - ReadWriteOnce
+  uploads:
+    persistence:
+      claimName: directus-uploads
+      storageClassName: guardian-local-retain
+      size: 10Gi
+      volumeName: guardian-dev-directus-uploads
+      accessModes:
+        - ReadWriteOnce
   resources:
     requests:
       cpu: 100m

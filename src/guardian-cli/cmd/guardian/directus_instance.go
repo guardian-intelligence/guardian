@@ -53,12 +53,14 @@ type directusInstanceSpec struct {
 		Email string `yaml:"email"`
 	} `yaml:"admin"`
 	Database struct {
-		Name        string `yaml:"name"`
-		User        string `yaml:"user"`
-		StoragePath string `yaml:"storagePath"`
+		Name        string          `yaml:"name"`
+		User        string          `yaml:"user"`
+		Persistence persistenceSpec `yaml:"persistence"`
 	} `yaml:"database"`
-	UploadsPath string `yaml:"uploadsPath"`
-	Storage     struct {
+	Uploads struct {
+		Persistence persistenceSpec `yaml:"persistence"`
+	} `yaml:"uploads"`
+	Storage struct {
 		S3 *directusS3Storage `yaml:"s3"`
 	} `yaml:"storage"`
 	Gateway struct {
@@ -148,8 +150,6 @@ func validateDirectusInstance(site *Site, instance directusInstanceManifest) err
 		"admin.email":                                   spec.Admin.Email,
 		"database.name":                                 spec.Database.Name,
 		"database.user":                                 spec.Database.User,
-		"database.storagePath":                          spec.Database.StoragePath,
-		"uploadsPath":                                   spec.UploadsPath,
 		"gateway.name":                                  spec.Gateway.Name,
 		"gateway.namespace":                             spec.Gateway.Namespace,
 		"gateway.httpSectionName":                       spec.Gateway.HTTPSectionName,
@@ -171,6 +171,14 @@ func validateDirectusInstance(site *Site, instance directusInstanceManifest) err
 		}
 		if strings.Contains(spec.AdminDomain, "://") || strings.Contains(spec.AdminDomain, "/") {
 			return fmt.Errorf("environment %s: DirectusInstance %s adminDomain must be a hostname, got %q", site.EnvironmentBundle.Path, name, spec.AdminDomain)
+		}
+	}
+	if err := validatePersistence(site, "DirectusInstance "+name+" database", spec.Namespace, spec.Database.Persistence); err != nil {
+		return err
+	}
+	if spec.Storage.S3 == nil || !spec.Storage.S3.Enabled {
+		if err := validatePersistence(site, "DirectusInstance "+name+" uploads", spec.Namespace, spec.Uploads.Persistence); err != nil {
+			return err
 		}
 	}
 	secretNames := []string{

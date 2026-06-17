@@ -36,8 +36,11 @@ func TestObservabilityStackSiteManifests(t *testing.T) {
 			if stack.Spec.VictoriaMetrics.Image == "" {
 				t.Fatal("ObservabilityStack victoriaMetrics.image is required")
 			}
-			if stack.Spec.VictoriaMetrics.StoragePath != "/var/lib/victoria-metrics" {
-				t.Fatalf("ObservabilityStack victoriaMetrics.storagePath = %q, want /var/lib/victoria-metrics", stack.Spec.VictoriaMetrics.StoragePath)
+			if stack.Spec.VictoriaMetrics.Persistence.ClaimName != "victoria-metrics-storage" {
+				t.Fatalf("ObservabilityStack victoriaMetrics.persistence.claimName = %q, want victoria-metrics-storage", stack.Spec.VictoriaMetrics.Persistence.ClaimName)
+			}
+			if stack.Spec.VictoriaMetrics.Persistence.VolumeName != "guardian-"+siteName+"-victoria-metrics" {
+				t.Fatalf("ObservabilityStack victoriaMetrics.persistence.volumeName = %q, want guardian-%s-victoria-metrics", stack.Spec.VictoriaMetrics.Persistence.VolumeName, siteName)
 			}
 			if stack.Spec.VictoriaMetrics.RetentionPeriod != "13" {
 				t.Fatalf("ObservabilityStack victoriaMetrics.retentionPeriod = %q, want 13", stack.Spec.VictoriaMetrics.RetentionPeriod)
@@ -65,8 +68,12 @@ func TestObservabilityStackPlatformRender(t *testing.T) {
 		"name: observability-stack-status",
 		"kind: Object",
 		"name: observability-stack-{{ $spec.namespace }}-victoria-metrics",
+		"name: observability-stack-{{ $spec.namespace }}-victoria-metrics-pvc",
+		"kind: PersistentVolumeClaim",
 		"image: {{ $spec.victoriaMetrics.image }}",
 		"- -retentionPeriod={{ $spec.victoriaMetrics.retentionPeriod }}",
+		"persistentVolumeClaim:",
+		"claimName: {{ $spec.victoriaMetrics.persistence.claimName }}",
 		"name: observability-stack-{{ $spec.namespace }}-victoria-metrics-service",
 		"victoriaMetricsURL",
 		"name: function-environment-configs",
@@ -94,7 +101,9 @@ func TestObservabilityStackEnvironmentBundleInstances(t *testing.T) {
 				"site: " + siteName,
 				"namespace: observability",
 				victoriaMetricsTestImage,
-				"storagePath: /var/lib/victoria-metrics",
+				"claimName: victoria-metrics-storage",
+				"storageClassName: guardian-local-retain",
+				"volumeName: guardian-" + siteName + "-victoria-metrics",
 				"retentionPeriod: \"13\"",
 				"memoryAllowedBytes: 256MiB",
 				"http: 8428",
