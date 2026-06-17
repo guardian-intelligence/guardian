@@ -1,0 +1,144 @@
+import type { SVGProps } from "react";
+
+// The wings path is the source-of-truth glyph for Guardian Intelligence.
+// Coordinates are deliberately preserved verbatim from the typographic playground
+// (logo-playground.html) — small adjustments here propagate to favicons, embosses,
+// chips, OG cards, and email signatures, so changes need brand sign-off.
+export const WINGS_PATH_D =
+  "M124.497 236.057L226.107 116.237L225.816 161.189C222.205 165.295 221.465 170.585 204.635 182.995C187.815 195.405 138.065 227.365 124.497 236.057ZM130.031 237.06C142.891 235.13 191.081 235.09 207.191 225.49C223.291 215.9 223.421 187.17 226.671 179.5C219.181 185.187 197.671 203.647 181.671 213.117C165.671 222.587 139.191 232.527 130.031 237.06Z";
+
+export const WINGS_TIGHT_VIEWBOX = "105 106 140 140";
+export const WINGS_PADDED_VIEWBOX = "30 31 292 292";
+// Glyph-hugging viewBox: the smallest box that contains the wings path exactly.
+// Derived from the extrema of WINGS_PATH_D (minX 124.497, minY 116.237, width
+// 102.174, height 120.823). Used by the Lockup so the SVG bottom coincides
+// with the lower wing's visual tip — wordmarks bottom-align against it without
+// the ~6% trim the canonical tight viewBox carries. Favicons, OG cards, email
+// signatures still use WINGS_TIGHT_VIEWBOX so the mark keeps its breathing
+// room on standalone surfaces.
+export const WINGS_CROPPED_VIEWBOX = "124.497 116.237 102.174 120.823";
+
+type SvgBase = Omit<SVGProps<SVGSVGElement>, "viewBox" | "xmlns" | "children">;
+
+export interface WingsArgentProps extends SvgBase {
+  readonly title?: string | undefined;
+  // Three viewBox modes:
+  //   tight (default)   — WINGS_TIGHT_VIEWBOX, the canonical breathing-room
+  //                       crop used by favicons, OG cards, email signatures.
+  //   cropped           — WINGS_CROPPED_VIEWBOX, glyph-hugging crop used when
+  //                       the bounding box must coincide with the wing tip
+  //                       (e.g. wordmark-tip alignment in standalone art).
+  //   padded            — WINGS_PADDED_VIEWBOX, the same 292×292 box chip and
+  //                       emboss render into, with no surrounding tile or
+  //                       disc. Lockup uses this so argent shares the chip's
+  //                       footprint and internal wing position — the chrome
+  //                       wordmark sits at the same x across Workshop /
+  //                       Letters / Newsroom even though Workshop draws no
+  //                       frame around the wings.
+  readonly viewBoxMode?: "tight" | "cropped" | "padded";
+  // Optional inner-mark scale around the wings' optical center (176, 177 in
+  // the 292-unit viewBox). Default 1.0. Used at chrome size (sm Lockup,
+  // padded mode) where the bare wings read ~10% smaller than the same
+  // pixel footprint inside chip/emboss — figure-ground compensation,
+  // since a framed mark borrows visual weight from its container while a
+  // bare mark on the canvas does not. Mirrors WingsEmboss's wingsScale,
+  // which goes the other way (0.92) to shrink wings inside the medallion.
+  readonly wingsScale?: number;
+}
+
+// Argent on Iron — the canonical mark when the canvas is already the wings'
+// ground (Iron, photography behind a scrim, in-product chrome). Tight viewBox
+// because the surrounding canvas does the work of giving the wings air.
+export function WingsArgent({
+  title,
+  viewBoxMode = "tight",
+  wingsScale = 1,
+  ...rest
+}: WingsArgentProps) {
+  const viewBox =
+    viewBoxMode === "cropped"
+      ? WINGS_CROPPED_VIEWBOX
+      : viewBoxMode === "padded"
+        ? WINGS_PADDED_VIEWBOX
+        : WINGS_TIGHT_VIEWBOX;
+  return (
+    <svg
+      viewBox={viewBox}
+      xmlns="http://www.w3.org/2000/svg"
+      role={title ? "img" : "presentation"}
+      aria-label={title}
+      aria-hidden={title ? undefined : true}
+      focusable="false"
+      {...rest}
+    >
+      {wingsScale === 1 ? (
+        <path fill="#FFFFFF" d={WINGS_PATH_D} />
+      ) : (
+        <g transform={`translate(176 177) scale(${wingsScale}) translate(-176 -177)`}>
+          <path fill="#FFFFFF" d={WINGS_PATH_D} />
+        </g>
+      )}
+    </svg>
+  );
+}
+
+export interface WingsEmbossProps extends SvgBase {
+  readonly title?: string | undefined;
+  // Optional inner-mark scale, applied around the disc center (176, 177)
+  // which coincides with the wings' optical center. Default 1.0. Used at
+  // chrome size (sm Lockup) where the wings read ~5–8% too large against
+  // the medallion at 22px because anti-aliased ink concentrates visual
+  // mass at small pixel counts; at md/lg the proportions read true.
+  readonly wingsScale?: number;
+}
+
+// Argent on Flare via a circular ink medallion — the broadcast treatment.
+// Used when the brand wants to be noticed: investor covers, billboards,
+// recruiting posters, signage. Reserved for surfaces with broadcast intent.
+export function WingsEmboss({ title, wingsScale = 1, ...rest }: WingsEmbossProps) {
+  return (
+    <svg
+      viewBox={WINGS_PADDED_VIEWBOX}
+      xmlns="http://www.w3.org/2000/svg"
+      role={title ? "img" : "presentation"}
+      aria-label={title}
+      aria-hidden={title ? undefined : true}
+      focusable="false"
+      {...rest}
+    >
+      <circle cx="176" cy="177" r="126" fill="#0B0B0B" />
+      {wingsScale === 1 ? (
+        <path fill="#FFFFFF" d={WINGS_PATH_D} />
+      ) : (
+        <g transform={`translate(176 177) scale(${wingsScale}) translate(-176 -177)`}>
+          <path fill="#FFFFFF" d={WINGS_PATH_D} />
+        </g>
+      )}
+    </svg>
+  );
+}
+
+export interface WingsChipProps extends SvgBase {
+  readonly title?: string | undefined;
+}
+
+// Argent on a rounded iron chip — the editorial / favicon / second-reference
+// treatment. Carries its own ground so the wings retain Argent on Paper, on
+// photography without scrim, and inside operating-system icon containers.
+// Coordinates (30.01, 31.08, 291.14) are the playground's; preserved verbatim.
+export function WingsChip({ title, ...rest }: WingsChipProps) {
+  return (
+    <svg
+      viewBox={WINGS_PADDED_VIEWBOX}
+      xmlns="http://www.w3.org/2000/svg"
+      role={title ? "img" : "presentation"}
+      aria-label={title}
+      aria-hidden={title ? undefined : true}
+      focusable="false"
+      {...rest}
+    >
+      <rect x="30.01" y="31.08" width="291.14" height="291.14" fill="#0E0E0E" rx="32" ry="32" />
+      <path fill="#FFFFFF" d={WINGS_PATH_D} />
+    </svg>
+  );
+}

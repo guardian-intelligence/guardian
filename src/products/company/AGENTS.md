@@ -34,11 +34,9 @@ Use this request path for public pages:
    but core page text, metadata, canonical URLs, and OG tags must already be in
    the streamed HTML.
 
-The current Go static service is a scaffold for the first public deployment. Do
-not deepen it into a second web framework. When TanStack Start lands, replace
-the static Go asset server with a Start server image while preserving the same
-Kubernetes envelope: `Deployment`, `Service`, Gateway routes, probes, metrics,
-and digest-pinned image rollout.
+The company site is now served by a TanStack Start/Nitro image. Keep it behind
+the same Kubernetes envelope: `Deployment`, `Service`, Gateway routes, probes,
+metrics, and digest-pinned image rollout.
 
 ## Directus Contract
 

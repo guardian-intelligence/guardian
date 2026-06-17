@@ -274,6 +274,10 @@ spec:
                             env:
                               - name: DOMAIN
                                 value: "{{ $spec.domain }}"
+                              - name: HOST
+                                value: "0.0.0.0"
+                              - name: PORT
+                                value: "{{ $spec.ports.http }}"
                               {{- if $appTLS }}
                               - name: ACME_EMAIL
                                 value: "{{ $spec.acmeEmail }}"
@@ -303,8 +307,10 @@ spec:
                               - name: https
                                 containerPort: {{ $spec.ports.https }}
                               {{- end }}
+                              {{- if ne $spec.ports.metrics $spec.ports.http }}
                               - name: metrics
                                 containerPort: {{ $spec.ports.metrics }}
+                              {{- end }}
                             resources:
                               requests:
                                 cpu: {{ $spec.cpuRequest }}

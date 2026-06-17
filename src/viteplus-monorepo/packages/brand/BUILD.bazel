@@ -1,0 +1,15 @@
+filegroup(
+    name = "package_manifest",
+    srcs = ["package.json"],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "sources",
+    srcs = glob([
+        "package.json",
+        "src/**/*",
+        "tsconfig.json",
+    ]),
+    visibility = ["//visibility:public"],
+)

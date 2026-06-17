@@ -33,9 +33,9 @@ Layer the site like this:
 | Release judge | release architecture M6 | design ratified | Reads artifact evidence and SLO gates, then advances channel pointers or rolls back. |
 
 The key rule is that `PublicHttpService` is the lift-out boundary. The current
-Go static site, the future TanStack Start/Nitro server, and any later renderer
-should fit behind the same envelope: `Deployment`, `Service`, Gateway routes,
-readiness, `/metrics`, and digest-pinned image rollout.
+TanStack Start/Nitro server and any later renderer should fit behind the same
+envelope: `Deployment`, `Service`, Gateway routes, readiness, `/metrics`, and
+digest-pinned image rollout.
 
 ## Crossplane reference model
 
@@ -187,8 +187,8 @@ Inputs are the product's desired identity and runtime contract: app name,
 namespace, digest-pinned image, domain, ports, health path, replicas, resource
 class, TLS mode, and SLO surface.
 
-This is the correct lift-out target for the current Go static company site and
-the future TanStack Start/Nitro server.
+This is the correct lift-out target for the TanStack Start/Nitro company site
+and any future renderer.
 
 ### `ObservabilityStack`
 
@@ -361,7 +361,7 @@ For the company site, the desired runtime objects are:
   owns redirects.
 - Pod labels:
   - `platform.guardian.dev/metrics-scrape: "true"`
-  - `platform.guardian.dev/metrics-port: "9090"`
+  - `platform.guardian.dev/metrics-port: "<spec.ports.metrics>"`
   - `platform.guardian.dev/slo-surface: public-http`
 
 The platform envelope should eventually set `RollingUpdate` with
@@ -427,7 +427,8 @@ and ClickHouse is the wide-event forensics plane.
 The concrete flow for public web services is:
 
 1. The Start/Nitro server exposes bounded Prometheus/OpenMetrics metrics on
-   its diagnostics port, currently `:9090`.
+   the metrics port declared by `CompanySite`. The first company-site
+   composition shares the HTTP listener on `:8080`.
 2. `PublicHttpService` labels opted-in pods with scrape metadata.
 3. OTel Collector discovers those pods through the `public-http` Kubernetes
    service-discovery scrape job.
