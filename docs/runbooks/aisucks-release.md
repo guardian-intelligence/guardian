@@ -18,8 +18,10 @@ Public OCI vending is a separate release target; see
 `docs/runbooks/public-release.md`. The npm SDK uses the OCI-first projection lane in
 `docs/runbooks/npm-sdk-release.md`.
 
-Sites: dev `206.223.228.101` (vs-dev-w0) · gamma `45.250.254.119` (gd-gamma-w0)
-· prod `67.213.115.113` (gd-prod-w0). CAUTION: `206.223.228.87` and
+Environments: dev `206.223.228.101` (`ash-bm-001`, `gi-ash-dev-platform-01`) ·
+gamma `45.250.254.119` (`ash-bm-002`, `gi-ash-gamma-platform-01`) · prod
+`67.213.115.113` (`ash-bm-003`, `gi-ash-prod-platform-01`). CAUTION:
+`206.223.228.87` and
 `206.223.228.99` are **verself's** gamma/prod boxes (the no-touch list in
 AGENTS.md) — never target them with anything in this runbook.
 
@@ -39,7 +41,7 @@ dev preview, but that is a drill/preview path, not the release mechanism:
 
 ```sh
 git checkout <branch>
-bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/sites/dev/bootstrap.yaml
+bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/hosts/ash-bm-001/host.yaml
 ```
 
 One preview at a time; converging main puts dev back. Do not grow product
@@ -79,7 +81,7 @@ the new schema, or step 5 (rollback) is a lie.
 ## 2. Converge gamma
 
 ```sh
-bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/sites/gamma/bootstrap.yaml
+bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/hosts/ash-bm-002/host.yaml
 ```
 
 Record the line `pushed registry.guardian.internal/aisucks@sha256:…` —
@@ -107,7 +109,7 @@ Same tag, same workspace, no commits in between:
 
 ```sh
 git describe --exact-match --tags   # expect: aisucks/v<N>
-bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/sites/prod/bootstrap.yaml
+bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/hosts/ash-bm-003/host.yaml
 ```
 
 **Assert the pushed aisucks digest is byte-identical to gamma's.** If it
@@ -119,7 +121,7 @@ artifact plus provenance for the same digest.
 
 ```sh
 git checkout aisucks/v<N-1>
-bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/sites/prod/bootstrap.yaml
+bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/hosts/ash-bm-003/host.yaml
 git checkout main
 ```
 

@@ -30,11 +30,11 @@ type component struct {
 	// Kustomize root, such as cert-manager. Keys are the seed-registry
 	// repository names.
 	images []componentImage
-	// enabled gates the component per site; nil converges on every site.
+	// enabled gates the component per host; nil converges on every host.
 	// A manifest-only component MUST be gated (TestComponentsTable pins
-	// this): with no image and no site gate there would be nothing
+	// this): with no image and no host gate there would be nothing
 	// deliberate about where its objects land.
-	enabled func(*Site) bool
+	enabled func(*Host) bool
 }
 
 type componentImage struct {
@@ -53,7 +53,7 @@ var components = []component{{
 }, {
 	name:          "cert-manager",
 	kustomization: "src/k8s/bootstrap/cert-manager/base",
-	enabled:       siteUsesPlatformTLS,
+	enabled:       hostUsesPlatformTLS,
 	images: []componentImage{{
 		name:   "cert-manager-cainjector",
 		layout: "_main/src/infrastructure-components/cert-manager/cainjector",
@@ -73,19 +73,19 @@ var components = []component{{
 }, {
 	name:          "provider-kubernetes",
 	kustomization: "src/k8s/bootstrap/provider-kubernetes/package",
-	enabled:       siteUsesCrossplane,
+	enabled:       hostUsesCrossplane,
 }, {
 	name:          "provider-kubernetes-config",
 	kustomization: "src/k8s/bootstrap/provider-kubernetes/config",
-	enabled:       siteUsesCrossplane,
+	enabled:       hostUsesCrossplane,
 }, {
 	name:          "guardian-platform",
 	kustomization: "src/crossplane/packages/guardian-platform",
-	enabled:       siteUsesCrossplane,
+	enabled:       hostUsesCrossplane,
 }, {
 	name:          "guardian-products",
 	kustomization: "src/crossplane/packages/guardian-products",
-	enabled:       siteUsesCrossplane,
+	enabled:       hostUsesCrossplane,
 }, {
 	name:     "aisucks",
 	layout:   "_main/src/products/aisucks/services/api/image",
@@ -101,7 +101,7 @@ var components = []component{{
 }, {
 	name:          "local-storage-bootstrap",
 	kustomization: "src/k8s/bootstrap/local-storage/base",
-	enabled:       siteUsesLocalStorage,
+	enabled:       hostUsesLocalStorage,
 }, {
 	name:     "directus",
 	layout:   "_main/src/infrastructure-components/directus/image",
@@ -132,16 +132,16 @@ var components = []component{{
 	// VictoriaMetrics owner) and before otel-collector: the collector's
 	// clickhouse exporter retries, but there is no reason to start the logs
 	// pipeline with its ledger behind. List order is apply order and no test
-	// pins this pair — this comment carries the invariant. Site-gated like
+	// pins this pair — this comment carries the invariant. Host-gated like
 	// gateway (the ledger ratchet: dev → gamma → prod); the otel-collector
-	// config patches branch on the same flag, so a non-ledger site's collector
+	// config patches branch on the same flag, so a non-ledger environment's collector
 	// stays byte-identical to the metrics-only spine. The otel schema is
 	// NOT applied here: docs/runbooks/ledger.md applies clickhouse/ddl/ by hand
 	// and the exporter runs create_schema: false.
 	name:          "clickhouse",
 	layout:        "_main/src/infrastructure-components/clickhouse/image",
 	kustomization: "src/k8s/reconciled/observability/clickhouse/base",
-	enabled:       func(s *Site) bool { return s.Clickhouse.Enabled },
+	enabled:       func(s *Host) bool { return s.Clickhouse.Enabled },
 }, {
 	name:          "otel-collector",
 	layout:        "_main/src/infrastructure-components/otel-collector/image",
@@ -181,26 +181,26 @@ var components = []component{{
 	name:     "zot",
 	layout:   "_main/src/infrastructure-components/zot/image",
 	pushOnly: true,
-	enabled:  siteUsesPlatformOCI,
+	enabled:  hostUsesPlatformOCI,
 }}
 
-func siteUsesEdgeGateway(s *Site) bool {
+func hostUsesEdgeGateway(s *Host) bool {
 	return s.Gateway.Enabled
 }
 
-func siteUsesCrossplane(*Site) bool {
+func hostUsesCrossplane(*Host) bool {
 	return true
 }
 
-func siteUsesLocalStorage(s *Site) bool {
+func hostUsesLocalStorage(s *Host) bool {
 	return s.Storage.ProductPool.Name != ""
 }
 
-func siteUsesPlatformTLS(s *Site) bool {
+func hostUsesPlatformTLS(s *Host) bool {
 	return s.OCI.Domain != "" || s.Company.Domain != ""
 }
 
-func siteUsesPlatformOCI(s *Site) bool {
+func hostUsesPlatformOCI(s *Host) bool {
 	return s.OCI.Domain != ""
 }
 

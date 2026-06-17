@@ -1,5 +1,5 @@
 // Command guardian is the controller-side bootstrap CLI. It turns a checked
-// out workspace plus bootstrap/environment YAML into a converged site:
+// out workspace plus host/environment YAML into a converged cluster:
 // provider reinstall into Talos, machine config, etcd bootstrap,
 // workspace-built OCI artifacts pushed through the in-cluster seed registry,
 // components applied.
@@ -28,12 +28,13 @@ const (
 )
 
 const usage = `usage:
-  guardian up [--restore <file|url> --sha256 <hex>] [bootstrap.yaml]
+  guardian up [--restore <file|url> --sha256 <hex>] [host.yaml]
                                      converge the node: machine config, etcd, seed registry, push artifacts, components;
                                      with --restore, force-restore OpenBao from the verified snapshot into a fresh vault
-  guardian down --yes [bootstrap.yaml]
+  guardian down --yes [host.yaml]
                                      wipe the node to Talos maintenance mode via talosctl reset
-  guardian config [bootstrap <path>] print config, or set the default bootstrap facts file
+  guardian config [host <path>]      print config, or set the default host facts file
+  guardian host list|inspect|use     inspect or select checked-in hosts
   guardian run <tool> [args...]      run a version-pinned tool (aspect, bazel, talosctl, kubectl, oras, cosign)
   guardian tools install|uninstall   manage tool symlinks pointing at this binary (--bin-dir, default ~/.local/bin)
   guardian version                   print pinned component versions`
@@ -60,6 +61,8 @@ func main() {
 		err = runDown(os.Args[2:])
 	case "config":
 		err = runConfigCmd(os.Args[2:])
+	case "host":
+		err = runHostCmd(os.Args[2:])
 	case "run":
 		err = runRunCmd(os.Args[2:])
 	case "tools":

@@ -1,10 +1,10 @@
-# Runbook: the observability ledger (per-site ClickHouse) bring-up
+# Runbook: the observability ledger (per-environment ClickHouse) bring-up
 
-Brings up the per-site ledger — ClickHouse plus the otel-collector's logs
-tee (filelog container logs + k8sobjects k8s Events) — on a site whose
+Brings up the per-environment ledger — ClickHouse plus the otel-collector's logs
+tee (filelog container logs + k8sobjects k8s Events) — on an environment whose
 environment bundle has `ObservabilityStack.spec.clickhouse.enabled: true`. Customer-grade: every step is a
-command against the real site, in order, with its verification. The ratchet
-is dev → gamma → prod; never start a site before the previous one's verify
+command against the real environment, in order, with its verification. The ratchet
+is dev → gamma → prod; never start an environment before the previous one's verify
 section passes.
 
 Scope of the current slice (roadmap M5, first two sub-items): container
@@ -34,7 +34,7 @@ would split truth between Kubernetes and OpenBao and would be lost on a
 wipe/restore.
 
 ```sh
-bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/sites/<site>/bootstrap.yaml
+bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/hosts/<host>/host.yaml
 ```
 
 Paging hygiene: the converge restarts the collector (`Recreate` strategy) —

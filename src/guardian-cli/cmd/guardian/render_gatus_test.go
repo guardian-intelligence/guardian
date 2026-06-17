@@ -24,7 +24,7 @@ func TestGatusProbeAlias(t *testing.T) {
 	const image = "registry.guardian.internal/gatus@sha256:deadbeef"
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
-			site := loadTestSite(t, siteName)
+			site := loadTestHost(t, siteName)
 			rendered, err := buildComponentKustomization(kubectl, c, map[string]string{"gatus": image}, site)
 			if err != nil {
 				t.Fatal(err)

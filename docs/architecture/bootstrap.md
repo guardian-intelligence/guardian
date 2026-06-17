@@ -1,6 +1,6 @@
 # From-zero bootstrap
 
-A site converges from a wiped machine to a healthy control plane through
+A host converges from a wiped machine to a healthy control plane through
 three layers, each owned by an existing, battle-tested supervisor. There is
 no custom resident daemon: `guardian` is a controller-side CLI that injects
 inputs and watches convergence.
@@ -9,13 +9,13 @@ inputs and watches convergence.
 
 **Layer 0 — host.** Talos Linux. The OS is an immutable A/B image produced by
 the Talos Image Factory from a checked-in schematic
-(`src/sites/<site>/talos/schematic.yaml`). The schematic ID plus the Talos
+(`src/hosts/<host>/talos/schematic.yaml`). The schematic ID plus the Talos
 version is a content-addressed description of the entire host. `machined`
 supervises the kubelet; the kubelet supervises the control plane via static
 pods; the control plane supervises everything above it. Host configuration is
 one declarative machine config applied over the Talos API
-(`talosctl apply-config`), generated from per-site patches under
-`src/sites/<site>/talos/patches/`.
+(`talosctl apply-config`), generated from per-host patches under
+`src/hosts/<host>/talos/patches/`.
 
 **Layer 1 — secrets.** Talos owns Kubernetes Secret encryption-at-rest via
 the generated `cluster.secretboxEncryptionSecret`; Guardian must not add a
@@ -37,39 +37,39 @@ substrate, but it must not become the runtime deployment engine.
 
 ## guardian CLI
 
-`guardian` owns the controller-side, human-initiated steps. Each site has a
-checked-in `bootstrap.yaml` (`src/sites/<site>/bootstrap.yaml`) naming the
+`guardian` owns the controller-side, human-initiated steps. Each host has a
+checked-in `host.yaml` (`src/hosts/<host>/host.yaml`) naming the
 node, its static addressing facts, and the Talos schematic and patches.
 Post-Kubernetes desired state lives separately in
-`src/crossplane/environments/<site>/environment.yaml` as an
-`EnvironmentConfig` plus any site XR instances. The bootstrap surface is two
+`src/environments/<environment>/environment.yaml` as an
+`EnvironmentConfig` plus any environment XR instances. The bootstrap surface is two
 verbs plus operator config: run
-`guardian config bootstrap src/sites/dev/bootstrap.yaml` once (the path is
+`guardian config host src/hosts/ash-bm-001/host.yaml` once (the path is
 stored absolute in `${XDG_CONFIG_HOME:-~/.config}/guardian/config.yaml`), then
 a drill is `guardian down --yes && guardian up`. Both verbs also accept an
-explicit `<bootstrap.yaml>` positional argument, which overrides the configured
-bootstrap path. `guardian config` with no arguments prints the config file path
-and contents. Run both verbs from the repo root: only the configured bootstrap
-path is stored absolute; the paths inside `bootstrap.yaml` and the Crossplane
+explicit `<host.yaml>` positional argument, which overrides the configured
+host path. `guardian config` with no arguments prints the config file path
+and contents. Run both verbs from the repo root: only the configured host
+path is stored absolute; the paths inside `host.yaml` and the Crossplane
 environment bag are repo-root relative.
 
-1. `guardian down --yes [bootstrap.yaml]` takes the node to Talos maintenance
+1. `guardian down --yes [host.yaml]` takes the node to Talos maintenance
    mode with a wiped system disk, from whichever state it is in. A node
    running configured Talos is reset over its authenticated API
    (`talosctl reset`, non-graceful because a single-node etcd cannot leave
    its own cluster). A node running any other Linux is kexec'd into the
    Talos maintenance image over SSH: the node downloads the factory's boot
    assets directly (its datacenter route to the factory is the one that
-   matters), guardian appends static `ip=` addressing from `bootstrap.yaml`
-   to the pinned metal command line (sites have no DHCP), loads with
+   matters), guardian appends static `ip=` addressing from `host.yaml`
+   to the pinned metal command line (hosts have no DHCP), loads with
    kexec-tools, and `systemctl kexec`.
    SSH authentication is the caller's ambient setup; guardian never holds
    credentials. No provider API is involved; provisioning compute is outside
    guardian's scope. The `--yes` acknowledgement is required because this
    destroys everything on the node.
-2. `guardian up [bootstrap.yaml]` converges host and bootstrap substrate from
+2. `guardian up [host.yaml]` converges host and bootstrap substrate from
    runtime truth. It generates or
-   reuses the site's Talos secrets bundle (under
+   reuses the cluster's Talos secrets bundle (under
    `${XDG_STATE_HOME:-~/.local/state}/guardian/<cluster>/`, never in the
    repo), including Talos's `secretboxEncryptionSecret` for Kubernetes
    Secret encryption-at-rest. It regenerates machine config from the pinned
@@ -82,8 +82,8 @@ environment bag are repo-root relative.
    an install target even when two identical NVMes re-enumerate. After the
    seed registry is populated, `up` runs a one-shot privileged ZFS initializer
    that creates or imports the checked-in product-workload pool from
-   `bootstrap.yaml` and creates the local PV directories declared by the
-   site's `StoragePlane`. Product workload pools mount under `/var/mnt`
+   `host.yaml` and creates the local PV directories declared by the
+   assigned environment's `StoragePlane`. Product workload pools mount under `/var/mnt`
    because `guardian up` binds that Talos storage root into kubelet with
    shared propagation before local PVs are scheduled. Both paths end with the
    seed registry up, bootstrap artifacts pushed into it, and the secrets
@@ -91,7 +91,7 @@ environment bag are repo-root relative.
    restored or fresh-initialized/unsealed; `kv/` and Kubernetes auth are
    configured; Crossplane, provider-kubernetes, pinned functions, Flux, and
    External Secrets Operator are installed or made reachable. From there the
-   cluster reconcilers own site desired state. `guardian up` may seed the
+   cluster reconcilers own environment desired state. `guardian up` may seed the
    initial reconciler inputs and wait for required readiness, but it does not
    choose product versions, evaluate SLO policy, promote channels, or own
    runtime manifests. Blocking projections must have ready ExternalSecrets and
@@ -121,7 +121,7 @@ registry is transport for content-addressed bytes the build already produced.
   Bazel-built OCI layouts from its runfiles and pushes them by digest with
   go-containerregistry. No docker daemon, no credentials beyond the Talos PKI.
 - Pulls happen through a Talos registry mirror
-  (`src/sites/<site>/talos/patches/registry-mirror.yaml`): manifests
+  (`src/hosts/<host>/talos/patches/registry-mirror.yaml`): manifests
   reference `registry.guardian.internal/<artifact>@<built digest>`, a
   virtual name containerd resolves to the seed registry's ClusterIP from the
   host netns. Manifests never name a real registry, so the transport can

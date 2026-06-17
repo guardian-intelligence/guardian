@@ -223,7 +223,7 @@ func TestRestoreSnapshotDance(t *testing.T) {
 		t.Fatalf("server received %q, want %q", b.gotSnap, snap)
 	}
 	// Restore swapped the barrier: the vault is sealed under the snapshot's
-	// keyring, awaiting the site's original shares.
+	// keyring, awaiting the cluster's original shares.
 	if st, err := baoHealth(addr); err != nil || st != baoSealed {
 		t.Fatalf("post-restore: got %s err %v, want %s", st, err, baoSealed)
 	}

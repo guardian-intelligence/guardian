@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-// runUp converges the site node from whatever state it is in: maintenance
+// runUp converges the host from whatever state it is in: maintenance
 // mode gets machine config applied and etcd bootstrapped; a configured node
 // gets the regenerated config re-applied. Both paths end with the seed
 // registry up, every workspace-built component pushed into it by digest, and
@@ -36,7 +36,7 @@ func runUp(args []string) error {
 	if restoring != (*wantSHA != "") {
 		return fmt.Errorf("up: %w: --restore and --sha256 must be given together", errUsage)
 	}
-	site, sitePath, err := resolveSite(fs.Args())
+	site, hostPath, err := resolveHost(fs.Args())
 	if err != nil {
 		return fmt.Errorf("up: %w", err)
 	}
@@ -72,7 +72,7 @@ func runUp(args []string) error {
 		return err
 	}
 
-	// Talos cluster secrets are generated once per site and reused across
+	// Talos cluster secrets are generated once per cluster and reused across
 	// wipe drills so talosconfig and cluster identity stay stable.
 	secrets := filepath.Join(state, "secrets.yaml")
 	if _, err := os.Stat(secrets); os.IsNotExist(err) {
@@ -102,7 +102,7 @@ func runUp(args []string) error {
 	// the default install.disk path, so the ZFS disk is never a target.
 	genArgs = append(genArgs, "--config-patch",
 		fmt.Sprintf(`{"machine":{"install":{"diskSelector":{"serial":%q}}}}`, site.Node.InstallDiskSerial))
-	// The site has no DHCP: static addressing comes from bootstrap.yaml, the same
+	// The host has no DHCP: static addressing comes from host.yaml, the same
 	// facts `down` passes to the maintenance kernel. Without this patch the
 	// installed node boots unreachable. The link is selected by MAC
 	// (deviceSelector), never by name: a dangling name fails silently — the
@@ -111,7 +111,7 @@ func runUp(args []string) error {
 	genArgs = append(genArgs, "--config-patch",
 		fmt.Sprintf(`{"machine":{"network":{"hostname":%q,"interfaces":[{"deviceSelector":{"hardwareAddr":%q},"addresses":["%s/%d"],"routes":[{"network":"0.0.0.0/0","gateway":%q}]}]}}}`,
 			site.Node.Hostname, site.Node.InterfaceMac, site.Node.Address, site.Node.PrefixLength, site.Node.Gateway))
-	if siteUsesLocalStorage(site) {
+	if hostUsesLocalStorage(site) {
 		genArgs = append(genArgs, "--config-patch",
 			fmt.Sprintf(`{"machine":{"kubelet":{"extraMounts":[{"destination":%q,"type":"bind","source":%q,"options":["rbind","rshared","rw"]}]}}}`,
 				talosKubeletStorageRoot, talosKubeletStorageRoot))
@@ -168,7 +168,7 @@ func runUp(args []string) error {
 		// the intended two-NVMe box and not some other host.
 		for label, serial := range map[string]string{"install": site.Node.InstallDiskSerial, "zfs": site.Node.ZFSDiskSerial} {
 			if !strings.Contains(disks, serial) {
-				return fmt.Errorf("up: %s disk serial %s not in node disk inventory above; fix node in %s", label, serial, sitePath)
+				return fmt.Errorf("up: %s disk serial %s not in node disk inventory above; fix node in %s", label, serial, hostPath)
 			}
 		}
 		// Same bar for the NIC: the declared MAC must exist on the node, or
@@ -180,7 +180,7 @@ func runUp(args []string) error {
 		}
 		if !strings.Contains(strings.ToLower(links), strings.ToLower(site.Node.InterfaceMac)) {
 			fmt.Fprint(os.Stderr, links)
-			return fmt.Errorf("up: interface MAC %s not in node link inventory above; fix node in %s", site.Node.InterfaceMac, sitePath)
+			return fmt.Errorf("up: interface MAC %s not in node link inventory above; fix node in %s", site.Node.InterfaceMac, hostPath)
 		}
 		if err := runTool(talosctl, "apply-config", "--insecure", "-n", node, "-f", controlplane); err != nil {
 			return err
@@ -247,7 +247,7 @@ func runUp(args []string) error {
 	digests := make(map[string]string, len(components))
 	err = withPortForward(kubectl, kubeconfig, "seed-registry", "deploy/seed-registry", pushLocalPort, 5000, 2*time.Minute, func(endpoint string) error {
 		for _, c := range components {
-			// Manifest-only components have nothing to push; site-gated
+			// Manifest-only components have nothing to push; host-gated
 			// components push nothing for sites they do not converge on.
 			if len(c.imageLayouts()) == 0 || (c.enabled != nil && !c.enabled(site)) {
 				continue
@@ -305,7 +305,7 @@ func runUp(args []string) error {
 	if err := waitCrossplane(kubectl, kubeconfig); err != nil {
 		return err
 	}
-	if siteUsesPlatformTLS(site) {
+	if hostUsesPlatformTLS(site) {
 		if err := apply("cert-manager"); err != nil {
 			return err
 		}
@@ -382,7 +382,7 @@ func lookupComponent(name string) (component, bool) {
 	return component{}, false
 }
 
-func applyEnvironmentBundle(kubectl, kubeconfig string, site *Site, images map[string]string) error {
+func applyEnvironmentBundle(kubectl, kubeconfig string, site *Host, images map[string]string) error {
 	if len(bytes.TrimSpace(site.EnvironmentBundle.Raw)) == 0 {
 		return fmt.Errorf("environment bundle %s is empty", site.EnvironmentBundle.Path)
 	}
@@ -414,9 +414,9 @@ func resolveRepoInputPath(path string) (string, error) {
 	return runfile, nil
 }
 
-func applyComponent(kubectl, kubeconfig string, c component, images map[string]string, site *Site) error {
+func applyComponent(kubectl, kubeconfig string, c component, images map[string]string, site *Host) error {
 	if c.enabled != nil && !c.enabled(site) {
-		fmt.Fprintf(os.Stderr, "skipping %s: disabled for this site\n", c.name)
+		fmt.Fprintf(os.Stderr, "skipping %s: disabled for this host\n", c.name)
 		return nil
 	}
 	if c.pushOnly {
@@ -435,7 +435,7 @@ func applyComponent(kubectl, kubeconfig string, c component, images map[string]s
 	// A component may guard its entire manifest on environment values; kubectl
 	// rejects empty input, so an empty render means "not deployed here".
 	if len(bytes.TrimSpace(manifest)) == 0 {
-		fmt.Fprintf(os.Stderr, "skipping %s: manifest renders empty for this site\n", c.name)
+		fmt.Fprintf(os.Stderr, "skipping %s: manifest renders empty for this host\n", c.name)
 		return nil
 	}
 	applyArgs := []string{"--kubeconfig", kubeconfig, "apply", "-f", "-"}
@@ -466,15 +466,15 @@ func waitOpenBao(kubectl, kubeconfig string) error {
 	return runTool(kubectl, "--kubeconfig", kubeconfig, "-n", "openbao", "rollout", "status", "statefulset/openbao", "--timeout=10m")
 }
 
-func waitLocalStorageBootstrap(kubectl, kubeconfig string, site *Site) error {
-	if !siteUsesLocalStorage(site) {
+func waitLocalStorageBootstrap(kubectl, kubeconfig string, site *Host) error {
+	if !hostUsesLocalStorage(site) {
 		return nil
 	}
 	return runTool(kubectl, "--kubeconfig", kubeconfig, "-n", "guardian-storage", "wait", "--for=condition=complete", "job/zfs-pool-init", "--timeout=5m")
 }
 
-func restartKubeletAfterLocalStorageBootstrap(talosctl string, talosArgs func(...string) []string, kubectl, kubeconfig string, site *Site) error {
-	if !siteUsesLocalStorage(site) {
+func restartKubeletAfterLocalStorageBootstrap(talosctl string, talosArgs func(...string) []string, kubectl, kubeconfig string, site *Host) error {
+	if !hostUsesLocalStorage(site) {
 		return nil
 	}
 	fmt.Fprintln(os.Stderr, "restarting kubelet so local ZFS mounts are visible to kubelet")
@@ -493,8 +493,8 @@ func restartKubeletAfterLocalStorageBootstrap(talosctl string, talosArgs func(..
 	})
 }
 
-func resetLocalStorageBootstrap(kubectl, kubeconfig string, site *Site) error {
-	if !siteUsesLocalStorage(site) {
+func resetLocalStorageBootstrap(kubectl, kubeconfig string, site *Host) error {
+	if !hostUsesLocalStorage(site) {
 		return nil
 	}
 	if _, err := outputTool(kubectl, "--kubeconfig", kubeconfig, "get", "namespace", "guardian-storage"); err != nil {
@@ -601,8 +601,8 @@ func waitGuardianProducts(kubectl, kubeconfig string) error {
 	return nil
 }
 
-func waitEdgeGateway(kubectl, kubeconfig string, site *Site) error {
-	if !siteUsesEdgeGateway(site) {
+func waitEdgeGateway(kubectl, kubeconfig string, site *Host) error {
+	if !hostUsesEdgeGateway(site) {
 		return nil
 	}
 	objects := []string{
@@ -610,7 +610,7 @@ func waitEdgeGateway(kubectl, kubeconfig string, site *Site) error {
 		"edge-gateway-class",
 		"edge-gateway",
 	}
-	if siteUsesPlatformTLS(site) {
+	if hostUsesPlatformTLS(site) {
 		objects = append(objects, "edge-gateway-clusterissuer")
 		certs, err := edgeGatewayCertificateObjectNames(site)
 		if err != nil {
@@ -629,7 +629,7 @@ func waitEdgeGateway(kubectl, kubeconfig string, site *Site) error {
 			return err
 		}
 	}
-	if siteUsesPlatformTLS(site) {
+	if hostUsesPlatformTLS(site) {
 		certs, err := edgeGatewayCertificateTargets(site)
 		if err != nil {
 			return err
@@ -695,7 +695,7 @@ func verifyPublicTLSName(dnsName string) error {
 	return conn.Close()
 }
 
-func reconcileOpenBao(kubectl, kubeconfig string, site *Site, restoring bool, restoreRef, wantSHA, snapPath string) error {
+func reconcileOpenBao(kubectl, kubeconfig string, site *Host, restoring bool, restoreRef, wantSHA, snapPath string) error {
 	// Probe OpenBao's seal/init state over its HTTP API through a port-forward
 	// (the bao CLI hits these same endpoints) and dispatch on probed truth
 	// crossed with operator intent — never on recorded state, the same
@@ -771,7 +771,7 @@ func reconcileOpenBao(kubectl, kubeconfig string, site *Site, restoring bool, re
 	})
 }
 
-// emitConvergedEvent records one core/v1 Event per converge on the site's
+// emitConvergedEvent records one core/v1 Event per converge on the host's
 // Node, message one name@digest line per component pushed this run. Node
 // rather than per-workload involvedObject: plumbing the kind (Deployment vs
 // StatefulSet) per component is not worth it when describe-node shows the
@@ -781,7 +781,7 @@ func emitConvergedEvent(kubectl, kubeconfig, nodeName string, digests map[string
 	lines := make([]string, 0, len(components))
 	for _, c := range components {
 		// The event documents image digests pushed this run; manifest-only
-		// and site-disabled components pushed nothing and are omitted.
+		// and disabled components pushed nothing and are omitted.
 		if digests[c.name] == "" {
 			continue
 		}

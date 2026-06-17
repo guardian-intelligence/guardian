@@ -38,9 +38,9 @@ type edgeGatewayTLSManifest struct {
 			DNS01CloudflareSecretName string `yaml:"dns01CloudflareSecretName"`
 		} `yaml:"acme"`
 		Certificates []struct {
-			Name       string `yaml:"name"`
-			Namespace  string `yaml:"namespace"`
-			SecretName string `yaml:"secretName"`
+			Name       string   `yaml:"name"`
+			Namespace  string   `yaml:"namespace"`
+			SecretName string   `yaml:"secretName"`
 			DNSNames   []string `yaml:"dnsNames"`
 		} `yaml:"certificates"`
 	} `yaml:"spec"`
@@ -60,8 +60,8 @@ type kubeSecretBackup struct {
 	Data      map[string]string `json:"data,omitempty"`
 }
 
-func backupPlatformTLSSecrets(kubectl, kubeconfig, state string, site *Site) error {
-	if !siteUsesPlatformTLS(site) {
+func backupPlatformTLSSecrets(kubectl, kubeconfig, state string, site *Host) error {
+	if !hostUsesPlatformTLS(site) {
 		return nil
 	}
 	refs, err := platformTLSSurvivalSecretRefs(site)
@@ -90,8 +90,8 @@ func backupPlatformTLSSecrets(kubectl, kubeconfig, state string, site *Site) err
 	return nil
 }
 
-func restorePlatformTLSSecrets(kubectl, kubeconfig, state string, site *Site) error {
-	if !siteUsesPlatformTLS(site) {
+func restorePlatformTLSSecrets(kubectl, kubeconfig, state string, site *Host) error {
+	if !hostUsesPlatformTLS(site) {
 		return nil
 	}
 	refs, err := platformTLSSurvivalSecretRefs(site)
@@ -126,7 +126,7 @@ func restorePlatformTLSSecrets(kubectl, kubeconfig, state string, site *Site) er
 	return nil
 }
 
-func platformTLSSurvivalSecretRefs(site *Site) ([]platformTLSSecretRef, error) {
+func platformTLSSurvivalSecretRefs(site *Host) ([]platformTLSSecretRef, error) {
 	refs := map[platformTLSSecretRef]struct{}{}
 	dec := yaml.NewDecoder(bytes.NewReader(site.EnvironmentBundle.Raw))
 	for {
@@ -166,7 +166,7 @@ func platformTLSSurvivalSecretRefs(site *Site) ([]platformTLSSecretRef, error) {
 	return out, nil
 }
 
-func edgeGatewayCertificateObjectNames(site *Site) ([]string, error) {
+func edgeGatewayCertificateObjectNames(site *Host) ([]string, error) {
 	var out []string
 	dec := yaml.NewDecoder(bytes.NewReader(site.EnvironmentBundle.Raw))
 	for {
@@ -191,7 +191,7 @@ func edgeGatewayCertificateObjectNames(site *Site) ([]string, error) {
 	return out, nil
 }
 
-func edgeGatewayCertificateRefs(site *Site) ([]edgeGatewayCertificateRef, error) {
+func edgeGatewayCertificateRefs(site *Host) ([]edgeGatewayCertificateRef, error) {
 	refs := map[edgeGatewayCertificateRef]struct{}{}
 	dec := yaml.NewDecoder(bytes.NewReader(site.EnvironmentBundle.Raw))
 	for {
@@ -225,7 +225,7 @@ func edgeGatewayCertificateRefs(site *Site) ([]edgeGatewayCertificateRef, error)
 	return out, nil
 }
 
-func edgeGatewayCertificateTargets(site *Site) ([]edgeGatewayCertificateTarget, error) {
+func edgeGatewayCertificateTargets(site *Host) ([]edgeGatewayCertificateTarget, error) {
 	targets := map[edgeGatewayCertificateRef]edgeGatewayCertificateTarget{}
 	dec := yaml.NewDecoder(bytes.NewReader(site.EnvironmentBundle.Raw))
 	for {

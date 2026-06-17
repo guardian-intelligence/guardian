@@ -88,7 +88,7 @@ Site configuration is split across pre-Kubernetes bootstrap facts and
 post-Kubernetes desired state. Crossplane can own only the second group because
 it runs after Kubernetes exists.
 
-`bootstrap.yaml` is consumed by `guardian up` before the API server exists. It
+`host.yaml` is consumed by `guardian up` before the API server exists. It
 contains physical facts that must never be copied across boxes: MAC addresses,
 disk serials, gateways, hostnames, endpoints, and Talos patch lists.
 
@@ -103,7 +103,7 @@ The environment bag is post-bootstrap desired state for a site. It contains:
 
 `guardian up` owns the host/bootstrap sequence:
 
-1. Read `bootstrap.yaml`.
+1. Read `host.yaml`.
 2. Generate/apply Talos machine config.
 3. Ensure the seed registry, OpenBao, Crossplane, provider-kubernetes, and
    pinned composition functions are installed.
@@ -339,7 +339,7 @@ Crossplane is:
 
 For Guardian, the Bazel package graph is the monorepo boundary of record.
 Keep language-specific packages near their product code, keep Crossplane APIs
-under `src/crossplane/packages`, keep bootstrap facts under `src/sites`, and
+under `src/crossplane/packages`, keep bootstrap facts under `src/hosts`, and
 keep generated manifests as build artifacts unless an applied artifact must be
 audited in git.
 

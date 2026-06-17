@@ -36,7 +36,7 @@ type observabilityStackSpec struct {
 	} `yaml:"clickhouse"`
 }
 
-func observabilityStacks(site *Site) ([]observabilityStackManifest, error) {
+func observabilityStacks(site *Host) ([]observabilityStackManifest, error) {
 	var out []observabilityStackManifest
 	if err := decodeEnvironmentDocuments(site.EnvironmentBundle.Raw, site.EnvironmentBundle.Path, "ObservabilityStack", func(node *yaml.Node) error {
 		var doc observabilityStackManifest
@@ -54,7 +54,7 @@ func observabilityStacks(site *Site) ([]observabilityStackManifest, error) {
 	return out, nil
 }
 
-func validateObservabilityStacks(site *Site, stacks []observabilityStackManifest) error {
+func validateObservabilityStacks(site *Host, stacks []observabilityStackManifest) error {
 	if len(stacks) != 1 {
 		return fmt.Errorf("environment %s: exactly one ObservabilityStack is required, found %d", site.EnvironmentBundle.Path, len(stacks))
 	}
@@ -66,7 +66,7 @@ func validateObservabilityStacks(site *Site, stacks []observabilityStackManifest
 	return nil
 }
 
-func validateObservabilityStack(site *Site, stack observabilityStackManifest) error {
+func validateObservabilityStack(site *Host, stack observabilityStackManifest) error {
 	name := stack.Metadata.Name
 	spec := stack.Spec
 	if name == "" {

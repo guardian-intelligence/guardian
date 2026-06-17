@@ -1,7 +1,14 @@
-# Gamma bootstrap facts consumed before Kubernetes exists. Paths are repo-root
+# Gamma host facts consumed before Kubernetes exists. Paths are repo-root
 # relative; run guardian from the repo root. Box: Latitude sv_nPRbajqEB5koM
-# (gd-gamma-w0, f4.metal.small, Ashburn), provisioned 2026-06-11.
-site: gamma
+# (f4.metal.small, Ashburn), provisioned 2026-06-11.
+host: ash-bm-002
+environment: gamma
+
+provider:
+  name: latitude
+  serverId: sv_nPRbajqEB5koM
+  metro: ash
+  plan: f4.metal.small
 
 cluster:
   name: guardian-gamma
@@ -9,7 +16,7 @@ cluster:
 
 node:
   address: 45.250.254.119
-  hostname: gd-gamma-w0
+  hostname: gi-ash-gamma-platform-01
   # Latitude assigns the address statically (no DHCP): /31 point-to-point
   # with the gateway on the paired address.
   prefixLength: 31
@@ -30,17 +37,17 @@ storage:
       mountpoint: /var/mnt/guardian
 
 talos:
-  schematic: src/sites/gamma/talos/schematic.yaml
+  schematic: src/hosts/ash-bm-002/talos/schematic.yaml
   patches:
-    - src/sites/gamma/talos/patches/single-node.yaml
-    - src/sites/gamma/talos/patches/registry-mirror.yaml
-    - src/sites/gamma/talos/patches/zfs-module.yaml
-    - src/sites/gamma/talos/patches/cni-none.yaml
+    - src/hosts/ash-bm-002/talos/patches/single-node.yaml
+    - src/hosts/ash-bm-002/talos/patches/registry-mirror.yaml
+    - src/hosts/ash-bm-002/talos/patches/zfs-module.yaml
+    - src/hosts/ash-bm-002/talos/patches/cni-none.yaml
     # Gateway API CRDs MUST stay listed above cilium: list order is
     # inlineManifests order, and the CRDs have to exist before the Cilium
     # render that watches them.
     - src/infrastructure-components/cilium/talos/gateway-api-crds-inline.yaml
-    # Shared generated render, deliberately not copied per-site: one Cilium
+    # Shared generated render, deliberately not copied per host: one Cilium
     # version across the fleet, one Bazel target to update on upgrade.
     - src/infrastructure-components/cilium/talos/cilium-inline.yaml
-    - src/sites/gamma/talos/patches/ingress-firewall.yaml
+    - src/hosts/ash-bm-002/talos/patches/ingress-firewall.yaml

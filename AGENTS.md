@@ -18,7 +18,7 @@ We're maximizing for safe operations (disaster-recovery from wiped box + offsite
 After doing some financial calculation I also realize I need to make provisioning N workload nodes (rs4.metal.xlarge CPU: AMD 9554P, 64 Cores @ 3.1 GHz / RAM: 1.5 TB / Storage: 2 x 480 GB NVME + 4 x 8 TB NVME / NIC: 2 x 100 Gbps) a first class concept as well, otherwise we don't break even.
 
 Important context:
-- Source: `src/crossplane/`, `src/sites/`.
+- Source: `src/hosts/`, `src/environments/`, `src/crossplane/`.
 - All dependencies version/commit pinned. Nothing during runtime, dev time, test time, or build time should require external non-version-pinned tooling, or shell out to binaries outside this repo or its build artifacts.
 - The `guardian` CLI is not a dumping ground for generic functionality. Its sole purpose is to manage host come-up.
 - Dev tools: `aspect`. Run `aspect tidy` to format the codebase.
@@ -47,6 +47,15 @@ Service architecture:
 - Guardian legitimately runs smaller/more services than a normal app: it's a platform of control loops (one per capability), and SPIRE (identity) + Protobuf/Connect (contracts/audit) + Bazel (hermetic builds) pre-pay the per-service tax that usually makes microservices too expensive. Cheaper, not free — every service is still its own SLO, on-call surface, and data-ownership decision.
 - Webhook handlers (Stripe, GitHub) are dumb edge adapters, not services: verify signature, persist the raw event idempotently (redelivery happens), ack 200 fast, hand off for processing. Default to a route in the app; break into its own pod only to keep ingestion alive across an app deploy, and even then the processing logic does not move out with it.
 
+Software shape doctrine:
+
+- Guardian distinguishes distributed software from deployed software. Distributed software runs on the user's device; deployed software runs on Guardian-owned capacity.
+- Releasing distributed software is a one-way door: after a CLI, SDK, crate, wheel, or desktop/mobile artifact is public, rollback means publishing a new artifact and helping consumers move. Its gates must get stricter as it approaches stable.
+- Deployed software can be rolled back by moving a pointer or converging an older digest, but Guardian pays for every second it runs and owns the blast radius of its data access.
+- Distributed software can maliciously hijack the user's device. Deployed software can hijack Guardian infrastructure and the data Guardian holds for users. Both require provenance, but the risk surface and release gates differ.
+- Distributed software should be small, fast, portable, easy to verify, and boring to install. Deployed software primarily needs to be fast, observable, reversible, and cheap to operate.
+- A software company is modeled as a source-controlled instruction set plus a computation substrate that organizes information into feedback loops: contracts, control loops, state, release evidence, telemetry, and policy. The codebase starts the loop; the substrate makes it useful and accountable.
+
 Release doctrine:
 
 - A release is a typed operation over a release target, not a workflow file. The release target is the tuple of distributable, source commit, package/ecosystem version or coordinate, publisher, platform, build flavor, and channel intent.
@@ -60,18 +69,30 @@ Release doctrine:
 - Gate results are first-class artifacts. Synthetic checks and SLO evaluation should emit machine-readable gate-result records; signing them as in-toto/SLSA-style attestations is the natural next step, not a bespoke release ledger.
 - Distribution/admission services, when present, admit immutable digests, verify standard OCI/in-toto/SLSA evidence, gate public reads, and move channel pointers. They do not build artifacts and they do not know package-specific Bazel labels.
 - API operation policy should live with the operation contract where practical: auth, audit level, risk tier, request body limit, rate limit, and idempotency requirements should be generated into Connect/Go interceptors or equivalent boring enforcement code.
+- Do not hand-roll a release promotion product. Target Kargo for distributable promotion graphs, staged gates, approvals, verification, and release-train visibility. Guardian-owned release code should be limited to small policy/verifier commands that check cosign signatures, SLSA/in-toto attestations, expected builder identity, subject digest, source commit, package/version, required gate attestations, and taint/rejection status.
+- Target Flagger for deployed-service progressive delivery after Flux applies an approved workload digest: canary, blue/green, metric checks, webhooks, promotion, and rollback. Flagger is not the distributable promotion system.
+- Release channels and stage names are not the same thing. Distributed software advances through increasing evidence gates such as edge -> nightly -> rc -> stable. Deployed software advances through runtime environments and rollout strategies such as dev/gamma/prod plus canary or blue/green.
+
+Flux migration path:
+
+- `guardian up` owns only host come-up: Talos machine config, CNI bootstrap, seed registry floor, OpenBao bootstrap/restore, Crossplane/Flux substrate install, and readiness handoff. It must not become a generic deployment runner.
+- Flux v2 owns runtime reconciliation after bootstrap. Use source-controller and kustomize-controller first; do not add Helm or image automation until a specific problem earns them.
+- Move Go-generated Kustomize patches into checked-in environment overlays or release/channel inputs. A clean checkout should be able to run `kubectl kustomize src/environments/<environment>` without `guardian up`.
+- Adopt Flux on dev first for the post-bootstrap reconciled layer: Crossplane packages, site environment bundle, and reconciled observability. Keep Talos, Cilium inline manifests, seed registry creation, OpenBao init/unseal, storage bootstrap, and early controller installation under `guardian up` until they are deliberately handed off.
+- Full wipe drills are acceptable migration tools. The acceptance test for each host is: wipe, run `guardian up src/hosts/<asset-id>/host.yaml`, Flux becomes Ready, the assigned environment converges from Git/OCI state, and re-running `guardian up` performs no ordinary application deployment work.
+- After dev is boring, repeat on gamma, then prod. Gamma gets the first release-gate integration; prod only follows signed/approved stable pointers with rollback drills practiced before relying on automation.
 
 Fleet (all Latitude.sh ASH, f4.metal.small; per-box physical facts — MACs, disk
-serials, gateways — live in `src/sites/<site>/bootstrap.yaml`; post-Kubernetes
-desired state lives in `src/crossplane/environments/<site>/environment.yaml`.
+serials, gateways — live in `src/hosts/<asset-id>/host.yaml`; post-Kubernetes
+desired state lives in `src/environments/<environment>/environment.yaml`.
 Physical facts are derived from the box and never copied between boxes: prod's
 external NIC is X550 fn 0 where dev/gamma use fn 1):
 
-| Site | Hostname | IP | Latitude ID | Serves | Notes |
-| - | - | - | - | - | - |
-| dev | vs-dev-w0 | 206.223.228.101 | sv_vAPXaMxKM5epz | dev.aisucks.app | cluster `guardian-dev`; host bootstrap/drill surface: `guardian up src/sites/dev/bootstrap.yaml` |
-| gamma | gd-gamma-w0 | 45.250.254.119 | sv_nPRbajqEB5koM | gamma.aisucks.app | cluster `guardian-gamma`; release gate (canary submissions); monthly billing |
-| prod | gd-prod-w0 | 67.213.115.113 | sv_BDXM5E4QLNrpk | aisucks.app | cluster `guardian-prod`; reserved/yearly billing (support ticket open to convert) |
+| Host | Environment | Hostname | IP | Latitude ID | Serves | Notes |
+| - | - | - | - | - | - | - |
+| ash-bm-001 | dev | gi-ash-dev-platform-01 | 206.223.228.101 | sv_vAPXaMxKM5epz | dev.aisucks.app | cluster `guardian-dev`; drill surface: `guardian up src/hosts/ash-bm-001/host.yaml` |
+| ash-bm-002 | gamma | gi-ash-gamma-platform-01 | 45.250.254.119 | sv_nPRbajqEB5koM | gamma.aisucks.app | cluster `guardian-gamma`; release gate (canary submissions); monthly billing |
+| ash-bm-003 | prod | gi-ash-prod-platform-01 | 67.213.115.113 | sv_BDXM5E4QLNrpk | aisucks.app | cluster `guardian-prod`; reserved/yearly billing (support ticket open to convert) |
 
 Verself boxes (run live Verself under Nomad — ClickHouse, TigerBeetle,
 Temporal): subsumption is the ratified direction (Compute doctrine below);
@@ -112,7 +133,7 @@ identity only in the operator's sops store; R2-flow token trio in gitignored
 procedure, measured auth matrix, and the drilled-restore record:
 `docs/runbooks/survival-floor.md` (roadmap: `docs/roadmap.md` M0).
 
-vs-dev-w0 Latitude ASH
+ash-bm-001 Latitude ASH
 
 | Layer | Facts |
 | - | - |
@@ -120,14 +141,14 @@ vs-dev-w0 Latitude ASH
 | BMC / IPMI (not ours) | Supermicro BMC, SOL payload on channel 1 port 623. **2026-06-11: operator confirms IPMI access, OOB access, and SOL are all available via the Latitude API** — this is the true out-of-band disaster-recovery path (survives any host-side mistake: NIC misconfig, firewall lockout, dead CNI), to be verified working before any host-firewall enforcement. (Historical, 2026-06-10: the per-user SOL payload for Latitude's OOB proxy user (7, `customer_access`) measured disabled in-band; superseded by the API-side access above.) Kernel side handled: schematic bakes `console=ttyS1,115200n8`. OOB SOL proxy: `POST /servers/{id}/out_of_band_connection`. |
 | Hardware | Supermicro AS-3015MR-H10TNR, AMD EPYC 4484PX (Zen 4, 12c). 2× 894GiB NVMe — select by serial, device names swap across boots. TPM 2.0 discrete (Infineon IFX). AMD-Vi IOMMU. PSP/CCP present (`psp enabled`, `tee enabled`) but SEV/SEV-SNP off in BIOS (no CPU flags, no `/dev/sev`); BIOS access via provider required to change. |
 | Firmware | AMI UEFI 2.5. Matrix is UEFI-only; Secure Boot off today (UKI signing + TPM measurement is the planned path). |
-| Boot | systemd-boot + UKI from the Image Factory schematic (`src/sites/<site>/talos/schematic.yaml`): ZFS extension and static `ip=` baked in, content-addressed by schematic ID. Kernel cmdline lives inside the UKI (`machine.install.extraKernelArgs` must stay unset). |
-| OS | Talos Linux v1.13.4: immutable, API-only, no SSH. Machine config generated by `guardian up` from `bootstrap.yaml` (serial-selected install disk, static network, single-node patches). |
+| Boot | systemd-boot + UKI from the Image Factory schematic (`src/hosts/<host>/talos/schematic.yaml`): ZFS extension and static `ip=` baked in, content-addressed by schematic ID. Kernel cmdline lives inside the UKI (`machine.install.extraKernelArgs` must stay unset). |
+| OS | Talos Linux v1.13.4: immutable, API-only, no SSH. Machine config generated by `guardian up` from `host.yaml` (serial-selected install disk, static network, single-node patches). |
 | Disks | System NVMe — drills wipe STATE+EPHEMERAL only (`--wipe-mode all` erases the bootloader and user disks). Data NVMe — reserved for ZFS, survives `down`. |
 | Cluster | Kubernetes v1.36.1, single node, default CNI, PSA baseline with privileged namespaces opt-in per component. |
 | Artifacts | In-cluster seed registry (CNCF `registry:3`, digest-pinned, hostPath-persistent) behind the `registry.guardian.internal` mirror; workspace-built OCI layouts pushed by digest over a port-forward. What runs is byte-for-byte what the workspace built. |
 | Secrets | OpenBao v2.5.4, raft integrated storage, sealed by default. Backup writes know R2; restore takes `(blob, sha256)`; init/unseal/restore are operator decisions, never automated. |
 | Identity | SPIRE — planned. |
-| Control | `guardian` CLI: `up`, `down --yes`, `config bootstrap` for host/bootstrap lifecycle only. talosctl v1.13.4 and kubectl v1.36.1 ride in runfiles; per-cluster state in `~/.local/state/guardian/<cluster>/`. |
+| Control | `guardian` CLI: `up`, `down --yes`, `config host` for host/bootstrap lifecycle only. talosctl v1.13.4 and kubectl v1.36.1 ride in runfiles; per-cluster state in `~/.local/state/guardian/<cluster>/`. |
 | Build | Bazel 9.1.0 (bazelisk sha256-pinned), bzlmod, rules_oci/rules_go; Go 1.26.4; deterministic OCI layouts and tarballs. |
 | Release | Planned: signed release manifests (component→digest sets), channels as signed pointers, zot, cosign via OpenBao Transit, npm projection of the CLI via dist-tags. |
 | Clients | Planned: web client and CLI binaries distributed through npm under the guardian-intelligence org. |

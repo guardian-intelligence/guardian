@@ -81,7 +81,7 @@ type directusS3Storage struct {
 	SecretAccessKeyKey string `yaml:"secretAccessKeyKey"`
 }
 
-func directusInstances(site *Site) ([]directusInstanceManifest, error) {
+func directusInstances(site *Host) ([]directusInstanceManifest, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(site.EnvironmentBundle.Raw))
 	var out []directusInstanceManifest
 	for {
@@ -116,7 +116,7 @@ func directusInstances(site *Site) ([]directusInstanceManifest, error) {
 	return out, nil
 }
 
-func validateDirectusInstances(site *Site, instances []directusInstanceManifest) error {
+func validateDirectusInstances(site *Host, instances []directusInstanceManifest) error {
 	for _, instance := range instances {
 		if err := validateDirectusInstance(site, instance); err != nil {
 			return err
@@ -125,7 +125,7 @@ func validateDirectusInstances(site *Site, instances []directusInstanceManifest)
 	return nil
 }
 
-func validateDirectusInstance(site *Site, instance directusInstanceManifest) error {
+func validateDirectusInstance(site *Host, instance directusInstanceManifest) error {
 	name := instance.Metadata.Name
 	spec := instance.Spec
 	if name == "" {

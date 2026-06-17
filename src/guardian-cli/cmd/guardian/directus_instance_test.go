@@ -8,7 +8,7 @@ import (
 func TestDirectusInstancesFromSiteBundles(t *testing.T) {
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
-			site := loadTestSite(t, siteName)
+			site := loadTestHost(t, siteName)
 			instances, err := directusInstances(site)
 			if err != nil {
 				t.Fatal(err)
@@ -99,7 +99,7 @@ func TestCompanySiteDirectusBindingMustMatchInstance(t *testing.T) {
 	xr := &companySiteSpec{}
 	xr.DirectusRef.Name = "missing"
 	xr.ContentSnapshot.Digest = "workspace"
-	site := &Site{Name: "dev"}
+	site := &Host{Name: "dev"}
 	site.Company.Domain = "dev.guardianintelligence.org"
 	err := validateCompanySiteDirectusBinding(site, "environment.yaml", xr, []directusInstanceManifest{{}})
 	if err == nil || !strings.Contains(err.Error(), "does not match any DirectusInstance") {
@@ -107,8 +107,8 @@ func TestCompanySiteDirectusBindingMustMatchInstance(t *testing.T) {
 	}
 }
 
-func siteWithEnvironment(raw string) *Site {
-	site := &Site{Name: "dev"}
+func siteWithEnvironment(raw string) *Host {
+	site := &Host{Name: "dev"}
 	site.Storage.ProductPool.Mountpoint = "/var/mnt/guardian"
 	plane := storagePlaneManifest{Kind: "StoragePlane"}
 	plane.Metadata.Name = "local-zfs"

@@ -56,7 +56,7 @@ func (p secretProjectionManifest) createsNamespace() bool {
 	return p.Spec.Target.CreateNamespace == nil || *p.Spec.Target.CreateNamespace
 }
 
-func secretProjections(site *Site) ([]secretProjectionManifest, error) {
+func secretProjections(site *Host) ([]secretProjectionManifest, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(site.EnvironmentBundle.Raw))
 	var out []secretProjectionManifest
 	for {
@@ -105,7 +105,7 @@ func secretProjections(site *Site) ([]secretProjectionManifest, error) {
 	return out, nil
 }
 
-func validateSecretProjection(site *Site, projection secretProjectionManifest) error {
+func validateSecretProjection(site *Host, projection secretProjectionManifest) error {
 	name := projection.Metadata.Name
 	spec := projection.Spec
 	if name == "" {
@@ -148,7 +148,7 @@ func validateSecretProjection(site *Site, projection secretProjectionManifest) e
 	return nil
 }
 
-func waitSecretProjections(kubectl, kubeconfig string, site *Site) error {
+func waitSecretProjections(kubectl, kubeconfig string, site *Host) error {
 	projections, err := secretProjections(site)
 	if err != nil {
 		return err

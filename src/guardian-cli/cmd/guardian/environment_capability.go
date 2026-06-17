@@ -20,7 +20,7 @@ type environmentRollout struct {
 	resource  string
 }
 
-func environmentCapabilities(site *Site) ([]environmentCapability, error) {
+func environmentCapabilities(site *Host) ([]environmentCapability, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(site.EnvironmentBundle.Raw))
 	var out []environmentCapability
 	for {
@@ -130,7 +130,7 @@ func environmentCapabilityRollouts(kind, namespace string, waitForRollout bool) 
 	}
 }
 
-func waitEnvironmentCapabilities(kubectl, kubeconfig string, site *Site) error {
+func waitEnvironmentCapabilities(kubectl, kubeconfig string, site *Host) error {
 	capabilities, err := environmentCapabilities(site)
 	if err != nil {
 		return err

@@ -10,9 +10,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// TestGatewayCRDsPrecedeCilium renders each site's machine config with the
-// pinned talosctl — the same `gen config` invocation up.go issues, site
-// patches in bootstrap.yaml list order — and asserts the machine-config
+// TestGatewayCRDsPrecedeCilium renders each host's machine config with the
+// pinned talosctl — the same `gen config` invocation up.go issues, host
+// patches in host.yaml list order — and asserts the machine-config
 // invariants that Talos owns for us:
 //
 //   - cluster.secretboxEncryptionSecret is present, so Kubernetes Secret
@@ -21,13 +21,13 @@ import (
 //   - cluster.inlineManifests lists gateway-api-crds before cilium. The
 //     CRDs must exist before the Cilium render that watches them, and list
 //     position in talos.patches is the only thing ordering them: nothing in
-//     Go enforces it, so this test is what a careless bootstrap.yaml edit (or a
-//     new site copied from a stale template) trips.
+//     Go enforces it, so this test is what a careless host.yaml edit (or a
+//     new host copied from a stale template) trips.
 //
-// up.go appends three programmatic --config-patch flags after the site
+// up.go appends three programmatic --config-patch flags after the host
 // patches (disk selector, static network, HostnameConfig delete); they are
 // omitted here because they patch only machine/network documents and run
-// after every site patch — they cannot reorder inlineManifests.
+// after every host patch — they cannot reorder inlineManifests.
 func TestGatewayCRDsPrecedeCilium(t *testing.T) {
 	talosctl, err := talosctlPath()
 	if err != nil {
@@ -41,11 +41,8 @@ func TestGatewayCRDsPrecedeCilium(t *testing.T) {
 
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
-			sitePath, err := toolPath("_main/src/sites/" + siteName + "/bootstrap.yaml")
-			if err != nil {
-				t.Fatalf("locate bootstrap.yaml: %v", err)
-			}
-			site, err := loadSite(sitePath)
+			sitePath := testHostPath(t, siteName)
+			site, err := loadHost(sitePath)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -1,62 +1,69 @@
 apiVersion: apiextensions.crossplane.io/v1beta1
 kind: EnvironmentConfig
 metadata:
-  name: guardian-gamma
+  name: guardian-dev
   labels:
-    guardian.dev/site: gamma
+    guardian.dev/site: dev
 data:
   site:
-    name: gamma
-    clusterName: guardian-gamma
-    nodeHostname: gd-gamma-w0
+    name: dev
+    clusterName: guardian-dev
+    nodeHostname: gi-ash-dev-platform-01
   alerts:
     ntfyTopic: "aisucks-ops-1ebda4d035e83ac0"
   gateway:
     enabled: true
   products:
     aisucks:
-      domain: gamma.aisucks.app
+      domain: dev.aisucks.app
     company:
-      domain: gamma.guardianintelligence.org
+      domain: dev.guardianintelligence.org
   platform:
-    oci: {}
+    oci:
+      domain: oci.guardianintelligence.org
 ---
 apiVersion: platform.guardian.dev/v1alpha1
 kind: StoragePlane
 metadata:
   name: local-zfs
 spec:
-  site: gamma
-  nodeName: gd-gamma-w0
+  site: dev
+  nodeName: gi-ash-dev-platform-01
   storageClassName: guardian-local-retain
   reclaimPolicy: Retain
   volumeBindingMode: WaitForFirstConsumer
   volumes:
     - name: victoria-metrics
-      persistentVolumeName: guardian-gamma-victoria-metrics
+      persistentVolumeName: guardian-dev-victoria-metrics
       namespace: observability
       claimName: victoria-metrics-storage
       capacity: 20Gi
       localPath: /var/mnt/guardian/victoria-metrics
     - name: directus-postgres
-      persistentVolumeName: guardian-gamma-directus-postgres
+      persistentVolumeName: guardian-dev-directus-postgres
       namespace: directus
       claimName: directus-postgres-data
       capacity: 20Gi
       localPath: /var/mnt/guardian/directus/postgres
     - name: directus-uploads
-      persistentVolumeName: guardian-gamma-directus-uploads
+      persistentVolumeName: guardian-dev-directus-uploads
       namespace: directus
       claimName: directus-uploads
       capacity: 10Gi
       localPath: /var/mnt/guardian/directus/uploads
+    - name: zot
+      persistentVolumeName: guardian-dev-zot
+      namespace: guardian-oci
+      claimName: zot-storage
+      capacity: 50Gi
+      localPath: /var/mnt/guardian/zot
 ---
 apiVersion: platform.guardian.dev/v1alpha1
 kind: SLOProfile
 metadata:
   name: public-http
 spec:
-  site: gamma
+  site: dev
   surface: public-http
   window: 15m
   apps:
@@ -81,7 +88,7 @@ kind: SyntheticCheck
 metadata:
   name: public-http-cross-site
 spec:
-  site: gamma
+  site: dev
   surface: public-http
   targets:
     - name: prod-aisucks-healthz
@@ -90,10 +97,10 @@ spec:
       url: https://aisucks.app/healthz
       expectedStatus: 200
       gate: true
-    - name: dev-aisucks-healthz
+    - name: gamma-aisucks-healthz
       product: aisucks
       kind: health
-      url: https://dev.aisucks.app/healthz
+      url: https://gamma.aisucks.app/healthz
       expectedStatus: 200
       gate: true
     - name: prod-aisucks-page
@@ -103,36 +110,12 @@ spec:
       expectedStatus: 200
       bodyContains: never be sold
       gate: true
-    - name: dev-aisucks-page
+    - name: gamma-aisucks-page
       product: aisucks
       kind: page
-      url: https://dev.aisucks.app/
+      url: https://gamma.aisucks.app/
       expectedStatus: 200
       bodyContains: never be sold
-      gate: true
-    - name: dev-company-healthz
-      product: company-site
-      kind: health
-      url: https://dev.guardianintelligence.org/healthz
-      expectedStatus: 200
-      gate: true
-    - name: dev-company-home
-      product: company-site
-      kind: page
-      url: https://dev.guardianintelligence.org/
-      expectedStatus: 200
-      gate: true
-    - name: dev-company-letters
-      product: company-site
-      kind: page
-      url: https://dev.guardianintelligence.org/letters
-      expectedStatus: 200
-      gate: true
-    - name: dev-company-news
-      product: company-site
-      kind: page
-      url: https://dev.guardianintelligence.org/news
-      expectedStatus: 200
       gate: true
 ---
 apiVersion: platform.guardian.dev/v1alpha1
@@ -140,7 +123,7 @@ kind: ObservabilityStack
 metadata:
   name: observability
 spec:
-  site: gamma
+  site: dev
   namespace: observability
   namespaceLabels:
     pod-security.kubernetes.io/enforce: privileged
@@ -150,7 +133,7 @@ spec:
       claimName: victoria-metrics-storage
       storageClassName: guardian-local-retain
       size: 20Gi
-      volumeName: guardian-gamma-victoria-metrics
+      volumeName: guardian-dev-victoria-metrics
       accessModes:
         - ReadWriteOnce
     retentionPeriod: "13"
@@ -171,11 +154,12 @@ kind: StatusSurface
 metadata:
   name: status
 spec:
-  site: gamma
+  site: dev
   namespace: status
   image: registry.guardian.internal/status:bootstrap
   domains:
-    - status.gamma.guardianintelligence.org
+    - status.guardianintelligence.org
+    - status.dev.guardianintelligence.org
   monitor: false
   replicas: 1
   acmeEmail: im.shovonhasan@gmail.com
@@ -208,13 +192,13 @@ spec:
   secrets:
     - name: clickhouse-admin
       type: Opaque
-      remotePath: guardian/guardian-gamma/observability/clickhouse-admin
+      remotePath: guardian/guardian-dev/observability/clickhouse-admin
       data:
         - secretKey: password
           property: password
     - name: grafana-admin
       type: Opaque
-      remotePath: guardian/guardian-gamma/observability/grafana-admin
+      remotePath: guardian/guardian-dev/observability/grafana-admin
       data:
         - secretKey: password
           property: password
@@ -232,25 +216,38 @@ spec:
     name: edge
   listeners:
     - name: https-aisucks
-      hostname: "gamma.aisucks.app"
+      hostname: "dev.aisucks.app"
       port: 443
       protocol: HTTPS
       tls:
         mode: Terminate
         certificateRefName: aisucks-tls
     - name: https-company-site
-      hostname: "gamma.guardianintelligence.org"
+      hostname: "dev.guardianintelligence.org"
       port: 443
       protocol: HTTPS
       tls:
         mode: Terminate
         certificateRefName: company-site-tls
     - name: tls-status-0
-      hostname: "status.gamma.guardianintelligence.org"
+      hostname: "status.guardianintelligence.org"
       port: 443
       protocol: TLS
       tls:
         mode: Passthrough
+    - name: tls-status-1
+      hostname: "status.dev.guardianintelligence.org"
+      port: 443
+      protocol: TLS
+      tls:
+        mode: Passthrough
+    - name: https-oci
+      hostname: "oci.guardianintelligence.org"
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefName: oci-guardianintelligence-org-tls
     - name: http
       port: 80
       protocol: HTTP
@@ -267,23 +264,65 @@ spec:
       namespace: gateway
       secretName: aisucks-tls
       dnsNames:
-        - "gamma.aisucks.app"
+        - "dev.aisucks.app"
       issuerRefName: letsencrypt-production
-      privateKeyAlgorithm: ECDSA
+    - name: oci-guardianintelligence-org-tls
+      namespace: gateway
+      secretName: oci-guardianintelligence-org-tls
+      dnsNames:
+        - "oci.guardianintelligence.org"
+      issuerRefName: letsencrypt-production
     - name: company-site-tls
       namespace: gateway
       secretName: company-site-tls
       dnsNames:
-        - "gamma.guardianintelligence.org"
+        - "dev.guardianintelligence.org"
       issuerRefName: letsencrypt-production
+---
+apiVersion: platform.guardian.dev/v1alpha1
+kind: OCIRegistry
+metadata:
+  name: zot
+spec:
+  site: dev
+  namespace: guardian-oci
+  namespaceLabels:
+    pod-security.kubernetes.io/enforce: privileged
+  image: registry.guardian.internal/zot:bootstrap
+  domain: oci.guardianintelligence.org
+  persistence:
+    claimName: zot-storage
+    storageClassName: guardian-local-retain
+    size: 50Gi
+    volumeName: guardian-dev-zot
+    accessModes:
+      - ReadWriteOnce
+  publisherSecret:
+    name: zot-publisher
+    usernameKey: username
+    passwordKey: password
+    htpasswdKey: htpasswd
+  secrets:
+    projection:
+      waitForSecrets: true
+      openbao:
+        role: guardian-oci-secrets
+        serviceAccountName: external-secrets-guardian-oci
+      remotePath: guardian/guardian-dev/oci/zot-publisher
+  gateway:
+    name: edge
+    namespace: gateway
+    httpsSectionName: https-oci
+  readiness:
+    waitForRollout: true
 ---
 apiVersion: products.guardian.dev/v1alpha1
 kind: AisucksProduct
 metadata:
   name: aisucks
 spec:
-  site: gamma
-  domain: gamma.aisucks.app
+  site: dev
+  domain: dev.aisucks.app
   image: registry.guardian.internal/aisucks:bootstrap
   replicas: 2
 ---
@@ -292,8 +331,8 @@ kind: CompanySite
 metadata:
   name: company-site
 spec:
-  site: gamma
-  domain: gamma.guardianintelligence.org
+  site: dev
+  domain: dev.guardianintelligence.org
   image: registry.guardian.internal/company-site:bootstrap
   directusRef:
     name: directus
@@ -310,7 +349,7 @@ kind: DirectusInstance
 metadata:
   name: directus
 spec:
-  site: gamma
+  site: dev
   namespace: directus
   namespaceLabels:
     pod-security.kubernetes.io/enforce: privileged
@@ -326,9 +365,9 @@ spec:
         role: directus-secrets
         serviceAccountName: external-secrets-directus
       remotePaths:
-        runtime: guardian/guardian-gamma/directus/runtime
-        admin: guardian/guardian-gamma/directus/admin
-        database: guardian/guardian-gamma/directus/postgres
+        runtime: guardian/guardian-dev/directus/runtime
+        admin: guardian/guardian-dev/directus/admin
+        database: guardian/guardian-dev/directus/postgres
     runtimeSecretName: directus-runtime
     runtimeSecretKey: secret
     adminSecretName: directus-admin
@@ -344,7 +383,7 @@ spec:
       claimName: directus-postgres-data
       storageClassName: guardian-local-retain
       size: 20Gi
-      volumeName: guardian-gamma-directus-postgres
+      volumeName: guardian-dev-directus-postgres
       accessModes:
         - ReadWriteOnce
   uploads:
@@ -352,7 +391,7 @@ spec:
       claimName: directus-uploads
       storageClassName: guardian-local-retain
       size: 10Gi
-      volumeName: guardian-gamma-directus-uploads
+      volumeName: guardian-dev-directus-uploads
       accessModes:
         - ReadWriteOnce
   resources:

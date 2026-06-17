@@ -78,7 +78,7 @@ func (t syntheticCheckTarget) gatesPromotion() bool {
 	return t.Gate == nil || *t.Gate
 }
 
-func sloProfiles(site *Site) ([]sloProfileManifest, error) {
+func sloProfiles(site *Host) ([]sloProfileManifest, error) {
 	var out []sloProfileManifest
 	if err := decodeEnvironmentDocuments(site.EnvironmentBundle.Raw, site.EnvironmentBundle.Path, "SLOProfile", func(node *yaml.Node) error {
 		var doc sloProfileManifest
@@ -96,7 +96,7 @@ func sloProfiles(site *Site) ([]sloProfileManifest, error) {
 	return out, nil
 }
 
-func syntheticChecks(site *Site) ([]syntheticCheckManifest, error) {
+func syntheticChecks(site *Host) ([]syntheticCheckManifest, error) {
 	var out []syntheticCheckManifest
 	if err := decodeEnvironmentDocuments(site.EnvironmentBundle.Raw, site.EnvironmentBundle.Path, "SyntheticCheck", func(node *yaml.Node) error {
 		var doc syntheticCheckManifest
@@ -142,7 +142,7 @@ func decodeEnvironmentDocuments(raw []byte, path, kind string, decode func(*yaml
 	}
 }
 
-func validateSLOProfiles(site *Site, profiles []sloProfileManifest) error {
+func validateSLOProfiles(site *Host, profiles []sloProfileManifest) error {
 	seenPublicHTTP := false
 	for _, profile := range profiles {
 		name := profile.Metadata.Name
@@ -201,7 +201,7 @@ func validateSLOProfiles(site *Site, profiles []sloProfileManifest) error {
 	return nil
 }
 
-func validateSyntheticChecks(site *Site, checks []syntheticCheckManifest) error {
+func validateSyntheticChecks(site *Host, checks []syntheticCheckManifest) error {
 	for _, check := range checks {
 		name := check.Metadata.Name
 		spec := check.Spec
@@ -252,7 +252,7 @@ func validateSyntheticChecks(site *Site, checks []syntheticCheckManifest) error 
 	return nil
 }
 
-func applySLOAndSyntheticConfig(site *Site) error {
+func applySLOAndSyntheticConfig(site *Host) error {
 	profiles, err := sloProfiles(site)
 	if err != nil {
 		return err

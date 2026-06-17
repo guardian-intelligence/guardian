@@ -5,7 +5,7 @@ import "testing"
 func TestEnvironmentCapabilities(t *testing.T) {
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
-			site := loadTestSite(t, siteName)
+			site := loadTestHost(t, siteName)
 			caps, err := environmentCapabilities(site)
 			if err != nil {
 				t.Fatal(err)

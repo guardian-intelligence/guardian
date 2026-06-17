@@ -125,11 +125,11 @@ func (b *fakeBaoConfig) handler() http.Handler {
 }
 
 func TestConfigureBaoForProjectionCreatesFreshSecrets(t *testing.T) {
-	sitePath, err := toolPath("_main/src/sites/dev/bootstrap.yaml")
+	sitePath, err := toolPath("_main/src/hosts/ash-bm-001/host.yaml")
 	if err != nil {
-		t.Fatalf("locate bootstrap.yaml: %v", err)
+		t.Fatalf("locate host.yaml: %v", err)
 	}
-	site, err := loadSite(sitePath)
+	site, err := loadHost(sitePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,11 +203,11 @@ func TestConfigureBaoForProjectionCreatesFreshSecrets(t *testing.T) {
 }
 
 func TestConfigureBaoForProjectionRefusesMissingRestoredSecret(t *testing.T) {
-	sitePath, err := toolPath("_main/src/sites/dev/bootstrap.yaml")
+	sitePath, err := toolPath("_main/src/hosts/ash-bm-001/host.yaml")
 	if err != nil {
-		t.Fatalf("locate bootstrap.yaml: %v", err)
+		t.Fatalf("locate host.yaml: %v", err)
 	}
-	site, err := loadSite(sitePath)
+	site, err := loadHost(sitePath)
 	if err != nil {
 		t.Fatal(err)
 	}

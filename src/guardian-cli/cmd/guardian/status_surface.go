@@ -40,7 +40,7 @@ type statusSurfaceSpec struct {
 	} `yaml:"readiness"`
 }
 
-func statusSurfaces(site *Site) ([]statusSurfaceManifest, error) {
+func statusSurfaces(site *Host) ([]statusSurfaceManifest, error) {
 	var out []statusSurfaceManifest
 	if err := decodeEnvironmentDocuments(site.EnvironmentBundle.Raw, site.EnvironmentBundle.Path, "StatusSurface", func(node *yaml.Node) error {
 		var doc statusSurfaceManifest
@@ -58,7 +58,7 @@ func statusSurfaces(site *Site) ([]statusSurfaceManifest, error) {
 	return out, nil
 }
 
-func validateStatusSurfaces(site *Site, surfaces []statusSurfaceManifest) error {
+func validateStatusSurfaces(site *Host, surfaces []statusSurfaceManifest) error {
 	if len(surfaces) != 1 {
 		return fmt.Errorf("environment %s: exactly one StatusSurface is required, found %d", site.EnvironmentBundle.Path, len(surfaces))
 	}
@@ -70,7 +70,7 @@ func validateStatusSurfaces(site *Site, surfaces []statusSurfaceManifest) error 
 	return nil
 }
 
-func validateStatusSurface(site *Site, surface statusSurfaceManifest) error {
+func validateStatusSurface(site *Host, surface statusSurfaceManifest) error {
 	name := surface.Metadata.Name
 	spec := surface.Spec
 	if name == "" {

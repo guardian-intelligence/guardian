@@ -13,7 +13,7 @@ func TestStatusSurfaceSiteManifests(t *testing.T) {
 	}
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
-			site := loadTestSite(t, siteName)
+			site := loadTestHost(t, siteName)
 			surfaces, err := statusSurfaces(site)
 			if err != nil {
 				t.Fatal(err)
@@ -71,7 +71,7 @@ func TestStatusSurfacePlatformRender(t *testing.T) {
 func TestStatusSurfaceEnvironmentBundleInstances(t *testing.T) {
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
-			site := loadTestSite(t, siteName)
+			site := loadTestHost(t, siteName)
 			rendered, err := buildTestEnvironmentBundle(site, testProductImages())
 			if err != nil {
 				t.Fatal(err)
@@ -99,7 +99,7 @@ func TestStatusSurfaceEnvironmentBundleInstances(t *testing.T) {
 }
 
 func TestStatusSurfaceRejectsMonitorWithoutDomains(t *testing.T) {
-	site := &Site{Name: "dev"}
+	site := &Host{Name: "dev"}
 	site.EnvironmentBundle.Path = "environment.yaml"
 	site.EnvironmentBundle.Raw = []byte(`apiVersion: platform.guardian.dev/v1alpha1
 kind: StatusSurface
