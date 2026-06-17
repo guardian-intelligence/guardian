@@ -6,7 +6,7 @@ import (
 )
 
 func TestStoragePlaneSiteManifests(t *testing.T) {
-	wantVolumes := map[string]int{"dev": 4, "gamma": 3, "prod": 3}
+	wantVolumes := map[string]int{"dev": 4, "gamma": 3, "prod": 4}
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
 			site := loadTestSite(t, siteName)

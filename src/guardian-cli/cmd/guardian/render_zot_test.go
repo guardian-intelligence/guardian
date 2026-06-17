@@ -62,16 +62,18 @@ func TestOCIRegistryEnvironmentBundleInstances(t *testing.T) {
 				t.Fatal(err)
 			}
 			out := string(rendered)
-			if siteName != "dev" {
+			if siteName == "gamma" {
 				if strings.Contains(out, "kind: OCIRegistry") {
 					t.Fatalf("OCIRegistry should not render for %s", siteName)
 				}
 				return
 			}
+			wantVolume := "guardian-" + siteName + "-zot"
+			wantRemotePath := "guardian/guardian-" + siteName + "/oci/zot-publisher"
 			for _, want := range []string{
 				"kind: OCIRegistry",
 				"name: zot",
-				"site: dev",
+				"site: " + siteName,
 				"namespace: guardian-oci",
 				"namespaceLabels:",
 				"pod-security.kubernetes.io/enforce: privileged",
@@ -79,7 +81,7 @@ func TestOCIRegistryEnvironmentBundleInstances(t *testing.T) {
 				"domain: oci.guardianintelligence.org",
 				"claimName: zot-storage",
 				"storageClassName: guardian-local-retain",
-				"volumeName: guardian-dev-zot",
+				"volumeName: " + wantVolume,
 				"publisherSecret:",
 				"name: zot-publisher",
 				"usernameKey: username",
@@ -88,7 +90,7 @@ func TestOCIRegistryEnvironmentBundleInstances(t *testing.T) {
 				"secrets:",
 				"role: guardian-oci-secrets",
 				"serviceAccountName: external-secrets-guardian-oci",
-				"remotePath: guardian/guardian-dev/oci/zot-publisher",
+				"remotePath: " + wantRemotePath,
 				"gateway:",
 				"name: edge",
 				"namespace: gateway",

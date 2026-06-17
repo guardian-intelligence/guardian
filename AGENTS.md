@@ -1,10 +1,16 @@
-Bazel polyglot hermetically sealed monorepo for Guardian, a free open-source self-hostable cloud. The `guardian` CLI owns host lifecycle: stock Ubuntu or Talos maintenance -> Talos/Kubernetes bootstrap substrate. Kubernetes, Crossplane, Flux, and release tooling own runtime desired state.
+Bazel polyglot hermetically sealed monorepo for Guardian, a free open-source self-hostable cloud. The `guardian` CLI owns host lifecycle: stock Ubuntu or Talos maintenance -> Talos/Flux v2 bootstrap. Flux owns GitOps reconciliation across clusters at runtime. Distributables (binaries, npm packages, PyPI packages, Rust crates) are OCI native with industry-leading supply-chain security: cosign v3, SLSA 1.2 provenance, in-toto attestations, SBOM + licenses. OpenBao Transit signs fleet-owned gate verdicts, channel pointers, and deployment evidence. Ecosystem packages are therefore just projections of our verified OCI subjects. Every distributable owns its own release process and promotion gates.
 
-Domain: guardianintelligence.org (abbr gi.org)
+Default release channels: Edge (CD on main), nightly, RC, stable.
+Default deployment stages: dev (PR preview), gamma (staging), prod.
+
+IOW: Bazel owns the build graph and produces bytes using OCI for layout. `cosign`/SLSA proves its authentic Guardian Intelligence LLC software. Flux reconciles our declared state.
+
+Domain: guardianintelligence.org (abbreviated gi.org)
 
 Optimize for BYOC on-prem
 
 See ~/Projects/verself-sh for reference https://github.com/guardian-intelligence/verself which was a Nomad-based version of this approach.
+
 
 Objectives:
 
@@ -13,7 +19,8 @@ After doing some financial calculation I also realize I need to make provisionin
 
 Important context:
 - Source: `src/crossplane/`, `src/sites/`.
-- All dependencies version/commit pinned. Nothing during runtime, dev time, test time, or build time should require external non-version-pinned tooling, or shell out to binaries outside this repo or its build artifacts. All binaries are available under `guardian run`. E.g. `guardian run talosctl image k8s-bundle`
+- All dependencies version/commit pinned. Nothing during runtime, dev time, test time, or build time should require external non-version-pinned tooling, or shell out to binaries outside this repo or its build artifacts.
+- The `guardian` CLI is not a dumping ground for generic functionality. Its sole purpose is to manage host come-up.
 - Dev tools: `aspect`. Run `aspect tidy` to format the codebase.
 - 1p configuration schemas in CUE, always. Read/Render-out YAML/JSON/TOML. Output must support all 3.
 - API IDL in Protobuf/Connect. Define IAM, audit, risk, request-size, rate limit, and idempotency metadata as explicit operation policy on the RPC contract.
