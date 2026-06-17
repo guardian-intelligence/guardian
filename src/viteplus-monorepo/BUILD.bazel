@@ -54,6 +54,7 @@ filegroup(
         "//src/products/aisucks/web:package_manifest",
         "//src/products/company/web:package_manifest",
         "//src/viteplus-monorepo/packages/aisucks-sdk:package_manifest",
+        "//src/viteplus-monorepo/packages/brand:package_manifest",
     ] + glob(
         [
             ".changeset/*.md",
@@ -78,6 +79,7 @@ filegroup(
         "//src/products/aisucks/web:sources",
         "//src/products/company/web:sources",
         "//src/viteplus-monorepo/packages/aisucks-sdk:sources",
+        "//src/viteplus-monorepo/packages/brand:sources",
     ] + glob(
         [
             ".changeset/*.md",

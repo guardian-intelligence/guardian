@@ -128,10 +128,10 @@ spec:
               readinessPeriod: 5
               ports:
                 http: 8080
-                metrics: 9090
+                metrics: 8080
               listen:
                 http: ":8080"
-                diagnostics: ":9090"
+                diagnostics: ":8080"
               gateway:
                 name: edge
                 namespace: gateway

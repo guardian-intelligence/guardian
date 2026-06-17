@@ -1,0 +1,56 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { CHANGELOG_META, changelog } from "~/content/changelog";
+import { PageShell } from "~/components/page-shell";
+import { ogMeta } from "~/lib/head";
+
+export const Route = createFileRoute("/_workshop/changelog")({
+  component: ChangelogPage,
+  head: () => ({
+    meta: ogMeta({
+      slug: "changelog",
+      title: CHANGELOG_META.title,
+      description: CHANGELOG_META.description,
+    }),
+  }),
+});
+
+function ChangelogPage() {
+  return (
+    <PageShell kicker="What shipped, when" heading="guardianintelligence.org changelog.">
+      <ul className="flex flex-col gap-6">
+        {changelog.map((entry) => (
+          <li key={entry.date} className="flex flex-col gap-2">
+            <span
+              className="font-mono text-[10px] uppercase tracking-[0.18em]"
+              style={{ color: "var(--treatment-muted-faint)" }}
+            >
+              {entry.date}
+            </span>
+            <span
+              style={{
+                fontFamily: "'Geist', sans-serif",
+                fontWeight: 600,
+                fontSize: "20px",
+                lineHeight: 1.2,
+                letterSpacing: "-0.012em",
+              }}
+            >
+              {entry.title}
+            </span>
+            <p
+              style={{
+                fontFamily: "'Geist', sans-serif",
+                fontSize: "15px",
+                lineHeight: 1.55,
+                color: "var(--treatment-muted)",
+                margin: 0,
+              }}
+            >
+              {entry.body}
+            </p>
+          </li>
+        ))}
+      </ul>
+    </PageShell>
+  );
+}

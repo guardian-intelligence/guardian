@@ -1,0 +1,203 @@
+/*
+ * Guardian Intelligence brand tokens — single source of truth.
+ *
+ * Apps that carry Guardian brand chrome (company, platform, future letters)
+ * import this file once in their app.css.
+ *
+ * Hex values mirror packages/brand/src/tokens.ts; keep both in sync when
+ * palettes change.
+ *
+ * Structure:
+ *   @theme       — Tailwind v4 token registration (palette + fonts + muted ramps).
+ *                  These generate utilities like `text-ash`, `bg-flare`, etc.
+ *   :root        — runtime vars the utilities cannot express (header geometry,
+ *                  wing-unit, and the default [data-treatment] scope = Workshop).
+ *   [data-treatment="..."]
+ *                — per-treatment override scopes. The three treatments each
+ *                  override the full --treatment-* ramp. Consumers render a
+ *                  wrapper with data-treatment=<name> and descendants read
+ *                  var(--treatment-*); repaints are pure CSS transitions, no
+ *                  React re-render needed. Precedent: Radix Themes' nested
+ *                  <Theme>, without the ambient provider.
+ */
+
+@theme {
+  /* Palette */
+  --color-iron: #0e0e0e;
+  --color-flare: #ccff00;
+  --color-paper: #f6f4ed;
+  --color-vellum: #e8e2d2;
+  --color-argent: #ffffff;
+  --color-ink: #0b0b0b;
+  --color-bordeaux: #5c1f1e;
+  --color-amber: #f79326;
+  --color-type-iron: #f5f5f5;
+  /* Sepia — warm dark ink for editorial rules (masthead, colophon). The
+     bordeaux pull-quote rule is reserved for prose; sepia is the *structural*
+     editorial ink. Reads as pressed-in newsprint, not laser-cut. Tuned warm
+     (chestnut family, not coffee) so a 4px rule against #f6f4ed paper reads
+     as ink dried on stonepaper rather than black UI chrome. */
+  --color-sepia: #5b3a26;
+
+  /* Fonts */
+  --font-display: "Fraunces", Georgia, serif;
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Ash — Iron-muted type family (Argent at opacity). Tuned to pass WCAG AA
+     on #0E0E0E. Registered under @theme so `text-ash`, `text-ash-strong`,
+     etc., become reachable Tailwind utilities.
+     On #0E0E0E:
+       ash-strong (0.82) → 11.4:1
+       ash        (0.72) → 9.3:1
+       ash-meta   (0.60) → 6.7:1
+       ash-faint  (0.55) → 5.8:1  [floor for small text] */
+  --color-ash-strong: rgba(245, 245, 245, 0.82);
+  --color-ash: rgba(245, 245, 245, 0.72);
+  --color-ash-meta: rgba(245, 245, 245, 0.6);
+  --color-ash-faint: rgba(245, 245, 245, 0.55);
+
+  /* Stone — Paper-muted ink family (Ink at opacity). Four-rung ramp derived
+     against the light ground to hold AA on small text.
+     On #F6F4ED:
+       stone-strong (0.78) → 9.3:1
+       stone        (0.70) → 6.9:1
+       stone-meta   (0.60) → 4.8:1
+       stone-faint  (0.55) → ~4.4:1 [decorative only] */
+  --color-stone-strong: rgba(11, 11, 11, 0.78);
+  --color-stone: rgba(11, 11, 11, 0.7);
+  --color-stone-meta: rgba(11, 11, 11, 0.6);
+  --color-stone-faint: rgba(11, 11, 11, 0.55);
+}
+
+@layer base {
+  :root {
+    /* Header geometry — single source of truth. --chrome-edge-gap is the
+       vertical logo inset; --chrome-inline-gap is the page-edge inset shared
+       by chrome and aligned content wrappers. The bottom rule offset derives
+       from the vertical gap plus the rule thickness, so tightening horizontal
+       margins does not move the masthead rule. */
+    --chrome-edge-gap: 10px;
+    --chrome-inline-gap: 20px;
+    --chrome-rule-gap: calc(var(--chrome-edge-gap) + var(--treatment-rule-thickness));
+    --chrome-lockup-h: 22px;
+    --header-h: calc(var(--chrome-edge-gap) + var(--chrome-lockup-h) + var(--chrome-rule-gap));
+    --header-scroll-offset: calc(var(--header-h) + 1.5rem);
+    /* The mark's external clear-space unit, in px. Equals the height of the
+       upper wing's tip on a 52px mark per logo-playground.html. Lockups and
+       /design specimens derive their padding from this value. */
+    --wing-unit: calc(52px * 0.45);
+
+    /* Default treatment scope — Workshop. Iron ground with Amber as the
+       single accent. Any route that does not declare a treatment inherits
+       this scope; each [data-treatment] override below redeclares the full
+       ramp so partial overrides can't leak one treatment's accent into
+       another's body text. */
+    --treatment-ground: var(--color-iron);
+    --treatment-ink: var(--color-type-iron);
+    --treatment-accent: var(--color-amber);
+    --treatment-wordmark: var(--color-argent);
+    /* Display font — what page headlines resolve to. Workshop bans Fraunces
+       in its chrome, so its display font is Geist; Newsroom and Letters
+       switch to Fraunces where their treatment scopes override this. */
+    --treatment-display-font: var(--font-sans);
+    /* Body font — what flowing prose resolves to. Letters is the only
+       treatment that sets Fraunces as body (the brand model's "Fraunces body,
+       Geist meta" rule for editorial long-form); Workshop and Newsroom keep
+       Geist for running prose and reserve Fraunces for display. */
+    --treatment-body-font: var(--font-sans);
+    --treatment-muted-strong: var(--color-ash-strong);
+    --treatment-muted: var(--color-ash);
+    --treatment-muted-meta: var(--color-ash-meta);
+    --treatment-muted-faint: var(--color-ash-faint);
+    --treatment-surface-subtle: rgba(245, 245, 245, 0.04);
+    --treatment-surface-border: rgba(245, 245, 245, 0.12);
+    --treatment-hairline: rgba(245, 245, 245, 0.08);
+    /* Editorial rule — the *one* structural rule a treatment may paint
+       (masthead under the chrome, colophon above the footer). Workshop and
+       Newsroom treat this as a hairline; Letters paints a thicker sepia rule
+       because it stands in for a newspaper masthead. Color and thickness are
+       split so consumers can compose `var(--treatment-rule-thickness) solid
+       var(--treatment-rule-color)`. */
+    --treatment-rule-color: rgba(245, 245, 245, 0.08);
+    --treatment-rule-thickness: 1px;
+  }
+}
+
+[data-treatment="workshop"] {
+  /* Workshop — Guardian's default chrome. Iron ground, Amber accent, Argent
+     wordmark. Geist-only typography (Fraunces is reserved for Letters). */
+  --treatment-ground: var(--color-iron);
+  --treatment-ink: var(--color-type-iron);
+  --treatment-accent: var(--color-amber);
+  --treatment-wordmark: var(--color-argent);
+  --treatment-display-font: var(--font-sans);
+  --treatment-body-font: var(--font-sans);
+  --treatment-muted-strong: var(--color-ash-strong);
+  --treatment-muted: var(--color-ash);
+  --treatment-muted-meta: var(--color-ash-meta);
+  --treatment-muted-faint: var(--color-ash-faint);
+  --treatment-surface-subtle: rgba(245, 245, 245, 0.04);
+  --treatment-surface-border: rgba(245, 245, 245, 0.12);
+  --treatment-hairline: rgba(245, 245, 245, 0.08);
+  --treatment-rule-color: rgba(245, 245, 245, 0.08);
+  --treatment-rule-thickness: 1px;
+}
+
+[data-treatment="newsroom"] {
+  /* Newsroom — a calm Argent (white) body with Flare confined to bounded
+     cards and CTAs. Ramp's press blog is the reference: the page scans like
+     a reading room; acid green appears once per page as a hero card or a
+     Newsroom-specific piece of stationery. Flare is an *event*, not an
+     environment — painting everything green teaches the eye to stop seeing
+     green. Paper is reserved for Letters; Newsroom reads on Argent.
+     CTAs paint Ink (black) so the control reads as a dark affordance on
+     both Argent body surfaces and Flare hero cards. Bordeaux never appears
+     on Newsroom; Amber never appears on Newsroom. */
+  --treatment-ground: var(--color-argent);
+  --treatment-ink: var(--color-ink);
+  --treatment-accent: var(--color-ink);
+  --treatment-wordmark: var(--color-ink);
+  --treatment-display-font: var(--font-display);
+  --treatment-body-font: var(--font-sans);
+  --treatment-muted-strong: var(--color-stone-strong);
+  --treatment-muted: var(--color-stone);
+  --treatment-muted-meta: var(--color-stone-meta);
+  --treatment-muted-faint: var(--color-stone-faint);
+  --treatment-surface-subtle: rgba(11, 11, 11, 0.04);
+  --treatment-surface-border: rgba(11, 11, 11, 0.12);
+  --treatment-hairline: rgba(11, 11, 11, 0.12);
+  --treatment-rule-color: rgba(11, 11, 11, 0.12);
+  --treatment-rule-thickness: 1px;
+}
+
+[data-treatment="letters"] {
+  /* Paper ground, Ink type. Ink is also the editorial accent: CTAs, the
+     drop-cap initial, nameplate/masthead rule, tab underline, active link
+     underline. Bordeaux is RESERVED for the blockquote left-rule and
+     appears nowhere else — the single editorial accent is the pull-quote,
+     not the whole page. Muted ramp is Stone (ink-on-light). Vellum is the
+     same-family inset used for colophons. Letters uses a warm paper ground
+     so the graph-paper backdrop keeps a sun-dried cream cast instead of
+     washing into neutral gray or peach. */
+  --treatment-ground: #fff4dc;
+  --treatment-ink: var(--color-ink);
+  --treatment-accent: var(--color-ink);
+  --treatment-wordmark: var(--color-ink);
+  --treatment-display-font: var(--font-display);
+  --treatment-body-font: var(--font-display);
+  --treatment-muted-strong: rgba(11, 11, 11, 0.9);
+  --treatment-muted: rgba(11, 11, 11, 0.78);
+  --treatment-muted-meta: rgba(11, 11, 11, 0.68);
+  --treatment-muted-faint: rgba(11, 11, 11, 0.58);
+  --treatment-surface-subtle: rgba(11, 11, 11, 0.04);
+  --treatment-surface-border: rgba(11, 11, 11, 0.14);
+  --treatment-hairline: rgba(11, 11, 11, 0.14);
+  /* Letters paints the masthead/colophon rule in Guardian ink. The thickness
+     is tuned to the optical weight of Fraunces body type — 3px reads as
+     a deliberate masthead stroke at our type scale. The rule is
+     column-aligned by the chrome's max-w-6xl wrapper, so it never touches
+     the viewport edge. */
+  --treatment-rule-color: var(--color-ink);
+  --treatment-rule-thickness: 3px;
+}

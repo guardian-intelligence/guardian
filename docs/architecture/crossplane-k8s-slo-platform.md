@@ -110,7 +110,7 @@ The public site should run as pod-network workloads behind Cilium Gateway:
   owns redirects.
 - Standard scrape labels:
   - `platform.guardian.dev/metrics-scrape: "true"`
-  - `platform.guardian.dev/metrics-port: "9090"`
+  - `platform.guardian.dev/metrics-port: "<spec.ports.metrics>"`
   - `platform.guardian.dev/slo-surface: public-http`
 
 Use rolling updates with `maxUnavailable: 0` and positive surge for pod-network
@@ -234,8 +234,9 @@ publish evidence.
 2. Keep site observability config in environment bags and Crossplane APIs, not
    in Guardian CLI render structs.
 3. Mirror Crossplane packages, providers, and functions into the seed registry.
-4. Replace the Go static company site with the TanStack Start/Nitro image while
-   preserving `/healthz`, `/livez`, `/metrics`, and the same Gateway contract.
+4. Keep the TanStack Start/Nitro company-site image behind the
+   `PublicHttpService` envelope while preserving `/healthz`, `/livez`,
+   `/metrics`, and the same Gateway contract.
 5. Introduce Directus publish operations that create content snapshots and OG
    image artifacts.
 6. Wire dev to gamma to prod promotion through signed gate-result artifacts.

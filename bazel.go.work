@@ -3,7 +3,6 @@ go 1.26.4
 use (
 	./src/guardian-cli
 	./src/products/aisucks/services/api
-	./src/products/company/services/site
 	./src/release
 	./src/status
 )

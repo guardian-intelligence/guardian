@@ -92,7 +92,7 @@ var components = []component{{
 	pushOnly: true,
 }, {
 	name:     "company-site",
-	layout:   "_main/src/products/company/services/site/image",
+	layout:   "_main/src/products/company/web/image",
 	pushOnly: true,
 }, {
 	name:     "postgres",
