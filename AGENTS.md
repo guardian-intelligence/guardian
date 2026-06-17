@@ -1,4 +1,4 @@
-Bazel polyglot hermetically sealed monorepo for Guardian, a free open-source self-hostable cloud. The `guardian` CLI owns host lifecycle: stock Ubuntu or Talos maintenance -> Talos/Kubernetes bootstrap substrate. Kubernetes, Crossplane, Flux, and release tooling own runtime desired state.
+Bazel polyglot hermetically sealed monorepo for Guardian, a free open-source self-hostable cloud. The `guardian` CLI owns host lifecycle: stock Ubuntu or Talos maintenance -> Talos/Flux v2 bootstrap. Flux owns GitOps reconciliation across clusters at runtime.
 
 Domain: guardianintelligence.org (abbreviated gi.org)
 
