@@ -12,16 +12,18 @@ the runtime exposes product writes.
 ```text
 guardian up
   -> bootstrap Talos + Cilium + seed registry
-  -> push workspace-built OCI images by digest
-  -> apply Guardian platform/product Crossplane APIs
-  -> apply the site's environment bundle
-  -> converge AisucksProduct through PublicHttpService
+  -> seed OpenBao, Crossplane, provider-kubernetes, Flux, and pinned functions
+  -> push bootstrap-required OCI artifacts by digest
+  -> hand off to Flux/Crossplane
+  -> Crossplane converges AisucksProduct through PublicHttpService
 ```
 
 The current implementation declares `AisucksProduct` in the site environment
 bundle. `AisucksProduct` composes
 `platform.guardian.dev/PublicHttpService`, which renders the Kubernetes
-workload envelope.
+workload envelope. The Guardian CLI is not the product deployment API; it only
+prepares the host and bootstrap substrate required for the cluster reconcilers
+to take over.
 
 ## APIs
 

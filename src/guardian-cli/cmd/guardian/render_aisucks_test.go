@@ -10,12 +10,7 @@ const statusTestImage = "registry.guardian.internal/status@sha256:deadbeef"
 const victoriaMetricsTestImage = "registry.guardian.internal/victoria-metrics@sha256:deadbeef"
 
 func TestAisucksProductAPIRender(t *testing.T) {
-	c := componentByName(t, "aisucks-product-api")
-	rendered, err := renderComponentManifest(c, "", nil, &Site{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := string(rendered)
+	out := buildTestProductPackage(t)
 	for _, want := range []string{
 		"kind: CompositeResourceDefinition",
 		"name: aisucksproducts.products.guardian.dev",
@@ -47,7 +42,7 @@ func TestAisucksEnvironmentBundleInstances(t *testing.T) {
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
 			site := loadTestSite(t, siteName)
-			rendered, err := renderEnvironmentBundle(site, testProductImages())
+			rendered, err := buildTestEnvironmentBundle(site, testProductImages())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -65,7 +60,7 @@ func TestAisucksEnvironmentBundleInstances(t *testing.T) {
 				}
 			}
 			if strings.Contains(out, "{{ index .Images") {
-				t.Error("environment bundle render left image template placeholders unresolved")
+				t.Error("environment bundle left bootstrap image placeholders unresolved")
 			}
 		})
 	}

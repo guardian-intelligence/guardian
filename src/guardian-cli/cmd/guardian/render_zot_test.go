@@ -8,12 +8,7 @@ import (
 const zotTestImage = "registry.guardian.internal/zot@sha256:deadbeef"
 
 func TestOCIRegistryPlatformRender(t *testing.T) {
-	c := componentByName(t, "oci-registry-platform")
-	rendered, err := renderComponentManifest(c, "", nil, &Site{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := string(rendered)
+	out := buildTestPlatformPackage(t)
 	for _, want := range []string{
 		"kind: CompositeResourceDefinition",
 		"name: ociregistries.platform.guardian.dev",
@@ -62,7 +57,7 @@ func TestOCIRegistryEnvironmentBundleInstances(t *testing.T) {
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
 			site := loadTestSite(t, siteName)
-			rendered, err := renderEnvironmentBundle(site, testProductImages())
+			rendered, err := buildTestEnvironmentBundle(site, testProductImages())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -112,9 +107,6 @@ func TestZotImageIsEnvironmentOnly(t *testing.T) {
 	c := componentByName(t, "zot")
 	if !c.pushOnly {
 		t.Fatal("zot image should be consumed by the OCIRegistry environment XR")
-	}
-	if c.manifest != "" {
-		t.Fatalf("zot component still has a direct manifest: %s", c.manifest)
 	}
 	if c.enabled == nil {
 		t.Fatal("zot image push should stay gated by platform.oci.domain")

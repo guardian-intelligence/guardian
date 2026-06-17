@@ -1,0 +1,100 @@
+# blackbox-exporter: the probe engine for cross-site watching. This config
+# holds prober MODULES only (how to probe); the probe TARGETS live in the
+# otel-collector's scrape config, rendered there from environment watch lists —
+# do not add a second target list here. Together with the SiteProbeFailed
+# alert rule this is the Gatus-retirement path; Gatus stays deployed in
+# parallel until a drill-induced cross-site page proves this pipeline.
+#
+# The "observability" Namespace object is owned by the victoria-metrics
+# manifest; this component assumes it already exists.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: blackbox-exporter-config
+  namespace: observability
+data:
+  # Key name matches the image's default --config.file path
+  # (/etc/blackbox_exporter/config.yml), so the Deployment needs no args
+  # override — just a mount over that directory.
+  config.yml: |
+    modules:
+      http_2xx:
+        prober: http
+        timeout: 5s
+        http:
+          # Watch targets are full URLs from the environment and include https://
+          # (sites with domains) as well as http:// (dev, pre-DNS); a plain
+          # HTTP probe must not fail merely for lacking TLS.
+          fail_if_not_ssl: false
+          # Sites with a domain redirect :80 to HTTPS; follow it so the probe
+          # exercises the real serving path, like Gatus does today.
+          follow_redirects: true
+          # Each fleet node has exactly one public IPv4 NIC; don't let a
+          # stray AAAA record send a probe down a path the fleet lacks.
+          preferred_ip_protocol: ip4
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blackbox-exporter
+  namespace: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: blackbox-exporter
+  template:
+    metadata:
+      labels:
+        app: blackbox-exporter
+    spec:
+      # Pod network on purpose (no hostNetwork): probe traffic must leave the
+      # box masqueraded out the public NIC and come back like a real
+      # visitor's return path, so a dead default route, broken DNS, or a
+      # wedged CNI datapath fails the probe. From the host netns a probe of a
+      # locally served target can hairpin over loopback — which the Talos
+      # ingress firewall does not police — and report healthy while real
+      # visitors see nothing.
+      containers:
+        - name: blackbox-exporter
+          image: registry.guardian.internal/blackbox-exporter:bootstrap
+          ports:
+            - name: http
+              containerPort: 9115
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 9115
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          # Modest by design: the exporter holds no state and probes a
+          # handful of URLs; it must never compete with postgres or the app.
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/blackbox_exporter
+      volumes:
+        - name: config
+          configMap:
+            name: blackbox-exporter-config
+---
+# ClusterIP only: the otel-collector scrapes /probe over the pod network (or
+# socket-LB from the host netns). Nothing here touches a host port, so the
+# ingress firewall stays exactly as it is.
+apiVersion: v1
+kind: Service
+metadata:
+  name: blackbox-exporter
+  namespace: observability
+spec:
+  selector:
+    app: blackbox-exporter
+  ports:
+    - name: http
+      port: 9115
+      targetPort: 9115

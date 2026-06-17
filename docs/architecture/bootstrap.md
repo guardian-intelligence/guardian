@@ -31,8 +31,9 @@ converge unattended. Restored Bao reuses the values in the snapshot; missing
 restored paths are explicit schema migrations. Shamir unseal-key custody is
 still secret-zero and must not be hidden in a Kubernetes Secret.
 
-**Layer 2 — everything else.** GitOps reconciliation from OCI artifacts with
-cosign verification at pull time. Not yet present in this repo.
+**Layer 2 — everything else.** GitOps and Crossplane reconciliation from
+signed, digest-addressed artifacts. The CLI may install or seed this
+substrate, but it must not become the runtime deployment engine.
 
 ## guardian CLI
 
@@ -49,9 +50,8 @@ a drill is `guardian down --yes && guardian up`. Both verbs also accept an
 explicit `<bootstrap.yaml>` positional argument, which overrides the configured
 bootstrap path. `guardian config` with no arguments prints the config file path
 and contents. Run both verbs from the repo root: only the configured bootstrap
-path is stored absolute; the paths inside `bootstrap.yaml` (schematic and
-patches), the Crossplane environment bundle, and component manifests are
-repo-root relative.
+path is stored absolute; the paths inside `bootstrap.yaml` and the Crossplane
+environment bag are repo-root relative.
 
 1. `guardian down --yes [bootstrap.yaml]` takes the node to Talos maintenance
    mode with a wiped system disk, from whichever state it is in. A node
@@ -67,7 +67,8 @@ repo-root relative.
    credentials. No provider API is involved; provisioning compute is outside
    guardian's scope. The `--yes` acknowledgement is required because this
    destroys everything on the node.
-2. `guardian up [bootstrap.yaml]` converges from runtime truth. It generates or
+2. `guardian up [bootstrap.yaml]` converges host and bootstrap substrate from
+   runtime truth. It generates or
    reuses the site's Talos secrets bundle (under
    `${XDG_STATE_HOME:-~/.local/state}/guardian/<cluster>/`, never in the
    repo), including Talos's `secretboxEncryptionSecret` for Kubernetes
@@ -85,19 +86,21 @@ repo-root relative.
    site's `StoragePlane`. Product workload pools mount under `/var/mnt`
    because `guardian up` binds that Talos storage root into kubelet with
    shared propagation before local PVs are scheduled. Both paths end with the
-   seed registry up, workspace artifacts pushed into it, and the secrets
+   seed registry up, bootstrap artifacts pushed into it, and the secrets
    substrate converged first. OpenBao applies and becomes reachable; Bao is
    restored or fresh-initialized/unsealed; `kv/` and Kubernetes auth are
-   configured; Crossplane, provider-kubernetes, and pinned functions are
-   installed; the site's Crossplane environment bundle is applied; External
-   Secrets Operator is installed; and declared SecretProjection XRs reconcile.
-   Blocking projections must have ready ExternalSecrets and Kubernetes Secrets
-   before their consumers are treated as converged. Nonblocking projections,
-   such as early Directus authoring secrets, keep the desired state visible and
-   warn on missing Bao values without blocking public serving convergence. An
-   already-sealed restored Bao must be unsealed with injected Shamir keys
-   (`GUARDIAN_OPENBAO_UNSEAL_KEY` or `GUARDIAN_OPENBAO_UNSEAL_KEYS`) before the
-   projection gate can pass.
+   configured; Crossplane, provider-kubernetes, pinned functions, Flux, and
+   External Secrets Operator are installed or made reachable. From there the
+   cluster reconcilers own site desired state. `guardian up` may seed the
+   initial reconciler inputs and wait for required readiness, but it does not
+   choose product versions, evaluate SLO policy, promote channels, or own
+   runtime manifests. Blocking projections must have ready ExternalSecrets and
+   Kubernetes Secrets before their consumers are treated as converged.
+   Nonblocking projections, such as early Directus authoring secrets, keep the
+   desired state visible and warn on missing Bao values without blocking public
+   serving convergence. An already-sealed restored Bao must be unsealed with
+   injected Shamir keys (`GUARDIAN_OPENBAO_UNSEAL_KEY` or
+   `GUARDIAN_OPENBAO_UNSEAL_KEYS`) before the projection gate can pass.
 
 Version pins consumed by the CLI are compile-time constants, and `talosctl`
 and `kubectl` ride in the binary's runfiles; changing what the fleet runs is
@@ -105,21 +108,21 @@ a reviewed commit, and nothing is taken from the operator's PATH.
 
 ## Image transport: the seed registry
 
-Workload images travel controller to node without any external registry or
-registry credential. The workspace is the root of trust; a registry is
-transport for content-addressed bytes the build already produced.
+Bootstrap images travel controller to node without any external registry or
+registry credential. During local drills the workspace is the root of trust; in
+the release path, signed channel artifacts are the root of trust. The seed
+registry is transport for content-addressed bytes the build already produced.
 
 - `up` applies the seed-registry Deployment
-  (`src/infrastructure-components/seed-registry/k8s/seed-registry.yaml`):
+  (`src/k8s/bootstrap/seed-registry/base`):
   CNCF distribution pinned by digest, storage on the node's `/var`, a fixed
   ClusterIP, and no exposure outside the cluster.
-- Pushes happen through a kubectl port-forward: guardian reads each
-  component's Bazel-built OCI layout from its runfiles and pushes it by
-  digest with go-containerregistry. No docker daemon, no credentials beyond
-  the Talos PKI.
+- Pushes happen through a kubectl port-forward: guardian reads required
+  Bazel-built OCI layouts from its runfiles and pushes them by digest with
+  go-containerregistry. No docker daemon, no credentials beyond the Talos PKI.
 - Pulls happen through a Talos registry mirror
   (`src/sites/<site>/talos/patches/registry-mirror.yaml`): manifests
-  reference `registry.guardian.internal/<component>@<built digest>`, a
+  reference `registry.guardian.internal/<artifact>@<built digest>`, a
   virtual name containerd resolves to the seed registry's ClusterIP from the
   host netns. Manifests never name a real registry, so the transport can
   change (node-local, in-cluster, hosted) without touching workloads.

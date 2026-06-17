@@ -7,17 +7,7 @@ import (
 )
 
 func TestEdgeGatewayPlatformRender(t *testing.T) {
-	c := componentByName(t, "edge-gateway-platform")
-	tmpl, err := toolPath("_main/" + c.manifest)
-	if err != nil {
-		t.Fatalf("locate edge gateway platform manifest: %v", err)
-	}
-	c.manifest = tmpl
-	rendered, err := renderComponentManifest(c, "", nil, &Site{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := string(rendered)
+	out := buildTestPlatformPackage(t)
 	for _, want := range []string{
 		"kind: CompositeResourceDefinition",
 		"name: edgegateways.platform.guardian.dev",
@@ -28,7 +18,8 @@ func TestEdgeGatewayPlatformRender(t *testing.T) {
 		"kind: Gateway",
 		"kind: ClusterIssuer",
 		"kind: Certificate",
-		"providerConfigRef:\n                name: edge-gateway",
+		"providerConfigRef:",
+		"name: edge-gateway",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("edge gateway platform render missing %q", want)

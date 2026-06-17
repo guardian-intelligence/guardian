@@ -11,14 +11,12 @@ import (
 // prod's otel-collector must render byte-identical to the metrics-only spine
 // (no logs pipeline, no hostPath log mounts, no runAsUser: 0).
 func TestClickhouseSiteGate(t *testing.T) {
-	chTmpl, err := toolPath("_main/src/infrastructure-components/clickhouse/k8s/clickhouse.yaml.tmpl")
+	kubectl, err := kubectlPath()
 	if err != nil {
-		t.Fatalf("locate clickhouse manifest: %v", err)
+		t.Fatalf("locate kubectl: %v", err)
 	}
-	otelTmpl, err := toolPath("_main/src/infrastructure-components/otel-collector/k8s/otel-collector.yaml.tmpl")
-	if err != nil {
-		t.Fatalf("locate otel-collector manifest: %v", err)
-	}
+	clickhouse := componentByName(t, "clickhouse")
+	otelCollector := componentByName(t, "otel-collector")
 	const (
 		chImage   = "registry.guardian.internal/clickhouse@sha256:deadbeef"
 		otelImage = "registry.guardian.internal/otel-collector@sha256:deadbeef"
@@ -27,14 +25,7 @@ func TestClickhouseSiteGate(t *testing.T) {
 	wantEnabled := map[string]bool{"dev": true, "gamma": true, "prod": false}
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
-			sitePath, err := toolPath("_main/src/sites/" + siteName + "/bootstrap.yaml")
-			if err != nil {
-				t.Fatalf("locate bootstrap.yaml: %v", err)
-			}
-			site, err := loadSite(sitePath)
-			if err != nil {
-				t.Fatal(err)
-			}
+			site := loadTestSite(t, siteName)
 			if site.Clickhouse.Enabled != wantEnabled[siteName] {
 				t.Fatalf("site %s ObservabilityStack clickhouse.enabled = %v, want %v (the ledger ratchet: dev+gamma on, prod off)",
 					siteName, site.Clickhouse.Enabled, wantEnabled[siteName])
@@ -42,7 +33,7 @@ func TestClickhouseSiteGate(t *testing.T) {
 
 			// The clickhouse manifest itself is site-independent; what gates
 			// prod is the components-table enabled func, mirrored here.
-			rendered, err := renderManifest(chTmpl, chImage, site)
+			rendered, err := buildComponentKustomization(kubectl, clickhouse, map[string]string{"clickhouse": chImage}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -54,14 +45,14 @@ func TestClickhouseSiteGate(t *testing.T) {
 			}
 
 			// The collector's ledger tee follows the same flag.
-			otelRendered, err := renderManifest(otelTmpl, otelImage, site)
+			otelRendered, err := buildComponentKustomization(kubectl, otelCollector, map[string]string{"otel-collector": otelImage}, site)
 			if err != nil {
 				t.Fatal(err)
 			}
 			out := string(otelRendered)
 			decodeKinds(t, otelRendered) // structural validity
-			// Key forms ("filelog:") not bare words: the template's header
-			// comment names the receivers unconditionally.
+			// Key forms ("filelog:") not bare words: comments may name
+			// receivers unconditionally.
 			ledgerMarkers := []string{
 				"filelog:",
 				"k8sobjects:",

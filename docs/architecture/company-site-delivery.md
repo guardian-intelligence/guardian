@@ -26,7 +26,7 @@ Layer the site like this:
 
 | Layer | Owner | Current state | Responsibility |
 | - | - | - | - |
-| Talos/Kubernetes | `guardian up` | live | Node bootstrap, Cilium, seed registry, OpenBao, pinned component manifests. |
+| Talos/Kubernetes | `guardian up` | live | Host bootstrap, Cilium bootstrap, seed registry, OpenBao, Crossplane/Flux substrate, and readiness handoff. |
 | Platform substrate | Crossplane + provider-kubernetes | live for `EdgeGateway` | GatewayClass/Gateway/listeners, shared edge policy, future common platform envelopes. |
 | Public service envelope | `platform.guardian.dev/PublicHttpService` | Crossplane XRD/Composition | Namespace, Deployment, Service, Gateway routes, health probes, metrics labels, rollout defaults. |
 | Product declaration | `products.guardian.dev/CompanySite` | Crossplane XRD/Composition | Chooses image/content digest/domain and composes the public service envelope plus content backend references. |
@@ -86,22 +86,13 @@ cleanly in template input.
 
 Site configuration is split across pre-Kubernetes bootstrap facts and
 post-Kubernetes desired state. Crossplane can own only the second group because
-it runs after Kubernetes exists. The durable split is:
-
-```text
-src/sites/<site>/
-  bootstrap.yaml         # physical facts and Talos input
-
-src/crossplane/environments/<site>/
-  environment.yaml       # EnvironmentConfig plus XR instances
-```
+it runs after Kubernetes exists.
 
 `bootstrap.yaml` is consumed by `guardian up` before the API server exists. It
 contains physical facts that must never be copied across boxes: MAC addresses,
 disk serials, gateways, hostnames, endpoints, and Talos patch lists.
 
-`environment.yaml` is the "bag of composition configuration" for a site. It
-contains:
+The environment bag is post-bootstrap desired state for a site. It contains:
 
 - one `EnvironmentConfig` labeled with `guardian.dev/site=<site>`;
 - root platform XRs such as `GuardianSite`, `ObservabilityStack`,
@@ -110,45 +101,26 @@ contains:
 - SLO/synthetic declarations consumed by the observability compositions and
   release judge.
 
-`guardian up` should shrink to this sequence:
+`guardian up` owns the host/bootstrap sequence:
 
 1. Read `bootstrap.yaml`.
 2. Generate/apply Talos machine config.
 3. Ensure the seed registry, OpenBao, Crossplane, provider-kubernetes, and
    pinned composition functions are installed.
-4. Push Bazel-built OCI layouts to the seed registry by digest.
-5. Apply the site environment bundle.
-6. Wait for root XRs and required capability XRs to report ready.
+4. Install or seed Flux and any bootstrap-only desired-state inputs.
+5. Push bootstrap-required Bazel-built OCI layouts to the seed registry by
+   digest.
+6. Wait for root reconcilers, XRs, and required capability XRs to report ready.
 
 The important consequence: environments differ by XR specs and
 `EnvironmentConfig` data, not by copied component templates. Dev, gamma, and
 prod are different bags of composition input over the same platform APIs.
+Release promotion and product version selection happen outside the CLI.
 
-## Crossplane package layout
+## Crossplane packages
 
 Keep platform APIs and product APIs separate even while they live in one
-monorepo:
-
-```text
-src/crossplane/
-  packages/
-    guardian-platform/
-      apis/                # XRDs
-      compositions/        # Composition pipelines
-      examples/            # small XR examples
-      tests/               # render/schema tests
-      crossplane.yaml      # package metadata
-    guardian-products/
-      apis/
-      compositions/
-      examples/
-      tests/
-      crossplane.yaml
-  environments/
-    dev/
-    gamma/
-    prod/
-```
+monorepo.
 
 `guardian-platform` owns reusable capabilities: Gateway, public service
 envelopes, secret projection, observability, registry, database/storage

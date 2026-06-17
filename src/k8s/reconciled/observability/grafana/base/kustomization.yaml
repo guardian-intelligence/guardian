@@ -1,0 +1,8 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - grafana.yaml
+images:
+  - name: registry.guardian.internal/grafana
+    newName: registry.guardian.internal/grafana
+    newTag: bootstrap

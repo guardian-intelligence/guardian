@@ -8,6 +8,37 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func buildTestEnvironmentBundle(site *Site, images map[string]string) ([]byte, error) {
+	kubectl, err := kubectlPath()
+	if err != nil {
+		return nil, err
+	}
+	return buildEnvironmentKustomization(kubectl, site, images)
+}
+
+func buildTestPlatformPackage(t *testing.T) string {
+	t.Helper()
+	return buildTestKustomization(t, "src/crossplane/packages/guardian-platform")
+}
+
+func buildTestProductPackage(t *testing.T) string {
+	t.Helper()
+	return buildTestKustomization(t, "src/crossplane/packages/guardian-products")
+}
+
+func buildTestKustomization(t *testing.T, path string) string {
+	t.Helper()
+	kubectl, err := kubectlPath()
+	if err != nil {
+		t.Fatalf("locate kubectl: %v", err)
+	}
+	rendered, err := buildKustomization(kubectl, path, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(rendered)
+}
+
 func decodeKinds(t *testing.T, manifest []byte) []string {
 	t.Helper()
 	dec := yaml.NewDecoder(bytes.NewReader(manifest))

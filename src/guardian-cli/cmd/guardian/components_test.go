@@ -18,8 +18,8 @@ func TestComponentsTable(t *testing.T) {
 		if c.name == "" {
 			t.Errorf("components[%d]: name is required", i)
 		}
-		if c.manifest == "" && !c.pushOnly {
-			t.Errorf("components[%d]: manifest is required unless pushOnly (got name=%q)", i, c.name)
+		if c.kustomization == "" && !c.pushOnly {
+			t.Errorf("components[%d]: kustomization is required unless pushOnly (got name=%q)", i, c.name)
 		}
 		if c.pushOnly && len(c.imageLayouts()) == 0 {
 			t.Errorf("component %q is pushOnly but has no image layout", c.name)
@@ -38,29 +38,15 @@ func TestComponentsTable(t *testing.T) {
 		why    string
 	}{
 		{"crossplane", "provider-kubernetes", "Crossplane package CRDs and controllers must exist before provider packages"},
-		{"cert-manager", "edge-gateway-platform", "platform TLS certificates require cert-manager CRDs"},
+		{"cert-manager", "guardian-platform", "platform TLS certificates require cert-manager CRDs"},
 		{"provider-kubernetes", "provider-kubernetes-config", "ProviderConfig requires provider-kubernetes CRDs"},
-		{"provider-kubernetes-config", "edge-gateway-platform", "the EdgeGateway composition emits provider-kubernetes Objects"},
-		{"provider-kubernetes-config", "secret-projection-platform", "the SecretProjection composition emits provider-kubernetes Objects"},
-		{"provider-kubernetes-config", "storage-plane-platform", "the StoragePlane composition emits provider-kubernetes Objects"},
-		{"storage-plane-platform", "directus-platform", "storage API loads before PVC-consuming platform APIs"},
-		{"storage-plane-platform", "observability-stack-platform", "storage API loads before PVC-consuming platform APIs"},
-		{"storage-plane-platform", "oci-registry-platform", "storage API loads before PVC-consuming platform APIs"},
-		{"provider-kubernetes-config", "public-http-service-platform", "the PublicHttpService composition emits provider-kubernetes Objects"},
-		{"provider-kubernetes-config", "directus-platform", "the DirectusInstance composition emits provider-kubernetes Objects"},
-		{"provider-kubernetes-config", "observability-stack-platform", "the ObservabilityStack composition uses Crossplane functions"},
-		{"provider-kubernetes-config", "slo-profile-platform", "the SLOProfile/SyntheticCheck compositions use Crossplane functions"},
-		{"provider-kubernetes-config", "status-surface-platform", "the StatusSurface composition uses Crossplane functions"},
-		{"observability-stack-platform", "slo-profile-platform", "observability APIs load before SLO/synthetic APIs consume the stack shape"},
-		{"provider-kubernetes-config", "oci-registry-platform", "the OCIRegistry composition emits provider-kubernetes Objects"},
-		{"slo-profile-platform", "aisucks-product-api", "SLO and synthetic APIs are part of the platform package"},
-		{"public-http-service-platform", "aisucks-product-api", "product APIs compose PublicHttpService"},
-		{"public-http-service-platform", "company-site-product-api", "product APIs compose PublicHttpService"},
-		{"oci-registry-platform", "zot", "the zot image is consumed by the OCIRegistry XR"},
-		{"aisucks-product-api", "aisucks", "product images are consumed by product XRs"},
-		{"company-site-product-api", "company-site", "product images are consumed by product XRs"},
+		{"provider-kubernetes-config", "guardian-platform", "platform compositions emit provider-kubernetes Objects"},
+		{"guardian-platform", "guardian-products", "product APIs compose platform APIs"},
+		{"guardian-platform", "zot", "the zot image is consumed by the OCIRegistry XR"},
+		{"guardian-products", "aisucks", "product images are consumed by product XRs"},
+		{"guardian-products", "company-site", "product images are consumed by product XRs"},
 		{"postgres", "local-storage-bootstrap", "the ZFS initializer reuses the pinned Postgres shell image"},
-		{"status-surface-platform", "status", "the status image is consumed by the StatusSurface XR"},
+		{"guardian-platform", "status", "the status image is consumed by the StatusSurface XR"},
 		{"openbao", "external-secrets", "ESO authenticates to Bao"},
 		{"external-secrets", "clickhouse", "ClickHouse requires clickhouse-admin at pod config time"},
 		{"external-secrets", "grafana", "Grafana requires grafana-admin at pod config time"},

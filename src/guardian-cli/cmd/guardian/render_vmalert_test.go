@@ -6,19 +6,12 @@ import (
 )
 
 func TestVMAlertRenderPinsCompanySiteRule(t *testing.T) {
-	tmpl, err := toolPath("_main/src/infrastructure-components/vmalert/k8s/vmalert.yaml.tmpl")
+	kubectl, err := kubectlPath()
 	if err != nil {
-		t.Fatalf("locate vmalert manifest: %v", err)
+		t.Fatalf("locate kubectl: %v", err)
 	}
-	sitePath, err := toolPath("_main/src/sites/dev/bootstrap.yaml")
-	if err != nil {
-		t.Fatalf("locate bootstrap.yaml: %v", err)
-	}
-	site, err := loadSite(sitePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rendered, err := renderManifest(tmpl, "registry.guardian.internal/vmalert@sha256:deadbeef", site)
+	c := componentByName(t, "vmalert")
+	rendered, err := buildComponentKustomization(kubectl, c, map[string]string{"vmalert": "registry.guardian.internal/vmalert@sha256:deadbeef"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

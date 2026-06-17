@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - directus-instance.yaml
+  - edge-gateway.yaml
+  - observability-stack.yaml
+  - oci-registry.yaml
+  - public-http-service.yaml
+  - secret-projection.yaml
+  - slo-profile.yaml
+  - status-surface.yaml
+  - storage-plane.yaml

@@ -14,26 +14,21 @@ import (
 )
 
 // component pairs a Bazel-built OCI layout (riding in the guardian binary's
-// runfiles) with the manifest template it feeds. Workload image references
+// runfiles) with the Kubernetes desired-state unit it feeds. Image references
 // are computed as registry.guardian.internal/<name>@<built digest>: what runs
 // is byte-for-byte what the workspace built.
 type component struct {
 	name string
 	// layout is the runfiles path of the rules_oci OCI layout directory.
-	// Empty means manifest-only: nothing to push, no image ref — the
-	// manifest template must never reference .Image.
+	// Empty means the component only applies Kubernetes state.
 	layout string
-	// manifest is the repo-root-relative manifest template. Empty is valid only
-	// for push-only image inputs consumed by Crossplane environment bundles.
-	manifest string
-	pushOnly bool
-	// rawManifest skips Guardian's Go-template renderer. This is for manifests
-	// that intentionally contain another controller's template language, such
-	// as Crossplane function-go-templating compositions.
-	rawManifest bool
-	// images is for components that render several image refs into one
-	// manifest, such as cert-manager. Keys are the seed-registry repository
-	// names and are exposed to templates as .Images.
+	// kustomization is the repo-root-relative Kustomize root. It replaces
+	// manifest for components whose Kubernetes state is plain YAML.
+	kustomization string
+	pushOnly      bool
+	// images is for components that patch several image refs into one
+	// Kustomize root, such as cert-manager. Keys are the seed-registry
+	// repository names.
 	images []componentImage
 	// enabled gates the component per site; nil converges on every site.
 	// A manifest-only component MUST be gated (TestComponentsTable pins
@@ -48,17 +43,17 @@ type componentImage struct {
 }
 
 var components = []component{{
-	name:     "openbao",
-	layout:   "_main/src/infrastructure-components/openbao/image",
-	manifest: "src/infrastructure-components/openbao/k8s/openbao.yaml.tmpl",
+	name:          "openbao",
+	layout:        "_main/src/infrastructure-components/openbao/image",
+	kustomization: "src/k8s/bootstrap/openbao/base",
 }, {
-	name:     "crossplane",
-	layout:   "_main/src/infrastructure-components/crossplane/image",
-	manifest: "src/infrastructure-components/crossplane/k8s/crossplane.yaml.tmpl",
+	name:          "crossplane",
+	layout:        "_main/src/infrastructure-components/crossplane/image",
+	kustomization: "src/k8s/bootstrap/crossplane/base",
 }, {
-	name:     "cert-manager",
-	manifest: "src/infrastructure-components/cert-manager/k8s/cert-manager.yaml.tmpl",
-	enabled:  siteUsesPlatformTLS,
+	name:          "cert-manager",
+	kustomization: "src/k8s/bootstrap/cert-manager/base",
+	enabled:       siteUsesPlatformTLS,
 	images: []componentImage{{
 		name:   "cert-manager-cainjector",
 		layout: "_main/src/infrastructure-components/cert-manager/cainjector",
@@ -76,68 +71,21 @@ var components = []component{{
 		layout: "_main/src/infrastructure-components/cert-manager/acmesolver",
 	}},
 }, {
-	name:     "provider-kubernetes",
-	manifest: "src/infrastructure-components/crossplane-provider-kubernetes/k8s/provider-kubernetes.yaml",
-	enabled:  siteUsesCrossplane,
+	name:          "provider-kubernetes",
+	kustomization: "src/k8s/bootstrap/provider-kubernetes/package",
+	enabled:       siteUsesCrossplane,
 }, {
-	name:     "provider-kubernetes-config",
-	manifest: "src/infrastructure-components/crossplane-provider-kubernetes/k8s/provider-kubernetes-config.yaml",
-	enabled:  siteUsesCrossplane,
+	name:          "provider-kubernetes-config",
+	kustomization: "src/k8s/bootstrap/provider-kubernetes/config",
+	enabled:       siteUsesCrossplane,
 }, {
-	name:        "edge-gateway-platform",
-	manifest:    "src/crossplane/packages/guardian-platform/edge-gateway.yaml",
-	rawManifest: true,
-	enabled:     siteUsesCrossplane,
+	name:          "guardian-platform",
+	kustomization: "src/crossplane/packages/guardian-platform",
+	enabled:       siteUsesCrossplane,
 }, {
-	name:        "secret-projection-platform",
-	manifest:    "src/crossplane/packages/guardian-platform/secret-projection.yaml",
-	rawManifest: true,
-	enabled:     siteUsesCrossplane,
-}, {
-	name:        "storage-plane-platform",
-	manifest:    "src/crossplane/packages/guardian-platform/storage-plane.yaml",
-	rawManifest: true,
-	enabled:     siteUsesCrossplane,
-}, {
-	name:        "public-http-service-platform",
-	manifest:    "src/crossplane/packages/guardian-platform/public-http-service.yaml",
-	rawManifest: true,
-	enabled:     siteUsesCrossplane,
-}, {
-	name:        "directus-platform",
-	manifest:    "src/crossplane/packages/guardian-platform/directus-instance.yaml",
-	rawManifest: true,
-	enabled:     siteUsesCrossplane,
-}, {
-	name:        "observability-stack-platform",
-	manifest:    "src/crossplane/packages/guardian-platform/observability-stack.yaml",
-	rawManifest: true,
-	enabled:     siteUsesCrossplane,
-}, {
-	name:        "slo-profile-platform",
-	manifest:    "src/crossplane/packages/guardian-platform/slo-profile.yaml",
-	rawManifest: true,
-	enabled:     siteUsesCrossplane,
-}, {
-	name:        "status-surface-platform",
-	manifest:    "src/crossplane/packages/guardian-platform/status-surface.yaml",
-	rawManifest: true,
-	enabled:     siteUsesCrossplane,
-}, {
-	name:        "oci-registry-platform",
-	manifest:    "src/crossplane/packages/guardian-platform/oci-registry.yaml",
-	rawManifest: true,
-	enabled:     siteUsesCrossplane,
-}, {
-	name:        "aisucks-product-api",
-	manifest:    "src/crossplane/packages/guardian-products/aisucks-product.yaml",
-	rawManifest: true,
-	enabled:     siteUsesCrossplane,
-}, {
-	name:        "company-site-product-api",
-	manifest:    "src/crossplane/packages/guardian-products/company-site.yaml",
-	rawManifest: true,
-	enabled:     siteUsesCrossplane,
+	name:          "guardian-products",
+	kustomization: "src/crossplane/packages/guardian-products",
+	enabled:       siteUsesCrossplane,
 }, {
 	name:     "aisucks",
 	layout:   "_main/src/products/aisucks/services/api/image",
@@ -151,17 +99,17 @@ var components = []component{{
 	layout:   "_main/src/infrastructure-components/postgres/image",
 	pushOnly: true,
 }, {
-	name:     "local-storage-bootstrap",
-	manifest: "src/infrastructure-components/local-storage/k8s/zfs-pool-init.yaml.tmpl",
-	enabled:  siteUsesLocalStorage,
+	name:          "local-storage-bootstrap",
+	kustomization: "src/k8s/bootstrap/local-storage/base",
+	enabled:       siteUsesLocalStorage,
 }, {
 	name:     "directus",
 	layout:   "_main/src/infrastructure-components/directus/image",
 	pushOnly: true,
 }, {
-	name:     "gatus",
-	layout:   "_main/src/infrastructure-components/gatus/image",
-	manifest: "src/infrastructure-components/gatus/k8s/gatus.yaml.tmpl",
+	name:          "gatus",
+	layout:        "_main/src/infrastructure-components/gatus/image",
+	kustomization: "src/k8s/reconciled/observability/gatus/base",
 }, {
 	// ObservabilityStack consumes this image from the environment bundle and
 	// owns the observability Namespace/Deployment/Service through Crossplane.
@@ -172,13 +120,13 @@ var components = []component{{
 	// Cluster-wide controller for SecretProjection's namespace-scoped
 	// SecretStores and ExternalSecrets. Source access remains bounded by
 	// per-projection OpenBao policies and Kubernetes auth roles.
-	name:     "external-secrets",
-	layout:   "_main/src/infrastructure-components/external-secrets/image",
-	manifest: "src/infrastructure-components/external-secrets/k8s/external-secrets.yaml.tmpl",
+	name:          "external-secrets",
+	layout:        "_main/src/infrastructure-components/external-secrets/image",
+	kustomization: "src/k8s/bootstrap/external-secrets/base",
 }, {
-	name:     "kube-state-metrics",
-	layout:   "_main/src/infrastructure-components/kube-state-metrics/image",
-	manifest: "src/infrastructure-components/kube-state-metrics/k8s/kube-state-metrics.yaml.tmpl",
+	name:          "kube-state-metrics",
+	layout:        "_main/src/infrastructure-components/kube-state-metrics/image",
+	kustomization: "src/k8s/reconciled/observability/kube-state-metrics/base",
 }, {
 	// clickhouse after ObservabilityStack (the observability Namespace and
 	// VictoriaMetrics owner) and before otel-collector: the collector's
@@ -186,42 +134,42 @@ var components = []component{{
 	// pipeline with its ledger behind. List order is apply order and no test
 	// pins this pair — this comment carries the invariant. Site-gated like
 	// gateway (the ledger ratchet: dev → gamma → prod); the otel-collector
-	// template branches on the same flag, so a non-ledger site's collector
-	// renders byte-identical to the metrics-only spine. The otel schema is
-	// NOT applied here: docs/runbooks/ledger.md applies k8s/ddl/ by hand
+	// config patches branch on the same flag, so a non-ledger site's collector
+	// stays byte-identical to the metrics-only spine. The otel schema is
+	// NOT applied here: docs/runbooks/ledger.md applies clickhouse/ddl/ by hand
 	// and the exporter runs create_schema: false.
-	name:     "clickhouse",
-	layout:   "_main/src/infrastructure-components/clickhouse/image",
-	manifest: "src/infrastructure-components/clickhouse/k8s/clickhouse.yaml.tmpl",
-	enabled:  func(s *Site) bool { return s.Clickhouse.Enabled },
+	name:          "clickhouse",
+	layout:        "_main/src/infrastructure-components/clickhouse/image",
+	kustomization: "src/k8s/reconciled/observability/clickhouse/base",
+	enabled:       func(s *Site) bool { return s.Clickhouse.Enabled },
 }, {
-	name:     "otel-collector",
-	layout:   "_main/src/infrastructure-components/otel-collector/image",
-	manifest: "src/infrastructure-components/otel-collector/k8s/otel-collector.yaml.tmpl",
+	name:          "otel-collector",
+	layout:        "_main/src/infrastructure-components/otel-collector/image",
+	kustomization: "src/k8s/reconciled/observability/otel-collector/base",
 }, {
 	// After ObservabilityStack: alertmanager assumes the observability
 	// Namespace and VictoriaMetrics service already exist.
-	name:     "alertmanager",
-	layout:   "_main/src/infrastructure-components/alertmanager/image",
-	manifest: "src/infrastructure-components/alertmanager/k8s/alertmanager.yaml.tmpl",
+	name:          "alertmanager",
+	layout:        "_main/src/infrastructure-components/alertmanager/image",
+	kustomization: "src/k8s/reconciled/observability/alertmanager/base",
 }, {
 	// vmalert after ObservabilityStack (owns the observability Namespace and
 	// VictoriaMetrics datasource) and alertmanager (the notifier): it retries
 	// both, but there is no reason to start rule eval with its backends
 	// behind.
-	name:     "vmalert",
-	layout:   "_main/src/infrastructure-components/vmalert/image",
-	manifest: "src/infrastructure-components/vmalert/k8s/vmalert.yaml.tmpl",
+	name:          "vmalert",
+	layout:        "_main/src/infrastructure-components/vmalert/image",
+	kustomization: "src/k8s/reconciled/observability/vmalert/base",
 }, {
-	name:     "blackbox-exporter",
-	layout:   "_main/src/infrastructure-components/blackbox-exporter/image",
-	manifest: "src/infrastructure-components/blackbox-exporter/k8s/blackbox-exporter.yaml.tmpl",
+	name:          "blackbox-exporter",
+	layout:        "_main/src/infrastructure-components/blackbox-exporter/image",
+	kustomization: "src/k8s/reconciled/observability/blackbox-exporter/base",
 }, {
 	// grafana after ObservabilityStack: the observability Namespace object is
 	// owned by Crossplane, and the datasource points at the VM service.
-	name:     "grafana",
-	layout:   "_main/src/infrastructure-components/grafana/image",
-	manifest: "src/infrastructure-components/grafana/k8s/grafana.yaml.tmpl",
+	name:          "grafana",
+	layout:        "_main/src/infrastructure-components/grafana/image",
+	kustomization: "src/k8s/reconciled/observability/grafana/base",
 }, {
 	// StatusSurface consumes this image from the environment bundle and owns
 	// the status Namespace/Deployment/Service/TLSRoute objects through
@@ -265,16 +213,16 @@ func (c component) imageLayouts() []componentImage {
 	return out
 }
 
-// seedRegistryManifest is substrate applied by `up` before any component:
+// seedRegistryKustomization is substrate applied by `up` before any component:
 // the in-cluster registry that workspace artifacts are pushed through.
 // (The CNI sits even lower and guardian deliberately knows nothing about
 // it: Cilium ships as a Talos inlineManifests patch — see
 // src/infrastructure-components/cilium/ — applied by Talos's own bootstrap
 // manifest controller, the same mechanism that deployed flannel.)
 const (
-	seedRegistryManifest = "src/infrastructure-components/seed-registry/k8s/seed-registry.yaml"
-	mirrorHost           = "registry.guardian.internal"
-	pushLocalPort        = 53000
+	seedRegistryKustomization = "src/k8s/bootstrap/seed-registry/base"
+	mirrorHost                = "registry.guardian.internal"
+	pushLocalPort             = 53000
 )
 
 // layoutDigest reads the single image manifest digest from an OCI layout.
@@ -322,30 +270,80 @@ func pushLayout(dir, endpoint, repo string) (v1.Hash, error) {
 // withPortForward runs fn while a kubectl port-forward to namespace/target is
 // up on localPort→remotePort, and tears the forward down afterwards. The
 // endpoint handed to fn is plain-HTTP loopback: forwards only ever carry
-// traffic on localhost. readyTimeout bounds the wait for the local socket —
-// short for best-effort probes, generous for converge steps.
+// traffic on localhost. readyTimeout bounds the total wait for a usable local
+// socket; short-lived port-forward failures are retried inside that budget.
 func withPortForward(kubectl, kubeconfig, namespace, target string, localPort, remotePort int, readyTimeout time.Duration, fn func(endpoint string) error) error {
-	cmd := exec.Command(kubectl, "--kubeconfig", kubeconfig, "-n", namespace,
-		"port-forward", target, fmt.Sprintf("%d:%d", localPort, remotePort))
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("port-forward %s/%s: %w", namespace, target, err)
-	}
-	defer func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	}()
 	endpoint := fmt.Sprintf("127.0.0.1:%d", localPort)
-	err := poll(fmt.Sprintf("port-forward %s/%s", namespace, target), readyTimeout, 2*time.Second, func() error {
-		conn, derr := net.DialTimeout("tcp", endpoint, time.Second)
-		if derr != nil {
-			return derr
+	deadline := time.Now().Add(readyTimeout)
+	var lastErr error
+	for {
+		if remaining := time.Until(deadline); remaining <= 0 {
+			return fmt.Errorf("timed out after %s waiting for port-forward %s/%s: %v", readyTimeout, namespace, target, lastErr)
 		}
-		return conn.Close()
-	})
-	if err != nil {
-		return err
+		cmd := exec.Command(kubectl, "--kubeconfig", kubeconfig, "-n", namespace,
+			"port-forward", target, fmt.Sprintf("%d:%d", localPort, remotePort))
+		cmd.Stdout = os.Stderr
+		cmd.Stderr = os.Stderr
+		if err := cmd.Start(); err != nil {
+			lastErr = fmt.Errorf("start port-forward: %w", err)
+			fmt.Fprintf(os.Stderr, "waiting for port-forward %s/%s (retry in 2s)\n", namespace, target)
+			sleepUntil(deadline, 2*time.Second)
+			continue
+		}
+		done := make(chan error, 1)
+		go func() {
+			done <- cmd.Wait()
+		}()
+		if err := waitPortForwardEndpoint(endpoint, deadline, done); err == nil {
+			defer stopPortForward(cmd, done)
+			return fn(endpoint)
+		} else {
+			lastErr = err
+			stopPortForward(cmd, done)
+			fmt.Fprintf(os.Stderr, "waiting for port-forward %s/%s (retry in 2s)\n", namespace, target)
+			sleepUntil(deadline, 2*time.Second)
+		}
 	}
-	return fn(endpoint)
+}
+
+func waitPortForwardEndpoint(endpoint string, deadline time.Time, done <-chan error) error {
+	var lastErr error
+	for {
+		select {
+		case err := <-done:
+			if err != nil {
+				return fmt.Errorf("port-forward exited before ready: %w", err)
+			}
+			return fmt.Errorf("port-forward exited before ready")
+		default:
+		}
+		conn, err := net.DialTimeout("tcp", endpoint, time.Second)
+		if err == nil {
+			return conn.Close()
+		}
+		lastErr = err
+		if time.Until(deadline) <= 0 {
+			return lastErr
+		}
+		sleepUntil(deadline, 500*time.Millisecond)
+	}
+}
+
+func stopPortForward(cmd *exec.Cmd, done <-chan error) {
+	if cmd.Process != nil {
+		_ = cmd.Process.Kill()
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+	}
+}
+
+func sleepUntil(deadline time.Time, d time.Duration) {
+	if remaining := time.Until(deadline); remaining < d {
+		d = remaining
+	}
+	if d > 0 {
+		time.Sleep(d)
+	}
 }

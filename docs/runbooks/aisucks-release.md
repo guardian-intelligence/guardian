@@ -33,24 +33,27 @@ export RUNFILES_DIR="$(bazelisk info bazel-bin 2>/dev/null)/src/guardian-cli/cmd
 
 ## PR previews (dev.aisucks.app)
 
-Dev serves whatever the workspace last converged — that IS the preview
-mechanism. To preview a branch:
+Dev should follow the release channel once Flux is in place. During the
+bootstrap transition, a branch can still be converged manually for a one-off
+dev preview, but that is a drill/preview path, not the release mechanism:
 
 ```sh
 git checkout <branch>
 bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/sites/dev/bootstrap.yaml
 ```
 
-One preview at a time; converging main puts dev back. No CI hook yet — when a
-forge with PRs exists, the hook is exactly this command.
+One preview at a time; converging main puts dev back. Do not grow product
+promotion logic in the Guardian CLI. The durable hook is channel admission
+plus Flux reconciliation.
 
 ## 0. Secret projection
 
-The observability stack's `grafana-admin` Kubernetes Secret is projected
-from `kv/guardian/<site>/observability/grafana-admin` in OpenBao by the site's
-`SecretProjection`. `guardian up` generates the value on a fresh Bao and waits for the projection before
-applying Grafana. Never run `kubectl create secret generic grafana-admin`
-by hand.
+The observability stack's `grafana-admin` Kubernetes Secret is projected from
+`kv/guardian/<site>/observability/grafana-admin` in OpenBao by the site's
+`SecretProjection`. `guardian up` generates the value on a fresh Bao and waits
+for the projection before the observability substrate is treated as ready.
+Flux/Crossplane own the Grafana desired state after bootstrap handoff. Never
+run `kubectl create secret generic grafana-admin` by hand.
 
 Config-bearing observability components (otel-collector, alertmanager) do
 NOT restart on ConfigMap-only changes — after editing environment watch lists

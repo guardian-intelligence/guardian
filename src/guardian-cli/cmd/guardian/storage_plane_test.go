@@ -43,12 +43,7 @@ func TestStoragePlaneSiteManifests(t *testing.T) {
 }
 
 func TestStoragePlanePlatformRender(t *testing.T) {
-	c := componentByName(t, "storage-plane-platform")
-	rendered, err := renderComponentManifest(c, "", nil, &Site{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := string(rendered)
+	out := buildTestPlatformPackage(t)
 	for _, want := range []string{
 		"kind: CompositeResourceDefinition",
 		"name: storageplanes.platform.guardian.dev",
@@ -69,9 +64,13 @@ func TestStoragePlanePlatformRender(t *testing.T) {
 }
 
 func TestLocalStorageBootstrapRender(t *testing.T) {
+	kubectl, err := kubectlPath()
+	if err != nil {
+		t.Fatalf("locate kubectl: %v", err)
+	}
 	site := loadTestSite(t, "dev")
 	c := componentByName(t, "local-storage-bootstrap")
-	rendered, err := renderComponentManifest(c, "", map[string]string{"postgres": postgresTestImage}, site)
+	rendered, err := buildComponentKustomization(kubectl, c, map[string]string{"postgres": postgresTestImage}, site)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,10 +80,12 @@ func TestLocalStorageBootstrapRender(t *testing.T) {
 		"name: zfs-pool-init",
 		"namespace: guardian-storage",
 		"image: " + postgresTestImage,
-		`pool="guardian"`,
-		`serial="362510FD7C47"`,
-		`mountpoint="/var/mnt/guardian"`,
-		`ensure_dataset "/var/mnt/guardian/victoria-metrics"`,
+		"name: zfs-pool-init-values",
+		"pool: guardian",
+		"serial: 362510FD7C47",
+		"mountpoint: /var/mnt/guardian",
+		"/var/mnt/guardian/victoria-metrics",
+		`ensure_dataset "${local_path}"`,
 		`zfs create -p -o mountpoint="${local_path}" "${dataset}"`,
 		"mountPropagation: Bidirectional",
 	} {

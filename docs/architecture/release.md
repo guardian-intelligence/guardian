@@ -96,10 +96,10 @@ the release subject.
   everywhere until explicit operator forgiveness — never a timeout);
   `deployed` (per site; audit trail and the status page's release-train
   source).
-- **Manifests** move from Go templates to kustomize bases + three per-site
-  overlays, substituting from a bootstrap-laid site ConfigMap; secrets stay
-  in-cluster. guardian-up's render/push path retires for components Flux
-  owns.
+- **Manifests** are assembled with Kustomize and reconciled by Flux; secrets
+  stay in-cluster and come from OpenBao projections. `guardian up` keeps only
+  the host/bootstrap handoff path and does not render product deployment
+  manifests for Flux-owned components.
 
 ## Channel ladder
 
@@ -186,8 +186,9 @@ package tests.
 - **Deep tests as replaceable runners.** TestPlan is Guardian-owned input;
   execution can be plain Kubernetes Jobs first, then Testkube, Playwright,
   k6, or another runner when it removes more complexity than it adds.
-- **Flux and the judge deploy via bootstrap / guardian up, operator-only.**
-  The pipeline never updates itself; the workstation is the second channel.
+- **Flux and the judge are installed through the bootstrap lane,
+  operator-only.** The pipeline never updates its own bootstrap substrate; the
+  workstation is the second channel.
 - Migrations discipline is unchanged and unverifiable by the pipeline:
   additive-only, enforced at review; pointer-move rollback assumes it.
 
@@ -205,7 +206,7 @@ package tests.
    Actions YAML. VERIFY: pull the real SDK release from a clean machine with
    `guardian run oras pull`, `guardian run oras discover`, `guardian run
    cosign verify`, and `guardian run cosign verify-attestation`.
-2. **Flux on dev** following edge; the template→kustomize conversion lands
+2. **Flux on dev** following edge; Kustomize-native manifest assembly lands
    here. VERIFY: a merge reaches dev converged in minutes, hands-off.
 3. **SLOProfile/TestPlan skeletons.** Define declarative inputs for
    nightly/rc/stable policies before implementing judge decisions.
