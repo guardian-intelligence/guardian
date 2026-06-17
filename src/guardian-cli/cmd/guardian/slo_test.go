@@ -35,12 +35,7 @@ func TestSLOAndSyntheticSiteManifests(t *testing.T) {
 }
 
 func TestSLOProfilePlatformRender(t *testing.T) {
-	c := componentByName(t, "slo-profile-platform")
-	rendered, err := renderComponentManifest(c, "", nil, &Site{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := string(rendered)
+	out := buildTestPlatformPackage(t)
 	for _, want := range []string{
 		"name: sloprofiles.platform.guardian.dev",
 		"kind: SLOProfile",

@@ -20,12 +20,14 @@ export RUNFILES_DIR="$(bazelisk info bazel-bin 2>/dev/null)/src/guardian-cli/cmd
 
 ## 1. Converge
 
-`guardian up` owns the admin Secret path. On a fresh OpenBao it generates
-`kv/guardian/<site>/observability/clickhouse-admin`, installs External
-Secrets Operator, applies the environment's `SecretProjection`, and waits for
-the Kubernetes `clickhouse-admin` Secret before applying ClickHouse. On a
-restored OpenBao the value must already exist in the restored snapshot; missing
-restored paths are a schema migration, not a hand-created Kubernetes Secret.
+Bootstrap owns the admin Secret path. On a fresh OpenBao, `guardian up`
+generates `kv/guardian/<site>/observability/clickhouse-admin`, installs or
+seeds External Secrets Operator, and waits for the environment's
+`SecretProjection` to produce the Kubernetes `clickhouse-admin` Secret before
+the ledger is treated as ready. Flux/Crossplane own the ClickHouse desired
+state after bootstrap handoff. On a restored OpenBao the value must already
+exist in the restored snapshot; missing restored paths are a schema migration,
+not a hand-created Kubernetes Secret.
 
 Never run `kubectl create secret generic clickhouse-admin` by hand. That
 would split truth between Kubernetes and OpenBao and would be lost on a
@@ -44,14 +46,14 @@ backlog (~10Mi × containers); memory_limiter backpressures the brief blip.
 ## 2. Apply the DDL by hand
 
 The exporter runs `create_schema: false`; the schema is the reviewed,
-vendored DDL in `src/infrastructure-components/clickhouse/k8s/ddl/`, never
+vendored DDL in `src/infrastructure-components/clickhouse/ddl/`, never
 whatever the exporter would CREATE. Idempotent (`CREATE ... IF NOT EXISTS`
 everywhere); future migrations append numbered files.
 
 ```sh
 kubectl -n observability exec -i deploy/clickhouse -- \
   clickhouse-client --password "$(kubectl -n observability get secret clickhouse-admin -o jsonpath='{.data.password}' | base64 -d)" \
-  --multiquery < src/infrastructure-components/clickhouse/k8s/ddl/0001_otel.sql
+  --multiquery < src/infrastructure-components/clickhouse/ddl/0001_otel.sql
 ```
 
 DDL-after-collector is fine: the exporter retries; allow ~1 minute after

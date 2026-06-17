@@ -169,7 +169,7 @@ spec:
   namespaceLabels:
     pod-security.kubernetes.io/enforce: privileged
   victoriaMetrics:
-    image: '{{ index .Images "victoria-metrics" }}'
+    image: registry.guardian.internal/victoria-metrics:bootstrap
     persistence:
       claimName: victoria-metrics-storage
       storageClassName: guardian-local-retain
@@ -197,7 +197,7 @@ metadata:
 spec:
   site: prod
   namespace: status
-  image: '{{ index .Images "status" }}'
+  image: registry.guardian.internal/status:bootstrap
   domains: []
   monitor: false
   replicas: 0
@@ -302,7 +302,7 @@ metadata:
 spec:
   site: prod
   domain: aisucks.app
-  image: '{{ index .Images "aisucks" }}'
+  image: registry.guardian.internal/aisucks:bootstrap
   replicas: 2
 ---
 apiVersion: products.guardian.dev/v1alpha1
@@ -312,7 +312,7 @@ metadata:
 spec:
   site: prod
   domain: guardianintelligence.org
-  image: '{{ index .Images "company-site" }}'
+  image: registry.guardian.internal/company-site:bootstrap
   directusRef:
     name: directus
   contentSnapshot:
@@ -332,8 +332,8 @@ spec:
   namespace: directus
   namespaceLabels:
     pod-security.kubernetes.io/enforce: privileged
-  image: '{{ index .Images "directus" }}'
-  postgresImage: '{{ index .Images "postgres" }}'
+  image: registry.guardian.internal/directus:bootstrap
+  postgresImage: registry.guardian.internal/postgres:bootstrap
   publicAdminRoute: false
   runtime:
     suspend: true

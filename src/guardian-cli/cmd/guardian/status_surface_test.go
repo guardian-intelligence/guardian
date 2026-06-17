@@ -48,12 +48,7 @@ func TestStatusSurfaceSiteManifests(t *testing.T) {
 }
 
 func TestStatusSurfacePlatformRender(t *testing.T) {
-	c := componentByName(t, "status-surface-platform")
-	rendered, err := renderComponentManifest(c, "", nil, &Site{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := string(rendered)
+	out := buildTestPlatformPackage(t)
 	for _, want := range []string{
 		"name: statussurfaces.platform.guardian.dev",
 		"kind: StatusSurface",
@@ -77,7 +72,7 @@ func TestStatusSurfaceEnvironmentBundleInstances(t *testing.T) {
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
 			site := loadTestSite(t, siteName)
-			rendered, err := renderEnvironmentBundle(site, testProductImages())
+			rendered, err := buildTestEnvironmentBundle(site, testProductImages())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -97,7 +92,7 @@ func TestStatusSurfaceEnvironmentBundleInstances(t *testing.T) {
 				}
 			}
 			if strings.Contains(out, "{{ index .Images") {
-				t.Error("environment bundle render left image template placeholders unresolved")
+				t.Error("environment bundle left bootstrap image placeholders unresolved")
 			}
 		})
 	}

@@ -12,22 +12,16 @@ import (
 // receiver to VictoriaMetrics. The test also pins the status.monitor gate:
 // status hostnames join blackbox targets only behind the default-off flag.
 func TestOtelPublicHttpScrape(t *testing.T) {
-	tmpl, err := toolPath("_main/src/infrastructure-components/otel-collector/k8s/otel-collector.yaml.tmpl")
+	kubectl, err := kubectlPath()
 	if err != nil {
-		t.Fatalf("locate otel-collector manifest: %v", err)
+		t.Fatalf("locate kubectl: %v", err)
 	}
+	c := componentByName(t, "otel-collector")
 	const image = "registry.guardian.internal/otel-collector@sha256:deadbeef"
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
-			sitePath, err := toolPath("_main/src/sites/" + siteName + "/bootstrap.yaml")
-			if err != nil {
-				t.Fatalf("locate bootstrap.yaml: %v", err)
-			}
-			site, err := loadSite(sitePath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			rendered, err := renderManifest(tmpl, image, site)
+			site := loadTestSite(t, siteName)
+			rendered, err := buildComponentKustomization(kubectl, c, map[string]string{"otel-collector": image}, site)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -61,7 +55,7 @@ func TestOtelPublicHttpScrape(t *testing.T) {
 			if siteName != "dev" && len(site.Company.ProbeURLs) == 0 {
 				t.Errorf("site %s must derive company blackbox targets from SyntheticCheck", siteName)
 			}
-			if !regexp.MustCompile(`guardian\.dev/render-sha256: "[0-9a-f]{64}"`).MatchString(out) {
+			if !regexp.MustCompile(`guardian\.dev/render-sha256: [0-9a-f]{64}`).MatchString(out) {
 				t.Error("otel render must include a render hash pod-template annotation so ConfigMap changes roll the collector")
 			}
 

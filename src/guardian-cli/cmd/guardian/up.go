@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"text/template"
 	"time"
 )
 
@@ -231,7 +230,11 @@ func runUp(args []string) error {
 	}
 
 	// Seed registry first: it is the transport for every other component.
-	if err := runTool(kubectl, "--kubeconfig", kubeconfig, "apply", "-f", resolvePath(seedRegistryManifest)); err != nil {
+	seedRegistry, err := buildKustomization(kubectl, seedRegistryKustomization, nil, nil)
+	if err != nil {
+		return err
+	}
+	if err := runToolInput(seedRegistry, kubectl, "--kubeconfig", kubeconfig, "apply", "-f", "-"); err != nil {
 		return err
 	}
 	if err := runTool(kubectl, "--kubeconfig", kubeconfig, "-n", "seed-registry", "rollout", "status", "deployment/seed-registry", "--timeout=10m"); err != nil {
@@ -316,40 +319,13 @@ func runUp(args []string) error {
 	if err := apply("provider-kubernetes-config"); err != nil {
 		return err
 	}
-	if err := apply("edge-gateway-platform"); err != nil {
-		return err
-	}
-	if err := apply("secret-projection-platform"); err != nil {
-		return err
-	}
-	if err := apply("storage-plane-platform"); err != nil {
-		return err
-	}
-	if err := apply("public-http-service-platform"); err != nil {
-		return err
-	}
-	if err := apply("directus-platform"); err != nil {
-		return err
-	}
-	if err := apply("observability-stack-platform"); err != nil {
-		return err
-	}
-	if err := apply("slo-profile-platform"); err != nil {
-		return err
-	}
-	if err := apply("status-surface-platform"); err != nil {
-		return err
-	}
-	if err := apply("oci-registry-platform"); err != nil {
+	if err := apply("guardian-platform"); err != nil {
 		return err
 	}
 	if err := waitGuardianPlatform(kubectl, kubeconfig); err != nil {
 		return err
 	}
-	if err := apply("aisucks-product-api"); err != nil {
-		return err
-	}
-	if err := apply("company-site-product-api"); err != nil {
+	if err := apply("guardian-products"); err != nil {
 		return err
 	}
 	if err := waitGuardianProducts(kubectl, kubeconfig); err != nil {
@@ -378,7 +354,7 @@ func runUp(args []string) error {
 	}
 	for _, c := range components {
 		switch c.name {
-		case "openbao", "crossplane", "cert-manager", "provider-kubernetes", "provider-kubernetes-config", "edge-gateway-platform", "secret-projection-platform", "storage-plane-platform", "public-http-service-platform", "directus-platform", "observability-stack-platform", "slo-profile-platform", "status-surface-platform", "oci-registry-platform", "aisucks-product-api", "company-site-product-api", "external-secrets", "local-storage-bootstrap":
+		case "openbao", "crossplane", "cert-manager", "provider-kubernetes", "provider-kubernetes-config", "guardian-platform", "guardian-products", "external-secrets", "local-storage-bootstrap":
 			continue
 		default:
 			if err := applyComponent(kubectl, kubeconfig, c, images, site); err != nil {
@@ -410,7 +386,7 @@ func applyEnvironmentBundle(kubectl, kubeconfig string, site *Site, images map[s
 	if len(bytes.TrimSpace(site.EnvironmentBundle.Raw)) == 0 {
 		return fmt.Errorf("environment bundle %s is empty", site.EnvironmentBundle.Path)
 	}
-	rendered, err := renderEnvironmentBundle(site, images)
+	rendered, err := buildEnvironmentKustomization(kubectl, site, images)
 	if err != nil {
 		return err
 	}
@@ -419,34 +395,6 @@ func applyEnvironmentBundle(kubectl, kubeconfig string, site *Site, images map[s
 		return fmt.Errorf("apply environment bundle %s: %w", site.EnvironmentBundle.Path, err)
 	}
 	return nil
-}
-
-func renderEnvironmentBundle(site *Site, images map[string]string) ([]byte, error) {
-	tmpl, err := template.New("environment").Option("missingkey=error").Parse(string(site.EnvironmentBundle.Raw))
-	if err != nil {
-		return nil, fmt.Errorf("render environment bundle %s: %w", site.EnvironmentBundle.Path, err)
-	}
-	var buf bytes.Buffer
-	data := struct {
-		Site   *Site
-		Images map[string]string
-	}{Site: site, Images: images}
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return nil, fmt.Errorf("render environment bundle %s: %w", site.EnvironmentBundle.Path, err)
-	}
-	return buf.Bytes(), nil
-}
-
-func readRepoManifest(path string) ([]byte, error) {
-	resolved, err := resolveRepoInputPath(path)
-	if err != nil {
-		return nil, err
-	}
-	raw, err := os.ReadFile(resolved)
-	if err != nil {
-		return nil, fmt.Errorf("read site manifest %s: %w", resolved, err)
-	}
-	return raw, nil
 }
 
 func resolveRepoInputPath(path string) (string, error) {
@@ -475,10 +423,12 @@ func applyComponent(kubectl, kubeconfig string, c component, images map[string]s
 		fmt.Fprintf(os.Stderr, "skipping %s: image is consumed by the environment bundle\n", c.name)
 		return nil
 	}
-	// images[c.name] is "" for a manifest-only component; its template
-	// never references .Image (the components-table test pins the gate,
-	// the render test pins the manifest).
-	manifest, rerr := renderComponentManifest(c, images[c.name], images, site)
+	var manifest []byte
+	var rerr error
+	if c.kustomization == "" {
+		return fmt.Errorf("component %s has no kustomization", c.name)
+	}
+	manifest, rerr = buildComponentKustomization(kubectl, c, images, site)
 	if rerr != nil {
 		return rerr
 	}
@@ -489,11 +439,11 @@ func applyComponent(kubectl, kubeconfig string, c component, images map[string]s
 		return nil
 	}
 	applyArgs := []string{"--kubeconfig", kubeconfig, "apply", "-f", "-"}
-	if c.name == "external-secrets" || c.name == "crossplane" {
+	if c.name == "external-secrets" || c.name == "crossplane" || c.name == "guardian-platform" || c.name == "guardian-products" {
 		// ESO CRDs are large enough that client-side apply's
 		// last-applied-configuration annotation exceeds Kubernetes' 256 KiB
-		// annotation limit. Crossplane's v2 CRDs have the same shape.
-		// Server-side apply avoids that annotation.
+		// annotation limit. Crossplane's v2 CRDs and Guardian API packages
+		// have the same failure mode. Server-side apply avoids that annotation.
 		applyArgs = []string{"--kubeconfig", kubeconfig, "apply", "--server-side=true", "-f", "-"}
 	}
 	if err := runToolInput(manifest, kubectl, applyArgs...); err != nil {
@@ -751,7 +701,7 @@ func reconcileOpenBao(kubectl, kubeconfig string, site *Site, restoring bool, re
 	// crossed with operator intent — never on recorded state, the same
 	// philosophy as the Talos mode probe above.
 	baoExec := fmt.Sprintf("kubectl --kubeconfig %s -n openbao exec -it openbao-0 -- env BAO_ADDR=http://127.0.0.1:8200 bao", kubeconfig)
-	return withPortForward(kubectl, kubeconfig, "openbao", "pod/openbao-0", baoLocalPort, 8200, 2*time.Minute, func(addr string) error {
+	return withPortForward(kubectl, kubeconfig, "openbao", "pod/openbao-0", baoLocalPort, 8200, 5*time.Minute, func(addr string) error {
 		st, herr := probeBaoHealth(addr)
 		if herr != nil {
 			return fmt.Errorf("up: %w (last: %v); inspect: kubectl --kubeconfig %s -n openbao logs openbao-0", errBaoUnreachable, herr, kubeconfig)

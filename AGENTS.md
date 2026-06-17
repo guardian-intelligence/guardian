@@ -1,4 +1,4 @@
-Bazel polyglot hermetically sealed monorepo for Guardian, a free open-source self-hostable cloud. Currently just a CLI that takes a node from stock ubuntu -> Talos installed + running OpenBao
+Bazel polyglot hermetically sealed monorepo for Guardian, a free open-source self-hostable cloud. The `guardian` CLI owns host lifecycle: stock Ubuntu or Talos maintenance -> Talos/Kubernetes bootstrap substrate. Kubernetes, Crossplane, Flux, and release tooling own runtime desired state.
 
 Domain: guardianintelligence.org (abbr gi.org)
 
@@ -62,7 +62,7 @@ external NIC is X550 fn 0 where dev/gamma use fn 1):
 
 | Site | Hostname | IP | Latitude ID | Serves | Notes |
 | - | - | - | - | - | - |
-| dev | vs-dev-w0 | 206.223.228.101 | sv_vAPXaMxKM5epz | dev.aisucks.app | cluster `guardian-dev`; PR-preview surface: converge any branch via `guardian up src/sites/dev/bootstrap.yaml` |
+| dev | vs-dev-w0 | 206.223.228.101 | sv_vAPXaMxKM5epz | dev.aisucks.app | cluster `guardian-dev`; host bootstrap/drill surface: `guardian up src/sites/dev/bootstrap.yaml` |
 | gamma | gd-gamma-w0 | 45.250.254.119 | sv_nPRbajqEB5koM | gamma.aisucks.app | cluster `guardian-gamma`; release gate (canary submissions); monthly billing |
 | prod | gd-prod-w0 | 67.213.115.113 | sv_BDXM5E4QLNrpk | aisucks.app | cluster `guardian-prod`; reserved/yearly billing (support ticket open to convert) |
 
@@ -120,7 +120,7 @@ vs-dev-w0 Latitude ASH
 | Artifacts | In-cluster seed registry (CNCF `registry:3`, digest-pinned, hostPath-persistent) behind the `registry.guardian.internal` mirror; workspace-built OCI layouts pushed by digest over a port-forward. What runs is byte-for-byte what the workspace built. |
 | Secrets | OpenBao v2.5.4, raft integrated storage, sealed by default. Backup writes know R2; restore takes `(blob, sha256)`; init/unseal/restore are operator decisions, never automated. |
 | Identity | SPIRE — planned. |
-| Control | `guardian` CLI: `up`, `down --yes`, `config bootstrap`. talosctl v1.13.4 and kubectl v1.36.1 ride in runfiles; per-cluster state in `~/.local/state/guardian/<cluster>/`. |
+| Control | `guardian` CLI: `up`, `down --yes`, `config bootstrap` for host/bootstrap lifecycle only. talosctl v1.13.4 and kubectl v1.36.1 ride in runfiles; per-cluster state in `~/.local/state/guardian/<cluster>/`. |
 | Build | Bazel 9.1.0 (bazelisk sha256-pinned), bzlmod, rules_oci/rules_go; Go 1.26.4; deterministic OCI layouts and tarballs. |
 | Release | Planned: signed release manifests (component→digest sets), channels as signed pointers, zot, cosign via OpenBao Transit, npm projection of the CLI via dist-tags. |
 | Clients | Planned: web client and CLI binaries distributed through npm under the guardian-intelligence org. |
@@ -128,11 +128,11 @@ vs-dev-w0 Latitude ASH
 Product Surfaces:
 
 - GitHub App (20x faster CI than GitHub Actions). (Not Yet Implemented)
-- Software Company from an API call, through web or `guardian` CLI. (Not Yet Implemented)
+- Software Company from an API call or web surface; the CLI only prepares hosts for the cluster control plane. (Not Yet Implemented)
 
 Current Objectives
 
-Phase 1 - Lay the groundwork: "the goal is "You just provisioned a box on latitude. Run the guardian CLI from your laptop to turn it into a functional software company (a leapfrog version of Verself) in under 4 minutes" (we'll get as fast as physically possible without a warm pool, and then do a warm pool + managed/billed approach to get it under 4 minutes). We ship this capability via the `guardian` CLI, which is also what we dogfood to provision OUR own servers and execute disaster-recovery drills (required). We're out of this phase when we have oci.guardianintelligence.org stood up vending in-toto attested binaries that users can run `cosign verify` on. No TEE because all code is open-source. See https://github.com/guardian-intelligence/verself/pull/150 for a previous attempt. This also doubles as our own disaster recovery procedure, which we will execute on an hourly basis.
+Phase 1 - Lay the groundwork: "the goal is "You just provisioned a box on latitude. Run the guardian CLI from your laptop to turn it into a functional Guardian cluster that can hand off to Kubernetes/Crossplane/Flux" (we'll get as fast as physically possible without a warm pool, and then do a warm pool + managed/billed approach to get it under 4 minutes). We ship this host-bootstrap capability via the `guardian` CLI, which is also what we dogfood to provision OUR own servers and execute disaster-recovery drills (required). We're out of this phase when we have oci.guardianintelligence.org stood up vending in-toto attested binaries that users can run `cosign verify` on. No TEE because all code is open-source. See https://github.com/guardian-intelligence/verself/pull/150 for a previous attempt. This also doubles as our own disaster recovery procedure, which we will execute on an hourly basis.
 
 Phase 2 - We assimilate the gamma and prod boxes from Verself and then figure out a GitOps pipeline: development boxes ship a single-box version of Guardian. Merges to main continuously deploy to Gamma. Synthetics canaries continuously run against all environments. On Gamma they gate promotion to Prod. on Prod they trigger alerts/rollbacks. This is the critical phase. We get confidence in our release process and then we rapidly release software, create a pipeline to automate announcements to the guardianintelligence.org/news, begin getting publicity, traction, contributing useful free open source software. Gate: we have automated or nearly automated releases/yank-drills practiced for
 

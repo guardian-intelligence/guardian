@@ -65,15 +65,16 @@ Fresh bootstrap order for a Gateway-enabled site:
 
 1. Talos inline manifests install Gateway API CRDs, then Cilium.
 2. `guardian up` starts the seed registry.
-3. Workspace-built images are pushed to the seed registry by digest.
+3. Bootstrap-required images are pushed to the seed registry by digest.
 4. OpenBao is converged and unsealed/configured.
 5. Crossplane is applied and its CRDs/controllers are waited on.
 6. cert-manager is applied if platform TLS is requested.
 7. provider-kubernetes and composition function packages are applied and waited
    on.
-8. ProviderConfig and Guardian platform/product XRDs/Compositions are applied.
-9. `guardian up` applies the site's Crossplane environment bundle, including
-   concrete platform and product XRs.
+8. ProviderConfig and Guardian platform/product XRDs/Compositions are made
+   available.
+9. Flux/Crossplane receive the site's desired state, including concrete
+   platform and product XRs.
 10. Crossplane reconciles product Deployments, Services, and routes.
 
 `guardian up` may wait for Kubernetes objects and controllers to converge, but

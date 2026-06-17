@@ -56,12 +56,7 @@ func TestObservabilityStackSiteManifests(t *testing.T) {
 }
 
 func TestObservabilityStackPlatformRender(t *testing.T) {
-	c := componentByName(t, "observability-stack-platform")
-	rendered, err := renderComponentManifest(c, "", nil, &Site{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := string(rendered)
+	out := buildTestPlatformPackage(t)
 	for _, want := range []string{
 		"name: observabilitystacks.platform.guardian.dev",
 		"kind: ObservabilityStack",
@@ -90,7 +85,7 @@ func TestObservabilityStackEnvironmentBundleInstances(t *testing.T) {
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
 			site := loadTestSite(t, siteName)
-			rendered, err := renderEnvironmentBundle(site, testProductImages())
+			rendered, err := buildTestEnvironmentBundle(site, testProductImages())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -113,7 +108,7 @@ func TestObservabilityStackEnvironmentBundleInstances(t *testing.T) {
 				}
 			}
 			if strings.Contains(out, "{{ index .Images") {
-				t.Error("environment bundle render left image template placeholders unresolved")
+				t.Error("environment bundle left bootstrap image placeholders unresolved")
 			}
 		})
 	}

@@ -83,7 +83,7 @@ release-train section shows a real promotion as it happens.
 
 ## M5 — the ledger release (independent track)
 
-Per-site ClickHouse (component authored; add to push.go), filelog pipeline
+Per-site ClickHouse through the `ObservabilityStack` ledger switch, filelog pipeline
 (container parser, no k8sattributes), OTLP receiver on loopback + app OTel
 SDK (traces; slog↔trace correlation), k8sobjects capturing Events (etcd
 forgets in 1h; the ledger remembers), R2 backups as CronJobs (pg + CH) with
@@ -96,11 +96,12 @@ VERIFY: application trace visible end-to-end in CH with its log lines by
 trace ID; restore drill produces a counted, queryable corpus copy; killing
 vmalert pages via the dead-man within its window.
 STATUS 2026-06-12: first two sub-items landed on dev+gamma — per-site
-ClickHouse in push.go behind `ObservabilityStack.spec.clickhouse.enabled`
-(OFF on prod until its ledger ratchet flips) and the filelog + k8sobjects Events
-pipeline (docs/runbooks/ledger.md). `guardian up` now owns the OpenBao path
-and ESO projection for clickhouse-admin. OTLP/app SDK, R2 backups + restore
-drill, and the dead-man heartbeat remain open; M5 is NOT done.
+ClickHouse behind `ObservabilityStack.spec.clickhouse.enabled` (OFF on prod
+until its ledger ratchet flips) and the filelog + k8sobjects Events pipeline
+(docs/runbooks/ledger.md). Bootstrap owns the OpenBao path preparation and ESO
+projection for clickhouse-admin; runtime reconciliation belongs to the cluster
+controllers. OTLP/app SDK, R2 backups + restore drill, and the dead-man
+heartbeat remain open; M5 is NOT done.
 
 ## M6 — rollout judgment (needs M1–M2; design: docs/architecture/release.md)
 
@@ -155,12 +156,12 @@ verification of a real public digest.
 ## M8 — the paved-road proof (capstone)
 
 Make "perfect service slice" literal: add a trivial service through the
-conventions — Protobuf/Connect contract, component entry, manifest. It
-must inherit scrape, RED dashboard, SLO rows, deploy markers, gated
-release, rollback, status presence, signed provenance, with near-zero
-bespoke wiring. The diff IS the measure: if the service needs more than a
-contract + a manifest + a components entry, the road isn't paved — fix the
-platform, not the tenant.
+conventions — Protobuf/Connect contract, product/platform declaration, and
+release target. It must inherit scrape, RED dashboard, SLO rows, deploy
+markers, gated release, rollback, status presence, and signed provenance with
+near-zero bespoke wiring. The diff IS the measure: if the service needs more
+than a contract plus platform/product desired state, the road isn't paved —
+fix the platform, not the tenant.
 VERIFY: the service ships through the full pipeline to prod and appears
 everywhere a service should, then is removed as cleanly (yank drill).
 

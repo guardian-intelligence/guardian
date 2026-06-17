@@ -97,8 +97,8 @@ type environmentConfigMetadata struct {
 }
 
 // Site is the runtime view assembled from bootstrap facts plus the site's
-// Crossplane environment bundle. Component templates still receive this
-// strongly typed view while XRs take ownership incrementally.
+// Crossplane environment bundle. Validation and Kustomize patches consume this
+// strongly typed view while XRs own platform desired state.
 type Site struct {
 	Name string
 	Bootstrap

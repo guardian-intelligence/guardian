@@ -16,22 +16,16 @@ import (
 // certificate (full TLS verification, real SNI) from in-cluster; the edge
 // listener itself is the sibling watchers' job.
 func TestGatusProbeAlias(t *testing.T) {
-	tmpl, err := toolPath("_main/src/infrastructure-components/gatus/k8s/gatus.yaml.tmpl")
+	kubectl, err := kubectlPath()
 	if err != nil {
-		t.Fatalf("locate gatus manifest: %v", err)
+		t.Fatalf("locate kubectl: %v", err)
 	}
+	c := componentByName(t, "gatus")
 	const image = "registry.guardian.internal/gatus@sha256:deadbeef"
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
-			sitePath, err := toolPath("_main/src/sites/" + siteName + "/bootstrap.yaml")
-			if err != nil {
-				t.Fatalf("locate bootstrap.yaml: %v", err)
-			}
-			site, err := loadSite(sitePath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			rendered, err := renderManifest(tmpl, image, site)
+			site := loadTestSite(t, siteName)
+			rendered, err := buildComponentKustomization(kubectl, c, map[string]string{"gatus": image}, site)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -42,7 +36,7 @@ func TestGatusProbeAlias(t *testing.T) {
 				for _, want := range []string{
 					"hostAliases:",
 					"ip: 10.96.111.43", // must match the aisucks-probe Service pin
-					`- "` + site.Aisucks.Domain + `"`,
+					"- " + site.Aisucks.Domain,
 				} {
 					if !strings.Contains(out, want) {
 						t.Errorf("pod-network gatus render missing %q", want)
@@ -71,7 +65,7 @@ func TestGatusProbeAlias(t *testing.T) {
 						t.Errorf("company gatus render missing %q", want)
 					}
 				}
-				if strings.Contains(out, `- "`+site.Company.Domain+`"`) {
+				if strings.Contains(out, "- "+site.Company.Domain) {
 					t.Error("Gateway-terminated company self-checks must not alias the public hostname to the HTTP probe Service")
 				}
 			}

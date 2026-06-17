@@ -1,5 +1,8 @@
 filegroup(
     name = "environments",
-    srcs = glob(["*/environment.yaml"]),
+    srcs = glob([
+        "*/environment.yaml",
+        "*/kustomization.yaml",
+    ]),
     visibility = ["//src/guardian-cli:__subpackages__"],
 )

@@ -6,22 +6,13 @@ import (
 )
 
 func TestExternalSecretsRenderUsesSeedRegistryImage(t *testing.T) {
-	sitePath, err := toolPath("_main/src/sites/dev/bootstrap.yaml")
+	kubectl, err := kubectlPath()
 	if err != nil {
-		t.Fatalf("locate bootstrap.yaml: %v", err)
-	}
-	site, err := loadSite(sitePath)
-	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("locate kubectl: %v", err)
 	}
 	c := componentByName(t, "external-secrets")
-	tmpl, err := toolPath("_main/src/infrastructure-components/external-secrets/k8s/external-secrets.yaml.tmpl")
-	if err != nil {
-		t.Fatalf("locate external-secrets manifest: %v", err)
-	}
-	c.manifest = tmpl
 	const image = "registry.guardian.internal/external-secrets@sha256:deadbeef"
-	rendered, err := renderComponentManifest(c, image, nil, site)
+	rendered, err := buildComponentKustomization(kubectl, c, map[string]string{"external-secrets": image}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,6 +38,7 @@ func TestExternalSecretsRenderUsesSeedRegistryImage(t *testing.T) {
 		"ghcr.io/external-secrets/external-secrets",
 		"--namespace=observability",
 		`namespace: "observability"`,
+		"registry.guardian.internal/external-secrets:bootstrap",
 	} {
 		if strings.Contains(out, banned) {
 			t.Errorf("external-secrets render must not contain %q", banned)

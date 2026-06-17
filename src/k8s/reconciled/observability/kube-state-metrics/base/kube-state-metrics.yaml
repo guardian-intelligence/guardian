@@ -1,0 +1,131 @@
+# kube-state-metrics: turns API-server object state into metrics for
+# VictoriaMetrics to scrape. The metric this component exists for is
+# kube_pod_container_status_restarts_total — a quietly crash-looping pod is
+# invisible to Gatus's blackbox probes (the old pod keeps serving, or the
+# kernel's SO_REUSEPORT balancing hides one dead listener), and only the
+# restart counter exposes it. Everything else KSM emits is a bonus.
+#
+# The observability Namespace is owned by the ObservabilityStack XR; this
+# manifest assumes it exists.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kube-state-metrics
+  namespace: observability
+---
+# Upstream's standard read-only ClusterRole, trimmed to the kinds that
+# actually exist on this cluster — no HPAs, no PodDisruptionBudgets, no
+# webhook configs on a single-node site. The Deployment's --resources flag
+# below MUST stay in lockstep with these rules: KSM lists exactly what it is
+# told to collect, and a resource granted here but dropped there (or vice
+# versa) shows up as either silent missing metrics or Forbidden spam in the
+# logs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kube-state-metrics
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - nodes
+      - namespaces
+      - services
+      - endpoints
+      - persistentvolumeclaims
+    verbs: [list, watch]
+  - apiGroups: [apps]
+    resources:
+      - deployments
+      - statefulsets
+      - daemonsets
+      - replicasets
+    verbs: [list, watch]
+  - apiGroups: [batch]
+    resources:
+      - jobs
+      - cronjobs
+    verbs: [list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kube-state-metrics
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kube-state-metrics
+subjects:
+  - kind: ServiceAccount
+    name: kube-state-metrics
+    namespace: observability
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kube-state-metrics
+  namespace: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kube-state-metrics
+  template:
+    metadata:
+      labels:
+        app: kube-state-metrics
+    spec:
+      serviceAccountName: kube-state-metrics
+      # Pod network, NOT hostNetwork: the firewall default-blocks new host
+      # ports, and the only consumer (the metrics collector) reaches the
+      # ClusterIP over the unpoliced pod network anyway.
+      containers:
+        - name: kube-state-metrics
+          image: registry.guardian.internal/kube-state-metrics:bootstrap
+          args:
+            # Must mirror the ClusterRole above — see the comment there.
+            - --resources=cronjobs,daemonsets,deployments,endpoints,jobs,namespaces,nodes,persistentvolumeclaims,pods,replicasets,services,statefulsets
+          ports:
+            - name: http-metrics
+              containerPort: 8080
+            - name: telemetry
+              containerPort: 8081
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http-metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          # /readyz lives on the telemetry port upstream, not the metrics
+          # port — probing 8080 would pass even while the caches are cold.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: telemetry
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          # KSM's working set is a watch cache proportional to object count;
+          # a single-node cluster holds a few hundred objects, so these caps
+          # are generous already. The box belongs to postgres and the app.
+          resources:
+            requests:
+              cpu: 20m
+              memory: 48Mi
+            limits:
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kube-state-metrics
+  namespace: observability
+spec:
+  selector:
+    app: kube-state-metrics
+  ports:
+    - name: http-metrics
+      port: 8080
+      targetPort: http-metrics
+    - name: telemetry
+      port: 8081
+      targetPort: telemetry

@@ -13,33 +13,7 @@ Public reads must not depend on Directus, ClickHouse, VictoriaMetrics, or a
 package manager. A serving pod should only need its image, local content
 snapshot, static assets, and certificate material to answer public requests.
 
-## Repository shape
-
-Keep pre-Kubernetes facts, platform APIs, product APIs, and environment
-instances separate:
-
-```text
-src/sites/<site>/
-  bootstrap.yaml                  # physical facts for guardian up and Talos
-
-src/crossplane/
-  packages/
-    guardian-platform/
-      edge-gateway.yaml
-      secret-projection.yaml
-      public-http-service.yaml
-      directus-instance.yaml
-    guardian-products/
-      aisucks-product.yaml
-      company-site.yaml
-  environments/
-    dev/environment.yaml          # EnvironmentConfig plus site XRs
-    gamma/environment.yaml
-    prod/environment.yaml
-
-src/infrastructure-components/    # substrate and pinned image re-exports
-src/products/<product>/            # application code and product-owned builds
-```
+## Configuration boundary
 
 `bootstrap.yaml` stays physical: hostnames, IPs, MACs, disk serials, Talos
 schematics, gateways, and cluster bootstrap inputs. Crossplane never owns these
@@ -56,8 +30,8 @@ services consume platform APIs; they do not create service-local control planes.
 
 | Layer | Owner | Responsibility |
 | - | - | - |
-| Talos and bootstrap | `guardian up` | Install Talos, create the single-node cluster, seed OpenBao/Crossplane/provider-kubernetes, push OCI layouts to the seed registry. |
-| Environment bundle | `src/crossplane/environments/<site>` | Site-specific desired state and configuration bag. |
+| Talos and bootstrap | `guardian up` | Install Talos, create the single-node cluster, seed OpenBao/Crossplane/provider-kubernetes/Flux, and push bootstrap-required OCI layouts to the seed registry. |
+| Environment bag | Flux + Crossplane | Site-specific desired state and configuration bag. |
 | Platform package | `guardian-platform` | Gateway, public HTTP envelope, secret projection, observability, Directus, registry/database/storage bindings. |
 | Product package | `guardian-products` | Product intent such as `CompanySite`, `AisucksProduct`, and future workload products. |
 | Release judge | Guardian release tooling | Promote immutable artifacts by signed evidence and SLO gates. Crossplane reconciles state; it does not decide promotion. |
@@ -79,9 +53,9 @@ spec:
         name: function-auto-ready
 ```
 
-`guardian up` pushes local OCI layouts, renders digest refs into the environment
-bundle, and applies XRs. Crossplane owns the stable Kubernetes envelopes behind
-XRDs and Compositions.
+`guardian up` stops at host/bootstrap convergence and reconciler handoff. Flux
+and Crossplane own environment convergence after the API server exists.
+Crossplane owns the stable Kubernetes envelopes behind XRDs and Compositions.
 
 ## Platform APIs
 
@@ -257,8 +231,8 @@ publish evidence.
 ## Rollout order
 
 1. Add `ObservabilityStack`, `SyntheticCheck`, and `SLOProfile` APIs.
-2. Move site observability config from `guardian up` structs into the
-   environment bundles.
+2. Keep site observability config in environment bags and Crossplane APIs, not
+   in Guardian CLI render structs.
 3. Mirror Crossplane packages, providers, and functions into the seed registry.
 4. Replace the Go static company site with the TanStack Start/Nitro image while
    preserving `/healthz`, `/livez`, `/metrics`, and the same Gateway contract.

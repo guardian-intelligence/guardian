@@ -1,0 +1,282 @@
+# Grafana: dashboards over VictoriaMetrics. Pod network only — the node's
+# firewall surface is fixed (80/443/6443/50000) and observability never adds
+# a public surface, so there is no Ingress and no NodePort: access is
+#   kubectl -n observability port-forward svc/grafana 3000:3000
+# which rides loopback on the operator's machine (the Talos firewall does
+# not police loopback either, but a forward never touches the node's NIC).
+#
+# The observability Namespace object and VictoriaMetrics Service are owned by
+# the ObservabilityStack XR; this component assumes they exist.
+#
+# The grafana-admin Secret is delivered by the site's SecretProjection. Do not
+# create it by hand; OpenBao remains the source.
+#
+# /var/lib/grafana is an emptyDir on purpose: dashboards arrive as code
+# (the provisioning ConfigMaps below), so anything clicked together in the
+# UI is droppable state and must not be the system of record.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: observability
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: VictoriaMetrics
+        # VictoriaMetrics speaks the Prometheus query API; Grafana needs no
+        # vendor plugin for it. The uid is pinned because the provisioned
+        # dashboard below references it; an auto-generated uid would change
+        # whenever the pod is replaced (storage is an emptyDir).
+        uid: victoriametrics
+        type: prometheus
+        access: proxy
+        url: http://victoria-metrics.observability.svc:8428
+        isDefault: true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-providers
+  namespace: observability
+data:
+  providers.yaml: |
+    apiVersion: 1
+    providers:
+      - name: guardian
+        type: file
+        # 30s matches the kubelet ConfigMap sync cadence well enough that a
+        # dashboard edit lands without a pod restart, like vmalert's rules.
+        updateIntervalSeconds: 30
+        # UI edits would be droppable state on the emptyDir; refusing them
+        # keeps the ConfigMap the system of record.
+        allowUiUpdates: false
+        options:
+          path: /etc/grafana/dashboards
+          foldersFromFilesStructure: true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: observability
+data:
+  aisucks-deploys.json: |
+    {
+      "uid": "aisucks-deploys",
+      "title": "aisucks deploys",
+      "schemaVersion": 39,
+      "editable": false,
+      "timezone": "utc",
+      "refresh": "30s",
+      "time": {"from": "now-6h", "to": "now"},
+      "annotations": {
+        "list": [
+          {
+            "name": "deploys",
+            "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+            "enable": true,
+            "iconColor": "#1F60C4",
+            "titleFormat": "deploy",
+            "expr": "changes(kube_deployment_status_observed_generation{namespace=\"aisucks\"}[5m]) > 0"
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "timeseries",
+          "title": "request rate by handler",
+          "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+          "targets": [
+            {"refId": "A", "expr": "sum(rate(aisucks_http_requests_total[5m])) by (handler)", "legendFormat": "{{handler}}"}
+          ]
+        },
+        {
+          "id": 2,
+          "type": "timeseries",
+          "title": "5xx rate",
+          "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+          "targets": [
+            {"refId": "A", "expr": "sum(rate(aisucks_http_requests_total{code=~\"5..\"}[5m])) or vector(0)", "legendFormat": "5xx"}
+          ]
+        },
+        {
+          "id": 3,
+          "type": "timeseries",
+          "title": "healthz request rate by code",
+          "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+          "targets": [
+            {"refId": "A", "expr": "sum(rate(aisucks_http_requests_total{handler=\"GET /healthz\"}[5m])) by (code)", "legendFormat": "{{code}}"}
+          ]
+        },
+        {
+          "id": 4,
+          "type": "timeseries",
+          "title": "in-flight public requests",
+          "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "targets": [
+            {"refId": "A", "expr": "aisucks_http_inflight_requests", "legendFormat": "{{instance}}"}
+          ]
+        },
+        {
+          "id": 5,
+          "type": "timeseries",
+          "title": "build info scrape presence",
+          "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "targets": [
+            {"refId": "A", "expr": "max(aisucks_build_info) by (version)", "legendFormat": "{{version}}"}
+          ]
+        },
+        {
+          "id": 6,
+          "type": "timeseries",
+          "title": "goroutines and heap vs GOMEMLIMIT",
+          "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {"thresholdsStyle": {"mode": "line"}},
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "green", "value": null},
+                {"color": "red", "value": 429916160}
+              ]}
+            },
+            "overrides": []
+          },
+          "targets": [
+            {"refId": "A", "expr": "go_goroutines{job=\"aisucks\"}", "legendFormat": "goroutines"},
+            {"refId": "B", "expr": "go_memstats_heap_alloc_bytes{job=\"aisucks\"}", "legendFormat": "heap bytes"}
+          ]
+        },
+        {
+          "id": 7,
+          "type": "timeseries",
+          "title": "container restarts (1h)",
+          "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "targets": [
+            {"refId": "A", "expr": "sum(increase(kube_pod_container_status_restarts_total[1h])) by (namespace, pod)", "legendFormat": "{{namespace}}/{{pod}}"}
+          ]
+        },
+        {
+          "id": 8,
+          "type": "timeseries",
+          "title": "pgxpool connections",
+          "datasource": {"type": "prometheus", "uid": "victoriametrics"},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "targets": [
+            {"refId": "A", "expr": "aisucks_pgxpool_acquired_conns", "legendFormat": "acquired"},
+            {"refId": "B", "expr": "aisucks_pgxpool_idle_conns", "legendFormat": "idle"},
+            {"refId": "C", "expr": "aisucks_pgxpool_max_conns", "legendFormat": "max"}
+          ]
+        }
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      securityContext:
+        # The grafana image runs as uid 472; fsGroup hands it the volume
+        # mounts without falling back to kubelet's default emptyDir modes.
+        fsGroup: 472
+      containers:
+        - name: grafana
+          image: registry.guardian.internal/grafana:bootstrap
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              value: admin
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin
+                  key: password
+            # 0.0.0.0 is pod-net only here: the pod has its own netns and
+            # nothing routes to it from outside except the port-forward.
+            - name: GF_SERVER_HTTP_ADDR
+              value: 0.0.0.0
+            - name: GF_ANALYTICS_REPORTING_ENABLED
+              value: "false"
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+          ports:
+            - name: http
+              containerPort: 3000
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            # Modest by policy: observability must never compete with
+            # postgres or the app for the box. Grafana idles well under
+            # this; the memory limit is the real guard.
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/grafana
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: dashboard-providers
+              mountPath: /etc/grafana/provisioning/dashboards
+            # Dashboard JSON lives outside /etc/grafana/provisioning so the
+            # provider's path option is the only thing that finds it; the
+            # ConfigMap volume re-syncs in place, which is what makes
+            # updateIntervalSeconds: 30 pick up edits without a restart.
+            - name: dashboards
+              mountPath: /etc/grafana/dashboards
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: datasources
+          configMap:
+            name: grafana-datasources
+        - name: dashboard-providers
+          configMap:
+            name: grafana-dashboard-providers
+        - name: dashboards
+          configMap:
+            name: grafana-dashboards
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: observability
+spec:
+  selector:
+    app: grafana
+  ports:
+    - name: http
+      port: 3000

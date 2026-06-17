@@ -6,17 +6,7 @@ import (
 )
 
 func TestSecretProjectionPlatformRender(t *testing.T) {
-	c := componentByName(t, "secret-projection-platform")
-	tmpl, err := toolPath("_main/" + c.manifest)
-	if err != nil {
-		t.Fatalf("locate SecretProjection platform manifest: %v", err)
-	}
-	c.manifest = tmpl
-	rendered, err := renderComponentManifest(c, "", nil, &Site{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := string(rendered)
+	out := buildTestPlatformPackage(t)
 	for _, want := range []string{
 		"kind: CompositeResourceDefinition",
 		"name: secretprojections.platform.guardian.dev",
@@ -26,7 +16,8 @@ func TestSecretProjectionPlatformRender(t *testing.T) {
 		"kind: ExternalSecret",
 		"createNamespace",
 		"deletionPolicy: Orphan",
-		"providerConfigRef:\n                name: platform",
+		"providerConfigRef:",
+		"name: platform",
 		"server: http://openbao.openbao.svc:8200",
 		"mountPath: kubernetes",
 		"name: function-auto-ready",

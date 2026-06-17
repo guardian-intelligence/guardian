@@ -12,12 +12,7 @@ const (
 )
 
 func TestPublicHTTPServicePlatformRender(t *testing.T) {
-	c := componentByName(t, "public-http-service-platform")
-	rendered, err := renderComponentManifest(c, "", nil, &Site{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := string(rendered)
+	out := buildTestPlatformPackage(t)
 	for _, want := range []string{
 		"kind: CompositeResourceDefinition",
 		"name: publichttpservices.platform.guardian.dev",
@@ -50,12 +45,7 @@ func TestPublicHTTPServicePlatformRender(t *testing.T) {
 }
 
 func TestDirectusPlatformRender(t *testing.T) {
-	c := componentByName(t, "directus-platform")
-	rendered, err := renderComponentManifest(c, "", nil, &Site{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := string(rendered)
+	out := buildTestPlatformPackage(t)
 	for _, want := range []string{
 		"kind: CompositeResourceDefinition",
 		"name: directusinstances.platform.guardian.dev",
@@ -105,12 +95,7 @@ func TestDirectusPlatformRender(t *testing.T) {
 }
 
 func TestCompanySiteProductAPIRender(t *testing.T) {
-	c := componentByName(t, "company-site-product-api")
-	rendered, err := renderComponentManifest(c, "", nil, &Site{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := string(rendered)
+	out := buildTestProductPackage(t)
 	for _, want := range []string{
 		"kind: CompositeResourceDefinition",
 		"name: companysites.products.guardian.dev",
@@ -142,7 +127,7 @@ func TestCompanySiteEnvironmentBundleInstances(t *testing.T) {
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
 			site := loadTestSite(t, siteName)
-			rendered, err := renderEnvironmentBundle(site, testProductImages())
+			rendered, err := buildTestEnvironmentBundle(site, testProductImages())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -173,7 +158,7 @@ func TestDirectusEnvironmentBundleInstances(t *testing.T) {
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
 			site := loadTestSite(t, siteName)
-			rendered, err := renderEnvironmentBundle(site, testProductImages())
+			rendered, err := buildTestEnvironmentBundle(site, testProductImages())
 			if err != nil {
 				t.Fatal(err)
 			}
