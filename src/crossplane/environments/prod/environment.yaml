@@ -19,7 +19,8 @@ data:
     company:
       domain: guardianintelligence.org
   platform:
-    oci: {}
+    oci:
+      domain: oci.guardianintelligence.org
 ---
 apiVersion: platform.guardian.dev/v1alpha1
 kind: StoragePlane
@@ -50,6 +51,12 @@ spec:
       claimName: directus-uploads
       capacity: 10Gi
       localPath: /var/mnt/guardian/directus/uploads
+    - name: zot
+      persistentVolumeName: guardian-prod-zot
+      namespace: guardian-oci
+      claimName: zot-storage
+      capacity: 50Gi
+      localPath: /var/mnt/guardian/zot
 ---
 apiVersion: platform.guardian.dev/v1alpha1
 kind: SLOProfile
@@ -270,6 +277,13 @@ spec:
       tls:
         mode: Terminate
         certificateRefName: company-site-tls
+    - name: https-oci
+      hostname: "oci.guardianintelligence.org"
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefName: oci-guardianintelligence-org-tls
     - name: http
       port: 80
       protocol: HTTP
@@ -294,6 +308,49 @@ spec:
       dnsNames:
         - "guardianintelligence.org"
       issuerRefName: letsencrypt-production
+    - name: oci-guardianintelligence-org-tls
+      namespace: gateway
+      secretName: oci-guardianintelligence-org-tls
+      dnsNames:
+        - "oci.guardianintelligence.org"
+      issuerRefName: letsencrypt-production
+---
+apiVersion: platform.guardian.dev/v1alpha1
+kind: OCIRegistry
+metadata:
+  name: zot
+spec:
+  site: prod
+  namespace: guardian-oci
+  namespaceLabels:
+    pod-security.kubernetes.io/enforce: privileged
+  image: registry.guardian.internal/zot:bootstrap
+  domain: oci.guardianintelligence.org
+  persistence:
+    claimName: zot-storage
+    storageClassName: guardian-local-retain
+    size: 50Gi
+    volumeName: guardian-prod-zot
+    accessModes:
+      - ReadWriteOnce
+  publisherSecret:
+    name: zot-publisher
+    usernameKey: username
+    passwordKey: password
+    htpasswdKey: htpasswd
+  secrets:
+    projection:
+      waitForSecrets: true
+      openbao:
+        role: guardian-oci-secrets
+        serviceAccountName: external-secrets-guardian-oci
+      remotePath: guardian/guardian-prod/oci/zot-publisher
+  gateway:
+    name: edge
+    namespace: gateway
+    httpsSectionName: https-oci
+  readiness:
+    waitForRollout: true
 ---
 apiVersion: products.guardian.dev/v1alpha1
 kind: AisucksProduct

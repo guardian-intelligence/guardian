@@ -1,10 +1,11 @@
 Bazel polyglot hermetically sealed monorepo for Guardian, a free open-source self-hostable cloud. The `guardian` CLI owns host lifecycle: stock Ubuntu or Talos maintenance -> Talos/Kubernetes bootstrap substrate. Kubernetes, Crossplane, Flux, and release tooling own runtime desired state.
 
-Domain: guardianintelligence.org (abbr gi.org)
+Domain: guardianintelligence.org (abbreviated gi.org)
 
 Optimize for BYOC on-prem
 
 See ~/Projects/verself-sh for reference https://github.com/guardian-intelligence/verself which was a Nomad-based version of this approach.
+
 
 Objectives:
 
@@ -13,7 +14,8 @@ After doing some financial calculation I also realize I need to make provisionin
 
 Important context:
 - Source: `src/crossplane/`, `src/sites/`.
-- All dependencies version/commit pinned. Nothing during runtime, dev time, test time, or build time should require external non-version-pinned tooling, or shell out to binaries outside this repo or its build artifacts. All binaries are available under `guardian run`. E.g. `guardian run talosctl image k8s-bundle`
+- All dependencies version/commit pinned. Nothing during runtime, dev time, test time, or build time should require external non-version-pinned tooling, or shell out to binaries outside this repo or its build artifacts.
+- The `guardian` CLI is not a dumping ground for generic functionality. Its sole purpose is to manage host come-up.
 - Dev tools: `aspect`. Run `aspect tidy` to format the codebase.
 - 1p configuration schemas in CUE, always. Read/Render-out YAML/JSON/TOML. Output must support all 3.
 - API IDL in Protobuf/Connect. Define IAM, audit, risk, request-size, rate limit, and idempotency metadata as explicit operation policy on the RPC contract.
