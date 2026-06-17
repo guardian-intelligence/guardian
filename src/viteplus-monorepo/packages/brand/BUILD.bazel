@@ -1,3 +1,11 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+
+BRAND_SRCS = glob([
+    "package.json",
+    "src/**/*",
+    "tsconfig.json",
+])
+
 filegroup(
     name = "package_manifest",
     srcs = ["package.json"],
@@ -6,10 +14,12 @@ filegroup(
 
 filegroup(
     name = "sources",
-    srcs = glob([
-        "package.json",
-        "src/**/*",
-        "tsconfig.json",
-    ]),
+    srcs = BRAND_SRCS,
+    visibility = ["//visibility:public"],
+)
+
+js_library(
+    name = "pkg",
+    srcs = BRAND_SRCS,
     visibility = ["//visibility:public"],
 )
