@@ -25,7 +25,7 @@ func TestClickhouseSiteGate(t *testing.T) {
 	wantEnabled := map[string]bool{"dev": true, "gamma": true, "prod": false}
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
-			site := loadTestSite(t, siteName)
+			site := loadTestHost(t, siteName)
 			if site.Clickhouse.Enabled != wantEnabled[siteName] {
 				t.Fatalf("site %s ObservabilityStack clickhouse.enabled = %v, want %v (the ledger ratchet: dev+gamma on, prod off)",
 					siteName, site.Clickhouse.Enabled, wantEnabled[siteName])
@@ -71,7 +71,7 @@ func TestClickhouseSiteGate(t *testing.T) {
 						siteName, site.Clickhouse.Enabled, marker)
 				}
 			}
-			// On every site the metrics spine survives untouched.
+			// On every host the metrics spine survives untouched.
 			for _, want := range []string{"prometheusremotewrite", "memory_limiter"} {
 				if !strings.Contains(out, want) {
 					t.Errorf("site %s: otel render missing metrics-spine marker %q", siteName, want)

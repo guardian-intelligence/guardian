@@ -12,11 +12,18 @@ import (
 
 const talosKubeletStorageRoot = "/var/mnt"
 
-// Bootstrap is the checked-in pre-Kubernetes description of one site. It is
-// intentionally limited to physical facts and Talos inputs that guardian must
-// know before an API server exists.
-type Bootstrap struct {
-	Site    string `yaml:"site"`
+// HostConfig is the checked-in pre-Kubernetes description of one physical
+// host. It is intentionally limited to provider identity, physical facts, and
+// Talos inputs that guardian must know before an API server exists.
+type HostConfig struct {
+	Host        string `yaml:"host"`
+	Environment string `yaml:"environment"`
+	Provider    struct {
+		Name     string `yaml:"name"`
+		ServerID string `yaml:"serverId"`
+		Metro    string `yaml:"metro"`
+		Plan     string `yaml:"plan"`
+	} `yaml:"provider"`
 	Cluster struct {
 		Name     string `yaml:"name"`
 		Endpoint string `yaml:"endpoint"`
@@ -24,7 +31,7 @@ type Bootstrap struct {
 	Node struct {
 		Address  string `yaml:"address"`
 		Hostname string `yaml:"hostname"`
-		// Static addressing facts: the site has no DHCP, so both the kexec
+		// Static addressing facts: the host has no DHCP, so both the kexec
 		// maintenance kernel (ip= argument) and the installed machine config
 		// derive network configuration from here.
 		PrefixLength int    `yaml:"prefixLength"`
@@ -42,18 +49,18 @@ type Bootstrap struct {
 		InstallDiskSerial string `yaml:"installDiskSerial"`
 		ZFSDiskSerial     string `yaml:"zfsDiskSerial"`
 	} `yaml:"node"`
-	Storage BootstrapStorage `yaml:"storage"`
+	Storage HostStorage `yaml:"storage"`
 	Talos   struct {
 		Schematic string   `yaml:"schematic"`
 		Patches   []string `yaml:"patches"`
 	} `yaml:"talos"`
 }
 
-type BootstrapStorage struct {
-	Pools []BootstrapStoragePool `yaml:"pools"`
+type HostStorage struct {
+	Pools []HostStoragePool `yaml:"pools"`
 }
 
-type BootstrapStoragePool struct {
+type HostStoragePool struct {
 	Name          string   `yaml:"name"`
 	Type          string   `yaml:"type"`
 	Role          string   `yaml:"role"`
@@ -62,8 +69,8 @@ type BootstrapStoragePool struct {
 	Mountpoint    string   `yaml:"mountpoint"`
 }
 
-// Environment is the post-Kubernetes desired-state bag for one site. The
-// source of truth is the site's Crossplane EnvironmentConfig.data document.
+// Environment is the post-Kubernetes desired-state bag assigned to a host. The
+// source of truth is the Crossplane EnvironmentConfig.data document.
 type Environment struct {
 	Site struct {
 		Name         string `yaml:"name"`
@@ -96,12 +103,12 @@ type environmentConfigMetadata struct {
 	Labels map[string]string `yaml:"labels"`
 }
 
-// Site is the runtime view assembled from bootstrap facts plus the site's
-// Crossplane environment bundle. Validation and Kustomize patches consume this
-// strongly typed view while XRs own platform desired state.
-type Site struct {
+// Host is the runtime view assembled from physical host facts plus the
+// environment bundle assigned to that host. Validation and Kustomize patches
+// consume this strongly typed view while XRs own platform desired state.
+type Host struct {
 	Name string
-	Bootstrap
+	HostConfig
 	EnvironmentBundle struct {
 		Path string
 		Raw  []byte
@@ -137,39 +144,39 @@ type Site struct {
 		Monitor bool
 	}
 	Storage struct {
-		ProductPool BootstrapStoragePool
+		ProductPool HostStoragePool
 	}
 	StoragePlane *storagePlaneManifest
 }
 
-// resolveSite resolves the site from an explicit bootstrap path, else the
-// configured bootstrap path. The returned string is the bootstrap path used.
-func resolveSite(args []string) (*Site, string, error) {
+// resolveHost resolves the host from an explicit host.yaml path, else the
+// configured host path. The returned string is the host path used.
+func resolveHost(args []string) (*Host, string, error) {
 	switch len(args) {
 	case 0:
 	case 1:
-		site, err := loadSite(args[0])
-		return site, args[0], err
+		host, err := loadHost(args[0])
+		return host, args[0], err
 	default:
-		return nil, "", fmt.Errorf("%w: expected at most one bootstrap.yaml path", errUsage)
+		return nil, "", fmt.Errorf("%w: expected at most one host.yaml path", errUsage)
 	}
 	cfg, err := loadConfig()
 	if err != nil {
 		return nil, "", err
 	}
-	if cfg.Bootstrap == "" {
-		return nil, "", fmt.Errorf("%w: no bootstrap configured: pass a bootstrap.yaml path or run: guardian config bootstrap <path>", errUsage)
+	if cfg.Host == "" {
+		return nil, "", fmt.Errorf("%w: no host configured: pass a host.yaml path or run: guardian config host <path>", errUsage)
 	}
-	site, err := loadSite(cfg.Bootstrap)
-	return site, cfg.Bootstrap, err
+	host, err := loadHost(cfg.Host)
+	return host, cfg.Host, err
 }
 
-func loadSite(path string) (*Site, error) {
-	bootstrap, resolved, err := loadBootstrap(path)
+func loadHost(path string) (*Host, error) {
+	hostConfig, resolved, err := loadHostConfig(path)
 	if err != nil {
 		return nil, err
 	}
-	envPath := environmentPathForSite(bootstrap.Site)
+	envPath := environmentPathForEnvironment(hostConfig.Environment)
 	env, envMeta, envRaw, envResolved, err := loadEnvironment(envPath)
 	if err != nil {
 		return nil, err
@@ -178,113 +185,118 @@ func loadSite(path string) (*Site, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Site{
-		Name:      bootstrap.Site,
-		Bootstrap: *bootstrap,
+	host := &Host{
+		Name:       hostConfig.Environment,
+		HostConfig: *hostConfig,
 	}
-	productPool, err := productWorkloadStoragePool(*bootstrap)
+	productPool, err := productWorkloadStoragePool(*hostConfig)
 	if err != nil {
 		return nil, err
 	}
-	s.Storage.ProductPool = productPool
-	s.EnvironmentBundle.Path = envResolved
-	s.EnvironmentBundle.Raw = envRaw
-	s.Aisucks.Domain = env.Products.Aisucks.Domain
-	s.Aisucks.NtfyTopic = env.Alerts.NtfyTopic
-	s.Company.Domain = env.Products.Company.Domain
+	host.Storage.ProductPool = productPool
+	host.EnvironmentBundle.Path = envResolved
+	host.EnvironmentBundle.Raw = envRaw
+	host.Aisucks.Domain = env.Products.Aisucks.Domain
+	host.Aisucks.NtfyTopic = env.Alerts.NtfyTopic
+	host.Company.Domain = env.Products.Company.Domain
 	if companyXR != nil {
-		s.Company.Routes = append([]string(nil), companyXR.Routes...)
+		host.Company.Routes = append([]string(nil), companyXR.Routes...)
 	}
-	s.Gateway.Enabled = env.Gateway.Enabled
-	s.OCI.Domain = env.Platform.OCI.Domain
-	planes, err := storagePlanes(s)
+	host.Gateway.Enabled = env.Gateway.Enabled
+	host.OCI.Domain = env.Platform.OCI.Domain
+	planes, err := storagePlanes(host)
 	if err != nil {
 		return nil, err
 	}
-	s.StoragePlane = &planes[0]
-	observability, err := observabilityStacks(s)
+	host.StoragePlane = &planes[0]
+	observability, err := observabilityStacks(host)
 	if err != nil {
 		return nil, err
 	}
-	s.Clickhouse.Enabled = observability[0].Spec.Clickhouse.Enabled
-	status, err := statusSurfaces(s)
+	host.Clickhouse.Enabled = observability[0].Spec.Clickhouse.Enabled
+	status, err := statusSurfaces(host)
 	if err != nil {
 		return nil, err
 	}
-	s.Status.Domains = append([]string(nil), status[0].Spec.Domains...)
-	s.Status.Monitor = status[0].Spec.Monitor
-	if err := applySLOAndSyntheticConfig(s); err != nil {
+	host.Status.Domains = append([]string(nil), status[0].Spec.Domains...)
+	host.Status.Monitor = status[0].Spec.Monitor
+	if err := applySLOAndSyntheticConfig(host); err != nil {
 		return nil, err
 	}
-	if err := validateSite(s, resolved, envResolved, env, envMeta); err != nil {
+	if err := validateHostEnvironment(host, resolved, envResolved, env, envMeta); err != nil {
 		return nil, err
 	}
-	directus, err := directusInstances(s)
+	directus, err := directusInstances(host)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := ociRegistries(s); err != nil {
+	if _, err := ociRegistries(host); err != nil {
 		return nil, err
 	}
-	if err := validateCompanySiteSpec(s, envResolved, companyXR); err != nil {
+	if err := validateCompanySiteSpec(host, envResolved, companyXR); err != nil {
 		return nil, err
 	}
-	if err := validateCompanySiteDirectusBinding(s, envResolved, companyXR, directus); err != nil {
+	if err := validateCompanySiteDirectusBinding(host, envResolved, companyXR, directus); err != nil {
 		return nil, err
 	}
-	return s, nil
+	return host, nil
 }
 
-func loadBootstrap(path string) (*Bootstrap, string, error) {
+func loadHostConfig(path string) (*HostConfig, string, error) {
 	resolved := resolvePath(path)
 	raw, err := os.ReadFile(resolved)
 	if err != nil {
-		return nil, "", fmt.Errorf("bootstrap: %w", err)
+		return nil, "", fmt.Errorf("host: %w", err)
 	}
-	var b Bootstrap
+	var h HostConfig
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	dec.KnownFields(true)
-	if err := dec.Decode(&b); err != nil {
-		return nil, "", fmt.Errorf("bootstrap %s: %w", resolved, err)
+	if err := dec.Decode(&h); err != nil {
+		return nil, "", fmt.Errorf("host %s: %w", resolved, err)
 	}
 	required := map[string]string{
-		"site":                   b.Site,
-		"cluster.name":           b.Cluster.Name,
-		"cluster.endpoint":       b.Cluster.Endpoint,
-		"node.address":           b.Node.Address,
-		"node.hostname":          b.Node.Hostname,
-		"node.gateway":           b.Node.Gateway,
-		"node.interfaceMac":      b.Node.InterfaceMac,
-		"node.installDiskSerial": b.Node.InstallDiskSerial,
-		"node.zfsDiskSerial":     b.Node.ZFSDiskSerial,
-		"talos.schematic":        b.Talos.Schematic,
+		"host":                   h.Host,
+		"environment":            h.Environment,
+		"provider.name":          h.Provider.Name,
+		"provider.serverId":      h.Provider.ServerID,
+		"provider.metro":         h.Provider.Metro,
+		"provider.plan":          h.Provider.Plan,
+		"cluster.name":           h.Cluster.Name,
+		"cluster.endpoint":       h.Cluster.Endpoint,
+		"node.address":           h.Node.Address,
+		"node.hostname":          h.Node.Hostname,
+		"node.gateway":           h.Node.Gateway,
+		"node.interfaceMac":      h.Node.InterfaceMac,
+		"node.installDiskSerial": h.Node.InstallDiskSerial,
+		"node.zfsDiskSerial":     h.Node.ZFSDiskSerial,
+		"talos.schematic":        h.Talos.Schematic,
 	}
 	for field, value := range required {
 		if value == "" {
-			return nil, "", fmt.Errorf("bootstrap %s: %s is required", resolved, field)
+			return nil, "", fmt.Errorf("host %s: %s is required", resolved, field)
 		}
 	}
-	if b.Node.PrefixLength < 1 || b.Node.PrefixLength > 32 {
-		return nil, "", fmt.Errorf("bootstrap %s: node.prefixLength must be 1-32, got %d", resolved, b.Node.PrefixLength)
+	if h.Node.PrefixLength < 1 || h.Node.PrefixLength > 32 {
+		return nil, "", fmt.Errorf("host %s: node.prefixLength must be 1-32, got %d", resolved, h.Node.PrefixLength)
 	}
-	if len(b.Talos.Patches) == 0 {
-		return nil, "", fmt.Errorf("bootstrap %s: talos.patches is required", resolved)
+	if len(h.Talos.Patches) == 0 {
+		return nil, "", fmt.Errorf("host %s: talos.patches is required", resolved)
 	}
-	if err := validateBootstrapStorage(resolved, b); err != nil {
+	if err := validateHostStorage(resolved, h); err != nil {
 		return nil, "", err
 	}
-	return &b, resolved, nil
+	return &h, resolved, nil
 }
 
-func validateBootstrapStorage(path string, b Bootstrap) error {
-	if b.Node.InstallDiskSerial == b.Node.ZFSDiskSerial {
-		return fmt.Errorf("bootstrap %s: node.installDiskSerial and node.zfsDiskSerial must be different", path)
+func validateHostStorage(path string, h HostConfig) error {
+	if h.Node.InstallDiskSerial == h.Node.ZFSDiskSerial {
+		return fmt.Errorf("host %s: node.installDiskSerial and node.zfsDiskSerial must be different", path)
 	}
-	if len(b.Storage.Pools) == 0 {
-		return fmt.Errorf("bootstrap %s: storage.pools is required", path)
+	if len(h.Storage.Pools) == 0 {
+		return fmt.Errorf("host %s: storage.pools is required", path)
 	}
 	var productPools int
-	for i, pool := range b.Storage.Pools {
+	for i, pool := range h.Storage.Pools {
 		prefix := fmt.Sprintf("storage.pools[%d]", i)
 		required := map[string]string{
 			prefix + ".name":       pool.Name,
@@ -295,61 +307,61 @@ func validateBootstrapStorage(path string, b Bootstrap) error {
 		}
 		for field, value := range required {
 			if value == "" {
-				return fmt.Errorf("bootstrap %s: %s is required", path, field)
+				return fmt.Errorf("host %s: %s is required", path, field)
 			}
 		}
 		if pool.Type != "zfs" {
-			return fmt.Errorf("bootstrap %s: %s.type must be zfs, got %q", path, prefix, pool.Type)
+			return fmt.Errorf("host %s: %s.type must be zfs, got %q", path, prefix, pool.Type)
 		}
 		if pool.WipePolicy != "never" {
-			return fmt.Errorf("bootstrap %s: %s.wipePolicy must be never, got %q", path, prefix, pool.WipePolicy)
+			return fmt.Errorf("host %s: %s.wipePolicy must be never, got %q", path, prefix, pool.WipePolicy)
 		}
 		if !filepath.IsAbs(pool.Mountpoint) {
-			return fmt.Errorf("bootstrap %s: %s.mountpoint must be absolute, got %q", path, prefix, pool.Mountpoint)
+			return fmt.Errorf("host %s: %s.mountpoint must be absolute, got %q", path, prefix, pool.Mountpoint)
 		}
 		if len(pool.DeviceSerials) == 0 {
-			return fmt.Errorf("bootstrap %s: %s.deviceSerials is required", path, prefix)
+			return fmt.Errorf("host %s: %s.deviceSerials is required", path, prefix)
 		}
 		seen := map[string]bool{}
 		var hasZFSDisk bool
 		for _, serial := range pool.DeviceSerials {
 			if serial == "" {
-				return fmt.Errorf("bootstrap %s: %s.deviceSerials cannot contain empty values", path, prefix)
+				return fmt.Errorf("host %s: %s.deviceSerials cannot contain empty values", path, prefix)
 			}
 			if seen[serial] {
-				return fmt.Errorf("bootstrap %s: %s.deviceSerials contains duplicate serial %q", path, prefix, serial)
+				return fmt.Errorf("host %s: %s.deviceSerials contains duplicate serial %q", path, prefix, serial)
 			}
 			seen[serial] = true
-			if serial == b.Node.InstallDiskSerial {
-				return fmt.Errorf("bootstrap %s: %s.deviceSerials must not include install disk serial %s", path, prefix, serial)
+			if serial == h.Node.InstallDiskSerial {
+				return fmt.Errorf("host %s: %s.deviceSerials must not include install disk serial %s", path, prefix, serial)
 			}
-			if serial == b.Node.ZFSDiskSerial {
+			if serial == h.Node.ZFSDiskSerial {
 				hasZFSDisk = true
 			}
 		}
 		if pool.Role == "product-workloads" {
 			productPools++
 			if !hasZFSDisk {
-				return fmt.Errorf("bootstrap %s: %s.deviceSerials must include node.zfsDiskSerial %s", path, prefix, b.Node.ZFSDiskSerial)
+				return fmt.Errorf("host %s: %s.deviceSerials must include node.zfsDiskSerial %s", path, prefix, h.Node.ZFSDiskSerial)
 			}
 			if !pathWithin(pool.Mountpoint, talosKubeletStorageRoot) {
-				return fmt.Errorf("bootstrap %s: %s.mountpoint %q must be under %s so Talos kubelet can see local PV paths", path, prefix, pool.Mountpoint, talosKubeletStorageRoot)
+				return fmt.Errorf("host %s: %s.mountpoint %q must be under %s so Talos kubelet can see local PV paths", path, prefix, pool.Mountpoint, talosKubeletStorageRoot)
 			}
 		}
 	}
 	if productPools != 1 {
-		return fmt.Errorf("bootstrap %s: exactly one storage pool must have role product-workloads, found %d", path, productPools)
+		return fmt.Errorf("host %s: exactly one storage pool must have role product-workloads, found %d", path, productPools)
 	}
 	return nil
 }
 
-func productWorkloadStoragePool(b Bootstrap) (BootstrapStoragePool, error) {
-	for _, pool := range b.Storage.Pools {
+func productWorkloadStoragePool(h HostConfig) (HostStoragePool, error) {
+	for _, pool := range h.Storage.Pools {
 		if pool.Role == "product-workloads" {
 			return pool, nil
 		}
 	}
-	return BootstrapStoragePool{}, fmt.Errorf("bootstrap %s: product-workloads storage pool is required", b.Site)
+	return HostStoragePool{}, fmt.Errorf("host %s: product-workloads storage pool is required", h.Host)
 }
 
 func loadEnvironment(path string) (*Environment, *environmentConfigMetadata, []byte, string, error) {
@@ -430,54 +442,54 @@ func loadCompanySiteSpec(raw []byte, path string) (*companySiteSpec, error) {
 	return found, nil
 }
 
-func validateSite(s *Site, bootstrapPath, envPath string, env *Environment, envMeta *environmentConfigMetadata) error {
+func validateHostEnvironment(h *Host, hostPath, envPath string, env *Environment, envMeta *environmentConfigMetadata) error {
 	if envMeta == nil {
 		return fmt.Errorf("environment %s: EnvironmentConfig metadata is required", envPath)
 	}
-	if envMeta.Name != s.Cluster.Name {
-		return fmt.Errorf("environment %s: metadata.name = %q, want %q from bootstrap %s", envPath, envMeta.Name, s.Cluster.Name, bootstrapPath)
+	if envMeta.Name != h.Cluster.Name {
+		return fmt.Errorf("environment %s: metadata.name = %q, want %q from host %s", envPath, envMeta.Name, h.Cluster.Name, hostPath)
 	}
-	if envMeta.Labels["guardian.dev/site"] != s.Name {
-		return fmt.Errorf("environment %s: metadata.labels[guardian.dev/site] = %q, want %q from bootstrap %s", envPath, envMeta.Labels["guardian.dev/site"], s.Name, bootstrapPath)
+	if envMeta.Labels["guardian.dev/site"] != h.Name {
+		return fmt.Errorf("environment %s: metadata.labels[guardian.dev/site] = %q, want %q from host %s", envPath, envMeta.Labels["guardian.dev/site"], h.Name, hostPath)
 	}
-	if env.Site.Name != s.Name {
-		return fmt.Errorf("environment %s: site.name = %q, want %q from bootstrap %s", envPath, env.Site.Name, s.Name, bootstrapPath)
+	if env.Site.Name != h.Name {
+		return fmt.Errorf("environment %s: site.name = %q, want %q from host %s", envPath, env.Site.Name, h.Name, hostPath)
 	}
-	if env.Site.ClusterName != "" && env.Site.ClusterName != s.Cluster.Name {
-		return fmt.Errorf("environment %s: site.clusterName = %q, want %q from bootstrap %s", envPath, env.Site.ClusterName, s.Cluster.Name, bootstrapPath)
+	if env.Site.ClusterName != "" && env.Site.ClusterName != h.Cluster.Name {
+		return fmt.Errorf("environment %s: site.clusterName = %q, want %q from host %s", envPath, env.Site.ClusterName, h.Cluster.Name, hostPath)
 	}
-	if env.Site.NodeHostname != "" && env.Site.NodeHostname != s.Node.Hostname {
-		return fmt.Errorf("environment %s: site.nodeHostname = %q, want %q from bootstrap %s", envPath, env.Site.NodeHostname, s.Node.Hostname, bootstrapPath)
+	if env.Site.NodeHostname != "" && env.Site.NodeHostname != h.Node.Hostname {
+		return fmt.Errorf("environment %s: site.nodeHostname = %q, want %q from host %s", envPath, env.Site.NodeHostname, h.Node.Hostname, hostPath)
 	}
-	if s.Aisucks.Domain != "" && !s.Gateway.Enabled {
+	if h.Aisucks.Domain != "" && !h.Gateway.Enabled {
 		return fmt.Errorf("environment %s: products.aisucks.domain requires gateway.enabled", envPath)
 	}
-	if s.OCI.Domain != "" && !s.Gateway.Enabled {
+	if h.OCI.Domain != "" && !h.Gateway.Enabled {
 		return fmt.Errorf("environment %s: platform.oci.domain requires gateway.enabled", envPath)
 	}
-	if s.Company.Domain != "" && !s.Gateway.Enabled {
+	if h.Company.Domain != "" && !h.Gateway.Enabled {
 		return fmt.Errorf("environment %s: products.company.domain requires gateway.enabled", envPath)
 	}
 	// Monitoring status hostnames with none declared would render a
 	// blackbox job with an empty target list.
-	if s.Status.Monitor && len(s.Status.Domains) == 0 {
+	if h.Status.Monitor && len(h.Status.Domains) == 0 {
 		return fmt.Errorf("environment %s: StatusSurface spec.monitor requires spec.domains", envPath)
 	}
 	return nil
 }
 
-func validateCompanySiteSpec(s *Site, envPath string, xr *companySiteSpec) error {
-	if s.Company.Domain == "" {
+func validateCompanySiteSpec(h *Host, envPath string, xr *companySiteSpec) error {
+	if h.Company.Domain == "" {
 		return nil
 	}
 	if xr == nil {
 		return fmt.Errorf("environment %s: products.company.domain requires a CompanySite document", envPath)
 	}
-	if xr.Site != s.Name {
-		return fmt.Errorf("environment %s: CompanySite spec.site = %q, want %q", envPath, xr.Site, s.Name)
+	if xr.Site != h.Name {
+		return fmt.Errorf("environment %s: CompanySite spec.site = %q, want %q", envPath, xr.Site, h.Name)
 	}
-	if xr.Domain != s.Company.Domain {
-		return fmt.Errorf("environment %s: CompanySite spec.domain = %q, want products.company.domain %q", envPath, xr.Domain, s.Company.Domain)
+	if xr.Domain != h.Company.Domain {
+		return fmt.Errorf("environment %s: CompanySite spec.domain = %q, want products.company.domain %q", envPath, xr.Domain, h.Company.Domain)
 	}
 	if len(xr.Routes) == 0 {
 		return fmt.Errorf("environment %s: CompanySite spec.routes is required", envPath)
@@ -495,8 +507,8 @@ func validateCompanySiteSpec(s *Site, envPath string, xr *companySiteSpec) error
 	return nil
 }
 
-func validateCompanySiteDirectusBinding(s *Site, envPath string, xr *companySiteSpec, directusInstances []directusInstanceManifest) error {
-	if s.Company.Domain == "" || xr == nil {
+func validateCompanySiteDirectusBinding(h *Host, envPath string, xr *companySiteSpec, directusInstances []directusInstanceManifest) error {
+	if h.Company.Domain == "" || xr == nil {
 		return nil
 	}
 	if xr.ContentSnapshot.Digest == "" {
@@ -536,8 +548,8 @@ func companyProbeURLs(domains []string, routes []string) []string {
 	return urls
 }
 
-func environmentPathForSite(site string) string {
-	return filepath.ToSlash(filepath.Join("src", "crossplane", "environments", site, "environment.yaml"))
+func environmentPathForEnvironment(environment string) string {
+	return filepath.ToSlash(filepath.Join("src", "environments", environment, "environment.yaml"))
 }
 
 // resolvePath maps repo-root-relative paths to the invoking shell's cwd.

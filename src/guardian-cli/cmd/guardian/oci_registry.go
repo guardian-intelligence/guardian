@@ -49,7 +49,7 @@ type ociRegistrySpec struct {
 	} `yaml:"readiness"`
 }
 
-func ociRegistries(site *Site) ([]ociRegistryManifest, error) {
+func ociRegistries(site *Host) ([]ociRegistryManifest, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(site.EnvironmentBundle.Raw))
 	var out []ociRegistryManifest
 	for {
@@ -84,7 +84,7 @@ func ociRegistries(site *Site) ([]ociRegistryManifest, error) {
 	return out, validateOCIRegistryConfig(site, out)
 }
 
-func validateOCIRegistryManifest(site *Site, registry ociRegistryManifest) error {
+func validateOCIRegistryManifest(site *Host, registry ociRegistryManifest) error {
 	name := registry.Metadata.Name
 	spec := registry.Spec
 	if name == "" {
@@ -126,7 +126,7 @@ func validateOCIRegistryManifest(site *Site, registry ociRegistryManifest) error
 	return nil
 }
 
-func validateOCIRegistryConfig(site *Site, registries []ociRegistryManifest) error {
+func validateOCIRegistryConfig(site *Host, registries []ociRegistryManifest) error {
 	if site.OCI.Domain == "" {
 		if len(registries) > 0 {
 			return fmt.Errorf("environment %s: OCIRegistry requires platform.oci.domain", site.EnvironmentBundle.Path)

@@ -42,7 +42,7 @@ type persistenceSpec struct {
 	AccessModes      []string `yaml:"accessModes"`
 }
 
-func storagePlanes(site *Site) ([]storagePlaneManifest, error) {
+func storagePlanes(site *Host) ([]storagePlaneManifest, error) {
 	var out []storagePlaneManifest
 	if err := decodeEnvironmentDocuments(site.EnvironmentBundle.Raw, site.EnvironmentBundle.Path, "StoragePlane", func(node *yaml.Node) error {
 		var doc storagePlaneManifest
@@ -60,14 +60,14 @@ func storagePlanes(site *Site) ([]storagePlaneManifest, error) {
 	return out, nil
 }
 
-func validateStoragePlanes(site *Site, planes []storagePlaneManifest) error {
+func validateStoragePlanes(site *Host, planes []storagePlaneManifest) error {
 	if len(planes) != 1 {
 		return fmt.Errorf("environment %s: exactly one StoragePlane is required, found %d", site.EnvironmentBundle.Path, len(planes))
 	}
 	return validateStoragePlane(site, planes[0])
 }
 
-func validateStoragePlane(site *Site, plane storagePlaneManifest) error {
+func validateStoragePlane(site *Host, plane storagePlaneManifest) error {
 	name := plane.Metadata.Name
 	spec := plane.Spec
 	if name == "" {
@@ -141,7 +141,7 @@ func validateStoragePlane(site *Site, plane storagePlaneManifest) error {
 	return nil
 }
 
-func validatePersistence(site *Site, owner, namespace string, persistence persistenceSpec) error {
+func validatePersistence(site *Host, owner, namespace string, persistence persistenceSpec) error {
 	required := map[string]string{
 		"persistence.claimName":        persistence.ClaimName,
 		"persistence.storageClassName": persistence.StorageClassName,

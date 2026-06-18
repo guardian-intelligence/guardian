@@ -30,11 +30,8 @@ func TestEdgeGatewayPlatformRender(t *testing.T) {
 func TestEdgeGatewaySiteManifests(t *testing.T) {
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
-			sitePath, err := toolPath("_main/src/sites/" + siteName + "/bootstrap.yaml")
-			if err != nil {
-				t.Fatalf("locate bootstrap.yaml: %v", err)
-			}
-			site, err := loadSite(sitePath)
+			sitePath := testHostPath(t, siteName)
+			site, err := loadHost(sitePath)
 			if err != nil {
 				t.Fatal(err)
 			}

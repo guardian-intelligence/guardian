@@ -6,7 +6,7 @@ import "testing"
 // table that nothing in the type system enforces:
 //
 //   - a manifest-only component (no image layouts) MUST be deliberately
-//     gated (enabled != nil): with no image and no site gate there would be
+//     gated (enabled != nil): with no image and no host gate there would be
 //     nothing deliberate about where its objects land;
 //   - OpenBao, Crossplane, and ESO apply before pods that consume projected
 //     Secrets;

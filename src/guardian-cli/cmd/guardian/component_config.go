@@ -17,7 +17,7 @@ func stableHash(input any) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-func gatusConfig(site *Site) string {
+func gatusConfig(site *Host) string {
 	var b strings.Builder
 	alert := site.Aisucks.NtfyTopic != ""
 	if alert {
@@ -87,7 +87,7 @@ func writeGatusEndpoint(b *strings.Builder, name, url string, conditions []strin
 	}
 }
 
-func otelCollectorConfig(site *Site) string {
+func otelCollectorConfig(site *Host) string {
 	var b strings.Builder
 	if site.Clickhouse.Enabled {
 		b.WriteString(`extensions:
@@ -255,7 +255,7 @@ func otelCollectorConfig(site *Site) string {
 	return b.String()
 }
 
-func otelBlackboxTargets(site *Site) []string {
+func otelBlackboxTargets(site *Host) []string {
 	targets := make([]string, 0, len(site.Aisucks.Watch)+len(site.Aisucks.WatchPages)+len(site.Company.ProbeURLs)+len(site.Status.Domains))
 	targets = append(targets, site.Aisucks.Watch...)
 	targets = append(targets, site.Aisucks.WatchPages...)

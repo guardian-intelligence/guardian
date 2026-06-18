@@ -222,7 +222,7 @@ func baoAPI(addr, method, path, token string, body io.Reader, out any) error {
 // the throwaway one — hence -force), and confirm the vault re-sealed under the
 // snapshot's own keyring. The throwaway key and root token never leave this
 // function; after the restore they are garbage and go out of scope. The
-// operator then unseals with the site's original shares.
+// operator then unseals with the cluster's original shares.
 func restoreSnapshot(addr, snapPath string) error {
 	recoverHint := "; vault now holds a throwaway init — recover with guardian down --yes and re-run --restore"
 
@@ -260,7 +260,7 @@ func restoreSnapshot(addr, snapPath string) error {
 	// FSM and reseals under the snapshot's keyring (measured <100ms, but it is
 	// a race): poll until it is actually sealed rather than reading the first
 	// state, which can catch the pre-reseal unsealed window. The throwaway keys
-	// are now garbage; the operator unseals with the site's original shares.
+	// are now garbage; the operator unseals with the cluster's original shares.
 	if err := poll("openbao to reseal after restore", 2*time.Minute, time.Second, func() error {
 		st, herr := baoHealth(addr)
 		if herr != nil {

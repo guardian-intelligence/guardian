@@ -8,7 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func buildTestEnvironmentBundle(site *Site, images map[string]string) ([]byte, error) {
+func buildTestEnvironmentBundle(site *Host, images map[string]string) ([]byte, error) {
 	kubectl, err := kubectlPath()
 	if err != nil {
 		return nil, err

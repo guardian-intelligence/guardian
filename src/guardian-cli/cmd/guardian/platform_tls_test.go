@@ -10,11 +10,11 @@ import (
 )
 
 func TestPlatformTLSSurvivalSecretRefs(t *testing.T) {
-	sitePath, err := toolPath("_main/src/sites/dev/bootstrap.yaml")
+	sitePath, err := toolPath("_main/src/hosts/ash-bm-001/host.yaml")
 	if err != nil {
-		t.Fatalf("locate bootstrap.yaml: %v", err)
+		t.Fatalf("locate host.yaml: %v", err)
 	}
-	site, err := loadSite(sitePath)
+	site, err := loadHost(sitePath)
 	if err != nil {
 		t.Fatalf("load site: %v", err)
 	}
@@ -35,11 +35,11 @@ func TestPlatformTLSSurvivalSecretRefs(t *testing.T) {
 }
 
 func TestEdgeGatewayCertificateObjectNames(t *testing.T) {
-	sitePath, err := toolPath("_main/src/sites/dev/bootstrap.yaml")
+	sitePath, err := toolPath("_main/src/hosts/ash-bm-001/host.yaml")
 	if err != nil {
-		t.Fatalf("locate bootstrap.yaml: %v", err)
+		t.Fatalf("locate host.yaml: %v", err)
 	}
-	site, err := loadSite(sitePath)
+	site, err := loadHost(sitePath)
 	if err != nil {
 		t.Fatalf("load site: %v", err)
 	}
@@ -58,11 +58,11 @@ func TestEdgeGatewayCertificateObjectNames(t *testing.T) {
 }
 
 func TestEdgeGatewayCertificateRefs(t *testing.T) {
-	sitePath, err := toolPath("_main/src/sites/dev/bootstrap.yaml")
+	sitePath, err := toolPath("_main/src/hosts/ash-bm-001/host.yaml")
 	if err != nil {
-		t.Fatalf("locate bootstrap.yaml: %v", err)
+		t.Fatalf("locate host.yaml: %v", err)
 	}
-	site, err := loadSite(sitePath)
+	site, err := loadHost(sitePath)
 	if err != nil {
 		t.Fatalf("load site: %v", err)
 	}
@@ -81,11 +81,11 @@ func TestEdgeGatewayCertificateRefs(t *testing.T) {
 }
 
 func TestEdgeGatewayCertificateTargets(t *testing.T) {
-	sitePath, err := toolPath("_main/src/sites/dev/bootstrap.yaml")
+	sitePath, err := toolPath("_main/src/hosts/ash-bm-001/host.yaml")
 	if err != nil {
-		t.Fatalf("locate bootstrap.yaml: %v", err)
+		t.Fatalf("locate host.yaml: %v", err)
 	}
-	site, err := loadSite(sitePath)
+	site, err := loadHost(sitePath)
 	if err != nil {
 		t.Fatalf("load site: %v", err)
 	}
@@ -145,11 +145,11 @@ func TestSanitizeSecretBackup(t *testing.T) {
 }
 
 func TestRestorePlatformTLSSecretsSkipsMissingBackups(t *testing.T) {
-	sitePath, err := toolPath("_main/src/sites/dev/bootstrap.yaml")
+	sitePath, err := toolPath("_main/src/hosts/ash-bm-001/host.yaml")
 	if err != nil {
-		t.Fatalf("locate bootstrap.yaml: %v", err)
+		t.Fatalf("locate host.yaml: %v", err)
 	}
-	site, err := loadSite(sitePath)
+	site, err := loadHost(sitePath)
 	if err != nil {
 		t.Fatalf("load site: %v", err)
 	}

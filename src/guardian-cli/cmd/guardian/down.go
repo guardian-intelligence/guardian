@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// runDown takes the site node to Talos maintenance mode with a wiped system
+// runDown takes the host to Talos maintenance mode with a wiped system
 // disk. Nodes are guaranteed to start life with Talos (provisioned via the
 // provider's iPXE pointed at the factory schematic), so a node that answers
 // neither Talos API is an error, not a migration case. `guardian up`
@@ -26,7 +26,7 @@ func runDown(args []string) error {
 		}
 		return fmt.Errorf("down: %w: %v", errUsage, err)
 	}
-	site, _, err := resolveSite(fs.Args())
+	site, _, err := resolveHost(fs.Args())
 	if err != nil {
 		return fmt.Errorf("down: %w", err)
 	}

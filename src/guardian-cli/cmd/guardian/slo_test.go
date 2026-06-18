@@ -8,7 +8,7 @@ import (
 func TestSLOAndSyntheticSiteManifests(t *testing.T) {
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
-			site := loadTestSite(t, siteName)
+			site := loadTestHost(t, siteName)
 			if site.SLO.PublicHTTP == nil {
 				t.Fatal("public-http SLOProfile not loaded")
 			}
@@ -51,7 +51,7 @@ func TestSLOProfilePlatformRender(t *testing.T) {
 }
 
 func TestSyntheticCheckRejectsBadTarget(t *testing.T) {
-	site := &Site{Name: "dev"}
+	site := &Host{Name: "dev"}
 	site.EnvironmentBundle.Path = "environment.yaml"
 	site.EnvironmentBundle.Raw = []byte(`apiVersion: platform.guardian.dev/v1alpha1
 kind: SyntheticCheck

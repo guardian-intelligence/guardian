@@ -23,7 +23,7 @@ type kustomizePatch struct {
 	value any
 }
 
-func buildComponentKustomization(kubectl string, c component, images map[string]string, site *Site) ([]byte, error) {
+func buildComponentKustomization(kubectl string, c component, images map[string]string, site *Host) ([]byte, error) {
 	overrides := make([]kustomizeImageOverride, 0, len(c.imageLayouts()))
 	for _, img := range c.imageLayouts() {
 		ref := images[img.name]
@@ -52,7 +52,7 @@ func buildComponentKustomization(kubectl string, c component, images map[string]
 	return buildKustomization(kubectl, c.kustomization, overrides, patches)
 }
 
-func componentKustomizePatches(c component, images map[string]string, site *Site) ([]kustomizePatch, error) {
+func componentKustomizePatches(c component, images map[string]string, site *Host) ([]kustomizePatch, error) {
 	switch c.name {
 	case "cert-manager":
 		ref := images["cert-manager-acmesolver"]
@@ -99,7 +99,7 @@ func componentKustomizePatches(c component, images map[string]string, site *Site
 		}}, nil
 	case "gatus":
 		if site == nil {
-			return nil, fmt.Errorf("kustomize %s: site is required", c.name)
+			return nil, fmt.Errorf("kustomize %s: host context is required", c.name)
 		}
 		patches := []kustomizePatch{{
 			kind:  "ConfigMap",
@@ -121,7 +121,7 @@ func componentKustomizePatches(c component, images map[string]string, site *Site
 		return patches, nil
 	case "otel-collector":
 		if site == nil {
-			return nil, fmt.Errorf("kustomize %s: site is required", c.name)
+			return nil, fmt.Errorf("kustomize %s: host context is required", c.name)
 		}
 		config := otelCollectorConfig(site)
 		configHash, err := stableHash(struct {
@@ -151,12 +151,12 @@ func componentKustomizePatches(c component, images map[string]string, site *Site
 	}
 }
 
-func buildEnvironmentKustomization(kubectl string, site *Site, images map[string]string) ([]byte, error) {
+func buildEnvironmentKustomization(kubectl string, site *Host, images map[string]string) ([]byte, error) {
 	path := filepath.Dir(site.EnvironmentBundle.Path)
 	return buildKustomization(kubectl, path, nil, environmentImagePatches(site, images))
 }
 
-func environmentImagePatches(site *Site, images map[string]string) []kustomizePatch {
+func environmentImagePatches(site *Host, images map[string]string) []kustomizePatch {
 	patches := make([]kustomizePatch, 0, 8)
 	add := func(kind, name, path, imageKey string) {
 		if ref := images[imageKey]; ref != "" {
@@ -170,7 +170,7 @@ func environmentImagePatches(site *Site, images map[string]string) []kustomizePa
 	}
 	add("ObservabilityStack", "observability", "/spec/victoriaMetrics/image", "victoria-metrics")
 	add("StatusSurface", "status", "/spec/image", "status")
-	if siteUsesPlatformOCI(site) {
+	if hostUsesPlatformOCI(site) {
 		add("OCIRegistry", "zot", "/spec/image", "zot")
 	}
 	add("AisucksProduct", "aisucks", "/spec/image", "aisucks")

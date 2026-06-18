@@ -1,7 +1,7 @@
 # guardian
 
 Playground for the Talos-native rewrite of the Verself host and bootstrap
-layers. The dev site is the experiment surface: a single bare-metal box that
+layers. The dev host is the experiment surface: a single bare-metal box that
 is repeatedly wiped, reinstalled with Talos, and converged from zero to a
 healthy OpenBao by control loops, with disaster recovery restored from an
 offsite snapshot pinned by digest.
@@ -17,7 +17,8 @@ See `docs/architecture/bootstrap.md` for the layer model and the DR contract.
 ```
 src/guardian-cli/                  controller-side CLI (Bazel-built Go binary)
 src/infrastructure-components/     deployable components, one OCI image each
-src/sites/                         per-site Talos schematics and config patches
+src/hosts/                         physical host inventory and Talos inputs
+src/environments/                  post-Kubernetes environment bundles
 docs/architecture/                 design documents
 ```
 
@@ -46,7 +47,7 @@ list it with `aspect help`.
 
 ## Quickstart
 
-Run from the repo root; site paths are repo-root relative.
+Run from the repo root; host paths are repo-root relative.
 
 ```bash
 bazelisk build //...
@@ -60,19 +61,23 @@ bazelisk run //src/infrastructure-components/openbao:load
 
 ## Wipe drill
 
-A full from-zero convergence of the dev site. The only inputs are the
+A full from-zero convergence of the dev host. The only inputs are the
 workspace clone and the ability to authenticate to the box; no provider
 API, no registry credentials, and no Guardian-hosted infrastructure.
 
-Run drills from the repo root: the configured bootstrap path is stored
-absolute, but the paths inside `bootstrap.yaml` (schematic, patches), the
+Run drills from the repo root: the configured host path is stored
+absolute, but the paths inside `host.yaml` (schematic, patches), the
 Crossplane environment bundle, and component manifests are repo-root relative.
 
 ```bash
-# One-time: point guardian at the site's bootstrap facts. The path is stored
+# List, inspect, and select a checked-in host.
+guardian host list
+guardian host inspect src/hosts/ash-bm-001/host.yaml
+
+# One-time: point guardian at the host facts. The path is stored
 # absolute in ${XDG_CONFIG_HOME:-~/.config}/guardian/config.yaml; inspect
 # with `guardian config`.
-guardian config bootstrap src/sites/dev/bootstrap.yaml
+guardian host use src/hosts/ash-bm-001/host.yaml
 
 # Down: wipe to Talos maintenance mode; waits until the Talos API answers.
 # A configured Talos node is reset over its API; a generic Linux node is
@@ -84,8 +89,8 @@ guardian config bootstrap src/sites/dev/bootstrap.yaml
 guardian down --yes && guardian up
 ```
 
-Both verbs also accept an explicit `<bootstrap.yaml>` positional argument,
-which overrides the configured bootstrap path.
+Both verbs also accept an explicit `<host.yaml>` positional argument,
+which overrides the configured host path.
 
 `up` probes runtime truth rather than recorded state: a node answering the
 authenticated Talos API gets its regenerated config re-applied; a node in

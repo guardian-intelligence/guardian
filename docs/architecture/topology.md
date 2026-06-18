@@ -5,11 +5,12 @@ owns the cluster shapes and the migration gates.
 
 ## Fleet truth
 
-Five boxes, not six: `vs-dev-w0` (the old verself dev) IS guardian dev. All
-Latitude ASH, f4.metal.small, one routed /31 each. `vs-gamma-w0`
-(206.223.228.87) and `vs-prod-w0` (206.223.228.99) still run Verself under
+Five boxes, not six: `ash-bm-001` is the current Guardian dev host. All
+Latitude ASH, f4.metal.small, one routed /31 each. Verself gamma
+(206.223.228.87) and Verself prod (206.223.228.99) still run Verself under
 Nomad; subsumption is ratified, but each box's wipe waits on an explicit
-per-box operator go (AGENTS.md).
+per-box operator go (AGENTS.md). Active Guardian hosts are named by stable
+asset ID in `src/hosts` and by current assignment hostname in Talos.
 
 ## Target shape: two clusters, not five sites
 

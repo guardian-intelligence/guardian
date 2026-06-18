@@ -24,9 +24,9 @@ func TestKustomizeRootsBuild(t *testing.T) {
 		"src/k8s/reconciled/observability/otel-collector/base",
 		"src/crossplane/packages/guardian-platform",
 		"src/crossplane/packages/guardian-products",
-		"src/crossplane/environments/dev",
-		"src/crossplane/environments/gamma",
-		"src/crossplane/environments/prod",
+		"src/environments/dev",
+		"src/environments/gamma",
+		"src/environments/prod",
 	} {
 		t.Run(path, func(t *testing.T) {
 			out, err := buildKustomization(kubectl, path, nil, nil)
@@ -43,7 +43,7 @@ func TestKustomizeRootsBuild(t *testing.T) {
 func TestEnvironmentKustomizePatchesImages(t *testing.T) {
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
-			site := loadTestSite(t, siteName)
+			site := loadTestHost(t, siteName)
 			out, err := buildTestEnvironmentBundle(site, testProductImages())
 			if err != nil {
 				t.Fatal(err)
@@ -61,7 +61,7 @@ func TestEnvironmentKustomizePatchesImages(t *testing.T) {
 					t.Fatalf("environment kustomize output missing patched image %s", image)
 				}
 			}
-			if siteUsesPlatformOCI(site) && !strings.Contains(text, zotTestImage) {
+			if hostUsesPlatformOCI(site) && !strings.Contains(text, zotTestImage) {
 				t.Fatalf("environment kustomize output missing patched zot image %s", zotTestImage)
 			}
 		})

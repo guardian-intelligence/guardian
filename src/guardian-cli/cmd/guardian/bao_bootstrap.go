@@ -134,7 +134,7 @@ func openBaoUnsealKeysFromEnv() []string {
 	return keys
 }
 
-func configureBaoForProjection(addr, token string, site *Site, allowCreateMissing bool) error {
+func configureBaoForProjection(addr, token string, site *Host, allowCreateMissing bool) error {
 	if token == "" {
 		return errors.New("openbao configuration requires a token")
 	}

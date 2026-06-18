@@ -9,7 +9,7 @@ func TestStoragePlaneSiteManifests(t *testing.T) {
 	wantVolumes := map[string]int{"dev": 4, "gamma": 3, "prod": 4}
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
-			site := loadTestSite(t, siteName)
+			site := loadTestHost(t, siteName)
 			planes, err := storagePlanes(site)
 			if err != nil {
 				t.Fatal(err)
@@ -68,7 +68,7 @@ func TestLocalStorageBootstrapRender(t *testing.T) {
 	if err != nil {
 		t.Fatalf("locate kubectl: %v", err)
 	}
-	site := loadTestSite(t, "dev")
+	site := loadTestHost(t, "dev")
 	c := componentByName(t, "local-storage-bootstrap")
 	rendered, err := buildComponentKustomization(kubectl, c, map[string]string{"postgres": postgresTestImage}, site)
 	if err != nil {

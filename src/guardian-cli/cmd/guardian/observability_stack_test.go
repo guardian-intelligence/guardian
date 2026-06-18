@@ -9,7 +9,7 @@ func TestObservabilityStackSiteManifests(t *testing.T) {
 	wantClickHouse := map[string]bool{"dev": true, "gamma": true, "prod": false}
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
-			site := loadTestSite(t, siteName)
+			site := loadTestHost(t, siteName)
 			stacks, err := observabilityStacks(site)
 			if err != nil {
 				t.Fatal(err)
@@ -84,7 +84,7 @@ func TestObservabilityStackPlatformRender(t *testing.T) {
 func TestObservabilityStackEnvironmentBundleInstances(t *testing.T) {
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
-			site := loadTestSite(t, siteName)
+			site := loadTestHost(t, siteName)
 			rendered, err := buildTestEnvironmentBundle(site, testProductImages())
 			if err != nil {
 				t.Fatal(err)

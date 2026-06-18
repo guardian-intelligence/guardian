@@ -1,7 +1,7 @@
 # Seed registry: transport for workspace-built OCI artifacts onto the node.
 # guardian pushes Bazel-built layouts here through a kubectl port-forward;
 # containerd pulls them back through the registry.guardian.internal mirror
-# (src/sites/<site>/talos/patches/registry-mirror.yaml). The fixed ClusterIP
+# (src/hosts/<host>/talos/patches/registry-mirror.yaml). The fixed ClusterIP
 # keeps the mirror endpoint stable across re-creates and is never reachable
 # from outside the cluster; push happens only over the port-forward.
 apiVersion: v1

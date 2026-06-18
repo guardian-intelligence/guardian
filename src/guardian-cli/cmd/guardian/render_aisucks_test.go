@@ -41,7 +41,7 @@ func TestAisucksProductAPIRender(t *testing.T) {
 func TestAisucksEnvironmentBundleInstances(t *testing.T) {
 	for _, siteName := range []string{"dev", "gamma", "prod"} {
 		t.Run(siteName, func(t *testing.T) {
-			site := loadTestSite(t, siteName)
+			site := loadTestHost(t, siteName)
 			rendered, err := buildTestEnvironmentBundle(site, testProductImages())
 			if err != nil {
 				t.Fatal(err)
@@ -66,13 +66,28 @@ func TestAisucksEnvironmentBundleInstances(t *testing.T) {
 	}
 }
 
-func loadTestSite(t *testing.T, siteName string) *Site {
+func testHostPath(t *testing.T, environment string) string {
 	t.Helper()
-	sitePath, err := toolPath("_main/src/sites/" + siteName + "/bootstrap.yaml")
-	if err != nil {
-		t.Fatalf("locate bootstrap.yaml: %v", err)
+	hostDirByEnvironment := map[string]string{
+		"dev":   "ash-bm-001",
+		"gamma": "ash-bm-002",
+		"prod":  "ash-bm-003",
 	}
-	site, err := loadSite(sitePath)
+	hostDir, ok := hostDirByEnvironment[environment]
+	if !ok {
+		t.Fatalf("no checked-in host for environment %q", environment)
+	}
+	sitePath, err := toolPath("_main/src/hosts/" + hostDir + "/host.yaml")
+	if err != nil {
+		t.Fatalf("locate host.yaml: %v", err)
+	}
+	return sitePath
+}
+
+func loadTestHost(t *testing.T, siteName string) *Host {
+	t.Helper()
+	sitePath := testHostPath(t, siteName)
+	site, err := loadHost(sitePath)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -15,7 +15,7 @@ snapshot, static assets, and certificate material to answer public requests.
 
 ## Configuration boundary
 
-`bootstrap.yaml` stays physical: hostnames, IPs, MACs, disk serials, Talos
+`host.yaml` stays physical: hostnames, IPs, MACs, disk serials, Talos
 schematics, gateways, and cluster bootstrap inputs. Crossplane never owns these
 because Crossplane only exists after Kubernetes exists.
 
