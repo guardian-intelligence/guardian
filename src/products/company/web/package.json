@@ -9,9 +9,11 @@
     "build": "vp build",
     "preview": "vp preview",
     "start": "node ./.output/server/index.mjs",
+    "test": "vp test run",
     "typecheck": "vp exec tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@chenglou/pretext": "catalog:",
     "@opentelemetry/api": "catalog:",
     "@opentelemetry/context-zone": "catalog:",
     "@opentelemetry/core": "catalog:",
@@ -24,6 +26,8 @@
     "@tanstack/react-router": "catalog:",
     "@tanstack/react-start": "catalog:",
     "@guardian/brand": "workspace:*",
+    "d3-scale": "catalog:",
+    "d3-shape": "catalog:",
     "gray-matter": "catalog:",
     "lucide-react": "catalog:",
     "marked": "catalog:",
@@ -36,6 +40,8 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "catalog:",
+    "@types/d3-scale": "catalog:",
+    "@types/d3-shape": "catalog:",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
@@ -44,6 +50,7 @@
     "tailwindcss": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
-    "vite-plus": "catalog:"
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
   }
 }

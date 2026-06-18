@@ -10,6 +10,8 @@
 // Shape: every entry is a full bulletin with a body. Add a new bulletin by
 // prepending to ITEMS (the array is reverse-chronological by convention).
 
+import type { TamProjectionDefaults } from "~/features/tam-playground/model";
+
 export type NewsroomCategory = "announcement" | "milestone" | "note";
 
 export interface NewsroomAuthor {
@@ -17,6 +19,14 @@ export interface NewsroomAuthor {
   readonly role: string;
   readonly avatar?: string;
 }
+
+// An optional interactive module embedded in an article body. Discriminated by
+// `kind` so the article route can switch on it; the only kind today is the
+// bare-metal TAM scenario playground.
+export type NewsroomInteractive = {
+  readonly kind: "bare-metal-tam-playground";
+  readonly defaults: TamProjectionDefaults;
+};
 
 export interface NewsroomItem {
   readonly slug: string;
@@ -28,11 +38,42 @@ export interface NewsroomItem {
   readonly publishedAt: string;
   readonly author: NewsroomAuthor;
   readonly body: readonly string[];
+  readonly interactive?: NewsroomInteractive;
   readonly ctaLabel?: string;
   readonly ctaHref?: string;
 }
 
 const ITEMS: readonly NewsroomItem[] = [
+  {
+    slug: "direct-to-consumer-bare-metal-hosting-1t-market-2030",
+    kicker: "Scenario",
+    category: "note",
+    title: "Direct-to-consumer bare metal hosting will be a $1T market by 2030.",
+    deck: "Cloud growth alone makes hosted bare metal much larger. The trillion-dollar case starts when consumer builders and new software companies stop treating local hardware as the default.",
+    date: "18 June 2026",
+    publishedAt: "2026-06-18",
+    author: { name: "Shovon Hasan", role: "Founder & CEO", avatar: "/people/shovon-hasan.jpg" },
+    body: [
+      "This is a scenario, not a forecast. The chart below starts from one observable number — today's cloud TAM — and projects a single question forward to 2030: how big does direct-to-consumer bare metal hosting get if it stops being a niche server category and becomes the default hardware layer for serious software work? Four levers drive the model, and every one of them is yours to move: today's cloud TAM, the 2030 cloud TAM, and the growth of the two markets we think are mispriced — the hobbyist and the software factory.",
+      "Start with cloud. Cloud spend has compounded for fifteen years and shows no sign of stopping; we index the window to a base near $723B today growing toward $2.5T by 2030. That growth alone is the floor of the argument. Bare metal does not have to take share from cloud to grow — it rides the same demand curve, because the workloads underneath are the same workloads.",
+      "So we treat bare metal not as a separate, sleepy server market but as a fixed share of cloud TAM. Hold that share constant — a $100B baseline indexed to cloud — and the bare-metal line alone clears a third of a trillion dollars by 2030 without a single behavior changing. That is the unglamorous part of the thesis, and it is the part we are most confident in.",
+      "The first behavior change is the hobbyist. Building a personal machine for serious AI or heavy local development gets less attractive every quarter: the hardware is expensive, it sits idle, and it is obsolete before it is paid off. That demand does not vanish — it moves to hosted bare metal that someone else racks, cools, and amortizes. We model it as incremental demand layered on the cloud-indexed line, not as the core market, which is why its lever is measured in single-digit percentages.",
+      "The second behavior change is the one that bends the curve: new software companies that never buy a rack and never rent a hyperscaler VM, because the default substrate for a company-as-code is hosted bare metal from day one. We call this the software factory. When founding a company means provisioning a computation substrate the way you provision a repository, the bare-metal market is no longer indexed to cloud — it is a multiple of it. Default behavior is a step function, and the step lands inside this window.",
+      "Put the three together and the model crosses a trillion dollars by 2030 under the defaults: the cloud-indexed floor, plus hobbyist displacement, plus new companies defaulting to bare metal. Move the levers and argue with us — the assumptions are all on the page. The claim is narrow and deliberately so. Direct-to-consumer bare metal becomes the default hardware layer for serious software work, and that makes it a trillion-dollar category.",
+    ],
+    interactive: {
+      kind: "bare-metal-tam-playground",
+      defaults: {
+        currentCloudTamBillion: 723,
+        cloudTam2030Billion: 2500,
+        hobbyistGrowthPct: 7,
+        softwareFactoryGrowthPct: 200,
+        currentBareMetalTamBillion: 100,
+        startQuarter: "2026Q3",
+        endQuarter: "2030Q4",
+      },
+    },
+  },
   {
     slug: "guardian-intelligence-announces-verself-private-beta",
     kicker: "Announcement",

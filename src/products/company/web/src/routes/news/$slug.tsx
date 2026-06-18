@@ -8,6 +8,8 @@ import {
 } from "~/content/newsroom";
 import { emitSpan } from "~/lib/telemetry/browser";
 import { ogMeta } from "~/lib/head";
+import { BareMetalTamPlayground } from "~/features/tam-playground/tam-playground";
+import { validateTamSearch } from "~/features/tam-playground/model";
 
 // /news/$slug — one bulletin.
 //
@@ -24,6 +26,10 @@ import { ogMeta } from "~/lib/head";
 
 export const Route = createFileRoute("/news/$slug")({
   component: NewsroomArticle,
+  // Optional scenario-playground levers live in the URL search. Unknown or
+  // out-of-range values are dropped to the article defaults rather than
+  // throwing, so a hand-edited share link still renders the article.
+  validateSearch: validateTamSearch,
   loader: ({ params }) => {
     const item = newsroomItemBySlug(params.slug);
     if (!item) {
@@ -228,10 +234,10 @@ function Byline({ item }: { item: NewsroomItem }) {
   );
 }
 
-function ArticleBody({ item }: { item: NewsroomItem }) {
+function Prose({ paragraphs }: { paragraphs: readonly string[] }) {
   return (
-    <div className="mt-8 flex flex-col gap-5" style={{ maxWidth: "64ch" }}>
-      {item.body.map((paragraph, idx) => (
+    <div className="flex flex-col gap-5" style={{ maxWidth: "64ch" }}>
+      {paragraphs.map((paragraph, idx) => (
         <p
           key={idx}
           style={{
@@ -248,6 +254,41 @@ function ArticleBody({ item }: { item: NewsroomItem }) {
       ))}
     </div>
   );
+}
+
+// Interactive modules render after the first two paragraphs and break out to
+// the full article column (wider than the 64ch prose measure). The prose above
+// sets up the model; the module is the argument; the prose below closes it.
+function ArticleBody({ item }: { item: NewsroomItem }) {
+  if (!item.interactive) {
+    return (
+      <div className="mt-8">
+        <Prose paragraphs={item.body} />
+      </div>
+    );
+  }
+  const leading = item.body.slice(0, 2);
+  const trailing = item.body.slice(2);
+  return (
+    <div className="mt-8 flex flex-col gap-8">
+      <Prose paragraphs={leading} />
+      <InteractiveModule interactive={item.interactive} slug={item.slug} />
+      <Prose paragraphs={trailing} />
+    </div>
+  );
+}
+
+function InteractiveModule({
+  interactive,
+  slug,
+}: {
+  interactive: NonNullable<NewsroomItem["interactive"]>;
+  slug: string;
+}) {
+  if (interactive.kind === "bare-metal-tam-playground") {
+    return <BareMetalTamPlayground slug={slug} defaults={interactive.defaults} />;
+  }
+  return null;
 }
 
 function ReadNext({ slug }: { slug: string }) {
