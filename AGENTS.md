@@ -1,5 +1,9 @@
 Bazel polyglot hermetically sealed monorepo for Guardian, a free open-source self-hostable cloud. The `guardian` CLI owns host lifecycle: stock Ubuntu or Talos maintenance -> Talos/Flux v2 bootstrap. Flux owns GitOps reconciliation across clusters at runtime. Distributables (binaries, npm packages, PyPI packages, Rust crates) are OCI native with industry-leading supply-chain security: cosign v3, SLSA 1.2 provenance, in-toto attestations, SBOM + licenses. OpenBao Transit signs fleet-owned gate verdicts, channel pointers, and deployment evidence. Ecosystem packages are therefore just projections of our verified OCI subjects. Every distributable owns its own release process and promotion gates.
 
+Pitch: CozyStack for agents.
+
+Reference Cozystack for prior art for the cloud portion.
+
 Default release channels: Edge (CD on main), nightly, RC, stable.
 Default deployment stages: dev (PR preview), gamma (staging), prod.
 
@@ -37,6 +41,7 @@ Constraints:
 - ClickHouse wide events / Observability 2.0. We don't separate metrics, logs, and traces. Time series data lives in ClickHouse as Wide Events except for float values that we care about for monitoring which go into VictoriaMetrics
 - Cross-site isolation. 
 - Secrets must be autoprovisioned/autorotated. Use OpenBao as the source of truth and K8s Secrets as the delivery mechanism.
+- Known gap: SecretProjection lacks OpenBao reconciler/readiness controller.
 
 Service architecture:
 
@@ -82,30 +87,38 @@ Flux migration path:
 - Full wipe drills are acceptable migration tools. The acceptance test for each host is: wipe, run `guardian up src/hosts/<asset-id>/host.yaml`, Flux becomes Ready, the assigned environment converges from Git/OCI state, and re-running `guardian up` performs no ordinary application deployment work.
 - After dev is boring, repeat on gamma, then prod. Gamma gets the first release-gate integration; prod only follows signed/approved stable pointers with rollback drills practiced before relying on automation.
 
-Fleet (all Latitude.sh ASH, f4.metal.small; per-box physical facts — MACs, disk
-serials, gateways — live in `src/hosts/<asset-id>/host.yaml`; post-Kubernetes
-desired state lives in `src/environments/<environment>/environment.yaml`.
-Physical facts are derived from the box and never copied between boxes: prod's
-external NIC is X550 fn 0 where dev/gamma use fn 1):
+Fleet (all Latitude.sh ASH, f4.metal.small; the Latitude project is `guardian`;
+per-box physical facts — MACs, disk serials, gateways — live in
+`src/hosts/<asset-id>/host.yaml`; post-Kubernetes desired state lives in
+`src/environments/<environment>/environment.yaml`). Physical hostnames are
+stable asset names, not stage names. Dev/gamma/prod are assignments expressed
+by clusters, namespaces, environments, and tags.
 
-| Host | Environment | Hostname | IP | Latitude ID | Serves | Notes |
+| Host | Current assignment | Latitude hostname | IP | Latitude ID | Serves | Notes |
 | - | - | - | - | - | - | - |
-| ash-bm-001 | dev | gi-ash-dev-platform-01 | 206.223.228.101 | sv_vAPXaMxKM5epz | dev.aisucks.app | cluster `guardian-dev`; drill surface: `guardian up src/hosts/ash-bm-001/host.yaml` |
-| ash-bm-002 | gamma | gi-ash-gamma-platform-01 | 45.250.254.119 | sv_nPRbajqEB5koM | gamma.aisucks.app | cluster `guardian-gamma`; release gate (canary submissions); monthly billing |
-| ash-bm-003 | prod | gi-ash-prod-platform-01 | 67.213.115.113 | sv_BDXM5E4QLNrpk | aisucks.app | cluster `guardian-prod`; reserved/yearly billing (support ticket open to convert) |
+| ash-bm-001 | prod target | gi-ash-bm-001 | 206.223.228.101 | sv_vAPXaMxKM5epz | aisucks.app | joins `guardian-prod`; currently has complete `host.yaml` |
+| ash-bm-002 | prod target | gi-ash-bm-002 | 45.250.254.119 | sv_nPRbajqEB5koM | aisucks.app | joins `guardian-prod`; currently has complete `host.yaml` |
+| ash-bm-003 | prod target | gi-ash-bm-003 | 67.213.115.113 | sv_BDXM5E4QLNrpk | aisucks.app | joins `guardian-prod`; currently has complete `host.yaml`; reserved/yearly billing |
+| ash-bm-004 | nonprod target | gi-ash-bm-004 | 206.223.228.87 | sv_8mop5gZo8Njxv | dev/gamma | released from Verself for takeover; refresh host-side disk serials before adding complete `host.yaml` |
+| excluded | Verself prod | vs-prod-w0 | 206.223.228.99 | sv_EvjLaBxRQNoqy | Verself prod | NOT ours to touch yet; never wipe, reinstall, rename, move, or reconfigure until explicit operator release |
 
-Verself boxes (run live Verself under Nomad — ClickHouse, TigerBeetle,
-Temporal): subsumption is the ratified direction (Compute doctrine below);
-per-box status differs:
+Target cluster shape while `vs-prod-w0` is excluded:
 
-- `vs-gamma-w0` (206.223.228.87, sv_8mop5gZo8Njxv): **RELEASED for takeover**
-  — explicit operator go 2026-06-12, including the data: the 384GB Verself
-  dataset on it is discardable (operator confirmed Verself keeps its own
-  backups in a separate R2 bucket). Wipe and enroll freely; converge its
-  boot chain to the gd-style ipxe OS-of-record when enrolling.
-- `vs-prod-w0` (206.223.228.99, sv_EvjLaBxRQNoqy): NOT ours to touch yet.
-  Stays Verself prod until a separate explicit go. Never wipe, reinstall, or
-  reconfigure it.
+- `guardian-prod`: 3 nodes (`ash-bm-001`, `ash-bm-002`, `ash-bm-003`) for etcd
+  quorum, rolling maintenance, OpenBao/CNPG HA, and production product surfaces.
+- `guardian-nonprod`: 1 node (`ash-bm-004`) shared by dev and gamma. Isolation is
+  namespace-first; use vCluster only when an environment-private API server is
+  earned. Gamma must not live inside the prod cluster, because it exists to catch
+  platform and product failures before prod.
+
+Former Verself gamma (`vs-gamma-w0`) is released for takeover as of 2026-06-12,
+including its data: the 384GB Verself dataset on it is discardable (operator
+confirmed Verself keeps its own backups in a separate R2 bucket). Wipe and enroll
+freely after host fact refresh; converge its boot chain to the gd-style ipxe
+OS-of-record when enrolling.
+
+Former/current Verself prod (`vs-prod-w0`) remains excluded. It stays Verself prod
+until a separate explicit go.
 
 Compute doctrine (ratified 2026-06-12): all Verself compute is subsumed — the
 whole fleet is guardian fleet, one pool. Spare dev/staging capacity IS workload

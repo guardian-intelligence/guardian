@@ -8,7 +8,7 @@ data:
   site:
     name: gamma
     clusterName: guardian-gamma
-    nodeHostname: gi-ash-gamma-platform-01
+    nodeHostname: gi-ash-bm-002
   alerts:
     ntfyTopic: "aisucks-ops-1ebda4d035e83ac0"
   gateway:
@@ -27,7 +27,7 @@ metadata:
   name: local-zfs
 spec:
   site: gamma
-  nodeName: gi-ash-gamma-platform-01
+  nodeName: gi-ash-bm-002
   storageClassName: guardian-local-retain
   reclaimPolicy: Retain
   volumeBindingMode: WaitForFirstConsumer

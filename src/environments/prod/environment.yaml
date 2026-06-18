@@ -8,7 +8,7 @@ data:
   site:
     name: prod
     clusterName: guardian-prod
-    nodeHostname: gi-ash-prod-platform-01
+    nodeHostname: gi-ash-bm-003
   alerts:
     ntfyTopic: "aisucks-ops-1ebda4d035e83ac0"
   gateway:
@@ -28,7 +28,7 @@ metadata:
   name: local-zfs
 spec:
   site: prod
-  nodeName: gi-ash-prod-platform-01
+  nodeName: gi-ash-bm-003
   storageClassName: guardian-local-retain
   reclaimPolicy: Retain
   volumeBindingMode: WaitForFirstConsumer

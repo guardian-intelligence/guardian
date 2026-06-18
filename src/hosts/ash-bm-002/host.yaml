@@ -16,7 +16,7 @@ cluster:
 
 node:
   address: 45.250.254.119
-  hostname: gi-ash-gamma-platform-01
+  hostname: gi-ash-bm-002
   # Latitude assigns the address statically (no DHCP): /31 point-to-point
   # with the gateway on the paired address.
   prefixLength: 31
