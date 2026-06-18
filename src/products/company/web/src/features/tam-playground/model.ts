@@ -1,97 +1,89 @@
-// Direct-to-consumer bare metal TAM — pure projection model.
+// Cloud / enthusiast TAM — pure projection model.
 //
-// This module owns ALL of the math and none of the rendering. It is imported
-// by the SSR summary table, the client canvas chart, the URL-state controls,
-// and the unit tests. Keeping it pure (no React, no DOM, no time source) is
-// what lets the same numbers render identically on the server and the client
-// and lets the test suite pin the headline claim.
+// This module owns ALL of the math and none of the rendering. It is imported by
+// the client canvas chart, the URL-state controls, the playground composition,
+// and the unit tests. Keeping it pure (no React, no DOM, no time source) is what
+// lets the same numbers render identically on the server and client.
 //
-// Scenario, not forecast. The article frames these as explicit, reader-editable
-// assumptions. Four levers are exposed:
+// Scenario, not forecast. ONE reader-editable lever:
 //
-//   1. currentCloudTamBillion  — today's cloud TAM            (cloudNow)
-//   2. cloudTam2030Billion     — projected 2030 cloud TAM     (cloud2030)
-//   3. hobbyistGrowthPct       — hobbyist/PC-builder market   (hobby)
-//   4. softwareFactoryGrowthPct— new-software-company market  (factory)
+//   segmentCagrPct — "Segment CAGR"  (URL param: enthusiast)
 //
-// Levers 3 and 4 replace the two fixed secondary assumptions from the original
-// note: the "+$25B PC-builder uplift" becomes a percentage of the 2030
-// cloud-indexed line, and the "3x default-company multiplier" becomes a
-// percentage growth (200% == the old 3x). The current bare-metal baseline
-// ($100B) stays a fixed assumption.
+// Everything else is a fixed assumption. The standard cloud projection grows
+// from Gartner's $723B 2025 estimate to Goldman Sachs' $2T 2030 projection. The
+// Guardian projection adds a latent enthusiast segment that begins landing in
+// 2027. Under the default:
 //
-// Under the defaults the software-factory endpoint lands at ~$1.06T, which the
-// article copy rounds to $1T:
+//   standard projection = $723B (2026) -> $2.0T (2030)
+//   segment baseline    = $100B (2026)
+//   segment CAGR        = (($360B / $100B) ^ (1 / 4 years)) - 1 = ~37.7%
+//   Guardian projection = $2.0T + $360B = ~$2.4T (2030)
 //
-//   cloudIndexed2030 = 100 * 2500 / 723          = ~$345.8B
-//   hobbyist uplift  = 345.8 * 7%                 = ~$24.2B
-//   factory step     = 345.8 * 200%               = ~$691.6B
-//   endpoint         = 345.8 + 24.2 + 691.6       = ~$1.06T  ✓
+// The series are sampled WEEKLY across the window (2025 → 2030) so the lines
+// read as smooth curves rather than chunky steps.
+
+const START_T = 2026.0;
+const END_T = 2030.0;
+const WEEKS_PER_YEAR = 52;
+const POINT_COUNT = Math.round((END_T - START_T) * WEEKS_PER_YEAR) + 1;
+
+const RAMP_START = 2027.0;
+const RAMP_END = END_T;
+const SEGMENT_CAGR_YEARS = END_T - START_T;
+const SEGMENT_CAGR_STEP = 0.1;
+
+export const DEFAULT_CURRENT_ENTHUSIAST_DEMAND_BILLION = 100;
+export const DEFAULT_2030_ENTHUSIAST_OPPORTUNITY_BILLION = 360;
 
 export interface TamProjectionDefaults {
   readonly currentCloudTamBillion: number;
   readonly cloudTam2030Billion: number;
-  readonly hobbyistGrowthPct: number;
-  readonly softwareFactoryGrowthPct: number;
-  readonly currentBareMetalTamBillion: number;
-  readonly startQuarter: "2026Q3";
-  readonly endQuarter: "2030Q4";
+  readonly currentEnthusiastDemandBillion: number;
+  readonly segmentCagrPct: number;
 }
 
-// The fully-resolved set of numbers the projection consumes. Lever values come
-// from the URL (or the article defaults); the bare-metal baseline is fixed.
 export interface TamProjectionInput {
   readonly currentCloudTamBillion: number;
   readonly cloudTam2030Billion: number;
-  readonly hobbyistGrowthPct: number;
-  readonly softwareFactoryGrowthPct: number;
-  readonly currentBareMetalTamBillion: number;
+  readonly currentEnthusiastDemandBillion: number;
+  readonly segmentCagrPct: number;
 }
 
 export interface TamProjectionPoint {
-  readonly quarter: string;
-  readonly cloudTamBillion: number;
-  readonly cloudIndexedBareMetalTamBillion: number;
-  readonly pcBuilderTamBillion: number;
-  readonly defaultSoftwareCompanyTamBillion: number;
+  // Continuous year fraction, e.g. 2027.25 ≈ early April 2027.
+  readonly t: number;
+  readonly standardProjectionTamBillion: number;
+  readonly guardianProjectionTamBillion: number;
+  readonly enthusiastDemandBillion: number;
 }
 
-// --- Quarter arithmetic -----------------------------------------------------
-// Quarters are encoded as a single integer (year*4 + quarterOrdinal) so ramps
-// and interpolation are plain arithmetic. 2026Q3 is the start of the window.
-
-const START_YEAR = 2026;
-const START_Q = 3;
-const END_YEAR = 2030;
-const END_Q = 4;
-
-function quarterIndex(year: number, quarter: number): number {
-  return year * 4 + (quarter - 1);
-}
-
-function indexToQuarter(index: number): string {
-  const year = Math.floor(index / 4);
-  const quarter = (index % 4) + 1;
-  return `${year}Q${quarter}`;
-}
-
-const START_INDEX = quarterIndex(START_YEAR, START_Q);
-const END_INDEX = quarterIndex(END_YEAR, END_Q);
-const POINT_COUNT = END_INDEX - START_INDEX + 1; // 18 quarters, inclusive.
-
-// PC-builder/hobbyist displacement ramps in across the whole window; the
-// software-factory step function only begins to bite once new companies are
-// defaulting to hosted bare metal in 2028+.
-const HOBBYIST_RAMP_START = quarterIndex(2026, 4);
-const FACTORY_RAMP_START = quarterIndex(2028, 4);
-
-// Smoothstep — a C1-continuous 0→1 ramp. Used so the displacement and
-// step-function lines ease in rather than turning on with a kink.
-function smoothstep(edge0: number, edge1: number, x: number): number {
-  if (edge1 <= edge0) return x >= edge1 ? 1 : 0;
-  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
+// Smoothstep — a C1-continuous 0→1 ramp, the S-curve the enthusiast line eases
+// along instead of turning on with a kink.
+function smoothstep(x: number): number {
+  const t = Math.min(1, Math.max(0, x));
   return t * t * (3 - 2 * t);
 }
+
+function roundToStep(value: number, step: number): number {
+  const decimals = Math.max(0, (String(step).split(".")[1] ?? "").length);
+  return Number((Math.round(value / step) * step).toFixed(decimals));
+}
+
+export function segmentCagrPctForOpportunity(
+  currentSegmentBillion: number,
+  opportunity2030Billion: number,
+): number {
+  if (currentSegmentBillion <= 0 || opportunity2030Billion <= 0) return 0;
+  const rate =
+    (Math.pow(opportunity2030Billion / currentSegmentBillion, 1 / SEGMENT_CAGR_YEARS) - 1) *
+    100;
+  return roundToStep(rate, SEGMENT_CAGR_STEP);
+}
+
+export const DEFAULT_SEGMENT_CAGR_PCT = segmentCagrPctForOpportunity(
+  DEFAULT_CURRENT_ENTHUSIAST_DEMAND_BILLION,
+  DEFAULT_2030_ENTHUSIAST_OPPORTUNITY_BILLION,
+);
 
 // --- Projection -------------------------------------------------------------
 
@@ -99,45 +91,35 @@ export function project(input: TamProjectionInput): readonly TamProjectionPoint[
   const {
     currentCloudTamBillion,
     cloudTam2030Billion,
-    hobbyistGrowthPct,
-    softwareFactoryGrowthPct,
-    currentBareMetalTamBillion,
+    currentEnthusiastDemandBillion,
+    segmentCagrPct,
   } = input;
 
-  // Cloud TAM grows exponentially (constant CAGR) from now to 2030. The ratio
-  // also indexes the bare-metal line, so guard the degenerate zero case.
+  // The standard projection grows exponentially across the window. The
+  // enthusiast segment also compounds, but only shows up in the visible market
+  // once the 2027 adoption ramp begins.
   const ratio =
     currentCloudTamBillion > 0 ? cloudTam2030Billion / currentCloudTamBillion : 1;
-
-  // Endpoints computed once at 2030Q4 and ramped back in, so the headline
-  // numbers are exact regardless of the smoothstep shape.
-  const cloudIndexed2030 = currentBareMetalTamBillion * ratio;
-  const hobbyistUplift2030 = cloudIndexed2030 * (hobbyistGrowthPct / 100);
-  const factoryStep2030 = cloudIndexed2030 * (softwareFactoryGrowthPct / 100);
+  const segmentRate = 1 + segmentCagrPct / 100;
 
   const points: TamProjectionPoint[] = [];
   for (let i = 0; i < POINT_COUNT; i += 1) {
-    const index = START_INDEX + i;
-    const fraction = POINT_COUNT === 1 ? 1 : i / (POINT_COUNT - 1);
+    const f = POINT_COUNT === 1 ? 1 : i / (POINT_COUNT - 1);
+    const t = START_T + (END_T - START_T) * f;
+    const yearsFromStart = t - START_T;
 
-    const cloudTamBillion = currentCloudTamBillion * Math.pow(ratio, fraction);
-    const cloudIndexedBareMetalTamBillion =
-      currentCloudTamBillion > 0
-        ? (currentBareMetalTamBillion * cloudTamBillion) / currentCloudTamBillion
-        : currentBareMetalTamBillion;
-
-    const hobbyistUplift = hobbyistUplift2030 * smoothstep(HOBBYIST_RAMP_START, END_INDEX, index);
-    const pcBuilderTamBillion = cloudIndexedBareMetalTamBillion + hobbyistUplift;
-
-    const factoryStep = factoryStep2030 * smoothstep(FACTORY_RAMP_START, END_INDEX, index);
-    const defaultSoftwareCompanyTamBillion = pcBuilderTamBillion + factoryStep;
+    const standardProjectionTamBillion = currentCloudTamBillion * Math.pow(ratio, f);
+    const segmentPotentialBillion =
+      currentEnthusiastDemandBillion * Math.pow(segmentRate, yearsFromStart);
+    const ramp = smoothstep((t - RAMP_START) / (RAMP_END - RAMP_START));
+    const enthusiastDemandBillion = segmentPotentialBillion * ramp;
+    const guardianProjectionTamBillion = standardProjectionTamBillion + enthusiastDemandBillion;
 
     points.push({
-      quarter: indexToQuarter(index),
-      cloudTamBillion,
-      cloudIndexedBareMetalTamBillion,
-      pcBuilderTamBillion,
-      defaultSoftwareCompanyTamBillion,
+      t,
+      standardProjectionTamBillion,
+      guardianProjectionTamBillion,
+      enthusiastDemandBillion,
     });
   }
   return points;
@@ -150,65 +132,51 @@ export function endpointOf(points: readonly TamProjectionPoint[]): TamProjection
 }
 
 // --- Series metadata --------------------------------------------------------
-// Single source of truth for the three plotted lines. The chart, the legend,
-// the table headers, and the CSV columns all derive from this so they cannot
-// drift apart.
+// Single source of truth for the two plotted lines. The chart, legend, KPIs,
+// and CSV columns all derive from this so they cannot drift apart.
 
 export type TamSeriesKey =
-  | "cloudIndexedBareMetalTamBillion"
-  | "pcBuilderTamBillion"
-  | "defaultSoftwareCompanyTamBillion";
+  | "standardProjectionTamBillion"
+  | "guardianProjectionTamBillion";
 
 export interface TamSeriesSpec {
   readonly key: TamSeriesKey;
   readonly label: string;
   readonly short: string;
   readonly csvColumn: string;
-  // Emphasis tier drives line weight and whether the Flare accent is allowed.
-  // Only the thesis line is emphasized; Flare stays a bounded event.
-  readonly emphasis: "base" | "mid" | "thesis";
+  // reference = the cloud projection (lighter dashed context line);
+  // thesis = the Guardian projection (heavy, with the bounded Flare band).
+  readonly emphasis: "reference" | "thesis";
 }
 
 export const TAM_SERIES: readonly TamSeriesSpec[] = [
   {
-    key: "cloudIndexedBareMetalTamBillion",
-    label: "Cloud-indexed bare metal TAM",
-    short: "Cloud-indexed",
-    csvColumn: "cloud_indexed_bare_metal_billion",
-    emphasis: "base",
+    key: "standardProjectionTamBillion",
+    label: "Standard Projection",
+    short: "Standard",
+    csvColumn: "standard_projection_billion",
+    emphasis: "reference",
   },
   {
-    key: "pcBuilderTamBillion",
-    label: "With hobbyist displacement",
-    short: "+ Hobbyist",
-    csvColumn: "with_hobbyist_billion",
-    emphasis: "mid",
-  },
-  {
-    key: "defaultSoftwareCompanyTamBillion",
-    label: "Default for new software companies",
-    short: "Software factory",
-    csvColumn: "software_factory_billion",
+    key: "guardianProjectionTamBillion",
+    label: "Guardian Projection",
+    short: "Guardian",
+    csvColumn: "guardian_projection_billion",
     emphasis: "thesis",
   },
 ];
 
-// --- Levers -----------------------------------------------------------------
+// --- Lever ------------------------------------------------------------------
 
-export type TamLeverParam = "cloudNow" | "cloud2030" | "hobby" | "factory";
-
-export type TamLeverKey =
-  | "currentCloudTamBillion"
-  | "cloudTam2030Billion"
-  | "hobbyistGrowthPct"
-  | "softwareFactoryGrowthPct";
+export type TamLeverParam = "enthusiast";
+export type TamLeverKey = "segmentCagrPct";
 
 export interface TamLeverSpec {
   readonly key: TamLeverKey;
   readonly param: TamLeverParam;
   readonly label: string;
   readonly help: string;
-  readonly unit: "$B" | "%";
+  readonly unit: "%";
   readonly min: number;
   readonly max: number;
   readonly step: number;
@@ -216,44 +184,14 @@ export interface TamLeverSpec {
 
 export const TAM_LEVERS: readonly TamLeverSpec[] = [
   {
-    key: "currentCloudTamBillion",
-    param: "cloudNow",
-    label: "Current cloud TAM",
-    help: "Today's total cloud market.",
-    unit: "$B",
-    min: 250,
-    max: 2000,
-    step: 25,
-  },
-  {
-    key: "cloudTam2030Billion",
-    param: "cloud2030",
-    label: "2030 cloud TAM",
-    help: "Projected cloud market by 2030Q4.",
-    unit: "$B",
-    min: 1000,
-    max: 6000,
-    step: 50,
-  },
-  {
-    key: "hobbyistGrowthPct",
-    param: "hobby",
-    label: "Hobbyist market growth",
-    help: "Consumer/PC-builder demand displaced into hosted bare metal, as a share of the 2030 cloud-indexed line.",
+    key: "segmentCagrPct",
+    param: "enthusiast",
+    label: "Segment CAGR",
+    help: "",
     unit: "%",
-    min: 0,
-    max: 50,
-    step: 1,
-  },
-  {
-    key: "softwareFactoryGrowthPct",
-    param: "factory",
-    label: "Software factory growth",
-    help: "New software companies defaulting to hosted bare metal, as growth over the 2030 cloud-indexed line. 200% == 3x.",
-    unit: "%",
-    min: 0,
-    max: 500,
-    step: 10,
+    min: roundToStep(DEFAULT_SEGMENT_CAGR_PCT * 0.5, SEGMENT_CAGR_STEP),
+    max: roundToStep(DEFAULT_SEGMENT_CAGR_PCT * 5, SEGMENT_CAGR_STEP),
+    step: SEGMENT_CAGR_STEP,
   },
 ];
 
@@ -263,13 +201,15 @@ export function leverByParam(param: TamLeverParam): TamLeverSpec {
   return spec;
 }
 
-// Clamp a candidate value into the lever's valid range and snap it to the
-// lever's step. Returns undefined for non-finite input so the URL never picks
-// up NaN. Snapping is anchored at min so steps line up with the slider stops.
+// Clamp a candidate into the lever's range and snap to its step. Returns
+// undefined for non-finite input so the URL never picks up NaN.
 export function clampLever(spec: TamLeverSpec, value: number): number | undefined {
   if (!Number.isFinite(value)) return undefined;
   const bounded = Math.min(spec.max, Math.max(spec.min, value));
-  const snapped = Math.round((bounded - spec.min) / spec.step) * spec.step + spec.min;
+  const snapped = roundToStep(
+    Math.round((bounded - spec.min) / spec.step) * spec.step + spec.min,
+    spec.step,
+  );
   return Math.min(spec.max, Math.max(spec.min, snapped));
 }
 
@@ -280,16 +220,12 @@ export function defaultLeverValue(defaults: TamProjectionDefaults, spec: TamLeve
 // --- URL search state -------------------------------------------------------
 
 export interface TamSearch {
-  readonly cloudNow?: number;
-  readonly cloud2030?: number;
-  readonly hobby?: number;
-  readonly factory?: number;
+  readonly enthusiast?: number;
 }
 
-// validateSearch authority for the route. Accepts the raw search record,
-// coerces each known param to a clamped/snapped number, and drops everything
-// else. Unknown or invalid values vanish rather than throwing so a hand-edited
-// share link degrades to the defaults instead of 404-ing.
+// validateSearch authority for the route. Coerces the known param to a
+// clamped/snapped number and drops everything else; an out-of-range hand-edited
+// link degrades to the default instead of 404-ing.
 export function validateTamSearch(raw: Record<string, unknown>): TamSearch {
   const out: { -readonly [K in keyof TamSearch]: TamSearch[K] } = {};
   for (const spec of TAM_LEVERS) {
@@ -306,39 +242,78 @@ export function resolveInput(
   defaults: TamProjectionDefaults,
   search: TamSearch,
 ): TamProjectionInput {
+  const legacyDefaults = defaults as TamProjectionDefaults & {
+    readonly currentBareMetalTamBillion?: number;
+    readonly enthusiastGrowthPct?: number;
+  };
+  const currentEnthusiastDemandBillion =
+    defaults.currentEnthusiastDemandBillion ??
+    legacyDefaults.currentBareMetalTamBillion ??
+    DEFAULT_CURRENT_ENTHUSIAST_DEMAND_BILLION;
+  const segmentCagrPct =
+    search.enthusiast ??
+    defaults.segmentCagrPct ??
+    legacyDefaults.enthusiastGrowthPct ??
+    DEFAULT_SEGMENT_CAGR_PCT;
   return {
-    currentCloudTamBillion: search.cloudNow ?? defaults.currentCloudTamBillion,
-    cloudTam2030Billion: search.cloud2030 ?? defaults.cloudTam2030Billion,
-    hobbyistGrowthPct: search.hobby ?? defaults.hobbyistGrowthPct,
-    softwareFactoryGrowthPct: search.factory ?? defaults.softwareFactoryGrowthPct,
-    currentBareMetalTamBillion: defaults.currentBareMetalTamBillion,
+    currentCloudTamBillion: defaults.currentCloudTamBillion,
+    cloudTam2030Billion: defaults.cloudTam2030Billion,
+    currentEnthusiastDemandBillion,
+    segmentCagrPct,
   };
 }
 
 export function leverValue(input: TamProjectionInput, spec: TamLeverSpec): number {
-  return input[spec.key];
+  return input[spec.key] ?? DEFAULT_SEGMENT_CAGR_PCT;
 }
 
 // --- Formatting -------------------------------------------------------------
 
-// Dollars rendered the way the article talks: billions until the number
-// crosses a trillion, then two-decimal trillions ("$1.06T").
+// Dollars the way the article talks: billions until a trillion, then rounded
+// trillions ("$2T", "$2.4T").
 export function formatTamBillion(value: number): string {
-  if (value >= 1000) return `$${(value / 1000).toFixed(2)}T`;
+  if (value >= 1000) {
+    const rounded = Math.round((value / 1000) * 10) / 10;
+    return `$${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}T`;
+  }
   return `$${Math.round(value)}B`;
 }
 
-// "2026Q3" -> "Q3 '26" for compact axis labels.
-export function formatQuarterShort(quarter: string): string {
-  const match = /^(\d{4})Q([1-4])$/.exec(quarter);
-  const year = match?.[1];
-  const q = match?.[2];
-  if (!year || !q) return quarter;
-  return `Q${q} '${year.slice(2)}`;
+const MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
+
+// Year fraction -> "Mon ''YY" (e.g. 2027.25 -> "Apr '27") for the hover readout.
+export function formatMonthYear(t: number): string {
+  const year = Math.floor(t);
+  const monthIndex = Math.min(11, Math.max(0, Math.floor((t - year) * 12)));
+  return `${MONTHS[monthIndex]} '${String(year).slice(2)}`;
 }
 
+// Integer years that fall inside the window, for sparse x-axis ticks.
+export function axisYears(): readonly number[] {
+  const years: number[] = [];
+  for (let y = Math.ceil(START_T); y <= Math.floor(END_T); y += 1) years.push(y);
+  return years;
+}
+
+export const WINDOW = { startT: START_T, endT: END_T } as const;
+
 export function formatLeverValue(spec: TamLeverSpec, value: number): string {
-  return spec.unit === "%" ? `${value}%` : formatTamBillion(value);
+  const safeValue = Number.isFinite(value) ? value : DEFAULT_SEGMENT_CAGR_PCT;
+  const formatted = Number.isInteger(safeValue) ? safeValue.toFixed(0) : safeValue.toFixed(1);
+  return `${formatted}${spec.unit}`;
 }
 
 // --- CSV --------------------------------------------------------------------
@@ -348,12 +323,16 @@ function round2(value: number): number {
 }
 
 export function toCSV(points: readonly TamProjectionPoint[]): string {
-  const header = ["quarter", "cloud_tam_billion", ...TAM_SERIES.map((s) => s.csvColumn)];
+  const header = [
+    "year_fraction",
+    ...TAM_SERIES.map((s) => s.csvColumn),
+    "enthusiast_demand_billion",
+  ];
   const rows = points.map((point) =>
     [
-      point.quarter,
-      round2(point.cloudTamBillion),
+      round2(point.t),
       ...TAM_SERIES.map((s) => round2(point[s.key])),
+      round2(point.enthusiastDemandBillion),
     ].join(","),
   );
   return [header.join(","), ...rows].join("\n") + "\n";

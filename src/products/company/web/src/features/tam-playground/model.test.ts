@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_CURRENT_ENTHUSIAST_DEMAND_BILLION,
+  DEFAULT_SEGMENT_CAGR_PCT,
   TAM_LEVERS,
+  axisYears,
   clampLever,
   endpointOf,
-  formatQuarterShort,
+  formatLeverValue,
+  formatMonthYear,
   formatTamBillion,
   leverByParam,
   project,
@@ -13,178 +17,142 @@ import {
   type TamProjectionDefaults,
 } from "./model";
 
-// Mirrors the article's interactive defaults. The headline claim is a property
-// of these numbers, so the suite asserts against them directly.
+// Mirrors the article's interactive defaults.
 const DEFAULTS: TamProjectionDefaults = {
   currentCloudTamBillion: 723,
-  cloudTam2030Billion: 2500,
-  hobbyistGrowthPct: 7,
-  softwareFactoryGrowthPct: 200,
-  currentBareMetalTamBillion: 100,
-  startQuarter: "2026Q3",
-  endQuarter: "2030Q4",
+  cloudTam2030Billion: 2000,
+  currentEnthusiastDemandBillion: DEFAULT_CURRENT_ENTHUSIAST_DEMAND_BILLION,
+  segmentCagrPct: DEFAULT_SEGMENT_CAGR_PCT,
 };
 
 const defaultInput = resolveInput(DEFAULTS, {});
 
-describe("quarter window", () => {
-  it("spans 2026Q3 through 2030Q4 inclusive", () => {
+describe("weekly window", () => {
+  it("samples weekly across 2026 -> 2030 and ends exactly on 2030", () => {
     const points = project(defaultInput);
-    expect(points).toHaveLength(18);
-    expect(points.at(0)?.quarter).toBe("2026Q3");
-    expect(points.at(-1)?.quarter).toBe("2030Q4");
+    expect(points.length).toBeGreaterThan(200);
+    expect(points.length).toBeLessThan(220);
+    expect(points.at(0)?.t).toBeCloseTo(2026.0, 6);
+    expect(points.at(-1)?.t).toBeCloseTo(2030.0, 6);
   });
 });
 
 describe("default scenario endpoint", () => {
   const endpoint = endpointOf(project(defaultInput));
 
-  it("rounds the software-factory line to $1T", () => {
-    // ~$1.06T under defaults; the copy rounds to $1T, the formatter shows $1.06T.
-    expect(endpoint.defaultSoftwareCompanyTamBillion).toBeGreaterThan(1000);
-    expect(endpoint.defaultSoftwareCompanyTamBillion).toBeLessThan(1100);
-    expect(formatTamBillion(endpoint.defaultSoftwareCompanyTamBillion)).toBe("$1.06T");
+  it("puts the standard projection at $2T", () => {
+    expect(endpoint.standardProjectionTamBillion).toBeCloseTo(2000, 6);
+    expect(formatTamBillion(endpoint.standardProjectionTamBillion)).toBe("$2T");
   });
 
-  it("indexes bare metal to cloud TAM at 2030", () => {
-    // 100 * 2500 / 723
-    expect(endpoint.cloudIndexedBareMetalTamBillion).toBeCloseTo(345.78, 1);
-    expect(endpoint.cloudTamBillion).toBeCloseTo(2500, 6);
+  it("derives Segment CAGR from the $360B enthusiast opportunity", () => {
+    expect(DEFAULT_SEGMENT_CAGR_PCT).toBeCloseTo(37.7, 1);
+    expect(endpoint.enthusiastDemandBillion).toBeGreaterThan(359);
+    expect(endpoint.enthusiastDemandBillion).toBeLessThan(361);
   });
 
-  it("stacks hobbyist uplift over the cloud-indexed line", () => {
-    const upliftAtEnd =
-      endpoint.pcBuilderTamBillion - endpoint.cloudIndexedBareMetalTamBillion;
-    // 7% of the 2030 cloud-indexed line.
-    expect(upliftAtEnd).toBeCloseTo(345.78 * 0.07, 1);
+  it("lands the Guardian projection at ~$2.4T", () => {
+    expect(endpoint.guardianProjectionTamBillion).toBeGreaterThan(2359);
+    expect(endpoint.guardianProjectionTamBillion).toBeLessThan(2361);
+    expect(formatTamBillion(endpoint.guardianProjectionTamBillion)).toBe("$2.4T");
   });
 });
 
-describe("lever bounds", () => {
-  it("drives the endpoint up at the upper bound and down at the lower bound", () => {
-    const low = endpointOf(
-      project(
-        resolveInput(DEFAULTS, { cloudNow: 2000, cloud2030: 1000, hobby: 0, factory: 0 }),
-      ),
-    );
-    const high = endpointOf(
-      project(
-        resolveInput(DEFAULTS, { cloudNow: 250, cloud2030: 6000, hobby: 50, factory: 500 }),
-      ),
-    );
-    expect(high.defaultSoftwareCompanyTamBillion).toBeGreaterThan(
-      low.defaultSoftwareCompanyTamBillion,
-    );
-    // Lower bound: cloud shrinks, no displacement, no factory step -> the three
-    // lines collapse onto the cloud-indexed baseline.
-    expect(low.pcBuilderTamBillion).toBeCloseTo(low.cloudIndexedBareMetalTamBillion, 6);
-    expect(low.defaultSoftwareCompanyTamBillion).toBeCloseTo(
-      low.cloudIndexedBareMetalTamBillion,
-      6,
-    );
-  });
-
-  it("zero software-factory growth keeps the thesis line on the hobbyist line", () => {
-    const endpoint = endpointOf(project(resolveInput(DEFAULTS, { factory: 0 })));
-    expect(endpoint.defaultSoftwareCompanyTamBillion).toBeCloseTo(
-      endpoint.pcBuilderTamBillion,
-      6,
+describe("enthusiast demand is latent until 2027", () => {
+  it("the demand band is closed before 2027, open after", () => {
+    const points = project(defaultInput);
+    for (const p of points) {
+      if (p.t <= 2027) {
+        expect(p.guardianProjectionTamBillion).toBeCloseTo(p.standardProjectionTamBillion, 6);
+        expect(p.enthusiastDemandBillion).toBeCloseTo(0, 6);
+      }
+    }
+    const endpoint = endpointOf(points);
+    expect(endpoint.guardianProjectionTamBillion).toBeGreaterThan(
+      endpoint.standardProjectionTamBillion + 300,
     );
   });
 });
 
-describe("monotonic growth", () => {
-  it("every series is non-decreasing across the window under defaults", () => {
+describe("the single lever", () => {
+  it("is Segment CAGR, keyed to the existing enthusiast param", () => {
+    expect(TAM_LEVERS).toHaveLength(1);
+    expect(TAM_LEVERS[0]?.param).toBe("enthusiast");
+    expect(TAM_LEVERS[0]?.label).toBe("Segment CAGR");
+  });
+
+  it("computes the range from the default", () => {
+    const enthusiast = leverByParam("enthusiast");
+    expect(enthusiast.min).toBeCloseTo(DEFAULT_SEGMENT_CAGR_PCT / 2, 1);
+    expect(enthusiast.max).toBeCloseTo(DEFAULT_SEGMENT_CAGR_PCT * 5, 1);
+    expect(enthusiast.step).toBe(0.1);
+  });
+});
+
+describe("monotonic growth + ordering", () => {
+  it("every series is non-decreasing, with Guardian >= standard", () => {
     const points = project(defaultInput);
     for (let i = 1; i < points.length; i += 1) {
       const prev = points[i - 1]!;
       const cur = points[i]!;
-      expect(cur.cloudTamBillion).toBeGreaterThanOrEqual(prev.cloudTamBillion);
-      expect(cur.cloudIndexedBareMetalTamBillion).toBeGreaterThanOrEqual(
-        prev.cloudIndexedBareMetalTamBillion,
+      expect(cur.standardProjectionTamBillion).toBeGreaterThanOrEqual(
+        prev.standardProjectionTamBillion,
       );
-      expect(cur.pcBuilderTamBillion).toBeGreaterThanOrEqual(prev.pcBuilderTamBillion);
-      expect(cur.defaultSoftwareCompanyTamBillion).toBeGreaterThanOrEqual(
-        prev.defaultSoftwareCompanyTamBillion,
+      expect(cur.guardianProjectionTamBillion).toBeGreaterThanOrEqual(
+        prev.guardianProjectionTamBillion,
       );
-    }
-  });
-
-  it("orders the three lines: cloud-indexed <= hobbyist <= software factory", () => {
-    for (const point of project(defaultInput)) {
-      expect(point.pcBuilderTamBillion).toBeGreaterThanOrEqual(
-        point.cloudIndexedBareMetalTamBillion,
-      );
-      expect(point.defaultSoftwareCompanyTamBillion).toBeGreaterThanOrEqual(
-        point.pcBuilderTamBillion,
+      expect(cur.guardianProjectionTamBillion).toBeGreaterThanOrEqual(
+        cur.standardProjectionTamBillion,
       );
     }
   });
 });
 
 describe("clampLever", () => {
-  it("clamps below min and above max", () => {
-    const cloudNow = leverByParam("cloudNow");
-    expect(clampLever(cloudNow, -1)).toBe(cloudNow.min);
-    expect(clampLever(cloudNow, 99999)).toBe(cloudNow.max);
-  });
+  const enthusiast = leverByParam("enthusiast");
 
-  it("snaps to the lever step", () => {
-    const cloud2030 = leverByParam("cloud2030"); // step 50
-    expect(clampLever(cloud2030, 2511)).toBe(2500);
-    expect(clampLever(cloud2030, 2530)).toBe(2550);
-  });
-
-  it("rejects non-finite values", () => {
-    expect(clampLever(leverByParam("hobby"), Number.NaN)).toBeUndefined();
+  it("clamps and snaps to the decimal step", () => {
+    expect(clampLever(enthusiast, -5)).toBe(enthusiast.min);
+    expect(clampLever(enthusiast, 99999)).toBe(enthusiast.max);
+    expect(clampLever(enthusiast, 37.84)).toBe(37.8);
+    expect(clampLever(enthusiast, 37.85)).toBe(37.9);
+    expect(clampLever(enthusiast, Number.NaN)).toBeUndefined();
   });
 });
 
 describe("validateTamSearch", () => {
-  it("keeps valid params, snapped, and drops unknowns", () => {
-    const out = validateTamSearch({
-      cloudNow: 731,
-      cloud2030: "2500",
-      hobby: 7,
-      factory: 200,
-      junk: "drop me",
-    });
-    expect(out).toEqual({ cloudNow: 725, cloud2030: 2500, hobby: 7, factory: 200 });
-  });
-
-  it("returns an empty object for absent/garbage input", () => {
+  it("keeps the snapped enthusiast param and drops unknowns", () => {
+    expect(validateTamSearch({ enthusiast: 38.04, junk: "x" })).toEqual({ enthusiast: 38 });
+    expect(validateTamSearch({ enthusiast: "abc" })).toEqual({});
     expect(validateTamSearch({})).toEqual({});
-    expect(validateTamSearch({ cloudNow: "abc" })).toEqual({});
-  });
-
-  it("round-trips every lever param", () => {
-    for (const spec of TAM_LEVERS) {
-      const out = validateTamSearch({ [spec.param]: spec.min });
-      expect(out[spec.param]).toBe(spec.min);
-    }
+    expect(resolveInput(DEFAULTS, validateTamSearch({}))).toEqual(DEFAULTS);
   });
 });
 
-describe("formatting", () => {
-  it("formats billions and trillions", () => {
-    expect(formatTamBillion(345.78)).toBe("$346B");
-    expect(formatTamBillion(1061.5)).toBe("$1.06T");
+describe("axis + formatting", () => {
+  it("ticks every year from 2026 through 2030", () => {
+    expect(axisYears()).toEqual([2026, 2027, 2028, 2029, 2030]);
   });
 
-  it("compacts quarters", () => {
-    expect(formatQuarterShort("2026Q3")).toBe("Q3 '26");
-    expect(formatQuarterShort("2030Q4")).toBe("Q4 '30");
+  it("formats month-year, dollars, and lever values", () => {
+    const enthusiast = leverByParam("enthusiast");
+    expect(formatMonthYear(2026.0)).toBe("Jan '26");
+    expect(formatMonthYear(2027.0)).toBe("Jan '27");
+    expect(formatTamBillion(360)).toBe("$360B");
+    expect(formatTamBillion(2000)).toBe("$2T");
+    expect(formatTamBillion(2360)).toBe("$2.4T");
+    expect(formatLeverValue(enthusiast, DEFAULT_SEGMENT_CAGR_PCT)).toBe("37.7%");
   });
 });
 
 describe("toCSV", () => {
-  it("emits a header and one row per quarter", () => {
-    const csv = toCSV(project(defaultInput));
+  it("emits a header (standard, Guardian, demand) and one row per weekly point", () => {
+    const points = project(defaultInput);
+    const csv = toCSV(points);
     const lines = csv.trimEnd().split("\n");
     expect(lines[0]).toBe(
-      "quarter,cloud_tam_billion,cloud_indexed_bare_metal_billion,with_hobbyist_billion,software_factory_billion",
+      "year_fraction,standard_projection_billion,guardian_projection_billion,enthusiast_demand_billion",
     );
-    expect(lines).toHaveLength(19); // header + 18 quarters
-    expect(lines[1]?.startsWith("2026Q3,")).toBe(true);
+    expect(lines).toHaveLength(points.length + 1);
   });
 });

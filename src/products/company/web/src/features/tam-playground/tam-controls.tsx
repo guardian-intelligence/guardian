@@ -156,17 +156,19 @@ function LeverControl({
           }}
         />
       </div>
-      <p
-        style={{
-          fontFamily: "'Geist', sans-serif",
-          fontSize: "11.5px",
-          lineHeight: 1.4,
-          color: "var(--treatment-muted-meta)",
-          margin: 0,
-        }}
-      >
-        {spec.help}
-      </p>
+      {spec.help ? (
+        <p
+          style={{
+            fontFamily: "'Geist', sans-serif",
+            fontSize: "11.5px",
+            lineHeight: 1.4,
+            color: "var(--treatment-muted-meta)",
+            margin: 0,
+          }}
+        >
+          {spec.help}
+        </p>
+      ) : null}
     </div>
   );
 }

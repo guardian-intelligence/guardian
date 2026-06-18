@@ -2,12 +2,11 @@ import { getRouteApi } from "@tanstack/react-router";
 import { Suspense, lazy, useEffect } from "react";
 import { emitSpan } from "~/lib/telemetry/browser";
 import { TamControls } from "./tam-controls";
-import { TamSummaryTable } from "./tam-summary-table";
 
 // The canvas chart pulls in d3 + pretext and only runs client-side. Lazy-load
 // it (the FirstLight pattern) so those libraries land in a hydration-time chunk
-// instead of the SSR bundle and the initial client payload. The summary table
-// below is the pre-hydration reading path, so deferring the chart costs nothing.
+// instead of the SSR bundle and the initial client payload. The endpoint KPIs
+// render server-side, so the headline numbers are present before hydration.
 const TamChart = lazy(() => import("./tam-chart").then((m) => ({ default: m.TamChart })));
 
 function ChartFallback() {
@@ -15,7 +14,6 @@ function ChartFallback() {
 }
 import {
   TAM_LEVERS,
-  TAM_SERIES,
   clampLever,
   endpointOf,
   formatTamBillion,
@@ -30,7 +28,7 @@ import {
 
 // Composition root for the bare-metal TAM scenario playground. It owns the
 // glue: read the validated URL search, resolve the projection input, recompute
-// the points, and fan the data out to the KPIs, controls, chart, and table.
+// the points, and fan the data out to the KPIs, controls, and chart.
 // URL search params are the single state authority — there is no separate store.
 
 const routeApi = getRouteApi("/news/$slug");
@@ -53,13 +51,14 @@ export function BareMetalTamPlayground({ slug, defaults }: BareMetalTamPlaygroun
     "article.slug": slug,
     cloud_now_billion: String(input.currentCloudTamBillion),
     cloud_2030_billion: String(input.cloudTam2030Billion),
-    hobbyist_growth_pct: String(input.hobbyistGrowthPct),
-    software_factory_growth_pct: String(input.softwareFactoryGrowthPct),
-    endpoint_cloud_indexed_billion: String(Math.round(endpoint.cloudIndexedBareMetalTamBillion)),
-    endpoint_pc_builder_billion: String(Math.round(endpoint.pcBuilderTamBillion)),
-    endpoint_default_company_billion: String(
-      Math.round(endpoint.defaultSoftwareCompanyTamBillion),
+    segment_cagr_pct: String(input.segmentCagrPct),
+    endpoint_standard_projection_billion: String(
+      Math.round(endpoint.standardProjectionTamBillion),
     ),
+    endpoint_guardian_projection_billion: String(
+      Math.round(endpoint.guardianProjectionTamBillion),
+    ),
+    endpoint_enthusiast_demand_billion: String(Math.round(endpoint.enthusiastDemandBillion)),
   });
 
   // One view span per article load.
@@ -75,6 +74,9 @@ export function BareMetalTamPlayground({ slug, defaults }: BareMetalTamPlaygroun
     const clamped = clampLever(spec, value);
     void navigate({
       replace: true,
+      // Keep the reader's scroll position — every slider tick writes the URL,
+      // and the router's default scroll-to-top would yank the page up mid-drag.
+      resetScroll: false,
       search: (prev: Record<string, unknown>) => {
         const next = { ...prev };
         if (clamped === undefined || clamped === defaults[spec.key]) {
@@ -98,7 +100,7 @@ export function BareMetalTamPlayground({ slug, defaults }: BareMetalTamPlaygroun
   };
 
   const reset = () => {
-    void navigate({ replace: true, search: {} });
+    void navigate({ replace: true, resetScroll: false, search: {} });
   };
 
   const downloadCsv = () => {
@@ -108,7 +110,7 @@ export function BareMetalTamPlayground({ slug, defaults }: BareMetalTamPlaygroun
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `bare-metal-tam-${input.currentCloudTamBillion}-${input.cloudTam2030Billion}-${input.hobbyistGrowthPct}-${input.softwareFactoryGrowthPct}.csv`;
+    anchor.download = `tam-playground-segment-cagr-${input.segmentCagrPct}.csv`;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
@@ -125,41 +127,13 @@ export function BareMetalTamPlayground({ slug, defaults }: BareMetalTamPlaygroun
         background: "var(--treatment-ground)",
       }}
     >
-      <header className="flex flex-col gap-2">
-        <p
-          className="font-mono text-[10px] font-semibold uppercase"
-          style={{ color: "var(--treatment-muted-meta)", letterSpacing: "0.2em", margin: 0 }}
-        >
-          Scenario playground
-        </p>
-        <p
-          style={{
-            fontFamily: "'Geist', sans-serif",
-            fontSize: "14px",
-            lineHeight: 1.5,
-            color: "var(--treatment-muted-strong)",
-            margin: 0,
-            maxWidth: "64ch",
-          }}
-        >
-          Move the four levers and the projection recomputes live. Every value lives in the
-          URL, so a scenario you like is a link you can share. This is a model, not a forecast.
-        </p>
-      </header>
-
       <KpiRow endpoint={endpoint} />
 
       <div className="grid grid-cols-1 gap-7 lg:grid-cols-5">
-        <div className="flex flex-col gap-4 lg:col-span-3">
+        <div className="lg:col-span-3">
           <Suspense fallback={<ChartFallback />}>
             <TamChart points={points} />
           </Suspense>
-          <Assumptions
-            currentBareMetalTamBillion={input.currentBareMetalTamBillion}
-            hobbyistUpliftBillion={endpoint.pcBuilderTamBillion - endpoint.cloudIndexedBareMetalTamBillion}
-            hobbyistGrowthPct={input.hobbyistGrowthPct}
-            softwareFactoryGrowthPct={input.softwareFactoryGrowthPct}
-          />
         </div>
         <div className="lg:col-span-2">
           <TamControls
@@ -172,113 +146,54 @@ export function BareMetalTamPlayground({ slug, defaults }: BareMetalTamPlaygroun
           />
         </div>
       </div>
-
-      <TamSummaryTable points={points} />
     </section>
   );
 }
 
+// The two headline numbers: external standard projection and Guardian's
+// projection with enthusiast demand stacked in.
 function KpiRow({ endpoint }: { endpoint: TamProjectionPoint }) {
+  const kpis = [
+    { label: "Standard Projection · 2030", value: endpoint.standardProjectionTamBillion, accent: false },
+    { label: "Guardian Projection · 2030", value: endpoint.guardianProjectionTamBillion, accent: true },
+  ];
   return (
     <div
-      className="grid grid-cols-1 gap-px sm:grid-cols-3"
+      className="grid grid-cols-1 gap-px sm:grid-cols-2"
       style={{ background: "var(--treatment-hairline)" }}
       data-tam-kpis
     >
-      {TAM_SERIES.map((series) => {
-        const thesis = series.emphasis === "thesis";
-        return (
-          <div
-            key={series.key}
-            className="flex flex-col gap-1 px-4 py-3"
-            style={{ background: "var(--treatment-ground)" }}
+      {kpis.map((kpi) => (
+        <div
+          key={kpi.label}
+          className="flex flex-col gap-1 px-4 py-3"
+          style={{ background: "var(--treatment-ground)" }}
+        >
+          <span
+            className="font-mono text-[10px] font-semibold uppercase"
+            style={{ color: "var(--treatment-muted-meta)", letterSpacing: "0.12em" }}
           >
-            <span
-              className="font-mono text-[10px] font-semibold uppercase"
-              style={{ color: "var(--treatment-muted-meta)", letterSpacing: "0.12em" }}
-            >
-              {series.short} · 2030
-            </span>
-            <span
-              style={{
-                fontFamily: "'Fraunces', Georgia, serif",
-                fontVariationSettings: '"opsz" 80',
-                fontSize: thesis ? "34px" : "28px",
-                lineHeight: 1.05,
-                color: "var(--treatment-ink)",
-              }}
-            >
-              {formatTamBillion(endpoint[series.key])}
-            </span>
-            {thesis ? (
-              <span
-                aria-hidden
-                style={{ height: "3px", width: "40px", background: "var(--color-flare)" }}
-              />
-            ) : null}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function Assumptions({
-  currentBareMetalTamBillion,
-  hobbyistUpliftBillion,
-  hobbyistGrowthPct,
-  softwareFactoryGrowthPct,
-}: {
-  currentBareMetalTamBillion: number;
-  hobbyistUpliftBillion: number;
-  hobbyistGrowthPct: number;
-  softwareFactoryGrowthPct: number;
-}) {
-  const rows: ReadonlyArray<readonly [string, string]> = [
-    ["Bare-metal baseline", formatTamBillion(currentBareMetalTamBillion)],
-    [
-      "Hobbyist displacement",
-      `${hobbyistGrowthPct}% of cloud-indexed · +${formatTamBillion(hobbyistUpliftBillion)}`,
-    ],
-    [
-      "Software factory",
-      `cloud-indexed +${softwareFactoryGrowthPct}% · ${(1 + softwareFactoryGrowthPct / 100).toFixed(1)}x`,
-    ],
-    ["Window", "2026Q3 → 2030Q4"],
-  ];
-  return (
-    <dl className="flex flex-col gap-1.5" data-tam-assumptions>
-      <p
-        className="font-mono text-[10px] font-semibold uppercase"
-        style={{ color: "var(--treatment-muted-meta)", letterSpacing: "0.2em", margin: "0 0 2px" }}
-      >
-        Fixed assumptions
-      </p>
-      {rows.map(([term, value]) => (
-        <div key={term} className="flex items-baseline justify-between gap-4">
-          <dt
+            {kpi.label}
+          </span>
+          <span
             style={{
-              fontFamily: "'Geist', sans-serif",
-              fontSize: "12px",
-              color: "var(--treatment-muted)",
+              fontFamily: "'Fraunces', Georgia, serif",
+              fontVariationSettings: '"opsz" 80',
+              fontSize: kpi.accent ? "34px" : "28px",
+              lineHeight: 1.05,
+              color: "var(--treatment-ink)",
             }}
           >
-            {term}
-          </dt>
-          <dd
-            className="font-mono"
-            style={{
-              fontSize: "12px",
-              color: "var(--treatment-muted-strong)",
-              fontVariantNumeric: "tabular-nums",
-              margin: 0,
-              textAlign: "right",
-            }}
-          >
-            {value}
-          </dd>
+            {formatTamBillion(kpi.value)}
+          </span>
+          {kpi.accent ? (
+            <span
+              aria-hidden
+              style={{ height: "3px", width: "40px", background: "var(--color-flare)" }}
+            />
+          ) : null}
         </div>
       ))}
-    </dl>
+    </div>
   );
 }

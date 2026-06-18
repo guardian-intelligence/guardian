@@ -1,5 +1,5 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 import {
   CATEGORY_LABELS,
   NEWSROOM_META,
@@ -10,6 +10,7 @@ import { emitSpan } from "~/lib/telemetry/browser";
 import { ogMeta } from "~/lib/head";
 import { BareMetalTamPlayground } from "~/features/tam-playground/tam-playground";
 import { validateTamSearch } from "~/features/tam-playground/model";
+import { GuardianUpInfographic } from "~/features/newsroom/guardian-up-infographic";
 
 // /news/$slug — one bulletin.
 //
@@ -234,6 +235,57 @@ function Byline({ item }: { item: NewsroomItem }) {
   );
 }
 
+// Lightweight inline markdown: [label](href) links and `code` spans. Rendered
+// to real React nodes (no dangerouslySetInnerHTML). External http(s) links open
+// in a new tab; internal paths navigate in place. Plain text passes through.
+const INLINE_TOKEN = /\[([^\]]+)\]\(([^)]+)\)|`([^`]+)`/g;
+
+function renderInline(text: string): ReactNode {
+  const nodes: ReactNode[] = [];
+  let last = 0;
+  INLINE_TOKEN.lastIndex = 0;
+  for (let m = INLINE_TOKEN.exec(text); m !== null; m = INLINE_TOKEN.exec(text)) {
+    if (m.index > last) nodes.push(text.slice(last, m.index));
+    if (m[1] !== undefined) {
+      const href = m[2] ?? "";
+      const external = /^https?:\/\//.test(href);
+      nodes.push(
+        <a
+          key={m.index}
+          href={href}
+          {...(external ? { target: "_blank", rel: "noreferrer noopener" } : {})}
+          style={{
+            color: "var(--treatment-ink)",
+            textDecoration: "underline",
+            textUnderlineOffset: "3px",
+          }}
+        >
+          {m[1]}
+        </a>,
+      );
+    } else if (m[3] !== undefined) {
+      nodes.push(
+        <code
+          key={m.index}
+          className="font-mono"
+          style={{
+            fontSize: "0.88em",
+            color: "var(--treatment-ink)",
+            background: "rgba(11, 11, 11, 0.06)",
+            padding: "0.05em 0.3em",
+            borderRadius: "3px",
+          }}
+        >
+          {m[3]}
+        </code>,
+      );
+    }
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) nodes.push(text.slice(last));
+  return nodes;
+}
+
 function Prose({ paragraphs }: { paragraphs: readonly string[] }) {
   return (
     <div className="flex flex-col gap-5" style={{ maxWidth: "64ch" }}>
@@ -249,21 +301,54 @@ function Prose({ paragraphs }: { paragraphs: readonly string[] }) {
             margin: 0,
           }}
         >
-          {paragraph}
+          {renderInline(paragraph)}
         </p>
       ))}
     </div>
   );
 }
 
-// Interactive modules render after the first two paragraphs and break out to
-// the full article column (wider than the 64ch prose measure). The prose above
-// sets up the model; the module is the argument; the prose below closes it.
+// Lead bullets — a scannable summary above the lede. Newsroom register: Geist
+// on the 64ch measure, with an ink em-dash marker instead of a default disc.
+function LeadBullets({ bullets }: { bullets: readonly string[] }) {
+  return (
+    <ul
+      className="flex flex-col gap-3"
+      style={{ maxWidth: "64ch", listStyle: "none", margin: 0, padding: 0 }}
+    >
+      {bullets.map((bullet, idx) => (
+        <li
+          key={idx}
+          className="flex gap-3"
+          style={{
+            fontFamily: "'Geist', sans-serif",
+            fontSize: "clamp(16px, 1.4vw, 18px)",
+            lineHeight: 1.6,
+            color: "var(--treatment-muted-strong)",
+          }}
+        >
+          <span aria-hidden style={{ color: "var(--treatment-ink)", flexShrink: 0 }}>
+            —
+          </span>
+          <span>{renderInline(bullet)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// Article shape: optional lead bullets, then the body lede, then the interactive
+// module breaks out to the full article column (wider than the 64ch measure).
+// Empty prose blocks are skipped so the layout gaps stay tight.
 function ArticleBody({ item }: { item: NewsroomItem }) {
+  const lead = item.lead?.length ? <LeadBullets bullets={item.lead} /> : null;
+  const infographic = item.infographic === "guardian-up" ? <GuardianUpInfographic /> : null;
   if (!item.interactive) {
     return (
-      <div className="mt-8">
+      <div className="mt-8 flex flex-col gap-8">
+        {lead}
         <Prose paragraphs={item.body} />
+        {infographic}
       </div>
     );
   }
@@ -271,9 +356,11 @@ function ArticleBody({ item }: { item: NewsroomItem }) {
   const trailing = item.body.slice(2);
   return (
     <div className="mt-8 flex flex-col gap-8">
-      <Prose paragraphs={leading} />
+      {lead}
+      {leading.length ? <Prose paragraphs={leading} /> : null}
       <InteractiveModule interactive={item.interactive} slug={item.slug} />
-      <Prose paragraphs={trailing} />
+      {infographic}
+      {trailing.length ? <Prose paragraphs={trailing} /> : null}
     </div>
   );
 }
