@@ -10,6 +10,7 @@ existing pre-provisioned bare-metal node
   -> guarded provider reinstall into Talos maintenance, when configured
   -> Talm-rendered Talos config
   -> Kubernetes bootstrap
+  -> etcd quorum
   -> Cozystack operator
   -> cozystack.cozystack-platform Package
   -> hello-world handoff marker
@@ -17,6 +18,34 @@ existing pre-provisioned bare-metal node
 
 Everything from the previous bespoke bootstrap tree is preserved under
 `src-old/` for reference. It is not part of the new command surface.
+
+## Timing Gate
+
+The four-minute bootstrap target is **provisioning complete to etcd quorum**.
+It is not measured from the provider API request that allocates, wipes,
+reinstalls, or powers a bare-metal server, and it is not measured through the
+full Cozystack platform package or hello-world handoff.
+
+For a provider-backed flow, the clock starts when the node is already
+provisioned for Guardian to manage: the server exists, has the expected IP and
+hardware identity, and has reached the boot path where Guardian can drive Talos
+installation or maintenance. Provider-side allocation, disk erase, iPXE
+handoff, and rescue/OOB operations are separate provider timing.
+
+The clock stops when the Kubernetes control plane has established etcd quorum:
+
+- single-node dev: the one control-plane member has bootstrapped etcd and the
+  Kubernetes API is backed by that member.
+- multi-node gamma/prod: a majority of the intended control-plane members are
+  participating in etcd and the API can survive the loss budget implied by that
+  topology.
+
+Cozystack operator install, platform package convergence, CNI/node Ready, and
+default hello-world apply are still required handoff checks for `guardian up`,
+but they are post-quorum platform convergence, not the four-minute quorum gate.
+The live Latitude drill that took 679s measured provider iPXE reinstall through
+hello-world handoff, so it is useful operational evidence but not the clarified
+four-minute quorum measurement.
 
 ## Secret-Zero
 

@@ -12,6 +12,18 @@ applies a default hello-world handoff manifest.
 The previous source tree is preserved under `src-old/` for reference only. It
 is ignored by Bazel and is not part of the active command surface.
 
+## Bootstrap Timing
+
+Guardian's four-minute target is measured from **provisioning complete to etcd
+quorum**. Provider-side allocation, disk erase, iPXE reinstall, power cycling,
+and rescue/OOB recovery are outside that clock. Full Cozystack platform
+convergence and the hello-world handoff are also outside that clock; they remain
+required `guardian up` handoff checks after quorum.
+
+For single-node dev, quorum means the one control-plane member has bootstrapped
+etcd and backs the Kubernetes API. For multi-node clusters, quorum means a
+majority of the intended control-plane members are participating in etcd.
+
 ## Layout
 
 ```text
