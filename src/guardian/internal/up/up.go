@@ -27,6 +27,7 @@ type Options struct {
 	Execute      bool
 	Now          func() time.Time
 	WaitForTalos func(context.Context, string, time.Duration) error
+	Status       StatusReporter
 }
 
 type Result struct {
@@ -71,10 +72,13 @@ func Run(ctx context.Context, loaded *config.Loaded, tools Tools, runner toolrun
 	if opts.WaitForTalos == nil {
 		opts.WaitForTalos = toolrunner.WaitTCP
 	}
+	reportStatus(opts.Status, openStateStep, StatusRunning, opts.Now, nil)
 	layout, err := state.Open(loaded.Config.Cluster.Name)
 	if err != nil {
+		reportStatus(opts.Status, openStateStep, StatusFailed, opts.Now, failureFor("state.open", "Could not open bootstrap state", err.Error(), nil))
 		return failed(loaded, nil, "NeedsConfig", err.Error())
 	}
+	reportStatus(opts.Status, openStateStep, StatusDone, opts.Now, nil)
 	result := Result{
 		Outcome:       "Planned",
 		ClusterName:   loaded.Config.Cluster.Name,
@@ -105,31 +109,44 @@ func Run(ctx context.Context, loaded *config.Loaded, tools Tools, runner toolrun
 		result.Reason = "rerun with --execute to mutate the Talos maintenance target"
 		return result
 	}
+	reportStatus(opts.Status, safetyStep, StatusRunning, opts.Now, nil)
 	if !loaded.Config.Bootstrap.Destructive || !loaded.Config.Bootstrap.RequireMaintenance {
+		reason := "bootstrap.destructive and bootstrap.requireMaintenance must both be true before reimage"
+		reportStatus(opts.Status, safetyStep, StatusBlocked, opts.Now, failureFor("bootstrap.safety", "Bootstrap safety gate is closed", reason, nil))
 		result.Outcome = "Refused"
-		result.Reason = "bootstrap.destructive and bootstrap.requireMaintenance must both be true before reimage"
+		result.Reason = reason
 		return result
 	}
 	if err := genesis.ValidateRecipients(loaded.Config.Bootstrap.Genesis.AgeRecipients); err != nil {
+		reportStatus(opts.Status, safetyStep, StatusBlocked, opts.Now, failureFor("bootstrap.genesis.ageRecipients", "Genesis recipient is missing", err.Error(), nil))
 		result.Outcome = "Refused"
 		result.Reason = err.Error()
 		return result
 	}
+	reportStatus(opts.Status, safetyStep, StatusDone, opts.Now, nil)
+	reportStatus(opts.Status, renderStep, StatusRunning, opts.Now, nil)
 	if err := writeGeneratedManifests(loaded.Config, layout); err != nil {
+		reportStatus(opts.Status, renderStep, StatusFailed, opts.Now, failureFor("render.manifests", "Could not render bootstrap manifests", err.Error(), nil))
 		return failed(loaded, layout, "Retryable", err.Error())
 	}
+	reportStatus(opts.Status, renderStep, StatusDone, opts.Now, nil)
 	for _, cmd := range commands {
+		spec := commandStep(cmd.Name)
+		reportStatus(opts.Status, spec, StatusRunning, opts.Now, nil)
 		switch cmd.Name {
 		case "talm-template":
 			out, err := runner.Output(ctx, cmd)
 			if err != nil {
+				reportStatus(opts.Status, spec, StatusFailed, opts.Now, failureForCommand(cmd, spec, err))
 				return failed(loaded, layout, "Retryable", err.Error())
 			}
 			if err := state.WriteFile(layout.NodeConfig, out); err != nil {
+				reportStatus(opts.Status, spec, StatusFailed, opts.Now, failureFor("talos.config.write", "Could not write Talos machine config", err.Error(), &cmd))
 				return failed(loaded, layout, "Retryable", err.Error())
 			}
 		case "wait-talos-api":
 			if err := opts.WaitForTalos(ctx, loaded.Config.Node.Address, 90*time.Second); err != nil {
+				reportStatus(opts.Status, spec, StatusFailed, opts.Now, failureFor("talos.api.wait", "Talos API did not become ready", err.Error(), &cmd))
 				return failed(loaded, layout, "Retryable", err.Error())
 			}
 		case "write-genesis-bundle":
@@ -142,19 +159,23 @@ func Run(ctx context.Context, loaded *config.Loaded, tools Tools, runner toolrun
 				Recipients:   loaded.Config.Bootstrap.Genesis.AgeRecipients,
 				Files:        genesisFiles(loaded.Config),
 			}); err != nil {
+				reportStatus(opts.Status, spec, StatusFailed, opts.Now, failureFor("genesis.bundle.write", "Could not write genesis bundle", err.Error(), &cmd))
 				return failed(loaded, layout, "Retryable", err.Error())
 			}
 		default:
 			if err := runner.Run(ctx, cmd); err != nil {
+				reportStatus(opts.Status, spec, StatusFailed, opts.Now, failureForCommand(cmd, spec, err))
 				return failed(loaded, layout, "Retryable", err.Error())
 			}
 		}
+		reportStatus(opts.Status, spec, StatusDone, opts.Now, nil)
 		if err := state.WriteOperation(layout.Operation, state.Operation{
 			ClusterName:  loaded.Config.Cluster.Name,
 			ConfigDigest: loaded.Digest,
 			Stage:        cmd.Name,
 			UpdatedAt:    opts.Now(),
 		}); err != nil {
+			reportStatus(opts.Status, spec, StatusFailed, opts.Now, failureFor("operation.write", "Could not write operation state", err.Error(), &cmd))
 			return failed(loaded, layout, "Retryable", err.Error())
 		}
 	}

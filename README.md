@@ -30,7 +30,7 @@ Run from the repo root.
 bazel test //...
 
 bazel run //src/guardian/cmd/guardian -- \
-  up src/clusters/guardian-dev/up.cue --output json
+  up -f src/clusters/guardian-dev/up.cue --output json
 ```
 
 Plan mode is the default. Destructive execution requires `--execute` and a CUE
@@ -48,6 +48,12 @@ bootstrap: {
 Without `bootstrap.genesis.ageRecipients`, `guardian up --execute` refuses
 before running any mutating command. The recipient is public age material; the
 private identity stays in the operator's own secret store.
+
+With `--execute`, `guardian up` writes live status to stderr by default.
+Interactive terminals get a compact Bubble Tea step tree; redirected runs get
+plain status lines. Structured `--output json|yaml|toml` stays on stdout. Use
+`--status=plain` to force log lines or `--status=off` to disable the status
+channel.
 
 ## Secret Bootstrap
 

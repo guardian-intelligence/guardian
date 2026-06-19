@@ -4,19 +4,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
 	"github.com/guardian-intelligence/guardian/src/guardian/internal/config"
 	"github.com/guardian-intelligence/guardian/src/guardian/internal/output"
+	statusview "github.com/guardian-intelligence/guardian/src/guardian/internal/status"
 	"github.com/guardian-intelligence/guardian/src/guardian/internal/toolrunner"
 	"github.com/guardian-intelligence/guardian/src/guardian/internal/up"
 )
 
 var errUsage = errors.New("usage")
+var errSilent = errors.New("silent")
 
 const usage = `usage:
-  guardian up <cluster.cue> [--execute] [--output text|json|yaml|toml]
+  guardian up -f <cluster.cue> [--execute] [--output text|json|yaml|toml] [--status auto|tui|plain|off]
 
 guardian owns only host come-up: Talos via Talm, Kubernetes bootstrap,
 Cozystack platform install, and a default hello-world handoff marker.`
@@ -35,6 +38,9 @@ func main() {
 		os.Exit(2)
 	}
 	if err != nil {
+		if errors.Is(err, errSilent) {
+			os.Exit(1)
+		}
 		if errors.Is(err, errUsage) {
 			fmt.Fprintf(os.Stderr, "guardian: %v\n%s\n", err, usage)
 			os.Exit(2)
@@ -45,7 +51,7 @@ func main() {
 }
 
 func runUp(args []string) error {
-	configPath, execute, format, err := parseUpArgs(args)
+	parsed, err := parseUpArgs(args)
 	if err != nil {
 		if errors.Is(err, errHelp) {
 			fmt.Println(usage)
@@ -53,63 +59,151 @@ func runUp(args []string) error {
 		}
 		return err
 	}
-	loaded, err := config.Load(configPath)
+	loaded, err := config.Load(parsed.ConfigPath)
 	if err != nil {
 		res := up.Result{Outcome: "NeedsConfig", Reason: err.Error()}
-		_ = output.Write(os.Stdout, res, format)
+		_ = output.Write(os.Stdout, res, parsed.Format)
 		return fmt.Errorf("up: %w", err)
 	}
 	tools, err := resolveTools()
 	if err != nil {
 		return err
 	}
-	res := up.Run(context.Background(), loaded, tools, toolrunner.RealRunner{}, up.Options{Execute: execute})
-	if err := output.Write(os.Stdout, res, format); err != nil {
+	statusReporter, closeStatus, err := newStatusReporter(parsed, loaded.Config.Cluster.Name)
+	if err != nil {
 		return err
+	}
+	defer closeStatus()
+	runner := toolrunner.RealRunner{}
+	if statusReporter != nil {
+		runner.Stdout = io.Discard
+		runner.Stderr = io.Discard
+	}
+	res := up.Run(context.Background(), loaded, tools, runner, up.Options{
+		Execute: parsed.Execute,
+		Status:  statusReporter,
+	})
+	humanStatus := parsed.Execute && parsed.Status != "off" && parsed.Format == "text"
+	if !humanStatus {
+		if err := output.Write(os.Stdout, res, parsed.Format); err != nil {
+			return err
+		}
 	}
 	if res.Outcome == "Converged" || res.Outcome == "Planned" {
 		return nil
+	}
+	if humanStatus {
+		return errSilent
 	}
 	return fmt.Errorf("up: %s: %s", res.Outcome, res.Reason)
 }
 
 var errHelp = errors.New("help")
 
-func parseUpArgs(args []string) (configPath string, execute bool, format string, err error) {
-	format = "text"
+type upArgs struct {
+	ConfigPath string
+	Execute    bool
+	Format     string
+	Status     string
+}
+
+func parseUpArgs(args []string) (upArgs, error) {
+	parsed := upArgs{Format: "text", Status: "auto"}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
 		case arg == "-h" || arg == "--help":
-			return "", false, "", errHelp
+			return upArgs{}, errHelp
 		case arg == "--execute":
-			execute = true
+			parsed.Execute = true
+		case arg == "-f" || arg == "--file":
+			i++
+			if i >= len(args) {
+				return upArgs{}, fmt.Errorf("up: %w: %s requires a value", errUsage, arg)
+			}
+			if err := setConfigPath(&parsed, args[i]); err != nil {
+				return upArgs{}, err
+			}
+		case strings.HasPrefix(arg, "--file="):
+			if err := setConfigPath(&parsed, strings.TrimPrefix(arg, "--file=")); err != nil {
+				return upArgs{}, err
+			}
 		case arg == "--output":
 			i++
 			if i >= len(args) {
-				return "", false, "", fmt.Errorf("up: %w: --output requires a value", errUsage)
+				return upArgs{}, fmt.Errorf("up: %w: --output requires a value", errUsage)
 			}
-			format = args[i]
+			parsed.Format = args[i]
 		case strings.HasPrefix(arg, "--output="):
-			format = strings.TrimPrefix(arg, "--output=")
-		case strings.HasPrefix(arg, "-"):
-			return "", false, "", fmt.Errorf("up: %w: unknown flag %q", errUsage, arg)
-		default:
-			if configPath != "" {
-				return "", false, "", fmt.Errorf("up: %w: expected one cluster CUE config path", errUsage)
+			parsed.Format = strings.TrimPrefix(arg, "--output=")
+		case arg == "--status":
+			i++
+			if i >= len(args) {
+				return upArgs{}, fmt.Errorf("up: %w: --status requires a value", errUsage)
 			}
-			configPath = arg
+			parsed.Status = args[i]
+		case strings.HasPrefix(arg, "--status="):
+			parsed.Status = strings.TrimPrefix(arg, "--status=")
+		case strings.HasPrefix(arg, "-"):
+			return upArgs{}, fmt.Errorf("up: %w: unknown flag %q", errUsage, arg)
+		default:
+			return upArgs{}, fmt.Errorf("up: %w: config path must be passed with -f or --file", errUsage)
 		}
 	}
-	switch format {
+	switch parsed.Format {
 	case "text", "json", "yaml", "toml":
 	default:
-		return "", false, "", fmt.Errorf("up: %w: unsupported --output %q", errUsage, format)
+		return upArgs{}, fmt.Errorf("up: %w: unsupported --output %q", errUsage, parsed.Format)
 	}
-	if configPath == "" {
-		return "", false, "", fmt.Errorf("up: %w: expected one cluster CUE config path", errUsage)
+	switch parsed.Status {
+	case "auto", "tui", "plain", "off":
+	default:
+		return upArgs{}, fmt.Errorf("up: %w: unsupported --status %q", errUsage, parsed.Status)
 	}
-	return configPath, execute, format, nil
+	if parsed.ConfigPath == "" {
+		return upArgs{}, fmt.Errorf("up: %w: expected -f <cluster CUE config path>", errUsage)
+	}
+	return parsed, nil
+}
+
+func setConfigPath(parsed *upArgs, path string) error {
+	if path == "" {
+		return fmt.Errorf("up: %w: config path must not be empty", errUsage)
+	}
+	if parsed.ConfigPath != "" {
+		return fmt.Errorf("up: %w: expected one cluster CUE config path", errUsage)
+	}
+	parsed.ConfigPath = path
+	return nil
+}
+
+func newStatusReporter(parsed upArgs, clusterName string) (up.StatusReporter, func() error, error) {
+	if !parsed.Execute || parsed.Status == "off" {
+		return nil, func() error { return nil }, nil
+	}
+	mode := parsed.Status
+	if mode == "auto" {
+		if isTerminal(os.Stderr) {
+			mode = "tui"
+		} else {
+			mode = "plain"
+		}
+	}
+	var input io.Reader
+	if mode == "tui" && isTerminal(os.Stdin) {
+		input = os.Stdin
+	}
+	renderer := statusview.New(os.Stderr, statusview.Options{
+		Mode:        statusview.Mode(mode),
+		ClusterName: clusterName,
+		Input:       input,
+	})
+	return renderer, renderer.Close, nil
+}
+
+func isTerminal(file *os.File) bool {
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func resolveTools() (up.Tools, error) {
