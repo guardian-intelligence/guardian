@@ -18,7 +18,7 @@ var errUsage = errors.New("usage")
 var errSilent = errors.New("silent")
 
 const usage = `usage:
-  guardian up [-f <cluster.cue>|<cluster.cue>] [--execute] [--genesis-age-recipient age1...] [--output text|json|yaml|toml] [--status auto|tui|plain|off]
+  guardian up -f <cluster.cue> [--execute] [--genesis-age-recipient age1...] [--output text|json|yaml|toml] [--status auto|tui|plain|off]
 
 guardian owns only host come-up: Talos via Talm, Kubernetes bootstrap,
 Cozystack platform install, and a default hello-world handoff marker.`
@@ -151,9 +151,7 @@ func parseUpArgs(args []string) (upArgs, error) {
 		case strings.HasPrefix(arg, "-"):
 			return upArgs{}, fmt.Errorf("up: %w: unknown flag %q", errUsage, arg)
 		default:
-			if err := setConfigPath(&parsed, arg); err != nil {
-				return upArgs{}, err
-			}
+			return upArgs{}, fmt.Errorf("up: %w: config path must be passed with -f or --file", errUsage)
 		}
 	}
 	if len(parsed.GenesisAgeRecipients) == 0 {
@@ -170,7 +168,7 @@ func parseUpArgs(args []string) (upArgs, error) {
 		return upArgs{}, fmt.Errorf("up: %w: unsupported --status %q", errUsage, parsed.Status)
 	}
 	if parsed.ConfigPath == "" {
-		return upArgs{}, fmt.Errorf("up: %w: expected one cluster CUE config path", errUsage)
+		return upArgs{}, fmt.Errorf("up: %w: expected -f <cluster CUE config path>", errUsage)
 	}
 	return parsed, nil
 }

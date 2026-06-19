@@ -63,7 +63,7 @@ Supply recipients either in `bootstrap.genesis.ageRecipients`, with repeated
 `GUARDIAN_GENESIS_AGE_RECIPIENTS`. The recipient is public age material; the
 private identity stays in the operator's own secret store.
 
-The cluster config can be passed positionally or with `-f`:
+Pass the cluster config with `-f`:
 
 ```sh
 guardian up -f src/clusters/guardian-dev/up.cue --execute

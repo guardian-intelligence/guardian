@@ -5,13 +5,11 @@ import (
 	"testing"
 )
 
-func TestParseUpArgsAcceptsFlagsBeforeAndAfterConfig(t *testing.T) {
+func TestParseUpArgsAcceptsFileFlag(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		args []string
 	}{
-		{name: "flags before config", args: []string{"--execute", "--output", "json", "--status", "plain", "cluster.cue"}},
-		{name: "flags after config", args: []string{"cluster.cue", "--output=json", "--status=plain", "--execute"}},
 		{name: "short file flag", args: []string{"-f", "cluster.cue", "--output=json", "--status=plain", "--execute"}},
 		{name: "long file flag", args: []string{"--file=cluster.cue", "--output=json", "--status=plain", "--execute"}},
 	} {
@@ -41,7 +39,7 @@ func TestParseUpArgsAcceptsGenesisRecipients(t *testing.T) {
 	parsed, err := parseUpArgs([]string{
 		"--genesis-age-recipient", "age1first",
 		"--genesis-age-recipient=age1second",
-		"cluster.cue",
+		"-f", "cluster.cue",
 	})
 	if err != nil {
 		t.Fatalf("parseUpArgs() error = %v", err)
@@ -54,7 +52,7 @@ func TestParseUpArgsAcceptsGenesisRecipients(t *testing.T) {
 
 func TestParseUpArgsReadsGenesisRecipientsFromEnv(t *testing.T) {
 	t.Setenv("GUARDIAN_GENESIS_AGE_RECIPIENTS", "age1one, age1two\nage1three")
-	parsed, err := parseUpArgs([]string{"cluster.cue"})
+	parsed, err := parseUpArgs([]string{"-f", "cluster.cue"})
 	if err != nil {
 		t.Fatalf("parseUpArgs() error = %v", err)
 	}
@@ -65,13 +63,16 @@ func TestParseUpArgsReadsGenesisRecipientsFromEnv(t *testing.T) {
 }
 
 func TestParseUpArgsRejectsMultipleConfigs(t *testing.T) {
-	if _, err := parseUpArgs([]string{"one.cue", "two.cue"}); err == nil {
-		t.Fatalf("parseUpArgs() error = nil, want rejection")
-	}
 	if _, err := parseUpArgs([]string{"-f", "one.cue", "two.cue"}); err == nil {
 		t.Fatalf("parseUpArgs() error = nil, want rejection")
 	}
-	if _, err := parseUpArgs([]string{"one.cue", "--file", "two.cue"}); err == nil {
+	if _, err := parseUpArgs([]string{"-f", "one.cue", "--file", "two.cue"}); err == nil {
+		t.Fatalf("parseUpArgs() error = nil, want rejection")
+	}
+}
+
+func TestParseUpArgsRejectsPositionalConfig(t *testing.T) {
+	if _, err := parseUpArgs([]string{"cluster.cue"}); err == nil {
 		t.Fatalf("parseUpArgs() error = nil, want rejection")
 	}
 }
@@ -86,7 +87,7 @@ func TestParseUpArgsRejectsMissingFileFlagValue(t *testing.T) {
 }
 
 func TestParseUpArgsRejectsUnsupportedStatus(t *testing.T) {
-	if _, err := parseUpArgs([]string{"cluster.cue", "--status=verbose"}); err == nil {
+	if _, err := parseUpArgs([]string{"-f", "cluster.cue", "--status=verbose"}); err == nil {
 		t.Fatalf("parseUpArgs() error = nil, want rejection")
 	}
 }

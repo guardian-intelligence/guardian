@@ -91,7 +91,7 @@ secret authority. It does not own Talos/Talm genesis.
 ## Command
 
 ```sh
-guardian up [-f <cluster.cue>|<cluster.cue>] [--execute] [--genesis-age-recipient age1...] [--output text|json|yaml|toml] [--status auto|tui|plain|off]
+guardian up -f <cluster.cue> [--execute] [--genesis-age-recipient age1...] [--output text|json|yaml|toml] [--status auto|tui|plain|off]
 ```
 
 Without `--execute`, the command prints the planned stages and commands. With
