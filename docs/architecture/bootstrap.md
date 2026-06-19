@@ -38,54 +38,36 @@ substrate, but it must not become the runtime deployment engine.
 ## guardian CLI
 
 `guardian` owns the controller-side, human-initiated steps. Each host has a
-checked-in `host.yaml` (`src/hosts/<host>/host.yaml`) naming the
-node, its static addressing facts, and the Talos schematic and patches.
+checked-in `host.json` (`src/hosts/<host>/host.json`) naming the target node
+and its cluster/environment assignment.
 Post-Kubernetes desired state lives separately in
 `src/environments/<environment>/environment.yaml` as an
-`EnvironmentConfig` plus any environment XR instances. The bootstrap surface is two
-verbs plus operator config: run
-`guardian config host src/hosts/ash-bm-001/host.yaml` once (the path is
-stored absolute in `${XDG_CONFIG_HOME:-~/.config}/guardian/config.yaml`), then
-a drill is `guardian down --yes && guardian up`. Both verbs also accept an
-explicit `<host.yaml>` positional argument, which overrides the configured
-host path. `guardian config` with no arguments prints the config file path
-and contents. Run both verbs from the repo root: only the configured host
-path is stored absolute; the paths inside `host.yaml` and the Crossplane
-environment bag are repo-root relative.
+`EnvironmentConfig` plus any environment XR instances. The active bootstrap
+surface is `guardian up -f src/hosts/<asset>/host.json`; plan mode is the
+default and destructive execution requires `--execute`.
 
-1. `guardian down --yes [host.yaml]` takes the node to Talos maintenance
+1. `guardian down --yes [host.json]` takes the node to Talos maintenance
    mode with a wiped system disk, from whichever state it is in. A node
    running configured Talos is reset over its authenticated API
    (`talosctl reset`, non-graceful because a single-node etcd cannot leave
    its own cluster). A node running any other Linux is kexec'd into the
    Talos maintenance image over SSH: the node downloads the factory's boot
    assets directly (its datacenter route to the factory is the one that
-   matters), guardian appends static `ip=` addressing from `host.yaml`
-   to the pinned metal command line (hosts have no DHCP), loads with
-   kexec-tools, and `systemctl kexec`.
+   matters), then boots into Talos maintenance with boot-to-talos.
    SSH authentication is the caller's ambient setup; guardian never holds
    credentials. No provider API is involved; provisioning compute is outside
    guardian's scope. The `--yes` acknowledgement is required because this
    destroys everything on the node.
-2. `guardian up [host.yaml]` converges host and bootstrap substrate from
+2. `guardian up -f [host.json]` converges host and bootstrap substrate from
    runtime truth. It generates or
    reuses the cluster's Talos secrets bundle (under
    `${XDG_STATE_HOME:-~/.local/state}/guardian/<cluster>/`, never in the
    repo), including Talos's `secretboxEncryptionSecret` for Kubernetes
-   Secret encryption-at-rest. It regenerates machine config from the pinned
-   installer image and checked-in patches, then probes the node: a
-   configured node gets the config re-applied; a maintenance-mode node gets
-   its disk inventory verified against both `node.installDiskSerial` and
-   `node.zfsDiskSerial`, the first install, and a one-time etcd bootstrap.
-   The install disk is selected by serial through a generated
-   `machine.install.diskSelector` patch, so the reserved ZFS disk is never
-   an install target even when two identical NVMes re-enumerate. After the
-   seed registry is populated, `up` runs a one-shot privileged ZFS initializer
-   that creates or imports the checked-in product-workload pool from
-   `host.yaml` and creates the local PV directories declared by the
-   assigned environment's `StoragePlane`. Product workload pools mount under `/var/mnt`
-   because `guardian up` binds that Talos storage root into kubelet with
-   shared propagation before local PVs are scheduled. Both paths end with the
+   Secret encryption-at-rest. It boots stock Ubuntu into Talos maintenance with
+   boot-to-talos, renders machine config with Talm's live discovery, applies
+   that config, and runs the one-time etcd bootstrap. Storage device ownership
+   is not modeled in Guardian's host come-up path; Cozystack/LINSTOR owns
+   post-Kubernetes storage discovery and policy. Both paths end with the
    seed registry up, bootstrap artifacts pushed into it, and the secrets
    substrate converged first. OpenBao applies and becomes reachable; Bao is
    restored or fresh-initialized/unsealed; `kv/` and Kubernetes auth are

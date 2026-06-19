@@ -40,8 +40,8 @@ func TestRunPlansWithoutExecuting(t *testing.T) {
 	if !strings.Contains(commandNames(result.Commands), "write-talm-values") {
 		t.Fatalf("planned commands = %#v, want write-talm-values", result.Commands)
 	}
-	if !strings.Contains(commandNames(result.Commands), "write-talm-template-overrides") {
-		t.Fatalf("planned commands = %#v, want write-talm-template-overrides", result.Commands)
+	if strings.Contains(commandNames(result.Commands), "write-talm-template-overrides") {
+		t.Fatalf("planned commands = %#v, want no template override command", result.Commands)
 	}
 	if !strings.Contains(commandNames(result.Commands), "wait-talos-maintenance-api") {
 		t.Fatalf("planned commands = %#v, want wait-talos-maintenance-api", result.Commands)
@@ -137,7 +137,12 @@ func TestCommandFailureUsesCodeOnly(t *testing.T) {
 		outputErr: errors.New("/runfiles/talm template: exit status 1"),
 	}
 
-	result := Run(context.Background(), testLoaded(), testTools(), runner, Options{Execute: true})
+	result := Run(context.Background(), testLoaded(), testTools(), runner, Options{
+		Execute: true,
+		WaitForTalos: func(_ context.Context, _ string, _ time.Duration) error {
+			return nil
+		},
+	})
 	if result.Outcome != "Retryable" {
 		t.Fatalf("outcome = %s, want Retryable: %#v", result.Outcome, result)
 	}
@@ -174,8 +179,8 @@ func TestRunExecuteUsesPinnedToolCommands(t *testing.T) {
 	got := runner.names()
 	for _, want := range []string{
 		"talm-init",
-		"talm-template",
 		"boot-to-talos-install",
+		"talm-template",
 		"talm-dry-run",
 		"talm-apply",
 		"talm-bootstrap",
@@ -199,8 +204,8 @@ func TestRunExecuteUsesPinnedToolCommands(t *testing.T) {
 	if !strings.Contains(strings.Join(flattenArgs(runner.commands), " "), "--kubernetes-version 1.36.1") {
 		t.Fatalf("commands do not include Kubernetes version pin: %#v", runner.commands)
 	}
-	if !strings.Contains(strings.Join(flattenArgs(runner.commands), " "), "--offline") {
-		t.Fatalf("commands do not render Talos config offline: %#v", runner.commands)
+	if strings.Contains(strings.Join(flattenArgs(runner.commands), " "), "--offline") {
+		t.Fatalf("commands should not render Talos config offline: %#v", runner.commands)
 	}
 	if !strings.Contains(strings.Join(flattenArgs(runner.commands), " "), "-mode boot -image ghcr.io/cozystack/cozystack/talos:v1.13.0 -yes") {
 		t.Fatalf("commands do not kexec Talos using boot-to-talos boot mode: %#v", runner.commands)
@@ -216,30 +221,6 @@ func TestRunExecuteUsesPinnedToolCommands(t *testing.T) {
 	if !strings.Contains(valuesText, "advertisedSubnets: [206.223.228.86/31]") &&
 		!strings.Contains(valuesText, "advertisedSubnets:\n  - 206.223.228.86/31") {
 		t.Fatalf("talm values do not pin advertisedSubnets:\n%s", valuesRaw)
-	}
-	helperRaw, err := os.ReadFile(filepath.Join(result.StateDir, "talm", "templates", "_helpers.tpl"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	helperText := string(helperRaw)
-	for _, want := range []string{
-		`define "talos.config.network.multidoc"`,
-		"kind: HostnameConfig",
-		`hostname: "gi-ash-bm-004"`,
-		"kind: ResolverConfig",
-		`address: "1.1.1.1"`,
-		`address: "8.8.8.8"`,
-		"diskSelector:",
-		`serial: "362510FE3218"`,
-	} {
-		if !strings.Contains(helperText, want) {
-			t.Fatalf("talm helper missing %q:\n%s", want, helperText)
-		}
-	}
-	for _, unwanted := range []string{`include "talm.config.network.multidoc"`, "kind: LinkConfig", "2605:6440", `talm.discovered.system_disk_name`, `disk: {{`} {
-		if strings.Contains(helperText, unwanted) {
-			t.Fatalf("talm helper still contains %q:\n%s", unwanted, helperText)
-		}
 	}
 	raw, err := os.ReadFile(result.GenesisBundle)
 	if err != nil {
@@ -328,6 +309,7 @@ noop
 	for _, unwanted := range []string{
 		"boot-to-talos-install",
 		"wait-talos-maintenance-api",
+		"talm-template",
 		"talm-dry-run",
 		"talm-apply",
 		"wait-talos-api",
@@ -357,77 +339,6 @@ noop
 	}
 	if !status.contains(upStatusMatch{ID: "cozystack", State: StatusUnchanged, Description: "Already converged"}) {
 		t.Fatalf("missing unchanged Cozystack event: %#v", status.events)
-	}
-}
-
-func TestNormalizeNodeConfigPinsDiskSerialAndHostname(t *testing.T) {
-	raw := []byte(`machine:
-  install:
-    disk: /dev/nvme0n1
-    image: ghcr.io/cozystack/cozystack/talos:v1.13.0
----
-apiVersion: v1alpha1
-kind: HostnameConfig
-hostname: talos-random
----
-apiVersion: v1alpha1
-kind: ResolverConfig
-nameservers: []
----
-apiVersion: v1alpha1
-kind: LinkConfig
-name: enp1s0f1
-addresses:
-  - address: 206.223.228.87/31
-  - address: 2605:6440:d000:1e0:925a:8ff:fe33:ba9f/64
-routes:
-  - gateway: 206.223.228.86
-  - gateway: fe80::1
-`)
-	cfg := testLoaded().Config
-
-	got, err := normalizeNodeConfig(raw, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(got)
-	for _, want := range []string{
-		"diskSelector:",
-		"serial: 362510FE3218",
-		"hostname: gi-ash-bm-004",
-		"nameservers:",
-		"address: 1.1.1.1",
-		"address: 8.8.8.8",
-		"deviceSelector:",
-		"hardwareAddr: 90:5a:08:33:bb:99",
-		"dhcp: false",
-		"addresses:",
-		"- 206.223.228.87/31",
-		"network: 0.0.0.0/0",
-		"gateway: 206.223.228.86",
-	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("normalized config missing %q:\n%s", want, text)
-		}
-	}
-	if strings.Contains(text, "disk: /dev/nvme0n1") {
-		t.Fatalf("normalized config still selects disk by device path:\n%s", text)
-	}
-	for _, unwanted := range []string{"kind: LinkConfig", "2605:6440", "fe80::1"} {
-		if strings.Contains(text, unwanted) {
-			t.Fatalf("normalized config still contains %q:\n%s", unwanted, text)
-		}
-	}
-}
-
-func TestNormalizeNodeConfigLeavesPlainOutputAlone(t *testing.T) {
-	raw := []byte("machine config")
-	got, err := normalizeNodeConfig(raw, testLoaded().Config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != string(raw) {
-		t.Fatalf("normalizeNodeConfig changed plain output: %q", got)
 	}
 }
 
@@ -509,7 +420,7 @@ func (r *fakeRunner) Output(_ context.Context, cmd toolrunner.Command) ([]byte, 
 		return nil, errors.New("kubernetes api not configured")
 	case "helm-probe-cozystack":
 		if r.cozystackConverged {
-			return []byte(`{"chart":"cozy-installer-1.4.1","info":{"status":"deployed"}}`), nil
+			return []byte(`[{"name":"cozystack","chart":"cozy-installer-1.4.1","status":"deployed"}]`), nil
 		}
 		return nil, errors.New("cozystack helm release not ready")
 	case "kubectl-probe-cozystack-operator", "kubectl-probe-cozystack-platform", "kubectl-probe-node-ready":
@@ -595,14 +506,8 @@ func testLoaded() *config.Loaded {
 			AdvertisedCIDR: "206.223.228.86/31",
 		},
 		Node: config.NodeSpec{
-			Name:              "ash-bm-004",
-			Address:           "206.223.228.87",
-			Gateway:           "206.223.228.86",
-			PrefixLength:      31,
-			InterfaceName:     "eno1",
-			Hostname:          "gi-ash-bm-004",
-			InterfaceMAC:      "90:5a:08:33:bb:99",
-			InstallDiskSerial: "362510FE3218",
+			Name:    "ash-bm-004",
+			Address: "206.223.228.87",
 		},
 		Talm: config.TalmSpec{
 			Preset:            "cozystack",

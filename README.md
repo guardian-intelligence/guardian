@@ -3,9 +3,9 @@
 Guardian is being cut over to a Cozystack-native bootstrap.
 
 The active `guardian` CLI has one job: host come-up. It takes a
-pre-provisioned bare-metal node that starts from stock Ubuntu, renders a
-Cozystack Talm project from repo facts, installs Talos with the pinned
-boot-to-talos tool, bootstraps Kubernetes, writes an encrypted genesis secret
+pre-provisioned bare-metal node that starts from stock Ubuntu, runs the pinned
+boot-to-talos tool, waits for Talos maintenance discovery, applies the stock
+Cozystack Talm flow, bootstraps Kubernetes, writes an encrypted genesis secret
 bundle, and hands off to the Cozystack installer. Runtime platform configuration
 belongs to Flux/Crossplane after that handoff.
 
@@ -16,8 +16,8 @@ is ignored by Bazel and is not part of the active command surface.
 
 ```text
 src/guardian/                  new Go CLI and host-bootstrap packages
-src/hosts/                     physical host facts and safety intent in JSON
-src/clusters/                  cluster bootstrap and Talos policy in JSON
+src/hosts/                     host target assignment and safety intent in JSON
+src/clusters/                  cluster bootstrap pins in JSON
 src/environments/              Crossplane/Flux environment bags in JSON
 src/tools/                     pinned runfile tool archives
 src-old/                       archived pre-Cozystack implementation
@@ -58,11 +58,9 @@ Without `bootstrap.genesis.ageRecipients`, `guardian up --execute` refuses
 before running any mutating command. The recipient is public age material; the
 private identity stays in the operator's own secret store.
 
-With `--execute`, `guardian up` writes live status to stderr by default.
-Interactive terminals get a compact Bubble Tea step tree; redirected runs get
-plain status lines. Structured `--output json|yaml|toml` stays on stdout. Use
-`--status=plain` to force log lines or `--status=off` to disable the status
-channel.
+With `--execute`, `guardian up` streams the underlying command lines and tool
+logs to stderr. Structured `--output json|yaml|toml` stays on stdout after the
+run.
 
 ## Secret Bootstrap
 

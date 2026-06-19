@@ -1,50 +1,11 @@
 {
   "asset": "ash-bm-004",
-  "provider": {
-    "name": "latitude",
-    "serverID": "sv_8mop5gZo8Njxv",
-    "projectID": "proj_7vRENkKxgNdPy",
-    "site": "ASH",
-    "plan": "f4-metal-small"
-  },
   "network": {
-    "ipv4": "206.223.228.87",
-    "gateway": "206.223.228.86",
-    "prefixLength": 31,
-    "interfaceName": "eno1",
-    "interfaceMAC": "90:5a:08:33:bb:99"
-  },
-  "disks": {
-    "installSerial": "362510FE3218",
-    "dataSerials": [
-      "362510FE3204"
-    ]
-  },
-  "storage": {
-    "pools": [
-      {
-        "name": "guardian",
-        "type": "zfs",
-        "role": "product-workloads",
-        "deviceSerials": [
-          "362510FE3204"
-        ],
-        "wipePolicy": "never",
-        "mountpoint": "/var/mnt/guardian"
-      }
-    ]
-  },
-  "talos": {
-    "schematic": "src/hosts/ash-bm-004/talos/schematic.yaml",
-    "patches": [
-      "src/hosts/ash-bm-004/talos/patches/single-node.yaml"
-    ]
+    "ipv4": "206.223.228.87"
   },
   "assignment": {
     "cluster": "guardian-nonprod",
     "environment": "dev",
-    "nodeHostname": "gi-ash-bm-004",
-    "role": "control-plane",
     "destructiveAllowed": true,
     "prod": false
   }

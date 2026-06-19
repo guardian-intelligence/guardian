@@ -61,9 +61,14 @@ func (r RealRunner) Run(ctx context.Context, c Command) error {
 		cmd.Stdin = bytes.NewReader(c.Stdin)
 	}
 	cmd.Stdout = stdout
-	cmd.Stderr = stderr
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = io.MultiWriter(stderr, &stderrBuf)
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s %s: %w", c.Bin, strings.Join(c.Args, " "), err)
+		detail := strings.TrimSpace(stderrBuf.String())
+		if detail == "" {
+			return fmt.Errorf("%s %s: %w", c.Bin, strings.Join(c.Args, " "), err)
+		}
+		return fmt.Errorf("%s %s: %w\n%s", c.Bin, strings.Join(c.Args, " "), err, detail)
 	}
 	return nil
 }
@@ -79,11 +84,19 @@ func (r RealRunner) Output(ctx context.Context, c Command) ([]byte, error) {
 	if len(c.Stdin) > 0 {
 		cmd.Stdin = bytes.NewReader(c.Stdin)
 	}
-	out, err := cmd.CombinedOutput()
+	var stdout bytes.Buffer
+	var stderrBuf bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = io.MultiWriter(stderr, &stderrBuf)
+	err := cmd.Run()
 	if err != nil {
-		return out, fmt.Errorf("%s %s: %w\n%s", c.Bin, strings.Join(c.Args, " "), err, out)
+		detail := strings.TrimSpace(stderrBuf.String())
+		if detail == "" {
+			return stdout.Bytes(), fmt.Errorf("%s %s: %w", c.Bin, strings.Join(c.Args, " "), err)
+		}
+		return stdout.Bytes(), fmt.Errorf("%s %s: %w\n%s", c.Bin, strings.Join(c.Args, " "), err, detail)
 	}
-	return out, nil
+	return stdout.Bytes(), nil
 }
 
 func WaitTCP(ctx context.Context, address string, timeout time.Duration) error {

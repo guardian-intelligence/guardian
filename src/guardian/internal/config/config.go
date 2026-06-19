@@ -33,15 +33,8 @@ type ClusterSpec struct {
 }
 
 type NodeSpec struct {
-	Name              string `json:"name" yaml:"name" toml:"name"`
-	Address           string `json:"address" yaml:"address" toml:"address"`
-	Gateway           string `json:"gateway" yaml:"gateway" toml:"gateway"`
-	PrefixLength      int    `json:"prefixLength" yaml:"prefixLength" toml:"prefixLength"`
-	InterfaceName     string `json:"interfaceName" yaml:"interfaceName" toml:"interfaceName"`
-	Hostname          string `json:"hostname" yaml:"hostname" toml:"hostname"`
-	InterfaceMAC      string `json:"interfaceMac" yaml:"interfaceMac" toml:"interfaceMac"`
-	InstallDiskSerial string `json:"installDiskSerial" yaml:"installDiskSerial" toml:"installDiskSerial"`
-	Role              string `json:"role" yaml:"role" toml:"role"`
+	Name    string `json:"name" yaml:"name" toml:"name"`
+	Address string `json:"address" yaml:"address" toml:"address"`
 }
 
 type TalmSpec struct {
@@ -88,21 +81,11 @@ type hostDocument struct {
 		Plan      string `json:"plan"`
 	} `json:"provider"`
 	Network struct {
-		IPv4          string `json:"ipv4"`
-		Gateway       string `json:"gateway"`
-		PrefixLength  int    `json:"prefixLength"`
-		InterfaceName string `json:"interfaceName"`
-		InterfaceMAC  string `json:"interfaceMAC"`
+		IPv4 string `json:"ipv4"`
 	} `json:"network"`
-	Disks struct {
-		InstallSerial string   `json:"installSerial"`
-		DataSerials   []string `json:"dataSerials"`
-	} `json:"disks"`
 	Assignment struct {
 		Cluster            string `json:"cluster"`
 		Environment        string `json:"environment"`
-		NodeHostname       string `json:"nodeHostname"`
-		Role               string `json:"role"`
 		DestructiveAllowed bool   `json:"destructiveAllowed"`
 		Prod               bool   `json:"prod"`
 	} `json:"assignment"`
@@ -242,20 +225,13 @@ func validateHostSource(host hostDocument) error {
 		}
 	}
 	require("asset", host.Asset)
-	require("provider.name", host.Provider.Name)
-	require("provider.serverID", host.Provider.ServerID)
 	require("network.ipv4", host.Network.IPv4)
-	require("network.gateway", host.Network.Gateway)
-	require("network.interfaceName", host.Network.InterfaceName)
-	require("network.interfaceMAC", host.Network.InterfaceMAC)
-	require("disks.installSerial", host.Disks.InstallSerial)
 	require("assignment.cluster", host.Assignment.Cluster)
 	require("assignment.environment", host.Assignment.Environment)
-	require("assignment.nodeHostname", host.Assignment.NodeHostname)
 	if len(missing) > 0 {
 		return fmt.Errorf("host missing required fields: %s", strings.Join(missing, ", "))
 	}
-	if host.Provider.Name != "latitude" {
+	if host.Provider.Name != "" && host.Provider.Name != "latitude" {
 		return fmt.Errorf("provider.name: got %q, want latitude", host.Provider.Name)
 	}
 	return nil
@@ -290,10 +266,6 @@ func contains(values []string, want string) bool {
 }
 
 func assemble(host hostDocument, cluster clusterDocument, _ environmentDocument) Config {
-	advertisedCIDR := cluster.Network.AdvertisedCIDR
-	if advertisedCIDR == "" && host.Network.Gateway != "" && host.Network.PrefixLength > 0 {
-		advertisedCIDR = fmt.Sprintf("%s/%d", host.Network.Gateway, host.Network.PrefixLength)
-	}
 	return Config{
 		Cluster: ClusterSpec{
 			Name:            cluster.Name,
@@ -302,19 +274,12 @@ func assemble(host hostDocument, cluster clusterDocument, _ environmentDocument)
 			PodCIDR:         cluster.Network.PodCIDR,
 			ServiceCIDR:     cluster.Network.ServiceCIDR,
 			JoinCIDR:        cluster.Network.JoinCIDR,
-			AdvertisedCIDR:  advertisedCIDR,
+			AdvertisedCIDR:  cluster.Network.AdvertisedCIDR,
 			APIServerDomain: cluster.APIServerDomain,
 		},
 		Node: NodeSpec{
-			Name:              host.Asset,
-			Address:           host.Network.IPv4,
-			Gateway:           host.Network.Gateway,
-			PrefixLength:      host.Network.PrefixLength,
-			InterfaceName:     host.Network.InterfaceName,
-			Hostname:          host.Assignment.NodeHostname,
-			InterfaceMAC:      host.Network.InterfaceMAC,
-			InstallDiskSerial: host.Disks.InstallSerial,
-			Role:              host.Assignment.Role,
+			Name:    host.Asset,
+			Address: host.Network.IPv4,
 		},
 		Talm: TalmSpec{
 			Preset:            "cozystack",
@@ -348,9 +313,6 @@ func normalize(cfg *Config) {
 	if cfg.Talm.Template == "" {
 		cfg.Talm.Template = "templates/controlplane.yaml"
 	}
-	if cfg.Node.Role == "" {
-		cfg.Node.Role = "control-plane"
-	}
 	if cfg.Cluster.PodCIDR == "" {
 		cfg.Cluster.PodCIDR = "10.244.0.0/16"
 	}
@@ -381,11 +343,6 @@ func validate(cfg Config) error {
 	require("cluster.advertisedCIDR", cfg.Cluster.AdvertisedCIDR)
 	require("node.name", cfg.Node.Name)
 	require("node.address", cfg.Node.Address)
-	require("node.gateway", cfg.Node.Gateway)
-	require("node.interfaceName", cfg.Node.InterfaceName)
-	require("node.hostname", cfg.Node.Hostname)
-	require("node.interfaceMac", cfg.Node.InterfaceMAC)
-	require("node.installDiskSerial", cfg.Node.InstallDiskSerial)
 	require("talm.talosVersion", cfg.Talm.TalosVersion)
 	require("talm.kubernetesVersion", cfg.Talm.KubernetesVersion)
 	require("talm.installerImage", cfg.Talm.InstallerImage)
@@ -401,17 +358,8 @@ func validate(cfg Config) error {
 	if ip := net.ParseIP(cfg.Node.Address); ip == nil {
 		return fmt.Errorf("node.address must be an IP address, got %q", cfg.Node.Address)
 	}
-	if ip := net.ParseIP(cfg.Node.Gateway); ip == nil {
-		return fmt.Errorf("node.gateway must be an IP address, got %q", cfg.Node.Gateway)
-	}
-	if cfg.Node.PrefixLength < 1 || cfg.Node.PrefixLength > 32 {
-		return fmt.Errorf("node.prefixLength: got %d, want 1..32", cfg.Node.PrefixLength)
-	}
 	if _, _, err := net.ParseCIDR(cfg.Cluster.AdvertisedCIDR); err != nil {
 		return fmt.Errorf("cluster.advertisedCIDR: %w", err)
-	}
-	if _, err := net.ParseMAC(cfg.Node.InterfaceMAC); err != nil {
-		return fmt.Errorf("node.interfaceMac: %w", err)
 	}
 	if cfg.Talm.Preset != "cozystack" {
 		return fmt.Errorf("talm.preset: got %q, want cozystack", cfg.Talm.Preset)

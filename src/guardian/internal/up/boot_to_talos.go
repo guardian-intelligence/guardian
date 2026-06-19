@@ -44,19 +44,6 @@ func runBootToTalosOnTarget(ctx context.Context, cfg config.Config, localBootToT
 	return nil
 }
 
-func resolveRemoteDiskBySerial(ctx context.Context, client *ssh.Client, serial string) (string, error) {
-	cmd := shellJoin("sh", "-c", `serial="$1"; lsblk -dn -o NAME,SERIAL | awk -v serial="$serial" '$2 == serial { print "/dev/" $1; found=1; exit } END { if (!found) exit 1 }'`, "guardian-resolve-disk", serial)
-	output, err := runSSH(ctx, client, cmd, nil)
-	if err != nil {
-		return "", fmt.Errorf("resolve install disk serial %s: %w", serial, err)
-	}
-	disk := strings.TrimSpace(string(output))
-	if disk == "" || !strings.HasPrefix(disk, "/dev/") {
-		return "", fmt.Errorf("resolve install disk serial %s: got %q", serial, disk)
-	}
-	return disk, nil
-}
-
 func dialBootstrapSSH(ctx context.Context, address string) (*ssh.Client, error) {
 	keyPath, err := expandHome(envDefault("GUARDIAN_BOOTSTRAP_SSH_KEY", "~/.ssh/id_ed25519"))
 	if err != nil {

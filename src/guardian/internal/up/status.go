@@ -102,10 +102,10 @@ var commandStepSpecs = map[string]StepSpec{
 	},
 	"talm-template": {
 		ID:          "talm-template",
-		ParentID:    "ubuntu",
-		ParentTitle: "Prepare Ubuntu host",
+		ParentID:    "talos",
+		ParentTitle: "Install Talos",
 		Title:       "Render Talos config",
-		Description: "Generate machine config offline from repo facts",
+		Description: "Generate machine config from Talos maintenance discovery",
 	},
 	"write-talm-values": {
 		ID:          "write-talm-values",
@@ -114,19 +114,12 @@ var commandStepSpecs = map[string]StepSpec{
 		Title:       "Write Talm values",
 		Description: "Pin cluster-wide values from repo facts",
 	},
-	"write-talm-template-overrides": {
-		ID:          "write-talm-template-overrides",
-		ParentID:    "ubuntu",
-		ParentTitle: "Prepare Ubuntu host",
-		Title:       "Pin Talm template facts",
-		Description: "Use repo-owned host facts during Talm apply",
-	},
 	"boot-to-talos-install": {
 		ID:          "boot-to-talos-install",
 		ParentID:    "talos",
 		ParentTitle: "Install Talos",
-		Title:       "Install Talos from Ubuntu",
-		Description: "Run the pinned boot-to-talos installer on the target disk",
+		Title:       "Boot Talos maintenance",
+		Description: "Run the pinned boot-to-talos binary on the Ubuntu target",
 	},
 	"wait-talos-maintenance-api": {
 		ID:          "wait-talos-maintenance-api",

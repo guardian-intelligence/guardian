@@ -7,7 +7,7 @@ Reference Cozystack for prior art for the cloud portion.
 Default release channels: Edge (CD on main), nightly, RC, stable.
 Default deployment stages: dev (PR preview), gamma (staging), prod.
 
-IOW: Bazel owns the build graph and produces bytes using OCI for layout. `cosign`/SLSA proves its authentic Guardian Intelligence LLC software. Flux reconciles our declared state.
+IOW: Bazel owns the build graph and produces bytes using OCI for layout. `cosign`/SLSA proves its authentic Guardian Intelligence LLC software. Cozystack management cluster reconciles our declared state.
 
 Domain: guardianintelligence.org (abbreviated gi.org)
 
@@ -78,14 +78,6 @@ Release doctrine:
 - Target Flagger for deployed-service progressive delivery after Flux applies an approved workload digest: canary, blue/green, metric checks, webhooks, promotion, and rollback. Flagger is not the distributable promotion system.
 - Release channels and stage names are not the same thing. Distributed software advances through increasing evidence gates such as edge -> nightly -> rc -> stable. Deployed software advances through runtime environments and rollout strategies such as dev/gamma/prod plus canary or blue/green.
 
-Flux migration path:
-
-- `guardian up` owns only host come-up: Talos machine config, CNI bootstrap, seed registry floor, OpenBao bootstrap/restore, Crossplane/Flux substrate install, and readiness handoff. It must not become a generic deployment runner.
-- Flux v2 owns runtime reconciliation after bootstrap. Use source-controller and kustomize-controller first; do not add Helm or image automation until a specific problem earns them.
-- Move Go-generated Kustomize patches into checked-in environment overlays or release/channel inputs. A clean checkout should be able to run `kubectl kustomize src/environments/<environment>` without `guardian up`.
-- Adopt Flux on dev first for the post-bootstrap reconciled layer: Crossplane packages, site environment bundle, and reconciled observability. Keep Talos, Cilium inline manifests, seed registry creation, OpenBao init/unseal, storage bootstrap, and early controller installation under `guardian up` until they are deliberately handed off.
-- Full wipe drills are acceptable migration tools. The acceptance test for each host is: wipe, run `guardian up src/hosts/<asset-id>/host.yaml`, Flux becomes Ready, the assigned environment converges from Git/OCI state, and re-running `guardian up` performs no ordinary application deployment work.
-- After dev is boring, repeat on gamma, then prod. Gamma gets the first release-gate integration; prod only follows signed/approved stable pointers with rollback drills practiced before relying on automation.
 
 Fleet (all Latitude.sh ASH, f4.metal.small; the Latitude project is `guardian`;
 per-box physical facts — MACs, disk serials, gateways — live in

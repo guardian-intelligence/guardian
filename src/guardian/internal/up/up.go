@@ -9,7 +9,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -49,6 +48,11 @@ type Result struct {
 	Stages        []string             `json:"stages,omitempty" yaml:"stages,omitempty" toml:"stages,omitempty"`
 	Commands      []toolrunner.Command `json:"commands,omitempty" yaml:"commands,omitempty" toml:"commands,omitempty"`
 }
+
+var (
+	idempotencyProbeTimeout = 2 * time.Second
+	retryAttemptTimeout     = 20 * time.Second
+)
 
 func (r Result) Text(w io.Writer) error {
 	source := displayPath(r.SourcePath)
@@ -139,11 +143,11 @@ func Run(ctx context.Context, loaded *config.Loaded, tools Tools, runner toolrun
 		GenesisBundle: layout.GenesisArchive,
 		Stages: []string{
 			"OpenState",
+			"TalmInit",
 			"WriteTalmValues",
-			"WriteTalmTemplateOverrides",
-			"TalmTemplate",
 			"BootToTalosInstall",
 			"WaitTalosMaintenanceAPI",
+			"TalmTemplate",
 			"TalmDryRun",
 			"TalmApply",
 			"WaitTalosAPI",
@@ -210,22 +214,10 @@ func Run(ctx context.Context, loaded *config.Loaded, tools Tools, runner toolrun
 				reportStatus(opts.Status, spec, StatusFailed, opts.Now, failure)
 				return failed(loaded, layout, "Retryable", failure.Code)
 			}
-		case "write-talm-template-overrides":
-			if err := writeTalmTemplateOverrides(loaded.Config, cmd.Args[1]); err != nil {
-				failure := failureFor("talm.template.overrides.write", &cmd)
-				reportStatus(opts.Status, spec, StatusFailed, opts.Now, failure)
-				return failed(loaded, layout, "Retryable", failure.Code)
-			}
 		case "talm-template":
 			out, err := runner.Output(ctx, cmd)
 			if err != nil {
 				failure := failureForCommandOutput(cmd)
-				reportStatus(opts.Status, spec, StatusFailed, opts.Now, failure)
-				return failed(loaded, layout, "Retryable", failure.Code)
-			}
-			out, err = normalizeNodeConfig(out, loaded.Config)
-			if err != nil {
-				failure := failureFor("talos.config.normalize", &cmd)
 				reportStatus(opts.Status, spec, StatusFailed, opts.Now, failure)
 				return failed(loaded, layout, "Retryable", failure.Code)
 			}
@@ -302,6 +294,16 @@ func Run(ctx context.Context, loaded *config.Loaded, tools Tools, runner toolrun
 				reportStatus(opts.Status, spec, StatusFailed, opts.Now, failure)
 				return failed(loaded, layout, "Retryable", failure.Code)
 			}
+		case "helm-install-cozystack":
+			if helmReleaseDeployed(ctx, runner, tools, layout.Kubeconfig, loaded.Config.Cozystack.Version) {
+				reportStatusDescription(opts.Status, spec, StatusUnchanged, "Already installed", opts.Now, nil)
+				continue
+			}
+			if err := runHelmInstallWithRetry(ctx, runner, cmd, 15*time.Minute); err != nil {
+				failure := failureForCommand(cmd)
+				reportStatus(opts.Status, spec, StatusFailed, opts.Now, failure)
+				return failed(loaded, layout, "Retryable", failure.Code)
+			}
 		case "write-cozystack-platform":
 			if err := writeCozystackPlatform(loaded.Config, layout.CozystackPlatform); err != nil {
 				failure := failureFor("cozystack.platform.write", &cmd)
@@ -343,7 +345,7 @@ func unchangedStageProbes(ctx context.Context, loaded *config.Loaded, tools Tool
 	if talosConfigured(ctx, runner, tools, layout, loaded.Config.Node.Address) {
 		unchanged["talos"] = "Already installed"
 	}
-	if kubernetesBootstrapped(ctx, runner, tools, layout, loaded.Config.Node.Hostname) {
+	if kubernetesBootstrapped(ctx, runner, tools, layout) {
 		unchanged["kubernetes"] = "Already bootstrapped"
 	}
 	if cozystackConverged(ctx, loaded, tools, runner, layout) {
@@ -384,9 +386,14 @@ func planCommands(cfg config.Config, layout *state.Layout, tools Tools) []toolru
 			Args: []string{"talm-values", layout.TalmValues},
 		},
 		{
-			Name: "write-talm-template-overrides",
+			Name: "boot-to-talos-install",
+			Bin:  tools.BootToTalos,
+			Args: bootToTalosArgs(cfg),
+		},
+		{
+			Name: "wait-talos-maintenance-api",
 			Bin:  "guardian-internal",
-			Args: []string{"talm-template-overrides", filepath.Join(layout.TalmProject, "templates", "_helpers.tpl")},
+			Args: []string{"wait-tcp", cfg.Node.Address, "50000"},
 		},
 		{
 			Name: "talm-template",
@@ -399,19 +406,8 @@ func planCommands(cfg config.Config, layout *state.Layout, tools Tools) []toolru
 				"-t", cfg.Talm.Template,
 				"--talos-version", cfg.Talm.TalosVersion,
 				"--kubernetes-version", cfg.Talm.KubernetesVersion,
-				"--offline",
 				"-i",
 			},
-		},
-		{
-			Name: "boot-to-talos-install",
-			Bin:  tools.BootToTalos,
-			Args: bootToTalosArgs(cfg),
-		},
-		{
-			Name: "wait-talos-maintenance-api",
-			Bin:  "guardian-internal",
-			Args: []string{"wait-tcp", cfg.Node.Address, "50000"},
 		},
 		{
 			Name: "talm-dry-run",
@@ -445,12 +441,12 @@ func planCommands(cfg config.Config, layout *state.Layout, tools Tools) []toolru
 		{
 			Name: "kubectl-wait-kubernetes-api",
 			Bin:  tools.Kubectl,
-			Args: []string{"--kubeconfig", layout.Kubeconfig, "get", "--raw=/readyz"},
+			Args: kubectlGetArgs(layout.Kubeconfig, "get", "--raw=/readyz"),
 		},
 		{
 			Name: "kubectl-wait-node-registered",
 			Bin:  tools.Kubectl,
-			Args: []string{"--kubeconfig", layout.Kubeconfig, "get", "node", cfg.Node.Hostname},
+			Args: kubectlGetArgs(layout.Kubeconfig, "get", "nodes"),
 		},
 		{
 			Name: "write-cozystack-platform",
@@ -506,10 +502,15 @@ func planCommands(cfg config.Config, layout *state.Layout, tools Tools) []toolru
 		toolrunner.Command{
 			Name: "kubectl-wait-cozystack-helmreleases",
 			Bin:  tools.Kubectl,
-			Args: []string{"--kubeconfig", layout.Kubeconfig, "get", "hr", "-A", "-o", "json"},
+			Args: kubectlGetArgs(layout.Kubeconfig, "get", "hr", "-A", "-o", "json"),
 		},
 	)
 	return commands
+}
+
+func kubectlGetArgs(kubeconfig string, args ...string) []string {
+	out := []string{"--kubeconfig", kubeconfig, "--request-timeout=10s"}
+	return append(out, args...)
 }
 
 func talmStateExists(layout *state.Layout) bool {
@@ -525,7 +526,7 @@ func talmStateExists(layout *state.Layout) bool {
 }
 
 func talosConfigured(ctx context.Context, runner toolrunner.Runner, tools Tools, layout *state.Layout, address string) bool {
-	_, err := runner.Output(ctx, toolrunner.Command{
+	_, err := probeOutput(ctx, runner, toolrunner.Command{
 		Name: "talos-version",
 		Bin:  tools.Talos,
 		Args: []string{
@@ -539,23 +540,23 @@ func talosConfigured(ctx context.Context, runner toolrunner.Runner, tools Tools,
 	return err == nil
 }
 
-func kubernetesBootstrapped(ctx context.Context, runner toolrunner.Runner, tools Tools, layout *state.Layout, hostname string) bool {
+func kubernetesBootstrapped(ctx context.Context, runner toolrunner.Runner, tools Tools, layout *state.Layout) bool {
 	for _, path := range []string{layout.Kubeconfig, layout.GenesisArchive} {
 		if _, err := os.Stat(path); err != nil {
 			return false
 		}
 	}
-	if _, err := runner.Output(ctx, toolrunner.Command{
+	if _, err := probeOutput(ctx, runner, toolrunner.Command{
 		Name: "kubectl-probe-kubernetes-api",
 		Bin:  tools.Kubectl,
-		Args: []string{"--kubeconfig", layout.Kubeconfig, "get", "--raw=/readyz"},
+		Args: kubectlGetArgs(layout.Kubeconfig, "get", "--raw=/readyz"),
 	}); err != nil {
 		return false
 	}
-	if _, err := runner.Output(ctx, toolrunner.Command{
+	if _, err := probeOutput(ctx, runner, toolrunner.Command{
 		Name: "kubectl-probe-node-registered",
 		Bin:  tools.Kubectl,
-		Args: []string{"--kubeconfig", layout.Kubeconfig, "get", "node", hostname},
+		Args: kubectlGetArgs(layout.Kubeconfig, "get", "nodes"),
 	}); err != nil {
 		return false
 	}
@@ -586,14 +587,14 @@ func cozystackConverged(ctx context.Context, loaded *config.Loaded, tools Tools,
 			Args: []string{"--kubeconfig", layout.Kubeconfig, "wait", "nodes", "--all", "--for=condition=Ready", "--timeout=1s"},
 		},
 	} {
-		if _, err := runner.Output(ctx, cmd); err != nil {
+		if _, err := probeOutput(ctx, runner, cmd); err != nil {
 			return false
 		}
 	}
-	raw, err := runner.Output(ctx, toolrunner.Command{
+	raw, err := probeOutput(ctx, runner, toolrunner.Command{
 		Name: "kubectl-probe-cozystack-helmreleases",
 		Bin:  tools.Kubectl,
-		Args: []string{"--kubeconfig", layout.Kubeconfig, "get", "hr", "-A", "-o", "json"},
+		Args: kubectlGetArgs(layout.Kubeconfig, "get", "hr", "-A", "-o", "json"),
 	})
 	if err != nil {
 		return false
@@ -614,30 +615,39 @@ func operationCompleted(path, digest, stage string) bool {
 	return op.ConfigDigest == digest && op.Stage == stage
 }
 
-type helmStatus struct {
-	Chart string `json:"chart"`
-	Info  struct {
-		Status string `json:"status"`
-	} `json:"info"`
+type helmReleaseSummary struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Chart  string `json:"chart"`
 }
 
 func helmReleaseDeployed(ctx context.Context, runner toolrunner.Runner, tools Tools, kubeconfig, version string) bool {
-	raw, err := runner.Output(ctx, toolrunner.Command{
+	raw, err := probeOutput(ctx, runner, toolrunner.Command{
 		Name: "helm-probe-cozystack",
 		Bin:  tools.Helm,
-		Args: []string{"status", "cozystack", "--namespace", "cozy-system", "--kubeconfig", kubeconfig, "--output", "json"},
+		Args: []string{"list", "--namespace", "cozy-system", "--kubeconfig", kubeconfig, "--filter", "^cozystack$", "--output", "json"},
 	})
 	if err != nil {
 		return false
 	}
-	var status helmStatus
-	if err := json.Unmarshal(raw, &status); err != nil {
+	var releases []helmReleaseSummary
+	if err := json.Unmarshal(raw, &releases); err != nil {
 		return false
 	}
-	if strings.ToLower(status.Info.Status) != "deployed" {
-		return false
+	for _, release := range releases {
+		if release.Name == "cozystack" &&
+			strings.ToLower(release.Status) == "deployed" &&
+			strings.Contains(release.Chart, version) {
+			return true
+		}
 	}
-	return strings.Contains(status.Chart, version)
+	return false
+}
+
+func probeOutput(ctx context.Context, runner toolrunner.Runner, cmd toolrunner.Command) ([]byte, error) {
+	probeCtx, cancel := context.WithTimeout(ctx, idempotencyProbeTimeout)
+	defer cancel()
+	return runner.Output(probeCtx, cmd)
 }
 
 func runBootstrapWithRetry(ctx context.Context, runner toolrunner.Runner, cmd toolrunner.Command, timeout time.Duration) error {
@@ -648,7 +658,7 @@ func runOutputWithRetry(ctx context.Context, runner toolrunner.Runner, cmd toolr
 	deadline := time.Now().Add(timeout)
 	var lastErr error
 	for {
-		_, err := runner.Output(ctx, cmd)
+		_, err := outputWithTimeout(ctx, runner, cmd, retryAttemptTimeout)
 		if err == nil {
 			return nil
 		}
@@ -663,6 +673,26 @@ func runOutputWithRetry(ctx context.Context, runner toolrunner.Runner, cmd toolr
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(5 * time.Second):
+		}
+	}
+}
+
+func runHelmInstallWithRetry(ctx context.Context, runner toolrunner.Runner, cmd toolrunner.Command, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		err := runWithTimeout(ctx, runner, cmd, timeout)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !helmOperationInProgress(err) || time.Now().After(deadline) {
+			return lastErr
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(10 * time.Second):
 		}
 	}
 }
@@ -710,11 +740,16 @@ func taintAlreadyRemoved(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "taint \"node-role.kubernetes.io/control-plane\" not found")
 }
 
+func helmOperationInProgress(err error) bool {
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "another operation") && strings.Contains(text, "in progress")
+}
+
 func waitCozystackHelmReleases(ctx context.Context, runner toolrunner.Runner, cmd toolrunner.Command, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	var lastErr error
 	for {
-		raw, err := runner.Output(ctx, cmd)
+		raw, err := outputWithTimeout(ctx, runner, cmd, retryAttemptTimeout)
 		if err != nil {
 			lastErr = err
 		} else {
@@ -737,6 +772,18 @@ func waitCozystackHelmReleases(ctx context.Context, runner toolrunner.Runner, cm
 		case <-time.After(10 * time.Second):
 		}
 	}
+}
+
+func outputWithTimeout(ctx context.Context, runner toolrunner.Runner, cmd toolrunner.Command, timeout time.Duration) ([]byte, error) {
+	attemptCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return runner.Output(attemptCtx, cmd)
+}
+
+func runWithTimeout(ctx context.Context, runner toolrunner.Runner, cmd toolrunner.Command, timeout time.Duration) error {
+	attemptCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return runner.Run(attemptCtx, cmd)
 }
 
 type helmReleaseList struct {
@@ -973,167 +1020,6 @@ func writeTalmValues(cfg config.Config, path string) error {
 	return nil
 }
 
-func writeTalmTemplateOverrides(cfg config.Config, path string) error {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read talm helper template: %w", err)
-	}
-	text, err := replaceTalmNetworkTemplateBlock(string(raw), cfg)
-	if err != nil {
-		return err
-	}
-	text, err = replaceTalmInstallDiskTemplate(text, cfg)
-	if err != nil {
-		return err
-	}
-	if text == string(raw) {
-		return nil
-	}
-	return state.WriteFile(path, []byte(text))
-}
-
-func replaceTalmNetworkTemplateBlock(text string, cfg config.Config) (string, error) {
-	const startMarker = `{{- define "talos.config.network.multidoc" }}`
-	const endMarker = `{{- end }}`
-	start := strings.Index(text, startMarker)
-	if start < 0 {
-		return "", fmt.Errorf("talm helper template missing %s", startMarker)
-	}
-	afterStart := start + len(startMarker)
-	endRel := strings.Index(text[afterStart:], endMarker)
-	if endRel < 0 {
-		return "", fmt.Errorf("talm helper template has unterminated talos.config.network.multidoc")
-	}
-	end := afterStart + endRel + len(endMarker)
-	replacement := talmNetworkTemplateBlock(cfg)
-	if text[start:end] == replacement {
-		return text, nil
-	}
-	return text[:start] + replacement + text[end:], nil
-}
-
-func replaceTalmInstallDiskTemplate(text string, cfg config.Config) (string, error) {
-	old := strings.Join([]string{
-		`    {{- (include "talm.discovered.disks_info" .) | nindent 4 }}`,
-		`    disk: {{ include "talm.discovered.system_disk_name" . | quote }}`,
-	}, "\n")
-	replacement := strings.Join([]string{
-		`    diskSelector:`,
-		`      serial: ` + strconv.Quote(cfg.Node.InstallDiskSerial),
-	}, "\n")
-	if strings.Contains(text, old) {
-		return strings.Replace(text, old, replacement, 1), nil
-	}
-	if strings.Contains(text, replacement) && !strings.Contains(text, `talm.discovered.system_disk_name`) {
-		return text, nil
-	}
-	if strings.Contains(text, `talm.discovered.system_disk_name`) {
-		return "", fmt.Errorf("talm helper template still contains discovery-based install disk selection")
-	}
-	return text, nil
-}
-
-func talmNetworkTemplateBlock(cfg config.Config) string {
-	return strings.Join([]string{
-		`{{- define "talos.config.network.multidoc" }}`,
-		`---`,
-		`apiVersion: v1alpha1`,
-		`kind: HostnameConfig`,
-		`hostname: ` + strconv.Quote(cfg.Node.Hostname),
-		`---`,
-		`apiVersion: v1alpha1`,
-		`kind: ResolverConfig`,
-		`nameservers:`,
-		`  - address: "1.1.1.1"`,
-		`  - address: "8.8.8.8"`,
-		`{{- end }}`,
-	}, "\n")
-}
-
-func normalizeNodeConfig(raw []byte, cfg config.Config) ([]byte, error) {
-	dec := yaml.NewDecoder(bytes.NewReader(raw))
-	var docs []*yaml.Node
-	for {
-		var doc yaml.Node
-		err := dec.Decode(&doc)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("decode rendered config: %w", err)
-		}
-		if len(doc.Content) == 0 {
-			continue
-		}
-		docs = append(docs, &doc)
-	}
-	if len(docs) == 0 {
-		return raw, nil
-	}
-	changed := false
-	hasStructuredConfig := false
-	hasHostnameConfig := false
-	filteredDocs := docs[:0]
-	for _, doc := range docs {
-		root := documentRoot(doc)
-		if root == nil || root.Kind != yaml.MappingNode {
-			filteredDocs = append(filteredDocs, doc)
-			continue
-		}
-		if kind := mappingValue(root, "kind"); kind != nil && kind.Kind == yaml.ScalarNode && kind.Value == "LinkConfig" {
-			changed = true
-			continue
-		}
-		filteredDocs = append(filteredDocs, doc)
-		hasStructuredConfig = true
-		if machine := mappingValue(root, "machine"); machine != nil && machine.Kind == yaml.MappingNode {
-			install := ensureMapping(machine, "install")
-			setScalar(install, "diskSelector", "")
-			diskSelector := mappingValue(install, "diskSelector")
-			if diskSelector == nil || diskSelector.Kind != yaml.MappingNode {
-				return nil, fmt.Errorf("machine.install.diskSelector was not a mapping after normalization")
-			}
-			setScalar(diskSelector, "serial", cfg.Node.InstallDiskSerial)
-			deleteMappingKey(install, "disk")
-			network := ensureMapping(machine, "network")
-			setTalosStaticInterfaces(network, cfg)
-			changed = true
-		}
-		if kind := mappingValue(root, "kind"); kind != nil && kind.Kind == yaml.ScalarNode && kind.Value == "HostnameConfig" {
-			setScalar(root, "hostname", cfg.Node.Hostname)
-			hasHostnameConfig = true
-			changed = true
-		}
-		if kind := mappingValue(root, "kind"); kind != nil && kind.Kind == yaml.ScalarNode && kind.Value == "ResolverConfig" {
-			setResolverNameservers(root, []string{"1.1.1.1", "8.8.8.8"})
-			changed = true
-		}
-	}
-	docs = filteredDocs
-	if !hasStructuredConfig {
-		return raw, nil
-	}
-	if !hasHostnameConfig {
-		docs = append(docs, hostnameConfigDocument(cfg.Node.Hostname))
-		changed = true
-	}
-	if !changed {
-		return raw, nil
-	}
-	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
-	enc.SetIndent(2)
-	for _, doc := range docs {
-		if err := enc.Encode(doc); err != nil {
-			return nil, fmt.Errorf("encode normalized config: %w", err)
-		}
-	}
-	if err := enc.Close(); err != nil {
-		return nil, fmt.Errorf("close normalized config encoder: %w", err)
-	}
-	return buf.Bytes(), nil
-}
-
 func documentRoot(doc *yaml.Node) *yaml.Node {
 	if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 {
 		return doc.Content[0]
@@ -1153,45 +1039,6 @@ func mappingValue(node *yaml.Node, key string) *yaml.Node {
 	return nil
 }
 
-func ensureMapping(node *yaml.Node, key string) *yaml.Node {
-	if child := mappingValue(node, key); child != nil {
-		if child.Kind != yaml.MappingNode {
-			child.Kind = yaml.MappingNode
-			child.Tag = "!!map"
-			child.Value = ""
-			child.Content = nil
-		}
-		return child
-	}
-	child := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-	node.Content = append(node.Content, scalarNode(key), child)
-	return child
-}
-
-func setScalar(node *yaml.Node, key, value string) {
-	if existing := mappingValue(node, key); existing != nil {
-		if value == "" {
-			existing.Kind = yaml.MappingNode
-			existing.Tag = "!!map"
-			existing.Value = ""
-			existing.Content = nil
-			return
-		}
-		existing.Kind = yaml.ScalarNode
-		existing.Tag = "!!str"
-		existing.Value = value
-		existing.Content = nil
-		return
-	}
-	var child *yaml.Node
-	if value == "" {
-		child = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-	} else {
-		child = scalarNode(value)
-	}
-	node.Content = append(node.Content, scalarNode(key), child)
-}
-
 func setStringSequence(node *yaml.Node, key string, values []string) {
 	seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
 	for _, value := range values {
@@ -1207,89 +1054,8 @@ func setStringSequence(node *yaml.Node, key string, values []string) {
 	node.Content = append(node.Content, scalarNode(key), seq)
 }
 
-func setTalosStaticInterfaces(network *yaml.Node, cfg config.Config) {
-	item := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-	deviceSelector := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-	deviceSelector.Content = append(deviceSelector.Content, scalarNode("hardwareAddr"), scalarNode(cfg.Node.InterfaceMAC))
-	item.Content = append(item.Content, scalarNode("deviceSelector"), deviceSelector)
-	item.Content = append(item.Content, scalarNode("dhcp"), boolNode(false))
-	item.Content = append(item.Content, scalarNode("addresses"), stringSequence([]string{nodeCIDR(cfg)}))
-	route := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-	route.Content = append(route.Content,
-		scalarNode("network"), scalarNode("0.0.0.0/0"),
-		scalarNode("gateway"), scalarNode(cfg.Node.Gateway),
-	)
-	routes := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq", Content: []*yaml.Node{route}}
-	item.Content = append(item.Content, scalarNode("routes"), routes)
-	interfaces := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq", Content: []*yaml.Node{item}}
-	if existing := mappingValue(network, "interfaces"); existing != nil {
-		existing.Kind = interfaces.Kind
-		existing.Tag = interfaces.Tag
-		existing.Value = ""
-		existing.Content = interfaces.Content
-		return
-	}
-	network.Content = append(network.Content, scalarNode("interfaces"), interfaces)
-}
-
-func setResolverNameservers(node *yaml.Node, addresses []string) {
-	seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
-	for _, address := range addresses {
-		item := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-		item.Content = append(item.Content, scalarNode("address"), scalarNode(address))
-		seq.Content = append(seq.Content, item)
-	}
-	if existing := mappingValue(node, "nameservers"); existing != nil {
-		existing.Kind = seq.Kind
-		existing.Tag = seq.Tag
-		existing.Value = ""
-		existing.Content = seq.Content
-		return
-	}
-	node.Content = append(node.Content, scalarNode("nameservers"), seq)
-}
-
-func nodeCIDR(cfg config.Config) string {
-	return fmt.Sprintf("%s/%d", cfg.Node.Address, cfg.Node.PrefixLength)
-}
-
-func stringSequence(values []string) *yaml.Node {
-	seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
-	for _, value := range values {
-		seq.Content = append(seq.Content, scalarNode(value))
-	}
-	return seq
-}
-
-func deleteMappingKey(node *yaml.Node, key string) {
-	if node == nil || node.Kind != yaml.MappingNode {
-		return
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		if node.Content[i].Value == key {
-			node.Content = append(node.Content[:i], node.Content[i+2:]...)
-			return
-		}
-	}
-}
-
 func scalarNode(value string) *yaml.Node {
 	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value}
-}
-
-func boolNode(value bool) *yaml.Node {
-	if value {
-		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "true"}
-	}
-	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "false"}
-}
-
-func hostnameConfigDocument(hostname string) *yaml.Node {
-	root := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-	setScalar(root, "apiVersion", "v1alpha1")
-	setScalar(root, "kind", "HostnameConfig")
-	setScalar(root, "hostname", hostname)
-	return &yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{root}}
 }
 
 func failed(loaded *config.Loaded, layout *state.Layout, outcome, code string) Result {

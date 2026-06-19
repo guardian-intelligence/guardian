@@ -12,8 +12,8 @@ func TestParseUpArgsRequiresHostFileFlag(t *testing.T) {
 		name string
 		args []string
 	}{
-		{name: "short file flag", args: []string{"-f", "src/hosts/ash-bm-004/host.json", "--output=json", "--status=plain", "--execute"}},
-		{name: "long file flag", args: []string{"--file=src/hosts/ash-bm-004/host.json", "--output=json", "--status=plain", "--execute"}},
+		{name: "short file flag", args: []string{"-f", "src/hosts/ash-bm-004/host.json", "--output=json", "--execute"}},
+		{name: "long file flag", args: []string{"--file=src/hosts/ash-bm-004/host.json", "--output=json", "--execute"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			parsed, err := parseUpArgs(tc.args)
@@ -28,9 +28,6 @@ func TestParseUpArgsRequiresHostFileFlag(t *testing.T) {
 			}
 			if parsed.Format != "json" {
 				t.Fatalf("format = %q, want json", parsed.Format)
-			}
-			if parsed.Status != "plain" {
-				t.Fatalf("status = %q, want plain", parsed.Status)
 			}
 		})
 	}
@@ -60,25 +57,9 @@ func TestParseUpArgsRejectsMissingFileFlagValue(t *testing.T) {
 	}
 }
 
-func TestParseUpArgsRejectsUnsupportedStatus(t *testing.T) {
-	if _, err := parseUpArgs([]string{"-f", "src/hosts/ash-bm-004/host.json", "--status=verbose"}); err == nil {
-		t.Fatalf("parseUpArgs() error = nil, want rejection")
-	}
-}
-
-func TestAutoStatusIsOffForStructuredOutput(t *testing.T) {
-	reporter, closeStatus, err := newStatusReporter(upArgs{
-		HostPath: "src/hosts/ash-bm-004/host.json",
-		Execute:  true,
-		Format:   "toml",
-		Status:   "auto",
-	}, "guardian-nonprod")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer closeStatus()
-	if reporter != nil {
-		t.Fatalf("reporter = %#v, want nil for structured output with --status=auto", reporter)
+func TestParseUpArgsRejectsStatusFlag(t *testing.T) {
+	if _, err := parseUpArgs([]string{"-f", "src/hosts/ash-bm-004/host.json", "--status=plain"}); err == nil {
+		t.Fatalf("parseUpArgs() error = nil, want status flag rejection")
 	}
 }
 

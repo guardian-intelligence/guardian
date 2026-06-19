@@ -4,14 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"strings"
 
 	"github.com/guardian-intelligence/guardian/src/guardian/internal/config"
 	"github.com/guardian-intelligence/guardian/src/guardian/internal/output"
-	statusview "github.com/guardian-intelligence/guardian/src/guardian/internal/status"
 	"github.com/guardian-intelligence/guardian/src/guardian/internal/toolrunner"
 	"github.com/guardian-intelligence/guardian/src/guardian/internal/up"
 )
@@ -20,10 +18,10 @@ var errUsage = errors.New("usage")
 var errSilent = errors.New("silent")
 
 const usage = `usage:
-  guardian up -f <host.json> [--execute] [--output text|json|yaml|toml] [--status auto|tui|plain|off]
+  guardian up -f <host.json> [--execute] [--output text|json|yaml|toml]
 
 guardian owns only host come-up: Talos via Talm, Kubernetes bootstrap,
-Cozystack installer handoff/status, and genesis recovery material.`
+Cozystack installer handoff, and genesis recovery material.`
 
 func main() {
 	if len(os.Args) < 2 {
@@ -70,35 +68,15 @@ func runUp(args []string) error {
 	if err != nil {
 		return err
 	}
-	statusReporter, closeStatus, err := newStatusReporter(parsed, loaded.Config.Cluster.Name)
-	if err != nil {
-		return err
-	}
-	statusClosed := false
-	defer func() {
-		if !statusClosed {
-			_ = closeStatus()
-		}
-	}()
-	runner := toolrunner.RealRunner{}
-	if statusReporter != nil || parsed.Format != "text" {
-		runner.Stdout = io.Discard
-		runner.Stderr = io.Discard
+	runner := toolrunner.RealRunner{
+		Stdout: os.Stderr,
+		Stderr: os.Stderr,
 	}
 	res := up.Run(context.Background(), loaded, tools, runner, up.Options{
 		Execute: parsed.Execute,
-		Status:  statusReporter,
 	})
-	if err := closeStatus(); err != nil {
-		statusClosed = true
+	if err := output.Write(os.Stdout, res, parsed.Format); err != nil {
 		return err
-	}
-	statusClosed = true
-	humanStatus := statusReporter != nil && parsed.Format == "text"
-	if !humanStatus {
-		if err := output.Write(os.Stdout, res, parsed.Format); err != nil {
-			return err
-		}
 	}
 	if res.Outcome == "Converged" || res.Outcome == "Planned" {
 		return nil
@@ -119,11 +97,10 @@ type upArgs struct {
 	HostPath string
 	Execute  bool
 	Format   string
-	Status   string
 }
 
 func parseUpArgs(args []string) (upArgs, error) {
-	parsed := upArgs{Format: "text", Status: "auto"}
+	parsed := upArgs{Format: "text"}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
@@ -151,14 +128,6 @@ func parseUpArgs(args []string) (upArgs, error) {
 			parsed.Format = args[i]
 		case strings.HasPrefix(arg, "--output="):
 			parsed.Format = strings.TrimPrefix(arg, "--output=")
-		case arg == "--status":
-			i++
-			if i >= len(args) {
-				return upArgs{}, fmt.Errorf("up: %w: --status requires a value", errUsage)
-			}
-			parsed.Status = args[i]
-		case strings.HasPrefix(arg, "--status="):
-			parsed.Status = strings.TrimPrefix(arg, "--status=")
 		case strings.HasPrefix(arg, "-"):
 			return upArgs{}, fmt.Errorf("up: %w: unknown flag %q", errUsage, arg)
 		default:
@@ -169,11 +138,6 @@ func parseUpArgs(args []string) (upArgs, error) {
 	case "text", "json", "yaml", "toml":
 	default:
 		return upArgs{}, fmt.Errorf("up: %w: unsupported --output %q", errUsage, parsed.Format)
-	}
-	switch parsed.Status {
-	case "auto", "tui", "plain", "off":
-	default:
-		return upArgs{}, fmt.Errorf("up: %w: unsupported --status %q", errUsage, parsed.Status)
 	}
 	if parsed.HostPath == "" {
 		return upArgs{}, fmt.Errorf("up: %w: expected -f <host JSON config path>", errUsage)
@@ -190,35 +154,6 @@ func setHostPath(parsed *upArgs, path string) error {
 	}
 	parsed.HostPath = path
 	return nil
-}
-
-func newStatusReporter(parsed upArgs, clusterName string) (up.StatusReporter, func() error, error) {
-	if !parsed.Execute || parsed.Status == "off" || (parsed.Status == "auto" && parsed.Format != "text") {
-		return nil, func() error { return nil }, nil
-	}
-	mode := parsed.Status
-	if mode == "auto" {
-		if isTerminal(os.Stderr) {
-			mode = "tui"
-		} else {
-			mode = "plain"
-		}
-	}
-	var input io.Reader
-	if mode == "tui" && isTerminal(os.Stdin) {
-		input = os.Stdin
-	}
-	renderer := statusview.New(os.Stderr, statusview.Options{
-		Mode:        statusview.Mode(mode),
-		ClusterName: clusterName,
-		Input:       input,
-	})
-	return renderer, renderer.Close, nil
-}
-
-func isTerminal(file *os.File) bool {
-	info, err := file.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func resolveTools() (up.Tools, error) {

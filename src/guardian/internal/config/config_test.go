@@ -29,8 +29,8 @@ func TestLoadHostConfigWithClusterAndEnvironment(t *testing.T) {
 	if loaded.Config.Cozystack.Version != "1.4.1" {
 		t.Fatalf("cozystack version = %q", loaded.Config.Cozystack.Version)
 	}
-	if loaded.Config.Node.InterfaceName != "eno1" {
-		t.Fatalf("node interface name = %q", loaded.Config.Node.InterfaceName)
+	if loaded.Config.Node.Address != "206.223.228.101" {
+		t.Fatalf("node address = %q", loaded.Config.Node.Address)
 	}
 	if loaded.Config.Cozystack.PlatformVariant != "isp-full" {
 		t.Fatalf("cozystack platform variant = %q", loaded.Config.Cozystack.PlatformVariant)
@@ -79,28 +79,12 @@ func writeTestRepo(t *testing.T) string {
 	writeFile(t, root, "MODULE.bazel", "module(name = \"test\")\n")
 	writeFile(t, root, "src/hosts/ash-bm-001/host.json", `{
   "asset": "ash-bm-001",
-  "provider": {
-    "name": "latitude",
-    "serverID": "sv_vAPXaMxKM5epz",
-    "projectID": "proj_ZWr75Zdbm0A91",
-    "site": "ASH",
-    "plan": "f4-metal-small"
-  },
   "network": {
-    "ipv4": "206.223.228.101",
-    "gateway": "206.223.228.100",
-    "prefixLength": 31,
-    "interfaceName": "eno1",
-    "interfaceMAC": "90:5a:08:33:ba:9f"
-  },
-  "disks": {
-    "installSerial": "362510FCEFB8"
+    "ipv4": "206.223.228.101"
   },
   "assignment": {
     "cluster": "guardian-nonprod",
     "environment": "dev",
-    "nodeHostname": "gi-ash-bm-001",
-    "role": "control-plane",
     "destructiveAllowed": true
   }
 }
