@@ -17,7 +17,12 @@ go_library(
 go_binary(
     name = "guardian",
     data = [
-        "//src/clusters/guardian-dev:config",
+        "//src/clusters/guardian-nonprod:config",
+        "//src/clusters/guardian-prod:config",
+        "//src/environments/dev:config",
+        "//src/environments/gamma:config",
+        "//src/environments/prod:config",
+        "//src/hosts/ash-bm-001:config",
         "@helm_linux_amd64//:helm",
         "@kubectl_linux_amd64//file:kubectl",
         "@talm_linux_amd64//:talm",

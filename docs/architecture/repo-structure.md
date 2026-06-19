@@ -2,7 +2,7 @@
 
 The Cozystack-native tree separates paid capacity, physical host facts,
 cluster bootstrap, and runtime desired state. Do not encode all of those in a
-single `up.cue` file.
+single bootstrap file.
 
 ## Top-level `src` layout
 
@@ -45,13 +45,6 @@ the nonprod cluster unless they earn a harder API-server boundary.
 explicitly allowed, bootstrap Talos/Kubernetes/Cozystack substrate, then hand
 off to reconcilers. It must not become an OpenTofu wrapper or a generic
 deployment runner.
-
-## Current migration state
-
-`src/clusters/guardian-dev/up.cue` remains as a compatibility entrypoint for
-the current CLI implementation. New work should add durable facts to
-`src/hosts`, `src/clusters/guardian-nonprod`, `src/clusters/guardian-prod`, and
-`src/environments` first, then teach the CLI to consume the split model.
 
 The first OpenTofu stack is deliberately flat:
 

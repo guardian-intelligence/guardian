@@ -87,31 +87,112 @@ type Loaded struct {
 	Digest    string
 }
 
-func Load(path string) (*Loaded, error) {
-	resolved, err := filepath.Abs(path)
+type hostDocument struct {
+	Asset    string `json:"asset"`
+	Provider struct {
+		Name      string `json:"name"`
+		ServerID  string `json:"serverID"`
+		ProjectID string `json:"projectID"`
+		Site      string `json:"site"`
+		Plan      string `json:"plan"`
+	} `json:"provider"`
+	Network struct {
+		IPv4         string `json:"ipv4"`
+		Gateway      string `json:"gateway"`
+		PrefixLength int    `json:"prefixLength"`
+		InterfaceMAC string `json:"interfaceMAC"`
+	} `json:"network"`
+	Disks struct {
+		InstallSerial string   `json:"installSerial"`
+		DataSerials   []string `json:"dataSerials"`
+	} `json:"disks"`
+	Assignment struct {
+		Cluster            string `json:"cluster"`
+		Environment        string `json:"environment"`
+		NodeHostname       string `json:"nodeHostname"`
+		Role               string `json:"role"`
+		DestructiveAllowed bool   `json:"destructiveAllowed"`
+		Prod               bool   `json:"prod"`
+	} `json:"assignment"`
+}
+
+type clusterDocument struct {
+	Name            string   `json:"name"`
+	Domain          string   `json:"domain"`
+	APIServerDomain string   `json:"apiServerDomain"`
+	Members         []string `json:"members"`
+	Environments    []string `json:"environments"`
+	Network         struct {
+		PodCIDR        string `json:"podCIDR"`
+		ServiceCIDR    string `json:"serviceCIDR"`
+		JoinCIDR       string `json:"joinCIDR"`
+		AdvertisedCIDR string `json:"advertisedCIDR"`
+	} `json:"network"`
+	Talos struct {
+		Version           string `json:"version"`
+		TalmVersion       string `json:"talmVersion"`
+		KubernetesVersion string `json:"kubernetesVersion"`
+		InstallerImage    string `json:"installerImage"`
+	} `json:"talos"`
+	Cozystack struct {
+		Version                 string `json:"version"`
+		Variant                 string `json:"variant"`
+		RemoveControlPlaneTaint bool   `json:"removeControlPlaneTaint"`
+	} `json:"cozystack"`
+	Bootstrap struct {
+		Destructive        bool   `json:"destructive"`
+		RequireMaintenance bool   `json:"requireMaintenance"`
+		TargetState        string `json:"targetState"`
+		Genesis            struct {
+			AgeRecipients []string `json:"ageRecipients"`
+		} `json:"genesis"`
+	} `json:"bootstrap"`
+}
+
+type environmentDocument struct {
+	Name       string `json:"name"`
+	Cluster    string `json:"cluster"`
+	Namespace  string `json:"namespace"`
+	Crossplane struct {
+		EnvironmentConfig string `json:"environmentConfig"`
+	} `json:"crossplane"`
+	Domains struct {
+		Company string `json:"company"`
+		AISucks string `json:"aisucks"`
+		OCI     string `json:"oci"`
+	} `json:"domains"`
+}
+
+func Load(hostPath string) (*Loaded, error) {
+	resolved, err := filepath.Abs(hostPath)
 	if err != nil {
-		return nil, fmt.Errorf("resolve config path: %w", err)
+		return nil, fmt.Errorf("resolve host path: %w", err)
 	}
-	args, err := cueArgs(resolved)
+	host, err := loadCUEFile[hostDocument](resolved)
 	if err != nil {
-		return nil, fmt.Errorf("load %s: %w", path, err)
+		return nil, fmt.Errorf("load host %s: %w", hostPath, err)
 	}
-	ctx := cuecontext.New()
-	instances := load.Instances(args, &load.Config{Dir: filepath.Dir(resolved)})
-	if len(instances) != 1 {
-		return nil, fmt.Errorf("load %s: got %d CUE instances, want 1", path, len(instances))
+	root, err := repoRoot(resolved)
+	if err != nil {
+		return nil, err
 	}
-	if err := instances[0].Err; err != nil {
-		return nil, fmt.Errorf("load %s: %w", path, err)
+	if err := validateHostSource(host); err != nil {
+		return nil, err
 	}
-	value := ctx.BuildInstance(instances[0])
-	if err := value.Err(); err != nil {
-		return nil, fmt.Errorf("load %s: %w", path, err)
+	clusterPath := filepath.Join(root, "src", "clusters", host.Assignment.Cluster, "cluster.cue")
+	cluster, err := loadCUEFile[clusterDocument](clusterPath)
+	if err != nil {
+		return nil, fmt.Errorf("load cluster %s: %w", host.Assignment.Cluster, err)
 	}
-	var cfg Config
-	if err := value.Decode(&cfg); err != nil {
-		return nil, fmt.Errorf("load %s: %w", path, err)
+	envPath := filepath.Join(root, "src", "environments", host.Assignment.Environment, "environment.cue")
+	env, err := loadCUEFile[environmentDocument](envPath)
+	if err != nil {
+		return nil, fmt.Errorf("load environment %s: %w", host.Assignment.Environment, err)
 	}
+	if err := validateSourceLinks(host, cluster, env); err != nil {
+		return nil, err
+	}
+	cfg := assemble(host, cluster, env)
 	normalize(&cfg)
 	if err := validate(cfg); err != nil {
 		return nil, err
@@ -123,17 +204,41 @@ func Load(path string) (*Loaded, error) {
 	return &Loaded{Path: resolved, Config: cfg, Canonical: canonical, Digest: digest}, nil
 }
 
-func cueArgs(resolved string) ([]string, error) {
+func loadCUEFile[T any](resolved string) (T, error) {
+	var out T
 	info, err := os.Stat(resolved)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
 	if info.IsDir() {
-		return nil, fmt.Errorf("entrypoint must be a CUE file, got directory")
+		return out, fmt.Errorf("entrypoint must be a CUE file, got directory")
 	}
 	if filepath.Ext(resolved) != ".cue" {
-		return nil, fmt.Errorf("entrypoint must be a .cue file")
+		return out, fmt.Errorf("entrypoint must be a .cue file")
 	}
+	args, err := cueArgs(resolved)
+	if err != nil {
+		return out, err
+	}
+	ctx := cuecontext.New()
+	instances := load.Instances(args, &load.Config{Dir: filepath.Dir(resolved)})
+	if len(instances) != 1 {
+		return out, fmt.Errorf("got %d CUE instances, want 1", len(instances))
+	}
+	if err := instances[0].Err; err != nil {
+		return out, err
+	}
+	value := ctx.BuildInstance(instances[0])
+	if err := value.Err(); err != nil {
+		return out, err
+	}
+	if err := value.Decode(&out); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+func cueArgs(resolved string) ([]string, error) {
 	entrypoint, err := parser.ParseFile(resolved, nil)
 	if err != nil {
 		return nil, fmt.Errorf("parse entrypoint: %w", err)
@@ -170,12 +275,137 @@ func cueArgs(resolved string) ([]string, error) {
 	return append(args, siblings...), nil
 }
 
+func repoRoot(path string) (string, error) {
+	dir := filepath.Dir(path)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "MODULE.bazel")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("could not find repo root for %s", path)
+		}
+		dir = parent
+	}
+}
+
+func validateHostSource(host hostDocument) error {
+	var missing []string
+	require := func(path, value string) {
+		if strings.TrimSpace(value) == "" {
+			missing = append(missing, path)
+		}
+	}
+	require("asset", host.Asset)
+	require("provider.name", host.Provider.Name)
+	require("provider.serverID", host.Provider.ServerID)
+	require("network.ipv4", host.Network.IPv4)
+	require("network.gateway", host.Network.Gateway)
+	require("network.interfaceMAC", host.Network.InterfaceMAC)
+	require("disks.installSerial", host.Disks.InstallSerial)
+	require("assignment.cluster", host.Assignment.Cluster)
+	require("assignment.environment", host.Assignment.Environment)
+	require("assignment.nodeHostname", host.Assignment.NodeHostname)
+	if len(missing) > 0 {
+		return fmt.Errorf("host missing required fields: %s", strings.Join(missing, ", "))
+	}
+	if host.Provider.Name != "latitude" {
+		return fmt.Errorf("provider.name: got %q, want latitude", host.Provider.Name)
+	}
+	return nil
+}
+
+func validateSourceLinks(host hostDocument, cluster clusterDocument, env environmentDocument) error {
+	if cluster.Name != host.Assignment.Cluster {
+		return fmt.Errorf("cluster name %q does not match host assignment %q", cluster.Name, host.Assignment.Cluster)
+	}
+	if env.Name != host.Assignment.Environment {
+		return fmt.Errorf("environment name %q does not match host assignment %q", env.Name, host.Assignment.Environment)
+	}
+	if env.Cluster != cluster.Name {
+		return fmt.Errorf("environment %q targets cluster %q, want %q", env.Name, env.Cluster, cluster.Name)
+	}
+	if !contains(cluster.Members, host.Asset) {
+		return fmt.Errorf("cluster %q members do not include host asset %q", cluster.Name, host.Asset)
+	}
+	if !contains(cluster.Environments, env.Name) {
+		return fmt.Errorf("cluster %q environments do not include %q", cluster.Name, env.Name)
+	}
+	return nil
+}
+
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func assemble(host hostDocument, cluster clusterDocument, env environmentDocument) Config {
+	publishingHost := env.Domains.Company
+	if publishingHost == "" {
+		publishingHost = cluster.Domain
+	}
+	advertisedCIDR := cluster.Network.AdvertisedCIDR
+	if advertisedCIDR == "" && host.Network.Gateway != "" && host.Network.PrefixLength > 0 {
+		advertisedCIDR = fmt.Sprintf("%s/%d", host.Network.Gateway, host.Network.PrefixLength)
+	}
+	return Config{
+		Cluster: ClusterSpec{
+			Name:            cluster.Name,
+			Endpoint:        fmt.Sprintf("https://%s:6443", host.Network.IPv4),
+			Domain:          cluster.Domain,
+			PodCIDR:         cluster.Network.PodCIDR,
+			ServiceCIDR:     cluster.Network.ServiceCIDR,
+			JoinCIDR:        cluster.Network.JoinCIDR,
+			AdvertisedCIDR:  advertisedCIDR,
+			APIServerDomain: cluster.APIServerDomain,
+		},
+		Node: NodeSpec{
+			Name:              host.Asset,
+			Address:           host.Network.IPv4,
+			Hostname:          host.Assignment.NodeHostname,
+			InterfaceMAC:      host.Network.InterfaceMAC,
+			InstallDiskSerial: host.Disks.InstallSerial,
+			Role:              host.Assignment.Role,
+		},
+		Talm: TalmSpec{
+			Preset:            "cozystack",
+			TalosVersion:      cluster.Talos.TalmVersion,
+			KubernetesVersion: cluster.Talos.KubernetesVersion,
+			InstallerImage:    cluster.Talos.InstallerImage,
+			Template:          "templates/controlplane.yaml",
+		},
+		Cozystack: CozystackSpec{
+			Version:            cluster.Cozystack.Version,
+			Variant:            cluster.Cozystack.Variant,
+			PublishingHost:     publishingHost,
+			APIServerEndpoint:  fmt.Sprintf("https://%s:443", cluster.APIServerDomain),
+			RemoveControlTaint: cluster.Cozystack.RemoveControlPlaneTaint,
+		},
+		Bootstrap: BootstrapSpec{
+			Destructive:        cluster.Bootstrap.Destructive && host.Assignment.DestructiveAllowed,
+			RequireMaintenance: cluster.Bootstrap.RequireMaintenance,
+			TargetState:        cluster.Bootstrap.TargetState,
+			Genesis: GenesisSpec{
+				AgeRecipients: cluster.Bootstrap.Genesis.AgeRecipients,
+			},
+		},
+		Hello: HelloSpec{Enabled: true, Namespace: "guardian-hello"},
+	}
+}
+
 func normalize(cfg *Config) {
 	if cfg.Talm.Preset == "" {
 		cfg.Talm.Preset = "cozystack"
 	}
 	if cfg.Talm.Template == "" {
 		cfg.Talm.Template = "templates/controlplane.yaml"
+	}
+	if cfg.Node.Role == "" {
+		cfg.Node.Role = "control-plane"
 	}
 	if cfg.Cozystack.Variant == "" {
 		cfg.Cozystack.Variant = "isp-full"

@@ -1,5 +1,7 @@
 package schemas
 
+#Identifier: =~"^[a-z0-9]+(-[a-z0-9]+)*$"
+
 #Environment: {
 	name:      #Identifier
 	cluster:   #Identifier

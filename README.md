@@ -15,7 +15,10 @@ is ignored by Bazel and is not part of the active command surface.
 
 ```text
 src/guardian/                  new Go CLI and host-bootstrap packages
-src/clusters/guardian-dev/     first Cozystack-native dev cluster config
+src/hosts/                     physical host facts and Talos inputs
+src/clusters/                  nonprod/prod cluster bootstrap intent
+src/environments/              Crossplane/Flux environment bags
+src/fleet/opentofu/            provider-owned fleet state
 src/schemas/                   CUE schemas for first-party config
 src/tools/                     pinned runfile tool archives
 src-old/                       archived pre-Cozystack implementation
@@ -30,11 +33,12 @@ Run from the repo root.
 bazel test //...
 
 bazel run //src/guardian/cmd/guardian -- \
-  up -f src/clusters/guardian-dev/up.cue --output json
+  up -f src/hosts/ash-bm-001/host.cue --output json
 ```
 
-Plan mode is the default. Destructive execution requires `--execute` and a CUE
-config that explicitly opts into maintenance-mode reimage:
+Plan mode is the default. Destructive execution requires `--execute`, a host
+assignment that allows destructive bootstrap, and a cluster config that
+explicitly opts into maintenance-mode reimage:
 
 ```cue
 bootstrap: {

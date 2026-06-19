@@ -214,6 +214,7 @@ func planCommands(cfg config.Config, layout *state.Layout, tools Tools) []toolru
 				"-t", cfg.Talm.Template,
 				"--talos-version", cfg.Talm.TalosVersion,
 				"--kubernetes-version", cfg.Talm.KubernetesVersion,
+				"--offline",
 				"-i",
 			},
 		},

@@ -88,7 +88,7 @@ Site configuration is split across pre-Kubernetes bootstrap facts and
 post-Kubernetes desired state. Crossplane can own only the second group because
 it runs after Kubernetes exists.
 
-`host.yaml` is consumed by `guardian up` before the API server exists. It
+`host.cue` is consumed by `guardian up` before the API server exists. It
 contains physical facts that must never be copied across boxes: MAC addresses,
 disk serials, gateways, hostnames, endpoints, and Talos patch lists.
 
@@ -103,7 +103,7 @@ The environment bag is post-bootstrap desired state for a site. It contains:
 
 `guardian up` owns the host/bootstrap sequence:
 
-1. Read `host.yaml`.
+1. Read `host.cue`.
 2. Generate/apply Talos machine config.
 3. Ensure the seed registry, OpenBao, Crossplane, provider-kubernetes, and
    pinned composition functions are installed.
@@ -221,9 +221,8 @@ Owns only Kubernetes delivery of OpenBao-backed secrets:
 
 It never owns secret values. OpenBao remains the source of truth.
 Source: `src/crossplane/packages/guardian-platform/secret-projection.yaml`;
-bootstrap-side Bao policy/value preparation:
-`src/guardian-cli/cmd/guardian/secret_projection.go` and
-`src/guardian-cli/cmd/guardian/bao_bootstrap.go`.
+bootstrap-side Bao policy/value preparation belongs in the active
+`src/guardian` host lifecycle CLI.
 
 ### `OCIRegistry`
 

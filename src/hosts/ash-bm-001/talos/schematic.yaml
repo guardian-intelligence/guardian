@@ -7,7 +7,7 @@
 #
 # The host has no DHCP, so static addressing is baked into the boot assets:
 # a disk-image-booted maintenance node would otherwise come up without
-# networking and be unreachable. The same facts live in host.yaml for the
+# networking and be unreachable. The same facts live in host.cue for the
 # machine config and the kexec command line.
 customization:
   extraKernelArgs:

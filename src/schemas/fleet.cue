@@ -1,5 +1,7 @@
 package schemas
 
+#Identifier: =~"^[a-z0-9]+(-[a-z0-9]+)*$"
+
 #FleetHost: {
 	asset:           #Identifier
 	provider:        "latitude"

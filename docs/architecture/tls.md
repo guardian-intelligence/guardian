@@ -145,7 +145,7 @@ ratchet.
 Local/schema checks:
 
 ```sh
-bazelisk test //src/guardian-cli/cmd/guardian:guardian_test
+bazelisk test //src/guardian/cmd/guardian:guardian_test
 bazelisk build //:build
 ```
 

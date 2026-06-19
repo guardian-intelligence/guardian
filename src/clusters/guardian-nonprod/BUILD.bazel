@@ -1,5 +1,5 @@
 filegroup(
     name = "config",
-    srcs = ["up.cue"],
+    srcs = ["cluster.cue"],
     visibility = ["//visibility:public"],
 )

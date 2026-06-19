@@ -58,7 +58,7 @@ secret authority. It does not own Talos/Talm genesis.
 ## Command
 
 ```sh
-guardian up -f <cluster.cue> [--execute] [--output text|json|yaml|toml] [--status auto|tui|plain|off]
+guardian up -f <host.cue> [--execute] [--output text|json|yaml|toml] [--status auto|tui|plain|off]
 ```
 
 Without `--execute`, the command prints the planned stages and commands. During
@@ -66,7 +66,8 @@ execution, the human status channel is stderr. `--status=auto` uses a compact
 Bubble Tea step tree when stderr is interactive and plain status lines
 otherwise. Structured `--output json|yaml|toml` stays on stdout.
 
-With `--execute`, mutation is still refused unless the CUE config declares:
+With `--execute`, mutation is still refused unless the host assignment permits
+destructive bootstrap and the cluster CUE config declares:
 
 ```cue
 bootstrap: {

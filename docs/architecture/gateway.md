@@ -61,12 +61,11 @@ Cilium firewall + gateway. Concretely:
 
 - **CRDs apply before Cilium, provably.** The CRDs ship as their own
   Talos inline manifest listed immediately above `cilium-inline.yaml` in
-  every `host.yaml`; list order is `talos.patches` order.
-  `src/guardian-cli/cmd/guardian/render_order_test.go` renders each host's
-  machine config with the pinned talosctl — the same `gen config` up.go
-  issues — and fails if `gateway-api-crds` does not precede `cilium`.
-  Nothing in Go enforces the order; the test is what a careless bootstrap edit
-  edit trips.
+  every `host.cue`; list order is `talos.patches` order.
+  Guardian render tests should render each host's machine config with the
+  pinned talosctl and fail if `gateway-api-crds` does not precede `cilium`.
+  Nothing in Go should silently reorder this; the test is what a careless
+  bootstrap edit trips.
 - **Inert by construction.** Talos applies inline manifests at bootstrap
   only; a config-only re-render is a no-op for a running site. So Phase 0
   carries zero rollout risk, and the rollout *is* the per-site conversion

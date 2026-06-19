@@ -2,21 +2,21 @@ package main
 
 import "testing"
 
-func TestParseUpArgsRequiresFileFlag(t *testing.T) {
+func TestParseUpArgsRequiresHostFileFlag(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		args []string
 	}{
-		{name: "short file flag", args: []string{"-f", "cluster.cue", "--output=json", "--status=plain", "--execute"}},
-		{name: "long file flag", args: []string{"--file=cluster.cue", "--output=json", "--status=plain", "--execute"}},
+		{name: "short file flag", args: []string{"-f", "src/hosts/ash-bm-001/host.cue", "--output=json", "--status=plain", "--execute"}},
+		{name: "long file flag", args: []string{"--file=src/hosts/ash-bm-001/host.cue", "--output=json", "--status=plain", "--execute"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			parsed, err := parseUpArgs(tc.args)
 			if err != nil {
 				t.Fatalf("parseUpArgs() error = %v", err)
 			}
-			if parsed.ConfigPath != "cluster.cue" {
-				t.Fatalf("config path = %q, want cluster.cue", parsed.ConfigPath)
+			if parsed.HostPath != "src/hosts/ash-bm-001/host.cue" {
+				t.Fatalf("host path = %q", parsed.HostPath)
 			}
 			if !parsed.Execute {
 				t.Fatalf("execute = false, want true")
@@ -31,13 +31,13 @@ func TestParseUpArgsRequiresFileFlag(t *testing.T) {
 	}
 }
 
-func TestParseUpArgsRejectsPositionalConfig(t *testing.T) {
-	if _, err := parseUpArgs([]string{"cluster.cue"}); err == nil {
+func TestParseUpArgsRejectsPositionalHost(t *testing.T) {
+	if _, err := parseUpArgs([]string{"src/hosts/ash-bm-001/host.cue"}); err == nil {
 		t.Fatalf("parseUpArgs() error = nil, want rejection")
 	}
 }
 
-func TestParseUpArgsRejectsMultipleConfigs(t *testing.T) {
+func TestParseUpArgsRejectsMultipleHosts(t *testing.T) {
 	if _, err := parseUpArgs([]string{"-f", "one.cue", "two.cue"}); err == nil {
 		t.Fatalf("parseUpArgs() error = nil, want rejection")
 	}
@@ -56,7 +56,7 @@ func TestParseUpArgsRejectsMissingFileFlagValue(t *testing.T) {
 }
 
 func TestParseUpArgsRejectsUnsupportedStatus(t *testing.T) {
-	if _, err := parseUpArgs([]string{"-f", "cluster.cue", "--status=verbose"}); err == nil {
+	if _, err := parseUpArgs([]string{"-f", "src/hosts/ash-bm-001/host.cue", "--status=verbose"}); err == nil {
 		t.Fatalf("parseUpArgs() error = nil, want rejection")
 	}
 }

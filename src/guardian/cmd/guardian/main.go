@@ -19,7 +19,7 @@ var errUsage = errors.New("usage")
 var errSilent = errors.New("silent")
 
 const usage = `usage:
-  guardian up -f <cluster.cue> [--execute] [--output text|json|yaml|toml] [--status auto|tui|plain|off]
+  guardian up -f <host.cue> [--execute] [--output text|json|yaml|toml] [--status auto|tui|plain|off]
 
 guardian owns only host come-up: Talos via Talm, Kubernetes bootstrap,
 Cozystack platform install, and a default hello-world handoff marker.`
@@ -59,7 +59,7 @@ func runUp(args []string) error {
 		}
 		return err
 	}
-	loaded, err := config.Load(parsed.ConfigPath)
+	loaded, err := config.Load(parsed.HostPath)
 	if err != nil {
 		res := up.Result{Outcome: "NeedsConfig", Reason: err.Error()}
 		_ = output.Write(os.Stdout, res, parsed.Format)
@@ -101,10 +101,10 @@ func runUp(args []string) error {
 var errHelp = errors.New("help")
 
 type upArgs struct {
-	ConfigPath string
-	Execute    bool
-	Format     string
-	Status     string
+	HostPath string
+	Execute  bool
+	Format   string
+	Status   string
 }
 
 func parseUpArgs(args []string) (upArgs, error) {
@@ -121,11 +121,11 @@ func parseUpArgs(args []string) (upArgs, error) {
 			if i >= len(args) {
 				return upArgs{}, fmt.Errorf("up: %w: %s requires a value", errUsage, arg)
 			}
-			if err := setConfigPath(&parsed, args[i]); err != nil {
+			if err := setHostPath(&parsed, args[i]); err != nil {
 				return upArgs{}, err
 			}
 		case strings.HasPrefix(arg, "--file="):
-			if err := setConfigPath(&parsed, strings.TrimPrefix(arg, "--file=")); err != nil {
+			if err := setHostPath(&parsed, strings.TrimPrefix(arg, "--file=")); err != nil {
 				return upArgs{}, err
 			}
 		case arg == "--output":
@@ -147,7 +147,7 @@ func parseUpArgs(args []string) (upArgs, error) {
 		case strings.HasPrefix(arg, "-"):
 			return upArgs{}, fmt.Errorf("up: %w: unknown flag %q", errUsage, arg)
 		default:
-			return upArgs{}, fmt.Errorf("up: %w: config path must be passed with -f or --file", errUsage)
+			return upArgs{}, fmt.Errorf("up: %w: host path must be passed with -f or --file", errUsage)
 		}
 	}
 	switch parsed.Format {
@@ -160,20 +160,20 @@ func parseUpArgs(args []string) (upArgs, error) {
 	default:
 		return upArgs{}, fmt.Errorf("up: %w: unsupported --status %q", errUsage, parsed.Status)
 	}
-	if parsed.ConfigPath == "" {
-		return upArgs{}, fmt.Errorf("up: %w: expected -f <cluster CUE config path>", errUsage)
+	if parsed.HostPath == "" {
+		return upArgs{}, fmt.Errorf("up: %w: expected -f <host CUE config path>", errUsage)
 	}
 	return parsed, nil
 }
 
-func setConfigPath(parsed *upArgs, path string) error {
+func setHostPath(parsed *upArgs, path string) error {
 	if path == "" {
-		return fmt.Errorf("up: %w: config path must not be empty", errUsage)
+		return fmt.Errorf("up: %w: host path must not be empty", errUsage)
 	}
-	if parsed.ConfigPath != "" {
-		return fmt.Errorf("up: %w: expected one cluster CUE config path", errUsage)
+	if parsed.HostPath != "" {
+		return fmt.Errorf("up: %w: expected one host CUE config path", errUsage)
 	}
-	parsed.ConfigPath = path
+	parsed.HostPath = path
 	return nil
 }
 
