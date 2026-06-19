@@ -6,6 +6,10 @@ go_library(
         "bao_bootstrap.go",
         "component_config.go",
         "config.go",
+        "create_cli.go",
+        "create_config.go",
+        "create_runner.go",
+        "create_types.go",
         "devtools.go",
         "directus_instance.go",
         "down.go",
@@ -38,6 +42,9 @@ go_library(
         "@com_github_google_go_containerregistry//pkg/v1/remote",
         "@in_gopkg_yaml_v3//:yaml_v3",
         "@io_bazel_rules_go//go/runfiles",
+        "@org_cuelang_go//cue/cuecontext",
+        "@org_cuelang_go//cue/load",
+        "@org_cuelang_go//cue/parser",
         "@org_golang_x_crypto//bcrypt",
     ],
 )
@@ -92,6 +99,7 @@ go_test(
     srcs = [
         "bao_bootstrap_test.go",
         "components_test.go",
+        "create_test.go",
         "directus_instance_test.go",
         "environment_capability_test.go",
         "host_config_test.go",

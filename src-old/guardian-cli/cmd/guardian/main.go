@@ -28,6 +28,9 @@ const (
 )
 
 const usage = `usage:
+  guardian create <config.cue> [--yes] [--output text|json] [--latitude-token-env NAME]
+                                     create a Cozystack cluster from a declared provider target;
+                                     refuses converged or unknown-live targets
   guardian up [--restore <file|url> --sha256 <hex>] [host.yaml]
                                      converge the node: machine config, etcd, seed registry, push artifacts, components;
                                      with --restore, force-restore OpenBao from the verified snapshot into a fresh vault
@@ -55,6 +58,8 @@ func main() {
 	}
 	var err error
 	switch os.Args[1] {
+	case "create":
+		err = runCreateCmd(os.Args[2:])
 	case "up":
 		err = runUp(os.Args[2:])
 	case "down":

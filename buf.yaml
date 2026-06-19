@@ -1,6 +1,5 @@
 version: v2
-modules:
-  - path: src/products/aisucks/api
+modules: []
 lint:
   use:
     - STANDARD
