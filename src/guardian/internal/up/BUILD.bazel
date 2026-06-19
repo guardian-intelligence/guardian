@@ -2,7 +2,10 @@ load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "up",
-    srcs = ["up.go"],
+    srcs = [
+        "status.go",
+        "up.go",
+    ],
     importpath = "github.com/guardian-intelligence/guardian/src/guardian/internal/up",
     visibility = ["//src/guardian:__subpackages__"],
     deps = [

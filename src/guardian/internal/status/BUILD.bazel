@@ -1,0 +1,20 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "status",
+    srcs = ["status.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/guardian/internal/status",
+    visibility = ["//src/guardian:__subpackages__"],
+    deps = [
+        "//src/guardian/internal/up",
+    ],
+)
+
+go_test(
+    name = "status_test",
+    srcs = ["status_test.go"],
+    embed = [":status"],
+    deps = [
+        "//src/guardian/internal/up",
+    ],
+)

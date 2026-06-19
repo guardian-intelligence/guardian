@@ -156,6 +156,38 @@ func TestRunExecuteUsesPinnedToolCommands(t *testing.T) {
 	}
 }
 
+func TestRunExecuteReportsStatusEvents(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	reporter := &recordingStatusReporter{}
+
+	result := Run(context.Background(), testLoaded(), testTools(), &fakeRunner{output: []byte("machine config")}, Options{
+		Execute: true,
+		Status:  reporter,
+		Now:     func() time.Time { return time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC) },
+		WaitForTalos: func(context.Context, string, time.Duration) error {
+			return nil
+		},
+	})
+	if result.Outcome != "Converged" {
+		t.Fatalf("outcome = %s, want Converged: %#v", result.Outcome, result)
+	}
+	got := reporter.String()
+	for _, want := range []string{
+		"open-state:done",
+		"render-manifests:running",
+		"render-manifests:done",
+		"talm-init:running",
+		"talm-init:done",
+		"helm-install-cozystack:running",
+		"helm-install-cozystack:done",
+		"kubectl-apply-hello-world:done",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("events = %s, missing %s", got, want)
+		}
+	}
+}
+
 func TestRunExecuteReusesExistingTalmSecretState(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	loaded := testLoaded()
@@ -475,4 +507,20 @@ func testTools() Tools {
 		Kubectl: "/runfiles/kubectl",
 		Helm:    "/runfiles/helm",
 	}
+}
+
+type recordingStatusReporter struct {
+	events []StatusEvent
+}
+
+func (r *recordingStatusReporter) Report(event StatusEvent) {
+	r.events = append(r.events, event)
+}
+
+func (r *recordingStatusReporter) String() string {
+	var parts []string
+	for _, event := range r.events {
+		parts = append(parts, event.Name+":"+string(event.State))
+	}
+	return strings.Join(parts, ",")
 }

@@ -34,6 +34,7 @@ type Options struct {
 	GenesisAgeRecipients []string
 	Latitude             LatitudeClient
 	Now                  func() time.Time
+	Status               StatusReporter
 	RegisterSchematic    func(context.Context, string) (string, error)
 	WaitForTalos         func(context.Context, string, time.Duration) error
 }
@@ -88,10 +89,21 @@ func Run(ctx context.Context, loaded *config.Loaded, tools Tools, runner toolrun
 	if opts.RegisterSchematic == nil {
 		opts.RegisterSchematic = registerSchematic
 	}
+	status := opts.Status
+	if status == nil {
+		status = NopStatusReporter{}
+	}
 	layout, err := state.Open(loaded.Config.Cluster.Name)
 	if err != nil {
 		return failed(loaded, nil, "NeedsConfig", err.Error())
 	}
+	status.Report(StatusEvent{
+		Name:        "open-state",
+		State:       StatusDone,
+		Title:       "Open state",
+		Description: "using the local per-cluster bootstrap state directory",
+		At:          opts.Now(),
+	})
 	stages := []string{"OpenState"}
 	if loaded.Config.Provider.Reinstall {
 		stages = append(stages,
@@ -146,101 +158,143 @@ func Run(ctx context.Context, loaded *config.Loaded, tools Tools, runner toolrun
 		result.Reason = err.Error()
 		return result
 	}
+	status.Report(StatusEvent{
+		Name:        "render-manifests",
+		State:       StatusRunning,
+		Title:       "Render manifests",
+		Description: "writing Talos, Cozystack, and handoff manifests into local state",
+		At:          opts.Now(),
+	})
 	if err := writeGeneratedManifests(loaded.Config, layout); err != nil {
+		status.Report(StatusEvent{
+			Name:        "render-manifests",
+			State:       StatusFailed,
+			Title:       "Render manifests",
+			Description: "writing Talos, Cozystack, and handoff manifests into local state",
+			Detail:      err.Error(),
+			At:          opts.Now(),
+		})
 		return failed(loaded, layout, "Retryable", err.Error())
 	}
+	status.Report(StatusEvent{
+		Name:        "render-manifests",
+		State:       StatusDone,
+		Title:       "Render manifests",
+		Description: "writing Talos, Cozystack, and handoff manifests into local state",
+		At:          opts.Now(),
+	})
 	var schematicID string
-	for _, cmd := range commands {
+	for i, cmd := range commands {
+		meta := DescribeStatus(cmd.Name, loaded.Config)
+		event := StatusEvent{
+			Name:        cmd.Name,
+			Index:       i + 1,
+			Total:       len(commands),
+			State:       StatusRunning,
+			Title:       meta.Title,
+			Description: meta.Description,
+			At:          opts.Now(),
+		}
+		status.Report(event)
+		skipped := false
+		failCommand := func(outcome, reason string) Result {
+			event.State = StatusFailed
+			event.Detail = reason
+			event.At = opts.Now()
+			status.Report(event)
+			return failed(loaded, layout, outcome, reason)
+		}
 		switch cmd.Name {
 		case "talos-factory-schematic":
 			path, err := providerSchematicPath(loaded)
 			if err != nil {
-				return failed(loaded, layout, "NeedsConfig", err.Error())
+				return failCommand("NeedsConfig", err.Error())
 			}
 			schematicID, err = opts.RegisterSchematic(ctx, path)
 			if err != nil {
-				return failed(loaded, layout, "Retryable", err.Error())
+				return failCommand("Retryable", err.Error())
 			}
 		case "latitude-reinstall-ipxe":
 			if schematicID == "" {
 				path, err := providerSchematicPath(loaded)
 				if err != nil {
-					return failed(loaded, layout, "NeedsConfig", err.Error())
+					return failCommand("NeedsConfig", err.Error())
 				}
 				schematicID, err = opts.RegisterSchematic(ctx, path)
 				if err != nil {
-					return failed(loaded, layout, "Retryable", err.Error())
+					return failCommand("Retryable", err.Error())
 				}
 			}
 			if err := reinstallLatitude(ctx, loaded.Config, opts.Latitude, talosPXEURL(schematicID, loaded.Config.Provider.TalosVersion)); err != nil {
-				return failed(loaded, layout, "Refused", err.Error())
+				return failCommand("Refused", err.Error())
 			}
 		case "wait-talos-maintenance":
 			out, err := waitCommandOutput(ctx, runner, cmd, 15*time.Minute, 5*time.Second)
 			if err != nil {
-				return failed(loaded, layout, "Retryable", err.Error())
+				return failCommand("Retryable", err.Error())
 			}
 			if err := requireInventoryValue("install disk serial", loaded.Config.Node.InstallDiskSerial, out); err != nil {
-				return failed(loaded, layout, "Refused", err.Error())
+				return failCommand("Refused", err.Error())
 			}
 		case "write-talm-values":
 			if err := writeTalmValues(loaded.Config, layout); err != nil {
-				return failed(loaded, layout, "Retryable", err.Error())
+				return failCommand("Retryable", err.Error())
 			}
 		case "write-guardian-host-patch":
 			if err := writeHostPatch(loaded.Config, layout); err != nil {
-				return failed(loaded, layout, "Retryable", err.Error())
+				return failCommand("Retryable", err.Error())
 			}
 		case "talos-maintenance-disks":
 			out, err := runner.Output(ctx, cmd)
 			if err != nil {
-				return failed(loaded, layout, "Retryable", err.Error())
+				return failCommand("Retryable", err.Error())
 			}
 			if err := requireInventoryValue("install disk serial", loaded.Config.Node.InstallDiskSerial, out); err != nil {
-				return failed(loaded, layout, "Refused", err.Error())
+				return failCommand("Refused", err.Error())
 			}
 		case "talos-maintenance-links":
 			out, err := runner.Output(ctx, cmd)
 			if err != nil {
-				return failed(loaded, layout, "Retryable", err.Error())
+				return failCommand("Retryable", err.Error())
 			}
 			if err := requireInventoryValue("interface MAC", loaded.Config.Node.InterfaceMAC, out); err != nil {
-				return failed(loaded, layout, "Refused", err.Error())
+				return failCommand("Refused", err.Error())
 			}
 		case "talm-template":
 			out, err := runner.Output(ctx, cmd)
 			if err != nil {
-				return failed(loaded, layout, "Retryable", err.Error())
+				return failCommand("Retryable", err.Error())
 			}
 			if err := state.WriteFile(layout.NodeConfig, out); err != nil {
-				return failed(loaded, layout, "Retryable", err.Error())
+				return failCommand("Retryable", err.Error())
 			}
 		case "talm-init":
 			initialized, err := talmSecretStateInitialized(layout)
 			if err != nil {
-				return failed(loaded, layout, "Refused", err.Error())
+				return failCommand("Refused", err.Error())
 			}
 			if initialized {
+				skipped = true
 				break
 			}
 			if err := runner.Run(ctx, cmd); err != nil {
-				return failed(loaded, layout, "Retryable", err.Error())
+				return failCommand("Retryable", err.Error())
 			}
 		case "wait-talos-api":
 			if _, err := waitCommandOutput(ctx, runner, cmd, 10*time.Minute, 5*time.Second); err != nil {
-				return failed(loaded, layout, "Retryable", err.Error())
+				return failCommand("Retryable", err.Error())
 			}
 		case "kubectl-wait-kubernetes-api":
 			if _, err := waitCommandOutput(ctx, runner, cmd, 10*time.Minute, 5*time.Second); err != nil {
-				return failed(loaded, layout, "Retryable", err.Error())
+				return failCommand("Retryable", err.Error())
 			}
 		case "kubectl-wait-node-ready":
 			if _, err := waitCommandOutput(ctx, runner, cmd, 10*time.Minute, 5*time.Second); err != nil {
-				return failed(loaded, layout, "Retryable", err.Error())
+				return failCommand("Retryable", err.Error())
 			}
 		case "kubectl-remove-control-plane-taint":
 			if _, err := runner.Output(ctx, cmd); err != nil && !missingControlPlaneTaint(err) {
-				return failed(loaded, layout, "Retryable", err.Error())
+				return failCommand("Retryable", err.Error())
 			}
 		case "write-genesis-bundle":
 			if _, err := genesis.WriteEncrypted(genesis.Bundle{
@@ -252,17 +306,17 @@ func Run(ctx context.Context, loaded *config.Loaded, tools Tools, runner toolrun
 				Recipients:   recipients,
 				Files:        genesisFiles(loaded.Config),
 			}); err != nil {
-				return failed(loaded, layout, "Retryable", err.Error())
+				return failCommand("Retryable", err.Error())
 			}
 		default:
 			if cmd.Name == "talm-bootstrap" {
 				if err := waitCommandRun(ctx, runner, cmd, 10*time.Minute, 10*time.Second); err != nil {
-					return failed(loaded, layout, "Retryable", err.Error())
+					return failCommand("Retryable", err.Error())
 				}
 				break
 			}
 			if err := runner.Run(ctx, cmd); err != nil {
-				return failed(loaded, layout, "Retryable", err.Error())
+				return failCommand("Retryable", err.Error())
 			}
 		}
 		if err := state.WriteOperation(layout.Operation, state.Operation{
@@ -271,8 +325,16 @@ func Run(ctx context.Context, loaded *config.Loaded, tools Tools, runner toolrun
 			Stage:        cmd.Name,
 			UpdatedAt:    opts.Now(),
 		}); err != nil {
-			return failed(loaded, layout, "Retryable", err.Error())
+			return failCommand("Retryable", err.Error())
 		}
+		if skipped {
+			event.State = StatusSkipped
+			event.Detail = "existing local Talos secret state found"
+		} else {
+			event.State = StatusDone
+		}
+		event.At = opts.Now()
+		status.Report(event)
 	}
 	result.Outcome = "Converged"
 	result.Commands = nil

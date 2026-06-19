@@ -8,6 +8,7 @@ go_library(
     deps = [
         "//src/guardian/internal/config",
         "//src/guardian/internal/output",
+        "//src/guardian/internal/status",
         "//src/guardian/internal/toolrunner",
         "//src/guardian/internal/up",
     ],

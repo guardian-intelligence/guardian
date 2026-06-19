@@ -9,6 +9,7 @@ import (
 
 	"github.com/guardian-intelligence/guardian/src/guardian/internal/config"
 	"github.com/guardian-intelligence/guardian/src/guardian/internal/output"
+	statusview "github.com/guardian-intelligence/guardian/src/guardian/internal/status"
 	"github.com/guardian-intelligence/guardian/src/guardian/internal/toolrunner"
 	"github.com/guardian-intelligence/guardian/src/guardian/internal/up"
 )
@@ -16,7 +17,7 @@ import (
 var errUsage = errors.New("usage")
 
 const usage = `usage:
-  guardian up <cluster.cue> [--execute] [--genesis-age-recipient age1...] [--output text|json|yaml|toml]
+  guardian up <cluster.cue> [--execute] [--genesis-age-recipient age1...] [--output text|json|yaml|toml] [--status auto|tui|plain|off]
 
 guardian owns only host come-up: Talos via Talm, Kubernetes bootstrap,
 Cozystack platform install, and a default hello-world handoff marker.`
@@ -63,9 +64,15 @@ func runUp(args []string) error {
 	if err != nil {
 		return err
 	}
+	statusReporter, closeStatus, err := newStatusReporter(parsed, loaded.Config.Cluster.Name)
+	if err != nil {
+		return err
+	}
+	defer closeStatus()
 	res := up.Run(context.Background(), loaded, tools, toolrunner.RealRunner{}, up.Options{
 		Execute:              parsed.Execute,
 		GenesisAgeRecipients: parsed.GenesisAgeRecipients,
+		Status:               statusReporter,
 	})
 	if err := output.Write(os.Stdout, res, parsed.Format); err != nil {
 		return err
@@ -82,11 +89,12 @@ type upArgs struct {
 	ConfigPath           string
 	Execute              bool
 	Format               string
+	Status               string
 	GenesisAgeRecipients []string
 }
 
 func parseUpArgs(args []string) (upArgs, error) {
-	parsed := upArgs{Format: "text"}
+	parsed := upArgs{Format: "text", Status: "auto"}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
@@ -110,6 +118,14 @@ func parseUpArgs(args []string) (upArgs, error) {
 			parsed.Format = args[i]
 		case strings.HasPrefix(arg, "--output="):
 			parsed.Format = strings.TrimPrefix(arg, "--output=")
+		case arg == "--status":
+			i++
+			if i >= len(args) {
+				return upArgs{}, fmt.Errorf("up: %w: --status requires a value", errUsage)
+			}
+			parsed.Status = args[i]
+		case strings.HasPrefix(arg, "--status="):
+			parsed.Status = strings.TrimPrefix(arg, "--status=")
 		case strings.HasPrefix(arg, "-"):
 			return upArgs{}, fmt.Errorf("up: %w: unknown flag %q", errUsage, arg)
 		default:
@@ -127,10 +143,39 @@ func parseUpArgs(args []string) (upArgs, error) {
 	default:
 		return upArgs{}, fmt.Errorf("up: %w: unsupported --output %q", errUsage, parsed.Format)
 	}
+	switch parsed.Status {
+	case "auto", "tui", "plain", "off":
+	default:
+		return upArgs{}, fmt.Errorf("up: %w: unsupported --status %q", errUsage, parsed.Status)
+	}
 	if parsed.ConfigPath == "" {
 		return upArgs{}, fmt.Errorf("up: %w: expected one cluster CUE config path", errUsage)
 	}
 	return parsed, nil
+}
+
+func newStatusReporter(parsed upArgs, clusterName string) (up.StatusReporter, func() error, error) {
+	if !parsed.Execute || parsed.Status == "off" {
+		return nil, func() error { return nil }, nil
+	}
+	mode := parsed.Status
+	if mode == "auto" {
+		if isTerminal(os.Stderr) {
+			mode = "tui"
+		} else {
+			mode = "plain"
+		}
+	}
+	renderer := statusview.New(os.Stderr, statusview.Options{
+		Mode:        statusview.Mode(mode),
+		ClusterName: clusterName,
+	})
+	return renderer, renderer.Close, nil
+}
+
+func isTerminal(file *os.File) bool {
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func splitEnvList(raw string) []string {
