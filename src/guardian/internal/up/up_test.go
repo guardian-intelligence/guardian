@@ -64,7 +64,7 @@ func TestResultTextOmitsCommandGraph(t *testing.T) {
 	}
 	for _, want := range []string{
 		"outcome\tPlanned",
-		"source\tsrc/hosts/ash-bm-004/host.cue",
+		"source\tsrc/hosts/ash-bm-004/host.json",
 		"target\t206.223.228.87",
 		"will\n",
 	} {
@@ -78,7 +78,7 @@ func TestResultTextOmitsUnsetFields(t *testing.T) {
 	result := Result{
 		Outcome:    "NeedsConfig",
 		Code:       "config.load",
-		SourcePath: "src/hosts/ash-bm-001/host.cue",
+		SourcePath: "src/hosts/ash-bm-001/host.json",
 	}
 
 	var buf bytes.Buffer
@@ -94,7 +94,7 @@ func TestResultTextOmitsUnsetFields(t *testing.T) {
 	for _, want := range []string{
 		"outcome\tNeedsConfig",
 		"code\tconfig.load",
-		"source\tsrc/hosts/ash-bm-001/host.cue",
+		"source\tsrc/hosts/ash-bm-001/host.json",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("text output missing %q:\n%s", want, text)
@@ -627,7 +627,7 @@ func testLoaded() *config.Loaded {
 			},
 		},
 	}
-	return &config.Loaded{Path: "src/hosts/ash-bm-004/host.cue", Config: cfg, Digest: "digest"}
+	return &config.Loaded{Path: "src/hosts/ash-bm-004/host.json", Config: cfg, Digest: "digest"}
 }
 
 func testTools() Tools {

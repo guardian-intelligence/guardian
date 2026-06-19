@@ -20,7 +20,7 @@ var errUsage = errors.New("usage")
 var errSilent = errors.New("silent")
 
 const usage = `usage:
-  guardian up -f <host.cue> [--execute] [--output text|json|yaml|toml] [--status auto|tui|plain|off]
+  guardian up -f <host.json> [--execute] [--output text|json|yaml|toml] [--status auto|tui|plain|off]
 
 guardian owns only host come-up: Talos via Talm, Kubernetes bootstrap,
 Cozystack installer handoff/status, and genesis recovery material.`
@@ -176,7 +176,7 @@ func parseUpArgs(args []string) (upArgs, error) {
 		return upArgs{}, fmt.Errorf("up: %w: unsupported --status %q", errUsage, parsed.Status)
 	}
 	if parsed.HostPath == "" {
-		return upArgs{}, fmt.Errorf("up: %w: expected -f <host CUE config path>", errUsage)
+		return upArgs{}, fmt.Errorf("up: %w: expected -f <host JSON config path>", errUsage)
 	}
 	return parsed, nil
 }
@@ -186,7 +186,7 @@ func setHostPath(parsed *upArgs, path string) error {
 		return fmt.Errorf("up: %w: host path must not be empty", errUsage)
 	}
 	if parsed.HostPath != "" {
-		return fmt.Errorf("up: %w: expected one host CUE config path", errUsage)
+		return fmt.Errorf("up: %w: expected one host JSON config path", errUsage)
 	}
 	parsed.HostPath = path
 	return nil

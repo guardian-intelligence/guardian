@@ -12,15 +12,15 @@ func TestParseUpArgsRequiresHostFileFlag(t *testing.T) {
 		name string
 		args []string
 	}{
-		{name: "short file flag", args: []string{"-f", "src/hosts/ash-bm-004/host.cue", "--output=json", "--status=plain", "--execute"}},
-		{name: "long file flag", args: []string{"--file=src/hosts/ash-bm-004/host.cue", "--output=json", "--status=plain", "--execute"}},
+		{name: "short file flag", args: []string{"-f", "src/hosts/ash-bm-004/host.json", "--output=json", "--status=plain", "--execute"}},
+		{name: "long file flag", args: []string{"--file=src/hosts/ash-bm-004/host.json", "--output=json", "--status=plain", "--execute"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			parsed, err := parseUpArgs(tc.args)
 			if err != nil {
 				t.Fatalf("parseUpArgs() error = %v", err)
 			}
-			if parsed.HostPath != "src/hosts/ash-bm-004/host.cue" {
+			if parsed.HostPath != "src/hosts/ash-bm-004/host.json" {
 				t.Fatalf("host path = %q", parsed.HostPath)
 			}
 			if !parsed.Execute {
@@ -37,16 +37,16 @@ func TestParseUpArgsRequiresHostFileFlag(t *testing.T) {
 }
 
 func TestParseUpArgsRejectsPositionalHost(t *testing.T) {
-	if _, err := parseUpArgs([]string{"src/hosts/ash-bm-004/host.cue"}); err == nil {
+	if _, err := parseUpArgs([]string{"src/hosts/ash-bm-004/host.json"}); err == nil {
 		t.Fatalf("parseUpArgs() error = nil, want rejection")
 	}
 }
 
 func TestParseUpArgsRejectsMultipleHosts(t *testing.T) {
-	if _, err := parseUpArgs([]string{"-f", "one.cue", "two.cue"}); err == nil {
+	if _, err := parseUpArgs([]string{"-f", "one.json", "two.json"}); err == nil {
 		t.Fatalf("parseUpArgs() error = nil, want rejection")
 	}
-	if _, err := parseUpArgs([]string{"-f", "one.cue", "--file", "two.cue"}); err == nil {
+	if _, err := parseUpArgs([]string{"-f", "one.json", "--file", "two.json"}); err == nil {
 		t.Fatalf("parseUpArgs() error = nil, want rejection")
 	}
 }
@@ -61,14 +61,14 @@ func TestParseUpArgsRejectsMissingFileFlagValue(t *testing.T) {
 }
 
 func TestParseUpArgsRejectsUnsupportedStatus(t *testing.T) {
-	if _, err := parseUpArgs([]string{"-f", "src/hosts/ash-bm-004/host.cue", "--status=verbose"}); err == nil {
+	if _, err := parseUpArgs([]string{"-f", "src/hosts/ash-bm-004/host.json", "--status=verbose"}); err == nil {
 		t.Fatalf("parseUpArgs() error = nil, want rejection")
 	}
 }
 
 func TestAutoStatusIsOffForStructuredOutput(t *testing.T) {
 	reporter, closeStatus, err := newStatusReporter(upArgs{
-		HostPath: "src/hosts/ash-bm-004/host.cue",
+		HostPath: "src/hosts/ash-bm-004/host.json",
 		Execute:  true,
 		Format:   "toml",
 		Status:   "auto",
@@ -86,7 +86,7 @@ func TestConfigLoadCodeRecognizesMissingPath(t *testing.T) {
 	if got := configLoadCode(fmt.Errorf("load host: %w", fs.ErrNotExist)); got != "config.path.notFound" {
 		t.Fatalf("configLoadCode() = %q, want config.path.notFound", got)
 	}
-	if got := configLoadCode(errors.New("invalid cue")); got != "config.load" {
+	if got := configLoadCode(errors.New("invalid json")); got != "config.load" {
 		t.Fatalf("configLoadCode() = %q, want config.load", got)
 	}
 }

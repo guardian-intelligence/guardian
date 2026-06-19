@@ -10,12 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
-
-	"cuelang.org/go/cue/cuecontext"
-	"cuelang.org/go/cue/load"
-	"cuelang.org/go/cue/parser"
 )
 
 type Config struct {
@@ -167,7 +162,7 @@ func Load(hostPath string) (*Loaded, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve host path: %w", err)
 	}
-	host, err := loadCUEFile[hostDocument](resolved)
+	host, err := loadJSONFile[hostDocument](resolved)
 	if err != nil {
 		return nil, fmt.Errorf("load host %s: %w", hostPath, err)
 	}
@@ -178,13 +173,13 @@ func Load(hostPath string) (*Loaded, error) {
 	if err := validateHostSource(host); err != nil {
 		return nil, err
 	}
-	clusterPath := filepath.Join(root, "src", "clusters", host.Assignment.Cluster, "cluster.cue")
-	cluster, err := loadCUEFile[clusterDocument](clusterPath)
+	clusterPath := filepath.Join(root, "src", "clusters", host.Assignment.Cluster, "cluster.json")
+	cluster, err := loadJSONFile[clusterDocument](clusterPath)
 	if err != nil {
 		return nil, fmt.Errorf("load cluster %s: %w", host.Assignment.Cluster, err)
 	}
-	envPath := filepath.Join(root, "src", "environments", host.Assignment.Environment, "environment.cue")
-	env, err := loadCUEFile[environmentDocument](envPath)
+	envPath := filepath.Join(root, "src", "environments", host.Assignment.Environment, "environment.json")
+	env, err := loadJSONFile[environmentDocument](envPath)
 	if err != nil {
 		return nil, fmt.Errorf("load environment %s: %w", host.Assignment.Environment, err)
 	}
@@ -203,75 +198,26 @@ func Load(hostPath string) (*Loaded, error) {
 	return &Loaded{Path: resolved, Config: cfg, Canonical: canonical, Digest: digest}, nil
 }
 
-func loadCUEFile[T any](resolved string) (T, error) {
+func loadJSONFile[T any](resolved string) (T, error) {
 	var out T
 	info, err := os.Stat(resolved)
 	if err != nil {
 		return out, err
 	}
 	if info.IsDir() {
-		return out, fmt.Errorf("entrypoint must be a CUE file, got directory")
+		return out, fmt.Errorf("entrypoint must be a JSON file, got directory")
 	}
-	if filepath.Ext(resolved) != ".cue" {
-		return out, fmt.Errorf("entrypoint must be a .cue file")
+	if filepath.Ext(resolved) != ".json" {
+		return out, fmt.Errorf("entrypoint must be a .json file")
 	}
-	args, err := cueArgs(resolved)
+	raw, err := os.ReadFile(resolved)
 	if err != nil {
 		return out, err
 	}
-	ctx := cuecontext.New()
-	instances := load.Instances(args, &load.Config{Dir: filepath.Dir(resolved)})
-	if len(instances) != 1 {
-		return out, fmt.Errorf("got %d CUE instances, want 1", len(instances))
-	}
-	if err := instances[0].Err; err != nil {
-		return out, err
-	}
-	value := ctx.BuildInstance(instances[0])
-	if err := value.Err(); err != nil {
-		return out, err
-	}
-	if err := value.Decode(&out); err != nil {
-		return out, err
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return out, fmt.Errorf("parse JSON: %w", err)
 	}
 	return out, nil
-}
-
-func cueArgs(resolved string) ([]string, error) {
-	entrypoint, err := parser.ParseFile(resolved, nil)
-	if err != nil {
-		return nil, fmt.Errorf("parse entrypoint: %w", err)
-	}
-	pkg := entrypoint.PackageName()
-	args := []string{filepath.Base(resolved)}
-	if pkg == "" {
-		return args, nil
-	}
-	entries, err := os.ReadDir(filepath.Dir(resolved))
-	if err != nil {
-		return nil, err
-	}
-	var siblings []string
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() ||
-			name == filepath.Base(resolved) ||
-			filepath.Ext(name) != ".cue" ||
-			strings.HasPrefix(name, ".") ||
-			strings.HasPrefix(name, "_") ||
-			strings.HasSuffix(name, "_test.cue") {
-			continue
-		}
-		file, err := parser.ParseFile(filepath.Join(filepath.Dir(resolved), name), nil)
-		if err != nil {
-			return nil, fmt.Errorf("parse sibling %s: %w", name, err)
-		}
-		if file.PackageName() == pkg {
-			siblings = append(siblings, name)
-		}
-	}
-	sort.Strings(siblings)
-	return append(args, siblings...), nil
 }
 
 func repoRoot(path string) (string, error) {

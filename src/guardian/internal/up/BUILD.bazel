@@ -25,6 +25,7 @@ go_test(
     embed = [":up"],
     deps = [
         "//src/guardian/internal/config",
+        "//src/guardian/internal/state",
         "//src/guardian/internal/toolrunner",
         "@io_filippo_age//:age",
     ],

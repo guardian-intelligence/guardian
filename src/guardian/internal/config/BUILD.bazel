@@ -5,11 +5,6 @@ go_library(
     srcs = ["config.go"],
     importpath = "github.com/guardian-intelligence/guardian/src/guardian/internal/config",
     visibility = ["//src/guardian:__subpackages__"],
-    deps = [
-        "@org_cuelang_go//cue/cuecontext",
-        "@org_cuelang_go//cue/load",
-        "@org_cuelang_go//cue/parser",
-    ],
 )
 
 go_test(

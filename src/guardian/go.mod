@@ -3,7 +3,6 @@ module github.com/guardian-intelligence/guardian/src/guardian
 go 1.26.4
 
 require (
-	cuelang.org/go v0.16.1
 	filippo.io/age v1.3.1
 	github.com/BurntSushi/toml v1.5.0
 	github.com/bazelbuild/rules_go v0.61.1
@@ -14,7 +13,6 @@ require (
 )
 
 require (
-	cuelabs.dev/go/oci/ociregistry v0.0.0-20251212221603-3adeb8663819 // indirect
 	filippo.io/hpke v0.4.0 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/charmbracelet/colorprofile v0.2.3-0.20250311203215-f60798e515dc // indirect

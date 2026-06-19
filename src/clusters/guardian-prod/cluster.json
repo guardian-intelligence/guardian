@@ -1,0 +1,37 @@
+{
+  "name": "guardian-prod",
+  "domain": "guardianintelligence.org",
+  "apiServerDomain": "api.guardianintelligence.org",
+  "members": [],
+  "environments": [
+    "prod"
+  ],
+  "network": {
+    "podCIDR": "10.244.0.0/16",
+    "serviceCIDR": "10.96.0.0/16",
+    "joinCIDR": "100.64.0.0/16"
+  },
+  "talos": {
+    "version": "v1.13.4",
+    "talmVersion": "v1.13",
+    "kubernetesVersion": "1.36.1",
+    "installerImage": "ghcr.io/cozystack/cozystack/talos:v1.13.0"
+  },
+  "cozystack": {
+    "version": "1.4.1",
+    "platformVariant": "isp-full",
+    "publishingHost": "",
+    "exposedServices": [],
+    "removeControlPlaneTaint": false
+  },
+  "bootstrap": {
+    "destructive": false,
+    "requireMaintenance": true,
+    "targetState": "stock-ubuntu",
+    "genesis": {
+      "ageRecipients": [
+        "age1e95feklupyh40qa24vly650vg0qmljcsfhqd66fwhwa82j3uefnsxed3s8"
+      ]
+    }
+  }
+}

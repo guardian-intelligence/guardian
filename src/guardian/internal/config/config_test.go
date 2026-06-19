@@ -10,7 +10,7 @@ import (
 func TestLoadHostConfigWithClusterAndEnvironment(t *testing.T) {
 	root := writeTestRepo(t)
 
-	loaded, err := Load(filepath.Join(root, "src", "hosts", "ash-bm-001", "host.cue"))
+	loaded, err := Load(filepath.Join(root, "src", "hosts", "ash-bm-001", "host.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,17 +42,17 @@ func TestLoadHostConfigWithClusterAndEnvironment(t *testing.T) {
 
 func TestLoadRejectsHostNotInClusterMembers(t *testing.T) {
 	root := writeTestRepo(t)
-	clusterPath := filepath.Join(root, "src", "clusters", "guardian-nonprod", "cluster.cue")
+	clusterPath := filepath.Join(root, "src", "clusters", "guardian-nonprod", "cluster.json")
 	raw, err := os.ReadFile(clusterPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw = []byte(strings.Replace(string(raw), `members: ["ash-bm-001"]`, `members: ["ash-bm-002"]`, 1))
+	raw = []byte(strings.Replace(string(raw), `"members": ["ash-bm-001"]`, `"members": ["ash-bm-002"]`, 1))
 	if err := os.WriteFile(clusterPath, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = Load(filepath.Join(root, "src", "hosts", "ash-bm-001", "host.cue"))
+	_, err = Load(filepath.Join(root, "src", "hosts", "ash-bm-001", "host.json"))
 	if err == nil {
 		t.Fatal("Load succeeded, want member validation error")
 	}
@@ -64,7 +64,7 @@ func TestLoadRejectsHostNotInClusterMembers(t *testing.T) {
 func TestLoadRequiresHostEntrypoint(t *testing.T) {
 	root := writeTestRepo(t)
 
-	_, err := Load(filepath.Join(root, "src", "clusters", "guardian-nonprod", "cluster.cue"))
+	_, err := Load(filepath.Join(root, "src", "clusters", "guardian-nonprod", "cluster.json"))
 	if err == nil {
 		t.Fatal("Load succeeded, want host entrypoint error")
 	}
@@ -77,72 +77,80 @@ func writeTestRepo(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	writeFile(t, root, "MODULE.bazel", "module(name = \"test\")\n")
-	writeFile(t, root, "src/hosts/ash-bm-001/host.cue", `package host
-
-asset: "ash-bm-001"
-provider: {
-	name: "latitude"
-	serverID: "sv_vAPXaMxKM5epz"
-	projectID: "proj_ZWr75Zdbm0A91"
-	site: "ASH"
-	plan: "f4-metal-small"
-}
-network: {
-	ipv4: "206.223.228.101"
-	gateway: "206.223.228.100"
-	prefixLength: 31
-	interfaceName: "eno1"
-	interfaceMAC: "90:5a:08:33:ba:9f"
-}
-disks: installSerial: "362510FCEFB8"
-assignment: {
-	cluster: "guardian-nonprod"
-	environment: "dev"
-	nodeHostname: "gi-ash-bm-001"
-	role: "control-plane"
-	destructiveAllowed: true
-}
-`)
-	writeFile(t, root, "src/clusters/guardian-nonprod/cluster.cue", `package cluster
-
-name: "guardian-nonprod"
-domain: "guardianintelligence.org"
-apiServerDomain: "api.nonprod.guardianintelligence.org"
-members: ["ash-bm-001"]
-environments: ["dev", "gamma"]
-network: {
-	podCIDR: "10.244.0.0/16"
-	serviceCIDR: "10.96.0.0/16"
-	joinCIDR: "100.64.0.0/16"
-	advertisedCIDR: "206.223.228.100/31"
-}
-talos: {
-	version: "v1.13.4"
-	talmVersion: "v1.13"
-	kubernetesVersion: "1.36.1"
-	installerImage: "ghcr.io/cozystack/cozystack/talos:v1.13.0"
-}
-cozystack: {
-	version: "1.4.1"
-	platformVariant: "isp-full"
-	publishingHost: ""
-	exposedServices: []
-	removeControlPlaneTaint: true
-}
-bootstrap: {
-	destructive: true
-	requireMaintenance: true
-	targetState: "stock-ubuntu"
-	genesis: ageRecipients: ["age1e95feklupyh40qa24vly650vg0qmljcsfhqd66fwhwa82j3uefnsxed3s8"]
+	writeFile(t, root, "src/hosts/ash-bm-001/host.json", `{
+  "asset": "ash-bm-001",
+  "provider": {
+    "name": "latitude",
+    "serverID": "sv_vAPXaMxKM5epz",
+    "projectID": "proj_ZWr75Zdbm0A91",
+    "site": "ASH",
+    "plan": "f4-metal-small"
+  },
+  "network": {
+    "ipv4": "206.223.228.101",
+    "gateway": "206.223.228.100",
+    "prefixLength": 31,
+    "interfaceName": "eno1",
+    "interfaceMAC": "90:5a:08:33:ba:9f"
+  },
+  "disks": {
+    "installSerial": "362510FCEFB8"
+  },
+  "assignment": {
+    "cluster": "guardian-nonprod",
+    "environment": "dev",
+    "nodeHostname": "gi-ash-bm-001",
+    "role": "control-plane",
+    "destructiveAllowed": true
+  }
 }
 `)
-	writeFile(t, root, "src/environments/dev/environment.cue", `package environment
-
-name: "dev"
-cluster: "guardian-nonprod"
-namespace: "guardian-dev"
-crossplane: environmentConfig: "guardian-dev"
-domains: company: "dev.guardianintelligence.org"
+	writeFile(t, root, "src/clusters/guardian-nonprod/cluster.json", `{
+  "name": "guardian-nonprod",
+  "domain": "guardianintelligence.org",
+  "apiServerDomain": "api.nonprod.guardianintelligence.org",
+  "members": ["ash-bm-001"],
+  "environments": ["dev", "gamma"],
+  "network": {
+    "podCIDR": "10.244.0.0/16",
+    "serviceCIDR": "10.96.0.0/16",
+    "joinCIDR": "100.64.0.0/16",
+    "advertisedCIDR": "206.223.228.100/31"
+  },
+  "talos": {
+    "version": "v1.13.4",
+    "talmVersion": "v1.13",
+    "kubernetesVersion": "1.36.1",
+    "installerImage": "ghcr.io/cozystack/cozystack/talos:v1.13.0"
+  },
+  "cozystack": {
+    "version": "1.4.1",
+    "platformVariant": "isp-full",
+    "publishingHost": "",
+    "exposedServices": [],
+    "removeControlPlaneTaint": true
+  },
+  "bootstrap": {
+    "destructive": true,
+    "requireMaintenance": true,
+    "targetState": "stock-ubuntu",
+    "genesis": {
+      "ageRecipients": ["age1e95feklupyh40qa24vly650vg0qmljcsfhqd66fwhwa82j3uefnsxed3s8"]
+    }
+  }
+}
+`)
+	writeFile(t, root, "src/environments/dev/environment.json", `{
+  "name": "dev",
+  "cluster": "guardian-nonprod",
+  "namespace": "guardian-dev",
+  "crossplane": {
+    "environmentConfig": "guardian-dev"
+  },
+  "domains": {
+    "company": "dev.guardianintelligence.org"
+  }
+}
 `)
 	return root
 }

@@ -26,7 +26,7 @@ Important context:
 - All dependencies version/commit pinned. Nothing during runtime, dev time, test time, or build time should require external non-version-pinned tooling, or shell out to binaries outside this repo or its build artifacts.
 - The `guardian` CLI is not a dumping ground for generic functionality. Its sole purpose is to manage host come-up.
 - Dev tools: `aspect`. Run `aspect tidy` to format the codebase.
-- 1p configuration schemas in CUE, always. Read/Render-out YAML/JSON/TOML. Output must support all 3.
+- 1p configuration in JSON/JSONL/JSON-ND where appropriate. Don't use CUE.
 - API IDL in Protobuf/Connect. Define IAM, audit, risk, request-size, rate limit, and idempotency metadata as explicit operation policy on the RPC contract.
 - Protobuf governance uses the repo-pinned Buf toolchain through Bazel: linting, formatting, and breaking-change checks run from `rules_buf`; code generation uses local pinned generators only. Do not use Buf remote plugins in build/test/release paths.
 - All operations must run unattended, no human-in-the-loop.

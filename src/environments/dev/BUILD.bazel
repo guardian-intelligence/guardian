@@ -1,5 +1,5 @@
 filegroup(
     name = "config",
-    srcs = ["environment.cue"],
+    srcs = ["environment.json"],
     visibility = ["//visibility:public"],
 )
