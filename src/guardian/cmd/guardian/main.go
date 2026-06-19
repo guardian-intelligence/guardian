@@ -15,6 +15,7 @@ import (
 )
 
 var errUsage = errors.New("usage")
+var errSilent = errors.New("silent")
 
 const usage = `usage:
   guardian up <cluster.cue> [--execute] [--genesis-age-recipient age1...] [--output text|json|yaml|toml] [--status auto|tui|plain|off]
@@ -36,6 +37,9 @@ func main() {
 		os.Exit(2)
 	}
 	if err != nil {
+		if errors.Is(err, errSilent) {
+			os.Exit(1)
+		}
 		if errors.Is(err, errUsage) {
 			fmt.Fprintf(os.Stderr, "guardian: %v\n%s\n", err, usage)
 			os.Exit(2)
@@ -74,11 +78,17 @@ func runUp(args []string) error {
 		GenesisAgeRecipients: parsed.GenesisAgeRecipients,
 		Status:               statusReporter,
 	})
-	if err := output.Write(os.Stdout, res, parsed.Format); err != nil {
-		return err
+	humanStatus := parsed.Execute && parsed.Status != "off" && parsed.Format == "text"
+	if !humanStatus {
+		if err := output.Write(os.Stdout, res, parsed.Format); err != nil {
+			return err
+		}
 	}
 	if res.Outcome == "Converged" || res.Outcome == "Planned" {
 		return nil
+	}
+	if humanStatus {
+		return errSilent
 	}
 	return fmt.Errorf("up: %s: %s", res.Outcome, res.Reason)
 }
@@ -160,13 +170,22 @@ func newStatusReporter(parsed upArgs, clusterName string) (up.StatusReporter, fu
 	}
 	mode := parsed.Status
 	if mode == "auto" {
-		mode = "plain"
+		if isTerminal(os.Stderr) {
+			mode = "tui"
+		} else {
+			mode = "plain"
+		}
 	}
 	renderer := statusview.New(os.Stderr, statusview.Options{
 		Mode:        statusview.Mode(mode),
 		ClusterName: clusterName,
 	})
 	return renderer, renderer.Close, nil
+}
+
+func isTerminal(file *os.File) bool {
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func splitEnvList(raw string) []string {

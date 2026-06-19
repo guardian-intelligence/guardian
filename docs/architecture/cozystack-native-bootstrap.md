@@ -105,10 +105,11 @@ bootstrap: {
 }
 ```
 
-During execution, the human status channel is stderr. `--status=auto` uses
-Heroku-style status lines with short descriptions. `--status=tui` enables the
-experimental compact in-place terminal view. The final result remains on stdout
-so `--output json|yaml|toml` continues to be automation-safe.
+During execution, the human status channel is stderr. `--status=auto` uses a
+Bubble Tea single-pane status view when stderr is interactive and Heroku-style
+status lines otherwise. The final result remains on stdout when
+`--output json|yaml|toml` is requested, so structured output stays
+automation-safe.
 
 The v0 provider adapter is intentionally narrow: Latitude GET server plus
 existing-server reinstall to `operating_system=ipxe`, using a Talos Image
