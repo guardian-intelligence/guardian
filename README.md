@@ -63,6 +63,12 @@ Supply recipients either in `bootstrap.genesis.ageRecipients`, with repeated
 `GUARDIAN_GENESIS_AGE_RECIPIENTS`. The recipient is public age material; the
 private identity stays in the operator's own secret store.
 
+The cluster config can be passed positionally or with `-f`:
+
+```sh
+guardian up -f src/clusters/guardian-dev/up.cue --execute
+```
+
 With `--execute`, `guardian up` writes live status to stderr by default.
 Interactive terminals get a Bubble Tea single-pane status view; redirected runs
 get Heroku-style status lines with short descriptions. Structured

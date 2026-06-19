@@ -18,7 +18,7 @@ var errUsage = errors.New("usage")
 var errSilent = errors.New("silent")
 
 const usage = `usage:
-  guardian up <cluster.cue> [--execute] [--genesis-age-recipient age1...] [--output text|json|yaml|toml] [--status auto|tui|plain|off]
+  guardian up [-f <cluster.cue>|<cluster.cue>] [--execute] [--genesis-age-recipient age1...] [--output text|json|yaml|toml] [--status auto|tui|plain|off]
 
 guardian owns only host come-up: Talos via Talm, Kubernetes bootstrap,
 Cozystack platform install, and a default hello-world handoff marker.`
@@ -112,6 +112,18 @@ func parseUpArgs(args []string) (upArgs, error) {
 			return upArgs{}, errHelp
 		case arg == "--execute":
 			parsed.Execute = true
+		case arg == "-f" || arg == "--file":
+			i++
+			if i >= len(args) {
+				return upArgs{}, fmt.Errorf("up: %w: %s requires a value", errUsage, arg)
+			}
+			if err := setConfigPath(&parsed, args[i]); err != nil {
+				return upArgs{}, err
+			}
+		case strings.HasPrefix(arg, "--file="):
+			if err := setConfigPath(&parsed, strings.TrimPrefix(arg, "--file=")); err != nil {
+				return upArgs{}, err
+			}
 		case arg == "--genesis-age-recipient":
 			i++
 			if i >= len(args) {
@@ -139,10 +151,9 @@ func parseUpArgs(args []string) (upArgs, error) {
 		case strings.HasPrefix(arg, "-"):
 			return upArgs{}, fmt.Errorf("up: %w: unknown flag %q", errUsage, arg)
 		default:
-			if parsed.ConfigPath != "" {
-				return upArgs{}, fmt.Errorf("up: %w: expected one cluster CUE config path", errUsage)
+			if err := setConfigPath(&parsed, arg); err != nil {
+				return upArgs{}, err
 			}
-			parsed.ConfigPath = arg
 		}
 	}
 	if len(parsed.GenesisAgeRecipients) == 0 {
@@ -162,6 +173,17 @@ func parseUpArgs(args []string) (upArgs, error) {
 		return upArgs{}, fmt.Errorf("up: %w: expected one cluster CUE config path", errUsage)
 	}
 	return parsed, nil
+}
+
+func setConfigPath(parsed *upArgs, path string) error {
+	if path == "" {
+		return fmt.Errorf("up: %w: config path must not be empty", errUsage)
+	}
+	if parsed.ConfigPath != "" {
+		return fmt.Errorf("up: %w: expected one cluster CUE config path", errUsage)
+	}
+	parsed.ConfigPath = path
+	return nil
 }
 
 func newStatusReporter(parsed upArgs, clusterName string) (up.StatusReporter, func() error, error) {
