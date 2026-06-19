@@ -160,22 +160,13 @@ func newStatusReporter(parsed upArgs, clusterName string) (up.StatusReporter, fu
 	}
 	mode := parsed.Status
 	if mode == "auto" {
-		if isTerminal(os.Stderr) {
-			mode = "tui"
-		} else {
-			mode = "plain"
-		}
+		mode = "plain"
 	}
 	renderer := statusview.New(os.Stderr, statusview.Options{
 		Mode:        statusview.Mode(mode),
 		ClusterName: clusterName,
 	})
 	return renderer, renderer.Close, nil
-}
-
-func isTerminal(file *os.File) bool {
-	info, err := file.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func splitEnvList(raw string) []string {

@@ -142,22 +142,41 @@ func Run(ctx context.Context, loaded *config.Loaded, tools Tools, runner toolrun
 		Stages:        stages,
 	}
 	commands := planCommands(loaded.Config, layout, tools)
-	result.Commands = commands
 	if !opts.Execute {
+		result.Commands = commands
 		result.Reason = "rerun with --execute to mutate the Talos maintenance target"
 		return result
 	}
+	preflight := StatusEvent{
+		Name:        "preflight",
+		State:       StatusRunning,
+		Title:       "Check bootstrap safety",
+		Description: "verifying destructive gates and genesis recipients before mutating the host",
+		At:          opts.Now(),
+	}
+	status.Report(preflight)
 	if !loaded.Config.Bootstrap.Destructive || !loaded.Config.Bootstrap.RequireMaintenance {
+		preflight.State = StatusFailed
+		preflight.Detail = "bootstrap.destructive and bootstrap.requireMaintenance must both be true before reimage"
+		preflight.At = opts.Now()
+		status.Report(preflight)
 		result.Outcome = "Refused"
 		result.Reason = "bootstrap.destructive and bootstrap.requireMaintenance must both be true before reimage"
 		return result
 	}
 	recipients := effectiveRecipients(loaded.Config, opts)
 	if err := genesis.ValidateRecipients(recipients); err != nil {
+		preflight.State = StatusFailed
+		preflight.Detail = err.Error()
+		preflight.At = opts.Now()
+		status.Report(preflight)
 		result.Outcome = "Refused"
 		result.Reason = err.Error()
 		return result
 	}
+	preflight.State = StatusDone
+	preflight.At = opts.Now()
+	status.Report(preflight)
 	status.Report(StatusEvent{
 		Name:        "render-manifests",
 		State:       StatusRunning,

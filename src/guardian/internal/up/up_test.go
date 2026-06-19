@@ -58,6 +58,9 @@ func TestRunExecuteRefusesWithoutGenesisRecipient(t *testing.T) {
 	if !strings.Contains(result.Reason, "ageRecipients") {
 		t.Fatalf("reason = %q, want ageRecipients", result.Reason)
 	}
+	if len(result.Commands) != 0 {
+		t.Fatalf("commands = %#v, want none in execute refusal", result.Commands)
+	}
 }
 
 func TestRunExecuteUsesRuntimeGenesisRecipient(t *testing.T) {
@@ -174,6 +177,8 @@ func TestRunExecuteReportsStatusEvents(t *testing.T) {
 	got := reporter.String()
 	for _, want := range []string{
 		"open-state:done",
+		"preflight:running",
+		"preflight:done",
 		"render-manifests:running",
 		"render-manifests:done",
 		"talm-init:running",

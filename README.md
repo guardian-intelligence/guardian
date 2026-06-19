@@ -63,10 +63,10 @@ Supply recipients either in `bootstrap.genesis.ageRecipients`, with repeated
 `GUARDIAN_GENESIS_AGE_RECIPIENTS`. The recipient is public age material; the
 private identity stays in the operator's own secret store.
 
-With `--execute`, `guardian up` writes simple live status to stderr by default.
-Interactive terminals get a compact in-place view; redirected runs get
-Heroku-style status lines. Structured `--output json|yaml|toml` stays on stdout.
-Use `--status=plain`, `--status=tui`, or `--status=off` to force the status
+With `--execute`, `guardian up` writes simple live status to stderr by default:
+Heroku-style status lines with short descriptions. Structured
+`--output json|yaml|toml` stays on stdout. Use `--status=tui` for the
+experimental compact in-place view, or `--status=off` to disable the status
 channel.
 
 The dev config also includes an existing Latitude server id. `guardian up` can

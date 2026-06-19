@@ -51,6 +51,11 @@ bootstrap: {
 	destructive: true
 	requireMaintenance: true
 	targetState: "talos-maintenance"
+	genesis: {
+		ageRecipients: [
+			"age1e95feklupyh40qa24vly650vg0qmljcsfhqd66fwhwa82j3uefnsxed3s8",
+		]
+	}
 }
 
 hello: {
