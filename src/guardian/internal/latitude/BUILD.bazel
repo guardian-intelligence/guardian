@@ -1,0 +1,14 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "latitude",
+    srcs = ["latitude.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/guardian/internal/latitude",
+    visibility = ["//src/guardian:__subpackages__"],
+)
+
+go_test(
+    name = "latitude_test",
+    srcs = ["latitude_test.go"],
+    embed = [":latitude"],
+)

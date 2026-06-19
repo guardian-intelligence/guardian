@@ -1,125 +1,90 @@
 # guardian
 
-Playground for the Talos-native rewrite of the Verself host and bootstrap
-layers. The dev host is the experiment surface: a single bare-metal box that
-is repeatedly wiped, reinstalled with Talos, and converged from zero to a
-healthy OpenBao by control loops, with disaster recovery restored from an
-offsite snapshot pinned by digest.
+Guardian is being cut over to a Cozystack-native bootstrap.
 
-Scope today: one infrastructure component (OpenBao as an OCI image), the
-pinned Talos toolchain, and the `guardian` CLI. Kubernetes manifests, the
-GitOps layer, and provider-driven reinstall land as the tracer progresses.
+The active `guardian` CLI has one job: host come-up. It takes an existing
+pre-provisioned bare-metal node, optionally reboots that same node through
+Latitude's iPXE reinstall flow into Talos maintenance, renders and applies a
+Cozystack Talm project, bootstraps Kubernetes, installs the Cozystack
+operator/platform package, writes an encrypted genesis secret bundle, and
+applies a default hello-world handoff manifest.
 
-See `docs/architecture/bootstrap.md` for the layer model and the DR contract.
+The previous source tree is preserved under `src-old/` for reference only. It
+is ignored by Bazel and is not part of the active command surface.
 
 ## Layout
 
-```
-src/guardian-cli/                  controller-side CLI (Bazel-built Go binary)
-src/infrastructure-components/     deployable components, one OCI image each
-src/hosts/                         physical host inventory and Talos inputs
-src/environments/                  post-Kubernetes environment bundles
-docs/architecture/                 design documents
+```text
+src/guardian/                  new Go CLI and host-bootstrap packages
+src/clusters/guardian-dev/     first Cozystack-native dev cluster config
+src/schemas/                   CUE schemas for first-party config
+src/tools/                     pinned runfile tool archives
+src-old/                       archived pre-Cozystack implementation
+docs/architecture/             design notes
 ```
 
-## Developer setup
+## Commands
 
-Every tool a developer touches is version-pinned in the repo. `bazel` is
-pinned in `.bazeliskrc` (version + binary sha256, honored by bazelisk, the
-Aspect CLI, and guardian itself); `aspect` is pinned in `.aspect/version.axl`
-(the native launcher pin, plus a guardian-sha256 line guardian verifies);
-`talosctl` and `kubectl` ride in the guardian binary's runfiles.
+Run from the repo root.
 
 ```bash
-# One-time: install symlinks (aspect, bazel, talosctl, kubectl, guardian)
-# into ~/.local/bin. Each name points at the guardian binary, which
-# dispatches on argv[0] and resolves the enclosing workspace's pins on every
-# invocation.
-bazelisk run //src/guardian-cli/cmd/guardian -- tools install
-# Equivalent: `aspect dev install`. Remove with `guardian tools uninstall`.
+bazel test //...
 
-bazel build //...                  # the sha256-verified pinned bazel
-guardian run talosctl -- version   # any pinned tool, without symlinks
+bazel run //src/guardian/cmd/guardian -- \
+  up src/clusters/guardian-dev/up.cue --output json
 ```
 
-Repo task surface (gazelle, bzlmod, dev symlinks) lives in `.aspect/tasks/`;
-list it with `aspect help`.
+Plan mode is the default. Destructive execution requires `--execute`, at least
+one genesis age recipient, and a CUE config that explicitly opts into
+maintenance-mode reimage:
 
-## Quickstart
-
-Run from the repo root; host paths are repo-root relative.
-
-```bash
-bazelisk build //...
-
-# Pinned component versions.
-bazelisk run //src/guardian-cli/cmd/guardian -- version
-
-# Build the OpenBao image and load it into the local container runtime.
-bazelisk run //src/infrastructure-components/openbao:load
+```cue
+bootstrap: {
+  destructive: true
+  requireMaintenance: true
+  targetState: "talos-maintenance"
+}
 ```
 
-## Wipe drill
+Supply recipients either in `bootstrap.genesis.ageRecipients`, with repeated
+`--genesis-age-recipient age1...` flags, or with
+`GUARDIAN_GENESIS_AGE_RECIPIENTS`. The recipient is public age material; the
+private identity stays in the operator's own secret store.
 
-A full from-zero convergence of the dev host. The only inputs are the
-workspace clone and the ability to authenticate to the box; no provider
-API, no registry credentials, and no Guardian-hosted infrastructure.
+The dev config also includes an existing Latitude server id. `guardian up` can
+call Latitude only for that existing server's GET and reinstall endpoints; it
+does not contain a server-create path.
 
-Run drills from the repo root: the configured host path is stored
-absolute, but the paths inside `host.yaml` (schematic, patches), the
-Crossplane environment bundle, and component manifests are repo-root relative.
+## Secret Bootstrap
 
-```bash
-# List, inspect, and select a checked-in host.
-guardian host list
-guardian host inspect src/hosts/ash-bm-001/host.yaml
+Cozystack-managed OpenBao comes after the platform exists, so it cannot own the
+cluster genesis secrets. `guardian up` handles that gap by keeping the Talm
+project under local operator state:
 
-# One-time: point guardian at the host facts. The path is stored
-# absolute in ${XDG_CONFIG_HOME:-~/.config}/guardian/config.yaml; inspect
-# with `guardian config`.
-guardian host use src/hosts/ash-bm-001/host.yaml
-
-# Down: wipe to Talos maintenance mode; waits until the Talos API answers.
-# A configured Talos node is reset over its API; a generic Linux node is
-# kexec'd into the factory maintenance image over SSH (caller's ambient ssh
-# auth; the node downloads the kernel from the factory itself).
-# Up: verify disk inventory, apply machine config (install to disk),
-# bootstrap etcd, fetch kubeconfig, stand up the seed registry, push every
-# workspace-built image into it by digest, apply components.
-guardian down --yes && guardian up
+```text
+${XDG_STATE_HOME:-~/.local/state}/guardian/clusters/<cluster>/
 ```
 
-Both verbs also accept an explicit `<host.yaml>` positional argument,
-which overrides the configured host path.
+After `talm kubeconfig`, it writes:
 
-`up` probes runtime truth rather than recorded state: a node answering the
-authenticated Talos API gets its regenerated config re-applied; a node in
-maintenance mode gets disk-inventory verification, first install, and etcd
-bootstrap. Talos cluster secrets persist in
-`~/.local/state/guardian/<cluster>/` so cluster identity survives wipe
-drills; OpenBao init/restore/unseal remain operator decisions after
-convergence.
+```text
+genesis.bundle.tar.age
+```
 
-Workload images travel controller -> node, not through any external
-registry: `up` applies the seed-registry Deployment (the one digest-pinned
-public image in the chain), pushes each Bazel-built OCI layout through a
-kubectl port-forward, and renders manifests referencing
-`registry.guardian.internal/<component>@<built digest>` — a virtual name the
-Talos machine config maps to the in-cluster registry, so what runs is
-byte-for-byte what the workspace built.
+The encrypted bundle contains a manifest plus `talm.key`, `secrets.yaml`, the
+rendered node config, kubeconfig, operation evidence, and generated handoff
+manifests. Nothing from the genesis set is committed to the repo.
 
-## Pins
+## Pinned Tools
 
-Every third-party byte is pinned by sha256 in a `*.MODULE.bazel` include or
-an `oci.pull` digest. Component versions consumed by the CLI are compile-time
-constants in `src/guardian-cli/cmd/guardian/main.go`; changing what the fleet
-runs is a reviewed commit, never a flag.
+The CLI resolves these from Bazel runfiles, never from `PATH`:
 
-| Component | Version  | Where                                                        |
-| --------- | -------- | ------------------------------------------------------------ |
-| Bazel     | 9.1.0    | `.bazeliskrc` (version + binary sha256), `.bazelversion`      |
-| Aspect CLI | 2026.17.17 | `.aspect/version.axl` (version + guardian-sha256)          |
-| Go        | 1.26.4   | `src/guardian-cli/go.mod` (workspace: `bazel.go.work`)        |
-| Talos     | v1.13.4  | `src/guardian-cli/tools/talosctl/talosctl.MODULE.bazel`       |
-| kubectl   | v1.36.1  | `src/guardian-cli/tools/kubectl/kubectl.MODULE.bazel`         |
-| OpenBao   | v2.5.4   | `src/infrastructure-components/openbao/openbao.MODULE.bazel`  |
+| Tool | Pin |
+| - | - |
+| Go | `src/guardian/go.mod` |
+| Talm | `src/tools/talm/talm.MODULE.bazel` |
+| talosctl | `src/tools/talosctl/talosctl.MODULE.bazel` |
+| kubectl | `src/tools/kubectl/kubectl.MODULE.bazel` |
+| Helm | `MODULE.bazel` |
+
+Run `aspect tidy` before publishing changes.

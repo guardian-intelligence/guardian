@@ -1,0 +1,8 @@
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+http_archive(
+    name = "talm_linux_amd64",
+    build_file_content = """exports_files(["talm"])""",
+    sha256 = "da407792f970356381953d96aaa4b902453482e3ddb56e893de17cb2e177d964",
+    url = "https://github.com/cozystack/talm/releases/download/v0.31.0/talm-linux-amd64.tar.gz",
+)

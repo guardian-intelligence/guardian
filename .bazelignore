@@ -3,3 +3,4 @@
 # package walk out of node_modules.
 src/viteplus-monorepo/node_modules
 src/viteplus-monorepo/apps/aisucks-web/node_modules
+src-old

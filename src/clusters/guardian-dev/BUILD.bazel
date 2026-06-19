@@ -1,0 +1,8 @@
+filegroup(
+    name = "config",
+    srcs = [
+        "talos/schematic.yaml",
+        "up.cue",
+    ],
+    visibility = ["//visibility:public"],
+)

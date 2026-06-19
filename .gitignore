@@ -1,3 +1,11 @@
 /bazel-*
 secret.env
 /src/aisucks/aisucks
+
+# Archived pre-Cozystack tree. Keep source, not local dependency/build output.
+/src-old/**/node_modules/
+/src-old/**/dist/
+/src-old/**/.vite/
+/src-old/**/.turbo/
+/src-old/**/.next/
+/src-old/**/.output/
