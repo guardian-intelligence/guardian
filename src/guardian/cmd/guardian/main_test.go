@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"testing"
+)
 
 func TestParseUpArgsRequiresHostFileFlag(t *testing.T) {
 	for _, tc := range []struct {
@@ -74,5 +79,14 @@ func TestAutoStatusIsOffForStructuredOutput(t *testing.T) {
 	defer closeStatus()
 	if reporter != nil {
 		t.Fatalf("reporter = %#v, want nil for structured output with --status=auto", reporter)
+	}
+}
+
+func TestConfigLoadCodeRecognizesMissingPath(t *testing.T) {
+	if got := configLoadCode(fmt.Errorf("load host: %w", fs.ErrNotExist)); got != "config.path.notFound" {
+		t.Fatalf("configLoadCode() = %q, want config.path.notFound", got)
+	}
+	if got := configLoadCode(errors.New("invalid cue")); got != "config.load" {
+		t.Fatalf("configLoadCode() = %q, want config.load", got)
 	}
 }

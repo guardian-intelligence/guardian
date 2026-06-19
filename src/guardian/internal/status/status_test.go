@@ -125,3 +125,51 @@ func TestPlainRendererPrintsFailureCode(t *testing.T) {
 		}
 	}
 }
+
+func TestPlainRendererPrintsUnchangedDescription(t *testing.T) {
+	var buf bytes.Buffer
+	renderer := New(&buf, Options{Mode: ModePlain, ClusterName: "guardian-dev"})
+	renderer.Report(up.StatusEvent{
+		ID:          "kubernetes",
+		State:       up.StatusUnchanged,
+		Title:       "Bootstrap Kubernetes",
+		Description: "Already bootstrapped",
+	})
+
+	out := buf.String()
+	if !strings.Contains(out, "◆ Bootstrap Kubernetes - Already bootstrapped") {
+		t.Fatalf("plain output missing unchanged status:\n%s", out)
+	}
+}
+
+func TestModelOnlyMarksParentUnchangedWhenAllChildrenUnchanged(t *testing.T) {
+	m := newModel("guardian-dev")
+	for _, event := range []up.StatusEvent{
+		{
+			ID:          "talm-init",
+			ParentID:    "ubuntu",
+			ParentTitle: "Prepare Ubuntu host",
+			State:       up.StatusUnchanged,
+			Title:       "Initialize Talm",
+			Description: "Already initialized",
+		},
+		{
+			ID:          "talm-template",
+			ParentID:    "ubuntu",
+			ParentTitle: "Prepare Ubuntu host",
+			State:       up.StatusDone,
+			Title:       "Render Talos config",
+		},
+	} {
+		updated, _ := m.Update(statusMsg{event: event})
+		m = updated.(model)
+	}
+
+	out := m.View()
+	if !strings.Contains(out, "✓ Prepare Ubuntu host") {
+		t.Fatalf("parent should be done for mixed changed/unchanged children:\n%s", out)
+	}
+	if strings.Contains(out, "◆ Prepare Ubuntu host") {
+		t.Fatalf("parent incorrectly marked unchanged for mixed children:\n%s", out)
+	}
+}

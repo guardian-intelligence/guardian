@@ -10,12 +10,13 @@ import (
 type StatusState string
 
 const (
-	StatusPending StatusState = "pending"
-	StatusRunning StatusState = "running"
-	StatusDone    StatusState = "done"
-	StatusSkipped StatusState = "skipped"
-	StatusFailed  StatusState = "failed"
-	StatusBlocked StatusState = "blocked"
+	StatusPending   StatusState = "pending"
+	StatusRunning   StatusState = "running"
+	StatusDone      StatusState = "done"
+	StatusUnchanged StatusState = "unchanged"
+	StatusSkipped   StatusState = "skipped"
+	StatusFailed    StatusState = "failed"
+	StatusBlocked   StatusState = "blocked"
 )
 
 type StatusFailure struct {
@@ -249,6 +250,10 @@ var commandStepSpecs = map[string]StepSpec{
 }
 
 func reportStatus(reporter StatusReporter, spec StepSpec, state StatusState, now func() time.Time, failure *StatusFailure) {
+	reportStatusDescription(reporter, spec, state, spec.Description, now, failure)
+}
+
+func reportStatusDescription(reporter StatusReporter, spec StepSpec, state StatusState, description string, now func() time.Time, failure *StatusFailure) {
 	if reporter == nil {
 		return
 	}
@@ -259,13 +264,13 @@ func reportStatus(reporter StatusReporter, spec StepSpec, state StatusState, now
 		ParentTitle: spec.ParentTitle,
 		State:       state,
 		Title:       spec.Title,
-		Description: spec.Description,
+		Description: description,
 		Failure:     failure,
 	}
 	switch state {
 	case StatusRunning:
 		event.StartedAt = t
-	case StatusDone, StatusSkipped, StatusFailed, StatusBlocked:
+	case StatusDone, StatusUnchanged, StatusSkipped, StatusFailed, StatusBlocked:
 		event.EndedAt = t
 	}
 	reporter.Report(event)

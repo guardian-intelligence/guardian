@@ -91,7 +91,11 @@ func (r *Renderer) renderPlain(event up.StatusEvent) {
 		r.started = true
 	}
 	icon := plainIcon(event.State)
-	fmt.Fprintf(r.w, "%s %s\n", icon, event.Title)
+	line := fmt.Sprintf("%s %s", icon, event.Title)
+	if event.State == up.StatusUnchanged && event.Description != "" {
+		line += " - " + event.Description
+	}
+	fmt.Fprintln(r.w, line)
 	if event.State == up.StatusFailed || event.State == up.StatusBlocked {
 		failure := event.Failure
 		if failure == nil {
@@ -109,6 +113,8 @@ func plainIcon(state up.StatusState) string {
 		return "/"
 	case up.StatusDone:
 		return "✓"
+	case up.StatusUnchanged:
+		return "◆"
 	case up.StatusSkipped:
 		return "-"
 	case up.StatusFailed:
@@ -237,7 +243,11 @@ func (m model) View() string {
 	for _, id := range m.rootOrder {
 		n := m.nodes[id]
 		state := m.derivedState(id)
-		b.WriteString(m.line(n, state, 0, width))
+		renderNode := *n
+		if state == up.StatusUnchanged && renderNode.description == "" {
+			renderNode.description = m.derivedDescription(id)
+		}
+		b.WriteString(m.line(&renderNode, state, 0, width))
 		b.WriteByte('\n')
 		if state == up.StatusRunning || state == up.StatusFailed || state == up.StatusBlocked {
 			for _, childID := range m.childOrder[id] {
@@ -268,6 +278,9 @@ func (m model) line(n *node, state up.StatusState, depth, width int) string {
 	if state == up.StatusRunning && n.description != "" {
 		line += "  " + subtleStyle.Render(n.description)
 	}
+	if state == up.StatusUnchanged && n.description != "" {
+		line += subtleStyle.Render(" - " + n.description)
+	}
 	if d := m.duration(n, state); d != "" {
 		padding := width - lipgloss.Width(line) - len(d)
 		if padding > 1 {
@@ -287,6 +300,8 @@ func (m model) icon(state up.StatusState) string {
 		return runningStyle.Render(frames[m.frame%len(frames)])
 	case up.StatusDone:
 		return doneStyle.Render("✓")
+	case up.StatusUnchanged:
+		return unchangedStyle.Render("◆")
 	case up.StatusSkipped:
 		return subtleStyle.Render("-")
 	case up.StatusFailed:
@@ -305,7 +320,7 @@ func (m model) duration(n *node, state up.StatusState) string {
 			return ""
 		}
 		return formatDuration(m.now.Sub(n.startedAt))
-	case up.StatusDone, up.StatusSkipped, up.StatusFailed, up.StatusBlocked:
+	case up.StatusDone, up.StatusUnchanged, up.StatusSkipped, up.StatusFailed, up.StatusBlocked:
 		if n.startedAt.IsZero() || n.endedAt.IsZero() {
 			return ""
 		}
@@ -324,11 +339,13 @@ func (m model) derivedState(rootID string) up.StatusState {
 		return up.StatusPending
 	}
 	seen := false
-	allDone := true
+	allTerminal := true
+	allUnchanged := true
 	for _, childID := range children {
 		child := m.nodes[childID]
 		if child == nil || child.state == up.StatusPending {
-			allDone = false
+			allTerminal = false
+			allUnchanged = false
 			continue
 		}
 		seen = true
@@ -339,18 +356,34 @@ func (m model) derivedState(rootID string) up.StatusState {
 			return up.StatusBlocked
 		case up.StatusRunning:
 			return up.StatusRunning
+		case up.StatusUnchanged:
 		case up.StatusDone, up.StatusSkipped:
+			allUnchanged = false
 		default:
-			allDone = false
+			allTerminal = false
+			allUnchanged = false
 		}
 	}
-	if seen && allDone {
+	if seen && allTerminal && allUnchanged {
+		return up.StatusUnchanged
+	}
+	if seen && allTerminal {
 		return up.StatusDone
 	}
 	if seen {
 		return up.StatusRunning
 	}
 	return up.StatusPending
+}
+
+func (m model) derivedDescription(rootID string) string {
+	for _, childID := range m.childOrder[rootID] {
+		child := m.nodes[childID]
+		if child != nil && child.state == up.StatusUnchanged && child.description != "" {
+			return child.description
+		}
+	}
+	return ""
 }
 
 type failureView struct {
@@ -406,12 +439,13 @@ func contains(values []string, want string) bool {
 }
 
 var (
-	headerStyle     = lipgloss.NewStyle().Bold(true)
-	clusterStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	subtleStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	doneStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-	runningStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
-	failedStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
-	blockedStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
-	errorStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
+	headerStyle    = lipgloss.NewStyle().Bold(true)
+	clusterStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	subtleStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	doneStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	unchangedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("33"))
+	runningStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+	failedStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
+	blockedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	errorStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
 )

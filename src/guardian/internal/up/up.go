@@ -40,13 +40,13 @@ type Result struct {
 	Outcome       string               `json:"outcome" yaml:"outcome" toml:"outcome"`
 	Code          string               `json:"code,omitempty" yaml:"code,omitempty" toml:"code,omitempty"`
 	SourcePath    string               `json:"sourcePath,omitempty" yaml:"sourcePath,omitempty" toml:"sourcePath,omitempty"`
-	ClusterName   string               `json:"clusterName" yaml:"clusterName" toml:"clusterName"`
+	ClusterName   string               `json:"clusterName,omitempty" yaml:"clusterName,omitempty" toml:"clusterName,omitempty"`
 	Target        string               `json:"target,omitempty" yaml:"target,omitempty" toml:"target,omitempty"`
-	ConfigDigest  string               `json:"configDigest" yaml:"configDigest" toml:"configDigest"`
-	StateDir      string               `json:"stateDir" yaml:"stateDir" toml:"stateDir"`
+	ConfigDigest  string               `json:"configDigest,omitempty" yaml:"configDigest,omitempty" toml:"configDigest,omitempty"`
+	StateDir      string               `json:"stateDir,omitempty" yaml:"stateDir,omitempty" toml:"stateDir,omitempty"`
 	Kubeconfig    string               `json:"kubeconfig,omitempty" yaml:"kubeconfig,omitempty" toml:"kubeconfig,omitempty"`
 	GenesisBundle string               `json:"genesisBundle,omitempty" yaml:"genesisBundle,omitempty" toml:"genesisBundle,omitempty"`
-	Stages        []string             `json:"stages" yaml:"stages" toml:"stages"`
+	Stages        []string             `json:"stages,omitempty" yaml:"stages,omitempty" toml:"stages,omitempty"`
 	Commands      []toolrunner.Command `json:"commands,omitempty" yaml:"commands,omitempty" toml:"commands,omitempty"`
 }
 
@@ -59,11 +59,15 @@ func (r Result) Text(w io.Writer) error {
 	if source != "" {
 		fmt.Fprintf(w, "source\t%s\n", source)
 	}
-	fmt.Fprintf(w, "cluster\t%s\n", r.ClusterName)
+	if r.ClusterName != "" {
+		fmt.Fprintf(w, "cluster\t%s\n", r.ClusterName)
+	}
 	if r.Target != "" {
 		fmt.Fprintf(w, "target\t%s\n", r.Target)
 	}
-	fmt.Fprintf(w, "state\t%s\n", r.StateDir)
+	if r.StateDir != "" {
+		fmt.Fprintf(w, "state\t%s\n", r.StateDir)
+	}
 	if r.Outcome != "Planned" {
 		if r.Kubeconfig != "" {
 			fmt.Fprintf(w, "kubeconfig\t%s\n", r.Kubeconfig)
@@ -177,13 +181,22 @@ func Run(ctx context.Context, loaded *config.Loaded, tools Tools, runner toolrun
 		return result
 	}
 	reportStatus(opts.Status, safetyStep, StatusDone, opts.Now, nil)
+	unchangedStages := unchangedStageProbes(ctx, loaded, tools, runner, layout)
+	reportedUnchangedStages := map[string]bool{}
 	for _, cmd := range commands {
 		spec := commandStep(cmd.Name)
+		if description, ok := unchangedStages[spec.ParentID]; ok {
+			if !reportedUnchangedStages[spec.ParentID] {
+				reportStatusDescription(opts.Status, parentStep(spec), StatusUnchanged, description, opts.Now, nil)
+				reportedUnchangedStages[spec.ParentID] = true
+			}
+			continue
+		}
 		reportStatus(opts.Status, spec, StatusRunning, opts.Now, nil)
 		switch cmd.Name {
 		case "talm-init":
 			if talmStateExists(layout) {
-				reportStatus(opts.Status, spec, StatusSkipped, opts.Now, nil)
+				reportStatusDescription(opts.Status, spec, StatusUnchanged, "Already initialized", opts.Now, nil)
 				continue
 			}
 			if err := runner.Run(ctx, cmd); err != nil {
@@ -223,7 +236,7 @@ func Run(ctx context.Context, loaded *config.Loaded, tools Tools, runner toolrun
 			}
 		case "talm-dry-run", "talm-apply":
 			if talosConfigured(ctx, runner, tools, layout, loaded.Config.Node.Address) {
-				reportStatus(opts.Status, spec, StatusSkipped, opts.Now, nil)
+				reportStatusDescription(opts.Status, spec, StatusUnchanged, "Already configured", opts.Now, nil)
 				continue
 			}
 			if err := runner.Run(ctx, cmd); err != nil {
@@ -232,12 +245,14 @@ func Run(ctx context.Context, loaded *config.Loaded, tools Tools, runner toolrun
 				return failed(loaded, layout, "Retryable", failure.Code)
 			}
 		case "boot-to-talos-install":
-			if err := opts.WaitForTalos(ctx, loaded.Config.Node.Address, 2*time.Second); err != nil {
-				if err := opts.RunBootToTalos(ctx, loaded.Config, tools.BootToTalos); err != nil {
-					failure := failureForCommand(cmd)
-					reportStatus(opts.Status, spec, StatusFailed, opts.Now, failure)
-					return failed(loaded, layout, "Retryable", failure.Code)
-				}
+			if err := opts.WaitForTalos(ctx, loaded.Config.Node.Address, 2*time.Second); err == nil {
+				reportStatusDescription(opts.Status, spec, StatusUnchanged, "Already installed", opts.Now, nil)
+				continue
+			}
+			if err := opts.RunBootToTalos(ctx, loaded.Config, tools.BootToTalos); err != nil {
+				failure := failureForCommand(cmd)
+				reportStatus(opts.Status, spec, StatusFailed, opts.Now, failure)
+				return failed(loaded, layout, "Retryable", failure.Code)
 			}
 		case "wait-talos-maintenance-api", "wait-talos-api":
 			if err := opts.WaitForTalos(ctx, loaded.Config.Node.Address, 5*time.Minute); err != nil {
@@ -278,7 +293,11 @@ func Run(ctx context.Context, loaded *config.Loaded, tools Tools, runner toolrun
 				return failed(loaded, layout, "Retryable", failure.Code)
 			}
 		case "kubectl-remove-control-plane-taint":
-			if _, err := runner.Output(ctx, cmd); err != nil && !taintAlreadyRemoved(err) {
+			if _, err := runner.Output(ctx, cmd); err != nil {
+				if taintAlreadyRemoved(err) {
+					reportStatusDescription(opts.Status, spec, StatusUnchanged, "Already removed", opts.Now, nil)
+					continue
+				}
 				failure := failureForCommand(cmd)
 				reportStatus(opts.Status, spec, StatusFailed, opts.Now, failure)
 				return failed(loaded, layout, "Retryable", failure.Code)
@@ -317,6 +336,27 @@ func Run(ctx context.Context, loaded *config.Loaded, tools Tools, runner toolrun
 	result.Outcome = "Converged"
 	result.Commands = nil
 	return result
+}
+
+func unchangedStageProbes(ctx context.Context, loaded *config.Loaded, tools Tools, runner toolrunner.Runner, layout *state.Layout) map[string]string {
+	unchanged := map[string]string{}
+	if talosConfigured(ctx, runner, tools, layout, loaded.Config.Node.Address) {
+		unchanged["talos"] = "Already installed"
+	}
+	if kubernetesBootstrapped(ctx, runner, tools, layout, loaded.Config.Node.Hostname) {
+		unchanged["kubernetes"] = "Already bootstrapped"
+	}
+	if cozystackConverged(ctx, loaded, tools, runner, layout) {
+		unchanged["cozystack"] = "Already converged"
+	}
+	return unchanged
+}
+
+func parentStep(spec StepSpec) StepSpec {
+	return StepSpec{
+		ID:    spec.ParentID,
+		Title: spec.ParentTitle,
+	}
 }
 
 func planCommands(cfg config.Config, layout *state.Layout, tools Tools) []toolrunner.Command {
@@ -497,6 +537,107 @@ func talosConfigured(ctx context.Context, runner toolrunner.Runner, tools Tools,
 		},
 	})
 	return err == nil
+}
+
+func kubernetesBootstrapped(ctx context.Context, runner toolrunner.Runner, tools Tools, layout *state.Layout, hostname string) bool {
+	for _, path := range []string{layout.Kubeconfig, layout.GenesisArchive} {
+		if _, err := os.Stat(path); err != nil {
+			return false
+		}
+	}
+	if _, err := runner.Output(ctx, toolrunner.Command{
+		Name: "kubectl-probe-kubernetes-api",
+		Bin:  tools.Kubectl,
+		Args: []string{"--kubeconfig", layout.Kubeconfig, "get", "--raw=/readyz"},
+	}); err != nil {
+		return false
+	}
+	if _, err := runner.Output(ctx, toolrunner.Command{
+		Name: "kubectl-probe-node-registered",
+		Bin:  tools.Kubectl,
+		Args: []string{"--kubeconfig", layout.Kubeconfig, "get", "node", hostname},
+	}); err != nil {
+		return false
+	}
+	return true
+}
+
+func cozystackConverged(ctx context.Context, loaded *config.Loaded, tools Tools, runner toolrunner.Runner, layout *state.Layout) bool {
+	if !operationCompleted(layout.Operation, loaded.Digest, "kubectl-wait-cozystack-helmreleases") {
+		return false
+	}
+	if !helmReleaseDeployed(ctx, runner, tools, layout.Kubeconfig, loaded.Config.Cozystack.Version) {
+		return false
+	}
+	for _, cmd := range []toolrunner.Command{
+		{
+			Name: "kubectl-probe-cozystack-operator",
+			Bin:  tools.Kubectl,
+			Args: []string{"--kubeconfig", layout.Kubeconfig, "-n", "cozy-system", "rollout", "status", "deploy/cozystack-operator", "--timeout=1s"},
+		},
+		{
+			Name: "kubectl-probe-cozystack-platform",
+			Bin:  tools.Kubectl,
+			Args: []string{"--kubeconfig", layout.Kubeconfig, "wait", "package/cozystack.cozystack-platform", "--for=condition=Ready", "--timeout=1s"},
+		},
+		{
+			Name: "kubectl-probe-node-ready",
+			Bin:  tools.Kubectl,
+			Args: []string{"--kubeconfig", layout.Kubeconfig, "wait", "nodes", "--all", "--for=condition=Ready", "--timeout=1s"},
+		},
+	} {
+		if _, err := runner.Output(ctx, cmd); err != nil {
+			return false
+		}
+	}
+	raw, err := runner.Output(ctx, toolrunner.Command{
+		Name: "kubectl-probe-cozystack-helmreleases",
+		Bin:  tools.Kubectl,
+		Args: []string{"--kubeconfig", layout.Kubeconfig, "get", "hr", "-A", "-o", "json"},
+	})
+	if err != nil {
+		return false
+	}
+	_, _, requiredReady, requiredTotal, err := countReadyHelmReleases(raw)
+	return err == nil && requiredTotal >= 20 && requiredReady == requiredTotal
+}
+
+func operationCompleted(path, digest, stage string) bool {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var op state.Operation
+	if err := json.Unmarshal(raw, &op); err != nil {
+		return false
+	}
+	return op.ConfigDigest == digest && op.Stage == stage
+}
+
+type helmStatus struct {
+	Chart string `json:"chart"`
+	Info  struct {
+		Status string `json:"status"`
+	} `json:"info"`
+}
+
+func helmReleaseDeployed(ctx context.Context, runner toolrunner.Runner, tools Tools, kubeconfig, version string) bool {
+	raw, err := runner.Output(ctx, toolrunner.Command{
+		Name: "helm-probe-cozystack",
+		Bin:  tools.Helm,
+		Args: []string{"status", "cozystack", "--namespace", "cozy-system", "--kubeconfig", kubeconfig, "--output", "json"},
+	})
+	if err != nil {
+		return false
+	}
+	var status helmStatus
+	if err := json.Unmarshal(raw, &status); err != nil {
+		return false
+	}
+	if strings.ToLower(status.Info.Status) != "deployed" {
+		return false
+	}
+	return strings.Contains(status.Chart, version)
 }
 
 func runBootstrapWithRetry(ctx context.Context, runner toolrunner.Runner, cmd toolrunner.Command, timeout time.Duration) error {

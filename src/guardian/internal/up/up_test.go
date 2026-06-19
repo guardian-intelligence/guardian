@@ -12,6 +12,7 @@ import (
 
 	"filippo.io/age"
 	"github.com/guardian-intelligence/guardian/src/guardian/internal/config"
+	"github.com/guardian-intelligence/guardian/src/guardian/internal/state"
 	"github.com/guardian-intelligence/guardian/src/guardian/internal/toolrunner"
 )
 
@@ -66,6 +67,34 @@ func TestResultTextOmitsCommandGraph(t *testing.T) {
 		"source\tsrc/hosts/ash-bm-004/host.cue",
 		"target\t206.223.228.87",
 		"will\n",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("text output missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestResultTextOmitsUnsetFields(t *testing.T) {
+	result := Result{
+		Outcome:    "NeedsConfig",
+		Code:       "config.load",
+		SourcePath: "src/hosts/ash-bm-001/host.cue",
+	}
+
+	var buf bytes.Buffer
+	if err := result.Text(&buf); err != nil {
+		t.Fatal(err)
+	}
+	text := buf.String()
+	for _, forbidden := range []string{"cluster\t", "state\t", "target\t", "kubeconfig\t", "genesisBundle\t"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("text output leaked unset field %q:\n%s", forbidden, text)
+		}
+	}
+	for _, want := range []string{
+		"outcome\tNeedsConfig",
+		"code\tconfig.load",
+		"source\tsrc/hosts/ash-bm-001/host.cue",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("text output missing %q:\n%s", want, text)
@@ -243,6 +272,94 @@ func TestRunExecuteUsesPinnedToolCommands(t *testing.T) {
 	}
 }
 
+func TestRunExecutePrunesUnchangedStages(t *testing.T) {
+	stateRoot := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateRoot)
+	loaded := testLoaded()
+	layout, err := state.Open(loaded.Config.Cluster.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		filepath.Join(layout.TalmProject, "secrets.yaml"),
+		filepath.Join(layout.TalmProject, "talm.key"),
+		layout.Talosconfig,
+		layout.Kubeconfig,
+		layout.GenesisArchive,
+	} {
+		if err := state.WriteFile(path, []byte("state")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := state.WriteFile(layout.TalmValues, []byte("advertisedSubnets: []\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.WriteFile(filepath.Join(layout.TalmProject, "templates", "_helpers.tpl"), []byte(`{{- define "talos.config.network.multidoc" }}
+noop
+{{- end }}
+`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.WriteOperation(layout.Operation, state.Operation{
+		ClusterName:  loaded.Config.Cluster.Name,
+		ConfigDigest: loaded.Digest,
+		Stage:        "kubectl-wait-cozystack-helmreleases",
+		UpdatedAt:    time.Date(2026, 6, 18, 11, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runner := &fakeRunner{
+		output:                 []byte("ok"),
+		talosConfigured:        true,
+		kubernetesBootstrapped: true,
+		cozystackConverged:     true,
+	}
+	status := &fakeStatusReporter{}
+
+	result := Run(context.Background(), loaded, testTools(), runner, Options{
+		Execute: true,
+		Status:  status,
+		Now:     func() time.Time { return time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC) },
+	})
+	if result.Outcome != "Converged" {
+		t.Fatalf("outcome = %s, want Converged: %#v", result.Outcome, result)
+	}
+	got := runner.names()
+	for _, unwanted := range []string{
+		"boot-to-talos-install",
+		"wait-talos-maintenance-api",
+		"talm-dry-run",
+		"talm-apply",
+		"wait-talos-api",
+		"talm-bootstrap",
+		"talm-kubeconfig",
+		"kubectl-wait-kubernetes-api",
+		"kubectl-wait-node-registered",
+		"write-genesis-bundle",
+		"kubectl-remove-control-plane-taint",
+		"write-cozystack-platform",
+		"helm-install-cozystack",
+		"kubectl-wait-cozystack-operator",
+		"kubectl-apply-cozystack-platform",
+		"kubectl-wait-platform-package",
+		"kubectl-wait-node-ready",
+		"kubectl-wait-cozystack-helmreleases",
+	} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("commands = %s, want %s pruned", got, unwanted)
+		}
+	}
+	if !status.contains(upStatusMatch{ID: "talos", State: StatusUnchanged, Description: "Already installed"}) {
+		t.Fatalf("missing unchanged Talos event: %#v", status.events)
+	}
+	if !status.contains(upStatusMatch{ID: "kubernetes", State: StatusUnchanged, Description: "Already bootstrapped"}) {
+		t.Fatalf("missing unchanged Kubernetes event: %#v", status.events)
+	}
+	if !status.contains(upStatusMatch{ID: "cozystack", State: StatusUnchanged, Description: "Already converged"}) {
+		t.Fatalf("missing unchanged Cozystack event: %#v", status.events)
+	}
+}
+
 func TestNormalizeNodeConfigPinsDiskSerialAndHostname(t *testing.T) {
 	raw := []byte(`machine:
   install:
@@ -315,9 +432,12 @@ func TestNormalizeNodeConfigLeavesPlainOutputAlone(t *testing.T) {
 }
 
 type fakeRunner struct {
-	commands  []toolrunner.Command
-	output    []byte
-	outputErr error
+	commands               []toolrunner.Command
+	output                 []byte
+	outputErr              error
+	talosConfigured        bool
+	kubernetesBootstrapped bool
+	cozystackConverged     bool
 }
 
 func (r *fakeRunner) Run(_ context.Context, cmd toolrunner.Command) error {
@@ -378,9 +498,32 @@ func (r *fakeRunner) Output(_ context.Context, cmd toolrunner.Command) ([]byte, 
 	r.commands = append(r.commands, cmd)
 	switch cmd.Name {
 	case "talos-version":
+		if r.talosConfigured {
+			return r.output, nil
+		}
 		return nil, errors.New("talos api not configured")
+	case "kubectl-probe-kubernetes-api", "kubectl-probe-node-registered":
+		if r.kubernetesBootstrapped {
+			return r.output, nil
+		}
+		return nil, errors.New("kubernetes api not configured")
+	case "helm-probe-cozystack":
+		if r.cozystackConverged {
+			return []byte(`{"chart":"cozy-installer-1.4.1","info":{"status":"deployed"}}`), nil
+		}
+		return nil, errors.New("cozystack helm release not ready")
+	case "kubectl-probe-cozystack-operator", "kubectl-probe-cozystack-platform", "kubectl-probe-node-ready":
+		if r.cozystackConverged {
+			return r.output, nil
+		}
+		return nil, errors.New("cozystack not ready")
+	case "kubectl-probe-cozystack-helmreleases":
+		if r.cozystackConverged {
+			return readyHelmReleaseList(), nil
+		}
+		return nil, errors.New("cozystack helmreleases not ready")
 	case "kubectl-wait-cozystack-helmreleases":
-		return []byte(`{"items":[` + strings.TrimSuffix(strings.Repeat(`{"status":{"conditions":[{"type":"Ready","status":"True"}]}},`, 20), ",") + `]}`), nil
+		return readyHelmReleaseList(), nil
 	}
 	return r.output, r.outputErr
 }
@@ -391,6 +534,33 @@ func (r *fakeRunner) names() string {
 		names = append(names, cmd.Name)
 	}
 	return strings.Join(names, ",")
+}
+
+func readyHelmReleaseList() []byte {
+	return []byte(`{"items":[` + strings.TrimSuffix(strings.Repeat(`{"status":{"conditions":[{"type":"Ready","status":"True"}]}},`, 20), ",") + `]}`)
+}
+
+type fakeStatusReporter struct {
+	events []StatusEvent
+}
+
+func (r *fakeStatusReporter) Report(event StatusEvent) {
+	r.events = append(r.events, event)
+}
+
+type upStatusMatch struct {
+	ID          string
+	State       StatusState
+	Description string
+}
+
+func (r *fakeStatusReporter) contains(match upStatusMatch) bool {
+	for _, event := range r.events {
+		if event.ID == match.ID && event.State == match.State && event.Description == match.Description {
+			return true
+		}
+	}
+	return false
 }
 
 func flattenArgs(commands []toolrunner.Command) []string {

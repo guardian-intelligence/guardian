@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"strings"
 
@@ -61,7 +62,7 @@ func runUp(args []string) error {
 	}
 	loaded, err := config.Load(parsed.HostPath)
 	if err != nil {
-		res := up.Result{Outcome: "NeedsConfig", Code: "config.load"}
+		res := up.Result{Outcome: "NeedsConfig", Code: configLoadCode(err), SourcePath: parsed.HostPath}
 		_ = output.Write(os.Stdout, res, parsed.Format)
 		return errSilent
 	}
@@ -103,6 +104,13 @@ func runUp(args []string) error {
 		return nil
 	}
 	return errSilent
+}
+
+func configLoadCode(err error) string {
+	if errors.Is(err, fs.ErrNotExist) {
+		return "config.path.notFound"
+	}
+	return "config.load"
 }
 
 var errHelp = errors.New("help")
