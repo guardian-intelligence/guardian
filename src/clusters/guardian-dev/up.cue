@@ -11,10 +11,20 @@ cluster: {
 	advertisedCIDR: "206.223.228.100/31"
 }
 
+provider: {
+	name: "latitude"
+	serverId: "sv_vAPXaMxKM5epz"
+	tokenEnv: "LATITUDE_API_KEY"
+	reinstall: true
+	talosSchematic: "talos/schematic.yaml"
+	talosVersion: "v1.13.4"
+	refuseProdNames: true
+}
+
 node: {
 	name: "ash-bm-001"
 	address: "206.223.228.101"
-	hostname: "gi-ash-bm-001"
+	hostname: "gi-ash-dev-platform-01"
 	interfaceMac: "90:5a:08:33:ba:9f"
 	installDiskSerial: "362510FCEFB8"
 	role: "control-plane"
@@ -41,6 +51,11 @@ bootstrap: {
 	destructive: true
 	requireMaintenance: true
 	targetState: "talos-maintenance"
+	genesis: {
+		ageRecipients: [
+			"age1e95feklupyh40qa24vly650vg0qmljcsfhqd66fwhwa82j3uefnsxed3s8",
+		]
+	}
 }
 
 hello: {
