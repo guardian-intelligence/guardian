@@ -1,0 +1,4 @@
+# Single-box host: the control plane node also schedules workloads.
+# Applied via `talosctl gen config --config-patch @<this file>`.
+cluster:
+  allowSchedulingOnControlPlanes: true

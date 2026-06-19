@@ -1,0 +1,15 @@
+package environment
+
+name: "dev"
+cluster: "guardian-nonprod"
+namespace: "guardian-dev"
+
+crossplane: {
+	environmentConfig: "guardian-dev"
+}
+
+domains: {
+	company: "dev.guardianintelligence.org"
+	aisucks: "dev.aisucks.app"
+	oci: "oci.guardianintelligence.org"
+}

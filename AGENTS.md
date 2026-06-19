@@ -1,6 +1,6 @@
 Bazel polyglot hermetically sealed monorepo for Guardian, a free open-source self-hostable cloud. The `guardian` CLI owns host lifecycle: stock Ubuntu or Talos maintenance -> Talos/Flux v2 bootstrap. Flux owns GitOps reconciliation across clusters at runtime. Distributables (binaries, npm packages, PyPI packages, Rust crates) are OCI native with industry-leading supply-chain security: cosign v3, SLSA 1.2 provenance, in-toto attestations, SBOM + licenses. OpenBao Transit signs fleet-owned gate verdicts, channel pointers, and deployment evidence. Ecosystem packages are therefore just projections of our verified OCI subjects. Every distributable owns its own release process and promotion gates.
 
-Pitch: CozyStack for agents.
+Pitch: `guardian` CLI wraps CozyStack bootstrapping + compute providers + user-configuration.
 
 Reference Cozystack for prior art for the cloud portion.
 
