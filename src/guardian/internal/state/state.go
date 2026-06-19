@@ -9,14 +9,15 @@ import (
 )
 
 type Layout struct {
-	Root           string `json:"root"`
-	TalmProject    string `json:"talmProject"`
-	NodeConfig     string `json:"nodeConfig"`
-	Kubeconfig     string `json:"kubeconfig"`
-	Platform       string `json:"platform"`
-	HelloWorld     string `json:"helloWorld"`
-	Operation      string `json:"operation"`
-	GenesisArchive string `json:"genesisArchive"`
+	Root              string `json:"root"`
+	TalmProject       string `json:"talmProject"`
+	TalmValues        string `json:"talmValues"`
+	NodeConfig        string `json:"nodeConfig"`
+	Talosconfig       string `json:"talosconfig"`
+	Kubeconfig        string `json:"kubeconfig"`
+	CozystackPlatform string `json:"cozystackPlatform"`
+	Operation         string `json:"operation"`
+	GenesisArchive    string `json:"genesisArchive"`
 }
 
 type Operation struct {
@@ -37,14 +38,15 @@ func Open(clusterName string) (*Layout, error) {
 	}
 	root := filepath.Join(base, "guardian", "clusters", clusterName)
 	layout := &Layout{
-		Root:           root,
-		TalmProject:    filepath.Join(root, "talm"),
-		NodeConfig:     filepath.Join(root, "talm", "nodes", "controlplane.yaml"),
-		Kubeconfig:     filepath.Join(root, "talm", "kubeconfig"),
-		Platform:       filepath.Join(root, "cozystack-platform.yaml"),
-		HelloWorld:     filepath.Join(root, "hello-world.yaml"),
-		Operation:      filepath.Join(root, "operation.json"),
-		GenesisArchive: filepath.Join(root, "genesis.bundle.tar.age"),
+		Root:              root,
+		TalmProject:       filepath.Join(root, "talm"),
+		TalmValues:        filepath.Join(root, "talm", "values.yaml"),
+		NodeConfig:        filepath.Join(root, "talm", "nodes", "controlplane.yaml"),
+		Talosconfig:       filepath.Join(root, "talm", "talosconfig"),
+		Kubeconfig:        filepath.Join(root, "talm", "kubeconfig"),
+		CozystackPlatform: filepath.Join(root, "cozystack-platform.yaml"),
+		Operation:         filepath.Join(root, "operation.json"),
+		GenesisArchive:    filepath.Join(root, "genesis.bundle.tar.age"),
 	}
 	for _, dir := range []string{layout.Root, layout.TalmProject, filepath.Dir(layout.NodeConfig)} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {

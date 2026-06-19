@@ -22,7 +22,7 @@ const usage = `usage:
   guardian up -f <host.cue> [--execute] [--output text|json|yaml|toml] [--status auto|tui|plain|off]
 
 guardian owns only host come-up: Talos via Talm, Kubernetes bootstrap,
-Cozystack platform install, and a default hello-world handoff marker.`
+Cozystack installer handoff/status, and genesis recovery material.`
 
 func main() {
 	if len(os.Args) < 2 {
@@ -61,9 +61,9 @@ func runUp(args []string) error {
 	}
 	loaded, err := config.Load(parsed.HostPath)
 	if err != nil {
-		res := up.Result{Outcome: "NeedsConfig", Reason: err.Error()}
+		res := up.Result{Outcome: "NeedsConfig", Code: "config.load"}
 		_ = output.Write(os.Stdout, res, parsed.Format)
-		return fmt.Errorf("up: %w", err)
+		return errSilent
 	}
 	tools, err := resolveTools()
 	if err != nil {
@@ -73,9 +73,14 @@ func runUp(args []string) error {
 	if err != nil {
 		return err
 	}
-	defer closeStatus()
+	statusClosed := false
+	defer func() {
+		if !statusClosed {
+			_ = closeStatus()
+		}
+	}()
 	runner := toolrunner.RealRunner{}
-	if statusReporter != nil {
+	if statusReporter != nil || parsed.Format != "text" {
 		runner.Stdout = io.Discard
 		runner.Stderr = io.Discard
 	}
@@ -83,7 +88,12 @@ func runUp(args []string) error {
 		Execute: parsed.Execute,
 		Status:  statusReporter,
 	})
-	humanStatus := parsed.Execute && parsed.Status != "off" && parsed.Format == "text"
+	if err := closeStatus(); err != nil {
+		statusClosed = true
+		return err
+	}
+	statusClosed = true
+	humanStatus := statusReporter != nil && parsed.Format == "text"
 	if !humanStatus {
 		if err := output.Write(os.Stdout, res, parsed.Format); err != nil {
 			return err
@@ -92,10 +102,7 @@ func runUp(args []string) error {
 	if res.Outcome == "Converged" || res.Outcome == "Planned" {
 		return nil
 	}
-	if humanStatus {
-		return errSilent
-	}
-	return fmt.Errorf("up: %s: %s", res.Outcome, res.Reason)
+	return errSilent
 }
 
 var errHelp = errors.New("help")
@@ -178,7 +185,7 @@ func setHostPath(parsed *upArgs, path string) error {
 }
 
 func newStatusReporter(parsed upArgs, clusterName string) (up.StatusReporter, func() error, error) {
-	if !parsed.Execute || parsed.Status == "off" {
+	if !parsed.Execute || parsed.Status == "off" || (parsed.Status == "auto" && parsed.Format != "text") {
 		return nil, func() error { return nil }, nil
 	}
 	mode := parsed.Status
@@ -230,5 +237,9 @@ func resolveTools() (up.Tools, error) {
 	if err != nil {
 		return up.Tools{}, err
 	}
-	return up.Tools{Talm: talm, Talos: talos, Kubectl: kubectl, Helm: helm}, nil
+	bootToTalos, err := resolve("boot-to-talos", "boot_to_talos_linux_amd64/boot-to-talos")
+	if err != nil {
+		return up.Tools{}, err
+	}
+	return up.Tools{Talm: talm, Talos: talos, Kubectl: kubectl, Helm: helm, BootToTalos: bootToTalos}, nil
 }

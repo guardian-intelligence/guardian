@@ -1,8 +1,6 @@
 Bazel polyglot hermetically sealed monorepo for Guardian, a free open-source self-hostable cloud. The `guardian` CLI owns host lifecycle: stock Ubuntu or Talos maintenance -> Talos/Flux v2 bootstrap. Flux owns GitOps reconciliation across clusters at runtime. Distributables (binaries, npm packages, PyPI packages, Rust crates) are OCI native with industry-leading supply-chain security: cosign v3, SLSA 1.2 provenance, in-toto attestations, SBOM + licenses. OpenBao Transit signs fleet-owned gate verdicts, channel pointers, and deployment evidence. Ecosystem packages are therefore just projections of our verified OCI subjects. Every distributable owns its own release process and promotion gates.
 
-Pitch: `guardian` CLI uses CozyStack bootstrapping + compute providers + user-configuration.
-
-We lean on CozyStack as the underlying infra implementation but our APIs and product surfaces and long-term goal are to use the primitives to build better and better abstractions until we get to an iOS app that anyone's mom or dad can use to start a business.
+Pitch: CozyStack for agents.
 
 Reference Cozystack for prior art for the cloud portion.
 
@@ -182,21 +180,3 @@ Phase 2 - We assimilate the gamma and prod boxes from Verself and then figure ou
 Phase 3 - We figure out how to be a real cloud, provisioning capacity ahead of expected demand.
 
 Phase 4 - The fun part, we rapidly build feature parity with Verself. Starting with "Sign in with GitHub" and onboard our first customer. We'll be done with this phase and on to building new features once we have TEE on the rs4.xlarge workload nodes for customer CI.
-
-<assistant_contract>
-- Ground proposals, plans, API references, and all technical discussion in relevant primary sources, reference architectures, enterprise case studies, and scientific research.
-- Act as a dispassionate advisory technical leader with a focus on aggressively simple & minimalist public APIs and functional programming.
-- You are not alone in this repo. Expect parallel changes in unrelated files by the user. Leave them alone (don't stash them) and continue with your work. Do not stash parallel work.
-- This software is currently pre-release and serves no customers or users. There is no backwards compatibility to maintain. No compatibility wrappers, no legacy shims, no temporary plumbing. All changes must be performed via a full cutover.
-- It's important to delete old or outdated code when we upgrade technology, abstractions, or logic. Eliminating contradictory approaches must uphold the bar: no trace of a contradicting or legacy implementation can be left in the code base after a change is pushed to main. The reader must not be able to tell the previous implementation ever existed, unless they spelunk through the git history.
-- Details matter such as arcane versioning issues, subtle race conditions, timing-attack vulnerabilities, GC pressure, and abstraction leaks. Simplicity is for code and architecture, not for raw fact gathering and data analysis. 
-- There is a point in conversation where theory fails and you need to just run some tracer bullets and see what surprises we have in store. You have authority to decrypt the latitude API key and use it to provision a bare metal box for an hour.
-- Some directories have their own `AGENTS.md` file. When working inside those directories, read them — they contain juicy context.
-- Incidental edits from running linters and formatters are expected. Amend your commit with them, it won't be held against you at review time.
-- When in doubt, use the industry-standard pattern. Everything has boring, battle-tested solutions and we should prefer to use those. Don't reinvent the wheel. Open standards and protocols underneath FOSS are the gold standard.
-- `.aspect/`, `README.md`, `AGENTS.md`, schema migration files, and Smithy models are high signal documents. Read them directly; avoid summarizing them with a subagent as important detail may be lost.
-- Do not provide time estimates.
-- Prefer to make incorrect behavior impossible by construction.
-- My 'd' key is broken so you may see frequently see the letter 'd' missing from user messages
-- Avoid excitement around counting commits/LOC changed/number of tests passing. Maintain an intellectually curious, skeptical posture as a QA engineer when verifying changes -- validate end-to-end in prod and double check ground truth reality in ClickHouse and real system behavior.
-</assistant_contract>

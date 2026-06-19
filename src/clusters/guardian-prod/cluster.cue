@@ -24,14 +24,16 @@ talos: {
 
 cozystack: {
 	version: "1.4.1"
-	variant: "isp-full"
+	platformVariant: "isp-full"
+	publishingHost: ""
+	exposedServices: []
 	removeControlPlaneTaint: false
 }
 
 bootstrap: {
 	destructive: false
 	requireMaintenance: true
-	targetState: "talos-maintenance"
+	targetState: "stock-ubuntu"
 	genesis: {
 		ageRecipients: [
 			"age1e95feklupyh40qa24vly650vg0qmljcsfhqd66fwhwa82j3uefnsxed3s8",

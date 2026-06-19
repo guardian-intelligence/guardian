@@ -26,8 +26,14 @@ func TestLoadHostConfigWithClusterAndEnvironment(t *testing.T) {
 	if loaded.Config.Talm.TalosVersion != "v1.13" {
 		t.Fatalf("talm talos version = %q", loaded.Config.Talm.TalosVersion)
 	}
-	if loaded.Config.Cozystack.PublishingHost != "dev.guardianintelligence.org" {
-		t.Fatalf("publishing host = %q", loaded.Config.Cozystack.PublishingHost)
+	if loaded.Config.Cozystack.Version != "1.4.1" {
+		t.Fatalf("cozystack version = %q", loaded.Config.Cozystack.Version)
+	}
+	if loaded.Config.Node.InterfaceName != "eno1" {
+		t.Fatalf("node interface name = %q", loaded.Config.Node.InterfaceName)
+	}
+	if loaded.Config.Cozystack.PlatformVariant != "isp-full" {
+		t.Fatalf("cozystack platform variant = %q", loaded.Config.Cozystack.PlatformVariant)
 	}
 	if !loaded.Config.Bootstrap.Destructive {
 		t.Fatalf("bootstrap destructive = false, want true")
@@ -85,6 +91,7 @@ network: {
 	ipv4: "206.223.228.101"
 	gateway: "206.223.228.100"
 	prefixLength: 31
+	interfaceName: "eno1"
 	interfaceMAC: "90:5a:08:33:ba:9f"
 }
 disks: installSerial: "362510FCEFB8"
@@ -117,13 +124,15 @@ talos: {
 }
 cozystack: {
 	version: "1.4.1"
-	variant: "isp-full"
+	platformVariant: "isp-full"
+	publishingHost: ""
+	exposedServices: []
 	removeControlPlaneTaint: true
 }
 bootstrap: {
 	destructive: true
 	requireMaintenance: true
-	targetState: "talos-maintenance"
+	targetState: "stock-ubuntu"
 	genesis: ageRecipients: ["age1e95feklupyh40qa24vly650vg0qmljcsfhqd66fwhwa82j3uefnsxed3s8"]
 }
 `)

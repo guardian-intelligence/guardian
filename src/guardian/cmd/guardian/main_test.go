@@ -7,15 +7,15 @@ func TestParseUpArgsRequiresHostFileFlag(t *testing.T) {
 		name string
 		args []string
 	}{
-		{name: "short file flag", args: []string{"-f", "src/hosts/ash-bm-001/host.cue", "--output=json", "--status=plain", "--execute"}},
-		{name: "long file flag", args: []string{"--file=src/hosts/ash-bm-001/host.cue", "--output=json", "--status=plain", "--execute"}},
+		{name: "short file flag", args: []string{"-f", "src/hosts/ash-bm-004/host.cue", "--output=json", "--status=plain", "--execute"}},
+		{name: "long file flag", args: []string{"--file=src/hosts/ash-bm-004/host.cue", "--output=json", "--status=plain", "--execute"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			parsed, err := parseUpArgs(tc.args)
 			if err != nil {
 				t.Fatalf("parseUpArgs() error = %v", err)
 			}
-			if parsed.HostPath != "src/hosts/ash-bm-001/host.cue" {
+			if parsed.HostPath != "src/hosts/ash-bm-004/host.cue" {
 				t.Fatalf("host path = %q", parsed.HostPath)
 			}
 			if !parsed.Execute {
@@ -32,7 +32,7 @@ func TestParseUpArgsRequiresHostFileFlag(t *testing.T) {
 }
 
 func TestParseUpArgsRejectsPositionalHost(t *testing.T) {
-	if _, err := parseUpArgs([]string{"src/hosts/ash-bm-001/host.cue"}); err == nil {
+	if _, err := parseUpArgs([]string{"src/hosts/ash-bm-004/host.cue"}); err == nil {
 		t.Fatalf("parseUpArgs() error = nil, want rejection")
 	}
 }
@@ -56,7 +56,23 @@ func TestParseUpArgsRejectsMissingFileFlagValue(t *testing.T) {
 }
 
 func TestParseUpArgsRejectsUnsupportedStatus(t *testing.T) {
-	if _, err := parseUpArgs([]string{"-f", "src/hosts/ash-bm-001/host.cue", "--status=verbose"}); err == nil {
+	if _, err := parseUpArgs([]string{"-f", "src/hosts/ash-bm-004/host.cue", "--status=verbose"}); err == nil {
 		t.Fatalf("parseUpArgs() error = nil, want rejection")
+	}
+}
+
+func TestAutoStatusIsOffForStructuredOutput(t *testing.T) {
+	reporter, closeStatus, err := newStatusReporter(upArgs{
+		HostPath: "src/hosts/ash-bm-004/host.cue",
+		Execute:  true,
+		Format:   "toml",
+		Status:   "auto",
+	}, "guardian-nonprod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeStatus()
+	if reporter != nil {
+		t.Fatalf("reporter = %#v, want nil for structured output with --status=auto", reporter)
 	}
 }

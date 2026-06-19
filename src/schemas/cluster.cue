@@ -26,14 +26,16 @@ package schemas
 
 	cozystack: {
 		version:                 string
-		variant:                 *"isp-full" | string
+		platformVariant:         *"isp-full" | "isp-full" | "isp-hosted" | "isp-full-generic"
+		publishingHost:          *"" | string
+		exposedServices:         *([]) | [...("api" | "dashboard" | "cdi-uploadproxy" | "vm-exportproxy")]
 		removeControlPlaneTaint: *false | bool
 	}
 
 	bootstrap: {
 		destructive:        bool
 		requireMaintenance: bool
-		targetState:        *"talos-maintenance" | "talos-maintenance"
+		targetState:        *"stock-ubuntu" | "stock-ubuntu"
 		genesis: {
 			ageRecipients: [...=~"^age1"]
 		}

@@ -1,7 +1,6 @@
 package up
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -20,11 +19,8 @@ const (
 )
 
 type StatusFailure struct {
-	Code      string             `json:"code,omitempty" yaml:"code,omitempty" toml:"code,omitempty"`
-	Summary   string             `json:"summary,omitempty" yaml:"summary,omitempty" toml:"summary,omitempty"`
-	Detail    string             `json:"detail,omitempty" yaml:"detail,omitempty" toml:"detail,omitempty"`
-	NextSteps []string           `json:"nextSteps,omitempty" yaml:"nextSteps,omitempty" toml:"nextSteps,omitempty"`
-	Command   toolrunner.Command `json:"command,omitempty" yaml:"command,omitempty" toml:"command,omitempty"`
+	Code    string             `json:"code,omitempty" yaml:"code,omitempty" toml:"code,omitempty"`
+	Command toolrunner.Command `json:"command,omitempty" yaml:"command,omitempty" toml:"command,omitempty"`
 }
 
 type StatusEvent struct {
@@ -34,7 +30,6 @@ type StatusEvent struct {
 	State       StatusState    `json:"state" yaml:"state" toml:"state"`
 	Title       string         `json:"title" yaml:"title" toml:"title"`
 	Description string         `json:"description,omitempty" yaml:"description,omitempty" toml:"description,omitempty"`
-	Detail      string         `json:"detail,omitempty" yaml:"detail,omitempty" toml:"detail,omitempty"`
 	Failure     *StatusFailure `json:"failure,omitempty" yaml:"failure,omitempty" toml:"failure,omitempty"`
 	StartedAt   time.Time      `json:"startedAt,omitempty" yaml:"startedAt,omitempty" toml:"startedAt,omitempty"`
 	EndedAt     time.Time      `json:"endedAt,omitempty" yaml:"endedAt,omitempty" toml:"endedAt,omitempty"`
@@ -92,31 +87,52 @@ var (
 		ParentID:    "prepare",
 		ParentTitle: "Prepare bootstrap",
 		Title:       "Check bootstrap safety",
-		Description: "Verify destructive gates and genesis recipients",
-	}
-	renderStep = StepSpec{
-		ID:          "render-manifests",
-		ParentID:    "prepare",
-		ParentTitle: "Prepare bootstrap",
-		Title:       "Render manifests",
-		Description: "Write Talos, Cozystack, and handoff manifests",
+		Description: "Verify stock Ubuntu target, destructive gates, and genesis recipients",
 	}
 )
 
 var commandStepSpecs = map[string]StepSpec{
 	"talm-init": {
 		ID:          "talm-init",
-		ParentID:    "talos",
-		ParentTitle: "Install Talos",
+		ParentID:    "ubuntu",
+		ParentTitle: "Prepare Ubuntu host",
 		Title:       "Initialize Talm",
 		Description: "Create the local Talos project state",
 	},
 	"talm-template": {
 		ID:          "talm-template",
+		ParentID:    "ubuntu",
+		ParentTitle: "Prepare Ubuntu host",
+		Title:       "Render Talos config",
+		Description: "Generate machine config offline from repo facts",
+	},
+	"write-talm-values": {
+		ID:          "write-talm-values",
+		ParentID:    "ubuntu",
+		ParentTitle: "Prepare Ubuntu host",
+		Title:       "Write Talm values",
+		Description: "Pin cluster-wide values from repo facts",
+	},
+	"write-talm-template-overrides": {
+		ID:          "write-talm-template-overrides",
+		ParentID:    "ubuntu",
+		ParentTitle: "Prepare Ubuntu host",
+		Title:       "Pin Talm template facts",
+		Description: "Use repo-owned host facts during Talm apply",
+	},
+	"boot-to-talos-install": {
+		ID:          "boot-to-talos-install",
 		ParentID:    "talos",
 		ParentTitle: "Install Talos",
-		Title:       "Render Talos config",
-		Description: "Generate machine config for the target node",
+		Title:       "Install Talos from Ubuntu",
+		Description: "Run the pinned boot-to-talos installer on the target disk",
+	},
+	"wait-talos-maintenance-api": {
+		ID:          "wait-talos-maintenance-api",
+		ParentID:    "talos",
+		ParentTitle: "Install Talos",
+		Title:       "Wait for Talos maintenance",
+		Description: "Wait for the Talos API after boot-to-talos",
 	},
 	"talm-dry-run": {
 		ID:          "talm-dry-run",
@@ -136,8 +152,8 @@ var commandStepSpecs = map[string]StepSpec{
 		ID:          "wait-talos-api",
 		ParentID:    "talos",
 		ParentTitle: "Install Talos",
-		Title:       "Wait for Talos API",
-		Description: "Wait for the Talos API to accept connections",
+		Title:       "Wait for configured Talos",
+		Description: "Wait for Talos API after applying machine config",
 	},
 	"talm-bootstrap": {
 		ID:          "talm-bootstrap",
@@ -152,6 +168,20 @@ var commandStepSpecs = map[string]StepSpec{
 		ParentTitle: "Bootstrap Kubernetes",
 		Title:       "Fetch kubeconfig",
 		Description: "Write the local admin kubeconfig",
+	},
+	"kubectl-wait-kubernetes-api": {
+		ID:          "kubectl-wait-kubernetes-api",
+		ParentID:    "kubernetes",
+		ParentTitle: "Bootstrap Kubernetes",
+		Title:       "Wait for Kubernetes API",
+		Description: "Wait for API server readiness",
+	},
+	"kubectl-wait-node-registered": {
+		ID:          "kubectl-wait-node-registered",
+		ParentID:    "kubernetes",
+		ParentTitle: "Bootstrap Kubernetes",
+		Title:       "Wait for node registration",
+		Description: "Wait for the Talos node object",
 	},
 	"write-genesis-bundle": {
 		ID:          "write-genesis-bundle",
@@ -171,43 +201,50 @@ var commandStepSpecs = map[string]StepSpec{
 		ID:          "helm-install-cozystack",
 		ParentID:    "cozystack",
 		ParentTitle: "Install Cozystack",
-		Title:       "Install operator",
-		Description: "Install the pinned Cozystack operator",
+		Title:       "Run installer",
+		Description: "Hand off to the pinned Cozystack installer",
 	},
 	"kubectl-wait-cozystack-operator": {
 		ID:          "kubectl-wait-cozystack-operator",
 		ParentID:    "cozystack",
 		ParentTitle: "Install Cozystack",
-		Title:       "Wait for operator",
-		Description: "Wait for the Cozystack operator rollout",
+		Title:       "Observe operator",
+		Description: "Report Cozystack operator rollout status",
 	},
-	"kubectl-apply-platform": {
-		ID:          "kubectl-apply-platform",
+	"write-cozystack-platform": {
+		ID:          "write-cozystack-platform",
+		ParentID:    "cozystack",
+		ParentTitle: "Install Cozystack",
+		Title:       "Render platform package",
+		Description: "Write the Cozystack platform Package from repo facts",
+	},
+	"kubectl-apply-cozystack-platform": {
+		ID:          "kubectl-apply-cozystack-platform",
 		ParentID:    "cozystack",
 		ParentTitle: "Install Cozystack",
 		Title:       "Apply platform package",
-		Description: "Apply the default Cozystack package",
+		Description: "Create the Cozystack platform Package",
 	},
 	"kubectl-wait-platform-package": {
 		ID:          "kubectl-wait-platform-package",
 		ParentID:    "cozystack",
 		ParentTitle: "Install Cozystack",
-		Title:       "Wait for platform",
-		Description: "Wait for the Cozystack package to become ready",
+		Title:       "Observe platform package",
+		Description: "Wait for the Cozystack Package controller",
 	},
-	"kubectl-get-helmreleases": {
-		ID:          "kubectl-get-helmreleases",
+	"kubectl-wait-node-ready": {
+		ID:          "kubectl-wait-node-ready",
 		ParentID:    "cozystack",
 		ParentTitle: "Install Cozystack",
-		Title:       "Read Helm releases",
-		Description: "Capture Cozystack HelmRelease state",
+		Title:       "Wait for node readiness",
+		Description: "Wait for platform networking to make nodes Ready",
 	},
-	"kubectl-apply-hello-world": {
-		ID:          "kubectl-apply-hello-world",
-		ParentID:    "handoff",
-		ParentTitle: "Handoff",
-		Title:       "Apply hello world",
-		Description: "Apply the default handoff marker",
+	"kubectl-wait-cozystack-helmreleases": {
+		ID:          "kubectl-wait-cozystack-helmreleases",
+		ParentID:    "cozystack",
+		ParentTitle: "Install Cozystack",
+		Title:       "Observe platform releases",
+		Description: "Wait for generated Cozystack HelmReleases",
 	},
 }
 
@@ -231,60 +268,23 @@ func reportStatus(reporter StatusReporter, spec StepSpec, state StatusState, now
 	case StatusDone, StatusSkipped, StatusFailed, StatusBlocked:
 		event.EndedAt = t
 	}
-	if failure != nil {
-		event.Detail = failure.Detail
-	}
 	reporter.Report(event)
 }
 
-func failureForCommand(cmd toolrunner.Command, spec StepSpec, err error) *StatusFailure {
-	return failureFor(
-		cmd.Name,
-		fmt.Sprintf("%s failed", spec.Title),
-		err.Error(),
-		&cmd,
-	)
+func failureForCommand(cmd toolrunner.Command) *StatusFailure {
+	return failureFor(cmd.Name, &cmd)
 }
 
-func failureFor(code, summary, detail string, cmd *toolrunner.Command) *StatusFailure {
+func failureForCommandOutput(cmd toolrunner.Command) *StatusFailure {
+	return failureFor(cmd.Name, &cmd)
+}
+
+func failureFor(code string, cmd *toolrunner.Command) *StatusFailure {
 	failure := &StatusFailure{
-		Code:      code,
-		Summary:   summary,
-		Detail:    detail,
-		NextSteps: nextStepsForFailure(code, detail),
+		Code: code,
 	}
 	if cmd != nil {
 		failure.Command = *cmd
 	}
 	return failure
-}
-
-func nextStepsForFailure(code, detail string) []string {
-	switch {
-	case code == "bootstrap.genesis.ageRecipients" || strings.Contains(detail, "ageRecipients"):
-		return []string{
-			"Add at least one public age recipient to bootstrap.genesis.ageRecipients.",
-			"Keep the matching private identity outside the repo.",
-		}
-	case code == "bootstrap.safety":
-		return []string{
-			"Confirm the target host is safe to wipe.",
-			"Set bootstrap.destructive and bootstrap.requireMaintenance only for an intended bootstrap run.",
-		}
-	case strings.Contains(detail, "LATITUDE_API_KEY"):
-		return []string{
-			"Export LATITUDE_API_KEY with a Latitude API token.",
-			"Run the same guardian up command again.",
-		}
-	case strings.Contains(detail, "timed out") && strings.Contains(detail, "50000"):
-		return []string{
-			"Verify the host is powered on and reachable on the Talos API port.",
-			"Check the provider console if the host did not reboot into Talos.",
-		}
-	default:
-		return []string{
-			"Review the full command detail with --status=plain.",
-			"Run the same guardian up command again after correcting the failure.",
-		}
-	}
 }

@@ -15,11 +15,11 @@ snapshot, static assets, and certificate material to answer public requests.
 
 ## Configuration boundary
 
-`host.cue` stays physical: hostnames, IPs, MACs, disk serials, Talos
+`host.yaml` stays physical: hostnames, IPs, MACs, disk serials, Talos
 schematics, gateways, and cluster bootstrap inputs. Crossplane never owns these
 because Crossplane only exists after Kubernetes exists.
 
-`environment.cue` is post-Kubernetes desired state: one `EnvironmentConfig`,
+`environment.yaml` is post-Kubernetes desired state: one `EnvironmentConfig`,
 root platform XRs, product XRs, secret projections, SLO declarations, and
 synthetic route declarations.
 

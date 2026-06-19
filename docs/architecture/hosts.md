@@ -2,16 +2,12 @@
 
 Guardian separates physical capacity from runtime intent.
 
-`src/hosts/<asset-id>/host.cue` is the durable record for one bare-metal
+`src/hosts/<asset-id>/host.yaml` is the durable record for one bare-metal
 asset. The asset ID is stable across wipes, hostnames, cluster assignments, and
 environment changes. A hostname describes the current assignment; it can change
 without changing the asset ID.
 
-See `docs/architecture/repo-structure.md` for the full Cozystack-native source
-layout and the boundary between OpenTofu, host facts, clusters, environments,
-and `guardian up`.
-
-`guardian` owns only host come-up. It reads `host.cue`, generates Talos
+`guardian` owns only host come-up. It reads `host.yaml`, generates Talos
 machine config from pinned repo inputs, verifies runtime hardware truth, applies
 Talos config, bootstraps Kubernetes, seeds the minimum substrate, and hands off
 to reconcilers. It does not provision provider servers, choose product versions,
@@ -30,10 +26,10 @@ The host command surface is intentionally small:
 
 ```bash
 guardian host list
-guardian host inspect [host.cue]
-guardian host use <host.cue>
-guardian down --yes [host.cue]
-guardian up [--restore <file|url> --sha256 <hex>] [host.cue]
+guardian host inspect [host.yaml]
+guardian host use <host.yaml>
+guardian down --yes [host.yaml]
+guardian up [--restore <file|url> --sha256 <hex>] [host.yaml]
 ```
 
 `guardian host list` reads checked-in inventory. `guardian host inspect`

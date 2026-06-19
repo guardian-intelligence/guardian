@@ -16,8 +16,5 @@ go_test(
     name = "status_test",
     srcs = ["status_test.go"],
     embed = [":status"],
-    deps = [
-        "//src/guardian/internal/up",
-        "@com_github_charmbracelet_bubbletea//:bubbletea",
-    ],
+    deps = ["//src/guardian/internal/up"],
 )

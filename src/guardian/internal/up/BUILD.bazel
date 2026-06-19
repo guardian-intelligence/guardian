@@ -3,6 +3,7 @@ load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "up",
     srcs = [
+        "boot_to_talos.go",
         "status.go",
         "up.go",
     ],
@@ -14,6 +15,7 @@ go_library(
         "//src/guardian/internal/state",
         "//src/guardian/internal/toolrunner",
         "@in_gopkg_yaml_v3//:yaml_v3",
+        "@org_golang_x_crypto//ssh",
     ],
 )
 

@@ -15,7 +15,7 @@ Setup for every step (repo root, per site):
 
 ```sh
 export KUBECONFIG=~/.local/state/guardian/guardian-<site>/kubeconfig
-export RUNFILES_DIR="$(bazelisk info bazel-bin 2>/dev/null)/src/guardian/cmd/guardian/guardian_/guardian.runfiles"
+export RUNFILES_DIR="$(bazelisk info bazel-bin 2>/dev/null)/src/guardian-cli/cmd/guardian/guardian_/guardian.runfiles"
 ```
 
 ## 1. Converge
@@ -34,7 +34,7 @@ would split truth between Kubernetes and OpenBao and would be lost on a
 wipe/restore.
 
 ```sh
-bazel run //src/guardian/cmd/guardian -- up -f src/hosts/<host>/host.cue
+bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/hosts/<host>/host.yaml
 ```
 
 Paging hygiene: the converge restarts the collector (`Recreate` strategy) —

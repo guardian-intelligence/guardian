@@ -17,8 +17,6 @@ func TestWriteEncryptedCreatesAgeBundle(t *testing.T) {
 		"talm/secrets.yaml":            "secrets",
 		"talm/nodes/controlplane.yaml": "machine",
 		"talm/kubeconfig":              "kubeconfig",
-		"cozystack-platform.yaml":      "platform",
-		"hello-world.yaml":             "hello",
 		"operation.json":               "{}",
 	} {
 		full := filepath.Join(root, filepath.FromSlash(path))
@@ -46,16 +44,14 @@ func TestWriteEncryptedCreatesAgeBundle(t *testing.T) {
 			"talm/secrets.yaml",
 			"talm/nodes/controlplane.yaml",
 			"talm/kubeconfig",
-			"cozystack-platform.yaml",
-			"hello-world.yaml",
 			"operation.json",
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(manifest.Files) != 7 {
-		t.Fatalf("manifest files = %d, want 7", len(manifest.Files))
+	if len(manifest.Files) != 5 {
+		t.Fatalf("manifest files = %d, want 5", len(manifest.Files))
 	}
 	raw, err := os.ReadFile(output)
 	if err != nil {

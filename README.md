@@ -3,10 +3,11 @@
 Guardian is being cut over to a Cozystack-native bootstrap.
 
 The active `guardian` CLI has one job: host come-up. It takes a
-pre-provisioned bare-metal node that is already in Talos maintenance mode,
-renders and applies a Cozystack Talm project, bootstraps Kubernetes, installs
-the Cozystack operator/platform package, writes an encrypted genesis secret
-bundle, and applies a default hello-world handoff manifest.
+pre-provisioned bare-metal node that starts from stock Ubuntu, renders a
+Cozystack Talm project from repo facts, installs Talos with the pinned
+boot-to-talos tool, bootstraps Kubernetes, writes an encrypted genesis secret
+bundle, and hands off to the Cozystack installer. Runtime platform configuration
+belongs to Flux/Crossplane after that handoff.
 
 The previous source tree is preserved under `src-old/` for reference only. It
 is ignored by Bazel and is not part of the active command surface.
@@ -18,7 +19,6 @@ src/guardian/                  new Go CLI and host-bootstrap packages
 src/hosts/                     physical host facts and Talos inputs
 src/clusters/                  nonprod/prod cluster bootstrap intent
 src/environments/              Crossplane/Flux environment bags
-src/fleet/opentofu/            provider-owned fleet state
 src/schemas/                   CUE schemas for first-party config
 src/tools/                     pinned runfile tool archives
 src-old/                       archived pre-Cozystack implementation
@@ -33,18 +33,18 @@ Run from the repo root.
 bazel test //...
 
 bazel run //src/guardian/cmd/guardian -- \
-  up -f src/hosts/ash-bm-001/host.cue --output json
+  up -f src/hosts/ash-bm-004/host.cue --output json
 ```
 
 Plan mode is the default. Destructive execution requires `--execute`, a host
 assignment that allows destructive bootstrap, and a cluster config that
-explicitly opts into maintenance-mode reimage:
+explicitly opts into stock-Ubuntu-to-Talos install:
 
 ```cue
 bootstrap: {
   destructive: true
   requireMaintenance: true
-  targetState: "talos-maintenance"
+  targetState: "stock-ubuntu"
   genesis: ageRecipients: ["age1..."]
 }
 ```
@@ -76,8 +76,8 @@ genesis.bundle.tar.age
 ```
 
 The encrypted bundle contains a manifest plus `talm.key`, `secrets.yaml`, the
-rendered node config, kubeconfig, operation evidence, and generated handoff
-manifests. Nothing from the genesis set is committed to the repo.
+rendered node config, kubeconfig, and operation evidence. Nothing from the
+genesis set is committed to the repo.
 
 ## Pinned Tools
 
@@ -88,6 +88,7 @@ The CLI resolves these from Bazel runfiles, never from `PATH`:
 | Go | `src/guardian/go.mod` |
 | Talm | `src/tools/talm/talm.MODULE.bazel` |
 | talosctl | `src/tools/talosctl/talosctl.MODULE.bazel` |
+| boot-to-talos | `src/tools/boot-to-talos/boot-to-talos.MODULE.bazel` |
 | kubectl | `src/tools/kubectl/kubectl.MODULE.bazel` |
 | Helm | `MODULE.bazel` |
 

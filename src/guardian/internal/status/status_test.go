@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/guardian-intelligence/guardian/src/guardian/internal/up"
 )
 
@@ -30,9 +29,7 @@ func TestModelRendersMinimalTreeAndFailure(t *testing.T) {
 			State:       up.StatusFailed,
 			Title:       "Ask Latitude to boot Talos",
 			Failure: &up.StatusFailure{
-				Summary:   "Latitude API token is missing",
-				Detail:    "LATITUDE_API_KEY must contain a Latitude API token before provider reinstall",
-				NextSteps: []string{"Export LATITUDE_API_KEY.", "Run guardian up again."},
+				Code: "latitude.reinstall",
 			},
 			StartedAt: start,
 			EndedAt:   start.Add(2 * time.Second),
@@ -49,16 +46,18 @@ func TestModelRendersMinimalTreeAndFailure(t *testing.T) {
 		"✓ Prepare bootstrap",
 		"✕ Reimage host",
 		"✕ Ask Latitude to boot Talos",
-		"Latitude API token is missing",
-		"Next:",
-		"Export LATITUDE_API_KEY.",
-		"Press e for details.",
+		"latitude.reinstall",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q:\n%s", want, out)
 		}
 	}
 	for _, reject := range []string{
+		"Next:",
+		"Why:",
+		"Press e",
+		"Details:",
+		"Detail:",
 		"ACTIVE",
 		"done",
 		"skipped",
@@ -73,7 +72,7 @@ func TestModelRendersMinimalTreeAndFailure(t *testing.T) {
 	}
 }
 
-func TestModelTogglesFailureDetails(t *testing.T) {
+func TestModelDoesNotRenderFailureDetails(t *testing.T) {
 	m := newModel("guardian-dev")
 	updated, _ := m.Update(statusMsg{event: up.StatusEvent{
 		ID:          "check-bootstrap-safety",
@@ -82,24 +81,23 @@ func TestModelTogglesFailureDetails(t *testing.T) {
 		State:       up.StatusBlocked,
 		Title:       "Check bootstrap safety",
 		Failure: &up.StatusFailure{
-			Summary: "Bootstrap safety gate is closed",
-			Detail:  "bootstrap.destructive and bootstrap.requireMaintenance must both be true before reimage",
+			Code: "bootstrap.safety",
 		},
 	}})
 	m = updated.(model)
 
-	if strings.Contains(m.View(), "bootstrap.destructive and bootstrap.requireMaintenance") {
-		t.Fatalf("details visible before toggle:\n%s", m.View())
+	out := m.View()
+	if !strings.Contains(out, "bootstrap.safety") {
+		t.Fatalf("code missing:\n%s", out)
 	}
-
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
-	m = updated.(model)
-	if !strings.Contains(m.View(), "bootstrap.destructive and bootstrap.requireMaintenance") {
-		t.Fatalf("details missing after toggle:\n%s", m.View())
+	for _, reject := range []string{"Details:", "Detail:", "bootstrap.destructive"} {
+		if strings.Contains(out, reject) {
+			t.Fatalf("output contains failure detail %q:\n%s", reject, out)
+		}
 	}
 }
 
-func TestPlainRendererPrintsFailureNextSteps(t *testing.T) {
+func TestPlainRendererPrintsFailureCode(t *testing.T) {
 	var buf bytes.Buffer
 	renderer := New(&buf, Options{Mode: ModePlain, ClusterName: "guardian-dev"})
 	renderer.Report(up.StatusEvent{
@@ -107,8 +105,7 @@ func TestPlainRendererPrintsFailureNextSteps(t *testing.T) {
 		State: up.StatusBlocked,
 		Title: "Check bootstrap safety",
 		Failure: &up.StatusFailure{
-			Summary:   "Bootstrap safety gate is closed",
-			NextSteps: []string{"Confirm the target host is safe to wipe."},
+			Code: "bootstrap.safety",
 		},
 	})
 
@@ -116,12 +113,15 @@ func TestPlainRendererPrintsFailureNextSteps(t *testing.T) {
 	for _, want := range []string{
 		"guardian up guardian-dev",
 		"! Check bootstrap safety",
-		"Bootstrap safety gate is closed",
-		"Next:",
-		"Confirm the target host is safe to wipe.",
+		"bootstrap.safety",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("plain output missing %q:\n%s", want, out)
+		}
+	}
+	for _, reject := range []string{"Next:", "Detail:", "reason"} {
+		if strings.Contains(out, reject) {
+			t.Fatalf("plain output contains generated failure text %q:\n%s", reject, out)
 		}
 	}
 }

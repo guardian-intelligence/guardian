@@ -95,22 +95,10 @@ func (r *Renderer) renderPlain(event up.StatusEvent) {
 	if event.State == up.StatusFailed || event.State == up.StatusBlocked {
 		failure := event.Failure
 		if failure == nil {
-			if event.Detail != "" {
-				fmt.Fprintf(r.w, "  %s\n", event.Detail)
-			}
 			return
 		}
-		if failure.Summary != "" {
-			fmt.Fprintf(r.w, "  %s\n", failure.Summary)
-		}
-		if len(failure.NextSteps) > 0 {
-			fmt.Fprintln(r.w, "  Next:")
-			for _, step := range failure.NextSteps {
-				fmt.Fprintf(r.w, "    - %s\n", step)
-			}
-		}
-		if failure.Detail != "" {
-			fmt.Fprintf(r.w, "  Detail: %s\n", failure.Detail)
+		if failure.Code != "" {
+			fmt.Fprintf(r.w, "  %s\n", failure.Code)
 		}
 	}
 }
@@ -143,7 +131,6 @@ type model struct {
 	nodes       map[string]*node
 	rootOrder   []string
 	childOrder  map[string][]string
-	showDetails bool
 	frame       int
 	width       int
 	now         time.Time
@@ -177,11 +164,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "e":
-			m.showDetails = !m.showDetails
-		}
 	case tickMsg:
 		m.now = time.Time(msg)
 		m.frame++
@@ -270,34 +252,8 @@ func (m model) View() string {
 	}
 	if failure := m.firstFailure(); failure != nil {
 		b.WriteByte('\n')
-		b.WriteString(errorStyle.Render(failure.summary()))
+		b.WriteString(errorStyle.Render(failure.code()))
 		b.WriteByte('\n')
-		if len(failure.failure.NextSteps) > 0 {
-			b.WriteString("Next:\n")
-			for _, step := range failure.failure.NextSteps {
-				b.WriteString("  - ")
-				b.WriteString(wrap(step, width-4, "    "))
-				b.WriteByte('\n')
-			}
-		}
-		if m.showDetails {
-			b.WriteString("\nDetails:\n")
-			b.WriteString("  ")
-			b.WriteString(wrap(failure.failure.Detail, width-2, "  "))
-			b.WriteByte('\n')
-			if failure.failure.Command.Name != "" {
-				b.WriteString("  command: ")
-				b.WriteString(failure.failure.Command.Bin)
-				if len(failure.failure.Command.Args) > 0 {
-					b.WriteByte(' ')
-					b.WriteString(strings.Join(failure.failure.Command.Args, " "))
-				}
-				b.WriteByte('\n')
-			}
-		} else if failure.failure.Detail != "" {
-			b.WriteString(detailHintStyle.Render("Press e for details."))
-			b.WriteByte('\n')
-		}
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -417,14 +373,14 @@ func (m model) firstFailure() *failureView {
 	return nil
 }
 
-func (f failureView) summary() string {
-	if f.failure.Summary != "" {
-		return f.failure.Summary
+func (f failureView) code() string {
+	if f.failure.Code != "" {
+		return f.failure.Code
 	}
-	if f.node != nil && f.node.title != "" {
-		return f.node.title
+	if f.node != nil && f.node.id != "" {
+		return f.node.id
 	}
-	return "Bootstrap failed"
+	return "bootstrap.failed"
 }
 
 func formatDuration(d time.Duration) string {
@@ -440,32 +396,6 @@ func formatDuration(d time.Duration) string {
 	return d.Truncate(time.Second).String()
 }
 
-func wrap(s string, width int, continuation string) string {
-	s = strings.Join(strings.Fields(s), " ")
-	if width <= 0 || lipgloss.Width(s) <= width {
-		return s
-	}
-	var out strings.Builder
-	lineWidth := 0
-	for _, word := range strings.Fields(s) {
-		wordWidth := lipgloss.Width(word)
-		if lineWidth > 0 && lineWidth+1+wordWidth > width {
-			out.WriteByte('\n')
-			out.WriteString(continuation)
-			out.WriteString(word)
-			lineWidth = lipgloss.Width(continuation) + wordWidth
-			continue
-		}
-		if lineWidth > 0 {
-			out.WriteByte(' ')
-			lineWidth++
-		}
-		out.WriteString(word)
-		lineWidth += wordWidth
-	}
-	return out.String()
-}
-
 func contains(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
@@ -479,7 +409,6 @@ var (
 	headerStyle     = lipgloss.NewStyle().Bold(true)
 	clusterStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 	subtleStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	detailHintStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 	doneStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 	runningStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
 	failedStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)

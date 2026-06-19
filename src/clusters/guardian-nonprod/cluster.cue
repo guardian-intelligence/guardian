@@ -4,14 +4,14 @@ name: "guardian-nonprod"
 domain: "guardianintelligence.org"
 apiServerDomain: "api.nonprod.guardianintelligence.org"
 
-members: ["ash-bm-001"]
+members: ["ash-bm-004"]
 environments: ["dev", "gamma"]
 
 network: {
 	podCIDR: "10.244.0.0/16"
 	serviceCIDR: "10.96.0.0/16"
 	joinCIDR: "100.64.0.0/16"
-	advertisedCIDR: "206.223.228.100/31"
+	advertisedCIDR: "206.223.228.86/31"
 }
 
 talos: {
@@ -23,14 +23,16 @@ talos: {
 
 cozystack: {
 	version: "1.4.1"
-	variant: "isp-full"
+	platformVariant: "isp-full"
+	publishingHost: ""
+	exposedServices: []
 	removeControlPlaneTaint: true
 }
 
 bootstrap: {
 	destructive: true
 	requireMaintenance: true
-	targetState: "talos-maintenance"
+	targetState: "stock-ubuntu"
 	genesis: {
 		ageRecipients: [
 			"age1e95feklupyh40qa24vly650vg0qmljcsfhqd66fwhwa82j3uefnsxed3s8",

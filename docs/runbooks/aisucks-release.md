@@ -30,7 +30,7 @@ Conventions for every step below, run from the repo root:
 ```sh
 export KUBECONFIG=~/.local/state/guardian/guardian-<site>/kubeconfig
 # The ~/.local/bin tool shims need runfiles when invoked outside bazelisk run:
-export RUNFILES_DIR="$(bazelisk info bazel-bin 2>/dev/null)/src/guardian/cmd/guardian/guardian_/guardian.runfiles"
+export RUNFILES_DIR="$(bazelisk info bazel-bin 2>/dev/null)/src/guardian-cli/cmd/guardian/guardian_/guardian.runfiles"
 ```
 
 ## PR previews (dev.aisucks.app)
@@ -41,7 +41,7 @@ dev preview, but that is a drill/preview path, not the release mechanism:
 
 ```sh
 git checkout <branch>
-bazel run //src/guardian/cmd/guardian -- up -f src/hosts/ash-bm-001/host.cue
+bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/hosts/ash-bm-001/host.yaml
 ```
 
 One preview at a time; converging main puts dev back. Do not grow product
@@ -81,7 +81,7 @@ the new schema, or step 5 (rollback) is a lie.
 ## 2. Converge gamma
 
 ```sh
-bazel run //src/guardian/cmd/guardian -- up -f src/hosts/ash-bm-002/host.cue
+bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/hosts/ash-bm-002/host.yaml
 ```
 
 Record the line `pushed registry.guardian.internal/aisucks@sha256:…` —
@@ -109,7 +109,7 @@ Same tag, same workspace, no commits in between:
 
 ```sh
 git describe --exact-match --tags   # expect: aisucks/v<N>
-bazel run //src/guardian/cmd/guardian -- up -f src/hosts/ash-bm-003/host.cue
+bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/hosts/ash-bm-003/host.yaml
 ```
 
 **Assert the pushed aisucks digest is byte-identical to gamma's.** If it
@@ -121,7 +121,7 @@ artifact plus provenance for the same digest.
 
 ```sh
 git checkout aisucks/v<N-1>
-bazel run //src/guardian/cmd/guardian -- up -f src/hosts/ash-bm-003/host.cue
+bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/hosts/ash-bm-003/host.yaml
 git checkout main
 ```
 

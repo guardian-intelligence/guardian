@@ -38,36 +38,36 @@ substrate, but it must not become the runtime deployment engine.
 ## guardian CLI
 
 `guardian` owns the controller-side, human-initiated steps. Each host has a
-checked-in `host.cue` (`src/hosts/<host>/host.cue`) naming the
+checked-in `host.yaml` (`src/hosts/<host>/host.yaml`) naming the
 node, its static addressing facts, and the Talos schematic and patches.
 Post-Kubernetes desired state lives separately in
-`src/environments/<environment>/environment.cue` as an
+`src/environments/<environment>/environment.yaml` as an
 `EnvironmentConfig` plus any environment XR instances. The bootstrap surface is two
 verbs plus operator config: run
-`guardian config host src/hosts/ash-bm-001/host.cue` once (the path is
+`guardian config host src/hosts/ash-bm-001/host.yaml` once (the path is
 stored absolute in `${XDG_CONFIG_HOME:-~/.config}/guardian/config.yaml`), then
 a drill is `guardian down --yes && guardian up`. Both verbs also accept an
-explicit `<host.cue>` argument, which overrides the configured
+explicit `<host.yaml>` positional argument, which overrides the configured
 host path. `guardian config` with no arguments prints the config file path
 and contents. Run both verbs from the repo root: only the configured host
-path is stored absolute; the paths inside `host.cue` and the Crossplane
+path is stored absolute; the paths inside `host.yaml` and the Crossplane
 environment bag are repo-root relative.
 
-1. `guardian down --yes [host.cue]` takes the node to Talos maintenance
+1. `guardian down --yes [host.yaml]` takes the node to Talos maintenance
    mode with a wiped system disk, from whichever state it is in. A node
    running configured Talos is reset over its authenticated API
    (`talosctl reset`, non-graceful because a single-node etcd cannot leave
    its own cluster). A node running any other Linux is kexec'd into the
    Talos maintenance image over SSH: the node downloads the factory's boot
    assets directly (its datacenter route to the factory is the one that
-   matters), guardian appends static `ip=` addressing from `host.cue`
+   matters), guardian appends static `ip=` addressing from `host.yaml`
    to the pinned metal command line (hosts have no DHCP), loads with
    kexec-tools, and `systemctl kexec`.
    SSH authentication is the caller's ambient setup; guardian never holds
    credentials. No provider API is involved; provisioning compute is outside
    guardian's scope. The `--yes` acknowledgement is required because this
    destroys everything on the node.
-2. `guardian up -f <host.cue>` converges host and bootstrap substrate from
+2. `guardian up [host.yaml]` converges host and bootstrap substrate from
    runtime truth. It generates or
    reuses the cluster's Talos secrets bundle (under
    `${XDG_STATE_HOME:-~/.local/state}/guardian/<cluster>/`, never in the
@@ -82,7 +82,7 @@ environment bag are repo-root relative.
    an install target even when two identical NVMes re-enumerate. After the
    seed registry is populated, `up` runs a one-shot privileged ZFS initializer
    that creates or imports the checked-in product-workload pool from
-   `host.cue` and creates the local PV directories declared by the
+   `host.yaml` and creates the local PV directories declared by the
    assigned environment's `StoragePlane`. Product workload pools mount under `/var/mnt`
    because `guardian up` binds that Talos storage root into kubelet with
    shared propagation before local PVs are scheduled. Both paths end with the

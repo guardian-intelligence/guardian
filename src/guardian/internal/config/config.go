@@ -24,7 +24,6 @@ type Config struct {
 	Talm      TalmSpec      `json:"talm" yaml:"talm" toml:"talm"`
 	Cozystack CozystackSpec `json:"cozystack" yaml:"cozystack" toml:"cozystack"`
 	Bootstrap BootstrapSpec `json:"bootstrap" yaml:"bootstrap" toml:"bootstrap"`
-	Hello     HelloSpec     `json:"hello" yaml:"hello" toml:"hello"`
 }
 
 type ClusterSpec struct {
@@ -41,6 +40,9 @@ type ClusterSpec struct {
 type NodeSpec struct {
 	Name              string `json:"name" yaml:"name" toml:"name"`
 	Address           string `json:"address" yaml:"address" toml:"address"`
+	Gateway           string `json:"gateway" yaml:"gateway" toml:"gateway"`
+	PrefixLength      int    `json:"prefixLength" yaml:"prefixLength" toml:"prefixLength"`
+	InterfaceName     string `json:"interfaceName" yaml:"interfaceName" toml:"interfaceName"`
 	Hostname          string `json:"hostname" yaml:"hostname" toml:"hostname"`
 	InterfaceMAC      string `json:"interfaceMac" yaml:"interfaceMac" toml:"interfaceMac"`
 	InstallDiskSerial string `json:"installDiskSerial" yaml:"installDiskSerial" toml:"installDiskSerial"`
@@ -57,9 +59,8 @@ type TalmSpec struct {
 
 type CozystackSpec struct {
 	Version            string   `json:"version" yaml:"version" toml:"version"`
-	Variant            string   `json:"variant" yaml:"variant" toml:"variant"`
+	PlatformVariant    string   `json:"platformVariant" yaml:"platformVariant" toml:"platformVariant"`
 	PublishingHost     string   `json:"publishingHost" yaml:"publishingHost" toml:"publishingHost"`
-	APIServerEndpoint  string   `json:"apiServerEndpoint" yaml:"apiServerEndpoint" toml:"apiServerEndpoint"`
 	ExposedServices    []string `json:"exposedServices" yaml:"exposedServices" toml:"exposedServices"`
 	RemoveControlTaint bool     `json:"removeControlPlaneTaint" yaml:"removeControlPlaneTaint" toml:"removeControlPlaneTaint"`
 }
@@ -73,11 +74,6 @@ type BootstrapSpec struct {
 
 type GenesisSpec struct {
 	AgeRecipients []string `json:"ageRecipients" yaml:"ageRecipients" toml:"ageRecipients"`
-}
-
-type HelloSpec struct {
-	Enabled   bool   `json:"enabled" yaml:"enabled" toml:"enabled"`
-	Namespace string `json:"namespace" yaml:"namespace" toml:"namespace"`
 }
 
 type Loaded struct {
@@ -97,10 +93,11 @@ type hostDocument struct {
 		Plan      string `json:"plan"`
 	} `json:"provider"`
 	Network struct {
-		IPv4         string `json:"ipv4"`
-		Gateway      string `json:"gateway"`
-		PrefixLength int    `json:"prefixLength"`
-		InterfaceMAC string `json:"interfaceMAC"`
+		IPv4          string `json:"ipv4"`
+		Gateway       string `json:"gateway"`
+		PrefixLength  int    `json:"prefixLength"`
+		InterfaceName string `json:"interfaceName"`
+		InterfaceMAC  string `json:"interfaceMAC"`
 	} `json:"network"`
 	Disks struct {
 		InstallSerial string   `json:"installSerial"`
@@ -135,9 +132,11 @@ type clusterDocument struct {
 		InstallerImage    string `json:"installerImage"`
 	} `json:"talos"`
 	Cozystack struct {
-		Version                 string `json:"version"`
-		Variant                 string `json:"variant"`
-		RemoveControlPlaneTaint bool   `json:"removeControlPlaneTaint"`
+		Version                 string   `json:"version"`
+		PlatformVariant         string   `json:"platformVariant"`
+		PublishingHost          string   `json:"publishingHost"`
+		ExposedServices         []string `json:"exposedServices"`
+		RemoveControlPlaneTaint bool     `json:"removeControlPlaneTaint"`
 	} `json:"cozystack"`
 	Bootstrap struct {
 		Destructive        bool   `json:"destructive"`
@@ -301,6 +300,7 @@ func validateHostSource(host hostDocument) error {
 	require("provider.serverID", host.Provider.ServerID)
 	require("network.ipv4", host.Network.IPv4)
 	require("network.gateway", host.Network.Gateway)
+	require("network.interfaceName", host.Network.InterfaceName)
 	require("network.interfaceMAC", host.Network.InterfaceMAC)
 	require("disks.installSerial", host.Disks.InstallSerial)
 	require("assignment.cluster", host.Assignment.Cluster)
@@ -343,11 +343,7 @@ func contains(values []string, want string) bool {
 	return false
 }
 
-func assemble(host hostDocument, cluster clusterDocument, env environmentDocument) Config {
-	publishingHost := env.Domains.Company
-	if publishingHost == "" {
-		publishingHost = cluster.Domain
-	}
+func assemble(host hostDocument, cluster clusterDocument, _ environmentDocument) Config {
 	advertisedCIDR := cluster.Network.AdvertisedCIDR
 	if advertisedCIDR == "" && host.Network.Gateway != "" && host.Network.PrefixLength > 0 {
 		advertisedCIDR = fmt.Sprintf("%s/%d", host.Network.Gateway, host.Network.PrefixLength)
@@ -366,6 +362,9 @@ func assemble(host hostDocument, cluster clusterDocument, env environmentDocumen
 		Node: NodeSpec{
 			Name:              host.Asset,
 			Address:           host.Network.IPv4,
+			Gateway:           host.Network.Gateway,
+			PrefixLength:      host.Network.PrefixLength,
+			InterfaceName:     host.Network.InterfaceName,
 			Hostname:          host.Assignment.NodeHostname,
 			InterfaceMAC:      host.Network.InterfaceMAC,
 			InstallDiskSerial: host.Disks.InstallSerial,
@@ -380,9 +379,9 @@ func assemble(host hostDocument, cluster clusterDocument, env environmentDocumen
 		},
 		Cozystack: CozystackSpec{
 			Version:            cluster.Cozystack.Version,
-			Variant:            cluster.Cozystack.Variant,
-			PublishingHost:     publishingHost,
-			APIServerEndpoint:  fmt.Sprintf("https://%s:443", cluster.APIServerDomain),
+			PlatformVariant:    cluster.Cozystack.PlatformVariant,
+			PublishingHost:     cluster.Cozystack.PublishingHost,
+			ExposedServices:    cluster.Cozystack.ExposedServices,
 			RemoveControlTaint: cluster.Cozystack.RemoveControlPlaneTaint,
 		},
 		Bootstrap: BootstrapSpec{
@@ -393,7 +392,6 @@ func assemble(host hostDocument, cluster clusterDocument, env environmentDocumen
 				AgeRecipients: cluster.Bootstrap.Genesis.AgeRecipients,
 			},
 		},
-		Hello: HelloSpec{Enabled: true, Namespace: "guardian-hello"},
 	}
 }
 
@@ -407,12 +405,6 @@ func normalize(cfg *Config) {
 	if cfg.Node.Role == "" {
 		cfg.Node.Role = "control-plane"
 	}
-	if cfg.Cozystack.Variant == "" {
-		cfg.Cozystack.Variant = "isp-full"
-	}
-	if len(cfg.Cozystack.ExposedServices) == 0 {
-		cfg.Cozystack.ExposedServices = []string{"dashboard", "api"}
-	}
 	if cfg.Cluster.PodCIDR == "" {
 		cfg.Cluster.PodCIDR = "10.244.0.0/16"
 	}
@@ -422,11 +414,11 @@ func normalize(cfg *Config) {
 	if cfg.Cluster.JoinCIDR == "" {
 		cfg.Cluster.JoinCIDR = "100.64.0.0/16"
 	}
-	if cfg.Hello.Namespace == "" {
-		cfg.Hello.Namespace = "guardian-hello"
+	if cfg.Cozystack.PlatformVariant == "" {
+		cfg.Cozystack.PlatformVariant = "isp-full"
 	}
 	if cfg.Bootstrap.TargetState == "" {
-		cfg.Bootstrap.TargetState = "talos-maintenance"
+		cfg.Bootstrap.TargetState = "stock-ubuntu"
 	}
 }
 
@@ -443,6 +435,8 @@ func validate(cfg Config) error {
 	require("cluster.advertisedCIDR", cfg.Cluster.AdvertisedCIDR)
 	require("node.name", cfg.Node.Name)
 	require("node.address", cfg.Node.Address)
+	require("node.gateway", cfg.Node.Gateway)
+	require("node.interfaceName", cfg.Node.InterfaceName)
 	require("node.hostname", cfg.Node.Hostname)
 	require("node.interfaceMac", cfg.Node.InterfaceMAC)
 	require("node.installDiskSerial", cfg.Node.InstallDiskSerial)
@@ -450,22 +444,22 @@ func validate(cfg Config) error {
 	require("talm.kubernetesVersion", cfg.Talm.KubernetesVersion)
 	require("talm.installerImage", cfg.Talm.InstallerImage)
 	require("cozystack.version", cfg.Cozystack.Version)
-	require("cozystack.publishingHost", cfg.Cozystack.PublishingHost)
-	require("cozystack.apiServerEndpoint", cfg.Cozystack.APIServerEndpoint)
+	require("cozystack.platformVariant", cfg.Cozystack.PlatformVariant)
 	if len(missing) > 0 {
 		return fmt.Errorf("config missing required fields: %s", strings.Join(missing, ", "))
 	}
-	for path, raw := range map[string]string{
-		"cluster.endpoint":            cfg.Cluster.Endpoint,
-		"cozystack.apiServerEndpoint": cfg.Cozystack.APIServerEndpoint,
-	} {
-		u, err := url.ParseRequestURI(raw)
-		if err != nil || u.Scheme != "https" || u.Host == "" {
-			return fmt.Errorf("%s must be an https URL, got %q", path, raw)
-		}
+	u, err := url.ParseRequestURI(cfg.Cluster.Endpoint)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return fmt.Errorf("cluster.endpoint must be an https URL, got %q", cfg.Cluster.Endpoint)
 	}
 	if ip := net.ParseIP(cfg.Node.Address); ip == nil {
 		return fmt.Errorf("node.address must be an IP address, got %q", cfg.Node.Address)
+	}
+	if ip := net.ParseIP(cfg.Node.Gateway); ip == nil {
+		return fmt.Errorf("node.gateway must be an IP address, got %q", cfg.Node.Gateway)
+	}
+	if cfg.Node.PrefixLength < 1 || cfg.Node.PrefixLength > 32 {
+		return fmt.Errorf("node.prefixLength: got %d, want 1..32", cfg.Node.PrefixLength)
 	}
 	if _, _, err := net.ParseCIDR(cfg.Cluster.AdvertisedCIDR); err != nil {
 		return fmt.Errorf("cluster.advertisedCIDR: %w", err)
@@ -476,8 +470,13 @@ func validate(cfg Config) error {
 	if cfg.Talm.Preset != "cozystack" {
 		return fmt.Errorf("talm.preset: got %q, want cozystack", cfg.Talm.Preset)
 	}
-	if cfg.Bootstrap.TargetState != "talos-maintenance" {
-		return fmt.Errorf("bootstrap.targetState: got %q, want talos-maintenance", cfg.Bootstrap.TargetState)
+	switch cfg.Cozystack.PlatformVariant {
+	case "isp-full", "isp-hosted", "isp-full-generic":
+	default:
+		return fmt.Errorf("cozystack.platformVariant: got %q, want isp-full, isp-hosted, or isp-full-generic", cfg.Cozystack.PlatformVariant)
+	}
+	if cfg.Bootstrap.TargetState != "stock-ubuntu" {
+		return fmt.Errorf("bootstrap.targetState: got %q, want stock-ubuntu", cfg.Bootstrap.TargetState)
 	}
 	return nil
 }

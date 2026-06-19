@@ -19,6 +19,7 @@ package schemas
 		ipv4:         #IPv4
 		gateway:      #IPv4
 		prefixLength: >=1 & <=32
+		interfaceName: =~"^[a-zA-Z0-9_.:-]+$"
 		interfaceMAC: #Mac
 	}
 
