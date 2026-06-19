@@ -22,6 +22,7 @@ go_test(
     deps = [
         "//src/guardian/internal/config",
         "//src/guardian/internal/latitude",
+        "//src/guardian/internal/state",
         "//src/guardian/internal/toolrunner",
         "@io_filippo_age//:age",
     ],

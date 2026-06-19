@@ -110,12 +110,14 @@ func Run(ctx context.Context, loaded *config.Loaded, tools Tools, runner toolrun
 		"TalmApply",
 		"TalmBootstrap",
 		"TalmKubeconfig",
+		"WaitKubernetesAPI",
 		"WriteGenesisBundle",
 		"RemoveControlPlaneTaint",
 		"InstallCozystackOperator",
 		"WaitCozystackOperator",
 		"ApplyCozystackPlatform",
 		"WaitCozystackPlatform",
+		"WaitNodeReady",
 		"ApplyHelloWorld",
 	)
 	result := Result{
@@ -213,8 +215,31 @@ func Run(ctx context.Context, loaded *config.Loaded, tools Tools, runner toolrun
 			if err := state.WriteFile(layout.NodeConfig, out); err != nil {
 				return failed(loaded, layout, "Retryable", err.Error())
 			}
+		case "talm-init":
+			initialized, err := talmSecretStateInitialized(layout)
+			if err != nil {
+				return failed(loaded, layout, "Refused", err.Error())
+			}
+			if initialized {
+				break
+			}
+			if err := runner.Run(ctx, cmd); err != nil {
+				return failed(loaded, layout, "Retryable", err.Error())
+			}
 		case "wait-talos-api":
 			if _, err := waitCommandOutput(ctx, runner, cmd, 10*time.Minute, 5*time.Second); err != nil {
+				return failed(loaded, layout, "Retryable", err.Error())
+			}
+		case "kubectl-wait-kubernetes-api":
+			if _, err := waitCommandOutput(ctx, runner, cmd, 10*time.Minute, 5*time.Second); err != nil {
+				return failed(loaded, layout, "Retryable", err.Error())
+			}
+		case "kubectl-wait-node-ready":
+			if _, err := waitCommandOutput(ctx, runner, cmd, 10*time.Minute, 5*time.Second); err != nil {
+				return failed(loaded, layout, "Retryable", err.Error())
+			}
+		case "kubectl-remove-control-plane-taint":
+			if _, err := runner.Output(ctx, cmd); err != nil && !missingControlPlaneTaint(err) {
 				return failed(loaded, layout, "Retryable", err.Error())
 			}
 		case "write-genesis-bundle":
@@ -291,7 +316,6 @@ func planCommands(cfg config.Config, layout *state.Layout, tools Tools) []toolru
 				"--image", cfg.Talm.InstallerImage,
 				"--talos-version", cfg.Talm.TalosVersion,
 				"--root", ".",
-				"--force",
 			},
 		},
 		toolrunner.Command{
@@ -315,9 +339,10 @@ func planCommands(cfg config.Config, layout *state.Layout, tools Tools) []toolru
 			Args: []string{"get", "links", "--insecure", "-n", cfg.Node.Address},
 		},
 		toolrunner.Command{
-			Name: "talm-template",
-			Bin:  tools.Talm,
-			Dir:  layout.TalmProject,
+			Name:   "talm-template",
+			Bin:    tools.Talm,
+			Dir:    layout.TalmProject,
+			Secret: true,
 			Args: []string{
 				"template",
 				"-e", cfg.Node.Address,
@@ -329,9 +354,10 @@ func planCommands(cfg config.Config, layout *state.Layout, tools Tools) []toolru
 			},
 		},
 		toolrunner.Command{
-			Name: "talm-dry-run",
-			Bin:  tools.Talm,
-			Dir:  layout.TalmProject,
+			Name:   "talm-dry-run",
+			Bin:    tools.Talm,
+			Dir:    layout.TalmProject,
+			Secret: true,
 			Args: []string{
 				"apply",
 				"-f", nodeRel,
@@ -343,9 +369,10 @@ func planCommands(cfg config.Config, layout *state.Layout, tools Tools) []toolru
 			},
 		},
 		toolrunner.Command{
-			Name: "talm-apply",
-			Bin:  tools.Talm,
-			Dir:  layout.TalmProject,
+			Name:   "talm-apply",
+			Bin:    tools.Talm,
+			Dir:    layout.TalmProject,
+			Secret: true,
 			Args: []string{
 				"apply",
 				"-f", nodeRel,
@@ -372,6 +399,11 @@ func planCommands(cfg config.Config, layout *state.Layout, tools Tools) []toolru
 			Bin:  tools.Talm,
 			Dir:  layout.TalmProject,
 			Args: []string{"kubeconfig", "-f", nodeRel},
+		},
+		toolrunner.Command{
+			Name: "kubectl-wait-kubernetes-api",
+			Bin:  tools.Kubectl,
+			Args: []string{"--kubeconfig", layout.Kubeconfig, "get", "--raw=/readyz"},
 		},
 		toolrunner.Command{
 			Name: "write-genesis-bundle",
@@ -418,6 +450,11 @@ func planCommands(cfg config.Config, layout *state.Layout, tools Tools) []toolru
 			Name: "kubectl-get-helmreleases",
 			Bin:  tools.Kubectl,
 			Args: []string{"--kubeconfig", layout.Kubeconfig, "get", "hr", "-A"},
+		},
+		toolrunner.Command{
+			Name: "kubectl-wait-node-ready",
+			Bin:  tools.Kubectl,
+			Args: []string{"--kubeconfig", layout.Kubeconfig, "wait", "nodes", "--all", "--for=condition=Ready", "--timeout=10m"},
 		},
 	)
 	if cfg.Hello.Enabled {
@@ -706,6 +743,52 @@ func waitCommandRun(ctx context.Context, runner toolrunner.Runner, cmd toolrunne
 		case <-time.After(interval):
 		}
 	}
+}
+
+func talmSecretStateInitialized(layout *state.Layout) (bool, error) {
+	keyExists, err := fileExists(filepath.Join(layout.TalmProject, "talm.key"))
+	if err != nil {
+		return false, err
+	}
+	secretsExist, err := fileExists(filepath.Join(layout.TalmProject, "secrets.yaml"))
+	if err != nil {
+		return false, err
+	}
+	if keyExists && secretsExist {
+		for _, path := range []string{
+			layout.TalmValues,
+			filepath.Join(layout.TalmProject, "templates", "controlplane.yaml"),
+		} {
+			exists, err := fileExists(path)
+			if err != nil {
+				return false, err
+			}
+			if !exists {
+				return false, fmt.Errorf("incomplete Talm bootstrap state in %s: missing %s; refusing to regenerate trust material", layout.TalmProject, path)
+			}
+		}
+		return true, nil
+	}
+	if keyExists || secretsExist {
+		return false, fmt.Errorf("partial Talm bootstrap secret state in %s; refusing to regenerate trust material", layout.TalmProject)
+	}
+	return false, nil
+}
+
+func fileExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
+}
+
+func missingControlPlaneTaint(err error) bool {
+	text := err.Error()
+	return strings.Contains(text, "not found") && strings.Contains(text, "node-role.kubernetes.io/control-plane")
 }
 
 func platformManifest(cfg config.Config) ([]byte, error) {

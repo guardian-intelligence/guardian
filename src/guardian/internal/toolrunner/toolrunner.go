@@ -54,7 +54,13 @@ func (r RealRunner) Run(ctx context.Context, c Command) error {
 	if stderr == nil {
 		stderr = os.Stderr
 	}
-	fmt.Fprintf(stderr, "+ %s %s\n", c.Bin, strings.Join(c.Args, " "))
+	if c.Secret {
+		fmt.Fprintf(stderr, "+ %s %s # output suppressed\n", c.Bin, strings.Join(c.Args, " "))
+		stdout = io.Discard
+		stderr = io.Discard
+	} else {
+		fmt.Fprintf(stderr, "+ %s %s\n", c.Bin, strings.Join(c.Args, " "))
+	}
 	cmd := exec.CommandContext(ctx, c.Bin, c.Args...)
 	cmd.Dir = c.Dir
 	if len(c.Stdin) > 0 {
@@ -73,7 +79,11 @@ func (r RealRunner) Output(ctx context.Context, c Command) ([]byte, error) {
 	if stderr == nil {
 		stderr = os.Stderr
 	}
-	fmt.Fprintf(stderr, "+ %s %s\n", c.Bin, strings.Join(c.Args, " "))
+	if c.Secret {
+		fmt.Fprintf(stderr, "+ %s %s # output captured as secret\n", c.Bin, strings.Join(c.Args, " "))
+	} else {
+		fmt.Fprintf(stderr, "+ %s %s\n", c.Bin, strings.Join(c.Args, " "))
+	}
 	cmd := exec.CommandContext(ctx, c.Bin, c.Args...)
 	cmd.Dir = c.Dir
 	if len(c.Stdin) > 0 {
@@ -81,6 +91,9 @@ func (r RealRunner) Output(ctx context.Context, c Command) ([]byte, error) {
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if c.Secret {
+			return out, fmt.Errorf("%s %s: %w (secret output suppressed)", c.Bin, strings.Join(c.Args, " "), err)
+		}
 		return out, fmt.Errorf("%s %s: %w\n%s", c.Bin, strings.Join(c.Args, " "), err, out)
 	}
 	return out, nil

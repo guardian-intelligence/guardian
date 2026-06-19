@@ -11,6 +11,7 @@ import (
 	"filippo.io/age"
 	"github.com/guardian-intelligence/guardian/src/guardian/internal/config"
 	"github.com/guardian-intelligence/guardian/src/guardian/internal/latitude"
+	"github.com/guardian-intelligence/guardian/src/guardian/internal/state"
 	"github.com/guardian-intelligence/guardian/src/guardian/internal/toolrunner"
 )
 
@@ -106,8 +107,10 @@ func TestRunExecuteUsesPinnedToolCommands(t *testing.T) {
 		"talm-apply",
 		"talm-bootstrap",
 		"talm-kubeconfig",
+		"kubectl-wait-kubernetes-api",
 		"helm-install-cozystack",
 		"kubectl-apply-platform",
+		"kubectl-wait-node-ready",
 		"kubectl-apply-hello-world",
 	} {
 		if !strings.Contains(got, want) {
@@ -121,6 +124,14 @@ func TestRunExecuteUsesPinnedToolCommands(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(flattenArgs(runner.commands), " "), "--kubernetes-version 1.36.1") {
 		t.Fatalf("commands do not include Kubernetes version pin: %#v", runner.commands)
+	}
+	for _, cmd := range runner.commands {
+		switch cmd.Name {
+		case "talm-template", "talm-dry-run", "talm-apply":
+			if !cmd.Secret {
+				t.Fatalf("%s is not marked secret", cmd.Name)
+			}
+		}
 	}
 	values, err := os.ReadFile(filepath.Join(result.StateDir, "talm", "values.yaml"))
 	if err != nil {
@@ -142,6 +153,71 @@ func TestRunExecuteUsesPinnedToolCommands(t *testing.T) {
 	}
 	if !strings.HasPrefix(string(raw), "age-encryption.org/v1") {
 		t.Fatalf("genesis bundle is not age encrypted")
+	}
+}
+
+func TestRunExecuteReusesExistingTalmSecretState(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	loaded := testLoaded()
+	layout, err := state.Open(loaded.Config.Cluster.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(layout.TalmProject, "talm.key"), []byte("existing key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(layout.TalmProject, "secrets.yaml"), []byte("existing secrets"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(layout.TalmValues, []byte("endpoint: \"\"\nadvertisedSubnets: []\ncertSANs: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(layout.TalmProject, "templates"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(layout.TalmProject, "templates", "controlplane.yaml"), []byte("template"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := &fakeRunner{output: []byte("machine config")}
+
+	result := Run(context.Background(), loaded, testTools(), runner, Options{
+		Execute: true,
+		Now:     func() time.Time { return time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC) },
+		WaitForTalos: func(context.Context, string, time.Duration) error {
+			return nil
+		},
+	})
+	if result.Outcome != "Converged" {
+		t.Fatalf("outcome = %s, want Converged: %#v", result.Outcome, result)
+	}
+	if strings.Contains(runner.names(), "talm-init") {
+		t.Fatalf("commands = %s, want talm-init skipped with existing secret state", runner.names())
+	}
+}
+
+func TestRunExecuteRefusesPartialTalmSecretState(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	loaded := testLoaded()
+	layout, err := state.Open(loaded.Config.Cluster.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(layout.TalmProject, "secrets.yaml"), []byte("existing secrets"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result := Run(context.Background(), loaded, testTools(), &fakeRunner{}, Options{
+		Execute: true,
+		Now:     func() time.Time { return time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC) },
+		WaitForTalos: func(context.Context, string, time.Duration) error {
+			return nil
+		},
+	})
+	if result.Outcome != "Refused" {
+		t.Fatalf("outcome = %s, want Refused: %#v", result.Outcome, result)
+	}
+	if !strings.Contains(result.Reason, "partial Talm bootstrap secret state") {
+		t.Fatalf("reason = %q, want partial secret state", result.Reason)
 	}
 }
 
