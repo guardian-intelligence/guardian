@@ -9,3 +9,11 @@ secret.env
 /src-old/**/.turbo/
 /src-old/**/.next/
 /src-old/**/.output/
+
+# OpenTofu/Terraform local state and working directories. Commit
+# .terraform.lock.hcl when a stack is initialized so provider checksums are
+# reviewable.
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
