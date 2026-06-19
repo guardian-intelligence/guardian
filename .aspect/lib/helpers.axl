@@ -12,7 +12,7 @@ Conventions:
     non-zero exit code. They never silently coerce errors to no-ops.
 """
 
-GUARDIAN_TARGET = "//src/guardian-cli/cmd/guardian"
+GUARDIAN_TARGET = "//src/guardian/cmd/guardian"
 
 def ws_path(ctx, *parts):
     """Resolve a workspace-relative path to absolute under the repo root."""

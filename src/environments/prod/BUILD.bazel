@@ -1,0 +1,5 @@
+filegroup(
+    name = "config",
+    srcs = ["environment.json"],
+    visibility = ["//visibility:public"],
+)

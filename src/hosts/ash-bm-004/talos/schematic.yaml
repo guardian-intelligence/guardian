@@ -1,0 +1,7 @@
+customization:
+  extraKernelArgs:
+    - ip=206.223.228.87::206.223.228.86:255.255.255.254::eno1:off
+    - console=ttyS1,115200n8
+  systemExtensions:
+    officialExtensions:
+      - siderolabs/zfs

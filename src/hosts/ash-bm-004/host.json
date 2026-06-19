@@ -1,0 +1,12 @@
+{
+  "asset": "ash-bm-004",
+  "network": {
+    "ipv4": "206.223.228.87"
+  },
+  "assignment": {
+    "cluster": "guardian-nonprod",
+    "environment": "dev",
+    "destructiveAllowed": true,
+    "prod": false
+  }
+}

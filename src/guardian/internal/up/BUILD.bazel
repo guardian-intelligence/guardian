@@ -1,0 +1,32 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "up",
+    srcs = [
+        "boot_to_talos.go",
+        "status.go",
+        "up.go",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/guardian/internal/up",
+    visibility = ["//src/guardian:__subpackages__"],
+    deps = [
+        "//src/guardian/internal/config",
+        "//src/guardian/internal/genesis",
+        "//src/guardian/internal/state",
+        "//src/guardian/internal/toolrunner",
+        "@in_gopkg_yaml_v3//:yaml_v3",
+        "@org_golang_x_crypto//ssh",
+    ],
+)
+
+go_test(
+    name = "up_test",
+    srcs = ["up_test.go"],
+    embed = [":up"],
+    deps = [
+        "//src/guardian/internal/config",
+        "//src/guardian/internal/state",
+        "//src/guardian/internal/toolrunner",
+        "@io_filippo_age//:age",
+    ],
+)

@@ -1,0 +1,12 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "output",
+    srcs = ["output.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/guardian/internal/output",
+    visibility = ["//src/guardian:__subpackages__"],
+    deps = [
+        "@com_github_burntsushi_toml//:toml",
+        "@in_gopkg_yaml_v3//:yaml_v3",
+    ],
+)

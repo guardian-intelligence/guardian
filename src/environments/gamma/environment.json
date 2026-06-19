@@ -1,0 +1,12 @@
+{
+  "name": "gamma",
+  "cluster": "guardian-nonprod",
+  "namespace": "guardian-gamma",
+  "crossplane": {
+    "environmentConfig": "guardian-gamma"
+  },
+  "domains": {
+    "company": "gamma.guardianintelligence.org",
+    "aisucks": "gamma.aisucks.app"
+  }
+}

@@ -17,16 +17,6 @@ load(
     bazel_update = "update",
 )
 load(
-    ".aspect/tasks/dev.axl",
-    dev_install = "install",
-    dev_uninstall = "uninstall",
-)
-load(
-    ".aspect/tasks/release.axl",
-    release_sdk_gate = "sdk_gate",
-    release_sdk_oci = "sdk_oci",
-)
-load(
     ".aspect/tasks/tidy.axl",
     tidy = "tidy",
 )
@@ -36,14 +26,6 @@ def config(ctx):
     ctx.tasks.add(bazel_gazelle)
     ctx.tasks.add(bazel_bzlmod)
     ctx.tasks.add(bazel_update)
-
-    # aspect dev ...
-    ctx.tasks.add(dev_install)
-    ctx.tasks.add(dev_uninstall)
-
-    # aspect release ...
-    ctx.tasks.add(release_sdk_gate)
-    ctx.tasks.add(release_sdk_oci)
 
     # aspect tidy
     ctx.tasks.add(tidy)
