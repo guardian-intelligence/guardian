@@ -21,15 +21,22 @@ one declarative machine config applied over the Talos API
 the generated `cluster.secretboxEncryptionSecret`; Guardian must not add a
 separate kube-apiserver `EncryptionConfiguration` path unless Talos drops
 that contract. OpenBao with raft integrated storage is the durable secret
-authority above Kubernetes, deployed as a StatefulSet from the OCI image
-built at `//src/infrastructure-components/openbao:image`. External Secrets
+authority above Kubernetes, deployed as a StatefulSet via the official OpenBao
+Helm chart (upstream chart + image in dev; vendored and digest-pinned for prod
+per the release contract). External Secrets
 Operator projects the small set of workload Kubernetes Secrets from OpenBao;
 workloads never get broad Secret read permissions, and the projected
 Kubernetes Secrets stay under Talos-owned encryption-at-rest. Fresh Bao
-initialization is performed by `guardian up` so a wiped dev node can
-converge unattended. Restored Bao reuses the values in the snapshot; missing
-restored paths are explicit schema migrations. Shamir unseal-key custody is
-still secret-zero and must not be hidden in a Kubernetes Secret.
+initialization is performed by `guardian up`, which converges a wiped node to a
+running, auto-unsealed OpenBao. The seal is the one per-environment axis: dev
+auto-unseals from a non-secret *static toy key* so an agent can bring it up
+unattended and run the daily wipe-restore DR drill with no human, while prod
+auto-unseals via a dedicated *transit* OpenBao (self-hosted KMS, no cloud
+dependency) with TLS and HA. `bao operator init` yields recovery keys plus a
+root token — low-value in dev; in prod the recovery keys are the break-glass,
+held in the operator's password manager (2FA-gated) and never on the cluster.
+Restored Bao reuses the values in the snapshot; missing restored paths are
+explicit schema migrations. Raft snapshots travel to R2 as ciphertext only.
 
 **Layer 2 — everything else.** GitOps and Crossplane reconciliation from
 signed, digest-addressed artifacts. The CLI may install or seed this
@@ -80,9 +87,11 @@ default and destructive execution requires `--execute`.
    Kubernetes Secrets before their consumers are treated as converged.
    Nonblocking projections, such as early Directus authoring secrets, keep the
    desired state visible and warn on missing Bao values without blocking public
-   serving convergence. An already-sealed restored Bao must be unsealed with
-   injected Shamir keys (`GUARDIAN_OPENBAO_UNSEAL_KEY` or
-   `GUARDIAN_OPENBAO_UNSEAL_KEYS`) before the projection gate can pass.
+   serving convergence. With auto-unseal the pod is unsealed as soon as it
+   reaches its seal provider, so the projection gate only waits for readiness —
+   there is no manual unseal step in normal operation. Recovery keys from init
+   are break-glass for root-token regeneration and seal migration, held
+   off-cluster in the operator's password manager.
 
 Version pins consumed by the CLI are compile-time constants, and `talosctl`
 and `kubectl` ride in the binary's runfiles; changing what the fleet runs is
