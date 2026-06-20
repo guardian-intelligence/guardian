@@ -1,0 +1,10 @@
+filegroup(
+    name = "manifests",
+    srcs = [
+        "helmrelease.yaml",
+        "helmrepository.yaml",
+        "namespace.yaml",
+        "storageclass.yaml",
+    ],
+    visibility = ["//visibility:public"],
+)

@@ -1,0 +1,16 @@
+# Where OpenBao's raft data is stored. reclaimPolicy: Retain means deleting the
+# PVC does NOT destroy the volume — proven in the tracer (risk #2). The default
+# `local` StorageClass is reclaimPolicy: Delete, which is wrong for a secret
+# authority. Backed by the ZFS-thin `data` pool via LINSTOR on guardian-nonprod.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: openbao-retain
+provisioner: linstor.csi.linbit.com
+parameters:
+  linstor.csi.linbit.com/storagePool: data
+  linstor.csi.linbit.com/placementCount: "1"
+  linstor.csi.linbit.com/allowRemoteVolumeAccess: "false"
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+reclaimPolicy: Retain
