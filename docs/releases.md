@@ -315,7 +315,7 @@ verification slice.
 
 The first PR-able implementation slice is the Contract checklist above. It is
 small enough to review, but valuable because it fixes the public API source of
-truth before runtime, release, and Crossplane layers depend on it.
+truth before runtime and release layers depend on it.
 
 ### Implementation Strategy
 
@@ -377,7 +377,7 @@ vp run -w lint
 - `@guardian-intelligence/aisucks` exposes `health()` as the intended SDK
   surface.
 - No release workflow YAML is introduced.
-- No fleet deploy, npm publish, Crossplane install, or SLO gate is required in
+- No fleet deploy, npm publish, or SLO gate is required in
   this deliverable.
 
 ### Follow-On Deliverables

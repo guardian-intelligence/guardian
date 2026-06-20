@@ -24,7 +24,7 @@ Bootstrap owns the admin Secret path. On a fresh OpenBao, `guardian up`
 generates `kv/guardian/<site>/observability/clickhouse-admin`, installs or
 seeds External Secrets Operator, and waits for the environment's
 `SecretProjection` to produce the Kubernetes `clickhouse-admin` Secret before
-the ledger is treated as ready. Flux/Crossplane own the ClickHouse desired
+the ledger is treated as ready. Flux owns the ClickHouse desired
 state after bootstrap handoff. On a restored OpenBao the value must already
 exist in the restored snapshot; missing restored paths are a schema migration,
 not a hand-created Kubernetes Secret.

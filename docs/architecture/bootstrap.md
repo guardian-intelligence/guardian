@@ -38,7 +38,7 @@ held in the operator's password manager (2FA-gated) and never on the cluster.
 Restored Bao reuses the values in the snapshot; missing restored paths are
 explicit schema migrations. Raft snapshots travel to R2 as ciphertext only.
 
-**Layer 2 — everything else.** GitOps and Crossplane reconciliation from
+**Layer 2 — everything else.** GitOps reconciliation from
 signed, digest-addressed artifacts. The CLI may install or seed this
 substrate, but it must not become the runtime deployment engine.
 
@@ -78,8 +78,8 @@ default and destructive execution requires `--execute`.
    seed registry up, bootstrap artifacts pushed into it, and the secrets
    substrate converged first. OpenBao applies and becomes reachable; Bao is
    restored or fresh-initialized/unsealed; `kv/` and Kubernetes auth are
-   configured; Crossplane, provider-kubernetes, pinned functions, Flux, and
-   External Secrets Operator are installed or made reachable. From there the
+   configured; Flux and External Secrets Operator are installed or made
+   reachable. From there the
    cluster reconcilers own environment desired state. `guardian up` may seed the
    initial reconciler inputs and wait for required readiness, but it does not
    choose product versions, evaluate SLO policy, promote channels, or own
@@ -148,7 +148,7 @@ bootstrap and wiped from the host after unseal.
 
 - Dynamic local storage provisioning and zvol churn. The first implemented
   storage slice creates/imports one ZFS product-workload pool and exposes it
-  through Crossplane-rendered static local PVs. A CSI driver or Guardian
+  through static local PVs. A CSI driver or Guardian
   storage controller can replace the static PV bridge once workload churn
   needs dynamic claims.
 - KubeSpan versus Cilium WireGuard encryption for WAN worker nodes; run one,
