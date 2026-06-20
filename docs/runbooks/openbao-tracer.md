@@ -38,7 +38,7 @@ Where the tracer can't reach prod fidelity it says so — no silent gaps.
 ```sh
 export KUBECONFIG=~/.local/state/guardian/clusters/guardian-nonprod/talm/kubeconfig
 export PATH=/tmp/gbin:$PATH          # pinned talm/talosctl/kubectl/helm (see the working-with-guardian-infra notes)
-set -a; source secret.env; set +a    # gitignored: cloudflare_*, R2 trio (see age note below)
+set -a; source <(your-secret-store export); set +a   # R2 trio + age recipient into the env from your secret store; no plaintext file
 # bao runs inside the pod. Main Bao serves TLS; transit Bao is plain http (internal):
 bao()  { kubectl -n openbao exec -i openbao-0 -- env BAO_ADDR=https://127.0.0.1:8200 BAO_SKIP_VERIFY=true bao "$@"; }
 baoT() { kubectl -n openbao exec -i openbao-transit-0 -- env BAO_ADDR=http://127.0.0.1:8200 bao "$@"; }
@@ -51,9 +51,10 @@ baoR() { kubectl -n openbao exec -i openbao-0 -- env BAO_ADDR=https://127.0.0.1:
 
 **age for the snapshot upload (Stage 5):** the survival-floor mechanism encrypts
 with a recipient (public key) and keeps the **identity** in the operator's sops
-store — never on the cluster, never in R2. `secret.env` currently carries only the
-R2 trio, **not** an `age_recipient`; add `age_recipient=age1...` to `secret.env`
-before Stage 5's upload leg can run. See [survival-floor.md](survival-floor.md).
+store — never on the cluster, never in R2. Export the R2 trio and an
+`age_recipient=age1...` into your environment from your secret store before
+Stage 5's upload leg can run; no plaintext credentials file is kept on disk. See
+[survival-floor.md](survival-floor.md).
 
 ---
 
@@ -371,9 +372,9 @@ age -r "$age_recipient" -o /tmp/openbao-$(date +%F).snap.age /tmp/openbao-$(date
 ```
 
 ⏹ **Expect:** one `uploaded openbao/...age` line; the age identity is NOT on the
-cluster and NOT in R2 — only ciphertext leaves. (Requires `age_recipient` in
-`secret.env` — see the preamble; absent on the first run, so the upload leg is the
-one open item.)
+cluster and NOT in R2 — only ciphertext leaves. (Requires `age_recipient`
+exported from your secret store — see the preamble; absent on the first run, so
+the upload leg is the one open item.)
 
 ---
 

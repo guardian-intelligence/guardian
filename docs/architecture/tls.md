@@ -90,15 +90,15 @@ self-check to the public hostname timed out on the single-node host-network
 edge. DNS-01 avoids same-node public-IP hairpin behavior.
 
 `guardian up` creates or updates the cert-manager Cloudflare token Secret from
-operator environment or the gitignored `./secret.env` file without printing the
-token. The preferred variable is:
+the operator environment (exported from the operator's secret store, e.g.
+sops/password manager) without printing the token. The preferred variable is:
 
 ```sh
 CLOUDFLARE_GUARDIAN_INTELLIGENCE_ORG_DNS_ZONE_API_TOKEN
 ```
 
-The current gitignored lowercase `secret.env` spelling is accepted for
-compatibility, and environment variables take precedence over file values.
+Credentials are read from the environment only; no plaintext credentials file is
+kept on disk.
 
 ## Survival Set
 

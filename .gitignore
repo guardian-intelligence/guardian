@@ -1,5 +1,7 @@
 /bazel-*
-secret.env
+# operator credential env files are never committed — creds come from the
+# operator's secret store (sops/password manager), exported into the environment.
+*.env
 /src/aisucks/aisucks
 
 # Archived pre-Cozystack tree. Keep source, not local dependency/build output.

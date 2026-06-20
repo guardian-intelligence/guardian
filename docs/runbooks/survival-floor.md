@@ -9,8 +9,9 @@ clusters) and the prod corpus (one NVMe, no replica).
 ## R2 facts (measured, 2026-06-12)
 
 - The bucket is `guardian-vault` on the shared Cloudflare account (same
-  account as verself's buckets). Credentials in `secret.env` (gitignored):
-  `cloudflare_account_id`, `cloudflare_r2_api_token`,
+  account as verself's buckets). Credentials are exported into the environment
+  from the operator's secret store (sops/password manager), never a plaintext
+  file on disk: `cloudflare_account_id`, `cloudflare_r2_api_token`,
   `cloudflare_r2_access_key_id`, `cloudflare_r2_secret_access_key`.
 - Account-owned API tokens (dashboard → Account API Tokens, even with R2
   permission groups) are a DEAD END for the R2 data plane. Measured matrix:
@@ -26,7 +27,7 @@ clusters) and the prod corpus (one NVMe, no replica).
   token never had that prefix — the owner, not the format, was the problem.)
 - The path that works: R2 → "Manage R2 API Tokens" → create. That flow
   displays a working trio at creation (Token value, Access Key ID, Secret
-  Access Key) — record all three into `secret.env` then; the Secret is used
+  Access Key) — record all three into the operator's secret store then; the Secret is used
   as-is, no derivation step. Scope: Object Read & Write on `guardian-vault`
   only, with a TTL.
 - Endpoint `https://<account_id>.r2.cloudflarestorage.com`, region `auto`.
@@ -48,7 +49,7 @@ plugin is boring.
 ## Produce + upload (run from the controller)
 
 ```sh
-set -a; source secret.env; set +a
+set -a; source <(your-secret-store export); set +a   # R2 trio + age recipient into the env (sops/password manager); no plaintext file
 STAMP=$(date +%F)
 tar -C ~/.local/state -czf /tmp/guardian-state-$STAMP.tar.gz guardian
 KUBECONFIG=~/.local/state/guardian/guardian-prod/kubeconfig \
@@ -109,7 +110,7 @@ passed (counts matched prod exactly). The decryption identity lives only in
 the operator's sops store, the payloads only in R2 — nothing remains on the
 controller. Remaining operator action: pull a second copy onto the MacBook
 (the snippet above with download_file).
-Note: secret.env also carries cloudflare_r2_s3_api_endpoint (the dashboard
+Note: the R2 credentials also include cloudflare_r2_s3_api_endpoint (the dashboard
 shows it at token creation); the upload snippet prefers it when present.
 
 | date | artifact | plaintext sha256 | counts |
