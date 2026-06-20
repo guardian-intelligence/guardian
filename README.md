@@ -7,7 +7,7 @@ pre-provisioned bare-metal node that starts from stock Ubuntu, runs the pinned
 boot-to-talos tool, waits for Talos maintenance discovery, applies the stock
 Cozystack Talm flow, bootstraps Kubernetes, writes an encrypted genesis secret
 bundle, and hands off to the Cozystack installer. Runtime platform configuration
-belongs to Flux/Crossplane after that handoff.
+belongs to Flux after that handoff.
 
 The previous source tree is preserved under `src-old/` for reference only. It
 is ignored by Bazel and is not part of the active command surface.
@@ -18,7 +18,7 @@ is ignored by Bazel and is not part of the active command surface.
 src/guardian/                  new Go CLI and host-bootstrap packages
 src/hosts/                     host target assignment and safety intent in JSON
 src/clusters/                  cluster bootstrap pins in JSON
-src/environments/              Crossplane/Flux environment bags in JSON
+src/environments/              Flux environment definitions in JSON
 src/tools/                     pinned runfile tool archives
 src-old/                       archived pre-Cozystack implementation
 docs/architecture/             design notes

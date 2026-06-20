@@ -128,9 +128,6 @@ func writeTestRepo(t *testing.T) string {
   "name": "dev",
   "cluster": "guardian-nonprod",
   "namespace": "guardian-dev",
-  "crossplane": {
-    "environmentConfig": "guardian-dev"
-  },
   "domains": {
     "company": "dev.guardianintelligence.org"
   }

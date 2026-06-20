@@ -54,7 +54,7 @@ The observability stack's `grafana-admin` Kubernetes Secret is projected from
 `kv/guardian/<site>/observability/grafana-admin` in OpenBao by the site's
 `SecretProjection`. `guardian up` generates the value on a fresh Bao and waits
 for the projection before the observability substrate is treated as ready.
-Flux/Crossplane own the Grafana desired state after bootstrap handoff. Never
+Flux owns the Grafana desired state after bootstrap handoff. Never
 run `kubectl create secret generic grafana-admin` by hand.
 
 Config-bearing observability components (otel-collector, alertmanager) do
@@ -94,8 +94,8 @@ git tag -f -a aisucks/v<N> -m "aisucks@sha256:<digest>"
 ## 3. Record gamma evidence
 
 This runbook predates the release judge. The Guardian CLI does not evaluate
-product-specific SLO policy; it converges the node until Kubernetes and
-Crossplane can own the site. Promotion evidence belongs in the release system:
+product-specific SLO policy; it converges the node until Kubernetes can own
+the site. Promotion evidence belongs in the release system:
 candidate digest, SLOProfile/SyntheticCheck inputs, rollout state, hot-plane
 metrics, cold-plane forensic links, and a signed gate verdict.
 

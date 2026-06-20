@@ -18,7 +18,6 @@ The checked-in state is split by responsibility:
 ```
 src/hosts/                 physical facts and Talos inputs
 src/environments/          post-Kubernetes environment desired state
-src/crossplane/packages/   reusable platform and product APIs
 src/k8s/bootstrap/         bootstrap-only Kubernetes substrate
 ```
 

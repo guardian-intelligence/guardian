@@ -127,13 +127,10 @@ type clusterDocument struct {
 }
 
 type environmentDocument struct {
-	Name       string `json:"name"`
-	Cluster    string `json:"cluster"`
-	Namespace  string `json:"namespace"`
-	Crossplane struct {
-		EnvironmentConfig string `json:"environmentConfig"`
-	} `json:"crossplane"`
-	Domains struct {
+	Name      string `json:"name"`
+	Cluster   string `json:"cluster"`
+	Namespace string `json:"namespace"`
+	Domains   struct {
 		Company string `json:"company"`
 		AISucks string `json:"aisucks"`
 		OCI     string `json:"oci"`
