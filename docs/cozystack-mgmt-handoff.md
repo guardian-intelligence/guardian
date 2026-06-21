@@ -6,6 +6,22 @@ from the planned CLI-driven flow** — it was done by hand because the single-no
 `guardian` CLI (and `src/clusters`, `src/hosts`, `src/environments`) were deleted
 this session. Reproduce via the runbook, not the CLI.
 
+> **Update 2026-06-21 (follow-on session).** Several "not yet done" items below are
+> now done and verified live:
+> - **PKI persisted** out of volatile `/tmp` → `~/.guardian-deploy/` (0700). Encrypted
+>   off-box backup is the remaining gap.
+> - **OpenBao initialized + unsealed** — 3/3 raft voters; secret-zero in
+>   `~/.guardian-deploy/openbao-init.json`.
+> - **Dashboard exposed at `https://dashboard.guardianintelligence.org`** with a real
+>   Let's Encrypt cert and working **Keycloak browser SSO** (user `shovon` in
+>   `cozystack-cluster-admin`). Exposure is the cross-subnet `externalIPs` path
+>   (`publishing.exposure: externalIPs` + node IPs; the `root` tenant patched
+>   `ingress: true`; wildcard `*.guardianintelligence.org` → the 3 node IPs on
+>   Cloudflare). **kube-apiserver OIDC** wired via talm `oidcIssuerUrl` (no-reboot,
+>   KubeSpan-patch-stacked, k8s pinned 1.34.3). See memory `cozystack-mgmt-dashboard-sso`.
+> - Remaining from the plan: the **PR4 KubeVirt-on-zvol GATE** (still unproven), PR5+
+>   tenant clusters, Track 2 worker pool, and **wiring Flux to reconcile `base/`**.
+
 ## 1 — What's been done
 
 A **3-node Talos control plane in three different public /31 subnets** (no shared
