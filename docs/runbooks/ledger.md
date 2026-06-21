@@ -14,28 +14,25 @@ CronJobs yet — those are the M5 remainder.
 Setup for every step (repo root, per site):
 
 ```sh
-export KUBECONFIG=~/.local/state/guardian/guardian-<site>/kubeconfig
-export RUNFILES_DIR="$(bazelisk info bazel-bin 2>/dev/null)/src/guardian-cli/cmd/guardian/guardian_/guardian.runfiles"
+export KUBECONFIG=~/.guardian-deploy/kubeconfig
 ```
 
 ## 1. Converge
 
-Bootstrap owns the admin Secret path. On a fresh OpenBao, `guardian up`
-generates `kv/guardian/<site>/observability/clickhouse-admin`, installs or
-seeds External Secrets Operator, and waits for the environment's
-`SecretProjection` to produce the Kubernetes `clickhouse-admin` Secret before
-the ledger is treated as ready. Flux owns the ClickHouse desired
-state after bootstrap handoff. On a restored OpenBao the value must already
-exist in the restored snapshot; missing restored paths are a schema migration,
-not a hand-created Kubernetes Secret.
+Flux owns the ClickHouse desired state. On a fresh OpenBao the admin Secret path
+`kv/guardian/<site>/observability/clickhouse-admin` is minted during secret-zero
+seeding, and the site's `SecretProjection` produces the Kubernetes
+`clickhouse-admin` Secret (via External Secrets Operator) before the ledger is
+treated as ready. On a restored OpenBao the value must already exist in the
+restored snapshot; missing restored paths are a schema migration, not a
+hand-created Kubernetes Secret.
 
 Never run `kubectl create secret generic clickhouse-admin` by hand. That
 would split truth between Kubernetes and OpenBao and would be lost on a
 wipe/restore.
 
-```sh
-bazelisk run //src/guardian-cli/cmd/guardian:guardian -- up src/hosts/<host>/host.yaml
-```
+Reconcile the observability stack from the repo (see
+`docs/runbooks/cozystack-mgmt-rebuild.md` Phase 5 for the Flux entrypoint).
 
 Paging hygiene: the converge restarts the collector (`Recreate` strategy) —
 a one-scrape-interval metrics gap; no monitored endpoint is in the path and

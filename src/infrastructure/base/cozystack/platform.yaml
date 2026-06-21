@@ -9,18 +9,14 @@ spec:
       values:
         publishing:
           host: guardianintelligence.org
-          # Shared-L2 rebuild: the k8s API rides a Talos Layer2 VIP on the
-          # Latitude Virtual Network (see src/infrastructure/talm values
-          # floatingIP/vipLink). One stable endpoint, no per-node /31 dead-end.
+          # k8s API rides a Talos Layer2 VIP on the Latitude Virtual Network.
+          # See docs/runbooks/cozystack-mgmt-rebuild.md.
           apiServerEndpoint: https://10.8.0.250:6443
           exposedServices:
             - dashboard
             - api
-          # On shared L2 the default LoadBalancer/MetalLB path works (an L2
-          # IPAddressPool can hand out 10.8.0.x VIPs and ARP for them), so the
-          # cross-subnet `externalIPs` hack is gone. NOTE (rebuild gate): once
-          # the VLAN range is confirmed, add a MetalLB L2 IPAddressPool from the
-          # private range (e.g. 10.8.0.200-10.8.0.240) so ingress gets a VIP.
+          # Ingress via MetalLB L2 (IPAddressPool from the private VLAN range).
+          # See docs/runbooks/cozystack-mgmt-rebuild.md.
         networking:
           podCIDR: 10.244.0.0/16
           podGateway: 10.244.0.1
@@ -38,6 +34,4 @@ spec:
           brandName: Guardian
           brandHtmlName: "<b>Guardian</b>"
     # MTU is set authoritatively on the kube-ovn Subnets in
-    # networking/subnet-mtu.yaml (1362 = the measured 1420 VLAN path MTU − 58
-    # GENEVE; KubeSpan's +80 WireGuard tax is gone). The platform-level
-    # kube-ovn.mtu knob did not propagate to the Subnets, so it is not carried here.
+    # networking/subnet-mtu.yaml. See docs/runbooks/cozystack-mgmt-rebuild.md.

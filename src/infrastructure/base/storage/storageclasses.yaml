@@ -28,11 +28,9 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: replicated
-  # Default class: platform stateful workloads (incl. the non-overridable
-  # bundled CNPGs in cozystack system/app charts like keycloak-db) get 3-way
-  # DRBD so a single node loss never strands a replica — the exact failure the
-  # ash-fire->ash-water CP swap hit. Opt into `local`/`local-retain` by name for
-  # ephemeral or perf-sensitive single-replica volumes.
+  # Default class: 3-way DRBD so a single node loss never strands a replica.
+  # Opt into `local`/`local-retain` by name for single-replica volumes.
+  # See docs/runbooks/cozystack-mgmt-rebuild.md.
   annotations:
     storageclass.kubernetes.io/is-default-class: "true"
 provisioner: linstor.csi.linbit.com

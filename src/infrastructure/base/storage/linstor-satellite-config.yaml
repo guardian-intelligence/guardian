@@ -1,16 +1,6 @@
-# Declarative LINSTOR `data` storage pool — replaces the per-node hand step
-#   linstor physical-storage create-device-pool --pool-name data \
-#     --storage-pool data zfs <node> /dev/nvme1n1
-# that every freshly-imaged node previously needed (and whose absence stranded
-# pods as Pending after the ash-fire->ash-water swap). Piraeus merges this with
-# the cozystack-* LinstorSatelliteConfigurations (which only patch the
-# satellite DaemonSet, not storage). No nodeSelector => applies to every node.
-#
-# Driver = thick ZFS (matches the live pools: provider_kind=ZFS, not ZFS_THIN).
-# hostDevices = /dev/nvme1n1: on this uniform fleet the Talos OS installs to
-# nvme0n1 and the second identical NVMe is always nvme1n1 (by-id WWIDs differ
-# per node, so a single by-id can't be shared). Piraeus prepares the zpool from
-# this raw device on first boot and adopts it idempotently if it already exists.
+# Declarative LINSTOR `data` storage pool (thick ZFS) on every node's second
+# NVMe (/dev/nvme1n1; OS is on nvme0n1). No nodeSelector => fleet-wide; Piraeus
+# adopts the zpool idempotently. See docs/runbooks/cozystack-mgmt-rebuild.md.
 apiVersion: piraeus.io/v1
 kind: LinstorSatelliteConfiguration
 metadata:

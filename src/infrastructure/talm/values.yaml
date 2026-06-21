@@ -17,8 +17,8 @@
 # the LB URL and leave `floatingIP` blank.
 #
 # Example: endpoint: "https://192.168.0.1:6443"
-# Shared-L2 rebuild: the API endpoint IS the Layer2 VIP on the Latitude Virtual
-# Network (floatingIP below = same IP). Replaces the old per-node public /31.
+# The API endpoint is the Layer2 VIP (floatingIP below = same IP).
+# See docs/runbooks/cozystack-mgmt-rebuild.md.
 endpoint: "https://10.8.0.250:6443"
 
 # Optional override for the cluster's name (defaults to Chart.Name).
@@ -36,9 +36,8 @@ clusterDomain: cozy.local
 # silently embeds a wrong VIP -- fill in only if you want a VIP.
 # Single-node clusters and external-LB topologies leave it blank.
 # Example: floatingIP: 192.168.0.1
-# Layer2 VIP for the k8s API, pinned onto the VLAN child link (vipLink). Equals
-# the host portion of `endpoint`. Shared L2 over the Latitude Virtual Network
-# makes this possible for the first time (an L2 VIP can't span the old /31s).
+# Layer2 VIP for the k8s API, pinned onto vipLink. Equals the host portion of
+# `endpoint`. See docs/runbooks/cozystack-mgmt-rebuild.md.
 floatingIP: "10.8.0.250"
 
 # Optional override for the link Layer2VIPConfig is pinned to. When
@@ -81,10 +80,9 @@ floatingIP: "10.8.0.250"
 # document brings vipLink up, Layer2VIPConfig will dangle on a
 # non-existent link and the cluster endpoint will be unreachable.
 # Example: vipLink: eth0.4000
-# Confirmed on hardware 2026-06-21: the Latitude Virtual Network (VID 2140) rides
-# the secondary/private NIC enp1s0f0 (the public IP is on enp1s0f1). The per-node
-# body overlay brings this link up with a VLANConfig (vlanID 2140, parent
-# enp1s0f0, address 10.8.0.1X/24, mtu 1420) — see the rebuild runbook.
+# The Latitude Virtual Network (VID 2140) rides the private NIC enp1s0f0; the
+# per-node overlay brings it up with a VLANConfig.
+# See docs/runbooks/cozystack-mgmt-rebuild.md.
 vipLink: "enp1s0f0.2140"
 image: "ghcr.io/cozystack/cozystack/talos:v1.12.6"
 podSubnets:
@@ -105,17 +103,15 @@ serviceSubnets:
 # Example:
 #   advertisedSubnets:
 #     - "10.0.0.0/8"
-# Pin kubelet nodeIP + etcd advertise to the private VLAN /24 (nodes .11/.12/.13)
-# instead of the public default-gateway link.
+# Pin kubelet nodeIP + etcd advertise to the private VLAN /24 (nodes .11/.12/.13).
+# See docs/runbooks/cozystack-mgmt-rebuild.md.
 advertisedSubnets:
   - "10.8.0.0/24"
 
 oidcIssuerUrl: "https://keycloak.guardianintelligence.org/realms/cozy"
-# Cluster-wide cert SANs. The stable internal API address is the VLAN VIP
-# (10.8.0.250). The node PUBLIC IPs are also included so the cluster stays
-# manageable (talosctl/kubectl) from a runner that is NOT on the private VLAN —
-# without them, a public-IP runner can't reach the API/Talos cert-validly and
-# would be locked out. The retired ash-fire 67.213.115.113 is dropped.
+# Cluster-wide cert SANs: the VLAN VIP (10.8.0.250) plus each node's public IP so
+# the API/Talos stays manageable from a runner off the private VLAN.
+# See docs/runbooks/cozystack-mgmt-rebuild.md.
 certSANs:
 - api.guardianintelligence.org
 - 10.8.0.250

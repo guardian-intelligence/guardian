@@ -193,8 +193,8 @@ Local layout verification:
 
 ```sh
 aspect release sdk-oci --output-dir /tmp/guardian-sdk-release
-guardian run oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist
-guardian run oras discover --oci-layout /tmp/guardian-sdk-release/oci-layout:edge
+oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist
+oras discover --oci-layout /tmp/guardian-sdk-release/oci-layout:edge
 jq . /tmp/guardian-sdk-release/release-result.json
 ```
 
@@ -203,13 +203,13 @@ Public registry verification once `oci.guardianintelligence.org` is live:
 ```sh
 SDK='oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>'
 
-guardian run oras pull "$SDK" -o ./dist
-guardian run oras discover "$SDK"
-guardian run cosign verify "$SDK" \
+oras pull "$SDK" -o ./dist
+oras discover "$SDK"
+cosign verify "$SDK" \
   --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml@refs/heads/main' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 
-guardian run cosign verify-attestation "$SDK" \
+cosign verify-attestation "$SDK" \
   --type slsaprovenance1 \
   --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml@refs/heads/main' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'

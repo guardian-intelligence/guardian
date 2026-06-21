@@ -49,15 +49,15 @@ The SDK OCI subject is built and admitted through Aspect:
 
 ```sh
 aspect release sdk-oci --output-dir /tmp/guardian-sdk-release
-guardian run oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist
-guardian run oras discover --oci-layout /tmp/guardian-sdk-release/oci-layout:edge
+oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist
+oras discover --oci-layout /tmp/guardian-sdk-release/oci-layout:edge
 ```
 
 The public zot registry allows anonymous reads and requires the
-`guardian-release` htpasswd identity for writes. `guardian up` generates that
-credential in OpenBao at `kv/guardian/<site>/oci/zot-publisher`; the site's
-`SecretProjection` owns the namespace-scoped ESO projection to the Kubernetes Secret
-`guardian-oci/zot-publisher`.
+`guardian-release` htpasswd identity for writes. That credential is minted in
+OpenBao at `kv/guardian/<site>/oci/zot-publisher` during secret-zero seeding;
+the site's `SecretProjection` owns the namespace-scoped ESO projection to the
+Kubernetes Secret `guardian-oci/zot-publisher`.
 
 When write credentials are present, the remote publish form is:
 
@@ -110,12 +110,12 @@ curl -fsSLO "$BASE/$ASSET"
 curl -fsSLO "$BASE/$ASSET.sigstore.json"
 curl -fsSLO "$BASE/$ASSET.intoto.sigstore.json"
 
-guardian run cosign verify-blob "$ASSET" \
+cosign verify-blob "$ASSET" \
   --bundle "$ASSET.sigstore.json" \
   --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/release.yml@refs/heads/main' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 
-guardian run cosign verify-blob-attestation "$ASSET" \
+cosign verify-blob-attestation "$ASSET" \
   --bundle "$ASSET.intoto.sigstore.json" \
   --type slsaprovenance1 \
   --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/release.yml@refs/heads/main' \
@@ -134,13 +134,13 @@ Use the digest printed by the release tool:
 ```sh
 SDK='oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<digest>'
 
-guardian run oras pull "$SDK" -o ./dist
-guardian run oras discover "$SDK"
-guardian run cosign verify "$SDK" \
+oras pull "$SDK" -o ./dist
+oras discover "$SDK"
+cosign verify "$SDK" \
   --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml@refs/heads/main' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 
-guardian run cosign verify-attestation "$SDK" \
+cosign verify-attestation "$SDK" \
   --type slsaprovenance1 \
   --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml@refs/heads/main' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
@@ -156,11 +156,11 @@ attestation attached to the same OCI subject digest.
 ```sh
 IMAGE='oci.guardianintelligence.org/guardian/aisucks/api@sha256:<digest>'
 
-guardian run cosign verify "$IMAGE" \
+cosign verify "$IMAGE" \
   --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/release.yml@refs/heads/main' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 
-guardian run cosign verify-attestation "$IMAGE" \
+cosign verify-attestation "$IMAGE" \
   --type slsaprovenance1 \
   --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/release.yml@refs/heads/main' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \

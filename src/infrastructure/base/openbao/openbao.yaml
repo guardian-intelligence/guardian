@@ -5,9 +5,8 @@ metadata:
   namespace: tenant-root
 spec:
   replicas: 3
-  # replicated-retain = 3-way DRBD + Retain. Each raft member's volume survives
-  # the loss of its node (the ash-fire->ash-water swap stranded the local-retain
-  # replica); Retain guards the data on PVC delete.
+  # replicated-retain = 3-way DRBD + Retain: each raft member's volume survives
+  # node loss and PVC delete. See docs/runbooks/cozystack-mgmt-rebuild.md.
   storageClass: replicated-retain
   size: 10Gi
   ui: true

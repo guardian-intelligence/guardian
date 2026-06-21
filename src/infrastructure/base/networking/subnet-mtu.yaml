@@ -1,9 +1,5 @@
-# Authoritative MTU for the kube-ovn Subnets. 1362 = 1420 − 58 (kube-ovn GENEVE).
-# The VLAN path MTU was MEASURED at 1420 on the Latitude Virtual Network (VID
-# 2140) via tracepath, 2026-06-21 — Latitude's fabric clamps tagged VLANs ~80B
-# below 1500; jumbo is unavailable. The old 1222 was over-conservative (it
-# absorbed Talos KubeSpan's +80 WireGuard tax, now removed); 1362 is the real
-# ceiling and is uniform across the fabric.
+# Authoritative MTU for the kube-ovn Subnets. 1362 = 1420 VLAN path MTU − 58
+# GENEVE. See docs/runbooks/cozystack-mgmt-rebuild.md.
 apiVersion: kubeovn.io/v1
 kind: Subnet
 metadata:

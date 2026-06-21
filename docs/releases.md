@@ -87,8 +87,8 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 
 ### GitHub Release Assets
 
-- [ ] GitHub Release asset projection is owned by the distributable release
-  tool, not by the Guardian CLI or repo-wide release code.
+- [ ] GitHub Release asset projection is owned by the package-owned release
+  tool invoked through `aspect`.
 - [ ] Each uploaded asset has a digest in a signed release manifest.
 - [ ] Each uploaded executable/package-like asset has a cosign v3 Sigstore
   signature bundle beside it as `<artifact>.sigstore.json`.
@@ -118,9 +118,9 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 - [ ] Public reads are digest-addressed; mutable tags are channel convenience
   only.
 - [x] SDK can be pulled from the local OCI layout with
-  `guardian run oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist`.
+  `oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist`.
 - [ ] SDK can be pulled from the public OCI registry with
-  `guardian run oras pull oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>`.
+  `oras pull oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>`.
 
 ### Release Tuple Manifest
 
@@ -262,33 +262,33 @@ BASE=https://github.com/guardian-intelligence/guardian/releases/download/${VERSI
 curl -fsSLO "$BASE/$ASSET"
 curl -fsSLO "$BASE/$ASSET.sigstore.json"
 curl -fsSLO "$BASE/$ASSET.intoto.sigstore.json"
-guardian run cosign verify-blob "$ASSET" --bundle "$ASSET.sigstore.json" \
+cosign verify-blob "$ASSET" --bundle "$ASSET.sigstore.json" \
   --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/release.yml@refs/heads/main' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
-guardian run cosign verify-blob-attestation "$ASSET" --bundle "$ASSET.intoto.sigstore.json" \
+cosign verify-blob-attestation "$ASSET" --bundle "$ASSET.intoto.sigstore.json" \
   --type slsaprovenance1 \
   --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/release.yml@refs/heads/main' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
-guardian run cosign verify oci.guardianintelligence.org/guardian/aisucks/api@sha256:... \
+cosign verify oci.guardianintelligence.org/guardian/aisucks/api@sha256:... \
   --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/release.yml@refs/heads/main' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
-guardian run cosign verify-attestation --type slsaprovenance1 oci.guardianintelligence.org/guardian/aisucks/api@sha256:... \
+cosign verify-attestation --type slsaprovenance1 oci.guardianintelligence.org/guardian/aisucks/api@sha256:... \
   --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/release.yml@refs/heads/main' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 npm view @guardian-intelligence/aisucks@edge dist.integrity
 npm install @guardian-intelligence/aisucks@edge
 aspect release sdk-oci --output-dir /tmp/guardian-sdk-release
-guardian run oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist
-guardian run oras discover --oci-layout /tmp/guardian-sdk-release/oci-layout:edge
-guardian run oras pull oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest> -o ./dist
-guardian run cosign verify oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest> \
+oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist
+oras discover --oci-layout /tmp/guardian-sdk-release/oci-layout:edge
+oras pull oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest> -o ./dist
+cosign verify oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest> \
   --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml@refs/heads/main' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
-guardian run cosign verify-attestation --type slsaprovenance1 oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest> \
+cosign verify-attestation --type slsaprovenance1 oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest> \
   --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml@refs/heads/main' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
-guardian/repo tool verify release-manifest <digest-or-file>
-guardian/repo tool synthetic health --base-url=https://gamma.aisucks.app
+aspect release verify release-manifest <digest-or-file>
+aspect release synthetic health --base-url=https://gamma.aisucks.app
 ```
 
 These public commands are the acceptance contract.

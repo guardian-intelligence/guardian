@@ -1,15 +1,9 @@
-# Runbook: guardian-mgmt clean-slate rebuild (shared-L2 VLAN, no KubeSpan)
+# Runbook: guardian-mgmt clean-slate rebuild (shared-L2 VLAN)
 
 Reproducible cold boot of the guardian-mgmt control plane onto a Latitude
-Virtual Network (true L2), with KubeSpan removed. This is the canonical bring-up
-runbook; it replaces the retired cross-subnet `/31` + KubeSpan + MTU-1222
-procedure (whose bespoke fabric was the root cause of the layered MTU pain).
-
-**Why a rebuild, not in-place repair:** an in-place CP node swap diverges the
-cluster's node-pinned stateful systems (etcd / OVN raft / LINSTOR / CNPG /
-OpenBao raft) from declared state, forcing imperative drift-repair. A rebuild
-regenerates all of it from code. This runbook + `src/infrastructure/base/` +
-`src/infrastructure/talm/` are the complete source of truth.
+Virtual Network (true L2). This is the canonical bring-up runbook;
+`src/infrastructure/base/` + `src/infrastructure/talm/` + this doc are the
+complete source of truth.
 
 **Clean slate:** nothing is preserved. secret-zero (OpenBao unseal/root,
 Keycloak admin) is re-minted; no data restore.
@@ -33,12 +27,9 @@ and tested host-netns VLAN interfaces.
 
 ## ⚠️ Merge timing (read before merging the rebuild PR)
 
-The live cluster's Flux reconciles `main`. This repo now describes the
-**post-rebuild VLAN topology**; applying it to the *current* cross-subnet +
-KubeSpan cluster would break it (VIP endpoint with no VIP, pod MTU 1442 > the
-1362 KubeSpan ceiling → silent drops). Therefore: **keep the rebuild changes on
-the branch / open PR — do NOT merge to `main` until the rebuild cutover**, when
-the old cluster is being replaced (or its Flux is quiesced). Repo-first means
+The live cluster's Flux reconciles `main`. Keep the rebuild changes on the
+branch / open PR — do NOT merge to `main` until the rebuild cutover, when the
+target cluster is provisioned (or its Flux is quiesced). Repo-first means
 "reviewed and correct," not "merged onto the live cluster."
 
 ---
@@ -88,12 +79,10 @@ section above. To recreate from scratch:
    { "server_id": "<sv_…>", "virtual_network_id": "<vlan_…>" }
    ```
 3. **CONFIRM THE VLAN MTU.** Bring the tagged sub-iface up on two nodes with
-   temp IPs and probe with DF set:
-   ```
-   ping -M do -s 1472 -c3 10.8.0.12     # 1472 = 1500 − 28; success ⇒ L2 clears 1500
-   ```
-   Record the result. Success ⇒ pod MTU 1442 stands. Failure ⇒ bisect, set
-   `POD_MTU = VLAN_MTU − 58`, and edit `subnet-mtu.yaml` + the node `VLANConfig`.
+   temp IPs and probe the path with `tracepath`/DF-set pings to find the largest
+   clearing packet. The fabric clamps tagged VLANs to a **1420** path. Set
+   `POD_MTU = VLAN_MTU − 58` (= **1362**) in `subnet-mtu.yaml` and the node
+   `VLANConfig`.
 
 ## Phase 2 — boot to Talos + fresh secret-zero
 PXE/`boot-to-talos` each node into Talos maintenance over its existing public
@@ -102,11 +91,10 @@ NIC (the private fabric isn't up yet). Then:
 cd ~/.guardian-deploy/talm && talm gen secrets    # fresh secrets.yaml + talm.key
 ```
 
-## Phase 3 — fill the VLAN gates, then talm apply (KubeSpan dropped)
+## Phase 3 — fill the VLAN gates, then talm apply
 1. Set `src/infrastructure/talm/values.yaml` `vipLink: <parent>.<VID>` (confirm
    `<parent>`: the NIC Latitude tagged — `enp1s0f0`/`enp1s0f1`).
-2. Generate + patch each node body with the VLAN link (replacing the public-/31
-   `LinkConfig`):
+2. Generate + patch each node body with the VLAN link:
    ```yaml
    apiVersion: v1alpha1
    kind: VLANConfig
@@ -116,7 +104,7 @@ cd ~/.guardian-deploy/talm && talm gen secrets    # fresh secrets.yaml + talm.ke
    mtu: <VLAN_MTU>
    addresses: [ 10.8.0.1X/24 ]      # .11 / .12 / .13
    ```
-3. Apply **without** the KubeSpan side-patch (it is deleted from the flow):
+3. Apply:
    ```
    talm template -f nodes/<n>.yaml --kubernetes-version 1.34.3
    talm apply    -f nodes/<n>.yaml --kubernetes-version 1.34.3 --nodes 10.8.0.1X --endpoints 10.8.0.1X
@@ -124,8 +112,8 @@ cd ~/.guardian-deploy/talm && talm gen secrets    # fresh secrets.yaml + talm.ke
    Bootstrap etcd on the first node; wait for the VIP `10.8.0.250:6443` to answer.
 
 ## Phase 4 — Cozystack
-Install the `isp-full` Cozystack platform against the VIP. With clean 1500 L2,
-kube-ovn calibrates pod MTU to 1442 (subnet-mtu.yaml then pins it explicitly).
+Install the `isp-full` Cozystack platform against the VIP. `subnet-mtu.yaml`
+pins pod MTU to 1362 (the 1420 VLAN path − 58 GENEVE).
 
 ## Phase 5 — Flux reconciles the repo
 Merge the rebuild PR (now safe — old cluster gone), then:
@@ -154,13 +142,11 @@ Re-seed Keycloak realm/clients. Re-mint any Transit / release-judge credentials.
 
 ---
 
-## What is now declarative (vs. the old imperative glue)
-- `data` ZFS pool → `storage/linstor-satellite-config.yaml` (was a per-node hand
-  command).
-- Platform stateful HA → default `replicated` SC + OpenBao `replicated-retain`
-  (was `local`, which stranded replicas on node loss).
-- Talos/VLAN/VIP topology → `src/infrastructure/talm/` (was only on the runner).
-- API exposure → L2 VIP + MetalLB (was the `externalIPs`/no-MetalLB hack).
+## What is declarative
+- `data` ZFS pool → `storage/linstor-satellite-config.yaml`.
+- Platform stateful HA → default `replicated` SC + OpenBao `replicated-retain`.
+- Talos/VLAN/VIP topology → `src/infrastructure/talm/`.
+- API exposure → L2 VIP + MetalLB.
 
 Still imperative by nature (documented here, not in Flux): Latitude provisioning,
 boot-to-Talos, `talm gen secrets`, OpenBao init/unseal.

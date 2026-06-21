@@ -114,6 +114,11 @@ Target cluster shape while `vs-prod-w0` is excluded:
   earned. Gamma must not live inside the prod cluster, because it exists to catch
   platform and product failures before prod.
 
+Hard infrastructure prerequisite: the control-plane nodes must share Layer-2 /
+ARP connectivity via a Latitude.sh Virtual Network (VLAN) — this shared-L2 fabric
+is what the API VIP and pod MTU depend on (see
+`docs/runbooks/cozystack-mgmt-rebuild.md`).
+
 Former Verself gamma (`vs-gamma-w0`) is released for takeover as of 2026-06-12,
 including its data: the 384GB Verself dataset on it is discardable (operator
 confirmed Verself keeps its own backups in a separate R2 bucket). Wipe and enroll
