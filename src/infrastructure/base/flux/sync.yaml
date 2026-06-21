@@ -1,0 +1,41 @@
+# GitOps entrypoint for the guardian-mgmt cluster.
+#
+# Cozystack already runs Flux in-cluster (cozy-fluxcd). These two objects make
+# Flux reconcile src/infrastructure/base/ — the declarative source of truth for
+# the management cluster — turning the by-hand bring-up into a control loop.
+#
+# Bootstrap: `kubectl apply -f src/infrastructure/base/flux/sync.yaml` once. The
+# Kustomization then manages this file too (the path includes flux/), so further
+# changes flow through git.
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: guardian
+  namespace: cozy-fluxcd
+spec:
+  interval: 5m
+  url: https://github.com/guardian-intelligence/guardian
+  ref:
+    # TODO: switch to `main` once PR #84 (infra/cozystack-mgmt-base) merges.
+    # base/ lives only on the feature branch until then.
+    branch: infra/cozystack-mgmt-base
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: guardian-mgmt-base
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 2m
+  path: ./src/infrastructure/base
+  sourceRef:
+    kind: GitRepository
+    name: guardian
+  # Conservative start: never delete. Flip to true once the inventory is
+  # trusted — pruning the cozystack Package or storage classes would be
+  # catastrophic, so we apply/update only until then.
+  prune: false
+  wait: true
+  timeout: 5m
