@@ -5,7 +5,10 @@ metadata:
   namespace: tenant-root
 spec:
   replicas: 3
-  storageClass: local-retain
+  # replicated-retain = 3-way DRBD + Retain. Each raft member's volume survives
+  # the loss of its node (the ash-fire->ash-water swap stranded the local-retain
+  # replica); Retain guards the data on PVC delete.
+  storageClass: replicated-retain
   size: 10Gi
   ui: true
   external: false

@@ -6,6 +6,7 @@ resources:
   - cozystack/platform.yaml
   - networking/subnet-mtu.yaml
   - storage/storageclasses.yaml
+  - storage/linstor-satellite-config.yaml
   - openbao/openbao.yaml
   - openbao/networkpolicy.yaml
   - flux/sync.yaml

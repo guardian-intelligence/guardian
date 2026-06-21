@@ -2,8 +2,6 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: local
-  annotations:
-    storageclass.kubernetes.io/is-default-class: "true"
 provisioner: linstor.csi.linbit.com
 parameters:
   linstor.csi.linbit.com/storagePool: data
@@ -30,6 +28,13 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: replicated
+  # Default class: platform stateful workloads (incl. the non-overridable
+  # bundled CNPGs in cozystack system/app charts like keycloak-db) get 3-way
+  # DRBD so a single node loss never strands a replica — the exact failure the
+  # ash-fire->ash-water CP swap hit. Opt into `local`/`local-retain` by name for
+  # ephemeral or perf-sensitive single-replica volumes.
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
 provisioner: linstor.csi.linbit.com
 parameters:
   linstor.csi.linbit.com/storagePool: data

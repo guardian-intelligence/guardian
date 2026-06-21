@@ -1,6 +1,7 @@
 filegroup(
     name = "manifests",
     srcs = [
+        "linstor-satellite-config.yaml",
         "storageclasses.yaml",
     ],
     visibility = ["//visibility:public"],

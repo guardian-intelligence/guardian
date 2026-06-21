@@ -9,20 +9,18 @@ spec:
       values:
         publishing:
           host: guardianintelligence.org
-          apiServerEndpoint: https://206.223.228.101:6443
+          # Shared-L2 rebuild: the k8s API rides a Talos Layer2 VIP on the
+          # Latitude Virtual Network (see src/infrastructure/talm values
+          # floatingIP/vipLink). One stable endpoint, no per-node /31 dead-end.
+          apiServerEndpoint: https://10.8.0.250:6443
           exposedServices:
             - dashboard
             - api
-          # Cross-subnet /31 nodes: no MetalLB/L2/VIP. exposure MUST be set
-          # explicitly — the real default leaves root-ingress-controller a
-          # stuck LoadBalancer<pending>. externalIPs path => ClusterIP svc
-          # carrying the node public IPs (which the *.guardianintelligence.org
-          # wildcard A records resolve to).
-          exposure: externalIPs
-          externalIPs:
-            - 206.223.228.101
-            - 45.250.254.119
-            - 67.213.115.113
+          # On shared L2 the default LoadBalancer/MetalLB path works (an L2
+          # IPAddressPool can hand out 10.8.0.x VIPs and ARP for them), so the
+          # cross-subnet `externalIPs` hack is gone. NOTE (rebuild gate): once
+          # the VLAN range is confirmed, add a MetalLB L2 IPAddressPool from the
+          # private range (e.g. 10.8.0.200-10.8.0.240) so ingress gets a VIP.
         networking:
           podCIDR: 10.244.0.0/16
           podGateway: 10.244.0.1
@@ -39,7 +37,7 @@ spec:
           logoText: Guardian
           brandName: Guardian
           brandHtmlName: "<b>Guardian</b>"
-    networking:
-      values:
-        kube-ovn:
-          mtu: 1222
+    # MTU is set authoritatively on the kube-ovn Subnets in
+    # networking/subnet-mtu.yaml (1442 = 1500 L2 − 58 GENEVE, once KubeSpan's
+    # +80 WireGuard tax is gone). The platform-level kube-ovn.mtu knob did not
+    # propagate to the Subnets, so it is not carried here.
