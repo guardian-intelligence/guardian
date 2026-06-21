@@ -1,0 +1,7 @@
+filegroup(
+    name = "manifests",
+    srcs = [
+        "subnet-mtu.yaml",
+    ],
+    visibility = ["//visibility:public"],
+)

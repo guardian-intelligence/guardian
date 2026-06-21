@@ -1,9 +1,0 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_library")
-
-go_library(
-    name = "toolrunner",
-    srcs = ["toolrunner.go"],
-    importpath = "github.com/guardian-intelligence/guardian/src/guardian/internal/toolrunner",
-    visibility = ["//src/guardian:__subpackages__"],
-    deps = ["@io_bazel_rules_go//go/runfiles"],
-)

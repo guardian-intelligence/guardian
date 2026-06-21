@@ -1,21 +1,12 @@
-"""aspect bazel gazelle|bzlmod|update — Bazel-graph orchestration shortcuts.
+"""aspect bazel bzlmod — Bazel-graph orchestration shortcut.
 
-Durable AXL wrappers around the Bazel-graph workflows an operator runs by
-hand often enough to want shape and help text. Everything else (one-off
+Durable AXL wrapper around the Bzlmod workflow an operator runs by hand often
+enough to want shape and help text. Everything else (one-off
 `bazel build|test|query` against ad-hoc target patterns) is raw bazel and
 intentionally out of scope.
 """
 
 load(".aspect/lib/helpers.axl", "checked_spawn", "ws_path")
-
-def _gazelle_impl(ctx):
-    return checked_spawn(
-        ctx,
-        "bazelisk",
-        ["run", "//:gazelle", "--", "update"],
-        cwd = ws_path(ctx),
-        label = "bazelisk run //:gazelle -- update",
-    )
 
 def _bzlmod_impl(ctx):
     return checked_spawn(
@@ -26,29 +17,9 @@ def _bzlmod_impl(ctx):
         label = "bazelisk mod tidy",
     )
 
-def _update_impl(ctx):
-    rc = _gazelle_impl(ctx)
-    if rc != 0:
-        return rc
-    return _bzlmod_impl(ctx)
-
-gazelle = task(
-    implementation = _gazelle_impl,
-    name = "gazelle",
-    group = ["bazel"],
-    summary = "Regenerate Bazel Go BUILD files via gazelle update.",
-)
-
 bzlmod = task(
     implementation = _bzlmod_impl,
     name = "bzlmod",
     group = ["bazel"],
     summary = "Update Bzlmod repository wiring (`bazelisk mod tidy --lockfile_mode=update`).",
-)
-
-update = task(
-    implementation = _update_impl,
-    name = "update",
-    group = ["bazel"],
-    summary = "Run `aspect bazel gazelle` then `aspect bazel bzlmod`.",
 )

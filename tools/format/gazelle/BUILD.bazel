@@ -1,7 +1,0 @@
-load("@bazel_gazelle//:def.bzl", "gazelle")
-
-gazelle(
-    name = "format",
-    tags = ["guardian-format"],
-    visibility = ["//visibility:public"],
-)

@@ -1,5 +1,0 @@
-filegroup(
-    name = "config",
-    srcs = ["cluster.json"],
-    visibility = ["//visibility:public"],
-)

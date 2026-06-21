@@ -1,0 +1,7 @@
+filegroup(
+    name = "manifests",
+    srcs = [
+        "storageclasses.yaml",
+    ],
+    visibility = ["//visibility:public"],
+)

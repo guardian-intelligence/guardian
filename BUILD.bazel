@@ -1,27 +1,14 @@
-load("@bazel_gazelle//:def.bzl", "gazelle")
-
 exports_files([
-    "bazel.go.work",
     "buf.yaml",
 ])
-
-gazelle(name = "gazelle")
 
 filegroup(
     name = "build",
     srcs = [
-        "//src/guardian/cmd/guardian",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-test_suite(
-    name = "dev_check",
-    tests = [
-        "//src/guardian/cmd/guardian:guardian_test",
-        "//src/guardian/internal/config:config_test",
-        "//src/guardian/internal/genesis:genesis_test",
-        "//src/guardian/internal/up:up_test",
+        "//src/infrastructure/base/cozystack:manifests",
+        "//src/infrastructure/base/networking:manifests",
+        "//src/infrastructure/base/openbao:manifests",
+        "//src/infrastructure/base/storage:manifests",
     ],
     visibility = ["//visibility:public"],
 )
