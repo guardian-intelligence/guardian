@@ -1,0 +1,33 @@
+apiVersion: cozystack.io/v1alpha1
+kind: Package
+metadata:
+  name: cozystack.cozystack-platform
+spec:
+  variant: isp-full
+  components:
+    platform:
+      values:
+        publishing:
+          host: guardianintelligence.org
+          apiServerEndpoint: https://206.223.228.101:6443
+          exposedServices: []
+        networking:
+          podCIDR: 10.244.0.0/16
+          podGateway: 10.244.0.1
+          serviceCIDR: 10.96.0.0/16
+          joinCIDR: 100.64.0.0/16
+        authentication:
+          oidc:
+            enabled: true
+            keycloakInternalUrl: http://keycloak-http.cozy-keycloak.svc:8080/realms/cozy
+        branding:
+          titleText: Guardian
+          footerText: Guardian Intelligence
+          tenantText: Guardian Platform
+          logoText: Guardian
+          brandName: Guardian
+          brandHtmlName: "<b>Guardian</b>"
+    networking:
+      values:
+        kube-ovn:
+          mtu: 1222

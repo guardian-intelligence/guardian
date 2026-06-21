@@ -1,6 +1,0 @@
-# The namespace OpenBao lives in. Shared by every environment on the cluster
-# (it is not part of the per-environment values), so it sits here in the base.
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: openbao

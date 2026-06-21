@@ -1,8 +1,7 @@
 filegroup(
     name = "manifests",
     srcs = [
-        "networkpolicy.yaml",
-        "openbao.yaml",
+        "subnet-mtu.yaml",
     ],
     visibility = ["//visibility:public"],
 )
