@@ -111,13 +111,17 @@ advertisedSubnets:
   - "10.8.0.0/24"
 
 oidcIssuerUrl: "https://keycloak.guardianintelligence.org/realms/cozy"
-# Cluster-wide cert SANs. Shared-L2 rebuild: the stable API address is the VLAN
-# VIP (10.8.0.250); the old per-node public /31 IPs (incl. the retired ash-fire
-# 67.213.115.113) are gone. Optionally add node VLAN IPs (.11/.12/.13) for
-# direct talosctl/kubectl over the fabric.
+# Cluster-wide cert SANs. The stable internal API address is the VLAN VIP
+# (10.8.0.250). The node PUBLIC IPs are also included so the cluster stays
+# manageable (talosctl/kubectl) from a runner that is NOT on the private VLAN —
+# without them, a public-IP runner can't reach the API/Talos cert-validly and
+# would be locked out. The retired ash-fire 67.213.115.113 is dropped.
 certSANs:
 - api.guardianintelligence.org
 - 10.8.0.250
+- 206.223.228.101  # ash-earth
+- 45.250.254.119   # ash-wind
+- 206.223.228.87   # ash-water
 nr_hugepages: 0
 allocateNodeCIDRs: true
 
