@@ -38,6 +38,6 @@ spec:
           brandName: Guardian
           brandHtmlName: "<b>Guardian</b>"
     # MTU is set authoritatively on the kube-ovn Subnets in
-    # networking/subnet-mtu.yaml (1442 = 1500 L2 − 58 GENEVE, once KubeSpan's
-    # +80 WireGuard tax is gone). The platform-level kube-ovn.mtu knob did not
-    # propagate to the Subnets, so it is not carried here.
+    # networking/subnet-mtu.yaml (1362 = the measured 1420 VLAN path MTU − 58
+    # GENEVE; KubeSpan's +80 WireGuard tax is gone). The platform-level
+    # kube-ovn.mtu knob did not propagate to the Subnets, so it is not carried here.

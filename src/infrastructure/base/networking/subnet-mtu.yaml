@@ -1,10 +1,9 @@
-# Authoritative MTU for the kube-ovn Subnets. 1442 = 1500 (clean L2 over the
-# Latitude Virtual Network) − 58 (kube-ovn GENEVE). The old 1222 only existed to
-# absorb Talos KubeSpan's +80 WireGuard tax, which the shared-L2 rebuild removes.
-# REBUILD GATE: confirm the VLAN link clears 1500 with
-#   ping -M do -s 1472 -c3 <other-node-vlan-ip>
-# before trusting 1442. If the VLAN MTU is < 1500 (some providers clamp tagged
-# VLANs to 1496 for the 802.1Q tag), set both mtu values below to VLAN_MTU − 58.
+# Authoritative MTU for the kube-ovn Subnets. 1362 = 1420 − 58 (kube-ovn GENEVE).
+# The VLAN path MTU was MEASURED at 1420 on the Latitude Virtual Network (VID
+# 2140) via tracepath, 2026-06-21 — Latitude's fabric clamps tagged VLANs ~80B
+# below 1500; jumbo is unavailable. The old 1222 was over-conservative (it
+# absorbed Talos KubeSpan's +80 WireGuard tax, now removed); 1362 is the real
+# ceiling and is uniform across the fabric.
 apiVersion: kubeovn.io/v1
 kind: Subnet
 metadata:
@@ -20,7 +19,7 @@ spec:
   natOutgoing: true
   excludeIps:
     - 10.244.0.1
-  mtu: 1442
+  mtu: 1362
 ---
 apiVersion: kubeovn.io/v1
 kind: Subnet
@@ -36,4 +35,4 @@ spec:
   natOutgoing: false
   excludeIps:
     - 100.64.0.1
-  mtu: 1442
+  mtu: 1362

@@ -81,13 +81,11 @@ floatingIP: "10.8.0.250"
 # document brings vipLink up, Layer2VIPConfig will dangle on a
 # non-existent link and the cluster endpoint will be unreachable.
 # Example: vipLink: eth0.4000
-# REBUILD GATE: set this to the VLAN child link once the Latitude Virtual
-# Network is created and its VID is known — "<parent>.<VID>", where <parent> is
-# the physical NIC Latitude trunks the tag onto (confirm at attach: the data
-# fabric is enp1s0f0/enp1s0f1; the public IP currently rides enp1s0f1). The
-# per-node body overlay must bring this same link up with a VLANConfig (see the
-# rebuild runbook). Left blank here so a stale guess can't dangle the VIP.
-vipLink: ""
+# Confirmed on hardware 2026-06-21: the Latitude Virtual Network (VID 2140) rides
+# the secondary/private NIC enp1s0f0 (the public IP is on enp1s0f1). The per-node
+# body overlay brings this link up with a VLANConfig (vlanID 2140, parent
+# enp1s0f0, address 10.8.0.1X/24, mtu 1420) — see the rebuild runbook.
+vipLink: "enp1s0f0.2140"
 image: "ghcr.io/cozystack/cozystack/talos:v1.12.6"
 podSubnets:
 - 10.244.0.0/16

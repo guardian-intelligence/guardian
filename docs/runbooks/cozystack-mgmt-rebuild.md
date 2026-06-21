@@ -16,14 +16,18 @@ Keycloak admin) is re-minted; no data restore.
 
 ---
 
-## The one load-bearing unknown: VLAN MTU
+## L2 + MTU: CONFIRMED ON HARDWARE (2026-06-21)
 
-Latitude does not document the Virtual Network MTU. The repo commits the
-**assumption of a clean 1500** L2 → pod MTU **1442** (`1500 − 58` kube-ovn
-GENEVE; Cilium chained adds no extra encap; KubeSpan's +80 is gone). This MUST
-be confirmed at attach (Phase 1.3). If the VLAN clamps below 1500, change
-`networking/subnet-mtu.yaml` (both `mtu:`) and the per-node `VLANConfig` mtu to
-`VLAN_MTU − 58` before installing Cozystack.
+Validated empirically before committing: created VID 2140 on the live mgmt nodes
+and tested host-netns VLAN interfaces.
+- **L2 works** — ping across the segment at 0.2ms; ARP resolves. (Latitude's
+  `failed_connection` assignment status is benign — its own health check,
+  failing only because the OS side wasn't configured. Test with a real packet.)
+- **VLAN path MTU = 1420** (`tracepath`), not 1500 — the fabric clamps tagged
+  VLANs ~80B down; jumbo unavailable. So **pod MTU = 1420 − 58 GENEVE = 1362**
+  (committed in `subnet-mtu.yaml`). Nested tenant clusters: `1362 − 50 = 1312`.
+- **VLAN rides `enp1s0f0`** (the secondary/private NIC; public IP is on
+  `enp1s0f1`). Sub-interface `enp1s0f0.2140`.
 
 ---
 
@@ -46,7 +50,9 @@ the old cluster is being replaced (or its Flux is quiesced). Repo-first means
 | Latitude project | `proj_R82A0yqmd06mM` (guardian-mgmt) |
 | Site / facility | `ASH` / DEFT IAD2 (all nodes here) |
 | Servers | ash-water `sv_8mop5gZo8Njxv`, ash-wind `sv_nPRbajqEB5koM`, ash-earth `sv_vAPXaMxKM5epz` |
+| Virtual Network | `vlan_8mop5gkpP5jxv` — **VID 2140**, ASH; rides NIC `enp1s0f0` (sub-iface `enp1s0f0.2140`) |
 | Private subnet | `10.8.0.0/24` — nodes `.11/.12/.13`, API VIP `.250`, reserve `.200–.240` for MetalLB |
+| MTU | VLAN path **1420** (measured) → pod **1362** |
 | Data disk | `/dev/nvme1n1` (OS on `nvme0n1`) — uniform across nodes |
 | Talos / k8s / Cozystack | v1.12.6 / v1.34.3 / 1.4.x isp-full |
 
@@ -58,10 +64,12 @@ Tokens/paths: `~/.guardian-deploy/kubeconfig`, talm at `~/.guardian-deploy/talm/
 
 ## Phase 0 — repo is correct (done before any metal moves)
 The branch `infra/vlan-rebuild-iac` carries all declarative changes (see the PR
-change-list). MTU committed as the 1442 assumption; `vipLink` blank pending the
-VID. Review and approve — but hold the merge per the timing note above.
+change-list). MTU = 1362 (validated); `vipLink: enp1s0f0.2140` set. Review and
+approve — but hold the merge per the timing note above.
 
-## Phase 1 — provision metal + VLAN  ·  the only live-confirm gate
+## Phase 1 — provision metal + VLAN
+**The VLAN already exists (VID 2140) and L2 is validated** — see the confirmed
+section above. To recreate from scratch:
 1. **Create the Virtual Network** (nested JSON:API; `site` is the slug `ASH`):
    ```
    POST https://api.latitude.sh/virtual_networks
@@ -69,8 +77,11 @@ VID. Review and approve — but hold the merge per the timing note above.
        "description": "guardian-mgmt L2 fabric",
        "project": "proj_R82A0yqmd06mM", "site": "ASH" } } }
    ```
-   Then `GET /virtual_networks?filter[project]=proj_R82A0yqmd06mM` → record the
-   `id` (`vlan_…`) and **`vid`** (auto-assigned).
+   Then `GET /virtual_networks` → record the `id` (`vlan_…`) and **`vid`**
+   (auto-assigned). Assignment body is ALSO nested:
+   `{ "data": { "type": "virtual_network_assignment", "attributes":
+   { "server_id": "<sv_…>", "virtual_network_id": "<vlan_…>" } } }`. The
+   `failed_connection` status it returns is benign (test L2 with a real packet).
 2. **Assign all 3 servers** (live-attach, no reinstall):
    ```
    POST https://api.latitude.sh/virtual_networks/assignments
