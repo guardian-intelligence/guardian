@@ -13,8 +13,6 @@ shape worth documenting.
 load(
     ".aspect/tasks/bazel.axl",
     bazel_bzlmod = "bzlmod",
-    bazel_gazelle = "gazelle",
-    bazel_update = "update",
 )
 load(
     ".aspect/tasks/tidy.axl",
@@ -23,9 +21,7 @@ load(
 
 def config(ctx):
     # aspect bazel ...
-    ctx.tasks.add(bazel_gazelle)
     ctx.tasks.add(bazel_bzlmod)
-    ctx.tasks.add(bazel_update)
 
     # aspect tidy
     ctx.tasks.add(tidy)

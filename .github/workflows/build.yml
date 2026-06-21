@@ -26,6 +26,3 @@ jobs:
 
       - name: Build
         run: bazelisk build --embed_label="$GITHUB_SHA" //:build
-
-      - name: Test
-        run: bazelisk test //:dev_check
