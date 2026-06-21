@@ -4,6 +4,6 @@ http_file(
     name = "kubectl_linux_amd64",
     downloaded_file_path = "kubectl",
     executable = True,
-    sha256 = "629d3f410e09bf49b64ae7079f7f0bda1191efed311f7d37fdbab0ad5b0ec2b7",
-    url = "https://dl.k8s.io/release/v1.36.1/bin/linux/amd64/kubectl",
+    sha256 = "ab60ca5f0fd60c1eb81b52909e67060e3ba0bd27e55a8ac147cbc2172ff14212",
+    url = "https://dl.k8s.io/release/v1.34.3/bin/linux/amd64/kubectl",
 )

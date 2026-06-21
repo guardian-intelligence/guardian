@@ -12,13 +12,13 @@
     "joinCIDR": "100.64.0.0/16"
   },
   "talos": {
-    "version": "v1.13.4",
-    "talmVersion": "v1.13",
-    "kubernetesVersion": "1.36.1",
-    "installerImage": "ghcr.io/cozystack/cozystack/talos:v1.13.0"
+    "version": "v1.12.6",
+    "talmVersion": "v1.12",
+    "kubernetesVersion": "1.34.3",
+    "installerImage": "ghcr.io/cozystack/cozystack/talos:v1.12.6"
   },
   "cozystack": {
-    "version": "1.4.1",
+    "version": "1.4.4",
     "platformVariant": "isp-full",
     "publishingHost": "",
     "exposedServices": [],

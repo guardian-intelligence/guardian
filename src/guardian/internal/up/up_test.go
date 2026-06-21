@@ -201,13 +201,13 @@ func TestRunExecuteUsesPinnedToolCommands(t *testing.T) {
 			t.Fatalf("command uses ambient tool path: %#v", cmd)
 		}
 	}
-	if !strings.Contains(strings.Join(flattenArgs(runner.commands), " "), "--kubernetes-version 1.36.1") {
+	if !strings.Contains(strings.Join(flattenArgs(runner.commands), " "), "--kubernetes-version 1.34.3") {
 		t.Fatalf("commands do not include Kubernetes version pin: %#v", runner.commands)
 	}
 	if strings.Contains(strings.Join(flattenArgs(runner.commands), " "), "--offline") {
 		t.Fatalf("commands should not render Talos config offline: %#v", runner.commands)
 	}
-	if !strings.Contains(strings.Join(flattenArgs(runner.commands), " "), "-mode boot -image ghcr.io/cozystack/cozystack/talos:v1.13.0 -yes") {
+	if !strings.Contains(strings.Join(flattenArgs(runner.commands), " "), "-mode boot -image ghcr.io/cozystack/cozystack/talos:v1.12.6 -yes") {
 		t.Fatalf("commands do not kexec Talos using boot-to-talos boot mode: %#v", runner.commands)
 	}
 	if !strings.Contains(strings.Join(flattenArgs(runner.commands), " "), "--mode reboot") {
@@ -420,7 +420,7 @@ func (r *fakeRunner) Output(_ context.Context, cmd toolrunner.Command) ([]byte, 
 		return nil, errors.New("kubernetes api not configured")
 	case "helm-probe-cozystack":
 		if r.cozystackConverged {
-			return []byte(`[{"name":"cozystack","chart":"cozy-installer-1.4.1","status":"deployed"}]`), nil
+			return []byte(`[{"name":"cozystack","chart":"cozy-installer-1.4.4","status":"deployed"}]`), nil
 		}
 		return nil, errors.New("cozystack helm release not ready")
 	case "kubectl-probe-cozystack-operator", "kubectl-probe-cozystack-platform", "kubectl-probe-node-ready":
@@ -511,13 +511,13 @@ func testLoaded() *config.Loaded {
 		},
 		Talm: config.TalmSpec{
 			Preset:            "cozystack",
-			TalosVersion:      "v1.13",
-			KubernetesVersion: "1.36.1",
-			InstallerImage:    "ghcr.io/cozystack/cozystack/talos:v1.13.0",
+			TalosVersion:      "v1.12",
+			KubernetesVersion: "1.34.3",
+			InstallerImage:    "ghcr.io/cozystack/cozystack/talos:v1.12.6",
 			Template:          "templates/controlplane.yaml",
 		},
 		Cozystack: config.CozystackSpec{
-			Version:            "1.4.1",
+			Version:            "1.4.4",
 			PlatformVariant:    "isp-full",
 			PublishingHost:     "",
 			ExposedServices:    []string{},

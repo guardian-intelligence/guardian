@@ -23,10 +23,10 @@ func TestLoadHostConfigWithClusterAndEnvironment(t *testing.T) {
 	if loaded.Config.Cluster.Endpoint != "https://206.223.228.101:6443" {
 		t.Fatalf("cluster endpoint = %q", loaded.Config.Cluster.Endpoint)
 	}
-	if loaded.Config.Talm.TalosVersion != "v1.13" {
+	if loaded.Config.Talm.TalosVersion != "v1.12" {
 		t.Fatalf("talm talos version = %q", loaded.Config.Talm.TalosVersion)
 	}
-	if loaded.Config.Cozystack.Version != "1.4.1" {
+	if loaded.Config.Cozystack.Version != "1.4.4" {
 		t.Fatalf("cozystack version = %q", loaded.Config.Cozystack.Version)
 	}
 	if loaded.Config.Node.Address != "206.223.228.101" {
@@ -102,13 +102,13 @@ func writeTestRepo(t *testing.T) string {
     "advertisedCIDR": "206.223.228.100/31"
   },
   "talos": {
-    "version": "v1.13.4",
-    "talmVersion": "v1.13",
-    "kubernetesVersion": "1.36.1",
-    "installerImage": "ghcr.io/cozystack/cozystack/talos:v1.13.0"
+    "version": "v1.12.6",
+    "talmVersion": "v1.12",
+    "kubernetesVersion": "1.34.3",
+    "installerImage": "ghcr.io/cozystack/cozystack/talos:v1.12.6"
   },
   "cozystack": {
-    "version": "1.4.1",
+    "version": "1.4.4",
     "platformVariant": "isp-full",
     "publishingHost": "",
     "exposedServices": [],
