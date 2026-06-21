@@ -271,8 +271,10 @@ kubectl -n tenant-root exec -i openbao-0 -- bao operator init   # ⏹ record key
 
 ## Done / not done
 
-Bring-up through OpenBao **serving** is reproducible by this runbook. Remaining:
-OpenBao **init/unseal**, persisting the `/tmp` PKI, DNS/ingress for browser SSO,
-and a durable home for the MTU value. See
-[../cozystack-mgmt-handoff.md](../cozystack-mgmt-handoff.md) for status against the
-original plan.
+This runbook reproduces the cluster through OpenBao **serving**. Since the original
+bring-up the rest also landed and is now declarative under
+`src/infrastructure/base/` (reconciled by Flux): OpenBao **init/unseal**, the `/tmp`
+PKI persisted to `~/.guardian-deploy/`, dashboard exposure + Keycloak browser SSO at
+`https://dashboard.guardianintelligence.org`, and the kube-ovn MTU 1222 (subnet
+manifest). Remaining: encrypted off-box backup of secret-zero, the PR4
+KubeVirt-on-zvol gate, and tenant clusters.

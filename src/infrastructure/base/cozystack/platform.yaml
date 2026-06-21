@@ -10,7 +10,19 @@ spec:
         publishing:
           host: guardianintelligence.org
           apiServerEndpoint: https://206.223.228.101:6443
-          exposedServices: []
+          exposedServices:
+            - dashboard
+            - api
+          # Cross-subnet /31 nodes: no MetalLB/L2/VIP. exposure MUST be set
+          # explicitly — the real default leaves root-ingress-controller a
+          # stuck LoadBalancer<pending>. externalIPs path => ClusterIP svc
+          # carrying the node public IPs (which the *.guardianintelligence.org
+          # wildcard A records resolve to).
+          exposure: externalIPs
+          externalIPs:
+            - 206.223.228.101
+            - 45.250.254.119
+            - 67.213.115.113
         networking:
           podCIDR: 10.244.0.0/16
           podGateway: 10.244.0.1

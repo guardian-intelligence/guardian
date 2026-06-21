@@ -1,0 +1,11 @@
+# Inventory reconciled by the `guardian-mgmt-base` Flux Kustomization (flux/sync.yaml).
+# Plain manifests (no overlays yet); per-environment overlays patch this base later.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - cozystack/platform.yaml
+  - networking/subnet-mtu.yaml
+  - storage/storageclasses.yaml
+  - openbao/openbao.yaml
+  - openbao/networkpolicy.yaml
+  - flux/sync.yaml
