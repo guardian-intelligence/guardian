@@ -339,13 +339,16 @@ verify_evidence() {
     evidence-jobs \
     evidence-backupjobs \
     evidence-restorejobs \
+    evidence-restore-verify-jobs \
     evidence-restore-targets \
     logs-evidence-postgres-load \
     logs-evidence-clickhouse-load \
     logs-evidence-harbor-oci-read \
     logs-evidence-openbao-load \
     logs-evidence-http-load \
-    logs-evidence-storage-smoke; do
+    logs-evidence-storage-smoke \
+    logs-evidence-postgres-restore-verify \
+    logs-evidence-clickhouse-restore-verify; do
     summary_status "${name}"
   done
 
@@ -392,6 +395,10 @@ verify_evidence() {
   grep_file "evidence/restorejobs.yaml" "name: evidence-postgres-to-copy" "dr:postgres-restorejob"
   grep_file "evidence/restorejobs.yaml" "name: evidence-clickhouse-to-copy" "dr:clickhouse-restorejob"
   count_file "evidence/restorejobs.yaml" "Succeeded" 2 "dr:restorejobs-succeeded"
+  grep_file "evidence/restore-verify-jobs-wide.txt" "evidence-postgres-restore-verify[[:space:]]+1/1" "dr:postgres-restore-verify-job"
+  grep_file "evidence/restore-verify-jobs-wide.txt" "evidence-clickhouse-restore-verify[[:space:]]+1/1" "dr:clickhouse-restore-verify-job"
+  grep_file "evidence/logs-evidence-postgres-restore-verify.txt" "postgres-restore-verify expected_minimum=1000 actual=[1-9][0-9]* attempts=[1-9][0-9]*" "dr:postgres-restore-verify"
+  grep_file "evidence/logs-evidence-clickhouse-restore-verify.txt" "clickhouse-restore-verify expected_minimum=1000 actual=[1-9][0-9]* attempts=[1-9][0-9]*" "dr:clickhouse-restore-verify"
   grep_file "evidence/restore-targets-wide.txt" "guardian-restore-check" "dr:postgres-restore-target"
   grep_file "evidence/restore-targets-wide.txt" "ledger-restore-check" "dr:clickhouse-restore-target"
 }

@@ -41,6 +41,8 @@
   `aspect infra evidence-restore-apply`, `aspect infra evidence-restore-wait`.
 - Restore source: `BackupJob/tenant-root/evidence-postgres-adhoc`.
 - Restore target: `Postgres/tenant-root/guardian-restore-check`.
+- Verifier checks: `dr:postgres-restore-verify-job` and
+  `dr:postgres-restore-verify`.
 - Pass criteria: BackupJob and RestoreJob reach `Succeeded`, restored copy
   starts, and validation query returns the pre-backup rows.
 - Result: pending.

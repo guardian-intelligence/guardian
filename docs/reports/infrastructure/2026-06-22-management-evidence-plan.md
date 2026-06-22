@@ -80,6 +80,8 @@ LATITUDESH_AUTH_TOKEN="${LATITUDESH_AUTH_TOKEN}" aspect infra hardware-outage-ru
   reads, OpenBao write-read load, replicated PVC smoke,
   Postgres/ClickHouse write-read load, and Postgres/ClickHouse
   backup/restore-to-copy.
+- Database restore evidence now includes restored-copy query verification Jobs
+  for Postgres and ClickHouse, not only BackupJob/RestoreJob phase checks.
 - Harbor publication now has a repo-owned `rules_oci` push target and Aspect
   task for the company-site image.
 - R2 backup credential delivery now has a repo-owned Aspect task that applies

@@ -42,6 +42,8 @@
   `aspect infra evidence-restore-apply`, `aspect infra evidence-restore-wait`.
 - Restore source: `BackupJob/tenant-root/evidence-clickhouse-adhoc`.
 - Restore target: `ClickHouse/tenant-root/ledger-restore-check`.
+- Verifier checks: `dr:clickhouse-restore-verify-job` and
+  `dr:clickhouse-restore-verify`.
 - Pass criteria: BackupJob and RestoreJob reach `Succeeded`, restored copy
   starts, and validation query returns the pre-backup rows.
 - Result: pending.

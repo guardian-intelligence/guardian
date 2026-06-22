@@ -40,6 +40,7 @@ summary_names=(
   evidence-jobs
   evidence-backupjobs
   evidence-restorejobs
+  evidence-restore-verify-jobs
   evidence-restore-targets
   logs-evidence-postgres-load
   logs-evidence-clickhouse-load
@@ -47,6 +48,8 @@ summary_names=(
   logs-evidence-openbao-load
   logs-evidence-http-load
   logs-evidence-storage-smoke
+  logs-evidence-postgres-restore-verify
+  logs-evidence-clickhouse-restore-verify
 )
 
 printf '%s\n' '# Management Evidence Capture' '- Phase: evidence' >"${run_dir}/MANIFEST.md"
@@ -146,6 +149,10 @@ metadata:
 status:
   phase: Succeeded
 EOF
+printf '%s\n' \
+  'evidence-postgres-restore-verify 1/1' \
+  'evidence-clickhouse-restore-verify 1/1' \
+  >"${run_dir}/evidence/restore-verify-jobs-wide.txt"
 printf '%s\n' 'guardian-restore-check Ready' 'ledger-restore-check Ready' >"${run_dir}/evidence/restore-targets-wide.txt"
 printf '%s\n' 'postgres-load run_id=test workers=4 rows_per_worker=250 expected=1000 actual=1000' >"${run_dir}/evidence/logs-evidence-postgres-load.txt"
 printf '%s\n' 'clickhouse-load run_id=test workers=4 rows_per_worker=250 expected=1000 actual=1000 cluster_rows=3' >"${run_dir}/evidence/logs-evidence-clickhouse-load.txt"
@@ -173,6 +180,8 @@ printf '%s\n' 'openbao-load total=25 failures=0 run_id=test' >"${run_dir}/eviden
     'http-load total=1700 failures=0'
 } >"${run_dir}/evidence/logs-evidence-http-load.txt"
 printf '%s\n' 'storage-smoke files=64 marker=/data/.guardian-evidence.sha256' >"${run_dir}/evidence/logs-evidence-storage-smoke.txt"
+printf '%s\n' 'postgres-restore-verify expected_minimum=1000 actual=1000 attempts=1' >"${run_dir}/evidence/logs-evidence-postgres-restore-verify.txt"
+printf '%s\n' 'clickhouse-restore-verify expected_minimum=1000 actual=1000 attempts=1' >"${run_dir}/evidence/logs-evidence-clickhouse-restore-verify.txt"
 
 bash "${script}" --run-dir "${run_dir}" --mode evidence --require-talos
 

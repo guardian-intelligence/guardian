@@ -37,6 +37,9 @@ have passed.
 - `BackupJob/tenant-root/evidence-clickhouse-adhoc` and
   `RestoreJob/tenant-root/evidence-clickhouse-to-copy` exercise ClickHouse
   restore-to-copy into `ClickHouse/tenant-root/ledger-restore-check`.
+- `Job/tenant-root/evidence-postgres-restore-verify` and
+  `Job/tenant-root/evidence-clickhouse-restore-verify` query the restored
+  copies and fail unless the rows inserted before backup are present.
 
 ## Command Surface
 

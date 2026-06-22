@@ -28,3 +28,206 @@ spec:
     apiGroup: apps.cozystack.io
     kind: ClickHouse
     name: ledger-restore-check
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: evidence-postgres-restore-verify
+  namespace: tenant-root
+  labels:
+    guardian.dev/evidence: infrastructure
+data:
+  run.sh: |
+    #!/bin/sh
+    set -eu
+
+    export PGHOST="${PGHOST:-postgres-guardian-restore-check-rw}"
+    export PGPORT="${PGPORT:-5432}"
+    export PGDATABASE="${PGDATABASE:-guardian_evidence}"
+    export PGUSER="${PGUSER:-guardian_evidence}"
+    minimum_rows="${MINIMUM_ROWS:-1000}"
+    attempts="${ATTEMPTS:-120}"
+    sleep_seconds="${SLEEP_SECONDS:-10}"
+
+    i=1
+    while [ "${i}" -le "${attempts}" ]; do
+      if actual="$(psql -qAt -v ON_ERROR_STOP=1 <<'SQL' 2>/tmp/postgres-restore-verify.err
+    SELECT count(*) FROM guardian_evidence.postgres_load;
+    SQL
+    )"; then
+        if [ "${actual}" -ge "${minimum_rows}" ]; then
+          echo "postgres-restore-verify expected_minimum=${minimum_rows} actual=${actual} attempts=${i}"
+          exit 0
+        fi
+        echo "postgres restore row count below threshold actual=${actual} minimum=${minimum_rows} attempt=${i}" >&2
+      else
+        echo "postgres restore query failed attempt=${i}" >&2
+        cat /tmp/postgres-restore-verify.err >&2 || true
+      fi
+      i=$((i + 1))
+      sleep "${sleep_seconds}"
+    done
+
+    echo "postgres-restore-verify expected_minimum=${minimum_rows} actual=${actual:-missing} attempts=${attempts}" >&2
+    exit 1
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: evidence-postgres-restore-verify
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: evidence-postgres-restore-verify
+    guardian.dev/evidence: infrastructure
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: evidence-postgres-restore-verify
+        guardian.dev/evidence: infrastructure
+    spec:
+      restartPolicy: Never
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: psql
+          image: docker.io/library/postgres@sha256:3f0182f7f06d949972a1d1901ff774e6d0b7c03ca95a27a12958d713fe5ea153
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/scripts/run.sh"]
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-guardian-restore-check-credentials
+                  key: guardian_evidence
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+      volumes:
+        - name: scripts
+          configMap:
+            name: evidence-postgres-restore-verify
+            defaultMode: 0555
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: evidence-clickhouse-restore-verify
+  namespace: tenant-root
+  labels:
+    guardian.dev/evidence: infrastructure
+data:
+  run.sh: |
+    #!/bin/sh
+    set -eu
+
+    host="${CLICKHOUSE_HOST:-chendpoint-clickhouse-ledger-restore-check}"
+    port="${CLICKHOUSE_PORT:-9000}"
+    user="${CLICKHOUSE_USER:-guardian_evidence}"
+    minimum_rows="${MINIMUM_ROWS:-1000}"
+    attempts="${ATTEMPTS:-120}"
+    sleep_seconds="${SLEEP_SECONDS:-10}"
+
+    i=1
+    while [ "${i}" -le "${attempts}" ]; do
+      if actual="$(clickhouse-client \
+        --host "${host}" \
+        --port "${port}" \
+        --user "${user}" \
+        --password "${CLICKHOUSE_PASSWORD}" \
+        --query "SELECT count() FROM guardian_evidence_wide_events" 2>/tmp/clickhouse-restore-verify.err)"; then
+        if [ "${actual}" -ge "${minimum_rows}" ]; then
+          echo "clickhouse-restore-verify expected_minimum=${minimum_rows} actual=${actual} attempts=${i}"
+          exit 0
+        fi
+        echo "clickhouse restore row count below threshold actual=${actual} minimum=${minimum_rows} attempt=${i}" >&2
+      else
+        echo "clickhouse restore query failed attempt=${i}" >&2
+        cat /tmp/clickhouse-restore-verify.err >&2 || true
+      fi
+      i=$((i + 1))
+      sleep "${sleep_seconds}"
+    done
+
+    echo "clickhouse-restore-verify expected_minimum=${minimum_rows} actual=${actual:-missing} attempts=${attempts}" >&2
+    exit 1
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: evidence-clickhouse-restore-verify
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: evidence-clickhouse-restore-verify
+    guardian.dev/evidence: infrastructure
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: evidence-clickhouse-restore-verify
+        guardian.dev/evidence: infrastructure
+    spec:
+      restartPolicy: Never
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: clickhouse-client
+          image: docker.io/clickhouse/clickhouse-server@sha256:cc8c5bf275148b2de01a31e8fd6b55ba1ba2b0d3d08c23fafcb25b06e3c5dec5
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/scripts/run.sh"]
+          env:
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-ledger-restore-check-credentials
+                  key: guardian_evidence
+            - name: HOME
+              value: /tmp
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            runAsNonRoot: true
+            runAsUser: 101
+            runAsGroup: 101
+      volumes:
+        - name: scripts
+          configMap:
+            name: evidence-clickhouse-restore-verify
+            defaultMode: 0555
+        - name: tmp
+          emptyDir: {}

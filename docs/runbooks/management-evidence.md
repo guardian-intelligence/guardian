@@ -225,6 +225,10 @@ aspect infra evidence-verify \
   --require-talos
 ```
 
+`evidence-restore-apply` creates the database RestoreJobs and the restored-copy
+query verification Jobs. `evidence-restore-wait` requires both the RestoreJobs
+and those verification Jobs to complete before the run can pass.
+
 `evidence-capture` is read-only. It writes command outputs under
 `docs/reports/infrastructure/live-runs/<timestamp>-<phase>/` by default,
 including `summary.tsv`, Kubernetes snapshots, an API VIP `/readyz` read-load
@@ -237,8 +241,8 @@ plus `verification.tsv` next to the raw outputs. For `--mode evidence`, it
 checks the command-status summary, API VIP load summary, required app CRs,
 tenant company-site resources and ready replicas, ingress hosts, evidence Job
 completions, stable load-test log summaries, per-target HTTP summaries, and
-BackupJob/RestoreJob success markers. Treat this as report input, not as a
-substitute for reviewing the raw evidence.
+BackupJob/RestoreJob success markers plus restored-copy query logs. Treat this
+as report input, not as a substitute for reviewing the raw evidence.
 
 `evidence-run` runs the expanded load/DR sequence in
 order and attempts `evidence-capture` even when an earlier wait/log/snapshot
@@ -311,9 +315,11 @@ The opt-in evidence overlay declares:
 - `BackupJob/tenant-root/evidence-postgres-adhoc`;
 - restore target `Postgres/tenant-root/guardian-restore-check`;
 - `RestoreJob/tenant-root/evidence-postgres-to-copy`;
+- `Job/tenant-root/evidence-postgres-restore-verify`;
 - `BackupJob/tenant-root/evidence-clickhouse-adhoc`;
 - restore target `ClickHouse/tenant-root/ledger-restore-check`;
-- `RestoreJob/tenant-root/evidence-clickhouse-to-copy`.
+- `RestoreJob/tenant-root/evidence-clickhouse-to-copy`;
+- `Job/tenant-root/evidence-clickhouse-restore-verify`.
 
 These objects are temporary evidence resources. Do not add
 `src/infrastructure/evidence` to the Flux base. Apply the RestoreJobs only after

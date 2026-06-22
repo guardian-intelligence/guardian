@@ -46,6 +46,10 @@ required_evidence_checks=(
   dr:postgres-restorejob
   dr:clickhouse-restorejob
   dr:restorejobs-succeeded
+  dr:postgres-restore-verify-job
+  dr:clickhouse-restore-verify-job
+  dr:postgres-restore-verify
+  dr:clickhouse-restore-verify
   dr:postgres-restore-target
   dr:clickhouse-restore-target
   api:vip-load

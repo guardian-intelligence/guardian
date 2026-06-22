@@ -271,11 +271,11 @@ run_step() {
 }
 
 evidence_clean() {
-  kubectl_cmd delete job/evidence-postgres-load job/evidence-clickhouse-load job/evidence-harbor-oci-read job/evidence-openbao-load job/evidence-http-load job/evidence-storage-smoke -n tenant-root --ignore-not-found
+  kubectl_cmd delete job/evidence-postgres-load job/evidence-clickhouse-load job/evidence-harbor-oci-read job/evidence-openbao-load job/evidence-http-load job/evidence-storage-smoke job/evidence-postgres-restore-verify job/evidence-clickhouse-restore-verify -n tenant-root --ignore-not-found
   kubectl_cmd delete backupjob/evidence-postgres-adhoc backupjob/evidence-clickhouse-adhoc -n tenant-root --ignore-not-found
   kubectl_cmd delete restorejob/evidence-postgres-to-copy restorejob/evidence-clickhouse-to-copy -n tenant-root --ignore-not-found
   kubectl_cmd delete postgres/guardian-restore-check clickhouse/ledger-restore-check -n tenant-root --ignore-not-found
-  kubectl_cmd delete configmap/evidence-postgres-load configmap/evidence-clickhouse-load configmap/evidence-harbor-oci-read configmap/evidence-openbao-load configmap/evidence-http-load configmap/evidence-storage-smoke -n tenant-root --ignore-not-found
+  kubectl_cmd delete configmap/evidence-postgres-load configmap/evidence-clickhouse-load configmap/evidence-harbor-oci-read configmap/evidence-openbao-load configmap/evidence-http-load configmap/evidence-storage-smoke configmap/evidence-postgres-restore-verify configmap/evidence-clickhouse-restore-verify -n tenant-root --ignore-not-found
   if [[ "${delete_pvc}" == "true" ]]; then
     kubectl_cmd delete pvc/evidence-replicated-retain -n tenant-root --ignore-not-found
   fi
@@ -321,6 +321,11 @@ evidence_restore_wait() {
   local restorejob
   for restorejob in evidence-postgres-to-copy evidence-clickhouse-to-copy; do
     kubectl_cmd wait "restorejob/${restorejob}" -n tenant-root '--for=jsonpath={.status.phase}=Succeeded' --timeout "${timeout}"
+  done
+
+  local job
+  for job in evidence-postgres-restore-verify evidence-clickhouse-restore-verify; do
+    kubectl_cmd wait "job/${job}" -n tenant-root --for=condition=complete --timeout "${timeout}"
   done
 }
 

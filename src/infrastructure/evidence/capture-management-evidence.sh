@@ -323,10 +323,12 @@ run_capture "evidence-backupjobs" "${out_dir}/evidence/backupjobs.yaml" \
   "${kubectl_bin}" "${kubectl_args[@]}" get backupjob/evidence-postgres-adhoc backupjob/evidence-clickhouse-adhoc -n tenant-root -o yaml --ignore-not-found
 run_capture "evidence-restorejobs" "${out_dir}/evidence/restorejobs.yaml" \
   "${kubectl_bin}" "${kubectl_args[@]}" get restorejob/evidence-postgres-to-copy restorejob/evidence-clickhouse-to-copy -n tenant-root -o yaml --ignore-not-found
+run_capture "evidence-restore-verify-jobs" "${out_dir}/evidence/restore-verify-jobs-wide.txt" \
+  "${kubectl_bin}" "${kubectl_args[@]}" get job/evidence-postgres-restore-verify job/evidence-clickhouse-restore-verify -n tenant-root -o wide --ignore-not-found
 run_capture "evidence-restore-targets" "${out_dir}/evidence/restore-targets-wide.txt" \
   "${kubectl_bin}" "${kubectl_args[@]}" get postgres/guardian-restore-check clickhouse/ledger-restore-check -n tenant-root -o wide --ignore-not-found
 
-for job in evidence-postgres-load evidence-clickhouse-load evidence-harbor-oci-read evidence-openbao-load evidence-http-load evidence-storage-smoke; do
+for job in evidence-postgres-load evidence-clickhouse-load evidence-harbor-oci-read evidence-openbao-load evidence-http-load evidence-storage-smoke evidence-postgres-restore-verify evidence-clickhouse-restore-verify; do
   run_capture "logs-${job}" "${out_dir}/evidence/logs-${job}.txt" \
     "${kubectl_bin}" "${kubectl_args[@]}" logs "job/${job}" -n tenant-root --ignore-errors
 done

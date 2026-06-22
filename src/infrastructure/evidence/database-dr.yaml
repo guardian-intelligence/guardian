@@ -26,6 +26,13 @@ spec:
   size: 5Gi
   version: v18
   resourcesPreset: t1.small
+  users:
+    guardian_evidence: {}
+  databases:
+    guardian_evidence:
+      roles:
+        admin:
+          - guardian_evidence
 ---
 apiVersion: backups.cozystack.io/v1alpha1
 kind: BackupJob
@@ -55,6 +62,8 @@ spec:
   size: 5Gi
   logStorageSize: 1Gi
   resourcesPreset: t1.small
+  users:
+    guardian_evidence: {}
   clickhouseKeeper:
     enabled: true
     replicas: 1

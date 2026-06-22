@@ -651,6 +651,8 @@ def _evidence_restore_wait_impl(ctx):
     return _kubectl_many(ctx, [
         ["wait", "restorejob/evidence-postgres-to-copy", "-n", "tenant-root", "--for=jsonpath={.status.phase}=Succeeded", "--timeout", ctx.args.timeout],
         ["wait", "restorejob/evidence-clickhouse-to-copy", "-n", "tenant-root", "--for=jsonpath={.status.phase}=Succeeded", "--timeout", ctx.args.timeout],
+        ["wait", "job/evidence-postgres-restore-verify", "-n", "tenant-root", "--for=condition=complete", "--timeout", ctx.args.timeout],
+        ["wait", "job/evidence-clickhouse-restore-verify", "-n", "tenant-root", "--for=condition=complete", "--timeout", ctx.args.timeout],
     ])
 
 def _evidence_snapshot_impl(ctx):
@@ -660,6 +662,7 @@ def _evidence_snapshot_impl(ctx):
         ["get", "pvc/evidence-replicated-retain", "-n", "tenant-root", "-o", "wide", "--ignore-not-found"],
         ["get", "backupjob/evidence-postgres-adhoc", "backupjob/evidence-clickhouse-adhoc", "-n", "tenant-root", "-o", "yaml", "--ignore-not-found"],
         ["get", "restorejob/evidence-postgres-to-copy", "restorejob/evidence-clickhouse-to-copy", "-n", "tenant-root", "-o", "yaml", "--ignore-not-found"],
+        ["get", "job/evidence-postgres-restore-verify", "job/evidence-clickhouse-restore-verify", "-n", "tenant-root", "-o", "wide", "--ignore-not-found"],
         ["get", "backup", "-n", "tenant-root", "-l", "guardian.dev/evidence=infrastructure", "-o", "wide"],
         ["get", "postgres/guardian-restore-check", "clickhouse/ledger-restore-check", "-n", "tenant-root", "-o", "wide", "--ignore-not-found"],
         ["get", "pods", "-n", "tenant-root", "-l", "guardian.dev/evidence=infrastructure", "-o", "wide", "--ignore-not-found"],
@@ -673,15 +676,17 @@ def _evidence_logs_impl(ctx):
         ["logs", "job/evidence-openbao-load", "-n", "tenant-root"],
         ["logs", "job/evidence-http-load", "-n", "tenant-root"],
         ["logs", "job/evidence-storage-smoke", "-n", "tenant-root"],
+        ["logs", "job/evidence-postgres-restore-verify", "-n", "tenant-root"],
+        ["logs", "job/evidence-clickhouse-restore-verify", "-n", "tenant-root"],
     ])
 
 def _evidence_clean_impl(ctx):
     commands = [
-        ["delete", "job/evidence-postgres-load", "job/evidence-clickhouse-load", "job/evidence-harbor-oci-read", "job/evidence-openbao-load", "job/evidence-http-load", "job/evidence-storage-smoke", "-n", "tenant-root", "--ignore-not-found"],
+        ["delete", "job/evidence-postgres-load", "job/evidence-clickhouse-load", "job/evidence-harbor-oci-read", "job/evidence-openbao-load", "job/evidence-http-load", "job/evidence-storage-smoke", "job/evidence-postgres-restore-verify", "job/evidence-clickhouse-restore-verify", "-n", "tenant-root", "--ignore-not-found"],
         ["delete", "backupjob/evidence-postgres-adhoc", "backupjob/evidence-clickhouse-adhoc", "-n", "tenant-root", "--ignore-not-found"],
         ["delete", "restorejob/evidence-postgres-to-copy", "restorejob/evidence-clickhouse-to-copy", "-n", "tenant-root", "--ignore-not-found"],
         ["delete", "postgres/guardian-restore-check", "clickhouse/ledger-restore-check", "-n", "tenant-root", "--ignore-not-found"],
-        ["delete", "configmap/evidence-postgres-load", "configmap/evidence-clickhouse-load", "configmap/evidence-harbor-oci-read", "configmap/evidence-openbao-load", "configmap/evidence-http-load", "configmap/evidence-storage-smoke", "-n", "tenant-root", "--ignore-not-found"],
+        ["delete", "configmap/evidence-postgres-load", "configmap/evidence-clickhouse-load", "configmap/evidence-harbor-oci-read", "configmap/evidence-openbao-load", "configmap/evidence-http-load", "configmap/evidence-storage-smoke", "configmap/evidence-postgres-restore-verify", "configmap/evidence-clickhouse-restore-verify", "-n", "tenant-root", "--ignore-not-found"],
     ]
     if ctx.args.delete_pvc:
         commands.append(["delete", "pvc/evidence-replicated-retain", "-n", "tenant-root", "--ignore-not-found"])
