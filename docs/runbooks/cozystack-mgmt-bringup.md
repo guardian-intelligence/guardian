@@ -1,280 +1,176 @@
-# Cozystack mgmt cluster bring-up (by hand)
+# Cozystack Management Cluster Bring-Up
 
-How to reproduce `guardian-mgmt` from cold metal: a 3-node Talos control plane
-in **three different public /31 subnets** (no shared L2), meshed by KubeSpan
-WireGuard, running Cozystack 1.4.4 isp-full. This is the **by-hand** procedure —
-the single-node `guardian` CLI was deleted (deploy was hand-driven), and the talm
-project lives in a **volatile `/tmp`** dir. Read the persistence warning first.
+This runbook describes the current `guardian-mgmt` substrate checked into this
+repo: a three-node Talos/Cozystack management cluster on one Latitude.sh Virtual
+Network with real L2/ARP. It replaces the old public-/31 KubeSpan procedure.
 
-> ⚠️ **PKI persistence (read first).** Everything that makes the cluster
-> manageable — the talm secrets (`secrets.yaml`, the cluster CA + machine
-> certs) and the generated `kubeconfig` — was created under `/tmp/guardian-deploy`
-> on the workstation. **`/tmp` does not survive a reboot.** Lose it and you lose
-> the ability to regenerate node configs, rotate certs, or talk to the API as
-> admin — the cluster becomes effectively unmanageable (recoverable only by a
-> wipe + reinstall). **Persist `/tmp/guardian-deploy` to durable storage (and the
-> survival-floor R2 path) before you walk away.** TODO: pick the canonical home
-> (`~/.local/state/guardian/clusters/guardian-mgmt/`) and commit the move.
+The source files are the authority. This document explains their shape and the
+checks to run; it is not a separate source of truth.
 
-## Cluster facts
+## Source Of Truth
 
-| node | public /31 | k8s node | role |
-|---|---|---|---|
-| ash-earth | 206.223.228.101 | talos-7c93e | CP, etcd bootstrap, API endpoint |
-| ash-wind  | 45.250.254.119  | talos-4085f | CP |
-| ash-fire  | 67.213.115.113  | talos-a63fa | CP |
+| Layer | File |
+| - | - |
+| Latitude inventory | `src/infrastructure/inventory/guardian-mgmt.json` |
+| Bare-metal state | `src/infrastructure/bootstrap/guardian-mgmt/*.tf` |
+| Talos/Talm chart | `src/infrastructure/talm/` |
+| Cozystack platform package | `src/infrastructure/base/cozystack/platform.yaml` |
+| MetalLB L2 pool | `src/infrastructure/base/networking/metallb.yaml` |
+| Kube-OVN MTU | `src/infrastructure/base/networking/subnet-mtu.yaml` |
+| Flux handoff | `src/infrastructure/base/flux/sync.yaml` |
+| OpenBao app | `src/infrastructure/base/openbao/` |
+| LINSTOR storage classes | `src/infrastructure/base/storage/storageclasses.yaml` |
 
-Per node: 2x960GB NVMe — install `/dev/nvme0n1`, ZFS data disk `/dev/nvme1n1`.
-Talos **v1.12.6**, k8s **v1.34.3**, Cozystack **1.4.4** isp-full. CNI = Kube-OVN
-+ Cilium. No VIP (an L2 VIP can't span three subnets); the API endpoint is
-ash-earth's IP. DNS round-robin across the three is a follow-up.
+## Current Facts
 
-## Prerequisites
+`guardian-mgmt` uses the Latitude project `proj_R82A0yqmd06mM` in ASH and
+Virtual Network `vlan_8mop5gkpP5jxv`, VID `2140`.
 
-Pinned tools matching the Cozystack-1.4.4 talm-preset set (already aligned on
-`main`, PR A): **talm v0.31.0**, **talosctl 1.12.6**, **kubectl 1.34.3**, **helm**.
-See the working-with-guardian-infra memory for how to materialise `/tmp/gbin`.
+| Node | Latitude ID | Public IPv4 | VLAN IPv4 |
+| - | - | - | - |
+| `ash-earth` | `sv_vAPXaMxKM5epz` | `206.223.228.101` | `10.8.0.11` |
+| `ash-wind` | `sv_nPRbajqEB5koM` | `45.250.254.119` | `10.8.0.12` |
+| `ash-water` | `sv_8mop5gZo8Njxv` | `206.223.228.87` | `10.8.0.13` |
 
-```sh
-export PATH=/tmp/gbin:$PATH
-mkdir -p /tmp/guardian-deploy && cd /tmp/guardian-deploy   # ⚠️ volatile — see warning above
-```
+The Kubernetes API endpoint is the Talos Layer2 VIP
+`https://10.8.0.250:6443`, pinned to `enp1s0f0.2140`.
 
-**Boot state.** Latitude's reinstall flow nominally lays down Ubuntu, but these
-nodes iPXE-boot **Talos maintenance mode** directly — so **skip the boot-to-Talos
-step**: the nodes already answer talosctl (insecure) on their public IPs. Confirm:
+Expected network shape:
 
-```sh
-for ip in 206.223.228.101 45.250.254.119 67.213.115.113; do
-  talosctl -n "$ip" -e "$ip" --insecure version --client=false   # ⏹ reports a Talos version, no node config yet
-done
-```
+- etcd, kubelet node IP selection, and kube-ovn node traffic use `10.8.0.0/24`.
+- KubeSpan is not part of this topology; there should be no KubeSpan mesh links.
+- MetalLB advertises private LoadBalancer services from `10.8.0.200-10.8.0.240`.
+- Public ingress still uses the three public node IPs in the Cozystack platform
+  package.
+- Kube-OVN subnet MTU is `1362`: `1420` VLAN path MTU minus `58` bytes of GENEVE.
 
-## 1 — Gather per-node facts
+## Validate OpenTofu
 
-talm's `cozystack` preset auto-discovers each node's static /31 network and its
-install disk, but verify the disks/links before templating so a wrong device
-doesn't wipe the data NVMe:
+The repo pins OpenTofu in `MODULE.bazel` and the Latitude provider in
+`src/infrastructure/bootstrap/guardian-mgmt/.terraform.lock.hcl`.
+
+Local validation does not require backend credentials:
 
 ```sh
-for ip in 206.223.228.101 45.250.254.119 67.213.115.113; do
-  echo "== $ip =="
-  talosctl -n "$ip" -e "$ip" --insecure get disks      # ⏹ nvme0n1 (install) + nvme1n1 (ZFS data), both ~960GB
-  talosctl -n "$ip" -e "$ip" --insecure get links       # physical NIC + its MTU (link MTU 1500)
-  talosctl -n "$ip" -e "$ip" --insecure get addresses    # the static /31 + gateway
-done
+bazelisk run @opentofu_linux_amd64//:tofu_bin -- \
+  -chdir="$PWD/src/infrastructure/bootstrap/guardian-mgmt" fmt -check
+
+bazelisk run @opentofu_linux_amd64//:tofu_bin -- \
+  -chdir="$PWD/src/infrastructure/bootstrap/guardian-mgmt" \
+  init -backend=false -input=false -reconfigure
+
+bazelisk run @opentofu_linux_amd64//:tofu_bin -- \
+  -chdir="$PWD/src/infrastructure/bootstrap/guardian-mgmt" validate
 ```
 
-## 2 — talm init (cozystack preset) + the KubeSpan/certSANs side-patch
+Live planning requires:
+
+- `LATITUDESH_AUTH_TOKEN` for the Latitude provider.
+- S3-compatible backend credentials for R2 through the usual `AWS_*`
+  environment variables.
+- The R2 endpoint passed during backend initialization, because OpenTofu's S3
+  backend cannot read it from `guardian-mgmt.json`.
 
 ```sh
-talm init --preset cozystack       # writes talconfig + per-node templates; auto-discovers /31 + install disk
+bazelisk run @opentofu_linux_amd64//:tofu_bin -- \
+  -chdir="$PWD/src/infrastructure/bootstrap/guardian-mgmt" \
+  init -input=false -reconfigure \
+  -backend-config="endpoint=$AWS_ENDPOINT_URL_S3"
+
+bazelisk run @opentofu_linux_amd64//:tofu_bin -- \
+  -chdir="$PWD/src/infrastructure/bootstrap/guardian-mgmt" plan -input=false
 ```
 
-The preset does NOT inject cross-subnet meshing or the multi-IP cert SANs. Apply a
-**side-patch** so (a) KubeSpan WireGuard meshes the three subnets, (b) cluster
-discovery lets peers find each other without a shared L2, and (c) the API cert is
-valid for the public DNS name and all three node IPs (no VIP):
+The checked-in import blocks adopt the known Virtual Network and three servers.
+`latitudesh_vlan_assignment.control_plane` is declared, but the provider imports
+VLAN assignments by provider-side assignment ID. Add those imports only after
+discovering the assignment IDs from Latitude.
 
-```yaml
-# kubespan-discovery.patch.yaml — applied to every node template
-machine:
-  network:
-    kubespan:
-      enabled: true
-cluster:
-  discovery:
-    enabled: true
----
-# certSANs — the apiserver must be reachable as the DNS name AND any node IP
-cluster:
-  apiServer:
-    certSANs:
-      - api.guardianintelligence.org
-      - 206.223.228.101
-      - 45.250.254.119
-      - 67.213.115.113
-```
+## Talos L2 Render Inputs
 
-Set the cluster endpoint to ash-earth's IP (no VIP):
+The checked-in Talm chart sets:
+
+- `endpoint: https://10.8.0.250:6443`
+- `floatingIP: 10.8.0.250`
+- `vipLink: enp1s0f0.2140`
+- `advertisedSubnets: ["10.8.0.0/24"]`
+- cert SANs for the VIP and each public node IP
+- Talos image `ghcr.io/cozystack/cozystack/talos:v1.12.6`
+- Kubernetes `v1.34.3`
+
+Generated Talm secrets, rendered node configs, kubeconfig, and local operator
+state must stay out of Git. `src/infrastructure/talm/.gitignore` excludes those
+paths.
+
+The next bootstrap CLI slice should wrap this chart with repo-pinned `talm` and
+`talosctl` artifacts, render each node, apply the first config in Talos
+maintenance mode, bootstrap etcd exactly once, and persist the encrypted genesis
+bundle under operator state.
+
+## Kubernetes Handoff
+
+After Talos is bootstrapped and Cozystack is installed, apply the Flux handoff
+once:
 
 ```sh
-# in talconfig: endpoint = https://206.223.228.101:6443
+kubectl apply -f src/infrastructure/base/flux/sync.yaml
 ```
 
-> TODO: fold the side-patch into the talm project as a tracked inline patch so it
-> is not re-derived by hand on the next converge.
+Flux then reconciles `src/infrastructure/base`, including the Platform package,
+networking manifests, storage classes, OpenBao, and the Flux objects themselves.
 
-## 3 — Template + apply per node
+For a direct render check from the repo-pinned kubectl artifact:
 
 ```sh
-for node in ash-earth ash-wind ash-fire; do
-  talm template -n "$node" > "$node.yaml"
-  talm apply -f "$node.yaml" --insecure     # first apply is insecure (maintenance mode)
-done
+bazelisk build @kubectl_linux_amd64//file:file
+OUTPUT_BASE="$(bazelisk info output_base)"
+"$OUTPUT_BASE/external/+http_file+kubectl_linux_amd64/file/kubectl" \
+  kustomize src/infrastructure/base
 ```
 
-⏹ Nodes reboot into Talos installed mode, format `/dev/nvme0n1`, and come up with
-KubeSpan enabled. Verify the **mesh** (this is the load-bearing check — see the MTU
-bug below): use `kubespanpeerstatuses`, NOT `LinkStatus`:
+## Live Checks
+
+Run these after Flux has reconciled the base:
 
 ```sh
-talosctl -n 206.223.228.101 -e 206.223.228.101 get kubespanpeerstatuses
-# ⏹ two peers, state=up, each in a different /31 — the WireGuard mesh is healthy
+kubectl get nodes -o wide
+kubectl get subnet ovn-default join -o custom-columns=NAME:.metadata.name,MTU:.spec.mtu
+kubectl -n cozy-metallb get ipaddresspool,l2advertisement
+kubectl -n cozy-fluxcd get gitrepository,kustomization
+kubectl get storageclass
+kubectl -n tenant-root get openbao guardian
 ```
 
-## 4 — Bootstrap etcd (node1 only) + kubeconfig
+Expected results:
 
-Bootstrap etcd on exactly one node (ash-earth). The other two join the quorum
-across their own subnets via KubeSpan:
+- all three nodes are Ready and use `10.8.0.0/24` for internal node addresses
+- `ovn-default` and `join` report MTU `1362`
+- MetalLB has the `cozystack` pool and L2 advertisement
+- Flux `guardian-mgmt-base` reconciles `src/infrastructure/base`
+- storage classes include `local`, `local-retain`, `replicated`, and
+  `replicated-retain`
+- OpenBao is deployed as the Cozystack-managed `guardian` app in `tenant-root`
+
+Talos-side network checks:
 
 ```sh
-talosctl -n 206.223.228.101 -e 206.223.228.101 bootstrap   # ONCE, ash-earth only
-talosctl -n 206.223.228.101 -e 206.223.228.101 health      # ⏹ etcd quorum forms across all 3 subnets
-talm kubeconfig ./kubeconfig                                # ⚠️ persist this — see warning
-export KUBECONFIG=$PWD/kubeconfig
-kubectl get nodes   # ⏹ talos-7c93e / talos-4085f / talos-a63fa all Ready
+talosctl --nodes 10.8.0.11,10.8.0.12,10.8.0.13 --endpoints 10.8.0.250 get addresses
+talosctl --nodes 10.8.0.11,10.8.0.12,10.8.0.13 --endpoints 10.8.0.250 get routes
+talosctl --nodes 10.8.0.11,10.8.0.12,10.8.0.13 --endpoints 10.8.0.250 get kubespanpeerstatuses
 ```
 
-## 5 — Install Cozystack + apply the Platform Package
+Expected result: addresses and routes show the VLAN subnet, and KubeSpan has no
+active mesh peers.
 
-```sh
-helm install cozystack -n cozy-system --create-namespace \
-  oci://ghcr.io/cozystack/cozystack/cozystack \
-  --version 1.4.4 \
-  --set cozystackOperator.disableTelemetry=true     # cozy-installer
-```
+## Not Done In This Substrate Slice
 
-Then apply the **Platform Package** CR (variant `isp-full`, carrying the Guardian
-white-label branding for the dashboard). Tracked at
-`src/infrastructure/base/cozystack/platform.yaml`:
+These are intentionally outside the merged L2/OpenTofu substrate and need
+separate PRs with their own validation:
 
-```sh
-kubectl apply -f src/infrastructure/base/cozystack/platform.yaml
-```
-
-⏹ Watch the HelmReleases converge — **93/93 healthy**:
-
-```sh
-kubectl get helmreleases -A    # ⏹ all READY=True (give it time; CNI + storage come up first)
-```
-
-> Note: the dashboard converges only **after Keycloak is enabled** (step 8). Until
-> then expect the console HelmRelease to wait.
-
-## 6 — Fabric MTU subnet patch (REQUIRED — do not skip)
-
-**This is the crown-jewel fix.** Kube-OVN's default pod MTU is 1400. Cross-node
-pod traffic is double-encapsulated: pod packet + **GENEVE (58)** + **KubeSpan
-WireGuard (80)** = up to **1538 bytes** on a node link with MTU **1500** → large
-cross-node packets are **silently dropped**. Small-packet workloads are fine, so
-the cluster *looks* healthy — but anything large (e.g. OpenBao raft's cluster-port
-TLS handshake) breaks. The principle: **MTU must be uniform across the whole
-fabric**, sized below the link minus both encaps.
-
-```sh
-kubectl patch subnet ovn-default --type merge -p '{"spec":{"mtu":1222}}'
-# join subnet too, if used:
-kubectl patch subnet join --type merge -p '{"spec":{"mtu":1222}}'
-kubectl get subnet -o custom-columns=NAME:.metadata.name,MTU:.spec.mtu   # ⏹ 1222
-```
-
-> ⚠️ **Durability + uniformity caveats.** (1) The Platform-Package
-> `kube-ovn.mtu` value is **inert** — it did not propagate to kube-ovn; the
-> *working lever* is this subnet patch. (2) **Only newly-created pods get 1222.**
-> Pods that existed before the patch keep 1400 until they cycle. After patching,
-> bounce stateful workloads (or the whole fabric) so the MTU is uniform. The
-> KubeSpan mesh itself was healthy throughout — confirm with
-> `talosctl get kubespanpeerstatuses`, never `LinkStatus`.
-> TODO: find a durable, declarative home for `mtu=1222` that actually propagates.
-> Note at `src/infrastructure/base/networking/`.
-
-## 7 — LINSTOR ZFS storage
-
-Create a ZFS-backed device pool named **`data`** on each node's second NVMe
-(`/dev/nvme1n1`), from the linstor-controller:
-
-```sh
-LC="kubectl -n cozy-linstor exec deploy/linstor-controller -c linstor-controller -- linstor"
-for node in talos-7c93e talos-4085f talos-a63fa; do
-  $LC physical-storage create-device-pool zfs "$node" /dev/nvme1n1 --pool-name data --storage-pool data
-done
-$LC storage-pool list    # ⏹ pool `data` present on all 3 nodes
-```
-
-Apply the four StorageClasses (tracked at
-`src/infrastructure/base/storage/storageclasses.yaml`): `local` (raw ZFS zvol,
-single replica, **default**), `local-retain`, `replicated` (DRBD x3), and
-`replicated-retain`. The `-retain` variants keep the PV/zvol on PVC delete.
-
-```sh
-kubectl apply -f src/infrastructure/base/storage/storageclasses.yaml
-kubectl get sc    # ⏹ local (default) / local-retain / replicated / replicated-retain
-```
-
-Smoke-test the provisioner: bind a throwaway PVC on `local`, confirm a zvol
-appears (`$LC resource list`), delete it.
-
-## 8 — Keycloak + dashboard
-
-Enable the Cozystack built-in IdP (Keycloak). The dashboard's gatekeeper
-oauth2-proxy needs an OIDC issuer it can reach **internally** (no external DNS
-yet), so set the internal URL:
-
-```sh
-# in the Platform Package values:
-#   authentication.oidc.enabled: true
-#   keycloakInternalUrl: <in-cluster keycloak svc URL>   # TODO: record exact value
-kubectl apply -f src/infrastructure/base/cozystack/platform.yaml
-```
-
-⏹ The dashboard HelmRelease converges and renders the **"Guardian"** white-label.
-Browser SSO login still needs **DNS + ingress** (deferred edge) — the OIDC wiring
-is correct internally but the redirect/login flow is not reachable from a browser
-until the edge lands.
-
-## 9 — OpenBao HA (raft)
-
-Deploy the Cozystack-managed OpenBAO app (`kind: OpenBAO`, `replicas: 3`, raft),
-tracked at `src/infrastructure/base/openbao/openbao.yaml` (namespace `tenant-root`).
-**Two things are required first or raft will not form:**
-
-1. The **MTU patch** (step 6) — without it the raft cluster-port TLS is dropped.
-2. The **apiserver egress CNP** — raft mode adds `service_registration
-   "kubernetes"`, which hangs startup unable to reach the k8s API. The Cozystack
-   tenant baseline (`tenant-root-egress`/`-ingress`) is **default-deny**; unlabeled
-   pods get only `world` + intra-cluster egress, and the apiserver is neither.
-   API egress is opt-in via `policy.cozystack.io/allow-to-apiserver: "true"`, which
-   the managed app never sets. So grant it directly (tracked at
-   `src/infrastructure/base/openbao/networkpolicy.yaml`):
-
-```sh
-kubectl apply -f src/infrastructure/base/openbao/networkpolicy.yaml   # CNP: openbao pods -> kube-apiserver/:6443
-kubectl apply -f src/infrastructure/base/openbao/openbao.yaml
-kubectl -n tenant-root get pods -l app.kubernetes.io/name=openbao   # ⏹ all 3 raft pods serving
-```
-
-### Init + unseal (PENDING)
-
-The 3 raft pods serve, but OpenBao is **not yet initialised**. The next operator
-must run `bao operator init` and hold the resulting Shamir keys (the "secret
-zero") — out of band, never on the cluster. For the prod-shaped transit
-auto-unseal + TLS + `retry_join` pattern (so init survives restart/restore), follow
-[openbao-tracer.md](openbao-tracer.md) — the listener config, the
-`leader_ca_cert_file` and `global.tlsDisable:false` gotchas, the periodic seal
-token, and the idempotency guards all carry over.
-
-```sh
-# scaffold (adapt to the tracer's transit/TLS overlay before prod):
-kubectl -n tenant-root exec -i openbao-0 -- bao operator init   # ⏹ record keys OUT OF BAND — secret zero
-```
-
-## Done / not done
-
-This runbook reproduces the cluster through OpenBao **serving**. Since the original
-bring-up the rest also landed and is now declarative under
-`src/infrastructure/base/` (reconciled by Flux): OpenBao **init/unseal**, the `/tmp`
-PKI persisted to `~/.guardian-deploy/`, dashboard exposure + Keycloak browser SSO at
-`https://dashboard.guardianintelligence.org`, and the kube-ovn MTU 1222 (subnet
-manifest). Remaining: encrypted off-box backup of secret-zero, the PR4
-KubeVirt-on-zvol gate, and tenant clusters.
+- Bootstrap CLI wrapper for the full Talm/Talos path.
+- Latitude VLAN assignment imports, once assignment IDs are collected.
+- Declarative CNPG, Harbor, ClickHouse, dashboard readiness, and company-site
+  surfaces for dev, gamma, and prod.
+- OpenBao init/unseal automation and backup/restore drills.
+- Checked-in load-test, disaster-recovery, and single-node-outage reports for
+  each new infrastructure component.
