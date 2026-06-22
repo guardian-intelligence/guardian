@@ -23,6 +23,7 @@
 - Command: `aspect infra evidence-apply`, `aspect infra evidence-wait`, then
   `aspect infra evidence-logs`.
 - Inputs: prod/root tenant public routes and shared tenant services.
+- Verifier check: `company-site:prod:ready`.
 - Pass criteria: prod company-site, Harbor health, dashboard route, and
   tenant-root workloads stay Ready.
 - Result: pending.
@@ -40,6 +41,7 @@
 
 - Procedure: run `aspect infra live-snapshot`, HTTP evidence, and database
   evidence during one-node outage.
+- Verifier check: `company-site:prod:ready` in each outage phase.
 - Expected behavior: root tenant services continue or recover within their
   rollout timeouts.
 - Result: pending.

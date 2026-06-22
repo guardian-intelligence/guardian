@@ -30,6 +30,7 @@
 - Inputs: `/`, `/letters/`, `/news/`, `/healthz`, and `/metrics` on prod, dev,
   and gamma hosts.
 - Verifier checks:
+  `company-site:{dev,gamma,prod}:ready` and
   `load:http:company-{prod,dev,gamma}-{root,letters,news,healthz,metrics}`.
 - Pass criteria: HTTP evidence job reports zero failures and all three
   deployments stay Ready.

@@ -235,10 +235,10 @@ component reports for the live run.
 `evidence-verify` reads a captured live-run directory and writes `VERIFY.md`
 plus `verification.tsv` next to the raw outputs. For `--mode evidence`, it
 checks the command-status summary, API VIP load summary, required app CRs,
-tenant company-site resources, ingress hosts, evidence Job completions, stable
-load-test log summaries, per-target HTTP summaries, and BackupJob/RestoreJob
-success markers. Treat this as report input, not as a substitute for reviewing
-the raw evidence.
+tenant company-site resources and ready replicas, ingress hosts, evidence Job
+completions, stable load-test log summaries, per-target HTTP summaries, and
+BackupJob/RestoreJob success markers. Treat this as report input, not as a
+substitute for reviewing the raw evidence.
 
 `evidence-run` runs the expanded load/DR sequence in
 order and attempts `evidence-capture` even when an earlier wait/log/snapshot

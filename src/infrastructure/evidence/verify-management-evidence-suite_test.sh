@@ -49,6 +49,9 @@ required_evidence_checks=(
   dr:postgres-restore-target
   dr:clickhouse-restore-target
   api:vip-load
+  company-site:dev:ready
+  company-site:gamma:ready
+  company-site:prod:ready
   app:harbor-kind
   app:clickhouse-kind
   app:postgres-kind
@@ -92,7 +95,13 @@ write_phase_fixture() {
     "- Talos required: ${talos_required}" \
     '- Result: PASS' \
     >"${phase_dir}/VERIFY.md"
-  printf 'pass\toutage:node-present\tok\npass\tnodes:ready\tok\n' >"${phase_dir}/verification.tsv"
+  printf '%s\n' \
+    'pass	outage:node-present	ok' \
+    'pass	nodes:ready	ok' \
+    'pass	company-site:dev:ready	ok' \
+    'pass	company-site:gamma:ready	ok' \
+    'pass	company-site:prod:ready	ok' \
+    >"${phase_dir}/verification.tsv"
 }
 
 write_node_fixture() {

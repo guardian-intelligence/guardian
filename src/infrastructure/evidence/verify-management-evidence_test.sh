@@ -83,7 +83,7 @@ EOF
 
 for env in dev gamma prod; do
   printf '%s\n' \
-    'deployment.apps/company-site 3/3' \
+    'deployment.apps/company-site 2/2' \
     'service/company-site ClusterIP' \
     'ingress.networking.k8s.io/company-site' \
     >"${run_dir}/kubectl/company-site-${env}-wide.txt"

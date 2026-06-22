@@ -319,6 +319,7 @@ verify_common() {
 
   for env in dev gamma prod; do
     grep_file "kubectl/company-site-${env}-wide.txt" "deployment.apps/company-site" "company-site:${env}:deployment"
+    grep_file "kubectl/company-site-${env}-wide.txt" "deployment.apps/company-site[[:space:]]+2/2" "company-site:${env}:ready"
     grep_file "kubectl/company-site-${env}-wide.txt" "service/company-site" "company-site:${env}:service"
     grep_file "kubectl/company-site-${env}-wide.txt" "ingress.networking.k8s.io/company-site" "company-site:${env}:ingress"
   done

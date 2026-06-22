@@ -23,6 +23,7 @@
 - Command: `aspect infra evidence-apply`, `aspect infra evidence-wait`, then
   `aspect infra evidence-logs`.
 - Inputs: `https://dev.guardianintelligence.org/`.
+- Verifier check: `company-site:dev:ready`.
 - Pass criteria: dev site routes return success and dev tenant workloads stay
   Ready.
 - Result: pending.
@@ -38,6 +39,7 @@
 ## Single-Node Outage Exercise
 
 - Procedure: run HTTP evidence during each one-node outage.
+- Verifier check: `company-site:dev:ready` in each outage phase.
 - Expected behavior: dev route remains reachable or recovers within rollout
   timeout.
 - Result: pending.

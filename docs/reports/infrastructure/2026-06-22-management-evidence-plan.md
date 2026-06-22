@@ -98,6 +98,8 @@ LATITUDESH_AUTH_TOKEN="${LATITUDESH_AUTH_TOKEN}" aspect infra hardware-outage-ru
   load summary through `https://10.8.0.250:6443`.
 - HTTP load evidence now emits and verifies one target summary per
   company-site route, Harbor health endpoint, and Cozystack dashboard host.
+- Captured evidence now verifies that dev, gamma, and prod company-site
+  Deployments report the desired `2/2` ready replicas.
 - Captured evidence now has a repo-owned `aspect infra evidence-verify` task
   that writes `VERIFY.md` and `verification.tsv` into the live-run directory
   before it is attached to component reports.

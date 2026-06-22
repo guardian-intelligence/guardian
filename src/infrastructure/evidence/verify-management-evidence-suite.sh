@@ -270,6 +270,9 @@ verify_evidence_package() {
     dr:postgres-restore-target \
     dr:clickhouse-restore-target \
     api:vip-load \
+    company-site:dev:ready \
+    company-site:gamma:ready \
+    company-site:prod:ready \
     app:harbor-kind \
     app:clickhouse-kind \
     app:postgres-kind \
@@ -316,6 +319,9 @@ verify_outage_phase() {
   grep_file "${phase_dir}/VERIFY.md" "^- Talos required: ${talos_required}$" "${label}:talos-required"
   require_verification_check "${phase_dir}" "outage:node-present" "${label}:node-present"
   require_verification_check "${phase_dir}" "nodes:ready" "${label}:nodes-ready"
+  require_verification_check "${phase_dir}" "company-site:dev:ready" "${label}:company-dev-ready"
+  require_verification_check "${phase_dir}" "company-site:gamma:ready" "${label}:company-gamma-ready"
+  require_verification_check "${phase_dir}" "company-site:prod:ready" "${label}:company-prod-ready"
 }
 
 verify_hardware_outage_package() {

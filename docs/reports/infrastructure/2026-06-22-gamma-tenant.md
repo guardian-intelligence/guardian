@@ -23,6 +23,7 @@
 - Command: `aspect infra evidence-apply`, `aspect infra evidence-wait`, then
   `aspect infra evidence-logs`.
 - Inputs: `https://gamma.guardianintelligence.org/`.
+- Verifier check: `company-site:gamma:ready`.
 - Pass criteria: gamma site routes return success and gamma tenant workloads
   stay Ready.
 - Result: pending.
@@ -39,6 +40,7 @@
 ## Single-Node Outage Exercise
 
 - Procedure: run HTTP evidence during each one-node outage.
+- Verifier check: `company-site:gamma:ready` in each outage phase.
 - Expected behavior: gamma route remains reachable or recovers within rollout
   timeout.
 - Result: pending.
