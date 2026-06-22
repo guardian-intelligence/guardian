@@ -457,10 +457,12 @@ LIVE_VALUE_CHECKS = [
     ("prod company image", ["-n", "tenant-prod", "get", "deployment/company-site", "-o", "jsonpath={.spec.template.spec.containers[0].image}"], COMPANY_SITE_IMAGE),
     ("prod company ingress host", ["-n", "tenant-prod", "get", "ingress/company-site", "-o", "jsonpath={.spec.rules[0].host}"], "guardianintelligence.org"),
 ]
-LIVE_WAITS = [
+LIVE_FLUX_WAITS = [
     ("flux source", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "gitrepositories.source.toolkit.fluxcd.io/guardian"]),
     ("flux base kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-base"]),
     ("flux tenant app kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-tenant-apps"]),
+]
+LIVE_WAITS = [
     ("backup controller package", ["wait", "--for=condition=Ready", "packages.cozystack.io/cozystack.backup-controller"]),
     ("backupstrategy controller package", ["wait", "--for=condition=Ready", "packages.cozystack.io/cozystack.backupstrategy-controller"]),
     ("backup controller helmrelease", ["-n", "cozy-backup-controller", "wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/backup-controller"]),
@@ -1142,7 +1144,7 @@ def _live_checks(ctx, kubectl, kubeconfig, revision):
     if rc != 0:
         return rc
 
-    for label, kubectl_args in LIVE_WAITS:
+    for label, kubectl_args in LIVE_FLUX_WAITS:
         rc = _kubectl_success_for(
             ctx,
             kubectl,
@@ -1156,6 +1158,17 @@ def _live_checks(ctx, kubectl, kubeconfig, revision):
     rc = _check_flux_revision_for(ctx, kubectl, kubeconfig, revision)
     if rc != 0:
         return rc
+
+    for label, kubectl_args in LIVE_WAITS:
+        rc = _kubectl_success_for(
+            ctx,
+            kubectl,
+            kubeconfig,
+            kubectl_args + ["--timeout=" + ctx.args.wait_timeout],
+            "kubectl wait " + label,
+        )
+        if rc != 0:
+            return rc
 
     for label, kubectl_args in LIVE_GETS:
         rc = _kubectl_success_for(ctx, kubectl, kubeconfig, kubectl_args, "kubectl get " + label)
