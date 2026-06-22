@@ -10,6 +10,7 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/inventory:inventory",
     "//src/infrastructure/talm:chart",
     "//src/infrastructure/base/apps:manifests",
+    "//src/infrastructure/base/backup:manifests",
     "//src/infrastructure/base/flux:manifests",
     "//src/infrastructure/base/networking:manifests",
     "//src/infrastructure/base/storage:manifests",
