@@ -653,6 +653,61 @@ should summarize the standard Kubernetes objects and include the relevant
 `BackupJob`, `Backup`, `RestoreJob`, and strategy pod log excerpts. Do not add
 repo-specific JSON evidence bundles.
 
+## OpenBao Drills
+
+OpenBao is intentionally different from Postgres, Harbor, and ClickHouse: if
+the entire management cluster is lost, recovering the old OpenBao key material
+is not required. Rebuild the cluster, re-initialize OpenBao, re-apply
+`src/infrastructure/bootstrap/guardian-mgmt-openbao`, and repopulate the
+required kv-v2 paths from the operator's secret source. For single-pod or
+single-node failures inside an otherwise surviving cluster, the cluster-local
+bootstrap Secret is enough to unseal replicas again.
+
+`aspect infra openbao-drill` is a thin wrapper around repo-pinned `kubectl` and
+native `bao` commands executed inside the Cozystack OpenBao pods. It first runs
+the same guardian-mgmt kubeconfig guard as `aspect infra live`, and when
+`--revision` is provided it verifies source-controller convergence before any
+mutation.
+
+Print status for all OpenBao replicas:
+
+```sh
+aspect infra openbao-drill \
+  --kubeconfig "$GUARDIAN_MGMT_KUBECONFIG" \
+  --revision "$(git rev-parse HEAD)" \
+  --mode status
+```
+
+Initialize OpenBao if needed and unseal all replicas:
+
+```sh
+aspect infra openbao-drill \
+  --kubeconfig "$GUARDIAN_MGMT_KUBECONFIG" \
+  --revision "$(git rev-parse HEAD)" \
+  --mode init-unseal
+```
+
+When `mode=init-unseal` initializes a fresh OpenBao cluster, it runs
+`bao operator init -key-shares=1 -key-threshold=1 -format=json`, captures the
+native JSON output without printing the root token or unseal key, and writes a
+cluster-local `Secret/openbao-guardian-bootstrap` in `tenant-root`. That Secret
+is operational bootstrap material, not offsite survival state. Do not check its
+contents into Git.
+
+Run an OpenBao Raft snapshot smoke drill:
+
+```sh
+aspect infra openbao-drill \
+  --kubeconfig "$GUARDIAN_MGMT_KUBECONFIG" \
+  --revision "$(git rev-parse HEAD)" \
+  --mode snapshot
+```
+
+The snapshot drill runs `bao operator raft autopilot state`, then
+`bao operator raft snapshot save` to a pod-local `/tmp` file, verifies the file
+is non-empty with `sha256sum`, and removes the pod-local snapshot. The report
+input is the native `bao`, `kubectl`, and `sha256sum` output.
+
 ## Single Node Outage Drills
 
 Use the Kubernetes eviction path first. `kubectl drain` is the standard
@@ -1003,7 +1058,10 @@ separate PRs with their own validation:
   live restore drill reports still need separate PRs.
 - ClickHouse chart-side `spec.storageClass` rendering, because Cozystack 1.4
   still relies on the cluster default for ClickHouse and keeper PVCs.
-- OpenBao init/unseal automation and backup/restore drills.
+- Live OpenBao init/unseal and Raft snapshot drill reports from
+  `aspect infra openbao-drill`. The task surface is declared and validated, but
+  live reports still require current guardian-mgmt credentials and
+  source-controller convergence on the merged revision.
 - Load-test and hard disaster-recovery drills for each new infrastructure
   component, plus live single-node outage reports from
   `aspect infra node-outage-drill`, recorded through standard tool outputs

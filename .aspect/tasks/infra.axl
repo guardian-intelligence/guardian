@@ -15,6 +15,7 @@ DB_LOAD_TARGET = "//src/infrastructure/cmd/cozystack_db_load:cozystack_db_load"
 HARBOR_REGISTRY_TARGET = "//src/infrastructure/cmd/cozystack_harbor_registry:cozystack_harbor_registry"
 HTTP_LOAD_TARGET = "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load"
 NODE_OUTAGE_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill"
+OPENBAO_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill"
 GUARDIAN_MGMT_TALOS_NODES = [
     "10.8.0.11",
     "10.8.0.12",
@@ -152,6 +153,7 @@ INFRA_TESTS = [
     "//src/infrastructure/cmd/cozystack_harbor_registry:cozystack_harbor_registry_test",
     "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load_test",
     "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill_test",
+    "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill_test",
     "//src/infrastructure/tests:manifest_invariants_test",
 ]
 LIVE_GETS = [
@@ -1348,6 +1350,48 @@ def _load_harbor_registry_impl(ctx):
         label = "cozystack harbor registry load",
     )
 
+def _openbao_drill_impl(ctx):
+    kubectl = _kubectl_path(ctx)
+    if kubectl == None:
+        return 1
+
+    rc = _check_live_context(ctx, kubectl)
+    if rc != 0:
+        return rc
+    if ctx.args.revision != "":
+        rc = _check_flux_revision(ctx, kubectl, ctx.args.revision)
+        if rc != 0:
+            return rc
+
+    drill_args = [
+        "--kubectl",
+        kubectl,
+        "--namespace",
+        ctx.args.namespace,
+        "--statefulset",
+        ctx.args.statefulset,
+        "--bootstrap-secret",
+        ctx.args.bootstrap_secret,
+        "--mode",
+        ctx.args.mode,
+        "--request-timeout",
+        ctx.args.request_timeout,
+        "--wait-timeout",
+        ctx.args.wait_timeout,
+    ]
+    if ctx.args.kubeconfig != "":
+        drill_args.extend(["--kubeconfig", ctx.args.kubeconfig])
+    if ctx.args.snapshot_name != "":
+        drill_args.extend(["--snapshot-name", ctx.args.snapshot_name])
+
+    return checked_spawn(
+        ctx,
+        "bazelisk",
+        ["run", OPENBAO_DRILL_TARGET, "--"] + drill_args,
+        cwd = ws_path(ctx),
+        label = "cozystack openbao drill",
+    )
+
 validate = task(
     implementation = _validate_impl,
     name = "validate",
@@ -1468,6 +1512,24 @@ load_harbor_registry = task(
         "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before the registry load."),
         "stage": args.string(default = "dev", description = "Guardian stage: root, dev, gamma, or prod."),
         "tag": args.string(default = "", description = "Optional tag or tag prefix. Defaults to a timestamped tag."),
+    },
+)
+
+openbao_drill = task(
+    implementation = _openbao_drill_impl,
+    name = "openbao-drill",
+    group = ["infra"],
+    summary = "Run OpenBao status, init/unseal, or Raft snapshot drills using native bao commands.",
+    args = {
+        "bootstrap_secret": args.string(default = "openbao-guardian-bootstrap", description = "Cluster-local Secret for OpenBao root token and unseal key."),
+        "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
+        "mode": args.string(default = "status", description = "Drill mode: status, init-unseal, or snapshot."),
+        "namespace": args.string(default = "tenant-root", description = "OpenBao namespace."),
+        "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
+        "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before the drill."),
+        "snapshot_name": args.string(default = "", description = "Optional pod-local snapshot filename for snapshot mode."),
+        "statefulset": args.string(default = "openbao-guardian", description = "OpenBao StatefulSet name."),
+        "wait_timeout": args.string(default = "5m", description = "Timeout for OpenBao readiness waits."),
     },
 )
 
