@@ -125,6 +125,8 @@ func TestNamespaceAndComponentValidation(t *testing.T) {
 		t.Fatalf("componentForName(postgres) resource = %#v, %v", got, err)
 	}
 	if _, err := componentForName("harbor"); err == nil {
-		t.Fatalf("unsupported component was accepted")
+		t.Fatalf("unsupported Harbor component was accepted")
+	} else if !strings.Contains(err.Error(), "Harbor is not a Cozystack managed-database BackupJob target") {
+		t.Fatalf("Harbor error = %q, want managed-database BackupJob guidance", err)
 	}
 }

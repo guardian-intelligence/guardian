@@ -446,6 +446,12 @@ on tenant secret material:
   runtime `apk add curl jq` pattern with a digest-pinned Python image and a
   standard-library HTTP client.
 
+Do not add a synthetic Harbor `BackupClass`. Cozystack 1.4's managed-app
+BackupJob/RestoreJob flow is the standard path for database-style apps such as
+Postgres and ClickHouse. Harbor's checked-in recovery proof is separate: the
+Harbor app, nested system HelmRelease, registry COSI BucketClaim/BucketAccess,
+and ORAS push/pull path must all work from the live cluster.
+
 The checked-in External Secrets layer declares the backup Secrets for
 `Postgres/guardian` and `ClickHouse/guardian` in `tenant-root`, `tenant-dev`,
 `tenant-gamma`, and `tenant-prod`:
@@ -724,6 +730,12 @@ will not pass until the corresponding `Postgres/guardian` app has
 `spec.backup.enabled`, `destinationPath`, and `endpointURL` wired to declared
 non-secret R2 coordinates. The reusable CNPG `BackupClass` and OpenBao-projected
 credential Secrets already exist.
+
+The backup drill intentionally does not support `--component harbor`. Harbor is
+not a Cozystack managed-database BackupJob target in the 1.4 backup flow. Use
+`aspect infra load-harbor-registry` for Harbor registry-path DR smoke evidence:
+it waits for the Harbor app, COSI registry bucket readiness and access grant,
+then exercises ORAS push/pull through the declared Harbor endpoint.
 
 For PR-local evidence, capture the unmodified command output. Durable reports
 should summarize the standard Kubernetes objects and include the relevant
@@ -1163,7 +1175,7 @@ separate PRs with their own validation:
   reports still require current guardian-mgmt credentials and successful
   source-controller convergence on the merged revision.
 - Postgres backup specs wired to declared OpenBao/R2-projected Secrets, plus
-  live backup/restore drills for Postgres, Harbor, and ClickHouse. The package
+  live backup/restore drills for Postgres and ClickHouse. The package
   prerequisites, backup controller deployments/RBAC/CRDs, reusable CNPG
   BackupClass, reusable ClickHouse Altinity BackupClass, Postgres / ClickHouse
   credential SecretStores and ExternalSecrets, OpenBao auth/policy
@@ -1172,8 +1184,8 @@ separate PRs with their own validation:
   and live-gated. `aspect infra backup-drill` now creates ad-hoc Cozystack
   BackupJob/RestoreJob resources and prints standard Kubernetes evidence, but
   applying the OpenBao root, populating real kv values, Postgres object-store
-  coordinates, running the smoke tests, Harbor registry restore validation, and
-  live restore drill reports still need separate PRs.
+  coordinates, running the smoke tests, Harbor registry-path validation through
+  ORAS/COSI, and live restore drill reports still need separate PRs.
 - ClickHouse chart-side `spec.storageClass` rendering, because Cozystack 1.4
   still relies on the cluster default for ClickHouse and keeper PVCs.
 - Live OpenBao init/unseal and Raft snapshot drill reports from

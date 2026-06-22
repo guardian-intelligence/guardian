@@ -98,6 +98,8 @@ func componentForName(name string) (componentSpec, error) {
 			Resource:    "postgreses.apps.cozystack.io",
 			BackupClass: "guardian-postgres-cnpg",
 		}, nil
+	case "harbor", "registry":
+		return componentSpec{}, errors.New("Harbor is not a Cozystack managed-database BackupJob target; validate Harbor registry recovery with the Harbor/COSI registry smoke path")
 	default:
 		return componentSpec{}, fmt.Errorf("component %q is not one of clickhouse, postgres", name)
 	}
