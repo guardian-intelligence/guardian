@@ -1,0 +1,22 @@
+environment: gamma
+cluster: guardian-mgmt
+tenant:
+  namespace: tenant-gamma
+  parent: tenant-root
+  host: gamma.guardianintelligence.org
+  services:
+    ingress: tenant-root
+    monitoring: tenant-root
+    etcd: tenant-root
+    seaweedfs: tenant-root
+surfaces:
+  companySite:
+    host: gamma.guardianintelligence.org
+    routes:
+      - /
+      - /letters
+      - /news
+      - /healthz
+      - /metrics
+    imageDigest: ""
+    deploymentStatus: waiting-for-repo-owned-company-site-image

@@ -12,10 +12,16 @@ spec:
           # k8s API rides a Talos Layer2 VIP on the Latitude Virtual Network.
           # See docs/runbooks/cozystack-mgmt-rebuild.md.
           apiServerEndpoint: https://10.8.0.250:6443
+          # Public ingress uses the node public IPs. The Latitude VLAN-backed
+          # MetalLB pool is private 10.8.0.0/24 and is not internet-routable.
+          externalIPs:
+            - 206.223.228.101
+            - 45.250.254.119
+            - 206.223.228.87
           exposedServices:
             - dashboard
             - api
-          # Ingress via MetalLB L2 (IPAddressPool from the private VLAN range).
+          # Private LoadBalancer services use MetalLB L2 on the VLAN range.
           # See docs/runbooks/cozystack-mgmt-rebuild.md.
         networking:
           podCIDR: 10.244.0.0/16

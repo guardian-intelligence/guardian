@@ -1,8 +1,9 @@
 filegroup(
     name = "manifests",
     srcs = [
-        "metallb.yaml",
-        "subnet-mtu.yaml",
+        "clickhouse.yaml",
+        "harbor.yaml",
+        "postgres.yaml",
     ],
     visibility = ["//visibility:public"],
 )

@@ -1,1 +1,9 @@
-package(default_visibility = ["//visibility:private"])
+package(default_visibility = ["//visibility:public"])
+
+genrule(
+    name = "talosctl",
+    srcs = ["@talosctl_linux_amd64//file"],
+    outs = ["talosctl-runner"],
+    cmd = "cp $(location @talosctl_linux_amd64//file) $@ && chmod +x $@",
+    executable = True,
+)

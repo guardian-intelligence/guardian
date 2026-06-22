@@ -15,6 +15,22 @@ load(
     bazel_bzlmod = "bzlmod",
 )
 load(
+    ".aspect/tasks/infra.axl",
+    infra_dns_adopt_known = "dns_adopt_known",
+    infra_dns_init = "dns_init",
+    infra_dns_output = "dns_output",
+    infra_dns_plan = "dns_plan",
+    infra_dns_tofu = "dns_tofu",
+    infra_adopt_known = "adopt_known",
+    infra_fmt = "fmt",
+    infra_init = "init",
+    infra_output = "output",
+    infra_plan = "plan",
+    infra_render_base = "render_base",
+    infra_tofu = "tofu",
+    infra_validate = "validate",
+)
+load(
     ".aspect/tasks/tidy.axl",
     tidy = "tidy",
 )
@@ -22,6 +38,21 @@ load(
 def config(ctx):
     # aspect bazel ...
     ctx.tasks.add(bazel_bzlmod)
+
+    # aspect infra ...
+    ctx.tasks.add(infra_adopt_known)
+    ctx.tasks.add(infra_dns_adopt_known)
+    ctx.tasks.add(infra_dns_init)
+    ctx.tasks.add(infra_dns_output)
+    ctx.tasks.add(infra_dns_plan)
+    ctx.tasks.add(infra_dns_tofu)
+    ctx.tasks.add(infra_fmt)
+    ctx.tasks.add(infra_init)
+    ctx.tasks.add(infra_output)
+    ctx.tasks.add(infra_plan)
+    ctx.tasks.add(infra_render_base)
+    ctx.tasks.add(infra_tofu)
+    ctx.tasks.add(infra_validate)
 
     # aspect tidy
     ctx.tasks.add(tidy)

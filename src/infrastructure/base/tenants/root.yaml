@@ -1,0 +1,13 @@
+# Root tenant services are part of the platform substrate. Keeping this in Flux
+# replaces the Cozystack docs' imperative post-install patch.
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: root
+  namespace: tenant-root
+spec:
+  host: guardianintelligence.org
+  ingress: true
+  monitoring: true
+  etcd: true
+  seaweedfs: true

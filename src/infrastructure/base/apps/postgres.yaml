@@ -1,0 +1,20 @@
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Postgres
+metadata:
+  name: guardian
+  namespace: tenant-root
+spec:
+  replicas: 3
+  storageClass: replicated
+  size: 20Gi
+  external: false
+  version: v18
+  resourcesPreset: t1.small
+  quorum:
+    minSyncReplicas: 1
+    maxSyncReplicas: 2
+  postgresql:
+    parameters:
+      max_connections: "200"
+  backup:
+    enabled: false

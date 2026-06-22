@@ -1,1 +1,9 @@
-package(default_visibility = ["//visibility:private"])
+package(default_visibility = ["//visibility:public"])
+
+genrule(
+    name = "talm",
+    srcs = ["@talm_linux_amd64//:talm"],
+    outs = ["talm-runner"],
+    cmd = "cp $(location @talm_linux_amd64//:talm) $@ && chmod +x $@",
+    executable = True,
+)

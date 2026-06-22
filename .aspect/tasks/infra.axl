@@ -1,0 +1,293 @@
+"""aspect infra — OpenTofu wrappers for bootstrap infrastructure."""
+
+load(".aspect/lib/helpers.axl", "checked_spawn", "ws_path")
+
+TOFU_TARGET = "@opentofu_linux_amd64//:tofu_bin"
+KUBECTL_TARGET = "//src/tools/kubectl:kubectl"
+GUARDIAN_MGMT_ROOT = "src/infrastructure/bootstrap/guardian-mgmt"
+CLOUDFLARE_DNS_ROOT = "src/infrastructure/bootstrap/cloudflare-dns"
+
+KNOWN_IMPORTS = [
+    ["latitudesh_project.guardian_mgmt", "proj_R82A0yqmd06mM"],
+    ["latitudesh_virtual_network.management", "vlan_8mop5gkpP5jxv"],
+    ["latitudesh_server.control_plane[\"ash-earth\"]", "sv_vAPXaMxKM5epz"],
+    ["latitudesh_server.control_plane[\"ash-wind\"]", "sv_nPRbajqEB5koM"],
+    ["latitudesh_server.control_plane[\"ash-water\"]", "sv_8mop5gZo8Njxv"],
+]
+
+CLOUDFLARE_DNS_IMPORTS = [
+    [
+        "cloudflare_dns_record.public_ingress_a[\"guardianintelligence.org/206.223.228.101\"]",
+        "c952fb5989d232593ec9cca71030cb58/a4c21abc5aedcebb84396b0a3f67d869",
+    ],
+    [
+        "cloudflare_dns_record.public_ingress_a[\"dev.guardianintelligence.org/206.223.228.101\"]",
+        "c952fb5989d232593ec9cca71030cb58/1f407d9f669eb6f6a8a2b9420c4ed9a1",
+    ],
+    [
+        "cloudflare_dns_record.public_ingress_a[\"gamma.guardianintelligence.org/45.250.254.119\"]",
+        "c952fb5989d232593ec9cca71030cb58/b5fa32be26dee974732bde043ec1397f",
+    ],
+    [
+        "cloudflare_dns_record.public_ingress_a[\"oci.guardianintelligence.org/206.223.228.101\"]",
+        "c952fb5989d232593ec9cca71030cb58/b30a4de80436cfe97d5e938b62a66885",
+    ],
+]
+
+def _root(ctx, root):
+    return ws_path(ctx, root)
+
+def _tofu_args(ctx, root, args):
+    return ["run", TOFU_TARGET, "--", "-chdir=" + _root(ctx, root)] + args
+
+def _tofu(ctx, root, args, label = None):
+    return checked_spawn(
+        ctx,
+        "bazelisk",
+        _tofu_args(ctx, root, args),
+        cwd = ws_path(ctx),
+        label = label if label != None else "tofu " + " ".join(args),
+    )
+
+def _clear_tofu_workdir(ctx, root):
+    return checked_spawn(
+        ctx,
+        "rm",
+        ["-rf", ws_path(ctx, root, ".terraform")],
+        cwd = ws_path(ctx),
+        label = "rm -rf " + root + " .terraform",
+    )
+
+def _capture_tofu(ctx, root, args, label = None):
+    label_str = label if label != None else "tofu " + " ".join(args)
+    cmd = ctx.std.process.command("bazelisk").args(_tofu_args(ctx, root, args)).current_dir(ws_path(ctx))
+    if ctx.std.io.stderr.is_tty:
+        ctx.std.io.stderr.write("$ " + label_str + "\n")
+    r = cmd.stdout("piped").stderr("piped").spawn().wait_with_output()
+    if r.status.code != 0:
+        return None
+    return r.stdout
+
+def _state_has(ctx, root, address):
+    raw = _capture_tofu(ctx, root, ["state", "list"], label = "tofu state list")
+    if raw == None:
+        return False
+    for line in raw.split("\n"):
+        if line.strip() == address:
+            return True
+    return False
+
+def _init_impl(ctx):
+    return _tofu(ctx, GUARDIAN_MGMT_ROOT, ["init", "-input=false", "-reconfigure"], label = "tofu init guardian-mgmt")
+
+def _fmt_impl(ctx):
+    rc = _tofu(ctx, GUARDIAN_MGMT_ROOT, ["fmt"], label = "tofu fmt guardian-mgmt")
+    if rc != 0:
+        return rc
+    return _tofu(ctx, CLOUDFLARE_DNS_ROOT, ["fmt"], label = "tofu fmt cloudflare-dns")
+
+def _validate_impl(ctx):
+    rc = _clear_tofu_workdir(ctx, GUARDIAN_MGMT_ROOT)
+    if rc != 0:
+        return rc
+    rc = _tofu(ctx, GUARDIAN_MGMT_ROOT, ["init", "-backend=false", "-input=false", "-reconfigure"], label = "tofu init -backend=false guardian-mgmt")
+    if rc != 0:
+        return rc
+    rc = _tofu(ctx, GUARDIAN_MGMT_ROOT, ["validate"], label = "tofu validate guardian-mgmt")
+    if rc != 0:
+        return rc
+    rc = _clear_tofu_workdir(ctx, CLOUDFLARE_DNS_ROOT)
+    if rc != 0:
+        return rc
+    rc = _tofu(ctx, CLOUDFLARE_DNS_ROOT, ["init", "-backend=false", "-input=false", "-reconfigure"], label = "tofu init -backend=false cloudflare-dns")
+    if rc != 0:
+        return rc
+    return _tofu(ctx, CLOUDFLARE_DNS_ROOT, ["validate"], label = "tofu validate cloudflare-dns")
+
+def _plan_impl(ctx):
+    rc = _tofu(ctx, GUARDIAN_MGMT_ROOT, ["init", "-input=false", "-reconfigure"], label = "tofu init guardian-mgmt")
+    if rc != 0:
+        return rc
+    return _tofu(ctx, GUARDIAN_MGMT_ROOT, ["plan", "-input=false"], label = "tofu plan guardian-mgmt")
+
+def _output_impl(ctx):
+    rc = _tofu(ctx, GUARDIAN_MGMT_ROOT, ["init", "-input=false", "-reconfigure"], label = "tofu init guardian-mgmt")
+    if rc != 0:
+        return rc
+    return _tofu(ctx, GUARDIAN_MGMT_ROOT, ["output"], label = "tofu output guardian-mgmt")
+
+def _adopt_known_impl(ctx):
+    rc = _tofu(ctx, GUARDIAN_MGMT_ROOT, ["init", "-input=false", "-reconfigure"], label = "tofu init guardian-mgmt")
+    if rc != 0:
+        return rc
+    for pair in KNOWN_IMPORTS:
+        address = pair[0]
+        import_id = pair[1]
+        if _state_has(ctx, GUARDIAN_MGMT_ROOT, address):
+            if ctx.std.io.stderr.is_tty:
+                ctx.std.io.stderr.write("already imported: " + address + "\n")
+            continue
+        rc = _tofu(ctx, GUARDIAN_MGMT_ROOT, ["import", "-input=false", address, import_id], label = "tofu import " + address)
+        if rc != 0:
+            return rc
+    ctx.std.io.stderr.write(
+        "Known Latitude project/server/VLAN resources are adopted. "
+        + "VLAN assignment resources still need provider assignment IDs; see "
+        + GUARDIAN_MGMT_ROOT
+        + "/README.md.\n",
+    )
+    return 0
+
+def _tofu_impl(ctx):
+    if ctx.args.args == "":
+        ctx.std.io.stderr.write("ERROR: pass raw OpenTofu args with --args, for example --args 'state list'\n")
+        return 1
+    return _tofu(ctx, GUARDIAN_MGMT_ROOT, ctx.args.args.split(" "), label = "tofu " + ctx.args.args)
+
+def _dns_init_impl(ctx):
+    return _tofu(ctx, CLOUDFLARE_DNS_ROOT, ["init", "-input=false", "-reconfigure"], label = "tofu init cloudflare-dns")
+
+def _dns_plan_impl(ctx):
+    rc = _tofu(ctx, CLOUDFLARE_DNS_ROOT, ["init", "-input=false", "-reconfigure"], label = "tofu init cloudflare-dns")
+    if rc != 0:
+        return rc
+    return _tofu(ctx, CLOUDFLARE_DNS_ROOT, ["plan", "-input=false"], label = "tofu plan cloudflare-dns")
+
+def _dns_output_impl(ctx):
+    rc = _tofu(ctx, CLOUDFLARE_DNS_ROOT, ["init", "-input=false", "-reconfigure"], label = "tofu init cloudflare-dns")
+    if rc != 0:
+        return rc
+    return _tofu(ctx, CLOUDFLARE_DNS_ROOT, ["output"], label = "tofu output cloudflare-dns")
+
+def _dns_adopt_known_impl(ctx):
+    rc = _tofu(ctx, CLOUDFLARE_DNS_ROOT, ["init", "-input=false", "-reconfigure"], label = "tofu init cloudflare-dns")
+    if rc != 0:
+        return rc
+    for pair in CLOUDFLARE_DNS_IMPORTS:
+        address = pair[0]
+        import_id = pair[1]
+        if _state_has(ctx, CLOUDFLARE_DNS_ROOT, address):
+            if ctx.std.io.stderr.is_tty:
+                ctx.std.io.stderr.write("already imported: " + address + "\n")
+            continue
+        rc = _tofu(ctx, CLOUDFLARE_DNS_ROOT, ["import", "-input=false", address, import_id], label = "tofu import " + address)
+        if rc != 0:
+            return rc
+    ctx.std.io.stderr.write(
+        "Known Cloudflare DNS records are adopted. Review `aspect infra dns-plan` "
+        + "before applying because apex and oci records may move traffic from the "
+        + "excluded Verself prod IP to the management cluster.\n",
+    )
+    return 0
+
+def _dns_tofu_impl(ctx):
+    if ctx.args.args == "":
+        ctx.std.io.stderr.write("ERROR: pass raw OpenTofu args with --args, for example --args 'state list'\n")
+        return 1
+    return _tofu(ctx, CLOUDFLARE_DNS_ROOT, ctx.args.args.split(" "), label = "tofu " + ctx.args.args)
+
+def _render_base_impl(ctx):
+    return checked_spawn(
+        ctx,
+        "bazelisk",
+        ["run", KUBECTL_TARGET, "--", "kustomize", "src/infrastructure/base"],
+        cwd = ws_path(ctx),
+        label = "kubectl kustomize src/infrastructure/base",
+    )
+
+init = task(
+    implementation = _init_impl,
+    name = "init",
+    group = ["infra"],
+    summary = "Initialize the guardian-mgmt OpenTofu root.",
+)
+
+fmt = task(
+    implementation = _fmt_impl,
+    name = "fmt",
+    group = ["infra"],
+    summary = "Format the guardian-mgmt OpenTofu root.",
+)
+
+validate = task(
+    implementation = _validate_impl,
+    name = "validate",
+    group = ["infra"],
+    summary = "Validate OpenTofu roots without opening their remote backends.",
+)
+
+plan = task(
+    implementation = _plan_impl,
+    name = "plan",
+    group = ["infra"],
+    summary = "Plan the guardian-mgmt OpenTofu root.",
+)
+
+output = task(
+    implementation = _output_impl,
+    name = "output",
+    group = ["infra"],
+    summary = "Show guardian-mgmt OpenTofu outputs.",
+)
+
+adopt_known = task(
+    implementation = _adopt_known_impl,
+    name = "adopt-known",
+    group = ["infra"],
+    summary = "Import known Latitude project, server, and VLAN IDs into OpenTofu state.",
+)
+
+tofu = task(
+    implementation = _tofu_impl,
+    name = "tofu",
+    group = ["infra"],
+    summary = "Run raw OpenTofu args against the guardian-mgmt root.",
+    args = {
+        "args": args.string(default = "", description = "Raw OpenTofu arguments, split on spaces."),
+    },
+)
+
+dns_init = task(
+    implementation = _dns_init_impl,
+    name = "dns-init",
+    group = ["infra"],
+    summary = "Initialize the cloudflare-dns OpenTofu root.",
+)
+
+dns_plan = task(
+    implementation = _dns_plan_impl,
+    name = "dns-plan",
+    group = ["infra"],
+    summary = "Plan the cloudflare-dns OpenTofu root.",
+)
+
+dns_output = task(
+    implementation = _dns_output_impl,
+    name = "dns-output",
+    group = ["infra"],
+    summary = "Show cloudflare-dns OpenTofu outputs.",
+)
+
+dns_adopt_known = task(
+    implementation = _dns_adopt_known_impl,
+    name = "dns-adopt-known",
+    group = ["infra"],
+    summary = "Import known Cloudflare DNS records into OpenTofu state.",
+)
+
+dns_tofu = task(
+    implementation = _dns_tofu_impl,
+    name = "dns-tofu",
+    group = ["infra"],
+    summary = "Run raw OpenTofu args against the cloudflare-dns root.",
+    args = {
+        "args": args.string(default = "", description = "Raw OpenTofu arguments, split on spaces."),
+    },
+)
+
+render_base = task(
+    implementation = _render_base_impl,
+    name = "render-base",
+    group = ["infra"],
+    summary = "Render src/infrastructure/base with the repo-pinned kubectl.",
+)

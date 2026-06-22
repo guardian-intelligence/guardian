@@ -4,6 +4,13 @@
 *.env
 /src/aisucks/aisucks
 
+# Local IaC state and provider/plugin working directories. State is adopted via
+# OpenTofu, not committed.
+/.local/
+**/.terraform/
+*.tfstate
+*.tfstate.*
+
 # Archived pre-Cozystack tree. Keep source, not local dependency/build output.
 /src-old/**/node_modules/
 /src-old/**/dist/

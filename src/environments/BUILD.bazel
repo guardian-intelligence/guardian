@@ -1,0 +1,9 @@
+filegroup(
+    name = "environments",
+    srcs = [
+        "dev/environment.yaml",
+        "gamma/environment.yaml",
+        "prod/environment.yaml",
+    ],
+    visibility = ["//visibility:public"],
+)

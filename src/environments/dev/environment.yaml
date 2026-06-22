@@ -1,0 +1,22 @@
+environment: dev
+cluster: guardian-mgmt
+tenant:
+  namespace: tenant-dev
+  parent: tenant-root
+  host: dev.guardianintelligence.org
+  services:
+    ingress: tenant-root
+    monitoring: tenant-root
+    etcd: tenant-root
+    seaweedfs: tenant-root
+surfaces:
+  companySite:
+    host: dev.guardianintelligence.org
+    routes:
+      - /
+      - /letters
+      - /news
+      - /healthz
+      - /metrics
+    imageDigest: ""
+    deploymentStatus: waiting-for-repo-owned-company-site-image

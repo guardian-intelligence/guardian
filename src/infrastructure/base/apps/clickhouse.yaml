@@ -1,0 +1,20 @@
+apiVersion: apps.cozystack.io/v1alpha1
+kind: ClickHouse
+metadata:
+  name: ledger
+  namespace: tenant-root
+spec:
+  replicas: 2
+  shards: 1
+  storageClass: replicated
+  size: 100Gi
+  logStorageSize: 10Gi
+  logTTL: 15
+  resourcesPreset: t1.medium
+  clickhouseKeeper:
+    enabled: true
+    replicas: 3
+    size: 5Gi
+    resourcesPreset: t1.micro
+  backup:
+    enabled: false

@@ -1,0 +1,40 @@
+# Environment tenants inherit root tenant services at first. Cozystack tenant
+# names cannot contain dashes; namespace names become tenant-dev/tenant-gamma.
+---
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: dev
+  namespace: tenant-root
+spec:
+  host: dev.guardianintelligence.org
+  ingress: false
+  monitoring: false
+  etcd: false
+  seaweedfs: false
+  resourceQuotas:
+    cpu: "4"
+    memory: 16Gi
+    storage: 200Gi
+    pods: "80"
+    services: "40"
+    persistentvolumeclaims: "40"
+---
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: gamma
+  namespace: tenant-root
+spec:
+  host: gamma.guardianintelligence.org
+  ingress: false
+  monitoring: false
+  etcd: false
+  seaweedfs: false
+  resourceQuotas:
+    cpu: "8"
+    memory: 32Gi
+    storage: 500Gi
+    pods: "120"
+    services: "60"
+    persistentvolumeclaims: "60"

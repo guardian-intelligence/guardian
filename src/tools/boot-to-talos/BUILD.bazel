@@ -1,1 +1,9 @@
-package(default_visibility = ["//visibility:private"])
+package(default_visibility = ["//visibility:public"])
+
+genrule(
+    name = "boot-to-talos",
+    srcs = ["@boot_to_talos_linux_amd64//:boot-to-talos"],
+    outs = ["boot-to-talos-runner"],
+    cmd = "cp $(location @boot_to_talos_linux_amd64//:boot-to-talos) $@ && chmod +x $@",
+    executable = True,
+)

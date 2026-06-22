@@ -5,10 +5,16 @@ exports_files([
 filegroup(
     name = "build",
     srcs = [
+        "//src/infrastructure/base/apps:manifests",
         "//src/infrastructure/base/cozystack:manifests",
         "//src/infrastructure/base/networking:manifests",
         "//src/infrastructure/base/openbao:manifests",
         "//src/infrastructure/base/storage:manifests",
+        "//src/infrastructure/base/tenants:manifests",
+        "//src/infrastructure/bootstrap/cloudflare-dns:root",
+        "//src/infrastructure/bootstrap/guardian-mgmt:root",
+        "//src/environments:environments",
+        "//src/infrastructure/inventory:inventory",
     ],
     visibility = ["//visibility:public"],
 )

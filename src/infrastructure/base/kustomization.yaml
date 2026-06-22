@@ -3,10 +3,16 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  - apps/clickhouse.yaml
+  - apps/harbor.yaml
+  - apps/postgres.yaml
   - cozystack/platform.yaml
+  - networking/metallb.yaml
   - networking/subnet-mtu.yaml
   - storage/storageclasses.yaml
   - storage/linstor-satellite-config.yaml
   - openbao/openbao.yaml
   - openbao/networkpolicy.yaml
+  - tenants/environments.yaml
+  - tenants/root.yaml
   - flux/sync.yaml

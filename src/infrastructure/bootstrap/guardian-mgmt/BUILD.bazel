@@ -1,0 +1,9 @@
+filegroup(
+    name = "root",
+    srcs = glob(["*.tf"]) + [
+        ".terraform.lock.hcl",
+        "README.md",
+        "//src/infrastructure/inventory:inventory",
+    ],
+    visibility = ["//visibility:public"],
+)
