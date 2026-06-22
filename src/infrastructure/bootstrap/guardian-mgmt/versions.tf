@@ -8,14 +8,14 @@ terraform {
     }
   }
 
-  # R2 is S3-compatible. The bucket/key are declarative; the endpoint is derived
-  # from the shared Cloudflare account id tfvars during `tofu init`; credentials
-  # still come from standard AWS_* environment variables.
+  # R2 is S3-compatible. The bucket/key are declarative; the endpoint is supplied
+  # as partial backend config during `tofu init` after deriving it from the
+  # shared Cloudflare account id file. Credentials still come from standard
+  # AWS_* environment variables.
   backend "s3" {
-    bucket   = "guardian-vault"
-    endpoint = "https://${var.cloudflare_account_id}.r2.cloudflarestorage.com"
-    key      = "opentofu/guardian-mgmt.tfstate"
-    region   = "auto"
+    bucket = "guardian-vault"
+    key    = "opentofu/guardian-mgmt.tfstate"
+    region = "auto"
 
     skip_credentials_validation = true
     skip_metadata_api_check     = true

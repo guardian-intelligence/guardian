@@ -28,8 +28,7 @@ Run from the repo root.
 ```bash
 aspect infra validate
 
-aspect infra tofu-init \
-  --endpoint "$AWS_ENDPOINT_URL_S3"
+aspect infra tofu-init
 
 aspect infra bootstrap \
   --revision "<merged-main-commit-sha>"
@@ -39,11 +38,12 @@ bazelisk run //src/guardian/cmd/guardian -- \
   --revision "<merged-main-commit-sha>"
 ```
 
-`aspect infra bootstrap` initializes the standard OpenTofu S3 backend from
-`AWS_ENDPOINT_URL_S3`, prints the standard OpenTofu management topology outputs,
-validates the checked-in substrate, refreshes the gitignored Talm kubeconfig,
-runs the Talos L2 gate, and verifies live Flux/source-controller convergence on
-the requested merged `main` revision.
+`aspect infra bootstrap` initializes the standard OpenTofu S3 backend from the
+checked-in Cloudflare account id in `src/infrastructure/bootstrap/backend.tfvars`
+or an explicit `AWS_ENDPOINT_URL_S3` override, prints the standard OpenTofu
+management topology outputs, validates the checked-in substrate, refreshes the
+gitignored Talm kubeconfig, runs the Talos L2 gate, and verifies live
+Flux/source-controller convergence on the requested merged `main` revision.
 
 Generated Talm secrets, rendered node configs, kubeconfigs, and local operator
 state stay out of Git. See
