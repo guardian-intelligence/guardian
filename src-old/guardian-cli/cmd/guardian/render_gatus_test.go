@@ -48,27 +48,6 @@ func TestGatusProbeAlias(t *testing.T) {
 					t.Error("self-probe URL must stay the public domain (hostAliases redirects resolution)")
 				}
 			}
-			if site.Company.Domain != "" {
-				for _, want := range []string{
-					"company-healthz (" + site.Cluster.Name + ")",
-					"http://company-site-probe.company.svc/healthz",
-					"company-home (" + site.Cluster.Name + ")",
-					"http://company-site-probe.company.svc/",
-					"company-letters (" + site.Cluster.Name + ")",
-					"http://company-site-probe.company.svc/letters",
-					"The Coding Agent is the Next Smartphone",
-					"company-news (" + site.Cluster.Name + ")",
-					"http://company-site-probe.company.svc/news",
-					"Guardian Intelligence Inc. announces private beta of Verself.",
-				} {
-					if !strings.Contains(out, want) {
-						t.Errorf("company gatus render missing %q", want)
-					}
-				}
-				if strings.Contains(out, "- "+site.Company.Domain) {
-					t.Error("Gateway-terminated company self-checks must not alias the public hostname to the HTTP probe Service")
-				}
-			}
 		})
 	}
 }

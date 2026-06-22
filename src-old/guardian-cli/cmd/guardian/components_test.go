@@ -44,7 +44,6 @@ func TestComponentsTable(t *testing.T) {
 		{"guardian-platform", "guardian-products", "product APIs compose platform APIs"},
 		{"guardian-platform", "zot", "the zot image is consumed by the OCIRegistry XR"},
 		{"guardian-products", "aisucks", "product images are consumed by product XRs"},
-		{"guardian-products", "company-site", "product images are consumed by product XRs"},
 		{"postgres", "local-storage-bootstrap", "the ZFS initializer reuses the pinned Postgres shell image"},
 		{"guardian-platform", "status", "the status image is consumed by the StatusSurface XR"},
 		{"openbao", "external-secrets", "ESO authenticates to Bao"},

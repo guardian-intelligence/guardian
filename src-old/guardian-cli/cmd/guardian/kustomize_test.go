@@ -51,7 +51,6 @@ func TestEnvironmentKustomizePatchesImages(t *testing.T) {
 			text := string(out)
 			for _, image := range []string{
 				aisucksTestImage,
-				companyTestImage,
 				directusTestImage,
 				postgresTestImage,
 				statusTestImage,

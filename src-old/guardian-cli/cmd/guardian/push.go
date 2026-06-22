@@ -91,10 +91,6 @@ var components = []component{{
 	layout:   "_main/src/products/aisucks/services/api/image",
 	pushOnly: true,
 }, {
-	name:     "company-site",
-	layout:   "_main/src/products/company/web/image",
-	pushOnly: true,
-}, {
 	name:     "postgres",
 	layout:   "_main/src/infrastructure-components/postgres/image",
 	pushOnly: true,
@@ -197,7 +193,7 @@ func hostUsesLocalStorage(s *Host) bool {
 }
 
 func hostUsesPlatformTLS(s *Host) bool {
-	return s.OCI.Domain != "" || s.Company.Domain != ""
+	return s.OCI.Domain != ""
 }
 
 func hostUsesPlatformOCI(s *Host) bool {

@@ -195,7 +195,7 @@ func validateSLOProfiles(site *Host, profiles []sloProfileManifest) error {
 			seenPublicHTTP = true
 		}
 	}
-	if (site.Aisucks.Domain != "" || site.Company.Domain != "") && !seenPublicHTTP {
+	if site.Aisucks.Domain != "" && !seenPublicHTTP {
 		return fmt.Errorf("environment %s: public HTTP products require a public-http SLOProfile", site.EnvironmentBundle.Path)
 	}
 	return nil
@@ -237,8 +237,8 @@ func validateSyntheticChecks(site *Host, checks []syntheticCheckManifest) error 
 			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 				return fmt.Errorf("environment %s: SyntheticCheck %s target %s url must be absolute http(s), got %q", site.EnvironmentBundle.Path, name, target.Name, target.URL)
 			}
-			if target.Product != "aisucks" && target.Product != "company-site" {
-				return fmt.Errorf("environment %s: SyntheticCheck %s target %s product = %q, want aisucks or company-site", site.EnvironmentBundle.Path, name, target.Name, target.Product)
+			if target.Product != "aisucks" {
+				return fmt.Errorf("environment %s: SyntheticCheck %s target %s product = %q, want aisucks", site.EnvironmentBundle.Path, name, target.Name, target.Product)
 			}
 			if target.TargetKind != "health" && target.TargetKind != "page" {
 				return fmt.Errorf("environment %s: SyntheticCheck %s target %s kind = %q, want health or page", site.EnvironmentBundle.Path, name, target.Name, target.TargetKind)
@@ -269,7 +269,6 @@ func applySLOAndSyntheticConfig(site *Host) error {
 	}
 	var aisucksHealth []string
 	var aisucksPages []string
-	var companyTargets []string
 	for _, check := range checks {
 		if check.Spec.Surface != "public-http" {
 			continue
@@ -285,15 +284,12 @@ func applySLOAndSyntheticConfig(site *Host) error {
 				} else {
 					aisucksPages = append(aisucksPages, target.URL)
 				}
-			case "company-site":
-				companyTargets = append(companyTargets, target.URL)
 			}
 			site.Synthetic.PublicHTTPTargets = append(site.Synthetic.PublicHTTPTargets, target)
 		}
 	}
 	site.Aisucks.Watch = uniqueStrings(aisucksHealth)
 	site.Aisucks.WatchPages = uniqueStrings(aisucksPages)
-	site.Company.ProbeURLs = uniqueStrings(companyTargets)
 	return nil
 }
 

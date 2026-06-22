@@ -95,18 +95,6 @@ func TestDirectusInstanceRequiresProjectionPaths(t *testing.T) {
 	}
 }
 
-func TestCompanySiteDirectusBindingMustMatchInstance(t *testing.T) {
-	xr := &companySiteSpec{}
-	xr.DirectusRef.Name = "missing"
-	xr.ContentSnapshot.Digest = "workspace"
-	site := &Host{Name: "dev"}
-	site.Company.Domain = "dev.guardianintelligence.org"
-	err := validateCompanySiteDirectusBinding(site, "environment.yaml", xr, []directusInstanceManifest{{}})
-	if err == nil || !strings.Contains(err.Error(), "does not match any DirectusInstance") {
-		t.Fatalf("validateCompanySiteDirectusBinding error = %v, want missing DirectusInstance error", err)
-	}
-}
-
 func siteWithEnvironment(raw string) *Host {
 	site := &Host{Name: "dev"}
 	site.Storage.ProductPool.Mountpoint = "/var/mnt/guardian"

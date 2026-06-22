@@ -141,18 +141,6 @@ data:
               severity: page
             annotations:
               summary: 'App 5xx outside healthz: {{ $value }} errors/s sustained for 5m'
-
-          # Company site scaffold: the public-http scrape job supplies
-          # app="company-site" on the series, but the metric name is still
-          # owned by the app binary until the TanStack server standardizes the
-          # web runtime metric catalog.
-          - alert: CompanySiteErrorRate
-            expr: sum(rate(company_site_http_requests_total{code=~"5..",handler!="GET /healthz"}[5m])) > 0
-            for: 5m
-            labels:
-              severity: page
-            annotations:
-              summary: 'Company site 5xx outside healthz: {{ $value }} errors/s sustained for 5m'
 ---
 apiVersion: apps/v1
 kind: Deployment

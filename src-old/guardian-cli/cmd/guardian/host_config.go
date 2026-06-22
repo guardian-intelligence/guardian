@@ -87,9 +87,6 @@ type Environment struct {
 		Aisucks struct {
 			Domain string `yaml:"domain"`
 		} `yaml:"aisucks"`
-		Company struct {
-			Domain string `yaml:"domain"`
-		} `yaml:"company"`
 	} `yaml:"products"`
 	Platform struct {
 		OCI struct {
@@ -118,11 +115,6 @@ type Host struct {
 		NtfyTopic  string
 		Watch      []string
 		WatchPages []string
-	}
-	Company struct {
-		Domain    string
-		Routes    []string
-		ProbeURLs []string
 	}
 	SLO struct {
 		PublicHTTP *sloProfileSpec
@@ -181,10 +173,6 @@ func loadHost(path string) (*Host, error) {
 	if err != nil {
 		return nil, err
 	}
-	companyXR, err := loadCompanySiteSpec(envRaw, envResolved)
-	if err != nil {
-		return nil, err
-	}
 	host := &Host{
 		Name:       hostConfig.Environment,
 		HostConfig: *hostConfig,
@@ -198,10 +186,6 @@ func loadHost(path string) (*Host, error) {
 	host.EnvironmentBundle.Raw = envRaw
 	host.Aisucks.Domain = env.Products.Aisucks.Domain
 	host.Aisucks.NtfyTopic = env.Alerts.NtfyTopic
-	host.Company.Domain = env.Products.Company.Domain
-	if companyXR != nil {
-		host.Company.Routes = append([]string(nil), companyXR.Routes...)
-	}
 	host.Gateway.Enabled = env.Gateway.Enabled
 	host.OCI.Domain = env.Platform.OCI.Domain
 	planes, err := storagePlanes(host)
@@ -233,12 +217,7 @@ func loadHost(path string) (*Host, error) {
 	if _, err := ociRegistries(host); err != nil {
 		return nil, err
 	}
-	if err := validateCompanySiteSpec(host, envResolved, companyXR); err != nil {
-		return nil, err
-	}
-	if err := validateCompanySiteDirectusBinding(host, envResolved, companyXR, directus); err != nil {
-		return nil, err
-	}
+	_ = directus
 	return host, nil
 }
 
@@ -404,44 +383,6 @@ func loadEnvironment(path string) (*Environment, *environmentConfigMetadata, []b
 	return nil, nil, nil, "", fmt.Errorf("environment %s: EnvironmentConfig document is required", resolved)
 }
 
-type companySiteSpec struct {
-	Site        string `yaml:"site"`
-	Domain      string `yaml:"domain"`
-	DirectusRef struct {
-		Name string `yaml:"name"`
-	} `yaml:"directusRef"`
-	ContentSnapshot struct {
-		Digest string `yaml:"digest"`
-	} `yaml:"contentSnapshot"`
-	Routes []string `yaml:"routes"`
-}
-
-func loadCompanySiteSpec(raw []byte, path string) (*companySiteSpec, error) {
-	dec := yaml.NewDecoder(bytes.NewReader(raw))
-	var found *companySiteSpec
-	for {
-		var doc struct {
-			Kind string          `yaml:"kind"`
-			Spec companySiteSpec `yaml:"spec"`
-		}
-		if err := dec.Decode(&doc); err != nil {
-			if err == io.EOF {
-				break
-			}
-			return nil, fmt.Errorf("environment %s: %w", path, err)
-		}
-		if doc.Kind != "CompanySite" {
-			continue
-		}
-		if found != nil {
-			return nil, fmt.Errorf("environment %s: multiple CompanySite documents are not supported", path)
-		}
-		spec := doc.Spec
-		found = &spec
-	}
-	return found, nil
-}
-
 func validateHostEnvironment(h *Host, hostPath, envPath string, env *Environment, envMeta *environmentConfigMetadata) error {
 	if envMeta == nil {
 		return fmt.Errorf("environment %s: EnvironmentConfig metadata is required", envPath)
@@ -467,85 +408,12 @@ func validateHostEnvironment(h *Host, hostPath, envPath string, env *Environment
 	if h.OCI.Domain != "" && !h.Gateway.Enabled {
 		return fmt.Errorf("environment %s: platform.oci.domain requires gateway.enabled", envPath)
 	}
-	if h.Company.Domain != "" && !h.Gateway.Enabled {
-		return fmt.Errorf("environment %s: products.company.domain requires gateway.enabled", envPath)
-	}
 	// Monitoring status hostnames with none declared would render a
 	// blackbox job with an empty target list.
 	if h.Status.Monitor && len(h.Status.Domains) == 0 {
 		return fmt.Errorf("environment %s: StatusSurface spec.monitor requires spec.domains", envPath)
 	}
 	return nil
-}
-
-func validateCompanySiteSpec(h *Host, envPath string, xr *companySiteSpec) error {
-	if h.Company.Domain == "" {
-		return nil
-	}
-	if xr == nil {
-		return fmt.Errorf("environment %s: products.company.domain requires a CompanySite document", envPath)
-	}
-	if xr.Site != h.Name {
-		return fmt.Errorf("environment %s: CompanySite spec.site = %q, want %q", envPath, xr.Site, h.Name)
-	}
-	if xr.Domain != h.Company.Domain {
-		return fmt.Errorf("environment %s: CompanySite spec.domain = %q, want products.company.domain %q", envPath, xr.Domain, h.Company.Domain)
-	}
-	if len(xr.Routes) == 0 {
-		return fmt.Errorf("environment %s: CompanySite spec.routes is required", envPath)
-	}
-	seen := map[string]bool{}
-	for _, route := range xr.Routes {
-		if route == "" || route[0] != '/' {
-			return fmt.Errorf("environment %s: CompanySite spec.routes entries must start with /, got %q", envPath, route)
-		}
-		if seen[route] {
-			return fmt.Errorf("environment %s: CompanySite spec.routes contains duplicate route %q", envPath, route)
-		}
-		seen[route] = true
-	}
-	return nil
-}
-
-func validateCompanySiteDirectusBinding(h *Host, envPath string, xr *companySiteSpec, directusInstances []directusInstanceManifest) error {
-	if h.Company.Domain == "" || xr == nil {
-		return nil
-	}
-	if xr.ContentSnapshot.Digest == "" {
-		return fmt.Errorf("environment %s: CompanySite spec.contentSnapshot.digest is required", envPath)
-	}
-	if xr.DirectusRef.Name == "" {
-		return fmt.Errorf("environment %s: CompanySite spec.directusRef.name is required", envPath)
-	}
-	for _, instance := range directusInstances {
-		if instance.Metadata.Name == xr.DirectusRef.Name {
-			return nil
-		}
-	}
-	return fmt.Errorf("environment %s: CompanySite spec.directusRef.name = %q does not match any DirectusInstance", envPath, xr.DirectusRef.Name)
-}
-
-func companyProbeURLs(domains []string, routes []string) []string {
-	if len(domains) == 0 {
-		return nil
-	}
-	urls := make([]string, 0, len(domains)*(1+len(routes)))
-	seen := map[string]bool{}
-	add := func(domain, path string) {
-		base := "https://" + domain
-		u := base + path
-		if !seen[u] {
-			urls = append(urls, u)
-			seen[u] = true
-		}
-	}
-	for _, domain := range domains {
-		add(domain, "/healthz")
-		for _, route := range routes {
-			add(domain, route)
-		}
-	}
-	return urls
 }
 
 func environmentPathForEnvironment(environment string) string {

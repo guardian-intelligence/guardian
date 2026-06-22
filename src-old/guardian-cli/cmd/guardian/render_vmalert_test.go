@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestVMAlertRenderPinsCompanySiteRule(t *testing.T) {
+func TestVMAlertRenderPinsAppErrorRule(t *testing.T) {
 	kubectl, err := kubectlPath()
 	if err != nil {
 		t.Fatalf("locate kubectl: %v", err)
@@ -21,8 +21,6 @@ func TestVMAlertRenderPinsCompanySiteRule(t *testing.T) {
 	for _, want := range []string{
 		"AppErrorRate",
 		"aisucks_http_requests_total",
-		"CompanySiteErrorRate",
-		"company_site_http_requests_total",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("vmalert render missing %q", want)

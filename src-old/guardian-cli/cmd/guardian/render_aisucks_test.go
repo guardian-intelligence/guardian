@@ -6,6 +6,8 @@ import (
 )
 
 const aisucksTestImage = "registry.guardian.internal/aisucks@sha256:deadbeef"
+const directusTestImage = "registry.guardian.internal/directus@sha256:deadbeef"
+const postgresTestImage = "registry.guardian.internal/postgres@sha256:deadbeef"
 const statusTestImage = "registry.guardian.internal/status@sha256:deadbeef"
 const victoriaMetricsTestImage = "registry.guardian.internal/victoria-metrics@sha256:deadbeef"
 
@@ -97,7 +99,6 @@ func loadTestHost(t *testing.T, siteName string) *Host {
 func testProductImages() map[string]string {
 	return map[string]string{
 		"aisucks":          aisucksTestImage,
-		"company-site":     companyTestImage,
 		"directus":         directusTestImage,
 		"postgres":         postgresTestImage,
 		"status":           statusTestImage,

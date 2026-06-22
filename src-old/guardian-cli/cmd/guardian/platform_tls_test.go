@@ -26,7 +26,6 @@ func TestPlatformTLSSurvivalSecretRefs(t *testing.T) {
 		{namespace: "cert-manager", name: "cloudflare-guardianintelligence-org-dns-token"},
 		{namespace: "cert-manager", name: "letsencrypt-production-account-key"},
 		{namespace: "gateway", name: "aisucks-tls"},
-		{namespace: "gateway", name: "company-site-tls"},
 		{namespace: "gateway", name: "oci-guardianintelligence-org-tls"},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -49,7 +48,6 @@ func TestEdgeGatewayCertificateObjectNames(t *testing.T) {
 	}
 	want := []string{
 		"edge-gateway-certificate-aisucks-tls",
-		"edge-gateway-certificate-company-site-tls",
 		"edge-gateway-certificate-oci-guardianintelligence-org-tls",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -72,7 +70,6 @@ func TestEdgeGatewayCertificateRefs(t *testing.T) {
 	}
 	want := []edgeGatewayCertificateRef{
 		{namespace: "gateway", name: "aisucks-tls"},
-		{namespace: "gateway", name: "company-site-tls"},
 		{namespace: "gateway", name: "oci-guardianintelligence-org-tls"},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -95,7 +92,6 @@ func TestEdgeGatewayCertificateTargets(t *testing.T) {
 	}
 	want := []edgeGatewayCertificateTarget{
 		{namespace: "gateway", name: "aisucks-tls", dnsNames: []string{"dev.aisucks.app"}},
-		{namespace: "gateway", name: "company-site-tls", dnsNames: []string{"dev.guardianintelligence.org"}},
 		{namespace: "gateway", name: "oci-guardianintelligence-org-tls", dnsNames: []string{"oci.guardianintelligence.org"}},
 	}
 	if !reflect.DeepEqual(got, want) {
