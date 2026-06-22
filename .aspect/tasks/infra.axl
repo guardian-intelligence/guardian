@@ -28,6 +28,7 @@ EXPECTED_KUBE_APIS = [
     "https://206.223.228.87:6443",
 ]
 COMPANY_SITE_IMAGE = "harbor.guardianintelligence.org/guardian/company-site@sha256:eb9741b5882386f15f7e2059d1ed143c8b6ca483f135417d6296c6f3387cc283"
+OPENBAO_INTERNAL_URL = "http://openbao-guardian.tenant-root.svc:8200"
 INFRA_FILEGROUPS = [
     "//src/infrastructure/bootstrap/guardian-mgmt:root",
     "//src/infrastructure/talm:chart",
@@ -126,6 +127,24 @@ LIVE_GETS = [
     ("prod company pdb", ["-n", "tenant-prod", "get", "poddisruptionbudget.policy/company-site"]),
     ("prod company ingress", ["-n", "tenant-prod", "get", "ingress/company-site"]),
 ]
+
+def _secret_store_checks(label, namespace, store, role, service_account):
+    return [
+        (label + " secret store server", ["-n", namespace, "get", "secretstores.external-secrets.io/" + store, "-o", "jsonpath={.spec.provider.vault.server}"], OPENBAO_INTERNAL_URL),
+        (label + " secret store engine", ["-n", namespace, "get", "secretstores.external-secrets.io/" + store, "-o", "jsonpath={.spec.provider.vault.path}"], "kv"),
+        (label + " secret store engine version", ["-n", namespace, "get", "secretstores.external-secrets.io/" + store, "-o", "jsonpath={.spec.provider.vault.version}"], "v2"),
+        (label + " secret store auth mount", ["-n", namespace, "get", "secretstores.external-secrets.io/" + store, "-o", "jsonpath={.spec.provider.vault.auth.kubernetes.mountPath}"], "kubernetes"),
+        (label + " secret store auth role", ["-n", namespace, "get", "secretstores.external-secrets.io/" + store, "-o", "jsonpath={.spec.provider.vault.auth.kubernetes.role}"], role),
+        (label + " secret store service account", ["-n", namespace, "get", "secretstores.external-secrets.io/" + store, "-o", "jsonpath={.spec.provider.vault.auth.kubernetes.serviceAccountRef.name}"], service_account),
+        (label + " secret store audience", ["-n", namespace, "get", "secretstores.external-secrets.io/" + store, "-o", "jsonpath={.spec.provider.vault.auth.kubernetes.serviceAccountRef.audiences[0]}"], "openbao"),
+    ]
+
+def _openbao_secret_store_checks(stage, namespace, cnpg_role, clickhouse_role):
+    return (
+        _secret_store_checks(stage + " cnpg backup", namespace, "openbao", cnpg_role, "guardian-external-secrets") +
+        _secret_store_checks(stage + " clickhouse backup", namespace, "openbao-clickhouse-backup", clickhouse_role, "guardian-clickhouse-external-secrets")
+    )
+
 LIVE_VALUE_CHECKS = [
     ("cozystack platform variant", ["get", "packages.cozystack.io/cozystack.cozystack-platform", "-o", "jsonpath={.spec.variant}"], "isp-full"),
     ("ovn-default mtu", ["get", "subnets.kubeovn.io/ovn-default", "-o", "jsonpath={.spec.mtu}"], "1362"),
@@ -154,6 +173,27 @@ LIVE_VALUE_CHECKS = [
     ("openbao storage class", ["-n", "tenant-root", "get", "openbaos.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.storageClass}"], "local-retain"),
     ("openbao external access", ["-n", "tenant-root", "get", "openbaos.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.external}"], "false"),
     ("openbao ui enabled", ["-n", "tenant-root", "get", "openbaos.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.ui}"], "true"),
+] + _openbao_secret_store_checks(
+    "root",
+    "tenant-root",
+    "tenant-root-cnpg-backup",
+    "tenant-root-clickhouse-backup",
+) + _openbao_secret_store_checks(
+    "dev",
+    "tenant-dev",
+    "tenant-dev-cnpg-backup",
+    "tenant-dev-clickhouse-backup",
+) + _openbao_secret_store_checks(
+    "gamma",
+    "tenant-gamma",
+    "tenant-gamma-cnpg-backup",
+    "tenant-gamma-clickhouse-backup",
+) + _openbao_secret_store_checks(
+    "prod",
+    "tenant-prod",
+    "tenant-prod-cnpg-backup",
+    "tenant-prod-clickhouse-backup",
+) + [
     ("dev postgres replicas", ["-n", "tenant-dev", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.replicas}"], "3"),
     ("dev postgres storage class", ["-n", "tenant-dev", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.storageClass}"], "replicated"),
     ("dev postgres version", ["-n", "tenant-dev", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.version}"], "v18"),
