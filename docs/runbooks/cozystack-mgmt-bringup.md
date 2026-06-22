@@ -544,14 +544,18 @@ Expected results:
 - root app resources exist for `Postgres/guardian`, `Harbor/guardian`, and
   `ClickHouse/guardian` in `tenant-root`; Postgres is replicated three ways on
   `replicated` storage with version `v18` and no external access, Harbor uses
-  the expected host and replicated storage, and ClickHouse uses the expected
-  backup Secret plus `Plan/guardian-clickhouse-daily` through
+  the expected host, replicated storage, three database replicas, three Redis
+  replicas, and Trivy scanning, and ClickHouse uses three replicas, replicated
+  storage, three keeper replicas, the expected backup Secret, and
+  `Plan/guardian-clickhouse-daily` through
   `BackupClass/guardian-clickhouse-altinity`
 - tenant namespaces exist for dev, gamma, and prod; their host labels are
   `dev.gi.org`, `gamma.gi.org`, and `prod.gi.org`, and their ingress label is
   `tenant-root`
 - each tenant namespace has `Postgres/guardian`, `Harbor/guardian`, and
-  `ClickHouse/guardian`
+  `ClickHouse/guardian` with the declared three-replica HA shape, replicated
+  storage, expected Harbor host, Trivy enabled, ClickHouse backup Secret, and
+  environment-specific daily ClickHouse backup Plan schedule
 - tenant and service app resources report `Ready=True`
 - root/dev/gamma/prod Postgres, Harbor, and ClickHouse app resources report
   `WorkloadsReady=True`; OpenBao app `Ready=True` is sufficient until
