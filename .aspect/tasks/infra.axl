@@ -1031,12 +1031,20 @@ def _tofu_init_impl(ctx):
     return _tofu_backend_init(ctx, roots, endpoint)
 
 def _require_talm_operator_state(ctx, root):
-    secrets = root + "/secrets.yaml"
-    if not ctx.std.fs.exists(secrets):
+    missing = []
+    for filename in [
+        "secrets.yaml",
+        "talm.key",
+        "talosconfig.encrypted",
+    ]:
+        path = root + "/" + filename
+        if not ctx.std.fs.exists(path):
+            missing.append(path)
+    if len(missing) != 0:
         ctx.std.io.stderr.write(
-            "ERROR: "
-            + secrets
-            + " is required before refreshing guardian-mgmt kubeconfig; restore the current Talm operator state instead of generating new local key material.\n",
+            "ERROR: current Talm operator state is required before refreshing guardian-mgmt kubeconfig; restore missing files: "
+            + ", ".join(missing)
+            + ". Refusing to generate new local key material.\n",
         )
         return 1
     return 0
