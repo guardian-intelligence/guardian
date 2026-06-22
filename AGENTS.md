@@ -40,7 +40,7 @@ Constraints:
 - Installing dependencies when building from source is OK. Doing so on a traffic-serving host (prod/gamma/dev et. al) is not. Traffic-serving hosts use a commit-pinned release artifact of this repo.
 - We don't do sidecars.
 - ClickHouse wide events / Observability 2.0. We don't separate metrics, logs, and traces. Time series data lives in ClickHouse as Wide Events except for float values that we care about for monitoring which go into VictoriaMetrics
-- Cross-site isolation. 
+- Cross-site isolation.
 - Secrets must be autoprovisioned/autorotated. Use OpenBao as the source of truth and K8s Secrets as the delivery mechanism.
 - Known gap: SecretProjection lacks OpenBao reconciler/readiness controller.
 
