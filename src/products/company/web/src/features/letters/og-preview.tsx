@@ -70,9 +70,8 @@ function PreviewFrame({
   );
 }
 
-// The developer view: the post's OG card as both the rasterised PNG (what
-// crawlers embed) and the source SVG it is rendered from, built client-side
-// from the same spec the server uses. No article body — just the two cards.
+// The developer view: the server-served SVG and the client-built source SVG
+// from the same spec. No article body — just the two cards.
 export function LetterOgPreview({ slug }: { readonly slug: string }) {
   const spec = ogSpecFor(`letter/${slug}`);
   const built = spec ? buildOGCard(spec) : null;
@@ -84,10 +83,10 @@ export function LetterOgPreview({ slug }: { readonly slug: string }) {
       <p className="m-0 font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--treatment-muted-faint)]">
         OG preview · /og/letter/{slug} · press “s” to exit
       </p>
-      <PreviewFrame label="PNG · rasterised (what social embeds)">
+      <PreviewFrame label="SVG · server endpoint">
         <img
           src={`/og/letter/${slug}`}
-          alt={`OG PNG for ${slug}`}
+          alt={`OG SVG for ${slug}`}
           width={1200}
           height={630}
           className="block w-full"

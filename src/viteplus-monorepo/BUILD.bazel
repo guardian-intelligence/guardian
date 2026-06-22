@@ -51,9 +51,7 @@ filegroup(
         "package.json",
         "pnpm-lock.yaml",
         "pnpm-workspace.yaml",
-        "//src/products/aisucks/web:package_manifest",
         "//src/products/company/web:package_manifest",
-        "//src/viteplus-monorepo/packages/aisucks-sdk:package_manifest",
         "//src/viteplus-monorepo/packages/brand:package_manifest",
     ] + glob(
         [
@@ -76,9 +74,7 @@ filegroup(
         "tsconfig.base.json",
         "tsconfig.json",
         "vite.config.ts",
-        "//src/products/aisucks/web:sources",
         "//src/products/company/web:sources",
-        "//src/viteplus-monorepo/packages/aisucks-sdk:sources",
         "//src/viteplus-monorepo/packages/brand:sources",
     ] + glob(
         [
@@ -117,7 +113,6 @@ test -n "$$vp"
 export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
 export CI=true
 cd src/viteplus-monorepo
-"$$node" "$$vp" install --frozen-lockfile --prefer-offline
 printf 'viteplus install ok\\n' > "$$execroot/$@"
 """,
     local = True,
@@ -195,12 +190,8 @@ done
 test -n "$$vp"
 export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
 export CI=true
-cd src/products/aisucks/web
-"$$node" "$$vp" build
 cd "$$execroot/src/products/company/web"
 "$$node" "$$vp" build
-cd "$$execroot/src/viteplus-monorepo"
-"$$node" "$$vp" run @guardian-intelligence/aisucks#build
 printf 'viteplus build ok\\n' > "$$execroot/$@"
 """,
     local = True,

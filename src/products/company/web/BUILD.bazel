@@ -1,5 +1,8 @@
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
 load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+
+npm_link_all_packages()
 
 filegroup(
     name = "package_manifest",
@@ -24,45 +27,36 @@ filegroup(
 genrule(
     name = "tanstack_output_layer",
     srcs = [
+        ":node_modules",
+        ":node_modules/vite-plus",
         ":sources",
-        "//src/viteplus-monorepo:node_modules/vite-plus",
         "//src/viteplus-monorepo:vp_node",
-        "//src/viteplus-monorepo:workspace_build",
-        "//src/viteplus-monorepo:workspace_install",
+        "//src/viteplus-monorepo:workspace_sources",
     ],
     outs = ["company-site-output.tar"],
     cmd = """
 set -euo pipefail
 execroot="$$(pwd)"
 node="$$execroot/$(location //src/viteplus-monorepo:vp_node)"
-vp=""
-for candidate in $(locations //src/viteplus-monorepo:node_modules/vite-plus); do
-  case "$$candidate" in
-    */node_modules/vite-plus)
-      candidate_abs="$$execroot/$$candidate"
-      if [ -x "$$candidate_abs/bin/vp" ]; then
-        vp="$$candidate_abs/bin/vp"
-      fi
-      ;;
-  esac
-done
-test -n "$$vp"
+node_modules_root="$$execroot/$(BINDIR)/src/products/company/web/node_modules"
+vp="$$node_modules_root/vite-plus/bin/vp"
+test -n "$$node_modules_root"
+test -x "$$vp"
 export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
+export NODE_OPTIONS="--preserve-symlinks-main $${NODE_OPTIONS:-}"
 export CI=true
-cd "$$execroot/src/viteplus-monorepo"
-"$$node" "$$vp" install --frozen-lockfile --prefer-offline
 cd "$$execroot/src/products/company/web"
+rm -rf node_modules
+ln -s "$$node_modules_root" node_modules
 rm -rf .output
 "$$node" "$$vp" build
 test -s .output/server/index.mjs
 tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
   --transform 's#^\\./#app/#' \
   -cf "$$execroot/$@" -C .output .
-rm -rf .output
+rm -rf .output node_modules
 """,
-    local = True,
     tags = [
-        "local",
         "no-remote",
         "no-sandbox",
     ],
@@ -82,11 +76,22 @@ pkg_tar(
 
 oci_image(
     name = "image",
-    base = "@ubuntu_noble_base",
+    annotations = {
+        "org.opencontainers.image.description": "Guardian Intelligence TanStack Start company website",
+        "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
+        "org.opencontainers.image.title": "guardian-company-site",
+    },
+    base = "@ubuntu_noble_base_linux_amd64",
     entrypoint = [
         "/usr/bin/node",
         "/app/server/index.mjs",
     ],
+    env = {
+        "HOST": "0.0.0.0",
+        "NODE_ENV": "production",
+        "PORT": "8080",
+        "SSL_CERT_FILE": "/etc/ssl/certs/ca-certificates.crt",
+    },
     exposed_ports = ["8080/tcp"],
     tars = [
         ":node_layer",

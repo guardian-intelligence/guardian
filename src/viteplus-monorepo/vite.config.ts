@@ -1,5 +1,3 @@
-import { defineConfig } from "vite-plus";
-
 const generatedIgnorePatterns = ["**/routeTree.gen.ts", "**/src/gen/**/*.ts"] as const;
 
 const buildOutputIgnorePatterns = [
@@ -18,7 +16,7 @@ const toolIgnorePatterns = [
   ...generatedIgnorePatterns,
 ] as const;
 
-export default defineConfig({
+export default {
   fmt: {
     ignorePatterns: [...toolIgnorePatterns],
   },
@@ -45,4 +43,4 @@ export default defineConfig({
   run: {
     cache: true,
   },
-});
+};

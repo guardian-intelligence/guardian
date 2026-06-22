@@ -7,7 +7,6 @@ import matter from "gray-matter";
 import { marked } from "marked";
 import { nitro } from "nitro/vite";
 import { defineConfig } from "vite-plus";
-import { lettersBodyFont } from "./src/features/letters/fonts";
 // Local bundled Nitro hooks. Keeping them as .mjs files avoids introducing a
 // separate plugin package into the vp build module graph.
 import { rewriteCjsRequireOnCompiled } from "./rewrite-cjs-require.mjs";
@@ -50,37 +49,6 @@ const lettersMarkdown = {
   },
 };
 
-// OG-card fonts, baked into the server bundle as base64 at build time. The OG
-// route rasterises its SVG to PNG with resvg (social platforms reject SVG
-// cards), and resvg needs the actual font bytes — there is no system Fraunces.
-// Inlining sidesteps any runtime path/cwd assumptions in the deployed
-// artifact: the bytes travel inside the JS, identical in dev and prod.
-const OG_FONTS_ID = "virtual:og-fonts";
-const ogFonts = {
-  name: "company:og-fonts",
-  resolveId(id: string) {
-    if (id === OG_FONTS_ID) return `\0${OG_FONTS_ID}`;
-    return null;
-  },
-  load(id: string) {
-    if (id !== `\0${OG_FONTS_ID}`) return null;
-    const dir = fileURLToPath(new URL("./public/fonts", import.meta.url));
-    const b64 = (file: string) => readFileSync(`${dir}/${file}`).toString("base64");
-    // Fraunces + Geist serve the workshop/newsroom cards' chrome; the letters
-    // card body uses the configured reading face (lettersBodyFont.ogFile). The
-    // filename is exported so the rasteriser stages the temp file with the
-    // right extension (resvg's fontFiles path; see og/raster.ts).
-    return [
-      `export const FRAUNCES_B64 = ${JSON.stringify(b64("Fraunces-Variable.woff2"))};`,
-      // resvg 2.6.2 does not reliably resolve the Geist WOFF2 through
-      // fontFiles. The OG TTF is generated from the same checked-in WOFF2.
-      `export const GEIST_B64 = ${JSON.stringify(b64("Geist-OG.ttf"))};`,
-      `export const LETTERS_BODY_B64 = ${JSON.stringify(b64(lettersBodyFont.ogFile))};`,
-      `export const LETTERS_BODY_FILE = ${JSON.stringify(lettersBodyFont.ogFile)};`,
-    ].join("\n");
-  },
-};
-
 export default defineConfig({
   server: {
     host: "127.0.0.1",
@@ -90,19 +58,8 @@ export default defineConfig({
   resolve: {
     tsconfigPaths: true,
   },
-  // @resvg/resvg-js is a native napi addon used only by the server-side OG
-  // route. It must never be pre-bundled (the optimizer reads its .node binary
-  // as UTF-8 and fails) or bundled into the SSR graph — keep it external so it
-  // loads via require() from node_modules at runtime.
-  optimizeDeps: {
-    exclude: ["@resvg/resvg-js"],
-  },
-  ssr: {
-    external: ["@resvg/resvg-js"],
-  },
   plugins: [
     lettersMarkdown,
-    ogFonts,
     tailwindcss(),
     tanstackStart({ srcDirectory: "src" }),
     viteReact(),

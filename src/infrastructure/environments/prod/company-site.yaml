@@ -38,7 +38,7 @@ spec:
               guardian.dev/stage: prod
       containers:
         - name: company-site
-          image: harbor.guardianintelligence.org/guardian/company-site@sha256:e2dd66b82d50494c099fa5039068e166fde9df0212728d270719e0e5f2791ef0
+          image: harbor.guardianintelligence.org/guardian/company-site@sha256:07ecde6824415734035cfadc6c8436cee9dcfd0bd18ceab1bd7d99f3a4c9c7d7
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -49,14 +49,14 @@ spec:
               drop:
                 - ALL
             runAsNonRoot: true
-            runAsUser: 101
-            runAsGroup: 101
+            runAsUser: 65532
+            runAsGroup: 65532
           resources:
             requests:
               cpu: 25m
-              memory: 64Mi
-            limits:
               memory: 128Mi
+            limits:
+              memory: 256Mi
           readinessProbe:
             httpGet:
               path: /healthz
