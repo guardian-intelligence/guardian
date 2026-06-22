@@ -81,7 +81,6 @@ go_binary(
         "//src/infrastructure-components/zot:image",
         "//src/k8s:all",
         "//src/products/aisucks/services/api:image",
-        "//src/products/company/web:image",
         "//src/status:image",
     ],
     embed = [":guardian_lib"],
@@ -143,7 +142,6 @@ go_test(
         "//src/infrastructure-components/openbao:image",
         "//src/infrastructure-components/postgres:image",
         "//src/k8s:all",
-        "//src/products/company/web:image",
     ],
     embed = [":guardian_lib"],
     deps = [

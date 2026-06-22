@@ -52,6 +52,7 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("root tenant core services", testRootTenantCoreServices)
 	t.Run("environment tenant core services", testEnvironmentTenantCoreServices)
 	t.Run("company site", testCompanySite)
+	t.Run("company site source ownership", testCompanySiteSourceOwnership)
 	t.Run("openbao", testOpenBao)
 	t.Run("openbao opentofu bootstrap", testOpenBaoOpenTofuBootstrap)
 	t.Run("openbao cnpg backup secret projection", testOpenBaoCNPGBackupSecretProjection)
@@ -472,6 +473,17 @@ func testCompanySite(t *testing.T) {
 			assertIngressHost(t, ingress, env.host)
 		})
 	}
+}
+
+func testCompanySiteSourceOwnership(t *testing.T) {
+	deps := string(readRunfile(t, "src/infrastructure/tests/company_site_dependency_closure"))
+	assertTextContains(t, deps, "//src/products/company/site:image", "company-site dependency closure")
+	assertTextContains(t, deps, "//src/products/company/web:image", "company-site dependency closure")
+	assertTextNotContains(t, deps, "src-old", "company-site dependency closure")
+	assertTextNotContains(t, deps, "//src-old", "company-site dependency closure")
+
+	bazelignore := string(readRunfile(t, ".bazelignore"))
+	assertTextContains(t, bazelignore, "src-old", ".bazelignore")
 }
 
 func readCompanySiteImageDigest(t *testing.T) string {
