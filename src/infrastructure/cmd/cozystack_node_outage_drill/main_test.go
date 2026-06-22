@@ -75,17 +75,43 @@ func TestNodeReadyArgs(t *testing.T) {
 	}
 }
 
+func TestNodeUnschedulableArgs(t *testing.T) {
+	got := nodeUnschedulableArgs("ash-earth", "15m")
+	want := []string{"wait", "--for=jsonpath={.spec.unschedulable}=true", "node/ash-earth", "--timeout=15m"}
+	if len(got) != len(want) {
+		t.Fatalf("nodeUnschedulableArgs length = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("nodeUnschedulableArgs[%d] = %q, want %q: %#v", i, got[i], want, got)
+		}
+	}
+}
+
+func TestOutageWaitsProveServicesWhileNodeCordoned(t *testing.T) {
+	got := outageWaits("ash-earth", "15m")
+	requireCheck(t, got, "wait outage target node cordoned", "node/ash-earth", "--for=jsonpath={.spec.unschedulable}=true", "--timeout=15m")
+	requireCheck(t, got, "wait outage root openbao statefulset", "statefulset.apps/openbao-guardian", "--timeout=15m")
+	requireCheck(t, got, "wait outage tenant-dev postgres workloads", "postgreses.apps.cozystack.io/guardian", "--timeout=15m")
+	requireCheck(t, got, "wait outage tenant-gamma harbor workloads", "harbors.apps.cozystack.io/guardian", "--timeout=15m")
+	requireCheck(t, got, "wait outage tenant-gamma harbor registry bucket ready", "--for=jsonpath={.status.bucketReady}=true", "bucketclaims.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=15m")
+	requireCheck(t, got, "wait outage tenant-gamma harbor registry bucket access granted", "--for=jsonpath={.status.accessGranted}=true", "bucketaccesses.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=15m")
+	requireCheck(t, got, "wait outage tenant-prod clickhouse workloads", "clickhouses.apps.cozystack.io/guardian", "--timeout=15m")
+	requireCheck(t, got, "wait outage tenant-prod company-site deployment", "deployment/company-site", "--timeout=15m")
+	requireCheck(t, got, "wait outage dashboard console deployment", "deployment/cozy-dashboard-console", "--timeout=15m")
+}
+
 func TestRecoveryWaitsCoverGuardianSurfaces(t *testing.T) {
 	got := recoveryWaits("ash-earth", "15m")
-	requireCheck(t, got, "wait target node Ready", "node/ash-earth", "--timeout=15m")
-	requireCheck(t, got, "wait root openbao statefulset", "statefulset.apps/openbao-guardian", "--timeout=15m")
-	requireCheck(t, got, "wait tenant-dev postgres workloads", "postgreses.apps.cozystack.io/guardian", "--timeout=15m")
-	requireCheck(t, got, "wait tenant-gamma harbor workloads", "harbors.apps.cozystack.io/guardian", "--timeout=15m")
-	requireCheck(t, got, "wait tenant-gamma harbor registry bucket ready", "--for=jsonpath={.status.bucketReady}=true", "bucketclaims.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=15m")
-	requireCheck(t, got, "wait tenant-gamma harbor registry bucket access granted", "--for=jsonpath={.status.accessGranted}=true", "bucketaccesses.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=15m")
-	requireCheck(t, got, "wait tenant-prod clickhouse workloads", "clickhouses.apps.cozystack.io/guardian", "--timeout=15m")
-	requireCheck(t, got, "wait tenant-prod company-site deployment", "deployment/company-site", "--timeout=15m")
-	requireCheck(t, got, "wait dashboard console deployment", "deployment/cozy-dashboard-console", "--timeout=15m")
+	requireCheck(t, got, "wait recovered target node Ready", "node/ash-earth", "--timeout=15m")
+	requireCheck(t, got, "wait recovered root openbao statefulset", "statefulset.apps/openbao-guardian", "--timeout=15m")
+	requireCheck(t, got, "wait recovered tenant-dev postgres workloads", "postgreses.apps.cozystack.io/guardian", "--timeout=15m")
+	requireCheck(t, got, "wait recovered tenant-gamma harbor workloads", "harbors.apps.cozystack.io/guardian", "--timeout=15m")
+	requireCheck(t, got, "wait recovered tenant-gamma harbor registry bucket ready", "--for=jsonpath={.status.bucketReady}=true", "bucketclaims.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=15m")
+	requireCheck(t, got, "wait recovered tenant-gamma harbor registry bucket access granted", "--for=jsonpath={.status.accessGranted}=true", "bucketaccesses.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=15m")
+	requireCheck(t, got, "wait recovered tenant-prod clickhouse workloads", "clickhouses.apps.cozystack.io/guardian", "--timeout=15m")
+	requireCheck(t, got, "wait recovered tenant-prod company-site deployment", "deployment/company-site", "--timeout=15m")
+	requireCheck(t, got, "wait recovered dashboard console deployment", "deployment/cozy-dashboard-console", "--timeout=15m")
 }
 
 func requireCheck(t *testing.T, checks []kubectlCheck, label string, parts ...string) {
