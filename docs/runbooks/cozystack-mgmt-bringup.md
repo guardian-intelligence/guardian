@@ -299,11 +299,16 @@ The checked-in root app slice declares:
 - `ClickHouse/guardian` in `tenant-root`: three ClickHouse replicas plus
   three Keeper replicas. `spec.storageClass: replicated` records operator
   intent, while the replicated default StorageClass is what places PVCs on
-  DRBD until the upstream chart renders that field.
+  DRBD until the upstream chart renders that field. Backup integration is
+  enabled through the pre-existing `guardian-clickhouse-backup-creds` Secret,
+  and a native Cozystack `Plan/guardian-clickhouse-daily` schedules the
+  `BackupClass` flow at `17 1 * * *`.
 
-Backups are off in this root app declaration. Enable them only by pointing the
-app specs at the Kubernetes Secrets delivered from the declared OpenBao/R2
-secret path; never put S3 credentials directly in app specs.
+ClickHouse backups are enabled only by pointing app specs at the Kubernetes
+Secrets delivered from the declared OpenBao/R2 secret path; raw S3 credentials
+must never be placed directly in app specs. Postgres backups remain disabled
+until the non-secret object-store endpoint URL and destination prefixes are
+declared for each app.
 
 The base backup layer declares the reusable strategy/classes that do not depend
 on tenant secret material:
@@ -350,20 +355,23 @@ Kubernetes auth, `vault_policy` for each least-privilege read path, and
 `vault_kubernetes_auth_backend_role` for each ESO service account. That root
 does not write `vault_kv_secret_v2` or `vault_generic_secret` resources, because
 R2 credentials would otherwise land in OpenTofu state. There are no checked-in
-`Plan` or `BackupJob` resources yet, and ClickHouse app backup is not enabled
-yet, because backup jobs and backup sidecars must wait until OpenBao is
-initialized/unsealed, the OpenTofu root has been applied, real kv secret values
-exist, and each app has real object-store coordinates.
+`BackupJob` resources yet. ClickHouse app backup is enabled and daily
+`Plan/guardian-clickhouse-daily` resources are declared in root/dev/gamma/prod;
+they require OpenBao to be initialized/unsealed, the OpenTofu root to be
+applied, and real kv secret values to exist before the sidecars and scheduled
+jobs can succeed.
 
 The checked-in environment app layer declares the same core service set in each
 environment namespace:
 
 - `tenant-dev`: `Postgres/guardian`, `Harbor/guardian` at `harbor.dev.gi.org`,
-  and `ClickHouse/guardian`.
+  and `ClickHouse/guardian` with a daily backup Plan at `23 1 * * *`.
 - `tenant-gamma`: `Postgres/guardian`, `Harbor/guardian` at
-  `harbor.gamma.gi.org`, and `ClickHouse/guardian`.
+  `harbor.gamma.gi.org`, and `ClickHouse/guardian` with a daily backup Plan at
+  `29 1 * * *`.
 - `tenant-prod`: `Postgres/guardian`, `Harbor/guardian` at
-  `harbor.prod.gi.org`, and `ClickHouse/guardian`.
+  `harbor.prod.gi.org`, and `ClickHouse/guardian` with a daily backup Plan at
+  `41 1 * * *`.
 
 All environment app specs select `storageClass: replicated` and run three
 replicas for the stateful control-plane services so single-node outage drills
@@ -437,18 +445,22 @@ kubectl -n tenant-root get secretstores.external-secrets.io openbao
 kubectl -n tenant-root get externalsecrets.external-secrets.io guardian-cnpg-backup-creds
 kubectl -n tenant-root get secretstores.external-secrets.io openbao-clickhouse-backup
 kubectl -n tenant-root get externalsecrets.external-secrets.io guardian-clickhouse-backup-creds
+kubectl -n tenant-root get plans.backups.cozystack.io guardian-clickhouse-daily
 kubectl -n tenant-dev get secretstores.external-secrets.io openbao
 kubectl -n tenant-dev get externalsecrets.external-secrets.io guardian-cnpg-backup-creds
 kubectl -n tenant-dev get secretstores.external-secrets.io openbao-clickhouse-backup
 kubectl -n tenant-dev get externalsecrets.external-secrets.io guardian-clickhouse-backup-creds
+kubectl -n tenant-dev get plans.backups.cozystack.io guardian-clickhouse-daily
 kubectl -n tenant-gamma get secretstores.external-secrets.io openbao
 kubectl -n tenant-gamma get externalsecrets.external-secrets.io guardian-cnpg-backup-creds
 kubectl -n tenant-gamma get secretstores.external-secrets.io openbao-clickhouse-backup
 kubectl -n tenant-gamma get externalsecrets.external-secrets.io guardian-clickhouse-backup-creds
+kubectl -n tenant-gamma get plans.backups.cozystack.io guardian-clickhouse-daily
 kubectl -n tenant-prod get secretstores.external-secrets.io openbao
 kubectl -n tenant-prod get externalsecrets.external-secrets.io guardian-cnpg-backup-creds
 kubectl -n tenant-prod get secretstores.external-secrets.io openbao-clickhouse-backup
 kubectl -n tenant-prod get externalsecrets.external-secrets.io guardian-clickhouse-backup-creds
+kubectl -n tenant-prod get plans.backups.cozystack.io guardian-clickhouse-daily
 kubectl get cnpgs.strategy.backups.cozystack.io guardian-postgres-r2
 kubectl get backupclasses.backups.cozystack.io guardian-postgres-cnpg
 kubectl get altinities.strategy.backups.cozystack.io guardian-clickhouse-altinity
@@ -491,8 +503,10 @@ Expected results:
 - the cluster has `CNPG/guardian-postgres-r2` and
   `BackupClass/guardian-postgres-cnpg`, plus
   `Altinity/guardian-clickhouse-altinity` and
-  `BackupClass/guardian-clickhouse-altinity`; there should not yet be a
-  checked-in recurring `Plan`
+  `BackupClass/guardian-clickhouse-altinity`
+- root/dev/gamma/prod each have
+  `Plan/guardian-clickhouse-daily` targeting `ClickHouse/guardian` through
+  `BackupClass/guardian-clickhouse-altinity`
 
 Talos-side network checks:
 
@@ -523,13 +537,14 @@ separate PRs with their own validation:
   readiness evidence for dev, gamma, and prod.
 - Load-test reports for CNPG/Postgres, Harbor, ClickHouse, OpenBao, the
   Cozystack dashboard, and the company-site surfaces.
-- Backup specs for root and environment Postgres/Harbor/ClickHouse, wired to
-  declared OpenBao/R2-projected Secrets. The package prerequisites, reusable
-  CNPG BackupClass, reusable ClickHouse Altinity BackupClass, and Postgres /
-  ClickHouse credential SecretStores and ExternalSecrets are now declared for
-  root/dev/gamma/prod. OpenBao auth/policy configuration is now declared as
-  OpenTofu, but applying it, app-level backup coordinates, recurring backup
-  plans, Harbor backup strategy, and live restore drills still need separate
+- Backup specs for root and environment Postgres/Harbor, wired to declared
+  OpenBao/R2-projected Secrets. The package prerequisites, reusable CNPG
+  BackupClass, reusable ClickHouse Altinity BackupClass, Postgres / ClickHouse
+  credential SecretStores and ExternalSecrets, OpenBao auth/policy
+  configuration, ClickHouse app backup Secret references, and recurring
+  ClickHouse backup Plans are declared. Applying the OpenBao root, populating
+  real kv values, Postgres object-store coordinates, Harbor backup strategy,
+  ad-hoc BackupJob smoke tests, and live restore drills still need separate
   PRs.
 - ClickHouse chart-side `spec.storageClass` rendering, because Cozystack 1.4
   still relies on the cluster default for ClickHouse and keeper PVCs.

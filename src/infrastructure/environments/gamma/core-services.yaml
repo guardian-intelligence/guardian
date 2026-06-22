@@ -44,7 +44,27 @@ spec:
   size: 50Gi
   storageClass: replicated
   logStorageSize: 10Gi
+  backup:
+    enabled: true
+    schedule: ""
+    s3CredentialsSecret:
+      name: guardian-clickhouse-backup-creds
   clickhouseKeeper:
     enabled: true
     replicas: 3
     size: 5Gi
+---
+apiVersion: backups.cozystack.io/v1alpha1
+kind: Plan
+metadata:
+  name: guardian-clickhouse-daily
+  namespace: tenant-gamma
+spec:
+  applicationRef:
+    apiGroup: apps.cozystack.io
+    kind: ClickHouse
+    name: guardian
+  backupClassName: guardian-clickhouse-altinity
+  schedule:
+    type: cron
+    cron: "29 1 * * *"
