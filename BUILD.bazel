@@ -15,6 +15,7 @@ filegroup(
         "//src/infrastructure/base/secrets:manifests",
         "//src/infrastructure/base/storage:manifests",
         "//src/infrastructure/base/tenants:manifests",
+        "//src/infrastructure/cmd/cozystack_backup_drill:cozystack_backup_drill",
         "//src/infrastructure/environments:manifests",
         "//src/products/company/site:image",
     ],
