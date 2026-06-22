@@ -47,6 +47,7 @@ type bootstrapMaterial struct {
 }
 
 var dnsSubdomainRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
+var snapshotFileRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
 func main() {
 	var cfg openBaoConfig
@@ -98,8 +99,8 @@ func validateConfig(cfg openBaoConfig) error {
 	default:
 		return fmt.Errorf("--mode %q is not one of status, init-unseal, snapshot", cfg.Mode)
 	}
-	if strings.Contains(cfg.SnapshotName, "/") || strings.Contains(cfg.SnapshotName, "..") || cfg.SnapshotName == "" {
-		return fmt.Errorf("--snapshot-name %q must be a simple filename", cfg.SnapshotName)
+	if !snapshotFileRE.MatchString(cfg.SnapshotName) || strings.Contains(cfg.SnapshotName, "..") {
+		return fmt.Errorf("--snapshot-name %q must be a simple ASCII filename using letters, digits, dot, underscore, or hyphen", cfg.SnapshotName)
 	}
 	return nil
 }
