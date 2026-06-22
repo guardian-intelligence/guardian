@@ -49,6 +49,12 @@ Expected network shape:
 The repo pins OpenTofu in `MODULE.bazel` and the Latitude provider in
 `src/infrastructure/bootstrap/guardian-mgmt/.terraform.lock.hcl`.
 
+Run the full local substrate check with:
+
+```sh
+aspect infra validate
+```
+
 Local validation does not require backend credentials:
 
 ```sh

@@ -15,6 +15,10 @@ load(
     bazel_bzlmod = "bzlmod",
 )
 load(
+    ".aspect/tasks/infra.axl",
+    infra_validate = "validate",
+)
+load(
     ".aspect/tasks/tidy.axl",
     tidy = "tidy",
 )
@@ -22,6 +26,9 @@ load(
 def config(ctx):
     # aspect bazel ...
     ctx.tasks.add(bazel_bzlmod)
+
+    # aspect infra ...
+    ctx.tasks.add(infra_validate)
 
     # aspect tidy
     ctx.tasks.add(tidy)
