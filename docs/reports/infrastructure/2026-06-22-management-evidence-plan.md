@@ -71,6 +71,8 @@ LATITUDESH_AUTH_TOKEN="${LATITUDESH_AUTH_TOKEN}" aspect infra hardware-outage-ru
   Harbor, ClickHouse, Postgres/CNPG, OpenBao, Cozystack platform, storage,
   networking, tenant, and company-site manifests.
 - The company-site OCI image builds locally by digest.
+- The built company-site digest is now checked against the dev/gamma/prod
+  environment declarations, Flux base Deployments, and Harbor evidence fixture.
 - The Cozystack base renders through the repo-pinned kubectl.
 - Postgres and ClickHouse now have declared R2 backup plumbing,
   `BackupClass` objects, and hourly `Plan` objects.

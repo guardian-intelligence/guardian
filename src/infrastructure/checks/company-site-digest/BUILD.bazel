@@ -1,0 +1,13 @@
+genrule(
+    name = "check",
+    srcs = [
+        "verify-company-site-digest.sh",
+        "//src/environments:environments",
+        "//src/infrastructure/base/products:manifests",
+        "//src/infrastructure/evidence:manifests",
+        "//src/products/company/site:image.digest",
+    ],
+    outs = ["company-site-digest.ok"],
+    cmd = "bash $(location verify-company-site-digest.sh) $(location //src/products/company/site:image.digest) $@",
+    visibility = ["//visibility:public"],
+)

@@ -28,7 +28,9 @@ aspect infra dns-plan
 
 `infra preflight` validates both OpenTofu roots without opening their remote
 backends, runs `infra inventory-check`, builds the company-site OCI artifact,
-and renders `src/infrastructure/base` with the repo-pinned kubectl.
+checks that the built company-site digest matches the environment manifests,
+base Deployments, and Harbor evidence fixture, and renders
+`src/infrastructure/base` with the repo-pinned kubectl.
 
 `infra inventory-check` is a provider-free OpenTofu plan over checked-in files
 only. It fails if the inventory's API VIP, node IPs, MetalLB pool, pod MTU, or
