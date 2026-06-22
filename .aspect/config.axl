@@ -16,7 +16,6 @@ load(
 )
 load(
     ".aspect/tasks/infra.axl",
-    infra_evidence = "evidence",
     infra_validate = "validate",
 )
 load(
@@ -29,7 +28,6 @@ def config(ctx):
     ctx.tasks.add(bazel_bzlmod)
 
     # aspect infra ...
-    ctx.tasks.add(infra_evidence)
     ctx.tasks.add(infra_validate)
 
     # aspect tidy

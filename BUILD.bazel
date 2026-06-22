@@ -12,7 +12,6 @@ filegroup(
         "//src/infrastructure/base/openbao:manifests",
         "//src/infrastructure/base/storage:manifests",
         "//src/infrastructure/base/tenants:manifests",
-        "//src/infrastructure/cmd/mgmt-evidence:mgmt-evidence",
         "//src/infrastructure/environments:manifests",
         "//src/products/company/site:image",
     ],
