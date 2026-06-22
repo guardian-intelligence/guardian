@@ -24,6 +24,7 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("environment tenant core services", testEnvironmentTenantCoreServices)
 	t.Run("company site", testCompanySite)
 	t.Run("openbao", testOpenBao)
+	t.Run("openbao cnpg backup secret projection", testOpenBaoCNPGBackupSecretProjection)
 	t.Run("flux handoff", testFluxHandoff)
 }
 
@@ -355,6 +356,131 @@ func testOpenBao(t *testing.T) {
 	port := asManifest(t, ports[0], "spec.egress[1].toPorts[0].ports[0]")
 	assertString(t, port, "6443", "port")
 	assertString(t, port, "TCP", "protocol")
+
+	esoPolicy := findObject(t, policies, "CiliumNetworkPolicy", "tenant-root", "allow-external-secrets-to-openbao")
+	assertString(t, esoPolicy, "cilium.io/v2", "apiVersion")
+	assertString(t, esoPolicy, "openbao", "spec", "endpointSelector", "matchLabels", "app.kubernetes.io/name")
+
+	ingress := sliceAt(t, esoPolicy, "spec", "ingress")
+	if len(ingress) != 1 {
+		t.Fatalf("allow-external-secrets-to-openbao spec.ingress has %d entries, want 1", len(ingress))
+	}
+	fromEndpoints := sliceAt(t, asManifest(t, ingress[0], "spec.ingress[0]"), "fromEndpoints")
+	if len(fromEndpoints) != 1 {
+		t.Fatalf("allow-external-secrets-to-openbao spec.ingress[0].fromEndpoints has %d entries, want 1", len(fromEndpoints))
+	}
+	source := asManifest(t, fromEndpoints[0], "spec.ingress[0].fromEndpoints[0]")
+	assertString(t, source, "cozy-external-secrets-operator", "matchLabels", "k8s:io.kubernetes.pod.namespace")
+	assertString(t, source, "external-secrets", "matchLabels", "app.kubernetes.io/name")
+	assertString(t, source, "external-secrets-operator", "matchLabels", "app.kubernetes.io/instance")
+
+	ingressToPorts := sliceAt(t, asManifest(t, ingress[0], "spec.ingress[0]"), "toPorts")
+	if len(ingressToPorts) != 1 {
+		t.Fatalf("allow-external-secrets-to-openbao spec.ingress[0].toPorts has %d entries, want 1", len(ingressToPorts))
+	}
+	ingressPorts := sliceAt(t, asManifest(t, ingressToPorts[0], "spec.ingress[0].toPorts[0]"), "ports")
+	if len(ingressPorts) != 1 {
+		t.Fatalf("allow-external-secrets-to-openbao spec.ingress[0].toPorts[0].ports has %d entries, want 1", len(ingressPorts))
+	}
+	ingressPort := asManifest(t, ingressPorts[0], "spec.ingress[0].toPorts[0].ports[0]")
+	assertString(t, ingressPort, "8200", "port")
+	assertString(t, ingressPort, "TCP", "protocol")
+}
+
+func testOpenBaoCNPGBackupSecretProjection(t *testing.T) {
+	cases := []struct {
+		name       string
+		manifest   string
+		namespace  string
+		role       string
+		remotePath string
+	}{
+		{
+			name:       "root",
+			manifest:   "src/infrastructure/base/secrets/cnpg-backup-secrets.yaml",
+			namespace:  "tenant-root",
+			role:       "tenant-root-cnpg-backup",
+			remotePath: "guardian/guardian-mgmt/tenant-root/postgres/guardian/cnpg-backup",
+		},
+		{
+			name:       "dev",
+			manifest:   "src/infrastructure/environments/dev/secrets.yaml",
+			namespace:  "tenant-dev",
+			role:       "tenant-dev-cnpg-backup",
+			remotePath: "guardian/guardian-mgmt/tenant-dev/postgres/guardian/cnpg-backup",
+		},
+		{
+			name:       "gamma",
+			manifest:   "src/infrastructure/environments/gamma/secrets.yaml",
+			namespace:  "tenant-gamma",
+			role:       "tenant-gamma-cnpg-backup",
+			remotePath: "guardian/guardian-mgmt/tenant-gamma/postgres/guardian/cnpg-backup",
+		},
+		{
+			name:       "prod",
+			manifest:   "src/infrastructure/environments/prod/secrets.yaml",
+			namespace:  "tenant-prod",
+			role:       "tenant-prod-cnpg-backup",
+			remotePath: "guardian/guardian-mgmt/tenant-prod/postgres/guardian/cnpg-backup",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			docs := readManifests(t, tc.manifest)
+			assertCNPGBackupSecretProjection(t, docs, tc.namespace, tc.role, tc.remotePath)
+		})
+	}
+}
+
+func assertCNPGBackupSecretProjection(t *testing.T, docs []manifest, namespace, role, remotePath string) {
+	t.Helper()
+
+	sa := findObject(t, docs, "ServiceAccount", namespace, "guardian-external-secrets")
+	assertString(t, sa, "v1", "apiVersion")
+	assertString(t, sa, "guardian", "metadata", "labels", "app.kubernetes.io/part-of")
+	assertString(t, sa, "cnpg-backup", "metadata", "labels", "guardian.dev/secret-scope")
+
+	store := findObject(t, docs, "SecretStore", namespace, "openbao")
+	assertString(t, store, "external-secrets.io/v1beta1", "apiVersion")
+	assertString(t, store, "http://guardian.tenant-root.svc:8200", "spec", "provider", "vault", "server")
+	assertString(t, store, "kv", "spec", "provider", "vault", "path")
+	assertString(t, store, "v2", "spec", "provider", "vault", "version")
+	assertString(t, store, "kubernetes", "spec", "provider", "vault", "auth", "kubernetes", "mountPath")
+	assertString(t, store, role, "spec", "provider", "vault", "auth", "kubernetes", "role")
+	assertString(t, store, "guardian-external-secrets", "spec", "provider", "vault", "auth", "kubernetes", "serviceAccountRef", "name")
+	assertStringSlice(t, store, []string{"openbao"}, "spec", "provider", "vault", "auth", "kubernetes", "serviceAccountRef", "audiences")
+
+	externalSecret := findObject(t, docs, "ExternalSecret", namespace, "guardian-cnpg-backup-creds")
+	assertString(t, externalSecret, "external-secrets.io/v1beta1", "apiVersion")
+	assertString(t, externalSecret, "1h", "spec", "refreshInterval")
+	assertString(t, externalSecret, "openbao", "spec", "secretStoreRef", "name")
+	assertString(t, externalSecret, "SecretStore", "spec", "secretStoreRef", "kind")
+	assertString(t, externalSecret, "guardian-cnpg-backup-creds", "spec", "target", "name")
+	assertString(t, externalSecret, "Owner", "spec", "target", "creationPolicy")
+	assertString(t, externalSecret, "Opaque", "spec", "target", "template", "type")
+
+	data := sliceAt(t, externalSecret, "spec", "data")
+	if len(data) != 2 {
+		t.Fatalf("ExternalSecret spec.data has %d entries, want 2", len(data))
+	}
+	assertExternalSecretData(t, data, "AWS_ACCESS_KEY_ID", remotePath, "AWS_ACCESS_KEY_ID")
+	assertExternalSecretData(t, data, "AWS_SECRET_ACCESS_KEY", remotePath, "AWS_SECRET_ACCESS_KEY")
+}
+
+func assertExternalSecretData(t *testing.T, entries []any, secretKey, remotePath, property string) {
+	t.Helper()
+
+	for _, entry := range entries {
+		doc := asManifest(t, entry, "spec.data[]")
+		if stringAt(doc, "secretKey") != secretKey {
+			continue
+		}
+		assertString(t, doc, remotePath, "remoteRef", "key")
+		assertString(t, doc, property, "remoteRef", "property")
+		return
+	}
+	t.Fatalf("ExternalSecret spec.data is missing secretKey %q", secretKey)
 }
 
 func testFluxHandoff(t *testing.T) {

@@ -3,7 +3,10 @@ kind: Kustomization
 resources:
   - dev/company-site.yaml
   - dev/core-services.yaml
+  - dev/secrets.yaml
   - gamma/company-site.yaml
   - gamma/core-services.yaml
+  - gamma/secrets.yaml
   - prod/company-site.yaml
   - prod/core-services.yaml
+  - prod/secrets.yaml
