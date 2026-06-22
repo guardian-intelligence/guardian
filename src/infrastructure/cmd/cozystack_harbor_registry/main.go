@@ -229,14 +229,31 @@ func waitHarborReady(ctx context.Context, cfg harborRegistryConfig) error {
 
 func harborReadinessChecks(cfg harborRegistryConfig) []kubectlCommand {
 	ref := "harbors.apps.cozystack.io/guardian"
+	registry := "harbor-guardian-registry"
 	return []kubectlCommand{
 		{
 			Label: "Harbor app yaml",
 			Args:  []string{"-n", cfg.Namespace, "get", ref, "-o", "yaml"},
 		},
 		{
+			Label: "Harbor registry bucket claim yaml",
+			Args:  []string{"-n", cfg.Namespace, "get", "bucketclaims.objectstorage.k8s.io/" + registry, "-o", "yaml"},
+		},
+		{
+			Label: "Harbor registry bucket access yaml",
+			Args:  []string{"-n", cfg.Namespace, "get", "bucketaccesses.objectstorage.k8s.io/" + registry, "-o", "yaml"},
+		},
+		{
 			Label: "wait Harbor app Ready",
 			Args:  []string{"-n", cfg.Namespace, "wait", "--for=condition=Ready", ref, "--timeout=" + cfg.WaitTimeout},
+		},
+		{
+			Label: "wait Harbor registry bucket ready",
+			Args:  []string{"-n", cfg.Namespace, "wait", "--for=jsonpath={.status.bucketReady}=true", "bucketclaims.objectstorage.k8s.io/" + registry, "--timeout=" + cfg.WaitTimeout},
+		},
+		{
+			Label: "wait Harbor registry bucket access granted",
+			Args:  []string{"-n", cfg.Namespace, "wait", "--for=jsonpath={.status.accessGranted}=true", "bucketaccesses.objectstorage.k8s.io/" + registry, "--timeout=" + cfg.WaitTimeout},
 		},
 		{
 			Label: "wait Harbor workloads Ready",

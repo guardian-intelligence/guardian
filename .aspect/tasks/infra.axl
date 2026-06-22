@@ -57,8 +57,11 @@ def _harbor_child_gets(stage, namespace):
 
 def _harbor_child_waits(stage, namespace):
     release = "harbor-guardian"
+    registry = release + "-registry"
     return [
         (stage + " harbor helmrelease", ["-n", namespace, "wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/" + release]),
+        (stage + " harbor registry bucket ready", ["-n", namespace, "wait", "--for=jsonpath={.status.bucketReady}=true", "bucketclaims.objectstorage.k8s.io/" + registry]),
+        (stage + " harbor registry bucket access granted", ["-n", namespace, "wait", "--for=jsonpath={.status.accessGranted}=true", "bucketaccesses.objectstorage.k8s.io/" + registry]),
         (stage + " harbor system helmrelease", ["-n", namespace, "wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/" + release + "-system"]),
     ]
 

@@ -81,6 +81,8 @@ func TestRecoveryWaitsCoverGuardianSurfaces(t *testing.T) {
 	requireCheck(t, got, "wait root openbao statefulset", "statefulset.apps/openbao-guardian", "--timeout=15m")
 	requireCheck(t, got, "wait tenant-dev postgres workloads", "postgreses.apps.cozystack.io/guardian", "--timeout=15m")
 	requireCheck(t, got, "wait tenant-gamma harbor workloads", "harbors.apps.cozystack.io/guardian", "--timeout=15m")
+	requireCheck(t, got, "wait tenant-gamma harbor registry bucket ready", "--for=jsonpath={.status.bucketReady}=true", "bucketclaims.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=15m")
+	requireCheck(t, got, "wait tenant-gamma harbor registry bucket access granted", "--for=jsonpath={.status.accessGranted}=true", "bucketaccesses.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=15m")
 	requireCheck(t, got, "wait tenant-prod clickhouse workloads", "clickhouses.apps.cozystack.io/guardian", "--timeout=15m")
 	requireCheck(t, got, "wait tenant-prod company-site deployment", "deployment/company-site", "--timeout=15m")
 	requireCheck(t, got, "wait dashboard console deployment", "deployment/cozy-dashboard-console", "--timeout=15m")
