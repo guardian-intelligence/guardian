@@ -11,4 +11,6 @@ aspect infra inventory-check
 
 This root has no backend and no providers. It decodes checked-in JSON/YAML only,
 then fails if the Talos VIP, Talm values, Cozystack platform external IPs,
-MetalLB private pool, or kube-ovn MTU drift away from the inventory.
+MetalLB private pool, kube-ovn MTU, environment files, Tenant hosts,
+company-site Ingresses, or company-site image digests drift away from the
+inventory.

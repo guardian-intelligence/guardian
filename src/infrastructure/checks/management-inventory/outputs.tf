@@ -8,5 +8,6 @@ output "management_endpoints" {
     pod_mtu             = local.vlan.pod_mtu
     vlan_mtu            = local.vlan.vlan_mtu
     vip_link            = local.vlan.vip_link
+    environment_hosts   = { for name, env in local.environments : name => env.host }
   }
 }

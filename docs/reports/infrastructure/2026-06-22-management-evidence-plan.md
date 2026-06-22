@@ -56,7 +56,8 @@ aspect infra outage-uncordon --kubeconfig "${KUBECONFIG}" --node <node>
 - OpenTofu roots can be validated without remote state access.
 - Provider-free inventory checks now compare
   `src/infrastructure/inventory/guardian-mgmt.json` against Talm, Cozystack,
-  MetalLB, and kube-ovn MTU manifests without live state.
+  MetalLB, kube-ovn MTU, environment, tenant, DNS, and company-site manifests
+  without live state.
 - The company-site OCI image builds locally by digest.
 - The Cozystack base renders through the repo-pinned kubectl.
 - Postgres and ClickHouse now have declared R2 backup plumbing,
