@@ -16,8 +16,6 @@ data:
   products:
     aisucks:
       domain: dev.aisucks.app
-    company:
-      domain: dev.guardianintelligence.org
   platform:
     oci:
       domain: oci.guardianintelligence.org
@@ -71,10 +69,6 @@ spec:
       namespace: aisucks
       deployment: aisucks
       metric: aisucks_http_requests_total
-    - name: company-site
-      namespace: company
-      deployment: company-site
-      metric: company_site_http_requests_total
   signals:
     publicScrape: true
     errorRate: true
@@ -222,13 +216,6 @@ spec:
       tls:
         mode: Terminate
         certificateRefName: aisucks-tls
-    - name: https-company-site
-      hostname: "dev.guardianintelligence.org"
-      port: 443
-      protocol: HTTPS
-      tls:
-        mode: Terminate
-        certificateRefName: company-site-tls
     - name: tls-status-0
       hostname: "status.guardianintelligence.org"
       port: 443
@@ -271,12 +258,6 @@ spec:
       secretName: oci-guardianintelligence-org-tls
       dnsNames:
         - "oci.guardianintelligence.org"
-      issuerRefName: letsencrypt-production
-    - name: company-site-tls
-      namespace: gateway
-      secretName: company-site-tls
-      dnsNames:
-        - "dev.guardianintelligence.org"
       issuerRefName: letsencrypt-production
 ---
 apiVersion: platform.guardian.dev/v1alpha1
@@ -324,24 +305,6 @@ spec:
   site: dev
   domain: dev.aisucks.app
   image: registry.guardian.internal/aisucks:bootstrap
-  replicas: 2
----
-apiVersion: products.guardian.dev/v1alpha1
-kind: CompanySite
-metadata:
-  name: company-site
-spec:
-  site: dev
-  domain: dev.guardianintelligence.org
-  image: registry.guardian.internal/company-site:bootstrap
-  directusRef:
-    name: directus
-  contentSnapshot:
-    digest: workspace
-  routes:
-    - /
-    - /letters
-    - /news
   replicas: 2
 ---
 apiVersion: platform.guardian.dev/v1alpha1

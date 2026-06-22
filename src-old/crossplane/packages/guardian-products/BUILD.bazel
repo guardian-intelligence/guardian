@@ -2,7 +2,6 @@ filegroup(
     name = "manifests",
     srcs = [
         "aisucks-product.yaml",
-        "company-site.yaml",
         "kustomization.yaml",
     ],
     visibility = ["//visibility:public"],
