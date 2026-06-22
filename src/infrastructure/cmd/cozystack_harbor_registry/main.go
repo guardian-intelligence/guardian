@@ -35,8 +35,6 @@ type harborRegistryConfig struct {
 	Tag              string
 	Iterations       int
 	PayloadBytes     int
-	AllowPlainHTTP   bool
-	AllowInsecureTLS bool
 	RegistryConfig   string
 }
 
@@ -57,8 +55,6 @@ func main() {
 	flag.StringVar(&cfg.Tag, "tag", "", "tag or tag prefix; defaults to a UTC timestamp")
 	flag.IntVar(&cfg.Iterations, "iterations", 1, "number of ORAS push/pull iterations")
 	flag.IntVar(&cfg.PayloadBytes, "payload-bytes", 4096, "payload size per ORAS push")
-	flag.BoolVar(&cfg.AllowPlainHTTP, "plain-http", false, "allow plain HTTP registry connections")
-	flag.BoolVar(&cfg.AllowInsecureTLS, "insecure", false, "allow TLS registry connections without certificate verification")
 	flag.StringVar(&cfg.RegistryConfig, "registry-config", "", "ORAS registry auth config path; defaults to a temporary file")
 	flag.Parse()
 
@@ -154,8 +150,6 @@ func runSmoke(ctx context.Context, cfg harborRegistryConfig) error {
 	oras := orasRunner{
 		bin:            cfg.Oras,
 		registryConfig: cfg.RegistryConfig,
-		plainHTTP:      cfg.AllowPlainHTTP,
-		insecureTLS:    cfg.AllowInsecureTLS,
 	}
 
 	fmt.Printf("guardian cozystack harbor registry smoke\n")
@@ -271,20 +265,12 @@ func payloadFor(cfg harborRegistryConfig, iteration int) []byte {
 type orasRunner struct {
 	bin            string
 	registryConfig string
-	plainHTTP      bool
-	insecureTLS    bool
 }
 
 func (r orasRunner) baseArgs(args ...string) []string {
-	out := make([]string, 0, len(args)+6)
+	out := make([]string, 0, len(args)+2)
 	out = append(out, args...)
 	out = append(out, "--registry-config", r.registryConfig)
-	if r.plainHTTP {
-		out = append(out, "--plain-http")
-	}
-	if r.insecureTLS {
-		out = append(out, "--insecure")
-	}
 	return out
 }
 

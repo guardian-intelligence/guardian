@@ -131,17 +131,20 @@ func TestKubectlArgs(t *testing.T) {
 func TestOrasBaseArgs(t *testing.T) {
 	runner := orasRunner{
 		registryConfig: "/tmp/oras-auth.json",
-		plainHTTP:      true,
-		insecureTLS:    true,
 	}
 	got := runner.baseArgs("push", "example.com/repo:tag")
-	want := []string{"push", "example.com/repo:tag", "--registry-config", "/tmp/oras-auth.json", "--plain-http", "--insecure"}
+	want := []string{"push", "example.com/repo:tag", "--registry-config", "/tmp/oras-auth.json"}
 	if len(got) != len(want) {
 		t.Fatalf("baseArgs length = %d, want %d: %#v", len(got), len(want), got)
 	}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("baseArgs[%d] = %q, want %q: %#v", i, got[i], want[i], got)
+		}
+	}
+	for _, arg := range got {
+		if arg == "--plain-http" || arg == "--insecure" {
+			t.Fatalf("baseArgs includes insecure bypass %q: %#v", arg, got)
 		}
 	}
 }

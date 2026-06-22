@@ -1461,16 +1461,6 @@ def _load_harbor_registry_impl(ctx):
         load_args.extend(["--host", ctx.args.host])
     if ctx.args.tag != "":
         load_args.extend(["--tag", ctx.args.tag])
-    if ctx.args.plain_http == "true":
-        load_args.append("--plain-http=true")
-    elif ctx.args.plain_http != "false":
-        ctx.std.io.stderr.write("ERROR: --plain-http must be true or false\n")
-        return 1
-    if ctx.args.insecure == "true":
-        load_args.append("--insecure=true")
-    elif ctx.args.insecure != "false":
-        ctx.std.io.stderr.write("ERROR: --insecure must be true or false\n")
-        return 1
 
     return checked_spawn(
         ctx,
@@ -1702,11 +1692,9 @@ load_harbor_registry = task(
     summary = "Run a standard ORAS push/pull smoke load against a Cozystack Harbor registry.",
     args = {
         "host": args.string(default = "", description = "Optional Harbor host override. Defaults from --stage."),
-        "insecure": args.string(default = "false", description = "Allow TLS registry connections without certificate verification."),
         "iterations": args.string(default = "1", description = "Number of ORAS push/pull iterations."),
         "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
         "payload_bytes": args.string(default = "4096", description = "Payload size per ORAS push."),
-        "plain_http": args.string(default = "false", description = "Allow plain HTTP registry connections."),
         "repository": args.string(default = "library/guardian-smoke", description = "Harbor repository path."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
         "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before the registry load."),
