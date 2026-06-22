@@ -9,6 +9,12 @@ checks to run; it is not a separate source of truth.
 
 ## Source Of Truth
 
+`src/infrastructure/inventory/guardian-mgmt.json` is the non-secret topology
+contract. The manifest invariant test checks that OpenTofu imports, Talm
+values, Cozystack platform publishing, MetalLB, and Kube-OVN stay aligned with
+that inventory. Change the inventory and dependent manifests together; do not
+let topology drift through one-off edits.
+
 | Layer | File |
 | - | - |
 | Latitude inventory | `src/infrastructure/inventory/guardian-mgmt.json` |
@@ -72,7 +78,8 @@ bazelisk test //src/infrastructure/tests:manifest_invariants_test
 
 That test parses the checked-in Kubernetes YAML and verifies the platform
 package publishes the dashboard/API endpoints, environment tenants use the
-expected `*.gi.org` hosts, MetalLB and Kube-OVN keep the L2/MTU topology,
+expected `*.gi.org` hosts, OpenTofu/Talm/Kubernetes manifests stay aligned with
+`guardian-mgmt.json`, MetalLB and Kube-OVN keep the L2/MTU topology,
 `replicated` is the only default StorageClass, root and environment
 Postgres/Harbor/ClickHouse apps use the intended HA/storage shape, OpenBao stays
 declared in `tenant-root`, the reusable CNPG backup strategy maps through a
@@ -90,11 +97,13 @@ aspect infra live \
 ```
 
 `aspect infra live` uses the repo-pinned kubectl artifact, refuses to validate
-against the excluded Verself-prod API at `206.223.228.99`, requires exactly
-three management nodes with `10.8.0.x` InternalIP addresses, waits for the Flux
-source and both Guardian Kustomizations to become Ready, verifies their applied
-revision contains the expected merged commit, and checks the declared Cozystack
-app, networking, storage, OpenBao, backup, and company-site resources exist.
+against the excluded Verself-prod API at `206.223.228.99`, refuses kubeconfigs
+whose cluster server is outside the `guardian-mgmt.json` API endpoint set,
+requires exactly three management nodes with `10.8.0.x` InternalIP addresses,
+waits for the Flux source and both Guardian Kustomizations to become Ready,
+verifies their applied revision contains the expected merged commit, and checks
+the declared Cozystack app, networking, storage, OpenBao, backup, and
+company-site resources exist.
 
 Local validation does not require backend credentials:
 

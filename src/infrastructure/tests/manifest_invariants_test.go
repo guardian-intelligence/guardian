@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -14,7 +16,34 @@ import (
 
 type manifest map[string]any
 
+type guardianMgmtInventory struct {
+	Cluster  string `json:"cluster"`
+	Network struct {
+		VLAN struct {
+			ID          string `json:"id"`
+			VID         int    `json:"vid"`
+			Description string `json:"description"`
+			Subnet      string `json:"subnet"`
+			VLANMTU     int    `json:"vlan_mtu"`
+			PodMTU      int    `json:"pod_mtu"`
+			APIVIP      string `json:"api_vip"`
+			VIPLink     string `json:"vip_link"`
+			MetalLBPool string `json:"metallb_pool"`
+		} `json:"vlan"`
+	} `json:"network"`
+	Nodes []guardianMgmtNode `json:"nodes"`
+}
+
+type guardianMgmtNode struct {
+	Name        string `json:"name"`
+	ServerID    string `json:"server_id"`
+	Hostname    string `json:"hostname"`
+	PublicIPv4  string `json:"public_ipv4"`
+	PrivateIPv4 string `json:"private_ipv4"`
+}
+
 func TestManifestInvariants(t *testing.T) {
+	t.Run("guardian mgmt inventory alignment", testGuardianMgmtInventoryAlignment)
 	t.Run("cozystack platform package", testCozystackPlatformPackage)
 	t.Run("environment tenants", testEnvironmentTenants)
 	t.Run("layer two networking", testLayerTwoNetworking)
@@ -29,6 +58,7 @@ func TestManifestInvariants(t *testing.T) {
 }
 
 func testCozystackPlatformPackage(t *testing.T) {
+	inventory := readGuardianMgmtInventory(t)
 	docs := readManifests(t, "src/infrastructure/base/cozystack/platform.yaml")
 	pkg := findObject(t, docs, "Package", "", "cozystack.cozystack-platform")
 
@@ -36,8 +66,8 @@ func testCozystackPlatformPackage(t *testing.T) {
 	assertString(t, pkg, "isp-full", "spec", "variant")
 	assertStringSlice(t, pkg, []string{"cozystack.external-secrets-operator", "cozystack.velero"}, "spec", "components", "platform", "values", "bundles", "enabledPackages")
 	assertString(t, pkg, "guardianintelligence.org", "spec", "components", "platform", "values", "publishing", "host")
-	assertString(t, pkg, "https://10.8.0.250:6443", "spec", "components", "platform", "values", "publishing", "apiServerEndpoint")
-	assertStringSlice(t, pkg, []string{"206.223.228.101", "45.250.254.119", "206.223.228.87"}, "spec", "components", "platform", "values", "publishing", "externalIPs")
+	assertString(t, pkg, fmt.Sprintf("https://%s:6443", inventory.Network.VLAN.APIVIP), "spec", "components", "platform", "values", "publishing", "apiServerEndpoint")
+	assertStringSlice(t, pkg, inventoryPublicIPs(inventory), "spec", "components", "platform", "values", "publishing", "externalIPs")
 	assertStringSlice(t, pkg, []string{"dashboard", "api"}, "spec", "components", "platform", "values", "publishing", "exposedServices")
 
 	assertString(t, pkg, "10.244.0.0/16", "spec", "components", "platform", "values", "networking", "podCIDR")
@@ -49,6 +79,43 @@ func testCozystackPlatformPackage(t *testing.T) {
 	assertString(t, pkg, "http://keycloak-http.cozy-keycloak.svc:8080/realms/cozy", "spec", "components", "platform", "values", "authentication", "oidc", "keycloakInternalUrl")
 	assertString(t, pkg, "Guardian", "spec", "components", "platform", "values", "branding", "titleText")
 	assertString(t, pkg, "Guardian Intelligence", "spec", "components", "platform", "values", "branding", "footerText")
+}
+
+func testGuardianMgmtInventoryAlignment(t *testing.T) {
+	inventory := readGuardianMgmtInventory(t)
+	if inventory.Cluster != "guardian-mgmt" {
+		t.Fatalf("inventory cluster = %q, want guardian-mgmt", inventory.Cluster)
+	}
+	if len(inventory.Nodes) != 3 {
+		t.Fatalf("inventory nodes = %d, want 3", len(inventory.Nodes))
+	}
+	assertUniqueInventoryValues(t, inventory)
+
+	values := readYAMLMap(t, "src/infrastructure/talm/values.yaml")
+	assertString(t, values, fmt.Sprintf("https://%s:6443", inventory.Network.VLAN.APIVIP), "endpoint")
+	assertString(t, values, inventory.Network.VLAN.APIVIP, "floatingIP")
+	assertString(t, values, inventory.Network.VLAN.VIPLink, "vipLink")
+	assertStringSlice(t, values, []string{inventory.Network.VLAN.Subnet}, "advertisedSubnets")
+
+	certSANs := sliceAt(t, values, "certSANs")
+	assertContainsString(t, certSANs, inventory.Network.VLAN.APIVIP, "certSANs")
+	for _, node := range inventory.Nodes {
+		assertContainsString(t, certSANs, node.PublicIPv4, "certSANs")
+	}
+
+	imports := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt/imports.tf"))
+	assertTextContains(t, imports, `to = latitudesh_virtual_network.management`, "imports.tf")
+	assertTextContains(t, imports, `id = "`+inventory.Network.VLAN.ID+`"`, "imports.tf")
+	for _, node := range inventory.Nodes {
+		assertTextContains(t, imports, `to = latitudesh_server.control_plane["`+node.Name+`"]`, "imports.tf")
+		assertTextContains(t, imports, `id = "`+node.ServerID+`"`, "imports.tf")
+	}
+
+	mainTF := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt/main.tf"))
+	assertTextContains(t, mainTF, `resource "latitudesh_vlan_assignment" "control_plane"`, "main.tf")
+	assertTextContains(t, mainTF, `for_each = local.control_plane_nodes`, "main.tf")
+	assertTextContains(t, mainTF, `latitudesh_virtual_network.management.vid == local.vlan.vid`, "main.tf")
+	assertTextContains(t, mainTF, `latitudesh_server.control_plane[name].primary_ipv4 == node.public_ipv4`, "main.tf")
 }
 
 func testEnvironmentTenants(t *testing.T) {
@@ -68,10 +135,11 @@ func testEnvironmentTenants(t *testing.T) {
 }
 
 func testLayerTwoNetworking(t *testing.T) {
+	inventory := readGuardianMgmtInventory(t)
 	metallb := readManifests(t, "src/infrastructure/base/networking/metallb.yaml")
 	pool := findObject(t, metallb, "IPAddressPool", "cozy-metallb", "cozystack")
 	assertString(t, pool, "metallb.io/v1beta1", "apiVersion")
-	assertStringSlice(t, pool, []string{"10.8.0.200-10.8.0.240"}, "spec", "addresses")
+	assertStringSlice(t, pool, []string{inventory.Network.VLAN.MetalLBPool}, "spec", "addresses")
 	assertBool(t, pool, true, "spec", "autoAssign")
 	assertBool(t, pool, false, "spec", "avoidBuggyIPs")
 
@@ -87,7 +155,7 @@ func testLayerTwoNetworking(t *testing.T) {
 	assertString(t, ovnDefault, "10.244.0.1", "spec", "gateway")
 	assertString(t, ovnDefault, "distributed", "spec", "gatewayType")
 	assertBool(t, ovnDefault, true, "spec", "natOutgoing")
-	assertInt(t, ovnDefault, 1362, "spec", "mtu")
+	assertInt(t, ovnDefault, inventory.Network.VLAN.PodMTU, "spec", "mtu")
 
 	join := findObject(t, subnets, "Subnet", "", "join")
 	assertString(t, join, "kubeovn.io/v1", "apiVersion")
@@ -95,7 +163,7 @@ func testLayerTwoNetworking(t *testing.T) {
 	assertString(t, join, "100.64.0.0/16", "spec", "cidrBlock")
 	assertString(t, join, "100.64.0.1", "spec", "gateway")
 	assertBool(t, join, false, "spec", "natOutgoing")
-	assertInt(t, join, 1362, "spec", "mtu")
+	assertInt(t, join, inventory.Network.VLAN.PodMTU, "spec", "mtu")
 }
 
 func testSingleDefaultStorageClass(t *testing.T) {
@@ -545,6 +613,61 @@ func assertApp(t *testing.T, docs []manifest, want appExpectation) {
 	}
 }
 
+func readGuardianMgmtInventory(t *testing.T) guardianMgmtInventory {
+	t.Helper()
+
+	var inventory guardianMgmtInventory
+	if err := json.Unmarshal(readRunfile(t, "src/infrastructure/inventory/guardian-mgmt.json"), &inventory); err != nil {
+		t.Fatalf("parse guardian-mgmt inventory: %v", err)
+	}
+	return inventory
+}
+
+func inventoryPublicIPs(inventory guardianMgmtInventory) []string {
+	out := make([]string, 0, len(inventory.Nodes))
+	for _, node := range inventory.Nodes {
+		out = append(out, node.PublicIPv4)
+	}
+	return out
+}
+
+func assertUniqueInventoryValues(t *testing.T, inventory guardianMgmtInventory) {
+	t.Helper()
+
+	seenNames := map[string]bool{}
+	seenServerIDs := map[string]bool{}
+	seenPublicIPs := map[string]bool{}
+	seenPrivateIPs := map[string]bool{}
+	for _, node := range inventory.Nodes {
+		assertUniqueValue(t, seenNames, "node name", node.Name)
+		assertUniqueValue(t, seenServerIDs, "server ID", node.ServerID)
+		assertUniqueValue(t, seenPublicIPs, "public IPv4", node.PublicIPv4)
+		assertUniqueValue(t, seenPrivateIPs, "private IPv4", node.PrivateIPv4)
+	}
+}
+
+func assertUniqueValue(t *testing.T, seen map[string]bool, label, value string) {
+	t.Helper()
+
+	if value == "" {
+		t.Fatalf("%s is empty", label)
+	}
+	if seen[value] {
+		t.Fatalf("duplicate %s %q", label, value)
+	}
+	seen[value] = true
+}
+
+func readYAMLMap(t *testing.T, rel string) manifest {
+	t.Helper()
+
+	var doc manifest
+	if err := yaml.Unmarshal(readRunfile(t, rel), &doc); err != nil {
+		t.Fatalf("parse %s: %v", rel, err)
+	}
+	return doc
+}
+
 func readManifests(t *testing.T, rel string) []manifest {
 	t.Helper()
 
@@ -665,6 +788,25 @@ func assertStringSlice(t *testing.T, doc manifest, want []string, path ...string
 		if got != want[i] {
 			t.Fatalf("%s[%d] = %q, want %q", dotPath(path), i, got, want[i])
 		}
+	}
+}
+
+func assertContainsString(t *testing.T, values []any, want, label string) {
+	t.Helper()
+
+	for _, value := range values {
+		if got, ok := value.(string); ok && got == want {
+			return
+		}
+	}
+	t.Fatalf("%s = %#v, want it to contain %q", label, values, want)
+}
+
+func assertTextContains(t *testing.T, text, needle, label string) {
+	t.Helper()
+
+	if !strings.Contains(text, needle) {
+		t.Fatalf("%s does not contain %q", label, needle)
 	}
 }
 
