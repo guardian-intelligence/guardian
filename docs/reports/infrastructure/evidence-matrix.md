@@ -5,7 +5,7 @@ infrastructure work can be called complete.
 
 | Component | Desired state source | Load test report | DR drill report | Single-node outage report | Status |
 | - | - | - | - | - | - |
-| Talos / Kubernetes API VIP | `src/infrastructure/talm/` | `2026-06-22-talos-kubernetes-api-vip.md` | same report | same report | report scaffolded; live execution pending |
+| Talos / Kubernetes API VIP | `src/infrastructure/talm/`, `src/infrastructure/evidence/capture-management-evidence.sh` | `2026-06-22-talos-kubernetes-api-vip.md` | same report | same report | API VIP load capture declared; live execution pending |
 | LINSTOR / DRBD storage | `src/infrastructure/base/storage/`, `src/infrastructure/evidence/storage-smoke.yaml` | `2026-06-22-linstor-drbd-storage.md` | same report | same report | opt-in smoke fixture declared; live execution pending |
 | OpenBao | `src/infrastructure/base/openbao/`, `src/infrastructure/evidence/openbao-load.yaml` | `2026-06-22-openbao.md` | same report | same report | opt-in read/write fixture declared; live execution pending |
 | CNPG / Postgres | `src/infrastructure/base/apps/postgres.yaml`, `src/infrastructure/base/backups/managed-databases.yaml`, `src/infrastructure/evidence/database-load.yaml`, `src/infrastructure/evidence/database-dr.yaml` | `2026-06-22-cnpg-postgres.md` | same report | same report | opt-in load and backup/restore fixtures declared; live execution pending |

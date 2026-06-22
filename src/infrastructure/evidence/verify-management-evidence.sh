@@ -289,7 +289,8 @@ verify_common() {
     kubectl-company-prod \
     kubectl-certificates \
     kubectl-ingress \
-    kubectl-pods; do
+    kubectl-pods \
+    api-vip-load; do
     summary_status "${name}"
   done
 
@@ -306,6 +307,7 @@ verify_common() {
   grep_file "kubectl/storageclasses-wide.txt" "replicated-retain" "storageclass:replicated-retain"
   grep_file "kubectl/secret-contracts.txt" "secret/guardian-r2-db-backups" "secret:r2-backups"
   grep_file "kubectl/secret-contracts.txt" "secret/guardian-openbao-evidence-token" "secret:openbao-evidence-token"
+  grep_file "evidence/api-vip-load.txt" "api-vip-load total=[1-9][0-9]* failures=0 concurrency=[1-9][0-9]* seconds=[0-9]+ server=https://10\\.8\\.0\\.250:6443 path=/readyz" "api:vip-load"
 
   grep_file "kubectl/root-apps.yaml" "kind: Harbor" "app:harbor-kind"
   grep_file "kubectl/root-apps.yaml" "name: oci" "app:harbor-name"

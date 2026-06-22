@@ -388,6 +388,12 @@ def _capture_evidence(ctx, phase = None, allow_failures = None):
         capture_args.extend(["--talos-endpoints", ctx.args.talos_endpoints])
     if ctx.args.talos_nodes != "":
         capture_args.extend(["--talos-nodes", ctx.args.talos_nodes])
+    if ctx.args.api_server != "":
+        capture_args.extend(["--api-server", ctx.args.api_server])
+    if ctx.args.api_load_requests != "":
+        capture_args.extend(["--api-load-requests", ctx.args.api_load_requests])
+    if ctx.args.api_load_concurrency != "":
+        capture_args.extend(["--api-load-concurrency", ctx.args.api_load_concurrency])
     if allow_failures != None:
         if allow_failures:
             capture_args.append("--allow-failures")
@@ -515,6 +521,12 @@ def _management_evidence_run_impl(ctx):
         run_args.extend(["--talos-endpoints", ctx.args.talos_endpoints])
     if ctx.args.talos_nodes != "":
         run_args.extend(["--talos-nodes", ctx.args.talos_nodes])
+    if ctx.args.api_server != "":
+        run_args.extend(["--api-server", ctx.args.api_server])
+    if ctx.args.api_load_requests != "":
+        run_args.extend(["--api-load-requests", ctx.args.api_load_requests])
+    if ctx.args.api_load_concurrency != "":
+        run_args.extend(["--api-load-concurrency", ctx.args.api_load_concurrency])
     if ctx.args.timeout != "":
         run_args.extend(["--timeout", ctx.args.timeout])
     if ctx.args.inventory != "":
@@ -966,6 +978,9 @@ _TALOS_LIVE_ARGS = {
 _CAPTURE_EVIDENCE_ARGS = dict(_KUBECTL_LIVE_ARGS)
 _CAPTURE_EVIDENCE_ARGS.update({
     "allow_failures": args.boolean(default = False, description = "Write all outputs and exit 0 even if one captured command fails."),
+    "api_load_concurrency": args.string(default = "6", description = "Concurrent Kubernetes API VIP /readyz reads during evidence capture."),
+    "api_load_requests": args.string(default = "60", description = "Total Kubernetes API VIP /readyz reads during evidence capture."),
+    "api_server": args.string(default = "https://10.8.0.250:6443", description = "Kubernetes API VIP URL exercised by evidence capture."),
     "out_dir": args.string(default = "", description = "Output directory; defaults under docs/reports/infrastructure/live-runs/."),
     "phase": args.string(default = "snapshot", description = "Evidence phase label, e.g. baseline, evidence, outage-before, outage-down, outage-after."),
     "talos_endpoints": args.string(default = "10.8.0.250", description = "Talos API endpoint list."),
@@ -1020,6 +1035,9 @@ _HARDWARE_OUTAGE_RUN_ALL_ARGS.update({
 _MANAGEMENT_EVIDENCE_RUN_ARGS = dict(_HARDWARE_OUTAGE_RUN_ALL_ARGS)
 _MANAGEMENT_EVIDENCE_RUN_ARGS.pop("require_talos")
 _MANAGEMENT_EVIDENCE_RUN_ARGS.update({
+    "api_load_concurrency": args.string(default = "6", description = "Concurrent Kubernetes API VIP /readyz reads during evidence capture."),
+    "api_load_requests": args.string(default = "60", description = "Total Kubernetes API VIP /readyz reads during evidence capture."),
+    "api_server": args.string(default = "https://10.8.0.250:6443", description = "Kubernetes API VIP URL exercised by evidence capture."),
     "delete_pvc": args.boolean(default = False, description = "Also delete the retained evidence storage PVC before running the suite."),
     "out_dir": args.string(default = "", description = "Parent output directory for evidence, hardware outage, and suite verification reports."),
     "talosconfig": args.string(default = "", description = "Talos config path. Required unless TALOSCONFIG is set; final suite verification requires Talos captures."),

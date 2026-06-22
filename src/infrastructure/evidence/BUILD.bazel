@@ -32,6 +32,17 @@ genrule(
 )
 
 genrule(
+    name = "verify-management-evidence-smoke",
+    srcs = [
+        "verify-management-evidence.sh",
+        "verify-management-evidence_test.sh",
+    ],
+    outs = ["verify-management-evidence-smoke.ok"],
+    cmd = "bash $(location verify-management-evidence_test.sh) $(location verify-management-evidence.sh) $@",
+    visibility = ["//visibility:public"],
+)
+
+genrule(
     name = "verify-management-evidence-suite",
     srcs = ["verify-management-evidence-suite.sh"],
     outs = ["verify-management-evidence-suite-runner"],

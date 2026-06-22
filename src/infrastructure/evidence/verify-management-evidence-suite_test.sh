@@ -31,6 +31,7 @@ required_evidence_checks=(
   dr:restorejobs-succeeded
   dr:postgres-restore-target
   dr:clickhouse-restore-target
+  api:vip-load
   app:harbor-kind
   app:clickhouse-kind
   app:postgres-kind

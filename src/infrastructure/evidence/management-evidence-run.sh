@@ -24,6 +24,9 @@ Options:
   --talosconfig PATH      optional talosconfig path; TALOSCONFIG env also works
   --talos-endpoints LIST  Talos endpoint list; default 10.8.0.250
   --talos-nodes LIST      Talos node list; default 10.8.0.11,10.8.0.12,10.8.0.13
+  --api-server URL        Kubernetes API VIP URL; default https://10.8.0.250:6443
+  --api-load-requests N   API VIP read count for evidence capture; default 60
+  --api-load-concurrency N API VIP concurrent read workers; default 6
   --timeout DURATION      evidence job/backup/restore wait timeout; default 30m
   --inventory PATH        inventory JSON; defaults to guardian-mgmt inventory
   --nodes CSV             optional management node subset; defaults to inventory
@@ -53,6 +56,9 @@ context=""
 talosconfig="${TALOSCONFIG:-}"
 talos_endpoints="10.8.0.250"
 talos_nodes="10.8.0.11,10.8.0.12,10.8.0.13"
+api_server="https://10.8.0.250:6443"
+api_load_requests="60"
+api_load_concurrency="6"
 timeout="30m"
 inventory="src/infrastructure/inventory/guardian-mgmt.json"
 nodes_csv=""
@@ -85,6 +91,18 @@ while [[ $# -gt 0 ]]; do
       ;;
     --talos-nodes)
       talos_nodes="${2:?--talos-nodes requires a value}"
+      shift 2
+      ;;
+    --api-server)
+      api_server="${2:?--api-server requires a value}"
+      shift 2
+      ;;
+    --api-load-requests)
+      api_load_requests="${2:?--api-load-requests requires a value}"
+      shift 2
+      ;;
+    --api-load-concurrency)
+      api_load_concurrency="${2:?--api-load-concurrency requires a value}"
       shift 2
       ;;
     --timeout)
@@ -148,6 +166,12 @@ missing=()
 [[ -n "${hardware_outage_all_bin}" && -x "${hardware_outage_all_bin}" ]] || missing+=("executable HARDWARE_OUTAGE_ALL_BIN")
 [[ -n "${verify_evidence_suite_bin}" && -x "${verify_evidence_suite_bin}" ]] || missing+=("executable VERIFY_EVIDENCE_SUITE_BIN")
 [[ -n "${talosconfig}" ]] || missing+=("--talosconfig or TALOSCONFIG; final suite verification requires Talos captures")
+if [[ ! "${api_load_requests}" =~ ^[1-9][0-9]*$ ]]; then
+  missing+=("positive integer --api-load-requests")
+fi
+if [[ ! "${api_load_concurrency}" =~ ^[1-9][0-9]*$ ]]; then
+  missing+=("positive integer --api-load-concurrency")
+fi
 if [[ -z "${LATITUDESH_AUTH_TOKEN:-}" && -z "${LATITUDESH_BEARER:-}" ]]; then
   missing+=("LATITUDESH_AUTH_TOKEN or LATITUDESH_BEARER")
 fi
@@ -184,6 +208,9 @@ fi
 capture_args+=(--talosconfig "${talosconfig}")
 capture_args+=(--talos-endpoints "${talos_endpoints}")
 capture_args+=(--talos-nodes "${talos_nodes}")
+capture_args+=(--api-server "${api_server}")
+capture_args+=(--api-load-requests "${api_load_requests}")
+capture_args+=(--api-load-concurrency "${api_load_concurrency}")
 
 hardware_args=()
 if [[ -n "${kubeconfig}" ]]; then
@@ -332,6 +359,9 @@ cat >"${out_dir}/MANIFEST.md" <<EOF
 - Inventory: ${inventory}
 - Talos endpoint list: ${talos_endpoints}
 - Talos node list: ${talos_nodes}
+- API server: ${api_server}
+- API load requests: ${api_load_requests}
+- API load concurrency: ${api_load_concurrency}
 - Evidence timeout: ${timeout}
 - Latitude down timeout: ${down_timeout}
 - Latitude up timeout: ${up_timeout}

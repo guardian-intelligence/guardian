@@ -20,6 +20,9 @@ Options:
                           unless this option or TALOSCONFIG is set
   --talos-endpoints LIST  Talos endpoint list
   --talos-nodes LIST      Talos node list
+  --api-server URL        Kubernetes API VIP URL; default https://10.8.0.250:6443
+  --api-load-requests N   API VIP read count; default 60
+  --api-load-concurrency N API VIP concurrent workers; default 6
   --allow-failures        write all outputs and exit 0 even if a command fails
   -h, --help              show this help
 
@@ -36,6 +39,9 @@ context=""
 talosconfig="${TALOSCONFIG:-}"
 talos_endpoints="10.8.0.250"
 talos_nodes="10.8.0.11,10.8.0.12,10.8.0.13"
+api_server="https://10.8.0.250:6443"
+api_load_requests="60"
+api_load_concurrency="6"
 allow_failures=false
 
 while [[ $# -gt 0 ]]; do
@@ -68,6 +74,18 @@ while [[ $# -gt 0 ]]; do
       talos_nodes="${2:?--talos-nodes requires a value}"
       shift 2
       ;;
+    --api-server)
+      api_server="${2:?--api-server requires a value}"
+      shift 2
+      ;;
+    --api-load-requests)
+      api_load_requests="${2:?--api-load-requests requires a value}"
+      shift 2
+      ;;
+    --api-load-concurrency)
+      api_load_concurrency="${2:?--api-load-concurrency requires a value}"
+      shift 2
+      ;;
     --allow-failures)
       allow_failures=true
       shift
@@ -91,6 +109,12 @@ missing=()
 [[ -x "${kubectl_bin}" ]] || missing+=("executable KUBECTL_BIN")
 [[ -n "${talosctl_bin}" ]] || missing+=("TALOSCTL_BIN")
 [[ -x "${talosctl_bin}" ]] || missing+=("executable TALOSCTL_BIN")
+if [[ ! "${api_load_requests}" =~ ^[1-9][0-9]*$ ]]; then
+  missing+=("positive integer --api-load-requests")
+fi
+if [[ ! "${api_load_concurrency}" =~ ^[1-9][0-9]*$ ]]; then
+  missing+=("positive integer --api-load-concurrency")
+fi
 if [[ "${#missing[@]}" -gt 0 ]]; then
   echo "missing required inputs:" >&2
   printf '  - %s\n' "${missing[@]}" >&2
@@ -156,6 +180,81 @@ run_capture() {
   fi
 }
 
+run_api_vip_load() {
+  local name="api-vip-load"
+  local file="${out_dir}/evidence/api-vip-load.txt"
+  local tmpdir
+  local request
+  local batch_size
+  local batch_end
+  local pid
+  local status
+  local request_failures
+  local request_count
+  local started
+  local ended
+  local elapsed
+
+  tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/guardian-api-vip-load.XXXXXX")"
+  {
+    printf '$'
+    printf ' %q' "${kubectl_bin}" "${kubectl_args[@]}" --server "${api_server}" get --raw=/readyz
+    printf ' # repeated %s times with concurrency %s\n\n' "${api_load_requests}" "${api_load_concurrency}"
+    printf 'api-vip-load server=%s requests=%s concurrency=%s path=/readyz\n' "${api_server}" "${api_load_requests}" "${api_load_concurrency}"
+  } >"${file}"
+
+  started="$(date +%s)"
+  request=1
+  while [[ "${request}" -le "${api_load_requests}" ]]; do
+    batch_size=0
+    batch_end=$((request + api_load_concurrency - 1))
+    while [[ "${request}" -le "${api_load_requests}" && "${request}" -le "${batch_end}" ]]; do
+      (
+        set +e
+        local output
+        output="$("${kubectl_bin}" "${kubectl_args[@]}" --server "${api_server}" get --raw=/readyz 2>&1)"
+        status=$?
+        if [[ "${status}" -eq 0 ]] && grep -Eq '(^|[[:space:]])ok($|[[:space:]])' <<<"${output}"; then
+          printf 'pass\t%s\n' "${request}" >"${tmpdir}/${request}.tsv"
+        else
+          printf 'fail\t%s\t%s\n%s\n' "${request}" "${status}" "${output}" >"${tmpdir}/${request}.tsv"
+        fi
+      ) &
+      request=$((request + 1))
+      batch_size=$((batch_size + 1))
+    done
+    for pid in $(jobs -p); do
+      wait "${pid}" || true
+    done
+    if [[ "${batch_size}" -eq 0 ]]; then
+      break
+    fi
+  done
+  ended="$(date +%s)"
+  elapsed=$((ended - started))
+
+  request_count="$(find "${tmpdir}" -maxdepth 1 -type f -name '*.tsv' | wc -l | tr -d '[:space:]')"
+  request_failures="$(awk -F '\t' '$1 == "fail" {count++} END {print count + 0}' "${tmpdir}"/*.tsv 2>/dev/null || true)"
+  request_failures="${request_failures:-0}"
+  {
+    printf 'api-vip-load total=%s failures=%s concurrency=%s seconds=%s server=%s path=/readyz\n' \
+      "${request_count}" "${request_failures}" "${api_load_concurrency}" "${elapsed}" "${api_server}"
+    if [[ "${request_failures}" -ne 0 || "${request_count}" -ne "${api_load_requests}" ]]; then
+      printf '\nfailed requests:\n'
+      awk -F '\t' '$1 == "fail" {print FILENAME ": request=" $2 " status=" $3}' "${tmpdir}"/*.tsv 2>/dev/null || true
+    fi
+  } >>"${file}"
+
+  rm -rf "${tmpdir}"
+
+  if [[ "${request_failures}" -eq 0 && "${request_count}" -eq "${api_load_requests}" ]]; then
+    record "${name}" "0" "${file}"
+  else
+    record "${name}" "1" "${file}"
+    failures=$((failures + 1))
+  fi
+}
+
 write_manifest() {
   cat >"${out_dir}/MANIFEST.md" <<EOF
 # Management Evidence Capture
@@ -166,6 +265,9 @@ write_manifest() {
 - Kubernetes context: ${context:-default}
 - Talos endpoints: ${talos_endpoints}
 - Talos nodes: ${talos_nodes}
+- API server: ${api_server}
+- API load requests: ${api_load_requests}
+- API load concurrency: ${api_load_concurrency}
 
 Command statuses are recorded in \`summary.tsv\`. The capture avoids Kubernetes
 Secret values: it records secret names only.
@@ -212,6 +314,8 @@ run_capture "kubectl-ingress" "${out_dir}/kubectl/ingress-all-wide.txt" \
   "${kubectl_bin}" "${kubectl_args[@]}" get ingress -A -o wide
 run_capture "kubectl-pods" "${out_dir}/kubectl/pods-all-wide.txt" \
   "${kubectl_bin}" "${kubectl_args[@]}" get pods -A -o wide
+
+run_api_vip_load
 
 run_capture "evidence-jobs" "${out_dir}/evidence/jobs-wide.txt" \
   "${kubectl_bin}" "${kubectl_args[@]}" get job/evidence-postgres-load job/evidence-clickhouse-load job/evidence-harbor-oci-read job/evidence-openbao-load job/evidence-http-load job/evidence-storage-smoke -n tenant-root -o wide --ignore-not-found

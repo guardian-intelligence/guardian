@@ -23,6 +23,7 @@ filegroup(
         "//src/infrastructure/evidence:hardware-outage-run-all",
         "//src/infrastructure/evidence:management-evidence-run",
         "//src/infrastructure/evidence:verify-management-evidence",
+        "//src/infrastructure/evidence:verify-management-evidence-smoke",
         "//src/infrastructure/evidence:verify-management-evidence-suite",
         "//src/infrastructure/evidence:verify-management-evidence-suite-smoke",
         "//src/infrastructure/secrets:seed-db-backup-secret",

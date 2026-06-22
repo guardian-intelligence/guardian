@@ -19,12 +19,16 @@
 
 ## Load Test
 
-- Command: repeat `aspect infra live-snapshot --kubeconfig "${KUBECONFIG}"` and
-  `aspect infra talos-health --talosconfig "${TALOSCONFIG}"` while evidence
-  overlay jobs run.
+- Command: `aspect infra management-evidence-run --kubeconfig "${KUBECONFIG}"
+  --talosconfig "${TALOSCONFIG}"`.
 - Inputs: endpoints `10.8.0.250`, nodes `10.8.0.11,10.8.0.12,10.8.0.13`.
-- Pass criteria: every API read succeeds, Talos health passes, etcd reports
-  three voting members, and no kube-apiserver VIP failover is visible.
+- Evidence artifact:
+  `docs/reports/infrastructure/live-runs/<run>/evidence/evidence/api-vip-load.txt`.
+- Verifier check: `api:vip-load` in
+  `docs/reports/infrastructure/live-runs/<run>/evidence/verification.tsv`.
+- Pass criteria: every API VIP `/readyz` read succeeds through
+  `https://10.8.0.250:6443`, Talos health passes, etcd reports three voting
+  members, and no kube-apiserver VIP failover is visible.
 - Result: pending.
 
 ## Disaster Recovery Drill
