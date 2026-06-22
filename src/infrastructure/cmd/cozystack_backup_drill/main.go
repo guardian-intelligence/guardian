@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -31,6 +32,8 @@ type drillConfig struct {
 	ApplicationName     string
 	Name                string
 	RestoreTargetName   string
+	CreateRestoreTarget bool
+	CleanupRestoreTarget bool
 	AllowInPlaceRestore bool
 }
 
@@ -48,6 +51,8 @@ func main() {
 	flag.StringVar(&cfg.ApplicationName, "application", "guardian", "Cozystack app name")
 	flag.StringVar(&cfg.Name, "name", "", "BackupJob name; defaults to a UTC timestamped DNS label")
 	flag.StringVar(&cfg.RestoreTargetName, "restore-target", "", "optional existing app name to restore into")
+	flag.BoolVar(&cfg.CreateRestoreTarget, "create-restore-target", false, "create the restore target app from the live source app spec before restoring")
+	flag.BoolVar(&cfg.CleanupRestoreTarget, "cleanup-created-restore-target", true, "delete a restore target app created by this drill before exiting")
 	flag.BoolVar(&cfg.AllowInPlaceRestore, "allow-in-place-restore", false, "allow restoring into the same app name")
 	flag.Parse()
 
@@ -136,6 +141,12 @@ func validateConfig(cfg drillConfig) error {
 		if cfg.RestoreTargetName == cfg.ApplicationName && !cfg.AllowInPlaceRestore {
 			return errors.New("--restore-target matches --application; pass --allow-in-place-restore only for an intentional in-place restore")
 		}
+		if cfg.RestoreTargetName == cfg.ApplicationName && cfg.CreateRestoreTarget {
+			return errors.New("--create-restore-target cannot create over the source application")
+		}
+	}
+	if cfg.CreateRestoreTarget && cfg.RestoreTargetName == "" {
+		return errors.New("--create-restore-target requires --restore-target")
 	}
 	return nil
 }
@@ -186,6 +197,35 @@ func runDrill(ctx context.Context, cfg drillConfig) error {
 		return err
 	}
 	if cfg.RestoreTargetName != "" {
+		restoreRef := cfg.Component.Resource + "/" + cfg.RestoreTargetName
+		if cfg.CreateRestoreTarget {
+			exists, err := runner.exists(ctx, "check restore target does not exist", restoreRef)
+			if err != nil {
+				return err
+			}
+			if exists {
+				return fmt.Errorf("restore target %s already exists; omit --create-restore-target to use it or choose a fresh --restore-target", restoreRef)
+			}
+
+			sourceJSON, err := runner.output(ctx, "source app json for restore target", "get", cfg.Component.Resource+"/"+cfg.ApplicationName, "-o", "json")
+			if err != nil {
+				return err
+			}
+			restoreTarget, err := restoreTargetManifestFromSource(cfg, []byte(sourceJSON))
+			if err != nil {
+				return err
+			}
+			restoreTargetPath := filepath.Join(dir, "restore-target.json")
+			if err := os.WriteFile(restoreTargetPath, []byte(restoreTarget), 0o600); err != nil {
+				return err
+			}
+			if err := runner.run(ctx, "apply restore target app", "apply", "-f", restoreTargetPath); err != nil {
+				return err
+			}
+			if cfg.CleanupRestoreTarget {
+				defer runner.bestEffort(ctx, "delete restore target app", "delete", restoreRef, "--wait=true", "--timeout="+cfg.WaitTimeout)
+			}
+		}
 		if err := waitAppReady(ctx, runner, "restore target", cfg.Component.Resource, cfg.RestoreTargetName, cfg.WaitTimeout); err != nil {
 			return err
 		}
@@ -266,6 +306,38 @@ func restoreJobName(backupJobName string) string {
 	return backupJobName + "-restore"
 }
 
+func restoreTargetManifestFromSource(cfg drillConfig, sourceJSON []byte) (string, error) {
+	var source map[string]interface{}
+	if err := json.Unmarshal(sourceJSON, &source); err != nil {
+		return "", fmt.Errorf("decode source app JSON: %w", err)
+	}
+	for _, field := range []string{"apiVersion", "kind", "spec"} {
+		if _, ok := source[field]; !ok {
+			return "", fmt.Errorf("source app JSON missing %s", field)
+		}
+	}
+	target := map[string]interface{}{
+		"apiVersion": source["apiVersion"],
+		"kind":       source["kind"],
+		"metadata": map[string]interface{}{
+			"name":      cfg.RestoreTargetName,
+			"namespace": cfg.Namespace,
+			"labels": map[string]string{
+				"app.kubernetes.io/part-of": "guardian",
+				"guardian.dev/component":    strings.ToLower(cfg.Component.Kind),
+				"guardian.dev/drill":        "cozystack-restore-target",
+				"guardian.dev/stage":        cfg.Stage,
+			},
+		},
+		"spec": source["spec"],
+	}
+	out, err := json.MarshalIndent(target, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("encode restore target app JSON: %w", err)
+	}
+	return string(out) + "\n", nil
+}
+
 type kubectlRunner struct {
 	bin            string
 	kubeconfig     string
@@ -305,6 +377,19 @@ func (r kubectlRunner) bestEffort(ctx context.Context, label string, args ...str
 	if err != nil {
 		fmt.Printf("best-effort command failed: %v\n", err)
 	}
+}
+
+func (r kubectlRunner) exists(ctx context.Context, label string, args ...string) (bool, error) {
+	fmt.Printf("\n## %s\n", label)
+	out, err := r.combinedOutput(ctx, args...)
+	fmt.Print(out)
+	if err == nil {
+		return true, nil
+	}
+	if strings.Contains(out, "NotFound") || strings.Contains(out, "not found") {
+		return false, nil
+	}
+	return false, fmt.Errorf("%s: %w", label, err)
 }
 
 func (r kubectlRunner) output(ctx context.Context, label string, args ...string) (string, error) {

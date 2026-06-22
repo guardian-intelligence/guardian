@@ -1289,6 +1289,12 @@ def _backup_drill_impl(ctx):
     if ctx.args.allow_in_place_restore != "" and ctx.args.allow_in_place_restore != "true" and ctx.args.allow_in_place_restore != "false":
         ctx.std.io.stderr.write("ERROR: --allow-in-place-restore must be true or false\n")
         return 1
+    if ctx.args.create_restore_target != "" and ctx.args.create_restore_target != "true" and ctx.args.create_restore_target != "false":
+        ctx.std.io.stderr.write("ERROR: --create-restore-target must be true or false\n")
+        return 1
+    if ctx.args.cleanup_created_restore_target != "" and ctx.args.cleanup_created_restore_target != "true" and ctx.args.cleanup_created_restore_target != "false":
+        ctx.std.io.stderr.write("ERROR: --cleanup-created-restore-target must be true or false\n")
+        return 1
 
     drill_args = [
         "--kubectl",
@@ -1312,6 +1318,10 @@ def _backup_drill_impl(ctx):
         drill_args.extend(["--restore-target", ctx.args.restore_target])
     if ctx.args.allow_in_place_restore == "true":
         drill_args.append("--allow-in-place-restore=true")
+    if ctx.args.create_restore_target == "true":
+        drill_args.append("--create-restore-target=true")
+    if ctx.args.cleanup_created_restore_target == "false":
+        drill_args.append("--cleanup-created-restore-target=false")
 
     return checked_spawn(
         ctx,
@@ -1813,11 +1823,13 @@ backup_drill = task(
     args = {
         "allow_in_place_restore": args.string(default = "false", description = "Set true only for an intentional restore into the source app."),
         "application": args.string(default = "guardian", description = "Cozystack app name."),
+        "cleanup_created_restore_target": args.string(default = "true", description = "Delete a restore target created by this drill before exiting."),
         "component": args.string(default = "clickhouse", description = "Component to drill: clickhouse or postgres."),
+        "create_restore_target": args.string(default = "false", description = "Create --restore-target from the live source app spec before restoring."),
         "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
         "name": args.string(default = "", description = "Optional BackupJob name. Defaults to a timestamped DNS label."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
-        "restore_target": args.string(default = "", description = "Optional existing app name to restore into after the backup succeeds."),
+        "restore_target": args.string(default = "", description = "Optional app name to restore into after the backup succeeds."),
         "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before the drill."),
         "stage": args.string(default = "dev", description = "Guardian stage: root, dev, gamma, or prod."),
         "wait_timeout": args.string(default = "30m", description = "Timeout for BackupJob, Backup, and RestoreJob waits."),

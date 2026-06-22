@@ -56,6 +56,60 @@ func TestRestoreJobManifest(t *testing.T) {
 	}
 }
 
+func TestRestoreTargetManifestFromSource(t *testing.T) {
+	cfg := drillConfig{
+		Stage:             "gamma",
+		Namespace:         "tenant-gamma",
+		Component:         componentSpec{Kind: "ClickHouse"},
+		RestoreTargetName: "guardian-restore",
+	}
+	source := []byte(`{
+  "apiVersion": "apps.cozystack.io/v1alpha1",
+  "kind": "ClickHouse",
+  "metadata": {
+    "name": "guardian",
+    "namespace": "tenant-gamma",
+    "resourceVersion": "123",
+    "uid": "deadbeef"
+  },
+  "spec": {
+    "replicas": 3,
+    "storageClass": "replicated",
+    "backup": {
+      "enabled": true,
+      "s3CredentialsSecret": {
+        "name": "guardian-clickhouse-backup-creds"
+      }
+    }
+  },
+  "status": {
+    "conditions": []
+  }
+}`)
+	got, err := restoreTargetManifestFromSource(cfg, source)
+	if err != nil {
+		t.Fatalf("restoreTargetManifestFromSource() error = %v", err)
+	}
+	for _, want := range []string{
+		`"apiVersion": "apps.cozystack.io/v1alpha1"`,
+		`"kind": "ClickHouse"`,
+		`"name": "guardian-restore"`,
+		`"namespace": "tenant-gamma"`,
+		`"guardian.dev/drill": "cozystack-restore-target"`,
+		`"storageClass": "replicated"`,
+		`"name": "guardian-clickhouse-backup-creds"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("restore target manifest missing %q:\n%s", want, got)
+		}
+	}
+	for _, forbidden := range []string{"resourceVersion", "uid", "status"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("restore target manifest retained %q:\n%s", forbidden, got)
+		}
+	}
+}
+
 func TestValidateConfig(t *testing.T) {
 	base := drillConfig{
 		Kubectl:         "/kubectl",
@@ -75,6 +129,18 @@ func TestValidateConfig(t *testing.T) {
 		t.Fatalf("valid restore config rejected: %v", err)
 	}
 
+	createRestore := restore
+	createRestore.CreateRestoreTarget = true
+	if err := validateConfig(createRestore); err != nil {
+		t.Fatalf("valid restore-target creation config rejected: %v", err)
+	}
+
+	missingRestoreTarget := base
+	missingRestoreTarget.CreateRestoreTarget = true
+	if err := validateConfig(missingRestoreTarget); err == nil {
+		t.Fatalf("create-restore-target without restore-target was accepted")
+	}
+
 	inPlace := base
 	inPlace.RestoreTargetName = "guardian"
 	if err := validateConfig(inPlace); err == nil {
@@ -84,6 +150,12 @@ func TestValidateConfig(t *testing.T) {
 	inPlace.AllowInPlaceRestore = true
 	if err := validateConfig(inPlace); err != nil {
 		t.Fatalf("explicitly allowed in-place restore rejected: %v", err)
+	}
+
+	createOverSource := inPlace
+	createOverSource.CreateRestoreTarget = true
+	if err := validateConfig(createOverSource); err == nil {
+		t.Fatalf("create-restore-target over source app was accepted")
 	}
 
 	badName := base

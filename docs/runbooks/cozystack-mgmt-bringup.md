@@ -699,10 +699,16 @@ If `--name` is omitted, the helper generates a unique UTC timestamped
 `BackupJob` name. When `--restore-target` is set, the helper also validates the
 generated `RestoreJob` name before it creates the `BackupJob`.
 Before creating the `BackupJob`, the helper prints the source app YAML and
-waits for that app's `Ready` and `WorkloadsReady` conditions. When
-`--restore-target` is set, it also proves the target app exists and is ready
-before the backup starts, then rechecks and prints the restored target after
-`RestoreJob` succeeds.
+waits for that app's `Ready` and `WorkloadsReady` conditions.
+
+To-copy restore drills need an empty same-kind target app in the same namespace.
+Pass `--create-restore-target=true` with `--restore-target` to have the helper
+create that target from the live source app's standard Cozystack CR spec before
+the backup starts. The helper waits for the target to become ready, runs the
+restore, rechecks and prints the restored target after `RestoreJob` succeeds,
+and deletes a target it created by default. Pass
+`--cleanup-created-restore-target=false` only when intentionally preserving the
+drill target for manual inspection.
 
 Run a ClickHouse backup smoke drill with:
 
@@ -714,8 +720,7 @@ aspect infra backup-drill \
   --component clickhouse
 ```
 
-Run a restore drill only into an existing restore target app, not the serving
-app:
+Run a restore drill into a temporary restore target app, not the serving app:
 
 ```sh
 aspect infra backup-drill \
@@ -723,7 +728,8 @@ aspect infra backup-drill \
   --revision "$(git rev-parse HEAD)" \
   --stage dev \
   --component clickhouse \
-  --restore-target guardian-restore
+  --restore-target guardian-restore \
+  --create-restore-target=true
 ```
 
 The helper refuses in-place restore by default. `--allow-in-place-restore=true`
@@ -1186,10 +1192,12 @@ separate PRs with their own validation:
   configuration, ClickHouse app backup Secret references, recurring ClickHouse
   backup Plans, and Harbor's COSI-backed registry bucket resources are declared
   and live-gated. `aspect infra backup-drill` now creates ad-hoc Cozystack
-  BackupJob/RestoreJob resources and prints standard Kubernetes evidence, but
-  applying the OpenBao root, populating real kv values, Postgres object-store
-  coordinates, running the smoke tests, Harbor registry-path validation through
-  ORAS/COSI, and live restore drill reports still need separate PRs.
+  BackupJob/RestoreJob resources, can create and clean up a temporary to-copy
+  restore target from the live source app spec, and prints standard Kubernetes
+  evidence. Applying the OpenBao root, populating real kv values, Postgres
+  object-store coordinates, running the smoke tests, Harbor registry-path
+  validation through ORAS/COSI, and live restore drill reports still need
+  current cluster credentials and source-controller convergence.
 - ClickHouse chart-side `spec.storageClass` rendering, because Cozystack 1.4
   still relies on the cluster default for ClickHouse and keeper PVCs.
 - Live OpenBao init/unseal and Raft snapshot drill reports from
