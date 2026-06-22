@@ -155,9 +155,11 @@ and writes `src/infrastructure/talm/kubeconfig`. If the Talos CA itself was
 rotated and the local Talm secrets are stale, restore or regenerate the operator
 state through the bootstrap path instead. Do not use insecure TLS flags for
 source-controller validation.
-The task checks for `src/infrastructure/talm/secrets.yaml` before invoking
-Talm, so a missing operator state fails before generating a fresh `talm.key` or
-`talosconfig.encrypted` in the repo.
+The task checks for `src/infrastructure/talm/secrets.yaml`,
+`src/infrastructure/talm/talm.key`, and
+`src/infrastructure/talm/talosconfig.encrypted` before invoking Talm, so a
+partial or missing operator-state restore fails before generating fresh local
+key material in the repo.
 
 ## Management Bootstrap Command
 
