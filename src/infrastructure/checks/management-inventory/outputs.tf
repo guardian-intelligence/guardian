@@ -9,5 +9,11 @@ output "management_endpoints" {
     vlan_mtu            = local.vlan.vlan_mtu
     vip_link            = local.vlan.vip_link
     environment_hosts   = { for name, env in local.environments : name => env.host }
+    apps = {
+      harbor     = "${local.harbor_app.metadata.namespace}/${local.harbor_app.metadata.name}"
+      clickhouse = "${local.clickhouse_app.metadata.namespace}/${local.clickhouse_app.metadata.name}"
+      postgres   = "${local.postgres_app.metadata.namespace}/${local.postgres_app.metadata.name}"
+      openbao    = "${local.openbao_app.metadata.namespace}/${local.openbao_app.metadata.name}"
+    }
   }
 }

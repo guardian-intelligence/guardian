@@ -12,5 +12,5 @@ aspect infra inventory-check
 This root has no backend and no providers. It decodes checked-in JSON/YAML only,
 then fails if the Talos VIP, Talm values, Cozystack platform external IPs,
 MetalLB private pool, kube-ovn MTU, environment files, Tenant hosts,
-company-site Ingresses, or company-site image digests drift away from the
-inventory.
+company-site Ingresses, company-site image digests, Flux base membership, or
+required Cozystack app identities drift away from the inventory.

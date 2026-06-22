@@ -15,6 +15,29 @@ locals {
   node_private_ipv4 = [for node in local.inventory.nodes : node.private_ipv4]
   api_endpoint      = "https://${local.vlan.api_vip}:6443"
 
+  base_kustomization = yamldecode(file("${path.module}/../../base/kustomization.yaml"))
+  required_base_resources = [
+    "apps/clickhouse.yaml",
+    "apps/harbor.yaml",
+    "apps/postgres.yaml",
+    "backups/managed-databases.yaml",
+    "cozystack/platform.yaml",
+    "networking/metallb.yaml",
+    "networking/subnet-mtu.yaml",
+    "storage/storageclasses.yaml",
+    "storage/linstor-satellite-config.yaml",
+    "openbao/openbao.yaml",
+    "openbao/networkpolicy.yaml",
+    "products/company-site.yaml",
+    "tenants/environments.yaml",
+    "tenants/root.yaml",
+  ]
+
+  harbor_app     = yamldecode(file("${path.module}/../../base/apps/harbor.yaml"))
+  clickhouse_app = yamldecode(file("${path.module}/../../base/apps/clickhouse.yaml"))
+  postgres_app   = yamldecode(file("${path.module}/../../base/apps/postgres.yaml"))
+  openbao_app    = yamldecode(file("${path.module}/../../base/openbao/openbao.yaml"))
+
   metallb_docs = [
     for raw in split("\n---\n", file("${path.module}/../../base/networking/metallb.yaml")) :
     yamldecode(raw)
@@ -86,10 +109,56 @@ check "node_private_ipv4_are_unique" {
   }
 }
 
+check "base_kustomization_contains_required_resources" {
+  assert {
+    condition = length(setsubtract(
+      toset(local.required_base_resources),
+      toset(local.base_kustomization.resources),
+    )) == 0
+    error_message = "src/infrastructure/base/kustomization.yaml must include all required management-cluster component manifests."
+  }
+}
+
+check "required_app_crs_match_management_surface" {
+  assert {
+    condition = (
+      local.harbor_app.apiVersion == "apps.cozystack.io/v1alpha1" &&
+      local.harbor_app.kind == "Harbor" &&
+      local.harbor_app.metadata.name == "oci" &&
+      local.harbor_app.metadata.namespace == "tenant-root" &&
+      local.harbor_app.spec.host == "oci.guardianintelligence.org" &&
+      local.clickhouse_app.kind == "ClickHouse" &&
+      local.clickhouse_app.metadata.name == "ledger" &&
+      local.clickhouse_app.metadata.namespace == "tenant-root" &&
+      local.postgres_app.kind == "Postgres" &&
+      local.postgres_app.metadata.name == "guardian" &&
+      local.postgres_app.metadata.namespace == "tenant-root" &&
+      local.openbao_app.kind == "OpenBAO" &&
+      local.openbao_app.metadata.name == "guardian" &&
+      local.openbao_app.metadata.namespace == "tenant-root"
+    )
+    error_message = "Required Harbor, ClickHouse, Postgres, and OpenBao app CRs must keep their expected names and tenant-root namespace."
+  }
+}
+
 check "cozystack_api_endpoint_matches_inventory_vip" {
   assert {
     condition     = local.cozystack_values.publishing.apiServerEndpoint == local.api_endpoint
     error_message = "Cozystack platform apiServerEndpoint must match the inventory API VIP."
+  }
+}
+
+check "cozystack_platform_exposes_required_services" {
+  assert {
+    condition = (
+      local.cozystack_platform.kind == "Package" &&
+      local.cozystack_platform.metadata.name == "cozystack.cozystack-platform" &&
+      local.cozystack_platform.spec.variant == "isp-full" &&
+      local.cozystack_values.publishing.host == local.environments.prod.host &&
+      contains(local.cozystack_values.publishing.exposedServices, "dashboard") &&
+      contains(local.cozystack_values.publishing.exposedServices, "api")
+    )
+    error_message = "Cozystack platform must use the isp-full variant and expose dashboard/api for the management cluster."
   }
 }
 

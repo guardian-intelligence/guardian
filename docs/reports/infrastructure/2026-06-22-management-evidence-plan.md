@@ -57,7 +57,9 @@ aspect infra outage-uncordon --kubeconfig "${KUBECONFIG}" --node <node>
 - Provider-free inventory checks now compare
   `src/infrastructure/inventory/guardian-mgmt.json` against Talm, Cozystack,
   MetalLB, kube-ovn MTU, environment, tenant, DNS, and company-site manifests
-  without live state.
+  without live state; they also assert the Flux base contains the required
+  Harbor, ClickHouse, Postgres/CNPG, OpenBao, Cozystack platform, storage,
+  networking, tenant, and company-site manifests.
 - The company-site OCI image builds locally by digest.
 - The Cozystack base renders through the repo-pinned kubectl.
 - Postgres and ClickHouse now have declared R2 backup plumbing,
