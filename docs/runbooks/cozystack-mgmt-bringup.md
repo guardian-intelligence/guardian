@@ -55,14 +55,12 @@ Aspect tasks, and future bootstrap CLI code; do not add a parallel inventory
 file for the same node/IP/VLAN facts.
 
 ```sh
-bazelisk run @opentofu_linux_amd64//:tofu_bin -- \
-  -chdir="$PWD/src/infrastructure/bootstrap/guardian-mgmt" \
-  output -json management_vlan
-
-bazelisk run @opentofu_linux_amd64//:tofu_bin -- \
-  -chdir="$PWD/src/infrastructure/bootstrap/guardian-mgmt" \
-  output -json control_plane_nodes
+aspect infra topology --name management_vlan
+aspect infra topology --name control_plane_nodes
 ```
+
+The task is a thin wrapper over the repo-pinned OpenTofu artifact and prints
+`tofu output -json`; it does not define a Guardian-specific schema.
 
 Expected network shape:
 
