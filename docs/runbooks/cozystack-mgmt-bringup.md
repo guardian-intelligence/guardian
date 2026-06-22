@@ -291,6 +291,18 @@ Expected success ends with:
 guardian-mgmt source-controller has reconciled <commit-sha>
 ```
 
+For the Talos-side L2 gate:
+
+```sh
+aspect infra talos
+```
+
+Expected success ends with:
+
+```text
+guardian-mgmt Talos L2 checks passed
+```
+
 ## Cozystack App Path
 
 Cozystack 1.4 serves `apps.cozystack.io/v1alpha1` resources through its
@@ -584,16 +596,16 @@ Expected results:
   `Plan/guardian-clickhouse-daily` targeting `ClickHouse/guardian` through
   `BackupClass/guardian-clickhouse-altinity`
 
-Talos-side network checks:
+Talos-side network checks are handled by:
 
 ```sh
-talosctl --nodes 10.8.0.11,10.8.0.12,10.8.0.13 --endpoints 10.8.0.250 get addresses
-talosctl --nodes 10.8.0.11,10.8.0.12,10.8.0.13 --endpoints 10.8.0.250 get routes
-talosctl --nodes 10.8.0.11,10.8.0.12,10.8.0.13 --endpoints 10.8.0.250 get kubespanpeerstatuses
+aspect infra talos
 ```
 
-Expected result: addresses and routes show the VLAN subnet, and KubeSpan has no
-active mesh peers.
+The task uses repo-pinned `talosctl`, reads
+`src/infrastructure/talm/talosconfig`, checks that all three management nodes
+report their `10.8.0.x` addresses, verifies routes can be read from the same
+Talos endpoints, and requires KubeSpan peer status to be empty.
 
 Kubernetes-side readiness evidence should be captured as PR-local command output
 while a change is being reviewed. Durable operational proof should come from

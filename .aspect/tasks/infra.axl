@@ -7,6 +7,12 @@ GUARDIAN_MGMT_OPENBAO_ROOT = "src/infrastructure/bootstrap/guardian-mgmt-openbao
 TOFU_TARGET = "@opentofu_linux_amd64//:tofu_bin"
 TALM_TARGET = "@talm_linux_amd64//:talm"
 KUBECTL_FILE_TARGET = "@kubectl_linux_amd64//file:file"
+TALOSCTL_FILE_TARGET = "@talosctl_linux_amd64//file:file"
+GUARDIAN_MGMT_TALOS_NODES = [
+    "10.8.0.11",
+    "10.8.0.12",
+    "10.8.0.13",
+]
 EXCLUDED_KUBE_APIS = [
     # AGENTS.md marks this as Verself prod. It is not guardian-mgmt and must not
     # be used to validate source-controller deployment.
@@ -316,12 +322,45 @@ def _kubectl_path(ctx):
         return None
     return output_base + "/external/+http_file+kubectl_linux_amd64/file/kubectl"
 
+def _talosctl_path(ctx):
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        ["build", TALOSCTL_FILE_TARGET],
+        cwd = ws_path(ctx),
+        label = "bazelisk build " + TALOSCTL_FILE_TARGET,
+    )
+    if rc != 0:
+        return None
+    output_base = _capture_stdout(
+        ctx,
+        "bazelisk",
+        ["info", "output_base"],
+        cwd = ws_path(ctx),
+        label = "bazelisk info output_base",
+    )
+    if output_base == None:
+        return None
+    return output_base + "/external/+http_file+talosctl_linux_amd64/file/talosctl"
+
 def _kubectl_args(ctx, args):
     out = []
     if ctx.args.kubeconfig != "":
         out.extend(["--kubeconfig", ctx.args.kubeconfig])
     if ctx.args.request_timeout != "":
         out.append("--request-timeout=" + ctx.args.request_timeout)
+    out.extend(args)
+    return out
+
+def _talosctl_args(ctx, args):
+    out = [
+        "--talosconfig",
+        ctx.args.talosconfig,
+        "--endpoints",
+        ctx.args.endpoints,
+        "--nodes",
+        ctx.args.nodes,
+    ]
     out.extend(args)
     return out
 
@@ -334,11 +373,29 @@ def _kubectl_capture(ctx, kubectl, args, label):
         label = label,
     )
 
+def _talosctl_capture(ctx, talosctl, args, label):
+    return _capture_stdout(
+        ctx,
+        talosctl,
+        _talosctl_args(ctx, args),
+        cwd = ws_path(ctx),
+        label = label,
+    )
+
 def _kubectl_success(ctx, kubectl, args, label):
     return _capture_success(
         ctx,
         kubectl,
         _kubectl_args(ctx, args),
+        cwd = ws_path(ctx),
+        label = label,
+    )
+
+def _talosctl_success(ctx, talosctl, args, label):
+    return _capture_success(
+        ctx,
+        talosctl,
+        _talosctl_args(ctx, args),
         cwd = ws_path(ctx),
         label = label,
     )
@@ -577,6 +634,48 @@ def _kubeconfig_impl(ctx):
     ctx.std.io.stderr.write("wrote guardian-mgmt kubeconfig to " + root + "/kubeconfig\n")
     return 0
 
+def _talos_impl(ctx):
+    talosctl = _talosctl_path(ctx)
+    if talosctl == None:
+        return 1
+
+    addresses = _talosctl_capture(
+        ctx,
+        talosctl,
+        ["get", "addresses"],
+        "talosctl get addresses",
+    )
+    if addresses == None:
+        return 1
+    for node in GUARDIAN_MGMT_TALOS_NODES:
+        rc = _assert_contains(ctx, addresses, node, "talos addresses")
+        if rc != 0:
+            return rc
+
+    rc = _talosctl_success(
+        ctx,
+        talosctl,
+        ["get", "routes"],
+        "talosctl get routes",
+    )
+    if rc != 0:
+        return rc
+
+    kubespan = _talosctl_capture(
+        ctx,
+        talosctl,
+        ["get", "kubespanpeerstatuses", "-o", "jsonpath={.items}"],
+        "talosctl get kubespanpeerstatuses",
+    )
+    if kubespan == None:
+        return 1
+    rc = _assert_equals(ctx, kubespan, "[]", "kubespan peer statuses")
+    if rc != 0:
+        return rc
+
+    ctx.std.io.stderr.write("guardian-mgmt Talos L2 checks passed\n")
+    return 0
+
 def _live_impl(ctx):
     revision = _expected_revision(ctx)
     if revision == None:
@@ -650,6 +749,18 @@ kubeconfig = task(
         "nodes": args.string(default = "10.8.0.11,10.8.0.12,10.8.0.13", description = "Talos nodes used to fetch kubeconfig."),
         "root": args.string(default = "src/infrastructure/talm", description = "Talm root containing gitignored secrets.yaml and talosconfig."),
         "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
+    },
+)
+
+talos = task(
+    implementation = _talos_impl,
+    name = "talos",
+    group = ["infra"],
+    summary = "Validate guardian-mgmt Talos L2 addresses/routes and absence of KubeSpan peers.",
+    args = {
+        "endpoints": args.string(default = "10.8.0.250", description = "Talos API endpoint for guardian-mgmt."),
+        "nodes": args.string(default = "10.8.0.11,10.8.0.12,10.8.0.13", description = "Comma-separated guardian-mgmt Talos nodes."),
+        "talosconfig": args.string(default = "src/infrastructure/talm/talosconfig", description = "Talos config for guardian-mgmt."),
     },
 )
 
