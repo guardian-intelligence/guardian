@@ -21,6 +21,24 @@ http_archive(
     url = "https://get.helm.sh/helm-v3.19.1-linux-amd64.tar.gz",
 )
 
+http_archive(
+    name = "opentofu_linux_amd64",
+    build_file_content = """
+exports_files(["tofu"])
+
+genrule(
+    name = "tofu_bin",
+    srcs = ["tofu"],
+    outs = ["tofu-runner"],
+    cmd = "cp $(location tofu) $@ && chmod +x $@",
+    executable = True,
+    visibility = ["//visibility:public"],
+)
+""",
+    sha256 = "46b48c3438c65cf479fc076c9281422ffa2f493548d1e813d154c835c5986a08",
+    url = "https://github.com/opentofu/opentofu/releases/download/v1.12.3/tofu_1.12.3_linux_amd64.zip",
+)
+
 buf = use_extension("@rules_buf//buf:extensions.bzl", "buf")
 buf.toolchains(
     sha256 = "ce4a14aeff08a01585c6ffd2a7743473ab3354275181de0ee10f792a21f7d56e",
