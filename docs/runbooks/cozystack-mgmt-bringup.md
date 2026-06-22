@@ -446,6 +446,92 @@ All environment app specs select `storageClass: replicated` and run three
 replicas for the stateful control-plane services so single-node outage drills
 exercise the intended topology.
 
+## HTTP Load Drills
+
+Use k6 for HTTP-facing surfaces. The repo pins the standalone Linux amd64 k6
+binary in Bazel and runs it through `aspect infra load-http`; do not install k6
+on an operator laptop or traffic-serving host.
+
+`aspect infra load-http` runs the same guardian-mgmt kubeconfig guard as
+`aspect infra live` by default. If `--revision` is provided, it also verifies
+that the live Flux source and Kustomizations have applied that merged commit
+before starting the load test. The task then runs the repo k6 script at
+`src/infrastructure/load/http-smoke.js` and prints k6's standard CLI summary.
+This is the report input; do not wrap it in a Guardian-specific evidence
+format.
+
+Company-site load:
+
+```sh
+aspect infra load-http \
+  --kubeconfig "$GUARDIAN_MGMT_KUBECONFIG" \
+  --revision "$(git rev-parse HEAD)" \
+  --surface company-site \
+  --stage gamma \
+  --vus 10 \
+  --duration 2m
+```
+
+Harbor registry API load:
+
+```sh
+aspect infra load-http \
+  --kubeconfig "$GUARDIAN_MGMT_KUBECONFIG" \
+  --revision "$(git rev-parse HEAD)" \
+  --surface harbor \
+  --stage root \
+  --vus 5 \
+  --duration 2m
+```
+
+Dashboard load:
+
+```sh
+aspect infra load-http \
+  --kubeconfig "$GUARDIAN_MGMT_KUBECONFIG" \
+  --revision "$(git rev-parse HEAD)" \
+  --surface dashboard \
+  --stage root \
+  --vus 5 \
+  --duration 2m
+```
+
+OpenBao health load uses a temporary `kubectl port-forward` to the in-cluster
+`Service/openbao-guardian` and targets `/v1/sys/health`:
+
+```sh
+aspect infra load-http \
+  --kubeconfig "$GUARDIAN_MGMT_KUBECONFIG" \
+  --revision "$(git rev-parse HEAD)" \
+  --surface openbao \
+  --stage root \
+  --vus 5 \
+  --duration 2m
+```
+
+Surface defaults:
+
+- `company-site`: `https://dev.gi.org/healthz`,
+  `https://gamma.gi.org/healthz`, or
+  `https://guardianintelligence.org/healthz`, expected status `200`.
+- `harbor`: `https://harbor.guardianintelligence.org/v2/` or the
+  environment Harbor host, expected status `200` or unauthenticated `401`.
+- `dashboard`: `https://dashboard.guardianintelligence.org/`, expected status
+  `200` or auth redirect `302`.
+- `openbao`: local port-forward to
+  `http://127.0.0.1:<port>/v1/sys/health`, accepting OpenBao's documented
+  health statuses for active, standby, sealed, uninitialized, and standby perf
+  modes.
+
+For a one-off local k6 smoke check that is not evidence for the management
+cluster, pass `--require-live=false --surface custom --url <url>`. Production
+load reports must keep `--require-live=true` and include the merged `--revision`.
+
+This HTTP task covers the company-site, Harbor registry API, Dashboard, and
+OpenBao health surfaces. Postgres/CNPG and ClickHouse database-path load should
+use standard database clients (`pgbench` and `clickhouse-benchmark`) in a later
+slice rather than forcing database traffic through an HTTP harness.
+
 ## Backup And Restore Drills
 
 Ad-hoc backup/restore evidence should use Cozystack's native
@@ -823,8 +909,12 @@ separate PRs with their own validation:
 - Latitude VLAN assignment imports, once assignment IDs are collected.
 - Publishing the checked-in TanStack company-site OCI image to Harbor and
   capturing live readiness evidence for dev, gamma, and prod.
-- Load-test reports for CNPG/Postgres, Harbor, ClickHouse, OpenBao, the
-  Cozystack dashboard, and the company-site surfaces.
+- Live load-test reports for CNPG/Postgres, Harbor, ClickHouse, OpenBao, the
+  Cozystack dashboard, and the company-site surfaces. `aspect infra load-http`
+  now provides the standard k6 path for HTTP-facing Harbor, OpenBao health,
+  dashboard, and company-site reports, but live reports still require current
+  guardian-mgmt credentials and Postgres/ClickHouse still need standard
+  database-client load tasks.
 - Postgres backup specs wired to declared OpenBao/R2-projected Secrets, plus
   live backup/restore drills for Postgres, Harbor, and ClickHouse. The package
   prerequisites, backup controller deployments/RBAC/CRDs, reusable CNPG

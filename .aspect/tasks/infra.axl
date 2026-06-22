@@ -6,9 +6,11 @@ GUARDIAN_MGMT_ROOT = "src/infrastructure/bootstrap/guardian-mgmt"
 GUARDIAN_MGMT_OPENBAO_ROOT = "src/infrastructure/bootstrap/guardian-mgmt-openbao"
 TOFU_TARGET = "@opentofu_linux_amd64//:tofu_bin"
 TALM_TARGET = "@talm_linux_amd64//:talm"
+K6_FILE_TARGET = "@k6_linux_amd64//:k6"
 KUBECTL_FILE_TARGET = "@kubectl_linux_amd64//file:file"
 TALOSCTL_FILE_TARGET = "@talosctl_linux_amd64//file:file"
 BACKUP_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_backup_drill:cozystack_backup_drill"
+HTTP_LOAD_TARGET = "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load"
 NODE_OUTAGE_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill"
 GUARDIAN_MGMT_TALOS_NODES = [
     "10.8.0.11",
@@ -137,11 +139,13 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/base/secrets:manifests",
     "//src/infrastructure/base/storage:manifests",
     "//src/infrastructure/base/tenants:manifests",
+    "//src/infrastructure/load:http_load_scripts",
     "//src/infrastructure/environments:manifests",
     "//src/infrastructure/bootstrap/guardian-mgmt-openbao:root",
 ]
 INFRA_TESTS = [
     "//src/infrastructure/cmd/cozystack_backup_drill:cozystack_backup_drill_test",
+    "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load_test",
     "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill_test",
     "//src/infrastructure/tests:manifest_invariants_test",
 ]
@@ -634,6 +638,27 @@ def _kubectl_path(ctx):
         return None
     return output_base + "/external/+http_file+kubectl_linux_amd64/file/kubectl"
 
+def _k6_path(ctx):
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        ["build", K6_FILE_TARGET],
+        cwd = ws_path(ctx),
+        label = "bazelisk build " + K6_FILE_TARGET,
+    )
+    if rc != 0:
+        return None
+    output_base = _capture_stdout(
+        ctx,
+        "bazelisk",
+        ["info", "output_base"],
+        cwd = ws_path(ctx),
+        label = "bazelisk info output_base",
+    )
+    if output_base == None:
+        return None
+    return output_base + "/external/+http_archive+k6_linux_amd64/k6"
+
 def _talosctl_path(ctx):
     rc = checked_spawn(
         ctx,
@@ -1121,6 +1146,67 @@ def _node_outage_drill_impl(ctx):
         label = "cozystack node outage drill",
     )
 
+def _load_http_impl(ctx):
+    if ctx.args.require_live != "true" and ctx.args.require_live != "false":
+        ctx.std.io.stderr.write("ERROR: --require-live must be true or false\n")
+        return 1
+
+    k6 = _k6_path(ctx)
+    if k6 == None:
+        return 1
+
+    kubectl = _kubectl_path(ctx)
+    if kubectl == None:
+        return 1
+
+    if ctx.args.require_live == "true":
+        rc = _check_live_context(ctx, kubectl)
+        if rc != 0:
+            return rc
+        if ctx.args.revision != "":
+            rc = _check_flux_revision(ctx, kubectl, ctx.args.revision)
+            if rc != 0:
+                return rc
+
+    load_args = [
+        "--k6",
+        k6,
+        "--script",
+        ws_path(ctx, "src/infrastructure/load/http-smoke.js"),
+        "--kubectl",
+        kubectl,
+        "--stage",
+        ctx.args.stage,
+        "--surface",
+        ctx.args.surface,
+        "--request-timeout",
+        ctx.args.request_timeout,
+        "--vus",
+        ctx.args.vus,
+        "--duration",
+        ctx.args.duration,
+        "--http-failed-threshold",
+        ctx.args.http_failed_threshold,
+        "--sleep-seconds",
+        ctx.args.sleep_seconds,
+        "--port-forward-ready-timeout",
+        ctx.args.port_forward_ready_timeout,
+    ]
+    if ctx.args.kubeconfig != "":
+        load_args.extend(["--kubeconfig", ctx.args.kubeconfig])
+    if ctx.args.url != "":
+        load_args.extend(["--url", ctx.args.url])
+    if ctx.args.expected_statuses != "":
+        load_args.extend(["--expected-statuses", ctx.args.expected_statuses])
+
+    return checked_spawn(
+        ctx,
+        "bazelisk",
+        ["run", HTTP_LOAD_TARGET, "--"] + load_args,
+        cwd = ws_path(ctx),
+        label = "cozystack http load",
+    )
+
 validate = task(
     implementation = _validate_impl,
     name = "validate",
@@ -1173,6 +1259,28 @@ live = task(
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
         "revision": args.string(default = "", description = "Expected merged Git commit SHA that source-controller must have applied."),
         "wait_timeout": args.string(default = "5m", description = "Timeout for Flux and Deployment readiness waits."),
+    },
+)
+
+load_http = task(
+    implementation = _load_http_impl,
+    name = "load-http",
+    group = ["infra"],
+    summary = "Run a standard k6 HTTP load test against a Guardian management-cluster surface.",
+    args = {
+        "duration": args.string(default = "30s", description = "k6 test duration."),
+        "expected_statuses": args.string(default = "", description = "Comma-separated acceptable HTTP status codes. Defaults depend on the surface."),
+        "http_failed_threshold": args.string(default = "rate<0.01", description = "k6 threshold for http_req_failed."),
+        "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
+        "port_forward_ready_timeout": args.string(default = "10s", description = "Timeout for OpenBao port-forward readiness."),
+        "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
+        "require_live": args.string(default = "true", description = "Set false only for local custom-URL k6 smoke checks."),
+        "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before the load test."),
+        "sleep_seconds": args.string(default = "1", description = "Sleep seconds between requests in each k6 VU."),
+        "stage": args.string(default = "dev", description = "Guardian stage: root, dev, gamma, or prod."),
+        "surface": args.string(default = "company-site", description = "HTTP surface: company-site, harbor, dashboard, openbao, or custom with --url."),
+        "url": args.string(default = "", description = "Explicit URL to load; overrides surface target mapping."),
+        "vus": args.string(default = "1", description = "k6 virtual users."),
     },
 )
 
