@@ -14,10 +14,83 @@ import (
 type manifest map[string]any
 
 func TestManifestInvariants(t *testing.T) {
+	t.Run("cozystack platform package", testCozystackPlatformPackage)
+	t.Run("environment tenants", testEnvironmentTenants)
+	t.Run("layer two networking", testLayerTwoNetworking)
 	t.Run("single default storage class", testSingleDefaultStorageClass)
 	t.Run("root tenant core services", testRootTenantCoreServices)
 	t.Run("environment tenant core services", testEnvironmentTenantCoreServices)
+	t.Run("openbao", testOpenBao)
 	t.Run("flux handoff", testFluxHandoff)
+}
+
+func testCozystackPlatformPackage(t *testing.T) {
+	docs := readManifests(t, "src/infrastructure/base/cozystack/platform.yaml")
+	pkg := findObject(t, docs, "Package", "", "cozystack.cozystack-platform")
+
+	assertString(t, pkg, "cozystack.io/v1alpha1", "apiVersion")
+	assertString(t, pkg, "isp-full", "spec", "variant")
+	assertString(t, pkg, "guardianintelligence.org", "spec", "components", "platform", "values", "publishing", "host")
+	assertString(t, pkg, "https://10.8.0.250:6443", "spec", "components", "platform", "values", "publishing", "apiServerEndpoint")
+	assertStringSlice(t, pkg, []string{"206.223.228.101", "45.250.254.119", "206.223.228.87"}, "spec", "components", "platform", "values", "publishing", "externalIPs")
+	assertStringSlice(t, pkg, []string{"dashboard", "api"}, "spec", "components", "platform", "values", "publishing", "exposedServices")
+
+	assertString(t, pkg, "10.244.0.0/16", "spec", "components", "platform", "values", "networking", "podCIDR")
+	assertString(t, pkg, "10.244.0.1", "spec", "components", "platform", "values", "networking", "podGateway")
+	assertString(t, pkg, "10.96.0.0/16", "spec", "components", "platform", "values", "networking", "serviceCIDR")
+	assertString(t, pkg, "100.64.0.0/16", "spec", "components", "platform", "values", "networking", "joinCIDR")
+
+	assertBool(t, pkg, true, "spec", "components", "platform", "values", "authentication", "oidc", "enabled")
+	assertString(t, pkg, "http://keycloak-http.cozy-keycloak.svc:8080/realms/cozy", "spec", "components", "platform", "values", "authentication", "oidc", "keycloakInternalUrl")
+	assertString(t, pkg, "Guardian", "spec", "components", "platform", "values", "branding", "titleText")
+	assertString(t, pkg, "Guardian Intelligence", "spec", "components", "platform", "values", "branding", "footerText")
+}
+
+func testEnvironmentTenants(t *testing.T) {
+	docs := readManifests(t, "src/infrastructure/base/tenants/environments.yaml")
+
+	for _, env := range []string{"dev", "gamma", "prod"} {
+		t.Run(env, func(t *testing.T) {
+			tenant := findObject(t, docs, "Tenant", "tenant-root", env)
+			assertString(t, tenant, "apps.cozystack.io/v1alpha1", "apiVersion")
+			assertString(t, tenant, env+".gi.org", "spec", "host")
+			assertBool(t, tenant, false, "spec", "etcd")
+			assertBool(t, tenant, false, "spec", "ingress")
+			assertBool(t, tenant, false, "spec", "monitoring")
+			assertBool(t, tenant, false, "spec", "seaweedfs")
+		})
+	}
+}
+
+func testLayerTwoNetworking(t *testing.T) {
+	metallb := readManifests(t, "src/infrastructure/base/networking/metallb.yaml")
+	pool := findObject(t, metallb, "IPAddressPool", "cozy-metallb", "cozystack")
+	assertString(t, pool, "metallb.io/v1beta1", "apiVersion")
+	assertStringSlice(t, pool, []string{"10.8.0.200-10.8.0.240"}, "spec", "addresses")
+	assertBool(t, pool, true, "spec", "autoAssign")
+	assertBool(t, pool, false, "spec", "avoidBuggyIPs")
+
+	ad := findObject(t, metallb, "L2Advertisement", "cozy-metallb", "cozystack")
+	assertString(t, ad, "metallb.io/v1beta1", "apiVersion")
+	assertStringSlice(t, ad, []string{"cozystack"}, "spec", "ipAddressPools")
+
+	subnets := readManifests(t, "src/infrastructure/base/networking/subnet-mtu.yaml")
+	ovnDefault := findObject(t, subnets, "Subnet", "", "ovn-default")
+	assertString(t, ovnDefault, "kubeovn.io/v1", "apiVersion")
+	assertBool(t, ovnDefault, true, "spec", "default")
+	assertString(t, ovnDefault, "10.244.0.0/16", "spec", "cidrBlock")
+	assertString(t, ovnDefault, "10.244.0.1", "spec", "gateway")
+	assertString(t, ovnDefault, "distributed", "spec", "gatewayType")
+	assertBool(t, ovnDefault, true, "spec", "natOutgoing")
+	assertInt(t, ovnDefault, 1362, "spec", "mtu")
+
+	join := findObject(t, subnets, "Subnet", "", "join")
+	assertString(t, join, "kubeovn.io/v1", "apiVersion")
+	assertBool(t, join, false, "spec", "default")
+	assertString(t, join, "100.64.0.0/16", "spec", "cidrBlock")
+	assertString(t, join, "100.64.0.1", "spec", "gateway")
+	assertBool(t, join, false, "spec", "natOutgoing")
+	assertInt(t, join, 1362, "spec", "mtu")
 }
 
 func testSingleDefaultStorageClass(t *testing.T) {
@@ -113,6 +186,43 @@ func testEnvironmentTenantCoreServices(t *testing.T) {
 			})
 		})
 	}
+}
+
+func testOpenBao(t *testing.T) {
+	docs := readManifests(t, "src/infrastructure/base/openbao/openbao.yaml")
+	bao := findObject(t, docs, "OpenBAO", "tenant-root", "guardian")
+
+	assertString(t, bao, "apps.cozystack.io/v1alpha1", "apiVersion")
+	assertInt(t, bao, 3, "spec", "replicas")
+	assertString(t, bao, "local-retain", "spec", "storageClass")
+	assertString(t, bao, "10Gi", "spec", "size")
+	assertBool(t, bao, true, "spec", "ui")
+	assertBool(t, bao, false, "spec", "external")
+	assertString(t, bao, "1", "spec", "resources", "cpu")
+	assertString(t, bao, "2Gi", "spec", "resources", "memory")
+
+	policies := readManifests(t, "src/infrastructure/base/openbao/networkpolicy.yaml")
+	policy := findObject(t, policies, "CiliumNetworkPolicy", "tenant-root", "allow-openbao-to-apiserver")
+	assertString(t, policy, "cilium.io/v2", "apiVersion")
+	assertString(t, policy, "openbao", "spec", "endpointSelector", "matchLabels", "app.kubernetes.io/name")
+
+	egress := sliceAt(t, policy, "spec", "egress")
+	if len(egress) != 2 {
+		t.Fatalf("spec.egress has %d entries, want 2", len(egress))
+	}
+	assertStringSlice(t, asManifest(t, egress[0], "spec.egress[0]"), []string{"kube-apiserver"}, "toEntities")
+
+	toPorts := sliceAt(t, asManifest(t, egress[1], "spec.egress[1]"), "toPorts")
+	if len(toPorts) != 1 {
+		t.Fatalf("spec.egress[1].toPorts has %d entries, want 1", len(toPorts))
+	}
+	ports := sliceAt(t, asManifest(t, toPorts[0], "spec.egress[1].toPorts[0]"), "ports")
+	if len(ports) != 1 {
+		t.Fatalf("spec.egress[1].toPorts[0].ports has %d entries, want 1", len(ports))
+	}
+	port := asManifest(t, ports[0], "spec.egress[1].toPorts[0].ports[0]")
+	assertString(t, port, "6443", "port")
+	assertString(t, port, "TCP", "protocol")
 }
 
 func testFluxHandoff(t *testing.T) {
@@ -255,6 +365,24 @@ func assertBool(t *testing.T, doc manifest, want bool, path ...string) {
 	}
 	if got != want {
 		t.Fatalf("%s = %v, want %v", dotPath(path), got, want)
+	}
+}
+
+func assertStringSlice(t *testing.T, doc manifest, want []string, path ...string) {
+	t.Helper()
+
+	gotValues := sliceAt(t, doc, path...)
+	if len(gotValues) != len(want) {
+		t.Fatalf("%s = %#v, want %#v", dotPath(path), gotValues, want)
+	}
+	for i, value := range gotValues {
+		got, ok := value.(string)
+		if !ok {
+			t.Fatalf("%s[%d] = %T(%#v), want string %q", dotPath(path), i, value, value, want[i])
+		}
+		if got != want[i] {
+			t.Fatalf("%s[%d] = %q, want %q", dotPath(path), i, got, want[i])
+		}
 	}
 }
 
