@@ -7,6 +7,8 @@ bazel_dep(name = "protobuf", version = "33.4")
 bazel_dep(name = "rules_buf", version = "0.5.4")
 bazel_dep(name = "rules_go", version = "0.59.0")
 bazel_dep(name = "gazelle", version = "0.40.0")
+bazel_dep(name = "rules_oci", version = "2.3.0")
+bazel_dep(name = "rules_pkg", version = "1.2.0")
 
 include("//src/tools/kubectl:kubectl.MODULE.bazel")
 include("//src/tools/boot-to-talos:boot-to-talos.MODULE.bazel")
@@ -54,3 +56,12 @@ go_sdk.download(version = "1.26.4")
 go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
 go_deps.from_file(go_mod = "//:go.mod")
 use_repo(go_deps, "in_gopkg_yaml_v3")
+
+oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
+oci.pull(
+    name = "nginx_unprivileged",
+    digest = "sha256:5aea7cc516b419e3526f47dd1531be31a56a046cfe44754d94f9383e13e2ee99",
+    image = "docker.io/nginxinc/nginx-unprivileged",
+    platforms = ["linux/amd64"],
+)
+use_repo(oci, "nginx_unprivileged", "nginx_unprivileged_linux_amd64")

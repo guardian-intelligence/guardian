@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: company-site
+  namespace: tenant-dev
+  labels:
+    app.kubernetes.io/name: company-site
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: dev
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: company-site
+      guardian.dev/stage: dev
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: company-site
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/stage: dev
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: company-site
+              guardian.dev/stage: dev
+      containers:
+        - name: company-site
+          image: harbor.guardianintelligence.org/guardian/company-site@sha256:e2dd66b82d50494c099fa5039068e166fde9df0212728d270719e0e5f2791ef0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            runAsNonRoot: true
+            runAsUser: 101
+            runAsGroup: 101
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: company-site
+  namespace: tenant-dev
+  labels:
+    app.kubernetes.io/name: company-site
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: dev
+spec:
+  selector:
+    app.kubernetes.io/name: company-site
+    guardian.dev/stage: dev
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: company-site
+  namespace: tenant-dev
+  annotations:
+    acme.cert-manager.io/http01-ingress-ingressclassname: tenant-root
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: tenant-root
+  tls:
+    - hosts:
+        - dev.gi.org
+      secretName: company-site-tls
+  rules:
+    - host: dev.gi.org
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: company-site
+                port:
+                  number: 80
