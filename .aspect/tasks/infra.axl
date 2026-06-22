@@ -844,6 +844,13 @@ def _unique_non_empty_lines(value):
             out.append(item)
     return out
 
+def _first_csv_value(value):
+    for item in value.split(","):
+        item = item.strip()
+        if item != "":
+            return item
+    return value.strip()
+
 def _expected_revision(ctx):
     if ctx.args.revision == "":
         ctx.std.io.stderr.write("ERROR: --revision is required; pass the merged main commit SHA that source-controller must have applied\n")
@@ -1076,7 +1083,7 @@ def _kubeconfig_impl(ctx):
             "--talosconfig",
             talosconfig,
             "--nodes",
-            ctx.args.nodes,
+            _first_csv_value(ctx.args.nodes),
             "--endpoints",
             ctx.args.endpoints,
             "--merge=false",

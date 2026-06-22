@@ -150,10 +150,11 @@ export GUARDIAN_MGMT_KUBECONFIG="$PWD/src/infrastructure/talm/kubeconfig"
 `aspect infra kubeconfig` runs repo-pinned `talm talosconfig` first so expired
 Talos client certificates are regenerated from the gitignored local Talm
 secrets, then runs repo-pinned `talm kubeconfig --merge=false --force` against
-the VLAN VIP and writes `src/infrastructure/talm/kubeconfig`. If the Talos CA
-itself was rotated and the local Talm secrets are stale, restore or regenerate
-the operator state through the bootstrap path instead. Do not use insecure TLS
-flags for source-controller validation.
+the VLAN VIP using the first node from the comma-separated management node list
+and writes `src/infrastructure/talm/kubeconfig`. If the Talos CA itself was
+rotated and the local Talm secrets are stale, restore or regenerate the operator
+state through the bootstrap path instead. Do not use insecure TLS flags for
+source-controller validation.
 The task checks for `src/infrastructure/talm/secrets.yaml` before invoking
 Talm, so a missing operator state fails before generating a fresh `talm.key` or
 `talosconfig.encrypted` in the repo.
