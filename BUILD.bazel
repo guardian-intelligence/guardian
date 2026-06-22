@@ -16,6 +16,7 @@ filegroup(
         "//src/infrastructure/base/storage:manifests",
         "//src/infrastructure/base/tenants:manifests",
         "//src/infrastructure/cmd/cozystack_backup_drill:cozystack_backup_drill",
+        "//src/infrastructure/cmd/cozystack_company_site_publish:cozystack_company_site_publish",
         "//src/infrastructure/cmd/cozystack_db_load:cozystack_db_load",
         "//src/infrastructure/cmd/cozystack_harbor_registry:cozystack_harbor_registry",
         "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load",

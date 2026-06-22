@@ -16,6 +16,7 @@ HARBOR_REGISTRY_TARGET = "//src/infrastructure/cmd/cozystack_harbor_registry:coz
 HTTP_LOAD_TARGET = "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load"
 NODE_OUTAGE_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill"
 OPENBAO_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill"
+COMPANY_SITE_PUBLISH_TARGET = "//src/infrastructure/cmd/cozystack_company_site_publish:cozystack_company_site_publish"
 GUARDIAN_MGMT_TALOS_NODES = [
     "10.8.0.11",
     "10.8.0.12",
@@ -149,6 +150,7 @@ INFRA_FILEGROUPS = [
 ]
 INFRA_TESTS = [
     "//src/infrastructure/cmd/cozystack_backup_drill:cozystack_backup_drill_test",
+    "//src/infrastructure/cmd/cozystack_company_site_publish:cozystack_company_site_publish_test",
     "//src/infrastructure/cmd/cozystack_db_load:cozystack_db_load_test",
     "//src/infrastructure/cmd/cozystack_harbor_registry:cozystack_harbor_registry_test",
     "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load_test",
@@ -1392,6 +1394,46 @@ def _openbao_drill_impl(ctx):
         label = "cozystack openbao drill",
     )
 
+def _publish_company_site_impl(ctx):
+    kubectl = _kubectl_path(ctx)
+    if kubectl == None:
+        return 1
+
+    rc = _check_live_context(ctx, kubectl)
+    if rc != 0:
+        return rc
+    if ctx.args.revision != "":
+        rc = _check_flux_revision(ctx, kubectl, ctx.args.revision)
+        if rc != 0:
+            return rc
+
+    publish_args = [
+        "--kubectl",
+        kubectl,
+        "--request-timeout",
+        ctx.args.request_timeout,
+        "--host",
+        ctx.args.host,
+        "--namespace",
+        ctx.args.namespace,
+        "--secret",
+        ctx.args.secret,
+        "--target",
+        ctx.args.target,
+        "--workspace",
+        ws_path(ctx),
+    ]
+    if ctx.args.kubeconfig != "":
+        publish_args.extend(["--kubeconfig", ctx.args.kubeconfig])
+
+    return checked_spawn(
+        ctx,
+        "bazelisk",
+        ["run", COMPANY_SITE_PUBLISH_TARGET, "--"] + publish_args,
+        cwd = ws_path(ctx),
+        label = "publish company-site image",
+    )
+
 validate = task(
     implementation = _validate_impl,
     name = "validate",
@@ -1530,6 +1572,22 @@ openbao_drill = task(
         "snapshot_name": args.string(default = "", description = "Optional pod-local snapshot filename for snapshot mode."),
         "statefulset": args.string(default = "openbao-guardian", description = "OpenBao StatefulSet name."),
         "wait_timeout": args.string(default = "5m", description = "Timeout for OpenBao readiness waits."),
+    },
+)
+
+publish_company_site = task(
+    implementation = _publish_company_site_impl,
+    name = "publish-company-site",
+    group = ["infra"],
+    summary = "Publish the checked-in company-site OCI image to root Harbor using cluster-sourced Harbor credentials.",
+    args = {
+        "host": args.string(default = "harbor.guardianintelligence.org", description = "Root Harbor registry host."),
+        "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
+        "namespace": args.string(default = "tenant-root", description = "Namespace containing the Harbor credentials Secret."),
+        "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
+        "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before publishing."),
+        "secret": args.string(default = "harbor-guardian-credentials", description = "Harbor credentials Secret name."),
+        "target": args.string(default = "//src/products/company/site:push-harbor", description = "Bazel oci_push target to run."),
     },
 )
 

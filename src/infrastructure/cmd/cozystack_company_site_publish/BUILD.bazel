@@ -1,0 +1,20 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+
+go_library(
+    name = "cozystack_company_site_publish_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/infrastructure/cmd/cozystack_company_site_publish",
+    visibility = ["//visibility:private"],
+)
+
+go_binary(
+    name = "cozystack_company_site_publish",
+    embed = [":cozystack_company_site_publish_lib"],
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "cozystack_company_site_publish_test",
+    srcs = ["main_test.go"],
+    embed = [":cozystack_company_site_publish_lib"],
+)
