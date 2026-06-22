@@ -71,6 +71,8 @@ aspect infra outage-uncordon --kubeconfig "${KUBECONFIG}" --node <node>
 - Latitude adoption is pending a Latitude token and VLAN assignment import IDs.
 - Cloudflare DNS state has been partially adopted but DNS changes have not been
   applied.
+- Cloudflare A-record targets are derived from the management node inventory
+  (`nodes[*].public_ipv4`) rather than a separate DNS IP list.
 - R2 backup credential values remain a secret-zero bootstrap input and must be
   present in the operator environment before `aspect infra seed-db-backup-secret`
   is run.

@@ -16,6 +16,9 @@
 - Render/build validation: `aspect infra dns-plan`, `aspect infra preflight`.
 - Reconciled resources: Cloudflare A records for apex, dev, gamma, oci,
   dashboard, and grafana.
+- DNS target IPs are derived from `nodes[*].public_ipv4` in
+  `src/infrastructure/inventory/guardian-mgmt.json`; there is no second
+  checked-in public-IP list for the Cloudflare root.
 - Healthy baseline command: `aspect infra live-snapshot --kubeconfig "${KUBECONFIG}"`.
 - Result: pending.
 

@@ -1,8 +1,10 @@
 # cloudflare-dns OpenTofu root
 
 Declares the public DNS records that publish the management cluster's ingress
-surfaces. Desired record names and node public IPs come from
-`src/infrastructure/inventory/guardian-mgmt.json`.
+surfaces. Desired record names come from
+`src/infrastructure/inventory/guardian-mgmt.json`; target A-record IPs are
+derived from `nodes[*].public_ipv4` in that same inventory so the node list is
+the only checked-in public-IP source.
 
 Authentication uses the Cloudflare provider's standard environment variable.
 OpenTofu state is stored in the R2 bucket/key declared in `versions.tf`; the S3

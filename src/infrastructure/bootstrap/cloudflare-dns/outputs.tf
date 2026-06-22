@@ -9,3 +9,7 @@ output "managed_public_a_records" {
     }
   }
 }
+
+output "management_public_ipv4" {
+  value = local.management_public_ipv4
+}

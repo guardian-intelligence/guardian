@@ -23,11 +23,6 @@
       "zone_id": "c952fb5989d232593ec9cca71030cb58",
       "zone_name": "guardianintelligence.org"
     },
-    "public_ipv4": [
-      "206.223.228.101",
-      "45.250.254.119",
-      "206.223.228.87"
-    ],
     "dns_names": [
       "guardianintelligence.org",
       "dev.guardianintelligence.org",
