@@ -1018,11 +1018,26 @@ def _tofu_init_impl(ctx):
         return 1
     return _tofu_backend_init(ctx, roots, endpoint)
 
+def _require_talm_operator_state(ctx, root):
+    secrets = root + "/secrets.yaml"
+    if not ctx.std.fs.exists(secrets):
+        ctx.std.io.stderr.write(
+            "ERROR: "
+            + secrets
+            + " is required before refreshing guardian-mgmt kubeconfig; restore the current Talm operator state instead of generating new local key material.\n",
+        )
+        return 1
+    return 0
+
 def _kubeconfig_impl(ctx):
     root = ws_path(ctx, ctx.args.root)
     talosconfig = ctx.args.talosconfig
     if talosconfig == "":
         talosconfig = root + "/talosconfig"
+
+    rc = _require_talm_operator_state(ctx, root)
+    if rc != 0:
+        return rc
 
     rc = checked_spawn(
         ctx,
