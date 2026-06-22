@@ -23,6 +23,7 @@ checks to run; it is not a separate source of truth.
 | LINSTOR storage classes | `src/infrastructure/base/storage/storageclasses.yaml` |
 | Environment tenants | `src/infrastructure/base/tenants/environments.yaml` |
 | Environment Cozystack apps | `src/infrastructure/environments/` |
+| Company-site OCI artifact | `src/products/company/site/` |
 
 ## Current Facts
 
@@ -72,7 +73,8 @@ package publishes the dashboard/API endpoints, environment tenants use the
 expected `*.gi.org` hosts, MetalLB and Kube-OVN keep the L2/MTU topology,
 `replicated` is the only default StorageClass, root and environment
 Postgres/Harbor/ClickHouse apps use the intended HA/storage shape, OpenBao stays
-declared in `tenant-root`, and Flux reconciles base before tenant apps.
+declared in `tenant-root`, the company site is declared for dev/gamma/prod, and
+Flux reconciles base before tenant apps.
 
 Local validation does not require backend credentials:
 
@@ -217,6 +219,37 @@ All environment app specs select `storageClass: replicated` and run three
 replicas for the stateful control-plane services so single-node outage drills
 exercise the intended topology.
 
+## Company Site
+
+The active company-site artifact is the static OCI image at
+`//src/products/company/site:image`. It uses the digest-pinned
+`nginx-unprivileged` base from `MODULE.bazel`, serves only checked-in static
+files, and exposes `/healthz`, `/livez`, and `/metrics`.
+
+Build the image with:
+
+```sh
+bazelisk build //src/products/company/site:image
+```
+
+Publish the image to the root Harbor registry after Harbor is reconciled:
+
+```sh
+bazelisk run //src/products/company/site:push-harbor
+```
+
+The checked-in environment layer declares:
+
+- `tenant-dev`: `Deployment`, `Service`, and `Ingress` for `dev.gi.org`.
+- `tenant-gamma`: `Deployment`, `Service`, and `Ingress` for `gamma.gi.org`.
+- `tenant-prod`: `Deployment`, `Service`, and `Ingress` for
+  `guardianintelligence.org`.
+
+Each deployment runs three replicas, uses the `tenant-root` ingress class, and
+references the immutable Harbor image digest produced by the checked-in static
+artifact. The full TanStack company site remains archived under `src-old/` until
+its pinned JS workspace is restored as an active build graph slice.
+
 ## Live Checks
 
 Run these after Flux has reconciled the base:
@@ -234,6 +267,9 @@ kubectl get ns tenant-dev tenant-gamma tenant-prod \
 kubectl -n tenant-dev get postgreses.apps.cozystack.io,harbors.apps.cozystack.io,clickhouses.apps.cozystack.io
 kubectl -n tenant-gamma get postgreses.apps.cozystack.io,harbors.apps.cozystack.io,clickhouses.apps.cozystack.io
 kubectl -n tenant-prod get postgreses.apps.cozystack.io,harbors.apps.cozystack.io,clickhouses.apps.cozystack.io
+kubectl -n tenant-dev get deploy,svc,ingress company-site
+kubectl -n tenant-gamma get deploy,svc,ingress company-site
+kubectl -n tenant-prod get deploy,svc,ingress company-site
 kubectl -n tenant-root get openbao guardian
 ```
 
@@ -253,6 +289,9 @@ Expected results:
   `tenant-root`
 - each tenant namespace has `Postgres/guardian`, `Harbor/guardian`, and
   `ClickHouse/guardian`
+- each tenant namespace has the company-site `Deployment`, `Service`, and
+  `Ingress`; the dev and gamma ingress hosts are `dev.gi.org` and
+  `gamma.gi.org`, and prod is `guardianintelligence.org`
 - OpenBao is deployed as the Cozystack-managed `guardian` app in `tenant-root`
 
 Talos-side network checks:
@@ -273,7 +312,8 @@ separate PRs with their own validation:
 
 - Bootstrap CLI wrapper for the full Talm/Talos path.
 - Latitude VLAN assignment imports, once assignment IDs are collected.
-- Company-site surfaces for dev, gamma, and prod.
+- Publishing the checked-in company-site OCI image to Harbor and capturing live
+  readiness evidence for dev, gamma, and prod.
 - Dashboard readiness evidence beyond the Cozystack platform package exposure.
 - Backup specs for root and environment Postgres/Harbor/ClickHouse, wired to
   declared OpenBao/R2-projected Secrets.

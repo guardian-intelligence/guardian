@@ -1,6 +1,9 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  - dev/company-site.yaml
   - dev/core-services.yaml
+  - gamma/company-site.yaml
   - gamma/core-services.yaml
+  - prod/company-site.yaml
   - prod/core-services.yaml

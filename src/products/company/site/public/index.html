@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Guardian Intelligence</title>
+    <meta name="description" content="Guardian Intelligence builds open, self-hostable private cloud infrastructure for software companies and agents.">
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #101413;
+        color: #eef4ef;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #101413;
+      }
+
+      main {
+        min-height: 100vh;
+        display: grid;
+        align-items: center;
+        padding: clamp(28px, 6vw, 72px);
+      }
+
+      .shell {
+        width: min(1120px, 100%);
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(180px, 320px);
+        gap: clamp(32px, 8vw, 104px);
+        align-items: center;
+      }
+
+      .mark {
+        width: min(100%, 320px);
+        justify-self: end;
+      }
+
+      h1 {
+        margin: 0;
+        max-width: 840px;
+        font-size: clamp(3rem, 10vw, 8rem);
+        line-height: 0.94;
+        letter-spacing: 0;
+      }
+
+      p {
+        max-width: 720px;
+        margin: 28px 0 0;
+        color: #c6d3ca;
+        font-size: clamp(1rem, 2vw, 1.25rem);
+        line-height: 1.65;
+      }
+
+      nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 18px;
+        margin-top: 36px;
+      }
+
+      a {
+        color: #80e7d2;
+        text-decoration-thickness: 0.08em;
+        text-underline-offset: 0.25em;
+      }
+
+      @media (max-width: 760px) {
+        main {
+          align-items: start;
+        }
+
+        .shell {
+          grid-template-columns: 1fr;
+        }
+
+        .mark {
+          justify-self: start;
+          width: 120px;
+          order: -1;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="shell" aria-label="Guardian Intelligence">
+        <div>
+          <h1>Guardian Intelligence</h1>
+          <p>
+            We build Guardian, an open self-hostable private cloud for software
+            companies and agents. Guardian is designed for safe operations,
+            durable recovery, and fast delivery from infrastructure you control.
+          </p>
+          <nav aria-label="Primary">
+            <a href="/healthz">Health</a>
+            <a href="/metrics">Metrics</a>
+          </nav>
+        </div>
+        <img class="mark" src="/mark.svg" alt="Guardian Intelligence shield mark">
+      </section>
+    </main>
+  </body>
+</html>

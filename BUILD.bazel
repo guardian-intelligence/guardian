@@ -13,6 +13,7 @@ filegroup(
         "//src/infrastructure/base/storage:manifests",
         "//src/infrastructure/base/tenants:manifests",
         "//src/infrastructure/environments:manifests",
+        "//src/products/company/site:image",
     ],
     visibility = ["//visibility:public"],
 )

@@ -2,6 +2,7 @@ package tests
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -20,6 +21,7 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("single default storage class", testSingleDefaultStorageClass)
 	t.Run("root tenant core services", testRootTenantCoreServices)
 	t.Run("environment tenant core services", testEnvironmentTenantCoreServices)
+	t.Run("company site", testCompanySite)
 	t.Run("openbao", testOpenBao)
 	t.Run("flux handoff", testFluxHandoff)
 }
@@ -188,6 +190,104 @@ func testEnvironmentTenantCoreServices(t *testing.T) {
 	}
 }
 
+func testCompanySite(t *testing.T) {
+	assertRunfileContent(t, "src/products/company/site/public/healthz", "ok\n")
+	assertRunfileContent(t, "src/products/company/site/public/livez", "ok\n")
+
+	metrics := readRunfile(t, "src/products/company/site/public/metrics")
+	if !bytes.Contains(metrics, []byte(`company_site_build_info{app="company-site",runtime="nginx-static"} 1`)) {
+		t.Fatalf("company-site metrics endpoint does not expose build info: %q", metrics)
+	}
+
+	index := readRunfile(t, "src/products/company/site/public/index.html")
+	if !bytes.Contains(index, []byte("Guardian Intelligence")) ||
+		!bytes.Contains(index, []byte("open self-hostable private cloud")) {
+		t.Fatalf("company-site index.html does not contain the expected company copy")
+	}
+
+	image := "harbor.guardianintelligence.org/guardian/company-site@" + readCompanySiteImageDigest(t)
+
+	for _, env := range []struct {
+		name      string
+		namespace string
+		host      string
+	}{
+		{name: "dev", namespace: "tenant-dev", host: "dev.gi.org"},
+		{name: "gamma", namespace: "tenant-gamma", host: "gamma.gi.org"},
+		{name: "prod", namespace: "tenant-prod", host: "guardianintelligence.org"},
+	} {
+		t.Run(env.name, func(t *testing.T) {
+			docs := readManifests(t, "src/infrastructure/environments/"+env.name+"/company-site.yaml")
+
+			deploy := findObject(t, docs, "Deployment", env.namespace, "company-site")
+			assertString(t, deploy, "apps/v1", "apiVersion")
+			assertInt(t, deploy, 3, "spec", "replicas")
+			assertString(t, deploy, "RollingUpdate", "spec", "strategy", "type")
+			assertInt(t, deploy, 0, "spec", "strategy", "rollingUpdate", "maxUnavailable")
+			assertInt(t, deploy, 1, "spec", "strategy", "rollingUpdate", "maxSurge")
+			assertString(t, deploy, "company-site", "spec", "selector", "matchLabels", "app.kubernetes.io/name")
+			assertString(t, deploy, env.name, "spec", "selector", "matchLabels", "guardian.dev/stage")
+			assertString(t, deploy, "RuntimeDefault", "spec", "template", "spec", "securityContext", "seccompProfile", "type")
+
+			spread := sliceAt(t, deploy, "spec", "template", "spec", "topologySpreadConstraints")
+			if len(spread) != 1 {
+				t.Fatalf("topologySpreadConstraints has %d entries, want 1", len(spread))
+			}
+			assertString(t, asManifest(t, spread[0], "topologySpreadConstraints[0]"), "kubernetes.io/hostname", "topologyKey")
+
+			containers := sliceAt(t, deploy, "spec", "template", "spec", "containers")
+			if len(containers) != 1 {
+				t.Fatalf("containers has %d entries, want 1", len(containers))
+			}
+			container := asManifest(t, containers[0], "containers[0]")
+			assertString(t, container, "company-site", "name")
+			assertString(t, container, image, "image")
+			assertString(t, container, "IfNotPresent", "imagePullPolicy")
+			assertBool(t, container, false, "securityContext", "allowPrivilegeEscalation")
+			assertBool(t, container, true, "securityContext", "runAsNonRoot")
+			assertInt(t, container, 101, "securityContext", "runAsUser")
+			assertString(t, container, "/healthz", "readinessProbe", "httpGet", "path")
+			assertString(t, container, "/livez", "livenessProbe", "httpGet", "path")
+
+			service := findObject(t, docs, "Service", env.namespace, "company-site")
+			assertString(t, service, "v1", "apiVersion")
+			assertString(t, service, "company-site", "spec", "selector", "app.kubernetes.io/name")
+			assertString(t, service, env.name, "spec", "selector", "guardian.dev/stage")
+			servicePorts := sliceAt(t, service, "spec", "ports")
+			if len(servicePorts) != 1 {
+				t.Fatalf("service ports has %d entries, want 1", len(servicePorts))
+			}
+			assertInt(t, asManifest(t, servicePorts[0], "spec.ports[0]"), 80, "port")
+			assertString(t, asManifest(t, servicePorts[0], "spec.ports[0]"), "http", "targetPort")
+
+			ingress := findObject(t, docs, "Ingress", env.namespace, "company-site")
+			assertString(t, ingress, "networking.k8s.io/v1", "apiVersion")
+			assertString(t, ingress, "tenant-root", "metadata", "annotations", "acme.cert-manager.io/http01-ingress-ingressclassname")
+			assertString(t, ingress, "letsencrypt-prod", "metadata", "annotations", "cert-manager.io/cluster-issuer")
+			assertString(t, ingress, "tenant-root", "spec", "ingressClassName")
+			assertIngressHost(t, ingress, env.host)
+		})
+	}
+}
+
+func readCompanySiteImageDigest(t *testing.T) string {
+	t.Helper()
+
+	var index struct {
+		Manifests []struct {
+			Digest string `json:"digest"`
+		} `json:"manifests"`
+	}
+	data := readRunfile(t, "src/products/company/site/image/index.json")
+	if err := json.Unmarshal(data, &index); err != nil {
+		t.Fatalf("parse company-site OCI index: %v", err)
+	}
+	if len(index.Manifests) != 1 {
+		t.Fatalf("company-site OCI index has %d manifests, want 1", len(index.Manifests))
+	}
+	return index.Manifests[0].Digest
+}
+
 func testOpenBao(t *testing.T) {
 	docs := readManifests(t, "src/infrastructure/base/openbao/openbao.yaml")
 	bao := findObject(t, docs, "OpenBAO", "tenant-root", "guardian")
@@ -290,11 +390,7 @@ func assertApp(t *testing.T, docs []manifest, want appExpectation) {
 func readManifests(t *testing.T, rel string) []manifest {
 	t.Helper()
 
-	path := runfilePath(rel)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
+	data := readRunfile(t, rel)
 
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var docs []manifest
@@ -305,7 +401,7 @@ func readManifests(t *testing.T, rel string) []manifest {
 			break
 		}
 		if err != nil {
-			t.Fatalf("parse %s: %v", path, err)
+			t.Fatalf("parse %s: %v", rel, err)
 		}
 		if len(doc) == 0 {
 			continue
@@ -313,6 +409,24 @@ func readManifests(t *testing.T, rel string) []manifest {
 		docs = append(docs, doc)
 	}
 	return docs
+}
+
+func readRunfile(t *testing.T, rel string) []byte {
+	t.Helper()
+
+	path := runfilePath(rel)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return data
+}
+
+func assertRunfileContent(t *testing.T, rel, want string) {
+	t.Helper()
+	if got := string(readRunfile(t, rel)); got != want {
+		t.Fatalf("%s = %q, want %q", rel, got, want)
+	}
 }
 
 func runfilePath(rel string) string {
@@ -384,6 +498,34 @@ func assertStringSlice(t *testing.T, doc manifest, want []string, path ...string
 			t.Fatalf("%s[%d] = %q, want %q", dotPath(path), i, got, want[i])
 		}
 	}
+}
+
+func assertIngressHost(t *testing.T, ingress manifest, host string) {
+	t.Helper()
+
+	tls := sliceAt(t, ingress, "spec", "tls")
+	if len(tls) != 1 {
+		t.Fatalf("spec.tls has %d entries, want 1", len(tls))
+	}
+	assertStringSlice(t, asManifest(t, tls[0], "spec.tls[0]"), []string{host}, "hosts")
+	assertString(t, asManifest(t, tls[0], "spec.tls[0]"), "company-site-tls", "secretName")
+
+	rules := sliceAt(t, ingress, "spec", "rules")
+	if len(rules) != 1 {
+		t.Fatalf("spec.rules has %d entries, want 1", len(rules))
+	}
+	rule := asManifest(t, rules[0], "spec.rules[0]")
+	assertString(t, rule, host, "host")
+
+	paths := sliceAt(t, rule, "http", "paths")
+	if len(paths) != 1 {
+		t.Fatalf("spec.rules[0].http.paths has %d entries, want 1", len(paths))
+	}
+	path := asManifest(t, paths[0], "spec.rules[0].http.paths[0]")
+	assertString(t, path, "/", "path")
+	assertString(t, path, "Prefix", "pathType")
+	assertString(t, path, "company-site", "backend", "service", "name")
+	assertInt(t, path, 80, "backend", "service", "port", "number")
 }
 
 func stringAt(doc manifest, path ...string) string {
