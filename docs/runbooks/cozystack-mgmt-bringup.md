@@ -86,9 +86,11 @@ aspect infra evidence \
 
 This task builds the repo-pinned `kubectl`, queries the live management cluster,
 and writes raw JSON snapshots plus `management-readiness.json` and
-`management-readiness.md` under the selected output directory. It exits nonzero
-when the cluster is unreachable or when expected readiness checks fail; do not
-check in failed output as proof of readiness.
+`management-readiness.md` under the selected output directory. It checks the
+platform packages, tenants, apps, company-site surfaces, backup/restore
+prerequisites, and live backup/restore evidence for the Postgres and ClickHouse
+apps. It exits nonzero when the cluster is unreachable or when expected
+readiness checks fail; do not check in failed output as proof of readiness.
 
 Local validation does not require backend credentials:
 
@@ -320,9 +322,11 @@ Expected result: addresses and routes show the VLAN subnet, and KubeSpan has no
 active mesh peers.
 
 The `aspect infra evidence` task automates the Kubernetes-side readiness checks
-above. It intentionally does not replace the later load-test,
-disaster-recovery, or single-node-outage reports; those reports still need live
-drills and checked-in evidence for each component.
+above, including backup controller, Velero, `BackupClass`, `Plan`, `BackupJob`,
+`Backup`, and `RestoreJob` checks for the Postgres and ClickHouse apps. It
+intentionally does not replace the later load-test, disaster-recovery, or
+single-node-outage reports; those reports still need live drills and checked-in
+evidence for each component.
 
 ## Not Done In This Substrate Slice
 
