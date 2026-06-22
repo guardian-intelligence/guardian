@@ -20,7 +20,12 @@
   `src/infrastructure/inventory/guardian-mgmt.json`; there is no second
   checked-in public-IP list for the Cloudflare root.
 - Healthy baseline command: `aspect infra live-snapshot --kubeconfig "${KUBECONFIG}"`.
-- Result: pending.
+- Result: read-only `aspect infra dns-plan` succeeded against the remote R2
+  OpenTofu backend and Cloudflare API. Current plan is 14 A records to add and
+  3 existing records to update; no records are planned for deletion. Not
+  applied. Apex and `oci.guardianintelligence.org` still plan to move away from
+  `206.223.228.99`, so apply is held until the management cluster is ready for
+  public traffic.
 
 ## Load Test
 
@@ -48,5 +53,6 @@
 
 ## Residual Risk
 
-- Cloudflare DNS has been adopted into state but not applied from this
-  workspace.
+- Cloudflare DNS has been partially adopted into state but not applied from
+  this workspace. The planned apex and `oci.guardianintelligence.org` updates
+  are intentional traffic moves and must remain gated on live cluster readiness.

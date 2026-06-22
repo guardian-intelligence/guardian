@@ -77,6 +77,10 @@ aspect infra outage-uncordon --kubeconfig "${KUBECONFIG}" --node <node>
   applied.
 - Cloudflare A-record targets are derived from the management node inventory
   (`nodes[*].public_ipv4`) rather than a separate DNS IP list.
+- A read-only `aspect infra dns-plan` against remote state succeeded: 14 A
+  records to add, 3 records to update, and 0 to destroy. Apply remains gated
+  because apex and `oci.guardianintelligence.org` still move public traffic from
+  `206.223.228.99` to the management cluster IP set.
 - R2 backup credential values remain a secret-zero bootstrap input and must be
   present in the operator environment before `aspect infra seed-db-backup-secret`
   is run.
