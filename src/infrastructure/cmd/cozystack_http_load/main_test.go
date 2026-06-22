@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestResolveTarget(t *testing.T) {
 	tests := []struct {
@@ -82,6 +85,22 @@ func TestResolveTargetValidation(t *testing.T) {
 	}
 	if !got.NeedsOpenBaoPort {
 		t.Fatalf("openbao without local port did not request port-forward: %#v", got)
+	}
+}
+
+func TestOpenBaoPortForwardArgs(t *testing.T) {
+	cfg := loadConfig{Kubeconfig: "/kubeconfig", RequestTimeout: "15s"}
+	want := []string{
+		"--kubeconfig", "/kubeconfig",
+		"--request-timeout=15s",
+		"-n", "tenant-root",
+		"port-forward",
+		"--address", "127.0.0.1",
+		"svc/openbao-guardian",
+		"18200:8200",
+	}
+	if got := openBaoPortForwardArgs(cfg, 18200); !reflect.DeepEqual(got, want) {
+		t.Fatalf("openBaoPortForwardArgs() = %#v, want %#v", got, want)
 	}
 }
 

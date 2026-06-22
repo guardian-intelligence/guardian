@@ -175,6 +175,13 @@ The current repo-native bootstrap surface is:
 aspect infra tofu-init
 
 aspect infra bootstrap --revision "<merged-main-commit-sha>"
+
+aspect infra openbao-drill \
+  --mode init-unseal \
+  --revision "<merged-main-commit-sha>"
+
+aspect infra openbao-apply \
+  --revision "<merged-main-commit-sha>"
 ```
 
 It is intentionally a thin orchestration path over standard tools and existing
@@ -188,6 +195,14 @@ task then prints the standard OpenTofu `output -json` for
 refreshes the gitignored Talm kubeconfig, runs the Talos L2 gate, and then runs
 the same live source-controller checks as `aspect infra live`. It does not
 define a Guardian-specific inventory format or evidence schema.
+OpenBao API configuration is a separate post-app step: initialize/unseal the
+Cozystack OpenBao app with `aspect infra openbao-drill --mode init-unseal`, then
+run `aspect infra openbao-apply`. The apply task waits for the OpenBao
+StatefulSet, reads the cluster-local bootstrap token Secret without printing
+secret material, opens a local `kubectl port-forward`, initializes the standard
+R2-backed OpenTofu backend, and applies
+`src/infrastructure/bootstrap/guardian-mgmt-openbao` with
+`openbao_addr=http://127.0.0.1:<port>`.
 
 The minimal host-come-up CLI delegates to the same task:
 
@@ -246,10 +261,11 @@ Live planning requires:
 - The checked-in Cloudflare account id in
   `src/infrastructure/bootstrap/backend.tfvars`, unless intentionally overriding
   the derived endpoint with `AWS_ENDPOINT_URL_S3` or a task flag.
-- `VAULT_TOKEN` when planning or applying
-  `src/infrastructure/bootstrap/guardian-mgmt-openbao`; pass
-  `-var=openbao_addr=...` when planning through a local port-forward instead of
-  the default in-cluster service address.
+- A healthy, initialized/unsealed OpenBao app and its cluster-local
+  `openbao-guardian-bootstrap` Secret when applying
+  `src/infrastructure/bootstrap/guardian-mgmt-openbao` through
+  `aspect infra openbao-apply`. The task supplies `VAULT_TOKEN` from that Secret
+  to the repo-pinned OpenTofu process without printing it.
 
 ```sh
 aspect infra tofu-init \
@@ -257,6 +273,10 @@ aspect infra tofu-init \
 
 bazelisk run @opentofu_linux_amd64//:tofu_bin -- \
   -chdir="$PWD/src/infrastructure/bootstrap/guardian-mgmt" plan -input=false
+
+aspect infra openbao-apply \
+  --mode plan \
+  --revision "<merged-main-commit-sha>"
 ```
 
 The checked-in import blocks adopt the known Virtual Network and three servers.
@@ -523,8 +543,8 @@ R2 credentials would otherwise land in OpenTofu state. There are no checked-in
 `BackupJob` resources yet. ClickHouse app backup is enabled and daily
 `Plan/guardian-clickhouse-daily` resources are declared in root/dev/gamma/prod;
 they require OpenBao to be initialized/unsealed, the OpenTofu root to be
-applied, and real kv secret values to exist before the sidecars and scheduled
-jobs can succeed.
+applied with `aspect infra openbao-apply`, and real kv secret values to exist
+before the sidecars and scheduled jobs can succeed.
 
 The checked-in environment app layer declares the same core service set in each
 environment namespace:
