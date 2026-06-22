@@ -88,6 +88,61 @@ type Artifact struct {
 	URI    string `json:"uri,omitempty"`
 }
 
+type CoverageKey struct {
+	ReportType  string
+	Component   string
+	Environment string
+}
+
+func ExpectedCoverage() []CoverageKey {
+	var out []CoverageKey
+	for _, component := range []string{"cnpg_postgres", "harbor", "clickhouse"} {
+		out = appendCoverage(out, component, []string{"root", "dev", "gamma", "prod"})
+	}
+	out = appendCoverage(out, "openbao", []string{"root"})
+	out = appendCoverage(out, "cozystack_dashboard", []string{"root"})
+	out = appendCoverage(out, "company_site", []string{"dev", "gamma", "prod"})
+	return out
+}
+
+func Coverage(report Report) CoverageKey {
+	return CoverageKey{
+		ReportType:  report.ReportType,
+		Component:   report.Component,
+		Environment: report.Environment,
+	}
+}
+
+func MissingCoverage(reports []Report) []CoverageKey {
+	seen := map[CoverageKey]bool{}
+	for _, report := range reports {
+		seen[Coverage(report)] = true
+	}
+
+	var missing []CoverageKey
+	for _, expected := range ExpectedCoverage() {
+		if !seen[expected] {
+			missing = append(missing, expected)
+		}
+	}
+	return missing
+}
+
+func UnexpectedCoverage(reports []Report) []CoverageKey {
+	expected := expectedCoverageSet()
+	seenUnexpected := map[CoverageKey]bool{}
+	var unexpected []CoverageKey
+	for _, report := range reports {
+		key := Coverage(report)
+		if expected[key] || seenUnexpected[key] {
+			continue
+		}
+		seenUnexpected[key] = true
+		unexpected = append(unexpected, key)
+	}
+	return unexpected
+}
+
 func Decode(data []byte) (Report, error) {
 	var report Report
 	dec := json.NewDecoder(strings.NewReader(string(data)))
@@ -239,4 +294,25 @@ func require(errs *[]string, ok bool, msg string) {
 	if !ok {
 		*errs = append(*errs, msg)
 	}
+}
+
+func appendCoverage(out []CoverageKey, component string, environments []string) []CoverageKey {
+	for _, environment := range environments {
+		for _, reportType := range []string{"load_test", "disaster_recovery", "single_node_outage"} {
+			out = append(out, CoverageKey{
+				ReportType:  reportType,
+				Component:   component,
+				Environment: environment,
+			})
+		}
+	}
+	return out
+}
+
+func expectedCoverageSet() map[CoverageKey]bool {
+	out := map[CoverageKey]bool{}
+	for _, expected := range ExpectedCoverage() {
+		out[expected] = true
+	}
+	return out
 }
