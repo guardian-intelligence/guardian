@@ -1,10 +1,9 @@
-exports_files([
-    "buf.yaml",
-])
+load("@rules_go//go:def.bzl", "go_test")
 
-filegroup(
-    name = "build",
-    srcs = [
+go_test(
+    name = "manifest_invariants_test",
+    srcs = ["manifest_invariants_test.go"],
+    data = [
         "//src/infrastructure/base/apps:manifests",
         "//src/infrastructure/base/cozystack:manifests",
         "//src/infrastructure/base/flux:manifests",
@@ -14,5 +13,7 @@ filegroup(
         "//src/infrastructure/base/tenants:manifests",
         "//src/infrastructure/environments:manifests",
     ],
-    visibility = ["//visibility:public"],
+    deps = [
+        "@in_gopkg_yaml_v3//:yaml_v3",
+    ],
 )
