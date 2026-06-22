@@ -8,11 +8,14 @@ const expectedStatuses = (__ENV.EXPECTED_STATUSES || "200")
   .filter((value) => !Number.isNaN(value));
 const requestName = __ENV.REQUEST_NAME || "guardian-http-load";
 
+http.setResponseCallback(http.expectedStatuses(...expectedStatuses));
+
 export const options = {
   vus: Number(__ENV.K6_VUS || "1"),
   duration: __ENV.K6_DURATION || "30s",
   thresholds: {
     http_req_failed: [__ENV.K6_HTTP_REQ_FAILED_THRESHOLD || "rate<0.01"],
+    http_reqs: ["count>0"],
   },
   summaryTrendStats: ["avg", "min", "med", "p(95)", "p(99)", "max"],
 };
