@@ -50,6 +50,7 @@ aspect infra outage-snapshot --kubeconfig "${KUBECONFIG}" --node <node>
 aspect infra outage-cordon --kubeconfig "${KUBECONFIG}" --node <node>
 aspect infra outage-drain --kubeconfig "${KUBECONFIG}" --node <node>
 aspect infra outage-uncordon --kubeconfig "${KUBECONFIG}" --node <node>
+aspect infra outage-run --kubeconfig "${KUBECONFIG}" --node <node> --timeout 10m
 ```
 
 ## Current Evidence
@@ -81,6 +82,9 @@ aspect infra outage-uncordon --kubeconfig "${KUBECONFIG}" --node <node>
 - The full opt-in load/DR sequence now has a repo-owned `aspect infra
   evidence-run` task that runs clean/apply/wait/restore/logs/snapshot/capture
   and captures degraded state when a step fails.
+- The Kubernetes-side single-node outage rehearsal now has a repo-owned
+  `aspect infra outage-run` task that captures before/drained/after evidence
+  and preserves failed-state output.
 - Live Kubernetes evidence is pending because the `guardian-mgmt` kubeconfig and
   converged cluster are not present in this workspace.
 - Latitude adoption is pending a Latitude token and VLAN assignment import IDs.

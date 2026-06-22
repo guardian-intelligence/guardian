@@ -241,6 +241,16 @@ survive a single-node failure.
 Kubernetes evacuation rehearsal:
 
 ```sh
+aspect infra outage-run \
+  --kubeconfig "${KUBECONFIG}" \
+  --talosconfig "${TALOSCONFIG}" \
+  --node <node> \
+  --timeout 10m
+```
+
+The equivalent expanded sequence is:
+
+```sh
 aspect infra outage-snapshot --kubeconfig "${KUBECONFIG}" --node <node>
 aspect infra outage-cordon --kubeconfig "${KUBECONFIG}" --node <node>
 aspect infra outage-drain --kubeconfig "${KUBECONFIG}" --node <node>
@@ -250,8 +260,11 @@ aspect infra outage-uncordon --kubeconfig "${KUBECONFIG}" --node <node>
 aspect infra outage-snapshot --kubeconfig "${KUBECONFIG}" --node <node>
 ```
 
-This proves Kubernetes scheduling and rollout recovery. It is not a substitute
-for the required hardware outage drill.
+`outage-run` is the preferred Kubernetes-side rehearsal command. It captures
+`outage-before`, `outage-drained`, and `outage-after` evidence directories and
+attempts an `outage-failed` capture if a step fails. This proves Kubernetes
+scheduling and rollout recovery. It is not a substitute for the required
+hardware outage drill.
 
 Hardware outage drill:
 

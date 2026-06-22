@@ -40,6 +40,7 @@ load(
     infra_live_snapshot = "live_snapshot",
     infra_outage_cordon = "outage_cordon",
     infra_outage_drain = "outage_drain",
+    infra_outage_run = "outage_run",
     infra_outage_snapshot = "outage_snapshot",
     infra_outage_uncordon = "outage_uncordon",
     infra_output = "output",
@@ -87,6 +88,7 @@ def config(ctx):
     ctx.tasks.add(infra_live_snapshot)
     ctx.tasks.add(infra_outage_cordon)
     ctx.tasks.add(infra_outage_drain)
+    ctx.tasks.add(infra_outage_run)
     ctx.tasks.add(infra_outage_snapshot)
     ctx.tasks.add(infra_outage_uncordon)
     ctx.tasks.add(infra_output)

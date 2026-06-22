@@ -345,7 +345,7 @@ def _apply_evidence_impl(ctx):
 def _apply_evidence_restore_impl(ctx):
     return _kubectl(ctx, ["apply", "-f", "src/infrastructure/evidence/database-restore.yaml"], label = "kubectl apply -f src/infrastructure/evidence/database-restore.yaml")
 
-def _capture_evidence_impl(ctx):
+def _capture_evidence(ctx, phase = None, allow_failures = None):
     rc = checked_spawn(
         ctx,
         "bazelisk",
@@ -358,7 +358,9 @@ def _capture_evidence_impl(ctx):
     capture_args = _kubectl_live_flags(ctx)
     if ctx.args.out_dir != "":
         capture_args.extend(["--out-dir", ctx.args.out_dir])
-    if ctx.args.phase != "":
+    if phase != None:
+        capture_args.extend(["--phase", phase])
+    elif ctx.args.phase != "":
         capture_args.extend(["--phase", ctx.args.phase])
     if ctx.args.talosconfig != "":
         capture_args.extend(["--talosconfig", ctx.args.talosconfig])
@@ -366,7 +368,10 @@ def _capture_evidence_impl(ctx):
         capture_args.extend(["--talos-endpoints", ctx.args.talos_endpoints])
     if ctx.args.talos_nodes != "":
         capture_args.extend(["--talos-nodes", ctx.args.talos_nodes])
-    if ctx.args.allow_failures:
+    if allow_failures != None:
+        if allow_failures:
+            capture_args.append("--allow-failures")
+    elif ctx.args.allow_failures:
         capture_args.append("--allow-failures")
     return checked_spawn(
         ctx,
@@ -379,6 +384,9 @@ def _capture_evidence_impl(ctx):
         },
         label = "capture management evidence",
     )
+
+def _capture_evidence_impl(ctx):
+    return _capture_evidence(ctx)
 
 def _publish_company_site_impl(ctx):
     return checked_spawn(
@@ -485,7 +493,7 @@ def _evidence_run_impl(ctx):
         rc = fn(ctx)
         if rc != 0:
             ctx.std.io.stderr.write("evidence-run failed during " + name + "; capturing current evidence state\n")
-            _capture_evidence_impl(ctx)
+            _capture_evidence(ctx, allow_failures = True)
             return rc
     return 0
 
@@ -569,6 +577,42 @@ def _outage_uncordon_impl(ctx):
         return 1
     return _kubectl(ctx, ["uncordon", ctx.args.node], label = "kubectl uncordon " + ctx.args.node)
 
+def _outage_run_impl(ctx):
+    if ctx.args.node == "":
+        ctx.std.io.stderr.write("ERROR: pass --node with the Kubernetes node name under outage rehearsal\n")
+        return 1
+    rc = _outage_snapshot_impl(ctx)
+    if rc != 0:
+        _capture_evidence(ctx, phase = "outage-failed", allow_failures = True)
+        return rc
+    rc = _capture_evidence(ctx, phase = "outage-before")
+    if rc != 0:
+        return rc
+    rc = _outage_cordon_impl(ctx)
+    if rc != 0:
+        _capture_evidence(ctx, phase = "outage-failed", allow_failures = True)
+        return rc
+    rc = _outage_drain_impl(ctx)
+    if rc != 0:
+        _capture_evidence(ctx, phase = "outage-failed", allow_failures = True)
+        return rc
+    rc = _outage_snapshot_impl(ctx)
+    if rc != 0:
+        _capture_evidence(ctx, phase = "outage-failed", allow_failures = True)
+        return rc
+    rc = _capture_evidence(ctx, phase = "outage-drained", allow_failures = True)
+    if rc != 0:
+        return rc
+    rc = _outage_uncordon_impl(ctx)
+    if rc != 0:
+        _capture_evidence(ctx, phase = "outage-failed", allow_failures = True)
+        return rc
+    rc = _outage_snapshot_impl(ctx)
+    if rc != 0:
+        _capture_evidence(ctx, phase = "outage-failed", allow_failures = True)
+        return rc
+    return _capture_evidence(ctx, phase = "outage-after")
+
 _KUBECTL_LIVE_ARGS = {
     "context": args.string(default = "", description = "Optional kubeconfig context."),
     "kubeconfig": args.string(default = "", description = "Optional kubeconfig path. Defaults to kubectl's environment/config loading."),
@@ -603,6 +647,12 @@ _CAPTURE_EVIDENCE_ARGS.update({
     "talos_endpoints": args.string(default = "10.8.0.250", description = "Talos API endpoint list."),
     "talos_nodes": args.string(default = "10.8.0.11,10.8.0.12,10.8.0.13", description = "Talos node list."),
     "talosconfig": args.string(default = "", description = "Optional talosconfig path. Talos capture is skipped unless set or TALOSCONFIG is present."),
+})
+
+_OUTAGE_RUN_ARGS = dict(_CAPTURE_EVIDENCE_ARGS)
+_OUTAGE_RUN_ARGS.update({
+    "node": args.string(default = "", description = "Kubernetes node name under outage rehearsal."),
+    "timeout": args.string(default = "10m", description = "kubectl drain/rollout timeout."),
 })
 
 _EVIDENCE_RUN_ARGS = dict(_CAPTURE_EVIDENCE_ARGS)
@@ -878,6 +928,14 @@ outage_drain = task(
     group = ["infra"],
     summary = "Drain a node for a Kubernetes-side outage rehearsal.",
     args = _KUBECTL_OUTAGE_ARGS,
+)
+
+outage_run = task(
+    implementation = _outage_run_impl,
+    name = "outage-run",
+    group = ["infra"],
+    summary = "Run the Kubernetes-side single-node outage rehearsal and capture before/drained/after evidence.",
+    args = _OUTAGE_RUN_ARGS,
 )
 
 outage_uncordon = task(
