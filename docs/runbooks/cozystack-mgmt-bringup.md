@@ -771,8 +771,18 @@ aspect build //src/products/company/site:image
 Publish the image to the root Harbor registry after Harbor is reconciled:
 
 ```sh
-aspect run //src/products/company/site:push-harbor
+aspect infra publish-company-site \
+  --kubeconfig "$GUARDIAN_MGMT_KUBECONFIG" \
+  --revision "$(git rev-parse HEAD)"
 ```
+
+The publish task runs the same guardian-mgmt kubeconfig guard as
+`aspect infra live`, verifies source-controller convergence when `--revision`
+is provided, reads the root Harbor admin password from
+`Secret/harbor-guardian-credentials`, writes a temporary Docker config, and then
+runs the existing Bazel `oci_push` target. Do not run the raw
+`//src/products/company/site:push-harbor` target with ambient workstation
+registry credentials for cluster publication.
 
 The checked-in environment layer declares:
 
@@ -1033,8 +1043,11 @@ separate PRs with their own validation:
 
 - Bootstrap CLI wrapper for the full Talm/Talos path.
 - Latitude VLAN assignment imports, once assignment IDs are collected.
-- Publishing the checked-in TanStack company-site OCI image to Harbor and
-  capturing live readiness evidence for dev, gamma, and prod.
+- Live publication of the checked-in TanStack company-site OCI image to Harbor
+  with `aspect infra publish-company-site`, followed by live readiness evidence
+  for dev, gamma, and prod. The task surface is declared and validated, but the
+  live publish still requires current guardian-mgmt credentials and
+  source-controller convergence on the merged revision.
 - Live load-test reports for CNPG/Postgres, Harbor, ClickHouse, OpenBao, the
   Cozystack dashboard, and the company-site surfaces. `aspect infra load-http`
   provides the standard k6 path for HTTP-facing Harbor, OpenBao health,
