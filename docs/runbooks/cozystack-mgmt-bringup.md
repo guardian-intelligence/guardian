@@ -106,8 +106,8 @@ whose cluster server is outside the management OpenTofu API endpoint set,
 requires exactly three management nodes with `10.8.0.x` InternalIP addresses,
 waits for the Flux source and both Guardian Kustomizations to become Ready,
 verifies their applied revision contains the expected merged commit, and checks
-the declared Cozystack app, networking, storage, OpenBao, backup, and
-company-site resources exist.
+the declared Cozystack dashboard, app, networking, storage, OpenBao, backup,
+and company-site resources exist.
 
 Local validation does not require backend credentials:
 
@@ -394,6 +394,8 @@ kubectl get ns tenant-dev tenant-gamma tenant-prod \
 kubectl -n tenant-dev get postgreses.apps.cozystack.io,harbors.apps.cozystack.io,clickhouses.apps.cozystack.io
 kubectl -n tenant-gamma get postgreses.apps.cozystack.io,harbors.apps.cozystack.io,clickhouses.apps.cozystack.io
 kubectl -n tenant-prod get postgreses.apps.cozystack.io,harbors.apps.cozystack.io,clickhouses.apps.cozystack.io
+kubectl -n cozy-dashboard get deployment/cozy-dashboard-console deployment/incloud-web-gatekeeper
+kubectl -n cozy-dashboard get service/cozy-dashboard-console service/incloud-web-gatekeeper ingress/dashboard-web-ingress
 kubectl -n tenant-dev get deploy,svc,ingress company-site
 kubectl -n tenant-gamma get deploy,svc,ingress company-site
 kubectl -n tenant-prod get deploy,svc,ingress company-site
@@ -483,7 +485,6 @@ separate PRs with their own validation:
 - Latitude VLAN assignment imports, once assignment IDs are collected.
 - Publishing the checked-in company-site OCI image to Harbor and capturing live
   readiness evidence for dev, gamma, and prod.
-- Dashboard readiness evidence beyond the Cozystack platform package exposure.
 - Load-test reports for CNPG/Postgres, Harbor, ClickHouse, OpenBao, the
   Cozystack dashboard, and the company-site surfaces.
 - Backup specs for root and environment Postgres/Harbor/ClickHouse, wired to
