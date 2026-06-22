@@ -54,6 +54,7 @@ func TestValidateConfig(t *testing.T) {
 		Host:         "harbor.dev.gi.org",
 		Repository:   "library/guardian-smoke",
 		Tag:          "guardian-dev-test",
+		WaitTimeout:  "15m",
 		Iterations:   1,
 		PayloadBytes: 128,
 	}
@@ -77,6 +78,12 @@ func TestValidateConfig(t *testing.T) {
 	badIterations.Iterations = 0
 	if err := validateConfig(badIterations); err == nil {
 		t.Fatalf("zero iterations accepted")
+	}
+
+	missingWaitTimeout := base
+	missingWaitTimeout.WaitTimeout = ""
+	if err := validateConfig(missingWaitTimeout); err == nil {
+		t.Fatalf("empty wait timeout accepted")
 	}
 }
 
@@ -112,6 +119,17 @@ func TestPayloadFor(t *testing.T) {
 	}
 }
 
+func TestHarborReadinessChecks(t *testing.T) {
+	cfg := harborRegistryConfig{
+		Namespace:   "tenant-gamma",
+		WaitTimeout: "20m",
+	}
+	got := harborReadinessChecks(cfg)
+	requireCommand(t, got, "Harbor app yaml", "tenant-gamma", "harbors.apps.cozystack.io/guardian", "-o", "yaml")
+	requireCommand(t, got, "wait Harbor app Ready", "--for=condition=Ready", "harbors.apps.cozystack.io/guardian", "--timeout=20m")
+	requireCommand(t, got, "wait Harbor workloads Ready", "--for=condition=WorkloadsReady", "harbors.apps.cozystack.io/guardian", "--timeout=20m")
+}
+
 func TestKubectlArgs(t *testing.T) {
 	got := kubectlArgs(harborRegistryConfig{
 		Kubeconfig:     "/tmp/kubeconfig",
@@ -126,6 +144,31 @@ func TestKubectlArgs(t *testing.T) {
 			t.Fatalf("kubectlArgs[%d] = %q, want %q: %#v", i, got[i], want[i], got)
 		}
 	}
+}
+
+func requireCommand(t *testing.T, checks []kubectlCommand, label string, parts ...string) {
+	t.Helper()
+	for _, check := range checks {
+		if check.Label != label {
+			continue
+		}
+		for _, part := range parts {
+			if !hasArg(check.Args, part) {
+				t.Fatalf("%s missing arg %q: %#v", label, part, check.Args)
+			}
+		}
+		return
+	}
+	t.Fatalf("missing command %q in %#v", label, checks)
+}
+
+func hasArg(args []string, want string) bool {
+	for _, arg := range args {
+		if arg == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestOrasBaseArgs(t *testing.T) {

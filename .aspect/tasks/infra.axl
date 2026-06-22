@@ -1475,6 +1475,8 @@ def _load_harbor_registry_impl(ctx):
         ctx.args.payload_bytes,
         "--request-timeout",
         ctx.args.request_timeout,
+        "--wait-timeout",
+        ctx.args.wait_timeout,
     ]
     if ctx.args.kubeconfig != "":
         load_args.extend(["--kubeconfig", ctx.args.kubeconfig])
@@ -1721,6 +1723,7 @@ load_harbor_registry = task(
         "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before the registry load."),
         "stage": args.string(default = "dev", description = "Guardian stage: root, dev, gamma, or prod."),
         "tag": args.string(default = "", description = "Optional tag or tag prefix. Defaults to a timestamped tag."),
+        "wait_timeout": args.string(default = "15m", description = "Timeout waiting for the Harbor app readiness preflight."),
     },
 )
 

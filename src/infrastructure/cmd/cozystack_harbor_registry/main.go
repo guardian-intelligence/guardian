@@ -28,6 +28,7 @@ type harborRegistryConfig struct {
 	Kubectl          string
 	Kubeconfig       string
 	RequestTimeout   string
+	WaitTimeout      string
 	Stage            string
 	Namespace        string
 	Host             string
@@ -36,6 +37,11 @@ type harborRegistryConfig struct {
 	Iterations       int
 	PayloadBytes     int
 	RegistryConfig   string
+}
+
+type kubectlCommand struct {
+	Label string
+	Args  []string
 }
 
 var (
@@ -49,6 +55,7 @@ func main() {
 	flag.StringVar(&cfg.Kubectl, "kubectl", "", "path to kubectl")
 	flag.StringVar(&cfg.Kubeconfig, "kubeconfig", "", "kubeconfig for guardian-mgmt")
 	flag.StringVar(&cfg.RequestTimeout, "request-timeout", "15s", "kubectl API request timeout")
+	flag.StringVar(&cfg.WaitTimeout, "wait-timeout", "15m", "timeout waiting for Harbor readiness")
 	flag.StringVar(&cfg.Stage, "stage", "dev", "Guardian stage: root, dev, gamma, or prod")
 	flag.StringVar(&cfg.Host, "host", "", "Harbor registry host; defaults from --stage")
 	flag.StringVar(&cfg.Repository, "repository", "library/guardian-smoke", "Harbor repository path")
@@ -116,6 +123,9 @@ func validateConfig(cfg harborRegistryConfig) error {
 	if cfg.Host == "" {
 		return errors.New("--host must not be empty")
 	}
+	if cfg.WaitTimeout == "" {
+		return errors.New("--wait-timeout must not be empty")
+	}
 	if !repositoryRE.MatchString(cfg.Repository) {
 		return fmt.Errorf("--repository %q is not an OCI repository path", cfg.Repository)
 	}
@@ -140,6 +150,10 @@ func runSmoke(ctx context.Context, cfg harborRegistryConfig) error {
 
 	if cfg.RegistryConfig == "" {
 		cfg.RegistryConfig = filepath.Join(dir, "oras-auth.json")
+	}
+
+	if err := waitHarborReady(ctx, cfg); err != nil {
+		return err
 	}
 
 	password, err := harborAdminPassword(ctx, cfg)
@@ -204,6 +218,33 @@ func runSmoke(ctx context.Context, cfg harborRegistryConfig) error {
 	return nil
 }
 
+func waitHarborReady(ctx context.Context, cfg harborRegistryConfig) error {
+	for _, cmd := range harborReadinessChecks(cfg) {
+		if err := runKubectl(ctx, cfg, cmd.Label, cmd.Args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func harborReadinessChecks(cfg harborRegistryConfig) []kubectlCommand {
+	ref := "harbors.apps.cozystack.io/guardian"
+	return []kubectlCommand{
+		{
+			Label: "Harbor app yaml",
+			Args:  []string{"-n", cfg.Namespace, "get", ref, "-o", "yaml"},
+		},
+		{
+			Label: "wait Harbor app Ready",
+			Args:  []string{"-n", cfg.Namespace, "wait", "--for=condition=Ready", ref, "--timeout=" + cfg.WaitTimeout},
+		},
+		{
+			Label: "wait Harbor workloads Ready",
+			Args:  []string{"-n", cfg.Namespace, "wait", "--for=condition=WorkloadsReady", ref, "--timeout=" + cfg.WaitTimeout},
+		},
+	}
+}
+
 func harborAdminPassword(ctx context.Context, cfg harborRegistryConfig) (string, error) {
 	args := kubectlArgs(cfg, "-n", cfg.Namespace, "get", "secret/harbor-guardian-credentials", "-o", "jsonpath={.data.admin-password}")
 	cmd := exec.CommandContext(ctx, cfg.Kubectl, args...)
@@ -229,6 +270,20 @@ func harborAdminPassword(ctx context.Context, cfg harborRegistryConfig) (string,
 		return "", errors.New("decoded Harbor admin password is empty")
 	}
 	return string(decoded), nil
+}
+
+func runKubectl(ctx context.Context, cfg harborRegistryConfig, label string, args ...string) error {
+	cmd := exec.CommandContext(ctx, cfg.Kubectl, kubectlArgs(cfg, args...)...)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	fmt.Printf("\n## %s\n", label)
+	err := cmd.Run()
+	fmt.Print(out.String())
+	if err != nil {
+		return fmt.Errorf("%s: %w", label, err)
+	}
+	return nil
 }
 
 func kubectlArgs(cfg harborRegistryConfig, args ...string) []string {

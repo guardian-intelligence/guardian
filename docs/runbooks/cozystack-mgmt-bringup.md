@@ -542,6 +542,8 @@ a temporary ORAS registry config, pushes a temporary payload artifact, fetches
 its manifest, pulls the artifact back, and verifies the payload bytes. The
 default repository is `library/guardian-smoke`; if the cluster uses a dedicated
 project later, pass it with `--repository`.
+Before logging in, the helper prints the target `Harbor/guardian` app YAML and
+waits for its `Ready` and `WorkloadsReady` conditions.
 
 ```sh
 aspect infra load-harbor-registry \
