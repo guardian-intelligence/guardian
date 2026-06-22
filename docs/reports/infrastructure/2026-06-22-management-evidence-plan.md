@@ -25,9 +25,10 @@ aspect infra apply-base --kubeconfig "${KUBECONFIG}"
 aspect infra seed-db-backup-secret --kubeconfig "${KUBECONFIG}"
 aspect infra seed-openbao-evidence-token --kubeconfig "${KUBECONFIG}"
 aspect infra publish-company-site
-aspect infra live-snapshot --kubeconfig "${KUBECONFIG}"
 aspect infra live-rollout --kubeconfig "${KUBECONFIG}"
 aspect infra talos-health --talosconfig "${TALOSCONFIG}"
+aspect infra dns-apply
+aspect infra live-snapshot --kubeconfig "${KUBECONFIG}"
 ```
 
 Opt-in load and DR evidence fixtures:
@@ -86,8 +87,8 @@ LATITUDESH_AUTH_TOKEN="${LATITUDESH_AUTH_TOKEN}" aspect infra hardware-outage-ru
 - Management convergence now has a repo-owned `aspect infra
   management-converge-run` task. It runs preflight, applies the base, seeds
   required Secret contracts, republishes the base after secrets exist, pushes
-  the company-site image, checks rollouts, checks Talos/etcd health, and prints
-  a live snapshot.
+  the company-site image, checks rollouts, checks Talos/etcd health, applies
+  Cloudflare DNS, and prints a live snapshot.
 - Live evidence capture now has a repo-owned read-only Aspect task that writes
   Kubernetes, evidence Job, database restore, and Talos outputs under
   `docs/reports/infrastructure/live-runs/` for check-in with component reports.

@@ -261,6 +261,12 @@ def _dns_plan_impl(ctx):
         return rc
     return _tofu(ctx, CLOUDFLARE_DNS_ROOT, ["plan", "-input=false"], label = "tofu plan cloudflare-dns")
 
+def _dns_apply_impl(ctx):
+    rc = _tofu(ctx, CLOUDFLARE_DNS_ROOT, ["init", "-input=false", "-reconfigure"], label = "tofu init cloudflare-dns")
+    if rc != 0:
+        return rc
+    return _tofu(ctx, CLOUDFLARE_DNS_ROOT, ["apply", "-input=false", "-auto-approve"], label = "tofu apply cloudflare-dns")
+
 def _dns_output_impl(ctx):
     rc = _tofu(ctx, CLOUDFLARE_DNS_ROOT, ["init", "-input=false", "-reconfigure"], label = "tofu init cloudflare-dns")
     if rc != 0:
@@ -557,8 +563,10 @@ def _management_converge_run_impl(ctx):
     steps.extend([
         ["live-rollout", _live_rollout_impl],
         ["talos-health", _talos_health_impl],
-        ["live-snapshot", _live_snapshot_impl],
     ])
+    if not ctx.args.skip_dns:
+        steps.append(["dns-apply", _dns_apply_impl])
+    steps.append(["live-snapshot", _live_snapshot_impl])
 
     for pair in steps:
         name = pair[0]
@@ -1021,6 +1029,7 @@ _MANAGEMENT_EVIDENCE_RUN_ARGS.update({
 _MANAGEMENT_CONVERGE_RUN_ARGS = dict(_KUBECTL_TIMEOUT_ARGS)
 _MANAGEMENT_CONVERGE_RUN_ARGS.update(_TALOS_LIVE_ARGS)
 _MANAGEMENT_CONVERGE_RUN_ARGS.update({
+    "skip_dns": args.boolean(default = False, description = "Skip Cloudflare DNS apply after live rollout checks pass."),
     "skip_preflight": args.boolean(default = False, description = "Skip provider-free validation, build, and render checks."),
     "skip_publish": args.boolean(default = False, description = "Skip pushing the company-site OCI image to Harbor."),
     "skip_secret_seed": args.boolean(default = False, description = "Skip R2 backup and OpenBao evidence token Secret seeding."),
@@ -1103,6 +1112,13 @@ dns_plan = task(
     name = "dns-plan",
     group = ["infra"],
     summary = "Plan the cloudflare-dns OpenTofu root.",
+)
+
+dns_apply = task(
+    implementation = _dns_apply_impl,
+    name = "dns-apply",
+    group = ["infra"],
+    summary = "Apply the cloudflare-dns OpenTofu root with the repo-pinned OpenTofu binary.",
 )
 
 dns_output = task(

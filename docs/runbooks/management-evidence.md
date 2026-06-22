@@ -53,9 +53,10 @@ collecting evidence. It runs provider-free preflight checks, applies
 `src/infrastructure/base`, seeds the R2 backup and OpenBao evidence Secret
 contracts from environment variables, reapplies the base after the Secret
 contracts exist, pushes the company-site OCI image to Harbor, checks
-dev/gamma/prod rollouts, checks Talos/etcd health, and prints a live snapshot.
-Use `--skip-secret-seed`, `--skip-publish`, or `--skip-preflight` only for a
-deliberate rerun where that prerequisite has already been handled.
+dev/gamma/prod rollouts, checks Talos/etcd health, applies the Cloudflare DNS
+root, and prints a live snapshot. Use `--skip-secret-seed`, `--skip-publish`,
+`--skip-dns`, or `--skip-preflight` only for a deliberate rerun where that
+prerequisite has already been handled.
 
 The equivalent expanded sequence is:
 
@@ -65,8 +66,10 @@ aspect infra seed-db-backup-secret --kubeconfig "${KUBECONFIG}"
 aspect infra seed-openbao-evidence-token --kubeconfig "${KUBECONFIG}"
 aspect infra apply-base --kubeconfig "${KUBECONFIG}"
 aspect infra publish-company-site
-aspect infra live-snapshot --kubeconfig "${KUBECONFIG}"
 aspect infra live-rollout --kubeconfig "${KUBECONFIG}"
+aspect infra talos-health --talosconfig "${TALOSCONFIG}"
+aspect infra dns-apply
+aspect infra live-snapshot --kubeconfig "${KUBECONFIG}"
 ```
 
 For Talos and etcd health over the Layer2 VIP:

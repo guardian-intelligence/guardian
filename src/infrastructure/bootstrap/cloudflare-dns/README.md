@@ -23,11 +23,18 @@ Use the repo-pinned OpenTofu binary through Aspect:
 aspect infra dns-init
 aspect infra dns-adopt-known
 aspect infra dns-plan
+aspect infra dns-apply
 aspect infra dns-output
 ```
 
-Do not run `apply` until `dns-adopt-known` has imported the existing DNS records
-listed in `.aspect/tasks/infra.axl` and the resulting plan has been reviewed.
-At the time this root was added, the apex and `oci.guardianintelligence.org`
-still pointed at the excluded Verself prod IP, so their planned changes are an
-intentional traffic move rather than a formatting cleanup.
+Do not run `dns-apply` until `dns-adopt-known` has imported the existing DNS
+records listed in `.aspect/tasks/infra.axl` and the resulting plan has been
+reviewed. At the time this root was added, the apex and
+`oci.guardianintelligence.org` still pointed at the excluded Verself prod IP, so
+their planned changes are an intentional traffic move rather than a formatting
+cleanup.
+
+`aspect infra management-converge-run` runs `dns-apply` by default after the
+Kubernetes base, secret contracts, company-site publication, rollout checks, and
+Talos health checks pass. Use `--skip-dns` for a deliberate staged run where
+public traffic must not move yet.
