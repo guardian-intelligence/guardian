@@ -182,6 +182,9 @@ aspect infra openbao-drill \
 
 aspect infra openbao-apply \
   --revision "<merged-main-commit-sha>"
+
+aspect infra openbao-backup-secrets \
+  --revision "<merged-main-commit-sha>"
 ```
 
 It is intentionally a thin orchestration path over standard tools and existing
@@ -203,6 +206,16 @@ secret material, opens a local `kubectl port-forward`, initializes the standard
 R2-backed OpenTofu backend, and applies
 `src/infrastructure/bootstrap/guardian-mgmt-openbao` with
 `openbao_addr=http://127.0.0.1:<port>`.
+Backup credential material is the next standard OpenBao operation. Run
+`aspect infra openbao-backup-secrets` after `openbao-apply`; it reads
+`GUARDIAN_BACKUP_AWS_ACCESS_KEY_ID` and
+`GUARDIAN_BACKUP_AWS_SECRET_ACCESS_KEY`, falling back to the standard
+`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, writes the declared kv-v2 paths
+for root/dev/gamma/prod, annotates the ExternalSecrets with `force-sync`, and
+waits for the target Kubernetes Secrets. The default non-secret coordinates are
+the checked-in R2 endpoint, bucket `guardian-vault`, and region `auto`; override
+them with `--endpoint`, `--bucket`, or `--region` when the backup bucket differs
+from the survival-floor bucket.
 
 The minimal host-come-up CLI delegates to the same task:
 
@@ -266,6 +279,9 @@ Live planning requires:
   `src/infrastructure/bootstrap/guardian-mgmt-openbao` through
   `aspect infra openbao-apply`. The task supplies `VAULT_TOKEN` from that Secret
   to the repo-pinned OpenTofu process without printing it.
+- Backup credentials in `GUARDIAN_BACKUP_AWS_ACCESS_KEY_ID` and
+  `GUARDIAN_BACKUP_AWS_SECRET_ACCESS_KEY`, or standard `AWS_ACCESS_KEY_ID` and
+  `AWS_SECRET_ACCESS_KEY`, before running `aspect infra openbao-backup-secrets`.
 
 ```sh
 aspect infra tofu-init \
@@ -276,6 +292,10 @@ bazelisk run @opentofu_linux_amd64//:tofu_bin -- \
 
 aspect infra openbao-apply \
   --mode plan \
+  --revision "<merged-main-commit-sha>"
+
+aspect infra openbao-backup-secrets \
+  --dry-run true \
   --revision "<merged-main-commit-sha>"
 ```
 
@@ -543,8 +563,9 @@ R2 credentials would otherwise land in OpenTofu state. There are no checked-in
 `BackupJob` resources yet. ClickHouse app backup is enabled and daily
 `Plan/guardian-clickhouse-daily` resources are declared in root/dev/gamma/prod;
 they require OpenBao to be initialized/unsealed, the OpenTofu root to be
-applied with `aspect infra openbao-apply`, and real kv secret values to exist
-before the sidecars and scheduled jobs can succeed.
+applied with `aspect infra openbao-apply`, and real kv secret values to be
+written with `aspect infra openbao-backup-secrets` before the sidecars and
+scheduled jobs can succeed.
 
 The checked-in environment app layer declares the same core service set in each
 environment namespace:
