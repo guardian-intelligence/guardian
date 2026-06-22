@@ -6,12 +6,13 @@ usage() {
 Usage: management-evidence-run [OPTIONS]
 
 Runs the full live management-cluster evidence suite:
-  1. clean and apply the opt-in evidence overlay;
-  2. wait for load jobs and database BackupJobs;
-  3. apply and wait for database RestoreJobs;
-  4. capture and verify load/DR evidence with Talos required;
-  5. run all-node Latitude hardware outage evidence;
-  6. verify the complete evidence package.
+  1. check live base app, secret, and tenant surface prerequisites;
+  2. clean and apply the opt-in evidence overlay;
+  3. wait for load jobs and database BackupJobs;
+  4. apply and wait for database RestoreJobs;
+  5. capture and verify load/DR evidence with Talos required;
+  6. run all-node Latitude hardware outage evidence;
+  7. verify the complete evidence package.
 
 This command performs live Kubernetes writes and powers off each selected
 Latitude management node sequentially.
@@ -257,6 +258,16 @@ evidence_apply() {
   kubectl_cmd apply -k src/infrastructure/evidence
 }
 
+evidence_prerequisites() {
+  kubectl_cmd get secret/guardian-r2-db-backups secret/guardian-openbao-evidence-token -n tenant-root -o name
+  kubectl_cmd get harbor/oci clickhouse/ledger postgres/guardian openbao/guardian -n tenant-root -o name
+
+  local namespace
+  for namespace in tenant-dev tenant-gamma tenant-root; do
+    kubectl_cmd get deploy/company-site svc/company-site ing/company-site -n "${namespace}" -o name
+  done
+}
+
 evidence_wait() {
   local job
   for job in \
@@ -331,6 +342,7 @@ This run performs live Kubernetes writes and sequential Latitude hardware power
 actions for each selected management node.
 EOF
 
+run_step "evidence-prerequisites" evidence_prerequisites
 run_step "evidence-clean" evidence_clean
 run_step "evidence-apply" evidence_apply
 run_step "evidence-wait" evidence_wait

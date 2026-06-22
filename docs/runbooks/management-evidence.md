@@ -150,7 +150,8 @@ aspect infra management-evidence-run \
 ```
 
 `management-evidence-run` is the preferred final live command. It applies the
-opt-in evidence overlay, waits for the load jobs and database backup/restore
+opt-in evidence overlay after checking base app, secret-contract, and tenant
+surface prerequisites, waits for the load jobs and database backup/restore
 drills, captures and verifies the load/DR evidence, power-cycles each selected
 Latitude management node sequentially through `hardware-outage-run-all`, and
 writes a suite verification report. The default parent output directory is
