@@ -426,9 +426,12 @@ bazelisk test //src/infrastructure/reports:report_contract_test
 
 The report contract requires the merged source revision, target component,
 environment, live procedure, observed checks, measurements appropriate to the
-report type, and placeholder/secret-text rejection. The directory may stay empty
-until live drills have actually run; do not check in synthetic reports to make a
-PR look complete.
+report type, and placeholder/secret-text rejection. Reports must also bind to
+the canonical Kubernetes target from `reports.ExpectedTarget()`: Cozystack app
+CRs for Postgres/Harbor/ClickHouse/OpenBao, the `cozy-dashboard` dashboard
+Ingress, and the company-site Deployment plus its public endpoint. The directory
+may stay empty until live drills have actually run; do not check in synthetic
+reports to make a PR look complete.
 
 The expected final coverage is encoded in `reports.ExpectedCoverage()`:
 load-test, disaster-recovery, and single-node-outage reports for root/dev/gamma/
