@@ -430,6 +430,13 @@ report type, and placeholder/secret-text rejection. The directory may stay empty
 until live drills have actually run; do not check in synthetic reports to make a
 PR look complete.
 
+The expected final coverage is encoded in `reports.ExpectedCoverage()`:
+load-test, disaster-recovery, and single-node-outage reports for root/dev/gamma/
+prod Postgres, Harbor, and ClickHouse; root OpenBao; root Cozystack dashboard;
+and dev/gamma/prod company-site. The current matrix is 51 final reports. The
+contract rejects checked-in reports outside that matrix and can compute missing
+coverage while still permitting real reports to land incrementally.
+
 ## Not Done In This Substrate Slice
 
 These are intentionally outside the merged L2/OpenTofu substrate and need

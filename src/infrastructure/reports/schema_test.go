@@ -92,6 +92,59 @@ func TestDecodeRejectsUnknownFieldsAndMultipleJSONValues(t *testing.T) {
 	}
 }
 
+func TestExpectedCoverage(t *testing.T) {
+	expected := ExpectedCoverage()
+	if len(expected) != 51 {
+		t.Fatalf("ExpectedCoverage returned %d entries, want 51", len(expected))
+	}
+
+	seen := map[CoverageKey]bool{}
+	for _, key := range expected {
+		if seen[key] {
+			t.Fatalf("duplicate expected coverage key: %#v", key)
+		}
+		seen[key] = true
+	}
+
+	for _, key := range []CoverageKey{
+		{ReportType: "load_test", Component: "cnpg_postgres", Environment: "root"},
+		{ReportType: "disaster_recovery", Component: "harbor", Environment: "prod"},
+		{ReportType: "single_node_outage", Component: "clickhouse", Environment: "gamma"},
+		{ReportType: "load_test", Component: "openbao", Environment: "root"},
+		{ReportType: "disaster_recovery", Component: "cozystack_dashboard", Environment: "root"},
+		{ReportType: "single_node_outage", Component: "company_site", Environment: "dev"},
+		{ReportType: "single_node_outage", Component: "company_site", Environment: "prod"},
+	} {
+		if !seen[key] {
+			t.Fatalf("ExpectedCoverage missing %#v", key)
+		}
+	}
+}
+
+func TestCoverageDiff(t *testing.T) {
+	reports := []Report{validReport("load_test")}
+	reports[0].Component = "company_site"
+	reports[0].Environment = "dev"
+
+	missing := MissingCoverage(reports)
+	if len(missing) != len(ExpectedCoverage())-1 {
+		t.Fatalf("MissingCoverage returned %d entries, want %d", len(missing), len(ExpectedCoverage())-1)
+	}
+	for _, key := range missing {
+		if key == Coverage(reports[0]) {
+			t.Fatalf("MissingCoverage still contains present key %#v", key)
+		}
+	}
+
+	unexpectedReport := validReport("load_test")
+	unexpectedReport.Component = "openbao"
+	unexpectedReport.Environment = "prod"
+	unexpected := UnexpectedCoverage([]Report{unexpectedReport})
+	if len(unexpected) != 1 || unexpected[0] != Coverage(unexpectedReport) {
+		t.Fatalf("UnexpectedCoverage = %#v, want only %#v", unexpected, Coverage(unexpectedReport))
+	}
+}
+
 func TestCheckedInReports(t *testing.T) {
 	root := runfilePath("src/infrastructure/reports/checked-in")
 	if _, err := os.Stat(root); os.IsNotExist(err) {
@@ -99,6 +152,7 @@ func TestCheckedInReports(t *testing.T) {
 	}
 
 	var checked int
+	var reports []Report
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -118,10 +172,14 @@ func TestCheckedInReports(t *testing.T) {
 		if err := Validate(report); err != nil {
 			t.Fatalf("validate %s: %v", path, err)
 		}
+		reports = append(reports, report)
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("walk checked-in reports: %v", err)
+	}
+	if unexpected := UnexpectedCoverage(reports); len(unexpected) != 0 {
+		t.Fatalf("checked-in reports contain unexpected coverage keys: %#v", unexpected)
 	}
 	t.Logf("validated %d checked-in reports", checked)
 }
