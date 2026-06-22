@@ -23,6 +23,7 @@ load(
     infra_dns_plan = "dns_plan",
     infra_dns_tofu = "dns_tofu",
     infra_evidence_apply = "apply_evidence",
+    infra_evidence_clean = "evidence_clean",
     infra_evidence_logs = "evidence_logs",
     infra_evidence_render = "render_evidence",
     infra_evidence_restore_apply = "apply_evidence_restore",
@@ -65,6 +66,7 @@ def config(ctx):
     ctx.tasks.add(infra_dns_plan)
     ctx.tasks.add(infra_dns_tofu)
     ctx.tasks.add(infra_evidence_apply)
+    ctx.tasks.add(infra_evidence_clean)
     ctx.tasks.add(infra_evidence_logs)
     ctx.tasks.add(infra_evidence_render)
     ctx.tasks.add(infra_evidence_restore_apply)

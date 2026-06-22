@@ -28,6 +28,7 @@ have passed.
 
 ```sh
 aspect infra evidence-render
+aspect infra evidence-clean --kubeconfig "${KUBECONFIG}"
 aspect infra evidence-apply --kubeconfig "${KUBECONFIG}"
 aspect infra evidence-wait --kubeconfig "${KUBECONFIG}" --timeout 30m
 aspect infra evidence-restore-apply --kubeconfig "${KUBECONFIG}"
@@ -41,6 +42,8 @@ aspect infra evidence-snapshot --kubeconfig "${KUBECONFIG}"
 - The overlay renders locally with the repo-pinned kubectl.
 - The main evidence overlay renders 9 Kubernetes documents; the deferred
   restore manifest renders 2 additional `RestoreJob` documents.
+- `aspect infra evidence-clean` is declared so the evidence loop can be rerun
+  without manual Kubernetes deletion.
 - The pinned curl image used by the Jobs is digest-addressed and contains the
   shell utilities used by the scripts.
 

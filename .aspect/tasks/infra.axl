@@ -336,6 +336,18 @@ def _evidence_logs_impl(ctx):
         ["logs", "job/evidence-storage-smoke", "-n", "tenant-root"],
     ])
 
+def _evidence_clean_impl(ctx):
+    commands = [
+        ["delete", "job/evidence-http-load", "job/evidence-storage-smoke", "-n", "tenant-root", "--ignore-not-found"],
+        ["delete", "backupjob/evidence-postgres-adhoc", "backupjob/evidence-clickhouse-adhoc", "-n", "tenant-root", "--ignore-not-found"],
+        ["delete", "restorejob/evidence-postgres-to-copy", "restorejob/evidence-clickhouse-to-copy", "-n", "tenant-root", "--ignore-not-found"],
+        ["delete", "postgres/guardian-restore-check", "clickhouse/ledger-restore-check", "-n", "tenant-root", "--ignore-not-found"],
+        ["delete", "configmap/evidence-http-load", "configmap/evidence-storage-smoke", "-n", "tenant-root", "--ignore-not-found"],
+    ]
+    if ctx.args.delete_pvc:
+        commands.append(["delete", "pvc/evidence-replicated-retain", "-n", "tenant-root", "--ignore-not-found"])
+    return _kubectl_many(ctx, commands)
+
 def _live_snapshot_impl(ctx):
     return _kubectl_many(ctx, [
         ["version"],
@@ -429,6 +441,11 @@ _KUBECTL_TIMEOUT_ARGS.update({
 _KUBECTL_OUTAGE_ARGS = dict(_KUBECTL_TIMEOUT_ARGS)
 _KUBECTL_OUTAGE_ARGS.update({
     "node": args.string(default = "", description = "Kubernetes node name under outage rehearsal."),
+})
+
+_KUBECTL_EVIDENCE_CLEAN_ARGS = dict(_KUBECTL_LIVE_ARGS)
+_KUBECTL_EVIDENCE_CLEAN_ARGS.update({
+    "delete_pvc": args.boolean(default = False, description = "Also delete the retained storage-smoke PVC and its checksum data."),
 })
 
 _TALOS_LIVE_ARGS = {
@@ -609,6 +626,14 @@ evidence_logs = task(
     group = ["infra"],
     summary = "Print logs from opt-in HTTP and storage evidence jobs.",
     args = _KUBECTL_LIVE_ARGS,
+)
+
+evidence_clean = task(
+    implementation = _evidence_clean_impl,
+    name = "evidence-clean",
+    group = ["infra"],
+    summary = "Delete opt-in evidence resources so the load/DR evidence loop can be rerun.",
+    args = _KUBECTL_EVIDENCE_CLEAN_ARGS,
 )
 
 live_snapshot = task(

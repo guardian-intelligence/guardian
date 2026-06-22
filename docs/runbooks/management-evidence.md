@@ -110,6 +110,7 @@ The opt-in evidence overlay provides:
 Run:
 
 ```sh
+aspect infra evidence-clean --kubeconfig "${KUBECONFIG}"
 aspect infra evidence-apply --kubeconfig "${KUBECONFIG}"
 aspect infra evidence-wait --kubeconfig "${KUBECONFIG}" --timeout 30m
 aspect infra evidence-restore-apply --kubeconfig "${KUBECONFIG}"
@@ -118,9 +119,11 @@ aspect infra evidence-logs --kubeconfig "${KUBECONFIG}"
 aspect infra evidence-snapshot --kubeconfig "${KUBECONFIG}"
 ```
 
-If the Jobs already exist from an earlier run, delete the completed Jobs first
-and re-apply the overlay. Keep the PVC unless the report explicitly drills data
-loss; repeat runs should verify the existing checksum manifest.
+`evidence-clean` deletes completed Jobs, BackupJobs, RestoreJobs, temporary
+restore targets, and evidence ConfigMaps. It keeps
+`PVC/tenant-root/evidence-replicated-retain` by default so repeat runs verify
+the existing checksum manifest. Pass `--delete-pvc=true` only when the report is
+explicitly drilling storage data loss.
 
 ## Disaster Recovery Evidence
 

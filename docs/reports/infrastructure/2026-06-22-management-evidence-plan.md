@@ -30,6 +30,7 @@ Opt-in load and DR evidence fixtures:
 
 ```sh
 aspect infra evidence-render
+aspect infra evidence-clean --kubeconfig "${KUBECONFIG}"
 aspect infra evidence-apply --kubeconfig "${KUBECONFIG}"
 aspect infra evidence-wait --kubeconfig "${KUBECONFIG}" --timeout 30m
 aspect infra evidence-restore-apply --kubeconfig "${KUBECONFIG}"
