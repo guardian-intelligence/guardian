@@ -397,6 +397,12 @@ func testCompanySite(t *testing.T) {
 		t.Fatalf("company-site metrics endpoint does not expose build info: %q", metrics)
 	}
 
+	otelForwarder := string(readRunfile(t, "src/products/company/web/src/routes/api/otel/v1/traces.tsx"))
+	assertTextContains(t, otelForwarder, "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "company-site OTLP forwarder")
+	assertTextContains(t, otelForwarder, "OTEL_EXPORTER_OTLP_ENDPOINT", "company-site OTLP forwarder")
+	assertTextContains(t, otelForwarder, "otel exporter endpoint not configured", "company-site OTLP forwarder")
+	assertTextNotContains(t, otelForwarder, "127.0.0.1:4318", "company-site OTLP forwarder")
+
 	landing := readRunfile(t, "src/products/company/web/src/routes/_workshop/index.tsx")
 	if !bytes.Contains(landing, []byte("Guardian")) ||
 		!bytes.Contains(landing, []byte("FirstLight")) {
