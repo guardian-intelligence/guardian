@@ -265,33 +265,48 @@ Backups are off in this root app declaration. Enable them only by pointing the
 app specs at the Kubernetes Secrets delivered from the declared OpenBao/R2
 secret path; never put S3 credentials directly in app specs.
 
-The base backup layer declares `CNPG/guardian-postgres-r2` plus
-`BackupClass/guardian-postgres-cnpg`. The strategy is intentionally reusable:
-it reads `destinationPath` and `endpointURL` from each Postgres app's own
-`spec.backup` block and references a tenant-local Secret named
-`<app>-cnpg-backup-creds`.
+The base backup layer declares the reusable strategy/classes that do not depend
+on tenant secret material:
 
-The checked-in External Secrets layer declares that Secret for
-`Postgres/guardian` in `tenant-root`, `tenant-dev`, `tenant-gamma`, and
-`tenant-prod`:
+- `CNPG/guardian-postgres-r2` plus `BackupClass/guardian-postgres-cnpg`.
+  The strategy reads `destinationPath` and `endpointURL` from each Postgres
+  app's own `spec.backup` block and references a tenant-local Secret named
+  `<app>-cnpg-backup-creds`.
+- `Altinity/guardian-clickhouse-altinity` plus
+  `BackupClass/guardian-clickhouse-altinity`. This follows Cozystack 1.4's
+  recommended ClickHouse `BackupClass` path but replaces the upstream example's
+  runtime `apk add curl jq` pattern with a digest-pinned Python image and a
+  standard-library HTTP client.
 
-| Namespace | OpenBao role | OpenBao kv-v2 path |
-| - | - | - |
-| `tenant-root` | `tenant-root-cnpg-backup` | `guardian/guardian-mgmt/tenant-root/postgres/guardian/cnpg-backup` |
-| `tenant-dev` | `tenant-dev-cnpg-backup` | `guardian/guardian-mgmt/tenant-dev/postgres/guardian/cnpg-backup` |
-| `tenant-gamma` | `tenant-gamma-cnpg-backup` | `guardian/guardian-mgmt/tenant-gamma/postgres/guardian/cnpg-backup` |
-| `tenant-prod` | `tenant-prod-cnpg-backup` | `guardian/guardian-mgmt/tenant-prod/postgres/guardian/cnpg-backup` |
+The checked-in External Secrets layer declares the backup Secrets for
+`Postgres/guardian` and `ClickHouse/guardian` in `tenant-root`, `tenant-dev`,
+`tenant-gamma`, and `tenant-prod`:
 
-Each path must contain `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`; ESO
-writes them to `guardian-cnpg-backup-creds` in the tenant namespace. The
-SecretStore talks to Cozystack's OpenBao service at
-`http://guardian.tenant-root.svc:8200`, uses the `kv` engine with `version: v2`,
-and authenticates through the `kubernetes` auth mount with audience `openbao`.
+| Namespace | Component | OpenBao role | OpenBao kv-v2 path |
+| - | - | - | - |
+| `tenant-root` | Postgres | `tenant-root-cnpg-backup` | `guardian/guardian-mgmt/tenant-root/postgres/guardian/cnpg-backup` |
+| `tenant-dev` | Postgres | `tenant-dev-cnpg-backup` | `guardian/guardian-mgmt/tenant-dev/postgres/guardian/cnpg-backup` |
+| `tenant-gamma` | Postgres | `tenant-gamma-cnpg-backup` | `guardian/guardian-mgmt/tenant-gamma/postgres/guardian/cnpg-backup` |
+| `tenant-prod` | Postgres | `tenant-prod-cnpg-backup` | `guardian/guardian-mgmt/tenant-prod/postgres/guardian/cnpg-backup` |
+| `tenant-root` | ClickHouse | `tenant-root-clickhouse-backup` | `guardian/guardian-mgmt/tenant-root/clickhouse/guardian/backup` |
+| `tenant-dev` | ClickHouse | `tenant-dev-clickhouse-backup` | `guardian/guardian-mgmt/tenant-dev/clickhouse/guardian/backup` |
+| `tenant-gamma` | ClickHouse | `tenant-gamma-clickhouse-backup` | `guardian/guardian-mgmt/tenant-gamma/clickhouse/guardian/backup` |
+| `tenant-prod` | ClickHouse | `tenant-prod-clickhouse-backup` | `guardian/guardian-mgmt/tenant-prod/clickhouse/guardian/backup` |
+
+Each Postgres path must contain `AWS_ACCESS_KEY_ID` and
+`AWS_SECRET_ACCESS_KEY`; ESO writes them to `guardian-cnpg-backup-creds` in the
+tenant namespace. Each ClickHouse path must contain `bucketName`, `endpoint`,
+`region`, `accessKey`, and `secretKey`; ESO writes them to
+`guardian-clickhouse-backup-creds` in the tenant namespace. The SecretStores
+talk to Cozystack's OpenBao service at
+`http://guardian.tenant-root.svc:8200`, use the `kv` engine with `version: v2`,
+and authenticate through the `kubernetes` auth mount with audience `openbao`.
 `tenant-root` also declares a Cilium allow policy for only the Cozystack ESO
 controller in `cozy-external-secrets-operator` to reach OpenBao on port 8200.
-There are no checked-in `Plan` or `BackupJob` resources yet, because recurring
-backup jobs must wait until OpenBao is initialized/unsealed, those auth roles
-and kv secrets exist, and each app has real object-store coordinates.
+There are no checked-in `Plan` or `BackupJob` resources yet, and ClickHouse app
+backup is not enabled yet, because backup jobs and backup sidecars must wait
+until OpenBao is initialized/unsealed, those auth roles and kv secrets exist,
+and each app has real object-store coordinates.
 
 The checked-in environment app layer declares the same core service set in each
 environment namespace:
@@ -362,14 +377,24 @@ kubectl -n tenant-root get openbao guardian
 kubectl -n tenant-root get ciliumnetworkpolicy allow-external-secrets-to-openbao
 kubectl -n tenant-root get secretstores.external-secrets.io openbao
 kubectl -n tenant-root get externalsecrets.external-secrets.io guardian-cnpg-backup-creds
+kubectl -n tenant-root get secretstores.external-secrets.io openbao-clickhouse-backup
+kubectl -n tenant-root get externalsecrets.external-secrets.io guardian-clickhouse-backup-creds
 kubectl -n tenant-dev get secretstores.external-secrets.io openbao
 kubectl -n tenant-dev get externalsecrets.external-secrets.io guardian-cnpg-backup-creds
+kubectl -n tenant-dev get secretstores.external-secrets.io openbao-clickhouse-backup
+kubectl -n tenant-dev get externalsecrets.external-secrets.io guardian-clickhouse-backup-creds
 kubectl -n tenant-gamma get secretstores.external-secrets.io openbao
 kubectl -n tenant-gamma get externalsecrets.external-secrets.io guardian-cnpg-backup-creds
+kubectl -n tenant-gamma get secretstores.external-secrets.io openbao-clickhouse-backup
+kubectl -n tenant-gamma get externalsecrets.external-secrets.io guardian-clickhouse-backup-creds
 kubectl -n tenant-prod get secretstores.external-secrets.io openbao
 kubectl -n tenant-prod get externalsecrets.external-secrets.io guardian-cnpg-backup-creds
+kubectl -n tenant-prod get secretstores.external-secrets.io openbao-clickhouse-backup
+kubectl -n tenant-prod get externalsecrets.external-secrets.io guardian-clickhouse-backup-creds
 kubectl get cnpgs.strategy.backups.cozystack.io guardian-postgres-r2
 kubectl get backupclasses.backups.cozystack.io guardian-postgres-cnpg
+kubectl get altinities.strategy.backups.cozystack.io guardian-clickhouse-altinity
+kubectl get backupclasses.backups.cozystack.io guardian-clickhouse-altinity
 ```
 
 Expected results:
@@ -397,9 +422,15 @@ Expected results:
   `ExternalSecret/guardian-cnpg-backup-creds`; they do not have to be Ready
   until OpenBao has been initialized/unsealed and populated with the matching
   roles and kv-v2 values
+- root/dev/gamma/prod have `SecretStore/openbao-clickhouse-backup` and
+  `ExternalSecret/guardian-clickhouse-backup-creds`; they do not have to be
+  Ready until OpenBao has been initialized/unsealed and populated with the
+  matching roles and kv-v2 values
 - the cluster has `CNPG/guardian-postgres-r2` and
-  `BackupClass/guardian-postgres-cnpg`; there should not yet be a checked-in
-  recurring `Plan`
+  `BackupClass/guardian-postgres-cnpg`, plus
+  `Altinity/guardian-clickhouse-altinity` and
+  `BackupClass/guardian-clickhouse-altinity`; there should not yet be a
+  checked-in recurring `Plan`
 
 Talos-side network checks:
 
@@ -453,12 +484,12 @@ separate PRs with their own validation:
 - Load-test reports for CNPG/Postgres, Harbor, ClickHouse, OpenBao, the
   Cozystack dashboard, and the company-site surfaces.
 - Backup specs for root and environment Postgres/Harbor/ClickHouse, wired to
-  declared OpenBao/R2-projected Secrets. The package prerequisites and reusable
-  CNPG BackupClass are now declared, and CNPG credential SecretStores /
-  ExternalSecrets are declared for root/dev/gamma/prod. OpenBao auth role
-  bootstrap, app-level backup coordinates, recurring backup plans,
-  ClickHouse/Harbor backup classes, and live restore artifacts still need
-  separate PRs.
+  declared OpenBao/R2-projected Secrets. The package prerequisites, reusable
+  CNPG BackupClass, reusable ClickHouse Altinity BackupClass, and Postgres /
+  ClickHouse credential SecretStores and ExternalSecrets are now declared for
+  root/dev/gamma/prod. OpenBao auth role bootstrap, app-level backup
+  coordinates, recurring backup plans, Harbor backup strategy, and live restore
+  artifacts still need separate PRs.
 - ClickHouse chart-side `spec.storageClass` rendering, because Cozystack 1.4
   still relies on the cluster default for ClickHouse and keeper PVCs.
 - OpenBao init/unseal automation and backup/restore drills.
