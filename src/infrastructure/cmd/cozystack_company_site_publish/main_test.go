@@ -3,21 +3,27 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
 
 func TestValidateConfig(t *testing.T) {
 	cfg := publishConfig{
-		Kubectl:        "/kubectl",
-		RequestTimeout: "5s",
-		WaitTimeout:    "15m",
-		Bazel:          "bazelisk",
-		Target:         "//src/products/company/site:push-harbor",
-		Namespace:      "tenant-root",
-		Secret:         "harbor-guardian-credentials",
-		Host:           "harbor.guardianintelligence.org",
-		Workspace:      ".",
+		Kubectl:                 "/kubectl",
+		RequestTimeout:          "5s",
+		WaitTimeout:             "15m",
+		Bazel:                   "bazelisk",
+		Target:                  "//src/products/company/site:push-harbor",
+		Namespace:               "tenant-root",
+		Secret:                  "harbor-guardian-credentials",
+		Host:                    "harbor.guardianintelligence.org",
+		Project:                 "guardian",
+		ProjectPublic:           true,
+		PortForwardService:      "harbor-guardian",
+		PortForwardReadyTimeout: "10s",
+		Workspace:               ".",
 	}
 	if err := validateConfig(cfg); err != nil {
 		t.Fatalf("valid config rejected: %v", err)
@@ -39,6 +45,18 @@ func TestValidateConfig(t *testing.T) {
 	missingWait.WaitTimeout = ""
 	if err := validateConfig(missingWait); err == nil {
 		t.Fatalf("empty wait timeout accepted")
+	}
+
+	badProject := cfg
+	badProject.Project = "Guardian"
+	if err := validateConfig(badProject); err == nil {
+		t.Fatalf("invalid project accepted")
+	}
+
+	badPortForwardReadyTimeout := cfg
+	badPortForwardReadyTimeout.PortForwardReadyTimeout = "eventually"
+	if err := validateConfig(badPortForwardReadyTimeout); err == nil {
+		t.Fatalf("invalid port-forward ready timeout accepted")
 	}
 }
 
@@ -118,6 +136,93 @@ func TestDockerConfigPayload(t *testing.T) {
 	}
 }
 
+func TestEnsureHarborProjectExists(t *testing.T) {
+	var putSeen bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requireBasicAuth(t, r)
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2.0/projects/guardian":
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v2.0/projects/guardian":
+			putSeen = true
+			var payload harborProjectRequest
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode update payload: %v", err)
+			}
+			if payload.Metadata["public"] != "true" {
+				t.Fatalf("update payload = %#v", payload)
+			}
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	cfg := publishConfig{Host: server.URL, Project: "guardian", ProjectPublic: true}
+	if err := ensureHarborProject(t.Context(), cfg, "secret"); err != nil {
+		t.Fatalf("ensureHarborProject() error = %v", err)
+	}
+	if !putSeen {
+		t.Fatalf("project visibility update was not called")
+	}
+}
+
+func TestEnsureHarborProjectCreatesMissingProject(t *testing.T) {
+	var postSeen bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requireBasicAuth(t, r)
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2.0/projects/guardian":
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v2.0/projects":
+			postSeen = true
+			var payload harborProjectRequest
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode create payload: %v", err)
+			}
+			if payload.ProjectName != "guardian" || !payload.Public || payload.Metadata["public"] != "true" {
+				t.Fatalf("create payload = %#v", payload)
+			}
+			w.WriteHeader(http.StatusCreated)
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	cfg := publishConfig{Host: server.URL, Project: "guardian", ProjectPublic: true}
+	if err := ensureHarborProject(t.Context(), cfg, "secret"); err != nil {
+		t.Fatalf("ensureHarborProject() error = %v", err)
+	}
+	if !postSeen {
+		t.Fatalf("project create was not called")
+	}
+}
+
+func TestEnsureHarborProjectRejectsUnauthorized(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte("nope"))
+	}))
+	defer server.Close()
+
+	cfg := publishConfig{Host: server.URL, Project: "guardian", ProjectPublic: true}
+	if err := ensureHarborProject(t.Context(), cfg, "secret"); err == nil {
+		t.Fatalf("unauthorized response was accepted")
+	}
+}
+
+func TestHarborAPIURL(t *testing.T) {
+	got, err := harborAPIURL("harbor.guardianintelligence.org", "/api/v2.0/projects")
+	if err != nil {
+		t.Fatalf("harborAPIURL() error = %v", err)
+	}
+	if got != "https://harbor.guardianintelligence.org/api/v2.0/projects" {
+		t.Fatalf("harborAPIURL() = %q", got)
+	}
+}
+
 func TestRedactSecret(t *testing.T) {
 	auth := base64.StdEncoding.EncodeToString([]byte("admin:secret"))
 	got := redactSecret("password secret auth "+auth, "secret")
@@ -126,5 +231,13 @@ func TestRedactSecret(t *testing.T) {
 	}
 	if !strings.Contains(got, "<redacted>") || !strings.Contains(got, "<redacted-auth>") {
 		t.Fatalf("redactSecret missing markers: %q", got)
+	}
+}
+
+func requireBasicAuth(t *testing.T, r *http.Request) {
+	t.Helper()
+	user, password, ok := r.BasicAuth()
+	if !ok || user != "admin" || password != "secret" {
+		t.Fatalf("missing or invalid basic auth")
 	}
 }
