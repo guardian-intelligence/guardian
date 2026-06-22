@@ -1606,6 +1606,8 @@ def _publish_company_site_impl(ctx):
         kubectl,
         "--request-timeout",
         ctx.args.request_timeout,
+        "--wait-timeout",
+        ctx.args.wait_timeout,
         "--host",
         ctx.args.host,
         "--namespace",
@@ -1812,6 +1814,7 @@ publish_company_site = task(
         "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before publishing."),
         "secret": args.string(default = "harbor-guardian-credentials", description = "Harbor credentials Secret name."),
         "target": args.string(default = "//src/products/company/site:push-harbor", description = "Bazel oci_push target to run."),
+        "wait_timeout": args.string(default = "15m", description = "Timeout for Harbor readiness waits before publishing."),
     },
 )
 

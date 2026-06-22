@@ -11,6 +11,7 @@ func TestValidateConfig(t *testing.T) {
 	cfg := publishConfig{
 		Kubectl:        "/kubectl",
 		RequestTimeout: "5s",
+		WaitTimeout:    "15m",
 		Bazel:          "bazelisk",
 		Target:         "//src/products/company/site:push-harbor",
 		Namespace:      "tenant-root",
@@ -33,6 +34,27 @@ func TestValidateConfig(t *testing.T) {
 	if err := validateConfig(badHost); err == nil {
 		t.Fatalf("invalid host accepted")
 	}
+
+	missingWait := cfg
+	missingWait.WaitTimeout = ""
+	if err := validateConfig(missingWait); err == nil {
+		t.Fatalf("empty wait timeout accepted")
+	}
+}
+
+func TestHarborReadinessChecks(t *testing.T) {
+	cfg := publishConfig{
+		Namespace:   "tenant-root",
+		WaitTimeout: "20m",
+	}
+	got := harborReadinessChecks(cfg)
+	requireCommand(t, got, "Harbor app yaml", "tenant-root", "harbors.apps.cozystack.io/guardian", "-o", "yaml")
+	requireCommand(t, got, "Harbor registry bucket claim yaml", "tenant-root", "bucketclaims.objectstorage.k8s.io/harbor-guardian-registry", "-o", "yaml")
+	requireCommand(t, got, "Harbor registry bucket access yaml", "tenant-root", "bucketaccesses.objectstorage.k8s.io/harbor-guardian-registry", "-o", "yaml")
+	requireCommand(t, got, "wait Harbor app Ready", "--for=condition=Ready", "harbors.apps.cozystack.io/guardian", "--timeout=20m")
+	requireCommand(t, got, "wait Harbor registry bucket ready", "--for=jsonpath={.status.bucketReady}=true", "bucketclaims.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=20m")
+	requireCommand(t, got, "wait Harbor registry bucket access granted", "--for=jsonpath={.status.accessGranted}=true", "bucketaccesses.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=20m")
+	requireCommand(t, got, "wait Harbor workloads Ready", "--for=condition=WorkloadsReady", "harbors.apps.cozystack.io/guardian", "--timeout=20m")
 }
 
 func TestKubectlArgs(t *testing.T) {
@@ -49,6 +71,31 @@ func TestKubectlArgs(t *testing.T) {
 			t.Fatalf("kubectlArgs[%d] = %q, want %q: %#v", i, got[i], want[i], got)
 		}
 	}
+}
+
+func requireCommand(t *testing.T, checks []kubectlCommand, label string, parts ...string) {
+	t.Helper()
+	for _, check := range checks {
+		if check.Label != label {
+			continue
+		}
+		for _, part := range parts {
+			if !hasArg(check.Args, part) {
+				t.Fatalf("%s missing arg %q: %#v", label, part, check.Args)
+			}
+		}
+		return
+	}
+	t.Fatalf("missing command %q in %#v", label, checks)
+}
+
+func hasArg(args []string, want string) bool {
+	for _, arg := range args {
+		if arg == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestDockerConfigPayload(t *testing.T) {
