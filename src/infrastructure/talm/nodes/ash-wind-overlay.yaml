@@ -1,0 +1,19 @@
+---
+apiVersion: v1alpha1
+kind: HostnameConfig
+hostname: ash-wind
+---
+apiVersion: v1alpha1
+kind: LinkConfig
+name: enp1s0f0
+up: true
+mtu: 1420
+---
+apiVersion: v1alpha1
+kind: VLANConfig
+name: enp1s0f0.2140
+parent: enp1s0f0
+vlanID: 2140
+mtu: 1420
+addresses:
+  - address: 10.8.0.12/24

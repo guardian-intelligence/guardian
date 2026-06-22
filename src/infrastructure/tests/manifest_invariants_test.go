@@ -48,6 +48,7 @@ type guardianMgmtNode struct {
 
 func TestManifestInvariants(t *testing.T) {
 	t.Run("guardian mgmt topology alignment", testGuardianMgmtTopologyAlignment)
+	t.Run("talm install disk selectors", testTalmInstallDiskSelectors)
 	t.Run("cozystack platform package", testCozystackPlatformPackage)
 	t.Run("environment tenants", testEnvironmentTenants)
 	t.Run("layer two networking", testLayerTwoNetworking)
@@ -64,6 +65,45 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("openbao cnpg backup secret projection", testOpenBaoCNPGBackupSecretProjection)
 	t.Run("openbao clickhouse backup secret projection", testOpenBaoClickHouseBackupSecretProjection)
 	t.Run("flux handoff", testFluxHandoff)
+}
+
+func testTalmInstallDiskSelectors(t *testing.T) {
+	systemDisks := map[string]string{
+		"ash-earth": "362510FCEFB8",
+		"ash-wind":  "352410A4E051",
+		"ash-water": "362510FE3218",
+	}
+	dataDisks := map[string]string{
+		"ash-earth": "362510FD7C47",
+		"ash-wind":  "352410A4E0A6",
+		"ash-water": "362510FE3204",
+	}
+
+	for node, systemSerial := range systemDisks {
+		t.Run(node, func(t *testing.T) {
+			rel := "src/infrastructure/talm/nodes/" + node + ".yaml"
+			text := string(readRunfile(t, rel))
+			assertTextNotContains(t, text, "disk: /dev/nvme", rel)
+
+			docs := readManifests(t, rel)
+			if len(docs) == 0 {
+				t.Fatalf("%s has no YAML documents", rel)
+			}
+			install := valueAt(docs[0], "machine", "install")
+			if install == nil {
+				t.Fatalf("%s first document is missing machine.install", rel)
+			}
+			installMap := asManifest(t, install, rel+" machine.install")
+			assertString(t, installMap, systemSerial, "diskSelector", "serial")
+			assertString(t, installMap, "ghcr.io/cozystack/cozystack/talos:v1.12.6", "image")
+			if disk := stringAt(installMap, "disk"); disk != "" {
+				t.Fatalf("%s machine.install.disk = %q, want diskSelector only", rel, disk)
+			}
+			if systemSerial == dataDisks[node] {
+				t.Fatalf("%s system disk serial must differ from LINSTOR data disk serial %s", node, dataDisks[node])
+			}
+		})
+	}
 }
 
 func testCozystackPlatformPackage(t *testing.T) {
@@ -234,7 +274,14 @@ func testSingleDefaultStorageClass(t *testing.T) {
 func testLINSTORDataPools(t *testing.T) {
 	kustomization := readYAMLMap(t, "src/infrastructure/base/kustomization.yaml")
 	resources := sliceAt(t, kustomization, "resources")
-	assertContainsString(t, resources, "storage/linstor-data-pools.yaml", "base kustomization resources")
+	if containsString(resources, "storage/linstor-data-pools.yaml") {
+		t.Fatalf("base kustomization must not include storage/linstor-data-pools.yaml; storage is reconciled by guardian-mgmt-storage")
+	}
+
+	storageKustomization := readYAMLMap(t, "src/infrastructure/base/storage/kustomization.yaml")
+	storageResources := sliceAt(t, storageKustomization, "resources")
+	assertContainsString(t, storageResources, "linstor-data-pools.yaml", "storage kustomization resources")
+	assertContainsString(t, storageResources, "storageclasses.yaml", "storage kustomization resources")
 
 	docs := readManifests(t, "src/infrastructure/base/storage/linstor-data-pools.yaml")
 	wantDevices := map[string]string{
@@ -1013,6 +1060,32 @@ func testFluxHandoff(t *testing.T) {
 	assertBool(t, base, false, "spec", "prune")
 	assertBool(t, base, false, "spec", "wait")
 
+	platform := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-platform")
+	assertString(t, platform, "./src/infrastructure/base/cozystack", "spec", "path")
+	assertString(t, platform, "GitRepository", "spec", "sourceRef", "kind")
+	assertString(t, platform, "guardian", "spec", "sourceRef", "name")
+	assertBool(t, platform, false, "spec", "prune")
+	assertBool(t, platform, false, "spec", "wait")
+
+	storage := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-storage")
+	assertString(t, storage, "./src/infrastructure/base/storage", "spec", "path")
+	assertString(t, storage, "GitRepository", "spec", "sourceRef", "kind")
+	assertString(t, storage, "guardian", "spec", "sourceRef", "name")
+	assertBool(t, storage, false, "spec", "prune")
+	assertBool(t, storage, false, "spec", "wait")
+
+	storageDeps := sliceAt(t, storage, "spec", "dependsOn")
+	if len(storageDeps) != 1 || stringAt(asManifest(t, storageDeps[0], "storage spec.dependsOn[0]"), "name") != "guardian-mgmt-platform" {
+		t.Fatalf("guardian-mgmt-storage dependsOn = %#v, want only guardian-mgmt-platform", storageDeps)
+	}
+
+	baseDeps := sliceAt(t, base, "spec", "dependsOn")
+	if len(baseDeps) != 2 ||
+		stringAt(asManifest(t, baseDeps[0], "base spec.dependsOn[0]"), "name") != "guardian-mgmt-platform" ||
+		stringAt(asManifest(t, baseDeps[1], "base spec.dependsOn[1]"), "name") != "guardian-mgmt-storage" {
+		t.Fatalf("guardian-mgmt-base dependsOn = %#v, want guardian-mgmt-platform then guardian-mgmt-storage", baseDeps)
+	}
+
 	apps := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-tenant-apps")
 	assertString(t, apps, "./src/infrastructure/environments", "spec", "path")
 	assertString(t, apps, "GitRepository", "spec", "sourceRef", "kind")
@@ -1454,12 +1527,19 @@ func findEnv(t *testing.T, env []any, name string) manifest {
 func assertContainsString(t *testing.T, values []any, want, label string) {
 	t.Helper()
 
-	for _, value := range values {
-		if got, ok := value.(string); ok && got == want {
-			return
-		}
+	if containsString(values, want) {
+		return
 	}
 	t.Fatalf("%s = %#v, want it to contain %q", label, values, want)
+}
+
+func containsString(values []any, want string) bool {
+	for _, value := range values {
+		if got, ok := value.(string); ok && got == want {
+			return true
+		}
+	}
+	return false
 }
 
 func assertTextContains(t *testing.T, text, needle, label string) {

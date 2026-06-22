@@ -1,6 +1,7 @@
 filegroup(
     name = "manifests",
     srcs = [
+        "kustomization.yaml",
         "platform.yaml",
     ],
     visibility = ["//visibility:public"],
