@@ -164,6 +164,10 @@ aspect infra evidence-capture \
   --kubeconfig "${KUBECONFIG}" \
   --talosconfig "${TALOSCONFIG}" \
   --phase evidence
+aspect infra evidence-verify \
+  --run-dir docs/reports/infrastructure/live-runs/<timestamp>-evidence \
+  --mode evidence \
+  --require-talos
 ```
 
 `evidence-capture` is read-only. It writes command outputs under
@@ -171,6 +175,13 @@ aspect infra evidence-capture \
 including `summary.tsv`, Kubernetes snapshots, evidence Job logs, BackupJob and
 RestoreJob state, and Talos health when `--talosconfig` is supplied. Commit the
 capture directory with the component reports for the live run.
+
+`evidence-verify` reads a captured live-run directory and writes `VERIFY.md`
+plus `verification.tsv` next to the raw outputs. For `--mode evidence`, it
+checks the command-status summary, required app CRs, tenant company-site
+resources, ingress hosts, evidence Job completions, stable load-test log
+summaries, and BackupJob/RestoreJob success markers. Treat this as report
+input, not as a substitute for reviewing the raw evidence.
 
 `evidence-run` is the preferred live command. It runs the expanded sequence in
 order and attempts `evidence-capture` even when an earlier wait/log/snapshot
@@ -256,6 +267,10 @@ aspect infra outage-cordon --kubeconfig "${KUBECONFIG}" --node <node>
 aspect infra outage-drain --kubeconfig "${KUBECONFIG}" --node <node>
 aspect infra outage-snapshot --kubeconfig "${KUBECONFIG}" --node <node>
 aspect infra evidence-capture --kubeconfig "${KUBECONFIG}" --phase outage-drained
+aspect infra evidence-verify \
+  --run-dir docs/reports/infrastructure/live-runs/<timestamp>-outage-drained \
+  --mode outage \
+  --node <node>
 aspect infra outage-uncordon --kubeconfig "${KUBECONFIG}" --node <node>
 aspect infra outage-snapshot --kubeconfig "${KUBECONFIG}" --node <node>
 ```
@@ -264,7 +279,9 @@ aspect infra outage-snapshot --kubeconfig "${KUBECONFIG}" --node <node>
 `outage-before`, `outage-drained`, and `outage-after` evidence directories and
 attempts an `outage-failed` capture if a step fails. This proves Kubernetes
 scheduling and rollout recovery. It is not a substitute for the required
-hardware outage drill.
+hardware outage drill. Run `aspect infra evidence-verify --mode outage` against
+each captured outage directory before attaching it to the outage report; pass
+`--min-ready-nodes 2` for a true `outage-down` hardware capture.
 
 Hardware outage drill:
 

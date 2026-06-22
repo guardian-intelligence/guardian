@@ -12,6 +12,8 @@ OPENBAO_EVIDENCE_TOKEN_TARGET = "//src/infrastructure/secrets:seed-openbao-evide
 OPENBAO_EVIDENCE_TOKEN_BIN = "bazel-bin/src/infrastructure/secrets/seed-openbao-evidence-token-runner"
 CAPTURE_EVIDENCE_TARGET = "//src/infrastructure/evidence:capture-management-evidence"
 CAPTURE_EVIDENCE_BIN = "bazel-bin/src/infrastructure/evidence/capture-management-evidence-runner"
+VERIFY_EVIDENCE_TARGET = "//src/infrastructure/evidence:verify-management-evidence"
+VERIFY_EVIDENCE_BIN = "bazel-bin/src/infrastructure/evidence/verify-management-evidence-runner"
 KUBECTL_RUNNER = "bazel-bin/src/tools/kubectl/kubectl-runner"
 TALOSCTL_RUNNER = "bazel-bin/src/tools/talosctl/talosctl-runner"
 GUARDIAN_MGMT_ROOT = "src/infrastructure/bootstrap/guardian-mgmt"
@@ -388,6 +390,38 @@ def _capture_evidence(ctx, phase = None, allow_failures = None):
 def _capture_evidence_impl(ctx):
     return _capture_evidence(ctx)
 
+def _verify_evidence_impl(ctx):
+    if ctx.args.run_dir == "":
+        ctx.std.io.stderr.write("ERROR: pass --run-dir with a captured evidence directory\n")
+        return 1
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        ["build", VERIFY_EVIDENCE_TARGET],
+        cwd = ws_path(ctx),
+        label = "bazelisk build " + VERIFY_EVIDENCE_TARGET,
+    )
+    if rc != 0:
+        return rc
+    verify_args = ["--run-dir", ctx.args.run_dir]
+    if ctx.args.phase != "":
+        verify_args.extend(["--phase", ctx.args.phase])
+    if ctx.args.mode != "":
+        verify_args.extend(["--mode", ctx.args.mode])
+    if ctx.args.min_ready_nodes != "":
+        verify_args.extend(["--min-ready-nodes", ctx.args.min_ready_nodes])
+    if ctx.args.require_talos:
+        verify_args.append("--require-talos")
+    if ctx.args.node != "":
+        verify_args.extend(["--node", ctx.args.node])
+    return checked_spawn(
+        ctx,
+        ws_path(ctx, VERIFY_EVIDENCE_BIN),
+        verify_args,
+        cwd = ws_path(ctx),
+        label = "verify management evidence",
+    )
+
 def _publish_company_site_impl(ctx):
     return checked_spawn(
         ctx,
@@ -649,6 +683,15 @@ _CAPTURE_EVIDENCE_ARGS.update({
     "talosconfig": args.string(default = "", description = "Optional talosconfig path. Talos capture is skipped unless set or TALOSCONFIG is present."),
 })
 
+_VERIFY_EVIDENCE_ARGS = {
+    "mode": args.string(default = "", description = "Verification mode: common, evidence, or outage. Defaults from the capture phase."),
+    "min_ready_nodes": args.string(default = "", description = "Minimum Ready nodes required. Defaults from the capture phase."),
+    "node": args.string(default = "", description = "Optional outage node name to check in kubectl node output."),
+    "phase": args.string(default = "", description = "Capture phase override. Defaults to MANIFEST.md."),
+    "require_talos": args.boolean(default = False, description = "Require Talos health and etcd member captures instead of allowing skipped Talos outputs."),
+    "run_dir": args.string(default = "", description = "Captured live-run directory to verify."),
+}
+
 _OUTAGE_RUN_ARGS = dict(_CAPTURE_EVIDENCE_ARGS)
 _OUTAGE_RUN_ARGS.update({
     "node": args.string(default = "", description = "Kubernetes node name under outage rehearsal."),
@@ -825,6 +868,14 @@ capture_evidence = task(
     group = ["infra"],
     summary = "Capture live management-cluster evidence into a checked-in report directory.",
     args = _CAPTURE_EVIDENCE_ARGS,
+)
+
+verify_evidence = task(
+    implementation = _verify_evidence_impl,
+    name = "evidence-verify",
+    group = ["infra"],
+    summary = "Verify a captured management evidence directory and write report check results.",
+    args = _VERIFY_EVIDENCE_ARGS,
 )
 
 publish_company_site = task(

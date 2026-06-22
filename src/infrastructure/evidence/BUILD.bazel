@@ -21,3 +21,12 @@ genrule(
     executable = True,
     visibility = ["//visibility:public"],
 )
+
+genrule(
+    name = "verify-management-evidence",
+    srcs = ["verify-management-evidence.sh"],
+    outs = ["verify-management-evidence-runner"],
+    cmd = "cp $(location verify-management-evidence.sh) $@ && chmod +x $@",
+    executable = True,
+    visibility = ["//visibility:public"],
+)

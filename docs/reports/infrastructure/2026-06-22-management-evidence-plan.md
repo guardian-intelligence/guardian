@@ -41,6 +41,7 @@ aspect infra evidence-logs --kubeconfig "${KUBECONFIG}"
 aspect infra evidence-snapshot --kubeconfig "${KUBECONFIG}"
 aspect infra evidence-capture --kubeconfig "${KUBECONFIG}" --phase evidence
 aspect infra evidence-run --kubeconfig "${KUBECONFIG}" --phase evidence --timeout 30m
+aspect infra evidence-verify --run-dir docs/reports/infrastructure/live-runs/<timestamp>-evidence --mode evidence --require-talos
 ```
 
 Kubernetes-side outage rehearsal:
@@ -51,6 +52,7 @@ aspect infra outage-cordon --kubeconfig "${KUBECONFIG}" --node <node>
 aspect infra outage-drain --kubeconfig "${KUBECONFIG}" --node <node>
 aspect infra outage-uncordon --kubeconfig "${KUBECONFIG}" --node <node>
 aspect infra outage-run --kubeconfig "${KUBECONFIG}" --node <node> --timeout 10m
+aspect infra evidence-verify --run-dir docs/reports/infrastructure/live-runs/<timestamp>-outage-after --mode outage --node <node>
 ```
 
 ## Current Evidence
@@ -79,6 +81,9 @@ aspect infra outage-run --kubeconfig "${KUBECONFIG}" --node <node> --timeout 10m
 - Live evidence capture now has a repo-owned read-only Aspect task that writes
   Kubernetes, evidence Job, database restore, and Talos outputs under
   `docs/reports/infrastructure/live-runs/` for check-in with component reports.
+- Captured evidence now has a repo-owned `aspect infra evidence-verify` task
+  that writes `VERIFY.md` and `verification.tsv` into the live-run directory
+  before it is attached to component reports.
 - The full opt-in load/DR sequence now has a repo-owned `aspect infra
   evidence-run` task that runs clean/apply/wait/restore/logs/snapshot/capture
   and captures degraded state when a step fails.
