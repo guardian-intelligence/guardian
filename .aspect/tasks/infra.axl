@@ -37,6 +37,9 @@ INFRA_FILEGROUPS = [
 ]
 LIVE_GETS = [
     ("cozystack platform package", ["get", "packages.cozystack.io/cozystack.cozystack-platform"]),
+    ("dashboard console service", ["-n", "cozy-dashboard", "get", "service/cozy-dashboard-console"]),
+    ("dashboard gatekeeper service", ["-n", "cozy-dashboard", "get", "service/incloud-web-gatekeeper"]),
+    ("dashboard ingress", ["-n", "cozy-dashboard", "get", "ingress/dashboard-web-ingress"]),
     ("ovn-default subnet", ["get", "subnets.kubeovn.io/ovn-default"]),
     ("join subnet", ["get", "subnets.kubeovn.io/join"]),
     ("metallb ip pool", ["-n", "cozy-metallb", "get", "ipaddresspools.metallb.io/cozystack"]),
@@ -93,6 +96,8 @@ LIVE_WAITS = [
     ("flux source", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "gitrepositories.source.toolkit.fluxcd.io/guardian"]),
     ("flux base kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-base"]),
     ("flux tenant app kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-tenant-apps"]),
+    ("dashboard console deployment", ["-n", "cozy-dashboard", "wait", "--for=condition=Available", "deployment/cozy-dashboard-console"]),
+    ("dashboard gatekeeper deployment", ["-n", "cozy-dashboard", "wait", "--for=condition=Available", "deployment/incloud-web-gatekeeper"]),
     ("dev company deployment", ["-n", "tenant-dev", "wait", "--for=condition=Available", "deployment/company-site"]),
     ("gamma company deployment", ["-n", "tenant-gamma", "wait", "--for=condition=Available", "deployment/company-site"]),
     ("prod company deployment", ["-n", "tenant-prod", "wait", "--for=condition=Available", "deployment/company-site"]),
