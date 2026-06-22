@@ -35,6 +35,9 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/environments:manifests",
     "//src/infrastructure/bootstrap/guardian-mgmt-openbao:root",
 ]
+INFRA_TESTS = [
+    "//src/infrastructure/tests:manifest_invariants_test",
+]
 LIVE_GETS = [
     ("cozystack platform package", ["get", "packages.cozystack.io/cozystack.cozystack-platform"]),
     ("dashboard console service", ["-n", "cozy-dashboard", "get", "service/cozy-dashboard-console"]),
@@ -329,6 +332,15 @@ def _validate_impl(ctx):
         ["build"] + INFRA_FILEGROUPS,
         cwd = ws_path(ctx),
         label = "bazelisk build infra filegroups",
+    )
+    if rc != 0:
+        return rc
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        ["test"] + INFRA_TESTS,
+        cwd = ws_path(ctx),
+        label = "bazelisk test infra invariants",
     )
     if rc != 0:
         return rc
