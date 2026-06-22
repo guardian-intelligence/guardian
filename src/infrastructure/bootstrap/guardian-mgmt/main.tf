@@ -7,13 +7,41 @@ data "latitudesh_plan" "f4_metal_small" {
 }
 
 locals {
-  inventory = jsondecode(file("${path.module}/../../inventory/guardian-mgmt.json"))
-
-  project_id = local.inventory.latitude.project_id
-  site       = local.inventory.latitude.site
-  vlan       = local.inventory.network.vlan
+  project_id = "proj_R82A0yqmd06mM"
+  site       = "ASH"
+  vlan = {
+    id           = "vlan_8mop5gkpP5jxv"
+    vid          = 2140
+    description  = "guardian-mgmt L2 fabric"
+    subnet       = "10.8.0.0/24"
+    vlan_mtu     = 1420
+    pod_mtu      = 1362
+    api_vip      = "10.8.0.250"
+    vip_link     = "enp1s0f0.2140"
+    metallb_pool = "10.8.0.200-10.8.0.240"
+  }
   control_plane_nodes = {
-    for node in local.inventory.nodes : node.name => node
+    ash-earth = {
+      name         = "ash-earth"
+      server_id    = "sv_vAPXaMxKM5epz"
+      hostname     = "ash-earth"
+      public_ipv4  = "206.223.228.101"
+      private_ipv4 = "10.8.0.11"
+    }
+    ash-wind = {
+      name         = "ash-wind"
+      server_id    = "sv_nPRbajqEB5koM"
+      hostname     = "ash-wind"
+      public_ipv4  = "45.250.254.119"
+      private_ipv4 = "10.8.0.12"
+    }
+    ash-water = {
+      name         = "ash-water"
+      server_id    = "sv_8mop5gZo8Njxv"
+      hostname     = "ash-water"
+      public_ipv4  = "206.223.228.87"
+      private_ipv4 = "10.8.0.13"
+    }
   }
 }
 
@@ -80,6 +108,6 @@ check "control_plane_public_ips" {
       for name, node in local.control_plane_nodes :
       latitudesh_server.control_plane[name].primary_ipv4 == node.public_ipv4
     ])
-    error_message = "Latitude server public IPv4s drifted from the checked-in guardian-mgmt inventory."
+    error_message = "Latitude server public IPv4s drifted from the checked-in guardian-mgmt OpenTofu topology."
   }
 }
