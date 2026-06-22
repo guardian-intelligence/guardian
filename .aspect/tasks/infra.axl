@@ -10,6 +10,7 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/inventory:inventory",
     "//src/infrastructure/talm:chart",
     "//src/infrastructure/base/networking:manifests",
+    "//src/infrastructure/base/tenants:manifests",
 ]
 
 def _capture_stdout(ctx, program, args, cwd = None, label = None):

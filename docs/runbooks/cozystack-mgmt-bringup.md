@@ -20,6 +20,7 @@ checks to run; it is not a separate source of truth.
 | Flux handoff | `src/infrastructure/base/flux/sync.yaml` |
 | OpenBao app | `src/infrastructure/base/openbao/` |
 | LINSTOR storage classes | `src/infrastructure/base/storage/storageclasses.yaml` |
+| Environment tenants | `src/infrastructure/base/tenants/environments.yaml` |
 
 ## Current Facts
 
@@ -123,7 +124,8 @@ kubectl apply -f src/infrastructure/base/flux/sync.yaml
 ```
 
 Flux then reconciles `src/infrastructure/base`, including the Platform package,
-networking manifests, storage classes, OpenBao, and the Flux objects themselves.
+networking manifests, storage classes, environment tenants, OpenBao, and the
+Flux objects themselves.
 
 For a direct render check from the repo-pinned kubectl artifact:
 
@@ -133,6 +135,27 @@ OUTPUT_BASE="$(bazelisk info output_base)"
 "$OUTPUT_BASE/external/+http_file+kubectl_linux_amd64/file/kubectl" \
   kustomize src/infrastructure/base
 ```
+
+## Cozystack App Path
+
+Cozystack 1.4 serves `apps.cozystack.io/v1alpha1` resources through its
+aggregated API server. The API server reads `ApplicationDefinition` objects at
+startup, then converts app resources such as `Tenant`, `Postgres`, `Harbor`, and
+`ClickHouse` into Flux `HelmRelease` objects.
+
+For `Tenant`, the Cozystack source sets `release.prefix: tenant-`. Applying
+`Tenant/dev` in `tenant-root` therefore creates a `HelmRelease` named
+`tenant-dev` in `tenant-root`. The tenant chart then creates namespace
+`tenant-dev` and writes that namespace's `cozystack-values` Secret. The checked
+in `dev`, `gamma`, and `prod` tenants intentionally inherit root `etcd`,
+ingress, monitoring, and SeaweedFS; they only set explicit environment hostnames
+for now.
+
+Important source finding for the next app slice: Cozystack 1.4 `Postgres` and
+`Harbor` templates honor `spec.storageClass`, but the `ClickHouse` chart exposes
+`spec.storageClass` without rendering it into ClickHouse or keeper PVC
+templates. Do not mark ClickHouse storage placement complete until that upstream
+behavior is patched or explicitly accepted.
 
 ## Live Checks
 
@@ -144,6 +167,9 @@ kubectl get subnet ovn-default join -o custom-columns=NAME:.metadata.name,MTU:.s
 kubectl -n cozy-metallb get ipaddresspool,l2advertisement
 kubectl -n cozy-fluxcd get gitrepository,kustomization
 kubectl get storageclass
+kubectl -n tenant-root get tenants.apps.cozystack.io
+kubectl get ns tenant-dev tenant-gamma tenant-prod \
+  -o custom-columns=NAME:.metadata.name,HOST:.metadata.labels.namespace\\.cozystack\\.io/host,INGRESS:.metadata.labels.namespace\\.cozystack\\.io/ingress
 kubectl -n tenant-root get openbao guardian
 ```
 
@@ -155,6 +181,9 @@ Expected results:
 - Flux `guardian-mgmt-base` reconciles `src/infrastructure/base`
 - storage classes include `local`, `local-retain`, `replicated`, and
   `replicated-retain`
+- tenant namespaces exist for dev, gamma, and prod; their host labels are
+  `dev.gi.org`, `gamma.gi.org`, and `prod.gi.org`, and their ingress label is
+  `tenant-root`
 - OpenBao is deployed as the Cozystack-managed `guardian` app in `tenant-root`
 
 Talos-side network checks:
@@ -175,8 +204,10 @@ separate PRs with their own validation:
 
 - Bootstrap CLI wrapper for the full Talm/Talos path.
 - Latitude VLAN assignment imports, once assignment IDs are collected.
-- Declarative CNPG, Harbor, ClickHouse, dashboard readiness, and company-site
+- Declarative CNPG/Postgres, Harbor, dashboard readiness, and company-site
   surfaces for dev, gamma, and prod.
+- ClickHouse storage-class enforcement, because the Cozystack 1.4 chart exposes
+  `spec.storageClass` but does not render it into PVC templates.
 - OpenBao init/unseal automation and backup/restore drills.
 - Checked-in load-test, disaster-recovery, and single-node-outage reports for
   each new infrastructure component.

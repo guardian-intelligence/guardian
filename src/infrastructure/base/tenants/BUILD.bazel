@@ -1,0 +1,7 @@
+filegroup(
+    name = "manifests",
+    srcs = [
+        "environments.yaml",
+    ],
+    visibility = ["//visibility:public"],
+)

@@ -9,6 +9,7 @@ filegroup(
         "//src/infrastructure/base/networking:manifests",
         "//src/infrastructure/base/openbao:manifests",
         "//src/infrastructure/base/storage:manifests",
+        "//src/infrastructure/base/tenants:manifests",
     ],
     visibility = ["//visibility:public"],
 )
