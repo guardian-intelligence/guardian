@@ -887,9 +887,12 @@ aspect infra publish-company-site \
 
 The publish task runs the same guardian-mgmt kubeconfig guard as
 `aspect infra live`, verifies source-controller convergence when `--revision`
-is provided, reads the root Harbor admin password from
-`Secret/harbor-guardian-credentials`, writes a temporary Docker config, and then
-runs the existing Bazel `oci_push` target. Do not run the raw
+is provided, prints the root `Harbor/guardian` and registry COSI resources,
+waits for the Harbor app `Ready` and `WorkloadsReady` conditions plus
+`BucketClaim.status.bucketReady=true` and
+`BucketAccess.status.accessGranted=true`, reads the root Harbor admin password
+from `Secret/harbor-guardian-credentials`, writes a temporary Docker config,
+and then runs the existing Bazel `oci_push` target. Do not run the raw
 `//src/products/company/site:push-harbor` target with ambient workstation
 registry credentials for cluster publication.
 
