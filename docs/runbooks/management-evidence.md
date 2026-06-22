@@ -140,7 +140,35 @@ The opt-in evidence overlay provides:
 - `Job/tenant-root/evidence-storage-smoke`: seed/verify a retained replicated
   PVC using deterministic checksums.
 
-Run:
+Run the full live evidence package:
+
+```sh
+LATITUDESH_AUTH_TOKEN="${LATITUDESH_AUTH_TOKEN}" \
+aspect infra management-evidence-run \
+  --kubeconfig "${KUBECONFIG}" \
+  --talosconfig "${TALOSCONFIG}"
+```
+
+`management-evidence-run` is the preferred final live command. It applies the
+opt-in evidence overlay, waits for the load jobs and database backup/restore
+drills, captures and verifies the load/DR evidence, power-cycles each selected
+Latitude management node sequentially through `hardware-outage-run-all`, and
+writes a suite verification report. The default parent output directory is
+`docs/reports/infrastructure/live-runs/<timestamp>-management-evidence/` with
+these children:
+
+- `evidence/`: load, storage, app, backup, restore, Kubernetes, and Talos
+  capture plus `VERIFY.md`;
+- `hardware-outage-all/`: one verified hardware outage run per management node;
+- `management-suite/`: `SUITE.md` and `suite-verification.tsv` tying the load,
+  DR, and outage evidence together.
+
+The command requires a Talos config because final suite verification requires
+Talos health in the load/DR capture and in the before/after outage phases. It
+also requires a Latitude API token because it performs true hardware power
+actions.
+
+For targeted debugging, run the load/DR portion alone:
 
 ```sh
 aspect infra evidence-run \
@@ -183,12 +211,12 @@ resources, ingress hosts, evidence Job completions, stable load-test log
 summaries, and BackupJob/RestoreJob success markers. Treat this as report
 input, not as a substitute for reviewing the raw evidence.
 
-`evidence-run` is the preferred live command. It runs the expanded sequence in
+`evidence-run` runs the expanded load/DR sequence in
 order and attempts `evidence-capture` even when an earlier wait/log/snapshot
 step fails, preserving the degraded state for the report.
 
-After `evidence-verify` passes and the all-node hardware outage capture exists,
-write the suite-level report:
+After standalone `evidence-verify` passes and the all-node hardware outage
+capture exists, write the suite-level report:
 
 ```sh
 aspect infra evidence-verify-suite \
@@ -302,7 +330,7 @@ hardware outage drill. Run `aspect infra evidence-verify --mode outage` against
 each captured outage directory before attaching it to the outage report; pass
 `--min-ready-nodes 2` for a true `outage-down` hardware capture.
 
-Hardware outage drill:
+Standalone hardware outage drill:
 
 ```sh
 LATITUDESH_AUTH_TOKEN="${LATITUDESH_AUTH_TOKEN}" \
@@ -312,7 +340,7 @@ aspect infra hardware-outage-run-all \
   --require-talos
 ```
 
-`hardware-outage-run-all` is the preferred final outage report command. It reads
+`hardware-outage-run-all` is the standalone final outage report command. It reads
 the management node list from
 `src/infrastructure/inventory/guardian-mgmt.json` and runs the true single-node
 outage drill once per node, sequentially.

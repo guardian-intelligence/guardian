@@ -42,6 +42,7 @@ load(
     infra_hardware_outage_run_all = "hardware_outage_run_all",
     infra_live_rollout = "live_rollout",
     infra_live_snapshot = "live_snapshot",
+    infra_management_evidence_run = "management_evidence_run",
     infra_outage_cordon = "outage_cordon",
     infra_outage_drain = "outage_drain",
     infra_outage_run = "outage_run",
@@ -94,6 +95,7 @@ def config(ctx):
     ctx.tasks.add(infra_hardware_outage_run_all)
     ctx.tasks.add(infra_live_rollout)
     ctx.tasks.add(infra_live_snapshot)
+    ctx.tasks.add(infra_management_evidence_run)
     ctx.tasks.add(infra_outage_cordon)
     ctx.tasks.add(infra_outage_drain)
     ctx.tasks.add(infra_outage_run)

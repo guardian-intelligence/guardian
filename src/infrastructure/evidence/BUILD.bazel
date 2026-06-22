@@ -52,6 +52,15 @@ genrule(
 )
 
 genrule(
+    name = "management-evidence-run",
+    srcs = ["management-evidence-run.sh"],
+    outs = ["management-evidence-runner"],
+    cmd = "cp $(location management-evidence-run.sh) $@ && chmod +x $@",
+    executable = True,
+    visibility = ["//visibility:public"],
+)
+
+genrule(
     name = "hardware-outage-run",
     srcs = ["hardware-outage-run.sh"],
     outs = ["hardware-outage-runner"],

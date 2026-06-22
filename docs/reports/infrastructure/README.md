@@ -23,6 +23,10 @@ complete. The suite report ties one passing load/DR capture to one passing
 all-node hardware outage capture and verifies all expected management nodes from
 the checked-in inventory.
 
+Use `aspect infra management-evidence-run` for the final live evidence package.
+It writes a single parent directory containing the verified load/DR capture,
+the verified all-node hardware outage capture, and the suite report.
+
 Each component report should cover:
 
 - load test scope, command, inputs, and result;

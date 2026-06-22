@@ -31,6 +31,7 @@ aspect infra talos-health --talosconfig "${TALOSCONFIG}"
 Opt-in load and DR evidence fixtures:
 
 ```sh
+LATITUDESH_AUTH_TOKEN="${LATITUDESH_AUTH_TOKEN}" aspect infra management-evidence-run --kubeconfig "${KUBECONFIG}" --talosconfig "${TALOSCONFIG}"
 aspect infra evidence-render
 aspect infra evidence-clean --kubeconfig "${KUBECONFIG}"
 aspect infra evidence-apply --kubeconfig "${KUBECONFIG}"
@@ -101,6 +102,10 @@ LATITUDESH_AUTH_TOKEN="${LATITUDESH_AUTH_TOKEN}" aspect infra hardware-outage-ru
 - The final all-node outage report path now has a repo-owned
   `aspect infra hardware-outage-run-all` task. It reads management nodes from
   checked-in inventory and runs the per-node hardware outage drill sequentially.
+- The final full-suite evidence path now has a repo-owned
+  `aspect infra management-evidence-run` task. It writes one parent live-run
+  directory containing the load/DR evidence capture, the all-node hardware
+  outage capture, and the suite verification report.
 - Live Kubernetes evidence is pending because the `guardian-mgmt` kubeconfig and
   converged cluster are not present in this workspace.
 - Latitude adoption is pending a Latitude token and VLAN assignment import IDs.
@@ -153,8 +158,8 @@ Single-node outage reports:
   seeding task has been run and live backup/restore-to-copy drills pass.
 - A Kubernetes drain rehearsal is useful but insufficient for the final
   single-node outage criterion.
-- Hardware outage evidence is still pending live execution through
-  `aspect infra hardware-outage-run-all` with a Latitude token, kubeconfig, and
+- Full-suite evidence is still pending live execution through
+  `aspect infra management-evidence-run` with a Latitude token, kubeconfig, and
   talosconfig.
 - The company-site deployment references Harbor by digest; it cannot pull until
   Harbor is live, OCI auth is present, and `aspect infra publish-company-site`

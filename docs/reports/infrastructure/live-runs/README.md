@@ -5,6 +5,10 @@ default. Each capture contains a `MANIFEST.md`, `summary.tsv`, Kubernetes
 snapshots, evidence Job logs, database backup/restore state, and Talos health
 when a talosconfig is supplied.
 
+`aspect infra management-evidence-run` writes a parent directory here with
+`evidence/`, `hardware-outage-all/`, and `management-suite/` children. That is
+the preferred final live evidence package for the management cluster.
+
 Run `aspect infra evidence-verify --run-dir <capture>` before committing a
 capture. The verifier writes `VERIFY.md` and `verification.tsv` into the
 capture directory so component reports can cite both raw evidence and

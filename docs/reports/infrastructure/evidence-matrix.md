@@ -24,5 +24,6 @@ not satisfy load, disaster-recovery, or single-node outage requirements.
 
 Evidence collection commands and pass/fail criteria live in
 `docs/runbooks/management-evidence.md`. The final checked-in evidence package
-must include a passing `aspect infra evidence-verify-suite` report tying the
-load/DR capture to the all-node hardware outage capture.
+should be produced by `aspect infra management-evidence-run` and must include a
+passing `aspect infra evidence-verify-suite` report tying the load/DR capture to
+the all-node hardware outage capture.
