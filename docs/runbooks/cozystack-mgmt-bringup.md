@@ -614,9 +614,13 @@ Postgres and ClickHouse. The task builds repo-pinned `kubectl`, runs the same
 guardian-mgmt kubeconfig guard as `aspect infra live`, optionally verifies a
 merged Flux `--revision`, and creates one ad-hoc Kubernetes `Job` in the tenant
 namespace. The job is not part of steady desired state.
+Before applying the load Job, the helper prints the target app YAML and waits
+for that Postgres or ClickHouse app's `Ready` and `WorkloadsReady` conditions,
+so the report shows the benchmark ran against a reconciled, ready app.
 
 The Postgres drill runs `pgbench` from the digest-pinned
-`ghcr.io/cloudnative-pg/postgresql:18.1` image, connects to
+`ghcr.io/cloudnative-pg/postgresql@sha256:6f64c83d80def98ab5b61bf36b1bbecea01dede382eef781dd9d1638b0d840c8`
+image, connects to
 `Service/postgres-guardian-rw`, creates a temporary database, initializes it
 with the requested scale, runs the benchmark, and drops the temporary database
 on exit. Credentials come from Cozystack's `postgres-guardian-superuser`
@@ -635,7 +639,8 @@ aspect infra load-db \
 ```
 
 The ClickHouse drill runs `clickhouse-benchmark` from the digest-pinned
-`clickhouse/clickhouse-server:24.9.2.42` image, connects to
+`clickhouse/clickhouse-server@sha256:cc8c5bf275148b2de01a31e8fd6b55ba1ba2b0d3d08c23fafcb25b06e3c5dec5`
+image, connects to
 `Service/chendpoint-clickhouse-guardian`, and uses the Cozystack backup user's
 password from `Secret/clickhouse-guardian-credentials`.
 

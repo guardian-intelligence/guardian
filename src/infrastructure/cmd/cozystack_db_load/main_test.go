@@ -100,6 +100,12 @@ func TestNamespaceAndComponentValidation(t *testing.T) {
 	if got, err := componentName("ch"); err != nil || got != "clickhouse" {
 		t.Fatalf("componentName(ch) = %q, %v", got, err)
 	}
+	if got := componentResource("postgres"); got != "postgreses.apps.cozystack.io" {
+		t.Fatalf("componentResource(postgres) = %q", got)
+	}
+	if got := componentResource("clickhouse"); got != "clickhouses.apps.cozystack.io" {
+		t.Fatalf("componentResource(clickhouse) = %q", got)
+	}
 	if _, err := componentName("harbor"); err == nil {
 		t.Fatalf("invalid component was accepted")
 	}

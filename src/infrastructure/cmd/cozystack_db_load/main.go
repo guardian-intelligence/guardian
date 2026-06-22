@@ -105,6 +105,13 @@ func componentName(component string) (string, error) {
 	}
 }
 
+func componentResource(component string) string {
+	if component == "clickhouse" {
+		return "clickhouses.apps.cozystack.io"
+	}
+	return "postgreses.apps.cozystack.io"
+}
+
 func defaultJobName(stage, component string, now time.Time) string {
 	return fmt.Sprintf(
 		"guardian-%s-%s-load-%s",
@@ -199,6 +206,10 @@ func runLoad(ctx context.Context, cfg dbLoadConfig) error {
 		cfg.Name,
 	)
 
+	if err := waitAppReady(ctx, runner, cfg.Component, componentResource(cfg.Component), cfg.ApplicationName, cfg.WaitTimeout); err != nil {
+		return err
+	}
+
 	if err := runner.run(ctx, "apply load Job", "apply", "-f", manifestPath); err != nil {
 		return err
 	}
@@ -215,6 +226,17 @@ func runLoad(ctx context.Context, cfg dbLoadConfig) error {
 	runner.bestEffort(ctx, "load Job logs", "logs", "job/"+cfg.Name, "--all-containers=true", "--tail=-1")
 	fmt.Printf("db load completed: job=%s\n", cfg.Name)
 	return nil
+}
+
+func waitAppReady(ctx context.Context, runner kubectlRunner, label, resource, name, timeout string) error {
+	ref := resource + "/" + name
+	if err := runner.run(ctx, label+" app yaml", "get", ref, "-o", "yaml"); err != nil {
+		return err
+	}
+	if err := runner.run(ctx, "wait "+label+" app Ready", "wait", "--for=condition=Ready", ref, "--timeout="+timeout); err != nil {
+		return err
+	}
+	return runner.run(ctx, "wait "+label+" workloads Ready", "wait", "--for=condition=WorkloadsReady", ref, "--timeout="+timeout)
 }
 
 func jobManifest(cfg dbLoadConfig) string {
