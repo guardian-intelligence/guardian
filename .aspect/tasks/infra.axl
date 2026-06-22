@@ -284,6 +284,15 @@ def _validate_impl(ctx):
     )
     if rc != 0:
         return rc
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        ["test", "//src/infrastructure/reports:report_contract_test"],
+        cwd = ws_path(ctx),
+        label = "bazelisk test infrastructure report contract",
+    )
+    if rc != 0:
+        return rc
     return _render_kustomizations(ctx)
 
 def _live_impl(ctx):

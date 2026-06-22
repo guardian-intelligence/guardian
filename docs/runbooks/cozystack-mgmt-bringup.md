@@ -32,6 +32,7 @@ let topology drift through one-off edits.
 | Environment tenants | `src/infrastructure/base/tenants/environments.yaml` |
 | Environment Cozystack apps | `src/infrastructure/environments/` |
 | Company-site OCI artifact | `src/products/company/site/` |
+| Final live drill report contract | `src/infrastructure/reports/` |
 
 ## Current Facts
 
@@ -416,6 +417,19 @@ while a change is being reviewed, or as checked-in final load-test,
 disaster-recovery, and single-node-outage reports after live drills. Do not add
 durable repo CLI/task surfaces whose only purpose is temporary PR verification.
 
+Final reports are JSON documents under `src/infrastructure/reports/checked-in/`
+and must validate with:
+
+```sh
+bazelisk test //src/infrastructure/reports:report_contract_test
+```
+
+The report contract requires the merged source revision, target component,
+environment, live procedure, observed checks, measurements appropriate to the
+report type, and placeholder/secret-text rejection. The directory may stay empty
+until live drills have actually run; do not check in synthetic reports to make a
+PR look complete.
+
 ## Not Done In This Substrate Slice
 
 These are intentionally outside the merged L2/OpenTofu substrate and need
@@ -439,4 +453,6 @@ separate PRs with their own validation:
   still relies on the cluster default for ClickHouse and keeper PVCs.
 - OpenBao init/unseal automation and backup/restore drills.
 - Checked-in load-test, disaster-recovery, and single-node-outage reports for
-  each new infrastructure component.
+  each new infrastructure component. The JSON report contract and validator are
+  now present, but the live reports themselves still require cluster access and
+  completed drills.
