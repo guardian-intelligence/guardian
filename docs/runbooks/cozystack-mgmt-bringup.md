@@ -484,6 +484,28 @@ aspect infra load-http \
   --duration 2m
 ```
 
+Harbor registry data-path load uses ORAS rather than an HTTP-only probe. The
+repo pins the standalone Linux amd64 ORAS binary in Bazel and runs it through
+`aspect infra load-harbor-registry`. The task fetches the Cozystack-generated
+Harbor admin password from `Secret/harbor-guardian-credentials`, logs in using
+a temporary ORAS registry config, pushes a temporary payload artifact, fetches
+its manifest, pulls the artifact back, and verifies the payload bytes. The
+default repository is `library/guardian-smoke`; if the cluster uses a dedicated
+project later, pass it with `--repository`.
+
+```sh
+aspect infra load-harbor-registry \
+  --kubeconfig "$GUARDIAN_MGMT_KUBECONFIG" \
+  --revision "$(git rev-parse HEAD)" \
+  --stage gamma \
+  --repository library/guardian-smoke \
+  --iterations 3 \
+  --payload-bytes 65536
+```
+
+The report input is the native ORAS command output plus the helper's pushed and
+pulled payload digests. Do not wrap it in a Guardian-specific evidence format.
+
 Dashboard load:
 
 ```sh
@@ -528,8 +550,9 @@ cluster, pass `--require-live=false --surface custom --url <url>`. Production
 load reports must keep `--require-live=true` and include the merged `--revision`.
 
 This HTTP task covers the company-site, Harbor registry API, Dashboard, and
-OpenBao health surfaces. Postgres/CNPG and ClickHouse database-path load uses
-standard database clients through `aspect infra load-db`.
+OpenBao health surfaces. Harbor registry write/read load uses
+`aspect infra load-harbor-registry`. Postgres/CNPG and ClickHouse database-path
+load uses standard database clients through `aspect infra load-db`.
 
 ## Database Load Drills
 
@@ -960,11 +983,12 @@ separate PRs with their own validation:
 - Live load-test reports for CNPG/Postgres, Harbor, ClickHouse, OpenBao, the
   Cozystack dashboard, and the company-site surfaces. `aspect infra load-http`
   provides the standard k6 path for HTTP-facing Harbor, OpenBao health,
-  dashboard, and company-site reports. `aspect infra load-db` provides the
-  standard `pgbench` and `clickhouse-benchmark` path for Postgres/CNPG and
-  ClickHouse reports. Live reports still require current guardian-mgmt
-  credentials and successful source-controller convergence on the merged
-  revision.
+  dashboard, and company-site reports. `aspect infra load-harbor-registry`
+  provides the standard ORAS push/pull path for Harbor registry data-path
+  reports. `aspect infra load-db` provides the standard `pgbench` and
+  `clickhouse-benchmark` path for Postgres/CNPG and ClickHouse reports. Live
+  reports still require current guardian-mgmt credentials and successful
+  source-controller convergence on the merged revision.
 - Postgres backup specs wired to declared OpenBao/R2-projected Secrets, plus
   live backup/restore drills for Postgres, Harbor, and ClickHouse. The package
   prerequisites, backup controller deployments/RBAC/CRDs, reusable CNPG
