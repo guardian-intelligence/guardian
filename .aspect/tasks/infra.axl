@@ -17,6 +17,7 @@ HARBOR_REGISTRY_TARGET = "//src/infrastructure/cmd/cozystack_harbor_registry:coz
 HTTP_LOAD_TARGET = "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load"
 NODE_OUTAGE_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill"
 OPENBAO_APPLY_TARGET = "//src/infrastructure/cmd/cozystack_openbao_apply:cozystack_openbao_apply"
+OPENBAO_BACKUP_SECRETS_TARGET = "//src/infrastructure/cmd/cozystack_openbao_backup_secrets:cozystack_openbao_backup_secrets"
 OPENBAO_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill"
 COMPANY_SITE_PUBLISH_TARGET = "//src/infrastructure/cmd/cozystack_company_site_publish:cozystack_company_site_publish"
 GUARDIAN_MGMT_TALOS_NODES = [
@@ -162,6 +163,7 @@ INFRA_TESTS = [
     "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load_test",
     "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill_test",
     "//src/infrastructure/cmd/cozystack_openbao_apply:cozystack_openbao_apply_test",
+    "//src/infrastructure/cmd/cozystack_openbao_backup_secrets:cozystack_openbao_backup_secrets_test",
     "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill_test",
     "//src/infrastructure/tests:manifest_invariants_test",
 ]
@@ -1699,6 +1701,64 @@ def _openbao_apply_impl(ctx):
         label = "cozystack openbao apply",
     )
 
+def _openbao_backup_secrets_impl(ctx):
+    kubectl = _kubectl_path(ctx)
+    if kubectl == None:
+        return 1
+
+    endpoint = _tofu_backend_endpoint(ctx, ctx.args.endpoint)
+    if endpoint == None:
+        return 1
+
+    rc = _check_live_context(ctx, kubectl)
+    if rc != 0:
+        return rc
+    if ctx.args.revision != "":
+        rc = _check_flux_revision(ctx, kubectl, ctx.args.revision)
+        if rc != 0:
+            return rc
+
+    secret_args = [
+        "--kubectl",
+        kubectl,
+        "--namespace",
+        ctx.args.namespace,
+        "--statefulset",
+        ctx.args.statefulset,
+        "--service",
+        ctx.args.service,
+        "--bootstrap-secret",
+        ctx.args.bootstrap_secret,
+        "--endpoint",
+        endpoint,
+        "--bucket",
+        ctx.args.bucket,
+        "--region",
+        ctx.args.region,
+        "--stages",
+        ctx.args.stages,
+        "--dry-run=" + ctx.args.dry_run,
+        "--force-sync=" + ctx.args.force_sync,
+        "--request-timeout",
+        ctx.args.request_timeout,
+        "--wait-timeout",
+        ctx.args.wait_timeout,
+        "--sync-wait-timeout",
+        ctx.args.sync_wait_timeout,
+        "--port-forward-ready-timeout",
+        ctx.args.port_forward_ready_timeout,
+    ]
+    if ctx.args.kubeconfig != "":
+        secret_args.extend(["--kubeconfig", ctx.args.kubeconfig])
+
+    return checked_spawn(
+        ctx,
+        "bazelisk",
+        ["run", OPENBAO_BACKUP_SECRETS_TARGET, "--"] + secret_args,
+        cwd = ws_path(ctx),
+        label = "cozystack openbao backup secrets",
+    )
+
 def _publish_company_site_impl(ctx):
     kubectl = _kubectl_path(ctx)
     if kubectl == None:
@@ -1785,6 +1845,31 @@ openbao_apply = task(
         "service": args.string(default = "openbao-guardian", description = "OpenBao Service name."),
         "statefulset": args.string(default = "openbao-guardian", description = "OpenBao StatefulSet name."),
         "tofu_backend_endpoint": args.string(default = "", description = "Optional S3-compatible OpenTofu backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
+        "wait_timeout": args.string(default = "5m", description = "Timeout for OpenBao StatefulSet readiness."),
+    },
+)
+
+openbao_backup_secrets = task(
+    implementation = _openbao_backup_secrets_impl,
+    name = "openbao-backup-secrets",
+    group = ["infra"],
+    summary = "Populate OpenBao kv-v2 backup credential paths for Guardian Postgres and ClickHouse ExternalSecrets.",
+    args = {
+        "bootstrap_secret": args.string(default = "openbao-guardian-bootstrap", description = "Cluster-local Secret containing OpenBao root token material."),
+        "bucket": args.string(default = "guardian-vault", description = "S3-compatible backup bucket name written to ClickHouse backup secrets."),
+        "dry_run": args.string(default = "false", description = "Set true to print target OpenBao paths and properties without writing secret values."),
+        "endpoint": args.string(default = "", description = "Optional S3-compatible backup endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
+        "force_sync": args.string(default = "true", description = "Annotate ExternalSecrets with force-sync and wait for synced target Secrets after writing OpenBao KV."),
+        "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
+        "namespace": args.string(default = "tenant-root", description = "OpenBao namespace."),
+        "port_forward_ready_timeout": args.string(default = "10s", description = "Timeout waiting for OpenBao port-forward readiness."),
+        "region": args.string(default = "auto", description = "S3-compatible backup region written to ClickHouse backup secrets."),
+        "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
+        "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before OpenBao secret population."),
+        "service": args.string(default = "openbao-guardian", description = "OpenBao Service name."),
+        "stages": args.string(default = "root,dev,gamma,prod", description = "Comma-separated Guardian stages to populate: root, dev, gamma, prod."),
+        "statefulset": args.string(default = "openbao-guardian", description = "OpenBao StatefulSet name."),
+        "sync_wait_timeout": args.string(default = "5m", description = "Timeout waiting for ExternalSecrets to become Ready after force-sync."),
         "wait_timeout": args.string(default = "5m", description = "Timeout for OpenBao StatefulSet readiness."),
     },
 )
