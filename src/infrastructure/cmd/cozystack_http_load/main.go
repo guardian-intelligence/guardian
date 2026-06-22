@@ -21,6 +21,7 @@ type loadConfig struct {
 	Kubectl              string
 	Kubeconfig           string
 	RequestTimeout       string
+	WaitTimeout          string
 	Surface              string
 	Stage                string
 	URL                  string
@@ -39,6 +40,11 @@ type targetSpec struct {
 	NeedsOpenBaoPort bool
 }
 
+type kubectlCommand struct {
+	Label string
+	Args  []string
+}
+
 func main() {
 	var cfg loadConfig
 	var portForwardReadyWait string
@@ -47,6 +53,7 @@ func main() {
 	flag.StringVar(&cfg.Kubectl, "kubectl", "", "path to kubectl; required for OpenBao port-forward")
 	flag.StringVar(&cfg.Kubeconfig, "kubeconfig", "", "kubeconfig for guardian-mgmt")
 	flag.StringVar(&cfg.RequestTimeout, "request-timeout", "15s", "kubectl API request timeout")
+	flag.StringVar(&cfg.WaitTimeout, "wait-timeout", "15m", "timeout waiting for Kubernetes surface readiness")
 	flag.StringVar(&cfg.Surface, "surface", "", "surface to load: company-site, harbor, dashboard, openbao, or custom with --url")
 	flag.StringVar(&cfg.Stage, "stage", "dev", "Guardian stage: root, dev, gamma, or prod")
 	flag.StringVar(&cfg.URL, "url", "", "explicit URL to load; overrides --surface target mapping")
@@ -95,6 +102,12 @@ func validateConfig(cfg loadConfig) error {
 	if cfg.URL == "" {
 		if _, err := resolveTarget(cfg, 0); err != nil {
 			return err
+		}
+		if cfg.Kubectl == "" {
+			return errors.New("--kubectl is required for built-in surface readiness preflight")
+		}
+		if cfg.WaitTimeout == "" {
+			return errors.New("--wait-timeout must not be empty for built-in surface readiness preflight")
 		}
 	}
 	return nil
@@ -152,11 +165,11 @@ func prepareTarget(ctx context.Context, cfg loadConfig) (targetSpec, func(), err
 	if err != nil {
 		return targetSpec{}, nil, err
 	}
+	if err := waitSurfaceReady(ctx, cfg); err != nil {
+		return targetSpec{}, nil, err
+	}
 	if !spec.NeedsOpenBaoPort {
 		return spec, func() {}, nil
-	}
-	if cfg.Kubectl == "" {
-		return targetSpec{}, nil, errors.New("--kubectl is required for OpenBao port-forward")
 	}
 	port, err := freeLocalPort()
 	if err != nil {
@@ -171,6 +184,107 @@ func prepareTarget(ctx context.Context, cfg loadConfig) (targetSpec, func(), err
 		return targetSpec{}, nil, err
 	}
 	return spec, forward.Stop, nil
+}
+
+func waitSurfaceReady(ctx context.Context, cfg loadConfig) error {
+	checks, err := surfaceReadinessChecks(cfg)
+	if err != nil {
+		return err
+	}
+	for _, check := range checks {
+		if err := runKubectl(ctx, cfg, check.Label, check.Args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func surfaceReadinessChecks(cfg loadConfig) ([]kubectlCommand, error) {
+	stage := strings.ToLower(cfg.Stage)
+	surface := normalizeSurface(cfg.Surface)
+	switch surface {
+	case "company-site":
+		namespace, err := namespaceForStage(stage)
+		if err != nil {
+			return nil, err
+		}
+		return []kubectlCommand{
+			{
+				Label: "company-site deployment yaml",
+				Args:  []string{"-n", namespace, "get", "deployment/company-site", "-o", "yaml"},
+			},
+			{
+				Label: "wait company-site deployment Available",
+				Args:  []string{"-n", namespace, "wait", "--for=condition=Available", "deployment/company-site", "--timeout=" + cfg.WaitTimeout},
+			},
+		}, nil
+	case "harbor":
+		namespace, err := namespaceForStage(stage)
+		if err != nil {
+			return nil, err
+		}
+		ref := "harbors.apps.cozystack.io/guardian"
+		return []kubectlCommand{
+			{
+				Label: "Harbor app yaml",
+				Args:  []string{"-n", namespace, "get", ref, "-o", "yaml"},
+			},
+			{
+				Label: "wait Harbor app Ready",
+				Args:  []string{"-n", namespace, "wait", "--for=condition=Ready", ref, "--timeout=" + cfg.WaitTimeout},
+			},
+			{
+				Label: "wait Harbor workloads Ready",
+				Args:  []string{"-n", namespace, "wait", "--for=condition=WorkloadsReady", ref, "--timeout=" + cfg.WaitTimeout},
+			},
+		}, nil
+	case "dashboard":
+		if stage != "root" {
+			return nil, errors.New("dashboard is a root management-cluster surface; use --stage root")
+		}
+		return []kubectlCommand{
+			{
+				Label: "dashboard console deployment yaml",
+				Args:  []string{"-n", "cozy-dashboard", "get", "deployment/cozy-dashboard-console", "-o", "yaml"},
+			},
+			{
+				Label: "dashboard gatekeeper deployment yaml",
+				Args:  []string{"-n", "cozy-dashboard", "get", "deployment/incloud-web-gatekeeper", "-o", "yaml"},
+			},
+			{
+				Label: "wait dashboard console deployment Available",
+				Args:  []string{"-n", "cozy-dashboard", "wait", "--for=condition=Available", "deployment/cozy-dashboard-console", "--timeout=" + cfg.WaitTimeout},
+			},
+			{
+				Label: "wait dashboard gatekeeper deployment Available",
+				Args:  []string{"-n", "cozy-dashboard", "wait", "--for=condition=Available", "deployment/incloud-web-gatekeeper", "--timeout=" + cfg.WaitTimeout},
+			},
+		}, nil
+	case "openbao":
+		if stage != "root" {
+			return nil, errors.New("OpenBao is a root management-cluster surface; use --stage root")
+		}
+		return []kubectlCommand{
+			{
+				Label: "OpenBao app yaml",
+				Args:  []string{"-n", "tenant-root", "get", "openbaos.apps.cozystack.io/guardian", "-o", "yaml"},
+			},
+			{
+				Label: "OpenBao statefulset yaml",
+				Args:  []string{"-n", "tenant-root", "get", "statefulset.apps/openbao-guardian", "-o", "yaml"},
+			},
+			{
+				Label: "wait OpenBao app Ready",
+				Args:  []string{"-n", "tenant-root", "wait", "--for=condition=Ready", "openbaos.apps.cozystack.io/guardian", "--timeout=" + cfg.WaitTimeout},
+			},
+			{
+				Label: "wait OpenBao statefulset ready replicas",
+				Args:  []string{"-n", "tenant-root", "wait", "--for=jsonpath={.status.readyReplicas}=3", "statefulset.apps/openbao-guardian", "--timeout=" + cfg.WaitTimeout},
+			},
+		}, nil
+	default:
+		return nil, fmt.Errorf("--surface %q is not one of company-site, harbor, dashboard, openbao, custom", cfg.Surface)
+	}
 }
 
 func resolveTarget(cfg loadConfig, localPort int) (targetSpec, error) {
@@ -251,6 +365,17 @@ func normalizeSurface(surface string) string {
 	}
 }
 
+func namespaceForStage(stage string) (string, error) {
+	switch stage {
+	case "root":
+		return "tenant-root", nil
+	case "dev", "gamma", "prod":
+		return "tenant-" + stage, nil
+	default:
+		return "", fmt.Errorf("stage %q is not one of root, dev, gamma, prod", stage)
+	}
+}
+
 func companyHost(stage string) (string, error) {
 	switch stage {
 	case "dev":
@@ -315,8 +440,7 @@ type portForward struct {
 }
 
 func startPortForward(ctx context.Context, cfg loadConfig, localPort int) (*portForward, error) {
-	args := kubectlBaseArgs(cfg)
-	args = append(args, "-n", "tenant-root", "port-forward", "svc/openbao-guardian", fmt.Sprintf("127.0.0.1:%d:8200", localPort))
+	args := kubectlArgs(cfg, "-n", "tenant-root", "port-forward", "svc/openbao-guardian", fmt.Sprintf("127.0.0.1:%d:8200", localPort))
 	cmd := exec.CommandContext(ctx, cfg.Kubectl, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -384,6 +508,26 @@ func (p *portForward) Stop() {
 	}
 	_ = p.cmd.Process.Kill()
 	_ = p.cmd.Wait()
+}
+
+func runKubectl(ctx context.Context, cfg loadConfig, label string, args ...string) error {
+	cmd := exec.CommandContext(ctx, cfg.Kubectl, kubectlArgs(cfg, args...)...)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	fmt.Printf("\n## %s\n", label)
+	err := cmd.Run()
+	fmt.Print(out.String())
+	if err != nil {
+		return fmt.Errorf("%s: %w", label, err)
+	}
+	return nil
+}
+
+func kubectlArgs(cfg loadConfig, args ...string) []string {
+	out := kubectlBaseArgs(cfg)
+	out = append(out, args...)
+	return out
 }
 
 func kubectlBaseArgs(cfg loadConfig) []string {
