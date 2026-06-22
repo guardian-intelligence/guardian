@@ -60,7 +60,7 @@ Expected network shape:
   checked-in `data` pool. `local` and `local-retain` remain available only for
   explicitly selected scratch or intentionally node-local state.
 
-## Validate OpenTofu
+## Validate Checked-In Substrate
 
 The repo pins OpenTofu in `MODULE.bazel`, the Latitude provider in
 `src/infrastructure/bootstrap/guardian-mgmt/.terraform.lock.hcl`, and the Vault
@@ -73,23 +73,31 @@ Run the full local substrate check with:
 aspect infra validate
 ```
 
-Run the active manifest invariant test with:
+`aspect infra validate` runs OpenTofu `fmt`/`init -backend=false`/`validate` for
+both bootstrap roots, builds the infrastructure filegroups, runs the active
+manifest invariant test, and renders both Kustomize roots with the repo-pinned
+kubectl artifact.
+
+Run the active invariant test directly with:
 
 ```sh
 bazelisk test //src/infrastructure/tests:manifest_invariants_test
 ```
 
-That test parses the checked-in Kubernetes YAML and verifies the platform
-package publishes the dashboard/API endpoints, environment tenants use the
-expected `*.gi.org` hosts, OpenTofu/Talm/Kubernetes manifests stay aligned with
-the management OpenTofu topology, MetalLB and Kube-OVN keep the L2/MTU topology,
-`replicated` is the only default StorageClass, root and environment
-Postgres/Harbor/ClickHouse apps use the intended HA/storage shape, OpenBao stays
-declared in `tenant-root`, the OpenBao OpenTofu root declares only mounts,
-policies, and Kubernetes-auth roles, the reusable CNPG backup strategy maps
-through a cluster-scoped BackupClass, OpenBao-backed CNPG backup credential
-projections exist for root/dev/gamma/prod, the company site is declared for
-dev/gamma/prod, and Flux reconciles base before tenant apps.
+That test parses the checked-in Kubernetes YAML and uses the repo-pinned `talm`
+binary to render the management control-plane template offline with throwaway
+secrets under the Bazel test temp directory. It verifies the platform package
+publishes the dashboard/API endpoints, environment tenants use the expected
+`*.gi.org` hosts, OpenTofu/Talm/Kubernetes manifests stay aligned with the
+management OpenTofu topology, the rendered Talos config keeps the L2 VIP and
+VLAN control-plane path, KubeSpan/WireGuard stays absent, MetalLB and Kube-OVN
+keep the L2/MTU topology, `replicated` is the only default StorageClass, root
+and environment Postgres/Harbor/ClickHouse apps use the intended HA/storage
+shape, OpenBao stays declared in `tenant-root`, the OpenBao OpenTofu root
+declares only mounts, policies, and Kubernetes-auth roles, the reusable CNPG
+backup strategy maps through a cluster-scoped BackupClass, OpenBao-backed CNPG
+backup credential projections exist for root/dev/gamma/prod, the company site
+is declared for dev/gamma/prod, and Flux reconciles base before tenant apps.
 
 After a PR is merged to `main`, validate that the live management cluster's
 source-controller has reconciled the merged commit with:
@@ -179,10 +187,12 @@ Generated Talm secrets, rendered node configs, kubeconfig, and local operator
 state must stay out of Git. `src/infrastructure/talm/.gitignore` excludes those
 paths.
 
-The next bootstrap CLI slice should wrap this chart with repo-pinned `talm` and
-`talosctl` artifacts, render each node, apply the first config in Talos
-maintenance mode, bootstrap etcd exactly once, and persist the encrypted genesis
-bundle under operator state.
+The invariant test renders the checked-in control-plane template with the
+repo-pinned `talm` artifact and scratch secrets only. The next bootstrap CLI
+slice should reuse that chart and the repo-pinned `talm`/`talosctl` artifacts to
+render each node, apply the first config in Talos maintenance mode, bootstrap
+etcd exactly once, and persist the encrypted genesis bundle under operator
+state.
 
 ## Kubernetes Handoff
 
