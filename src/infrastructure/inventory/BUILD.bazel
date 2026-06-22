@@ -1,7 +1,0 @@
-filegroup(
-    name = "inventory",
-    srcs = [
-        "guardian-mgmt.json",
-    ],
-    visibility = ["//visibility:public"],
-)

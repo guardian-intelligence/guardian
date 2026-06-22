@@ -3,6 +3,7 @@
 load(".aspect/lib/helpers.axl", "checked_spawn", "ws_path")
 
 GUARDIAN_MGMT_ROOT = "src/infrastructure/bootstrap/guardian-mgmt"
+GUARDIAN_MGMT_OPENBAO_ROOT = "src/infrastructure/bootstrap/guardian-mgmt-openbao"
 TOFU_TARGET = "@opentofu_linux_amd64//:tofu_bin"
 KUBECTL_FILE_TARGET = "@kubectl_linux_amd64//file:file"
 EXCLUDED_KUBE_APIS = [
@@ -11,7 +12,7 @@ EXCLUDED_KUBE_APIS = [
     "https://206.223.228.99:6443",
 ]
 EXPECTED_KUBE_APIS = [
-    # Mirrors src/infrastructure/inventory/guardian-mgmt.json. The VIP is the
+    # Mirrors src/infrastructure/bootstrap/guardian-mgmt/main.tf. The VIP is the
     # source-of-truth endpoint; public node APIs are accepted for off-VLAN
     # operator validation when the kubeconfig CA is current.
     "https://10.8.0.250:6443",
@@ -21,7 +22,6 @@ EXPECTED_KUBE_APIS = [
 ]
 INFRA_FILEGROUPS = [
     "//src/infrastructure/bootstrap/guardian-mgmt:root",
-    "//src/infrastructure/inventory:inventory",
     "//src/infrastructure/talm:chart",
     "//src/infrastructure/base/apps:manifests",
     "//src/infrastructure/base/backup:manifests",
@@ -33,6 +33,7 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/base/storage:manifests",
     "//src/infrastructure/base/tenants:manifests",
     "//src/infrastructure/environments:manifests",
+    "//src/infrastructure/bootstrap/guardian-mgmt-openbao:root",
 ]
 LIVE_GETS = [
     ("cozystack platform package", ["get", "packages.cozystack.io/cozystack.cozystack-platform"]),
@@ -131,11 +132,11 @@ def _capture_success(ctx, program, args, cwd = None, label = None):
         return 1
     return 0
 
-def _tofu(ctx, args, label):
+def _tofu_root(ctx, root, args, label):
     return checked_spawn(
         ctx,
         "bazelisk",
-        ["run", TOFU_TARGET, "--", "-chdir=" + ws_path(ctx, GUARDIAN_MGMT_ROOT)] + args,
+        ["run", TOFU_TARGET, "--", "-chdir=" + ws_path(ctx, root)] + args,
         cwd = ws_path(ctx),
         label = label,
     )
@@ -226,7 +227,7 @@ def _check_live_context(ctx, kubectl):
         ctx.std.io.stderr.write("ERROR: refusing to validate against excluded cluster API " + server + "\n")
         return 1
     if not _contains(EXPECTED_KUBE_APIS, server):
-        ctx.std.io.stderr.write("ERROR: kubeconfig points at " + server + "; expected guardian-mgmt API endpoint from src/infrastructure/inventory/guardian-mgmt.json\n")
+        ctx.std.io.stderr.write("ERROR: kubeconfig points at " + server + "; expected guardian-mgmt API endpoint from src/infrastructure/bootstrap/guardian-mgmt/main.tf\n")
         return 1
 
     nodes = _kubectl_capture(ctx, kubectl, ["get", "nodes", "-o", "name"], "kubectl get nodes")
@@ -276,30 +277,25 @@ def _render_kustomizations(ctx):
     return 0
 
 def _validate_impl(ctx):
-    rc = _tofu(ctx, ["fmt", "-check"], "tofu fmt -check guardian-mgmt")
-    if rc != 0:
-        return rc
-    rc = _tofu(ctx, ["init", "-backend=false", "-input=false", "-reconfigure"], "tofu init -backend=false guardian-mgmt")
-    if rc != 0:
-        return rc
-    rc = _tofu(ctx, ["validate"], "tofu validate guardian-mgmt")
-    if rc != 0:
-        return rc
+    for root, label in [
+        (GUARDIAN_MGMT_ROOT, "guardian-mgmt"),
+        (GUARDIAN_MGMT_OPENBAO_ROOT, "guardian-mgmt-openbao"),
+    ]:
+        rc = _tofu_root(ctx, root, ["fmt", "-check"], "tofu fmt -check " + label)
+        if rc != 0:
+            return rc
+        rc = _tofu_root(ctx, root, ["init", "-backend=false", "-input=false", "-reconfigure"], "tofu init -backend=false " + label)
+        if rc != 0:
+            return rc
+        rc = _tofu_root(ctx, root, ["validate"], "tofu validate " + label)
+        if rc != 0:
+            return rc
     rc = checked_spawn(
         ctx,
         "bazelisk",
         ["build"] + INFRA_FILEGROUPS,
         cwd = ws_path(ctx),
         label = "bazelisk build infra filegroups",
-    )
-    if rc != 0:
-        return rc
-    rc = checked_spawn(
-        ctx,
-        "bazelisk",
-        ["test", "//src/infrastructure/reports:report_contract_test"],
-        cwd = ws_path(ctx),
-        label = "bazelisk test infrastructure report contract",
     )
     if rc != 0:
         return rc

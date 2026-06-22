@@ -16,7 +16,7 @@ import (
 
 type manifest map[string]any
 
-type guardianMgmtInventory struct {
+type guardianMgmtTopology struct {
 	Cluster  string `json:"cluster"`
 	Network struct {
 		VLAN struct {
@@ -43,7 +43,7 @@ type guardianMgmtNode struct {
 }
 
 func TestManifestInvariants(t *testing.T) {
-	t.Run("guardian mgmt inventory alignment", testGuardianMgmtInventoryAlignment)
+	t.Run("guardian mgmt topology alignment", testGuardianMgmtTopologyAlignment)
 	t.Run("cozystack platform package", testCozystackPlatformPackage)
 	t.Run("environment tenants", testEnvironmentTenants)
 	t.Run("layer two networking", testLayerTwoNetworking)
@@ -53,13 +53,14 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("environment tenant core services", testEnvironmentTenantCoreServices)
 	t.Run("company site", testCompanySite)
 	t.Run("openbao", testOpenBao)
+	t.Run("openbao opentofu bootstrap", testOpenBaoOpenTofuBootstrap)
 	t.Run("openbao cnpg backup secret projection", testOpenBaoCNPGBackupSecretProjection)
 	t.Run("openbao clickhouse backup secret projection", testOpenBaoClickHouseBackupSecretProjection)
 	t.Run("flux handoff", testFluxHandoff)
 }
 
 func testCozystackPlatformPackage(t *testing.T) {
-	inventory := readGuardianMgmtInventory(t)
+	topology := guardianMgmtTopologyFixture(t)
 	docs := readManifests(t, "src/infrastructure/base/cozystack/platform.yaml")
 	pkg := findObject(t, docs, "Package", "", "cozystack.cozystack-platform")
 
@@ -67,8 +68,8 @@ func testCozystackPlatformPackage(t *testing.T) {
 	assertString(t, pkg, "isp-full", "spec", "variant")
 	assertStringSlice(t, pkg, []string{"cozystack.external-secrets-operator", "cozystack.velero"}, "spec", "components", "platform", "values", "bundles", "enabledPackages")
 	assertString(t, pkg, "guardianintelligence.org", "spec", "components", "platform", "values", "publishing", "host")
-	assertString(t, pkg, fmt.Sprintf("https://%s:6443", inventory.Network.VLAN.APIVIP), "spec", "components", "platform", "values", "publishing", "apiServerEndpoint")
-	assertStringSlice(t, pkg, inventoryPublicIPs(inventory), "spec", "components", "platform", "values", "publishing", "externalIPs")
+	assertString(t, pkg, fmt.Sprintf("https://%s:6443", topology.Network.VLAN.APIVIP), "spec", "components", "platform", "values", "publishing", "apiServerEndpoint")
+	assertStringSlice(t, pkg, topologyPublicIPs(topology), "spec", "components", "platform", "values", "publishing", "externalIPs")
 	assertStringSlice(t, pkg, []string{"dashboard", "api"}, "spec", "components", "platform", "values", "publishing", "exposedServices")
 
 	assertString(t, pkg, "10.244.0.0/16", "spec", "components", "platform", "values", "networking", "podCIDR")
@@ -82,37 +83,56 @@ func testCozystackPlatformPackage(t *testing.T) {
 	assertString(t, pkg, "Guardian Intelligence", "spec", "components", "platform", "values", "branding", "footerText")
 }
 
-func testGuardianMgmtInventoryAlignment(t *testing.T) {
-	inventory := readGuardianMgmtInventory(t)
-	if inventory.Cluster != "guardian-mgmt" {
-		t.Fatalf("inventory cluster = %q, want guardian-mgmt", inventory.Cluster)
+func testGuardianMgmtTopologyAlignment(t *testing.T) {
+	topology := guardianMgmtTopologyFixture(t)
+	if topology.Cluster != "guardian-mgmt" {
+		t.Fatalf("topology cluster = %q, want guardian-mgmt", topology.Cluster)
 	}
-	if len(inventory.Nodes) != 3 {
-		t.Fatalf("inventory nodes = %d, want 3", len(inventory.Nodes))
+	if len(topology.Nodes) != 3 {
+		t.Fatalf("topology nodes = %d, want 3", len(topology.Nodes))
 	}
-	assertUniqueInventoryValues(t, inventory)
+	assertUniqueTopologyValues(t, topology)
 
 	values := readYAMLMap(t, "src/infrastructure/talm/values.yaml")
-	assertString(t, values, fmt.Sprintf("https://%s:6443", inventory.Network.VLAN.APIVIP), "endpoint")
-	assertString(t, values, inventory.Network.VLAN.APIVIP, "floatingIP")
-	assertString(t, values, inventory.Network.VLAN.VIPLink, "vipLink")
-	assertStringSlice(t, values, []string{inventory.Network.VLAN.Subnet}, "advertisedSubnets")
+	assertString(t, values, fmt.Sprintf("https://%s:6443", topology.Network.VLAN.APIVIP), "endpoint")
+	assertString(t, values, topology.Network.VLAN.APIVIP, "floatingIP")
+	assertString(t, values, topology.Network.VLAN.VIPLink, "vipLink")
+	assertStringSlice(t, values, []string{topology.Network.VLAN.Subnet}, "advertisedSubnets")
 
 	certSANs := sliceAt(t, values, "certSANs")
-	assertContainsString(t, certSANs, inventory.Network.VLAN.APIVIP, "certSANs")
-	for _, node := range inventory.Nodes {
+	assertContainsString(t, certSANs, topology.Network.VLAN.APIVIP, "certSANs")
+	for _, node := range topology.Nodes {
 		assertContainsString(t, certSANs, node.PublicIPv4, "certSANs")
 	}
 
 	imports := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt/imports.tf"))
 	assertTextContains(t, imports, `to = latitudesh_virtual_network.management`, "imports.tf")
-	assertTextContains(t, imports, `id = "`+inventory.Network.VLAN.ID+`"`, "imports.tf")
-	for _, node := range inventory.Nodes {
+	assertTextContains(t, imports, `id = "`+topology.Network.VLAN.ID+`"`, "imports.tf")
+	for _, node := range topology.Nodes {
 		assertTextContains(t, imports, `to = latitudesh_server.control_plane["`+node.Name+`"]`, "imports.tf")
 		assertTextContains(t, imports, `id = "`+node.ServerID+`"`, "imports.tf")
 	}
 
 	mainTF := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt/main.tf"))
+	assertTextNotContains(t, mainTF, "jsondecode", "main.tf")
+	assertTextNotContains(t, mainTF, "guardian-mgmt.json", "main.tf")
+	assertTextContains(t, mainTF, `project_id = "proj_R82A0yqmd06mM"`, "main.tf")
+	assertTextContains(t, mainTF, `site       = "ASH"`, "main.tf")
+	assertTextContains(t, mainTF, `id           = "`+topology.Network.VLAN.ID+`"`, "main.tf")
+	assertTextContains(t, mainTF, fmt.Sprintf(`vid          = %d`, topology.Network.VLAN.VID), "main.tf")
+	assertTextContains(t, mainTF, `subnet       = "`+topology.Network.VLAN.Subnet+`"`, "main.tf")
+	assertTextContains(t, mainTF, fmt.Sprintf(`vlan_mtu     = %d`, topology.Network.VLAN.VLANMTU), "main.tf")
+	assertTextContains(t, mainTF, fmt.Sprintf(`pod_mtu      = %d`, topology.Network.VLAN.PodMTU), "main.tf")
+	assertTextContains(t, mainTF, `api_vip      = "`+topology.Network.VLAN.APIVIP+`"`, "main.tf")
+	assertTextContains(t, mainTF, `vip_link     = "`+topology.Network.VLAN.VIPLink+`"`, "main.tf")
+	assertTextContains(t, mainTF, `metallb_pool = "`+topology.Network.VLAN.MetalLBPool+`"`, "main.tf")
+	for _, node := range topology.Nodes {
+		assertTextContains(t, mainTF, node.Name+" = {", "main.tf")
+		assertTextContains(t, mainTF, `server_id    = "`+node.ServerID+`"`, "main.tf")
+		assertTextContains(t, mainTF, `hostname     = "`+node.Hostname+`"`, "main.tf")
+		assertTextContains(t, mainTF, `public_ipv4  = "`+node.PublicIPv4+`"`, "main.tf")
+		assertTextContains(t, mainTF, `private_ipv4 = "`+node.PrivateIPv4+`"`, "main.tf")
+	}
 	assertTextContains(t, mainTF, `resource "latitudesh_vlan_assignment" "control_plane"`, "main.tf")
 	assertTextContains(t, mainTF, `for_each = local.control_plane_nodes`, "main.tf")
 	assertTextContains(t, mainTF, `latitudesh_virtual_network.management.vid == local.vlan.vid`, "main.tf")
@@ -136,11 +156,11 @@ func testEnvironmentTenants(t *testing.T) {
 }
 
 func testLayerTwoNetworking(t *testing.T) {
-	inventory := readGuardianMgmtInventory(t)
+	topology := guardianMgmtTopologyFixture(t)
 	metallb := readManifests(t, "src/infrastructure/base/networking/metallb.yaml")
 	pool := findObject(t, metallb, "IPAddressPool", "cozy-metallb", "cozystack")
 	assertString(t, pool, "metallb.io/v1beta1", "apiVersion")
-	assertStringSlice(t, pool, []string{inventory.Network.VLAN.MetalLBPool}, "spec", "addresses")
+	assertStringSlice(t, pool, []string{topology.Network.VLAN.MetalLBPool}, "spec", "addresses")
 	assertBool(t, pool, true, "spec", "autoAssign")
 	assertBool(t, pool, false, "spec", "avoidBuggyIPs")
 
@@ -156,7 +176,7 @@ func testLayerTwoNetworking(t *testing.T) {
 	assertString(t, ovnDefault, "10.244.0.1", "spec", "gateway")
 	assertString(t, ovnDefault, "distributed", "spec", "gatewayType")
 	assertBool(t, ovnDefault, true, "spec", "natOutgoing")
-	assertInt(t, ovnDefault, inventory.Network.VLAN.PodMTU, "spec", "mtu")
+	assertInt(t, ovnDefault, topology.Network.VLAN.PodMTU, "spec", "mtu")
 
 	join := findObject(t, subnets, "Subnet", "", "join")
 	assertString(t, join, "kubeovn.io/v1", "apiVersion")
@@ -164,7 +184,7 @@ func testLayerTwoNetworking(t *testing.T) {
 	assertString(t, join, "100.64.0.0/16", "spec", "cidrBlock")
 	assertString(t, join, "100.64.0.1", "spec", "gateway")
 	assertBool(t, join, false, "spec", "natOutgoing")
-	assertInt(t, join, inventory.Network.VLAN.PodMTU, "spec", "mtu")
+	assertInt(t, join, topology.Network.VLAN.PodMTU, "spec", "mtu")
 }
 
 func testSingleDefaultStorageClass(t *testing.T) {
@@ -508,6 +528,95 @@ func testOpenBao(t *testing.T) {
 	assertString(t, ingressPort, "TCP", "protocol")
 }
 
+func testOpenBaoOpenTofuBootstrap(t *testing.T) {
+	versions := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt-openbao/versions.tf"))
+	mainTF := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt-openbao/main.tf"))
+	lock := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt-openbao/.terraform.lock.hcl"))
+
+	assertTextContains(t, versions, `source  = "hashicorp/vault"`, "guardian-mgmt-openbao versions.tf")
+	assertTextContains(t, versions, `version = "= 4.4.0"`, "guardian-mgmt-openbao versions.tf")
+	assertTextContains(t, versions, `key    = "opentofu/guardian-mgmt-openbao.tfstate"`, "guardian-mgmt-openbao versions.tf")
+	assertTextContains(t, lock, `provider "registry.opentofu.org/hashicorp/vault"`, "guardian-mgmt-openbao lock")
+	assertTextContains(t, lock, `version     = "4.4.0"`, "guardian-mgmt-openbao lock")
+
+	assertTextContains(t, mainTF, `resource "vault_mount" "kv"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `type        = "kv-v2"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `resource "vault_auth_backend" "kubernetes"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `type        = "kubernetes"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `resource "vault_kubernetes_auth_backend_config" "guardian_mgmt"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `kubernetes_host        = "https://kubernetes.default.svc:443"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `disable_iss_validation = true`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `resource "vault_policy" "secret_projection"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `resource "vault_kubernetes_auth_backend_role" "secret_projection"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `audience                         = "openbao"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `token_no_default_policy          = true`, "guardian-mgmt-openbao main.tf")
+	assertTextNotContains(t, mainTF, "vault_kv_secret", "guardian-mgmt-openbao main.tf")
+	assertTextNotContains(t, mainTF, "vault_generic_secret", "guardian-mgmt-openbao main.tf")
+
+	for _, tc := range []struct {
+		role           string
+		namespace      string
+		serviceAccount string
+		path           string
+	}{
+		{
+			role:           "tenant-root-cnpg-backup",
+			namespace:      "tenant-root",
+			serviceAccount: "guardian-external-secrets",
+			path:           "guardian/guardian-mgmt/tenant-root/postgres/guardian/cnpg-backup",
+		},
+		{
+			role:           "tenant-dev-cnpg-backup",
+			namespace:      "tenant-dev",
+			serviceAccount: "guardian-external-secrets",
+			path:           "guardian/guardian-mgmt/tenant-dev/postgres/guardian/cnpg-backup",
+		},
+		{
+			role:           "tenant-gamma-cnpg-backup",
+			namespace:      "tenant-gamma",
+			serviceAccount: "guardian-external-secrets",
+			path:           "guardian/guardian-mgmt/tenant-gamma/postgres/guardian/cnpg-backup",
+		},
+		{
+			role:           "tenant-prod-cnpg-backup",
+			namespace:      "tenant-prod",
+			serviceAccount: "guardian-external-secrets",
+			path:           "guardian/guardian-mgmt/tenant-prod/postgres/guardian/cnpg-backup",
+		},
+		{
+			role:           "tenant-root-clickhouse-backup",
+			namespace:      "tenant-root",
+			serviceAccount: "guardian-clickhouse-external-secrets",
+			path:           "guardian/guardian-mgmt/tenant-root/clickhouse/guardian/backup",
+		},
+		{
+			role:           "tenant-dev-clickhouse-backup",
+			namespace:      "tenant-dev",
+			serviceAccount: "guardian-clickhouse-external-secrets",
+			path:           "guardian/guardian-mgmt/tenant-dev/clickhouse/guardian/backup",
+		},
+		{
+			role:           "tenant-gamma-clickhouse-backup",
+			namespace:      "tenant-gamma",
+			serviceAccount: "guardian-clickhouse-external-secrets",
+			path:           "guardian/guardian-mgmt/tenant-gamma/clickhouse/guardian/backup",
+		},
+		{
+			role:           "tenant-prod-clickhouse-backup",
+			namespace:      "tenant-prod",
+			serviceAccount: "guardian-clickhouse-external-secrets",
+			path:           "guardian/guardian-mgmt/tenant-prod/clickhouse/guardian/backup",
+		},
+	} {
+		t.Run(tc.role, func(t *testing.T) {
+			assertTextContains(t, mainTF, tc.role+" = {", "guardian-mgmt-openbao main.tf")
+			assertTextContains(t, mainTF, `service_account = "`+tc.serviceAccount+`"`, "guardian-mgmt-openbao main.tf")
+			assertTextContains(t, mainTF, `namespace       = "`+tc.namespace+`"`, "guardian-mgmt-openbao main.tf")
+			assertTextContains(t, mainTF, `path            = "`+tc.path+`"`, "guardian-mgmt-openbao main.tf")
+		})
+	}
+}
+
 func testOpenBaoCNPGBackupSecretProjection(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -748,32 +857,62 @@ func assertApp(t *testing.T, docs []manifest, want appExpectation) {
 	}
 }
 
-func readGuardianMgmtInventory(t *testing.T) guardianMgmtInventory {
+func guardianMgmtTopologyFixture(t *testing.T) guardianMgmtTopology {
 	t.Helper()
 
-	var inventory guardianMgmtInventory
-	if err := json.Unmarshal(readRunfile(t, "src/infrastructure/inventory/guardian-mgmt.json"), &inventory); err != nil {
-		t.Fatalf("parse guardian-mgmt inventory: %v", err)
+	var topology guardianMgmtTopology
+	topology.Cluster = "guardian-mgmt"
+	topology.Network.VLAN.ID = "vlan_8mop5gkpP5jxv"
+	topology.Network.VLAN.VID = 2140
+	topology.Network.VLAN.Description = "guardian-mgmt L2 fabric"
+	topology.Network.VLAN.Subnet = "10.8.0.0/24"
+	topology.Network.VLAN.VLANMTU = 1420
+	topology.Network.VLAN.PodMTU = 1362
+	topology.Network.VLAN.APIVIP = "10.8.0.250"
+	topology.Network.VLAN.VIPLink = "enp1s0f0.2140"
+	topology.Network.VLAN.MetalLBPool = "10.8.0.200-10.8.0.240"
+	topology.Nodes = []guardianMgmtNode{
+		{
+			Name:        "ash-earth",
+			ServerID:    "sv_vAPXaMxKM5epz",
+			Hostname:    "ash-earth",
+			PublicIPv4:  "206.223.228.101",
+			PrivateIPv4: "10.8.0.11",
+		},
+		{
+			Name:        "ash-wind",
+			ServerID:    "sv_nPRbajqEB5koM",
+			Hostname:    "ash-wind",
+			PublicIPv4:  "45.250.254.119",
+			PrivateIPv4: "10.8.0.12",
+		},
+		{
+			Name:        "ash-water",
+			ServerID:    "sv_8mop5gZo8Njxv",
+			Hostname:    "ash-water",
+			PublicIPv4:  "206.223.228.87",
+			PrivateIPv4: "10.8.0.13",
+		},
 	}
-	return inventory
+	return topology
 }
 
-func inventoryPublicIPs(inventory guardianMgmtInventory) []string {
-	out := make([]string, 0, len(inventory.Nodes))
-	for _, node := range inventory.Nodes {
+func topologyPublicIPs(topology guardianMgmtTopology) []string {
+	out := make([]string, 0, len(topology.Nodes))
+	for _, node := range topology.Nodes {
 		out = append(out, node.PublicIPv4)
 	}
 	return out
 }
 
-func assertUniqueInventoryValues(t *testing.T, inventory guardianMgmtInventory) {
+func assertUniqueTopologyValues(t *testing.T, topology guardianMgmtTopology) {
 	t.Helper()
 
 	seenNames := map[string]bool{}
 	seenServerIDs := map[string]bool{}
 	seenPublicIPs := map[string]bool{}
 	seenPrivateIPs := map[string]bool{}
-	for _, node := range inventory.Nodes {
+	for _, node := range topology.Nodes {
 		assertUniqueValue(t, seenNames, "node name", node.Name)
 		assertUniqueValue(t, seenServerIDs, "server ID", node.ServerID)
 		assertUniqueValue(t, seenPublicIPs, "public IPv4", node.PublicIPv4)
@@ -970,6 +1109,14 @@ func assertTextContains(t *testing.T, text, needle, label string) {
 
 	if !strings.Contains(text, needle) {
 		t.Fatalf("%s does not contain %q", label, needle)
+	}
+}
+
+func assertTextNotContains(t *testing.T, text, needle, label string) {
+	t.Helper()
+
+	if strings.Contains(text, needle) {
+		t.Fatalf("%s contains %q", label, needle)
 	}
 }
 

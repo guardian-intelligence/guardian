@@ -9,16 +9,17 @@ checks to run; it is not a separate source of truth.
 
 ## Source Of Truth
 
-`src/infrastructure/inventory/guardian-mgmt.json` is the non-secret topology
-contract. The manifest invariant test checks that OpenTofu imports, Talm
-values, Cozystack platform publishing, MetalLB, and Kube-OVN stay aligned with
-that inventory. Change the inventory and dependent manifests together; do not
-let topology drift through one-off edits.
+`src/infrastructure/bootstrap/guardian-mgmt/main.tf` is the non-secret topology
+record for Latitude project/site, the management VLAN, and the three adopted
+control-plane servers. The manifest invariant test checks that OpenTofu imports,
+Talm values, Cozystack platform publishing, MetalLB, and Kube-OVN stay aligned
+with that HCL. Change the HCL and dependent manifests together; do not let
+topology drift through one-off edits.
 
 | Layer | File |
 | - | - |
-| Latitude inventory | `src/infrastructure/inventory/guardian-mgmt.json` |
-| Bare-metal state | `src/infrastructure/bootstrap/guardian-mgmt/*.tf` |
+| Bare-metal and VLAN state | `src/infrastructure/bootstrap/guardian-mgmt/*.tf` |
+| OpenBao API configuration | `src/infrastructure/bootstrap/guardian-mgmt-openbao/*.tf` |
 | Talos/Talm chart | `src/infrastructure/talm/` |
 | Cozystack platform package | `src/infrastructure/base/cozystack/platform.yaml` |
 | Core Cozystack apps | `src/infrastructure/base/apps/core-services.yaml` |
@@ -32,7 +33,6 @@ let topology drift through one-off edits.
 | Environment tenants | `src/infrastructure/base/tenants/environments.yaml` |
 | Environment Cozystack apps | `src/infrastructure/environments/` |
 | Company-site OCI artifact | `src/products/company/site/` |
-| Final live drill report contract | `src/infrastructure/reports/` |
 
 ## Current Facts
 
@@ -62,8 +62,10 @@ Expected network shape:
 
 ## Validate OpenTofu
 
-The repo pins OpenTofu in `MODULE.bazel` and the Latitude provider in
-`src/infrastructure/bootstrap/guardian-mgmt/.terraform.lock.hcl`.
+The repo pins OpenTofu in `MODULE.bazel`, the Latitude provider in
+`src/infrastructure/bootstrap/guardian-mgmt/.terraform.lock.hcl`, and the Vault
+provider in
+`src/infrastructure/bootstrap/guardian-mgmt-openbao/.terraform.lock.hcl`.
 
 Run the full local substrate check with:
 
@@ -80,13 +82,14 @@ bazelisk test //src/infrastructure/tests:manifest_invariants_test
 That test parses the checked-in Kubernetes YAML and verifies the platform
 package publishes the dashboard/API endpoints, environment tenants use the
 expected `*.gi.org` hosts, OpenTofu/Talm/Kubernetes manifests stay aligned with
-`guardian-mgmt.json`, MetalLB and Kube-OVN keep the L2/MTU topology,
+the management OpenTofu topology, MetalLB and Kube-OVN keep the L2/MTU topology,
 `replicated` is the only default StorageClass, root and environment
 Postgres/Harbor/ClickHouse apps use the intended HA/storage shape, OpenBao stays
-declared in `tenant-root`, the reusable CNPG backup strategy maps through a
-cluster-scoped BackupClass, OpenBao-backed CNPG backup credential projections
-exist for root/dev/gamma/prod, the company site is declared for dev/gamma/prod,
-and Flux reconciles base before tenant apps.
+declared in `tenant-root`, the OpenBao OpenTofu root declares only mounts,
+policies, and Kubernetes-auth roles, the reusable CNPG backup strategy maps
+through a cluster-scoped BackupClass, OpenBao-backed CNPG backup credential
+projections exist for root/dev/gamma/prod, the company site is declared for
+dev/gamma/prod, and Flux reconciles base before tenant apps.
 
 After a PR is merged to `main`, validate that the live management cluster's
 source-controller has reconciled the merged commit with:
@@ -99,7 +102,7 @@ aspect infra live \
 
 `aspect infra live` uses the repo-pinned kubectl artifact, refuses to validate
 against the excluded Verself-prod API at `206.223.228.99`, refuses kubeconfigs
-whose cluster server is outside the `guardian-mgmt.json` API endpoint set,
+whose cluster server is outside the management OpenTofu API endpoint set,
 requires exactly three management nodes with `10.8.0.x` InternalIP addresses,
 waits for the Flux source and both Guardian Kustomizations to become Ready,
 verifies their applied revision contains the expected merged commit, and checks
@@ -118,6 +121,16 @@ bazelisk run @opentofu_linux_amd64//:tofu_bin -- \
 
 bazelisk run @opentofu_linux_amd64//:tofu_bin -- \
   -chdir="$PWD/src/infrastructure/bootstrap/guardian-mgmt" validate
+
+bazelisk run @opentofu_linux_amd64//:tofu_bin -- \
+  -chdir="$PWD/src/infrastructure/bootstrap/guardian-mgmt-openbao" fmt -check
+
+bazelisk run @opentofu_linux_amd64//:tofu_bin -- \
+  -chdir="$PWD/src/infrastructure/bootstrap/guardian-mgmt-openbao" \
+  init -backend=false -input=false -reconfigure
+
+bazelisk run @opentofu_linux_amd64//:tofu_bin -- \
+  -chdir="$PWD/src/infrastructure/bootstrap/guardian-mgmt-openbao" validate
 ```
 
 Live planning requires:
@@ -126,7 +139,11 @@ Live planning requires:
 - S3-compatible backend credentials for R2 through the usual `AWS_*`
   environment variables.
 - The R2 endpoint passed during backend initialization, because OpenTofu's S3
-  backend cannot read it from `guardian-mgmt.json`.
+  backend cannot read it from HCL locals.
+- `VAULT_TOKEN` when planning or applying
+  `src/infrastructure/bootstrap/guardian-mgmt-openbao`; pass
+  `-var=openbao_addr=...` when planning through a local port-forward instead of
+  the default in-cluster service address.
 
 ```sh
 bazelisk run @opentofu_linux_amd64//:tofu_bin -- \
@@ -303,10 +320,17 @@ talk to Cozystack's OpenBao service at
 and authenticate through the `kubernetes` auth mount with audience `openbao`.
 `tenant-root` also declares a Cilium allow policy for only the Cozystack ESO
 controller in `cozy-external-secrets-operator` to reach OpenBao on port 8200.
-There are no checked-in `Plan` or `BackupJob` resources yet, and ClickHouse app
-backup is not enabled yet, because backup jobs and backup sidecars must wait
-until OpenBao is initialized/unsealed, those auth roles and kv secrets exist,
-and each app has real object-store coordinates.
+The matching OpenBao API state is declared with standard OpenTofu resources in
+`src/infrastructure/bootstrap/guardian-mgmt-openbao`: `vault_mount` for `kv`,
+`vault_auth_backend` plus `vault_kubernetes_auth_backend_config` for
+Kubernetes auth, `vault_policy` for each least-privilege read path, and
+`vault_kubernetes_auth_backend_role` for each ESO service account. That root
+does not write `vault_kv_secret_v2` or `vault_generic_secret` resources, because
+R2 credentials would otherwise land in OpenTofu state. There are no checked-in
+`Plan` or `BackupJob` resources yet, and ClickHouse app backup is not enabled
+yet, because backup jobs and backup sidecars must wait until OpenBao is
+initialized/unsealed, the OpenTofu root has been applied, real kv secret values
+exist, and each app has real object-store coordinates.
 
 The checked-in environment app layer declares the same core service set in each
 environment namespace:
@@ -444,32 +468,11 @@ Expected result: addresses and routes show the VLAN subnet, and KubeSpan has no
 active mesh peers.
 
 Kubernetes-side readiness evidence should be captured as PR-local command output
-while a change is being reviewed, or as checked-in final load-test,
-disaster-recovery, and single-node-outage reports after live drills. Do not add
-durable repo CLI/task surfaces whose only purpose is temporary PR verification.
-
-Final reports are JSON documents under `src/infrastructure/reports/checked-in/`
-and must validate with:
-
-```sh
-bazelisk test //src/infrastructure/reports:report_contract_test
-```
-
-The report contract requires the merged source revision, target component,
-environment, live procedure, observed checks, measurements appropriate to the
-report type, and placeholder/secret-text rejection. Reports must also bind to
-the canonical Kubernetes target from `reports.ExpectedTarget()`: Cozystack app
-CRs for Postgres/Harbor/ClickHouse/OpenBao, the `cozy-dashboard` dashboard
-Ingress, and the company-site Deployment plus its public endpoint. The directory
-may stay empty until live drills have actually run; do not check in synthetic
-reports to make a PR look complete.
-
-The expected final coverage is encoded in `reports.ExpectedCoverage()`:
-load-test, disaster-recovery, and single-node-outage reports for root/dev/gamma/
-prod Postgres, Harbor, and ClickHouse; root OpenBao; root Cozystack dashboard;
-and dev/gamma/prod company-site. The current matrix is 51 final reports. The
-contract rejects checked-in reports outside that matrix and can compute missing
-coverage while still permitting real reports to land incrementally.
+while a change is being reviewed. Durable operational proof should come from
+standard tools already in the stack: Flux status, Kubernetes conditions,
+Cozystack backup/restore resources, load-test tool output, and monitoring data.
+Do not add repo-specific JSON evidence bundles or durable CLI/task surfaces whose
+only purpose is temporary PR verification.
 
 ## Not Done In This Substrate Slice
 
@@ -487,13 +490,13 @@ separate PRs with their own validation:
   declared OpenBao/R2-projected Secrets. The package prerequisites, reusable
   CNPG BackupClass, reusable ClickHouse Altinity BackupClass, and Postgres /
   ClickHouse credential SecretStores and ExternalSecrets are now declared for
-  root/dev/gamma/prod. OpenBao auth role bootstrap, app-level backup
-  coordinates, recurring backup plans, Harbor backup strategy, and live restore
-  artifacts still need separate PRs.
+  root/dev/gamma/prod. OpenBao auth/policy configuration is now declared as
+  OpenTofu, but applying it, app-level backup coordinates, recurring backup
+  plans, Harbor backup strategy, and live restore drills still need separate
+  PRs.
 - ClickHouse chart-side `spec.storageClass` rendering, because Cozystack 1.4
   still relies on the cluster default for ClickHouse and keeper PVCs.
 - OpenBao init/unseal automation and backup/restore drills.
-- Checked-in load-test, disaster-recovery, and single-node-outage reports for
-  each new infrastructure component. The JSON report contract and validator are
-  now present, but the live reports themselves still require cluster access and
-  completed drills.
+- Load-test, disaster-recovery, and single-node-outage drills for each new
+  infrastructure component, recorded through standard tool outputs rather than
+  a Guardian-specific evidence schema.
