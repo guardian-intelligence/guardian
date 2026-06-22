@@ -30,3 +30,12 @@ genrule(
     executable = True,
     visibility = ["//visibility:public"],
 )
+
+genrule(
+    name = "hardware-outage-run",
+    srcs = ["hardware-outage-run.sh"],
+    outs = ["hardware-outage-runner"],
+    cmd = "cp $(location hardware-outage-run.sh) $@ && chmod +x $@",
+    executable = True,
+    visibility = ["//visibility:public"],
+)

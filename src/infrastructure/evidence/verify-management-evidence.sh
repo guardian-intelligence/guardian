@@ -186,6 +186,7 @@ count_file() {
 summary_status() {
   local name="$1"
   local allow_skipped="${2:-false}"
+  local allow_failed="${3:-false}"
   local line
   local status
   local path
@@ -215,7 +216,11 @@ summary_status() {
       fi
       ;;
     *)
-      fail "summary:${name}" "exit status ${status}; ${path}"
+      if [[ "${allow_failed}" == "true" ]]; then
+        skip "summary:${name}" "allowed degraded status ${status}; ${path}"
+      else
+        fail "summary:${name}" "exit status ${status}; ${path}"
+      fi
       ;;
   esac
 }
@@ -257,6 +262,11 @@ verify_outage_node() {
 }
 
 verify_common() {
+  local allow_degraded_talos=false
+  if [[ "${phase}" == "outage-down" && "${require_talos}" != "true" ]]; then
+    allow_degraded_talos=true
+  fi
+
   require_file "MANIFEST.md"
   require_file "summary.tsv"
 
@@ -287,8 +297,8 @@ verify_common() {
     summary_status "talos-health"
     summary_status "talos-etcd-members"
   else
-    summary_status "talos-health" "true"
-    summary_status "talos-etcd-members" "true"
+    summary_status "talos-health" "true" "${allow_degraded_talos}"
+    summary_status "talos-etcd-members" "true" "${allow_degraded_talos}"
   fi
 
   verify_ready_nodes

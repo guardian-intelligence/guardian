@@ -285,6 +285,32 @@ each captured outage directory before attaching it to the outage report; pass
 
 Hardware outage drill:
 
+```sh
+LATITUDESH_AUTH_TOKEN="${LATITUDESH_AUTH_TOKEN}" \
+aspect infra hardware-outage-run \
+  --kubeconfig "${KUBECONFIG}" \
+  --talosconfig "${TALOSCONFIG}" \
+  --node <node> \
+  --require-talos
+```
+
+`hardware-outage-run` is the preferred true single-node outage command. It:
+
+- records Latitude status before the outage;
+- captures and verifies `outage-before`;
+- sends Latitude `power_off` and waits for server status `off`;
+- captures and verifies `outage-down` with two Ready Kubernetes nodes required;
+- sends Latitude `power_on` and waits for server status `on`;
+- captures and verifies `outage-after`.
+
+The default output directory is
+`docs/reports/infrastructure/live-runs/<timestamp>-hardware-outage-<node>/`.
+It contains `latitude-before.jsonl`, `latitude-down.jsonl`,
+`latitude-after.jsonl`, and one capture directory per phase. Commit the parent
+directory with the final outage report.
+
+Equivalent manual sequence:
+
 1. Capture `infra live-snapshot` and `infra talos-health`.
    Also run `aspect infra evidence-capture --phase outage-before`.
 2. Use Latitude OOB/API power control to stop one management node.
@@ -325,7 +351,5 @@ Use `power_on` to restore the node. Poll
 The management server IDs are checked into
 `src/infrastructure/inventory/guardian-mgmt.json`.
 
-There is intentionally no `aspect infra hardware-outage-run` task yet. A live
-power action must not depend on an unpinned workstation `curl` or SDK binary;
-add the task only after the repo owns a pinned HTTP client or equivalent
-provider-backed action surface.
+The Aspect task uses the repo-built `//src/tools/latitude:latitude-power`
+binary, not a workstation `curl` or provider CLI.
