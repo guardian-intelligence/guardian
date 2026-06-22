@@ -326,6 +326,15 @@ The same source-level naming rule applies to Guardian's core services:
 `ClickHouse/guardian` becomes `HelmRelease/clickhouse-guardian`, and
 `OpenBAO/guardian` becomes `HelmRelease/openbao-guardian`. The OpenBao app then
 renders its own nested system HelmRelease, `openbao-guardian-system`.
+The Harbor app follows the same pattern and renders its nested system
+HelmRelease as `harbor-guardian-system`. It also renders standard COSI
+`BucketClaim/harbor-guardian-registry` and
+`BucketAccess/harbor-guardian-registry` objects, with bucket credentials written
+to `Secret/harbor-guardian-registry-bucket`; the nested system chart then
+translates the COSI `BucketInfo` into
+`Secret/harbor-guardian-registry-s3` for Harbor's S3 registry storage. The live
+gate checks those resources directly instead of relying only on the top-level
+`Harbor/guardian` condition.
 
 Important source finding for the next app slice: Cozystack 1.4 `Postgres` and
 `Harbor` templates honor `spec.storageClass`, but the `ClickHouse` chart exposes
@@ -562,7 +571,16 @@ kubectl -n tenant-prod wait --for=condition=Ready secretstores.external-secrets.
 kubectl -n tenant-prod wait --for=condition=Ready externalsecrets.external-secrets.io/guardian-cnpg-backup-creds externalsecrets.external-secrets.io/guardian-clickhouse-backup-creds
 kubectl -n tenant-root wait --for=condition=Ready helmrelease/openbao-guardian helmrelease/openbao-guardian-system
 kubectl -n tenant-root wait --for=jsonpath='{.status.readyReplicas}'=3 statefulset/openbao-guardian
+kubectl -n tenant-root get helmrelease harbor-guardian harbor-guardian-system
+kubectl -n tenant-root get bucketclaims.objectstorage.k8s.io harbor-guardian-registry
+kubectl -n tenant-root get bucketaccesses.objectstorage.k8s.io harbor-guardian-registry
+kubectl -n tenant-root get secret harbor-guardian-registry-bucket harbor-guardian-registry-s3
+kubectl -n tenant-root get workloadmonitors.cozystack.io harbor-guardian-core harbor-guardian-registry harbor-guardian-portal
 ```
+
+Run the Harbor child-resource checks in `tenant-dev`, `tenant-gamma`, and
+`tenant-prod` as well. `aspect infra live` performs those namespace repetitions
+automatically and also checks the COSI protocol and credential references.
 
 Expected results:
 
@@ -595,6 +613,16 @@ Expected results:
 - root/dev/gamma/prod Postgres, Harbor, and ClickHouse app resources report
   `WorkloadsReady=True`; OpenBao app `Ready=True` and
   `StatefulSet/openbao-guardian` has three ready replicas
+- root/dev/gamma/prod each have `HelmRelease/harbor-guardian`, nested
+  `HelmRelease/harbor-guardian-system`,
+  `BucketClaim/harbor-guardian-registry`,
+  `BucketAccess/harbor-guardian-registry`,
+  `Secret/harbor-guardian-registry-bucket`,
+  `Secret/harbor-guardian-registry-s3`, and the Harbor core, registry, and
+  portal `WorkloadMonitor` objects. The live gate also verifies that the COSI
+  BucketClaim and BucketAccess use protocol `s3`, that the access object points
+  at `harbor-guardian-registry`, and that it writes credentials to
+  `harbor-guardian-registry-bucket`.
 - each tenant namespace has the company-site `Deployment`, `Service`,
   `NetworkPolicy`, `PodDisruptionBudget`, and `Ingress`; the dev and gamma
   ingress hosts are `dev.gi.org` and `gamma.gi.org`, and prod is
@@ -658,16 +686,16 @@ separate PRs with their own validation:
   capturing live readiness evidence for dev, gamma, and prod.
 - Load-test reports for CNPG/Postgres, Harbor, ClickHouse, OpenBao, the
   Cozystack dashboard, and the company-site surfaces.
-- Backup specs for root and environment Postgres/Harbor, wired to declared
-  OpenBao/R2-projected Secrets. The package prerequisites, reusable CNPG
-  BackupClass, reusable ClickHouse Altinity BackupClass, Postgres / ClickHouse
-  credential SecretStores and ExternalSecrets, OpenBao auth/policy
-  configuration, ClickHouse app backup Secret references, and recurring
-  ClickHouse backup Plans are declared, and `aspect infra live` now gates ESO
-  readiness, target backup Secret creation, and the live OpenBao SecretStore
-  provider configuration. Applying the OpenBao root, populating real kv values,
-  Postgres object-store coordinates, Harbor backup strategy, ad-hoc BackupJob
-  smoke tests, and live restore drills still need separate PRs.
+- Postgres backup specs wired to declared OpenBao/R2-projected Secrets, plus
+  live backup/restore drills for Postgres, Harbor, and ClickHouse. The package
+  prerequisites, reusable CNPG BackupClass, reusable ClickHouse Altinity
+  BackupClass, Postgres / ClickHouse credential SecretStores and
+  ExternalSecrets, OpenBao auth/policy configuration, ClickHouse app backup
+  Secret references, recurring ClickHouse backup Plans, and Harbor's COSI-backed
+  registry bucket resources are declared and live-gated. Applying the OpenBao
+  root, populating real kv values, Postgres object-store coordinates, ad-hoc
+  BackupJob smoke tests, Harbor registry restore validation, and live restore
+  drills still need separate PRs.
 - ClickHouse chart-side `spec.storageClass` rendering, because Cozystack 1.4
   still relies on the cluster default for ClickHouse and keeper PVCs.
 - OpenBao init/unseal automation and backup/restore drills.
