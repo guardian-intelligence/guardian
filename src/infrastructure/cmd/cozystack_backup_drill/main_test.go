@@ -101,6 +101,12 @@ func TestNamespaceAndComponentValidation(t *testing.T) {
 	if got, err := componentForName("postgresql"); err != nil || got.Kind != "Postgres" || got.BackupClass != "guardian-postgres-cnpg" {
 		t.Fatalf("componentForName(postgresql) = %#v, %v", got, err)
 	}
+	if got, err := componentForName("clickhouse"); err != nil || got.Resource != "clickhouses.apps.cozystack.io" {
+		t.Fatalf("componentForName(clickhouse) resource = %#v, %v", got, err)
+	}
+	if got, err := componentForName("postgres"); err != nil || got.Resource != "postgreses.apps.cozystack.io" {
+		t.Fatalf("componentForName(postgres) resource = %#v, %v", got, err)
+	}
 	if _, err := componentForName("harbor"); err == nil {
 		t.Fatalf("unsupported component was accepted")
 	}

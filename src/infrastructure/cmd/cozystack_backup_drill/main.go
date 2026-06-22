@@ -16,6 +16,7 @@ import (
 
 type componentSpec struct {
 	Kind        string
+	Resource    string
 	BackupClass string
 }
 
@@ -88,11 +89,13 @@ func componentForName(name string) (componentSpec, error) {
 	case "clickhouse":
 		return componentSpec{
 			Kind:        "ClickHouse",
+			Resource:    "clickhouses.apps.cozystack.io",
 			BackupClass: "guardian-clickhouse-altinity",
 		}, nil
 	case "postgres", "postgresql":
 		return componentSpec{
 			Kind:        "Postgres",
+			Resource:    "postgreses.apps.cozystack.io",
 			BackupClass: "guardian-postgres-cnpg",
 		}, nil
 	default:
@@ -174,6 +177,15 @@ func runDrill(ctx context.Context, cfg drillConfig) error {
 		cfg.Name,
 	)
 
+	if err := waitAppReady(ctx, runner, "source", cfg.Component.Resource, cfg.ApplicationName, cfg.WaitTimeout); err != nil {
+		return err
+	}
+	if cfg.RestoreTargetName != "" {
+		if err := waitAppReady(ctx, runner, "restore target", cfg.Component.Resource, cfg.RestoreTargetName, cfg.WaitTimeout); err != nil {
+			return err
+		}
+	}
+
 	if err := runner.run(ctx, "apply BackupJob", "apply", "-f", backupJobPath); err != nil {
 		return err
 	}
@@ -230,8 +242,22 @@ func runDrill(ctx context.Context, cfg drillConfig) error {
 	if err := runner.run(ctx, "RestoreJob yaml", "get", "restorejobs.backups.cozystack.io/"+restoreName, "-o", "yaml"); err != nil {
 		return err
 	}
+	if err := waitAppReady(ctx, runner, "restored target", cfg.Component.Resource, cfg.RestoreTargetName, cfg.WaitTimeout); err != nil {
+		return err
+	}
 	fmt.Printf("backup and restore drill completed: backup=%s restoreJob=%s\n", backupName, restoreName)
 	return nil
+}
+
+func waitAppReady(ctx context.Context, runner kubectlRunner, label, resource, name, timeout string) error {
+	ref := resource + "/" + name
+	if err := runner.run(ctx, label+" app yaml", "get", ref, "-o", "yaml"); err != nil {
+		return err
+	}
+	if err := runner.run(ctx, "wait "+label+" app Ready", "wait", "--for=condition=Ready", ref, "--timeout="+timeout); err != nil {
+		return err
+	}
+	return runner.run(ctx, "wait "+label+" workloads Ready", "wait", "--for=condition=WorkloadsReady", ref, "--timeout="+timeout)
 }
 
 type kubectlRunner struct {

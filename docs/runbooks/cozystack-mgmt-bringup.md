@@ -673,6 +673,11 @@ waits for `BackupJob.status.phase=Succeeded`, waits for the resulting
 related Jobs/Pods, and pod logs where the backup strategy labels them.
 If `--name` is omitted, the helper generates a unique UTC timestamped
 `BackupJob` name.
+Before creating the `BackupJob`, the helper prints the source app YAML and
+waits for that app's `Ready` and `WorkloadsReady` conditions. When
+`--restore-target` is set, it also proves the target app exists and is ready
+before the backup starts, then rechecks and prints the restored target after
+`RestoreJob` succeeds.
 
 Run a ClickHouse backup smoke drill with:
 
