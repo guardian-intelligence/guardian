@@ -610,11 +610,17 @@ Expected results:
   been applied, and the matching kv-v2 values exist, root/dev/gamma/prod have
   Ready `SecretStore/openbao`, Ready
   `ExternalSecret/guardian-cnpg-backup-creds`, and the target
-  `Secret/guardian-cnpg-backup-creds`
+  `Secret/guardian-cnpg-backup-creds`; the live gate also verifies that each
+  CNPG backup SecretStore points at
+  `http://openbao-guardian.tenant-root.svc:8200`, uses the `kv` v2 engine, the
+  `kubernetes` auth mount, the expected tenant-scoped role, the
+  `guardian-external-secrets` service account, and the `openbao` audience
 - after the same OpenBao prerequisites, root/dev/gamma/prod have Ready
   `SecretStore/openbao-clickhouse-backup`, Ready
   `ExternalSecret/guardian-clickhouse-backup-creds`, and the target
-  `Secret/guardian-clickhouse-backup-creds`
+  `Secret/guardian-clickhouse-backup-creds`; the live gate verifies the same
+  OpenBao provider fields with the tenant-scoped ClickHouse backup role and the
+  `guardian-clickhouse-external-secrets` service account
 - the cluster has `CNPG/guardian-postgres-r2` and
   `BackupClass/guardian-postgres-cnpg`, plus
   `Altinity/guardian-clickhouse-altinity` and
@@ -658,10 +664,10 @@ separate PRs with their own validation:
   credential SecretStores and ExternalSecrets, OpenBao auth/policy
   configuration, ClickHouse app backup Secret references, and recurring
   ClickHouse backup Plans are declared, and `aspect infra live` now gates ESO
-  readiness and target backup Secret creation. Applying the OpenBao root,
-  populating real kv values, Postgres object-store coordinates, Harbor backup
-  strategy, ad-hoc BackupJob smoke tests, and live restore drills still need
-  separate PRs.
+  readiness, target backup Secret creation, and the live OpenBao SecretStore
+  provider configuration. Applying the OpenBao root, populating real kv values,
+  Postgres object-store coordinates, Harbor backup strategy, ad-hoc BackupJob
+  smoke tests, and live restore drills still need separate PRs.
 - ClickHouse chart-side `spec.storageClass` rendering, because Cozystack 1.4
   still relies on the cluster default for ClickHouse and keeper PVCs.
 - OpenBao init/unseal automation and backup/restore drills.
