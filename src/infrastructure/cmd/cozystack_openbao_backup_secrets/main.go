@@ -21,22 +21,23 @@ import (
 )
 
 type backupSecretsConfig struct {
-	Kubectl              string
-	Kubeconfig           string
-	RequestTimeout       string
-	WaitTimeout          string
-	SyncWaitTimeout      string
-	PortForwardReadyWait time.Duration
-	Namespace            string
-	StatefulSet          string
-	Service              string
-	BootstrapSecret      string
-	Endpoint             string
-	Bucket               string
-	Region               string
-	Stages               string
-	DryRun               bool
-	ForceSync            bool
+	Kubectl               string
+	Kubeconfig            string
+	RequestTimeout        string
+	WaitTimeout           string
+	SyncWaitTimeout       string
+	PortForwardReadyWait  time.Duration
+	Namespace             string
+	StatefulSet           string
+	Service               string
+	BootstrapSecret       string
+	Endpoint              string
+	Bucket                string
+	Region                string
+	Stages                string
+	DryRun                bool
+	ForceSync             bool
+	AllowSharedCredential bool
 }
 
 type backupSecretCredential struct {
@@ -45,14 +46,20 @@ type backupSecretCredential struct {
 	Source      string
 }
 
+type credentialScope struct {
+	Stage     string
+	Component string
+}
+
 type stageConfig struct {
 	Name      string
 	Namespace string
 }
 
 type secretWrite struct {
-	Path string
-	Data map[string]string
+	Path             string
+	Data             map[string]string
+	CredentialSource string
 }
 
 type kubectlRunner struct {
@@ -87,6 +94,7 @@ func main() {
 	flag.StringVar(&cfg.Stages, "stages", "root,dev,gamma,prod", "comma-separated Guardian stages to populate: root, dev, gamma, prod")
 	flag.BoolVar(&cfg.DryRun, "dry-run", false, "print target OpenBao paths and properties without writing secret values")
 	flag.BoolVar(&cfg.ForceSync, "force-sync", true, "annotate ExternalSecrets with force-sync and wait for target Secrets")
+	flag.BoolVar(&cfg.AllowSharedCredential, "allow-shared-backup-credential", false, "allow GUARDIAN_BACKUP_AWS_* to seed all selected backup paths; intended only for temporary bootstrap")
 	flag.Parse()
 
 	var err error
@@ -141,22 +149,14 @@ func runBackupSecrets(ctx context.Context, cfg backupSecretsConfig, env []string
 	if err != nil {
 		return err
 	}
-	creds := backupSecretCredential{
-		AccessKeyID: "<redacted>",
-		SecretKey:   "<redacted>",
-		Source:      "dry-run",
-	}
-	if !cfg.DryRun {
-		var err error
-		creds, err = credentialsFromEnv(env)
-		if err != nil {
-			return err
-		}
+	creds, err := credentialsFromEnv(stages, env, cfg.AllowSharedCredential, cfg.DryRun)
+	if err != nil {
+		return err
 	}
 	writes := backupSecretWrites(stages, creds, cfg.Endpoint, cfg.Bucket, cfg.Region)
 
 	fmt.Printf("guardian cozystack openbao backup secrets\n")
-	fmt.Printf("namespace=%s statefulset=%s service=%s bootstrapSecret=%s bucket=%s endpoint=%s region=%s stages=%s dryRun=%t forceSync=%t credentialSource=%s\n",
+	fmt.Printf("namespace=%s statefulset=%s service=%s bootstrapSecret=%s bucket=%s endpoint=%s region=%s stages=%s dryRun=%t forceSync=%t allowSharedCredential=%t\n",
 		cfg.Namespace,
 		cfg.StatefulSet,
 		cfg.Service,
@@ -167,11 +167,11 @@ func runBackupSecrets(ctx context.Context, cfg backupSecretsConfig, env []string
 		stageNames(stages),
 		cfg.DryRun,
 		cfg.ForceSync,
-		creds.Source,
+		cfg.AllowSharedCredential,
 	)
 
 	for _, write := range writes {
-		fmt.Printf("target %s properties=%s\n", write.Path, propertyNames(write.Data))
+		fmt.Printf("target %s properties=%s credentialSource=%s\n", write.Path, propertyNames(write.Data), write.CredentialSource)
 	}
 	if cfg.DryRun {
 		return nil
@@ -246,21 +246,70 @@ func parseStages(raw string) ([]stageConfig, error) {
 	return stages, nil
 }
 
-func credentialsFromEnv(env []string) (backupSecretCredential, error) {
+func credentialsFromEnv(stages []stageConfig, env []string, allowShared bool, dryRun bool) (map[credentialScope]backupSecretCredential, error) {
+	out := map[credentialScope]backupSecretCredential{}
+	for _, stage := range stages {
+		for _, component := range []string{"postgres", "clickhouse"} {
+			scope := credentialScope{Stage: stage.Name, Component: component}
+			if dryRun {
+				out[scope] = backupSecretCredential{
+					AccessKeyID: "<redacted>",
+					SecretKey:   "<redacted>",
+					Source:      "dry-run",
+				}
+				continue
+			}
+			creds, err := credentialFromEnv(env, stage, component, allowShared)
+			if err != nil {
+				return nil, err
+			}
+			out[scope] = creds
+		}
+	}
+	return out, nil
+}
+
+func credentialFromEnv(env []string, stage stageConfig, component string, allowShared bool) (backupSecretCredential, error) {
 	values := envMap(env)
-	accessKey, accessSource := firstEnv(values, "GUARDIAN_BACKUP_AWS_ACCESS_KEY_ID", "AWS_ACCESS_KEY_ID")
-	secretKey, secretSource := firstEnv(values, "GUARDIAN_BACKUP_AWS_SECRET_ACCESS_KEY", "AWS_SECRET_ACCESS_KEY")
-	if accessKey == "" {
-		return backupSecretCredential{}, errors.New("missing backup access key: set GUARDIAN_BACKUP_AWS_ACCESS_KEY_ID or AWS_ACCESS_KEY_ID")
+	prefix := scopedCredentialEnvPrefix(stage.Name, component)
+	accessEnv := prefix + "_AWS_ACCESS_KEY_ID"
+	secretEnv := prefix + "_AWS_SECRET_ACCESS_KEY"
+	accessKey := values[accessEnv]
+	secretKey := values[secretEnv]
+	if accessKey != "" && secretKey != "" {
+		return backupSecretCredential{
+			AccessKeyID: accessKey,
+			SecretKey:   secretKey,
+			Source:      accessEnv + "/" + secretEnv,
+		}, nil
 	}
-	if secretKey == "" {
-		return backupSecretCredential{}, errors.New("missing backup secret key: set GUARDIAN_BACKUP_AWS_SECRET_ACCESS_KEY or AWS_SECRET_ACCESS_KEY")
+	if accessKey != "" || secretKey != "" {
+		return backupSecretCredential{}, fmt.Errorf("incomplete scoped backup credential for %s/%s: set both %s and %s", stage.Name, component, accessEnv, secretEnv)
 	}
-	return backupSecretCredential{
-		AccessKeyID: accessKey,
-		SecretKey:   secretKey,
-		Source:      accessSource + "/" + secretSource,
-	}, nil
+
+	if allowShared {
+		sharedAccessEnv := "GUARDIAN_BACKUP_AWS_ACCESS_KEY_ID"
+		sharedSecretEnv := "GUARDIAN_BACKUP_AWS_SECRET_ACCESS_KEY"
+		accessKey = values[sharedAccessEnv]
+		secretKey = values[sharedSecretEnv]
+		if accessKey != "" && secretKey != "" {
+			return backupSecretCredential{
+				AccessKeyID: accessKey,
+				SecretKey:   secretKey,
+				Source:      sharedAccessEnv + "/" + sharedSecretEnv + " (shared bootstrap)",
+			}, nil
+		}
+		if accessKey != "" || secretKey != "" {
+			return backupSecretCredential{}, fmt.Errorf("incomplete shared backup credential: set both %s and %s", sharedAccessEnv, sharedSecretEnv)
+		}
+	}
+	return backupSecretCredential{}, fmt.Errorf("missing scoped backup credential for %s/%s: set %s and %s", stage.Name, component, accessEnv, secretEnv)
+}
+
+func scopedCredentialEnvPrefix(stage, component string) string {
+	stage = strings.ToUpper(strings.ReplaceAll(stage, "-", "_"))
+	component = strings.ToUpper(strings.ReplaceAll(component, "-", "_"))
+	return "GUARDIAN_BACKUP_" + stage + "_" + component
 }
 
 func envMap(env []string) map[string]string {
@@ -275,34 +324,29 @@ func envMap(env []string) map[string]string {
 	return out
 }
 
-func firstEnv(values map[string]string, names ...string) (string, string) {
-	for _, name := range names {
-		if value := values[name]; value != "" {
-			return value, name
-		}
-	}
-	return "", ""
-}
-
-func backupSecretWrites(stages []stageConfig, creds backupSecretCredential, endpoint, bucket, region string) []secretWrite {
+func backupSecretWrites(stages []stageConfig, creds map[credentialScope]backupSecretCredential, endpoint, bucket, region string) []secretWrite {
 	var writes []secretWrite
 	for _, stage := range stages {
+		postgresCreds := creds[credentialScope{Stage: stage.Name, Component: "postgres"}]
 		writes = append(writes, secretWrite{
 			Path: "guardian/guardian-mgmt/" + stage.Namespace + "/postgres/guardian/cnpg-backup",
 			Data: map[string]string{
-				"AWS_ACCESS_KEY_ID":     creds.AccessKeyID,
-				"AWS_SECRET_ACCESS_KEY": creds.SecretKey,
+				"AWS_ACCESS_KEY_ID":     postgresCreds.AccessKeyID,
+				"AWS_SECRET_ACCESS_KEY": postgresCreds.SecretKey,
 			},
+			CredentialSource: postgresCreds.Source,
 		})
+		clickHouseCreds := creds[credentialScope{Stage: stage.Name, Component: "clickhouse"}]
 		writes = append(writes, secretWrite{
 			Path: "guardian/guardian-mgmt/" + stage.Namespace + "/clickhouse/guardian/backup",
 			Data: map[string]string{
 				"bucketName": bucket,
 				"endpoint":   endpoint,
 				"region":     region,
-				"accessKey":  creds.AccessKeyID,
-				"secretKey":  creds.SecretKey,
+				"accessKey":  clickHouseCreds.AccessKeyID,
+				"secretKey":  clickHouseCreds.SecretKey,
 			},
+			CredentialSource: clickHouseCreds.Source,
 		})
 	}
 	return writes

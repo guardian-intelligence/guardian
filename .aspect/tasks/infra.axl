@@ -1782,6 +1782,7 @@ def _openbao_backup_secrets_impl(ctx):
         ctx.args.stages,
         "--dry-run=" + ctx.args.dry_run,
         "--force-sync=" + ctx.args.force_sync,
+        "--allow-shared-backup-credential=" + ctx.args.allow_shared_backup_credential,
         "--request-timeout",
         ctx.args.request_timeout,
         "--wait-timeout",
@@ -1916,6 +1917,7 @@ openbao_backup_secrets = task(
     group = ["infra"],
     summary = "Populate OpenBao kv-v2 backup credential paths for Guardian Postgres and ClickHouse ExternalSecrets.",
     args = {
+        "allow_shared_backup_credential": args.string(default = "false", description = "Set true only for temporary bootstrap with GUARDIAN_BACKUP_AWS_* shared across selected backup paths."),
         "bootstrap_secret": args.string(default = "openbao-guardian-bootstrap", description = "Cluster-local Secret containing OpenBao root token material."),
         "bucket": args.string(default = "guardian-vault", description = "S3-compatible backup bucket name written to ClickHouse backup secrets."),
         "dry_run": args.string(default = "false", description = "Set true to print target OpenBao paths and properties without writing secret values."),

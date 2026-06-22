@@ -67,34 +67,55 @@ func TestParseStages(t *testing.T) {
 }
 
 func TestCredentialsFromEnv(t *testing.T) {
-	got, err := credentialsFromEnv([]string{
-		"AWS_ACCESS_KEY_ID=state-access",
-		"AWS_SECRET_ACCESS_KEY=state-secret",
-		"GUARDIAN_BACKUP_AWS_ACCESS_KEY_ID=backup-access",
-		"GUARDIAN_BACKUP_AWS_SECRET_ACCESS_KEY=backup-secret",
-	})
+	stages := []stageConfig{{Name: "root", Namespace: "tenant-root"}}
+	got, err := credentialsFromEnv(stages, []string{
+		"GUARDIAN_BACKUP_ROOT_POSTGRES_AWS_ACCESS_KEY_ID=pg-access",
+		"GUARDIAN_BACKUP_ROOT_POSTGRES_AWS_SECRET_ACCESS_KEY=pg-secret",
+		"GUARDIAN_BACKUP_ROOT_CLICKHOUSE_AWS_ACCESS_KEY_ID=ch-access",
+		"GUARDIAN_BACKUP_ROOT_CLICKHOUSE_AWS_SECRET_ACCESS_KEY=ch-secret",
+	}, false, false)
 	if err != nil {
 		t.Fatalf("credentialsFromEnv() error = %v", err)
 	}
-	if got.AccessKeyID != "backup-access" || got.SecretKey != "backup-secret" {
-		t.Fatalf("credentialsFromEnv() = %#v", got)
+	postgres := got[credentialScope{Stage: "root", Component: "postgres"}]
+	if postgres.AccessKeyID != "pg-access" || postgres.SecretKey != "pg-secret" {
+		t.Fatalf("postgres credentialsFromEnv() = %#v", postgres)
 	}
-	if got.Source != "GUARDIAN_BACKUP_AWS_ACCESS_KEY_ID/GUARDIAN_BACKUP_AWS_SECRET_ACCESS_KEY" {
-		t.Fatalf("credential source = %q", got.Source)
+	if postgres.Source != "GUARDIAN_BACKUP_ROOT_POSTGRES_AWS_ACCESS_KEY_ID/GUARDIAN_BACKUP_ROOT_POSTGRES_AWS_SECRET_ACCESS_KEY" {
+		t.Fatalf("postgres credential source = %q", postgres.Source)
+	}
+	clickhouse := got[credentialScope{Stage: "root", Component: "clickhouse"}]
+	if clickhouse.AccessKeyID != "ch-access" || clickhouse.SecretKey != "ch-secret" {
+		t.Fatalf("clickhouse credentialsFromEnv() = %#v", clickhouse)
 	}
 
-	got, err = credentialsFromEnv([]string{
+	shared, err := credentialsFromEnv(stages, []string{
+		"GUARDIAN_BACKUP_AWS_ACCESS_KEY_ID=shared-access",
+		"GUARDIAN_BACKUP_AWS_SECRET_ACCESS_KEY=shared-secret",
+	}, true, false)
+	if err != nil {
+		t.Fatalf("shared credentialsFromEnv() error = %v", err)
+	}
+	for scope, creds := range shared {
+		if creds.AccessKeyID != "shared-access" || creds.SecretKey != "shared-secret" {
+			t.Fatalf("shared credentials for %#v = %#v", scope, creds)
+		}
+		if !strings.Contains(creds.Source, "shared bootstrap") {
+			t.Fatalf("shared credential source missing bootstrap marker: %q", creds.Source)
+		}
+	}
+
+	if _, err := credentialsFromEnv(stages, []string{
 		"AWS_ACCESS_KEY_ID=state-access",
 		"AWS_SECRET_ACCESS_KEY=state-secret",
-	})
-	if err != nil {
-		t.Fatalf("fallback credentialsFromEnv() error = %v", err)
+	}, false, false); err == nil {
+		t.Fatalf("generic AWS credentials were accepted as backup credentials")
 	}
-	if got.AccessKeyID != "state-access" || got.SecretKey != "state-secret" {
-		t.Fatalf("fallback credentialsFromEnv() = %#v", got)
-	}
-	if _, err := credentialsFromEnv([]string{"AWS_ACCESS_KEY_ID=only-access"}); err == nil {
-		t.Fatalf("missing secret key accepted")
+
+	if _, err := credentialsFromEnv(stages, []string{
+		"GUARDIAN_BACKUP_ROOT_POSTGRES_AWS_ACCESS_KEY_ID=only-access",
+	}, false, false); err == nil {
+		t.Fatalf("incomplete scoped credentials accepted")
 	}
 }
 
@@ -119,25 +140,33 @@ func TestDryRunDoesNotRequireCredentials(t *testing.T) {
 
 func TestBackupSecretWrites(t *testing.T) {
 	stages := []stageConfig{{Name: "root", Namespace: "tenant-root"}, {Name: "dev", Namespace: "tenant-dev"}}
-	creds := backupSecretCredential{AccessKeyID: "access", SecretKey: "secret"}
+	creds := map[credentialScope]backupSecretCredential{
+		{Stage: "root", Component: "postgres"}:   {AccessKeyID: "root-pg-access", SecretKey: "root-pg-secret", Source: "root-pg"},
+		{Stage: "root", Component: "clickhouse"}: {AccessKeyID: "root-ch-access", SecretKey: "root-ch-secret", Source: "root-ch"},
+		{Stage: "dev", Component: "postgres"}:    {AccessKeyID: "dev-pg-access", SecretKey: "dev-pg-secret", Source: "dev-pg"},
+		{Stage: "dev", Component: "clickhouse"}:  {AccessKeyID: "dev-ch-access", SecretKey: "dev-ch-secret", Source: "dev-ch"},
+	}
 	writes := backupSecretWrites(stages, creds, "https://r2.example", "guardian-vault", "auto")
 	if len(writes) != 4 {
 		t.Fatalf("backupSecretWrites() produced %d writes, want 4", len(writes))
 	}
 	assertWrite(t, writes[0], "guardian/guardian-mgmt/tenant-root/postgres/guardian/cnpg-backup", map[string]string{
-		"AWS_ACCESS_KEY_ID":     "access",
-		"AWS_SECRET_ACCESS_KEY": "secret",
+		"AWS_ACCESS_KEY_ID":     "root-pg-access",
+		"AWS_SECRET_ACCESS_KEY": "root-pg-secret",
 	})
+	if writes[0].CredentialSource != "root-pg" {
+		t.Fatalf("root postgres credential source = %q", writes[0].CredentialSource)
+	}
 	assertWrite(t, writes[1], "guardian/guardian-mgmt/tenant-root/clickhouse/guardian/backup", map[string]string{
 		"bucketName": "guardian-vault",
 		"endpoint":   "https://r2.example",
 		"region":     "auto",
-		"accessKey":  "access",
-		"secretKey":  "secret",
+		"accessKey":  "root-ch-access",
+		"secretKey":  "root-ch-secret",
 	})
 	assertWrite(t, writes[2], "guardian/guardian-mgmt/tenant-dev/postgres/guardian/cnpg-backup", map[string]string{
-		"AWS_ACCESS_KEY_ID":     "access",
-		"AWS_SECRET_ACCESS_KEY": "secret",
+		"AWS_ACCESS_KEY_ID":     "dev-pg-access",
+		"AWS_SECRET_ACCESS_KEY": "dev-pg-secret",
 	})
 }
 
