@@ -445,8 +445,27 @@ func testCompanySite(t *testing.T) {
 			assertBool(t, container, false, "securityContext", "allowPrivilegeEscalation")
 			assertBool(t, container, true, "securityContext", "runAsNonRoot")
 			assertInt(t, container, 65532, "securityContext", "runAsUser")
+			assertBool(t, container, true, "securityContext", "readOnlyRootFilesystem")
+			assertEnvValue(t, sliceAt(t, container, "env"), "TMPDIR", "/tmp")
+			volumeMounts := sliceAt(t, container, "volumeMounts")
+			if len(volumeMounts) != 1 {
+				t.Fatalf("company-site volumeMounts has %d entries, want 1", len(volumeMounts))
+			}
+			tmpMount := asManifest(t, volumeMounts[0], "volumeMounts[0]")
+			assertString(t, tmpMount, "tmp", "name")
+			assertString(t, tmpMount, "/tmp", "mountPath")
 			assertString(t, container, "/healthz", "readinessProbe", "httpGet", "path")
 			assertString(t, container, "/livez", "livenessProbe", "httpGet", "path")
+
+			volumes := sliceAt(t, deploy, "spec", "template", "spec", "volumes")
+			if len(volumes) != 1 {
+				t.Fatalf("company-site volumes has %d entries, want 1", len(volumes))
+			}
+			tmpVolume := asManifest(t, volumes[0], "spec.template.spec.volumes[0]")
+			assertString(t, tmpVolume, "tmp", "name")
+			if valueAt(tmpVolume, "emptyDir") == nil {
+				t.Fatalf("company-site tmp volume must use emptyDir")
+			}
 
 			service := findObject(t, docs, "Service", env.namespace, "company-site")
 			assertString(t, service, "v1", "apiVersion")
