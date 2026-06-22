@@ -29,6 +29,39 @@ EXPECTED_KUBE_APIS = [
 ]
 COMPANY_SITE_IMAGE = "harbor.guardianintelligence.org/guardian/company-site@sha256:eb9741b5882386f15f7e2059d1ed143c8b6ca483f135417d6296c6f3387cc283"
 OPENBAO_INTERNAL_URL = "http://openbao-guardian.tenant-root.svc:8200"
+
+def _harbor_child_gets(stage, namespace):
+    release = "harbor-guardian"
+    registry = release + "-registry"
+    return [
+        (stage + " harbor helmrelease", ["-n", namespace, "get", "helmreleases.helm.toolkit.fluxcd.io/" + release]),
+        (stage + " harbor system helmrelease", ["-n", namespace, "get", "helmreleases.helm.toolkit.fluxcd.io/" + release + "-system"]),
+        (stage + " harbor credentials secret", ["-n", namespace, "get", "secret/" + release + "-credentials"]),
+        (stage + " harbor registry bucket claim", ["-n", namespace, "get", "bucketclaims.objectstorage.k8s.io/" + registry]),
+        (stage + " harbor registry bucket access", ["-n", namespace, "get", "bucketaccesses.objectstorage.k8s.io/" + registry]),
+        (stage + " harbor registry bucket secret", ["-n", namespace, "get", "secret/" + registry + "-bucket"]),
+        (stage + " harbor registry s3 secret", ["-n", namespace, "get", "secret/" + registry + "-s3"]),
+        (stage + " harbor core workload monitor", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release + "-core"]),
+        (stage + " harbor registry workload monitor", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release + "-registry"]),
+        (stage + " harbor portal workload monitor", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release + "-portal"]),
+    ]
+
+def _harbor_child_waits(stage, namespace):
+    release = "harbor-guardian"
+    return [
+        (stage + " harbor helmrelease", ["-n", namespace, "wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/" + release]),
+        (stage + " harbor system helmrelease", ["-n", namespace, "wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/" + release + "-system"]),
+    ]
+
+def _harbor_bucket_checks(stage, namespace):
+    registry = "harbor-guardian-registry"
+    return [
+        (stage + " harbor registry bucket protocol", ["-n", namespace, "get", "bucketclaims.objectstorage.k8s.io/" + registry, "-o", "jsonpath={.spec.protocols[0]}"], "s3"),
+        (stage + " harbor registry bucket access protocol", ["-n", namespace, "get", "bucketaccesses.objectstorage.k8s.io/" + registry, "-o", "jsonpath={.spec.protocol}"], "s3"),
+        (stage + " harbor registry bucket access claim", ["-n", namespace, "get", "bucketaccesses.objectstorage.k8s.io/" + registry, "-o", "jsonpath={.spec.bucketClaimName}"], registry),
+        (stage + " harbor registry bucket access secret", ["-n", namespace, "get", "bucketaccesses.objectstorage.k8s.io/" + registry, "-o", "jsonpath={.spec.credentialsSecretName}"], registry + "-bucket"),
+    ]
+
 INFRA_FILEGROUPS = [
     "//src/infrastructure/bootstrap/guardian-mgmt:root",
     "//src/infrastructure/talm:chart",
@@ -126,7 +159,19 @@ LIVE_GETS = [
     ("prod company network policy", ["-n", "tenant-prod", "get", "networkpolicy.networking.k8s.io/company-site-ingress"]),
     ("prod company pdb", ["-n", "tenant-prod", "get", "poddisruptionbudget.policy/company-site"]),
     ("prod company ingress", ["-n", "tenant-prod", "get", "ingress/company-site"]),
-]
+] + _harbor_child_gets(
+    "root",
+    "tenant-root",
+) + _harbor_child_gets(
+    "dev",
+    "tenant-dev",
+) + _harbor_child_gets(
+    "gamma",
+    "tenant-gamma",
+) + _harbor_child_gets(
+    "prod",
+    "tenant-prod",
+)
 
 def _secret_store_checks(label, namespace, store, role, service_account):
     return [
@@ -193,6 +238,18 @@ LIVE_VALUE_CHECKS = [
     "tenant-prod",
     "tenant-prod-cnpg-backup",
     "tenant-prod-clickhouse-backup",
+) + _harbor_bucket_checks(
+    "root",
+    "tenant-root",
+) + _harbor_bucket_checks(
+    "dev",
+    "tenant-dev",
+) + _harbor_bucket_checks(
+    "gamma",
+    "tenant-gamma",
+) + _harbor_bucket_checks(
+    "prod",
+    "tenant-prod",
 ) + [
     ("dev postgres replicas", ["-n", "tenant-dev", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.replicas}"], "3"),
     ("dev postgres storage class", ["-n", "tenant-dev", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.storageClass}"], "replicated"),
@@ -308,7 +365,19 @@ LIVE_WAITS = [
     ("dev company deployment", ["-n", "tenant-dev", "wait", "--for=condition=Available", "deployment/company-site"]),
     ("gamma company deployment", ["-n", "tenant-gamma", "wait", "--for=condition=Available", "deployment/company-site"]),
     ("prod company deployment", ["-n", "tenant-prod", "wait", "--for=condition=Available", "deployment/company-site"]),
-]
+] + _harbor_child_waits(
+    "root",
+    "tenant-root",
+) + _harbor_child_waits(
+    "dev",
+    "tenant-dev",
+) + _harbor_child_waits(
+    "gamma",
+    "tenant-gamma",
+) + _harbor_child_waits(
+    "prod",
+    "tenant-prod",
+)
 LIVE_COMPANY_SITE_SPREADS = [
     ("dev company pod placement", "tenant-dev", "dev"),
     ("gamma company pod placement", "tenant-gamma", "gamma"),
