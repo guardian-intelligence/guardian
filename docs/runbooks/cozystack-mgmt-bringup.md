@@ -677,7 +677,8 @@ waits for `BackupJob.status.phase=Succeeded`, waits for the resulting
 `Backup.status.phase=Ready`, and prints standard Kubernetes resource YAML,
 related Jobs/Pods, and pod logs where the backup strategy labels them.
 If `--name` is omitted, the helper generates a unique UTC timestamped
-`BackupJob` name.
+`BackupJob` name. When `--restore-target` is set, the helper also validates the
+generated `RestoreJob` name before it creates the `BackupJob`.
 Before creating the `BackupJob`, the helper prints the source app YAML and
 waits for that app's `Ready` and `WorkloadsReady` conditions. When
 `--restore-target` is set, it also proves the target app exists and is ready

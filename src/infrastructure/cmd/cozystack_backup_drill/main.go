@@ -128,6 +128,9 @@ func validateConfig(cfg drillConfig) error {
 		if err := validateDNSLabel("restore-target", cfg.RestoreTargetName); err != nil {
 			return err
 		}
+		if err := validateDNSLabel("restore-job", restoreJobName(cfg.Name)); err != nil {
+			return err
+		}
 		if cfg.RestoreTargetName == cfg.ApplicationName && !cfg.AllowInPlaceRestore {
 			return errors.New("--restore-target matches --application; pass --allow-in-place-restore only for an intentional in-place restore")
 		}
@@ -222,10 +225,7 @@ func runDrill(ctx context.Context, cfg drillConfig) error {
 		return nil
 	}
 
-	restoreName := cfg.Name + "-restore"
-	if err := validateDNSLabel("restore-job", restoreName); err != nil {
-		return err
-	}
+	restoreName := restoreJobName(cfg.Name)
 	restoreJobPath := filepath.Join(dir, "restorejob.yaml")
 	if err := os.WriteFile(restoreJobPath, []byte(restoreJobManifest(cfg, restoreName, backupName)), 0o600); err != nil {
 		return err
@@ -258,6 +258,10 @@ func waitAppReady(ctx context.Context, runner kubectlRunner, label, resource, na
 		return err
 	}
 	return runner.run(ctx, "wait "+label+" workloads Ready", "wait", "--for=condition=WorkloadsReady", ref, "--timeout="+timeout)
+}
+
+func restoreJobName(backupJobName string) string {
+	return backupJobName + "-restore"
 }
 
 type kubectlRunner struct {

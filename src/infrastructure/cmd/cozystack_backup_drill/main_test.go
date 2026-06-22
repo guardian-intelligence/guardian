@@ -69,6 +69,12 @@ func TestValidateConfig(t *testing.T) {
 		t.Fatalf("valid config rejected: %v", err)
 	}
 
+	restore := base
+	restore.RestoreTargetName = "guardian-restore"
+	if err := validateConfig(restore); err != nil {
+		t.Fatalf("valid restore config rejected: %v", err)
+	}
+
 	inPlace := base
 	inPlace.RestoreTargetName = "guardian"
 	if err := validateConfig(inPlace); err == nil {
@@ -84,6 +90,17 @@ func TestValidateConfig(t *testing.T) {
 	badName.Name = "Not_A_DNS_Label"
 	if err := validateConfig(badName); err == nil {
 		t.Fatalf("invalid DNS label was accepted")
+	}
+
+	longRestoreName := base
+	longRestoreName.Name = strings.Repeat("a", 56)
+	longRestoreName.RestoreTargetName = "guardian-restore"
+	err := validateConfig(longRestoreName)
+	if err == nil {
+		t.Fatalf("restore config with too-long generated RestoreJob name was accepted")
+	}
+	if !strings.Contains(err.Error(), "--restore-job") {
+		t.Fatalf("restore config rejected with %q, want restore-job error", err)
 	}
 }
 
