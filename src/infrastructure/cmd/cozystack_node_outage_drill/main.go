@@ -99,6 +99,9 @@ func runDrill(ctx context.Context, cfg drillConfig) error {
 	if err := runner.run(ctx, "preflight target node", "get", "node/"+cfg.Node, "-o", "wide"); err != nil {
 		return err
 	}
+	if err := runner.run(ctx, "preflight target node Ready", nodeReadyArgs(cfg.Node, cfg.WaitTimeout)...); err != nil {
+		return err
+	}
 	printStatus(ctx, runner, cfg.Node, "preflight")
 
 	cordoned := false
@@ -145,6 +148,10 @@ func drainArgs(cfg drillConfig) []string {
 		"--delete-emptydir-data",
 		"--timeout=" + cfg.DrainTimeout,
 	}
+}
+
+func nodeReadyArgs(node, timeout string) []string {
+	return []string{"wait", "--for=condition=Ready", "node/" + node, "--timeout=" + timeout}
 }
 
 func printStatus(ctx context.Context, runner kubectlRunner, node, phase string) {

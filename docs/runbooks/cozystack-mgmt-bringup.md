@@ -786,9 +786,9 @@ fails instead of bypassing an unsafe topology.
 and a small repo-built helper. It first runs the same guardian-mgmt kubeconfig
 guard as `aspect infra live`. If `--revision` is provided, it also verifies
 source-controller convergence before cordoning the node. It then prints node,
-pod, PDB, app, and dashboard status, cordons and drains the selected node,
-prints the same status while the node is drained, uncordons the node, and waits
-for recovery. The recovery gate
+pod, PDB, app, and dashboard status, proves the target node is currently
+`Ready`, cordons and drains the selected node, prints the same status while the
+node is drained, uncordons the node, and waits for recovery. The recovery gate
 requires the target node to be `Ready`, the dashboard deployments to be
 `Available`, OpenBao to be ready with three statefulset replicas, root, dev,
 gamma, and prod Postgres, Harbor, and ClickHouse apps to report `Ready` and
