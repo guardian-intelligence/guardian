@@ -16,6 +16,8 @@ CAPTURE_EVIDENCE_TARGET = "//src/infrastructure/evidence:capture-management-evid
 CAPTURE_EVIDENCE_BIN = "bazel-bin/src/infrastructure/evidence/capture-management-evidence-runner"
 VERIFY_EVIDENCE_TARGET = "//src/infrastructure/evidence:verify-management-evidence"
 VERIFY_EVIDENCE_BIN = "bazel-bin/src/infrastructure/evidence/verify-management-evidence-runner"
+VERIFY_EVIDENCE_SUITE_TARGET = "//src/infrastructure/evidence:verify-management-evidence-suite"
+VERIFY_EVIDENCE_SUITE_BIN = "bazel-bin/src/infrastructure/evidence/verify-management-evidence-suite-runner"
 HARDWARE_OUTAGE_TARGET = "//src/infrastructure/evidence:hardware-outage-run"
 HARDWARE_OUTAGE_BIN = "bazel-bin/src/infrastructure/evidence/hardware-outage-runner"
 HARDWARE_OUTAGE_ALL_TARGET = "//src/infrastructure/evidence:hardware-outage-run-all"
@@ -430,6 +432,45 @@ def _verify_evidence_impl(ctx):
         label = "verify management evidence",
     )
 
+def _verify_evidence_suite_impl(ctx):
+    if ctx.args.evidence_dir == "":
+        ctx.std.io.stderr.write("ERROR: pass --evidence-dir with a verified load/DR evidence capture\n")
+        return 1
+    if ctx.args.hardware_outage_dir == "":
+        ctx.std.io.stderr.write("ERROR: pass --hardware-outage-dir with an all-node hardware outage capture\n")
+        return 1
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        ["build", MANAGEMENT_INVENTORY_TARGET, VERIFY_EVIDENCE_SUITE_TARGET],
+        cwd = ws_path(ctx),
+        label = "bazelisk build " + MANAGEMENT_INVENTORY_TARGET + " " + VERIFY_EVIDENCE_SUITE_TARGET,
+    )
+    if rc != 0:
+        return rc
+    verify_args = [
+        "--evidence-dir",
+        ctx.args.evidence_dir,
+        "--hardware-outage-dir",
+        ctx.args.hardware_outage_dir,
+    ]
+    if ctx.args.inventory != "":
+        verify_args.extend(["--inventory", ctx.args.inventory])
+    if ctx.args.nodes != "":
+        verify_args.extend(["--nodes", ctx.args.nodes])
+    if ctx.args.out_dir != "":
+        verify_args.extend(["--out-dir", ctx.args.out_dir])
+    return checked_spawn(
+        ctx,
+        ws_path(ctx, VERIFY_EVIDENCE_SUITE_BIN),
+        verify_args,
+        cwd = ws_path(ctx),
+        env = {
+            "MANAGEMENT_INVENTORY_BIN": ws_path(ctx, MANAGEMENT_INVENTORY_RUNNER),
+        },
+        label = "verify management evidence suite",
+    )
+
 def _publish_company_site_impl(ctx):
     return checked_spawn(
         ctx,
@@ -825,6 +866,14 @@ _VERIFY_EVIDENCE_ARGS = {
     "run_dir": args.string(default = "", description = "Captured live-run directory to verify."),
 }
 
+_VERIFY_EVIDENCE_SUITE_ARGS = {
+    "evidence_dir": args.string(default = "", description = "Verified load/DR evidence capture directory."),
+    "hardware_outage_dir": args.string(default = "", description = "All-node hardware outage parent directory."),
+    "inventory": args.string(default = "src/infrastructure/inventory/guardian-mgmt.json", description = "Management inventory JSON containing expected nodes."),
+    "nodes": args.string(default = "", description = "Optional comma-separated management node subset. Defaults to all inventory nodes."),
+    "out_dir": args.string(default = "", description = "Output directory for SUITE.md and suite-verification.tsv."),
+}
+
 _OUTAGE_RUN_ARGS = dict(_CAPTURE_EVIDENCE_ARGS)
 _OUTAGE_RUN_ARGS.update({
     "node": args.string(default = "", description = "Kubernetes node name under outage rehearsal."),
@@ -1030,6 +1079,14 @@ verify_evidence = task(
     group = ["infra"],
     summary = "Verify a captured management evidence directory and write report check results.",
     args = _VERIFY_EVIDENCE_ARGS,
+)
+
+verify_evidence_suite = task(
+    implementation = _verify_evidence_suite_impl,
+    name = "evidence-verify-suite",
+    group = ["infra"],
+    summary = "Verify a complete load/DR plus all-node outage evidence package.",
+    args = _VERIFY_EVIDENCE_SUITE_ARGS,
 )
 
 publish_company_site = task(

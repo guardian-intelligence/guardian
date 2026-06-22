@@ -18,6 +18,11 @@ Use `src/infrastructure/evidence/` for opt-in Kubernetes Jobs and backup/restore
 objects that generate load-test and disaster-recovery evidence. These resources
 are not part of the steady-state Flux base.
 
+Use `aspect infra evidence-verify-suite` before marking the evidence matrix
+complete. The suite report ties one passing load/DR capture to one passing
+all-node hardware outage capture and verifies all expected management nodes from
+the checked-in inventory.
+
 Each component report should cover:
 
 - load test scope, command, inputs, and result;

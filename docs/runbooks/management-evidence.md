@@ -187,6 +187,25 @@ input, not as a substitute for reviewing the raw evidence.
 order and attempts `evidence-capture` even when an earlier wait/log/snapshot
 step fails, preserving the degraded state for the report.
 
+After `evidence-verify` passes and the all-node hardware outage capture exists,
+write the suite-level report:
+
+```sh
+aspect infra evidence-verify-suite \
+  --evidence-dir docs/reports/infrastructure/live-runs/<timestamp>-evidence \
+  --hardware-outage-dir docs/reports/infrastructure/live-runs/<timestamp>-hardware-outage-all \
+  --out-dir docs/reports/infrastructure/live-runs/<timestamp>-management-suite
+```
+
+`evidence-verify-suite` is read-only against captured evidence. It checks that
+the load/DR capture has a passing `VERIFY.md` with Talos required, that the
+required component load and restore checks are present, that every management
+node from `src/infrastructure/inventory/guardian-mgmt.json` has Latitude
+power/status records, and that each node has passing `outage-before`,
+`outage-down`, and `outage-after` verification reports. The before/after
+outage phases must also have Talos required. Commit the suite directory with
+the raw live-run directories and component reports.
+
 `evidence-clean` deletes completed Jobs, BackupJobs, RestoreJobs, temporary
 restore targets, and evidence ConfigMaps. It keeps
 `PVC/tenant-root/evidence-replicated-retain` by default so repeat runs verify
@@ -324,7 +343,8 @@ all-node command, and
 `docs/reports/infrastructure/live-runs/<timestamp>-hardware-outage-<node>/` for
 the per-node command. Each per-node directory contains `latitude-before.jsonl`,
 `latitude-down.jsonl`, `latitude-after.jsonl`, and one capture directory per
-phase. Commit the parent directory with the final outage report.
+phase. Run `aspect infra evidence-verify-suite` after the all-node command
+finishes, then commit the parent directory with the final outage report.
 
 Equivalent manual sequence:
 

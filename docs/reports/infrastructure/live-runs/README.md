@@ -15,6 +15,11 @@ one per-node hardware outage directory. Each per-node directory has Latitude
 JSONL status/action records plus `outage-before`, `outage-down`, and
 `outage-after` capture subdirectories.
 
+`aspect infra evidence-verify-suite` reads one verified load/DR evidence
+capture and one all-node hardware outage parent directory, then writes a
+suite-level `SUITE.md` and `suite-verification.tsv` into a separate output
+directory. Commit that suite directory with the raw captures it references.
+
 Commit only live captures that support an infrastructure report. Do not commit
 operator kubeconfigs, talosconfigs, OpenBao tokens, Cloudflare credentials, R2
 credentials, or raw Kubernetes Secret values.
