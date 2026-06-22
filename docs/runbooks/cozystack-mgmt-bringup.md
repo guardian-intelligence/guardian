@@ -76,6 +76,20 @@ Postgres/Harbor/ClickHouse apps use the intended HA/storage shape, OpenBao stays
 declared in `tenant-root`, the company site is declared for dev/gamma/prod, and
 Flux reconciles base before tenant apps.
 
+Collect live readiness evidence with:
+
+```sh
+aspect infra evidence \
+  --output-dir docs/reports/infrastructure/live/management-readiness \
+  --kube-context guardian-mgmt
+```
+
+This task builds the repo-pinned `kubectl`, queries the live management cluster,
+and writes raw JSON snapshots plus `management-readiness.json` and
+`management-readiness.md` under the selected output directory. It exits nonzero
+when the cluster is unreachable or when expected readiness checks fail; do not
+check in failed output as proof of readiness.
+
 Local validation does not require backend credentials:
 
 ```sh
@@ -305,6 +319,11 @@ talosctl --nodes 10.8.0.11,10.8.0.12,10.8.0.13 --endpoints 10.8.0.250 get kubesp
 Expected result: addresses and routes show the VLAN subnet, and KubeSpan has no
 active mesh peers.
 
+The `aspect infra evidence` task automates the Kubernetes-side readiness checks
+above. It intentionally does not replace the later load-test,
+disaster-recovery, or single-node-outage reports; those reports still need live
+drills and checked-in evidence for each component.
+
 ## Not Done In This Substrate Slice
 
 These are intentionally outside the merged L2/OpenTofu substrate and need
@@ -315,6 +334,8 @@ separate PRs with their own validation:
 - Publishing the checked-in company-site OCI image to Harbor and capturing live
   readiness evidence for dev, gamma, and prod.
 - Dashboard readiness evidence beyond the Cozystack platform package exposure.
+- Load-test reports for CNPG/Postgres, Harbor, ClickHouse, OpenBao, the
+  Cozystack dashboard, and the company-site surfaces.
 - Backup specs for root and environment Postgres/Harbor/ClickHouse, wired to
   declared OpenBao/R2-projected Secrets.
 - ClickHouse chart-side `spec.storageClass` rendering, because Cozystack 1.4
