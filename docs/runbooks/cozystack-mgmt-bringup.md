@@ -208,16 +208,25 @@ secret material, opens a local `kubectl port-forward`, initializes the standard
 R2-backed OpenTofu backend, and applies
 `src/infrastructure/bootstrap/guardian-mgmt-openbao` with
 `openbao_addr=http://127.0.0.1:<port>`.
-Backup credential material is the next standard OpenBao operation. Run
-`aspect infra openbao-backup-secrets` after `openbao-apply`; it reads
-`GUARDIAN_BACKUP_AWS_ACCESS_KEY_ID` and
-`GUARDIAN_BACKUP_AWS_SECRET_ACCESS_KEY`, falling back to the standard
-`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, writes the declared kv-v2 paths
-for root/dev/gamma/prod, annotates the ExternalSecrets with `force-sync`, and
-waits for the target Kubernetes Secrets. The default non-secret coordinates are
-the checked-in R2 endpoint, bucket `guardian-vault`, and region `auto`; override
-them with `--endpoint`, `--bucket`, or `--region` when the backup bucket differs
-from the survival-floor bucket.
+Backup credential delivery is the next standard OpenBao operation. Run
+`aspect infra openbao-backup-secrets` after `openbao-apply`; it reads scoped
+backup credentials from
+`GUARDIAN_BACKUP_<STAGE>_<COMPONENT>_AWS_ACCESS_KEY_ID` and
+`GUARDIAN_BACKUP_<STAGE>_<COMPONENT>_AWS_SECRET_ACCESS_KEY`, writes the
+declared kv-v2 paths for root/dev/gamma/prod, annotates the ExternalSecrets
+with `force-sync`, and waits for the target Kubernetes Secrets. Use stage names
+`ROOT`, `DEV`, `GAMMA`, and `PROD`; use components `POSTGRES` and
+`CLICKHOUSE`. The default non-secret coordinates are the checked-in R2 endpoint,
+bucket `guardian-vault`, and region `auto`; override them with `--endpoint`,
+`--bucket`, or `--region` when the backup bucket differs from the
+survival-floor bucket.
+
+Do not use generic `AWS_ACCESS_KEY_ID` or OpenTofu backend credentials as
+database backup credentials. A shared pair can be used only as a temporary
+bootstrap escape hatch by setting `--allow-shared-backup-credential=true` and
+`GUARDIAN_BACKUP_AWS_ACCESS_KEY_ID` /
+`GUARDIAN_BACKUP_AWS_SECRET_ACCESS_KEY`; replace it with scoped credentials
+before treating backup load or recovery drills as production evidence.
 
 Public DNS is a separate OpenTofu root:
 `src/infrastructure/bootstrap/guardian-mgmt-dns`. It manages Route53 records for
@@ -337,9 +346,12 @@ Live planning requires:
   `src/infrastructure/bootstrap/guardian-mgmt-openbao` through
   `aspect infra openbao-apply`. The task supplies `VAULT_TOKEN` from that Secret
   to the repo-pinned OpenTofu process without printing it.
-- Backup credentials in `GUARDIAN_BACKUP_AWS_ACCESS_KEY_ID` and
-  `GUARDIAN_BACKUP_AWS_SECRET_ACCESS_KEY`, or standard `AWS_ACCESS_KEY_ID` and
-  `AWS_SECRET_ACCESS_KEY`, before running `aspect infra openbao-backup-secrets`.
+- Scoped backup credentials such as
+  `GUARDIAN_BACKUP_GAMMA_POSTGRES_AWS_ACCESS_KEY_ID`,
+  `GUARDIAN_BACKUP_GAMMA_POSTGRES_AWS_SECRET_ACCESS_KEY`,
+  `GUARDIAN_BACKUP_GAMMA_CLICKHOUSE_AWS_ACCESS_KEY_ID`, and
+  `GUARDIAN_BACKUP_GAMMA_CLICKHOUSE_AWS_SECRET_ACCESS_KEY`, before running
+  `aspect infra openbao-backup-secrets`.
 
 ```sh
 aspect infra tofu-init \
@@ -607,8 +619,9 @@ Each Postgres path must contain `AWS_ACCESS_KEY_ID` and
 `AWS_SECRET_ACCESS_KEY`; ESO writes them to `guardian-cnpg-backup-creds` in the
 tenant namespace. Each ClickHouse path must contain `bucketName`, `endpoint`,
 `region`, `accessKey`, and `secretKey`; ESO writes them to
-`guardian-clickhouse-backup-creds` in the tenant namespace. The SecretStores
-talk to Cozystack's OpenBao service at
+`guardian-clickhouse-backup-creds` in the tenant namespace. Populate these paths
+from scoped provider-side backup credentials rather than preserving Kubernetes
+Secrets as recovery state. The SecretStores talk to Cozystack's OpenBao service at
 `http://openbao-guardian.tenant-root.svc:8200`, use the `kv` engine with
 `version: v2`, and authenticate through the `kubernetes` auth mount with
 audience `openbao`.
