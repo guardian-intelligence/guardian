@@ -566,6 +566,14 @@ LIVE_COMPANY_SITE_SPREADS = [
     ("gamma company pod placement", "tenant-gamma", "gamma"),
     ("prod company pod placement", "tenant-prod", "prod"),
 ]
+FORBIDDEN_SOURCE_PATHS = [
+    ("DELETE_ME.env", "operator Cloudflare credentials must stay out of the repo workspace and must not be load-bearing"),
+    ("mgmt-evidence", "management-cluster evidence is temporary PR validation output, not durable source"),
+    ("docs/mgmt-evidence", "management-cluster evidence is temporary PR validation output, not durable source"),
+    ("src/infrastructure/mgmt-evidence", "management-cluster evidence is temporary PR validation output, not durable source"),
+    ("src/infrastructure/inventory/guardian-mgmt.json", "guardian-mgmt topology belongs in OpenTofu locals, not a parallel inventory JSON file"),
+    ("src-old/release/evidence", "custom release evidence schemas were removed; use standard OCI, in-toto, SLSA, and tool-native records"),
+]
 
 def _capture_stdout(ctx, program, args, cwd = None, label = None, auth_hint = "kubernetes"):
     label_str = label if label != None else program
@@ -976,7 +984,22 @@ def _render_kustomizations(ctx):
             return rc
     return 0
 
+def _check_source_hygiene(ctx):
+    failed = False
+    for rel, reason in FORBIDDEN_SOURCE_PATHS:
+        path = ws_path(ctx, rel)
+        if ctx.std.fs.exists(path):
+            ctx.std.io.stderr.write("ERROR: remove " + rel + ": " + reason + "\n")
+            failed = True
+    if failed:
+        return 1
+    return 0
+
 def _validate_impl(ctx):
+    rc = _check_source_hygiene(ctx)
+    if rc != 0:
+        return rc
+
     for root, label in [
         (GUARDIAN_MGMT_ROOT, "guardian-mgmt"),
         (GUARDIAN_MGMT_OPENBAO_ROOT, "guardian-mgmt-openbao"),

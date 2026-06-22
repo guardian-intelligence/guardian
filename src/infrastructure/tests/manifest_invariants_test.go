@@ -21,7 +21,7 @@ import (
 type manifest map[string]any
 
 type guardianMgmtTopology struct {
-	Cluster  string `json:"cluster"`
+	Cluster string `json:"cluster"`
 	Network struct {
 		VLAN struct {
 			ID          string `json:"id"`
@@ -53,6 +53,7 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("layer two networking", testLayerTwoNetworking)
 	t.Run("single default storage class", testSingleDefaultStorageClass)
 	t.Run("backup classes", testBackupClasses)
+	t.Run("postgres backup activation guard", testPostgresBackupActivationGuard)
 	t.Run("root tenant core services", testRootTenantCoreServices)
 	t.Run("environment tenant core services", testEnvironmentTenantCoreServices)
 	t.Run("company site", testCompanySite)
@@ -308,6 +309,51 @@ func testBackupClasses(t *testing.T) {
 	for _, docs := range [][]manifest{postgresDocs, clickhouseDocs} {
 		assertNoKind(t, docs, "Plan")
 		assertNoKind(t, docs, "BackupJob")
+	}
+}
+
+func testPostgresBackupActivationGuard(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		manifest  string
+		namespace string
+	}{
+		{name: "root", manifest: "src/infrastructure/base/apps/core-services.yaml", namespace: "tenant-root"},
+		{name: "dev", manifest: "src/infrastructure/environments/dev/core-services.yaml", namespace: "tenant-dev"},
+		{name: "gamma", manifest: "src/infrastructure/environments/gamma/core-services.yaml", namespace: "tenant-gamma"},
+		{name: "prod", manifest: "src/infrastructure/environments/prod/core-services.yaml", namespace: "tenant-prod"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			docs := readManifests(t, tc.manifest)
+			app := findObject(t, docs, "Postgres", tc.namespace, "guardian")
+			plans := findObjects(t, docs, "Plan", tc.namespace, "guardian-postgres-daily")
+			backupValue := valueAt(app, "spec", "backup")
+			if backupValue == nil {
+				if len(plans) != 0 {
+					t.Fatalf("found guardian-postgres-daily Plan without spec.backup on Postgres tenant %s", tc.namespace)
+				}
+				return
+			}
+
+			backup := asManifest(t, backupValue, "Postgres spec.backup")
+			assertBool(t, backup, true, "enabled")
+			destinationPath := stringAt(backup, "destinationPath")
+			endpointURL := stringAt(backup, "endpointURL")
+			assertConcreteBackupCoordinate(t, destinationPath, "destinationPath", "s3://")
+			assertConcreteBackupCoordinate(t, endpointURL, "endpointURL", "https://")
+
+			if len(plans) != 1 {
+				t.Fatalf("found %d guardian-postgres-daily Plans, want exactly 1 when Postgres backup is enabled", len(plans))
+			}
+			plan := plans[0]
+			assertString(t, plan, "backups.cozystack.io/v1alpha1", "apiVersion")
+			assertString(t, plan, "apps.cozystack.io", "spec", "applicationRef", "apiGroup")
+			assertString(t, plan, "Postgres", "spec", "applicationRef", "kind")
+			assertString(t, plan, "guardian", "spec", "applicationRef", "name")
+			assertString(t, plan, "guardian-postgres-cnpg", "spec", "backupClassName")
+			assertString(t, plan, "cron", "spec", "schedule", "type")
+			assertConcreteBackupSchedule(t, stringAt(plan, "spec", "schedule", "cron"))
+		})
 	}
 }
 
@@ -923,14 +969,14 @@ func testFluxHandoff(t *testing.T) {
 }
 
 type appExpectation struct {
-	kind            string
-	namespace       string
-	host            string
-	storageClass    string
-	topReplicas     int
-	nestedReplicas  map[string]int
-	noExternalDB    bool
-	postgresVersion string
+	kind               string
+	namespace          string
+	host               string
+	storageClass       string
+	topReplicas        int
+	nestedReplicas     map[string]int
+	noExternalDB       bool
+	postgresVersion    string
 	backupSecretName   string
 	backupPlanName     string
 	backupPlanSchedule string
@@ -1204,6 +1250,16 @@ func runfilePath(rel string) string {
 func findObject(t *testing.T, docs []manifest, kind, namespace, name string) manifest {
 	t.Helper()
 
+	matches := findObjects(t, docs, kind, namespace, name)
+	if len(matches) != 1 {
+		t.Fatalf("expected one %s %s/%s, got %d", kind, namespace, name, len(matches))
+	}
+	return matches[0]
+}
+
+func findObjects(t *testing.T, docs []manifest, kind, namespace, name string) []manifest {
+	t.Helper()
+
 	var matches []manifest
 	for _, doc := range docs {
 		if stringAt(doc, "kind") == kind &&
@@ -1212,10 +1268,7 @@ func findObject(t *testing.T, docs []manifest, kind, namespace, name string) man
 			matches = append(matches, doc)
 		}
 	}
-	if len(matches) != 1 {
-		t.Fatalf("expected one %s %s/%s, got %d", kind, namespace, name, len(matches))
-	}
-	return matches[0]
+	return matches
 }
 
 func assertNoKind(t *testing.T, docs []manifest, kind string) {
@@ -1327,6 +1380,37 @@ func assertTextNotContains(t *testing.T, text, needle, label string) {
 
 	if strings.Contains(text, needle) {
 		t.Fatalf("%s contains %q", label, needle)
+	}
+}
+
+func assertConcreteBackupCoordinate(t *testing.T, value, label, prefix string) {
+	t.Helper()
+
+	if value == "" {
+		t.Fatalf("Postgres backup %s is empty", label)
+	}
+	if !strings.HasPrefix(value, prefix) {
+		t.Fatalf("Postgres backup %s = %q, want prefix %q", label, value, prefix)
+	}
+	assertNoTemplateOrPlaceholder(t, value, "Postgres backup "+label)
+}
+
+func assertConcreteBackupSchedule(t *testing.T, value string) {
+	t.Helper()
+
+	if value == "" {
+		t.Fatalf("Postgres backup Plan schedule.cron is empty")
+	}
+	assertNoTemplateOrPlaceholder(t, value, "Postgres backup Plan schedule.cron")
+}
+
+func assertNoTemplateOrPlaceholder(t *testing.T, value, label string) {
+	t.Helper()
+
+	for _, bad := range []string{"{{", "}}", "TODO", "todo", "placeholder", "example", "DELETE_ME"} {
+		if strings.Contains(value, bad) {
+			t.Fatalf("%s = %q contains non-production marker %q", label, value, bad)
+		}
 	}
 }
 
