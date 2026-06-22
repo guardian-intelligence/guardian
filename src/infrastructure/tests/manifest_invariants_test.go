@@ -459,6 +459,35 @@ func testCompanySite(t *testing.T) {
 			assertInt(t, asManifest(t, servicePorts[0], "spec.ports[0]"), 80, "port")
 			assertString(t, asManifest(t, servicePorts[0], "spec.ports[0]"), "http", "targetPort")
 
+			policy := findObject(t, docs, "NetworkPolicy", env.namespace, "company-site-ingress")
+			assertString(t, policy, "networking.k8s.io/v1", "apiVersion")
+			assertString(t, policy, "company-site", "spec", "podSelector", "matchLabels", "app.kubernetes.io/name")
+			assertString(t, policy, env.name, "spec", "podSelector", "matchLabels", "guardian.dev/stage")
+			assertStringSlice(t, policy, []string{"Ingress"}, "spec", "policyTypes")
+			if valueAt(policy, "spec", "egress") != nil {
+				t.Fatalf("company-site NetworkPolicy must not restrict egress")
+			}
+			ingressRules := sliceAt(t, policy, "spec", "ingress")
+			if len(ingressRules) != 1 {
+				t.Fatalf("company-site NetworkPolicy ingress has %d entries, want 1", len(ingressRules))
+			}
+			ingressRule := asManifest(t, ingressRules[0], "spec.ingress[0]")
+			from := sliceAt(t, ingressRule, "from")
+			if len(from) != 1 {
+				t.Fatalf("company-site NetworkPolicy ingress[0].from has %d entries, want 1", len(from))
+			}
+			source := asManifest(t, from[0], "spec.ingress[0].from[0]")
+			assertString(t, source, "tenant-root", "namespaceSelector", "matchLabels", "kubernetes.io/metadata.name")
+			assertString(t, source, "ingress-nginx", "podSelector", "matchLabels", "app.kubernetes.io/name")
+			assertString(t, source, "ingress-nginx-system", "podSelector", "matchLabels", "app.kubernetes.io/instance")
+			ports := sliceAt(t, ingressRule, "ports")
+			if len(ports) != 1 {
+				t.Fatalf("company-site NetworkPolicy ingress[0].ports has %d entries, want 1", len(ports))
+			}
+			networkPort := asManifest(t, ports[0], "spec.ingress[0].ports[0]")
+			assertString(t, networkPort, "TCP", "protocol")
+			assertInt(t, networkPort, 8080, "port")
+
 			pdb := findObject(t, docs, "PodDisruptionBudget", env.namespace, "company-site")
 			assertString(t, pdb, "policy/v1", "apiVersion")
 			assertInt(t, pdb, 2, "spec", "minAvailable")

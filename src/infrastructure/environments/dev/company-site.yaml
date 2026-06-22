@@ -86,6 +86,35 @@ spec:
       port: 80
       targetPort: http
 ---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: company-site-ingress
+  namespace: tenant-dev
+  labels:
+    app.kubernetes.io/name: company-site
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: dev
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: company-site
+      guardian.dev/stage: dev
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tenant-root
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+              app.kubernetes.io/instance: ingress-nginx-system
+      ports:
+        - protocol: TCP
+          port: 8080
+---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
