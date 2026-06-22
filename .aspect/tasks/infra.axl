@@ -315,7 +315,7 @@ LIVE_COMPANY_SITE_SPREADS = [
     ("prod company pod placement", "tenant-prod", "prod"),
 ]
 
-def _capture_stdout(ctx, program, args, cwd = None, label = None):
+def _capture_stdout(ctx, program, args, cwd = None, label = None, auth_hint = "kubernetes"):
     label_str = label if label != None else program
     cmd = ctx.std.process.command(program).args(args)
     if cwd != None:
@@ -329,11 +329,11 @@ def _capture_stdout(ctx, program, args, cwd = None, label = None):
             ctx.std.io.stderr.write(r.stdout)
         if r.stderr != "":
             ctx.std.io.stderr.write(r.stderr)
-            _write_kube_auth_hint(ctx, r.stderr)
+            _write_auth_hint(ctx, r.stderr, auth_hint)
         return None
     return r.stdout.strip()
 
-def _capture_success(ctx, program, args, cwd = None, label = None):
+def _capture_success(ctx, program, args, cwd = None, label = None, auth_hint = "kubernetes"):
     label_str = label if label != None else program
     cmd = ctx.std.process.command(program).args(args)
     if cwd != None:
@@ -347,14 +347,22 @@ def _capture_success(ctx, program, args, cwd = None, label = None):
             ctx.std.io.stderr.write(r.stdout)
         if r.stderr != "":
             ctx.std.io.stderr.write(r.stderr)
-            _write_kube_auth_hint(ctx, r.stderr)
+            _write_auth_hint(ctx, r.stderr, auth_hint)
         return 1
     return 0
 
-def _write_kube_auth_hint(ctx, stderr):
+def _write_auth_hint(ctx, stderr, auth_hint):
     if stderr.find("tls: failed to verify certificate") == -1:
         return
     if stderr.find("x509:") == -1:
+        return
+    if auth_hint == "talos":
+        ctx.std.io.stderr.write(
+            "ERROR: Talos rejected the local talosconfig credentials. Refresh "
+            + "the guardian-mgmt Talos operator state from the current cluster "
+            + "before running Talos L2 validation; do not use insecure TLS flags "
+            + "for management-plane validation.\n",
+        )
         return
     ctx.std.io.stderr.write(
         "ERROR: Kubernetes rejected the local cluster credentials. Refresh the "
@@ -451,6 +459,7 @@ def _talosctl_capture(ctx, talosctl, args, label):
         _talosctl_args(ctx, args),
         cwd = ws_path(ctx),
         label = label,
+        auth_hint = "talos",
     )
 
 def _kubectl_success(ctx, kubectl, args, label):
@@ -469,6 +478,7 @@ def _talosctl_success(ctx, talosctl, args, label):
         _talosctl_args(ctx, args),
         cwd = ws_path(ctx),
         label = label,
+        auth_hint = "talos",
     )
 
 def _contains(items, needle):
