@@ -120,6 +120,11 @@ on the aggregated app resources' standard conditions: `Ready` for tenant and
 service Helm reconciliation, and `WorkloadsReady` for monitored
 Postgres/Harbor/ClickHouse workloads.
 
+If `aspect infra live` fails before node discovery with an x509 verification
+error, treat the local kubeconfig/Talos operator state as stale. Refresh the
+operator credentials from the current cluster state before rerunning the live
+gate; do not use insecure TLS flags for source-controller validation.
+
 Local validation does not require backend credentials:
 
 ```sh
