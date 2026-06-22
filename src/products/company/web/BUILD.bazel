@@ -30,6 +30,7 @@ genrule(
         ":node_modules",
         ":node_modules/vite-plus",
         ":sources",
+        "//src/viteplus-monorepo:.aspect_rules_js/node_modules/@voidzero-dev+vite-plus-linux-x64-gnu@0.1.16/dir",
         "//src/viteplus-monorepo:vp_node",
         "//src/viteplus-monorepo:workspace_sources",
     ],
@@ -44,6 +45,7 @@ test -n "$$node_modules_root"
 test -x "$$vp"
 export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
 export NODE_OPTIONS="--preserve-symlinks-main $${NODE_OPTIONS:-}"
+export NODE_PATH="$$node_modules_root$${NODE_PATH:+:$$NODE_PATH}"
 export CI=true
 cd "$$execroot/src/products/company/web"
 rm -rf node_modules

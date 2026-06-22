@@ -89,6 +89,7 @@ filegroup(
 genrule(
     name = "workspace_install",
     srcs = [
+        ":.aspect_rules_js/node_modules/@voidzero-dev+vite-plus-linux-x64-gnu@0.1.16/dir",
         ":workspace_install_inputs",
         ":vp_node",
         ":node_modules/vite-plus",
@@ -111,6 +112,8 @@ for candidate in $(locations :node_modules/vite-plus); do
 done
 test -n "$$vp"
 export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
+export NODE_OPTIONS="--preserve-symlinks-main $${NODE_OPTIONS:-}"
+export NODE_PATH="$$execroot/$(BINDIR)/src/viteplus-monorepo/node_modules$${NODE_PATH:+:$$NODE_PATH}"
 export CI=true
 cd src/viteplus-monorepo
 printf 'viteplus install ok\\n' > "$$execroot/$@"
@@ -126,6 +129,7 @@ printf 'viteplus install ok\\n' > "$$execroot/$@"
 genrule(
     name = "workspace_lint",
     srcs = [
+        ":.aspect_rules_js/node_modules/@voidzero-dev+vite-plus-linux-x64-gnu@0.1.16/dir",
         ":workspace_sources",
         ":workspace_install",
         ":vp_node",
@@ -149,6 +153,8 @@ for candidate in $(locations :node_modules/vite-plus); do
 done
 test -n "$$vp"
 export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
+export NODE_OPTIONS="--preserve-symlinks-main $${NODE_OPTIONS:-}"
+export NODE_PATH="$$execroot/$(BINDIR)/src/viteplus-monorepo/node_modules$${NODE_PATH:+:$$NODE_PATH}"
 export CI=true
 cd src/viteplus-monorepo
 "$$node" "$$vp" run -w lint
@@ -165,6 +171,7 @@ printf 'viteplus lint ok\\n' > "$$execroot/$@"
 genrule(
     name = "workspace_build",
     srcs = [
+        ":.aspect_rules_js/node_modules/@voidzero-dev+vite-plus-linux-x64-gnu@0.1.16/dir",
         ":workspace_sources",
         ":workspace_install",
         ":workspace_lint",
@@ -189,6 +196,8 @@ for candidate in $(locations :node_modules/vite-plus); do
 done
 test -n "$$vp"
 export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
+export NODE_OPTIONS="--preserve-symlinks-main $${NODE_OPTIONS:-}"
+export NODE_PATH="$$execroot/$(BINDIR)/src/viteplus-monorepo/node_modules$${NODE_PATH:+:$$NODE_PATH}"
 export CI=true
 cd "$$execroot/src/products/company/web"
 "$$node" "$$vp" build

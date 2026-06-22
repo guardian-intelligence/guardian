@@ -38,7 +38,7 @@ spec:
               guardian.dev/stage: gamma
       containers:
         - name: company-site
-          image: harbor.guardianintelligence.org/guardian/company-site@sha256:07ecde6824415734035cfadc6c8436cee9dcfd0bd18ceab1bd7d99f3a4c9c7d7
+          image: harbor.guardianintelligence.org/guardian/company-site@sha256:52f25abfd2eb50ee3b71845fcc4e7e8c7374d5f6acb057b5be87fed05f4c1423
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

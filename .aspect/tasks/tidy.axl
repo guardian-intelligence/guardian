@@ -88,6 +88,7 @@ def _run_viteplus(ctx, target):
         env = {
             "CI": "true",
             "NODE_OPTIONS": "--preserve-symlinks-main",
+            "NODE_PATH": ws_path(ctx, "bazel-bin", pkg, "node_modules"),
             "PATH": ws_path(ctx, "bazel-bin", pkg) + ":" + DEFAULT_PROCESS_PATH,
         },
         label = target + " package format",
