@@ -665,8 +665,10 @@ steady desired state.
 
 `aspect infra backup-drill` is a thin wrapper around repo-pinned `kubectl` and a
 small repo-built helper. It first runs the same guardian-mgmt kubeconfig guard
-as `aspect infra live`, then creates a one-shot `BackupJob`, waits for
-`BackupJob.status.phase=Succeeded`, waits for the resulting
+as `aspect infra live`. If `--revision` is provided, it also verifies that the
+live Flux source and Kustomizations have applied that merged commit before
+creating any backup or restore objects. It then creates a one-shot `BackupJob`,
+waits for `BackupJob.status.phase=Succeeded`, waits for the resulting
 `Backup.status.phase=Ready`, and prints standard Kubernetes resource YAML,
 related Jobs/Pods, and pod logs where the backup strategy labels them.
 If `--name` is omitted, the helper generates a unique UTC timestamped
@@ -677,6 +679,7 @@ Run a ClickHouse backup smoke drill with:
 ```sh
 aspect infra backup-drill \
   --kubeconfig "$GUARDIAN_MGMT_KUBECONFIG" \
+  --revision "$(git rev-parse HEAD)" \
   --stage dev \
   --component clickhouse
 ```
@@ -687,6 +690,7 @@ app:
 ```sh
 aspect infra backup-drill \
   --kubeconfig "$GUARDIAN_MGMT_KUBECONFIG" \
+  --revision "$(git rev-parse HEAD)" \
   --stage dev \
   --component clickhouse \
   --restore-target guardian-restore
@@ -769,9 +773,11 @@ fails instead of bypassing an unsafe topology.
 
 `aspect infra node-outage-drill` is a thin wrapper around repo-pinned `kubectl`
 and a small repo-built helper. It first runs the same guardian-mgmt kubeconfig
-guard as `aspect infra live`, then prints node, pod, PDB, app, and dashboard
-status, cordons and drains the selected node, prints the same status while the
-node is drained, uncordons the node, and waits for recovery. The recovery gate
+guard as `aspect infra live`. If `--revision` is provided, it also verifies
+source-controller convergence before cordoning the node. It then prints node,
+pod, PDB, app, and dashboard status, cordons and drains the selected node,
+prints the same status while the node is drained, uncordons the node, and waits
+for recovery. The recovery gate
 requires the target node to be `Ready`, the dashboard deployments to be
 `Available`, OpenBao to be ready with three statefulset replicas, root, dev,
 gamma, and prod Postgres, Harbor, and ClickHouse apps to report `Ready` and
@@ -783,6 +789,7 @@ Run it against one node at a time:
 ```sh
 aspect infra node-outage-drill \
   --kubeconfig "$GUARDIAN_MGMT_KUBECONFIG" \
+  --revision "$(git rev-parse HEAD)" \
   --node ash-earth \
   --confirm-node ash-earth
 ```
