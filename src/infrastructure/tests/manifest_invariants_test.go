@@ -185,6 +185,9 @@ func testGuardianMgmtTopologyAlignment(t *testing.T) {
 	assertTextContains(t, mainTF, `latitudesh_virtual_network.management.vid == local.vlan.vid`, "main.tf")
 	assertTextContains(t, mainTF, `latitudesh_server.control_plane[name].primary_ipv4 == node.public_ipv4`, "main.tf")
 
+	versionsPath := "src/infrastructure/bootstrap/guardian-mgmt/versions.tf"
+	assertPartialS3Backend(t, readRunfile(t, versionsPath), versionsPath, "opentofu/guardian-mgmt.tfstate", "guardian-mgmt backend.s3")
+
 	outputsTF := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt/outputs.tf"))
 	assertTextContains(t, outputsTF, `output "management_vlan"`, "outputs.tf")
 	assertTextContains(t, outputsTF, `api_server_endpoint = "https://${local.vlan.api_vip}:6443"`, "outputs.tf")
@@ -783,10 +786,9 @@ func testOpenBaoOpenTofuBootstrap(t *testing.T) {
 
 	assertTextContains(t, versions, `source  = "hashicorp/vault"`, "guardian-mgmt-openbao versions.tf")
 	assertTextContains(t, versions, `version = "= 4.4.0"`, "guardian-mgmt-openbao versions.tf")
-	backendAttrs := hclBackendAttrs(t, versionsBytes, versionsPath, "s3")
-	assertHCLStringAttribute(t, backendAttrs, "key", "opentofu/guardian-mgmt-openbao.tfstate", "guardian-mgmt-openbao backend.s3")
-	assertTextContains(t, hclExpressionSource(versionsBytes, hclAttr(t, backendAttrs, "endpoint", "guardian-mgmt-openbao backend.s3").Expr), "var.cloudflare_account_id", "guardian-mgmt-openbao backend.s3 endpoint")
-	assertTextContains(t, hclExpressionSource(versionsBytes, hclAttr(t, backendAttrs, "endpoint", "guardian-mgmt-openbao backend.s3").Expr), ".r2.cloudflarestorage.com", "guardian-mgmt-openbao backend.s3 endpoint")
+	assertPartialS3Backend(t, versionsBytes, versionsPath, "opentofu/guardian-mgmt-openbao.tfstate", "guardian-mgmt-openbao backend.s3")
+	backendConfig := string(readRunfile(t, "src/infrastructure/bootstrap/backend.tfvars"))
+	assertTextContains(t, backendConfig, `cloudflare_account_id = "c3eaeffaadf7d4847684d4775c16d598"`, "backend.tfvars")
 	assertTextContains(t, lock, `provider "registry.opentofu.org/hashicorp/vault"`, "guardian-mgmt-openbao lock")
 	assertTextContains(t, lock, `version     = "4.4.0"`, "guardian-mgmt-openbao lock")
 
@@ -1248,6 +1250,18 @@ func hclBackendAttrs(t *testing.T, source []byte, path, backendType string) hcls
 	}
 	t.Fatalf("%s is missing terraform backend %q", path, backendType)
 	return nil
+}
+
+func assertPartialS3Backend(t *testing.T, source []byte, path, wantKey, label string) {
+	t.Helper()
+
+	attrs := hclBackendAttrs(t, source, path, "s3")
+	assertHCLStringAttribute(t, attrs, "bucket", "guardian-vault", label)
+	assertHCLStringAttribute(t, attrs, "key", wantKey, label)
+	assertHCLStringAttribute(t, attrs, "region", "auto", label)
+	if _, ok := attrs["endpoint"]; ok {
+		t.Fatalf("%s must not set endpoint in HCL; pass it with -backend-config during init", label)
+	}
 }
 
 func assertHCLStringAttribute(t *testing.T, attrs hclsyntax.Attributes, name, want, label string) {

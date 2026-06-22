@@ -641,11 +641,43 @@ def _tofu_root(ctx, root, args, label):
         label = label,
     )
 
+def _cloudflare_account_id(ctx):
+    path = ws_path(ctx, GUARDIAN_BACKEND_TFVARS)
+    if not ctx.std.fs.exists(path):
+        ctx.std.io.stderr.write("ERROR: missing " + GUARDIAN_BACKEND_TFVARS + "\n")
+        return None
+
+    for line in ctx.std.fs.read_to_string(path).split("\n"):
+        item = line.strip()
+        if item == "" or item.startswith("#"):
+            continue
+        parts = item.split("=", 1)
+        if len(parts) != 2:
+            continue
+        if parts[0].strip() != "cloudflare_account_id":
+            continue
+        account_id = parts[1].strip()
+        if account_id.startswith("\"") and account_id.endswith("\""):
+            account_id = account_id[1:len(account_id) - 1]
+        if account_id == "":
+            ctx.std.io.stderr.write("ERROR: cloudflare_account_id is empty in " + GUARDIAN_BACKEND_TFVARS + "\n")
+            return None
+        return account_id
+
+    ctx.std.io.stderr.write("ERROR: cloudflare_account_id is missing in " + GUARDIAN_BACKEND_TFVARS + "\n")
+    return None
+
 def _tofu_backend_endpoint(ctx, value):
     endpoint = value
     if endpoint == "":
         endpoint = ctx.std.env.var("AWS_ENDPOINT_URL_S3") or ""
-    return endpoint
+    if endpoint != "":
+        return endpoint
+
+    account_id = _cloudflare_account_id(ctx)
+    if account_id == None:
+        return None
+    return "https://" + account_id + ".r2.cloudflarestorage.com"
 
 def _tofu_backend_roots(ctx, root):
     if root == "all":
@@ -666,10 +698,8 @@ def _tofu_backend_init(ctx, roots, endpoint):
             "init",
             "-input=false",
             "-reconfigure",
-            "-var-file=" + ws_path(ctx, GUARDIAN_BACKEND_TFVARS),
+            "-backend-config=endpoint=" + endpoint,
         ]
-        if endpoint != "":
-            args.append("-backend-config=endpoint=" + endpoint)
         rc = _tofu_root(
             ctx,
             root,

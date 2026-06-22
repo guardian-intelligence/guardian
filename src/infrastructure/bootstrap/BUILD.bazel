@@ -1,0 +1,5 @@
+filegroup(
+    name = "backend_config",
+    srcs = ["backend.tfvars"],
+    visibility = ["//visibility:public"],
+)

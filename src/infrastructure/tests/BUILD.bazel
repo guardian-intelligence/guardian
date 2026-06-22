@@ -26,6 +26,7 @@ go_test(
         "//src/infrastructure/base/secrets:manifests",
         "//src/infrastructure/base/storage:manifests",
         "//src/infrastructure/base/tenants:manifests",
+        "//src/infrastructure/bootstrap:backend_config",
         "//src/infrastructure/bootstrap/guardian-mgmt:root",
         "//src/infrastructure/bootstrap/guardian-mgmt-openbao:root",
         "//src/infrastructure/environments:manifests",
