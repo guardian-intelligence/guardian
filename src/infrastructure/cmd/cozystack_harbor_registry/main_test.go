@@ -126,7 +126,11 @@ func TestHarborReadinessChecks(t *testing.T) {
 	}
 	got := harborReadinessChecks(cfg)
 	requireCommand(t, got, "Harbor app yaml", "tenant-gamma", "harbors.apps.cozystack.io/guardian", "-o", "yaml")
+	requireCommand(t, got, "Harbor registry bucket claim yaml", "tenant-gamma", "bucketclaims.objectstorage.k8s.io/harbor-guardian-registry", "-o", "yaml")
+	requireCommand(t, got, "Harbor registry bucket access yaml", "tenant-gamma", "bucketaccesses.objectstorage.k8s.io/harbor-guardian-registry", "-o", "yaml")
 	requireCommand(t, got, "wait Harbor app Ready", "--for=condition=Ready", "harbors.apps.cozystack.io/guardian", "--timeout=20m")
+	requireCommand(t, got, "wait Harbor registry bucket ready", "--for=jsonpath={.status.bucketReady}=true", "bucketclaims.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=20m")
+	requireCommand(t, got, "wait Harbor registry bucket access granted", "--for=jsonpath={.status.accessGranted}=true", "bucketaccesses.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=20m")
 	requireCommand(t, got, "wait Harbor workloads Ready", "--for=condition=WorkloadsReady", "harbors.apps.cozystack.io/guardian", "--timeout=20m")
 }
 

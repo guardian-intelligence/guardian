@@ -385,8 +385,10 @@ HelmRelease as `harbor-guardian-system`. It also renders standard COSI
 to `Secret/harbor-guardian-registry-bucket`; the nested system chart then
 translates the COSI `BucketInfo` into
 `Secret/harbor-guardian-registry-s3` for Harbor's S3 registry storage. The live
-gate checks those resources directly instead of relying only on the top-level
-`Harbor/guardian` condition.
+gate checks those resources directly and waits for
+`BucketClaim.status.bucketReady=true` plus
+`BucketAccess.status.accessGranted=true` instead of relying only on the
+top-level `Harbor/guardian` condition.
 
 The Postgres app renders `Cluster/postgres-guardian` through CloudNativePG and
 `WorkloadMonitor/postgres-guardian`. The ClickHouse app renders
@@ -543,7 +545,9 @@ its manifest, pulls the artifact back, and verifies the payload bytes. The
 default repository is `library/guardian-smoke`; if the cluster uses a dedicated
 project later, pass it with `--repository`.
 Before logging in, the helper prints the target `Harbor/guardian` app YAML and
-waits for its `Ready` and `WorkloadsReady` conditions.
+the registry COSI resource YAML, then waits for the app `Ready` condition,
+`BucketClaim.status.bucketReady=true`, `BucketAccess.status.accessGranted=true`,
+and `WorkloadsReady`.
 
 ```sh
 aspect infra load-harbor-registry \
@@ -796,8 +800,10 @@ node is drained, uncordons the node, and waits for recovery. The recovery gate
 requires the target node to be `Ready`, the dashboard deployments to be
 `Available`, OpenBao to be ready with three statefulset replicas, root, dev,
 gamma, and prod Postgres, Harbor, and ClickHouse apps to report `Ready` and
-`WorkloadsReady`, and the dev/gamma/prod company-site deployments to be
-`Available`.
+`WorkloadsReady`, each Harbor registry bucket to report
+`BucketClaim.status.bucketReady=true` and
+`BucketAccess.status.accessGranted=true`, and the dev/gamma/prod company-site
+deployments to be `Available`.
 
 Run it against one node at a time:
 
@@ -1041,8 +1047,9 @@ Expected results:
   `Secret/harbor-guardian-registry-s3`, and the Harbor core, registry, and
   portal `WorkloadMonitor` objects. The live gate also verifies that the COSI
   BucketClaim and BucketAccess use protocol `s3`, that the access object points
-  at `harbor-guardian-registry`, and that it writes credentials to
-  `harbor-guardian-registry-bucket`.
+  at `harbor-guardian-registry`, that it writes credentials to
+  `harbor-guardian-registry-bucket`, and that the COSI controller reports
+  `status.bucketReady=true` and `status.accessGranted=true`.
 - root/dev/gamma/prod each have `HelmRelease/postgres-guardian`,
   `Cluster/postgres-guardian`, `Secret/postgres-guardian-credentials`,
   `Secret/postgres-guardian-init-script`, and

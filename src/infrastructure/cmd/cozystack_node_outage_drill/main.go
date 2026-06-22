@@ -218,6 +218,7 @@ func recoveryWaits(node, timeout string) []kubectlCheck {
 	}
 	for _, namespace := range []string{"tenant-root", "tenant-dev", "tenant-gamma", "tenant-prod"} {
 		label := namespace
+		registry := "harbor-guardian-registry"
 		checks = append(checks,
 			kubectlCheck{
 				Label: "wait " + label + " postgres app",
@@ -230,6 +231,14 @@ func recoveryWaits(node, timeout string) []kubectlCheck {
 			kubectlCheck{
 				Label: "wait " + label + " harbor app",
 				Args:  []string{"-n", namespace, "wait", "--for=condition=Ready", "harbors.apps.cozystack.io/guardian"},
+			},
+			kubectlCheck{
+				Label: "wait " + label + " harbor registry bucket ready",
+				Args:  []string{"-n", namespace, "wait", "--for=jsonpath={.status.bucketReady}=true", "bucketclaims.objectstorage.k8s.io/" + registry},
+			},
+			kubectlCheck{
+				Label: "wait " + label + " harbor registry bucket access granted",
+				Args:  []string{"-n", namespace, "wait", "--for=jsonpath={.status.accessGranted}=true", "bucketaccesses.objectstorage.k8s.io/" + registry},
 			},
 			kubectlCheck{
 				Label: "wait " + label + " harbor workloads",
