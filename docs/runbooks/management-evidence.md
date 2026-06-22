@@ -20,14 +20,19 @@ Run this before changing live infrastructure:
 
 ```sh
 aspect infra preflight
+aspect infra inventory-check
 aspect infra evidence-render
 aspect infra plan
 aspect infra dns-plan
 ```
 
 `infra preflight` validates both OpenTofu roots without opening their remote
-backends, builds the company-site OCI artifact, and renders
-`src/infrastructure/base` with the repo-pinned kubectl.
+backends, runs `infra inventory-check`, builds the company-site OCI artifact,
+and renders `src/infrastructure/base` with the repo-pinned kubectl.
+
+`infra inventory-check` is a provider-free OpenTofu plan over checked-in files
+only. It fails if the inventory's API VIP, node IPs, MetalLB pool, pod MTU, or
+Talm values drift away from the manifests that Flux and Talm consume.
 
 `infra evidence-render` renders the opt-in evidence overlay at
 `src/infrastructure/evidence`. It is not part of the Flux base; apply it only

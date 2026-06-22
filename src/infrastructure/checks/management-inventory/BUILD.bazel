@@ -1,0 +1,11 @@
+filegroup(
+    name = "root",
+    srcs = glob(["*.tf"]) + [
+        "README.md",
+        "//src/infrastructure/base/cozystack:manifests",
+        "//src/infrastructure/base/networking:manifests",
+        "//src/infrastructure/inventory:inventory",
+        "//src/infrastructure/talm:chart",
+    ],
+    visibility = ["//visibility:public"],
+)

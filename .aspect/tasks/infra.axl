@@ -13,6 +13,7 @@ OPENBAO_EVIDENCE_TOKEN_BIN = "bazel-bin/src/infrastructure/secrets/seed-openbao-
 KUBECTL_RUNNER = "bazel-bin/src/tools/kubectl/kubectl-runner"
 GUARDIAN_MGMT_ROOT = "src/infrastructure/bootstrap/guardian-mgmt"
 CLOUDFLARE_DNS_ROOT = "src/infrastructure/bootstrap/cloudflare-dns"
+MANAGEMENT_INVENTORY_CHECKS_ROOT = "src/infrastructure/checks/management-inventory"
 
 KNOWN_IMPORTS = [
     ["latitudesh_project.guardian_mgmt", "proj_R82A0yqmd06mM"],
@@ -156,25 +157,43 @@ def _fmt_impl(ctx):
     rc = _tofu(ctx, GUARDIAN_MGMT_ROOT, ["fmt"], label = "tofu fmt guardian-mgmt")
     if rc != 0:
         return rc
-    return _tofu(ctx, CLOUDFLARE_DNS_ROOT, ["fmt"], label = "tofu fmt cloudflare-dns")
+    rc = _tofu(ctx, CLOUDFLARE_DNS_ROOT, ["fmt"], label = "tofu fmt cloudflare-dns")
+    if rc != 0:
+        return rc
+    return _tofu(ctx, MANAGEMENT_INVENTORY_CHECKS_ROOT, ["fmt"], label = "tofu fmt management-inventory")
+
+def _validate_tofu_root(ctx, root, name):
+    rc = _clear_tofu_workdir(ctx, root)
+    if rc != 0:
+        return rc
+    rc = _tofu(ctx, root, ["init", "-backend=false", "-input=false", "-reconfigure"], label = "tofu init -backend=false " + name)
+    if rc != 0:
+        return rc
+    rc = _tofu(ctx, root, ["validate"], label = "tofu validate " + name)
+    if rc != 0:
+        return rc
+    return _clear_tofu_workdir(ctx, root)
 
 def _validate_impl(ctx):
-    rc = _clear_tofu_workdir(ctx, GUARDIAN_MGMT_ROOT)
+    rc = _validate_tofu_root(ctx, MANAGEMENT_INVENTORY_CHECKS_ROOT, "management-inventory")
     if rc != 0:
         return rc
-    rc = _tofu(ctx, GUARDIAN_MGMT_ROOT, ["init", "-backend=false", "-input=false", "-reconfigure"], label = "tofu init -backend=false guardian-mgmt")
+    rc = _validate_tofu_root(ctx, GUARDIAN_MGMT_ROOT, "guardian-mgmt")
     if rc != 0:
         return rc
-    rc = _tofu(ctx, GUARDIAN_MGMT_ROOT, ["validate"], label = "tofu validate guardian-mgmt")
+    return _validate_tofu_root(ctx, CLOUDFLARE_DNS_ROOT, "cloudflare-dns")
+
+def _inventory_check_impl(ctx):
+    rc = _clear_tofu_workdir(ctx, MANAGEMENT_INVENTORY_CHECKS_ROOT)
     if rc != 0:
         return rc
-    rc = _clear_tofu_workdir(ctx, CLOUDFLARE_DNS_ROOT)
+    rc = _tofu(ctx, MANAGEMENT_INVENTORY_CHECKS_ROOT, ["init", "-backend=false", "-input=false", "-reconfigure"], label = "tofu init -backend=false management-inventory")
     if rc != 0:
         return rc
-    rc = _tofu(ctx, CLOUDFLARE_DNS_ROOT, ["init", "-backend=false", "-input=false", "-reconfigure"], label = "tofu init -backend=false cloudflare-dns")
+    rc = _tofu(ctx, MANAGEMENT_INVENTORY_CHECKS_ROOT, ["plan", "-input=false", "-lock=false", "-refresh=false"], label = "tofu plan management-inventory")
     if rc != 0:
         return rc
-    return _tofu(ctx, CLOUDFLARE_DNS_ROOT, ["validate"], label = "tofu validate cloudflare-dns")
+    return _clear_tofu_workdir(ctx, MANAGEMENT_INVENTORY_CHECKS_ROOT)
 
 def _plan_impl(ctx):
     rc = _tofu(ctx, GUARDIAN_MGMT_ROOT, ["init", "-input=false", "-reconfigure"], label = "tofu init guardian-mgmt")
@@ -333,6 +352,9 @@ def _publish_company_site_impl(ctx):
     )
 
 def _preflight_impl(ctx):
+    rc = _inventory_check_impl(ctx)
+    if rc != 0:
+        return rc
     rc = _validate_impl(ctx)
     if rc != 0:
         return rc
@@ -533,6 +555,13 @@ validate = task(
     name = "validate",
     group = ["infra"],
     summary = "Validate OpenTofu roots without opening their remote backends.",
+)
+
+inventory_check = task(
+    implementation = _inventory_check_impl,
+    name = "inventory-check",
+    group = ["infra"],
+    summary = "Check management inventory against Talm, Cozystack, MetalLB, and MTU manifests without live state.",
 )
 
 plan = task(
