@@ -4,6 +4,7 @@ load(".aspect/lib/helpers.axl", "checked_spawn", "ws_path")
 
 GUARDIAN_MGMT_ROOT = "src/infrastructure/bootstrap/guardian-mgmt"
 GUARDIAN_MGMT_OPENBAO_ROOT = "src/infrastructure/bootstrap/guardian-mgmt-openbao"
+GUARDIAN_MGMT_DNS_ROOT = "src/infrastructure/bootstrap/guardian-mgmt-dns"
 GUARDIAN_BACKEND_TFVARS = "src/infrastructure/bootstrap/backend.tfvars"
 TOFU_TARGET = "@opentofu_linux_amd64//:tofu_bin"
 TALM_TARGET = "@talm_linux_amd64//:talm"
@@ -140,6 +141,7 @@ def _clickhouse_child_checks(stage, namespace):
 
 INFRA_FILEGROUPS = [
     "//src/infrastructure/bootstrap/guardian-mgmt:root",
+    "//src/infrastructure/bootstrap/guardian-mgmt-dns:root",
     "//src/infrastructure/talm:chart",
     "//src/infrastructure/base/apps:manifests",
     "//src/infrastructure/base/backup:manifests",
@@ -688,12 +690,15 @@ def _tofu_backend_roots(ctx, root):
         return [
             (GUARDIAN_MGMT_ROOT, "guardian-mgmt"),
             (GUARDIAN_MGMT_OPENBAO_ROOT, "guardian-mgmt-openbao"),
+            (GUARDIAN_MGMT_DNS_ROOT, "guardian-mgmt-dns"),
         ]
     if root == "guardian-mgmt":
         return [(GUARDIAN_MGMT_ROOT, "guardian-mgmt")]
     if root == "guardian-mgmt-openbao":
         return [(GUARDIAN_MGMT_OPENBAO_ROOT, "guardian-mgmt-openbao")]
-    ctx.std.io.stderr.write("ERROR: --root must be all, guardian-mgmt, or guardian-mgmt-openbao\n")
+    if root == "guardian-mgmt-dns":
+        return [(GUARDIAN_MGMT_DNS_ROOT, "guardian-mgmt-dns")]
+    ctx.std.io.stderr.write("ERROR: --root must be all, guardian-mgmt, guardian-mgmt-openbao, or guardian-mgmt-dns\n")
     return None
 
 def _tofu_backend_init(ctx, roots, endpoint):
@@ -1067,6 +1072,7 @@ def _validate_impl(ctx):
     for root, label in [
         (GUARDIAN_MGMT_ROOT, "guardian-mgmt"),
         (GUARDIAN_MGMT_OPENBAO_ROOT, "guardian-mgmt-openbao"),
+        (GUARDIAN_MGMT_DNS_ROOT, "guardian-mgmt-dns"),
     ]:
         rc = _tofu_root(ctx, root, ["fmt", "-check"], "tofu fmt -check " + label)
         if rc != 0:
@@ -1116,6 +1122,33 @@ def _tofu_init_impl(ctx):
     if roots == None:
         return 1
     return _tofu_backend_init(ctx, roots, endpoint)
+
+def _dns_apply_impl(ctx):
+    if ctx.args.mode not in ["plan", "apply"]:
+        ctx.std.io.stderr.write("ERROR: --mode must be plan or apply\n")
+        return 1
+
+    endpoint = _tofu_backend_endpoint(ctx, ctx.args.endpoint)
+    if endpoint == None:
+        return 1
+    rc = _tofu_backend_init(ctx, [(GUARDIAN_MGMT_DNS_ROOT, "guardian-mgmt-dns")], endpoint)
+    if rc != 0:
+        return rc
+
+    tofu_args = [
+        ctx.args.mode,
+        "-input=false",
+        "-var-file=" + ws_path(ctx, GUARDIAN_BACKEND_TFVARS),
+    ]
+    if ctx.args.mode == "apply":
+        tofu_args.append("-auto-approve")
+
+    return _tofu_root(
+        ctx,
+        GUARDIAN_MGMT_DNS_ROOT,
+        tofu_args,
+        "tofu " + ctx.args.mode + " guardian-mgmt-dns",
+    )
 
 def _require_talm_operator_state(ctx, root):
     missing = []
@@ -1840,7 +1873,18 @@ tofu_init = task(
     summary = "Initialize OpenTofu S3 backends for management bootstrap roots using standard AWS/R2 environment credentials.",
     args = {
         "endpoint": args.string(default = "", description = "Optional S3-compatible backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
-        "root": args.string(default = "all", description = "OpenTofu root to initialize: all, guardian-mgmt, or guardian-mgmt-openbao."),
+        "root": args.string(default = "all", description = "OpenTofu root to initialize: all, guardian-mgmt, guardian-mgmt-openbao, or guardian-mgmt-dns."),
+    },
+)
+
+dns_apply = task(
+    implementation = _dns_apply_impl,
+    name = "dns-apply",
+    group = ["infra"],
+    summary = "Plan or apply public guardian-mgmt DNS records through OpenTofu.",
+    args = {
+        "endpoint": args.string(default = "", description = "Optional S3-compatible backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
+        "mode": args.string(default = "plan", description = "OpenTofu operation: plan or apply."),
     },
 )
 

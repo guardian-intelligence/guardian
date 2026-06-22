@@ -28,6 +28,7 @@ go_test(
         "//src/infrastructure/base/tenants:manifests",
         "//src/infrastructure/bootstrap:backend_config",
         "//src/infrastructure/bootstrap/guardian-mgmt:root",
+        "//src/infrastructure/bootstrap/guardian-mgmt-dns:root",
         "//src/infrastructure/bootstrap/guardian-mgmt-openbao:root",
         "//src/infrastructure/environments:manifests",
         "//src/infrastructure/talm:chart",

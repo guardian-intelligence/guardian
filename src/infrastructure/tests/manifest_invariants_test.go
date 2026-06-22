@@ -48,6 +48,7 @@ type guardianMgmtNode struct {
 
 func TestManifestInvariants(t *testing.T) {
 	t.Run("guardian mgmt topology alignment", testGuardianMgmtTopologyAlignment)
+	t.Run("guardian mgmt dns bootstrap", testGuardianMgmtDNSBootstrap)
 	t.Run("talm install disk selectors", testTalmInstallDiskSelectors)
 	t.Run("cozystack platform package", testCozystackPlatformPackage)
 	t.Run("environment tenants", testEnvironmentTenants)
@@ -214,6 +215,55 @@ func testEnvironmentTenants(t *testing.T) {
 			assertBool(t, tenant, false, "spec", "seaweedfs")
 		})
 	}
+}
+
+func testGuardianMgmtDNSBootstrap(t *testing.T) {
+	const versionsPath = "src/infrastructure/bootstrap/guardian-mgmt-dns/versions.tf"
+	versionsBytes := readRunfile(t, versionsPath)
+	versions := string(versionsBytes)
+	mainTF := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt-dns/main.tf"))
+	variablesTF := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt-dns/variables.tf"))
+	outputsTF := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt-dns/outputs.tf"))
+
+	assertTextContains(t, versions, `source  = "hashicorp/aws"`, "guardian-mgmt-dns versions.tf")
+	assertTextContains(t, versions, `version = "= 5.100.0"`, "guardian-mgmt-dns versions.tf")
+	assertTextContains(t, versions, `source  = "cloudflare/cloudflare"`, "guardian-mgmt-dns versions.tf")
+	assertTextContains(t, versions, `version = "= 4.52.5"`, "guardian-mgmt-dns versions.tf")
+	assertPartialS3Backend(t, versionsBytes, versionsPath, "opentofu/guardian-mgmt-dns.tfstate", "guardian-mgmt-dns backend.s3")
+
+	assertTextContains(t, variablesTF, `variable "cloudflare_account_id"`, "guardian-mgmt-dns variables.tf")
+	assertTextContains(t, mainTF, `data "terraform_remote_state" "guardian_mgmt"`, "guardian-mgmt-dns main.tf")
+	assertTextContains(t, mainTF, `key    = "opentofu/guardian-mgmt.tfstate"`, "guardian-mgmt-dns main.tf")
+	assertTextContains(t, mainTF, `endpoint                    = "https://${var.cloudflare_account_id}.r2.cloudflarestorage.com"`, "guardian-mgmt-dns main.tf")
+	assertTextContains(t, mainTF, `data.terraform_remote_state.guardian_mgmt.outputs.control_plane_nodes`, "guardian-mgmt-dns main.tf")
+	assertTextContains(t, mainTF, `data "aws_route53_zone" "gi_org"`, "guardian-mgmt-dns main.tf")
+	assertTextContains(t, mainTF, `data "cloudflare_zone" "guardianintelligence_org"`, "guardian-mgmt-dns main.tf")
+	assertTextContains(t, mainTF, `account_id = var.cloudflare_account_id`, "guardian-mgmt-dns main.tf")
+	assertTextContains(t, mainTF, `resource "aws_route53_record" "gi_org_a"`, "guardian-mgmt-dns main.tf")
+	assertTextContains(t, mainTF, `resource "cloudflare_record" "guardianintelligence_org_a"`, "guardian-mgmt-dns main.tf")
+	assertTextContains(t, mainTF, `allow_overwrite = true`, "guardian-mgmt-dns main.tf")
+
+	for _, host := range []string{
+		`"dev.gi.org"`,
+		`"gamma.gi.org"`,
+		`"prod.gi.org"`,
+		`"harbor.dev.gi.org"`,
+		`"harbor.gamma.gi.org"`,
+		`"harbor.prod.gi.org"`,
+		`"guardianintelligence.org"`,
+		`"dashboard.guardianintelligence.org"`,
+		`"harbor.guardianintelligence.org"`,
+		`"s3.guardianintelligence.org"`,
+	} {
+		assertTextContains(t, mainTF, host, "guardian-mgmt-dns main.tf")
+	}
+	recordDefinitions := strings.Split(mainTF, `check "no_legacy_verself_records"`)[0]
+	assertTextNotContains(t, recordDefinitions, "206.223.228.99", "guardian-mgmt-dns record definitions")
+	assertTextNotContains(t, recordDefinitions, "67.213.115.113", "guardian-mgmt-dns record definitions")
+	assertTextContains(t, mainTF, `check "no_legacy_verself_records"`, "guardian-mgmt-dns main.tf")
+
+	assertTextContains(t, outputsTF, `output "route53_records"`, "guardian-mgmt-dns outputs.tf")
+	assertTextContains(t, outputsTF, `output "cloudflare_records"`, "guardian-mgmt-dns outputs.tf")
 }
 
 func testLayerTwoNetworking(t *testing.T) {
