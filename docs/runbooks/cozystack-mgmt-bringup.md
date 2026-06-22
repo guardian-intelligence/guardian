@@ -336,6 +336,16 @@ translates the COSI `BucketInfo` into
 gate checks those resources directly instead of relying only on the top-level
 `Harbor/guardian` condition.
 
+The Postgres app renders `Cluster/postgres-guardian` through CloudNativePG and
+`WorkloadMonitor/postgres-guardian`. The ClickHouse app renders
+`ClickHouseInstallation/clickhouse-guardian`,
+`ClickHouseKeeperInstallation/clickhouse-guardian-keeper`,
+`VMPodScrape/clickhouse-guardian-keeper`,
+`Secret/clickhouse-guardian-backup-api-auth`, and ClickHouse/keeper
+WorkloadMonitors through the Altinity and VictoriaMetrics APIs. `aspect infra
+live` checks those child resources and selected spec fields so the app CRs,
+operator-facing CRs, and backup sidecar wiring stay aligned.
+
 Important source finding for the next app slice: Cozystack 1.4 `Postgres` and
 `Harbor` templates honor `spec.storageClass`, but the `ClickHouse` chart exposes
 `spec.storageClass` without rendering it into ClickHouse or keeper PVC
@@ -576,11 +586,17 @@ kubectl -n tenant-root get bucketclaims.objectstorage.k8s.io harbor-guardian-reg
 kubectl -n tenant-root get bucketaccesses.objectstorage.k8s.io harbor-guardian-registry
 kubectl -n tenant-root get secret harbor-guardian-registry-bucket harbor-guardian-registry-s3
 kubectl -n tenant-root get workloadmonitors.cozystack.io harbor-guardian-core harbor-guardian-registry harbor-guardian-portal
+kubectl -n tenant-root get helmrelease postgres-guardian clickhouse-guardian
+kubectl -n tenant-root get clusters.postgresql.cnpg.io postgres-guardian
+kubectl -n tenant-root get clickhouseinstallations.clickhouse.altinity.com clickhouse-guardian
+kubectl -n tenant-root get clickhousekeeperinstallations.clickhouse-keeper.altinity.com clickhouse-guardian-keeper
+kubectl -n tenant-root get vmpodscrapes.operator.victoriametrics.com clickhouse-guardian-keeper
+kubectl -n tenant-root get workloadmonitors.cozystack.io postgres-guardian clickhouse-guardian clickhouse-guardian-keeper
 ```
 
-Run the Harbor child-resource checks in `tenant-dev`, `tenant-gamma`, and
-`tenant-prod` as well. `aspect infra live` performs those namespace repetitions
-automatically and also checks the COSI protocol and credential references.
+Run the Harbor, Postgres, and ClickHouse child-resource checks in `tenant-dev`,
+`tenant-gamma`, and `tenant-prod` as well. `aspect infra live` performs those
+namespace repetitions automatically and also checks selected CR spec fields.
 
 Expected results:
 
@@ -623,6 +639,21 @@ Expected results:
   BucketClaim and BucketAccess use protocol `s3`, that the access object points
   at `harbor-guardian-registry`, and that it writes credentials to
   `harbor-guardian-registry-bucket`.
+- root/dev/gamma/prod each have `HelmRelease/postgres-guardian`,
+  `Cluster/postgres-guardian`, `Secret/postgres-guardian-credentials`,
+  `Secret/postgres-guardian-init-script`, and
+  `WorkloadMonitor/postgres-guardian`. The live gate verifies the CNPG Cluster
+  has three instances, `replicated` storage, and synchronous replica bounds
+  `1..2`.
+- root/dev/gamma/prod each have `HelmRelease/clickhouse-guardian`,
+  `ClickHouseInstallation/clickhouse-guardian`,
+  `ClickHouseKeeperInstallation/clickhouse-guardian-keeper`,
+  `VMPodScrape/clickhouse-guardian-keeper`,
+  `Secret/clickhouse-guardian-credentials`,
+  `Secret/clickhouse-guardian-backup-api-auth`, and ClickHouse plus keeper
+  WorkloadMonitors. The live gate verifies one shard, three replicas, three
+  keeper replicas, and that the ClickHouseInstallation pod template includes
+  the `clickhouse-backup` sidecar exposing the `ch-backup-api` port.
 - each tenant namespace has the company-site `Deployment`, `Service`,
   `NetworkPolicy`, `PodDisruptionBudget`, and `Ingress`; the dev and gamma
   ingress hosts are `dev.gi.org` and `gamma.gi.org`, and prod is
