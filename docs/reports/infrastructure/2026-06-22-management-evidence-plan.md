@@ -20,6 +20,7 @@ Live convergence and readiness:
 
 ```sh
 aspect infra apply-base --kubeconfig "${KUBECONFIG}"
+aspect infra publish-company-site
 aspect infra live-snapshot --kubeconfig "${KUBECONFIG}"
 aspect infra live-rollout --kubeconfig "${KUBECONFIG}"
 aspect infra talos-health --talosconfig "${TALOSCONFIG}"
@@ -55,6 +56,8 @@ aspect infra outage-uncordon --kubeconfig "${KUBECONFIG}" --node <node>
   `BackupClass` objects, and hourly `Plan` objects.
 - Opt-in Kubernetes evidence fixtures now exist for HTTP load, replicated PVC
   smoke, and Postgres/ClickHouse backup/restore-to-copy.
+- Harbor publication now has a repo-owned `rules_oci` push target and Aspect
+  task for the company-site image.
 - Live Kubernetes evidence is pending because the `guardian-mgmt` kubeconfig and
   converged cluster are not present in this workspace.
 - Latitude adoption is pending a Latitude token and VLAN assignment import IDs.
@@ -99,4 +102,5 @@ Single-node outage reports:
 - A Kubernetes drain rehearsal is useful but insufficient for the final
   single-node outage criterion.
 - The company-site deployment references Harbor by digest; it cannot pull until
-  Harbor is live and the image has been published there.
+  Harbor is live, OCI auth is present, and `aspect infra publish-company-site`
+  has pushed the image there.

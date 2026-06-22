@@ -19,6 +19,7 @@ filegroup(
         "//src/environments:environments",
         "//src/infrastructure/inventory:inventory",
         "//src/products/company/site:image.digest",
+        "//src/products/company/site:push-harbor",
     ],
     visibility = ["//visibility:public"],
 )

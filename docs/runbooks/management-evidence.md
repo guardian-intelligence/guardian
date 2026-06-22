@@ -63,6 +63,18 @@ aspect infra talos-health \
 - Cozystack backup resources (`BackupClass`, `Plan`, `BackupJob`, `Backup`);
 - storage classes and PVC/PV state.
 
+Before the company-site Deployments can pull from Harbor, publish the digest
+built by the repo:
+
+```sh
+aspect infra publish-company-site
+```
+
+This delegates to `//src/products/company/site:push-harbor`, which uses
+`rules_oci`'s pinned push toolchain. OCI auth is session secret material; seed
+it from secret-zero/OpenBao rather than treating a workstation registry login as
+desired state.
+
 ## Load Evidence
 
 Each component report must state the exact command, target, concurrency, request

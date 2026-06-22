@@ -1,4 +1,4 @@
-load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load", "oci_push")
 load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 
 filegroup(
@@ -32,4 +32,12 @@ oci_load(
     name = "load",
     image = ":image",
     repo_tags = ":repo_tags.txt",
+)
+
+oci_push(
+    name = "push-harbor",
+    image = ":image",
+    remote_tags = ["dev"],
+    repository = "oci.guardianintelligence.org/guardian/company-site",
+    visibility = ["//visibility:public"],
 )

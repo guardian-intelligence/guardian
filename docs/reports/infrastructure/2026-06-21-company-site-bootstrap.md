@@ -22,6 +22,9 @@
   as `localhost/guardian/company-site:dev`.
 - Local HTTP probes against the loaded image passed for `/`, `/healthz`, and
   `/metrics`.
+- Harbor publication is declared as `//src/products/company/site:push-harbor`
+  and exposed as `aspect infra publish-company-site`; live publication is still
+  pending Harbor convergence and OCI auth.
 
 ## Load Test
 

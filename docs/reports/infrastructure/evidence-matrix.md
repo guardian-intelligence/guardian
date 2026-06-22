@@ -9,7 +9,7 @@ infrastructure work can be called complete.
 | LINSTOR / DRBD storage | `src/infrastructure/base/storage/`, `src/infrastructure/evidence/storage-smoke.yaml` | pending | pending | pending | opt-in smoke fixture declared |
 | OpenBao | `src/infrastructure/base/openbao/` | pending | pending | pending | evidence commands declared |
 | CNPG / Postgres | `src/infrastructure/base/apps/postgres.yaml`, `src/infrastructure/base/backups/managed-databases.yaml`, `src/infrastructure/evidence/database-dr.yaml` | pending | pending | pending | opt-in backup/restore fixture declared |
-| Harbor | `src/infrastructure/base/apps/harbor.yaml` | pending | pending | pending | evidence commands declared |
+| Harbor | `src/infrastructure/base/apps/harbor.yaml`, `src/products/company/site:push-harbor` | pending | pending | pending | publish target declared; live push/pull pending |
 | ClickHouse | `src/infrastructure/base/apps/clickhouse.yaml`, `src/infrastructure/base/backups/managed-databases.yaml`, `src/infrastructure/evidence/database-dr.yaml` | pending | pending | pending | opt-in backup/restore fixture declared |
 | Cozystack Dashboard | `src/infrastructure/base/cozystack/platform.yaml`, `src/infrastructure/evidence/http-load.yaml` | pending | pending | pending | opt-in HTTP fixture declared |
 | Public ingress / DNS | `src/infrastructure/bootstrap/cloudflare-dns/` | pending | pending | pending | adopted, not applied |
