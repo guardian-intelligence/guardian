@@ -1,8 +1,8 @@
 # GitOps entrypoint for the guardian-mgmt cluster.
 #
-# Cozystack already runs Flux in-cluster (cozy-fluxcd). These two objects make
-# Flux reconcile src/infrastructure/base/ — the declarative source of truth for
-# the management cluster — turning the by-hand bring-up into a control loop.
+# Cozystack already runs Flux in-cluster (cozy-fluxcd). These objects make Flux
+# reconcile the management-cluster substrate and the tenant app layer, turning
+# the by-hand bring-up into a control loop.
 #
 # Bootstrap: `kubectl apply -f src/infrastructure/base/flux/sync.yaml` once. The
 # Kustomization then manages this file too (the path includes flux/), so further
@@ -35,5 +35,31 @@ spec:
   # trusted — pruning the cozystack Package or storage classes would be
   # catastrophic, so we apply/update only until then.
   prune: false
-  wait: true
+  # Apply-only: this Kustomization owns the dependent
+  # guardian-mgmt-tenant-apps Kustomization. Waiting on all applied resources
+  # would include that child, which itself depends on this parent.
+  wait: false
   timeout: 5m
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: guardian-mgmt-tenant-apps
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 2m
+  path: ./src/infrastructure/environments
+  sourceRef:
+    kind: GitRepository
+    name: guardian
+  dependsOn:
+    - name: guardian-mgmt-base
+  # Keep the tenant app layer apply-only until live inventory and DR drills are
+  # routine. Pruning app CRs can cascade into stateful Helm releases.
+  prune: false
+  # Apply-only. Cozystack app resources fan out into HelmReleases; readiness is
+  # proven by explicit live checks and checked-in drill reports, not by Flux
+  # kstatus on the app CR itself.
+  wait: false
+  timeout: 10m

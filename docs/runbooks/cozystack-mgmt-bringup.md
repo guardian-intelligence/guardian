@@ -22,6 +22,7 @@ checks to run; it is not a separate source of truth.
 | OpenBao app | `src/infrastructure/base/openbao/` |
 | LINSTOR storage classes | `src/infrastructure/base/storage/storageclasses.yaml` |
 | Environment tenants | `src/infrastructure/base/tenants/environments.yaml` |
+| Environment Cozystack apps | `src/infrastructure/environments/` |
 
 ## Current Facts
 
@@ -127,9 +128,18 @@ once:
 kubectl apply -f src/infrastructure/base/flux/sync.yaml
 ```
 
-Flux then reconciles `src/infrastructure/base`, including the Platform package,
+Flux first reconciles `src/infrastructure/base`, including the Platform package,
 root Postgres/Harbor/ClickHouse apps, networking manifests, storage classes,
-environment tenants, OpenBao, and the Flux objects themselves.
+environment tenants, OpenBao, and the Flux objects themselves. The base also
+declares a second Flux Kustomization, `guardian-mgmt-tenant-apps`, that depends
+on `guardian-mgmt-base` and reconciles `src/infrastructure/environments` after
+the Tenant chart has had a chance to create `tenant-dev`, `tenant-gamma`, and
+`tenant-prod`.
+
+Both Flux Kustomizations are apply-only (`wait: false`). Cozystack app CRs fan
+out into HelmReleases and stateful workloads; readiness is proven by the live
+checks and checked-in load/DR/outage reports, not by treating Flux's apply
+status as service health.
 
 For a direct render check from the repo-pinned kubectl artifact:
 
@@ -180,6 +190,20 @@ Backups are off in this first root app declaration. Enable them only by pointing
 the app specs at pre-existing Kubernetes Secrets delivered from the declared
 OpenBao/R2 secret path; never put S3 credentials directly in app specs.
 
+The checked-in environment app layer declares the same core service set in each
+environment namespace:
+
+- `tenant-dev`: `Postgres/guardian`, `Harbor/guardian` at `harbor.dev.gi.org`,
+  and `ClickHouse/guardian`.
+- `tenant-gamma`: `Postgres/guardian`, `Harbor/guardian` at
+  `harbor.gamma.gi.org`, and `ClickHouse/guardian`.
+- `tenant-prod`: `Postgres/guardian`, `Harbor/guardian` at
+  `harbor.prod.gi.org`, and `ClickHouse/guardian`.
+
+All environment app specs select `storageClass: replicated` and run three
+replicas for the stateful control-plane services so single-node outage drills
+exercise the intended topology.
+
 ## Live Checks
 
 Run these after Flux has reconciled the base:
@@ -194,6 +218,9 @@ kubectl -n tenant-root get tenants.apps.cozystack.io
 kubectl -n tenant-root get postgreses.apps.cozystack.io,harbors.apps.cozystack.io,clickhouses.apps.cozystack.io
 kubectl get ns tenant-dev tenant-gamma tenant-prod \
   -o custom-columns=NAME:.metadata.name,HOST:.metadata.labels.namespace\\.cozystack\\.io/host,INGRESS:.metadata.labels.namespace\\.cozystack\\.io/ingress
+kubectl -n tenant-dev get postgreses.apps.cozystack.io,harbors.apps.cozystack.io,clickhouses.apps.cozystack.io
+kubectl -n tenant-gamma get postgreses.apps.cozystack.io,harbors.apps.cozystack.io,clickhouses.apps.cozystack.io
+kubectl -n tenant-prod get postgreses.apps.cozystack.io,harbors.apps.cozystack.io,clickhouses.apps.cozystack.io
 kubectl -n tenant-root get openbao guardian
 ```
 
@@ -202,7 +229,8 @@ Expected results:
 - all three nodes are Ready and use `10.8.0.0/24` for internal node addresses
 - `ovn-default` and `join` report MTU `1362`
 - MetalLB has the `cozystack` pool and L2 advertisement
-- Flux `guardian-mgmt-base` reconciles `src/infrastructure/base`
+- Flux `guardian-mgmt-base` reconciles `src/infrastructure/base`, and
+  `guardian-mgmt-tenant-apps` reconciles `src/infrastructure/environments`
 - storage classes include `local`, `local-retain`, `replicated`, and
   `replicated-retain`; `replicated` is the only default class
 - root app resources exist for `Postgres/guardian`, `Harbor/guardian`, and
@@ -210,6 +238,8 @@ Expected results:
 - tenant namespaces exist for dev, gamma, and prod; their host labels are
   `dev.gi.org`, `gamma.gi.org`, and `prod.gi.org`, and their ingress label is
   `tenant-root`
+- each tenant namespace has `Postgres/guardian`, `Harbor/guardian`, and
+  `ClickHouse/guardian`
 - OpenBao is deployed as the Cozystack-managed `guardian` app in `tenant-root`
 
 Talos-side network checks:
@@ -230,12 +260,10 @@ separate PRs with their own validation:
 
 - Bootstrap CLI wrapper for the full Talm/Talos path.
 - Latitude VLAN assignment imports, once assignment IDs are collected.
-- Per-environment CNPG/Postgres, Harbor, ClickHouse, and company-site surfaces
-  for dev, gamma, and prod. The current app declaration is a root tenant
-  infrastructure slice only.
+- Company-site surfaces for dev, gamma, and prod.
 - Dashboard readiness evidence beyond the Cozystack platform package exposure.
-- Backup specs for root Postgres/Harbor/ClickHouse, wired to declared
-  OpenBao/R2-projected Secrets.
+- Backup specs for root and environment Postgres/Harbor/ClickHouse, wired to
+  declared OpenBao/R2-projected Secrets.
 - ClickHouse chart-side `spec.storageClass` rendering, because Cozystack 1.4
   still relies on the cluster default for ClickHouse and keeper PVCs.
 - OpenBao init/unseal automation and backup/restore drills.
