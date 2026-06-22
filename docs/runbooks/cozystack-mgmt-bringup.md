@@ -160,22 +160,27 @@ flags for source-controller validation.
 The current repo-native bootstrap surface is:
 
 ```sh
+aspect infra tofu-init --endpoint "$AWS_ENDPOINT_URL_S3"
+
 aspect infra bootstrap --revision "<merged-main-commit-sha>"
 ```
 
 It is intentionally a thin orchestration path over standard tools and existing
-repo tasks. It prints the standard OpenTofu `output -json` for
-`src/infrastructure/bootstrap/guardian-mgmt`, runs `aspect infra validate`,
-refreshes the gitignored Talm kubeconfig, runs the Talos L2 gate, and then runs
-the same live source-controller checks as `aspect infra live`. It does not
-define a Guardian-specific inventory format or evidence schema.
+repo tasks. It initializes the standard OpenTofu S3 backend from
+`AWS_ENDPOINT_URL_S3` or `--tofu-backend-endpoint`, prints the standard
+OpenTofu `output -json` for `src/infrastructure/bootstrap/guardian-mgmt`, runs
+`aspect infra validate`, refreshes the gitignored Talm kubeconfig, runs the
+Talos L2 gate, and then runs the same live source-controller checks as
+`aspect infra live`. It does not define a Guardian-specific inventory format or
+evidence schema.
 
 The minimal host-come-up CLI delegates to the same task:
 
 ```sh
 bazelisk run //src/guardian/cmd/guardian -- \
   up management \
-  --revision "<merged-main-commit-sha>"
+  --revision "<merged-main-commit-sha>" \
+  --tofu-backend-endpoint "$AWS_ENDPOINT_URL_S3"
 ```
 
 Pass explicit state paths only when exercising a non-default Talm root:
@@ -186,11 +191,12 @@ bazelisk run //src/guardian/cmd/guardian -- \
   --revision "<merged-main-commit-sha>" \
   --root src/infrastructure/talm \
   --talosconfig src/infrastructure/talm/talosconfig \
+  --tofu-backend-endpoint "$AWS_ENDPOINT_URL_S3" \
   --kubeconfig "$GUARDIAN_MGMT_KUBECONFIG"
 ```
 
 This command still requires the standard operator prerequisites for the steps it
-wraps: initialized OpenTofu backend access for `tofu output`, current Talm
+wraps: OpenTofu backend credentials for `tofu output`, current Talm
 operator secrets for kubeconfig refresh, and a trusted guardian-mgmt kubeconfig
 for live validation. If any credential is stale, refresh or restore the
 standard state for that tool; do not bypass TLS verification.
@@ -232,10 +238,9 @@ Live planning requires:
   the default in-cluster service address.
 
 ```sh
-bazelisk run @opentofu_linux_amd64//:tofu_bin -- \
-  -chdir="$PWD/src/infrastructure/bootstrap/guardian-mgmt" \
-  init -input=false -reconfigure \
-  -backend-config="endpoint=$AWS_ENDPOINT_URL_S3"
+aspect infra tofu-init \
+  --endpoint "$AWS_ENDPOINT_URL_S3" \
+  --root all
 
 bazelisk run @opentofu_linux_amd64//:tofu_bin -- \
   -chdir="$PWD/src/infrastructure/bootstrap/guardian-mgmt" plan -input=false

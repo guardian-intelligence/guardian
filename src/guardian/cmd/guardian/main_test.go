@@ -48,6 +48,8 @@ func TestUpManagementBuildsAspectBootstrapCommand(t *testing.T) {
 		"abc123",
 		"--kubeconfig",
 		"/tmp/kubeconfig",
+		"--tofu-backend-endpoint",
+		"https://r2.example",
 		"--request-timeout",
 		"5s",
 		"--wait-timeout",
@@ -78,6 +80,8 @@ func TestUpManagementBuildsAspectBootstrapCommand(t *testing.T) {
 		"src/infrastructure/talm/talosconfig",
 		"--kubeconfig",
 		"/tmp/kubeconfig",
+		"--tofu-backend-endpoint",
+		"https://r2.example",
 	}
 	if !reflect.DeepEqual(runner.args, want) {
 		t.Fatalf("args = %#v, want %#v", runner.args, want)
