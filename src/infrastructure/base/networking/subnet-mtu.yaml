@@ -1,3 +1,4 @@
+# Authoritative MTU for the kube-ovn Subnets. 1362 = 1420 VLAN path MTU - 58 GENEVE.
 apiVersion: kubeovn.io/v1
 kind: Subnet
 metadata:
@@ -13,7 +14,7 @@ spec:
   natOutgoing: true
   excludeIps:
     - 10.244.0.1
-  mtu: 1222
+  mtu: 1362
 ---
 apiVersion: kubeovn.io/v1
 kind: Subnet
@@ -29,4 +30,4 @@ spec:
   natOutgoing: false
   excludeIps:
     - 100.64.0.1
-  mtu: 1222
+  mtu: 1362

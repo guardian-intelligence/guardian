@@ -1,0 +1,13 @@
+# Secret-zero / PKI — NEVER commit (clean-slate rebuild regenerates these via
+# `talm gen secrets`). These live only on the release runner's filesystem.
+secrets.yaml
+secrets.encrypted.yaml
+talosconfig
+talosconfig.encrypted
+talm.key
+kubeconfig
+
+# Per-node machine configs are generated at rebuild (`talm template`) from the
+# templates + values here, then patched with the VLAN interface stanza. They
+# carry node-specific addresses and are not canonical source.
+nodes/

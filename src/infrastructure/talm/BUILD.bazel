@@ -1,0 +1,16 @@
+# The talm (Talos machine-config) chart source - the reproducible Layer-2/VLAN
+# cluster definition. Rendered by the `talm` binary, not a Bazel rule; this
+# filegroup exists for hermetic fingerprinting / dependency tracking. Secrets
+# and generated node configs are gitignored and excluded.
+filegroup(
+    name = "chart",
+    srcs = glob(
+        [
+            "Chart.yaml",
+            "values.yaml",
+            "templates/**",
+            "charts/**",
+        ],
+    ),
+    visibility = ["//visibility:public"],
+)

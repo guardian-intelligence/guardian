@@ -1,8 +1,7 @@
 filegroup(
-    name = "manifests",
+    name = "inventory",
     srcs = [
-        "metallb.yaml",
-        "subnet-mtu.yaml",
+        "guardian-mgmt.json",
     ],
     visibility = ["//visibility:public"],
 )
