@@ -6,6 +6,10 @@ infrastructure components.
 Use `templates/component-operational-report.md` for each component and update
 `evidence-matrix.md` as reports land.
 
+Files dated `2026-06-22` for individual components are report scaffolds with
+explicit commands and pass criteria. They remain pending until live output from
+`guardian-mgmt` is pasted into the Result/Evidence fields.
+
 Use `docs/runbooks/management-evidence.md` for the repo-owned commands that
 collect live snapshots, rollout state, Talos health, and outage-rehearsal
 state.
