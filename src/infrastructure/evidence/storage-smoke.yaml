@@ -1,0 +1,103 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: evidence-replicated-retain
+  namespace: tenant-root
+  labels:
+    guardian.dev/evidence: infrastructure
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: replicated-retain
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: evidence-storage-smoke
+  namespace: tenant-root
+data:
+  run.sh: |
+    #!/bin/sh
+    set -eu
+
+    root=/evidence
+    marker="${root}/guardian-storage-smoke.sha256"
+
+    mkdir -p "${root}/payload"
+    if [ ! -s "${marker}" ]; then
+      echo "seeding replicated PVC"
+      rm -f "${root}/payload/"*
+      i=1
+      while [ "${i}" -le 64 ]; do
+        yes "guardian-evidence-${i}" | head -c 16384 > "${root}/payload/file-${i}.bin"
+        i=$((i + 1))
+      done
+      (cd "${root}" && sha256sum payload/* > "${marker}.tmp")
+      mv "${marker}.tmp" "${marker}"
+      sync
+    fi
+
+    echo "verifying replicated PVC"
+    (cd "${root}" && sha256sum -c "${marker}")
+    echo "storage-smoke files=$(wc -l < "${marker}")"
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: evidence-storage-smoke
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: evidence-storage-smoke
+    guardian.dev/evidence: infrastructure
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: evidence-storage-smoke
+        guardian.dev/evidence: infrastructure
+    spec:
+      restartPolicy: Never
+      securityContext:
+        fsGroup: 101
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: storage-smoke
+          image: docker.io/curlimages/curl@sha256:c1fe1679c34d9784c1b0d1e5f62ac0a79fca01fb6377cdd33e90473c6f9f9a69
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/scripts/run.sh"]
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: evidence
+              mountPath: /evidence
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            runAsNonRoot: true
+            runAsUser: 100
+            runAsGroup: 101
+      volumes:
+        - name: scripts
+          configMap:
+            name: evidence-storage-smoke
+            defaultMode: 0555
+        - name: evidence
+          persistentVolumeClaim:
+            claimName: evidence-replicated-retain

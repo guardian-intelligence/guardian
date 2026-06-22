@@ -25,6 +25,18 @@ aspect infra live-rollout --kubeconfig "${KUBECONFIG}"
 aspect infra talos-health --talosconfig "${TALOSCONFIG}"
 ```
 
+Opt-in load and DR evidence fixtures:
+
+```sh
+aspect infra evidence-render
+aspect infra evidence-apply --kubeconfig "${KUBECONFIG}"
+aspect infra evidence-wait --kubeconfig "${KUBECONFIG}" --timeout 30m
+aspect infra evidence-restore-apply --kubeconfig "${KUBECONFIG}"
+aspect infra evidence-restore-wait --kubeconfig "${KUBECONFIG}" --timeout 30m
+aspect infra evidence-logs --kubeconfig "${KUBECONFIG}"
+aspect infra evidence-snapshot --kubeconfig "${KUBECONFIG}"
+```
+
 Kubernetes-side outage rehearsal:
 
 ```sh
@@ -41,6 +53,8 @@ aspect infra outage-uncordon --kubeconfig "${KUBECONFIG}" --node <node>
 - The Cozystack base renders through the repo-pinned kubectl.
 - Postgres and ClickHouse now have declared R2 backup plumbing,
   `BackupClass` objects, and hourly `Plan` objects.
+- Opt-in Kubernetes evidence fixtures now exist for HTTP load, replicated PVC
+  smoke, and Postgres/ClickHouse backup/restore-to-copy.
 - Live Kubernetes evidence is pending because the `guardian-mgmt` kubeconfig and
   converged cluster are not present in this workspace.
 - Latitude adoption is pending a Latitude token and VLAN assignment import IDs.

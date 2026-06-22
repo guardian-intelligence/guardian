@@ -15,6 +15,7 @@ filegroup(
         "//src/infrastructure/base/tenants:manifests",
         "//src/infrastructure/bootstrap/cloudflare-dns:root",
         "//src/infrastructure/bootstrap/guardian-mgmt:root",
+        "//src/infrastructure/evidence:manifests",
         "//src/environments:environments",
         "//src/infrastructure/inventory:inventory",
         "//src/products/company/site:image.digest",

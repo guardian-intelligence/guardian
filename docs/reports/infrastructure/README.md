@@ -10,6 +10,10 @@ Use `docs/runbooks/management-evidence.md` for the repo-owned commands that
 collect live snapshots, rollout state, Talos health, and outage-rehearsal
 state.
 
+Use `src/infrastructure/evidence/` for opt-in Kubernetes Jobs and backup/restore
+objects that generate load-test and disaster-recovery evidence. These resources
+are not part of the steady-state Flux base.
+
 Each component report should cover:
 
 - load test scope, command, inputs, and result;

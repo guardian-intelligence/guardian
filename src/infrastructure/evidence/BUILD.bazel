@@ -1,0 +1,11 @@
+filegroup(
+    name = "manifests",
+    srcs = [
+        "database-dr.yaml",
+        "database-restore.yaml",
+        "http-load.yaml",
+        "kustomization.yaml",
+        "storage-smoke.yaml",
+    ],
+    visibility = ["//visibility:public"],
+)

@@ -20,6 +20,7 @@ Run this before changing live infrastructure:
 
 ```sh
 aspect infra preflight
+aspect infra evidence-render
 aspect infra plan
 aspect infra dns-plan
 ```
@@ -27,6 +28,10 @@ aspect infra dns-plan
 `infra preflight` validates both OpenTofu roots without opening their remote
 backends, builds the company-site OCI artifact, and renders
 `src/infrastructure/base` with the repo-pinned kubectl.
+
+`infra evidence-render` renders the opt-in evidence overlay at
+`src/infrastructure/evidence`. It is not part of the Flux base; apply it only
+when collecting reports.
 
 ## Convergence Snapshot
 
@@ -83,6 +88,28 @@ Required component coverage:
 - Company site dev/gamma/prod: load `/`, `/letters/`, `/news/`, `/healthz`, and
   `/metrics` on all three hosts.
 
+The opt-in evidence overlay provides:
+
+- `Job/tenant-root/evidence-http-load`: repeated HTTPS requests against
+  prod/dev/gamma company-site routes, Harbor health, and the dashboard host;
+- `Job/tenant-root/evidence-storage-smoke`: seed/verify a retained replicated
+  PVC using deterministic checksums.
+
+Run:
+
+```sh
+aspect infra evidence-apply --kubeconfig "${KUBECONFIG}"
+aspect infra evidence-wait --kubeconfig "${KUBECONFIG}" --timeout 30m
+aspect infra evidence-restore-apply --kubeconfig "${KUBECONFIG}"
+aspect infra evidence-restore-wait --kubeconfig "${KUBECONFIG}" --timeout 30m
+aspect infra evidence-logs --kubeconfig "${KUBECONFIG}"
+aspect infra evidence-snapshot --kubeconfig "${KUBECONFIG}"
+```
+
+If the Jobs already exist from an earlier run, delete the completed Jobs first
+and re-apply the overlay. Keep the PVC unless the report explicitly drills data
+loss; repeat runs should verify the existing checksum manifest.
+
 ## Disaster Recovery Evidence
 
 Cozystack v1.4's managed database backup path uses admin-provisioned
@@ -118,6 +145,19 @@ Before marking DR complete, each stateful component report must include:
 Postgres and ClickHouse should use restore-to-copy drills for routine evidence.
 In-place restore is destructive and should be reserved for explicit recovery
 drills.
+
+The opt-in evidence overlay declares:
+
+- `BackupJob/tenant-root/evidence-postgres-adhoc`;
+- restore target `Postgres/tenant-root/guardian-restore-check`;
+- `RestoreJob/tenant-root/evidence-postgres-to-copy`;
+- `BackupJob/tenant-root/evidence-clickhouse-adhoc`;
+- restore target `ClickHouse/tenant-root/ledger-restore-check`;
+- `RestoreJob/tenant-root/evidence-clickhouse-to-copy`.
+
+These objects are temporary evidence resources. Do not add
+`src/infrastructure/evidence` to the Flux base. Apply the RestoreJobs only after
+`aspect infra evidence-wait` has observed both BackupJobs in `Succeeded`.
 
 OpenBao is allowed to be unrecoverable from total cluster loss for this phase,
 but it still needs a pod/PVC loss drill proving raft replicas and DRBD storage

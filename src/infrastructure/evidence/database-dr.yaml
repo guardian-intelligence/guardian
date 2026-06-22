@@ -1,0 +1,72 @@
+---
+apiVersion: backups.cozystack.io/v1alpha1
+kind: BackupJob
+metadata:
+  name: evidence-postgres-adhoc
+  namespace: tenant-root
+  labels:
+    guardian.dev/evidence: infrastructure
+spec:
+  applicationRef:
+    apiGroup: apps.cozystack.io
+    kind: Postgres
+    name: guardian
+  backupClassName: guardian-postgres-r2
+---
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Postgres
+metadata:
+  name: guardian-restore-check
+  namespace: tenant-root
+  labels:
+    guardian.dev/evidence: infrastructure
+spec:
+  replicas: 2
+  storageClass: replicated
+  size: 5Gi
+  version: v18
+  resourcesPreset: t1.small
+---
+apiVersion: backups.cozystack.io/v1alpha1
+kind: BackupJob
+metadata:
+  name: evidence-clickhouse-adhoc
+  namespace: tenant-root
+  labels:
+    guardian.dev/evidence: infrastructure
+spec:
+  applicationRef:
+    apiGroup: apps.cozystack.io
+    kind: ClickHouse
+    name: ledger
+  backupClassName: guardian-clickhouse-r2
+---
+apiVersion: apps.cozystack.io/v1alpha1
+kind: ClickHouse
+metadata:
+  name: ledger-restore-check
+  namespace: tenant-root
+  labels:
+    guardian.dev/evidence: infrastructure
+spec:
+  replicas: 1
+  shards: 1
+  storageClass: replicated
+  size: 5Gi
+  logStorageSize: 1Gi
+  resourcesPreset: t1.small
+  clickhouseKeeper:
+    enabled: true
+    replicas: 1
+    size: 1Gi
+    resourcesPreset: t1.micro
+  backup:
+    enabled: true
+    s3PathOverride: gm/ch/ledger
+    s3CredentialsSecret:
+      name: guardian-r2-db-backups
+      bucketKey: bucketName
+      endpointKey: endpoint
+      regionKey: region
+      accessKeyIDKey: AWS_ACCESS_KEY_ID
+      secretAccessKeyKey: AWS_SECRET_ACCESS_KEY

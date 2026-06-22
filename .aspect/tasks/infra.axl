@@ -253,8 +253,23 @@ def _render_base_impl(ctx):
         label = "kubectl kustomize src/infrastructure/base",
     )
 
+def _render_evidence_impl(ctx):
+    return checked_spawn(
+        ctx,
+        "bazelisk",
+        ["run", KUBECTL_TARGET, "--", "kustomize", "src/infrastructure/evidence"],
+        cwd = ws_path(ctx),
+        label = "kubectl kustomize src/infrastructure/evidence",
+    )
+
 def _apply_base_impl(ctx):
     return _kubectl(ctx, ["apply", "-k", "src/infrastructure/base"], label = "kubectl apply -k src/infrastructure/base")
+
+def _apply_evidence_impl(ctx):
+    return _kubectl(ctx, ["apply", "-k", "src/infrastructure/evidence"], label = "kubectl apply -k src/infrastructure/evidence")
+
+def _apply_evidence_restore_impl(ctx):
+    return _kubectl(ctx, ["apply", "-f", "src/infrastructure/evidence/database-restore.yaml"], label = "kubectl apply -f src/infrastructure/evidence/database-restore.yaml")
 
 def _preflight_impl(ctx):
     rc = _validate_impl(ctx)
@@ -279,6 +294,37 @@ def _preflight_impl(ctx):
         ["run", KUBECTL_TARGET, "--", "kustomize", "src/infrastructure/base"],
         "kubectl kustomize src/infrastructure/base",
     )
+
+def _evidence_wait_impl(ctx):
+    return _kubectl_many(ctx, [
+        ["wait", "job/evidence-http-load", "-n", "tenant-root", "--for=condition=complete", "--timeout", ctx.args.timeout],
+        ["wait", "job/evidence-storage-smoke", "-n", "tenant-root", "--for=condition=complete", "--timeout", ctx.args.timeout],
+        ["wait", "backupjob/evidence-postgres-adhoc", "-n", "tenant-root", "--for=jsonpath={.status.phase}=Succeeded", "--timeout", ctx.args.timeout],
+        ["wait", "backupjob/evidence-clickhouse-adhoc", "-n", "tenant-root", "--for=jsonpath={.status.phase}=Succeeded", "--timeout", ctx.args.timeout],
+    ])
+
+def _evidence_restore_wait_impl(ctx):
+    return _kubectl_many(ctx, [
+        ["wait", "restorejob/evidence-postgres-to-copy", "-n", "tenant-root", "--for=jsonpath={.status.phase}=Succeeded", "--timeout", ctx.args.timeout],
+        ["wait", "restorejob/evidence-clickhouse-to-copy", "-n", "tenant-root", "--for=jsonpath={.status.phase}=Succeeded", "--timeout", ctx.args.timeout],
+    ])
+
+def _evidence_snapshot_impl(ctx):
+    return _kubectl_many(ctx, [
+        ["get", "job/evidence-http-load", "job/evidence-storage-smoke", "-n", "tenant-root", "-o", "wide", "--ignore-not-found"],
+        ["get", "pvc/evidence-replicated-retain", "-n", "tenant-root", "-o", "wide", "--ignore-not-found"],
+        ["get", "backupjob/evidence-postgres-adhoc", "backupjob/evidence-clickhouse-adhoc", "-n", "tenant-root", "-o", "yaml", "--ignore-not-found"],
+        ["get", "restorejob/evidence-postgres-to-copy", "restorejob/evidence-clickhouse-to-copy", "-n", "tenant-root", "-o", "yaml", "--ignore-not-found"],
+        ["get", "backup", "-n", "tenant-root", "-l", "guardian.dev/evidence=infrastructure", "-o", "wide"],
+        ["get", "postgres/guardian-restore-check", "clickhouse/ledger-restore-check", "-n", "tenant-root", "-o", "wide", "--ignore-not-found"],
+        ["get", "pods", "-n", "tenant-root", "-l", "guardian.dev/evidence=infrastructure", "-o", "wide", "--ignore-not-found"],
+    ])
+
+def _evidence_logs_impl(ctx):
+    return _kubectl_many(ctx, [
+        ["logs", "job/evidence-http-load", "-n", "tenant-root"],
+        ["logs", "job/evidence-storage-smoke", "-n", "tenant-root"],
+    ])
 
 def _live_snapshot_impl(ctx):
     return _kubectl_many(ctx, [
@@ -478,6 +524,13 @@ render_base = task(
     summary = "Render src/infrastructure/base with the repo-pinned kubectl.",
 )
 
+render_evidence = task(
+    implementation = _render_evidence_impl,
+    name = "evidence-render",
+    group = ["infra"],
+    summary = "Render opt-in infrastructure evidence jobs with the repo-pinned kubectl.",
+)
+
 preflight = task(
     implementation = _preflight_impl,
     name = "preflight",
@@ -490,6 +543,54 @@ apply_base = task(
     name = "apply-base",
     group = ["infra"],
     summary = "Apply src/infrastructure/base to the selected Kubernetes cluster.",
+    args = _KUBECTL_LIVE_ARGS,
+)
+
+apply_evidence = task(
+    implementation = _apply_evidence_impl,
+    name = "evidence-apply",
+    group = ["infra"],
+    summary = "Apply opt-in infrastructure evidence jobs to the selected Kubernetes cluster.",
+    args = _KUBECTL_LIVE_ARGS,
+)
+
+apply_evidence_restore = task(
+    implementation = _apply_evidence_restore_impl,
+    name = "evidence-restore-apply",
+    group = ["infra"],
+    summary = "Apply opt-in database RestoreJobs after evidence BackupJobs pass.",
+    args = _KUBECTL_LIVE_ARGS,
+)
+
+evidence_wait = task(
+    implementation = _evidence_wait_impl,
+    name = "evidence-wait",
+    group = ["infra"],
+    summary = "Wait for opt-in HTTP, storage, and database BackupJobs to pass.",
+    args = _KUBECTL_TIMEOUT_ARGS,
+)
+
+evidence_restore_wait = task(
+    implementation = _evidence_restore_wait_impl,
+    name = "evidence-restore-wait",
+    group = ["infra"],
+    summary = "Wait for opt-in database RestoreJobs to pass.",
+    args = _KUBECTL_TIMEOUT_ARGS,
+)
+
+evidence_snapshot = task(
+    implementation = _evidence_snapshot_impl,
+    name = "evidence-snapshot",
+    group = ["infra"],
+    summary = "Collect Kubernetes state for opt-in infrastructure evidence resources.",
+    args = _KUBECTL_LIVE_ARGS,
+)
+
+evidence_logs = task(
+    implementation = _evidence_logs_impl,
+    name = "evidence-logs",
+    group = ["infra"],
+    summary = "Print logs from opt-in HTTP and storage evidence jobs.",
     args = _KUBECTL_LIVE_ARGS,
 )
 

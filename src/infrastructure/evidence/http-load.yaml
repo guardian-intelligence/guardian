@@ -1,0 +1,101 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: evidence-http-load
+  namespace: tenant-root
+data:
+  run.sh: |
+    #!/bin/sh
+    set -eu
+
+    requests="${REQUESTS:-100}"
+    urls="
+    https://guardianintelligence.org/
+    https://guardianintelligence.org/letters/
+    https://guardianintelligence.org/news/
+    https://guardianintelligence.org/healthz
+    https://guardianintelligence.org/metrics
+    https://dev.guardianintelligence.org/
+    https://dev.guardianintelligence.org/letters/
+    https://dev.guardianintelligence.org/news/
+    https://dev.guardianintelligence.org/healthz
+    https://dev.guardianintelligence.org/metrics
+    https://gamma.guardianintelligence.org/
+    https://gamma.guardianintelligence.org/letters/
+    https://gamma.guardianintelligence.org/news/
+    https://gamma.guardianintelligence.org/healthz
+    https://gamma.guardianintelligence.org/metrics
+    https://oci.guardianintelligence.org/api/v2.0/health
+    https://dashboard.guardianintelligence.org/
+    "
+
+    failures=0
+    total=0
+    for url in ${urls}; do
+      i=1
+      while [ "${i}" -le "${requests}" ]; do
+        total=$((total + 1))
+        if ! curl -fsSL --connect-timeout 5 --max-time 20 --retry 2 --output /dev/null "${url}"; then
+          echo "request failed url=${url} iteration=${i}" >&2
+          failures=$((failures + 1))
+        fi
+        i=$((i + 1))
+      done
+    done
+
+    echo "http-load total=${total} failures=${failures}"
+    test "${failures}" -eq 0
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: evidence-http-load
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: evidence-http-load
+    guardian.dev/evidence: infrastructure
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: evidence-http-load
+        guardian.dev/evidence: infrastructure
+    spec:
+      restartPolicy: Never
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: curl
+          image: docker.io/curlimages/curl@sha256:c1fe1679c34d9784c1b0d1e5f62ac0a79fca01fb6377cdd33e90473c6f9f9a69
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/scripts/run.sh"]
+          env:
+            - name: REQUESTS
+              value: "100"
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            runAsNonRoot: true
+            runAsUser: 100
+            runAsGroup: 101
+      volumes:
+        - name: scripts
+          configMap:
+            name: evidence-http-load
+            defaultMode: 0555

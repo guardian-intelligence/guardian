@@ -22,6 +22,13 @@ load(
     infra_dns_output = "dns_output",
     infra_dns_plan = "dns_plan",
     infra_dns_tofu = "dns_tofu",
+    infra_evidence_apply = "apply_evidence",
+    infra_evidence_logs = "evidence_logs",
+    infra_evidence_render = "render_evidence",
+    infra_evidence_restore_apply = "apply_evidence_restore",
+    infra_evidence_restore_wait = "evidence_restore_wait",
+    infra_evidence_snapshot = "evidence_snapshot",
+    infra_evidence_wait = "evidence_wait",
     infra_adopt_known = "adopt_known",
     infra_fmt = "fmt",
     infra_init = "init",
@@ -56,6 +63,13 @@ def config(ctx):
     ctx.tasks.add(infra_dns_output)
     ctx.tasks.add(infra_dns_plan)
     ctx.tasks.add(infra_dns_tofu)
+    ctx.tasks.add(infra_evidence_apply)
+    ctx.tasks.add(infra_evidence_logs)
+    ctx.tasks.add(infra_evidence_render)
+    ctx.tasks.add(infra_evidence_restore_apply)
+    ctx.tasks.add(infra_evidence_restore_wait)
+    ctx.tasks.add(infra_evidence_snapshot)
+    ctx.tasks.add(infra_evidence_wait)
     ctx.tasks.add(infra_fmt)
     ctx.tasks.add(infra_init)
     ctx.tasks.add(infra_live_rollout)
