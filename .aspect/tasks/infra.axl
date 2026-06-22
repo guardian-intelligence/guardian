@@ -825,11 +825,19 @@ def _kubectl_args(ctx, args):
 def _kubectl_args_for(ctx, kubeconfig, args):
     out = []
     if kubeconfig != "":
-        out.extend(["--kubeconfig", kubeconfig])
+        out.extend(["--kubeconfig", _workspace_path_if_relative(ctx, kubeconfig)])
     if ctx.args.request_timeout != "":
         out.append("--request-timeout=" + ctx.args.request_timeout)
     out.extend(args)
     return out
+
+def _kubeconfig_path(ctx):
+    return _workspace_path_if_relative(ctx, ctx.args.kubeconfig)
+
+def _workspace_path_if_relative(ctx, path):
+    if path == "" or path.startswith("/") or path.startswith("~"):
+        return path
+    return ws_path(ctx, path)
 
 def _talosconfig_path(ctx):
     if ctx.args.talosconfig != "":
@@ -1367,7 +1375,7 @@ def _backup_drill_impl(ctx):
         ctx.args.wait_timeout,
     ]
     if ctx.args.kubeconfig != "":
-        drill_args.extend(["--kubeconfig", ctx.args.kubeconfig])
+        drill_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
     if ctx.args.name != "":
         drill_args.extend(["--name", ctx.args.name])
     if ctx.args.restore_target != "":
@@ -1422,7 +1430,7 @@ def _node_outage_drill_impl(ctx):
         ctx.args.wait_timeout,
     ]
     if ctx.args.kubeconfig != "":
-        drill_args.extend(["--kubeconfig", ctx.args.kubeconfig])
+        drill_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
 
     return checked_spawn(
         ctx,
@@ -1481,7 +1489,7 @@ def _load_http_impl(ctx):
         ctx.args.port_forward_ready_timeout,
     ]
     if ctx.args.kubeconfig != "":
-        load_args.extend(["--kubeconfig", ctx.args.kubeconfig])
+        load_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
     if ctx.args.url != "":
         load_args.extend(["--url", ctx.args.url])
     if ctx.args.expected_statuses != "":
@@ -1541,7 +1549,7 @@ def _load_db_impl(ctx):
         ctx.args.clickhouse_query,
     ]
     if ctx.args.kubeconfig != "":
-        load_args.extend(["--kubeconfig", ctx.args.kubeconfig])
+        load_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
     if ctx.args.name != "":
         load_args.extend(["--name", ctx.args.name])
 
@@ -1588,7 +1596,7 @@ def _load_harbor_registry_impl(ctx):
         ctx.args.wait_timeout,
     ]
     if ctx.args.kubeconfig != "":
-        load_args.extend(["--kubeconfig", ctx.args.kubeconfig])
+        load_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
     if ctx.args.host != "":
         load_args.extend(["--host", ctx.args.host])
     if ctx.args.tag != "":
@@ -1632,7 +1640,7 @@ def _openbao_drill_impl(ctx):
         ctx.args.wait_timeout,
     ]
     if ctx.args.kubeconfig != "":
-        drill_args.extend(["--kubeconfig", ctx.args.kubeconfig])
+        drill_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
     if ctx.args.snapshot_name != "":
         drill_args.extend(["--snapshot-name", ctx.args.snapshot_name])
 
@@ -1691,7 +1699,7 @@ def _openbao_apply_impl(ctx):
         ctx.args.port_forward_ready_timeout,
     ]
     if ctx.args.kubeconfig != "":
-        apply_args.extend(["--kubeconfig", ctx.args.kubeconfig])
+        apply_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
 
     return checked_spawn(
         ctx,
@@ -1749,7 +1757,7 @@ def _openbao_backup_secrets_impl(ctx):
         ctx.args.port_forward_ready_timeout,
     ]
     if ctx.args.kubeconfig != "":
-        secret_args.extend(["--kubeconfig", ctx.args.kubeconfig])
+        secret_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
 
     return checked_spawn(
         ctx,
@@ -1791,7 +1799,7 @@ def _publish_company_site_impl(ctx):
         ws_path(ctx),
     ]
     if ctx.args.kubeconfig != "":
-        publish_args.extend(["--kubeconfig", ctx.args.kubeconfig])
+        publish_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
 
     return checked_spawn(
         ctx,
