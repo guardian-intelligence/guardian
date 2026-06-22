@@ -675,13 +675,18 @@ func testOpenBao(t *testing.T) {
 }
 
 func testOpenBaoOpenTofuBootstrap(t *testing.T) {
-	versions := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt-openbao/versions.tf"))
+	const versionsPath = "src/infrastructure/bootstrap/guardian-mgmt-openbao/versions.tf"
+	versionsBytes := readRunfile(t, versionsPath)
+	versions := string(versionsBytes)
 	mainTF := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt-openbao/main.tf"))
 	lock := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt-openbao/.terraform.lock.hcl"))
 
 	assertTextContains(t, versions, `source  = "hashicorp/vault"`, "guardian-mgmt-openbao versions.tf")
 	assertTextContains(t, versions, `version = "= 4.4.0"`, "guardian-mgmt-openbao versions.tf")
-	assertTextContains(t, versions, `key    = "opentofu/guardian-mgmt-openbao.tfstate"`, "guardian-mgmt-openbao versions.tf")
+	backendAttrs := hclBackendAttrs(t, versionsBytes, versionsPath, "s3")
+	assertHCLStringAttribute(t, backendAttrs, "key", "opentofu/guardian-mgmt-openbao.tfstate", "guardian-mgmt-openbao backend.s3")
+	assertTextContains(t, hclExpressionSource(versionsBytes, hclAttr(t, backendAttrs, "endpoint", "guardian-mgmt-openbao backend.s3").Expr), "var.cloudflare_account_id", "guardian-mgmt-openbao backend.s3 endpoint")
+	assertTextContains(t, hclExpressionSource(versionsBytes, hclAttr(t, backendAttrs, "endpoint", "guardian-mgmt-openbao backend.s3").Expr), ".r2.cloudflarestorage.com", "guardian-mgmt-openbao backend.s3 endpoint")
 	assertTextContains(t, lock, `provider "registry.opentofu.org/hashicorp/vault"`, "guardian-mgmt-openbao lock")
 	assertTextContains(t, lock, `version     = "4.4.0"`, "guardian-mgmt-openbao lock")
 
@@ -1093,6 +1098,43 @@ func hclAttr(t *testing.T, attrs hclsyntax.Attributes, name, label string) *hcls
 		t.Fatalf("%s is missing %q", label, name)
 	}
 	return attr
+}
+
+func hclBackendAttrs(t *testing.T, source []byte, path, backendType string) hclsyntax.Attributes {
+	t.Helper()
+
+	file, diags := hclsyntax.ParseConfig(source, path, hcl.InitialPos)
+	assertHCLDiags(t, diags, path)
+	body, ok := file.Body.(*hclsyntax.Body)
+	if !ok {
+		t.Fatalf("%s parsed body = %T, want *hclsyntax.Body", path, file.Body)
+	}
+
+	for _, block := range body.Blocks {
+		if block.Type != "terraform" {
+			continue
+		}
+		for _, nested := range block.Body.Blocks {
+			if nested.Type == "backend" && len(nested.Labels) == 1 && nested.Labels[0] == backendType {
+				return nested.Body.Attributes
+			}
+		}
+	}
+	t.Fatalf("%s is missing terraform backend %q", path, backendType)
+	return nil
+}
+
+func assertHCLStringAttribute(t *testing.T, attrs hclsyntax.Attributes, name, want, label string) {
+	t.Helper()
+
+	got := ctyString(t, evalHCLExpr(t, hclAttr(t, attrs, name, label).Expr, label+"."+name), label+"."+name)
+	if got != want {
+		t.Fatalf("%s.%s = %q, want %q", label, name, got, want)
+	}
+}
+
+func hclExpressionSource(source []byte, expr hcl.Expression) string {
+	return string(expr.Range().SliceBytes(source))
 }
 
 func objectExpr(t *testing.T, expr hcl.Expression, label string) *hclsyntax.ObjectConsExpr {

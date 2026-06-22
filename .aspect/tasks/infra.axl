@@ -4,6 +4,7 @@ load(".aspect/lib/helpers.axl", "checked_spawn", "ws_path")
 
 GUARDIAN_MGMT_ROOT = "src/infrastructure/bootstrap/guardian-mgmt"
 GUARDIAN_MGMT_OPENBAO_ROOT = "src/infrastructure/bootstrap/guardian-mgmt-openbao"
+GUARDIAN_BACKEND_TFVARS = "src/infrastructure/bootstrap/backend.tfvars"
 TOFU_TARGET = "@opentofu_linux_amd64//:tofu_bin"
 TALM_TARGET = "@talm_linux_amd64//:talm"
 K6_FILE_TARGET = "@k6_linux_amd64//:k6"
@@ -644,9 +645,6 @@ def _tofu_backend_endpoint(ctx, value):
     endpoint = value
     if endpoint == "":
         endpoint = ctx.std.env.var("AWS_ENDPOINT_URL_S3") or ""
-    if endpoint == "":
-        ctx.std.io.stderr.write("ERROR: pass --endpoint or set AWS_ENDPOINT_URL_S3 before initializing the OpenTofu S3 backend\n")
-        return None
     return endpoint
 
 def _tofu_backend_roots(ctx, root):
@@ -664,15 +662,18 @@ def _tofu_backend_roots(ctx, root):
 
 def _tofu_backend_init(ctx, roots, endpoint):
     for root, label in roots:
+        args = [
+            "init",
+            "-input=false",
+            "-reconfigure",
+            "-var-file=" + ws_path(ctx, GUARDIAN_BACKEND_TFVARS),
+        ]
+        if endpoint != "":
+            args.append("-backend-config=endpoint=" + endpoint)
         rc = _tofu_root(
             ctx,
             root,
-            [
-                "init",
-                "-input=false",
-                "-reconfigure",
-                "-backend-config=endpoint=" + endpoint,
-            ],
+            args,
             "tofu init backend " + label,
         )
         if rc != 0:
@@ -1653,7 +1654,7 @@ tofu_init = task(
     group = ["infra"],
     summary = "Initialize OpenTofu S3 backends for management bootstrap roots using standard AWS/R2 environment credentials.",
     args = {
-        "endpoint": args.string(default = "", description = "S3-compatible backend endpoint. Defaults to AWS_ENDPOINT_URL_S3."),
+        "endpoint": args.string(default = "", description = "Optional S3-compatible backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
         "root": args.string(default = "all", description = "OpenTofu root to initialize: all, guardian-mgmt, or guardian-mgmt-openbao."),
     },
 )
@@ -1697,7 +1698,7 @@ bootstrap = task(
         "revision": args.string(default = "", description = "Expected merged Git commit SHA that source-controller must have applied."),
         "root": args.string(default = "src/infrastructure/talm", description = "Talm root containing gitignored secrets.yaml, talosconfig, and kubeconfig."),
         "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
-        "tofu_backend_endpoint": args.string(default = "", description = "S3-compatible OpenTofu backend endpoint. Defaults to AWS_ENDPOINT_URL_S3."),
+        "tofu_backend_endpoint": args.string(default = "", description = "Optional S3-compatible OpenTofu backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
         "wait_timeout": args.string(default = "5m", description = "Timeout for Flux and Deployment readiness waits."),
     },
 )

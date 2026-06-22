@@ -166,27 +166,29 @@ key material in the repo.
 The current repo-native bootstrap surface is:
 
 ```sh
-aspect infra tofu-init --endpoint "$AWS_ENDPOINT_URL_S3"
+aspect infra tofu-init
 
 aspect infra bootstrap --revision "<merged-main-commit-sha>"
 ```
 
 It is intentionally a thin orchestration path over standard tools and existing
-repo tasks. It initializes the standard OpenTofu S3 backend from
-`AWS_ENDPOINT_URL_S3` or `--tofu-backend-endpoint`, prints the standard
-OpenTofu `output -json` for `src/infrastructure/bootstrap/guardian-mgmt`, runs
-`aspect infra validate`, refreshes the gitignored Talm kubeconfig, runs the
-Talos L2 gate, and then runs the same live source-controller checks as
-`aspect infra live`. It does not define a Guardian-specific inventory format or
-evidence schema.
+repo tasks. It initializes the standard OpenTofu S3 backend using the checked-in
+Cloudflare account id in `src/infrastructure/bootstrap/backend.tfvars` to derive
+the R2 endpoint, while credentials still come from the standard AWS/R2
+environment variables. `AWS_ENDPOINT_URL_S3`, `--endpoint`, or
+`--tofu-backend-endpoint` can override the derived endpoint when needed. The
+task then prints the standard OpenTofu `output -json` for
+`src/infrastructure/bootstrap/guardian-mgmt`, runs `aspect infra validate`,
+refreshes the gitignored Talm kubeconfig, runs the Talos L2 gate, and then runs
+the same live source-controller checks as `aspect infra live`. It does not
+define a Guardian-specific inventory format or evidence schema.
 
 The minimal host-come-up CLI delegates to the same task:
 
 ```sh
 bazelisk run //src/guardian/cmd/guardian -- \
   up management \
-  --revision "<merged-main-commit-sha>" \
-  --tofu-backend-endpoint "$AWS_ENDPOINT_URL_S3"
+  --revision "<merged-main-commit-sha>"
 ```
 
 Pass explicit state paths only when exercising a non-default Talm root:
@@ -197,7 +199,6 @@ bazelisk run //src/guardian/cmd/guardian -- \
   --revision "<merged-main-commit-sha>" \
   --root src/infrastructure/talm \
   --talosconfig src/infrastructure/talm/talosconfig \
-  --tofu-backend-endpoint "$AWS_ENDPOINT_URL_S3" \
   --kubeconfig "$GUARDIAN_MGMT_KUBECONFIG"
 ```
 
@@ -236,8 +237,9 @@ Live planning requires:
 - `LATITUDESH_AUTH_TOKEN` for the Latitude provider.
 - S3-compatible backend credentials for R2 through the usual `AWS_*`
   environment variables.
-- The R2 endpoint passed during backend initialization, because OpenTofu's S3
-  backend cannot read it from HCL locals.
+- The checked-in Cloudflare account id in
+  `src/infrastructure/bootstrap/backend.tfvars`, unless intentionally overriding
+  the derived endpoint with `AWS_ENDPOINT_URL_S3` or a task flag.
 - `VAULT_TOKEN` when planning or applying
   `src/infrastructure/bootstrap/guardian-mgmt-openbao`; pass
   `-var=openbao_addr=...` when planning through a local port-forward instead of
@@ -245,7 +247,6 @@ Live planning requires:
 
 ```sh
 aspect infra tofu-init \
-  --endpoint "$AWS_ENDPOINT_URL_S3" \
   --root all
 
 bazelisk run @opentofu_linux_amd64//:tofu_bin -- \
