@@ -71,8 +71,11 @@ Expected network shape:
   package.
 - Kube-OVN subnet MTU is `1362`: `1420` VLAN path MTU minus `58` bytes of GENEVE.
 - The default StorageClass is `replicated`: three-way LINSTOR/DRBD on the
-  checked-in `data` pool. `local` and `local-retain` remain available only for
-  explicitly selected scratch or intentionally node-local state.
+  checked-in `data` pool. The pool devices are declared by stable
+  `/dev/disk/by-id/nvme-...` identities and must stay on the non-Talos install
+  disk for each node; Latitude NVMe kernel names can swap across boots. `local`
+  and `local-retain` remain available only for explicitly selected scratch or
+  intentionally node-local state.
 
 ## Validate Checked-In Substrate
 
@@ -1074,7 +1077,8 @@ Expected results:
 - storage classes include `local`, `local-retain`, `replicated`, and
   `replicated-retain`; `replicated` is the only default class and has LINSTOR
   `autoPlace=3`; Piraeus has a LINSTOR `data` pool on `ash-earth`, `ash-wind`,
-  and `ash-water`
+  and `ash-water`, sourced from stable NVMe by-id paths rather than volatile
+  `/dev/nvme*` names
 - root app resources exist for `SeaweedFS/seaweedfs`, `Postgres/guardian`,
   `Harbor/guardian`, and `ClickHouse/guardian` in `tenant-root`; SeaweedFS
   publishes root object storage at `s3.guardianintelligence.org`, creates the

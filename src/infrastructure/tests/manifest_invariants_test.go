@@ -238,9 +238,9 @@ func testLINSTORDataPools(t *testing.T) {
 
 	docs := readManifests(t, "src/infrastructure/base/storage/linstor-data-pools.yaml")
 	wantDevices := map[string]string{
-		"ash-earth": "/dev/nvme0n1",
-		"ash-wind":  "/dev/nvme0n1",
-		"ash-water": "/dev/nvme1n1",
+		"ash-earth": "/dev/disk/by-id/nvme-MTFDKCC960TGP-1BK1JABYY_362510FD7C47",
+		"ash-wind":  "/dev/disk/by-id/nvme-MTFDKCC960TGP-1BK1JABYY_352410A4E0A6",
+		"ash-water": "/dev/disk/by-id/nvme-MTFDKCC960TGP-1BK1JABYY_362510FE3204",
 	}
 	if len(docs) != len(wantDevices) {
 		t.Fatalf("LINSTOR data pool docs = %d, want %d", len(docs), len(wantDevices))
