@@ -627,6 +627,45 @@ def _tofu_root(ctx, root, args, label):
         label = label,
     )
 
+def _tofu_backend_endpoint(ctx, value):
+    endpoint = value
+    if endpoint == "":
+        endpoint = ctx.std.env.var("AWS_ENDPOINT_URL_S3") or ""
+    if endpoint == "":
+        ctx.std.io.stderr.write("ERROR: pass --endpoint or set AWS_ENDPOINT_URL_S3 before initializing the OpenTofu S3 backend\n")
+        return None
+    return endpoint
+
+def _tofu_backend_roots(ctx, root):
+    if root == "all":
+        return [
+            (GUARDIAN_MGMT_ROOT, "guardian-mgmt"),
+            (GUARDIAN_MGMT_OPENBAO_ROOT, "guardian-mgmt-openbao"),
+        ]
+    if root == "guardian-mgmt":
+        return [(GUARDIAN_MGMT_ROOT, "guardian-mgmt")]
+    if root == "guardian-mgmt-openbao":
+        return [(GUARDIAN_MGMT_OPENBAO_ROOT, "guardian-mgmt-openbao")]
+    ctx.std.io.stderr.write("ERROR: --root must be all, guardian-mgmt, or guardian-mgmt-openbao\n")
+    return None
+
+def _tofu_backend_init(ctx, roots, endpoint):
+    for root, label in roots:
+        rc = _tofu_root(
+            ctx,
+            root,
+            [
+                "init",
+                "-input=false",
+                "-reconfigure",
+                "-backend-config=endpoint=" + endpoint,
+            ],
+            "tofu init backend " + label,
+        )
+        if rc != 0:
+            return rc
+    return 0
+
 def _kubectl_path(ctx):
     rc = checked_spawn(
         ctx,
@@ -970,6 +1009,15 @@ def _topology_impl(ctx):
         "tofu output -json guardian-mgmt",
     )
 
+def _tofu_init_impl(ctx):
+    endpoint = _tofu_backend_endpoint(ctx, ctx.args.endpoint)
+    if endpoint == None:
+        return 1
+    roots = _tofu_backend_roots(ctx, ctx.args.root)
+    if roots == None:
+        return 1
+    return _tofu_backend_init(ctx, roots, endpoint)
+
 def _kubeconfig_impl(ctx):
     root = ws_path(ctx, ctx.args.root)
     talosconfig = ctx.args.talosconfig
@@ -1118,6 +1166,13 @@ def _bootstrap_impl(ctx):
     revision = _expected_revision(ctx)
     if revision == None:
         return 1
+
+    endpoint = _tofu_backend_endpoint(ctx, ctx.args.tofu_backend_endpoint)
+    if endpoint == None:
+        return 1
+    rc = _tofu_backend_init(ctx, [(GUARDIAN_MGMT_ROOT, "guardian-mgmt")], endpoint)
+    if rc != 0:
+        return rc
 
     rc = _tofu_root(
         ctx,
@@ -1509,6 +1564,17 @@ topology = task(
     },
 )
 
+tofu_init = task(
+    implementation = _tofu_init_impl,
+    name = "tofu-init",
+    group = ["infra"],
+    summary = "Initialize OpenTofu S3 backends for management bootstrap roots using standard AWS/R2 environment credentials.",
+    args = {
+        "endpoint": args.string(default = "", description = "S3-compatible backend endpoint. Defaults to AWS_ENDPOINT_URL_S3."),
+        "root": args.string(default = "all", description = "OpenTofu root to initialize: all, guardian-mgmt, or guardian-mgmt-openbao."),
+    },
+)
+
 kubeconfig = task(
     implementation = _kubeconfig_impl,
     name = "kubeconfig",
@@ -1548,6 +1614,7 @@ bootstrap = task(
         "revision": args.string(default = "", description = "Expected merged Git commit SHA that source-controller must have applied."),
         "root": args.string(default = "src/infrastructure/talm", description = "Talm root containing gitignored secrets.yaml, talosconfig, and kubeconfig."),
         "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
+        "tofu_backend_endpoint": args.string(default = "", description = "S3-compatible OpenTofu backend endpoint. Defaults to AWS_ENDPOINT_URL_S3."),
         "wait_timeout": args.string(default = "5m", description = "Timeout for Flux and Deployment readiness waits."),
     },
 )

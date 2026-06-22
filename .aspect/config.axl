@@ -27,6 +27,7 @@ load(
     infra_openbao_drill = "openbao_drill",
     infra_publish_company_site = "publish_company_site",
     infra_talos = "talos",
+    infra_tofu_init = "tofu_init",
     infra_topology = "topology",
     infra_validate = "validate",
 )
@@ -51,6 +52,7 @@ def config(ctx):
     ctx.tasks.add(infra_openbao_drill)
     ctx.tasks.add(infra_publish_company_site)
     ctx.tasks.add(infra_talos)
+    ctx.tasks.add(infra_tofu_init)
     ctx.tasks.add(infra_topology)
     ctx.tasks.add(infra_validate)
 

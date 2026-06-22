@@ -41,6 +41,7 @@ type managementBootstrapConfig struct {
 	Kubeconfig     string
 	RequestTimeout string
 	WaitTimeout    string
+	TofuEndpoint   string
 }
 
 func main() {
@@ -116,6 +117,7 @@ func runUpManagement(ctx context.Context, argv []string, stdout io.Writer, stder
 	fs.StringVar(&cfg.Kubeconfig, "kubeconfig", "", "optional kubeconfig for live validation; defaults to <root>/kubeconfig after refresh")
 	fs.StringVar(&cfg.RequestTimeout, "request-timeout", cfg.RequestTimeout, "kubectl API request timeout")
 	fs.StringVar(&cfg.WaitTimeout, "wait-timeout", cfg.WaitTimeout, "Flux and workload readiness wait timeout")
+	fs.StringVar(&cfg.TofuEndpoint, "tofu-backend-endpoint", "", "S3-compatible OpenTofu backend endpoint; defaults to AWS_ENDPOINT_URL_S3 in Aspect")
 
 	if err := fs.Parse(argv); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -183,6 +185,9 @@ func (cfg managementBootstrapConfig) aspectArgs() ([]string, error) {
 	}
 	if cfg.Kubeconfig != "" {
 		args = append(args, "--kubeconfig", cfg.Kubeconfig)
+	}
+	if cfg.TofuEndpoint != "" {
+		args = append(args, "--tofu-backend-endpoint", cfg.TofuEndpoint)
 	}
 	return args, nil
 }
