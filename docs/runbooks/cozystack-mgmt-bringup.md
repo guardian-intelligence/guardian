@@ -61,6 +61,19 @@ Run the full local substrate check with:
 aspect infra validate
 ```
 
+Run the active manifest invariant test with:
+
+```sh
+bazelisk test //src/infrastructure/tests:manifest_invariants_test
+```
+
+That test parses the checked-in Kubernetes YAML and verifies the platform
+package publishes the dashboard/API endpoints, environment tenants use the
+expected `*.gi.org` hosts, MetalLB and Kube-OVN keep the L2/MTU topology,
+`replicated` is the only default StorageClass, root and environment
+Postgres/Harbor/ClickHouse apps use the intended HA/storage shape, OpenBao stays
+declared in `tenant-root`, and Flux reconciles base before tenant apps.
+
 Local validation does not require backend credentials:
 
 ```sh
