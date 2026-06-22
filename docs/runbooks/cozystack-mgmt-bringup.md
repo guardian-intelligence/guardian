@@ -243,6 +243,24 @@ The task initializes the standard R2-backed state for
 normal OpenTofu var-file, and then runs `tofu plan` or `tofu apply
 -auto-approve`. DNS credentials stay in standard provider environment variables.
 
+If cert-manager leaves an HTTP-01 `Challenge` pending with a self-check timeout
+for `http://<host>/.well-known/acme-challenge/...`, verify public DNS before
+touching the cluster. The ACME solver path should return `200` when resolved
+directly to each current ingress IP, and the public record should resolve to
+the same IP set:
+
+```sh
+getent ahostsv4 gamma.gi.org
+
+curl --resolve gamma.gi.org:80:206.223.228.101 \
+  http://gamma.gi.org/.well-known/acme-challenge/<token>
+```
+
+If the direct solver request works but public DNS still points at old
+infrastructure, run `aspect infra dns-apply --mode apply` with the standard
+Route53, Cloudflare, and R2 backend credentials. Rebooting or reimaging nodes
+does not fix stale public DNS.
+
 The minimal host-come-up CLI delegates to the same task:
 
 ```sh
@@ -642,6 +660,11 @@ the repo k6 script at `src/infrastructure/load/http-smoke.js` and prints k6's
 standard CLI summary. This is the report input; do not wrap it in a
 Guardian-specific evidence format.
 
+When public DNS has not converged yet, pass `--host-overrides host=ip` to use
+k6's native `hosts` option for that run. This is only a diagnostic split
+between DNS and the cluster ingress path; the report must state the override,
+and final public-DNS load evidence should omit it.
+
 Company-site load:
 
 ```sh
@@ -650,6 +673,19 @@ aspect infra load-http \
   --revision "$(git rev-parse HEAD)" \
   --surface company-site \
   --stage gamma \
+  --vus 10 \
+  --duration 2m
+```
+
+Company-site ingress diagnostic while DNS is stale:
+
+```sh
+aspect infra load-http \
+  --kubeconfig "$GUARDIAN_MGMT_KUBECONFIG" \
+  --revision "$(git rev-parse HEAD)" \
+  --surface company-site \
+  --stage gamma \
+  --host-overrides gamma.gi.org=45.250.254.119 \
   --vus 10 \
   --duration 2m
 ```

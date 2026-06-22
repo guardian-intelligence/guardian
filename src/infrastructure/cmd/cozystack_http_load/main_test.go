@@ -135,6 +135,12 @@ func TestValidateConfig(t *testing.T) {
 		t.Fatalf("custom URL config rejected: %v", err)
 	}
 
+	hostOverride := base
+	hostOverride.HostOverrides = "dev.gi.org=45.250.254.119"
+	if err := validateConfig(hostOverride); err != nil {
+		t.Fatalf("config with host override rejected: %v", err)
+	}
+
 	missingKubectl := base
 	missingKubectl.Kubectl = ""
 	if err := validateConfig(missingKubectl); err == nil {
@@ -145,6 +151,85 @@ func TestValidateConfig(t *testing.T) {
 	badVUs.VUs = "many"
 	if err := validateConfig(badVUs); err == nil {
 		t.Fatalf("non-numeric VUs accepted")
+	}
+
+	badHostOverride := base
+	badHostOverride.HostOverrides = "dev.gi.org=not-an-ip"
+	if err := validateConfig(badHostOverride); err == nil {
+		t.Fatalf("invalid host override accepted")
+	}
+}
+
+func TestNormalizeHostOverrides(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{
+			name:  "empty",
+			input: "",
+			want:  "",
+		},
+		{
+			name:  "normalizes spacing case and order",
+			input: " Gamma.GI.Org = 45.250.254.119, dev.gi.org=206.223.228.87 ",
+			want:  "dev.gi.org=206.223.228.87,gamma.gi.org=45.250.254.119",
+		},
+		{
+			name:  "ipv6 literal",
+			input: "example.com=2001:db8::1",
+			want:  "example.com=2001:db8::1",
+		},
+		{
+			name:    "missing separator",
+			input:   "dev.gi.org:45.250.254.119",
+			wantErr: true,
+		},
+		{
+			name:    "host must not include port",
+			input:   "dev.gi.org:443=45.250.254.119",
+			wantErr: true,
+		},
+		{
+			name:    "invalid host",
+			input:   "bad_host=45.250.254.119",
+			wantErr: true,
+		},
+		{
+			name:    "invalid ip",
+			input:   "dev.gi.org=not-an-ip",
+			wantErr: true,
+		},
+		{
+			name:    "duplicate host",
+			input:   "dev.gi.org=206.223.228.87,dev.gi.org=45.250.254.119",
+			wantErr: true,
+		},
+		{
+			name:    "trailing comma",
+			input:   "dev.gi.org=206.223.228.87,",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := normalizeHostOverrides(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("normalizeHostOverrides(%q) accepted invalid input", tt.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("normalizeHostOverrides(%q) error = %v", tt.input, err)
+			}
+			if got != tt.want {
+				t.Fatalf("normalizeHostOverrides(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }
 

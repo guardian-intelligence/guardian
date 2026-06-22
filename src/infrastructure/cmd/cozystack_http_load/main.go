@@ -10,6 +10,8 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +28,7 @@ type loadConfig struct {
 	Stage                string
 	URL                  string
 	ExpectedStatuses     string
+	HostOverrides        string
 	VUs                  string
 	Duration             string
 	HTTPFailedThreshold  string
@@ -58,6 +61,7 @@ func main() {
 	flag.StringVar(&cfg.Stage, "stage", "dev", "Guardian stage: root, dev, gamma, or prod")
 	flag.StringVar(&cfg.URL, "url", "", "explicit URL to load; overrides --surface target mapping")
 	flag.StringVar(&cfg.ExpectedStatuses, "expected-statuses", "", "comma-separated acceptable HTTP status codes")
+	flag.StringVar(&cfg.HostOverrides, "host-overrides", "", "comma-separated k6 DNS host overrides as host=ip entries")
 	flag.StringVar(&cfg.VUs, "vus", "1", "k6 virtual users")
 	flag.StringVar(&cfg.Duration, "duration", "30s", "k6 duration")
 	flag.StringVar(&cfg.HTTPFailedThreshold, "http-failed-threshold", "rate<0.01", "k6 threshold for http_req_failed")
@@ -96,6 +100,9 @@ func validateConfig(cfg loadConfig) error {
 	if _, err := strconv.ParseFloat(cfg.SleepSeconds, 64); err != nil {
 		return fmt.Errorf("--sleep-seconds must be numeric: %w", err)
 	}
+	if _, err := normalizeHostOverrides(cfg.HostOverrides); err != nil {
+		return err
+	}
 	if cfg.PortForwardReadyWait <= 0 {
 		return errors.New("--port-forward-ready-timeout must be positive")
 	}
@@ -114,6 +121,10 @@ func validateConfig(cfg loadConfig) error {
 }
 
 func runLoad(ctx context.Context, cfg loadConfig) error {
+	hostOverrides, err := normalizeHostOverrides(cfg.HostOverrides)
+	if err != nil {
+		return err
+	}
 	spec, cleanup, err := prepareTarget(ctx, cfg)
 	if err != nil {
 		return err
@@ -133,6 +144,9 @@ func runLoad(ctx context.Context, cfg loadConfig) error {
 		cfg.VUs,
 		cfg.Duration,
 	)
+	if hostOverrides != "" {
+		fmt.Printf("hostOverrides=%s\n", hostOverrides)
+	}
 
 	runner := k6Runner{
 		bin:    cfg.K6,
@@ -149,7 +163,54 @@ func runLoad(ctx context.Context, cfg loadConfig) error {
 			"K6_SLEEP_SECONDS":             cfg.SleepSeconds,
 		},
 	}
+	if hostOverrides != "" {
+		runner.env["K6_HOSTS"] = hostOverrides
+	}
 	return runner.run(ctx)
+}
+
+var hostOverrideHostRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
+
+func normalizeHostOverrides(value string) (string, error) {
+	if strings.TrimSpace(value) == "" {
+		return "", nil
+	}
+
+	entries := map[string]string{}
+	for _, rawEntry := range strings.Split(value, ",") {
+		entry := strings.TrimSpace(rawEntry)
+		if entry == "" {
+			return "", errors.New("--host-overrides contains an empty host=ip entry")
+		}
+		parts := strings.SplitN(entry, "=", 2)
+		if len(parts) != 2 {
+			return "", fmt.Errorf("--host-overrides entry %q must be host=ip", entry)
+		}
+		host := strings.ToLower(strings.TrimSpace(parts[0]))
+		ip := strings.TrimSpace(parts[1])
+		if !hostOverrideHostRE.MatchString(host) {
+			return "", fmt.Errorf("--host-overrides host %q must be a DNS hostname without a port", host)
+		}
+		if net.ParseIP(ip) == nil {
+			return "", fmt.Errorf("--host-overrides IP for %q is invalid: %q", host, ip)
+		}
+		if _, exists := entries[host]; exists {
+			return "", fmt.Errorf("--host-overrides contains duplicate host %q", host)
+		}
+		entries[host] = ip
+	}
+
+	hosts := make([]string, 0, len(entries))
+	for host := range entries {
+		hosts = append(hosts, host)
+	}
+	sort.Strings(hosts)
+
+	out := make([]string, 0, len(hosts))
+	for _, host := range hosts {
+		out = append(out, host+"="+entries[host])
+	}
+	return strings.Join(out, ","), nil
 }
 
 func prepareTarget(ctx context.Context, cfg loadConfig) (targetSpec, func(), error) {
