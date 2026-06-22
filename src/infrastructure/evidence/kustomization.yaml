@@ -5,4 +5,5 @@ resources:
   - database-dr.yaml
   - harbor-oci-read.yaml
   - http-load.yaml
+  - openbao-load.yaml
   - storage-smoke.yaml

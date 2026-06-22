@@ -193,7 +193,12 @@ key + root token under `${GUARDIAN_STATE}/secret-zero/` (filesystem perms only,
 never git) and back them up through the survival-floor process. Re-seed Keycloak
 realm/clients. Re-mint any Transit / release-judge credentials. Run
 `aspect infra seed-db-backup-secret` from the operator secret source until the
-OpenBao projection controller owns that contract.
+OpenBao projection controller owns that contract. Mint or select a
+non-production OpenBao token with permission to enable `kv/` and write/read
+`kv/guardian/evidence/openbao/*`, then seed the evidence contract:
+```
+aspect infra seed-openbao-evidence-token --kubeconfig "${KUBECONFIG}"
+```
 
 ## Phase 7 — verify (end-to-end, like production)
 Use `docs/runbooks/management-evidence.md` for the repo-owned command surface

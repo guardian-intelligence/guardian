@@ -57,11 +57,14 @@ aspect infra outage-uncordon --kubeconfig "${KUBECONFIG}" --node <node>
 - Postgres and ClickHouse now have declared R2 backup plumbing,
   `BackupClass` objects, and hourly `Plan` objects.
 - Opt-in Kubernetes evidence fixtures now exist for HTTP load, Harbor digest
-  reads, replicated PVC smoke, Postgres/ClickHouse write-read load, and
-  Postgres/ClickHouse backup/restore-to-copy.
+  reads, OpenBao write-read load, replicated PVC smoke,
+  Postgres/ClickHouse write-read load, and Postgres/ClickHouse
+  backup/restore-to-copy.
 - Harbor publication now has a repo-owned `rules_oci` push target and Aspect
   task for the company-site image.
 - R2 backup credential delivery now has a repo-owned Aspect task that applies
+  the Kubernetes Secret from environment variables through stdin.
+- OpenBao evidence token delivery now has a repo-owned Aspect task that applies
   the Kubernetes Secret from environment variables through stdin.
 - Live Kubernetes evidence is pending because the `guardian-mgmt` kubeconfig and
   converged cluster are not present in this workspace.
@@ -71,6 +74,9 @@ aspect infra outage-uncordon --kubeconfig "${KUBECONFIG}" --node <node>
 - R2 backup credential values remain a secret-zero bootstrap input and must be
   present in the operator environment before `aspect infra seed-db-backup-secret`
   is run.
+- The OpenBao evidence token remains a secret-zero bootstrap input and must be
+  present in the operator environment before
+  `aspect infra seed-openbao-evidence-token` is run.
 
 ## Remaining Evidence Required
 

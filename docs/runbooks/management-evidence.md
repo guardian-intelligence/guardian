@@ -40,6 +40,7 @@ Once the management kubeconfig exists, apply and snapshot the declared platform:
 ```sh
 aspect infra apply-base --kubeconfig "${KUBECONFIG}"
 aspect infra seed-db-backup-secret --kubeconfig "${KUBECONFIG}"
+aspect infra seed-openbao-evidence-token --kubeconfig "${KUBECONFIG}"
 aspect infra live-snapshot --kubeconfig "${KUBECONFIG}"
 aspect infra live-rollout --kubeconfig "${KUBECONFIG}"
 ```
@@ -60,12 +61,20 @@ through the repo-pinned kubectl. It accepts
 or the temporary Cloudflare/AWS variable names documented by
 `--help`. Secret values are written to kubectl stdin only.
 
+`infra seed-openbao-evidence-token` reads a non-production OpenBao evidence
+token from `GUARDIAN_OPENBAO_EVIDENCE_TOKEN`, `OPENBAO_TOKEN`, `BAO_TOKEN`, or
+`VAULT_TOKEN` and applies
+`Secret/tenant-root/guardian-openbao-evidence-token` through the repo-pinned
+kubectl. Secret values are written to kubectl stdin only.
+
 `infra live-snapshot` expects these resources to exist and be queryable:
 
 - `apps.cozystack.io` app CRs in `tenant-root`: Harbor `oci`, ClickHouse
   `ledger`, Postgres `guardian`, and OpenBAO `guardian`;
 - tenants `tenant-root`, `tenant-dev`, and `tenant-gamma`;
 - R2 backup Secret contract `tenant-root/guardian-r2-db-backups` by name only;
+- OpenBao evidence token Secret contract
+  `tenant-root/guardian-openbao-evidence-token` by name only;
 - company-site Deployment/Service/Ingress in `tenant-dev`, `tenant-gamma`, and
   `tenant-root`;
 - Cozystack backup resources (`BackupClass`, `Plan`, `BackupJob`, `Backup`);
@@ -118,6 +127,9 @@ The opt-in evidence overlay provides:
 - `Job/tenant-root/evidence-harbor-oci-read`: repeated digest-addressed
   manifest reads from Harbor for the company-site OCI artifact, failing on
   registry errors or digest mismatch;
+- `Job/tenant-root/evidence-openbao-load`: health-check OpenBao, ensure the
+  `kv/` KV v2 mount exists, then perform 25 token-authenticated write/read
+  checks under `kv/guardian/evidence/openbao`;
 - `Job/tenant-root/evidence-http-load`: repeated HTTPS requests against
   prod/dev/gamma company-site routes, Harbor health, and the dashboard host;
 - `Job/tenant-root/evidence-storage-smoke`: seed/verify a retained replicated

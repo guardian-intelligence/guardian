@@ -1,0 +1,155 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: evidence-openbao-load
+  namespace: tenant-root
+data:
+  run.sh: |
+    #!/bin/sh
+    set -eu
+
+    requests="${REQUESTS:-25}"
+    base="${OPENBAO_ADDR:-http://guardian:8200}"
+    safe_host="$(printf '%s' "${HOSTNAME:-pod}" | tr -c 'A-Za-z0-9_' '_')"
+    run_id="obao_$(date -u +%Y%m%dT%H%M%SZ)_${safe_host}"
+
+    health_body="$(mktemp)"
+    health_status="$(curl -sS -L \
+      --connect-timeout 5 \
+      --max-time 20 \
+      -o "${health_body}" \
+      -w "%{http_code}" \
+      "${base}/v1/sys/health?standbyok=true&perfstandbyok=true&sealedcode=503&uninitcode=501")"
+    if [ "${health_status}" != "200" ]; then
+      echo "openbao health failed status=${health_status}" >&2
+      cat "${health_body}" >&2 || true
+      rm -f "${health_body}"
+      exit 1
+    fi
+    rm -f "${health_body}"
+
+    mount_body="$(mktemp)"
+    mount_status="$(curl -sS -L \
+      --connect-timeout 5 \
+      --max-time 20 \
+      -H "X-Vault-Token: ${OPENBAO_TOKEN}" \
+      -H "Content-Type: application/json" \
+      -X POST \
+      --data '{"type":"kv-v2"}' \
+      -o "${mount_body}" \
+      -w "%{http_code}" \
+      "${base}/v1/sys/mounts/kv")"
+    case "${mount_status}" in
+      200|204|400)
+        ;;
+      *)
+        echo "openbao kv mount failed status=${mount_status}" >&2
+        cat "${mount_body}" >&2 || true
+        rm -f "${mount_body}"
+        exit 1
+        ;;
+    esac
+    rm -f "${mount_body}"
+
+    failures=0
+    i=1
+    while [ "${i}" -le "${requests}" ]; do
+      payload="guardian-openbao-load-${run_id}-${i}"
+      body="$(printf '{"data":{"run_id":"%s","iteration":"%s","payload":"%s"}}' "${run_id}" "${i}" "${payload}")"
+
+      if ! curl -fsSL \
+        --connect-timeout 5 \
+        --max-time 20 \
+        --retry 2 \
+        -H "X-Vault-Token: ${OPENBAO_TOKEN}" \
+        -H "Content-Type: application/json" \
+        -X POST \
+        --data "${body}" \
+        -o /dev/null \
+        "${base}/v1/kv/data/guardian/evidence/openbao/${run_id}/${i}"; then
+        echo "openbao write failed iteration=${i}" >&2
+        failures=$((failures + 1))
+        i=$((i + 1))
+        continue
+      fi
+
+      read_body="$(mktemp)"
+      if curl -fsSL \
+        --connect-timeout 5 \
+        --max-time 20 \
+        --retry 2 \
+        -H "X-Vault-Token: ${OPENBAO_TOKEN}" \
+        -o "${read_body}" \
+        "${base}/v1/kv/data/guardian/evidence/openbao/${run_id}/${i}" \
+        && grep -F "\"payload\":\"${payload}\"" "${read_body}" >/dev/null; then
+        :
+      else
+        echo "openbao read/verify failed iteration=${i}" >&2
+        cat "${read_body}" >&2 || true
+        failures=$((failures + 1))
+      fi
+      rm -f "${read_body}"
+      i=$((i + 1))
+    done
+
+    echo "openbao-load total=${requests} failures=${failures} run_id=${run_id}"
+    test "${failures}" -eq 0
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: evidence-openbao-load
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: evidence-openbao-load
+    guardian.dev/evidence: infrastructure
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: evidence-openbao-load
+        guardian.dev/evidence: infrastructure
+    spec:
+      restartPolicy: Never
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: curl
+          image: docker.io/curlimages/curl@sha256:c1fe1679c34d9784c1b0d1e5f62ac0a79fca01fb6377cdd33e90473c6f9f9a69
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/scripts/run.sh"]
+          env:
+            - name: OPENBAO_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: guardian-openbao-evidence-token
+                  key: token
+            - name: REQUESTS
+              value: "25"
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            runAsNonRoot: true
+            runAsUser: 100
+            runAsGroup: 101
+      volumes:
+        - name: scripts
+          configMap:
+            name: evidence-openbao-load
+            defaultMode: 0555

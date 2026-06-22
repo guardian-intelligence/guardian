@@ -6,6 +6,7 @@ filegroup(
         "database-restore.yaml",
         "harbor-oci-read.yaml",
         "http-load.yaml",
+        "openbao-load.yaml",
         "kustomization.yaml",
         "storage-smoke.yaml",
     ],

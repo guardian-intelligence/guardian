@@ -8,6 +8,8 @@ TALOSCTL_TARGET = "//src/tools/talosctl:talosctl"
 COMPANY_SITE_PUSH_TARGET = "//src/products/company/site:push-harbor"
 DB_BACKUP_SECRET_TARGET = "//src/infrastructure/secrets:seed-db-backup-secret"
 DB_BACKUP_SECRET_BIN = "bazel-bin/src/infrastructure/secrets/seed-db-backup-secret-runner"
+OPENBAO_EVIDENCE_TOKEN_TARGET = "//src/infrastructure/secrets:seed-openbao-evidence-token"
+OPENBAO_EVIDENCE_TOKEN_BIN = "bazel-bin/src/infrastructure/secrets/seed-openbao-evidence-token-runner"
 KUBECTL_RUNNER = "bazel-bin/src/tools/kubectl/kubectl-runner"
 GUARDIAN_MGMT_ROOT = "src/infrastructure/bootstrap/guardian-mgmt"
 CLOUDFLARE_DNS_ROOT = "src/infrastructure/bootstrap/cloudflare-dns"
@@ -296,6 +298,25 @@ def _seed_db_backup_secret_impl(ctx):
         label = "seed tenant-root/guardian-r2-db-backups",
     )
 
+def _seed_openbao_evidence_token_impl(ctx):
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        ["build", KUBECTL_TARGET, OPENBAO_EVIDENCE_TOKEN_TARGET],
+        cwd = ws_path(ctx),
+        label = "bazelisk build " + KUBECTL_TARGET + " " + OPENBAO_EVIDENCE_TOKEN_TARGET,
+    )
+    if rc != 0:
+        return rc
+    return checked_spawn(
+        ctx,
+        ws_path(ctx, OPENBAO_EVIDENCE_TOKEN_BIN),
+        _kubectl_live_flags(ctx),
+        cwd = ws_path(ctx),
+        env = {"KUBECTL_BIN": ws_path(ctx, KUBECTL_RUNNER)},
+        label = "seed tenant-root/guardian-openbao-evidence-token",
+    )
+
 def _apply_evidence_impl(ctx):
     return _kubectl(ctx, ["apply", "-k", "src/infrastructure/evidence"], label = "kubectl apply -k src/infrastructure/evidence")
 
@@ -340,6 +361,7 @@ def _evidence_wait_impl(ctx):
         ["wait", "job/evidence-postgres-load", "-n", "tenant-root", "--for=condition=complete", "--timeout", ctx.args.timeout],
         ["wait", "job/evidence-clickhouse-load", "-n", "tenant-root", "--for=condition=complete", "--timeout", ctx.args.timeout],
         ["wait", "job/evidence-harbor-oci-read", "-n", "tenant-root", "--for=condition=complete", "--timeout", ctx.args.timeout],
+        ["wait", "job/evidence-openbao-load", "-n", "tenant-root", "--for=condition=complete", "--timeout", ctx.args.timeout],
         ["wait", "job/evidence-http-load", "-n", "tenant-root", "--for=condition=complete", "--timeout", ctx.args.timeout],
         ["wait", "job/evidence-storage-smoke", "-n", "tenant-root", "--for=condition=complete", "--timeout", ctx.args.timeout],
         ["wait", "backupjob/evidence-postgres-adhoc", "-n", "tenant-root", "--for=jsonpath={.status.phase}=Succeeded", "--timeout", ctx.args.timeout],
@@ -354,7 +376,8 @@ def _evidence_restore_wait_impl(ctx):
 
 def _evidence_snapshot_impl(ctx):
     return _kubectl_many(ctx, [
-        ["get", "job/evidence-postgres-load", "job/evidence-clickhouse-load", "job/evidence-harbor-oci-read", "job/evidence-http-load", "job/evidence-storage-smoke", "-n", "tenant-root", "-o", "wide", "--ignore-not-found"],
+        ["get", "job/evidence-postgres-load", "job/evidence-clickhouse-load", "job/evidence-harbor-oci-read", "job/evidence-openbao-load", "job/evidence-http-load", "job/evidence-storage-smoke", "-n", "tenant-root", "-o", "wide", "--ignore-not-found"],
+        ["get", "secret/guardian-openbao-evidence-token", "-n", "tenant-root", "-o", "name", "--ignore-not-found"],
         ["get", "pvc/evidence-replicated-retain", "-n", "tenant-root", "-o", "wide", "--ignore-not-found"],
         ["get", "backupjob/evidence-postgres-adhoc", "backupjob/evidence-clickhouse-adhoc", "-n", "tenant-root", "-o", "yaml", "--ignore-not-found"],
         ["get", "restorejob/evidence-postgres-to-copy", "restorejob/evidence-clickhouse-to-copy", "-n", "tenant-root", "-o", "yaml", "--ignore-not-found"],
@@ -368,17 +391,18 @@ def _evidence_logs_impl(ctx):
         ["logs", "job/evidence-postgres-load", "-n", "tenant-root"],
         ["logs", "job/evidence-clickhouse-load", "-n", "tenant-root"],
         ["logs", "job/evidence-harbor-oci-read", "-n", "tenant-root"],
+        ["logs", "job/evidence-openbao-load", "-n", "tenant-root"],
         ["logs", "job/evidence-http-load", "-n", "tenant-root"],
         ["logs", "job/evidence-storage-smoke", "-n", "tenant-root"],
     ])
 
 def _evidence_clean_impl(ctx):
     commands = [
-        ["delete", "job/evidence-postgres-load", "job/evidence-clickhouse-load", "job/evidence-harbor-oci-read", "job/evidence-http-load", "job/evidence-storage-smoke", "-n", "tenant-root", "--ignore-not-found"],
+        ["delete", "job/evidence-postgres-load", "job/evidence-clickhouse-load", "job/evidence-harbor-oci-read", "job/evidence-openbao-load", "job/evidence-http-load", "job/evidence-storage-smoke", "-n", "tenant-root", "--ignore-not-found"],
         ["delete", "backupjob/evidence-postgres-adhoc", "backupjob/evidence-clickhouse-adhoc", "-n", "tenant-root", "--ignore-not-found"],
         ["delete", "restorejob/evidence-postgres-to-copy", "restorejob/evidence-clickhouse-to-copy", "-n", "tenant-root", "--ignore-not-found"],
         ["delete", "postgres/guardian-restore-check", "clickhouse/ledger-restore-check", "-n", "tenant-root", "--ignore-not-found"],
-        ["delete", "configmap/evidence-postgres-load", "configmap/evidence-clickhouse-load", "configmap/evidence-harbor-oci-read", "configmap/evidence-http-load", "configmap/evidence-storage-smoke", "-n", "tenant-root", "--ignore-not-found"],
+        ["delete", "configmap/evidence-postgres-load", "configmap/evidence-clickhouse-load", "configmap/evidence-harbor-oci-read", "configmap/evidence-openbao-load", "configmap/evidence-http-load", "configmap/evidence-storage-smoke", "-n", "tenant-root", "--ignore-not-found"],
     ]
     if ctx.args.delete_pvc:
         commands.append(["delete", "pvc/evidence-replicated-retain", "-n", "tenant-root", "--ignore-not-found"])
@@ -614,6 +638,14 @@ seed_db_backup_secret = task(
     name = "seed-db-backup-secret",
     group = ["infra"],
     summary = "Seed tenant-root/guardian-r2-db-backups from environment variables using the repo-pinned kubectl.",
+    args = _KUBECTL_LIVE_ARGS,
+)
+
+seed_openbao_evidence_token = task(
+    implementation = _seed_openbao_evidence_token_impl,
+    name = "seed-openbao-evidence-token",
+    group = ["infra"],
+    summary = "Seed tenant-root/guardian-openbao-evidence-token from environment variables using the repo-pinned kubectl.",
     args = _KUBECTL_LIVE_ARGS,
 )
 

@@ -22,6 +22,9 @@ have passed.
 - `Job/tenant-root/evidence-harbor-oci-read` reads the company-site OCI manifest
   from `oci.guardianintelligence.org/guardian/company-site` by digest 25 times
   and fails on registry errors or `Docker-Content-Digest` mismatch.
+- `Job/tenant-root/evidence-openbao-load` health-checks OpenBao, ensures the
+  `kv/` KV v2 mount exists, then performs 25 token-authenticated write/read
+  checks under `kv/guardian/evidence/openbao`.
 - `Job/tenant-root/evidence-http-load` runs repeated HTTPS checks against the
   prod/dev/gamma company-site routes, Harbor health, and dashboard host.
 - `PersistentVolumeClaim/tenant-root/evidence-replicated-retain` plus
@@ -50,7 +53,7 @@ aspect infra evidence-snapshot --kubeconfig "${KUBECONFIG}"
 ## Current Evidence
 
 - The overlay renders locally with the repo-pinned kubectl.
-- The main evidence overlay renders 15 Kubernetes documents; the deferred
+- The main evidence overlay renders 17 Kubernetes documents; the deferred
   restore manifest renders 2 additional `RestoreJob` documents.
 - `aspect infra evidence-clean` is declared so the evidence loop can be rerun
   without manual Kubernetes deletion.
