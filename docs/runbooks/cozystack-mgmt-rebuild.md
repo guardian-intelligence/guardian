@@ -165,7 +165,11 @@ deployment envelope.
 Postgres and ClickHouse also declare R2 backup plumbing. Their releases will
 not become fully healthy until `tenant-root/guardian-r2-db-backups` exists with
 the keys declared in `src/infrastructure/inventory/guardian-mgmt.json`. Seed
-that Secret during secret-zero bring-up, then let Flux retry reconciliation.
+that Secret during secret-zero bring-up with:
+```
+aspect infra seed-db-backup-secret --kubeconfig "${KUBECONFIG}"
+```
+Then let Flux retry reconciliation.
 
 ## Phase 5.5 — adopt and plan DNS
 Cloudflare DNS is declared in `src/infrastructure/bootstrap/cloudflare-dns/` from
@@ -187,10 +191,9 @@ Review the plan before `apply`. Moving the apex or
 OpenBao init + unseal (3-replica raft on `replicated-retain`); persist unseal
 key + root token under `${GUARDIAN_STATE}/secret-zero/` (filesystem perms only,
 never git) and back them up through the survival-floor process. Re-seed Keycloak
-realm/clients. Re-mint any Transit / release-judge credentials. Seed the
-temporary Kubernetes delivery Secret `tenant-root/guardian-r2-db-backups` from
-the operator secret source until the OpenBao projection controller owns that
-contract.
+realm/clients. Re-mint any Transit / release-judge credentials. Run
+`aspect infra seed-db-backup-secret` from the operator secret source until the
+OpenBao projection controller owns that contract.
 
 ## Phase 7 — verify (end-to-end, like production)
 Use `docs/runbooks/management-evidence.md` for the repo-owned command surface

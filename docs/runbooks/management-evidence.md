@@ -39,6 +39,7 @@ Once the management kubeconfig exists, apply and snapshot the declared platform:
 
 ```sh
 aspect infra apply-base --kubeconfig "${KUBECONFIG}"
+aspect infra seed-db-backup-secret --kubeconfig "${KUBECONFIG}"
 aspect infra live-snapshot --kubeconfig "${KUBECONFIG}"
 aspect infra live-rollout --kubeconfig "${KUBECONFIG}"
 ```
@@ -51,6 +52,13 @@ aspect infra talos-health \
   --endpoints 10.8.0.250 \
   --nodes 10.8.0.11,10.8.0.12,10.8.0.13
 ```
+
+`infra seed-db-backup-secret` reads the R2 backup credential contract from
+environment variables and applies `Secret/tenant-root/guardian-r2-db-backups`
+through the repo-pinned kubectl. It accepts
+`GUARDIAN_R2_BACKUP_{BUCKET,ENDPOINT,REGION,ACCESS_KEY_ID,SECRET_ACCESS_KEY}`
+or the temporary Cloudflare/AWS variable names documented by
+`--help`. Secret values are written to kubectl stdin only.
 
 `infra live-snapshot` expects these resources to exist and be queryable:
 
@@ -146,7 +154,8 @@ The checked-in desired state declares:
 The Secret `tenant-root/guardian-r2-db-backups` must exist before the Postgres
 and ClickHouse releases can complete. Required keys are `bucketName`,
 `endpoint`, `region`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY`.
-Secret-zero seeding is responsible for minting it; once the OpenBao projection
+Secret-zero seeding is currently the repo-owned
+`aspect infra seed-db-backup-secret` task; once the OpenBao projection
 controller exists, OpenBao should become the reconciled source of truth.
 
 Before marking DR complete, each stateful component report must include:

@@ -20,6 +20,7 @@ Live convergence and readiness:
 
 ```sh
 aspect infra apply-base --kubeconfig "${KUBECONFIG}"
+aspect infra seed-db-backup-secret --kubeconfig "${KUBECONFIG}"
 aspect infra publish-company-site
 aspect infra live-snapshot --kubeconfig "${KUBECONFIG}"
 aspect infra live-rollout --kubeconfig "${KUBECONFIG}"
@@ -59,14 +60,16 @@ aspect infra outage-uncordon --kubeconfig "${KUBECONFIG}" --node <node>
   smoke, and Postgres/ClickHouse backup/restore-to-copy.
 - Harbor publication now has a repo-owned `rules_oci` push target and Aspect
   task for the company-site image.
+- R2 backup credential delivery now has a repo-owned Aspect task that applies
+  the Kubernetes Secret from environment variables through stdin.
 - Live Kubernetes evidence is pending because the `guardian-mgmt` kubeconfig and
   converged cluster are not present in this workspace.
 - Latitude adoption is pending a Latitude token and VLAN assignment import IDs.
 - Cloudflare DNS state has been partially adopted but DNS changes have not been
   applied.
-- R2 backup credential delivery is still a bootstrap input:
-  `tenant-root/guardian-r2-db-backups` must be seeded before the managed
-  database releases can complete.
+- R2 backup credential values remain a secret-zero bootstrap input and must be
+  present in the operator environment before `aspect infra seed-db-backup-secret`
+  is run.
 
 ## Remaining Evidence Required
 
@@ -98,8 +101,8 @@ Single-node outage reports:
 
 ## Risk Register
 
-- Postgres and ClickHouse DR cannot be considered ready until the R2 Secret is
-  seeded and live backup/restore-to-copy drills pass.
+- Postgres and ClickHouse DR cannot be considered ready until the R2 Secret
+  seeding task has been run and live backup/restore-to-copy drills pass.
 - A Kubernetes drain rehearsal is useful but insufficient for the final
   single-node outage criterion.
 - The company-site deployment references Harbor by digest; it cannot pull until

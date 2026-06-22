@@ -48,12 +48,15 @@ Shared Secret contract:
 - Desired state renders locally with `aspect infra render-base`.
 - The backup Secret is checked by name in `aspect infra live-snapshot`, without
   printing secret data.
+- The repo now provides `aspect infra seed-db-backup-secret` to create
+  `tenant-root/guardian-r2-db-backups` from environment variables without
+  passing secret values through argv or storing them in git.
 
 ## Not Yet Passed
 
 - No live `BackupJob` has reached `Succeeded`.
 - No `Backup` artifact has been restored to a copy.
 - No report proves restored Postgres rows or ClickHouse wide-event rows.
-- Secret projection from OpenBao remains a known bootstrap gap; secret-zero must
-  seed `tenant-root/guardian-r2-db-backups` before managed database
-  reconciliation can complete.
+- Secret projection from OpenBao remains a known bootstrap gap; the checked-in
+  secret-zero task must be run before managed database reconciliation can
+  complete.

@@ -44,6 +44,7 @@ load(
     infra_preflight = "preflight",
     infra_publish_company_site = "publish_company_site",
     infra_render_base = "render_base",
+    infra_seed_db_backup_secret = "seed_db_backup_secret",
     infra_talos_health = "talos_health",
     infra_tofu = "tofu",
     infra_validate = "validate",
@@ -86,6 +87,7 @@ def config(ctx):
     ctx.tasks.add(infra_preflight)
     ctx.tasks.add(infra_publish_company_site)
     ctx.tasks.add(infra_render_base)
+    ctx.tasks.add(infra_seed_db_backup_secret)
     ctx.tasks.add(infra_talos_health)
     ctx.tasks.add(infra_tofu)
     ctx.tasks.add(infra_validate)

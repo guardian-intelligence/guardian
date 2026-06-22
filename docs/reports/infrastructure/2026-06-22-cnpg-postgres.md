@@ -49,5 +49,6 @@
 
 ## Residual Risk
 
-- Requires `Secret/tenant-root/guardian-r2-db-backups` before reconciliation can
+- Requires `aspect infra seed-db-backup-secret` to create
+  `Secret/tenant-root/guardian-r2-db-backups` before reconciliation can
   complete.

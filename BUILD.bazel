@@ -16,6 +16,7 @@ filegroup(
         "//src/infrastructure/bootstrap/cloudflare-dns:root",
         "//src/infrastructure/bootstrap/guardian-mgmt:root",
         "//src/infrastructure/evidence:manifests",
+        "//src/infrastructure/secrets:seed-db-backup-secret",
         "//src/environments:environments",
         "//src/infrastructure/inventory:inventory",
         "//src/products/company/site:image.digest",

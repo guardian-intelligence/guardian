@@ -48,5 +48,6 @@
 
 ## Residual Risk
 
-- Requires `Secret/tenant-root/guardian-r2-db-backups` before backup sidecars can
+- Requires `aspect infra seed-db-backup-secret` to create
+  `Secret/tenant-root/guardian-r2-db-backups` before backup sidecars can
   complete.
