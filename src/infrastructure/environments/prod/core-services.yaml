@@ -1,0 +1,49 @@
+# Prod tenant core services.
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Postgres
+metadata:
+  name: guardian
+  namespace: tenant-prod
+spec:
+  replicas: 3
+  size: 50Gi
+  storageClass: replicated
+  external: false
+  version: v18
+  quorum:
+    minSyncReplicas: 1
+    maxSyncReplicas: 2
+---
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Harbor
+metadata:
+  name: guardian
+  namespace: tenant-prod
+spec:
+  host: harbor.prod.gi.org
+  storageClass: replicated
+  database:
+    replicas: 3
+    size: 50Gi
+  redis:
+    replicas: 3
+    size: 10Gi
+  trivy:
+    enabled: true
+    size: 20Gi
+---
+apiVersion: apps.cozystack.io/v1alpha1
+kind: ClickHouse
+metadata:
+  name: guardian
+  namespace: tenant-prod
+spec:
+  replicas: 3
+  shards: 1
+  size: 100Gi
+  storageClass: replicated
+  logStorageSize: 20Gi
+  clickhouseKeeper:
+    enabled: true
+    replicas: 3
+    size: 10Gi

@@ -13,6 +13,7 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/base/networking:manifests",
     "//src/infrastructure/base/storage:manifests",
     "//src/infrastructure/base/tenants:manifests",
+    "//src/infrastructure/environments:manifests",
 ]
 
 def _capture_stdout(ctx, program, args, cwd = None, label = None):
@@ -58,7 +59,7 @@ def _tofu(ctx, args, label):
         label = label,
     )
 
-def _render_base(ctx):
+def _render_kustomizations(ctx):
     rc = checked_spawn(
         ctx,
         "bazelisk",
@@ -78,13 +79,20 @@ def _render_base(ctx):
     if output_base == None:
         return 1
     kubectl = output_base + "/external/+http_file+kubectl_linux_amd64/file/kubectl"
-    return _capture_success(
-        ctx,
-        kubectl,
-        ["kustomize", "src/infrastructure/base"],
-        cwd = ws_path(ctx),
-        label = "kubectl kustomize src/infrastructure/base",
-    )
+    for path in [
+        "src/infrastructure/base",
+        "src/infrastructure/environments",
+    ]:
+        rc = _capture_success(
+            ctx,
+            kubectl,
+            ["kustomize", path],
+            cwd = ws_path(ctx),
+            label = "kubectl kustomize " + path,
+        )
+        if rc != 0:
+            return rc
+    return 0
 
 def _validate_impl(ctx):
     rc = _tofu(ctx, ["fmt", "-check"], "tofu fmt -check guardian-mgmt")
@@ -105,7 +113,7 @@ def _validate_impl(ctx):
     )
     if rc != 0:
         return rc
-    return _render_base(ctx)
+    return _render_kustomizations(ctx)
 
 validate = task(
     implementation = _validate_impl,
