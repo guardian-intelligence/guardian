@@ -1527,6 +1527,8 @@ def _load_http_impl(ctx):
         load_args.extend(["--url", ctx.args.url])
     if ctx.args.expected_statuses != "":
         load_args.extend(["--expected-statuses", ctx.args.expected_statuses])
+    if ctx.args.host_overrides != "":
+        load_args.extend(["--host-overrides", ctx.args.host_overrides])
 
     return checked_spawn(
         ctx,
@@ -1998,6 +2000,7 @@ load_http = task(
     args = {
         "duration": args.string(default = "30s", description = "k6 test duration."),
         "expected_statuses": args.string(default = "", description = "Comma-separated acceptable HTTP status codes. Defaults depend on the surface."),
+        "host_overrides": args.string(default = "", description = "Comma-separated k6 DNS overrides as host=ip entries, for ingress diagnostics while public DNS is being converged."),
         "http_failed_threshold": args.string(default = "rate<0.01", description = "k6 threshold for http_req_failed."),
         "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
         "port_forward_ready_timeout": args.string(default = "10s", description = "Timeout for OpenBao port-forward readiness."),
