@@ -12,7 +12,7 @@ spec:
         volumeGroup: data
       source:
         hostDevices:
-          - /dev/nvme0n1
+          - /dev/disk/by-id/nvme-MTFDKCC960TGP-1BK1JABYY_362510FD7C47
 ---
 apiVersion: piraeus.io/v1
 kind: LinstorSatelliteConfiguration
@@ -28,7 +28,7 @@ spec:
         volumeGroup: data
       source:
         hostDevices:
-          - /dev/nvme0n1
+          - /dev/disk/by-id/nvme-MTFDKCC960TGP-1BK1JABYY_352410A4E0A6
 ---
 apiVersion: piraeus.io/v1
 kind: LinstorSatelliteConfiguration
@@ -44,4 +44,4 @@ spec:
         volumeGroup: data
       source:
         hostDevices:
-          - /dev/nvme1n1
+          - /dev/disk/by-id/nvme-MTFDKCC960TGP-1BK1JABYY_362510FE3204
