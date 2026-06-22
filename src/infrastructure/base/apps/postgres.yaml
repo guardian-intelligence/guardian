@@ -17,4 +17,15 @@ spec:
     parameters:
       max_connections: "200"
   backup:
-    enabled: false
+    enabled: true
+    # Cozystack 1.4 recommends BackupClass/Plan orchestration plus chart-side
+    # WAL archive plumbing from first install. The Secret is minted during
+    # secret-zero seeding; see src/infrastructure/inventory/guardian-mgmt.json.
+    schedule: ""
+    retentionPolicy: 30d
+    destinationPath: s3://guardian-vault/gm/pg/guardian/
+    endpointURL: https://c3eaeffaadf7d4847684d4775c16d598.r2.cloudflarestorage.com
+    s3CredentialsSecret:
+      name: guardian-r2-db-backups
+      accessKeyIDKey: AWS_ACCESS_KEY_ID
+      secretAccessKeyKey: AWS_SECRET_ACCESS_KEY

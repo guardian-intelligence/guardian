@@ -1,0 +1,173 @@
+---
+apiVersion: strategy.backups.cozystack.io/v1alpha1
+kind: CNPG
+metadata:
+  name: guardian-r2-cnpg
+spec:
+  template:
+    serverName: "{{ .Application.metadata.name }}"
+    barmanObjectStore:
+      destinationPath: |-
+        s3://guardian-vault/gm/pg/{{.Application.metadata.name}}/
+      endpointURL: "https://c3eaeffaadf7d4847684d4775c16d598.r2.cloudflarestorage.com"
+      retentionPolicy: "30d"
+      s3Credentials:
+        secretRef:
+          name: guardian-r2-db-backups
+      data:
+        compression: gzip
+      wal:
+        compression: gzip
+---
+apiVersion: backups.cozystack.io/v1alpha1
+kind: BackupClass
+metadata:
+  name: guardian-postgres-r2
+spec:
+  strategies:
+    - application:
+        apiGroup: apps.cozystack.io
+        kind: Postgres
+      strategyRef:
+        apiGroup: strategy.backups.cozystack.io
+        kind: CNPG
+        name: guardian-r2-cnpg
+---
+apiVersion: backups.cozystack.io/v1alpha1
+kind: Plan
+metadata:
+  name: guardian-postgres-hourly
+  namespace: tenant-root
+spec:
+  applicationRef:
+    apiGroup: apps.cozystack.io
+    kind: Postgres
+    name: guardian
+  backupClassName: guardian-postgres-r2
+  schedule:
+    type: cron
+    cron: "17 * * * *"
+---
+apiVersion: strategy.backups.cozystack.io/v1alpha1
+kind: Altinity
+metadata:
+  name: guardian-r2-altinity
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: ch-backup-client
+          image: docker.io/curlimages/curl@sha256:c1fe1679c34d9784c1b0d1e5f62ac0a79fca01fb6377cdd33e90473c6f9f9a69
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: API_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-{{ .Release.Name }}-backup-api-auth
+                  key: username
+            - name: API_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-{{ .Release.Name }}-backup-api-auth
+                  key: password
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+
+              host="chi-clickhouse-{{ .Release.Name }}-clickhouse-0-0.{{ .Release.Namespace }}.svc"
+              api="http://${host}:7171"
+
+              ready=
+              for _ in $(seq 1 60); do
+                if curl -fsS --user "${API_USERNAME}:${API_PASSWORD}" --max-time 2 "${api}/backup/status" >/dev/null 2>&1; then
+                  ready=1
+                  break
+                fi
+                sleep 5
+              done
+              if [ -z "${ready}" ]; then
+                echo "clickhouse-backup API did not become ready" >&2
+                exit 1
+              fi
+
+              if [ "{{ .Mode }}" = "backup" ]; then
+                prefix="clickhouse-{{ .Release.Name }}-"
+                target="${prefix}$(date -u +%Y%m%dT%H%M%SZ)"
+                echo "create_remote ${target}"
+                curl -fsS --user "${API_USERNAME}:${API_PASSWORD}" -X POST "${api}/backup/create_remote?name=${target}" >/dev/null
+              else
+                prefix="clickhouse-{{ .Backup.ApplicationRef.Name }}-"
+                target="$(curl -fsS --user "${API_USERNAME}:${API_PASSWORD}" "${api}/backup/list/remote" \
+                  | grep -F "\"name\":\"${prefix}" \
+                  | tail -n 1 \
+                  | sed -n 's/.*"name":"\([^"]*\)".*/\1/p')"
+                if [ -z "${target}" ]; then
+                  echo "no remote backup found for prefix ${prefix}" >&2
+                  exit 1
+                fi
+                echo "restore_remote ${target}"
+                curl -fsS --user "${API_USERNAME}:${API_PASSWORD}" -X POST "${api}/backup/restore_remote/${target}" >/dev/null
+              fi
+
+              while true; do
+                row="$(curl -fsS --user "${API_USERNAME}:${API_PASSWORD}" "${api}/backup/actions" | grep -F "${target}" | tail -n 1 || true)"
+                case "${row}" in
+                  *'"status":"success"'*)
+                    echo "operation succeeded"
+                    exit 0
+                    ;;
+                  *'"status":"error"'*)
+                    echo "operation failed: ${row}" >&2
+                    exit 1
+                    ;;
+                esac
+                sleep 5
+              done
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            runAsNonRoot: true
+            runAsUser: 100
+            runAsGroup: 101
+            seccompProfile:
+              type: RuntimeDefault
+---
+apiVersion: backups.cozystack.io/v1alpha1
+kind: BackupClass
+metadata:
+  name: guardian-clickhouse-r2
+spec:
+  strategies:
+    - application:
+        apiGroup: apps.cozystack.io
+        kind: ClickHouse
+      strategyRef:
+        apiGroup: strategy.backups.cozystack.io
+        kind: Altinity
+        name: guardian-r2-altinity
+---
+apiVersion: backups.cozystack.io/v1alpha1
+kind: Plan
+metadata:
+  name: guardian-clickhouse-hourly
+  namespace: tenant-root
+spec:
+  applicationRef:
+    apiGroup: apps.cozystack.io
+    kind: ClickHouse
+    name: ledger
+  backupClassName: guardian-clickhouse-r2
+  schedule:
+    type: cron
+    cron: "37 * * * *"

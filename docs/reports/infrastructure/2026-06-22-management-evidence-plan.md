@@ -39,11 +39,16 @@ aspect infra outage-uncordon --kubeconfig "${KUBECONFIG}" --node <node>
 - OpenTofu roots can be validated without remote state access.
 - The company-site OCI image builds locally by digest.
 - The Cozystack base renders through the repo-pinned kubectl.
+- Postgres and ClickHouse now have declared R2 backup plumbing,
+  `BackupClass` objects, and hourly `Plan` objects.
 - Live Kubernetes evidence is pending because the `guardian-mgmt` kubeconfig and
   converged cluster are not present in this workspace.
 - Latitude adoption is pending a Latitude token and VLAN assignment import IDs.
 - Cloudflare DNS state has been partially adopted but DNS changes have not been
   applied.
+- R2 backup credential delivery is still a bootstrap input:
+  `tenant-root/guardian-r2-db-backups` must be seeded before the managed
+  database releases can complete.
 
 ## Remaining Evidence Required
 
@@ -61,8 +66,8 @@ Load reports:
 
 Disaster-recovery reports:
 
-- backup and restore-to-copy for CNPG / Postgres.
-- backup and restore-to-copy for ClickHouse.
+- live backup and restore-to-copy for CNPG / Postgres.
+- live backup and restore-to-copy for ClickHouse.
 - Harbor push/pull after storage recovery.
 - OpenBao raft/PVC recovery under single-node loss.
 - LINSTOR / DRBD volume survival.
@@ -75,8 +80,8 @@ Single-node outage reports:
 
 ## Risk Register
 
-- Postgres and ClickHouse DR cannot be considered ready while their managed
-  backup classes, S3 credentials, backup plans, and restore drills are absent.
+- Postgres and ClickHouse DR cannot be considered ready until the R2 Secret is
+  seeded and live backup/restore-to-copy drills pass.
 - A Kubernetes drain rehearsal is useful but insufficient for the final
   single-node outage criterion.
 - The company-site deployment references Harbor by digest; it cannot pull until

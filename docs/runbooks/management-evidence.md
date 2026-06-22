@@ -52,6 +52,7 @@ aspect infra talos-health \
 - `apps.cozystack.io` app CRs in `tenant-root`: Harbor `oci`, ClickHouse
   `ledger`, Postgres `guardian`, and OpenBAO `guardian`;
 - tenants `tenant-root`, `tenant-dev`, and `tenant-gamma`;
+- R2 backup Secret contract `tenant-root/guardian-r2-db-backups` by name only;
 - company-site Deployment/Service/Ingress in `tenant-dev`, `tenant-gamma`, and
   `tenant-root`;
 - Cozystack backup resources (`BackupClass`, `Plan`, `BackupJob`, `Backup`);
@@ -89,6 +90,22 @@ Cozystack v1.4's managed database backup path uses admin-provisioned
 objects. Postgres also needs `backup.enabled=true` at chart install so CNPG WAL
 archiving starts before the first backup; ClickHouse needs `backup.enabled=true`
 so the Altinity sidecar exists.
+
+The checked-in desired state declares:
+
+- Postgres WAL archive plumbing in `src/infrastructure/base/apps/postgres.yaml`;
+- ClickHouse backup sidecar plumbing in
+  `src/infrastructure/base/apps/clickhouse.yaml`;
+- backup strategies, `BackupClass` objects, and hourly `Plan` objects in
+  `src/infrastructure/base/backups/managed-databases.yaml`;
+- the non-secret R2 backup contract in
+  `src/infrastructure/inventory/guardian-mgmt.json`.
+
+The Secret `tenant-root/guardian-r2-db-backups` must exist before the Postgres
+and ClickHouse releases can complete. Required keys are `bucketName`,
+`endpoint`, `region`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY`.
+Secret-zero seeding is responsible for minting it; once the OpenBao projection
+controller exists, OpenBao should become the reconciled source of truth.
 
 Before marking DR complete, each stateful component report must include:
 

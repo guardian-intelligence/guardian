@@ -8,9 +8,9 @@ infrastructure work can be called complete.
 | Talos / Kubernetes API VIP | `src/infrastructure/talm/` | pending | pending | pending | evidence commands declared |
 | LINSTOR / DRBD storage | `src/infrastructure/base/storage/` | pending | pending | pending | evidence commands declared |
 | OpenBao | `src/infrastructure/base/openbao/` | pending | pending | pending | evidence commands declared |
-| CNPG / Postgres | `src/infrastructure/base/apps/postgres.yaml` | pending | pending | pending | desired state only; backup path pending |
+| CNPG / Postgres | `src/infrastructure/base/apps/postgres.yaml`, `src/infrastructure/base/backups/managed-databases.yaml` | pending | pending | pending | backup substrate declared; live restore pending |
 | Harbor | `src/infrastructure/base/apps/harbor.yaml` | pending | pending | pending | evidence commands declared |
-| ClickHouse | `src/infrastructure/base/apps/clickhouse.yaml` | pending | pending | pending | desired state only; backup path pending |
+| ClickHouse | `src/infrastructure/base/apps/clickhouse.yaml`, `src/infrastructure/base/backups/managed-databases.yaml` | pending | pending | pending | backup substrate declared; live restore pending |
 | Cozystack Dashboard | `src/infrastructure/base/cozystack/platform.yaml` | pending | pending | pending | evidence commands declared |
 | Public ingress / DNS | `src/infrastructure/bootstrap/cloudflare-dns/` | pending | pending | pending | adopted, not applied |
 | Dev tenant | `src/infrastructure/base/tenants/environments.yaml` | pending | pending | pending | evidence commands declared |

@@ -81,6 +81,27 @@
       }
     ]
   },
+  "backups": {
+    "provider": "cloudflare-r2",
+    "bucket": "guardian-vault",
+    "endpoint": "https://c3eaeffaadf7d4847684d4775c16d598.r2.cloudflarestorage.com",
+    "region": "auto",
+    "secret": {
+      "namespace": "tenant-root",
+      "name": "guardian-r2-db-backups",
+      "keys": {
+        "bucket": "bucketName",
+        "endpoint": "endpoint",
+        "region": "region",
+        "accessKeyID": "AWS_ACCESS_KEY_ID",
+        "secretAccessKey": "AWS_SECRET_ACCESS_KEY"
+      }
+    },
+    "prefixes": {
+      "postgres": "gm/pg",
+      "clickhouse": "gm/ch"
+    }
+  },
   "environments": [
     {
       "name": "dev",

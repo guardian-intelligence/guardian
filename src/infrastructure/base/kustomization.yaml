@@ -6,6 +6,7 @@ resources:
   - apps/clickhouse.yaml
   - apps/harbor.yaml
   - apps/postgres.yaml
+  - backups/managed-databases.yaml
   - cozystack/platform.yaml
   - networking/metallb.yaml
   - networking/subnet-mtu.yaml

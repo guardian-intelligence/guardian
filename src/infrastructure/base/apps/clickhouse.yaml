@@ -17,4 +17,15 @@ spec:
     size: 5Gi
     resourcesPreset: t1.micro
   backup:
-    enabled: false
+    enabled: true
+    # The Altinity BackupClass strategy calls the chart-emitted sidecar. The
+    # Secret is minted during secret-zero seeding; see the inventory backup
+    # contract for required keys.
+    s3PathOverride: gm/ch/ledger
+    s3CredentialsSecret:
+      name: guardian-r2-db-backups
+      bucketKey: bucketName
+      endpointKey: endpoint
+      regionKey: region
+      accessKeyIDKey: AWS_ACCESS_KEY_ID
+      secretAccessKeyKey: AWS_SECRET_ACCESS_KEY
