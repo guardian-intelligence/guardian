@@ -967,10 +967,15 @@ is provided, prints the root `Harbor/guardian` and registry COSI resources,
 waits for the Harbor app `Ready` and `WorkloadsReady` conditions plus
 `BucketClaim.status.bucketReady=true` and
 `BucketAccess.status.accessGranted=true`, reads the root Harbor admin password
-from `Secret/harbor-guardian-credentials`, writes a temporary Docker config,
-and then runs the existing Bazel `oci_push` target. Do not run the raw
-`//src/products/company/site:push-harbor` target with ambient workstation
-registry credentials for cluster publication.
+from `Secret/harbor-guardian-credentials`, opens a local `kubectl
+port-forward` to `Service/harbor-guardian`, ensures the `guardian` Harbor
+project exists and is public for unauthenticated cluster pulls, writes a
+temporary Docker config for the local forwarded registry endpoint, and then
+runs the existing Bazel `oci_push` target with a local repository override.
+Do not run the raw `//src/products/company/site:push-harbor` target with
+ambient workstation registry credentials for cluster publication; pushing
+through the public ingress path can fail on large layer uploads and bypasses
+the project-public invariant the deployments rely on.
 
 The checked-in environment layer declares:
 
