@@ -155,6 +155,46 @@ itself was rotated and the local Talm secrets are stale, restore or regenerate
 the operator state through the bootstrap path instead. Do not use insecure TLS
 flags for source-controller validation.
 
+## Management Bootstrap Command
+
+The current repo-native bootstrap surface is:
+
+```sh
+aspect infra bootstrap --revision "<merged-main-commit-sha>"
+```
+
+It is intentionally a thin orchestration path over standard tools and existing
+repo tasks. It prints the standard OpenTofu `output -json` for
+`src/infrastructure/bootstrap/guardian-mgmt`, runs `aspect infra validate`,
+refreshes the gitignored Talm kubeconfig, runs the Talos L2 gate, and then runs
+the same live source-controller checks as `aspect infra live`. It does not
+define a Guardian-specific inventory format or evidence schema.
+
+The minimal host-come-up CLI delegates to the same task:
+
+```sh
+bazelisk run //src/guardian/cmd/guardian -- \
+  up management \
+  --revision "<merged-main-commit-sha>"
+```
+
+Pass explicit state paths only when exercising a non-default Talm root:
+
+```sh
+bazelisk run //src/guardian/cmd/guardian -- \
+  up management \
+  --revision "<merged-main-commit-sha>" \
+  --root src/infrastructure/talm \
+  --talosconfig src/infrastructure/talm/talosconfig \
+  --kubeconfig "$GUARDIAN_MGMT_KUBECONFIG"
+```
+
+This command still requires the standard operator prerequisites for the steps it
+wraps: initialized OpenTofu backend access for `tofu output`, current Talm
+operator secrets for kubeconfig refresh, and a trusted guardian-mgmt kubeconfig
+for live validation. If any credential is stale, refresh or restore the
+standard state for that tool; do not bypass TLS verification.
+
 Local validation does not require backend credentials:
 
 ```sh
@@ -223,11 +263,13 @@ state must stay out of Git. `src/infrastructure/talm/.gitignore` excludes those
 paths.
 
 The invariant test renders the checked-in control-plane template with the
-repo-pinned `talm` artifact and scratch secrets only. The next bootstrap CLI
-slice should reuse that chart and the repo-pinned `talm`/`talosctl` artifacts to
-render each node, apply the first config in Talos maintenance mode, bootstrap
-etcd exactly once, and persist the encrypted genesis bundle under operator
-state.
+repo-pinned `talm` artifact and scratch secrets only. The current
+`aspect infra bootstrap` / `guardian up management` slice exercises the
+already-adopted management cluster path. A later destructive host-come-up slice
+still needs to reuse this chart and the repo-pinned `talm`/`talosctl` artifacts
+to render each node, apply the first config in Talos maintenance mode,
+bootstrap etcd exactly once, and persist the encrypted genesis bundle under
+operator state.
 
 ## Kubernetes Handoff
 
@@ -1041,7 +1083,10 @@ only purpose is temporary PR verification.
 These are intentionally outside the merged L2/OpenTofu substrate and need
 separate PRs with their own validation:
 
-- Bootstrap CLI wrapper for the full Talm/Talos path.
+- Destructive first-node host-bootstrap for a freshly provisioned Latitude box:
+  render/apply Talos configs in maintenance mode, bootstrap etcd exactly once,
+  install Cozystack, apply the initial Flux handoff, and persist the encrypted
+  genesis bundle under operator state.
 - Latitude VLAN assignment imports, once assignment IDs are collected.
 - Live publication of the checked-in TanStack company-site OCI image to Harbor
   with `aspect infra publish-company-site`, followed by live readiness evidence

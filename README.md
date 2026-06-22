@@ -1,13 +1,11 @@
 # guardian
 
-Guardian is being cut over to a Cozystack-native bootstrap.
+Guardian is being cut over to a Cozystack-native management cluster.
 
-The active `guardian` CLI has one job: host come-up. It takes a
-pre-provisioned bare-metal node that starts from stock Ubuntu, runs the pinned
-boot-to-talos tool, waits for Talos maintenance discovery, applies the stock
-Cozystack Talm flow, bootstraps Kubernetes, writes an encrypted genesis secret
-bundle, and hands off to the Cozystack installer. Runtime platform configuration
-belongs to Flux after that handoff.
+The active `guardian` CLI surface is deliberately narrow: it manages
+host/bootstrap come-up paths and delegates post-Kubernetes desired state to the
+repo's Aspect, OpenTofu, Talm, Talos, Flux, and Cozystack configuration. It is
+not a generic cluster administration CLI.
 
 The previous source tree is preserved under `src-old/` for reference only. It
 is ignored by Bazel and is not part of the active command surface.
@@ -15,13 +13,16 @@ is ignored by Bazel and is not part of the active command surface.
 ## Layout
 
 ```text
-src/guardian/                  new Go CLI and host-bootstrap packages
-src/hosts/                     host target assignment and safety intent in JSON
-src/clusters/                  cluster bootstrap pins in JSON
-src/environments/              Flux environment definitions in JSON
-src/tools/                     pinned runfile tool archives
+.aspect/                       durable Aspect task surface
+src/guardian/                  Go CLI entrypoints for host/bootstrap come-up
+src/infrastructure/bootstrap/  OpenTofu bootstrap roots
+src/infrastructure/base/       base management-cluster Kubernetes desired state
+src/infrastructure/talm/       Talm chart for the management control plane
+src/infrastructure/environments/  dev/gamma/prod tenant desired state
+src/products/company/          active TanStack company website artifact
+src/tools/                     repo-pinned external tool archives
 src-old/                       archived pre-Cozystack implementation
-docs/architecture/             design notes
+docs/runbooks/                 operator runbooks
 ```
 
 ## Commands
@@ -29,70 +30,36 @@ docs/architecture/             design notes
 Run from the repo root.
 
 ```bash
-bazel test //...
+aspect infra validate
 
-bazel run //src/guardian/cmd/guardian -- \
-  up -f src/hosts/ash-bm-004/host.json --output json
+aspect infra bootstrap \
+  --revision "<merged-main-commit-sha>"
+
+bazelisk run //src/guardian/cmd/guardian -- \
+  up management \
+  --revision "<merged-main-commit-sha>"
 ```
 
-Plan mode is the default. Destructive execution requires `--execute`, a host
-assignment that allows destructive bootstrap, and a cluster config that
-explicitly opts into stock-Ubuntu-to-Talos install:
+`aspect infra bootstrap` prints the standard OpenTofu management topology
+outputs, validates the checked-in substrate, refreshes the gitignored Talm
+kubeconfig, runs the Talos L2 gate, and verifies live Flux/source-controller
+convergence on the requested merged `main` revision.
 
-```json
-{
-  "bootstrap": {
-    "destructive": true,
-    "requireMaintenance": true,
-    "targetState": "stock-ubuntu",
-    "genesis": {
-      "ageRecipients": [
-        "age1..."
-      ]
-    }
-  }
-}
-```
-
-Without `bootstrap.genesis.ageRecipients`, `guardian up --execute` refuses
-before running any mutating command. The recipient is public age material; the
-private identity stays in the operator's own secret store.
-
-With `--execute`, `guardian up` streams the underlying command lines and tool
-logs to stderr. Structured `--output json|yaml|toml` stays on stdout after the
-run.
-
-## Secret Bootstrap
-
-Cozystack-managed OpenBao comes after the platform exists, so it cannot own the
-cluster genesis secrets. `guardian up` handles that gap by keeping the Talm
-project under local operator state:
-
-```text
-${XDG_STATE_HOME:-~/.local/state}/guardian/clusters/<cluster>/
-```
-
-After `talm kubeconfig`, it writes:
-
-```text
-genesis.bundle.tar.age
-```
-
-The encrypted bundle contains a manifest plus `talm.key`, `secrets.yaml`, the
-rendered node config, kubeconfig, and operation evidence. Nothing from the
-genesis set is committed to the repo.
+Generated Talm secrets, rendered node configs, kubeconfigs, and local operator
+state stay out of Git. See
+`docs/runbooks/cozystack-mgmt-bringup.md` for the full management-cluster path.
 
 ## Pinned Tools
 
-The CLI resolves these from Bazel runfiles, never from `PATH`:
-
 | Tool | Pin |
 | - | - |
-| Go | `src/guardian/go.mod` |
+| Go | `MODULE.bazel` / `go.mod` |
+| Aspect CLI | `.aspect/version.axl` |
+| OpenTofu | `MODULE.bazel` |
 | Talm | `src/tools/talm/talm.MODULE.bazel` |
 | talosctl | `src/tools/talosctl/talosctl.MODULE.bazel` |
-| boot-to-talos | `src/tools/boot-to-talos/boot-to-talos.MODULE.bazel` |
 | kubectl | `src/tools/kubectl/kubectl.MODULE.bazel` |
-| Helm | `MODULE.bazel` |
+| k6 | `src/tools/k6/k6.MODULE.bazel` |
+| ORAS | `src/tools/oras/oras.MODULE.bazel` |
 
 Run `aspect tidy` before publishing changes.
