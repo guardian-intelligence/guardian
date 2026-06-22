@@ -137,6 +137,17 @@ func testGuardianMgmtTopologyAlignment(t *testing.T) {
 	assertTextContains(t, mainTF, `for_each = local.control_plane_nodes`, "main.tf")
 	assertTextContains(t, mainTF, `latitudesh_virtual_network.management.vid == local.vlan.vid`, "main.tf")
 	assertTextContains(t, mainTF, `latitudesh_server.control_plane[name].primary_ipv4 == node.public_ipv4`, "main.tf")
+
+	outputsTF := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt/outputs.tf"))
+	assertTextContains(t, outputsTF, `output "management_vlan"`, "outputs.tf")
+	assertTextContains(t, outputsTF, `api_server_endpoint = "https://${local.vlan.api_vip}:6443"`, "outputs.tf")
+	assertTextContains(t, outputsTF, `metallb_pool        = local.vlan.metallb_pool`, "outputs.tf")
+	assertTextContains(t, outputsTF, `output "control_plane_nodes"`, "outputs.tf")
+	assertTextContains(t, outputsTF, `for name, node in local.control_plane_nodes`, "outputs.tf")
+	assertTextContains(t, outputsTF, `server_id    = latitudesh_server.control_plane[name].id`, "outputs.tf")
+	assertTextContains(t, outputsTF, `hostname     = latitudesh_server.control_plane[name].hostname`, "outputs.tf")
+	assertTextContains(t, outputsTF, `public_ipv4  = latitudesh_server.control_plane[name].primary_ipv4`, "outputs.tf")
+	assertTextContains(t, outputsTF, `private_ipv4 = node.private_ipv4`, "outputs.tf")
 }
 
 func testEnvironmentTenants(t *testing.T) {
