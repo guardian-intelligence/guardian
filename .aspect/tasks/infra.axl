@@ -8,6 +8,7 @@ TOFU_TARGET = "@opentofu_linux_amd64//:tofu_bin"
 TALM_TARGET = "@talm_linux_amd64//:talm"
 KUBECTL_FILE_TARGET = "@kubectl_linux_amd64//file:file"
 TALOSCTL_FILE_TARGET = "@talosctl_linux_amd64//file:file"
+BACKUP_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_backup_drill:cozystack_backup_drill"
 GUARDIAN_MGMT_TALOS_NODES = [
     "10.8.0.11",
     "10.8.0.12",
@@ -139,6 +140,7 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/bootstrap/guardian-mgmt-openbao:root",
 ]
 INFRA_TESTS = [
+    "//src/infrastructure/cmd/cozystack_backup_drill:cozystack_backup_drill_test",
     "//src/infrastructure/tests:manifest_invariants_test",
 ]
 LIVE_GETS = [
@@ -1032,6 +1034,50 @@ def _live_impl(ctx):
     ctx.std.io.stderr.write("guardian-mgmt source-controller has reconciled " + revision + "\n")
     return 0
 
+def _backup_drill_impl(ctx):
+    kubectl = _kubectl_path(ctx)
+    if kubectl == None:
+        return 1
+
+    rc = _check_live_context(ctx, kubectl)
+    if rc != 0:
+        return rc
+
+    if ctx.args.allow_in_place_restore != "" and ctx.args.allow_in_place_restore != "true" and ctx.args.allow_in_place_restore != "false":
+        ctx.std.io.stderr.write("ERROR: --allow-in-place-restore must be true or false\n")
+        return 1
+
+    drill_args = [
+        "--kubectl",
+        kubectl,
+        "--stage",
+        ctx.args.stage,
+        "--component",
+        ctx.args.component,
+        "--application",
+        ctx.args.application,
+        "--request-timeout",
+        ctx.args.request_timeout,
+        "--wait-timeout",
+        ctx.args.wait_timeout,
+    ]
+    if ctx.args.kubeconfig != "":
+        drill_args.extend(["--kubeconfig", ctx.args.kubeconfig])
+    if ctx.args.name != "":
+        drill_args.extend(["--name", ctx.args.name])
+    if ctx.args.restore_target != "":
+        drill_args.extend(["--restore-target", ctx.args.restore_target])
+    if ctx.args.allow_in_place_restore == "true":
+        drill_args.append("--allow-in-place-restore=true")
+
+    return checked_spawn(
+        ctx,
+        "bazelisk",
+        ["run", BACKUP_DRILL_TARGET, "--"] + drill_args,
+        cwd = ws_path(ctx),
+        label = "cozystack backup drill",
+    )
+
 validate = task(
     implementation = _validate_impl,
     name = "validate",
@@ -1084,5 +1130,23 @@ live = task(
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
         "revision": args.string(default = "", description = "Expected merged Git commit SHA that source-controller must have applied."),
         "wait_timeout": args.string(default = "5m", description = "Timeout for Flux and Deployment readiness waits."),
+    },
+)
+
+backup_drill = task(
+    implementation = _backup_drill_impl,
+    name = "backup-drill",
+    group = ["infra"],
+    summary = "Run an ad-hoc Cozystack BackupJob, and optionally a RestoreJob, for a Guardian app.",
+    args = {
+        "allow_in_place_restore": args.string(default = "false", description = "Set true only for an intentional restore into the source app."),
+        "application": args.string(default = "guardian", description = "Cozystack app name."),
+        "component": args.string(default = "clickhouse", description = "Component to drill: clickhouse or postgres."),
+        "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
+        "name": args.string(default = "", description = "Optional BackupJob name. Defaults to a timestamped DNS label."),
+        "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
+        "restore_target": args.string(default = "", description = "Optional existing app name to restore into after the backup succeeds."),
+        "stage": args.string(default = "dev", description = "Guardian stage: root, dev, gamma, or prod."),
+        "wait_timeout": args.string(default = "30m", description = "Timeout for BackupJob, Backup, and RestoreJob waits."),
     },
 )

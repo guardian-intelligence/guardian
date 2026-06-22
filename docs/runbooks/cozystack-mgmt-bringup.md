@@ -446,6 +446,56 @@ All environment app specs select `storageClass: replicated` and run three
 replicas for the stateful control-plane services so single-node outage drills
 exercise the intended topology.
 
+## Backup And Restore Drills
+
+Ad-hoc backup/restore evidence should use Cozystack's native
+`BackupJob`, `Backup`, and `RestoreJob` resources. Do not check one-shot
+`BackupJob` resources into the Flux path; they are operation records, not
+steady desired state.
+
+`aspect infra backup-drill` is a thin wrapper around repo-pinned `kubectl` and a
+small repo-built helper. It first runs the same guardian-mgmt kubeconfig guard
+as `aspect infra live`, then creates a one-shot `BackupJob`, waits for
+`BackupJob.status.phase=Succeeded`, waits for the resulting
+`Backup.status.phase=Ready`, and prints standard Kubernetes resource YAML,
+related Jobs/Pods, and pod logs where the backup strategy labels them.
+If `--name` is omitted, the helper generates a unique UTC timestamped
+`BackupJob` name.
+
+Run a ClickHouse backup smoke drill with:
+
+```sh
+aspect infra backup-drill \
+  --kubeconfig "$GUARDIAN_MGMT_KUBECONFIG" \
+  --stage dev \
+  --component clickhouse
+```
+
+Run a restore drill only into an existing restore target app, not the serving
+app:
+
+```sh
+aspect infra backup-drill \
+  --kubeconfig "$GUARDIAN_MGMT_KUBECONFIG" \
+  --stage dev \
+  --component clickhouse \
+  --restore-target guardian-restore
+```
+
+The helper refuses in-place restore by default. `--allow-in-place-restore=true`
+exists for an intentional repair operation, not for routine drills.
+
+The same command supports `--component postgres`, but Postgres backup drills
+will not pass until the corresponding `Postgres/guardian` app has
+`spec.backup.enabled`, `destinationPath`, and `endpointURL` wired to declared
+non-secret R2 coordinates. The reusable CNPG `BackupClass` and OpenBao-projected
+credential Secrets already exist.
+
+For PR-local evidence, capture the unmodified command output. Durable reports
+should summarize the standard Kubernetes objects and include the relevant
+`BackupJob`, `Backup`, `RestoreJob`, and strategy pod log excerpts. Do not add
+repo-specific JSON evidence bundles.
+
 ## Company Site
 
 The active company-site artifact is the TanStack Start/Nitro OCI image exposed
@@ -743,9 +793,11 @@ separate PRs with their own validation:
   credential SecretStores and ExternalSecrets, OpenBao auth/policy
   configuration, ClickHouse app backup Secret references, recurring ClickHouse
   backup Plans, and Harbor's COSI-backed registry bucket resources are declared
-  and live-gated. Applying the OpenBao root, populating real kv values, Postgres
-  object-store coordinates, ad-hoc BackupJob smoke tests, Harbor registry
-  restore validation, and live restore drills still need separate PRs.
+  and live-gated. `aspect infra backup-drill` now creates ad-hoc Cozystack
+  BackupJob/RestoreJob resources and prints standard Kubernetes evidence, but
+  applying the OpenBao root, populating real kv values, Postgres object-store
+  coordinates, running the smoke tests, Harbor registry restore validation, and
+  live restore drill reports still need separate PRs.
 - ClickHouse chart-side `spec.storageClass` rendering, because Cozystack 1.4
   still relies on the cluster default for ClickHouse and keeper PVCs.
 - OpenBao init/unseal automation and backup/restore drills.
