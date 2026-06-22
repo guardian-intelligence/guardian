@@ -78,6 +78,22 @@ declared in `tenant-root`, the reusable CNPG backup strategy maps through a
 cluster-scoped BackupClass, the company site is declared for dev/gamma/prod,
 and Flux reconciles base before tenant apps.
 
+After a PR is merged to `main`, validate that the live management cluster's
+source-controller has reconciled the merged commit with:
+
+```sh
+aspect infra live \
+  --kubeconfig "$GUARDIAN_MGMT_KUBECONFIG" \
+  --revision "<merged-main-commit-sha>"
+```
+
+`aspect infra live` uses the repo-pinned kubectl artifact, refuses to validate
+against the excluded Verself-prod API at `206.223.228.99`, requires exactly
+three management nodes with `10.8.0.x` InternalIP addresses, waits for the Flux
+source and both Guardian Kustomizations to become Ready, verifies their applied
+revision contains the expected merged commit, and checks the declared Cozystack
+app, networking, storage, OpenBao, backup, and company-site resources exist.
+
 Local validation does not require backend credentials:
 
 ```sh
@@ -158,6 +174,12 @@ out into HelmReleases and stateful workloads; readiness is proven by the live
 checks and checked-in load/DR/outage reports, not by treating Flux's apply
 status as service health.
 
+After changing checked-in infrastructure, merge the PR to `main` and let the
+existing `GitRepository/guardian` and `Kustomization/guardian-mgmt-*` objects
+pull the new revision. Do not manually apply the rendered base as a substitute
+for source-controller validation; manual apply is only the bootstrap handoff
+before Flux owns the path.
+
 The platform package uses Cozystack's `isp-full` variant. In Cozystack 1.4,
 `isp-full` includes the backup controller and backupstrategy controller, but
 `cozystack.external-secrets-operator` and `cozystack.velero` are optional
@@ -173,6 +195,20 @@ bazelisk build @kubectl_linux_amd64//file:file
 OUTPUT_BASE="$(bazelisk info output_base)"
 "$OUTPUT_BASE/external/+http_file+kubectl_linux_amd64/file/kubectl" \
   kustomize src/infrastructure/base
+```
+
+For the live source-controller gate:
+
+```sh
+aspect infra live \
+  --kubeconfig "$GUARDIAN_MGMT_KUBECONFIG" \
+  --revision "<merged-main-commit-sha>"
+```
+
+Expected success ends with:
+
+```text
+guardian-mgmt source-controller has reconciled <commit-sha>
 ```
 
 ## Cozystack App Path

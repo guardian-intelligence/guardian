@@ -16,6 +16,7 @@ load(
 )
 load(
     ".aspect/tasks/infra.axl",
+    infra_live = "live",
     infra_validate = "validate",
 )
 load(
@@ -28,6 +29,7 @@ def config(ctx):
     ctx.tasks.add(bazel_bzlmod)
 
     # aspect infra ...
+    ctx.tasks.add(infra_live)
     ctx.tasks.add(infra_validate)
 
     # aspect tidy

@@ -1,21 +1,71 @@
-"""aspect infra validate - local checks for the management-cluster substrate."""
+"""aspect infra validate|live - checks for the management-cluster substrate."""
 
 load(".aspect/lib/helpers.axl", "checked_spawn", "ws_path")
 
 GUARDIAN_MGMT_ROOT = "src/infrastructure/bootstrap/guardian-mgmt"
 TOFU_TARGET = "@opentofu_linux_amd64//:tofu_bin"
 KUBECTL_FILE_TARGET = "@kubectl_linux_amd64//file:file"
+EXCLUDED_KUBE_APIS = [
+    # AGENTS.md marks this as Verself prod. It is not guardian-mgmt and must not
+    # be used to validate source-controller deployment.
+    "https://206.223.228.99:6443",
+]
 INFRA_FILEGROUPS = [
     "//src/infrastructure/bootstrap/guardian-mgmt:root",
     "//src/infrastructure/inventory:inventory",
     "//src/infrastructure/talm:chart",
     "//src/infrastructure/base/apps:manifests",
     "//src/infrastructure/base/backup:manifests",
+    "//src/infrastructure/base/cozystack:manifests",
     "//src/infrastructure/base/flux:manifests",
     "//src/infrastructure/base/networking:manifests",
+    "//src/infrastructure/base/openbao:manifests",
     "//src/infrastructure/base/storage:manifests",
     "//src/infrastructure/base/tenants:manifests",
     "//src/infrastructure/environments:manifests",
+]
+LIVE_GETS = [
+    ("cozystack platform package", ["get", "packages.cozystack.io/cozystack.cozystack-platform"]),
+    ("ovn-default subnet", ["get", "subnets.kubeovn.io/ovn-default"]),
+    ("join subnet", ["get", "subnets.kubeovn.io/join"]),
+    ("metallb ip pool", ["-n", "cozy-metallb", "get", "ipaddresspools.metallb.io/cozystack"]),
+    ("metallb l2 advertisement", ["-n", "cozy-metallb", "get", "l2advertisements.metallb.io/cozystack"]),
+    ("replicated storage class", ["get", "storageclass/replicated"]),
+    ("replicated-retain storage class", ["get", "storageclass/replicated-retain"]),
+    ("local storage class", ["get", "storageclass/local"]),
+    ("local-retain storage class", ["get", "storageclass/local-retain"]),
+    ("postgres backup strategy", ["get", "cnpgs.strategy.backups.cozystack.io/guardian-postgres-r2"]),
+    ("postgres backup class", ["get", "backupclasses.backups.cozystack.io/guardian-postgres-cnpg"]),
+    ("dev tenant", ["-n", "tenant-root", "get", "tenants.apps.cozystack.io/dev"]),
+    ("gamma tenant", ["-n", "tenant-root", "get", "tenants.apps.cozystack.io/gamma"]),
+    ("prod tenant", ["-n", "tenant-root", "get", "tenants.apps.cozystack.io/prod"]),
+    ("root postgres", ["-n", "tenant-root", "get", "postgreses.apps.cozystack.io/guardian"]),
+    ("root harbor", ["-n", "tenant-root", "get", "harbors.apps.cozystack.io/guardian"]),
+    ("root clickhouse", ["-n", "tenant-root", "get", "clickhouses.apps.cozystack.io/guardian"]),
+    ("root openbao", ["-n", "tenant-root", "get", "openbao", "guardian"]),
+    ("dev postgres", ["-n", "tenant-dev", "get", "postgreses.apps.cozystack.io/guardian"]),
+    ("dev harbor", ["-n", "tenant-dev", "get", "harbors.apps.cozystack.io/guardian"]),
+    ("dev clickhouse", ["-n", "tenant-dev", "get", "clickhouses.apps.cozystack.io/guardian"]),
+    ("gamma postgres", ["-n", "tenant-gamma", "get", "postgreses.apps.cozystack.io/guardian"]),
+    ("gamma harbor", ["-n", "tenant-gamma", "get", "harbors.apps.cozystack.io/guardian"]),
+    ("gamma clickhouse", ["-n", "tenant-gamma", "get", "clickhouses.apps.cozystack.io/guardian"]),
+    ("prod postgres", ["-n", "tenant-prod", "get", "postgreses.apps.cozystack.io/guardian"]),
+    ("prod harbor", ["-n", "tenant-prod", "get", "harbors.apps.cozystack.io/guardian"]),
+    ("prod clickhouse", ["-n", "tenant-prod", "get", "clickhouses.apps.cozystack.io/guardian"]),
+    ("dev company service", ["-n", "tenant-dev", "get", "service/company-site"]),
+    ("dev company ingress", ["-n", "tenant-dev", "get", "ingress/company-site"]),
+    ("gamma company service", ["-n", "tenant-gamma", "get", "service/company-site"]),
+    ("gamma company ingress", ["-n", "tenant-gamma", "get", "ingress/company-site"]),
+    ("prod company service", ["-n", "tenant-prod", "get", "service/company-site"]),
+    ("prod company ingress", ["-n", "tenant-prod", "get", "ingress/company-site"]),
+]
+LIVE_WAITS = [
+    ("flux source", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "gitrepositories.source.toolkit.fluxcd.io/guardian"]),
+    ("flux base kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-base"]),
+    ("flux tenant app kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-tenant-apps"]),
+    ("dev company deployment", ["-n", "tenant-dev", "wait", "--for=condition=Available", "deployment/company-site"]),
+    ("gamma company deployment", ["-n", "tenant-gamma", "wait", "--for=condition=Available", "deployment/company-site"]),
+    ("prod company deployment", ["-n", "tenant-prod", "wait", "--for=condition=Available", "deployment/company-site"]),
 ]
 
 def _capture_stdout(ctx, program, args, cwd = None, label = None):
@@ -82,6 +132,98 @@ def _kubectl_path(ctx):
         return None
     return output_base + "/external/+http_file+kubectl_linux_amd64/file/kubectl"
 
+def _kubectl_args(ctx, args):
+    out = []
+    if ctx.args.kubeconfig != "":
+        out.extend(["--kubeconfig", ctx.args.kubeconfig])
+    if ctx.args.request_timeout != "":
+        out.append("--request-timeout=" + ctx.args.request_timeout)
+    out.extend(args)
+    return out
+
+def _kubectl_capture(ctx, kubectl, args, label):
+    return _capture_stdout(
+        ctx,
+        kubectl,
+        _kubectl_args(ctx, args),
+        cwd = ws_path(ctx),
+        label = label,
+    )
+
+def _kubectl_success(ctx, kubectl, args, label):
+    return _capture_success(
+        ctx,
+        kubectl,
+        _kubectl_args(ctx, args),
+        cwd = ws_path(ctx),
+        label = label,
+    )
+
+def _contains(items, needle):
+    for item in items:
+        if item == needle:
+            return True
+    return False
+
+def _expected_revision(ctx):
+    if ctx.args.revision == "":
+        ctx.std.io.stderr.write("ERROR: --revision is required; pass the merged main commit SHA that source-controller must have applied\n")
+        return None
+    return ctx.args.revision
+
+def _line_count(s):
+    count = 0
+    for line in s.split("\n"):
+        if line.strip() != "":
+            count = count + 1
+    return count
+
+def _assert_contains(ctx, value, needle, label):
+    if value.find(needle) == -1:
+        ctx.std.io.stderr.write("ERROR: " + label + " = " + value + "; expected it to contain " + needle + "\n")
+        return 1
+    return 0
+
+def _check_live_context(ctx, kubectl):
+    server = _kubectl_capture(
+        ctx,
+        kubectl,
+        ["config", "view", "--minify", "--output=jsonpath={.clusters[0].cluster.server}"],
+        "kubectl current cluster server",
+    )
+    if server == None:
+        return 1
+    if _contains(EXCLUDED_KUBE_APIS, server):
+        ctx.std.io.stderr.write("ERROR: refusing to validate against excluded cluster API " + server + "\n")
+        return 1
+
+    nodes = _kubectl_capture(ctx, kubectl, ["get", "nodes", "-o", "name"], "kubectl get nodes")
+    if nodes == None:
+        return 1
+    if _line_count(nodes) != 3:
+        ctx.std.io.stderr.write("ERROR: guardian-mgmt should have exactly 3 nodes; kubectl reported:\n" + nodes + "\n")
+        return 1
+
+    node_details = _kubectl_capture(ctx, kubectl, ["get", "nodes", "-o", "wide"], "kubectl get nodes -o wide")
+    if node_details == None:
+        return 1
+    return _assert_contains(ctx, node_details, "10.8.0.", "node InternalIP addresses")
+
+def _check_flux_revision(ctx, kubectl, revision):
+    checks = [
+        ("guardian GitRepository artifact revision", ["-n", "cozy-fluxcd", "get", "gitrepositories.source.toolkit.fluxcd.io/guardian", "-o", "jsonpath={.status.artifact.revision}"]),
+        ("guardian-mgmt-base last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-base", "-o", "jsonpath={.status.lastAppliedRevision}"]),
+        ("guardian-mgmt-tenant-apps last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-tenant-apps", "-o", "jsonpath={.status.lastAppliedRevision}"]),
+    ]
+    for label, kubectl_args in checks:
+        value = _kubectl_capture(ctx, kubectl, kubectl_args, "kubectl read " + label)
+        if value == None:
+            return 1
+        rc = _assert_contains(ctx, value, revision, label)
+        if rc != 0:
+            return rc
+    return 0
+
 def _render_kustomizations(ctx):
     kubectl = _kubectl_path(ctx)
     if kubectl == None:
@@ -122,9 +264,56 @@ def _validate_impl(ctx):
         return rc
     return _render_kustomizations(ctx)
 
+def _live_impl(ctx):
+    revision = _expected_revision(ctx)
+    if revision == None:
+        return 1
+    kubectl = _kubectl_path(ctx)
+    if kubectl == None:
+        return 1
+
+    rc = _check_live_context(ctx, kubectl)
+    if rc != 0:
+        return rc
+
+    for label, kubectl_args in LIVE_WAITS:
+        rc = _kubectl_success(
+            ctx,
+            kubectl,
+            kubectl_args + ["--timeout=" + ctx.args.wait_timeout],
+            "kubectl wait " + label,
+        )
+        if rc != 0:
+            return rc
+
+    rc = _check_flux_revision(ctx, kubectl, revision)
+    if rc != 0:
+        return rc
+
+    for label, kubectl_args in LIVE_GETS:
+        rc = _kubectl_success(ctx, kubectl, kubectl_args, "kubectl get " + label)
+        if rc != 0:
+            return rc
+
+    ctx.std.io.stderr.write("guardian-mgmt source-controller has reconciled " + revision + "\n")
+    return 0
+
 validate = task(
     implementation = _validate_impl,
     name = "validate",
     group = ["infra"],
     summary = "Validate the checked-in management-cluster OpenTofu, Talm, and Kustomize substrate.",
+)
+
+live = task(
+    implementation = _live_impl,
+    name = "live",
+    group = ["infra"],
+    summary = "Validate that the live guardian-mgmt source-controller reconciled this repo commit.",
+    args = {
+        "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
+        "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
+        "revision": args.string(default = "", description = "Expected merged Git commit SHA that source-controller must have applied."),
+        "wait_timeout": args.string(default = "5m", description = "Timeout for Flux and Deployment readiness waits."),
+    },
 )
