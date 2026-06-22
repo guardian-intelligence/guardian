@@ -14,8 +14,14 @@ CronJobs yet — those are the M5 remainder.
 Setup for every step (repo root, per site):
 
 ```sh
-export KUBECONFIG=~/.guardian-deploy/kubeconfig
+export GUARDIAN_CLUSTER="guardian-<site>"
+export GUARDIAN_STATE="${XDG_STATE_HOME:-$HOME/.local/state}/guardian/clusters/${GUARDIAN_CLUSTER}"
+export KUBECONFIG="${GUARDIAN_STATE}/talm/kubeconfig"
 ```
+
+The kubeconfig is private generated operator state. Desired state remains in
+git and is reconciled by Flux; do not introduce a separate scratch deploy
+directory.
 
 ## 1. Converge
 

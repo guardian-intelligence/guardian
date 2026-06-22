@@ -21,11 +21,19 @@ L2/ARP:
   private VLAN (nodes `.11/.12/.13`).
 - `certSANs` = the VIP, `api.guardianintelligence.org`, and each node's public IP.
 
-## Secrets — never committed
+## Secrets - never committed
 
 `secrets.yaml`, `talm.key`, `talosconfig*` are gitignored and live only on the
-release runner (`~/.guardian-deploy/talm/`). A clean-slate rebuild regenerates
-them:
+operator state path:
+
+```text
+${XDG_STATE_HOME:-$HOME/.local/state}/guardian/clusters/<cluster>/talm/
+```
+
+That directory is generated from this checked-in chart and is safe to delete
+between rebuilds. If a value is needed to reproduce the cluster, it belongs in
+this repo, not in the generated state directory. A clean-slate rebuild
+regenerates the secret-zero material:
 
 ```
 talm gen secrets            # -> secrets.yaml + talm.key (fresh PKI, secret-zero)

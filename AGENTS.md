@@ -25,6 +25,13 @@ After doing some financial calculation I also realize I need to make provisionin
 
 Important context:
 - All dependencies version/commit pinned. Nothing during runtime, dev time, test time, or build time should require external non-version-pinned tooling, or shell out to binaries outside this repo or its build artifacts.
+- IaC first: non-secret desired state belongs in this repo. Local state under
+  `${XDG_STATE_HOME:-$HOME/.local/state}/guardian/` is private, generated, and
+  disposable: kubeconfigs, Talos/Talm PKI, rendered configs, genesis bundles,
+  unseal material, and operation evidence only. If deleting local state loses
+  infrastructure intent, move that intent into the repo before proceeding. Do
+  not recreate or depend on the old `~/.guardian-deploy` tracer-bullet
+  directory.
 - The `guardian` CLI is not a dumping ground for generic functionality. Its sole purpose is to manage host come-up.
 - Dev tools: `aspect`. Run `aspect tidy` to format the codebase.
 - 1p configuration in JSON/JSONL/JSON-ND where appropriate. Don't use CUE.
