@@ -76,8 +76,6 @@ func environmentCapabilityResource(kind string) (string, bool) {
 	switch kind {
 	case "AisucksProduct":
 		return "aisucksproducts.products.guardian.dev", true
-	case "CompanySite":
-		return "companysites.products.guardian.dev", true
 	case "DirectusInstance":
 		return "directusinstances.platform.guardian.dev", true
 	case "ObservabilityStack":
@@ -100,8 +98,6 @@ func environmentCapabilityRollouts(kind, namespace string, waitForRollout bool) 
 	switch kind {
 	case "AisucksProduct":
 		return []environmentRollout{{namespace: "aisucks", resource: "deployment/aisucks"}}, nil
-	case "CompanySite":
-		return []environmentRollout{{namespace: "company", resource: "deployment/company-site"}}, nil
 	case "DirectusInstance":
 		if namespace == "" {
 			return nil, fmt.Errorf("spec.namespace is required")

@@ -43,22 +43,6 @@ func gatusConfig(site *Host) string {
 		"[STATUS] == 200",
 		"[BODY] == pat(*never be sold*)",
 	}, alert)
-	if site.Company.Domain != "" {
-		companyBase := "http://company-site-probe.company.svc"
-		writeGatusEndpoint(&b, "company-healthz ("+site.Cluster.Name+")", companyBase+"/healthz", []string{"[STATUS] == 200"}, alert)
-		writeGatusEndpoint(&b, "company-home ("+site.Cluster.Name+")", companyBase+"/", []string{
-			"[STATUS] == 200",
-			"[BODY] == pat(*Guardian Intelligence*)",
-		}, alert)
-		writeGatusEndpoint(&b, "company-letters ("+site.Cluster.Name+")", companyBase+"/letters", []string{
-			"[STATUS] == 200",
-			"[BODY] == pat(*The Coding Agent is the Next Smartphone*)",
-		}, alert)
-		writeGatusEndpoint(&b, "company-news ("+site.Cluster.Name+")", companyBase+"/news", []string{
-			"[STATUS] == 200",
-			"[BODY] == pat(*Guardian Intelligence Inc. announces private beta of Verself.*)",
-		}, alert)
-	}
 	for i, target := range site.Aisucks.Watch {
 		writeGatusEndpoint(&b, fmt.Sprintf("watch-%d", i), target, []string{"[STATUS] == 200"}, alert)
 	}
@@ -256,10 +240,9 @@ func otelCollectorConfig(site *Host) string {
 }
 
 func otelBlackboxTargets(site *Host) []string {
-	targets := make([]string, 0, len(site.Aisucks.Watch)+len(site.Aisucks.WatchPages)+len(site.Company.ProbeURLs)+len(site.Status.Domains))
+	targets := make([]string, 0, len(site.Aisucks.Watch)+len(site.Aisucks.WatchPages)+len(site.Status.Domains))
 	targets = append(targets, site.Aisucks.Watch...)
 	targets = append(targets, site.Aisucks.WatchPages...)
-	targets = append(targets, site.Company.ProbeURLs...)
 	if site.Status.Monitor {
 		for _, domain := range site.Status.Domains {
 			targets = append(targets, "https://"+domain+"/healthz")

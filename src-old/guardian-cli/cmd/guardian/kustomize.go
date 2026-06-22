@@ -174,7 +174,6 @@ func environmentImagePatches(site *Host, images map[string]string) []kustomizePa
 		add("OCIRegistry", "zot", "/spec/image", "zot")
 	}
 	add("AisucksProduct", "aisucks", "/spec/image", "aisucks")
-	add("CompanySite", "company-site", "/spec/image", "company-site")
 	add("DirectusInstance", "directus", "/spec/image", "directus")
 	add("DirectusInstance", "directus", "/spec/postgresImage", "postgres")
 	return patches

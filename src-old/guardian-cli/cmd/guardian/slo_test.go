@@ -27,9 +27,6 @@ func TestSLOAndSyntheticSiteManifests(t *testing.T) {
 			if len(site.Aisucks.WatchPages) == 0 {
 				t.Fatal("Aisucks page watch targets not derived from SyntheticCheck")
 			}
-			if siteName != "dev" && len(site.Company.ProbeURLs) == 0 {
-				t.Fatal("company probe URLs not derived from SyntheticCheck")
-			}
 		})
 	}
 }
@@ -62,7 +59,7 @@ spec:
   surface: public-http
   targets:
     - name: bad
-      product: company-site
+      product: aisucks
       kind: page
       url: not-a-url
 `)

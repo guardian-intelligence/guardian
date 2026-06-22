@@ -139,12 +139,6 @@ func TestEnvironmentValidation(t *testing.T) {
 		},
 		wantErr: "site.name",
 	}, {
-		name: "company requires gateway",
-		mutate: func(site *Host, _ *Environment, _ *environmentConfigMetadata) {
-			site.Company.Domain = "guardianintelligence.org"
-		},
-		wantErr: "products.company.domain requires gateway.enabled",
-	}, {
 		name: "aisucks requires gateway",
 		mutate: func(site *Host, _ *Environment, _ *environmentConfigMetadata) {
 			site.Aisucks.Domain = "aisucks.app"
@@ -174,46 +168,5 @@ func TestEnvironmentValidation(t *testing.T) {
 				t.Fatalf("validateHostEnvironment error = %v; want it to contain %q", err, tc.wantErr)
 			}
 		})
-	}
-}
-
-func TestCompanyProbeURLs(t *testing.T) {
-	raw := []byte(`apiVersion: apiextensions.crossplane.io/v1beta1
-kind: EnvironmentConfig
-metadata:
-  name: guardian-dev
----
-apiVersion: products.guardian.dev/v1alpha1
-kind: CompanySite
-metadata:
-  name: company-site
-spec:
-  site: dev
-  domain: dev.guardianintelligence.org
-  image: registry.guardian.internal/company-site@sha256:deadbeef
-  routes:
-    - /
-    - /letters
-    - /news
-  replicas: 2
-`)
-	xr, err := loadCompanySiteSpec(raw, "environment.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	site := &Host{Name: "dev"}
-	site.Company.Domain = "dev.guardianintelligence.org"
-	if err := validateCompanySiteSpec(site, "environment.yaml", xr); err != nil {
-		t.Fatal(err)
-	}
-	got := companyProbeURLs([]string{"gamma.guardianintelligence.org"}, xr.Routes)
-	want := []string{
-		"https://gamma.guardianintelligence.org/healthz",
-		"https://gamma.guardianintelligence.org/",
-		"https://gamma.guardianintelligence.org/letters",
-		"https://gamma.guardianintelligence.org/news",
-	}
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("companyProbeURLs = %#v, want %#v", got, want)
 	}
 }

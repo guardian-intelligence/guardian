@@ -70,19 +70,6 @@ func TestEdgeGatewaySiteManifests(t *testing.T) {
 					}
 				}
 			}
-			if site.Company.Domain != "" {
-				for _, want := range []string{
-					"name: https-company-site",
-					"hostname: \"" + site.Company.Domain + "\"",
-					"protocol: HTTPS",
-					"certificateRefName: company-site-tls",
-					"name: company-site-tls",
-				} {
-					if !strings.Contains(out, want) {
-						t.Errorf("edge gateway instance render missing %q", want)
-					}
-				}
-			}
 			for i, domain := range site.Status.Domains {
 				for _, want := range []string{
 					"name: tls-status-" + strconv.Itoa(i),

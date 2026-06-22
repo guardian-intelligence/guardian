@@ -12,7 +12,6 @@ func TestEnvironmentCapabilities(t *testing.T) {
 			}
 			want := map[string]string{
 				"AisucksProduct/aisucks":           "aisucksproducts.products.guardian.dev",
-				"CompanySite/company-site":         "companysites.products.guardian.dev",
 				"DirectusInstance/directus":        "directusinstances.platform.guardian.dev",
 				"ObservabilityStack/observability": "observabilitystacks.platform.guardian.dev",
 				"StatusSurface/status":             "statussurfaces.platform.guardian.dev",
@@ -21,9 +20,6 @@ func TestEnvironmentCapabilities(t *testing.T) {
 			wantRollouts := map[string][]environmentRollout{
 				"AisucksProduct/aisucks": {
 					{namespace: "aisucks", resource: "deployment/aisucks"},
-				},
-				"CompanySite/company-site": {
-					{namespace: "company", resource: "deployment/company-site"},
 				},
 				"DirectusInstance/directus": nil,
 				"ObservabilityStack/observability": {
