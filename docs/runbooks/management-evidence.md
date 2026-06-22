@@ -301,3 +301,31 @@ Passing criteria: the API VIP remains reachable, etcd remains quorate, tenant
 site rollouts remain available, replicated storage does not suspend writes for
 healthy workloads, and the returned node becomes Ready without manual
 Kubernetes object repair.
+
+Latitude API contract for the power step:
+
+```http
+POST https://api.latitude.sh/servers/{server_id}/actions
+Authorization: Bearer ${LATITUDESH_AUTH_TOKEN}
+Content-Type: application/vnd.api+json
+
+{
+  "data": {
+    "type": "actions",
+    "attributes": {
+      "action": "power_off"
+    }
+  }
+}
+```
+
+Use `power_on` to restore the node. Poll
+`GET https://api.latitude.sh/servers/{server_id}` and record
+`data.attributes.status` before the down capture and after the restored capture.
+The management server IDs are checked into
+`src/infrastructure/inventory/guardian-mgmt.json`.
+
+There is intentionally no `aspect infra hardware-outage-run` task yet. A live
+power action must not depend on an unpinned workstation `curl` or SDK binary;
+add the task only after the repo owns a pinned HTTP client or equivalent
+provider-backed action surface.

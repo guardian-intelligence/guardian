@@ -90,6 +90,8 @@ aspect infra evidence-verify --run-dir docs/reports/infrastructure/live-runs/<ti
 - The Kubernetes-side single-node outage rehearsal now has a repo-owned
   `aspect infra outage-run` task that captures before/drained/after evidence
   and preserves failed-state output.
+- The hardware outage runbook now records the exact Latitude power-action HTTP
+  contract and identifies the checked-in inventory as the source for server IDs.
 - Live Kubernetes evidence is pending because the `guardian-mgmt` kubeconfig and
   converged cluster are not present in this workspace.
 - Latitude adoption is pending a Latitude token and VLAN assignment import IDs.
@@ -142,6 +144,9 @@ Single-node outage reports:
   seeding task has been run and live backup/restore-to-copy drills pass.
 - A Kubernetes drain rehearsal is useful but insufficient for the final
   single-node outage criterion.
+- A repo-owned hardware power-action task is still pending a pinned HTTP client
+  or provider-backed action surface; the current runbook records the Latitude
+  API contract but does not automate it.
 - The company-site deployment references Harbor by digest; it cannot pull until
   Harbor is live, OCI auth is present, and `aspect infra publish-company-site`
   has pushed the image there.
