@@ -769,7 +769,7 @@ func assertCNPGBackupSecretProjection(t *testing.T, docs []manifest, namespace, 
 
 	store := findObject(t, docs, "SecretStore", namespace, "openbao")
 	assertString(t, store, "external-secrets.io/v1beta1", "apiVersion")
-	assertString(t, store, "http://guardian.tenant-root.svc:8200", "spec", "provider", "vault", "server")
+	assertString(t, store, "http://openbao-guardian.tenant-root.svc:8200", "spec", "provider", "vault", "server")
 	assertString(t, store, "kv", "spec", "provider", "vault", "path")
 	assertString(t, store, "v2", "spec", "provider", "vault", "version")
 	assertString(t, store, "kubernetes", "spec", "provider", "vault", "auth", "kubernetes", "mountPath")
@@ -865,7 +865,7 @@ func assertClickHouseBackupSecretProjection(t *testing.T, docs []manifest, names
 
 	store := findObject(t, docs, "SecretStore", namespace, "openbao-clickhouse-backup")
 	assertString(t, store, "external-secrets.io/v1beta1", "apiVersion")
-	assertString(t, store, "http://guardian.tenant-root.svc:8200", "spec", "provider", "vault", "server")
+	assertString(t, store, "http://openbao-guardian.tenant-root.svc:8200", "spec", "provider", "vault", "server")
 	assertString(t, store, "kv", "spec", "provider", "vault", "path")
 	assertString(t, store, "v2", "spec", "provider", "vault", "version")
 	assertString(t, store, "kubernetes", "spec", "provider", "vault", "auth", "kubernetes", "mountPath")

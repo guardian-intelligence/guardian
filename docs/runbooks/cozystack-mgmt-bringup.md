@@ -391,8 +391,9 @@ tenant namespace. Each ClickHouse path must contain `bucketName`, `endpoint`,
 `region`, `accessKey`, and `secretKey`; ESO writes them to
 `guardian-clickhouse-backup-creds` in the tenant namespace. The SecretStores
 talk to Cozystack's OpenBao service at
-`http://guardian.tenant-root.svc:8200`, use the `kv` engine with `version: v2`,
-and authenticate through the `kubernetes` auth mount with audience `openbao`.
+`http://openbao-guardian.tenant-root.svc:8200`, use the `kv` engine with
+`version: v2`, and authenticate through the `kubernetes` auth mount with
+audience `openbao`.
 `tenant-root` also declares a Cilium allow policy for only the Cozystack ESO
 controller in `cozy-external-secrets-operator` to reach OpenBao on port 8200.
 The matching OpenBao API state is declared with standard OpenTofu resources in
@@ -513,6 +514,10 @@ kubectl -n tenant-gamma get networkpolicy company-site-ingress
 kubectl -n tenant-prod get deploy,svc,poddisruptionbudget,ingress company-site
 kubectl -n tenant-prod get networkpolicy company-site-ingress
 kubectl -n tenant-root get openbao guardian
+kubectl -n tenant-root get helmrelease openbao-guardian
+kubectl -n tenant-root get helmrelease openbao-guardian-system
+kubectl -n tenant-root get service openbao-guardian
+kubectl -n tenant-root get statefulset openbao-guardian
 kubectl -n tenant-root get ciliumnetworkpolicy allow-openbao-to-apiserver
 kubectl -n tenant-root get ciliumnetworkpolicy allow-external-secrets-to-openbao
 kubectl -n tenant-root get secretstores.external-secrets.io openbao
@@ -555,6 +560,8 @@ kubectl -n tenant-gamma wait --for=condition=Ready secretstores.external-secrets
 kubectl -n tenant-gamma wait --for=condition=Ready externalsecrets.external-secrets.io/guardian-cnpg-backup-creds externalsecrets.external-secrets.io/guardian-clickhouse-backup-creds
 kubectl -n tenant-prod wait --for=condition=Ready secretstores.external-secrets.io/openbao secretstores.external-secrets.io/openbao-clickhouse-backup
 kubectl -n tenant-prod wait --for=condition=Ready externalsecrets.external-secrets.io/guardian-cnpg-backup-creds externalsecrets.external-secrets.io/guardian-clickhouse-backup-creds
+kubectl -n tenant-root wait --for=condition=Ready helmrelease/openbao-guardian helmrelease/openbao-guardian-system
+kubectl -n tenant-root wait --for=jsonpath='{.status.readyReplicas}'=3 statefulset/openbao-guardian
 ```
 
 Expected results:
@@ -586,14 +593,17 @@ Expected results:
   environment-specific daily ClickHouse backup Plan schedule
 - tenant and service app resources report `Ready=True`
 - root/dev/gamma/prod Postgres, Harbor, and ClickHouse app resources report
-  `WorkloadsReady=True`; OpenBao app `Ready=True` is sufficient until
-  init/unseal is declared in the bootstrap path
+  `WorkloadsReady=True`; OpenBao app `Ready=True` and
+  `StatefulSet/openbao-guardian` has three ready replicas
 - each tenant namespace has the company-site `Deployment`, `Service`,
   `NetworkPolicy`, `PodDisruptionBudget`, and `Ingress`; the dev and gamma
   ingress hosts are `dev.gi.org` and `gamma.gi.org`, and prod is
   `guardianintelligence.org`; each live company-site surface runs the declared
   Harbor digest and has pods placed on three distinct Kubernetes nodes
 - OpenBao is deployed as the Cozystack-managed `guardian` app in `tenant-root`
+  with `HelmRelease/openbao-guardian`, nested
+  `HelmRelease/openbao-guardian-system`, `Service/openbao-guardian`, and
+  `StatefulSet/openbao-guardian` with three ready replicas
 - `tenant-root` has the Cilium allow policies for OpenBao-to-API-server
   traffic and ESO-to-OpenBao traffic
 - after OpenBao has been initialized/unsealed, the OpenTofu OpenBao root has
