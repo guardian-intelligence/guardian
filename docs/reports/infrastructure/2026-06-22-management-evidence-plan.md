@@ -40,6 +40,7 @@ aspect infra evidence-restore-wait --kubeconfig "${KUBECONFIG}" --timeout 30m
 aspect infra evidence-logs --kubeconfig "${KUBECONFIG}"
 aspect infra evidence-snapshot --kubeconfig "${KUBECONFIG}"
 aspect infra evidence-capture --kubeconfig "${KUBECONFIG}" --phase evidence
+aspect infra evidence-run --kubeconfig "${KUBECONFIG}" --phase evidence --timeout 30m
 ```
 
 Kubernetes-side outage rehearsal:
@@ -77,6 +78,9 @@ aspect infra outage-uncordon --kubeconfig "${KUBECONFIG}" --node <node>
 - Live evidence capture now has a repo-owned read-only Aspect task that writes
   Kubernetes, evidence Job, database restore, and Talos outputs under
   `docs/reports/infrastructure/live-runs/` for check-in with component reports.
+- The full opt-in load/DR sequence now has a repo-owned `aspect infra
+  evidence-run` task that runs clean/apply/wait/restore/logs/snapshot/capture
+  and captures degraded state when a step fails.
 - Live Kubernetes evidence is pending because the `guardian-mgmt` kubeconfig and
   converged cluster are not present in this workspace.
 - Latitude adoption is pending a Latitude token and VLAN assignment import IDs.

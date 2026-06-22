@@ -29,6 +29,7 @@ load(
     infra_evidence_render = "render_evidence",
     infra_evidence_restore_apply = "apply_evidence_restore",
     infra_evidence_restore_wait = "evidence_restore_wait",
+    infra_evidence_run = "evidence_run",
     infra_evidence_snapshot = "evidence_snapshot",
     infra_evidence_wait = "evidence_wait",
     infra_adopt_known = "adopt_known",
@@ -76,6 +77,7 @@ def config(ctx):
     ctx.tasks.add(infra_evidence_render)
     ctx.tasks.add(infra_evidence_restore_apply)
     ctx.tasks.add(infra_evidence_restore_wait)
+    ctx.tasks.add(infra_evidence_run)
     ctx.tasks.add(infra_evidence_snapshot)
     ctx.tasks.add(infra_evidence_wait)
     ctx.tasks.add(infra_fmt)

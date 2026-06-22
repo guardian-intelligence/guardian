@@ -468,6 +468,27 @@ def _evidence_clean_impl(ctx):
         commands.append(["delete", "pvc/evidence-replicated-retain", "-n", "tenant-root", "--ignore-not-found"])
     return _kubectl_many(ctx, commands)
 
+def _evidence_run_impl(ctx):
+    steps = [
+        ["clean", _evidence_clean_impl],
+        ["apply", _apply_evidence_impl],
+        ["wait", _evidence_wait_impl],
+        ["restore-apply", _apply_evidence_restore_impl],
+        ["restore-wait", _evidence_restore_wait_impl],
+        ["logs", _evidence_logs_impl],
+        ["snapshot", _evidence_snapshot_impl],
+        ["capture", _capture_evidence_impl],
+    ]
+    for pair in steps:
+        name = pair[0]
+        fn = pair[1]
+        rc = fn(ctx)
+        if rc != 0:
+            ctx.std.io.stderr.write("evidence-run failed during " + name + "; capturing current evidence state\n")
+            _capture_evidence_impl(ctx)
+            return rc
+    return 0
+
 def _live_snapshot_impl(ctx):
     return _kubectl_many(ctx, [
         ["version"],
@@ -582,6 +603,12 @@ _CAPTURE_EVIDENCE_ARGS.update({
     "talos_endpoints": args.string(default = "10.8.0.250", description = "Talos API endpoint list."),
     "talos_nodes": args.string(default = "10.8.0.11,10.8.0.12,10.8.0.13", description = "Talos node list."),
     "talosconfig": args.string(default = "", description = "Optional talosconfig path. Talos capture is skipped unless set or TALOSCONFIG is present."),
+})
+
+_EVIDENCE_RUN_ARGS = dict(_CAPTURE_EVIDENCE_ARGS)
+_EVIDENCE_RUN_ARGS.update({
+    "delete_pvc": args.boolean(default = False, description = "Also delete the retained storage-smoke PVC and its checksum data before running evidence."),
+    "timeout": args.string(default = "30m", description = "kubectl wait/rollout timeout for evidence jobs, backup jobs, and restore jobs."),
 })
 
 init = task(
@@ -795,6 +822,14 @@ evidence_clean = task(
     group = ["infra"],
     summary = "Delete opt-in evidence resources so the load/DR evidence loop can be rerun.",
     args = _KUBECTL_EVIDENCE_CLEAN_ARGS,
+)
+
+evidence_run = task(
+    implementation = _evidence_run_impl,
+    name = "evidence-run",
+    group = ["infra"],
+    summary = "Run the full opt-in load/DR evidence sequence and capture live outputs.",
+    args = _EVIDENCE_RUN_ARGS,
 )
 
 live_snapshot = task(

@@ -143,6 +143,16 @@ The opt-in evidence overlay provides:
 Run:
 
 ```sh
+aspect infra evidence-run \
+  --kubeconfig "${KUBECONFIG}" \
+  --talosconfig "${TALOSCONFIG}" \
+  --phase evidence \
+  --timeout 30m
+```
+
+The equivalent expanded sequence is:
+
+```sh
 aspect infra evidence-clean --kubeconfig "${KUBECONFIG}"
 aspect infra evidence-apply --kubeconfig "${KUBECONFIG}"
 aspect infra evidence-wait --kubeconfig "${KUBECONFIG}" --timeout 30m
@@ -161,6 +171,10 @@ aspect infra evidence-capture \
 including `summary.tsv`, Kubernetes snapshots, evidence Job logs, BackupJob and
 RestoreJob state, and Talos health when `--talosconfig` is supplied. Commit the
 capture directory with the component reports for the live run.
+
+`evidence-run` is the preferred live command. It runs the expanded sequence in
+order and attempts `evidence-capture` even when an earlier wait/log/snapshot
+step fails, preserving the degraded state for the report.
 
 `evidence-clean` deletes completed Jobs, BackupJobs, RestoreJobs, temporary
 restore targets, and evidence ConfigMaps. It keeps
