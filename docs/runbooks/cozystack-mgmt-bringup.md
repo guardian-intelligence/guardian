@@ -448,6 +448,10 @@ Each environment also declares `NetworkPolicy/company-site-ingress`, selecting
 only the company-site pods and allowing inbound TCP/8080 traffic only from the
 `tenant-root` ingress-nginx controller pods. Egress remains unrestricted until
 the site has a declared in-cluster telemetry collector endpoint.
+The same-origin OTLP browser forwarder requires
+`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT`; without
+one it returns `503` instead of falling back to localhost or an undeclared
+sidecar.
 
 ## Live Checks
 
