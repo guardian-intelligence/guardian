@@ -8,6 +8,7 @@ resources:
   - cozystack/platform.yaml
   - networking/metallb.yaml
   - networking/subnet-mtu.yaml
+  - secrets/cnpg-backup-secrets.yaml
   - storage/storageclasses.yaml
   - tenants/environments.yaml
   - openbao/openbao.yaml
