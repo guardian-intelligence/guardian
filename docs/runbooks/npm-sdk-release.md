@@ -1,8 +1,8 @@
 # npm SDK Projection
 
-Status: target runbook. npm is not the source artifact store for Guardian
-releases. The canonical SDK candidate is the npm package tarball stored as an
-OCI artifact at:
+Status: target runbook, not an active operator procedure on `main`. npm is not
+the source artifact store for Guardian releases. The canonical SDK candidate is
+the npm package tarball stored as an OCI artifact at:
 
 ```text
 oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>
@@ -15,12 +15,19 @@ publisher fan-out, no-op policy, SLO gates, or channel promotion.
 In OCI paths, `npm` names the npm package tarball format; it does not mean
 npmjs.com is the artifact's source of truth.
 
+The previous `aspect release sdk-oci`, `aspect release sdk-gate`, and
+`aspect release declare` task implementations pointed at archived
+`src/viteplus-monorepo` and `src/release` paths that are not present in the
+active tree. Those tasks have been removed. Reintroduce the Aspect release
+surface only when it delegates to active package-owned Bazel targets.
+
 ## Release Intent
 
-Use Changesets for user-facing SDK changes:
+When the active JavaScript package workspace is restored, use Changesets for
+user-facing SDK changes. The historical command shape was:
 
 ```sh
-cd src/viteplus-monorepo
+cd <active-js-workspace>
 vp run -w changeset
 vp run -w changeset:version
 ```
@@ -31,25 +38,24 @@ been applied by the version step; package-owned static checks refuse to hide
 pending SDK release intent behind a release no-op:
 
 ```sh
-cd src/viteplus-monorepo
+cd <active-js-workspace>
 vp run -w lint
 ```
 
 This runs VitePlus linting plus the TypeScript workspace release hygiene check.
 The check uses `@changesets/read` to parse pending Changesets and
 `@manypkg/get-packages` to discover publishable workspace packages. The
-top-level Bazel build reaches it through
-`//src/viteplus-monorepo:workspace_lint`, so repo-level build orchestration
-does not need to know Changesets semantics.
+top-level Bazel build should reach it through a package-owned lint target, so
+repo-level build orchestration does not need to know Changesets semantics.
 
 ## Canonical Artifact
 
-The SDK artifact lane is package-owned. The durable command surface is Aspect,
-but the release policy and state machine live in
-`src/viteplus-monorepo/packages/aisucks-sdk/release/`.
+The SDK artifact lane is package-owned. The target durable command surface is
+Aspect, but the release policy and state machine must live with the active SDK
+package, not in workflow YAML and not in a repo-wide dumping ground.
 
-Local check mode builds the package through Bazel, creates a local OCI layout,
-runs admission, and stops before public writes:
+Target local check mode builds the package through Bazel, creates a local OCI
+layout, runs admission, and stops before public writes:
 
 ```sh
 aspect release sdk-oci
@@ -65,15 +71,16 @@ aspect release sdk-oci \
   --ref oci.guardianintelligence.org/guardian/aisucks/sdk/npm:edge
 ```
 
-The package release script builds these inputs through Bazel:
+The restored package release script should build its inputs through Bazel. The
+historical inactive inputs were:
 
 - `//src/viteplus-monorepo:vp_node`
 - `//src/viteplus-monorepo/packages/aisucks-sdk:npm_package`
 - `//src/release/cmd/sdkoci`
 
-It writes `release-result.json` in the selected output directory. Check mode
-defaults to a temporary directory; pass `--output-dir <dir>` to keep the local
-OCI layout and release records.
+The restored command should write release records in the selected output
+directory. Check mode should default to a temporary directory; pass
+`--output-dir <dir>` to keep the local OCI layout and release records.
 
 `sdkoci` is the low-level OCI pack/push helper. It does not decide whether a
 release should happen; it only writes the package tarball payload as an OCI
@@ -189,10 +196,9 @@ if the bytes differ, the release fails.
 
 ## Verify OCI Subject
 
-Local layout verification:
+Local layout verification once the release command is restored:
 
 ```sh
-aspect release sdk-oci --output-dir /tmp/guardian-sdk-release
 guardian run oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist
 guardian run oras discover --oci-layout /tmp/guardian-sdk-release/oci-layout:edge
 jq . /tmp/guardian-sdk-release/release-result.json
@@ -225,11 +231,11 @@ Expected:
 
 ## Declare Release Subject
 
-Release declaration is the first admission boundary for an external version. It
-resolves the SDK version tag to an immutable OCI digest, verifies the cosign v3
-signature and SLSA provenance against the pinned main workflow identity, checks
-that the provenance names the declared source commit, and only then writes
-`release-declaration.json`.
+Release declaration is the first admission boundary for an external version.
+When restored, it resolves the SDK version tag to an immutable OCI digest,
+verifies the cosign v3 signature and SLSA provenance against the pinned main
+workflow identity, checks that the provenance names the declared source commit,
+and only then writes its declaration record.
 
 ```sh
 aspect release declare \

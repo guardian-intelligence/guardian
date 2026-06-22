@@ -16,15 +16,17 @@ The Contract slice is delivered by the Connect/RPC Health contract work:
 - Buf lint and breaking-change checks run through Bazel with a pinned local
   toolchain and no remote plugins.
 
-The SDK release slice is delivered by `aspect release sdk-oci`, which delegates
-to the package-owned Effect/TypeScript release state machine under
-`src/viteplus-monorepo/packages/aisucks-sdk/release/`. Check mode builds the
-generated Health SDK tarball, writes it as an OCI artifact subject in a local
-OCI layout, validates admission before any public write, and records the event
-log in `release-result.json`.
+The SDK release slice is not active on `main` right now. The previous
+`aspect release sdk-oci` task pointed at the archived VitePlus workspace and
+release helper paths, which are not present in the active tree. Do not treat
+those historical paths as an operator surface.
 
-The current release-system work makes live public publish, npm dist-tags, and
-Health gates permutations of the same package-owned release logic.
+When the SDK lane is restored, the durable shape stays the same: a
+package-owned release command should build the generated Health SDK tarball,
+write it as an OCI artifact subject, validate admission before public writes,
+and use standard OCI metadata, in-toto/SLSA provenance, SLSA VSA promotion
+verdicts, and stock cosign/Sigstore verification. The Aspect task should be
+reintroduced only when it points at active Bazel targets.
 
 ## Todo
 
@@ -74,8 +76,8 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 
 ### SDK Artifact
 
-- [x] Package-owned `aspect release sdk-oci` writes the npm package tarball as
-  an OCI artifact subject in a declared local OCI layout.
+- [ ] Restore a package-owned SDK release command that writes the npm package
+  tarball as an OCI artifact subject in a declared local OCI layout.
 - [ ] npm package tarball is pushed to the public OCI registry by digest.
 - [x] Package integrity is recorded.
 - [x] npm publication is implemented as a downstream projection from the verified
@@ -118,8 +120,8 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
   - [ ] gate result
 - [ ] Public reads are digest-addressed; mutable tags are channel convenience
   only.
-- [x] SDK can be pulled from the local OCI layout with
-  `guardian run oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist`.
+- [ ] SDK can be pulled from the local OCI layout with a restored release
+  command's OCI layout output.
 - [ ] SDK can be pulled from the public OCI registry with
   `guardian run oras pull oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>`.
 
@@ -267,7 +269,6 @@ guardian run cosign verify-attestation --type slsaprovenance1 oci.guardianintell
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 npm view @guardian-intelligence/aisucks@edge dist.integrity
 npm install @guardian-intelligence/aisucks@edge
-aspect release sdk-oci --output-dir /tmp/guardian-sdk-release
 guardian run oras pull --oci-layout /tmp/guardian-sdk-release/oci-layout:edge -o ./dist
 guardian run oras discover --oci-layout /tmp/guardian-sdk-release/oci-layout:edge
 guardian run oras pull oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest> -o ./dist
@@ -310,8 +311,8 @@ truth before runtime and release layers depend on it.
 ### Implementation Strategy
 
 1. Add a repo-pinned Protobuf/Connect generation path.
-   - The repo currently has Go, Bazel, and the VitePlus TypeScript workspace,
-     but no checked-in Protobuf/Connect generation stack.
+   - The repo currently has Go and Bazel; restore an active TypeScript
+     workspace before making TypeScript SDK generation part of this slice.
    - Prefer Bazel-owned generation or a repo-pinned generator invoked through
      `aspect`; do not depend on host-global protoc, buf, npm binaries, or Go
      tools.
@@ -341,8 +342,8 @@ truth before runtime and release layers depend on it.
      requires a compile-time integration point.
 
 5. Generate TypeScript SDK surfaces.
-   - Add the Connect runtime dependencies through the existing
-     `src/viteplus-monorepo` package catalog.
+   - Add the Connect runtime dependencies through the active TypeScript package
+     catalog once that workspace is restored.
    - Generate or wrap the generated client so the public SDK exposes only
      `health()`.
    - Remove the handwritten legacy public SDK API and old service endpoint in
@@ -355,8 +356,6 @@ truth before runtime and release layers depend on it.
 
 ```sh
 bazelisk build //src/products/aisucks/api:all
-bazelisk build //src/viteplus-monorepo:workspace_build
-vp run -w lint
 ```
 
 ### Acceptance Criteria
