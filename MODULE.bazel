@@ -15,6 +15,7 @@ bazel_dep(name = "rules_nodejs", version = "6.7.4")
 include("//src/tools/kubectl:kubectl.MODULE.bazel")
 include("//src/tools/boot-to-talos:boot-to-talos.MODULE.bazel")
 include("//src/tools/k6:k6.MODULE.bazel")
+include("//src/tools/oras:oras.MODULE.bazel")
 include("//src/tools/talm:talm.MODULE.bazel")
 include("//src/tools/talosctl:talosctl.MODULE.bazel")
 
