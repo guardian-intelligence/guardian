@@ -40,6 +40,9 @@ spec:
         - name: company-site
           image: harbor.guardianintelligence.org/guardian/company-site@sha256:52f25abfd2eb50ee3b71845fcc4e7e8c7374d5f6acb057b5be87fed05f4c1423
           imagePullPolicy: IfNotPresent
+          env:
+            - name: TMPDIR
+              value: /tmp
           ports:
             - name: http
               containerPort: 8080
@@ -51,6 +54,10 @@ spec:
             runAsNonRoot: true
             runAsUser: 65532
             runAsGroup: 65532
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           resources:
             requests:
               cpu: 25m
@@ -67,6 +74,9 @@ spec:
               path: /livez
               port: http
             periodSeconds: 20
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

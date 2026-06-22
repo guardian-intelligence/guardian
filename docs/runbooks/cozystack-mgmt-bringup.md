@@ -437,10 +437,13 @@ The checked-in environment layer declares:
 
 Each deployment runs three replicas, uses the `tenant-root` ingress class, and
 references the immutable Harbor image digest produced by the checked-in
-TanStack artifact. Pods use a strict hostname topology spread (`maxSkew: 1`,
-`whenUnsatisfiable: DoNotSchedule`), and each environment declares
-`PodDisruptionBudget/company-site` with `minAvailable: 2` so voluntary
-disruption cannot take the surface below the single-node-outage target.
+TanStack artifact. Containers run as uid/gid `65532`, drop all Linux
+capabilities, and use a read-only root filesystem with only `/tmp` backed by an
+`emptyDir` scratch volume. Pods use a strict hostname topology spread
+(`maxSkew: 1`, `whenUnsatisfiable: DoNotSchedule`), and each environment
+declares `PodDisruptionBudget/company-site` with `minAvailable: 2` so
+voluntary disruption cannot take the surface below the single-node-outage
+target.
 Each environment also declares `NetworkPolicy/company-site-ingress`, selecting
 only the company-site pods and allowing inbound TCP/8080 traffic only from the
 `tenant-root` ingress-nginx controller pods. Egress remains unrestricted until
