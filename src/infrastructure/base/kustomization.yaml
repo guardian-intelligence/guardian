@@ -11,6 +11,7 @@ resources:
   - networking/subnet-mtu.yaml
   - secrets/clickhouse-backup-secrets.yaml
   - secrets/cnpg-backup-secrets.yaml
+  - storage/linstor-data-pools.yaml
   - storage/storageclasses.yaml
   - tenants/environments.yaml
   - openbao/openbao.yaml

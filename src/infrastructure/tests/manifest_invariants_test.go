@@ -52,6 +52,7 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("environment tenants", testEnvironmentTenants)
 	t.Run("layer two networking", testLayerTwoNetworking)
 	t.Run("single default storage class", testSingleDefaultStorageClass)
+	t.Run("linstor data pools", testLINSTORDataPools)
 	t.Run("backup classes", testBackupClasses)
 	t.Run("postgres backup activation guard", testPostgresBackupActivationGuard)
 	t.Run("root tenant core services", testRootTenantCoreServices)
@@ -230,6 +231,37 @@ func testSingleDefaultStorageClass(t *testing.T) {
 	assertString(t, replicated, "Immediate", "volumeBindingMode")
 }
 
+func testLINSTORDataPools(t *testing.T) {
+	kustomization := readYAMLMap(t, "src/infrastructure/base/kustomization.yaml")
+	resources := sliceAt(t, kustomization, "resources")
+	assertContainsString(t, resources, "storage/linstor-data-pools.yaml", "base kustomization resources")
+
+	docs := readManifests(t, "src/infrastructure/base/storage/linstor-data-pools.yaml")
+	wantDevices := map[string]string{
+		"ash-earth": "/dev/nvme0n1",
+		"ash-wind":  "/dev/nvme0n1",
+		"ash-water": "/dev/nvme1n1",
+	}
+	if len(docs) != len(wantDevices) {
+		t.Fatalf("LINSTOR data pool docs = %d, want %d", len(docs), len(wantDevices))
+	}
+
+	for node, device := range wantDevices {
+		cfg := findObject(t, docs, "LinstorSatelliteConfiguration", "cozy-linstor", "guardian-data-pool-"+node)
+		assertString(t, cfg, "piraeus.io/v1", "apiVersion")
+		assertString(t, cfg, node, "spec", "nodeSelector", "kubernetes.io/hostname")
+
+		pools := sliceAt(t, cfg, "spec", "storagePools")
+		if len(pools) != 1 {
+			t.Fatalf("%s storagePools = %d, want 1", node, len(pools))
+		}
+		pool := asManifest(t, pools[0], node+" storagePools[0]")
+		assertString(t, pool, "data", "name")
+		assertString(t, pool, "data", "lvmPool", "volumeGroup")
+		assertStringSlice(t, pool, []string{device}, "source", "hostDevices")
+	}
+}
+
 func testBackupClasses(t *testing.T) {
 	postgresDocs := readManifests(t, "src/infrastructure/base/backup/postgres-cnpg.yaml")
 
@@ -359,6 +391,27 @@ func testPostgresBackupActivationGuard(t *testing.T) {
 
 func testRootTenantCoreServices(t *testing.T) {
 	docs := readManifests(t, "src/infrastructure/base/apps/core-services.yaml")
+
+	ingress := findObject(t, docs, "Ingress", "tenant-root", "ingress")
+	assertString(t, ingress, "apps.cozystack.io/v1alpha1", "apiVersion")
+	assertInt(t, ingress, 3, "spec", "replicas")
+	assertStringSlice(t, ingress, []string{}, "spec", "whitelist")
+	assertBool(t, ingress, false, "spec", "cloudflareProxy")
+
+	seaweedfs := findObject(t, docs, "SeaweedFS", "tenant-root", "seaweedfs")
+	assertString(t, seaweedfs, "apps.cozystack.io/v1alpha1", "apiVersion")
+	assertString(t, seaweedfs, "s3.guardianintelligence.org", "spec", "host")
+	assertString(t, seaweedfs, "Simple", "spec", "topology")
+	assertInt(t, seaweedfs, 3, "spec", "replicationFactor")
+	assertInt(t, seaweedfs, 3, "spec", "db", "replicas")
+	assertString(t, seaweedfs, "10Gi", "spec", "db", "size")
+	assertString(t, seaweedfs, "replicated", "spec", "db", "storageClass")
+	assertInt(t, seaweedfs, 3, "spec", "master", "replicas")
+	assertInt(t, seaweedfs, 3, "spec", "filer", "replicas")
+	assertInt(t, seaweedfs, 3, "spec", "volume", "replicas")
+	assertString(t, seaweedfs, "20Gi", "spec", "volume", "size")
+	assertString(t, seaweedfs, "replicated", "spec", "volume", "storageClass")
+	assertInt(t, seaweedfs, 3, "spec", "s3", "replicas")
 
 	assertApp(t, docs, appExpectation{
 		kind:            "Postgres",

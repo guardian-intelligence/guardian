@@ -16,6 +16,7 @@ go_test(
         "//:.bazelignore",
         "@talm_linux_amd64//:talm",
         ":company_site_dependency_closure",
+        "//src/infrastructure/base:kustomization",
         "//src/infrastructure/base/apps:manifests",
         "//src/infrastructure/base/backup:manifests",
         "//src/infrastructure/base/cozystack:manifests",

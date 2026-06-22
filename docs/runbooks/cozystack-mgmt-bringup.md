@@ -30,7 +30,7 @@ dependent manifests together; do not let topology drift through one-off edits.
 | Kube-OVN MTU | `src/infrastructure/base/networking/subnet-mtu.yaml` |
 | Flux handoff | `src/infrastructure/base/flux/sync.yaml` |
 | OpenBao app | `src/infrastructure/base/openbao/` |
-| LINSTOR storage classes | `src/infrastructure/base/storage/storageclasses.yaml` |
+| LINSTOR storage | `src/infrastructure/base/storage/` |
 | Environment tenants | `src/infrastructure/base/tenants/environments.yaml` |
 | Environment Cozystack apps | `src/infrastructure/environments/` |
 | Company-site OCI artifact | `src/products/company/site/` |
@@ -105,13 +105,16 @@ publishes the dashboard/API endpoints, environment tenants use the expected
 `*.gi.org` hosts, OpenTofu/Talm/Kubernetes manifests stay aligned with the
 management OpenTofu topology, the rendered Talos config keeps the L2 VIP and
 VLAN control-plane path, KubeSpan/WireGuard stays absent, MetalLB and Kube-OVN
-keep the L2/MTU topology, `replicated` is the only default StorageClass, root
-and environment Postgres/Harbor/ClickHouse apps use the intended HA/storage
-shape, OpenBao stays declared in `tenant-root`, the OpenBao OpenTofu root
-declares only mounts, policies, and Kubernetes-auth roles, the reusable CNPG
-backup strategy maps through a cluster-scoped BackupClass, OpenBao-backed CNPG
-backup credential projections exist for root/dev/gamma/prod, the company site
-is declared for dev/gamma/prod, and Flux reconciles base before tenant apps.
+keep the L2/MTU topology, `replicated` is the only default StorageClass, the
+Piraeus/LINSTOR `data` pool is declared for all three management nodes, root
+Ingress provides tenant-root ingress, root SeaweedFS provides tenant-root object
+storage, root and environment Postgres/Harbor/ClickHouse apps use the intended
+HA/storage shape, OpenBao stays declared in `tenant-root`, the OpenBao OpenTofu
+root declares only mounts, policies, and Kubernetes-auth roles, the reusable
+CNPG backup strategy maps through a cluster-scoped BackupClass, OpenBao-backed
+CNPG backup credential projections exist for root/dev/gamma/prod, the company
+site is declared for dev/gamma/prod, and Flux reconciles base before tenant
+apps.
 
 After a PR is merged to `main`, validate that the live management cluster's
 source-controller has reconciled the merged commit with:
@@ -380,8 +383,16 @@ The same source-level naming rule applies to Guardian's core services:
 `Postgres/guardian` becomes `HelmRelease/postgres-guardian`,
 `Harbor/guardian` becomes `HelmRelease/harbor-guardian`,
 `ClickHouse/guardian` becomes `HelmRelease/clickhouse-guardian`, and
-`OpenBAO/guardian` becomes `HelmRelease/openbao-guardian`. The OpenBao app then
-renders its own nested system HelmRelease, `openbao-guardian-system`.
+`OpenBAO/guardian` becomes `HelmRelease/openbao-guardian`. Root
+`Ingress/ingress` and `SeaweedFS/seaweedfs` use application definitions with an
+empty release prefix, so their HelmReleases are `ingress` and `seaweedfs` in
+`tenant-root`. The Ingress app renders nested `ingress-nginx-system`, which
+other tenant-root apps can depend on before creating public Ingress resources.
+The SeaweedFS chart renders the standard COSI `BucketClass/tenant-root`,
+`BucketClass/tenant-root-lock`, `BucketAccessClass/tenant-root`, and
+`BucketAccessClass/tenant-root-readonly` objects plus the SeaweedFS COSI
+provisioner. The OpenBao app then renders its own nested system HelmRelease,
+`openbao-guardian-system`.
 The Harbor app follows the same pattern and renders its nested system
 HelmRelease as `harbor-guardian-system`. It also renders standard COSI
 `BucketClaim/harbor-guardian-registry` and
@@ -417,6 +428,14 @@ The checked-in root app slice declares:
 
 - `Postgres/guardian` in `tenant-root`: CNPG-backed, three replicas, explicit
   `storageClass: replicated`, synchronous commit quorum `1..2`.
+- `Ingress/ingress` in `tenant-root`: three ingress-nginx replicas for the root
+  tenant ingress class that child tenants inherit.
+- `SeaweedFS/seaweedfs` in `tenant-root`: root object storage at
+  `s3.guardianintelligence.org`, three master, filer, volume, S3, and database
+  replicas, three-way object replication, `10Gi` database PVCs, `20Gi` volume
+  PVCs, and replicated storage for the
+  database and volume PVCs. This app owns the tenant-root COSI bucket classes;
+  do not check in hand-written `BucketClass` or `BucketAccessClass` objects.
 - `Harbor/guardian` in `tenant-root`: `harbor.guardianintelligence.org`, with
   replicated storage for the registry database, Redis, Trivy, and chart-owned
   PVCs.
@@ -1050,11 +1069,17 @@ Expected results:
   `10.8.0.200-10.8.0.240` address range
 - Flux `guardian-mgmt-base` reconciles `src/infrastructure/base`, and
   `guardian-mgmt-tenant-apps` reconciles `src/infrastructure/environments`
+- `Ingress/ingress`, `HelmRelease/ingress`, and nested
+  `HelmRelease/ingress-nginx-system` are ready in `tenant-root`
 - storage classes include `local`, `local-retain`, `replicated`, and
   `replicated-retain`; `replicated` is the only default class and has LINSTOR
-  `autoPlace=3`
-- root app resources exist for `Postgres/guardian`, `Harbor/guardian`, and
-  `ClickHouse/guardian` in `tenant-root`; Postgres is replicated three ways on
+  `autoPlace=3`; Piraeus has a LINSTOR `data` pool on `ash-earth`, `ash-wind`,
+  and `ash-water`
+- root app resources exist for `SeaweedFS/seaweedfs`, `Postgres/guardian`,
+  `Harbor/guardian`, and `ClickHouse/guardian` in `tenant-root`; SeaweedFS
+  publishes root object storage at `s3.guardianintelligence.org`, creates the
+  tenant-root COSI classes, and runs three master, filer, volume, S3, and
+  database replicas on replicated storage; Postgres is replicated three ways on
   `replicated` storage with version `v18` and no external access, Harbor uses
   the expected host, replicated storage, three database replicas, three Redis
   replicas, and Trivy scanning, and ClickHouse uses three replicas, replicated
