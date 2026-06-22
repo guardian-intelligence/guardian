@@ -62,6 +62,67 @@ def _harbor_bucket_checks(stage, namespace):
         (stage + " harbor registry bucket access secret", ["-n", namespace, "get", "bucketaccesses.objectstorage.k8s.io/" + registry, "-o", "jsonpath={.spec.credentialsSecretName}"], registry + "-bucket"),
     ]
 
+def _postgres_child_gets(stage, namespace):
+    release = "postgres-guardian"
+    return [
+        (stage + " postgres helmrelease", ["-n", namespace, "get", "helmreleases.helm.toolkit.fluxcd.io/" + release]),
+        (stage + " postgres cnpg cluster", ["-n", namespace, "get", "clusters.postgresql.cnpg.io/" + release]),
+        (stage + " postgres credentials secret", ["-n", namespace, "get", "secret/" + release + "-credentials"]),
+        (stage + " postgres init script secret", ["-n", namespace, "get", "secret/" + release + "-init-script"]),
+        (stage + " postgres workload monitor", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release]),
+    ]
+
+def _postgres_child_waits(stage, namespace):
+    release = "postgres-guardian"
+    return [
+        (stage + " postgres helmrelease", ["-n", namespace, "wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/" + release]),
+        (stage + " postgres cnpg cluster", ["-n", namespace, "wait", "--for=condition=Ready", "clusters.postgresql.cnpg.io/" + release]),
+    ]
+
+def _postgres_child_checks(stage, namespace):
+    release = "postgres-guardian"
+    return [
+        (stage + " postgres cnpg instances", ["-n", namespace, "get", "clusters.postgresql.cnpg.io/" + release, "-o", "jsonpath={.spec.instances}"], "3"),
+        (stage + " postgres cnpg storage class", ["-n", namespace, "get", "clusters.postgresql.cnpg.io/" + release, "-o", "jsonpath={.spec.storage.storageClass}"], "replicated"),
+        (stage + " postgres cnpg min sync replicas", ["-n", namespace, "get", "clusters.postgresql.cnpg.io/" + release, "-o", "jsonpath={.spec.minSyncReplicas}"], "1"),
+        (stage + " postgres cnpg max sync replicas", ["-n", namespace, "get", "clusters.postgresql.cnpg.io/" + release, "-o", "jsonpath={.spec.maxSyncReplicas}"], "2"),
+        (stage + " postgres workload monitor replicas", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release, "-o", "jsonpath={.spec.replicas}"], "3"),
+        (stage + " postgres workload monitor kind", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release, "-o", "jsonpath={.spec.kind}"], "postgres"),
+    ]
+
+def _clickhouse_child_gets(stage, namespace):
+    release = "clickhouse-guardian"
+    return [
+        (stage + " clickhouse helmrelease", ["-n", namespace, "get", "helmreleases.helm.toolkit.fluxcd.io/" + release]),
+        (stage + " clickhouse installation", ["-n", namespace, "get", "clickhouseinstallations.clickhouse.altinity.com/" + release]),
+        (stage + " clickhouse keeper installation", ["-n", namespace, "get", "clickhousekeeperinstallations.clickhouse-keeper.altinity.com/" + release + "-keeper"]),
+        (stage + " clickhouse keeper scrape", ["-n", namespace, "get", "vmpodscrapes.operator.victoriametrics.com/" + release + "-keeper"]),
+        (stage + " clickhouse credentials secret", ["-n", namespace, "get", "secret/" + release + "-credentials"]),
+        (stage + " clickhouse backup api secret", ["-n", namespace, "get", "secret/" + release + "-backup-api-auth"]),
+        (stage + " clickhouse workload monitor", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release]),
+        (stage + " clickhouse keeper workload monitor", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release + "-keeper"]),
+    ]
+
+def _clickhouse_child_waits(stage, namespace):
+    release = "clickhouse-guardian"
+    return [
+        (stage + " clickhouse helmrelease", ["-n", namespace, "wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/" + release]),
+    ]
+
+def _clickhouse_child_checks(stage, namespace):
+    release = "clickhouse-guardian"
+    return [
+        (stage + " clickhouse shards", ["-n", namespace, "get", "clickhouseinstallations.clickhouse.altinity.com/" + release, "-o", "jsonpath={.spec.configuration.clusters[0].layout.shardsCount}"], "1"),
+        (stage + " clickhouse replicas", ["-n", namespace, "get", "clickhouseinstallations.clickhouse.altinity.com/" + release, "-o", "jsonpath={.spec.configuration.clusters[0].layout.replicasCount}"], "3"),
+        (stage + " clickhouse backup sidecar", ["-n", namespace, "get", "clickhouseinstallations.clickhouse.altinity.com/" + release, "-o", "jsonpath={.spec.templates.podTemplates[0].spec.containers[1].name}"], "clickhouse-backup"),
+        (stage + " clickhouse backup api port", ["-n", namespace, "get", "clickhouseinstallations.clickhouse.altinity.com/" + release, "-o", "jsonpath={.spec.templates.podTemplates[0].spec.containers[1].ports[0].name}"], "ch-backup-api"),
+        (stage + " clickhouse keeper replicas", ["-n", namespace, "get", "clickhousekeeperinstallations.clickhouse-keeper.altinity.com/" + release + "-keeper", "-o", "jsonpath={.spec.configuration.clusters[0].layout.replicasCount}"], "3"),
+        (stage + " clickhouse workload monitor replicas", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release, "-o", "jsonpath={.spec.replicas}"], "3"),
+        (stage + " clickhouse workload monitor kind", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release, "-o", "jsonpath={.spec.kind}"], "clickhouse"),
+        (stage + " clickhouse keeper workload monitor replicas", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release + "-keeper", "-o", "jsonpath={.spec.replicas}"], "3"),
+        (stage + " clickhouse keeper workload monitor kind", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release + "-keeper", "-o", "jsonpath={.spec.kind}"], "clickhouse"),
+    ]
+
 INFRA_FILEGROUPS = [
     "//src/infrastructure/bootstrap/guardian-mgmt:root",
     "//src/infrastructure/talm:chart",
@@ -171,6 +232,30 @@ LIVE_GETS = [
 ) + _harbor_child_gets(
     "prod",
     "tenant-prod",
+) + _postgres_child_gets(
+    "root",
+    "tenant-root",
+) + _postgres_child_gets(
+    "dev",
+    "tenant-dev",
+) + _postgres_child_gets(
+    "gamma",
+    "tenant-gamma",
+) + _postgres_child_gets(
+    "prod",
+    "tenant-prod",
+) + _clickhouse_child_gets(
+    "root",
+    "tenant-root",
+) + _clickhouse_child_gets(
+    "dev",
+    "tenant-dev",
+) + _clickhouse_child_gets(
+    "gamma",
+    "tenant-gamma",
+) + _clickhouse_child_gets(
+    "prod",
+    "tenant-prod",
 )
 
 def _secret_store_checks(label, namespace, store, role, service_account):
@@ -248,6 +333,30 @@ LIVE_VALUE_CHECKS = [
     "gamma",
     "tenant-gamma",
 ) + _harbor_bucket_checks(
+    "prod",
+    "tenant-prod",
+) + _postgres_child_checks(
+    "root",
+    "tenant-root",
+) + _postgres_child_checks(
+    "dev",
+    "tenant-dev",
+) + _postgres_child_checks(
+    "gamma",
+    "tenant-gamma",
+) + _postgres_child_checks(
+    "prod",
+    "tenant-prod",
+) + _clickhouse_child_checks(
+    "root",
+    "tenant-root",
+) + _clickhouse_child_checks(
+    "dev",
+    "tenant-dev",
+) + _clickhouse_child_checks(
+    "gamma",
+    "tenant-gamma",
+) + _clickhouse_child_checks(
     "prod",
     "tenant-prod",
 ) + [
@@ -375,6 +484,30 @@ LIVE_WAITS = [
     "gamma",
     "tenant-gamma",
 ) + _harbor_child_waits(
+    "prod",
+    "tenant-prod",
+) + _postgres_child_waits(
+    "root",
+    "tenant-root",
+) + _postgres_child_waits(
+    "dev",
+    "tenant-dev",
+) + _postgres_child_waits(
+    "gamma",
+    "tenant-gamma",
+) + _postgres_child_waits(
+    "prod",
+    "tenant-prod",
+) + _clickhouse_child_waits(
+    "root",
+    "tenant-root",
+) + _clickhouse_child_waits(
+    "dev",
+    "tenant-dev",
+) + _clickhouse_child_waits(
+    "gamma",
+    "tenant-gamma",
+) + _clickhouse_child_waits(
     "prod",
     "tenant-prod",
 )
