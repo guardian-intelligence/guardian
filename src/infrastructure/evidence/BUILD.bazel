@@ -63,6 +63,26 @@ genrule(
 )
 
 genrule(
+    name = "verify-infrastructure-reports",
+    srcs = ["verify-infrastructure-reports.sh"],
+    outs = ["verify-infrastructure-reports-runner"],
+    cmd = "cp $(location verify-infrastructure-reports.sh) $@ && chmod +x $@",
+    executable = True,
+    visibility = ["//visibility:public"],
+)
+
+genrule(
+    name = "verify-infrastructure-reports-smoke",
+    srcs = [
+        "verify-infrastructure-reports.sh",
+        "verify-infrastructure-reports_test.sh",
+    ],
+    outs = ["verify-infrastructure-reports-smoke.ok"],
+    cmd = "bash $(location verify-infrastructure-reports_test.sh) $(location verify-infrastructure-reports.sh) $@",
+    visibility = ["//visibility:public"],
+)
+
+genrule(
     name = "management-evidence-run",
     srcs = ["management-evidence-run.sh"],
     outs = ["management-evidence-runner"],

@@ -27,6 +27,19 @@ Use `aspect infra management-evidence-run` for the final live evidence package.
 It writes a single parent directory containing the verified load/DR capture,
 the verified all-node hardware outage capture, and the suite report.
 
+After the component reports and `evidence-matrix.md` have been filled from that
+final live-run package, run:
+
+```sh
+aspect infra reports-verify \
+  --live-run-dir docs/reports/infrastructure/live-runs/<timestamp>-management-evidence
+```
+
+This writes `report-verification.tsv` into the live-run directory and fails if a
+component report is missing required sections, still contains pending result
+markers, does not reference the final live run, or if the evidence matrix claims
+completion without a passing suite.
+
 Each component report should cover:
 
 - load test scope, command, inputs, and result;

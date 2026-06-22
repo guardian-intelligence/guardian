@@ -46,6 +46,7 @@ aspect infra evidence-snapshot --kubeconfig "${KUBECONFIG}"
 aspect infra evidence-capture --kubeconfig "${KUBECONFIG}" --phase evidence
 aspect infra evidence-run --kubeconfig "${KUBECONFIG}" --phase evidence --timeout 30m
 aspect infra evidence-verify --run-dir docs/reports/infrastructure/live-runs/<timestamp>-evidence --mode evidence --require-talos
+aspect infra reports-verify --live-run-dir docs/reports/infrastructure/live-runs/<timestamp>-management-evidence
 ```
 
 Kubernetes-side outage rehearsal:
@@ -134,6 +135,11 @@ LATITUDESH_AUTH_TOKEN="${LATITUDESH_AUTH_TOKEN}" aspect infra hardware-outage-ru
   `aspect infra management-evidence-run` task. It writes one parent live-run
   directory containing the load/DR evidence capture, the all-node hardware
   outage capture, and the suite verification report.
+- Final checked-in component reports now have a repo-owned `aspect infra
+  reports-verify` task. It requires a passing final live-run suite,
+  component reports with passing results and evidence links, and an evidence
+  matrix without pending markers before the report package can be treated as
+  complete.
 - Live Kubernetes evidence is pending because the `guardian-mgmt` kubeconfig and
   converged cluster are not present in this workspace.
 - Latitude adoption is pending a Latitude token and VLAN assignment import IDs.

@@ -18,6 +18,8 @@ VERIFY_EVIDENCE_TARGET = "//src/infrastructure/evidence:verify-management-eviden
 VERIFY_EVIDENCE_BIN = "bazel-bin/src/infrastructure/evidence/verify-management-evidence-runner"
 VERIFY_EVIDENCE_SUITE_TARGET = "//src/infrastructure/evidence:verify-management-evidence-suite"
 VERIFY_EVIDENCE_SUITE_BIN = "bazel-bin/src/infrastructure/evidence/verify-management-evidence-suite-runner"
+VERIFY_INFRASTRUCTURE_REPORTS_TARGET = "//src/infrastructure/evidence:verify-infrastructure-reports"
+VERIFY_INFRASTRUCTURE_REPORTS_BIN = "bazel-bin/src/infrastructure/evidence/verify-infrastructure-reports-runner"
 MANAGEMENT_EVIDENCE_RUN_TARGET = "//src/infrastructure/evidence:management-evidence-run"
 MANAGEMENT_EVIDENCE_RUN_BIN = "bazel-bin/src/infrastructure/evidence/management-evidence-runner"
 HARDWARE_OUTAGE_TARGET = "//src/infrastructure/evidence:hardware-outage-run"
@@ -487,6 +489,32 @@ def _verify_evidence_suite_impl(ctx):
         label = "verify management evidence suite",
     )
 
+def _verify_infrastructure_reports_impl(ctx):
+    if ctx.args.live_run_dir == "":
+        ctx.std.io.stderr.write("ERROR: pass --live-run-dir with the final management-evidence-run output\n")
+        return 1
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        ["build", VERIFY_INFRASTRUCTURE_REPORTS_TARGET],
+        cwd = ws_path(ctx),
+        label = "bazelisk build " + VERIFY_INFRASTRUCTURE_REPORTS_TARGET,
+    )
+    if rc != 0:
+        return rc
+    verify_args = ["--live-run-dir", ctx.args.live_run_dir]
+    if ctx.args.reports_dir != "":
+        verify_args.extend(["--reports-dir", ctx.args.reports_dir])
+    if ctx.args.out != "":
+        verify_args.extend(["--out", ctx.args.out])
+    return checked_spawn(
+        ctx,
+        ws_path(ctx, VERIFY_INFRASTRUCTURE_REPORTS_BIN),
+        verify_args,
+        cwd = ws_path(ctx),
+        label = "verify infrastructure reports",
+    )
+
 def _management_evidence_run_impl(ctx):
     rc = checked_spawn(
         ctx,
@@ -632,6 +660,7 @@ def _preflight_impl(ctx):
         [
             "build",
             "//src/infrastructure/evidence:hardware-outage-run-smoke",
+            "//src/infrastructure/evidence:verify-infrastructure-reports-smoke",
             "//src/infrastructure/evidence:verify-management-evidence-suite-smoke",
         ],
         cwd = ws_path(ctx),
@@ -1029,6 +1058,12 @@ _VERIFY_EVIDENCE_SUITE_ARGS = {
     "out_dir": args.string(default = "", description = "Output directory for SUITE.md and suite-verification.tsv."),
 }
 
+_VERIFY_INFRASTRUCTURE_REPORTS_ARGS = {
+    "live_run_dir": args.string(default = "", description = "Final management-evidence-run directory under docs/reports/infrastructure/live-runs/."),
+    "out": args.string(default = "", description = "Output TSV path. Defaults to <live-run-dir>/report-verification.tsv."),
+    "reports_dir": args.string(default = "docs/reports/infrastructure", description = "Infrastructure reports directory."),
+}
+
 _OUTAGE_RUN_ARGS = dict(_CAPTURE_EVIDENCE_ARGS)
 _OUTAGE_RUN_ARGS.update({
     "node": args.string(default = "", description = "Kubernetes node name under outage rehearsal."),
@@ -1272,6 +1307,14 @@ verify_evidence_suite = task(
     group = ["infra"],
     summary = "Verify a complete load/DR plus all-node outage evidence package.",
     args = _VERIFY_EVIDENCE_SUITE_ARGS,
+)
+
+verify_infrastructure_reports = task(
+    implementation = _verify_infrastructure_reports_impl,
+    name = "reports-verify",
+    group = ["infra"],
+    summary = "Verify final infrastructure reports reference a passing live evidence run.",
+    args = _VERIFY_INFRASTRUCTURE_REPORTS_ARGS,
 )
 
 management_evidence_run = task(

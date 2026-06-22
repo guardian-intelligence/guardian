@@ -267,6 +267,21 @@ power/status records, and that each node has passing `outage-before`,
 outage phases must also have Talos required. Commit the suite directory with
 the raw live-run directories and component reports.
 
+After filling the component reports and `evidence-matrix.md` from the final
+`management-evidence-run` output, verify the checked-in report package:
+
+```sh
+aspect infra reports-verify \
+  --live-run-dir docs/reports/infrastructure/live-runs/<timestamp>-management-evidence
+```
+
+`reports-verify` is read-only against the checked-in reports and live-run
+bundle, except for writing
+`<live-run-dir>/report-verification.tsv`. It requires a passing suite report, no
+failed suite checks, no pending markers in `evidence-matrix.md`, and component
+reports with the required sections, passing results, evidence references, and a
+link back to the same final live-run directory.
+
 `evidence-clean` deletes completed Jobs, BackupJobs, RestoreJobs, temporary
 restore targets, and evidence ConfigMaps. It keeps
 `PVC/tenant-root/evidence-replicated-retain` by default so repeat runs verify
