@@ -94,6 +94,11 @@ type CoverageKey struct {
 	Environment string
 }
 
+type TargetKey struct {
+	Component   string
+	Environment string
+}
+
 func ExpectedCoverage() []CoverageKey {
 	var out []CoverageKey
 	for _, component := range []string{"cnpg_postgres", "harbor", "clickhouse"} {
@@ -103,6 +108,14 @@ func ExpectedCoverage() []CoverageKey {
 	out = appendCoverage(out, "cozystack_dashboard", []string{"root"})
 	out = appendCoverage(out, "company_site", []string{"dev", "gamma", "prod"})
 	return out
+}
+
+func ExpectedTarget(component, environment string) (Target, bool) {
+	target, ok := expectedTargets()[TargetKey{
+		Component:   component,
+		Environment: environment,
+	}]
+	return target, ok
 }
 
 func Coverage(report Report) CoverageKey {
@@ -174,6 +187,7 @@ func Validate(report Report) error {
 	}
 
 	validateTarget(&errs, report.Target)
+	validateExpectedTarget(&errs, report)
 	require(&errs, len(report.Procedure) > 0, "procedure must contain at least one step")
 	for i, step := range report.Procedure {
 		requireText(&errs, fmt.Sprintf("procedure[%d]", i), step)
@@ -212,6 +226,22 @@ func validateTarget(errs *[]string, target Target) {
 	requireText(errs, "target.kind", target.Kind)
 	requireText(errs, "target.name", target.Name)
 	requireNoBannedText(errs, "target.endpoint", target.Endpoint)
+}
+
+func validateExpectedTarget(errs *[]string, report Report) {
+	expected, ok := ExpectedTarget(report.Component, report.Environment)
+	if !ok {
+		return
+	}
+	requireTargetField(errs, "target.namespace", report.Target.Namespace, expected.Namespace, report)
+	requireTargetField(errs, "target.api_group", report.Target.APIGroup, expected.APIGroup, report)
+	requireTargetField(errs, "target.kind", report.Target.Kind, expected.Kind, report)
+	requireTargetField(errs, "target.name", report.Target.Name, expected.Name, report)
+	requireTargetField(errs, "target.endpoint", report.Target.Endpoint, expected.Endpoint, report)
+}
+
+func requireTargetField(errs *[]string, field, got, want string, report Report) {
+	require(errs, got == want, fmt.Sprintf("%s must be %q for %s/%s reports", field, want, report.Component, report.Environment))
 }
 
 func validateCheck(errs *[]string, i int, check Check) {
@@ -307,6 +337,81 @@ func appendCoverage(out []CoverageKey, component string, environments []string) 
 		}
 	}
 	return out
+}
+
+func expectedTargets() map[TargetKey]Target {
+	out := map[TargetKey]Target{}
+	for _, environment := range []string{"root", "dev", "gamma", "prod"} {
+		namespace := tenantNamespace(environment)
+		out[TargetKey{Component: "cnpg_postgres", Environment: environment}] = Target{
+			Namespace: namespace,
+			APIGroup:  "apps.cozystack.io",
+			Kind:      "Postgres",
+			Name:      "guardian",
+		}
+		out[TargetKey{Component: "harbor", Environment: environment}] = Target{
+			Namespace: namespace,
+			APIGroup:  "apps.cozystack.io",
+			Kind:      "Harbor",
+			Name:      "guardian",
+			Endpoint:  harborEndpoint(environment),
+		}
+		out[TargetKey{Component: "clickhouse", Environment: environment}] = Target{
+			Namespace: namespace,
+			APIGroup:  "apps.cozystack.io",
+			Kind:      "ClickHouse",
+			Name:      "guardian",
+		}
+	}
+
+	out[TargetKey{Component: "openbao", Environment: "root"}] = Target{
+		Namespace: "tenant-root",
+		APIGroup:  "apps.cozystack.io",
+		Kind:      "OpenBAO",
+		Name:      "guardian",
+	}
+	out[TargetKey{Component: "cozystack_dashboard", Environment: "root"}] = Target{
+		Namespace: "cozy-dashboard",
+		APIGroup:  "networking.k8s.io",
+		Kind:      "Ingress",
+		Name:      "dashboard-web-ingress",
+		Endpoint:  "https://dashboard.guardianintelligence.org",
+	}
+	for _, environment := range []string{"dev", "gamma", "prod"} {
+		out[TargetKey{Component: "company_site", Environment: environment}] = Target{
+			Namespace: tenantNamespace(environment),
+			APIGroup:  "apps",
+			Kind:      "Deployment",
+			Name:      "company-site",
+			Endpoint:  companySiteEndpoint(environment),
+		}
+	}
+	return out
+}
+
+func tenantNamespace(environment string) string {
+	if environment == "root" {
+		return "tenant-root"
+	}
+	return "tenant-" + environment
+}
+
+func harborEndpoint(environment string) string {
+	switch environment {
+	case "root":
+		return "https://harbor.guardianintelligence.org"
+	default:
+		return "https://harbor." + environment + ".gi.org"
+	}
+}
+
+func companySiteEndpoint(environment string) string {
+	switch environment {
+	case "prod":
+		return "https://guardianintelligence.org"
+	default:
+		return "https://" + environment + ".gi.org"
+	}
 }
 
 func expectedCoverageSet() map[CoverageKey]bool {

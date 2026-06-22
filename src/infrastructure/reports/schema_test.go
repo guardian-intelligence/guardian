@@ -15,6 +15,26 @@ func TestValidateAcceptsCompleteLoadReport(t *testing.T) {
 	}
 }
 
+func TestValidateEnforcesExpectedTarget(t *testing.T) {
+	report := validReport("load_test")
+	report.Target.Endpoint = "https://gamma.gi.org"
+	report.Target.Namespace = "tenant-gamma"
+
+	err := Validate(report)
+	if err == nil {
+		t.Fatal("Validate accepted a report targeting the wrong environment")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		`target.namespace must be "tenant-dev" for company_site/dev reports`,
+		`target.endpoint must be "https://dev.gi.org" for company_site/dev reports`,
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("Validate error %q does not contain %q", msg, want)
+		}
+	}
+}
+
 func TestValidateRejectsPlaceholdersAndSecretLookingText(t *testing.T) {
 	report := validReport("load_test")
 	report.Procedure[0] = "TODO run this later"
@@ -121,6 +141,71 @@ func TestExpectedCoverage(t *testing.T) {
 	}
 }
 
+func TestExpectedTargets(t *testing.T) {
+	targets := expectedTargets()
+	if len(targets) != 17 {
+		t.Fatalf("expectedTargets returned %d entries, want 17", len(targets))
+	}
+
+	for _, tc := range []struct {
+		component   string
+		environment string
+		want        Target
+	}{
+		{
+			component:   "cnpg_postgres",
+			environment: "prod",
+			want: Target{
+				Namespace: "tenant-prod",
+				APIGroup:  "apps.cozystack.io",
+				Kind:      "Postgres",
+				Name:      "guardian",
+			},
+		},
+		{
+			component:   "harbor",
+			environment: "gamma",
+			want: Target{
+				Namespace: "tenant-gamma",
+				APIGroup:  "apps.cozystack.io",
+				Kind:      "Harbor",
+				Name:      "guardian",
+				Endpoint:  "https://harbor.gamma.gi.org",
+			},
+		},
+		{
+			component:   "cozystack_dashboard",
+			environment: "root",
+			want: Target{
+				Namespace: "cozy-dashboard",
+				APIGroup:  "networking.k8s.io",
+				Kind:      "Ingress",
+				Name:      "dashboard-web-ingress",
+				Endpoint:  "https://dashboard.guardianintelligence.org",
+			},
+		},
+		{
+			component:   "company_site",
+			environment: "prod",
+			want: Target{
+				Namespace: "tenant-prod",
+				APIGroup:  "apps",
+				Kind:      "Deployment",
+				Name:      "company-site",
+				Endpoint:  "https://guardianintelligence.org",
+			},
+		},
+	} {
+		got, ok := ExpectedTarget(tc.component, tc.environment)
+		if !ok {
+			t.Fatalf("ExpectedTarget(%q, %q) missing", tc.component, tc.environment)
+		}
+		if got != tc.want {
+			t.Fatalf("ExpectedTarget(%q, %q) = %#v, want %#v", tc.component, tc.environment, got, tc.want)
+		}
+	}
+}
+
 func TestCoverageDiff(t *testing.T) {
 	reports := []Report{validReport("load_test")}
 	reports[0].Component = "company_site"
@@ -194,13 +279,7 @@ func validReport(reportType string) Report {
 		SourceRevision: "0123456789abcdef0123456789abcdef01234567",
 		StartedAt:      "2026-06-22T07:00:00Z",
 		FinishedAt:     "2026-06-22T07:05:00Z",
-		Target: Target{
-			Namespace: "tenant-dev",
-			APIGroup:  "apps",
-			Kind:      "Deployment",
-			Name:      "company-site",
-			Endpoint:  "https://dev.gi.org",
-		},
+		Target:         mustExpectedTarget("company_site", "dev"),
 		Procedure: []string{
 			"Applied the merged source revision through Flux.",
 			"Collected live Kubernetes and endpoint observations.",
@@ -239,6 +318,14 @@ func validReport(reportType string) Report {
 		report.Measurements = []Measurement{{Name: "recovery_seconds", Unit: "seconds", Value: 45}}
 	}
 	return report
+}
+
+func mustExpectedTarget(component, environment string) Target {
+	target, ok := ExpectedTarget(component, environment)
+	if !ok {
+		panic("missing expected target for " + component + "/" + environment)
+	}
+	return target
 }
 
 func runfilePath(rel string) string {
