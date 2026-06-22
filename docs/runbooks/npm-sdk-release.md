@@ -85,8 +85,8 @@ This milestone must produce:
 - npm package tarball built from repo source
 - OCI subject at `oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>`
 - tarball digest and npm `dist.integrity`
-- `synthetic-result.v1` and `gate-result.v1` JSON for edge→nightly and
-  nightly→RC Health gates
+- standard synthetic telemetry/test output and SLSA VSA promotion verdicts for
+  edge→nightly and nightly→RC Health gates
 - npm dist-tags for the selected channel after the gate passes
 
 Public release and promotion runs request an in-toto/SLSA provenance statement,
@@ -170,10 +170,10 @@ aspect release sdk-gate \
 ```
 
 The gate installs `@guardian-intelligence/aisucks@<from-channel>` from npm,
-calls Connect Health through the installed SDK, and emits:
+calls Connect Health through the installed SDK, and emits standard tool outputs
+and attestations:
 
-- `synthetic-result.v1.json`
-- `gate-result.v1.json`
+- synthetic test/telemetry output
 - `promotion-vsa.v1.json`
 - `promotion-vsa.sigstore.bundle.json`
 - `promotion-vsa.intoto.jsonl`
@@ -262,7 +262,8 @@ Expected:
 - `name` is `@guardian-intelligence/aisucks`.
 - `repository.url` is
   `git+https://github.com/guardian-intelligence/guardian.git`.
-- `dist.integrity` matches the integrity recorded in the release manifest.
+- `dist.integrity` matches the selected OCI subject metadata and in-toto
+  attestation subject.
 - npmjs.com shows the provenance badge for versions published with
   `npm publish --provenance`.
 

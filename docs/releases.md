@@ -70,7 +70,7 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
   - [ ] platform
   - [ ] flavor
   - [ ] version or channel
-- [ ] Image digest is recorded in a release manifest.
+- [ ] Image digest is recorded in OCI metadata and in-toto/SLSA subjects.
 
 ### SDK Artifact
 
@@ -89,21 +89,22 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 
 - [ ] GitHub Release asset projection is owned by the distributable release
   tool, not by the Guardian CLI or repo-wide release code.
-- [ ] Each uploaded asset has a digest in a signed release manifest.
+- [ ] Each uploaded asset has a digest in signed in-toto/SLSA provenance.
 - [ ] Each uploaded executable/package-like asset has a cosign v3 Sigstore
   signature bundle beside it as `<artifact>.sigstore.json`.
 - [ ] Each uploaded executable/package-like asset has DSSE/in-toto SLSA
   provenance beside it as `<artifact>.intoto.sigstore.json`, verifiable with
   stock `cosign verify-blob-attestation`.
-- [ ] The GitHub Release body links verification commands and the release
-  manifest digest instead of treating the GitHub Release page as the ledger.
+- [ ] The GitHub Release body links verification commands and attestation
+  digests instead of treating the GitHub Release page as the ledger.
 
 ### OCI Distribution
 
 - [x] Platform TLS for `oci.guardianintelligence.org` is solved through
-  Cilium Gateway termination with product TLS passthrough preserved.
-  Crossplane owns the `EdgeGateway` platform substrate; each enabled site
-  declares its concrete `EdgeGateway` object in checked-in site manifests.
+  Cilium Gateway termination with product TLS passthrough preserved. The
+  platform substrate is declared through checked-in Kubernetes/Gateway API
+  manifests and reconciled by the cluster; there is no Crossplane layer in this
+  path.
 - [ ] zot stores release artifacts by immutable digest.
 - [ ] zot serves OCI Distribution v1.1 referrers in the form consumed by
   cosign v3 without experimental flags.
@@ -113,7 +114,7 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
   - [ ] in-toto statement
   - [ ] DSSE envelope carried by stock cosign attestations
   - [ ] SBOM, even minimal at first
-  - [ ] release manifest / metadata
+  - [ ] release metadata through standard OCI annotations/referrers
   - [ ] gate result
 - [ ] Public reads are digest-addressed; mutable tags are channel convenience
   only.
@@ -122,11 +123,12 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 - [ ] SDK can be pulled from the public OCI registry with
   `guardian run oras pull oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>`.
 
-### Release Tuple Manifest
+### Release Target Metadata
 
-- [ ] Emit a machine-readable manifest, likely CUE-rendered JSON, with all
-  release targets.
-- [ ] For each permutation, record:
+- [ ] Represent release targets with standard OCI metadata, package registry
+  metadata, and in-toto/SLSA subjects instead of a Guardian-specific CUE/JSON
+  schema.
+- [ ] For each permutation, standard metadata records:
   - [ ] distributable
   - [ ] source commit
   - [ ] external version or coordinate
@@ -143,9 +145,9 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 
 ### SLSA
 
-- [ ] Guardian release evidence schemas live in
-  `src/release/evidence/schemas.cue`. They define the Guardian-owned contract
-  around standards-owned in-toto/SLSA predicates before verifier code exists.
+- [ ] Do not create Guardian evidence schemas. Verification evidence uses
+  standards-owned in-toto Statement, SLSA provenance, and SLSA VSA predicates
+  that stock cosign/Sigstore tooling can verify.
 - [ ] Every Guardian VSA uses `predicateType:
   https://slsa.dev/verification_summary/v1`.
 - [ ] DSSE envelopes use `payloadType: application/vnd.in-toto+json`, base64
@@ -156,10 +158,9 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
   GitHub Release blobs.
 - [ ] Every Guardian VSA carries `subject` digests, `resourceUri`, verifier
   identity, policy URI + digest, input attestation digests, `PASSED`/`FAILED`,
-  verified levels, and the Guardian extension field
-  `https://guardianintelligence.org/evidence/v1`.
-- [ ] Minimal Guardian VSA policy surfaces are represented. The VSA `kind`
-  names the policy surface; `verificationResult` records pass/fail.
+  verified levels, and no Guardian-specific extension namespace.
+- [ ] Minimal Guardian policy surfaces are represented as verifier policy inputs
+  and standard VSA results, not as a custom result schema.
   - [ ] `build`
   - [ ] `license`
   - [ ] `promotion` with `track: nightly | rc | stable`
@@ -193,18 +194,13 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 - [x] Connect Health is served by the API binary.
 - [ ] Connect Health is publicly reachable on gamma.
 
-### Synthetic Result
+### Synthetic Output
 
 - [x] Repo-owned synthetic installs `@guardian-intelligence/aisucks@<channel>`.
 - [x] Synthetic calls Connect Health against the selected endpoint.
-- [x] Synthetic emits `synthetic-result.v1` JSON:
-  - [x] package/version installed
-  - [x] endpoint URL
-  - [x] operation full name
-  - [x] status
-  - [x] latency
-  - [x] timestamp
-  - [ ] source commit or release manifest digest
+- [ ] Synthetic publishes standard test/telemetry output with package version,
+  endpoint URL, operation full name, status, latency, timestamp, and source
+  commit or selected OCI subject digest.
 
 ### SLO Gate Result
 
@@ -217,14 +213,8 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
   - [ ] app 5xx == 0 over window
   - [ ] pod restart delta == 0 over window
   - [ ] health/liveness probe success
-- [x] Gate evaluator emits `gate-result.v1` JSON:
-  - [ ] candidate digest or manifest digest
-  - [x] decision pass/fail
-  - [x] checked queries
-  - [x] observed values
-  - [ ] time window
-- [x] Gate evaluator emits a SLSA VSA statement plus DSSE JSONL for the
-  promotion verdict.
+- [ ] Gate evaluator emits a SLSA VSA statement plus stock DSSE/in-toto
+  attestation for the promotion verdict.
 - [ ] Gate VSA is attached as an OCI referrer on the promoted release subject.
 
 ### Promotion / Channel Pointer
@@ -239,7 +229,7 @@ bazelisk run @rules_buf_toolchains//:buf -- build -o src/products/aisucks/api/te
 ### Git Tag
 
 - [ ] RC/stable tags come first; edge/nightly tags are optional.
-- [ ] Annotated tag points to a release manifest digest.
+- [ ] Annotated tag points to the selected OCI subject digest.
 - [ ] Tag message includes distributable/version/source commit and artifact
   digest(s).
 - [ ] Tag creation happens after publish/gate success.
@@ -287,7 +277,7 @@ guardian run cosign verify oci.guardianintelligence.org/guardian/aisucks/sdk/npm
 guardian run cosign verify-attestation --type slsaprovenance1 oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest> \
   --certificate-identity 'https://github.com/guardian-intelligence/guardian/.github/workflows/npm-sdk-release.yml@refs/heads/main' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
-guardian/repo tool verify release-manifest <digest-or-file>
+guardian run oras discover oci.guardianintelligence.org/guardian/aisucks/sdk/npm@sha256:<manifest>
 guardian/repo tool synthetic health --base-url=https://gamma.aisucks.app
 ```
 
@@ -302,10 +292,10 @@ The smallest meaningful release slice is:
 3. API image pushed to zot by digest.
 4. SDK tarball pushed to OCI as `guardian/aisucks/sdk/npm` by digest.
 5. SDK published to npm edge from the verified OCI subject.
-6. Release manifest records image digest, SDK OCI digest, and npm package
-   integrity.
+6. Standard OCI/package metadata and in-toto subjects record image digest, SDK
+   OCI digest, and npm package integrity.
 7. Synthetic installs npm edge and calls gamma Health.
-8. Gate result JSON emitted.
+8. SLSA VSA promotion verdict emitted and attached as an OCI referrer.
 9. `nightly` pointer advances only after gate pass.
 
 SLSA/in-toto provenance and signatures are now part of the v0.4.0 public
@@ -391,8 +381,9 @@ vp run -w lint
    `guardian/aisucks/sdk/npm` by digest.
 4. npm projection slice: publish the verified SDK OCI subject to npm `edge`.
 5. Synthetic slice: install npm `edge` and call gamma/prod Health.
-6. Gate slice: emit `synthetic-result.v1` and `gate-result.v1`.
-7. Release manifest slice: record API image digest, SDK OCI digest, and npm
-   integrity in a machine-readable manifest.
+6. Gate slice: emit standard synthetic telemetry and a SLSA VSA promotion
+   verdict.
+7. Release metadata slice: record API image digest, SDK OCI digest, and npm
+   integrity in OCI/package metadata and in-toto subjects.
 8. Distribution slice: attach provenance/SBOM/gate referrers and advance signed
    channel pointers.
