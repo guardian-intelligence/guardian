@@ -7,9 +7,6 @@ host/bootstrap come-up paths and delegates post-Kubernetes desired state to the
 repo's Aspect, OpenTofu, Talm, Talos, Flux, and Cozystack configuration. It is
 not a generic cluster administration CLI.
 
-The previous source tree is preserved under `src-old/` for reference only. It
-is ignored by Bazel and is not part of the active command surface.
-
 ## Layout
 
 ```text
@@ -21,7 +18,6 @@ src/infrastructure/talm/       Talm chart for the management control plane
 src/infrastructure/environments/  dev/gamma/prod tenant desired state
 src/products/company/          active TanStack company website artifact
 src/tools/                     repo-pinned external tool archives
-src-old/                       archived pre-Cozystack implementation
 docs/runbooks/                 operator runbooks
 ```
 

@@ -806,7 +806,6 @@ source, Vite+ workspace, pinned pnpm lock, and brand package now live under
 `src/`. The runtime image uses the digest-pinned Ubuntu base from
 `MODULE.bazel`, the repo-pinned Node toolchain, and exposes `/healthz`,
 `/livez`, `/metrics`, and the public company routes.
-The archived `src-old/` tree is not a source of company-site build inputs.
 
 The OG endpoints currently serve generated SVG cards. If PNG social-card
 compatibility becomes required, add it as a pre-rendered build artifact instead
