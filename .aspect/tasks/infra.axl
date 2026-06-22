@@ -62,6 +62,7 @@ LIVE_GETS = [
     ("root harbor", ["-n", "tenant-root", "get", "harbors.apps.cozystack.io/guardian"]),
     ("root clickhouse", ["-n", "tenant-root", "get", "clickhouses.apps.cozystack.io/guardian"]),
     ("root openbao", ["-n", "tenant-root", "get", "openbao", "guardian"]),
+    ("openbao apiserver network policy", ["-n", "tenant-root", "get", "ciliumnetworkpolicies.cilium.io/allow-openbao-to-apiserver"]),
     ("openbao external-secrets network policy", ["-n", "tenant-root", "get", "ciliumnetworkpolicies.cilium.io/allow-external-secrets-to-openbao"]),
     ("root openbao secret store", ["-n", "tenant-root", "get", "secretstores.external-secrets.io/openbao"]),
     ("root cnpg backup external secret", ["-n", "tenant-root", "get", "externalsecrets.external-secrets.io/guardian-cnpg-backup-creds"]),
