@@ -11,7 +11,7 @@ Runs the full live management-cluster evidence suite:
   3. wait for load jobs and database BackupJobs;
   4. apply and wait for database RestoreJobs;
   5. capture and verify load/DR evidence with Talos required;
-  6. run all-node Latitude hardware outage evidence;
+  6. run all-node Latitude hardware outage evidence with component probes;
   7. verify the complete evidence package.
 
 This command performs live Kubernetes writes and powers off each selected
@@ -33,6 +33,8 @@ Options:
   --down-timeout DURATION Latitude status wait after power_off; default 10m
   --up-timeout DURATION   Latitude status wait after power_on; default 15m
   --poll-interval DURATION Latitude status poll interval; default 10s
+  --probe-timeout DURATION component probe Job wait timeout; default 10m
+  --skip-component-probes skip per-component load probes in outage phases
   --delete-pvc            also delete retained evidence storage PVC before run
   -h, --help              show this help
 
@@ -65,6 +67,8 @@ nodes_csv=""
 down_timeout="10m"
 up_timeout="15m"
 poll_interval="10s"
+probe_timeout="10m"
+component_probes=true
 delete_pvc=false
 
 while [[ $# -gt 0 ]]; do
@@ -128,6 +132,14 @@ while [[ $# -gt 0 ]]; do
     --poll-interval)
       poll_interval="${2:?--poll-interval requires a value}"
       shift 2
+      ;;
+    --probe-timeout)
+      probe_timeout="${2:?--probe-timeout requires a value}"
+      shift 2
+      ;;
+    --skip-component-probes)
+      component_probes=false
+      shift
       ;;
     --delete-pvc)
       delete_pvc=true
@@ -226,9 +238,13 @@ hardware_args+=(--inventory "${inventory}")
 hardware_args+=(--down-timeout "${down_timeout}")
 hardware_args+=(--up-timeout "${up_timeout}")
 hardware_args+=(--poll-interval "${poll_interval}")
+hardware_args+=(--probe-timeout "${probe_timeout}")
 hardware_args+=(--require-talos)
 if [[ -n "${nodes_csv}" ]]; then
   hardware_args+=(--nodes "${nodes_csv}")
+fi
+if [[ "${component_probes}" != "true" ]]; then
+  hardware_args+=(--skip-component-probes)
 fi
 
 suite_args=(
@@ -371,6 +387,8 @@ cat >"${out_dir}/MANIFEST.md" <<EOF
 - Latitude down timeout: ${down_timeout}
 - Latitude up timeout: ${up_timeout}
 - Latitude poll interval: ${poll_interval}
+- Component probes during outages: ${component_probes}
+- Component probe timeout: ${probe_timeout}
 - Delete retained evidence PVC: ${delete_pvc}
 
 This run performs live Kubernetes writes and sequential Latitude hardware power

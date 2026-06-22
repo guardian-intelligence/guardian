@@ -321,6 +321,7 @@ verify_outage_phase() {
   grep_file "${phase_dir}/VERIFY.md" "^- Mode: outage$" "${label}:mode"
   grep_file "${phase_dir}/VERIFY.md" "^- Minimum Ready nodes: ${min_ready_nodes}$" "${label}:min-ready"
   grep_file "${phase_dir}/VERIFY.md" "^- Talos required: ${talos_required}$" "${label}:talos-required"
+  grep_file "${phase_dir}/VERIFY.md" "^- Component probes required: true$" "${label}:component-probes-required"
   require_verification_check "${phase_dir}" "outage:node-present" "${label}:node-present"
   case "${phase}" in
     outage-before)
@@ -337,6 +338,33 @@ verify_outage_phase() {
   require_verification_check "${phase_dir}" "company-site:dev:ready" "${label}:company-dev-ready"
   require_verification_check "${phase_dir}" "company-site:gamma:ready" "${label}:company-gamma-ready"
   require_verification_check "${phase_dir}" "company-site:prod:ready" "${label}:company-prod-ready"
+
+  for check_name in \
+    load:postgres \
+    load:clickhouse \
+    load:harbor \
+    load:openbao \
+    load:http \
+    load:http:company-prod-root \
+    load:http:company-prod-letters \
+    load:http:company-prod-news \
+    load:http:company-prod-healthz \
+    load:http:company-prod-metrics \
+    load:http:company-dev-root \
+    load:http:company-dev-letters \
+    load:http:company-dev-news \
+    load:http:company-dev-healthz \
+    load:http:company-dev-metrics \
+    load:http:company-gamma-root \
+    load:http:company-gamma-letters \
+    load:http:company-gamma-news \
+    load:http:company-gamma-healthz \
+    load:http:company-gamma-metrics \
+    load:http:harbor-health \
+    load:http:dashboard-root \
+    load:storage; do
+    require_verification_check "${phase_dir}" "${check_name}" "${label}:probe:${check_name}"
+  done
 }
 
 verify_hardware_outage_package() {

@@ -7,7 +7,9 @@ Usage: hardware-outage-run-all [OPTIONS]
 
 Runs hardware-outage-run once for every management node in the checked-in
 inventory, sequentially. This is the report path for proving single-node outage
-recovery across the whole management control plane.
+recovery across the whole management control plane. Each per-node run reruns
+component probes before, during, and after the power cycle unless explicitly
+skipped.
 
 Options:
   --nodes CSV             optional comma-separated node subset; defaults to inventory
@@ -21,7 +23,9 @@ Options:
   --down-timeout DURATION Latitude status wait after power_off; default 10m
   --up-timeout DURATION   Latitude status wait after power_on; default 15m
   --poll-interval DURATION Latitude status poll interval; default 10s
+  --probe-timeout DURATION component probe Job wait timeout; default 10m
   --require-talos         require Talos capture success for before/after
+  --skip-component-probes skip per-component load probes in outage phases
   -h, --help              show this help
 
 Inputs:
@@ -42,7 +46,9 @@ talos_nodes="10.8.0.11,10.8.0.12,10.8.0.13"
 down_timeout="10m"
 up_timeout="15m"
 poll_interval="10s"
+probe_timeout="10m"
 require_talos=false
+component_probes=true
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -90,8 +96,16 @@ while [[ $# -gt 0 ]]; do
       poll_interval="${2:?--poll-interval requires a value}"
       shift 2
       ;;
+    --probe-timeout)
+      probe_timeout="${2:?--probe-timeout requires a value}"
+      shift 2
+      ;;
     --require-talos)
       require_talos=true
+      shift
+      ;;
+    --skip-component-probes)
+      component_probes=false
       shift
       ;;
     -h|--help)
@@ -150,6 +164,7 @@ common_args=(
   --down-timeout "${down_timeout}"
   --up-timeout "${up_timeout}"
   --poll-interval "${poll_interval}"
+  --probe-timeout "${probe_timeout}"
 )
 if [[ -n "${kubeconfig}" ]]; then
   common_args+=(--kubeconfig "${kubeconfig}")
@@ -169,6 +184,9 @@ fi
 if [[ "${require_talos}" == "true" ]]; then
   common_args+=(--require-talos)
 fi
+if [[ "${component_probes}" != "true" ]]; then
+  common_args+=(--skip-component-probes)
+fi
 
 {
   echo "# Hardware Outage Evidence Run All"
@@ -176,6 +194,7 @@ fi
   echo "- Inventory: ${inventory}"
   echo "- Captured at: ${timestamp}"
   echo "- Output directory: ${out_dir}"
+  echo "- Component probes: ${component_probes}"
   echo "- Nodes:"
   for node in "${nodes[@]}"; do
     echo "  - ${node}"

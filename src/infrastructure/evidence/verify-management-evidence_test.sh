@@ -201,6 +201,7 @@ run_outage_fixture() {
     --phase "${phase}"
     --node ash-earth
     --min-ready-nodes "${min_ready_nodes}"
+    --require-component-probes
   )
 
   printf '%s\n' '# Management Evidence Capture' "- Phase: ${phase}" >"${run_dir}/MANIFEST.md"
@@ -218,7 +219,10 @@ run_outage_fixture() {
 
   grep -Fqx -- '- Result: PASS' "${run_dir}/VERIFY.md"
   grep -Fqx -- '- Failures: 0' "${run_dir}/VERIFY.md"
+  grep -Fqx -- '- Component probes required: true' "${run_dir}/VERIFY.md"
   awk -F '\t' -v expected_check="${expected_check}" '$1 == "pass" && $2 == expected_check {found = 1} END {exit found ? 0 : 1}' "${run_dir}/verification.tsv"
+  awk -F '\t' '$1 == "pass" && $2 == "load:postgres" {found = 1} END {exit found ? 0 : 1}' "${run_dir}/verification.tsv"
+  awk -F '\t' '$1 == "pass" && $2 == "load:storage" {found = 1} END {exit found ? 0 : 1}' "${run_dir}/verification.tsv"
 }
 
 run_outage_fixture outage-before Ready 3 outage:node-ready-before true

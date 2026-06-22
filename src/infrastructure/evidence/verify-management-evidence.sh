@@ -15,6 +15,8 @@ Options:
   --mode MODE              common, evidence, or outage; defaults from phase
   --min-ready-nodes N      minimum Ready nodes required; defaults from phase
   --require-talos          require Talos health and etcd member captures
+  --require-component-probes
+                           require evidence load Jobs/logs in outage mode
   --node NAME              optional outage node name to check in nodes output
   -h, --help               show this help
 EOF
@@ -25,6 +27,7 @@ phase=""
 mode=""
 min_ready_nodes=""
 require_talos=false
+require_component_probes=false
 node=""
 
 while [[ $# -gt 0 ]]; do
@@ -47,6 +50,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --require-talos)
       require_talos=true
+      shift
+      ;;
+    --require-component-probes)
+      require_component_probes=true
       shift
       ;;
     --node)
@@ -272,6 +279,56 @@ verify_outage_node() {
   esac
 }
 
+verify_component_probes() {
+  for name in \
+    evidence-jobs \
+    logs-evidence-postgres-load \
+    logs-evidence-clickhouse-load \
+    logs-evidence-harbor-oci-read \
+    logs-evidence-openbao-load \
+    logs-evidence-http-load \
+    logs-evidence-storage-smoke; do
+    summary_status "${name}"
+  done
+
+  for job in \
+    evidence-postgres-load \
+    evidence-clickhouse-load \
+    evidence-harbor-oci-read \
+    evidence-openbao-load \
+    evidence-http-load \
+    evidence-storage-smoke; do
+    grep_file "evidence/jobs-wide.txt" "${job}[[:space:]]+1/1" "evidence-job:${job}"
+  done
+
+  grep_file "evidence/logs-evidence-postgres-load.txt" "postgres-load .*expected=1000 actual=1000" "load:postgres"
+  grep_file "evidence/logs-evidence-clickhouse-load.txt" "clickhouse-load .*expected=1000 actual=1000" "load:clickhouse"
+  grep_file "evidence/logs-evidence-harbor-oci-read.txt" "harbor-oci-read total=25 failures=0" "load:harbor"
+  grep_file "evidence/logs-evidence-openbao-load.txt" "openbao-load total=25 failures=0" "load:openbao"
+  grep_file "evidence/logs-evidence-http-load.txt" "http-load total=1700 failures=0" "load:http"
+  for label in \
+    company-prod-root \
+    company-prod-letters \
+    company-prod-news \
+    company-prod-healthz \
+    company-prod-metrics \
+    company-dev-root \
+    company-dev-letters \
+    company-dev-news \
+    company-dev-healthz \
+    company-dev-metrics \
+    company-gamma-root \
+    company-gamma-letters \
+    company-gamma-news \
+    company-gamma-healthz \
+    company-gamma-metrics \
+    harbor-health \
+    dashboard-root; do
+    grep_file "evidence/logs-evidence-http-load.txt" "http-target label=${label} .* total=100 failures=0" "load:http:${label}"
+  done
+  grep_file "evidence/logs-evidence-storage-smoke.txt" "storage-smoke files=64" "load:storage"
+}
+
 verify_common() {
   local allow_degraded_talos=false
   if [[ "${phase}" == "outage-down" && "${require_talos}" != "true" ]]; then
@@ -346,59 +403,17 @@ verify_common() {
 }
 
 verify_evidence() {
+  verify_component_probes
+
   for name in \
-    evidence-jobs \
     evidence-backupjobs \
     evidence-restorejobs \
     evidence-restore-verify-jobs \
     evidence-restore-targets \
-    logs-evidence-postgres-load \
-    logs-evidence-clickhouse-load \
-    logs-evidence-harbor-oci-read \
-    logs-evidence-openbao-load \
-    logs-evidence-http-load \
-    logs-evidence-storage-smoke \
     logs-evidence-postgres-restore-verify \
     logs-evidence-clickhouse-restore-verify; do
     summary_status "${name}"
   done
-
-  for job in \
-    evidence-postgres-load \
-    evidence-clickhouse-load \
-    evidence-harbor-oci-read \
-    evidence-openbao-load \
-    evidence-http-load \
-    evidence-storage-smoke; do
-    grep_file "evidence/jobs-wide.txt" "${job}[[:space:]]+1/1" "evidence-job:${job}"
-  done
-
-  grep_file "evidence/logs-evidence-postgres-load.txt" "postgres-load .*expected=1000 actual=1000" "load:postgres"
-  grep_file "evidence/logs-evidence-clickhouse-load.txt" "clickhouse-load .*expected=1000 actual=1000" "load:clickhouse"
-  grep_file "evidence/logs-evidence-harbor-oci-read.txt" "harbor-oci-read total=25 failures=0" "load:harbor"
-  grep_file "evidence/logs-evidence-openbao-load.txt" "openbao-load total=25 failures=0" "load:openbao"
-  grep_file "evidence/logs-evidence-http-load.txt" "http-load total=1700 failures=0" "load:http"
-  for label in \
-    company-prod-root \
-    company-prod-letters \
-    company-prod-news \
-    company-prod-healthz \
-    company-prod-metrics \
-    company-dev-root \
-    company-dev-letters \
-    company-dev-news \
-    company-dev-healthz \
-    company-dev-metrics \
-    company-gamma-root \
-    company-gamma-letters \
-    company-gamma-news \
-    company-gamma-healthz \
-    company-gamma-metrics \
-    harbor-health \
-    dashboard-root; do
-    grep_file "evidence/logs-evidence-http-load.txt" "http-target label=${label} .* total=100 failures=0" "load:http:${label}"
-  done
-  grep_file "evidence/logs-evidence-storage-smoke.txt" "storage-smoke files=64" "load:storage"
 
   grep_file "evidence/backupjobs.yaml" "name: evidence-postgres-adhoc" "dr:postgres-backupjob"
   grep_file "evidence/backupjobs.yaml" "name: evidence-clickhouse-adhoc" "dr:clickhouse-backupjob"
@@ -428,6 +443,7 @@ write_report() {
 - Mode: ${mode}
 - Minimum Ready nodes: ${min_ready_nodes}
 - Talos required: ${require_talos}
+- Component probes required: ${require_component_probes}
 - Result: ${result}
 - Checks: ${checks}
 - Failures: ${failures}
@@ -452,6 +468,9 @@ case "${mode}" in
     ;;
   outage)
     verify_outage_node
+    if [[ "${require_component_probes}" == "true" ]]; then
+      verify_component_probes
+    fi
     ;;
 esac
 

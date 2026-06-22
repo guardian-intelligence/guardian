@@ -6,11 +6,11 @@ usage() {
 Usage: hardware-outage-run --node NAME [OPTIONS]
 
 Runs a true hardware single-node outage rehearsal:
-  1. capture and verify outage-before;
+  1. rerun component probes, then capture and verify outage-before;
   2. power off the Latitude server and wait for status=off;
-  3. capture and verify outage-down with two Ready nodes required;
+  3. rerun component probes, then capture and verify outage-down with two Ready nodes required;
   4. power on the server and wait for status=on;
-  5. capture and verify outage-after.
+  5. rerun component probes, then capture and verify outage-after.
 
 Options:
   --node NAME             management node name from guardian-mgmt inventory
@@ -24,7 +24,9 @@ Options:
   --down-timeout DURATION Latitude status wait after power_off; default 10m
   --up-timeout DURATION   Latitude status wait after power_on; default 15m
   --poll-interval DURATION Latitude status poll interval; default 10s
+  --probe-timeout DURATION component probe Job wait timeout; default 10m
   --require-talos         require Talos capture success for before/after
+  --skip-component-probes skip per-component load probes in outage phases
   -h, --help              show this help
 
 Inputs:
@@ -48,7 +50,9 @@ talos_nodes="10.8.0.11,10.8.0.12,10.8.0.13"
 down_timeout="10m"
 up_timeout="15m"
 poll_interval="10s"
+probe_timeout="10m"
 require_talos=false
+component_probes=true
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -96,8 +100,16 @@ while [[ $# -gt 0 ]]; do
       poll_interval="${2:?--poll-interval requires a value}"
       shift 2
       ;;
+    --probe-timeout)
+      probe_timeout="${2:?--probe-timeout requires a value}"
+      shift 2
+      ;;
     --require-talos)
       require_talos=true
+      shift
+      ;;
+    --skip-component-probes)
+      component_probes=false
       shift
       ;;
     -h|--help)
@@ -144,6 +156,13 @@ if [[ -z "${out_dir}" ]]; then
 fi
 mkdir -p "${out_dir}"
 power_restore_required=false
+kubectl_args=()
+if [[ -n "${kubeconfig}" ]]; then
+  kubectl_args+=(--kubeconfig "${kubeconfig}")
+fi
+if [[ -n "${context}" ]]; then
+  kubectl_args+=(--context "${context}")
+fi
 
 run_latitude() {
   local action="$1"
@@ -157,6 +176,43 @@ run_latitude() {
     --timeout "${timeout}" \
     --poll-interval "${poll_interval}" \
     >"${output}"
+}
+
+kubectl_cmd() {
+  "${kubectl_bin}" "${kubectl_args[@]}" "$@"
+}
+
+run_component_probes() {
+  if [[ "${component_probes}" != "true" ]]; then
+    return 0
+  fi
+
+  local job
+  kubectl_cmd delete \
+    job/evidence-postgres-load \
+    job/evidence-clickhouse-load \
+    job/evidence-harbor-oci-read \
+    job/evidence-openbao-load \
+    job/evidence-http-load \
+    job/evidence-storage-smoke \
+    -n tenant-root \
+    --ignore-not-found
+
+  kubectl_cmd apply -f src/infrastructure/evidence/database-load.yaml
+  kubectl_cmd apply -f src/infrastructure/evidence/harbor-oci-read.yaml
+  kubectl_cmd apply -f src/infrastructure/evidence/http-load.yaml
+  kubectl_cmd apply -f src/infrastructure/evidence/openbao-load.yaml
+  kubectl_cmd apply -f src/infrastructure/evidence/storage-smoke.yaml
+
+  for job in \
+    evidence-postgres-load \
+    evidence-clickhouse-load \
+    evidence-harbor-oci-read \
+    evidence-openbao-load \
+    evidence-http-load \
+    evidence-storage-smoke; do
+    kubectl_cmd wait "job/${job}" -n tenant-root --for=condition=complete --timeout "${probe_timeout}"
+  done
 }
 
 restore_power_on_exit() {
@@ -230,6 +286,9 @@ run_verify() {
   if [[ "${require_talos_for_phase}" == "true" ]]; then
     args+=(--require-talos)
   fi
+  if [[ "${component_probes}" == "true" ]]; then
+    args+=(--require-component-probes)
+  fi
   "${verify_evidence_bin}" "${args[@]}"
 }
 
@@ -245,21 +304,25 @@ write_manifest() {
 - Latitude power off and down status: latitude-down.jsonl
 - Latitude power on and after status: latitude-after.jsonl
 - Kubernetes/Talos phases: outage-before, outage-down, outage-after
+- Component probes: ${component_probes}
 EOF
 }
 
 write_manifest
 run_latitude status "1s" "${out_dir}/latitude-before.jsonl"
+run_component_probes
 run_capture outage-before false
 run_verify outage-before 3 "${require_talos}"
 
 power_restore_required=true
 run_latitude power_off "${down_timeout}" "${out_dir}/latitude-down.jsonl"
+run_component_probes
 run_capture outage-down true
 run_verify outage-down 2 false
 
 run_latitude power_on "${up_timeout}" "${out_dir}/latitude-after.jsonl"
 power_restore_required=false
+run_component_probes
 run_capture outage-after false
 run_verify outage-after 3 "${require_talos}"
 

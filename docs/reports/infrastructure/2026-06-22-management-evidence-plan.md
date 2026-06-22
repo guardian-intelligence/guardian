@@ -57,6 +57,7 @@ aspect infra outage-drain --kubeconfig "${KUBECONFIG}" --node <node>
 aspect infra outage-uncordon --kubeconfig "${KUBECONFIG}" --node <node>
 aspect infra outage-run --kubeconfig "${KUBECONFIG}" --node <node> --timeout 10m
 aspect infra evidence-verify --run-dir docs/reports/infrastructure/live-runs/<timestamp>-outage-after --mode outage --node <node>
+aspect infra evidence-verify --run-dir docs/reports/infrastructure/live-runs/<timestamp>-hardware-outage-<node>/outage-down --mode outage --node <node> --min-ready-nodes 2 --require-component-probes
 LATITUDESH_AUTH_TOKEN="${LATITUDESH_AUTH_TOKEN}" aspect infra hardware-outage-run --kubeconfig "${KUBECONFIG}" --talosconfig "${TALOSCONFIG}" --node <node> --require-talos
 LATITUDESH_AUTH_TOKEN="${LATITUDESH_AUTH_TOKEN}" aspect infra hardware-outage-run-all --kubeconfig "${KUBECONFIG}" --talosconfig "${TALOSCONFIG}" --require-talos
 ```
@@ -119,6 +120,9 @@ LATITUDESH_AUTH_TOKEN="${LATITUDESH_AUTH_TOKEN}" aspect infra hardware-outage-ru
   before/down/after evidence, and runs the evidence verifier for each phase.
 - Hardware outage verification now requires the target node to be Ready before
   the drill, `NotReady` while powered off, and Ready again after power-on.
+- Hardware outage phases now rerun and verify the load-only evidence Jobs
+  before/down/after each node power cycle: Postgres, ClickHouse, Harbor,
+  OpenBao, HTTP routes, and replicated storage.
 - The hardware outage runner now attempts Latitude `power_on` during exit
   cleanup if a capture or verification step fails after `power_off`; this is
   covered by `//src/infrastructure/evidence:hardware-outage-run-smoke`.

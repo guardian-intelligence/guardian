@@ -67,6 +67,32 @@ required_evidence_checks=(
   ingress:dashboard.guardianintelligence.org
 )
 
+required_outage_probe_checks=(
+  load:postgres
+  load:clickhouse
+  load:harbor
+  load:openbao
+  load:http
+  load:http:company-prod-root
+  load:http:company-prod-letters
+  load:http:company-prod-news
+  load:http:company-prod-healthz
+  load:http:company-prod-metrics
+  load:http:company-dev-root
+  load:http:company-dev-letters
+  load:http:company-dev-news
+  load:http:company-dev-healthz
+  load:http:company-dev-metrics
+  load:http:company-gamma-root
+  load:http:company-gamma-letters
+  load:http:company-gamma-news
+  load:http:company-gamma-healthz
+  load:http:company-gamma-metrics
+  load:http:harbor-health
+  load:http:dashboard-root
+  load:storage
+)
+
 write_evidence_fixture() {
   printf '%s\n' '# Manifest' >"${evidence_dir}/MANIFEST.md"
   printf '%s\n' \
@@ -97,6 +123,7 @@ write_phase_fixture() {
     '- Mode: outage' \
     "- Minimum Ready nodes: ${min_ready}" \
     "- Talos required: ${talos_required}" \
+    '- Component probes required: true' \
     '- Result: PASS' \
     >"${phase_dir}/VERIFY.md"
   {
@@ -117,6 +144,9 @@ write_phase_fixture() {
         printf '%s\n' 'pass	outage:node-ready-after	ok'
         ;;
     esac
+    for check in "${required_outage_probe_checks[@]}"; do
+      printf 'pass\t%s\tok\n' "${check}"
+    done
   } >"${phase_dir}/verification.tsv"
 }
 

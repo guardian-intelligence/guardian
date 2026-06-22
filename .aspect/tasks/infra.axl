@@ -436,6 +436,8 @@ def _verify_evidence_impl(ctx):
         verify_args.extend(["--min-ready-nodes", ctx.args.min_ready_nodes])
     if ctx.args.require_talos:
         verify_args.append("--require-talos")
+    if ctx.args.require_component_probes:
+        verify_args.append("--require-component-probes")
     if ctx.args.node != "":
         verify_args.extend(["--node", ctx.args.node])
     return checked_spawn(
@@ -539,6 +541,10 @@ def _management_evidence_run_impl(ctx):
         run_args.extend(["--up-timeout", ctx.args.up_timeout])
     if ctx.args.poll_interval != "":
         run_args.extend(["--poll-interval", ctx.args.poll_interval])
+    if ctx.args.probe_timeout != "":
+        run_args.extend(["--probe-timeout", ctx.args.probe_timeout])
+    if ctx.args.skip_component_probes:
+        run_args.append("--skip-component-probes")
     if ctx.args.delete_pvc:
         run_args.append("--delete-pvc")
 
@@ -876,8 +882,12 @@ def _hardware_outage_run_impl(ctx):
         hardware_args.extend(["--up-timeout", ctx.args.up_timeout])
     if ctx.args.poll_interval != "":
         hardware_args.extend(["--poll-interval", ctx.args.poll_interval])
+    if ctx.args.probe_timeout != "":
+        hardware_args.extend(["--probe-timeout", ctx.args.probe_timeout])
     if ctx.args.require_talos:
         hardware_args.append("--require-talos")
+    if ctx.args.skip_component_probes:
+        hardware_args.append("--skip-component-probes")
 
     return checked_spawn(
         ctx,
@@ -938,8 +948,12 @@ def _hardware_outage_run_all_impl(ctx):
         hardware_args.extend(["--up-timeout", ctx.args.up_timeout])
     if ctx.args.poll_interval != "":
         hardware_args.extend(["--poll-interval", ctx.args.poll_interval])
+    if ctx.args.probe_timeout != "":
+        hardware_args.extend(["--probe-timeout", ctx.args.probe_timeout])
     if ctx.args.require_talos:
         hardware_args.append("--require-talos")
+    if ctx.args.skip_component_probes:
+        hardware_args.append("--skip-component-probes")
 
     return checked_spawn(
         ctx,
@@ -1002,6 +1016,7 @@ _VERIFY_EVIDENCE_ARGS = {
     "min_ready_nodes": args.string(default = "", description = "Minimum Ready nodes required. Defaults from the capture phase."),
     "node": args.string(default = "", description = "Optional outage node name to check in kubectl node output."),
     "phase": args.string(default = "", description = "Capture phase override. Defaults to MANIFEST.md."),
+    "require_component_probes": args.boolean(default = False, description = "Require per-component evidence load Jobs/logs in outage mode."),
     "require_talos": args.boolean(default = False, description = "Require Talos health and etcd member captures instead of allowing skipped Talos outputs."),
     "run_dir": args.string(default = "", description = "Captured live-run directory to verify."),
 }
@@ -1028,7 +1043,9 @@ _HARDWARE_OUTAGE_RUN_ARGS = {
     "node": args.string(default = "", description = "Management node name under hardware outage rehearsal."),
     "out_dir": args.string(default = "", description = "Output directory; defaults under docs/reports/infrastructure/live-runs/."),
     "poll_interval": args.string(default = "10s", description = "Latitude status poll interval."),
+    "probe_timeout": args.string(default = "10m", description = "kubectl wait timeout for component probe Jobs during outage phases."),
     "require_talos": args.boolean(default = False, description = "Require Talos health and etcd member captures for before/after phases."),
+    "skip_component_probes": args.boolean(default = False, description = "Skip per-component load probes during outage phases. Debug only; final suite expects probes."),
     "talos_endpoints": args.string(default = "10.8.0.250", description = "Talos API endpoint list."),
     "talos_nodes": args.string(default = "10.8.0.11,10.8.0.12,10.8.0.13", description = "Talos node list."),
     "talosconfig": args.string(default = "", description = "Optional talosconfig path. Talos capture is skipped unless set or TALOSCONFIG is present."),

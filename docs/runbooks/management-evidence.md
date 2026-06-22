@@ -363,7 +363,9 @@ attempts an `outage-failed` capture if a step fails. This proves Kubernetes
 scheduling and rollout recovery. It is not a substitute for the required
 hardware outage drill. Run `aspect infra evidence-verify --mode outage` against
 each captured outage directory before attaching it to the outage report; pass
-`--min-ready-nodes 2` for a true `outage-down` hardware capture.
+`--min-ready-nodes 2` for a true `outage-down` hardware capture. For hardware
+outage captures, also pass `--require-component-probes` when verifying
+manually; `hardware-outage-run` passes it automatically.
 
 Standalone hardware outage drill:
 
@@ -394,12 +396,21 @@ aspect infra hardware-outage-run \
 `hardware-outage-run` is the per-node true single-node outage command. It:
 
 - records Latitude status before the outage;
+- reruns the load-only evidence Jobs and captures their logs for
+  `outage-before`;
 - captures and verifies `outage-before`;
 - sends Latitude `power_off` and waits for server status `off`;
+- reruns the load-only evidence Jobs on the remaining nodes;
 - captures and verifies `outage-down` with the target node `NotReady` and two
   Ready Kubernetes nodes required;
 - sends Latitude `power_on` and waits for server status `on`;
+- reruns the load-only evidence Jobs after recovery;
 - captures and verifies `outage-after` with the target node Ready again.
+
+The load-only evidence Jobs are Postgres, ClickHouse, Harbor digest reads,
+OpenBao write/read checks, HTTP route checks, and replicated storage smoke. Use
+`--skip-component-probes` only for debugging; final suite verification requires
+component probes in every hardware outage phase.
 
 If a capture or verification step fails after `power_off`, the runner attempts
 Latitude `power_on` during exit cleanup before returning failure. Treat the
