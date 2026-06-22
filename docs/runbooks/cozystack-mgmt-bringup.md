@@ -441,6 +441,10 @@ TanStack artifact. Pods use a strict hostname topology spread (`maxSkew: 1`,
 `whenUnsatisfiable: DoNotSchedule`), and each environment declares
 `PodDisruptionBudget/company-site` with `minAvailable: 2` so voluntary
 disruption cannot take the surface below the single-node-outage target.
+Each environment also declares `NetworkPolicy/company-site-ingress`, selecting
+only the company-site pods and allowing inbound TCP/8080 traffic only from the
+`tenant-root` ingress-nginx controller pods. Egress remains unrestricted until
+the site has a declared in-cluster telemetry collector endpoint.
 
 ## Live Checks
 
@@ -471,8 +475,11 @@ kubectl -n tenant-gamma wait --for=condition=WorkloadsReady postgreses.apps.cozy
 kubectl -n tenant-prod wait --for=condition=Ready postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian
 kubectl -n tenant-prod wait --for=condition=WorkloadsReady postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian
 kubectl -n tenant-dev get deploy,svc,poddisruptionbudget,ingress company-site
+kubectl -n tenant-dev get networkpolicy company-site-ingress
 kubectl -n tenant-gamma get deploy,svc,poddisruptionbudget,ingress company-site
+kubectl -n tenant-gamma get networkpolicy company-site-ingress
 kubectl -n tenant-prod get deploy,svc,poddisruptionbudget,ingress company-site
+kubectl -n tenant-prod get networkpolicy company-site-ingress
 kubectl -n tenant-root get openbao guardian
 kubectl -n tenant-root get ciliumnetworkpolicy allow-external-secrets-to-openbao
 kubectl -n tenant-root get secretstores.external-secrets.io openbao
@@ -522,10 +529,10 @@ Expected results:
   `WorkloadsReady=True`; OpenBao app `Ready=True` is sufficient until
   init/unseal is declared in the bootstrap path
 - each tenant namespace has the company-site `Deployment`, `Service`,
-  `PodDisruptionBudget`, and `Ingress`; the dev and gamma ingress hosts are
-  `dev.gi.org` and `gamma.gi.org`, and prod is `guardianintelligence.org`;
-  each live company-site surface has pods placed on three distinct Kubernetes
-  nodes
+  `NetworkPolicy`, `PodDisruptionBudget`, and `Ingress`; the dev and gamma
+  ingress hosts are `dev.gi.org` and `gamma.gi.org`, and prod is
+  `guardianintelligence.org`; each live company-site surface has pods placed on
+  three distinct Kubernetes nodes
 - OpenBao is deployed as the Cozystack-managed `guardian` app in `tenant-root`
 - `tenant-root` has the Cilium allow policy for ESO-to-OpenBao traffic
 - root/dev/gamma/prod have `SecretStore/openbao` and
