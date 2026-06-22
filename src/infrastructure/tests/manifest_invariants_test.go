@@ -19,6 +19,7 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("environment tenants", testEnvironmentTenants)
 	t.Run("layer two networking", testLayerTwoNetworking)
 	t.Run("single default storage class", testSingleDefaultStorageClass)
+	t.Run("backup classes", testBackupClasses)
 	t.Run("root tenant core services", testRootTenantCoreServices)
 	t.Run("environment tenant core services", testEnvironmentTenantCoreServices)
 	t.Run("company site", testCompanySite)
@@ -122,15 +123,45 @@ func testSingleDefaultStorageClass(t *testing.T) {
 	assertString(t, replicated, "Immediate", "volumeBindingMode")
 }
 
+func testBackupClasses(t *testing.T) {
+	docs := readManifests(t, "src/infrastructure/base/backup/postgres-cnpg.yaml")
+
+	strategy := findObject(t, docs, "CNPG", "", "guardian-postgres-r2")
+	assertString(t, strategy, "strategy.backups.cozystack.io/v1alpha1", "apiVersion")
+	assertString(t, strategy, "{{ .Application.metadata.namespace }}-{{ .Application.metadata.name }}", "spec", "template", "serverName")
+	assertString(t, strategy, "{{ .Application.spec.backup.destinationPath }}", "spec", "template", "barmanObjectStore", "destinationPath")
+	assertString(t, strategy, "{{ .Application.spec.backup.endpointURL }}", "spec", "template", "barmanObjectStore", "endpointURL")
+	assertString(t, strategy, "30d", "spec", "template", "barmanObjectStore", "retentionPolicy")
+	assertString(t, strategy, "{{ .Application.metadata.name }}-cnpg-backup-creds", "spec", "template", "barmanObjectStore", "s3Credentials", "secretRef", "name")
+	assertString(t, strategy, "gzip", "spec", "template", "barmanObjectStore", "data", "compression")
+	assertString(t, strategy, "gzip", "spec", "template", "barmanObjectStore", "wal", "compression")
+
+	class := findObject(t, docs, "BackupClass", "", "guardian-postgres-cnpg")
+	assertString(t, class, "backups.cozystack.io/v1alpha1", "apiVersion")
+	strategies := sliceAt(t, class, "spec", "strategies")
+	if len(strategies) != 1 {
+		t.Fatalf("spec.strategies has %d entries, want 1", len(strategies))
+	}
+	classStrategy := asManifest(t, strategies[0], "spec.strategies[0]")
+	assertString(t, classStrategy, "apps.cozystack.io", "application", "apiGroup")
+	assertString(t, classStrategy, "Postgres", "application", "kind")
+	assertString(t, classStrategy, "strategy.backups.cozystack.io", "strategyRef", "apiGroup")
+	assertString(t, classStrategy, "CNPG", "strategyRef", "kind")
+	assertString(t, classStrategy, "guardian-postgres-r2", "strategyRef", "name")
+
+	assertNoKind(t, docs, "Plan")
+	assertNoKind(t, docs, "BackupJob")
+}
+
 func testRootTenantCoreServices(t *testing.T) {
 	docs := readManifests(t, "src/infrastructure/base/apps/core-services.yaml")
 
 	assertApp(t, docs, appExpectation{
-		kind:           "Postgres",
-		namespace:      "tenant-root",
-		storageClass:   "replicated",
-		topReplicas:    3,
-		noExternalDB:   true,
+		kind:            "Postgres",
+		namespace:       "tenant-root",
+		storageClass:    "replicated",
+		topReplicas:     3,
+		noExternalDB:    true,
 		postgresVersion: "v18",
 	})
 	assertApp(t, docs, appExpectation{
@@ -161,11 +192,11 @@ func testEnvironmentTenantCoreServices(t *testing.T) {
 			namespace := "tenant-" + env
 
 			assertApp(t, docs, appExpectation{
-				kind:           "Postgres",
-				namespace:      namespace,
-				storageClass:   "replicated",
-				topReplicas:    3,
-				noExternalDB:   true,
+				kind:            "Postgres",
+				namespace:       namespace,
+				storageClass:    "replicated",
+				topReplicas:     3,
+				noExternalDB:    true,
 				postgresVersion: "v18",
 			})
 			assertApp(t, docs, appExpectation{
@@ -354,14 +385,14 @@ func testFluxHandoff(t *testing.T) {
 }
 
 type appExpectation struct {
-	kind             string
-	namespace        string
-	host             string
-	storageClass     string
-	topReplicas      int
-	nestedReplicas   map[string]int
-	noExternalDB     bool
-	postgresVersion  string
+	kind            string
+	namespace       string
+	host            string
+	storageClass    string
+	topReplicas     int
+	nestedReplicas  map[string]int
+	noExternalDB    bool
+	postgresVersion string
 }
 
 func assertApp(t *testing.T, docs []manifest, want appExpectation) {
@@ -452,6 +483,16 @@ func findObject(t *testing.T, docs []manifest, kind, namespace, name string) man
 		t.Fatalf("expected one %s %s/%s, got %d", kind, namespace, name, len(matches))
 	}
 	return matches[0]
+}
+
+func assertNoKind(t *testing.T, docs []manifest, kind string) {
+	t.Helper()
+
+	for _, doc := range docs {
+		if stringAt(doc, "kind") == kind {
+			t.Fatalf("found unexpected %s %s/%s", kind, stringAt(doc, "metadata", "namespace"), stringAt(doc, "metadata", "name"))
+		}
+	}
 }
 
 func assertString(t *testing.T, doc manifest, want string, path ...string) {

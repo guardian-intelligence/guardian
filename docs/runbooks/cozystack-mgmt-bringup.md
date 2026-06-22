@@ -16,6 +16,7 @@ checks to run; it is not a separate source of truth.
 | Talos/Talm chart | `src/infrastructure/talm/` |
 | Cozystack platform package | `src/infrastructure/base/cozystack/platform.yaml` |
 | Core Cozystack apps | `src/infrastructure/base/apps/core-services.yaml` |
+| Backup strategy classes | `src/infrastructure/base/backup/` |
 | MetalLB L2 pool | `src/infrastructure/base/networking/metallb.yaml` |
 | Kube-OVN MTU | `src/infrastructure/base/networking/subnet-mtu.yaml` |
 | Flux handoff | `src/infrastructure/base/flux/sync.yaml` |
@@ -73,8 +74,9 @@ package publishes the dashboard/API endpoints, environment tenants use the
 expected `*.gi.org` hosts, MetalLB and Kube-OVN keep the L2/MTU topology,
 `replicated` is the only default StorageClass, root and environment
 Postgres/Harbor/ClickHouse apps use the intended HA/storage shape, OpenBao stays
-declared in `tenant-root`, the company site is declared for dev/gamma/prod, and
-Flux reconciles base before tenant apps.
+declared in `tenant-root`, the reusable CNPG backup strategy maps through a
+cluster-scoped BackupClass, the company site is declared for dev/gamma/prod,
+and Flux reconciles base before tenant apps.
 
 Local validation does not require backend credentials:
 
@@ -144,12 +146,12 @@ kubectl apply -f src/infrastructure/base/flux/sync.yaml
 ```
 
 Flux first reconciles `src/infrastructure/base`, including the Platform package,
-root Postgres/Harbor/ClickHouse apps, networking manifests, storage classes,
-environment tenants, OpenBao, and the Flux objects themselves. The base also
-declares a second Flux Kustomization, `guardian-mgmt-tenant-apps`, that depends
-on `guardian-mgmt-base` and reconciles `src/infrastructure/environments` after
-the Tenant chart has had a chance to create `tenant-dev`, `tenant-gamma`, and
-`tenant-prod`.
+root Postgres/Harbor/ClickHouse apps, the CNPG backup strategy and BackupClass,
+networking manifests, storage classes, environment tenants, OpenBao, and the
+Flux objects themselves. The base also declares a second Flux Kustomization,
+`guardian-mgmt-tenant-apps`, that depends on `guardian-mgmt-base` and reconciles
+`src/infrastructure/environments` after the Tenant chart has had a chance to
+create `tenant-dev`, `tenant-gamma`, and `tenant-prod`.
 
 Both Flux Kustomizations are apply-only (`wait: false`). Cozystack app CRs fan
 out into HelmReleases and stateful workloads; readiness is proven by the live
@@ -212,6 +214,14 @@ The checked-in root app slice declares:
 Backups are off in this first root app declaration. Enable them only by pointing
 the app specs at pre-existing Kubernetes Secrets delivered from the declared
 OpenBao/R2 secret path; never put S3 credentials directly in app specs.
+
+The base backup layer declares `CNPG/guardian-postgres-r2` plus
+`BackupClass/guardian-postgres-cnpg`. The strategy is intentionally reusable:
+it reads `destinationPath` and `endpointURL` from each Postgres app's own
+`spec.backup` block and references a tenant-local Secret named
+`<app>-cnpg-backup-creds`. There are no checked-in `Plan` or `BackupJob`
+resources yet, because recurring backup jobs must wait until OpenBao projects
+real R2 credentials and each app has real object-store coordinates.
 
 The checked-in environment app layer declares the same core service set in each
 environment namespace:
@@ -279,6 +289,8 @@ kubectl -n tenant-dev get deploy,svc,ingress company-site
 kubectl -n tenant-gamma get deploy,svc,ingress company-site
 kubectl -n tenant-prod get deploy,svc,ingress company-site
 kubectl -n tenant-root get openbao guardian
+kubectl get cnpgs.strategy.backups.cozystack.io guardian-postgres-r2
+kubectl get backupclasses.backups.cozystack.io guardian-postgres-cnpg
 ```
 
 Expected results:
@@ -301,6 +313,9 @@ Expected results:
   `Ingress`; the dev and gamma ingress hosts are `dev.gi.org` and
   `gamma.gi.org`, and prod is `guardianintelligence.org`
 - OpenBao is deployed as the Cozystack-managed `guardian` app in `tenant-root`
+- the cluster has `CNPG/guardian-postgres-r2` and
+  `BackupClass/guardian-postgres-cnpg`; there should not yet be a checked-in
+  recurring `Plan`
 
 Talos-side network checks:
 
@@ -331,9 +346,10 @@ separate PRs with their own validation:
 - Load-test reports for CNPG/Postgres, Harbor, ClickHouse, OpenBao, the
   Cozystack dashboard, and the company-site surfaces.
 - Backup specs for root and environment Postgres/Harbor/ClickHouse, wired to
-  declared OpenBao/R2-projected Secrets. The package prerequisites are now
-  declared, but the `SecretStore`/`ExternalSecret`, backup class, backup plan,
-  and live restore artifacts still need separate PRs.
+  declared OpenBao/R2-projected Secrets. The package prerequisites and reusable
+  CNPG BackupClass are now declared, but the `SecretStore`/`ExternalSecret`,
+  app-level backup coordinates, recurring backup plans, ClickHouse/Harbor backup
+  classes, and live restore artifacts still need separate PRs.
 - ClickHouse chart-side `spec.storageClass` rendering, because Cozystack 1.4
   still relies on the cluster default for ClickHouse and keeper PVCs.
 - OpenBao init/unseal automation and backup/restore drills.
