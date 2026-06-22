@@ -149,6 +149,7 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/bootstrap/guardian-mgmt-openbao:root",
 ]
 INFRA_TESTS = [
+    "//src/guardian/cmd/guardian:guardian_test",
     "//src/infrastructure/cmd/cozystack_backup_drill:cozystack_backup_drill_test",
     "//src/infrastructure/cmd/cozystack_company_site_publish:cozystack_company_site_publish_test",
     "//src/infrastructure/cmd/cozystack_db_load:cozystack_db_load_test",
@@ -711,18 +712,26 @@ def _talosctl_path(ctx):
     return output_base + "/external/+http_file+talosctl_linux_amd64/file/talosctl"
 
 def _kubectl_args(ctx, args):
+    return _kubectl_args_for(ctx, ctx.args.kubeconfig, args)
+
+def _kubectl_args_for(ctx, kubeconfig, args):
     out = []
-    if ctx.args.kubeconfig != "":
-        out.extend(["--kubeconfig", ctx.args.kubeconfig])
+    if kubeconfig != "":
+        out.extend(["--kubeconfig", kubeconfig])
     if ctx.args.request_timeout != "":
         out.append("--request-timeout=" + ctx.args.request_timeout)
     out.extend(args)
     return out
 
+def _talosconfig_path(ctx):
+    if ctx.args.talosconfig != "":
+        return ctx.args.talosconfig
+    return ws_path(ctx, ctx.args.root) + "/talosconfig"
+
 def _talosctl_args(ctx, args):
     out = [
         "--talosconfig",
-        ctx.args.talosconfig,
+        _talosconfig_path(ctx),
         "--endpoints",
         ctx.args.endpoints,
         "--nodes",
@@ -732,10 +741,13 @@ def _talosctl_args(ctx, args):
     return out
 
 def _kubectl_capture(ctx, kubectl, args, label):
+    return _kubectl_capture_for(ctx, kubectl, ctx.args.kubeconfig, args, label)
+
+def _kubectl_capture_for(ctx, kubectl, kubeconfig, args, label):
     return _capture_stdout(
         ctx,
         kubectl,
-        _kubectl_args(ctx, args),
+        _kubectl_args_for(ctx, kubeconfig, args),
         cwd = ws_path(ctx),
         label = label,
     )
@@ -751,10 +763,13 @@ def _talosctl_capture(ctx, talosctl, args, label):
     )
 
 def _kubectl_success(ctx, kubectl, args, label):
+    return _kubectl_success_for(ctx, kubectl, ctx.args.kubeconfig, args, label)
+
+def _kubectl_success_for(ctx, kubectl, kubeconfig, args, label):
     return _capture_success(
         ctx,
         kubectl,
-        _kubectl_args(ctx, args),
+        _kubectl_args_for(ctx, kubeconfig, args),
         cwd = ws_path(ctx),
         label = label,
     )
@@ -811,12 +826,10 @@ def _assert_equals(ctx, value, expected, label):
     return 0
 
 def _check_live_context(ctx, kubectl):
-    server = _kubectl_capture(
-        ctx,
-        kubectl,
-        ["config", "view", "--minify", "--output=jsonpath={.clusters[0].cluster.server}"],
-        "kubectl current cluster server",
-    )
+    return _check_live_context_for(ctx, kubectl, ctx.args.kubeconfig)
+
+def _check_live_context_for(ctx, kubectl, kubeconfig):
+    server = _kubectl_capture_for(ctx, kubectl, kubeconfig, ["config", "view", "--minify", "--output=jsonpath={.clusters[0].cluster.server}"], "kubectl current cluster server")
     if server == None:
         return 1
     if _contains(EXCLUDED_KUBE_APIS, server):
@@ -826,26 +839,29 @@ def _check_live_context(ctx, kubectl):
         ctx.std.io.stderr.write("ERROR: kubeconfig points at " + server + "; expected guardian-mgmt API endpoint from src/infrastructure/bootstrap/guardian-mgmt/main.tf\n")
         return 1
 
-    nodes = _kubectl_capture(ctx, kubectl, ["get", "nodes", "-o", "name"], "kubectl get nodes")
+    nodes = _kubectl_capture_for(ctx, kubectl, kubeconfig, ["get", "nodes", "-o", "name"], "kubectl get nodes")
     if nodes == None:
         return 1
     if _line_count(nodes) != 3:
         ctx.std.io.stderr.write("ERROR: guardian-mgmt should have exactly 3 nodes; kubectl reported:\n" + nodes + "\n")
         return 1
 
-    node_details = _kubectl_capture(ctx, kubectl, ["get", "nodes", "-o", "wide"], "kubectl get nodes -o wide")
+    node_details = _kubectl_capture_for(ctx, kubectl, kubeconfig, ["get", "nodes", "-o", "wide"], "kubectl get nodes -o wide")
     if node_details == None:
         return 1
     return _assert_contains(ctx, node_details, "10.8.0.", "node InternalIP addresses")
 
 def _check_flux_revision(ctx, kubectl, revision):
+    return _check_flux_revision_for(ctx, kubectl, ctx.args.kubeconfig, revision)
+
+def _check_flux_revision_for(ctx, kubectl, kubeconfig, revision):
     checks = [
         ("guardian GitRepository artifact revision", ["-n", "cozy-fluxcd", "get", "gitrepositories.source.toolkit.fluxcd.io/guardian", "-o", "jsonpath={.status.artifact.revision}"]),
         ("guardian-mgmt-base last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-base", "-o", "jsonpath={.status.lastAppliedRevision}"]),
         ("guardian-mgmt-tenant-apps last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-tenant-apps", "-o", "jsonpath={.status.lastAppliedRevision}"]),
     ]
     for label, kubectl_args in checks:
-        value = _kubectl_capture(ctx, kubectl, kubectl_args, "kubectl read " + label)
+        value = _kubectl_capture_for(ctx, kubectl, kubeconfig, kubectl_args, "kubectl read " + label)
         if value == None:
             return 1
         rc = _assert_contains(ctx, value, revision, label)
@@ -854,10 +870,14 @@ def _check_flux_revision(ctx, kubectl, revision):
     return 0
 
 def _check_company_site_spread(ctx, kubectl):
+    return _check_company_site_spread_for(ctx, kubectl, ctx.args.kubeconfig)
+
+def _check_company_site_spread_for(ctx, kubectl, kubeconfig):
     for label, namespace, stage in LIVE_COMPANY_SITE_SPREADS:
-        node_names = _kubectl_capture(
+        node_names = _kubectl_capture_for(
             ctx,
             kubectl,
+            kubeconfig,
             [
                 "-n",
                 namespace,
@@ -1052,44 +1072,82 @@ def _live_impl(ctx):
     kubectl = _kubectl_path(ctx)
     if kubectl == None:
         return 1
+    return _live_checks(ctx, kubectl, ctx.args.kubeconfig, revision)
 
-    rc = _check_live_context(ctx, kubectl)
+def _live_checks(ctx, kubectl, kubeconfig, revision):
+    rc = _check_live_context_for(ctx, kubectl, kubeconfig)
     if rc != 0:
         return rc
 
     for label, kubectl_args in LIVE_WAITS:
-        rc = _kubectl_success(
+        rc = _kubectl_success_for(
             ctx,
             kubectl,
+            kubeconfig,
             kubectl_args + ["--timeout=" + ctx.args.wait_timeout],
             "kubectl wait " + label,
         )
         if rc != 0:
             return rc
 
-    rc = _check_flux_revision(ctx, kubectl, revision)
+    rc = _check_flux_revision_for(ctx, kubectl, kubeconfig, revision)
     if rc != 0:
         return rc
 
     for label, kubectl_args in LIVE_GETS:
-        rc = _kubectl_success(ctx, kubectl, kubectl_args, "kubectl get " + label)
+        rc = _kubectl_success_for(ctx, kubectl, kubeconfig, kubectl_args, "kubectl get " + label)
         if rc != 0:
             return rc
 
     for label, kubectl_args, expected in LIVE_VALUE_CHECKS:
-        value = _kubectl_capture(ctx, kubectl, kubectl_args, "kubectl read " + label)
+        value = _kubectl_capture_for(ctx, kubectl, kubeconfig, kubectl_args, "kubectl read " + label)
         if value == None:
             return 1
         rc = _assert_equals(ctx, value, expected, label)
         if rc != 0:
             return rc
 
-    rc = _check_company_site_spread(ctx, kubectl)
+    rc = _check_company_site_spread_for(ctx, kubectl, kubeconfig)
     if rc != 0:
         return rc
 
     ctx.std.io.stderr.write("guardian-mgmt source-controller has reconciled " + revision + "\n")
     return 0
+
+def _bootstrap_impl(ctx):
+    revision = _expected_revision(ctx)
+    if revision == None:
+        return 1
+
+    rc = _tofu_root(
+        ctx,
+        GUARDIAN_MGMT_ROOT,
+        ["output", "-json"],
+        "tofu output -json guardian-mgmt",
+    )
+    if rc != 0:
+        return rc
+
+    rc = _validate_impl(ctx)
+    if rc != 0:
+        return rc
+
+    rc = _kubeconfig_impl(ctx)
+    if rc != 0:
+        return rc
+
+    rc = _talos_impl(ctx)
+    if rc != 0:
+        return rc
+
+    kubectl = _kubectl_path(ctx)
+    if kubectl == None:
+        return 1
+
+    live_kubeconfig = ctx.args.kubeconfig
+    if live_kubeconfig == "":
+        live_kubeconfig = ws_path(ctx, ctx.args.root) + "/kubeconfig"
+    return _live_checks(ctx, kubectl, live_kubeconfig, revision)
 
 def _backup_drill_impl(ctx):
     kubectl = _kubectl_path(ctx)
@@ -1472,7 +1530,25 @@ talos = task(
     args = {
         "endpoints": args.string(default = "10.8.0.250", description = "Talos API endpoint for guardian-mgmt."),
         "nodes": args.string(default = "10.8.0.11,10.8.0.12,10.8.0.13", description = "Comma-separated guardian-mgmt Talos nodes."),
-        "talosconfig": args.string(default = "src/infrastructure/talm/talosconfig", description = "Talos config for guardian-mgmt."),
+        "root": args.string(default = "src/infrastructure/talm", description = "Talm root containing gitignored secrets.yaml and talosconfig."),
+        "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
+    },
+)
+
+bootstrap = task(
+    implementation = _bootstrap_impl,
+    name = "bootstrap",
+    group = ["infra"],
+    summary = "Exercise the guardian-mgmt OpenTofu, Talm, Talos, and live source-controller bootstrap path.",
+    args = {
+        "endpoints": args.string(default = "10.8.0.250", description = "Talos API endpoint used to fetch kubeconfig and validate L2 state."),
+        "kubeconfig": args.string(default = "", description = "Optional kubeconfig for guardian-mgmt live validation. Defaults to <root>/kubeconfig after refresh."),
+        "nodes": args.string(default = "10.8.0.11,10.8.0.12,10.8.0.13", description = "Comma-separated guardian-mgmt Talos nodes."),
+        "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
+        "revision": args.string(default = "", description = "Expected merged Git commit SHA that source-controller must have applied."),
+        "root": args.string(default = "src/infrastructure/talm", description = "Talm root containing gitignored secrets.yaml, talosconfig, and kubeconfig."),
+        "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
+        "wait_timeout": args.string(default = "5m", description = "Timeout for Flux and Deployment readiness waits."),
     },
 )
 

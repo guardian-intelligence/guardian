@@ -17,6 +17,7 @@ load(
 load(
     ".aspect/tasks/infra.axl",
     infra_backup_drill = "backup_drill",
+    infra_bootstrap = "bootstrap",
     infra_kubeconfig = "kubeconfig",
     infra_live = "live",
     infra_load_harbor_registry = "load_harbor_registry",
@@ -40,6 +41,7 @@ def config(ctx):
 
     # aspect infra ...
     ctx.tasks.add(infra_backup_drill)
+    ctx.tasks.add(infra_bootstrap)
     ctx.tasks.add(infra_kubeconfig)
     ctx.tasks.add(infra_live)
     ctx.tasks.add(infra_load_harbor_registry)
