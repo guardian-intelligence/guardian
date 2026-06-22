@@ -555,6 +555,9 @@ aspect infra load-harbor-registry \
 
 The report input is the native ORAS command output plus the helper's pushed and
 pulled payload digests. Do not wrap it in a Guardian-specific evidence format.
+The helper does not expose ORAS `--insecure` or `--plain-http`; fix Harbor
+certificate trust, DNS, or ingress before treating a registry load drill as
+valid.
 
 Dashboard load:
 
