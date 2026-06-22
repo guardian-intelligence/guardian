@@ -37,8 +37,9 @@ aspect infra reports-verify \
 
 This writes `report-verification.tsv` into the live-run directory and fails if a
 component report is missing required sections, still contains pending result
-markers, does not reference the final live run, or if the evidence matrix claims
-completion without a passing suite.
+markers, lacks section-local passing results and evidence links for preflight,
+load, DR, and outage evidence, does not reference the final live run, or if the
+evidence matrix claims completion without a passing suite.
 
 Each component report should cover:
 

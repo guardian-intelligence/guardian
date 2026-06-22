@@ -101,4 +101,42 @@ bash "${script}" \
 
 test -s "${tmpdir}/report-verification.tsv"
 awk -F '\t' '$1 == "fail" {failures++} END {exit (failures + 0) == 0 ? 0 : 1}' "${tmpdir}/report-verification.tsv"
+
+bad_reports_dir="${tmpdir}/bad-reports"
+mkdir -p "${bad_reports_dir}"
+cp -R "${reports_dir}/." "${bad_reports_dir}/"
+bad_report="${bad_reports_dir}/2026-06-22-harbor.md"
+awk '
+  /^## Single-Node Outage Exercise$/ {
+    in_outage = 1
+  }
+  /^## Residual Risk$/ {
+    in_outage = 0
+  }
+  in_outage && /Evidence:/ {
+    next
+  }
+  {
+    print
+  }
+' "${bad_report}" >"${bad_report}.tmp"
+mv "${bad_report}.tmp" "${bad_report}"
+
+if bash "${script}" \
+  --reports-dir "${bad_reports_dir}" \
+  --live-run-dir "${bad_reports_dir}/live-runs/20260622T000000Z-management-evidence" \
+  --out "${tmpdir}/bad-report-verification.tsv" \
+  >"${tmpdir}/bad-report-verification.log" 2>&1; then
+  echo "expected missing outage evidence to fail verification" >&2
+  exit 1
+fi
+awk -F '\t' '
+  $1 == "fail" && $2 == "report:2026-06-22-harbor:single-node-outage-exercise:evidence-live-run" {
+    found = 1
+  }
+  END {
+    exit found ? 0 : 1
+  }
+' "${tmpdir}/bad-report-verification.tsv"
+
 printf 'ok\n' >"${out_file}"

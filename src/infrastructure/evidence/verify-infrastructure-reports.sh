@@ -130,6 +130,37 @@ grep_file() {
   fi
 }
 
+section_grep_file() {
+  local path="$1"
+  local section="$2"
+  local pattern="$3"
+  local name="$4"
+
+  if [[ ! -s "${path}" ]]; then
+    fail "${name}" "missing ${path}"
+    return
+  fi
+  if awk -v section="${section}" -v pattern="${pattern}" '
+    $0 == section {
+      in_section = 1
+      next
+    }
+    in_section && /^## / {
+      exit
+    }
+    in_section && $0 ~ pattern {
+      found = 1
+    }
+    END {
+      exit found ? 0 : 1
+    }
+  ' "${path}"; then
+    pass "${name}" "matched ${path} section ${section}"
+  else
+    fail "${name}" "pattern not found in ${path} section ${section}: ${pattern}"
+  fi
+}
+
 reject_file() {
   local path="$1"
   local pattern="$2"
@@ -177,10 +208,14 @@ require_file "${matrix}" "matrix:file"
 reject_file "${matrix}" "pending|not applied|not passed|live execution pending" "matrix:no-pending"
 grep_file "${matrix}" "Status[[:space:]]*\\|" "matrix:status-column"
 
+pass_result_pattern="Result:[[:space:]]*(PASS|pass|Passed|passed)"
+section_evidence_pattern="Evidence:[[:space:]]*.*live-runs/${run_basename}"
+
 for report in "${component_reports[@]}"; do
   path="${reports_dir}/${report}"
   stem="${report%.md}"
   require_file "${path}" "report:${stem}:file"
+  grep_file "${matrix}" "${report}" "matrix:report:${stem}"
 
   for section in "${required_sections[@]}"; do
     grep_file "${path}" "^${section}$" "report:${stem}:section:${section#\#\# }"
@@ -188,8 +223,14 @@ for report in "${component_reports[@]}"; do
 
   reject_file "${path}" "pending live execution|Result:[[:space:]]*pending|Result:[[:space:]]*$|Status:[[:space:]]*pending" "report:${stem}:no-pending"
   grep_file "${path}" "live-runs/${run_basename}" "report:${stem}:live-run-reference"
-  grep_file "${path}" "Result:[[:space:]]*(PASS|pass|Passed|passed)" "report:${stem}:has-pass-result"
-  grep_file "${path}" "Evidence:" "report:${stem}:has-evidence"
+  section_grep_file "${path}" "## Scope" "Status:[[:space:]]*(PASS|pass|Passed|passed)" "report:${stem}:scope-status-pass"
+  for section in "## Preflight" "## Load Test" "## Disaster Recovery Drill" "## Single-Node Outage Exercise"; do
+    section_name="${section#\#\# }"
+    section_key="${section_name// /-}"
+    section_key="${section_key,,}"
+    section_grep_file "${path}" "${section}" "${pass_result_pattern}" "report:${stem}:${section_key}:result-pass"
+    section_grep_file "${path}" "${section}" "${section_evidence_pattern}" "report:${stem}:${section_key}:evidence-live-run"
+  done
 done
 
 echo "wrote ${out}"

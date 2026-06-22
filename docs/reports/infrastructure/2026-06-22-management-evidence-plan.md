@@ -137,9 +137,9 @@ LATITUDESH_AUTH_TOKEN="${LATITUDESH_AUTH_TOKEN}" aspect infra hardware-outage-ru
   outage capture, and the suite verification report.
 - Final checked-in component reports now have a repo-owned `aspect infra
   reports-verify` task. It requires a passing final live-run suite,
-  component reports with passing results and evidence links, and an evidence
-  matrix without pending markers before the report package can be treated as
-  complete.
+  component reports with section-local passing results and evidence links for
+  preflight/load/DR/outage, and an evidence matrix without pending markers
+  before the report package can be treated as complete.
 - Live Kubernetes evidence is pending because the `guardian-mgmt` kubeconfig and
   converged cluster are not present in this workspace.
 - Latitude adoption is pending a Latitude token and VLAN assignment import IDs.

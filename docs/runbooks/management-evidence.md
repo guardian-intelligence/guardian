@@ -279,8 +279,9 @@ aspect infra reports-verify \
 bundle, except for writing
 `<live-run-dir>/report-verification.tsv`. It requires a passing suite report, no
 failed suite checks, no pending markers in `evidence-matrix.md`, and component
-reports with the required sections, passing results, evidence references, and a
-link back to the same final live-run directory.
+reports with the required sections. Each component report's preflight, load,
+disaster-recovery, and single-node outage sections must include their own
+passing result and evidence link back to the same final live-run directory.
 
 `evidence-clean` deletes completed Jobs, BackupJobs, RestoreJobs, temporary
 restore targets, and evidence ConfigMaps. It keeps
