@@ -11,6 +11,8 @@ spec:
   logStorageSize: 10Gi
   logTTL: 15
   resourcesPreset: t1.medium
+  users:
+    guardian_evidence: {}
   clickhouseKeeper:
     enabled: true
     replicas: 3

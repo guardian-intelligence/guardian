@@ -5,6 +5,7 @@
 - Component: Cozystack Postgres / CNPG.
 - Desired state source: `src/infrastructure/base/apps/postgres.yaml`,
   `src/infrastructure/base/backups/managed-databases.yaml`,
+  `src/infrastructure/evidence/database-load.yaml`,
   `src/infrastructure/evidence/database-dr.yaml`.
 - Cluster: `guardian-mgmt`.
 - Environment or tenant: `tenant-root`.
@@ -16,17 +17,22 @@
 - Render/build validation: `aspect infra preflight` and
   `aspect infra evidence-render`.
 - Reconciled Kubernetes resources: `Postgres/tenant-root/guardian`,
-  `BackupClass/guardian-postgres-r2`, `Plan/tenant-root/guardian-postgres-hourly`.
+  `BackupClass/guardian-postgres-r2`,
+  `Plan/tenant-root/guardian-postgres-hourly`,
+  `Job/tenant-root/evidence-postgres-load`.
 - Healthy baseline command: `aspect infra live-snapshot --kubeconfig "${KUBECONFIG}"`.
 - Result: pending.
 
 ## Load Test
 
-- Command: SQL write/read loop through the managed Postgres service, followed by
-  `aspect infra live-snapshot`.
-- Inputs: test table `guardian_evidence.postgres_load`.
-- Pass criteria: all inserted rows read back, CNPG reports three instances, and
-  synchronous replica settings remain in effect.
+- Command: `aspect infra evidence-apply`, `aspect infra evidence-wait`,
+  `aspect infra evidence-logs`, followed by `aspect infra live-snapshot`.
+- Target: `postgres-guardian-rw.tenant-root.svc:5432`, database
+  `guardian_evidence`, user `guardian_evidence`.
+- Inputs: `Job/tenant-root/evidence-postgres-load`, 4 workers, 250 rows per
+  worker, table `guardian_evidence.postgres_load`.
+- Pass criteria: job completes, log reports `expected=1000 actual=1000`, CNPG
+  reports three instances, and synchronous replica settings remain in effect.
 - Result: pending.
 
 ## Disaster Recovery Drill

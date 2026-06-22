@@ -5,6 +5,7 @@
 - Component: Cozystack ClickHouse.
 - Desired state source: `src/infrastructure/base/apps/clickhouse.yaml`,
   `src/infrastructure/base/backups/managed-databases.yaml`,
+  `src/infrastructure/evidence/database-load.yaml`,
   `src/infrastructure/evidence/database-dr.yaml`.
 - Cluster: `guardian-mgmt`.
 - Environment or tenant: `tenant-root`.
@@ -16,16 +17,23 @@
 - Render/build validation: `aspect infra preflight` and
   `aspect infra evidence-render`.
 - Reconciled Kubernetes resources: `ClickHouse/tenant-root/ledger`,
-  `BackupClass/guardian-clickhouse-r2`, `Plan/tenant-root/guardian-clickhouse-hourly`.
+  `BackupClass/guardian-clickhouse-r2`,
+  `Plan/tenant-root/guardian-clickhouse-hourly`,
+  `Job/tenant-root/evidence-clickhouse-load`.
 - Healthy baseline command: `aspect infra live-snapshot --kubeconfig "${KUBECONFIG}"`.
 - Result: pending.
 
 ## Load Test
 
-- Command: write/query wide-event rows through the managed ClickHouse endpoint.
-- Inputs: test table `default.guardian_evidence_wide_events`.
-- Pass criteria: rows read back, Keeper has three replicas, and ClickHouse pods
-  stay Ready.
+- Command: `aspect infra evidence-apply`, `aspect infra evidence-wait`,
+  `aspect infra evidence-logs`, followed by `aspect infra live-snapshot`.
+- Target: `chendpoint-clickhouse-ledger.tenant-root.svc:9000`, user
+  `guardian_evidence`.
+- Inputs: `Job/tenant-root/evidence-clickhouse-load`, 4 workers, 250 rows per
+  worker, table `default.guardian_evidence_wide_events`.
+- Pass criteria: job completes, log reports `expected=1000 actual=1000`,
+  ClickHouse cluster metadata is queryable, Keeper has three replicas, and
+  ClickHouse pods stay Ready.
 - Result: pending.
 
 ## Disaster Recovery Drill

@@ -57,7 +57,8 @@ aspect infra outage-uncordon --kubeconfig "${KUBECONFIG}" --node <node>
 - Postgres and ClickHouse now have declared R2 backup plumbing,
   `BackupClass` objects, and hourly `Plan` objects.
 - Opt-in Kubernetes evidence fixtures now exist for HTTP load, replicated PVC
-  smoke, and Postgres/ClickHouse backup/restore-to-copy.
+  smoke, Postgres/ClickHouse write-read load, and Postgres/ClickHouse
+  backup/restore-to-copy.
 - Harbor publication now has a repo-owned `rules_oci` push target and Aspect
   task for the company-site image.
 - R2 backup credential delivery now has a repo-owned Aspect task that applies

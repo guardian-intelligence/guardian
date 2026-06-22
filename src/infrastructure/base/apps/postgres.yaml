@@ -16,6 +16,13 @@ spec:
   postgresql:
     parameters:
       max_connections: "200"
+  users:
+    guardian_evidence: {}
+  databases:
+    guardian_evidence:
+      roles:
+        admin:
+          - guardian_evidence
   backup:
     enabled: true
     # Cozystack 1.4 recommends BackupClass/Plan orchestration plus chart-side

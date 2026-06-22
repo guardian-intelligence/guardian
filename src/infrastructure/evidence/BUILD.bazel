@@ -1,6 +1,7 @@
 filegroup(
     name = "manifests",
     srcs = [
+        "database-load.yaml",
         "database-dr.yaml",
         "database-restore.yaml",
         "http-load.yaml",

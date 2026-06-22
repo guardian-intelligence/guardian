@@ -12,6 +12,13 @@ have passed.
 
 ## Declared Fixtures
 
+- `Job/tenant-root/evidence-postgres-load` runs 4 psql workers through
+  `postgres-guardian-rw`, inserts 250 rows per worker into
+  `guardian_evidence.postgres_load`, and fails unless all 1,000 rows read back.
+- `Job/tenant-root/evidence-clickhouse-load` runs 4 clickhouse-client workers
+  through `chendpoint-clickhouse-ledger`, inserts 250 wide-event rows per worker
+  into `default.guardian_evidence_wide_events`, and fails unless all 1,000 rows
+  read back.
 - `Job/tenant-root/evidence-http-load` runs repeated HTTPS checks against the
   prod/dev/gamma company-site routes, Harbor health, and dashboard host.
 - `PersistentVolumeClaim/tenant-root/evidence-replicated-retain` plus
@@ -40,12 +47,12 @@ aspect infra evidence-snapshot --kubeconfig "${KUBECONFIG}"
 ## Current Evidence
 
 - The overlay renders locally with the repo-pinned kubectl.
-- The main evidence overlay renders 9 Kubernetes documents; the deferred
+- The main evidence overlay renders 13 Kubernetes documents; the deferred
   restore manifest renders 2 additional `RestoreJob` documents.
 - `aspect infra evidence-clean` is declared so the evidence loop can be rerun
   without manual Kubernetes deletion.
-- The pinned curl image used by the Jobs is digest-addressed and contains the
-  shell utilities used by the scripts.
+- The pinned curl, Postgres client, and ClickHouse client images used by the
+  Jobs are digest-addressed.
 
 ## Not Yet Passed
 
