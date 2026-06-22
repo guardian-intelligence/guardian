@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" role="img" aria-label="Guardian Intelligence mark">
+  <rect width="320" height="320" rx="32" fill="#111816"/>
+  <path d="M160 42 54 82v72c0 68 43 110 106 134 63-24 106-66 106-134V82L160 42Z" fill="none" stroke="#80e7d2" stroke-width="14"/>
+  <path d="M116 163h88M160 119v88" stroke="#eef4ef" stroke-width="16" stroke-linecap="round"/>
+</svg>

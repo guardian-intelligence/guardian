@@ -159,7 +159,8 @@ kubectl apply -f src/infrastructure/base/flux/sync.yaml
 Flux reconciles platform.yaml, storageclasses (default = `replicated`),
 `linstor-satellite-config.yaml` (Piraeus auto-prepares the `data` zpool from
 `/dev/nvme1n1` — no hand `create-device-pool`), openbao (`replicated-retain`),
-networkpolicy, and root/dev/gamma tenant declarations.
+networkpolicy, root/dev/gamma tenant declarations, and the company-site
+deployment envelope.
 
 ## Phase 5.5 — adopt and plan DNS
 Cloudflare DNS is declared in `src/infrastructure/bootstrap/cloudflare-dns/` from
@@ -206,6 +207,9 @@ realm/clients. Re-mint any Transit / release-judge credentials.
 - Dev/gamma/prod stage intent →
   `src/environments/{dev,gamma,prod}/environment.yaml`; dev and gamma become
   child tenants that inherit root tenant services.
+- Company site artifact and deployment →
+  `src/products/company/site/` and
+  `src/infrastructure/base/products/company-site.yaml`.
 - Talos/VLAN/VIP topology → `src/infrastructure/talm/`.
 - API exposure → Talos L2 VIP; public HTTP(S) exposure → node public IPs;
   private LoadBalancer exposure → MetalLB L2.

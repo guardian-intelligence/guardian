@@ -6,7 +6,8 @@ This report covers the first repository-only infrastructure increment for the
 Guardian management cluster: OpenTofu roots for Latitude substrate adoption and
 Cloudflare DNS adoption, shared management-cluster inventory, and base
 Cozystack desired state for root/dev/gamma tenants, storage, networking,
-CNPG/Postgres, Harbor, ClickHouse, and OpenBao.
+CNPG/Postgres, Harbor, ClickHouse, OpenBao, and the company-site deployment
+envelope.
 
 ## Evidence Collected
 
@@ -15,8 +16,14 @@ CNPG/Postgres, Harbor, ClickHouse, and OpenBao.
   remote backends disabled.
 - `bazelisk build //:build //src/infrastructure/bootstrap/cloudflare-dns:root //src/infrastructure/bootstrap/guardian-mgmt:root`
   completed successfully.
-- `aspect infra render-base` rendered Kubernetes YAML with the repo-pinned
-  `kubectl` target.
+- `aspect infra render-base` rendered 690 lines of Kubernetes YAML with the
+  repo-pinned `kubectl` target.
+- `bazelisk build //src/products/company/site:image //src/products/company/site:image.digest`
+  completed successfully and produced
+  `sha256:708390f2a646b7286fdc29c6d9bc0cc789932aa7ae6fa899ce436084e5435277`.
+- `bazelisk run //src/products/company/site:load` loaded the company-site image
+  into Podman as `localhost/guardian/company-site:dev`; local HTTP probes for
+  `/`, `/healthz`, and `/metrics` passed.
 - `jq empty src/infrastructure/inventory/guardian-mgmt.json` completed
   successfully.
 - `git diff --check` completed successfully.
@@ -51,9 +58,9 @@ against it.
 - No infrastructure component load test has run yet.
 - No component disaster-recovery drill has run yet.
 - No single-node outage exercise has run yet.
-- Dev and gamma tenant desired state exists, but the company-site Deployment is
-  not declared yet because the active repo cannot currently build or reference a
-  digest-pinned company-site image.
+- The company-site image is built, smoke-tested locally, and referenced by
+  digest, but it has not yet been pushed into the management-cluster Harbor
+  registry.
 - No live Kubernetes, Latitude, or Cloudflare DNS apply was run from this
   increment.
 

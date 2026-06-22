@@ -1,0 +1,5 @@
+filegroup(
+    name = "manifests",
+    srcs = ["company-site.yaml"],
+    visibility = ["//visibility:public"],
+)

@@ -15,7 +15,7 @@ infrastructure work can be called complete.
 | Public ingress / DNS | `src/infrastructure/bootstrap/cloudflare-dns/` | pending | pending | pending | adopted, not applied |
 | Dev tenant | `src/infrastructure/base/tenants/environments.yaml` | pending | pending | pending | desired state only |
 | Gamma tenant | `src/infrastructure/base/tenants/environments.yaml` | pending | pending | pending | desired state only |
-| Company site dev/gamma | `src/environments/{dev,gamma}/environment.yaml` | pending | pending | pending | blocked on repo-owned image digest |
+| Company site dev/gamma/prod | `src/products/company/site/`, `src/infrastructure/base/products/company-site.yaml`, `src/environments/{dev,gamma,prod}/environment.yaml` | pending | pending | pending | desired state only |
 
 Evidence must be gathered from live systems after convergence. Render checks,
 OpenTofu validation, and state import are prerequisite evidence only; they do

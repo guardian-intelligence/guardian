@@ -13,6 +13,7 @@ resources:
   - storage/linstor-satellite-config.yaml
   - openbao/openbao.yaml
   - openbao/networkpolicy.yaml
+  - products/company-site.yaml
   - tenants/environments.yaml
   - tenants/root.yaml
   - flux/sync.yaml

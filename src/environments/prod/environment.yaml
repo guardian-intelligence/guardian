@@ -18,5 +18,5 @@ surfaces:
       - /news
       - /healthz
       - /metrics
-    imageDigest: ""
-    deploymentStatus: waiting-for-repo-owned-company-site-image
+    image: oci.guardianintelligence.org/guardian/company-site@sha256:708390f2a646b7286fdc29c6d9bc0cc789932aa7ae6fa899ce436084e5435277
+    deploymentStatus: declared
