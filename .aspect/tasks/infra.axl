@@ -414,6 +414,17 @@ def _validate_impl(ctx):
         return rc
     return _render_kustomizations(ctx)
 
+def _topology_impl(ctx):
+    tofu_args = ["output", "-json"]
+    if ctx.args.name != "":
+        tofu_args.append(ctx.args.name)
+    return _tofu_root(
+        ctx,
+        GUARDIAN_MGMT_ROOT,
+        tofu_args,
+        "tofu output -json guardian-mgmt",
+    )
+
 def _live_impl(ctx):
     revision = _expected_revision(ctx)
     if revision == None:
@@ -457,6 +468,16 @@ validate = task(
     name = "validate",
     group = ["infra"],
     summary = "Validate the checked-in management-cluster OpenTofu, Talm, and Kustomize substrate.",
+)
+
+topology = task(
+    implementation = _topology_impl,
+    name = "topology",
+    group = ["infra"],
+    summary = "Print guardian-mgmt OpenTofu outputs as JSON for bootstrap and automation consumers.",
+    args = {
+        "name": args.string(default = "", description = "Optional OpenTofu output name, such as management_vlan or control_plane_nodes."),
+    },
 )
 
 live = task(
