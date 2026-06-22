@@ -322,6 +322,17 @@ verify_outage_phase() {
   grep_file "${phase_dir}/VERIFY.md" "^- Minimum Ready nodes: ${min_ready_nodes}$" "${label}:min-ready"
   grep_file "${phase_dir}/VERIFY.md" "^- Talos required: ${talos_required}$" "${label}:talos-required"
   require_verification_check "${phase_dir}" "outage:node-present" "${label}:node-present"
+  case "${phase}" in
+    outage-before)
+      require_verification_check "${phase_dir}" "outage:node-ready-before" "${label}:node-ready-before"
+      ;;
+    outage-down)
+      require_verification_check "${phase_dir}" "outage:node-down" "${label}:node-down"
+      ;;
+    outage-after)
+      require_verification_check "${phase_dir}" "outage:node-ready-after" "${label}:node-ready-after"
+      ;;
+  esac
   require_verification_check "${phase_dir}" "nodes:ready" "${label}:nodes-ready"
   require_verification_check "${phase_dir}" "company-site:dev:ready" "${label}:company-dev-ready"
   require_verification_check "${phase_dir}" "company-site:gamma:ready" "${label}:company-gamma-ready"

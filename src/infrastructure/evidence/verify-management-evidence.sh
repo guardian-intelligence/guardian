@@ -256,9 +256,20 @@ verify_outage_node() {
   fi
 
   grep_file "kubectl/nodes-wide.txt" "^${node}[[:space:]]" "outage:node-present"
-  if [[ "${phase}" == "outage-drained" ]]; then
-    grep_file "kubectl/nodes-wide.txt" "^${node}[[:space:]]+Ready,SchedulingDisabled" "outage:node-drained"
-  fi
+  case "${phase}" in
+    outage-before)
+      grep_file "kubectl/nodes-wide.txt" "^${node}[[:space:]]+Ready[[:space:]]" "outage:node-ready-before"
+      ;;
+    outage-drained)
+      grep_file "kubectl/nodes-wide.txt" "^${node}[[:space:]]+Ready,SchedulingDisabled" "outage:node-drained"
+      ;;
+    outage-down)
+      grep_file "kubectl/nodes-wide.txt" "^${node}[[:space:]]+NotReady([[:space:],]|$)" "outage:node-down"
+      ;;
+    outage-after)
+      grep_file "kubectl/nodes-wide.txt" "^${node}[[:space:]]+Ready[[:space:]]" "outage:node-ready-after"
+      ;;
+  esac
 }
 
 verify_common() {

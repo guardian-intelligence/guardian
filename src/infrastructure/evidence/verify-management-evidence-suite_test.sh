@@ -99,13 +99,25 @@ write_phase_fixture() {
     "- Talos required: ${talos_required}" \
     '- Result: PASS' \
     >"${phase_dir}/VERIFY.md"
-  printf '%s\n' \
-    'pass	outage:node-present	ok' \
-    'pass	nodes:ready	ok' \
-    'pass	company-site:dev:ready	ok' \
-    'pass	company-site:gamma:ready	ok' \
-    'pass	company-site:prod:ready	ok' \
-    >"${phase_dir}/verification.tsv"
+  {
+    printf '%s\n' \
+      'pass	outage:node-present	ok' \
+      'pass	nodes:ready	ok' \
+      'pass	company-site:dev:ready	ok' \
+      'pass	company-site:gamma:ready	ok' \
+      'pass	company-site:prod:ready	ok'
+    case "${phase}" in
+      outage-before)
+        printf '%s\n' 'pass	outage:node-ready-before	ok'
+        ;;
+      outage-down)
+        printf '%s\n' 'pass	outage:node-down	ok'
+        ;;
+      outage-after)
+        printf '%s\n' 'pass	outage:node-ready-after	ok'
+        ;;
+    esac
+  } >"${phase_dir}/verification.tsv"
 }
 
 write_node_fixture() {

@@ -188,4 +188,41 @@ bash "${script}" --run-dir "${run_dir}" --mode evidence --require-talos
 grep -Fqx -- '- Result: PASS' "${run_dir}/VERIFY.md"
 grep -Fqx -- '- Failures: 0' "${run_dir}/VERIFY.md"
 awk -F '\t' '$1 == "pass" && $2 == "api:vip-load" {found = 1} END {exit found ? 0 : 1}' "${run_dir}/verification.tsv"
+
+run_outage_fixture() {
+  local phase="$1"
+  local node_status="$2"
+  local min_ready_nodes="$3"
+  local expected_check="$4"
+  local require_talos="$5"
+  local args=(
+    --run-dir "${run_dir}"
+    --mode outage
+    --phase "${phase}"
+    --node ash-earth
+    --min-ready-nodes "${min_ready_nodes}"
+  )
+
+  printf '%s\n' '# Management Evidence Capture' "- Phase: ${phase}" >"${run_dir}/MANIFEST.md"
+  printf '%s\n' \
+    'NAME STATUS ROLES AGE VERSION' \
+    "ash-earth ${node_status} control-plane 1d v1.34.3" \
+    'ash-wind Ready control-plane 1d v1.34.3' \
+    'ash-water Ready control-plane 1d v1.34.3' \
+    >"${run_dir}/kubectl/nodes-wide.txt"
+
+  if [[ "${require_talos}" == "true" ]]; then
+    args+=(--require-talos)
+  fi
+  bash "${script}" "${args[@]}"
+
+  grep -Fqx -- '- Result: PASS' "${run_dir}/VERIFY.md"
+  grep -Fqx -- '- Failures: 0' "${run_dir}/VERIFY.md"
+  awk -F '\t' -v expected_check="${expected_check}" '$1 == "pass" && $2 == expected_check {found = 1} END {exit found ? 0 : 1}' "${run_dir}/verification.tsv"
+}
+
+run_outage_fixture outage-before Ready 3 outage:node-ready-before true
+run_outage_fixture outage-down NotReady 2 outage:node-down false
+run_outage_fixture outage-after Ready 3 outage:node-ready-after true
+
 printf 'ok\n' >"${out_file}"

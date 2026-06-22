@@ -117,6 +117,8 @@ LATITUDESH_AUTH_TOKEN="${LATITUDESH_AUTH_TOKEN}" aspect infra hardware-outage-ru
   `aspect infra hardware-outage-run` task. It builds the pinned Latitude power
   helper, powers one management node off/on through the Latitude API, captures
   before/down/after evidence, and runs the evidence verifier for each phase.
+- Hardware outage verification now requires the target node to be Ready before
+  the drill, `NotReady` while powered off, and Ready again after power-on.
 - The final all-node outage report path now has a repo-owned
   `aspect infra hardware-outage-run-all` task. It reads management nodes from
   checked-in inventory and runs the per-node hardware outage drill sequentially.

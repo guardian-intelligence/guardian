@@ -396,9 +396,10 @@ aspect infra hardware-outage-run \
 - records Latitude status before the outage;
 - captures and verifies `outage-before`;
 - sends Latitude `power_off` and waits for server status `off`;
-- captures and verifies `outage-down` with two Ready Kubernetes nodes required;
+- captures and verifies `outage-down` with the target node `NotReady` and two
+  Ready Kubernetes nodes required;
 - sends Latitude `power_on` and waits for server status `on`;
-- captures and verifies `outage-after`.
+- captures and verifies `outage-after` with the target node Ready again.
 
 The default output directory is
 `docs/reports/infrastructure/live-runs/<timestamp>-hardware-outage-all/` for the
