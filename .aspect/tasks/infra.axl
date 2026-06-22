@@ -423,9 +423,9 @@ def _verify_evidence_impl(ctx):
     rc = checked_spawn(
         ctx,
         "bazelisk",
-        ["build", VERIFY_EVIDENCE_TARGET],
+        ["build", MANAGEMENT_INVENTORY_TARGET, VERIFY_EVIDENCE_TARGET],
         cwd = ws_path(ctx),
-        label = "bazelisk build " + VERIFY_EVIDENCE_TARGET,
+        label = "bazelisk build " + MANAGEMENT_INVENTORY_TARGET + " " + VERIFY_EVIDENCE_TARGET,
     )
     if rc != 0:
         return rc
@@ -442,11 +442,18 @@ def _verify_evidence_impl(ctx):
         verify_args.append("--require-component-probes")
     if ctx.args.node != "":
         verify_args.extend(["--node", ctx.args.node])
+    if ctx.args.inventory != "":
+        verify_args.extend(["--inventory", ctx.args.inventory])
+    if ctx.args.public_ingress_ips != "":
+        verify_args.extend(["--public-ingress-ips", ctx.args.public_ingress_ips])
     return checked_spawn(
         ctx,
         ws_path(ctx, VERIFY_EVIDENCE_BIN),
         verify_args,
         cwd = ws_path(ctx),
+        env = {
+            "MANAGEMENT_INVENTORY_BIN": ws_path(ctx, MANAGEMENT_INVENTORY_RUNNER),
+        },
         label = "verify management evidence",
     )
 
@@ -880,6 +887,7 @@ def _hardware_outage_run_impl(ctx):
             KUBECTL_TARGET,
             TALOSCTL_TARGET,
             LATITUDE_POWER_TARGET,
+            MANAGEMENT_INVENTORY_TARGET,
             CAPTURE_EVIDENCE_TARGET,
             VERIFY_EVIDENCE_TARGET,
             HARDWARE_OUTAGE_TARGET,
@@ -927,6 +935,7 @@ def _hardware_outage_run_impl(ctx):
             "CAPTURE_EVIDENCE_BIN": ws_path(ctx, CAPTURE_EVIDENCE_BIN),
             "KUBECTL_BIN": ws_path(ctx, KUBECTL_RUNNER),
             "LATITUDE_POWER_BIN": ws_path(ctx, LATITUDE_POWER_RUNNER),
+            "MANAGEMENT_INVENTORY_BIN": ws_path(ctx, MANAGEMENT_INVENTORY_RUNNER),
             "TALOSCTL_BIN": ws_path(ctx, TALOSCTL_RUNNER),
             "VERIFY_EVIDENCE_BIN": ws_path(ctx, VERIFY_EVIDENCE_BIN),
         },
@@ -1045,6 +1054,8 @@ _VERIFY_EVIDENCE_ARGS = {
     "min_ready_nodes": args.string(default = "", description = "Minimum Ready nodes required. Defaults from the capture phase."),
     "node": args.string(default = "", description = "Optional outage node name to check in kubectl node output."),
     "phase": args.string(default = "", description = "Capture phase override. Defaults to MANIFEST.md."),
+    "inventory": args.string(default = "src/infrastructure/inventory/guardian-mgmt.json", description = "Management inventory JSON containing expected public ingress IPs."),
+    "public_ingress_ips": args.string(default = "", description = "Optional comma-separated public ingress IP override for fixture/debug verification."),
     "require_component_probes": args.boolean(default = False, description = "Require per-component evidence load Jobs/logs in outage mode."),
     "require_talos": args.boolean(default = False, description = "Require Talos health and etcd member captures instead of allowing skipped Talos outputs."),
     "run_dir": args.string(default = "", description = "Captured live-run directory to verify."),

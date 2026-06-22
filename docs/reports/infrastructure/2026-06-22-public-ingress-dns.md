@@ -33,8 +33,13 @@
   `aspect infra evidence-logs`.
 - Inputs: all managed public hostnames from
   `src/infrastructure/inventory/guardian-mgmt.json`.
-- Pass criteria: DNS resolves only to the declared management node public IPs,
-  TLS is valid, and HTTP evidence requests report zero failures.
+- Evidence source: `Job/tenant-root/evidence-http-load` logs one
+  `http-target` line per public route with `remote_ips=` from curl's connected
+  remote IP; `aspect infra evidence-verify` checks every observed IP against
+  `nodes[*].public_ipv4` in `src/infrastructure/inventory/guardian-mgmt.json`.
+- Pass criteria: observed DNS/connection targets are only declared management
+  node public IPs, TLS is valid, and HTTP evidence requests report zero
+  failures.
 - Result: pending.
 
 ## Disaster Recovery Drill
@@ -42,13 +47,16 @@
 - Failure injected: remove one ingress node from service by powering off a
   management node.
 - Restore source: remaining public node IPs and Cozystack ingress controllers.
-- Pass criteria: DNS still returns healthy node IPs and HTTP evidence succeeds.
+- Pass criteria: HTTP evidence succeeds during the node outage and every
+  observed `remote_ips=` value remains in the declared management public IP
+  set.
 - Result: pending.
 
 ## Single-Node Outage Exercise
 
 - Procedure: run HTTP evidence before, during, and after each one-node outage.
-- Expected behavior: public routes remain reachable.
+- Expected behavior: public routes remain reachable and no route resolves or
+  connects to an undeclared public IP.
 - Result: pending.
 
 ## Residual Risk

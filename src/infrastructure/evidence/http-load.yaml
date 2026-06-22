@@ -17,16 +17,26 @@ data:
       [ -n "${label}" ] || continue
       i=1
       target_failures=0
+      ip_log="/tmp/${label}.remote-ips"
+      : >"${ip_log}"
       while [ "${i}" -le "${requests}" ]; do
         total=$((total + 1))
-        if ! curl -fsSL --connect-timeout 5 --max-time 20 --retry 2 --output /dev/null "${url}"; then
+        if remote_ip="$(curl -fsSL --connect-timeout 5 --max-time 20 --retry 2 --output /dev/null --write-out '%{remote_ip}' "${url}")"; then
+          if [ -n "${remote_ip}" ]; then
+            echo "${remote_ip}" >>"${ip_log}"
+          fi
+        else
           echo "request failed label=${label} url=${url} iteration=${i}" >&2
           failures=$((failures + 1))
           target_failures=$((target_failures + 1))
         fi
         i=$((i + 1))
       done
-      echo "http-target label=${label} url=${url} total=${requests} failures=${target_failures}"
+      remote_ips="$(sort -u "${ip_log}" | tr '\n' ',' | sed 's/,$//')"
+      if [ -z "${remote_ips}" ]; then
+        remote_ips="none"
+      fi
+      echo "http-target label=${label} url=${url} remote_ips=${remote_ips} total=${requests} failures=${target_failures}"
     done <<'TARGETS'
     company-prod-root https://guardianintelligence.org/
     company-prod-letters https://guardianintelligence.org/letters/

@@ -33,6 +33,7 @@ Inputs:
   LATITUDE_POWER_BIN      repo-pinned Latitude power helper
   CAPTURE_EVIDENCE_BIN   repo-pinned evidence capture helper
   VERIFY_EVIDENCE_BIN    repo-pinned evidence verifier
+  MANAGEMENT_INVENTORY_BIN repo-pinned inventory reader
   KUBECTL_BIN            repo-pinned kubectl executable path
   TALOSCTL_BIN           repo-pinned talosctl executable path
   LATITUDESH_AUTH_TOKEN  Latitude API token; LATITUDESH_BEARER also works
@@ -132,12 +133,14 @@ fi
 latitude_power_bin="${LATITUDE_POWER_BIN:-}"
 capture_evidence_bin="${CAPTURE_EVIDENCE_BIN:-}"
 verify_evidence_bin="${VERIFY_EVIDENCE_BIN:-}"
+management_inventory_bin="${MANAGEMENT_INVENTORY_BIN:-}"
 kubectl_bin="${KUBECTL_BIN:-}"
 talosctl_bin="${TALOSCTL_BIN:-}"
 missing=()
 [[ -n "${latitude_power_bin}" && -x "${latitude_power_bin}" ]] || missing+=("executable LATITUDE_POWER_BIN")
 [[ -n "${capture_evidence_bin}" && -x "${capture_evidence_bin}" ]] || missing+=("executable CAPTURE_EVIDENCE_BIN")
 [[ -n "${verify_evidence_bin}" && -x "${verify_evidence_bin}" ]] || missing+=("executable VERIFY_EVIDENCE_BIN")
+[[ -n "${management_inventory_bin}" && -x "${management_inventory_bin}" ]] || missing+=("executable MANAGEMENT_INVENTORY_BIN")
 [[ -n "${kubectl_bin}" && -x "${kubectl_bin}" ]] || missing+=("executable KUBECTL_BIN")
 [[ -n "${talosctl_bin}" && -x "${talosctl_bin}" ]] || missing+=("executable TALOSCTL_BIN")
 if [[ -z "${LATITUDESH_AUTH_TOKEN:-}" && -z "${LATITUDESH_BEARER:-}" ]]; then
@@ -297,6 +300,7 @@ run_verify() {
     --mode outage
     --node "${node}"
     --min-ready-nodes "${min_ready_nodes}"
+    --inventory "${inventory}"
   )
   if [[ "${require_talos_for_phase}" == "true" ]]; then
     args+=(--require-talos)
@@ -304,7 +308,7 @@ run_verify() {
   if [[ "${component_probes}" == "true" ]]; then
     args+=(--require-component-probes)
   fi
-  "${verify_evidence_bin}" "${args[@]}"
+  MANAGEMENT_INVENTORY_BIN="${management_inventory_bin}" "${verify_evidence_bin}" "${args[@]}"
 }
 
 write_manifest() {

@@ -39,6 +39,24 @@ required_evidence_checks=(
   load:http:company-gamma-metrics
   load:http:harbor-health
   load:http:dashboard-root
+  dns:inventory
+  dns:company-prod-root:remote-ips
+  dns:company-prod-letters:remote-ips
+  dns:company-prod-news:remote-ips
+  dns:company-prod-healthz:remote-ips
+  dns:company-prod-metrics:remote-ips
+  dns:company-dev-root:remote-ips
+  dns:company-dev-letters:remote-ips
+  dns:company-dev-news:remote-ips
+  dns:company-dev-healthz:remote-ips
+  dns:company-dev-metrics:remote-ips
+  dns:company-gamma-root:remote-ips
+  dns:company-gamma-letters:remote-ips
+  dns:company-gamma-news:remote-ips
+  dns:company-gamma-healthz:remote-ips
+  dns:company-gamma-metrics:remote-ips
+  dns:harbor-health:remote-ips
+  dns:dashboard-root:remote-ips
   load:storage
   dr:postgres-backupjob
   dr:clickhouse-backupjob
@@ -90,6 +108,24 @@ required_outage_probe_checks=(
   load:http:company-gamma-metrics
   load:http:harbor-health
   load:http:dashboard-root
+  dns:inventory
+  dns:company-prod-root:remote-ips
+  dns:company-prod-letters:remote-ips
+  dns:company-prod-news:remote-ips
+  dns:company-prod-healthz:remote-ips
+  dns:company-prod-metrics:remote-ips
+  dns:company-dev-root:remote-ips
+  dns:company-dev-letters:remote-ips
+  dns:company-dev-news:remote-ips
+  dns:company-dev-healthz:remote-ips
+  dns:company-dev-metrics:remote-ips
+  dns:company-gamma-root:remote-ips
+  dns:company-gamma-letters:remote-ips
+  dns:company-gamma-news:remote-ips
+  dns:company-gamma-healthz:remote-ips
+  dns:company-gamma-metrics:remote-ips
+  dns:harbor-health:remote-ips
+  dns:dashboard-root:remote-ips
   load:storage
 )
 

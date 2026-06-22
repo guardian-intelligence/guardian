@@ -353,8 +353,9 @@ evidence_capture() {
 }
 
 evidence_verify() {
-  "${verify_evidence_bin}" \
+  MANAGEMENT_INVENTORY_BIN="${management_inventory_bin}" "${verify_evidence_bin}" \
     --run-dir "${evidence_dir}" \
+    --inventory "${inventory}" \
     --mode evidence \
     --require-talos
 }

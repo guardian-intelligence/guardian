@@ -160,34 +160,61 @@ printf '%s\n' 'harbor-oci-read total=25 failures=0 repository=guardian/company-s
 printf '%s\n' 'openbao-load total=25 failures=0 run_id=test' >"${run_dir}/evidence/logs-evidence-openbao-load.txt"
 {
   printf '%s\n' \
-    'http-target label=company-prod-root url=https://guardianintelligence.org/ total=100 failures=0' \
-    'http-target label=company-prod-letters url=https://guardianintelligence.org/letters/ total=100 failures=0' \
-    'http-target label=company-prod-news url=https://guardianintelligence.org/news/ total=100 failures=0' \
-    'http-target label=company-prod-healthz url=https://guardianintelligence.org/healthz total=100 failures=0' \
-    'http-target label=company-prod-metrics url=https://guardianintelligence.org/metrics total=100 failures=0' \
-    'http-target label=company-dev-root url=https://dev.guardianintelligence.org/ total=100 failures=0' \
-    'http-target label=company-dev-letters url=https://dev.guardianintelligence.org/letters/ total=100 failures=0' \
-    'http-target label=company-dev-news url=https://dev.guardianintelligence.org/news/ total=100 failures=0' \
-    'http-target label=company-dev-healthz url=https://dev.guardianintelligence.org/healthz total=100 failures=0' \
-    'http-target label=company-dev-metrics url=https://dev.guardianintelligence.org/metrics total=100 failures=0' \
-    'http-target label=company-gamma-root url=https://gamma.guardianintelligence.org/ total=100 failures=0' \
-    'http-target label=company-gamma-letters url=https://gamma.guardianintelligence.org/letters/ total=100 failures=0' \
-    'http-target label=company-gamma-news url=https://gamma.guardianintelligence.org/news/ total=100 failures=0' \
-    'http-target label=company-gamma-healthz url=https://gamma.guardianintelligence.org/healthz total=100 failures=0' \
-    'http-target label=company-gamma-metrics url=https://gamma.guardianintelligence.org/metrics total=100 failures=0' \
-    'http-target label=harbor-health url=https://oci.guardianintelligence.org/api/v2.0/health total=100 failures=0' \
-    'http-target label=dashboard-root url=https://dashboard.guardianintelligence.org/ total=100 failures=0' \
+    'http-target label=company-prod-root url=https://guardianintelligence.org/ remote_ips=206.223.228.101 total=100 failures=0' \
+    'http-target label=company-prod-letters url=https://guardianintelligence.org/letters/ remote_ips=206.223.228.101 total=100 failures=0' \
+    'http-target label=company-prod-news url=https://guardianintelligence.org/news/ remote_ips=206.223.228.101 total=100 failures=0' \
+    'http-target label=company-prod-healthz url=https://guardianintelligence.org/healthz remote_ips=206.223.228.101 total=100 failures=0' \
+    'http-target label=company-prod-metrics url=https://guardianintelligence.org/metrics remote_ips=206.223.228.101 total=100 failures=0' \
+    'http-target label=company-dev-root url=https://dev.guardianintelligence.org/ remote_ips=45.250.254.119 total=100 failures=0' \
+    'http-target label=company-dev-letters url=https://dev.guardianintelligence.org/letters/ remote_ips=45.250.254.119 total=100 failures=0' \
+    'http-target label=company-dev-news url=https://dev.guardianintelligence.org/news/ remote_ips=45.250.254.119 total=100 failures=0' \
+    'http-target label=company-dev-healthz url=https://dev.guardianintelligence.org/healthz remote_ips=45.250.254.119 total=100 failures=0' \
+    'http-target label=company-dev-metrics url=https://dev.guardianintelligence.org/metrics remote_ips=45.250.254.119 total=100 failures=0' \
+    'http-target label=company-gamma-root url=https://gamma.guardianintelligence.org/ remote_ips=206.223.228.87 total=100 failures=0' \
+    'http-target label=company-gamma-letters url=https://gamma.guardianintelligence.org/letters/ remote_ips=206.223.228.87 total=100 failures=0' \
+    'http-target label=company-gamma-news url=https://gamma.guardianintelligence.org/news/ remote_ips=206.223.228.87 total=100 failures=0' \
+    'http-target label=company-gamma-healthz url=https://gamma.guardianintelligence.org/healthz remote_ips=206.223.228.87 total=100 failures=0' \
+    'http-target label=company-gamma-metrics url=https://gamma.guardianintelligence.org/metrics remote_ips=206.223.228.87 total=100 failures=0' \
+    'http-target label=harbor-health url=https://oci.guardianintelligence.org/api/v2.0/health remote_ips=206.223.228.101,45.250.254.119 total=100 failures=0' \
+    'http-target label=dashboard-root url=https://dashboard.guardianintelligence.org/ remote_ips=206.223.228.87 total=100 failures=0' \
     'http-load total=1700 failures=0'
 } >"${run_dir}/evidence/logs-evidence-http-load.txt"
 printf '%s\n' 'storage-smoke files=64 marker=/data/.guardian-evidence.sha256' >"${run_dir}/evidence/logs-evidence-storage-smoke.txt"
 printf '%s\n' 'postgres-restore-verify expected_minimum=1000 actual=1000 attempts=1' >"${run_dir}/evidence/logs-evidence-postgres-restore-verify.txt"
 printf '%s\n' 'clickhouse-restore-verify expected_minimum=1000 actual=1000 attempts=1' >"${run_dir}/evidence/logs-evidence-clickhouse-restore-verify.txt"
 
-bash "${script}" --run-dir "${run_dir}" --mode evidence --require-talos
+bash "${script}" \
+  --run-dir "${run_dir}" \
+  --mode evidence \
+  --require-talos \
+  --public-ingress-ips 206.223.228.101,45.250.254.119,206.223.228.87
 
 grep -Fqx -- '- Result: PASS' "${run_dir}/VERIFY.md"
 grep -Fqx -- '- Failures: 0' "${run_dir}/VERIFY.md"
 awk -F '\t' '$1 == "pass" && $2 == "api:vip-load" {found = 1} END {exit found ? 0 : 1}' "${run_dir}/verification.tsv"
+awk -F '\t' '$1 == "pass" && $2 == "dns:company-prod-root:remote-ips" {found = 1} END {exit found ? 0 : 1}' "${run_dir}/verification.tsv"
+
+bad_run_dir="${tmpdir}/bad-dns"
+cp -R "${run_dir}" "${bad_run_dir}"
+sed -i 's/remote_ips=206\.223\.228\.101 total=100 failures=0/remote_ips=206.223.228.99 total=100 failures=0/' \
+  "${bad_run_dir}/evidence/logs-evidence-http-load.txt"
+if bash "${script}" \
+  --run-dir "${bad_run_dir}" \
+  --mode evidence \
+  --require-talos \
+  --public-ingress-ips 206.223.228.101,45.250.254.119,206.223.228.87 \
+  >"${tmpdir}/bad-dns.log" 2>&1; then
+  echo "expected unexpected public ingress IP to fail verification" >&2
+  exit 1
+fi
+awk -F '\t' '
+  $1 == "fail" && $2 == "dns:company-prod-root:remote-ips" {
+    found = 1
+  }
+  END {
+    exit found ? 0 : 1
+  }
+' "${bad_run_dir}/verification.tsv"
 
 run_outage_fixture() {
   local phase="$1"
@@ -202,6 +229,7 @@ run_outage_fixture() {
     --node ash-earth
     --min-ready-nodes "${min_ready_nodes}"
     --require-component-probes
+    --public-ingress-ips 206.223.228.101,45.250.254.119,206.223.228.87
   )
 
   printf '%s\n' '# Management Evidence Capture' "- Phase: ${phase}" >"${run_dir}/MANIFEST.md"
@@ -223,6 +251,7 @@ run_outage_fixture() {
   awk -F '\t' -v expected_check="${expected_check}" '$1 == "pass" && $2 == expected_check {found = 1} END {exit found ? 0 : 1}' "${run_dir}/verification.tsv"
   awk -F '\t' '$1 == "pass" && $2 == "load:postgres" {found = 1} END {exit found ? 0 : 1}' "${run_dir}/verification.tsv"
   awk -F '\t' '$1 == "pass" && $2 == "load:storage" {found = 1} END {exit found ? 0 : 1}' "${run_dir}/verification.tsv"
+  awk -F '\t' '$1 == "pass" && $2 == "dns:company-prod-root:remote-ips" {found = 1} END {exit found ? 0 : 1}' "${run_dir}/verification.tsv"
 }
 
 run_outage_fixture outage-before Ready 3 outage:node-ready-before true

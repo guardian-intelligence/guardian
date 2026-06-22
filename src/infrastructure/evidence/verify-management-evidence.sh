@@ -18,7 +18,13 @@ Options:
   --require-component-probes
                            require evidence load Jobs/logs in outage mode
   --node NAME              optional outage node name to check in nodes output
+  --inventory PATH         inventory JSON; defaults to guardian-mgmt inventory
+  --public-ingress-ips CSV override expected public ingress IPs
   -h, --help               show this help
+
+Inputs:
+  MANAGEMENT_INVENTORY_BIN repo-pinned inventory reader; required for
+                           DNS checks unless --public-ingress-ips is set
 EOF
 }
 
@@ -29,6 +35,9 @@ min_ready_nodes=""
 require_talos=false
 require_component_probes=false
 node=""
+inventory="src/infrastructure/inventory/guardian-mgmt.json"
+public_ingress_ips_csv=""
+public_ingress_ips=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -58,6 +67,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --node)
       node="${2:?--node requires a value}"
+      shift 2
+      ;;
+    --inventory)
+      inventory="${2:?--inventory requires a value}"
+      shift 2
+      ;;
+    --public-ingress-ips)
+      public_ingress_ips_csv="${2:?--public-ingress-ips requires a value}"
       shift 2
       ;;
     -h|--help)
@@ -188,6 +205,60 @@ count_file() {
   else
     fail "${name}" "matched ${count}; required ${minimum}"
   fi
+}
+
+load_public_ingress_ips() {
+  local output
+  local ip
+  local management_inventory_bin
+  local filtered_ips
+
+  if [[ "${#public_ingress_ips[@]}" -ne 0 ]]; then
+    return 0
+  fi
+
+  if [[ -n "${public_ingress_ips_csv}" ]]; then
+    IFS=',' read -r -a public_ingress_ips <<<"${public_ingress_ips_csv}"
+  else
+    management_inventory_bin="${MANAGEMENT_INVENTORY_BIN:-}"
+    if [[ -z "${management_inventory_bin}" || ! -x "${management_inventory_bin}" ]]; then
+      fail "dns:inventory" "MANAGEMENT_INVENTORY_BIN must be executable unless --public-ingress-ips is set"
+      return 1
+    fi
+    if ! output="$("${management_inventory_bin}" --inventory "${inventory}" public-ips 2>&1)"; then
+      fail "dns:inventory" "${output}"
+      return 1
+    fi
+    mapfile -t public_ingress_ips <<<"${output}"
+  fi
+
+  filtered_ips=()
+  for ip in "${public_ingress_ips[@]}"; do
+    ip="${ip#"${ip%%[![:space:]]*}"}"
+    ip="${ip%"${ip##*[![:space:]]}"}"
+    if [[ -n "${ip}" ]]; then
+      filtered_ips+=("${ip}")
+    fi
+  done
+  public_ingress_ips=("${filtered_ips[@]}")
+
+  if [[ "${#public_ingress_ips[@]}" -eq 0 ]]; then
+    fail "dns:inventory" "no public ingress IPs found"
+    return 1
+  fi
+  pass "dns:inventory" "$(IFS=','; printf '%s' "${public_ingress_ips[*]}")"
+}
+
+public_ingress_ip_allowed() {
+  local observed="$1"
+  local expected
+
+  for expected in "${public_ingress_ips[@]}"; do
+    if [[ "${observed}" == "${expected}" ]]; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 summary_status() {
@@ -326,7 +397,68 @@ verify_component_probes() {
     dashboard-root; do
     grep_file "evidence/logs-evidence-http-load.txt" "http-target label=${label} .* total=100 failures=0" "load:http:${label}"
   done
+  verify_http_remote_ips
   grep_file "evidence/logs-evidence-storage-smoke.txt" "storage-smoke files=64" "load:storage"
+}
+
+verify_http_remote_ips() {
+  local rel="evidence/logs-evidence-http-load.txt"
+  local path="${run_dir}/${rel}"
+  local label
+  local line
+  local remote_ips
+  local observed
+  local observed_ips
+  local invalid
+
+  if [[ ! -s "${path}" ]]; then
+    fail "dns:http-log" "missing ${rel}"
+    return
+  fi
+  load_public_ingress_ips || return
+
+  for label in \
+    company-prod-root \
+    company-prod-letters \
+    company-prod-news \
+    company-prod-healthz \
+    company-prod-metrics \
+    company-dev-root \
+    company-dev-letters \
+    company-dev-news \
+    company-dev-healthz \
+    company-dev-metrics \
+    company-gamma-root \
+    company-gamma-letters \
+    company-gamma-news \
+    company-gamma-healthz \
+    company-gamma-metrics \
+    harbor-health \
+    dashboard-root; do
+    line="$(awk -v label="${label}" '$0 ~ "^http-target label=" label " " {print; exit}' "${path}")"
+    if [[ -z "${line}" ]]; then
+      fail "dns:${label}:remote-ips" "missing http-target summary"
+      continue
+    fi
+    remote_ips="$(sed -n 's/.* remote_ips=\([^ ]*\).*/\1/p' <<<"${line}")"
+    if [[ -z "${remote_ips}" || "${remote_ips}" == "none" ]]; then
+      fail "dns:${label}:remote-ips" "missing remote_ips in ${rel}"
+      continue
+    fi
+
+    invalid=()
+    IFS=',' read -r -a observed_ips <<<"${remote_ips}"
+    for observed in "${observed_ips[@]}"; do
+      if ! public_ingress_ip_allowed "${observed}"; then
+        invalid+=("${observed}")
+      fi
+    done
+    if [[ "${#invalid[@]}" -eq 0 ]]; then
+      pass "dns:${label}:remote-ips" "${remote_ips}"
+    else
+      fail "dns:${label}:remote-ips" "unexpected IP(s): $(IFS=','; printf '%s' "${invalid[*]}"); expected one of $(IFS=','; printf '%s' "${public_ingress_ips[*]}")"
+    fi
+  done
 }
 
 verify_common() {

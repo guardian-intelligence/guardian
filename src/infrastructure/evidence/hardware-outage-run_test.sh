@@ -16,6 +16,7 @@ event_log="${tmpdir}/events.log"
 fake_latitude="${tmpdir}/latitude-power"
 fake_capture="${tmpdir}/capture"
 fake_verify="${tmpdir}/verify"
+fake_management_inventory="${tmpdir}/management-inventory"
 fake_kubectl="${tmpdir}/kubectl"
 fake_talosctl="${tmpdir}/talosctl"
 
@@ -92,6 +93,12 @@ set -euo pipefail
 exit 0
 EOF
 
+cat >"${fake_management_inventory}" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+exit 0
+EOF
+
 cat >"${fake_kubectl}" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -104,7 +111,7 @@ set -euo pipefail
 exit 0
 EOF
 
-chmod +x "${fake_latitude}" "${fake_capture}" "${fake_verify}" "${fake_kubectl}" "${fake_talosctl}"
+chmod +x "${fake_latitude}" "${fake_capture}" "${fake_verify}" "${fake_management_inventory}" "${fake_kubectl}" "${fake_talosctl}"
 
 set +e
 HARDWARE_OUTAGE_EVENT_LOG="${event_log}" \
@@ -113,6 +120,7 @@ LATITUDESH_AUTH_TOKEN="test-token" \
 LATITUDE_POWER_BIN="${fake_latitude}" \
 CAPTURE_EVIDENCE_BIN="${fake_capture}" \
 VERIFY_EVIDENCE_BIN="${fake_verify}" \
+MANAGEMENT_INVENTORY_BIN="${fake_management_inventory}" \
 KUBECTL_BIN="${fake_kubectl}" \
 TALOSCTL_BIN="${fake_talosctl}" \
 bash "${script}" \

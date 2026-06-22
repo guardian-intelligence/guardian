@@ -15,8 +15,9 @@ type inventory struct {
 }
 
 type inventoryNode struct {
-	Name     string `json:"name"`
-	ServerID string `json:"server_id"`
+	Name       string `json:"name"`
+	ServerID   string `json:"server_id"`
+	PublicIPv4 string `json:"public_ipv4"`
 }
 
 type options struct {
@@ -44,7 +45,13 @@ func run(args []string, stdout io.Writer) error {
 
 	switch command {
 	case "nodes":
-		return writeNodes(stdout, inv.Nodes, opts.format)
+		return writeNodeField(stdout, inv.Nodes, opts.format, func(node inventoryNode) string {
+			return node.Name
+		})
+	case "public-ips":
+		return writeNodeField(stdout, inv.Nodes, opts.format, func(node inventoryNode) string {
+			return node.PublicIPv4
+		})
 	default:
 		return fmt.Errorf("unsupported command %q", command)
 	}
@@ -62,7 +69,7 @@ func parseOptions(args []string) (options, string, error) {
 		return opts, "", err
 	}
 	if fs.NArg() != 1 {
-		return opts, "", errors.New("pass exactly one command: nodes")
+		return opts, "", errors.New("pass exactly one command: nodes or public-ips")
 	}
 	if opts.format != "lines" && opts.format != "csv" {
 		return opts, "", fmt.Errorf("unsupported --format %q", opts.format)
@@ -82,22 +89,22 @@ func readInventory(path string) (inventory, error) {
 	return inv, nil
 }
 
-func writeNodes(w io.Writer, nodes []inventoryNode, format string) error {
-	names := make([]string, 0, len(nodes))
+func writeNodeField(w io.Writer, nodes []inventoryNode, format string, field func(inventoryNode) string) error {
+	values := make([]string, 0, len(nodes))
 	for _, node := range nodes {
-		if node.Name != "" {
-			names = append(names, node.Name)
+		if value := field(node); value != "" {
+			values = append(values, value)
 		}
 	}
 	switch format {
 	case "lines":
-		for _, name := range names {
-			if _, err := fmt.Fprintln(w, name); err != nil {
+		for _, value := range values {
+			if _, err := fmt.Fprintln(w, value); err != nil {
 				return err
 			}
 		}
 	case "csv":
-		if _, err := fmt.Fprintln(w, strings.Join(names, ",")); err != nil {
+		if _, err := fmt.Fprintln(w, strings.Join(values, ",")); err != nil {
 			return err
 		}
 	default:
