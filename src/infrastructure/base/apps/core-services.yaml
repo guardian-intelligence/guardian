@@ -1,8 +1,8 @@
 # Root tenant infrastructure services shared by the management cluster.
 #
 # These resources are Cozystack app CRs. The aggregated apps API converts them
-# into Flux HelmReleases named postgres-guardian, harbor-guardian, and
-# clickhouse-guardian in tenant-root.
+# into Flux HelmReleases in tenant-root. SeaweedFS provides the tenant-root COSI
+# bucket classes that Harbor and bucket-style apps consume.
 #
 # Backups point at tenant-local Kubernetes Secrets projected from OpenBao/R2.
 # Do not place raw S3 credentials in these app CRs.
@@ -13,13 +13,47 @@ metadata:
   namespace: tenant-root
 spec:
   replicas: 3
-  size: 20Gi
+  size: 10Gi
   storageClass: replicated
   external: false
   version: v18
   quorum:
     minSyncReplicas: 1
     maxSyncReplicas: 2
+---
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Ingress
+metadata:
+  name: ingress
+  namespace: tenant-root
+spec:
+  replicas: 3
+  whitelist: []
+  cloudflareProxy: false
+---
+apiVersion: apps.cozystack.io/v1alpha1
+kind: SeaweedFS
+metadata:
+  name: seaweedfs
+  namespace: tenant-root
+spec:
+  host: s3.guardianintelligence.org
+  topology: Simple
+  replicationFactor: 3
+  db:
+    replicas: 3
+    size: 10Gi
+    storageClass: replicated
+  master:
+    replicas: 3
+  filer:
+    replicas: 3
+  volume:
+    replicas: 3
+    size: 20Gi
+    storageClass: replicated
+  s3:
+    replicas: 3
 ---
 apiVersion: apps.cozystack.io/v1alpha1
 kind: Harbor
@@ -31,13 +65,13 @@ spec:
   storageClass: replicated
   database:
     replicas: 3
-    size: 20Gi
+    size: 10Gi
   redis:
     replicas: 3
-    size: 5Gi
+    size: 2Gi
   trivy:
     enabled: true
-    size: 10Gi
+    size: 5Gi
 ---
 apiVersion: apps.cozystack.io/v1alpha1
 kind: ClickHouse
@@ -47,9 +81,9 @@ metadata:
 spec:
   replicas: 3
   shards: 1
-  size: 50Gi
+  size: 20Gi
   storageClass: replicated
-  logStorageSize: 10Gi
+  logStorageSize: 5Gi
   backup:
     enabled: true
     schedule: ""
@@ -58,7 +92,7 @@ spec:
   clickhouseKeeper:
     enabled: true
     replicas: 3
-    size: 5Gi
+    size: 2Gi
 ---
 apiVersion: backups.cozystack.io/v1alpha1
 kind: Plan

@@ -1,0 +1,7 @@
+filegroup(
+    name = "kustomization",
+    srcs = [
+        "kustomization.yaml",
+    ],
+    visibility = ["//visibility:public"],
+)

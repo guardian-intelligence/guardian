@@ -6,7 +6,7 @@ metadata:
   namespace: tenant-prod
 spec:
   replicas: 3
-  size: 50Gi
+  size: 5Gi
   storageClass: replicated
   external: false
   version: v18
@@ -24,13 +24,13 @@ spec:
   storageClass: replicated
   database:
     replicas: 3
-    size: 50Gi
+    size: 5Gi
   redis:
     replicas: 3
-    size: 10Gi
+    size: 1Gi
   trivy:
     enabled: true
-    size: 20Gi
+    size: 2Gi
 ---
 apiVersion: apps.cozystack.io/v1alpha1
 kind: ClickHouse
@@ -40,9 +40,9 @@ metadata:
 spec:
   replicas: 3
   shards: 1
-  size: 100Gi
+  size: 10Gi
   storageClass: replicated
-  logStorageSize: 20Gi
+  logStorageSize: 2Gi
   backup:
     enabled: true
     schedule: ""
@@ -51,7 +51,7 @@ spec:
   clickhouseKeeper:
     enabled: true
     replicas: 3
-    size: 10Gi
+    size: 1Gi
 ---
 apiVersion: backups.cozystack.io/v1alpha1
 kind: Plan
