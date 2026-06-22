@@ -387,21 +387,28 @@ exercise the intended topology.
 
 ## Company Site
 
-The active company-site artifact is the static OCI image at
-`//src/products/company/site:image`. It uses the digest-pinned
-`nginx-unprivileged` base from `MODULE.bazel`, serves only checked-in static
-files, and exposes `/healthz`, `/livez`, and `/metrics`.
+The active company-site artifact is the TanStack Start/Nitro OCI image exposed
+through `//src/products/company/site:image`. The deploy-facing `site` package
+is a compatibility shim over `//src/products/company/web:image`; the web app
+source, Vite+ workspace, pinned pnpm lock, and brand package now live under
+`src/`. The runtime image uses the digest-pinned Ubuntu base from
+`MODULE.bazel`, the repo-pinned Node toolchain, and exposes `/healthz`,
+`/livez`, `/metrics`, and the public company routes.
+
+The OG endpoints currently serve generated SVG cards. If PNG social-card
+compatibility becomes required, add it as a pre-rendered build artifact instead
+of reintroducing a native rasterizer in the request path.
 
 Build the image with:
 
 ```sh
-bazelisk build //src/products/company/site:image
+aspect build //src/products/company/site:image
 ```
 
 Publish the image to the root Harbor registry after Harbor is reconciled:
 
 ```sh
-bazelisk run //src/products/company/site:push-harbor
+aspect run //src/products/company/site:push-harbor
 ```
 
 The checked-in environment layer declares:
@@ -414,13 +421,11 @@ The checked-in environment layer declares:
   `Ingress` for `guardianintelligence.org`.
 
 Each deployment runs three replicas, uses the `tenant-root` ingress class, and
-references the immutable Harbor image digest produced by the checked-in static
-artifact. Pods use a strict hostname topology spread (`maxSkew: 1`,
+references the immutable Harbor image digest produced by the checked-in
+TanStack artifact. Pods use a strict hostname topology spread (`maxSkew: 1`,
 `whenUnsatisfiable: DoNotSchedule`), and each environment declares
 `PodDisruptionBudget/company-site` with `minAvailable: 2` so voluntary
-disruption cannot take the surface below the single-node-outage target. The
-full TanStack company site remains archived under `src-old/` until its pinned JS
-workspace is restored as an active build graph slice.
+disruption cannot take the surface below the single-node-outage target.
 
 ## Live Checks
 
@@ -549,8 +554,8 @@ separate PRs with their own validation:
 
 - Bootstrap CLI wrapper for the full Talm/Talos path.
 - Latitude VLAN assignment imports, once assignment IDs are collected.
-- Publishing the checked-in company-site OCI image to Harbor and capturing live
-  readiness evidence for dev, gamma, and prod.
+- Publishing the checked-in TanStack company-site OCI image to Harbor and
+  capturing live readiness evidence for dev, gamma, and prod.
 - Load-test reports for CNPG/Postgres, Harbor, ClickHouse, OpenBao, the
   Cozystack dashboard, and the company-site surfaces.
 - Backup specs for root and environment Postgres/Harbor, wired to declared

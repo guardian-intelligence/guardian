@@ -1,5 +1,4 @@
 packages:
-  - apps/*
   - ../products/*/web
   - packages/*
 allowBuilds:

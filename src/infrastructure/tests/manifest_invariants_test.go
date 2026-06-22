@@ -371,18 +371,24 @@ func testEnvironmentTenantCoreServices(t *testing.T) {
 }
 
 func testCompanySite(t *testing.T) {
-	assertRunfileContent(t, "src/products/company/site/public/healthz", "ok\n")
-	assertRunfileContent(t, "src/products/company/site/public/livez", "ok\n")
+	healthz := readRunfile(t, "src/products/company/web/src/routes/healthz.tsx")
+	if !bytes.Contains(healthz, []byte(`GET: () => new Response("ok\n", { status: 200, headers })`)) {
+		t.Fatalf("company-site healthz route does not return ok")
+	}
+	livez := readRunfile(t, "src/products/company/web/src/routes/livez.tsx")
+	if !bytes.Contains(livez, []byte(`GET: () => new Response("ok\n", { status: 200, headers })`)) {
+		t.Fatalf("company-site livez route does not return ok")
+	}
 
-	metrics := readRunfile(t, "src/products/company/site/public/metrics")
-	if !bytes.Contains(metrics, []byte(`company_site_build_info{app="company-site",runtime="nginx-static"} 1`)) {
+	metrics := readRunfile(t, "src/products/company/web/src/routes/metrics.tsx")
+	if !bytes.Contains(metrics, []byte(`company_site_build_info{app="company-site",runtime="tanstack-start"} 1`)) {
 		t.Fatalf("company-site metrics endpoint does not expose build info: %q", metrics)
 	}
 
-	index := readRunfile(t, "src/products/company/site/public/index.html")
-	if !bytes.Contains(index, []byte("Guardian Intelligence")) ||
-		!bytes.Contains(index, []byte("open self-hostable private cloud")) {
-		t.Fatalf("company-site index.html does not contain the expected company copy")
+	landing := readRunfile(t, "src/products/company/web/src/routes/_workshop/index.tsx")
+	if !bytes.Contains(landing, []byte("Guardian")) ||
+		!bytes.Contains(landing, []byte("FirstLight")) {
+		t.Fatalf("company-site landing route does not contain the expected TanStack app")
 	}
 
 	image := "harbor.guardianintelligence.org/guardian/company-site@" + readCompanySiteImageDigest(t)
@@ -426,7 +432,7 @@ func testCompanySite(t *testing.T) {
 			assertString(t, container, "IfNotPresent", "imagePullPolicy")
 			assertBool(t, container, false, "securityContext", "allowPrivilegeEscalation")
 			assertBool(t, container, true, "securityContext", "runAsNonRoot")
-			assertInt(t, container, 101, "securityContext", "runAsUser")
+			assertInt(t, container, 65532, "securityContext", "runAsUser")
 			assertString(t, container, "/healthz", "readinessProbe", "httpGet", "path")
 			assertString(t, container, "/livez", "livenessProbe", "httpGet", "path")
 
@@ -465,7 +471,7 @@ func readCompanySiteImageDigest(t *testing.T) string {
 			Digest string `json:"digest"`
 		} `json:"manifests"`
 	}
-	data := readRunfile(t, "src/products/company/site/image/index.json")
+	data := readRunfile(t, "src/products/company/web/image/index.json")
 	if err := json.Unmarshal(data, &index); err != nil {
 		t.Fatalf("parse company-site OCI index: %v", err)
 	}

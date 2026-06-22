@@ -14,3 +14,9 @@
 /src-old/**/.turbo/
 /src-old/**/.next/
 /src-old/**/.output/
+
+# Active web workspace dependency/build output is produced by Bazel/rules_js.
+/src/viteplus-monorepo/**/node_modules/
+/src/products/company/web/node_modules/
+/src/products/company/web/.output/
+/src/products/company/web/.vite/

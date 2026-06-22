@@ -22,7 +22,7 @@ go_test(
         "//src/infrastructure/environments:manifests",
         "//src/infrastructure/talm:chart",
         "//src/products/company/site:image",
-        "//src/products/company/site:public",
+        "//src/products/company/web:sources",
     ],
     deps = [
         "@rules_go//go/runfiles",

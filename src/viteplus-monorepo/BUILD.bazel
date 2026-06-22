@@ -51,9 +51,7 @@ filegroup(
         "package.json",
         "pnpm-lock.yaml",
         "pnpm-workspace.yaml",
-        "//src/products/aisucks/web:package_manifest",
         "//src/products/company/web:package_manifest",
-        "//src/viteplus-monorepo/packages/aisucks-sdk:package_manifest",
         "//src/viteplus-monorepo/packages/brand:package_manifest",
     ] + glob(
         [
@@ -76,9 +74,7 @@ filegroup(
         "tsconfig.base.json",
         "tsconfig.json",
         "vite.config.ts",
-        "//src/products/aisucks/web:sources",
         "//src/products/company/web:sources",
-        "//src/viteplus-monorepo/packages/aisucks-sdk:sources",
         "//src/viteplus-monorepo/packages/brand:sources",
     ] + glob(
         [
@@ -93,6 +89,7 @@ filegroup(
 genrule(
     name = "workspace_install",
     srcs = [
+        ":.aspect_rules_js/node_modules/@voidzero-dev+vite-plus-linux-x64-gnu@0.1.16/dir",
         ":workspace_install_inputs",
         ":vp_node",
         ":node_modules/vite-plus",
@@ -115,9 +112,10 @@ for candidate in $(locations :node_modules/vite-plus); do
 done
 test -n "$$vp"
 export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
+export NODE_OPTIONS="--preserve-symlinks-main $${NODE_OPTIONS:-}"
+export NODE_PATH="$$execroot/$(BINDIR)/src/viteplus-monorepo/node_modules$${NODE_PATH:+:$$NODE_PATH}"
 export CI=true
 cd src/viteplus-monorepo
-"$$node" "$$vp" install --frozen-lockfile --prefer-offline
 printf 'viteplus install ok\\n' > "$$execroot/$@"
 """,
     local = True,
@@ -131,6 +129,7 @@ printf 'viteplus install ok\\n' > "$$execroot/$@"
 genrule(
     name = "workspace_lint",
     srcs = [
+        ":.aspect_rules_js/node_modules/@voidzero-dev+vite-plus-linux-x64-gnu@0.1.16/dir",
         ":workspace_sources",
         ":workspace_install",
         ":vp_node",
@@ -154,6 +153,8 @@ for candidate in $(locations :node_modules/vite-plus); do
 done
 test -n "$$vp"
 export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
+export NODE_OPTIONS="--preserve-symlinks-main $${NODE_OPTIONS:-}"
+export NODE_PATH="$$execroot/$(BINDIR)/src/viteplus-monorepo/node_modules$${NODE_PATH:+:$$NODE_PATH}"
 export CI=true
 cd src/viteplus-monorepo
 "$$node" "$$vp" run -w lint
@@ -170,6 +171,7 @@ printf 'viteplus lint ok\\n' > "$$execroot/$@"
 genrule(
     name = "workspace_build",
     srcs = [
+        ":.aspect_rules_js/node_modules/@voidzero-dev+vite-plus-linux-x64-gnu@0.1.16/dir",
         ":workspace_sources",
         ":workspace_install",
         ":workspace_lint",
@@ -194,13 +196,11 @@ for candidate in $(locations :node_modules/vite-plus); do
 done
 test -n "$$vp"
 export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
+export NODE_OPTIONS="--preserve-symlinks-main $${NODE_OPTIONS:-}"
+export NODE_PATH="$$execroot/$(BINDIR)/src/viteplus-monorepo/node_modules$${NODE_PATH:+:$$NODE_PATH}"
 export CI=true
-cd src/products/aisucks/web
-"$$node" "$$vp" build
 cd "$$execroot/src/products/company/web"
 "$$node" "$$vp" build
-cd "$$execroot/src/viteplus-monorepo"
-"$$node" "$$vp" run @guardian-intelligence/aisucks#build
 printf 'viteplus build ok\\n' > "$$execroot/$@"
 """,
     local = True,
