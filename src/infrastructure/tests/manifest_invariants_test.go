@@ -414,6 +414,7 @@ func testCompanySite(t *testing.T) {
 				t.Fatalf("topologySpreadConstraints has %d entries, want 1", len(spread))
 			}
 			assertString(t, asManifest(t, spread[0], "topologySpreadConstraints[0]"), "kubernetes.io/hostname", "topologyKey")
+			assertString(t, asManifest(t, spread[0], "topologySpreadConstraints[0]"), "DoNotSchedule", "whenUnsatisfiable")
 
 			containers := sliceAt(t, deploy, "spec", "template", "spec", "containers")
 			if len(containers) != 1 {
@@ -439,6 +440,12 @@ func testCompanySite(t *testing.T) {
 			}
 			assertInt(t, asManifest(t, servicePorts[0], "spec.ports[0]"), 80, "port")
 			assertString(t, asManifest(t, servicePorts[0], "spec.ports[0]"), "http", "targetPort")
+
+			pdb := findObject(t, docs, "PodDisruptionBudget", env.namespace, "company-site")
+			assertString(t, pdb, "policy/v1", "apiVersion")
+			assertInt(t, pdb, 2, "spec", "minAvailable")
+			assertString(t, pdb, "company-site", "spec", "selector", "matchLabels", "app.kubernetes.io/name")
+			assertString(t, pdb, env.name, "spec", "selector", "matchLabels", "guardian.dev/stage")
 
 			ingress := findObject(t, docs, "Ingress", env.namespace, "company-site")
 			assertString(t, ingress, "networking.k8s.io/v1", "apiVersion")
