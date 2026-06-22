@@ -488,6 +488,7 @@ kubectl -n tenant-gamma get networkpolicy company-site-ingress
 kubectl -n tenant-prod get deploy,svc,poddisruptionbudget,ingress company-site
 kubectl -n tenant-prod get networkpolicy company-site-ingress
 kubectl -n tenant-root get openbao guardian
+kubectl -n tenant-root get ciliumnetworkpolicy allow-openbao-to-apiserver
 kubectl -n tenant-root get ciliumnetworkpolicy allow-external-secrets-to-openbao
 kubectl -n tenant-root get secretstores.external-secrets.io openbao
 kubectl -n tenant-root get externalsecrets.external-secrets.io guardian-cnpg-backup-creds
@@ -541,7 +542,8 @@ Expected results:
   `guardianintelligence.org`; each live company-site surface has pods placed on
   three distinct Kubernetes nodes
 - OpenBao is deployed as the Cozystack-managed `guardian` app in `tenant-root`
-- `tenant-root` has the Cilium allow policy for ESO-to-OpenBao traffic
+- `tenant-root` has the Cilium allow policies for OpenBao-to-API-server
+  traffic and ESO-to-OpenBao traffic
 - root/dev/gamma/prod have `SecretStore/openbao` and
   `ExternalSecret/guardian-cnpg-backup-creds`; they do not have to be Ready
   until OpenBao has been initialized/unsealed and populated with the matching
