@@ -398,15 +398,21 @@ bazelisk run //src/products/company/site:push-harbor
 
 The checked-in environment layer declares:
 
-- `tenant-dev`: `Deployment`, `Service`, and `Ingress` for `dev.gi.org`.
-- `tenant-gamma`: `Deployment`, `Service`, and `Ingress` for `gamma.gi.org`.
-- `tenant-prod`: `Deployment`, `Service`, and `Ingress` for
-  `guardianintelligence.org`.
+- `tenant-dev`: `Deployment`, `Service`, `PodDisruptionBudget`, and `Ingress`
+  for `dev.gi.org`.
+- `tenant-gamma`: `Deployment`, `Service`, `PodDisruptionBudget`, and
+  `Ingress` for `gamma.gi.org`.
+- `tenant-prod`: `Deployment`, `Service`, `PodDisruptionBudget`, and
+  `Ingress` for `guardianintelligence.org`.
 
 Each deployment runs three replicas, uses the `tenant-root` ingress class, and
 references the immutable Harbor image digest produced by the checked-in static
-artifact. The full TanStack company site remains archived under `src-old/` until
-its pinned JS workspace is restored as an active build graph slice.
+artifact. Pods use a strict hostname topology spread (`maxSkew: 1`,
+`whenUnsatisfiable: DoNotSchedule`), and each environment declares
+`PodDisruptionBudget/company-site` with `minAvailable: 2` so voluntary
+disruption cannot take the surface below the single-node-outage target. The
+full TanStack company site remains archived under `src-old/` until its pinned JS
+workspace is restored as an active build graph slice.
 
 ## Live Checks
 
@@ -436,9 +442,9 @@ kubectl -n tenant-gamma wait --for=condition=Ready postgreses.apps.cozystack.io/
 kubectl -n tenant-gamma wait --for=condition=WorkloadsReady postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian
 kubectl -n tenant-prod wait --for=condition=Ready postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian
 kubectl -n tenant-prod wait --for=condition=WorkloadsReady postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian
-kubectl -n tenant-dev get deploy,svc,ingress company-site
-kubectl -n tenant-gamma get deploy,svc,ingress company-site
-kubectl -n tenant-prod get deploy,svc,ingress company-site
+kubectl -n tenant-dev get deploy,svc,poddisruptionbudget,ingress company-site
+kubectl -n tenant-gamma get deploy,svc,poddisruptionbudget,ingress company-site
+kubectl -n tenant-prod get deploy,svc,poddisruptionbudget,ingress company-site
 kubectl -n tenant-root get openbao guardian
 kubectl -n tenant-root get ciliumnetworkpolicy allow-external-secrets-to-openbao
 kubectl -n tenant-root get secretstores.external-secrets.io openbao
@@ -487,9 +493,9 @@ Expected results:
 - root/dev/gamma/prod Postgres, Harbor, and ClickHouse app resources report
   `WorkloadsReady=True`; OpenBao app `Ready=True` is sufficient until
   init/unseal is declared in the bootstrap path
-- each tenant namespace has the company-site `Deployment`, `Service`, and
-  `Ingress`; the dev and gamma ingress hosts are `dev.gi.org` and
-  `gamma.gi.org`, and prod is `guardianintelligence.org`
+- each tenant namespace has the company-site `Deployment`, `Service`,
+  `PodDisruptionBudget`, and `Ingress`; the dev and gamma ingress hosts are
+  `dev.gi.org` and `gamma.gi.org`, and prod is `guardianintelligence.org`
 - OpenBao is deployed as the Cozystack-managed `guardian` app in `tenant-root`
 - `tenant-root` has the Cilium allow policy for ESO-to-OpenBao traffic
 - root/dev/gamma/prod have `SecretStore/openbao` and

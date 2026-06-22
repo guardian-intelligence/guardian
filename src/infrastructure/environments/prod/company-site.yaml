@@ -31,7 +31,7 @@ spec:
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
-          whenUnsatisfiable: ScheduleAnyway
+          whenUnsatisfiable: DoNotSchedule
           labelSelector:
             matchLabels:
               app.kubernetes.io/name: company-site
@@ -85,6 +85,22 @@ spec:
     - name: http
       port: 80
       targetPort: http
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: company-site
+  namespace: tenant-prod
+  labels:
+    app.kubernetes.io/name: company-site
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: company-site
+      guardian.dev/stage: prod
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
