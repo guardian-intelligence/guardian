@@ -172,6 +172,14 @@ out into HelmReleases and stateful workloads; readiness is proven by the live
 checks and checked-in load/DR/outage reports, not by treating Flux's apply
 status as service health.
 
+The platform package uses Cozystack's `isp-full` variant. In Cozystack 1.4,
+`isp-full` includes the backup controller and backupstrategy controller, but
+`cozystack.external-secrets-operator` and `cozystack.velero` are optional
+system packages. Guardian enables both through
+`bundles.enabledPackages` so later OpenBao-backed Secret projection and
+Velero-backed backup/restore evidence can reconcile without an out-of-band
+package install.
+
 For a direct render check from the repo-pinned kubectl artifact:
 
 ```sh
@@ -341,7 +349,9 @@ separate PRs with their own validation:
 - Load-test reports for CNPG/Postgres, Harbor, ClickHouse, OpenBao, the
   Cozystack dashboard, and the company-site surfaces.
 - Backup specs for root and environment Postgres/Harbor/ClickHouse, wired to
-  declared OpenBao/R2-projected Secrets.
+  declared OpenBao/R2-projected Secrets. The package prerequisites are now
+  declared, but the `SecretStore`/`ExternalSecret`, backup class, backup plan,
+  and live restore artifacts still need separate PRs.
 - ClickHouse chart-side `spec.storageClass` rendering, because Cozystack 1.4
   still relies on the cluster default for ClickHouse and keeper PVCs.
 - OpenBao init/unseal automation and backup/restore drills.

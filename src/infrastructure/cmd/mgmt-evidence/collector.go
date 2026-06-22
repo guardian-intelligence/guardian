@@ -426,6 +426,7 @@ func validateBackupSystem(objects []object) []check {
 	for _, name := range []string{
 		"cozystack.backup-controller",
 		"cozystack.backupstrategy-controller",
+		"cozystack.external-secrets-operator",
 		"cozystack.velero",
 	} {
 		obj := byKindName["Package/"+name]

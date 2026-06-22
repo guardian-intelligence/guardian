@@ -7,6 +7,12 @@ spec:
   components:
     platform:
       values:
+        bundles:
+          enabledPackages:
+            # Standard Cozystack optional packages needed for OpenBao-backed
+            # Secret projection and Velero-backed backup/restore evidence.
+            - cozystack.external-secrets-operator
+            - cozystack.velero
         publishing:
           host: guardianintelligence.org
           # k8s API rides a Talos Layer2 VIP on the Latitude Virtual Network.

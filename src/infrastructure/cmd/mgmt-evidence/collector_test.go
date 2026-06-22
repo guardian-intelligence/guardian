@@ -131,6 +131,20 @@ func TestValidateBackupRestoresAttributesInPlaceRestoreThroughBackup(t *testing.
 	}
 }
 
+func TestValidateBackupSystemRequiresSecretProjectionAndVeleroPackages(t *testing.T) {
+	checks := validateBackupSystem([]object{
+		readyPackage(t, "cozystack.backup-controller"),
+		readyPackage(t, "cozystack.backupstrategy-controller"),
+		readyPackage(t, "cozystack.external-secrets-operator"),
+		readyPackage(t, "cozystack.velero"),
+	})
+	for _, c := range checks {
+		if c.Status != statusPass {
+			t.Fatalf("check %s failed: %s", c.Name, c.Detail)
+		}
+	}
+}
+
 func mustObject(t *testing.T, raw string) object {
 	t.Helper()
 	var obj object
@@ -138,6 +152,15 @@ func mustObject(t *testing.T, raw string) object {
 		t.Fatal(err)
 	}
 	return obj
+}
+
+func readyPackage(t *testing.T, name string) object {
+	t.Helper()
+	return mustObject(t, `{
+	  "kind":"Package",
+	  "metadata":{"name":"`+name+`"},
+	  "status":{"conditions":[{"type":"Ready","status":"True"}]}
+	}`)
 }
 
 func backupPlan(t *testing.T, namespace, kind, cron string) object {
