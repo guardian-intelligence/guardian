@@ -401,6 +401,11 @@ aspect infra hardware-outage-run \
 - sends Latitude `power_on` and waits for server status `on`;
 - captures and verifies `outage-after` with the target node Ready again.
 
+If a capture or verification step fails after `power_off`, the runner attempts
+Latitude `power_on` during exit cleanup before returning failure. Treat the
+failed run directory as incident evidence, then confirm the server status before
+starting another drill.
+
 The default output directory is
 `docs/reports/infrastructure/live-runs/<timestamp>-hardware-outage-all/` for the
 all-node command, and

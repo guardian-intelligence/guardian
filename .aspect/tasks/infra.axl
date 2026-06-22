@@ -623,9 +623,13 @@ def _preflight_impl(ctx):
     rc = checked_spawn(
         ctx,
         "bazelisk",
-        ["build", "//src/infrastructure/evidence:verify-management-evidence-suite-smoke"],
+        [
+            "build",
+            "//src/infrastructure/evidence:hardware-outage-run-smoke",
+            "//src/infrastructure/evidence:verify-management-evidence-suite-smoke",
+        ],
         cwd = ws_path(ctx),
-        label = "bazelisk build //src/infrastructure/evidence:verify-management-evidence-suite-smoke",
+        label = "bazelisk build evidence smoke tests",
     )
     if rc != 0:
         return rc

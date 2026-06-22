@@ -119,6 +119,9 @@ LATITUDESH_AUTH_TOKEN="${LATITUDESH_AUTH_TOKEN}" aspect infra hardware-outage-ru
   before/down/after evidence, and runs the evidence verifier for each phase.
 - Hardware outage verification now requires the target node to be Ready before
   the drill, `NotReady` while powered off, and Ready again after power-on.
+- The hardware outage runner now attempts Latitude `power_on` during exit
+  cleanup if a capture or verification step fails after `power_off`; this is
+  covered by `//src/infrastructure/evidence:hardware-outage-run-smoke`.
 - The final all-node outage report path now has a repo-owned
   `aspect infra hardware-outage-run-all` task. It reads management nodes from
   checked-in inventory and runs the per-node hardware outage drill sequentially.

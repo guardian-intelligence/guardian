@@ -81,6 +81,17 @@ genrule(
 )
 
 genrule(
+    name = "hardware-outage-run-smoke",
+    srcs = [
+        "hardware-outage-run.sh",
+        "hardware-outage-run_test.sh",
+    ],
+    outs = ["hardware-outage-run-smoke.ok"],
+    cmd = "bash $(location hardware-outage-run_test.sh) $(location hardware-outage-run.sh) $@",
+    visibility = ["//visibility:public"],
+)
+
+genrule(
     name = "hardware-outage-run-all",
     srcs = ["hardware-outage-run-all.sh"],
     outs = ["hardware-outage-run-all-runner"],

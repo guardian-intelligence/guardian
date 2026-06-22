@@ -143,6 +143,7 @@ if [[ -z "${out_dir}" ]]; then
   out_dir="docs/reports/infrastructure/live-runs/${timestamp}-hardware-outage-${safe_node}"
 fi
 mkdir -p "${out_dir}"
+power_restore_required=false
 
 run_latitude() {
   local action="$1"
@@ -157,6 +158,28 @@ run_latitude() {
     --poll-interval "${poll_interval}" \
     >"${output}"
 }
+
+restore_power_on_exit() {
+  local rc=$?
+
+  if [[ "${power_restore_required}" == "true" ]]; then
+    echo "attempting Latitude power_on for ${node} before exit" >&2
+    set +e
+    run_latitude power_on "${up_timeout}" "${out_dir}/latitude-after.jsonl"
+    local restore_rc=$?
+    set -e
+    if [[ "${restore_rc}" -ne 0 ]]; then
+      echo "Latitude power_on for ${node} failed during exit cleanup" >&2
+      if [[ "${rc}" -eq 0 ]]; then
+        rc="${restore_rc}"
+      fi
+    fi
+  fi
+
+  exit "${rc}"
+}
+
+trap restore_power_on_exit EXIT
 
 capture_args() {
   if [[ -n "${kubeconfig}" ]]; then
@@ -230,11 +253,13 @@ run_latitude status "1s" "${out_dir}/latitude-before.jsonl"
 run_capture outage-before false
 run_verify outage-before 3 "${require_talos}"
 
+power_restore_required=true
 run_latitude power_off "${down_timeout}" "${out_dir}/latitude-down.jsonl"
 run_capture outage-down true
 run_verify outage-down 2 false
 
 run_latitude power_on "${up_timeout}" "${out_dir}/latitude-after.jsonl"
+power_restore_required=false
 run_capture outage-after false
 run_verify outage-after 3 "${require_talos}"
 
