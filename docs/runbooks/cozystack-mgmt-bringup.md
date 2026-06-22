@@ -107,7 +107,10 @@ requires exactly three management nodes with `10.8.0.x` InternalIP addresses,
 waits for the Flux source and both Guardian Kustomizations to become Ready,
 verifies their applied revision contains the expected merged commit, and checks
 the declared Cozystack dashboard, app, networking, storage, OpenBao, backup,
-and company-site resources exist.
+and company-site resources exist. For Cozystack apps, the live gate also waits
+on the aggregated app resources' standard conditions: `Ready` for tenant and
+service Helm reconciliation, and `WorkloadsReady` for monitored
+Postgres/Harbor/ClickHouse workloads.
 
 Local validation does not require backend credentials:
 
@@ -201,9 +204,10 @@ create `tenant-dev`, `tenant-gamma`, and `tenant-prod`. The environment layer
 also declares each tenant's CNPG backup credential projection.
 
 Both Flux Kustomizations are apply-only (`wait: false`). Cozystack app CRs fan
-out into HelmReleases and stateful workloads; readiness is proven by the live
-checks and checked-in load/DR/outage reports, not by treating Flux's apply
-status as service health.
+out into HelmReleases and stateful workloads; service readiness is proven by
+the Cozystack app resources' `Ready` and `WorkloadsReady` conditions plus the
+component-specific live drill output, not by treating Flux's apply status as
+service health.
 
 After changing checked-in infrastructure, merge the PR to `main` and let the
 existing `GitRepository/guardian` and `Kustomization/guardian-mgmt-*` objects
@@ -247,7 +251,9 @@ guardian-mgmt source-controller has reconciled <commit-sha>
 Cozystack 1.4 serves `apps.cozystack.io/v1alpha1` resources through its
 aggregated API server. The API server reads `ApplicationDefinition` objects at
 startup, then converts app resources such as `Tenant`, `Postgres`, `Harbor`, and
-`ClickHouse` into Flux `HelmRelease` objects.
+`ClickHouse` into Flux `HelmRelease` objects. The aggregated app resource
+mirrors HelmRelease `Ready` into `.status.conditions` and adds
+`WorkloadsReady` when the chart declares Cozystack `WorkloadMonitor` resources.
 
 For `Tenant`, the Cozystack source sets `release.prefix: tenant-`. Applying
 `Tenant/dev` in `tenant-root` therefore creates a `HelmRelease` named
@@ -256,6 +262,13 @@ For `Tenant`, the Cozystack source sets `release.prefix: tenant-`. Applying
 in `dev`, `gamma`, and `prod` tenants intentionally inherit root `etcd`,
 ingress, monitoring, and SeaweedFS; they only set explicit environment hostnames
 for now.
+
+The same source-level naming rule applies to Guardian's core services:
+`Postgres/guardian` becomes `HelmRelease/postgres-guardian`,
+`Harbor/guardian` becomes `HelmRelease/harbor-guardian`,
+`ClickHouse/guardian` becomes `HelmRelease/clickhouse-guardian`, and
+`OpenBAO/guardian` becomes `HelmRelease/openbao-guardian`. The OpenBao app then
+renders its own nested system HelmRelease, `openbao-guardian-system`.
 
 Important source finding for the next app slice: Cozystack 1.4 `Postgres` and
 `Harbor` templates honor `spec.storageClass`, but the `ClickHouse` chart exposes
@@ -396,6 +409,15 @@ kubectl -n tenant-gamma get postgreses.apps.cozystack.io,harbors.apps.cozystack.
 kubectl -n tenant-prod get postgreses.apps.cozystack.io,harbors.apps.cozystack.io,clickhouses.apps.cozystack.io
 kubectl -n cozy-dashboard get deployment/cozy-dashboard-console deployment/incloud-web-gatekeeper
 kubectl -n cozy-dashboard get service/cozy-dashboard-console service/incloud-web-gatekeeper ingress/dashboard-web-ingress
+kubectl -n tenant-root wait --for=condition=Ready tenants.apps.cozystack.io/dev tenants.apps.cozystack.io/gamma tenants.apps.cozystack.io/prod
+kubectl -n tenant-root wait --for=condition=Ready postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian openbaos.apps.cozystack.io/guardian
+kubectl -n tenant-root wait --for=condition=WorkloadsReady postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian
+kubectl -n tenant-dev wait --for=condition=Ready postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian
+kubectl -n tenant-dev wait --for=condition=WorkloadsReady postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian
+kubectl -n tenant-gamma wait --for=condition=Ready postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian
+kubectl -n tenant-gamma wait --for=condition=WorkloadsReady postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian
+kubectl -n tenant-prod wait --for=condition=Ready postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian
+kubectl -n tenant-prod wait --for=condition=WorkloadsReady postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian
 kubectl -n tenant-dev get deploy,svc,ingress company-site
 kubectl -n tenant-gamma get deploy,svc,ingress company-site
 kubectl -n tenant-prod get deploy,svc,ingress company-site
@@ -439,6 +461,10 @@ Expected results:
   `tenant-root`
 - each tenant namespace has `Postgres/guardian`, `Harbor/guardian`, and
   `ClickHouse/guardian`
+- tenant and service app resources report `Ready=True`
+- root/dev/gamma/prod Postgres, Harbor, and ClickHouse app resources report
+  `WorkloadsReady=True`; OpenBao app `Ready=True` is sufficient until
+  init/unseal is declared in the bootstrap path
 - each tenant namespace has the company-site `Deployment`, `Service`, and
   `Ingress`; the dev and gamma ingress hosts are `dev.gi.org` and
   `gamma.gi.org`, and prod is `guardianintelligence.org`

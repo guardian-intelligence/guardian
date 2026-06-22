@@ -59,7 +59,7 @@ spec:
   # routine. Pruning app CRs can cascade into stateful Helm releases.
   prune: false
   # Apply-only. Cozystack app resources fan out into HelmReleases; readiness is
-  # proven by explicit live checks and checked-in drill reports, not by Flux
-  # kstatus on the app CR itself.
+  # proven by explicit live checks and standard tool output, not by Flux kstatus
+  # on the app CR itself.
   wait: false
   timeout: 10m
