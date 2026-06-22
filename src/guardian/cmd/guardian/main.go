@@ -117,7 +117,7 @@ func runUpManagement(ctx context.Context, argv []string, stdout io.Writer, stder
 	fs.StringVar(&cfg.Kubeconfig, "kubeconfig", "", "optional kubeconfig for live validation; defaults to <root>/kubeconfig after refresh")
 	fs.StringVar(&cfg.RequestTimeout, "request-timeout", cfg.RequestTimeout, "kubectl API request timeout")
 	fs.StringVar(&cfg.WaitTimeout, "wait-timeout", cfg.WaitTimeout, "Flux and workload readiness wait timeout")
-	fs.StringVar(&cfg.TofuEndpoint, "tofu-backend-endpoint", "", "S3-compatible OpenTofu backend endpoint; defaults to AWS_ENDPOINT_URL_S3 in Aspect")
+	fs.StringVar(&cfg.TofuEndpoint, "tofu-backend-endpoint", "", "optional S3-compatible OpenTofu backend endpoint override; defaults to AWS_ENDPOINT_URL_S3, then checked-in backend tfvars")
 
 	if err := fs.Parse(argv); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
