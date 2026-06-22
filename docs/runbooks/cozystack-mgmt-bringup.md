@@ -21,6 +21,7 @@ dependent manifests together; do not let topology drift through one-off edits.
 | - | - |
 | Bare-metal and VLAN state | `src/infrastructure/bootstrap/guardian-mgmt/*.tf` |
 | OpenBao API configuration | `src/infrastructure/bootstrap/guardian-mgmt-openbao/*.tf` |
+| Public DNS records | `src/infrastructure/bootstrap/guardian-mgmt-dns/*.tf` |
 | Talos/Talm chart | `src/infrastructure/talm/` |
 | Cozystack platform package | `src/infrastructure/base/cozystack/platform.yaml` |
 | Core Cozystack apps | `src/infrastructure/base/apps/core-services.yaml` |
@@ -80,9 +81,10 @@ Expected network shape:
 ## Validate Checked-In Substrate
 
 The repo pins OpenTofu in `MODULE.bazel`, the Latitude provider in
-`src/infrastructure/bootstrap/guardian-mgmt/.terraform.lock.hcl`, and the Vault
-provider in
-`src/infrastructure/bootstrap/guardian-mgmt-openbao/.terraform.lock.hcl`.
+`src/infrastructure/bootstrap/guardian-mgmt/.terraform.lock.hcl`, the Vault
+provider in `src/infrastructure/bootstrap/guardian-mgmt-openbao/.terraform.lock.hcl`,
+and the AWS/Cloudflare providers in
+`src/infrastructure/bootstrap/guardian-mgmt-dns/.terraform.lock.hcl`.
 
 Run the full local substrate check with:
 
@@ -91,7 +93,7 @@ aspect infra validate
 ```
 
 `aspect infra validate` runs OpenTofu `fmt`/`init -backend=false`/`validate` for
-both bootstrap roots, builds the infrastructure filegroups, runs the active
+the three bootstrap roots, builds the infrastructure filegroups, runs the active
 manifest invariant test, and renders both Kustomize roots with the repo-pinned
 kubectl artifact.
 
@@ -217,6 +219,30 @@ the checked-in R2 endpoint, bucket `guardian-vault`, and region `auto`; override
 them with `--endpoint`, `--bucket`, or `--region` when the backup bucket differs
 from the survival-floor bucket.
 
+Public DNS is a separate OpenTofu root:
+`src/infrastructure/bootstrap/guardian-mgmt-dns`. It manages Route53 records for
+`gi.org` and Cloudflare records for `guardianintelligence.org`. The DNS root
+does not duplicate node IPs; it reads
+`opentofu/guardian-mgmt.tfstate` through standard OpenTofu remote state and uses
+the `control_plane_nodes` output from the bare-metal topology root. This keeps
+public records aligned with the management-node state and avoids another custom
+inventory file.
+
+Use the DNS task to plan or apply records:
+
+```sh
+aspect infra dns-apply \
+  --mode plan
+
+aspect infra dns-apply \
+  --mode apply
+```
+
+The task initializes the standard R2-backed state for
+`guardian-mgmt-dns`, passes `src/infrastructure/bootstrap/backend.tfvars` as a
+normal OpenTofu var-file, and then runs `tofu plan` or `tofu apply
+-auto-approve`. DNS credentials stay in standard provider environment variables.
+
 The minimal host-come-up CLI delegates to the same task:
 
 ```sh
@@ -264,6 +290,16 @@ bazelisk run @opentofu_linux_amd64//:tofu_bin -- \
 
 bazelisk run @opentofu_linux_amd64//:tofu_bin -- \
   -chdir="$PWD/src/infrastructure/bootstrap/guardian-mgmt-openbao" validate
+
+bazelisk run @opentofu_linux_amd64//:tofu_bin -- \
+  -chdir="$PWD/src/infrastructure/bootstrap/guardian-mgmt-dns" fmt -check
+
+bazelisk run @opentofu_linux_amd64//:tofu_bin -- \
+  -chdir="$PWD/src/infrastructure/bootstrap/guardian-mgmt-dns" \
+  init -backend=false -input=false -reconfigure
+
+bazelisk run @opentofu_linux_amd64//:tofu_bin -- \
+  -chdir="$PWD/src/infrastructure/bootstrap/guardian-mgmt-dns" validate
 ```
 
 Live planning requires:
@@ -274,6 +310,10 @@ Live planning requires:
 - The checked-in Cloudflare account id in
   `src/infrastructure/bootstrap/backend.tfvars`, unless intentionally overriding
   the derived endpoint with `AWS_ENDPOINT_URL_S3` or a task flag.
+- AWS Route53 credentials allowed to manage `gi.org` records, before running
+  `aspect infra dns-apply`.
+- A Cloudflare API token allowed to read the `guardianintelligence.org` zone and
+  edit DNS records, before running `aspect infra dns-apply`.
 - A healthy, initialized/unsealed OpenBao app and its cluster-local
   `openbao-guardian-bootstrap` Secret when applying
   `src/infrastructure/bootstrap/guardian-mgmt-openbao` through
@@ -297,6 +337,9 @@ aspect infra openbao-apply \
 aspect infra openbao-backup-secrets \
   --dry-run true \
   --revision "<merged-main-commit-sha>"
+
+aspect infra dns-apply \
+  --mode plan
 ```
 
 The checked-in import blocks adopt the known Virtual Network and three servers.
