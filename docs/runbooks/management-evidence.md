@@ -161,7 +161,8 @@ The opt-in evidence overlay provides:
   `kv/` KV v2 mount exists, then perform 25 token-authenticated write/read
   checks under `kv/guardian/evidence/openbao`;
 - `Job/tenant-root/evidence-http-load`: repeated HTTPS requests against
-  prod/dev/gamma company-site routes, Harbor health, and the dashboard host;
+  prod/dev/gamma company-site routes, Harbor health, and the dashboard host,
+  emitting one `http-target` summary per URL;
 - `Job/tenant-root/evidence-storage-smoke`: seed/verify a retained replicated
   PVC using deterministic checksums.
 
@@ -235,8 +236,9 @@ component reports for the live run.
 plus `verification.tsv` next to the raw outputs. For `--mode evidence`, it
 checks the command-status summary, API VIP load summary, required app CRs,
 tenant company-site resources, ingress hosts, evidence Job completions, stable
-load-test log summaries, and BackupJob/RestoreJob success markers. Treat this
-as report input, not as a substitute for reviewing the raw evidence.
+load-test log summaries, per-target HTTP summaries, and BackupJob/RestoreJob
+success markers. Treat this as report input, not as a substitute for reviewing
+the raw evidence.
 
 `evidence-run` runs the expanded load/DR sequence in
 order and attempts `evidence-capture` even when an earlier wait/log/snapshot

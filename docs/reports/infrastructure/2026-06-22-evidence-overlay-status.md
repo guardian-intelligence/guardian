@@ -26,7 +26,8 @@ have passed.
   `kv/` KV v2 mount exists, then performs 25 token-authenticated write/read
   checks under `kv/guardian/evidence/openbao`.
 - `Job/tenant-root/evidence-http-load` runs repeated HTTPS checks against the
-  prod/dev/gamma company-site routes, Harbor health, and dashboard host.
+  prod/dev/gamma company-site routes, Harbor health, and dashboard host, then
+  writes one `http-target` summary line per URL.
 - `PersistentVolumeClaim/tenant-root/evidence-replicated-retain` plus
   `Job/tenant-root/evidence-storage-smoke` seed and verify checksummed data on
   the default retained replicated storage path.

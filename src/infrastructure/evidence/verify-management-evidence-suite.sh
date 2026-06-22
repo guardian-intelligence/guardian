@@ -243,6 +243,23 @@ verify_evidence_package() {
     load:harbor \
     load:openbao \
     load:http \
+    load:http:company-prod-root \
+    load:http:company-prod-letters \
+    load:http:company-prod-news \
+    load:http:company-prod-healthz \
+    load:http:company-prod-metrics \
+    load:http:company-dev-root \
+    load:http:company-dev-letters \
+    load:http:company-dev-news \
+    load:http:company-dev-healthz \
+    load:http:company-dev-metrics \
+    load:http:company-gamma-root \
+    load:http:company-gamma-letters \
+    load:http:company-gamma-news \
+    load:http:company-gamma-healthz \
+    load:http:company-gamma-metrics \
+    load:http:harbor-health \
+    load:http:dashboard-root \
     load:storage \
     dr:postgres-backupjob \
     dr:clickhouse-backupjob \

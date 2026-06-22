@@ -151,7 +151,27 @@ printf '%s\n' 'postgres-load run_id=test workers=4 rows_per_worker=250 expected=
 printf '%s\n' 'clickhouse-load run_id=test workers=4 rows_per_worker=250 expected=1000 actual=1000 cluster_rows=3' >"${run_dir}/evidence/logs-evidence-clickhouse-load.txt"
 printf '%s\n' 'harbor-oci-read total=25 failures=0 repository=guardian/company-site digest=sha256:test' >"${run_dir}/evidence/logs-evidence-harbor-oci-read.txt"
 printf '%s\n' 'openbao-load total=25 failures=0 run_id=test' >"${run_dir}/evidence/logs-evidence-openbao-load.txt"
-printf '%s\n' 'http-load total=1700 failures=0' >"${run_dir}/evidence/logs-evidence-http-load.txt"
+{
+  printf '%s\n' \
+    'http-target label=company-prod-root url=https://guardianintelligence.org/ total=100 failures=0' \
+    'http-target label=company-prod-letters url=https://guardianintelligence.org/letters/ total=100 failures=0' \
+    'http-target label=company-prod-news url=https://guardianintelligence.org/news/ total=100 failures=0' \
+    'http-target label=company-prod-healthz url=https://guardianintelligence.org/healthz total=100 failures=0' \
+    'http-target label=company-prod-metrics url=https://guardianintelligence.org/metrics total=100 failures=0' \
+    'http-target label=company-dev-root url=https://dev.guardianintelligence.org/ total=100 failures=0' \
+    'http-target label=company-dev-letters url=https://dev.guardianintelligence.org/letters/ total=100 failures=0' \
+    'http-target label=company-dev-news url=https://dev.guardianintelligence.org/news/ total=100 failures=0' \
+    'http-target label=company-dev-healthz url=https://dev.guardianintelligence.org/healthz total=100 failures=0' \
+    'http-target label=company-dev-metrics url=https://dev.guardianintelligence.org/metrics total=100 failures=0' \
+    'http-target label=company-gamma-root url=https://gamma.guardianintelligence.org/ total=100 failures=0' \
+    'http-target label=company-gamma-letters url=https://gamma.guardianintelligence.org/letters/ total=100 failures=0' \
+    'http-target label=company-gamma-news url=https://gamma.guardianintelligence.org/news/ total=100 failures=0' \
+    'http-target label=company-gamma-healthz url=https://gamma.guardianintelligence.org/healthz total=100 failures=0' \
+    'http-target label=company-gamma-metrics url=https://gamma.guardianintelligence.org/metrics total=100 failures=0' \
+    'http-target label=harbor-health url=https://oci.guardianintelligence.org/api/v2.0/health total=100 failures=0' \
+    'http-target label=dashboard-root url=https://dashboard.guardianintelligence.org/ total=100 failures=0' \
+    'http-load total=1700 failures=0'
+} >"${run_dir}/evidence/logs-evidence-http-load.txt"
 printf '%s\n' 'storage-smoke files=64 marker=/data/.guardian-evidence.sha256' >"${run_dir}/evidence/logs-evidence-storage-smoke.txt"
 
 bash "${script}" --run-dir "${run_dir}" --mode evidence --require-talos

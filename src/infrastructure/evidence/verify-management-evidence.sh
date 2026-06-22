@@ -363,6 +363,26 @@ verify_evidence() {
   grep_file "evidence/logs-evidence-harbor-oci-read.txt" "harbor-oci-read total=25 failures=0" "load:harbor"
   grep_file "evidence/logs-evidence-openbao-load.txt" "openbao-load total=25 failures=0" "load:openbao"
   grep_file "evidence/logs-evidence-http-load.txt" "http-load total=1700 failures=0" "load:http"
+  for label in \
+    company-prod-root \
+    company-prod-letters \
+    company-prod-news \
+    company-prod-healthz \
+    company-prod-metrics \
+    company-dev-root \
+    company-dev-letters \
+    company-dev-news \
+    company-dev-healthz \
+    company-dev-metrics \
+    company-gamma-root \
+    company-gamma-letters \
+    company-gamma-news \
+    company-gamma-healthz \
+    company-gamma-metrics \
+    harbor-health \
+    dashboard-root; do
+    grep_file "evidence/logs-evidence-http-load.txt" "http-target label=${label} .* total=100 failures=0" "load:http:${label}"
+  done
   grep_file "evidence/logs-evidence-storage-smoke.txt" "storage-smoke files=64" "load:storage"
 
   grep_file "evidence/backupjobs.yaml" "name: evidence-postgres-adhoc" "dr:postgres-backupjob"

@@ -29,6 +29,8 @@
   `aspect infra evidence-logs`.
 - Inputs: `/`, `/letters/`, `/news/`, `/healthz`, and `/metrics` on prod, dev,
   and gamma hosts.
+- Verifier checks:
+  `load:http:company-{prod,dev,gamma}-{root,letters,news,healthz,metrics}`.
 - Pass criteria: HTTP evidence job reports zero failures and all three
   deployments stay Ready.
 - Result: pending.

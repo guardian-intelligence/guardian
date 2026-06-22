@@ -10,39 +10,42 @@ data:
     set -eu
 
     requests="${REQUESTS:-100}"
-    urls="
-    https://guardianintelligence.org/
-    https://guardianintelligence.org/letters/
-    https://guardianintelligence.org/news/
-    https://guardianintelligence.org/healthz
-    https://guardianintelligence.org/metrics
-    https://dev.guardianintelligence.org/
-    https://dev.guardianintelligence.org/letters/
-    https://dev.guardianintelligence.org/news/
-    https://dev.guardianintelligence.org/healthz
-    https://dev.guardianintelligence.org/metrics
-    https://gamma.guardianintelligence.org/
-    https://gamma.guardianintelligence.org/letters/
-    https://gamma.guardianintelligence.org/news/
-    https://gamma.guardianintelligence.org/healthz
-    https://gamma.guardianintelligence.org/metrics
-    https://oci.guardianintelligence.org/api/v2.0/health
-    https://dashboard.guardianintelligence.org/
-    "
-
     failures=0
     total=0
-    for url in ${urls}; do
+
+    while read -r label url; do
+      [ -n "${label}" ] || continue
       i=1
+      target_failures=0
       while [ "${i}" -le "${requests}" ]; do
         total=$((total + 1))
         if ! curl -fsSL --connect-timeout 5 --max-time 20 --retry 2 --output /dev/null "${url}"; then
-          echo "request failed url=${url} iteration=${i}" >&2
+          echo "request failed label=${label} url=${url} iteration=${i}" >&2
           failures=$((failures + 1))
+          target_failures=$((target_failures + 1))
         fi
         i=$((i + 1))
       done
-    done
+      echo "http-target label=${label} url=${url} total=${requests} failures=${target_failures}"
+    done <<'TARGETS'
+    company-prod-root https://guardianintelligence.org/
+    company-prod-letters https://guardianintelligence.org/letters/
+    company-prod-news https://guardianintelligence.org/news/
+    company-prod-healthz https://guardianintelligence.org/healthz
+    company-prod-metrics https://guardianintelligence.org/metrics
+    company-dev-root https://dev.guardianintelligence.org/
+    company-dev-letters https://dev.guardianintelligence.org/letters/
+    company-dev-news https://dev.guardianintelligence.org/news/
+    company-dev-healthz https://dev.guardianintelligence.org/healthz
+    company-dev-metrics https://dev.guardianintelligence.org/metrics
+    company-gamma-root https://gamma.guardianintelligence.org/
+    company-gamma-letters https://gamma.guardianintelligence.org/letters/
+    company-gamma-news https://gamma.guardianintelligence.org/news/
+    company-gamma-healthz https://gamma.guardianintelligence.org/healthz
+    company-gamma-metrics https://gamma.guardianintelligence.org/metrics
+    harbor-health https://oci.guardianintelligence.org/api/v2.0/health
+    dashboard-root https://dashboard.guardianintelligence.org/
+    TARGETS
 
     echo "http-load total=${total} failures=${failures}"
     test "${failures}" -eq 0

@@ -23,6 +23,7 @@
 - Command: `aspect infra evidence-apply`, `aspect infra evidence-wait`, then
   `aspect infra evidence-logs`.
 - Inputs: `https://dashboard.guardianintelligence.org/`.
+- Verifier check: `load:http:dashboard-root`.
 - Pass criteria: HTTP requests succeed or return the expected auth redirect
   without TLS errors.
 - Result: pending.
