@@ -140,7 +140,20 @@ manifests.
 If `aspect infra live` fails before node discovery with an x509 verification
 error, treat the local kubeconfig/Talos operator state as stale. Refresh the
 operator credentials from the current cluster state before rerunning the live
-gate; do not use insecure TLS flags for source-controller validation.
+gate:
+
+```sh
+aspect infra kubeconfig
+export GUARDIAN_MGMT_KUBECONFIG="$PWD/src/infrastructure/talm/kubeconfig"
+```
+
+`aspect infra kubeconfig` runs repo-pinned `talm talosconfig` first so expired
+Talos client certificates are regenerated from the gitignored local Talm
+secrets, then runs repo-pinned `talm kubeconfig --merge=false --force` against
+the VLAN VIP and writes `src/infrastructure/talm/kubeconfig`. If the Talos CA
+itself was rotated and the local Talm secrets are stale, restore or regenerate
+the operator state through the bootstrap path instead. Do not use insecure TLS
+flags for source-controller validation.
 
 Local validation does not require backend credentials:
 

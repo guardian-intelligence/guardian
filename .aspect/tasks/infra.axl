@@ -5,6 +5,7 @@ load(".aspect/lib/helpers.axl", "checked_spawn", "ws_path")
 GUARDIAN_MGMT_ROOT = "src/infrastructure/bootstrap/guardian-mgmt"
 GUARDIAN_MGMT_OPENBAO_ROOT = "src/infrastructure/bootstrap/guardian-mgmt-openbao"
 TOFU_TARGET = "@opentofu_linux_amd64//:tofu_bin"
+TALM_TARGET = "@talm_linux_amd64//:talm"
 KUBECTL_FILE_TARGET = "@kubectl_linux_amd64//file:file"
 EXCLUDED_KUBE_APIS = [
     # AGENTS.md marks this as Verself prod. It is not guardian-mgmt and must not
@@ -238,7 +239,8 @@ def _write_kube_auth_hint(ctx, stderr):
         return
     ctx.std.io.stderr.write(
         "ERROR: Kubernetes rejected the local cluster credentials. Refresh the "
-        + "guardian-mgmt kubeconfig/Talos operator state from the current cluster; "
+        + "guardian-mgmt kubeconfig/Talos operator state from the current cluster "
+        + "with `aspect infra kubeconfig` when the local Talm state is current; "
         + "do not use insecure TLS flags for source-controller validation.\n",
     )
 
@@ -480,6 +482,59 @@ def _topology_impl(ctx):
         "tofu output -json guardian-mgmt",
     )
 
+def _kubeconfig_impl(ctx):
+    root = ws_path(ctx, ctx.args.root)
+    talosconfig = ctx.args.talosconfig
+    if talosconfig == "":
+        talosconfig = root + "/talosconfig"
+
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        [
+            "run",
+            TALM_TARGET,
+            "--",
+            "talosconfig",
+            "--root",
+            root,
+            "--talosconfig",
+            talosconfig,
+        ],
+        cwd = root,
+        label = "talm talosconfig guardian-mgmt",
+    )
+    if rc != 0:
+        return rc
+
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        [
+            "run",
+            TALM_TARGET,
+            "--",
+            "kubeconfig",
+            "--root",
+            root,
+            "--talosconfig",
+            talosconfig,
+            "--nodes",
+            ctx.args.nodes,
+            "--endpoints",
+            ctx.args.endpoints,
+            "--merge=false",
+            "--force",
+        ],
+        cwd = root,
+        label = "talm kubeconfig guardian-mgmt",
+    )
+    if rc != 0:
+        return rc
+
+    ctx.std.io.stderr.write("wrote guardian-mgmt kubeconfig to " + root + "/kubeconfig\n")
+    return 0
+
 def _live_impl(ctx):
     revision = _expected_revision(ctx)
     if revision == None:
@@ -540,6 +595,19 @@ topology = task(
     summary = "Print guardian-mgmt OpenTofu outputs as JSON for bootstrap and automation consumers.",
     args = {
         "name": args.string(default = "", description = "Optional OpenTofu output name, such as management_vlan or control_plane_nodes."),
+    },
+)
+
+kubeconfig = task(
+    implementation = _kubeconfig_impl,
+    name = "kubeconfig",
+    group = ["infra"],
+    summary = "Refresh the gitignored guardian-mgmt kubeconfig from the repo-pinned Talm state.",
+    args = {
+        "endpoints": args.string(default = "10.8.0.250", description = "Talos API endpoint used to fetch kubeconfig."),
+        "nodes": args.string(default = "10.8.0.11,10.8.0.12,10.8.0.13", description = "Talos nodes used to fetch kubeconfig."),
+        "root": args.string(default = "src/infrastructure/talm", description = "Talm root containing gitignored secrets.yaml and talosconfig."),
+        "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
     },
 )
 
