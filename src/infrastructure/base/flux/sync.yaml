@@ -1,8 +1,8 @@
 # GitOps entrypoint for the guardian-mgmt cluster.
 #
 # Cozystack already runs Flux in-cluster (cozy-fluxcd). These objects make Flux
-# reconcile the management-cluster substrate and the tenant app layer, turning
-# the by-hand bring-up into a control loop.
+# reconcile the management-cluster substrate in ordered slices, turning the
+# by-hand bring-up into a control loop.
 #
 # Bootstrap: `kubectl apply -f src/infrastructure/base/flux/sync.yaml` once. The
 # Kustomization then manages this file too (the path includes flux/), so further
@@ -22,6 +22,44 @@ spec:
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
+  name: guardian-mgmt-platform
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 2m
+  path: ./src/infrastructure/base/cozystack
+  sourceRef:
+    kind: GitRepository
+    name: guardian
+  # Apply-only. The Platform package fans out into Cozystack-owned packages and
+  # HelmReleases; the storage slice below retries until the Piraeus CRDs exist.
+  prune: false
+  wait: false
+  timeout: 5m
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: guardian-mgmt-storage
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 30s
+  path: ./src/infrastructure/base/storage
+  sourceRef:
+    kind: GitRepository
+    name: guardian
+  dependsOn:
+    - name: guardian-mgmt-platform
+  # Apply-only. The LINSTOR data-pool CRDs are created by the Platform package;
+  # Flux retry handles that CRD discovery race without a manual kubectl apply.
+  prune: false
+  wait: false
+  timeout: 5m
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
   name: guardian-mgmt-base
   namespace: cozy-fluxcd
 spec:
@@ -31,6 +69,9 @@ spec:
   sourceRef:
     kind: GitRepository
     name: guardian
+  dependsOn:
+    - name: guardian-mgmt-platform
+    - name: guardian-mgmt-storage
   # Conservative start: never delete. Flip to true once the inventory is
   # trusted — pruning the cozystack Package or storage classes would be
   # catastrophic, so we apply/update only until then.

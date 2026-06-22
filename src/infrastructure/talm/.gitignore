@@ -7,7 +7,7 @@ talosconfig.encrypted
 talm.key
 kubeconfig
 
-# Per-node machine configs are generated at rebuild (`talm template`) from the
-# templates + values here, then patched with the VLAN interface stanza. They
-# carry node-specific addresses and are not canonical source.
-nodes/
+# Per-node Talm patches are canonical source for host-specific, non-secret
+# facts such as disk serials, public endpoints, and VLAN addresses. Keep them
+# tracked so a clean checkout can exercise the management-cluster bootstrap path
+# without local inventory state.

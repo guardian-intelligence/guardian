@@ -275,10 +275,15 @@ The checked-in Talm chart sets:
 - cert SANs for the VIP and each public node IP
 - Talos image `ghcr.io/cozystack/cozystack/talos:v1.12.6`
 - Kubernetes `v1.34.3`
+- tracked per-node Talm patches under `src/infrastructure/talm/nodes/`, each
+  using Talos `machine.install.diskSelector.serial` for the system disk
 
-Generated Talm secrets, rendered node configs, kubeconfig, and local operator
-state must stay out of Git. `src/infrastructure/talm/.gitignore` excludes those
-paths.
+Generated Talm secrets, kubeconfig, and local operator state must stay out of
+Git. `src/infrastructure/talm/.gitignore` excludes those paths. The per-node
+Talm patches are intentionally checked in because they contain non-secret
+physical facts required for unattended rebuilds: stable install disk serials,
+public endpoints, and the VLAN address overlay. Do not replace install disk
+selectors with `/dev/nvme*`; NVMe names can swap across boots.
 
 The invariant test renders the checked-in control-plane template with the
 repo-pinned `talm` artifact and scratch secrets only. The current
@@ -298,17 +303,24 @@ once:
 kubectl apply -f src/infrastructure/base/flux/sync.yaml
 ```
 
-Flux first reconciles `src/infrastructure/base`, including the Platform package,
-root Postgres/Harbor/ClickHouse apps, the CNPG backup strategy and BackupClass,
-root CNPG backup credential projection, networking manifests, storage classes,
-environment tenants, OpenBao, and the Flux objects themselves. The base also
-declares a second Flux Kustomization,
-`guardian-mgmt-tenant-apps`, that depends on `guardian-mgmt-base` and reconciles
-`src/infrastructure/environments` after the Tenant chart has had a chance to
-create `tenant-dev`, `tenant-gamma`, and `tenant-prod`. The environment layer
-also declares each tenant's CNPG backup credential projection.
+Flux reconciles the management cluster in ordered slices:
 
-Both Flux Kustomizations are apply-only (`wait: false`). Cozystack app CRs fan
+- `guardian-mgmt-platform` reconciles `src/infrastructure/base/cozystack` and
+  applies the Cozystack Platform package.
+- `guardian-mgmt-storage` reconciles `src/infrastructure/base/storage` and
+  applies the LINSTOR-backed storage classes plus per-node data pools. This
+  slice depends on the platform slice and retries while Piraeus CRDs are still
+  coming up.
+- `guardian-mgmt-base` reconciles `src/infrastructure/base` after storage is
+  declared. It applies root Postgres/Harbor/ClickHouse apps, backup strategy
+  and BackupClass manifests, backup credential projections, networking
+  manifests, environment tenants, OpenBao, and the Flux objects themselves.
+- `guardian-mgmt-tenant-apps` reconciles `src/infrastructure/environments`
+  after `guardian-mgmt-base` has created `tenant-dev`, `tenant-gamma`, and
+  `tenant-prod`. The environment layer also declares each tenant's CNPG backup
+  credential projection.
+
+All Flux Kustomizations are apply-only (`wait: false`). Cozystack app CRs fan
 out into HelmReleases and stateful workloads; service readiness is proven by
 the Cozystack app resources' `Ready` and `WorkloadsReady` conditions plus the
 component-specific live drill output, not by treating Flux's apply status as
@@ -1070,7 +1082,9 @@ Expected results:
 - `ovn-default` and `join` report MTU `1362`
 - MetalLB has the `cozystack` pool, L2 advertisement, and
   `10.8.0.200-10.8.0.240` address range
-- Flux `guardian-mgmt-base` reconciles `src/infrastructure/base`, and
+- Flux `guardian-mgmt-platform` reconciles `src/infrastructure/base/cozystack`,
+  `guardian-mgmt-storage` reconciles `src/infrastructure/base/storage`,
+  `guardian-mgmt-base` reconciles `src/infrastructure/base`, and
   `guardian-mgmt-tenant-apps` reconciles `src/infrastructure/environments`
 - `Ingress/ingress`, `HelmRelease/ingress`, and nested
   `HelmRelease/ingress-nginx-system` are ready in `tenant-root`

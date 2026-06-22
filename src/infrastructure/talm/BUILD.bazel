@@ -8,6 +8,7 @@ filegroup(
         [
             "Chart.yaml",
             "values.yaml",
+            "nodes/*.yaml",
             "templates/**",
             "charts/**",
         ],
