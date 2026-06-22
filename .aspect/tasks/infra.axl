@@ -9,7 +9,9 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/bootstrap/guardian-mgmt:root",
     "//src/infrastructure/inventory:inventory",
     "//src/infrastructure/talm:chart",
+    "//src/infrastructure/base/apps:manifests",
     "//src/infrastructure/base/networking:manifests",
+    "//src/infrastructure/base/storage:manifests",
     "//src/infrastructure/base/tenants:manifests",
 ]
 

@@ -15,6 +15,7 @@ checks to run; it is not a separate source of truth.
 | Bare-metal state | `src/infrastructure/bootstrap/guardian-mgmt/*.tf` |
 | Talos/Talm chart | `src/infrastructure/talm/` |
 | Cozystack platform package | `src/infrastructure/base/cozystack/platform.yaml` |
+| Core Cozystack apps | `src/infrastructure/base/apps/core-services.yaml` |
 | MetalLB L2 pool | `src/infrastructure/base/networking/metallb.yaml` |
 | Kube-OVN MTU | `src/infrastructure/base/networking/subnet-mtu.yaml` |
 | Flux handoff | `src/infrastructure/base/flux/sync.yaml` |
@@ -44,6 +45,9 @@ Expected network shape:
 - Public ingress still uses the three public node IPs in the Cozystack platform
   package.
 - Kube-OVN subnet MTU is `1362`: `1420` VLAN path MTU minus `58` bytes of GENEVE.
+- The default StorageClass is `replicated`: three-way LINSTOR/DRBD on the
+  checked-in `data` pool. `local` and `local-retain` remain available only for
+  explicitly selected scratch or intentionally node-local state.
 
 ## Validate OpenTofu
 
@@ -124,8 +128,8 @@ kubectl apply -f src/infrastructure/base/flux/sync.yaml
 ```
 
 Flux then reconciles `src/infrastructure/base`, including the Platform package,
-networking manifests, storage classes, environment tenants, OpenBao, and the
-Flux objects themselves.
+root Postgres/Harbor/ClickHouse apps, networking manifests, storage classes,
+environment tenants, OpenBao, and the Flux objects themselves.
 
 For a direct render check from the repo-pinned kubectl artifact:
 
@@ -154,8 +158,27 @@ for now.
 Important source finding for the next app slice: Cozystack 1.4 `Postgres` and
 `Harbor` templates honor `spec.storageClass`, but the `ClickHouse` chart exposes
 `spec.storageClass` without rendering it into ClickHouse or keeper PVC
-templates. Do not mark ClickHouse storage placement complete until that upstream
-behavior is patched or explicitly accepted.
+templates. Because Guardian makes `replicated` the cluster default
+StorageClass, ClickHouse PVCs that omit `storageClassName` still land on the
+three-way DRBD class. Keep specifying `spec.storageClass: replicated` for
+operator intent, but treat actual placement as default-class driven until the
+upstream chart renders the field.
+
+The checked-in root app slice declares:
+
+- `Postgres/guardian` in `tenant-root`: CNPG-backed, three replicas, explicit
+  `storageClass: replicated`, synchronous commit quorum `1..2`.
+- `Harbor/guardian` in `tenant-root`: `harbor.guardianintelligence.org`, with
+  replicated storage for the registry database, Redis, Trivy, and chart-owned
+  PVCs.
+- `ClickHouse/guardian` in `tenant-root`: three ClickHouse replicas plus
+  three Keeper replicas. `spec.storageClass: replicated` records operator
+  intent, while the replicated default StorageClass is what places PVCs on
+  DRBD until the upstream chart renders that field.
+
+Backups are off in this first root app declaration. Enable them only by pointing
+the app specs at pre-existing Kubernetes Secrets delivered from the declared
+OpenBao/R2 secret path; never put S3 credentials directly in app specs.
 
 ## Live Checks
 
@@ -168,6 +191,7 @@ kubectl -n cozy-metallb get ipaddresspool,l2advertisement
 kubectl -n cozy-fluxcd get gitrepository,kustomization
 kubectl get storageclass
 kubectl -n tenant-root get tenants.apps.cozystack.io
+kubectl -n tenant-root get postgreses.apps.cozystack.io,harbors.apps.cozystack.io,clickhouses.apps.cozystack.io
 kubectl get ns tenant-dev tenant-gamma tenant-prod \
   -o custom-columns=NAME:.metadata.name,HOST:.metadata.labels.namespace\\.cozystack\\.io/host,INGRESS:.metadata.labels.namespace\\.cozystack\\.io/ingress
 kubectl -n tenant-root get openbao guardian
@@ -180,7 +204,9 @@ Expected results:
 - MetalLB has the `cozystack` pool and L2 advertisement
 - Flux `guardian-mgmt-base` reconciles `src/infrastructure/base`
 - storage classes include `local`, `local-retain`, `replicated`, and
-  `replicated-retain`
+  `replicated-retain`; `replicated` is the only default class
+- root app resources exist for `Postgres/guardian`, `Harbor/guardian`, and
+  `ClickHouse/guardian` in `tenant-root`
 - tenant namespaces exist for dev, gamma, and prod; their host labels are
   `dev.gi.org`, `gamma.gi.org`, and `prod.gi.org`, and their ingress label is
   `tenant-root`
@@ -204,10 +230,14 @@ separate PRs with their own validation:
 
 - Bootstrap CLI wrapper for the full Talm/Talos path.
 - Latitude VLAN assignment imports, once assignment IDs are collected.
-- Declarative CNPG/Postgres, Harbor, dashboard readiness, and company-site
-  surfaces for dev, gamma, and prod.
-- ClickHouse storage-class enforcement, because the Cozystack 1.4 chart exposes
-  `spec.storageClass` but does not render it into PVC templates.
+- Per-environment CNPG/Postgres, Harbor, ClickHouse, and company-site surfaces
+  for dev, gamma, and prod. The current app declaration is a root tenant
+  infrastructure slice only.
+- Dashboard readiness evidence beyond the Cozystack platform package exposure.
+- Backup specs for root Postgres/Harbor/ClickHouse, wired to declared
+  OpenBao/R2-projected Secrets.
+- ClickHouse chart-side `spec.storageClass` rendering, because Cozystack 1.4
+  still relies on the cluster default for ClickHouse and keeper PVCs.
 - OpenBao init/unseal automation and backup/restore drills.
 - Checked-in load-test, disaster-recovery, and single-node-outage reports for
   each new infrastructure component.
