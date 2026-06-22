@@ -10,6 +10,15 @@ EXCLUDED_KUBE_APIS = [
     # be used to validate source-controller deployment.
     "https://206.223.228.99:6443",
 ]
+EXPECTED_KUBE_APIS = [
+    # Mirrors src/infrastructure/inventory/guardian-mgmt.json. The VIP is the
+    # source-of-truth endpoint; public node APIs are accepted for off-VLAN
+    # operator validation when the kubeconfig CA is current.
+    "https://10.8.0.250:6443",
+    "https://206.223.228.101:6443",
+    "https://45.250.254.119:6443",
+    "https://206.223.228.87:6443",
+]
 INFRA_FILEGROUPS = [
     "//src/infrastructure/bootstrap/guardian-mgmt:root",
     "//src/infrastructure/inventory:inventory",
@@ -205,6 +214,9 @@ def _check_live_context(ctx, kubectl):
         return 1
     if _contains(EXCLUDED_KUBE_APIS, server):
         ctx.std.io.stderr.write("ERROR: refusing to validate against excluded cluster API " + server + "\n")
+        return 1
+    if not _contains(EXPECTED_KUBE_APIS, server):
+        ctx.std.io.stderr.write("ERROR: kubeconfig points at " + server + "; expected guardian-mgmt API endpoint from src/infrastructure/inventory/guardian-mgmt.json\n")
         return 1
 
     nodes = _kubectl_capture(ctx, kubectl, ["get", "nodes", "-o", "name"], "kubectl get nodes")
