@@ -266,7 +266,9 @@ The platform package uses Cozystack's `isp-full` variant. In Cozystack 1.4,
 system packages. Guardian enables both through
 `bundles.enabledPackages` so later OpenBao-backed Secret projection and
 Velero-backed backup/restore evidence can reconcile without an out-of-band
-package install.
+package install. The live gate checks the Cozystack backup packages,
+controller deployments, RBAC bindings, and backup CRDs directly before it
+checks Guardian's reusable BackupClass resources.
 
 For a direct render check from the repo-pinned kubectl artifact:
 
@@ -507,6 +509,17 @@ kubectl get nodes -o wide
 kubectl get subnet ovn-default join -o custom-columns=NAME:.metadata.name,MTU:.spec.mtu
 kubectl -n cozy-metallb get ipaddresspool,l2advertisement
 kubectl -n cozy-fluxcd get gitrepository,kustomization
+kubectl get packages.cozystack.io cozystack.backup-controller cozystack.backupstrategy-controller
+kubectl -n cozy-backup-controller get helmrelease backup-controller backupstrategy-controller
+kubectl -n cozy-backup-controller get deployment backup-controller backupstrategy-controller
+kubectl -n cozy-backup-controller get serviceaccount backup-controller backupstrategy-controller
+kubectl get clusterrole backups.cozystack.io:core-controller backups.cozystack.io:strategy-controller
+kubectl get clusterrolebinding backups.cozystack.io:core-controller backups.cozystack.io:strategy-controller
+kubectl get crd backupclasses.backups.cozystack.io backupjobs.backups.cozystack.io backups.backups.cozystack.io plans.backups.cozystack.io restorejobs.backups.cozystack.io
+kubectl get crd jobs.strategy.backups.cozystack.io cnpgs.strategy.backups.cozystack.io altinities.strategy.backups.cozystack.io
+kubectl wait --for=condition=Ready packages.cozystack.io/cozystack.backup-controller packages.cozystack.io/cozystack.backupstrategy-controller
+kubectl -n cozy-backup-controller wait --for=condition=Ready helmrelease/backup-controller helmrelease/backupstrategy-controller
+kubectl -n cozy-backup-controller wait --for=condition=Available deployment/backup-controller deployment/backupstrategy-controller
 kubectl get storageclass
 kubectl -n tenant-root get tenants.apps.cozystack.io
 kubectl -n tenant-root get postgreses.apps.cozystack.io,harbors.apps.cozystack.io,clickhouses.apps.cozystack.io
@@ -602,6 +615,12 @@ Expected results:
 
 - all three nodes are Ready and use `10.8.0.0/24` for internal node addresses
 - `Package/cozystack.cozystack-platform` uses variant `isp-full`
+- `Package/cozystack.backup-controller` and
+  `Package/cozystack.backupstrategy-controller` report `Ready=True`, their
+  HelmReleases and deployments are ready in `cozy-backup-controller`, their
+  service accounts are bound to the expected cluster roles, and the core
+  `backups.cozystack.io` plus Guardian-used `strategy.backups.cozystack.io`
+  CRDs exist
 - `ovn-default` and `join` report MTU `1362`
 - MetalLB has the `cozystack` pool, L2 advertisement, and
   `10.8.0.200-10.8.0.240` address range
@@ -719,14 +738,14 @@ separate PRs with their own validation:
   Cozystack dashboard, and the company-site surfaces.
 - Postgres backup specs wired to declared OpenBao/R2-projected Secrets, plus
   live backup/restore drills for Postgres, Harbor, and ClickHouse. The package
-  prerequisites, reusable CNPG BackupClass, reusable ClickHouse Altinity
-  BackupClass, Postgres / ClickHouse credential SecretStores and
-  ExternalSecrets, OpenBao auth/policy configuration, ClickHouse app backup
-  Secret references, recurring ClickHouse backup Plans, and Harbor's COSI-backed
-  registry bucket resources are declared and live-gated. Applying the OpenBao
-  root, populating real kv values, Postgres object-store coordinates, ad-hoc
-  BackupJob smoke tests, Harbor registry restore validation, and live restore
-  drills still need separate PRs.
+  prerequisites, backup controller deployments/RBAC/CRDs, reusable CNPG
+  BackupClass, reusable ClickHouse Altinity BackupClass, Postgres / ClickHouse
+  credential SecretStores and ExternalSecrets, OpenBao auth/policy
+  configuration, ClickHouse app backup Secret references, recurring ClickHouse
+  backup Plans, and Harbor's COSI-backed registry bucket resources are declared
+  and live-gated. Applying the OpenBao root, populating real kv values, Postgres
+  object-store coordinates, ad-hoc BackupJob smoke tests, Harbor registry
+  restore validation, and live restore drills still need separate PRs.
 - ClickHouse chart-side `spec.storageClass` rendering, because Cozystack 1.4
   still relies on the cluster default for ClickHouse and keeper PVCs.
 - OpenBao init/unseal automation and backup/restore drills.
