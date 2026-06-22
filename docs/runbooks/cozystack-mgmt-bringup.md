@@ -519,14 +519,21 @@ kubectl get backupclasses.backups.cozystack.io guardian-clickhouse-altinity
 Expected results:
 
 - all three nodes are Ready and use `10.8.0.0/24` for internal node addresses
+- `Package/cozystack.cozystack-platform` uses variant `isp-full`
 - `ovn-default` and `join` report MTU `1362`
-- MetalLB has the `cozystack` pool and L2 advertisement
+- MetalLB has the `cozystack` pool, L2 advertisement, and
+  `10.8.0.200-10.8.0.240` address range
 - Flux `guardian-mgmt-base` reconciles `src/infrastructure/base`, and
   `guardian-mgmt-tenant-apps` reconciles `src/infrastructure/environments`
 - storage classes include `local`, `local-retain`, `replicated`, and
-  `replicated-retain`; `replicated` is the only default class
+  `replicated-retain`; `replicated` is the only default class and has LINSTOR
+  `autoPlace=3`
 - root app resources exist for `Postgres/guardian`, `Harbor/guardian`, and
-  `ClickHouse/guardian` in `tenant-root`
+  `ClickHouse/guardian` in `tenant-root`; Postgres is replicated three ways on
+  `replicated` storage with version `v18` and no external access, Harbor uses
+  the expected host and replicated storage, and ClickHouse uses the expected
+  backup Secret plus `Plan/guardian-clickhouse-daily` through
+  `BackupClass/guardian-clickhouse-altinity`
 - tenant namespaces exist for dev, gamma, and prod; their host labels are
   `dev.gi.org`, `gamma.gi.org`, and `prod.gi.org`, and their ingress label is
   `tenant-root`
@@ -539,8 +546,8 @@ Expected results:
 - each tenant namespace has the company-site `Deployment`, `Service`,
   `NetworkPolicy`, `PodDisruptionBudget`, and `Ingress`; the dev and gamma
   ingress hosts are `dev.gi.org` and `gamma.gi.org`, and prod is
-  `guardianintelligence.org`; each live company-site surface has pods placed on
-  three distinct Kubernetes nodes
+  `guardianintelligence.org`; each live company-site surface runs the declared
+  Harbor digest and has pods placed on three distinct Kubernetes nodes
 - OpenBao is deployed as the Cozystack-managed `guardian` app in `tenant-root`
 - `tenant-root` has the Cilium allow policies for OpenBao-to-API-server
   traffic and ESO-to-OpenBao traffic
