@@ -13,8 +13,9 @@ checks to run; it is not a separate source of truth.
 record for Latitude project/site, the management VLAN, and the three adopted
 control-plane servers. The manifest invariant test checks that OpenTofu imports,
 Talm values, Cozystack platform publishing, MetalLB, and Kube-OVN stay aligned
-with that HCL. Change the HCL and dependent manifests together; do not let
-topology drift through one-off edits.
+with that HCL, and that `outputs.tf` exposes the management VLAN and
+control-plane node map as standard OpenTofu outputs. Change the HCL and
+dependent manifests together; do not let topology drift through one-off edits.
 
 | Layer | File |
 | - | - |
@@ -47,6 +48,21 @@ Virtual Network `vlan_8mop5gkpP5jxv`, VID `2140`.
 
 The Kubernetes API endpoint is the Talos Layer2 VIP
 `https://10.8.0.250:6443`, pinned to `enp1s0f0.2140`.
+
+The checked-in OpenTofu root also exposes this topology through standard
+outputs. Use those outputs as the machine-readable interface for scripts,
+Aspect tasks, and future bootstrap CLI code; do not add a parallel inventory
+file for the same node/IP/VLAN facts.
+
+```sh
+bazelisk run @opentofu_linux_amd64//:tofu_bin -- \
+  -chdir="$PWD/src/infrastructure/bootstrap/guardian-mgmt" \
+  output -json management_vlan
+
+bazelisk run @opentofu_linux_amd64//:tofu_bin -- \
+  -chdir="$PWD/src/infrastructure/bootstrap/guardian-mgmt" \
+  output -json control_plane_nodes
+```
 
 Expected network shape:
 
