@@ -219,6 +219,31 @@ func queries() []query {
 			validate: validateOpenBao,
 		},
 		{
+			name:     "backup-system",
+			args:     []string{"get", "packages.cozystack.io", "-o", "json"},
+			validate: validateBackupSystem,
+		},
+		{
+			name:     "backup-classes",
+			args:     []string{"get", "backupclasses.backups.cozystack.io", "-o", "json"},
+			validate: validateBackupClasses,
+		},
+		{
+			name:     "backup-plans",
+			args:     []string{"get", "plans.backups.cozystack.io", "-A", "-o", "json"},
+			validate: validateBackupPlans,
+		},
+		{
+			name:     "backup-jobs",
+			args:     []string{"get", "backupjobs.backups.cozystack.io", "-A", "-o", "json"},
+			validate: validateBackupJobs,
+		},
+		{
+			name:     "backup-restores",
+			args:     []string{"get", "backups.backups.cozystack.io,restorejobs.backups.cozystack.io", "-A", "-o", "json"},
+			validate: validateBackupRestores,
+		},
+		{
 			name:     "company-site-dev",
 			args:     []string{"-n", "tenant-dev", "get", "deployment/company-site", "service/company-site", "ingress/company-site", "-o", "json"},
 			validate: validateCompanySite("dev", "tenant-dev", "dev.gi.org"),
@@ -395,6 +420,114 @@ func validateOpenBao(objects []object) []check {
 	}
 }
 
+func validateBackupSystem(objects []object) []check {
+	byKindName := byKindName(objects)
+	checks := []check{}
+	for _, name := range []string{
+		"cozystack.backup-controller",
+		"cozystack.backupstrategy-controller",
+		"cozystack.velero",
+	} {
+		obj := byKindName["Package/"+name]
+		checkName := "backup.system." + strings.TrimPrefix(name, "cozystack.")
+		checks = append(checks, passFail(checkName+".exists", obj != nil, "present", "missing"))
+		if obj != nil {
+			checks = append(checks, passFail(checkName+".ready", hasCondition(obj, "Ready", "True"), "Ready=True", "Ready condition not True"))
+		}
+	}
+	return checks
+}
+
+func validateBackupClasses(objects []object) []check {
+	checks := []check{}
+	for _, kind := range backupKinds() {
+		found := false
+		for _, obj := range objects {
+			for _, strategy := range backupClassStrategies(obj) {
+				if stringAt(strategy, "application", "kind") == kind &&
+					stringAt(strategy, "strategyRef", "kind") != "" &&
+					stringAt(strategy, "strategyRef", "name") != "" {
+					found = true
+				}
+			}
+		}
+		checks = append(checks, passFail("backup.classes."+strings.ToLower(kind), found, "mapped to strategy", "missing BackupClass strategy mapping"))
+	}
+	return checks
+}
+
+func validateBackupPlans(objects []object) []check {
+	checks := []check{}
+	for _, target := range backupTargets() {
+		plan := findBackupPlan(objects, target)
+		prefix := backupCheckPrefix("backup.plans", target)
+		checks = append(checks, passFail(prefix+".exists", plan != nil, "present", "missing"))
+		if plan != nil {
+			checks = append(checks,
+				passFail(prefix+".backupclass", stringAt(plan, "spec", "backupClassName") != "", "backupClassName="+stringAt(plan, "spec", "backupClassName"), "backupClassName empty"),
+				passFail(prefix+".schedule", stringAt(plan, "spec", "schedule", "cron") != "", "cron="+stringAt(plan, "spec", "schedule", "cron"), "cron empty"),
+			)
+		}
+	}
+	return checks
+}
+
+func validateBackupJobs(objects []object) []check {
+	checks := []check{}
+	for _, target := range backupTargets() {
+		checks = append(checks, passFail(
+			backupCheckPrefix("backup.jobs", target)+".succeeded",
+			hasSucceededBackupJob(objects, target),
+			"Succeeded backup job present",
+			"no Succeeded BackupJob found",
+		))
+	}
+	return checks
+}
+
+func validateBackupRestores(objects []object) []check {
+	backups := map[string]backupTarget{}
+	restoreTargets := map[backupTarget]bool{}
+	for _, obj := range objects {
+		switch kindOf(obj) {
+		case "Backup":
+			target := backupTarget{
+				namespace: namespaceOf(obj),
+				kind:      stringAt(obj, "spec", "applicationRef", "kind"),
+				name:      stringAt(obj, "spec", "applicationRef", "name"),
+			}
+			backups[namespaceOf(obj)+"/"+nameOf(obj)] = target
+		case "RestoreJob":
+			if stringAt(obj, "status", "phase") != "Succeeded" {
+				continue
+			}
+			target := restoreTarget(obj, backups)
+			if target.kind != "" && target.name != "" {
+				restoreTargets[target] = true
+			}
+		}
+	}
+
+	checks := []check{}
+	for _, target := range backupTargets() {
+		checks = append(checks,
+			passFail(
+				backupCheckPrefix("backup.artifacts", target)+".exists",
+				hasBackupArtifact(backups, target),
+				"Backup artifact present",
+				"no Backup artifact found",
+			),
+			passFail(
+				backupCheckPrefix("backup.restores", target)+".succeeded",
+				restoreTargets[target],
+				"Succeeded restore job present",
+				"no Succeeded RestoreJob found",
+			),
+		)
+	}
+	return checks
+}
+
 func validateCompanySite(env, namespace, host string) func([]object) []check {
 	return func(objects []object) []check {
 		byKindName := byKindName(objects)
@@ -455,6 +588,95 @@ func ingressHasHost(obj object, host string) bool {
 		}
 	}
 	return false
+}
+
+type backupTarget struct {
+	namespace string
+	kind      string
+	name      string
+}
+
+func backupKinds() []string {
+	return []string{"Postgres", "ClickHouse"}
+}
+
+func backupTargets() []backupTarget {
+	targets := []backupTarget{}
+	for _, namespace := range []string{"tenant-root", "tenant-dev", "tenant-gamma", "tenant-prod"} {
+		for _, kind := range backupKinds() {
+			targets = append(targets, backupTarget{namespace: namespace, kind: kind, name: "guardian"})
+		}
+	}
+	return targets
+}
+
+func backupClassStrategies(obj object) []object {
+	raw, ok := valueAt(obj, "spec", "strategies").([]any)
+	if !ok {
+		return nil
+	}
+	strategies := make([]object, 0, len(raw))
+	for _, item := range raw {
+		strategy, ok := item.(map[string]any)
+		if ok {
+			strategies = append(strategies, object(strategy))
+		}
+	}
+	return strategies
+}
+
+func findBackupPlan(objects []object, target backupTarget) object {
+	for _, obj := range objects {
+		if kindOf(obj) != "Plan" || namespaceOf(obj) != target.namespace {
+			continue
+		}
+		if backupAppRefMatches(obj, target) {
+			return obj
+		}
+	}
+	return nil
+}
+
+func hasSucceededBackupJob(objects []object, target backupTarget) bool {
+	for _, obj := range objects {
+		if kindOf(obj) != "BackupJob" || namespaceOf(obj) != target.namespace {
+			continue
+		}
+		if stringAt(obj, "status", "phase") == "Succeeded" && backupAppRefMatches(obj, target) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasBackupArtifact(backups map[string]backupTarget, target backupTarget) bool {
+	for _, backup := range backups {
+		if backup == target {
+			return true
+		}
+	}
+	return false
+}
+
+func restoreTarget(obj object, backups map[string]backupTarget) backupTarget {
+	if stringAt(obj, "spec", "targetApplicationRef", "kind") != "" {
+		return backupTarget{
+			namespace: namespaceOf(obj),
+			kind:      stringAt(obj, "spec", "targetApplicationRef", "kind"),
+			name:      stringAt(obj, "spec", "targetApplicationRef", "name"),
+		}
+	}
+	return backups[namespaceOf(obj)+"/"+stringAt(obj, "spec", "backupRef", "name")]
+}
+
+func backupAppRefMatches(obj object, target backupTarget) bool {
+	return namespaceOf(obj) == target.namespace &&
+		stringAt(obj, "spec", "applicationRef", "kind") == target.kind &&
+		stringAt(obj, "spec", "applicationRef", "name") == target.name
+}
+
+func backupCheckPrefix(prefix string, target backupTarget) string {
+	return prefix + "." + strings.TrimPrefix(target.namespace, "tenant-") + "." + strings.ToLower(target.kind)
 }
 
 func byName(objects []object) map[string]object {
