@@ -1,9 +1,10 @@
 # Public artifact release
 
-Status: current runbook for the SDK lane, target runbook for later service
-images. The old workflow-owned public release bridge has been removed. Public
-vending is reintroduced as package-owned release tooling executed through
-`aspect`, with any GitHub YAML reduced to an executor shim.
+Status: target runbook, not an active operator procedure on `main`. The old
+workflow-owned public release bridge has been removed, and the stale
+`aspect release` tasks that pointed at archived package paths have also been
+removed. Public vending should be reintroduced as package-owned release tooling
+executed through `aspect`, with any GitHub YAML reduced to an executor shim.
 
 This lane runs after the fleet release gate. It should publish immutable
 artifacts, signatures, attestations, and release metadata for selected release
@@ -45,7 +46,8 @@ executed through `aspect`, which pushes
 `oci.guardianintelligence.org/guardian/aisucks/api@sha256:<digest>`, signs the
 digest, attaches DSSE/in-toto provenance, and then applies convenience tags.
 
-The SDK OCI subject is built and admitted through Aspect:
+The target SDK OCI subject is built and admitted through Aspect once the active
+SDK release command is restored:
 
 ```sh
 aspect release sdk-oci --output-dir /tmp/guardian-sdk-release
@@ -59,7 +61,7 @@ credential in OpenBao at `kv/guardian/<site>/oci/zot-publisher`; the site's
 `SecretProjection` owns the namespace-scoped ESO projection to the Kubernetes Secret
 `guardian-oci/zot-publisher`.
 
-When write credentials are present, the remote publish form is:
+When write credentials are present, the target remote publish form is:
 
 ```sh
 aspect release sdk-oci \
@@ -68,13 +70,14 @@ aspect release sdk-oci \
   --ref oci.guardianintelligence.org/guardian/aisucks/sdk/npm:edge
 ```
 
-`aspect release sdk-oci --publish` defaults to the ref above, the
-`guardian-release` OCI registry username, and `GUARDIAN_OCI_PASSWORD`.
-Publish mode signs the pushed SDK subject with cosign keyless signing, so it
-currently requires `GUARDIAN_OCI_USERNAME`/`GUARDIAN_OCI_PASSWORD` basic auth.
-Bearer-token OCI push works for unsigned pushes, but signed SDK publication
-rejects `GUARDIAN_OCI_ACCESS_TOKEN` until cosign token-stdin support is wired.
-npm publish authority comes from GitHub OIDC Trusted Publishing, not from
+The restored `aspect release sdk-oci --publish` task should default to the ref
+above, the `guardian-release` OCI registry username, and
+`GUARDIAN_OCI_PASSWORD`. Publish mode signs the pushed SDK subject with cosign
+keyless signing, so it currently requires
+`GUARDIAN_OCI_USERNAME`/`GUARDIAN_OCI_PASSWORD` basic auth. Bearer-token OCI
+push works for unsigned pushes, but signed SDK publication rejects
+`GUARDIAN_OCI_ACCESS_TOKEN` until cosign token-stdin support is wired. npm
+publish authority comes from GitHub OIDC Trusted Publishing, not from
 `NPM_TOKEN`.
 
 ## Required Setup
