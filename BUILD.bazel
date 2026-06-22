@@ -1,4 +1,5 @@
 exports_files([
+    ".bazelignore",
     "buf.yaml",
 ])
 
