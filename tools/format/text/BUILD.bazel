@@ -1,0 +1,9 @@
+genrule(
+    name = "format",
+    srcs = ["format.sh"],
+    outs = ["format-runner"],
+    cmd = "cp $(location format.sh) $@ && chmod +x $@",
+    executable = True,
+    tags = ["guardian-format"],
+    visibility = ["//visibility:public"],
+)
