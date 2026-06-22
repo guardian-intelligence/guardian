@@ -440,7 +440,7 @@ type portForward struct {
 }
 
 func startPortForward(ctx context.Context, cfg loadConfig, localPort int) (*portForward, error) {
-	args := kubectlArgs(cfg, "-n", "tenant-root", "port-forward", "svc/openbao-guardian", fmt.Sprintf("127.0.0.1:%d:8200", localPort))
+	args := openBaoPortForwardArgs(cfg, localPort)
 	cmd := exec.CommandContext(ctx, cfg.Kubectl, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -488,6 +488,10 @@ func startPortForward(ctx context.Context, cfg loadConfig, localPort int) (*port
 		_ = cmd.Process.Kill()
 		return nil, ctx.Err()
 	}
+}
+
+func openBaoPortForwardArgs(cfg loadConfig, localPort int) []string {
+	return kubectlArgs(cfg, "-n", "tenant-root", "port-forward", "--address", "127.0.0.1", "svc/openbao-guardian", fmt.Sprintf("%d:8200", localPort))
 }
 
 func drainOutput(done chan string) string {

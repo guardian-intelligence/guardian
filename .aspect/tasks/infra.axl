@@ -16,6 +16,7 @@ DB_LOAD_TARGET = "//src/infrastructure/cmd/cozystack_db_load:cozystack_db_load"
 HARBOR_REGISTRY_TARGET = "//src/infrastructure/cmd/cozystack_harbor_registry:cozystack_harbor_registry"
 HTTP_LOAD_TARGET = "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load"
 NODE_OUTAGE_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill"
+OPENBAO_APPLY_TARGET = "//src/infrastructure/cmd/cozystack_openbao_apply:cozystack_openbao_apply"
 OPENBAO_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill"
 COMPANY_SITE_PUBLISH_TARGET = "//src/infrastructure/cmd/cozystack_company_site_publish:cozystack_company_site_publish"
 GUARDIAN_MGMT_TALOS_NODES = [
@@ -160,6 +161,7 @@ INFRA_TESTS = [
     "//src/infrastructure/cmd/cozystack_harbor_registry:cozystack_harbor_registry_test",
     "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load_test",
     "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill_test",
+    "//src/infrastructure/cmd/cozystack_openbao_apply:cozystack_openbao_apply_test",
     "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill_test",
     "//src/infrastructure/tests:manifest_invariants_test",
 ]
@@ -793,6 +795,27 @@ def _talosctl_path(ctx):
     if output_base == None:
         return None
     return output_base + "/external/+http_file+talosctl_linux_amd64/file/talosctl"
+
+def _tofu_path(ctx):
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        ["build", TOFU_TARGET],
+        cwd = ws_path(ctx),
+        label = "bazelisk build " + TOFU_TARGET,
+    )
+    if rc != 0:
+        return None
+    output_path = _capture_stdout(
+        ctx,
+        "bazelisk",
+        ["cquery", TOFU_TARGET, "--output=files"],
+        cwd = ws_path(ctx),
+        label = "bazelisk cquery " + TOFU_TARGET + " --output=files",
+    )
+    if output_path == None:
+        return None
+    return ws_path(ctx, output_path)
 
 def _kubectl_args(ctx, args):
     return _kubectl_args_for(ctx, ctx.args.kubeconfig, args)
@@ -1619,6 +1642,63 @@ def _openbao_drill_impl(ctx):
         label = "cozystack openbao drill",
     )
 
+def _openbao_apply_impl(ctx):
+    kubectl = _kubectl_path(ctx)
+    if kubectl == None:
+        return 1
+    tofu = _tofu_path(ctx)
+    if tofu == None:
+        return 1
+
+    endpoint = _tofu_backend_endpoint(ctx, ctx.args.tofu_backend_endpoint)
+    if endpoint == None:
+        return 1
+
+    rc = _check_live_context(ctx, kubectl)
+    if rc != 0:
+        return rc
+    if ctx.args.revision != "":
+        rc = _check_flux_revision(ctx, kubectl, ctx.args.revision)
+        if rc != 0:
+            return rc
+
+    apply_args = [
+        "--kubectl",
+        kubectl,
+        "--tofu",
+        tofu,
+        "--namespace",
+        ctx.args.namespace,
+        "--statefulset",
+        ctx.args.statefulset,
+        "--service",
+        ctx.args.service,
+        "--bootstrap-secret",
+        ctx.args.bootstrap_secret,
+        "--root",
+        ws_path(ctx, GUARDIAN_MGMT_OPENBAO_ROOT),
+        "--backend-endpoint",
+        endpoint,
+        "--mode",
+        ctx.args.mode,
+        "--request-timeout",
+        ctx.args.request_timeout,
+        "--wait-timeout",
+        ctx.args.wait_timeout,
+        "--port-forward-ready-timeout",
+        ctx.args.port_forward_ready_timeout,
+    ]
+    if ctx.args.kubeconfig != "":
+        apply_args.extend(["--kubeconfig", ctx.args.kubeconfig])
+
+    return checked_spawn(
+        ctx,
+        "bazelisk",
+        ["run", OPENBAO_APPLY_TARGET, "--"] + apply_args,
+        cwd = ws_path(ctx),
+        label = "cozystack openbao apply",
+    )
+
 def _publish_company_site_impl(ctx):
     kubectl = _kubectl_path(ctx)
     if kubectl == None:
@@ -1686,6 +1766,26 @@ tofu_init = task(
     args = {
         "endpoint": args.string(default = "", description = "Optional S3-compatible backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
         "root": args.string(default = "all", description = "OpenTofu root to initialize: all, guardian-mgmt, or guardian-mgmt-openbao."),
+    },
+)
+
+openbao_apply = task(
+    implementation = _openbao_apply_impl,
+    name = "openbao-apply",
+    group = ["infra"],
+    summary = "Apply the guardian-mgmt OpenBao API OpenTofu root through a live OpenBao port-forward.",
+    args = {
+        "bootstrap_secret": args.string(default = "openbao-guardian-bootstrap", description = "Cluster-local Secret containing OpenBao root token material."),
+        "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
+        "mode": args.string(default = "apply", description = "OpenTofu operation: plan or apply."),
+        "namespace": args.string(default = "tenant-root", description = "OpenBao namespace."),
+        "port_forward_ready_timeout": args.string(default = "10s", description = "Timeout waiting for OpenBao port-forward readiness."),
+        "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
+        "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before OpenBao API configuration."),
+        "service": args.string(default = "openbao-guardian", description = "OpenBao Service name."),
+        "statefulset": args.string(default = "openbao-guardian", description = "OpenBao StatefulSet name."),
+        "tofu_backend_endpoint": args.string(default = "", description = "Optional S3-compatible OpenTofu backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
+        "wait_timeout": args.string(default = "5m", description = "Timeout for OpenBao StatefulSet readiness."),
     },
 )
 

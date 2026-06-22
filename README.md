@@ -33,6 +33,13 @@ aspect infra tofu-init
 aspect infra bootstrap \
   --revision "<merged-main-commit-sha>"
 
+aspect infra openbao-drill \
+  --mode init-unseal \
+  --revision "<merged-main-commit-sha>"
+
+aspect infra openbao-apply \
+  --revision "<merged-main-commit-sha>"
+
 bazelisk run //src/guardian/cmd/guardian -- \
   up management \
   --revision "<merged-main-commit-sha>"
@@ -44,6 +51,10 @@ or an explicit `AWS_ENDPOINT_URL_S3` override, prints the standard OpenTofu
 management topology outputs, validates the checked-in substrate, refreshes the
 gitignored Talm kubeconfig, runs the Talos L2 gate, and verifies live
 Flux/source-controller convergence on the requested merged `main` revision.
+`aspect infra openbao-drill --mode init-unseal` initializes/unseals the
+cluster-local OpenBao app, and `aspect infra openbao-apply` applies the standard
+OpenBao API state for External Secrets through a live port-forward. Backup
+secret values still come from OpenBao KV and are not stored in OpenTofu state.
 
 Generated Talm secrets, rendered node configs, kubeconfigs, and local operator
 state stay out of Git. See
