@@ -33,6 +33,9 @@ go_test(
         "//src/products/company/web:sources",
     ],
     deps = [
+        "@com_github_hashicorp_hcl_v2//:hcl",
+        "@com_github_hashicorp_hcl_v2//hclsyntax",
+        "@com_github_zclconf_go_cty//cty",
         "@rules_go//go/runfiles",
         "@in_gopkg_yaml_v3//:yaml_v3",
     ],

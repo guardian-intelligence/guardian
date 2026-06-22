@@ -66,6 +66,11 @@ go_sdk.download(version = "1.26.4")
 go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
 go_deps.from_file(go_mod = "//:go.mod")
 use_repo(go_deps, "in_gopkg_yaml_v3")
+use_repo(
+    go_deps,
+    "com_github_hashicorp_hcl_v2",
+    "com_github_zclconf_go_cty",
+)
 
 node = use_extension("@rules_nodejs//nodejs:extensions.bzl", "node")
 node.toolchain(node_version = "22.22.2")
