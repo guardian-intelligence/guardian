@@ -118,7 +118,10 @@ the declared Cozystack dashboard, app, networking, storage, OpenBao, backup,
 and company-site resources exist. For Cozystack apps, the live gate also waits
 on the aggregated app resources' standard conditions: `Ready` for tenant and
 service Helm reconciliation, and `WorkloadsReady` for monitored
-Postgres/Harbor/ClickHouse workloads.
+Postgres/Harbor/ClickHouse workloads. For the dev/gamma/prod company-site
+surfaces, it also checks that live pods are scheduled on three distinct
+Kubernetes nodes, matching the strict hostname topology spread declared in the
+manifests.
 
 If `aspect infra live` fails before node discovery with an x509 verification
 error, treat the local kubeconfig/Talos operator state as stale. Refresh the
@@ -500,7 +503,9 @@ Expected results:
   init/unseal is declared in the bootstrap path
 - each tenant namespace has the company-site `Deployment`, `Service`,
   `PodDisruptionBudget`, and `Ingress`; the dev and gamma ingress hosts are
-  `dev.gi.org` and `gamma.gi.org`, and prod is `guardianintelligence.org`
+  `dev.gi.org` and `gamma.gi.org`, and prod is `guardianintelligence.org`;
+  each live company-site surface has pods placed on three distinct Kubernetes
+  nodes
 - OpenBao is deployed as the Cozystack-managed `guardian` app in `tenant-root`
 - `tenant-root` has the Cilium allow policy for ESO-to-OpenBao traffic
 - root/dev/gamma/prod have `SecretStore/openbao` and

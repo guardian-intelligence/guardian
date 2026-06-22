@@ -140,6 +140,11 @@ LIVE_WAITS = [
     ("gamma company deployment", ["-n", "tenant-gamma", "wait", "--for=condition=Available", "deployment/company-site"]),
     ("prod company deployment", ["-n", "tenant-prod", "wait", "--for=condition=Available", "deployment/company-site"]),
 ]
+LIVE_COMPANY_SITE_SPREADS = [
+    ("dev company pod placement", "tenant-dev", "dev"),
+    ("gamma company pod placement", "tenant-gamma", "gamma"),
+    ("prod company pod placement", "tenant-prod", "prod"),
+]
 
 def _capture_stdout(ctx, program, args, cwd = None, label = None):
     label_str = label if label != None else program
@@ -251,6 +256,16 @@ def _contains(items, needle):
             return True
     return False
 
+def _unique_non_empty_lines(value):
+    out = []
+    for line in value.split("\n"):
+        item = line.strip()
+        if item == "":
+            continue
+        if not _contains(out, item):
+            out.append(item)
+    return out
+
 def _expected_revision(ctx):
     if ctx.args.revision == "":
         ctx.std.io.stderr.write("ERROR: --revision is required; pass the merged main commit SHA that source-controller must have applied\n")
@@ -311,6 +326,39 @@ def _check_flux_revision(ctx, kubectl, revision):
         rc = _assert_contains(ctx, value, revision, label)
         if rc != 0:
             return rc
+    return 0
+
+def _check_company_site_spread(ctx, kubectl):
+    for label, namespace, stage in LIVE_COMPANY_SITE_SPREADS:
+        node_names = _kubectl_capture(
+            ctx,
+            kubectl,
+            [
+                "-n",
+                namespace,
+                "get",
+                "pods",
+                "-l",
+                "app.kubernetes.io/name=company-site,guardian.dev/stage=" + stage,
+                "-o",
+                "jsonpath={range .items[*]}{.spec.nodeName}{\"\\n\"}{end}",
+            ],
+            "kubectl read " + label,
+        )
+        if node_names == None:
+            return 1
+        unique_nodes = _unique_non_empty_lines(node_names)
+        if len(unique_nodes) != 3:
+            ctx.std.io.stderr.write(
+                "ERROR: "
+                + label
+                + " is scheduled on "
+                + str(len(unique_nodes))
+                + " unique nodes, expected 3; nodes:\n"
+                + node_names
+                + "\n",
+            )
+            return 1
     return 0
 
 def _render_kustomizations(ctx):
@@ -396,6 +444,10 @@ def _live_impl(ctx):
         rc = _kubectl_success(ctx, kubectl, kubectl_args, "kubectl get " + label)
         if rc != 0:
             return rc
+
+    rc = _check_company_site_spread(ctx, kubectl)
+    if rc != 0:
+        return rc
 
     ctx.std.io.stderr.write("guardian-mgmt source-controller has reconciled " + revision + "\n")
     return 0
