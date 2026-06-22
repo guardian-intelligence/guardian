@@ -10,6 +10,7 @@ K6_FILE_TARGET = "@k6_linux_amd64//:k6"
 KUBECTL_FILE_TARGET = "@kubectl_linux_amd64//file:file"
 TALOSCTL_FILE_TARGET = "@talosctl_linux_amd64//file:file"
 BACKUP_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_backup_drill:cozystack_backup_drill"
+DB_LOAD_TARGET = "//src/infrastructure/cmd/cozystack_db_load:cozystack_db_load"
 HTTP_LOAD_TARGET = "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load"
 NODE_OUTAGE_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill"
 GUARDIAN_MGMT_TALOS_NODES = [
@@ -145,6 +146,7 @@ INFRA_FILEGROUPS = [
 ]
 INFRA_TESTS = [
     "//src/infrastructure/cmd/cozystack_backup_drill:cozystack_backup_drill_test",
+    "//src/infrastructure/cmd/cozystack_db_load:cozystack_db_load_test",
     "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load_test",
     "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill_test",
     "//src/infrastructure/tests:manifest_invariants_test",
@@ -1207,6 +1209,64 @@ def _load_http_impl(ctx):
         label = "cozystack http load",
     )
 
+def _load_db_impl(ctx):
+    kubectl = _kubectl_path(ctx)
+    if kubectl == None:
+        return 1
+
+    rc = _check_live_context(ctx, kubectl)
+    if rc != 0:
+        return rc
+    if ctx.args.revision != "":
+        rc = _check_flux_revision(ctx, kubectl, ctx.args.revision)
+        if rc != 0:
+            return rc
+
+    load_args = [
+        "--kubectl",
+        kubectl,
+        "--stage",
+        ctx.args.stage,
+        "--component",
+        ctx.args.component,
+        "--application",
+        ctx.args.application,
+        "--request-timeout",
+        ctx.args.request_timeout,
+        "--wait-timeout",
+        ctx.args.wait_timeout,
+        "--ttl-seconds-after-finished",
+        ctx.args.ttl_seconds_after_finished,
+        "--pgbench-scale",
+        ctx.args.pgbench_scale,
+        "--pgbench-clients",
+        ctx.args.pgbench_clients,
+        "--pgbench-jobs",
+        ctx.args.pgbench_jobs,
+        "--pgbench-duration-seconds",
+        ctx.args.pgbench_duration_seconds,
+        "--clickhouse-concurrency",
+        ctx.args.clickhouse_concurrency,
+        "--clickhouse-iterations",
+        ctx.args.clickhouse_iterations,
+        "--clickhouse-duration-seconds",
+        ctx.args.clickhouse_duration_seconds,
+        "--clickhouse-query",
+        ctx.args.clickhouse_query,
+    ]
+    if ctx.args.kubeconfig != "":
+        load_args.extend(["--kubeconfig", ctx.args.kubeconfig])
+    if ctx.args.name != "":
+        load_args.extend(["--name", ctx.args.name])
+
+    return checked_spawn(
+        ctx,
+        "bazelisk",
+        ["run", DB_LOAD_TARGET, "--"] + load_args,
+        cwd = ws_path(ctx),
+        label = "cozystack db load",
+    )
+
 validate = task(
     implementation = _validate_impl,
     name = "validate",
@@ -1281,6 +1341,32 @@ load_http = task(
         "surface": args.string(default = "company-site", description = "HTTP surface: company-site, harbor, dashboard, openbao, or custom with --url."),
         "url": args.string(default = "", description = "Explicit URL to load; overrides surface target mapping."),
         "vus": args.string(default = "1", description = "k6 virtual users."),
+    },
+)
+
+load_db = task(
+    implementation = _load_db_impl,
+    name = "load-db",
+    group = ["infra"],
+    summary = "Run a standard database-client load test against a Guardian Postgres or ClickHouse app.",
+    args = {
+        "application": args.string(default = "guardian", description = "Cozystack app name."),
+        "clickhouse_concurrency": args.string(default = "4", description = "clickhouse-benchmark concurrency."),
+        "clickhouse_duration_seconds": args.string(default = "60", description = "clickhouse-benchmark max duration in seconds."),
+        "clickhouse_iterations": args.string(default = "100", description = "clickhouse-benchmark iteration limit."),
+        "clickhouse_query": args.string(default = "SELECT sum(number) FROM numbers(1000000)", description = "clickhouse-benchmark query."),
+        "component": args.string(default = "postgres", description = "Database component: postgres or clickhouse."),
+        "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
+        "name": args.string(default = "", description = "Optional Kubernetes Job name. Defaults to a timestamped DNS label."),
+        "pgbench_clients": args.string(default = "4", description = "pgbench concurrent client count."),
+        "pgbench_duration_seconds": args.string(default = "60", description = "pgbench run duration in seconds."),
+        "pgbench_jobs": args.string(default = "2", description = "pgbench worker thread count."),
+        "pgbench_scale": args.string(default = "10", description = "pgbench initialization scale factor."),
+        "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
+        "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before the load test."),
+        "stage": args.string(default = "dev", description = "Guardian stage: root, dev, gamma, or prod."),
+        "ttl_seconds_after_finished": args.string(default = "86400", description = "Kubernetes Job ttlSecondsAfterFinished."),
+        "wait_timeout": args.string(default = "20m", description = "Timeout for load Job completion."),
     },
 )
 

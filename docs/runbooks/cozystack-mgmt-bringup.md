@@ -528,9 +528,57 @@ cluster, pass `--require-live=false --surface custom --url <url>`. Production
 load reports must keep `--require-live=true` and include the merged `--revision`.
 
 This HTTP task covers the company-site, Harbor registry API, Dashboard, and
-OpenBao health surfaces. Postgres/CNPG and ClickHouse database-path load should
-use standard database clients (`pgbench` and `clickhouse-benchmark`) in a later
-slice rather than forcing database traffic through an HTTP harness.
+OpenBao health surfaces. Postgres/CNPG and ClickHouse database-path load uses
+standard database clients through `aspect infra load-db`.
+
+## Database Load Drills
+
+Use `aspect infra load-db` for database-path load against Cozystack-managed
+Postgres and ClickHouse. The task builds repo-pinned `kubectl`, runs the same
+guardian-mgmt kubeconfig guard as `aspect infra live`, optionally verifies a
+merged Flux `--revision`, and creates one ad-hoc Kubernetes `Job` in the tenant
+namespace. The job is not part of steady desired state.
+
+The Postgres drill runs `pgbench` from the digest-pinned
+`ghcr.io/cloudnative-pg/postgresql:18.1` image, connects to
+`Service/postgres-guardian-rw`, creates a temporary database, initializes it
+with the requested scale, runs the benchmark, and drops the temporary database
+on exit. Credentials come from Cozystack's `postgres-guardian-superuser`
+Secret.
+
+```sh
+aspect infra load-db \
+  --kubeconfig "$GUARDIAN_MGMT_KUBECONFIG" \
+  --revision "$(git rev-parse HEAD)" \
+  --stage gamma \
+  --component postgres \
+  --pgbench-scale 10 \
+  --pgbench-clients 4 \
+  --pgbench-jobs 2 \
+  --pgbench-duration-seconds 120
+```
+
+The ClickHouse drill runs `clickhouse-benchmark` from the digest-pinned
+`clickhouse/clickhouse-server:24.9.2.42` image, connects to
+`Service/chendpoint-clickhouse-guardian`, and uses the Cozystack backup user's
+password from `Secret/clickhouse-guardian-credentials`.
+
+```sh
+aspect infra load-db \
+  --kubeconfig "$GUARDIAN_MGMT_KUBECONFIG" \
+  --revision "$(git rev-parse HEAD)" \
+  --stage gamma \
+  --component clickhouse \
+  --clickhouse-concurrency 4 \
+  --clickhouse-iterations 100 \
+  --clickhouse-duration-seconds 120 \
+  --clickhouse-query 'SELECT sum(number) FROM numbers(1000000)'
+```
+
+The report input is standard Kubernetes `Job` YAML, related pods, and pod logs
+containing the native `pgbench` or `clickhouse-benchmark` output. Do not wrap it
+in a Guardian-specific evidence format, and do not check one-shot load Jobs into
+Flux.
 
 ## Backup And Restore Drills
 
@@ -911,10 +959,12 @@ separate PRs with their own validation:
   capturing live readiness evidence for dev, gamma, and prod.
 - Live load-test reports for CNPG/Postgres, Harbor, ClickHouse, OpenBao, the
   Cozystack dashboard, and the company-site surfaces. `aspect infra load-http`
-  now provides the standard k6 path for HTTP-facing Harbor, OpenBao health,
-  dashboard, and company-site reports, but live reports still require current
-  guardian-mgmt credentials and Postgres/ClickHouse still need standard
-  database-client load tasks.
+  provides the standard k6 path for HTTP-facing Harbor, OpenBao health,
+  dashboard, and company-site reports. `aspect infra load-db` provides the
+  standard `pgbench` and `clickhouse-benchmark` path for Postgres/CNPG and
+  ClickHouse reports. Live reports still require current guardian-mgmt
+  credentials and successful source-controller convergence on the merged
+  revision.
 - Postgres backup specs wired to declared OpenBao/R2-projected Secrets, plus
   live backup/restore drills for Postgres, Harbor, and ClickHouse. The package
   prerequisites, backup controller deployments/RBAC/CRDs, reusable CNPG
