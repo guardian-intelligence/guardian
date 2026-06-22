@@ -43,9 +43,28 @@ when collecting reports.
 Once the management kubeconfig exists, apply and snapshot the declared platform:
 
 ```sh
+aspect infra management-converge-run \
+  --kubeconfig "${KUBECONFIG}" \
+  --talosconfig "${TALOSCONFIG}"
+```
+
+`management-converge-run` is the preferred live convergence command before
+collecting evidence. It runs provider-free preflight checks, applies
+`src/infrastructure/base`, seeds the R2 backup and OpenBao evidence Secret
+contracts from environment variables, reapplies the base after the Secret
+contracts exist, pushes the company-site OCI image to Harbor, checks
+dev/gamma/prod rollouts, checks Talos/etcd health, and prints a live snapshot.
+Use `--skip-secret-seed`, `--skip-publish`, or `--skip-preflight` only for a
+deliberate rerun where that prerequisite has already been handled.
+
+The equivalent expanded sequence is:
+
+```sh
 aspect infra apply-base --kubeconfig "${KUBECONFIG}"
 aspect infra seed-db-backup-secret --kubeconfig "${KUBECONFIG}"
 aspect infra seed-openbao-evidence-token --kubeconfig "${KUBECONFIG}"
+aspect infra apply-base --kubeconfig "${KUBECONFIG}"
+aspect infra publish-company-site
 aspect infra live-snapshot --kubeconfig "${KUBECONFIG}"
 aspect infra live-rollout --kubeconfig "${KUBECONFIG}"
 ```
@@ -85,8 +104,9 @@ kubectl. Secret values are written to kubectl stdin only.
 - Cozystack backup resources (`BackupClass`, `Plan`, `BackupJob`, `Backup`);
 - storage classes and PVC/PV state.
 
-Before the company-site Deployments can pull from Harbor, publish the digest
-built by the repo:
+Before the company-site Deployments can pull from Harbor, the digest built by
+the repo must be published. `management-converge-run` does this by default; the
+standalone command is:
 
 ```sh
 aspect infra publish-company-site

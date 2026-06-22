@@ -20,8 +20,10 @@ aspect infra inventory-check
 Live convergence and readiness:
 
 ```sh
+aspect infra management-converge-run --kubeconfig "${KUBECONFIG}" --talosconfig "${TALOSCONFIG}"
 aspect infra apply-base --kubeconfig "${KUBECONFIG}"
 aspect infra seed-db-backup-secret --kubeconfig "${KUBECONFIG}"
+aspect infra seed-openbao-evidence-token --kubeconfig "${KUBECONFIG}"
 aspect infra publish-company-site
 aspect infra live-snapshot --kubeconfig "${KUBECONFIG}"
 aspect infra live-rollout --kubeconfig "${KUBECONFIG}"
@@ -81,6 +83,11 @@ LATITUDESH_AUTH_TOKEN="${LATITUDESH_AUTH_TOKEN}" aspect infra hardware-outage-ru
   the Kubernetes Secret from environment variables through stdin.
 - OpenBao evidence token delivery now has a repo-owned Aspect task that applies
   the Kubernetes Secret from environment variables through stdin.
+- Management convergence now has a repo-owned `aspect infra
+  management-converge-run` task. It runs preflight, applies the base, seeds
+  required Secret contracts, republishes the base after secrets exist, pushes
+  the company-site image, checks rollouts, checks Talos/etcd health, and prints
+  a live snapshot.
 - Live evidence capture now has a repo-owned read-only Aspect task that writes
   Kubernetes, evidence Job, database restore, and Talos outputs under
   `docs/reports/infrastructure/live-runs/` for check-in with component reports.

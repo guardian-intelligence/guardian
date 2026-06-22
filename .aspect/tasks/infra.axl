@@ -543,6 +543,33 @@ def _management_evidence_run_impl(ctx):
         label = "run management evidence suite",
     )
 
+def _management_converge_run_impl(ctx):
+    steps = []
+    if not ctx.args.skip_preflight:
+        steps.append(["preflight", _preflight_impl])
+    steps.append(["apply-base", _apply_base_impl])
+    if not ctx.args.skip_secret_seed:
+        steps.append(["seed-db-backup-secret", _seed_db_backup_secret_impl])
+        steps.append(["seed-openbao-evidence-token", _seed_openbao_evidence_token_impl])
+        steps.append(["apply-base-after-secrets", _apply_base_impl])
+    if not ctx.args.skip_publish:
+        steps.append(["publish-company-site", _publish_company_site_impl])
+    steps.extend([
+        ["live-rollout", _live_rollout_impl],
+        ["talos-health", _talos_health_impl],
+        ["live-snapshot", _live_snapshot_impl],
+    ])
+
+    for pair in steps:
+        name = pair[0]
+        fn = pair[1]
+        ctx.std.io.stderr.write("running " + name + "\n")
+        rc = fn(ctx)
+        if rc != 0:
+            ctx.std.io.stderr.write("management-converge-run failed during " + name + "\n")
+            return rc
+    return 0
+
 def _publish_company_site_impl(ctx):
     return checked_spawn(
         ctx,
@@ -991,6 +1018,14 @@ _MANAGEMENT_EVIDENCE_RUN_ARGS.update({
     "timeout": args.string(default = "30m", description = "kubectl wait timeout for evidence jobs, BackupJobs, and RestoreJobs."),
 })
 
+_MANAGEMENT_CONVERGE_RUN_ARGS = dict(_KUBECTL_TIMEOUT_ARGS)
+_MANAGEMENT_CONVERGE_RUN_ARGS.update(_TALOS_LIVE_ARGS)
+_MANAGEMENT_CONVERGE_RUN_ARGS.update({
+    "skip_preflight": args.boolean(default = False, description = "Skip provider-free validation, build, and render checks."),
+    "skip_publish": args.boolean(default = False, description = "Skip pushing the company-site OCI image to Harbor."),
+    "skip_secret_seed": args.boolean(default = False, description = "Skip R2 backup and OpenBao evidence token Secret seeding."),
+})
+
 _EVIDENCE_RUN_ARGS = dict(_CAPTURE_EVIDENCE_ARGS)
 _EVIDENCE_RUN_ARGS.update({
     "delete_pvc": args.boolean(default = False, description = "Also delete the retained storage-smoke PVC and its checksum data before running evidence."),
@@ -1185,6 +1220,14 @@ management_evidence_run = task(
     group = ["infra"],
     summary = "Run load/DR evidence, all-node hardware outages, and suite verification into one report directory.",
     args = _MANAGEMENT_EVIDENCE_RUN_ARGS,
+)
+
+management_converge_run = task(
+    implementation = _management_converge_run_impl,
+    name = "management-converge-run",
+    group = ["infra"],
+    summary = "Apply base management infrastructure, seed bootstrap secrets, publish the site, and verify readiness.",
+    args = _MANAGEMENT_CONVERGE_RUN_ARGS,
 )
 
 publish_company_site = task(
