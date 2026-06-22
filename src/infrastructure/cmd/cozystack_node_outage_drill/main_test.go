@@ -62,6 +62,19 @@ func TestDrainArgsRespectPDBs(t *testing.T) {
 	}
 }
 
+func TestNodeReadyArgs(t *testing.T) {
+	got := nodeReadyArgs("ash-earth", "15m")
+	want := []string{"wait", "--for=condition=Ready", "node/ash-earth", "--timeout=15m"}
+	if len(got) != len(want) {
+		t.Fatalf("nodeReadyArgs length = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("nodeReadyArgs[%d] = %q, want %q: %#v", i, got[i], want, got)
+		}
+	}
+}
+
 func TestRecoveryWaitsCoverGuardianSurfaces(t *testing.T) {
 	got := recoveryWaits("ash-earth", "15m")
 	requireCheck(t, got, "wait target node Ready", "node/ash-earth", "--timeout=15m")
