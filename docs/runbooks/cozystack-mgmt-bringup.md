@@ -516,10 +516,12 @@ on an operator laptop or traffic-serving host.
 `aspect infra load-http` runs the same guardian-mgmt kubeconfig guard as
 `aspect infra live` by default. If `--revision` is provided, it also verifies
 that the live Flux source and Kustomizations have applied that merged commit
-before starting the load test. The task then runs the repo k6 script at
-`src/infrastructure/load/http-smoke.js` and prints k6's standard CLI summary.
-This is the report input; do not wrap it in a Guardian-specific evidence
-format.
+before starting the load test. For built-in surfaces, the helper also prints
+the backing Kubernetes app or Deployment YAML and waits for the relevant
+Kubernetes/Cozystack readiness condition before k6 starts. The task then runs
+the repo k6 script at `src/infrastructure/load/http-smoke.js` and prints k6's
+standard CLI summary. This is the report input; do not wrap it in a
+Guardian-specific evidence format.
 
 Company-site load:
 
@@ -614,8 +616,10 @@ Surface defaults:
   modes.
 
 For a one-off local k6 smoke check that is not evidence for the management
-cluster, pass `--require-live=false --surface custom --url <url>`. Production
-load reports must keep `--require-live=true` and include the merged `--revision`.
+cluster, pass `--require-live=false --surface custom --url <url>`. Custom URLs
+skip Kubernetes surface readiness because there is no canonical in-cluster
+resource to prove. Production load reports must keep `--require-live=true`, use
+a built-in surface where possible, and include the merged `--revision`.
 
 This HTTP task covers the company-site, Harbor registry API, Dashboard, and
 OpenBao health surfaces. Harbor registry write/read load uses

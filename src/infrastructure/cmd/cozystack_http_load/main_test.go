@@ -89,11 +89,13 @@ func TestValidateConfig(t *testing.T) {
 	base := loadConfig{
 		K6:                   "/k6",
 		Script:               "http-smoke.js",
+		Kubectl:              "/kubectl",
 		Surface:              "company-site",
 		Stage:                "dev",
 		VUs:                  "1",
 		Duration:             "1s",
 		SleepSeconds:         "1",
+		WaitTimeout:          "15m",
 		PortForwardReadyWait: 1,
 	}
 	if err := validateConfig(base); err != nil {
@@ -107,15 +109,94 @@ func TestValidateConfig(t *testing.T) {
 	}
 
 	customURL := missingTarget
+	customURL.Kubectl = ""
+	customURL.WaitTimeout = ""
 	customURL.URL = "https://example.invalid/healthz"
 	if err := validateConfig(customURL); err != nil {
 		t.Fatalf("custom URL config rejected: %v", err)
+	}
+
+	missingKubectl := base
+	missingKubectl.Kubectl = ""
+	if err := validateConfig(missingKubectl); err == nil {
+		t.Fatalf("built-in surface without kubectl was accepted")
 	}
 
 	badVUs := base
 	badVUs.VUs = "many"
 	if err := validateConfig(badVUs); err == nil {
 		t.Fatalf("non-numeric VUs accepted")
+	}
+}
+
+func TestSurfaceReadinessChecks(t *testing.T) {
+	tests := []struct {
+		name     string
+		cfg      loadConfig
+		required []commandExpectation
+	}{
+		{
+			name: "company",
+			cfg:  loadConfig{Surface: "company-site", Stage: "gamma", WaitTimeout: "20m"},
+			required: []commandExpectation{
+				{label: "company-site deployment yaml", parts: []string{"tenant-gamma", "deployment/company-site", "-o", "yaml"}},
+				{label: "wait company-site deployment Available", parts: []string{"--for=condition=Available", "deployment/company-site", "--timeout=20m"}},
+			},
+		},
+		{
+			name: "harbor",
+			cfg:  loadConfig{Surface: "harbor", Stage: "root", WaitTimeout: "20m"},
+			required: []commandExpectation{
+				{label: "Harbor app yaml", parts: []string{"tenant-root", "harbors.apps.cozystack.io/guardian", "-o", "yaml"}},
+				{label: "wait Harbor app Ready", parts: []string{"--for=condition=Ready", "harbors.apps.cozystack.io/guardian", "--timeout=20m"}},
+				{label: "wait Harbor workloads Ready", parts: []string{"--for=condition=WorkloadsReady", "harbors.apps.cozystack.io/guardian", "--timeout=20m"}},
+			},
+		},
+		{
+			name: "dashboard",
+			cfg:  loadConfig{Surface: "dashboard", Stage: "root", WaitTimeout: "20m"},
+			required: []commandExpectation{
+				{label: "dashboard console deployment yaml", parts: []string{"cozy-dashboard", "deployment/cozy-dashboard-console", "-o", "yaml"}},
+				{label: "dashboard gatekeeper deployment yaml", parts: []string{"cozy-dashboard", "deployment/incloud-web-gatekeeper", "-o", "yaml"}},
+				{label: "wait dashboard console deployment Available", parts: []string{"--for=condition=Available", "deployment/cozy-dashboard-console", "--timeout=20m"}},
+				{label: "wait dashboard gatekeeper deployment Available", parts: []string{"--for=condition=Available", "deployment/incloud-web-gatekeeper", "--timeout=20m"}},
+			},
+		},
+		{
+			name: "openbao",
+			cfg:  loadConfig{Surface: "openbao", Stage: "root", WaitTimeout: "20m"},
+			required: []commandExpectation{
+				{label: "OpenBao app yaml", parts: []string{"tenant-root", "openbaos.apps.cozystack.io/guardian", "-o", "yaml"}},
+				{label: "OpenBao statefulset yaml", parts: []string{"tenant-root", "statefulset.apps/openbao-guardian", "-o", "yaml"}},
+				{label: "wait OpenBao app Ready", parts: []string{"--for=condition=Ready", "openbaos.apps.cozystack.io/guardian", "--timeout=20m"}},
+				{label: "wait OpenBao statefulset ready replicas", parts: []string{"--for=jsonpath={.status.readyReplicas}=3", "statefulset.apps/openbao-guardian", "--timeout=20m"}},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := surfaceReadinessChecks(tt.cfg)
+			if err != nil {
+				t.Fatalf("surfaceReadinessChecks() error = %v", err)
+			}
+			for _, want := range tt.required {
+				requireCommand(t, got, want.label, want.parts...)
+			}
+		})
+	}
+}
+
+func TestSurfaceReadinessValidation(t *testing.T) {
+	for _, cfg := range []loadConfig{
+		{Surface: "dashboard", Stage: "dev", WaitTimeout: "15m"},
+		{Surface: "openbao", Stage: "dev", WaitTimeout: "15m"},
+		{Surface: "custom", Stage: "dev", WaitTimeout: "15m"},
+		{Surface: "nope", Stage: "dev", WaitTimeout: "15m"},
+	} {
+		if _, err := surfaceReadinessChecks(cfg); err == nil {
+			t.Fatalf("surfaceReadinessChecks(%#v) accepted invalid target", cfg)
+		}
 	}
 }
 
@@ -133,4 +214,50 @@ func TestKubectlBaseArgs(t *testing.T) {
 			t.Fatalf("kubectlBaseArgs[%d] = %q, want %q: %#v", i, got[i], want[i], got)
 		}
 	}
+}
+
+func TestKubectlArgs(t *testing.T) {
+	got := kubectlArgs(loadConfig{
+		Kubeconfig:     "/tmp/kubeconfig",
+		RequestTimeout: "5s",
+	}, "get", "nodes")
+	want := []string{"--kubeconfig", "/tmp/kubeconfig", "--request-timeout=5s", "get", "nodes"}
+	if len(got) != len(want) {
+		t.Fatalf("kubectlArgs length = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("kubectlArgs[%d] = %q, want %q: %#v", i, got[i], want[i], got)
+		}
+	}
+}
+
+type commandExpectation struct {
+	label string
+	parts []string
+}
+
+func requireCommand(t *testing.T, checks []kubectlCommand, label string, parts ...string) {
+	t.Helper()
+	for _, check := range checks {
+		if check.Label != label {
+			continue
+		}
+		for _, part := range parts {
+			if !hasArg(check.Args, part) {
+				t.Fatalf("%s missing arg %q: %#v", label, part, check.Args)
+			}
+		}
+		return
+	}
+	t.Fatalf("missing command %q in %#v", label, checks)
+}
+
+func hasArg(args []string, want string) bool {
+	for _, arg := range args {
+		if arg == want {
+			return true
+		}
+	}
+	return false
 }

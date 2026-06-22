@@ -1401,6 +1401,8 @@ def _load_http_impl(ctx):
         ctx.args.surface,
         "--request-timeout",
         ctx.args.request_timeout,
+        "--wait-timeout",
+        ctx.args.wait_timeout,
         "--vus",
         ctx.args.vus,
         "--duration",
@@ -1705,7 +1707,7 @@ load_http = task(
     implementation = _load_http_impl,
     name = "load-http",
     group = ["infra"],
-    summary = "Run a standard k6 HTTP load test against a Guardian management-cluster surface.",
+    summary = "Readiness-check a Guardian management-cluster HTTP surface and run a standard k6 load test.",
     args = {
         "duration": args.string(default = "30s", description = "k6 test duration."),
         "expected_statuses": args.string(default = "", description = "Comma-separated acceptable HTTP status codes. Defaults depend on the surface."),
@@ -1720,6 +1722,7 @@ load_http = task(
         "surface": args.string(default = "company-site", description = "HTTP surface: company-site, harbor, dashboard, openbao, or custom with --url."),
         "url": args.string(default = "", description = "Explicit URL to load; overrides surface target mapping."),
         "vus": args.string(default = "1", description = "k6 virtual users."),
+        "wait_timeout": args.string(default = "15m", description = "Timeout for surface readiness waits before k6 starts."),
     },
 )
 
@@ -1825,7 +1828,7 @@ node_outage_drill = task(
     implementation = _node_outage_drill_impl,
     name = "node-outage-drill",
     group = ["infra"],
-    summary = "Cordon, drain, uncordon, and recovery-check one guardian-mgmt Kubernetes node.",
+    summary = "Cordon, drain, outage-check, uncordon, and recovery-check one guardian-mgmt Kubernetes node.",
     args = {
         "confirm_node": args.string(default = "", description = "Must exactly match --node before the task mutates the cluster."),
         "drain_timeout": args.string(default = "10m", description = "kubectl drain timeout."),
@@ -1833,6 +1836,6 @@ node_outage_drill = task(
         "node": args.string(default = "", description = "Kubernetes node name to cordon and drain."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
         "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before the drill."),
-        "wait_timeout": args.string(default = "15m", description = "Timeout for post-recovery readiness waits."),
+        "wait_timeout": args.string(default = "15m", description = "Timeout for outage-phase and recovery readiness waits."),
     },
 )
