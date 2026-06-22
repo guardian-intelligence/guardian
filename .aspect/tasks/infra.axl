@@ -501,6 +501,15 @@ def _preflight_impl(ctx):
     )
     if rc != 0:
         return rc
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        ["build", "//src/infrastructure/evidence:verify-management-evidence-suite-smoke"],
+        cwd = ws_path(ctx),
+        label = "bazelisk build //src/infrastructure/evidence:verify-management-evidence-suite-smoke",
+    )
+    if rc != 0:
+        return rc
     return _quiet_bazel(
         ctx,
         ["run", KUBECTL_TARGET, "--", "kustomize", "src/infrastructure/base"],

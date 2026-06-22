@@ -41,6 +41,17 @@ genrule(
 )
 
 genrule(
+    name = "verify-management-evidence-suite-smoke",
+    srcs = [
+        "verify-management-evidence-suite.sh",
+        "verify-management-evidence-suite_test.sh",
+    ],
+    outs = ["verify-management-evidence-suite-smoke.ok"],
+    cmd = "bash $(location verify-management-evidence-suite_test.sh) $(location verify-management-evidence-suite.sh) $@",
+    visibility = ["//visibility:public"],
+)
+
+genrule(
     name = "hardware-outage-run",
     srcs = ["hardware-outage-run.sh"],
     outs = ["hardware-outage-runner"],
