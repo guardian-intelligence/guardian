@@ -9,6 +9,7 @@ TALM_TARGET = "@talm_linux_amd64//:talm"
 KUBECTL_FILE_TARGET = "@kubectl_linux_amd64//file:file"
 TALOSCTL_FILE_TARGET = "@talosctl_linux_amd64//file:file"
 BACKUP_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_backup_drill:cozystack_backup_drill"
+NODE_OUTAGE_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill"
 GUARDIAN_MGMT_TALOS_NODES = [
     "10.8.0.11",
     "10.8.0.12",
@@ -141,6 +142,7 @@ INFRA_FILEGROUPS = [
 ]
 INFRA_TESTS = [
     "//src/infrastructure/cmd/cozystack_backup_drill:cozystack_backup_drill_test",
+    "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill_test",
     "//src/infrastructure/tests:manifest_invariants_test",
 ]
 LIVE_GETS = [
@@ -1078,6 +1080,47 @@ def _backup_drill_impl(ctx):
         label = "cozystack backup drill",
     )
 
+def _node_outage_drill_impl(ctx):
+    if ctx.args.node == "":
+        ctx.std.io.stderr.write("ERROR: --node is required\n")
+        return 1
+    if ctx.args.confirm_node != ctx.args.node:
+        ctx.std.io.stderr.write("ERROR: --confirm-node must exactly match --node before running this disruptive drill\n")
+        return 1
+
+    kubectl = _kubectl_path(ctx)
+    if kubectl == None:
+        return 1
+
+    rc = _check_live_context(ctx, kubectl)
+    if rc != 0:
+        return rc
+
+    drill_args = [
+        "--kubectl",
+        kubectl,
+        "--node",
+        ctx.args.node,
+        "--confirm-node",
+        ctx.args.confirm_node,
+        "--request-timeout",
+        ctx.args.request_timeout,
+        "--drain-timeout",
+        ctx.args.drain_timeout,
+        "--wait-timeout",
+        ctx.args.wait_timeout,
+    ]
+    if ctx.args.kubeconfig != "":
+        drill_args.extend(["--kubeconfig", ctx.args.kubeconfig])
+
+    return checked_spawn(
+        ctx,
+        "bazelisk",
+        ["run", NODE_OUTAGE_DRILL_TARGET, "--"] + drill_args,
+        cwd = ws_path(ctx),
+        label = "cozystack node outage drill",
+    )
+
 validate = task(
     implementation = _validate_impl,
     name = "validate",
@@ -1148,5 +1191,20 @@ backup_drill = task(
         "restore_target": args.string(default = "", description = "Optional existing app name to restore into after the backup succeeds."),
         "stage": args.string(default = "dev", description = "Guardian stage: root, dev, gamma, or prod."),
         "wait_timeout": args.string(default = "30m", description = "Timeout for BackupJob, Backup, and RestoreJob waits."),
+    },
+)
+
+node_outage_drill = task(
+    implementation = _node_outage_drill_impl,
+    name = "node-outage-drill",
+    group = ["infra"],
+    summary = "Cordon, drain, uncordon, and recovery-check one guardian-mgmt Kubernetes node.",
+    args = {
+        "confirm_node": args.string(default = "", description = "Must exactly match --node before the task mutates the cluster."),
+        "drain_timeout": args.string(default = "10m", description = "kubectl drain timeout."),
+        "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
+        "node": args.string(default = "", description = "Kubernetes node name to cordon and drain."),
+        "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
+        "wait_timeout": args.string(default = "15m", description = "Timeout for post-recovery readiness waits."),
     },
 )
