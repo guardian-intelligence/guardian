@@ -317,10 +317,13 @@ func testRootTenantCoreServices(t *testing.T) {
 		},
 	})
 	assertApp(t, docs, appExpectation{
-		kind:         "ClickHouse",
-		namespace:    "tenant-root",
-		storageClass: "replicated",
-		topReplicas:  3,
+		kind:               "ClickHouse",
+		namespace:          "tenant-root",
+		storageClass:       "replicated",
+		topReplicas:        3,
+		backupSecretName:   "guardian-clickhouse-backup-creds",
+		backupPlanName:     "guardian-clickhouse-daily",
+		backupPlanSchedule: "17 1 * * *",
 		nestedReplicas: map[string]int{
 			"clickhouseKeeper": 3,
 		},
@@ -352,10 +355,13 @@ func testEnvironmentTenantCoreServices(t *testing.T) {
 				},
 			})
 			assertApp(t, docs, appExpectation{
-				kind:         "ClickHouse",
-				namespace:    namespace,
-				storageClass: "replicated",
-				topReplicas:  3,
+				kind:               "ClickHouse",
+				namespace:          namespace,
+				storageClass:       "replicated",
+				topReplicas:        3,
+				backupSecretName:   "guardian-clickhouse-backup-creds",
+				backupPlanName:     "guardian-clickhouse-daily",
+				backupPlanSchedule: map[string]string{"dev": "23 1 * * *", "gamma": "29 1 * * *", "prod": "41 1 * * *"}[env],
 				nestedReplicas: map[string]int{
 					"clickhouseKeeper": 3,
 				},
@@ -831,6 +837,9 @@ type appExpectation struct {
 	nestedReplicas  map[string]int
 	noExternalDB    bool
 	postgresVersion string
+	backupSecretName   string
+	backupPlanName     string
+	backupPlanSchedule string
 }
 
 func assertApp(t *testing.T, docs []manifest, want appExpectation) {
@@ -854,6 +863,20 @@ func assertApp(t *testing.T, docs []manifest, want appExpectation) {
 	}
 	if want.postgresVersion != "" {
 		assertString(t, app, want.postgresVersion, "spec", "version")
+	}
+	if want.backupSecretName != "" {
+		assertBool(t, app, true, "spec", "backup", "enabled")
+		assertString(t, app, "", "spec", "backup", "schedule")
+		assertString(t, app, want.backupSecretName, "spec", "backup", "s3CredentialsSecret", "name")
+
+		plan := findObject(t, docs, "Plan", want.namespace, want.backupPlanName)
+		assertString(t, plan, "backups.cozystack.io/v1alpha1", "apiVersion")
+		assertString(t, plan, "apps.cozystack.io", "spec", "applicationRef", "apiGroup")
+		assertString(t, plan, want.kind, "spec", "applicationRef", "kind")
+		assertString(t, plan, "guardian", "spec", "applicationRef", "name")
+		assertString(t, plan, "guardian-clickhouse-altinity", "spec", "backupClassName")
+		assertString(t, plan, "cron", "spec", "schedule", "type")
+		assertString(t, plan, want.backupPlanSchedule, "spec", "schedule", "cron")
 	}
 }
 

@@ -4,9 +4,8 @@
 # into Flux HelmReleases named postgres-guardian, harbor-guardian, and
 # clickhouse-guardian in tenant-root.
 #
-# Backups are intentionally not enabled here yet: the backup specs must point at
-# pre-existing Kubernetes Secrets projected from OpenBao/R2. Do not place raw S3
-# credentials in these app CRs.
+# Backups point at tenant-local Kubernetes Secrets projected from OpenBao/R2.
+# Do not place raw S3 credentials in these app CRs.
 apiVersion: apps.cozystack.io/v1alpha1
 kind: Postgres
 metadata:
@@ -51,7 +50,27 @@ spec:
   size: 50Gi
   storageClass: replicated
   logStorageSize: 10Gi
+  backup:
+    enabled: true
+    schedule: ""
+    s3CredentialsSecret:
+      name: guardian-clickhouse-backup-creds
   clickhouseKeeper:
     enabled: true
     replicas: 3
     size: 5Gi
+---
+apiVersion: backups.cozystack.io/v1alpha1
+kind: Plan
+metadata:
+  name: guardian-clickhouse-daily
+  namespace: tenant-root
+spec:
+  applicationRef:
+    apiGroup: apps.cozystack.io
+    kind: ClickHouse
+    name: guardian
+  backupClassName: guardian-clickhouse-altinity
+  schedule:
+    type: cron
+    cron: "17 1 * * *"
