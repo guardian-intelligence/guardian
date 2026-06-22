@@ -6,11 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/hclsyntax"
+	"github.com/zclconf/go-cty/cty"
 	"gopkg.in/yaml.v3"
 )
 
@@ -973,41 +977,134 @@ func assertApp(t *testing.T, docs []manifest, want appExpectation) {
 func guardianMgmtTopologyFixture(t *testing.T) guardianMgmtTopology {
 	t.Helper()
 
+	const mainTF = "src/infrastructure/bootstrap/guardian-mgmt/main.tf"
+	file, diags := hclsyntax.ParseConfig(readRunfile(t, mainTF), mainTF, hcl.InitialPos)
+	assertHCLDiags(t, diags, mainTF)
+	body, ok := file.Body.(*hclsyntax.Body)
+	if !ok {
+		t.Fatalf("%s parsed body = %T, want *hclsyntax.Body", mainTF, file.Body)
+	}
+
+	var locals *hclsyntax.Block
+	for _, block := range body.Blocks {
+		if block.Type != "locals" {
+			continue
+		}
+		if locals != nil {
+			t.Fatalf("%s has more than one locals block", mainTF)
+		}
+		locals = block
+	}
+	if locals == nil {
+		t.Fatalf("%s is missing locals block", mainTF)
+	}
+
+	attrs := locals.Body.Attributes
+	vlan := evalObjectExpr(t, hclAttr(t, attrs, "vlan", "locals").Expr, "local.vlan")
+	nodes := objectExpr(t, hclAttr(t, attrs, "control_plane_nodes", "locals").Expr, "local.control_plane_nodes")
+
 	var topology guardianMgmtTopology
 	topology.Cluster = "guardian-mgmt"
-	topology.Network.VLAN.ID = "vlan_8mop5gkpP5jxv"
-	topology.Network.VLAN.VID = 2140
-	topology.Network.VLAN.Description = "guardian-mgmt L2 fabric"
-	topology.Network.VLAN.Subnet = "10.8.0.0/24"
-	topology.Network.VLAN.VLANMTU = 1420
-	topology.Network.VLAN.PodMTU = 1362
-	topology.Network.VLAN.APIVIP = "10.8.0.250"
-	topology.Network.VLAN.VIPLink = "enp1s0f0.2140"
-	topology.Network.VLAN.MetalLBPool = "10.8.0.200-10.8.0.240"
-	topology.Nodes = []guardianMgmtNode{
-		{
-			Name:        "ash-earth",
-			ServerID:    "sv_vAPXaMxKM5epz",
-			Hostname:    "ash-earth",
-			PublicIPv4:  "206.223.228.101",
-			PrivateIPv4: "10.8.0.11",
-		},
-		{
-			Name:        "ash-wind",
-			ServerID:    "sv_nPRbajqEB5koM",
-			Hostname:    "ash-wind",
-			PublicIPv4:  "45.250.254.119",
-			PrivateIPv4: "10.8.0.12",
-		},
-		{
-			Name:        "ash-water",
-			ServerID:    "sv_8mop5gZo8Njxv",
-			Hostname:    "ash-water",
-			PublicIPv4:  "206.223.228.87",
-			PrivateIPv4: "10.8.0.13",
-		},
+	topology.Network.VLAN.ID = ctyStringField(t, vlan, "id", "local.vlan")
+	topology.Network.VLAN.VID = ctyIntField(t, vlan, "vid", "local.vlan")
+	topology.Network.VLAN.Description = ctyStringField(t, vlan, "description", "local.vlan")
+	topology.Network.VLAN.Subnet = ctyStringField(t, vlan, "subnet", "local.vlan")
+	topology.Network.VLAN.VLANMTU = ctyIntField(t, vlan, "vlan_mtu", "local.vlan")
+	topology.Network.VLAN.PodMTU = ctyIntField(t, vlan, "pod_mtu", "local.vlan")
+	topology.Network.VLAN.APIVIP = ctyStringField(t, vlan, "api_vip", "local.vlan")
+	topology.Network.VLAN.VIPLink = ctyStringField(t, vlan, "vip_link", "local.vlan")
+	topology.Network.VLAN.MetalLBPool = ctyStringField(t, vlan, "metallb_pool", "local.vlan")
+
+	for _, item := range nodes.Items {
+		key := ctyString(t, evalHCLExpr(t, item.KeyExpr, "local.control_plane_nodes key"), "local.control_plane_nodes key")
+		nodeFields := evalObjectExpr(t, item.ValueExpr, "local.control_plane_nodes."+key)
+		node := guardianMgmtNode{
+			Name:        ctyStringField(t, nodeFields, "name", "local.control_plane_nodes."+key),
+			ServerID:    ctyStringField(t, nodeFields, "server_id", "local.control_plane_nodes."+key),
+			Hostname:    ctyStringField(t, nodeFields, "hostname", "local.control_plane_nodes."+key),
+			PublicIPv4:  ctyStringField(t, nodeFields, "public_ipv4", "local.control_plane_nodes."+key),
+			PrivateIPv4: ctyStringField(t, nodeFields, "private_ipv4", "local.control_plane_nodes."+key),
+		}
+		if node.Name != key {
+			t.Fatalf("local.control_plane_nodes.%s.name = %q, want it to match the OpenTofu map key", key, node.Name)
+		}
+		topology.Nodes = append(topology.Nodes, node)
 	}
 	return topology
+}
+
+func assertHCLDiags(t *testing.T, diags hcl.Diagnostics, label string) {
+	t.Helper()
+	if diags.HasErrors() {
+		t.Fatalf("%s HCL diagnostics: %s", label, diags.Error())
+	}
+}
+
+func hclAttr(t *testing.T, attrs hclsyntax.Attributes, name, label string) *hclsyntax.Attribute {
+	t.Helper()
+	attr, ok := attrs[name]
+	if !ok {
+		t.Fatalf("%s is missing %q", label, name)
+	}
+	return attr
+}
+
+func objectExpr(t *testing.T, expr hcl.Expression, label string) *hclsyntax.ObjectConsExpr {
+	t.Helper()
+	obj, ok := expr.(*hclsyntax.ObjectConsExpr)
+	if !ok {
+		t.Fatalf("%s = %T, want HCL object constructor", label, expr)
+	}
+	return obj
+}
+
+func evalObjectExpr(t *testing.T, expr hcl.Expression, label string) map[string]cty.Value {
+	t.Helper()
+	value := evalHCLExpr(t, expr, label)
+	if !value.CanIterateElements() {
+		t.Fatalf("%s = %s, want object value", label, value.GoString())
+	}
+	return value.AsValueMap()
+}
+
+func evalHCLExpr(t *testing.T, expr hcl.Expression, label string) cty.Value {
+	t.Helper()
+	value, diags := expr.Value(nil)
+	assertHCLDiags(t, diags, label)
+	return value
+}
+
+func ctyStringField(t *testing.T, values map[string]cty.Value, field, label string) string {
+	t.Helper()
+	value, ok := values[field]
+	if !ok {
+		t.Fatalf("%s is missing %q", label, field)
+	}
+	return ctyString(t, value, label+"."+field)
+}
+
+func ctyString(t *testing.T, value cty.Value, label string) string {
+	t.Helper()
+	if value.Type() != cty.String {
+		t.Fatalf("%s = %s, want string", label, value.GoString())
+	}
+	return value.AsString()
+}
+
+func ctyIntField(t *testing.T, values map[string]cty.Value, field, label string) int {
+	t.Helper()
+	value, ok := values[field]
+	if !ok {
+		t.Fatalf("%s is missing %q", label, field)
+	}
+	if value.Type() != cty.Number {
+		t.Fatalf("%s.%s = %s, want number", label, field, value.GoString())
+	}
+	got, accuracy := value.AsBigFloat().Int64()
+	if accuracy != big.Exact {
+		t.Fatalf("%s.%s = %s, want exact integer", label, field, value.GoString())
+	}
+	return int(got)
 }
 
 func topologyPublicIPs(topology guardianMgmtTopology) []string {
