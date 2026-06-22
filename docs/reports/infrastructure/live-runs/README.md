@@ -10,8 +10,9 @@ capture. The verifier writes `VERIFY.md` and `verification.tsv` into the
 capture directory so component reports can cite both raw evidence and
 machine-checked pass/fail results.
 
-`aspect infra hardware-outage-run` writes a parent directory here containing
-Latitude JSONL status/action records plus `outage-before`, `outage-down`, and
+`aspect infra hardware-outage-run-all` writes a parent directory here containing
+one per-node hardware outage directory. Each per-node directory has Latitude
+JSONL status/action records plus `outage-before`, `outage-down`, and
 `outage-after` capture subdirectories.
 
 Commit only live captures that support an infrastructure report. Do not commit

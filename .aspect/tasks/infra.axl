@@ -6,6 +6,7 @@ TOFU_TARGET = "@opentofu_linux_amd64//:tofu_bin"
 KUBECTL_TARGET = "//src/tools/kubectl:kubectl"
 TALOSCTL_TARGET = "//src/tools/talosctl:talosctl"
 LATITUDE_POWER_TARGET = "//src/tools/latitude:latitude-power-runner-bin"
+MANAGEMENT_INVENTORY_TARGET = "//src/tools/management-inventory:management-inventory-runner-bin"
 COMPANY_SITE_PUSH_TARGET = "//src/products/company/site:push-harbor"
 DB_BACKUP_SECRET_TARGET = "//src/infrastructure/secrets:seed-db-backup-secret"
 DB_BACKUP_SECRET_BIN = "bazel-bin/src/infrastructure/secrets/seed-db-backup-secret-runner"
@@ -17,9 +18,12 @@ VERIFY_EVIDENCE_TARGET = "//src/infrastructure/evidence:verify-management-eviden
 VERIFY_EVIDENCE_BIN = "bazel-bin/src/infrastructure/evidence/verify-management-evidence-runner"
 HARDWARE_OUTAGE_TARGET = "//src/infrastructure/evidence:hardware-outage-run"
 HARDWARE_OUTAGE_BIN = "bazel-bin/src/infrastructure/evidence/hardware-outage-runner"
+HARDWARE_OUTAGE_ALL_TARGET = "//src/infrastructure/evidence:hardware-outage-run-all"
+HARDWARE_OUTAGE_ALL_BIN = "bazel-bin/src/infrastructure/evidence/hardware-outage-run-all-runner"
 KUBECTL_RUNNER = "bazel-bin/src/tools/kubectl/kubectl-runner"
 TALOSCTL_RUNNER = "bazel-bin/src/tools/talosctl/talosctl-runner"
 LATITUDE_POWER_RUNNER = "bazel-bin/src/tools/latitude/latitude-power-runner"
+MANAGEMENT_INVENTORY_RUNNER = "bazel-bin/src/tools/management-inventory/management-inventory-runner"
 GUARDIAN_MGMT_ROOT = "src/infrastructure/bootstrap/guardian-mgmt"
 CLOUDFLARE_DNS_ROOT = "src/infrastructure/bootstrap/cloudflare-dns"
 MANAGEMENT_INVENTORY_CHECKS_ROOT = "src/infrastructure/checks/management-inventory"
@@ -712,6 +716,70 @@ def _hardware_outage_run_impl(ctx):
         label = "run hardware outage evidence",
     )
 
+def _hardware_outage_run_all_impl(ctx):
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        [
+            "build",
+            KUBECTL_TARGET,
+            TALOSCTL_TARGET,
+            LATITUDE_POWER_TARGET,
+            MANAGEMENT_INVENTORY_TARGET,
+            CAPTURE_EVIDENCE_TARGET,
+            VERIFY_EVIDENCE_TARGET,
+            HARDWARE_OUTAGE_TARGET,
+            HARDWARE_OUTAGE_ALL_TARGET,
+        ],
+        cwd = ws_path(ctx),
+        label = "bazelisk build all-node hardware outage evidence tools",
+    )
+    if rc != 0:
+        return rc
+
+    hardware_args = []
+    if ctx.args.nodes != "":
+        hardware_args.extend(["--nodes", ctx.args.nodes])
+    if ctx.args.inventory != "":
+        hardware_args.extend(["--inventory", ctx.args.inventory])
+    if ctx.args.out_dir != "":
+        hardware_args.extend(["--out-dir", ctx.args.out_dir])
+    if ctx.args.kubeconfig != "":
+        hardware_args.extend(["--kubeconfig", ctx.args.kubeconfig])
+    if ctx.args.context != "":
+        hardware_args.extend(["--context", ctx.args.context])
+    if ctx.args.talosconfig != "":
+        hardware_args.extend(["--talosconfig", ctx.args.talosconfig])
+    if ctx.args.talos_endpoints != "":
+        hardware_args.extend(["--talos-endpoints", ctx.args.talos_endpoints])
+    if ctx.args.talos_nodes != "":
+        hardware_args.extend(["--talos-nodes", ctx.args.talos_nodes])
+    if ctx.args.down_timeout != "":
+        hardware_args.extend(["--down-timeout", ctx.args.down_timeout])
+    if ctx.args.up_timeout != "":
+        hardware_args.extend(["--up-timeout", ctx.args.up_timeout])
+    if ctx.args.poll_interval != "":
+        hardware_args.extend(["--poll-interval", ctx.args.poll_interval])
+    if ctx.args.require_talos:
+        hardware_args.append("--require-talos")
+
+    return checked_spawn(
+        ctx,
+        ws_path(ctx, HARDWARE_OUTAGE_ALL_BIN),
+        hardware_args,
+        cwd = ws_path(ctx),
+        env = {
+            "CAPTURE_EVIDENCE_BIN": ws_path(ctx, CAPTURE_EVIDENCE_BIN),
+            "HARDWARE_OUTAGE_BIN": ws_path(ctx, HARDWARE_OUTAGE_BIN),
+            "KUBECTL_BIN": ws_path(ctx, KUBECTL_RUNNER),
+            "LATITUDE_POWER_BIN": ws_path(ctx, LATITUDE_POWER_RUNNER),
+            "MANAGEMENT_INVENTORY_BIN": ws_path(ctx, MANAGEMENT_INVENTORY_RUNNER),
+            "TALOSCTL_BIN": ws_path(ctx, TALOSCTL_RUNNER),
+            "VERIFY_EVIDENCE_BIN": ws_path(ctx, VERIFY_EVIDENCE_BIN),
+        },
+        label = "run all-node hardware outage evidence",
+    )
+
 _KUBECTL_LIVE_ARGS = {
     "context": args.string(default = "", description = "Optional kubeconfig context."),
     "kubeconfig": args.string(default = "", description = "Optional kubeconfig path. Defaults to kubectl's environment/config loading."),
@@ -777,6 +845,12 @@ _HARDWARE_OUTAGE_RUN_ARGS = {
     "talosconfig": args.string(default = "", description = "Optional talosconfig path. Talos capture is skipped unless set or TALOSCONFIG is present."),
     "up_timeout": args.string(default = "15m", description = "Latitude status wait timeout after power_on."),
 }
+
+_HARDWARE_OUTAGE_RUN_ALL_ARGS = dict(_HARDWARE_OUTAGE_RUN_ARGS)
+_HARDWARE_OUTAGE_RUN_ALL_ARGS.pop("node")
+_HARDWARE_OUTAGE_RUN_ALL_ARGS.update({
+    "nodes": args.string(default = "", description = "Optional comma-separated management node subset. Defaults to all inventory nodes."),
+})
 
 _EVIDENCE_RUN_ARGS = dict(_CAPTURE_EVIDENCE_ARGS)
 _EVIDENCE_RUN_ARGS.update({
@@ -1075,6 +1149,14 @@ hardware_outage_run = task(
     group = ["infra"],
     summary = "Power-cycle one Latitude management node and capture before/down/after evidence.",
     args = _HARDWARE_OUTAGE_RUN_ARGS,
+)
+
+hardware_outage_run_all = task(
+    implementation = _hardware_outage_run_all_impl,
+    name = "hardware-outage-run-all",
+    group = ["infra"],
+    summary = "Power-cycle each Latitude management node sequentially and capture outage evidence.",
+    args = _HARDWARE_OUTAGE_RUN_ALL_ARGS,
 )
 
 outage_uncordon = task(

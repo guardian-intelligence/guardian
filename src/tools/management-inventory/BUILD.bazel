@@ -1,0 +1,28 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "management_inventory_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/tools/management-inventory",
+)
+
+go_binary(
+    name = "management-inventory",
+    embed = [":management_inventory_lib"],
+)
+
+genrule(
+    name = "management-inventory-runner-bin",
+    srcs = [":management-inventory"],
+    outs = ["management-inventory-runner"],
+    cmd = "cp $(location :management-inventory) $@ && chmod +x $@",
+    executable = True,
+)
+
+go_test(
+    name = "management-inventory_test",
+    srcs = ["main_test.go"],
+    embed = [":management_inventory_lib"],
+)

@@ -287,6 +287,21 @@ Hardware outage drill:
 
 ```sh
 LATITUDESH_AUTH_TOKEN="${LATITUDESH_AUTH_TOKEN}" \
+aspect infra hardware-outage-run-all \
+  --kubeconfig "${KUBECONFIG}" \
+  --talosconfig "${TALOSCONFIG}" \
+  --require-talos
+```
+
+`hardware-outage-run-all` is the preferred final outage report command. It reads
+the management node list from
+`src/infrastructure/inventory/guardian-mgmt.json` and runs the true single-node
+outage drill once per node, sequentially.
+
+Use the per-node command for a targeted rerun:
+
+```sh
+LATITUDESH_AUTH_TOKEN="${LATITUDESH_AUTH_TOKEN}" \
 aspect infra hardware-outage-run \
   --kubeconfig "${KUBECONFIG}" \
   --talosconfig "${TALOSCONFIG}" \
@@ -294,7 +309,7 @@ aspect infra hardware-outage-run \
   --require-talos
 ```
 
-`hardware-outage-run` is the preferred true single-node outage command. It:
+`hardware-outage-run` is the per-node true single-node outage command. It:
 
 - records Latitude status before the outage;
 - captures and verifies `outage-before`;
@@ -304,10 +319,12 @@ aspect infra hardware-outage-run \
 - captures and verifies `outage-after`.
 
 The default output directory is
-`docs/reports/infrastructure/live-runs/<timestamp>-hardware-outage-<node>/`.
-It contains `latitude-before.jsonl`, `latitude-down.jsonl`,
-`latitude-after.jsonl`, and one capture directory per phase. Commit the parent
-directory with the final outage report.
+`docs/reports/infrastructure/live-runs/<timestamp>-hardware-outage-all/` for the
+all-node command, and
+`docs/reports/infrastructure/live-runs/<timestamp>-hardware-outage-<node>/` for
+the per-node command. Each per-node directory contains `latitude-before.jsonl`,
+`latitude-down.jsonl`, `latitude-after.jsonl`, and one capture directory per
+phase. Commit the parent directory with the final outage report.
 
 Equivalent manual sequence:
 

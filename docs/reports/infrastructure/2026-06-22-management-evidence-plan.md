@@ -54,6 +54,7 @@ aspect infra outage-uncordon --kubeconfig "${KUBECONFIG}" --node <node>
 aspect infra outage-run --kubeconfig "${KUBECONFIG}" --node <node> --timeout 10m
 aspect infra evidence-verify --run-dir docs/reports/infrastructure/live-runs/<timestamp>-outage-after --mode outage --node <node>
 LATITUDESH_AUTH_TOKEN="${LATITUDESH_AUTH_TOKEN}" aspect infra hardware-outage-run --kubeconfig "${KUBECONFIG}" --talosconfig "${TALOSCONFIG}" --node <node> --require-talos
+LATITUDESH_AUTH_TOKEN="${LATITUDESH_AUTH_TOKEN}" aspect infra hardware-outage-run-all --kubeconfig "${KUBECONFIG}" --talosconfig "${TALOSCONFIG}" --require-talos
 ```
 
 ## Current Evidence
@@ -97,6 +98,9 @@ LATITUDESH_AUTH_TOKEN="${LATITUDESH_AUTH_TOKEN}" aspect infra hardware-outage-ru
   `aspect infra hardware-outage-run` task. It builds the pinned Latitude power
   helper, powers one management node off/on through the Latitude API, captures
   before/down/after evidence, and runs the evidence verifier for each phase.
+- The final all-node outage report path now has a repo-owned
+  `aspect infra hardware-outage-run-all` task. It reads management nodes from
+  checked-in inventory and runs the per-node hardware outage drill sequentially.
 - Live Kubernetes evidence is pending because the `guardian-mgmt` kubeconfig and
   converged cluster are not present in this workspace.
 - Latitude adoption is pending a Latitude token and VLAN assignment import IDs.
@@ -149,8 +153,9 @@ Single-node outage reports:
   seeding task has been run and live backup/restore-to-copy drills pass.
 - A Kubernetes drain rehearsal is useful but insufficient for the final
   single-node outage criterion.
-- Hardware outage evidence is still pending live execution on each management
-  node with a Latitude token, kubeconfig, and talosconfig.
+- Hardware outage evidence is still pending live execution through
+  `aspect infra hardware-outage-run-all` with a Latitude token, kubeconfig, and
+  talosconfig.
 - The company-site deployment references Harbor by digest; it cannot pull until
   Harbor is live, OCI auth is present, and `aspect infra publish-company-site`
   has pushed the image there.
