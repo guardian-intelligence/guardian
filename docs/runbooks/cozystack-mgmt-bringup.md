@@ -1120,6 +1120,20 @@ Cozystack backup/restore resources, load-test tool output, and monitoring data.
 Do not add repo-specific JSON evidence bundles or durable CLI/task surfaces whose
 only purpose is temporary PR verification.
 
+`aspect infra validate` enforces that boundary before rendering or live checks:
+it fails if operator scratch credentials (`DELETE_ME.env`), management-cluster
+evidence directories, the retired `guardian-mgmt.json` inventory, or the old
+custom release evidence schema path are reintroduced. Guardian management
+topology belongs in the OpenTofu root, and proof belongs in standard tool output.
+
+The same validation path prevents partial Postgres backup activation. A
+`Postgres/guardian` app may omit `spec.backup` until the real R2 coordinates are
+known; once it includes `spec.backup`, the app must carry concrete
+`destinationPath` and `endpointURL` values and the same manifest set must include
+`Plan/guardian-postgres-daily` targeting `BackupClass/guardian-postgres-cnpg`.
+This keeps the reusable CNPG strategy present without silently deploying a
+non-restorable Postgres backup surface.
+
 ## Not Done In This Substrate Slice
 
 These are intentionally outside the merged L2/OpenTofu substrate and need
