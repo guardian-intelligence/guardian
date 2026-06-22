@@ -517,28 +517,44 @@ kubectl -n tenant-root get ciliumnetworkpolicy allow-openbao-to-apiserver
 kubectl -n tenant-root get ciliumnetworkpolicy allow-external-secrets-to-openbao
 kubectl -n tenant-root get secretstores.external-secrets.io openbao
 kubectl -n tenant-root get externalsecrets.external-secrets.io guardian-cnpg-backup-creds
+kubectl -n tenant-root get secret guardian-cnpg-backup-creds
 kubectl -n tenant-root get secretstores.external-secrets.io openbao-clickhouse-backup
 kubectl -n tenant-root get externalsecrets.external-secrets.io guardian-clickhouse-backup-creds
+kubectl -n tenant-root get secret guardian-clickhouse-backup-creds
 kubectl -n tenant-root get plans.backups.cozystack.io guardian-clickhouse-daily
 kubectl -n tenant-dev get secretstores.external-secrets.io openbao
 kubectl -n tenant-dev get externalsecrets.external-secrets.io guardian-cnpg-backup-creds
+kubectl -n tenant-dev get secret guardian-cnpg-backup-creds
 kubectl -n tenant-dev get secretstores.external-secrets.io openbao-clickhouse-backup
 kubectl -n tenant-dev get externalsecrets.external-secrets.io guardian-clickhouse-backup-creds
+kubectl -n tenant-dev get secret guardian-clickhouse-backup-creds
 kubectl -n tenant-dev get plans.backups.cozystack.io guardian-clickhouse-daily
 kubectl -n tenant-gamma get secretstores.external-secrets.io openbao
 kubectl -n tenant-gamma get externalsecrets.external-secrets.io guardian-cnpg-backup-creds
+kubectl -n tenant-gamma get secret guardian-cnpg-backup-creds
 kubectl -n tenant-gamma get secretstores.external-secrets.io openbao-clickhouse-backup
 kubectl -n tenant-gamma get externalsecrets.external-secrets.io guardian-clickhouse-backup-creds
+kubectl -n tenant-gamma get secret guardian-clickhouse-backup-creds
 kubectl -n tenant-gamma get plans.backups.cozystack.io guardian-clickhouse-daily
 kubectl -n tenant-prod get secretstores.external-secrets.io openbao
 kubectl -n tenant-prod get externalsecrets.external-secrets.io guardian-cnpg-backup-creds
+kubectl -n tenant-prod get secret guardian-cnpg-backup-creds
 kubectl -n tenant-prod get secretstores.external-secrets.io openbao-clickhouse-backup
 kubectl -n tenant-prod get externalsecrets.external-secrets.io guardian-clickhouse-backup-creds
+kubectl -n tenant-prod get secret guardian-clickhouse-backup-creds
 kubectl -n tenant-prod get plans.backups.cozystack.io guardian-clickhouse-daily
 kubectl get cnpgs.strategy.backups.cozystack.io guardian-postgres-r2
 kubectl get backupclasses.backups.cozystack.io guardian-postgres-cnpg
 kubectl get altinities.strategy.backups.cozystack.io guardian-clickhouse-altinity
 kubectl get backupclasses.backups.cozystack.io guardian-clickhouse-altinity
+kubectl -n tenant-root wait --for=condition=Ready secretstores.external-secrets.io/openbao secretstores.external-secrets.io/openbao-clickhouse-backup
+kubectl -n tenant-root wait --for=condition=Ready externalsecrets.external-secrets.io/guardian-cnpg-backup-creds externalsecrets.external-secrets.io/guardian-clickhouse-backup-creds
+kubectl -n tenant-dev wait --for=condition=Ready secretstores.external-secrets.io/openbao secretstores.external-secrets.io/openbao-clickhouse-backup
+kubectl -n tenant-dev wait --for=condition=Ready externalsecrets.external-secrets.io/guardian-cnpg-backup-creds externalsecrets.external-secrets.io/guardian-clickhouse-backup-creds
+kubectl -n tenant-gamma wait --for=condition=Ready secretstores.external-secrets.io/openbao secretstores.external-secrets.io/openbao-clickhouse-backup
+kubectl -n tenant-gamma wait --for=condition=Ready externalsecrets.external-secrets.io/guardian-cnpg-backup-creds externalsecrets.external-secrets.io/guardian-clickhouse-backup-creds
+kubectl -n tenant-prod wait --for=condition=Ready secretstores.external-secrets.io/openbao secretstores.external-secrets.io/openbao-clickhouse-backup
+kubectl -n tenant-prod wait --for=condition=Ready externalsecrets.external-secrets.io/guardian-cnpg-backup-creds externalsecrets.external-secrets.io/guardian-clickhouse-backup-creds
 ```
 
 Expected results:
@@ -580,14 +596,15 @@ Expected results:
 - OpenBao is deployed as the Cozystack-managed `guardian` app in `tenant-root`
 - `tenant-root` has the Cilium allow policies for OpenBao-to-API-server
   traffic and ESO-to-OpenBao traffic
-- root/dev/gamma/prod have `SecretStore/openbao` and
-  `ExternalSecret/guardian-cnpg-backup-creds`; they do not have to be Ready
-  until OpenBao has been initialized/unsealed and populated with the matching
-  roles and kv-v2 values
-- root/dev/gamma/prod have `SecretStore/openbao-clickhouse-backup` and
-  `ExternalSecret/guardian-clickhouse-backup-creds`; they do not have to be
-  Ready until OpenBao has been initialized/unsealed and populated with the
-  matching roles and kv-v2 values
+- after OpenBao has been initialized/unsealed, the OpenTofu OpenBao root has
+  been applied, and the matching kv-v2 values exist, root/dev/gamma/prod have
+  Ready `SecretStore/openbao`, Ready
+  `ExternalSecret/guardian-cnpg-backup-creds`, and the target
+  `Secret/guardian-cnpg-backup-creds`
+- after the same OpenBao prerequisites, root/dev/gamma/prod have Ready
+  `SecretStore/openbao-clickhouse-backup`, Ready
+  `ExternalSecret/guardian-clickhouse-backup-creds`, and the target
+  `Secret/guardian-clickhouse-backup-creds`
 - the cluster has `CNPG/guardian-postgres-r2` and
   `BackupClass/guardian-postgres-cnpg`, plus
   `Altinity/guardian-clickhouse-altinity` and
@@ -630,10 +647,11 @@ separate PRs with their own validation:
   BackupClass, reusable ClickHouse Altinity BackupClass, Postgres / ClickHouse
   credential SecretStores and ExternalSecrets, OpenBao auth/policy
   configuration, ClickHouse app backup Secret references, and recurring
-  ClickHouse backup Plans are declared. Applying the OpenBao root, populating
-  real kv values, Postgres object-store coordinates, Harbor backup strategy,
-  ad-hoc BackupJob smoke tests, and live restore drills still need separate
-  PRs.
+  ClickHouse backup Plans are declared, and `aspect infra live` now gates ESO
+  readiness and target backup Secret creation. Applying the OpenBao root,
+  populating real kv values, Postgres object-store coordinates, Harbor backup
+  strategy, ad-hoc BackupJob smoke tests, and live restore drills still need
+  separate PRs.
 - ClickHouse chart-side `spec.storageClass` rendering, because Cozystack 1.4
   still relies on the cluster default for ClickHouse and keeper PVCs.
 - OpenBao init/unseal automation and backup/restore drills.
