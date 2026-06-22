@@ -5,7 +5,6 @@ load(".aspect/lib/helpers.axl", "checked_spawn", "ws_path")
 GUARDIAN_MGMT_ROOT = "src/infrastructure/bootstrap/guardian-mgmt"
 TOFU_TARGET = "@opentofu_linux_amd64//:tofu_bin"
 KUBECTL_FILE_TARGET = "@kubectl_linux_amd64//file:file"
-EVIDENCE_TARGET = "//src/infrastructure/cmd/mgmt-evidence:mgmt-evidence"
 INFRA_FILEGROUPS = [
     "//src/infrastructure/bootstrap/guardian-mgmt:root",
     "//src/infrastructure/inventory:inventory",
@@ -122,45 +121,9 @@ def _validate_impl(ctx):
         return rc
     return _render_kustomizations(ctx)
 
-def _evidence_impl(ctx):
-    kubectl = _kubectl_path(ctx)
-    if kubectl == None:
-        return 1
-
-    cli_args = [
-        "--kubectl", kubectl,
-        "--output-dir", ws_path(ctx, ctx.args.output_dir),
-        "--timeout", ctx.args.timeout,
-    ]
-    if ctx.args.kubeconfig != "":
-        cli_args.extend(["--kubeconfig", ctx.args.kubeconfig])
-    if ctx.args.kube_context != "":
-        cli_args.extend(["--context", ctx.args.kube_context])
-
-    return checked_spawn(
-        ctx,
-        "bazelisk",
-        ["run", EVIDENCE_TARGET, "--"] + cli_args,
-        cwd = ws_path(ctx),
-        label = "management readiness evidence",
-    )
-
 validate = task(
     implementation = _validate_impl,
     name = "validate",
     group = ["infra"],
     summary = "Validate the checked-in management-cluster OpenTofu, Talm, and Kustomize substrate.",
-)
-
-evidence = task(
-    implementation = _evidence_impl,
-    name = "evidence",
-    group = ["infra"],
-    summary = "Collect live management-cluster readiness evidence with the repo-pinned kubectl.",
-    args = {
-        "output_dir": args.string(default = "docs/reports/infrastructure/live/management-readiness", description = "Workspace-relative output directory for raw snapshots and readiness reports."),
-        "kubeconfig": args.string(default = "", description = "Optional kubeconfig path for the management cluster."),
-        "kube_context": args.string(default = "", description = "Optional kubeconfig context for the management cluster."),
-        "timeout": args.string(default = "20s", description = "Per-kubectl-command timeout, passed to kubectl and the collector."),
-    },
 )

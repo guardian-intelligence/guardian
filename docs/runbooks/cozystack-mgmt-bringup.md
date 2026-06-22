@@ -76,22 +76,6 @@ Postgres/Harbor/ClickHouse apps use the intended HA/storage shape, OpenBao stays
 declared in `tenant-root`, the company site is declared for dev/gamma/prod, and
 Flux reconciles base before tenant apps.
 
-Collect live readiness evidence with:
-
-```sh
-aspect infra evidence \
-  --output-dir docs/reports/infrastructure/live/management-readiness \
-  --kube-context guardian-mgmt
-```
-
-This task builds the repo-pinned `kubectl`, queries the live management cluster,
-and writes raw JSON snapshots plus `management-readiness.json` and
-`management-readiness.md` under the selected output directory. It checks the
-platform packages, tenants, apps, company-site surfaces, backup/restore
-prerequisites, and live backup/restore evidence for the Postgres and ClickHouse
-apps. It exits nonzero when the cluster is unreachable or when expected
-readiness checks fail; do not check in failed output as proof of readiness.
-
 Local validation does not require backend credentials:
 
 ```sh
@@ -171,6 +155,14 @@ Both Flux Kustomizations are apply-only (`wait: false`). Cozystack app CRs fan
 out into HelmReleases and stateful workloads; readiness is proven by the live
 checks and checked-in load/DR/outage reports, not by treating Flux's apply
 status as service health.
+
+The platform package uses Cozystack's `isp-full` variant. In Cozystack 1.4,
+`isp-full` includes the backup controller and backupstrategy controller, but
+`cozystack.external-secrets-operator` and `cozystack.velero` are optional
+system packages. Guardian enables both through
+`bundles.enabledPackages` so later OpenBao-backed Secret projection and
+Velero-backed backup/restore evidence can reconcile without an out-of-band
+package install.
 
 For a direct render check from the repo-pinned kubectl artifact:
 
@@ -321,12 +313,10 @@ talosctl --nodes 10.8.0.11,10.8.0.12,10.8.0.13 --endpoints 10.8.0.250 get kubesp
 Expected result: addresses and routes show the VLAN subnet, and KubeSpan has no
 active mesh peers.
 
-The `aspect infra evidence` task automates the Kubernetes-side readiness checks
-above, including backup controller, Velero, `BackupClass`, `Plan`, `BackupJob`,
-`Backup`, and `RestoreJob` checks for the Postgres and ClickHouse apps. It
-intentionally does not replace the later load-test, disaster-recovery, or
-single-node-outage reports; those reports still need live drills and checked-in
-evidence for each component.
+Kubernetes-side readiness evidence should be captured as PR-local command output
+while a change is being reviewed, or as checked-in final load-test,
+disaster-recovery, and single-node-outage reports after live drills. Do not add
+durable repo CLI/task surfaces whose only purpose is temporary PR verification.
 
 ## Not Done In This Substrate Slice
 
@@ -341,7 +331,9 @@ separate PRs with their own validation:
 - Load-test reports for CNPG/Postgres, Harbor, ClickHouse, OpenBao, the
   Cozystack dashboard, and the company-site surfaces.
 - Backup specs for root and environment Postgres/Harbor/ClickHouse, wired to
-  declared OpenBao/R2-projected Secrets.
+  declared OpenBao/R2-projected Secrets. The package prerequisites are now
+  declared, but the `SecretStore`/`ExternalSecret`, backup class, backup plan,
+  and live restore artifacts still need separate PRs.
 - ClickHouse chart-side `spec.storageClass` rendering, because Cozystack 1.4
   still relies on the cluster default for ClickHouse and keeper PVCs.
 - OpenBao init/unseal automation and backup/restore drills.

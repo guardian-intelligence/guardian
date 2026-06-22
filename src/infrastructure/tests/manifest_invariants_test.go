@@ -32,6 +32,7 @@ func testCozystackPlatformPackage(t *testing.T) {
 
 	assertString(t, pkg, "cozystack.io/v1alpha1", "apiVersion")
 	assertString(t, pkg, "isp-full", "spec", "variant")
+	assertStringSlice(t, pkg, []string{"cozystack.external-secrets-operator", "cozystack.velero"}, "spec", "components", "platform", "values", "bundles", "enabledPackages")
 	assertString(t, pkg, "guardianintelligence.org", "spec", "components", "platform", "values", "publishing", "host")
 	assertString(t, pkg, "https://10.8.0.250:6443", "spec", "components", "platform", "values", "publishing", "apiServerEndpoint")
 	assertStringSlice(t, pkg, []string{"206.223.228.101", "45.250.254.119", "206.223.228.87"}, "spec", "components", "platform", "values", "publishing", "externalIPs")
