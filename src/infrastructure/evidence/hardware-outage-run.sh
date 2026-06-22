@@ -271,6 +271,21 @@ run_capture() {
     "${args[@]}"
 }
 
+run_or_capture_failure() {
+  local failed_phase="$1"
+  shift
+  local rc=0
+
+  "$@" || rc=$?
+  if [[ "${rc}" -eq 0 ]]; then
+    return 0
+  fi
+
+  echo "hardware outage step failed; capturing ${failed_phase}" >&2
+  run_capture "${failed_phase}" true || true
+  return "${rc}"
+}
+
 run_verify() {
   local phase="$1"
   local min_ready_nodes="$2"
@@ -310,20 +325,20 @@ EOF
 
 write_manifest
 run_latitude status "1s" "${out_dir}/latitude-before.jsonl"
-run_component_probes
-run_capture outage-before false
-run_verify outage-before 3 "${require_talos}"
+run_or_capture_failure outage-before-failed run_component_probes
+run_or_capture_failure outage-before-failed run_capture outage-before false
+run_or_capture_failure outage-before-failed run_verify outage-before 3 "${require_talos}"
 
 power_restore_required=true
 run_latitude power_off "${down_timeout}" "${out_dir}/latitude-down.jsonl"
-run_component_probes
-run_capture outage-down true
-run_verify outage-down 2 false
+run_or_capture_failure outage-down-failed run_component_probes
+run_or_capture_failure outage-down-failed run_capture outage-down true
+run_or_capture_failure outage-down-failed run_verify outage-down 2 false
 
 run_latitude power_on "${up_timeout}" "${out_dir}/latitude-after.jsonl"
 power_restore_required=false
-run_component_probes
-run_capture outage-after false
-run_verify outage-after 3 "${require_talos}"
+run_or_capture_failure outage-after-failed run_component_probes
+run_or_capture_failure outage-after-failed run_capture outage-after false
+run_or_capture_failure outage-after-failed run_verify outage-after 3 "${require_talos}"
 
 echo "wrote hardware outage evidence to ${out_dir}"

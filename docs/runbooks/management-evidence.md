@@ -413,9 +413,10 @@ OpenBao write/read checks, HTTP route checks, and replicated storage smoke. Use
 component probes in every hardware outage phase.
 
 If a capture or verification step fails after `power_off`, the runner attempts
-Latitude `power_on` during exit cleanup before returning failure. Treat the
-failed run directory as incident evidence, then confirm the server status before
-starting another drill.
+to write an `*-failed` capture for that phase, then attempts Latitude
+`power_on` during exit cleanup before returning failure. Treat the failed run
+directory as incident evidence, then confirm the server status before starting
+another drill.
 
 The default output directory is
 `docs/reports/infrastructure/live-runs/<timestamp>-hardware-outage-all/` for the
