@@ -185,6 +185,10 @@ never git) and back them up through the survival-floor process. Re-seed Keycloak
 realm/clients. Re-mint any Transit / release-judge credentials.
 
 ## Phase 7 — verify (end-to-end, like production)
+Use `docs/runbooks/management-evidence.md` for the repo-owned command surface
+and report requirements. The quick acceptance checks here are the minimum live
+signals before filling the checked-in reports.
+
 - etcd: 3 voting members over the VLAN, equal RAFT INDEX.
 - `kubectl get nodes` all Ready; VIP `10.8.0.250:6443` answers.
 - **Pod-level** large-packet probe across nodes (not just host VLAN) — a fresh

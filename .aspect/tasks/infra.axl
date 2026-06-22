@@ -4,6 +4,7 @@ load(".aspect/lib/helpers.axl", "checked_spawn", "ws_path")
 
 TOFU_TARGET = "@opentofu_linux_amd64//:tofu_bin"
 KUBECTL_TARGET = "//src/tools/kubectl:kubectl"
+TALOSCTL_TARGET = "//src/tools/talosctl:talosctl"
 GUARDIAN_MGMT_ROOT = "src/infrastructure/bootstrap/guardian-mgmt"
 CLOUDFLARE_DNS_ROOT = "src/infrastructure/bootstrap/cloudflare-dns"
 
@@ -49,6 +50,51 @@ def _tofu(ctx, root, args, label = None):
         label = label if label != None else "tofu " + " ".join(args),
     )
 
+def _kubectl_args(ctx, kubectl_args):
+    out = ["run", KUBECTL_TARGET, "--"]
+    if ctx.args.kubeconfig != "":
+        out.extend(["--kubeconfig", ctx.args.kubeconfig])
+    if ctx.args.context != "":
+        out.extend(["--context", ctx.args.context])
+    out.extend(kubectl_args)
+    return out
+
+def _kubectl(ctx, kubectl_args, label = None):
+    return checked_spawn(
+        ctx,
+        "bazelisk",
+        _kubectl_args(ctx, kubectl_args),
+        cwd = ws_path(ctx),
+        label = label if label != None else "kubectl " + " ".join(kubectl_args),
+    )
+
+def _kubectl_many(ctx, command_sets):
+    for command in command_sets:
+        rc = _kubectl(ctx, command)
+        if rc != 0:
+            return rc
+    return 0
+
+def _talosctl_args(ctx, talosctl_args):
+    out = ["run", TALOSCTL_TARGET, "--"]
+    if ctx.args.talosconfig != "":
+        out.extend(["--talosconfig", ctx.args.talosconfig])
+    if ctx.args.nodes != "":
+        out.extend(["--nodes", ctx.args.nodes])
+    if ctx.args.endpoints != "":
+        out.extend(["--endpoints", ctx.args.endpoints])
+    out.extend(talosctl_args)
+    return out
+
+def _talosctl(ctx, talosctl_args, label = None):
+    return checked_spawn(
+        ctx,
+        "bazelisk",
+        _talosctl_args(ctx, talosctl_args),
+        cwd = ws_path(ctx),
+        label = label if label != None else "talosctl " + " ".join(talosctl_args),
+    )
+
 def _clear_tofu_workdir(ctx, root):
     return checked_spawn(
         ctx,
@@ -67,6 +113,18 @@ def _capture_tofu(ctx, root, args, label = None):
     if r.status.code != 0:
         return None
     return r.stdout
+
+def _quiet_bazel(ctx, bazel_args, label):
+    cmd = ctx.std.process.command("bazelisk").args(bazel_args).current_dir(ws_path(ctx))
+    if ctx.std.io.stderr.is_tty:
+        ctx.std.io.stderr.write("$ " + label + "\n")
+    r = cmd.stdout("piped").stderr("piped").spawn().wait_with_output()
+    if r.status.code != 0:
+        if r.stdout != "":
+            ctx.std.io.stderr.write(r.stdout)
+        if r.stderr != "":
+            ctx.std.io.stderr.write(r.stderr)
+    return r.status.code
 
 def _state_has(ctx, root, address):
     raw = _capture_tofu(ctx, root, ["state", "list"], label = "tofu state list")
@@ -195,6 +253,131 @@ def _render_base_impl(ctx):
         label = "kubectl kustomize src/infrastructure/base",
     )
 
+def _apply_base_impl(ctx):
+    return _kubectl(ctx, ["apply", "-k", "src/infrastructure/base"], label = "kubectl apply -k src/infrastructure/base")
+
+def _preflight_impl(ctx):
+    rc = _validate_impl(ctx)
+    if rc != 0:
+        return rc
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        [
+            "build",
+            "//:build",
+            "//src/products/company/site:image",
+            "//src/products/company/site:image.digest",
+        ],
+        cwd = ws_path(ctx),
+        label = "bazelisk build //:build //src/products/company/site:image //src/products/company/site:image.digest",
+    )
+    if rc != 0:
+        return rc
+    return _quiet_bazel(
+        ctx,
+        ["run", KUBECTL_TARGET, "--", "kustomize", "src/infrastructure/base"],
+        "kubectl kustomize src/infrastructure/base",
+    )
+
+def _live_snapshot_impl(ctx):
+    return _kubectl_many(ctx, [
+        ["version"],
+        ["get", "nodes", "-o", "wide"],
+        ["get", "storageclass", "-o", "wide"],
+        ["get", "pv", "-o", "wide"],
+        ["get", "pvc", "-A", "-o", "wide"],
+        ["get", "packages", "-A", "-o", "wide"],
+        ["get", "tenants", "-A", "-o", "wide"],
+        ["get", "backupclasses", "-o", "wide"],
+        ["get", "plans", "-A", "-o", "wide"],
+        ["get", "backupjobs", "-A", "-o", "wide"],
+        ["get", "backups", "-A", "-o", "wide"],
+        ["get", "harbor", "oci", "-n", "tenant-root", "-o", "yaml"],
+        ["get", "clickhouse", "ledger", "-n", "tenant-root", "-o", "yaml"],
+        ["get", "postgres", "guardian", "-n", "tenant-root", "-o", "yaml"],
+        ["get", "openbao", "guardian", "-n", "tenant-root", "-o", "yaml"],
+        ["get", "deploy/company-site", "svc/company-site", "ing/company-site", "-n", "tenant-dev", "-o", "wide"],
+        ["get", "deploy/company-site", "svc/company-site", "ing/company-site", "-n", "tenant-gamma", "-o", "wide"],
+        ["get", "deploy/company-site", "svc/company-site", "ing/company-site", "-n", "tenant-root", "-o", "wide"],
+        ["get", "certificate", "-A", "-o", "wide"],
+        ["get", "ingress", "-A", "-o", "wide"],
+        ["get", "pods", "-A", "-o", "wide"],
+    ])
+
+def _live_rollout_impl(ctx):
+    return _kubectl_many(ctx, [
+        ["rollout", "status", "deployment/company-site", "-n", "tenant-dev", "--timeout", ctx.args.timeout],
+        ["rollout", "status", "deployment/company-site", "-n", "tenant-gamma", "--timeout", ctx.args.timeout],
+        ["rollout", "status", "deployment/company-site", "-n", "tenant-root", "--timeout", ctx.args.timeout],
+    ])
+
+def _talos_health_impl(ctx):
+    rc = _talosctl(ctx, ["health"], label = "talosctl health")
+    if rc != 0:
+        return rc
+    return _talosctl(ctx, ["etcd", "members"], label = "talosctl etcd members")
+
+def _outage_snapshot_impl(ctx):
+    if ctx.args.node == "":
+        ctx.std.io.stderr.write("ERROR: pass --node with the Kubernetes node name being exercised\n")
+        return 1
+    return _kubectl_many(ctx, [
+        ["get", "node", ctx.args.node, "-o", "wide"],
+        ["get", "pods", "-A", "--field-selector", "spec.nodeName=" + ctx.args.node, "-o", "wide"],
+        ["get", "nodes", "-o", "wide"],
+        ["get", "pods", "-A", "-o", "wide"],
+        ["rollout", "status", "deployment/company-site", "-n", "tenant-dev", "--timeout", ctx.args.timeout],
+        ["rollout", "status", "deployment/company-site", "-n", "tenant-gamma", "--timeout", ctx.args.timeout],
+        ["rollout", "status", "deployment/company-site", "-n", "tenant-root", "--timeout", ctx.args.timeout],
+    ])
+
+def _outage_cordon_impl(ctx):
+    if ctx.args.node == "":
+        ctx.std.io.stderr.write("ERROR: pass --node with the Kubernetes node name to cordon\n")
+        return 1
+    return _kubectl(ctx, ["cordon", ctx.args.node], label = "kubectl cordon " + ctx.args.node)
+
+def _outage_drain_impl(ctx):
+    if ctx.args.node == "":
+        ctx.std.io.stderr.write("ERROR: pass --node with the Kubernetes node name to drain\n")
+        return 1
+    return _kubectl(ctx, [
+        "drain",
+        ctx.args.node,
+        "--ignore-daemonsets",
+        "--delete-emptydir-data",
+        "--timeout",
+        ctx.args.timeout,
+    ], label = "kubectl drain " + ctx.args.node)
+
+def _outage_uncordon_impl(ctx):
+    if ctx.args.node == "":
+        ctx.std.io.stderr.write("ERROR: pass --node with the Kubernetes node name to uncordon\n")
+        return 1
+    return _kubectl(ctx, ["uncordon", ctx.args.node], label = "kubectl uncordon " + ctx.args.node)
+
+_KUBECTL_LIVE_ARGS = {
+    "context": args.string(default = "", description = "Optional kubeconfig context."),
+    "kubeconfig": args.string(default = "", description = "Optional kubeconfig path. Defaults to kubectl's environment/config loading."),
+}
+
+_KUBECTL_TIMEOUT_ARGS = dict(_KUBECTL_LIVE_ARGS)
+_KUBECTL_TIMEOUT_ARGS.update({
+    "timeout": args.string(default = "10m", description = "kubectl wait/rollout timeout."),
+})
+
+_KUBECTL_OUTAGE_ARGS = dict(_KUBECTL_TIMEOUT_ARGS)
+_KUBECTL_OUTAGE_ARGS.update({
+    "node": args.string(default = "", description = "Kubernetes node name under outage rehearsal."),
+})
+
+_TALOS_LIVE_ARGS = {
+    "endpoints": args.string(default = "10.8.0.250", description = "Talos API endpoint list."),
+    "nodes": args.string(default = "10.8.0.11,10.8.0.12,10.8.0.13", description = "Talos node list."),
+    "talosconfig": args.string(default = "", description = "Optional talosconfig path."),
+}
+
 init = task(
     implementation = _init_impl,
     name = "init",
@@ -290,4 +473,75 @@ render_base = task(
     name = "render-base",
     group = ["infra"],
     summary = "Render src/infrastructure/base with the repo-pinned kubectl.",
+)
+
+preflight = task(
+    implementation = _preflight_impl,
+    name = "preflight",
+    group = ["infra"],
+    summary = "Validate OpenTofu, build declared images, and render the base manifests before touching the cluster.",
+)
+
+apply_base = task(
+    implementation = _apply_base_impl,
+    name = "apply-base",
+    group = ["infra"],
+    summary = "Apply src/infrastructure/base to the selected Kubernetes cluster.",
+    args = _KUBECTL_LIVE_ARGS,
+)
+
+live_snapshot = task(
+    implementation = _live_snapshot_impl,
+    name = "live-snapshot",
+    group = ["infra"],
+    summary = "Collect a live readiness snapshot for the management cluster.",
+    args = _KUBECTL_LIVE_ARGS,
+)
+
+live_rollout = task(
+    implementation = _live_rollout_impl,
+    name = "live-rollout",
+    group = ["infra"],
+    summary = "Check declared tenant company-site rollouts.",
+    args = _KUBECTL_TIMEOUT_ARGS,
+)
+
+talos_health = task(
+    implementation = _talos_health_impl,
+    name = "talos-health",
+    group = ["infra"],
+    summary = "Check Talos node health and etcd membership over the management VIP.",
+    args = _TALOS_LIVE_ARGS,
+)
+
+outage_snapshot = task(
+    implementation = _outage_snapshot_impl,
+    name = "outage-snapshot",
+    group = ["infra"],
+    summary = "Collect Kubernetes state around a single-node outage rehearsal.",
+    args = _KUBECTL_OUTAGE_ARGS,
+)
+
+outage_cordon = task(
+    implementation = _outage_cordon_impl,
+    name = "outage-cordon",
+    group = ["infra"],
+    summary = "Cordon a node for a Kubernetes-side outage rehearsal.",
+    args = _KUBECTL_OUTAGE_ARGS,
+)
+
+outage_drain = task(
+    implementation = _outage_drain_impl,
+    name = "outage-drain",
+    group = ["infra"],
+    summary = "Drain a node for a Kubernetes-side outage rehearsal.",
+    args = _KUBECTL_OUTAGE_ARGS,
+)
+
+outage_uncordon = task(
+    implementation = _outage_uncordon_impl,
+    name = "outage-uncordon",
+    group = ["infra"],
+    summary = "Uncordon a node after an outage rehearsal.",
+    args = _KUBECTL_OUTAGE_ARGS,
 )

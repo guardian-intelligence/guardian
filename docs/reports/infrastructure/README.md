@@ -6,6 +6,10 @@ infrastructure components.
 Use `templates/component-operational-report.md` for each component and update
 `evidence-matrix.md` as reports land.
 
+Use `docs/runbooks/management-evidence.md` for the repo-owned commands that
+collect live snapshots, rollout state, Talos health, and outage-rehearsal
+state.
+
 Each component report should cover:
 
 - load test scope, command, inputs, and result;
