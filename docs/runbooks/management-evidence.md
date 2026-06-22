@@ -115,6 +115,9 @@ The opt-in evidence overlay provides:
 - `Job/tenant-root/evidence-clickhouse-load`: 4 concurrent clickhouse-client
   workers insert and read back 250 wide-event rows each through
   `chendpoint-clickhouse-ledger`;
+- `Job/tenant-root/evidence-harbor-oci-read`: repeated digest-addressed
+  manifest reads from Harbor for the company-site OCI artifact, failing on
+  registry errors or digest mismatch;
 - `Job/tenant-root/evidence-http-load`: repeated HTTPS requests against
   prod/dev/gamma company-site routes, Harbor health, and the dashboard host;
 - `Job/tenant-root/evidence-storage-smoke`: seed/verify a retained replicated

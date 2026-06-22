@@ -26,18 +26,22 @@ Desired state sources:
   `oci.guardianintelligence.org/guardian/company-site` using the repo-pinned
   `rules_oci` push toolchain.
 - `aspect infra publish-company-site` is the operator command for the live push.
+- `Job/tenant-root/evidence-harbor-oci-read` repeatedly resolves the published
+  manifest by digest and checks the `Docker-Content-Digest` response header.
 
 ## Current Evidence
 
 - The push target builds locally without contacting Harbor.
 - `aspect infra preflight` includes the top-level build graph and therefore
   catches breakage in the company-site publish target.
+- The Harbor digest-read evidence job renders through
+  `aspect infra evidence-render`.
 
 ## Not Yet Passed
 
 - Harbor has not been converged in the live `guardian-mgmt` cluster from this
   workspace.
 - No live `aspect infra publish-company-site` run has succeeded.
-- No digest-addressed pull from Harbor has been verified.
+- No digest-addressed manifest read from Harbor has been verified.
 - OCI auth delivery is still secret-zero/OpenBao session material, not checked
   into git.

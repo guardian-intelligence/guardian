@@ -4,6 +4,7 @@ filegroup(
         "database-load.yaml",
         "database-dr.yaml",
         "database-restore.yaml",
+        "harbor-oci-read.yaml",
         "http-load.yaml",
         "kustomization.yaml",
         "storage-smoke.yaml",

@@ -3,5 +3,6 @@ kind: Kustomization
 resources:
   - database-load.yaml
   - database-dr.yaml
+  - harbor-oci-read.yaml
   - http-load.yaml
   - storage-smoke.yaml
