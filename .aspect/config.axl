@@ -19,6 +19,7 @@ load(
     infra_backup_drill = "backup_drill",
     infra_kubeconfig = "kubeconfig",
     infra_live = "live",
+    infra_node_outage_drill = "node_outage_drill",
     infra_talos = "talos",
     infra_topology = "topology",
     infra_validate = "validate",
@@ -36,6 +37,7 @@ def config(ctx):
     ctx.tasks.add(infra_backup_drill)
     ctx.tasks.add(infra_kubeconfig)
     ctx.tasks.add(infra_live)
+    ctx.tasks.add(infra_node_outage_drill)
     ctx.tasks.add(infra_talos)
     ctx.tasks.add(infra_topology)
     ctx.tasks.add(infra_validate)

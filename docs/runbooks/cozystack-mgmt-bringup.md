@@ -496,6 +496,45 @@ should summarize the standard Kubernetes objects and include the relevant
 `BackupJob`, `Backup`, `RestoreJob`, and strategy pod log excerpts. Do not add
 repo-specific JSON evidence bundles.
 
+## Single Node Outage Drills
+
+Use the Kubernetes eviction path first. `kubectl drain` is the standard
+maintenance primitive here because it respects `PodDisruptionBudget` objects and
+fails instead of bypassing an unsafe topology.
+
+`aspect infra node-outage-drill` is a thin wrapper around repo-pinned `kubectl`
+and a small repo-built helper. It first runs the same guardian-mgmt kubeconfig
+guard as `aspect infra live`, then prints node, pod, PDB, app, and dashboard
+status, cordons and drains the selected node, prints the same status while the
+node is drained, uncordons the node, and waits for recovery. The recovery gate
+requires the target node to be `Ready`, the dashboard deployments to be
+`Available`, OpenBao to be ready with three statefulset replicas, root, dev,
+gamma, and prod Postgres, Harbor, and ClickHouse apps to report `Ready` and
+`WorkloadsReady`, and the dev/gamma/prod company-site deployments to be
+`Available`.
+
+Run it against one node at a time:
+
+```sh
+aspect infra node-outage-drill \
+  --kubeconfig "$GUARDIAN_MGMT_KUBECONFIG" \
+  --node ash-earth \
+  --confirm-node ash-earth
+```
+
+`--confirm-node` must exactly match `--node`; this is a deliberate guard because
+the task mutates scheduling state. The helper does not pass `--force` or
+`--disable-eviction` to `kubectl drain`, so PDB failures, unmanaged pods, or
+other eviction problems stop the drill. If the drain or recovery checks fail
+after cordon, the helper best-effort uncordons the node before exiting.
+
+Capture the unmodified command output for PR-local evidence. Durable outage
+reports should summarize the standard `kubectl` output and the relevant PDB,
+pod placement, Cozystack app conditions, dashboard deployment conditions, and
+company-site deployment conditions. Hard power-loss, Talos reboot, and provider
+power-cycle drills are separate exercises once the current Talos operator state
+is trustworthy.
+
 ## Company Site
 
 The active company-site artifact is the TanStack Start/Nitro OCI image exposed
@@ -801,6 +840,7 @@ separate PRs with their own validation:
 - ClickHouse chart-side `spec.storageClass` rendering, because Cozystack 1.4
   still relies on the cluster default for ClickHouse and keeper PVCs.
 - OpenBao init/unseal automation and backup/restore drills.
-- Load-test, disaster-recovery, and single-node-outage drills for each new
-  infrastructure component, recorded through standard tool outputs rather than
-  a Guardian-specific evidence schema.
+- Load-test and hard disaster-recovery drills for each new infrastructure
+  component, plus live single-node outage reports from
+  `aspect infra node-outage-drill`, recorded through standard tool outputs
+  rather than a Guardian-specific evidence schema.
