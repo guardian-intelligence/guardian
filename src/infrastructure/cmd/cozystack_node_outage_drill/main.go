@@ -123,6 +123,14 @@ func runDrill(ctx context.Context, cfg drillConfig) error {
 
 	printStatus(ctx, runner, cfg.Node, "drained")
 
+	for _, check := range outageWaits(cfg.Node, cfg.WaitTimeout) {
+		if err := runner.run(ctx, check.Label, check.Args...); err != nil {
+			printStatus(ctx, runner, cfg.Node, "failed-outage")
+			return err
+		}
+	}
+	printStatus(ctx, runner, cfg.Node, "outage-verified")
+
 	if err := runner.run(ctx, "uncordon node", "uncordon", cfg.Node); err != nil {
 		return err
 	}
@@ -152,6 +160,10 @@ func drainArgs(cfg drillConfig) []string {
 
 func nodeReadyArgs(node, timeout string) []string {
 	return []string{"wait", "--for=condition=Ready", "node/" + node, "--timeout=" + timeout}
+}
+
+func nodeUnschedulableArgs(node, timeout string) []string {
+	return []string{"wait", "--for=jsonpath={.spec.unschedulable}=true", "node/" + node, "--timeout=" + timeout}
 }
 
 func printStatus(ctx context.Context, runner kubectlRunner, node, phase string) {
@@ -193,26 +205,44 @@ func statusGets(node, phase string) []kubectlCheck {
 	}
 }
 
+func outageWaits(node, timeout string) []kubectlCheck {
+	checks := []kubectlCheck{
+		{
+			Label: "wait outage target node cordoned",
+			Args:  nodeUnschedulableArgs(node, timeout),
+		},
+	}
+	checks = append(checks, serviceReadinessWaits("outage", timeout)...)
+	return checks
+}
+
 func recoveryWaits(node, timeout string) []kubectlCheck {
 	checks := []kubectlCheck{
 		{
-			Label: "wait target node Ready",
-			Args:  []string{"wait", "--for=condition=Ready", "node/" + node},
+			Label: "wait recovered target node Ready",
+			Args:  nodeReadyArgs(node, timeout),
 		},
+	}
+	checks = append(checks, serviceReadinessWaits("recovered", timeout)...)
+	return checks
+}
+
+func serviceReadinessWaits(phase, timeout string) []kubectlCheck {
+	checks := []kubectlCheck{
 		{
-			Label: "wait dashboard console deployment",
+			Label: "wait " + phase + " dashboard console deployment",
 			Args:  []string{"-n", "cozy-dashboard", "wait", "--for=condition=Available", "deployment/cozy-dashboard-console"},
 		},
 		{
-			Label: "wait dashboard gatekeeper deployment",
+			Label: "wait " + phase + " dashboard gatekeeper deployment",
 			Args:  []string{"-n", "cozy-dashboard", "wait", "--for=condition=Available", "deployment/incloud-web-gatekeeper"},
 		},
 		{
-			Label: "wait root openbao app",
+			Label: "wait " + phase + " root openbao app",
 			Args:  []string{"-n", "tenant-root", "wait", "--for=condition=Ready", "openbaos.apps.cozystack.io/guardian"},
 		},
 		{
-			Label: "wait root openbao statefulset",
+			Label: "wait " + phase + " root openbao statefulset",
 			Args:  []string{"-n", "tenant-root", "wait", "--for=jsonpath={.status.readyReplicas}=3", "statefulset.apps/openbao-guardian"},
 		},
 	}
@@ -221,42 +251,42 @@ func recoveryWaits(node, timeout string) []kubectlCheck {
 		registry := "harbor-guardian-registry"
 		checks = append(checks,
 			kubectlCheck{
-				Label: "wait " + label + " postgres app",
+				Label: "wait " + phase + " " + label + " postgres app",
 				Args:  []string{"-n", namespace, "wait", "--for=condition=Ready", "postgreses.apps.cozystack.io/guardian"},
 			},
 			kubectlCheck{
-				Label: "wait " + label + " postgres workloads",
+				Label: "wait " + phase + " " + label + " postgres workloads",
 				Args:  []string{"-n", namespace, "wait", "--for=condition=WorkloadsReady", "postgreses.apps.cozystack.io/guardian"},
 			},
 			kubectlCheck{
-				Label: "wait " + label + " harbor app",
+				Label: "wait " + phase + " " + label + " harbor app",
 				Args:  []string{"-n", namespace, "wait", "--for=condition=Ready", "harbors.apps.cozystack.io/guardian"},
 			},
 			kubectlCheck{
-				Label: "wait " + label + " harbor registry bucket ready",
+				Label: "wait " + phase + " " + label + " harbor registry bucket ready",
 				Args:  []string{"-n", namespace, "wait", "--for=jsonpath={.status.bucketReady}=true", "bucketclaims.objectstorage.k8s.io/" + registry},
 			},
 			kubectlCheck{
-				Label: "wait " + label + " harbor registry bucket access granted",
+				Label: "wait " + phase + " " + label + " harbor registry bucket access granted",
 				Args:  []string{"-n", namespace, "wait", "--for=jsonpath={.status.accessGranted}=true", "bucketaccesses.objectstorage.k8s.io/" + registry},
 			},
 			kubectlCheck{
-				Label: "wait " + label + " harbor workloads",
+				Label: "wait " + phase + " " + label + " harbor workloads",
 				Args:  []string{"-n", namespace, "wait", "--for=condition=WorkloadsReady", "harbors.apps.cozystack.io/guardian"},
 			},
 			kubectlCheck{
-				Label: "wait " + label + " clickhouse app",
+				Label: "wait " + phase + " " + label + " clickhouse app",
 				Args:  []string{"-n", namespace, "wait", "--for=condition=Ready", "clickhouses.apps.cozystack.io/guardian"},
 			},
 			kubectlCheck{
-				Label: "wait " + label + " clickhouse workloads",
+				Label: "wait " + phase + " " + label + " clickhouse workloads",
 				Args:  []string{"-n", namespace, "wait", "--for=condition=WorkloadsReady", "clickhouses.apps.cozystack.io/guardian"},
 			},
 		)
 	}
 	for _, namespace := range []string{"tenant-dev", "tenant-gamma", "tenant-prod"} {
 		checks = append(checks, kubectlCheck{
-			Label: "wait " + namespace + " company-site deployment",
+			Label: "wait " + phase + " " + namespace + " company-site deployment",
 			Args:  []string{"-n", namespace, "wait", "--for=condition=Available", "deployment/company-site"},
 		})
 	}

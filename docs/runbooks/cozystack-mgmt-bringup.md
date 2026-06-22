@@ -799,14 +799,17 @@ guard as `aspect infra live`. If `--revision` is provided, it also verifies
 source-controller convergence before cordoning the node. It then prints node,
 pod, PDB, app, and dashboard status, proves the target node is currently
 `Ready`, cordons and drains the selected node, prints the same status while the
-node is drained, uncordons the node, and waits for recovery. The recovery gate
-requires the target node to be `Ready`, the dashboard deployments to be
-`Available`, OpenBao to be ready with three statefulset replicas, root, dev,
-gamma, and prod Postgres, Harbor, and ClickHouse apps to report `Ready` and
-`WorkloadsReady`, each Harbor registry bucket to report
+node is drained, verifies the node is still cordoned, and proves the Guardian
+surfaces are healthy before the node is uncordoned. Only after that outage-phase
+gate passes does it uncordon the node and run the recovered-phase gate. Both
+service-readiness gates require the dashboard deployments to be `Available`,
+OpenBao to be ready with three statefulset replicas, root, dev, gamma, and prod
+Postgres, Harbor, and ClickHouse apps to report `Ready` and `WorkloadsReady`,
+each Harbor registry bucket to report
 `BucketClaim.status.bucketReady=true` and
 `BucketAccess.status.accessGranted=true`, and the dev/gamma/prod company-site
-deployments to be `Available`.
+deployments to be `Available`. The recovered-phase gate also requires the
+target node to be `Ready` after uncordon.
 
 Run it against one node at a time:
 
@@ -825,8 +828,9 @@ other eviction problems stop the drill. If the drain or recovery checks fail
 after cordon, the helper best-effort uncordons the node before exiting.
 
 Capture the unmodified command output for PR-local evidence. Durable outage
-reports should summarize the standard `kubectl` output and the relevant PDB,
-pod placement, Cozystack app conditions, dashboard deployment conditions, and
+reports should summarize the standard `kubectl` output from the preflight,
+drained, outage-verified, and recovered phases, plus the relevant PDB, pod
+placement, Cozystack app conditions, dashboard deployment conditions, and
 company-site deployment conditions. Hard power-loss, Talos reboot, and provider
 power-cycle drills are separate exercises once the current Talos operator state
 is trustworthy.
