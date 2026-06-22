@@ -1,0 +1,112 @@
+"""aspect infra validate - local checks for the management-cluster substrate."""
+
+load(".aspect/lib/helpers.axl", "checked_spawn", "ws_path")
+
+GUARDIAN_MGMT_ROOT = "src/infrastructure/bootstrap/guardian-mgmt"
+TOFU_TARGET = "@opentofu_linux_amd64//:tofu_bin"
+KUBECTL_FILE_TARGET = "@kubectl_linux_amd64//file:file"
+INFRA_FILEGROUPS = [
+    "//src/infrastructure/bootstrap/guardian-mgmt:root",
+    "//src/infrastructure/inventory:inventory",
+    "//src/infrastructure/talm:chart",
+    "//src/infrastructure/base/networking:manifests",
+]
+
+def _capture_stdout(ctx, program, args, cwd = None, label = None):
+    label_str = label if label != None else program
+    cmd = ctx.std.process.command(program).args(args)
+    if cwd != None:
+        cmd = cmd.current_dir(cwd)
+    if ctx.std.io.stderr.is_tty:
+        ctx.std.io.stderr.write("$ " + label_str + "\n")
+    r = cmd.stdout("piped").stderr("piped").spawn().wait_with_output()
+    if r.status.code != 0:
+        ctx.std.io.stderr.write("ERROR: " + label_str + " failed\n")
+        if r.stdout != "":
+            ctx.std.io.stderr.write(r.stdout)
+        if r.stderr != "":
+            ctx.std.io.stderr.write(r.stderr)
+        return None
+    return r.stdout.strip()
+
+def _capture_success(ctx, program, args, cwd = None, label = None):
+    label_str = label if label != None else program
+    cmd = ctx.std.process.command(program).args(args)
+    if cwd != None:
+        cmd = cmd.current_dir(cwd)
+    if ctx.std.io.stderr.is_tty:
+        ctx.std.io.stderr.write("$ " + label_str + "\n")
+    r = cmd.stdout("piped").stderr("piped").spawn().wait_with_output()
+    if r.status.code != 0:
+        ctx.std.io.stderr.write("ERROR: " + label_str + " failed\n")
+        if r.stdout != "":
+            ctx.std.io.stderr.write(r.stdout)
+        if r.stderr != "":
+            ctx.std.io.stderr.write(r.stderr)
+        return 1
+    return 0
+
+def _tofu(ctx, args, label):
+    return checked_spawn(
+        ctx,
+        "bazelisk",
+        ["run", TOFU_TARGET, "--", "-chdir=" + ws_path(ctx, GUARDIAN_MGMT_ROOT)] + args,
+        cwd = ws_path(ctx),
+        label = label,
+    )
+
+def _render_base(ctx):
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        ["build", KUBECTL_FILE_TARGET],
+        cwd = ws_path(ctx),
+        label = "bazelisk build " + KUBECTL_FILE_TARGET,
+    )
+    if rc != 0:
+        return rc
+    output_base = _capture_stdout(
+        ctx,
+        "bazelisk",
+        ["info", "output_base"],
+        cwd = ws_path(ctx),
+        label = "bazelisk info output_base",
+    )
+    if output_base == None:
+        return 1
+    kubectl = output_base + "/external/+http_file+kubectl_linux_amd64/file/kubectl"
+    return _capture_success(
+        ctx,
+        kubectl,
+        ["kustomize", "src/infrastructure/base"],
+        cwd = ws_path(ctx),
+        label = "kubectl kustomize src/infrastructure/base",
+    )
+
+def _validate_impl(ctx):
+    rc = _tofu(ctx, ["fmt", "-check"], "tofu fmt -check guardian-mgmt")
+    if rc != 0:
+        return rc
+    rc = _tofu(ctx, ["init", "-backend=false", "-input=false", "-reconfigure"], "tofu init -backend=false guardian-mgmt")
+    if rc != 0:
+        return rc
+    rc = _tofu(ctx, ["validate"], "tofu validate guardian-mgmt")
+    if rc != 0:
+        return rc
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        ["build"] + INFRA_FILEGROUPS,
+        cwd = ws_path(ctx),
+        label = "bazelisk build infra filegroups",
+    )
+    if rc != 0:
+        return rc
+    return _render_base(ctx)
+
+validate = task(
+    implementation = _validate_impl,
+    name = "validate",
+    group = ["infra"],
+    summary = "Validate the checked-in management-cluster OpenTofu, Talm, and Kustomize substrate.",
+)
