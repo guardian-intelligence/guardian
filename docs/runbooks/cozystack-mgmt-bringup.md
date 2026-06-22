@@ -773,8 +773,10 @@ aspect infra openbao-drill \
 
 The snapshot drill runs `bao operator raft autopilot state`, then
 `bao operator raft snapshot save` to a pod-local `/tmp` file, verifies the file
-is non-empty with `sha256sum`, and removes the pod-local snapshot. The report
-input is the native `bao`, `kubectl`, and `sha256sum` output.
+is non-empty with `sha256sum`, and removes the pod-local snapshot. Custom
+`--snapshot-name` values must be simple ASCII filenames using only letters,
+digits, dot, underscore, or hyphen. The report input is the native `bao`,
+`kubectl`, and `sha256sum` output.
 
 ## Single Node Outage Drills
 

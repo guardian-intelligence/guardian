@@ -39,6 +39,21 @@ func TestValidateConfig(t *testing.T) {
 	if err := validateConfig(badSnapshot); err == nil {
 		t.Fatalf("path traversal snapshot accepted")
 	}
+
+	for _, name := range []string{
+		"snapshot name.snap",
+		"snapshot;rm.snap",
+		"/tmp/snapshot.snap",
+		strings.Repeat("a", 129) + ".snap",
+	} {
+		t.Run("bad snapshot "+name, func(t *testing.T) {
+			bad := cfg
+			bad.SnapshotName = name
+			if err := validateConfig(bad); err == nil {
+				t.Fatalf("invalid snapshot name %q accepted", name)
+			}
+		})
+	}
 }
 
 func TestParseInitResult(t *testing.T) {
