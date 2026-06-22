@@ -39,6 +39,7 @@ aspect infra evidence-restore-apply --kubeconfig "${KUBECONFIG}"
 aspect infra evidence-restore-wait --kubeconfig "${KUBECONFIG}" --timeout 30m
 aspect infra evidence-logs --kubeconfig "${KUBECONFIG}"
 aspect infra evidence-snapshot --kubeconfig "${KUBECONFIG}"
+aspect infra evidence-capture --kubeconfig "${KUBECONFIG}" --phase evidence
 ```
 
 Kubernetes-side outage rehearsal:
@@ -70,6 +71,9 @@ aspect infra outage-uncordon --kubeconfig "${KUBECONFIG}" --node <node>
   the Kubernetes Secret from environment variables through stdin.
 - OpenBao evidence token delivery now has a repo-owned Aspect task that applies
   the Kubernetes Secret from environment variables through stdin.
+- Live evidence capture now has a repo-owned read-only Aspect task that writes
+  Kubernetes, evidence Job, database restore, and Talos outputs under
+  `docs/reports/infrastructure/live-runs/` for check-in with component reports.
 - Live Kubernetes evidence is pending because the `guardian-mgmt` kubeconfig and
   converged cluster are not present in this workspace.
 - Latitude adoption is pending a Latitude token and VLAN assignment import IDs.

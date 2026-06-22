@@ -17,6 +17,7 @@ filegroup(
         "//src/infrastructure/bootstrap/guardian-mgmt:root",
         "//src/infrastructure/checks/management-inventory:root",
         "//src/infrastructure/evidence:manifests",
+        "//src/infrastructure/evidence:capture-management-evidence",
         "//src/infrastructure/secrets:seed-db-backup-secret",
         "//src/infrastructure/secrets:seed-openbao-evidence-token",
         "//src/environments:environments",

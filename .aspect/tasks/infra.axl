@@ -10,7 +10,10 @@ DB_BACKUP_SECRET_TARGET = "//src/infrastructure/secrets:seed-db-backup-secret"
 DB_BACKUP_SECRET_BIN = "bazel-bin/src/infrastructure/secrets/seed-db-backup-secret-runner"
 OPENBAO_EVIDENCE_TOKEN_TARGET = "//src/infrastructure/secrets:seed-openbao-evidence-token"
 OPENBAO_EVIDENCE_TOKEN_BIN = "bazel-bin/src/infrastructure/secrets/seed-openbao-evidence-token-runner"
+CAPTURE_EVIDENCE_TARGET = "//src/infrastructure/evidence:capture-management-evidence"
+CAPTURE_EVIDENCE_BIN = "bazel-bin/src/infrastructure/evidence/capture-management-evidence-runner"
 KUBECTL_RUNNER = "bazel-bin/src/tools/kubectl/kubectl-runner"
+TALOSCTL_RUNNER = "bazel-bin/src/tools/talosctl/talosctl-runner"
 GUARDIAN_MGMT_ROOT = "src/infrastructure/bootstrap/guardian-mgmt"
 CLOUDFLARE_DNS_ROOT = "src/infrastructure/bootstrap/cloudflare-dns"
 MANAGEMENT_INVENTORY_CHECKS_ROOT = "src/infrastructure/checks/management-inventory"
@@ -342,6 +345,41 @@ def _apply_evidence_impl(ctx):
 def _apply_evidence_restore_impl(ctx):
     return _kubectl(ctx, ["apply", "-f", "src/infrastructure/evidence/database-restore.yaml"], label = "kubectl apply -f src/infrastructure/evidence/database-restore.yaml")
 
+def _capture_evidence_impl(ctx):
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        ["build", KUBECTL_TARGET, TALOSCTL_TARGET, CAPTURE_EVIDENCE_TARGET],
+        cwd = ws_path(ctx),
+        label = "bazelisk build " + KUBECTL_TARGET + " " + TALOSCTL_TARGET + " " + CAPTURE_EVIDENCE_TARGET,
+    )
+    if rc != 0:
+        return rc
+    capture_args = _kubectl_live_flags(ctx)
+    if ctx.args.out_dir != "":
+        capture_args.extend(["--out-dir", ctx.args.out_dir])
+    if ctx.args.phase != "":
+        capture_args.extend(["--phase", ctx.args.phase])
+    if ctx.args.talosconfig != "":
+        capture_args.extend(["--talosconfig", ctx.args.talosconfig])
+    if ctx.args.talos_endpoints != "":
+        capture_args.extend(["--talos-endpoints", ctx.args.talos_endpoints])
+    if ctx.args.talos_nodes != "":
+        capture_args.extend(["--talos-nodes", ctx.args.talos_nodes])
+    if ctx.args.allow_failures:
+        capture_args.append("--allow-failures")
+    return checked_spawn(
+        ctx,
+        ws_path(ctx, CAPTURE_EVIDENCE_BIN),
+        capture_args,
+        cwd = ws_path(ctx),
+        env = {
+            "KUBECTL_BIN": ws_path(ctx, KUBECTL_RUNNER),
+            "TALOSCTL_BIN": ws_path(ctx, TALOSCTL_RUNNER),
+        },
+        label = "capture management evidence",
+    )
+
 def _publish_company_site_impl(ctx):
     return checked_spawn(
         ctx,
@@ -536,6 +574,16 @@ _TALOS_LIVE_ARGS = {
     "talosconfig": args.string(default = "", description = "Optional talosconfig path."),
 }
 
+_CAPTURE_EVIDENCE_ARGS = dict(_KUBECTL_LIVE_ARGS)
+_CAPTURE_EVIDENCE_ARGS.update({
+    "allow_failures": args.boolean(default = False, description = "Write all outputs and exit 0 even if one captured command fails."),
+    "out_dir": args.string(default = "", description = "Output directory; defaults under docs/reports/infrastructure/live-runs/."),
+    "phase": args.string(default = "snapshot", description = "Evidence phase label, e.g. baseline, evidence, outage-before, outage-down, outage-after."),
+    "talos_endpoints": args.string(default = "10.8.0.250", description = "Talos API endpoint list."),
+    "talos_nodes": args.string(default = "10.8.0.11,10.8.0.12,10.8.0.13", description = "Talos node list."),
+    "talosconfig": args.string(default = "", description = "Optional talosconfig path. Talos capture is skipped unless set or TALOSCONFIG is present."),
+})
+
 init = task(
     implementation = _init_impl,
     name = "init",
@@ -692,6 +740,14 @@ apply_evidence_restore = task(
     group = ["infra"],
     summary = "Apply opt-in database RestoreJobs after evidence BackupJobs pass.",
     args = _KUBECTL_LIVE_ARGS,
+)
+
+capture_evidence = task(
+    implementation = _capture_evidence_impl,
+    name = "evidence-capture",
+    group = ["infra"],
+    summary = "Capture live management-cluster evidence into a checked-in report directory.",
+    args = _CAPTURE_EVIDENCE_ARGS,
 )
 
 publish_company_site = task(

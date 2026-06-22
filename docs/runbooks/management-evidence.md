@@ -150,7 +150,17 @@ aspect infra evidence-restore-apply --kubeconfig "${KUBECONFIG}"
 aspect infra evidence-restore-wait --kubeconfig "${KUBECONFIG}" --timeout 30m
 aspect infra evidence-logs --kubeconfig "${KUBECONFIG}"
 aspect infra evidence-snapshot --kubeconfig "${KUBECONFIG}"
+aspect infra evidence-capture \
+  --kubeconfig "${KUBECONFIG}" \
+  --talosconfig "${TALOSCONFIG}" \
+  --phase evidence
 ```
+
+`evidence-capture` is read-only. It writes command outputs under
+`docs/reports/infrastructure/live-runs/<timestamp>-<phase>/` by default,
+including `summary.tsv`, Kubernetes snapshots, evidence Job logs, BackupJob and
+RestoreJob state, and Talos health when `--talosconfig` is supplied. Commit the
+capture directory with the component reports for the live run.
 
 `evidence-clean` deletes completed Jobs, BackupJobs, RestoreJobs, temporary
 restore targets, and evidence ConfigMaps. It keeps
@@ -221,6 +231,7 @@ aspect infra outage-snapshot --kubeconfig "${KUBECONFIG}" --node <node>
 aspect infra outage-cordon --kubeconfig "${KUBECONFIG}" --node <node>
 aspect infra outage-drain --kubeconfig "${KUBECONFIG}" --node <node>
 aspect infra outage-snapshot --kubeconfig "${KUBECONFIG}" --node <node>
+aspect infra evidence-capture --kubeconfig "${KUBECONFIG}" --phase outage-drained
 aspect infra outage-uncordon --kubeconfig "${KUBECONFIG}" --node <node>
 aspect infra outage-snapshot --kubeconfig "${KUBECONFIG}" --node <node>
 ```
@@ -231,11 +242,16 @@ for the required hardware outage drill.
 Hardware outage drill:
 
 1. Capture `infra live-snapshot` and `infra talos-health`.
+   Also run `aspect infra evidence-capture --phase outage-before`.
 2. Use Latitude OOB/API power control to stop one management node.
 3. Capture `infra live-snapshot`, `infra live-rollout`, and `infra talos-health`
-   while the node is down.
+   while the node is down. Also run
+   `aspect infra evidence-capture --phase outage-down --allow-failures=true`
+   so the report preserves any degraded command output instead of stopping at
+   the first failure.
 4. Restore the node.
 5. Capture the same commands again after it rejoins.
+   Also run `aspect infra evidence-capture --phase outage-after`.
 
 Passing criteria: the API VIP remains reachable, etcd remains quorate, tenant
 site rollouts remain available, replicated storage does not suspend writes for

@@ -12,3 +12,12 @@ filegroup(
     ],
     visibility = ["//visibility:public"],
 )
+
+genrule(
+    name = "capture-management-evidence",
+    srcs = ["capture-management-evidence.sh"],
+    outs = ["capture-management-evidence-runner"],
+    cmd = "cp $(location capture-management-evidence.sh) $@ && chmod +x $@",
+    executable = True,
+    visibility = ["//visibility:public"],
+)
