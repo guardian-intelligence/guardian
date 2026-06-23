@@ -82,7 +82,7 @@ floatingIP: "10.8.0.250"
 # The Latitude Virtual Network (VID 2140) rides the private NIC enp1s0f0; the
 # per-node overlay brings it up with a VLANConfig.
 vipLink: "enp1s0f0.2140"
-image: "ghcr.io/cozystack/cozystack/talos:v1.12.6"
+image: "ghcr.io/cozystack/cozystack/talos:v1.13.0"
 podSubnets:
 - 10.244.0.0/16
 serviceSubnets:

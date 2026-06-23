@@ -41,9 +41,6 @@ aspect infra openbao-drill \
 aspect infra openbao-apply \
   --revision "<merged-main-commit-sha>"
 
-aspect infra openbao-backup-secrets \
-  --revision "<merged-main-commit-sha>"
-
 bazelisk run //src/guardian/cmd/guardian -- \
   up management \
   --revision "<merged-main-commit-sha>"
@@ -57,10 +54,10 @@ gitignored Talm kubeconfig, runs the Talos L2 gate, and verifies live
 Flux/source-controller convergence on the requested merged `main` revision.
 `aspect infra openbao-drill --mode init-unseal` initializes/unseals the
 cluster-local OpenBao app, and `aspect infra openbao-apply` applies the standard
-OpenBao API state for External Secrets through a live port-forward. Backup
-secret values still come from OpenBao KV and are not stored in OpenTofu state;
-`aspect infra openbao-backup-secrets` writes the expected KV-v2 paths from
-`GUARDIAN_BACKUP_AWS_*` or standard `AWS_*` environment credentials.
+OpenBao API state through a live port-forward. Postgres and ClickHouse backups
+use Cozystack 1.5's platform-managed `BackupClass/cozy-default` and system
+bucket via `spec.backup.useSystemBucket: true`; the repo does not carry
+Guardian-specific backup strategies or per-app backup credential Secrets.
 
 Generated Talm secrets, rendered node configs, kubeconfigs, and local operator
 state stay out of Git. See

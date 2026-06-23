@@ -17,13 +17,8 @@ spec:
   backup:
     enabled: true
     retentionPolicy: 30d
-    destinationPath: s3://guardian-vault/guardian/guardian-mgmt/tenant-guardiancommercial-platform-dev/postgres/guardian/
-    endpointURL: https://c3eaeffaadf7d4847684d4775c16d598.r2.cloudflarestorage.com
     schedule: ""
-    s3CredentialsSecret:
-      name: guardian-cnpg-backup-creds
-      accessKeyIDKey: AWS_ACCESS_KEY_ID
-      secretAccessKeyKey: AWS_SECRET_ACCESS_KEY
+    useSystemBucket: true
 ---
 apiVersion: backups.cozystack.io/v1alpha1
 kind: Plan
@@ -35,7 +30,7 @@ spec:
     apiGroup: apps.cozystack.io
     kind: Postgres
     name: guardian
-  backupClassName: guardian-postgres-cnpg
+  backupClassName: cozy-default
   schedule:
     type: cron
     cron: "13 1 * * *"
@@ -72,8 +67,7 @@ spec:
   backup:
     enabled: true
     schedule: ""
-    s3CredentialsSecret:
-      name: guardian-clickhouse-backup-creds
+    useSystemBucket: true
   clickhouseKeeper:
     enabled: true
     replicas: 3
@@ -89,7 +83,7 @@ spec:
     apiGroup: apps.cozystack.io
     kind: ClickHouse
     name: guardian
-  backupClassName: guardian-clickhouse-altinity
+  backupClassName: cozy-default
   schedule:
     type: cron
     cron: "23 1 * * *"
