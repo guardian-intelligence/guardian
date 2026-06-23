@@ -1197,6 +1197,7 @@ func testFluxHandoff(t *testing.T) {
 	assertString(t, apps, "guardian", "spec", "sourceRef", "name")
 	assertBool(t, apps, true, "spec", "prune")
 	assertBool(t, apps, true, "spec", "wait")
+	assertNamespaceHealthCheck(t, apps, "tenant-guardiancommercial")
 
 	deps := sliceAt(t, apps, "spec", "dependsOn")
 	if len(deps) != 1 || stringAt(asManifest(t, deps[0], "spec.dependsOn[0]"), "name") != "guardian-mgmt-base" {
@@ -1207,6 +1208,7 @@ func testFluxHandoff(t *testing.T) {
 	assertString(t, product, "./src/infrastructure/tenants/platform", "spec", "path")
 	assertBool(t, product, true, "spec", "prune")
 	assertBool(t, product, true, "spec", "wait")
+	assertNamespaceHealthCheck(t, product, "tenant-guardiancommercial-platform")
 	productDeps := sliceAt(t, product, "spec", "dependsOn")
 	if len(productDeps) != 1 || stringAt(asManifest(t, productDeps[0], "spec.dependsOn[0]"), "name") != "guardian-mgmt-tenant-apps" {
 		t.Fatalf("guardian-mgmt-platform-tenant dependsOn = %#v, want only guardian-mgmt-tenant-apps", productDeps)
@@ -1218,12 +1220,13 @@ func testFluxHandoff(t *testing.T) {
 		dependsOn string
 		wait      bool
 		apps      bool
+		namespace string
 	}{
-		{name: "guardian-mgmt-platform-dev-tenant", path: "./src/infrastructure/tenants/platform/dev", dependsOn: "guardian-mgmt-platform-tenant", wait: true},
+		{name: "guardian-mgmt-platform-dev-tenant", path: "./src/infrastructure/tenants/platform/dev", dependsOn: "guardian-mgmt-platform-tenant", wait: true, namespace: "tenant-guardiancommercial-platform-dev"},
 		{name: "guardian-mgmt-platform-dev", path: "./src/infrastructure/products/platform/dev", dependsOn: "guardian-mgmt-platform-dev-tenant", wait: false, apps: true},
-		{name: "guardian-mgmt-platform-gamma-tenant", path: "./src/infrastructure/tenants/platform/gamma", dependsOn: "guardian-mgmt-platform-dev", wait: true},
+		{name: "guardian-mgmt-platform-gamma-tenant", path: "./src/infrastructure/tenants/platform/gamma", dependsOn: "guardian-mgmt-platform-dev", wait: true, namespace: "tenant-guardiancommercial-platform-gamma"},
 		{name: "guardian-mgmt-platform-gamma", path: "./src/infrastructure/products/platform/gamma", dependsOn: "guardian-mgmt-platform-gamma-tenant", wait: false, apps: true},
-		{name: "guardian-mgmt-platform-prod-tenant", path: "./src/infrastructure/tenants/platform/prod", dependsOn: "guardian-mgmt-platform-gamma", wait: true},
+		{name: "guardian-mgmt-platform-prod-tenant", path: "./src/infrastructure/tenants/platform/prod", dependsOn: "guardian-mgmt-platform-gamma", wait: true, namespace: "tenant-guardiancommercial-platform-prod"},
 		{name: "guardian-mgmt-platform-prod", path: "./src/infrastructure/products/platform/prod", dependsOn: "guardian-mgmt-platform-prod-tenant", wait: false, apps: true},
 	}
 	for _, tc := range stageChecks {
@@ -1239,11 +1242,27 @@ func testFluxHandoff(t *testing.T) {
 			if len(stageDeps) != 1 || stringAt(asManifest(t, stageDeps[0], "spec.dependsOn[0]"), "name") != tc.dependsOn {
 				t.Fatalf("%s dependsOn = %#v, want only %s", tc.name, stageDeps, tc.dependsOn)
 			}
+			if tc.namespace != "" {
+				assertNamespaceHealthCheck(t, kustomization, tc.namespace)
+			}
 			if tc.apps {
 				assertString(t, kustomization, "10m", "spec", "timeout")
 			}
 		})
 	}
+}
+
+func assertNamespaceHealthCheck(t *testing.T, kustomization manifest, namespace string) {
+	t.Helper()
+
+	checks := sliceAt(t, kustomization, "spec", "healthChecks")
+	if len(checks) != 1 {
+		t.Fatalf("spec.healthChecks has %d entries, want 1", len(checks))
+	}
+	check := asManifest(t, checks[0], "spec.healthChecks[0]")
+	assertString(t, check, "v1", "apiVersion")
+	assertString(t, check, "Namespace", "kind")
+	assertString(t, check, namespace, "name")
 }
 
 type appExpectation struct {
