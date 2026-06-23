@@ -1009,15 +1009,29 @@ pod, PDB, app, and dashboard status, proves the target node is currently
 `Ready`, cordons and drains the selected node, prints the same status while the
 node is drained, verifies the node is still cordoned, and proves the Guardian
 surfaces are healthy before the node is uncordoned. Only after that outage-phase
-gate passes does it uncordon the node and run the recovered-phase gate. Both
-service-readiness gates require the dashboard deployments to be `Available`,
-OpenBao to be ready with three statefulset replicas, root, dev, gamma, and prod
-Postgres, Harbor, and ClickHouse apps to report `Ready` and `WorkloadsReady`,
-each Harbor registry bucket to report
-`BucketClaim.status.bucketReady=true` and
-`BucketAccess.status.accessGranted=true`, and the dev/gamma/prod company-site
-deployments to be `Available`. The recovered-phase gate also requires the
-target node to be `Ready` after uncordon.
+gate passes does it uncordon the node and run the recovered-phase gate.
+
+The outage-phase OpenBao contract is quorum, not full replica placement. The
+OpenBao app must report `Ready=True`, and
+`StatefulSet/openbao-guardian.status.readyReplicas` must be at or above quorum
+for the declared replica count. With the current three-replica `local-retain`
+shape, that means `2/3` is the expected success condition while one node is
+drained; the pod whose persistent volume is node-local cannot schedule
+elsewhere. After uncordon, the helper waits for the target node to be `Ready`,
+waits for every OpenBao StatefulSet pod to be `Running`, reads only the
+cluster-local bootstrap Secret's `unseal-key`, unseals any sealed returned
+replica, and then requires all declared OpenBao replicas to be ready.
+
+Both service-readiness gates require the dashboard deployments to be
+`Available`, root, dev, gamma, and prod Postgres, Harbor, and ClickHouse apps to
+report `Ready` and `WorkloadsReady`, each Harbor registry bucket to report
+`BucketClaim.status.bucketReady=true`, and
+`BucketAccess.status.accessGranted=true`. During the outage phase, the
+dev/gamma/prod company-site deployments are checked through their standard
+PodDisruptionBudgets: `currentHealthy` must be at least `desiredHealthy`. That
+allows the current `2/3` healthy state during a single-node drain while the
+third pod is intentionally blocked by topology spread. During the recovered
+phase, the company-site deployments must return to `Available=True`.
 
 Run it against one node at a time:
 
@@ -1412,8 +1426,6 @@ separate PRs with their own validation:
   still relies on the cluster default for ClickHouse and keeper PVCs.
 - Complete single-node outage reports from `aspect infra node-outage-drill`,
   recorded through standard tool outputs rather than a Guardian-specific
-  evidence schema. The 2026-06-23 drill proved drain/reattach behavior but also
-  exposed that OpenBao on `local-retain` cannot remain 3/3 while its owning
-  node is drained; decide whether the outage contract is quorum-survives plus
-  unseal-after-return, or change OpenBao storage/autounseal to satisfy 3/3
-  during a drained node.
+  evidence schema. The outage contract is quorum-survives while the node is
+  drained, followed by automatic unseal and full OpenBao replica readiness after
+  the node returns.
