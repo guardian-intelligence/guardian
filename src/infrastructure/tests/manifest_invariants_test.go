@@ -907,6 +907,7 @@ func testOpenBaoOpenTofuBootstrap(t *testing.T) {
 	assertTextContains(t, mainTF, `resource "vault_kubernetes_auth_backend_role" "secret_projection"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `audience                         = "openbao"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `token_no_default_policy          = true`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `path "auth/token/lookup-self"`, "guardian-mgmt-openbao main.tf")
 	assertTextNotContains(t, mainTF, "vault_kv_secret", "guardian-mgmt-openbao main.tf")
 	assertTextNotContains(t, mainTF, "vault_generic_secret", "guardian-mgmt-openbao main.tf")
 

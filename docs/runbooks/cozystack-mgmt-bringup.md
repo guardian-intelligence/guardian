@@ -646,8 +646,11 @@ The matching OpenBao API state is declared with standard OpenTofu resources in
 `src/infrastructure/bootstrap/guardian-mgmt-openbao`: `vault_mount` for `kv`,
 `vault_auth_backend` plus `vault_kubernetes_auth_backend_config` for
 Kubernetes auth, `vault_policy` for each least-privilege read path, and
-`vault_kubernetes_auth_backend_role` for each ESO service account. That root
-does not write `vault_kv_secret_v2` or `vault_generic_secret` resources, because
+`vault_kubernetes_auth_backend_role` for each ESO service account. Those
+policies also allow `auth/token/lookup-self`, because ESO validates Vault/OpenBao
+credentials by introspecting the short-lived token it receives after Kubernetes
+auth login. That root does not write `vault_kv_secret_v2` or
+`vault_generic_secret` resources, because
 R2 credentials would otherwise land in OpenTofu state. There are no checked-in
 `BackupJob` resources yet. ClickHouse app backup is enabled and daily
 `Plan/guardian-clickhouse-daily` resources are declared in root/dev/gamma/prod;
