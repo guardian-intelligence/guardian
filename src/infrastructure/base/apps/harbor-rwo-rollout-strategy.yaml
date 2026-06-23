@@ -1,0 +1,13 @@
+# Server-side apply patch for the Cozystack-generated Harbor child release.
+# Harbor jobservice and registry use RWO volumes, so chart-documented Recreate
+# rollouts avoid multi-attach deadlocks during upgrades.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: harbor-guardian-system
+  namespace: tenant-root
+spec:
+  values:
+    harbor:
+      updateStrategy:
+        type: Recreate

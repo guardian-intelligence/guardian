@@ -535,6 +535,14 @@ func assertSystemBucketBackup(t *testing.T, docs []manifest, kind, namespace, pl
 	assertString(t, plan, schedule, "spec", "schedule", "cron")
 }
 
+func assertHarborRWORolloutStrategy(t *testing.T, rel, namespace string) {
+	t.Helper()
+
+	hr := findObject(t, readManifests(t, rel), "HelmRelease", namespace, "harbor-guardian-system")
+	assertString(t, hr, "helm.toolkit.fluxcd.io/v2", "apiVersion")
+	assertString(t, hr, "Recreate", "spec", "values", "harbor", "updateStrategy", "type")
+}
+
 func testRootTenantCoreServices(t *testing.T) {
 	docs := readManifests(t, "src/infrastructure/base/apps/core-services.yaml")
 
@@ -591,6 +599,7 @@ func testRootTenantCoreServices(t *testing.T) {
 			"redis":    3,
 		},
 	})
+	assertHarborRWORolloutStrategy(t, "src/infrastructure/base/apps/harbor-rwo-rollout-strategy.yaml", "tenant-root")
 	assertApp(t, docs, appExpectation{
 		kind:               "ClickHouse",
 		namespace:          "tenant-root",
@@ -626,6 +635,7 @@ func testPlatformTenantCoreServices(t *testing.T) {
 					"redis":    3,
 				},
 			})
+			assertHarborRWORolloutStrategy(t, stage.manifestDir+"/harbor-rwo-rollout-strategy.yaml", stage.namespace)
 			assertApp(t, docs, appExpectation{
 				kind:               "ClickHouse",
 				namespace:          stage.namespace,
