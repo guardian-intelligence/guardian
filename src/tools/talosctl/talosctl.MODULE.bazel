@@ -4,6 +4,6 @@ http_file(
     name = "talosctl_linux_amd64",
     downloaded_file_path = "talosctl",
     executable = True,
-    sha256 = "4c41a3b10b075292e64b182283d558e9d8e935f43239de1ed4e4b14359593efb",
-    url = "https://github.com/siderolabs/talos/releases/download/v1.12.6/talosctl-linux-amd64",
+    sha256 = "4aa5cd191c708b8c1a3b358bfd7dd21fb0cc6bd4dc7a07f2aa925cd2a8473bae",
+    url = "https://github.com/siderolabs/talos/releases/download/v1.13.0/talosctl-linux-amd64",
 )

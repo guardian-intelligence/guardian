@@ -99,13 +99,13 @@ func componentForName(name string) (componentSpec, error) {
 		return componentSpec{
 			Kind:        "ClickHouse",
 			Resource:    "clickhouses.apps.cozystack.io",
-			BackupClass: "guardian-clickhouse-altinity",
+			BackupClass: "cozy-default",
 		}, nil
 	case "postgres", "postgresql":
 		return componentSpec{
 			Kind:        "Postgres",
 			Resource:    "postgreses.apps.cozystack.io",
-			BackupClass: "guardian-postgres-cnpg",
+			BackupClass: "cozy-default",
 		}, nil
 	case "harbor", "registry":
 		return componentSpec{}, errors.New("Harbor is not a Cozystack managed-database BackupJob target; validate Harbor registry recovery with the Harbor/COSI registry smoke path")

@@ -30,7 +30,7 @@ machine:
     #    size: 960 GB
     diskSelector:
       serial: "362510FE3218"
-    image: ghcr.io/cozystack/cozystack/talos:v1.12.6
+    image: ghcr.io/cozystack/cozystack/talos:v1.13.0
   files:
     - content: |
         [plugins]

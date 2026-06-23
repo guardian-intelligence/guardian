@@ -1,4 +1,4 @@
-# Cozystack 1.4 tenant names are lowercase alphanumeric only. The directory
+# Cozystack tenant names are lowercase alphanumeric only. The directory
 # keeps the human-readable product boundary name; the Kubernetes object uses
 # the Cozystack-compatible spelling.
 apiVersion: apps.cozystack.io/v1alpha1

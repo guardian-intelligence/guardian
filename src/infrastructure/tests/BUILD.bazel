@@ -18,7 +18,6 @@ go_test(
         ":company_site_dependency_closure",
         "//src/infrastructure/base:kustomization",
         "//src/infrastructure/base/apps:manifests",
-        "//src/infrastructure/base/backup:manifests",
         "//src/infrastructure/base/cozystack:manifests",
         "//src/infrastructure/base/flux:manifests",
         "//src/infrastructure/base/networking:manifests",

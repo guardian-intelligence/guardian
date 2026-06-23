@@ -18,7 +18,7 @@ func TestBackupJobManifest(t *testing.T) {
 	cfg := drillConfig{
 		Stage:           "dev",
 		Namespace:       "tenant-guardiancommercial-platform-dev",
-		Component:       componentSpec{Kind: "ClickHouse", BackupClass: "guardian-clickhouse-altinity"},
+		Component:       componentSpec{Kind: "ClickHouse", BackupClass: "cozy-default"},
 		ApplicationName: "guardian",
 		Name:            "guardian-dev-clickhouse-test",
 	}
@@ -28,7 +28,7 @@ func TestBackupJobManifest(t *testing.T) {
 		"name: guardian-dev-clickhouse-test\n  namespace: tenant-guardiancommercial-platform-dev\n",
 		"guardian.dev/drill: cozystack-backup\n",
 		"kind: ClickHouse\n    name: guardian\n",
-		"backupClassName: guardian-clickhouse-altinity\n",
+		"backupClassName: cozy-default\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("backupJobManifest missing %q:\n%s", want, got)
@@ -40,7 +40,7 @@ func TestRestoreJobManifest(t *testing.T) {
 	cfg := drillConfig{
 		Stage:             "dev",
 		Namespace:         "tenant-guardiancommercial-platform-dev",
-		Component:         componentSpec{Kind: "ClickHouse", BackupClass: "guardian-clickhouse-altinity"},
+		Component:         componentSpec{Kind: "ClickHouse", BackupClass: "cozy-default"},
 		RestoreTargetName: "guardian-restore",
 	}
 	got := restoreJobManifest(cfg, "guardian-dev-clickhouse-test-restore", "guardian-dev-clickhouse-test-20260622")
@@ -90,9 +90,7 @@ func TestRestoreTargetManifestFromSource(t *testing.T) {
     "storageClass": "replicated",
     "backup": {
       "enabled": true,
-      "s3CredentialsSecret": {
-        "name": "guardian-clickhouse-backup-creds"
-      }
+      "useSystemBucket": true
     }
   },
   "status": {
@@ -110,7 +108,7 @@ func TestRestoreTargetManifestFromSource(t *testing.T) {
 		`"namespace": "tenant-guardiancommercial-platform-gamma"`,
 		`"guardian.dev/drill": "cozystack-restore-target"`,
 		`"storageClass": "replicated"`,
-		`"name": "guardian-clickhouse-backup-creds"`,
+		`"useSystemBucket": true`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("restore target manifest missing %q:\n%s", want, got)
@@ -128,7 +126,7 @@ func TestValidateConfig(t *testing.T) {
 		Kubectl:         "/kubectl",
 		Stage:           "prod",
 		Namespace:       "tenant-guardiancommercial-platform-prod",
-		Component:       componentSpec{Kind: "Postgres", BackupClass: "guardian-postgres-cnpg"},
+		Component:       componentSpec{Kind: "Postgres", BackupClass: "cozy-default"},
 		ApplicationName: "guardian",
 		Name:            "guardian-prod-postgres-test",
 	}
@@ -200,7 +198,7 @@ func TestNamespaceAndComponentValidation(t *testing.T) {
 		t.Fatalf("invalid stage was accepted")
 	}
 
-	if got, err := componentForName("postgresql"); err != nil || got.Kind != "Postgres" || got.BackupClass != "guardian-postgres-cnpg" {
+	if got, err := componentForName("postgresql"); err != nil || got.Kind != "Postgres" || got.BackupClass != "cozy-default" {
 		t.Fatalf("componentForName(postgresql) = %#v, %v", got, err)
 	}
 	if got, err := componentForName("clickhouse"); err != nil || got.Resource != "clickhouses.apps.cozystack.io" {

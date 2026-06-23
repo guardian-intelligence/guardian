@@ -22,7 +22,7 @@ func TestTalmControlplaneRender(t *testing.T) {
 		"--name", "guardian-mgmt",
 		"--preset", "cozystack",
 		"--cluster-endpoint", "https://10.8.0.250:6443",
-		"--talos-version", "v1.12.6",
+		"--talos-version", "v1.13.0",
 		"--force",
 	)
 
@@ -34,14 +34,14 @@ func TestTalmControlplaneRender(t *testing.T) {
 		"--values", filepath.Join(chartRoot, "values.yaml"),
 		"--template", filepath.Join(chartRoot, "templates/controlplane.yaml"),
 		"--with-secrets", filepath.Join(scratch, "secrets.yaml"),
-		"--talos-version", "v1.12.6",
+		"--talos-version", "v1.13.0",
 		"--kubernetes-version", "v1.34.3",
 	)
 
 	for _, want := range []string{
 		"clusterName: guardian-mgmt",
 		"endpoint: https://10.8.0.250:6443",
-		"image: ghcr.io/cozystack/cozystack/talos:v1.12.6",
+		"image: ghcr.io/cozystack/cozystack/talos:v1.13.0",
 		"serviceSubnets:\n      - 10.96.0.0/16",
 		"cluster-cidr: 10.244.0.0/16",
 		"advertisedSubnets:\n      - 10.8.0.0/24",

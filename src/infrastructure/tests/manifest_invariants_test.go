@@ -105,17 +105,13 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("layer two networking", testLayerTwoNetworking)
 	t.Run("single default storage class", testSingleDefaultStorageClass)
 	t.Run("linstor data pools", testLINSTORDataPools)
-	t.Run("backup classes", testBackupClasses)
-	t.Run("postgres backup activation guard", testPostgresBackupActivationGuard)
+	t.Run("cozystack system bucket backups", testCozystackSystemBucketBackups)
 	t.Run("root tenant core services", testRootTenantCoreServices)
 	t.Run("platform tenant core services", testPlatformTenantCoreServices)
 	t.Run("company site", testCompanySite)
 	t.Run("company site source ownership", testCompanySiteSourceOwnership)
 	t.Run("openbao", testOpenBao)
 	t.Run("openbao opentofu bootstrap", testOpenBaoOpenTofuBootstrap)
-	t.Run("openbao auth delegation", testOpenBaoAuthDelegation)
-	t.Run("openbao cnpg backup secret projection", testOpenBaoCNPGBackupSecretProjection)
-	t.Run("openbao clickhouse backup secret projection", testOpenBaoClickHouseBackupSecretProjection)
 	t.Run("flux handoff", testFluxHandoff)
 }
 
@@ -147,7 +143,7 @@ func testTalmInstallDiskSelectors(t *testing.T) {
 			}
 			installMap := asManifest(t, install, rel+" machine.install")
 			assertString(t, installMap, systemSerial, "diskSelector", "serial")
-			assertString(t, installMap, "ghcr.io/cozystack/cozystack/talos:v1.12.6", "image")
+			assertString(t, installMap, "ghcr.io/cozystack/cozystack/talos:v1.13.0", "image")
 			if disk := stringAt(installMap, "disk"); disk != "" {
 				t.Fatalf("%s machine.install.disk = %q, want diskSelector only", rel, disk)
 			}
@@ -165,7 +161,9 @@ func testCozystackPlatformPackage(t *testing.T) {
 
 	assertString(t, pkg, "cozystack.io/v1alpha1", "apiVersion")
 	assertString(t, pkg, "isp-full", "spec", "variant")
-	assertStringSlice(t, pkg, []string{"cozystack.external-secrets-operator", "cozystack.velero"}, "spec", "components", "platform", "values", "bundles", "enabledPackages")
+	if valueAt(pkg, "spec", "components", "platform", "values", "bundles", "enabledPackages") != nil {
+		t.Fatalf("cozystack platform package must not carry legacy enabledPackages overrides")
+	}
 	assertString(t, pkg, "guardianintelligence.org", "spec", "components", "platform", "values", "publishing", "host")
 	assertString(t, pkg, fmt.Sprintf("https://%s:6443", topology.Network.VLAN.APIVIP), "spec", "components", "platform", "values", "publishing", "apiServerEndpoint")
 	assertStringSlice(t, pkg, topologyPublicIPs(topology), "spec", "components", "platform", "values", "publishing", "externalIPs")
@@ -430,156 +428,105 @@ func testLINSTORDataPools(t *testing.T) {
 	}
 }
 
-func testBackupClasses(t *testing.T) {
-	postgresDocs := readManifests(t, "src/infrastructure/base/backup/postgres-cnpg.yaml")
+func testCozystackSystemBucketBackups(t *testing.T) {
+	for _, rel := range []string{
+		"src/infrastructure/base/kustomization.yaml",
+		"src/infrastructure/base/apps/core-services.yaml",
+		"src/infrastructure/products/platform/dev/kustomization.yaml",
+		"src/infrastructure/products/platform/dev/core-services.yaml",
+		"src/infrastructure/products/platform/gamma/kustomization.yaml",
+		"src/infrastructure/products/platform/gamma/core-services.yaml",
+		"src/infrastructure/products/platform/prod/kustomization.yaml",
+		"src/infrastructure/products/platform/prod/core-services.yaml",
+	} {
+		text := string(readRunfile(t, rel))
+		for _, forbidden := range []string{
+			"backup/",
+			"destinationPath:",
+			"endpointURL:",
+			"s3CredentialsSecret:",
+			"openbao-clickhouse-backup",
+			"ExternalSecret",
+			"SecretStore",
+		} {
+			assertTextNotContains(t, text, forbidden, rel)
+		}
+	}
 
-	strategy := findObject(t, postgresDocs, "CNPG", "", "guardian-postgres-r2")
-	assertString(t, strategy, "strategy.backups.cozystack.io/v1alpha1", "apiVersion")
-	assertString(t, strategy, "{{ .Application.metadata.namespace }}-{{ .Application.metadata.name }}", "spec", "template", "serverName")
-	assertString(t, strategy, "{{ .Application.spec.backup.destinationPath }}", "spec", "template", "barmanObjectStore", "destinationPath")
-	assertString(t, strategy, "{{ .Application.spec.backup.endpointURL }}", "spec", "template", "barmanObjectStore", "endpointURL")
-	assertString(t, strategy, "30d", "spec", "template", "barmanObjectStore", "retentionPolicy")
-	assertString(t, strategy, "{{ .Application.spec.backup.s3CredentialsSecret.name }}", "spec", "template", "barmanObjectStore", "s3Credentials", "secretRef", "name")
-	assertString(t, strategy, "{{ .Application.spec.backup.s3CredentialsSecret.accessKeyIDKey }}", "spec", "template", "barmanObjectStore", "s3Credentials", "accessKeyIDKey")
-	assertString(t, strategy, "{{ .Application.spec.backup.s3CredentialsSecret.secretAccessKeyKey }}", "spec", "template", "barmanObjectStore", "s3Credentials", "secretAccessKeyKey")
-	assertString(t, strategy, "gzip", "spec", "template", "barmanObjectStore", "data", "compression")
-	assertString(t, strategy, "gzip", "spec", "template", "barmanObjectStore", "wal", "compression")
-
-	class := findObject(t, postgresDocs, "BackupClass", "", "guardian-postgres-cnpg")
-	assertString(t, class, "backups.cozystack.io/v1alpha1", "apiVersion")
-	strategies := sliceAt(t, class, "spec", "strategies")
-	if len(strategies) != 1 {
-		t.Fatalf("spec.strategies has %d entries, want 1", len(strategies))
-	}
-	classStrategy := asManifest(t, strategies[0], "spec.strategies[0]")
-	assertString(t, classStrategy, "apps.cozystack.io", "application", "apiGroup")
-	assertString(t, classStrategy, "Postgres", "application", "kind")
-	assertString(t, classStrategy, "strategy.backups.cozystack.io", "strategyRef", "apiGroup")
-	assertString(t, classStrategy, "CNPG", "strategyRef", "kind")
-	assertString(t, classStrategy, "guardian-postgres-r2", "strategyRef", "name")
-
-	clickhouseDocs := readManifests(t, "src/infrastructure/base/backup/clickhouse-altinity.yaml")
-	altinity := findObject(t, clickhouseDocs, "Altinity", "", "guardian-clickhouse-altinity")
-	assertString(t, altinity, "strategy.backups.cozystack.io/v1alpha1", "apiVersion")
-	assertInt(t, altinity, 1800, "spec", "template", "spec", "activeDeadlineSeconds")
-	assertString(t, altinity, "Never", "spec", "template", "spec", "restartPolicy")
-	containers := sliceAt(t, altinity, "spec", "template", "spec", "containers")
-	if len(containers) != 1 {
-		t.Fatalf("Altinity strategy containers has %d entries, want 1", len(containers))
-	}
-	container := asManifest(t, containers[0], "spec.template.spec.containers[0]")
-	assertString(t, container, "clickhouse-backup-client", "name")
-	assertString(t, container, "docker.io/library/python@sha256:c25cd44f45df1279a2cba589e67dfcd9db04647ea483b117a7de8b1a99bdfb23", "image")
-	assertStringSlice(t, container, []string{"python3", "-c"}, "command")
-	env := sliceAt(t, container, "env")
-	assertEnvValue(t, env, "MODE", "{{ .Mode }}")
-	assertEnvValue(t, env, "RELEASE_NAME", "{{ .Release.Name }}")
-	assertEnvSecretRef(t, env, "API_USERNAME", "clickhouse-{{ .Release.Name }}-backup-api-auth", "username")
-	assertEnvSecretRef(t, env, "API_PASSWORD", "clickhouse-{{ .Release.Name }}-backup-api-auth", "password")
-	args := sliceAt(t, container, "args")
-	if len(args) != 1 {
-		t.Fatalf("Altinity strategy args has %d entries, want 1", len(args))
-	}
-	script, ok := args[0].(string)
-	if !ok {
-		t.Fatalf("Altinity strategy args[0] = %T(%#v), want string", args[0], args[0])
-	}
-	assertTextContains(t, script, "urllib.request", "Altinity strategy script")
-	if strings.Contains(script, "apk add") || strings.Contains(script, "curl ") || strings.Contains(script, "jq") {
-		t.Fatalf("Altinity strategy script installs or shells to unpinned runtime tools: %s", script)
-	}
-	assertBool(t, container, false, "securityContext", "allowPrivilegeEscalation")
-	assertBool(t, container, true, "securityContext", "readOnlyRootFilesystem")
-	assertBool(t, container, true, "securityContext", "runAsNonRoot")
-	assertInt(t, container, 65532, "securityContext", "runAsUser")
-	assertInt(t, container, 65532, "securityContext", "runAsGroup")
-	assertString(t, container, "RuntimeDefault", "securityContext", "seccompProfile", "type")
-
-	clickhouseClass := findObject(t, clickhouseDocs, "BackupClass", "", "guardian-clickhouse-altinity")
-	assertString(t, clickhouseClass, "backups.cozystack.io/v1alpha1", "apiVersion")
-	clickhouseStrategies := sliceAt(t, clickhouseClass, "spec", "strategies")
-	if len(clickhouseStrategies) != 1 {
-		t.Fatalf("ClickHouse BackupClass spec.strategies has %d entries, want 1", len(clickhouseStrategies))
-	}
-	clickhouseClassStrategy := asManifest(t, clickhouseStrategies[0], "spec.strategies[0]")
-	assertString(t, clickhouseClassStrategy, "apps.cozystack.io", "application", "apiGroup")
-	assertString(t, clickhouseClassStrategy, "ClickHouse", "application", "kind")
-	assertString(t, clickhouseClassStrategy, "strategy.backups.cozystack.io", "strategyRef", "apiGroup")
-	assertString(t, clickhouseClassStrategy, "Altinity", "strategyRef", "kind")
-	assertString(t, clickhouseClassStrategy, "guardian-clickhouse-altinity", "strategyRef", "name")
-
-	for _, docs := range [][]manifest{postgresDocs, clickhouseDocs} {
-		assertNoKind(t, docs, "Plan")
-		assertNoKind(t, docs, "BackupJob")
-	}
-}
-
-func testPostgresBackupActivationGuard(t *testing.T) {
-	r2Endpoint := cloudflareR2Endpoint(t)
 	cases := []struct {
-		name      string
-		manifest  string
-		namespace string
-		schedule  string
+		name       string
+		manifest   string
+		namespace  string
+		postgres   string
+		clickhouse string
 	}{
-		{name: "root", manifest: "src/infrastructure/base/apps/core-services.yaml", namespace: "tenant-root", schedule: "7 1 * * *"},
+		{
+			name:       "root",
+			manifest:   "src/infrastructure/base/apps/core-services.yaml",
+			namespace:  "tenant-root",
+			postgres:   "7 1 * * *",
+			clickhouse: "17 1 * * *",
+		},
 	}
 	for _, stage := range platformStages() {
 		cases = append(cases, struct {
-			name      string
-			manifest  string
-			namespace string
-			schedule  string
+			name       string
+			manifest   string
+			namespace  string
+			postgres   string
+			clickhouse string
 		}{
-			name:      stage.name,
-			manifest:  stage.manifestDir + "/core-services.yaml",
-			namespace: stage.namespace,
-			schedule:  stage.postgresSchedule,
+			name:       stage.name,
+			manifest:   stage.manifestDir + "/core-services.yaml",
+			namespace:  stage.namespace,
+			postgres:   stage.postgresSchedule,
+			clickhouse: stage.clickHouseSchedule,
 		})
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			docs := readManifests(t, tc.manifest)
-			app := findObject(t, docs, "Postgres", tc.namespace, "guardian")
-			plans := findObjects(t, docs, "Plan", tc.namespace, "guardian-postgres-daily")
-			backupValue := valueAt(app, "spec", "backup")
-			if backupValue == nil {
-				t.Fatalf("Postgres tenant %s is missing spec.backup", tc.namespace)
-			}
-
-			backup := asManifest(t, backupValue, "Postgres spec.backup")
-			assertBool(t, backup, true, "enabled")
-			assertString(t, backup, "30d", "retentionPolicy")
-			assertString(t, backup, "", "schedule")
-			destinationPath := stringAt(backup, "destinationPath")
-			endpointURL := stringAt(backup, "endpointURL")
-			assertConcreteBackupCoordinate(t, destinationPath, "destinationPath", "s3://")
-			assertConcreteBackupCoordinate(t, endpointURL, "endpointURL", "https://")
-			assertString(t, backup, "guardian-cnpg-backup-creds", "s3CredentialsSecret", "name")
-			assertString(t, backup, "AWS_ACCESS_KEY_ID", "s3CredentialsSecret", "accessKeyIDKey")
-			assertString(t, backup, "AWS_SECRET_ACCESS_KEY", "s3CredentialsSecret", "secretAccessKeyKey")
-			if destinationPath != "s3://guardian-vault/guardian/guardian-mgmt/"+tc.namespace+"/postgres/guardian/" {
-				t.Fatalf("Postgres backup destinationPath = %q, want tenant-scoped guardian-vault path for %s", destinationPath, tc.namespace)
-			}
-			if endpointURL != r2Endpoint {
-				t.Fatalf("Postgres backup endpointURL = %q, want %q from backend.tfvars", endpointURL, r2Endpoint)
-			}
-
-			if len(plans) != 1 {
-				t.Fatalf("found %d guardian-postgres-daily Plans, want exactly 1 when Postgres backup is enabled", len(plans))
-			}
-			plan := plans[0]
-			assertString(t, plan, "backups.cozystack.io/v1alpha1", "apiVersion")
-			assertString(t, plan, "apps.cozystack.io", "spec", "applicationRef", "apiGroup")
-			assertString(t, plan, "Postgres", "spec", "applicationRef", "kind")
-			assertString(t, plan, "guardian", "spec", "applicationRef", "name")
-			assertString(t, plan, "guardian-postgres-cnpg", "spec", "backupClassName")
-			assertString(t, plan, "cron", "spec", "schedule", "type")
-			assertConcreteBackupSchedule(t, stringAt(plan, "spec", "schedule", "cron"))
-			assertString(t, plan, tc.schedule, "spec", "schedule", "cron")
+			assertSystemBucketBackup(t, docs, "Postgres", tc.namespace, "guardian-postgres-daily", tc.postgres)
+			assertSystemBucketBackup(t, docs, "ClickHouse", tc.namespace, "guardian-clickhouse-daily", tc.clickhouse)
 		})
 	}
+}
+
+func assertSystemBucketBackup(t *testing.T, docs []manifest, kind, namespace, planName, schedule string) {
+	t.Helper()
+
+	app := findObject(t, docs, kind, namespace, "guardian")
+	backupValue := valueAt(app, "spec", "backup")
+	if backupValue == nil {
+		t.Fatalf("%s tenant %s is missing spec.backup", kind, namespace)
+	}
+	backup := asManifest(t, backupValue, kind+" spec.backup")
+	assertBool(t, backup, true, "enabled")
+	assertString(t, backup, "", "schedule")
+	assertBool(t, backup, true, "useSystemBucket")
+	if kind == "Postgres" {
+		assertString(t, backup, "30d", "retentionPolicy")
+	}
+	for _, field := range []string{"destinationPath", "endpointURL", "s3CredentialsSecret"} {
+		if valueAt(backup, field) != nil {
+			t.Fatalf("%s %s backup must not set legacy %s", namespace, kind, field)
+		}
+	}
+
+	plans := findObjects(t, docs, "Plan", namespace, planName)
+	if len(plans) != 1 {
+		t.Fatalf("found %d %s Plans, want exactly 1 when %s backup is enabled", len(plans), planName, kind)
+	}
+	plan := plans[0]
+	assertString(t, plan, "backups.cozystack.io/v1alpha1", "apiVersion")
+	assertString(t, plan, "apps.cozystack.io", "spec", "applicationRef", "apiGroup")
+	assertString(t, plan, kind, "spec", "applicationRef", "kind")
+	assertString(t, plan, "guardian", "spec", "applicationRef", "name")
+	assertString(t, plan, "cozy-default", "spec", "backupClassName")
+	assertString(t, plan, "cron", "spec", "schedule", "type")
+	assertConcreteBackupSchedule(t, stringAt(plan, "spec", "schedule", "cron"))
+	assertString(t, plan, schedule, "spec", "schedule", "cron")
 }
 
 func testRootTenantCoreServices(t *testing.T) {
@@ -629,7 +576,6 @@ func testRootTenantCoreServices(t *testing.T) {
 		namespace:          "tenant-root",
 		storageClass:       "replicated",
 		topReplicas:        3,
-		backupSecretName:   "guardian-clickhouse-backup-creds",
 		backupPlanName:     "guardian-clickhouse-daily",
 		backupPlanSchedule: "17 1 * * *",
 		nestedReplicas: map[string]int{
@@ -665,7 +611,6 @@ func testPlatformTenantCoreServices(t *testing.T) {
 				namespace:          stage.namespace,
 				storageClass:       "replicated",
 				topReplicas:        3,
-				backupSecretName:   "guardian-clickhouse-backup-creds",
 				backupPlanName:     "guardian-clickhouse-daily",
 				backupPlanSchedule: stage.clickHouseSchedule,
 				nestedReplicas: map[string]int{
@@ -879,35 +824,7 @@ func testOpenBao(t *testing.T) {
 	port := asManifest(t, ports[0], "spec.egress[1].toPorts[0].ports[0]")
 	assertString(t, port, "6443", "port")
 	assertString(t, port, "TCP", "protocol")
-
-	esoPolicy := findObject(t, policies, "CiliumNetworkPolicy", "tenant-root", "allow-external-secrets-to-openbao")
-	assertString(t, esoPolicy, "cilium.io/v2", "apiVersion")
-	assertString(t, esoPolicy, "openbao", "spec", "endpointSelector", "matchLabels", "app.kubernetes.io/name")
-
-	ingress := sliceAt(t, esoPolicy, "spec", "ingress")
-	if len(ingress) != 1 {
-		t.Fatalf("allow-external-secrets-to-openbao spec.ingress has %d entries, want 1", len(ingress))
-	}
-	fromEndpoints := sliceAt(t, asManifest(t, ingress[0], "spec.ingress[0]"), "fromEndpoints")
-	if len(fromEndpoints) != 1 {
-		t.Fatalf("allow-external-secrets-to-openbao spec.ingress[0].fromEndpoints has %d entries, want 1", len(fromEndpoints))
-	}
-	source := asManifest(t, fromEndpoints[0], "spec.ingress[0].fromEndpoints[0]")
-	assertString(t, source, "cozy-external-secrets-operator", "matchLabels", "k8s:io.kubernetes.pod.namespace")
-	assertString(t, source, "external-secrets", "matchLabels", "app.kubernetes.io/name")
-	assertString(t, source, "external-secrets-operator", "matchLabels", "app.kubernetes.io/instance")
-
-	ingressToPorts := sliceAt(t, asManifest(t, ingress[0], "spec.ingress[0]"), "toPorts")
-	if len(ingressToPorts) != 1 {
-		t.Fatalf("allow-external-secrets-to-openbao spec.ingress[0].toPorts has %d entries, want 1", len(ingressToPorts))
-	}
-	ingressPorts := sliceAt(t, asManifest(t, ingressToPorts[0], "spec.ingress[0].toPorts[0]"), "ports")
-	if len(ingressPorts) != 1 {
-		t.Fatalf("allow-external-secrets-to-openbao spec.ingress[0].toPorts[0].ports has %d entries, want 1", len(ingressPorts))
-	}
-	ingressPort := asManifest(t, ingressPorts[0], "spec.ingress[0].toPorts[0].ports[0]")
-	assertString(t, ingressPort, "8200", "port")
-	assertString(t, ingressPort, "TCP", "protocol")
+	assertNoObject(t, policies, "CiliumNetworkPolicy", "tenant-root", "allow-external-secrets-to-openbao")
 }
 
 func testOpenBaoOpenTofuBootstrap(t *testing.T) {
@@ -932,295 +849,18 @@ func testOpenBaoOpenTofuBootstrap(t *testing.T) {
 	assertTextContains(t, mainTF, `resource "vault_kubernetes_auth_backend_config" "guardian_mgmt"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `kubernetes_host        = "https://kubernetes.default.svc:443"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `disable_iss_validation = true`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `resource "vault_policy" "secret_projection"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `resource "vault_kubernetes_auth_backend_role" "secret_projection"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `audience                         = "openbao"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `token_no_default_policy          = true`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `path "auth/token/lookup-self"`, "guardian-mgmt-openbao main.tf")
+	assertTextNotContains(t, mainTF, `resource "vault_policy" "secret_projection"`, "guardian-mgmt-openbao main.tf")
+	assertTextNotContains(t, mainTF, `resource "vault_kubernetes_auth_backend_role" "secret_projection"`, "guardian-mgmt-openbao main.tf")
+	assertTextNotContains(t, mainTF, `auth/token/lookup-self`, "guardian-mgmt-openbao main.tf")
 	assertTextNotContains(t, mainTF, "vault_kv_secret", "guardian-mgmt-openbao main.tf")
 	assertTextNotContains(t, mainTF, "vault_generic_secret", "guardian-mgmt-openbao main.tf")
 
-	for _, tc := range []struct {
-		role           string
-		namespace      string
-		serviceAccount string
-		path           string
-	}{
-		{
-			role:           "tenant-root-cnpg-backup",
-			namespace:      "tenant-root",
-			serviceAccount: "guardian-external-secrets",
-			path:           "guardian/guardian-mgmt/tenant-root/postgres/guardian/cnpg-backup",
-		},
-		{
-			role:           "tenant-guardiancommercial-platform-dev-cnpg-backup",
-			namespace:      "tenant-guardiancommercial-platform-dev",
-			serviceAccount: "guardian-external-secrets",
-			path:           "guardian/guardian-mgmt/tenant-guardiancommercial-platform-dev/postgres/guardian/cnpg-backup",
-		},
-		{
-			role:           "tenant-guardiancommercial-platform-gamma-cnpg-backup",
-			namespace:      "tenant-guardiancommercial-platform-gamma",
-			serviceAccount: "guardian-external-secrets",
-			path:           "guardian/guardian-mgmt/tenant-guardiancommercial-platform-gamma/postgres/guardian/cnpg-backup",
-		},
-		{
-			role:           "tenant-guardiancommercial-platform-prod-cnpg-backup",
-			namespace:      "tenant-guardiancommercial-platform-prod",
-			serviceAccount: "guardian-external-secrets",
-			path:           "guardian/guardian-mgmt/tenant-guardiancommercial-platform-prod/postgres/guardian/cnpg-backup",
-		},
-		{
-			role:           "tenant-root-clickhouse-backup",
-			namespace:      "tenant-root",
-			serviceAccount: "guardian-clickhouse-external-secrets",
-			path:           "guardian/guardian-mgmt/tenant-root/clickhouse/guardian/backup",
-		},
-		{
-			role:           "tenant-guardiancommercial-platform-dev-clickhouse-backup",
-			namespace:      "tenant-guardiancommercial-platform-dev",
-			serviceAccount: "guardian-clickhouse-external-secrets",
-			path:           "guardian/guardian-mgmt/tenant-guardiancommercial-platform-dev/clickhouse/guardian/backup",
-		},
-		{
-			role:           "tenant-guardiancommercial-platform-gamma-clickhouse-backup",
-			namespace:      "tenant-guardiancommercial-platform-gamma",
-			serviceAccount: "guardian-clickhouse-external-secrets",
-			path:           "guardian/guardian-mgmt/tenant-guardiancommercial-platform-gamma/clickhouse/guardian/backup",
-		},
-		{
-			role:           "tenant-guardiancommercial-platform-prod-clickhouse-backup",
-			namespace:      "tenant-guardiancommercial-platform-prod",
-			serviceAccount: "guardian-clickhouse-external-secrets",
-			path:           "guardian/guardian-mgmt/tenant-guardiancommercial-platform-prod/clickhouse/guardian/backup",
-		},
+	for _, forbidden := range []string{
+		"secret_projection",
+		"vault_kv_secret",
+		"vault_generic_secret",
 	} {
-		t.Run(tc.role, func(t *testing.T) {
-			assertTextContains(t, mainTF, tc.role+" = {", "guardian-mgmt-openbao main.tf")
-			assertTextContains(t, mainTF, `service_account = "`+tc.serviceAccount+`"`, "guardian-mgmt-openbao main.tf")
-			assertTextContains(t, mainTF, `namespace       = "`+tc.namespace+`"`, "guardian-mgmt-openbao main.tf")
-			assertTextContains(t, mainTF, `path            = "`+tc.path+`"`, "guardian-mgmt-openbao main.tf")
-		})
-	}
-}
-
-func testOpenBaoAuthDelegation(t *testing.T) {
-	docs := readManifests(t, "src/infrastructure/base/backup/openbao-auth-delegator.yaml")
-
-	binding := findObject(t, docs, "ClusterRoleBinding", "", "guardian-openbao-secret-projection-auth-delegator")
-	assertString(t, binding, "rbac.authorization.k8s.io/v1", "apiVersion")
-	assertString(t, binding, "guardian", "metadata", "labels", "app.kubernetes.io/part-of")
-	assertString(t, binding, "openbao-secret-projection", "metadata", "labels", "guardian.dev/secret-scope")
-	assertString(t, binding, "rbac.authorization.k8s.io", "roleRef", "apiGroup")
-	assertString(t, binding, "ClusterRole", "roleRef", "kind")
-	assertString(t, binding, "system:auth-delegator", "roleRef", "name")
-
-	subjects := sliceAt(t, binding, "subjects")
-	want := map[string]bool{
-		"tenant-root/guardian-external-secrets":                                         false,
-		"tenant-root/guardian-clickhouse-external-secrets":                              false,
-		"tenant-guardiancommercial-platform-dev/guardian-external-secrets":              false,
-		"tenant-guardiancommercial-platform-dev/guardian-clickhouse-external-secrets":   false,
-		"tenant-guardiancommercial-platform-gamma/guardian-external-secrets":            false,
-		"tenant-guardiancommercial-platform-gamma/guardian-clickhouse-external-secrets": false,
-		"tenant-guardiancommercial-platform-prod/guardian-external-secrets":             false,
-		"tenant-guardiancommercial-platform-prod/guardian-clickhouse-external-secrets":  false,
-	}
-	for _, subject := range subjects {
-		doc := asManifest(t, subject, "subjects[]")
-		assertString(t, doc, "ServiceAccount", "kind")
-		key := stringAt(doc, "namespace") + "/" + stringAt(doc, "name")
-		if _, ok := want[key]; !ok {
-			t.Fatalf("ClusterRoleBinding has unexpected subject %q", key)
-		}
-		want[key] = true
-	}
-	for key, seen := range want {
-		if !seen {
-			t.Fatalf("ClusterRoleBinding is missing subject %q", key)
-		}
-	}
-
-	kustomization := readManifests(t, "src/infrastructure/base/kustomization.yaml")[0]
-	resources := sliceAt(t, kustomization, "resources")
-	assertContainsString(t, resources, "backup/openbao-auth-delegator.yaml", "base kustomization resources")
-}
-
-func testOpenBaoCNPGBackupSecretProjection(t *testing.T) {
-	cases := []struct {
-		name       string
-		manifest   string
-		namespace  string
-		role       string
-		remotePath string
-	}{
-		{
-			name:       "root",
-			manifest:   "src/infrastructure/base/backup/root-cnpg-backup-secrets.yaml",
-			namespace:  "tenant-root",
-			role:       "tenant-root-cnpg-backup",
-			remotePath: "guardian/guardian-mgmt/tenant-root/postgres/guardian/cnpg-backup",
-		},
-		{
-			name:       "dev",
-			manifest:   "src/infrastructure/products/platform/dev/secrets.yaml",
-			namespace:  "tenant-guardiancommercial-platform-dev",
-			role:       "tenant-guardiancommercial-platform-dev-cnpg-backup",
-			remotePath: "guardian/guardian-mgmt/tenant-guardiancommercial-platform-dev/postgres/guardian/cnpg-backup",
-		},
-		{
-			name:       "gamma",
-			manifest:   "src/infrastructure/products/platform/gamma/secrets.yaml",
-			namespace:  "tenant-guardiancommercial-platform-gamma",
-			role:       "tenant-guardiancommercial-platform-gamma-cnpg-backup",
-			remotePath: "guardian/guardian-mgmt/tenant-guardiancommercial-platform-gamma/postgres/guardian/cnpg-backup",
-		},
-		{
-			name:       "prod",
-			manifest:   "src/infrastructure/products/platform/prod/secrets.yaml",
-			namespace:  "tenant-guardiancommercial-platform-prod",
-			role:       "tenant-guardiancommercial-platform-prod-cnpg-backup",
-			remotePath: "guardian/guardian-mgmt/tenant-guardiancommercial-platform-prod/postgres/guardian/cnpg-backup",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			docs := readManifests(t, tc.manifest)
-			assertCNPGBackupSecretProjection(t, docs, tc.namespace, tc.role, tc.remotePath)
-		})
-	}
-}
-
-func assertCNPGBackupSecretProjection(t *testing.T, docs []manifest, namespace, role, remotePath string) {
-	t.Helper()
-
-	sa := findObject(t, docs, "ServiceAccount", namespace, "guardian-external-secrets")
-	assertString(t, sa, "v1", "apiVersion")
-	assertString(t, sa, "guardian", "metadata", "labels", "app.kubernetes.io/part-of")
-	assertString(t, sa, "cnpg-backup", "metadata", "labels", "guardian.dev/secret-scope")
-
-	store := findObject(t, docs, "SecretStore", namespace, "openbao")
-	assertString(t, store, "external-secrets.io/v1beta1", "apiVersion")
-	assertString(t, store, "http://openbao-guardian.tenant-root.svc:8200", "spec", "provider", "vault", "server")
-	assertString(t, store, "kv", "spec", "provider", "vault", "path")
-	assertString(t, store, "v2", "spec", "provider", "vault", "version")
-	assertString(t, store, "kubernetes", "spec", "provider", "vault", "auth", "kubernetes", "mountPath")
-	assertString(t, store, role, "spec", "provider", "vault", "auth", "kubernetes", "role")
-	assertString(t, store, "guardian-external-secrets", "spec", "provider", "vault", "auth", "kubernetes", "serviceAccountRef", "name")
-	assertStringSlice(t, store, []string{"openbao"}, "spec", "provider", "vault", "auth", "kubernetes", "serviceAccountRef", "audiences")
-
-	externalSecret := findObject(t, docs, "ExternalSecret", namespace, "guardian-cnpg-backup-creds")
-	assertString(t, externalSecret, "external-secrets.io/v1beta1", "apiVersion")
-	assertString(t, externalSecret, "1h", "spec", "refreshInterval")
-	assertString(t, externalSecret, "openbao", "spec", "secretStoreRef", "name")
-	assertString(t, externalSecret, "SecretStore", "spec", "secretStoreRef", "kind")
-	assertString(t, externalSecret, "guardian-cnpg-backup-creds", "spec", "target", "name")
-	assertString(t, externalSecret, "Owner", "spec", "target", "creationPolicy")
-	assertString(t, externalSecret, "Opaque", "spec", "target", "template", "type")
-
-	data := sliceAt(t, externalSecret, "spec", "data")
-	if len(data) != 2 {
-		t.Fatalf("ExternalSecret spec.data has %d entries, want 2", len(data))
-	}
-	assertExternalSecretData(t, data, "AWS_ACCESS_KEY_ID", remotePath, "AWS_ACCESS_KEY_ID")
-	assertExternalSecretData(t, data, "AWS_SECRET_ACCESS_KEY", remotePath, "AWS_SECRET_ACCESS_KEY")
-}
-
-func assertExternalSecretData(t *testing.T, entries []any, secretKey, remotePath, property string) {
-	t.Helper()
-
-	for _, entry := range entries {
-		doc := asManifest(t, entry, "spec.data[]")
-		if stringAt(doc, "secretKey") != secretKey {
-			continue
-		}
-		assertString(t, doc, remotePath, "remoteRef", "key")
-		assertString(t, doc, property, "remoteRef", "property")
-		return
-	}
-	t.Fatalf("ExternalSecret spec.data is missing secretKey %q", secretKey)
-}
-
-func testOpenBaoClickHouseBackupSecretProjection(t *testing.T) {
-	cases := []struct {
-		name       string
-		manifest   string
-		namespace  string
-		role       string
-		remotePath string
-	}{
-		{
-			name:       "root",
-			manifest:   "src/infrastructure/base/backup/root-clickhouse-backup-secrets.yaml",
-			namespace:  "tenant-root",
-			role:       "tenant-root-clickhouse-backup",
-			remotePath: "guardian/guardian-mgmt/tenant-root/clickhouse/guardian/backup",
-		},
-		{
-			name:       "dev",
-			manifest:   "src/infrastructure/products/platform/dev/secrets.yaml",
-			namespace:  "tenant-guardiancommercial-platform-dev",
-			role:       "tenant-guardiancommercial-platform-dev-clickhouse-backup",
-			remotePath: "guardian/guardian-mgmt/tenant-guardiancommercial-platform-dev/clickhouse/guardian/backup",
-		},
-		{
-			name:       "gamma",
-			manifest:   "src/infrastructure/products/platform/gamma/secrets.yaml",
-			namespace:  "tenant-guardiancommercial-platform-gamma",
-			role:       "tenant-guardiancommercial-platform-gamma-clickhouse-backup",
-			remotePath: "guardian/guardian-mgmt/tenant-guardiancommercial-platform-gamma/clickhouse/guardian/backup",
-		},
-		{
-			name:       "prod",
-			manifest:   "src/infrastructure/products/platform/prod/secrets.yaml",
-			namespace:  "tenant-guardiancommercial-platform-prod",
-			role:       "tenant-guardiancommercial-platform-prod-clickhouse-backup",
-			remotePath: "guardian/guardian-mgmt/tenant-guardiancommercial-platform-prod/clickhouse/guardian/backup",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			docs := readManifests(t, tc.manifest)
-			assertClickHouseBackupSecretProjection(t, docs, tc.namespace, tc.role, tc.remotePath)
-		})
-	}
-}
-
-func assertClickHouseBackupSecretProjection(t *testing.T, docs []manifest, namespace, role, remotePath string) {
-	t.Helper()
-
-	sa := findObject(t, docs, "ServiceAccount", namespace, "guardian-clickhouse-external-secrets")
-	assertString(t, sa, "v1", "apiVersion")
-	assertString(t, sa, "guardian", "metadata", "labels", "app.kubernetes.io/part-of")
-	assertString(t, sa, "clickhouse-backup", "metadata", "labels", "guardian.dev/secret-scope")
-
-	store := findObject(t, docs, "SecretStore", namespace, "openbao-clickhouse-backup")
-	assertString(t, store, "external-secrets.io/v1beta1", "apiVersion")
-	assertString(t, store, "http://openbao-guardian.tenant-root.svc:8200", "spec", "provider", "vault", "server")
-	assertString(t, store, "kv", "spec", "provider", "vault", "path")
-	assertString(t, store, "v2", "spec", "provider", "vault", "version")
-	assertString(t, store, "kubernetes", "spec", "provider", "vault", "auth", "kubernetes", "mountPath")
-	assertString(t, store, role, "spec", "provider", "vault", "auth", "kubernetes", "role")
-	assertString(t, store, "guardian-clickhouse-external-secrets", "spec", "provider", "vault", "auth", "kubernetes", "serviceAccountRef", "name")
-	assertStringSlice(t, store, []string{"openbao"}, "spec", "provider", "vault", "auth", "kubernetes", "serviceAccountRef", "audiences")
-
-	externalSecret := findObject(t, docs, "ExternalSecret", namespace, "guardian-clickhouse-backup-creds")
-	assertString(t, externalSecret, "external-secrets.io/v1beta1", "apiVersion")
-	assertString(t, externalSecret, "1h", "spec", "refreshInterval")
-	assertString(t, externalSecret, "openbao-clickhouse-backup", "spec", "secretStoreRef", "name")
-	assertString(t, externalSecret, "SecretStore", "spec", "secretStoreRef", "kind")
-	assertString(t, externalSecret, "guardian-clickhouse-backup-creds", "spec", "target", "name")
-	assertString(t, externalSecret, "Owner", "spec", "target", "creationPolicy")
-	assertString(t, externalSecret, "Opaque", "spec", "target", "template", "type")
-
-	data := sliceAt(t, externalSecret, "spec", "data")
-	if len(data) != 5 {
-		t.Fatalf("ExternalSecret spec.data has %d entries, want 5", len(data))
-	}
-	for _, key := range []string{"bucketName", "endpoint", "region", "accessKey", "secretKey"} {
-		assertExternalSecretData(t, data, key, remotePath, key)
+		assertTextNotContains(t, mainTF, forbidden, "guardian-mgmt-openbao main.tf")
 	}
 }
 
@@ -1347,7 +987,6 @@ type appExpectation struct {
 	nestedReplicas     map[string]int
 	noExternalDB       bool
 	postgresVersion    string
-	backupSecretName   string
 	backupPlanName     string
 	backupPlanSchedule string
 }
@@ -1374,17 +1013,20 @@ func assertApp(t *testing.T, docs []manifest, want appExpectation) {
 	if want.postgresVersion != "" {
 		assertString(t, app, want.postgresVersion, "spec", "version")
 	}
-	if want.backupSecretName != "" {
+	if want.backupPlanName != "" {
 		assertBool(t, app, true, "spec", "backup", "enabled")
 		assertString(t, app, "", "spec", "backup", "schedule")
-		assertString(t, app, want.backupSecretName, "spec", "backup", "s3CredentialsSecret", "name")
+		assertBool(t, app, true, "spec", "backup", "useSystemBucket")
+		if valueAt(app, "spec", "backup", "s3CredentialsSecret") != nil {
+			t.Fatalf("%s/%s must not set legacy backup s3CredentialsSecret", want.namespace, want.kind)
+		}
 
 		plan := findObject(t, docs, "Plan", want.namespace, want.backupPlanName)
 		assertString(t, plan, "backups.cozystack.io/v1alpha1", "apiVersion")
 		assertString(t, plan, "apps.cozystack.io", "spec", "applicationRef", "apiGroup")
 		assertString(t, plan, want.kind, "spec", "applicationRef", "kind")
 		assertString(t, plan, "guardian", "spec", "applicationRef", "name")
-		assertString(t, plan, "guardian-clickhouse-altinity", "spec", "backupClassName")
+		assertString(t, plan, "cozy-default", "spec", "backupClassName")
 		assertString(t, plan, "cron", "spec", "schedule", "type")
 		assertString(t, plan, want.backupPlanSchedule, "spec", "schedule", "cron")
 	}
@@ -1689,6 +1331,15 @@ func findObject(t *testing.T, docs []manifest, kind, namespace, name string) man
 		t.Fatalf("expected one %s %s/%s, got %d", kind, namespace, name, len(matches))
 	}
 	return matches[0]
+}
+
+func assertNoObject(t *testing.T, docs []manifest, kind, namespace, name string) {
+	t.Helper()
+
+	matches := findObjects(t, docs, kind, namespace, name)
+	if len(matches) != 0 {
+		t.Fatalf("expected no %s %s/%s, got %d", kind, namespace, name, len(matches))
+	}
 }
 
 func findObjects(t *testing.T, docs []manifest, kind, namespace, name string) []manifest {
