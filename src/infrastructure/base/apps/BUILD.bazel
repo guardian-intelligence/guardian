@@ -2,6 +2,7 @@ filegroup(
     name = "manifests",
     srcs = [
         "core-services.yaml",
+        "seaweedfs-s3-ingress-service.yaml",
     ],
     visibility = ["//visibility:public"],
 )

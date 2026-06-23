@@ -559,6 +559,20 @@ func testRootTenantCoreServices(t *testing.T) {
 	assertString(t, seaweedfs, "replicated", "spec", "volume", "storageClass")
 	assertInt(t, seaweedfs, 3, "spec", "s3", "replicas")
 
+	seaweedfsS3Service := findObject(t, readManifests(t, "src/infrastructure/base/apps/seaweedfs-s3-ingress-service.yaml"), "Service", "tenant-root", "seaweedfs-system-s3")
+	assertString(t, seaweedfsS3Service, "v1", "apiVersion")
+	assertString(t, seaweedfsS3Service, "seaweedfs", "metadata", "labels", "app.kubernetes.io/name")
+	assertString(t, seaweedfsS3Service, "seaweedfs-system", "metadata", "labels", "app.kubernetes.io/instance")
+	assertString(t, seaweedfsS3Service, "s3", "metadata", "labels", "app.kubernetes.io/component")
+	assertString(t, seaweedfsS3Service, "ClusterIP", "spec", "type")
+	assertString(t, seaweedfsS3Service, "Cluster", "spec", "internalTrafficPolicy")
+	assertString(t, seaweedfsS3Service, "PreferClose", "spec", "trafficDistribution")
+	assertString(t, seaweedfsS3Service, "seaweedfs", "spec", "selector", "app.kubernetes.io/name")
+	assertString(t, seaweedfsS3Service, "seaweedfs-system", "spec", "selector", "app.kubernetes.io/instance")
+	assertString(t, seaweedfsS3Service, "s3", "spec", "selector", "app.kubernetes.io/component")
+	assertServicePort(t, seaweedfsS3Service, "swfs-s3", 8333)
+	assertServicePort(t, seaweedfsS3Service, "metrics", 9327)
+
 	assertApp(t, docs, appExpectation{
 		kind:            "Postgres",
 		namespace:       "tenant-root",
@@ -1538,6 +1552,21 @@ func assertIngressHost(t *testing.T, ingress manifest, host string) {
 	assertString(t, path, "Prefix", "pathType")
 	assertString(t, path, "company-site", "backend", "service", "name")
 	assertInt(t, path, 80, "backend", "service", "port", "number")
+}
+
+func assertServicePort(t *testing.T, service manifest, name string, port int) {
+	t.Helper()
+
+	for _, value := range sliceAt(t, service, "spec", "ports") {
+		entry := asManifest(t, value, "spec.ports[]")
+		if stringAt(entry, "name") == name {
+			assertInt(t, entry, port, "port")
+			assertInt(t, entry, port, "targetPort")
+			assertString(t, entry, "TCP", "protocol")
+			return
+		}
+	}
+	t.Fatalf("service %s/%s is missing port %q", stringAt(service, "metadata", "namespace"), stringAt(service, "metadata", "name"), name)
 }
 
 func stringAt(doc manifest, path ...string) string {
