@@ -26,14 +26,14 @@ dependent manifests together; do not let topology drift through one-off edits.
 | Cozystack platform package | `src/infrastructure/base/cozystack/platform.yaml` |
 | Core Cozystack apps | `src/infrastructure/base/apps/core-services.yaml` |
 | Backup strategy classes | `src/infrastructure/base/backup/` |
-| OpenBao-backed secret delivery | `src/infrastructure/base/secrets/`, `src/infrastructure/environments/*/secrets.yaml` |
+| OpenBao-backed secret delivery | `src/infrastructure/base/backup/root-*-backup-secrets.yaml`, `src/infrastructure/products/platform/*/secrets.yaml` |
 | MetalLB L2 pool | `src/infrastructure/base/networking/metallb.yaml` |
 | Kube-OVN MTU | `src/infrastructure/base/networking/subnet-mtu.yaml` |
 | Flux handoff | `src/infrastructure/base/flux/sync.yaml` |
 | OpenBao app | `src/infrastructure/base/openbao/` |
 | LINSTOR storage | `src/infrastructure/base/storage/` |
-| Environment tenants | `src/infrastructure/base/tenants/environments.yaml` |
-| Environment Cozystack apps | `src/infrastructure/environments/` |
+| Product tenant topology | `src/infrastructure/tenants/guardian-commercial/`, `src/infrastructure/tenants/platform/` |
+| Product stage Cozystack apps | `src/infrastructure/products/platform/` |
 | Company-site OCI artifact | `src/products/company/site/` |
 
 ## Current Facts
@@ -106,7 +106,7 @@ bazelisk test //src/infrastructure/tests:manifest_invariants_test
 That test parses the checked-in Kubernetes YAML and uses the repo-pinned `talm`
 binary to render the management control-plane template offline with throwaway
 secrets under the Bazel test temp directory. It verifies the platform package
-publishes the dashboard/API endpoints, environment tenants use the expected
+publishes the dashboard/API endpoints, product stage tenants use the expected
 `*.gi.org` hosts, OpenTofu/Talm/Kubernetes manifests stay aligned with the
 management OpenTofu topology, the rendered Talos config keeps the L2 VIP and
 VLAN control-plane path, KubeSpan/WireGuard stays absent, MetalLB and Kube-OVN
@@ -427,14 +427,24 @@ Flux reconciles the management cluster in ordered slices:
 - `guardian-mgmt-base` reconciles `src/infrastructure/base` after storage is
   declared. It applies root Postgres/Harbor/ClickHouse apps, backup strategy
   and BackupClass manifests, backup credential projections, networking
-  manifests, environment tenants, OpenBao, and the Flux objects themselves.
-- `guardian-mgmt-tenant-apps` reconciles `src/infrastructure/environments`
-  after `guardian-mgmt-base` has created `tenant-dev`, `tenant-gamma`, and
-  `tenant-prod`. The environment layer also declares each tenant's CNPG backup
-  credential projection.
+  manifests, OpenBao, and the Flux objects themselves.
+- `guardian-mgmt-tenant-apps` keeps the existing live Flux object name and now
+  reconciles `src/infrastructure/tenants/guardian-commercial`. This creates the
+  `guardiancommercial` product boundary under `tenant-root` and prunes the old
+  top-level environment inventory.
+- `guardian-mgmt-platform-tenant` reconciles
+  `src/infrastructure/tenants/platform` after the commercial boundary exists.
+- `guardian-mgmt-platform-<stage>-tenant` reconciles
+  `src/infrastructure/tenants/platform/<stage>` and waits for the Cozystack
+  tenant controller to create the stage namespace.
+- `guardian-mgmt-platform-dev`, `guardian-mgmt-platform-gamma`, and
+  `guardian-mgmt-platform-prod` reconcile `src/infrastructure/products/platform/*`
+  in dev -> gamma -> prod order. Those product stage wrappers apply the core
+  service, company-site, and backup credential projection manifests.
 
-All Flux Kustomizations are apply-only (`wait: false`). Cozystack app CRs fan
-out into HelmReleases and stateful workloads; service readiness is proven by
+Flux waits on tenant-only slices, where namespace creation is the desired
+readiness signal. Product app slices use `wait: false` because Cozystack app CRs
+fan out into HelmReleases and stateful workloads. Service readiness is proven by
 the Cozystack app resources' `Ready` and `WorkloadsReady` conditions plus the
 component-specific live drill output, not by treating Flux's apply status as
 service health.
@@ -499,13 +509,14 @@ startup, then converts app resources such as `Tenant`, `Postgres`, `Harbor`, and
 mirrors HelmRelease `Ready` into `.status.conditions` and adds
 `WorkloadsReady` when the chart declares Cozystack `WorkloadMonitor` resources.
 
-For `Tenant`, the Cozystack source sets `release.prefix: tenant-`. Applying
-`Tenant/dev` in `tenant-root` therefore creates a `HelmRelease` named
-`tenant-dev` in `tenant-root`. The tenant chart then creates namespace
-`tenant-dev` and writes that namespace's `cozystack-values` Secret. The checked
-in `dev`, `gamma`, and `prod` tenants intentionally inherit root `etcd`,
-ingress, monitoring, and SeaweedFS; they only set explicit environment hostnames
-for now.
+For `Tenant`, the Cozystack source sets `release.prefix: tenant-`, and
+Cozystack 1.4 tenant names are lowercase alphanumeric only. Applying
+`Tenant/guardiancommercial` in `tenant-root` creates namespace
+`tenant-guardiancommercial`; applying `Tenant/platform` there creates
+`tenant-guardiancommercial-platform`; applying `Tenant/dev`, `Tenant/gamma`, and
+`Tenant/prod` in that product namespace creates the stage namespaces. The stage
+tenants intentionally inherit root `etcd`, ingress, monitoring, and SeaweedFS;
+they only set explicit stage hostnames for now.
 
 The same source-level naming rule applies to Guardian's core services:
 `Postgres/guardian` becomes `HelmRelease/postgres-guardian`,
@@ -601,19 +612,19 @@ Harbor app, nested system HelmRelease, registry COSI BucketClaim/BucketAccess,
 and ORAS push/pull path must all work from the live cluster.
 
 The checked-in External Secrets layer declares the backup Secrets for
-`Postgres/guardian` and `ClickHouse/guardian` in `tenant-root`, `tenant-dev`,
-`tenant-gamma`, and `tenant-prod`:
+`Postgres/guardian` and `ClickHouse/guardian` in `tenant-root`, `tenant-guardiancommercial-platform-dev`,
+`tenant-guardiancommercial-platform-gamma`, and `tenant-guardiancommercial-platform-prod`:
 
 | Namespace | Component | OpenBao role | OpenBao kv-v2 path |
 | - | - | - | - |
 | `tenant-root` | Postgres | `tenant-root-cnpg-backup` | `guardian/guardian-mgmt/tenant-root/postgres/guardian/cnpg-backup` |
-| `tenant-dev` | Postgres | `tenant-dev-cnpg-backup` | `guardian/guardian-mgmt/tenant-dev/postgres/guardian/cnpg-backup` |
-| `tenant-gamma` | Postgres | `tenant-gamma-cnpg-backup` | `guardian/guardian-mgmt/tenant-gamma/postgres/guardian/cnpg-backup` |
-| `tenant-prod` | Postgres | `tenant-prod-cnpg-backup` | `guardian/guardian-mgmt/tenant-prod/postgres/guardian/cnpg-backup` |
+| `tenant-guardiancommercial-platform-dev` | Postgres | `tenant-guardiancommercial-platform-dev-cnpg-backup` | `guardian/guardian-mgmt/tenant-guardiancommercial-platform-dev/postgres/guardian/cnpg-backup` |
+| `tenant-guardiancommercial-platform-gamma` | Postgres | `tenant-guardiancommercial-platform-gamma-cnpg-backup` | `guardian/guardian-mgmt/tenant-guardiancommercial-platform-gamma/postgres/guardian/cnpg-backup` |
+| `tenant-guardiancommercial-platform-prod` | Postgres | `tenant-guardiancommercial-platform-prod-cnpg-backup` | `guardian/guardian-mgmt/tenant-guardiancommercial-platform-prod/postgres/guardian/cnpg-backup` |
 | `tenant-root` | ClickHouse | `tenant-root-clickhouse-backup` | `guardian/guardian-mgmt/tenant-root/clickhouse/guardian/backup` |
-| `tenant-dev` | ClickHouse | `tenant-dev-clickhouse-backup` | `guardian/guardian-mgmt/tenant-dev/clickhouse/guardian/backup` |
-| `tenant-gamma` | ClickHouse | `tenant-gamma-clickhouse-backup` | `guardian/guardian-mgmt/tenant-gamma/clickhouse/guardian/backup` |
-| `tenant-prod` | ClickHouse | `tenant-prod-clickhouse-backup` | `guardian/guardian-mgmt/tenant-prod/clickhouse/guardian/backup` |
+| `tenant-guardiancommercial-platform-dev` | ClickHouse | `tenant-guardiancommercial-platform-dev-clickhouse-backup` | `guardian/guardian-mgmt/tenant-guardiancommercial-platform-dev/clickhouse/guardian/backup` |
+| `tenant-guardiancommercial-platform-gamma` | ClickHouse | `tenant-guardiancommercial-platform-gamma-clickhouse-backup` | `guardian/guardian-mgmt/tenant-guardiancommercial-platform-gamma/clickhouse/guardian/backup` |
+| `tenant-guardiancommercial-platform-prod` | ClickHouse | `tenant-guardiancommercial-platform-prod-clickhouse-backup` | `guardian/guardian-mgmt/tenant-guardiancommercial-platform-prod/clickhouse/guardian/backup` |
 
 Each Postgres path must contain `AWS_ACCESS_KEY_ID` and
 `AWS_SECRET_ACCESS_KEY`; ESO writes them to `guardian-cnpg-backup-creds` in the
@@ -644,12 +655,12 @@ scheduled jobs can succeed.
 The checked-in environment app layer declares the same core service set in each
 environment namespace:
 
-- `tenant-dev`: `Postgres/guardian`, `Harbor/guardian` at `harbor.dev.gi.org`,
+- `tenant-guardiancommercial-platform-dev`: `Postgres/guardian`, `Harbor/guardian` at `harbor.dev.gi.org`,
   and `ClickHouse/guardian` with a daily backup Plan at `23 1 * * *`.
-- `tenant-gamma`: `Postgres/guardian`, `Harbor/guardian` at
+- `tenant-guardiancommercial-platform-gamma`: `Postgres/guardian`, `Harbor/guardian` at
   `harbor.gamma.gi.org`, and `ClickHouse/guardian` with a daily backup Plan at
   `29 1 * * *`.
-- `tenant-prod`: `Postgres/guardian`, `Harbor/guardian` at
+- `tenant-guardiancommercial-platform-prod`: `Postgres/guardian`, `Harbor/guardian` at
   `harbor.prod.gi.org`, and `ClickHouse/guardian` with a daily backup Plan at
   `41 1 * * *`.
 
@@ -1071,11 +1082,11 @@ the project-public invariant the deployments rely on.
 
 The checked-in environment layer declares:
 
-- `tenant-dev`: `Deployment`, `Service`, `PodDisruptionBudget`, and `Ingress`
+- `tenant-guardiancommercial-platform-dev`: `Deployment`, `Service`, `PodDisruptionBudget`, and `Ingress`
   for `dev.gi.org`.
-- `tenant-gamma`: `Deployment`, `Service`, `PodDisruptionBudget`, and
+- `tenant-guardiancommercial-platform-gamma`: `Deployment`, `Service`, `PodDisruptionBudget`, and
   `Ingress` for `gamma.gi.org`.
-- `tenant-prod`: `Deployment`, `Service`, `PodDisruptionBudget`, and
+- `tenant-guardiancommercial-platform-prod`: `Deployment`, `Service`, `PodDisruptionBudget`, and
   `Ingress` for `guardianintelligence.org`.
 
 Each deployment runs three replicas, uses the `tenant-root` ingress class, and
@@ -1118,29 +1129,33 @@ kubectl -n cozy-backup-controller wait --for=condition=Ready helmrelease/backup-
 kubectl -n cozy-backup-controller wait --for=condition=Available deployment/backup-controller deployment/backupstrategy-controller
 kubectl get storageclass
 kubectl -n tenant-root get tenants.apps.cozystack.io
+kubectl -n tenant-guardiancommercial get tenants.apps.cozystack.io
+kubectl -n tenant-guardiancommercial-platform get tenants.apps.cozystack.io
 kubectl -n tenant-root get postgreses.apps.cozystack.io,harbors.apps.cozystack.io,clickhouses.apps.cozystack.io
-kubectl get ns tenant-dev tenant-gamma tenant-prod \
+kubectl get ns tenant-guardiancommercial-platform-dev tenant-guardiancommercial-platform-gamma tenant-guardiancommercial-platform-prod \
   -o custom-columns=NAME:.metadata.name,HOST:.metadata.labels.namespace\\.cozystack\\.io/host,INGRESS:.metadata.labels.namespace\\.cozystack\\.io/ingress
-kubectl -n tenant-dev get postgreses.apps.cozystack.io,harbors.apps.cozystack.io,clickhouses.apps.cozystack.io
-kubectl -n tenant-gamma get postgreses.apps.cozystack.io,harbors.apps.cozystack.io,clickhouses.apps.cozystack.io
-kubectl -n tenant-prod get postgreses.apps.cozystack.io,harbors.apps.cozystack.io,clickhouses.apps.cozystack.io
+kubectl -n tenant-guardiancommercial-platform-dev get postgreses.apps.cozystack.io,harbors.apps.cozystack.io,clickhouses.apps.cozystack.io
+kubectl -n tenant-guardiancommercial-platform-gamma get postgreses.apps.cozystack.io,harbors.apps.cozystack.io,clickhouses.apps.cozystack.io
+kubectl -n tenant-guardiancommercial-platform-prod get postgreses.apps.cozystack.io,harbors.apps.cozystack.io,clickhouses.apps.cozystack.io
 kubectl -n cozy-dashboard get deployment/cozy-dashboard-console deployment/incloud-web-gatekeeper
 kubectl -n cozy-dashboard get service/cozy-dashboard-console service/incloud-web-gatekeeper ingress/dashboard-web-ingress
-kubectl -n tenant-root wait --for=condition=Ready tenants.apps.cozystack.io/dev tenants.apps.cozystack.io/gamma tenants.apps.cozystack.io/prod
+kubectl -n tenant-root wait --for=condition=Ready tenants.apps.cozystack.io/guardiancommercial
+kubectl -n tenant-guardiancommercial wait --for=condition=Ready tenants.apps.cozystack.io/platform
+kubectl -n tenant-guardiancommercial-platform wait --for=condition=Ready tenants.apps.cozystack.io/dev tenants.apps.cozystack.io/gamma tenants.apps.cozystack.io/prod
 kubectl -n tenant-root wait --for=condition=Ready postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian openbaos.apps.cozystack.io/guardian
 kubectl -n tenant-root wait --for=condition=WorkloadsReady postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian
-kubectl -n tenant-dev wait --for=condition=Ready postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian
-kubectl -n tenant-dev wait --for=condition=WorkloadsReady postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian
-kubectl -n tenant-gamma wait --for=condition=Ready postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian
-kubectl -n tenant-gamma wait --for=condition=WorkloadsReady postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian
-kubectl -n tenant-prod wait --for=condition=Ready postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian
-kubectl -n tenant-prod wait --for=condition=WorkloadsReady postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian
-kubectl -n tenant-dev get deploy,svc,poddisruptionbudget,ingress company-site
-kubectl -n tenant-dev get networkpolicy company-site-ingress
-kubectl -n tenant-gamma get deploy,svc,poddisruptionbudget,ingress company-site
-kubectl -n tenant-gamma get networkpolicy company-site-ingress
-kubectl -n tenant-prod get deploy,svc,poddisruptionbudget,ingress company-site
-kubectl -n tenant-prod get networkpolicy company-site-ingress
+kubectl -n tenant-guardiancommercial-platform-dev wait --for=condition=Ready postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian
+kubectl -n tenant-guardiancommercial-platform-dev wait --for=condition=WorkloadsReady postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian
+kubectl -n tenant-guardiancommercial-platform-gamma wait --for=condition=Ready postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian
+kubectl -n tenant-guardiancommercial-platform-gamma wait --for=condition=WorkloadsReady postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian
+kubectl -n tenant-guardiancommercial-platform-prod wait --for=condition=Ready postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian
+kubectl -n tenant-guardiancommercial-platform-prod wait --for=condition=WorkloadsReady postgreses.apps.cozystack.io/guardian harbors.apps.cozystack.io/guardian clickhouses.apps.cozystack.io/guardian
+kubectl -n tenant-guardiancommercial-platform-dev get deploy,svc,poddisruptionbudget,ingress company-site
+kubectl -n tenant-guardiancommercial-platform-dev get networkpolicy company-site-ingress
+kubectl -n tenant-guardiancommercial-platform-gamma get deploy,svc,poddisruptionbudget,ingress company-site
+kubectl -n tenant-guardiancommercial-platform-gamma get networkpolicy company-site-ingress
+kubectl -n tenant-guardiancommercial-platform-prod get deploy,svc,poddisruptionbudget,ingress company-site
+kubectl -n tenant-guardiancommercial-platform-prod get networkpolicy company-site-ingress
 kubectl -n tenant-root get openbao guardian
 kubectl -n tenant-root get helmrelease openbao-guardian
 kubectl -n tenant-root get helmrelease openbao-guardian-system
@@ -1155,39 +1170,39 @@ kubectl -n tenant-root get secretstores.external-secrets.io openbao-clickhouse-b
 kubectl -n tenant-root get externalsecrets.external-secrets.io guardian-clickhouse-backup-creds
 kubectl -n tenant-root get secret guardian-clickhouse-backup-creds
 kubectl -n tenant-root get plans.backups.cozystack.io guardian-clickhouse-daily
-kubectl -n tenant-dev get secretstores.external-secrets.io openbao
-kubectl -n tenant-dev get externalsecrets.external-secrets.io guardian-cnpg-backup-creds
-kubectl -n tenant-dev get secret guardian-cnpg-backup-creds
-kubectl -n tenant-dev get secretstores.external-secrets.io openbao-clickhouse-backup
-kubectl -n tenant-dev get externalsecrets.external-secrets.io guardian-clickhouse-backup-creds
-kubectl -n tenant-dev get secret guardian-clickhouse-backup-creds
-kubectl -n tenant-dev get plans.backups.cozystack.io guardian-clickhouse-daily
-kubectl -n tenant-gamma get secretstores.external-secrets.io openbao
-kubectl -n tenant-gamma get externalsecrets.external-secrets.io guardian-cnpg-backup-creds
-kubectl -n tenant-gamma get secret guardian-cnpg-backup-creds
-kubectl -n tenant-gamma get secretstores.external-secrets.io openbao-clickhouse-backup
-kubectl -n tenant-gamma get externalsecrets.external-secrets.io guardian-clickhouse-backup-creds
-kubectl -n tenant-gamma get secret guardian-clickhouse-backup-creds
-kubectl -n tenant-gamma get plans.backups.cozystack.io guardian-clickhouse-daily
-kubectl -n tenant-prod get secretstores.external-secrets.io openbao
-kubectl -n tenant-prod get externalsecrets.external-secrets.io guardian-cnpg-backup-creds
-kubectl -n tenant-prod get secret guardian-cnpg-backup-creds
-kubectl -n tenant-prod get secretstores.external-secrets.io openbao-clickhouse-backup
-kubectl -n tenant-prod get externalsecrets.external-secrets.io guardian-clickhouse-backup-creds
-kubectl -n tenant-prod get secret guardian-clickhouse-backup-creds
-kubectl -n tenant-prod get plans.backups.cozystack.io guardian-clickhouse-daily
+kubectl -n tenant-guardiancommercial-platform-dev get secretstores.external-secrets.io openbao
+kubectl -n tenant-guardiancommercial-platform-dev get externalsecrets.external-secrets.io guardian-cnpg-backup-creds
+kubectl -n tenant-guardiancommercial-platform-dev get secret guardian-cnpg-backup-creds
+kubectl -n tenant-guardiancommercial-platform-dev get secretstores.external-secrets.io openbao-clickhouse-backup
+kubectl -n tenant-guardiancommercial-platform-dev get externalsecrets.external-secrets.io guardian-clickhouse-backup-creds
+kubectl -n tenant-guardiancommercial-platform-dev get secret guardian-clickhouse-backup-creds
+kubectl -n tenant-guardiancommercial-platform-dev get plans.backups.cozystack.io guardian-clickhouse-daily
+kubectl -n tenant-guardiancommercial-platform-gamma get secretstores.external-secrets.io openbao
+kubectl -n tenant-guardiancommercial-platform-gamma get externalsecrets.external-secrets.io guardian-cnpg-backup-creds
+kubectl -n tenant-guardiancommercial-platform-gamma get secret guardian-cnpg-backup-creds
+kubectl -n tenant-guardiancommercial-platform-gamma get secretstores.external-secrets.io openbao-clickhouse-backup
+kubectl -n tenant-guardiancommercial-platform-gamma get externalsecrets.external-secrets.io guardian-clickhouse-backup-creds
+kubectl -n tenant-guardiancommercial-platform-gamma get secret guardian-clickhouse-backup-creds
+kubectl -n tenant-guardiancommercial-platform-gamma get plans.backups.cozystack.io guardian-clickhouse-daily
+kubectl -n tenant-guardiancommercial-platform-prod get secretstores.external-secrets.io openbao
+kubectl -n tenant-guardiancommercial-platform-prod get externalsecrets.external-secrets.io guardian-cnpg-backup-creds
+kubectl -n tenant-guardiancommercial-platform-prod get secret guardian-cnpg-backup-creds
+kubectl -n tenant-guardiancommercial-platform-prod get secretstores.external-secrets.io openbao-clickhouse-backup
+kubectl -n tenant-guardiancommercial-platform-prod get externalsecrets.external-secrets.io guardian-clickhouse-backup-creds
+kubectl -n tenant-guardiancommercial-platform-prod get secret guardian-clickhouse-backup-creds
+kubectl -n tenant-guardiancommercial-platform-prod get plans.backups.cozystack.io guardian-clickhouse-daily
 kubectl get cnpgs.strategy.backups.cozystack.io guardian-postgres-r2
 kubectl get backupclasses.backups.cozystack.io guardian-postgres-cnpg
 kubectl get altinities.strategy.backups.cozystack.io guardian-clickhouse-altinity
 kubectl get backupclasses.backups.cozystack.io guardian-clickhouse-altinity
 kubectl -n tenant-root wait --for=condition=Ready secretstores.external-secrets.io/openbao secretstores.external-secrets.io/openbao-clickhouse-backup
 kubectl -n tenant-root wait --for=condition=Ready externalsecrets.external-secrets.io/guardian-cnpg-backup-creds externalsecrets.external-secrets.io/guardian-clickhouse-backup-creds
-kubectl -n tenant-dev wait --for=condition=Ready secretstores.external-secrets.io/openbao secretstores.external-secrets.io/openbao-clickhouse-backup
-kubectl -n tenant-dev wait --for=condition=Ready externalsecrets.external-secrets.io/guardian-cnpg-backup-creds externalsecrets.external-secrets.io/guardian-clickhouse-backup-creds
-kubectl -n tenant-gamma wait --for=condition=Ready secretstores.external-secrets.io/openbao secretstores.external-secrets.io/openbao-clickhouse-backup
-kubectl -n tenant-gamma wait --for=condition=Ready externalsecrets.external-secrets.io/guardian-cnpg-backup-creds externalsecrets.external-secrets.io/guardian-clickhouse-backup-creds
-kubectl -n tenant-prod wait --for=condition=Ready secretstores.external-secrets.io/openbao secretstores.external-secrets.io/openbao-clickhouse-backup
-kubectl -n tenant-prod wait --for=condition=Ready externalsecrets.external-secrets.io/guardian-cnpg-backup-creds externalsecrets.external-secrets.io/guardian-clickhouse-backup-creds
+kubectl -n tenant-guardiancommercial-platform-dev wait --for=condition=Ready secretstores.external-secrets.io/openbao secretstores.external-secrets.io/openbao-clickhouse-backup
+kubectl -n tenant-guardiancommercial-platform-dev wait --for=condition=Ready externalsecrets.external-secrets.io/guardian-cnpg-backup-creds externalsecrets.external-secrets.io/guardian-clickhouse-backup-creds
+kubectl -n tenant-guardiancommercial-platform-gamma wait --for=condition=Ready secretstores.external-secrets.io/openbao secretstores.external-secrets.io/openbao-clickhouse-backup
+kubectl -n tenant-guardiancommercial-platform-gamma wait --for=condition=Ready externalsecrets.external-secrets.io/guardian-cnpg-backup-creds externalsecrets.external-secrets.io/guardian-clickhouse-backup-creds
+kubectl -n tenant-guardiancommercial-platform-prod wait --for=condition=Ready secretstores.external-secrets.io/openbao secretstores.external-secrets.io/openbao-clickhouse-backup
+kubectl -n tenant-guardiancommercial-platform-prod wait --for=condition=Ready externalsecrets.external-secrets.io/guardian-cnpg-backup-creds externalsecrets.external-secrets.io/guardian-clickhouse-backup-creds
 kubectl -n tenant-root wait --for=condition=Ready helmrelease/openbao-guardian helmrelease/openbao-guardian-system
 kubectl -n tenant-root wait --for=jsonpath='{.status.readyReplicas}'=3 statefulset/openbao-guardian
 kubectl -n tenant-root get helmrelease harbor-guardian harbor-guardian-system
@@ -1203,8 +1218,8 @@ kubectl -n tenant-root get vmpodscrapes.operator.victoriametrics.com clickhouse-
 kubectl -n tenant-root get workloadmonitors.cozystack.io postgres-guardian clickhouse-guardian clickhouse-guardian-keeper
 ```
 
-Run the Harbor, Postgres, and ClickHouse child-resource checks in `tenant-dev`,
-`tenant-gamma`, and `tenant-prod` as well. `aspect infra live` performs those
+Run the Harbor, Postgres, and ClickHouse child-resource checks in `tenant-guardiancommercial-platform-dev`,
+`tenant-guardiancommercial-platform-gamma`, and `tenant-guardiancommercial-platform-prod` as well. `aspect infra live` performs those
 namespace repetitions automatically and also checks selected CR spec fields.
 
 Expected results:
@@ -1223,7 +1238,8 @@ Expected results:
 - Flux `guardian-mgmt-platform` reconciles `src/infrastructure/base/cozystack`,
   `guardian-mgmt-storage` reconciles `src/infrastructure/base/storage`,
   `guardian-mgmt-base` reconciles `src/infrastructure/base`, and
-  `guardian-mgmt-tenant-apps` reconciles `src/infrastructure/environments`
+  the product tenant graph reconciles `src/infrastructure/tenants/*` plus
+  `src/infrastructure/products/platform/*`
 - `Ingress/ingress`, `HelmRelease/ingress`, and nested
   `HelmRelease/ingress-nginx-system` are ready in `tenant-root`
 - storage classes include `local`, `local-retain`, `replicated`, and

@@ -12,40 +12,40 @@ locals {
       namespace       = "tenant-root"
       path            = "guardian/guardian-mgmt/tenant-root/postgres/guardian/cnpg-backup"
     }
-    tenant-dev-cnpg-backup = {
+    tenant-guardiancommercial-platform-dev-cnpg-backup = {
       service_account = "guardian-external-secrets"
-      namespace       = "tenant-dev"
-      path            = "guardian/guardian-mgmt/tenant-dev/postgres/guardian/cnpg-backup"
+      namespace       = "tenant-guardiancommercial-platform-dev"
+      path            = "guardian/guardian-mgmt/tenant-guardiancommercial-platform-dev/postgres/guardian/cnpg-backup"
     }
-    tenant-gamma-cnpg-backup = {
+    tenant-guardiancommercial-platform-gamma-cnpg-backup = {
       service_account = "guardian-external-secrets"
-      namespace       = "tenant-gamma"
-      path            = "guardian/guardian-mgmt/tenant-gamma/postgres/guardian/cnpg-backup"
+      namespace       = "tenant-guardiancommercial-platform-gamma"
+      path            = "guardian/guardian-mgmt/tenant-guardiancommercial-platform-gamma/postgres/guardian/cnpg-backup"
     }
-    tenant-prod-cnpg-backup = {
+    tenant-guardiancommercial-platform-prod-cnpg-backup = {
       service_account = "guardian-external-secrets"
-      namespace       = "tenant-prod"
-      path            = "guardian/guardian-mgmt/tenant-prod/postgres/guardian/cnpg-backup"
+      namespace       = "tenant-guardiancommercial-platform-prod"
+      path            = "guardian/guardian-mgmt/tenant-guardiancommercial-platform-prod/postgres/guardian/cnpg-backup"
     }
     tenant-root-clickhouse-backup = {
       service_account = "guardian-clickhouse-external-secrets"
       namespace       = "tenant-root"
       path            = "guardian/guardian-mgmt/tenant-root/clickhouse/guardian/backup"
     }
-    tenant-dev-clickhouse-backup = {
+    tenant-guardiancommercial-platform-dev-clickhouse-backup = {
       service_account = "guardian-clickhouse-external-secrets"
-      namespace       = "tenant-dev"
-      path            = "guardian/guardian-mgmt/tenant-dev/clickhouse/guardian/backup"
+      namespace       = "tenant-guardiancommercial-platform-dev"
+      path            = "guardian/guardian-mgmt/tenant-guardiancommercial-platform-dev/clickhouse/guardian/backup"
     }
-    tenant-gamma-clickhouse-backup = {
+    tenant-guardiancommercial-platform-gamma-clickhouse-backup = {
       service_account = "guardian-clickhouse-external-secrets"
-      namespace       = "tenant-gamma"
-      path            = "guardian/guardian-mgmt/tenant-gamma/clickhouse/guardian/backup"
+      namespace       = "tenant-guardiancommercial-platform-gamma"
+      path            = "guardian/guardian-mgmt/tenant-guardiancommercial-platform-gamma/clickhouse/guardian/backup"
     }
-    tenant-prod-clickhouse-backup = {
+    tenant-guardiancommercial-platform-prod-clickhouse-backup = {
       service_account = "guardian-clickhouse-external-secrets"
-      namespace       = "tenant-prod"
-      path            = "guardian/guardian-mgmt/tenant-prod/clickhouse/guardian/backup"
+      namespace       = "tenant-guardiancommercial-platform-prod"
+      path            = "guardian/guardian-mgmt/tenant-guardiancommercial-platform-prod/clickhouse/guardian/backup"
     }
   }
 }

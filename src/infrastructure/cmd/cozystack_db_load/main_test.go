@@ -19,7 +19,7 @@ func TestPostgresJobManifest(t *testing.T) {
 	got := postgresJobManifest(cfg)
 	for _, want := range []string{
 		"kind: Job\nmetadata:\n  name: guardian-dev-postgres-load-test\n",
-		"namespace: tenant-dev\n",
+		"namespace: tenant-guardiancommercial-platform-dev\n",
 		"guardian.dev/component: postgres\n",
 		"image: " + postgresBenchImage + "\n",
 		"value: postgres-guardian-rw\n",
@@ -41,7 +41,7 @@ func TestClickHouseJobManifest(t *testing.T) {
 	got := clickHouseJobManifest(cfg)
 	for _, want := range []string{
 		"kind: Job\nmetadata:\n  name: guardian-dev-clickhouse-load-test\n",
-		"namespace: tenant-dev\n",
+		"namespace: tenant-guardiancommercial-platform-dev\n",
 		"guardian.dev/component: clickhouse\n",
 		"image: " + clickhouseBenchImage + "\n",
 		"value: chendpoint-clickhouse-guardian\n",
@@ -87,7 +87,7 @@ func TestNamespaceAndComponentValidation(t *testing.T) {
 	if got, err := namespaceForStage("root"); err != nil || got != "tenant-root" {
 		t.Fatalf("namespaceForStage(root) = %q, %v", got, err)
 	}
-	if got, err := namespaceForStage("prod"); err != nil || got != "tenant-prod" {
+	if got, err := namespaceForStage("prod"); err != nil || got != "tenant-guardiancommercial-platform-prod" {
 		t.Fatalf("namespaceForStage(prod) = %q, %v", got, err)
 	}
 	if _, err := namespaceForStage("staging"); err == nil {
@@ -118,7 +118,7 @@ func baseConfig(component string) dbLoadConfig {
 		RequestTimeout:            "15s",
 		WaitTimeout:               "20m",
 		Stage:                     "dev",
-		Namespace:                 "tenant-dev",
+		Namespace:                 "tenant-guardiancommercial-platform-dev",
 		Component:                 component,
 		ApplicationName:           "guardian",
 		Name:                      name,

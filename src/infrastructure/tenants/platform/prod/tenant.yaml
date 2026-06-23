@@ -1,0 +1,15 @@
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: prod
+  namespace: tenant-guardiancommercial-platform
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: platform
+    guardian.dev/stage: prod
+spec:
+  host: prod.gi.org
+  etcd: false
+  ingress: false
+  monitoring: false
+  seaweedfs: false

@@ -1,0 +1,15 @@
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: gamma
+  namespace: tenant-guardiancommercial-platform
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: platform
+    guardian.dev/stage: gamma
+spec:
+  host: gamma.gi.org
+  etcd: false
+  ingress: false
+  monitoring: false
+  seaweedfs: false

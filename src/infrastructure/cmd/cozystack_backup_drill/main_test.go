@@ -17,7 +17,7 @@ func TestDefaultJobName(t *testing.T) {
 func TestBackupJobManifest(t *testing.T) {
 	cfg := drillConfig{
 		Stage:           "dev",
-		Namespace:       "tenant-dev",
+		Namespace:       "tenant-guardiancommercial-platform-dev",
 		Component:       componentSpec{Kind: "ClickHouse", BackupClass: "guardian-clickhouse-altinity"},
 		ApplicationName: "guardian",
 		Name:            "guardian-dev-clickhouse-test",
@@ -25,7 +25,7 @@ func TestBackupJobManifest(t *testing.T) {
 	got := backupJobManifest(cfg)
 	for _, want := range []string{
 		"apiVersion: backups.cozystack.io/v1alpha1\nkind: BackupJob\n",
-		"name: guardian-dev-clickhouse-test\n  namespace: tenant-dev\n",
+		"name: guardian-dev-clickhouse-test\n  namespace: tenant-guardiancommercial-platform-dev\n",
 		"guardian.dev/drill: cozystack-backup\n",
 		"kind: ClickHouse\n    name: guardian\n",
 		"backupClassName: guardian-clickhouse-altinity\n",
@@ -39,14 +39,14 @@ func TestBackupJobManifest(t *testing.T) {
 func TestRestoreJobManifest(t *testing.T) {
 	cfg := drillConfig{
 		Stage:             "dev",
-		Namespace:         "tenant-dev",
+		Namespace:         "tenant-guardiancommercial-platform-dev",
 		Component:         componentSpec{Kind: "ClickHouse", BackupClass: "guardian-clickhouse-altinity"},
 		RestoreTargetName: "guardian-restore",
 	}
 	got := restoreJobManifest(cfg, "guardian-dev-clickhouse-test-restore", "guardian-dev-clickhouse-test-20260622")
 	for _, want := range []string{
 		"apiVersion: backups.cozystack.io/v1alpha1\nkind: RestoreJob\n",
-		"name: guardian-dev-clickhouse-test-restore\n  namespace: tenant-dev\n",
+		"name: guardian-dev-clickhouse-test-restore\n  namespace: tenant-guardiancommercial-platform-dev\n",
 		"name: guardian-dev-clickhouse-test-20260622\n",
 		"kind: ClickHouse\n    name: guardian-restore\n",
 	} {
@@ -59,7 +59,7 @@ func TestRestoreJobManifest(t *testing.T) {
 func TestRestoreTargetManifestFromSource(t *testing.T) {
 	cfg := drillConfig{
 		Stage:             "gamma",
-		Namespace:         "tenant-gamma",
+		Namespace:         "tenant-guardiancommercial-platform-gamma",
 		Component:         componentSpec{Kind: "ClickHouse"},
 		RestoreTargetName: "guardian-restore",
 	}
@@ -68,7 +68,7 @@ func TestRestoreTargetManifestFromSource(t *testing.T) {
   "kind": "ClickHouse",
   "metadata": {
     "name": "guardian",
-    "namespace": "tenant-gamma",
+    "namespace": "tenant-guardiancommercial-platform-gamma",
     "resourceVersion": "123",
     "uid": "deadbeef"
   },
@@ -94,7 +94,7 @@ func TestRestoreTargetManifestFromSource(t *testing.T) {
 		`"apiVersion": "apps.cozystack.io/v1alpha1"`,
 		`"kind": "ClickHouse"`,
 		`"name": "guardian-restore"`,
-		`"namespace": "tenant-gamma"`,
+		`"namespace": "tenant-guardiancommercial-platform-gamma"`,
 		`"guardian.dev/drill": "cozystack-restore-target"`,
 		`"storageClass": "replicated"`,
 		`"name": "guardian-clickhouse-backup-creds"`,
@@ -114,7 +114,7 @@ func TestValidateConfig(t *testing.T) {
 	base := drillConfig{
 		Kubectl:         "/kubectl",
 		Stage:           "prod",
-		Namespace:       "tenant-prod",
+		Namespace:       "tenant-guardiancommercial-platform-prod",
 		Component:       componentSpec{Kind: "Postgres", BackupClass: "guardian-postgres-cnpg"},
 		ApplicationName: "guardian",
 		Name:            "guardian-prod-postgres-test",
@@ -180,7 +180,7 @@ func TestNamespaceAndComponentValidation(t *testing.T) {
 	if got, err := namespaceForStage("root"); err != nil || got != "tenant-root" {
 		t.Fatalf("namespaceForStage(root) = %q, %v", got, err)
 	}
-	if got, err := namespaceForStage("gamma"); err != nil || got != "tenant-gamma" {
+	if got, err := namespaceForStage("gamma"); err != nil || got != "tenant-guardiancommercial-platform-gamma" {
 		t.Fatalf("namespaceForStage(gamma) = %q, %v", got, err)
 	}
 	if _, err := namespaceForStage("staging"); err == nil {

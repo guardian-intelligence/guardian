@@ -1,0 +1,17 @@
+# Cozystack 1.4 tenant names are lowercase alphanumeric only. The directory
+# keeps the human-readable product boundary name; the Kubernetes object uses
+# the Cozystack-compatible spelling.
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: guardiancommercial
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/tenant-boundary: guardian-commercial
+spec:
+  host: guardianintelligence.org
+  etcd: false
+  ingress: false
+  monitoring: false
+  seaweedfs: false

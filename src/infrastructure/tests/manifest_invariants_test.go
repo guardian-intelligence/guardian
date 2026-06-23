@@ -46,19 +46,65 @@ type guardianMgmtNode struct {
 	PrivateIPv4 string `json:"private_ipv4"`
 }
 
+type platformStage struct {
+	name               string
+	namespace          string
+	manifestDir        string
+	tenantDir          string
+	tenantHost         string
+	harborHost         string
+	companyHost        string
+	clickHouseSchedule string
+}
+
+func platformStages() []platformStage {
+	return []platformStage{
+		{
+			name:               "dev",
+			namespace:          "tenant-guardiancommercial-platform-dev",
+			manifestDir:        "src/infrastructure/products/platform/dev",
+			tenantDir:          "src/infrastructure/tenants/platform/dev",
+			tenantHost:         "dev.gi.org",
+			harborHost:         "harbor.dev.gi.org",
+			companyHost:        "dev.gi.org",
+			clickHouseSchedule: "23 1 * * *",
+		},
+		{
+			name:               "gamma",
+			namespace:          "tenant-guardiancommercial-platform-gamma",
+			manifestDir:        "src/infrastructure/products/platform/gamma",
+			tenantDir:          "src/infrastructure/tenants/platform/gamma",
+			tenantHost:         "gamma.gi.org",
+			harborHost:         "harbor.gamma.gi.org",
+			companyHost:        "gamma.gi.org",
+			clickHouseSchedule: "29 1 * * *",
+		},
+		{
+			name:               "prod",
+			namespace:          "tenant-guardiancommercial-platform-prod",
+			manifestDir:        "src/infrastructure/products/platform/prod",
+			tenantDir:          "src/infrastructure/tenants/platform/prod",
+			tenantHost:         "prod.gi.org",
+			harborHost:         "harbor.prod.gi.org",
+			companyHost:        "guardianintelligence.org",
+			clickHouseSchedule: "41 1 * * *",
+		},
+	}
+}
+
 func TestManifestInvariants(t *testing.T) {
 	t.Run("guardian mgmt topology alignment", testGuardianMgmtTopologyAlignment)
 	t.Run("guardian mgmt dns bootstrap", testGuardianMgmtDNSBootstrap)
 	t.Run("talm install disk selectors", testTalmInstallDiskSelectors)
 	t.Run("cozystack platform package", testCozystackPlatformPackage)
-	t.Run("environment tenants", testEnvironmentTenants)
+	t.Run("platform tenant topology", testPlatformTenantTopology)
 	t.Run("layer two networking", testLayerTwoNetworking)
 	t.Run("single default storage class", testSingleDefaultStorageClass)
 	t.Run("linstor data pools", testLINSTORDataPools)
 	t.Run("backup classes", testBackupClasses)
 	t.Run("postgres backup activation guard", testPostgresBackupActivationGuard)
 	t.Run("root tenant core services", testRootTenantCoreServices)
-	t.Run("environment tenant core services", testEnvironmentTenantCoreServices)
+	t.Run("platform tenant core services", testPlatformTenantCoreServices)
 	t.Run("company site", testCompanySite)
 	t.Run("company site source ownership", testCompanySiteSourceOwnership)
 	t.Run("openbao", testOpenBao)
@@ -201,14 +247,31 @@ func testGuardianMgmtTopologyAlignment(t *testing.T) {
 	assertTextContains(t, outputsTF, `private_ipv4 = node.private_ipv4`, "outputs.tf")
 }
 
-func testEnvironmentTenants(t *testing.T) {
-	docs := readManifests(t, "src/infrastructure/base/tenants/environments.yaml")
+func testPlatformTenantTopology(t *testing.T) {
+	commercialDocs := readManifests(t, "src/infrastructure/tenants/guardian-commercial/tenant.yaml")
+	commercial := findObject(t, commercialDocs, "Tenant", "tenant-root", "guardiancommercial")
+	assertString(t, commercial, "apps.cozystack.io/v1alpha1", "apiVersion")
+	assertString(t, commercial, "guardianintelligence.org", "spec", "host")
+	assertBool(t, commercial, false, "spec", "etcd")
+	assertBool(t, commercial, false, "spec", "ingress")
+	assertBool(t, commercial, false, "spec", "monitoring")
+	assertBool(t, commercial, false, "spec", "seaweedfs")
 
-	for _, env := range []string{"dev", "gamma", "prod"} {
-		t.Run(env, func(t *testing.T) {
-			tenant := findObject(t, docs, "Tenant", "tenant-root", env)
+	platformDocs := readManifests(t, "src/infrastructure/tenants/platform/tenant.yaml")
+	platform := findObject(t, platformDocs, "Tenant", "tenant-guardiancommercial", "platform")
+	assertString(t, platform, "apps.cozystack.io/v1alpha1", "apiVersion")
+	assertString(t, platform, "platform.guardianintelligence.org", "spec", "host")
+	assertBool(t, platform, false, "spec", "etcd")
+	assertBool(t, platform, false, "spec", "ingress")
+	assertBool(t, platform, false, "spec", "monitoring")
+	assertBool(t, platform, false, "spec", "seaweedfs")
+
+	for _, stage := range platformStages() {
+		t.Run(stage.name, func(t *testing.T) {
+			docs := readManifests(t, stage.tenantDir+"/tenant.yaml")
+			tenant := findObject(t, docs, "Tenant", "tenant-guardiancommercial-platform", stage.name)
 			assertString(t, tenant, "apps.cozystack.io/v1alpha1", "apiVersion")
-			assertString(t, tenant, env+".gi.org", "spec", "host")
+			assertString(t, tenant, stage.tenantHost, "spec", "host")
 			assertBool(t, tenant, false, "spec", "etcd")
 			assertBool(t, tenant, false, "spec", "ingress")
 			assertBool(t, tenant, false, "spec", "monitoring")
@@ -451,9 +514,9 @@ func testPostgresBackupActivationGuard(t *testing.T) {
 		namespace string
 	}{
 		{name: "root", manifest: "src/infrastructure/base/apps/core-services.yaml", namespace: "tenant-root"},
-		{name: "dev", manifest: "src/infrastructure/environments/dev/core-services.yaml", namespace: "tenant-dev"},
-		{name: "gamma", manifest: "src/infrastructure/environments/gamma/core-services.yaml", namespace: "tenant-gamma"},
-		{name: "prod", manifest: "src/infrastructure/environments/prod/core-services.yaml", namespace: "tenant-prod"},
+		{name: "dev", manifest: "src/infrastructure/products/platform/dev/core-services.yaml", namespace: "tenant-guardiancommercial-platform-dev"},
+		{name: "gamma", manifest: "src/infrastructure/products/platform/gamma/core-services.yaml", namespace: "tenant-guardiancommercial-platform-gamma"},
+		{name: "prod", manifest: "src/infrastructure/products/platform/prod/core-services.yaml", namespace: "tenant-guardiancommercial-platform-prod"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			docs := readManifests(t, tc.manifest)
@@ -545,15 +608,13 @@ func testRootTenantCoreServices(t *testing.T) {
 	})
 }
 
-func testEnvironmentTenantCoreServices(t *testing.T) {
-	for _, env := range []string{"dev", "gamma", "prod"} {
-		t.Run(env, func(t *testing.T) {
-			docs := readManifests(t, "src/infrastructure/environments/"+env+"/core-services.yaml")
-			namespace := "tenant-" + env
-
+func testPlatformTenantCoreServices(t *testing.T) {
+	for _, stage := range platformStages() {
+		t.Run(stage.name, func(t *testing.T) {
+			docs := readManifests(t, stage.manifestDir+"/core-services.yaml")
 			assertApp(t, docs, appExpectation{
 				kind:            "Postgres",
-				namespace:       namespace,
+				namespace:       stage.namespace,
 				storageClass:    "replicated",
 				topReplicas:     3,
 				noExternalDB:    true,
@@ -561,8 +622,8 @@ func testEnvironmentTenantCoreServices(t *testing.T) {
 			})
 			assertApp(t, docs, appExpectation{
 				kind:         "Harbor",
-				namespace:    namespace,
-				host:         "harbor." + env + ".gi.org",
+				namespace:    stage.namespace,
+				host:         stage.harborHost,
 				storageClass: "replicated",
 				nestedReplicas: map[string]int{
 					"database": 3,
@@ -571,12 +632,12 @@ func testEnvironmentTenantCoreServices(t *testing.T) {
 			})
 			assertApp(t, docs, appExpectation{
 				kind:               "ClickHouse",
-				namespace:          namespace,
+				namespace:          stage.namespace,
 				storageClass:       "replicated",
 				topReplicas:        3,
 				backupSecretName:   "guardian-clickhouse-backup-creds",
 				backupPlanName:     "guardian-clickhouse-daily",
-				backupPlanSchedule: map[string]string{"dev": "23 1 * * *", "gamma": "29 1 * * *", "prod": "41 1 * * *"}[env],
+				backupPlanSchedule: stage.clickHouseSchedule,
 				nestedReplicas: map[string]int{
 					"clickhouseKeeper": 3,
 				},
@@ -614,26 +675,18 @@ func testCompanySite(t *testing.T) {
 
 	image := "harbor.guardianintelligence.org/guardian/company-site@" + readCompanySiteImageDigest(t)
 
-	for _, env := range []struct {
-		name      string
-		namespace string
-		host      string
-	}{
-		{name: "dev", namespace: "tenant-dev", host: "dev.gi.org"},
-		{name: "gamma", namespace: "tenant-gamma", host: "gamma.gi.org"},
-		{name: "prod", namespace: "tenant-prod", host: "guardianintelligence.org"},
-	} {
-		t.Run(env.name, func(t *testing.T) {
-			docs := readManifests(t, "src/infrastructure/environments/"+env.name+"/company-site.yaml")
+	for _, stage := range platformStages() {
+		t.Run(stage.name, func(t *testing.T) {
+			docs := readManifests(t, stage.manifestDir+"/company-site.yaml")
 
-			deploy := findObject(t, docs, "Deployment", env.namespace, "company-site")
+			deploy := findObject(t, docs, "Deployment", stage.namespace, "company-site")
 			assertString(t, deploy, "apps/v1", "apiVersion")
 			assertInt(t, deploy, 3, "spec", "replicas")
 			assertString(t, deploy, "RollingUpdate", "spec", "strategy", "type")
 			assertInt(t, deploy, 0, "spec", "strategy", "rollingUpdate", "maxUnavailable")
 			assertInt(t, deploy, 1, "spec", "strategy", "rollingUpdate", "maxSurge")
 			assertString(t, deploy, "company-site", "spec", "selector", "matchLabels", "app.kubernetes.io/name")
-			assertString(t, deploy, env.name, "spec", "selector", "matchLabels", "guardian.dev/stage")
+			assertString(t, deploy, stage.name, "spec", "selector", "matchLabels", "guardian.dev/stage")
 			assertString(t, deploy, "RuntimeDefault", "spec", "template", "spec", "securityContext", "seccompProfile", "type")
 
 			spread := sliceAt(t, deploy, "spec", "template", "spec", "topologySpreadConstraints")
@@ -676,10 +729,10 @@ func testCompanySite(t *testing.T) {
 				t.Fatalf("company-site tmp volume must use emptyDir")
 			}
 
-			service := findObject(t, docs, "Service", env.namespace, "company-site")
+			service := findObject(t, docs, "Service", stage.namespace, "company-site")
 			assertString(t, service, "v1", "apiVersion")
 			assertString(t, service, "company-site", "spec", "selector", "app.kubernetes.io/name")
-			assertString(t, service, env.name, "spec", "selector", "guardian.dev/stage")
+			assertString(t, service, stage.name, "spec", "selector", "guardian.dev/stage")
 			servicePorts := sliceAt(t, service, "spec", "ports")
 			if len(servicePorts) != 1 {
 				t.Fatalf("service ports has %d entries, want 1", len(servicePorts))
@@ -687,10 +740,10 @@ func testCompanySite(t *testing.T) {
 			assertInt(t, asManifest(t, servicePorts[0], "spec.ports[0]"), 80, "port")
 			assertString(t, asManifest(t, servicePorts[0], "spec.ports[0]"), "http", "targetPort")
 
-			policy := findObject(t, docs, "NetworkPolicy", env.namespace, "company-site-ingress")
+			policy := findObject(t, docs, "NetworkPolicy", stage.namespace, "company-site-ingress")
 			assertString(t, policy, "networking.k8s.io/v1", "apiVersion")
 			assertString(t, policy, "company-site", "spec", "podSelector", "matchLabels", "app.kubernetes.io/name")
-			assertString(t, policy, env.name, "spec", "podSelector", "matchLabels", "guardian.dev/stage")
+			assertString(t, policy, stage.name, "spec", "podSelector", "matchLabels", "guardian.dev/stage")
 			assertStringSlice(t, policy, []string{"Ingress"}, "spec", "policyTypes")
 			if valueAt(policy, "spec", "egress") != nil {
 				t.Fatalf("company-site NetworkPolicy must not restrict egress")
@@ -716,18 +769,18 @@ func testCompanySite(t *testing.T) {
 			assertString(t, networkPort, "TCP", "protocol")
 			assertInt(t, networkPort, 8080, "port")
 
-			pdb := findObject(t, docs, "PodDisruptionBudget", env.namespace, "company-site")
+			pdb := findObject(t, docs, "PodDisruptionBudget", stage.namespace, "company-site")
 			assertString(t, pdb, "policy/v1", "apiVersion")
 			assertInt(t, pdb, 2, "spec", "minAvailable")
 			assertString(t, pdb, "company-site", "spec", "selector", "matchLabels", "app.kubernetes.io/name")
-			assertString(t, pdb, env.name, "spec", "selector", "matchLabels", "guardian.dev/stage")
+			assertString(t, pdb, stage.name, "spec", "selector", "matchLabels", "guardian.dev/stage")
 
-			ingress := findObject(t, docs, "Ingress", env.namespace, "company-site")
+			ingress := findObject(t, docs, "Ingress", stage.namespace, "company-site")
 			assertString(t, ingress, "networking.k8s.io/v1", "apiVersion")
 			assertString(t, ingress, "tenant-root", "metadata", "annotations", "acme.cert-manager.io/http01-ingress-ingressclassname")
 			assertString(t, ingress, "letsencrypt-prod", "metadata", "annotations", "cert-manager.io/cluster-issuer")
 			assertString(t, ingress, "tenant-root", "spec", "ingressClassName")
-			assertIngressHost(t, ingress, env.host)
+			assertIngressHost(t, ingress, stage.companyHost)
 		})
 	}
 }
@@ -869,22 +922,22 @@ func testOpenBaoOpenTofuBootstrap(t *testing.T) {
 			path:           "guardian/guardian-mgmt/tenant-root/postgres/guardian/cnpg-backup",
 		},
 		{
-			role:           "tenant-dev-cnpg-backup",
-			namespace:      "tenant-dev",
+			role:           "tenant-guardiancommercial-platform-dev-cnpg-backup",
+			namespace:      "tenant-guardiancommercial-platform-dev",
 			serviceAccount: "guardian-external-secrets",
-			path:           "guardian/guardian-mgmt/tenant-dev/postgres/guardian/cnpg-backup",
+			path:           "guardian/guardian-mgmt/tenant-guardiancommercial-platform-dev/postgres/guardian/cnpg-backup",
 		},
 		{
-			role:           "tenant-gamma-cnpg-backup",
-			namespace:      "tenant-gamma",
+			role:           "tenant-guardiancommercial-platform-gamma-cnpg-backup",
+			namespace:      "tenant-guardiancommercial-platform-gamma",
 			serviceAccount: "guardian-external-secrets",
-			path:           "guardian/guardian-mgmt/tenant-gamma/postgres/guardian/cnpg-backup",
+			path:           "guardian/guardian-mgmt/tenant-guardiancommercial-platform-gamma/postgres/guardian/cnpg-backup",
 		},
 		{
-			role:           "tenant-prod-cnpg-backup",
-			namespace:      "tenant-prod",
+			role:           "tenant-guardiancommercial-platform-prod-cnpg-backup",
+			namespace:      "tenant-guardiancommercial-platform-prod",
 			serviceAccount: "guardian-external-secrets",
-			path:           "guardian/guardian-mgmt/tenant-prod/postgres/guardian/cnpg-backup",
+			path:           "guardian/guardian-mgmt/tenant-guardiancommercial-platform-prod/postgres/guardian/cnpg-backup",
 		},
 		{
 			role:           "tenant-root-clickhouse-backup",
@@ -893,22 +946,22 @@ func testOpenBaoOpenTofuBootstrap(t *testing.T) {
 			path:           "guardian/guardian-mgmt/tenant-root/clickhouse/guardian/backup",
 		},
 		{
-			role:           "tenant-dev-clickhouse-backup",
-			namespace:      "tenant-dev",
+			role:           "tenant-guardiancommercial-platform-dev-clickhouse-backup",
+			namespace:      "tenant-guardiancommercial-platform-dev",
 			serviceAccount: "guardian-clickhouse-external-secrets",
-			path:           "guardian/guardian-mgmt/tenant-dev/clickhouse/guardian/backup",
+			path:           "guardian/guardian-mgmt/tenant-guardiancommercial-platform-dev/clickhouse/guardian/backup",
 		},
 		{
-			role:           "tenant-gamma-clickhouse-backup",
-			namespace:      "tenant-gamma",
+			role:           "tenant-guardiancommercial-platform-gamma-clickhouse-backup",
+			namespace:      "tenant-guardiancommercial-platform-gamma",
 			serviceAccount: "guardian-clickhouse-external-secrets",
-			path:           "guardian/guardian-mgmt/tenant-gamma/clickhouse/guardian/backup",
+			path:           "guardian/guardian-mgmt/tenant-guardiancommercial-platform-gamma/clickhouse/guardian/backup",
 		},
 		{
-			role:           "tenant-prod-clickhouse-backup",
-			namespace:      "tenant-prod",
+			role:           "tenant-guardiancommercial-platform-prod-clickhouse-backup",
+			namespace:      "tenant-guardiancommercial-platform-prod",
 			serviceAccount: "guardian-clickhouse-external-secrets",
-			path:           "guardian/guardian-mgmt/tenant-prod/clickhouse/guardian/backup",
+			path:           "guardian/guardian-mgmt/tenant-guardiancommercial-platform-prod/clickhouse/guardian/backup",
 		},
 	} {
 		t.Run(tc.role, func(t *testing.T) {
@@ -930,31 +983,31 @@ func testOpenBaoCNPGBackupSecretProjection(t *testing.T) {
 	}{
 		{
 			name:       "root",
-			manifest:   "src/infrastructure/base/secrets/cnpg-backup-secrets.yaml",
+			manifest:   "src/infrastructure/base/backup/root-cnpg-backup-secrets.yaml",
 			namespace:  "tenant-root",
 			role:       "tenant-root-cnpg-backup",
 			remotePath: "guardian/guardian-mgmt/tenant-root/postgres/guardian/cnpg-backup",
 		},
 		{
 			name:       "dev",
-			manifest:   "src/infrastructure/environments/dev/secrets.yaml",
-			namespace:  "tenant-dev",
-			role:       "tenant-dev-cnpg-backup",
-			remotePath: "guardian/guardian-mgmt/tenant-dev/postgres/guardian/cnpg-backup",
+			manifest:   "src/infrastructure/products/platform/dev/secrets.yaml",
+			namespace:  "tenant-guardiancommercial-platform-dev",
+			role:       "tenant-guardiancommercial-platform-dev-cnpg-backup",
+			remotePath: "guardian/guardian-mgmt/tenant-guardiancommercial-platform-dev/postgres/guardian/cnpg-backup",
 		},
 		{
 			name:       "gamma",
-			manifest:   "src/infrastructure/environments/gamma/secrets.yaml",
-			namespace:  "tenant-gamma",
-			role:       "tenant-gamma-cnpg-backup",
-			remotePath: "guardian/guardian-mgmt/tenant-gamma/postgres/guardian/cnpg-backup",
+			manifest:   "src/infrastructure/products/platform/gamma/secrets.yaml",
+			namespace:  "tenant-guardiancommercial-platform-gamma",
+			role:       "tenant-guardiancommercial-platform-gamma-cnpg-backup",
+			remotePath: "guardian/guardian-mgmt/tenant-guardiancommercial-platform-gamma/postgres/guardian/cnpg-backup",
 		},
 		{
 			name:       "prod",
-			manifest:   "src/infrastructure/environments/prod/secrets.yaml",
-			namespace:  "tenant-prod",
-			role:       "tenant-prod-cnpg-backup",
-			remotePath: "guardian/guardian-mgmt/tenant-prod/postgres/guardian/cnpg-backup",
+			manifest:   "src/infrastructure/products/platform/prod/secrets.yaml",
+			namespace:  "tenant-guardiancommercial-platform-prod",
+			role:       "tenant-guardiancommercial-platform-prod-cnpg-backup",
+			remotePath: "guardian/guardian-mgmt/tenant-guardiancommercial-platform-prod/postgres/guardian/cnpg-backup",
 		},
 	}
 
@@ -1026,31 +1079,31 @@ func testOpenBaoClickHouseBackupSecretProjection(t *testing.T) {
 	}{
 		{
 			name:       "root",
-			manifest:   "src/infrastructure/base/secrets/clickhouse-backup-secrets.yaml",
+			manifest:   "src/infrastructure/base/backup/root-clickhouse-backup-secrets.yaml",
 			namespace:  "tenant-root",
 			role:       "tenant-root-clickhouse-backup",
 			remotePath: "guardian/guardian-mgmt/tenant-root/clickhouse/guardian/backup",
 		},
 		{
 			name:       "dev",
-			manifest:   "src/infrastructure/environments/dev/secrets.yaml",
-			namespace:  "tenant-dev",
-			role:       "tenant-dev-clickhouse-backup",
-			remotePath: "guardian/guardian-mgmt/tenant-dev/clickhouse/guardian/backup",
+			manifest:   "src/infrastructure/products/platform/dev/secrets.yaml",
+			namespace:  "tenant-guardiancommercial-platform-dev",
+			role:       "tenant-guardiancommercial-platform-dev-clickhouse-backup",
+			remotePath: "guardian/guardian-mgmt/tenant-guardiancommercial-platform-dev/clickhouse/guardian/backup",
 		},
 		{
 			name:       "gamma",
-			manifest:   "src/infrastructure/environments/gamma/secrets.yaml",
-			namespace:  "tenant-gamma",
-			role:       "tenant-gamma-clickhouse-backup",
-			remotePath: "guardian/guardian-mgmt/tenant-gamma/clickhouse/guardian/backup",
+			manifest:   "src/infrastructure/products/platform/gamma/secrets.yaml",
+			namespace:  "tenant-guardiancommercial-platform-gamma",
+			role:       "tenant-guardiancommercial-platform-gamma-clickhouse-backup",
+			remotePath: "guardian/guardian-mgmt/tenant-guardiancommercial-platform-gamma/clickhouse/guardian/backup",
 		},
 		{
 			name:       "prod",
-			manifest:   "src/infrastructure/environments/prod/secrets.yaml",
-			namespace:  "tenant-prod",
-			role:       "tenant-prod-clickhouse-backup",
-			remotePath: "guardian/guardian-mgmt/tenant-prod/clickhouse/guardian/backup",
+			manifest:   "src/infrastructure/products/platform/prod/secrets.yaml",
+			namespace:  "tenant-guardiancommercial-platform-prod",
+			role:       "tenant-guardiancommercial-platform-prod-clickhouse-backup",
+			remotePath: "guardian/guardian-mgmt/tenant-guardiancommercial-platform-prod/clickhouse/guardian/backup",
 		},
 	}
 
@@ -1139,15 +1192,57 @@ func testFluxHandoff(t *testing.T) {
 	}
 
 	apps := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-tenant-apps")
-	assertString(t, apps, "./src/infrastructure/environments", "spec", "path")
+	assertString(t, apps, "./src/infrastructure/tenants/guardian-commercial", "spec", "path")
 	assertString(t, apps, "GitRepository", "spec", "sourceRef", "kind")
 	assertString(t, apps, "guardian", "spec", "sourceRef", "name")
-	assertBool(t, apps, false, "spec", "prune")
-	assertBool(t, apps, false, "spec", "wait")
+	assertBool(t, apps, true, "spec", "prune")
+	assertBool(t, apps, true, "spec", "wait")
 
 	deps := sliceAt(t, apps, "spec", "dependsOn")
 	if len(deps) != 1 || stringAt(asManifest(t, deps[0], "spec.dependsOn[0]"), "name") != "guardian-mgmt-base" {
 		t.Fatalf("guardian-mgmt-tenant-apps dependsOn = %#v, want only guardian-mgmt-base", deps)
+	}
+
+	product := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-platform-tenant")
+	assertString(t, product, "./src/infrastructure/tenants/platform", "spec", "path")
+	assertBool(t, product, true, "spec", "prune")
+	assertBool(t, product, true, "spec", "wait")
+	productDeps := sliceAt(t, product, "spec", "dependsOn")
+	if len(productDeps) != 1 || stringAt(asManifest(t, productDeps[0], "spec.dependsOn[0]"), "name") != "guardian-mgmt-tenant-apps" {
+		t.Fatalf("guardian-mgmt-platform-tenant dependsOn = %#v, want only guardian-mgmt-tenant-apps", productDeps)
+	}
+
+	stageChecks := []struct {
+		name      string
+		path      string
+		dependsOn string
+		wait      bool
+		apps      bool
+	}{
+		{name: "guardian-mgmt-platform-dev-tenant", path: "./src/infrastructure/tenants/platform/dev", dependsOn: "guardian-mgmt-platform-tenant", wait: true},
+		{name: "guardian-mgmt-platform-dev", path: "./src/infrastructure/products/platform/dev", dependsOn: "guardian-mgmt-platform-dev-tenant", wait: false, apps: true},
+		{name: "guardian-mgmt-platform-gamma-tenant", path: "./src/infrastructure/tenants/platform/gamma", dependsOn: "guardian-mgmt-platform-dev", wait: true},
+		{name: "guardian-mgmt-platform-gamma", path: "./src/infrastructure/products/platform/gamma", dependsOn: "guardian-mgmt-platform-gamma-tenant", wait: false, apps: true},
+		{name: "guardian-mgmt-platform-prod-tenant", path: "./src/infrastructure/tenants/platform/prod", dependsOn: "guardian-mgmt-platform-gamma", wait: true},
+		{name: "guardian-mgmt-platform-prod", path: "./src/infrastructure/products/platform/prod", dependsOn: "guardian-mgmt-platform-prod-tenant", wait: false, apps: true},
+	}
+	for _, tc := range stageChecks {
+		t.Run(tc.name, func(t *testing.T) {
+			kustomization := findObject(t, docs, "Kustomization", "cozy-fluxcd", tc.name)
+			assertString(t, kustomization, tc.path, "spec", "path")
+			assertString(t, kustomization, "GitRepository", "spec", "sourceRef", "kind")
+			assertString(t, kustomization, "guardian", "spec", "sourceRef", "name")
+			assertBool(t, kustomization, true, "spec", "prune")
+			assertBool(t, kustomization, tc.wait, "spec", "wait")
+
+			stageDeps := sliceAt(t, kustomization, "spec", "dependsOn")
+			if len(stageDeps) != 1 || stringAt(asManifest(t, stageDeps[0], "spec.dependsOn[0]"), "name") != tc.dependsOn {
+				t.Fatalf("%s dependsOn = %#v, want only %s", tc.name, stageDeps, tc.dependsOn)
+			}
+			if tc.apps {
+				assertString(t, kustomization, "10m", "spec", "timeout")
+			}
+		})
 	}
 }
 
