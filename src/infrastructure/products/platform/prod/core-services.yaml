@@ -1,10 +1,9 @@
-# Gamma tenant core services. Gamma is the staging gate for platform and
-# product failures before prod.
+# Platform prod tenant core services.
 apiVersion: apps.cozystack.io/v1alpha1
 kind: Postgres
 metadata:
   name: guardian
-  namespace: tenant-gamma
+  namespace: tenant-guardiancommercial-platform-prod
 spec:
   replicas: 3
   size: 5Gi
@@ -19,9 +18,9 @@ apiVersion: apps.cozystack.io/v1alpha1
 kind: Harbor
 metadata:
   name: guardian
-  namespace: tenant-gamma
+  namespace: tenant-guardiancommercial-platform-prod
 spec:
-  host: harbor.gamma.gi.org
+  host: harbor.prod.gi.org
   storageClass: replicated
   database:
     replicas: 3
@@ -37,7 +36,7 @@ apiVersion: apps.cozystack.io/v1alpha1
 kind: ClickHouse
 metadata:
   name: guardian
-  namespace: tenant-gamma
+  namespace: tenant-guardiancommercial-platform-prod
 spec:
   replicas: 3
   shards: 1
@@ -58,7 +57,7 @@ apiVersion: backups.cozystack.io/v1alpha1
 kind: Plan
 metadata:
   name: guardian-clickhouse-daily
-  namespace: tenant-gamma
+  namespace: tenant-guardiancommercial-platform-prod
 spec:
   applicationRef:
     apiGroup: apps.cozystack.io
@@ -67,4 +66,4 @@ spec:
   backupClassName: guardian-clickhouse-altinity
   schedule:
     type: cron
-    cron: "29 1 * * *"
+    cron: "41 1 * * *"

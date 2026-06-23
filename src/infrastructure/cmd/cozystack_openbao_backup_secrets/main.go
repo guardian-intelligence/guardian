@@ -219,9 +219,9 @@ func runBackupSecrets(ctx context.Context, cfg backupSecretsConfig, env []string
 func parseStages(raw string) ([]stageConfig, error) {
 	known := map[string]stageConfig{
 		"root":  {Name: "root", Namespace: "tenant-root"},
-		"dev":   {Name: "dev", Namespace: "tenant-dev"},
-		"gamma": {Name: "gamma", Namespace: "tenant-gamma"},
-		"prod":  {Name: "prod", Namespace: "tenant-prod"},
+		"dev":   {Name: "dev", Namespace: "tenant-guardiancommercial-platform-dev"},
+		"gamma": {Name: "gamma", Namespace: "tenant-guardiancommercial-platform-gamma"},
+		"prod":  {Name: "prod", Namespace: "tenant-guardiancommercial-platform-prod"},
 	}
 	seen := map[string]bool{}
 	var stages []stageConfig

@@ -13,9 +13,9 @@ func TestStageResolution(t *testing.T) {
 		host      string
 	}{
 		{stage: "root", namespace: "tenant-root", host: "harbor.guardianintelligence.org"},
-		{stage: "dev", namespace: "tenant-dev", host: "harbor.dev.gi.org"},
-		{stage: "gamma", namespace: "tenant-gamma", host: "harbor.gamma.gi.org"},
-		{stage: "prod", namespace: "tenant-prod", host: "harbor.prod.gi.org"},
+		{stage: "dev", namespace: "tenant-guardiancommercial-platform-dev", host: "harbor.dev.gi.org"},
+		{stage: "gamma", namespace: "tenant-guardiancommercial-platform-gamma", host: "harbor.gamma.gi.org"},
+		{stage: "prod", namespace: "tenant-guardiancommercial-platform-prod", host: "harbor.prod.gi.org"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.stage, func(t *testing.T) {
@@ -50,7 +50,7 @@ func TestValidateConfig(t *testing.T) {
 		Oras:         "/oras",
 		Kubectl:      "/kubectl",
 		Stage:        "dev",
-		Namespace:    "tenant-dev",
+		Namespace:    "tenant-guardiancommercial-platform-dev",
 		Host:         "harbor.dev.gi.org",
 		Repository:   "library/guardian-smoke",
 		Tag:          "guardian-dev-test",
@@ -121,13 +121,13 @@ func TestPayloadFor(t *testing.T) {
 
 func TestHarborReadinessChecks(t *testing.T) {
 	cfg := harborRegistryConfig{
-		Namespace:   "tenant-gamma",
+		Namespace:   "tenant-guardiancommercial-platform-gamma",
 		WaitTimeout: "20m",
 	}
 	got := harborReadinessChecks(cfg)
-	requireCommand(t, got, "Harbor app yaml", "tenant-gamma", "harbors.apps.cozystack.io/guardian", "-o", "yaml")
-	requireCommand(t, got, "Harbor registry bucket claim yaml", "tenant-gamma", "bucketclaims.objectstorage.k8s.io/harbor-guardian-registry", "-o", "yaml")
-	requireCommand(t, got, "Harbor registry bucket access yaml", "tenant-gamma", "bucketaccesses.objectstorage.k8s.io/harbor-guardian-registry", "-o", "yaml")
+	requireCommand(t, got, "Harbor app yaml", "tenant-guardiancommercial-platform-gamma", "harbors.apps.cozystack.io/guardian", "-o", "yaml")
+	requireCommand(t, got, "Harbor registry bucket claim yaml", "tenant-guardiancommercial-platform-gamma", "bucketclaims.objectstorage.k8s.io/harbor-guardian-registry", "-o", "yaml")
+	requireCommand(t, got, "Harbor registry bucket access yaml", "tenant-guardiancommercial-platform-gamma", "bucketaccesses.objectstorage.k8s.io/harbor-guardian-registry", "-o", "yaml")
 	requireCommand(t, got, "wait Harbor app Ready", "--for=condition=Ready", "harbors.apps.cozystack.io/guardian", "--timeout=20m")
 	requireCommand(t, got, "wait Harbor registry bucket ready", "--for=jsonpath={.status.bucketReady}=true", "bucketclaims.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=20m")
 	requireCommand(t, got, "wait Harbor registry bucket access granted", "--for=jsonpath={.status.accessGranted}=true", "bucketaccesses.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=20m")

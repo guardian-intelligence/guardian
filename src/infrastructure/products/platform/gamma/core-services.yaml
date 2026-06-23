@@ -1,10 +1,10 @@
-# Dev tenant core services. The tenant namespace is created by
-# Tenant/dev in src/infrastructure/base/tenants/environments.yaml.
+# Platform gamma tenant core services. Gamma is the staging gate for platform
+# and product failures before prod.
 apiVersion: apps.cozystack.io/v1alpha1
 kind: Postgres
 metadata:
   name: guardian
-  namespace: tenant-dev
+  namespace: tenant-guardiancommercial-platform-gamma
 spec:
   replicas: 3
   size: 5Gi
@@ -19,9 +19,9 @@ apiVersion: apps.cozystack.io/v1alpha1
 kind: Harbor
 metadata:
   name: guardian
-  namespace: tenant-dev
+  namespace: tenant-guardiancommercial-platform-gamma
 spec:
-  host: harbor.dev.gi.org
+  host: harbor.gamma.gi.org
   storageClass: replicated
   database:
     replicas: 3
@@ -37,7 +37,7 @@ apiVersion: apps.cozystack.io/v1alpha1
 kind: ClickHouse
 metadata:
   name: guardian
-  namespace: tenant-dev
+  namespace: tenant-guardiancommercial-platform-gamma
 spec:
   replicas: 3
   shards: 1
@@ -58,7 +58,7 @@ apiVersion: backups.cozystack.io/v1alpha1
 kind: Plan
 metadata:
   name: guardian-clickhouse-daily
-  namespace: tenant-dev
+  namespace: tenant-guardiancommercial-platform-gamma
 spec:
   applicationRef:
     apiGroup: apps.cozystack.io
@@ -67,4 +67,4 @@ spec:
   backupClassName: guardian-clickhouse-altinity
   schedule:
     type: cron
-    cron: "23 1 * * *"
+    cron: "29 1 * * *"

@@ -243,7 +243,7 @@ func TestSurfaceReadinessChecks(t *testing.T) {
 			name: "company",
 			cfg:  loadConfig{Surface: "company-site", Stage: "gamma", WaitTimeout: "20m"},
 			required: []commandExpectation{
-				{label: "company-site deployment yaml", parts: []string{"tenant-gamma", "deployment/company-site", "-o", "yaml"}},
+				{label: "company-site deployment yaml", parts: []string{"tenant-guardiancommercial-platform-gamma", "deployment/company-site", "-o", "yaml"}},
 				{label: "wait company-site deployment Available", parts: []string{"--for=condition=Available", "deployment/company-site", "--timeout=20m"}},
 			},
 		},

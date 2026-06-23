@@ -24,19 +24,19 @@ const (
 )
 
 type harborRegistryConfig struct {
-	Oras             string
-	Kubectl          string
-	Kubeconfig       string
-	RequestTimeout   string
-	WaitTimeout      string
-	Stage            string
-	Namespace        string
-	Host             string
-	Repository       string
-	Tag              string
-	Iterations       int
-	PayloadBytes     int
-	RegistryConfig   string
+	Oras           string
+	Kubectl        string
+	Kubeconfig     string
+	RequestTimeout string
+	WaitTimeout    string
+	Stage          string
+	Namespace      string
+	Host           string
+	Repository     string
+	Tag            string
+	Iterations     int
+	PayloadBytes   int
+	RegistryConfig string
 }
 
 type kubectlCommand struct {
@@ -91,8 +91,12 @@ func namespaceForStage(stage string) (string, error) {
 	switch stage {
 	case "root":
 		return "tenant-root", nil
-	case "dev", "gamma", "prod":
-		return "tenant-" + stage, nil
+	case "dev":
+		return "tenant-guardiancommercial-platform-dev", nil
+	case "gamma":
+		return "tenant-guardiancommercial-platform-gamma", nil
+	case "prod":
+		return "tenant-guardiancommercial-platform-prod", nil
 	default:
 		return "", fmt.Errorf("stage %q is not one of root, dev, gamma, prod", stage)
 	}

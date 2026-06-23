@@ -14,8 +14,9 @@ not a generic cluster administration CLI.
 src/guardian/                  Go CLI entrypoints for host/bootstrap come-up
 src/infrastructure/bootstrap/  OpenTofu bootstrap roots
 src/infrastructure/base/       base management-cluster Kubernetes desired state
+src/infrastructure/tenants/    Cozystack tenant hierarchy and stage resources
+src/infrastructure/products/   product-stage Kustomize entrypoints
 src/infrastructure/talm/       Talm chart for the management control plane
-src/infrastructure/environments/  dev/gamma/prod tenant desired state
 src/products/company/          active TanStack company website artifact
 src/tools/                     repo-pinned external tool archives
 docs/runbooks/                 operator runbooks

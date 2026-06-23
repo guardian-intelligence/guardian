@@ -6,11 +6,10 @@ resources:
   - apps/core-services.yaml
   - backup/clickhouse-altinity.yaml
   - backup/postgres-cnpg.yaml
+  - backup/root-clickhouse-backup-secrets.yaml
+  - backup/root-cnpg-backup-secrets.yaml
   - networking/metallb.yaml
   - networking/subnet-mtu.yaml
-  - secrets/clickhouse-backup-secrets.yaml
-  - secrets/cnpg-backup-secrets.yaml
-  - tenants/environments.yaml
   - openbao/openbao.yaml
   - openbao/networkpolicy.yaml
   - flux/sync.yaml

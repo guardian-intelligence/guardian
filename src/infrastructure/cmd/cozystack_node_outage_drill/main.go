@@ -246,7 +246,7 @@ func serviceReadinessWaits(phase, timeout string) []kubectlCheck {
 			Args:  []string{"-n", "tenant-root", "wait", "--for=jsonpath={.status.readyReplicas}=3", "statefulset.apps/openbao-guardian"},
 		},
 	}
-	for _, namespace := range []string{"tenant-root", "tenant-dev", "tenant-gamma", "tenant-prod"} {
+	for _, namespace := range []string{"tenant-root", "tenant-guardiancommercial-platform-dev", "tenant-guardiancommercial-platform-gamma", "tenant-guardiancommercial-platform-prod"} {
 		label := namespace
 		registry := "harbor-guardian-registry"
 		checks = append(checks,
@@ -284,7 +284,7 @@ func serviceReadinessWaits(phase, timeout string) []kubectlCheck {
 			},
 		)
 	}
-	for _, namespace := range []string{"tenant-dev", "tenant-gamma", "tenant-prod"} {
+	for _, namespace := range []string{"tenant-guardiancommercial-platform-dev", "tenant-guardiancommercial-platform-gamma", "tenant-guardiancommercial-platform-prod"} {
 		checks = append(checks, kubectlCheck{
 			Label: "wait " + phase + " " + namespace + " company-site deployment",
 			Args:  []string{"-n", namespace, "wait", "--for=condition=Available", "deployment/company-site"},

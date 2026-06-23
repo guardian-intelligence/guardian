@@ -1,9 +1,10 @@
-# Prod tenant core services.
+# Platform dev tenant core services. The tenant namespace is created by
+# Tenant/dev under tenant-guardiancommercial-platform.
 apiVersion: apps.cozystack.io/v1alpha1
 kind: Postgres
 metadata:
   name: guardian
-  namespace: tenant-prod
+  namespace: tenant-guardiancommercial-platform-dev
 spec:
   replicas: 3
   size: 5Gi
@@ -18,9 +19,9 @@ apiVersion: apps.cozystack.io/v1alpha1
 kind: Harbor
 metadata:
   name: guardian
-  namespace: tenant-prod
+  namespace: tenant-guardiancommercial-platform-dev
 spec:
-  host: harbor.prod.gi.org
+  host: harbor.dev.gi.org
   storageClass: replicated
   database:
     replicas: 3
@@ -36,7 +37,7 @@ apiVersion: apps.cozystack.io/v1alpha1
 kind: ClickHouse
 metadata:
   name: guardian
-  namespace: tenant-prod
+  namespace: tenant-guardiancommercial-platform-dev
 spec:
   replicas: 3
   shards: 1
@@ -57,7 +58,7 @@ apiVersion: backups.cozystack.io/v1alpha1
 kind: Plan
 metadata:
   name: guardian-clickhouse-daily
-  namespace: tenant-prod
+  namespace: tenant-guardiancommercial-platform-dev
 spec:
   applicationRef:
     apiGroup: apps.cozystack.io
@@ -66,4 +67,4 @@ spec:
   backupClassName: guardian-clickhouse-altinity
   schedule:
     type: cron
-    cron: "41 1 * * *"
+    cron: "23 1 * * *"

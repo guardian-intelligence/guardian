@@ -22,19 +22,19 @@ type componentSpec struct {
 }
 
 type drillConfig struct {
-	Kubectl             string
-	Kubeconfig          string
-	RequestTimeout      string
-	WaitTimeout         string
-	Stage               string
-	Namespace           string
-	Component           componentSpec
-	ApplicationName     string
-	Name                string
-	RestoreTargetName   string
-	CreateRestoreTarget bool
+	Kubectl              string
+	Kubeconfig           string
+	RequestTimeout       string
+	WaitTimeout          string
+	Stage                string
+	Namespace            string
+	Component            componentSpec
+	ApplicationName      string
+	Name                 string
+	RestoreTargetName    string
+	CreateRestoreTarget  bool
 	CleanupRestoreTarget bool
-	AllowInPlaceRestore bool
+	AllowInPlaceRestore  bool
 }
 
 var dnsLabelRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
@@ -82,8 +82,12 @@ func namespaceForStage(stage string) (string, error) {
 	switch stage {
 	case "root":
 		return "tenant-root", nil
-	case "dev", "gamma", "prod":
-		return "tenant-" + stage, nil
+	case "dev":
+		return "tenant-guardiancommercial-platform-dev", nil
+	case "gamma":
+		return "tenant-guardiancommercial-platform-gamma", nil
+	case "prod":
+		return "tenant-guardiancommercial-platform-prod", nil
 	default:
 		return "", fmt.Errorf("stage %q is not one of root, dev, gamma, prod", stage)
 	}

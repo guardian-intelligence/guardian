@@ -55,8 +55,8 @@ func TestParseStages(t *testing.T) {
 	}
 	want := []stageConfig{
 		{Name: "root", Namespace: "tenant-root"},
-		{Name: "dev", Namespace: "tenant-dev"},
-		{Name: "prod", Namespace: "tenant-prod"},
+		{Name: "dev", Namespace: "tenant-guardiancommercial-platform-dev"},
+		{Name: "prod", Namespace: "tenant-guardiancommercial-platform-prod"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("parseStages() = %#v, want %#v", got, want)
@@ -139,7 +139,7 @@ func TestDryRunDoesNotRequireCredentials(t *testing.T) {
 }
 
 func TestBackupSecretWrites(t *testing.T) {
-	stages := []stageConfig{{Name: "root", Namespace: "tenant-root"}, {Name: "dev", Namespace: "tenant-dev"}}
+	stages := []stageConfig{{Name: "root", Namespace: "tenant-root"}, {Name: "dev", Namespace: "tenant-guardiancommercial-platform-dev"}}
 	creds := map[credentialScope]backupSecretCredential{
 		{Stage: "root", Component: "postgres"}:   {AccessKeyID: "root-pg-access", SecretKey: "root-pg-secret", Source: "root-pg"},
 		{Stage: "root", Component: "clickhouse"}: {AccessKeyID: "root-ch-access", SecretKey: "root-ch-secret", Source: "root-ch"},
@@ -164,7 +164,7 @@ func TestBackupSecretWrites(t *testing.T) {
 		"accessKey":  "root-ch-access",
 		"secretKey":  "root-ch-secret",
 	})
-	assertWrite(t, writes[2], "guardian/guardian-mgmt/tenant-dev/postgres/guardian/cnpg-backup", map[string]string{
+	assertWrite(t, writes[2], "guardian/guardian-mgmt/tenant-guardiancommercial-platform-dev/postgres/guardian/cnpg-backup", map[string]string{
 		"AWS_ACCESS_KEY_ID":     "dev-pg-access",
 		"AWS_SECRET_ACCESS_KEY": "dev-pg-secret",
 	})
