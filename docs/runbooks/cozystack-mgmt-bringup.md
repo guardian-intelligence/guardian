@@ -155,7 +155,7 @@ The checked-in root app slice declares:
   PVCs.
 - `ClickHouse/guardian` in `tenant-root`: three ClickHouse replicas plus three
   Keeper replicas, with a daily backup Plan at `17 1 * * *`.
-- `Monitoring/guardian` in `tenant-root`: Cozystack's Grafana,
+- `Monitoring/monitoring` in `tenant-root`: Cozystack's Grafana,
   VictoriaMetrics, VictoriaLogs, Alerta, and VMAgent stack at
   `grafana.guardianintelligence.org`, with replicated metrics and logs storage.
 

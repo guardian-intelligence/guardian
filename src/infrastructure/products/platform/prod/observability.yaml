@@ -2,7 +2,7 @@
 apiVersion: apps.cozystack.io/v1alpha1
 kind: Monitoring
 metadata:
-  name: guardian
+  name: monitoring
   namespace: tenant-guardiancommercial-platform-prod
 spec:
   host: grafana.prod.gi.org
