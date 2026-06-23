@@ -166,6 +166,36 @@ def _monitoring_checks(stage, namespace, host, shortterm_storage, longterm_stora
         (stage + " monitoring vmagent cluster label", ["-n", namespace, "get", "monitorings.apps.cozystack.io/monitoring", "-o", "jsonpath={.spec.vmagent.externalLabels.cluster}"], "guardian-mgmt"),
     ]
 
+def _victorialogs_gets(scope, namespace):
+    return [
+        (scope + " victorialogs cluster", ["-n", namespace, "get", "vlclusters.operator.victoriametrics.com/generic"]),
+        (scope + " vlinsert service", ["-n", namespace, "get", "service/vlinsert-generic"]),
+        (scope + " vlselect service", ["-n", namespace, "get", "service/vlselect-generic"]),
+        (scope + " vlstorage service", ["-n", namespace, "get", "service/vlstorage-generic"]),
+        (scope + " vlinsert deployment", ["-n", namespace, "get", "deployment.apps/vlinsert-generic"]),
+        (scope + " vlselect deployment", ["-n", namespace, "get", "deployment.apps/vlselect-generic"]),
+        (scope + " vlstorage statefulset", ["-n", namespace, "get", "statefulset.apps/vlstorage-generic"]),
+    ]
+
+def _victorialogs_checks(scope, namespace):
+    return [
+        (scope + " victorialogs status", ["-n", namespace, "get", "vlclusters.operator.victoriametrics.com/generic", "-o", "jsonpath={.status.updateStatus}"], "operational"),
+        (scope + " victorialogs retention", ["-n", namespace, "get", "vlclusters.operator.victoriametrics.com/generic", "-o", "jsonpath={.spec.vlstorage.retentionPeriod}"], "7"),
+        (scope + " victorialogs storage", ["-n", namespace, "get", "vlclusters.operator.victoriametrics.com/generic", "-o", "jsonpath={.spec.vlstorage.storage.volumeClaimTemplate.spec.resources.requests.storage}"], "5Gi"),
+        (scope + " victorialogs storage class", ["-n", namespace, "get", "vlclusters.operator.victoriametrics.com/generic", "-o", "jsonpath={.spec.vlstorage.storage.volumeClaimTemplate.spec.storageClassName}"], "replicated"),
+        (scope + " vlinsert replicas", ["-n", namespace, "get", "vlclusters.operator.victoriametrics.com/generic", "-o", "jsonpath={.spec.vlinsert.replicaCount}"], "2"),
+        (scope + " vlselect replicas", ["-n", namespace, "get", "vlclusters.operator.victoriametrics.com/generic", "-o", "jsonpath={.spec.vlselect.replicaCount}"], "2"),
+        (scope + " vlstorage replicas", ["-n", namespace, "get", "vlclusters.operator.victoriametrics.com/generic", "-o", "jsonpath={.spec.vlstorage.replicaCount}"], "2"),
+    ]
+
+def _namespace_monitoring_checks():
+    return [
+        ("platform namespace monitoring owner", ["get", "namespace/tenant-guardiancommercial-platform", "-o", "go-template={{index .metadata.labels \"namespace.cozystack.io/monitoring\"}}"], "tenant-guardiancommercial-platform"),
+        ("dev namespace monitoring owner", ["get", "namespace/tenant-guardiancommercial-platform-dev", "-o", "go-template={{index .metadata.labels \"namespace.cozystack.io/monitoring\"}}"], "tenant-guardiancommercial-platform"),
+        ("gamma namespace monitoring owner", ["get", "namespace/tenant-guardiancommercial-platform-gamma", "-o", "go-template={{index .metadata.labels \"namespace.cozystack.io/monitoring\"}}"], "tenant-guardiancommercial-platform"),
+        ("prod namespace monitoring owner", ["get", "namespace/tenant-guardiancommercial-platform-prod", "-o", "go-template={{index .metadata.labels \"namespace.cozystack.io/monitoring\"}}"], "tenant-guardiancommercial-platform"),
+    ]
+
 INFRA_FILEGROUPS = [
     "//src/infrastructure/bootstrap/guardian-mgmt:root",
     "//src/infrastructure/bootstrap/guardian-mgmt-dns:root",
@@ -200,6 +230,10 @@ INFRA_TESTS = [
 LIVE_GETS = [
     ("cozystack operator deployment", ["-n", "cozy-system", "get", "deployment/cozystack-operator"]),
     ("cozystack platform package", ["get", "packages.cozystack.io/cozystack.cozystack-platform"]),
+    ("monitoring agents package", ["get", "packages.cozystack.io/cozystack.monitoring-agents"]),
+    ("monitoring agents helmrelease", ["-n", "cozy-monitoring", "get", "helmreleases.helm.toolkit.fluxcd.io/monitoring-agents"]),
+    ("monitoring agents fluent-bit config", ["-n", "cozy-monitoring", "get", "configmap/monitoring-agents-fluent-bit"]),
+    ("monitoring agents fluent-bit daemonset", ["-n", "cozy-monitoring", "get", "daemonset.apps/monitoring-agents-fluent-bit"]),
     ("backup controller package", ["get", "packages.cozystack.io/cozystack.backup-controller"]),
     ("backupstrategy controller package", ["get", "packages.cozystack.io/cozystack.backupstrategy-controller"]),
     ("backup controller namespace", ["get", "namespace/cozy-backup-controller"]),
@@ -328,11 +362,22 @@ LIVE_GETS = [
 ) + _monitoring_gets(
     "platform",
     "tenant-guardiancommercial-platform",
+) + _victorialogs_gets(
+    "root",
+    "tenant-root",
+) + _victorialogs_gets(
+    "platform",
+    "tenant-guardiancommercial-platform",
 )
 
 LIVE_VALUE_CHECKS = [
     ("cozystack operator image", ["-n", "cozy-system", "get", "deployment/cozystack-operator", "-o", "jsonpath={.spec.template.spec.containers[0].image}"], COZYSTACK_OPERATOR_IMAGE),
     ("cozystack platform variant", ["get", "packages.cozystack.io/cozystack.cozystack-platform", "-o", "jsonpath={.spec.variant}"], "isp-full"),
+    ("monitoring agents package target", ["get", "packages.cozystack.io/cozystack.monitoring-agents", "-o", "jsonpath={.spec.components.monitoring-agents.values.global.target}"], "tenant-root"),
+    ("monitoring agents helmrelease target", ["-n", "cozy-monitoring", "get", "helmreleases.helm.toolkit.fluxcd.io/monitoring-agents", "-o", "jsonpath={.spec.values.global.target}"], "tenant-root"),
+    ("monitoring agents fluent-bit desired", ["-n", "cozy-monitoring", "get", "daemonset.apps/monitoring-agents-fluent-bit", "-o", "jsonpath={.status.desiredNumberScheduled}"], "3"),
+    ("monitoring agents fluent-bit available", ["-n", "cozy-monitoring", "get", "daemonset.apps/monitoring-agents-fluent-bit", "-o", "jsonpath={.status.numberAvailable}"], "3"),
+    ("monitoring agents fluent-bit updated", ["-n", "cozy-monitoring", "get", "daemonset.apps/monitoring-agents-fluent-bit", "-o", "jsonpath={.status.updatedNumberScheduled}"], "3"),
     ("backupstrategy endpoint", ["get", "cnpgs.strategy.backups.cozystack.io/cozy-default-cnpg", "-o", "jsonpath={.spec.template.barmanObjectStore.endpointURL}"], "https://s3.guardianintelligence.org"),
     ("default velero backup storage location phase", ["-n", "cozy-velero", "get", "backupstoragelocations.velero.io/cozy-default", "-o", "jsonpath={.status.phase}"], "Available"),
     ("ovn-default mtu", ["get", "subnets.kubeovn.io/ovn-default", "-o", "jsonpath={.spec.mtu}"], "1362"),
@@ -417,6 +462,13 @@ LIVE_VALUE_CHECKS = [
     "10Gi",
     "7",
     "5Gi",
+) + _victorialogs_checks(
+    "root",
+    "tenant-root",
+) + _victorialogs_checks(
+    "platform",
+    "tenant-guardiancommercial-platform",
+) + _namespace_monitoring_checks(
 ) + [
     ("dev postgres replicas", ["-n", "tenant-guardiancommercial-platform-dev", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.replicas}"], "3"),
     ("dev postgres storage class", ["-n", "tenant-guardiancommercial-platform-dev", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.storageClass}"], "replicated"),
@@ -488,6 +540,12 @@ LIVE_VALUE_CHECKS = [
     ("prod company image", ["-n", "tenant-guardiancommercial-platform-prod", "get", "deployment/company-site", "-o", "jsonpath={.spec.template.spec.containers[0].image}"], COMPANY_SITE_IMAGE),
     ("prod company ingress host", ["-n", "tenant-guardiancommercial-platform-prod", "get", "ingress/company-site", "-o", "jsonpath={.spec.rules[0].host}"], "guardianintelligence.org"),
 ]
+
+LIVE_CONTAINS_CHECKS = [
+    ("monitoring agents fluent-bit root tenant label", ["-n", "cozy-monitoring", "get", "configmap/monitoring-agents-fluent-bit", "-o", "go-template={{index .data \"fluent-bit.conf\"}}"], "Add tenant tenant-root"),
+    ("monitoring agents fluent-bit root log target", ["-n", "cozy-monitoring", "get", "configmap/monitoring-agents-fluent-bit", "-o", "go-template={{index .data \"fluent-bit.conf\"}}"], "Host vlinsert-generic.tenant-root.svc"),
+]
+
 LIVE_FLUX_WAITS = [
     ("flux source", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "gitrepositories.source.toolkit.fluxcd.io/guardian"]),
     ("flux base kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-base"]),
@@ -502,6 +560,8 @@ LIVE_FLUX_WAITS = [
     ("flux platform prod kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-prod"]),
 ]
 LIVE_WAITS = [
+    ("monitoring agents package", ["wait", "--for=condition=Ready", "packages.cozystack.io/cozystack.monitoring-agents"]),
+    ("monitoring agents helmrelease", ["-n", "cozy-monitoring", "wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/monitoring-agents"]),
     ("backup controller package", ["wait", "--for=condition=Ready", "packages.cozystack.io/cozystack.backup-controller"]),
     ("backupstrategy controller package", ["wait", "--for=condition=Ready", "packages.cozystack.io/cozystack.backupstrategy-controller"]),
     ("backup controller helmrelease", ["-n", "cozy-backup-controller", "wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/backup-controller"]),
@@ -1384,6 +1444,14 @@ def _live_checks(ctx, kubectl, kubeconfig, revision):
         if value == None:
             return 1
         rc = _assert_equals(ctx, value, expected, label)
+        if rc != 0:
+            return rc
+
+    for label, kubectl_args, needle in LIVE_CONTAINS_CHECKS:
+        value = _kubectl_capture_for(ctx, kubectl, kubeconfig, kubectl_args, "kubectl read " + label)
+        if value == None:
+            return 1
+        rc = _assert_contains(ctx, value, needle, label)
         if rc != 0:
             return rc
 

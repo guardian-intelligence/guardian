@@ -171,6 +171,36 @@ The platform product tenant declares `Monitoring/monitoring` at
 stage tenants inherit that monitoring stack instead of each owning a separate
 Grafana/Victoria stack.
 
+## Observability Model
+
+Root monitoring is the platform/operator view. `tenant-root` owns the
+cluster-wide collectors, root Grafana, root VictoriaMetrics, root VictoriaLogs,
+audit logs, Kubernetes events, and generated Cozystack monitoring agents.
+
+Product monitoring is the Guardian Platform product view.
+`tenant-guardiancommercial-platform` owns product-stage metrics and dashboards,
+and the dev, gamma, and prod namespaces are labeled to inherit that Monitoring
+stack.
+
+Metrics already follow the product boundary through the product tenant VMAgent
+and VictoriaMetrics remote-write path. Use VictoriaMetrics for alertable numeric
+signals: Flux and Cozystack readiness, Kubernetes capacity, CNPG health,
+replication lag, Hubble counters, load-test SLOs, and storage saturation.
+
+VictoriaLogs is available in both the root and product Monitoring stacks, but
+Cozystack 1.5 routes the cluster-scoped `monitoring-agents` Fluent Bit output to
+`vlinsert-generic.tenant-root.svc` with `tenant-root` as the log tenant. Product
+logs are therefore queried from root VictoriaLogs by Kubernetes namespace and
+pod labels. Do not patch the generated
+`cozy-monitoring/monitoring-agents-fluent-bit` ConfigMap by hand; upstream
+per-tenant log routing is tracked in
+<https://github.com/cozystack/cozystack/issues/2194>.
+
+Traces and wide events are the durable proof layer for release gates, disaster
+recovery, outage drills, and load tests. VictoriaMetrics should receive only the
+numeric projections needed for alerting; ClickHouse will own wide operational
+event history once it is fully promoted into the stack.
+
 The platform dev/gamma/prod product stage namespaces declare Postgres, Harbor,
 ClickHouse, and the company-site workload with smaller storage sizes and
 stage-specific backup schedules. Stage ingress hostnames and the product
@@ -235,7 +265,9 @@ resources, MetalLB/L2, Kube-OVN MTU, LINSTOR storage classes, OpenBao, root,
 product, and product-stage app CRs, child HelmReleases and workload resources,
 Harbor COSI registry bucket access, Postgres/CNPG child resources,
 ClickHouse/Altinity child resources, Monitoring app readiness and storage
-settings, and company-site deployment shape.
+settings, VictoriaLogs cluster readiness, generated monitoring-agent readiness,
+the supported root VictoriaLogs routing target, product namespace Monitoring
+inheritance, and company-site deployment shape.
 
 Kubernetes-side readiness evidence should be captured as PR-local command output
 while a change is being reviewed. Durable operational proof should come from
