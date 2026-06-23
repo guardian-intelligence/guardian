@@ -132,6 +132,11 @@ pull the new revision. Do not manually apply the rendered base as a substitute
 for source-controller validation; manual apply is only the bootstrap handoff
 before Flux owns the path.
 
+The `guardian-mgmt-platform` and `guardian-mgmt-storage` slices stay
+apply-only because they own the Cozystack platform package and storage
+substrate. `guardian-mgmt-base` and the tenant/product slices prune their owned
+inventory so renamed or removed app objects do not remain live after a merge.
+
 ## Cozystack Apps
 
 The platform package uses Cozystack's `isp-full` variant. Cozystack provides the
@@ -223,7 +228,8 @@ resources, MetalLB/L2, Kube-OVN MTU, LINSTOR storage classes, OpenBao, root and
 product-stage app CRs, child HelmReleases and workload resources, Harbor COSI
 registry bucket access, Postgres/CNPG child resources, ClickHouse/Altinity child
 resources, Monitoring app readiness and storage settings, and company-site
-deployment shape.
+deployment shape. It also checks known stale resources are absent after Flux
+prunes the owning inventory.
 
 Kubernetes-side readiness evidence should be captured as PR-local command output
 while a change is being reviewed. Durable operational proof should come from
