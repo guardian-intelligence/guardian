@@ -54,6 +54,7 @@ type platformStage struct {
 	tenantHost         string
 	harborHost         string
 	companyHost        string
+	postgresSchedule   string
 	clickHouseSchedule string
 }
 
@@ -67,6 +68,7 @@ func platformStages() []platformStage {
 			tenantHost:         "dev.gi.org",
 			harborHost:         "harbor.dev.gi.org",
 			companyHost:        "dev.gi.org",
+			postgresSchedule:   "13 1 * * *",
 			clickHouseSchedule: "23 1 * * *",
 		},
 		{
@@ -77,6 +79,7 @@ func platformStages() []platformStage {
 			tenantHost:         "gamma.gi.org",
 			harborHost:         "harbor.gamma.gi.org",
 			companyHost:        "gamma.gi.org",
+			postgresSchedule:   "19 1 * * *",
 			clickHouseSchedule: "29 1 * * *",
 		},
 		{
@@ -87,6 +90,7 @@ func platformStages() []platformStage {
 			tenantHost:         "prod.gi.org",
 			harborHost:         "harbor.prod.gi.org",
 			companyHost:        "guardianintelligence.org",
+			postgresSchedule:   "37 1 * * *",
 			clickHouseSchedule: "41 1 * * *",
 		},
 	}
@@ -435,7 +439,9 @@ func testBackupClasses(t *testing.T) {
 	assertString(t, strategy, "{{ .Application.spec.backup.destinationPath }}", "spec", "template", "barmanObjectStore", "destinationPath")
 	assertString(t, strategy, "{{ .Application.spec.backup.endpointURL }}", "spec", "template", "barmanObjectStore", "endpointURL")
 	assertString(t, strategy, "30d", "spec", "template", "barmanObjectStore", "retentionPolicy")
-	assertString(t, strategy, "{{ .Application.metadata.name }}-cnpg-backup-creds", "spec", "template", "barmanObjectStore", "s3Credentials", "secretRef", "name")
+	assertString(t, strategy, "{{ .Application.spec.backup.s3CredentialsSecret.name }}", "spec", "template", "barmanObjectStore", "s3Credentials", "secretRef", "name")
+	assertString(t, strategy, "{{ .Application.spec.backup.s3CredentialsSecret.accessKeyIDKey }}", "spec", "template", "barmanObjectStore", "s3Credentials", "accessKeyIDKey")
+	assertString(t, strategy, "{{ .Application.spec.backup.s3CredentialsSecret.secretAccessKeyKey }}", "spec", "template", "barmanObjectStore", "s3Credentials", "secretAccessKeyKey")
 	assertString(t, strategy, "gzip", "spec", "template", "barmanObjectStore", "data", "compression")
 	assertString(t, strategy, "gzip", "spec", "template", "barmanObjectStore", "wal", "compression")
 
@@ -509,34 +515,56 @@ func testBackupClasses(t *testing.T) {
 }
 
 func testPostgresBackupActivationGuard(t *testing.T) {
-	for _, tc := range []struct {
+	r2Endpoint := cloudflareR2Endpoint(t)
+	cases := []struct {
 		name      string
 		manifest  string
 		namespace string
+		schedule  string
 	}{
-		{name: "root", manifest: "src/infrastructure/base/apps/core-services.yaml", namespace: "tenant-root"},
-		{name: "dev", manifest: "src/infrastructure/products/platform/dev/core-services.yaml", namespace: "tenant-guardiancommercial-platform-dev"},
-		{name: "gamma", manifest: "src/infrastructure/products/platform/gamma/core-services.yaml", namespace: "tenant-guardiancommercial-platform-gamma"},
-		{name: "prod", manifest: "src/infrastructure/products/platform/prod/core-services.yaml", namespace: "tenant-guardiancommercial-platform-prod"},
-	} {
+		{name: "root", manifest: "src/infrastructure/base/apps/core-services.yaml", namespace: "tenant-root", schedule: "7 1 * * *"},
+	}
+	for _, stage := range platformStages() {
+		cases = append(cases, struct {
+			name      string
+			manifest  string
+			namespace string
+			schedule  string
+		}{
+			name:      stage.name,
+			manifest:  stage.manifestDir + "/core-services.yaml",
+			namespace: stage.namespace,
+			schedule:  stage.postgresSchedule,
+		})
+	}
+
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			docs := readManifests(t, tc.manifest)
 			app := findObject(t, docs, "Postgres", tc.namespace, "guardian")
 			plans := findObjects(t, docs, "Plan", tc.namespace, "guardian-postgres-daily")
 			backupValue := valueAt(app, "spec", "backup")
 			if backupValue == nil {
-				if len(plans) != 0 {
-					t.Fatalf("found guardian-postgres-daily Plan without spec.backup on Postgres tenant %s", tc.namespace)
-				}
-				return
+				t.Fatalf("Postgres tenant %s is missing spec.backup", tc.namespace)
 			}
 
 			backup := asManifest(t, backupValue, "Postgres spec.backup")
 			assertBool(t, backup, true, "enabled")
+			assertString(t, backup, "30d", "retentionPolicy")
+			assertString(t, backup, "", "schedule")
 			destinationPath := stringAt(backup, "destinationPath")
 			endpointURL := stringAt(backup, "endpointURL")
 			assertConcreteBackupCoordinate(t, destinationPath, "destinationPath", "s3://")
 			assertConcreteBackupCoordinate(t, endpointURL, "endpointURL", "https://")
+			assertString(t, backup, "guardian-cnpg-backup-creds", "s3CredentialsSecret", "name")
+			assertString(t, backup, "AWS_ACCESS_KEY_ID", "s3CredentialsSecret", "accessKeyIDKey")
+			assertString(t, backup, "AWS_SECRET_ACCESS_KEY", "s3CredentialsSecret", "secretAccessKeyKey")
+			if destinationPath != "s3://guardian-vault/guardian/guardian-mgmt/"+tc.namespace+"/postgres/guardian/" {
+				t.Fatalf("Postgres backup destinationPath = %q, want tenant-scoped guardian-vault path for %s", destinationPath, tc.namespace)
+			}
+			if endpointURL != r2Endpoint {
+				t.Fatalf("Postgres backup endpointURL = %q, want %q from backend.tfvars", endpointURL, r2Endpoint)
+			}
 
 			if len(plans) != 1 {
 				t.Fatalf("found %d guardian-postgres-daily Plans, want exactly 1 when Postgres backup is enabled", len(plans))
@@ -549,6 +577,7 @@ func testPostgresBackupActivationGuard(t *testing.T) {
 			assertString(t, plan, "guardian-postgres-cnpg", "spec", "backupClassName")
 			assertString(t, plan, "cron", "spec", "schedule", "type")
 			assertConcreteBackupSchedule(t, stringAt(plan, "spec", "schedule", "cron"))
+			assertString(t, plan, tc.schedule, "spec", "schedule", "cron")
 		})
 	}
 }
@@ -1483,6 +1512,21 @@ func assertHCLStringAttribute(t *testing.T, attrs hclsyntax.Attributes, name, wa
 
 func hclExpressionSource(source []byte, expr hcl.Expression) string {
 	return string(expr.Range().SliceBytes(source))
+}
+
+func cloudflareR2Endpoint(t *testing.T) string {
+	t.Helper()
+
+	const path = "src/infrastructure/bootstrap/backend.tfvars"
+	file, diags := hclsyntax.ParseConfig(readRunfile(t, path), path, hcl.InitialPos)
+	assertHCLDiags(t, diags, path)
+	body, ok := file.Body.(*hclsyntax.Body)
+	if !ok {
+		t.Fatalf("%s parsed body = %T, want *hclsyntax.Body", path, file.Body)
+	}
+
+	accountID := ctyString(t, evalHCLExpr(t, hclAttr(t, body.Attributes, "cloudflare_account_id", path).Expr, path+".cloudflare_account_id"), path+".cloudflare_account_id")
+	return "https://" + accountID + ".r2.cloudflarestorage.com"
 }
 
 func objectExpr(t *testing.T, expr hcl.Expression, label string) *hclsyntax.ObjectConsExpr {

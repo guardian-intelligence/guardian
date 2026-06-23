@@ -14,6 +14,31 @@ spec:
   quorum:
     minSyncReplicas: 1
     maxSyncReplicas: 2
+  backup:
+    enabled: true
+    retentionPolicy: 30d
+    destinationPath: s3://guardian-vault/guardian/guardian-mgmt/tenant-guardiancommercial-platform-dev/postgres/guardian/
+    endpointURL: https://c3eaeffaadf7d4847684d4775c16d598.r2.cloudflarestorage.com
+    schedule: ""
+    s3CredentialsSecret:
+      name: guardian-cnpg-backup-creds
+      accessKeyIDKey: AWS_ACCESS_KEY_ID
+      secretAccessKeyKey: AWS_SECRET_ACCESS_KEY
+---
+apiVersion: backups.cozystack.io/v1alpha1
+kind: Plan
+metadata:
+  name: guardian-postgres-daily
+  namespace: tenant-guardiancommercial-platform-dev
+spec:
+  applicationRef:
+    apiGroup: apps.cozystack.io
+    kind: Postgres
+    name: guardian
+  backupClassName: guardian-postgres-cnpg
+  schedule:
+    type: cron
+    cron: "13 1 * * *"
 ---
 apiVersion: apps.cozystack.io/v1alpha1
 kind: Harbor

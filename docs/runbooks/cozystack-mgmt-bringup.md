@@ -116,7 +116,8 @@ Ingress provides tenant-root ingress, root SeaweedFS provides tenant-root object
 storage, root and environment Postgres/Harbor/ClickHouse apps use the intended
 HA/storage shape, OpenBao stays declared in `tenant-root`, the OpenBao OpenTofu
 root declares only mounts, policies, and Kubernetes-auth roles, the reusable
-CNPG backup strategy maps through a cluster-scoped BackupClass, OpenBao-backed
+CNPG backup strategy maps through a cluster-scoped BackupClass, Postgres backup
+activation and daily Plans are declared for root/dev/gamma/prod, OpenBao-backed
 CNPG backup credential projections exist for root/dev/gamma/prod, the company
 site is declared for dev/gamma/prod, and Flux reconciles base before tenant
 apps.
@@ -566,7 +567,8 @@ upstream chart renders the field.
 The checked-in root app slice declares:
 
 - `Postgres/guardian` in `tenant-root`: CNPG-backed, three replicas, explicit
-  `storageClass: replicated`, synchronous commit quorum `1..2`.
+  `storageClass: replicated`, synchronous commit quorum `1..2`, and a daily
+  backup Plan at `7 1 * * *`.
 - `Ingress/ingress` in `tenant-root`: three ingress-nginx replicas for the root
   tenant ingress class that child tenants inherit.
 - `SeaweedFS/seaweedfs` in `tenant-root`: root object storage at
@@ -586,19 +588,21 @@ The checked-in root app slice declares:
   and a native Cozystack `Plan/guardian-clickhouse-daily` schedules the
   `BackupClass` flow at `17 1 * * *`.
 
-ClickHouse backups are enabled only by pointing app specs at the Kubernetes
-Secrets delivered from the declared OpenBao/R2 secret path; raw S3 credentials
-must never be placed directly in app specs. Postgres backups remain disabled
-until the non-secret object-store endpoint URL and destination prefixes are
-declared for each app.
+Postgres and ClickHouse backups are enabled only by pointing app specs at the
+Kubernetes Secrets delivered from the declared OpenBao/R2 secret paths; raw S3
+credentials must never be placed directly in app specs. Postgres app specs carry
+only non-secret R2 coordinates: the Cloudflare R2 endpoint derived from
+`src/infrastructure/bootstrap/backend.tfvars` and tenant-scoped
+`s3://guardian-vault/guardian/guardian-mgmt/<tenant>/postgres/guardian/`
+destination prefixes.
 
 The base backup layer declares the reusable strategy/classes that do not depend
 on tenant secret material:
 
 - `CNPG/guardian-postgres-r2` plus `BackupClass/guardian-postgres-cnpg`.
   The strategy reads `destinationPath` and `endpointURL` from each Postgres
-  app's own `spec.backup` block and references a tenant-local Secret named
-  `<app>-cnpg-backup-creds`.
+  app's own `spec.backup` block and references the tenant-local Secret named by
+  `spec.backup.s3CredentialsSecret`.
 - `Altinity/guardian-clickhouse-altinity` plus
   `BackupClass/guardian-clickhouse-altinity`. This follows Cozystack 1.4's
   recommended ClickHouse `BackupClass` path but replaces the upstream example's
@@ -652,24 +656,25 @@ credentials by introspecting the short-lived token it receives after Kubernetes
 auth login. That root does not write `vault_kv_secret_v2` or
 `vault_generic_secret` resources, because
 R2 credentials would otherwise land in OpenTofu state. There are no checked-in
-`BackupJob` resources yet. ClickHouse app backup is enabled and daily
-`Plan/guardian-clickhouse-daily` resources are declared in root/dev/gamma/prod;
-they require OpenBao to be initialized/unsealed, the OpenTofu root to be
+`BackupJob` resources yet. Postgres and ClickHouse app backup integration is
+enabled and daily `Plan` resources are declared in root/dev/gamma/prod. These
+Plans require OpenBao to be initialized/unsealed, the OpenTofu root to be
 applied with `aspect infra openbao-apply`, and real kv secret values to be
-written with `aspect infra openbao-backup-secrets` before the sidecars and
-scheduled jobs can succeed.
+written with `aspect infra openbao-backup-secrets` before scheduled jobs can
+succeed.
 
 The checked-in environment app layer declares the same core service set in each
 environment namespace:
 
-- `tenant-guardiancommercial-platform-dev`: `Postgres/guardian`, `Harbor/guardian` at `harbor.dev.gi.org`,
-  and `ClickHouse/guardian` with a daily backup Plan at `23 1 * * *`.
-- `tenant-guardiancommercial-platform-gamma`: `Postgres/guardian`, `Harbor/guardian` at
-  `harbor.gamma.gi.org`, and `ClickHouse/guardian` with a daily backup Plan at
-  `29 1 * * *`.
-- `tenant-guardiancommercial-platform-prod`: `Postgres/guardian`, `Harbor/guardian` at
-  `harbor.prod.gi.org`, and `ClickHouse/guardian` with a daily backup Plan at
-  `41 1 * * *`.
+- `tenant-guardiancommercial-platform-dev`: `Postgres/guardian` with a daily
+  backup Plan at `13 1 * * *`, `Harbor/guardian` at `harbor.dev.gi.org`, and
+  `ClickHouse/guardian` with a daily backup Plan at `23 1 * * *`.
+- `tenant-guardiancommercial-platform-gamma`: `Postgres/guardian` with a daily
+  backup Plan at `19 1 * * *`, `Harbor/guardian` at `harbor.gamma.gi.org`, and
+  `ClickHouse/guardian` with a daily backup Plan at `29 1 * * *`.
+- `tenant-guardiancommercial-platform-prod`: `Postgres/guardian` with a daily
+  backup Plan at `37 1 * * *`, `Harbor/guardian` at `harbor.prod.gi.org`, and
+  `ClickHouse/guardian` with a daily backup Plan at `41 1 * * *`.
 
 All environment app specs select `storageClass: replicated` and run three
 replicas for the stateful control-plane services so single-node outage drills
@@ -921,11 +926,11 @@ aspect infra backup-drill \
 The helper refuses in-place restore by default. `--allow-in-place-restore=true`
 exists for an intentional repair operation, not for routine drills.
 
-The same command supports `--component postgres`, but Postgres backup drills
-will not pass until the corresponding `Postgres/guardian` app has
-`spec.backup.enabled`, `destinationPath`, and `endpointURL` wired to declared
-non-secret R2 coordinates. The reusable CNPG `BackupClass` and OpenBao-projected
-credential Secrets already exist.
+Run the same smoke and restore drill for Postgres by setting
+`--component postgres`. The helper creates standard Cozystack `BackupJob` and
+`RestoreJob` resources against `BackupClass/guardian-postgres-cnpg`; the
+serving `Postgres/guardian` app must stay ready, and routine restore drills
+should use a temporary target app instead of the serving app.
 
 The backup drill intentionally does not support `--component harbor`. Harbor is
 not a Cozystack managed-database BackupJob target in the 1.4 backup flow. Use
@@ -1377,13 +1382,13 @@ evidence directories, the retired `guardian-mgmt.json` inventory, or the old
 custom release evidence schema path are reintroduced. Guardian management
 topology belongs in the OpenTofu root, and proof belongs in standard tool output.
 
-The same validation path prevents partial Postgres backup activation. A
-`Postgres/guardian` app may omit `spec.backup` until the real R2 coordinates are
-known; once it includes `spec.backup`, the app must carry concrete
-`destinationPath` and `endpointURL` values and the same manifest set must include
-`Plan/guardian-postgres-daily` targeting `BackupClass/guardian-postgres-cnpg`.
-This keeps the reusable CNPG strategy present without silently deploying a
-non-restorable Postgres backup surface.
+The same validation path prevents partial Postgres backup activation. Every
+`Postgres/guardian` app in root/dev/gamma/prod must carry concrete
+`destinationPath` and `endpointURL` values, point at
+`guardian-cnpg-backup-creds`, and include `Plan/guardian-postgres-daily`
+targeting `BackupClass/guardian-postgres-cnpg`. This keeps the reusable CNPG
+strategy present without silently deploying a non-restorable Postgres backup
+surface.
 
 ## Not Done In This Substrate Slice
 
@@ -1408,20 +1413,20 @@ separate PRs with their own validation:
   smoke, and dashboard HTTP with host overrides. Public company-site and
   environment Harbor evidence still depends on converging DNS and cert-manager
   issuance first.
-- Postgres backup specs wired to declared OpenBao/R2-projected Secrets, plus
-  live backup/restore drills for Postgres and ClickHouse. The package
+- Live backup/restore drills for Postgres and ClickHouse. The package
   prerequisites, backup controller deployments/RBAC/CRDs, reusable CNPG
   BackupClass, reusable ClickHouse Altinity BackupClass, Postgres / ClickHouse
   credential SecretStores and ExternalSecrets, OpenBao auth/policy
-  configuration, ClickHouse app backup Secret references, recurring ClickHouse
-  backup Plans, and Harbor's COSI-backed registry bucket resources are declared
+  configuration, Postgres / ClickHouse app backup Secret references, recurring
+  Postgres / ClickHouse backup Plans, and Harbor's COSI-backed registry bucket
+  resources are declared
   and live-gated. `aspect infra backup-drill` now creates ad-hoc Cozystack
   BackupJob/RestoreJob resources, can create and clean up a temporary to-copy
   restore target from the live source app spec, and prints standard Kubernetes
   evidence. ClickHouse backup-only drills passed for root/dev/gamma/prod on
   2026-06-23, but full restore target reconciliation stalled before target pods
-  were created. Postgres object-store coordinates and CNPG backup/restore
-  drills remain unwired.
+  were created. CNPG backup/restore drills must pass after this backup
+  activation changeset is reconciled by source-controller.
 - ClickHouse chart-side `spec.storageClass` rendering, because Cozystack 1.4
   still relies on the cluster default for ClickHouse and keeper PVCs.
 - Complete single-node outage reports from `aspect infra node-outage-drill`,
