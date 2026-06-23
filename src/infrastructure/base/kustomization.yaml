@@ -5,6 +5,7 @@ kind: Kustomization
 resources:
   - apps/core-services.yaml
   - backup/clickhouse-altinity.yaml
+  - backup/openbao-auth-delegator.yaml
   - backup/postgres-cnpg.yaml
   - backup/root-clickhouse-backup-secrets.yaml
   - backup/root-cnpg-backup-secrets.yaml

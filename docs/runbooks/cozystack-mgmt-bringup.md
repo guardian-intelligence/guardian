@@ -636,6 +636,10 @@ Secrets as recovery state. The SecretStores talk to Cozystack's OpenBao service 
 `http://openbao-guardian.tenant-root.svc:8200`, use the `kv` engine with
 `version: v2`, and authenticate through the `kubernetes` auth mount with
 audience `openbao`.
+The ESO service accounts used for those OpenBao logins are also bound to the
+standard Kubernetes `system:auth-delegator` ClusterRole so OpenBao's Kubernetes
+auth method can validate their projected service-account tokens through the
+TokenReview API.
 `tenant-root` also declares a Cilium allow policy for only the Cozystack ESO
 controller in `cozy-external-secrets-operator` to reach OpenBao on port 8200.
 The matching OpenBao API state is declared with standard OpenTofu resources in
@@ -1306,6 +1310,9 @@ Expected results:
   `StatefulSet/openbao-guardian` with three ready replicas
 - `tenant-root` has the Cilium allow policies for OpenBao-to-API-server
   traffic and ESO-to-OpenBao traffic
+- the root/dev/gamma/prod ESO backup service accounts are subjects of
+  `ClusterRoleBinding/guardian-openbao-secret-projection-auth-delegator`,
+  which points at `ClusterRole/system:auth-delegator`
 - after OpenBao has been initialized/unsealed, the OpenTofu OpenBao root has
   been applied, and the matching kv-v2 values exist, root/dev/gamma/prod have
   Ready `SecretStore/openbao`, Ready

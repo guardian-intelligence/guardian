@@ -1,0 +1,36 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: guardian-openbao-secret-projection-auth-delegator
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/secret-scope: openbao-secret-projection
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: guardian-external-secrets
+    namespace: tenant-root
+  - kind: ServiceAccount
+    name: guardian-clickhouse-external-secrets
+    namespace: tenant-root
+  - kind: ServiceAccount
+    name: guardian-external-secrets
+    namespace: tenant-guardiancommercial-platform-dev
+  - kind: ServiceAccount
+    name: guardian-clickhouse-external-secrets
+    namespace: tenant-guardiancommercial-platform-dev
+  - kind: ServiceAccount
+    name: guardian-external-secrets
+    namespace: tenant-guardiancommercial-platform-gamma
+  - kind: ServiceAccount
+    name: guardian-clickhouse-external-secrets
+    namespace: tenant-guardiancommercial-platform-gamma
+  - kind: ServiceAccount
+    name: guardian-external-secrets
+    namespace: tenant-guardiancommercial-platform-prod
+  - kind: ServiceAccount
+    name: guardian-clickhouse-external-secrets
+    namespace: tenant-guardiancommercial-platform-prod
