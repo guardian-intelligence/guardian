@@ -658,14 +658,21 @@ def _write_auth_hint(ctx, stderr, auth_hint):
         + "do not use insecure TLS flags for source-controller validation.\n",
     )
 
-def _tofu_root(ctx, root, args, label):
+def _tofu_root(ctx, root, args, label, env = None):
     return checked_spawn(
         ctx,
         "bazelisk",
         ["run", TOFU_TARGET, "--", "-chdir=" + ws_path(ctx, root)] + args,
         cwd = ws_path(ctx),
+        env = env,
         label = label,
     )
+
+def _tofu_validate_env(ctx, label):
+    return {
+        "AWS_EC2_METADATA_DISABLED": "true",
+        "TF_DATA_DIR": ws_path(ctx, ".terraform/validate/" + label),
+    }
 
 def _cloudflare_account_id(ctx):
     path = ws_path(ctx, GUARDIAN_BACKEND_TFVARS)
@@ -1108,13 +1115,14 @@ def _validate_impl(ctx):
         (GUARDIAN_MGMT_OPENBAO_ROOT, "guardian-mgmt-openbao"),
         (GUARDIAN_MGMT_DNS_ROOT, "guardian-mgmt-dns"),
     ]:
-        rc = _tofu_root(ctx, root, ["fmt", "-check"], "tofu fmt -check " + label)
+        tofu_env = _tofu_validate_env(ctx, label)
+        rc = _tofu_root(ctx, root, ["fmt", "-check"], "tofu fmt -check " + label, env = tofu_env)
         if rc != 0:
             return rc
-        rc = _tofu_root(ctx, root, ["init", "-backend=false", "-input=false", "-reconfigure"], "tofu init -backend=false " + label)
+        rc = _tofu_root(ctx, root, ["init", "-backend=false", "-input=false", "-reconfigure"], "tofu init -backend=false " + label, env = tofu_env)
         if rc != 0:
             return rc
-        rc = _tofu_root(ctx, root, ["validate"], "tofu validate " + label)
+        rc = _tofu_root(ctx, root, ["validate"], "tofu validate " + label, env = tofu_env)
         if rc != 0:
             return rc
     rc = checked_spawn(

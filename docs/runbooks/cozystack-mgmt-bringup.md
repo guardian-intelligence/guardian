@@ -1386,15 +1386,14 @@ separate PRs with their own validation:
   for dev, gamma, and prod. The task surface is declared and validated, but the
   live publish still requires current guardian-mgmt credentials and
   source-controller convergence on the merged revision.
-- Live load-test reports for CNPG/Postgres, Harbor, ClickHouse, OpenBao, the
-  Cozystack dashboard, and the company-site surfaces. `aspect infra load-http`
-  provides the standard k6 path for HTTP-facing Harbor, OpenBao health,
-  dashboard, and company-site reports. `aspect infra load-harbor-registry`
-  provides the standard ORAS push/pull path for Harbor registry data-path
-  reports. `aspect infra load-db` provides the standard `pgbench` and
-  `clickhouse-benchmark` path for Postgres/CNPG and ClickHouse reports. Live
-  reports still require current guardian-mgmt credentials and successful
-  source-controller convergence on the merged revision.
+- Complete public-DNS load-test reports for CNPG/Postgres, Harbor, ClickHouse,
+  OpenBao, the Cozystack dashboard, and the company-site surfaces. The
+  2026-06-23 live report at
+  `docs/reports/cozystack-mgmt-validation-2026-06-23.md` proves in-cluster
+  Postgres and ClickHouse load, root Harbor ORAS push/pull, OpenBao snapshot
+  smoke, and dashboard HTTP with host overrides. Public company-site and
+  environment Harbor evidence still depends on converging DNS and cert-manager
+  issuance first.
 - Postgres backup specs wired to declared OpenBao/R2-projected Secrets, plus
   live backup/restore drills for Postgres and ClickHouse. The package
   prerequisites, backup controller deployments/RBAC/CRDs, reusable CNPG
@@ -1405,17 +1404,16 @@ separate PRs with their own validation:
   and live-gated. `aspect infra backup-drill` now creates ad-hoc Cozystack
   BackupJob/RestoreJob resources, can create and clean up a temporary to-copy
   restore target from the live source app spec, and prints standard Kubernetes
-  evidence. Applying the OpenBao root, populating real kv values, Postgres
-  object-store coordinates, running the smoke tests, Harbor registry-path
-  validation through ORAS/COSI, and live restore drill reports still need
-  current cluster credentials and source-controller convergence.
+  evidence. ClickHouse backup-only drills passed for root/dev/gamma/prod on
+  2026-06-23, but full restore target reconciliation stalled before target pods
+  were created. Postgres object-store coordinates and CNPG backup/restore
+  drills remain unwired.
 - ClickHouse chart-side `spec.storageClass` rendering, because Cozystack 1.4
   still relies on the cluster default for ClickHouse and keeper PVCs.
-- Live OpenBao init/unseal and Raft snapshot drill reports from
-  `aspect infra openbao-drill`. The task surface is declared and validated, but
-  live reports still require current guardian-mgmt credentials and
-  source-controller convergence on the merged revision.
-- Load-test and hard disaster-recovery drills for each new infrastructure
-  component, plus live single-node outage reports from
-  `aspect infra node-outage-drill`, recorded through standard tool outputs
-  rather than a Guardian-specific evidence schema.
+- Complete single-node outage reports from `aspect infra node-outage-drill`,
+  recorded through standard tool outputs rather than a Guardian-specific
+  evidence schema. The 2026-06-23 drill proved drain/reattach behavior but also
+  exposed that OpenBao on `local-retain` cannot remain 3/3 while its owning
+  node is drained; decide whether the outage contract is quorum-survives plus
+  unseal-after-return, or change OpenBao storage/autounseal to satisfy 3/3
+  during a drained node.

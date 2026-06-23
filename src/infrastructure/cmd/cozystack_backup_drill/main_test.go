@@ -56,6 +56,19 @@ func TestRestoreJobManifest(t *testing.T) {
 	}
 }
 
+func TestRestoreTargetGetArgs(t *testing.T) {
+	got := restoreTargetGetArgs("clickhouses.apps.cozystack.io/guardian-restore")
+	want := []string{"get", "clickhouses.apps.cozystack.io/guardian-restore"}
+	if len(got) != len(want) {
+		t.Fatalf("restoreTargetGetArgs() = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("restoreTargetGetArgs() = %#v, want %#v", got, want)
+		}
+	}
+}
+
 func TestRestoreTargetManifestFromSource(t *testing.T) {
 	cfg := drillConfig{
 		Stage:             "gamma",
