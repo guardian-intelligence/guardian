@@ -616,6 +616,10 @@ LIVE_WAITS = [
     "prod",
     "tenant-guardiancommercial-platform-prod",
 )
+LIVE_ABSENT = [
+    ("stale root monitoring app", ["-n", "tenant-root", "get", "monitorings.apps.cozystack.io/guardian"]),
+    ("stale root monitoring helmrelease", ["-n", "tenant-root", "get", "helmreleases.helm.toolkit.fluxcd.io/guardian"]),
+]
 LIVE_COMPANY_SITE_SPREADS = [
     ("dev company pod placement", "tenant-guardiancommercial-platform-dev", "dev"),
     ("gamma company pod placement", "tenant-guardiancommercial-platform-gamma", "gamma"),
@@ -970,6 +974,29 @@ def _kubectl_success_for(ctx, kubectl, kubeconfig, args, label):
         cwd = ws_path(ctx),
         label = label,
     )
+
+def _kubectl_expect_absent_for(ctx, kubectl, kubeconfig, args, label):
+    cmd = ctx.std.process.command(kubectl).args(_kubectl_args_for(ctx, kubeconfig, args)).current_dir(ws_path(ctx))
+    if ctx.std.io.stderr.is_tty:
+        ctx.std.io.stderr.write("$ kubectl confirm absent " + label + "\n")
+    r = cmd.stdout("piped").stderr("piped").spawn().wait_with_output()
+    if r.status.code == 0:
+        ctx.std.io.stderr.write("ERROR: " + label + " still exists but should be pruned\n")
+        if r.stdout != "":
+            ctx.std.io.stderr.write(r.stdout)
+        if r.stderr != "":
+            ctx.std.io.stderr.write(r.stderr)
+        return 1
+    not_found = r.stderr.find("NotFound") != -1 or r.stderr.find("not found") != -1
+    if not_found:
+        return 0
+    ctx.std.io.stderr.write("ERROR: could not confirm " + label + " is absent\n")
+    if r.stdout != "":
+        ctx.std.io.stderr.write(r.stdout)
+    if r.stderr != "":
+        ctx.std.io.stderr.write(r.stderr)
+        _write_auth_hint(ctx, r.stderr, "kubernetes")
+    return 1
 
 def _talosctl_success(ctx, talosctl, args, label):
     return _capture_success(
@@ -1409,6 +1436,11 @@ def _live_checks(ctx, kubectl, kubeconfig, revision):
         if value == None:
             return 1
         rc = _assert_equals(ctx, value, expected, label)
+        if rc != 0:
+            return rc
+
+    for label, kubectl_args in LIVE_ABSENT:
+        rc = _kubectl_expect_absent_for(ctx, kubectl, kubeconfig, kubectl_args, label)
         if rc != 0:
             return rc
 

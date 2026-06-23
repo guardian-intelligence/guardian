@@ -72,13 +72,12 @@ spec:
   dependsOn:
     - name: guardian-mgmt-platform
     - name: guardian-mgmt-storage
-  # Conservative start: never delete. Flip to true once the inventory is
-  # trusted — pruning the cozystack Package or storage classes would be
-  # catastrophic, so we apply/update only until then.
-  prune: false
-  # Apply-only: this Kustomization owns the dependent product/tenant
-  # Kustomizations. Waiting on all applied resources would include those
-  # children, which themselves depend on this parent.
+  # This slice owns root tenant apps, networking, OpenBao policy, and the Flux
+  # entrypoint. The Cozystack platform package and storage classes are separate
+  # apply-only slices, so this inventory can now be pruned safely.
+  prune: true
+  # Do not wait here: this Kustomization owns the dependent product/tenant
+  # Kustomizations, and those children depend on this parent.
   wait: false
   timeout: 5m
 ---

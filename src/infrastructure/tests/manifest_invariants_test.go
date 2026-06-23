@@ -1013,7 +1013,7 @@ func testFluxHandoff(t *testing.T) {
 	assertString(t, base, "./src/infrastructure/base", "spec", "path")
 	assertString(t, base, "GitRepository", "spec", "sourceRef", "kind")
 	assertString(t, base, "guardian", "spec", "sourceRef", "name")
-	assertBool(t, base, false, "spec", "prune")
+	assertBool(t, base, true, "spec", "prune")
 	assertBool(t, base, false, "spec", "wait")
 
 	platform := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-platform")
