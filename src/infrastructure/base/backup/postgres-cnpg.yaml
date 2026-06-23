@@ -1,9 +1,8 @@
 # Cluster-scoped CNPG backup wiring for Cozystack Postgres apps.
 #
-# This declares the reusable backup strategy and class only. Per-app backup
-# activation stays out of this file because each app must first receive real R2
-# endpoint coordinates and an OpenBao-projected Kubernetes Secret named
-# <app>-cnpg-backup-creds in its own tenant namespace.
+# This declares the reusable backup strategy and class. Per-app backup
+# activation lives on each Postgres app CR so object-store coordinates stay
+# beside the workload that owns the backup stream.
 apiVersion: strategy.backups.cozystack.io/v1alpha1
 kind: CNPG
 metadata:
@@ -17,7 +16,9 @@ spec:
       retentionPolicy: "30d"
       s3Credentials:
         secretRef:
-          name: "{{ .Application.metadata.name }}-cnpg-backup-creds"
+          name: "{{ .Application.spec.backup.s3CredentialsSecret.name }}"
+        accessKeyIDKey: "{{ .Application.spec.backup.s3CredentialsSecret.accessKeyIDKey }}"
+        secretAccessKeyKey: "{{ .Application.spec.backup.s3CredentialsSecret.secretAccessKeyKey }}"
       data:
         compression: gzip
       wal:
