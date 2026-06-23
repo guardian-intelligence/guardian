@@ -86,6 +86,10 @@ path "${vault_mount.kv.path}/data/${each.value.path}" {
 path "${vault_mount.kv.path}/metadata/${each.value.path}" {
   capabilities = ["read"]
 }
+
+path "auth/token/lookup-self" {
+  capabilities = ["read"]
+}
 EOT
 }
 
