@@ -326,14 +326,8 @@ LIVE_GETS = [
     "root",
     "tenant-root",
 ) + _monitoring_gets(
-    "dev",
-    "tenant-guardiancommercial-platform-dev",
-) + _monitoring_gets(
-    "gamma",
-    "tenant-guardiancommercial-platform-gamma",
-) + _monitoring_gets(
-    "prod",
-    "tenant-guardiancommercial-platform-prod",
+    "platform",
+    "tenant-guardiancommercial-platform",
 )
 
 LIVE_VALUE_CHECKS = [
@@ -416,29 +410,13 @@ LIVE_VALUE_CHECKS = [
     "7",
     "5Gi",
 ) + _monitoring_checks(
-    "dev",
-    "tenant-guardiancommercial-platform-dev",
-    "grafana.dev.gi.org",
-    "3Gi",
+    "platform",
+    "tenant-guardiancommercial-platform",
+    "grafana.platform.guardianintelligence.org",
     "5Gi",
-    "3",
-    "3Gi",
-) + _monitoring_checks(
-    "gamma",
-    "tenant-guardiancommercial-platform-gamma",
-    "grafana.gamma.gi.org",
-    "3Gi",
+    "10Gi",
+    "7",
     "5Gi",
-    "3",
-    "3Gi",
-) + _monitoring_checks(
-    "prod",
-    "tenant-guardiancommercial-platform-prod",
-    "grafana.prod.gi.org",
-    "3Gi",
-    "5Gi",
-    "3",
-    "3Gi",
 ) + [
     ("dev postgres replicas", ["-n", "tenant-guardiancommercial-platform-dev", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.replicas}"], "3"),
     ("dev postgres storage class", ["-n", "tenant-guardiancommercial-platform-dev", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.storageClass}"], "replicated"),
@@ -515,6 +493,7 @@ LIVE_FLUX_WAITS = [
     ("flux base kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-base"]),
     ("flux guardian commercial tenant kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-tenant-apps"]),
     ("flux platform tenant kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-tenant"]),
+    ("flux platform apps kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-apps"]),
     ("flux platform dev tenant kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-dev-tenant"]),
     ("flux platform dev kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-dev"]),
     ("flux platform gamma tenant kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-gamma-tenant"]),
@@ -607,19 +586,9 @@ LIVE_WAITS = [
     "root",
     "tenant-root",
 ) + _monitoring_waits(
-    "dev",
-    "tenant-guardiancommercial-platform-dev",
-) + _monitoring_waits(
-    "gamma",
-    "tenant-guardiancommercial-platform-gamma",
-) + _monitoring_waits(
-    "prod",
-    "tenant-guardiancommercial-platform-prod",
+    "platform",
+    "tenant-guardiancommercial-platform",
 )
-LIVE_ABSENT = [
-    ("stale root monitoring app", ["-n", "tenant-root", "get", "monitorings.apps.cozystack.io/guardian"]),
-    ("stale root monitoring helmrelease", ["-n", "tenant-root", "get", "helmreleases.helm.toolkit.fluxcd.io/guardian"]),
-]
 LIVE_COMPANY_SITE_SPREADS = [
     ("dev company pod placement", "tenant-guardiancommercial-platform-dev", "dev"),
     ("gamma company pod placement", "tenant-guardiancommercial-platform-gamma", "gamma"),
@@ -975,29 +944,6 @@ def _kubectl_success_for(ctx, kubectl, kubeconfig, args, label):
         label = label,
     )
 
-def _kubectl_expect_absent_for(ctx, kubectl, kubeconfig, args, label):
-    cmd = ctx.std.process.command(kubectl).args(_kubectl_args_for(ctx, kubeconfig, args)).current_dir(ws_path(ctx))
-    if ctx.std.io.stderr.is_tty:
-        ctx.std.io.stderr.write("$ kubectl confirm absent " + label + "\n")
-    r = cmd.stdout("piped").stderr("piped").spawn().wait_with_output()
-    if r.status.code == 0:
-        ctx.std.io.stderr.write("ERROR: " + label + " still exists but should be pruned\n")
-        if r.stdout != "":
-            ctx.std.io.stderr.write(r.stdout)
-        if r.stderr != "":
-            ctx.std.io.stderr.write(r.stderr)
-        return 1
-    not_found = r.stderr.find("NotFound") != -1 or r.stderr.find("not found") != -1
-    if not_found:
-        return 0
-    ctx.std.io.stderr.write("ERROR: could not confirm " + label + " is absent\n")
-    if r.stdout != "":
-        ctx.std.io.stderr.write(r.stdout)
-    if r.stderr != "":
-        ctx.std.io.stderr.write(r.stderr)
-        _write_auth_hint(ctx, r.stderr, "kubernetes")
-    return 1
-
 def _talosctl_success(ctx, talosctl, args, label):
     return _capture_success(
         ctx,
@@ -1091,6 +1037,7 @@ def _check_flux_revision_for(ctx, kubectl, kubeconfig, revision):
         ("guardian-mgmt-base last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-base", "-o", "jsonpath={.status.lastAppliedRevision}"]),
         ("guardian-mgmt-tenant-apps last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-tenant-apps", "-o", "jsonpath={.status.lastAppliedRevision}"]),
         ("guardian-mgmt-platform-tenant last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-tenant", "-o", "jsonpath={.status.lastAppliedRevision}"]),
+        ("guardian-mgmt-platform-apps last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-apps", "-o", "jsonpath={.status.lastAppliedRevision}"]),
         ("guardian-mgmt-platform-dev-tenant last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-dev-tenant", "-o", "jsonpath={.status.lastAppliedRevision}"]),
         ("guardian-mgmt-platform-dev last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-dev", "-o", "jsonpath={.status.lastAppliedRevision}"]),
         ("guardian-mgmt-platform-gamma-tenant last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-gamma-tenant", "-o", "jsonpath={.status.lastAppliedRevision}"]),
@@ -1155,6 +1102,7 @@ def _render_kustomizations(ctx):
         "src/infrastructure/tenants/platform/dev",
         "src/infrastructure/tenants/platform/gamma",
         "src/infrastructure/tenants/platform/prod",
+        "src/infrastructure/products/platform",
         "src/infrastructure/products/platform/dev",
         "src/infrastructure/products/platform/gamma",
         "src/infrastructure/products/platform/prod",
@@ -1436,11 +1384,6 @@ def _live_checks(ctx, kubectl, kubeconfig, revision):
         if value == None:
             return 1
         rc = _assert_equals(ctx, value, expected, label)
-        if rc != 0:
-            return rc
-
-    for label, kubectl_args in LIVE_ABSENT:
-        rc = _kubectl_expect_absent_for(ctx, kubectl, kubeconfig, kubectl_args, label)
         if rc != 0:
             return rc
 

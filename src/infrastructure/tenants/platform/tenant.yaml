@@ -10,5 +10,5 @@ spec:
   host: platform.guardianintelligence.org
   etcd: false
   ingress: false
-  monitoring: false
+  monitoring: true
   seaweedfs: false

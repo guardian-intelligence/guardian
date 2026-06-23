@@ -53,7 +53,6 @@ type platformStage struct {
 	tenantDir          string
 	tenantHost         string
 	harborHost         string
-	grafanaHost        string
 	companyHost        string
 	postgresSchedule   string
 	clickHouseSchedule string
@@ -68,7 +67,6 @@ func platformStages() []platformStage {
 			tenantDir:          "src/infrastructure/tenants/platform/dev",
 			tenantHost:         "dev.gi.org",
 			harborHost:         "harbor.dev.gi.org",
-			grafanaHost:        "grafana.dev.gi.org",
 			companyHost:        "dev.gi.org",
 			postgresSchedule:   "13 1 * * *",
 			clickHouseSchedule: "23 1 * * *",
@@ -80,7 +78,6 @@ func platformStages() []platformStage {
 			tenantDir:          "src/infrastructure/tenants/platform/gamma",
 			tenantHost:         "gamma.gi.org",
 			harborHost:         "harbor.gamma.gi.org",
-			grafanaHost:        "grafana.gamma.gi.org",
 			companyHost:        "gamma.gi.org",
 			postgresSchedule:   "19 1 * * *",
 			clickHouseSchedule: "29 1 * * *",
@@ -92,7 +89,6 @@ func platformStages() []platformStage {
 			tenantDir:          "src/infrastructure/tenants/platform/prod",
 			tenantHost:         "prod.gi.org",
 			harborHost:         "harbor.prod.gi.org",
-			grafanaHost:        "grafana.prod.gi.org",
 			companyHost:        "guardianintelligence.org",
 			postgresSchedule:   "37 1 * * *",
 			clickHouseSchedule: "41 1 * * *",
@@ -278,7 +274,7 @@ func testPlatformTenantTopology(t *testing.T) {
 	assertString(t, platform, "platform.guardianintelligence.org", "spec", "host")
 	assertBool(t, platform, false, "spec", "etcd")
 	assertBool(t, platform, false, "spec", "ingress")
-	assertBool(t, platform, false, "spec", "monitoring")
+	assertBool(t, platform, true, "spec", "monitoring")
 	assertBool(t, platform, false, "spec", "seaweedfs")
 
 	for _, stage := range platformStages() {
@@ -323,9 +319,6 @@ func testGuardianMgmtDNSBootstrap(t *testing.T) {
 
 	for _, host := range []string{
 		`"dev.gi.org"`,
-		`"grafana.dev.gi.org"`,
-		`"grafana.gamma.gi.org"`,
-		`"grafana.prod.gi.org"`,
 		`"gamma.gi.org"`,
 		`"prod.gi.org"`,
 		`"harbor.dev.gi.org"`,
@@ -334,6 +327,7 @@ func testGuardianMgmtDNSBootstrap(t *testing.T) {
 		`"guardianintelligence.org"`,
 		`"dashboard.guardianintelligence.org"`,
 		`"grafana.guardianintelligence.org"`,
+		`"grafana.platform.guardianintelligence.org"`,
 		`"harbor.guardianintelligence.org"`,
 		`"s3.guardianintelligence.org"`,
 	} {
@@ -552,7 +546,7 @@ func assertHarborRWORolloutStrategy(t *testing.T, rel, namespace string) {
 	assertString(t, hr, "Recreate", "spec", "values", "harbor", "updateStrategy", "type")
 }
 
-func assertMonitoring(t *testing.T, rel, namespace, host string, root bool) {
+func assertMonitoring(t *testing.T, rel, namespace, host string, highCapacity bool, labelKey, labelValue string) {
 	t.Helper()
 
 	docs := readManifests(t, rel)
@@ -568,7 +562,7 @@ func assertMonitoring(t *testing.T, rel, namespace, host string, root bool) {
 	alertaStorage := "1Gi"
 	cpuRequest := "25m"
 	cpuLimit := "250m"
-	if root {
+	if highCapacity {
 		shortSize = "5Gi"
 		longSize = "10Gi"
 		logRetention = "7"
@@ -584,7 +578,7 @@ func assertMonitoring(t *testing.T, rel, namespace, host string, root bool) {
 		t.Fatalf("%s Monitoring metricsStorages = %d, want 2", namespace, len(metricsStorages))
 	}
 	assertMetricsStorage(t, asManifest(t, metricsStorages[0], namespace+" metricsStorages[0]"), "shortterm", "3d", "15s", shortSize, cpuRequest, cpuLimit)
-	assertMetricsStorage(t, asManifest(t, metricsStorages[1], namespace+" metricsStorages[1]"), "longterm", map[bool]string{true: "14d", false: "7d"}[root], "5m", longSize, cpuRequest, cpuLimit)
+	assertMetricsStorage(t, asManifest(t, metricsStorages[1], namespace+" metricsStorages[1]"), "longterm", map[bool]string{true: "14d", false: "7d"}[highCapacity], "5m", longSize, cpuRequest, cpuLimit)
 
 	logsStorages := sliceAt(t, monitoring, "spec", "logsStorages")
 	if len(logsStorages) != 1 {
@@ -610,11 +604,7 @@ func assertMonitoring(t *testing.T, rel, namespace, host string, root bool) {
 	assertString(t, monitoring, "512Mi", "spec", "alerta", "resources", "limits", "memory")
 
 	assertString(t, monitoring, "guardian-mgmt", "spec", "vmagent", "externalLabels", "cluster")
-	if root {
-		assertString(t, monitoring, "root", "spec", "vmagent", "externalLabels", "guardian_tenant")
-	} else {
-		assertString(t, monitoring, "platform", "spec", "vmagent", "externalLabels", "guardian_product")
-	}
+	assertString(t, monitoring, labelValue, "spec", "vmagent", "externalLabels", labelKey)
 	assertStringSlice(t, monitoring, []string{
 		"http://vminsert-shortterm:8480/insert/0/prometheus",
 		"http://vminsert-longterm:8480/insert/0/prometheus",
@@ -751,12 +741,8 @@ func testPlatformTenantCoreServices(t *testing.T) {
 }
 
 func testObservability(t *testing.T) {
-	assertMonitoring(t, "src/infrastructure/base/apps/observability.yaml", "tenant-root", "grafana.guardianintelligence.org", true)
-	for _, stage := range platformStages() {
-		t.Run(stage.name, func(t *testing.T) {
-			assertMonitoring(t, stage.manifestDir+"/observability.yaml", stage.namespace, stage.grafanaHost, false)
-		})
-	}
+	assertMonitoring(t, "src/infrastructure/base/apps/observability.yaml", "tenant-root", "grafana.guardianintelligence.org", true, "guardian_tenant", "root")
+	assertMonitoring(t, "src/infrastructure/products/platform/observability.yaml", "tenant-guardiancommercial-platform", "grafana.platform.guardianintelligence.org", true, "guardian_product", "platform")
 }
 
 func testCompanySite(t *testing.T) {
@@ -1065,6 +1051,15 @@ func testFluxHandoff(t *testing.T) {
 		t.Fatalf("guardian-mgmt-platform-tenant dependsOn = %#v, want only guardian-mgmt-tenant-apps", productDeps)
 	}
 
+	productApps := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-platform-apps")
+	assertString(t, productApps, "./src/infrastructure/products/platform", "spec", "path")
+	assertBool(t, productApps, true, "spec", "prune")
+	assertBool(t, productApps, false, "spec", "wait")
+	productAppsDeps := sliceAt(t, productApps, "spec", "dependsOn")
+	if len(productAppsDeps) != 1 || stringAt(asManifest(t, productAppsDeps[0], "spec.dependsOn[0]"), "name") != "guardian-mgmt-platform-tenant" {
+		t.Fatalf("guardian-mgmt-platform-apps dependsOn = %#v, want only guardian-mgmt-platform-tenant", productAppsDeps)
+	}
+
 	stageChecks := []struct {
 		name      string
 		path      string
@@ -1073,7 +1068,7 @@ func testFluxHandoff(t *testing.T) {
 		apps      bool
 		namespace string
 	}{
-		{name: "guardian-mgmt-platform-dev-tenant", path: "./src/infrastructure/tenants/platform/dev", dependsOn: "guardian-mgmt-platform-tenant", wait: true, namespace: "tenant-guardiancommercial-platform-dev"},
+		{name: "guardian-mgmt-platform-dev-tenant", path: "./src/infrastructure/tenants/platform/dev", dependsOn: "guardian-mgmt-platform-apps", wait: true, namespace: "tenant-guardiancommercial-platform-dev"},
 		{name: "guardian-mgmt-platform-dev", path: "./src/infrastructure/products/platform/dev", dependsOn: "guardian-mgmt-platform-dev-tenant", wait: false, apps: true},
 		{name: "guardian-mgmt-platform-gamma-tenant", path: "./src/infrastructure/tenants/platform/gamma", dependsOn: "guardian-mgmt-platform-dev", wait: true, namespace: "tenant-guardiancommercial-platform-gamma"},
 		{name: "guardian-mgmt-platform-gamma", path: "./src/infrastructure/products/platform/gamma", dependsOn: "guardian-mgmt-platform-gamma-tenant", wait: false, apps: true},
