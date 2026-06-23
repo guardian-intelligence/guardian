@@ -164,6 +164,7 @@ func testCozystackPlatformPackage(t *testing.T) {
 	if valueAt(pkg, "spec", "components", "platform", "values", "bundles", "enabledPackages") != nil {
 		t.Fatalf("cozystack platform package must not carry legacy enabledPackages overrides")
 	}
+	assertStringSlice(t, pkg, []string{"cozystack.backupstrategy-controller"}, "spec", "components", "platform", "values", "bundles", "disabledPackages")
 	assertString(t, pkg, "guardianintelligence.org", "spec", "components", "platform", "values", "publishing", "host")
 	assertString(t, pkg, fmt.Sprintf("https://%s:6443", topology.Network.VLAN.APIVIP), "spec", "components", "platform", "values", "publishing", "apiServerEndpoint")
 	assertStringSlice(t, pkg, topologyPublicIPs(topology), "spec", "components", "platform", "values", "publishing", "externalIPs")
@@ -178,6 +179,12 @@ func testCozystackPlatformPackage(t *testing.T) {
 	assertString(t, pkg, "http://keycloak-http.cozy-keycloak.svc:8080/realms/cozy", "spec", "components", "platform", "values", "authentication", "oidc", "keycloakInternalUrl")
 	assertString(t, pkg, "Guardian", "spec", "components", "platform", "values", "branding", "titleText")
 	assertString(t, pkg, "Guardian Intelligence", "spec", "components", "platform", "values", "branding", "footerText")
+
+	docs = readManifests(t, "src/infrastructure/base/cozystack/backupstrategy-controller.yaml")
+	pkg = findObject(t, docs, "Package", "", "cozystack.backupstrategy-controller")
+	assertString(t, pkg, "cozystack.io/v1alpha1", "apiVersion")
+	assertString(t, pkg, "default", "spec", "variant")
+	assertString(t, pkg, "https://s3.guardianintelligence.org", "spec", "components", "backupstrategy-controller", "values", "backupStorage", "endpoint")
 }
 
 func testGuardianMgmtTopologyAlignment(t *testing.T) {
@@ -445,7 +452,6 @@ func testCozystackSystemBucketBackups(t *testing.T) {
 			"destinationPath:",
 			"endpointURL:",
 			"s3CredentialsSecret:",
-			"openbao-clickhouse-backup",
 			"ExternalSecret",
 			"SecretStore",
 		} {
