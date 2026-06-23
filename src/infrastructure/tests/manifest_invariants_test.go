@@ -857,10 +857,8 @@ func testOpenBaoOpenTofuBootstrap(t *testing.T) {
 
 	for _, forbidden := range []string{
 		"secret_projection",
-		"guardian-external-secrets",
-		"guardian-clickhouse-external-secrets",
-		"cnpg-backup",
-		"clickhouse-backup",
+		"vault_kv_secret",
+		"vault_generic_secret",
 	} {
 		assertTextNotContains(t, mainTF, forbidden, "guardian-mgmt-openbao main.tf")
 	}
