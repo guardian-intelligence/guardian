@@ -1,0 +1,95 @@
+# Platform prod observability hub.
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Monitoring
+metadata:
+  name: guardian
+  namespace: tenant-guardiancommercial-platform-prod
+spec:
+  host: grafana.prod.gi.org
+  metricsStorages:
+    - name: shortterm
+      retentionPeriod: 3d
+      deduplicationInterval: 15s
+      storage: 3Gi
+      storageClassName: replicated
+      vminsert:
+        minAllowed:
+          cpu: 25m
+          memory: 128Mi
+        maxAllowed:
+          cpu: 250m
+          memory: 512Mi
+      vmselect:
+        minAllowed:
+          cpu: 25m
+          memory: 128Mi
+        maxAllowed:
+          cpu: 250m
+          memory: 512Mi
+      vmstorage:
+        minAllowed:
+          cpu: 25m
+          memory: 256Mi
+        maxAllowed:
+          cpu: 250m
+          memory: 1Gi
+    - name: longterm
+      retentionPeriod: 7d
+      deduplicationInterval: 5m
+      storage: 5Gi
+      storageClassName: replicated
+      vminsert:
+        minAllowed:
+          cpu: 25m
+          memory: 128Mi
+        maxAllowed:
+          cpu: 250m
+          memory: 512Mi
+      vmselect:
+        minAllowed:
+          cpu: 25m
+          memory: 128Mi
+        maxAllowed:
+          cpu: 250m
+          memory: 512Mi
+      vmstorage:
+        minAllowed:
+          cpu: 25m
+          memory: 256Mi
+        maxAllowed:
+          cpu: 250m
+          memory: 1Gi
+  logsStorages:
+    - name: generic
+      retentionPeriod: "3"
+      storage: 3Gi
+      storageClassName: replicated
+  grafana:
+    db:
+      size: 1Gi
+    resources:
+      requests:
+        cpu: 25m
+        memory: 128Mi
+      limits:
+        cpu: 250m
+        memory: 512Mi
+  alerta:
+    storage: 1Gi
+    storageClassName: replicated
+    resources:
+      requests:
+        cpu: 25m
+        memory: 128Mi
+      limits:
+        cpu: 250m
+        memory: 512Mi
+  vmagent:
+    externalLabels:
+      cluster: guardian-mgmt
+      guardian_product: platform
+      guardian_stage: prod
+    remoteWrite:
+      urls:
+        - http://vminsert-shortterm:8480/insert/0/prometheus
+        - http://vminsert-longterm:8480/insert/0/prometheus

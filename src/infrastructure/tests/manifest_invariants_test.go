@@ -53,6 +53,7 @@ type platformStage struct {
 	tenantDir          string
 	tenantHost         string
 	harborHost         string
+	grafanaHost        string
 	companyHost        string
 	postgresSchedule   string
 	clickHouseSchedule string
@@ -67,6 +68,7 @@ func platformStages() []platformStage {
 			tenantDir:          "src/infrastructure/tenants/platform/dev",
 			tenantHost:         "dev.gi.org",
 			harborHost:         "harbor.dev.gi.org",
+			grafanaHost:        "grafana.dev.gi.org",
 			companyHost:        "dev.gi.org",
 			postgresSchedule:   "13 1 * * *",
 			clickHouseSchedule: "23 1 * * *",
@@ -78,6 +80,7 @@ func platformStages() []platformStage {
 			tenantDir:          "src/infrastructure/tenants/platform/gamma",
 			tenantHost:         "gamma.gi.org",
 			harborHost:         "harbor.gamma.gi.org",
+			grafanaHost:        "grafana.gamma.gi.org",
 			companyHost:        "gamma.gi.org",
 			postgresSchedule:   "19 1 * * *",
 			clickHouseSchedule: "29 1 * * *",
@@ -89,6 +92,7 @@ func platformStages() []platformStage {
 			tenantDir:          "src/infrastructure/tenants/platform/prod",
 			tenantHost:         "prod.gi.org",
 			harborHost:         "harbor.prod.gi.org",
+			grafanaHost:        "grafana.prod.gi.org",
 			companyHost:        "guardianintelligence.org",
 			postgresSchedule:   "37 1 * * *",
 			clickHouseSchedule: "41 1 * * *",
@@ -108,6 +112,7 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("cozystack system bucket backups", testCozystackSystemBucketBackups)
 	t.Run("root tenant core services", testRootTenantCoreServices)
 	t.Run("platform tenant core services", testPlatformTenantCoreServices)
+	t.Run("observability", testObservability)
 	t.Run("company site", testCompanySite)
 	t.Run("company site source ownership", testCompanySiteSourceOwnership)
 	t.Run("openbao", testOpenBao)
@@ -318,6 +323,9 @@ func testGuardianMgmtDNSBootstrap(t *testing.T) {
 
 	for _, host := range []string{
 		`"dev.gi.org"`,
+		`"grafana.dev.gi.org"`,
+		`"grafana.gamma.gi.org"`,
+		`"grafana.prod.gi.org"`,
 		`"gamma.gi.org"`,
 		`"prod.gi.org"`,
 		`"harbor.dev.gi.org"`,
@@ -325,6 +333,7 @@ func testGuardianMgmtDNSBootstrap(t *testing.T) {
 		`"harbor.prod.gi.org"`,
 		`"guardianintelligence.org"`,
 		`"dashboard.guardianintelligence.org"`,
+		`"grafana.guardianintelligence.org"`,
 		`"harbor.guardianintelligence.org"`,
 		`"s3.guardianintelligence.org"`,
 	} {
@@ -543,6 +552,96 @@ func assertHarborRWORolloutStrategy(t *testing.T, rel, namespace string) {
 	assertString(t, hr, "Recreate", "spec", "values", "harbor", "updateStrategy", "type")
 }
 
+func assertMonitoring(t *testing.T, rel, namespace, host string, root bool) {
+	t.Helper()
+
+	docs := readManifests(t, rel)
+	monitoring := findObject(t, docs, "Monitoring", namespace, "guardian")
+	assertString(t, monitoring, "apps.cozystack.io/v1alpha1", "apiVersion")
+	assertString(t, monitoring, host, "spec", "host")
+
+	shortSize := "3Gi"
+	longSize := "5Gi"
+	logRetention := "3"
+	logSize := "3Gi"
+	dbSize := "1Gi"
+	alertaStorage := "1Gi"
+	cpuRequest := "25m"
+	cpuLimit := "250m"
+	if root {
+		shortSize = "5Gi"
+		longSize = "10Gi"
+		logRetention = "7"
+		logSize = "5Gi"
+		dbSize = "2Gi"
+		alertaStorage = "2Gi"
+		cpuRequest = "50m"
+		cpuLimit = "500m"
+	}
+
+	metricsStorages := sliceAt(t, monitoring, "spec", "metricsStorages")
+	if len(metricsStorages) != 2 {
+		t.Fatalf("%s Monitoring metricsStorages = %d, want 2", namespace, len(metricsStorages))
+	}
+	assertMetricsStorage(t, asManifest(t, metricsStorages[0], namespace+" metricsStorages[0]"), "shortterm", "3d", "15s", shortSize, cpuRequest, cpuLimit)
+	assertMetricsStorage(t, asManifest(t, metricsStorages[1], namespace+" metricsStorages[1]"), "longterm", map[bool]string{true: "14d", false: "7d"}[root], "5m", longSize, cpuRequest, cpuLimit)
+
+	logsStorages := sliceAt(t, monitoring, "spec", "logsStorages")
+	if len(logsStorages) != 1 {
+		t.Fatalf("%s Monitoring logsStorages = %d, want 1", namespace, len(logsStorages))
+	}
+	logs := asManifest(t, logsStorages[0], namespace+" logsStorages[0]")
+	assertString(t, logs, "generic", "name")
+	assertString(t, logs, logRetention, "retentionPeriod")
+	assertString(t, logs, logSize, "storage")
+	assertString(t, logs, "replicated", "storageClassName")
+
+	assertString(t, monitoring, dbSize, "spec", "grafana", "db", "size")
+	assertString(t, monitoring, "128Mi", "spec", "grafana", "resources", "requests", "memory")
+	assertString(t, monitoring, cpuRequest, "spec", "grafana", "resources", "requests", "cpu")
+	assertString(t, monitoring, "512Mi", "spec", "grafana", "resources", "limits", "memory")
+	assertString(t, monitoring, cpuLimit, "spec", "grafana", "resources", "limits", "cpu")
+
+	assertString(t, monitoring, alertaStorage, "spec", "alerta", "storage")
+	assertString(t, monitoring, "replicated", "spec", "alerta", "storageClassName")
+	assertString(t, monitoring, "25m", "spec", "alerta", "resources", "requests", "cpu")
+	assertString(t, monitoring, "128Mi", "spec", "alerta", "resources", "requests", "memory")
+	assertString(t, monitoring, "250m", "spec", "alerta", "resources", "limits", "cpu")
+	assertString(t, monitoring, "512Mi", "spec", "alerta", "resources", "limits", "memory")
+
+	assertString(t, monitoring, "guardian-mgmt", "spec", "vmagent", "externalLabels", "cluster")
+	if root {
+		assertString(t, monitoring, "root", "spec", "vmagent", "externalLabels", "guardian_tenant")
+	} else {
+		assertString(t, monitoring, "platform", "spec", "vmagent", "externalLabels", "guardian_product")
+	}
+	assertStringSlice(t, monitoring, []string{
+		"http://vminsert-shortterm:8480/insert/0/prometheus",
+		"http://vminsert-longterm:8480/insert/0/prometheus",
+	}, "spec", "vmagent", "remoteWrite", "urls")
+}
+
+func assertMetricsStorage(t *testing.T, storage manifest, name, retention, deduplication, size, cpuRequest, cpuLimit string) {
+	t.Helper()
+
+	assertString(t, storage, name, "name")
+	assertString(t, storage, retention, "retentionPeriod")
+	assertString(t, storage, deduplication, "deduplicationInterval")
+	assertString(t, storage, size, "storage")
+	assertString(t, storage, "replicated", "storageClassName")
+	for _, component := range []string{"vminsert", "vmselect", "vmstorage"} {
+		assertString(t, storage, cpuRequest, component, "minAllowed", "cpu")
+		assertString(t, storage, cpuLimit, component, "maxAllowed", "cpu")
+		if component == "vmstorage" {
+			assertString(t, storage, "256Mi", component, "minAllowed", "memory")
+			assertString(t, storage, "1Gi", component, "maxAllowed", "memory")
+			continue
+		}
+		assertString(t, storage, "128Mi", component, "minAllowed", "memory")
+		assertString(t, storage, "512Mi", component, "maxAllowed", "memory")
+	}
+}
+
 func testRootTenantCoreServices(t *testing.T) {
 	docs := readManifests(t, "src/infrastructure/base/apps/core-services.yaml")
 
@@ -647,6 +746,15 @@ func testPlatformTenantCoreServices(t *testing.T) {
 					"clickhouseKeeper": 3,
 				},
 			})
+		})
+	}
+}
+
+func testObservability(t *testing.T) {
+	assertMonitoring(t, "src/infrastructure/base/apps/observability.yaml", "tenant-root", "grafana.guardianintelligence.org", true)
+	for _, stage := range platformStages() {
+		t.Run(stage.name, func(t *testing.T) {
+			assertMonitoring(t, stage.manifestDir+"/observability.yaml", stage.namespace, stage.grafanaHost, false)
 		})
 	}
 }

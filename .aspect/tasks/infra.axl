@@ -142,6 +142,30 @@ def _clickhouse_child_checks(stage, namespace):
         (stage + " clickhouse keeper workload monitor kind", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release + "-keeper", "-o", "jsonpath={.spec.kind}"], "clickhouse"),
     ]
 
+def _monitoring_gets(stage, namespace):
+    return [
+        (stage + " monitoring", ["-n", namespace, "get", "monitorings.apps.cozystack.io/guardian"]),
+    ]
+
+def _monitoring_waits(stage, namespace):
+    return [
+        (stage + " monitoring app", ["-n", namespace, "wait", "--for=condition=Ready", "monitorings.apps.cozystack.io/guardian"]),
+        (stage + " monitoring workloads", ["-n", namespace, "wait", "--for=condition=WorkloadsReady", "monitorings.apps.cozystack.io/guardian"]),
+    ]
+
+def _monitoring_checks(stage, namespace, host, shortterm_storage, longterm_storage, log_retention, log_storage):
+    return [
+        (stage + " monitoring host", ["-n", namespace, "get", "monitorings.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.host}"], host),
+        (stage + " monitoring shortterm storage", ["-n", namespace, "get", "monitorings.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.metricsStorages[0].storage}"], shortterm_storage),
+        (stage + " monitoring shortterm storage class", ["-n", namespace, "get", "monitorings.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.metricsStorages[0].storageClassName}"], "replicated"),
+        (stage + " monitoring longterm storage", ["-n", namespace, "get", "monitorings.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.metricsStorages[1].storage}"], longterm_storage),
+        (stage + " monitoring longterm storage class", ["-n", namespace, "get", "monitorings.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.metricsStorages[1].storageClassName}"], "replicated"),
+        (stage + " monitoring logs retention", ["-n", namespace, "get", "monitorings.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.logsStorages[0].retentionPeriod}"], log_retention),
+        (stage + " monitoring logs storage", ["-n", namespace, "get", "monitorings.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.logsStorages[0].storage}"], log_storage),
+        (stage + " monitoring logs storage class", ["-n", namespace, "get", "monitorings.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.logsStorages[0].storageClassName}"], "replicated"),
+        (stage + " monitoring vmagent cluster label", ["-n", namespace, "get", "monitorings.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.vmagent.externalLabels.cluster}"], "guardian-mgmt"),
+    ]
+
 INFRA_FILEGROUPS = [
     "//src/infrastructure/bootstrap/guardian-mgmt:root",
     "//src/infrastructure/bootstrap/guardian-mgmt-dns:root",
@@ -298,6 +322,18 @@ LIVE_GETS = [
 ) + _clickhouse_child_gets(
     "prod",
     "tenant-guardiancommercial-platform-prod",
+) + _monitoring_gets(
+    "root",
+    "tenant-root",
+) + _monitoring_gets(
+    "dev",
+    "tenant-guardiancommercial-platform-dev",
+) + _monitoring_gets(
+    "gamma",
+    "tenant-guardiancommercial-platform-gamma",
+) + _monitoring_gets(
+    "prod",
+    "tenant-guardiancommercial-platform-prod",
 )
 
 LIVE_VALUE_CHECKS = [
@@ -371,6 +407,38 @@ LIVE_VALUE_CHECKS = [
 ) + _clickhouse_child_checks(
     "prod",
     "tenant-guardiancommercial-platform-prod",
+) + _monitoring_checks(
+    "root",
+    "tenant-root",
+    "grafana.guardianintelligence.org",
+    "5Gi",
+    "10Gi",
+    "7",
+    "5Gi",
+) + _monitoring_checks(
+    "dev",
+    "tenant-guardiancommercial-platform-dev",
+    "grafana.dev.gi.org",
+    "3Gi",
+    "5Gi",
+    "3",
+    "3Gi",
+) + _monitoring_checks(
+    "gamma",
+    "tenant-guardiancommercial-platform-gamma",
+    "grafana.gamma.gi.org",
+    "3Gi",
+    "5Gi",
+    "3",
+    "3Gi",
+) + _monitoring_checks(
+    "prod",
+    "tenant-guardiancommercial-platform-prod",
+    "grafana.prod.gi.org",
+    "3Gi",
+    "5Gi",
+    "3",
+    "3Gi",
 ) + [
     ("dev postgres replicas", ["-n", "tenant-guardiancommercial-platform-dev", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.replicas}"], "3"),
     ("dev postgres storage class", ["-n", "tenant-guardiancommercial-platform-dev", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.storageClass}"], "replicated"),
@@ -533,6 +601,18 @@ LIVE_WAITS = [
     "gamma",
     "tenant-guardiancommercial-platform-gamma",
 ) + _clickhouse_child_waits(
+    "prod",
+    "tenant-guardiancommercial-platform-prod",
+) + _monitoring_waits(
+    "root",
+    "tenant-root",
+) + _monitoring_waits(
+    "dev",
+    "tenant-guardiancommercial-platform-dev",
+) + _monitoring_waits(
+    "gamma",
+    "tenant-guardiancommercial-platform-gamma",
+) + _monitoring_waits(
     "prod",
     "tenant-guardiancommercial-platform-prod",
 )

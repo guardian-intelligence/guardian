@@ -5,6 +5,7 @@ kind: Kustomization
 resources:
   - apps/core-services.yaml
   - apps/harbor-rwo-rollout-strategy.yaml
+  - apps/observability.yaml
   - apps/seaweedfs-s3-ingress-service.yaml
   - networking/metallb.yaml
   - networking/subnet-mtu.yaml
