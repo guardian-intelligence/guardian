@@ -3,5 +3,4 @@ kind: Kustomization
 resources:
   - core-services.yaml
   - harbor-rwo-rollout-strategy.yaml
-  - observability.yaml
   - company-site.yaml
