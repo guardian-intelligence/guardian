@@ -15,6 +15,7 @@ and the standard checks to run.
 | Talos/Talm chart | `src/infrastructure/talm/` |
 | Cozystack platform package | `src/infrastructure/base/cozystack/platform.yaml` |
 | Core Cozystack apps | `src/infrastructure/base/apps/core-services.yaml` |
+| Observability apps | `src/infrastructure/base/apps/observability.yaml`, `src/infrastructure/products/platform/*/observability.yaml` |
 | MetalLB L2 pool | `src/infrastructure/base/networking/metallb.yaml` |
 | Kube-OVN MTU | `src/infrastructure/base/networking/subnet-mtu.yaml` |
 | Flux handoff | `src/infrastructure/base/flux/sync.yaml` |
@@ -154,10 +155,15 @@ The checked-in root app slice declares:
   PVCs.
 - `ClickHouse/guardian` in `tenant-root`: three ClickHouse replicas plus three
   Keeper replicas, with a daily backup Plan at `17 1 * * *`.
+- `Monitoring/guardian` in `tenant-root`: Cozystack's Grafana,
+  VictoriaMetrics, VictoriaLogs, Alerta, and VMAgent stack at
+  `grafana.guardianintelligence.org`, with replicated metrics and logs storage.
 
 The platform dev/gamma/prod product stage namespaces declare the same Postgres,
-Harbor, and ClickHouse core service set with smaller storage sizes and
-stage-specific backup schedules.
+Harbor, ClickHouse, and Monitoring service set with smaller storage sizes,
+stage-specific backup schedules, and Grafana hosts at `grafana.<stage>.gi.org`.
+Those Grafana hostnames are part of the OpenTofu-managed public DNS desired
+state in `src/infrastructure/bootstrap/guardian-mgmt-dns`.
 
 ## Backups
 
@@ -216,7 +222,8 @@ The live gate checks Flux reconciliation, Cozystack packages, backup platform
 resources, MetalLB/L2, Kube-OVN MTU, LINSTOR storage classes, OpenBao, root and
 product-stage app CRs, child HelmReleases and workload resources, Harbor COSI
 registry bucket access, Postgres/CNPG child resources, ClickHouse/Altinity child
-resources, and company-site deployment shape.
+resources, Monitoring app readiness and storage settings, and company-site
+deployment shape.
 
 Kubernetes-side readiness evidence should be captured as PR-local command output
 while a change is being reviewed. Durable operational proof should come from
