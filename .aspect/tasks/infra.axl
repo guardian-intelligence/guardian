@@ -144,26 +144,26 @@ def _clickhouse_child_checks(stage, namespace):
 
 def _monitoring_gets(stage, namespace):
     return [
-        (stage + " monitoring", ["-n", namespace, "get", "monitorings.apps.cozystack.io/guardian"]),
+        (stage + " monitoring", ["-n", namespace, "get", "monitorings.apps.cozystack.io/monitoring"]),
     ]
 
 def _monitoring_waits(stage, namespace):
     return [
-        (stage + " monitoring app", ["-n", namespace, "wait", "--for=condition=Ready", "monitorings.apps.cozystack.io/guardian"]),
-        (stage + " monitoring workloads", ["-n", namespace, "wait", "--for=condition=WorkloadsReady", "monitorings.apps.cozystack.io/guardian"]),
+        (stage + " monitoring app", ["-n", namespace, "wait", "--for=condition=Ready", "monitorings.apps.cozystack.io/monitoring"]),
+        (stage + " monitoring workloads", ["-n", namespace, "wait", "--for=condition=WorkloadsReady", "monitorings.apps.cozystack.io/monitoring"]),
     ]
 
 def _monitoring_checks(stage, namespace, host, shortterm_storage, longterm_storage, log_retention, log_storage):
     return [
-        (stage + " monitoring host", ["-n", namespace, "get", "monitorings.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.host}"], host),
-        (stage + " monitoring shortterm storage", ["-n", namespace, "get", "monitorings.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.metricsStorages[0].storage}"], shortterm_storage),
-        (stage + " monitoring shortterm storage class", ["-n", namespace, "get", "monitorings.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.metricsStorages[0].storageClassName}"], "replicated"),
-        (stage + " monitoring longterm storage", ["-n", namespace, "get", "monitorings.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.metricsStorages[1].storage}"], longterm_storage),
-        (stage + " monitoring longterm storage class", ["-n", namespace, "get", "monitorings.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.metricsStorages[1].storageClassName}"], "replicated"),
-        (stage + " monitoring logs retention", ["-n", namespace, "get", "monitorings.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.logsStorages[0].retentionPeriod}"], log_retention),
-        (stage + " monitoring logs storage", ["-n", namespace, "get", "monitorings.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.logsStorages[0].storage}"], log_storage),
-        (stage + " monitoring logs storage class", ["-n", namespace, "get", "monitorings.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.logsStorages[0].storageClassName}"], "replicated"),
-        (stage + " monitoring vmagent cluster label", ["-n", namespace, "get", "monitorings.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.vmagent.externalLabels.cluster}"], "guardian-mgmt"),
+        (stage + " monitoring host", ["-n", namespace, "get", "monitorings.apps.cozystack.io/monitoring", "-o", "jsonpath={.spec.host}"], host),
+        (stage + " monitoring shortterm storage", ["-n", namespace, "get", "monitorings.apps.cozystack.io/monitoring", "-o", "jsonpath={.spec.metricsStorages[0].storage}"], shortterm_storage),
+        (stage + " monitoring shortterm storage class", ["-n", namespace, "get", "monitorings.apps.cozystack.io/monitoring", "-o", "jsonpath={.spec.metricsStorages[0].storageClassName}"], "replicated"),
+        (stage + " monitoring longterm storage", ["-n", namespace, "get", "monitorings.apps.cozystack.io/monitoring", "-o", "jsonpath={.spec.metricsStorages[1].storage}"], longterm_storage),
+        (stage + " monitoring longterm storage class", ["-n", namespace, "get", "monitorings.apps.cozystack.io/monitoring", "-o", "jsonpath={.spec.metricsStorages[1].storageClassName}"], "replicated"),
+        (stage + " monitoring logs retention", ["-n", namespace, "get", "monitorings.apps.cozystack.io/monitoring", "-o", "jsonpath={.spec.logsStorages[0].retentionPeriod}"], log_retention),
+        (stage + " monitoring logs storage", ["-n", namespace, "get", "monitorings.apps.cozystack.io/monitoring", "-o", "jsonpath={.spec.logsStorages[0].storage}"], log_storage),
+        (stage + " monitoring logs storage class", ["-n", namespace, "get", "monitorings.apps.cozystack.io/monitoring", "-o", "jsonpath={.spec.logsStorages[0].storageClassName}"], "replicated"),
+        (stage + " monitoring vmagent cluster label", ["-n", namespace, "get", "monitorings.apps.cozystack.io/monitoring", "-o", "jsonpath={.spec.vmagent.externalLabels.cluster}"], "guardian-mgmt"),
     ]
 
 INFRA_FILEGROUPS = [

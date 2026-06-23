@@ -556,7 +556,7 @@ func assertMonitoring(t *testing.T, rel, namespace, host string, root bool) {
 	t.Helper()
 
 	docs := readManifests(t, rel)
-	monitoring := findObject(t, docs, "Monitoring", namespace, "guardian")
+	monitoring := findObject(t, docs, "Monitoring", namespace, "monitoring")
 	assertString(t, monitoring, "apps.cozystack.io/v1alpha1", "apiVersion")
 	assertString(t, monitoring, host, "spec", "host")
 
