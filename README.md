@@ -50,8 +50,11 @@ bazelisk run //src/guardian/cmd/guardian -- \
 checked-in Cloudflare account id in `src/infrastructure/bootstrap/backend.tfvars`
 or an explicit `AWS_ENDPOINT_URL_S3` override, prints the standard OpenTofu
 management topology outputs, validates the checked-in substrate, refreshes the
-gitignored Talm kubeconfig, runs the Talos L2 gate, and verifies live
+gitignored Talm kubeconfig, runs the Talos L2 gate, upgrades the Cozystack
+installer/operator to the repo-pinned version, and verifies live
 Flux/source-controller convergence on the requested merged `main` revision.
+`aspect infra upgrade-cozystack` is the narrow day-two path for existing
+clusters when only the Cozystack installer/operator release needs to move.
 `aspect infra openbao-drill --mode init-unseal` initializes/unseals the
 cluster-local OpenBao app, and `aspect infra openbao-apply` applies the standard
 OpenBao API state through a live port-forward. Postgres and ClickHouse backups

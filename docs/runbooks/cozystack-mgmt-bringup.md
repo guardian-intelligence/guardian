@@ -93,8 +93,11 @@ aspect infra openbao-apply \
 
 `aspect infra bootstrap` initializes the standard OpenTofu S3 backend, prints
 the standard OpenTofu topology outputs, runs `aspect infra validate`, refreshes
-the gitignored Talm kubeconfig, runs the Talos L2 gate, and then runs the live
+the gitignored Talm kubeconfig, runs the Talos L2 gate, upgrades the Cozystack
+installer/operator to the repo-pinned version, and then runs the live
 source-controller checks on the requested merged `main` revision.
+`aspect infra upgrade-cozystack` is the narrow day-two path for existing
+clusters when only the Cozystack installer/operator release needs to move.
 
 OpenBao API configuration is a separate post-app step. Initialize/unseal the
 Cozystack OpenBao app with `aspect infra openbao-drill --mode init-unseal`, then
@@ -200,6 +203,9 @@ Use repo-pinned tools through Aspect:
 aspect infra validate
 
 aspect infra talos
+
+aspect infra upgrade-cozystack \
+  --kubeconfig "$GUARDIAN_MGMT_KUBECONFIG"
 
 aspect infra live \
   --kubeconfig "$GUARDIAN_MGMT_KUBECONFIG" \
