@@ -31,6 +31,7 @@ load(
     infra_talos = "talos",
     infra_tofu_init = "tofu_init",
     infra_topology = "topology",
+    infra_upgrade_cozystack = "upgrade_cozystack",
     infra_validate = "validate",
 )
 load(
@@ -58,6 +59,7 @@ def config(ctx):
     ctx.tasks.add(infra_talos)
     ctx.tasks.add(infra_tofu_init)
     ctx.tasks.add(infra_topology)
+    ctx.tasks.add(infra_upgrade_cozystack)
     ctx.tasks.add(infra_validate)
 
     # aspect tidy
