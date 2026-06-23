@@ -126,29 +126,36 @@ cert-manager state explains the TLS failures:
 
 ## Single-Node Outage
 
-`aspect infra node-outage-drill` was run against `ash-water`.
+`aspect infra node-outage-drill` was run against `ash-water` after changing the
+outage contract to Kubernetes-native disruption health.
 
-The standard drain path worked: `ash-water` was cordoned, non-daemon workloads
-were evicted, and Cozystack stateful apps remained `Ready=True` while drained.
-DRBD volume reattach events were observed and completed for moved pods.
+The standard drain path worked: `ash-water` was cordoned and drained through
+`kubectl drain` without `--force` or `--disable-eviction`; PDBs controlled the
+eviction boundary. During the outage phase, root/dev/gamma/prod Postgres,
+Harbor, and ClickHouse apps reported `Ready=True` and `WorkloadsReady=True`, and
+dashboard deployments remained `Available=True`.
 
-The outage drill did not complete because it requires
-`StatefulSet/openbao-guardian` to remain `3/3` during the outage. OpenBao uses
-`local-retain` storage. After draining `ash-water`, `openbao-guardian-2` could
-not schedule on the other nodes:
+OpenBao stayed available under the intended `local-retain` contract:
+`OpenBao/guardian` reported `Ready=True`, and
+`StatefulSet/openbao-guardian` reported `readyReplicas=2` out of `replicas=3`,
+meeting quorum `2`.
 
-`0/3 nodes are available: 1 node(s) were unschedulable, 2 node(s) didn't match PersistentVolume's node affinity.`
+Company-site stayed available under its PDB contract while topology spread kept
+the third replica intentionally pending:
 
-Recovery steps taken:
+- dev: `currentHealthy=2`, `desiredHealthy=2`, `disruptionsAllowed=0`
+- gamma: `currentHealthy=2`, `desiredHealthy=2`, `disruptionsAllowed=0`
+- prod: `currentHealthy=2`, `desiredHealthy=2`, `disruptionsAllowed=0`
 
-- Stopped the drill.
-- Uncordoned `ash-water`.
-- Waited for `openbao-guardian-2` to schedule back onto `ash-water`.
-- Ran `aspect infra openbao-drill --mode init-unseal` to unseal the returned
-  replica.
-- Reran `aspect infra openbao-drill --mode snapshot`; OpenBao returned to 3/3
-  with healthy Raft autopilot and failure tolerance `1`.
-- Reran `aspect infra live`; source-controller and live gates passed.
+Recovery completed unattended: the helper uncordoned `ash-water`, waited for the
+returned OpenBao container to exist, detected `openbao-guardian-2` as sealed,
+unsealed it with the cluster-local `unseal-key`, waited for
+`StatefulSet/openbao-guardian` to return to `3/3`, and then required
+dev/gamma/prod company-site deployments to return to `3/3`. The drill completed
+with `node outage drill completed: node=ash-water`.
+
+Post-drill `aspect infra live --revision c987e948570407e7d0711ef6bcbb306634a18e14`
+passed; source-controller reported the same merged main revision reconciled.
 
 ## Remaining Work
 
@@ -158,14 +165,7 @@ Recovery steps taken:
 2. Let cert-manager complete HTTP-01 issuance, then rerun public k6 loads for
    company-site, dashboard, Harbor HTTP, and root/dev/gamma/prod Harbor ORAS
    registry smoke without `--host-overrides`.
-3. Decide the OpenBao single-node-outage contract. Either keep `local-retain`
-   and change the drill/report expectation to quorum-survives-plus-auto-unseal
-   after node return, or move OpenBao to storage/autounseal behavior that can
-   satisfy 3/3 during a drained node.
-4. Investigate ClickHouse restore target reconciliation. Backup-only works, but
+3. Investigate ClickHouse restore target reconciliation. Backup-only works, but
    full restore did not create restore target pods in dev.
-5. Wire concrete Postgres backup coordinates into the `Postgres/guardian` app
+4. Wire concrete Postgres backup coordinates into the `Postgres/guardian` app
    specs, then run CNPG backup and restore drills.
-6. Rerun a complete single-node outage drill after the OpenBao contract is
-   fixed, and preserve the resulting standard command summary in this reports
-   directory.
