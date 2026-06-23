@@ -442,12 +442,12 @@ Flux reconciles the management cluster in ordered slices:
   in dev -> gamma -> prod order. Those product stage wrappers apply the core
   service, company-site, and backup credential projection manifests.
 
-Flux waits on tenant-only slices, where namespace creation is the desired
-readiness signal. Product app slices use `wait: false` because Cozystack app CRs
-fan out into HelmReleases and stateful workloads. Service readiness is proven by
-the Cozystack app resources' `Ready` and `WorkloadsReady` conditions plus the
-component-specific live drill output, not by treating Flux's apply status as
-service health.
+Flux waits on tenant-only slices and health-checks the namespace each tenant
+chart creates; namespace creation is the desired readiness signal. Product app
+slices use `wait: false` because Cozystack app CRs fan out into HelmReleases and
+stateful workloads. Service readiness is proven by the Cozystack app resources'
+`Ready` and `WorkloadsReady` conditions plus the component-specific live drill
+output, not by treating Flux's apply status as service health.
 
 After changing checked-in infrastructure, merge the PR to `main` and let the
 existing `GitRepository/guardian` and `Kustomization/guardian-mgmt-*` objects
