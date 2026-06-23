@@ -83,7 +83,8 @@ def _postgres_child_gets(stage, namespace):
     return [
         (stage + " postgres helmrelease", ["-n", namespace, "get", "helmreleases.helm.toolkit.fluxcd.io/" + release]),
         (stage + " postgres cnpg cluster", ["-n", namespace, "get", "clusters.postgresql.cnpg.io/" + release]),
-        (stage + " postgres credentials secret", ["-n", namespace, "get", "secret/" + release + "-credentials"]),
+        (stage + " postgres app credentials secret", ["-n", namespace, "get", "secret/" + release + "-app"]),
+        (stage + " postgres superuser credentials secret", ["-n", namespace, "get", "secret/" + release + "-superuser"]),
         (stage + " postgres init script secret", ["-n", namespace, "get", "secret/" + release + "-init-script"]),
         (stage + " postgres workload monitor", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release]),
     ]

@@ -1288,8 +1288,8 @@ Expected results:
   `harbor-guardian-registry-bucket`, and that the COSI controller reports
   `status.bucketReady=true` and `status.accessGranted=true`.
 - root/dev/gamma/prod each have `HelmRelease/postgres-guardian`,
-  `Cluster/postgres-guardian`, `Secret/postgres-guardian-credentials`,
-  `Secret/postgres-guardian-init-script`, and
+  `Cluster/postgres-guardian`, `Secret/postgres-guardian-app`,
+  `Secret/postgres-guardian-superuser`, `Secret/postgres-guardian-init-script`, and
   `WorkloadMonitor/postgres-guardian`. The live gate verifies the CNPG Cluster
   has three instances, `replicated` storage, and synchronous replica bounds
   `1..2`.
