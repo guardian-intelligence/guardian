@@ -34,6 +34,9 @@ Important context:
 
 Constraints:
 - Secrets must be autoprovisioned/autorotated.
+- Cozystack 1.5 backups use the platform-managed `cozy-default` BackupClass
+  and system bucket. Do not add Guardian-specific backup strategies, backup
+  credential Secrets, or checks for legacy backup object names.
 - Structure infra for BYOC on-prem
 - Traces are the only admissable proof -- ClickHouse (when stood up), Victoria Metrics, Victoria Logs. Collect traces/spans and relevant log lines to support your thesis that your task is complete to satisfaction. Test services under heavy load via k6 to surface subtle bugs.
 

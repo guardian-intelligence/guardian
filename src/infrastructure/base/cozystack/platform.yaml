@@ -7,6 +7,9 @@ spec:
   components:
     platform:
       values:
+        bundles:
+          disabledPackages:
+            - cozystack.backupstrategy-controller
         publishing:
           host: guardianintelligence.org
           # k8s API rides a Talos Layer2 VIP on the Latitude Virtual Network.

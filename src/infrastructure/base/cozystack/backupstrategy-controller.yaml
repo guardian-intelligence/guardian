@@ -1,0 +1,11 @@
+apiVersion: cozystack.io/v1alpha1
+kind: Package
+metadata:
+  name: cozystack.backupstrategy-controller
+spec:
+  variant: default
+  components:
+    backupstrategy-controller:
+      values:
+        backupStorage:
+          endpoint: https://s3.guardianintelligence.org
