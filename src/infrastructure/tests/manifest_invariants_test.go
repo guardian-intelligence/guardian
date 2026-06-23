@@ -109,6 +109,7 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("company site source ownership", testCompanySiteSourceOwnership)
 	t.Run("openbao", testOpenBao)
 	t.Run("openbao opentofu bootstrap", testOpenBaoOpenTofuBootstrap)
+	t.Run("openbao auth delegation", testOpenBaoAuthDelegation)
 	t.Run("openbao cnpg backup secret projection", testOpenBaoCNPGBackupSecretProjection)
 	t.Run("openbao clickhouse backup secret projection", testOpenBaoClickHouseBackupSecretProjection)
 	t.Run("flux handoff", testFluxHandoff)
@@ -971,6 +972,48 @@ func testOpenBaoOpenTofuBootstrap(t *testing.T) {
 			assertTextContains(t, mainTF, `path            = "`+tc.path+`"`, "guardian-mgmt-openbao main.tf")
 		})
 	}
+}
+
+func testOpenBaoAuthDelegation(t *testing.T) {
+	docs := readManifests(t, "src/infrastructure/base/backup/openbao-auth-delegator.yaml")
+
+	binding := findObject(t, docs, "ClusterRoleBinding", "", "guardian-openbao-secret-projection-auth-delegator")
+	assertString(t, binding, "rbac.authorization.k8s.io/v1", "apiVersion")
+	assertString(t, binding, "guardian", "metadata", "labels", "app.kubernetes.io/part-of")
+	assertString(t, binding, "openbao-secret-projection", "metadata", "labels", "guardian.dev/secret-scope")
+	assertString(t, binding, "rbac.authorization.k8s.io", "roleRef", "apiGroup")
+	assertString(t, binding, "ClusterRole", "roleRef", "kind")
+	assertString(t, binding, "system:auth-delegator", "roleRef", "name")
+
+	subjects := sliceAt(t, binding, "subjects")
+	want := map[string]bool{
+		"tenant-root/guardian-external-secrets":                                         false,
+		"tenant-root/guardian-clickhouse-external-secrets":                              false,
+		"tenant-guardiancommercial-platform-dev/guardian-external-secrets":              false,
+		"tenant-guardiancommercial-platform-dev/guardian-clickhouse-external-secrets":   false,
+		"tenant-guardiancommercial-platform-gamma/guardian-external-secrets":            false,
+		"tenant-guardiancommercial-platform-gamma/guardian-clickhouse-external-secrets": false,
+		"tenant-guardiancommercial-platform-prod/guardian-external-secrets":             false,
+		"tenant-guardiancommercial-platform-prod/guardian-clickhouse-external-secrets":  false,
+	}
+	for _, subject := range subjects {
+		doc := asManifest(t, subject, "subjects[]")
+		assertString(t, doc, "ServiceAccount", "kind")
+		key := stringAt(doc, "namespace") + "/" + stringAt(doc, "name")
+		if _, ok := want[key]; !ok {
+			t.Fatalf("ClusterRoleBinding has unexpected subject %q", key)
+		}
+		want[key] = true
+	}
+	for key, seen := range want {
+		if !seen {
+			t.Fatalf("ClusterRoleBinding is missing subject %q", key)
+		}
+	}
+
+	kustomization := readManifests(t, "src/infrastructure/base/kustomization.yaml")[0]
+	resources := sliceAt(t, kustomization, "resources")
+	assertContainsString(t, resources, "backup/openbao-auth-delegator.yaml", "base kustomization resources")
 }
 
 func testOpenBaoCNPGBackupSecretProjection(t *testing.T) {
