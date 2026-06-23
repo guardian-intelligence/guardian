@@ -203,7 +203,7 @@ func runDrill(ctx context.Context, cfg drillConfig) error {
 	if cfg.RestoreTargetName != "" {
 		restoreRef := cfg.Component.Resource + "/" + cfg.RestoreTargetName
 		if cfg.CreateRestoreTarget {
-			exists, err := runner.exists(ctx, "check restore target does not exist", restoreRef)
+			exists, err := runner.exists(ctx, "check restore target does not exist", restoreTargetGetArgs(restoreRef)...)
 			if err != nil {
 				return err
 			}
@@ -308,6 +308,10 @@ func waitAppReady(ctx context.Context, runner kubectlRunner, label, resource, na
 
 func restoreJobName(backupJobName string) string {
 	return backupJobName + "-restore"
+}
+
+func restoreTargetGetArgs(ref string) []string {
+	return []string{"get", ref}
 }
 
 func restoreTargetManifestFromSource(cfg drillConfig, sourceJSON []byte) (string, error) {
