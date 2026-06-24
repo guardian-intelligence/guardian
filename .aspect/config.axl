@@ -20,7 +20,6 @@ load(
     infra_bootstrap = "bootstrap",
     infra_dns_apply = "dns_apply",
     infra_kubeconfig = "kubeconfig",
-    infra_live = "live",
     infra_load_harbor_registry = "load_harbor_registry",
     infra_load_db = "load_db",
     infra_load_http = "load_http",
@@ -48,7 +47,6 @@ def config(ctx):
     ctx.tasks.add(infra_bootstrap)
     ctx.tasks.add(infra_dns_apply)
     ctx.tasks.add(infra_kubeconfig)
-    ctx.tasks.add(infra_live)
     ctx.tasks.add(infra_load_harbor_registry)
     ctx.tasks.add(infra_load_db)
     ctx.tasks.add(infra_load_http)

@@ -1,4 +1,8 @@
-"""aspect infra validate|live - checks for the management-cluster substrate."""
+"""aspect infra validate - checks for the management-cluster substrate.
+
+Available live debugging CLIs: repo-pinned kubectl, talosctl, helm, k6, and
+ORAS surfaced by focused infra tasks.
+"""
 
 load(".aspect/lib/helpers.axl", "checked_spawn", "ws_path")
 
@@ -15,7 +19,6 @@ KUBECTL_FILE_TARGET = "@kubectl_linux_amd64//file:file"
 TALOSCTL_FILE_TARGET = "@talosctl_linux_amd64//file:file"
 COZYSTACK_INSTALLER_CHART = "oci://ghcr.io/cozystack/cozystack/cozy-installer"
 COZYSTACK_INSTALLER_VERSION = "1.5.0"
-COZYSTACK_OPERATOR_IMAGE = "ghcr.io/cozystack/cozystack/cozystack-operator:v1.5.0@sha256:05027a381a8a97276ec426dabb87e1b7df753d4d76925b68e2dd8819f7eb22df"
 BACKUP_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_backup_drill:cozystack_backup_drill"
 DB_LOAD_TARGET = "//src/infrastructure/cmd/cozystack_db_load:cozystack_db_load"
 HARBOR_REGISTRY_TARGET = "//src/infrastructure/cmd/cozystack_harbor_registry:cozystack_harbor_registry"
@@ -31,7 +34,7 @@ GUARDIAN_MGMT_TALOS_NODES = [
 ]
 EXCLUDED_KUBE_APIS = [
     # AGENTS.md marks this as Verself prod. It is not guardian-mgmt and must not
-    # be used to validate source-controller deployment.
+    # be used for guardian-mgmt operations.
     "https://206.223.228.99:6443",
 ]
 EXPECTED_KUBE_APIS = [
@@ -43,149 +46,6 @@ EXPECTED_KUBE_APIS = [
     "https://45.250.254.119:6443",
     "https://206.223.228.87:6443",
 ]
-
-def _harbor_child_gets(stage, namespace):
-    release = "harbor-guardian"
-    registry = release + "-registry"
-    return [
-        (stage + " harbor helmrelease", ["-n", namespace, "get", "helmreleases.helm.toolkit.fluxcd.io/" + release]),
-        (stage + " harbor system helmrelease", ["-n", namespace, "get", "helmreleases.helm.toolkit.fluxcd.io/" + release + "-system"]),
-        (stage + " harbor credentials secret", ["-n", namespace, "get", "secret/" + release + "-credentials"]),
-        (stage + " harbor registry bucket claim", ["-n", namespace, "get", "bucketclaims.objectstorage.k8s.io/" + registry]),
-        (stage + " harbor registry bucket access", ["-n", namespace, "get", "bucketaccesses.objectstorage.k8s.io/" + registry]),
-        (stage + " harbor registry bucket secret", ["-n", namespace, "get", "secret/" + registry + "-bucket"]),
-        (stage + " harbor registry s3 secret", ["-n", namespace, "get", "secret/" + registry + "-s3"]),
-        (stage + " harbor core workload monitor", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release + "-core"]),
-        (stage + " harbor registry workload monitor", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release + "-registry"]),
-        (stage + " harbor portal workload monitor", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release + "-portal"]),
-    ]
-
-def _harbor_child_waits(stage, namespace):
-    release = "harbor-guardian"
-    registry = release + "-registry"
-    return [
-        (stage + " harbor helmrelease", ["-n", namespace, "wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/" + release]),
-        (stage + " harbor registry bucket ready", ["-n", namespace, "wait", "--for=jsonpath={.status.bucketReady}=true", "bucketclaims.objectstorage.k8s.io/" + registry]),
-        (stage + " harbor registry bucket access granted", ["-n", namespace, "wait", "--for=jsonpath={.status.accessGranted}=true", "bucketaccesses.objectstorage.k8s.io/" + registry]),
-        (stage + " harbor system helmrelease", ["-n", namespace, "wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/" + release + "-system"]),
-    ]
-
-def _harbor_bucket_checks(stage, namespace):
-    registry = "harbor-guardian-registry"
-    return [
-        (stage + " harbor registry bucket protocol", ["-n", namespace, "get", "bucketclaims.objectstorage.k8s.io/" + registry, "-o", "jsonpath={.spec.protocols[0]}"], "s3"),
-        (stage + " harbor registry bucket access protocol", ["-n", namespace, "get", "bucketaccesses.objectstorage.k8s.io/" + registry, "-o", "jsonpath={.spec.protocol}"], "s3"),
-        (stage + " harbor registry bucket access claim", ["-n", namespace, "get", "bucketaccesses.objectstorage.k8s.io/" + registry, "-o", "jsonpath={.spec.bucketClaimName}"], registry),
-        (stage + " harbor registry bucket access secret", ["-n", namespace, "get", "bucketaccesses.objectstorage.k8s.io/" + registry, "-o", "jsonpath={.spec.credentialsSecretName}"], registry + "-bucket"),
-    ]
-
-def _postgres_child_gets(stage, namespace):
-    release = "postgres-guardian"
-    return [
-        (stage + " postgres helmrelease", ["-n", namespace, "get", "helmreleases.helm.toolkit.fluxcd.io/" + release]),
-        (stage + " postgres cnpg cluster", ["-n", namespace, "get", "clusters.postgresql.cnpg.io/" + release]),
-        (stage + " postgres app credentials secret", ["-n", namespace, "get", "secret/" + release + "-app"]),
-        (stage + " postgres superuser credentials secret", ["-n", namespace, "get", "secret/" + release + "-superuser"]),
-        (stage + " postgres init script secret", ["-n", namespace, "get", "secret/" + release + "-init-script"]),
-        (stage + " postgres workload monitor", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release]),
-    ]
-
-def _postgres_child_waits(stage, namespace):
-    release = "postgres-guardian"
-    return [
-        (stage + " postgres helmrelease", ["-n", namespace, "wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/" + release]),
-        (stage + " postgres cnpg cluster", ["-n", namespace, "wait", "--for=condition=Ready", "clusters.postgresql.cnpg.io/" + release]),
-    ]
-
-def _postgres_child_checks(stage, namespace):
-    release = "postgres-guardian"
-    return [
-        (stage + " postgres cnpg instances", ["-n", namespace, "get", "clusters.postgresql.cnpg.io/" + release, "-o", "jsonpath={.spec.instances}"], "3"),
-        (stage + " postgres cnpg storage class", ["-n", namespace, "get", "clusters.postgresql.cnpg.io/" + release, "-o", "jsonpath={.spec.storage.storageClass}"], "replicated"),
-        (stage + " postgres cnpg min sync replicas", ["-n", namespace, "get", "clusters.postgresql.cnpg.io/" + release, "-o", "jsonpath={.spec.minSyncReplicas}"], "1"),
-        (stage + " postgres cnpg max sync replicas", ["-n", namespace, "get", "clusters.postgresql.cnpg.io/" + release, "-o", "jsonpath={.spec.maxSyncReplicas}"], "2"),
-        (stage + " postgres workload monitor replicas", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release, "-o", "jsonpath={.spec.replicas}"], "3"),
-        (stage + " postgres workload monitor kind", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release, "-o", "jsonpath={.spec.kind}"], "postgres"),
-    ]
-
-def _clickhouse_child_gets(stage, namespace):
-    release = "clickhouse-guardian"
-    return [
-        (stage + " clickhouse helmrelease", ["-n", namespace, "get", "helmreleases.helm.toolkit.fluxcd.io/" + release]),
-        (stage + " clickhouse installation", ["-n", namespace, "get", "clickhouseinstallations.clickhouse.altinity.com/" + release]),
-        (stage + " clickhouse keeper installation", ["-n", namespace, "get", "clickhousekeeperinstallations.clickhouse-keeper.altinity.com/" + release + "-keeper"]),
-        (stage + " clickhouse keeper scrape", ["-n", namespace, "get", "vmpodscrapes.operator.victoriametrics.com/" + release + "-keeper"]),
-        (stage + " clickhouse credentials secret", ["-n", namespace, "get", "secret/" + release + "-credentials"]),
-        (stage + " clickhouse backup api secret", ["-n", namespace, "get", "secret/" + release + "-backup-api-auth"]),
-        (stage + " clickhouse workload monitor", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release]),
-        (stage + " clickhouse keeper workload monitor", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release + "-keeper"]),
-    ]
-
-def _clickhouse_child_waits(stage, namespace):
-    release = "clickhouse-guardian"
-    return [
-        (stage + " clickhouse helmrelease", ["-n", namespace, "wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/" + release]),
-    ]
-
-def _clickhouse_child_checks(stage, namespace):
-    release = "clickhouse-guardian"
-    return [
-        (stage + " clickhouse shards", ["-n", namespace, "get", "clickhouseinstallations.clickhouse.altinity.com/" + release, "-o", "jsonpath={.spec.configuration.clusters[0].layout.shardsCount}"], "1"),
-        (stage + " clickhouse replicas", ["-n", namespace, "get", "clickhouseinstallations.clickhouse.altinity.com/" + release, "-o", "jsonpath={.spec.configuration.clusters[0].layout.replicasCount}"], "3"),
-        (stage + " clickhouse backup sidecar", ["-n", namespace, "get", "clickhouseinstallations.clickhouse.altinity.com/" + release, "-o", "jsonpath={.spec.templates.podTemplates[0].spec.containers[1].name}"], "clickhouse-backup"),
-        (stage + " clickhouse backup api port", ["-n", namespace, "get", "clickhouseinstallations.clickhouse.altinity.com/" + release, "-o", "jsonpath={.spec.templates.podTemplates[0].spec.containers[1].ports[0].name}"], "ch-backup-api"),
-        (stage + " clickhouse keeper replicas", ["-n", namespace, "get", "clickhousekeeperinstallations.clickhouse-keeper.altinity.com/" + release + "-keeper", "-o", "jsonpath={.spec.configuration.clusters[0].layout.replicasCount}"], "3"),
-        (stage + " clickhouse workload monitor replicas", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release, "-o", "jsonpath={.spec.replicas}"], "3"),
-        (stage + " clickhouse workload monitor kind", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release, "-o", "jsonpath={.spec.kind}"], "clickhouse"),
-        (stage + " clickhouse keeper workload monitor replicas", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release + "-keeper", "-o", "jsonpath={.spec.replicas}"], "3"),
-        (stage + " clickhouse keeper workload monitor kind", ["-n", namespace, "get", "workloadmonitors.cozystack.io/" + release + "-keeper", "-o", "jsonpath={.spec.kind}"], "clickhouse"),
-    ]
-
-def _monitoring_gets(stage, namespace):
-    return [
-        (stage + " monitoring", ["-n", namespace, "get", "monitorings.apps.cozystack.io/monitoring"]),
-    ]
-
-def _monitoring_waits(stage, namespace):
-    return [
-        (stage + " monitoring app", ["-n", namespace, "wait", "--for=condition=Ready", "monitorings.apps.cozystack.io/monitoring"]),
-        (stage + " monitoring workloads", ["-n", namespace, "wait", "--for=condition=WorkloadsReady", "monitorings.apps.cozystack.io/monitoring"]),
-    ]
-
-def _monitoring_checks(stage, namespace, host, shortterm_storage, longterm_storage, log_retention, log_storage):
-    return [
-        (stage + " monitoring host", ["-n", namespace, "get", "monitorings.apps.cozystack.io/monitoring", "-o", "jsonpath={.spec.host}"], host),
-        (stage + " monitoring shortterm storage", ["-n", namespace, "get", "monitorings.apps.cozystack.io/monitoring", "-o", "jsonpath={.spec.metricsStorages[0].storage}"], shortterm_storage),
-        (stage + " monitoring shortterm storage class", ["-n", namespace, "get", "monitorings.apps.cozystack.io/monitoring", "-o", "jsonpath={.spec.metricsStorages[0].storageClassName}"], "replicated"),
-        (stage + " monitoring longterm storage", ["-n", namespace, "get", "monitorings.apps.cozystack.io/monitoring", "-o", "jsonpath={.spec.metricsStorages[1].storage}"], longterm_storage),
-        (stage + " monitoring longterm storage class", ["-n", namespace, "get", "monitorings.apps.cozystack.io/monitoring", "-o", "jsonpath={.spec.metricsStorages[1].storageClassName}"], "replicated"),
-        (stage + " monitoring logs retention", ["-n", namespace, "get", "monitorings.apps.cozystack.io/monitoring", "-o", "jsonpath={.spec.logsStorages[0].retentionPeriod}"], log_retention),
-        (stage + " monitoring logs storage", ["-n", namespace, "get", "monitorings.apps.cozystack.io/monitoring", "-o", "jsonpath={.spec.logsStorages[0].storage}"], log_storage),
-        (stage + " monitoring logs storage class", ["-n", namespace, "get", "monitorings.apps.cozystack.io/monitoring", "-o", "jsonpath={.spec.logsStorages[0].storageClassName}"], "replicated"),
-        (stage + " monitoring vmagent cluster label", ["-n", namespace, "get", "monitorings.apps.cozystack.io/monitoring", "-o", "jsonpath={.spec.vmagent.externalLabels.cluster}"], "guardian-mgmt"),
-    ]
-
-def _victorialogs_gets(scope, namespace):
-    return [
-        (scope + " victorialogs cluster", ["-n", namespace, "get", "vlclusters.operator.victoriametrics.com/generic"]),
-        (scope + " vlinsert service", ["-n", namespace, "get", "service/vlinsert-generic"]),
-        (scope + " vlselect service", ["-n", namespace, "get", "service/vlselect-generic"]),
-        (scope + " vlstorage service", ["-n", namespace, "get", "service/vlstorage-generic"]),
-        (scope + " vlinsert deployment", ["-n", namespace, "get", "deployment.apps/vlinsert-generic"]),
-        (scope + " vlselect deployment", ["-n", namespace, "get", "deployment.apps/vlselect-generic"]),
-        (scope + " vlstorage statefulset", ["-n", namespace, "get", "statefulset.apps/vlstorage-generic"]),
-    ]
-
-def _victorialogs_checks(scope, namespace):
-    return [
-        (scope + " victorialogs status", ["-n", namespace, "get", "vlclusters.operator.victoriametrics.com/generic", "-o", "jsonpath={.status.updateStatus}"], "operational"),
-        (scope + " victorialogs retention", ["-n", namespace, "get", "vlclusters.operator.victoriametrics.com/generic", "-o", "jsonpath={.spec.vlstorage.retentionPeriod}"], "7"),
-        (scope + " victorialogs storage", ["-n", namespace, "get", "vlclusters.operator.victoriametrics.com/generic", "-o", "jsonpath={.spec.vlstorage.storage.volumeClaimTemplate.spec.resources.requests.storage}"], "5Gi"),
-        (scope + " victorialogs storage class", ["-n", namespace, "get", "vlclusters.operator.victoriametrics.com/generic", "-o", "jsonpath={.spec.vlstorage.storage.volumeClaimTemplate.spec.storageClassName}"], "replicated"),
-        (scope + " vlinsert replicas", ["-n", namespace, "get", "vlclusters.operator.victoriametrics.com/generic", "-o", "jsonpath={.spec.vlinsert.replicaCount}"], "2"),
-        (scope + " vlselect replicas", ["-n", namespace, "get", "vlclusters.operator.victoriametrics.com/generic", "-o", "jsonpath={.spec.vlselect.replicaCount}"], "2"),
-        (scope + " vlstorage replicas", ["-n", namespace, "get", "vlclusters.operator.victoriametrics.com/generic", "-o", "jsonpath={.spec.vlstorage.replicaCount}"], "2"),
-    ]
 
 INFRA_FILEGROUPS = [
     "//src/infrastructure/bootstrap/guardian-mgmt:root",
@@ -213,225 +73,6 @@ INFRA_TESTS = [
     "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill_test",
     "//src/infrastructure/tests:manifest_invariants_test",
 ]
-LIVE_GETS = [
-    ("cozystack operator deployment", ["-n", "cozy-system", "get", "deployment/cozystack-operator"]),
-    ("cozystack platform package", ["get", "packages.cozystack.io/cozystack.cozystack-platform"]),
-    ("cozystack networking package", ["get", "packages.cozystack.io/cozystack.networking"]),
-    ("cilium helmrelease", ["-n", "cozy-cilium", "get", "helmreleases.helm.toolkit.fluxcd.io/cilium"]),
-    ("cilium daemonset", ["-n", "cozy-cilium", "get", "daemonset.apps/cilium"]),
-    ("hubble metrics service", ["-n", "cozy-cilium", "get", "service/hubble-metrics"]),
-    ("hubble relay service", ["-n", "cozy-cilium", "get", "service/hubble-relay"]),
-    ("hubble relay deployment", ["-n", "cozy-cilium", "get", "deployment.apps/hubble-relay"]),
-    ("hubble ui service", ["-n", "cozy-cilium", "get", "service/hubble-ui"]),
-    ("hubble ui deployment", ["-n", "cozy-cilium", "get", "deployment.apps/hubble-ui"]),
-    ("hubble service monitor", ["-n", "cozy-cilium", "get", "servicemonitors.monitoring.coreos.com/hubble"]),
-    ("hubble relay service monitor", ["-n", "cozy-cilium", "get", "servicemonitors.monitoring.coreos.com/hubble-relay"]),
-    ("monitoring agents package", ["get", "packages.cozystack.io/cozystack.monitoring-agents"]),
-    ("monitoring agents helmrelease", ["-n", "cozy-monitoring", "get", "helmreleases.helm.toolkit.fluxcd.io/monitoring-agents"]),
-    ("monitoring agents fluent-bit config", ["-n", "cozy-monitoring", "get", "configmap/monitoring-agents-fluent-bit"]),
-    ("monitoring agents fluent-bit daemonset", ["-n", "cozy-monitoring", "get", "daemonset.apps/monitoring-agents-fluent-bit"]),
-    ("backup controller package", ["get", "packages.cozystack.io/cozystack.backup-controller"]),
-    ("backupstrategy controller package", ["get", "packages.cozystack.io/cozystack.backupstrategy-controller"]),
-    ("backup controller namespace", ["get", "namespace/cozy-backup-controller"]),
-    ("backup controller helmrelease", ["-n", "cozy-backup-controller", "get", "helmreleases.helm.toolkit.fluxcd.io/backup-controller"]),
-    ("backupstrategy controller helmrelease", ["-n", "cozy-backup-controller", "get", "helmreleases.helm.toolkit.fluxcd.io/backupstrategy-controller"]),
-    ("backup controller deployment", ["-n", "cozy-backup-controller", "get", "deployment/backup-controller"]),
-    ("backupstrategy controller deployment", ["-n", "cozy-backup-controller", "get", "deployment/backupstrategy-controller"]),
-    ("backup controller service account", ["-n", "cozy-backup-controller", "get", "serviceaccount/backup-controller"]),
-    ("backupstrategy controller service account", ["-n", "cozy-backup-controller", "get", "serviceaccount/backupstrategy-controller"]),
-    ("backup controller cluster role", ["get", "clusterrole/backups.cozystack.io:core-controller"]),
-    ("backup controller cluster role binding", ["get", "clusterrolebinding/backups.cozystack.io:core-controller"]),
-    ("backupstrategy controller cluster role", ["get", "clusterrole/backups.cozystack.io:strategy-controller"]),
-    ("backupstrategy controller cluster role binding", ["get", "clusterrolebinding/backups.cozystack.io:strategy-controller"]),
-    ("backup classes crd", ["get", "customresourcedefinitions.apiextensions.k8s.io/backupclasses.backups.cozystack.io"]),
-    ("backup jobs crd", ["get", "customresourcedefinitions.apiextensions.k8s.io/backupjobs.backups.cozystack.io"]),
-    ("backups crd", ["get", "customresourcedefinitions.apiextensions.k8s.io/backups.backups.cozystack.io"]),
-    ("backup plans crd", ["get", "customresourcedefinitions.apiextensions.k8s.io/plans.backups.cozystack.io"]),
-    ("restore jobs crd", ["get", "customresourcedefinitions.apiextensions.k8s.io/restorejobs.backups.cozystack.io"]),
-    ("generic job strategy crd", ["get", "customresourcedefinitions.apiextensions.k8s.io/jobs.strategy.backups.cozystack.io"]),
-    ("cnpg strategy crd", ["get", "customresourcedefinitions.apiextensions.k8s.io/cnpgs.strategy.backups.cozystack.io"]),
-    ("altinity strategy crd", ["get", "customresourcedefinitions.apiextensions.k8s.io/altinities.strategy.backups.cozystack.io"]),
-    ("dashboard console service", ["-n", "cozy-dashboard", "get", "service/cozy-dashboard-console"]),
-    ("dashboard gatekeeper service", ["-n", "cozy-dashboard", "get", "service/incloud-web-gatekeeper"]),
-    ("dashboard ingress", ["-n", "cozy-dashboard", "get", "ingress/dashboard-web-ingress"]),
-    ("ovn-default subnet", ["get", "subnets.kubeovn.io/ovn-default"]),
-    ("join subnet", ["get", "subnets.kubeovn.io/join"]),
-    ("metallb ip pool", ["-n", "cozy-metallb", "get", "ipaddresspools.metallb.io/cozystack"]),
-    ("metallb l2 advertisement", ["-n", "cozy-metallb", "get", "l2advertisements.metallb.io/cozystack"]),
-    ("replicated storage class", ["get", "storageclass/replicated"]),
-    ("replicated-retain storage class", ["get", "storageclass/replicated-retain"]),
-    ("local storage class", ["get", "storageclass/local"]),
-    ("local-retain storage class", ["get", "storageclass/local-retain"]),
-    ("default backup class", ["get", "backupclasses.backups.cozystack.io/cozy-default"]),
-    ("default cnpg backup strategy", ["get", "cnpgs.strategy.backups.cozystack.io/cozy-default-cnpg"]),
-    ("default clickhouse backup strategy", ["get", "altinities.strategy.backups.cozystack.io/cozy-default-altinity"]),
-    ("system backup bucket", ["-n", "tenant-root", "get", "bucket/cozy-backups"]),
-    ("system backup credentials secret", ["-n", "tenant-root", "get", "secret/bucket-cozy-backups-system-credentials"]),
-    ("default velero backup storage location", ["-n", "cozy-velero", "get", "backupstoragelocations.velero.io/cozy-default"]),
-    ("root postgres", ["-n", "tenant-root", "get", "postgreses.apps.cozystack.io/guardian"]),
-    ("root harbor", ["-n", "tenant-root", "get", "harbors.apps.cozystack.io/guardian"]),
-    ("root clickhouse", ["-n", "tenant-root", "get", "clickhouses.apps.cozystack.io/guardian"]),
-    ("root openbao", ["-n", "tenant-root", "get", "openbao", "guardian"]),
-    ("root openbao helmrelease", ["-n", "tenant-root", "get", "helmreleases.helm.toolkit.fluxcd.io/openbao-guardian"]),
-    ("root openbao system helmrelease", ["-n", "tenant-root", "get", "helmreleases.helm.toolkit.fluxcd.io/openbao-guardian-system"]),
-    ("root openbao service", ["-n", "tenant-root", "get", "service/openbao-guardian"]),
-    ("root openbao statefulset", ["-n", "tenant-root", "get", "statefulset.apps/openbao-guardian"]),
-    ("openbao apiserver network policy", ["-n", "tenant-root", "get", "ciliumnetworkpolicies.cilium.io/allow-openbao-to-apiserver"]),
-    ("root postgres backup plan", ["-n", "tenant-root", "get", "plans.backups.cozystack.io/guardian-postgres-daily"]),
-    ("root clickhouse backup plan", ["-n", "tenant-root", "get", "plans.backups.cozystack.io/guardian-clickhouse-daily"]),
-    ("flux platform patches kustomization", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-patches"]),
-    ("flux app patches kustomization", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-app-patches"]),
-] + _harbor_child_gets(
-    "root",
-    "tenant-root",
-) + _postgres_child_gets(
-    "root",
-    "tenant-root",
-) + _clickhouse_child_gets(
-    "root",
-    "tenant-root",
-) + _monitoring_gets(
-    "root",
-    "tenant-root",
-) + _victorialogs_gets(
-    "root",
-    "tenant-root",
-)
-
-LIVE_VALUE_CHECKS = [
-    ("cozystack operator image", ["-n", "cozy-system", "get", "deployment/cozystack-operator", "-o", "jsonpath={.spec.template.spec.containers[0].image}"], COZYSTACK_OPERATOR_IMAGE),
-    ("cozystack platform variant", ["get", "packages.cozystack.io/cozystack.cozystack-platform", "-o", "jsonpath={.spec.variant}"], "isp-full"),
-    ("cozystack platform external ips", ["get", "packages.cozystack.io/cozystack.cozystack-platform", "-o", "jsonpath={.spec.components.platform.values.publishing.externalIPs[*]}"], "206.223.228.101"),
-    ("root ingress external ips", ["-n", "tenant-root", "get", "service/root-ingress-controller", "-o", "jsonpath={.spec.externalIPs[*]}"], "206.223.228.101"),
-    ("cozystack networking variant", ["get", "packages.cozystack.io/cozystack.networking", "-o", "jsonpath={.spec.variant}"], "kubeovn-cilium"),
-    ("hubble package enabled", ["get", "packages.cozystack.io/cozystack.networking", "-o", "jsonpath={.spec.components.cilium.values.cilium.hubble.enabled}"], "true"),
-    ("hubble package relay enabled", ["get", "packages.cozystack.io/cozystack.networking", "-o", "jsonpath={.spec.components.cilium.values.cilium.hubble.relay.enabled}"], "true"),
-    ("hubble package relay rollout enabled", ["get", "packages.cozystack.io/cozystack.networking", "-o", "jsonpath={.spec.components.cilium.values.cilium.hubble.relay.rollOutPods}"], "true"),
-    ("hubble package peer service cluster domain", ["get", "packages.cozystack.io/cozystack.networking", "-o", "jsonpath={.spec.components.cilium.values.cilium.hubble.peerService.clusterDomain}"], "cozy.local"),
-    ("hubble package ui enabled", ["get", "packages.cozystack.io/cozystack.networking", "-o", "jsonpath={.spec.components.cilium.values.cilium.hubble.ui.enabled}"], "true"),
-    ("hubble package ui rollout enabled", ["get", "packages.cozystack.io/cozystack.networking", "-o", "jsonpath={.spec.components.cilium.values.cilium.hubble.ui.rollOutPods}"], "true"),
-    ("hubble package service monitor enabled", ["get", "packages.cozystack.io/cozystack.networking", "-o", "jsonpath={.spec.components.cilium.values.cilium.hubble.metrics.serviceMonitor.enabled}"], "true"),
-    ("hubble package flow metric enabled", ["get", "packages.cozystack.io/cozystack.networking", "-o", "jsonpath={.spec.components.cilium.values.cilium.hubble.metrics.enabled[3]}"], "flow"),
-    ("hubble helmrelease enabled", ["-n", "cozy-cilium", "get", "helmreleases.helm.toolkit.fluxcd.io/cilium", "-o", "jsonpath={.spec.values.cilium.hubble.enabled}"], "true"),
-    ("hubble helmrelease relay rollout enabled", ["-n", "cozy-cilium", "get", "helmreleases.helm.toolkit.fluxcd.io/cilium", "-o", "jsonpath={.spec.values.cilium.hubble.relay.rollOutPods}"], "true"),
-    ("hubble helmrelease peer service cluster domain", ["-n", "cozy-cilium", "get", "helmreleases.helm.toolkit.fluxcd.io/cilium", "-o", "jsonpath={.spec.values.cilium.hubble.peerService.clusterDomain}"], "cozy.local"),
-    ("hubble helmrelease ui rollout enabled", ["-n", "cozy-cilium", "get", "helmreleases.helm.toolkit.fluxcd.io/cilium", "-o", "jsonpath={.spec.values.cilium.hubble.ui.rollOutPods}"], "true"),
-    ("hubble helmrelease metrics service monitor enabled", ["-n", "cozy-cilium", "get", "helmreleases.helm.toolkit.fluxcd.io/cilium", "-o", "jsonpath={.spec.values.cilium.hubble.metrics.serviceMonitor.enabled}"], "true"),
-    ("cilium daemonset desired", ["-n", "cozy-cilium", "get", "daemonset.apps/cilium", "-o", "jsonpath={.status.desiredNumberScheduled}"], "3"),
-    ("cilium daemonset ready", ["-n", "cozy-cilium", "get", "daemonset.apps/cilium", "-o", "jsonpath={.status.numberReady}"], "3"),
-    ("cilium daemonset updated", ["-n", "cozy-cilium", "get", "daemonset.apps/cilium", "-o", "jsonpath={.status.updatedNumberScheduled}"], "3"),
-    ("monitoring agents package target", ["get", "packages.cozystack.io/cozystack.monitoring-agents", "-o", "jsonpath={.spec.components.monitoring-agents.values.global.target}"], "tenant-root"),
-    ("monitoring agents helmrelease target", ["-n", "cozy-monitoring", "get", "helmreleases.helm.toolkit.fluxcd.io/monitoring-agents", "-o", "jsonpath={.spec.values.global.target}"], "tenant-root"),
-    ("monitoring agents fluent-bit desired", ["-n", "cozy-monitoring", "get", "daemonset.apps/monitoring-agents-fluent-bit", "-o", "jsonpath={.status.desiredNumberScheduled}"], "3"),
-    ("monitoring agents fluent-bit available", ["-n", "cozy-monitoring", "get", "daemonset.apps/monitoring-agents-fluent-bit", "-o", "jsonpath={.status.numberAvailable}"], "3"),
-    ("monitoring agents fluent-bit updated", ["-n", "cozy-monitoring", "get", "daemonset.apps/monitoring-agents-fluent-bit", "-o", "jsonpath={.status.updatedNumberScheduled}"], "3"),
-    ("backupstrategy endpoint", ["get", "cnpgs.strategy.backups.cozystack.io/cozy-default-cnpg", "-o", "jsonpath={.spec.template.barmanObjectStore.endpointURL}"], "https://s3.guardianintelligence.org"),
-    ("default velero backup storage location phase", ["-n", "cozy-velero", "get", "backupstoragelocations.velero.io/cozy-default", "-o", "jsonpath={.status.phase}"], "Available"),
-    ("ovn-default mtu", ["get", "subnets.kubeovn.io/ovn-default", "-o", "jsonpath={.spec.mtu}"], "1362"),
-    ("join mtu", ["get", "subnets.kubeovn.io/join", "-o", "jsonpath={.spec.mtu}"], "1362"),
-    ("metallb pool range", ["-n", "cozy-metallb", "get", "ipaddresspools.metallb.io/cozystack", "-o", "jsonpath={.spec.addresses[0]}"], "10.8.0.200-10.8.0.240"),
-    ("replicated storage default", ["get", "storageclass/replicated", "-o", "go-template={{index .metadata.annotations \"storageclass.kubernetes.io/is-default-class\"}}"], "true"),
-    ("replicated storage autoplace", ["get", "storageclass/replicated", "-o", "go-template={{index .parameters \"linstor.csi.linbit.com/autoPlace\"}}"], "3"),
-    ("root postgres replicas", ["-n", "tenant-root", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.replicas}"], "3"),
-    ("root postgres storage class", ["-n", "tenant-root", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.storageClass}"], "replicated"),
-    ("root postgres version", ["-n", "tenant-root", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.version}"], "v18"),
-    ("root postgres external access", ["-n", "tenant-root", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.external}"], "false"),
-    ("root postgres backup enabled", ["-n", "tenant-root", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.backup.enabled}"], "true"),
-    ("root postgres system bucket backup", ["-n", "tenant-root", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.backup.useSystemBucket}"], "true"),
-    ("root postgres backup plan class", ["-n", "tenant-root", "get", "plans.backups.cozystack.io/guardian-postgres-daily", "-o", "jsonpath={.spec.backupClassName}"], "cozy-default"),
-    ("root postgres backup plan cron", ["-n", "tenant-root", "get", "plans.backups.cozystack.io/guardian-postgres-daily", "-o", "jsonpath={.spec.schedule.cron}"], "7 1 * * *"),
-    ("root harbor host", ["-n", "tenant-root", "get", "harbors.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.host}"], "harbor.guardianintelligence.org"),
-    ("root harbor storage class", ["-n", "tenant-root", "get", "harbors.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.storageClass}"], "replicated"),
-    ("root harbor database replicas", ["-n", "tenant-root", "get", "harbors.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.database.replicas}"], "3"),
-    ("root harbor redis replicas", ["-n", "tenant-root", "get", "harbors.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.redis.replicas}"], "3"),
-    ("root harbor trivy enabled", ["-n", "tenant-root", "get", "harbors.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.trivy.enabled}"], "true"),
-    ("root clickhouse replicas", ["-n", "tenant-root", "get", "clickhouses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.replicas}"], "3"),
-    ("root clickhouse storage class", ["-n", "tenant-root", "get", "clickhouses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.storageClass}"], "replicated"),
-    ("root clickhouse backup enabled", ["-n", "tenant-root", "get", "clickhouses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.backup.enabled}"], "true"),
-    ("root clickhouse system bucket backup", ["-n", "tenant-root", "get", "clickhouses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.backup.useSystemBucket}"], "true"),
-    ("root clickhouse keeper enabled", ["-n", "tenant-root", "get", "clickhouses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.clickhouseKeeper.enabled}"], "true"),
-    ("root clickhouse keeper replicas", ["-n", "tenant-root", "get", "clickhouses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.clickhouseKeeper.replicas}"], "3"),
-    ("root clickhouse backup plan class", ["-n", "tenant-root", "get", "plans.backups.cozystack.io/guardian-clickhouse-daily", "-o", "jsonpath={.spec.backupClassName}"], "cozy-default"),
-    ("root clickhouse backup plan cron", ["-n", "tenant-root", "get", "plans.backups.cozystack.io/guardian-clickhouse-daily", "-o", "jsonpath={.spec.schedule.cron}"], "17 1 * * *"),
-    ("root clickhouse rendered s3 endpoint", ["-n", "tenant-root", "get", "clickhouseinstallations.clickhouse.altinity.com/clickhouse-guardian", "-o", "jsonpath={.spec.templates.podTemplates[0].spec.containers[1].env[12].value}"], "https://s3.guardianintelligence.org"),
-    ("openbao replicas", ["-n", "tenant-root", "get", "openbaos.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.replicas}"], "3"),
-    ("openbao storage class", ["-n", "tenant-root", "get", "openbaos.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.storageClass}"], "local-retain"),
-    ("openbao external access", ["-n", "tenant-root", "get", "openbaos.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.external}"], "false"),
-    ("openbao ui enabled", ["-n", "tenant-root", "get", "openbaos.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.ui}"], "true"),
-] + _harbor_bucket_checks(
-    "root",
-    "tenant-root",
-) + _postgres_child_checks(
-    "root",
-    "tenant-root",
-) + _clickhouse_child_checks(
-    "root",
-    "tenant-root",
-) + _monitoring_checks(
-    "root",
-    "tenant-root",
-    "grafana.guardianintelligence.org",
-    "5Gi",
-    "10Gi",
-    "7",
-    "5Gi",
-) + _victorialogs_checks(
-    "root",
-    "tenant-root",
-)
-
-LIVE_CONTAINS_CHECKS = [
-    ("monitoring agents fluent-bit root tenant label", ["-n", "cozy-monitoring", "get", "configmap/monitoring-agents-fluent-bit", "-o", "go-template={{index .data \"fluent-bit.conf\"}}"], "Add tenant tenant-root"),
-    ("monitoring agents fluent-bit root log target", ["-n", "cozy-monitoring", "get", "configmap/monitoring-agents-fluent-bit", "-o", "go-template={{index .data \"fluent-bit.conf\"}}"], "Host vlinsert-generic.tenant-root.svc"),
-    ("root clickhouse helm post-render endpoint patch", ["-n", "tenant-root", "get", "helmreleases.helm.toolkit.fluxcd.io/clickhouse-guardian", "-o", "jsonpath={.spec.postRenderers[0].kustomize.patches[0].patch}"], "https://s3.guardianintelligence.org"),
-]
-
-LIVE_FLUX_WAITS = [
-    ("flux source", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "gitrepositories.source.toolkit.fluxcd.io/guardian"]),
-    ("flux cozystack platform package kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform"]),
-    ("flux storage kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-storage"]),
-    ("flux base kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-base"]),
-    ("flux platform patches kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-patches"]),
-    ("flux app patches kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-app-patches"]),
-]
-LIVE_WAITS = [
-    ("cozystack networking package", ["wait", "--for=condition=Ready", "packages.cozystack.io/cozystack.networking"]),
-    ("cilium helmrelease", ["-n", "cozy-cilium", "wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/cilium"]),
-    ("hubble relay deployment", ["-n", "cozy-cilium", "wait", "--for=condition=Available", "deployment.apps/hubble-relay"]),
-    ("hubble ui deployment", ["-n", "cozy-cilium", "wait", "--for=condition=Available", "deployment.apps/hubble-ui"]),
-    ("monitoring agents package", ["wait", "--for=condition=Ready", "packages.cozystack.io/cozystack.monitoring-agents"]),
-    ("monitoring agents helmrelease", ["-n", "cozy-monitoring", "wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/monitoring-agents"]),
-    ("backup controller package", ["wait", "--for=condition=Ready", "packages.cozystack.io/cozystack.backup-controller"]),
-    ("backupstrategy controller package", ["wait", "--for=condition=Ready", "packages.cozystack.io/cozystack.backupstrategy-controller"]),
-    ("backup controller helmrelease", ["-n", "cozy-backup-controller", "wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/backup-controller"]),
-    ("backupstrategy controller helmrelease", ["-n", "cozy-backup-controller", "wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/backupstrategy-controller"]),
-    ("backup controller deployment", ["-n", "cozy-backup-controller", "wait", "--for=condition=Available", "deployment/backup-controller"]),
-    ("backupstrategy controller deployment", ["-n", "cozy-backup-controller", "wait", "--for=condition=Available", "deployment/backupstrategy-controller"]),
-    ("root postgres app", ["-n", "tenant-root", "wait", "--for=condition=Ready", "postgreses.apps.cozystack.io/guardian"]),
-    ("root postgres workloads", ["-n", "tenant-root", "wait", "--for=condition=WorkloadsReady", "postgreses.apps.cozystack.io/guardian"]),
-    ("root harbor app", ["-n", "tenant-root", "wait", "--for=condition=Ready", "harbors.apps.cozystack.io/guardian"]),
-    ("root harbor workloads", ["-n", "tenant-root", "wait", "--for=condition=WorkloadsReady", "harbors.apps.cozystack.io/guardian"]),
-    ("root clickhouse app", ["-n", "tenant-root", "wait", "--for=condition=Ready", "clickhouses.apps.cozystack.io/guardian"]),
-    ("root clickhouse workloads", ["-n", "tenant-root", "wait", "--for=condition=WorkloadsReady", "clickhouses.apps.cozystack.io/guardian"]),
-    ("root openbao app", ["-n", "tenant-root", "wait", "--for=condition=Ready", "openbaos.apps.cozystack.io/guardian"]),
-    ("root openbao helmrelease", ["-n", "tenant-root", "wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/openbao-guardian"]),
-    ("root openbao system helmrelease", ["-n", "tenant-root", "wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/openbao-guardian-system"]),
-    ("root openbao statefulset", ["-n", "tenant-root", "wait", "--for=jsonpath={.status.readyReplicas}=3", "statefulset.apps/openbao-guardian"]),
-    ("dashboard console deployment", ["-n", "cozy-dashboard", "wait", "--for=condition=Available", "deployment/cozy-dashboard-console"]),
-    ("dashboard gatekeeper deployment", ["-n", "cozy-dashboard", "wait", "--for=condition=Available", "deployment/incloud-web-gatekeeper"]),
-] + _harbor_child_waits(
-    "root",
-    "tenant-root",
-) + _postgres_child_waits(
-    "root",
-    "tenant-root",
-) + _clickhouse_child_waits(
-    "root",
-    "tenant-root",
-) + _monitoring_waits(
-    "root",
-    "tenant-root",
-)
 FORBIDDEN_SOURCE_PATHS = [
     ("DELETE_ME.env", "operator Cloudflare credentials must stay out of the repo workspace and must not be load-bearing"),
     ("mgmt-evidence", "management-cluster evidence is temporary PR validation output, not durable source"),
@@ -494,7 +135,7 @@ def _write_auth_hint(ctx, stderr, auth_hint):
         "ERROR: Kubernetes rejected the local cluster credentials. Refresh the "
         + "guardian-mgmt kubeconfig/Talos operator state from the current cluster "
         + "with `aspect infra kubeconfig` when the local Talm state is current; "
-        + "do not use insecure TLS flags for source-controller validation.\n",
+        + "do not use insecure TLS flags for management-cluster debugging.\n",
     )
 
 def _tofu_root(ctx, root, args, label, env = None):
@@ -770,18 +411,6 @@ def _talosctl_capture(ctx, talosctl, args, label):
         auth_hint = "talos",
     )
 
-def _kubectl_success(ctx, kubectl, args, label):
-    return _kubectl_success_for(ctx, kubectl, ctx.args.kubeconfig, args, label)
-
-def _kubectl_success_for(ctx, kubectl, kubeconfig, args, label):
-    return _capture_success(
-        ctx,
-        kubectl,
-        _kubectl_args_for(ctx, kubeconfig, args),
-        cwd = ws_path(ctx),
-        label = label,
-    )
-
 def _talosctl_success(ctx, talosctl, args, label):
     return _capture_success(
         ctx,
@@ -814,12 +443,6 @@ def _first_csv_value(value):
         if item != "":
             return item
     return value.strip()
-
-def _expected_revision(ctx):
-    if ctx.args.revision == "":
-        ctx.std.io.stderr.write("ERROR: --revision is required; pass the merged main commit SHA that source-controller must have applied\n")
-        return None
-    return ctx.args.revision
 
 def _line_count(s):
     count = 0
@@ -1121,71 +744,6 @@ def _talos_impl(ctx):
     ctx.std.io.stderr.write("guardian-mgmt Talos L2 checks passed\n")
     return 0
 
-def _live_impl(ctx):
-    revision = _expected_revision(ctx)
-    if revision == None:
-        return 1
-    kubectl = _kubectl_path(ctx)
-    if kubectl == None:
-        return 1
-    return _live_checks(ctx, kubectl, ctx.args.kubeconfig, revision)
-
-def _live_checks(ctx, kubectl, kubeconfig, revision):
-    rc = _check_live_context_for(ctx, kubectl, kubeconfig)
-    if rc != 0:
-        return rc
-
-    for label, kubectl_args in LIVE_FLUX_WAITS:
-        rc = _kubectl_success_for(
-            ctx,
-            kubectl,
-            kubeconfig,
-            kubectl_args + ["--timeout=" + ctx.args.wait_timeout],
-            "kubectl wait " + label,
-        )
-        if rc != 0:
-            return rc
-
-    rc = _check_flux_revision_for(ctx, kubectl, kubeconfig, revision)
-    if rc != 0:
-        return rc
-
-    for label, kubectl_args in LIVE_WAITS:
-        rc = _kubectl_success_for(
-            ctx,
-            kubectl,
-            kubeconfig,
-            kubectl_args + ["--timeout=" + ctx.args.wait_timeout],
-            "kubectl wait " + label,
-        )
-        if rc != 0:
-            return rc
-
-    for label, kubectl_args in LIVE_GETS:
-        rc = _kubectl_success_for(ctx, kubectl, kubeconfig, kubectl_args, "kubectl get " + label)
-        if rc != 0:
-            return rc
-
-    for label, kubectl_args, expected in LIVE_VALUE_CHECKS:
-        value = _kubectl_capture_for(ctx, kubectl, kubeconfig, kubectl_args, "kubectl read " + label)
-        if value == None:
-            return 1
-        rc = _assert_equals(ctx, value, expected, label)
-        if rc != 0:
-            return rc
-
-    for label, kubectl_args, needle in LIVE_CONTAINS_CHECKS:
-        value = _kubectl_capture_for(ctx, kubectl, kubeconfig, kubectl_args, "kubectl read " + label)
-        if value == None:
-            return 1
-        rc = _assert_contains(ctx, value, needle, label)
-        if rc != 0:
-            return rc
-
-
-    ctx.std.io.stderr.write("guardian-mgmt source-controller has reconciled " + revision + "\n")
-    return 0
-
 def _upgrade_cozystack_impl(ctx):
     return _upgrade_cozystack_with_kubeconfig(ctx, ctx.args.kubeconfig, ctx.args.wait_timeout)
 
@@ -1225,10 +783,6 @@ def _upgrade_cozystack_with_kubeconfig(ctx, kubeconfig, wait_timeout):
     )
 
 def _bootstrap_impl(ctx):
-    revision = _expected_revision(ctx)
-    if revision == None:
-        return 1
-
     endpoint = _tofu_backend_endpoint(ctx, ctx.args.tofu_backend_endpoint)
     if endpoint == None:
         return 1
@@ -1265,11 +819,7 @@ def _bootstrap_impl(ctx):
     if rc != 0:
         return rc
 
-    kubectl = _kubectl_path(ctx)
-    if kubectl == None:
-        return 1
-
-    return _live_checks(ctx, kubectl, live_kubeconfig, revision)
+    return 0
 
 def _backup_drill_impl(ctx):
     kubectl = _kubectl_path(ctx)
@@ -1768,7 +1318,7 @@ openbao_apply = task(
         "namespace": args.string(default = "tenant-root", description = "OpenBao namespace."),
         "port_forward_ready_timeout": args.string(default = "10s", description = "Timeout waiting for OpenBao port-forward readiness."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
-        "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before OpenBao API configuration."),
+        "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before OpenBao API configuration."),
         "service": args.string(default = "openbao-guardian", description = "OpenBao Service name."),
         "statefulset": args.string(default = "openbao-guardian", description = "OpenBao StatefulSet name."),
         "tofu_backend_endpoint": args.string(default = "", description = "Optional S3-compatible OpenTofu backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
@@ -1806,31 +1356,15 @@ bootstrap = task(
     implementation = _bootstrap_impl,
     name = "bootstrap",
     group = ["infra"],
-    summary = "Exercise the guardian-mgmt OpenTofu, Talm, Talos, and live source-controller bootstrap path.",
+    summary = "Exercise the guardian-mgmt OpenTofu, Talm, Talos, and Cozystack installer bootstrap path.",
     args = {
         "cozystack_upgrade_timeout": args.string(default = "10m", description = "Timeout for the official Cozystack installer/operator Helm upgrade inside bootstrap."),
         "endpoints": args.string(default = "10.8.0.250", description = "Talos API endpoint used to fetch kubeconfig and validate L2 state."),
-        "kubeconfig": args.string(default = "", description = "Optional kubeconfig for guardian-mgmt live validation. Defaults to <root>/kubeconfig after refresh."),
+        "kubeconfig": args.string(default = "", description = "Optional kubeconfig for the Cozystack installer/operator Helm upgrade. Defaults to <root>/kubeconfig after refresh."),
         "nodes": args.string(default = "10.8.0.11,10.8.0.12,10.8.0.13", description = "Comma-separated guardian-mgmt Talos nodes."),
-        "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
-        "revision": args.string(default = "", description = "Expected merged Git commit SHA that source-controller must have applied."),
         "root": args.string(default = "src/infrastructure/talm", description = "Talm root containing gitignored secrets.yaml, talosconfig, and kubeconfig."),
         "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
         "tofu_backend_endpoint": args.string(default = "", description = "Optional S3-compatible OpenTofu backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
-        "wait_timeout": args.string(default = "5m", description = "Timeout for Flux and Deployment readiness waits."),
-    },
-)
-
-live = task(
-    implementation = _live_impl,
-    name = "live",
-    group = ["infra"],
-    summary = "Validate that the live guardian-mgmt source-controller reconciled this repo commit.",
-    args = {
-        "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
-        "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
-        "revision": args.string(default = "", description = "Expected merged Git commit SHA that source-controller must have applied."),
-        "wait_timeout": args.string(default = "5m", description = "Timeout for Flux and Deployment readiness waits."),
     },
 )
 
@@ -1859,7 +1393,7 @@ load_http = task(
         "port_forward_ready_timeout": args.string(default = "10s", description = "Timeout for OpenBao port-forward readiness."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
         "require_live": args.string(default = "true", description = "Set false only for local custom-URL k6 smoke checks."),
-        "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before the load test."),
+        "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before the load test."),
         "sleep_seconds": args.string(default = "1", description = "Sleep seconds between requests in each k6 VU."),
         "stage": args.string(default = "root", description = "Guardian bootstrap stage: root."),
         "surface": args.string(default = "harbor", description = "HTTP surface: harbor, dashboard, openbao, or custom with --url."),
@@ -1888,7 +1422,7 @@ load_db = task(
         "pgbench_jobs": args.string(default = "2", description = "pgbench worker thread count."),
         "pgbench_scale": args.string(default = "10", description = "pgbench initialization scale factor."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
-        "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before the load test."),
+        "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before the load test."),
         "stage": args.string(default = "root", description = "Guardian bootstrap stage: root."),
         "ttl_seconds_after_finished": args.string(default = "86400", description = "Kubernetes Job ttlSecondsAfterFinished."),
         "wait_timeout": args.string(default = "20m", description = "Timeout for load Job completion."),
@@ -1907,7 +1441,7 @@ load_harbor_registry = task(
         "payload_bytes": args.string(default = "4096", description = "Payload size per ORAS push."),
         "repository": args.string(default = "library/guardian-smoke", description = "Harbor repository path."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
-        "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before the registry load."),
+        "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before the registry load."),
         "stage": args.string(default = "root", description = "Guardian bootstrap stage: root."),
         "tag": args.string(default = "", description = "Optional tag or tag prefix. Defaults to a timestamped tag."),
         "wait_timeout": args.string(default = "15m", description = "Timeout waiting for the Harbor app readiness preflight."),
@@ -1931,7 +1465,7 @@ observability_drill = task(
         "poll_timeout": args.string(default = "3m", description = "Timeout waiting for VictoriaMetrics and VictoriaLogs ingestion."),
         "port_forward_ready_timeout": args.string(default = "10s", description = "Timeout for VictoriaMetrics/VictoriaLogs port-forward readiness."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
-        "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before the drill."),
+        "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before the drill."),
         "skip_load": args.string(default = "false", description = "Set true to verify observability for an existing --name without creating a new load Job."),
         "stage": args.string(default = "root", description = "Guardian bootstrap stage: root."),
         "ttl_seconds_after_finished": args.string(default = "86400", description = "Kubernetes Job ttlSecondsAfterFinished."),
@@ -1950,7 +1484,7 @@ openbao_drill = task(
         "mode": args.string(default = "status", description = "Drill mode: status, init-unseal, or snapshot."),
         "namespace": args.string(default = "tenant-root", description = "OpenBao namespace."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
-        "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before the drill."),
+        "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before the drill."),
         "snapshot_name": args.string(default = "", description = "Optional pod-local snapshot filename for snapshot mode."),
         "statefulset": args.string(default = "openbao-guardian", description = "OpenBao StatefulSet name."),
         "wait_timeout": args.string(default = "5m", description = "Timeout for OpenBao readiness waits."),
@@ -1973,7 +1507,7 @@ backup_drill = task(
         "name": args.string(default = "", description = "Optional BackupJob name. Defaults to a timestamped DNS label."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
         "restore_target": args.string(default = "", description = "Optional app name to restore into after the backup succeeds."),
-        "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before the drill."),
+        "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before the drill."),
         "stage": args.string(default = "root", description = "Guardian bootstrap stage: root."),
         "wait_timeout": args.string(default = "30m", description = "Timeout for BackupJob, Backup, and RestoreJob waits."),
     },
@@ -1994,7 +1528,7 @@ node_outage_drill = task(
         "openbao_namespace": args.string(default = "tenant-root", description = "OpenBao namespace."),
         "openbao_statefulset": args.string(default = "openbao-guardian", description = "OpenBao StatefulSet name."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
-        "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before the drill."),
+        "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before the drill."),
         "wait_timeout": args.string(default = "15m", description = "Timeout for outage-phase and recovery readiness waits."),
     },
 )
