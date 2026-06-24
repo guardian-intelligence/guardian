@@ -70,6 +70,7 @@ func TestPostgresJobManifest(t *testing.T) {
 		"guardian.dev/drill: observability",
 		"guardian-observability-drill job=$JOB_NAME phase=start",
 		"guardian-observability-drill job=$JOB_NAME phase=complete",
+		"guardian-observability-drill job=$JOB_NAME phase=cleanup-warning",
 		"name: postgres-guardian-superuser",
 		"value: postgres-guardian-rw",
 		"value: guardian_root_observability_20260624t030405z",
@@ -78,6 +79,35 @@ func TestPostgresJobManifest(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("manifest missing %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestParseJobTerminalStatus(t *testing.T) {
+	complete, err := parseJobTerminalStatus(`{"status":{"conditions":[{"type":"Complete","status":"True","reason":"Completed","message":"done"}]}}`)
+	if err != nil {
+		t.Fatalf("parse complete job: %v", err)
+	}
+	if !complete.complete || complete.failed {
+		t.Fatalf("complete status = %#v", complete)
+	}
+
+	failed, err := parseJobTerminalStatus(`{"status":{"conditions":[{"type":"Failed","status":"True","reason":"BackoffLimitExceeded","message":"Job has reached the specified backoff limit"}]}}`)
+	if err != nil {
+		t.Fatalf("parse failed job: %v", err)
+	}
+	if !failed.failed || failed.complete {
+		t.Fatalf("failed status = %#v", failed)
+	}
+	if !strings.Contains(failed.message, "BackoffLimitExceeded") {
+		t.Fatalf("failed message = %q, want reason", failed.message)
+	}
+
+	running, err := parseJobTerminalStatus(`{"status":{"conditions":[{"type":"Complete","status":"False"}]}}`)
+	if err != nil {
+		t.Fatalf("parse running job: %v", err)
+	}
+	if running.complete || running.failed {
+		t.Fatalf("running status = %#v, want non-terminal", running)
 	}
 }
 

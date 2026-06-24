@@ -61,6 +61,25 @@ type queryCheck struct {
 	query string
 }
 
+type jobCondition struct {
+	Type    string `json:"type"`
+	Status  string `json:"status"`
+	Reason  string `json:"reason"`
+	Message string `json:"message"`
+}
+
+type jobStatusResponse struct {
+	Status struct {
+		Conditions []jobCondition `json:"conditions"`
+	} `json:"status"`
+}
+
+type jobTerminalStatus struct {
+	complete bool
+	failed   bool
+	message  string
+}
+
 type kubectlRunner struct {
 	bin            string
 	kubeconfig     string
@@ -294,7 +313,11 @@ func runLoadJob(ctx context.Context, runner kubectlRunner, cfg observabilityConf
 	if err := runner.run(ctx, "apply observability load Job", "apply", "-f", manifestPath); err != nil {
 		return err
 	}
-	if err := runner.run(ctx, "wait observability load Job Complete", "wait", "--for=condition=Complete", "job/"+cfg.Name, "--timeout="+cfg.WaitTimeout); err != nil {
+	waitTimeout, err := time.ParseDuration(cfg.WaitTimeout)
+	if err != nil {
+		return err
+	}
+	if err := waitJobComplete(ctx, runner, cfg.Name, waitTimeout, 5*time.Second); err != nil {
 		runner.bestEffort(ctx, "describe failed observability load Job", "describe", "job/"+cfg.Name)
 		runner.bestEffort(ctx, "observability load Job pods", "get", "pods", "-l", "job-name="+cfg.Name, "-o", "wide")
 		runner.bestEffort(ctx, "observability load Job logs", "logs", "job/"+cfg.Name, "--all-containers=true", "--tail=-1")
@@ -351,7 +374,9 @@ spec:
               echo "guardian-observability-drill job=$JOB_NAME phase=start"
               pg_isready --host "$PGHOST" --port "$PGPORT" --username "$PGUSER" --dbname postgres
               cleanup() {
-                dropdb --if-exists --host "$PGHOST" --port "$PGPORT" --username "$PGUSER" "$PGBENCH_DATABASE"
+                if ! dropdb --if-exists --host "$PGHOST" --port "$PGPORT" --username "$PGUSER" "$PGBENCH_DATABASE"; then
+                  echo "guardian-observability-drill job=$JOB_NAME phase=cleanup-warning"
+                fi
               }
               trap cleanup EXIT
               cleanup
@@ -417,6 +442,58 @@ spec:
 		cfg.PgbenchJobs,
 		cfg.PgbenchDurationSeconds,
 	)
+}
+
+func waitJobComplete(ctx context.Context, runner kubectlRunner, name string, timeout, interval time.Duration) error {
+	fmt.Printf("\n## wait observability load Job terminal condition\n")
+	deadline, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	var last string
+	for {
+		out, err := runner.combinedOutput(deadline, "get", "job/"+name, "-o", "json")
+		if err == nil {
+			last = out
+			status, err := parseJobTerminalStatus(out)
+			if err != nil {
+				last = err.Error()
+			} else if status.complete {
+				fmt.Printf("job.batch/%s condition met: Complete\n", name)
+				return nil
+			} else if status.failed {
+				return fmt.Errorf("job.batch/%s condition met: Failed: %s", name, status.message)
+			}
+		} else {
+			last = out + err.Error()
+		}
+
+		timer := time.NewTimer(interval)
+		select {
+		case <-deadline.Done():
+			timer.Stop()
+			return fmt.Errorf("job.batch/%s did not reach Complete within %s; last response: %s", name, timeout, truncate(last, 900))
+		case <-timer.C:
+		}
+	}
+}
+
+func parseJobTerminalStatus(raw string) (jobTerminalStatus, error) {
+	var job jobStatusResponse
+	if err := json.Unmarshal([]byte(raw), &job); err != nil {
+		return jobTerminalStatus{}, err
+	}
+	for _, condition := range job.Status.Conditions {
+		if condition.Status != "True" {
+			continue
+		}
+		message := strings.TrimSpace(strings.Join([]string{condition.Reason, condition.Message}, " "))
+		switch condition.Type {
+		case "Complete":
+			return jobTerminalStatus{complete: true, message: message}, nil
+		case "Failed":
+			return jobTerminalStatus{failed: true, message: message}, nil
+		}
+	}
+	return jobTerminalStatus{}, nil
 }
 
 func verifyVictoriaMetrics(ctx context.Context, cfg observabilityConfig) error {
