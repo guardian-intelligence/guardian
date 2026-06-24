@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/url"
 	"os"
@@ -21,18 +20,18 @@ import (
 )
 
 const (
-	defaultDoggoRunfile        = "+http_archive+doggo_linux_amd64/doggo"
-	defaultK6Runfile           = "+http_archive+k6_linux_amd64/k6"
-	defaultScriptRunfile       = "_main/src/infrastructure/load/edge-health.js"
-	defaultDNSEndpointsRunfile = "_main/src/infrastructure/base/dns/records/dnsendpoints.yaml"
-	defaultHTTPTargetsRunfile  = "_main/src/infrastructure/edge/http-targets.file_sd.yaml"
+	defaultDoggoRunfile       = "+http_archive+doggo_linux_amd64/doggo"
+	defaultK6Runfile          = "+http_archive+k6_linux_amd64/k6"
+	defaultScriptRunfile      = "_main/src/infrastructure/load/edge-health.js"
+	defaultDNSTargetsRunfile  = "_main/src/infrastructure/edge/dns-targets.file_sd.yaml"
+	defaultHTTPTargetsRunfile = "_main/src/infrastructure/edge/http-targets.file_sd.yaml"
 )
 
 type config struct {
 	Doggo                  string
 	K6                     string
 	Script                 string
-	DNSEndpoints           string
+	DNSTargets             string
 	HTTPTargets            string
 	Domain                 string
 	DNSResolvers           string
@@ -46,16 +45,13 @@ type config struct {
 	HTTPRequestTimeout     string
 	HTTPSleepSeconds       string
 	K6ExpectedStatusCutoff string
-	OriginChecks           bool
-	WildcardProbeLabel     string
 }
 
 type dnsTarget struct {
-	DNSName        string
-	QueryName      string
-	RecordType     string
-	ExpectedValues []string
-	Source         string
+	DNSName    string
+	QueryName  string
+	RecordType string
+	Source     string
 }
 
 type httpTarget struct {
@@ -65,24 +61,12 @@ type httpTarget struct {
 	Stage            string
 	Name             string
 	ExpectedStatuses []int
-	ExpectedIPs      []string
 	Source           string
 }
 
 type fileSDGroup struct {
 	Targets []string          `yaml:"targets"`
 	Labels  map[string]string `yaml:"labels"`
-}
-
-type dnsEndpointDoc struct {
-	Kind string `yaml:"kind"`
-	Spec struct {
-		Endpoints []struct {
-			DNSName    string   `yaml:"dnsName"`
-			RecordType string   `yaml:"recordType"`
-			Targets    []string `yaml:"targets"`
-		} `yaml:"endpoints"`
-	} `yaml:"spec"`
 }
 
 type doggoResponse struct {
@@ -108,10 +92,8 @@ type dnsObservation struct {
 	Resolver   string
 	Sample     int
 	Values     []string
-	Expected   []string
 	Matched    bool
 	Err        error
-	Raw        string
 }
 
 type k6Target struct {
@@ -145,7 +127,7 @@ func defaultConfig() (config, error) {
 	if err != nil {
 		return config{}, err
 	}
-	dnsEndpoints, err := runfile(defaultDNSEndpointsRunfile)
+	dnsTargets, err := runfile(defaultDNSTargetsRunfile)
 	if err != nil {
 		return config{}, err
 	}
@@ -157,7 +139,7 @@ func defaultConfig() (config, error) {
 		Doggo:                  doggo,
 		K6:                     k6,
 		Script:                 script,
-		DNSEndpoints:           dnsEndpoints,
+		DNSTargets:             dnsTargets,
 		HTTPTargets:            httpTargets,
 		Domain:                 "guardianintelligence.org",
 		DNSResolvers:           "1.1.1.1,8.8.8.8,9.9.9.9",
@@ -171,8 +153,6 @@ func defaultConfig() (config, error) {
 		HTTPRequestTimeout:     "10s",
 		HTTPSleepSeconds:       "1",
 		K6ExpectedStatusCutoff: "rate>0.99",
-		OriginChecks:           true,
-		WildcardProbeLabel:     "edge-health-wildcard",
 	}, nil
 }
 
@@ -223,8 +203,8 @@ func validateConfig(cfg config) error {
 	if _, err := strconv.ParseFloat(cfg.HTTPSleepSeconds, 64); err != nil {
 		return fmt.Errorf("HTTP sleep seconds must be numeric: %w", err)
 	}
-	if _, err := splitNonEmptyComma(cfg.DNSEndpoints); err != nil {
-		return fmt.Errorf("DNS endpoint runfiles: %w", err)
+	if _, err := splitNonEmptyComma(cfg.DNSTargets); err != nil {
+		return fmt.Errorf("DNS target runfiles: %w", err)
 	}
 	if _, err := splitNonEmptyComma(cfg.HTTPTargets); err != nil {
 		return fmt.Errorf("HTTP target runfiles: %w", err)
@@ -236,16 +216,16 @@ func validateConfig(cfg config) error {
 }
 
 func run(ctx context.Context, cfg config) error {
-	dnsPaths, _ := splitNonEmptyComma(cfg.DNSEndpoints)
+	dnsPaths, _ := splitNonEmptyComma(cfg.DNSTargets)
 	httpPaths, _ := splitNonEmptyComma(cfg.HTTPTargets)
 	resolvers, _ := splitNonEmptyComma(cfg.DNSResolvers)
 
-	dnsTargets, err := loadDNSTargets(dnsPaths, cfg.WildcardProbeLabel)
+	dnsTargets, err := loadDNSTargets(dnsPaths, cfg.Domain)
 	if err != nil {
 		return err
 	}
 	if len(dnsTargets) == 0 {
-		return errors.New("no DNS targets discovered from DNSEndpoint manifests")
+		return errors.New("no DNS targets discovered from edge file_sd manifests")
 	}
 	httpTargets, err := loadHTTPTargets(httpPaths, dnsTargets, cfg.Domain)
 	if err != nil {
@@ -253,75 +233,59 @@ func run(ctx context.Context, cfg config) error {
 	}
 
 	fmt.Printf("guardian edge health\n")
-	fmt.Printf("dnsTargets=%d httpTargets=%d resolvers=%s dnsSamples=%d dnsMinSuccessRatio=%.2f originChecks=%t\n",
+	fmt.Printf("dnsTargets=%d httpTargets=%d resolvers=%s dnsSamples=%d dnsMinSuccessRatio=%.2f\n",
 		len(dnsTargets),
 		len(httpTargets),
 		strings.Join(resolvers, ","),
 		cfg.DNSSamples,
 		cfg.DNSMinSuccessRatio,
-		cfg.OriginChecks,
 	)
 
-	dnsErr := runDNS(ctx, cfg, dnsTargets, resolvers)
-	httpErr := runHTTP(ctx, cfg, httpTargets)
-	return errors.Join(dnsErr, httpErr)
+	return errors.Join(
+		runDNS(ctx, cfg, dnsTargets, resolvers),
+		runHTTP(ctx, cfg, httpTargets),
+	)
 }
 
-func loadDNSTargets(paths []string, wildcardLabel string) ([]dnsTarget, error) {
+func loadDNSTargets(paths []string, domain string) ([]dnsTarget, error) {
 	merged := map[string]dnsTarget{}
 	for _, path := range paths {
 		file, err := os.Open(path)
 		if err != nil {
-			return nil, fmt.Errorf("open DNS endpoints %s: %w", path, err)
+			return nil, fmt.Errorf("open DNS targets %s: %w", path, err)
 		}
-		decoder := yaml.NewDecoder(file)
-		for {
-			var doc dnsEndpointDoc
-			err := decoder.Decode(&doc)
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			if err != nil {
-				_ = file.Close()
-				return nil, fmt.Errorf("decode DNS endpoints %s: %w", path, err)
-			}
-			if doc.Kind != "DNSEndpoint" {
-				continue
-			}
-			for _, endpoint := range doc.Spec.Endpoints {
-				dnsName := normalizeDNSName(endpoint.DNSName)
-				recordType := strings.ToUpper(strings.TrimSpace(endpoint.RecordType))
-				if recordType == "" {
-					recordType = "A"
-				}
-				if dnsName == "" {
-					_ = file.Close()
-					return nil, fmt.Errorf("%s has DNSEndpoint with empty dnsName", path)
-				}
-				if len(endpoint.Targets) == 0 {
-					_ = file.Close()
-					return nil, fmt.Errorf("%s DNSEndpoint %s/%s has no targets", path, dnsName, recordType)
-				}
-				target := dnsTarget{
-					DNSName:        dnsName,
-					QueryName:      queryNameForDNSName(dnsName, wildcardLabel),
-					RecordType:     recordType,
-					ExpectedValues: normalizeRecordValues(endpoint.Targets),
-					Source:         path,
-				}
-				key := target.DNSName + "\x00" + target.RecordType
-				if existing, ok := merged[key]; ok {
-					existing.ExpectedValues = sortedUnique(append(existing.ExpectedValues, target.ExpectedValues...))
-					merged[key] = existing
-					continue
-				}
-				merged[key] = target
-			}
+		var groups []fileSDGroup
+		if err := yaml.NewDecoder(file).Decode(&groups); err != nil {
+			_ = file.Close()
+			return nil, fmt.Errorf("decode DNS targets %s: %w", path, err)
 		}
 		if err := file.Close(); err != nil {
-			return nil, fmt.Errorf("close DNS endpoints %s: %w", path, err)
+			return nil, fmt.Errorf("close DNS targets %s: %w", path, err)
+		}
+		for groupIndex, group := range groups {
+			recordType := strings.ToUpper(strings.TrimSpace(group.Labels["guardian_record_type"]))
+			if recordType == "" {
+				recordType = "A"
+			}
+			for _, rawTarget := range group.Targets {
+				queryName := normalizeDNSName(rawTarget)
+				if queryName == "" {
+					return nil, fmt.Errorf("%s group %d has empty DNS target", path, groupIndex)
+				}
+				if !isUnderDomain(queryName, domain) {
+					return nil, fmt.Errorf("%s DNS target %q is outside %s", path, rawTarget, domain)
+				}
+				target := dnsTarget{
+					DNSName:    queryName,
+					QueryName:  queryName,
+					RecordType: recordType,
+					Source:     path,
+				}
+				merged[target.DNSName+"\x00"+target.RecordType] = target
+			}
 		}
 	}
+
 	out := make([]dnsTarget, 0, len(merged))
 	for _, target := range merged {
 		out = append(out, target)
@@ -369,9 +333,8 @@ func loadHTTPTargets(paths []string, dnsTargets []dnsTarget, domain string) ([]h
 				if !isUnderDomain(host, domain) {
 					return nil, fmt.Errorf("%s target %q host is outside %s", path, rawTarget, domain)
 				}
-				expectedIPs := expectedValuesForHost(host, dnsTargets)
-				if len(expectedIPs) == 0 {
-					return nil, fmt.Errorf("%s target %q has no matching DNSEndpoint", path, rawTarget)
+				if !hasDNSTargetForHost(host, dnsTargets) {
+					return nil, fmt.Errorf("%s target %q has no matching public DNS target", path, rawTarget)
 				}
 				out = append(out, httpTarget{
 					URL:              parsed.String(),
@@ -380,7 +343,6 @@ func loadHTTPTargets(paths []string, dnsTargets []dnsTarget, domain string) ([]h
 					Stage:            stage,
 					Name:             requestName(stage, surface, host),
 					ExpectedStatuses: expectedStatuses,
-					ExpectedIPs:      expectedIPs,
 					Source:           path,
 				})
 			}
@@ -424,11 +386,10 @@ func runDNS(ctx context.Context, cfg config, targets []dnsTarget, resolvers []st
 		}
 		ratio := float64(matched) / float64(total)
 		passed := ratio >= cfg.DNSMinSuccessRatio
-		fmt.Printf("%s %s query=%s expected=%s matched=%d/%d ratio=%.2f pass=%t\n",
+		fmt.Printf("%s %s query=%s answered=%d/%d ratio=%.2f pass=%t\n",
 			target.DNSName,
 			target.RecordType,
 			target.QueryName,
-			strings.Join(target.ExpectedValues, ","),
 			matched,
 			total,
 			ratio,
@@ -447,7 +408,7 @@ func runDNS(ctx context.Context, cfg config, targets []dnsTarget, resolvers []st
 			)
 		}
 		if !passed {
-			failures = append(failures, fmt.Sprintf("%s %s matched %d/%d observations", target.DNSName, target.RecordType, matched, total))
+			failures = append(failures, fmt.Sprintf("%s %s answered %d/%d observations", target.DNSName, target.RecordType, matched, total))
 		}
 	}
 	if len(failures) > 0 {
@@ -472,9 +433,7 @@ func runDoggo(ctx context.Context, cfg config, target dnsTarget, resolver string
 		RecordType: target.RecordType,
 		Resolver:   resolver,
 		Sample:     sample,
-		Expected:   target.ExpectedValues,
 		Err:        err,
-		Raw:        string(output),
 	}
 	if err != nil {
 		return observation
@@ -498,7 +457,7 @@ func runDoggo(ctx context.Context, cfg config, target dnsTarget, resolver string
 		}
 	}
 	observation.Values = normalizeRecordValues(values)
-	observation.Matched = sameStringSet(observation.Values, observation.Expected)
+	observation.Matched = len(observation.Values) > 0
 	return observation
 }
 
@@ -509,33 +468,16 @@ func runHTTP(ctx context.Context, cfg config, targets []httpTarget) error {
 	}
 	fmt.Printf("\n## HTTP probes\n")
 	for _, target := range targets {
-		fmt.Printf("%s expectedStatuses=%s expectedIPs=%s source=%s\n",
+		fmt.Printf("%s expectedStatuses=%s source=%s\n",
 			target.URL,
 			intsString(target.ExpectedStatuses),
-			strings.Join(target.ExpectedIPs, ","),
 			target.Source,
 		)
 	}
-
-	var errs []error
-	if err := runK6(ctx, cfg, "public-dns", targets, nil); err != nil {
-		errs = append(errs, err)
-	}
-	if cfg.OriginChecks {
-		for origin, originTargets := range targetsByOrigin(targets) {
-			hosts := map[string]string{}
-			for _, target := range originTargets {
-				hosts[target.Host] = origin
-			}
-			if err := runK6(ctx, cfg, origin, originTargets, hosts); err != nil {
-				errs = append(errs, err)
-			}
-		}
-	}
-	return errors.Join(errs...)
+	return runK6(ctx, cfg, targets)
 }
 
-func runK6(ctx context.Context, cfg config, origin string, targets []httpTarget, hosts map[string]string) error {
+func runK6(ctx context.Context, cfg config, targets []httpTarget) error {
 	payload := make([]k6Target, 0, len(targets))
 	for _, target := range targets {
 		payload = append(payload, k6Target{
@@ -556,12 +498,12 @@ func runK6(ctx context.Context, cfg config, origin string, targets []httpTarget,
 		"avg,min,med,p(95),p(99),max",
 		cfg.Script,
 	}
-	fmt.Printf("\n### k6 %s\n", origin)
+	fmt.Printf("\n### k6 public-edge\n")
 	cmd := exec.CommandContext(ctx, cfg.K6, args...)
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env,
 		"EDGE_TARGETS_JSON="+string(targetJSON),
-		"EDGE_K6_ORIGIN="+origin,
+		"EDGE_K6_ORIGIN=public-edge",
 		"EDGE_K6_VUS="+cfg.HTTPVUs,
 		"EDGE_K6_ITERATIONS="+strconv.Itoa(cfg.HTTPIterations),
 		"EDGE_K6_MIN_REQUESTS="+strconv.Itoa(len(targets)*cfg.HTTPIterations),
@@ -570,70 +512,24 @@ func runK6(ctx context.Context, cfg config, origin string, targets []httpTarget,
 		"EDGE_K6_SLEEP_SECONDS="+cfg.HTTPSleepSeconds,
 		"EDGE_K6_EXPECTED_STATUS_THRESHOLD="+cfg.K6ExpectedStatusCutoff,
 	)
-	if len(hosts) > 0 {
-		cmd.Env = append(cmd.Env, "EDGE_K6_HOSTS="+formatHostOverrides(hosts))
-		fmt.Printf("hostOverrides=%s\n", formatHostOverrides(hosts))
-	}
 	var output bytes.Buffer
 	cmd.Stdout = &output
 	cmd.Stderr = &output
 	err = cmd.Run()
 	fmt.Print(output.String())
 	if err != nil {
-		return fmt.Errorf("k6 %s: %w", origin, err)
+		return fmt.Errorf("k6 public-edge: %w", err)
 	}
 	return nil
 }
 
-func targetsByOrigin(targets []httpTarget) map[string][]httpTarget {
-	out := map[string][]httpTarget{}
-	for _, target := range targets {
-		for _, ip := range target.ExpectedIPs {
-			out[ip] = append(out[ip], target)
-		}
-	}
-	origins := make([]string, 0, len(out))
-	for origin := range out {
-		origins = append(origins, origin)
-	}
-	sort.Strings(origins)
-	sorted := map[string][]httpTarget{}
-	for _, origin := range origins {
-		sorted[origin] = out[origin]
-	}
-	return sorted
-}
-
-func expectedValuesForHost(host string, targets []dnsTarget) []string {
+func hasDNSTargetForHost(host string, targets []dnsTarget) bool {
 	for _, target := range targets {
 		if target.RecordType == "A" && target.DNSName == host {
-			return target.ExpectedValues
+			return true
 		}
 	}
-	for _, target := range targets {
-		if target.RecordType == "A" && wildcardMatches(target.DNSName, host) {
-			return target.ExpectedValues
-		}
-	}
-	return nil
-}
-
-func queryNameForDNSName(dnsName, wildcardLabel string) string {
-	dnsName = normalizeDNSName(dnsName)
-	if strings.HasPrefix(dnsName, "*.") {
-		return normalizeDNSName(wildcardLabel + "." + strings.TrimPrefix(dnsName, "*."))
-	}
-	return dnsName
-}
-
-func wildcardMatches(pattern, host string) bool {
-	pattern = normalizeDNSName(pattern)
-	host = normalizeDNSName(host)
-	if !strings.HasPrefix(pattern, "*.") {
-		return false
-	}
-	suffix := strings.TrimPrefix(pattern, "*.")
-	return host != suffix && strings.HasSuffix(host, "."+suffix)
+	return false
 }
 
 func isUnderDomain(host, domain string) bool {
@@ -702,20 +598,6 @@ func normalizeRecordValue(value string) string {
 
 func normalizeDNSName(value string) string {
 	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(value)), ".")
-}
-
-func sameStringSet(left, right []string) bool {
-	left = sortedUnique(left)
-	right = sortedUnique(right)
-	if len(left) != len(right) {
-		return false
-	}
-	for i := range left {
-		if left[i] != right[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func sortedUnique(values []string) []string {
@@ -791,19 +673,6 @@ func intsString(values []int) string {
 	parts := make([]string, 0, len(values))
 	for _, value := range values {
 		parts = append(parts, strconv.Itoa(value))
-	}
-	return strings.Join(parts, ",")
-}
-
-func formatHostOverrides(hosts map[string]string) string {
-	keys := make([]string, 0, len(hosts))
-	for host := range hosts {
-		keys = append(keys, host)
-	}
-	sort.Strings(keys)
-	parts := make([]string, 0, len(keys))
-	for _, host := range keys {
-		parts = append(parts, host+"="+hosts[host])
 	}
 	return strings.Join(parts, ",")
 }

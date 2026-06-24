@@ -1,5 +1,8 @@
 filegroup(
     name = "edge_health_targets",
-    srcs = ["http-targets.file_sd.yaml"],
+    srcs = [
+        "dns-targets.file_sd.yaml",
+        "http-targets.file_sd.yaml",
+    ],
     visibility = ["//visibility:public"],
 )

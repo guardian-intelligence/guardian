@@ -16,7 +16,6 @@ go_binary(
     data = [
         "@doggo_linux_amd64//:doggo",
         "@k6_linux_amd64//:k6",
-        "//src/infrastructure/base/dns:manifests",
         "//src/infrastructure/edge:edge_health_targets",
         "//src/infrastructure/load:http_load_scripts",
     ],
