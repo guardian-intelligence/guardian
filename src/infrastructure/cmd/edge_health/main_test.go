@@ -8,25 +8,18 @@ import (
 	"testing"
 )
 
-func TestLoadDNSTargetsFromDNSEndpoint(t *testing.T) {
+func TestLoadDNSTargetsFromPrometheusFileSD(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "dns.yaml")
 	writeFile(t, path, `
-apiVersion: externaldns.k8s.io/v1alpha1
-kind: DNSEndpoint
-spec:
-  endpoints:
-    - dnsName: "*.guardianintelligence.org"
-      recordType: A
-      targets:
-        - 206.223.228.101
-    - dnsName: harbor.guardianintelligence.org.
-      recordType: A
-      targets:
-        - 206.223.228.101
+- targets:
+    - edge-health-wildcard.guardianintelligence.org
+    - harbor.guardianintelligence.org.
+  labels:
+    guardian_record_type: A
 `)
 
-	targets, err := loadDNSTargets([]string{path}, "edge-health-wildcard")
+	targets, err := loadDNSTargets([]string{path}, "guardianintelligence.org")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,24 +27,20 @@ spec:
 		t.Fatalf("targets = %d, want 2", len(targets))
 	}
 	wildcard := targets[0]
-	if wildcard.DNSName != "*.guardianintelligence.org" {
+	if wildcard.DNSName != "edge-health-wildcard.guardianintelligence.org" {
 		t.Fatalf("wildcard DNSName = %q", wildcard.DNSName)
 	}
 	if wildcard.QueryName != "edge-health-wildcard.guardianintelligence.org" {
 		t.Fatalf("wildcard QueryName = %q", wildcard.QueryName)
-	}
-	if got, want := wildcard.ExpectedValues, []string{"206.223.228.101"}; !sameStringSet(got, want) {
-		t.Fatalf("wildcard ExpectedValues = %v, want %v", got, want)
 	}
 }
 
 func TestLoadHTTPTargetsFromPrometheusFileSD(t *testing.T) {
 	dnsTargets := []dnsTarget{
 		{
-			DNSName:        "*.guardianintelligence.org",
-			QueryName:      "edge-health-wildcard.guardianintelligence.org",
-			RecordType:     "A",
-			ExpectedValues: []string{"206.223.228.101"},
+			DNSName:    "harbor.guardianintelligence.org",
+			QueryName:  "harbor.guardianintelligence.org",
+			RecordType: "A",
 		},
 	}
 	dir := t.TempDir()
@@ -79,9 +68,6 @@ func TestLoadHTTPTargetsFromPrometheusFileSD(t *testing.T) {
 	if got, want := target.ExpectedStatuses, []int{200, 401}; !sameInts(got, want) {
 		t.Fatalf("ExpectedStatuses = %v, want %v", got, want)
 	}
-	if got, want := target.ExpectedIPs, []string{"206.223.228.101"}; !sameStringSet(got, want) {
-		t.Fatalf("ExpectedIPs = %v, want %v", got, want)
-	}
 }
 
 func TestLoadHTTPTargetsRejectsHostOutsideDNS(t *testing.T) {
@@ -100,10 +86,10 @@ func TestLoadHTTPTargetsRejectsHostOutsideDNS(t *testing.T) {
 	}
 }
 
-func TestRunDNSFailsWhenAnswersDoNotMatch(t *testing.T) {
+func TestRunDNSFailsWhenQueryDoesNotAnswer(t *testing.T) {
 	doggo := writeExecutable(t, "doggo", `#!/bin/sh
 cat <<'JSON'
-{"responses":[{"answers":[{"type":"A","address":"203.0.113.10"}]}]}
+{"responses":[{"answers":[]}]}
 JSON
 `)
 	cfg := config{
@@ -114,14 +100,13 @@ JSON
 	}
 	err := runDNS(context.Background(), cfg, []dnsTarget{
 		{
-			DNSName:        "harbor.guardianintelligence.org",
-			QueryName:      "harbor.guardianintelligence.org",
-			RecordType:     "A",
-			ExpectedValues: []string{"206.223.228.101"},
+			DNSName:    "harbor.guardianintelligence.org",
+			QueryName:  "harbor.guardianintelligence.org",
+			RecordType: "A",
 		},
 	}, []string{"1.1.1.1"})
 	if err == nil {
-		t.Fatal("runDNS succeeded, want mismatch failure")
+		t.Fatal("runDNS succeeded, want unanswered failure")
 	}
 	if !strings.Contains(err.Error(), "DNS confidence below threshold") {
 		t.Fatalf("runDNS error = %v", err)
@@ -139,7 +124,6 @@ func TestRunHTTPPropagatesK6Failure(t *testing.T) {
 		HTTPRequestTimeout:     "1s",
 		HTTPSleepSeconds:       "0",
 		K6ExpectedStatusCutoff: "rate>0.99",
-		OriginChecks:           false,
 	}
 	err := runHTTP(context.Background(), cfg, []httpTarget{
 		{
@@ -149,32 +133,13 @@ func TestRunHTTPPropagatesK6Failure(t *testing.T) {
 			Stage:            "root",
 			Name:             "guardian-edge-root-harbor",
 			ExpectedStatuses: []int{200, 401},
-			ExpectedIPs:      []string{"206.223.228.101"},
 		},
 	})
 	if err == nil {
 		t.Fatal("runHTTP succeeded, want k6 failure")
 	}
-	if !strings.Contains(err.Error(), "k6 public-dns") {
+	if !strings.Contains(err.Error(), "k6 public-edge") {
 		t.Fatalf("runHTTP error = %v", err)
-	}
-}
-
-func TestSameStringSetNormalizesOrdering(t *testing.T) {
-	if !sameStringSet([]string{"b", "a", "a"}, []string{"a", "b"}) {
-		t.Fatal("sameStringSet returned false for equivalent sets")
-	}
-	if sameStringSet([]string{"a"}, []string{"a", "b"}) {
-		t.Fatal("sameStringSet returned true for different sets")
-	}
-}
-
-func TestWildcardMatchesOnlySubdomains(t *testing.T) {
-	if !wildcardMatches("*.guardianintelligence.org", "harbor.guardianintelligence.org") {
-		t.Fatal("wildcard did not match subdomain")
-	}
-	if wildcardMatches("*.guardianintelligence.org", "guardianintelligence.org") {
-		t.Fatal("wildcard matched apex")
 	}
 }
 

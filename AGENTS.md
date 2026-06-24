@@ -176,9 +176,13 @@ src/
 </repo_shape>
 
 <technology>
+TLS terminates at Cloudflare edge.
+Cloudflare LB for the three control plane nodes. [206.223.228.101, 45.250.254.119, 206.223.228.87]
+MetalLB for L2/ARP inside the Latitude VLAN. `10.8.0.200 - 10.8.0.240`
+
 Bazel owns the build graph and produces bytes using OCI for layout. `cosign`/SLSA proves its authentic Guardian Intelligence LLC software. Cozystack management cluster reconciles our declared state.
 
-Use Flagger for progressive delivery after Flux applies an approved digest. Use Kargo/Freight to promote immutable release candidates to service+stage+region targets.
+Planned: Use Flagger for progressive delivery after Flux applies an approved digest. Use Kargo/Freight to promote immutable release candidates to service+stage+region targets.
 
 Domain: guardianintelligence.org (abbreviated gi.org)
 

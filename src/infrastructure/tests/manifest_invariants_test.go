@@ -116,7 +116,7 @@ func testCozystackPlatformPackage(t *testing.T) {
 	assertStringSlice(t, pkg, []string{"cozystack.backupstrategy-controller"}, "spec", "components", "platform", "values", "bundles", "disabledPackages")
 	assertString(t, pkg, "guardianintelligence.org", "spec", "components", "platform", "values", "publishing", "host")
 	assertString(t, pkg, fmt.Sprintf("https://%s:6443", topology.Network.VLAN.APIVIP), "spec", "components", "platform", "values", "publishing", "apiServerEndpoint")
-	assertStringSlice(t, pkg, []string{topologyNodePublicIP(t, topology, "ash-earth")}, "spec", "components", "platform", "values", "publishing", "externalIPs")
+	assertStringSlice(t, pkg, topologyPublicIPs(t, topology), "spec", "components", "platform", "values", "publishing", "externalIPs")
 	assertStringSlice(t, pkg, []string{"dashboard", "api"}, "spec", "components", "platform", "values", "publishing", "exposedServices")
 
 	assertString(t, pkg, "10.244.0.0/16", "spec", "components", "platform", "values", "networking", "podCIDR")
@@ -223,12 +223,18 @@ func testGuardianMgmtDNSBootstrap(t *testing.T) {
 
 	assertTextNotContains(t, variablesTF, `variable "aws_region"`, "guardian-mgmt-dns variables.tf")
 	assertTextContains(t, variablesTF, `variable "cloudflare_account_id"`, "guardian-mgmt-dns variables.tf")
+	assertTextContains(t, variablesTF, `variable "cloudflare_lb_monitor_interval_seconds"`, "guardian-mgmt-dns variables.tf")
+	assertTextContains(t, variablesTF, `variable "cloudflare_lb_check_regions"`, "guardian-mgmt-dns variables.tf")
 	assertTextContains(t, mainTF, `data "terraform_remote_state" "guardian_mgmt"`, "guardian-mgmt-dns main.tf")
 	assertTextContains(t, mainTF, `key    = "opentofu/guardian-mgmt.tfstate"`, "guardian-mgmt-dns main.tf")
 	assertTextContains(t, mainTF, `endpoint                    = "https://${var.cloudflare_account_id}.r2.cloudflarestorage.com"`, "guardian-mgmt-dns main.tf")
 	assertTextContains(t, mainTF, `data.terraform_remote_state.guardian_mgmt.outputs.control_plane_nodes`, "guardian-mgmt-dns main.tf")
-	assertTextContains(t, mainTF, `public_ingress_node   = "ash-earth"`, "guardian-mgmt-dns main.tf")
-	assertTextContains(t, mainTF, `control_plane_nodes[local.public_ingress_node].public_ipv4`, "guardian-mgmt-dns main.tf")
+	assertTextContains(t, mainTF, `public_ingress_origin_names = [`, "guardian-mgmt-dns main.tf")
+	assertTextContains(t, mainTF, `cloudflare_load_balancer_monitor`, "guardian-mgmt-dns main.tf")
+	assertTextContains(t, mainTF, `cloudflare_load_balancer_pool`, "guardian-mgmt-dns main.tf")
+	assertTextContains(t, mainTF, `cloudflare_load_balancer`, "guardian-mgmt-dns main.tf")
+	assertTextContains(t, mainTF, `session_affinity     = "cookie"`, "guardian-mgmt-dns main.tf")
+	assertTextContains(t, mainTF, `zero_downtime_failover = "temporary"`, "guardian-mgmt-dns main.tf")
 	assertTextContains(t, mainTF, `data "cloudflare_zone" "guardianintelligence_org"`, "guardian-mgmt-dns main.tf")
 	assertTextContains(t, mainTF, `account_id = var.cloudflare_account_id`, "guardian-mgmt-dns main.tf")
 	assertTextNotContains(t, mainTF, `resource "aws_route53_record"`, "guardian-mgmt-dns main.tf")
@@ -251,11 +257,14 @@ func testGuardianMgmtDNSBootstrap(t *testing.T) {
 	recordDefinitions := strings.Split(mainTF, `check "no_legacy_verself_records"`)[0]
 	assertTextNotContains(t, recordDefinitions, "206.223.228.99", "guardian-mgmt-dns record definitions")
 	assertTextNotContains(t, recordDefinitions, "67.213.115.113", "guardian-mgmt-dns record definitions")
-	assertTextContains(t, mainTF, `check "external_dns_owns_dns_records"`, "guardian-mgmt-dns main.tf")
+	assertTextContains(t, mainTF, `check "cloudflare_load_balancer_hostnames"`, "guardian-mgmt-dns main.tf")
+	assertTextContains(t, mainTF, `check "cloudflare_load_balancer_origins"`, "guardian-mgmt-dns main.tf")
 
 	assertTextContains(t, outputsTF, `output "cloudflare_zone_id"`, "guardian-mgmt-dns outputs.tf")
 	assertTextContains(t, outputsTF, `output "external_dns_owner_id"`, "guardian-mgmt-dns outputs.tf")
 	assertTextContains(t, outputsTF, `output "external_dns_record_hostnames"`, "guardian-mgmt-dns outputs.tf")
+	assertTextContains(t, outputsTF, `output "cloudflare_load_balancer_hostnames"`, "guardian-mgmt-dns outputs.tf")
+	assertTextContains(t, outputsTF, `output "cloudflare_load_balancer_pool_id"`, "guardian-mgmt-dns outputs.tf")
 	assertTextContains(t, outputsTF, `output "public_ingress_ipv4s"`, "guardian-mgmt-dns outputs.tf")
 }
 
@@ -472,6 +481,7 @@ func testCozystackAppPatches(t *testing.T) {
 }
 
 func testExternalDNS(t *testing.T) {
+	topology := guardianMgmtTopologyFixture(t)
 	base := readYAMLMap(t, "src/infrastructure/base/kustomization.yaml")
 	baseResources := sliceAt(t, base, "resources")
 	if containsString(baseResources, "dns") {
@@ -580,8 +590,15 @@ func testExternalDNS(t *testing.T) {
 		endpoint := asManifest(t, endpoints[i], "external-dns endpoint")
 		assertString(t, endpoint, host, "dnsName")
 		assertString(t, endpoint, "A", "recordType")
-		assertInt(t, endpoint, 120, "recordTTL")
-		assertStringSlice(t, endpoint, []string{"206.223.228.101"}, "targets")
+		assertInt(t, endpoint, 1, "recordTTL")
+		assertStringSlice(t, endpoint, topologyPublicIPs(t, topology), "targets")
+		providerSpecific := sliceAt(t, endpoint, "providerSpecific")
+		if len(providerSpecific) != 1 {
+			t.Fatalf("external-dns endpoint providerSpecific = %d entries, want 1", len(providerSpecific))
+		}
+		cloudflareProxy := asManifest(t, providerSpecific[0], "external-dns endpoint providerSpecific[0]")
+		assertString(t, cloudflareProxy, "external-dns.alpha.kubernetes.io/cloudflare-proxied", "name")
+		assertString(t, cloudflareProxy, "true", "value")
 	}
 
 	policy := findObject(t, readManifests(t, "src/infrastructure/base/dns/networkpolicy.yaml"), "CiliumNetworkPolicy", "external-dns", "external-dns-egress")
@@ -760,7 +777,7 @@ func testRootTenantCoreServices(t *testing.T) {
 	assertString(t, ingress, "apps.cozystack.io/v1alpha1", "apiVersion")
 	assertInt(t, ingress, 3, "spec", "replicas")
 	assertStringSlice(t, ingress, []string{}, "spec", "whitelist")
-	assertBool(t, ingress, false, "spec", "cloudflareProxy")
+	assertBool(t, ingress, true, "spec", "cloudflareProxy")
 
 	seaweedfs := findObject(t, docs, "SeaweedFS", "tenant-root", "seaweedfs")
 	assertString(t, seaweedfs, "apps.cozystack.io/v1alpha1", "apiVersion")
@@ -1251,6 +1268,15 @@ func topologyNodePublicIP(t *testing.T, topology guardianMgmtTopology, name stri
 	}
 	t.Fatalf("topology node %q not found", name)
 	return ""
+}
+
+func topologyPublicIPs(t *testing.T, topology guardianMgmtTopology) []string {
+	t.Helper()
+	out := make([]string, 0, len(topology.Nodes))
+	for _, node := range topology.Nodes {
+		out = append(out, node.PublicIPv4)
+	}
+	return out
 }
 
 func assertUniqueTopologyValues(t *testing.T, topology guardianMgmtTopology) {

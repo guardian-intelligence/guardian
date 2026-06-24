@@ -24,6 +24,7 @@ DB_LOAD_TARGET = "//src/infrastructure/cmd/cozystack_db_load:cozystack_db_load"
 HARBOR_REGISTRY_TARGET = "//src/infrastructure/cmd/cozystack_harbor_registry:cozystack_harbor_registry"
 HTTP_LOAD_TARGET = "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load"
 EDGE_HEALTH_TARGET = "//src/infrastructure/cmd/edge_health:edge_health"
+EDGE_FAILOVER_DRILL_TARGET = "//src/infrastructure/cmd/edge_failover_drill:edge_failover_drill"
 NODE_OUTAGE_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill"
 OPENBAO_APPLY_TARGET = "//src/infrastructure/cmd/cozystack_openbao_apply:cozystack_openbao_apply"
 OPENBAO_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill"
@@ -67,6 +68,7 @@ INFRA_FILEGROUPS = [
 INFRA_TESTS = [
     "//src/infrastructure/cmd/cozystack_backup_drill:cozystack_backup_drill_test",
     "//src/infrastructure/cmd/cozystack_db_load:cozystack_db_load_test",
+    "//src/infrastructure/cmd/edge_failover_drill:edge_failover_drill_test",
     "//src/infrastructure/cmd/edge_health:edge_health_test",
     "//src/infrastructure/cmd/cozystack_harbor_registry:cozystack_harbor_registry_test",
     "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load_test",
@@ -1014,6 +1016,76 @@ def _edge_health_impl(ctx):
         label = "guardian edge health",
     )
 
+def _edge_failover_drill_impl(ctx):
+    if ctx.args.confirm_nodes != ctx.args.nodes:
+        ctx.std.io.stderr.write("ERROR: --confirm-nodes must exactly match --nodes before rebooting nodes\n")
+        return 1
+
+    k6 = _k6_path(ctx)
+    if k6 == None:
+        return 1
+    kubectl = _kubectl_path(ctx)
+    if kubectl == None:
+        return 1
+    talosctl = _talosctl_path(ctx)
+    if talosctl == None:
+        return 1
+
+    rc = _check_live_context(ctx, kubectl)
+    if rc != 0:
+        return rc
+    if ctx.args.revision != "":
+        rc = _check_flux_revision(ctx, kubectl, ctx.args.revision)
+        if rc != 0:
+            return rc
+
+    drill_args = [
+        "--k6",
+        k6,
+        "--script",
+        ws_path(ctx, "src/infrastructure/load/edge-failover.js"),
+        "--kubectl",
+        kubectl,
+        "--talosctl",
+        talosctl,
+        "--talosconfig",
+        _talosconfig_path(ctx),
+        "--talos-endpoint",
+        ctx.args.talos_endpoint,
+        "--nodes",
+        ctx.args.nodes,
+        "--confirm-nodes",
+        ctx.args.confirm_nodes,
+        "--url",
+        ctx.args.url,
+        "--expected-statuses",
+        ctx.args.expected_statuses,
+        "--duration",
+        ctx.args.duration,
+        "--warmup",
+        ctx.args.warmup,
+        "--cooldown",
+        ctx.args.cooldown,
+        "--sample-interval-ms",
+        ctx.args.sample_interval_ms,
+        "--request-timeout",
+        ctx.args.request_timeout,
+        "--kube-timeout",
+        ctx.args.kube_timeout,
+        "--report",
+        ctx.args.report,
+    ]
+    if ctx.args.kubeconfig != "":
+        drill_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
+
+    return checked_spawn(
+        ctx,
+        "bazelisk",
+        ["run", EDGE_FAILOVER_DRILL_TARGET, "--"] + drill_args,
+        cwd = ws_path(ctx),
+        label = "guardian edge failover drill",
+    )
+
 def _load_db_impl(ctx):
     kubectl = _kubectl_path(ctx)
     if kubectl == None:
@@ -1420,6 +1492,31 @@ edge_health = task(
     name = "edge-health",
     group = ["infra"],
     summary = "Run the self-contained Guardian public edge DNS and HTTPS synthetic suite.",
+)
+
+edge_failover_drill = task(
+    implementation = _edge_failover_drill_impl,
+    name = "edge-failover-drill",
+    group = ["infra"],
+    summary = "Reboot guardian-mgmt nodes while k6 measures Cloudflare LB public-edge failover.",
+    args = {
+        "confirm_nodes": args.string(default = "", description = "Must exactly match --nodes before the task reboots Talos nodes."),
+        "cooldown": args.string(default = "20s", description = "Time to keep sampling after Kubernetes node recovery."),
+        "duration": args.string(default = "5m", description = "k6 probe duration per node."),
+        "expected_statuses": args.string(default = "200,302", description = "Comma-separated acceptable public edge HTTP status codes."),
+        "kube_timeout": args.string(default = "10m", description = "Timeout for Kubernetes node NotReady/Ready transitions."),
+        "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
+        "nodes": args.string(default = "ash-earth=206.223.228.101,ash-wind=45.250.254.119,ash-water=206.223.228.87", description = "Comma-separated nodeName=talosNode entries to reboot sequentially."),
+        "report": args.string(default = "reports/infrastructure/edge-failover-report.json", description = "JSON outage report path."),
+        "request_timeout": args.string(default = "5s", description = "Per-request public edge timeout."),
+        "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before the drill."),
+        "root": args.string(default = "src/infrastructure/talm", description = "Talm root containing gitignored talosconfig."),
+        "sample_interval_ms": args.string(default = "250", description = "k6 sample interval in milliseconds."),
+        "talos_endpoint": args.string(default = "206.223.228.101,45.250.254.119,206.223.228.87", description = "Comma-separated Talos API endpoints for guardian-mgmt."),
+        "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
+        "url": args.string(default = "https://dashboard.guardianintelligence.org/", description = "Public edge URL to probe during failover."),
+        "warmup": args.string(default = "10s", description = "Time to collect baseline samples before each reboot."),
+    },
 )
 
 load_db = task(

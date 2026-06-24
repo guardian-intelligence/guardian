@@ -3,7 +3,6 @@ import { check, sleep } from "k6";
 import { Counter, Rate } from "k6/metrics";
 
 const targets = JSON.parse(__ENV.EDGE_TARGETS_JSON || "[]");
-const hostOverrides = parseHostOverrides(__ENV.EDGE_K6_HOSTS || "");
 const iterations = Number(__ENV.EDGE_K6_ITERATIONS || "2");
 const minRequests = Number(
   __ENV.EDGE_K6_MIN_REQUESTS || String(targets.length * iterations),
@@ -25,7 +24,6 @@ export const options = {
       maxDuration: __ENV.EDGE_K6_MAX_DURATION || "2m",
     },
   },
-  hosts: hostOverrides,
   noConnectionReuse: true,
   noVUConnectionReuse: true,
   thresholds: {
@@ -43,7 +41,7 @@ export default function () {
     targetRequests.add(1, {
       guardian_surface: target.surface,
       guardian_stage: target.stage,
-      guardian_origin: __ENV.EDGE_K6_ORIGIN || "public-dns",
+      guardian_origin: __ENV.EDGE_K6_ORIGIN || "public-edge",
     });
     const response = http.get(target.url, {
       redirects: 0,
@@ -53,10 +51,11 @@ export default function () {
         name: target.name,
         guardian_surface: target.surface,
         guardian_stage: target.stage,
-        guardian_origin: __ENV.EDGE_K6_ORIGIN || "public-dns",
+        guardian_origin: __ENV.EDGE_K6_ORIGIN || "public-edge",
       },
     });
     const ok = (target.expected_statuses || [200]).includes(response.status);
+    const cloudflareHeadersOk = hasHeader(response.headers, "cf-ray");
     if (!ok) {
       console.error(
         JSON.stringify({
@@ -64,41 +63,43 @@ export default function () {
           url: target.url,
           surface: target.surface,
           stage: target.stage,
-          origin: __ENV.EDGE_K6_ORIGIN || "public-dns",
+          origin: __ENV.EDGE_K6_ORIGIN || "public-edge",
           status: response.status,
           error: response.error || "",
           expected_statuses: target.expected_statuses || [200],
         }),
       );
     }
+    if (!cloudflareHeadersOk) {
+      console.error(
+        JSON.stringify({
+          msg: "guardian edge probe missing Cloudflare response headers",
+          url: target.url,
+          surface: target.surface,
+          stage: target.stage,
+          origin: __ENV.EDGE_K6_ORIGIN || "public-edge",
+          headers: Object.keys(response.headers || {}).sort(),
+        }),
+      );
+    }
     expectedStatusRate.add(ok, {
       guardian_surface: target.surface,
       guardian_stage: target.stage,
-      guardian_origin: __ENV.EDGE_K6_ORIGIN || "public-dns",
+      guardian_origin: __ENV.EDGE_K6_ORIGIN || "public-edge",
     });
     check(response, {
       "status is expected": () => ok,
+      "Cloudflare headers present": () => cloudflareHeadersOk,
     });
   }
   sleep(Number(__ENV.EDGE_K6_SLEEP_SECONDS || "1"));
 }
 
-function parseHostOverrides(value) {
-  const hosts = {};
-  for (const rawEntry of value.split(",")) {
-    const entry = rawEntry.trim();
-    if (entry === "") {
-      continue;
-    }
-    const separator = entry.indexOf("=");
-    if (separator <= 0 || separator === entry.length - 1) {
-      throw new Error(`invalid EDGE_K6_HOSTS entry: ${entry}`);
-    }
-    hosts[entry.slice(0, separator).trim()] = entry.slice(separator + 1).trim();
-  }
-  return hosts;
-}
-
 function unique(values) {
   return Array.from(new Set(values)).sort((left, right) => left - right);
+}
+
+function hasHeader(headers, name) {
+  const want = name.toLowerCase();
+  return Object.keys(headers || {}).some((key) => key.toLowerCase() === want);
 }

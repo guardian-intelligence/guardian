@@ -1,6 +1,7 @@
 filegroup(
     name = "http_load_scripts",
     srcs = [
+        "edge-failover.js",
         "edge-health.js",
         "http-smoke.js",
     ],
