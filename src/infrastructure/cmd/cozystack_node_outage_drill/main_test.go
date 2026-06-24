@@ -107,12 +107,11 @@ func TestOutageWaitsProveServicesWhileNodeCordoned(t *testing.T) {
 	requireCheck(t, got, "wait outage target node cordoned", "node/ash-earth", "--for=jsonpath={.spec.unschedulable}=true", "--timeout=15m")
 	requireCheck(t, got, "wait outage root openbao app", "openbaos.apps.cozystack.io/guardian", "--timeout=15m")
 	rejectCheck(t, got, "wait outage root openbao statefulset")
-	requireCheck(t, got, "wait outage tenant-guardiancommercial-platform-dev postgres workloads", "postgreses.apps.cozystack.io/guardian", "--timeout=15m")
-	requireCheck(t, got, "wait outage tenant-guardiancommercial-platform-gamma harbor workloads", "harbors.apps.cozystack.io/guardian", "--timeout=15m")
-	requireCheck(t, got, "wait outage tenant-guardiancommercial-platform-gamma harbor registry bucket ready", "--for=jsonpath={.status.bucketReady}=true", "bucketclaims.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=15m")
-	requireCheck(t, got, "wait outage tenant-guardiancommercial-platform-gamma harbor registry bucket access granted", "--for=jsonpath={.status.accessGranted}=true", "bucketaccesses.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=15m")
-	requireCheck(t, got, "wait outage tenant-guardiancommercial-platform-prod clickhouse workloads", "clickhouses.apps.cozystack.io/guardian", "--timeout=15m")
-	rejectCheck(t, got, "wait outage tenant-guardiancommercial-platform-prod company-site deployment")
+	requireCheck(t, got, "wait outage tenant-root postgres workloads", "postgreses.apps.cozystack.io/guardian", "--timeout=15m")
+	requireCheck(t, got, "wait outage tenant-root harbor workloads", "harbors.apps.cozystack.io/guardian", "--timeout=15m")
+	requireCheck(t, got, "wait outage tenant-root harbor registry bucket ready", "--for=jsonpath={.status.bucketReady}=true", "bucketclaims.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=15m")
+	requireCheck(t, got, "wait outage tenant-root harbor registry bucket access granted", "--for=jsonpath={.status.accessGranted}=true", "bucketaccesses.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=15m")
+	requireCheck(t, got, "wait outage tenant-root clickhouse workloads", "clickhouses.apps.cozystack.io/guardian", "--timeout=15m")
 	requireCheck(t, got, "wait outage dashboard console deployment", "deployment/cozy-dashboard-console", "--timeout=15m")
 }
 
@@ -121,26 +120,12 @@ func TestRecoveryWaitsCoverGuardianSurfaces(t *testing.T) {
 	requireCheck(t, got, "wait recovered target node Ready", "node/ash-earth", "--timeout=15m")
 	requireCheck(t, got, "wait recovered root openbao app", "openbaos.apps.cozystack.io/guardian", "--timeout=15m")
 	rejectCheck(t, got, "wait recovered root openbao statefulset")
-	requireCheck(t, got, "wait recovered tenant-guardiancommercial-platform-dev postgres workloads", "postgreses.apps.cozystack.io/guardian", "--timeout=15m")
-	requireCheck(t, got, "wait recovered tenant-guardiancommercial-platform-gamma harbor workloads", "harbors.apps.cozystack.io/guardian", "--timeout=15m")
-	requireCheck(t, got, "wait recovered tenant-guardiancommercial-platform-gamma harbor registry bucket ready", "--for=jsonpath={.status.bucketReady}=true", "bucketclaims.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=15m")
-	requireCheck(t, got, "wait recovered tenant-guardiancommercial-platform-gamma harbor registry bucket access granted", "--for=jsonpath={.status.accessGranted}=true", "bucketaccesses.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=15m")
-	requireCheck(t, got, "wait recovered tenant-guardiancommercial-platform-prod clickhouse workloads", "clickhouses.apps.cozystack.io/guardian", "--timeout=15m")
-	requireCheck(t, got, "wait recovered tenant-guardiancommercial-platform-prod company-site deployment", "deployment/company-site", "--timeout=15m")
+	requireCheck(t, got, "wait recovered tenant-root postgres workloads", "postgreses.apps.cozystack.io/guardian", "--timeout=15m")
+	requireCheck(t, got, "wait recovered tenant-root harbor workloads", "harbors.apps.cozystack.io/guardian", "--timeout=15m")
+	requireCheck(t, got, "wait recovered tenant-root harbor registry bucket ready", "--for=jsonpath={.status.bucketReady}=true", "bucketclaims.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=15m")
+	requireCheck(t, got, "wait recovered tenant-root harbor registry bucket access granted", "--for=jsonpath={.status.accessGranted}=true", "bucketaccesses.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=15m")
+	requireCheck(t, got, "wait recovered tenant-root clickhouse workloads", "clickhouses.apps.cozystack.io/guardian", "--timeout=15m")
 	requireCheck(t, got, "wait recovered dashboard console deployment", "deployment/cozy-dashboard-console", "--timeout=15m")
-}
-
-func TestParsePDBHealth(t *testing.T) {
-	got, err := parsePDBHealth(`{"status":{"currentHealthy":2,"desiredHealthy":2,"disruptionsAllowed":0}}`)
-	if err != nil {
-		t.Fatalf("parsePDBHealth() error = %v", err)
-	}
-	if got.CurrentHealthy != 2 || got.DesiredHealthy != 2 || got.DisruptionsAllowed != 0 {
-		t.Fatalf("parsePDBHealth() = %#v", got)
-	}
-	if _, err := parsePDBHealth(`{"status":{"currentHealthy":0,"desiredHealthy":0}}`); err == nil {
-		t.Fatalf("zero desiredHealthy PDB accepted")
-	}
 }
 
 func TestQuorumForReplicas(t *testing.T) {

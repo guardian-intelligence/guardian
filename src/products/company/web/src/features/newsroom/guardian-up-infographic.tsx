@@ -9,15 +9,15 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-// Guardian CLI infographic — one transformation, left to right:
+// Guardian bootstrap infographic — one transformation, left to right:
 //
-//   [ Latitude bare metal ] --guardian up-->  [ a complete software company ]
+//   [ Latitude bare metal ] --repo bootstrap-->  [ a complete software company ]
 //
 // Left: the raw input — Latitude's bare metal, captioned "Bare Metal". Middle:
 // the command, the single bounded Flare accent. Right: the output — five
 // labelled business functions stacked on a labelled Cozystack foundation. The
-// flat metal slab vs. the tall, layered company is the message: `guardian up`
-// turns rented hardware into a running business.
+// flat metal slab vs. the tall, layered company is the message: repo-declared
+// bootstrap turns rented hardware into a running business.
 //
 // Restraint: monochrome ink on Argent, Flare reserved for the command. The
 // whole graphic carries one screen-reader label (role="img").
@@ -31,7 +31,7 @@ const FUNCTIONS: ReadonlyArray<{ readonly Icon: LucideIcon; readonly label: stri
 ];
 
 const ARIA_LABEL =
-  "Running guardian up on Latitude bare metal produces a complete software company — billing, go-to-market, integrations, operations, and compliance — on a Cozystack foundation.";
+  "Running repo-declared bootstrap on Latitude bare metal produces a complete software company — billing, go-to-market, integrations, operations, and compliance — on a Cozystack foundation.";
 
 export function GuardianUpInfographic() {
   return (
@@ -87,7 +87,7 @@ export function GuardianUpInfographic() {
               whiteSpace: "nowrap",
             }}
           >
-            guardian&nbsp;up
+            repo&nbsp;bootstrap
           </span>
           <ArrowRight
             className="hidden md:block"

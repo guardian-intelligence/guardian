@@ -46,7 +46,7 @@ func main() {
 	flag.StringVar(&cfg.Kubeconfig, "kubeconfig", "", "kubeconfig for guardian-mgmt")
 	flag.StringVar(&cfg.RequestTimeout, "request-timeout", "15s", "kubectl API request timeout")
 	flag.StringVar(&cfg.WaitTimeout, "wait-timeout", "30m", "timeout for backup and restore completion waits")
-	flag.StringVar(&cfg.Stage, "stage", "dev", "Guardian stage: root, dev, gamma, or prod")
+	flag.StringVar(&cfg.Stage, "stage", "root", "Guardian bootstrap stage: root")
 	flag.StringVar(&component, "component", "clickhouse", "component to drill: clickhouse or postgres")
 	flag.StringVar(&cfg.ApplicationName, "application", "guardian", "Cozystack app name")
 	flag.StringVar(&cfg.Name, "name", "", "BackupJob name; defaults to a UTC timestamped DNS label")
@@ -82,14 +82,8 @@ func namespaceForStage(stage string) (string, error) {
 	switch stage {
 	case "root":
 		return "tenant-root", nil
-	case "dev":
-		return "tenant-guardiancommercial-platform-dev", nil
-	case "gamma":
-		return "tenant-guardiancommercial-platform-gamma", nil
-	case "prod":
-		return "tenant-guardiancommercial-platform-prod", nil
 	default:
-		return "", fmt.Errorf("stage %q is not one of root, dev, gamma, prod", stage)
+		return "", fmt.Errorf("stage %q is not root", stage)
 	}
 }
 

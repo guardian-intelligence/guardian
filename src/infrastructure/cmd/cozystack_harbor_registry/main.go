@@ -56,7 +56,7 @@ func main() {
 	flag.StringVar(&cfg.Kubeconfig, "kubeconfig", "", "kubeconfig for guardian-mgmt")
 	flag.StringVar(&cfg.RequestTimeout, "request-timeout", "15s", "kubectl API request timeout")
 	flag.StringVar(&cfg.WaitTimeout, "wait-timeout", "15m", "timeout waiting for Harbor readiness")
-	flag.StringVar(&cfg.Stage, "stage", "dev", "Guardian stage: root, dev, gamma, or prod")
+	flag.StringVar(&cfg.Stage, "stage", "root", "Guardian bootstrap stage: root")
 	flag.StringVar(&cfg.Host, "host", "", "Harbor registry host; defaults from --stage")
 	flag.StringVar(&cfg.Repository, "repository", "library/guardian-smoke", "Harbor repository path")
 	flag.StringVar(&cfg.Tag, "tag", "", "tag or tag prefix; defaults to a UTC timestamp")
@@ -91,14 +91,8 @@ func namespaceForStage(stage string) (string, error) {
 	switch stage {
 	case "root":
 		return "tenant-root", nil
-	case "dev":
-		return "tenant-guardiancommercial-platform-dev", nil
-	case "gamma":
-		return "tenant-guardiancommercial-platform-gamma", nil
-	case "prod":
-		return "tenant-guardiancommercial-platform-prod", nil
 	default:
-		return "", fmt.Errorf("stage %q is not one of root, dev, gamma, prod", stage)
+		return "", fmt.Errorf("stage %q is not root", stage)
 	}
 }
 
@@ -106,10 +100,8 @@ func harborHost(stage string) (string, error) {
 	switch stage {
 	case "root":
 		return "harbor.guardianintelligence.org", nil
-	case "dev", "gamma", "prod":
-		return "harbor." + stage + ".gi.org", nil
 	default:
-		return "", fmt.Errorf("stage %q is not one of root, dev, gamma, prod", stage)
+		return "", fmt.Errorf("stage %q is not root", stage)
 	}
 }
 

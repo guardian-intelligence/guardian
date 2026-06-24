@@ -23,7 +23,6 @@ HTTP_LOAD_TARGET = "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_
 NODE_OUTAGE_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill"
 OPENBAO_APPLY_TARGET = "//src/infrastructure/cmd/cozystack_openbao_apply:cozystack_openbao_apply"
 OPENBAO_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill"
-COMPANY_SITE_PUBLISH_TARGET = "//src/infrastructure/cmd/cozystack_company_site_publish:cozystack_company_site_publish"
 GUARDIAN_MGMT_TALOS_NODES = [
     "10.8.0.11",
     "10.8.0.12",
@@ -43,7 +42,6 @@ EXPECTED_KUBE_APIS = [
     "https://45.250.254.119:6443",
     "https://206.223.228.87:6443",
 ]
-COMPANY_SITE_IMAGE = "harbor.guardianintelligence.org/guardian/company-site@sha256:eb9741b5882386f15f7e2059d1ed143c8b6ca483f135417d6296c6f3387cc283"
 
 def _harbor_child_gets(stage, namespace):
     release = "harbor-guardian"
@@ -188,14 +186,6 @@ def _victorialogs_checks(scope, namespace):
         (scope + " vlstorage replicas", ["-n", namespace, "get", "vlclusters.operator.victoriametrics.com/generic", "-o", "jsonpath={.spec.vlstorage.replicaCount}"], "2"),
     ]
 
-def _namespace_monitoring_checks():
-    return [
-        ("platform namespace monitoring owner", ["get", "namespace/tenant-guardiancommercial-platform", "-o", "go-template={{index .metadata.labels \"namespace.cozystack.io/monitoring\"}}"], "tenant-guardiancommercial-platform"),
-        ("dev namespace monitoring owner", ["get", "namespace/tenant-guardiancommercial-platform-dev", "-o", "go-template={{index .metadata.labels \"namespace.cozystack.io/monitoring\"}}"], "tenant-guardiancommercial-platform"),
-        ("gamma namespace monitoring owner", ["get", "namespace/tenant-guardiancommercial-platform-gamma", "-o", "go-template={{index .metadata.labels \"namespace.cozystack.io/monitoring\"}}"], "tenant-guardiancommercial-platform"),
-        ("prod namespace monitoring owner", ["get", "namespace/tenant-guardiancommercial-platform-prod", "-o", "go-template={{index .metadata.labels \"namespace.cozystack.io/monitoring\"}}"], "tenant-guardiancommercial-platform"),
-    ]
-
 INFRA_FILEGROUPS = [
     "//src/infrastructure/bootstrap/guardian-mgmt:root",
     "//src/infrastructure/bootstrap/guardian-mgmt-dns:root",
@@ -207,18 +197,10 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/base/openbao:manifests",
     "//src/infrastructure/base/storage:manifests",
     "//src/infrastructure/load:http_load_scripts",
-    "//src/infrastructure/products/platform:manifests",
-    "//src/infrastructure/tenants/guardian-commercial:manifests",
-    "//src/infrastructure/tenants/platform:manifests",
-    "//src/infrastructure/tenants/platform/dev:manifests",
-    "//src/infrastructure/tenants/platform/gamma:manifests",
-    "//src/infrastructure/tenants/platform/prod:manifests",
     "//src/infrastructure/bootstrap/guardian-mgmt-openbao:root",
 ]
 INFRA_TESTS = [
-    "//src/guardian/cmd/guardian:guardian_test",
     "//src/infrastructure/cmd/cozystack_backup_drill:cozystack_backup_drill_test",
-    "//src/infrastructure/cmd/cozystack_company_site_publish:cozystack_company_site_publish_test",
     "//src/infrastructure/cmd/cozystack_db_load:cozystack_db_load_test",
     "//src/infrastructure/cmd/cozystack_harbor_registry:cozystack_harbor_registry_test",
     "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load_test",
@@ -272,16 +254,6 @@ LIVE_GETS = [
     ("system backup bucket", ["-n", "tenant-root", "get", "bucket/cozy-backups"]),
     ("system backup credentials secret", ["-n", "tenant-root", "get", "secret/bucket-cozy-backups-system-credentials"]),
     ("default velero backup storage location", ["-n", "cozy-velero", "get", "backupstoragelocations.velero.io/cozy-default"]),
-    ("guardian commercial tenant", ["-n", "tenant-root", "get", "tenants.apps.cozystack.io/guardiancommercial"]),
-    ("guardian commercial namespace", ["get", "namespace/tenant-guardiancommercial"]),
-    ("platform tenant", ["-n", "tenant-guardiancommercial", "get", "tenants.apps.cozystack.io/platform"]),
-    ("platform namespace", ["get", "namespace/tenant-guardiancommercial-platform"]),
-    ("platform dev tenant", ["-n", "tenant-guardiancommercial-platform", "get", "tenants.apps.cozystack.io/dev"]),
-    ("platform gamma tenant", ["-n", "tenant-guardiancommercial-platform", "get", "tenants.apps.cozystack.io/gamma"]),
-    ("platform prod tenant", ["-n", "tenant-guardiancommercial-platform", "get", "tenants.apps.cozystack.io/prod"]),
-    ("platform dev namespace", ["get", "namespace/tenant-guardiancommercial-platform-dev"]),
-    ("platform gamma namespace", ["get", "namespace/tenant-guardiancommercial-platform-gamma"]),
-    ("platform prod namespace", ["get", "namespace/tenant-guardiancommercial-platform-prod"]),
     ("root postgres", ["-n", "tenant-root", "get", "postgreses.apps.cozystack.io/guardian"]),
     ("root harbor", ["-n", "tenant-root", "get", "harbors.apps.cozystack.io/guardian"]),
     ("root clickhouse", ["-n", "tenant-root", "get", "clickhouses.apps.cozystack.io/guardian"]),
@@ -293,81 +265,21 @@ LIVE_GETS = [
     ("openbao apiserver network policy", ["-n", "tenant-root", "get", "ciliumnetworkpolicies.cilium.io/allow-openbao-to-apiserver"]),
     ("root postgres backup plan", ["-n", "tenant-root", "get", "plans.backups.cozystack.io/guardian-postgres-daily"]),
     ("root clickhouse backup plan", ["-n", "tenant-root", "get", "plans.backups.cozystack.io/guardian-clickhouse-daily"]),
-    ("dev postgres", ["-n", "tenant-guardiancommercial-platform-dev", "get", "postgreses.apps.cozystack.io/guardian"]),
-    ("dev harbor", ["-n", "tenant-guardiancommercial-platform-dev", "get", "harbors.apps.cozystack.io/guardian"]),
-    ("dev clickhouse", ["-n", "tenant-guardiancommercial-platform-dev", "get", "clickhouses.apps.cozystack.io/guardian"]),
-    ("dev postgres backup plan", ["-n", "tenant-guardiancommercial-platform-dev", "get", "plans.backups.cozystack.io/guardian-postgres-daily"]),
-    ("dev clickhouse backup plan", ["-n", "tenant-guardiancommercial-platform-dev", "get", "plans.backups.cozystack.io/guardian-clickhouse-daily"]),
-    ("gamma postgres", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "postgreses.apps.cozystack.io/guardian"]),
-    ("gamma harbor", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "harbors.apps.cozystack.io/guardian"]),
-    ("gamma clickhouse", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "clickhouses.apps.cozystack.io/guardian"]),
-    ("gamma postgres backup plan", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "plans.backups.cozystack.io/guardian-postgres-daily"]),
-    ("gamma clickhouse backup plan", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "plans.backups.cozystack.io/guardian-clickhouse-daily"]),
-    ("prod postgres", ["-n", "tenant-guardiancommercial-platform-prod", "get", "postgreses.apps.cozystack.io/guardian"]),
-    ("prod harbor", ["-n", "tenant-guardiancommercial-platform-prod", "get", "harbors.apps.cozystack.io/guardian"]),
-    ("prod clickhouse", ["-n", "tenant-guardiancommercial-platform-prod", "get", "clickhouses.apps.cozystack.io/guardian"]),
-    ("prod postgres backup plan", ["-n", "tenant-guardiancommercial-platform-prod", "get", "plans.backups.cozystack.io/guardian-postgres-daily"]),
-    ("prod clickhouse backup plan", ["-n", "tenant-guardiancommercial-platform-prod", "get", "plans.backups.cozystack.io/guardian-clickhouse-daily"]),
-    ("dev company service", ["-n", "tenant-guardiancommercial-platform-dev", "get", "service/company-site"]),
-    ("dev company network policy", ["-n", "tenant-guardiancommercial-platform-dev", "get", "networkpolicy.networking.k8s.io/company-site-ingress"]),
-    ("dev company pdb", ["-n", "tenant-guardiancommercial-platform-dev", "get", "poddisruptionbudget.policy/company-site"]),
-    ("dev company ingress", ["-n", "tenant-guardiancommercial-platform-dev", "get", "ingress/company-site"]),
-    ("gamma company service", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "service/company-site"]),
-    ("gamma company network policy", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "networkpolicy.networking.k8s.io/company-site-ingress"]),
-    ("gamma company pdb", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "poddisruptionbudget.policy/company-site"]),
-    ("gamma company ingress", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "ingress/company-site"]),
-    ("prod company service", ["-n", "tenant-guardiancommercial-platform-prod", "get", "service/company-site"]),
-    ("prod company network policy", ["-n", "tenant-guardiancommercial-platform-prod", "get", "networkpolicy.networking.k8s.io/company-site-ingress"]),
-    ("prod company pdb", ["-n", "tenant-guardiancommercial-platform-prod", "get", "poddisruptionbudget.policy/company-site"]),
-    ("prod company ingress", ["-n", "tenant-guardiancommercial-platform-prod", "get", "ingress/company-site"]),
 ] + _harbor_child_gets(
     "root",
     "tenant-root",
-) + _harbor_child_gets(
-    "dev",
-    "tenant-guardiancommercial-platform-dev",
-) + _harbor_child_gets(
-    "gamma",
-    "tenant-guardiancommercial-platform-gamma",
-) + _harbor_child_gets(
-    "prod",
-    "tenant-guardiancommercial-platform-prod",
 ) + _postgres_child_gets(
     "root",
     "tenant-root",
-) + _postgres_child_gets(
-    "dev",
-    "tenant-guardiancommercial-platform-dev",
-) + _postgres_child_gets(
-    "gamma",
-    "tenant-guardiancommercial-platform-gamma",
-) + _postgres_child_gets(
-    "prod",
-    "tenant-guardiancommercial-platform-prod",
 ) + _clickhouse_child_gets(
     "root",
     "tenant-root",
-) + _clickhouse_child_gets(
-    "dev",
-    "tenant-guardiancommercial-platform-dev",
-) + _clickhouse_child_gets(
-    "gamma",
-    "tenant-guardiancommercial-platform-gamma",
-) + _clickhouse_child_gets(
-    "prod",
-    "tenant-guardiancommercial-platform-prod",
 ) + _monitoring_gets(
     "root",
     "tenant-root",
-) + _monitoring_gets(
-    "platform",
-    "tenant-guardiancommercial-platform",
 ) + _victorialogs_gets(
     "root",
     "tenant-root",
-) + _victorialogs_gets(
-    "platform",
-    "tenant-guardiancommercial-platform",
 )
 
 LIVE_VALUE_CHECKS = [
@@ -413,39 +325,12 @@ LIVE_VALUE_CHECKS = [
 ] + _harbor_bucket_checks(
     "root",
     "tenant-root",
-) + _harbor_bucket_checks(
-    "dev",
-    "tenant-guardiancommercial-platform-dev",
-) + _harbor_bucket_checks(
-    "gamma",
-    "tenant-guardiancommercial-platform-gamma",
-) + _harbor_bucket_checks(
-    "prod",
-    "tenant-guardiancommercial-platform-prod",
 ) + _postgres_child_checks(
     "root",
     "tenant-root",
-) + _postgres_child_checks(
-    "dev",
-    "tenant-guardiancommercial-platform-dev",
-) + _postgres_child_checks(
-    "gamma",
-    "tenant-guardiancommercial-platform-gamma",
-) + _postgres_child_checks(
-    "prod",
-    "tenant-guardiancommercial-platform-prod",
 ) + _clickhouse_child_checks(
     "root",
     "tenant-root",
-) + _clickhouse_child_checks(
-    "dev",
-    "tenant-guardiancommercial-platform-dev",
-) + _clickhouse_child_checks(
-    "gamma",
-    "tenant-guardiancommercial-platform-gamma",
-) + _clickhouse_child_checks(
-    "prod",
-    "tenant-guardiancommercial-platform-prod",
 ) + _monitoring_checks(
     "root",
     "tenant-root",
@@ -454,92 +339,10 @@ LIVE_VALUE_CHECKS = [
     "10Gi",
     "7",
     "5Gi",
-) + _monitoring_checks(
-    "platform",
-    "tenant-guardiancommercial-platform",
-    "grafana.platform.guardianintelligence.org",
-    "5Gi",
-    "10Gi",
-    "7",
-    "5Gi",
 ) + _victorialogs_checks(
     "root",
     "tenant-root",
-) + _victorialogs_checks(
-    "platform",
-    "tenant-guardiancommercial-platform",
-) + _namespace_monitoring_checks(
-) + [
-    ("dev postgres replicas", ["-n", "tenant-guardiancommercial-platform-dev", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.replicas}"], "3"),
-    ("dev postgres storage class", ["-n", "tenant-guardiancommercial-platform-dev", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.storageClass}"], "replicated"),
-    ("dev postgres version", ["-n", "tenant-guardiancommercial-platform-dev", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.version}"], "v18"),
-    ("dev postgres external access", ["-n", "tenant-guardiancommercial-platform-dev", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.external}"], "false"),
-    ("dev postgres backup enabled", ["-n", "tenant-guardiancommercial-platform-dev", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.backup.enabled}"], "true"),
-    ("dev postgres system bucket backup", ["-n", "tenant-guardiancommercial-platform-dev", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.backup.useSystemBucket}"], "true"),
-    ("dev postgres backup plan class", ["-n", "tenant-guardiancommercial-platform-dev", "get", "plans.backups.cozystack.io/guardian-postgres-daily", "-o", "jsonpath={.spec.backupClassName}"], "cozy-default"),
-    ("dev postgres backup plan cron", ["-n", "tenant-guardiancommercial-platform-dev", "get", "plans.backups.cozystack.io/guardian-postgres-daily", "-o", "jsonpath={.spec.schedule.cron}"], "13 1 * * *"),
-    ("dev harbor host", ["-n", "tenant-guardiancommercial-platform-dev", "get", "harbors.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.host}"], "harbor.dev.gi.org"),
-    ("dev harbor storage class", ["-n", "tenant-guardiancommercial-platform-dev", "get", "harbors.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.storageClass}"], "replicated"),
-    ("dev harbor database replicas", ["-n", "tenant-guardiancommercial-platform-dev", "get", "harbors.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.database.replicas}"], "3"),
-    ("dev harbor redis replicas", ["-n", "tenant-guardiancommercial-platform-dev", "get", "harbors.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.redis.replicas}"], "3"),
-    ("dev harbor trivy enabled", ["-n", "tenant-guardiancommercial-platform-dev", "get", "harbors.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.trivy.enabled}"], "true"),
-    ("dev clickhouse replicas", ["-n", "tenant-guardiancommercial-platform-dev", "get", "clickhouses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.replicas}"], "3"),
-    ("dev clickhouse storage class", ["-n", "tenant-guardiancommercial-platform-dev", "get", "clickhouses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.storageClass}"], "replicated"),
-    ("dev clickhouse backup enabled", ["-n", "tenant-guardiancommercial-platform-dev", "get", "clickhouses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.backup.enabled}"], "true"),
-    ("dev clickhouse system bucket backup", ["-n", "tenant-guardiancommercial-platform-dev", "get", "clickhouses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.backup.useSystemBucket}"], "true"),
-    ("dev clickhouse keeper enabled", ["-n", "tenant-guardiancommercial-platform-dev", "get", "clickhouses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.clickhouseKeeper.enabled}"], "true"),
-    ("dev clickhouse keeper replicas", ["-n", "tenant-guardiancommercial-platform-dev", "get", "clickhouses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.clickhouseKeeper.replicas}"], "3"),
-    ("dev clickhouse backup plan class", ["-n", "tenant-guardiancommercial-platform-dev", "get", "plans.backups.cozystack.io/guardian-clickhouse-daily", "-o", "jsonpath={.spec.backupClassName}"], "cozy-default"),
-    ("dev clickhouse backup plan cron", ["-n", "tenant-guardiancommercial-platform-dev", "get", "plans.backups.cozystack.io/guardian-clickhouse-daily", "-o", "jsonpath={.spec.schedule.cron}"], "23 1 * * *"),
-    ("dev company image", ["-n", "tenant-guardiancommercial-platform-dev", "get", "deployment/company-site", "-o", "jsonpath={.spec.template.spec.containers[0].image}"], COMPANY_SITE_IMAGE),
-    ("dev company ingress host", ["-n", "tenant-guardiancommercial-platform-dev", "get", "ingress/company-site", "-o", "jsonpath={.spec.rules[0].host}"], "dev.gi.org"),
-    ("gamma postgres replicas", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.replicas}"], "3"),
-    ("gamma postgres storage class", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.storageClass}"], "replicated"),
-    ("gamma postgres version", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.version}"], "v18"),
-    ("gamma postgres external access", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.external}"], "false"),
-    ("gamma postgres backup enabled", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.backup.enabled}"], "true"),
-    ("gamma postgres system bucket backup", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.backup.useSystemBucket}"], "true"),
-    ("gamma postgres backup plan class", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "plans.backups.cozystack.io/guardian-postgres-daily", "-o", "jsonpath={.spec.backupClassName}"], "cozy-default"),
-    ("gamma postgres backup plan cron", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "plans.backups.cozystack.io/guardian-postgres-daily", "-o", "jsonpath={.spec.schedule.cron}"], "19 1 * * *"),
-    ("gamma harbor host", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "harbors.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.host}"], "harbor.gamma.gi.org"),
-    ("gamma harbor storage class", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "harbors.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.storageClass}"], "replicated"),
-    ("gamma harbor database replicas", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "harbors.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.database.replicas}"], "3"),
-    ("gamma harbor redis replicas", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "harbors.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.redis.replicas}"], "3"),
-    ("gamma harbor trivy enabled", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "harbors.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.trivy.enabled}"], "true"),
-    ("gamma clickhouse replicas", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "clickhouses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.replicas}"], "3"),
-    ("gamma clickhouse storage class", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "clickhouses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.storageClass}"], "replicated"),
-    ("gamma clickhouse backup enabled", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "clickhouses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.backup.enabled}"], "true"),
-    ("gamma clickhouse system bucket backup", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "clickhouses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.backup.useSystemBucket}"], "true"),
-    ("gamma clickhouse keeper enabled", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "clickhouses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.clickhouseKeeper.enabled}"], "true"),
-    ("gamma clickhouse keeper replicas", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "clickhouses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.clickhouseKeeper.replicas}"], "3"),
-    ("gamma clickhouse backup plan class", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "plans.backups.cozystack.io/guardian-clickhouse-daily", "-o", "jsonpath={.spec.backupClassName}"], "cozy-default"),
-    ("gamma clickhouse backup plan cron", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "plans.backups.cozystack.io/guardian-clickhouse-daily", "-o", "jsonpath={.spec.schedule.cron}"], "29 1 * * *"),
-    ("gamma company image", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "deployment/company-site", "-o", "jsonpath={.spec.template.spec.containers[0].image}"], COMPANY_SITE_IMAGE),
-    ("gamma company ingress host", ["-n", "tenant-guardiancommercial-platform-gamma", "get", "ingress/company-site", "-o", "jsonpath={.spec.rules[0].host}"], "gamma.gi.org"),
-    ("prod postgres replicas", ["-n", "tenant-guardiancommercial-platform-prod", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.replicas}"], "3"),
-    ("prod postgres storage class", ["-n", "tenant-guardiancommercial-platform-prod", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.storageClass}"], "replicated"),
-    ("prod postgres version", ["-n", "tenant-guardiancommercial-platform-prod", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.version}"], "v18"),
-    ("prod postgres external access", ["-n", "tenant-guardiancommercial-platform-prod", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.external}"], "false"),
-    ("prod postgres backup enabled", ["-n", "tenant-guardiancommercial-platform-prod", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.backup.enabled}"], "true"),
-    ("prod postgres system bucket backup", ["-n", "tenant-guardiancommercial-platform-prod", "get", "postgreses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.backup.useSystemBucket}"], "true"),
-    ("prod postgres backup plan class", ["-n", "tenant-guardiancommercial-platform-prod", "get", "plans.backups.cozystack.io/guardian-postgres-daily", "-o", "jsonpath={.spec.backupClassName}"], "cozy-default"),
-    ("prod postgres backup plan cron", ["-n", "tenant-guardiancommercial-platform-prod", "get", "plans.backups.cozystack.io/guardian-postgres-daily", "-o", "jsonpath={.spec.schedule.cron}"], "37 1 * * *"),
-    ("prod harbor host", ["-n", "tenant-guardiancommercial-platform-prod", "get", "harbors.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.host}"], "harbor.prod.gi.org"),
-    ("prod harbor storage class", ["-n", "tenant-guardiancommercial-platform-prod", "get", "harbors.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.storageClass}"], "replicated"),
-    ("prod harbor database replicas", ["-n", "tenant-guardiancommercial-platform-prod", "get", "harbors.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.database.replicas}"], "3"),
-    ("prod harbor redis replicas", ["-n", "tenant-guardiancommercial-platform-prod", "get", "harbors.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.redis.replicas}"], "3"),
-    ("prod harbor trivy enabled", ["-n", "tenant-guardiancommercial-platform-prod", "get", "harbors.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.trivy.enabled}"], "true"),
-    ("prod clickhouse replicas", ["-n", "tenant-guardiancommercial-platform-prod", "get", "clickhouses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.replicas}"], "3"),
-    ("prod clickhouse storage class", ["-n", "tenant-guardiancommercial-platform-prod", "get", "clickhouses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.storageClass}"], "replicated"),
-    ("prod clickhouse backup enabled", ["-n", "tenant-guardiancommercial-platform-prod", "get", "clickhouses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.backup.enabled}"], "true"),
-    ("prod clickhouse system bucket backup", ["-n", "tenant-guardiancommercial-platform-prod", "get", "clickhouses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.backup.useSystemBucket}"], "true"),
-    ("prod clickhouse keeper enabled", ["-n", "tenant-guardiancommercial-platform-prod", "get", "clickhouses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.clickhouseKeeper.enabled}"], "true"),
-    ("prod clickhouse keeper replicas", ["-n", "tenant-guardiancommercial-platform-prod", "get", "clickhouses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.clickhouseKeeper.replicas}"], "3"),
-    ("prod clickhouse backup plan class", ["-n", "tenant-guardiancommercial-platform-prod", "get", "plans.backups.cozystack.io/guardian-clickhouse-daily", "-o", "jsonpath={.spec.backupClassName}"], "cozy-default"),
-    ("prod clickhouse backup plan cron", ["-n", "tenant-guardiancommercial-platform-prod", "get", "plans.backups.cozystack.io/guardian-clickhouse-daily", "-o", "jsonpath={.spec.schedule.cron}"], "41 1 * * *"),
-    ("prod company image", ["-n", "tenant-guardiancommercial-platform-prod", "get", "deployment/company-site", "-o", "jsonpath={.spec.template.spec.containers[0].image}"], COMPANY_SITE_IMAGE),
-    ("prod company ingress host", ["-n", "tenant-guardiancommercial-platform-prod", "get", "ingress/company-site", "-o", "jsonpath={.spec.rules[0].host}"], "guardianintelligence.org"),
-]
+)
 
 LIVE_CONTAINS_CHECKS = [
     ("monitoring agents fluent-bit root tenant label", ["-n", "cozy-monitoring", "get", "configmap/monitoring-agents-fluent-bit", "-o", "go-template={{index .data \"fluent-bit.conf\"}}"], "Add tenant tenant-root"),
@@ -548,16 +351,9 @@ LIVE_CONTAINS_CHECKS = [
 
 LIVE_FLUX_WAITS = [
     ("flux source", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "gitrepositories.source.toolkit.fluxcd.io/guardian"]),
+    ("flux cozystack platform package kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform"]),
+    ("flux storage kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-storage"]),
     ("flux base kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-base"]),
-    ("flux guardian commercial tenant kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-tenant-apps"]),
-    ("flux platform tenant kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-tenant"]),
-    ("flux platform apps kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-apps"]),
-    ("flux platform dev tenant kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-dev-tenant"]),
-    ("flux platform dev kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-dev"]),
-    ("flux platform gamma tenant kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-gamma-tenant"]),
-    ("flux platform gamma kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-gamma"]),
-    ("flux platform prod tenant kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-prod-tenant"]),
-    ("flux platform prod kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-prod"]),
 ]
 LIVE_WAITS = [
     ("monitoring agents package", ["wait", "--for=condition=Ready", "packages.cozystack.io/cozystack.monitoring-agents"]),
@@ -568,11 +364,6 @@ LIVE_WAITS = [
     ("backupstrategy controller helmrelease", ["-n", "cozy-backup-controller", "wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/backupstrategy-controller"]),
     ("backup controller deployment", ["-n", "cozy-backup-controller", "wait", "--for=condition=Available", "deployment/backup-controller"]),
     ("backupstrategy controller deployment", ["-n", "cozy-backup-controller", "wait", "--for=condition=Available", "deployment/backupstrategy-controller"]),
-    ("guardian commercial tenant app", ["-n", "tenant-root", "wait", "--for=condition=Ready", "tenants.apps.cozystack.io/guardiancommercial"]),
-    ("platform tenant app", ["-n", "tenant-guardiancommercial", "wait", "--for=condition=Ready", "tenants.apps.cozystack.io/platform"]),
-    ("platform dev tenant app", ["-n", "tenant-guardiancommercial-platform", "wait", "--for=condition=Ready", "tenants.apps.cozystack.io/dev"]),
-    ("platform gamma tenant app", ["-n", "tenant-guardiancommercial-platform", "wait", "--for=condition=Ready", "tenants.apps.cozystack.io/gamma"]),
-    ("platform prod tenant app", ["-n", "tenant-guardiancommercial-platform", "wait", "--for=condition=Ready", "tenants.apps.cozystack.io/prod"]),
     ("root postgres app", ["-n", "tenant-root", "wait", "--for=condition=Ready", "postgreses.apps.cozystack.io/guardian"]),
     ("root postgres workloads", ["-n", "tenant-root", "wait", "--for=condition=WorkloadsReady", "postgreses.apps.cozystack.io/guardian"]),
     ("root harbor app", ["-n", "tenant-root", "wait", "--for=condition=Ready", "harbors.apps.cozystack.io/guardian"]),
@@ -583,77 +374,21 @@ LIVE_WAITS = [
     ("root openbao helmrelease", ["-n", "tenant-root", "wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/openbao-guardian"]),
     ("root openbao system helmrelease", ["-n", "tenant-root", "wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/openbao-guardian-system"]),
     ("root openbao statefulset", ["-n", "tenant-root", "wait", "--for=jsonpath={.status.readyReplicas}=3", "statefulset.apps/openbao-guardian"]),
-    ("dev postgres app", ["-n", "tenant-guardiancommercial-platform-dev", "wait", "--for=condition=Ready", "postgreses.apps.cozystack.io/guardian"]),
-    ("dev postgres workloads", ["-n", "tenant-guardiancommercial-platform-dev", "wait", "--for=condition=WorkloadsReady", "postgreses.apps.cozystack.io/guardian"]),
-    ("dev harbor app", ["-n", "tenant-guardiancommercial-platform-dev", "wait", "--for=condition=Ready", "harbors.apps.cozystack.io/guardian"]),
-    ("dev harbor workloads", ["-n", "tenant-guardiancommercial-platform-dev", "wait", "--for=condition=WorkloadsReady", "harbors.apps.cozystack.io/guardian"]),
-    ("dev clickhouse app", ["-n", "tenant-guardiancommercial-platform-dev", "wait", "--for=condition=Ready", "clickhouses.apps.cozystack.io/guardian"]),
-    ("dev clickhouse workloads", ["-n", "tenant-guardiancommercial-platform-dev", "wait", "--for=condition=WorkloadsReady", "clickhouses.apps.cozystack.io/guardian"]),
-    ("gamma postgres app", ["-n", "tenant-guardiancommercial-platform-gamma", "wait", "--for=condition=Ready", "postgreses.apps.cozystack.io/guardian"]),
-    ("gamma postgres workloads", ["-n", "tenant-guardiancommercial-platform-gamma", "wait", "--for=condition=WorkloadsReady", "postgreses.apps.cozystack.io/guardian"]),
-    ("gamma harbor app", ["-n", "tenant-guardiancommercial-platform-gamma", "wait", "--for=condition=Ready", "harbors.apps.cozystack.io/guardian"]),
-    ("gamma harbor workloads", ["-n", "tenant-guardiancommercial-platform-gamma", "wait", "--for=condition=WorkloadsReady", "harbors.apps.cozystack.io/guardian"]),
-    ("gamma clickhouse app", ["-n", "tenant-guardiancommercial-platform-gamma", "wait", "--for=condition=Ready", "clickhouses.apps.cozystack.io/guardian"]),
-    ("gamma clickhouse workloads", ["-n", "tenant-guardiancommercial-platform-gamma", "wait", "--for=condition=WorkloadsReady", "clickhouses.apps.cozystack.io/guardian"]),
-    ("prod postgres app", ["-n", "tenant-guardiancommercial-platform-prod", "wait", "--for=condition=Ready", "postgreses.apps.cozystack.io/guardian"]),
-    ("prod postgres workloads", ["-n", "tenant-guardiancommercial-platform-prod", "wait", "--for=condition=WorkloadsReady", "postgreses.apps.cozystack.io/guardian"]),
-    ("prod harbor app", ["-n", "tenant-guardiancommercial-platform-prod", "wait", "--for=condition=Ready", "harbors.apps.cozystack.io/guardian"]),
-    ("prod harbor workloads", ["-n", "tenant-guardiancommercial-platform-prod", "wait", "--for=condition=WorkloadsReady", "harbors.apps.cozystack.io/guardian"]),
-    ("prod clickhouse app", ["-n", "tenant-guardiancommercial-platform-prod", "wait", "--for=condition=Ready", "clickhouses.apps.cozystack.io/guardian"]),
-    ("prod clickhouse workloads", ["-n", "tenant-guardiancommercial-platform-prod", "wait", "--for=condition=WorkloadsReady", "clickhouses.apps.cozystack.io/guardian"]),
     ("dashboard console deployment", ["-n", "cozy-dashboard", "wait", "--for=condition=Available", "deployment/cozy-dashboard-console"]),
     ("dashboard gatekeeper deployment", ["-n", "cozy-dashboard", "wait", "--for=condition=Available", "deployment/incloud-web-gatekeeper"]),
-    ("dev company deployment", ["-n", "tenant-guardiancommercial-platform-dev", "wait", "--for=condition=Available", "deployment/company-site"]),
-    ("gamma company deployment", ["-n", "tenant-guardiancommercial-platform-gamma", "wait", "--for=condition=Available", "deployment/company-site"]),
-    ("prod company deployment", ["-n", "tenant-guardiancommercial-platform-prod", "wait", "--for=condition=Available", "deployment/company-site"]),
 ] + _harbor_child_waits(
     "root",
     "tenant-root",
-) + _harbor_child_waits(
-    "dev",
-    "tenant-guardiancommercial-platform-dev",
-) + _harbor_child_waits(
-    "gamma",
-    "tenant-guardiancommercial-platform-gamma",
-) + _harbor_child_waits(
-    "prod",
-    "tenant-guardiancommercial-platform-prod",
 ) + _postgres_child_waits(
     "root",
     "tenant-root",
-) + _postgres_child_waits(
-    "dev",
-    "tenant-guardiancommercial-platform-dev",
-) + _postgres_child_waits(
-    "gamma",
-    "tenant-guardiancommercial-platform-gamma",
-) + _postgres_child_waits(
-    "prod",
-    "tenant-guardiancommercial-platform-prod",
 ) + _clickhouse_child_waits(
-    "root",
-    "tenant-root",
-) + _clickhouse_child_waits(
-    "dev",
-    "tenant-guardiancommercial-platform-dev",
-) + _clickhouse_child_waits(
-    "gamma",
-    "tenant-guardiancommercial-platform-gamma",
-) + _clickhouse_child_waits(
-    "prod",
-    "tenant-guardiancommercial-platform-prod",
-) + _monitoring_waits(
     "root",
     "tenant-root",
 ) + _monitoring_waits(
-    "platform",
-    "tenant-guardiancommercial-platform",
+    "root",
+    "tenant-root",
 )
-LIVE_COMPANY_SITE_SPREADS = [
-    ("dev company pod placement", "tenant-guardiancommercial-platform-dev", "dev"),
-    ("gamma company pod placement", "tenant-guardiancommercial-platform-gamma", "gamma"),
-    ("prod company pod placement", "tenant-guardiancommercial-platform-prod", "prod"),
-]
 FORBIDDEN_SOURCE_PATHS = [
     ("DELETE_ME.env", "operator Cloudflare credentials must stay out of the repo workspace and must not be load-bearing"),
     ("mgmt-evidence", "management-cluster evidence is temporary PR validation output, not durable source"),
@@ -1094,16 +829,9 @@ def _check_flux_revision(ctx, kubectl, revision):
 def _check_flux_revision_for(ctx, kubectl, kubeconfig, revision):
     checks = [
         ("guardian GitRepository artifact revision", ["-n", "cozy-fluxcd", "get", "gitrepositories.source.toolkit.fluxcd.io/guardian", "-o", "jsonpath={.status.artifact.revision}"]),
+        ("guardian-mgmt-platform last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform", "-o", "jsonpath={.status.lastAppliedRevision}"]),
+        ("guardian-mgmt-storage last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-storage", "-o", "jsonpath={.status.lastAppliedRevision}"]),
         ("guardian-mgmt-base last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-base", "-o", "jsonpath={.status.lastAppliedRevision}"]),
-        ("guardian-mgmt-tenant-apps last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-tenant-apps", "-o", "jsonpath={.status.lastAppliedRevision}"]),
-        ("guardian-mgmt-platform-tenant last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-tenant", "-o", "jsonpath={.status.lastAppliedRevision}"]),
-        ("guardian-mgmt-platform-apps last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-apps", "-o", "jsonpath={.status.lastAppliedRevision}"]),
-        ("guardian-mgmt-platform-dev-tenant last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-dev-tenant", "-o", "jsonpath={.status.lastAppliedRevision}"]),
-        ("guardian-mgmt-platform-dev last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-dev", "-o", "jsonpath={.status.lastAppliedRevision}"]),
-        ("guardian-mgmt-platform-gamma-tenant last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-gamma-tenant", "-o", "jsonpath={.status.lastAppliedRevision}"]),
-        ("guardian-mgmt-platform-gamma last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-gamma", "-o", "jsonpath={.status.lastAppliedRevision}"]),
-        ("guardian-mgmt-platform-prod-tenant last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-prod-tenant", "-o", "jsonpath={.status.lastAppliedRevision}"]),
-        ("guardian-mgmt-platform-prod last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-prod", "-o", "jsonpath={.status.lastAppliedRevision}"]),
     ]
     for label, kubectl_args in checks:
         value = _kubectl_capture_for(ctx, kubectl, kubeconfig, kubectl_args, "kubectl read " + label)
@@ -1114,58 +842,12 @@ def _check_flux_revision_for(ctx, kubectl, kubeconfig, revision):
             return rc
     return 0
 
-def _check_company_site_spread(ctx, kubectl):
-    return _check_company_site_spread_for(ctx, kubectl, ctx.args.kubeconfig)
-
-def _check_company_site_spread_for(ctx, kubectl, kubeconfig):
-    for label, namespace, stage in LIVE_COMPANY_SITE_SPREADS:
-        node_names = _kubectl_capture_for(
-            ctx,
-            kubectl,
-            kubeconfig,
-            [
-                "-n",
-                namespace,
-                "get",
-                "pods",
-                "-l",
-                "app.kubernetes.io/name=company-site,guardian.dev/stage=" + stage,
-                "-o",
-                "jsonpath={range .items[*]}{.spec.nodeName}{\"\\n\"}{end}",
-            ],
-            "kubectl read " + label,
-        )
-        if node_names == None:
-            return 1
-        unique_nodes = _unique_non_empty_lines(node_names)
-        if len(unique_nodes) != 3:
-            ctx.std.io.stderr.write(
-                "ERROR: "
-                + label
-                + " is scheduled on "
-                + str(len(unique_nodes))
-                + " unique nodes, expected 3; nodes:\n"
-                + node_names
-                + "\n",
-            )
-            return 1
-    return 0
-
 def _render_kustomizations(ctx):
     kubectl = _kubectl_path(ctx)
     if kubectl == None:
         return 1
     for path in [
         "src/infrastructure/base",
-        "src/infrastructure/tenants/guardian-commercial",
-        "src/infrastructure/tenants/platform",
-        "src/infrastructure/tenants/platform/dev",
-        "src/infrastructure/tenants/platform/gamma",
-        "src/infrastructure/tenants/platform/prod",
-        "src/infrastructure/products/platform",
-        "src/infrastructure/products/platform/dev",
-        "src/infrastructure/products/platform/gamma",
-        "src/infrastructure/products/platform/prod",
     ]:
         rc = _capture_success(
             ctx,
@@ -1455,9 +1137,6 @@ def _live_checks(ctx, kubectl, kubeconfig, revision):
         if rc != 0:
             return rc
 
-    rc = _check_company_site_spread_for(ctx, kubectl, kubeconfig)
-    if rc != 0:
-        return rc
 
     ctx.std.io.stderr.write("guardian-mgmt source-controller has reconciled " + revision + "\n")
     return 0
@@ -1929,55 +1608,6 @@ def _openbao_apply_impl(ctx):
         label = "cozystack openbao apply",
     )
 
-def _publish_company_site_impl(ctx):
-    kubectl = _kubectl_path(ctx)
-    if kubectl == None:
-        return 1
-
-    rc = _check_live_context(ctx, kubectl)
-    if rc != 0:
-        return rc
-    if ctx.args.revision != "":
-        rc = _check_flux_revision(ctx, kubectl, ctx.args.revision)
-        if rc != 0:
-            return rc
-
-    publish_args = [
-        "--kubectl",
-        kubectl,
-        "--request-timeout",
-        ctx.args.request_timeout,
-        "--wait-timeout",
-        ctx.args.wait_timeout,
-        "--host",
-        ctx.args.host,
-        "--project",
-        ctx.args.project,
-        "--project-public=" + ctx.args.project_public,
-        "--port-forward-service",
-        ctx.args.port_forward_service,
-        "--port-forward-ready-timeout",
-        ctx.args.port_forward_ready_timeout,
-        "--namespace",
-        ctx.args.namespace,
-        "--secret",
-        ctx.args.secret,
-        "--target",
-        ctx.args.target,
-        "--workspace",
-        ws_path(ctx),
-    ]
-    if ctx.args.kubeconfig != "":
-        publish_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
-
-    return checked_spawn(
-        ctx,
-        "bazelisk",
-        ["run", COMPANY_SITE_PUBLISH_TARGET, "--"] + publish_args,
-        cwd = ws_path(ctx),
-        label = "publish company-site image",
-    )
-
 validate = task(
     implementation = _validate_impl,
     name = "validate",
@@ -2122,8 +1752,8 @@ load_http = task(
         "require_live": args.string(default = "true", description = "Set false only for local custom-URL k6 smoke checks."),
         "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before the load test."),
         "sleep_seconds": args.string(default = "1", description = "Sleep seconds between requests in each k6 VU."),
-        "stage": args.string(default = "dev", description = "Guardian stage: root, dev, gamma, or prod."),
-        "surface": args.string(default = "company-site", description = "HTTP surface: company-site, harbor, dashboard, openbao, or custom with --url."),
+        "stage": args.string(default = "root", description = "Guardian bootstrap stage: root."),
+        "surface": args.string(default = "harbor", description = "HTTP surface: harbor, dashboard, openbao, or custom with --url."),
         "url": args.string(default = "", description = "Explicit URL to load; overrides surface target mapping."),
         "vus": args.string(default = "1", description = "k6 virtual users."),
         "wait_timeout": args.string(default = "15m", description = "Timeout for surface readiness waits before k6 starts."),
@@ -2150,7 +1780,7 @@ load_db = task(
         "pgbench_scale": args.string(default = "10", description = "pgbench initialization scale factor."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
         "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before the load test."),
-        "stage": args.string(default = "dev", description = "Guardian stage: root, dev, gamma, or prod."),
+        "stage": args.string(default = "root", description = "Guardian bootstrap stage: root."),
         "ttl_seconds_after_finished": args.string(default = "86400", description = "Kubernetes Job ttlSecondsAfterFinished."),
         "wait_timeout": args.string(default = "20m", description = "Timeout for load Job completion."),
     },
@@ -2169,7 +1799,7 @@ load_harbor_registry = task(
         "repository": args.string(default = "library/guardian-smoke", description = "Harbor repository path."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
         "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before the registry load."),
-        "stage": args.string(default = "dev", description = "Guardian stage: root, dev, gamma, or prod."),
+        "stage": args.string(default = "root", description = "Guardian bootstrap stage: root."),
         "tag": args.string(default = "", description = "Optional tag or tag prefix. Defaults to a timestamped tag."),
         "wait_timeout": args.string(default = "15m", description = "Timeout waiting for the Harbor app readiness preflight."),
     },
@@ -2193,27 +1823,6 @@ openbao_drill = task(
     },
 )
 
-publish_company_site = task(
-    implementation = _publish_company_site_impl,
-    name = "publish-company-site",
-    group = ["infra"],
-    summary = "Publish the checked-in company-site OCI image to root Harbor using cluster-sourced Harbor credentials.",
-    args = {
-        "host": args.string(default = "harbor.guardianintelligence.org", description = "Root Harbor registry host."),
-        "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
-        "namespace": args.string(default = "tenant-root", description = "Namespace containing the Harbor credentials Secret."),
-        "port_forward_ready_timeout": args.string(default = "10s", description = "Timeout waiting for the local Harbor port-forward."),
-        "port_forward_service": args.string(default = "harbor-guardian", description = "Harbor frontend Service used for local publish port-forwarding."),
-        "project": args.string(default = "guardian", description = "Harbor project that owns the company-site repository."),
-        "project_public": args.string(default = "true", description = "Set false to keep the Harbor project private; company-site deployments require public pulls unless imagePullSecrets are added."),
-        "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
-        "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before publishing."),
-        "secret": args.string(default = "harbor-guardian-credentials", description = "Harbor credentials Secret name."),
-        "target": args.string(default = "//src/products/company/site:push-harbor", description = "Bazel oci_push target to run."),
-        "wait_timeout": args.string(default = "15m", description = "Timeout for Harbor readiness waits before publishing."),
-    },
-)
-
 backup_drill = task(
     implementation = _backup_drill_impl,
     name = "backup-drill",
@@ -2230,7 +1839,7 @@ backup_drill = task(
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
         "restore_target": args.string(default = "", description = "Optional app name to restore into after the backup succeeds."),
         "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before the drill."),
-        "stage": args.string(default = "dev", description = "Guardian stage: root, dev, gamma, or prod."),
+        "stage": args.string(default = "root", description = "Guardian bootstrap stage: root."),
         "wait_timeout": args.string(default = "30m", description = "Timeout for BackupJob, Backup, and RestoreJob waits."),
     },
 )

@@ -163,10 +163,6 @@ func runDrill(ctx context.Context, cfg drillConfig) error {
 			return err
 		}
 	}
-	if err := waitCompanySitePDBsHealthy(ctx, runner, cfg); err != nil {
-		printStatus(ctx, runner, cfg.Node, "failed-outage")
-		return err
-	}
 	if err := waitOpenBaoQuorum(ctx, runner, cfg); err != nil {
 		printStatus(ctx, runner, cfg.Node, "failed-outage")
 		return err
@@ -249,10 +245,6 @@ func statusGets(node, phase string) []kubectlCheck {
 			Args:  []string{"get", "openbaos.apps.cozystack.io", "-A"},
 		},
 		{
-			Label: phase + " company-site deployments",
-			Args:  []string{"get", "deployments.apps", "-A", "-l", "app.kubernetes.io/name=company-site", "-o", "wide"},
-		},
-		{
 			Label: phase + " dashboard deployments",
 			Args:  []string{"-n", "cozy-dashboard", "get", "deployments.apps", "-o", "wide"},
 		},
@@ -266,7 +258,7 @@ func outageWaits(cfg drillConfig) []kubectlCheck {
 			Args:  nodeUnschedulableArgs(cfg.Node, cfg.WaitTimeout),
 		},
 	}
-	checks = append(checks, serviceReadinessWaits("outage", cfg, false)...)
+	checks = append(checks, serviceReadinessWaits("outage", cfg)...)
 	return checks
 }
 
@@ -282,10 +274,10 @@ func recoveryWaits(cfg drillConfig) []kubectlCheck {
 }
 
 func recoveryServiceWaits(cfg drillConfig) []kubectlCheck {
-	return serviceReadinessWaits("recovered", cfg, true)
+	return serviceReadinessWaits("recovered", cfg)
 }
 
-func serviceReadinessWaits(phase string, cfg drillConfig, includeCompanySiteDeployments bool) []kubectlCheck {
+func serviceReadinessWaits(phase string, cfg drillConfig) []kubectlCheck {
 	checks := []kubectlCheck{
 		{
 			Label: "wait " + phase + " dashboard console deployment",
@@ -300,7 +292,7 @@ func serviceReadinessWaits(phase string, cfg drillConfig, includeCompanySiteDepl
 			Args:  []string{"-n", cfg.OpenBaoNamespace, "wait", "--for=condition=Ready", "openbaos.apps.cozystack.io/" + cfg.OpenBaoApp},
 		},
 	}
-	for _, namespace := range []string{"tenant-root", "tenant-guardiancommercial-platform-dev", "tenant-guardiancommercial-platform-gamma", "tenant-guardiancommercial-platform-prod"} {
+	for _, namespace := range []string{"tenant-root"} {
 		label := namespace
 		registry := "harbor-guardian-registry"
 		checks = append(checks,
@@ -338,83 +330,10 @@ func serviceReadinessWaits(phase string, cfg drillConfig, includeCompanySiteDepl
 			},
 		)
 	}
-	if includeCompanySiteDeployments {
-		for _, namespace := range companySiteNamespaces() {
-			checks = append(checks, kubectlCheck{
-				Label: "wait " + phase + " " + namespace + " company-site deployment",
-				Args:  []string{"-n", namespace, "wait", "--for=condition=Available", "deployment/company-site"},
-			})
-		}
-	}
 	for i := range checks {
 		checks[i].Args = append(checks[i].Args, "--timeout="+cfg.WaitTimeout)
 	}
 	return checks
-}
-
-func companySiteNamespaces() []string {
-	return []string{"tenant-guardiancommercial-platform-dev", "tenant-guardiancommercial-platform-gamma", "tenant-guardiancommercial-platform-prod"}
-}
-
-func waitCompanySitePDBsHealthy(ctx context.Context, runner kubectlRunner, cfg drillConfig) error {
-	for _, namespace := range companySiteNamespaces() {
-		if err := waitPDBHealthy(ctx, runner, cfg.WaitTimeout, namespace, "company-site", "wait outage "+namespace+" company-site pdb healthy"); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func waitPDBHealthy(ctx context.Context, runner kubectlRunner, timeoutValue, namespace, name, label string) error {
-	return waitJSONStatus(ctx, timeoutValue, label, func(ctx context.Context) (string, bool, error) {
-		status, err := pdbHealth(ctx, runner, namespace, name)
-		if err != nil {
-			return "", false, err
-		}
-		message := fmt.Sprintf("namespace=%s pdb=%s currentHealthy=%d desiredHealthy=%d disruptionsAllowed=%d",
-			namespace,
-			name,
-			status.CurrentHealthy,
-			status.DesiredHealthy,
-			status.DisruptionsAllowed,
-		)
-		return message, status.CurrentHealthy >= status.DesiredHealthy, nil
-	})
-}
-
-type pdbHealthStatus struct {
-	CurrentHealthy     int
-	DesiredHealthy     int
-	DisruptionsAllowed int
-}
-
-func pdbHealth(ctx context.Context, runner kubectlRunner, namespace, name string) (pdbHealthStatus, error) {
-	out, err := runner.output(ctx, "get PodDisruptionBudget health", "-n", namespace, "get", "poddisruptionbudgets.policy/"+name, "-o", "json")
-	if err != nil {
-		return pdbHealthStatus{}, err
-	}
-	return parsePDBHealth(out)
-}
-
-func parsePDBHealth(raw string) (pdbHealthStatus, error) {
-	var payload struct {
-		Status struct {
-			CurrentHealthy     int `json:"currentHealthy"`
-			DesiredHealthy     int `json:"desiredHealthy"`
-			DisruptionsAllowed int `json:"disruptionsAllowed"`
-		} `json:"status"`
-	}
-	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		return pdbHealthStatus{}, fmt.Errorf("parse PodDisruptionBudget JSON: %w", err)
-	}
-	if payload.Status.DesiredHealthy <= 0 {
-		return pdbHealthStatus{}, fmt.Errorf("PodDisruptionBudget desiredHealthy must be positive, got %d", payload.Status.DesiredHealthy)
-	}
-	return pdbHealthStatus{
-		CurrentHealthy:     payload.Status.CurrentHealthy,
-		DesiredHealthy:     payload.Status.DesiredHealthy,
-		DisruptionsAllowed: payload.Status.DisruptionsAllowed,
-	}, nil
 }
 
 func waitOpenBaoQuorum(ctx context.Context, runner kubectlRunner, cfg drillConfig) error {
