@@ -1,0 +1,36 @@
+- targets:
+    - https://dashboard.guardianintelligence.org/
+  labels:
+    guardian_surface: dashboard
+    guardian_stage: root
+    guardian_expected_statuses: "200,302"
+- targets:
+    - https://grafana.guardianintelligence.org/
+  labels:
+    guardian_surface: grafana
+    guardian_stage: root
+    guardian_expected_statuses: "200,302"
+- targets:
+    - https://alerta.guardianintelligence.org/
+  labels:
+    guardian_surface: alerta
+    guardian_stage: root
+    guardian_expected_statuses: "200"
+- targets:
+    - https://harbor.guardianintelligence.org/v2/
+  labels:
+    guardian_surface: harbor
+    guardian_stage: root
+    guardian_expected_statuses: "200,401"
+- targets:
+    - https://keycloak.guardianintelligence.org/realms/cozy/
+  labels:
+    guardian_surface: keycloak
+    guardian_stage: root
+    guardian_expected_statuses: "200"
+- targets:
+    - https://s3.guardianintelligence.org/
+  labels:
+    guardian_surface: seaweedfs-s3
+    guardian_stage: root
+    guardian_expected_statuses: "200,403"

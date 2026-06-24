@@ -1,5 +1,8 @@
 filegroup(
     name = "http_load_scripts",
-    srcs = ["http-smoke.js"],
+    srcs = [
+        "edge-health.js",
+        "http-smoke.js",
+    ],
     visibility = ["//visibility:public"],
 )

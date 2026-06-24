@@ -23,6 +23,7 @@ BACKUP_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_backup_drill:cozystack
 DB_LOAD_TARGET = "//src/infrastructure/cmd/cozystack_db_load:cozystack_db_load"
 HARBOR_REGISTRY_TARGET = "//src/infrastructure/cmd/cozystack_harbor_registry:cozystack_harbor_registry"
 HTTP_LOAD_TARGET = "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load"
+EDGE_HEALTH_TARGET = "//src/infrastructure/cmd/edge_health:edge_health"
 NODE_OUTAGE_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill"
 OPENBAO_APPLY_TARGET = "//src/infrastructure/cmd/cozystack_openbao_apply:cozystack_openbao_apply"
 OPENBAO_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill"
@@ -60,11 +61,13 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/base/openbao:manifests",
     "//src/infrastructure/base/storage:manifests",
     "//src/infrastructure/load:http_load_scripts",
+    "//src/infrastructure/edge:edge_health_targets",
     "//src/infrastructure/bootstrap/guardian-mgmt-openbao:root",
 ]
 INFRA_TESTS = [
     "//src/infrastructure/cmd/cozystack_backup_drill:cozystack_backup_drill_test",
     "//src/infrastructure/cmd/cozystack_db_load:cozystack_db_load_test",
+    "//src/infrastructure/cmd/edge_health:edge_health_test",
     "//src/infrastructure/cmd/cozystack_harbor_registry:cozystack_harbor_registry_test",
     "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load_test",
     "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill_test",
@@ -1002,6 +1005,15 @@ def _load_http_impl(ctx):
         label = "cozystack http load",
     )
 
+def _edge_health_impl(ctx):
+    return checked_spawn(
+        ctx,
+        "bazelisk",
+        ["run", EDGE_HEALTH_TARGET],
+        cwd = ws_path(ctx),
+        label = "guardian edge health",
+    )
+
 def _load_db_impl(ctx):
     kubectl = _kubectl_path(ctx)
     if kubectl == None:
@@ -1401,6 +1413,13 @@ load_http = task(
         "vus": args.string(default = "1", description = "k6 virtual users."),
         "wait_timeout": args.string(default = "15m", description = "Timeout for surface readiness waits before k6 starts."),
     },
+)
+
+edge_health = task(
+    implementation = _edge_health_impl,
+    name = "edge-health",
+    group = ["infra"],
+    summary = "Run the self-contained Guardian public edge DNS and HTTPS synthetic suite.",
 )
 
 load_db = task(
