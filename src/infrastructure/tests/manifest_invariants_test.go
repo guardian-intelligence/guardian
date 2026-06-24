@@ -54,6 +54,7 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("single default storage class", testSingleDefaultStorageClass)
 	t.Run("linstor data pools", testLINSTORDataPools)
 	t.Run("cozystack system bucket backups", testCozystackSystemBucketBackups)
+	t.Run("cozystack app patches", testCozystackAppPatches)
 	t.Run("root tenant core services", testRootTenantCoreServices)
 	t.Run("observability", testObservability)
 	t.Run("openbao", testOpenBao)
@@ -366,6 +367,52 @@ func testCozystackSystemBucketBackups(t *testing.T) {
 	docs := readManifests(t, "src/infrastructure/base/apps/core-services.yaml")
 	assertSystemBucketBackup(t, docs, "Postgres", "tenant-root", "guardian-postgres-daily", "7 1 * * *")
 	assertSystemBucketBackup(t, docs, "ClickHouse", "tenant-root", "guardian-clickhouse-daily", "17 1 * * *")
+}
+
+func testCozystackAppPatches(t *testing.T) {
+	docs := readManifests(t, "src/infrastructure/base/app-patches/clickhouse-system-bucket-endpoint.yaml")
+	hr := findObject(t, docs, "HelmRelease", "tenant-root", "clickhouse-guardian")
+	assertString(t, hr, "helm.toolkit.fluxcd.io/v2", "apiVersion")
+
+	postRenderers := valueAt(hr, "spec", "postRenderers")
+	list, ok := postRenderers.([]any)
+	if !ok || len(list) != 1 {
+		t.Fatalf("clickhouse HelmRelease patch postRenderers = %#v, want one postRenderer", postRenderers)
+	}
+	renderer := asManifest(t, list[0], "clickhouse postRenderer")
+	patches := valueAt(renderer, "kustomize", "patches")
+	patchList, ok := patches.([]any)
+	if !ok || len(patchList) != 1 {
+		t.Fatalf("clickhouse postRenderer patches = %#v, want one patch", patches)
+	}
+	patch := asManifest(t, patchList[0], "clickhouse postRenderer patch")
+	assertString(t, patch, "clickhouse.altinity.com", "target", "group")
+	assertString(t, patch, "v1", "target", "version")
+	assertString(t, patch, "ClickHouseInstallation", "target", "kind")
+	assertString(t, patch, "clickhouse-guardian", "target", "name")
+
+	patchText := stringAt(patch, "patch")
+	for _, want := range []string{
+		"path: /spec/templates/podTemplates/0/spec/containers/1/env/12/valueFrom",
+		"path: /spec/templates/podTemplates/0/spec/containers/1/env/12/value",
+		"value: https://s3.guardianintelligence.org",
+	} {
+		assertTextContains(t, patchText, want, "clickhouse postRenderer patch")
+	}
+
+	fluxDocs := readManifests(t, "src/infrastructure/base/flux/sync.yaml")
+	kustomization := findObject(t, fluxDocs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-app-patches")
+	assertString(t, kustomization, "kustomize.toolkit.fluxcd.io/v1", "apiVersion")
+	assertString(t, kustomization, "./src/infrastructure/base/app-patches", "spec", "path")
+	assertBool(t, kustomization, false, "spec", "prune")
+	assertBool(t, kustomization, false, "spec", "wait")
+	dependsOn := valueAt(kustomization, "spec", "dependsOn")
+	deps, ok := dependsOn.([]any)
+	if !ok || len(deps) != 1 {
+		t.Fatalf("guardian-mgmt-app-patches dependsOn = %#v, want one dependency", dependsOn)
+	}
+	dep := asManifest(t, deps[0], "guardian-mgmt-app-patches dependsOn[0]")
+	assertString(t, dep, "guardian-mgmt-base", "name")
 }
 
 func assertSystemBucketBackup(t *testing.T, docs []manifest, kind, namespace, planName, schedule string) {
