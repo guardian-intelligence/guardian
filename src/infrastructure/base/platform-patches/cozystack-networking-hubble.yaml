@@ -12,6 +12,8 @@ spec:
         cilium:
           hubble:
             enabled: true
+            peerService:
+              clusterDomain: cozy.local
             relay:
               enabled: true
               prometheus:

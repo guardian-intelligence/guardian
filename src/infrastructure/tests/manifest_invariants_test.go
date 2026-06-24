@@ -375,6 +375,7 @@ func testCozystackPlatformPatches(t *testing.T) {
 	pkg := findObject(t, docs, "Package", "", "cozystack.networking")
 	assertString(t, pkg, "cozystack.io/v1alpha1", "apiVersion")
 	assertBool(t, pkg, true, "spec", "components", "cilium", "values", "cilium", "hubble", "enabled")
+	assertString(t, pkg, "cozy.local", "spec", "components", "cilium", "values", "cilium", "hubble", "peerService", "clusterDomain")
 	assertBool(t, pkg, true, "spec", "components", "cilium", "values", "cilium", "hubble", "relay", "enabled")
 	assertBool(t, pkg, true, "spec", "components", "cilium", "values", "cilium", "hubble", "ui", "enabled")
 	assertBool(t, pkg, true, "spec", "components", "cilium", "values", "cilium", "hubble", "metrics", "serviceMonitor", "enabled")
