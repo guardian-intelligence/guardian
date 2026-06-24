@@ -825,6 +825,10 @@ func testRootTenantCoreServices(t *testing.T) {
 
 func testObservability(t *testing.T) {
 	assertMonitoring(t, "src/infrastructure/base/apps/observability.yaml", "tenant-root", "guardianintelligence.org", true, "guardian_tenant", "root")
+
+	docs := readManifests(t, "src/infrastructure/base/platform-patches/cozystack-monitoring-agents-vmagent.yaml")
+	pkg := findObject(t, docs, "Package", "", "cozystack.monitoring-agents")
+	assertString(t, pkg, "64MB", "spec", "components", "monitoring-agents", "values", "vmagent", "extraArgs", "promscrape.maxScrapeSize")
 }
 
 func testOpenBao(t *testing.T) {

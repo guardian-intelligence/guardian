@@ -1,6 +1,7 @@
 filegroup(
     name = "manifests",
     srcs = [
+        "cozystack-monitoring-agents-vmagent.yaml",
         "cozystack-networking-hubble.yaml",
         "kustomization.yaml",
     ],
