@@ -26,6 +26,13 @@ uses a 60-second interval, which matches the Pro-plan minimum documented by
 Cloudflare; Business and Enterprise can go lower, but the repo default should
 stay boring unless the account plan changes.
 
+The current ASH edge needs one Load Balancing pool with three origins:
+`ash-earth`, `ash-wind`, and `ash-water`. Cloudflare's base Load Balancing
+subscription only allowed two origins during the 2026-06-24 cutover, so the
+account needs capacity for at least three origins before
+`guardian-mgmt-dns` can converge. The same cutover showed the account only
+allowed one health-check probe region; ASH uses `ENAM`.
+
 The Cloudflare account must also have R2 enabled before generating the S3
 credentials used by the OpenTofu backend. R2 credentials are S3-compatible
 access key material, not the same shape as regular Cloudflare API tokens.

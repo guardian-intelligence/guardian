@@ -19,7 +19,6 @@ variable "cloudflare_lb_check_regions" {
   type        = list(string)
   default = [
     "ENAM",
-    "WNAM",
   ]
 
   validation {
