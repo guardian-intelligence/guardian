@@ -14,6 +14,34 @@ func TestDefaultJobName(t *testing.T) {
 	}
 }
 
+func TestActivationJobName(t *testing.T) {
+	if got := activationJobName("guardian-root-clickhouse-test"); got != "guardian-root-clickhouse-test-prime" {
+		t.Fatalf("activationJobName(short) = %q", got)
+	}
+	long := strings.Repeat("a", 63)
+	got := activationJobName(long)
+	if len(got) > 63 {
+		t.Fatalf("activationJobName(long) length = %d, want <= 63", len(got))
+	}
+	if !strings.HasSuffix(got, "-prime") {
+		t.Fatalf("activationJobName(long) = %q, want -prime suffix", got)
+	}
+}
+
+func TestClickHouseEnvCheckShellDoesNotPrintValues(t *testing.T) {
+	got := clickHouseEnvCheckShell()
+	for _, want := range clickHouseSystemBucketEnv {
+		if !strings.Contains(got, want) {
+			t.Fatalf("clickHouseEnvCheckShell missing %s: %s", want, got)
+		}
+	}
+	for _, forbidden := range []string{"printenv", "env |", "set"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("clickHouseEnvCheckShell may print values via %q: %s", forbidden, got)
+		}
+	}
+}
+
 func TestBackupJobManifest(t *testing.T) {
 	cfg := drillConfig{
 		Stage:           "root",
@@ -89,7 +117,21 @@ func TestRestoreTargetManifestFromSource(t *testing.T) {
     "replicas": 3,
     "storageClass": "replicated",
     "backup": {
+      "cleanupStrategy": "--keep-last=3",
+      "destinationPath": "s3://legacy",
       "enabled": true,
+      "endpoint": "https://legacy.example",
+      "endpointURL": "https://legacy.example",
+      "resticPassword": "legacy",
+      "s3AccessKey": "legacy",
+      "s3Bucket": "legacy",
+      "s3CredentialsSecret": {
+        "name": "guardian-clickhouse-backup-creds"
+      },
+      "s3PathOverride": "legacy",
+      "s3Region": "legacy",
+      "s3SecretKey": "legacy",
+      "schedule": "",
       "useSystemBucket": true
     }
   },
@@ -114,7 +156,22 @@ func TestRestoreTargetManifestFromSource(t *testing.T) {
 			t.Fatalf("restore target manifest missing %q:\n%s", want, got)
 		}
 	}
-	for _, forbidden := range []string{"resourceVersion", "uid", "status"} {
+	for _, forbidden := range []string{
+		"cleanupStrategy",
+		"destinationPath",
+		"endpointURL",
+		"guardian-clickhouse-backup-creds",
+		"resourceVersion",
+		"resticPassword",
+		"s3AccessKey",
+		"s3Bucket",
+		"s3CredentialsSecret",
+		"s3PathOverride",
+		"s3Region",
+		"s3SecretKey",
+		"status",
+		"uid",
+	} {
 		if strings.Contains(got, forbidden) {
 			t.Fatalf("restore target manifest retained %q:\n%s", forbidden, got)
 		}

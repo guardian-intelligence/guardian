@@ -190,6 +190,7 @@ def _victorialogs_checks(scope, namespace):
 INFRA_FILEGROUPS = [
     "//src/infrastructure/bootstrap/guardian-mgmt:root",
     "//src/infrastructure/bootstrap/guardian-mgmt-dns:root",
+    "//src/infrastructure/base/app-patches:manifests",
     "//src/infrastructure/talm:chart",
     "//src/infrastructure/base/apps:manifests",
     "//src/infrastructure/base/cozystack:manifests",
@@ -267,6 +268,7 @@ LIVE_GETS = [
     ("openbao apiserver network policy", ["-n", "tenant-root", "get", "ciliumnetworkpolicies.cilium.io/allow-openbao-to-apiserver"]),
     ("root postgres backup plan", ["-n", "tenant-root", "get", "plans.backups.cozystack.io/guardian-postgres-daily"]),
     ("root clickhouse backup plan", ["-n", "tenant-root", "get", "plans.backups.cozystack.io/guardian-clickhouse-daily"]),
+    ("flux app patches kustomization", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-app-patches"]),
 ] + _harbor_child_gets(
     "root",
     "tenant-root",
@@ -320,6 +322,7 @@ LIVE_VALUE_CHECKS = [
     ("root clickhouse keeper replicas", ["-n", "tenant-root", "get", "clickhouses.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.clickhouseKeeper.replicas}"], "3"),
     ("root clickhouse backup plan class", ["-n", "tenant-root", "get", "plans.backups.cozystack.io/guardian-clickhouse-daily", "-o", "jsonpath={.spec.backupClassName}"], "cozy-default"),
     ("root clickhouse backup plan cron", ["-n", "tenant-root", "get", "plans.backups.cozystack.io/guardian-clickhouse-daily", "-o", "jsonpath={.spec.schedule.cron}"], "17 1 * * *"),
+    ("root clickhouse rendered s3 endpoint", ["-n", "tenant-root", "get", "clickhouseinstallations.clickhouse.altinity.com/clickhouse-guardian", "-o", "jsonpath={.spec.templates.podTemplates[0].spec.containers[1].env[12].value}"], "https://s3.guardianintelligence.org"),
     ("openbao replicas", ["-n", "tenant-root", "get", "openbaos.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.replicas}"], "3"),
     ("openbao storage class", ["-n", "tenant-root", "get", "openbaos.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.storageClass}"], "local-retain"),
     ("openbao external access", ["-n", "tenant-root", "get", "openbaos.apps.cozystack.io/guardian", "-o", "jsonpath={.spec.external}"], "false"),
@@ -349,6 +352,7 @@ LIVE_VALUE_CHECKS = [
 LIVE_CONTAINS_CHECKS = [
     ("monitoring agents fluent-bit root tenant label", ["-n", "cozy-monitoring", "get", "configmap/monitoring-agents-fluent-bit", "-o", "go-template={{index .data \"fluent-bit.conf\"}}"], "Add tenant tenant-root"),
     ("monitoring agents fluent-bit root log target", ["-n", "cozy-monitoring", "get", "configmap/monitoring-agents-fluent-bit", "-o", "go-template={{index .data \"fluent-bit.conf\"}}"], "Host vlinsert-generic.tenant-root.svc"),
+    ("root clickhouse helm post-render endpoint patch", ["-n", "tenant-root", "get", "helmreleases.helm.toolkit.fluxcd.io/clickhouse-guardian", "-o", "jsonpath={.spec.postRenderers[0].kustomize.patches[0].patch}"], "https://s3.guardianintelligence.org"),
 ]
 
 LIVE_FLUX_WAITS = [
@@ -356,6 +360,7 @@ LIVE_FLUX_WAITS = [
     ("flux cozystack platform package kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform"]),
     ("flux storage kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-storage"]),
     ("flux base kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-base"]),
+    ("flux app patches kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-app-patches"]),
 ]
 LIVE_WAITS = [
     ("monitoring agents package", ["wait", "--for=condition=Ready", "packages.cozystack.io/cozystack.monitoring-agents"]),
@@ -1250,6 +1255,9 @@ def _backup_drill_impl(ctx):
     if ctx.args.cleanup_created_restore_target != "" and ctx.args.cleanup_created_restore_target != "true" and ctx.args.cleanup_created_restore_target != "false":
         ctx.std.io.stderr.write("ERROR: --cleanup-created-restore-target must be true or false\n")
         return 1
+    if ctx.args.activate_system_bucket != "" and ctx.args.activate_system_bucket != "true" and ctx.args.activate_system_bucket != "false":
+        ctx.std.io.stderr.write("ERROR: --activate-system-bucket must be true or false\n")
+        return 1
 
     drill_args = [
         "--kubectl",
@@ -1277,6 +1285,8 @@ def _backup_drill_impl(ctx):
         drill_args.append("--create-restore-target=true")
     if ctx.args.cleanup_created_restore_target == "false":
         drill_args.append("--cleanup-created-restore-target=false")
+    if ctx.args.activate_system_bucket == "false":
+        drill_args.append("--activate-system-bucket=false")
 
     return checked_spawn(
         ctx,
@@ -1916,6 +1926,7 @@ backup_drill = task(
     summary = "Run an ad-hoc Cozystack BackupJob, and optionally a RestoreJob, for a Guardian app.",
     args = {
         "allow_in_place_restore": args.string(default = "false", description = "Set true only for an intentional restore into the source app."),
+        "activate_system_bucket": args.string(default = "true", description = "For ClickHouse useSystemBucket, prime projected credentials and roll backup sidecars before the drill."),
         "application": args.string(default = "guardian", description = "Cozystack app name."),
         "cleanup_created_restore_target": args.string(default = "true", description = "Delete a restore target created by this drill before exiting."),
         "component": args.string(default = "clickhouse", description = "Component to drill: clickhouse or postgres."),

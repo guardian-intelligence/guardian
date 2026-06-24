@@ -35,9 +35,30 @@ type drillConfig struct {
 	CreateRestoreTarget  bool
 	CleanupRestoreTarget bool
 	AllowInPlaceRestore  bool
+	ActivateSystemBucket bool
 }
 
 var dnsLabelRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+
+const systemBucketSecretName = "cozy-backups-creds"
+
+var systemBucketSecretKeys = []string{
+	"bucketName",
+	"endpoint",
+	"region",
+	"accessKey",
+	"secretKey",
+	"forcePathStyle",
+}
+
+var clickHouseSystemBucketEnv = []string{
+	"S3_BUCKET",
+	"S3_ENDPOINT",
+	"S3_REGION",
+	"S3_ACCESS_KEY",
+	"S3_SECRET_KEY",
+	"S3_FORCE_PATH_STYLE",
+}
 
 func main() {
 	var cfg drillConfig
@@ -54,6 +75,7 @@ func main() {
 	flag.BoolVar(&cfg.CreateRestoreTarget, "create-restore-target", false, "create the restore target app from the live source app spec before restoring")
 	flag.BoolVar(&cfg.CleanupRestoreTarget, "cleanup-created-restore-target", true, "delete a restore target app created by this drill before exiting")
 	flag.BoolVar(&cfg.AllowInPlaceRestore, "allow-in-place-restore", false, "allow restoring into the same app name")
+	flag.BoolVar(&cfg.ActivateSystemBucket, "activate-system-bucket", true, "for ClickHouse useSystemBucket, ensure projected system-bucket credentials are loaded before running the backup")
 	flag.Parse()
 
 	var err error
@@ -194,6 +216,11 @@ func runDrill(ctx context.Context, cfg drillConfig) error {
 	if err := waitAppReady(ctx, runner, "source", cfg.Component.Resource, cfg.ApplicationName, cfg.WaitTimeout); err != nil {
 		return err
 	}
+	if cfg.ActivateSystemBucket {
+		if err := activateClickHouseSystemBucket(ctx, runner, cfg, cfg.ApplicationName, dir); err != nil {
+			return err
+		}
+	}
 	if cfg.RestoreTargetName != "" {
 		restoreRef := cfg.Component.Resource + "/" + cfg.RestoreTargetName
 		if cfg.CreateRestoreTarget {
@@ -227,12 +254,17 @@ func runDrill(ctx context.Context, cfg drillConfig) error {
 		if err := waitAppReady(ctx, runner, "restore target", cfg.Component.Resource, cfg.RestoreTargetName, cfg.WaitTimeout); err != nil {
 			return err
 		}
+		if cfg.ActivateSystemBucket {
+			if err := activateClickHouseSystemBucket(ctx, runner, cfg, cfg.RestoreTargetName, dir); err != nil {
+				return err
+			}
+		}
 	}
 
 	if err := runner.run(ctx, "apply BackupJob", "apply", "-f", backupJobPath); err != nil {
 		return err
 	}
-	if err := runner.run(ctx, "wait BackupJob Succeeded", "wait", "--for=jsonpath={.status.phase}=Succeeded", "backupjobs.backups.cozystack.io/"+cfg.Name, "--timeout="+cfg.WaitTimeout); err != nil {
+	if err := waitResourcePhase(ctx, runner, "BackupJob", "backupjobs.backups.cozystack.io", cfg.Name, "Succeeded", "Failed", cfg.WaitTimeout); err != nil {
 		runner.bestEffort(ctx, "describe failed BackupJob", "describe", "backupjobs.backups.cozystack.io/"+cfg.Name)
 		runner.bestEffort(ctx, "related pods", "get", "pods", "-l", "backups.cozystack.io/owned-by.BackupJobName="+cfg.Name, "-o", "wide")
 		runner.bestEffort(ctx, "related pod logs", "logs", "-l", "backups.cozystack.io/owned-by.BackupJobName="+cfg.Name, "--all-containers=true", "--tail=-1")
@@ -275,7 +307,7 @@ func runDrill(ctx context.Context, cfg drillConfig) error {
 	if err := runner.run(ctx, "apply RestoreJob", "apply", "-f", restoreJobPath); err != nil {
 		return err
 	}
-	if err := runner.run(ctx, "wait RestoreJob Succeeded", "wait", "--for=jsonpath={.status.phase}=Succeeded", "restorejobs.backups.cozystack.io/"+restoreName, "--timeout="+cfg.WaitTimeout); err != nil {
+	if err := waitResourcePhase(ctx, runner, "RestoreJob", "restorejobs.backups.cozystack.io", restoreName, "Succeeded", "Failed", cfg.WaitTimeout); err != nil {
 		runner.bestEffort(ctx, "describe failed RestoreJob", "describe", "restorejobs.backups.cozystack.io/"+restoreName)
 		return err
 	}
@@ -298,6 +330,279 @@ func waitAppReady(ctx context.Context, runner kubectlRunner, label, resource, na
 		return err
 	}
 	return runner.run(ctx, "wait "+label+" workloads Ready", "wait", "--for=condition=WorkloadsReady", ref, "--timeout="+timeout)
+}
+
+func waitResourcePhase(ctx context.Context, runner kubectlRunner, label, resource, name, successPhase, failurePhase, timeout string) error {
+	wait, err := time.ParseDuration(timeout)
+	if err != nil {
+		return fmt.Errorf("parse --wait-timeout: %w", err)
+	}
+	fmt.Printf("\n## wait %s %s\n", label, successPhase)
+	ctx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		phase, err := runner.quietOutput(ctx, "read "+label+" phase", "get", resource+"/"+name, "-o", "jsonpath={.status.phase}")
+		if err != nil {
+			return err
+		}
+		phase = strings.TrimSpace(phase)
+		if phase == successPhase {
+			fmt.Printf("%s/%s phase=%s\n", resource, name, phase)
+			return nil
+		}
+		if failurePhase != "" && phase == failurePhase {
+			return fmt.Errorf("%s/%s phase=%s", resource, name, phase)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timed out waiting for %s/%s phase=%s; last phase=%q", resource, name, successPhase, phase)
+		case <-ticker.C:
+		}
+	}
+}
+
+func activateClickHouseSystemBucket(ctx context.Context, runner kubectlRunner, cfg drillConfig, appName, dir string) error {
+	if cfg.Component.Kind != "ClickHouse" {
+		return nil
+	}
+	ref := cfg.Component.Resource + "/" + appName
+	useSystemBucket, err := runner.quietOutput(ctx, "read ClickHouse backup mode", "get", ref, "-o", "jsonpath={.spec.backup.useSystemBucket}")
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(useSystemBucket) != "true" {
+		fmt.Printf("clickhouse system-bucket activation skipped: %s does not set backup.useSystemBucket=true\n", ref)
+		return nil
+	}
+
+	release := clickHouseReleaseName(appName)
+	loaded, missing, err := clickHouseBackupEnvLoaded(ctx, runner, release)
+	if err != nil {
+		return err
+	}
+	if loaded {
+		fmt.Printf("clickhouse system-bucket activation: %s backup sidecars already have projected S3 env\n", release)
+		return nil
+	}
+	fmt.Printf("clickhouse system-bucket activation: %s backup sidecars are missing projected env: %s\n", release, formatMissingEnv(missing))
+
+	if err := ensureSystemBucketSecret(ctx, runner, cfg, dir); err != nil {
+		return err
+	}
+	if err := rolloutClickHouseStatefulSets(ctx, runner, release, cfg.WaitTimeout); err != nil {
+		return err
+	}
+	if err := waitAppReady(ctx, runner, "activated "+appName, cfg.Component.Resource, appName, cfg.WaitTimeout); err != nil {
+		return err
+	}
+
+	loaded, missing, err = clickHouseBackupEnvLoaded(ctx, runner, release)
+	if err != nil {
+		return err
+	}
+	if !loaded {
+		return fmt.Errorf("clickhouse system-bucket activation did not load projected env after rollout: %s", formatMissingEnv(missing))
+	}
+	fmt.Printf("clickhouse system-bucket activation completed: %s backup sidecars loaded projected S3 env\n", release)
+	return nil
+}
+
+func clickHouseReleaseName(appName string) string {
+	return "clickhouse-" + appName
+}
+
+func clickHouseBackupEnvLoaded(ctx context.Context, runner kubectlRunner, release string) (bool, map[string][]string, error) {
+	pods, err := clickHousePods(ctx, runner, release)
+	if err != nil {
+		return false, nil, err
+	}
+	missing := map[string][]string{}
+	for _, pod := range pods {
+		out, err := runner.quietOutput(ctx, "check "+pod+" backup env", "exec", pod, "-c", "clickhouse-backup", "--", "sh", "-ec", clickHouseEnvCheckShell())
+		if err != nil {
+			return false, nil, err
+		}
+		envNames := nonEmptyLines(out)
+		if len(envNames) > 0 {
+			missing[pod] = envNames
+		}
+	}
+	return len(missing) == 0, missing, nil
+}
+
+func clickHousePods(ctx context.Context, runner kubectlRunner, release string) ([]string, error) {
+	out, err := runner.quietOutput(
+		ctx,
+		"list ClickHouse pods",
+		"get",
+		"pods",
+		"-l",
+		"clickhouse.altinity.com/chi="+release,
+		"-o",
+		"jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}",
+	)
+	if err != nil {
+		return nil, err
+	}
+	pods := nonEmptyLines(out)
+	if len(pods) == 0 {
+		return nil, fmt.Errorf("no ClickHouse pods found for release %s", release)
+	}
+	return pods, nil
+}
+
+func clickHouseEnvCheckShell() string {
+	return "for name in " + strings.Join(clickHouseSystemBucketEnv, " ") + `; do eval "value=\${$name:-}"; if [ -z "$value" ]; then echo "$name"; fi; done`
+}
+
+func ensureSystemBucketSecret(ctx context.Context, runner kubectlRunner, cfg drillConfig, dir string) error {
+	ready, missing, err := systemBucketSecretReady(ctx, runner)
+	if err != nil {
+		return err
+	}
+	if ready {
+		fmt.Printf("system-bucket projection: %s is present with required keys\n", systemBucketSecretName)
+		return nil
+	}
+
+	primeName := activationJobName(cfg.Name)
+	prime := cfg
+	prime.Name = primeName
+	path := filepath.Join(dir, primeName+".yaml")
+	if err := os.WriteFile(path, []byte(backupJobManifest(prime)), 0o600); err != nil {
+		return err
+	}
+
+	fmt.Printf("system-bucket projection: %s missing keys %s; applying projection BackupJob %s\n", systemBucketSecretName, strings.Join(missing, ","), primeName)
+	if err := runner.run(ctx, "apply system-bucket projection BackupJob", "apply", "-f", path); err != nil {
+		return err
+	}
+	defer runner.bestEffort(ctx, "delete system-bucket projection BackupJob", "delete", "backupjobs.backups.cozystack.io/"+primeName, "--ignore-not-found=true")
+
+	return waitSystemBucketSecret(ctx, runner, cfg.WaitTimeout)
+}
+
+func waitSystemBucketSecret(ctx context.Context, runner kubectlRunner, timeout string) error {
+	wait, err := time.ParseDuration(timeout)
+	if err != nil {
+		return fmt.Errorf("parse --wait-timeout: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		ready, missing, err := systemBucketSecretReady(ctx, runner)
+		if err != nil {
+			return err
+		}
+		if ready {
+			fmt.Printf("system-bucket projection: %s is present with required keys\n", systemBucketSecretName)
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timed out waiting for %s; missing keys: %s", systemBucketSecretName, strings.Join(missing, ","))
+		case <-ticker.C:
+		}
+	}
+}
+
+func systemBucketSecretReady(ctx context.Context, runner kubectlRunner) (bool, []string, error) {
+	out, err := runner.quietOutput(ctx, "read projected system-bucket Secret", "get", "secret/"+systemBucketSecretName, "-o", "json")
+	if err != nil {
+		if strings.Contains(out, "NotFound") || strings.Contains(out, "not found") {
+			return false, systemBucketSecretKeys, nil
+		}
+		return false, nil, err
+	}
+
+	var secret struct {
+		Data map[string]string `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(out), &secret); err != nil {
+		return false, nil, fmt.Errorf("decode %s Secret JSON: %w", systemBucketSecretName, err)
+	}
+	missing := make([]string, 0, len(systemBucketSecretKeys))
+	for _, key := range systemBucketSecretKeys {
+		if strings.TrimSpace(secret.Data[key]) == "" {
+			missing = append(missing, key)
+		}
+	}
+	return len(missing) == 0, missing, nil
+}
+
+func rolloutClickHouseStatefulSets(ctx context.Context, runner kubectlRunner, release, timeout string) error {
+	names, err := clickHouseStatefulSets(ctx, runner, release)
+	if err != nil {
+		return err
+	}
+	if err := runner.run(ctx, "rollout restart ClickHouse StatefulSets", "rollout", "restart", "statefulset", "-l", "clickhouse.altinity.com/chi="+release); err != nil {
+		return err
+	}
+	for _, name := range names {
+		if err := runner.run(ctx, "rollout status "+name, "rollout", "status", "statefulset/"+name, "--timeout="+timeout); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func clickHouseStatefulSets(ctx context.Context, runner kubectlRunner, release string) ([]string, error) {
+	out, err := runner.quietOutput(
+		ctx,
+		"list ClickHouse StatefulSets",
+		"get",
+		"statefulsets.apps",
+		"-l",
+		"clickhouse.altinity.com/chi="+release,
+		"-o",
+		"jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}",
+	)
+	if err != nil {
+		return nil, err
+	}
+	names := nonEmptyLines(out)
+	if len(names) == 0 {
+		return nil, fmt.Errorf("no ClickHouse StatefulSets found for release %s", release)
+	}
+	return names, nil
+}
+
+func activationJobName(name string) string {
+	const suffix = "-prime"
+	if len(name)+len(suffix) <= 63 {
+		return name + suffix
+	}
+	trimmed := strings.TrimRight(name[:63-len(suffix)], "-")
+	return trimmed + suffix
+}
+
+func formatMissingEnv(missing map[string][]string) string {
+	if len(missing) == 0 {
+		return "none"
+	}
+	parts := make([]string, 0, len(missing))
+	for pod, vars := range missing {
+		parts = append(parts, pod+"="+strings.Join(vars, ","))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func nonEmptyLines(out string) []string {
+	lines := strings.Split(out, "\n")
+	nonEmpty := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			nonEmpty = append(nonEmpty, line)
+		}
+	}
+	return nonEmpty
 }
 
 func restoreJobName(backupJobName string) string {
@@ -333,11 +638,39 @@ func restoreTargetManifestFromSource(cfg drillConfig, sourceJSON []byte) (string
 		},
 		"spec": source["spec"],
 	}
+	sanitizeSystemBucketBackup(target["spec"])
 	out, err := json.MarshalIndent(target, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("encode restore target app JSON: %w", err)
 	}
 	return string(out) + "\n", nil
+}
+
+func sanitizeSystemBucketBackup(spec interface{}) {
+	specMap, ok := spec.(map[string]interface{})
+	if !ok {
+		return
+	}
+	backup, ok := specMap["backup"].(map[string]interface{})
+	if !ok || backup["useSystemBucket"] != true {
+		return
+	}
+	for _, key := range []string{
+		"cleanupStrategy",
+		"destinationPath",
+		"endpoint",
+		"endpointCA",
+		"endpointURL",
+		"resticPassword",
+		"s3AccessKey",
+		"s3Bucket",
+		"s3CredentialsSecret",
+		"s3PathOverride",
+		"s3Region",
+		"s3SecretKey",
+	} {
+		delete(backup, key)
+	}
 }
 
 type kubectlRunner struct {
@@ -400,6 +733,14 @@ func (r kubectlRunner) output(ctx context.Context, label string, args ...string)
 	fmt.Print(out)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", label, err)
+	}
+	return out, nil
+}
+
+func (r kubectlRunner) quietOutput(ctx context.Context, label string, args ...string) (string, error) {
+	out, err := r.combinedOutput(ctx, args...)
+	if err != nil {
+		return out, fmt.Errorf("%s: %w", label, err)
 	}
 	return out, nil
 }
