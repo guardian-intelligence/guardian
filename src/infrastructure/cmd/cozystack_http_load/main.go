@@ -57,8 +57,8 @@ func main() {
 	flag.StringVar(&cfg.Kubeconfig, "kubeconfig", "", "kubeconfig for guardian-mgmt")
 	flag.StringVar(&cfg.RequestTimeout, "request-timeout", "15s", "kubectl API request timeout")
 	flag.StringVar(&cfg.WaitTimeout, "wait-timeout", "15m", "timeout waiting for Kubernetes surface readiness")
-	flag.StringVar(&cfg.Surface, "surface", "", "surface to load: company-site, harbor, dashboard, openbao, or custom with --url")
-	flag.StringVar(&cfg.Stage, "stage", "dev", "Guardian stage: root, dev, gamma, or prod")
+	flag.StringVar(&cfg.Surface, "surface", "", "surface to load: harbor, dashboard, openbao, or custom with --url")
+	flag.StringVar(&cfg.Stage, "stage", "root", "Guardian bootstrap stage: root")
 	flag.StringVar(&cfg.URL, "url", "", "explicit URL to load; overrides --surface target mapping")
 	flag.StringVar(&cfg.ExpectedStatuses, "expected-statuses", "", "comma-separated acceptable HTTP status codes")
 	flag.StringVar(&cfg.HostOverrides, "host-overrides", "", "comma-separated k6 DNS host overrides as host=ip entries")
@@ -264,21 +264,6 @@ func surfaceReadinessChecks(cfg loadConfig) ([]kubectlCommand, error) {
 	stage := strings.ToLower(cfg.Stage)
 	surface := normalizeSurface(cfg.Surface)
 	switch surface {
-	case "company-site":
-		namespace, err := namespaceForStage(stage)
-		if err != nil {
-			return nil, err
-		}
-		return []kubectlCommand{
-			{
-				Label: "company-site deployment yaml",
-				Args:  []string{"-n", namespace, "get", "deployment/company-site", "-o", "yaml"},
-			},
-			{
-				Label: "wait company-site deployment Available",
-				Args:  []string{"-n", namespace, "wait", "--for=condition=Available", "deployment/company-site", "--timeout=" + cfg.WaitTimeout},
-			},
-		}, nil
 	case "harbor":
 		namespace, err := namespaceForStage(stage)
 		if err != nil {
@@ -344,7 +329,7 @@ func surfaceReadinessChecks(cfg loadConfig) ([]kubectlCommand, error) {
 			},
 		}, nil
 	default:
-		return nil, fmt.Errorf("--surface %q is not one of company-site, harbor, dashboard, openbao, custom", cfg.Surface)
+		return nil, fmt.Errorf("--surface %q is not one of harbor, dashboard, openbao, custom", cfg.Surface)
 	}
 }
 
@@ -358,16 +343,6 @@ func resolveTarget(cfg loadConfig, localPort int) (targetSpec, error) {
 		return targetSpec{}, errors.New("--surface is required when --url is not set")
 	}
 	switch surface {
-	case "company-site":
-		host, err := companyHost(stage)
-		if err != nil {
-			return targetSpec{}, err
-		}
-		return targetSpec{
-			URL:              "https://" + host + "/healthz",
-			ExpectedStatuses: defaultExpectedStatuses(cfg.ExpectedStatuses),
-			RequestName:      requestName(surface, stage),
-		}, nil
 	case "harbor":
 		host, err := harborHost(stage)
 		if err != nil {
@@ -405,14 +380,12 @@ func resolveTarget(cfg loadConfig, localPort int) (targetSpec, error) {
 			NeedsOpenBaoPort: true,
 		}, nil
 	default:
-		return targetSpec{}, fmt.Errorf("--surface %q is not one of company-site, harbor, dashboard, openbao, custom", cfg.Surface)
+		return targetSpec{}, fmt.Errorf("--surface %q is not one of harbor, dashboard, openbao, custom", cfg.Surface)
 	}
 }
 
 func normalizeSurface(surface string) string {
 	switch strings.ToLower(surface) {
-	case "company", "company-site", "website":
-		return "company-site"
 	case "harbor", "registry":
 		return "harbor"
 	case "dashboard", "cozystack-dashboard":
@@ -430,27 +403,8 @@ func namespaceForStage(stage string) (string, error) {
 	switch stage {
 	case "root":
 		return "tenant-root", nil
-	case "dev":
-		return "tenant-guardiancommercial-platform-dev", nil
-	case "gamma":
-		return "tenant-guardiancommercial-platform-gamma", nil
-	case "prod":
-		return "tenant-guardiancommercial-platform-prod", nil
 	default:
-		return "", fmt.Errorf("stage %q is not one of root, dev, gamma, prod", stage)
-	}
-}
-
-func companyHost(stage string) (string, error) {
-	switch stage {
-	case "dev":
-		return "dev.gi.org", nil
-	case "gamma":
-		return "gamma.gi.org", nil
-	case "prod":
-		return "guardianintelligence.org", nil
-	default:
-		return "", errors.New("company-site supports --stage dev, gamma, or prod")
+		return "", fmt.Errorf("stage %q is not root", stage)
 	}
 }
 
@@ -458,14 +412,8 @@ func harborHost(stage string) (string, error) {
 	switch stage {
 	case "root":
 		return "harbor.guardianintelligence.org", nil
-	case "dev":
-		return "harbor.dev.gi.org", nil
-	case "gamma":
-		return "harbor.gamma.gi.org", nil
-	case "prod":
-		return "harbor.prod.gi.org", nil
 	default:
-		return "", errors.New("harbor supports --stage root, dev, gamma, or prod")
+		return "", errors.New("harbor supports --stage root")
 	}
 }
 

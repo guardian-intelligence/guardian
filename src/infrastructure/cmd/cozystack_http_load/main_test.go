@@ -14,27 +14,9 @@ func TestResolveTarget(t *testing.T) {
 		status string
 	}{
 		{
-			name:   "company dev",
-			cfg:    loadConfig{Surface: "company-site", Stage: "dev"},
-			url:    "https://dev.gi.org/healthz",
-			status: "200",
-		},
-		{
-			name:   "company prod",
-			cfg:    loadConfig{Surface: "website", Stage: "prod"},
-			url:    "https://guardianintelligence.org/healthz",
-			status: "200",
-		},
-		{
 			name:   "harbor root",
 			cfg:    loadConfig{Surface: "harbor", Stage: "root"},
 			url:    "https://harbor.guardianintelligence.org/v2/",
-			status: "200,401",
-		},
-		{
-			name:   "harbor gamma",
-			cfg:    loadConfig{Surface: "registry", Stage: "gamma"},
-			url:    "https://harbor.gamma.gi.org/v2/",
 			status: "200,401",
 		},
 		{
@@ -69,7 +51,7 @@ func TestResolveTarget(t *testing.T) {
 
 func TestResolveTargetValidation(t *testing.T) {
 	for _, cfg := range []loadConfig{
-		{Surface: "company-site", Stage: "root"},
+		{Surface: "harbor", Stage: "gamma"},
 		{Surface: "dashboard", Stage: "dev"},
 		{Surface: "openbao", Stage: "dev"},
 		{Surface: "nope", Stage: "dev"},
@@ -109,8 +91,8 @@ func TestValidateConfig(t *testing.T) {
 		K6:                   "/k6",
 		Script:               "http-smoke.js",
 		Kubectl:              "/kubectl",
-		Surface:              "company-site",
-		Stage:                "dev",
+		Surface:              "harbor",
+		Stage:                "root",
 		VUs:                  "1",
 		Duration:             "1s",
 		SleepSeconds:         "1",
@@ -136,7 +118,7 @@ func TestValidateConfig(t *testing.T) {
 	}
 
 	hostOverride := base
-	hostOverride.HostOverrides = "dev.gi.org=45.250.254.119"
+	hostOverride.HostOverrides = "harbor.guardianintelligence.org=45.250.254.119"
 	if err := validateConfig(hostOverride); err != nil {
 		t.Fatalf("config with host override rejected: %v", err)
 	}
@@ -154,7 +136,7 @@ func TestValidateConfig(t *testing.T) {
 	}
 
 	badHostOverride := base
-	badHostOverride.HostOverrides = "dev.gi.org=not-an-ip"
+	badHostOverride.HostOverrides = "harbor.guardianintelligence.org=not-an-ip"
 	if err := validateConfig(badHostOverride); err == nil {
 		t.Fatalf("invalid host override accepted")
 	}
@@ -174,8 +156,8 @@ func TestNormalizeHostOverrides(t *testing.T) {
 		},
 		{
 			name:  "normalizes spacing case and order",
-			input: " Gamma.GI.Org = 45.250.254.119, dev.gi.org=206.223.228.87 ",
-			want:  "dev.gi.org=206.223.228.87,gamma.gi.org=45.250.254.119",
+			input: " Harbor.GuardianIntelligence.Org = 45.250.254.119, dashboard.guardianintelligence.org=206.223.228.87 ",
+			want:  "dashboard.guardianintelligence.org=206.223.228.87,harbor.guardianintelligence.org=45.250.254.119",
 		},
 		{
 			name:  "ipv6 literal",
@@ -184,12 +166,12 @@ func TestNormalizeHostOverrides(t *testing.T) {
 		},
 		{
 			name:    "missing separator",
-			input:   "dev.gi.org:45.250.254.119",
+			input:   "harbor.guardianintelligence.org:45.250.254.119",
 			wantErr: true,
 		},
 		{
 			name:    "host must not include port",
-			input:   "dev.gi.org:443=45.250.254.119",
+			input:   "harbor.guardianintelligence.org:443=45.250.254.119",
 			wantErr: true,
 		},
 		{
@@ -199,17 +181,17 @@ func TestNormalizeHostOverrides(t *testing.T) {
 		},
 		{
 			name:    "invalid ip",
-			input:   "dev.gi.org=not-an-ip",
+			input:   "harbor.guardianintelligence.org=not-an-ip",
 			wantErr: true,
 		},
 		{
 			name:    "duplicate host",
-			input:   "dev.gi.org=206.223.228.87,dev.gi.org=45.250.254.119",
+			input:   "harbor.guardianintelligence.org=206.223.228.87,harbor.guardianintelligence.org=45.250.254.119",
 			wantErr: true,
 		},
 		{
 			name:    "trailing comma",
-			input:   "dev.gi.org=206.223.228.87,",
+			input:   "harbor.guardianintelligence.org=206.223.228.87,",
 			wantErr: true,
 		},
 	}
@@ -239,14 +221,6 @@ func TestSurfaceReadinessChecks(t *testing.T) {
 		cfg      loadConfig
 		required []commandExpectation
 	}{
-		{
-			name: "company",
-			cfg:  loadConfig{Surface: "company-site", Stage: "gamma", WaitTimeout: "20m"},
-			required: []commandExpectation{
-				{label: "company-site deployment yaml", parts: []string{"tenant-guardiancommercial-platform-gamma", "deployment/company-site", "-o", "yaml"}},
-				{label: "wait company-site deployment Available", parts: []string{"--for=condition=Available", "deployment/company-site", "--timeout=20m"}},
-			},
-		},
 		{
 			name: "harbor",
 			cfg:  loadConfig{Surface: "harbor", Stage: "root", WaitTimeout: "20m"},

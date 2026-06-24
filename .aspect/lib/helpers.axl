@@ -12,8 +12,6 @@ Conventions:
     non-zero exit code. They never silently coerce errors to no-ops.
 """
 
-GUARDIAN_TARGET = "//src/guardian/cmd/guardian"
-
 def ws_path(ctx, *parts):
     """Resolve a workspace-relative path to absolute under the repo root."""
     root = ctx.std.env.root_dir()
@@ -35,14 +33,3 @@ def checked_spawn(ctx, program, args, cwd = None, env = None, label = None):
         ctx.std.io.stderr.write("$ " + label_str + "\n")
     r = cmd.spawn().wait()
     return r.code
-
-def bazel_run(ctx, target, args = None, label = None):
-    """Run a Bazel executable target and pass argv after `--`."""
-    target_args = list(args) if args != None else []
-    return checked_spawn(
-        ctx,
-        "bazelisk",
-        ["run", target, "--"] + target_args,
-        cwd = ws_path(ctx),
-        label = label if label != None else "bazelisk run " + target,
-    )

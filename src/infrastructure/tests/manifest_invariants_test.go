@@ -2,7 +2,6 @@ package tests
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -46,71 +45,17 @@ type guardianMgmtNode struct {
 	PrivateIPv4 string `json:"private_ipv4"`
 }
 
-type platformStage struct {
-	name               string
-	namespace          string
-	manifestDir        string
-	tenantDir          string
-	tenantHost         string
-	harborHost         string
-	companyHost        string
-	postgresSchedule   string
-	clickHouseSchedule string
-}
-
-func platformStages() []platformStage {
-	return []platformStage{
-		{
-			name:               "dev",
-			namespace:          "tenant-guardiancommercial-platform-dev",
-			manifestDir:        "src/infrastructure/products/platform/dev",
-			tenantDir:          "src/infrastructure/tenants/platform/dev",
-			tenantHost:         "dev.gi.org",
-			harborHost:         "harbor.dev.gi.org",
-			companyHost:        "dev.gi.org",
-			postgresSchedule:   "13 1 * * *",
-			clickHouseSchedule: "23 1 * * *",
-		},
-		{
-			name:               "gamma",
-			namespace:          "tenant-guardiancommercial-platform-gamma",
-			manifestDir:        "src/infrastructure/products/platform/gamma",
-			tenantDir:          "src/infrastructure/tenants/platform/gamma",
-			tenantHost:         "gamma.gi.org",
-			harborHost:         "harbor.gamma.gi.org",
-			companyHost:        "gamma.gi.org",
-			postgresSchedule:   "19 1 * * *",
-			clickHouseSchedule: "29 1 * * *",
-		},
-		{
-			name:               "prod",
-			namespace:          "tenant-guardiancommercial-platform-prod",
-			manifestDir:        "src/infrastructure/products/platform/prod",
-			tenantDir:          "src/infrastructure/tenants/platform/prod",
-			tenantHost:         "prod.gi.org",
-			harborHost:         "harbor.prod.gi.org",
-			companyHost:        "guardianintelligence.org",
-			postgresSchedule:   "37 1 * * *",
-			clickHouseSchedule: "41 1 * * *",
-		},
-	}
-}
-
 func TestManifestInvariants(t *testing.T) {
 	t.Run("guardian mgmt topology alignment", testGuardianMgmtTopologyAlignment)
 	t.Run("guardian mgmt dns bootstrap", testGuardianMgmtDNSBootstrap)
 	t.Run("talm install disk selectors", testTalmInstallDiskSelectors)
 	t.Run("cozystack platform package", testCozystackPlatformPackage)
-	t.Run("platform tenant topology", testPlatformTenantTopology)
 	t.Run("layer two networking", testLayerTwoNetworking)
 	t.Run("single default storage class", testSingleDefaultStorageClass)
 	t.Run("linstor data pools", testLINSTORDataPools)
 	t.Run("cozystack system bucket backups", testCozystackSystemBucketBackups)
 	t.Run("root tenant core services", testRootTenantCoreServices)
-	t.Run("platform tenant core services", testPlatformTenantCoreServices)
 	t.Run("observability", testObservability)
-	t.Run("company site", testCompanySite)
-	t.Run("company site source ownership", testCompanySiteSourceOwnership)
 	t.Run("openbao", testOpenBao)
 	t.Run("openbao opentofu bootstrap", testOpenBaoOpenTofuBootstrap)
 	t.Run("flux handoff", testFluxHandoff)
@@ -258,39 +203,6 @@ func testGuardianMgmtTopologyAlignment(t *testing.T) {
 	assertTextContains(t, outputsTF, `private_ipv4 = node.private_ipv4`, "outputs.tf")
 }
 
-func testPlatformTenantTopology(t *testing.T) {
-	commercialDocs := readManifests(t, "src/infrastructure/tenants/guardian-commercial/tenant.yaml")
-	commercial := findObject(t, commercialDocs, "Tenant", "tenant-root", "guardiancommercial")
-	assertString(t, commercial, "apps.cozystack.io/v1alpha1", "apiVersion")
-	assertString(t, commercial, "guardianintelligence.org", "spec", "host")
-	assertBool(t, commercial, false, "spec", "etcd")
-	assertBool(t, commercial, false, "spec", "ingress")
-	assertBool(t, commercial, false, "spec", "monitoring")
-	assertBool(t, commercial, false, "spec", "seaweedfs")
-
-	platformDocs := readManifests(t, "src/infrastructure/tenants/platform/tenant.yaml")
-	platform := findObject(t, platformDocs, "Tenant", "tenant-guardiancommercial", "platform")
-	assertString(t, platform, "apps.cozystack.io/v1alpha1", "apiVersion")
-	assertString(t, platform, "platform.guardianintelligence.org", "spec", "host")
-	assertBool(t, platform, false, "spec", "etcd")
-	assertBool(t, platform, false, "spec", "ingress")
-	assertBool(t, platform, true, "spec", "monitoring")
-	assertBool(t, platform, false, "spec", "seaweedfs")
-
-	for _, stage := range platformStages() {
-		t.Run(stage.name, func(t *testing.T) {
-			docs := readManifests(t, stage.tenantDir+"/tenant.yaml")
-			tenant := findObject(t, docs, "Tenant", "tenant-guardiancommercial-platform", stage.name)
-			assertString(t, tenant, "apps.cozystack.io/v1alpha1", "apiVersion")
-			assertString(t, tenant, stage.tenantHost, "spec", "host")
-			assertBool(t, tenant, false, "spec", "etcd")
-			assertBool(t, tenant, false, "spec", "ingress")
-			assertBool(t, tenant, false, "spec", "monitoring")
-			assertBool(t, tenant, false, "spec", "seaweedfs")
-		})
-	}
-}
-
 func testGuardianMgmtDNSBootstrap(t *testing.T) {
 	const versionsPath = "src/infrastructure/bootstrap/guardian-mgmt-dns/versions.tf"
 	versionsBytes := readRunfile(t, versionsPath)
@@ -318,16 +230,11 @@ func testGuardianMgmtDNSBootstrap(t *testing.T) {
 	assertTextContains(t, mainTF, `allow_overwrite = true`, "guardian-mgmt-dns main.tf")
 
 	for _, host := range []string{
-		`"dev.gi.org"`,
-		`"gamma.gi.org"`,
-		`"prod.gi.org"`,
-		`"harbor.dev.gi.org"`,
-		`"harbor.gamma.gi.org"`,
-		`"harbor.prod.gi.org"`,
 		`"guardianintelligence.org"`,
+		`"api.guardianintelligence.org"`,
 		`"dashboard.guardianintelligence.org"`,
+		`"keycloak.guardianintelligence.org"`,
 		`"grafana.guardianintelligence.org"`,
-		`"grafana.platform.guardianintelligence.org"`,
 		`"harbor.guardianintelligence.org"`,
 		`"s3.guardianintelligence.org"`,
 	} {
@@ -442,12 +349,6 @@ func testCozystackSystemBucketBackups(t *testing.T) {
 	for _, rel := range []string{
 		"src/infrastructure/base/kustomization.yaml",
 		"src/infrastructure/base/apps/core-services.yaml",
-		"src/infrastructure/products/platform/dev/kustomization.yaml",
-		"src/infrastructure/products/platform/dev/core-services.yaml",
-		"src/infrastructure/products/platform/gamma/kustomization.yaml",
-		"src/infrastructure/products/platform/gamma/core-services.yaml",
-		"src/infrastructure/products/platform/prod/kustomization.yaml",
-		"src/infrastructure/products/platform/prod/core-services.yaml",
 	} {
 		text := string(readRunfile(t, rel))
 		for _, forbidden := range []string{
@@ -462,44 +363,9 @@ func testCozystackSystemBucketBackups(t *testing.T) {
 		}
 	}
 
-	cases := []struct {
-		name       string
-		manifest   string
-		namespace  string
-		postgres   string
-		clickhouse string
-	}{
-		{
-			name:       "root",
-			manifest:   "src/infrastructure/base/apps/core-services.yaml",
-			namespace:  "tenant-root",
-			postgres:   "7 1 * * *",
-			clickhouse: "17 1 * * *",
-		},
-	}
-	for _, stage := range platformStages() {
-		cases = append(cases, struct {
-			name       string
-			manifest   string
-			namespace  string
-			postgres   string
-			clickhouse string
-		}{
-			name:       stage.name,
-			manifest:   stage.manifestDir + "/core-services.yaml",
-			namespace:  stage.namespace,
-			postgres:   stage.postgresSchedule,
-			clickhouse: stage.clickHouseSchedule,
-		})
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			docs := readManifests(t, tc.manifest)
-			assertSystemBucketBackup(t, docs, "Postgres", tc.namespace, "guardian-postgres-daily", tc.postgres)
-			assertSystemBucketBackup(t, docs, "ClickHouse", tc.namespace, "guardian-clickhouse-daily", tc.clickhouse)
-		})
-	}
+	docs := readManifests(t, "src/infrastructure/base/apps/core-services.yaml")
+	assertSystemBucketBackup(t, docs, "Postgres", "tenant-root", "guardian-postgres-daily", "7 1 * * *")
+	assertSystemBucketBackup(t, docs, "ClickHouse", "tenant-root", "guardian-clickhouse-daily", "17 1 * * *")
 }
 
 func assertSystemBucketBackup(t *testing.T, docs []manifest, kind, namespace, planName, schedule string) {
@@ -702,215 +568,8 @@ func testRootTenantCoreServices(t *testing.T) {
 	})
 }
 
-func testPlatformTenantCoreServices(t *testing.T) {
-	for _, stage := range platformStages() {
-		t.Run(stage.name, func(t *testing.T) {
-			docs := readManifests(t, stage.manifestDir+"/core-services.yaml")
-			assertApp(t, docs, appExpectation{
-				kind:            "Postgres",
-				namespace:       stage.namespace,
-				storageClass:    "replicated",
-				topReplicas:     3,
-				noExternalDB:    true,
-				postgresVersion: "v18",
-			})
-			assertApp(t, docs, appExpectation{
-				kind:         "Harbor",
-				namespace:    stage.namespace,
-				host:         stage.harborHost,
-				storageClass: "replicated",
-				nestedReplicas: map[string]int{
-					"database": 3,
-					"redis":    3,
-				},
-			})
-			assertHarborRWORolloutStrategy(t, stage.manifestDir+"/harbor-rwo-rollout-strategy.yaml", stage.namespace)
-			assertApp(t, docs, appExpectation{
-				kind:               "ClickHouse",
-				namespace:          stage.namespace,
-				storageClass:       "replicated",
-				topReplicas:        3,
-				backupPlanName:     "guardian-clickhouse-daily",
-				backupPlanSchedule: stage.clickHouseSchedule,
-				nestedReplicas: map[string]int{
-					"clickhouseKeeper": 3,
-				},
-			})
-		})
-	}
-}
-
 func testObservability(t *testing.T) {
 	assertMonitoring(t, "src/infrastructure/base/apps/observability.yaml", "tenant-root", "grafana.guardianintelligence.org", true, "guardian_tenant", "root")
-	assertMonitoring(t, "src/infrastructure/products/platform/observability.yaml", "tenant-guardiancommercial-platform", "grafana.platform.guardianintelligence.org", true, "guardian_product", "platform")
-}
-
-func testCompanySite(t *testing.T) {
-	healthz := readRunfile(t, "src/products/company/web/src/routes/healthz.tsx")
-	if !bytes.Contains(healthz, []byte(`GET: () => new Response("ok\n", { status: 200, headers })`)) {
-		t.Fatalf("company-site healthz route does not return ok")
-	}
-	livez := readRunfile(t, "src/products/company/web/src/routes/livez.tsx")
-	if !bytes.Contains(livez, []byte(`GET: () => new Response("ok\n", { status: 200, headers })`)) {
-		t.Fatalf("company-site livez route does not return ok")
-	}
-
-	metrics := readRunfile(t, "src/products/company/web/src/routes/metrics.tsx")
-	if !bytes.Contains(metrics, []byte(`company_site_build_info{app="company-site",runtime="tanstack-start"} 1`)) {
-		t.Fatalf("company-site metrics endpoint does not expose build info: %q", metrics)
-	}
-
-	otelForwarder := string(readRunfile(t, "src/products/company/web/src/routes/api/otel/v1/traces.tsx"))
-	assertTextContains(t, otelForwarder, "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "company-site OTLP forwarder")
-	assertTextContains(t, otelForwarder, "OTEL_EXPORTER_OTLP_ENDPOINT", "company-site OTLP forwarder")
-	assertTextContains(t, otelForwarder, "otel exporter endpoint not configured", "company-site OTLP forwarder")
-	assertTextNotContains(t, otelForwarder, "127.0.0.1:4318", "company-site OTLP forwarder")
-
-	landing := readRunfile(t, "src/products/company/web/src/routes/_workshop/index.tsx")
-	if !bytes.Contains(landing, []byte("Guardian")) ||
-		!bytes.Contains(landing, []byte("FirstLight")) {
-		t.Fatalf("company-site landing route does not contain the expected TanStack app")
-	}
-
-	image := "harbor.guardianintelligence.org/guardian/company-site@" + readCompanySiteImageDigest(t)
-
-	for _, stage := range platformStages() {
-		t.Run(stage.name, func(t *testing.T) {
-			docs := readManifests(t, stage.manifestDir+"/company-site.yaml")
-
-			deploy := findObject(t, docs, "Deployment", stage.namespace, "company-site")
-			assertString(t, deploy, "apps/v1", "apiVersion")
-			assertInt(t, deploy, 3, "spec", "replicas")
-			assertString(t, deploy, "RollingUpdate", "spec", "strategy", "type")
-			assertInt(t, deploy, 0, "spec", "strategy", "rollingUpdate", "maxUnavailable")
-			assertInt(t, deploy, 1, "spec", "strategy", "rollingUpdate", "maxSurge")
-			assertString(t, deploy, "company-site", "spec", "selector", "matchLabels", "app.kubernetes.io/name")
-			assertString(t, deploy, stage.name, "spec", "selector", "matchLabels", "guardian.dev/stage")
-			assertString(t, deploy, "RuntimeDefault", "spec", "template", "spec", "securityContext", "seccompProfile", "type")
-
-			spread := sliceAt(t, deploy, "spec", "template", "spec", "topologySpreadConstraints")
-			if len(spread) != 1 {
-				t.Fatalf("topologySpreadConstraints has %d entries, want 1", len(spread))
-			}
-			assertString(t, asManifest(t, spread[0], "topologySpreadConstraints[0]"), "kubernetes.io/hostname", "topologyKey")
-			assertString(t, asManifest(t, spread[0], "topologySpreadConstraints[0]"), "DoNotSchedule", "whenUnsatisfiable")
-
-			containers := sliceAt(t, deploy, "spec", "template", "spec", "containers")
-			if len(containers) != 1 {
-				t.Fatalf("containers has %d entries, want 1", len(containers))
-			}
-			container := asManifest(t, containers[0], "containers[0]")
-			assertString(t, container, "company-site", "name")
-			assertString(t, container, image, "image")
-			assertString(t, container, "IfNotPresent", "imagePullPolicy")
-			assertBool(t, container, false, "securityContext", "allowPrivilegeEscalation")
-			assertBool(t, container, true, "securityContext", "runAsNonRoot")
-			assertInt(t, container, 65532, "securityContext", "runAsUser")
-			assertBool(t, container, true, "securityContext", "readOnlyRootFilesystem")
-			assertEnvValue(t, sliceAt(t, container, "env"), "TMPDIR", "/tmp")
-			volumeMounts := sliceAt(t, container, "volumeMounts")
-			if len(volumeMounts) != 1 {
-				t.Fatalf("company-site volumeMounts has %d entries, want 1", len(volumeMounts))
-			}
-			tmpMount := asManifest(t, volumeMounts[0], "volumeMounts[0]")
-			assertString(t, tmpMount, "tmp", "name")
-			assertString(t, tmpMount, "/tmp", "mountPath")
-			assertString(t, container, "/healthz", "readinessProbe", "httpGet", "path")
-			assertString(t, container, "/livez", "livenessProbe", "httpGet", "path")
-
-			volumes := sliceAt(t, deploy, "spec", "template", "spec", "volumes")
-			if len(volumes) != 1 {
-				t.Fatalf("company-site volumes has %d entries, want 1", len(volumes))
-			}
-			tmpVolume := asManifest(t, volumes[0], "spec.template.spec.volumes[0]")
-			assertString(t, tmpVolume, "tmp", "name")
-			if valueAt(tmpVolume, "emptyDir") == nil {
-				t.Fatalf("company-site tmp volume must use emptyDir")
-			}
-
-			service := findObject(t, docs, "Service", stage.namespace, "company-site")
-			assertString(t, service, "v1", "apiVersion")
-			assertString(t, service, "company-site", "spec", "selector", "app.kubernetes.io/name")
-			assertString(t, service, stage.name, "spec", "selector", "guardian.dev/stage")
-			servicePorts := sliceAt(t, service, "spec", "ports")
-			if len(servicePorts) != 1 {
-				t.Fatalf("service ports has %d entries, want 1", len(servicePorts))
-			}
-			assertInt(t, asManifest(t, servicePorts[0], "spec.ports[0]"), 80, "port")
-			assertString(t, asManifest(t, servicePorts[0], "spec.ports[0]"), "http", "targetPort")
-
-			policy := findObject(t, docs, "NetworkPolicy", stage.namespace, "company-site-ingress")
-			assertString(t, policy, "networking.k8s.io/v1", "apiVersion")
-			assertString(t, policy, "company-site", "spec", "podSelector", "matchLabels", "app.kubernetes.io/name")
-			assertString(t, policy, stage.name, "spec", "podSelector", "matchLabels", "guardian.dev/stage")
-			assertStringSlice(t, policy, []string{"Ingress"}, "spec", "policyTypes")
-			if valueAt(policy, "spec", "egress") != nil {
-				t.Fatalf("company-site NetworkPolicy must not restrict egress")
-			}
-			ingressRules := sliceAt(t, policy, "spec", "ingress")
-			if len(ingressRules) != 1 {
-				t.Fatalf("company-site NetworkPolicy ingress has %d entries, want 1", len(ingressRules))
-			}
-			ingressRule := asManifest(t, ingressRules[0], "spec.ingress[0]")
-			from := sliceAt(t, ingressRule, "from")
-			if len(from) != 1 {
-				t.Fatalf("company-site NetworkPolicy ingress[0].from has %d entries, want 1", len(from))
-			}
-			source := asManifest(t, from[0], "spec.ingress[0].from[0]")
-			assertString(t, source, "tenant-root", "namespaceSelector", "matchLabels", "kubernetes.io/metadata.name")
-			assertString(t, source, "ingress-nginx", "podSelector", "matchLabels", "app.kubernetes.io/name")
-			assertString(t, source, "ingress-nginx-system", "podSelector", "matchLabels", "app.kubernetes.io/instance")
-			ports := sliceAt(t, ingressRule, "ports")
-			if len(ports) != 1 {
-				t.Fatalf("company-site NetworkPolicy ingress[0].ports has %d entries, want 1", len(ports))
-			}
-			networkPort := asManifest(t, ports[0], "spec.ingress[0].ports[0]")
-			assertString(t, networkPort, "TCP", "protocol")
-			assertInt(t, networkPort, 8080, "port")
-
-			pdb := findObject(t, docs, "PodDisruptionBudget", stage.namespace, "company-site")
-			assertString(t, pdb, "policy/v1", "apiVersion")
-			assertInt(t, pdb, 2, "spec", "minAvailable")
-			assertString(t, pdb, "company-site", "spec", "selector", "matchLabels", "app.kubernetes.io/name")
-			assertString(t, pdb, stage.name, "spec", "selector", "matchLabels", "guardian.dev/stage")
-
-			ingress := findObject(t, docs, "Ingress", stage.namespace, "company-site")
-			assertString(t, ingress, "networking.k8s.io/v1", "apiVersion")
-			assertString(t, ingress, "tenant-root", "metadata", "annotations", "acme.cert-manager.io/http01-ingress-ingressclassname")
-			assertString(t, ingress, "letsencrypt-prod", "metadata", "annotations", "cert-manager.io/cluster-issuer")
-			assertString(t, ingress, "tenant-root", "spec", "ingressClassName")
-			assertIngressHost(t, ingress, stage.companyHost)
-		})
-	}
-}
-
-func testCompanySiteSourceOwnership(t *testing.T) {
-	deps := string(readRunfile(t, "src/infrastructure/tests/company_site_dependency_closure"))
-	assertTextContains(t, deps, "//src/products/company/site:image", "company-site dependency closure")
-	assertTextContains(t, deps, "//src/products/company/web:image", "company-site dependency closure")
-	assertTextNotContains(t, deps, "src-old", "company-site dependency closure")
-	assertTextNotContains(t, deps, "//src-old", "company-site dependency closure")
-
-	bazelignore := string(readRunfile(t, ".bazelignore"))
-	assertTextContains(t, bazelignore, "src-old", ".bazelignore")
-}
-
-func readCompanySiteImageDigest(t *testing.T) string {
-	t.Helper()
-
-	var index struct {
-		Manifests []struct {
-			Digest string `json:"digest"`
-		} `json:"manifests"`
-	}
-	data := readRunfile(t, "src/products/company/web/image/index.json")
-	if err := json.Unmarshal(data, &index); err != nil {
-		t.Fatalf("parse company-site OCI index: %v", err)
-	}
-	if len(index.Manifests) != 1 {
-		t.Fatalf("company-site OCI index has %d manifests, want 1", len(index.Manifests))
-	}
-	return index.Manifests[0].Digest
 }
 
 func testOpenBao(t *testing.T) {
@@ -1027,88 +686,6 @@ func testFluxHandoff(t *testing.T) {
 		stringAt(asManifest(t, baseDeps[1], "base spec.dependsOn[1]"), "name") != "guardian-mgmt-storage" {
 		t.Fatalf("guardian-mgmt-base dependsOn = %#v, want guardian-mgmt-platform then guardian-mgmt-storage", baseDeps)
 	}
-
-	apps := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-tenant-apps")
-	assertString(t, apps, "./src/infrastructure/tenants/guardian-commercial", "spec", "path")
-	assertString(t, apps, "GitRepository", "spec", "sourceRef", "kind")
-	assertString(t, apps, "guardian", "spec", "sourceRef", "name")
-	assertBool(t, apps, true, "spec", "prune")
-	assertBool(t, apps, true, "spec", "wait")
-	assertNamespaceHealthCheck(t, apps, "tenant-guardiancommercial")
-
-	deps := sliceAt(t, apps, "spec", "dependsOn")
-	if len(deps) != 1 || stringAt(asManifest(t, deps[0], "spec.dependsOn[0]"), "name") != "guardian-mgmt-base" {
-		t.Fatalf("guardian-mgmt-tenant-apps dependsOn = %#v, want only guardian-mgmt-base", deps)
-	}
-
-	product := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-platform-tenant")
-	assertString(t, product, "./src/infrastructure/tenants/platform", "spec", "path")
-	assertBool(t, product, true, "spec", "prune")
-	assertBool(t, product, true, "spec", "wait")
-	assertNamespaceHealthCheck(t, product, "tenant-guardiancommercial-platform")
-	productDeps := sliceAt(t, product, "spec", "dependsOn")
-	if len(productDeps) != 1 || stringAt(asManifest(t, productDeps[0], "spec.dependsOn[0]"), "name") != "guardian-mgmt-tenant-apps" {
-		t.Fatalf("guardian-mgmt-platform-tenant dependsOn = %#v, want only guardian-mgmt-tenant-apps", productDeps)
-	}
-
-	productApps := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-platform-apps")
-	assertString(t, productApps, "./src/infrastructure/products/platform", "spec", "path")
-	assertBool(t, productApps, true, "spec", "prune")
-	assertBool(t, productApps, false, "spec", "wait")
-	productAppsDeps := sliceAt(t, productApps, "spec", "dependsOn")
-	if len(productAppsDeps) != 1 || stringAt(asManifest(t, productAppsDeps[0], "spec.dependsOn[0]"), "name") != "guardian-mgmt-platform-tenant" {
-		t.Fatalf("guardian-mgmt-platform-apps dependsOn = %#v, want only guardian-mgmt-platform-tenant", productAppsDeps)
-	}
-
-	stageChecks := []struct {
-		name      string
-		path      string
-		dependsOn string
-		wait      bool
-		apps      bool
-		namespace string
-	}{
-		{name: "guardian-mgmt-platform-dev-tenant", path: "./src/infrastructure/tenants/platform/dev", dependsOn: "guardian-mgmt-platform-apps", wait: true, namespace: "tenant-guardiancommercial-platform-dev"},
-		{name: "guardian-mgmt-platform-dev", path: "./src/infrastructure/products/platform/dev", dependsOn: "guardian-mgmt-platform-dev-tenant", wait: false, apps: true},
-		{name: "guardian-mgmt-platform-gamma-tenant", path: "./src/infrastructure/tenants/platform/gamma", dependsOn: "guardian-mgmt-platform-dev", wait: true, namespace: "tenant-guardiancommercial-platform-gamma"},
-		{name: "guardian-mgmt-platform-gamma", path: "./src/infrastructure/products/platform/gamma", dependsOn: "guardian-mgmt-platform-gamma-tenant", wait: false, apps: true},
-		{name: "guardian-mgmt-platform-prod-tenant", path: "./src/infrastructure/tenants/platform/prod", dependsOn: "guardian-mgmt-platform-gamma", wait: true, namespace: "tenant-guardiancommercial-platform-prod"},
-		{name: "guardian-mgmt-platform-prod", path: "./src/infrastructure/products/platform/prod", dependsOn: "guardian-mgmt-platform-prod-tenant", wait: false, apps: true},
-	}
-	for _, tc := range stageChecks {
-		t.Run(tc.name, func(t *testing.T) {
-			kustomization := findObject(t, docs, "Kustomization", "cozy-fluxcd", tc.name)
-			assertString(t, kustomization, tc.path, "spec", "path")
-			assertString(t, kustomization, "GitRepository", "spec", "sourceRef", "kind")
-			assertString(t, kustomization, "guardian", "spec", "sourceRef", "name")
-			assertBool(t, kustomization, true, "spec", "prune")
-			assertBool(t, kustomization, tc.wait, "spec", "wait")
-
-			stageDeps := sliceAt(t, kustomization, "spec", "dependsOn")
-			if len(stageDeps) != 1 || stringAt(asManifest(t, stageDeps[0], "spec.dependsOn[0]"), "name") != tc.dependsOn {
-				t.Fatalf("%s dependsOn = %#v, want only %s", tc.name, stageDeps, tc.dependsOn)
-			}
-			if tc.namespace != "" {
-				assertNamespaceHealthCheck(t, kustomization, tc.namespace)
-			}
-			if tc.apps {
-				assertString(t, kustomization, "10m", "spec", "timeout")
-			}
-		})
-	}
-}
-
-func assertNamespaceHealthCheck(t *testing.T, kustomization manifest, namespace string) {
-	t.Helper()
-
-	checks := sliceAt(t, kustomization, "spec", "healthChecks")
-	if len(checks) != 1 {
-		t.Fatalf("spec.healthChecks has %d entries, want 1", len(checks))
-	}
-	check := asManifest(t, checks[0], "spec.healthChecks[0]")
-	assertString(t, check, "v1", "apiVersion")
-	assertString(t, check, "Namespace", "kind")
-	assertString(t, check, namespace, "name")
 }
 
 type appExpectation struct {
@@ -1637,34 +1214,6 @@ func assertNoTemplateOrPlaceholder(t *testing.T, value, label string) {
 			t.Fatalf("%s = %q contains non-production marker %q", label, value, bad)
 		}
 	}
-}
-
-func assertIngressHost(t *testing.T, ingress manifest, host string) {
-	t.Helper()
-
-	tls := sliceAt(t, ingress, "spec", "tls")
-	if len(tls) != 1 {
-		t.Fatalf("spec.tls has %d entries, want 1", len(tls))
-	}
-	assertStringSlice(t, asManifest(t, tls[0], "spec.tls[0]"), []string{host}, "hosts")
-	assertString(t, asManifest(t, tls[0], "spec.tls[0]"), "company-site-tls", "secretName")
-
-	rules := sliceAt(t, ingress, "spec", "rules")
-	if len(rules) != 1 {
-		t.Fatalf("spec.rules has %d entries, want 1", len(rules))
-	}
-	rule := asManifest(t, rules[0], "spec.rules[0]")
-	assertString(t, rule, host, "host")
-
-	paths := sliceAt(t, rule, "http", "paths")
-	if len(paths) != 1 {
-		t.Fatalf("spec.rules[0].http.paths has %d entries, want 1", len(paths))
-	}
-	path := asManifest(t, paths[0], "spec.rules[0].http.paths[0]")
-	assertString(t, path, "/", "path")
-	assertString(t, path, "Prefix", "pathType")
-	assertString(t, path, "company-site", "backend", "service", "name")
-	assertInt(t, path, 80, "backend", "service", "port", "number")
 }
 
 func assertServicePort(t *testing.T, service manifest, name string, port int) {

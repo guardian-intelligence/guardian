@@ -7,8 +7,8 @@ import (
 )
 
 func TestDefaultJobName(t *testing.T) {
-	got := defaultJobName("gamma", "ClickHouse", time.Date(2026, 6, 22, 12, 34, 56, 0, time.UTC))
-	want := "guardian-gamma-clickhouse-20260622t123456z"
+	got := defaultJobName("root", "ClickHouse", time.Date(2026, 6, 22, 12, 34, 56, 0, time.UTC))
+	want := "guardian-root-clickhouse-20260622t123456z"
 	if got != want {
 		t.Fatalf("defaultJobName() = %q, want %q", got, want)
 	}
@@ -16,16 +16,16 @@ func TestDefaultJobName(t *testing.T) {
 
 func TestBackupJobManifest(t *testing.T) {
 	cfg := drillConfig{
-		Stage:           "dev",
-		Namespace:       "tenant-guardiancommercial-platform-dev",
+		Stage:           "root",
+		Namespace:       "tenant-root",
 		Component:       componentSpec{Kind: "ClickHouse", BackupClass: "cozy-default"},
 		ApplicationName: "guardian",
-		Name:            "guardian-dev-clickhouse-test",
+		Name:            "guardian-root-clickhouse-test",
 	}
 	got := backupJobManifest(cfg)
 	for _, want := range []string{
 		"apiVersion: backups.cozystack.io/v1alpha1\nkind: BackupJob\n",
-		"name: guardian-dev-clickhouse-test\n  namespace: tenant-guardiancommercial-platform-dev\n",
+		"name: guardian-root-clickhouse-test\n  namespace: tenant-root\n",
 		"guardian.dev/drill: cozystack-backup\n",
 		"kind: ClickHouse\n    name: guardian\n",
 		"backupClassName: cozy-default\n",
@@ -38,16 +38,16 @@ func TestBackupJobManifest(t *testing.T) {
 
 func TestRestoreJobManifest(t *testing.T) {
 	cfg := drillConfig{
-		Stage:             "dev",
-		Namespace:         "tenant-guardiancommercial-platform-dev",
+		Stage:             "root",
+		Namespace:         "tenant-root",
 		Component:         componentSpec{Kind: "ClickHouse", BackupClass: "cozy-default"},
 		RestoreTargetName: "guardian-restore",
 	}
-	got := restoreJobManifest(cfg, "guardian-dev-clickhouse-test-restore", "guardian-dev-clickhouse-test-20260622")
+	got := restoreJobManifest(cfg, "guardian-root-clickhouse-test-restore", "guardian-root-clickhouse-test-20260622")
 	for _, want := range []string{
 		"apiVersion: backups.cozystack.io/v1alpha1\nkind: RestoreJob\n",
-		"name: guardian-dev-clickhouse-test-restore\n  namespace: tenant-guardiancommercial-platform-dev\n",
-		"name: guardian-dev-clickhouse-test-20260622\n",
+		"name: guardian-root-clickhouse-test-restore\n  namespace: tenant-root\n",
+		"name: guardian-root-clickhouse-test-20260622\n",
 		"kind: ClickHouse\n    name: guardian-restore\n",
 	} {
 		if !strings.Contains(got, want) {
@@ -71,8 +71,8 @@ func TestRestoreTargetGetArgs(t *testing.T) {
 
 func TestRestoreTargetManifestFromSource(t *testing.T) {
 	cfg := drillConfig{
-		Stage:             "gamma",
-		Namespace:         "tenant-guardiancommercial-platform-gamma",
+		Stage:             "root",
+		Namespace:         "tenant-root",
 		Component:         componentSpec{Kind: "ClickHouse"},
 		RestoreTargetName: "guardian-restore",
 	}
@@ -81,7 +81,7 @@ func TestRestoreTargetManifestFromSource(t *testing.T) {
   "kind": "ClickHouse",
   "metadata": {
     "name": "guardian",
-    "namespace": "tenant-guardiancommercial-platform-gamma",
+    "namespace": "tenant-root",
     "resourceVersion": "123",
     "uid": "deadbeef"
   },
@@ -105,7 +105,7 @@ func TestRestoreTargetManifestFromSource(t *testing.T) {
 		`"apiVersion": "apps.cozystack.io/v1alpha1"`,
 		`"kind": "ClickHouse"`,
 		`"name": "guardian-restore"`,
-		`"namespace": "tenant-guardiancommercial-platform-gamma"`,
+		`"namespace": "tenant-root"`,
 		`"guardian.dev/drill": "cozystack-restore-target"`,
 		`"storageClass": "replicated"`,
 		`"useSystemBucket": true`,
@@ -124,11 +124,11 @@ func TestRestoreTargetManifestFromSource(t *testing.T) {
 func TestValidateConfig(t *testing.T) {
 	base := drillConfig{
 		Kubectl:         "/kubectl",
-		Stage:           "prod",
-		Namespace:       "tenant-guardiancommercial-platform-prod",
+		Stage:           "root",
+		Namespace:       "tenant-root",
 		Component:       componentSpec{Kind: "Postgres", BackupClass: "cozy-default"},
 		ApplicationName: "guardian",
-		Name:            "guardian-prod-postgres-test",
+		Name:            "guardian-root-postgres-test",
 	}
 	if err := validateConfig(base); err != nil {
 		t.Fatalf("valid config rejected: %v", err)
@@ -191,8 +191,8 @@ func TestNamespaceAndComponentValidation(t *testing.T) {
 	if got, err := namespaceForStage("root"); err != nil || got != "tenant-root" {
 		t.Fatalf("namespaceForStage(root) = %q, %v", got, err)
 	}
-	if got, err := namespaceForStage("gamma"); err != nil || got != "tenant-guardiancommercial-platform-gamma" {
-		t.Fatalf("namespaceForStage(gamma) = %q, %v", got, err)
+	if _, err := namespaceForStage("gamma"); err == nil {
+		t.Fatalf("retired product stage was accepted")
 	}
 	if _, err := namespaceForStage("staging"); err == nil {
 		t.Fatalf("invalid stage was accepted")

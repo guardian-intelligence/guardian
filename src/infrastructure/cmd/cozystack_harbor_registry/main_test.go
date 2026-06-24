@@ -13,9 +13,6 @@ func TestStageResolution(t *testing.T) {
 		host      string
 	}{
 		{stage: "root", namespace: "tenant-root", host: "harbor.guardianintelligence.org"},
-		{stage: "dev", namespace: "tenant-guardiancommercial-platform-dev", host: "harbor.dev.gi.org"},
-		{stage: "gamma", namespace: "tenant-guardiancommercial-platform-gamma", host: "harbor.gamma.gi.org"},
-		{stage: "prod", namespace: "tenant-guardiancommercial-platform-prod", host: "harbor.prod.gi.org"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.stage, func(t *testing.T) {
@@ -38,8 +35,8 @@ func TestStageResolution(t *testing.T) {
 }
 
 func TestDefaultTag(t *testing.T) {
-	got := defaultTag("gamma", time.Date(2026, 6, 22, 14, 15, 16, 0, time.UTC))
-	want := "guardian-gamma-20260622t141516z"
+	got := defaultTag("root", time.Date(2026, 6, 22, 14, 15, 16, 0, time.UTC))
+	want := "guardian-root-20260622t141516z"
 	if got != want {
 		t.Fatalf("defaultTag() = %q, want %q", got, want)
 	}
@@ -49,11 +46,11 @@ func TestValidateConfig(t *testing.T) {
 	base := harborRegistryConfig{
 		Oras:         "/oras",
 		Kubectl:      "/kubectl",
-		Stage:        "dev",
-		Namespace:    "tenant-guardiancommercial-platform-dev",
-		Host:         "harbor.dev.gi.org",
+		Stage:        "root",
+		Namespace:    "tenant-root",
+		Host:         "harbor.guardianintelligence.org",
 		Repository:   "library/guardian-smoke",
-		Tag:          "guardian-dev-test",
+		Tag:          "guardian-root-test",
 		WaitTimeout:  "15m",
 		Iterations:   1,
 		PayloadBytes: 128,
@@ -89,24 +86,24 @@ func TestValidateConfig(t *testing.T) {
 
 func TestRegistryRef(t *testing.T) {
 	cfg := harborRegistryConfig{
-		Host:       "harbor.gamma.gi.org",
+		Host:       "harbor.guardianintelligence.org",
 		Repository: "library/guardian-smoke",
-		Tag:        "guardian-gamma-test",
+		Tag:        "guardian-root-test",
 		Iterations: 1,
 	}
-	if got, want := registryRef(cfg, 1), "harbor.gamma.gi.org/library/guardian-smoke:guardian-gamma-test"; got != want {
+	if got, want := registryRef(cfg, 1), "harbor.guardianintelligence.org/library/guardian-smoke:guardian-root-test"; got != want {
 		t.Fatalf("registryRef single = %q, want %q", got, want)
 	}
 	cfg.Iterations = 2
-	if got, want := registryRef(cfg, 2), "harbor.gamma.gi.org/library/guardian-smoke:guardian-gamma-test-000002"; got != want {
+	if got, want := registryRef(cfg, 2), "harbor.guardianintelligence.org/library/guardian-smoke:guardian-root-test-000002"; got != want {
 		t.Fatalf("registryRef multi = %q, want %q", got, want)
 	}
 }
 
 func TestPayloadFor(t *testing.T) {
 	cfg := harborRegistryConfig{
-		Stage:        "dev",
-		Host:         "harbor.dev.gi.org",
+		Stage:        "root",
+		Host:         "harbor.guardianintelligence.org",
 		Repository:   "library/guardian-smoke",
 		PayloadBytes: 256,
 	}
@@ -114,20 +111,20 @@ func TestPayloadFor(t *testing.T) {
 	if len(got) != 256 {
 		t.Fatalf("payload length = %d, want 256", len(got))
 	}
-	if !bytes.Contains(got, []byte("stage=dev")) || !bytes.Contains(got, []byte("iteration=3")) {
+	if !bytes.Contains(got, []byte("stage=root")) || !bytes.Contains(got, []byte("iteration=3")) {
 		t.Fatalf("payload missing identifying fields: %q", got)
 	}
 }
 
 func TestHarborReadinessChecks(t *testing.T) {
 	cfg := harborRegistryConfig{
-		Namespace:   "tenant-guardiancommercial-platform-gamma",
+		Namespace:   "tenant-root",
 		WaitTimeout: "20m",
 	}
 	got := harborReadinessChecks(cfg)
-	requireCommand(t, got, "Harbor app yaml", "tenant-guardiancommercial-platform-gamma", "harbors.apps.cozystack.io/guardian", "-o", "yaml")
-	requireCommand(t, got, "Harbor registry bucket claim yaml", "tenant-guardiancommercial-platform-gamma", "bucketclaims.objectstorage.k8s.io/harbor-guardian-registry", "-o", "yaml")
-	requireCommand(t, got, "Harbor registry bucket access yaml", "tenant-guardiancommercial-platform-gamma", "bucketaccesses.objectstorage.k8s.io/harbor-guardian-registry", "-o", "yaml")
+	requireCommand(t, got, "Harbor app yaml", "tenant-root", "harbors.apps.cozystack.io/guardian", "-o", "yaml")
+	requireCommand(t, got, "Harbor registry bucket claim yaml", "tenant-root", "bucketclaims.objectstorage.k8s.io/harbor-guardian-registry", "-o", "yaml")
+	requireCommand(t, got, "Harbor registry bucket access yaml", "tenant-root", "bucketaccesses.objectstorage.k8s.io/harbor-guardian-registry", "-o", "yaml")
 	requireCommand(t, got, "wait Harbor app Ready", "--for=condition=Ready", "harbors.apps.cozystack.io/guardian", "--timeout=20m")
 	requireCommand(t, got, "wait Harbor registry bucket ready", "--for=jsonpath={.status.bucketReady}=true", "bucketclaims.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=20m")
 	requireCommand(t, got, "wait Harbor registry bucket access granted", "--for=jsonpath={.status.accessGranted}=true", "bucketaccesses.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=20m")

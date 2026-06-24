@@ -1,15 +1,182 @@
-Bazel polyglot hermetically sealed monorepo for Guardian, a free open-source self-hostable private cloud capable of selling excess compute as QEMU sandboxes. Early days, still getting the infra set up.
+Bazel polyglot hermetically sealed monorepo for Guardian, a free open-source self-hostable private cloud capable of selling excess compute as QEMU VMs. Early days, still getting the infra set up.
 
 Pitch: CozyStack for agents.
 
-Reference Cozystack for prior art for the cloud portion.
+Grep through docs https://github.com/cozystack/cozystack/tree/release-1.5.0/docs (ensure you're reading the 1.5 docs and NOT v0 docs or v1.4.0.)
+
+Reference Cozystack for prior art for the cloud portion. Other inspiration: Zarf/UDS, AWS Landing Zone Accelerator
+<company_topology>
+Single Global Writer
+Public DNS stays globally managed, for now.
+
+Cozystack tenants map mostly onto AWS Accounts. `tenant-root` is the required Cozystack root/admin tenant for a regional management cluster. Cozystack packages/operators, Flux handoff, storage classes, COSI/BackupClass/system bucket, root ingress/load-balancer substrate, root infrastructure monitoring, child Tenant CRs, and cluster-wide policy. Do not put product workloads, product databases, or shared business logic in `tenant-root`. tenant-root owns:
+
+- Cozystack Package / operator declarations
+- Flux source and Kustomizations that reconcile the management cluster
+- child Tenant CRs/Flux slices that create them
+- storage substrate: StorageClasses, LINSTOR config, COSI classes
+- backup substrate: BackupClass/cozy-default, system bucket plumbing
+- root ingress/load-balancer substrate
+- MetalLB / Cilium / Gateway substrate if cluster-scoped
+- root DNS/bootstrap glue for cluster entrypoints: guardianintelligence.org
+- root Monitoring for Kubernetes/Cozystack/storage/ingress health
+- root Harbor/cache only if it is a cluster artifact cache, not a product registry
+- bootstrap/break-glass OpenBao only if needed for regional substrate recovery
+- cluster-wide NetworkPolicy/RBAC/admission defaults
+- cert-manager/issuer substrate if it serves all tenants
+- External Secrets / SecretStore bootstrap needed for tenant secret projection
+- operational drills for cluster survival: backup restore, node outage, OpenBao unseal, system bucket validation
+
+Today the active region is Latitude ASH (`ash`).
+
+```
+region: ash
+  cozystack-management-cluster: guardian-mgmt-ash
+    tenant-root                     # Cozystack substrate only
+
+    tenant-iam-dev                  # identity, principals, authz policy
+    tenant-iam-gamma
+    tenant-iam-prod
+
+    tenant-kms-dev                  # OpenBao-backed keys, signing, PKI, secrets
+    tenant-kms-gamma
+    tenant-kms-prod
+
+    tenant-audit-dev                # CloudTrail-ish audit/event ledger
+    tenant-audit-gamma
+    tenant-audit-prod
+
+    tenant-telemetry-dev            # CloudWatch/X-Ray-ish operational telemetry
+    tenant-telemetry-gamma
+    tenant-telemetry-prod
+
+    tenant-release-dev              # artifact admission, Kargo, release evidence
+    tenant-release-gamma
+    tenant-release-prod
+
+    tenant-billing-dev              # Guardian service
+    tenant-billing-gamma
+    tenant-billing-prod
+
+    tenant-aisucks-dev              # Guardian product
+    tenant-aisucks-gamma
+    tenant-aisucks-prod
+
+    tenant-workloads-dev            # QEMU workload-agent fleet, not customer pods
+    tenant-workloads-gamma
+    tenant-workloads-prod
+
+region: cmh                         # hypothetical future region
+  cozystack-management-cluster: guardian-mgmt-cmh
+    tenant-root
+    tenant-iam-dev
+    tenant-iam-gamma
+    tenant-iam-prod
+    tenant-kms-dev
+    tenant-kms-gamma
+    tenant-kms-prod
+    ...
+```
 
 Default release channels: Edge (CD on main), nightly, RC, stable.
 Default deployment stages: dev (PR preview), gamma (staging), prod.
+</company_topology>
 
-IOW: Bazel owns the build graph and produces bytes using OCI for layout. `cosign`/SLSA proves its authentic Guardian Intelligence LLC software. Cozystack management cluster reconciles our declared state.
+<repo_shape>
+src/
+    products/
+      company/
+        web/
+        deploy/base/                   # reusable company website Deployment/
+        Service
 
-Grep through docs https://github.com/cozystack/cozystack/tree/release-1.5.0/docs (ensure you're reading the 1.5 docs and NOT v0 docs or v1.4.0.)
+      aisucks/
+        api/
+        service/
+        web/
+        sdk/
+        release/
+        deploy/base/
+
+    services/
+      kms/
+        api/                           # future Connect KMS/Secrets API
+        service/                       # future wrapper/control plane if needed
+        release/
+        deploy/base/                   # reusable OpenBao-backed runtime
+        component
+
+      release/
+        api/
+        service/
+        release/
+        deploy/base/                   # Kargo/admission/registry policy surface
+
+      telemetry/
+        api/
+        service/
+        deploy/base/
+
+    infrastructure/
+      components/                      # reusable Kustomize bases/components
+        cozystack-root/
+        root-monitoring/
+        root-harbor-cache/
+        openbao-kms/
+        harbor-registry/
+        postgres-service/
+        clickhouse-service/
+
+      clusters/
+        ash/
+          bootstrap/
+            opentofu/
+              baremetal/
+              dns/
+              openbao-bootstrap/
+            talm/
+
+          root/                        # reconciled into tenant-root
+            kustomization.yaml
+            cozystack/
+            flux/
+            networking/
+            storage/
+            backup/
+            observability/
+            registry/
+            secrets-bootstrap/
+            policy/
+            tenants/
+
+          deployments/                 # reconciled into child tenants
+            kms/
+              dev/
+              gamma/
+              prod/
+            release/
+              dev/
+              gamma/
+              prod/
+            company/
+              dev/
+              gamma/
+              prod/
+            aisucks/
+              dev/
+              gamma/
+              prod/
+
+      tests/
+      cmd/                             # infra validation/drill helpers
+      load/
+    tools/
+</repo_shape>
+
+<technology>
+Bazel owns the build graph and produces bytes using OCI for layout. `cosign`/SLSA proves its authentic Guardian Intelligence LLC software. Cozystack management cluster reconciles our declared state.
+
+Use Flagger for progressive delivery after Flux applies an approved digest. Use Kargo/Freight to promote immutable release candidates to service+stage+region targets.
 
 Domain: guardianintelligence.org (abbreviated gi.org)
 
@@ -70,52 +237,17 @@ Release doctrine:
 - Target Flagger for deployed-service progressive delivery after Flux applies an approved workload digest: canary, blue/green, metric checks, webhooks, promotion, and rollback. Flagger is not the distributable promotion system.
 - Release channels and stage names are not the same thing. Distributed software advances through increasing evidence gates such as edge -> nightly -> rc -> stable. Deployed software advances through runtime environments and rollout strategies such as dev/gamma/prod plus canary or blue/green.
 
-Fleet (all Latitude.sh ASH, f4.metal.small; the Latitude project is `guardian`;
-per-box physical facts — MACs, disk serials, gateways — live in
-`src/hosts/<asset-id>/host.yaml`; post-Kubernetes desired state lives in
-`src/environments/<environment>/environment.yaml`). Physical hostnames are
-stable asset names, not stage names. Dev/gamma/prod are assignments expressed
-by clusters, namespaces, environments, and tags.
-
-Compute doctrine (ratified 2026-06-12): all Verself compute is subsumed — the
-whole fleet is guardian fleet, one pool. Spare dev/staging capacity IS workload
-capacity: idle boxes run customer workloads instead of sitting as cold spares.
-Customer/untrusted work never runs as a k8s pod — it runs in QEMU microVMs
-drawn from a per-host **warm pool** (booted before the work exists; "launch" =
-bind a late-loaded rootfs to a waiting VM, which is what makes start time
-constant and placement locality-free). The pool is owned by a single
-**workload-agent binary**: hosts know nothing except "run the agent"; the agent
-boots/recycles VMs, binds work, supervises the full lifecycle, and heartbeats
-capacity. Kubernetes schedules the *agent*, not the sandboxes — sandbox
-placement is verself-v2 control-plane logic (power-of-two-choices over
-eventually-consistent capacity heartbeats; lock-free, tolerant of stale state).
-QEMU over Kata: Kata would put the k8s scheduler in the sandbox path and boot
-VMs at pod-create (defeating the warm pool); plain QEMU keeps the agent in
-charge and the PCI/TEE/GPU passthrough path open for the rs4 era. Agent
-upgrades ship like any release: quiesce is a first-class verb (drain a host's
-pool without disrupting running work), and load tests across the nonprod fleet
-gate promotion.
-
-| Layer | Facts |
-| - | - |
-| Provider | Latitude.sh bare metal. Rescue mode is the reliable recovery lever (~3 min). OS-of-record governs the boot chain: `ubuntu` chainloads the local disk; `ipxe` chains the URL on every boot and disables rescue. Reinstall workflows wedge when the box is dark; power-cycle kicks them. |
-| BMC / IPMI (not ours) | Supermicro BMC, SOL payload on channel 1 port 623. **2026-06-11: operator confirms IPMI access, OOB access, and SOL are all available via the Latitude API** — this is the true out-of-band disaster-recovery path (survives any host-side mistake: NIC misconfig, firewall lockout, dead CNI), to be verified working before any host-firewall enforcement. (Historical, 2026-06-10: the per-user SOL payload for Latitude's OOB proxy user (7, `customer_access`) measured disabled in-band; superseded by the API-side access above.) Kernel side handled: schematic bakes `console=ttyS1,115200n8`. OOB SOL proxy: `POST /servers/{id}/out_of_band_connection`. |
-| Hardware | Supermicro AS-3015MR-H10TNR, AMD EPYC 4484PX (Zen 4, 12c). 2× 894GiB NVMe — select by serial, device names swap across boots. TPM 2.0 discrete (Infineon IFX). AMD-Vi IOMMU. PSP/CCP present (`psp enabled`, `tee enabled`) but SEV/SEV-SNP off in BIOS (no CPU flags, no `/dev/sev`); BIOS access via provider required to change. |
-| Firmware | AMI UEFI 2.5. Matrix is UEFI-only; Secure Boot off today (UKI signing + TPM measurement is the planned path). |
-| OS | Talos Linux v1.13.0 (Cozystack 1.5.0 talm-preset set): immutable, API-only, no SSH. Machine config generated by `guardian up` from `host.yaml` (serial-selected install disk, static network, single-node patches). |
-| Disks | System NVMe — drills wipe STATE+EPHEMERAL only (`--wipe-mode all` erases the bootloader and user disks). Data NVMe — reserved for ZFS, survives `down`. |
-| Cluster | Kubernetes v1.34.3, single node, default CNI, PSA baseline with privileged namespaces opt-in per component. |
-| Secrets | OpenBao v2.5.4, raft integrated storage, sealed by default. Backup writes know R2; restore takes `(blob, sha256)`; init/unseal/restore are operator decisions, never automated. |
-| Build | Bazel 9.1.0 (bazelisk sha256-pinned), bzlmod, rules_oci/rules_go; Go 1.26.4; deterministic OCI layouts and tarballs. |
-
-Product Surfaces:
-
-- GitHub App (20x faster CI than GitHub Actions). (Not Yet Implemented, must be adapted from Verself repo)
-- Software Company from an API call or web surface; the CLI only prepares hosts for the cluster control plane. (Not Yet Implemented)
+Fleet (all Latitude.sh ASH, f4.metal.small; the Latitude project is `guardian`).
 
 Objectives (outdated but mildly useful historical context)
 
-Phase 1 - Lay the groundwork: "the goal is "You just provisioned a box on latitude. Run the guardian CLI from your laptop to turn it into a functional Guardian cluster that can hand off to Kubernetes/Crossplane/Flux" (we'll get as fast as physically possible without a warm pool, and then do a warm pool + managed/billed approach to get it under 4 minutes). We ship this host-bootstrap capability via the `guardian` CLI, which is also what we dogfood to provision OUR own servers and execute disaster-recovery drills (required). We're out of this phase when we have oci.guardianintelligence.org stood up vending in-toto attested binaries that users can run `cosign verify` on. No TEE because all code is open-source. See https://github.com/guardian-intelligence/verself/pull/150 for a previous attempt. This also doubles as our own disaster recovery procedure, which we will execute on an hourly basis.
+Planned Product Surfaces:
+
+- GitHub App (20x faster CI than GitHub Actions). (Not Yet Implemented, must be adapted from Verself repo)
+- Software Company from an API call or web surface; host come-up tooling only prepares machines for the management cluster. (Not Yet Implemented)
+
+
+Phase 1 - Lay the groundwork: management-cluster bootstrap is repo-declared infrastructure plus narrowly scoped host come-up tooling. Do not recreate the retired `guardian` CLI as a generic operator surface. Disaster recovery and load testing live as explicit infra drill/load helpers; day-to-day convergence belongs to OpenTofu, Talm, Cozystack, Flux, and standard Kubernetes controllers.
 
 Phase 2 - We assimilate the gamma and prod boxes from Verself and then figure out a GitOps pipeline: development boxes ship a single-box version of Guardian. Merges to main continuously deploy to Gamma. Synthetics canaries continuously run against all environments. On Gamma they gate promotion to Prod. on Prod they trigger alerts/rollbacks. This is the critical phase. We get confidence in our release process and then we rapidly release software, create a pipeline to automate announcements to the guardianintelligence.org/news, begin getting publicity, traction, contributing useful free open source software. Gate: we have automated or nearly automated releases/yank-drills practiced for
 

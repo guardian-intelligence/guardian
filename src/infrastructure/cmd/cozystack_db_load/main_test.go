@@ -7,8 +7,8 @@ import (
 )
 
 func TestDefaultJobName(t *testing.T) {
-	got := defaultJobName("gamma", "postgres", time.Date(2026, 6, 22, 13, 14, 15, 0, time.UTC))
-	want := "guardian-gamma-postgres-load-20260622t131415z"
+	got := defaultJobName("root", "postgres", time.Date(2026, 6, 22, 13, 14, 15, 0, time.UTC))
+	want := "guardian-root-postgres-load-20260622t131415z"
 	if got != want {
 		t.Fatalf("defaultJobName() = %q, want %q", got, want)
 	}
@@ -18,8 +18,8 @@ func TestPostgresJobManifest(t *testing.T) {
 	cfg := baseConfig("postgres")
 	got := postgresJobManifest(cfg)
 	for _, want := range []string{
-		"kind: Job\nmetadata:\n  name: guardian-dev-postgres-load-test\n",
-		"namespace: tenant-guardiancommercial-platform-dev\n",
+		"kind: Job\nmetadata:\n  name: guardian-root-postgres-load-test\n",
+		"namespace: tenant-root\n",
 		"guardian.dev/component: postgres\n",
 		"image: " + postgresBenchImage + "\n",
 		"value: postgres-guardian-rw\n",
@@ -28,7 +28,7 @@ func TestPostgresJobManifest(t *testing.T) {
 		"name: HOME\n              value: /tmp\n",
 		"pgbench --initialize --scale \"$PGBENCH_SCALE\"",
 		"pgbench --client \"$PGBENCH_CLIENTS\"",
-		"value: guardian_dev_postgres_load_test\n",
+		"value: guardian_root_postgres_load_test\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("postgres manifest missing %q:\n%s", want, got)
@@ -40,8 +40,8 @@ func TestClickHouseJobManifest(t *testing.T) {
 	cfg := baseConfig("clickhouse")
 	got := clickHouseJobManifest(cfg)
 	for _, want := range []string{
-		"kind: Job\nmetadata:\n  name: guardian-dev-clickhouse-load-test\n",
-		"namespace: tenant-guardiancommercial-platform-dev\n",
+		"kind: Job\nmetadata:\n  name: guardian-root-clickhouse-load-test\n",
+		"namespace: tenant-root\n",
 		"guardian.dev/component: clickhouse\n",
 		"image: " + clickhouseBenchImage + "\n",
 		"value: chendpoint-clickhouse-guardian\n",
@@ -87,8 +87,8 @@ func TestNamespaceAndComponentValidation(t *testing.T) {
 	if got, err := namespaceForStage("root"); err != nil || got != "tenant-root" {
 		t.Fatalf("namespaceForStage(root) = %q, %v", got, err)
 	}
-	if got, err := namespaceForStage("prod"); err != nil || got != "tenant-guardiancommercial-platform-prod" {
-		t.Fatalf("namespaceForStage(prod) = %q, %v", got, err)
+	if _, err := namespaceForStage("prod"); err == nil {
+		t.Fatalf("retired product stage was accepted")
 	}
 	if _, err := namespaceForStage("staging"); err == nil {
 		t.Fatalf("invalid stage was accepted")
@@ -112,13 +112,13 @@ func TestNamespaceAndComponentValidation(t *testing.T) {
 }
 
 func baseConfig(component string) dbLoadConfig {
-	name := "guardian-dev-" + component + "-load-test"
+	name := "guardian-root-" + component + "-load-test"
 	return dbLoadConfig{
 		Kubectl:                   "/kubectl",
 		RequestTimeout:            "15s",
 		WaitTimeout:               "20m",
-		Stage:                     "dev",
-		Namespace:                 "tenant-guardiancommercial-platform-dev",
+		Stage:                     "root",
+		Namespace:                 "tenant-root",
 		Component:                 component,
 		ApplicationName:           "guardian",
 		Name:                      name,

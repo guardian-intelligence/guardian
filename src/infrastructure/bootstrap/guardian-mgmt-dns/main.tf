@@ -7,22 +7,16 @@ locals {
     node.public_ipv4
   ])
 
-  route53_record_sets = {
-    "dev.gi.org"          = local.public_ingress_ipv4s
-    "gamma.gi.org"        = local.public_ingress_ipv4s
-    "prod.gi.org"         = local.public_ingress_ipv4s
-    "harbor.dev.gi.org"   = local.public_ingress_ipv4s
-    "harbor.gamma.gi.org" = local.public_ingress_ipv4s
-    "harbor.prod.gi.org"  = local.public_ingress_ipv4s
-  }
+  route53_record_sets = {}
 
   cloudflare_record_sets = {
-    "guardianintelligence.org"                  = local.public_ingress_ipv4s
-    "dashboard.guardianintelligence.org"        = local.public_ingress_ipv4s
-    "grafana.guardianintelligence.org"          = local.public_ingress_ipv4s
-    "grafana.platform.guardianintelligence.org" = local.public_ingress_ipv4s
-    "harbor.guardianintelligence.org"           = local.public_ingress_ipv4s
-    "s3.guardianintelligence.org"               = local.public_ingress_ipv4s
+    "guardianintelligence.org"           = local.public_ingress_ipv4s
+    "api.guardianintelligence.org"       = local.public_ingress_ipv4s
+    "dashboard.guardianintelligence.org" = local.public_ingress_ipv4s
+    "grafana.guardianintelligence.org"   = local.public_ingress_ipv4s
+    "harbor.guardianintelligence.org"    = local.public_ingress_ipv4s
+    "keycloak.guardianintelligence.org"  = local.public_ingress_ipv4s
+    "s3.guardianintelligence.org"        = local.public_ingress_ipv4s
   }
 
   cloudflare_record_names = {
