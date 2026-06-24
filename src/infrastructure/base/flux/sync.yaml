@@ -14,7 +14,7 @@ metadata:
   name: guardian
   namespace: cozy-fluxcd
 spec:
-  interval: 5m
+  interval: 10s
   url: https://github.com/guardian-intelligence/guardian
   ref:
     branch: main
