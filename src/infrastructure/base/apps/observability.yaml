@@ -61,7 +61,7 @@ spec:
           memory: 1Gi
   logsStorages:
     - name: generic
-      retentionPeriod: "7"
+      retentionPeriod: "3"
       storage: 5Gi
       storageClassName: replicated
   grafana:

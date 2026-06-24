@@ -687,7 +687,6 @@ func assertMonitoring(t *testing.T, rel, namespace, host string, highCapacity bo
 	if highCapacity {
 		shortSize = "5Gi"
 		longSize = "10Gi"
-		logRetention = "7"
 		logSize = "5Gi"
 		dbSize = "2Gi"
 		alertaStorage = "2Gi"
