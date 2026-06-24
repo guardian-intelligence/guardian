@@ -1,25 +1,22 @@
 # guardian
 
-Guardian is being cut over to a Cozystack-native management cluster.
-
-The active `guardian` CLI surface is deliberately narrow: it manages
-host/bootstrap come-up paths and delegates post-Kubernetes desired state to the
-repo's Aspect, OpenTofu, Talm, Talos, Flux, and Cozystack configuration. It is
-not a generic cluster administration CLI.
+Guardian is being cut over to a Cozystack-native management cluster. The
+post-Kubernetes desired state is declared in this repo and converged by
+OpenTofu, Talm, Talos, Flux, Cozystack, and standard Kubernetes controllers.
+Local commands are limited to bootstrap, validation, load, and disaster-recovery
+drills.
 
 ## Layout
 
 ```text
 .aspect/                       durable Aspect task surface
-src/guardian/                  Go CLI entrypoints for host/bootstrap come-up
 src/infrastructure/bootstrap/  OpenTofu bootstrap roots
-src/infrastructure/base/       base management-cluster Kubernetes desired state
-src/infrastructure/tenants/    Cozystack tenant hierarchy and stage resources
-src/infrastructure/products/   product-stage Kustomize entrypoints
+src/infrastructure/base/       root management-cluster Kubernetes desired state
+src/infrastructure/cmd/        infra validation, load, and DR helpers
+src/infrastructure/load/       k6 scripts used by infra load helpers
 src/infrastructure/talm/       Talm chart for the management control plane
 src/products/company/          active TanStack company website artifact
 src/tools/                     repo-pinned external tool archives
-docs/runbooks/                 operator runbooks
 ```
 
 ## Commands
@@ -41,8 +38,7 @@ aspect infra openbao-drill \
 aspect infra openbao-apply \
   --revision "<merged-main-commit-sha>"
 
-bazelisk run //src/guardian/cmd/guardian -- \
-  up management \
+aspect infra observability-drill \
   --revision "<merged-main-commit-sha>"
 ```
 
@@ -57,14 +53,16 @@ Flux/source-controller convergence on the requested merged `main` revision.
 clusters when only the Cozystack installer/operator release needs to move.
 `aspect infra openbao-drill --mode init-unseal` initializes/unseals the
 cluster-local OpenBao app, and `aspect infra openbao-apply` applies the standard
-OpenBao API state through a live port-forward. Postgres and ClickHouse backups
-use Cozystack 1.5's platform-managed `BackupClass/cozy-default` and system
-bucket via `spec.backup.useSystemBucket: true`; the repo does not carry
-Guardian-specific backup strategies or per-app backup credential Secrets.
+OpenBao API state through a live port-forward. `aspect infra
+observability-drill` creates a short root Postgres pgbench job, then queries
+VictoriaMetrics and VictoriaLogs for that exact workload and the CNPG scrape
+path. Postgres and ClickHouse backups use Cozystack 1.5's platform-managed
+`BackupClass/cozy-default` and system bucket via
+`spec.backup.useSystemBucket: true`; the repo does not carry Guardian-specific
+backup strategies or per-app backup credential Secrets.
 
 Generated Talm secrets, rendered node configs, kubeconfigs, and local operator
-state stay out of Git. See
-`docs/runbooks/cozystack-mgmt-bringup.md` for the full management-cluster path.
+state stay out of Git.
 
 ## Pinned Tools
 

@@ -23,6 +23,7 @@ HTTP_LOAD_TARGET = "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_
 NODE_OUTAGE_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill"
 OPENBAO_APPLY_TARGET = "//src/infrastructure/cmd/cozystack_openbao_apply:cozystack_openbao_apply"
 OPENBAO_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill"
+OBSERVABILITY_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_observability_drill:cozystack_observability_drill"
 GUARDIAN_MGMT_TALOS_NODES = [
     "10.8.0.11",
     "10.8.0.12",
@@ -205,6 +206,7 @@ INFRA_TESTS = [
     "//src/infrastructure/cmd/cozystack_harbor_registry:cozystack_harbor_registry_test",
     "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load_test",
     "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill_test",
+    "//src/infrastructure/cmd/cozystack_observability_drill:cozystack_observability_drill_test",
     "//src/infrastructure/cmd/cozystack_openbao_apply:cozystack_openbao_apply_test",
     "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill_test",
     "//src/infrastructure/tests:manifest_invariants_test",
@@ -1509,6 +1511,65 @@ def _load_harbor_registry_impl(ctx):
         label = "cozystack harbor registry load",
     )
 
+def _observability_drill_impl(ctx):
+    kubectl = _kubectl_path(ctx)
+    if kubectl == None:
+        return 1
+
+    rc = _check_live_context(ctx, kubectl)
+    if rc != 0:
+        return rc
+    if ctx.args.revision != "":
+        rc = _check_flux_revision(ctx, kubectl, ctx.args.revision)
+        if rc != 0:
+            return rc
+
+    drill_args = [
+        "--kubectl",
+        kubectl,
+        "--stage",
+        ctx.args.stage,
+        "--application",
+        ctx.args.application,
+        "--request-timeout",
+        ctx.args.request_timeout,
+        "--wait-timeout",
+        ctx.args.wait_timeout,
+        "--poll-timeout",
+        ctx.args.poll_timeout,
+        "--poll-interval",
+        ctx.args.poll_interval,
+        "--port-forward-ready-timeout",
+        ctx.args.port_forward_ready_timeout,
+        "--ttl-seconds-after-finished",
+        ctx.args.ttl_seconds_after_finished,
+        "--pgbench-scale",
+        ctx.args.pgbench_scale,
+        "--pgbench-clients",
+        ctx.args.pgbench_clients,
+        "--pgbench-jobs",
+        ctx.args.pgbench_jobs,
+        "--pgbench-duration-seconds",
+        ctx.args.pgbench_duration_seconds,
+    ]
+    if ctx.args.kubeconfig != "":
+        drill_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
+    if ctx.args.name != "":
+        drill_args.extend(["--name", ctx.args.name])
+    if ctx.args.skip_load == "true":
+        drill_args.append("--skip-load=true")
+    elif ctx.args.skip_load != "false":
+        ctx.std.io.stderr.write("ERROR: --skip-load must be true or false\n")
+        return 1
+
+    return checked_spawn(
+        ctx,
+        "bazelisk",
+        ["run", OBSERVABILITY_DRILL_TARGET, "--"] + drill_args,
+        cwd = ws_path(ctx),
+        label = "cozystack observability drill",
+    )
+
 def _openbao_drill_impl(ctx):
     kubectl = _kubectl_path(ctx)
     if kubectl == None:
@@ -1802,6 +1863,31 @@ load_harbor_registry = task(
         "stage": args.string(default = "root", description = "Guardian bootstrap stage: root."),
         "tag": args.string(default = "", description = "Optional tag or tag prefix. Defaults to a timestamped tag."),
         "wait_timeout": args.string(default = "15m", description = "Timeout waiting for the Harbor app readiness preflight."),
+    },
+)
+
+observability_drill = task(
+    implementation = _observability_drill_impl,
+    name = "observability-drill",
+    group = ["infra"],
+    summary = "Run a pgbench workload and verify VictoriaMetrics and VictoriaLogs can query the root Postgres path.",
+    args = {
+        "application": args.string(default = "guardian", description = "Cozystack Postgres app name."),
+        "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
+        "name": args.string(default = "", description = "Optional Kubernetes Job name. Defaults to a timestamped DNS label."),
+        "pgbench_clients": args.string(default = "4", description = "pgbench concurrent client count."),
+        "pgbench_duration_seconds": args.string(default = "30", description = "pgbench run duration in seconds."),
+        "pgbench_jobs": args.string(default = "2", description = "pgbench worker thread count."),
+        "pgbench_scale": args.string(default = "10", description = "pgbench initialization scale factor."),
+        "poll_interval": args.string(default = "10s", description = "Interval for VictoriaMetrics and VictoriaLogs polling."),
+        "poll_timeout": args.string(default = "3m", description = "Timeout waiting for VictoriaMetrics and VictoriaLogs ingestion."),
+        "port_forward_ready_timeout": args.string(default = "10s", description = "Timeout for VictoriaMetrics/VictoriaLogs port-forward readiness."),
+        "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
+        "revision": args.string(default = "", description = "Optional merged Git commit SHA that source-controller must have applied before the drill."),
+        "skip_load": args.string(default = "false", description = "Set true to verify observability for an existing --name without creating a new load Job."),
+        "stage": args.string(default = "root", description = "Guardian bootstrap stage: root."),
+        "ttl_seconds_after_finished": args.string(default = "86400", description = "Kubernetes Job ttlSecondsAfterFinished."),
+        "wait_timeout": args.string(default = "20m", description = "Timeout for readiness and load Job completion."),
     },
 )
 

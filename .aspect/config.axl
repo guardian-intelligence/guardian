@@ -27,6 +27,7 @@ load(
     infra_node_outage_drill = "node_outage_drill",
     infra_openbao_apply = "openbao_apply",
     infra_openbao_drill = "openbao_drill",
+    infra_observability_drill = "observability_drill",
     infra_talos = "talos",
     infra_tofu_init = "tofu_init",
     infra_topology = "topology",
@@ -54,6 +55,7 @@ def config(ctx):
     ctx.tasks.add(infra_node_outage_drill)
     ctx.tasks.add(infra_openbao_apply)
     ctx.tasks.add(infra_openbao_drill)
+    ctx.tasks.add(infra_observability_drill)
     ctx.tasks.add(infra_talos)
     ctx.tasks.add(infra_tofu_init)
     ctx.tasks.add(infra_topology)
