@@ -28,18 +28,14 @@ aspect infra validate
 
 aspect infra tofu-init
 
-aspect infra bootstrap \
-  --revision "<merged-main-commit-sha>"
+aspect infra bootstrap
 
 aspect infra openbao-drill \
-  --mode init-unseal \
-  --revision "<merged-main-commit-sha>"
+  --mode init-unseal
 
-aspect infra openbao-apply \
-  --revision "<merged-main-commit-sha>"
+aspect infra openbao-apply
 
-aspect infra observability-drill \
-  --revision "<merged-main-commit-sha>"
+aspect infra observability-drill
 ```
 
 `aspect infra bootstrap` initializes the standard OpenTofu S3 backend from the
@@ -47,8 +43,7 @@ checked-in Cloudflare account id in `src/infrastructure/bootstrap/backend.tfvars
 or an explicit `AWS_ENDPOINT_URL_S3` override, prints the standard OpenTofu
 management topology outputs, validates the checked-in substrate, refreshes the
 gitignored Talm kubeconfig, runs the Talos L2 gate, upgrades the Cozystack
-installer/operator to the repo-pinned version, and verifies live
-Flux/source-controller convergence on the requested merged `main` revision.
+installer/operator to the repo-pinned version.
 `aspect infra upgrade-cozystack` is the narrow day-two path for existing
 clusters when only the Cozystack installer/operator release needs to move.
 `aspect infra openbao-drill --mode init-unseal` initializes/unseals the
@@ -60,6 +55,9 @@ path. Postgres and ClickHouse backups use Cozystack 1.5's platform-managed
 `BackupClass/cozy-default` and system bucket via
 `spec.backup.useSystemBucket: true`; the repo does not carry Guardian-specific
 backup strategies or per-app backup credential Secrets.
+
+Available live debugging CLIs are repo-pinned `kubectl`, `talosctl`, `helm`,
+`k6`, and ORAS through the focused `aspect infra ...` tasks.
 
 Generated Talm secrets, rendered node configs, kubeconfigs, and local operator
 state stay out of Git.
