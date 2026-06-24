@@ -608,7 +608,7 @@ func testExternalDNS(t *testing.T) {
 	if len(dnsNames) != 1 {
 		t.Fatalf("external-dns DNS match rules = %d, want 1", len(dnsNames))
 	}
-	assertString(t, asManifest(t, dnsNames[0], "external-dns DNS match"), "api.cloudflare.com", "matchName")
+	assertString(t, asManifest(t, dnsNames[0], "external-dns DNS match"), "*", "matchPattern")
 	fqdnRule := asManifest(t, egress[2], "external-dns egress[2]")
 	fqdns := sliceAt(t, fqdnRule, "toFQDNs")
 	if len(fqdns) != 1 {

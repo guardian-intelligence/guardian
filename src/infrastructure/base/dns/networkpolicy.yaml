@@ -22,7 +22,7 @@ spec:
               protocol: TCP
           rules:
             dns:
-              - matchName: api.cloudflare.com
+              - matchPattern: "*"
     - toFQDNs:
         - matchName: api.cloudflare.com
       toPorts:
