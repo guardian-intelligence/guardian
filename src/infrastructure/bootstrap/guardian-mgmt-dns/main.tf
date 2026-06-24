@@ -6,6 +6,17 @@ locals {
     "ash-wind",
     "ash-water",
   ]
+  public_ingress_origins = {
+    ash-earth = {
+      public_ipv4 = "206.223.228.101"
+    }
+    ash-wind = {
+      public_ipv4 = "45.250.254.119"
+    }
+    ash-water = {
+      public_ipv4 = "206.223.228.87"
+    }
+  }
   public_edge_hostnames = [
     "*.guardianintelligence.org",
     "guardianintelligence.org",
@@ -20,24 +31,8 @@ locals {
 
   public_ingress_ipv4s = [
     for name in local.public_ingress_origin_names :
-    data.terraform_remote_state.guardian_mgmt.outputs.control_plane_nodes[name].public_ipv4
+    local.public_ingress_origins[name].public_ipv4
   ]
-}
-
-data "terraform_remote_state" "guardian_mgmt" {
-  backend = "s3"
-  config = {
-    bucket = "guardian-vault"
-    key    = "opentofu/guardian-mgmt.tfstate"
-    region = "auto"
-
-    endpoint                    = "https://${var.cloudflare_account_id}.r2.cloudflarestorage.com"
-    skip_credentials_validation = true
-    skip_metadata_api_check     = true
-    skip_region_validation      = true
-    skip_requesting_account_id  = true
-    use_path_style              = true
-  }
 }
 
 data "cloudflare_zone" "guardianintelligence_org" {
@@ -82,7 +77,7 @@ resource "cloudflare_load_balancer_pool" "guardian_mgmt_ash" {
 
     content {
       name    = origins.value
-      address = data.terraform_remote_state.guardian_mgmt.outputs.control_plane_nodes[origins.value].public_ipv4
+      address = local.public_ingress_origins[origins.value].public_ipv4
       enabled = true
       weight  = 1
     }
