@@ -40,6 +40,27 @@ spec:
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
+  name: guardian-mgmt-platform-patches
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/base/platform-patches
+  sourceRef:
+    kind: GitRepository
+    name: guardian
+  dependsOn:
+    - name: guardian-mgmt-platform
+  # These patches target Cozystack-generated platform Package objects. They
+  # retry until the platform chart has created the targets and never prune
+  # generated objects.
+  prune: false
+  wait: false
+  timeout: 5m
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
   name: guardian-mgmt-storage
   namespace: cozy-fluxcd
 spec:

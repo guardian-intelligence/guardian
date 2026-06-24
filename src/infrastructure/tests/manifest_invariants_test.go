@@ -54,6 +54,7 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("single default storage class", testSingleDefaultStorageClass)
 	t.Run("linstor data pools", testLINSTORDataPools)
 	t.Run("cozystack system bucket backups", testCozystackSystemBucketBackups)
+	t.Run("cozystack platform patches", testCozystackPlatformPatches)
 	t.Run("cozystack app patches", testCozystackAppPatches)
 	t.Run("root tenant core services", testRootTenantCoreServices)
 	t.Run("observability", testObservability)
@@ -367,6 +368,50 @@ func testCozystackSystemBucketBackups(t *testing.T) {
 	docs := readManifests(t, "src/infrastructure/base/apps/core-services.yaml")
 	assertSystemBucketBackup(t, docs, "Postgres", "tenant-root", "guardian-postgres-daily", "7 1 * * *")
 	assertSystemBucketBackup(t, docs, "ClickHouse", "tenant-root", "guardian-clickhouse-daily", "17 1 * * *")
+}
+
+func testCozystackPlatformPatches(t *testing.T) {
+	docs := readManifests(t, "src/infrastructure/base/platform-patches/cozystack-networking-hubble.yaml")
+	pkg := findObject(t, docs, "Package", "", "cozystack.networking")
+	assertString(t, pkg, "cozystack.io/v1alpha1", "apiVersion")
+	assertBool(t, pkg, true, "spec", "components", "cilium", "values", "cilium", "hubble", "enabled")
+	assertBool(t, pkg, true, "spec", "components", "cilium", "values", "cilium", "hubble", "relay", "enabled")
+	assertBool(t, pkg, true, "spec", "components", "cilium", "values", "cilium", "hubble", "ui", "enabled")
+	assertBool(t, pkg, true, "spec", "components", "cilium", "values", "cilium", "hubble", "metrics", "serviceMonitor", "enabled")
+	assertBool(t, pkg, true, "spec", "components", "cilium", "values", "cilium", "hubble", "relay", "prometheus", "serviceMonitor", "enabled")
+	assertString(t, pkg, "50m", "spec", "components", "cilium", "values", "cilium", "hubble", "relay", "resources", "requests", "cpu")
+	assertString(t, pkg, "256Mi", "spec", "components", "cilium", "values", "cilium", "hubble", "relay", "resources", "limits", "memory")
+
+	metrics := sliceAt(t, pkg, "spec", "components", "cilium", "values", "cilium", "hubble", "metrics", "enabled")
+	if len(metrics) != 7 {
+		t.Fatalf("hubble metrics enabled = %d entries, want 7", len(metrics))
+	}
+	for _, want := range []string{"dns", "drop", "tcp", "flow", "port-distribution", "icmp", "httpV2:exemplars=true;labelsContext=source_ip,source_namespace,source_workload,destination_ip,destination_namespace,destination_workload,traffic_direction"} {
+		found := false
+		for _, got := range metrics {
+			if got == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("hubble metrics enabled missing %q: %#v", want, metrics)
+		}
+	}
+
+	fluxDocs := readManifests(t, "src/infrastructure/base/flux/sync.yaml")
+	kustomization := findObject(t, fluxDocs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-platform-patches")
+	assertString(t, kustomization, "kustomize.toolkit.fluxcd.io/v1", "apiVersion")
+	assertString(t, kustomization, "./src/infrastructure/base/platform-patches", "spec", "path")
+	assertBool(t, kustomization, false, "spec", "prune")
+	assertBool(t, kustomization, false, "spec", "wait")
+	dependsOn := valueAt(kustomization, "spec", "dependsOn")
+	deps, ok := dependsOn.([]any)
+	if !ok || len(deps) != 1 {
+		t.Fatalf("guardian-mgmt-platform-patches dependsOn = %#v, want one dependency", dependsOn)
+	}
+	dep := asManifest(t, deps[0], "guardian-mgmt-platform-patches dependsOn[0]")
+	assertString(t, dep, "guardian-mgmt-platform", "name")
 }
 
 func testCozystackAppPatches(t *testing.T) {
@@ -715,6 +760,13 @@ func testFluxHandoff(t *testing.T) {
 	assertBool(t, platform, false, "spec", "prune")
 	assertBool(t, platform, false, "spec", "wait")
 
+	platformPatches := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-platform-patches")
+	assertString(t, platformPatches, "./src/infrastructure/base/platform-patches", "spec", "path")
+	assertString(t, platformPatches, "GitRepository", "spec", "sourceRef", "kind")
+	assertString(t, platformPatches, "guardian", "spec", "sourceRef", "name")
+	assertBool(t, platformPatches, false, "spec", "prune")
+	assertBool(t, platformPatches, false, "spec", "wait")
+
 	storage := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-storage")
 	assertString(t, storage, "./src/infrastructure/base/storage", "spec", "path")
 	assertString(t, storage, "GitRepository", "spec", "sourceRef", "kind")
@@ -725,6 +777,11 @@ func testFluxHandoff(t *testing.T) {
 	storageDeps := sliceAt(t, storage, "spec", "dependsOn")
 	if len(storageDeps) != 1 || stringAt(asManifest(t, storageDeps[0], "storage spec.dependsOn[0]"), "name") != "guardian-mgmt-platform" {
 		t.Fatalf("guardian-mgmt-storage dependsOn = %#v, want only guardian-mgmt-platform", storageDeps)
+	}
+
+	platformPatchDeps := sliceAt(t, platformPatches, "spec", "dependsOn")
+	if len(platformPatchDeps) != 1 || stringAt(asManifest(t, platformPatchDeps[0], "platform patches spec.dependsOn[0]"), "name") != "guardian-mgmt-platform" {
+		t.Fatalf("guardian-mgmt-platform-patches dependsOn = %#v, want only guardian-mgmt-platform", platformPatchDeps)
 	}
 
 	baseDeps := sliceAt(t, base, "spec", "dependsOn")

@@ -92,3 +92,26 @@ func TestPrometheusValuePositive(t *testing.T) {
 		t.Fatal("invalid Prometheus value was accepted")
 	}
 }
+
+func TestVictoriaMetricsQueriesIncludeHubble(t *testing.T) {
+	cfg := observabilityConfig{
+		Namespace:       "tenant-root",
+		ApplicationName: "guardian",
+		Name:            "guardian-root-observability-20260624t030405z",
+	}
+	queries := victoriaMetricsQueries(cfg)
+	joined := make([]string, 0, len(queries))
+	for _, query := range queries {
+		joined = append(joined, query.label+"="+query.query)
+	}
+	got := strings.Join(joined, "\n")
+	for _, want := range []string{
+		`Postgres scrape targets in VictoriaMetrics=sum(up{namespace="tenant-root",job="tenant-root/postgres-guardian"})`,
+		"Hubble flow metrics in VictoriaMetrics=sum(hubble_flows_processed_total)",
+		"Hubble TCP metrics in VictoriaMetrics=sum(hubble_tcp_flags_total)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("victoriaMetricsQueries missing %q:\n%s", want, got)
+		}
+	}
+}

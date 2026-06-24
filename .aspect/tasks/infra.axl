@@ -191,6 +191,7 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/bootstrap/guardian-mgmt:root",
     "//src/infrastructure/bootstrap/guardian-mgmt-dns:root",
     "//src/infrastructure/base/app-patches:manifests",
+    "//src/infrastructure/base/platform-patches:manifests",
     "//src/infrastructure/talm:chart",
     "//src/infrastructure/base/apps:manifests",
     "//src/infrastructure/base/cozystack:manifests",
@@ -215,6 +216,16 @@ INFRA_TESTS = [
 LIVE_GETS = [
     ("cozystack operator deployment", ["-n", "cozy-system", "get", "deployment/cozystack-operator"]),
     ("cozystack platform package", ["get", "packages.cozystack.io/cozystack.cozystack-platform"]),
+    ("cozystack networking package", ["get", "packages.cozystack.io/cozystack.networking"]),
+    ("cilium helmrelease", ["-n", "cozy-cilium", "get", "helmreleases.helm.toolkit.fluxcd.io/cilium"]),
+    ("cilium daemonset", ["-n", "cozy-cilium", "get", "daemonset.apps/cilium"]),
+    ("hubble metrics service", ["-n", "cozy-cilium", "get", "service/hubble-metrics"]),
+    ("hubble relay service", ["-n", "cozy-cilium", "get", "service/hubble-relay"]),
+    ("hubble relay deployment", ["-n", "cozy-cilium", "get", "deployment.apps/hubble-relay"]),
+    ("hubble ui service", ["-n", "cozy-cilium", "get", "service/hubble-ui"]),
+    ("hubble ui deployment", ["-n", "cozy-cilium", "get", "deployment.apps/hubble-ui"]),
+    ("hubble service monitor", ["-n", "cozy-cilium", "get", "servicemonitors.monitoring.coreos.com/hubble"]),
+    ("hubble relay service monitor", ["-n", "cozy-cilium", "get", "servicemonitors.monitoring.coreos.com/hubble-relay"]),
     ("monitoring agents package", ["get", "packages.cozystack.io/cozystack.monitoring-agents"]),
     ("monitoring agents helmrelease", ["-n", "cozy-monitoring", "get", "helmreleases.helm.toolkit.fluxcd.io/monitoring-agents"]),
     ("monitoring agents fluent-bit config", ["-n", "cozy-monitoring", "get", "configmap/monitoring-agents-fluent-bit"]),
@@ -268,6 +279,7 @@ LIVE_GETS = [
     ("openbao apiserver network policy", ["-n", "tenant-root", "get", "ciliumnetworkpolicies.cilium.io/allow-openbao-to-apiserver"]),
     ("root postgres backup plan", ["-n", "tenant-root", "get", "plans.backups.cozystack.io/guardian-postgres-daily"]),
     ("root clickhouse backup plan", ["-n", "tenant-root", "get", "plans.backups.cozystack.io/guardian-clickhouse-daily"]),
+    ("flux platform patches kustomization", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-patches"]),
     ("flux app patches kustomization", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-app-patches"]),
 ] + _harbor_child_gets(
     "root",
@@ -289,6 +301,17 @@ LIVE_GETS = [
 LIVE_VALUE_CHECKS = [
     ("cozystack operator image", ["-n", "cozy-system", "get", "deployment/cozystack-operator", "-o", "jsonpath={.spec.template.spec.containers[0].image}"], COZYSTACK_OPERATOR_IMAGE),
     ("cozystack platform variant", ["get", "packages.cozystack.io/cozystack.cozystack-platform", "-o", "jsonpath={.spec.variant}"], "isp-full"),
+    ("cozystack networking variant", ["get", "packages.cozystack.io/cozystack.networking", "-o", "jsonpath={.spec.variant}"], "kubeovn-cilium"),
+    ("hubble package enabled", ["get", "packages.cozystack.io/cozystack.networking", "-o", "jsonpath={.spec.components.cilium.values.cilium.hubble.enabled}"], "true"),
+    ("hubble package relay enabled", ["get", "packages.cozystack.io/cozystack.networking", "-o", "jsonpath={.spec.components.cilium.values.cilium.hubble.relay.enabled}"], "true"),
+    ("hubble package ui enabled", ["get", "packages.cozystack.io/cozystack.networking", "-o", "jsonpath={.spec.components.cilium.values.cilium.hubble.ui.enabled}"], "true"),
+    ("hubble package service monitor enabled", ["get", "packages.cozystack.io/cozystack.networking", "-o", "jsonpath={.spec.components.cilium.values.cilium.hubble.metrics.serviceMonitor.enabled}"], "true"),
+    ("hubble package flow metric enabled", ["get", "packages.cozystack.io/cozystack.networking", "-o", "jsonpath={.spec.components.cilium.values.cilium.hubble.metrics.enabled[3]}"], "flow"),
+    ("hubble helmrelease enabled", ["-n", "cozy-cilium", "get", "helmreleases.helm.toolkit.fluxcd.io/cilium", "-o", "jsonpath={.spec.values.cilium.hubble.enabled}"], "true"),
+    ("hubble helmrelease metrics service monitor enabled", ["-n", "cozy-cilium", "get", "helmreleases.helm.toolkit.fluxcd.io/cilium", "-o", "jsonpath={.spec.values.cilium.hubble.metrics.serviceMonitor.enabled}"], "true"),
+    ("cilium daemonset desired", ["-n", "cozy-cilium", "get", "daemonset.apps/cilium", "-o", "jsonpath={.status.desiredNumberScheduled}"], "3"),
+    ("cilium daemonset ready", ["-n", "cozy-cilium", "get", "daemonset.apps/cilium", "-o", "jsonpath={.status.numberReady}"], "3"),
+    ("cilium daemonset updated", ["-n", "cozy-cilium", "get", "daemonset.apps/cilium", "-o", "jsonpath={.status.updatedNumberScheduled}"], "3"),
     ("monitoring agents package target", ["get", "packages.cozystack.io/cozystack.monitoring-agents", "-o", "jsonpath={.spec.components.monitoring-agents.values.global.target}"], "tenant-root"),
     ("monitoring agents helmrelease target", ["-n", "cozy-monitoring", "get", "helmreleases.helm.toolkit.fluxcd.io/monitoring-agents", "-o", "jsonpath={.spec.values.global.target}"], "tenant-root"),
     ("monitoring agents fluent-bit desired", ["-n", "cozy-monitoring", "get", "daemonset.apps/monitoring-agents-fluent-bit", "-o", "jsonpath={.status.desiredNumberScheduled}"], "3"),
@@ -360,9 +383,14 @@ LIVE_FLUX_WAITS = [
     ("flux cozystack platform package kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform"]),
     ("flux storage kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-storage"]),
     ("flux base kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-base"]),
+    ("flux platform patches kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-patches"]),
     ("flux app patches kustomization", ["-n", "cozy-fluxcd", "wait", "--for=condition=Ready", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-app-patches"]),
 ]
 LIVE_WAITS = [
+    ("cozystack networking package", ["wait", "--for=condition=Ready", "packages.cozystack.io/cozystack.networking"]),
+    ("cilium helmrelease", ["-n", "cozy-cilium", "wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/cilium"]),
+    ("hubble relay deployment", ["-n", "cozy-cilium", "wait", "--for=condition=Available", "deployment.apps/hubble-relay"]),
+    ("hubble ui deployment", ["-n", "cozy-cilium", "wait", "--for=condition=Available", "deployment.apps/hubble-ui"]),
     ("monitoring agents package", ["wait", "--for=condition=Ready", "packages.cozystack.io/cozystack.monitoring-agents"]),
     ("monitoring agents helmrelease", ["-n", "cozy-monitoring", "wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/monitoring-agents"]),
     ("backup controller package", ["wait", "--for=condition=Ready", "packages.cozystack.io/cozystack.backup-controller"]),
@@ -837,8 +865,10 @@ def _check_flux_revision_for(ctx, kubectl, kubeconfig, revision):
     checks = [
         ("guardian GitRepository artifact revision", ["-n", "cozy-fluxcd", "get", "gitrepositories.source.toolkit.fluxcd.io/guardian", "-o", "jsonpath={.status.artifact.revision}"]),
         ("guardian-mgmt-platform last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform", "-o", "jsonpath={.status.lastAppliedRevision}"]),
+        ("guardian-mgmt-platform-patches last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-patches", "-o", "jsonpath={.status.lastAppliedRevision}"]),
         ("guardian-mgmt-storage last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-storage", "-o", "jsonpath={.status.lastAppliedRevision}"]),
         ("guardian-mgmt-base last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-base", "-o", "jsonpath={.status.lastAppliedRevision}"]),
+        ("guardian-mgmt-app-patches last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-app-patches", "-o", "jsonpath={.status.lastAppliedRevision}"]),
     ]
     for label, kubectl_args in checks:
         value = _kubectl_capture_for(ctx, kubectl, kubeconfig, kubectl_args, "kubectl read " + label)

@@ -1,0 +1,8 @@
+filegroup(
+    name = "manifests",
+    srcs = [
+        "cozystack-networking-hubble.yaml",
+        "kustomization.yaml",
+    ],
+    visibility = ["//visibility:public"],
+)
