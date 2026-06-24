@@ -28,12 +28,15 @@ DEBUG_CLI_SHIMS = [
     ("pgbench", "@percona_postgresql_18_linux_amd64//:pgbench"),
 ]
 
+def _path_export(bin_dir):
+    return "export PATH=\"" + bin_dir + ":${PATH}\"\n"
+
 def _install_impl(ctx):
     bin_dir = install_bazel_tool_shims(ctx, DEBUG_CLI_SHIMS, ctx.args.bin_dir)
     if bin_dir == "":
         return 1
     if ctx.args.print_path:
-        ctx.std.io.stdout.write(bin_dir + "\n")
+        ctx.std.io.stdout.write(bin_dir + ":" + (ctx.std.env.var("PATH") or "") + "\n")
     return 0
 
 def _uninstall_impl(ctx):
@@ -43,7 +46,7 @@ def _path_impl(ctx):
     bin_dir = ctx.args.bin_dir
     if not bin_dir.startswith("/"):
         bin_dir = ctx.std.env.root_dir() + "/" + bin_dir
-    ctx.std.io.stdout.write("export PATH=\"" + bin_dir + ":${PATH}\"\n")
+    ctx.std.io.stdout.write(_path_export(bin_dir))
     return 0
 
 install = task(
@@ -53,7 +56,7 @@ install = task(
     summary = "Install symlinks for repo-pinned live debugging CLIs.",
     args = {
         "bin_dir": args.string(default = ".guardian/tools/bin", description = "Directory for installed CLI shims."),
-        "print_path": args.boolean(default = False, description = "Print the shim directory after install."),
+        "print_path": args.boolean(default = False, description = "Print the full PATH value with the shim directory prepended after install."),
     },
 )
 
