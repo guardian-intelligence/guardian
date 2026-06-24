@@ -1,0 +1,34 @@
+# TLS terminates at Cloudflare edge. Keep the origin ingress stateless and
+# node-local so Cloudflare can detect and route around a bad node instead of
+# depending on cross-node service forwarding inside the cluster.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: ingress-nginx-system
+  namespace: tenant-root
+spec:
+  values:
+    ingress-nginx:
+      controller:
+        affinity:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchExpressions:
+                    - key: app.kubernetes.io/name
+                      operator: In
+                      values:
+                        - ingress-nginx
+                    - key: app.kubernetes.io/instance
+                      operator: In
+                      values:
+                        - ingress-nginx-system
+                    - key: app.kubernetes.io/component
+                      operator: In
+                      values:
+                        - controller
+                topologyKey: kubernetes.io/hostname
+        config:
+          use-http2: "false"
+        service:
+          externalTrafficPolicy: Local

@@ -435,7 +435,7 @@ func testCozystackPlatformPatches(t *testing.T) {
 func testCozystackAppPatches(t *testing.T) {
 	kustomization := readYAMLMap(t, "src/infrastructure/base/app-patches/kustomization.yaml")
 	assertContainsString(t, sliceAt(t, kustomization, "resources"), "clickhouse-system-bucket-endpoint.yaml", "app patches kustomization resources")
-	assertContainsString(t, sliceAt(t, kustomization, "resources"), "ingress-origin-http2.yaml", "app patches kustomization resources")
+	assertContainsString(t, sliceAt(t, kustomization, "resources"), "ingress-origin-edge.yaml", "app patches kustomization resources")
 
 	docs := readManifests(t, "src/infrastructure/base/app-patches/clickhouse-system-bucket-endpoint.yaml")
 	hr := findObject(t, docs, "HelmRelease", "tenant-root", "clickhouse-guardian")
@@ -467,10 +467,18 @@ func testCozystackAppPatches(t *testing.T) {
 		assertTextContains(t, patchText, want, "clickhouse postRenderer patch")
 	}
 
-	ingressDocs := readManifests(t, "src/infrastructure/base/app-patches/ingress-origin-http2.yaml")
+	ingressDocs := readManifests(t, "src/infrastructure/base/app-patches/ingress-origin-edge.yaml")
 	ingressHR := findObject(t, ingressDocs, "HelmRelease", "tenant-root", "ingress-nginx-system")
 	assertString(t, ingressHR, "helm.toolkit.fluxcd.io/v2", "apiVersion")
 	assertString(t, ingressHR, "false", "spec", "values", "ingress-nginx", "controller", "config", "use-http2")
+	assertString(t, ingressHR, "Local", "spec", "values", "ingress-nginx", "controller", "service", "externalTrafficPolicy")
+	requiredAntiAffinity := valueAt(ingressHR, "spec", "values", "ingress-nginx", "controller", "affinity", "podAntiAffinity", "requiredDuringSchedulingIgnoredDuringExecution")
+	requiredTerms, ok := requiredAntiAffinity.([]any)
+	if !ok || len(requiredTerms) != 1 {
+		t.Fatalf("ingress required pod anti-affinity = %#v, want one term", requiredAntiAffinity)
+	}
+	requiredTerm := asManifest(t, requiredTerms[0], "ingress required pod anti-affinity")
+	assertString(t, requiredTerm, "kubernetes.io/hostname", "topologyKey")
 
 	fluxDocs := readManifests(t, "src/infrastructure/base/flux/sync.yaml")
 	fluxKustomization := findObject(t, fluxDocs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-app-patches")
