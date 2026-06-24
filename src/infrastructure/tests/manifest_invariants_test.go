@@ -604,17 +604,19 @@ func testExternalDNS(t *testing.T) {
 	if len(dnsPorts) != 2 {
 		t.Fatalf("external-dns DNS egress ports = %d, want 2", len(dnsPorts))
 	}
-	dnsNames := sliceAt(t, dnsPortRule, "rules", "dns")
-	if len(dnsNames) != 1 {
-		t.Fatalf("external-dns DNS match rules = %d, want 1", len(dnsNames))
+	httpsRule := asManifest(t, egress[2], "external-dns egress[2]")
+	assertStringSlice(t, httpsRule, []string{"world"}, "toEntities")
+	httpsToPorts := sliceAt(t, httpsRule, "toPorts")
+	if len(httpsToPorts) != 1 {
+		t.Fatalf("external-dns HTTPS egress toPorts = %d, want 1", len(httpsToPorts))
 	}
-	assertString(t, asManifest(t, dnsNames[0], "external-dns DNS match"), "*", "matchPattern")
-	fqdnRule := asManifest(t, egress[2], "external-dns egress[2]")
-	fqdns := sliceAt(t, fqdnRule, "toFQDNs")
-	if len(fqdns) != 1 {
-		t.Fatalf("external-dns FQDN egress targets = %d, want 1", len(fqdns))
+	httpsPorts := sliceAt(t, asManifest(t, httpsToPorts[0], "external-dns HTTPS egress toPorts[0]"), "ports")
+	if len(httpsPorts) != 1 {
+		t.Fatalf("external-dns HTTPS egress ports = %d, want 1", len(httpsPorts))
 	}
-	assertString(t, asManifest(t, fqdns[0], "external-dns FQDN match"), "api.cloudflare.com", "matchName")
+	httpsPort := asManifest(t, httpsPorts[0], "external-dns HTTPS egress port")
+	assertString(t, httpsPort, "443", "port")
+	assertString(t, httpsPort, "TCP", "protocol")
 }
 
 func assertSystemBucketBackup(t *testing.T, docs []manifest, kind, namespace, planName, schedule string) {

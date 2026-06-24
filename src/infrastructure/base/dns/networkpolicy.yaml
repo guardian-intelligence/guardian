@@ -20,11 +20,8 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
-          rules:
-            dns:
-              - matchPattern: "*"
-    - toFQDNs:
-        - matchName: api.cloudflare.com
+    - toEntities:
+        - world
       toPorts:
         - ports:
             - port: "443"
