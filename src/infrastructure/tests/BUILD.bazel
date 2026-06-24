@@ -16,6 +16,7 @@ go_test(
         "//src/infrastructure/base/flux:manifests",
         "//src/infrastructure/base/networking:manifests",
         "//src/infrastructure/base/openbao:manifests",
+        "//src/infrastructure/base/platform-patches:manifests",
         "//src/infrastructure/base/storage:manifests",
         "//src/infrastructure/bootstrap:backend_config",
         "//src/infrastructure/bootstrap/guardian-mgmt:root",

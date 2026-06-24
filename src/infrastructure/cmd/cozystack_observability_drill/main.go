@@ -56,6 +56,11 @@ type prometheusResult struct {
 	Value  []any             `json:"value"`
 }
 
+type queryCheck struct {
+	label string
+	query string
+}
+
 type kubectlRunner struct {
 	bin            string
 	kubeconfig     string
@@ -206,6 +211,9 @@ func runDrill(ctx context.Context, cfg observabilityConfig) error {
 	if err := waitObservabilityReady(ctx, runner, cfg.WaitTimeout); err != nil {
 		return err
 	}
+	if err := waitHubbleReady(ctx, runner, cfg.WaitTimeout); err != nil {
+		return err
+	}
 	if err := waitPostgresReady(ctx, runner, cfg.ApplicationName, cfg.WaitTimeout); err != nil {
 		return err
 	}
@@ -235,6 +243,25 @@ func waitObservabilityReady(ctx context.Context, runner kubectlRunner, timeout s
 		{"get", "service/vlselect-generic"},
 	} {
 		if err := runner.run(ctx, strings.Join(args, " "), args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func waitHubbleReady(ctx context.Context, runner kubectlRunner, timeout string) error {
+	hubbleRunner := runner
+	hubbleRunner.namespace = "cozy-cilium"
+	for _, args := range [][]string{
+		{"get", "service/hubble-metrics"},
+		{"get", "service/hubble-relay"},
+		{"get", "service/hubble-ui"},
+		{"get", "servicemonitors.monitoring.coreos.com/hubble"},
+		{"get", "servicemonitors.monitoring.coreos.com/hubble-relay"},
+		{"wait", "--for=condition=Available", "deployment.apps/hubble-relay", "--timeout=" + timeout},
+		{"wait", "--for=condition=Available", "deployment.apps/hubble-ui", "--timeout=" + timeout},
+	} {
+		if err := hubbleRunner.run(ctx, strings.Join(args, " "), args...); err != nil {
 			return err
 		}
 	}
@@ -404,10 +431,16 @@ func verifyVictoriaMetrics(ctx context.Context, cfg observabilityConfig) error {
 	defer forward.Stop()
 
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d/select/0/prometheus/api/v1/query", port)
-	queries := []struct {
-		label string
-		query string
-	}{
+	for _, check := range victoriaMetricsQueries(cfg) {
+		if err := waitPrometheusQuery(ctx, baseURL, check.label, check.query, cfg.PollTimeout, cfg.PollInterval); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func victoriaMetricsQueries(cfg observabilityConfig) []queryCheck {
+	return []queryCheck{
 		{
 			label: "Postgres scrape targets in VictoriaMetrics",
 			query: fmt.Sprintf(`sum(up{namespace=%q,job=%q})`, cfg.Namespace, cfg.Namespace+"/postgres-"+cfg.ApplicationName),
@@ -424,13 +457,15 @@ func verifyVictoriaMetrics(ctx context.Context, cfg observabilityConfig) error {
 			label: "CNPG transaction counters in VictoriaMetrics",
 			query: fmt.Sprintf(`count(cnpg_pg_stat_database_xact_commit{namespace=%q,job=%q})`, cfg.Namespace, cfg.Namespace+"/postgres-"+cfg.ApplicationName),
 		},
+		{
+			label: "Hubble flow metrics in VictoriaMetrics",
+			query: `sum(hubble_flows_processed_total)`,
+		},
+		{
+			label: "Hubble TCP metrics in VictoriaMetrics",
+			query: `sum(hubble_tcp_flags_total)`,
+		},
 	}
-	for _, check := range queries {
-		if err := waitPrometheusQuery(ctx, baseURL, check.label, check.query, cfg.PollTimeout, cfg.PollInterval); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func waitPrometheusQuery(ctx context.Context, endpoint, label, query string, timeout, interval time.Duration) error {
