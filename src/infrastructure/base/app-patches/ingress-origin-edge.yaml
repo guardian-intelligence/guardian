@@ -1,6 +1,6 @@
-# TLS terminates at Cloudflare edge. Keep the origin ingress stateless and
-# node-local so Cloudflare can detect and route around a bad node instead of
-# depending on cross-node service forwarding inside the cluster.
+# TLS terminates at Cloudflare edge. Keep one ingress controller on each origin
+# node and keep origin HTTP/2 disabled; the current ClusterIP+externalIPs
+# service path requires Cluster traffic policy to remain reachable.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -31,7 +31,7 @@ spec:
         config:
           use-http2: "false"
         service:
-          externalTrafficPolicy: Local
+          externalTrafficPolicy: Cluster
         updateStrategy:
           type: RollingUpdate
           rollingUpdate:

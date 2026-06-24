@@ -471,7 +471,7 @@ func testCozystackAppPatches(t *testing.T) {
 	ingressHR := findObject(t, ingressDocs, "HelmRelease", "tenant-root", "ingress-nginx-system")
 	assertString(t, ingressHR, "helm.toolkit.fluxcd.io/v2", "apiVersion")
 	assertString(t, ingressHR, "false", "spec", "values", "ingress-nginx", "controller", "config", "use-http2")
-	assertString(t, ingressHR, "Local", "spec", "values", "ingress-nginx", "controller", "service", "externalTrafficPolicy")
+	assertString(t, ingressHR, "Cluster", "spec", "values", "ingress-nginx", "controller", "service", "externalTrafficPolicy")
 	assertString(t, ingressHR, "RollingUpdate", "spec", "values", "ingress-nginx", "controller", "updateStrategy", "type")
 	assertInt(t, ingressHR, 0, "spec", "values", "ingress-nginx", "controller", "updateStrategy", "rollingUpdate", "maxSurge")
 	assertInt(t, ingressHR, 1, "spec", "values", "ingress-nginx", "controller", "updateStrategy", "rollingUpdate", "maxUnavailable")
