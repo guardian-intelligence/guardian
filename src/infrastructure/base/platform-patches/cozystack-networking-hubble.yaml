@@ -16,6 +16,7 @@ spec:
               clusterDomain: cozy.local
             relay:
               enabled: true
+              rollOutPods: true
               prometheus:
                 enabled: true
                 serviceMonitor:
@@ -29,6 +30,7 @@ spec:
                   memory: 256Mi
             ui:
               enabled: true
+              rollOutPods: true
               backend:
                 resources:
                   requests:
