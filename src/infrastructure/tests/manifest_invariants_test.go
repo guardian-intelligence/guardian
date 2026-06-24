@@ -236,6 +236,7 @@ func testGuardianMgmtDNSBootstrap(t *testing.T) {
 	assertTextContains(t, mainTF, `external_dns_owner_id = "guardian-mgmt-ash"`, "guardian-mgmt-dns main.tf")
 
 	for _, host := range []string{
+		`"*.guardianintelligence.org"`,
 		`"guardianintelligence.org"`,
 		`"api.guardianintelligence.org"`,
 		`"dashboard.guardianintelligence.org"`,
@@ -560,6 +561,7 @@ func testExternalDNS(t *testing.T) {
 	assertString(t, dnsEndpoint, "externaldns.k8s.io/v1alpha1", "apiVersion")
 	endpoints := sliceAt(t, dnsEndpoint, "spec", "endpoints")
 	wantHosts := []string{
+		"*.guardianintelligence.org",
 		"guardianintelligence.org",
 		"api.guardianintelligence.org",
 		"dashboard.guardianintelligence.org",

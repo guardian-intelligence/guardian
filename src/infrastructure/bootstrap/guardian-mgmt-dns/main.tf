@@ -3,6 +3,7 @@ locals {
   public_ingress_node   = "ash-earth"
   external_dns_owner_id = "guardian-mgmt-ash"
   external_dns_record_hostnames = [
+    "*.guardianintelligence.org",
     "guardianintelligence.org",
     "api.guardianintelligence.org",
     "dashboard.guardianintelligence.org",
@@ -40,7 +41,7 @@ data "cloudflare_zone" "guardianintelligence_org" {
 
 check "external_dns_owns_dns_records" {
   assert {
-    condition     = length(local.external_dns_record_hostnames) == 7
+    condition     = length(local.external_dns_record_hostnames) == 8
     error_message = "Root public DNS record ownership belongs to the in-cluster ExternalDNS controller."
   }
 }
