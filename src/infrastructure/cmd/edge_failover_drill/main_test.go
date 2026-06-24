@@ -20,6 +20,26 @@ func TestParseNodes(t *testing.T) {
 	}
 }
 
+func TestKubeAPIServerForNodeUsesDifferentNode(t *testing.T) {
+	got, err := kubeAPIServerForNode(
+		"ash-earth=206.223.228.101,ash-wind=45.250.254.119,ash-water=206.223.228.87",
+		"ash-earth",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "https://45.250.254.119:6443" {
+		t.Fatalf("kubeAPIServerForNode() = %q, want alternate node API", got)
+	}
+}
+
+func TestKubeAPIServerURLPreservesExplicitURL(t *testing.T) {
+	got := kubeAPIServerURL("https://10.8.0.250:6443")
+	if got != "https://10.8.0.250:6443" {
+		t.Fatalf("kubeAPIServerURL() = %q", got)
+	}
+}
+
 func TestSamplePayloadParsesRawJSON(t *testing.T) {
 	got, ok := samplePayload(`{"event":"guardian_edge_failover_sample"}`)
 	if !ok || got != `{"event":"guardian_edge_failover_sample"}` {

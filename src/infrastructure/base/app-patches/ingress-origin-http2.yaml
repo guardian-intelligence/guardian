@@ -1,0 +1,14 @@
+# TLS terminates at Cloudflare edge. Keep the origin ingress on HTTP/1.1 so
+# Cloudflare/browser ALPN negotiation cannot trip node-specific TLS/HTTP2
+# failures while the public edge can still serve HTTP/2 to clients.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: ingress-nginx-system
+  namespace: tenant-root
+spec:
+  values:
+    ingress-nginx:
+      controller:
+        config:
+          use-http2: "false"

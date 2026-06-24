@@ -325,12 +325,47 @@ func nodeReadyStatus(ctx context.Context, cfg drillConfig, node string) (bool, e
 	if cfg.Kubeconfig != "" {
 		args = append([]string{"--kubeconfig", cfg.Kubeconfig}, args...)
 	}
+	server, err := kubeAPIServerForNode(cfg.Nodes, node)
+	if err != nil {
+		return false, err
+	}
+	if server != "" {
+		args = append([]string{"--server", server}, args...)
+	}
 	cmd := exec.CommandContext(ctx, cfg.Kubectl, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return false, fmt.Errorf("kubectl get node %s: %w: %s", node, err, strings.TrimSpace(string(output)))
 	}
 	return strings.TrimSpace(string(output)) == "True", nil
+}
+
+func kubeAPIServerForNode(nodesCSV, node string) (string, error) {
+	nodes, err := parseNodes(nodesCSV)
+	if err != nil {
+		return "", err
+	}
+	for _, candidate := range nodes {
+		if candidate.Name == node {
+			continue
+		}
+		if strings.TrimSpace(candidate.TalosNode) == "" {
+			continue
+		}
+		return kubeAPIServerURL(candidate.TalosNode), nil
+	}
+	return "", nil
+}
+
+func kubeAPIServerURL(address string) string {
+	address = strings.TrimSpace(address)
+	if strings.HasPrefix(address, "http://") || strings.HasPrefix(address, "https://") {
+		return address
+	}
+	if strings.Contains(address, ":") {
+		return "https://" + address
+	}
+	return "https://" + address + ":6443"
 }
 
 func parseSamplesFile(path string) ([]sample, error) {

@@ -180,6 +180,16 @@ TLS terminates at Cloudflare edge.
 Cloudflare LB for the three control plane nodes. [206.223.228.101, 45.250.254.119, 206.223.228.87]
 MetalLB for L2/ARP inside the Latitude VLAN. `10.8.0.200 - 10.8.0.240`
 
+Public edge should follow the standard Kubernetes shape wherever the provider
+network supports it: `Service.type=LoadBalancer` backed by MetalLB/Cilium
+allocation and announcement, with Cloudflare Load Balancing in front for WAF,
+TLS, health checks, and failover. The current private MetalLB range is only
+reachable on the Latitude VLAN, so it must not be used as a Cloudflare origin.
+Using MetalLB as a public origin requires routable service IPs or BGP from the
+provider network. Until that exists, Cloudflare origins are the three Latitude
+public node IPs, and the public edge must stay stateless so Cloudflare can steer
+around unhealthy origins per request.
+
 Bazel owns the build graph and produces bytes using OCI for layout. `cosign`/SLSA proves its authentic Guardian Intelligence LLC software. Cozystack management cluster reconciles our declared state.
 
 Planned: Use Flagger for progressive delivery after Flux applies an approved digest. Use Kargo/Freight to promote immutable release candidates to service+stage+region targets.

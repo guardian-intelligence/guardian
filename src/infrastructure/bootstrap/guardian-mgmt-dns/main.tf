@@ -99,16 +99,8 @@ resource "cloudflare_load_balancer" "guardian_mgmt_public" {
   default_pool_ids = [
     cloudflare_load_balancer_pool.guardian_mgmt_ash.id,
   ]
-  proxied              = true
-  steering_policy      = "off"
-  session_affinity     = "cookie"
-  session_affinity_ttl = 1800
-
-  session_affinity_attributes {
-    secure                 = "Always"
-    samesite               = "Auto"
-    zero_downtime_failover = "temporary"
-  }
+  proxied         = true
+  steering_policy = "off"
 
   adaptive_routing {
     failover_across_pools = false

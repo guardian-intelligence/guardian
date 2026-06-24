@@ -231,8 +231,8 @@ func testGuardianMgmtDNSBootstrap(t *testing.T) {
 	assertTextContains(t, mainTF, `cloudflare_load_balancer_monitor`, "guardian-mgmt-dns main.tf")
 	assertTextContains(t, mainTF, `cloudflare_load_balancer_pool`, "guardian-mgmt-dns main.tf")
 	assertTextContains(t, mainTF, `cloudflare_load_balancer`, "guardian-mgmt-dns main.tf")
-	assertTextContains(t, mainTF, `session_affinity     = "cookie"`, "guardian-mgmt-dns main.tf")
-	assertTextContains(t, mainTF, `zero_downtime_failover = "temporary"`, "guardian-mgmt-dns main.tf")
+	assertTextContains(t, mainTF, `origin_steering {`, "guardian-mgmt-dns main.tf")
+	assertTextContains(t, mainTF, `policy = "random"`, "guardian-mgmt-dns main.tf")
 	assertTextContains(t, mainTF, `data "cloudflare_zone" "guardianintelligence_org"`, "guardian-mgmt-dns main.tf")
 	assertTextContains(t, mainTF, `account_id = var.cloudflare_account_id`, "guardian-mgmt-dns main.tf")
 	assertTextNotContains(t, mainTF, `resource "aws_route53_record"`, "guardian-mgmt-dns main.tf")
@@ -433,6 +433,10 @@ func testCozystackPlatformPatches(t *testing.T) {
 }
 
 func testCozystackAppPatches(t *testing.T) {
+	kustomization := readYAMLMap(t, "src/infrastructure/base/app-patches/kustomization.yaml")
+	assertContainsString(t, sliceAt(t, kustomization, "resources"), "clickhouse-system-bucket-endpoint.yaml", "app patches kustomization resources")
+	assertContainsString(t, sliceAt(t, kustomization, "resources"), "ingress-origin-http2.yaml", "app patches kustomization resources")
+
 	docs := readManifests(t, "src/infrastructure/base/app-patches/clickhouse-system-bucket-endpoint.yaml")
 	hr := findObject(t, docs, "HelmRelease", "tenant-root", "clickhouse-guardian")
 	assertString(t, hr, "helm.toolkit.fluxcd.io/v2", "apiVersion")
@@ -463,13 +467,18 @@ func testCozystackAppPatches(t *testing.T) {
 		assertTextContains(t, patchText, want, "clickhouse postRenderer patch")
 	}
 
+	ingressDocs := readManifests(t, "src/infrastructure/base/app-patches/ingress-origin-http2.yaml")
+	ingressHR := findObject(t, ingressDocs, "HelmRelease", "tenant-root", "ingress-nginx-system")
+	assertString(t, ingressHR, "helm.toolkit.fluxcd.io/v2", "apiVersion")
+	assertString(t, ingressHR, "false", "spec", "values", "ingress-nginx", "controller", "config", "use-http2")
+
 	fluxDocs := readManifests(t, "src/infrastructure/base/flux/sync.yaml")
-	kustomization := findObject(t, fluxDocs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-app-patches")
-	assertString(t, kustomization, "kustomize.toolkit.fluxcd.io/v1", "apiVersion")
-	assertString(t, kustomization, "./src/infrastructure/base/app-patches", "spec", "path")
-	assertBool(t, kustomization, false, "spec", "prune")
-	assertBool(t, kustomization, false, "spec", "wait")
-	dependsOn := valueAt(kustomization, "spec", "dependsOn")
+	fluxKustomization := findObject(t, fluxDocs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-app-patches")
+	assertString(t, fluxKustomization, "kustomize.toolkit.fluxcd.io/v1", "apiVersion")
+	assertString(t, fluxKustomization, "./src/infrastructure/base/app-patches", "spec", "path")
+	assertBool(t, fluxKustomization, false, "spec", "prune")
+	assertBool(t, fluxKustomization, false, "spec", "wait")
+	dependsOn := valueAt(fluxKustomization, "spec", "dependsOn")
 	deps, ok := dependsOn.([]any)
 	if !ok || len(deps) != 1 {
 		t.Fatalf("guardian-mgmt-app-patches dependsOn = %#v, want one dependency", dependsOn)
