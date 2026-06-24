@@ -121,3 +121,41 @@ spec:
   prune: false
   wait: false
   timeout: 5m
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: guardian-mgmt-dns-controller
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/base/dns
+  sourceRef:
+    kind: GitRepository
+    name: guardian
+  dependsOn:
+    - name: guardian-mgmt-base
+  # The records slice below depends on this being Ready so the ExternalDNS CRD
+  # is discoverable before DNSEndpoint resources are applied.
+  prune: true
+  wait: true
+  timeout: 10m
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: guardian-mgmt-dns-records
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/base/dns/records
+  sourceRef:
+    kind: GitRepository
+    name: guardian
+  dependsOn:
+    - name: guardian-mgmt-dns-controller
+  prune: true
+  wait: false
+  timeout: 5m

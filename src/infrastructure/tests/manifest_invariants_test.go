@@ -56,6 +56,7 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("cozystack system bucket backups", testCozystackSystemBucketBackups)
 	t.Run("cozystack platform patches", testCozystackPlatformPatches)
 	t.Run("cozystack app patches", testCozystackAppPatches)
+	t.Run("external dns", testExternalDNS)
 	t.Run("root tenant core services", testRootTenantCoreServices)
 	t.Run("observability", testObservability)
 	t.Run("openbao", testOpenBao)
@@ -212,26 +213,27 @@ func testGuardianMgmtDNSBootstrap(t *testing.T) {
 	mainTF := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt-dns/main.tf"))
 	variablesTF := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt-dns/variables.tf"))
 	outputsTF := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt-dns/outputs.tf"))
+	lock := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt-dns/.terraform.lock.hcl"))
 
-	assertTextContains(t, versions, `source  = "hashicorp/aws"`, "guardian-mgmt-dns versions.tf")
-	assertTextContains(t, versions, `version = "= 5.100.0"`, "guardian-mgmt-dns versions.tf")
+	assertTextNotContains(t, versions, `source  = "hashicorp/aws"`, "guardian-mgmt-dns versions.tf")
+	assertTextNotContains(t, lock, `provider "registry.opentofu.org/hashicorp/aws"`, "guardian-mgmt-dns lock")
 	assertTextContains(t, versions, `source  = "cloudflare/cloudflare"`, "guardian-mgmt-dns versions.tf")
 	assertTextContains(t, versions, `version = "= 4.52.5"`, "guardian-mgmt-dns versions.tf")
 	assertPartialS3Backend(t, versionsBytes, versionsPath, "opentofu/guardian-mgmt-dns.tfstate", "guardian-mgmt-dns backend.s3")
 
+	assertTextNotContains(t, variablesTF, `variable "aws_region"`, "guardian-mgmt-dns variables.tf")
 	assertTextContains(t, variablesTF, `variable "cloudflare_account_id"`, "guardian-mgmt-dns variables.tf")
 	assertTextContains(t, mainTF, `data "terraform_remote_state" "guardian_mgmt"`, "guardian-mgmt-dns main.tf")
 	assertTextContains(t, mainTF, `key    = "opentofu/guardian-mgmt.tfstate"`, "guardian-mgmt-dns main.tf")
 	assertTextContains(t, mainTF, `endpoint                    = "https://${var.cloudflare_account_id}.r2.cloudflarestorage.com"`, "guardian-mgmt-dns main.tf")
 	assertTextContains(t, mainTF, `data.terraform_remote_state.guardian_mgmt.outputs.control_plane_nodes`, "guardian-mgmt-dns main.tf")
-	assertTextContains(t, mainTF, `public_ingress_node  = "ash-earth"`, "guardian-mgmt-dns main.tf")
+	assertTextContains(t, mainTF, `public_ingress_node   = "ash-earth"`, "guardian-mgmt-dns main.tf")
 	assertTextContains(t, mainTF, `control_plane_nodes[local.public_ingress_node].public_ipv4`, "guardian-mgmt-dns main.tf")
-	assertTextContains(t, mainTF, `data "aws_route53_zone" "gi_org"`, "guardian-mgmt-dns main.tf")
 	assertTextContains(t, mainTF, `data "cloudflare_zone" "guardianintelligence_org"`, "guardian-mgmt-dns main.tf")
 	assertTextContains(t, mainTF, `account_id = var.cloudflare_account_id`, "guardian-mgmt-dns main.tf")
-	assertTextContains(t, mainTF, `resource "aws_route53_record" "gi_org_a"`, "guardian-mgmt-dns main.tf")
-	assertTextContains(t, mainTF, `resource "cloudflare_record" "guardianintelligence_org_a"`, "guardian-mgmt-dns main.tf")
-	assertTextContains(t, mainTF, `allow_overwrite = true`, "guardian-mgmt-dns main.tf")
+	assertTextNotContains(t, mainTF, `resource "aws_route53_record"`, "guardian-mgmt-dns main.tf")
+	assertTextNotContains(t, mainTF, `resource "cloudflare_record"`, "guardian-mgmt-dns main.tf")
+	assertTextContains(t, mainTF, `external_dns_owner_id = "guardian-mgmt-ash"`, "guardian-mgmt-dns main.tf")
 
 	for _, host := range []string{
 		`"guardianintelligence.org"`,
@@ -247,10 +249,12 @@ func testGuardianMgmtDNSBootstrap(t *testing.T) {
 	recordDefinitions := strings.Split(mainTF, `check "no_legacy_verself_records"`)[0]
 	assertTextNotContains(t, recordDefinitions, "206.223.228.99", "guardian-mgmt-dns record definitions")
 	assertTextNotContains(t, recordDefinitions, "67.213.115.113", "guardian-mgmt-dns record definitions")
-	assertTextContains(t, mainTF, `check "no_legacy_verself_records"`, "guardian-mgmt-dns main.tf")
+	assertTextContains(t, mainTF, `check "external_dns_owns_dns_records"`, "guardian-mgmt-dns main.tf")
 
-	assertTextContains(t, outputsTF, `output "route53_records"`, "guardian-mgmt-dns outputs.tf")
-	assertTextContains(t, outputsTF, `output "cloudflare_records"`, "guardian-mgmt-dns outputs.tf")
+	assertTextContains(t, outputsTF, `output "cloudflare_zone_id"`, "guardian-mgmt-dns outputs.tf")
+	assertTextContains(t, outputsTF, `output "external_dns_owner_id"`, "guardian-mgmt-dns outputs.tf")
+	assertTextContains(t, outputsTF, `output "external_dns_record_hostnames"`, "guardian-mgmt-dns outputs.tf")
+	assertTextContains(t, outputsTF, `output "public_ingress_ipv4s"`, "guardian-mgmt-dns outputs.tf")
 }
 
 func testLayerTwoNetworking(t *testing.T) {
@@ -463,6 +467,154 @@ func testCozystackAppPatches(t *testing.T) {
 	}
 	dep := asManifest(t, deps[0], "guardian-mgmt-app-patches dependsOn[0]")
 	assertString(t, dep, "guardian-mgmt-base", "name")
+}
+
+func testExternalDNS(t *testing.T) {
+	base := readYAMLMap(t, "src/infrastructure/base/kustomization.yaml")
+	baseResources := sliceAt(t, base, "resources")
+	if containsString(baseResources, "dns") {
+		t.Fatalf("base kustomization must not include dns directly; Flux applies DNS controller and records in ordered slices")
+	}
+	assertContainsString(t, baseResources, "flux/sync.yaml", "base kustomization resources")
+
+	kustomization := readYAMLMap(t, "src/infrastructure/base/dns/kustomization.yaml")
+	for _, resource := range []string{
+		"namespace.yaml",
+		"secrets.yaml",
+		"external-dns.yaml",
+		"networkpolicy.yaml",
+	} {
+		assertContainsString(t, sliceAt(t, kustomization, "resources"), resource, "external-dns kustomization resources")
+	}
+	recordsKustomization := readYAMLMap(t, "src/infrastructure/base/dns/records/kustomization.yaml")
+	assertContainsString(t, sliceAt(t, recordsKustomization, "resources"), "dnsendpoints.yaml", "external-dns records kustomization resources")
+
+	namespace := findObject(t, readManifests(t, "src/infrastructure/base/dns/namespace.yaml"), "Namespace", "", "external-dns")
+	assertString(t, namespace, "restricted", "metadata", "labels", "pod-security.kubernetes.io/enforce")
+	assertString(t, namespace, "restricted", "metadata", "labels", "pod-security.kubernetes.io/audit")
+	assertString(t, namespace, "restricted", "metadata", "labels", "pod-security.kubernetes.io/warn")
+
+	secretDocs := readManifests(t, "src/infrastructure/base/dns/secrets.yaml")
+	serviceAccount := findObject(t, secretDocs, "ServiceAccount", "external-dns", "external-dns-secrets")
+	assertBool(t, serviceAccount, false, "automountServiceAccountToken")
+
+	store := findObject(t, secretDocs, "SecretStore", "external-dns", "openbao")
+	assertString(t, store, "http://openbao-guardian.tenant-root.svc:8200", "spec", "provider", "vault", "server")
+	assertString(t, store, "kv", "spec", "provider", "vault", "path")
+	assertString(t, store, "v2", "spec", "provider", "vault", "version")
+	assertString(t, store, "kubernetes", "spec", "provider", "vault", "auth", "kubernetes", "mountPath")
+	assertString(t, store, "tenant-root-external-dns", "spec", "provider", "vault", "auth", "kubernetes", "role")
+	assertString(t, store, "external-dns-secrets", "spec", "provider", "vault", "auth", "kubernetes", "serviceAccountRef", "name")
+	assertStringSlice(t, store, []string{"openbao"}, "spec", "provider", "vault", "auth", "kubernetes", "serviceAccountRef", "audiences")
+
+	externalSecret := findObject(t, secretDocs, "ExternalSecret", "external-dns", "cloudflare-external-dns")
+	assertString(t, externalSecret, "1h", "spec", "refreshInterval")
+	assertString(t, externalSecret, "SecretStore", "spec", "secretStoreRef", "kind")
+	assertString(t, externalSecret, "openbao", "spec", "secretStoreRef", "name")
+	assertString(t, externalSecret, "cloudflare-external-dns", "spec", "target", "name")
+	assertString(t, externalSecret, "Owner", "spec", "target", "creationPolicy")
+	assertString(t, externalSecret, "Retain", "spec", "target", "deletionPolicy")
+	data := sliceAt(t, externalSecret, "spec", "data")
+	if len(data) != 1 {
+		t.Fatalf("external-dns ExternalSecret data = %d entries, want 1", len(data))
+	}
+	secretRef := asManifest(t, data[0], "external-dns ExternalSecret data[0]")
+	assertString(t, secretRef, "CF_API_TOKEN", "secretKey")
+	assertString(t, secretRef, "guardian/guardian-mgmt/tenant-root/dns/external-dns", "remoteRef", "key")
+	assertString(t, secretRef, "CF_API_TOKEN", "remoteRef", "property")
+
+	externalDNSDocs := readManifests(t, "src/infrastructure/base/dns/external-dns.yaml")
+	repo := findObject(t, externalDNSDocs, "HelmRepository", "external-dns", "external-dns")
+	assertString(t, repo, "https://kubernetes-sigs.github.io/external-dns/", "spec", "url")
+	assertString(t, repo, "1h", "spec", "interval")
+
+	release := findObject(t, externalDNSDocs, "HelmRelease", "external-dns", "external-dns")
+	assertString(t, release, "helm.toolkit.fluxcd.io/v2", "apiVersion")
+	assertString(t, release, "external-dns", "spec", "chart", "spec", "chart")
+	assertString(t, release, "1.21.1", "spec", "chart", "spec", "version")
+	assertString(t, release, "HelmRepository", "spec", "chart", "spec", "sourceRef", "kind")
+	assertString(t, release, "external-dns", "spec", "chart", "spec", "sourceRef", "name")
+	assertString(t, release, "external-dns", "spec", "chart", "spec", "sourceRef", "namespace")
+	assertString(t, release, "Create", "spec", "install", "crds")
+	assertString(t, release, "CreateReplace", "spec", "upgrade", "crds")
+	assertString(t, release, "cloudflare", "spec", "values", "provider", "name")
+	assertStringSlice(t, release, []string{"crd"}, "spec", "values", "sources")
+	assertStringSlice(t, release, []string{"A"}, "spec", "values", "managedRecordTypes")
+	assertString(t, release, "sync", "spec", "values", "policy")
+	assertString(t, release, "txt", "spec", "values", "registry")
+	assertString(t, release, "guardian-mgmt-ash", "spec", "values", "txtOwnerId")
+	assertStringSlice(t, release, []string{"guardianintelligence.org"}, "spec", "values", "domainFilters")
+	assertBool(t, release, true, "spec", "values", "triggerLoopOnEvent")
+	assertString(t, release, "json", "spec", "values", "logFormat")
+	assertString(t, release, "c952fb5989d232593ec9cca71030cb58", "spec", "values", "extraArgs", "zone-id-filter")
+	assertString(t, release, "5000", "spec", "values", "extraArgs", "cloudflare-dns-records-per-page")
+	assertString(t, release, "guardian-mgmt-ash external-dns", "spec", "values", "extraArgs", "cloudflare-record-comment")
+	assertString(t, release, "25m", "spec", "values", "resources", "requests", "cpu")
+	assertString(t, release, "64Mi", "spec", "values", "resources", "requests", "memory")
+	assertString(t, release, "250m", "spec", "values", "resources", "limits", "cpu")
+	assertString(t, release, "256Mi", "spec", "values", "resources", "limits", "memory")
+	assertBool(t, release, true, "spec", "values", "serviceMonitor", "enabled")
+	assertEnvSecretRef(t, sliceAt(t, release, "spec", "values", "env"), "CF_API_TOKEN", "cloudflare-external-dns", "CF_API_TOKEN")
+
+	dnsEndpoint := findObject(t, readManifests(t, "src/infrastructure/base/dns/records/dnsendpoints.yaml"), "DNSEndpoint", "external-dns", "guardian-root-public")
+	assertString(t, dnsEndpoint, "externaldns.k8s.io/v1alpha1", "apiVersion")
+	endpoints := sliceAt(t, dnsEndpoint, "spec", "endpoints")
+	wantHosts := []string{
+		"guardianintelligence.org",
+		"api.guardianintelligence.org",
+		"dashboard.guardianintelligence.org",
+		"grafana.guardianintelligence.org",
+		"harbor.guardianintelligence.org",
+		"keycloak.guardianintelligence.org",
+		"s3.guardianintelligence.org",
+	}
+	if len(endpoints) != len(wantHosts) {
+		t.Fatalf("external-dns endpoints = %d, want %d", len(endpoints), len(wantHosts))
+	}
+	for i, host := range wantHosts {
+		endpoint := asManifest(t, endpoints[i], "external-dns endpoint")
+		assertString(t, endpoint, host, "dnsName")
+		assertString(t, endpoint, "A", "recordType")
+		assertInt(t, endpoint, 120, "recordTTL")
+		assertStringSlice(t, endpoint, []string{"206.223.228.101"}, "targets")
+	}
+
+	policy := findObject(t, readManifests(t, "src/infrastructure/base/dns/networkpolicy.yaml"), "CiliumNetworkPolicy", "external-dns", "external-dns-egress")
+	assertString(t, policy, "cilium.io/v2", "apiVersion")
+	assertString(t, policy, "external-dns", "spec", "endpointSelector", "matchLabels", "app.kubernetes.io/name")
+	egress := sliceAt(t, policy, "spec", "egress")
+	if len(egress) != 3 {
+		t.Fatalf("external-dns egress policy has %d rules, want 3", len(egress))
+	}
+	assertStringSlice(t, asManifest(t, egress[0], "external-dns egress[0]"), []string{"kube-apiserver"}, "toEntities")
+	dnsRule := asManifest(t, egress[1], "external-dns egress[1]")
+	dnsTargets := sliceAt(t, dnsRule, "toEndpoints")
+	if len(dnsTargets) != 1 {
+		t.Fatalf("external-dns DNS egress targets = %d, want 1", len(dnsTargets))
+	}
+	dnsTarget := asManifest(t, dnsTargets[0], "external-dns DNS egress target")
+	assertString(t, dnsTarget, "kube-system", "matchLabels", "k8s:io.kubernetes.pod.namespace")
+	assertString(t, dnsTarget, "kube-dns", "matchLabels", "k8s:k8s-app")
+	dnsToPorts := sliceAt(t, dnsRule, "toPorts")
+	if len(dnsToPorts) != 1 {
+		t.Fatalf("external-dns DNS egress toPorts = %d, want 1", len(dnsToPorts))
+	}
+	dnsPortRule := asManifest(t, dnsToPorts[0], "external-dns DNS egress toPorts[0]")
+	dnsPorts := sliceAt(t, dnsPortRule, "ports")
+	if len(dnsPorts) != 2 {
+		t.Fatalf("external-dns DNS egress ports = %d, want 2", len(dnsPorts))
+	}
+	dnsNames := sliceAt(t, dnsPortRule, "rules", "dns")
+	if len(dnsNames) != 1 {
+		t.Fatalf("external-dns DNS match rules = %d, want 1", len(dnsNames))
+	}
+	assertString(t, asManifest(t, dnsNames[0], "external-dns DNS match"), "api.cloudflare.com", "matchName")
+	fqdnRule := asManifest(t, egress[2], "external-dns egress[2]")
+	fqdns := sliceAt(t, fqdnRule, "toFQDNs")
+	if len(fqdns) != 1 {
+		t.Fatalf("external-dns FQDN egress targets = %d, want 1", len(fqdns))
+	}
+	assertString(t, asManifest(t, fqdns[0], "external-dns FQDN match"), "api.cloudflare.com", "matchName")
 }
 
 func assertSystemBucketBackup(t *testing.T, docs []manifest, kind, namespace, planName, schedule string) {
@@ -729,6 +881,16 @@ func testOpenBaoOpenTofuBootstrap(t *testing.T) {
 	assertTextContains(t, mainTF, `resource "vault_kubernetes_auth_backend_config" "guardian_mgmt"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `kubernetes_host        = "https://kubernetes.default.svc:443"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `disable_iss_validation = true`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `external_dns_secret   = "guardian/guardian-mgmt/tenant-root/dns/external-dns"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `resource "vault_policy" "external_dns"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `name = "tenant-root-external-dns"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `path "${local.kv_mount}/data/${local.external_dns_secret}"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `resource "vault_kubernetes_auth_backend_role" "external_dns"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `role_name                        = "tenant-root-external-dns"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `bound_service_account_names      = ["external-dns-secrets"]`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `bound_service_account_namespaces = ["external-dns"]`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `audience                         = "openbao"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `token_policies                   = [vault_policy.external_dns.name]`, "guardian-mgmt-openbao main.tf")
 	assertTextNotContains(t, mainTF, `resource "vault_policy" "secret_projection"`, "guardian-mgmt-openbao main.tf")
 	assertTextNotContains(t, mainTF, `resource "vault_kubernetes_auth_backend_role" "secret_projection"`, "guardian-mgmt-openbao main.tf")
 	assertTextNotContains(t, mainTF, `auth/token/lookup-self`, "guardian-mgmt-openbao main.tf")
@@ -794,6 +956,28 @@ func testFluxHandoff(t *testing.T) {
 		stringAt(asManifest(t, baseDeps[0], "base spec.dependsOn[0]"), "name") != "guardian-mgmt-platform" ||
 		stringAt(asManifest(t, baseDeps[1], "base spec.dependsOn[1]"), "name") != "guardian-mgmt-storage" {
 		t.Fatalf("guardian-mgmt-base dependsOn = %#v, want guardian-mgmt-platform then guardian-mgmt-storage", baseDeps)
+	}
+
+	dnsController := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-dns-controller")
+	assertString(t, dnsController, "./src/infrastructure/base/dns", "spec", "path")
+	assertString(t, dnsController, "GitRepository", "spec", "sourceRef", "kind")
+	assertString(t, dnsController, "guardian", "spec", "sourceRef", "name")
+	assertBool(t, dnsController, true, "spec", "prune")
+	assertBool(t, dnsController, true, "spec", "wait")
+	dnsControllerDeps := sliceAt(t, dnsController, "spec", "dependsOn")
+	if len(dnsControllerDeps) != 1 || stringAt(asManifest(t, dnsControllerDeps[0], "dns controller spec.dependsOn[0]"), "name") != "guardian-mgmt-base" {
+		t.Fatalf("guardian-mgmt-dns-controller dependsOn = %#v, want only guardian-mgmt-base", dnsControllerDeps)
+	}
+
+	dnsRecords := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-dns-records")
+	assertString(t, dnsRecords, "./src/infrastructure/base/dns/records", "spec", "path")
+	assertString(t, dnsRecords, "GitRepository", "spec", "sourceRef", "kind")
+	assertString(t, dnsRecords, "guardian", "spec", "sourceRef", "name")
+	assertBool(t, dnsRecords, true, "spec", "prune")
+	assertBool(t, dnsRecords, false, "spec", "wait")
+	dnsRecordDeps := sliceAt(t, dnsRecords, "spec", "dependsOn")
+	if len(dnsRecordDeps) != 1 || stringAt(asManifest(t, dnsRecordDeps[0], "dns records spec.dependsOn[0]"), "name") != "guardian-mgmt-dns-controller" {
+		t.Fatalf("guardian-mgmt-dns-records dependsOn = %#v, want only guardian-mgmt-dns-controller", dnsRecordDeps)
 	}
 }
 

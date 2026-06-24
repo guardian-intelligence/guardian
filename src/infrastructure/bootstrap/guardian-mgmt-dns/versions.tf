@@ -2,10 +2,6 @@ terraform {
   required_version = ">= 1.12.0"
 
   required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "= 5.100.0"
-    }
     cloudflare = {
       source  = "cloudflare/cloudflare"
       version = "= 4.52.5"
@@ -27,10 +23,6 @@ terraform {
     skip_requesting_account_id  = true
     use_path_style              = true
   }
-}
-
-provider "aws" {
-  region = var.aws_region
 }
 
 provider "cloudflare" {}
