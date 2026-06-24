@@ -83,6 +83,8 @@ Default deployment stages: dev (PR preview), gamma (staging), prod.
 </company_topology>
 
 <repo_shape>
+The below is the target shape -- repo still in flux and does not match this quite yet
+
 src/
     products/
       company/
@@ -198,6 +200,12 @@ Important context:
 - Code is not the truth for how the system works. Traces are.
 - Use SQLC.
 - Do not provide time estimates.
+
+<development_loop>
+- This section is WIP, follow best practices. The below is just a few things to add to normal development workflow
+- Do not use CLI commands as a control plane. Rely on flux to converge the cluster on merged commits.
+- Run `aspect infra edge-health` to smoke-test edge reachability post convergence. Verify DNS resolution for every configured `guardianintelligence.org` hostname, HTTPS behavior through the public edge and origin consistency checks; the next milestone is moving the same stateless prober to a VPS and integrating it with in-cluster Flagger gates.
+</development_loop>
 
 Constraints:
 - Secrets must be autoprovisioned/autorotated.
