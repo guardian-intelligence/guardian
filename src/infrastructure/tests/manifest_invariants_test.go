@@ -239,6 +239,7 @@ func testGuardianMgmtDNSBootstrap(t *testing.T) {
 		`"*.guardianintelligence.org"`,
 		`"guardianintelligence.org"`,
 		`"api.guardianintelligence.org"`,
+		`"alerta.guardianintelligence.org"`,
 		`"dashboard.guardianintelligence.org"`,
 		`"keycloak.guardianintelligence.org"`,
 		`"grafana.guardianintelligence.org"`,
@@ -565,6 +566,7 @@ func testExternalDNS(t *testing.T) {
 		"*.guardianintelligence.org",
 		"guardianintelligence.org",
 		"api.guardianintelligence.org",
+		"alerta.guardianintelligence.org",
 		"dashboard.guardianintelligence.org",
 		"grafana.guardianintelligence.org",
 		"harbor.guardianintelligence.org",
@@ -823,7 +825,7 @@ func testRootTenantCoreServices(t *testing.T) {
 }
 
 func testObservability(t *testing.T) {
-	assertMonitoring(t, "src/infrastructure/base/apps/observability.yaml", "tenant-root", "grafana.guardianintelligence.org", true, "guardian_tenant", "root")
+	assertMonitoring(t, "src/infrastructure/base/apps/observability.yaml", "tenant-root", "guardianintelligence.org", true, "guardian_tenant", "root")
 }
 
 func testOpenBao(t *testing.T) {

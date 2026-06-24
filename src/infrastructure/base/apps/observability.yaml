@@ -5,7 +5,7 @@ metadata:
   name: monitoring
   namespace: tenant-root
 spec:
-  host: grafana.guardianintelligence.org
+  host: guardianintelligence.org
   metricsStorages:
     - name: shortterm
       retentionPeriod: 3d

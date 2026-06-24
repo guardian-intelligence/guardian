@@ -6,6 +6,7 @@ locals {
     "*.guardianintelligence.org",
     "guardianintelligence.org",
     "api.guardianintelligence.org",
+    "alerta.guardianintelligence.org",
     "dashboard.guardianintelligence.org",
     "grafana.guardianintelligence.org",
     "harbor.guardianintelligence.org",
@@ -41,7 +42,7 @@ data "cloudflare_zone" "guardianintelligence_org" {
 
 check "external_dns_owns_dns_records" {
   assert {
-    condition     = length(local.external_dns_record_hostnames) == 8
+    condition     = length(local.external_dns_record_hostnames) == 9
     error_message = "Root public DNS record ownership belongs to the in-cluster ExternalDNS controller."
   }
 }

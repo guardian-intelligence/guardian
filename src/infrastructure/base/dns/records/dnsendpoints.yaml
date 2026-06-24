@@ -23,6 +23,11 @@ spec:
       recordTTL: 120
       targets:
         - 206.223.228.101
+    - dnsName: alerta.guardianintelligence.org
+      recordType: A
+      recordTTL: 120
+      targets:
+        - 206.223.228.101
     - dnsName: dashboard.guardianintelligence.org
       recordType: A
       recordTTL: 120
