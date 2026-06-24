@@ -1,11 +1,11 @@
 locals {
   route53_zone_name    = "gi.org"
   cloudflare_zone_name = "guardianintelligence.org"
+  public_ingress_node  = "ash-earth"
 
-  public_ingress_ipv4s = sort([
-    for node in values(data.terraform_remote_state.guardian_mgmt.outputs.control_plane_nodes) :
-    node.public_ipv4
-  ])
+  public_ingress_ipv4s = [
+    data.terraform_remote_state.guardian_mgmt.outputs.control_plane_nodes[local.public_ingress_node].public_ipv4
+  ]
 
   route53_record_sets = {}
 

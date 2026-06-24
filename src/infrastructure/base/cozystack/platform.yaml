@@ -14,12 +14,12 @@ spec:
           host: guardianintelligence.org
           # k8s API rides a Talos Layer2 VIP on the Latitude Virtual Network.
           apiServerEndpoint: https://10.8.0.250:6443
-          # Public ingress uses the node public IPs. The Latitude VLAN-backed
-          # MetalLB pool is private 10.8.0.0/24 and is not internet-routable.
+          # Public ingress uses a single known-good edge IP. Cozystack expects
+          # externalIPs for ingress on bare metal without a native load balancer;
+          # it should not be treated as a DNS round-robin over control-plane
+          # nodes.
           externalIPs:
             - 206.223.228.101
-            - 45.250.254.119
-            - 206.223.228.87
           exposedServices:
             - dashboard
             - api

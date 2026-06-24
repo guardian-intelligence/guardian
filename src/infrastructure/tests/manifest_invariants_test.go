@@ -115,7 +115,7 @@ func testCozystackPlatformPackage(t *testing.T) {
 	assertStringSlice(t, pkg, []string{"cozystack.backupstrategy-controller"}, "spec", "components", "platform", "values", "bundles", "disabledPackages")
 	assertString(t, pkg, "guardianintelligence.org", "spec", "components", "platform", "values", "publishing", "host")
 	assertString(t, pkg, fmt.Sprintf("https://%s:6443", topology.Network.VLAN.APIVIP), "spec", "components", "platform", "values", "publishing", "apiServerEndpoint")
-	assertStringSlice(t, pkg, topologyPublicIPs(topology), "spec", "components", "platform", "values", "publishing", "externalIPs")
+	assertStringSlice(t, pkg, []string{topologyNodePublicIP(t, topology, "ash-earth")}, "spec", "components", "platform", "values", "publishing", "externalIPs")
 	assertStringSlice(t, pkg, []string{"dashboard", "api"}, "spec", "components", "platform", "values", "publishing", "exposedServices")
 
 	assertString(t, pkg, "10.244.0.0/16", "spec", "components", "platform", "values", "networking", "podCIDR")
@@ -224,6 +224,8 @@ func testGuardianMgmtDNSBootstrap(t *testing.T) {
 	assertTextContains(t, mainTF, `key    = "opentofu/guardian-mgmt.tfstate"`, "guardian-mgmt-dns main.tf")
 	assertTextContains(t, mainTF, `endpoint                    = "https://${var.cloudflare_account_id}.r2.cloudflarestorage.com"`, "guardian-mgmt-dns main.tf")
 	assertTextContains(t, mainTF, `data.terraform_remote_state.guardian_mgmt.outputs.control_plane_nodes`, "guardian-mgmt-dns main.tf")
+	assertTextContains(t, mainTF, `public_ingress_node  = "ash-earth"`, "guardian-mgmt-dns main.tf")
+	assertTextContains(t, mainTF, `control_plane_nodes[local.public_ingress_node].public_ipv4`, "guardian-mgmt-dns main.tf")
 	assertTextContains(t, mainTF, `data "aws_route53_zone" "gi_org"`, "guardian-mgmt-dns main.tf")
 	assertTextContains(t, mainTF, `data "cloudflare_zone" "guardianintelligence_org"`, "guardian-mgmt-dns main.tf")
 	assertTextContains(t, mainTF, `account_id = var.cloudflare_account_id`, "guardian-mgmt-dns main.tf")
@@ -1046,12 +1048,15 @@ func ctyIntField(t *testing.T, values map[string]cty.Value, field, label string)
 	return int(got)
 }
 
-func topologyPublicIPs(topology guardianMgmtTopology) []string {
-	out := make([]string, 0, len(topology.Nodes))
+func topologyNodePublicIP(t *testing.T, topology guardianMgmtTopology, name string) string {
+	t.Helper()
 	for _, node := range topology.Nodes {
-		out = append(out, node.PublicIPv4)
+		if node.Name == name {
+			return node.PublicIPv4
+		}
 	}
-	return out
+	t.Fatalf("topology node %q not found", name)
+	return ""
 }
 
 func assertUniqueTopologyValues(t *testing.T, topology guardianMgmtTopology) {
