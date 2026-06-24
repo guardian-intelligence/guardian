@@ -1,0 +1,91 @@
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+http_archive(
+    name = "cilium_cli_linux_amd64",
+    build_file_content = """exports_files(["cilium"])""",
+    sha256 = "98ecd554591a592b0ee32f5d73871133bcee06639619f1c032bcba339340dc26",
+    url = "https://github.com/cilium/cilium-cli/releases/download/v0.19.4/cilium-linux-amd64.tar.gz",
+)
+
+http_archive(
+    name = "hubble_linux_amd64",
+    build_file_content = """exports_files(["hubble"])""",
+    sha256 = "9f1b8167f1beef3656b96def19a75478582579e8d7702307cc0c0c5330eef969",
+    url = "https://github.com/cilium/hubble/releases/download/v1.18.0/hubble-linux-amd64.tar.gz",
+)
+
+http_archive(
+    name = "stern_linux_amd64",
+    build_file_content = """exports_files(["stern"])""",
+    sha256 = "7754adfa653939240f7d20fff4ada9b69cda40c9e70732301f67bb8045f1ef3e",
+    url = "https://github.com/stern/stern/releases/download/v1.34.0/stern_1.34.0_linux_amd64.tar.gz",
+)
+
+http_archive(
+    name = "velero_linux_amd64",
+    build_file_content = """exports_files(["velero"])""",
+    sha256 = "f483cf07b0fa09f33d91f264528492f362e031afa85546b47cbfdf9f77662067",
+    strip_prefix = "velero-v1.18.1-linux-amd64",
+    url = "https://github.com/vmware-tanzu/velero/releases/download/v1.18.1/velero-v1.18.1-linux-amd64.tar.gz",
+)
+
+http_archive(
+    name = "kubectl_cnpg_linux_amd64",
+    build_file_content = """exports_files(["kubectl-cnpg"])""",
+    sha256 = "2a550d5ee2224e5bb66b95602f8052fc50da50485f59f97b817a0c3b44b58581",
+    url = "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v1.29.1/kubectl-cnpg_1.29.1_linux_x86_64.tar.gz",
+)
+
+http_archive(
+    name = "doggo_linux_amd64",
+    build_file_content = """exports_files(["doggo"])""",
+    sha256 = "aa6760e7f163958e7626420447385ab938fdc127983edaceb121f809bd3e2bca",
+    url = "https://github.com/mr-karan/doggo/releases/download/v1.2.0/doggo-linux-x86_64.tar.gz",
+)
+
+http_archive(
+    name = "step_linux_amd64",
+    build_file_content = """
+filegroup(
+    name = "step",
+    srcs = ["bin/step"],
+    visibility = ["//visibility:public"],
+)
+""",
+    sha256 = "f9ebb5a078c713abe286a02e64ad9b78197c5bda3e729a8de44f739c5cb3c0ac",
+    strip_prefix = "step_linux_amd64",
+    url = "https://github.com/smallstep/cli/releases/download/v0.30.6/step_linux_amd64.tar.gz",
+)
+
+http_archive(
+    name = "clickhouse_common_static_linux_amd64",
+    build_file_content = """
+filegroup(
+    name = "clickhouse",
+    srcs = ["usr/bin/clickhouse"],
+    visibility = ["//visibility:public"],
+)
+""",
+    sha256 = "ac4a6158e0be60c1a9394e3ca5822957d603e26ef94731ca586fc50177d4182c",
+    strip_prefix = "clickhouse-common-static-26.3.15.4",
+    url = "https://github.com/ClickHouse/ClickHouse/releases/download/v26.3.15.4-lts/clickhouse-common-static-26.3.15.4-amd64.tgz",
+)
+
+http_archive(
+    name = "percona_postgresql_18_linux_amd64",
+    build_file_content = """
+filegroup(
+    name = "psql",
+    srcs = ["percona-postgresql18/bin/psql.bin"],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "pgbench",
+    srcs = ["percona-postgresql18/bin/pgbench"],
+    visibility = ["//visibility:public"],
+)
+""",
+    sha256 = "8aa2aeeba395c306a5e2b4f121c77f654ddb3145d8617bd3d23e81e5980ca767",
+    url = "https://downloads.percona.com/downloads/postgresql-distribution-18/18.4/binary/tarball/percona-postgresql-18.4-ssl3-linux-x86_64.tar.gz",
+)

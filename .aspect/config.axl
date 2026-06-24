@@ -37,6 +37,12 @@ load(
     ".aspect/tasks/tidy.axl",
     tidy = "tidy",
 )
+load(
+    ".aspect/tasks/tools.axl",
+    tools_install = "install",
+    tools_path = "path",
+    tools_uninstall = "uninstall",
+)
 
 def config(ctx):
     # aspect bazel ...
@@ -62,3 +68,8 @@ def config(ctx):
 
     # aspect tidy
     ctx.tasks.add(tidy)
+
+    # aspect tools ...
+    ctx.tasks.add(tools_install)
+    ctx.tasks.add(tools_path)
+    ctx.tasks.add(tools_uninstall)

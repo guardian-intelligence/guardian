@@ -33,3 +33,104 @@ def checked_spawn(ctx, program, args, cwd = None, env = None, label = None):
         ctx.std.io.stderr.write("$ " + label_str + "\n")
     r = cmd.spawn().wait()
     return r.code
+
+def _capture_stdout(ctx, program, args, cwd = None, label = None):
+    label_str = label if label != None else program
+    cmd = ctx.std.process.command(program).args(args)
+    if cwd != None:
+        cmd = cmd.current_dir(cwd)
+    if ctx.std.io.stderr.is_tty:
+        ctx.std.io.stderr.write("$ " + label_str + "\n")
+    r = cmd.stdout("piped").stderr("piped").spawn().wait_with_output()
+    if r.status.code != 0:
+        ctx.std.io.stderr.write("ERROR: " + label_str + " failed\n")
+        if r.stdout != "":
+            ctx.std.io.stderr.write(r.stdout)
+        if r.stderr != "":
+            ctx.std.io.stderr.write(r.stderr)
+        return None
+    return r.stdout.strip()
+
+def _absolute_or_workspace_path(ctx, path):
+    if path.startswith("/"):
+        return path
+    return ws_path(ctx, path)
+
+def bazel_output_file(ctx, target):
+    """Build a single-output Bazel target and return its filesystem path."""
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        ["build", target],
+        cwd = ws_path(ctx),
+        label = "bazelisk build " + target,
+    )
+    if rc != 0:
+        return ""
+
+    raw_files = _capture_stdout(
+        ctx,
+        "bazelisk",
+        ["cquery", "--output=files", target],
+        cwd = ws_path(ctx),
+        label = "bazelisk cquery --output=files " + target,
+    )
+    if raw_files == None:
+        return ""
+
+    files = []
+    for line in raw_files.split("\n"):
+        clean = line.strip()
+        if clean != "":
+            files.append(clean)
+    if len(files) != 1:
+        ctx.std.io.stderr.write("ERROR: expected one output for " + target + ", got " + str(len(files)) + "\n")
+        return ""
+
+    execroot = _capture_stdout(
+        ctx,
+        "bazelisk",
+        ["info", "execution_root"],
+        cwd = ws_path(ctx),
+        label = "bazelisk info execution_root",
+    )
+    if execroot == None:
+        return ""
+    execroot_path = execroot + "/" + files[0]
+    if not files[0].startswith("external/"):
+        return execroot_path
+
+    output_base = _capture_stdout(
+        ctx,
+        "bazelisk",
+        ["info", "output_base"],
+        cwd = ws_path(ctx),
+        label = "bazelisk info output_base",
+    )
+    if output_base == None:
+        return ""
+    return output_base + "/" + files[0]
+
+def install_bazel_tool_shims(ctx, shims, bin_dir):
+    """Install local symlinks for Bazel-resolved executable targets."""
+    out_dir = _absolute_or_workspace_path(ctx, bin_dir)
+    rc = checked_spawn(ctx, "mkdir", ["-p", out_dir], label = "mkdir -p " + out_dir)
+    if rc != 0:
+        return ""
+    for name, target in shims:
+        tool = bazel_output_file(ctx, target)
+        if tool == "":
+            return ""
+        rc = checked_spawn(ctx, "ln", ["-sf", tool, out_dir + "/" + name], label = "ln -sf " + name)
+        if rc != 0:
+            return ""
+    return out_dir
+
+def uninstall_bazel_tool_shims(ctx, shims, bin_dir):
+    """Remove only the known shim names from a local bin directory."""
+    out_dir = _absolute_or_workspace_path(ctx, bin_dir)
+    for name, _target in shims:
+        rc = checked_spawn(ctx, "rm", ["-f", out_dir + "/" + name], label = "rm -f " + name)
+        if rc != 0:
+            return 1
+    return 0

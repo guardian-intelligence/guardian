@@ -1,0 +1,78 @@
+"""aspect tools install|uninstall|path - repo-pinned CLI shims."""
+
+load(
+    ".aspect/lib/helpers.axl",
+    "install_bazel_tool_shims",
+    "uninstall_bazel_tool_shims",
+)
+
+DEBUG_CLI_SHIMS = [
+    ("kubectl", "@kubectl_linux_amd64//file:file"),
+    ("talosctl", "@talosctl_linux_amd64//file:file"),
+    ("helm", "@helm_linux_amd64//:helm"),
+    ("k6", "@k6_linux_amd64//:k6"),
+    ("oras", "@oras_linux_amd64//:oras_file"),
+    ("tofu", "@opentofu_linux_amd64//:tofu_bin"),
+    ("talm", "@talm_linux_amd64//:talm"),
+    ("cilium", "@cilium_cli_linux_amd64//:cilium"),
+    ("hubble", "@hubble_linux_amd64//:hubble"),
+    ("stern", "@stern_linux_amd64//:stern"),
+    ("velero", "@velero_linux_amd64//:velero"),
+    ("kubectl-cnpg", "@kubectl_cnpg_linux_amd64//:kubectl-cnpg"),
+    ("doggo", "@doggo_linux_amd64//:doggo"),
+    ("step", "@step_linux_amd64//:step"),
+    ("clickhouse", "@clickhouse_common_static_linux_amd64//:clickhouse"),
+    ("clickhouse-client", "@clickhouse_common_static_linux_amd64//:clickhouse"),
+    ("clickhouse-benchmark", "@clickhouse_common_static_linux_amd64//:clickhouse"),
+    ("psql", "@percona_postgresql_18_linux_amd64//:psql"),
+    ("pgbench", "@percona_postgresql_18_linux_amd64//:pgbench"),
+]
+
+def _install_impl(ctx):
+    bin_dir = install_bazel_tool_shims(ctx, DEBUG_CLI_SHIMS, ctx.args.bin_dir)
+    if bin_dir == "":
+        return 1
+    if ctx.args.print_path:
+        ctx.std.io.stdout.write(bin_dir + "\n")
+    return 0
+
+def _uninstall_impl(ctx):
+    return uninstall_bazel_tool_shims(ctx, DEBUG_CLI_SHIMS, ctx.args.bin_dir)
+
+def _path_impl(ctx):
+    bin_dir = ctx.args.bin_dir
+    if not bin_dir.startswith("/"):
+        bin_dir = ctx.std.env.root_dir() + "/" + bin_dir
+    ctx.std.io.stdout.write("export PATH=\"" + bin_dir + ":${PATH}\"\n")
+    return 0
+
+install = task(
+    implementation = _install_impl,
+    name = "install",
+    group = ["tools"],
+    summary = "Install symlinks for repo-pinned live debugging CLIs.",
+    args = {
+        "bin_dir": args.string(default = ".guardian/tools/bin", description = "Directory for installed CLI shims."),
+        "print_path": args.boolean(default = False, description = "Print the shim directory after install."),
+    },
+)
+
+uninstall = task(
+    implementation = _uninstall_impl,
+    name = "uninstall",
+    group = ["tools"],
+    summary = "Remove repo-pinned live debugging CLI shims from a bin directory.",
+    args = {
+        "bin_dir": args.string(default = ".guardian/tools/bin", description = "Directory containing installed CLI shims."),
+    },
+)
+
+path = task(
+    implementation = _path_impl,
+    name = "path",
+    group = ["tools"],
+    summary = "Print the PATH export for the repo-pinned CLI shim directory.",
+    args = {
+        "bin_dir": args.string(default = ".guardian/tools/bin", description = "Directory containing installed CLI shims."),
+    },
+)

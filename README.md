@@ -6,19 +6,6 @@ OpenTofu, Talm, Talos, Flux, Cozystack, and standard Kubernetes controllers.
 Local commands are limited to bootstrap, validation, load, and disaster-recovery
 drills.
 
-## Layout
-
-```text
-.aspect/                       durable Aspect task surface
-src/infrastructure/bootstrap/  OpenTofu bootstrap roots
-src/infrastructure/base/       root management-cluster Kubernetes desired state
-src/infrastructure/cmd/        infra validation, load, and DR helpers
-src/infrastructure/load/       k6 scripts used by infra load helpers
-src/infrastructure/talm/       Talm chart for the management control plane
-src/products/company/          active TanStack company website artifact
-src/tools/                     repo-pinned external tool archives
-```
-
 ## Commands
 
 Run from the repo root.
@@ -56,8 +43,18 @@ path. Postgres and ClickHouse backups use Cozystack 1.5's platform-managed
 `spec.backup.useSystemBucket: true`; the repo does not carry Guardian-specific
 backup strategies or per-app backup credential Secrets.
 
-Available live debugging CLIs are repo-pinned `kubectl`, `talosctl`, `helm`,
-`k6`, and ORAS through the focused `aspect infra ...` tasks.
+Available live debugging CLIs are repo-pinned and can be installed as local
+shims:
+
+```bash
+aspect tools install
+eval "$(aspect tools path)"
+aspect tools uninstall
+```
+
+The default shim directory is `.guardian/tools/bin`. Pass
+`--bin-dir "${HOME}/.local/bin"` to install into an existing user bin directory.
+`aspect tools uninstall` removes only the known shim names from that directory.
 
 Generated Talm secrets, rendered node configs, kubeconfigs, and local operator
 state stay out of Git.
@@ -74,5 +71,14 @@ state stay out of Git.
 | kubectl | `src/tools/kubectl/kubectl.MODULE.bazel` |
 | k6 | `src/tools/k6/k6.MODULE.bazel` |
 | ORAS | `src/tools/oras/oras.MODULE.bazel` |
+| Cilium CLI | `src/tools/debug-clis/debug-clis.MODULE.bazel` |
+| Hubble CLI | `src/tools/debug-clis/debug-clis.MODULE.bazel` |
+| Stern | `src/tools/debug-clis/debug-clis.MODULE.bazel` |
+| Velero CLI | `src/tools/debug-clis/debug-clis.MODULE.bazel` |
+| kubectl-cnpg | `src/tools/debug-clis/debug-clis.MODULE.bazel` |
+| doggo DNS client | `src/tools/debug-clis/debug-clis.MODULE.bazel` |
+| step TLS/certificate CLI | `src/tools/debug-clis/debug-clis.MODULE.bazel` |
+| ClickHouse CLI | `src/tools/debug-clis/debug-clis.MODULE.bazel` |
+| psql / pgbench | `src/tools/debug-clis/debug-clis.MODULE.bazel` |
 
 Run `aspect tidy` before publishing changes.
