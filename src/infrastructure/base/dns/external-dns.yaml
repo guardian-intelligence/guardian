@@ -40,6 +40,7 @@ spec:
     policy: sync
     registry: txt
     txtOwnerId: guardian-mgmt-ash
+    txtPrefix: external-dns-
     domainFilters:
       - guardianintelligence.org
     interval: 1m

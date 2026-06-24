@@ -544,6 +544,7 @@ func testExternalDNS(t *testing.T) {
 	assertString(t, release, "sync", "spec", "values", "policy")
 	assertString(t, release, "txt", "spec", "values", "registry")
 	assertString(t, release, "guardian-mgmt-ash", "spec", "values", "txtOwnerId")
+	assertString(t, release, "external-dns-", "spec", "values", "txtPrefix")
 	assertStringSlice(t, release, []string{"guardianintelligence.org"}, "spec", "values", "domainFilters")
 	assertBool(t, release, true, "spec", "values", "triggerLoopOnEvent")
 	assertString(t, release, "json", "spec", "values", "logFormat")
