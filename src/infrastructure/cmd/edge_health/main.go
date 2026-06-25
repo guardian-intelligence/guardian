@@ -61,6 +61,7 @@ type httpTarget struct {
 	Surface          string
 	Stage            string
 	Name             string
+	ExpectedSpec     string
 	ExpectedStatuses []int
 	Source           string
 }
@@ -102,6 +103,7 @@ type k6Target struct {
 	Name             string `json:"name"`
 	Surface          string `json:"surface"`
 	Stage            string `json:"stage"`
+	ExpectedSpec     string `json:"expected_statuses_label"`
 	ExpectedStatuses []int  `json:"expected_statuses"`
 }
 
@@ -320,7 +322,8 @@ func loadHTTPTargets(paths []string, dnsTargets []dnsTarget, domain string) ([]h
 			return nil, fmt.Errorf("close HTTP targets %s: %w", path, err)
 		}
 		for groupIndex, group := range groups {
-			expectedStatuses, err := parseExpectedStatuses(group.Labels["guardian_expected_statuses"])
+			expectedSpec := defaultString(group.Labels["guardian_expected_statuses"], "200")
+			expectedStatuses, err := parseExpectedStatuses(expectedSpec)
 			if err != nil {
 				return nil, fmt.Errorf("%s group %d: %w", path, groupIndex, err)
 			}
@@ -347,6 +350,7 @@ func loadHTTPTargets(paths []string, dnsTargets []dnsTarget, domain string) ([]h
 					Surface:          surface,
 					Stage:            stage,
 					Name:             requestName(stage, surface, host),
+					ExpectedSpec:     expectedSpec,
 					ExpectedStatuses: expectedStatuses,
 					Source:           path,
 				})
@@ -475,7 +479,7 @@ func runHTTP(ctx context.Context, cfg config, targets []httpTarget) error {
 	for _, target := range targets {
 		fmt.Printf("%s expectedStatuses=%s source=%s\n",
 			target.URL,
-			intsString(target.ExpectedStatuses),
+			target.ExpectedSpec,
 			target.Source,
 		)
 	}
@@ -490,6 +494,7 @@ func runK6(ctx context.Context, cfg config, targets []httpTarget) error {
 			Name:             target.Name,
 			Surface:          target.Surface,
 			Stage:            target.Stage,
+			ExpectedSpec:     target.ExpectedSpec,
 			ExpectedStatuses: target.ExpectedStatuses,
 		})
 	}
@@ -553,9 +558,19 @@ func parseExpectedStatuses(value string) ([]int, error) {
 	var out []int
 	for _, raw := range strings.Split(value, ",") {
 		part := strings.TrimSpace(raw)
+		if statusClass := strings.ToLower(part); len(statusClass) == 3 && statusClass[1:] == "xx" {
+			if statusClass[0] < '1' || statusClass[0] > '5' {
+				return nil, fmt.Errorf("guardian_expected_statuses contains invalid HTTP status class %q", part)
+			}
+			base := int(statusClass[0]-'0') * 100
+			for status := base; status < base+100; status++ {
+				out = append(out, status)
+			}
+			continue
+		}
 		status, err := strconv.Atoi(part)
 		if err != nil {
-			return nil, fmt.Errorf("guardian_expected_statuses contains non-integer %q", part)
+			return nil, fmt.Errorf("guardian_expected_statuses contains non-integer status or class %q", part)
 		}
 		if status < 100 || status > 599 {
 			return nil, fmt.Errorf("guardian_expected_statuses contains invalid HTTP status %d", status)

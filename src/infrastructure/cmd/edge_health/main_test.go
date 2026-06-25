@@ -86,6 +86,24 @@ func TestLoadHTTPTargetsRejectsHostOutsideDNS(t *testing.T) {
 	}
 }
 
+func TestParseExpectedStatusesAcceptsStatusClass(t *testing.T) {
+	statuses, err := parseExpectedStatuses("2xx,401")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(statuses) != 101 {
+		t.Fatalf("statuses = %d, want 101", len(statuses))
+	}
+	for _, status := range []int{200, 204, 299, 401} {
+		if !containsInt(statuses, status) {
+			t.Fatalf("statuses missing %d: %v", status, statuses)
+		}
+	}
+	if containsInt(statuses, 199) || containsInt(statuses, 300) {
+		t.Fatalf("statuses should only include 2xx plus explicit statuses: %v", statuses)
+	}
+}
+
 func TestRunDNSFailsWhenQueryDoesNotAnswer(t *testing.T) {
 	doggo := writeExecutable(t, "doggo", `#!/bin/sh
 cat <<'JSON'
@@ -153,6 +171,15 @@ func sameInts(left, right []int) bool {
 		}
 	}
 	return true
+}
+
+func containsInt(values []int, want int) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func writeFile(t *testing.T, path, contents string) {

@@ -23,6 +23,8 @@ go_test(
         "//src/infrastructure/bootstrap/guardian-mgmt:root",
         "//src/infrastructure/bootstrap/guardian-mgmt-dns:root",
         "//src/infrastructure/bootstrap/guardian-mgmt-openbao:root",
+        "//src/infrastructure/deployments/company/prod:manifests",
+        "//src/infrastructure/edge:edge_health_targets",
         "//src/infrastructure/talm:chart",
     ],
     deps = [

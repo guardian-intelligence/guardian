@@ -57,6 +57,8 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("cozystack platform patches", testCozystackPlatformPatches)
 	t.Run("cozystack app patches", testCozystackAppPatches)
 	t.Run("external dns", testExternalDNS)
+	t.Run("edge health targets", testEdgeHealthTargets)
+	t.Run("company site prod deployment", testCompanySiteProdDeployment)
 	t.Run("root tenant core services", testRootTenantCoreServices)
 	t.Run("observability", testObservability)
 	t.Run("openbao", testOpenBao)
@@ -623,6 +625,36 @@ func testExternalDNS(t *testing.T) {
 	assertString(t, httpsPort, "TCP", "protocol")
 }
 
+func testEdgeHealthTargets(t *testing.T) {
+	type fileSDGroup struct {
+		Targets []string          `yaml:"targets"`
+		Labels  map[string]string `yaml:"labels"`
+	}
+
+	var groups []fileSDGroup
+	if err := yaml.Unmarshal(readRunfile(t, "src/infrastructure/edge/http-targets.file_sd.yaml"), &groups); err != nil {
+		t.Fatal(err)
+	}
+	for _, group := range groups {
+		for _, target := range group.Targets {
+			if target != "https://guardianintelligence.org/" {
+				continue
+			}
+			if group.Labels["guardian_surface"] != "company-site" {
+				t.Fatalf("guardianintelligence.org surface = %q, want company-site", group.Labels["guardian_surface"])
+			}
+			if group.Labels["guardian_stage"] != "prod" {
+				t.Fatalf("guardianintelligence.org stage = %q, want prod", group.Labels["guardian_stage"])
+			}
+			if group.Labels["guardian_expected_statuses"] != "2xx" {
+				t.Fatalf("guardianintelligence.org expected statuses = %q, want 2xx", group.Labels["guardian_expected_statuses"])
+			}
+			return
+		}
+	}
+	t.Fatal("edge health targets must include https://guardianintelligence.org/")
+}
+
 func assertSystemBucketBackup(t *testing.T, docs []manifest, kind, namespace, planName, schedule string) {
 	t.Helper()
 
@@ -977,6 +1009,95 @@ func testFluxHandoff(t *testing.T) {
 	if len(dnsControllerDeps) != 1 || stringAt(asManifest(t, dnsControllerDeps[0], "dns controller spec.dependsOn[0]"), "name") != "guardian-mgmt-base" {
 		t.Fatalf("guardian-mgmt-dns-controller dependsOn = %#v, want only guardian-mgmt-base", dnsControllerDeps)
 	}
+
+	companyProd := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-company-prod")
+	assertString(t, companyProd, "./src/infrastructure/deployments/company/prod", "spec", "path")
+	assertString(t, companyProd, "GitRepository", "spec", "sourceRef", "kind")
+	assertString(t, companyProd, "guardian", "spec", "sourceRef", "name")
+	assertBool(t, companyProd, true, "spec", "prune")
+	assertBool(t, companyProd, true, "spec", "wait")
+	companyProdDeps := sliceAt(t, companyProd, "spec", "dependsOn")
+	if len(companyProdDeps) != 1 || stringAt(asManifest(t, companyProdDeps[0], "company prod spec.dependsOn[0]"), "name") != "guardian-mgmt-base" {
+		t.Fatalf("guardian-company-prod dependsOn = %#v, want only guardian-mgmt-base", companyProdDeps)
+	}
+}
+
+func testCompanySiteProdDeployment(t *testing.T) {
+	docs := readManifests(t, "src/infrastructure/deployments/company/prod/web.yaml")
+
+	deployment := findObject(t, docs, "Deployment", "tenant-prod", "company-site")
+	assertInt(t, deployment, 3, "spec", "replicas")
+	assertInt(t, deployment, 3, "spec", "revisionHistoryLimit")
+	assertString(t, deployment, "RollingUpdate", "spec", "strategy", "type")
+	assertInt(t, deployment, 0, "spec", "strategy", "rollingUpdate", "maxUnavailable")
+	assertInt(t, deployment, 1, "spec", "strategy", "rollingUpdate", "maxSurge")
+	assertString(t, deployment, "company-site", "metadata", "labels", "app.kubernetes.io/name")
+	assertString(t, deployment, "company", "metadata", "labels", "guardian.dev/product")
+	assertString(t, deployment, "prod", "metadata", "labels", "guardian.dev/stage")
+	assertBool(t, deployment, false, "spec", "template", "spec", "automountServiceAccountToken")
+
+	containers := sliceAt(t, deployment, "spec", "template", "spec", "containers")
+	if len(containers) != 1 {
+		t.Fatalf("company-site containers = %d, want 1", len(containers))
+	}
+	container := asManifest(t, containers[0], "company-site container")
+	assertString(t, container, "web", "name")
+	assertString(t, container, "harbor.guardianintelligence.org/guardian/company-site@sha256:d23f3f74fb61c45721367af4906df95d09f493a13b4fe1e3fc9cf5f9e06843bf", "image")
+	assertString(t, container, "IfNotPresent", "imagePullPolicy")
+	assertString(t, container, "50m", "resources", "requests", "cpu")
+	assertString(t, container, "128Mi", "resources", "requests", "memory")
+	assertString(t, container, "500m", "resources", "limits", "cpu")
+	assertString(t, container, "512Mi", "resources", "limits", "memory")
+	assertString(t, container, "/healthz", "readinessProbe", "httpGet", "path")
+	assertString(t, container, "http", "readinessProbe", "httpGet", "port")
+	assertString(t, container, "/livez", "livenessProbe", "httpGet", "path")
+	assertString(t, container, "http", "livenessProbe", "httpGet", "port")
+
+	service := findObject(t, docs, "Service", "tenant-prod", "company-site")
+	assertString(t, service, "ClusterIP", "spec", "type")
+	assertString(t, service, "Cluster", "spec", "internalTrafficPolicy")
+	assertString(t, service, "company-site", "spec", "selector", "app.kubernetes.io/name")
+	assertString(t, service, "prod", "spec", "selector", "guardian.dev/stage")
+	ports := sliceAt(t, service, "spec", "ports")
+	if len(ports) != 1 {
+		t.Fatalf("company-site service ports = %d, want 1", len(ports))
+	}
+	port := asManifest(t, ports[0], "company-site service port")
+	assertString(t, port, "http", "name")
+	assertInt(t, port, 80, "port")
+	assertString(t, port, "http", "targetPort")
+	assertString(t, port, "TCP", "protocol")
+
+	pdb := findObject(t, docs, "PodDisruptionBudget", "tenant-prod", "company-site")
+	assertInt(t, pdb, 2, "spec", "minAvailable")
+	assertString(t, pdb, "company-site", "spec", "selector", "matchLabels", "app.kubernetes.io/name")
+	assertString(t, pdb, "prod", "spec", "selector", "matchLabels", "guardian.dev/stage")
+
+	ingress := findObject(t, docs, "Ingress", "tenant-prod", "company-site")
+	assertString(t, ingress, "tenant-root", "spec", "ingressClassName")
+	assertString(t, ingress, "letsencrypt-prod", "metadata", "annotations", "cert-manager.io/cluster-issuer")
+	rules := sliceAt(t, ingress, "spec", "rules")
+	if len(rules) != 1 {
+		t.Fatalf("company-site ingress rules = %d, want 1", len(rules))
+	}
+	rule := asManifest(t, rules[0], "company-site ingress rule")
+	assertString(t, rule, "guardianintelligence.org", "host")
+	paths := sliceAt(t, rule, "http", "paths")
+	if len(paths) != 1 {
+		t.Fatalf("company-site ingress paths = %d, want 1", len(paths))
+	}
+	path := asManifest(t, paths[0], "company-site ingress path")
+	assertString(t, path, "/", "path")
+	assertString(t, path, "Prefix", "pathType")
+	assertString(t, path, "company-site", "backend", "service", "name")
+	assertInt(t, path, 80, "backend", "service", "port", "number")
+	tls := sliceAt(t, ingress, "spec", "tls")
+	if len(tls) != 1 {
+		t.Fatalf("company-site ingress tls = %d, want 1", len(tls))
+	}
+	tlsEntry := asManifest(t, tls[0], "company-site ingress tls[0]")
+	assertStringSlice(t, tlsEntry, []string{"guardianintelligence.org"}, "hosts")
+	assertString(t, tlsEntry, "company-site-tls", "secretName")
 }
 
 type appExpectation struct {

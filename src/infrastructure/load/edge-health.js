@@ -66,7 +66,7 @@ export default function () {
           origin: __ENV.EDGE_K6_ORIGIN || "public-edge",
           status: response.status,
           error: response.error || "",
-          expected_statuses: target.expected_statuses || [200],
+          expected_statuses: target.expected_statuses_label || "200",
         }),
       );
     }

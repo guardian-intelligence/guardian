@@ -61,6 +61,7 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/base/networking:manifests",
     "//src/infrastructure/base/openbao:manifests",
     "//src/infrastructure/base/storage:manifests",
+    "//src/infrastructure/deployments/company/prod:manifests",
     "//src/infrastructure/load:http_load_scripts",
     "//src/infrastructure/edge:edge_health_targets",
     "//src/infrastructure/bootstrap/guardian-mgmt-openbao:root",

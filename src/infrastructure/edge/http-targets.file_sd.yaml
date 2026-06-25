@@ -1,4 +1,10 @@
 - targets:
+    - https://guardianintelligence.org/
+  labels:
+    guardian_surface: company-site
+    guardian_stage: prod
+    guardian_expected_statuses: "2xx"
+- targets:
     - https://dashboard.guardianintelligence.org/
   labels:
     guardian_surface: dashboard
