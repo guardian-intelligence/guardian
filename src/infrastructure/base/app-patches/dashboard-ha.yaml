@@ -1,0 +1,96 @@
+# The Cozystack 1.5 dashboard chart hard-codes a single console and gatekeeper
+# replica. Keep the public management dashboard from depending on one node by
+# post-rendering the generated Deployments to one replica per control-plane node.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: dashboard
+  namespace: cozy-dashboard
+spec:
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              group: apps
+              version: v1
+              kind: Deployment
+              name: incloud-web-gatekeeper
+            patch: |-
+              - op: replace
+                path: /spec/replicas
+                value: 3
+              - op: replace
+                path: /spec/strategy/rollingUpdate/maxSurge
+                value: 0
+              - op: replace
+                path: /spec/strategy/rollingUpdate/maxUnavailable
+                value: 1
+              - op: replace
+                path: /spec/template/spec/affinity/podAntiAffinity
+                value:
+                  requiredDuringSchedulingIgnoredDuringExecution:
+                    - labelSelector:
+                        matchExpressions:
+                          - key: app.kubernetes.io/name
+                            operator: In
+                            values:
+                              - gatekeeper
+                          - key: app.kubernetes.io/instance
+                            operator: In
+                            values:
+                              - incloud-web
+                      topologyKey: kubernetes.io/hostname
+          - target:
+              group: apps
+              version: v1
+              kind: Deployment
+              name: cozy-dashboard-console
+            patch: |-
+              - op: replace
+                path: /spec/replicas
+                value: 3
+              - op: replace
+                path: /spec/strategy/rollingUpdate/maxSurge
+                value: 0
+              - op: replace
+                path: /spec/strategy/rollingUpdate/maxUnavailable
+                value: 1
+              - op: replace
+                path: /spec/template/spec/affinity/podAntiAffinity
+                value:
+                  requiredDuringSchedulingIgnoredDuringExecution:
+                    - labelSelector:
+                        matchExpressions:
+                          - key: app.kubernetes.io/name
+                            operator: In
+                            values:
+                              - console
+                          - key: app.kubernetes.io/instance
+                            operator: In
+                            values:
+                              - cozy-dashboard
+                      topologyKey: kubernetes.io/hostname
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: incloud-web-gatekeeper
+  namespace: cozy-dashboard
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: incloud-web
+      app.kubernetes.io/name: gatekeeper
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: cozy-dashboard-console
+  namespace: cozy-dashboard
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: cozy-dashboard
+      app.kubernetes.io/name: console
