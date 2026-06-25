@@ -136,10 +136,6 @@ metadata:
     app.kubernetes.io/part-of: guardian
     guardian.dev/product: company
     guardian.dev/stage: prod
-  annotations:
-    acme.cert-manager.io/http01-ingress-ingressclassname: tenant-root
-    cert-manager.io/cluster-issuer: letsencrypt-prod
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
 spec:
   ingressClassName: tenant-root
   rules:
@@ -153,7 +149,3 @@ spec:
                 name: company-site
                 port:
                   number: 80
-  tls:
-    - hosts:
-        - guardianintelligence.org
-      secretName: company-site-tls

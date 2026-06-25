@@ -1075,7 +1075,6 @@ func testCompanySiteProdDeployment(t *testing.T) {
 
 	ingress := findObject(t, docs, "Ingress", "tenant-prod", "company-site")
 	assertString(t, ingress, "tenant-root", "spec", "ingressClassName")
-	assertString(t, ingress, "letsencrypt-prod", "metadata", "annotations", "cert-manager.io/cluster-issuer")
 	rules := sliceAt(t, ingress, "spec", "rules")
 	if len(rules) != 1 {
 		t.Fatalf("company-site ingress rules = %d, want 1", len(rules))
@@ -1091,13 +1090,6 @@ func testCompanySiteProdDeployment(t *testing.T) {
 	assertString(t, path, "Prefix", "pathType")
 	assertString(t, path, "company-site", "backend", "service", "name")
 	assertInt(t, path, 80, "backend", "service", "port", "number")
-	tls := sliceAt(t, ingress, "spec", "tls")
-	if len(tls) != 1 {
-		t.Fatalf("company-site ingress tls = %d, want 1", len(tls))
-	}
-	tlsEntry := asManifest(t, tls[0], "company-site ingress tls[0]")
-	assertStringSlice(t, tlsEntry, []string{"guardianintelligence.org"}, "hosts")
-	assertString(t, tlsEntry, "company-site-tls", "secretName")
 }
 
 type appExpectation struct {
