@@ -8,11 +8,6 @@ output "external_dns_owner_id" {
   value       = local.external_dns_owner_id
 }
 
-output "external_dns_record_hostnames" {
-  description = "Root public DNS hostnames reconciled by ExternalDNS as Cloudflare-proxied fallback A records."
-  value       = local.public_edge_hostnames
-}
-
 output "cloudflare_load_balancer_hostnames" {
   description = "Root public edge hostnames actively served by Cloudflare Load Balancing."
   value       = local.public_edge_hostnames

@@ -6,30 +6,33 @@ import (
 	"time"
 )
 
-func TestParseNodes(t *testing.T) {
-	got, err := parseNodes("ash-earth=10.8.0.11,ash-wind=10.8.0.12")
-	if err != nil {
-		t.Fatal(err)
+func TestValidateConfigRequiresSingleConfirmedNodeIP(t *testing.T) {
+	cfg := drillConfig{
+		K6:               "/bin/k6",
+		Script:           "edge-failover.js",
+		Kubectl:          "/bin/kubectl",
+		Talosctl:         "/bin/talosctl",
+		Talosconfig:      "talosconfig",
+		TalosEndpoint:    "206.223.228.101,45.250.254.119,206.223.228.87",
+		NodeName:         "ash-earth",
+		NodeIP:           "206.223.228.101",
+		ConfirmNodeIP:    "45.250.254.119",
+		URL:              "https://dashboard.guardianintelligence.org/",
+		ExpectedStatuses: "200,302",
+		Duration:         "5m",
+		Warmup:           10 * time.Second,
+		Cooldown:         20 * time.Second,
+		SampleIntervalMS: 250,
+		RequestTimeout:   "5s",
+		KubeTimeout:      10 * time.Minute,
+		Report:           "report.json",
 	}
-	want := []nodeTarget{
-		{Name: "ash-earth", TalosNode: "10.8.0.11"},
-		{Name: "ash-wind", TalosNode: "10.8.0.12"},
+	if err := validateConfig(cfg); err == nil {
+		t.Fatal("validateConfig accepted an unconfirmed node IP")
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("parseNodes() = %#v, want %#v", got, want)
-	}
-}
-
-func TestKubeAPIServerForNodeUsesDifferentNode(t *testing.T) {
-	got, err := kubeAPIServerForNode(
-		"ash-earth=206.223.228.101,ash-wind=45.250.254.119,ash-water=206.223.228.87",
-		"ash-earth",
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "https://45.250.254.119:6443" {
-		t.Fatalf("kubeAPIServerForNode() = %q, want alternate node API", got)
+	cfg.ConfirmNodeIP = cfg.NodeIP
+	if err := validateConfig(cfg); err != nil {
+		t.Fatalf("validateConfig() = %v", err)
 	}
 }
 
@@ -82,7 +85,7 @@ func TestSummarizeNodeMaxOutage(t *testing.T) {
 	reboot := time.UnixMilli(1100)
 	finished := time.UnixMilli(2400)
 	report := summarizeNode(
-		nodeTarget{Name: "ash-earth", TalosNode: "10.8.0.11"},
+		nodeTarget{Name: "ash-earth", IP: "10.8.0.11"},
 		[]sample{
 			{TimeUnixMS: 1000, OK: true},
 			{TimeUnixMS: 1250, OK: false},

@@ -260,7 +260,6 @@ func testGuardianMgmtDNSBootstrap(t *testing.T) {
 
 	assertTextContains(t, outputsTF, `output "cloudflare_zone_id"`, "guardian-mgmt-dns outputs.tf")
 	assertTextContains(t, outputsTF, `output "external_dns_owner_id"`, "guardian-mgmt-dns outputs.tf")
-	assertTextContains(t, outputsTF, `output "external_dns_record_hostnames"`, "guardian-mgmt-dns outputs.tf")
 	assertTextContains(t, outputsTF, `output "cloudflare_load_balancer_hostnames"`, "guardian-mgmt-dns outputs.tf")
 	assertTextContains(t, outputsTF, `output "cloudflare_load_balancer_pool_id"`, "guardian-mgmt-dns outputs.tf")
 	assertTextContains(t, outputsTF, `output "public_ingress_ipv4s"`, "guardian-mgmt-dns outputs.tf")
@@ -499,11 +498,10 @@ func testCozystackAppPatches(t *testing.T) {
 }
 
 func testExternalDNS(t *testing.T) {
-	topology := guardianMgmtTopologyFixture(t)
 	base := readYAMLMap(t, "src/infrastructure/base/kustomization.yaml")
 	baseResources := sliceAt(t, base, "resources")
 	if containsString(baseResources, "dns") {
-		t.Fatalf("base kustomization must not include dns directly; Flux applies DNS controller and records in ordered slices")
+		t.Fatalf("base kustomization must not include dns directly; Flux applies the DNS controller in an ordered slice")
 	}
 	assertContainsString(t, baseResources, "flux/sync.yaml", "base kustomization resources")
 
@@ -516,8 +514,6 @@ func testExternalDNS(t *testing.T) {
 	} {
 		assertContainsString(t, sliceAt(t, kustomization, "resources"), resource, "external-dns kustomization resources")
 	}
-	recordsKustomization := readYAMLMap(t, "src/infrastructure/base/dns/records/kustomization.yaml")
-	assertContainsString(t, sliceAt(t, recordsKustomization, "resources"), "dnsendpoints.yaml", "external-dns records kustomization resources")
 
 	namespace := findObject(t, readManifests(t, "src/infrastructure/base/dns/namespace.yaml"), "Namespace", "", "external-dns")
 	assertString(t, namespace, "restricted", "metadata", "labels", "pod-security.kubernetes.io/enforce")
@@ -586,38 +582,6 @@ func testExternalDNS(t *testing.T) {
 	assertString(t, release, "256Mi", "spec", "values", "resources", "limits", "memory")
 	assertBool(t, release, true, "spec", "values", "serviceMonitor", "enabled")
 	assertEnvSecretRef(t, sliceAt(t, release, "spec", "values", "env"), "CF_API_TOKEN", "cloudflare-external-dns", "CF_API_TOKEN")
-
-	dnsEndpoint := findObject(t, readManifests(t, "src/infrastructure/base/dns/records/dnsendpoints.yaml"), "DNSEndpoint", "external-dns", "guardian-root-public")
-	assertString(t, dnsEndpoint, "externaldns.k8s.io/v1alpha1", "apiVersion")
-	endpoints := sliceAt(t, dnsEndpoint, "spec", "endpoints")
-	wantHosts := []string{
-		"*.guardianintelligence.org",
-		"guardianintelligence.org",
-		"api.guardianintelligence.org",
-		"alerta.guardianintelligence.org",
-		"dashboard.guardianintelligence.org",
-		"grafana.guardianintelligence.org",
-		"harbor.guardianintelligence.org",
-		"keycloak.guardianintelligence.org",
-		"s3.guardianintelligence.org",
-	}
-	if len(endpoints) != len(wantHosts) {
-		t.Fatalf("external-dns endpoints = %d, want %d", len(endpoints), len(wantHosts))
-	}
-	for i, host := range wantHosts {
-		endpoint := asManifest(t, endpoints[i], "external-dns endpoint")
-		assertString(t, endpoint, host, "dnsName")
-		assertString(t, endpoint, "A", "recordType")
-		assertInt(t, endpoint, 1, "recordTTL")
-		assertStringSlice(t, endpoint, topologyPublicIPs(t, topology), "targets")
-		providerSpecific := sliceAt(t, endpoint, "providerSpecific")
-		if len(providerSpecific) != 1 {
-			t.Fatalf("external-dns endpoint providerSpecific = %d entries, want 1", len(providerSpecific))
-		}
-		cloudflareProxy := asManifest(t, providerSpecific[0], "external-dns endpoint providerSpecific[0]")
-		assertString(t, cloudflareProxy, "external-dns.alpha.kubernetes.io/cloudflare-proxied", "name")
-		assertString(t, cloudflareProxy, "true", "value")
-	}
 
 	policy := findObject(t, readManifests(t, "src/infrastructure/base/dns/networkpolicy.yaml"), "CiliumNetworkPolicy", "external-dns", "external-dns-egress")
 	assertString(t, policy, "cilium.io/v2", "apiVersion")
@@ -1012,17 +976,6 @@ func testFluxHandoff(t *testing.T) {
 	dnsControllerDeps := sliceAt(t, dnsController, "spec", "dependsOn")
 	if len(dnsControllerDeps) != 1 || stringAt(asManifest(t, dnsControllerDeps[0], "dns controller spec.dependsOn[0]"), "name") != "guardian-mgmt-base" {
 		t.Fatalf("guardian-mgmt-dns-controller dependsOn = %#v, want only guardian-mgmt-base", dnsControllerDeps)
-	}
-
-	dnsRecords := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-dns-records")
-	assertString(t, dnsRecords, "./src/infrastructure/base/dns/records", "spec", "path")
-	assertString(t, dnsRecords, "GitRepository", "spec", "sourceRef", "kind")
-	assertString(t, dnsRecords, "guardian", "spec", "sourceRef", "name")
-	assertBool(t, dnsRecords, true, "spec", "prune")
-	assertBool(t, dnsRecords, false, "spec", "wait")
-	dnsRecordDeps := sliceAt(t, dnsRecords, "spec", "dependsOn")
-	if len(dnsRecordDeps) != 1 || stringAt(asManifest(t, dnsRecordDeps[0], "dns records spec.dependsOn[0]"), "name") != "guardian-mgmt-dns-controller" {
-		t.Fatalf("guardian-mgmt-dns-records dependsOn = %#v, want only guardian-mgmt-dns-controller", dnsRecordDeps)
 	}
 }
 

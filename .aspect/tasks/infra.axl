@@ -1017,8 +1017,8 @@ def _edge_health_impl(ctx):
     )
 
 def _edge_failover_drill_impl(ctx):
-    if ctx.args.confirm_nodes != ctx.args.nodes:
-        ctx.std.io.stderr.write("ERROR: --confirm-nodes must exactly match --nodes before rebooting nodes\n")
+    if ctx.args.confirm_node_ip != ctx.args.node_ip:
+        ctx.std.io.stderr.write("ERROR: --confirm-node-ip must exactly match --node-ip before rebooting a node\n")
         return 1
 
     k6 = _k6_path(ctx)
@@ -1052,10 +1052,12 @@ def _edge_failover_drill_impl(ctx):
         _talosconfig_path(ctx),
         "--talos-endpoint",
         ctx.args.talos_endpoint,
-        "--nodes",
-        ctx.args.nodes,
-        "--confirm-nodes",
-        ctx.args.confirm_nodes,
+        "--node-name",
+        ctx.args.node_name,
+        "--node-ip",
+        ctx.args.node_ip,
+        "--confirm-node-ip",
+        ctx.args.confirm_node_ip,
         "--url",
         ctx.args.url,
         "--expected-statuses",
@@ -1077,6 +1079,8 @@ def _edge_failover_drill_impl(ctx):
     ]
     if ctx.args.kubeconfig != "":
         drill_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
+    if ctx.args.kube_api_server != "":
+        drill_args.extend(["--kube-api-server", ctx.args.kube_api_server])
 
     return checked_spawn(
         ctx,
@@ -1498,15 +1502,17 @@ edge_failover_drill = task(
     implementation = _edge_failover_drill_impl,
     name = "edge-failover-drill",
     group = ["infra"],
-    summary = "Reboot guardian-mgmt nodes while k6 measures Cloudflare LB public-edge failover.",
+    summary = "Reboot one guardian-mgmt node while k6 measures Cloudflare LB public-edge failover.",
     args = {
-        "confirm_nodes": args.string(default = "", description = "Must exactly match --nodes before the task reboots Talos nodes."),
+        "confirm_node_ip": args.string(default = "", description = "Must exactly match --node-ip before the task reboots a Talos node."),
         "cooldown": args.string(default = "20s", description = "Time to keep sampling after Kubernetes node recovery."),
-        "duration": args.string(default = "5m", description = "k6 probe duration per node."),
+        "duration": args.string(default = "5m", description = "k6 probe duration for this node drill."),
         "expected_statuses": args.string(default = "200,302", description = "Comma-separated acceptable public edge HTTP status codes."),
+        "kube_api_server": args.string(default = "", description = "Optional Kubernetes API server to use while the target node reboots."),
         "kube_timeout": args.string(default = "10m", description = "Timeout for Kubernetes node NotReady/Ready transitions."),
         "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
-        "nodes": args.string(default = "ash-earth=206.223.228.101,ash-wind=45.250.254.119,ash-water=206.223.228.87", description = "Comma-separated nodeName=talosNode entries to reboot sequentially."),
+        "node_ip": args.string(default = "", description = "Talos node IP/address to reboot."),
+        "node_name": args.string(default = "", description = "Kubernetes node name to watch during this drill."),
         "report": args.string(default = "reports/infrastructure/edge-failover-report.json", description = "JSON outage report path."),
         "request_timeout": args.string(default = "5s", description = "Per-request public edge timeout."),
         "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before the drill."),

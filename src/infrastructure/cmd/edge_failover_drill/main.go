@@ -25,8 +25,10 @@ type drillConfig struct {
 	Talosctl         string
 	Talosconfig      string
 	TalosEndpoint    string
-	Nodes            string
-	ConfirmNodes     string
+	NodeName         string
+	NodeIP           string
+	ConfirmNodeIP    string
+	KubeAPIServer    string
 	URL              string
 	ExpectedStatuses string
 	Duration         string
@@ -39,8 +41,8 @@ type drillConfig struct {
 }
 
 type nodeTarget struct {
-	Name      string `json:"name"`
-	TalosNode string `json:"talos_node"`
+	Name string `json:"name"`
+	IP   string `json:"ip"`
 }
 
 type sample struct {
@@ -63,7 +65,7 @@ type outageWindow struct {
 
 type nodeReport struct {
 	Node                    string         `json:"node"`
-	TalosNode               string         `json:"talos_node"`
+	NodeIP                  string         `json:"node_ip"`
 	StartedUnixMS           int64          `json:"started_unix_ms"`
 	RebootRequestedUnixMS   int64          `json:"reboot_requested_unix_ms"`
 	NodeNotReadyUnixMS      int64          `json:"node_not_ready_unix_ms,omitempty"`
@@ -94,11 +96,13 @@ func main() {
 	flag.StringVar(&cfg.Talosctl, "talosctl", "", "path to talosctl")
 	flag.StringVar(&cfg.Talosconfig, "talosconfig", "", "talosconfig for guardian-mgmt")
 	flag.StringVar(&cfg.TalosEndpoint, "talos-endpoint", "206.223.228.101,45.250.254.119,206.223.228.87", "comma-separated Talos API endpoints")
-	flag.StringVar(&cfg.Nodes, "nodes", "", "comma-separated nodeName=talosNode entries")
-	flag.StringVar(&cfg.ConfirmNodes, "confirm-nodes", "", "must exactly match --nodes before rebooting nodes")
+	flag.StringVar(&cfg.NodeName, "node-name", "", "Kubernetes node name to watch during the drill")
+	flag.StringVar(&cfg.NodeIP, "node-ip", "", "Talos node IP/address to reboot")
+	flag.StringVar(&cfg.ConfirmNodeIP, "confirm-node-ip", "", "must exactly match --node-ip before rebooting a node")
+	flag.StringVar(&cfg.KubeAPIServer, "kube-api-server", "", "optional Kubernetes API server used while the target node reboots")
 	flag.StringVar(&cfg.URL, "url", "https://dashboard.guardianintelligence.org/", "public edge URL to probe during failover")
 	flag.StringVar(&cfg.ExpectedStatuses, "expected-statuses", "200,302", "comma-separated acceptable HTTP status codes")
-	flag.StringVar(&cfg.Duration, "duration", "5m", "k6 probe duration per node")
+	flag.StringVar(&cfg.Duration, "duration", "5m", "k6 probe duration for this node drill")
 	flag.StringVar(&warmup, "warmup", "10s", "time to collect successful samples before reboot")
 	flag.StringVar(&cooldown, "cooldown", "20s", "time to keep sampling after Kubernetes recovery")
 	flag.IntVar(&cfg.SampleIntervalMS, "sample-interval-ms", 250, "k6 sample interval in milliseconds")
@@ -135,7 +139,8 @@ func validateConfig(cfg drillConfig) error {
 		"talosctl":       cfg.Talosctl,
 		"talosconfig":    cfg.Talosconfig,
 		"talos-endpoint": cfg.TalosEndpoint,
-		"nodes":          cfg.Nodes,
+		"node-name":      cfg.NodeName,
+		"node-ip":        cfg.NodeIP,
 		"url":            cfg.URL,
 		"report":         cfg.Report,
 	} {
@@ -143,11 +148,8 @@ func validateConfig(cfg drillConfig) error {
 			return fmt.Errorf("--%s is required", label)
 		}
 	}
-	if cfg.ConfirmNodes != cfg.Nodes {
-		return errors.New("--confirm-nodes must exactly match --nodes before rebooting nodes")
-	}
-	if _, err := parseNodes(cfg.Nodes); err != nil {
-		return err
+	if cfg.ConfirmNodeIP != cfg.NodeIP {
+		return errors.New("--confirm-node-ip must exactly match --node-ip before rebooting a node")
 	}
 	if _, err := parseStatuses(cfg.ExpectedStatuses); err != nil {
 		return err
@@ -171,31 +173,29 @@ func validateConfig(cfg drillConfig) error {
 }
 
 func run(ctx context.Context, cfg drillConfig) error {
-	nodes, _ := parseNodes(cfg.Nodes)
 	statuses, _ := parseStatuses(cfg.ExpectedStatuses)
 	out := report{
 		GeneratedUnixMS:  time.Now().UnixMilli(),
 		URL:              cfg.URL,
 		ExpectedStatuses: statuses,
 		SampleIntervalMS: cfg.SampleIntervalMS,
-		Nodes:            make([]nodeReport, 0, len(nodes)),
+		Nodes:            make([]nodeReport, 0, 1),
 	}
 
-	for _, node := range nodes {
-		nodeReport, err := runNode(ctx, cfg, node)
-		out.Nodes = append(out.Nodes, nodeReport)
-		if err != nil {
-			_ = writeReport(cfg.Report, out)
-			return err
-		}
+	node := nodeTarget{Name: cfg.NodeName, IP: cfg.NodeIP}
+	nodeReport, err := runNode(ctx, cfg, node)
+	out.Nodes = append(out.Nodes, nodeReport)
+	if err != nil {
+		_ = writeReport(cfg.Report, out)
+		return err
 	}
 	return writeReport(cfg.Report, out)
 }
 
 func runNode(ctx context.Context, cfg drillConfig, node nodeTarget) (nodeReport, error) {
-	fmt.Printf("guardian edge failover drill node=%s talosNode=%s url=%s\n", node.Name, node.TalosNode, cfg.URL)
+	fmt.Printf("guardian edge failover drill node=%s nodeIP=%s url=%s\n", node.Name, node.IP, cfg.URL)
 	if err := waitNodeReady(ctx, cfg, node.Name, cfg.KubeTimeout); err != nil {
-		return nodeReport{Node: node.Name, TalosNode: node.TalosNode}, err
+		return nodeReport{Node: node.Name, NodeIP: node.IP}, err
 	}
 
 	consoleFile, err := os.CreateTemp("", "guardian-edge-failover-*.jsonl")
@@ -265,11 +265,11 @@ func rebootNode(ctx context.Context, cfg drillConfig, node nodeTarget) error {
 	args := []string{
 		"--talosconfig", cfg.Talosconfig,
 		"--endpoints", cfg.TalosEndpoint,
-		"--nodes", node.TalosNode,
+		"--nodes", node.IP,
 		"reboot",
 		"--wait=false",
 	}
-	fmt.Printf("reboot requested node=%s talosNode=%s\n", node.Name, node.TalosNode)
+	fmt.Printf("reboot requested node=%s nodeIP=%s\n", node.Name, node.IP)
 	cmd := exec.CommandContext(ctx, cfg.Talosctl, args...)
 	output, err := cmd.CombinedOutput()
 	if len(output) > 0 {
@@ -325,12 +325,8 @@ func nodeReadyStatus(ctx context.Context, cfg drillConfig, node string) (bool, e
 	if cfg.Kubeconfig != "" {
 		args = append([]string{"--kubeconfig", cfg.Kubeconfig}, args...)
 	}
-	server, err := kubeAPIServerForNode(cfg.Nodes, node)
-	if err != nil {
-		return false, err
-	}
-	if server != "" {
-		args = append([]string{"--server", server}, args...)
+	if cfg.KubeAPIServer != "" {
+		args = append([]string{"--server", kubeAPIServerURL(cfg.KubeAPIServer)}, args...)
 	}
 	cmd := exec.CommandContext(ctx, cfg.Kubectl, args...)
 	output, err := cmd.CombinedOutput()
@@ -338,23 +334,6 @@ func nodeReadyStatus(ctx context.Context, cfg drillConfig, node string) (bool, e
 		return false, fmt.Errorf("kubectl get node %s: %w: %s", node, err, strings.TrimSpace(string(output)))
 	}
 	return strings.TrimSpace(string(output)) == "True", nil
-}
-
-func kubeAPIServerForNode(nodesCSV, node string) (string, error) {
-	nodes, err := parseNodes(nodesCSV)
-	if err != nil {
-		return "", err
-	}
-	for _, candidate := range nodes {
-		if candidate.Name == node {
-			continue
-		}
-		if strings.TrimSpace(candidate.TalosNode) == "" {
-			continue
-		}
-		return kubeAPIServerURL(candidate.TalosNode), nil
-	}
-	return "", nil
 }
 
 func kubeAPIServerURL(address string) string {
@@ -439,7 +418,7 @@ func summarizeNode(node nodeTarget, samples []sample, started, rebootRequested, 
 	}
 	report := nodeReport{
 		Node:                    node.Name,
-		TalosNode:               node.TalosNode,
+		NodeIP:                  node.IP,
 		StartedUnixMS:           started.UnixMilli(),
 		RebootRequestedUnixMS:   rebootRequested.UnixMilli(),
 		FinishedUnixMS:          finished.UnixMilli(),
@@ -500,22 +479,6 @@ func writeReport(path string, value report) error {
 	}
 	fmt.Printf("wrote outage report %s\n", path)
 	return nil
-}
-
-func parseNodes(value string) ([]nodeTarget, error) {
-	var out []nodeTarget
-	for _, raw := range strings.Split(value, ",") {
-		part := strings.TrimSpace(raw)
-		if part == "" {
-			return nil, errors.New("--nodes contains an empty entry")
-		}
-		pair := strings.SplitN(part, "=", 2)
-		if len(pair) != 2 || strings.TrimSpace(pair[0]) == "" || strings.TrimSpace(pair[1]) == "" {
-			return nil, fmt.Errorf("--nodes entry %q must be nodeName=talosNode", part)
-		}
-		out = append(out, nodeTarget{Name: strings.TrimSpace(pair[0]), TalosNode: strings.TrimSpace(pair[1])})
-	}
-	return out, nil
 }
 
 func parseStatuses(value string) ([]int, error) {
