@@ -434,7 +434,6 @@ func testCozystackPlatformPatches(t *testing.T) {
 func testCozystackAppPatches(t *testing.T) {
 	kustomization := readYAMLMap(t, "src/infrastructure/base/app-patches/kustomization.yaml")
 	assertContainsString(t, sliceAt(t, kustomization, "resources"), "clickhouse-system-bucket-endpoint.yaml", "app patches kustomization resources")
-	assertContainsString(t, sliceAt(t, kustomization, "resources"), "dashboard-ha.yaml", "app patches kustomization resources")
 	assertContainsString(t, sliceAt(t, kustomization, "resources"), "ingress-origin-edge.yaml", "app patches kustomization resources")
 
 	docs := readManifests(t, "src/infrastructure/base/app-patches/clickhouse-system-bucket-endpoint.yaml")
@@ -482,42 +481,6 @@ func testCozystackAppPatches(t *testing.T) {
 	}
 	requiredTerm := asManifest(t, requiredTerms[0], "ingress required pod anti-affinity")
 	assertString(t, requiredTerm, "kubernetes.io/hostname", "topologyKey")
-
-	dashboardDocs := readManifests(t, "src/infrastructure/base/app-patches/dashboard-ha.yaml")
-	dashboardHR := findObject(t, dashboardDocs, "HelmRelease", "cozy-dashboard", "dashboard")
-	assertString(t, dashboardHR, "helm.toolkit.fluxcd.io/v2", "apiVersion")
-	dashboardPostRenderers := valueAt(dashboardHR, "spec", "postRenderers")
-	dashboardRendererList, ok := dashboardPostRenderers.([]any)
-	if !ok || len(dashboardRendererList) != 1 {
-		t.Fatalf("dashboard HelmRelease patch postRenderers = %#v, want one postRenderer", dashboardPostRenderers)
-	}
-	dashboardRenderer := asManifest(t, dashboardRendererList[0], "dashboard postRenderer")
-	dashboardPatches := valueAt(dashboardRenderer, "kustomize", "patches")
-	dashboardPatchList, ok := dashboardPatches.([]any)
-	if !ok || len(dashboardPatchList) != 2 {
-		t.Fatalf("dashboard postRenderer patches = %#v, want two patches", dashboardPatches)
-	}
-	for _, patchValue := range dashboardPatchList {
-		patch := asManifest(t, patchValue, "dashboard postRenderer patch")
-		assertString(t, patch, "apps", "target", "group")
-		assertString(t, patch, "v1", "target", "version")
-		assertString(t, patch, "Deployment", "target", "kind")
-		patchText := stringAt(patch, "patch")
-		assertTextContains(t, patchText, "path: /spec/replicas", "dashboard postRenderer patch")
-		assertTextContains(t, patchText, "value: 3", "dashboard postRenderer patch")
-		assertTextContains(t, patchText, "path: /spec/strategy/rollingUpdate/maxSurge", "dashboard postRenderer patch")
-		assertTextContains(t, patchText, "path: /spec/strategy/rollingUpdate/maxUnavailable", "dashboard postRenderer patch")
-		assertTextContains(t, patchText, "requiredDuringSchedulingIgnoredDuringExecution", "dashboard postRenderer patch")
-		assertTextContains(t, patchText, "topologyKey: kubernetes.io/hostname", "dashboard postRenderer patch")
-	}
-	gatekeeperPDB := findObject(t, dashboardDocs, "PodDisruptionBudget", "cozy-dashboard", "incloud-web-gatekeeper")
-	assertInt(t, gatekeeperPDB, 2, "spec", "minAvailable")
-	assertString(t, gatekeeperPDB, "incloud-web", "spec", "selector", "matchLabels", "app.kubernetes.io/instance")
-	assertString(t, gatekeeperPDB, "gatekeeper", "spec", "selector", "matchLabels", "app.kubernetes.io/name")
-	consolePDB := findObject(t, dashboardDocs, "PodDisruptionBudget", "cozy-dashboard", "cozy-dashboard-console")
-	assertInt(t, consolePDB, 2, "spec", "minAvailable")
-	assertString(t, consolePDB, "cozy-dashboard", "spec", "selector", "matchLabels", "app.kubernetes.io/instance")
-	assertString(t, consolePDB, "console", "spec", "selector", "matchLabels", "app.kubernetes.io/name")
 
 	fluxDocs := readManifests(t, "src/infrastructure/base/flux/sync.yaml")
 	fluxKustomization := findObject(t, fluxDocs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-app-patches")

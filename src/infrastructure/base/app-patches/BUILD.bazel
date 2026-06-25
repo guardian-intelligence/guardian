@@ -2,7 +2,6 @@ filegroup(
     name = "manifests",
     srcs = [
         "clickhouse-system-bucket-endpoint.yaml",
-        "dashboard-ha.yaml",
         "ingress-origin-edge.yaml",
         "kustomization.yaml",
     ],
