@@ -44,6 +44,7 @@ type config struct {
 	HTTPMaxDuration        string
 	HTTPRequestTimeout     string
 	HTTPSleepSeconds       string
+	K6DNS                  string
 	K6ExpectedStatusCutoff string
 }
 
@@ -152,6 +153,7 @@ func defaultConfig() (config, error) {
 		HTTPMaxDuration:        "2m",
 		HTTPRequestTimeout:     "10s",
 		HTTPSleepSeconds:       "1",
+		K6DNS:                  "ttl=0,select=random,policy=preferIPv6",
 		K6ExpectedStatusCutoff: "rate>0.99",
 	}, nil
 }
@@ -202,6 +204,9 @@ func validateConfig(cfg config) error {
 	}
 	if _, err := strconv.ParseFloat(cfg.HTTPSleepSeconds, 64); err != nil {
 		return fmt.Errorf("HTTP sleep seconds must be numeric: %w", err)
+	}
+	if strings.TrimSpace(cfg.K6DNS) == "" {
+		return errors.New("k6 DNS policy is required")
 	}
 	if _, err := splitNonEmptyComma(cfg.DNSTargets); err != nil {
 		return fmt.Errorf("DNS target runfiles: %w", err)
@@ -494,11 +499,14 @@ func runK6(ctx context.Context, cfg config, targets []httpTarget) error {
 	}
 	args := []string{
 		"run",
+		"--dns",
+		cfg.K6DNS,
 		"--summary-trend-stats",
 		"avg,min,med,p(95),p(99),max",
 		cfg.Script,
 	}
 	fmt.Printf("\n### k6 public-edge\n")
+	fmt.Printf("dns=%s\n", cfg.K6DNS)
 	cmd := exec.CommandContext(ctx, cfg.K6, args...)
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env,

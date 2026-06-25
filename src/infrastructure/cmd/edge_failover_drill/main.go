@@ -36,6 +36,7 @@ type drillConfig struct {
 	Cooldown         time.Duration
 	SampleIntervalMS int
 	RequestTimeout   string
+	K6DNS            string
 	KubeTimeout      time.Duration
 	Report           string
 }
@@ -107,6 +108,7 @@ func main() {
 	flag.StringVar(&cooldown, "cooldown", "20s", "time to keep sampling after Kubernetes recovery")
 	flag.IntVar(&cfg.SampleIntervalMS, "sample-interval-ms", 250, "k6 sample interval in milliseconds")
 	flag.StringVar(&cfg.RequestTimeout, "request-timeout", "5s", "per-request public edge timeout")
+	flag.StringVar(&cfg.K6DNS, "k6-dns", "ttl=0,select=random,policy=preferIPv6", "k6 DNS resolver policy for the public edge probe")
 	flag.StringVar(&kubeTimeout, "kube-timeout", "10m", "timeout for Kubernetes node state transitions")
 	flag.StringVar(&cfg.Report, "report", "", "path to write JSON outage report")
 	flag.Parse()
@@ -142,6 +144,7 @@ func validateConfig(cfg drillConfig) error {
 		"node-name":      cfg.NodeName,
 		"node-ip":        cfg.NodeIP,
 		"url":            cfg.URL,
+		"k6-dns":         cfg.K6DNS,
 		"report":         cfg.Report,
 	} {
 		if strings.TrimSpace(value) == "" {
@@ -242,6 +245,7 @@ func k6Command(ctx context.Context, cfg drillConfig, consolePath string) *exec.C
 	args := []string{
 		"run",
 		"--quiet",
+		"--dns", cfg.K6DNS,
 		"--console-output", consolePath,
 		"--summary-trend-stats", "avg,min,med,p(95),p(99),max",
 		cfg.Script,

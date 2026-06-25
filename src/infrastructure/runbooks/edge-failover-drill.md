@@ -21,6 +21,10 @@ Use a Kubernetes API server that is not the node being rebooted. Reports are
 temporary drill evidence; write them under `/tmp` unless a PR explicitly asks for
 checked-in evidence.
 
+The drill's k6 probe defaults to `ttl=0,select=random,policy=preferIPv6` so this
+runner measures Cloudflare edge-to-origin failover without the local IPv4 egress
+loss observed from the development host.
+
 ```sh
 aspect infra edge-failover-drill \
   --kubeconfig=src/infrastructure/talm/kubeconfig \

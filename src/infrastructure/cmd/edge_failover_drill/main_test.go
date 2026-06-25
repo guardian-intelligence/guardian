@@ -24,6 +24,7 @@ func TestValidateConfigRequiresSingleConfirmedNodeIP(t *testing.T) {
 		Cooldown:         20 * time.Second,
 		SampleIntervalMS: 250,
 		RequestTimeout:   "5s",
+		K6DNS:            "ttl=0,select=random,policy=preferIPv6",
 		KubeTimeout:      10 * time.Minute,
 		Report:           "report.json",
 	}
