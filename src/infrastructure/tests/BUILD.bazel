@@ -29,6 +29,7 @@ go_test(
         "//src/infrastructure/clusters/ash/deployments/kms/prod:manifests",
         "//src/infrastructure/clusters/ash/tenants/guardian:manifests",
         "//src/infrastructure/clusters/ash/tenants/guardian/company:manifests",
+        "//src/infrastructure/clusters/ash/tenants/guardian/iam:manifests",
         "//src/infrastructure/clusters/ash/tenants/guardian/kms:manifests",
         "//src/infrastructure/clusters/ash/tenants/guardian/release:manifests",
         "//src/infrastructure/clusters/ash/tenants/guardian/secrets:manifests",
