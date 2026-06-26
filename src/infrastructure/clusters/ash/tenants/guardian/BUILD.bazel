@@ -1,17 +1,10 @@
 filegroup(
     name = "manifests",
     srcs = [
-        "aisucks.yaml",
-        "audit.yaml",
-        "billing.yaml",
         "company.yaml",
-        "iam.yaml",
         "kms.yaml",
         "kustomization.yaml",
         "release.yaml",
-        "secrets.yaml",
-        "telemetry.yaml",
-        "workloads.yaml",
     ],
     visibility = ["//visibility:public"],
 )
