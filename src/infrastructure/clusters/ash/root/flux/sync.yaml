@@ -161,6 +161,24 @@ spec:
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
+  name: guardian-kms-tenancy
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/clusters/ash/tenants/guardian/kms
+  sourceRef:
+    kind: GitRepository
+    name: guardian
+  dependsOn:
+    - name: guardian-tenancy
+  prune: true
+  wait: true
+  timeout: 10m
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
   name: guardian-kms-prod
   namespace: cozy-fluxcd
 spec:
@@ -171,7 +189,7 @@ spec:
     kind: GitRepository
     name: guardian
   dependsOn:
-    - name: guardian-tenancy
+    - name: guardian-kms-tenancy
   prune: true
   wait: true
   timeout: 10m

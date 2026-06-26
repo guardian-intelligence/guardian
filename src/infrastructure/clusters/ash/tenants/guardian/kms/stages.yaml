@@ -1,0 +1,53 @@
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: dev
+  namespace: tenant-guardian-kms
+  labels:
+    guardian.dev/component: kms
+    guardian.dev/stage: dev
+    guardian.dev/tenant-id: gi-kms-dev
+spec:
+  etcd: false
+  host: ""
+  ingress: false
+  monitoring: false
+  resourceQuotas: {}
+  schedulingClass: ""
+  seaweedfs: false
+---
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: gamma
+  namespace: tenant-guardian-kms
+  labels:
+    guardian.dev/component: kms
+    guardian.dev/stage: gamma
+    guardian.dev/tenant-id: gi-kms-gamma
+spec:
+  etcd: false
+  host: ""
+  ingress: false
+  monitoring: false
+  resourceQuotas: {}
+  schedulingClass: ""
+  seaweedfs: false
+---
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: prod
+  namespace: tenant-guardian-kms
+  labels:
+    guardian.dev/component: kms
+    guardian.dev/stage: prod
+    guardian.dev/tenant-id: gi-kms-prod
+spec:
+  etcd: false
+  host: ""
+  ingress: false
+  monitoring: false
+  resourceQuotas: {}
+  schedulingClass: ""
+  seaweedfs: false
