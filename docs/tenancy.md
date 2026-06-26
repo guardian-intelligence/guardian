@@ -11,6 +11,10 @@ parent namespace and child tenant name, so a Tenant named `company` in
 `tenant-root` becomes `tenant-company`, and a Tenant named `prod` inside
 `tenant-company` becomes `tenant-company-prod`.
 
+Read nested Guardian tenant namespaces as account, component, then stage. For
+example, `tenant-guardian-release-gamma` is the `gamma` stage namespace for the
+Guardian `release` component; it is not a separate release channel.
+
 The ASH management cluster is laid out under
 `src/infrastructure/clusters/ash/`:
 
@@ -68,7 +72,11 @@ operations do not depend on the old non-tenant `guardian-release` namespace.
 The reusable projection base lives at
 `src/infrastructure/components/openbao-github-integration-secrets/`; it is not
 wired into Flux until `aspect infra openbao-drill --mode=api-state` proves the
-OpenBao mounts, policies, and auth roles exist.
+OpenBao mounts, policies, and auth roles exist. The source-only release-stage
+overlays under
+`src/infrastructure/clusters/ash/deployments/release/{beta,gamma,prod}/` show
+how that base will project GitHub app credentials into each release stage
+namespace once the API-state gate passes.
 
 Milestone order:
 
