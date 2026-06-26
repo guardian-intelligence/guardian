@@ -40,11 +40,11 @@ tenant-scoped Guardian KMS OpenBao authority in `tenant-guardian-kms`, and
 `aspect infra openbao-apply` applies the standard OpenBao API state through a
 live port-forward. `openbao-apply` requires the off-cluster R2 state credentials
 as `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` before it reads any OpenBao
-bootstrap material. After a successful `openbao-apply`, run
-`aspect infra openbao-drill --mode api-state` to verify KV v2, transit keys,
-policies, and Kubernetes auth roles for ExternalDNS and third-party
-integrations. Use an explicit `--namespace tenant-root` only for the legacy root
-break-glass OpenBao instance during migration. `aspect infra observability-drill`
+bootstrap material. In apply mode, `openbao-apply` then runs
+`openbao-drill --mode api-state` to verify KV v2, transit keys, policies, and
+Kubernetes auth roles for ExternalDNS and third-party integrations. Use an
+explicit `--namespace tenant-root` only for the legacy root break-glass OpenBao
+instance during migration. `aspect infra observability-drill`
 creates a short root Postgres pgbench job, then queries VictoriaMetrics and
 VictoriaLogs for that exact workload and the CNPG scrape path. Postgres and
 ClickHouse backups use Cozystack 1.5's platform-managed `BackupClass/cozy-default`
