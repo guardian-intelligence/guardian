@@ -895,6 +895,9 @@ func testTenancy(t *testing.T) {
 	guardian := readManifests(t, "src/infrastructure/clusters/ash/root/tenants/guardian.yaml")
 	assertTenant(t, guardian, "tenant-root", "guardian", "gi-guardian", "")
 
+	aisucks := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/aisucks.yaml")
+	assertTenant(t, aisucks, "tenant-guardian", "aisucks", "gi-aisucks", "")
+
 	audit := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/audit.yaml")
 	assertTenant(t, audit, "tenant-guardian", "audit", "gi-audit", "")
 
@@ -918,6 +921,14 @@ func testTenancy(t *testing.T) {
 
 	telemetry := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/telemetry.yaml")
 	assertTenant(t, telemetry, "tenant-guardian", "telemetry", "gi-telemetry", "")
+
+	aisucksStages := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/aisucks/stages.yaml")
+	assertTenant(t, aisucksStages, "tenant-guardian-aisucks", "beta", "gi-aisucks-beta", "")
+	assertTenant(t, aisucksStages, "tenant-guardian-aisucks", "gamma", "gi-aisucks-gamma", "")
+	assertTenant(t, aisucksStages, "tenant-guardian-aisucks", "prod", "gi-aisucks-prod", "")
+	assertTenantStageLabels(t, aisucksStages, "tenant-guardian-aisucks", "beta", "aisucks", "beta")
+	assertTenantStageLabels(t, aisucksStages, "tenant-guardian-aisucks", "gamma", "aisucks", "gamma")
+	assertTenantStageLabels(t, aisucksStages, "tenant-guardian-aisucks", "prod", "aisucks", "prod")
 
 	auditStages := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/audit/stages.yaml")
 	assertTenant(t, auditStages, "tenant-guardian-audit", "beta", "gi-audit-beta", "")
@@ -1247,6 +1258,17 @@ func testFluxHandoff(t *testing.T) {
 	tenancyDeps := sliceAt(t, tenancy, "spec", "dependsOn")
 	if len(tenancyDeps) != 1 || stringAt(asManifest(t, tenancyDeps[0], "tenancy spec.dependsOn[0]"), "name") != "guardian-mgmt-base" {
 		t.Fatalf("guardian-tenancy dependsOn = %#v, want only guardian-mgmt-base", tenancyDeps)
+	}
+
+	aisucksTenancy := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-aisucks-tenancy")
+	assertString(t, aisucksTenancy, "./src/infrastructure/clusters/ash/tenants/guardian/aisucks", "spec", "path")
+	assertString(t, aisucksTenancy, "GitRepository", "spec", "sourceRef", "kind")
+	assertString(t, aisucksTenancy, "guardian", "spec", "sourceRef", "name")
+	assertBool(t, aisucksTenancy, true, "spec", "prune")
+	assertBool(t, aisucksTenancy, true, "spec", "wait")
+	aisucksTenancyDeps := sliceAt(t, aisucksTenancy, "spec", "dependsOn")
+	if len(aisucksTenancyDeps) != 1 || stringAt(asManifest(t, aisucksTenancyDeps[0], "aisucks tenancy spec.dependsOn[0]"), "name") != "guardian-tenancy" {
+		t.Fatalf("guardian-aisucks-tenancy dependsOn = %#v, want only guardian-tenancy", aisucksTenancyDeps)
 	}
 
 	auditTenancy := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-audit-tenancy")
