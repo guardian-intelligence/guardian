@@ -1,0 +1,53 @@
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: beta
+  namespace: tenant-guardian-workloads
+  labels:
+    guardian.dev/component: workloads
+    guardian.dev/stage: beta
+    guardian.dev/tenant-id: gi-workloads-beta
+spec:
+  etcd: false
+  host: ""
+  ingress: false
+  monitoring: false
+  resourceQuotas: {}
+  schedulingClass: ""
+  seaweedfs: false
+---
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: gamma
+  namespace: tenant-guardian-workloads
+  labels:
+    guardian.dev/component: workloads
+    guardian.dev/stage: gamma
+    guardian.dev/tenant-id: gi-workloads-gamma
+spec:
+  etcd: false
+  host: ""
+  ingress: false
+  monitoring: false
+  resourceQuotas: {}
+  schedulingClass: ""
+  seaweedfs: false
+---
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: prod
+  namespace: tenant-guardian-workloads
+  labels:
+    guardian.dev/component: workloads
+    guardian.dev/stage: prod
+    guardian.dev/tenant-id: gi-workloads-prod
+spec:
+  etcd: false
+  host: ""
+  ingress: false
+  monitoring: false
+  resourceQuotas: {}
+  schedulingClass: ""
+  seaweedfs: false
