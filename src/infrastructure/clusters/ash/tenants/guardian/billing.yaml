@@ -1,0 +1,15 @@
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: billing
+  namespace: tenant-guardian
+  labels:
+    guardian.dev/tenant-id: gi-billing
+spec:
+  etcd: false
+  host: ""
+  ingress: false
+  monitoring: false
+  resourceQuotas: {}
+  schedulingClass: ""
+  seaweedfs: false

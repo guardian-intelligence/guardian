@@ -1,0 +1,53 @@
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: beta
+  namespace: tenant-guardian-billing
+  labels:
+    guardian.dev/component: billing
+    guardian.dev/stage: beta
+    guardian.dev/tenant-id: gi-billing-beta
+spec:
+  etcd: false
+  host: ""
+  ingress: false
+  monitoring: false
+  resourceQuotas: {}
+  schedulingClass: ""
+  seaweedfs: false
+---
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: gamma
+  namespace: tenant-guardian-billing
+  labels:
+    guardian.dev/component: billing
+    guardian.dev/stage: gamma
+    guardian.dev/tenant-id: gi-billing-gamma
+spec:
+  etcd: false
+  host: ""
+  ingress: false
+  monitoring: false
+  resourceQuotas: {}
+  schedulingClass: ""
+  seaweedfs: false
+---
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: prod
+  namespace: tenant-guardian-billing
+  labels:
+    guardian.dev/component: billing
+    guardian.dev/stage: prod
+    guardian.dev/tenant-id: gi-billing-prod
+spec:
+  etcd: false
+  host: ""
+  ingress: false
+  monitoring: false
+  resourceQuotas: {}
+  schedulingClass: ""
+  seaweedfs: false
