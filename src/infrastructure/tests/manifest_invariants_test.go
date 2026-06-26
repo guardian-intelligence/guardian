@@ -895,6 +895,9 @@ func testTenancy(t *testing.T) {
 	guardian := readManifests(t, "src/infrastructure/clusters/ash/root/tenants/guardian.yaml")
 	assertTenant(t, guardian, "tenant-root", "guardian", "gi-guardian", "")
 
+	iam := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/iam.yaml")
+	assertTenant(t, iam, "tenant-guardian", "iam", "gi-iam", "")
+
 	kms := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/kms.yaml")
 	assertTenant(t, kms, "tenant-guardian", "kms", "gi-kms", "")
 
@@ -906,6 +909,14 @@ func testTenancy(t *testing.T) {
 
 	secrets := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/secrets.yaml")
 	assertTenant(t, secrets, "tenant-guardian", "secrets", "gi-secrets", "")
+
+	iamStages := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/iam/stages.yaml")
+	assertTenant(t, iamStages, "tenant-guardian-iam", "beta", "gi-iam-beta", "")
+	assertTenant(t, iamStages, "tenant-guardian-iam", "gamma", "gi-iam-gamma", "")
+	assertTenant(t, iamStages, "tenant-guardian-iam", "prod", "gi-iam-prod", "")
+	assertTenantStageLabels(t, iamStages, "tenant-guardian-iam", "beta", "iam", "beta")
+	assertTenantStageLabels(t, iamStages, "tenant-guardian-iam", "gamma", "iam", "gamma")
+	assertTenantStageLabels(t, iamStages, "tenant-guardian-iam", "prod", "iam", "prod")
 
 	kmsStages := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/kms/stages.yaml")
 	assertTenant(t, kmsStages, "tenant-guardian-kms", "beta", "gi-kms-beta", "")
@@ -1203,6 +1214,17 @@ func testFluxHandoff(t *testing.T) {
 	tenancyDeps := sliceAt(t, tenancy, "spec", "dependsOn")
 	if len(tenancyDeps) != 1 || stringAt(asManifest(t, tenancyDeps[0], "tenancy spec.dependsOn[0]"), "name") != "guardian-mgmt-base" {
 		t.Fatalf("guardian-tenancy dependsOn = %#v, want only guardian-mgmt-base", tenancyDeps)
+	}
+
+	iamTenancy := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-iam-tenancy")
+	assertString(t, iamTenancy, "./src/infrastructure/clusters/ash/tenants/guardian/iam", "spec", "path")
+	assertString(t, iamTenancy, "GitRepository", "spec", "sourceRef", "kind")
+	assertString(t, iamTenancy, "guardian", "spec", "sourceRef", "name")
+	assertBool(t, iamTenancy, true, "spec", "prune")
+	assertBool(t, iamTenancy, true, "spec", "wait")
+	iamTenancyDeps := sliceAt(t, iamTenancy, "spec", "dependsOn")
+	if len(iamTenancyDeps) != 1 || stringAt(asManifest(t, iamTenancyDeps[0], "iam tenancy spec.dependsOn[0]"), "name") != "guardian-tenancy" {
+		t.Fatalf("guardian-iam-tenancy dependsOn = %#v, want only guardian-tenancy", iamTenancyDeps)
 	}
 
 	kmsTenancy := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-kms-tenancy")
