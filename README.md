@@ -20,6 +20,8 @@ aspect infra bootstrap
 aspect infra openbao-drill \
   --mode init-unseal
 
+AWS_ACCESS_KEY_ID="${cloudflare_r2_access_key_id}" \
+AWS_SECRET_ACCESS_KEY="${cloudflare_r2_secret_access_key}" \
 aspect infra openbao-apply
 
 aspect infra observability-drill
@@ -36,7 +38,9 @@ clusters when only the Cozystack installer/operator release needs to move.
 `aspect infra openbao-drill --mode init-unseal` initializes/unseals the
 tenant-scoped Guardian KMS OpenBao authority in `tenant-guardian-kms`, and
 `aspect infra openbao-apply` applies the standard OpenBao API state through a
-live port-forward. Use an explicit `--namespace tenant-root` only for the
+live port-forward. `openbao-apply` requires the off-cluster R2 state credentials
+as `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` before it reads any OpenBao
+bootstrap material. Use an explicit `--namespace tenant-root` only for the
 legacy root break-glass OpenBao instance during migration. `aspect infra
 observability-drill` creates a short root Postgres pgbench job, then queries
 VictoriaMetrics and VictoriaLogs for that exact workload and the CNPG scrape
