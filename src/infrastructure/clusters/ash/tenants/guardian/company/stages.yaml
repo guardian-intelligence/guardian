@@ -2,11 +2,11 @@ apiVersion: apps.cozystack.io/v1alpha1
 kind: Tenant
 metadata:
   name: beta
-  namespace: tenant-guardian-kms
+  namespace: tenant-guardian-company
   labels:
-    guardian.dev/component: kms
+    guardian.dev/component: company
     guardian.dev/stage: beta
-    guardian.dev/tenant-id: gi-kms-beta
+    guardian.dev/tenant-id: gi-company-beta
 spec:
   etcd: false
   host: ""
@@ -20,11 +20,11 @@ apiVersion: apps.cozystack.io/v1alpha1
 kind: Tenant
 metadata:
   name: gamma
-  namespace: tenant-guardian-kms
+  namespace: tenant-guardian-company
   labels:
-    guardian.dev/component: kms
+    guardian.dev/component: company
     guardian.dev/stage: gamma
-    guardian.dev/tenant-id: gi-kms-gamma
+    guardian.dev/tenant-id: gi-company-gamma
 spec:
   etcd: false
   host: ""
@@ -38,11 +38,11 @@ apiVersion: apps.cozystack.io/v1alpha1
 kind: Tenant
 metadata:
   name: prod
-  namespace: tenant-guardian-kms
+  namespace: tenant-guardian-company
   labels:
-    guardian.dev/component: kms
+    guardian.dev/component: company
     guardian.dev/stage: prod
-    guardian.dev/tenant-id: gi-kms-prod
+    guardian.dev/tenant-id: gi-company-prod
 spec:
   etcd: false
   host: ""

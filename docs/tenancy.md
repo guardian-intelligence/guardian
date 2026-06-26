@@ -25,11 +25,12 @@ reconciled the canonical ASH paths from
 `src/infrastructure/clusters/ash/root/flux/sync.yaml`.
 
 The root slice declares existing root-level compatibility tenants for `dev`,
-`gamma`, and `prod`. New Guardian-owned infrastructure should live below the
-`guardian` tenant chain instead. The first concrete child is `tenant-guardian-kms`,
-which hosts the tenant-scoped OpenBao authority while the original
-`tenant-root/openbao-guardian` instance remains available for bootstrap and
-break-glass continuity during migration.
+`gamma`, and `prod`. New Guardian-owned infrastructure should use durable stage
+names `beta`, `gamma`, and `prod` below the `guardian` tenant chain instead.
+The first concrete child is `tenant-guardian-kms`, which hosts the
+tenant-scoped OpenBao authority while the original `tenant-root/openbao-guardian`
+instance remains available for bootstrap and break-glass continuity during
+migration.
 
 The standard `aspect infra openbao-drill`, `aspect infra openbao-apply`, node
 outage drill, and OpenBao load-test defaults target `tenant-guardian-kms`. The
@@ -37,11 +38,17 @@ legacy root instance requires an explicit namespace override or the
 `bootstrap-root` OpenBao load-test stage.
 
 The KMS component tenant has explicit stage child tenants:
-`tenant-guardian-kms-dev`, `tenant-guardian-kms-gamma`, and
+`tenant-guardian-kms-beta`, `tenant-guardian-kms-gamma`, and
 `tenant-guardian-kms-prod`. The live OpenBao runtime still runs in the parent
 `tenant-guardian-kms` namespace as a compatibility placement until a later PR
 migrates state into `tenant-guardian-kms-prod` with a snapshot/restore drill and
 updated OpenBao apply/load defaults.
+
+The company component tenant has explicit stage child tenants:
+`tenant-guardian-company-beta`, `tenant-guardian-company-gamma`, and
+`tenant-guardian-company-prod`. The live company website still runs in the
+root-level `tenant-prod` namespace as a compatibility placement until a separate
+route-handoff PR moves the workload into `tenant-guardian-company-prod`.
 
 Milestone order:
 
@@ -49,7 +56,7 @@ Milestone order:
 2. Move OpenBao into the Guardian tenancy pattern first as the secrets/transit
    authority.
 3. Move other Guardian platform components into the Guardian tenant boundary.
-4. Add dev, gamma, and prod subtenants below each Guardian component tenant
+4. Add beta, gamma, and prod subtenants below each Guardian component tenant
    once the parent boundary is proven.
 
 Until a workload has migrated to a real nested Cozystack tenant, label it with
