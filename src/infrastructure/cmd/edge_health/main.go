@@ -25,6 +25,11 @@ const (
 	defaultScriptRunfile      = "_main/src/infrastructure/load/edge-health.js"
 	defaultDNSTargetsRunfile  = "_main/src/infrastructure/edge/dns-targets.file_sd.yaml"
 	defaultHTTPTargetsRunfile = "_main/src/infrastructure/edge/http-targets.file_sd.yaml"
+	defaultHTTPRequestTimeout = "30s"
+	// DNS validation covers the public A records. Keep k6 on the same path so a
+	// random Cloudflare edge address from the local runner does not mask the
+	// deployment signal this smoke test is meant to prove.
+	defaultK6DNS              = "ttl=5m,select=first,policy=onlyIPv4"
 )
 
 type config struct {
@@ -153,9 +158,9 @@ func defaultConfig() (config, error) {
 		HTTPVUs:                "1",
 		HTTPIterations:         2,
 		HTTPMaxDuration:        "2m",
-		HTTPRequestTimeout:     "10s",
+		HTTPRequestTimeout:     defaultHTTPRequestTimeout,
 		HTTPSleepSeconds:       "1",
-		K6DNS:                  "ttl=0,select=random,policy=preferIPv6",
+		K6DNS:                  defaultK6DNS,
 		K6ExpectedStatusCutoff: "rate>0.99",
 	}, nil
 }
