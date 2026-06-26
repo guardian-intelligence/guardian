@@ -473,9 +473,11 @@ func testCozystackAppPatches(t *testing.T) {
 	ingressDocs := readManifests(t, "src/infrastructure/clusters/ash/root/app-patches/ingress-origin-edge.yaml")
 	ingressHR := findObject(t, ingressDocs, "HelmRelease", "tenant-root", "ingress-nginx-system")
 	assertString(t, ingressHR, "helm.toolkit.fluxcd.io/v2", "apiVersion")
+	assertString(t, ingressHR, "25m", "spec", "timeout")
 	assertBool(t, ingressHR, true, "spec", "values", "ingress-nginx", "controller", "hostNetwork")
 	assertString(t, ingressHR, "ClusterFirstWithHostNet", "spec", "values", "ingress-nginx", "controller", "dnsPolicy")
 	assertString(t, ingressHR, "false", "spec", "values", "ingress-nginx", "controller", "config", "use-http2")
+	assertString(t, ingressHR, "host-network", "spec", "values", "ingress-nginx", "controller", "podLabels", "guardian.dev/edge-mode")
 	assertStringSlice(t, ingressHR, []string{}, "spec", "values", "ingress-nginx", "controller", "service", "externalIPs")
 	assertString(t, ingressHR, "Cluster", "spec", "values", "ingress-nginx", "controller", "service", "externalTrafficPolicy")
 	assertString(t, ingressHR, "RollingUpdate", "spec", "values", "ingress-nginx", "controller", "updateStrategy", "type")
@@ -488,6 +490,7 @@ func testCozystackAppPatches(t *testing.T) {
 	}
 	requiredTerm := asManifest(t, requiredTerms[0], "ingress required pod anti-affinity")
 	assertString(t, requiredTerm, "kubernetes.io/hostname", "topologyKey")
+	assertMatchExpression(t, sliceAt(t, requiredTerm, "labelSelector", "matchExpressions"), "guardian.dev/edge-mode", "In", []string{"host-network"})
 
 	fluxDocs := readManifests(t, "src/infrastructure/clusters/ash/root/flux/sync.yaml")
 	fluxKustomization := findObject(t, fluxDocs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-app-patches")
@@ -502,6 +505,21 @@ func testCozystackAppPatches(t *testing.T) {
 	}
 	dep := asManifest(t, deps[0], "guardian-mgmt-app-patches dependsOn[0]")
 	assertString(t, dep, "guardian-mgmt-base", "name")
+}
+
+func assertMatchExpression(t *testing.T, expressions []any, key, operator string, values []string) {
+	t.Helper()
+
+	for _, value := range expressions {
+		expression := asManifest(t, value, "matchExpression")
+		if stringAt(expression, "key") != key {
+			continue
+		}
+		assertString(t, expression, operator, "operator")
+		assertStringSlice(t, expression, values, "values")
+		return
+	}
+	t.Fatalf("matchExpressions missing key %q", key)
 }
 
 func testExternalDNS(t *testing.T) {

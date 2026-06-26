@@ -8,6 +8,7 @@ metadata:
   name: ingress-nginx-system
   namespace: tenant-root
 spec:
+  timeout: 25m
   values:
     ingress-nginx:
       controller:
@@ -28,11 +29,17 @@ spec:
                       operator: In
                       values:
                         - controller
+                    - key: guardian.dev/edge-mode
+                      operator: In
+                      values:
+                        - host-network
                 topologyKey: kubernetes.io/hostname
         dnsPolicy: ClusterFirstWithHostNet
         config:
           use-http2: "false"
         hostNetwork: true
+        podLabels:
+          guardian.dev/edge-mode: host-network
         service:
           externalIPs: []
           externalTrafficPolicy: Cluster
