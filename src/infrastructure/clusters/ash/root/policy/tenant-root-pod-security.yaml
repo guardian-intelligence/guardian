@@ -1,0 +1,13 @@
+# tenant-root is the regional substrate namespace. Its public ingress controller
+# binds host networking so Cloudflare can use each node public IP as an origin.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tenant-root
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: baseline
+    pod-security.kubernetes.io/warn-version: latest

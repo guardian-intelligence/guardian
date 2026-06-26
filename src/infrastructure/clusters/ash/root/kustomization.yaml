@@ -13,4 +13,5 @@ resources:
   - networking/subnet-mtu.yaml
   - openbao/openbao.yaml
   - openbao/networkpolicy.yaml
+  - policy/tenant-root-pod-security.yaml
   - flux/sync.yaml

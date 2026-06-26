@@ -18,6 +18,7 @@ go_test(
         "//src/infrastructure/clusters/ash/root/networking:manifests",
         "//src/infrastructure/clusters/ash/root/openbao:manifests",
         "//src/infrastructure/clusters/ash/root/platform-patches:manifests",
+        "//src/infrastructure/clusters/ash/root/policy:manifests",
         "//src/infrastructure/clusters/ash/root/storage:manifests",
         "//src/infrastructure/clusters/ash/root/tenants:manifests",
         "//src/infrastructure/clusters/ash/bootstrap/opentofu:backend_config",
