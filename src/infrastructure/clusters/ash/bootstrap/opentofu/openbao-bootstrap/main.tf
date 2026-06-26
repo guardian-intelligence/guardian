@@ -20,7 +20,18 @@ locals {
     "tenant-guardian-release-beta",
     "tenant-guardian-release-gamma",
     "tenant-guardian-release-prod",
+    "tenant-guardian-secrets",
+    "tenant-guardian-secrets-beta",
+    "tenant-guardian-secrets-gamma",
+    "tenant-guardian-secrets-prod",
   ]
+  third_party_integration_roles = {
+    github = {
+      role_name                        = "guardian-github-integrations"
+      bound_service_account_names      = local.github_integration_service_accounts
+      bound_service_account_namespaces = local.github_integration_namespaces
+    }
+  }
 }
 
 resource "vault_mount" "kv" {
@@ -145,11 +156,18 @@ resource "vault_kubernetes_auth_backend_role" "external_dns" {
   token_max_ttl                    = 3600
 }
 
-resource "vault_kubernetes_auth_backend_role" "github_integrations" {
+moved {
+  from = vault_kubernetes_auth_backend_role.github_integrations
+  to   = vault_kubernetes_auth_backend_role.third_party_integrations["github"]
+}
+
+resource "vault_kubernetes_auth_backend_role" "third_party_integrations" {
+  for_each = local.third_party_integration_roles
+
   backend                          = vault_auth_backend.kubernetes.path
-  role_name                        = "guardian-github-integrations"
-  bound_service_account_names      = local.github_integration_service_accounts
-  bound_service_account_namespaces = local.github_integration_namespaces
+  role_name                        = each.value.role_name
+  bound_service_account_names      = each.value.bound_service_account_names
+  bound_service_account_namespaces = each.value.bound_service_account_namespaces
   audience                         = "openbao"
   token_policies = [
     vault_policy.third_party_secret_reader.name,
