@@ -1,8 +1,0 @@
-filegroup(
-    name = "manifests",
-    srcs = [
-        "metallb.yaml",
-        "subnet-mtu.yaml",
-    ],
-    visibility = ["//visibility:public"],
-)

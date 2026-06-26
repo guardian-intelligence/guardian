@@ -61,7 +61,10 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/clusters/ash/root/networking:manifests",
     "//src/infrastructure/clusters/ash/root/openbao:manifests",
     "//src/infrastructure/clusters/ash/root/storage:manifests",
+    "//src/infrastructure/clusters/ash/root/tenants:manifests",
+    "//src/infrastructure/clusters/ash/tenants/guardian:manifests",
     "//src/infrastructure/clusters/ash/deployments/company/prod:manifests",
+    "//src/infrastructure/clusters/ash/deployments/kms/prod:manifests",
     "//src/infrastructure/load:http_load_scripts",
     "//src/infrastructure/edge:edge_health_targets",
     "//src/infrastructure/clusters/ash/bootstrap/opentofu/openbao-bootstrap:root",
@@ -521,8 +524,10 @@ def _render_kustomizations(ctx):
     if kubectl == None:
         return 1
     for path in [
-        "src/infrastructure/base",
         "src/infrastructure/clusters/ash/root",
+        "src/infrastructure/clusters/ash/tenants/guardian",
+        "src/infrastructure/clusters/ash/deployments/company/prod",
+        "src/infrastructure/clusters/ash/deployments/kms/prod",
     ]:
         rc = _capture_success(
             ctx,

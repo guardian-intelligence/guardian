@@ -2,7 +2,11 @@ apiVersion: apps.cozystack.io/v1alpha1
 kind: OpenBAO
 metadata:
   name: guardian
-  namespace: tenant-root
+  namespace: tenant-guardian-kms
+  labels:
+    guardian.dev/component: kms
+    guardian.dev/stage: prod
+    guardian.dev/tenant-id: gi-kms-prod
 spec:
   replicas: 3
   storageClass: local-retain

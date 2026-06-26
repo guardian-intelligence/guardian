@@ -59,6 +59,7 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("external dns", testExternalDNS)
 	t.Run("edge health targets", testEdgeHealthTargets)
 	t.Run("company site prod deployment", testCompanySiteProdDeployment)
+	t.Run("tenancy", testTenancy)
 	t.Run("root tenant core services", testRootTenantCoreServices)
 	t.Run("observability", testObservability)
 	t.Run("openbao", testOpenBao)
@@ -862,9 +863,65 @@ func testObservability(t *testing.T) {
 	assertString(t, pkg, "64MB", "spec", "components", "monitoring-agents", "values", "vmagent", "extraArgs", "promscrape.maxScrapeSize")
 }
 
+func testTenancy(t *testing.T) {
+	rootStages := readManifests(t, "src/infrastructure/clusters/ash/root/tenants/root-stages.yaml")
+	assertTenant(t, rootStages, "tenant-root", "root", "gi-root", "")
+	assertTenant(t, rootStages, "tenant-root", "dev", "gi-stage-dev", "dev.gi.org")
+	assertTenant(t, rootStages, "tenant-root", "gamma", "gi-stage-gamma", "gamma.gi.org")
+	assertTenant(t, rootStages, "tenant-root", "prod", "gi-stage-prod", "prod.gi.org")
+
+	guardian := readManifests(t, "src/infrastructure/clusters/ash/root/tenants/guardian.yaml")
+	assertTenant(t, guardian, "tenant-root", "guardian", "gi-guardian", "")
+
+	kms := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/kms.yaml")
+	assertTenant(t, kms, "tenant-guardian", "kms", "gi-kms", "")
+
+	rootKustomization := readYAMLMap(t, "src/infrastructure/clusters/ash/root/kustomization.yaml")
+	resources := sliceAt(t, rootKustomization, "resources")
+	assertContainsString(t, resources, "tenants/root-stages.yaml", "root kustomization resources")
+	assertContainsString(t, resources, "tenants/guardian.yaml", "root kustomization resources")
+}
+
+func assertTenant(t *testing.T, docs []manifest, namespace, name, tenantID, host string) {
+	t.Helper()
+
+	tenant := findObject(t, docs, "Tenant", namespace, name)
+	assertString(t, tenant, "apps.cozystack.io/v1alpha1", "apiVersion")
+	assertString(t, tenant, tenantID, "metadata", "labels", "guardian.dev/tenant-id")
+	assertBool(t, tenant, false, "spec", "etcd")
+	assertString(t, tenant, host, "spec", "host")
+	assertBool(t, tenant, false, "spec", "ingress")
+	assertBool(t, tenant, false, "spec", "monitoring")
+	assertBool(t, tenant, false, "spec", "seaweedfs")
+	assertString(t, tenant, "", "spec", "schedulingClass")
+	if quotas := valueAt(tenant, "spec", "resourceQuotas"); quotas == nil {
+		t.Fatalf("Tenant %s/%s missing spec.resourceQuotas", namespace, name)
+	}
+}
+
 func testOpenBao(t *testing.T) {
 	docs := readManifests(t, "src/infrastructure/clusters/ash/root/openbao/openbao.yaml")
 	bao := findObject(t, docs, "OpenBAO", "tenant-root", "guardian")
+	assertOpenBaoSpec(t, bao)
+
+	policies := readManifests(t, "src/infrastructure/clusters/ash/root/openbao/networkpolicy.yaml")
+	assertOpenBaoAPIServerPolicy(t, policies, "tenant-root")
+	assertNoObject(t, policies, "CiliumNetworkPolicy", "tenant-root", "allow-external-secrets-to-openbao")
+
+	kmsDocs := readManifests(t, "src/infrastructure/clusters/ash/deployments/kms/prod/openbao.yaml")
+	kmsBao := findObject(t, kmsDocs, "OpenBAO", "tenant-guardian-kms", "guardian")
+	assertOpenBaoSpec(t, kmsBao)
+	assertString(t, kmsBao, "kms", "metadata", "labels", "guardian.dev/component")
+	assertString(t, kmsBao, "prod", "metadata", "labels", "guardian.dev/stage")
+	assertString(t, kmsBao, "gi-kms-prod", "metadata", "labels", "guardian.dev/tenant-id")
+
+	kmsPolicies := readManifests(t, "src/infrastructure/clusters/ash/deployments/kms/prod/networkpolicy.yaml")
+	assertOpenBaoAPIServerPolicy(t, kmsPolicies, "tenant-guardian-kms")
+	assertNoObject(t, kmsPolicies, "CiliumNetworkPolicy", "tenant-guardian-kms", "allow-external-secrets-to-openbao")
+}
+
+func assertOpenBaoSpec(t *testing.T, bao manifest) {
+	t.Helper()
 
 	assertString(t, bao, "apps.cozystack.io/v1alpha1", "apiVersion")
 	assertInt(t, bao, 3, "spec", "replicas")
@@ -874,9 +931,12 @@ func testOpenBao(t *testing.T) {
 	assertBool(t, bao, false, "spec", "external")
 	assertString(t, bao, "1", "spec", "resources", "cpu")
 	assertString(t, bao, "2Gi", "spec", "resources", "memory")
+}
 
-	policies := readManifests(t, "src/infrastructure/clusters/ash/root/openbao/networkpolicy.yaml")
-	policy := findObject(t, policies, "CiliumNetworkPolicy", "tenant-root", "allow-openbao-to-apiserver")
+func assertOpenBaoAPIServerPolicy(t *testing.T, policies []manifest, namespace string) {
+	t.Helper()
+
+	policy := findObject(t, policies, "CiliumNetworkPolicy", namespace, "allow-openbao-to-apiserver")
 	assertString(t, policy, "cilium.io/v2", "apiVersion")
 	assertString(t, policy, "openbao", "spec", "endpointSelector", "matchLabels", "app.kubernetes.io/name")
 
@@ -897,7 +957,6 @@ func testOpenBao(t *testing.T) {
 	port := asManifest(t, ports[0], "spec.egress[1].toPorts[0].ports[0]")
 	assertString(t, port, "6443", "port")
 	assertString(t, port, "TCP", "protocol")
-	assertNoObject(t, policies, "CiliumNetworkPolicy", "tenant-root", "allow-external-secrets-to-openbao")
 }
 
 func testOpenBaoOpenTofuBootstrap(t *testing.T) {
@@ -917,21 +976,51 @@ func testOpenBaoOpenTofuBootstrap(t *testing.T) {
 
 	assertTextContains(t, mainTF, `resource "vault_mount" "kv"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `type        = "kv-v2"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `resource "vault_mount" "transit"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `type        = "transit"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `resource "vault_auth_backend" "kubernetes"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `type        = "kubernetes"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `resource "vault_kubernetes_auth_backend_config" "guardian_mgmt"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `kubernetes_host        = "https://kubernetes.default.svc:443"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `disable_iss_validation = true`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `external_dns_secret   = "guardian/guardian-mgmt/tenant-root/dns/external-dns"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `external_dns_secret        = "guardian/guardian-mgmt/tenant-root/dns/external-dns"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `third_party_secret_prefix  = "guardian/guardian-mgmt/integrations"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `third_party_encryption_key = "guardian-integrations-encryption"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `third_party_signing_key    = "guardian-integrations-signing"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `resource "vault_transit_secret_backend_key" "third_party_encryption"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `name             = local.third_party_encryption_key`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `type             = "aes256-gcm96"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `resource "vault_transit_secret_backend_key" "third_party_signing"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `name             = local.third_party_signing_key`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `type             = "ed25519"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `resource "vault_policy" "external_dns"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `name = "tenant-root-external-dns"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `path "${local.kv_mount}/data/${local.external_dns_secret}"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `resource "vault_policy" "third_party_secret_reader"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `name = "guardian-third-party-secret-reader"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `path "${local.kv_mount}/data/${local.third_party_secret_prefix}/*"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `resource "vault_policy" "third_party_transit_client"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `name = "guardian-third-party-transit-client"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `path "${local.transit_mount}/encrypt/${local.third_party_encryption_key}"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `path "${local.transit_mount}/decrypt/${local.third_party_encryption_key}"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `path "${local.transit_mount}/rewrap/${local.third_party_encryption_key}"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `path "${local.transit_mount}/datakey/plaintext/${local.third_party_encryption_key}"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `path "${local.transit_mount}/hmac/${local.third_party_encryption_key}"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `path "${local.transit_mount}/verify/${local.third_party_encryption_key}"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `path "${local.transit_mount}/sign/${local.third_party_signing_key}"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `path "${local.transit_mount}/verify/${local.third_party_signing_key}"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `resource "vault_kubernetes_auth_backend_role" "external_dns"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `role_name                        = "tenant-root-external-dns"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `bound_service_account_names      = ["external-dns-secrets"]`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `bound_service_account_namespaces = ["external-dns"]`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `audience                         = "openbao"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `token_policies                   = [vault_policy.external_dns.name]`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `resource "vault_kubernetes_auth_backend_role" "github_integrations"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `role_name                        = "guardian-github-integrations"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `bound_service_account_names      = ["github-actions-runner-controller", "github-app-secrets"]`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `bound_service_account_namespaces = ["arc-systems", "guardian-release"]`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `vault_policy.third_party_secret_reader.name`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `vault_policy.third_party_transit_client.name`, "guardian-mgmt-openbao main.tf")
 	assertTextNotContains(t, mainTF, `resource "vault_policy" "secret_projection"`, "guardian-mgmt-openbao main.tf")
 	assertTextNotContains(t, mainTF, `resource "vault_kubernetes_auth_backend_role" "secret_projection"`, "guardian-mgmt-openbao main.tf")
 	assertTextNotContains(t, mainTF, `auth/token/lookup-self`, "guardian-mgmt-openbao main.tf")
@@ -1008,6 +1097,28 @@ func testFluxHandoff(t *testing.T) {
 	dnsControllerDeps := sliceAt(t, dnsController, "spec", "dependsOn")
 	if len(dnsControllerDeps) != 1 || stringAt(asManifest(t, dnsControllerDeps[0], "dns controller spec.dependsOn[0]"), "name") != "guardian-mgmt-base" {
 		t.Fatalf("guardian-mgmt-dns-controller dependsOn = %#v, want only guardian-mgmt-base", dnsControllerDeps)
+	}
+
+	tenancy := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-tenancy")
+	assertString(t, tenancy, "./src/infrastructure/clusters/ash/tenants/guardian", "spec", "path")
+	assertString(t, tenancy, "GitRepository", "spec", "sourceRef", "kind")
+	assertString(t, tenancy, "guardian", "spec", "sourceRef", "name")
+	assertBool(t, tenancy, true, "spec", "prune")
+	assertBool(t, tenancy, true, "spec", "wait")
+	tenancyDeps := sliceAt(t, tenancy, "spec", "dependsOn")
+	if len(tenancyDeps) != 1 || stringAt(asManifest(t, tenancyDeps[0], "tenancy spec.dependsOn[0]"), "name") != "guardian-mgmt-base" {
+		t.Fatalf("guardian-tenancy dependsOn = %#v, want only guardian-mgmt-base", tenancyDeps)
+	}
+
+	kmsProd := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-kms-prod")
+	assertString(t, kmsProd, "./src/infrastructure/clusters/ash/deployments/kms/prod", "spec", "path")
+	assertString(t, kmsProd, "GitRepository", "spec", "sourceRef", "kind")
+	assertString(t, kmsProd, "guardian", "spec", "sourceRef", "name")
+	assertBool(t, kmsProd, true, "spec", "prune")
+	assertBool(t, kmsProd, true, "spec", "wait")
+	kmsProdDeps := sliceAt(t, kmsProd, "spec", "dependsOn")
+	if len(kmsProdDeps) != 1 || stringAt(asManifest(t, kmsProdDeps[0], "kms prod spec.dependsOn[0]"), "name") != "guardian-tenancy" {
+		t.Fatalf("guardian-kms-prod dependsOn = %#v, want only guardian-tenancy", kmsProdDeps)
 	}
 
 	companyProd := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-company-prod")

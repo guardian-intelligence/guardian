@@ -1,7 +1,0 @@
-filegroup(
-    name = "manifests",
-    srcs = [
-        "sync.yaml",
-    ],
-    visibility = ["//visibility:public"],
-)
