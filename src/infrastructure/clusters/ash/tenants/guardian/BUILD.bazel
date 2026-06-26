@@ -2,6 +2,7 @@ filegroup(
     name = "manifests",
     srcs = [
         "audit.yaml",
+        "billing.yaml",
         "company.yaml",
         "iam.yaml",
         "kms.yaml",

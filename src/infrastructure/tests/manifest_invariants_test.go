@@ -898,6 +898,9 @@ func testTenancy(t *testing.T) {
 	audit := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/audit.yaml")
 	assertTenant(t, audit, "tenant-guardian", "audit", "gi-audit", "")
 
+	billing := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/billing.yaml")
+	assertTenant(t, billing, "tenant-guardian", "billing", "gi-billing", "")
+
 	iam := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/iam.yaml")
 	assertTenant(t, iam, "tenant-guardian", "iam", "gi-iam", "")
 
@@ -923,6 +926,14 @@ func testTenancy(t *testing.T) {
 	assertTenantStageLabels(t, auditStages, "tenant-guardian-audit", "beta", "audit", "beta")
 	assertTenantStageLabels(t, auditStages, "tenant-guardian-audit", "gamma", "audit", "gamma")
 	assertTenantStageLabels(t, auditStages, "tenant-guardian-audit", "prod", "audit", "prod")
+
+	billingStages := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/billing/stages.yaml")
+	assertTenant(t, billingStages, "tenant-guardian-billing", "beta", "gi-billing-beta", "")
+	assertTenant(t, billingStages, "tenant-guardian-billing", "gamma", "gi-billing-gamma", "")
+	assertTenant(t, billingStages, "tenant-guardian-billing", "prod", "gi-billing-prod", "")
+	assertTenantStageLabels(t, billingStages, "tenant-guardian-billing", "beta", "billing", "beta")
+	assertTenantStageLabels(t, billingStages, "tenant-guardian-billing", "gamma", "billing", "gamma")
+	assertTenantStageLabels(t, billingStages, "tenant-guardian-billing", "prod", "billing", "prod")
 
 	iamStages := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/iam/stages.yaml")
 	assertTenant(t, iamStages, "tenant-guardian-iam", "beta", "gi-iam-beta", "")
@@ -1247,6 +1258,17 @@ func testFluxHandoff(t *testing.T) {
 	auditTenancyDeps := sliceAt(t, auditTenancy, "spec", "dependsOn")
 	if len(auditTenancyDeps) != 1 || stringAt(asManifest(t, auditTenancyDeps[0], "audit tenancy spec.dependsOn[0]"), "name") != "guardian-tenancy" {
 		t.Fatalf("guardian-audit-tenancy dependsOn = %#v, want only guardian-tenancy", auditTenancyDeps)
+	}
+
+	billingTenancy := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-billing-tenancy")
+	assertString(t, billingTenancy, "./src/infrastructure/clusters/ash/tenants/guardian/billing", "spec", "path")
+	assertString(t, billingTenancy, "GitRepository", "spec", "sourceRef", "kind")
+	assertString(t, billingTenancy, "guardian", "spec", "sourceRef", "name")
+	assertBool(t, billingTenancy, true, "spec", "prune")
+	assertBool(t, billingTenancy, true, "spec", "wait")
+	billingTenancyDeps := sliceAt(t, billingTenancy, "spec", "dependsOn")
+	if len(billingTenancyDeps) != 1 || stringAt(asManifest(t, billingTenancyDeps[0], "billing tenancy spec.dependsOn[0]"), "name") != "guardian-tenancy" {
+		t.Fatalf("guardian-billing-tenancy dependsOn = %#v, want only guardian-tenancy", billingTenancyDeps)
 	}
 
 	iamTenancy := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-iam-tenancy")
