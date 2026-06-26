@@ -48,6 +48,7 @@ EXPECTED_KUBE_APIS = [
     "https://45.250.254.119:6443",
     "https://206.223.228.87:6443",
 ]
+GO_TLS_COMPAT_GODEBUG = "tlsmlkem=0"
 
 INFRA_FILEGROUPS = [
     "//src/infrastructure/clusters/ash/bootstrap/opentofu/baremetal:root",
@@ -94,11 +95,22 @@ FORBIDDEN_SOURCE_PATHS = [
     ("src-old/release/evidence", "custom release evidence schemas were removed; use standard OCI, in-toto, SLSA, and tool-native records"),
 ]
 
-def _capture_stdout(ctx, program, args, cwd = None, label = None, auth_hint = "kubernetes"):
+def _go_tls_env(ctx):
+    existing = ctx.std.env.var("GODEBUG") or ""
+    if existing == "":
+        return {"GODEBUG": GO_TLS_COMPAT_GODEBUG}
+    if existing.find("tlsmlkem=") != -1:
+        return {"GODEBUG": existing}
+    return {"GODEBUG": existing + "," + GO_TLS_COMPAT_GODEBUG}
+
+def _capture_stdout(ctx, program, args, cwd = None, label = None, auth_hint = "kubernetes", env = None):
     label_str = label if label != None else program
     cmd = ctx.std.process.command(program).args(args)
     if cwd != None:
         cmd = cmd.current_dir(cwd)
+    if env != None:
+        for k, v in env.items():
+            cmd = cmd.env(k, v)
     if ctx.std.io.stderr.is_tty:
         ctx.std.io.stderr.write("$ " + label_str + "\n")
     r = cmd.stdout("piped").stderr("piped").spawn().wait_with_output()
@@ -112,11 +124,14 @@ def _capture_stdout(ctx, program, args, cwd = None, label = None, auth_hint = "k
         return None
     return r.stdout.strip()
 
-def _capture_success(ctx, program, args, cwd = None, label = None, auth_hint = "kubernetes"):
+def _capture_success(ctx, program, args, cwd = None, label = None, auth_hint = "kubernetes", env = None):
     label_str = label if label != None else program
     cmd = ctx.std.process.command(program).args(args)
     if cwd != None:
         cmd = cmd.current_dir(cwd)
+    if env != None:
+        for k, v in env.items():
+            cmd = cmd.env(k, v)
     if ctx.std.io.stderr.is_tty:
         ctx.std.io.stderr.write("$ " + label_str + "\n")
     r = cmd.stdout("piped").stderr("piped").spawn().wait_with_output()
@@ -411,6 +426,7 @@ def _kubectl_capture_for(ctx, kubectl, kubeconfig, args, label):
         _kubectl_args_for(ctx, kubeconfig, args),
         cwd = ws_path(ctx),
         label = label,
+        env = _go_tls_env(ctx),
     )
 
 def _talosctl_capture(ctx, talosctl, args, label):
@@ -421,6 +437,7 @@ def _talosctl_capture(ctx, talosctl, args, label):
         cwd = ws_path(ctx),
         label = label,
         auth_hint = "talos",
+        env = _go_tls_env(ctx),
     )
 
 def _talosctl_success(ctx, talosctl, args, label):
@@ -431,6 +448,7 @@ def _talosctl_success(ctx, talosctl, args, label):
         cwd = ws_path(ctx),
         label = label,
         auth_hint = "talos",
+        env = _go_tls_env(ctx),
     )
 
 def _contains(items, needle):
@@ -538,6 +556,7 @@ def _render_kustomizations(ctx):
             ["kustomize", path],
             cwd = ws_path(ctx),
             label = "kubectl kustomize " + path,
+            env = _go_tls_env(ctx),
         )
         if rc != 0:
             return rc
@@ -684,6 +703,7 @@ def _kubeconfig_impl(ctx):
             talosconfig,
         ],
         cwd = root,
+        env = _go_tls_env(ctx),
         label = "talm talosconfig guardian-mgmt",
     )
     if rc != 0:
@@ -709,6 +729,7 @@ def _kubeconfig_impl(ctx):
             "--force",
         ],
         cwd = root,
+        env = _go_tls_env(ctx),
         label = "talm kubeconfig guardian-mgmt",
     )
     if rc != 0:
@@ -752,9 +773,9 @@ def _talos_impl(ctx):
     )
     if kubespan == None:
         return 1
-    rc = _assert_equals(ctx, kubespan, "[]", "kubespan peer statuses")
-    if rc != 0:
-        return rc
+    if kubespan != "" and kubespan != "[]":
+        ctx.std.io.stderr.write("ERROR: kubespan peer statuses = " + kubespan + "; expected no peers\n")
+        return 1
 
     ctx.std.io.stderr.write("guardian-mgmt Talos L2 checks passed\n")
     return 0
@@ -794,6 +815,7 @@ def _upgrade_cozystack_with_kubeconfig(ctx, kubeconfig, wait_timeout):
         helm,
         args,
         cwd = ws_path(ctx),
+        env = _go_tls_env(ctx),
         label = "helm upgrade cozystack installer " + COZYSTACK_INSTALLER_VERSION,
     )
 
@@ -896,6 +918,7 @@ def _backup_drill_impl(ctx):
         "bazelisk",
         ["run", BACKUP_DRILL_TARGET, "--"] + drill_args,
         cwd = ws_path(ctx),
+        env = _go_tls_env(ctx),
         label = "cozystack backup drill",
     )
 
@@ -949,6 +972,7 @@ def _node_outage_drill_impl(ctx):
         "bazelisk",
         ["run", NODE_OUTAGE_DRILL_TARGET, "--"] + drill_args,
         cwd = ws_path(ctx),
+        env = _go_tls_env(ctx),
         label = "cozystack node outage drill",
     )
 
@@ -1019,6 +1043,7 @@ def _load_http_impl(ctx):
         "bazelisk",
         ["run", HTTP_LOAD_TARGET, "--"] + load_args,
         cwd = ws_path(ctx),
+        env = _go_tls_env(ctx),
         label = "cozystack http load",
     )
 
@@ -1104,6 +1129,7 @@ def _edge_failover_drill_impl(ctx):
         "bazelisk",
         ["run", EDGE_FAILOVER_DRILL_TARGET, "--"] + drill_args,
         cwd = ws_path(ctx),
+        env = _go_tls_env(ctx),
         label = "guardian edge failover drill",
     )
 
@@ -1162,6 +1188,7 @@ def _load_db_impl(ctx):
         "bazelisk",
         ["run", DB_LOAD_TARGET, "--"] + load_args,
         cwd = ws_path(ctx),
+        env = _go_tls_env(ctx),
         label = "cozystack db load",
     )
 
@@ -1211,6 +1238,7 @@ def _load_harbor_registry_impl(ctx):
         "bazelisk",
         ["run", HARBOR_REGISTRY_TARGET, "--"] + load_args,
         cwd = ws_path(ctx),
+        env = _go_tls_env(ctx),
         label = "cozystack harbor registry load",
     )
 
@@ -1270,6 +1298,7 @@ def _observability_drill_impl(ctx):
         "bazelisk",
         ["run", OBSERVABILITY_DRILL_TARGET, "--"] + drill_args,
         cwd = ws_path(ctx),
+        env = _go_tls_env(ctx),
         label = "cozystack observability drill",
     )
 
@@ -1312,6 +1341,7 @@ def _openbao_drill_impl(ctx):
         "bazelisk",
         ["run", OPENBAO_DRILL_TARGET, "--"] + drill_args,
         cwd = ws_path(ctx),
+        env = _go_tls_env(ctx),
         label = "cozystack openbao drill",
     )
 
@@ -1369,6 +1399,7 @@ def _openbao_apply_impl(ctx):
         "bazelisk",
         ["run", OPENBAO_APPLY_TARGET, "--"] + apply_args,
         cwd = ws_path(ctx),
+        env = _go_tls_env(ctx),
         label = "cozystack openbao apply",
     )
 

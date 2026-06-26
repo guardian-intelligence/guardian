@@ -49,6 +49,12 @@ path. Postgres and ClickHouse backups use Cozystack 1.5's platform-managed
 `spec.backup.useSystemBucket: true`; the repo does not carry Guardian-specific
 backup strategies or per-app backup credential Secrets.
 
+The live management tasks set `GODEBUG=tlsmlkem=0` for repo-pinned Go clients
+that talk to guardian-mgmt Kubernetes or Talos endpoints. The current public
+control-plane path can time out during larger default Go TLS ClientHello
+handshakes; this compatibility setting keeps operator checks repeatable until
+the underlying network/TLS path is fixed.
+
 Available live debugging CLIs are repo-pinned and can be installed as local
 shims:
 
