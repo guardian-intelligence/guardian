@@ -31,6 +31,7 @@ go_test(
         "//src/infrastructure/clusters/ash/tenants/guardian/company:manifests",
         "//src/infrastructure/clusters/ash/tenants/guardian/kms:manifests",
         "//src/infrastructure/clusters/ash/tenants/guardian/release:manifests",
+        "//src/infrastructure/clusters/ash/tenants/guardian/secrets:manifests",
         "//src/infrastructure/edge:edge_health_targets",
         "//src/infrastructure/clusters/ash/bootstrap/talm:chart",
     ],
