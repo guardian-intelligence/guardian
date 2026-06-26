@@ -7,3 +7,4 @@ resources:
   - kms.yaml
   - release.yaml
   - secrets.yaml
+  - telemetry.yaml

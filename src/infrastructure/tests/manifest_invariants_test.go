@@ -913,6 +913,9 @@ func testTenancy(t *testing.T) {
 	secrets := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/secrets.yaml")
 	assertTenant(t, secrets, "tenant-guardian", "secrets", "gi-secrets", "")
 
+	telemetry := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/telemetry.yaml")
+	assertTenant(t, telemetry, "tenant-guardian", "telemetry", "gi-telemetry", "")
+
 	auditStages := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/audit/stages.yaml")
 	assertTenant(t, auditStages, "tenant-guardian-audit", "beta", "gi-audit-beta", "")
 	assertTenant(t, auditStages, "tenant-guardian-audit", "gamma", "gi-audit-gamma", "")
@@ -960,6 +963,14 @@ func testTenancy(t *testing.T) {
 	assertTenantStageLabels(t, secretsStages, "tenant-guardian-secrets", "beta", "secrets", "beta")
 	assertTenantStageLabels(t, secretsStages, "tenant-guardian-secrets", "gamma", "secrets", "gamma")
 	assertTenantStageLabels(t, secretsStages, "tenant-guardian-secrets", "prod", "secrets", "prod")
+
+	telemetryStages := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/telemetry/stages.yaml")
+	assertTenant(t, telemetryStages, "tenant-guardian-telemetry", "beta", "gi-telemetry-beta", "")
+	assertTenant(t, telemetryStages, "tenant-guardian-telemetry", "gamma", "gi-telemetry-gamma", "")
+	assertTenant(t, telemetryStages, "tenant-guardian-telemetry", "prod", "gi-telemetry-prod", "")
+	assertTenantStageLabels(t, telemetryStages, "tenant-guardian-telemetry", "beta", "telemetry", "beta")
+	assertTenantStageLabels(t, telemetryStages, "tenant-guardian-telemetry", "gamma", "telemetry", "gamma")
+	assertTenantStageLabels(t, telemetryStages, "tenant-guardian-telemetry", "prod", "telemetry", "prod")
 
 	rootKustomization := readYAMLMap(t, "src/infrastructure/clusters/ash/root/kustomization.yaml")
 	resources := sliceAt(t, rootKustomization, "resources")
@@ -1291,6 +1302,17 @@ func testFluxHandoff(t *testing.T) {
 	secretsTenancyDeps := sliceAt(t, secretsTenancy, "spec", "dependsOn")
 	if len(secretsTenancyDeps) != 1 || stringAt(asManifest(t, secretsTenancyDeps[0], "secrets tenancy spec.dependsOn[0]"), "name") != "guardian-tenancy" {
 		t.Fatalf("guardian-secrets-tenancy dependsOn = %#v, want only guardian-tenancy", secretsTenancyDeps)
+	}
+
+	telemetryTenancy := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-telemetry-tenancy")
+	assertString(t, telemetryTenancy, "./src/infrastructure/clusters/ash/tenants/guardian/telemetry", "spec", "path")
+	assertString(t, telemetryTenancy, "GitRepository", "spec", "sourceRef", "kind")
+	assertString(t, telemetryTenancy, "guardian", "spec", "sourceRef", "name")
+	assertBool(t, telemetryTenancy, true, "spec", "prune")
+	assertBool(t, telemetryTenancy, true, "spec", "wait")
+	telemetryTenancyDeps := sliceAt(t, telemetryTenancy, "spec", "dependsOn")
+	if len(telemetryTenancyDeps) != 1 || stringAt(asManifest(t, telemetryTenancyDeps[0], "telemetry tenancy spec.dependsOn[0]"), "name") != "guardian-tenancy" {
+		t.Fatalf("guardian-telemetry-tenancy dependsOn = %#v, want only guardian-tenancy", telemetryTenancyDeps)
 	}
 
 	companyTenancy := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-company-tenancy")

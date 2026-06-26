@@ -8,6 +8,7 @@ filegroup(
         "kustomization.yaml",
         "release.yaml",
         "secrets.yaml",
+        "telemetry.yaml",
     ],
     visibility = ["//visibility:public"],
 )
