@@ -6,12 +6,12 @@ exports_files([
 filegroup(
     name = "build",
     srcs = [
-        "//src/infrastructure/base/apps:manifests",
-        "//src/infrastructure/base/cozystack:manifests",
-        "//src/infrastructure/base/flux:manifests",
-        "//src/infrastructure/base/networking:manifests",
-        "//src/infrastructure/base/openbao:manifests",
-        "//src/infrastructure/base/storage:manifests",
+        "//src/infrastructure/clusters/ash/root/apps:manifests",
+        "//src/infrastructure/clusters/ash/root/cozystack:manifests",
+        "//src/infrastructure/clusters/ash/root/flux:manifests",
+        "//src/infrastructure/clusters/ash/root/networking:manifests",
+        "//src/infrastructure/clusters/ash/root/openbao:manifests",
+        "//src/infrastructure/clusters/ash/root/storage:manifests",
         "//src/infrastructure/cmd/cozystack_backup_drill:cozystack_backup_drill",
         "//src/infrastructure/cmd/cozystack_db_load:cozystack_db_load",
         "//src/infrastructure/cmd/cozystack_harbor_registry:cozystack_harbor_registry",

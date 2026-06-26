@@ -1,0 +1,47 @@
+apiVersion: piraeus.io/v1
+kind: LinstorSatelliteConfiguration
+metadata:
+  name: guardian-data-pool-ash-earth
+  namespace: cozy-linstor
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: ash-earth
+  storagePools:
+    - name: data
+      lvmPool:
+        volumeGroup: data
+      source:
+        hostDevices:
+          - /dev/disk/by-id/nvme-MTFDKCC960TGP-1BK1JABYY_362510FD7C47
+---
+apiVersion: piraeus.io/v1
+kind: LinstorSatelliteConfiguration
+metadata:
+  name: guardian-data-pool-ash-wind
+  namespace: cozy-linstor
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: ash-wind
+  storagePools:
+    - name: data
+      lvmPool:
+        volumeGroup: data
+      source:
+        hostDevices:
+          - /dev/disk/by-id/nvme-MTFDKCC960TGP-1BK1JABYY_352410A4E0A6
+---
+apiVersion: piraeus.io/v1
+kind: LinstorSatelliteConfiguration
+metadata:
+  name: guardian-data-pool-ash-water
+  namespace: cozy-linstor
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: ash-water
+  storagePools:
+    - name: data
+      lvmPool:
+        volumeGroup: data
+      source:
+        hostDevices:
+          - /dev/disk/by-id/nvme-MTFDKCC960TGP-1BK1JABYY_362510FE3204
