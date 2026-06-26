@@ -1,0 +1,63 @@
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: root
+  namespace: tenant-root
+  labels:
+    guardian.dev/tenant-id: gi-root
+spec:
+  etcd: false
+  host: ""
+  ingress: false
+  monitoring: false
+  resourceQuotas: {}
+  schedulingClass: ""
+  seaweedfs: false
+---
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: dev
+  namespace: tenant-root
+  labels:
+    guardian.dev/tenant-id: gi-stage-dev
+spec:
+  etcd: false
+  host: dev.gi.org
+  ingress: false
+  monitoring: false
+  resourceQuotas: {}
+  schedulingClass: ""
+  seaweedfs: false
+---
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: gamma
+  namespace: tenant-root
+  labels:
+    guardian.dev/tenant-id: gi-stage-gamma
+spec:
+  etcd: false
+  host: gamma.gi.org
+  ingress: false
+  monitoring: false
+  resourceQuotas: {}
+  schedulingClass: ""
+  seaweedfs: false
+---
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: prod
+  namespace: tenant-root
+  labels:
+    guardian.dev/tenant-id: gi-stage-prod
+spec:
+  etcd: false
+  host: prod.gi.org
+  ingress: false
+  monitoring: false
+  resourceQuotas: {}
+  schedulingClass: ""
+  seaweedfs: false

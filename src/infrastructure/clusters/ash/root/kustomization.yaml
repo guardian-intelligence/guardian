@@ -7,6 +7,8 @@ resources:
   - apps/harbor-rwo-rollout-strategy.yaml
   - apps/observability.yaml
   - apps/seaweedfs-s3-ingress-service.yaml
+  - tenants/root-stages.yaml
+  - tenants/guardian.yaml
   - networking/metallb.yaml
   - networking/subnet-mtu.yaml
   - openbao/openbao.yaml

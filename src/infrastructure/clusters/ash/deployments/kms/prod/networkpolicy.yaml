@@ -2,7 +2,7 @@ apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
   name: allow-openbao-to-apiserver
-  namespace: tenant-root
+  namespace: tenant-guardian-kms
 spec:
   endpointSelector:
     matchLabels:

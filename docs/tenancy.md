@@ -20,10 +20,16 @@ The ASH management cluster is laid out under
 - `deployments/` reconciles workloads that run inside child tenants.
 
 The legacy Flux entrypoints under `src/infrastructure/base/` and
-`src/infrastructure/deployments/company/prod/` are temporary compatibility
-copies. Keep them until the live Flux Kustomizations have reconciled the new
-paths from `src/infrastructure/clusters/ash/root/flux/sync.yaml`, then remove
-them in the next PR.
+`src/infrastructure/deployments/company/prod/` were removed after Flux
+reconciled the canonical ASH paths from
+`src/infrastructure/clusters/ash/root/flux/sync.yaml`.
+
+The root slice declares existing root-level compatibility tenants for `dev`,
+`gamma`, and `prod`. New Guardian-owned infrastructure should live below the
+`guardian` tenant chain instead. The first concrete child is `tenant-guardian-kms`,
+which hosts the tenant-scoped OpenBao authority while the original
+`tenant-root/openbao-guardian` instance remains available for bootstrap and
+break-glass continuity during migration.
 
 Milestone order:
 

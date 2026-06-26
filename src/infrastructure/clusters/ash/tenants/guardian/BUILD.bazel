@@ -1,8 +1,7 @@
 filegroup(
     name = "manifests",
     srcs = [
-        "clickhouse-system-bucket-endpoint.yaml",
-        "ingress-origin-edge.yaml",
+        "kms.yaml",
         "kustomization.yaml",
     ],
     visibility = ["//visibility:public"],
