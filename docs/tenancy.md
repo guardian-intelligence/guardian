@@ -31,6 +31,11 @@ which hosts the tenant-scoped OpenBao authority while the original
 `tenant-root/openbao-guardian` instance remains available for bootstrap and
 break-glass continuity during migration.
 
+The standard `aspect infra openbao-drill`, `aspect infra openbao-apply`, node
+outage drill, and OpenBao load-test defaults target `tenant-guardian-kms`. The
+legacy root instance requires an explicit namespace override or the
+`bootstrap-root` OpenBao load-test stage.
+
 Milestone order:
 
 1. Keep `tenant-root` limited to Cozystack substrate and bootstrap recovery.
