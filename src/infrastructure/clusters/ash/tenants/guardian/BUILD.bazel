@@ -11,6 +11,7 @@ filegroup(
         "release.yaml",
         "secrets.yaml",
         "telemetry.yaml",
+        "workloads.yaml",
     ],
     visibility = ["//visibility:public"],
 )
