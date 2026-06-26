@@ -63,6 +63,7 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/clusters/ash/root/storage:manifests",
     "//src/infrastructure/clusters/ash/root/tenants:manifests",
     "//src/infrastructure/clusters/ash/tenants/guardian:manifests",
+    "//src/infrastructure/clusters/ash/tenants/guardian/company:manifests",
     "//src/infrastructure/clusters/ash/tenants/guardian/kms:manifests",
     "//src/infrastructure/clusters/ash/deployments/company/prod:manifests",
     "//src/infrastructure/clusters/ash/deployments/kms/prod:manifests",

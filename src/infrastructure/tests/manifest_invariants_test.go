@@ -898,13 +898,24 @@ func testTenancy(t *testing.T) {
 	kms := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/kms.yaml")
 	assertTenant(t, kms, "tenant-guardian", "kms", "gi-kms", "")
 
+	company := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/company.yaml")
+	assertTenant(t, company, "tenant-guardian", "company", "gi-company", "")
+
 	kmsStages := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/kms/stages.yaml")
-	assertTenant(t, kmsStages, "tenant-guardian-kms", "dev", "gi-kms-dev", "")
+	assertTenant(t, kmsStages, "tenant-guardian-kms", "beta", "gi-kms-beta", "")
 	assertTenant(t, kmsStages, "tenant-guardian-kms", "gamma", "gi-kms-gamma", "")
 	assertTenant(t, kmsStages, "tenant-guardian-kms", "prod", "gi-kms-prod", "")
-	assertTenantStageLabels(t, kmsStages, "tenant-guardian-kms", "dev", "kms", "dev")
+	assertTenantStageLabels(t, kmsStages, "tenant-guardian-kms", "beta", "kms", "beta")
 	assertTenantStageLabels(t, kmsStages, "tenant-guardian-kms", "gamma", "kms", "gamma")
 	assertTenantStageLabels(t, kmsStages, "tenant-guardian-kms", "prod", "kms", "prod")
+
+	companyStages := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/company/stages.yaml")
+	assertTenant(t, companyStages, "tenant-guardian-company", "beta", "gi-company-beta", "")
+	assertTenant(t, companyStages, "tenant-guardian-company", "gamma", "gi-company-gamma", "")
+	assertTenant(t, companyStages, "tenant-guardian-company", "prod", "gi-company-prod", "")
+	assertTenantStageLabels(t, companyStages, "tenant-guardian-company", "beta", "company", "beta")
+	assertTenantStageLabels(t, companyStages, "tenant-guardian-company", "gamma", "company", "gamma")
+	assertTenantStageLabels(t, companyStages, "tenant-guardian-company", "prod", "company", "prod")
 
 	rootKustomization := readYAMLMap(t, "src/infrastructure/clusters/ash/root/kustomization.yaml")
 	resources := sliceAt(t, rootKustomization, "resources")
@@ -1186,6 +1197,17 @@ func testFluxHandoff(t *testing.T) {
 		t.Fatalf("guardian-kms-prod dependsOn = %#v, want only guardian-kms-tenancy", kmsProdDeps)
 	}
 
+	companyTenancy := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-company-tenancy")
+	assertString(t, companyTenancy, "./src/infrastructure/clusters/ash/tenants/guardian/company", "spec", "path")
+	assertString(t, companyTenancy, "GitRepository", "spec", "sourceRef", "kind")
+	assertString(t, companyTenancy, "guardian", "spec", "sourceRef", "name")
+	assertBool(t, companyTenancy, true, "spec", "prune")
+	assertBool(t, companyTenancy, true, "spec", "wait")
+	companyTenancyDeps := sliceAt(t, companyTenancy, "spec", "dependsOn")
+	if len(companyTenancyDeps) != 1 || stringAt(asManifest(t, companyTenancyDeps[0], "company tenancy spec.dependsOn[0]"), "name") != "guardian-tenancy" {
+		t.Fatalf("guardian-company-tenancy dependsOn = %#v, want only guardian-tenancy", companyTenancyDeps)
+	}
+
 	companyProd := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-company-prod")
 	assertString(t, companyProd, "./src/infrastructure/clusters/ash/deployments/company/prod", "spec", "path")
 	assertString(t, companyProd, "GitRepository", "spec", "sourceRef", "kind")
@@ -1193,8 +1215,8 @@ func testFluxHandoff(t *testing.T) {
 	assertBool(t, companyProd, true, "spec", "prune")
 	assertBool(t, companyProd, true, "spec", "wait")
 	companyProdDeps := sliceAt(t, companyProd, "spec", "dependsOn")
-	if len(companyProdDeps) != 1 || stringAt(asManifest(t, companyProdDeps[0], "company prod spec.dependsOn[0]"), "name") != "guardian-mgmt-base" {
-		t.Fatalf("guardian-company-prod dependsOn = %#v, want only guardian-mgmt-base", companyProdDeps)
+	if len(companyProdDeps) != 1 || stringAt(asManifest(t, companyProdDeps[0], "company prod spec.dependsOn[0]"), "name") != "guardian-company-tenancy" {
+		t.Fatalf("guardian-company-prod dependsOn = %#v, want only guardian-company-tenancy", companyProdDeps)
 	}
 }
 
