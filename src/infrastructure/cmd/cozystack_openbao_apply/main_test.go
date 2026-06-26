@@ -116,6 +116,34 @@ func TestTofuEnv(t *testing.T) {
 	}
 }
 
+func TestValidateBackendCredentials(t *testing.T) {
+	if err := validateBackendCredentials([]string{
+		"AWS_ACCESS_KEY_ID=access-key",
+		"AWS_SECRET_ACCESS_KEY=secret-key",
+	}); err != nil {
+		t.Fatalf("valid backend credentials rejected: %v", err)
+	}
+
+	err := validateBackendCredentials([]string{"AWS_ACCESS_KEY_ID=access-key"})
+	if err == nil {
+		t.Fatalf("missing secret access key accepted")
+	}
+	if !strings.Contains(err.Error(), "AWS_SECRET_ACCESS_KEY") {
+		t.Fatalf("missing credential error did not name AWS_SECRET_ACCESS_KEY: %v", err)
+	}
+	if !strings.Contains(err.Error(), "cloudflare_r2_access_key_id/cloudflare_r2_secret_access_key") {
+		t.Fatalf("missing credential error did not explain R2 source names: %v", err)
+	}
+
+	err = validateBackendCredentials([]string{"AWS_ACCESS_KEY_ID=", "AWS_SECRET_ACCESS_KEY=secret-key"})
+	if err == nil {
+		t.Fatalf("empty access key accepted")
+	}
+	if !strings.Contains(err.Error(), "AWS_ACCESS_KEY_ID") {
+		t.Fatalf("empty credential error did not name AWS_ACCESS_KEY_ID: %v", err)
+	}
+}
+
 func TestRedactToken(t *testing.T) {
 	got := redactToken("token=root-token\nagain root-token", "root-token")
 	if strings.Contains(got, "root-token") {
