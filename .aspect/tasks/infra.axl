@@ -1371,6 +1371,9 @@ def _openbao_apply_impl(ctx):
         rc = _check_flux_revision(ctx, kubectl, ctx.args.revision)
         if rc != 0:
             return rc
+    if ctx.args.verify_api_state not in ["true", "false"]:
+        ctx.std.io.stderr.write("ERROR: --verify-api-state must be true or false\n")
+        return 1
 
     apply_args = [
         "--kubectl",
@@ -1401,13 +1404,45 @@ def _openbao_apply_impl(ctx):
     if ctx.args.kubeconfig != "":
         apply_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
 
-    return checked_spawn(
+    rc = checked_spawn(
         ctx,
         "bazelisk",
         ["run", OPENBAO_APPLY_TARGET, "--"] + apply_args,
         cwd = ws_path(ctx),
         env = _go_tls_env(ctx),
         label = "cozystack openbao apply",
+    )
+    if rc != 0:
+        return rc
+    if ctx.args.mode != "apply" or ctx.args.verify_api_state != "true":
+        return 0
+
+    drill_args = [
+        "--kubectl",
+        kubectl,
+        "--namespace",
+        ctx.args.namespace,
+        "--statefulset",
+        ctx.args.statefulset,
+        "--bootstrap-secret",
+        ctx.args.bootstrap_secret,
+        "--mode",
+        "api-state",
+        "--request-timeout",
+        ctx.args.request_timeout,
+        "--wait-timeout",
+        ctx.args.wait_timeout,
+    ]
+    if ctx.args.kubeconfig != "":
+        drill_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
+
+    return checked_spawn(
+        ctx,
+        "bazelisk",
+        ["run", OPENBAO_DRILL_TARGET, "--"] + drill_args,
+        cwd = ws_path(ctx),
+        env = _go_tls_env(ctx),
+        label = "cozystack openbao api-state drill",
     )
 
 validate = task(
@@ -1465,6 +1500,7 @@ openbao_apply = task(
         "service": args.string(default = "openbao-guardian", description = "OpenBao Service name."),
         "statefulset": args.string(default = "openbao-guardian", description = "OpenBao StatefulSet name."),
         "tofu_backend_endpoint": args.string(default = "", description = "Optional S3-compatible OpenTofu backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
+        "verify_api_state": args.string(default = "true", description = "After apply mode succeeds, run the OpenBao api-state drill. Set false only for emergency recovery."),
         "wait_timeout": args.string(default = "5m", description = "Timeout for OpenBao StatefulSet readiness."),
     },
 )
@@ -1659,7 +1695,7 @@ openbao_drill = task(
     args = {
         "bootstrap_secret": args.string(default = "openbao-guardian-bootstrap", description = "Cluster-local Secret for OpenBao root token and unseal key."),
         "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
-        "mode": args.string(default = "status", description = "Drill mode: status, init-unseal, or snapshot."),
+        "mode": args.string(default = "status", description = "Drill mode: status, api-state, init-unseal, or snapshot."),
         "namespace": args.string(default = "tenant-guardian-kms", description = "OpenBao namespace."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
         "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before the drill."),
