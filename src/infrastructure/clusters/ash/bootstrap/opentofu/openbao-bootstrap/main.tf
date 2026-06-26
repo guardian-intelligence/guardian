@@ -10,6 +10,17 @@ locals {
   third_party_secret_prefix  = "guardian/guardian-mgmt/integrations"
   third_party_encryption_key = "guardian-integrations-encryption"
   third_party_signing_key    = "guardian-integrations-signing"
+  github_integration_service_accounts = [
+    "github-actions-runner-controller",
+    "github-app-secrets",
+  ]
+  github_integration_namespaces = [
+    "arc-systems",
+    "tenant-guardian-release",
+    "tenant-guardian-release-beta",
+    "tenant-guardian-release-gamma",
+    "tenant-guardian-release-prod",
+  ]
 }
 
 resource "vault_mount" "kv" {
@@ -137,8 +148,8 @@ resource "vault_kubernetes_auth_backend_role" "external_dns" {
 resource "vault_kubernetes_auth_backend_role" "github_integrations" {
   backend                          = vault_auth_backend.kubernetes.path
   role_name                        = "guardian-github-integrations"
-  bound_service_account_names      = ["github-actions-runner-controller", "github-app-secrets"]
-  bound_service_account_namespaces = ["arc-systems", "guardian-release"]
+  bound_service_account_names      = local.github_integration_service_accounts
+  bound_service_account_namespaces = local.github_integration_namespaces
   audience                         = "openbao"
   token_policies = [
     vault_policy.third_party_secret_reader.name,

@@ -50,6 +50,15 @@ The company component tenant has explicit stage child tenants:
 root-level `tenant-prod` namespace as a compatibility placement until a separate
 route-handoff PR moves the workload into `tenant-guardian-company-prod`.
 
+The release component tenant has explicit stage child tenants:
+`tenant-guardian-release-beta`, `tenant-guardian-release-gamma`, and
+`tenant-guardian-release-prod`. This is the destination boundary for GitHub
+runners, Kargo, artifact admission, and release evidence. OpenBao's
+`guardian-github-integrations` Kubernetes auth role is scoped to `arc-systems`
+plus the `tenant-guardian-release*` namespaces so GitHub integration secrets and
+transit operations do not depend on the old non-tenant `guardian-release`
+namespace.
+
 Milestone order:
 
 1. Keep `tenant-root` limited to Cozystack substrate and bootstrap recovery.

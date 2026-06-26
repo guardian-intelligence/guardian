@@ -901,6 +901,9 @@ func testTenancy(t *testing.T) {
 	company := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/company.yaml")
 	assertTenant(t, company, "tenant-guardian", "company", "gi-company", "")
 
+	release := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/release.yaml")
+	assertTenant(t, release, "tenant-guardian", "release", "gi-release", "")
+
 	kmsStages := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/kms/stages.yaml")
 	assertTenant(t, kmsStages, "tenant-guardian-kms", "beta", "gi-kms-beta", "")
 	assertTenant(t, kmsStages, "tenant-guardian-kms", "gamma", "gi-kms-gamma", "")
@@ -916,6 +919,14 @@ func testTenancy(t *testing.T) {
 	assertTenantStageLabels(t, companyStages, "tenant-guardian-company", "beta", "company", "beta")
 	assertTenantStageLabels(t, companyStages, "tenant-guardian-company", "gamma", "company", "gamma")
 	assertTenantStageLabels(t, companyStages, "tenant-guardian-company", "prod", "company", "prod")
+
+	releaseStages := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/release/stages.yaml")
+	assertTenant(t, releaseStages, "tenant-guardian-release", "beta", "gi-release-beta", "")
+	assertTenant(t, releaseStages, "tenant-guardian-release", "gamma", "gi-release-gamma", "")
+	assertTenant(t, releaseStages, "tenant-guardian-release", "prod", "gi-release-prod", "")
+	assertTenantStageLabels(t, releaseStages, "tenant-guardian-release", "beta", "release", "beta")
+	assertTenantStageLabels(t, releaseStages, "tenant-guardian-release", "gamma", "release", "gamma")
+	assertTenantStageLabels(t, releaseStages, "tenant-guardian-release", "prod", "release", "prod")
 
 	rootKustomization := readYAMLMap(t, "src/infrastructure/clusters/ash/root/kustomization.yaml")
 	resources := sliceAt(t, rootKustomization, "resources")
@@ -1052,6 +1063,13 @@ func testOpenBaoOpenTofuBootstrap(t *testing.T) {
 	assertTextContains(t, mainTF, `third_party_secret_prefix  = "guardian/guardian-mgmt/integrations"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `third_party_encryption_key = "guardian-integrations-encryption"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `third_party_signing_key    = "guardian-integrations-signing"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `"github-actions-runner-controller"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `"github-app-secrets"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `"arc-systems"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `"tenant-guardian-release"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `"tenant-guardian-release-beta"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `"tenant-guardian-release-gamma"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `"tenant-guardian-release-prod"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `resource "vault_transit_secret_backend_key" "third_party_encryption"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `name             = local.third_party_encryption_key`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `type             = "aes256-gcm96"`, "guardian-mgmt-openbao main.tf")
@@ -1082,8 +1100,9 @@ func testOpenBaoOpenTofuBootstrap(t *testing.T) {
 	assertTextContains(t, mainTF, `token_policies                   = [vault_policy.external_dns.name]`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `resource "vault_kubernetes_auth_backend_role" "github_integrations"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `role_name                        = "guardian-github-integrations"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `bound_service_account_names      = ["github-actions-runner-controller", "github-app-secrets"]`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `bound_service_account_namespaces = ["arc-systems", "guardian-release"]`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `bound_service_account_names      = local.github_integration_service_accounts`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `bound_service_account_namespaces = local.github_integration_namespaces`, "guardian-mgmt-openbao main.tf")
+	assertTextNotContains(t, mainTF, `"guardian-release"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `vault_policy.third_party_secret_reader.name`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `vault_policy.third_party_transit_client.name`, "guardian-mgmt-openbao main.tf")
 	assertTextNotContains(t, mainTF, `resource "vault_policy" "secret_projection"`, "guardian-mgmt-openbao main.tf")
@@ -1195,6 +1214,17 @@ func testFluxHandoff(t *testing.T) {
 	kmsProdDeps := sliceAt(t, kmsProd, "spec", "dependsOn")
 	if len(kmsProdDeps) != 1 || stringAt(asManifest(t, kmsProdDeps[0], "kms prod spec.dependsOn[0]"), "name") != "guardian-kms-tenancy" {
 		t.Fatalf("guardian-kms-prod dependsOn = %#v, want only guardian-kms-tenancy", kmsProdDeps)
+	}
+
+	releaseTenancy := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-release-tenancy")
+	assertString(t, releaseTenancy, "./src/infrastructure/clusters/ash/tenants/guardian/release", "spec", "path")
+	assertString(t, releaseTenancy, "GitRepository", "spec", "sourceRef", "kind")
+	assertString(t, releaseTenancy, "guardian", "spec", "sourceRef", "name")
+	assertBool(t, releaseTenancy, true, "spec", "prune")
+	assertBool(t, releaseTenancy, true, "spec", "wait")
+	releaseTenancyDeps := sliceAt(t, releaseTenancy, "spec", "dependsOn")
+	if len(releaseTenancyDeps) != 1 || stringAt(asManifest(t, releaseTenancyDeps[0], "release tenancy spec.dependsOn[0]"), "name") != "guardian-tenancy" {
+		t.Fatalf("guardian-release-tenancy dependsOn = %#v, want only guardian-tenancy", releaseTenancyDeps)
 	}
 
 	companyTenancy := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-company-tenancy")
