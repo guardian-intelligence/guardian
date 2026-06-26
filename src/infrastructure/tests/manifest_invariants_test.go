@@ -65,6 +65,7 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("observability", testObservability)
 	t.Run("openbao", testOpenBao)
 	t.Run("openbao github integration secrets", testOpenBaoGitHubIntegrationSecrets)
+	t.Run("release github secret projection overlays", testReleaseGitHubSecretProjectionOverlays)
 	t.Run("openbao opentofu bootstrap", testOpenBaoOpenTofuBootstrap)
 	t.Run("flux handoff", testFluxHandoff)
 }
@@ -1118,6 +1119,32 @@ func assertExternalSecretRef(t *testing.T, value any, secretKey, remoteKey, prop
 	assertString(t, ref, secretKey, "secretKey")
 	assertString(t, ref, remoteKey, "remoteRef", "key")
 	assertString(t, ref, property, "remoteRef", "property")
+}
+
+func testReleaseGitHubSecretProjectionOverlays(t *testing.T) {
+	for _, stage := range []string{"beta", "gamma", "prod"} {
+		t.Run(stage, func(t *testing.T) {
+			rel := fmt.Sprintf("src/infrastructure/clusters/ash/deployments/release/%s/kustomization.yaml", stage)
+			kustomization := readYAMLMap(t, rel)
+			assertString(t, kustomization, "tenant-guardian-release-"+stage, "namespace")
+			assertContainsString(t, sliceAt(t, kustomization, "resources"), "../../../../../components/openbao-github-integration-secrets", rel+" resources")
+
+			labels := sliceAt(t, kustomization, "labels")
+			if len(labels) != 1 {
+				t.Fatalf("%s labels = %d entries, want 1", rel, len(labels))
+			}
+			label := asManifest(t, labels[0], rel+" labels[0]")
+			assertBool(t, label, false, "includeSelectors")
+			assertString(t, label, "release", "pairs", "guardian.dev/component")
+			assertString(t, label, stage, "pairs", "guardian.dev/stage")
+			assertString(t, label, "gi-release-"+stage, "pairs", "guardian.dev/tenant-id")
+		})
+	}
+
+	fluxDocs := readManifests(t, "src/infrastructure/clusters/ash/root/flux/sync.yaml")
+	assertNoObject(t, fluxDocs, "Kustomization", "cozy-fluxcd", "guardian-release-beta")
+	assertNoObject(t, fluxDocs, "Kustomization", "cozy-fluxcd", "guardian-release-gamma")
+	assertNoObject(t, fluxDocs, "Kustomization", "cozy-fluxcd", "guardian-release-prod")
 }
 
 func assertOpenBaoSpec(t *testing.T, bao manifest) {
