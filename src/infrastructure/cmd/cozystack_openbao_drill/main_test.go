@@ -28,6 +28,12 @@ func TestValidateConfig(t *testing.T) {
 		t.Fatalf("valid config rejected: %v", err)
 	}
 
+	apiState := cfg
+	apiState.Mode = "api-state"
+	if err := validateConfig(apiState); err != nil {
+		t.Fatalf("api-state mode rejected: %v", err)
+	}
+
 	badMode := cfg
 	badMode.Mode = "restore"
 	if err := validateConfig(badMode); err == nil {
@@ -91,6 +97,52 @@ func TestParseNativeJSONWithWrapperOutput(t *testing.T) {
 	}
 	if init.UnsealKey != "abc" || init.RootToken != "root" {
 		t.Fatalf("parseInitResult() wrapped output = %#v", init)
+	}
+}
+
+func TestOpenBaoAPIStateAssertions(t *testing.T) {
+	mounts := `{
+		"kv/": {"type": "kv", "options": {"version": "2"}},
+		"transit/": {"type": "transit", "options": null},
+		"kubernetes/": {"type": "kubernetes", "options": null}
+	}`
+	if err := assertMount(mounts, "kv/", "kv", map[string]string{"version": "2"}); err != nil {
+		t.Fatalf("kv mount rejected: %v", err)
+	}
+	if err := assertMount(mounts, "transit/", "transit", nil); err != nil {
+		t.Fatalf("transit mount rejected: %v", err)
+	}
+	if err := assertMount(mounts, "missing/", "kv", nil); err == nil {
+		t.Fatalf("missing mount accepted")
+	}
+
+	key := `{"data":{"name":"guardian-integrations-encryption","type":"aes256-gcm96","deletion_allowed":false,"exportable":false}}`
+	if err := assertTransitKey(key, "guardian-integrations-encryption", "aes256-gcm96"); err != nil {
+		t.Fatalf("transit key rejected: %v", err)
+	}
+
+	policy := `path "kv/data/guardian/guardian-mgmt/integrations/*" {
+  capabilities = ["read"]
+}`
+	if err := assertPolicyContains(policy, "guardian-third-party-secret-reader", []string{`path "kv/data/guardian/guardian-mgmt/integrations/*"`, `capabilities = ["read"]`}); err != nil {
+		t.Fatalf("policy rejected: %v", err)
+	}
+
+	role := `{"data":{
+		"bound_service_account_names":["github-actions-runner-controller","github-app-secrets"],
+		"bound_service_account_namespaces":"arc-systems,tenant-guardian-release,tenant-guardian-secrets-prod",
+		"token_policies":["guardian-third-party-secret-reader","guardian-third-party-transit-client"],
+		"audience":"openbao"
+	}}`
+	if err := assertKubernetesAuthRole(
+		role,
+		"guardian-github-integrations",
+		[]string{"github-actions-runner-controller", "github-app-secrets"},
+		[]string{"arc-systems", "tenant-guardian-release", "tenant-guardian-secrets-prod"},
+		[]string{"guardian-third-party-secret-reader", "guardian-third-party-transit-client"},
+		"openbao",
+	); err != nil {
+		t.Fatalf("github role rejected: %v", err)
 	}
 }
 
