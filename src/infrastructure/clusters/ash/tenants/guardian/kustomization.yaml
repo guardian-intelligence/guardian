@@ -1,6 +1,13 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  - aisucks.yaml
+  - audit.yaml
+  - billing.yaml
   - company.yaml
+  - iam.yaml
   - kms.yaml
   - release.yaml
+  - secrets.yaml
+  - telemetry.yaml
+  - workloads.yaml

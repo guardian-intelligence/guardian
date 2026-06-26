@@ -39,10 +39,17 @@ legacy root instance requires an explicit namespace override or the
 
 The KMS component tenant has explicit stage child tenants:
 `tenant-guardian-kms-beta`, `tenant-guardian-kms-gamma`, and
-`tenant-guardian-kms-prod`. The live OpenBao runtime still runs in the parent
-`tenant-guardian-kms` namespace as a compatibility placement until a later PR
-migrates state into `tenant-guardian-kms-prod` with a snapshot/restore drill and
-updated OpenBao apply/load defaults.
+`tenant-guardian-kms-prod`. This is the live compatibility placement created
+while proving OpenBao under Guardian tenancy. The canonical long-term OpenBao
+boundary is `tenant-guardian-secrets`; do not add new product integrations to
+the KMS tenant after the secrets tenant exists.
+
+The secrets component tenant has explicit stage child tenants:
+`tenant-guardian-secrets-beta`, `tenant-guardian-secrets-gamma`, and
+`tenant-guardian-secrets-prod`. The live OpenBao runtime still runs in the
+parent `tenant-guardian-kms` namespace until a later PR migrates state into
+`tenant-guardian-secrets-prod` with a snapshot/restore drill and updated
+OpenBao apply/load defaults.
 
 The company component tenant has explicit stage child tenants:
 `tenant-guardian-company-beta`, `tenant-guardian-company-gamma`, and
@@ -58,6 +65,11 @@ runners, Kargo, artifact admission, and release evidence. OpenBao's
 plus the `tenant-guardian-release*` namespaces so GitHub integration secrets and
 transit operations do not depend on the old non-tenant `guardian-release`
 namespace.
+
+The remaining Guardian component tenants are declared with the same
+`beta`, `gamma`, and `prod` stage shape: `iam`, `audit`, `telemetry`,
+`billing`, `aisucks`, and `workloads`. These are empty account boundaries until
+their services or workload planes have explicit migration PRs.
 
 Milestone order:
 

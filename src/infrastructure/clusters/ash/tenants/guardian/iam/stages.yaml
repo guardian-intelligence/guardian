@@ -1,0 +1,53 @@
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: beta
+  namespace: tenant-guardian-iam
+  labels:
+    guardian.dev/component: iam
+    guardian.dev/stage: beta
+    guardian.dev/tenant-id: gi-iam-beta
+spec:
+  etcd: false
+  host: ""
+  ingress: false
+  monitoring: false
+  resourceQuotas: {}
+  schedulingClass: ""
+  seaweedfs: false
+---
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: gamma
+  namespace: tenant-guardian-iam
+  labels:
+    guardian.dev/component: iam
+    guardian.dev/stage: gamma
+    guardian.dev/tenant-id: gi-iam-gamma
+spec:
+  etcd: false
+  host: ""
+  ingress: false
+  monitoring: false
+  resourceQuotas: {}
+  schedulingClass: ""
+  seaweedfs: false
+---
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: prod
+  namespace: tenant-guardian-iam
+  labels:
+    guardian.dev/component: iam
+    guardian.dev/stage: prod
+    guardian.dev/tenant-id: gi-iam-prod
+spec:
+  etcd: false
+  host: ""
+  ingress: false
+  monitoring: false
+  resourceQuotas: {}
+  schedulingClass: ""
+  seaweedfs: false
