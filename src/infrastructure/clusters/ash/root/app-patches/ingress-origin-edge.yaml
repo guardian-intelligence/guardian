@@ -42,6 +42,7 @@ spec:
           guardian.dev/edge-mode: host-network
         service:
           externalIPs: []
+          externalTrafficPolicy: ""
         updateStrategy:
           type: RollingUpdate
           rollingUpdate:
