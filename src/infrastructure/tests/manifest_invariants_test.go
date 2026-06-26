@@ -60,6 +60,7 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("edge health targets", testEdgeHealthTargets)
 	t.Run("company site prod deployment", testCompanySiteProdDeployment)
 	t.Run("tenancy", testTenancy)
+	t.Run("root tenant policy", testRootTenantPolicy)
 	t.Run("root tenant core services", testRootTenantCoreServices)
 	t.Run("observability", testObservability)
 	t.Run("openbao", testOpenBao)
@@ -883,6 +884,20 @@ func testTenancy(t *testing.T) {
 	resources := sliceAt(t, rootKustomization, "resources")
 	assertContainsString(t, resources, "tenants/root-stages.yaml", "root kustomization resources")
 	assertContainsString(t, resources, "tenants/guardian.yaml", "root kustomization resources")
+}
+
+func testRootTenantPolicy(t *testing.T) {
+	rootKustomization := readYAMLMap(t, "src/infrastructure/clusters/ash/root/kustomization.yaml")
+	assertContainsString(t, sliceAt(t, rootKustomization, "resources"), "policy/tenant-root-pod-security.yaml", "root kustomization resources")
+
+	docs := readManifests(t, "src/infrastructure/clusters/ash/root/policy/tenant-root-pod-security.yaml")
+	namespace := findObject(t, docs, "Namespace", "", "tenant-root")
+	assertString(t, namespace, "privileged", "metadata", "labels", "pod-security.kubernetes.io/enforce")
+	assertString(t, namespace, "latest", "metadata", "labels", "pod-security.kubernetes.io/enforce-version")
+	assertString(t, namespace, "baseline", "metadata", "labels", "pod-security.kubernetes.io/audit")
+	assertString(t, namespace, "latest", "metadata", "labels", "pod-security.kubernetes.io/audit-version")
+	assertString(t, namespace, "baseline", "metadata", "labels", "pod-security.kubernetes.io/warn")
+	assertString(t, namespace, "latest", "metadata", "labels", "pod-security.kubernetes.io/warn-version")
 }
 
 func assertTenant(t *testing.T, docs []manifest, namespace, name, tenantID, host string) {
