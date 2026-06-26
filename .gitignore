@@ -19,5 +19,6 @@
 # Active web workspace dependency/build output is produced by Bazel/rules_js.
 /src/viteplus-monorepo/**/node_modules/
 /src/products/company/web/node_modules/
+/src/products/*/render/node_modules/
 /src/products/company/web/.output/
 /src/products/company/web/.vite/
