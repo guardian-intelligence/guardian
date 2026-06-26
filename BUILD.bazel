@@ -16,6 +16,7 @@ filegroup(
         "//src/infrastructure/clusters/ash/tenants/guardian:manifests",
         "//src/infrastructure/clusters/ash/tenants/guardian/kms:manifests",
         "//src/infrastructure/clusters/ash/deployments/kms/prod:manifests",
+        "//src/infrastructure/components/openbao-github-integration-secrets:manifests",
         "//src/infrastructure/cmd/cozystack_backup_drill:cozystack_backup_drill",
         "//src/infrastructure/cmd/cozystack_db_load:cozystack_db_load",
         "//src/infrastructure/cmd/cozystack_harbor_registry:cozystack_harbor_registry",

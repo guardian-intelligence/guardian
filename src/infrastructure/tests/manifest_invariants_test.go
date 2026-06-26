@@ -64,6 +64,7 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("root tenant core services", testRootTenantCoreServices)
 	t.Run("observability", testObservability)
 	t.Run("openbao", testOpenBao)
+	t.Run("openbao github integration secrets", testOpenBaoGitHubIntegrationSecrets)
 	t.Run("openbao opentofu bootstrap", testOpenBaoOpenTofuBootstrap)
 	t.Run("flux handoff", testFluxHandoff)
 }
@@ -1069,6 +1070,54 @@ func testOpenBao(t *testing.T) {
 	kmsPolicies := readManifests(t, "src/infrastructure/clusters/ash/deployments/kms/prod/networkpolicy.yaml")
 	assertOpenBaoAPIServerPolicy(t, kmsPolicies, "tenant-guardian-kms")
 	assertNoObject(t, kmsPolicies, "CiliumNetworkPolicy", "tenant-guardian-kms", "allow-external-secrets-to-openbao")
+}
+
+func testOpenBaoGitHubIntegrationSecrets(t *testing.T) {
+	kustomization := readYAMLMap(t, "src/infrastructure/components/openbao-github-integration-secrets/kustomization.yaml")
+	assertContainsString(t, sliceAt(t, kustomization, "resources"), "github-app-secrets.yaml", "github integration secrets kustomization resources")
+
+	docs := readManifests(t, "src/infrastructure/components/openbao-github-integration-secrets/github-app-secrets.yaml")
+
+	serviceAccount := findObject(t, docs, "ServiceAccount", "", "github-app-secrets")
+	assertBool(t, serviceAccount, false, "automountServiceAccountToken")
+	assertString(t, serviceAccount, "github-integrations", "metadata", "labels", "guardian.dev/secret-scope")
+	if namespace := stringAt(serviceAccount, "metadata", "namespace"); namespace != "" {
+		t.Fatalf("github integration ServiceAccount namespace = %q, want namespace-neutral base", namespace)
+	}
+
+	store := findObject(t, docs, "SecretStore", "", "openbao-github-integrations")
+	assertString(t, store, "http://openbao-guardian.tenant-guardian-kms.svc:8200", "spec", "provider", "vault", "server")
+	assertString(t, store, "kv", "spec", "provider", "vault", "path")
+	assertString(t, store, "v2", "spec", "provider", "vault", "version")
+	assertString(t, store, "kubernetes", "spec", "provider", "vault", "auth", "kubernetes", "mountPath")
+	assertString(t, store, "guardian-github-integrations", "spec", "provider", "vault", "auth", "kubernetes", "role")
+	assertString(t, store, "github-app-secrets", "spec", "provider", "vault", "auth", "kubernetes", "serviceAccountRef", "name")
+	assertStringSlice(t, store, []string{"openbao"}, "spec", "provider", "vault", "auth", "kubernetes", "serviceAccountRef", "audiences")
+
+	externalSecret := findObject(t, docs, "ExternalSecret", "", "github-app-secrets")
+	assertString(t, externalSecret, "1h", "spec", "refreshInterval")
+	assertString(t, externalSecret, "SecretStore", "spec", "secretStoreRef", "kind")
+	assertString(t, externalSecret, "openbao-github-integrations", "spec", "secretStoreRef", "name")
+	assertString(t, externalSecret, "github-app-secrets", "spec", "target", "name")
+	assertString(t, externalSecret, "Owner", "spec", "target", "creationPolicy")
+	assertString(t, externalSecret, "Retain", "spec", "target", "deletionPolicy")
+
+	data := sliceAt(t, externalSecret, "spec", "data")
+	if len(data) != 3 {
+		t.Fatalf("github integration ExternalSecret data = %d entries, want 3", len(data))
+	}
+	assertExternalSecretRef(t, data[0], "github-app-private-key", "guardian/guardian-mgmt/integrations/github/app", "private_key")
+	assertExternalSecretRef(t, data[1], "github-webhook-secret", "guardian/guardian-mgmt/integrations/github/app", "webhook_secret")
+	assertExternalSecretRef(t, data[2], "github-oauth-client-secret", "guardian/guardian-mgmt/integrations/github/app", "oauth_client_secret")
+}
+
+func assertExternalSecretRef(t *testing.T, value any, secretKey, remoteKey, property string) {
+	t.Helper()
+
+	ref := asManifest(t, value, "ExternalSecret data")
+	assertString(t, ref, secretKey, "secretKey")
+	assertString(t, ref, remoteKey, "remoteRef", "key")
+	assertString(t, ref, property, "remoteRef", "property")
 }
 
 func assertOpenBaoSpec(t *testing.T, bao manifest) {

@@ -53,11 +53,22 @@ route-handoff PR moves the workload into `tenant-guardian-company-prod`.
 The release component tenant has explicit stage child tenants:
 `tenant-guardian-release-beta`, `tenant-guardian-release-gamma`, and
 `tenant-guardian-release-prod`. This is the destination boundary for GitHub
-runners, Kargo, artifact admission, and release evidence. OpenBao's
-`guardian-github-integrations` Kubernetes auth role is scoped to `arc-systems`
-plus the `tenant-guardian-release*` namespaces so GitHub integration secrets and
-transit operations do not depend on the old non-tenant `guardian-release`
-namespace.
+runners, Kargo, artifact admission, and release evidence.
+
+The secrets component tenant has explicit stage child tenants:
+`tenant-guardian-secrets-beta`, `tenant-guardian-secrets-gamma`, and
+`tenant-guardian-secrets-prod`. This is the destination boundary for projected
+third-party integration material when a runtime should consume Kubernetes
+Secrets rather than talk to OpenBao directly.
+
+OpenBao's `guardian-github-integrations` Kubernetes auth role is scoped to
+`arc-systems`, the `tenant-guardian-release*` namespaces, and the
+`tenant-guardian-secrets*` namespaces so GitHub integration secrets and transit
+operations do not depend on the old non-tenant `guardian-release` namespace.
+The reusable projection base lives at
+`src/infrastructure/components/openbao-github-integration-secrets/`; it is not
+wired into Flux until `aspect infra openbao-drill --mode=api-state` proves the
+OpenBao mounts, policies, and auth roles exist.
 
 Milestone order:
 
