@@ -28,6 +28,7 @@ go_test(
         "//src/infrastructure/clusters/ash/deployments/company/prod:manifests",
         "//src/infrastructure/clusters/ash/deployments/kms/prod:manifests",
         "//src/infrastructure/clusters/ash/tenants/guardian:manifests",
+        "//src/infrastructure/clusters/ash/tenants/guardian/aisucks:manifests",
         "//src/infrastructure/clusters/ash/tenants/guardian/audit:manifests",
         "//src/infrastructure/clusters/ash/tenants/guardian/billing:manifests",
         "//src/infrastructure/clusters/ash/tenants/guardian/company:manifests",

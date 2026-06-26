@@ -1,6 +1,7 @@
 filegroup(
     name = "manifests",
     srcs = [
+        "aisucks.yaml",
         "audit.yaml",
         "billing.yaml",
         "company.yaml",
