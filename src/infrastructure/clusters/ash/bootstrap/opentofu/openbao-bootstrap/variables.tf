@@ -1,5 +1,5 @@
 variable "openbao_addr" {
-  description = "OpenBao API address. The default is reachable from inside the management cluster; operators can override it when using a local port-forward."
+  description = "OpenBao API address. The default targets the tenant-scoped Guardian KMS authority; operators can override it when using a local port-forward."
   type        = string
-  default     = "http://openbao-guardian.tenant-root.svc:8200"
+  default     = "http://openbao-guardian.tenant-guardian-kms.svc:8200"
 }

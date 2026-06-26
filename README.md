@@ -34,8 +34,10 @@ installer/operator to the repo-pinned version.
 `aspect infra upgrade-cozystack` is the narrow day-two path for existing
 clusters when only the Cozystack installer/operator release needs to move.
 `aspect infra openbao-drill --mode init-unseal` initializes/unseals the
-cluster-local OpenBao app, and `aspect infra openbao-apply` applies the standard
-OpenBao API state through a live port-forward. `aspect infra
+tenant-scoped Guardian KMS OpenBao authority in `tenant-guardian-kms`, and
+`aspect infra openbao-apply` applies the standard OpenBao API state through a
+live port-forward. Use an explicit `--namespace tenant-root` only for the
+legacy root break-glass OpenBao instance during migration. `aspect infra
 observability-drill` creates a short root Postgres pgbench job, then queries
 VictoriaMetrics and VictoriaLogs for that exact workload and the CNPG scrape
 path. Postgres and ClickHouse backups use Cozystack 1.5's platform-managed

@@ -54,7 +54,7 @@ func main() {
 	flag.StringVar(&cfg.RequestTimeout, "request-timeout", "15s", "kubectl API request timeout")
 	flag.StringVar(&cfg.WaitTimeout, "wait-timeout", "5m", "timeout waiting for OpenBao StatefulSet readiness")
 	flag.StringVar(&portForwardReadyWait, "port-forward-ready-timeout", "10s", "timeout waiting for kubectl port-forward readiness")
-	flag.StringVar(&cfg.Namespace, "namespace", "tenant-root", "OpenBao namespace")
+	flag.StringVar(&cfg.Namespace, "namespace", "tenant-guardian-kms", "OpenBao namespace")
 	flag.StringVar(&cfg.StatefulSet, "statefulset", "openbao-guardian", "OpenBao StatefulSet name")
 	flag.StringVar(&cfg.Service, "service", "openbao-guardian", "OpenBao Service name")
 	flag.StringVar(&cfg.BootstrapSecret, "bootstrap-secret", "openbao-guardian-bootstrap", "Kubernetes Secret containing cluster-local OpenBao bootstrap material")

@@ -12,7 +12,7 @@ func TestValidateConfig(t *testing.T) {
 	cfg := applyConfig{
 		Kubectl:              "/kubectl",
 		Tofu:                 "/tofu",
-		Namespace:            "tenant-root",
+		Namespace:            "tenant-guardian-kms",
 		StatefulSet:          "openbao-guardian",
 		Service:              "openbao-guardian",
 		BootstrapSecret:      "openbao-guardian-bootstrap",
@@ -130,9 +130,9 @@ func TestKubectlArgs(t *testing.T) {
 	runner := kubectlRunner{
 		kubeconfig:     "/kubeconfig",
 		requestTimeout: "15s",
-		namespace:      "tenant-root",
+		namespace:      "tenant-guardian-kms",
 	}
-	want := []string{"--kubeconfig", "/kubeconfig", "--request-timeout=15s", "-n", "tenant-root", "get", "pods"}
+	want := []string{"--kubeconfig", "/kubeconfig", "--request-timeout=15s", "-n", "tenant-guardian-kms", "get", "pods"}
 	if got := runner.args("get", "pods"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("kubectl args = %#v, want %#v", got, want)
 	}
@@ -142,12 +142,12 @@ func TestOpenBaoPortForwardArgs(t *testing.T) {
 	runner := kubectlRunner{
 		kubeconfig:     "/kubeconfig",
 		requestTimeout: "15s",
-		namespace:      "tenant-root",
+		namespace:      "tenant-guardian-kms",
 	}
 	want := []string{
 		"--kubeconfig", "/kubeconfig",
 		"--request-timeout=15s",
-		"-n", "tenant-root",
+		"-n", "tenant-guardian-kms",
 		"port-forward",
 		"--address", "127.0.0.1",
 		"svc/openbao-guardian",

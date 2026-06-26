@@ -949,6 +949,11 @@ def _node_outage_drill_impl(ctx):
         label = "cozystack node outage drill",
     )
 
+def _http_load_stage(surface, stage):
+    if stage == "root" and surface in ["openbao", "bao", "vault"]:
+        return "prod"
+    return stage
+
 def _load_http_impl(ctx):
     if ctx.args.require_live != "true" and ctx.args.require_live != "false":
         ctx.std.io.stderr.write("ERROR: --require-live must be true or false\n")
@@ -979,7 +984,7 @@ def _load_http_impl(ctx):
         "--kubectl",
         kubectl,
         "--stage",
-        ctx.args.stage,
+        _http_load_stage(ctx.args.surface, ctx.args.stage),
         "--surface",
         ctx.args.surface,
         "--request-timeout",
@@ -1412,7 +1417,7 @@ openbao_apply = task(
         "bootstrap_secret": args.string(default = "openbao-guardian-bootstrap", description = "Cluster-local Secret containing OpenBao root token material."),
         "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
         "mode": args.string(default = "apply", description = "OpenTofu operation: plan or apply."),
-        "namespace": args.string(default = "tenant-root", description = "OpenBao namespace."),
+        "namespace": args.string(default = "tenant-guardian-kms", description = "OpenBao namespace."),
         "port_forward_ready_timeout": args.string(default = "10s", description = "Timeout waiting for OpenBao port-forward readiness."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
         "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before OpenBao API configuration."),
@@ -1492,7 +1497,7 @@ load_http = task(
         "require_live": args.string(default = "true", description = "Set false only for local custom-URL k6 smoke checks."),
         "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before the load test."),
         "sleep_seconds": args.string(default = "1", description = "Sleep seconds between requests in each k6 VU."),
-        "stage": args.string(default = "root", description = "Guardian bootstrap stage: root."),
+        "stage": args.string(default = "root", description = "Guardian surface stage. Use root for Harbor/dashboard, prod for tenant OpenBao, and bootstrap-root for legacy root OpenBao."),
         "surface": args.string(default = "harbor", description = "HTTP surface: harbor, dashboard, openbao, or custom with --url."),
         "url": args.string(default = "", description = "Explicit URL to load; overrides surface target mapping."),
         "vus": args.string(default = "1", description = "k6 virtual users."),
@@ -1614,7 +1619,7 @@ openbao_drill = task(
         "bootstrap_secret": args.string(default = "openbao-guardian-bootstrap", description = "Cluster-local Secret for OpenBao root token and unseal key."),
         "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
         "mode": args.string(default = "status", description = "Drill mode: status, init-unseal, or snapshot."),
-        "namespace": args.string(default = "tenant-root", description = "OpenBao namespace."),
+        "namespace": args.string(default = "tenant-guardian-kms", description = "OpenBao namespace."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
         "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before the drill."),
         "snapshot_name": args.string(default = "", description = "Optional pod-local snapshot filename for snapshot mode."),
@@ -1657,7 +1662,7 @@ node_outage_drill = task(
         "node": args.string(default = "", description = "Kubernetes node name to cordon and drain."),
         "openbao_app": args.string(default = "guardian", description = "OpenBao Cozystack app name."),
         "openbao_bootstrap_secret": args.string(default = "openbao-guardian-bootstrap", description = "Cluster-local Secret for OpenBao root token and unseal key."),
-        "openbao_namespace": args.string(default = "tenant-root", description = "OpenBao namespace."),
+        "openbao_namespace": args.string(default = "tenant-guardian-kms", description = "OpenBao namespace."),
         "openbao_statefulset": args.string(default = "openbao-guardian", description = "OpenBao StatefulSet name."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
         "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before the drill."),

@@ -550,7 +550,7 @@ func testExternalDNS(t *testing.T) {
 	assertBool(t, serviceAccount, false, "automountServiceAccountToken")
 
 	store := findObject(t, secretDocs, "SecretStore", "external-dns", "openbao")
-	assertString(t, store, "http://openbao-guardian.tenant-root.svc:8200", "spec", "provider", "vault", "server")
+	assertString(t, store, "http://openbao-guardian.tenant-guardian-kms.svc:8200", "spec", "provider", "vault", "server")
 	assertString(t, store, "kv", "spec", "provider", "vault", "path")
 	assertString(t, store, "v2", "spec", "provider", "vault", "version")
 	assertString(t, store, "kubernetes", "spec", "provider", "vault", "auth", "kubernetes", "mountPath")
@@ -1000,10 +1000,12 @@ func testOpenBaoOpenTofuBootstrap(t *testing.T) {
 	versionsBytes := readRunfile(t, versionsPath)
 	versions := string(versionsBytes)
 	mainTF := string(readRunfile(t, "src/infrastructure/clusters/ash/bootstrap/opentofu/openbao-bootstrap/main.tf"))
+	variablesTF := string(readRunfile(t, "src/infrastructure/clusters/ash/bootstrap/opentofu/openbao-bootstrap/variables.tf"))
 	lock := string(readRunfile(t, "src/infrastructure/clusters/ash/bootstrap/opentofu/openbao-bootstrap/.terraform.lock.hcl"))
 
 	assertTextContains(t, versions, `source  = "hashicorp/vault"`, "guardian-mgmt-openbao versions.tf")
 	assertTextContains(t, versions, `version = "= 4.4.0"`, "guardian-mgmt-openbao versions.tf")
+	assertTextContains(t, variablesTF, `default     = "http://openbao-guardian.tenant-guardian-kms.svc:8200"`, "guardian-mgmt-openbao variables.tf")
 	assertPartialS3Backend(t, versionsBytes, versionsPath, "opentofu/guardian-mgmt-openbao.tfstate", "guardian-mgmt-openbao backend.s3")
 	backendConfig := string(readRunfile(t, "src/infrastructure/clusters/ash/bootstrap/opentofu/backend.tfvars"))
 	assertTextContains(t, backendConfig, `cloudflare_account_id = "c3eaeffaadf7d4847684d4775c16d598"`, "backend.tfvars")
