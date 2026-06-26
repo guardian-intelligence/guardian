@@ -80,7 +80,7 @@ func testTalmInstallDiskSelectors(t *testing.T) {
 
 	for node, systemSerial := range systemDisks {
 		t.Run(node, func(t *testing.T) {
-			rel := "src/infrastructure/talm/nodes/" + node + ".yaml"
+			rel := "src/infrastructure/clusters/ash/bootstrap/talm/nodes/" + node + ".yaml"
 			text := string(readRunfile(t, rel))
 			assertTextNotContains(t, text, "disk: /dev/nvme", rel)
 
@@ -107,7 +107,7 @@ func testTalmInstallDiskSelectors(t *testing.T) {
 
 func testCozystackPlatformPackage(t *testing.T) {
 	topology := guardianMgmtTopologyFixture(t)
-	docs := readManifests(t, "src/infrastructure/base/cozystack/platform.yaml")
+	docs := readManifests(t, "src/infrastructure/clusters/ash/root/cozystack/platform.yaml")
 	pkg := findObject(t, docs, "Package", "", "cozystack.cozystack-platform")
 
 	assertString(t, pkg, "cozystack.io/v1alpha1", "apiVersion")
@@ -131,7 +131,7 @@ func testCozystackPlatformPackage(t *testing.T) {
 	assertString(t, pkg, "Guardian", "spec", "components", "platform", "values", "branding", "titleText")
 	assertString(t, pkg, "Guardian Intelligence", "spec", "components", "platform", "values", "branding", "footerText")
 
-	docs = readManifests(t, "src/infrastructure/base/cozystack/backupstrategy-controller.yaml")
+	docs = readManifests(t, "src/infrastructure/clusters/ash/root/cozystack/backupstrategy-controller.yaml")
 	pkg = findObject(t, docs, "Package", "", "cozystack.backupstrategy-controller")
 	assertString(t, pkg, "cozystack.io/v1alpha1", "apiVersion")
 	assertString(t, pkg, "default", "spec", "variant")
@@ -148,7 +148,7 @@ func testGuardianMgmtTopologyAlignment(t *testing.T) {
 	}
 	assertUniqueTopologyValues(t, topology)
 
-	values := readYAMLMap(t, "src/infrastructure/talm/values.yaml")
+	values := readYAMLMap(t, "src/infrastructure/clusters/ash/bootstrap/talm/values.yaml")
 	assertString(t, values, fmt.Sprintf("https://%s:6443", topology.Network.VLAN.APIVIP), "endpoint")
 	assertString(t, values, topology.Network.VLAN.APIVIP, "floatingIP")
 	assertString(t, values, topology.Network.VLAN.VIPLink, "vipLink")
@@ -160,7 +160,7 @@ func testGuardianMgmtTopologyAlignment(t *testing.T) {
 		assertContainsString(t, certSANs, node.PublicIPv4, "certSANs")
 	}
 
-	imports := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt/imports.tf"))
+	imports := string(readRunfile(t, "src/infrastructure/clusters/ash/bootstrap/opentofu/baremetal/imports.tf"))
 	assertTextContains(t, imports, `to = latitudesh_virtual_network.management`, "imports.tf")
 	assertTextContains(t, imports, `id = "`+topology.Network.VLAN.ID+`"`, "imports.tf")
 	for _, node := range topology.Nodes {
@@ -168,7 +168,7 @@ func testGuardianMgmtTopologyAlignment(t *testing.T) {
 		assertTextContains(t, imports, `id = "`+node.ServerID+`"`, "imports.tf")
 	}
 
-	mainTF := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt/main.tf"))
+	mainTF := string(readRunfile(t, "src/infrastructure/clusters/ash/bootstrap/opentofu/baremetal/main.tf"))
 	assertTextNotContains(t, mainTF, "jsondecode", "main.tf")
 	assertTextNotContains(t, mainTF, "guardian-mgmt.json", "main.tf")
 	assertTextContains(t, mainTF, `project_id = "proj_R82A0yqmd06mM"`, "main.tf")
@@ -193,10 +193,10 @@ func testGuardianMgmtTopologyAlignment(t *testing.T) {
 	assertTextContains(t, mainTF, `latitudesh_virtual_network.management.vid == local.vlan.vid`, "main.tf")
 	assertTextContains(t, mainTF, `latitudesh_server.control_plane[name].primary_ipv4 == node.public_ipv4`, "main.tf")
 
-	versionsPath := "src/infrastructure/bootstrap/guardian-mgmt/versions.tf"
+	versionsPath := "src/infrastructure/clusters/ash/bootstrap/opentofu/baremetal/versions.tf"
 	assertPartialS3Backend(t, readRunfile(t, versionsPath), versionsPath, "opentofu/guardian-mgmt.tfstate", "guardian-mgmt backend.s3")
 
-	outputsTF := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt/outputs.tf"))
+	outputsTF := string(readRunfile(t, "src/infrastructure/clusters/ash/bootstrap/opentofu/baremetal/outputs.tf"))
 	assertTextContains(t, outputsTF, `output "management_vlan"`, "outputs.tf")
 	assertTextContains(t, outputsTF, `api_server_endpoint = "https://${local.vlan.api_vip}:6443"`, "outputs.tf")
 	assertTextContains(t, outputsTF, `metallb_pool        = local.vlan.metallb_pool`, "outputs.tf")
@@ -209,13 +209,13 @@ func testGuardianMgmtTopologyAlignment(t *testing.T) {
 }
 
 func testGuardianMgmtDNSBootstrap(t *testing.T) {
-	const versionsPath = "src/infrastructure/bootstrap/guardian-mgmt-dns/versions.tf"
+	const versionsPath = "src/infrastructure/clusters/ash/bootstrap/opentofu/dns/versions.tf"
 	versionsBytes := readRunfile(t, versionsPath)
 	versions := string(versionsBytes)
-	mainTF := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt-dns/main.tf"))
-	variablesTF := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt-dns/variables.tf"))
-	outputsTF := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt-dns/outputs.tf"))
-	lock := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt-dns/.terraform.lock.hcl"))
+	mainTF := string(readRunfile(t, "src/infrastructure/clusters/ash/bootstrap/opentofu/dns/main.tf"))
+	variablesTF := string(readRunfile(t, "src/infrastructure/clusters/ash/bootstrap/opentofu/dns/variables.tf"))
+	outputsTF := string(readRunfile(t, "src/infrastructure/clusters/ash/bootstrap/opentofu/dns/outputs.tf"))
+	lock := string(readRunfile(t, "src/infrastructure/clusters/ash/bootstrap/opentofu/dns/.terraform.lock.hcl"))
 
 	assertTextNotContains(t, versions, `source  = "hashicorp/aws"`, "guardian-mgmt-dns versions.tf")
 	assertTextNotContains(t, lock, `provider "registry.opentofu.org/hashicorp/aws"`, "guardian-mgmt-dns lock")
@@ -269,7 +269,7 @@ func testGuardianMgmtDNSBootstrap(t *testing.T) {
 
 func testLayerTwoNetworking(t *testing.T) {
 	topology := guardianMgmtTopologyFixture(t)
-	metallb := readManifests(t, "src/infrastructure/base/networking/metallb.yaml")
+	metallb := readManifests(t, "src/infrastructure/clusters/ash/root/networking/metallb.yaml")
 	pool := findObject(t, metallb, "IPAddressPool", "cozy-metallb", "cozystack")
 	assertString(t, pool, "metallb.io/v1beta1", "apiVersion")
 	assertStringSlice(t, pool, []string{topology.Network.VLAN.MetalLBPool}, "spec", "addresses")
@@ -280,7 +280,7 @@ func testLayerTwoNetworking(t *testing.T) {
 	assertString(t, ad, "metallb.io/v1beta1", "apiVersion")
 	assertStringSlice(t, ad, []string{"cozystack"}, "spec", "ipAddressPools")
 
-	subnets := readManifests(t, "src/infrastructure/base/networking/subnet-mtu.yaml")
+	subnets := readManifests(t, "src/infrastructure/clusters/ash/root/networking/subnet-mtu.yaml")
 	ovnDefault := findObject(t, subnets, "Subnet", "", "ovn-default")
 	assertString(t, ovnDefault, "kubeovn.io/v1", "apiVersion")
 	assertBool(t, ovnDefault, true, "spec", "default")
@@ -300,7 +300,7 @@ func testLayerTwoNetworking(t *testing.T) {
 }
 
 func testSingleDefaultStorageClass(t *testing.T) {
-	docs := readManifests(t, "src/infrastructure/base/storage/storageclasses.yaml")
+	docs := readManifests(t, "src/infrastructure/clusters/ash/root/storage/storageclasses.yaml")
 
 	var defaults []manifest
 	for _, doc := range docs {
@@ -326,18 +326,18 @@ func testSingleDefaultStorageClass(t *testing.T) {
 }
 
 func testLINSTORDataPools(t *testing.T) {
-	kustomization := readYAMLMap(t, "src/infrastructure/base/kustomization.yaml")
+	kustomization := readYAMLMap(t, "src/infrastructure/clusters/ash/root/kustomization.yaml")
 	resources := sliceAt(t, kustomization, "resources")
 	if containsString(resources, "storage/linstor-data-pools.yaml") {
 		t.Fatalf("base kustomization must not include storage/linstor-data-pools.yaml; storage is reconciled by guardian-mgmt-storage")
 	}
 
-	storageKustomization := readYAMLMap(t, "src/infrastructure/base/storage/kustomization.yaml")
+	storageKustomization := readYAMLMap(t, "src/infrastructure/clusters/ash/root/storage/kustomization.yaml")
 	storageResources := sliceAt(t, storageKustomization, "resources")
 	assertContainsString(t, storageResources, "linstor-data-pools.yaml", "storage kustomization resources")
 	assertContainsString(t, storageResources, "storageclasses.yaml", "storage kustomization resources")
 
-	docs := readManifests(t, "src/infrastructure/base/storage/linstor-data-pools.yaml")
+	docs := readManifests(t, "src/infrastructure/clusters/ash/root/storage/linstor-data-pools.yaml")
 	wantDevices := map[string]string{
 		"ash-earth": "/dev/disk/by-id/nvme-MTFDKCC960TGP-1BK1JABYY_362510FD7C47",
 		"ash-wind":  "/dev/disk/by-id/nvme-MTFDKCC960TGP-1BK1JABYY_352410A4E0A6",
@@ -365,8 +365,8 @@ func testLINSTORDataPools(t *testing.T) {
 
 func testCozystackSystemBucketBackups(t *testing.T) {
 	for _, rel := range []string{
-		"src/infrastructure/base/kustomization.yaml",
-		"src/infrastructure/base/apps/core-services.yaml",
+		"src/infrastructure/clusters/ash/root/kustomization.yaml",
+		"src/infrastructure/clusters/ash/root/apps/core-services.yaml",
 	} {
 		text := string(readRunfile(t, rel))
 		for _, forbidden := range []string{
@@ -381,13 +381,13 @@ func testCozystackSystemBucketBackups(t *testing.T) {
 		}
 	}
 
-	docs := readManifests(t, "src/infrastructure/base/apps/core-services.yaml")
+	docs := readManifests(t, "src/infrastructure/clusters/ash/root/apps/core-services.yaml")
 	assertSystemBucketBackup(t, docs, "Postgres", "tenant-root", "guardian-postgres-daily", "7 1 * * *")
 	assertSystemBucketBackup(t, docs, "ClickHouse", "tenant-root", "guardian-clickhouse-daily", "17 1 * * *")
 }
 
 func testCozystackPlatformPatches(t *testing.T) {
-	docs := readManifests(t, "src/infrastructure/base/platform-patches/cozystack-networking-hubble.yaml")
+	docs := readManifests(t, "src/infrastructure/clusters/ash/root/platform-patches/cozystack-networking-hubble.yaml")
 	pkg := findObject(t, docs, "Package", "", "cozystack.networking")
 	assertString(t, pkg, "cozystack.io/v1alpha1", "apiVersion")
 	assertBool(t, pkg, true, "spec", "components", "cilium", "values", "cilium", "hubble", "enabled")
@@ -418,10 +418,10 @@ func testCozystackPlatformPatches(t *testing.T) {
 		}
 	}
 
-	fluxDocs := readManifests(t, "src/infrastructure/base/flux/sync.yaml")
+	fluxDocs := readManifests(t, "src/infrastructure/clusters/ash/root/flux/sync.yaml")
 	kustomization := findObject(t, fluxDocs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-platform-patches")
 	assertString(t, kustomization, "kustomize.toolkit.fluxcd.io/v1", "apiVersion")
-	assertString(t, kustomization, "./src/infrastructure/base/platform-patches", "spec", "path")
+	assertString(t, kustomization, "./src/infrastructure/clusters/ash/root/platform-patches", "spec", "path")
 	assertBool(t, kustomization, false, "spec", "prune")
 	assertBool(t, kustomization, false, "spec", "wait")
 	dependsOn := valueAt(kustomization, "spec", "dependsOn")
@@ -434,11 +434,11 @@ func testCozystackPlatformPatches(t *testing.T) {
 }
 
 func testCozystackAppPatches(t *testing.T) {
-	kustomization := readYAMLMap(t, "src/infrastructure/base/app-patches/kustomization.yaml")
+	kustomization := readYAMLMap(t, "src/infrastructure/clusters/ash/root/app-patches/kustomization.yaml")
 	assertContainsString(t, sliceAt(t, kustomization, "resources"), "clickhouse-system-bucket-endpoint.yaml", "app patches kustomization resources")
 	assertContainsString(t, sliceAt(t, kustomization, "resources"), "ingress-origin-edge.yaml", "app patches kustomization resources")
 
-	docs := readManifests(t, "src/infrastructure/base/app-patches/clickhouse-system-bucket-endpoint.yaml")
+	docs := readManifests(t, "src/infrastructure/clusters/ash/root/app-patches/clickhouse-system-bucket-endpoint.yaml")
 	hr := findObject(t, docs, "HelmRelease", "tenant-root", "clickhouse-guardian")
 	assertString(t, hr, "helm.toolkit.fluxcd.io/v2", "apiVersion")
 
@@ -468,7 +468,7 @@ func testCozystackAppPatches(t *testing.T) {
 		assertTextContains(t, patchText, want, "clickhouse postRenderer patch")
 	}
 
-	ingressDocs := readManifests(t, "src/infrastructure/base/app-patches/ingress-origin-edge.yaml")
+	ingressDocs := readManifests(t, "src/infrastructure/clusters/ash/root/app-patches/ingress-origin-edge.yaml")
 	ingressHR := findObject(t, ingressDocs, "HelmRelease", "tenant-root", "ingress-nginx-system")
 	assertString(t, ingressHR, "helm.toolkit.fluxcd.io/v2", "apiVersion")
 	assertString(t, ingressHR, "false", "spec", "values", "ingress-nginx", "controller", "config", "use-http2")
@@ -484,10 +484,10 @@ func testCozystackAppPatches(t *testing.T) {
 	requiredTerm := asManifest(t, requiredTerms[0], "ingress required pod anti-affinity")
 	assertString(t, requiredTerm, "kubernetes.io/hostname", "topologyKey")
 
-	fluxDocs := readManifests(t, "src/infrastructure/base/flux/sync.yaml")
+	fluxDocs := readManifests(t, "src/infrastructure/clusters/ash/root/flux/sync.yaml")
 	fluxKustomization := findObject(t, fluxDocs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-app-patches")
 	assertString(t, fluxKustomization, "kustomize.toolkit.fluxcd.io/v1", "apiVersion")
-	assertString(t, fluxKustomization, "./src/infrastructure/base/app-patches", "spec", "path")
+	assertString(t, fluxKustomization, "./src/infrastructure/clusters/ash/root/app-patches", "spec", "path")
 	assertBool(t, fluxKustomization, false, "spec", "prune")
 	assertBool(t, fluxKustomization, false, "spec", "wait")
 	dependsOn := valueAt(fluxKustomization, "spec", "dependsOn")
@@ -500,14 +500,14 @@ func testCozystackAppPatches(t *testing.T) {
 }
 
 func testExternalDNS(t *testing.T) {
-	base := readYAMLMap(t, "src/infrastructure/base/kustomization.yaml")
+	base := readYAMLMap(t, "src/infrastructure/clusters/ash/root/kustomization.yaml")
 	baseResources := sliceAt(t, base, "resources")
 	if containsString(baseResources, "dns") {
 		t.Fatalf("base kustomization must not include dns directly; Flux applies the DNS controller in an ordered slice")
 	}
 	assertContainsString(t, baseResources, "flux/sync.yaml", "base kustomization resources")
 
-	kustomization := readYAMLMap(t, "src/infrastructure/base/dns/kustomization.yaml")
+	kustomization := readYAMLMap(t, "src/infrastructure/clusters/ash/root/dns/kustomization.yaml")
 	for _, resource := range []string{
 		"namespace.yaml",
 		"secrets.yaml",
@@ -517,12 +517,12 @@ func testExternalDNS(t *testing.T) {
 		assertContainsString(t, sliceAt(t, kustomization, "resources"), resource, "external-dns kustomization resources")
 	}
 
-	namespace := findObject(t, readManifests(t, "src/infrastructure/base/dns/namespace.yaml"), "Namespace", "", "external-dns")
+	namespace := findObject(t, readManifests(t, "src/infrastructure/clusters/ash/root/dns/namespace.yaml"), "Namespace", "", "external-dns")
 	assertString(t, namespace, "restricted", "metadata", "labels", "pod-security.kubernetes.io/enforce")
 	assertString(t, namespace, "restricted", "metadata", "labels", "pod-security.kubernetes.io/audit")
 	assertString(t, namespace, "restricted", "metadata", "labels", "pod-security.kubernetes.io/warn")
 
-	secretDocs := readManifests(t, "src/infrastructure/base/dns/secrets.yaml")
+	secretDocs := readManifests(t, "src/infrastructure/clusters/ash/root/dns/secrets.yaml")
 	serviceAccount := findObject(t, secretDocs, "ServiceAccount", "external-dns", "external-dns-secrets")
 	assertBool(t, serviceAccount, false, "automountServiceAccountToken")
 
@@ -551,7 +551,7 @@ func testExternalDNS(t *testing.T) {
 	assertString(t, secretRef, "guardian/guardian-mgmt/tenant-root/dns/external-dns", "remoteRef", "key")
 	assertString(t, secretRef, "CF_API_TOKEN", "remoteRef", "property")
 
-	externalDNSDocs := readManifests(t, "src/infrastructure/base/dns/external-dns.yaml")
+	externalDNSDocs := readManifests(t, "src/infrastructure/clusters/ash/root/dns/external-dns.yaml")
 	repo := findObject(t, externalDNSDocs, "HelmRepository", "external-dns", "external-dns")
 	assertString(t, repo, "https://kubernetes-sigs.github.io/external-dns/", "spec", "url")
 	assertString(t, repo, "1h", "spec", "interval")
@@ -585,7 +585,7 @@ func testExternalDNS(t *testing.T) {
 	assertBool(t, release, true, "spec", "values", "serviceMonitor", "enabled")
 	assertEnvSecretRef(t, sliceAt(t, release, "spec", "values", "env"), "CF_API_TOKEN", "cloudflare-external-dns", "CF_API_TOKEN")
 
-	policy := findObject(t, readManifests(t, "src/infrastructure/base/dns/networkpolicy.yaml"), "CiliumNetworkPolicy", "external-dns", "external-dns-egress")
+	policy := findObject(t, readManifests(t, "src/infrastructure/clusters/ash/root/dns/networkpolicy.yaml"), "CiliumNetworkPolicy", "external-dns", "external-dns-egress")
 	assertString(t, policy, "cilium.io/v2", "apiVersion")
 	assertString(t, policy, "external-dns", "spec", "endpointSelector", "matchLabels", "app.kubernetes.io/name")
 	egress := sliceAt(t, policy, "spec", "egress")
@@ -785,7 +785,7 @@ func assertMetricsStorage(t *testing.T, storage manifest, name, retention, dedup
 }
 
 func testRootTenantCoreServices(t *testing.T) {
-	docs := readManifests(t, "src/infrastructure/base/apps/core-services.yaml")
+	docs := readManifests(t, "src/infrastructure/clusters/ash/root/apps/core-services.yaml")
 
 	ingress := findObject(t, docs, "Ingress", "tenant-root", "ingress")
 	assertString(t, ingress, "apps.cozystack.io/v1alpha1", "apiVersion")
@@ -808,7 +808,7 @@ func testRootTenantCoreServices(t *testing.T) {
 	assertString(t, seaweedfs, "replicated", "spec", "volume", "storageClass")
 	assertInt(t, seaweedfs, 3, "spec", "s3", "replicas")
 
-	seaweedfsS3Service := findObject(t, readManifests(t, "src/infrastructure/base/apps/seaweedfs-s3-ingress-service.yaml"), "Service", "tenant-root", "seaweedfs-system-s3")
+	seaweedfsS3Service := findObject(t, readManifests(t, "src/infrastructure/clusters/ash/root/apps/seaweedfs-s3-ingress-service.yaml"), "Service", "tenant-root", "seaweedfs-system-s3")
 	assertString(t, seaweedfsS3Service, "v1", "apiVersion")
 	assertString(t, seaweedfsS3Service, "seaweedfs", "metadata", "labels", "app.kubernetes.io/name")
 	assertString(t, seaweedfsS3Service, "seaweedfs-system", "metadata", "labels", "app.kubernetes.io/instance")
@@ -840,7 +840,7 @@ func testRootTenantCoreServices(t *testing.T) {
 			"redis":    3,
 		},
 	})
-	assertHarborRWORolloutStrategy(t, "src/infrastructure/base/apps/harbor-rwo-rollout-strategy.yaml", "tenant-root")
+	assertHarborRWORolloutStrategy(t, "src/infrastructure/clusters/ash/root/apps/harbor-rwo-rollout-strategy.yaml", "tenant-root")
 	assertApp(t, docs, appExpectation{
 		kind:               "ClickHouse",
 		namespace:          "tenant-root",
@@ -855,15 +855,15 @@ func testRootTenantCoreServices(t *testing.T) {
 }
 
 func testObservability(t *testing.T) {
-	assertMonitoring(t, "src/infrastructure/base/apps/observability.yaml", "tenant-root", "guardianintelligence.org", true, "guardian_tenant", "root")
+	assertMonitoring(t, "src/infrastructure/clusters/ash/root/apps/observability.yaml", "tenant-root", "guardianintelligence.org", true, "guardian_tenant", "root")
 
-	docs := readManifests(t, "src/infrastructure/base/platform-patches/cozystack-monitoring-agents-vmagent.yaml")
+	docs := readManifests(t, "src/infrastructure/clusters/ash/root/platform-patches/cozystack-monitoring-agents-vmagent.yaml")
 	pkg := findObject(t, docs, "Package", "", "cozystack.monitoring-agents")
 	assertString(t, pkg, "64MB", "spec", "components", "monitoring-agents", "values", "vmagent", "extraArgs", "promscrape.maxScrapeSize")
 }
 
 func testOpenBao(t *testing.T) {
-	docs := readManifests(t, "src/infrastructure/base/openbao/openbao.yaml")
+	docs := readManifests(t, "src/infrastructure/clusters/ash/root/openbao/openbao.yaml")
 	bao := findObject(t, docs, "OpenBAO", "tenant-root", "guardian")
 
 	assertString(t, bao, "apps.cozystack.io/v1alpha1", "apiVersion")
@@ -875,7 +875,7 @@ func testOpenBao(t *testing.T) {
 	assertString(t, bao, "1", "spec", "resources", "cpu")
 	assertString(t, bao, "2Gi", "spec", "resources", "memory")
 
-	policies := readManifests(t, "src/infrastructure/base/openbao/networkpolicy.yaml")
+	policies := readManifests(t, "src/infrastructure/clusters/ash/root/openbao/networkpolicy.yaml")
 	policy := findObject(t, policies, "CiliumNetworkPolicy", "tenant-root", "allow-openbao-to-apiserver")
 	assertString(t, policy, "cilium.io/v2", "apiVersion")
 	assertString(t, policy, "openbao", "spec", "endpointSelector", "matchLabels", "app.kubernetes.io/name")
@@ -901,16 +901,16 @@ func testOpenBao(t *testing.T) {
 }
 
 func testOpenBaoOpenTofuBootstrap(t *testing.T) {
-	const versionsPath = "src/infrastructure/bootstrap/guardian-mgmt-openbao/versions.tf"
+	const versionsPath = "src/infrastructure/clusters/ash/bootstrap/opentofu/openbao-bootstrap/versions.tf"
 	versionsBytes := readRunfile(t, versionsPath)
 	versions := string(versionsBytes)
-	mainTF := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt-openbao/main.tf"))
-	lock := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt-openbao/.terraform.lock.hcl"))
+	mainTF := string(readRunfile(t, "src/infrastructure/clusters/ash/bootstrap/opentofu/openbao-bootstrap/main.tf"))
+	lock := string(readRunfile(t, "src/infrastructure/clusters/ash/bootstrap/opentofu/openbao-bootstrap/.terraform.lock.hcl"))
 
 	assertTextContains(t, versions, `source  = "hashicorp/vault"`, "guardian-mgmt-openbao versions.tf")
 	assertTextContains(t, versions, `version = "= 4.4.0"`, "guardian-mgmt-openbao versions.tf")
 	assertPartialS3Backend(t, versionsBytes, versionsPath, "opentofu/guardian-mgmt-openbao.tfstate", "guardian-mgmt-openbao backend.s3")
-	backendConfig := string(readRunfile(t, "src/infrastructure/bootstrap/backend.tfvars"))
+	backendConfig := string(readRunfile(t, "src/infrastructure/clusters/ash/bootstrap/opentofu/backend.tfvars"))
 	assertTextContains(t, backendConfig, `cloudflare_account_id = "c3eaeffaadf7d4847684d4775c16d598"`, "backend.tfvars")
 	assertTextContains(t, lock, `provider "registry.opentofu.org/hashicorp/vault"`, "guardian-mgmt-openbao lock")
 	assertTextContains(t, lock, `version     = "4.4.0"`, "guardian-mgmt-openbao lock")
@@ -948,35 +948,35 @@ func testOpenBaoOpenTofuBootstrap(t *testing.T) {
 }
 
 func testFluxHandoff(t *testing.T) {
-	docs := readManifests(t, "src/infrastructure/base/flux/sync.yaml")
+	docs := readManifests(t, "src/infrastructure/clusters/ash/root/flux/sync.yaml")
 
 	repo := findObject(t, docs, "GitRepository", "cozy-fluxcd", "guardian")
 	assertString(t, repo, "https://github.com/guardian-intelligence/guardian", "spec", "url")
 	assertString(t, repo, "main", "spec", "ref", "branch")
 
 	base := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-base")
-	assertString(t, base, "./src/infrastructure/base", "spec", "path")
+	assertString(t, base, "./src/infrastructure/clusters/ash/root", "spec", "path")
 	assertString(t, base, "GitRepository", "spec", "sourceRef", "kind")
 	assertString(t, base, "guardian", "spec", "sourceRef", "name")
 	assertBool(t, base, true, "spec", "prune")
 	assertBool(t, base, false, "spec", "wait")
 
 	platform := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-platform")
-	assertString(t, platform, "./src/infrastructure/base/cozystack", "spec", "path")
+	assertString(t, platform, "./src/infrastructure/clusters/ash/root/cozystack", "spec", "path")
 	assertString(t, platform, "GitRepository", "spec", "sourceRef", "kind")
 	assertString(t, platform, "guardian", "spec", "sourceRef", "name")
 	assertBool(t, platform, false, "spec", "prune")
 	assertBool(t, platform, false, "spec", "wait")
 
 	platformPatches := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-platform-patches")
-	assertString(t, platformPatches, "./src/infrastructure/base/platform-patches", "spec", "path")
+	assertString(t, platformPatches, "./src/infrastructure/clusters/ash/root/platform-patches", "spec", "path")
 	assertString(t, platformPatches, "GitRepository", "spec", "sourceRef", "kind")
 	assertString(t, platformPatches, "guardian", "spec", "sourceRef", "name")
 	assertBool(t, platformPatches, false, "spec", "prune")
 	assertBool(t, platformPatches, false, "spec", "wait")
 
 	storage := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-storage")
-	assertString(t, storage, "./src/infrastructure/base/storage", "spec", "path")
+	assertString(t, storage, "./src/infrastructure/clusters/ash/root/storage", "spec", "path")
 	assertString(t, storage, "GitRepository", "spec", "sourceRef", "kind")
 	assertString(t, storage, "guardian", "spec", "sourceRef", "name")
 	assertBool(t, storage, false, "spec", "prune")
@@ -1000,7 +1000,7 @@ func testFluxHandoff(t *testing.T) {
 	}
 
 	dnsController := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-dns-controller")
-	assertString(t, dnsController, "./src/infrastructure/base/dns", "spec", "path")
+	assertString(t, dnsController, "./src/infrastructure/clusters/ash/root/dns", "spec", "path")
 	assertString(t, dnsController, "GitRepository", "spec", "sourceRef", "kind")
 	assertString(t, dnsController, "guardian", "spec", "sourceRef", "name")
 	assertBool(t, dnsController, true, "spec", "prune")
@@ -1011,7 +1011,7 @@ func testFluxHandoff(t *testing.T) {
 	}
 
 	companyProd := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-company-prod")
-	assertString(t, companyProd, "./src/infrastructure/deployments/company/prod", "spec", "path")
+	assertString(t, companyProd, "./src/infrastructure/clusters/ash/deployments/company/prod", "spec", "path")
 	assertString(t, companyProd, "GitRepository", "spec", "sourceRef", "kind")
 	assertString(t, companyProd, "guardian", "spec", "sourceRef", "name")
 	assertBool(t, companyProd, true, "spec", "prune")
@@ -1023,7 +1023,7 @@ func testFluxHandoff(t *testing.T) {
 }
 
 func testCompanySiteProdDeployment(t *testing.T) {
-	docs := readManifests(t, "src/infrastructure/deployments/company/prod/web.yaml")
+	docs := readManifests(t, "src/infrastructure/clusters/ash/deployments/company/prod/web.yaml")
 
 	deployment := findObject(t, docs, "Deployment", "tenant-prod", "company-site")
 	assertInt(t, deployment, 3, "spec", "replicas")
@@ -1032,8 +1032,10 @@ func testCompanySiteProdDeployment(t *testing.T) {
 	assertInt(t, deployment, 0, "spec", "strategy", "rollingUpdate", "maxUnavailable")
 	assertInt(t, deployment, 1, "spec", "strategy", "rollingUpdate", "maxSurge")
 	assertString(t, deployment, "company-site", "metadata", "labels", "app.kubernetes.io/name")
+	assertString(t, deployment, "gi-company-prod", "metadata", "labels", "guardian.dev/tenant-id")
 	assertString(t, deployment, "company", "metadata", "labels", "guardian.dev/product")
 	assertString(t, deployment, "prod", "metadata", "labels", "guardian.dev/stage")
+	assertString(t, deployment, "gi-company-prod", "spec", "template", "metadata", "labels", "guardian.dev/tenant-id")
 	assertBool(t, deployment, false, "spec", "template", "spec", "automountServiceAccountToken")
 
 	containers := sliceAt(t, deployment, "spec", "template", "spec", "containers")
@@ -1054,6 +1056,7 @@ func testCompanySiteProdDeployment(t *testing.T) {
 	assertString(t, container, "http", "livenessProbe", "httpGet", "port")
 
 	service := findObject(t, docs, "Service", "tenant-prod", "company-site")
+	assertString(t, service, "gi-company-prod", "metadata", "labels", "guardian.dev/tenant-id")
 	assertString(t, service, "ClusterIP", "spec", "type")
 	assertString(t, service, "Cluster", "spec", "internalTrafficPolicy")
 	assertString(t, service, "company-site", "spec", "selector", "app.kubernetes.io/name")
@@ -1069,11 +1072,13 @@ func testCompanySiteProdDeployment(t *testing.T) {
 	assertString(t, port, "TCP", "protocol")
 
 	pdb := findObject(t, docs, "PodDisruptionBudget", "tenant-prod", "company-site")
+	assertString(t, pdb, "gi-company-prod", "metadata", "labels", "guardian.dev/tenant-id")
 	assertInt(t, pdb, 2, "spec", "minAvailable")
 	assertString(t, pdb, "company-site", "spec", "selector", "matchLabels", "app.kubernetes.io/name")
 	assertString(t, pdb, "prod", "spec", "selector", "matchLabels", "guardian.dev/stage")
 
 	ingress := findObject(t, docs, "Ingress", "tenant-prod", "company-site")
+	assertString(t, ingress, "gi-company-prod", "metadata", "labels", "guardian.dev/tenant-id")
 	assertString(t, ingress, "tenant-root", "spec", "ingressClassName")
 	rules := sliceAt(t, ingress, "spec", "rules")
 	if len(rules) != 1 {
@@ -1149,7 +1154,7 @@ func assertApp(t *testing.T, docs []manifest, want appExpectation) {
 func guardianMgmtTopologyFixture(t *testing.T) guardianMgmtTopology {
 	t.Helper()
 
-	const mainTF = "src/infrastructure/bootstrap/guardian-mgmt/main.tf"
+	const mainTF = "src/infrastructure/clusters/ash/bootstrap/opentofu/baremetal/main.tf"
 	file, diags := hclsyntax.ParseConfig(readRunfile(t, mainTF), mainTF, hcl.InitialPos)
 	assertHCLDiags(t, diags, mainTF)
 	body, ok := file.Body.(*hclsyntax.Body)
@@ -1273,7 +1278,7 @@ func hclExpressionSource(source []byte, expr hcl.Expression) string {
 func cloudflareR2Endpoint(t *testing.T) string {
 	t.Helper()
 
-	const path = "src/infrastructure/bootstrap/backend.tfvars"
+	const path = "src/infrastructure/clusters/ash/bootstrap/opentofu/backend.tfvars"
 	file, diags := hclsyntax.ParseConfig(readRunfile(t, path), path, hcl.InitialPos)
 	assertHCLDiags(t, diags, path)
 	body, ok := file.Body.(*hclsyntax.Body)

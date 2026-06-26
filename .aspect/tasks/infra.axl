@@ -6,10 +6,10 @@ ORAS surfaced by focused infra tasks.
 
 load(".aspect/lib/helpers.axl", "checked_spawn", "ws_path")
 
-GUARDIAN_MGMT_ROOT = "src/infrastructure/bootstrap/guardian-mgmt"
-GUARDIAN_MGMT_OPENBAO_ROOT = "src/infrastructure/bootstrap/guardian-mgmt-openbao"
-GUARDIAN_MGMT_DNS_ROOT = "src/infrastructure/bootstrap/guardian-mgmt-dns"
-GUARDIAN_BACKEND_TFVARS = "src/infrastructure/bootstrap/backend.tfvars"
+GUARDIAN_MGMT_ROOT = "src/infrastructure/clusters/ash/bootstrap/opentofu/baremetal"
+GUARDIAN_MGMT_OPENBAO_ROOT = "src/infrastructure/clusters/ash/bootstrap/opentofu/openbao-bootstrap"
+GUARDIAN_MGMT_DNS_ROOT = "src/infrastructure/clusters/ash/bootstrap/opentofu/dns"
+GUARDIAN_BACKEND_TFVARS = "src/infrastructure/clusters/ash/bootstrap/opentofu/backend.tfvars"
 TOFU_TARGET = "@opentofu_linux_amd64//:tofu_bin"
 TALM_TARGET = "@talm_linux_amd64//:talm"
 HELM_FILE_TARGET = "@helm_linux_amd64//:helm"
@@ -40,7 +40,7 @@ EXCLUDED_KUBE_APIS = [
     "https://206.223.228.99:6443",
 ]
 EXPECTED_KUBE_APIS = [
-    # Mirrors src/infrastructure/bootstrap/guardian-mgmt/main.tf. The VIP is the
+    # Mirrors src/infrastructure/clusters/ash/bootstrap/opentofu/baremetal/main.tf. The VIP is the
     # source-of-truth endpoint; public node APIs are accepted for off-VLAN
     # operator validation when the kubeconfig CA is current.
     "https://10.8.0.250:6443",
@@ -50,21 +50,21 @@ EXPECTED_KUBE_APIS = [
 ]
 
 INFRA_FILEGROUPS = [
-    "//src/infrastructure/bootstrap/guardian-mgmt:root",
-    "//src/infrastructure/bootstrap/guardian-mgmt-dns:root",
-    "//src/infrastructure/base/app-patches:manifests",
-    "//src/infrastructure/base/platform-patches:manifests",
-    "//src/infrastructure/talm:chart",
-    "//src/infrastructure/base/apps:manifests",
-    "//src/infrastructure/base/cozystack:manifests",
-    "//src/infrastructure/base/flux:manifests",
-    "//src/infrastructure/base/networking:manifests",
-    "//src/infrastructure/base/openbao:manifests",
-    "//src/infrastructure/base/storage:manifests",
-    "//src/infrastructure/deployments/company/prod:manifests",
+    "//src/infrastructure/clusters/ash/bootstrap/opentofu/baremetal:root",
+    "//src/infrastructure/clusters/ash/bootstrap/opentofu/dns:root",
+    "//src/infrastructure/clusters/ash/root/app-patches:manifests",
+    "//src/infrastructure/clusters/ash/root/platform-patches:manifests",
+    "//src/infrastructure/clusters/ash/bootstrap/talm:chart",
+    "//src/infrastructure/clusters/ash/root/apps:manifests",
+    "//src/infrastructure/clusters/ash/root/cozystack:manifests",
+    "//src/infrastructure/clusters/ash/root/flux:manifests",
+    "//src/infrastructure/clusters/ash/root/networking:manifests",
+    "//src/infrastructure/clusters/ash/root/openbao:manifests",
+    "//src/infrastructure/clusters/ash/root/storage:manifests",
+    "//src/infrastructure/clusters/ash/deployments/company/prod:manifests",
     "//src/infrastructure/load:http_load_scripts",
     "//src/infrastructure/edge:edge_health_targets",
-    "//src/infrastructure/bootstrap/guardian-mgmt-openbao:root",
+    "//src/infrastructure/clusters/ash/bootstrap/opentofu/openbao-bootstrap:root",
 ]
 INFRA_TESTS = [
     "//src/infrastructure/cmd/cozystack_backup_drill:cozystack_backup_drill_test",
@@ -480,7 +480,7 @@ def _check_live_context_for(ctx, kubectl, kubeconfig):
         ctx.std.io.stderr.write("ERROR: refusing to validate against excluded cluster API " + server + "\n")
         return 1
     if not _contains(EXPECTED_KUBE_APIS, server):
-        ctx.std.io.stderr.write("ERROR: kubeconfig points at " + server + "; expected guardian-mgmt API endpoint from src/infrastructure/bootstrap/guardian-mgmt/main.tf\n")
+        ctx.std.io.stderr.write("ERROR: kubeconfig points at " + server + "; expected guardian-mgmt API endpoint from src/infrastructure/clusters/ash/bootstrap/opentofu/baremetal/main.tf\n")
         return 1
 
     nodes = _kubectl_capture_for(ctx, kubectl, kubeconfig, ["get", "nodes", "-o", "name"], "kubectl get nodes")
@@ -522,6 +522,7 @@ def _render_kustomizations(ctx):
         return 1
     for path in [
         "src/infrastructure/base",
+        "src/infrastructure/clusters/ash/root",
     ]:
         rc = _capture_success(
             ctx,
@@ -1425,7 +1426,7 @@ kubeconfig = task(
     args = {
         "endpoints": args.string(default = "10.8.0.250", description = "Talos API endpoint used to fetch kubeconfig."),
         "nodes": args.string(default = "10.8.0.11,10.8.0.12,10.8.0.13", description = "Talos nodes used to fetch kubeconfig."),
-        "root": args.string(default = "src/infrastructure/talm", description = "Talm root containing gitignored secrets.yaml and talosconfig."),
+        "root": args.string(default = "src/infrastructure/clusters/ash/bootstrap/talm", description = "Talm root containing gitignored secrets.yaml and talosconfig."),
         "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
     },
 )
@@ -1438,7 +1439,7 @@ talos = task(
     args = {
         "endpoints": args.string(default = "10.8.0.250", description = "Talos API endpoint for guardian-mgmt."),
         "nodes": args.string(default = "10.8.0.11,10.8.0.12,10.8.0.13", description = "Comma-separated guardian-mgmt Talos nodes."),
-        "root": args.string(default = "src/infrastructure/talm", description = "Talm root containing gitignored secrets.yaml and talosconfig."),
+        "root": args.string(default = "src/infrastructure/clusters/ash/bootstrap/talm", description = "Talm root containing gitignored secrets.yaml and talosconfig."),
         "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
     },
 )
@@ -1453,7 +1454,7 @@ bootstrap = task(
         "endpoints": args.string(default = "10.8.0.250", description = "Talos API endpoint used to fetch kubeconfig and validate L2 state."),
         "kubeconfig": args.string(default = "", description = "Optional kubeconfig for the Cozystack installer/operator Helm upgrade. Defaults to <root>/kubeconfig after refresh."),
         "nodes": args.string(default = "10.8.0.11,10.8.0.12,10.8.0.13", description = "Comma-separated guardian-mgmt Talos nodes."),
-        "root": args.string(default = "src/infrastructure/talm", description = "Talm root containing gitignored secrets.yaml, talosconfig, and kubeconfig."),
+        "root": args.string(default = "src/infrastructure/clusters/ash/bootstrap/talm", description = "Talm root containing gitignored secrets.yaml, talosconfig, and kubeconfig."),
         "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
         "tofu_backend_endpoint": args.string(default = "", description = "Optional S3-compatible OpenTofu backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
     },
@@ -1520,7 +1521,7 @@ edge_failover_drill = task(
         "report": args.string(default = "reports/infrastructure/edge-failover-report.json", description = "JSON outage report path."),
         "request_timeout": args.string(default = "5s", description = "Per-request public edge timeout."),
         "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before the drill."),
-        "root": args.string(default = "src/infrastructure/talm", description = "Talm root containing gitignored talosconfig."),
+        "root": args.string(default = "src/infrastructure/clusters/ash/bootstrap/talm", description = "Talm root containing gitignored talosconfig."),
         "sample_interval_ms": args.string(default = "250", description = "k6 sample interval in milliseconds."),
         "talos_endpoint": args.string(default = "206.223.228.101,45.250.254.119,206.223.228.87", description = "Comma-separated Talos API endpoints for guardian-mgmt."),
         "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),

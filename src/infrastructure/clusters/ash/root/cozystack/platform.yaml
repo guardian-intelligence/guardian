@@ -1,0 +1,43 @@
+apiVersion: cozystack.io/v1alpha1
+kind: Package
+metadata:
+  name: cozystack.cozystack-platform
+spec:
+  variant: isp-full
+  components:
+    platform:
+      values:
+        bundles:
+          disabledPackages:
+            - cozystack.backupstrategy-controller
+        publishing:
+          host: guardianintelligence.org
+          # k8s API rides a Talos Layer2 VIP on the Latitude Virtual Network.
+          apiServerEndpoint: https://10.8.0.250:6443
+          # Cloudflare Load Balancing probes and routes to each public node IP.
+          # MetalLB remains private L2/ARP only on the Latitude VLAN.
+          externalIPs:
+            - 206.223.228.101
+            - 45.250.254.119
+            - 206.223.228.87
+          exposedServices:
+            - dashboard
+            - api
+          # Private LoadBalancer services use MetalLB L2 on the VLAN range.
+        networking:
+          podCIDR: 10.244.0.0/16
+          podGateway: 10.244.0.1
+          serviceCIDR: 10.96.0.0/16
+          joinCIDR: 100.64.0.0/16
+        authentication:
+          oidc:
+            enabled: true
+            keycloakInternalUrl: http://keycloak-http.cozy-keycloak.svc:8080/realms/cozy
+        branding:
+          titleText: Guardian
+          footerText: Guardian Intelligence
+          tenantText: Guardian Platform
+          logoText: Guardian
+          brandName: Guardian
+          brandHtmlName: "<b>Guardian</b>"
+    # MTU is set authoritatively on the kube-ovn Subnets in networking/subnet-mtu.yaml.

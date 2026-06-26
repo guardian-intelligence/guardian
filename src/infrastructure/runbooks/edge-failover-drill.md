@@ -32,7 +32,7 @@ loss observed from the development host.
 
 ```sh
 aspect infra edge-failover-drill \
-  --kubeconfig=src/infrastructure/talm/kubeconfig \
+  --kubeconfig=src/infrastructure/clusters/ash/bootstrap/talm/kubeconfig \
   --node-name=ash-earth \
   --node-ip=206.223.228.101 \
   --confirm-node-ip=206.223.228.101 \
@@ -42,7 +42,7 @@ aspect infra edge-failover-drill \
   --report=/tmp/guardian-edge-failover-ash-earth.json
 
 aspect infra edge-failover-drill \
-  --kubeconfig=src/infrastructure/talm/kubeconfig \
+  --kubeconfig=src/infrastructure/clusters/ash/bootstrap/talm/kubeconfig \
   --node-name=ash-wind \
   --node-ip=45.250.254.119 \
   --confirm-node-ip=45.250.254.119 \
@@ -52,7 +52,7 @@ aspect infra edge-failover-drill \
   --report=/tmp/guardian-edge-failover-ash-wind.json
 
 aspect infra edge-failover-drill \
-  --kubeconfig=src/infrastructure/talm/kubeconfig \
+  --kubeconfig=src/infrastructure/clusters/ash/bootstrap/talm/kubeconfig \
   --node-name=ash-water \
   --node-ip=206.223.228.87 \
   --confirm-node-ip=206.223.228.87 \

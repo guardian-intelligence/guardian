@@ -1,0 +1,9 @@
+filegroup(
+    name = "manifests",
+    srcs = [
+        "kustomization.yaml",
+        "linstor-data-pools.yaml",
+        "storageclasses.yaml",
+    ],
+    visibility = ["//visibility:public"],
+)
