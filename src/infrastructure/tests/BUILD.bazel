@@ -38,6 +38,7 @@ go_test(
         "//src/infrastructure/clusters/ash/tenants/guardian/secrets:manifests",
         "//src/infrastructure/clusters/ash/tenants/guardian/telemetry:manifests",
         "//src/infrastructure/clusters/ash/tenants/guardian/workloads:manifests",
+        "//src/infrastructure/components/openbao-github-integration-secrets:manifests",
         "//src/infrastructure/edge:edge_health_targets",
         "//src/infrastructure/clusters/ash/bootstrap/talm:chart",
     ],

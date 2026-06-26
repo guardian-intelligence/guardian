@@ -76,6 +76,7 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/clusters/ash/tenants/guardian/workloads:manifests",
     "//src/infrastructure/clusters/ash/deployments/company/prod:manifests",
     "//src/infrastructure/clusters/ash/deployments/kms/prod:manifests",
+    "//src/infrastructure/components/openbao-github-integration-secrets:manifests",
     "//src/infrastructure/load:http_load_scripts",
     "//src/infrastructure/edge:edge_health_targets",
     "//src/infrastructure/clusters/ash/bootstrap/opentofu/openbao-bootstrap:root",
@@ -556,6 +557,7 @@ def _render_kustomizations(ctx):
         "src/infrastructure/clusters/ash/tenants/guardian",
         "src/infrastructure/clusters/ash/deployments/company/prod",
         "src/infrastructure/clusters/ash/deployments/kms/prod",
+        "src/infrastructure/components/openbao-github-integration-secrets",
     ]:
         rc = _capture_success(
             ctx,
