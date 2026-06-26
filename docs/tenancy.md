@@ -36,13 +36,20 @@ outage drill, and OpenBao load-test defaults target `tenant-guardian-kms`. The
 legacy root instance requires an explicit namespace override or the
 `bootstrap-root` OpenBao load-test stage.
 
+The KMS component tenant has explicit stage child tenants:
+`tenant-guardian-kms-dev`, `tenant-guardian-kms-gamma`, and
+`tenant-guardian-kms-prod`. The live OpenBao runtime still runs in the parent
+`tenant-guardian-kms` namespace as a compatibility placement until a later PR
+migrates state into `tenant-guardian-kms-prod` with a snapshot/restore drill and
+updated OpenBao apply/load defaults.
+
 Milestone order:
 
 1. Keep `tenant-root` limited to Cozystack substrate and bootstrap recovery.
 2. Move OpenBao into the Guardian tenancy pattern first as the secrets/transit
    authority.
 3. Move other Guardian platform components into the Guardian tenant boundary.
-4. Add beta, gamma, and prod subtenants below each Guardian component tenant
+4. Add dev, gamma, and prod subtenants below each Guardian component tenant
    once the parent boundary is proven.
 
 Until a workload has migrated to a real nested Cozystack tenant, label it with

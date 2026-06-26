@@ -898,6 +898,14 @@ func testTenancy(t *testing.T) {
 	kms := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/kms.yaml")
 	assertTenant(t, kms, "tenant-guardian", "kms", "gi-kms", "")
 
+	kmsStages := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/kms/stages.yaml")
+	assertTenant(t, kmsStages, "tenant-guardian-kms", "dev", "gi-kms-dev", "")
+	assertTenant(t, kmsStages, "tenant-guardian-kms", "gamma", "gi-kms-gamma", "")
+	assertTenant(t, kmsStages, "tenant-guardian-kms", "prod", "gi-kms-prod", "")
+	assertTenantStageLabels(t, kmsStages, "tenant-guardian-kms", "dev", "kms", "dev")
+	assertTenantStageLabels(t, kmsStages, "tenant-guardian-kms", "gamma", "kms", "gamma")
+	assertTenantStageLabels(t, kmsStages, "tenant-guardian-kms", "prod", "kms", "prod")
+
 	rootKustomization := readYAMLMap(t, "src/infrastructure/clusters/ash/root/kustomization.yaml")
 	resources := sliceAt(t, rootKustomization, "resources")
 	assertContainsString(t, resources, "tenants/root-stages.yaml", "root kustomization resources")
@@ -933,6 +941,14 @@ func assertTenant(t *testing.T, docs []manifest, namespace, name, tenantID, host
 	if quotas := valueAt(tenant, "spec", "resourceQuotas"); quotas == nil {
 		t.Fatalf("Tenant %s/%s missing spec.resourceQuotas", namespace, name)
 	}
+}
+
+func assertTenantStageLabels(t *testing.T, docs []manifest, namespace, name, component, stage string) {
+	t.Helper()
+
+	tenant := findObject(t, docs, "Tenant", namespace, name)
+	assertString(t, tenant, component, "metadata", "labels", "guardian.dev/component")
+	assertString(t, tenant, stage, "metadata", "labels", "guardian.dev/stage")
 }
 
 func testOpenBao(t *testing.T) {
@@ -1148,6 +1164,17 @@ func testFluxHandoff(t *testing.T) {
 		t.Fatalf("guardian-tenancy dependsOn = %#v, want only guardian-mgmt-base", tenancyDeps)
 	}
 
+	kmsTenancy := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-kms-tenancy")
+	assertString(t, kmsTenancy, "./src/infrastructure/clusters/ash/tenants/guardian/kms", "spec", "path")
+	assertString(t, kmsTenancy, "GitRepository", "spec", "sourceRef", "kind")
+	assertString(t, kmsTenancy, "guardian", "spec", "sourceRef", "name")
+	assertBool(t, kmsTenancy, true, "spec", "prune")
+	assertBool(t, kmsTenancy, true, "spec", "wait")
+	kmsTenancyDeps := sliceAt(t, kmsTenancy, "spec", "dependsOn")
+	if len(kmsTenancyDeps) != 1 || stringAt(asManifest(t, kmsTenancyDeps[0], "kms tenancy spec.dependsOn[0]"), "name") != "guardian-tenancy" {
+		t.Fatalf("guardian-kms-tenancy dependsOn = %#v, want only guardian-tenancy", kmsTenancyDeps)
+	}
+
 	kmsProd := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-kms-prod")
 	assertString(t, kmsProd, "./src/infrastructure/clusters/ash/deployments/kms/prod", "spec", "path")
 	assertString(t, kmsProd, "GitRepository", "spec", "sourceRef", "kind")
@@ -1155,8 +1182,8 @@ func testFluxHandoff(t *testing.T) {
 	assertBool(t, kmsProd, true, "spec", "prune")
 	assertBool(t, kmsProd, true, "spec", "wait")
 	kmsProdDeps := sliceAt(t, kmsProd, "spec", "dependsOn")
-	if len(kmsProdDeps) != 1 || stringAt(asManifest(t, kmsProdDeps[0], "kms prod spec.dependsOn[0]"), "name") != "guardian-tenancy" {
-		t.Fatalf("guardian-kms-prod dependsOn = %#v, want only guardian-tenancy", kmsProdDeps)
+	if len(kmsProdDeps) != 1 || stringAt(asManifest(t, kmsProdDeps[0], "kms prod spec.dependsOn[0]"), "name") != "guardian-kms-tenancy" {
+		t.Fatalf("guardian-kms-prod dependsOn = %#v, want only guardian-kms-tenancy", kmsProdDeps)
 	}
 
 	companyProd := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-company-prod")
