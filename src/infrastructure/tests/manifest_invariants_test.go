@@ -479,7 +479,9 @@ func testCozystackAppPatches(t *testing.T) {
 	assertString(t, ingressHR, "false", "spec", "values", "ingress-nginx", "controller", "config", "use-http2")
 	assertString(t, ingressHR, "host-network", "spec", "values", "ingress-nginx", "controller", "podLabels", "guardian.dev/edge-mode")
 	assertStringSlice(t, ingressHR, []string{}, "spec", "values", "ingress-nginx", "controller", "service", "externalIPs")
-	assertString(t, ingressHR, "Cluster", "spec", "values", "ingress-nginx", "controller", "service", "externalTrafficPolicy")
+	if valueAt(ingressHR, "spec", "values", "ingress-nginx", "controller", "service", "externalTrafficPolicy") != nil {
+		t.Fatal("root ingress ClusterIP Service must omit externalTrafficPolicy")
+	}
 	assertString(t, ingressHR, "RollingUpdate", "spec", "values", "ingress-nginx", "controller", "updateStrategy", "type")
 	assertInt(t, ingressHR, 0, "spec", "values", "ingress-nginx", "controller", "updateStrategy", "rollingUpdate", "maxSurge")
 	assertInt(t, ingressHR, 1, "spec", "values", "ingress-nginx", "controller", "updateStrategy", "rollingUpdate", "maxUnavailable")
