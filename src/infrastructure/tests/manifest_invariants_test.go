@@ -59,13 +59,9 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("external dns", testExternalDNS)
 	t.Run("edge health targets", testEdgeHealthTargets)
 	t.Run("company site prod deployment", testCompanySiteProdDeployment)
-	t.Run("tenancy", testTenancy)
-	t.Run("root tenant policy", testRootTenantPolicy)
 	t.Run("root tenant core services", testRootTenantCoreServices)
 	t.Run("observability", testObservability)
 	t.Run("openbao", testOpenBao)
-	t.Run("openbao github integration secrets", testOpenBaoGitHubIntegrationSecrets)
-	t.Run("release github secret projection overlays", testReleaseGitHubSecretProjectionOverlays)
 	t.Run("openbao opentofu bootstrap", testOpenBaoOpenTofuBootstrap)
 	t.Run("flux handoff", testFluxHandoff)
 }
@@ -84,7 +80,7 @@ func testTalmInstallDiskSelectors(t *testing.T) {
 
 	for node, systemSerial := range systemDisks {
 		t.Run(node, func(t *testing.T) {
-			rel := "src/infrastructure/clusters/ash/bootstrap/talm/nodes/" + node + ".yaml"
+			rel := "src/infrastructure/talm/nodes/" + node + ".yaml"
 			text := string(readRunfile(t, rel))
 			assertTextNotContains(t, text, "disk: /dev/nvme", rel)
 
@@ -111,7 +107,7 @@ func testTalmInstallDiskSelectors(t *testing.T) {
 
 func testCozystackPlatformPackage(t *testing.T) {
 	topology := guardianMgmtTopologyFixture(t)
-	docs := readManifests(t, "src/infrastructure/clusters/ash/root/cozystack/platform.yaml")
+	docs := readManifests(t, "src/infrastructure/base/cozystack/platform.yaml")
 	pkg := findObject(t, docs, "Package", "", "cozystack.cozystack-platform")
 
 	assertString(t, pkg, "cozystack.io/v1alpha1", "apiVersion")
@@ -135,7 +131,7 @@ func testCozystackPlatformPackage(t *testing.T) {
 	assertString(t, pkg, "Guardian", "spec", "components", "platform", "values", "branding", "titleText")
 	assertString(t, pkg, "Guardian Intelligence", "spec", "components", "platform", "values", "branding", "footerText")
 
-	docs = readManifests(t, "src/infrastructure/clusters/ash/root/cozystack/backupstrategy-controller.yaml")
+	docs = readManifests(t, "src/infrastructure/base/cozystack/backupstrategy-controller.yaml")
 	pkg = findObject(t, docs, "Package", "", "cozystack.backupstrategy-controller")
 	assertString(t, pkg, "cozystack.io/v1alpha1", "apiVersion")
 	assertString(t, pkg, "default", "spec", "variant")
@@ -152,7 +148,7 @@ func testGuardianMgmtTopologyAlignment(t *testing.T) {
 	}
 	assertUniqueTopologyValues(t, topology)
 
-	values := readYAMLMap(t, "src/infrastructure/clusters/ash/bootstrap/talm/values.yaml")
+	values := readYAMLMap(t, "src/infrastructure/talm/values.yaml")
 	assertString(t, values, fmt.Sprintf("https://%s:6443", topology.Network.VLAN.APIVIP), "endpoint")
 	assertString(t, values, topology.Network.VLAN.APIVIP, "floatingIP")
 	assertString(t, values, topology.Network.VLAN.VIPLink, "vipLink")
@@ -164,7 +160,7 @@ func testGuardianMgmtTopologyAlignment(t *testing.T) {
 		assertContainsString(t, certSANs, node.PublicIPv4, "certSANs")
 	}
 
-	imports := string(readRunfile(t, "src/infrastructure/clusters/ash/bootstrap/opentofu/baremetal/imports.tf"))
+	imports := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt/imports.tf"))
 	assertTextContains(t, imports, `to = latitudesh_virtual_network.management`, "imports.tf")
 	assertTextContains(t, imports, `id = "`+topology.Network.VLAN.ID+`"`, "imports.tf")
 	for _, node := range topology.Nodes {
@@ -172,7 +168,7 @@ func testGuardianMgmtTopologyAlignment(t *testing.T) {
 		assertTextContains(t, imports, `id = "`+node.ServerID+`"`, "imports.tf")
 	}
 
-	mainTF := string(readRunfile(t, "src/infrastructure/clusters/ash/bootstrap/opentofu/baremetal/main.tf"))
+	mainTF := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt/main.tf"))
 	assertTextNotContains(t, mainTF, "jsondecode", "main.tf")
 	assertTextNotContains(t, mainTF, "guardian-mgmt.json", "main.tf")
 	assertTextContains(t, mainTF, `project_id = "proj_R82A0yqmd06mM"`, "main.tf")
@@ -197,10 +193,10 @@ func testGuardianMgmtTopologyAlignment(t *testing.T) {
 	assertTextContains(t, mainTF, `latitudesh_virtual_network.management.vid == local.vlan.vid`, "main.tf")
 	assertTextContains(t, mainTF, `latitudesh_server.control_plane[name].primary_ipv4 == node.public_ipv4`, "main.tf")
 
-	versionsPath := "src/infrastructure/clusters/ash/bootstrap/opentofu/baremetal/versions.tf"
+	versionsPath := "src/infrastructure/bootstrap/guardian-mgmt/versions.tf"
 	assertPartialS3Backend(t, readRunfile(t, versionsPath), versionsPath, "opentofu/guardian-mgmt.tfstate", "guardian-mgmt backend.s3")
 
-	outputsTF := string(readRunfile(t, "src/infrastructure/clusters/ash/bootstrap/opentofu/baremetal/outputs.tf"))
+	outputsTF := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt/outputs.tf"))
 	assertTextContains(t, outputsTF, `output "management_vlan"`, "outputs.tf")
 	assertTextContains(t, outputsTF, `api_server_endpoint = "https://${local.vlan.api_vip}:6443"`, "outputs.tf")
 	assertTextContains(t, outputsTF, `metallb_pool        = local.vlan.metallb_pool`, "outputs.tf")
@@ -213,13 +209,13 @@ func testGuardianMgmtTopologyAlignment(t *testing.T) {
 }
 
 func testGuardianMgmtDNSBootstrap(t *testing.T) {
-	const versionsPath = "src/infrastructure/clusters/ash/bootstrap/opentofu/dns/versions.tf"
+	const versionsPath = "src/infrastructure/bootstrap/guardian-mgmt-dns/versions.tf"
 	versionsBytes := readRunfile(t, versionsPath)
 	versions := string(versionsBytes)
-	mainTF := string(readRunfile(t, "src/infrastructure/clusters/ash/bootstrap/opentofu/dns/main.tf"))
-	variablesTF := string(readRunfile(t, "src/infrastructure/clusters/ash/bootstrap/opentofu/dns/variables.tf"))
-	outputsTF := string(readRunfile(t, "src/infrastructure/clusters/ash/bootstrap/opentofu/dns/outputs.tf"))
-	lock := string(readRunfile(t, "src/infrastructure/clusters/ash/bootstrap/opentofu/dns/.terraform.lock.hcl"))
+	mainTF := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt-dns/main.tf"))
+	variablesTF := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt-dns/variables.tf"))
+	outputsTF := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt-dns/outputs.tf"))
+	lock := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt-dns/.terraform.lock.hcl"))
 
 	assertTextNotContains(t, versions, `source  = "hashicorp/aws"`, "guardian-mgmt-dns versions.tf")
 	assertTextNotContains(t, lock, `provider "registry.opentofu.org/hashicorp/aws"`, "guardian-mgmt-dns lock")
@@ -273,7 +269,7 @@ func testGuardianMgmtDNSBootstrap(t *testing.T) {
 
 func testLayerTwoNetworking(t *testing.T) {
 	topology := guardianMgmtTopologyFixture(t)
-	metallb := readManifests(t, "src/infrastructure/clusters/ash/root/networking/metallb.yaml")
+	metallb := readManifests(t, "src/infrastructure/base/networking/metallb.yaml")
 	pool := findObject(t, metallb, "IPAddressPool", "cozy-metallb", "cozystack")
 	assertString(t, pool, "metallb.io/v1beta1", "apiVersion")
 	assertStringSlice(t, pool, []string{topology.Network.VLAN.MetalLBPool}, "spec", "addresses")
@@ -284,7 +280,7 @@ func testLayerTwoNetworking(t *testing.T) {
 	assertString(t, ad, "metallb.io/v1beta1", "apiVersion")
 	assertStringSlice(t, ad, []string{"cozystack"}, "spec", "ipAddressPools")
 
-	subnets := readManifests(t, "src/infrastructure/clusters/ash/root/networking/subnet-mtu.yaml")
+	subnets := readManifests(t, "src/infrastructure/base/networking/subnet-mtu.yaml")
 	ovnDefault := findObject(t, subnets, "Subnet", "", "ovn-default")
 	assertString(t, ovnDefault, "kubeovn.io/v1", "apiVersion")
 	assertBool(t, ovnDefault, true, "spec", "default")
@@ -304,7 +300,7 @@ func testLayerTwoNetworking(t *testing.T) {
 }
 
 func testSingleDefaultStorageClass(t *testing.T) {
-	docs := readManifests(t, "src/infrastructure/clusters/ash/root/storage/storageclasses.yaml")
+	docs := readManifests(t, "src/infrastructure/base/storage/storageclasses.yaml")
 
 	var defaults []manifest
 	for _, doc := range docs {
@@ -330,18 +326,18 @@ func testSingleDefaultStorageClass(t *testing.T) {
 }
 
 func testLINSTORDataPools(t *testing.T) {
-	kustomization := readYAMLMap(t, "src/infrastructure/clusters/ash/root/kustomization.yaml")
+	kustomization := readYAMLMap(t, "src/infrastructure/base/kustomization.yaml")
 	resources := sliceAt(t, kustomization, "resources")
 	if containsString(resources, "storage/linstor-data-pools.yaml") {
 		t.Fatalf("base kustomization must not include storage/linstor-data-pools.yaml; storage is reconciled by guardian-mgmt-storage")
 	}
 
-	storageKustomization := readYAMLMap(t, "src/infrastructure/clusters/ash/root/storage/kustomization.yaml")
+	storageKustomization := readYAMLMap(t, "src/infrastructure/base/storage/kustomization.yaml")
 	storageResources := sliceAt(t, storageKustomization, "resources")
 	assertContainsString(t, storageResources, "linstor-data-pools.yaml", "storage kustomization resources")
 	assertContainsString(t, storageResources, "storageclasses.yaml", "storage kustomization resources")
 
-	docs := readManifests(t, "src/infrastructure/clusters/ash/root/storage/linstor-data-pools.yaml")
+	docs := readManifests(t, "src/infrastructure/base/storage/linstor-data-pools.yaml")
 	wantDevices := map[string]string{
 		"ash-earth": "/dev/disk/by-id/nvme-MTFDKCC960TGP-1BK1JABYY_362510FD7C47",
 		"ash-wind":  "/dev/disk/by-id/nvme-MTFDKCC960TGP-1BK1JABYY_352410A4E0A6",
@@ -369,8 +365,8 @@ func testLINSTORDataPools(t *testing.T) {
 
 func testCozystackSystemBucketBackups(t *testing.T) {
 	for _, rel := range []string{
-		"src/infrastructure/clusters/ash/root/kustomization.yaml",
-		"src/infrastructure/clusters/ash/root/apps/core-services.yaml",
+		"src/infrastructure/base/kustomization.yaml",
+		"src/infrastructure/base/apps/core-services.yaml",
 	} {
 		text := string(readRunfile(t, rel))
 		for _, forbidden := range []string{
@@ -385,13 +381,13 @@ func testCozystackSystemBucketBackups(t *testing.T) {
 		}
 	}
 
-	docs := readManifests(t, "src/infrastructure/clusters/ash/root/apps/core-services.yaml")
+	docs := readManifests(t, "src/infrastructure/base/apps/core-services.yaml")
 	assertSystemBucketBackup(t, docs, "Postgres", "tenant-root", "guardian-postgres-daily", "7 1 * * *")
 	assertSystemBucketBackup(t, docs, "ClickHouse", "tenant-root", "guardian-clickhouse-daily", "17 1 * * *")
 }
 
 func testCozystackPlatformPatches(t *testing.T) {
-	docs := readManifests(t, "src/infrastructure/clusters/ash/root/platform-patches/cozystack-networking-hubble.yaml")
+	docs := readManifests(t, "src/infrastructure/base/platform-patches/cozystack-networking-hubble.yaml")
 	pkg := findObject(t, docs, "Package", "", "cozystack.networking")
 	assertString(t, pkg, "cozystack.io/v1alpha1", "apiVersion")
 	assertBool(t, pkg, true, "spec", "components", "cilium", "values", "cilium", "hubble", "enabled")
@@ -422,10 +418,10 @@ func testCozystackPlatformPatches(t *testing.T) {
 		}
 	}
 
-	fluxDocs := readManifests(t, "src/infrastructure/clusters/ash/root/flux/sync.yaml")
+	fluxDocs := readManifests(t, "src/infrastructure/base/flux/sync.yaml")
 	kustomization := findObject(t, fluxDocs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-platform-patches")
 	assertString(t, kustomization, "kustomize.toolkit.fluxcd.io/v1", "apiVersion")
-	assertString(t, kustomization, "./src/infrastructure/clusters/ash/root/platform-patches", "spec", "path")
+	assertString(t, kustomization, "./src/infrastructure/base/platform-patches", "spec", "path")
 	assertBool(t, kustomization, false, "spec", "prune")
 	assertBool(t, kustomization, false, "spec", "wait")
 	dependsOn := valueAt(kustomization, "spec", "dependsOn")
@@ -438,11 +434,11 @@ func testCozystackPlatformPatches(t *testing.T) {
 }
 
 func testCozystackAppPatches(t *testing.T) {
-	kustomization := readYAMLMap(t, "src/infrastructure/clusters/ash/root/app-patches/kustomization.yaml")
+	kustomization := readYAMLMap(t, "src/infrastructure/base/app-patches/kustomization.yaml")
 	assertContainsString(t, sliceAt(t, kustomization, "resources"), "clickhouse-system-bucket-endpoint.yaml", "app patches kustomization resources")
 	assertContainsString(t, sliceAt(t, kustomization, "resources"), "ingress-origin-edge.yaml", "app patches kustomization resources")
 
-	docs := readManifests(t, "src/infrastructure/clusters/ash/root/app-patches/clickhouse-system-bucket-endpoint.yaml")
+	docs := readManifests(t, "src/infrastructure/base/app-patches/clickhouse-system-bucket-endpoint.yaml")
 	hr := findObject(t, docs, "HelmRelease", "tenant-root", "clickhouse-guardian")
 	assertString(t, hr, "helm.toolkit.fluxcd.io/v2", "apiVersion")
 
@@ -472,16 +468,11 @@ func testCozystackAppPatches(t *testing.T) {
 		assertTextContains(t, patchText, want, "clickhouse postRenderer patch")
 	}
 
-	ingressDocs := readManifests(t, "src/infrastructure/clusters/ash/root/app-patches/ingress-origin-edge.yaml")
+	ingressDocs := readManifests(t, "src/infrastructure/base/app-patches/ingress-origin-edge.yaml")
 	ingressHR := findObject(t, ingressDocs, "HelmRelease", "tenant-root", "ingress-nginx-system")
 	assertString(t, ingressHR, "helm.toolkit.fluxcd.io/v2", "apiVersion")
-	assertString(t, ingressHR, "25m", "spec", "timeout")
-	assertBool(t, ingressHR, true, "spec", "values", "ingress-nginx", "controller", "hostNetwork")
-	assertString(t, ingressHR, "ClusterFirstWithHostNet", "spec", "values", "ingress-nginx", "controller", "dnsPolicy")
 	assertString(t, ingressHR, "false", "spec", "values", "ingress-nginx", "controller", "config", "use-http2")
-	assertString(t, ingressHR, "host-network", "spec", "values", "ingress-nginx", "controller", "podLabels", "guardian.dev/edge-mode")
-	assertStringSlice(t, ingressHR, []string{}, "spec", "values", "ingress-nginx", "controller", "service", "externalIPs")
-	assertString(t, ingressHR, "", "spec", "values", "ingress-nginx", "controller", "service", "externalTrafficPolicy")
+	assertString(t, ingressHR, "Cluster", "spec", "values", "ingress-nginx", "controller", "service", "externalTrafficPolicy")
 	assertString(t, ingressHR, "RollingUpdate", "spec", "values", "ingress-nginx", "controller", "updateStrategy", "type")
 	assertInt(t, ingressHR, 0, "spec", "values", "ingress-nginx", "controller", "updateStrategy", "rollingUpdate", "maxSurge")
 	assertInt(t, ingressHR, 1, "spec", "values", "ingress-nginx", "controller", "updateStrategy", "rollingUpdate", "maxUnavailable")
@@ -492,12 +483,11 @@ func testCozystackAppPatches(t *testing.T) {
 	}
 	requiredTerm := asManifest(t, requiredTerms[0], "ingress required pod anti-affinity")
 	assertString(t, requiredTerm, "kubernetes.io/hostname", "topologyKey")
-	assertMatchExpression(t, sliceAt(t, requiredTerm, "labelSelector", "matchExpressions"), "guardian.dev/edge-mode", "In", []string{"host-network"})
 
-	fluxDocs := readManifests(t, "src/infrastructure/clusters/ash/root/flux/sync.yaml")
+	fluxDocs := readManifests(t, "src/infrastructure/base/flux/sync.yaml")
 	fluxKustomization := findObject(t, fluxDocs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-app-patches")
 	assertString(t, fluxKustomization, "kustomize.toolkit.fluxcd.io/v1", "apiVersion")
-	assertString(t, fluxKustomization, "./src/infrastructure/clusters/ash/root/app-patches", "spec", "path")
+	assertString(t, fluxKustomization, "./src/infrastructure/base/app-patches", "spec", "path")
 	assertBool(t, fluxKustomization, false, "spec", "prune")
 	assertBool(t, fluxKustomization, false, "spec", "wait")
 	dependsOn := valueAt(fluxKustomization, "spec", "dependsOn")
@@ -509,30 +499,15 @@ func testCozystackAppPatches(t *testing.T) {
 	assertString(t, dep, "guardian-mgmt-base", "name")
 }
 
-func assertMatchExpression(t *testing.T, expressions []any, key, operator string, values []string) {
-	t.Helper()
-
-	for _, value := range expressions {
-		expression := asManifest(t, value, "matchExpression")
-		if stringAt(expression, "key") != key {
-			continue
-		}
-		assertString(t, expression, operator, "operator")
-		assertStringSlice(t, expression, values, "values")
-		return
-	}
-	t.Fatalf("matchExpressions missing key %q", key)
-}
-
 func testExternalDNS(t *testing.T) {
-	base := readYAMLMap(t, "src/infrastructure/clusters/ash/root/kustomization.yaml")
+	base := readYAMLMap(t, "src/infrastructure/base/kustomization.yaml")
 	baseResources := sliceAt(t, base, "resources")
 	if containsString(baseResources, "dns") {
 		t.Fatalf("base kustomization must not include dns directly; Flux applies the DNS controller in an ordered slice")
 	}
 	assertContainsString(t, baseResources, "flux/sync.yaml", "base kustomization resources")
 
-	kustomization := readYAMLMap(t, "src/infrastructure/clusters/ash/root/dns/kustomization.yaml")
+	kustomization := readYAMLMap(t, "src/infrastructure/base/dns/kustomization.yaml")
 	for _, resource := range []string{
 		"namespace.yaml",
 		"secrets.yaml",
@@ -542,17 +517,17 @@ func testExternalDNS(t *testing.T) {
 		assertContainsString(t, sliceAt(t, kustomization, "resources"), resource, "external-dns kustomization resources")
 	}
 
-	namespace := findObject(t, readManifests(t, "src/infrastructure/clusters/ash/root/dns/namespace.yaml"), "Namespace", "", "external-dns")
+	namespace := findObject(t, readManifests(t, "src/infrastructure/base/dns/namespace.yaml"), "Namespace", "", "external-dns")
 	assertString(t, namespace, "restricted", "metadata", "labels", "pod-security.kubernetes.io/enforce")
 	assertString(t, namespace, "restricted", "metadata", "labels", "pod-security.kubernetes.io/audit")
 	assertString(t, namespace, "restricted", "metadata", "labels", "pod-security.kubernetes.io/warn")
 
-	secretDocs := readManifests(t, "src/infrastructure/clusters/ash/root/dns/secrets.yaml")
+	secretDocs := readManifests(t, "src/infrastructure/base/dns/secrets.yaml")
 	serviceAccount := findObject(t, secretDocs, "ServiceAccount", "external-dns", "external-dns-secrets")
 	assertBool(t, serviceAccount, false, "automountServiceAccountToken")
 
 	store := findObject(t, secretDocs, "SecretStore", "external-dns", "openbao")
-	assertString(t, store, "http://openbao-guardian.tenant-guardian-kms.svc:8200", "spec", "provider", "vault", "server")
+	assertString(t, store, "http://openbao-guardian.tenant-root.svc:8200", "spec", "provider", "vault", "server")
 	assertString(t, store, "kv", "spec", "provider", "vault", "path")
 	assertString(t, store, "v2", "spec", "provider", "vault", "version")
 	assertString(t, store, "kubernetes", "spec", "provider", "vault", "auth", "kubernetes", "mountPath")
@@ -576,7 +551,7 @@ func testExternalDNS(t *testing.T) {
 	assertString(t, secretRef, "guardian/guardian-mgmt/tenant-root/dns/external-dns", "remoteRef", "key")
 	assertString(t, secretRef, "CF_API_TOKEN", "remoteRef", "property")
 
-	externalDNSDocs := readManifests(t, "src/infrastructure/clusters/ash/root/dns/external-dns.yaml")
+	externalDNSDocs := readManifests(t, "src/infrastructure/base/dns/external-dns.yaml")
 	repo := findObject(t, externalDNSDocs, "HelmRepository", "external-dns", "external-dns")
 	assertString(t, repo, "https://kubernetes-sigs.github.io/external-dns/", "spec", "url")
 	assertString(t, repo, "1h", "spec", "interval")
@@ -610,7 +585,7 @@ func testExternalDNS(t *testing.T) {
 	assertBool(t, release, true, "spec", "values", "serviceMonitor", "enabled")
 	assertEnvSecretRef(t, sliceAt(t, release, "spec", "values", "env"), "CF_API_TOKEN", "cloudflare-external-dns", "CF_API_TOKEN")
 
-	policy := findObject(t, readManifests(t, "src/infrastructure/clusters/ash/root/dns/networkpolicy.yaml"), "CiliumNetworkPolicy", "external-dns", "external-dns-egress")
+	policy := findObject(t, readManifests(t, "src/infrastructure/base/dns/networkpolicy.yaml"), "CiliumNetworkPolicy", "external-dns", "external-dns-egress")
 	assertString(t, policy, "cilium.io/v2", "apiVersion")
 	assertString(t, policy, "external-dns", "spec", "endpointSelector", "matchLabels", "app.kubernetes.io/name")
 	egress := sliceAt(t, policy, "spec", "egress")
@@ -810,7 +785,7 @@ func assertMetricsStorage(t *testing.T, storage manifest, name, retention, dedup
 }
 
 func testRootTenantCoreServices(t *testing.T) {
-	docs := readManifests(t, "src/infrastructure/clusters/ash/root/apps/core-services.yaml")
+	docs := readManifests(t, "src/infrastructure/base/apps/core-services.yaml")
 
 	ingress := findObject(t, docs, "Ingress", "tenant-root", "ingress")
 	assertString(t, ingress, "apps.cozystack.io/v1alpha1", "apiVersion")
@@ -833,7 +808,7 @@ func testRootTenantCoreServices(t *testing.T) {
 	assertString(t, seaweedfs, "replicated", "spec", "volume", "storageClass")
 	assertInt(t, seaweedfs, 3, "spec", "s3", "replicas")
 
-	seaweedfsS3Service := findObject(t, readManifests(t, "src/infrastructure/clusters/ash/root/apps/seaweedfs-s3-ingress-service.yaml"), "Service", "tenant-root", "seaweedfs-system-s3")
+	seaweedfsS3Service := findObject(t, readManifests(t, "src/infrastructure/base/apps/seaweedfs-s3-ingress-service.yaml"), "Service", "tenant-root", "seaweedfs-system-s3")
 	assertString(t, seaweedfsS3Service, "v1", "apiVersion")
 	assertString(t, seaweedfsS3Service, "seaweedfs", "metadata", "labels", "app.kubernetes.io/name")
 	assertString(t, seaweedfsS3Service, "seaweedfs-system", "metadata", "labels", "app.kubernetes.io/instance")
@@ -865,7 +840,7 @@ func testRootTenantCoreServices(t *testing.T) {
 			"redis":    3,
 		},
 	})
-	assertHarborRWORolloutStrategy(t, "src/infrastructure/clusters/ash/root/apps/harbor-rwo-rollout-strategy.yaml", "tenant-root")
+	assertHarborRWORolloutStrategy(t, "src/infrastructure/base/apps/harbor-rwo-rollout-strategy.yaml", "tenant-root")
 	assertApp(t, docs, appExpectation{
 		kind:               "ClickHouse",
 		namespace:          "tenant-root",
@@ -880,275 +855,16 @@ func testRootTenantCoreServices(t *testing.T) {
 }
 
 func testObservability(t *testing.T) {
-	assertMonitoring(t, "src/infrastructure/clusters/ash/root/apps/observability.yaml", "tenant-root", "guardianintelligence.org", true, "guardian_tenant", "root")
+	assertMonitoring(t, "src/infrastructure/base/apps/observability.yaml", "tenant-root", "guardianintelligence.org", true, "guardian_tenant", "root")
 
-	docs := readManifests(t, "src/infrastructure/clusters/ash/root/platform-patches/cozystack-monitoring-agents-vmagent.yaml")
+	docs := readManifests(t, "src/infrastructure/base/platform-patches/cozystack-monitoring-agents-vmagent.yaml")
 	pkg := findObject(t, docs, "Package", "", "cozystack.monitoring-agents")
 	assertString(t, pkg, "64MB", "spec", "components", "monitoring-agents", "values", "vmagent", "extraArgs", "promscrape.maxScrapeSize")
 }
 
-func testTenancy(t *testing.T) {
-	rootStages := readManifests(t, "src/infrastructure/clusters/ash/root/tenants/root-stages.yaml")
-	assertTenant(t, rootStages, "tenant-root", "root", "gi-root", "")
-	assertTenant(t, rootStages, "tenant-root", "dev", "gi-stage-dev", "dev.gi.org")
-	assertTenant(t, rootStages, "tenant-root", "gamma", "gi-stage-gamma", "gamma.gi.org")
-	assertTenant(t, rootStages, "tenant-root", "prod", "gi-stage-prod", "prod.gi.org")
-
-	guardian := readManifests(t, "src/infrastructure/clusters/ash/root/tenants/guardian.yaml")
-	assertTenant(t, guardian, "tenant-root", "guardian", "gi-guardian", "")
-
-	aisucks := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/aisucks.yaml")
-	assertTenant(t, aisucks, "tenant-guardian", "aisucks", "gi-aisucks", "")
-
-	audit := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/audit.yaml")
-	assertTenant(t, audit, "tenant-guardian", "audit", "gi-audit", "")
-
-	billing := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/billing.yaml")
-	assertTenant(t, billing, "tenant-guardian", "billing", "gi-billing", "")
-
-	iam := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/iam.yaml")
-	assertTenant(t, iam, "tenant-guardian", "iam", "gi-iam", "")
-
-	kms := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/kms.yaml")
-	assertTenant(t, kms, "tenant-guardian", "kms", "gi-kms", "")
-
-	company := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/company.yaml")
-	assertTenant(t, company, "tenant-guardian", "company", "gi-company", "")
-
-	release := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/release.yaml")
-	assertTenant(t, release, "tenant-guardian", "release", "gi-release", "")
-
-	secrets := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/secrets.yaml")
-	assertTenant(t, secrets, "tenant-guardian", "secrets", "gi-secrets", "")
-
-	telemetry := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/telemetry.yaml")
-	assertTenant(t, telemetry, "tenant-guardian", "telemetry", "gi-telemetry", "")
-
-	workloads := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/workloads.yaml")
-	assertTenant(t, workloads, "tenant-guardian", "workloads", "gi-workloads", "")
-
-	aisucksStages := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/aisucks/stages.yaml")
-	assertTenant(t, aisucksStages, "tenant-guardian-aisucks", "beta", "gi-aisucks-beta", "")
-	assertTenant(t, aisucksStages, "tenant-guardian-aisucks", "gamma", "gi-aisucks-gamma", "")
-	assertTenant(t, aisucksStages, "tenant-guardian-aisucks", "prod", "gi-aisucks-prod", "")
-	assertTenantStageLabels(t, aisucksStages, "tenant-guardian-aisucks", "beta", "aisucks", "beta")
-	assertTenantStageLabels(t, aisucksStages, "tenant-guardian-aisucks", "gamma", "aisucks", "gamma")
-	assertTenantStageLabels(t, aisucksStages, "tenant-guardian-aisucks", "prod", "aisucks", "prod")
-
-	auditStages := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/audit/stages.yaml")
-	assertTenant(t, auditStages, "tenant-guardian-audit", "beta", "gi-audit-beta", "")
-	assertTenant(t, auditStages, "tenant-guardian-audit", "gamma", "gi-audit-gamma", "")
-	assertTenant(t, auditStages, "tenant-guardian-audit", "prod", "gi-audit-prod", "")
-	assertTenantStageLabels(t, auditStages, "tenant-guardian-audit", "beta", "audit", "beta")
-	assertTenantStageLabels(t, auditStages, "tenant-guardian-audit", "gamma", "audit", "gamma")
-	assertTenantStageLabels(t, auditStages, "tenant-guardian-audit", "prod", "audit", "prod")
-
-	billingStages := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/billing/stages.yaml")
-	assertTenant(t, billingStages, "tenant-guardian-billing", "beta", "gi-billing-beta", "")
-	assertTenant(t, billingStages, "tenant-guardian-billing", "gamma", "gi-billing-gamma", "")
-	assertTenant(t, billingStages, "tenant-guardian-billing", "prod", "gi-billing-prod", "")
-	assertTenantStageLabels(t, billingStages, "tenant-guardian-billing", "beta", "billing", "beta")
-	assertTenantStageLabels(t, billingStages, "tenant-guardian-billing", "gamma", "billing", "gamma")
-	assertTenantStageLabels(t, billingStages, "tenant-guardian-billing", "prod", "billing", "prod")
-
-	iamStages := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/iam/stages.yaml")
-	assertTenant(t, iamStages, "tenant-guardian-iam", "beta", "gi-iam-beta", "")
-	assertTenant(t, iamStages, "tenant-guardian-iam", "gamma", "gi-iam-gamma", "")
-	assertTenant(t, iamStages, "tenant-guardian-iam", "prod", "gi-iam-prod", "")
-	assertTenantStageLabels(t, iamStages, "tenant-guardian-iam", "beta", "iam", "beta")
-	assertTenantStageLabels(t, iamStages, "tenant-guardian-iam", "gamma", "iam", "gamma")
-	assertTenantStageLabels(t, iamStages, "tenant-guardian-iam", "prod", "iam", "prod")
-
-	kmsStages := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/kms/stages.yaml")
-	assertTenant(t, kmsStages, "tenant-guardian-kms", "beta", "gi-kms-beta", "")
-	assertTenant(t, kmsStages, "tenant-guardian-kms", "gamma", "gi-kms-gamma", "")
-	assertTenant(t, kmsStages, "tenant-guardian-kms", "prod", "gi-kms-prod", "")
-	assertTenantStageLabels(t, kmsStages, "tenant-guardian-kms", "beta", "kms", "beta")
-	assertTenantStageLabels(t, kmsStages, "tenant-guardian-kms", "gamma", "kms", "gamma")
-	assertTenantStageLabels(t, kmsStages, "tenant-guardian-kms", "prod", "kms", "prod")
-
-	companyStages := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/company/stages.yaml")
-	assertTenant(t, companyStages, "tenant-guardian-company", "beta", "gi-company-beta", "")
-	assertTenant(t, companyStages, "tenant-guardian-company", "gamma", "gi-company-gamma", "")
-	assertTenant(t, companyStages, "tenant-guardian-company", "prod", "gi-company-prod", "")
-	assertTenantStageLabels(t, companyStages, "tenant-guardian-company", "beta", "company", "beta")
-	assertTenantStageLabels(t, companyStages, "tenant-guardian-company", "gamma", "company", "gamma")
-	assertTenantStageLabels(t, companyStages, "tenant-guardian-company", "prod", "company", "prod")
-
-	releaseStages := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/release/stages.yaml")
-	assertTenant(t, releaseStages, "tenant-guardian-release", "beta", "gi-release-beta", "")
-	assertTenant(t, releaseStages, "tenant-guardian-release", "gamma", "gi-release-gamma", "")
-	assertTenant(t, releaseStages, "tenant-guardian-release", "prod", "gi-release-prod", "")
-	assertTenantStageLabels(t, releaseStages, "tenant-guardian-release", "beta", "release", "beta")
-	assertTenantStageLabels(t, releaseStages, "tenant-guardian-release", "gamma", "release", "gamma")
-	assertTenantStageLabels(t, releaseStages, "tenant-guardian-release", "prod", "release", "prod")
-
-	secretsStages := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/secrets/stages.yaml")
-	assertTenant(t, secretsStages, "tenant-guardian-secrets", "beta", "gi-secrets-beta", "")
-	assertTenant(t, secretsStages, "tenant-guardian-secrets", "gamma", "gi-secrets-gamma", "")
-	assertTenant(t, secretsStages, "tenant-guardian-secrets", "prod", "gi-secrets-prod", "")
-	assertTenantStageLabels(t, secretsStages, "tenant-guardian-secrets", "beta", "secrets", "beta")
-	assertTenantStageLabels(t, secretsStages, "tenant-guardian-secrets", "gamma", "secrets", "gamma")
-	assertTenantStageLabels(t, secretsStages, "tenant-guardian-secrets", "prod", "secrets", "prod")
-
-	telemetryStages := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/telemetry/stages.yaml")
-	assertTenant(t, telemetryStages, "tenant-guardian-telemetry", "beta", "gi-telemetry-beta", "")
-	assertTenant(t, telemetryStages, "tenant-guardian-telemetry", "gamma", "gi-telemetry-gamma", "")
-	assertTenant(t, telemetryStages, "tenant-guardian-telemetry", "prod", "gi-telemetry-prod", "")
-	assertTenantStageLabels(t, telemetryStages, "tenant-guardian-telemetry", "beta", "telemetry", "beta")
-	assertTenantStageLabels(t, telemetryStages, "tenant-guardian-telemetry", "gamma", "telemetry", "gamma")
-	assertTenantStageLabels(t, telemetryStages, "tenant-guardian-telemetry", "prod", "telemetry", "prod")
-
-	workloadsStages := readManifests(t, "src/infrastructure/clusters/ash/tenants/guardian/workloads/stages.yaml")
-	assertTenant(t, workloadsStages, "tenant-guardian-workloads", "beta", "gi-workloads-beta", "")
-	assertTenant(t, workloadsStages, "tenant-guardian-workloads", "gamma", "gi-workloads-gamma", "")
-	assertTenant(t, workloadsStages, "tenant-guardian-workloads", "prod", "gi-workloads-prod", "")
-	assertTenantStageLabels(t, workloadsStages, "tenant-guardian-workloads", "beta", "workloads", "beta")
-	assertTenantStageLabels(t, workloadsStages, "tenant-guardian-workloads", "gamma", "workloads", "gamma")
-	assertTenantStageLabels(t, workloadsStages, "tenant-guardian-workloads", "prod", "workloads", "prod")
-
-	rootKustomization := readYAMLMap(t, "src/infrastructure/clusters/ash/root/kustomization.yaml")
-	resources := sliceAt(t, rootKustomization, "resources")
-	assertContainsString(t, resources, "tenants/root-stages.yaml", "root kustomization resources")
-	assertContainsString(t, resources, "tenants/guardian.yaml", "root kustomization resources")
-}
-
-func testRootTenantPolicy(t *testing.T) {
-	rootKustomization := readYAMLMap(t, "src/infrastructure/clusters/ash/root/kustomization.yaml")
-	assertContainsString(t, sliceAt(t, rootKustomization, "resources"), "policy/tenant-root-pod-security.yaml", "root kustomization resources")
-
-	docs := readManifests(t, "src/infrastructure/clusters/ash/root/policy/tenant-root-pod-security.yaml")
-	namespace := findObject(t, docs, "Namespace", "", "tenant-root")
-	assertString(t, namespace, "privileged", "metadata", "labels", "pod-security.kubernetes.io/enforce")
-	assertString(t, namespace, "latest", "metadata", "labels", "pod-security.kubernetes.io/enforce-version")
-	assertString(t, namespace, "baseline", "metadata", "labels", "pod-security.kubernetes.io/audit")
-	assertString(t, namespace, "latest", "metadata", "labels", "pod-security.kubernetes.io/audit-version")
-	assertString(t, namespace, "baseline", "metadata", "labels", "pod-security.kubernetes.io/warn")
-	assertString(t, namespace, "latest", "metadata", "labels", "pod-security.kubernetes.io/warn-version")
-}
-
-func assertTenant(t *testing.T, docs []manifest, namespace, name, tenantID, host string) {
-	t.Helper()
-
-	tenant := findObject(t, docs, "Tenant", namespace, name)
-	assertString(t, tenant, "apps.cozystack.io/v1alpha1", "apiVersion")
-	assertString(t, tenant, tenantID, "metadata", "labels", "guardian.dev/tenant-id")
-	assertBool(t, tenant, false, "spec", "etcd")
-	assertString(t, tenant, host, "spec", "host")
-	assertBool(t, tenant, false, "spec", "ingress")
-	assertBool(t, tenant, false, "spec", "monitoring")
-	assertBool(t, tenant, false, "spec", "seaweedfs")
-	assertString(t, tenant, "", "spec", "schedulingClass")
-	if quotas := valueAt(tenant, "spec", "resourceQuotas"); quotas == nil {
-		t.Fatalf("Tenant %s/%s missing spec.resourceQuotas", namespace, name)
-	}
-}
-
-func assertTenantStageLabels(t *testing.T, docs []manifest, namespace, name, component, stage string) {
-	t.Helper()
-
-	tenant := findObject(t, docs, "Tenant", namespace, name)
-	assertString(t, tenant, component, "metadata", "labels", "guardian.dev/component")
-	assertString(t, tenant, stage, "metadata", "labels", "guardian.dev/stage")
-}
-
 func testOpenBao(t *testing.T) {
-	docs := readManifests(t, "src/infrastructure/clusters/ash/root/openbao/openbao.yaml")
+	docs := readManifests(t, "src/infrastructure/base/openbao/openbao.yaml")
 	bao := findObject(t, docs, "OpenBAO", "tenant-root", "guardian")
-	assertOpenBaoSpec(t, bao)
-
-	policies := readManifests(t, "src/infrastructure/clusters/ash/root/openbao/networkpolicy.yaml")
-	assertOpenBaoAPIServerPolicy(t, policies, "tenant-root")
-	assertNoObject(t, policies, "CiliumNetworkPolicy", "tenant-root", "allow-external-secrets-to-openbao")
-
-	kmsDocs := readManifests(t, "src/infrastructure/clusters/ash/deployments/kms/prod/openbao.yaml")
-	kmsBao := findObject(t, kmsDocs, "OpenBAO", "tenant-guardian-kms", "guardian")
-	assertOpenBaoSpec(t, kmsBao)
-	assertString(t, kmsBao, "kms", "metadata", "labels", "guardian.dev/component")
-	assertString(t, kmsBao, "prod", "metadata", "labels", "guardian.dev/stage")
-	assertString(t, kmsBao, "gi-kms-prod", "metadata", "labels", "guardian.dev/tenant-id")
-
-	kmsPolicies := readManifests(t, "src/infrastructure/clusters/ash/deployments/kms/prod/networkpolicy.yaml")
-	assertOpenBaoAPIServerPolicy(t, kmsPolicies, "tenant-guardian-kms")
-	assertNoObject(t, kmsPolicies, "CiliumNetworkPolicy", "tenant-guardian-kms", "allow-external-secrets-to-openbao")
-}
-
-func testOpenBaoGitHubIntegrationSecrets(t *testing.T) {
-	kustomization := readYAMLMap(t, "src/infrastructure/components/openbao-github-integration-secrets/kustomization.yaml")
-	assertContainsString(t, sliceAt(t, kustomization, "resources"), "github-app-secrets.yaml", "github integration secrets kustomization resources")
-
-	docs := readManifests(t, "src/infrastructure/components/openbao-github-integration-secrets/github-app-secrets.yaml")
-
-	serviceAccount := findObject(t, docs, "ServiceAccount", "", "github-app-secrets")
-	assertBool(t, serviceAccount, false, "automountServiceAccountToken")
-	assertString(t, serviceAccount, "github-integrations", "metadata", "labels", "guardian.dev/secret-scope")
-	if namespace := stringAt(serviceAccount, "metadata", "namespace"); namespace != "" {
-		t.Fatalf("github integration ServiceAccount namespace = %q, want namespace-neutral base", namespace)
-	}
-
-	store := findObject(t, docs, "SecretStore", "", "openbao-github-integrations")
-	assertString(t, store, "http://openbao-guardian.tenant-guardian-kms.svc:8200", "spec", "provider", "vault", "server")
-	assertString(t, store, "kv", "spec", "provider", "vault", "path")
-	assertString(t, store, "v2", "spec", "provider", "vault", "version")
-	assertString(t, store, "kubernetes", "spec", "provider", "vault", "auth", "kubernetes", "mountPath")
-	assertString(t, store, "guardian-github-integrations", "spec", "provider", "vault", "auth", "kubernetes", "role")
-	assertString(t, store, "github-app-secrets", "spec", "provider", "vault", "auth", "kubernetes", "serviceAccountRef", "name")
-	assertStringSlice(t, store, []string{"openbao"}, "spec", "provider", "vault", "auth", "kubernetes", "serviceAccountRef", "audiences")
-
-	externalSecret := findObject(t, docs, "ExternalSecret", "", "github-app-secrets")
-	assertString(t, externalSecret, "1h", "spec", "refreshInterval")
-	assertString(t, externalSecret, "SecretStore", "spec", "secretStoreRef", "kind")
-	assertString(t, externalSecret, "openbao-github-integrations", "spec", "secretStoreRef", "name")
-	assertString(t, externalSecret, "github-app-secrets", "spec", "target", "name")
-	assertString(t, externalSecret, "Owner", "spec", "target", "creationPolicy")
-	assertString(t, externalSecret, "Retain", "spec", "target", "deletionPolicy")
-
-	data := sliceAt(t, externalSecret, "spec", "data")
-	if len(data) != 3 {
-		t.Fatalf("github integration ExternalSecret data = %d entries, want 3", len(data))
-	}
-	assertExternalSecretRef(t, data[0], "github-app-private-key", "guardian/guardian-mgmt/integrations/github/app", "private_key")
-	assertExternalSecretRef(t, data[1], "github-webhook-secret", "guardian/guardian-mgmt/integrations/github/app", "webhook_secret")
-	assertExternalSecretRef(t, data[2], "github-oauth-client-secret", "guardian/guardian-mgmt/integrations/github/app", "oauth_client_secret")
-}
-
-func assertExternalSecretRef(t *testing.T, value any, secretKey, remoteKey, property string) {
-	t.Helper()
-
-	ref := asManifest(t, value, "ExternalSecret data")
-	assertString(t, ref, secretKey, "secretKey")
-	assertString(t, ref, remoteKey, "remoteRef", "key")
-	assertString(t, ref, property, "remoteRef", "property")
-}
-
-func testReleaseGitHubSecretProjectionOverlays(t *testing.T) {
-	for _, stage := range []string{"beta", "gamma", "prod"} {
-		t.Run(stage, func(t *testing.T) {
-			rel := fmt.Sprintf("src/infrastructure/clusters/ash/deployments/release/%s/kustomization.yaml", stage)
-			kustomization := readYAMLMap(t, rel)
-			assertString(t, kustomization, "tenant-guardian-release-"+stage, "namespace")
-			assertContainsString(t, sliceAt(t, kustomization, "resources"), "../../../../../components/openbao-github-integration-secrets", rel+" resources")
-
-			labels := sliceAt(t, kustomization, "labels")
-			if len(labels) != 1 {
-				t.Fatalf("%s labels = %d entries, want 1", rel, len(labels))
-			}
-			label := asManifest(t, labels[0], rel+" labels[0]")
-			assertBool(t, label, false, "includeSelectors")
-			assertString(t, label, "release", "pairs", "guardian.dev/component")
-			assertString(t, label, stage, "pairs", "guardian.dev/stage")
-			assertString(t, label, "gi-release-"+stage, "pairs", "guardian.dev/tenant-id")
-		})
-	}
-
-	fluxDocs := readManifests(t, "src/infrastructure/clusters/ash/root/flux/sync.yaml")
-	assertNoObject(t, fluxDocs, "Kustomization", "cozy-fluxcd", "guardian-release-beta")
-	assertNoObject(t, fluxDocs, "Kustomization", "cozy-fluxcd", "guardian-release-gamma")
-	assertNoObject(t, fluxDocs, "Kustomization", "cozy-fluxcd", "guardian-release-prod")
-}
-
-func assertOpenBaoSpec(t *testing.T, bao manifest) {
-	t.Helper()
 
 	assertString(t, bao, "apps.cozystack.io/v1alpha1", "apiVersion")
 	assertInt(t, bao, 3, "spec", "replicas")
@@ -1158,12 +874,9 @@ func assertOpenBaoSpec(t *testing.T, bao manifest) {
 	assertBool(t, bao, false, "spec", "external")
 	assertString(t, bao, "1", "spec", "resources", "cpu")
 	assertString(t, bao, "2Gi", "spec", "resources", "memory")
-}
 
-func assertOpenBaoAPIServerPolicy(t *testing.T, policies []manifest, namespace string) {
-	t.Helper()
-
-	policy := findObject(t, policies, "CiliumNetworkPolicy", namespace, "allow-openbao-to-apiserver")
+	policies := readManifests(t, "src/infrastructure/base/openbao/networkpolicy.yaml")
+	policy := findObject(t, policies, "CiliumNetworkPolicy", "tenant-root", "allow-openbao-to-apiserver")
 	assertString(t, policy, "cilium.io/v2", "apiVersion")
 	assertString(t, policy, "openbao", "spec", "endpointSelector", "matchLabels", "app.kubernetes.io/name")
 
@@ -1184,91 +897,41 @@ func assertOpenBaoAPIServerPolicy(t *testing.T, policies []manifest, namespace s
 	port := asManifest(t, ports[0], "spec.egress[1].toPorts[0].ports[0]")
 	assertString(t, port, "6443", "port")
 	assertString(t, port, "TCP", "protocol")
+	assertNoObject(t, policies, "CiliumNetworkPolicy", "tenant-root", "allow-external-secrets-to-openbao")
 }
 
 func testOpenBaoOpenTofuBootstrap(t *testing.T) {
-	const versionsPath = "src/infrastructure/clusters/ash/bootstrap/opentofu/openbao-bootstrap/versions.tf"
+	const versionsPath = "src/infrastructure/bootstrap/guardian-mgmt-openbao/versions.tf"
 	versionsBytes := readRunfile(t, versionsPath)
 	versions := string(versionsBytes)
-	mainTF := string(readRunfile(t, "src/infrastructure/clusters/ash/bootstrap/opentofu/openbao-bootstrap/main.tf"))
-	variablesTF := string(readRunfile(t, "src/infrastructure/clusters/ash/bootstrap/opentofu/openbao-bootstrap/variables.tf"))
-	lock := string(readRunfile(t, "src/infrastructure/clusters/ash/bootstrap/opentofu/openbao-bootstrap/.terraform.lock.hcl"))
+	mainTF := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt-openbao/main.tf"))
+	lock := string(readRunfile(t, "src/infrastructure/bootstrap/guardian-mgmt-openbao/.terraform.lock.hcl"))
 
 	assertTextContains(t, versions, `source  = "hashicorp/vault"`, "guardian-mgmt-openbao versions.tf")
 	assertTextContains(t, versions, `version = "= 4.4.0"`, "guardian-mgmt-openbao versions.tf")
-	assertTextContains(t, variablesTF, `default     = "http://openbao-guardian.tenant-guardian-kms.svc:8200"`, "guardian-mgmt-openbao variables.tf")
 	assertPartialS3Backend(t, versionsBytes, versionsPath, "opentofu/guardian-mgmt-openbao.tfstate", "guardian-mgmt-openbao backend.s3")
-	backendConfig := string(readRunfile(t, "src/infrastructure/clusters/ash/bootstrap/opentofu/backend.tfvars"))
+	backendConfig := string(readRunfile(t, "src/infrastructure/bootstrap/backend.tfvars"))
 	assertTextContains(t, backendConfig, `cloudflare_account_id = "c3eaeffaadf7d4847684d4775c16d598"`, "backend.tfvars")
 	assertTextContains(t, lock, `provider "registry.opentofu.org/hashicorp/vault"`, "guardian-mgmt-openbao lock")
 	assertTextContains(t, lock, `version     = "4.4.0"`, "guardian-mgmt-openbao lock")
 
 	assertTextContains(t, mainTF, `resource "vault_mount" "kv"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `type        = "kv-v2"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `resource "vault_mount" "transit"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `type        = "transit"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `resource "vault_auth_backend" "kubernetes"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `type        = "kubernetes"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `resource "vault_kubernetes_auth_backend_config" "guardian_mgmt"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `kubernetes_host        = "https://kubernetes.default.svc:443"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `disable_iss_validation = true`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `external_dns_secret        = "guardian/guardian-mgmt/tenant-root/dns/external-dns"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `third_party_secret_prefix  = "guardian/guardian-mgmt/integrations"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `third_party_encryption_key = "guardian-integrations-encryption"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `third_party_signing_key    = "guardian-integrations-signing"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `"github-actions-runner-controller"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `"github-app-secrets"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `"arc-systems"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `"tenant-guardian-release"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `"tenant-guardian-release-beta"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `"tenant-guardian-release-gamma"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `"tenant-guardian-release-prod"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `"tenant-guardian-secrets"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `"tenant-guardian-secrets-beta"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `"tenant-guardian-secrets-gamma"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `"tenant-guardian-secrets-prod"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `third_party_integration_roles = {`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `github = {`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `resource "vault_transit_secret_backend_key" "third_party_encryption"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `name             = local.third_party_encryption_key`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `type             = "aes256-gcm96"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `resource "vault_transit_secret_backend_key" "third_party_signing"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `name             = local.third_party_signing_key`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `type             = "ed25519"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `external_dns_secret   = "guardian/guardian-mgmt/tenant-root/dns/external-dns"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `resource "vault_policy" "external_dns"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `name = "tenant-root-external-dns"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `path "${local.kv_mount}/data/${local.external_dns_secret}"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `resource "vault_policy" "third_party_secret_reader"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `name = "guardian-third-party-secret-reader"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `path "${local.kv_mount}/data/${local.third_party_secret_prefix}/*"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `resource "vault_policy" "third_party_transit_client"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `name = "guardian-third-party-transit-client"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `path "${local.transit_mount}/encrypt/${local.third_party_encryption_key}"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `path "${local.transit_mount}/decrypt/${local.third_party_encryption_key}"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `path "${local.transit_mount}/rewrap/${local.third_party_encryption_key}"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `path "${local.transit_mount}/datakey/plaintext/${local.third_party_encryption_key}"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `path "${local.transit_mount}/hmac/${local.third_party_encryption_key}"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `path "${local.transit_mount}/verify/${local.third_party_encryption_key}"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `path "${local.transit_mount}/sign/${local.third_party_signing_key}"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `path "${local.transit_mount}/verify/${local.third_party_signing_key}"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `resource "vault_kubernetes_auth_backend_role" "external_dns"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `role_name                        = "tenant-root-external-dns"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `bound_service_account_names      = ["external-dns-secrets"]`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `bound_service_account_namespaces = ["external-dns"]`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `audience                         = "openbao"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `token_policies                   = [vault_policy.external_dns.name]`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `moved {`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `from = vault_kubernetes_auth_backend_role.github_integrations`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `to   = vault_kubernetes_auth_backend_role.third_party_integrations["github"]`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `resource "vault_kubernetes_auth_backend_role" "third_party_integrations"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `for_each = local.third_party_integration_roles`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `role_name                        = each.value.role_name`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `bound_service_account_names      = each.value.bound_service_account_names`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `bound_service_account_namespaces = each.value.bound_service_account_namespaces`, "guardian-mgmt-openbao main.tf")
-	assertTextNotContains(t, mainTF, `resource "vault_kubernetes_auth_backend_role" "github_integrations"`, "guardian-mgmt-openbao main.tf")
-	assertTextNotContains(t, mainTF, `"guardian-release"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `vault_policy.third_party_secret_reader.name`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `vault_policy.third_party_transit_client.name`, "guardian-mgmt-openbao main.tf")
 	assertTextNotContains(t, mainTF, `resource "vault_policy" "secret_projection"`, "guardian-mgmt-openbao main.tf")
 	assertTextNotContains(t, mainTF, `resource "vault_kubernetes_auth_backend_role" "secret_projection"`, "guardian-mgmt-openbao main.tf")
 	assertTextNotContains(t, mainTF, `auth/token/lookup-self`, "guardian-mgmt-openbao main.tf")
@@ -1285,35 +948,35 @@ func testOpenBaoOpenTofuBootstrap(t *testing.T) {
 }
 
 func testFluxHandoff(t *testing.T) {
-	docs := readManifests(t, "src/infrastructure/clusters/ash/root/flux/sync.yaml")
+	docs := readManifests(t, "src/infrastructure/base/flux/sync.yaml")
 
 	repo := findObject(t, docs, "GitRepository", "cozy-fluxcd", "guardian")
 	assertString(t, repo, "https://github.com/guardian-intelligence/guardian", "spec", "url")
 	assertString(t, repo, "main", "spec", "ref", "branch")
 
 	base := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-base")
-	assertString(t, base, "./src/infrastructure/clusters/ash/root", "spec", "path")
+	assertString(t, base, "./src/infrastructure/base", "spec", "path")
 	assertString(t, base, "GitRepository", "spec", "sourceRef", "kind")
 	assertString(t, base, "guardian", "spec", "sourceRef", "name")
 	assertBool(t, base, true, "spec", "prune")
 	assertBool(t, base, false, "spec", "wait")
 
 	platform := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-platform")
-	assertString(t, platform, "./src/infrastructure/clusters/ash/root/cozystack", "spec", "path")
+	assertString(t, platform, "./src/infrastructure/base/cozystack", "spec", "path")
 	assertString(t, platform, "GitRepository", "spec", "sourceRef", "kind")
 	assertString(t, platform, "guardian", "spec", "sourceRef", "name")
 	assertBool(t, platform, false, "spec", "prune")
 	assertBool(t, platform, false, "spec", "wait")
 
 	platformPatches := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-platform-patches")
-	assertString(t, platformPatches, "./src/infrastructure/clusters/ash/root/platform-patches", "spec", "path")
+	assertString(t, platformPatches, "./src/infrastructure/base/platform-patches", "spec", "path")
 	assertString(t, platformPatches, "GitRepository", "spec", "sourceRef", "kind")
 	assertString(t, platformPatches, "guardian", "spec", "sourceRef", "name")
 	assertBool(t, platformPatches, false, "spec", "prune")
 	assertBool(t, platformPatches, false, "spec", "wait")
 
 	storage := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-storage")
-	assertString(t, storage, "./src/infrastructure/clusters/ash/root/storage", "spec", "path")
+	assertString(t, storage, "./src/infrastructure/base/storage", "spec", "path")
 	assertString(t, storage, "GitRepository", "spec", "sourceRef", "kind")
 	assertString(t, storage, "guardian", "spec", "sourceRef", "name")
 	assertBool(t, storage, false, "spec", "prune")
@@ -1337,7 +1000,7 @@ func testFluxHandoff(t *testing.T) {
 	}
 
 	dnsController := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-dns-controller")
-	assertString(t, dnsController, "./src/infrastructure/clusters/ash/root/dns", "spec", "path")
+	assertString(t, dnsController, "./src/infrastructure/base/dns", "spec", "path")
 	assertString(t, dnsController, "GitRepository", "spec", "sourceRef", "kind")
 	assertString(t, dnsController, "guardian", "spec", "sourceRef", "name")
 	assertBool(t, dnsController, true, "spec", "prune")
@@ -1347,152 +1010,20 @@ func testFluxHandoff(t *testing.T) {
 		t.Fatalf("guardian-mgmt-dns-controller dependsOn = %#v, want only guardian-mgmt-base", dnsControllerDeps)
 	}
 
-	tenancy := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-tenancy")
-	assertString(t, tenancy, "./src/infrastructure/clusters/ash/tenants/guardian", "spec", "path")
-	assertString(t, tenancy, "GitRepository", "spec", "sourceRef", "kind")
-	assertString(t, tenancy, "guardian", "spec", "sourceRef", "name")
-	assertBool(t, tenancy, true, "spec", "prune")
-	assertBool(t, tenancy, true, "spec", "wait")
-	tenancyDeps := sliceAt(t, tenancy, "spec", "dependsOn")
-	if len(tenancyDeps) != 1 || stringAt(asManifest(t, tenancyDeps[0], "tenancy spec.dependsOn[0]"), "name") != "guardian-mgmt-base" {
-		t.Fatalf("guardian-tenancy dependsOn = %#v, want only guardian-mgmt-base", tenancyDeps)
-	}
-
-	aisucksTenancy := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-aisucks-tenancy")
-	assertString(t, aisucksTenancy, "./src/infrastructure/clusters/ash/tenants/guardian/aisucks", "spec", "path")
-	assertString(t, aisucksTenancy, "GitRepository", "spec", "sourceRef", "kind")
-	assertString(t, aisucksTenancy, "guardian", "spec", "sourceRef", "name")
-	assertBool(t, aisucksTenancy, true, "spec", "prune")
-	assertBool(t, aisucksTenancy, true, "spec", "wait")
-	aisucksTenancyDeps := sliceAt(t, aisucksTenancy, "spec", "dependsOn")
-	if len(aisucksTenancyDeps) != 1 || stringAt(asManifest(t, aisucksTenancyDeps[0], "aisucks tenancy spec.dependsOn[0]"), "name") != "guardian-tenancy" {
-		t.Fatalf("guardian-aisucks-tenancy dependsOn = %#v, want only guardian-tenancy", aisucksTenancyDeps)
-	}
-
-	auditTenancy := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-audit-tenancy")
-	assertString(t, auditTenancy, "./src/infrastructure/clusters/ash/tenants/guardian/audit", "spec", "path")
-	assertString(t, auditTenancy, "GitRepository", "spec", "sourceRef", "kind")
-	assertString(t, auditTenancy, "guardian", "spec", "sourceRef", "name")
-	assertBool(t, auditTenancy, true, "spec", "prune")
-	assertBool(t, auditTenancy, true, "spec", "wait")
-	auditTenancyDeps := sliceAt(t, auditTenancy, "spec", "dependsOn")
-	if len(auditTenancyDeps) != 1 || stringAt(asManifest(t, auditTenancyDeps[0], "audit tenancy spec.dependsOn[0]"), "name") != "guardian-tenancy" {
-		t.Fatalf("guardian-audit-tenancy dependsOn = %#v, want only guardian-tenancy", auditTenancyDeps)
-	}
-
-	billingTenancy := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-billing-tenancy")
-	assertString(t, billingTenancy, "./src/infrastructure/clusters/ash/tenants/guardian/billing", "spec", "path")
-	assertString(t, billingTenancy, "GitRepository", "spec", "sourceRef", "kind")
-	assertString(t, billingTenancy, "guardian", "spec", "sourceRef", "name")
-	assertBool(t, billingTenancy, true, "spec", "prune")
-	assertBool(t, billingTenancy, true, "spec", "wait")
-	billingTenancyDeps := sliceAt(t, billingTenancy, "spec", "dependsOn")
-	if len(billingTenancyDeps) != 1 || stringAt(asManifest(t, billingTenancyDeps[0], "billing tenancy spec.dependsOn[0]"), "name") != "guardian-tenancy" {
-		t.Fatalf("guardian-billing-tenancy dependsOn = %#v, want only guardian-tenancy", billingTenancyDeps)
-	}
-
-	iamTenancy := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-iam-tenancy")
-	assertString(t, iamTenancy, "./src/infrastructure/clusters/ash/tenants/guardian/iam", "spec", "path")
-	assertString(t, iamTenancy, "GitRepository", "spec", "sourceRef", "kind")
-	assertString(t, iamTenancy, "guardian", "spec", "sourceRef", "name")
-	assertBool(t, iamTenancy, true, "spec", "prune")
-	assertBool(t, iamTenancy, true, "spec", "wait")
-	iamTenancyDeps := sliceAt(t, iamTenancy, "spec", "dependsOn")
-	if len(iamTenancyDeps) != 1 || stringAt(asManifest(t, iamTenancyDeps[0], "iam tenancy spec.dependsOn[0]"), "name") != "guardian-tenancy" {
-		t.Fatalf("guardian-iam-tenancy dependsOn = %#v, want only guardian-tenancy", iamTenancyDeps)
-	}
-
-	kmsTenancy := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-kms-tenancy")
-	assertString(t, kmsTenancy, "./src/infrastructure/clusters/ash/tenants/guardian/kms", "spec", "path")
-	assertString(t, kmsTenancy, "GitRepository", "spec", "sourceRef", "kind")
-	assertString(t, kmsTenancy, "guardian", "spec", "sourceRef", "name")
-	assertBool(t, kmsTenancy, true, "spec", "prune")
-	assertBool(t, kmsTenancy, true, "spec", "wait")
-	kmsTenancyDeps := sliceAt(t, kmsTenancy, "spec", "dependsOn")
-	if len(kmsTenancyDeps) != 1 || stringAt(asManifest(t, kmsTenancyDeps[0], "kms tenancy spec.dependsOn[0]"), "name") != "guardian-tenancy" {
-		t.Fatalf("guardian-kms-tenancy dependsOn = %#v, want only guardian-tenancy", kmsTenancyDeps)
-	}
-
-	kmsProd := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-kms-prod")
-	assertString(t, kmsProd, "./src/infrastructure/clusters/ash/deployments/kms/prod", "spec", "path")
-	assertString(t, kmsProd, "GitRepository", "spec", "sourceRef", "kind")
-	assertString(t, kmsProd, "guardian", "spec", "sourceRef", "name")
-	assertBool(t, kmsProd, true, "spec", "prune")
-	assertBool(t, kmsProd, true, "spec", "wait")
-	kmsProdDeps := sliceAt(t, kmsProd, "spec", "dependsOn")
-	if len(kmsProdDeps) != 1 || stringAt(asManifest(t, kmsProdDeps[0], "kms prod spec.dependsOn[0]"), "name") != "guardian-kms-tenancy" {
-		t.Fatalf("guardian-kms-prod dependsOn = %#v, want only guardian-kms-tenancy", kmsProdDeps)
-	}
-
-	releaseTenancy := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-release-tenancy")
-	assertString(t, releaseTenancy, "./src/infrastructure/clusters/ash/tenants/guardian/release", "spec", "path")
-	assertString(t, releaseTenancy, "GitRepository", "spec", "sourceRef", "kind")
-	assertString(t, releaseTenancy, "guardian", "spec", "sourceRef", "name")
-	assertBool(t, releaseTenancy, true, "spec", "prune")
-	assertBool(t, releaseTenancy, true, "spec", "wait")
-	releaseTenancyDeps := sliceAt(t, releaseTenancy, "spec", "dependsOn")
-	if len(releaseTenancyDeps) != 1 || stringAt(asManifest(t, releaseTenancyDeps[0], "release tenancy spec.dependsOn[0]"), "name") != "guardian-tenancy" {
-		t.Fatalf("guardian-release-tenancy dependsOn = %#v, want only guardian-tenancy", releaseTenancyDeps)
-	}
-
-	secretsTenancy := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-secrets-tenancy")
-	assertString(t, secretsTenancy, "./src/infrastructure/clusters/ash/tenants/guardian/secrets", "spec", "path")
-	assertString(t, secretsTenancy, "GitRepository", "spec", "sourceRef", "kind")
-	assertString(t, secretsTenancy, "guardian", "spec", "sourceRef", "name")
-	assertBool(t, secretsTenancy, true, "spec", "prune")
-	assertBool(t, secretsTenancy, true, "spec", "wait")
-	secretsTenancyDeps := sliceAt(t, secretsTenancy, "spec", "dependsOn")
-	if len(secretsTenancyDeps) != 1 || stringAt(asManifest(t, secretsTenancyDeps[0], "secrets tenancy spec.dependsOn[0]"), "name") != "guardian-tenancy" {
-		t.Fatalf("guardian-secrets-tenancy dependsOn = %#v, want only guardian-tenancy", secretsTenancyDeps)
-	}
-
-	telemetryTenancy := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-telemetry-tenancy")
-	assertString(t, telemetryTenancy, "./src/infrastructure/clusters/ash/tenants/guardian/telemetry", "spec", "path")
-	assertString(t, telemetryTenancy, "GitRepository", "spec", "sourceRef", "kind")
-	assertString(t, telemetryTenancy, "guardian", "spec", "sourceRef", "name")
-	assertBool(t, telemetryTenancy, true, "spec", "prune")
-	assertBool(t, telemetryTenancy, true, "spec", "wait")
-	telemetryTenancyDeps := sliceAt(t, telemetryTenancy, "spec", "dependsOn")
-	if len(telemetryTenancyDeps) != 1 || stringAt(asManifest(t, telemetryTenancyDeps[0], "telemetry tenancy spec.dependsOn[0]"), "name") != "guardian-tenancy" {
-		t.Fatalf("guardian-telemetry-tenancy dependsOn = %#v, want only guardian-tenancy", telemetryTenancyDeps)
-	}
-
-	workloadsTenancy := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-workloads-tenancy")
-	assertString(t, workloadsTenancy, "./src/infrastructure/clusters/ash/tenants/guardian/workloads", "spec", "path")
-	assertString(t, workloadsTenancy, "GitRepository", "spec", "sourceRef", "kind")
-	assertString(t, workloadsTenancy, "guardian", "spec", "sourceRef", "name")
-	assertBool(t, workloadsTenancy, true, "spec", "prune")
-	assertBool(t, workloadsTenancy, true, "spec", "wait")
-	workloadsTenancyDeps := sliceAt(t, workloadsTenancy, "spec", "dependsOn")
-	if len(workloadsTenancyDeps) != 1 || stringAt(asManifest(t, workloadsTenancyDeps[0], "workloads tenancy spec.dependsOn[0]"), "name") != "guardian-tenancy" {
-		t.Fatalf("guardian-workloads-tenancy dependsOn = %#v, want only guardian-tenancy", workloadsTenancyDeps)
-	}
-
-	companyTenancy := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-company-tenancy")
-	assertString(t, companyTenancy, "./src/infrastructure/clusters/ash/tenants/guardian/company", "spec", "path")
-	assertString(t, companyTenancy, "GitRepository", "spec", "sourceRef", "kind")
-	assertString(t, companyTenancy, "guardian", "spec", "sourceRef", "name")
-	assertBool(t, companyTenancy, true, "spec", "prune")
-	assertBool(t, companyTenancy, true, "spec", "wait")
-	companyTenancyDeps := sliceAt(t, companyTenancy, "spec", "dependsOn")
-	if len(companyTenancyDeps) != 1 || stringAt(asManifest(t, companyTenancyDeps[0], "company tenancy spec.dependsOn[0]"), "name") != "guardian-tenancy" {
-		t.Fatalf("guardian-company-tenancy dependsOn = %#v, want only guardian-tenancy", companyTenancyDeps)
-	}
-
 	companyProd := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-company-prod")
-	assertString(t, companyProd, "./src/infrastructure/clusters/ash/deployments/company/prod", "spec", "path")
+	assertString(t, companyProd, "./src/infrastructure/deployments/company/prod", "spec", "path")
 	assertString(t, companyProd, "GitRepository", "spec", "sourceRef", "kind")
 	assertString(t, companyProd, "guardian", "spec", "sourceRef", "name")
 	assertBool(t, companyProd, true, "spec", "prune")
 	assertBool(t, companyProd, true, "spec", "wait")
 	companyProdDeps := sliceAt(t, companyProd, "spec", "dependsOn")
-	if len(companyProdDeps) != 1 || stringAt(asManifest(t, companyProdDeps[0], "company prod spec.dependsOn[0]"), "name") != "guardian-company-tenancy" {
-		t.Fatalf("guardian-company-prod dependsOn = %#v, want only guardian-company-tenancy", companyProdDeps)
+	if len(companyProdDeps) != 1 || stringAt(asManifest(t, companyProdDeps[0], "company prod spec.dependsOn[0]"), "name") != "guardian-mgmt-base" {
+		t.Fatalf("guardian-company-prod dependsOn = %#v, want only guardian-mgmt-base", companyProdDeps)
 	}
 }
 
 func testCompanySiteProdDeployment(t *testing.T) {
-	docs := readManifests(t, "src/infrastructure/clusters/ash/deployments/company/prod/web.yaml")
+	docs := readManifests(t, "src/infrastructure/deployments/company/prod/web.yaml")
 
 	deployment := findObject(t, docs, "Deployment", "tenant-prod", "company-site")
 	assertInt(t, deployment, 3, "spec", "replicas")
@@ -1501,10 +1032,8 @@ func testCompanySiteProdDeployment(t *testing.T) {
 	assertInt(t, deployment, 0, "spec", "strategy", "rollingUpdate", "maxUnavailable")
 	assertInt(t, deployment, 1, "spec", "strategy", "rollingUpdate", "maxSurge")
 	assertString(t, deployment, "company-site", "metadata", "labels", "app.kubernetes.io/name")
-	assertString(t, deployment, "gi-company-prod", "metadata", "labels", "guardian.dev/tenant-id")
 	assertString(t, deployment, "company", "metadata", "labels", "guardian.dev/product")
 	assertString(t, deployment, "prod", "metadata", "labels", "guardian.dev/stage")
-	assertString(t, deployment, "gi-company-prod", "spec", "template", "metadata", "labels", "guardian.dev/tenant-id")
 	assertBool(t, deployment, false, "spec", "template", "spec", "automountServiceAccountToken")
 
 	containers := sliceAt(t, deployment, "spec", "template", "spec", "containers")
@@ -1525,7 +1054,6 @@ func testCompanySiteProdDeployment(t *testing.T) {
 	assertString(t, container, "http", "livenessProbe", "httpGet", "port")
 
 	service := findObject(t, docs, "Service", "tenant-prod", "company-site")
-	assertString(t, service, "gi-company-prod", "metadata", "labels", "guardian.dev/tenant-id")
 	assertString(t, service, "ClusterIP", "spec", "type")
 	assertString(t, service, "Cluster", "spec", "internalTrafficPolicy")
 	assertString(t, service, "company-site", "spec", "selector", "app.kubernetes.io/name")
@@ -1541,13 +1069,11 @@ func testCompanySiteProdDeployment(t *testing.T) {
 	assertString(t, port, "TCP", "protocol")
 
 	pdb := findObject(t, docs, "PodDisruptionBudget", "tenant-prod", "company-site")
-	assertString(t, pdb, "gi-company-prod", "metadata", "labels", "guardian.dev/tenant-id")
 	assertInt(t, pdb, 2, "spec", "minAvailable")
 	assertString(t, pdb, "company-site", "spec", "selector", "matchLabels", "app.kubernetes.io/name")
 	assertString(t, pdb, "prod", "spec", "selector", "matchLabels", "guardian.dev/stage")
 
 	ingress := findObject(t, docs, "Ingress", "tenant-prod", "company-site")
-	assertString(t, ingress, "gi-company-prod", "metadata", "labels", "guardian.dev/tenant-id")
 	assertString(t, ingress, "tenant-root", "spec", "ingressClassName")
 	rules := sliceAt(t, ingress, "spec", "rules")
 	if len(rules) != 1 {
@@ -1623,7 +1149,7 @@ func assertApp(t *testing.T, docs []manifest, want appExpectation) {
 func guardianMgmtTopologyFixture(t *testing.T) guardianMgmtTopology {
 	t.Helper()
 
-	const mainTF = "src/infrastructure/clusters/ash/bootstrap/opentofu/baremetal/main.tf"
+	const mainTF = "src/infrastructure/bootstrap/guardian-mgmt/main.tf"
 	file, diags := hclsyntax.ParseConfig(readRunfile(t, mainTF), mainTF, hcl.InitialPos)
 	assertHCLDiags(t, diags, mainTF)
 	body, ok := file.Body.(*hclsyntax.Body)
@@ -1747,7 +1273,7 @@ func hclExpressionSource(source []byte, expr hcl.Expression) string {
 func cloudflareR2Endpoint(t *testing.T) string {
 	t.Helper()
 
-	const path = "src/infrastructure/clusters/ash/bootstrap/opentofu/backend.tfvars"
+	const path = "src/infrastructure/bootstrap/backend.tfvars"
 	file, diags := hclsyntax.ParseConfig(readRunfile(t, path), path, hcl.InitialPos)
 	assertHCLDiags(t, diags, path)
 	body, ok := file.Body.(*hclsyntax.Body)

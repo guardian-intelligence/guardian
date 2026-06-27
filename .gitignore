@@ -8,6 +8,14 @@
 /src/aisucks/aisucks
 /.guardian/
 
+# Local operator state that may remain after moving the ASH bootstrap tree.
+/src/infrastructure/clusters/**/bootstrap/talm/secrets.yaml
+/src/infrastructure/clusters/**/bootstrap/talm/secrets.encrypted.yaml
+/src/infrastructure/clusters/**/bootstrap/talm/talosconfig
+/src/infrastructure/clusters/**/bootstrap/talm/talosconfig.encrypted
+/src/infrastructure/clusters/**/bootstrap/talm/talm.key
+/src/infrastructure/clusters/**/bootstrap/talm/kubeconfig
+
 # Archived pre-Cozystack tree. Keep source, not local dependency/build output.
 /src-old/**/node_modules/
 /src-old/**/dist/

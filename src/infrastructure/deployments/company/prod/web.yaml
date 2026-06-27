@@ -1,0 +1,151 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: company-site
+  namespace: tenant-prod
+  labels:
+    app.kubernetes.io/name: company-site
+    app.kubernetes.io/part-of: guardian
+    app.kubernetes.io/component: web
+    guardian.dev/product: company
+    guardian.dev/stage: prod
+spec:
+  replicas: 3
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: company-site
+      app.kubernetes.io/part-of: guardian
+      guardian.dev/stage: prod
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: company-site
+        app.kubernetes.io/part-of: guardian
+        app.kubernetes.io/component: web
+        guardian.dev/product: company
+        guardian.dev/stage: prod
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: harbor.guardianintelligence.org/guardian/company-site@sha256:d23f3f74fb61c45721367af4906df95d09f493a13b4fe1e3fc9cf5f9e06843bf
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: GUARDIAN_SITE
+              value: prod
+            - name: GUARDIAN_DEPLOY_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+              ephemeral-storage: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+              ephemeral-storage: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: company-site
+  namespace: tenant-prod
+  labels:
+    app.kubernetes.io/name: company-site
+    app.kubernetes.io/part-of: guardian
+    app.kubernetes.io/component: web
+    guardian.dev/product: company
+    guardian.dev/stage: prod
+spec:
+  type: ClusterIP
+  internalTrafficPolicy: Cluster
+  selector:
+    app.kubernetes.io/name: company-site
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: company-site
+  namespace: tenant-prod
+  labels:
+    app.kubernetes.io/name: company-site
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: company
+    guardian.dev/stage: prod
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: company-site
+      app.kubernetes.io/part-of: guardian
+      guardian.dev/stage: prod
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: company-site
+  namespace: tenant-prod
+  labels:
+    app.kubernetes.io/name: company-site
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: company
+    guardian.dev/stage: prod
+spec:
+  ingressClassName: tenant-root
+  rules:
+    - host: guardianintelligence.org
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: company-site
+                port:
+                  number: 80

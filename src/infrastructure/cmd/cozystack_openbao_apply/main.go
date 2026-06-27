@@ -54,7 +54,7 @@ func main() {
 	flag.StringVar(&cfg.RequestTimeout, "request-timeout", "15s", "kubectl API request timeout")
 	flag.StringVar(&cfg.WaitTimeout, "wait-timeout", "5m", "timeout waiting for OpenBao StatefulSet readiness")
 	flag.StringVar(&portForwardReadyWait, "port-forward-ready-timeout", "10s", "timeout waiting for kubectl port-forward readiness")
-	flag.StringVar(&cfg.Namespace, "namespace", "tenant-guardian-kms", "OpenBao namespace")
+	flag.StringVar(&cfg.Namespace, "namespace", "tenant-root", "OpenBao namespace")
 	flag.StringVar(&cfg.StatefulSet, "statefulset", "openbao-guardian", "OpenBao StatefulSet name")
 	flag.StringVar(&cfg.Service, "service", "openbao-guardian", "OpenBao Service name")
 	flag.StringVar(&cfg.BootstrapSecret, "bootstrap-secret", "openbao-guardian-bootstrap", "Kubernetes Secret containing cluster-local OpenBao bootstrap material")
@@ -113,11 +113,6 @@ func validateConfig(cfg applyConfig) error {
 }
 
 func runApply(ctx context.Context, cfg applyConfig) error {
-	env := os.Environ()
-	if err := validateBackendCredentials(env); err != nil {
-		return err
-	}
-
 	runner := kubectlRunner{
 		bin:            cfg.Kubectl,
 		kubeconfig:     cfg.Kubeconfig,
@@ -148,7 +143,7 @@ func runApply(ctx context.Context, cfg applyConfig) error {
 	defer pf.stop()
 
 	openbaoAddr := fmt.Sprintf("http://127.0.0.1:%d", localPort)
-	env = tofuEnv(env, openbaoAddr, token)
+	env := tofuEnv(os.Environ(), openbaoAddr, token)
 	if err := runTofu(ctx, cfg.Tofu, "tofu init guardian-mgmt-openbao", tofuInitArgs(cfg.Root, cfg.BackendEndpoint), env, token); err != nil {
 		return err
 	}
@@ -225,19 +220,6 @@ func runTofu(ctx context.Context, tofu, label string, args, env []string, token 
 	return nil
 }
 
-func validateBackendCredentials(env []string) error {
-	missing := []string{}
-	for _, key := range []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"} {
-		if !hasNonEmptyEnv(env, key) {
-			missing = append(missing, key)
-		}
-	}
-	if len(missing) == 0 {
-		return nil
-	}
-	return fmt.Errorf("OpenTofu S3 backend credentials are required before reading OpenBao bootstrap material; set %s from the off-cluster cloudflare_r2_access_key_id/cloudflare_r2_secret_access_key values", strings.Join(missing, " and "))
-}
-
 func tofuEnv(base []string, openbaoAddr, token string) []string {
 	env := append([]string{}, base...)
 	env = putEnv(env, "BAO_ADDR", openbaoAddr)
@@ -249,21 +231,6 @@ func tofuEnv(base []string, openbaoAddr, token string) []string {
 		env = append(env, "AWS_EC2_METADATA_DISABLED=true")
 	}
 	return env
-}
-
-func hasNonEmptyEnv(env []string, key string) bool {
-	value, ok := envValue(env, key)
-	return ok && strings.TrimSpace(value) != ""
-}
-
-func envValue(env []string, key string) (string, bool) {
-	prefix := key + "="
-	for _, item := range env {
-		if strings.HasPrefix(item, prefix) {
-			return strings.TrimPrefix(item, prefix), true
-		}
-	}
-	return "", false
 }
 
 func putEnv(env []string, key, value string) []string {

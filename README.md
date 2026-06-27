@@ -20,8 +20,6 @@ aspect infra bootstrap
 aspect infra openbao-drill \
   --mode init-unseal
 
-AWS_ACCESS_KEY_ID="${cloudflare_r2_access_key_id}" \
-AWS_SECRET_ACCESS_KEY="${cloudflare_r2_secret_access_key}" \
 aspect infra openbao-apply
 
 aspect infra observability-drill
@@ -36,27 +34,14 @@ installer/operator to the repo-pinned version.
 `aspect infra upgrade-cozystack` is the narrow day-two path for existing
 clusters when only the Cozystack installer/operator release needs to move.
 `aspect infra openbao-drill --mode init-unseal` initializes/unseals the
-tenant-scoped Guardian KMS OpenBao authority in `tenant-guardian-kms`, and
-`aspect infra openbao-apply` applies the standard OpenBao API state through a
-live port-forward. `openbao-apply` requires the off-cluster R2 state credentials
-as `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` before it reads any OpenBao
-bootstrap material. In apply mode, `openbao-apply` then runs
-`openbao-drill --mode api-state` to verify KV v2, transit keys, policies, and
-Kubernetes auth roles for ExternalDNS and third-party integrations. Use an
-explicit `--namespace tenant-root` only for the legacy root break-glass OpenBao
-instance during migration. `aspect infra observability-drill`
-creates a short root Postgres pgbench job, then queries VictoriaMetrics and
-VictoriaLogs for that exact workload and the CNPG scrape path. Postgres and
-ClickHouse backups use Cozystack 1.5's platform-managed `BackupClass/cozy-default`
-and system bucket via
+cluster-local OpenBao app, and `aspect infra openbao-apply` applies the standard
+OpenBao API state through a live port-forward. `aspect infra
+observability-drill` creates a short root Postgres pgbench job, then queries
+VictoriaMetrics and VictoriaLogs for that exact workload and the CNPG scrape
+path. Postgres and ClickHouse backups use Cozystack 1.5's platform-managed
+`BackupClass/cozy-default` and system bucket via
 `spec.backup.useSystemBucket: true`; the repo does not carry Guardian-specific
 backup strategies or per-app backup credential Secrets.
-
-The live management tasks set `GODEBUG=tlsmlkem=0` for repo-pinned Go clients
-that talk to guardian-mgmt Kubernetes or Talos endpoints. The current public
-control-plane path can time out during larger default Go TLS ClientHello
-handshakes; this compatibility setting keeps operator checks repeatable until
-the underlying network/TLS path is fixed.
 
 Available live debugging CLIs are repo-pinned and can be installed as local
 shims:

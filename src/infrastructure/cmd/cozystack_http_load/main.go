@@ -58,7 +58,7 @@ func main() {
 	flag.StringVar(&cfg.RequestTimeout, "request-timeout", "15s", "kubectl API request timeout")
 	flag.StringVar(&cfg.WaitTimeout, "wait-timeout", "15m", "timeout waiting for Kubernetes surface readiness")
 	flag.StringVar(&cfg.Surface, "surface", "", "surface to load: harbor, dashboard, openbao, or custom with --url")
-	flag.StringVar(&cfg.Stage, "stage", "root", "Guardian surface stage: root for Harbor/dashboard, prod for tenant OpenBao, bootstrap-root for legacy root OpenBao")
+	flag.StringVar(&cfg.Stage, "stage", "root", "Guardian bootstrap stage: root")
 	flag.StringVar(&cfg.URL, "url", "", "explicit URL to load; overrides --surface target mapping")
 	flag.StringVar(&cfg.ExpectedStatuses, "expected-statuses", "", "comma-separated acceptable HTTP status codes")
 	flag.StringVar(&cfg.HostOverrides, "host-overrides", "", "comma-separated k6 DNS host overrides as host=ip entries")
@@ -307,26 +307,25 @@ func surfaceReadinessChecks(cfg loadConfig) ([]kubectlCommand, error) {
 			},
 		}, nil
 	case "openbao":
-		namespace, err := openBaoNamespaceForStage(stage)
-		if err != nil {
-			return nil, err
+		if stage != "root" {
+			return nil, errors.New("OpenBao is a root management-cluster surface; use --stage root")
 		}
 		return []kubectlCommand{
 			{
 				Label: "OpenBao app yaml",
-				Args:  []string{"-n", namespace, "get", "openbaos.apps.cozystack.io/guardian", "-o", "yaml"},
+				Args:  []string{"-n", "tenant-root", "get", "openbaos.apps.cozystack.io/guardian", "-o", "yaml"},
 			},
 			{
 				Label: "OpenBao statefulset yaml",
-				Args:  []string{"-n", namespace, "get", "statefulset.apps/openbao-guardian", "-o", "yaml"},
+				Args:  []string{"-n", "tenant-root", "get", "statefulset.apps/openbao-guardian", "-o", "yaml"},
 			},
 			{
 				Label: "wait OpenBao app Ready",
-				Args:  []string{"-n", namespace, "wait", "--for=condition=Ready", "openbaos.apps.cozystack.io/guardian", "--timeout=" + cfg.WaitTimeout},
+				Args:  []string{"-n", "tenant-root", "wait", "--for=condition=Ready", "openbaos.apps.cozystack.io/guardian", "--timeout=" + cfg.WaitTimeout},
 			},
 			{
 				Label: "wait OpenBao statefulset ready replicas",
-				Args:  []string{"-n", namespace, "wait", "--for=jsonpath={.status.readyReplicas}=3", "statefulset.apps/openbao-guardian", "--timeout=" + cfg.WaitTimeout},
+				Args:  []string{"-n", "tenant-root", "wait", "--for=jsonpath={.status.readyReplicas}=3", "statefulset.apps/openbao-guardian", "--timeout=" + cfg.WaitTimeout},
 			},
 		}, nil
 	default:
@@ -364,8 +363,8 @@ func resolveTarget(cfg loadConfig, localPort int) (targetSpec, error) {
 			RequestName:      requestName(surface, stage),
 		}, nil
 	case "openbao":
-		if _, err := openBaoNamespaceForStage(stage); err != nil {
-			return targetSpec{}, err
+		if stage != "root" {
+			return targetSpec{}, errors.New("OpenBao is a root management-cluster surface; use --stage root")
 		}
 		if localPort == 0 {
 			return targetSpec{
@@ -406,17 +405,6 @@ func namespaceForStage(stage string) (string, error) {
 		return "tenant-root", nil
 	default:
 		return "", fmt.Errorf("stage %q is not root", stage)
-	}
-}
-
-func openBaoNamespaceForStage(stage string) (string, error) {
-	switch stage {
-	case "prod":
-		return "tenant-guardian-kms", nil
-	case "bootstrap-root":
-		return "tenant-root", nil
-	default:
-		return "", fmt.Errorf("OpenBao supports --stage prod for the tenant KMS authority or --stage bootstrap-root for the legacy root break-glass instance, got %q", stage)
 	}
 }
 
@@ -465,10 +453,7 @@ type portForward struct {
 }
 
 func startPortForward(ctx context.Context, cfg loadConfig, localPort int) (*portForward, error) {
-	args, err := openBaoPortForwardArgs(cfg, localPort)
-	if err != nil {
-		return nil, err
-	}
+	args := openBaoPortForwardArgs(cfg, localPort)
 	cmd := exec.CommandContext(ctx, cfg.Kubectl, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -518,12 +503,8 @@ func startPortForward(ctx context.Context, cfg loadConfig, localPort int) (*port
 	}
 }
 
-func openBaoPortForwardArgs(cfg loadConfig, localPort int) ([]string, error) {
-	namespace, err := openBaoNamespaceForStage(strings.ToLower(cfg.Stage))
-	if err != nil {
-		return nil, err
-	}
-	return kubectlArgs(cfg, "-n", namespace, "port-forward", "--address", "127.0.0.1", "svc/openbao-guardian", fmt.Sprintf("%d:8200", localPort)), nil
+func openBaoPortForwardArgs(cfg loadConfig, localPort int) []string {
+	return kubectlArgs(cfg, "-n", "tenant-root", "port-forward", "--address", "127.0.0.1", "svc/openbao-guardian", fmt.Sprintf("%d:8200", localPort))
 }
 
 func drainOutput(done chan string) string {

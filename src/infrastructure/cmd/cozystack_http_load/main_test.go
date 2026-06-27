@@ -26,8 +26,8 @@ func TestResolveTarget(t *testing.T) {
 			status: "200,302",
 		},
 		{
-			name:   "openbao prod with port",
-			cfg:    loadConfig{Surface: "openbao", Stage: "prod"},
+			name:   "openbao root with port",
+			cfg:    loadConfig{Surface: "openbao", Stage: "root"},
 			port:   18200,
 			url:    "http://127.0.0.1:18200/v1/sys/health",
 			status: "200,429,472,473,501,503",
@@ -53,7 +53,6 @@ func TestResolveTargetValidation(t *testing.T) {
 	for _, cfg := range []loadConfig{
 		{Surface: "harbor", Stage: "gamma"},
 		{Surface: "dashboard", Stage: "dev"},
-		{Surface: "openbao", Stage: "root"},
 		{Surface: "openbao", Stage: "dev"},
 		{Surface: "nope", Stage: "dev"},
 	} {
@@ -62,7 +61,7 @@ func TestResolveTargetValidation(t *testing.T) {
 		}
 	}
 
-	got, err := resolveTarget(loadConfig{Surface: "openbao", Stage: "prod"}, 0)
+	got, err := resolveTarget(loadConfig{Surface: "openbao", Stage: "root"}, 0)
 	if err != nil {
 		t.Fatalf("openbao without port should prepare a port-forward target: %v", err)
 	}
@@ -72,32 +71,18 @@ func TestResolveTargetValidation(t *testing.T) {
 }
 
 func TestOpenBaoPortForwardArgs(t *testing.T) {
-	cfg := loadConfig{Kubeconfig: "/kubeconfig", RequestTimeout: "15s", Stage: "prod"}
+	cfg := loadConfig{Kubeconfig: "/kubeconfig", RequestTimeout: "15s"}
 	want := []string{
 		"--kubeconfig", "/kubeconfig",
 		"--request-timeout=15s",
-		"-n", "tenant-guardian-kms",
+		"-n", "tenant-root",
 		"port-forward",
 		"--address", "127.0.0.1",
 		"svc/openbao-guardian",
 		"18200:8200",
 	}
-	got, err := openBaoPortForwardArgs(cfg, 18200)
-	if err != nil {
-		t.Fatalf("openBaoPortForwardArgs() error = %v", err)
-	}
-	if !reflect.DeepEqual(got, want) {
+	if got := openBaoPortForwardArgs(cfg, 18200); !reflect.DeepEqual(got, want) {
 		t.Fatalf("openBaoPortForwardArgs() = %#v, want %#v", got, want)
-	}
-
-	legacy := cfg
-	legacy.Stage = "bootstrap-root"
-	got, err = openBaoPortForwardArgs(legacy, 18200)
-	if err != nil {
-		t.Fatalf("legacy openBaoPortForwardArgs() error = %v", err)
-	}
-	if !hasArg(got, "tenant-root") {
-		t.Fatalf("legacy openBaoPortForwardArgs() missing tenant-root namespace: %#v", got)
 	}
 }
 
@@ -257,10 +242,10 @@ func TestSurfaceReadinessChecks(t *testing.T) {
 		},
 		{
 			name: "openbao",
-			cfg:  loadConfig{Surface: "openbao", Stage: "prod", WaitTimeout: "20m"},
+			cfg:  loadConfig{Surface: "openbao", Stage: "root", WaitTimeout: "20m"},
 			required: []commandExpectation{
-				{label: "OpenBao app yaml", parts: []string{"tenant-guardian-kms", "openbaos.apps.cozystack.io/guardian", "-o", "yaml"}},
-				{label: "OpenBao statefulset yaml", parts: []string{"tenant-guardian-kms", "statefulset.apps/openbao-guardian", "-o", "yaml"}},
+				{label: "OpenBao app yaml", parts: []string{"tenant-root", "openbaos.apps.cozystack.io/guardian", "-o", "yaml"}},
+				{label: "OpenBao statefulset yaml", parts: []string{"tenant-root", "statefulset.apps/openbao-guardian", "-o", "yaml"}},
 				{label: "wait OpenBao app Ready", parts: []string{"--for=condition=Ready", "openbaos.apps.cozystack.io/guardian", "--timeout=20m"}},
 				{label: "wait OpenBao statefulset ready replicas", parts: []string{"--for=jsonpath={.status.readyReplicas}=3", "statefulset.apps/openbao-guardian", "--timeout=20m"}},
 			},
@@ -283,7 +268,6 @@ func TestSurfaceReadinessChecks(t *testing.T) {
 func TestSurfaceReadinessValidation(t *testing.T) {
 	for _, cfg := range []loadConfig{
 		{Surface: "dashboard", Stage: "dev", WaitTimeout: "15m"},
-		{Surface: "openbao", Stage: "root", WaitTimeout: "15m"},
 		{Surface: "openbao", Stage: "dev", WaitTimeout: "15m"},
 		{Surface: "custom", Stage: "dev", WaitTimeout: "15m"},
 		{Surface: "nope", Stage: "dev", WaitTimeout: "15m"},

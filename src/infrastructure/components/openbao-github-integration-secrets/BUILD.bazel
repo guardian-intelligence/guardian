@@ -1,8 +1,0 @@
-filegroup(
-    name = "manifests",
-    srcs = [
-        "github-app-secrets.yaml",
-        "kustomization.yaml",
-    ],
-    visibility = ["//visibility:public"],
-)
