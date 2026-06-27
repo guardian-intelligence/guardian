@@ -540,7 +540,7 @@ func testExternalDNS(t *testing.T) {
 	assertString(t, externalSecret, "SecretStore", "spec", "secretStoreRef", "kind")
 	assertString(t, externalSecret, "openbao", "spec", "secretStoreRef", "name")
 	assertString(t, externalSecret, "cloudflare-external-dns", "spec", "target", "name")
-	assertString(t, externalSecret, "Owner", "spec", "target", "creationPolicy")
+	assertString(t, externalSecret, "Orphan", "spec", "target", "creationPolicy")
 	assertString(t, externalSecret, "Retain", "spec", "target", "deletionPolicy")
 	data := sliceAt(t, externalSecret, "spec", "data")
 	if len(data) != 1 {
@@ -874,6 +874,19 @@ func testOpenBao(t *testing.T) {
 	assertBool(t, bao, false, "spec", "external")
 	assertString(t, bao, "1", "spec", "resources", "cpu")
 	assertString(t, bao, "2Gi", "spec", "resources", "memory")
+
+	rbac := readManifests(t, "src/infrastructure/base/openbao/auth-delegator.yaml")
+	binding := findObject(t, rbac, "ClusterRoleBinding", "", "guardian-openbao-root-auth-delegator")
+	assertString(t, binding, "rbac.authorization.k8s.io/v1", "apiVersion")
+	assertString(t, binding, "system:auth-delegator", "roleRef", "name")
+	subjects := sliceAt(t, binding, "subjects")
+	if len(subjects) != 1 {
+		t.Fatalf("openbao auth-delegator subjects = %d, want 1", len(subjects))
+	}
+	subject := asManifest(t, subjects[0], "openbao auth-delegator subject")
+	assertString(t, subject, "ServiceAccount", "kind")
+	assertString(t, subject, "openbao-guardian", "name")
+	assertString(t, subject, "tenant-root", "namespace")
 
 	policies := readManifests(t, "src/infrastructure/base/openbao/networkpolicy.yaml")
 	policy := findObject(t, policies, "CiliumNetworkPolicy", "tenant-root", "allow-openbao-to-apiserver")
