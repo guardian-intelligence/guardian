@@ -2,7 +2,10 @@ Bazel polyglot hermetically sealed monorepo for Guardian, a free open-source sel
 
 Pitch: CozyStack for agents.
 
-Grep through docs https://github.com/cozystack/cozystack/tree/release-1.5.0/docs (ensure you're reading the 1.5 docs and NOT v0 docs or v1.4.0.)
+Grep through Cozystack 1.5 docs from the exact `v1.5.0` tag when validating
+1.5.0 behavior, or the `release-1.5` branch when intentionally reading the
+maintained 1.5 line. Do not use v0 docs, v1.4 docs, or current main by
+accident.
 
 Reference Cozystack for prior art for the cloud portion. Other inspiration: Zarf/UDS, AWS Landing Zone Accelerator
 <company_topology>
@@ -48,13 +51,13 @@ region: ash
 
     tenant-guardian                 # Guardian-owned control planes/products
       namespace: guardian-system    # OpenBao, release controllers, shared ops
-      namespace: guardian-dev       # PR preview / continuous integration
-      namespace: guardian-gamma     # staging
+      namespace: guardian-beta      # first durable integration stage
+      namespace: guardian-gamma     # staging / release-candidate validation
       namespace: guardian-prod      # production
 
       labels:
-        guardian.dev/component: iam | kms | audit | telemetry | release | billing | aisucks | workloads | company
-        guardian.dev/stage: dev | gamma | prod
+        guardian.dev/component: iam | secrets | audit | telemetry | release | billing | aisucks | workloads | company
+        guardian.dev/stage: beta | gamma | prod
         guardian.dev/tenant-id: gi-guardian
 
 region: cmh                         # hypothetical future region
@@ -64,7 +67,8 @@ region: cmh                         # hypothetical future region
 ```
 
 Default release channels: Edge (CD on main), nightly, RC, stable.
-Default deployment stages: dev (PR preview), gamma (staging), prod.
+Default deployment stages: beta, gamma, prod. Use `dev` only for local or
+PR-preview workflows, not durable regional namespace names.
 Release channels and deployment stages are not the same thing. Do not encode
 release channels as Cozystack Tenants.
 </company_topology>
@@ -88,12 +92,12 @@ src/
         deploy/base/
 
     services/
-      kms/
-        api/                           # future Connect KMS/Secrets API
+      secrets/
+        openbao/                       # OpenBao substrate, policies, transit, projection
+        api/                           # future Connect KMS/Secrets API when needed
         service/                       # future wrapper/control plane if needed
         release/
-        deploy/base/                   # reusable OpenBao-backed runtime
-        component
+        deploy/base/
 
       release/
         api/
@@ -139,7 +143,7 @@ src/
       deployments/
         guardian/                      # reconciled into tenant-guardian
           system/                      # OpenBao, release controllers, shared ops
-          dev/
+          beta/
           gamma/
           prod/
         company/prod/                  # compatibility path until folded in
