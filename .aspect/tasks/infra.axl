@@ -522,6 +522,15 @@ def _render_kustomizations(ctx):
         return 1
     for path in [
         "src/infrastructure/base",
+        # Compatibility bridges for live Flux Kustomizations while reverting
+        # the ASH directory cutover back to src/infrastructure/base.
+        "src/infrastructure/clusters/ash/root/cozystack",
+        "src/infrastructure/clusters/ash/root/storage",
+        "src/infrastructure/clusters/ash/root",
+        "src/infrastructure/clusters/ash/root/platform-patches",
+        "src/infrastructure/clusters/ash/root/app-patches",
+        "src/infrastructure/clusters/ash/root/dns",
+        "src/infrastructure/clusters/ash/deployments/company/prod",
     ]:
         rc = _capture_success(
             ctx,
