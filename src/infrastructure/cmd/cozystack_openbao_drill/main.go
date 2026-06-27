@@ -46,15 +46,6 @@ type bootstrapMaterial struct {
 	RootToken string
 }
 
-type baoMount struct {
-	Type    string            `json:"type"`
-	Options map[string]string `json:"options"`
-}
-
-type baoDataResponse struct {
-	Data map[string]any `json:"data"`
-}
-
 var dnsSubdomainRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
 var snapshotFileRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
@@ -64,10 +55,10 @@ func main() {
 	flag.StringVar(&cfg.Kubeconfig, "kubeconfig", "", "kubeconfig for guardian-mgmt")
 	flag.StringVar(&cfg.RequestTimeout, "request-timeout", "15s", "kubectl API request timeout")
 	flag.StringVar(&cfg.WaitTimeout, "wait-timeout", "5m", "timeout for OpenBao StatefulSet readiness")
-	flag.StringVar(&cfg.Namespace, "namespace", "tenant-guardian-kms", "OpenBao namespace")
+	flag.StringVar(&cfg.Namespace, "namespace", "tenant-root", "OpenBao namespace")
 	flag.StringVar(&cfg.StatefulSet, "statefulset", "openbao-guardian", "OpenBao StatefulSet name")
 	flag.StringVar(&cfg.BootstrapSecret, "bootstrap-secret", "openbao-guardian-bootstrap", "Kubernetes Secret for cluster-local OpenBao bootstrap material")
-	flag.StringVar(&cfg.Mode, "mode", "status", "drill mode: status, api-state, init-unseal, or snapshot")
+	flag.StringVar(&cfg.Mode, "mode", "status", "drill mode: status, init-unseal, or snapshot")
 	flag.StringVar(&cfg.SnapshotName, "snapshot-name", "", "snapshot filename inside the OpenBao pod; defaults to a UTC timestamped name")
 	flag.Parse()
 
@@ -104,9 +95,9 @@ func validateConfig(cfg openBaoConfig) error {
 		}
 	}
 	switch cfg.Mode {
-	case "status", "api-state", "init-unseal", "snapshot":
+	case "status", "init-unseal", "snapshot":
 	default:
-		return fmt.Errorf("--mode %q is not one of status, api-state, init-unseal, snapshot", cfg.Mode)
+		return fmt.Errorf("--mode %q is not one of status, init-unseal, snapshot", cfg.Mode)
 	}
 	if !snapshotFileRE.MatchString(cfg.SnapshotName) || strings.Contains(cfg.SnapshotName, "..") {
 		return fmt.Errorf("--snapshot-name %q must be a simple ASCII filename using letters, digits, dot, underscore, or hyphen", cfg.SnapshotName)
@@ -136,8 +127,6 @@ func runDrill(ctx context.Context, cfg openBaoConfig) error {
 	switch cfg.Mode {
 	case "status":
 		return printStatus(ctx, runner, cfg, replicas)
-	case "api-state":
-		return verifyAPIState(ctx, runner, cfg, replicas)
 	case "init-unseal":
 		return initUnseal(ctx, runner, cfg, replicas)
 	case "snapshot":
@@ -171,121 +160,6 @@ func printStatus(ctx context.Context, runner kubectlRunner, cfg openBaoConfig, r
 	} else {
 		fmt.Printf("bootstrap secret unavailable; skipping raft autopilot state: %v\n", err)
 	}
-	return nil
-}
-
-func verifyAPIState(ctx context.Context, runner kubectlRunner, cfg openBaoConfig, replicas int) error {
-	if err := runner.run(ctx, "wait OpenBao StatefulSet Ready", "wait", "--for=jsonpath={.status.readyReplicas}="+strconv.Itoa(replicas), "statefulset.apps/"+cfg.StatefulSet, "--timeout="+cfg.WaitTimeout); err != nil {
-		return err
-	}
-	material, err := readBootstrapMaterial(ctx, runner, cfg.BootstrapSecret)
-	if err != nil {
-		return fmt.Errorf("read bootstrap secret before OpenBao API-state verification: %w", err)
-	}
-	pod := podName(cfg.StatefulSet, 0)
-
-	secrets, err := baoOutput(ctx, runner, pod, "secrets list", material.RootToken, "secrets", "list", "-format=json")
-	if err != nil {
-		return err
-	}
-	if err := assertMount(secrets, "kv/", "kv", map[string]string{"version": "2"}); err != nil {
-		return err
-	}
-	if err := assertMount(secrets, "transit/", "transit", nil); err != nil {
-		return err
-	}
-
-	auth, err := baoOutput(ctx, runner, pod, "auth list", material.RootToken, "auth", "list", "-format=json")
-	if err != nil {
-		return err
-	}
-	if err := assertMount(auth, "kubernetes/", "kubernetes", nil); err != nil {
-		return err
-	}
-
-	encryptionKey, err := baoOutput(ctx, runner, pod, "read transit encryption key", material.RootToken, "read", "-format=json", "transit/keys/guardian-integrations-encryption")
-	if err != nil {
-		return err
-	}
-	if err := assertTransitKey(encryptionKey, "guardian-integrations-encryption", "aes256-gcm96"); err != nil {
-		return err
-	}
-
-	signingKey, err := baoOutput(ctx, runner, pod, "read transit signing key", material.RootToken, "read", "-format=json", "transit/keys/guardian-integrations-signing")
-	if err != nil {
-		return err
-	}
-	if err := assertTransitKey(signingKey, "guardian-integrations-signing", "ed25519"); err != nil {
-		return err
-	}
-
-	externalDNSPolicy, err := baoOutput(ctx, runner, pod, "read external-dns policy", material.RootToken, "policy", "read", "tenant-root-external-dns")
-	if err != nil {
-		return err
-	}
-	if err := assertPolicyContains(externalDNSPolicy, "tenant-root-external-dns", []string{
-		`path "kv/data/guardian/guardian-mgmt/tenant-root/dns/external-dns"`,
-		`capabilities = ["read"]`,
-	}); err != nil {
-		return err
-	}
-
-	secretReaderPolicy, err := baoOutput(ctx, runner, pod, "read third-party secret-reader policy", material.RootToken, "policy", "read", "guardian-third-party-secret-reader")
-	if err != nil {
-		return err
-	}
-	if err := assertPolicyContains(secretReaderPolicy, "guardian-third-party-secret-reader", []string{
-		`path "kv/data/guardian/guardian-mgmt/integrations/*"`,
-		`capabilities = ["read"]`,
-	}); err != nil {
-		return err
-	}
-
-	transitPolicy, err := baoOutput(ctx, runner, pod, "read third-party transit policy", material.RootToken, "policy", "read", "guardian-third-party-transit-client")
-	if err != nil {
-		return err
-	}
-	if err := assertPolicyContains(transitPolicy, "guardian-third-party-transit-client", []string{
-		`path "transit/encrypt/guardian-integrations-encryption"`,
-		`path "transit/decrypt/guardian-integrations-encryption"`,
-		`path "transit/sign/guardian-integrations-signing"`,
-		`capabilities = ["update"]`,
-	}); err != nil {
-		return err
-	}
-
-	externalDNSRole, err := baoOutput(ctx, runner, pod, "read external-dns auth role", material.RootToken, "read", "-format=json", "auth/kubernetes/role/tenant-root-external-dns")
-	if err != nil {
-		return err
-	}
-	if err := assertKubernetesAuthRole(externalDNSRole, "tenant-root-external-dns", []string{"external-dns-secrets"}, []string{"external-dns"}, []string{"tenant-root-external-dns"}, "openbao"); err != nil {
-		return err
-	}
-
-	githubRole, err := baoOutput(ctx, runner, pod, "read GitHub integration auth role", material.RootToken, "read", "-format=json", "auth/kubernetes/role/guardian-github-integrations")
-	if err != nil {
-		return err
-	}
-	if err := assertKubernetesAuthRole(githubRole, "guardian-github-integrations",
-		[]string{"github-actions-runner-controller", "github-app-secrets"},
-		[]string{
-			"arc-systems",
-			"tenant-guardian-release",
-			"tenant-guardian-release-beta",
-			"tenant-guardian-release-gamma",
-			"tenant-guardian-release-prod",
-			"tenant-guardian-secrets",
-			"tenant-guardian-secrets-beta",
-			"tenant-guardian-secrets-gamma",
-			"tenant-guardian-secrets-prod",
-		},
-		[]string{"guardian-third-party-secret-reader", "guardian-third-party-transit-client"},
-		"openbao",
-	); err != nil {
-		return err
-	}
-
-	fmt.Printf("openbao api-state drill verified mounts, transit keys, policies, and Kubernetes auth roles\n")
 	return nil
 }
 
@@ -405,159 +279,6 @@ func parseInitResult(raw string) (bootstrapMaterial, error) {
 		return bootstrapMaterial{}, errors.New("bao operator init returned empty root token")
 	}
 	return bootstrapMaterial{UnsealKey: result.UnsealKeysB64[0], RootToken: result.RootToken}, nil
-}
-
-func assertMount(raw, mountPath, mountType string, options map[string]string) error {
-	payload, err := jsonObjectPayload(raw)
-	if err != nil {
-		return fmt.Errorf("parse OpenBao mount list: %w", err)
-	}
-	var mounts map[string]baoMount
-	if err := json.Unmarshal([]byte(payload), &mounts); err != nil {
-		return fmt.Errorf("parse OpenBao mount list: %w", err)
-	}
-	mount, ok := mounts[mountPath]
-	if !ok {
-		return fmt.Errorf("OpenBao mount %s is missing", mountPath)
-	}
-	if mount.Type != mountType {
-		return fmt.Errorf("OpenBao mount %s type = %q, want %q", mountPath, mount.Type, mountType)
-	}
-	for key, want := range options {
-		if got := mount.Options[key]; got != want {
-			return fmt.Errorf("OpenBao mount %s option %s = %q, want %q", mountPath, key, got, want)
-		}
-	}
-	return nil
-}
-
-func assertTransitKey(raw, name, keyType string) error {
-	data, err := baoData(raw)
-	if err != nil {
-		return fmt.Errorf("parse transit key %s: %w", name, err)
-	}
-	if got := stringField(data, "name"); got != name {
-		return fmt.Errorf("transit key %s name = %q, want %q", name, got, name)
-	}
-	if got := stringField(data, "type"); got != keyType {
-		return fmt.Errorf("transit key %s type = %q, want %q", name, got, keyType)
-	}
-	for _, key := range []string{"deletion_allowed", "exportable"} {
-		got, ok := data[key].(bool)
-		if !ok {
-			return fmt.Errorf("transit key %s %s is missing or not boolean", name, key)
-		}
-		if got {
-			return fmt.Errorf("transit key %s %s = true, want false", name, key)
-		}
-	}
-	return nil
-}
-
-func assertPolicyContains(policy, name string, snippets []string) error {
-	for _, snippet := range snippets {
-		if !strings.Contains(policy, snippet) {
-			return fmt.Errorf("OpenBao policy %s missing %q", name, snippet)
-		}
-	}
-	return nil
-}
-
-func assertKubernetesAuthRole(raw, name string, serviceAccounts, namespaces, policies []string, audience string) error {
-	data, err := baoData(raw)
-	if err != nil {
-		return fmt.Errorf("parse Kubernetes auth role %s: %w", name, err)
-	}
-	for field, wants := range map[string][]string{
-		"bound_service_account_names":      serviceAccounts,
-		"bound_service_account_namespaces": namespaces,
-		"token_policies":                   policies,
-	} {
-		got, err := stringListField(data, field)
-		if err != nil {
-			return fmt.Errorf("Kubernetes auth role %s: %w", name, err)
-		}
-		for _, want := range wants {
-			if !contains(got, want) {
-				return fmt.Errorf("Kubernetes auth role %s %s missing %q from %#v", name, field, want, got)
-			}
-		}
-	}
-	gotAudience := stringField(data, "audience")
-	if gotAudience == "" {
-		audiences, err := stringListField(data, "audiences")
-		if err != nil {
-			return fmt.Errorf("Kubernetes auth role %s audience is missing", name)
-		}
-		if contains(audiences, audience) {
-			return nil
-		}
-		return fmt.Errorf("Kubernetes auth role %s audiences missing %q from %#v", name, audience, audiences)
-	}
-	if gotAudience != audience {
-		return fmt.Errorf("Kubernetes auth role %s audience = %q, want %q", name, gotAudience, audience)
-	}
-	return nil
-}
-
-func baoData(raw string) (map[string]any, error) {
-	payload, err := jsonObjectPayload(raw)
-	if err != nil {
-		return nil, err
-	}
-	var response baoDataResponse
-	if err := json.Unmarshal([]byte(payload), &response); err != nil {
-		return nil, err
-	}
-	if response.Data == nil {
-		return nil, errors.New("response missing data object")
-	}
-	return response.Data, nil
-}
-
-func stringField(data map[string]any, key string) string {
-	value, _ := data[key].(string)
-	return value
-}
-
-func stringListField(data map[string]any, key string) ([]string, error) {
-	value, ok := data[key]
-	if !ok {
-		return nil, fmt.Errorf("field %s is missing", key)
-	}
-	switch typed := value.(type) {
-	case []any:
-		out := []string{}
-		for _, item := range typed {
-			text, ok := item.(string)
-			if !ok {
-				return nil, fmt.Errorf("field %s contains non-string item %#v", key, item)
-			}
-			out = append(out, text)
-		}
-		return out, nil
-	case string:
-		if strings.TrimSpace(typed) == "" {
-			return []string{}, nil
-		}
-		parts := strings.Split(typed, ",")
-		out := make([]string, 0, len(parts))
-		for _, part := range parts {
-			out = append(out, strings.TrimSpace(part))
-		}
-		return out, nil
-	default:
-		return nil, fmt.Errorf("field %s has unsupported type %T", key, value)
-	}
-}
-
-func contains(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }
 
 func jsonObjectPayload(raw string) (string, error) {

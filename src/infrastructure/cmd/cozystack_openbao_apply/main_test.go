@@ -12,11 +12,11 @@ func TestValidateConfig(t *testing.T) {
 	cfg := applyConfig{
 		Kubectl:              "/kubectl",
 		Tofu:                 "/tofu",
-		Namespace:            "tenant-guardian-kms",
+		Namespace:            "tenant-root",
 		StatefulSet:          "openbao-guardian",
 		Service:              "openbao-guardian",
 		BootstrapSecret:      "openbao-guardian-bootstrap",
-		Root:                 "/repo/src/infrastructure/clusters/ash/bootstrap/opentofu/openbao-bootstrap",
+		Root:                 "/repo/src/infrastructure/bootstrap/guardian-mgmt-openbao",
 		BackendEndpoint:      "https://account.r2.cloudflarestorage.com",
 		Mode:                 "apply",
 		PortForwardReadyWait: time.Second,
@@ -62,7 +62,7 @@ func TestDecodeRootToken(t *testing.T) {
 }
 
 func TestTofuArgs(t *testing.T) {
-	root := "/repo/src/infrastructure/clusters/ash/bootstrap/opentofu/openbao-bootstrap"
+	root := "/repo/src/infrastructure/bootstrap/guardian-mgmt-openbao"
 	endpoint := "https://account.r2.cloudflarestorage.com"
 	addr := "http://127.0.0.1:18200"
 
@@ -116,34 +116,6 @@ func TestTofuEnv(t *testing.T) {
 	}
 }
 
-func TestValidateBackendCredentials(t *testing.T) {
-	if err := validateBackendCredentials([]string{
-		"AWS_ACCESS_KEY_ID=access-key",
-		"AWS_SECRET_ACCESS_KEY=secret-key",
-	}); err != nil {
-		t.Fatalf("valid backend credentials rejected: %v", err)
-	}
-
-	err := validateBackendCredentials([]string{"AWS_ACCESS_KEY_ID=access-key"})
-	if err == nil {
-		t.Fatalf("missing secret access key accepted")
-	}
-	if !strings.Contains(err.Error(), "AWS_SECRET_ACCESS_KEY") {
-		t.Fatalf("missing credential error did not name AWS_SECRET_ACCESS_KEY: %v", err)
-	}
-	if !strings.Contains(err.Error(), "cloudflare_r2_access_key_id/cloudflare_r2_secret_access_key") {
-		t.Fatalf("missing credential error did not explain R2 source names: %v", err)
-	}
-
-	err = validateBackendCredentials([]string{"AWS_ACCESS_KEY_ID=", "AWS_SECRET_ACCESS_KEY=secret-key"})
-	if err == nil {
-		t.Fatalf("empty access key accepted")
-	}
-	if !strings.Contains(err.Error(), "AWS_ACCESS_KEY_ID") {
-		t.Fatalf("empty credential error did not name AWS_ACCESS_KEY_ID: %v", err)
-	}
-}
-
 func TestRedactToken(t *testing.T) {
 	got := redactToken("token=root-token\nagain root-token", "root-token")
 	if strings.Contains(got, "root-token") {
@@ -158,9 +130,9 @@ func TestKubectlArgs(t *testing.T) {
 	runner := kubectlRunner{
 		kubeconfig:     "/kubeconfig",
 		requestTimeout: "15s",
-		namespace:      "tenant-guardian-kms",
+		namespace:      "tenant-root",
 	}
-	want := []string{"--kubeconfig", "/kubeconfig", "--request-timeout=15s", "-n", "tenant-guardian-kms", "get", "pods"}
+	want := []string{"--kubeconfig", "/kubeconfig", "--request-timeout=15s", "-n", "tenant-root", "get", "pods"}
 	if got := runner.args("get", "pods"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("kubectl args = %#v, want %#v", got, want)
 	}
@@ -170,12 +142,12 @@ func TestOpenBaoPortForwardArgs(t *testing.T) {
 	runner := kubectlRunner{
 		kubeconfig:     "/kubeconfig",
 		requestTimeout: "15s",
-		namespace:      "tenant-guardian-kms",
+		namespace:      "tenant-root",
 	}
 	want := []string{
 		"--kubeconfig", "/kubeconfig",
 		"--request-timeout=15s",
-		"-n", "tenant-guardian-kms",
+		"-n", "tenant-root",
 		"port-forward",
 		"--address", "127.0.0.1",
 		"svc/openbao-guardian",

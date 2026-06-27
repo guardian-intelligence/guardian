@@ -6,10 +6,10 @@ ORAS surfaced by focused infra tasks.
 
 load(".aspect/lib/helpers.axl", "checked_spawn", "ws_path")
 
-GUARDIAN_MGMT_ROOT = "src/infrastructure/clusters/ash/bootstrap/opentofu/baremetal"
-GUARDIAN_MGMT_OPENBAO_ROOT = "src/infrastructure/clusters/ash/bootstrap/opentofu/openbao-bootstrap"
-GUARDIAN_MGMT_DNS_ROOT = "src/infrastructure/clusters/ash/bootstrap/opentofu/dns"
-GUARDIAN_BACKEND_TFVARS = "src/infrastructure/clusters/ash/bootstrap/opentofu/backend.tfvars"
+GUARDIAN_MGMT_ROOT = "src/infrastructure/bootstrap/guardian-mgmt"
+GUARDIAN_MGMT_OPENBAO_ROOT = "src/infrastructure/bootstrap/guardian-mgmt-openbao"
+GUARDIAN_MGMT_DNS_ROOT = "src/infrastructure/bootstrap/guardian-mgmt-dns"
+GUARDIAN_BACKEND_TFVARS = "src/infrastructure/bootstrap/backend.tfvars"
 TOFU_TARGET = "@opentofu_linux_amd64//:tofu_bin"
 TALM_TARGET = "@talm_linux_amd64//:talm"
 HELM_FILE_TARGET = "@helm_linux_amd64//:helm"
@@ -40,7 +40,7 @@ EXCLUDED_KUBE_APIS = [
     "https://206.223.228.99:6443",
 ]
 EXPECTED_KUBE_APIS = [
-    # Mirrors src/infrastructure/clusters/ash/bootstrap/opentofu/baremetal/main.tf. The VIP is the
+    # Mirrors src/infrastructure/bootstrap/guardian-mgmt/main.tf. The VIP is the
     # source-of-truth endpoint; public node APIs are accepted for off-VLAN
     # operator validation when the kubeconfig CA is current.
     "https://10.8.0.250:6443",
@@ -48,41 +48,23 @@ EXPECTED_KUBE_APIS = [
     "https://45.250.254.119:6443",
     "https://206.223.228.87:6443",
 ]
-GO_TLS_COMPAT_GODEBUG = "tlsmlkem=0"
 
 INFRA_FILEGROUPS = [
-    "//src/infrastructure/clusters/ash/bootstrap/opentofu/baremetal:root",
-    "//src/infrastructure/clusters/ash/bootstrap/opentofu/dns:root",
-    "//src/infrastructure/clusters/ash/root/app-patches:manifests",
-    "//src/infrastructure/clusters/ash/root/platform-patches:manifests",
-    "//src/infrastructure/clusters/ash/bootstrap/talm:chart",
-    "//src/infrastructure/clusters/ash/root/apps:manifests",
-    "//src/infrastructure/clusters/ash/root/cozystack:manifests",
-    "//src/infrastructure/clusters/ash/root/flux:manifests",
-    "//src/infrastructure/clusters/ash/root/networking:manifests",
-    "//src/infrastructure/clusters/ash/root/openbao:manifests",
-    "//src/infrastructure/clusters/ash/root/storage:manifests",
-    "//src/infrastructure/clusters/ash/root/tenants:manifests",
-    "//src/infrastructure/clusters/ash/tenants/guardian:manifests",
-    "//src/infrastructure/clusters/ash/tenants/guardian/aisucks:manifests",
-    "//src/infrastructure/clusters/ash/tenants/guardian/audit:manifests",
-    "//src/infrastructure/clusters/ash/tenants/guardian/billing:manifests",
-    "//src/infrastructure/clusters/ash/tenants/guardian/company:manifests",
-    "//src/infrastructure/clusters/ash/tenants/guardian/iam:manifests",
-    "//src/infrastructure/clusters/ash/tenants/guardian/kms:manifests",
-    "//src/infrastructure/clusters/ash/tenants/guardian/release:manifests",
-    "//src/infrastructure/clusters/ash/tenants/guardian/secrets:manifests",
-    "//src/infrastructure/clusters/ash/tenants/guardian/telemetry:manifests",
-    "//src/infrastructure/clusters/ash/tenants/guardian/workloads:manifests",
-    "//src/infrastructure/clusters/ash/deployments/company/prod:manifests",
-    "//src/infrastructure/clusters/ash/deployments/kms/prod:manifests",
-    "//src/infrastructure/clusters/ash/deployments/release/beta:manifests",
-    "//src/infrastructure/clusters/ash/deployments/release/gamma:manifests",
-    "//src/infrastructure/clusters/ash/deployments/release/prod:manifests",
-    "//src/infrastructure/components/openbao-github-integration-secrets:manifests",
+    "//src/infrastructure/bootstrap/guardian-mgmt:root",
+    "//src/infrastructure/bootstrap/guardian-mgmt-dns:root",
+    "//src/infrastructure/base/app-patches:manifests",
+    "//src/infrastructure/base/platform-patches:manifests",
+    "//src/infrastructure/talm:chart",
+    "//src/infrastructure/base/apps:manifests",
+    "//src/infrastructure/base/cozystack:manifests",
+    "//src/infrastructure/base/flux:manifests",
+    "//src/infrastructure/base/networking:manifests",
+    "//src/infrastructure/base/openbao:manifests",
+    "//src/infrastructure/base/storage:manifests",
+    "//src/infrastructure/deployments/company/prod:manifests",
     "//src/infrastructure/load:http_load_scripts",
     "//src/infrastructure/edge:edge_health_targets",
-    "//src/infrastructure/clusters/ash/bootstrap/opentofu/openbao-bootstrap:root",
+    "//src/infrastructure/bootstrap/guardian-mgmt-openbao:root",
 ]
 INFRA_TESTS = [
     "//src/infrastructure/cmd/cozystack_backup_drill:cozystack_backup_drill_test",
@@ -106,22 +88,11 @@ FORBIDDEN_SOURCE_PATHS = [
     ("src-old/release/evidence", "custom release evidence schemas were removed; use standard OCI, in-toto, SLSA, and tool-native records"),
 ]
 
-def _go_tls_env(ctx):
-    existing = ctx.std.env.var("GODEBUG") or ""
-    if existing == "":
-        return {"GODEBUG": GO_TLS_COMPAT_GODEBUG}
-    if existing.find("tlsmlkem=") != -1:
-        return {"GODEBUG": existing}
-    return {"GODEBUG": existing + "," + GO_TLS_COMPAT_GODEBUG}
-
-def _capture_stdout(ctx, program, args, cwd = None, label = None, auth_hint = "kubernetes", env = None):
+def _capture_stdout(ctx, program, args, cwd = None, label = None, auth_hint = "kubernetes"):
     label_str = label if label != None else program
     cmd = ctx.std.process.command(program).args(args)
     if cwd != None:
         cmd = cmd.current_dir(cwd)
-    if env != None:
-        for k, v in env.items():
-            cmd = cmd.env(k, v)
     if ctx.std.io.stderr.is_tty:
         ctx.std.io.stderr.write("$ " + label_str + "\n")
     r = cmd.stdout("piped").stderr("piped").spawn().wait_with_output()
@@ -135,14 +106,11 @@ def _capture_stdout(ctx, program, args, cwd = None, label = None, auth_hint = "k
         return None
     return r.stdout.strip()
 
-def _capture_success(ctx, program, args, cwd = None, label = None, auth_hint = "kubernetes", env = None):
+def _capture_success(ctx, program, args, cwd = None, label = None, auth_hint = "kubernetes"):
     label_str = label if label != None else program
     cmd = ctx.std.process.command(program).args(args)
     if cwd != None:
         cmd = cmd.current_dir(cwd)
-    if env != None:
-        for k, v in env.items():
-            cmd = cmd.env(k, v)
     if ctx.std.io.stderr.is_tty:
         ctx.std.io.stderr.write("$ " + label_str + "\n")
     r = cmd.stdout("piped").stderr("piped").spawn().wait_with_output()
@@ -437,7 +405,6 @@ def _kubectl_capture_for(ctx, kubectl, kubeconfig, args, label):
         _kubectl_args_for(ctx, kubeconfig, args),
         cwd = ws_path(ctx),
         label = label,
-        env = _go_tls_env(ctx),
     )
 
 def _talosctl_capture(ctx, talosctl, args, label):
@@ -448,7 +415,6 @@ def _talosctl_capture(ctx, talosctl, args, label):
         cwd = ws_path(ctx),
         label = label,
         auth_hint = "talos",
-        env = _go_tls_env(ctx),
     )
 
 def _talosctl_success(ctx, talosctl, args, label):
@@ -459,7 +425,6 @@ def _talosctl_success(ctx, talosctl, args, label):
         cwd = ws_path(ctx),
         label = label,
         auth_hint = "talos",
-        env = _go_tls_env(ctx),
     )
 
 def _contains(items, needle):
@@ -515,7 +480,7 @@ def _check_live_context_for(ctx, kubectl, kubeconfig):
         ctx.std.io.stderr.write("ERROR: refusing to validate against excluded cluster API " + server + "\n")
         return 1
     if not _contains(EXPECTED_KUBE_APIS, server):
-        ctx.std.io.stderr.write("ERROR: kubeconfig points at " + server + "; expected guardian-mgmt API endpoint from src/infrastructure/clusters/ash/bootstrap/opentofu/baremetal/main.tf\n")
+        ctx.std.io.stderr.write("ERROR: kubeconfig points at " + server + "; expected guardian-mgmt API endpoint from src/infrastructure/bootstrap/guardian-mgmt/main.tf\n")
         return 1
 
     nodes = _kubectl_capture_for(ctx, kubectl, kubeconfig, ["get", "nodes", "-o", "name"], "kubectl get nodes")
@@ -556,14 +521,7 @@ def _render_kustomizations(ctx):
     if kubectl == None:
         return 1
     for path in [
-        "src/infrastructure/clusters/ash/root",
-        "src/infrastructure/clusters/ash/tenants/guardian",
-        "src/infrastructure/clusters/ash/deployments/company/prod",
-        "src/infrastructure/clusters/ash/deployments/kms/prod",
-        "src/infrastructure/clusters/ash/deployments/release/beta",
-        "src/infrastructure/clusters/ash/deployments/release/gamma",
-        "src/infrastructure/clusters/ash/deployments/release/prod",
-        "src/infrastructure/components/openbao-github-integration-secrets",
+        "src/infrastructure/base",
     ]:
         rc = _capture_success(
             ctx,
@@ -571,7 +529,6 @@ def _render_kustomizations(ctx):
             ["kustomize", path],
             cwd = ws_path(ctx),
             label = "kubectl kustomize " + path,
-            env = _go_tls_env(ctx),
         )
         if rc != 0:
             return rc
@@ -718,7 +675,6 @@ def _kubeconfig_impl(ctx):
             talosconfig,
         ],
         cwd = root,
-        env = _go_tls_env(ctx),
         label = "talm talosconfig guardian-mgmt",
     )
     if rc != 0:
@@ -744,7 +700,6 @@ def _kubeconfig_impl(ctx):
             "--force",
         ],
         cwd = root,
-        env = _go_tls_env(ctx),
         label = "talm kubeconfig guardian-mgmt",
     )
     if rc != 0:
@@ -788,9 +743,9 @@ def _talos_impl(ctx):
     )
     if kubespan == None:
         return 1
-    if kubespan != "" and kubespan != "[]":
-        ctx.std.io.stderr.write("ERROR: kubespan peer statuses = " + kubespan + "; expected no peers\n")
-        return 1
+    rc = _assert_equals(ctx, kubespan, "[]", "kubespan peer statuses")
+    if rc != 0:
+        return rc
 
     ctx.std.io.stderr.write("guardian-mgmt Talos L2 checks passed\n")
     return 0
@@ -830,7 +785,6 @@ def _upgrade_cozystack_with_kubeconfig(ctx, kubeconfig, wait_timeout):
         helm,
         args,
         cwd = ws_path(ctx),
-        env = _go_tls_env(ctx),
         label = "helm upgrade cozystack installer " + COZYSTACK_INSTALLER_VERSION,
     )
 
@@ -933,7 +887,6 @@ def _backup_drill_impl(ctx):
         "bazelisk",
         ["run", BACKUP_DRILL_TARGET, "--"] + drill_args,
         cwd = ws_path(ctx),
-        env = _go_tls_env(ctx),
         label = "cozystack backup drill",
     )
 
@@ -987,14 +940,8 @@ def _node_outage_drill_impl(ctx):
         "bazelisk",
         ["run", NODE_OUTAGE_DRILL_TARGET, "--"] + drill_args,
         cwd = ws_path(ctx),
-        env = _go_tls_env(ctx),
         label = "cozystack node outage drill",
     )
-
-def _http_load_stage(surface, stage):
-    if stage == "root" and surface in ["openbao", "bao", "vault"]:
-        return "prod"
-    return stage
 
 def _load_http_impl(ctx):
     if ctx.args.require_live != "true" and ctx.args.require_live != "false":
@@ -1026,7 +973,7 @@ def _load_http_impl(ctx):
         "--kubectl",
         kubectl,
         "--stage",
-        _http_load_stage(ctx.args.surface, ctx.args.stage),
+        ctx.args.stage,
         "--surface",
         ctx.args.surface,
         "--request-timeout",
@@ -1058,7 +1005,6 @@ def _load_http_impl(ctx):
         "bazelisk",
         ["run", HTTP_LOAD_TARGET, "--"] + load_args,
         cwd = ws_path(ctx),
-        env = _go_tls_env(ctx),
         label = "cozystack http load",
     )
 
@@ -1144,7 +1090,6 @@ def _edge_failover_drill_impl(ctx):
         "bazelisk",
         ["run", EDGE_FAILOVER_DRILL_TARGET, "--"] + drill_args,
         cwd = ws_path(ctx),
-        env = _go_tls_env(ctx),
         label = "guardian edge failover drill",
     )
 
@@ -1203,7 +1148,6 @@ def _load_db_impl(ctx):
         "bazelisk",
         ["run", DB_LOAD_TARGET, "--"] + load_args,
         cwd = ws_path(ctx),
-        env = _go_tls_env(ctx),
         label = "cozystack db load",
     )
 
@@ -1253,7 +1197,6 @@ def _load_harbor_registry_impl(ctx):
         "bazelisk",
         ["run", HARBOR_REGISTRY_TARGET, "--"] + load_args,
         cwd = ws_path(ctx),
-        env = _go_tls_env(ctx),
         label = "cozystack harbor registry load",
     )
 
@@ -1313,7 +1256,6 @@ def _observability_drill_impl(ctx):
         "bazelisk",
         ["run", OBSERVABILITY_DRILL_TARGET, "--"] + drill_args,
         cwd = ws_path(ctx),
-        env = _go_tls_env(ctx),
         label = "cozystack observability drill",
     )
 
@@ -1356,7 +1298,6 @@ def _openbao_drill_impl(ctx):
         "bazelisk",
         ["run", OPENBAO_DRILL_TARGET, "--"] + drill_args,
         cwd = ws_path(ctx),
-        env = _go_tls_env(ctx),
         label = "cozystack openbao drill",
     )
 
@@ -1379,9 +1320,6 @@ def _openbao_apply_impl(ctx):
         rc = _check_flux_revision(ctx, kubectl, ctx.args.revision)
         if rc != 0:
             return rc
-    if ctx.args.verify_api_state not in ["true", "false"]:
-        ctx.std.io.stderr.write("ERROR: --verify-api-state must be true or false\n")
-        return 1
 
     apply_args = [
         "--kubectl",
@@ -1412,45 +1350,12 @@ def _openbao_apply_impl(ctx):
     if ctx.args.kubeconfig != "":
         apply_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
 
-    rc = checked_spawn(
+    return checked_spawn(
         ctx,
         "bazelisk",
         ["run", OPENBAO_APPLY_TARGET, "--"] + apply_args,
         cwd = ws_path(ctx),
-        env = _go_tls_env(ctx),
         label = "cozystack openbao apply",
-    )
-    if rc != 0:
-        return rc
-    if ctx.args.mode != "apply" or ctx.args.verify_api_state != "true":
-        return 0
-
-    drill_args = [
-        "--kubectl",
-        kubectl,
-        "--namespace",
-        ctx.args.namespace,
-        "--statefulset",
-        ctx.args.statefulset,
-        "--bootstrap-secret",
-        ctx.args.bootstrap_secret,
-        "--mode",
-        "api-state",
-        "--request-timeout",
-        ctx.args.request_timeout,
-        "--wait-timeout",
-        ctx.args.wait_timeout,
-    ]
-    if ctx.args.kubeconfig != "":
-        drill_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
-
-    return checked_spawn(
-        ctx,
-        "bazelisk",
-        ["run", OPENBAO_DRILL_TARGET, "--"] + drill_args,
-        cwd = ws_path(ctx),
-        env = _go_tls_env(ctx),
-        label = "cozystack openbao api-state drill",
     )
 
 validate = task(
@@ -1501,14 +1406,13 @@ openbao_apply = task(
         "bootstrap_secret": args.string(default = "openbao-guardian-bootstrap", description = "Cluster-local Secret containing OpenBao root token material."),
         "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
         "mode": args.string(default = "apply", description = "OpenTofu operation: plan or apply."),
-        "namespace": args.string(default = "tenant-guardian-kms", description = "OpenBao namespace."),
+        "namespace": args.string(default = "tenant-root", description = "OpenBao namespace."),
         "port_forward_ready_timeout": args.string(default = "10s", description = "Timeout waiting for OpenBao port-forward readiness."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
         "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before OpenBao API configuration."),
         "service": args.string(default = "openbao-guardian", description = "OpenBao Service name."),
         "statefulset": args.string(default = "openbao-guardian", description = "OpenBao StatefulSet name."),
         "tofu_backend_endpoint": args.string(default = "", description = "Optional S3-compatible OpenTofu backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
-        "verify_api_state": args.string(default = "true", description = "After apply mode succeeds, run the OpenBao api-state drill. Set false only for emergency recovery."),
         "wait_timeout": args.string(default = "5m", description = "Timeout for OpenBao StatefulSet readiness."),
     },
 )
@@ -1521,7 +1425,7 @@ kubeconfig = task(
     args = {
         "endpoints": args.string(default = "10.8.0.250", description = "Talos API endpoint used to fetch kubeconfig."),
         "nodes": args.string(default = "10.8.0.11,10.8.0.12,10.8.0.13", description = "Talos nodes used to fetch kubeconfig."),
-        "root": args.string(default = "src/infrastructure/clusters/ash/bootstrap/talm", description = "Talm root containing gitignored secrets.yaml and talosconfig."),
+        "root": args.string(default = "src/infrastructure/talm", description = "Talm root containing gitignored secrets.yaml and talosconfig."),
         "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
     },
 )
@@ -1534,7 +1438,7 @@ talos = task(
     args = {
         "endpoints": args.string(default = "10.8.0.250", description = "Talos API endpoint for guardian-mgmt."),
         "nodes": args.string(default = "10.8.0.11,10.8.0.12,10.8.0.13", description = "Comma-separated guardian-mgmt Talos nodes."),
-        "root": args.string(default = "src/infrastructure/clusters/ash/bootstrap/talm", description = "Talm root containing gitignored secrets.yaml and talosconfig."),
+        "root": args.string(default = "src/infrastructure/talm", description = "Talm root containing gitignored secrets.yaml and talosconfig."),
         "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
     },
 )
@@ -1549,7 +1453,7 @@ bootstrap = task(
         "endpoints": args.string(default = "10.8.0.250", description = "Talos API endpoint used to fetch kubeconfig and validate L2 state."),
         "kubeconfig": args.string(default = "", description = "Optional kubeconfig for the Cozystack installer/operator Helm upgrade. Defaults to <root>/kubeconfig after refresh."),
         "nodes": args.string(default = "10.8.0.11,10.8.0.12,10.8.0.13", description = "Comma-separated guardian-mgmt Talos nodes."),
-        "root": args.string(default = "src/infrastructure/clusters/ash/bootstrap/talm", description = "Talm root containing gitignored secrets.yaml, talosconfig, and kubeconfig."),
+        "root": args.string(default = "src/infrastructure/talm", description = "Talm root containing gitignored secrets.yaml, talosconfig, and kubeconfig."),
         "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
         "tofu_backend_endpoint": args.string(default = "", description = "Optional S3-compatible OpenTofu backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
     },
@@ -1582,7 +1486,7 @@ load_http = task(
         "require_live": args.string(default = "true", description = "Set false only for local custom-URL k6 smoke checks."),
         "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before the load test."),
         "sleep_seconds": args.string(default = "1", description = "Sleep seconds between requests in each k6 VU."),
-        "stage": args.string(default = "root", description = "Guardian surface stage. Use root for Harbor/dashboard, prod for tenant OpenBao, and bootstrap-root for legacy root OpenBao."),
+        "stage": args.string(default = "root", description = "Guardian bootstrap stage: root."),
         "surface": args.string(default = "harbor", description = "HTTP surface: harbor, dashboard, openbao, or custom with --url."),
         "url": args.string(default = "", description = "Explicit URL to load; overrides surface target mapping."),
         "vus": args.string(default = "1", description = "k6 virtual users."),
@@ -1616,7 +1520,7 @@ edge_failover_drill = task(
         "report": args.string(default = "reports/infrastructure/edge-failover-report.json", description = "JSON outage report path."),
         "request_timeout": args.string(default = "5s", description = "Per-request public edge timeout."),
         "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before the drill."),
-        "root": args.string(default = "src/infrastructure/clusters/ash/bootstrap/talm", description = "Talm root containing gitignored talosconfig."),
+        "root": args.string(default = "src/infrastructure/talm", description = "Talm root containing gitignored talosconfig."),
         "sample_interval_ms": args.string(default = "250", description = "k6 sample interval in milliseconds."),
         "talos_endpoint": args.string(default = "206.223.228.101,45.250.254.119,206.223.228.87", description = "Comma-separated Talos API endpoints for guardian-mgmt."),
         "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
@@ -1703,8 +1607,8 @@ openbao_drill = task(
     args = {
         "bootstrap_secret": args.string(default = "openbao-guardian-bootstrap", description = "Cluster-local Secret for OpenBao root token and unseal key."),
         "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
-        "mode": args.string(default = "status", description = "Drill mode: status, api-state, init-unseal, or snapshot."),
-        "namespace": args.string(default = "tenant-guardian-kms", description = "OpenBao namespace."),
+        "mode": args.string(default = "status", description = "Drill mode: status, init-unseal, or snapshot."),
+        "namespace": args.string(default = "tenant-root", description = "OpenBao namespace."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
         "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before the drill."),
         "snapshot_name": args.string(default = "", description = "Optional pod-local snapshot filename for snapshot mode."),
@@ -1747,7 +1651,7 @@ node_outage_drill = task(
         "node": args.string(default = "", description = "Kubernetes node name to cordon and drain."),
         "openbao_app": args.string(default = "guardian", description = "OpenBao Cozystack app name."),
         "openbao_bootstrap_secret": args.string(default = "openbao-guardian-bootstrap", description = "Cluster-local Secret for OpenBao root token and unseal key."),
-        "openbao_namespace": args.string(default = "tenant-guardian-kms", description = "OpenBao namespace."),
+        "openbao_namespace": args.string(default = "tenant-root", description = "OpenBao namespace."),
         "openbao_statefulset": args.string(default = "openbao-guardian", description = "OpenBao StatefulSet name."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
         "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before the drill."),

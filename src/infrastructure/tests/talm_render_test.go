@@ -26,7 +26,7 @@ func TestTalmControlplaneRender(t *testing.T) {
 		"--force",
 	)
 
-	chartRoot := filepath.Dir(runfilePath("src/infrastructure/clusters/ash/bootstrap/talm/values.yaml"))
+	chartRoot := filepath.Dir(runfilePath("src/infrastructure/talm/values.yaml"))
 	rendered := runTalm(t, talm, env,
 		"template",
 		"--offline",

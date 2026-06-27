@@ -1,8 +1,0 @@
-filegroup(
-    name = "manifests",
-    srcs = [
-        "guardian.yaml",
-        "root-stages.yaml",
-    ],
-    visibility = ["//visibility:public"],
-)

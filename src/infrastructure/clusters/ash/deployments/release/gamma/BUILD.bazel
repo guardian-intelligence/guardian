@@ -1,7 +1,0 @@
-filegroup(
-    name = "manifests",
-    srcs = [
-        "kustomization.yaml",
-    ],
-    visibility = ["//visibility:public"],
-)

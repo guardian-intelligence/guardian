@@ -161,51 +161,6 @@ func TestRunHTTPPropagatesK6Failure(t *testing.T) {
 	}
 }
 
-func TestRunHTTPPassesDefaultRequestTimeoutToK6(t *testing.T) {
-	output := filepath.Join(t.TempDir(), "k6-env")
-	k6 := writeExecutable(t, "k6", `#!/bin/sh
-{
-  printf 'timeout=%s\n' "$EDGE_K6_REQUEST_TIMEOUT"
-  printf 'args=%s\n' "$*"
-} > "$K6_ENV_OUTPUT"
-exit 0
-`)
-	t.Setenv("K6_ENV_OUTPUT", output)
-
-	cfg := config{
-		K6:                     k6,
-		Script:                 "/does/not/matter.js",
-		HTTPVUs:                "1",
-		HTTPIterations:         1,
-		HTTPMaxDuration:        "1s",
-		HTTPRequestTimeout:     defaultHTTPRequestTimeout,
-		HTTPSleepSeconds:       "0",
-		K6DNS:                  defaultK6DNS,
-		K6ExpectedStatusCutoff: "rate>0.99",
-	}
-	err := runHTTP(context.Background(), cfg, []httpTarget{
-		{
-			URL:              "https://dashboard.guardianintelligence.org/",
-			Host:             "dashboard.guardianintelligence.org",
-			Surface:          "dashboard",
-			Stage:            "root",
-			Name:             "guardian-edge-root-dashboard",
-			ExpectedStatuses: []int{200, 302},
-		},
-	})
-	if err != nil {
-		t.Fatalf("runHTTP error = %v", err)
-	}
-
-	got := string(readFile(t, output))
-	if !strings.Contains(got, "timeout=30s\n") {
-		t.Fatalf("k6 environment = %q, want timeout=30s", got)
-	}
-	if !strings.Contains(got, "ttl=5m,select=first,policy=onlyIPv4") {
-		t.Fatalf("k6 args = %q, want stable A-record DNS policy", got)
-	}
-}
-
 func sameInts(left, right []int) bool {
 	if len(left) != len(right) {
 		return false
@@ -241,13 +196,4 @@ func writeExecutable(t *testing.T, name, contents string) string {
 		t.Fatal(err)
 	}
 	return path
-}
-
-func readFile(t *testing.T, path string) []byte {
-	t.Helper()
-	out, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return out
 }

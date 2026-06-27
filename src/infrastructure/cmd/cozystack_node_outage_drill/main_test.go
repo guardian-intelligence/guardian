@@ -10,7 +10,7 @@ func testConfig() drillConfig {
 		WaitTimeout:            "15m",
 		Node:                   "ash-earth",
 		ConfirmNode:            "ash-earth",
-		OpenBaoNamespace:       "tenant-guardian-kms",
+		OpenBaoNamespace:       "tenant-root",
 		OpenBaoApp:             "guardian",
 		OpenBaoStatefulSet:     "openbao-guardian",
 		OpenBaoBootstrapSecret: "openbao-guardian-bootstrap",
@@ -105,8 +105,8 @@ func TestNodeUnschedulableArgs(t *testing.T) {
 func TestOutageWaitsProveServicesWhileNodeCordoned(t *testing.T) {
 	got := outageWaits(testConfig())
 	requireCheck(t, got, "wait outage target node cordoned", "node/ash-earth", "--for=jsonpath={.spec.unschedulable}=true", "--timeout=15m")
-	requireCheck(t, got, "wait outage openbao authority app", "tenant-guardian-kms", "openbaos.apps.cozystack.io/guardian", "--timeout=15m")
-	rejectCheck(t, got, "wait outage openbao authority statefulset")
+	requireCheck(t, got, "wait outage root openbao app", "openbaos.apps.cozystack.io/guardian", "--timeout=15m")
+	rejectCheck(t, got, "wait outage root openbao statefulset")
 	requireCheck(t, got, "wait outage tenant-root postgres workloads", "postgreses.apps.cozystack.io/guardian", "--timeout=15m")
 	requireCheck(t, got, "wait outage tenant-root harbor workloads", "harbors.apps.cozystack.io/guardian", "--timeout=15m")
 	requireCheck(t, got, "wait outage tenant-root harbor registry bucket ready", "--for=jsonpath={.status.bucketReady}=true", "bucketclaims.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=15m")
@@ -118,8 +118,8 @@ func TestOutageWaitsProveServicesWhileNodeCordoned(t *testing.T) {
 func TestRecoveryWaitsCoverGuardianSurfaces(t *testing.T) {
 	got := recoveryWaits(testConfig())
 	requireCheck(t, got, "wait recovered target node Ready", "node/ash-earth", "--timeout=15m")
-	requireCheck(t, got, "wait recovered openbao authority app", "tenant-guardian-kms", "openbaos.apps.cozystack.io/guardian", "--timeout=15m")
-	rejectCheck(t, got, "wait recovered openbao authority statefulset")
+	requireCheck(t, got, "wait recovered root openbao app", "openbaos.apps.cozystack.io/guardian", "--timeout=15m")
+	rejectCheck(t, got, "wait recovered root openbao statefulset")
 	requireCheck(t, got, "wait recovered tenant-root postgres workloads", "postgreses.apps.cozystack.io/guardian", "--timeout=15m")
 	requireCheck(t, got, "wait recovered tenant-root harbor workloads", "harbors.apps.cozystack.io/guardian", "--timeout=15m")
 	requireCheck(t, got, "wait recovered tenant-root harbor registry bucket ready", "--for=jsonpath={.status.bucketReady}=true", "bucketclaims.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=15m")

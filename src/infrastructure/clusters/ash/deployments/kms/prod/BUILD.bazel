@@ -1,9 +1,0 @@
-filegroup(
-    name = "manifests",
-    srcs = [
-        "kustomization.yaml",
-        "networkpolicy.yaml",
-        "openbao.yaml",
-    ],
-    visibility = ["//visibility:public"],
-)

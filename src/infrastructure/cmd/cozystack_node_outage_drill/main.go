@@ -57,7 +57,7 @@ func main() {
 	flag.StringVar(&cfg.WaitTimeout, "wait-timeout", "15m", "post-recovery readiness wait timeout")
 	flag.StringVar(&cfg.Node, "node", "", "Kubernetes node name to cordon and drain")
 	flag.StringVar(&cfg.ConfirmNode, "confirm-node", "", "must exactly match --node before the drill mutates the cluster")
-	flag.StringVar(&cfg.OpenBaoNamespace, "openbao-namespace", "tenant-guardian-kms", "OpenBao namespace")
+	flag.StringVar(&cfg.OpenBaoNamespace, "openbao-namespace", "tenant-root", "OpenBao namespace")
 	flag.StringVar(&cfg.OpenBaoApp, "openbao-app", "guardian", "OpenBao Cozystack app name")
 	flag.StringVar(&cfg.OpenBaoStatefulSet, "openbao-statefulset", "openbao-guardian", "OpenBao StatefulSet name")
 	flag.StringVar(&cfg.OpenBaoBootstrapSecret, "openbao-bootstrap-secret", "openbao-guardian-bootstrap", "Kubernetes Secret for cluster-local OpenBao bootstrap material")
@@ -288,7 +288,7 @@ func serviceReadinessWaits(phase string, cfg drillConfig) []kubectlCheck {
 			Args:  []string{"-n", "cozy-dashboard", "wait", "--for=condition=Available", "deployment/incloud-web-gatekeeper"},
 		},
 		{
-			Label: "wait " + phase + " openbao authority app",
+			Label: "wait " + phase + " root openbao app",
 			Args:  []string{"-n", cfg.OpenBaoNamespace, "wait", "--for=condition=Ready", "openbaos.apps.cozystack.io/" + cfg.OpenBaoApp},
 		},
 	}
@@ -337,11 +337,11 @@ func serviceReadinessWaits(phase string, cfg drillConfig) []kubectlCheck {
 }
 
 func waitOpenBaoQuorum(ctx context.Context, runner kubectlRunner, cfg drillConfig) error {
-	return waitOpenBaoReplicas(ctx, runner, cfg, "wait outage openbao authority statefulset quorum", quorumForReplicas)
+	return waitOpenBaoReplicas(ctx, runner, cfg, "wait outage root openbao statefulset quorum", quorumForReplicas)
 }
 
 func waitOpenBaoFullReadiness(ctx context.Context, runner kubectlRunner, cfg drillConfig) error {
-	return waitOpenBaoReplicas(ctx, runner, cfg, "wait recovered openbao authority statefulset full readiness", func(replicas int) int {
+	return waitOpenBaoReplicas(ctx, runner, cfg, "wait recovered root openbao statefulset full readiness", func(replicas int) int {
 		if replicas <= 0 {
 			return 1
 		}

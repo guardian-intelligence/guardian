@@ -2,20 +2,30 @@ Bazel polyglot hermetically sealed monorepo for Guardian, a free open-source sel
 
 Pitch: CozyStack for agents.
 
-Grep through Cozystack 1.5 docs from the exact `v1.5.0` tag when validating 1.5.0 behavior, or the `release-1.5` branch when intentionally reading the maintained 1.5 line. Do not use v0 docs, v1.4 docs, or current main by accident.
+Grep through docs https://github.com/cozystack/cozystack/tree/release-1.5.0/docs (ensure you're reading the 1.5 docs and NOT v0 docs or v1.4.0.)
 
 Reference Cozystack for prior art for the cloud portion. Other inspiration: Zarf/UDS, AWS Landing Zone Accelerator
 <company_topology>
 Single Global Writer
 Public DNS stays globally managed, for now.
 
-Cozystack tenants map mostly onto AWS Accounts. Guardian tenant/account IDs are slugs such as `gi-company-prod` and should travel as labels/annotations and release metadata. Cozystack Tenant object names are stricter: they must start with a lowercase letter, use only lowercase letters and digits, and cannot contain dashes. Cozystack computes the Kubernetes namespace from the parent namespace plus the child tenant name. For example, `tenant-root` + Tenant `company` creates `tenant-company`; `tenant-company` + Tenant `prod` creates `tenant-company-prod`. Do not force Guardian slugs to be literal Cozystack Tenant names unless they satisfy those rules.
+Cozystack tenants are coarse account boundaries, not the default unit of
+application isolation. Start with one Guardian tenant under the required
+Cozystack root/admin tenant. Use Kubernetes namespaces, labels, RBAC,
+NetworkPolicy, service accounts, and release evidence for Guardian component
+and stage isolation until a concrete operational need justifies another
+Cozystack Tenant.
 
-`tenant-root` is the required Cozystack root/admin tenant for a regional management cluster. Cozystack packages/operators, Flux handoff, storage classes, COSI/BackupClass/system bucket, root ingress/load-balancer substrate, root infrastructure monitoring, child Tenant CRs, and cluster-wide policy live there. Do not put product workloads, product databases, or shared business logic in `tenant-root`. tenant-root owns:
+`tenant-root` is the required Cozystack root/admin tenant for a regional
+management cluster. Cozystack packages/operators, Flux handoff, storage classes,
+COSI/BackupClass/system bucket, root ingress/load-balancer substrate, root
+infrastructure monitoring, child Tenant CRs, and cluster-wide policy belong
+there. Do not put product workloads, product databases, or shared business logic
+in `tenant-root`. tenant-root owns:
 
 - Cozystack Package / operator declarations
 - Flux source and Kustomizations that reconcile the management cluster
-- child Tenant CRs/Flux slices that create them
+- the single `guardian` Tenant CR and any future account-boundary Tenant CRs
 - storage substrate: StorageClasses, LINSTOR config, COSI classes
 - backup substrate: BackupClass/cozy-default, system bucket plumbing
 - root ingress/load-balancer substrate
@@ -36,63 +46,27 @@ region: ash
   cozystack-management-cluster: guardian-mgmt-ash
     tenant-root                     # Cozystack substrate only
 
-    tenant-guardian                 # Guardian-owned platform/product account root
-      tenant-guardian-iam           # identity, principals, authz policy
-        tenant-guardian-iam-beta
-        tenant-guardian-iam-gamma
-        tenant-guardian-iam-prod
+    tenant-guardian                 # Guardian-owned control planes/products
+      namespace: guardian-system    # OpenBao, release controllers, shared ops
+      namespace: guardian-dev       # PR preview / continuous integration
+      namespace: guardian-gamma     # staging
+      namespace: guardian-prod      # production
 
-      tenant-guardian-secrets       # OpenBao-backed secrets/transit substrate
-        tenant-guardian-secrets-beta
-        tenant-guardian-secrets-gamma
-        tenant-guardian-secrets-prod
-
-      tenant-guardian-audit         # CloudTrail-ish audit/event ledger
-        tenant-guardian-audit-beta
-        tenant-guardian-audit-gamma
-        tenant-guardian-audit-prod
-
-      tenant-guardian-telemetry     # CloudWatch/X-Ray-ish operational telemetry
-        tenant-guardian-telemetry-beta
-        tenant-guardian-telemetry-gamma
-        tenant-guardian-telemetry-prod
-
-      tenant-guardian-release       # artifact admission, GitHub runners, Kargo, release evidence
-        tenant-guardian-release-beta
-        tenant-guardian-release-gamma
-        tenant-guardian-release-prod
-
-      tenant-guardian-company       # Guardian company website/product surface
-        tenant-guardian-company-beta
-        tenant-guardian-company-gamma
-        tenant-guardian-company-prod
-
-      tenant-guardian-billing       # Guardian service
-        tenant-guardian-billing-beta
-        tenant-guardian-billing-gamma
-        tenant-guardian-billing-prod
-
-      tenant-guardian-aisucks       # Guardian product
-        tenant-guardian-aisucks-beta
-        tenant-guardian-aisucks-gamma
-        tenant-guardian-aisucks-prod
-
-      tenant-guardian-workloads     # QEMU workload-agent fleet, not customer pods
-        tenant-guardian-workloads-beta
-        tenant-guardian-workloads-gamma
-        tenant-guardian-workloads-prod
+      labels:
+        guardian.dev/component: iam | kms | audit | telemetry | release | billing | aisucks | workloads | company
+        guardian.dev/stage: dev | gamma | prod
+        guardian.dev/tenant-id: gi-guardian
 
 region: cmh                         # hypothetical future region
   cozystack-management-cluster: guardian-mgmt-cmh
     tenant-root
     tenant-guardian
-      tenant-guardian-iam
-      tenant-guardian-secrets
-    ...
 ```
 
 Default release channels: Edge (CD on main), nightly, RC, stable.
-Default deployment stages: beta, gamma, prod. Use `dev` only for local or PR-preview workflows, not durable regional tenant names.
+Default deployment stages: dev (PR preview), gamma (staging), prod.
+Release channels and deployment stages are not the same thing. Do not encode
+release channels as Cozystack Tenants.
 </company_topology>
 
 <repo_shape>
@@ -114,12 +88,12 @@ src/
         deploy/base/
 
     services/
-      secrets/
-        openbao/                       # OpenBao substrate, policies, transit, projection
-        api/                           # future Connect KMS/Secrets API when needed
+      kms/
+        api/                           # future Connect KMS/Secrets API
         service/                       # future wrapper/control plane if needed
         release/
-        deploy/base/
+        deploy/base/                   # reusable OpenBao-backed runtime
+        component
 
       release/
         api/
@@ -142,45 +116,33 @@ src/
         postgres-service/
         clickhouse-service/
 
-      clusters/
-        ash/
-          bootstrap/
-            opentofu/
-              baremetal/
-              dns/
-              openbao-bootstrap/
-            talm/
+      bootstrap/
+        guardian-mgmt/                 # ASH bare-metal/OpenTofu root
+        guardian-mgmt-dns/
+        guardian-mgmt-openbao/
+        backend.tfvars
 
-          root/                        # reconciled into tenant-root
-            kustomization.yaml
-            cozystack/
-            flux/
-            networking/
-            storage/
-            backup/
-            observability/
-            registry/
-            secrets-bootstrap/
-            policy/
-            tenants/
+      talm/
 
-          deployments/                 # reconciled into child tenants
-            secrets/
-              beta/
-              gamma/
-              prod/
-            release/
-              beta/
-              gamma/
-              prod/
-            company/
-              beta/
-              gamma/
-              prod/
-            aisucks/
-              beta/
-              gamma/
-              prod/
+      base/                            # reconciled into tenant-root
+        kustomization.yaml
+        cozystack/
+        flux/
+        networking/
+        storage/
+        backup/
+        observability/
+        registry/
+        policy/
+        tenants/                       # creates only tenant-guardian by default
+
+      deployments/
+        guardian/                      # reconciled into tenant-guardian
+          system/                      # OpenBao, release controllers, shared ops
+          dev/
+          gamma/
+          prod/
+        company/prod/                  # compatibility path until folded in
 
       tests/
       cmd/                             # infra validation/drill helpers
@@ -272,7 +234,7 @@ Release doctrine:
 - API operation policy should live with the operation contract where practical: auth, audit level, risk tier, request body limit, rate limit, and idempotency requirements should be generated into Connect/Go interceptors or equivalent boring enforcement code.
 - Do not hand-roll a release promotion product. Target Kargo for distributable promotion graphs, staged gates, approvals, verification, and release-train visibility. Guardian-owned release code should be limited to small policy/verifier commands that check cosign signatures, SLSA/in-toto attestations, expected builder identity, subject digest, source commit, package/version, required gate attestations, and taint/rejection status.
 - Target Flagger for deployed-service progressive delivery after Flux applies an approved workload digest: canary, blue/green, metric checks, webhooks, promotion, and rollback. Flagger is not the distributable promotion system.
-- Release channels and stage names are not the same thing. Distributed software advances through increasing evidence gates such as edge -> nightly -> rc -> stable. Deployed software advances through runtime environments and rollout strategies such as beta/gamma/prod plus canary or blue/green.
+- Release channels and stage names are not the same thing. Distributed software advances through increasing evidence gates such as edge -> nightly -> rc -> stable. Deployed software advances through runtime environments and rollout strategies such as dev/gamma/prod plus canary or blue/green.
 
 Fleet (all Latitude.sh ASH, f4.metal.small; the Latitude project is `guardian`).
 
