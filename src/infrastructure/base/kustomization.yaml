@@ -9,6 +9,7 @@ resources:
   - apps/seaweedfs-s3-ingress-service.yaml
   - networking/metallb.yaml
   - networking/subnet-mtu.yaml
+  - openbao/auth-delegator.yaml
   - openbao/openbao.yaml
   - openbao/networkpolicy.yaml
   - flux/sync.yaml
