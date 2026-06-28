@@ -1,15 +1,3 @@
-apiVersion: v1
-kind: Secret
-metadata:
-  name: guardian-openbao-seal
-  namespace: tenant-guardian
-  labels:
-    app.kubernetes.io/name: openbao
-    app.kubernetes.io/part-of: guardian
-    guardian.dev/component: secrets
-    guardian.dev/secret-scope: openbao-auto-unseal
-type: Opaque
----
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -21,7 +9,7 @@ metadata:
     guardian.dev/component: secrets
     guardian.dev/tenant-id: gi-guardian
 spec:
-  # Unsuspend after guardian-openbao-seal contains the AWS KMS unseal material.
+  # Unsuspend only during the manual Shamir initialization/unseal runbook.
   suspend: true
   chartRef:
     kind: ExternalArtifact
@@ -52,19 +40,6 @@ spec:
       server:
         configAnnotation: true
         podManagementPolicy: Parallel
-        extraSecretEnvironmentVars:
-          - envName: AWS_ACCESS_KEY_ID
-            secretName: guardian-openbao-seal
-            secretKey: AWS_ACCESS_KEY_ID
-          - envName: AWS_SECRET_ACCESS_KEY
-            secretName: guardian-openbao-seal
-            secretKey: AWS_SECRET_ACCESS_KEY
-          - envName: AWS_REGION
-            secretName: guardian-openbao-seal
-            secretKey: AWS_REGION
-          - envName: VAULT_AWSKMS_SEAL_KEY_ID
-            secretName: guardian-openbao-seal
-            secretKey: VAULT_AWSKMS_SEAL_KEY_ID
         dataStorage:
           enabled: true
           size: 10Gi
@@ -98,8 +73,6 @@ spec:
                 cluster_address = "[::]:8201"
                 tls_disable = true
               }
-
-              seal "awskms" {}
 
               storage "raft" {
                 path = "/openbao/data"

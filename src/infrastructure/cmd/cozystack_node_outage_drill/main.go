@@ -416,9 +416,9 @@ func ensureOpenBaoUnsealed(ctx context.Context, runner kubectlRunner, cfg drillC
 			return fmt.Errorf("OpenBao pod %s is not initialized", pod)
 		}
 		if podStatus.Sealed {
-			return fmt.Errorf("OpenBao pod %s is still sealed after auto-unseal recovery", pod)
+			return fmt.Errorf("OpenBao pod %s is sealed after recovery; follow src/infrastructure/runbooks/openbao-manual-shamir-unseal.md", pod)
 		}
-		fmt.Printf("pod %s auto-unsealed\n", pod)
+		fmt.Printf("pod %s remains unsealed\n", pod)
 	}
 	return nil
 }

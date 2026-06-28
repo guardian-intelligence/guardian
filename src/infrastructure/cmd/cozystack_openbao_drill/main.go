@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -20,30 +19,19 @@ import (
 const baoAddr = "http://127.0.0.1:8200"
 
 type openBaoConfig struct {
-	Kubectl         string
-	Kubeconfig      string
-	RequestTimeout  string
-	WaitTimeout     string
-	Namespace       string
-	StatefulSet     string
-	BootstrapSecret string
-	Mode            string
-	SnapshotName    string
+	Kubectl        string
+	Kubeconfig     string
+	RequestTimeout string
+	WaitTimeout    string
+	Namespace      string
+	StatefulSet    string
+	Mode           string
+	SnapshotName   string
 }
 
 type baoStatus struct {
 	Initialized bool `json:"initialized"`
 	Sealed      bool `json:"sealed"`
-}
-
-type initResult struct {
-	UnsealKeysB64 []string `json:"unseal_keys_b64"`
-	RootToken     string   `json:"root_token"`
-}
-
-type bootstrapMaterial struct {
-	UnsealKey string
-	RootToken string
 }
 
 var dnsSubdomainRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
@@ -57,8 +45,7 @@ func main() {
 	flag.StringVar(&cfg.WaitTimeout, "wait-timeout", "5m", "timeout for OpenBao StatefulSet readiness")
 	flag.StringVar(&cfg.Namespace, "namespace", "tenant-guardian", "OpenBao namespace")
 	flag.StringVar(&cfg.StatefulSet, "statefulset", "guardian-openbao", "OpenBao StatefulSet name")
-	flag.StringVar(&cfg.BootstrapSecret, "bootstrap-secret", "guardian-openbao-bootstrap", "fallback Kubernetes Secret for legacy Shamir bootstrap material")
-	flag.StringVar(&cfg.Mode, "mode", "status", "drill mode: status, snapshot, or legacy init-unseal")
+	flag.StringVar(&cfg.Mode, "mode", "status", "drill mode: status or snapshot")
 	flag.StringVar(&cfg.SnapshotName, "snapshot-name", "", "snapshot filename inside the OpenBao pod; defaults to a UTC timestamped name")
 	flag.Parse()
 
@@ -86,18 +73,17 @@ func validateConfig(cfg openBaoConfig) error {
 		return errors.New("--kubectl is required")
 	}
 	for label, value := range map[string]string{
-		"namespace":        cfg.Namespace,
-		"statefulset":      cfg.StatefulSet,
-		"bootstrap-secret": cfg.BootstrapSecret,
+		"namespace":   cfg.Namespace,
+		"statefulset": cfg.StatefulSet,
 	} {
 		if !dnsSubdomainRE.MatchString(value) {
 			return fmt.Errorf("--%s %q is not a Kubernetes DNS subdomain", label, value)
 		}
 	}
 	switch cfg.Mode {
-	case "status", "init-unseal", "snapshot":
+	case "status", "snapshot":
 	default:
-		return fmt.Errorf("--mode %q is not one of status, init-unseal, snapshot", cfg.Mode)
+		return fmt.Errorf("--mode %q is not one of status, snapshot", cfg.Mode)
 	}
 	if !snapshotFileRE.MatchString(cfg.SnapshotName) || strings.Contains(cfg.SnapshotName, "..") {
 		return fmt.Errorf("--snapshot-name %q must be a simple ASCII filename using letters, digits, dot, underscore, or hyphen", cfg.SnapshotName)
@@ -114,7 +100,7 @@ func runDrill(ctx context.Context, cfg openBaoConfig) error {
 	}
 
 	fmt.Printf("guardian cozystack openbao drill\n")
-	fmt.Printf("namespace=%s statefulset=%s bootstrapSecret=%s mode=%s\n", cfg.Namespace, cfg.StatefulSet, cfg.BootstrapSecret, cfg.Mode)
+	fmt.Printf("namespace=%s statefulset=%s mode=%s\n", cfg.Namespace, cfg.StatefulSet, cfg.Mode)
 
 	if err := runner.run(ctx, "get OpenBao StatefulSet", "get", "statefulset.apps/"+cfg.StatefulSet); err != nil {
 		return err
@@ -127,8 +113,6 @@ func runDrill(ctx context.Context, cfg openBaoConfig) error {
 	switch cfg.Mode {
 	case "status":
 		return printStatus(ctx, runner, cfg, replicas)
-	case "init-unseal":
-		return initUnseal(ctx, runner, cfg, replicas)
 	case "snapshot":
 		return snapshot(ctx, runner, cfg, replicas)
 	default:
@@ -155,7 +139,7 @@ func printStatus(ctx context.Context, runner kubectlRunner, cfg openBaoConfig, r
 			return err
 		}
 	}
-	if token, source, err := rootTokenFromEnvOrBootstrap(ctx, runner, cfg.BootstrapSecret); err == nil {
+	if token, source, err := rootTokenFromEnv(); err == nil {
 		fmt.Printf("read OpenBao root token from %s without printing secret material\n", source)
 		_ = baoRun(ctx, runner, podName(cfg.StatefulSet, 0), "raft autopilot state", token, "operator", "raft", "autopilot", "state")
 	} else {
@@ -164,56 +148,11 @@ func printStatus(ctx context.Context, runner kubectlRunner, cfg openBaoConfig, r
 	return nil
 }
 
-func initUnseal(ctx context.Context, runner kubectlRunner, cfg openBaoConfig, replicas int) error {
-	firstPod := podName(cfg.StatefulSet, 0)
-	status, err := baoStatusForPod(ctx, runner, firstPod, true)
-	if err != nil {
-		return err
-	}
-
-	var material bootstrapMaterial
-	if !status.Initialized {
-		initOut, err := baoOutputSilent(ctx, runner, firstPod, "operator init", "", "operator", "init", "-key-shares=1", "-key-threshold=1", "-format=json")
-		if err != nil {
-			return err
-		}
-		material, err = parseInitResult(initOut)
-		if err != nil {
-			return err
-		}
-		if err := applyBootstrapSecret(ctx, runner, cfg.BootstrapSecret, material); err != nil {
-			return err
-		}
-		fmt.Printf("initialized OpenBao and wrote cluster-local bootstrap Secret/%s\n", cfg.BootstrapSecret)
-	} else {
-		material, err = readBootstrapMaterial(ctx, runner, cfg.BootstrapSecret)
-		if err != nil {
-			return fmt.Errorf("OpenBao is initialized; read bootstrap secret before unseal: %w", err)
-		}
-	}
-
-	for i := 0; i < replicas; i++ {
-		pod := podName(cfg.StatefulSet, i)
-		status, err := baoStatusForPod(ctx, runner, pod, true)
-		if err != nil {
-			return err
-		}
-		if !status.Sealed {
-			fmt.Printf("pod %s already unsealed\n", pod)
-			continue
-		}
-		if err := baoRun(ctx, runner, pod, "operator unseal", "", "operator", "unseal", material.UnsealKey); err != nil {
-			return err
-		}
-	}
-	return printStatus(ctx, runner, cfg, replicas)
-}
-
 func snapshot(ctx context.Context, runner kubectlRunner, cfg openBaoConfig, replicas int) error {
 	if err := runner.run(ctx, "wait OpenBao StatefulSet Ready", "wait", "--for=jsonpath={.status.readyReplicas}="+strconv.Itoa(replicas), "statefulset.apps/"+cfg.StatefulSet, "--timeout="+cfg.WaitTimeout); err != nil {
 		return err
 	}
-	token, source, err := rootTokenFromEnvOrBootstrap(ctx, runner, cfg.BootstrapSecret)
+	token, source, err := rootTokenFromEnv()
 	if err != nil {
 		return fmt.Errorf("read OpenBao root token before snapshot: %w", err)
 	}
@@ -265,24 +204,6 @@ func parseBaoStatus(raw string) (baoStatus, error) {
 	return status, nil
 }
 
-func parseInitResult(raw string) (bootstrapMaterial, error) {
-	payload, err := jsonObjectPayload(raw)
-	if err != nil {
-		return bootstrapMaterial{}, fmt.Errorf("parse bao operator init output: %w", err)
-	}
-	var result initResult
-	if err := json.Unmarshal([]byte(payload), &result); err != nil {
-		return bootstrapMaterial{}, fmt.Errorf("parse bao operator init output: %w", err)
-	}
-	if len(result.UnsealKeysB64) != 1 || result.UnsealKeysB64[0] == "" {
-		return bootstrapMaterial{}, errors.New("bao operator init did not return exactly one unseal key")
-	}
-	if result.RootToken == "" {
-		return bootstrapMaterial{}, errors.New("bao operator init returned empty root token")
-	}
-	return bootstrapMaterial{UnsealKey: result.UnsealKeysB64[0], RootToken: result.RootToken}, nil
-}
-
 func jsonObjectPayload(raw string) (string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if json.Valid([]byte(trimmed)) {
@@ -300,74 +221,14 @@ func jsonObjectPayload(raw string) (string, error) {
 	return payload, nil
 }
 
-func applyBootstrapSecret(ctx context.Context, runner kubectlRunner, name string, material bootstrapMaterial) error {
-	manifest := bootstrapSecretManifest(runner.namespace, name, material)
-	return runner.runWithStdin(ctx, "apply OpenBao bootstrap Secret", manifest, "apply", "-f", "-")
-}
-
-func bootstrapSecretManifest(namespace, name string, material bootstrapMaterial) string {
-	return fmt.Sprintf(`apiVersion: v1
-kind: Secret
-metadata:
-  name: %s
-  namespace: %s
-  labels:
-    app.kubernetes.io/part-of: guardian
-    guardian.dev/secret-scope: openbao-bootstrap
-type: Opaque
-data:
-  unseal-key: %s
-  root-token: %s
-`,
-		name,
-		namespace,
-		base64.StdEncoding.EncodeToString([]byte(material.UnsealKey)),
-		base64.StdEncoding.EncodeToString([]byte(material.RootToken)),
-	)
-}
-
-func readBootstrapMaterial(ctx context.Context, runner kubectlRunner, name string) (bootstrapMaterial, error) {
-	unsealKey, err := readSecretKey(ctx, runner, name, "unseal-key")
-	if err != nil {
-		return bootstrapMaterial{}, err
-	}
-	rootToken, err := readSecretKey(ctx, runner, name, "root-token")
-	if err != nil {
-		return bootstrapMaterial{}, err
-	}
-	return bootstrapMaterial{UnsealKey: unsealKey, RootToken: rootToken}, nil
-}
-
-func rootTokenFromEnvOrBootstrap(ctx context.Context, runner kubectlRunner, secret string) (string, string, error) {
+func rootTokenFromEnv() (string, string, error) {
 	for _, key := range []string{"BAO_TOKEN", "VAULT_TOKEN"} {
 		token := strings.TrimSpace(os.Getenv(key))
 		if token != "" {
 			return token, key, nil
 		}
 	}
-	material, err := readBootstrapMaterial(ctx, runner, secret)
-	if err != nil {
-		return "", "", err
-	}
-	if material.RootToken == "" {
-		return "", "", errors.New("OpenBao bootstrap root-token is empty")
-	}
-	return material.RootToken, "Kubernetes Secret/" + secret, nil
-}
-
-func readSecretKey(ctx context.Context, runner kubectlRunner, name, key string) (string, error) {
-	raw, err := runner.output(ctx, "read Secret/"+name+" "+key, "get", "secret/"+name, "-o", `go-template={{index .data "`+key+`"}}`)
-	if err != nil {
-		return "", err
-	}
-	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(raw))
-	if err != nil {
-		return "", fmt.Errorf("decode Secret/%s %s: %w", name, key, err)
-	}
-	if len(decoded) == 0 {
-		return "", fmt.Errorf("Secret/%s %s is empty", name, key)
-	}
-	return string(decoded), nil
+	return "", "", errors.New("BAO_TOKEN or VAULT_TOKEN is required; do not store the OpenBao root token in Kubernetes")
 }
 
 func baoRun(ctx context.Context, runner kubectlRunner, pod, label, token string, args ...string) error {
@@ -380,17 +241,6 @@ func baoOutput(ctx context.Context, runner kubectlRunner, pod, label, token stri
 	if err != nil {
 		return "", err
 	}
-	return out, nil
-}
-
-func baoOutputSilent(ctx context.Context, runner kubectlRunner, pod, label, token string, args ...string) (string, error) {
-	execArgs := baoExecArgs(pod, token, args...)
-	out, err := runner.combinedOutput(ctx, execArgs...)
-	fmt.Printf("\n## %s on %s\n", label, pod)
-	if err != nil {
-		return "", fmt.Errorf("%s on %s: %w", label, pod, err)
-	}
-	fmt.Printf("captured %s output without printing secret material\n", label)
 	return out, nil
 }
 

@@ -883,9 +883,7 @@ func testOpenBao(t *testing.T) {
 	}
 
 	docs := readManifests(t, "src/infrastructure/deployments/guardian/system/openbao.yaml")
-	seal := findObject(t, docs, "Secret", "tenant-guardian", "guardian-openbao-seal")
-	assertString(t, seal, "Opaque", "type")
-
+	assertNoObject(t, docs, "Secret", "tenant-guardian", "guardian-openbao-seal")
 	hr := findObject(t, docs, "HelmRelease", "tenant-guardian", "guardian-openbao")
 	assertString(t, hr, "helm.toolkit.fluxcd.io/v2", "apiVersion")
 	assertBool(t, hr, true, "spec", "suspend")
@@ -902,14 +900,12 @@ func testOpenBao(t *testing.T) {
 	assertBool(t, hr, true, "spec", "values", "openbao", "server", "ha", "raft", "enabled")
 	assertBool(t, hr, true, "spec", "values", "openbao", "server", "ha", "raft", "setNodeId")
 	config := stringAt(hr, "spec", "values", "openbao", "server", "ha", "raft", "config")
-	assertTextContains(t, config, `seal "awskms" {}`, "guardian OpenBao raft config")
 	assertTextContains(t, config, `storage "raft"`, "guardian OpenBao raft config")
 	assertTextContains(t, config, `service_registration "kubernetes" {}`, "guardian OpenBao raft config")
-	secretEnv := sliceAt(t, hr, "spec", "values", "openbao", "server", "extraSecretEnvironmentVars")
-	assertOpenBaoSecretEnv(t, secretEnv, "AWS_ACCESS_KEY_ID", "guardian-openbao-seal", "AWS_ACCESS_KEY_ID")
-	assertOpenBaoSecretEnv(t, secretEnv, "AWS_SECRET_ACCESS_KEY", "guardian-openbao-seal", "AWS_SECRET_ACCESS_KEY")
-	assertOpenBaoSecretEnv(t, secretEnv, "AWS_REGION", "guardian-openbao-seal", "AWS_REGION")
-	assertOpenBaoSecretEnv(t, secretEnv, "VAULT_AWSKMS_SEAL_KEY_ID", "guardian-openbao-seal", "VAULT_AWSKMS_SEAL_KEY_ID")
+	assertTextNotContains(t, config, `seal "awskms"`, "guardian OpenBao raft config")
+	if valueAt(hr, "spec", "values", "openbao", "server", "extraSecretEnvironmentVars") != nil {
+		t.Fatalf("guardian OpenBao must not use cloud KMS seal environment variables")
+	}
 
 	policies := readManifests(t, "src/infrastructure/deployments/guardian/system/networkpolicy.yaml")
 	policy := findObject(t, policies, "CiliumNetworkPolicy", "tenant-guardian", "allow-openbao-to-apiserver")
@@ -938,7 +934,7 @@ func testOpenBao(t *testing.T) {
 	assertString(t, port, "TCP", "protocol")
 
 	findObject(t, policies, "CiliumNetworkPolicy", "tenant-guardian", "allow-external-secrets-to-openbao")
-	findObject(t, policies, "CiliumNetworkPolicy", "tenant-guardian", "allow-openbao-to-aws-kms")
+	assertNoObject(t, policies, "CiliumNetworkPolicy", "tenant-guardian", "allow-openbao-to-aws-kms")
 }
 
 func testOpenBaoOpenTofuBootstrap(t *testing.T) {
@@ -1604,20 +1600,6 @@ func assertEnvSecretRef(t *testing.T, env []any, name, secretName, key string) {
 	entry := findEnv(t, env, name)
 	assertString(t, entry, secretName, "valueFrom", "secretKeyRef", "name")
 	assertString(t, entry, key, "valueFrom", "secretKeyRef", "key")
-}
-
-func assertOpenBaoSecretEnv(t *testing.T, env []any, envName, secretName, secretKey string) {
-	t.Helper()
-
-	for _, value := range env {
-		entry := asManifest(t, value, "extraSecretEnvironmentVars[]")
-		if stringAt(entry, "envName") == envName {
-			assertString(t, entry, secretName, "secretName")
-			assertString(t, entry, secretKey, "secretKey")
-			return
-		}
-	}
-	t.Fatalf("extraSecretEnvironmentVars missing envName %q", envName)
 }
 
 func findEnv(t *testing.T, env []any, name string) manifest {

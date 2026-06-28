@@ -1,8 +1,6 @@
 package main
 
 import (
-	"context"
-	"encoding/base64"
 	"reflect"
 	"strings"
 	"testing"
@@ -16,7 +14,6 @@ func TestValidateConfig(t *testing.T) {
 		Namespace:            "tenant-guardian",
 		StatefulSet:          "guardian-openbao",
 		Service:              "guardian-openbao",
-		BootstrapSecret:      "guardian-openbao-bootstrap",
 		Root:                 "/repo/src/infrastructure/bootstrap/guardian-mgmt-openbao",
 		BackendEndpoint:      "https://account.r2.cloudflarestorage.com",
 		Mode:                 "apply",
@@ -45,51 +42,43 @@ func TestValidateConfig(t *testing.T) {
 	}
 }
 
-func TestDecodeRootToken(t *testing.T) {
-	want := "root-token"
-	got, err := decodeRootToken(base64.StdEncoding.EncodeToString([]byte(want)))
-	if err != nil {
-		t.Fatalf("decodeRootToken() error = %v", err)
-	}
-	if got != want {
-		t.Fatalf("decodeRootToken() = %q, want %q", got, want)
-	}
-	if _, err := decodeRootToken(""); err == nil {
-		t.Fatalf("empty token accepted")
-	}
-	if _, err := decodeRootToken("not base64"); err == nil {
-		t.Fatalf("invalid base64 accepted")
-	}
-}
-
 func TestRootTokenFromEnvPrefersBaoToken(t *testing.T) {
 	t.Setenv("BAO_TOKEN", "env-token")
 	t.Setenv("VAULT_TOKEN", "vault-token")
 
-	got, source, err := rootTokenFromEnvOrSecret(context.Background(), kubectlRunner{}, "bootstrap")
+	got, source, err := rootTokenFromEnv()
 	if err != nil {
-		t.Fatalf("rootTokenFromEnvOrSecret() error = %v", err)
+		t.Fatalf("rootTokenFromEnv() error = %v", err)
 	}
 	if got != "env-token" {
-		t.Fatalf("rootTokenFromEnvOrSecret() token = %q, want env-token", got)
+		t.Fatalf("rootTokenFromEnv() token = %q, want env-token", got)
 	}
 	if source != "BAO_TOKEN" {
-		t.Fatalf("rootTokenFromEnvOrSecret() source = %q, want BAO_TOKEN", source)
+		t.Fatalf("rootTokenFromEnv() source = %q, want BAO_TOKEN", source)
 	}
 }
 
 func TestRootTokenFromEnvFallsBackToVaultToken(t *testing.T) {
 	t.Setenv("VAULT_TOKEN", "vault-token")
 
-	got, source, err := rootTokenFromEnvOrSecret(context.Background(), kubectlRunner{}, "bootstrap")
+	got, source, err := rootTokenFromEnv()
 	if err != nil {
-		t.Fatalf("rootTokenFromEnvOrSecret() error = %v", err)
+		t.Fatalf("rootTokenFromEnv() error = %v", err)
 	}
 	if got != "vault-token" {
-		t.Fatalf("rootTokenFromEnvOrSecret() token = %q, want vault-token", got)
+		t.Fatalf("rootTokenFromEnv() token = %q, want vault-token", got)
 	}
 	if source != "VAULT_TOKEN" {
-		t.Fatalf("rootTokenFromEnvOrSecret() source = %q, want VAULT_TOKEN", source)
+		t.Fatalf("rootTokenFromEnv() source = %q, want VAULT_TOKEN", source)
+	}
+}
+
+func TestRootTokenFromEnvRequiresEnv(t *testing.T) {
+	t.Setenv("BAO_TOKEN", "")
+	t.Setenv("VAULT_TOKEN", "")
+
+	if _, _, err := rootTokenFromEnv(); err == nil {
+		t.Fatalf("rootTokenFromEnv() accepted missing root token")
 	}
 }
 

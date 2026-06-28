@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
@@ -26,7 +25,6 @@ type applyConfig struct {
 	Namespace            string
 	StatefulSet          string
 	Service              string
-	BootstrapSecret      string
 	Root                 string
 	BackendEndpoint      string
 	Mode                 string
@@ -57,7 +55,6 @@ func main() {
 	flag.StringVar(&cfg.Namespace, "namespace", "tenant-guardian", "OpenBao namespace")
 	flag.StringVar(&cfg.StatefulSet, "statefulset", "guardian-openbao", "OpenBao StatefulSet name")
 	flag.StringVar(&cfg.Service, "service", "guardian-openbao", "OpenBao Service name")
-	flag.StringVar(&cfg.BootstrapSecret, "bootstrap-secret", "guardian-openbao-bootstrap", "fallback Kubernetes Secret containing legacy OpenBao bootstrap material")
 	flag.StringVar(&cfg.Root, "root", "", "OpenTofu root to apply")
 	flag.StringVar(&cfg.BackendEndpoint, "backend-endpoint", "", "S3-compatible OpenTofu backend endpoint")
 	flag.StringVar(&cfg.Mode, "mode", "apply", "OpenTofu operation: plan or apply")
@@ -95,10 +92,9 @@ func validateConfig(cfg applyConfig) error {
 		return errors.New("--port-forward-ready-timeout must be positive")
 	}
 	for label, value := range map[string]string{
-		"namespace":        cfg.Namespace,
-		"statefulset":      cfg.StatefulSet,
-		"service":          cfg.Service,
-		"bootstrap-secret": cfg.BootstrapSecret,
+		"namespace":   cfg.Namespace,
+		"statefulset": cfg.StatefulSet,
+		"service":     cfg.Service,
 	} {
 		if !dnsSubdomainRE.MatchString(value) {
 			return fmt.Errorf("--%s %q is not a Kubernetes DNS subdomain", label, value)
@@ -121,12 +117,12 @@ func runApply(ctx context.Context, cfg applyConfig) error {
 	}
 
 	fmt.Printf("guardian cozystack openbao apply\n")
-	fmt.Printf("namespace=%s statefulset=%s service=%s bootstrapSecret=%s root=%s mode=%s\n", cfg.Namespace, cfg.StatefulSet, cfg.Service, cfg.BootstrapSecret, cfg.Root, cfg.Mode)
+	fmt.Printf("namespace=%s statefulset=%s service=%s root=%s mode=%s\n", cfg.Namespace, cfg.StatefulSet, cfg.Service, cfg.Root, cfg.Mode)
 
 	if err := waitStatefulSetReady(ctx, runner, cfg.StatefulSet, cfg.WaitTimeout); err != nil {
 		return err
 	}
-	token, tokenSource, err := rootTokenFromEnvOrSecret(ctx, runner, cfg.BootstrapSecret)
+	token, tokenSource, err := rootTokenFromEnv()
 	if err != nil {
 		return err
 	}
@@ -162,41 +158,14 @@ func waitStatefulSetReady(ctx context.Context, runner kubectlRunner, statefulSet
 	return runner.run(ctx, "wait OpenBao StatefulSet ready", "wait", "--for=jsonpath={.status.readyReplicas}="+want, "statefulset.apps/"+statefulSet, "--timeout="+timeout)
 }
 
-func rootToken(ctx context.Context, runner kubectlRunner, secret string) (string, error) {
-	out, err := runner.output(ctx, "OpenBao bootstrap root token", "get", "secret/"+secret, "-o", "jsonpath={.data.root-token}")
-	if err != nil {
-		return "", err
-	}
-	return decodeRootToken(strings.TrimSpace(out))
-}
-
-func rootTokenFromEnvOrSecret(ctx context.Context, runner kubectlRunner, secret string) (string, string, error) {
+func rootTokenFromEnv() (string, string, error) {
 	for _, key := range []string{"BAO_TOKEN", "VAULT_TOKEN"} {
 		token := strings.TrimSpace(os.Getenv(key))
 		if token != "" {
 			return token, key, nil
 		}
 	}
-	token, err := rootToken(ctx, runner, secret)
-	if err != nil {
-		return "", "", err
-	}
-	return token, "Kubernetes Secret/" + secret, nil
-}
-
-func decodeRootToken(encoded string) (string, error) {
-	if encoded == "" {
-		return "", errors.New("OpenBao bootstrap root-token is empty")
-	}
-	raw, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		return "", fmt.Errorf("decode OpenBao bootstrap root-token: %w", err)
-	}
-	token := string(raw)
-	if token == "" {
-		return "", errors.New("decoded OpenBao bootstrap root-token is empty")
-	}
-	return token, nil
+	return "", "", errors.New("BAO_TOKEN or VAULT_TOKEN is required; do not store the OpenBao root token in Kubernetes")
 }
 
 func tofuInitArgs(root, endpoint string) []string {

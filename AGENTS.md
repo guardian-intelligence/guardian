@@ -207,6 +207,12 @@ Important context:
 
 Constraints:
 - Secrets must be autoprovisioned/autorotated.
+- Notable exception: Guardian tenant OpenBao uses Manual Shamir unseal for
+  worst-case/bootstrap recovery until we have a suitable external trust anchor
+  such as parent transit seal, KMIP, HSM, PKCS#11, or cloud KMS from an accepted
+  provider. Do not store Shamir unseal keys or the initial root token in
+  Kubernetes, Git, CI, chat, shell history, or OpenBao-backed secret paths. The
+  runbook is `src/infrastructure/runbooks/openbao-manual-shamir-unseal.md`.
 - Cozystack 1.5 backups use the platform-managed `cozy-default` BackupClass
   and system bucket. Do not add Guardian-specific backup strategies, backup
   credential Secrets, or checks for legacy backup object names.

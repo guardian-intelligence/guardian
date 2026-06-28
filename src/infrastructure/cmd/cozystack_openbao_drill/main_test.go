@@ -1,8 +1,6 @@
 package main
 
 import (
-	"context"
-	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
@@ -18,12 +16,11 @@ func TestDefaultSnapshotName(t *testing.T) {
 
 func TestValidateConfig(t *testing.T) {
 	cfg := openBaoConfig{
-		Kubectl:         "/kubectl",
-		Namespace:       "tenant-guardian",
-		StatefulSet:     "guardian-openbao",
-		BootstrapSecret: "guardian-openbao-bootstrap",
-		Mode:            "snapshot",
-		SnapshotName:    "guardian-openbao-test.snap",
+		Kubectl:      "/kubectl",
+		Namespace:    "tenant-guardian",
+		StatefulSet:  "guardian-openbao",
+		Mode:         "snapshot",
+		SnapshotName: "guardian-openbao-test.snap",
 	}
 	if err := validateConfig(cfg); err != nil {
 		t.Fatalf("valid config rejected: %v", err)
@@ -57,23 +54,6 @@ func TestValidateConfig(t *testing.T) {
 	}
 }
 
-func TestParseInitResult(t *testing.T) {
-	got, err := parseInitResult(`{"unseal_keys_b64":["abc"],"root_token":"root"}`)
-	if err != nil {
-		t.Fatalf("parseInitResult() error = %v", err)
-	}
-	if got.UnsealKey != "abc" || got.RootToken != "root" {
-		t.Fatalf("parseInitResult() = %#v", got)
-	}
-
-	if _, err := parseInitResult(`{"unseal_keys_b64":[],"root_token":"root"}`); err == nil {
-		t.Fatalf("missing unseal key accepted")
-	}
-	if _, err := parseInitResult(`{"unseal_keys_b64":["abc"],"root_token":""}`); err == nil {
-		t.Fatalf("missing root token accepted")
-	}
-}
-
 func TestParseNativeJSONWithWrapperOutput(t *testing.T) {
 	status, err := parseBaoStatus("warning from wrapper\n{\"initialized\":true,\"sealed\":false}\n")
 	if err != nil {
@@ -85,63 +65,46 @@ func TestParseNativeJSONWithWrapperOutput(t *testing.T) {
 	if !looksLikeBaoStatusJSON("warning\n{\"initialized\":false,\"sealed\":true}\n") {
 		t.Fatalf("looksLikeBaoStatusJSON() rejected status payload")
 	}
-
-	init, err := parseInitResult("warning\n{\"unseal_keys_b64\":[\"abc\"],\"root_token\":\"root\"}\n")
-	if err != nil {
-		t.Fatalf("parseInitResult() wrapped output error = %v", err)
-	}
-	if init.UnsealKey != "abc" || init.RootToken != "root" {
-		t.Fatalf("parseInitResult() wrapped output = %#v", init)
-	}
 }
 
-func TestBootstrapSecretManifest(t *testing.T) {
-	material := bootstrapMaterial{UnsealKey: "unseal-value", RootToken: "root-value"}
-	got := bootstrapSecretManifest("tenant-guardian", "guardian-openbao-bootstrap", material)
-	for _, want := range []string{
-		"kind: Secret\nmetadata:\n  name: guardian-openbao-bootstrap\n  namespace: tenant-guardian\n",
-		"guardian.dev/secret-scope: openbao-bootstrap\n",
-		"unseal-key: " + base64.StdEncoding.EncodeToString([]byte(material.UnsealKey)) + "\n",
-		"root-token: " + base64.StdEncoding.EncodeToString([]byte(material.RootToken)) + "\n",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("bootstrap secret manifest missing %q:\n%s", want, got)
-		}
-	}
-	if strings.Contains(got, material.UnsealKey) || strings.Contains(got, material.RootToken) {
-		t.Fatalf("bootstrap secret manifest contains raw secret material:\n%s", got)
-	}
-}
-
-func TestRootTokenFromEnvOrBootstrapPrefersEnv(t *testing.T) {
+func TestRootTokenFromEnvPrefersBaoToken(t *testing.T) {
 	t.Setenv("BAO_TOKEN", "bao-token")
 	t.Setenv("VAULT_TOKEN", "vault-token")
 
-	got, source, err := rootTokenFromEnvOrBootstrap(context.Background(), kubectlRunner{}, "guardian-openbao-bootstrap")
+	got, source, err := rootTokenFromEnv()
 	if err != nil {
-		t.Fatalf("rootTokenFromEnvOrBootstrap() error = %v", err)
+		t.Fatalf("rootTokenFromEnv() error = %v", err)
 	}
 	if got != "bao-token" {
-		t.Fatalf("rootTokenFromEnvOrBootstrap() token = %q, want BAO_TOKEN value", got)
+		t.Fatalf("rootTokenFromEnv() token = %q, want BAO_TOKEN value", got)
 	}
 	if source != "BAO_TOKEN" {
-		t.Fatalf("rootTokenFromEnvOrBootstrap() source = %q, want BAO_TOKEN", source)
+		t.Fatalf("rootTokenFromEnv() source = %q, want BAO_TOKEN", source)
 	}
 }
 
-func TestRootTokenFromEnvOrBootstrapUsesVaultEnv(t *testing.T) {
+func TestRootTokenFromEnvUsesVaultEnv(t *testing.T) {
 	t.Setenv("BAO_TOKEN", "")
 	t.Setenv("VAULT_TOKEN", "vault-token")
 
-	got, source, err := rootTokenFromEnvOrBootstrap(context.Background(), kubectlRunner{}, "guardian-openbao-bootstrap")
+	got, source, err := rootTokenFromEnv()
 	if err != nil {
-		t.Fatalf("rootTokenFromEnvOrBootstrap() error = %v", err)
+		t.Fatalf("rootTokenFromEnv() error = %v", err)
 	}
 	if got != "vault-token" {
-		t.Fatalf("rootTokenFromEnvOrBootstrap() token = %q, want VAULT_TOKEN value", got)
+		t.Fatalf("rootTokenFromEnv() token = %q, want VAULT_TOKEN value", got)
 	}
 	if source != "VAULT_TOKEN" {
-		t.Fatalf("rootTokenFromEnvOrBootstrap() source = %q, want VAULT_TOKEN", source)
+		t.Fatalf("rootTokenFromEnv() source = %q, want VAULT_TOKEN", source)
+	}
+}
+
+func TestRootTokenFromEnvRequiresEnv(t *testing.T) {
+	t.Setenv("BAO_TOKEN", "")
+	t.Setenv("VAULT_TOKEN", "")
+
+	if _, _, err := rootTokenFromEnv(); err == nil {
+		t.Fatalf("rootTokenFromEnv() accepted missing root token")
 	}
 }
 
