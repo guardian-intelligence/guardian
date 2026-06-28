@@ -888,7 +888,7 @@ func testOpenBao(t *testing.T) {
 	assertNoObject(t, docs, "Secret", "tenant-guardian", "guardian-openbao-seal")
 	hr := findObject(t, docs, "HelmRelease", "tenant-guardian", "guardian-openbao")
 	assertString(t, hr, "helm.toolkit.fluxcd.io/v2", "apiVersion")
-	assertBool(t, hr, true, "spec", "suspend")
+	assertBool(t, hr, false, "spec", "suspend")
 	assertString(t, hr, "ExternalArtifact", "spec", "chartRef", "kind")
 	assertString(t, hr, "cozystack-openbao-application-default-openbao-system", "spec", "chartRef", "name")
 	assertString(t, hr, "cozy-system", "spec", "chartRef", "namespace")

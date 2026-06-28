@@ -9,8 +9,7 @@ metadata:
     guardian.dev/component: secrets
     guardian.dev/tenant-id: gi-guardian
 spec:
-  # Unsuspend only during the manual Shamir initialization/unseal runbook.
-  suspend: true
+  suspend: false
   chartRef:
     kind: ExternalArtifact
     name: cozystack-openbao-application-default-openbao-system
