@@ -18,6 +18,7 @@ filegroup(
         "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load",
         "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill",
         "//src/infrastructure/cmd/cozystack_observability_drill:cozystack_observability_drill",
+        "//src/infrastructure/cmd/cozystack_openbao_observability_drill:cozystack_openbao_observability_drill",
         "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill",
         "//src/infrastructure/load:http_load_scripts",
         "//src/services/secrets/openbao/deploy/base:manifests",

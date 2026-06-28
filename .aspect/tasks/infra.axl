@@ -28,6 +28,7 @@ EDGE_FAILOVER_DRILL_TARGET = "//src/infrastructure/cmd/edge_failover_drill:edge_
 NODE_OUTAGE_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill"
 OPENBAO_APPLY_TARGET = "//src/infrastructure/cmd/cozystack_openbao_apply:cozystack_openbao_apply"
 OPENBAO_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill"
+OPENBAO_OBSERVABILITY_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_openbao_observability_drill:cozystack_openbao_observability_drill"
 OBSERVABILITY_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_observability_drill:cozystack_observability_drill"
 GUARDIAN_MGMT_TALOS_NODES = [
     "10.8.0.11",
@@ -81,6 +82,7 @@ INFRA_TESTS = [
     "//src/infrastructure/cmd/cozystack_observability_drill:cozystack_observability_drill_test",
     "//src/infrastructure/cmd/cozystack_openbao_apply:cozystack_openbao_apply_test",
     "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill_test",
+    "//src/infrastructure/cmd/cozystack_openbao_observability_drill:cozystack_openbao_observability_drill_test",
     "//src/infrastructure/tests:manifest_invariants_test",
     "//src/services/secrets/openbao/operator/controllers:controllers_test",
 ]
@@ -1314,6 +1316,52 @@ def _openbao_drill_impl(ctx):
         label = "cozystack openbao drill",
     )
 
+def _openbao_observability_drill_impl(ctx):
+    kubectl = _kubectl_path(ctx)
+    if kubectl == None:
+        return 1
+
+    rc = _check_live_context(ctx, kubectl)
+    if rc != 0:
+        return rc
+    if ctx.args.revision != "":
+        rc = _check_flux_revision(ctx, kubectl, ctx.args.revision)
+        if rc != 0:
+            return rc
+
+    drill_args = [
+        "--kubectl",
+        kubectl,
+        "--stage",
+        ctx.args.stage,
+        "--namespace",
+        ctx.args.namespace,
+        "--monitoring-namespace",
+        ctx.args.monitoring_namespace,
+        "--statefulset",
+        ctx.args.statefulset,
+        "--request-timeout",
+        ctx.args.request_timeout,
+        "--wait-timeout",
+        ctx.args.wait_timeout,
+        "--poll-timeout",
+        ctx.args.poll_timeout,
+        "--poll-interval",
+        ctx.args.poll_interval,
+        "--port-forward-ready-timeout",
+        ctx.args.port_forward_ready_timeout,
+    ]
+    if ctx.args.kubeconfig != "":
+        drill_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
+
+    return checked_spawn(
+        ctx,
+        "bazelisk",
+        ["run", OPENBAO_OBSERVABILITY_DRILL_TARGET, "--"] + drill_args,
+        cwd = ws_path(ctx),
+        label = "cozystack openbao observability drill",
+    )
+
 def _openbao_apply_impl(ctx):
     kubectl = _kubectl_path(ctx)
     if kubectl == None:
@@ -1623,6 +1671,26 @@ openbao_drill = task(
         "snapshot_name": args.string(default = "", description = "Optional pod-local snapshot filename for snapshot mode."),
         "statefulset": args.string(default = "guardian-openbao", description = "OpenBao StatefulSet name."),
         "wait_timeout": args.string(default = "5m", description = "Timeout for OpenBao readiness waits."),
+    },
+)
+
+openbao_observability_drill = task(
+    implementation = _openbao_observability_drill_impl,
+    name = "openbao-observability-drill",
+    group = ["infra"],
+    summary = "Verify OpenBao metrics, audit tailing, ops-controller metrics, and VictoriaLogs ingestion.",
+    args = {
+        "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
+        "monitoring_namespace": args.string(default = "tenant-root", description = "Cozystack monitoring namespace hosting vmselect/vlselect."),
+        "namespace": args.string(default = "tenant-guardian", description = "OpenBao namespace."),
+        "poll_interval": args.string(default = "10s", description = "Interval for VictoriaMetrics and VictoriaLogs polling."),
+        "poll_timeout": args.string(default = "5m", description = "Timeout waiting for VictoriaMetrics and VictoriaLogs ingestion."),
+        "port_forward_ready_timeout": args.string(default = "10s", description = "Timeout for VictoriaMetrics/VictoriaLogs port-forward readiness."),
+        "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
+        "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before the drill."),
+        "stage": args.string(default = "root", description = "Guardian bootstrap stage: root."),
+        "statefulset": args.string(default = "guardian-openbao", description = "OpenBao StatefulSet name."),
+        "wait_timeout": args.string(default = "10m", description = "Timeout for OpenBao and monitoring readiness waits."),
     },
 )
 

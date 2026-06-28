@@ -950,6 +950,7 @@ func testOpenBao(t *testing.T) {
 	assertString(t, hr, "2.5.4@sha256:436eaf9778cad75507ff70ea26ace30dcbe15606e619ac3823495663d7f7c115", "spec", "values", "openbao", "server", "image", "tag")
 	assertString(t, hr, "replicated", "spec", "values", "openbao", "server", "dataStorage", "storageClass")
 	assertString(t, hr, "replicated", "spec", "values", "openbao", "server", "auditStorage", "storageClass")
+	assertString(t, hr, "RollingUpdate", "spec", "values", "openbao", "server", "updateStrategyType")
 	assertInt(t, hr, 3, "spec", "values", "openbao", "server", "ha", "replicas")
 	assertBool(t, hr, true, "spec", "values", "openbao", "server", "ha", "raft", "enabled")
 	assertBool(t, hr, true, "spec", "values", "openbao", "server", "ha", "raft", "setNodeId")
@@ -1041,6 +1042,25 @@ func testOpenBao(t *testing.T) {
 	}
 	assertString(t, asManifest(t, metricsPorts[0], "metrics ports[0]"), "9101", "port")
 	assertString(t, asManifest(t, metricsPorts[0], "metrics ports[0]"), "TCP", "protocol")
+	opsMetricsPolicy := findObject(t, policies, "CiliumNetworkPolicy", "tenant-guardian", "allow-vmagent-to-openbao-ops-controller-metrics")
+	assertString(t, opsMetricsPolicy, "openbao-ops-controller", "spec", "endpointSelector", "matchLabels", "app.kubernetes.io/name")
+	opsMetricsIngress := sliceAt(t, opsMetricsPolicy, "spec", "ingress")
+	if len(opsMetricsIngress) != 1 {
+		t.Fatalf("ops metrics policy ingress = %#v, want one ingress rule", opsMetricsIngress)
+	}
+	opsMetricsFrom := sliceAt(t, asManifest(t, opsMetricsIngress[0], "ops metrics ingress[0]"), "fromEndpoints")
+	if len(opsMetricsFrom) != 1 {
+		t.Fatalf("ops metrics policy fromEndpoints = %#v, want only vmagent", opsMetricsFrom)
+	}
+	assertString(t, asManifest(t, opsMetricsFrom[0], "ops metrics fromEndpoints[0]"), "vmagent", "matchLabels", "app.kubernetes.io/name")
+	assertString(t, asManifest(t, opsMetricsFrom[0], "ops metrics fromEndpoints[0]"), "cozy-monitoring", "matchLabels", "k8s:io.kubernetes.pod.namespace")
+	opsMetricsToPorts := sliceAt(t, asManifest(t, opsMetricsIngress[0], "ops metrics ingress[0]"), "toPorts")
+	opsMetricsPorts := sliceAt(t, asManifest(t, opsMetricsToPorts[0], "ops metrics toPorts[0]"), "ports")
+	if len(opsMetricsPorts) != 1 {
+		t.Fatalf("ops metrics policy ports = %#v, want only 8080", opsMetricsPorts)
+	}
+	assertString(t, asManifest(t, opsMetricsPorts[0], "ops metrics ports[0]"), "8080", "port")
+	assertString(t, asManifest(t, opsMetricsPorts[0], "ops metrics ports[0]"), "TCP", "protocol")
 	assertNoObject(t, policies, "CiliumNetworkPolicy", "tenant-guardian", "allow-openbao-to-aws-kms")
 
 	observability := readManifests(t, "src/infrastructure/deployments/guardian/system/openbao-observability.yaml")
@@ -1063,6 +1083,16 @@ func testOpenBao(t *testing.T) {
 	assertString(t, endpoint, "/v1/sys/metrics", "path")
 	assertStringSlice(t, endpoint, []string{"prometheus"}, "params", "format")
 
+	opsScrape := findObject(t, observability, "VMServiceScrape", "tenant-guardian", "guardian-openbao-ops-controller")
+	assertString(t, opsScrape, "openbao-ops-controller", "spec", "selector", "matchLabels", "app.kubernetes.io/name")
+	opsEndpoints := sliceAt(t, opsScrape, "spec", "endpoints")
+	if len(opsEndpoints) != 1 {
+		t.Fatalf("guardian OpenBao ops controller VMServiceScrape endpoints = %#v, want one endpoint", opsEndpoints)
+	}
+	opsEndpoint := asManifest(t, opsEndpoints[0], "ops controller VMServiceScrape endpoint")
+	assertString(t, opsEndpoint, "metrics", "port")
+	assertString(t, opsEndpoint, "/metrics", "path")
+
 	rule := findObject(t, observability, "VMRule", "tenant-guardian", "guardian-openbao")
 	groups := sliceAt(t, rule, "spec", "groups")
 	if len(groups) != 1 {
@@ -1075,8 +1105,10 @@ func testOpenBao(t *testing.T) {
 		"OpenBaoNoLeader",
 		"OpenBaoQuorumAtRisk",
 		"OpenBaoAuditFailures",
+		"OpenBaoAuditLogSilent",
 		"OpenBaoDataPVCPressure",
 		"OpenBaoAuditPVCPressure",
+		"OpenBaoOpsControllerReconcileFailures",
 		"ExternalSecretOpenBaoSyncFailure",
 	}
 	if len(rules) != len(wantAlerts) {
@@ -1091,6 +1123,7 @@ func testOpenBao(t *testing.T) {
 			t.Fatalf("VMRule alert %q has empty expression", stringAt(entry, "alert"))
 		}
 		assertTextNotContains(t, expr, "TODO", "VMRule alert expression")
+		assertTextNotContains(t, expr, `job="tenant-guardian/guardian-openbao-metrics"`, "VMRule alert expression")
 	}
 	for _, want := range wantAlerts {
 		if !seenAlerts[want] {
