@@ -919,6 +919,78 @@ func testObservability(t *testing.T) {
 	assertString(t, pkg, "64MB", "spec", "components", "monitoring-agents", "values", "vmagent", "extraArgs", "promscrape.maxScrapeSize")
 }
 
+func openBaoCLIVersion(t *testing.T) string {
+	t.Helper()
+
+	const marker = "https://github.com/openbao/openbao/releases/download/v"
+	const rel = "src/tools/openbao/openbao.MODULE.bazel"
+
+	module := string(readRunfile(t, rel))
+	start := strings.Index(module, marker)
+	if start < 0 {
+		t.Fatalf("%s must pin the OpenBao CLI from github.com/openbao/openbao releases", rel)
+	}
+	releasePath := module[start+len(marker):]
+	end := strings.Index(releasePath, "/")
+	if end < 0 || releasePath[:end] == "" {
+		t.Fatalf("%s has malformed OpenBao CLI release URL", rel)
+	}
+	version := releasePath[:end]
+	assertTextContains(t, module, "bao_"+version+"_Linux_x86_64.tar.gz", rel)
+	assertTextContains(t, module, `sha256 = "`, rel)
+	return version
+}
+
+func assertOpenBaoTagVersionAndDigest(t *testing.T, tag, version, context string) {
+	t.Helper()
+
+	tagVersion, digest, ok := strings.Cut(tag, "@")
+	if !ok {
+		t.Fatalf("%s = %q, want version pinned by digest", context, tag)
+	}
+	if tagVersion != version {
+		t.Fatalf("%s version = %q, want repo-pinned bao CLI version %q", context, tagVersion, version)
+	}
+	assertOpenBaoSHA256Digest(t, digest, context)
+}
+
+func assertOpenBaoImageVersionAndDigest(t *testing.T, image, version, context string) {
+	t.Helper()
+
+	imageRef, digest, ok := strings.Cut(image, "@")
+	if !ok {
+		t.Fatalf("%s = %q, want image pinned by digest", context, image)
+	}
+	tagStart := strings.LastIndex(imageRef, ":")
+	slashStart := strings.LastIndex(imageRef, "/")
+	if tagStart <= slashStart {
+		t.Fatalf("%s = %q, want explicit image tag before digest", context, image)
+	}
+	tagVersion := imageRef[tagStart+1:]
+	if tagVersion != version {
+		t.Fatalf("%s version = %q, want repo-pinned bao CLI version %q", context, tagVersion, version)
+	}
+	assertOpenBaoSHA256Digest(t, digest, context)
+}
+
+func assertOpenBaoSHA256Digest(t *testing.T, digest, context string) {
+	t.Helper()
+
+	const prefix = "sha256:"
+	if !strings.HasPrefix(digest, prefix) {
+		t.Fatalf("%s digest = %q, want sha256 digest", context, digest)
+	}
+	hexDigest := digest[len(prefix):]
+	if len(hexDigest) != 64 {
+		t.Fatalf("%s digest = %q, want 64 hex characters", context, digest)
+	}
+	for _, r := range hexDigest {
+		if !('0' <= r && r <= '9') && !('a' <= r && r <= 'f') {
+			t.Fatalf("%s digest = %q, want lowercase hex sha256 digest", context, digest)
+		}
+	}
+}
+
 func testOpenBao(t *testing.T) {
 	tenantDocs := readManifests(t, "src/infrastructure/base/tenants/guardian.yaml")
 	guardian := findObject(t, tenantDocs, "Tenant", "tenant-root", "guardian")
@@ -953,7 +1025,9 @@ func testOpenBao(t *testing.T) {
 	assertBool(t, hr, false, "spec", "values", "openbao", "csi", "enabled")
 	assertString(t, hr, "quay.io", "spec", "values", "openbao", "server", "image", "registry")
 	assertString(t, hr, "openbao/openbao", "spec", "values", "openbao", "server", "image", "repository")
-	assertString(t, hr, "2.5.4@sha256:436eaf9778cad75507ff70ea26ace30dcbe15606e619ac3823495663d7f7c115", "spec", "values", "openbao", "server", "image", "tag")
+	openBaoVersion := openBaoCLIVersion(t)
+	serverImageTag := stringAt(hr, "spec", "values", "openbao", "server", "image", "tag")
+	assertOpenBaoTagVersionAndDigest(t, serverImageTag, openBaoVersion, "guardian OpenBao server image tag")
 	assertString(t, hr, "replicated", "spec", "values", "openbao", "server", "dataStorage", "storageClass")
 	assertString(t, hr, "replicated", "spec", "values", "openbao", "server", "auditStorage", "storageClass")
 	assertString(t, hr, "RollingUpdate", "spec", "values", "openbao", "server", "updateStrategyType")
@@ -990,7 +1064,9 @@ func testOpenBao(t *testing.T) {
 	}
 	tailer := asManifest(t, extraContainers[0], "server.extraContainers[0]")
 	assertString(t, tailer, "audit-log-tailer", "name")
-	assertString(t, tailer, "quay.io/openbao/openbao:2.5.4@sha256:436eaf9778cad75507ff70ea26ace30dcbe15606e619ac3823495663d7f7c115", "image")
+	tailerImage := stringAt(tailer, "image")
+	assertString(t, tailer, "quay.io/openbao/openbao:"+serverImageTag, "image")
+	assertOpenBaoImageVersionAndDigest(t, tailerImage, openBaoVersion, "guardian OpenBao audit tailer image")
 	tailerArgs := sliceAt(t, tailer, "args")
 	if len(tailerArgs) != 1 || !strings.Contains(tailerArgs[0].(string), "/openbao/audit/audit.log") {
 		t.Fatalf("audit-log-tailer args = %#v, want tail of /openbao/audit/audit.log", tailerArgs)

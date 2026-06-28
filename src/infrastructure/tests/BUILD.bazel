@@ -34,6 +34,7 @@ go_test(
         "//src/services/secrets/openbao/deploy/base:manifests",
         "//src/services/secrets/openbao/deploy/guardian-mgmt:manifests",
         "//src/services/secrets/openbao/operator:image",
+        "//src/tools/openbao:openbao.MODULE.bazel",
     ],
     deps = [
         "@com_github_hashicorp_hcl_v2//:hcl",
