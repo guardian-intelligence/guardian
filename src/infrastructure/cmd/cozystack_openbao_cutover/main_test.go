@@ -82,6 +82,24 @@ func TestValidateStatefulSetRolled(t *testing.T) {
 	}
 }
 
+func TestValidateStatefulSetRolledAcceptsOnDeleteCurrentRevisionLag(t *testing.T) {
+	raw := `{"spec":{"replicas":3,"updateStrategy":{"type":"OnDelete"}},"status":{"readyReplicas":3,"updatedReplicas":3,"currentRevision":"guardian-openbao-old","updateRevision":"guardian-openbao-new"}}`
+	if err := validateStatefulSetRolled(raw, "guardian-openbao"); err != nil {
+		t.Fatalf("validateStatefulSetRolled() error = %v", err)
+	}
+}
+
+func TestValidateStatefulSetRolledRejectsRollingUpdateRevisionMismatch(t *testing.T) {
+	raw := `{"spec":{"replicas":3,"updateStrategy":{"type":"RollingUpdate"}},"status":{"readyReplicas":3,"updatedReplicas":3,"currentRevision":"guardian-openbao-old","updateRevision":"guardian-openbao-new"}}`
+	err := validateStatefulSetRolled(raw, "guardian-openbao")
+	if err == nil {
+		t.Fatalf("validateStatefulSetRolled() accepted revision mismatch")
+	}
+	if !strings.Contains(err.Error(), "currentRevision=") {
+		t.Fatalf("validateStatefulSetRolled() error = %v, want revision detail", err)
+	}
+}
+
 func TestValidateStatefulSetRolledRejectsMixedRevision(t *testing.T) {
 	raw := `{"spec":{"replicas":3},"status":{"readyReplicas":2,"updatedReplicas":1,"currentRevision":"guardian-openbao-old","updateRevision":"guardian-openbao-new"}}`
 	err := validateStatefulSetRolled(raw, "guardian-openbao")
