@@ -716,6 +716,37 @@ func assertHarborRWORolloutStrategy(t *testing.T, rel, namespace string) {
 	hr := findObject(t, readManifests(t, rel), "HelmRelease", namespace, "harbor-guardian-system")
 	assertString(t, hr, "helm.toolkit.fluxcd.io/v2", "apiVersion")
 	assertString(t, hr, "Recreate", "spec", "values", "harbor", "updateStrategy", "type")
+
+	postRenderers := valueAt(hr, "spec", "postRenderers")
+	list, ok := postRenderers.([]any)
+	if !ok || len(list) != 1 {
+		t.Fatalf("harbor HelmRelease patch postRenderers = %#v, want one postRenderer", postRenderers)
+	}
+	renderer := asManifest(t, list[0], "harbor postRenderer")
+	patches := valueAt(renderer, "kustomize", "patches")
+	patchList, ok := patches.([]any)
+	if !ok || len(patchList) != 2 {
+		t.Fatalf("harbor postRenderer patches = %#v, want jobservice and registry patches", patches)
+	}
+	for _, wantName := range []string{"harbor-guardian-jobservice", "harbor-guardian-registry"} {
+		var patch map[string]any
+		for _, rawPatch := range patchList {
+			candidate := asManifest(t, rawPatch, "harbor postRenderer patch")
+			if stringAt(candidate, "target", "name") == wantName {
+				patch = candidate
+				break
+			}
+		}
+		if patch == nil {
+			t.Fatalf("harbor postRenderer missing patch for %s", wantName)
+		}
+		assertString(t, patch, "apps", "target", "group")
+		assertString(t, patch, "v1", "target", "version")
+		assertString(t, patch, "Deployment", "target", "kind")
+		patchText := stringAt(patch, "patch")
+		assertTextContains(t, patchText, "type: Recreate", "harbor postRenderer patch")
+		assertTextContains(t, patchText, "rollingUpdate: null", "harbor postRenderer patch")
+	}
 }
 
 func assertMonitoring(t *testing.T, rel, namespace, host string, highCapacity bool, labelKey, labelValue string) {
@@ -1226,7 +1257,7 @@ func testOpenBaoOpsControllerScaffold(t *testing.T) {
 	}
 	image := asManifest(t, images[0], "openbao guardian-mgmt image override")
 	assertString(t, image, "guardian/openbao-ops-controller", "name")
-	assertString(t, image, "harbor.guardianintelligence.org/guardian/openbao-ops-controller", "newName")
+	assertString(t, image, "oci.guardianintelligence.org/guardian/openbao-ops-controller", "newName")
 	assertString(t, image, "sha256:4bf8a4213772ec5cf404473f9a326a2657de1be18ab7a1a81bd60e0488a419a3", "digest")
 	if valueAt(image, "newTag") != nil {
 		t.Fatalf("openbao guardian-mgmt overlay must pin by digest, not newTag")
