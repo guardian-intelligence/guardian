@@ -37,32 +37,34 @@ jobs:
           bazelisk build \
             --embed_label="$GITHUB_SHA" \
             //src/services/secrets/openbao/operator:image \
-            //src/services/secrets/openbao/operator:push-oci
+            //src/services/secrets/openbao/operator:push-harbor
 
-      - name: Authenticate to Guardian OCI
+      - name: Authenticate to Harbor
         env:
-          GUARDIAN_OCI_USERNAME: guardian-release
-          GUARDIAN_OCI_PASSWORD: ${{ secrets.GUARDIAN_OCI_PASSWORD }}
+          GUARDIAN_HARBOR_USERNAME: ${{ secrets.GUARDIAN_HARBOR_USERNAME }}
+          GUARDIAN_HARBOR_PASSWORD: ${{ secrets.GUARDIAN_HARBOR_PASSWORD }}
         run: |
-          crane="bazel-bin/src/services/secrets/openbao/operator/push_push-oci.sh.runfiles/rules_oci++oci+oci_crane_linux_amd64/crane"
+          crane="bazel-bin/src/services/secrets/openbao/operator/push_push-harbor.sh.runfiles/rules_oci++oci+oci_crane_linux_amd64/crane"
           test -x "$crane"
-          printf '%s' "$GUARDIAN_OCI_PASSWORD" | "$crane" auth login oci.guardianintelligence.org -u "$GUARDIAN_OCI_USERNAME" --password-stdin
+          test -n "$GUARDIAN_HARBOR_USERNAME"
+          test -n "$GUARDIAN_HARBOR_PASSWORD"
+          printf '%s' "$GUARDIAN_HARBOR_PASSWORD" | "$crane" auth login harbor.guardianintelligence.org -u "$GUARDIAN_HARBOR_USERNAME" --password-stdin
 
       - name: Push image
         run: |
           bazelisk run \
             --embed_label="$GITHUB_SHA" \
-            //src/services/secrets/openbao/operator:push-oci
+            //src/services/secrets/openbao/operator:push-harbor
 
       - name: Summarize digest
         run: |
-          jq_bin="bazel-bin/src/services/secrets/openbao/operator/push_push-oci.sh.runfiles/aspect_bazel_lib++toolchains+jq_linux_amd64/jq"
+          jq_bin="bazel-bin/src/services/secrets/openbao/operator/push_push-harbor.sh.runfiles/aspect_bazel_lib++toolchains+jq_linux_amd64/jq"
           test -x "$jq_bin"
           digest="$("$jq_bin" -r '.manifests[0].digest' bazel-bin/src/services/secrets/openbao/operator/image/index.json)"
           {
             echo "## OpenBao ops controller image"
             echo
-            echo "- Repository: \`oci.guardianintelligence.org/guardian/openbao-ops-controller\`"
+            echo "- Repository: \`harbor.guardianintelligence.org/guardian/openbao-ops-controller\`"
             echo "- Tag: \`edge\`"
             echo "- Digest: \`$digest\`"
           } >> "$GITHUB_STEP_SUMMARY"
