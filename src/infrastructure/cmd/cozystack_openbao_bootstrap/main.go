@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-type applyConfig struct {
+type bootstrapConfig struct {
 	Kubectl              string
 	Tofu                 string
 	Kubeconfig           string
@@ -44,7 +44,7 @@ type portForward struct {
 var dnsSubdomainRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
 
 func main() {
-	var cfg applyConfig
+	var cfg bootstrapConfig
 	var portForwardReadyWait string
 	flag.StringVar(&cfg.Kubectl, "kubectl", "", "path to kubectl")
 	flag.StringVar(&cfg.Tofu, "tofu", "", "path to the repo-pinned OpenTofu runner")
@@ -55,7 +55,7 @@ func main() {
 	flag.StringVar(&cfg.Namespace, "namespace", "tenant-guardian", "OpenBao namespace")
 	flag.StringVar(&cfg.StatefulSet, "statefulset", "guardian-openbao", "OpenBao StatefulSet name")
 	flag.StringVar(&cfg.Service, "service", "guardian-openbao", "OpenBao Service name")
-	flag.StringVar(&cfg.Root, "root", "", "OpenTofu root to apply")
+	flag.StringVar(&cfg.Root, "root", "", "OpenTofu root to bootstrap the OpenBao ops-controller identity")
 	flag.StringVar(&cfg.BackendEndpoint, "backend-endpoint", "", "S3-compatible OpenTofu backend endpoint")
 	flag.StringVar(&cfg.Mode, "mode", "apply", "OpenTofu operation: plan or apply")
 	flag.Parse()
@@ -64,7 +64,7 @@ func main() {
 	cfg.PortForwardReadyWait, err = time.ParseDuration(portForwardReadyWait)
 	exitIfErr(err)
 	exitIfErr(validateConfig(cfg))
-	exitIfErr(runApply(context.Background(), cfg))
+	exitIfErr(runBootstrap(context.Background(), cfg))
 }
 
 func exitIfErr(err error) {
@@ -75,7 +75,7 @@ func exitIfErr(err error) {
 	os.Exit(1)
 }
 
-func validateConfig(cfg applyConfig) error {
+func validateConfig(cfg bootstrapConfig) error {
 	if cfg.Kubectl == "" {
 		return errors.New("--kubectl is required")
 	}
@@ -108,7 +108,7 @@ func validateConfig(cfg applyConfig) error {
 	return nil
 }
 
-func runApply(ctx context.Context, cfg applyConfig) error {
+func runBootstrap(ctx context.Context, cfg bootstrapConfig) error {
 	runner := kubectlRunner{
 		bin:            cfg.Kubectl,
 		kubeconfig:     cfg.Kubeconfig,
@@ -116,7 +116,7 @@ func runApply(ctx context.Context, cfg applyConfig) error {
 		namespace:      cfg.Namespace,
 	}
 
-	fmt.Printf("guardian cozystack openbao apply\n")
+	fmt.Printf("guardian cozystack openbao bootstrap\n")
 	fmt.Printf("namespace=%s statefulset=%s service=%s root=%s mode=%s\n", cfg.Namespace, cfg.StatefulSet, cfg.Service, cfg.Root, cfg.Mode)
 
 	if err := waitStatefulSetReady(ctx, runner, cfg.StatefulSet, cfg.WaitTimeout); err != nil {

@@ -8,7 +8,7 @@ import (
 )
 
 func TestValidateConfig(t *testing.T) {
-	cfg := applyConfig{
+	cfg := bootstrapConfig{
 		Kubectl:              "/kubectl",
 		Tofu:                 "/tofu",
 		Namespace:            "tenant-guardian",
