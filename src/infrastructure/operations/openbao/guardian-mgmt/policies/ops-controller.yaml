@@ -9,23 +9,35 @@ spec:
       capabilities = ["create", "read", "update", "delete"]
     }
 
+    path "sys/auth" {
+      capabilities = ["read", "sudo"]
+    }
+
+    path "sys/auth/kubernetes" {
+      capabilities = ["create", "read", "update", "delete", "sudo"]
+    }
+
+    path "sys/auth/kubernetes/tune" {
+      capabilities = ["read", "update", "sudo"]
+    }
+
+    path "auth/kubernetes/config" {
+      capabilities = ["read", "update"]
+    }
+
     path "auth/kubernetes/role/guardian-*" {
       capabilities = ["create", "read", "update", "delete"]
     }
 
-    path "sys/auth/kubernetes" {
-      capabilities = ["create", "read", "update", "delete"]
-    }
-
-    path "sys/auth/kubernetes/tune" {
-      capabilities = ["read", "update"]
+    path "sys/mounts" {
+      capabilities = ["read", "sudo"]
     }
 
     path "sys/mounts/kv" {
-      capabilities = ["create", "read", "update", "delete"]
+      capabilities = ["create", "read", "update", "delete", "sudo"]
     }
 
     path "sys/mounts/kv/tune" {
-      capabilities = ["read", "update"]
+      capabilities = ["read", "update", "sudo"]
     }
   deletionPolicy: Retain

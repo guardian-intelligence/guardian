@@ -40,6 +40,9 @@ func TestOpenBaoStaticSealTLSAndStorageConformance(t *testing.T) {
 		`test "$(sha256sum "$key" | awk '{print $1}')" = "` + openBaoStaticSealKeyID + `"`,
 			`initialize "guardian_self_init"`,
 			`request "write_ops_controller_role"`,
+			`path \"sys/auth\"`,
+			`path \"auth/kubernetes/config\"`,
+			`path \"sys/mounts\"`,
 			`request "write_secret_importer_policy"`,
 			`request "write_secret_importer_role"`,
 			`kv/data/guardian/guardian-mgmt/tenant-guardian/dns/external-dns`,
@@ -126,7 +129,11 @@ func TestOpenBaoConsumersUseTLSConformance(t *testing.T) {
 	for _, want := range []string{
 		"value: https://guardian-openbao-active:8200",
 		"name: BAO_CACERT",
+		"name: OPENBAO_KUBERNETES_JWT_PATH",
+		"value: /var/run/secrets/openbao/token",
 		"secretName: guardian-openbao-api-tls",
+		"name: openbao-auth-token",
+		"audience: openbao",
 	} {
 		assertTextContains(t, deployment, want, "ops-controller deployment")
 	}
