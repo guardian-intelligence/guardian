@@ -1077,6 +1077,18 @@ func testOpenBao(t *testing.T) {
 	if len(opsCRDDeps) != 1 || stringAt(asManifest(t, opsCRDDeps[0], "openbao ops CRDs spec.dependsOn[0]"), "name") != "guardian-system" {
 		t.Fatalf("guardian-openbao-ops-crds dependsOn = %#v, want only guardian-system", opsCRDDeps)
 	}
+
+	opsState := findObject(t, opsController, "Kustomization", "cozy-fluxcd", "guardian-openbao-ops-state")
+	assertString(t, opsState, "kustomize.toolkit.fluxcd.io/v1", "apiVersion")
+	assertString(t, opsState, "./src/infrastructure/operations/openbao/guardian-mgmt", "spec", "path")
+	assertString(t, opsState, "GitRepository", "spec", "sourceRef", "kind")
+	assertString(t, opsState, "guardian", "spec", "sourceRef", "name")
+	assertBool(t, opsState, true, "spec", "prune")
+	assertBool(t, opsState, false, "spec", "wait")
+	opsStateDeps := sliceAt(t, opsState, "spec", "dependsOn")
+	if len(opsStateDeps) != 1 || stringAt(asManifest(t, opsStateDeps[0], "openbao ops state spec.dependsOn[0]"), "name") != "guardian-openbao-ops-crds" {
+		t.Fatalf("guardian-openbao-ops-state dependsOn = %#v, want only guardian-openbao-ops-crds", opsStateDeps)
+	}
 }
 
 func testOpenBaoOpsControllerScaffold(t *testing.T) {
