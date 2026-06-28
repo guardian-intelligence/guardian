@@ -2,12 +2,22 @@ load("@rules_go//go:def.bzl", "go_test")
 
 go_test(
     name = "talm_render_test",
-    srcs = ["talm_render_test.go"],
+    srcs = [
+        "openbao_conformance_test.go",
+        "talm_render_test.go",
+    ],
     data = [
         "@talm_linux_amd64//:talm",
+        "//src/infrastructure/base/dns:manifests",
+        "//src/infrastructure/base/flux:manifests",
+        "//src/infrastructure/base/storage:manifests",
+        "//src/infrastructure/deployments/guardian/openbao-ops:manifests",
+        "//src/infrastructure/deployments/guardian/system:manifests",
         "//src/infrastructure/talm:chart",
+        "//src/services/secrets/openbao/deploy/base:manifests",
     ],
     deps = [
         "@rules_go//go/runfiles",
+        "@in_gopkg_yaml_v3//:yaml_v3",
     ],
 )

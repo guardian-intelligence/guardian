@@ -6,20 +6,6 @@ import (
 	"testing"
 )
 
-func TestValidateOpenBaoCRsBootstrapRequired(t *testing.T) {
-	raw := `{"items":[
-		{"kind":"OpenBaoPolicy","metadata":{"name":"ops-controller"},"status":{"lastError":"login failed: invalid role name \"guardian-openbao-ops-controller\"","conditions":[
-			{"type":"Authenticated","status":"False","reason":"BootstrapRequired"},
-			{"type":"Applied","status":"False","reason":"BootstrapRequired"},
-			{"type":"Ready","status":"False","reason":"BootstrapRequired"},
-			{"type":"DriftDetected","status":"Unknown","reason":"BootstrapRequired"}
-		]}}
-	]}`
-	if err := validateOpenBaoCRs(raw, []string{"OpenBaoPolicy/ops-controller"}, phaseBootstrapRequired); err != nil {
-		t.Fatalf("validateOpenBaoCRs() error = %v", err)
-	}
-}
-
 func TestValidateOpenBaoCRsConverged(t *testing.T) {
 	raw := `{"items":[
 		{"kind":"OpenBaoPolicy","metadata":{"name":"ops-controller"},"status":{"conditions":[
@@ -29,23 +15,23 @@ func TestValidateOpenBaoCRsConverged(t *testing.T) {
 			{"type":"DriftDetected","status":"False","reason":"Applied"}
 		]}}
 	]}`
-	if err := validateOpenBaoCRs(raw, []string{"OpenBaoPolicy/ops-controller"}, phaseConverged); err != nil {
+	if err := validateOpenBaoCRs(raw, []string{"OpenBaoPolicy/ops-controller"}); err != nil {
 		t.Fatalf("validateOpenBaoCRs() error = %v", err)
 	}
 }
 
-func TestValidateOpenBaoCRsConvergedRejectsBootstrapRequired(t *testing.T) {
+func TestValidateOpenBaoCRsRejectsSelfInitIncomplete(t *testing.T) {
 	raw := `{"items":[
 		{"kind":"OpenBaoPolicy","metadata":{"name":"ops-controller"},"status":{"lastError":"login failed: invalid role name","conditions":[
-			{"type":"Authenticated","status":"False","reason":"BootstrapRequired"},
-			{"type":"Applied","status":"False","reason":"BootstrapRequired"},
-			{"type":"Ready","status":"False","reason":"BootstrapRequired"},
-			{"type":"DriftDetected","status":"Unknown","reason":"BootstrapRequired"}
+			{"type":"Authenticated","status":"False","reason":"SelfInitIncomplete"},
+			{"type":"Applied","status":"False","reason":"SelfInitIncomplete"},
+			{"type":"Ready","status":"False","reason":"SelfInitIncomplete"},
+			{"type":"DriftDetected","status":"Unknown","reason":"SelfInitIncomplete"}
 		]}}
 	]}`
-	err := validateOpenBaoCRs(raw, []string{"OpenBaoPolicy/ops-controller"}, phaseConverged)
+	err := validateOpenBaoCRs(raw, []string{"OpenBaoPolicy/ops-controller"})
 	if err == nil {
-		t.Fatalf("validateOpenBaoCRs() accepted bootstrap-required CR as converged")
+		t.Fatalf("validateOpenBaoCRs() accepted self-init-incomplete CR as converged")
 	}
 	if !strings.Contains(err.Error(), "Authenticated = False") {
 		t.Fatalf("validateOpenBaoCRs() error = %v, want condition detail", err)

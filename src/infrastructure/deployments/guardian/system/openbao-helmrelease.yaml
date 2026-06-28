@@ -30,7 +30,7 @@ spec:
     openbao:
       fullnameOverride: guardian-openbao
       global:
-        tlsDisable: true
+        tlsDisable: false
       injector:
         enabled: false
       csi:
@@ -39,7 +39,7 @@ spec:
         enabled: false
       server:
         configAnnotation: true
-        podManagementPolicy: Parallel
+        podManagementPolicy: OrderedReady
         image:
           registry: quay.io
           repository: openbao/openbao
@@ -48,12 +48,64 @@ spec:
         dataStorage:
           enabled: true
           size: 10Gi
-          storageClass: replicated
+          storageClass: openbao-local
         auditStorage:
           enabled: true
           size: 10Gi
-          storageClass: replicated
+          storageClass: openbao-local
         updateStrategyType: OnDelete
+        shareProcessNamespace: true
+        nodeSelector:
+          guardian.dev/openbao-static-seal: "true"
+        extraEnvironmentVars:
+          BAO_CACERT: /openbao/tls/ca.crt
+        volumes:
+          - name: openbao-api-tls
+            secret:
+              secretName: guardian-openbao-api-tls
+          - name: openbao-static-seal
+            hostPath:
+              path: /var/lib/guardian/openbao/static-seal
+              type: DirectoryOrCreate
+        volumeMounts:
+          - name: openbao-api-tls
+            mountPath: /openbao/tls
+            readOnly: true
+          - name: openbao-static-seal
+            mountPath: /openbao/secrets
+            readOnly: true
+        extraInitContainers:
+          - name: verify-static-seal-key
+            image: quay.io/openbao/openbao:2.5.4@sha256:436eaf9778cad75507ff70ea26ace30dcbe15606e619ac3823495663d7f7c115
+            imagePullPolicy: IfNotPresent
+            command:
+              - /bin/sh
+              - -ec
+            args:
+              - |
+                key=/openbao/secrets/unseal-4dd033bda750c5e2e9718a6b571ba787a46443a412c2713727b7ab592001380d.key
+                test -r "$key"
+                test "$(wc -c < "$key" | tr -d ' ')" = "32"
+                test "$(sha256sum "$key" | awk '{print $1}')" = "4dd033bda750c5e2e9718a6b571ba787a46443a412c2713727b7ab592001380d"
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+                ephemeral-storage: 16Mi
+              limits:
+                cpu: 100m
+                memory: 64Mi
+                ephemeral-storage: 128Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                  - ALL
+              readOnlyRootFilesystem: true
+            volumeMounts:
+              - name: openbao-static-seal
+                mountPath: /openbao/secrets
+                readOnly: true
         extraPorts:
           - containerPort: 9101
             name: metrics
@@ -90,6 +142,48 @@ spec:
               - name: audit
                 mountPath: /openbao/audit
                 readOnly: true
+          - name: tls-reloader
+            image: quay.io/openbao/openbao:2.5.4@sha256:436eaf9778cad75507ff70ea26ace30dcbe15606e619ac3823495663d7f7c115
+            imagePullPolicy: IfNotPresent
+            command:
+              - /bin/sh
+              - -ec
+            args:
+              - |
+                last=""
+                while true; do
+                  next="$(sha256sum /openbao/tls/tls.crt /openbao/tls/tls.key /openbao/tls/ca.crt 2>/dev/null | sha256sum | awk '{print $1}')"
+                  if [ -n "$last" ] && [ "$next" != "$last" ]; then
+                    for comm in /proc/[0-9]*/comm; do
+                      if [ "$(cat "$comm" 2>/dev/null)" = "openbao" ]; then
+                        pid="${comm#/proc/}"
+                        pid="${pid%/comm}"
+                        kill -HUP "$pid" || true
+                      fi
+                    done
+                  fi
+                  last="$next"
+                  sleep 30
+                done
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+                ephemeral-storage: 16Mi
+              limits:
+                cpu: 100m
+                memory: 64Mi
+                ephemeral-storage: 128Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                  - ALL
+              readOnlyRootFilesystem: true
+            volumeMounts:
+              - name: openbao-api-tls
+                mountPath: /openbao/tls
+                readOnly: true
         resources:
           requests:
             cpu: "0.1"
@@ -103,6 +197,7 @@ spec:
           enabled: false
         ha:
           enabled: true
+          apiAddr: https://guardian-openbao-active.tenant-guardian.svc:8200
           replicas: 3
           raft:
             enabled: true
@@ -110,10 +205,18 @@ spec:
             config: |
               ui = false
 
+              seal "static" {
+                current_key_id = "4dd033bda750c5e2e9718a6b571ba787a46443a412c2713727b7ab592001380d"
+                current_key = "file:///openbao/secrets/unseal-4dd033bda750c5e2e9718a6b571ba787a46443a412c2713727b7ab592001380d.key"
+              }
+
               listener "tcp" {
                 address = "[::]:8200"
                 cluster_address = "[::]:8201"
-                tls_disable = true
+                tls_disable = false
+                tls_cert_file = "/openbao/tls/tls.crt"
+                tls_key_file = "/openbao/tls/tls.key"
+                tls_client_ca_file = "/openbao/tls/ca.crt"
 
                 telemetry {
                   unauthenticated_metrics_access = false
@@ -138,13 +241,19 @@ spec:
               storage "raft" {
                 path = "/openbao/data"
                 retry_join {
-                  leader_api_addr = "http://guardian-openbao-0.guardian-openbao-internal:8200"
+                  leader_api_addr = "https://guardian-openbao-0.guardian-openbao-internal:8200"
+                  leader_ca_cert_file = "/openbao/tls/ca.crt"
+                  leader_tls_servername = "guardian-openbao.tenant-guardian.svc"
                 }
                 retry_join {
-                  leader_api_addr = "http://guardian-openbao-1.guardian-openbao-internal:8200"
+                  leader_api_addr = "https://guardian-openbao-1.guardian-openbao-internal:8200"
+                  leader_ca_cert_file = "/openbao/tls/ca.crt"
+                  leader_tls_servername = "guardian-openbao.tenant-guardian.svc"
                 }
                 retry_join {
-                  leader_api_addr = "http://guardian-openbao-2.guardian-openbao-internal:8200"
+                  leader_api_addr = "https://guardian-openbao-2.guardian-openbao-internal:8200"
+                  leader_ca_cert_file = "/openbao/tls/ca.crt"
+                  leader_tls_servername = "guardian-openbao.tenant-guardian.svc"
                 }
               }
 
@@ -152,6 +261,68 @@ spec:
                 description = "Guardian OpenBao audit log."
                 options {
                   file_path = "/openbao/audit/audit.log"
+                }
+              }
+
+              initialize "guardian_self_init" {
+                request "enable_kubernetes_auth" {
+                  operation = "update"
+                  path = "sys/auth/kubernetes"
+                  data = {
+                    type = "kubernetes"
+                    description = "Kubernetes service account auth for guardian-mgmt workloads."
+                  }
+                }
+
+                request "configure_kubernetes_auth" {
+                  operation = "update"
+                  path = "auth/kubernetes/config"
+                  data = {
+                    kubernetes_host = "https://kubernetes.default.svc:443"
+                    disable_iss_validation = true
+                  }
+                }
+
+                request "write_ops_controller_policy" {
+                  operation = "update"
+                  path = "sys/policies/acl/guardian-openbao-ops-controller"
+                  data = {
+                    policy = "path \"sys/policies/acl/guardian-*\" {\n  capabilities = [\"create\", \"read\", \"update\", \"delete\"]\n}\n\npath \"auth/kubernetes/role/guardian-*\" {\n  capabilities = [\"create\", \"read\", \"update\", \"delete\"]\n}\n\npath \"sys/auth/kubernetes\" {\n  capabilities = [\"create\", \"read\", \"update\", \"delete\"]\n}\n\npath \"sys/auth/kubernetes/tune\" {\n  capabilities = [\"read\", \"update\"]\n}\n\npath \"sys/mounts/kv\" {\n  capabilities = [\"create\", \"read\", \"update\", \"delete\"]\n}\n\npath \"sys/mounts/kv/tune\" {\n  capabilities = [\"read\", \"update\"]\n}\n"
+                  }
+                }
+
+                request "write_ops_controller_role" {
+                  operation = "update"
+                  path = "auth/kubernetes/role/guardian-openbao-ops-controller"
+                  data = {
+                    bound_service_account_names = ["openbao-ops-controller"]
+                    bound_service_account_namespaces = ["tenant-guardian"]
+                    audience = "openbao"
+                    token_policies = ["guardian-openbao-ops-controller"]
+                    token_ttl = "900"
+                    token_max_ttl = "3600"
+                  }
+                }
+
+                request "write_secret_importer_policy" {
+                  operation = "update"
+                  path = "sys/policies/acl/guardian-secret-importer"
+                  data = {
+                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-guardian/dns/external-dns\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/data/guardian/guardian-mgmt/operator/cloudflare\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/data/guardian/guardian-mgmt/operator/r2\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"auth/kubernetes/role/guardian-secret-importer\" {\n  capabilities = [\"delete\"]\n}\n\npath \"sys/policies/acl/guardian-secret-importer\" {\n  capabilities = [\"delete\"]\n}\n"
+                  }
+                }
+
+                request "write_secret_importer_role" {
+                  operation = "update"
+                  path = "auth/kubernetes/role/guardian-secret-importer"
+                  data = {
+                    bound_service_account_names = ["openbao-ops-controller"]
+                    bound_service_account_namespaces = ["tenant-guardian"]
+                    audience = "openbao"
+                    token_policies = ["guardian-secret-importer"]
+                    token_ttl = "600"
+                    token_max_ttl = "600"
+                  }
                 }
               }
 

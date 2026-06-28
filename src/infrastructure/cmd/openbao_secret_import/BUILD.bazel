@@ -1,0 +1,21 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+
+go_library(
+    name = "openbao_secret_import_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/infrastructure/cmd/openbao_secret_import",
+    visibility = ["//visibility:private"],
+    deps = ["@com_github_openbao_openbao_api_v2//:api"],
+)
+
+go_binary(
+    name = "openbao_secret_import",
+    embed = [":openbao_secret_import_lib"],
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "openbao_secret_import_test",
+    srcs = ["main_test.go"],
+    embed = [":openbao_secret_import_lib"],
+)

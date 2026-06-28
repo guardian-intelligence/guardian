@@ -1,8 +1,0 @@
-# Package marker so //src/guardian-cli:go.mod is addressable by the
-# go_deps/go_sdk module extensions. Build targets live under cmd/.
-
-load("//tools/format:defs.bzl", "go_format")
-
-go_format(
-    visibility = ["//visibility:public"],
-)

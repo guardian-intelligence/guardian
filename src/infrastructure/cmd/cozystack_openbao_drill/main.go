@@ -162,12 +162,6 @@ func printStatus(ctx context.Context, runner kubectlRunner, cfg openBaoConfig, r
 	if err := validateStatusSet(statuses, expectedVersion); err != nil {
 		return err
 	}
-	if token, source, err := rootTokenFromEnv(); err == nil {
-		fmt.Printf("read OpenBao root token from %s without printing secret material\n", source)
-		_ = baoRun(ctx, runner, podName(cfg.StatefulSet, 0), "raft autopilot state", token, "operator", "raft", "autopilot", "state")
-	} else {
-		fmt.Printf("root token unavailable; skipping raft autopilot state: %v\n", err)
-	}
 	return nil
 }
 
@@ -176,7 +170,7 @@ func podName(statefulSet string, ordinal int) string {
 }
 
 func baoStatusForPod(ctx context.Context, runner kubectlRunner, pod string, print bool) (baoStatus, error) {
-	out, err := baoOutputAllowExit(ctx, runner, pod, "status", "", "status", "-format=json")
+	out, err := baoOutputAllowExit(ctx, runner, pod, "status", "status", "-format=json")
 	if err != nil {
 		return baoStatus{}, err
 	}
@@ -249,45 +243,19 @@ func jsonObjectPayload(raw string) (string, error) {
 	return payload, nil
 }
 
-func rootTokenFromEnv() (string, string, error) {
-	for _, key := range []string{"BAO_TOKEN", "VAULT_TOKEN"} {
-		token := strings.TrimSpace(os.Getenv(key))
-		if token != "" {
-			return token, key, nil
-		}
-	}
-	return "", "", errors.New("BAO_TOKEN or VAULT_TOKEN is required; do not store the OpenBao root token in Kubernetes")
-}
-
-func baoRun(ctx context.Context, runner kubectlRunner, pod, label, token string, args ...string) error {
-	_, err := baoOutput(ctx, runner, pod, label, token, args...)
-	return err
-}
-
-func baoOutput(ctx context.Context, runner kubectlRunner, pod, label, token string, args ...string) (string, error) {
-	out, err := baoOutputAllowExit(ctx, runner, pod, label, token, args...)
-	if err != nil {
-		return "", err
-	}
-	return out, nil
-}
-
-func baoOutputAllowExit(ctx context.Context, runner kubectlRunner, pod, label, token string, args ...string) (string, error) {
-	execArgs := baoExecArgs(pod, token, args...)
+func baoOutputAllowExit(ctx context.Context, runner kubectlRunner, pod, label string, args ...string) (string, error) {
+	execArgs := baoExecArgs(pod, args...)
 	out, err := runner.combinedOutput(ctx, execArgs...)
 	fmt.Printf("\n## %s on %s\n", label, pod)
-	fmt.Print(redactToken(out, token))
+	fmt.Print(out)
 	if err != nil && !looksLikeBaoStatusJSON(out) {
 		return "", fmt.Errorf("%s on %s: %w", label, pod, err)
 	}
 	return out, nil
 }
 
-func baoExecArgs(pod, token string, args ...string) []string {
+func baoExecArgs(pod string, args ...string) []string {
 	execArgs := []string{"exec", "pod/" + pod, "--", "env", "BAO_ADDR=" + baoAddr, "VAULT_ADDR=" + baoAddr, "VAULT_CLIENT_TIMEOUT=120s"}
-	if token != "" {
-		execArgs = append(execArgs, "BAO_TOKEN="+token, "VAULT_TOKEN="+token)
-	}
 	execArgs = append(execArgs, "bao")
 	execArgs = append(execArgs, args...)
 	return execArgs
@@ -305,17 +273,6 @@ func looksLikeBaoStatusJSON(out string) bool {
 	_, hasInitialized := fields["initialized"]
 	_, hasSealed := fields["sealed"]
 	return hasInitialized && hasSealed
-}
-
-func redactToken(out, token string) string {
-	if token == "" {
-		return out
-	}
-	return strings.ReplaceAll(out, token, "<redacted>")
-}
-
-func shellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 type kubectlRunner struct {

@@ -9,10 +9,18 @@
 {{- /* Shared machine section: type, nodeLabels (controlplane), kubelet, sysctls, kernel, certSANs, files, install */ -}}
 {{- define "talos.config.machine.common" }}
 machine:
-  {{- if eq .MachineType "controlplane" }}
+  {{- if and (eq .MachineType "controlplane") (hasKey (.Values.extraNodeLabels | default dict) "node.kubernetes.io/exclude-from-external-load-balancers") }}
+  {{- fail "values.yaml: extraNodeLabels.node.kubernetes.io/exclude-from-external-load-balancers collides with the cozystack preset's control-plane label patch; remove it or fork the preset." }}
+  {{- end }}
+  {{- if or (eq .MachineType "controlplane") .Values.extraNodeLabels }}
   nodeLabels:
+    {{- if eq .MachineType "controlplane" }}
     node.kubernetes.io/exclude-from-external-load-balancers:
       $patch: delete
+    {{- end }}
+    {{- with .Values.extraNodeLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
   {{- end }}
   type: {{ .MachineType }}
   kubelet:

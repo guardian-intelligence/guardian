@@ -416,7 +416,7 @@ func ensureOpenBaoUnsealed(ctx context.Context, runner kubectlRunner, cfg drillC
 			return fmt.Errorf("OpenBao pod %s is not initialized", pod)
 		}
 		if podStatus.Sealed {
-			return fmt.Errorf("OpenBao pod %s is sealed after recovery; follow src/infrastructure/runbooks/openbao-manual-shamir-unseal.md", pod)
+			return fmt.Errorf("OpenBao pod %s is sealed after recovery; verify the node static seal key and follow src/infrastructure/runbooks/openbao-static-seal-self-init.md", pod)
 		}
 		fmt.Printf("pod %s remains unsealed\n", pod)
 	}
@@ -509,7 +509,7 @@ func podName(statefulSet string, ordinal int) string {
 }
 
 func baoStatusForPod(ctx context.Context, runner kubectlRunner, namespace, pod string, print bool) (baoStatus, error) {
-	out, err := baoOutputAllowExit(ctx, runner, namespace, pod, "status", "", "status", "-format=json")
+	out, err := baoOutputAllowExit(ctx, runner, namespace, pod, "status", "status", "-format=json")
 	if err != nil {
 		return baoStatus{}, err
 	}
@@ -535,35 +535,19 @@ func parseBaoStatus(raw string) (baoStatus, error) {
 	return status, nil
 }
 
-func baoRun(ctx context.Context, runner kubectlRunner, namespace, pod, label, token string, args ...string) error {
-	_, err := baoOutput(ctx, runner, namespace, pod, label, token, args...)
-	return err
-}
-
-func baoOutput(ctx context.Context, runner kubectlRunner, namespace, pod, label, token string, args ...string) (string, error) {
-	out, err := baoOutputAllowExit(ctx, runner, namespace, pod, label, token, args...)
-	if err != nil {
-		return "", err
-	}
-	return out, nil
-}
-
-func baoOutputAllowExit(ctx context.Context, runner kubectlRunner, namespace, pod, label, token string, args ...string) (string, error) {
-	execArgs := baoExecArgs(namespace, pod, token, args...)
+func baoOutputAllowExit(ctx context.Context, runner kubectlRunner, namespace, pod, label string, args ...string) (string, error) {
+	execArgs := baoExecArgs(namespace, pod, args...)
 	out, err := runner.combinedOutput(ctx, execArgs...)
 	fmt.Printf("\n## %s on %s\n", label, pod)
-	fmt.Print(redactToken(out, token))
+	fmt.Print(out)
 	if err != nil && !looksLikeBaoStatusJSON(out) {
 		return "", fmt.Errorf("%s on %s: %w", label, pod, err)
 	}
 	return out, nil
 }
 
-func baoExecArgs(namespace, pod, token string, args ...string) []string {
+func baoExecArgs(namespace, pod string, args ...string) []string {
 	execArgs := []string{"-n", namespace, "exec", "pod/" + pod, "--", "env", "BAO_ADDR=" + baoAddr, "VAULT_ADDR=" + baoAddr, "VAULT_CLIENT_TIMEOUT=120s"}
-	if token != "" {
-		execArgs = append(execArgs, "BAO_TOKEN="+token, "VAULT_TOKEN="+token)
-	}
 	execArgs = append(execArgs, "bao")
 	execArgs = append(execArgs, args...)
 	return execArgs
@@ -598,13 +582,6 @@ func jsonObjectPayload(raw string) (string, error) {
 		return "", errors.New("output did not contain a valid JSON object")
 	}
 	return payload, nil
-}
-
-func redactToken(out, token string) string {
-	if token == "" {
-		return out
-	}
-	return strings.ReplaceAll(out, token, "<redacted>")
 }
 
 type kubectlRunner struct {

@@ -1,5 +1,0 @@
-alias(
-    name = "kubectl",
-    actual = "@kubectl_linux_amd64//file",
-    visibility = ["//src/guardian-cli:__subpackages__"],
-)

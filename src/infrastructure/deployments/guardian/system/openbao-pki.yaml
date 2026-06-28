@@ -1,0 +1,113 @@
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: guardian-openbao-selfsigned
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: openbao
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: secrets
+    guardian.dev/tenant-id: gi-guardian
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: guardian-openbao-ca
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: openbao
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: secrets
+    guardian.dev/tenant-id: gi-guardian
+spec:
+  secretName: guardian-openbao-ca-tls
+  isCA: true
+  commonName: Guardian OpenBao tenant CA
+  duration: 8760h
+  renewBefore: 720h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    group: cert-manager.io
+    kind: Issuer
+    name: guardian-openbao-selfsigned
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: guardian-openbao-ca
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: openbao
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: secrets
+    guardian.dev/tenant-id: gi-guardian
+spec:
+  ca:
+    secretName: guardian-openbao-ca-tls
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: guardian-openbao-api
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: openbao
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: secrets
+    guardian.dev/tenant-id: gi-guardian
+spec:
+  secretName: guardian-openbao-api-tls
+  commonName: guardian-openbao.tenant-guardian.svc
+  duration: 2160h
+  renewBefore: 360h
+  usages:
+    - digital signature
+    - key encipherment
+    - server auth
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    group: cert-manager.io
+    kind: Issuer
+    name: guardian-openbao-ca
+  dnsNames:
+    - guardian-openbao
+    - guardian-openbao.tenant-guardian
+    - guardian-openbao.tenant-guardian.svc
+    - guardian-openbao.tenant-guardian.svc.cozy.local
+    - guardian-openbao.tenant-guardian.svc.cluster.local
+    - guardian-openbao-active
+    - guardian-openbao-active.tenant-guardian
+    - guardian-openbao-active.tenant-guardian.svc
+    - guardian-openbao-active.tenant-guardian.svc.cozy.local
+    - guardian-openbao-active.tenant-guardian.svc.cluster.local
+    - guardian-openbao-internal
+    - guardian-openbao-internal.tenant-guardian
+    - guardian-openbao-internal.tenant-guardian.svc
+    - guardian-openbao-internal.tenant-guardian.svc.cozy.local
+    - guardian-openbao-internal.tenant-guardian.svc.cluster.local
+    - guardian-openbao-0.guardian-openbao-internal
+    - guardian-openbao-0.guardian-openbao-internal.tenant-guardian
+    - guardian-openbao-0.guardian-openbao-internal.tenant-guardian.svc
+    - guardian-openbao-0.guardian-openbao-internal.tenant-guardian.svc.cozy.local
+    - guardian-openbao-0.guardian-openbao-internal.tenant-guardian.svc.cluster.local
+    - guardian-openbao-1.guardian-openbao-internal
+    - guardian-openbao-1.guardian-openbao-internal.tenant-guardian
+    - guardian-openbao-1.guardian-openbao-internal.tenant-guardian.svc
+    - guardian-openbao-1.guardian-openbao-internal.tenant-guardian.svc.cozy.local
+    - guardian-openbao-1.guardian-openbao-internal.tenant-guardian.svc.cluster.local
+    - guardian-openbao-2.guardian-openbao-internal
+    - guardian-openbao-2.guardian-openbao-internal.tenant-guardian
+    - guardian-openbao-2.guardian-openbao-internal.tenant-guardian.svc
+    - guardian-openbao-2.guardian-openbao-internal.tenant-guardian.svc.cozy.local
+    - guardian-openbao-2.guardian-openbao-internal.tenant-guardian.svc.cluster.local
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
