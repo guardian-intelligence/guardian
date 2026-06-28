@@ -1545,6 +1545,11 @@ func testOpenBaoOpenTofuBootstrap(t *testing.T) {
 	assertTextContains(t, lock, `version     = "4.4.0"`, "openbao-root-bootstrap lock")
 	assertTextContains(t, aspectTask, `"service": args.string(default = "guardian-openbao-active"`, ".aspect/tasks/infra.axl")
 	assertTextNotContains(t, aspectTask, `"service": args.string(default = "guardian-openbao"`, ".aspect/tasks/infra.axl")
+	assertTextContains(t, aspectTask, `"auth_path": args.string(default = "kubernetes"`, ".aspect/tasks/infra.axl")
+	assertTextContains(t, aspectTask, `"ops_service_account": args.string(default = "openbao-ops-controller"`, ".aspect/tasks/infra.axl")
+	assertTextContains(t, aspectTask, `"ops_role": args.string(default = "guardian-openbao-ops-controller"`, ".aspect/tasks/infra.axl")
+	assertTextContains(t, aspectTask, `"token_audience": args.string(default = "openbao"`, ".aspect/tasks/infra.axl")
+	assertTextContains(t, aspectTask, `"token_duration": args.string(default = "10m"`, ".aspect/tasks/infra.axl")
 
 	assertTextContains(t, mainTF, `resource "vault_auth_backend" "kubernetes"`, "openbao-root-bootstrap main.tf")
 	assertTextContains(t, mainTF, `type        = "kubernetes"`, "openbao-root-bootstrap main.tf")
