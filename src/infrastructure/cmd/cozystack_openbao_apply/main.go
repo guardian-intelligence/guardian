@@ -140,10 +140,10 @@ func runApply(ctx context.Context, cfg applyConfig) error {
 
 	openbaoAddr := fmt.Sprintf("http://127.0.0.1:%d", localPort)
 	env := tofuEnv(os.Environ(), openbaoAddr, token)
-	if err := runTofu(ctx, cfg.Tofu, "tofu init guardian-mgmt-openbao", tofuInitArgs(cfg.Root, cfg.BackendEndpoint), env, token); err != nil {
+	if err := runTofu(ctx, cfg.Tofu, "tofu init openbao-root-bootstrap", tofuInitArgs(cfg.Root, cfg.BackendEndpoint), env, token); err != nil {
 		return err
 	}
-	return runTofu(ctx, cfg.Tofu, "tofu "+cfg.Mode+" guardian-mgmt-openbao", tofuRunArgs(cfg.Mode, cfg.Root, openbaoAddr), env, token)
+	return runTofu(ctx, cfg.Tofu, "tofu "+cfg.Mode+" openbao-root-bootstrap", tofuRunArgs(cfg.Mode, cfg.Root, openbaoAddr), env, token)
 }
 
 func waitStatefulSetReady(ctx context.Context, runner kubectlRunner, statefulSet, timeout string) error {

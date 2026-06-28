@@ -7,7 +7,7 @@ ORAS surfaced by focused infra tasks.
 load(".aspect/lib/helpers.axl", "checked_spawn", "ws_path")
 
 GUARDIAN_MGMT_ROOT = "src/infrastructure/bootstrap/guardian-mgmt"
-GUARDIAN_MGMT_OPENBAO_ROOT = "src/infrastructure/bootstrap/guardian-mgmt-openbao"
+OPENBAO_ROOT_BOOTSTRAP_ROOT = "src/infrastructure/bootstrap/openbao-root-bootstrap"
 GUARDIAN_MGMT_DNS_ROOT = "src/infrastructure/bootstrap/guardian-mgmt-dns"
 GUARDIAN_BACKEND_TFVARS = "src/infrastructure/bootstrap/backend.tfvars"
 TOFU_TARGET = "@opentofu_linux_amd64//:tofu_bin"
@@ -64,7 +64,7 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/deployments/company/prod:manifests",
     "//src/infrastructure/load:http_load_scripts",
     "//src/infrastructure/edge:edge_health_targets",
-    "//src/infrastructure/bootstrap/guardian-mgmt-openbao:root",
+    "//src/infrastructure/bootstrap/openbao-root-bootstrap:root",
     "//src/infrastructure/operations/openbao/guardian-mgmt:manifests",
     "//src/services/secrets/openbao/deploy/base/crds:manifests",
     "//src/services/secrets/openbao/deploy/base:manifests",
@@ -207,16 +207,16 @@ def _tofu_backend_roots(ctx, root):
     if root == "all":
         return [
             (GUARDIAN_MGMT_ROOT, "guardian-mgmt"),
-            (GUARDIAN_MGMT_OPENBAO_ROOT, "guardian-mgmt-openbao"),
+            (OPENBAO_ROOT_BOOTSTRAP_ROOT, "openbao-root-bootstrap"),
             (GUARDIAN_MGMT_DNS_ROOT, "guardian-mgmt-dns"),
         ]
     if root == "guardian-mgmt":
         return [(GUARDIAN_MGMT_ROOT, "guardian-mgmt")]
-    if root == "guardian-mgmt-openbao":
-        return [(GUARDIAN_MGMT_OPENBAO_ROOT, "guardian-mgmt-openbao")]
+    if root == "openbao-root-bootstrap":
+        return [(OPENBAO_ROOT_BOOTSTRAP_ROOT, "openbao-root-bootstrap")]
     if root == "guardian-mgmt-dns":
         return [(GUARDIAN_MGMT_DNS_ROOT, "guardian-mgmt-dns")]
-    ctx.std.io.stderr.write("ERROR: --root must be all, guardian-mgmt, guardian-mgmt-openbao, or guardian-mgmt-dns\n")
+    ctx.std.io.stderr.write("ERROR: --root must be all, guardian-mgmt, openbao-root-bootstrap, or guardian-mgmt-dns\n")
     return None
 
 def _tofu_backend_init(ctx, roots, endpoint):
@@ -571,7 +571,7 @@ def _validate_impl(ctx):
 
     for root, label in [
         (GUARDIAN_MGMT_ROOT, "guardian-mgmt"),
-        (GUARDIAN_MGMT_OPENBAO_ROOT, "guardian-mgmt-openbao"),
+        (OPENBAO_ROOT_BOOTSTRAP_ROOT, "openbao-root-bootstrap"),
         (GUARDIAN_MGMT_DNS_ROOT, "guardian-mgmt-dns"),
     ]:
         tofu_env = _tofu_validate_env(ctx, label)
@@ -1346,7 +1346,7 @@ def _openbao_apply_impl(ctx):
         "--service",
         ctx.args.service,
         "--root",
-        ws_path(ctx, GUARDIAN_MGMT_OPENBAO_ROOT),
+        ws_path(ctx, OPENBAO_ROOT_BOOTSTRAP_ROOT),
         "--backend-endpoint",
         endpoint,
         "--mode",
@@ -1393,7 +1393,7 @@ tofu_init = task(
     summary = "Initialize OpenTofu S3 backends for management bootstrap roots using standard AWS/R2 environment credentials.",
     args = {
         "endpoint": args.string(default = "", description = "Optional S3-compatible backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
-        "root": args.string(default = "all", description = "OpenTofu root to initialize: all, guardian-mgmt, guardian-mgmt-openbao, or guardian-mgmt-dns."),
+        "root": args.string(default = "all", description = "OpenTofu root to initialize: all, guardian-mgmt, openbao-root-bootstrap, or guardian-mgmt-dns."),
     },
 )
 

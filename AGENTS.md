@@ -126,7 +126,7 @@ src/
       bootstrap/
         guardian-mgmt/                 # ASH bare-metal/OpenTofu root
         guardian-mgmt-dns/
-        guardian-mgmt-openbao/
+        openbao-root-bootstrap/
         backend.tfvars
 
       talm/

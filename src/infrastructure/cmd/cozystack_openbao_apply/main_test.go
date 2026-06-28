@@ -14,7 +14,7 @@ func TestValidateConfig(t *testing.T) {
 		Namespace:            "tenant-guardian",
 		StatefulSet:          "guardian-openbao",
 		Service:              "guardian-openbao",
-		Root:                 "/repo/src/infrastructure/bootstrap/guardian-mgmt-openbao",
+		Root:                 "/repo/src/infrastructure/bootstrap/openbao-root-bootstrap",
 		BackendEndpoint:      "https://account.r2.cloudflarestorage.com",
 		Mode:                 "apply",
 		PortForwardReadyWait: time.Second,
@@ -83,7 +83,7 @@ func TestRootTokenFromEnvRequiresEnv(t *testing.T) {
 }
 
 func TestTofuArgs(t *testing.T) {
-	root := "/repo/src/infrastructure/bootstrap/guardian-mgmt-openbao"
+	root := "/repo/src/infrastructure/bootstrap/openbao-root-bootstrap"
 	endpoint := "https://account.r2.cloudflarestorage.com"
 	addr := "http://127.0.0.1:18200"
 
