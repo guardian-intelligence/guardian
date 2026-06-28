@@ -40,6 +40,11 @@ spec:
       server:
         configAnnotation: true
         podManagementPolicy: Parallel
+        image:
+          registry: quay.io
+          repository: openbao/openbao
+          tag: 2.5.4@sha256:436eaf9778cad75507ff70ea26ace30dcbe15606e619ac3823495663d7f7c115
+          pullPolicy: IfNotPresent
         dataStorage:
           enabled: true
           size: 10Gi
@@ -48,6 +53,42 @@ spec:
           enabled: true
           size: 10Gi
           storageClass: replicated
+        extraPorts:
+          - containerPort: 9101
+            name: metrics
+            protocol: TCP
+        extraContainers:
+          - name: audit-log-tailer
+            image: quay.io/openbao/openbao:2.5.4@sha256:436eaf9778cad75507ff70ea26ace30dcbe15606e619ac3823495663d7f7c115
+            imagePullPolicy: IfNotPresent
+            command:
+              - /bin/sh
+              - -ec
+            args:
+              - |
+                while [ ! -e /openbao/audit/audit.log ]; do
+                  sleep 1
+                done
+                exec tail -n+1 -F /openbao/audit/audit.log
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+                ephemeral-storage: 16Mi
+              limits:
+                cpu: 100m
+                memory: 64Mi
+                ephemeral-storage: 128Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                  - ALL
+              readOnlyRootFilesystem: true
+            volumeMounts:
+              - name: audit
+                mountPath: /openbao/audit
+                readOnly: true
         resources:
           requests:
             cpu: "0.1"
@@ -72,6 +113,25 @@ spec:
                 address = "[::]:8200"
                 cluster_address = "[::]:8201"
                 tls_disable = true
+
+                telemetry {
+                  unauthenticated_metrics_access = false
+                }
+              }
+
+              listener "tcp" {
+                address = "[::]:9101"
+                tls_disable = true
+
+                telemetry {
+                  metrics_only = true
+                  unauthenticated_metrics_access = true
+                }
+              }
+
+              telemetry {
+                prometheus_retention_time = "1m"
+                disable_hostname = true
               }
 
               storage "raft" {
@@ -84,6 +144,13 @@ spec:
                 }
                 retry_join {
                   leader_api_addr = "http://guardian-openbao-2.guardian-openbao-internal:8200"
+                }
+              }
+
+              audit "file" "audit-log" {
+                description = "Guardian OpenBao audit log."
+                options {
+                  file_path = "/openbao/audit/audit.log"
                 }
               }
 

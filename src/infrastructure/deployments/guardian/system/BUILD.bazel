@@ -2,8 +2,10 @@ filegroup(
     name = "manifests",
     srcs = [
         "kustomization.yaml",
-        "networkpolicy.yaml",
-        "openbao.yaml",
+        "openbao-helmrelease.yaml",
+        "openbao-networkpolicy.yaml",
+        "openbao-observability.yaml",
+        "openbao-rbac.yaml",
         "stage-tenants.yaml",
     ],
     visibility = ["//visibility:public"],

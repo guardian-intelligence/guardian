@@ -17,10 +17,9 @@ aspect infra tofu-init
 
 aspect infra bootstrap
 
-aspect infra openbao-drill \
-  --mode init-unseal
-
 aspect infra openbao-apply
+
+aspect infra openbao-drill --mode status
 
 aspect infra observability-drill
 ```
@@ -33,9 +32,10 @@ gitignored Talm kubeconfig, runs the Talos L2 gate, upgrades the Cozystack
 installer/operator to the repo-pinned version.
 `aspect infra upgrade-cozystack` is the narrow day-two path for existing
 clusters when only the Cozystack installer/operator release needs to move.
-`aspect infra openbao-drill --mode init-unseal` initializes/unseals the
-cluster-local OpenBao app, and `aspect infra openbao-apply` applies the standard
-OpenBao API state through a live port-forward. `aspect infra
+Initialize and unseal OpenBao with the Manual Shamir runbook before using
+`aspect infra openbao-apply`, which applies the standard OpenBao API state
+through a live port-forward. `aspect infra openbao-drill --mode status` verifies
+OpenBao status, and `--mode snapshot` runs a Raft snapshot drill. `aspect infra
 observability-drill` creates a short root Postgres pgbench job, then queries
 VictoriaMetrics and VictoriaLogs for that exact workload and the CNPG scrape
 path. Postgres and ClickHouse backups use Cozystack 1.5's platform-managed
@@ -71,6 +71,8 @@ state stay out of Git.
 | kubectl | `src/tools/kubectl/kubectl.MODULE.bazel` |
 | k6 | `src/tools/k6/k6.MODULE.bazel` |
 | ORAS | `src/tools/oras/oras.MODULE.bazel` |
+| OpenBao CLI (`bao`) | `src/tools/openbao/openbao.MODULE.bazel` |
+| curl | `src/tools/curl/curl.MODULE.bazel` |
 | Cilium CLI | `src/tools/debug-clis/debug-clis.MODULE.bazel` |
 | Hubble CLI | `src/tools/debug-clis/debug-clis.MODULE.bazel` |
 | Stern | `src/tools/debug-clis/debug-clis.MODULE.bazel` |

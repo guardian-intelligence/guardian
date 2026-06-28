@@ -1,0 +1,8 @@
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+http_archive(
+    name = "curl_linux_amd64",
+    build_file_content = """exports_files(["curl"])""",
+    sha256 = "e955f211202ded2536164588331acfc987dc4b7857efa3577717b1ffeab22029",
+    url = "https://github.com/stunnel/static-curl/releases/download/8.21.0/curl-linux-x86_64-musl-8.21.0.tar.xz",
+)
