@@ -9,6 +9,7 @@ go_test(
     data = [
         "//:.aspect/tasks/infra.axl",
         "//:.bazelignore",
+        "//:.github/workflows/openbao-ops-controller-image.yml",
         "//:AGENTS.md",
         "//:TRIBAL_KNOWLEDGE.md",
         "@talm_linux_amd64//:talm",
