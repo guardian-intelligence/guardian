@@ -520,6 +520,8 @@ func testCozystackAppPatches(t *testing.T) {
 }
 
 func testExternalDNS(t *testing.T) {
+	const externalDNSKVPath = "guardian/guardian-mgmt/tenant-guardian/dns/external-dns"
+
 	base := readYAMLMap(t, "src/infrastructure/base/kustomization.yaml")
 	baseResources := sliceAt(t, base, "resources")
 	if containsString(baseResources, "dns") {
@@ -568,8 +570,12 @@ func testExternalDNS(t *testing.T) {
 	}
 	secretRef := asManifest(t, data[0], "external-dns ExternalSecret data[0]")
 	assertString(t, secretRef, "CF_API_TOKEN", "secretKey")
-	assertString(t, secretRef, "guardian/guardian-mgmt/tenant-guardian/dns/external-dns", "remoteRef", "key")
+	assertString(t, secretRef, externalDNSKVPath, "remoteRef", "key")
 	assertString(t, secretRef, "CF_API_TOKEN", "remoteRef", "property")
+
+	tribalKnowledge := string(readRunfile(t, "TRIBAL_KNOWLEDGE.md"))
+	assertTextContains(t, tribalKnowledge, "kv/"+externalDNSKVPath, "TRIBAL_KNOWLEDGE.md")
+	assertTextNotContains(t, tribalKnowledge, "kv/guardian/guardian-mgmt/tenant-root/dns/external-dns", "TRIBAL_KNOWLEDGE.md")
 
 	externalDNSDocs := readManifests(t, "src/infrastructure/base/dns/external-dns.yaml")
 	repo := findObject(t, externalDNSDocs, "HelmRepository", "external-dns", "external-dns")

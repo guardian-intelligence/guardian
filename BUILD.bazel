@@ -1,5 +1,6 @@
 exports_files([
     ".bazelignore",
+    "TRIBAL_KNOWLEDGE.md",
     "buf.yaml",
 ])
 
