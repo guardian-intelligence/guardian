@@ -45,6 +45,36 @@ resource "vault_policy" "external_dns" {
   EOT
 }
 
+resource "vault_policy" "ops_controller" {
+  name = "guardian-openbao-ops-controller"
+
+  policy = <<-EOT
+    path "sys/policies/acl/guardian-*" {
+      capabilities = ["create", "read", "update", "delete"]
+    }
+
+    path "auth/${local.kubernetes_auth_mount}/role/guardian-*" {
+      capabilities = ["create", "read", "update", "delete"]
+    }
+
+    path "sys/auth/${local.kubernetes_auth_mount}" {
+      capabilities = ["create", "read", "update"]
+    }
+
+    path "sys/auth/${local.kubernetes_auth_mount}/tune" {
+      capabilities = ["read", "update"]
+    }
+
+    path "sys/mounts/${local.kv_mount}" {
+      capabilities = ["create", "read", "update"]
+    }
+
+    path "sys/mounts/${local.kv_mount}/tune" {
+      capabilities = ["read", "update"]
+    }
+  EOT
+}
+
 resource "vault_kubernetes_auth_backend_role" "external_dns" {
   backend                          = vault_auth_backend.kubernetes.path
   role_name                        = "guardian-external-dns"
@@ -53,5 +83,16 @@ resource "vault_kubernetes_auth_backend_role" "external_dns" {
   audience                         = "openbao"
   token_policies                   = [vault_policy.external_dns.name]
   token_ttl                        = 3600
+  token_max_ttl                    = 3600
+}
+
+resource "vault_kubernetes_auth_backend_role" "ops_controller" {
+  backend                          = vault_auth_backend.kubernetes.path
+  role_name                        = "guardian-openbao-ops-controller"
+  bound_service_account_names      = ["openbao-ops-controller"]
+  bound_service_account_namespaces = ["tenant-guardian"]
+  audience                         = "openbao"
+  token_policies                   = [vault_policy.ops_controller.name]
+  token_ttl                        = 900
   token_max_ttl                    = 3600
 }
