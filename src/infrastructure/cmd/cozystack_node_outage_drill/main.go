@@ -416,7 +416,7 @@ func ensureOpenBaoUnsealed(ctx context.Context, runner kubectlRunner, cfg drillC
 			return fmt.Errorf("OpenBao pod %s is not initialized", pod)
 		}
 		if podStatus.Sealed {
-			return fmt.Errorf("OpenBao pod %s is sealed after recovery; follow src/infrastructure/runbooks/openbao-manual-shamir-unseal.md", pod)
+			return fmt.Errorf("OpenBao pod %s is sealed after recovery; verify the static seal key placement in src/infrastructure/runbooks/openbao-static-seal-bootstrap.md", pod)
 		}
 		fmt.Printf("pod %s remains unsealed\n", pod)
 	}

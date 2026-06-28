@@ -58,6 +58,45 @@ spec:
           - containerPort: 9101
             name: metrics
             protocol: TCP
+        volumes:
+          - name: static-seal
+            hostPath:
+              path: /var/mnt/openbao-seal/secrets
+              type: Directory
+        volumeMounts:
+          - name: static-seal
+            mountPath: /openbao/secrets
+            readOnly: true
+        extraInitContainers:
+          - name: static-seal-key-check
+            image: quay.io/openbao/openbao:2.5.4@sha256:436eaf9778cad75507ff70ea26ace30dcbe15606e619ac3823495663d7f7c115
+            imagePullPolicy: IfNotPresent
+            command:
+              - /bin/sh
+              - -ec
+            args:
+              - |
+                test -f /openbao/secrets/unseal-20260628-1.key
+                test "$(wc -c < /openbao/secrets/unseal-20260628-1.key)" = "32"
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+                ephemeral-storage: 16Mi
+              limits:
+                cpu: 100m
+                memory: 64Mi
+                ephemeral-storage: 128Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                  - ALL
+              readOnlyRootFilesystem: true
+            volumeMounts:
+              - name: static-seal
+                mountPath: /openbao/secrets
+                readOnly: true
         extraContainers:
           - name: audit-log-tailer
             image: quay.io/openbao/openbao:2.5.4@sha256:436eaf9778cad75507ff70ea26ace30dcbe15606e619ac3823495663d7f7c115
@@ -99,6 +138,29 @@ spec:
             cpu: "1"
             memory: 2Gi
             ephemeral-storage: 2Gi
+        affinity: |
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: guardian.dev/openbao-seal
+                      operator: In
+                      values:
+                        - "true"
+                    - key: kubernetes.io/hostname
+                      operator: In
+                      values:
+                        - ash-earth
+                        - ash-wind
+                        - ash-water
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: openbao
+                    app.kubernetes.io/instance: guardian-openbao
+                    component: server
+                topologyKey: kubernetes.io/hostname
         standalone:
           enabled: false
         ha:
@@ -109,6 +171,11 @@ spec:
             setNodeId: true
             config: |
               ui = false
+
+              seal "static" {
+                current_key_id = "20260628-1"
+                current_key = "file:///openbao/secrets/unseal-20260628-1.key"
+              }
 
               listener "tcp" {
                 address = "[::]:8200"

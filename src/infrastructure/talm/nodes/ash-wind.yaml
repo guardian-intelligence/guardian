@@ -74,6 +74,7 @@ machine:
   nodeLabels:
     node.kubernetes.io/exclude-from-external-load-balancers:
       $patch: delete
+    guardian.dev/openbao-seal: "true"
 cluster:
   controlPlane:
     endpoint: https://10.8.0.250:6443
@@ -164,3 +165,22 @@ addresses:
 routes:
   - gateway: 45.250.254.118
 mtu: 1500
+---
+apiVersion: v1alpha1
+kind: UserVolumeConfig
+name: openbao-seal
+provisioning:
+  diskSelector:
+    match: disk.serial == "352410A4E051"
+  minSize: 64MiB
+  maxSize: 64MiB
+filesystem:
+  type: xfs
+encryption:
+  provider: luks2
+  keys:
+    - slot: 0
+      tpm:
+        options:
+          pcrs:
+            - 7

@@ -117,6 +117,10 @@ certSANs:
 nr_hugepages: 0
 allocateNodeCIDRs: true
 
+openBaoSealNodeLabel:
+  key: guardian.dev/openbao-seal
+  value: "true"
+
 # Opt-in aggressive TCP keepalive tuning, OFF by default. When true the
 # preset adds net.ipv4.tcp_keepalive_time=600 / intvl=10 / probes=6,
 # reaping a dead idle socket in ~660s instead of the kernel default

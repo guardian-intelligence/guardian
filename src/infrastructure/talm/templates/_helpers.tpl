@@ -13,6 +13,9 @@ machine:
   nodeLabels:
     node.kubernetes.io/exclude-from-external-load-balancers:
       $patch: delete
+    {{- with .Values.openBaoSealNodeLabel }}
+    {{ .key }}: {{ .value | quote }}
+    {{- end }}
   {{- end }}
   type: {{ .MachineType }}
   kubelet:
