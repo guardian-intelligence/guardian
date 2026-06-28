@@ -210,6 +210,87 @@ func TestParseStatefulSetReplicaStatusRejectsZeroReplicas(t *testing.T) {
 	}
 }
 
+func TestParseOpenBaoRuntimeSpec(t *testing.T) {
+	raw := `{
+		"spec": {
+			"replicas": 3,
+			"template": {
+				"spec": {
+					"containers": [
+						{"name": "openbao", "image": "quay.io/openbao/openbao:2.5.4@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+						{"name": "audit-log-tailer", "image": "quay.io/openbao/openbao:2.5.4@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+					]
+				}
+			}
+		}
+	}`
+	got, err := parseOpenBaoRuntimeSpec(raw)
+	if err != nil {
+		t.Fatalf("parseOpenBaoRuntimeSpec() error = %v", err)
+	}
+	if got.Replicas != 3 || got.Version != "2.5.4" {
+		t.Fatalf("parseOpenBaoRuntimeSpec() = %#v, want replicas=3 version=2.5.4", got)
+	}
+}
+
+func TestOpenBaoVersionFromImage(t *testing.T) {
+	got, err := openBaoVersionFromImage("quay.io/openbao/openbao:2.5.4@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	if err != nil {
+		t.Fatalf("openBaoVersionFromImage() error = %v", err)
+	}
+	if got != "2.5.4" {
+		t.Fatalf("openBaoVersionFromImage() = %q, want 2.5.4", got)
+	}
+}
+
+func TestParseBaoStatusAllowsKubectlDefaultedContainerPrefix(t *testing.T) {
+	raw := `Defaulted container "openbao" out of: openbao, audit-log-tailer
+{
+  "initialized": true,
+  "sealed": false,
+  "version": "2.5.4"
+}`
+	got, err := parseBaoStatus(raw)
+	if err != nil {
+		t.Fatalf("parseBaoStatus() error = %v", err)
+	}
+	if !got.Initialized || got.Sealed || got.Version != "2.5.4" {
+		t.Fatalf("parseBaoStatus() = %#v", got)
+	}
+}
+
+func TestValidateBootstrapRuntimeStatus(t *testing.T) {
+	statuses := []podBaoStatus{
+		{Pod: "guardian-openbao-0", Status: baoStatus{Initialized: true, Sealed: false, Version: "2.5.4"}},
+		{Pod: "guardian-openbao-1", Status: baoStatus{Initialized: true, Sealed: false, Version: "2.5.4"}},
+		{Pod: "guardian-openbao-2", Status: baoStatus{Initialized: true, Sealed: false, Version: "2.5.4"}},
+	}
+	if err := validateBootstrapRuntimeStatus(statuses, "2.5.4"); err != nil {
+		t.Fatalf("validateBootstrapRuntimeStatus() error = %v", err)
+	}
+}
+
+func TestValidateBootstrapRuntimeStatusRejectsSealedAndVersionSkew(t *testing.T) {
+	statuses := []podBaoStatus{
+		{Pod: "guardian-openbao-0", Status: baoStatus{Initialized: true, Sealed: false, Version: "2.5.0"}},
+		{Pod: "guardian-openbao-1", Status: baoStatus{Initialized: true, Sealed: false, Version: "2.5.0"}},
+		{Pod: "guardian-openbao-2", Status: baoStatus{Initialized: true, Sealed: true, Version: "2.5.4"}},
+	}
+	err := validateBootstrapRuntimeStatus(statuses, "2.5.4")
+	if err == nil {
+		t.Fatalf("validateBootstrapRuntimeStatus() accepted sealed/version-skewed runtime")
+	}
+	for _, want := range []string{
+		"guardian-openbao-0 reports version 2.5.0; expected 2.5.4",
+		"guardian-openbao-1 reports version 2.5.0; expected 2.5.4",
+		"guardian-openbao-2 is sealed",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("validateBootstrapRuntimeStatus() error = %v, want %q", err, want)
+		}
+	}
+}
+
 func TestParseReadyEndpointSliceAddresses(t *testing.T) {
 	const raw = `{
 		"items": [

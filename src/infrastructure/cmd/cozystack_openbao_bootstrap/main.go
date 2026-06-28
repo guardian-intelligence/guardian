@@ -19,6 +19,8 @@ import (
 	"time"
 )
 
+const baoAddr = "http://127.0.0.1:8200"
+
 type bootstrapConfig struct {
 	Kubectl              string
 	Tofu                 string
@@ -51,6 +53,22 @@ type kubectlRunner struct {
 
 type portForward struct {
 	cmd *exec.Cmd
+}
+
+type openBaoRuntimeSpec struct {
+	Replicas int
+	Version  string
+}
+
+type baoStatus struct {
+	Initialized bool   `json:"initialized"`
+	Sealed      bool   `json:"sealed"`
+	Version     string `json:"version"`
+}
+
+type podBaoStatus struct {
+	Pod    string
+	Status baoStatus
 }
 
 var dnsSubdomainRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
@@ -159,6 +177,9 @@ func runBootstrap(ctx context.Context, cfg bootstrapConfig) error {
 	fmt.Printf("namespace=%s statefulset=%s service=%s root=%s mode=%s\n", cfg.Namespace, cfg.StatefulSet, cfg.Service, cfg.Root, cfg.Mode)
 
 	if err := waitOpenBaoBootstrapReady(ctx, runner, cfg.StatefulSet, cfg.Service, cfg.WaitTimeout); err != nil {
+		return err
+	}
+	if err := verifyOpenBaoRuntimeReady(ctx, runner, cfg.StatefulSet); err != nil {
 		return err
 	}
 	token, tokenSource, err := rootTokenFromEnv()
@@ -309,6 +330,180 @@ func parseStatefulSetReplicaStatus(raw string) (replicaStatus, error) {
 
 func requiredReadyReplicas(replicas int) int {
 	return replicas/2 + 1
+}
+
+func verifyOpenBaoRuntimeReady(ctx context.Context, runner kubectlRunner, statefulSet string) error {
+	raw, err := runner.output(ctx, "OpenBao StatefulSet runtime", "get", "statefulset.apps/"+statefulSet, "-o", "json")
+	if err != nil {
+		return err
+	}
+	runtime, err := parseOpenBaoRuntimeSpec(raw)
+	if err != nil {
+		return fmt.Errorf("parse OpenBao StatefulSet runtime: %w", err)
+	}
+	statuses := make([]podBaoStatus, 0, runtime.Replicas)
+	for i := 0; i < runtime.Replicas; i++ {
+		pod := fmt.Sprintf("%s-%d", statefulSet, i)
+		status, err := baoStatusForPod(ctx, runner, pod)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("OpenBao bootstrap runtime preflight: pod=%s initialized=%t sealed=%t version=%s\n", pod, status.Initialized, status.Sealed, status.Version)
+		statuses = append(statuses, podBaoStatus{Pod: pod, Status: status})
+	}
+	return validateBootstrapRuntimeStatus(statuses, runtime.Version)
+}
+
+func parseOpenBaoRuntimeSpec(raw string) (openBaoRuntimeSpec, error) {
+	var doc struct {
+		Spec struct {
+			Replicas *int `json:"replicas"`
+			Template struct {
+				Spec struct {
+					Containers []struct {
+						Name  string `json:"name"`
+						Image string `json:"image"`
+					} `json:"containers"`
+				} `json:"spec"`
+			} `json:"template"`
+		} `json:"spec"`
+	}
+	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+		return openBaoRuntimeSpec{}, err
+	}
+	replicas := 1
+	if doc.Spec.Replicas != nil {
+		replicas = *doc.Spec.Replicas
+	}
+	if replicas <= 0 {
+		return openBaoRuntimeSpec{}, fmt.Errorf("StatefulSet replicas must be positive, got %d", replicas)
+	}
+	image := containerImage(doc.Spec.Template.Spec.Containers, "openbao")
+	version, err := openBaoVersionFromImage(image)
+	if err != nil {
+		return openBaoRuntimeSpec{}, fmt.Errorf("parse OpenBao version from StatefulSet image %q: %w", image, err)
+	}
+	return openBaoRuntimeSpec{Replicas: replicas, Version: version}, nil
+}
+
+func containerImage(containers []struct {
+	Name  string `json:"name"`
+	Image string `json:"image"`
+}, name string) string {
+	for _, container := range containers {
+		if container.Name == name {
+			return container.Image
+		}
+	}
+	if len(containers) == 1 {
+		return containers[0].Image
+	}
+	return ""
+}
+
+func openBaoVersionFromImage(image string) (string, error) {
+	if image == "" {
+		return "", errors.New("empty image")
+	}
+	nameAndTag := image
+	if digestStart := strings.Index(nameAndTag, "@"); digestStart >= 0 {
+		nameAndTag = nameAndTag[:digestStart]
+	}
+	tagStart := strings.LastIndex(nameAndTag, ":")
+	if tagStart == -1 || tagStart == len(nameAndTag)-1 {
+		return "", errors.New("image has no tag")
+	}
+	tag := nameAndTag[tagStart+1:]
+	if tag == "" {
+		return "", errors.New("image tag is empty")
+	}
+	return tag, nil
+}
+
+func baoStatusForPod(ctx context.Context, runner kubectlRunner, pod string) (baoStatus, error) {
+	out, err := runner.combinedOutput(ctx, "exec", "pod/"+pod, "--", "env", "BAO_ADDR="+baoAddr, "VAULT_ADDR="+baoAddr, "VAULT_CLIENT_TIMEOUT=120s", "bao", "status", "-format=json")
+	if err != nil && !looksLikeBaoStatusJSON(out) {
+		return baoStatus{}, fmt.Errorf("bao status on %s: %w\n%s", pod, err, out)
+	}
+	status, err := parseBaoStatus(out)
+	if err != nil {
+		return baoStatus{}, fmt.Errorf("parse bao status for %s: %w\n%s", pod, err, out)
+	}
+	return status, nil
+}
+
+func parseBaoStatus(raw string) (baoStatus, error) {
+	payload, err := jsonObjectPayload(raw)
+	if err != nil {
+		return baoStatus{}, err
+	}
+	var status baoStatus
+	if err := json.Unmarshal([]byte(payload), &status); err != nil {
+		return baoStatus{}, err
+	}
+	return status, nil
+}
+
+func jsonObjectPayload(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if json.Valid([]byte(trimmed)) {
+		return trimmed, nil
+	}
+	start := strings.Index(trimmed, "{")
+	end := strings.LastIndex(trimmed, "}")
+	if start == -1 || end < start {
+		return "", errors.New("output did not contain a JSON object")
+	}
+	payload := trimmed[start : end+1]
+	if !json.Valid([]byte(payload)) {
+		return "", errors.New("output did not contain a valid JSON object")
+	}
+	return payload, nil
+}
+
+func looksLikeBaoStatusJSON(out string) bool {
+	payload, err := jsonObjectPayload(out)
+	if err != nil {
+		return false
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(payload), &fields); err != nil {
+		return false
+	}
+	_, hasInitialized := fields["initialized"]
+	_, hasSealed := fields["sealed"]
+	return hasInitialized && hasSealed
+}
+
+func validateBootstrapRuntimeStatus(statuses []podBaoStatus, expectedVersion string) error {
+	if len(statuses) == 0 {
+		return errors.New("OpenBao bootstrap runtime preflight found no pods")
+	}
+	if expectedVersion == "" {
+		return errors.New("OpenBao bootstrap runtime preflight has empty expected version")
+	}
+	var problems []string
+	for _, item := range statuses {
+		status := item.Status
+		if !status.Initialized {
+			problems = append(problems, fmt.Sprintf("%s is not initialized", item.Pod))
+		}
+		if status.Sealed {
+			problems = append(problems, fmt.Sprintf("%s is sealed", item.Pod))
+		}
+		if status.Version == "" {
+			problems = append(problems, fmt.Sprintf("%s reported empty OpenBao version", item.Pod))
+			continue
+		}
+		if status.Version != expectedVersion {
+			problems = append(problems, fmt.Sprintf("%s reports version %s; expected %s", item.Pod, status.Version, expectedVersion))
+		}
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("OpenBao bootstrap runtime preflight failed: %s", strings.Join(problems, "; "))
+	}
+	fmt.Printf("OpenBao bootstrap runtime preflight passed: replicas=%d version=%s\n", len(statuses), expectedVersion)
+	return nil
 }
 
 func parseReadyEndpointSliceAddresses(raw string) (int, error) {
@@ -549,12 +744,17 @@ func (r kubectlRunner) run(ctx context.Context, label string, args ...string) er
 }
 
 func (r kubectlRunner) output(ctx context.Context, label string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, r.bin, r.args(args...)...)
-	out, err := cmd.CombinedOutput()
+	out, err := r.combinedOutput(ctx, args...)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w\n%s", label, err, out)
 	}
-	return string(out), nil
+	return out, nil
+}
+
+func (r kubectlRunner) combinedOutput(ctx context.Context, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, r.bin, r.args(args...)...)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
 }
 
 func freeLocalPort() (int, error) {
