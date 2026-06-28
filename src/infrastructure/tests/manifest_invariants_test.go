@@ -63,7 +63,7 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("root tenant core services", testRootTenantCoreServices)
 	t.Run("observability", testObservability)
 	t.Run("openbao", testOpenBao)
-	t.Run("openbao ops controller scaffold", testOpenBaoOpsControllerScaffold)
+	t.Run("openbao ops controller deployment", testOpenBaoOpsControllerDeployment)
 	t.Run("openbao operations crs", testOpenBaoOperationsCRs)
 	t.Run("openbao opentofu bootstrap", testOpenBaoOpenTofuBootstrap)
 	t.Run("runbooks", testRunbooks)
@@ -1185,7 +1185,7 @@ func testOpenBao(t *testing.T) {
 	}
 }
 
-func testOpenBaoOpsControllerScaffold(t *testing.T) {
+func testOpenBaoOpsControllerDeployment(t *testing.T) {
 	const base = "src/services/secrets/openbao/deploy/base"
 	baseKustomization := readYAMLMap(t, base+"/kustomization.yaml")
 	assertStringSlice(t, baseKustomization, []string{
