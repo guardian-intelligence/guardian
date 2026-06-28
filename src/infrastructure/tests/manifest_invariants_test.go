@@ -65,6 +65,7 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("observability", testObservability)
 	t.Run("openbao", testOpenBao)
 	t.Run("openbao ops controller deployment", testOpenBaoOpsControllerDeployment)
+	t.Run("openbao ops controller image workflow", testOpenBaoOpsControllerImageWorkflow)
 	t.Run("openbao operations crs", testOpenBaoOperationsCRs)
 	t.Run("openbao opentofu bootstrap", testOpenBaoOpenTofuBootstrap)
 	t.Run("runbooks", testRunbooks)
@@ -1417,6 +1418,18 @@ func testOpenBaoOpsControllerDeployment(t *testing.T) {
 	if valueAt(image, "newTag") != nil {
 		t.Fatalf("openbao guardian-mgmt overlay must pin by digest, not newTag")
 	}
+}
+
+func testOpenBaoOpsControllerImageWorkflow(t *testing.T) {
+	const rel = ".github/workflows/openbao-ops-controller-image.yml"
+	workflow := string(readRunfile(t, rel))
+
+	assertTextContains(t, workflow, "OPENBAO_OPS_CONTROLLER_DIGEST", rel)
+	assertTextContains(t, workflow, "for attempt in 1 2 3; do", rel)
+	assertTextContains(t, workflow, "--embed_label=\"$GITHUB_SHA\"", rel)
+	assertTextContains(t, workflow, "harbor.guardianintelligence.org/guardian/openbao-ops-controller@${OPENBAO_OPS_CONTROLLER_DIGEST}", rel)
+	assertTextContains(t, workflow, "\"$crane\" digest \"$remote_ref\"", rel)
+	assertTextContains(t, workflow, "test \"$remote_digest\" = \"$OPENBAO_OPS_CONTROLLER_DIGEST\"", rel)
 }
 
 func assertOpenBaoOpsControllerImageConfig(t *testing.T) string {
