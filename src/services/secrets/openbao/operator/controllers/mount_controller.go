@@ -303,6 +303,9 @@ func (r *MountReconciler) updateMountErrorStatus(ctx context.Context, mount *ope
 	if _, err := r.updateMountStatus(ctx, mount, input); err != nil {
 		return ctrl.Result{}, err
 	}
+	if input.reason == reasonBootstrapRequired {
+		return ctrl.Result{RequeueAfter: bootstrapRequiredRequeueAfter}, nil
+	}
 	return ctrl.Result{}, cause
 }
 
