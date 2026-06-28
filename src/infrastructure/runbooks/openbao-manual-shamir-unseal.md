@@ -21,9 +21,9 @@ in Kubernetes, Git, CI, chat, shell history, or any OpenBao-backed secret path.
 
 ## Start OpenBao
 
-Flux keeps the OpenBao HelmRelease active. The chart uses an `OnDelete`
-StatefulSet update strategy, so manifest reconciliation updates Kubernetes
-objects without automatically restarting sealed Shamir pods.
+Flux keeps the OpenBao HelmRelease active. The declared StatefulSet update
+strategy is `RollingUpdate`, so OpenBao configuration and image changes roll
+through the raft set from the Flux-managed HelmRelease.
 
 ```sh
 kubectl --kubeconfig=src/infrastructure/clusters/ash/bootstrap/talm/kubeconfig \
@@ -66,9 +66,8 @@ kubectl --kubeconfig=src/infrastructure/clusters/ash/bootstrap/talm/kubeconfig \
 Run the same command for `guardian-openbao-1` and `guardian-openbao-2` when
 they are sealed. Each invocation prompts for one unseal key.
 
-For an image or configuration rollout, delete and unseal one StatefulSet pod at
-a time. Wait for the replacement pod to become unsealed and rejoin raft before
-moving to the next ordinal.
+For an image or configuration rollout, watch each StatefulSet replacement pod
+and unseal it before the next ordinal needs quorum capacity.
 
 ## Verify
 

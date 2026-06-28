@@ -55,3 +55,22 @@ spec:
         - ports:
             - port: "9101"
               protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-vmagent-to-openbao-ops-controller-metrics
+  namespace: tenant-guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: openbao-ops-controller
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: vmagent
+            k8s:io.kubernetes.pod.namespace: cozy-monitoring
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
