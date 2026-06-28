@@ -9,6 +9,7 @@ go_test(
     data = [
         "//:.aspect/tasks/infra.axl",
         "//:.bazelignore",
+        "//:AGENTS.md",
         "//:TRIBAL_KNOWLEDGE.md",
         "@talm_linux_amd64//:talm",
         "//src/infrastructure/base:kustomization",
