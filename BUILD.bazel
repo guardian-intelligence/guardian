@@ -1,4 +1,5 @@
 exports_files([
+    ".aspect/tasks/infra.axl",
     ".bazelignore",
     "TRIBAL_KNOWLEDGE.md",
     "buf.yaml",

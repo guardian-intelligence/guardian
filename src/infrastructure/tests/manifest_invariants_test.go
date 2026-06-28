@@ -1512,6 +1512,7 @@ func testOpenBaoOpenTofuBootstrap(t *testing.T) {
 	versions := string(versionsBytes)
 	mainTF := string(readRunfile(t, "src/infrastructure/bootstrap/openbao-root-bootstrap/main.tf"))
 	lock := string(readRunfile(t, "src/infrastructure/bootstrap/openbao-root-bootstrap/.terraform.lock.hcl"))
+	aspectTask := string(readRunfile(t, ".aspect/tasks/infra.axl"))
 
 	assertTextContains(t, versions, `source  = "hashicorp/vault"`, "openbao-root-bootstrap versions.tf")
 	assertTextContains(t, versions, `version = "= 4.4.0"`, "openbao-root-bootstrap versions.tf")
@@ -1520,6 +1521,8 @@ func testOpenBaoOpenTofuBootstrap(t *testing.T) {
 	assertTextContains(t, backendConfig, `cloudflare_account_id = "c3eaeffaadf7d4847684d4775c16d598"`, "backend.tfvars")
 	assertTextContains(t, lock, `provider "registry.opentofu.org/hashicorp/vault"`, "openbao-root-bootstrap lock")
 	assertTextContains(t, lock, `version     = "4.4.0"`, "openbao-root-bootstrap lock")
+	assertTextContains(t, aspectTask, `"service": args.string(default = "guardian-openbao-active"`, ".aspect/tasks/infra.axl")
+	assertTextNotContains(t, aspectTask, `"service": args.string(default = "guardian-openbao"`, ".aspect/tasks/infra.axl")
 
 	assertTextContains(t, mainTF, `resource "vault_auth_backend" "kubernetes"`, "openbao-root-bootstrap main.tf")
 	assertTextContains(t, mainTF, `type        = "kubernetes"`, "openbao-root-bootstrap main.tf")

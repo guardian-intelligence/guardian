@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -54,7 +55,7 @@ func main() {
 	flag.StringVar(&portForwardReadyWait, "port-forward-ready-timeout", "10s", "timeout waiting for kubectl port-forward readiness")
 	flag.StringVar(&cfg.Namespace, "namespace", "tenant-guardian", "OpenBao namespace")
 	flag.StringVar(&cfg.StatefulSet, "statefulset", "guardian-openbao", "OpenBao StatefulSet name")
-	flag.StringVar(&cfg.Service, "service", "guardian-openbao", "OpenBao Service name")
+	flag.StringVar(&cfg.Service, "service", "guardian-openbao-active", "OpenBao active Service name")
 	flag.StringVar(&cfg.Root, "root", "", "OpenTofu root to bootstrap the OpenBao ops-controller identity")
 	flag.StringVar(&cfg.BackendEndpoint, "backend-endpoint", "", "S3-compatible OpenTofu backend endpoint")
 	flag.StringVar(&cfg.Mode, "mode", "apply", "OpenTofu operation: plan or apply")
@@ -119,7 +120,7 @@ func runBootstrap(ctx context.Context, cfg bootstrapConfig) error {
 	fmt.Printf("guardian cozystack openbao bootstrap\n")
 	fmt.Printf("namespace=%s statefulset=%s service=%s root=%s mode=%s\n", cfg.Namespace, cfg.StatefulSet, cfg.Service, cfg.Root, cfg.Mode)
 
-	if err := waitStatefulSetReady(ctx, runner, cfg.StatefulSet, cfg.WaitTimeout); err != nil {
+	if err := waitOpenBaoBootstrapReady(ctx, runner, cfg.StatefulSet, cfg.Service, cfg.WaitTimeout); err != nil {
 		return err
 	}
 	token, tokenSource, err := rootTokenFromEnv()
@@ -146,16 +147,150 @@ func runBootstrap(ctx context.Context, cfg bootstrapConfig) error {
 	return runTofu(ctx, cfg.Tofu, "tofu "+cfg.Mode+" openbao-root-bootstrap", tofuRunArgs(cfg.Mode, cfg.Root, openbaoAddr), env, token)
 }
 
-func waitStatefulSetReady(ctx context.Context, runner kubectlRunner, statefulSet, timeout string) error {
-	replicas, err := runner.output(ctx, "OpenBao StatefulSet replicas", "get", "statefulset.apps/"+statefulSet, "-o", "jsonpath={.spec.replicas}")
+func waitOpenBaoBootstrapReady(ctx context.Context, runner kubectlRunner, statefulSet, service, timeout string) error {
+	waitTimeout, err := time.ParseDuration(timeout)
 	if err != nil {
+		return fmt.Errorf("parse --wait-timeout %q: %w", timeout, err)
+	}
+	if waitTimeout <= 0 {
+		return errors.New("--wait-timeout must be positive")
+	}
+
+	deadline := time.Now().Add(waitTimeout)
+	if err := waitOpenBaoStatefulSetQuorum(ctx, runner, statefulSet, deadline); err != nil {
 		return err
 	}
-	want := strings.TrimSpace(replicas)
-	if want == "" {
-		return fmt.Errorf("OpenBao StatefulSet %s has empty spec.replicas", statefulSet)
+	return waitOpenBaoActiveEndpoints(ctx, runner, service, deadline)
+}
+
+func waitOpenBaoStatefulSetQuorum(ctx context.Context, runner kubectlRunner, statefulSet string, deadline time.Time) error {
+	var last string
+	for {
+		out, err := runner.output(ctx, "OpenBao StatefulSet status", "get", "statefulset.apps/"+statefulSet, "-o", "json")
+		if err != nil {
+			last = err.Error()
+		} else {
+			status, err := parseStatefulSetReplicaStatus(out)
+			if err != nil {
+				last = err.Error()
+			} else {
+				required := requiredReadyReplicas(status.Replicas)
+				if status.ReadyReplicas >= required {
+					fmt.Printf("OpenBao StatefulSet quorum ready: readyReplicas=%d required=%d replicas=%d\n", status.ReadyReplicas, required, status.Replicas)
+					return nil
+				}
+				last = fmt.Sprintf("readyReplicas=%d required=%d replicas=%d", status.ReadyReplicas, required, status.Replicas)
+			}
+		}
+		if err := sleepUntilNextPoll(ctx, deadline, "timed out waiting for OpenBao StatefulSet quorum readiness", last); err != nil {
+			return err
+		}
 	}
-	return runner.run(ctx, "wait OpenBao StatefulSet ready", "wait", "--for=jsonpath={.status.readyReplicas}="+want, "statefulset.apps/"+statefulSet, "--timeout="+timeout)
+}
+
+func waitOpenBaoActiveEndpoints(ctx context.Context, runner kubectlRunner, service string, deadline time.Time) error {
+	var last string
+	for {
+		out, err := runner.output(ctx, "OpenBao active EndpointSlices", "get", "endpointslices.discovery.k8s.io", "-l", "kubernetes.io/service-name="+service, "-o", "json")
+		if err != nil {
+			last = err.Error()
+		} else {
+			addresses, err := parseReadyEndpointSliceAddresses(out)
+			if err != nil {
+				last = err.Error()
+			} else if addresses > 0 {
+				fmt.Printf("OpenBao active service endpoints ready: service=%s readyAddresses=%d\n", service, addresses)
+				return nil
+			} else {
+				last = fmt.Sprintf("service=%s readyAddresses=0", service)
+			}
+		}
+		if err := sleepUntilNextPoll(ctx, deadline, "timed out waiting for OpenBao active service endpoints", last); err != nil {
+			return err
+		}
+	}
+}
+
+func sleepUntilNextPoll(ctx context.Context, deadline time.Time, message, last string) error {
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		if last == "" {
+			return errors.New(message)
+		}
+		return fmt.Errorf("%s: %s", message, last)
+	}
+	sleep := 5 * time.Second
+	if remaining < sleep {
+		sleep = remaining
+	}
+	timer := time.NewTimer(sleep)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+type replicaStatus struct {
+	Replicas      int
+	ReadyReplicas int
+}
+
+func parseStatefulSetReplicaStatus(raw string) (replicaStatus, error) {
+	var doc struct {
+		Spec struct {
+			Replicas *int `json:"replicas"`
+		} `json:"spec"`
+		Status struct {
+			ReadyReplicas int `json:"readyReplicas"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+		return replicaStatus{}, err
+	}
+	replicas := 1
+	if doc.Spec.Replicas != nil {
+		replicas = *doc.Spec.Replicas
+	}
+	if replicas <= 0 {
+		return replicaStatus{}, fmt.Errorf("StatefulSet replicas must be positive, got %d", replicas)
+	}
+	if doc.Status.ReadyReplicas < 0 {
+		return replicaStatus{}, fmt.Errorf("StatefulSet readyReplicas must be non-negative, got %d", doc.Status.ReadyReplicas)
+	}
+	return replicaStatus{Replicas: replicas, ReadyReplicas: doc.Status.ReadyReplicas}, nil
+}
+
+func requiredReadyReplicas(replicas int) int {
+	return replicas/2 + 1
+}
+
+func parseReadyEndpointSliceAddresses(raw string) (int, error) {
+	var list struct {
+		Items []struct {
+			Endpoints []struct {
+				Addresses  []string `json:"addresses"`
+				Conditions struct {
+					Ready *bool `json:"ready"`
+				} `json:"conditions"`
+			} `json:"endpoints"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(raw), &list); err != nil {
+		return 0, err
+	}
+	total := 0
+	for _, item := range list.Items {
+		for _, endpoint := range item.Endpoints {
+			if endpoint.Conditions.Ready != nil && !*endpoint.Conditions.Ready {
+				continue
+			}
+			total += len(endpoint.Addresses)
+		}
+	}
+	return total, nil
 }
 
 func rootTokenFromEnv() (string, string, error) {

@@ -7,6 +7,7 @@ go_test(
         "talm_render_test.go",
     ],
     data = [
+        "//:.aspect/tasks/infra.axl",
         "//:.bazelignore",
         "//:TRIBAL_KNOWLEDGE.md",
         "@talm_linux_amd64//:talm",
