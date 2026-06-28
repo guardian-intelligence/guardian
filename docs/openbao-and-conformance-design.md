@@ -40,8 +40,10 @@ trade-offs and the two genuinely-open questions are called out at the end.
 - Any restart self-unseals from the file. "Sealed after init" is a **fault**, not a resting
   state, and health/readiness reflect that.
 - OpenBao self-init performs the cluster-level initialize operation once. With
-  `podManagementPolicy: OrderedReady`, `guardian-openbao-0` is the first eligible member; the
-  operation is still cluster-scoped, so later members only retry-join and skip initialize.
+  `podManagementPolicy: OrderedReady`, `guardian-openbao-0` is the first eligible member. Later
+  members retry-join through `guardian-openbao-active`; they must not list their own ordinal as a
+  retry target, because a first-start follower can otherwise fall back to an independent
+  self-init. The cutover proof rejects mixed OpenBao `cluster_id` values across raft members.
 
 ### Trust root for the seal key — TPM (tracer-gated)
 - The key exists only on **TPM-sealed Talos node storage** (luks2 + `tpm` key provider)

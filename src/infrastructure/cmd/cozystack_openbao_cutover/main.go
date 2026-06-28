@@ -101,6 +101,14 @@ type condition struct {
 	Message string `json:"message"`
 }
 
+type openBaoStatus struct {
+	Initialized bool   `json:"initialized"`
+	Sealed      bool   `json:"sealed"`
+	HAEnabled   bool   `json:"ha_enabled"`
+	ClusterID   string `json:"cluster_id"`
+	Version     string `json:"version"`
+}
+
 func main() {
 	var cfg cutoverConfig
 	var requiredKustomizations string
@@ -196,6 +204,22 @@ func runCutoverProof(ctx context.Context, cfg cutoverConfig) error {
 	if err := validateStatefulSetRolled(statefulSetRaw, cfg.OpenBaoStatefulSet); err != nil {
 		return err
 	}
+	replicas, err := statefulSetReplicaCount(statefulSetRaw, cfg.OpenBaoStatefulSet)
+	if err != nil {
+		return err
+	}
+	statuses := map[string]string{}
+	for i := 0; i < replicas; i++ {
+		pod := fmt.Sprintf("%s-%d", cfg.OpenBaoStatefulSet, i)
+		statusRaw, err := runner.output(ctx, "OpenBao status "+pod, "-n", cfg.OpenBaoNamespace, "exec", pod, "-c", "openbao", "--", "bao", "status", "-format=json", "-tls-skip-verify")
+		if err != nil {
+			return err
+		}
+		statuses[pod] = statusRaw
+	}
+	if err := validateOpenBaoClusterStatus(statuses); err != nil {
+		return err
+	}
 
 	deploymentRaw, err := runner.output(ctx, "OpenBao ops-controller Deployment", "-n", cfg.OpenBaoNamespace, "get", "deployment.apps/"+cfg.ControllerDeployment, "-o", "json")
 	if err != nil {
@@ -276,16 +300,13 @@ func validateReadyCondition(raw string, kind string, name string) error {
 }
 
 func validateStatefulSetRolled(raw string, name string) error {
+	replicas, err := statefulSetReplicaCount(raw, name)
+	if err != nil {
+		return err
+	}
 	var statefulSet kubeObject
 	if err := json.Unmarshal([]byte(raw), &statefulSet); err != nil {
 		return fmt.Errorf("parse StatefulSet %q: %w", name, err)
-	}
-	replicas := statefulSet.Spec.Replicas
-	if replicas == 0 {
-		replicas = statefulSet.Status.Replicas
-	}
-	if replicas == 0 {
-		return fmt.Errorf("StatefulSet %q has zero desired replicas", name)
 	}
 	if statefulSet.Status.ReadyReplicas != replicas {
 		return fmt.Errorf("StatefulSet %q readyReplicas=%d replicas=%d", name, statefulSet.Status.ReadyReplicas, replicas)
@@ -300,6 +321,55 @@ func validateStatefulSetRolled(raw string, name string) error {
 		return fmt.Errorf("StatefulSet %q currentRevision=%q updateRevision=%q", name, statefulSet.Status.CurrentRevision, statefulSet.Status.UpdateRevision)
 	}
 	fmt.Printf("OpenBao StatefulSet rolled: statefulSet=%s replicas=%d revision=%s\n", name, replicas, statefulSet.Status.CurrentRevision)
+	return nil
+}
+
+func statefulSetReplicaCount(raw string, name string) (int, error) {
+	var statefulSet kubeObject
+	if err := json.Unmarshal([]byte(raw), &statefulSet); err != nil {
+		return 0, fmt.Errorf("parse StatefulSet %q: %w", name, err)
+	}
+	replicas := statefulSet.Spec.Replicas
+	if replicas == 0 {
+		replicas = statefulSet.Status.Replicas
+	}
+	if replicas == 0 {
+		return 0, fmt.Errorf("StatefulSet %q has zero desired replicas", name)
+	}
+	return replicas, nil
+}
+
+func validateOpenBaoClusterStatus(rawByPod map[string]string) error {
+	if len(rawByPod) == 0 {
+		return errors.New("no OpenBao pod statuses were collected")
+	}
+	var clusterID string
+	for pod, raw := range rawByPod {
+		var status openBaoStatus
+		if err := json.Unmarshal([]byte(raw), &status); err != nil {
+			return fmt.Errorf("parse OpenBao status for %s: %w", pod, err)
+		}
+		if !status.Initialized {
+			return fmt.Errorf("OpenBao pod %s initialized=false", pod)
+		}
+		if status.Sealed {
+			return fmt.Errorf("OpenBao pod %s sealed=true", pod)
+		}
+		if !status.HAEnabled {
+			return fmt.Errorf("OpenBao pod %s ha_enabled=false", pod)
+		}
+		if status.ClusterID == "" {
+			return fmt.Errorf("OpenBao pod %s cluster_id is empty", pod)
+		}
+		if clusterID == "" {
+			clusterID = status.ClusterID
+			continue
+		}
+		if status.ClusterID != clusterID {
+			return fmt.Errorf("OpenBao pod %s cluster_id=%s, want %s", pod, status.ClusterID, clusterID)
+		}
+	}
+	fmt.Printf("OpenBao cluster status verified: pods=%d clusterID=%s\n", len(rawByPod), clusterID)
 	return nil
 }
 

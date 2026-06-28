@@ -1,0 +1,35 @@
+# Guardian OpenBao uses a node-local static seal key mounted through hostPath.
+# Keep the namespace owned by the Cozystack Tenant chart and add Pod Security
+# labels through its generated HelmRelease post-renderer.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: tenant-guardian
+  namespace: tenant-root
+spec:
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              version: v1
+              kind: Namespace
+              name: tenant-guardian
+            patch: |-
+              - op: add
+                path: /metadata/labels/pod-security.kubernetes.io~1enforce
+                value: privileged
+              - op: add
+                path: /metadata/labels/pod-security.kubernetes.io~1enforce-version
+                value: latest
+              - op: add
+                path: /metadata/labels/pod-security.kubernetes.io~1audit
+                value: baseline
+              - op: add
+                path: /metadata/labels/pod-security.kubernetes.io~1audit-version
+                value: latest
+              - op: add
+                path: /metadata/labels/pod-security.kubernetes.io~1warn
+                value: baseline
+              - op: add
+                path: /metadata/labels/pod-security.kubernetes.io~1warn-version
+                value: latest

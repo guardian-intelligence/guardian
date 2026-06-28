@@ -241,19 +241,9 @@ spec:
               storage "raft" {
                 path = "/openbao/data"
                 retry_join {
-                  leader_api_addr = "https://guardian-openbao-0.guardian-openbao-internal:8200"
+                  leader_api_addr = "https://guardian-openbao-active.tenant-guardian.svc:8200"
                   leader_ca_cert_file = "/openbao/tls/ca.crt"
-                  leader_tls_servername = "guardian-openbao.tenant-guardian.svc"
-                }
-                retry_join {
-                  leader_api_addr = "https://guardian-openbao-1.guardian-openbao-internal:8200"
-                  leader_ca_cert_file = "/openbao/tls/ca.crt"
-                  leader_tls_servername = "guardian-openbao.tenant-guardian.svc"
-                }
-                retry_join {
-                  leader_api_addr = "https://guardian-openbao-2.guardian-openbao-internal:8200"
-                  leader_ca_cert_file = "/openbao/tls/ca.crt"
-                  leader_tls_servername = "guardian-openbao.tenant-guardian.svc"
+                  leader_tls_servername = "guardian-openbao-active.tenant-guardian.svc"
                 }
               }
 

@@ -4,6 +4,7 @@ filegroup(
         "clickhouse-system-bucket-endpoint.yaml",
         "ingress-origin-edge.yaml",
         "kustomization.yaml",
+        "tenant-guardian-namespace-pod-security.yaml",
     ],
     visibility = ["//visibility:public"],
 )

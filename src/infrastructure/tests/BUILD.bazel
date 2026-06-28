@@ -8,6 +8,7 @@ go_test(
     ],
     data = [
         "@talm_linux_amd64//:talm",
+        "//src/infrastructure/base/app-patches:manifests",
         "//src/infrastructure/base/dns:manifests",
         "//src/infrastructure/base/flux:manifests",
         "//src/infrastructure/base/storage:manifests",
