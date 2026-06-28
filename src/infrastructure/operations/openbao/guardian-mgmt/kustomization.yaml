@@ -6,6 +6,7 @@ resources:
   - authroles/external-dns.yaml
   - authroles/ops-controller.yaml
   - mounts/kv.yaml
+  - mounttunes/kv.yaml
   - policies/external-dns.yaml
   - policies/ops-controller.yaml
 labels:

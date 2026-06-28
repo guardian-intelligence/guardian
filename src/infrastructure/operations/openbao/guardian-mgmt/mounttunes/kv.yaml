@@ -1,0 +1,8 @@
+apiVersion: openbao.guardian.dev/v1alpha1
+kind: OpenBaoMountTune
+metadata:
+  name: kv
+spec:
+  mountPath: kv
+  tune:
+    listingVisibility: hidden

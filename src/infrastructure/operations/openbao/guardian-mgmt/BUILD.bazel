@@ -6,6 +6,7 @@ filegroup(
         "authroles/ops-controller.yaml",
         "kustomization.yaml",
         "mounts/kv.yaml",
+        "mounttunes/kv.yaml",
         "policies/external-dns.yaml",
         "policies/ops-controller.yaml",
     ],
