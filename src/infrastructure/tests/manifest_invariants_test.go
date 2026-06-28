@@ -1207,7 +1207,7 @@ func testOpenBaoOpsControllerScaffold(t *testing.T) {
 	image := asManifest(t, images[0], "openbao guardian-mgmt image override")
 	assertString(t, image, "guardian/openbao-ops-controller", "name")
 	assertString(t, image, "ghcr.io/guardian-intelligence/guardian/openbao-ops-controller", "newName")
-	assertString(t, image, "sha256:684eeb25948be49933b7b219d822dcfe7b549b6701a15b01caa6821be39a10a1", "digest")
+	assertString(t, image, "sha256:4bf8a4213772ec5cf404473f9a326a2657de1be18ab7a1a81bd60e0488a419a3", "digest")
 	if valueAt(image, "newTag") != nil {
 		t.Fatalf("openbao guardian-mgmt overlay must pin by digest, not newTag")
 	}
