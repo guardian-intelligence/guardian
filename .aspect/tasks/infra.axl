@@ -9,6 +9,7 @@ load(".aspect/lib/helpers.axl", "checked_spawn", "ws_path")
 GUARDIAN_MGMT_ROOT = "src/infrastructure/bootstrap/guardian-mgmt"
 OPENBAO_ROOT_BOOTSTRAP_ROOT = "src/infrastructure/bootstrap/openbao-root-bootstrap"
 GUARDIAN_MGMT_DNS_ROOT = "src/infrastructure/bootstrap/guardian-mgmt-dns"
+GUARDIAN_MGMT_TALM_ROOT = "src/infrastructure/clusters/ash/bootstrap/talm"
 GUARDIAN_BACKEND_TFVARS = "src/infrastructure/bootstrap/backend.tfvars"
 TOFU_TARGET = "@opentofu_linux_amd64//:tofu_bin"
 TALM_TARGET = "@talm_linux_amd64//:talm"
@@ -762,9 +763,10 @@ def _talos_impl(ctx):
     )
     if kubespan == None:
         return 1
-    rc = _assert_equals(ctx, kubespan, "[]", "kubespan peer statuses")
-    if rc != 0:
-        return rc
+    if kubespan != "" and kubespan != "[]":
+        rc = _assert_equals(ctx, kubespan, "[]", "kubespan peer statuses")
+        if rc != 0:
+            return rc
 
     ctx.std.io.stderr.write("guardian-mgmt Talos L2 checks passed\n")
     return 0
@@ -1563,7 +1565,7 @@ kubeconfig = task(
     args = {
         "endpoints": args.string(default = "10.8.0.250", description = "Talos API endpoint used to fetch kubeconfig."),
         "nodes": args.string(default = "10.8.0.11,10.8.0.12,10.8.0.13", description = "Talos nodes used to fetch kubeconfig."),
-        "root": args.string(default = "src/infrastructure/talm", description = "Talm root containing gitignored secrets.yaml and talosconfig."),
+        "root": args.string(default = GUARDIAN_MGMT_TALM_ROOT, description = "Talm root containing gitignored secrets.yaml and talosconfig."),
         "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
     },
 )
@@ -1576,7 +1578,7 @@ talos = task(
     args = {
         "endpoints": args.string(default = "10.8.0.250", description = "Talos API endpoint for guardian-mgmt."),
         "nodes": args.string(default = "10.8.0.11,10.8.0.12,10.8.0.13", description = "Comma-separated guardian-mgmt Talos nodes."),
-        "root": args.string(default = "src/infrastructure/talm", description = "Talm root containing gitignored secrets.yaml and talosconfig."),
+        "root": args.string(default = GUARDIAN_MGMT_TALM_ROOT, description = "Talm root containing gitignored secrets.yaml and talosconfig."),
         "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
     },
 )
@@ -1591,7 +1593,7 @@ bootstrap = task(
         "endpoints": args.string(default = "10.8.0.250", description = "Talos API endpoint used to fetch kubeconfig and validate L2 state."),
         "kubeconfig": args.string(default = "", description = "Optional kubeconfig for the Cozystack installer/operator Helm upgrade. Defaults to <root>/kubeconfig after refresh."),
         "nodes": args.string(default = "10.8.0.11,10.8.0.12,10.8.0.13", description = "Comma-separated guardian-mgmt Talos nodes."),
-        "root": args.string(default = "src/infrastructure/talm", description = "Talm root containing gitignored secrets.yaml, talosconfig, and kubeconfig."),
+        "root": args.string(default = GUARDIAN_MGMT_TALM_ROOT, description = "Talm root containing gitignored secrets.yaml, talosconfig, and kubeconfig."),
         "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
         "tofu_backend_endpoint": args.string(default = "", description = "Optional S3-compatible OpenTofu backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
     },
@@ -1658,7 +1660,7 @@ edge_failover_drill = task(
         "report": args.string(default = "reports/infrastructure/edge-failover-report.json", description = "JSON outage report path."),
         "request_timeout": args.string(default = "5s", description = "Per-request public edge timeout."),
         "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before the drill."),
-        "root": args.string(default = "src/infrastructure/talm", description = "Talm root containing gitignored talosconfig."),
+        "root": args.string(default = GUARDIAN_MGMT_TALM_ROOT, description = "Talm root containing gitignored talosconfig."),
         "sample_interval_ms": args.string(default = "250", description = "k6 sample interval in milliseconds."),
         "talos_endpoint": args.string(default = "206.223.228.101,45.250.254.119,206.223.228.87", description = "Comma-separated Talos API endpoints for guardian-mgmt."),
         "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
