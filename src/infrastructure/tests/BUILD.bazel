@@ -30,6 +30,7 @@ go_test(
         "//src/infrastructure/talm:chart",
         "//src/services/secrets/openbao/deploy/base/crds:manifests",
         "//src/services/secrets/openbao/deploy/base:manifests",
+        "//src/services/secrets/openbao/deploy/guardian-mgmt:manifests",
         "//src/services/secrets/openbao/operator:image",
     ],
     deps = [

@@ -1179,6 +1179,19 @@ func testOpenBaoOpsControllerScaffold(t *testing.T) {
 			t.Fatalf("openbao ops controller deployment missing env %s", want)
 		}
 	}
+
+	guardianMgmtOverlay := readYAMLMap(t, "src/services/secrets/openbao/deploy/guardian-mgmt/kustomization.yaml")
+	images := sliceAt(t, guardianMgmtOverlay, "images")
+	if len(images) != 1 {
+		t.Fatalf("openbao guardian-mgmt overlay images = %#v, want one pinned image override", images)
+	}
+	image := asManifest(t, images[0], "openbao guardian-mgmt image override")
+	assertString(t, image, "guardian/openbao-ops-controller", "name")
+	assertString(t, image, "ghcr.io/guardian-intelligence/guardian/openbao-ops-controller", "newName")
+	assertString(t, image, "sha256:684eeb25948be49933b7b219d822dcfe7b549b6701a15b01caa6821be39a10a1", "digest")
+	if valueAt(image, "newTag") != nil {
+		t.Fatalf("openbao guardian-mgmt overlay must pin by digest, not newTag")
+	}
 }
 
 func testOpenBaoOperationsCRs(t *testing.T) {
