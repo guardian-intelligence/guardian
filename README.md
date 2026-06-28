@@ -17,7 +17,7 @@ aspect infra tofu-init
 
 aspect infra bootstrap
 
-aspect infra openbao-apply
+aspect infra openbao-bootstrap
 
 aspect infra openbao-drill --mode status
 
@@ -33,9 +33,10 @@ installer/operator to the repo-pinned version.
 `aspect infra upgrade-cozystack` is the narrow day-two path for existing
 clusters when only the Cozystack installer/operator release needs to move.
 Initialize and unseal OpenBao with the Manual Shamir runbook before using
-`aspect infra openbao-apply`, which applies the standard OpenBao API state
-through a live port-forward. `aspect infra openbao-drill --mode status` verifies
-OpenBao status, and `--mode snapshot` runs a Raft snapshot drill. `aspect infra
+`aspect infra openbao-bootstrap`, which uses the interim OpenTofu root only to
+create the OpenBao ops-controller policy and Kubernetes auth role through a live
+port-forward. `aspect infra openbao-drill --mode status` verifies OpenBao
+status, and `--mode snapshot` runs a Raft snapshot drill. `aspect infra
 observability-drill` creates a short root Postgres pgbench job, then queries
 VictoriaMetrics and VictoriaLogs for that exact workload and the CNPG scrape
 path. Postgres and ClickHouse backups use Cozystack 1.5's platform-managed

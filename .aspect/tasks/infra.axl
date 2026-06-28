@@ -26,7 +26,7 @@ HTTP_LOAD_TARGET = "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_
 EDGE_HEALTH_TARGET = "//src/infrastructure/cmd/edge_health:edge_health"
 EDGE_FAILOVER_DRILL_TARGET = "//src/infrastructure/cmd/edge_failover_drill:edge_failover_drill"
 NODE_OUTAGE_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill"
-OPENBAO_APPLY_TARGET = "//src/infrastructure/cmd/cozystack_openbao_apply:cozystack_openbao_apply"
+OPENBAO_BOOTSTRAP_TARGET = "//src/infrastructure/cmd/cozystack_openbao_bootstrap:cozystack_openbao_bootstrap"
 OPENBAO_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill"
 OPENBAO_OBSERVABILITY_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_openbao_observability_drill:cozystack_openbao_observability_drill"
 OBSERVABILITY_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_observability_drill:cozystack_observability_drill"
@@ -80,7 +80,7 @@ INFRA_TESTS = [
     "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load_test",
     "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill_test",
     "//src/infrastructure/cmd/cozystack_observability_drill:cozystack_observability_drill_test",
-    "//src/infrastructure/cmd/cozystack_openbao_apply:cozystack_openbao_apply_test",
+    "//src/infrastructure/cmd/cozystack_openbao_bootstrap:cozystack_openbao_bootstrap_test",
     "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill_test",
     "//src/infrastructure/cmd/cozystack_openbao_observability_drill:cozystack_openbao_observability_drill_test",
     "//src/infrastructure/tests:manifest_invariants_test",
@@ -1362,7 +1362,7 @@ def _openbao_observability_drill_impl(ctx):
         label = "cozystack openbao observability drill",
     )
 
-def _openbao_apply_impl(ctx):
+def _openbao_bootstrap_impl(ctx):
     kubectl = _kubectl_path(ctx)
     if kubectl == None:
         return 1
@@ -1382,7 +1382,7 @@ def _openbao_apply_impl(ctx):
         if rc != 0:
             return rc
 
-    apply_args = [
+    bootstrap_args = [
         "--kubectl",
         kubectl,
         "--tofu",
@@ -1407,14 +1407,14 @@ def _openbao_apply_impl(ctx):
         ctx.args.port_forward_ready_timeout,
     ]
     if ctx.args.kubeconfig != "":
-        apply_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
+        bootstrap_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
 
     return checked_spawn(
         ctx,
         "bazelisk",
-        ["run", OPENBAO_APPLY_TARGET, "--"] + apply_args,
+        ["run", OPENBAO_BOOTSTRAP_TARGET, "--"] + bootstrap_args,
         cwd = ws_path(ctx),
-        label = "cozystack openbao apply",
+        label = "cozystack openbao bootstrap",
     )
 
 validate = task(
@@ -1456,18 +1456,18 @@ dns_apply = task(
     },
 )
 
-openbao_apply = task(
-    implementation = _openbao_apply_impl,
-    name = "openbao-apply",
+openbao_bootstrap = task(
+    implementation = _openbao_bootstrap_impl,
+    name = "openbao-bootstrap",
     group = ["infra"],
-    summary = "Apply the guardian-mgmt OpenBao API OpenTofu root through a live OpenBao port-forward.",
+    summary = "Bootstrap the OpenBao ops-controller identity through the interim OpenTofu root.",
     args = {
         "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
         "mode": args.string(default = "apply", description = "OpenTofu operation: plan or apply."),
         "namespace": args.string(default = "tenant-guardian", description = "OpenBao namespace."),
         "port_forward_ready_timeout": args.string(default = "10s", description = "Timeout waiting for OpenBao port-forward readiness."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
-        "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before OpenBao API configuration."),
+        "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before OpenBao identity bootstrap."),
         "service": args.string(default = "guardian-openbao", description = "OpenBao Service name."),
         "statefulset": args.string(default = "guardian-openbao", description = "OpenBao StatefulSet name."),
         "tofu_backend_endpoint": args.string(default = "", description = "Optional S3-compatible OpenTofu backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
