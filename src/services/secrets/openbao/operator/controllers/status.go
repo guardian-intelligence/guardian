@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"strings"
+	"time"
 
 	openbaov1alpha1 "github.com/guardian-intelligence/guardian/src/services/secrets/openbao/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -17,6 +18,8 @@ const (
 
 	messageAuthenticationFailed = "OpenBao Kubernetes auth login failed."
 	messageBootstrapRequired    = "OpenBao Kubernetes auth role is missing; run the one-time OpenBao bootstrap before this controller can reconcile."
+
+	bootstrapRequiredRequeueAfter = time.Minute
 )
 
 type conditionReasonMessage struct {

@@ -347,6 +347,9 @@ func (r *AuthBackendReconciler) updateAuthBackendErrorStatus(ctx context.Context
 	if _, err := r.updateAuthBackendStatus(ctx, backend, input); err != nil {
 		return ctrl.Result{}, err
 	}
+	if input.reason == reasonBootstrapRequired {
+		return ctrl.Result{RequeueAfter: bootstrapRequiredRequeueAfter}, nil
+	}
 	return ctrl.Result{}, cause
 }
 

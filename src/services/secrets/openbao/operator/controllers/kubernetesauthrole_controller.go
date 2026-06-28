@@ -210,6 +210,9 @@ func (r *KubernetesAuthRoleReconciler) updateKubernetesAuthRoleErrorStatus(ctx c
 	if _, err := r.updateKubernetesAuthRoleStatus(ctx, role, input); err != nil {
 		return ctrl.Result{}, err
 	}
+	if input.reason == reasonBootstrapRequired {
+		return ctrl.Result{RequeueAfter: bootstrapRequiredRequeueAfter}, nil
+	}
 	return ctrl.Result{}, cause
 }
 
