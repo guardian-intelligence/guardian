@@ -44,6 +44,12 @@ func TestKubeAPIServerURLPreservesExplicitURL(t *testing.T) {
 	}
 }
 
+func TestDefaultKubeAPIServerTargetsGuardianMgmtVIP(t *testing.T) {
+	if defaultKubeAPIServer != "https://10.8.0.250:6443" {
+		t.Fatalf("defaultKubeAPIServer = %q", defaultKubeAPIServer)
+	}
+}
+
 func TestSamplePayloadParsesRawJSON(t *testing.T) {
 	got, ok := samplePayload(`{"event":"guardian_edge_failover_sample"}`)
 	if !ok || got != `{"event":"guardian_edge_failover_sample"}` {

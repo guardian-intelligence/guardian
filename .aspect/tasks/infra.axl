@@ -1569,7 +1569,7 @@ edge_failover_drill = task(
         "cooldown": args.string(default = "20s", description = "Time to keep sampling after Kubernetes node recovery."),
         "duration": args.string(default = "5m", description = "k6 probe duration for this node drill."),
         "expected_statuses": args.string(default = "200,302", description = "Comma-separated acceptable public edge HTTP status codes."),
-        "kube_api_server": args.string(default = "", description = "Optional Kubernetes API server to use while the target node reboots."),
+        "kube_api_server": args.string(default = "https://10.8.0.250:6443", description = "Kubernetes API server to use while the target node reboots."),
         "kube_timeout": args.string(default = "10m", description = "Timeout for Kubernetes node NotReady/Ready transitions."),
         "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
         "k6_dns": args.string(default = "ttl=0,select=random,policy=preferIPv6", description = "k6 DNS resolver policy for the public edge probe."),

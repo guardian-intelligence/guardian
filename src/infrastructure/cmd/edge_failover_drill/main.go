@@ -41,6 +41,8 @@ type drillConfig struct {
 	Report           string
 }
 
+const defaultKubeAPIServer = "https://10.8.0.250:6443"
+
 type nodeTarget struct {
 	Name string `json:"name"`
 	IP   string `json:"ip"`
@@ -100,7 +102,7 @@ func main() {
 	flag.StringVar(&cfg.NodeName, "node-name", "", "Kubernetes node name to watch during the drill")
 	flag.StringVar(&cfg.NodeIP, "node-ip", "", "Talos node IP/address to reboot")
 	flag.StringVar(&cfg.ConfirmNodeIP, "confirm-node-ip", "", "must exactly match --node-ip before rebooting a node")
-	flag.StringVar(&cfg.KubeAPIServer, "kube-api-server", "", "optional Kubernetes API server used while the target node reboots")
+	flag.StringVar(&cfg.KubeAPIServer, "kube-api-server", defaultKubeAPIServer, "Kubernetes API server used while the target node reboots")
 	flag.StringVar(&cfg.URL, "url", "https://s3.guardianintelligence.org/", "public edge URL to probe during failover")
 	flag.StringVar(&cfg.ExpectedStatuses, "expected-statuses", "200,403", "comma-separated acceptable HTTP status codes")
 	flag.StringVar(&cfg.Duration, "duration", "5m", "k6 probe duration for this node drill")
