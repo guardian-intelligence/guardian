@@ -277,7 +277,7 @@ spec:
                   operation = "update"
                   path = "sys/policies/acl/guardian-openbao-ops-controller"
                   data = {
-                    policy = "path \"sys/policies/acl/guardian-*\" {\n  capabilities = [\"create\", \"read\", \"update\", \"delete\"]\n}\n\npath \"auth/kubernetes/role/guardian-*\" {\n  capabilities = [\"create\", \"read\", \"update\", \"delete\"]\n}\n\npath \"sys/auth/kubernetes\" {\n  capabilities = [\"create\", \"read\", \"update\", \"delete\"]\n}\n\npath \"sys/auth/kubernetes/tune\" {\n  capabilities = [\"read\", \"update\"]\n}\n\npath \"sys/mounts/kv\" {\n  capabilities = [\"create\", \"read\", \"update\", \"delete\"]\n}\n\npath \"sys/mounts/kv/tune\" {\n  capabilities = [\"read\", \"update\"]\n}\n"
+                    policy = "path \"sys/policies/acl/guardian-*\" {\n  capabilities = [\"create\", \"read\", \"update\", \"delete\"]\n}\n\npath \"sys/auth\" {\n  capabilities = [\"read\", \"sudo\"]\n}\n\npath \"sys/auth/kubernetes\" {\n  capabilities = [\"create\", \"read\", \"update\", \"delete\", \"sudo\"]\n}\n\npath \"sys/auth/kubernetes/tune\" {\n  capabilities = [\"read\", \"update\", \"sudo\"]\n}\n\npath \"auth/kubernetes/config\" {\n  capabilities = [\"read\", \"update\"]\n}\n\npath \"auth/kubernetes/role/guardian-*\" {\n  capabilities = [\"create\", \"read\", \"update\", \"delete\"]\n}\n\npath \"sys/mounts\" {\n  capabilities = [\"read\", \"sudo\"]\n}\n\npath \"sys/mounts/kv\" {\n  capabilities = [\"create\", \"read\", \"update\", \"delete\", \"sudo\"]\n}\n\npath \"sys/mounts/kv/tune\" {\n  capabilities = [\"read\", \"update\", \"sudo\"]\n}\n"
                   }
                 }
 
