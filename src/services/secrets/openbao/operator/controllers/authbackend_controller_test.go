@@ -147,6 +147,119 @@ func TestAuthBackendReconcilerSkipsMatchingBackend(t *testing.T) {
 	}
 }
 
+func TestAuthBackendReconcilerObserveModeReportsMissingBackendWithoutApplying(t *testing.T) {
+	ctx := context.Background()
+	scheme := testScheme(t)
+	obj := &openbaov1alpha1.OpenBaoAuthBackend{
+		ObjectMeta: metav1.ObjectMeta{Name: "kubernetes", Namespace: "tenant-guardian"},
+		Spec: openbaov1alpha1.OpenBaoAuthBackendSpec{
+			Path:        "kubernetes",
+			Type:        "kubernetes",
+			Description: "Kubernetes service account auth.",
+			Kubernetes: &openbaov1alpha1.OpenBaoKubernetesAuthConfig{
+				KubernetesHost:       "https://kubernetes.default.svc:443",
+				DisableISSValidation: true,
+			},
+			Tune: &openbaov1alpha1.OpenBaoTuneSpec{
+				DefaultLeaseTTL: "1h",
+			},
+		},
+	}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&openbaov1alpha1.OpenBaoAuthBackend{}).
+		WithObjects(obj).
+		Build()
+	openbao := &fakeAuthBackendClient{
+		backends: map[string]bao.AuthBackend{},
+		configs:  map[string]bao.KubernetesAuthConfig{},
+		tunes:    map[string]bao.TuneConfig{},
+	}
+	reconciler := &AuthBackendReconciler{
+		Client: kube,
+		Scheme: scheme,
+		Mode:   ReconcileModeObserve,
+		OpenBao: func(context.Context) (AuthBackendClient, error) {
+			return openbao, nil
+		},
+	}
+
+	_, err := reconciler.Reconcile(ctx, requestFor(obj))
+	if err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if openbao.enables != 0 {
+		t.Fatalf("enables = %d, want 0", openbao.enables)
+	}
+	if openbao.configPuts != 0 {
+		t.Fatalf("configPuts = %d, want 0", openbao.configPuts)
+	}
+	if openbao.tunePuts != 0 {
+		t.Fatalf("tunePuts = %d, want 0", openbao.tunePuts)
+	}
+
+	var got openbaov1alpha1.OpenBaoAuthBackend
+	if err := kube.Get(ctx, client.ObjectKeyFromObject(obj), &got); err != nil {
+		t.Fatalf("get reconciled auth backend: %v", err)
+	}
+	assertObservedDriftStatus(t, got.Status)
+}
+
+func TestAuthBackendReconcilerObserveModeReportsConfigDriftWithoutApplying(t *testing.T) {
+	ctx := context.Background()
+	scheme := testScheme(t)
+	obj := &openbaov1alpha1.OpenBaoAuthBackend{
+		ObjectMeta: metav1.ObjectMeta{Name: "kubernetes", Namespace: "tenant-guardian"},
+		Spec: openbaov1alpha1.OpenBaoAuthBackendSpec{
+			Path: "kubernetes",
+			Type: "kubernetes",
+			Kubernetes: &openbaov1alpha1.OpenBaoKubernetesAuthConfig{
+				KubernetesHost:       "https://kubernetes.default.svc:443",
+				DisableISSValidation: true,
+			},
+		},
+	}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&openbaov1alpha1.OpenBaoAuthBackend{}).
+		WithObjects(obj).
+		Build()
+	openbao := &fakeAuthBackendClient{
+		backends: map[string]bao.AuthBackend{
+			"kubernetes": {Path: "kubernetes", Type: "kubernetes"},
+		},
+		configs: map[string]bao.KubernetesAuthConfig{
+			"kubernetes": {KubernetesHost: "https://old.example"},
+		},
+		tunes: map[string]bao.TuneConfig{},
+	}
+	reconciler := &AuthBackendReconciler{
+		Client: kube,
+		Scheme: scheme,
+		Mode:   ReconcileModeObserve,
+		OpenBao: func(context.Context) (AuthBackendClient, error) {
+			return openbao, nil
+		},
+	}
+
+	_, err := reconciler.Reconcile(ctx, requestFor(obj))
+	if err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if openbao.configPuts != 0 {
+		t.Fatalf("configPuts = %d, want 0", openbao.configPuts)
+	}
+	if got := openbao.configs["kubernetes"].KubernetesHost; got != "https://old.example" {
+		t.Fatalf("kubernetes host = %q, want unchanged old host", got)
+	}
+
+	var got openbaov1alpha1.OpenBaoAuthBackend
+	if err := kube.Get(ctx, client.ObjectKeyFromObject(obj), &got); err != nil {
+		t.Fatalf("get reconciled auth backend: %v", err)
+	}
+	assertObservedDriftStatus(t, got.Status)
+}
+
 func TestAuthBackendReconcilerReportsTypeMismatch(t *testing.T) {
 	ctx := context.Background()
 	scheme := testScheme(t)

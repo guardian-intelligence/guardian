@@ -28,6 +28,7 @@ type KubernetesAuthRoleReconciler struct {
 	client.Client
 	Scheme  *runtime.Scheme
 	OpenBao func(context.Context) (KubernetesAuthRoleClient, error)
+	Mode    ReconcileMode
 }
 
 func (r *KubernetesAuthRoleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -49,7 +50,14 @@ func (r *KubernetesAuthRoleReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return r.reconcileDelete(ctx, &role)
 	}
 
-	if role.Spec.DeletionPolicy == openbaov1alpha1.DeletionPolicyDelete && !controllerutil.ContainsFinalizer(&role, kubernetesAuthRoleFinalizer) {
+	if !r.Mode.AllowsWrites() && controllerutil.ContainsFinalizer(&role, kubernetesAuthRoleFinalizer) {
+		controllerutil.RemoveFinalizer(&role, kubernetesAuthRoleFinalizer)
+		if err := r.Update(ctx, &role); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
+	}
+	if r.Mode.AllowsWrites() && role.Spec.DeletionPolicy == openbaov1alpha1.DeletionPolicyDelete && !controllerutil.ContainsFinalizer(&role, kubernetesAuthRoleFinalizer) {
 		controllerutil.AddFinalizer(&role, kubernetesAuthRoleFinalizer)
 		if err := r.Update(ctx, &role); err != nil {
 			return ctrl.Result{}, err
@@ -92,6 +100,17 @@ func (r *KubernetesAuthRoleReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	if !found || !kubernetesAuthRoleEqual(current, desired) {
+		if !r.Mode.AllowsWrites() {
+			return r.updateKubernetesAuthRoleStatus(ctx, &role, kubernetesAuthRoleStatusInput{
+				authenticated:   metav1.ConditionTrue,
+				applied:         metav1.ConditionFalse,
+				drift:           metav1.ConditionTrue,
+				ready:           metav1.ConditionFalse,
+				reason:          "DriftDetected",
+				message:         fmt.Sprintf("OpenBao Kubernetes auth role %q differs from desired state; observe mode left it unchanged.", desired.RoleName),
+				lastAppliedHash: specHash(role.Spec),
+			})
+		}
 		if err := openbaoClient.PutKubernetesAuthRole(ctx, desired); err != nil {
 			return r.updateKubernetesAuthRoleErrorStatus(ctx, &role, kubernetesAuthRoleStatusInput{
 				authenticated: metav1.ConditionTrue,
@@ -110,7 +129,7 @@ func (r *KubernetesAuthRoleReconciler) Reconcile(ctx context.Context, req ctrl.R
 		applied:         metav1.ConditionTrue,
 		drift:           metav1.ConditionFalse,
 		ready:           metav1.ConditionTrue,
-		reason:          "Applied",
+		reason:          appliedReason(r.Mode),
 		message:         fmt.Sprintf("OpenBao Kubernetes auth role %q is applied.", desired.RoleName),
 		lastAppliedHash: specHash(role.Spec),
 	})
@@ -125,6 +144,10 @@ func (r *KubernetesAuthRoleReconciler) SetupWithManager(mgr ctrl.Manager) error 
 func (r *KubernetesAuthRoleReconciler) reconcileDelete(ctx context.Context, role *openbaov1alpha1.OpenBaoKubernetesAuthRole) (ctrl.Result, error) {
 	if !controllerutil.ContainsFinalizer(role, kubernetesAuthRoleFinalizer) {
 		return ctrl.Result{}, nil
+	}
+	if !r.Mode.AllowsWrites() {
+		controllerutil.RemoveFinalizer(role, kubernetesAuthRoleFinalizer)
+		return ctrl.Result{}, r.Update(ctx, role)
 	}
 	if role.Spec.DeletionPolicy == openbaov1alpha1.DeletionPolicyDelete {
 		openbaoClient, err := r.OpenBao(ctx)

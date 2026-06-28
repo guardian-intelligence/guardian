@@ -1185,6 +1185,8 @@ func testOpenBaoOpsControllerScaffold(t *testing.T) {
 	container := asManifest(t, containers[0], "openbao ops controller container")
 	assertString(t, container, "manager", "name")
 	assertString(t, container, "guardian/openbao-ops-controller:dev", "image")
+	args := sliceAt(t, container, "args")
+	assertContainsString(t, args, "--reconcile-mode=observe", "openbao ops controller args")
 	env := sliceAt(t, container, "env")
 	seenEnv := map[string]bool{}
 	for _, value := range env {

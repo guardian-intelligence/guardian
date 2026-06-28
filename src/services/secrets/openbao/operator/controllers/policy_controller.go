@@ -26,6 +26,7 @@ type PolicyReconciler struct {
 	client.Client
 	Scheme  *runtime.Scheme
 	OpenBao func(context.Context) (PolicyClient, error)
+	Mode    ReconcileMode
 }
 
 func (r *PolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -47,7 +48,14 @@ func (r *PolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return r.reconcileDelete(ctx, &policy)
 	}
 
-	if policy.Spec.DeletionPolicy == openbaov1alpha1.DeletionPolicyDelete && !controllerutil.ContainsFinalizer(&policy, policyFinalizer) {
+	if !r.Mode.AllowsWrites() && controllerutil.ContainsFinalizer(&policy, policyFinalizer) {
+		controllerutil.RemoveFinalizer(&policy, policyFinalizer)
+		if err := r.Update(ctx, &policy); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
+	}
+	if r.Mode.AllowsWrites() && policy.Spec.DeletionPolicy == openbaov1alpha1.DeletionPolicyDelete && !controllerutil.ContainsFinalizer(&policy, policyFinalizer) {
 		controllerutil.AddFinalizer(&policy, policyFinalizer)
 		if err := r.Update(ctx, &policy); err != nil {
 			return ctrl.Result{}, err
@@ -91,6 +99,17 @@ func (r *PolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	if currentRules != policy.Spec.Rules {
+		if !r.Mode.AllowsWrites() {
+			return r.updatePolicyStatus(ctx, &policy, policyStatusInput{
+				authenticated:   metav1.ConditionTrue,
+				applied:         metav1.ConditionFalse,
+				drift:           metav1.ConditionTrue,
+				ready:           metav1.ConditionFalse,
+				reason:          "DriftDetected",
+				message:         fmt.Sprintf("OpenBao policy %q differs from desired state; observe mode left it unchanged.", policyName),
+				lastAppliedHash: desiredHash,
+			})
+		}
 		if err := openbaoClient.PutPolicy(ctx, policyName, policy.Spec.Rules); err != nil {
 			return r.updatePolicyErrorStatus(ctx, &policy, policyStatusInput{
 				authenticated: metav1.ConditionTrue,
@@ -109,7 +128,7 @@ func (r *PolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		applied:         metav1.ConditionTrue,
 		drift:           metav1.ConditionFalse,
 		ready:           metav1.ConditionTrue,
-		reason:          "Applied",
+		reason:          appliedReason(r.Mode),
 		message:         fmt.Sprintf("OpenBao policy %q is applied.", policyName),
 		lastAppliedHash: desiredHash,
 	})
@@ -124,6 +143,10 @@ func (r *PolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 func (r *PolicyReconciler) reconcileDelete(ctx context.Context, policy *openbaov1alpha1.OpenBaoPolicy) (ctrl.Result, error) {
 	if !controllerutil.ContainsFinalizer(policy, policyFinalizer) {
 		return ctrl.Result{}, nil
+	}
+	if !r.Mode.AllowsWrites() {
+		controllerutil.RemoveFinalizer(policy, policyFinalizer)
+		return ctrl.Result{}, r.Update(ctx, policy)
 	}
 	if policy.Spec.DeletionPolicy == openbaov1alpha1.DeletionPolicyDelete {
 		openbaoClient, err := r.OpenBao(ctx)

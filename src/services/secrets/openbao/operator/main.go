@@ -25,9 +25,11 @@ func main() {
 	var metricsAddr string
 	var probeAddr string
 	var leaderElect bool
+	var reconcileModeRaw string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "address for controller metrics")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "address for health probes")
 	flag.BoolVar(&leaderElect, "leader-elect", true, "enable leader election")
+	flag.StringVar(&reconcileModeRaw, "reconcile-mode", envOrDefault("OPENBAO_RECONCILE_MODE", string(controllers.ReconcileModeObserve)), "OpenBao reconciliation mode: observe or apply")
 	opts := zap.Options{Development: false}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -37,6 +39,11 @@ func main() {
 
 	if _, err := bao.NewClientFromEnv(); err != nil {
 		log.Error(err, "configure OpenBao client")
+		os.Exit(1)
+	}
+	reconcileMode, err := controllers.ParseReconcileMode(reconcileModeRaw)
+	if err != nil {
+		log.Error(err, "configure reconcile mode")
 		os.Exit(1)
 	}
 
@@ -61,16 +68,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	must((&controllers.PolicyReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager(mgr))
-	must((&controllers.KubernetesAuthRoleReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager(mgr))
-	must((&controllers.AuthBackendReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager(mgr))
-	must((&controllers.MountReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager(mgr))
-	must((&controllers.MountTuneReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager(mgr))
+	must((&controllers.PolicyReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), Mode: reconcileMode}).SetupWithManager(mgr))
+	must((&controllers.KubernetesAuthRoleReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), Mode: reconcileMode}).SetupWithManager(mgr))
+	must((&controllers.AuthBackendReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), Mode: reconcileMode}).SetupWithManager(mgr))
+	must((&controllers.MountReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), Mode: reconcileMode}).SetupWithManager(mgr))
+	must((&controllers.MountTuneReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), Mode: reconcileMode}).SetupWithManager(mgr))
 
 	must(mgr.AddHealthzCheck("healthz", healthz.Ping))
 	must(mgr.AddReadyzCheck("readyz", healthz.Ping))
 
-	log.Info("starting manager")
+	log.Info("starting manager", "reconcileMode", reconcileMode.String())
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		log.Error(err, "run manager")
 		os.Exit(1)
@@ -81,4 +88,11 @@ func must(err error) {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func envOrDefault(name string, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
 }

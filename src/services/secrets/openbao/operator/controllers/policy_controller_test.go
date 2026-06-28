@@ -98,6 +98,96 @@ func TestPolicyReconcilerSkipsMatchingPolicy(t *testing.T) {
 	}
 }
 
+func TestPolicyReconcilerObserveModeReportsDriftWithoutApplying(t *testing.T) {
+	ctx := context.Background()
+	scheme := testScheme(t)
+	obj := &openbaov1alpha1.OpenBaoPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "external-dns", Namespace: "tenant-guardian"},
+		Spec: openbaov1alpha1.OpenBaoPolicySpec{
+			Name:  "guardian-external-dns",
+			Rules: `path "kv/data/example" { capabilities = ["read"] }`,
+		},
+	}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&openbaov1alpha1.OpenBaoPolicy{}).
+		WithObjects(obj).
+		Build()
+	openbao := &fakePolicyClient{policies: map[string]string{"guardian-external-dns": "old"}}
+	reconciler := &PolicyReconciler{
+		Client: kube,
+		Scheme: scheme,
+		Mode:   ReconcileModeObserve,
+		OpenBao: func(context.Context) (PolicyClient, error) {
+			return openbao, nil
+		},
+	}
+
+	_, err := reconciler.Reconcile(ctx, requestFor(obj))
+	if err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if openbao.puts != 0 {
+		t.Fatalf("puts = %d, want 0", openbao.puts)
+	}
+	if got := openbao.policies["guardian-external-dns"]; got != "old" {
+		t.Fatalf("policy rules = %q, want unchanged old rules", got)
+	}
+
+	var got openbaov1alpha1.OpenBaoPolicy
+	if err := kube.Get(ctx, client.ObjectKeyFromObject(obj), &got); err != nil {
+		t.Fatalf("get reconciled policy: %v", err)
+	}
+	assertObservedDriftStatus(t, got.Status)
+}
+
+func TestPolicyReconcilerObserveModeReportsMatchingPolicyApplied(t *testing.T) {
+	ctx := context.Background()
+	scheme := testScheme(t)
+	obj := &openbaov1alpha1.OpenBaoPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "metrics-reader", Namespace: "tenant-guardian"},
+		Spec: openbaov1alpha1.OpenBaoPolicySpec{
+			Rules: `path "sys/metrics" { capabilities = ["read"] }`,
+		},
+	}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&openbaov1alpha1.OpenBaoPolicy{}).
+		WithObjects(obj).
+		Build()
+	openbao := &fakePolicyClient{policies: map[string]string{"metrics-reader": obj.Spec.Rules}}
+	reconciler := &PolicyReconciler{
+		Client: kube,
+		Scheme: scheme,
+		Mode:   ReconcileModeObserve,
+		OpenBao: func(context.Context) (PolicyClient, error) {
+			return openbao, nil
+		},
+	}
+
+	_, err := reconciler.Reconcile(ctx, requestFor(obj))
+	if err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if openbao.puts != 0 {
+		t.Fatalf("puts = %d, want 0", openbao.puts)
+	}
+
+	var got openbaov1alpha1.OpenBaoPolicy
+	if err := kube.Get(ctx, client.ObjectKeyFromObject(obj), &got); err != nil {
+		t.Fatalf("get reconciled policy: %v", err)
+	}
+	assertCondition(t, got.Status.Conditions, openbaov1alpha1.ConditionReady, metav1.ConditionTrue)
+	assertCondition(t, got.Status.Conditions, openbaov1alpha1.ConditionApplied, metav1.ConditionTrue)
+	assertCondition(t, got.Status.Conditions, openbaov1alpha1.ConditionDriftDetected, metav1.ConditionFalse)
+	if got.Status.LastAppliedHash == "" {
+		t.Fatalf("LastAppliedHash is empty")
+	}
+	if got.Status.LastError != "" {
+		t.Fatalf("LastError = %q, want empty", got.Status.LastError)
+	}
+}
+
 func TestPolicyReconcilerAddsFinalizerForDeletePolicy(t *testing.T) {
 	ctx := context.Background()
 	scheme := testScheme(t)
@@ -158,6 +248,20 @@ func assertCondition(t *testing.T, conditions []metav1.Condition, conditionType 
 		}
 	}
 	t.Fatalf("missing condition %s in %#v", conditionType, conditions)
+}
+
+func assertObservedDriftStatus(t *testing.T, status openbaov1alpha1.OpenBaoStatus) {
+	t.Helper()
+	assertCondition(t, status.Conditions, openbaov1alpha1.ConditionReady, metav1.ConditionFalse)
+	assertCondition(t, status.Conditions, openbaov1alpha1.ConditionAuthenticated, metav1.ConditionTrue)
+	assertCondition(t, status.Conditions, openbaov1alpha1.ConditionApplied, metav1.ConditionFalse)
+	assertCondition(t, status.Conditions, openbaov1alpha1.ConditionDriftDetected, metav1.ConditionTrue)
+	if status.LastAppliedHash == "" {
+		t.Fatalf("LastAppliedHash is empty")
+	}
+	if status.LastError != "" {
+		t.Fatalf("LastError = %q, want empty", status.LastError)
+	}
 }
 
 type fakePolicyClient struct {
