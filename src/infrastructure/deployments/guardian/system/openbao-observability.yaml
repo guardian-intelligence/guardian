@@ -1,0 +1,130 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: guardian-openbao-metrics
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: openbao
+    app.kubernetes.io/instance: guardian-openbao
+    app.kubernetes.io/component: metrics
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: secrets
+    guardian.dev/tenant-id: gi-guardian
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: openbao
+    app.kubernetes.io/instance: guardian-openbao
+    component: server
+  ports:
+    - name: metrics
+      port: 9101
+      targetPort: 9101
+      protocol: TCP
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: guardian-openbao
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: openbao
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: secrets
+    guardian.dev/tenant-id: gi-guardian
+spec:
+  namespaceSelector:
+    matchNames:
+      - tenant-guardian
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: openbao
+      app.kubernetes.io/component: metrics
+  endpoints:
+    - port: metrics
+      path: /v1/sys/metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      params:
+        format:
+          - prometheus
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: guardian-openbao
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: openbao
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: secrets
+    guardian.dev/tenant-id: gi-guardian
+spec:
+  groups:
+    - name: guardian-openbao.rules
+      interval: 30s
+      rules:
+        - alert: OpenBaoTargetDown
+          expr: up{namespace="tenant-guardian",job="tenant-guardian/guardian-openbao-metrics"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            guardian.dev/component: secrets
+          annotations:
+            summary: Guardian OpenBao metrics target is down.
+        - alert: OpenBaoSealed
+          expr: vault_core_unsealed{namespace="tenant-guardian",job="tenant-guardian/guardian-openbao-metrics"} == 0
+          for: 1m
+          labels:
+            severity: critical
+            guardian.dev/component: secrets
+          annotations:
+            summary: Guardian OpenBao is sealed.
+        - alert: OpenBaoNoLeader
+          expr: sum(vault_core_active{namespace="tenant-guardian",job="tenant-guardian/guardian-openbao-metrics"}) < 1
+          for: 1m
+          labels:
+            severity: critical
+            guardian.dev/component: secrets
+          annotations:
+            summary: Guardian OpenBao has no active leader.
+        - alert: OpenBaoQuorumAtRisk
+          expr: count(up{namespace="tenant-guardian",job="tenant-guardian/guardian-openbao-metrics"} == 1) < 2
+          for: 2m
+          labels:
+            severity: critical
+            guardian.dev/component: secrets
+          annotations:
+            summary: Guardian OpenBao has fewer than two scrapeable replicas.
+        - alert: OpenBaoAuditFailures
+          expr: increase(vault_audit_log_request_failure{namespace="tenant-guardian",job="tenant-guardian/guardian-openbao-metrics"}[5m]) > 0 or increase(vault_audit_log_response_failure{namespace="tenant-guardian",job="tenant-guardian/guardian-openbao-metrics"}[5m]) > 0
+          for: 1m
+          labels:
+            severity: critical
+            guardian.dev/component: secrets
+          annotations:
+            summary: Guardian OpenBao audit logging is failing.
+        - alert: OpenBaoDataPVCPressure
+          expr: kubelet_volume_stats_available_bytes{namespace="tenant-guardian",persistentvolumeclaim=~"data-guardian-openbao-.*"} / kubelet_volume_stats_capacity_bytes{namespace="tenant-guardian",persistentvolumeclaim=~"data-guardian-openbao-.*"} < 0.15
+          for: 10m
+          labels:
+            severity: warning
+            guardian.dev/component: secrets
+          annotations:
+            summary: Guardian OpenBao data PVC free space is below 15%.
+        - alert: OpenBaoAuditPVCPressure
+          expr: kubelet_volume_stats_available_bytes{namespace="tenant-guardian",persistentvolumeclaim=~"audit-guardian-openbao-.*"} / kubelet_volume_stats_capacity_bytes{namespace="tenant-guardian",persistentvolumeclaim=~"audit-guardian-openbao-.*"} < 0.15
+          for: 10m
+          labels:
+            severity: warning
+            guardian.dev/component: secrets
+          annotations:
+            summary: Guardian OpenBao audit PVC free space is below 15%.
+        - alert: ExternalSecretOpenBaoSyncFailure
+          expr: increase(externalsecret_status_condition{namespace="external-dns",name="cloudflare-external-dns",condition="Ready",status!="True"}[10m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+            guardian.dev/component: secrets
+          annotations:
+            summary: External Secrets is failing to sync from Guardian OpenBao.

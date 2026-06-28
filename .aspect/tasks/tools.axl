@@ -14,6 +14,8 @@ DEBUG_CLI_SHIMS = [
     ("oras", "@oras_linux_amd64//:oras_file"),
     ("tofu", "@opentofu_linux_amd64//:tofu_bin"),
     ("talm", "@talm_linux_amd64//:talm"),
+    ("bao", "@openbao_linux_amd64//:bao"),
+    ("curl", "@curl_linux_amd64//:curl"),
     ("cilium", "@cilium_cli_linux_amd64//:cilium"),
     ("hubble", "@hubble_linux_amd64//:hubble"),
     ("stern", "@stern_linux_amd64//:stern"),

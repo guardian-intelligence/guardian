@@ -188,7 +188,7 @@ After doing some financial calculation I also realize I need to make provisionin
 Important context:
 - All dependencies version/commit pinned. Nothing during runtime, dev time, test time, or build time should require external non-version-pinned tooling, or shell out to binaries outside this repo or its build artifacts.
 - Dev tools: `aspect`. Run `aspect tidy` to format the codebase.
-- Don't use CUE. Avoid custom schemas, protocols, shell scripts, contracts.
+- Don't use CUE. Avoid custom schemas, protocols, shell scripts, contracts. Lean towards production-ready implementations for CRDs and ensure Flux-operated Kubernetes can converge state without making CLI execution a second control plane.
 - API IDL in Protobuf/Connect. Define IAM, audit, risk, request-size, rate limit, and idempotency metadata as explicit operation policy on the RPC contract.
 - Protobuf governance uses the repo-pinned Buf toolchain through Bazel: linting, formatting, and breaking-change checks run from `rules_buf`; code generation uses local pinned generators only. Do not use Buf remote plugins in build/test/release paths.
 - All operations must run unattended, no human-in-the-loop.

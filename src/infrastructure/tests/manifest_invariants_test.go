@@ -882,7 +882,7 @@ func testOpenBao(t *testing.T) {
 		assertBool(t, stageTenant, false, "spec", "seaweedfs")
 	}
 
-	docs := readManifests(t, "src/infrastructure/deployments/guardian/system/openbao.yaml")
+	docs := readManifests(t, "src/infrastructure/deployments/guardian/system/openbao-helmrelease.yaml")
 	assertNoObject(t, docs, "Secret", "tenant-guardian", "guardian-openbao-seal")
 	hr := findObject(t, docs, "HelmRelease", "tenant-guardian", "guardian-openbao")
 	assertString(t, hr, "helm.toolkit.fluxcd.io/v2", "apiVersion")
@@ -894,20 +894,58 @@ func testOpenBao(t *testing.T) {
 	assertBool(t, hr, false, "spec", "values", "openbao", "ui", "enabled")
 	assertBool(t, hr, false, "spec", "values", "openbao", "injector", "enabled")
 	assertBool(t, hr, false, "spec", "values", "openbao", "csi", "enabled")
+	assertString(t, hr, "quay.io", "spec", "values", "openbao", "server", "image", "registry")
+	assertString(t, hr, "openbao/openbao", "spec", "values", "openbao", "server", "image", "repository")
+	assertString(t, hr, "2.5.4@sha256:436eaf9778cad75507ff70ea26ace30dcbe15606e619ac3823495663d7f7c115", "spec", "values", "openbao", "server", "image", "tag")
 	assertString(t, hr, "replicated", "spec", "values", "openbao", "server", "dataStorage", "storageClass")
 	assertString(t, hr, "replicated", "spec", "values", "openbao", "server", "auditStorage", "storageClass")
 	assertInt(t, hr, 3, "spec", "values", "openbao", "server", "ha", "replicas")
 	assertBool(t, hr, true, "spec", "values", "openbao", "server", "ha", "raft", "enabled")
 	assertBool(t, hr, true, "spec", "values", "openbao", "server", "ha", "raft", "setNodeId")
 	config := stringAt(hr, "spec", "values", "openbao", "server", "ha", "raft", "config")
+	assertTextContains(t, config, `listener "tcp"`, "guardian OpenBao raft config")
+	assertTextContains(t, config, `address = "[::]:8200"`, "guardian OpenBao raft config")
+	assertTextContains(t, config, `address = "[::]:9101"`, "guardian OpenBao raft config")
+	assertTextContains(t, config, `metrics_only = true`, "guardian OpenBao raft config")
+	assertTextContains(t, config, `unauthenticated_metrics_access = true`, "guardian OpenBao raft config")
+	assertTextContains(t, config, `prometheus_retention_time = "1m"`, "guardian OpenBao raft config")
+	assertTextContains(t, config, `disable_hostname = true`, "guardian OpenBao raft config")
 	assertTextContains(t, config, `storage "raft"`, "guardian OpenBao raft config")
+	assertTextContains(t, config, `audit "file" "audit-log"`, "guardian OpenBao raft config")
+	assertTextContains(t, config, `file_path = "/openbao/audit/audit.log"`, "guardian OpenBao raft config")
 	assertTextContains(t, config, `service_registration "kubernetes" {}`, "guardian OpenBao raft config")
 	assertTextNotContains(t, config, `seal "awskms"`, "guardian OpenBao raft config")
+	assertTextNotContains(t, config, `unsafe_allow_api_audit_creation`, "guardian OpenBao raft config")
 	if valueAt(hr, "spec", "values", "openbao", "server", "extraSecretEnvironmentVars") != nil {
 		t.Fatalf("guardian OpenBao must not use cloud KMS seal environment variables")
 	}
+	extraPorts := sliceAt(t, hr, "spec", "values", "openbao", "server", "extraPorts")
+	if len(extraPorts) != 1 {
+		t.Fatalf("guardian OpenBao extraPorts = %#v, want only metrics", extraPorts)
+	}
+	assertString(t, asManifest(t, extraPorts[0], "server.extraPorts[0]"), "metrics", "name")
+	assertInt(t, asManifest(t, extraPorts[0], "server.extraPorts[0]"), 9101, "containerPort")
 
-	policies := readManifests(t, "src/infrastructure/deployments/guardian/system/networkpolicy.yaml")
+	extraContainers := sliceAt(t, hr, "spec", "values", "openbao", "server", "extraContainers")
+	if len(extraContainers) != 1 {
+		t.Fatalf("guardian OpenBao extraContainers = %#v, want audit log tailer only", extraContainers)
+	}
+	tailer := asManifest(t, extraContainers[0], "server.extraContainers[0]")
+	assertString(t, tailer, "audit-log-tailer", "name")
+	assertString(t, tailer, "quay.io/openbao/openbao:2.5.4@sha256:436eaf9778cad75507ff70ea26ace30dcbe15606e619ac3823495663d7f7c115", "image")
+	tailerArgs := sliceAt(t, tailer, "args")
+	if len(tailerArgs) != 1 || !strings.Contains(tailerArgs[0].(string), "/openbao/audit/audit.log") {
+		t.Fatalf("audit-log-tailer args = %#v, want tail of /openbao/audit/audit.log", tailerArgs)
+	}
+	mounts := sliceAt(t, tailer, "volumeMounts")
+	if len(mounts) != 1 {
+		t.Fatalf("audit-log-tailer volumeMounts = %#v, want audit mount only", mounts)
+	}
+	assertString(t, asManifest(t, mounts[0], "audit-log-tailer volumeMounts[0]"), "audit", "name")
+	assertString(t, asManifest(t, mounts[0], "audit-log-tailer volumeMounts[0]"), "/openbao/audit", "mountPath")
+	assertBool(t, asManifest(t, mounts[0], "audit-log-tailer volumeMounts[0]"), true, "readOnly")
+
+	policies := readManifests(t, "src/infrastructure/deployments/guardian/system/openbao-networkpolicy.yaml")
 	policy := findObject(t, policies, "CiliumNetworkPolicy", "tenant-guardian", "allow-openbao-to-apiserver")
 	assertString(t, policy, "cilium.io/v2", "apiVersion")
 	assertString(t, policy, "openbao", "spec", "endpointSelector", "matchLabels", "app.kubernetes.io/name")
@@ -934,7 +972,86 @@ func testOpenBao(t *testing.T) {
 	assertString(t, port, "TCP", "protocol")
 
 	findObject(t, policies, "CiliumNetworkPolicy", "tenant-guardian", "allow-external-secrets-to-openbao")
+	metricsPolicy := findObject(t, policies, "CiliumNetworkPolicy", "tenant-guardian", "allow-vmagent-to-openbao-metrics")
+	metricsIngress := sliceAt(t, metricsPolicy, "spec", "ingress")
+	if len(metricsIngress) != 1 {
+		t.Fatalf("metrics policy ingress = %#v, want one ingress rule", metricsIngress)
+	}
+	metricsFrom := sliceAt(t, asManifest(t, metricsIngress[0], "metrics ingress[0]"), "fromEndpoints")
+	if len(metricsFrom) != 1 {
+		t.Fatalf("metrics policy fromEndpoints = %#v, want only vmagent", metricsFrom)
+	}
+	assertString(t, asManifest(t, metricsFrom[0], "metrics fromEndpoints[0]"), "vmagent", "matchLabels", "app.kubernetes.io/name")
+	assertString(t, asManifest(t, metricsFrom[0], "metrics fromEndpoints[0]"), "cozy-monitoring", "matchLabels", "k8s:io.kubernetes.pod.namespace")
+	metricsToPorts := sliceAt(t, asManifest(t, metricsIngress[0], "metrics ingress[0]"), "toPorts")
+	metricsPorts := sliceAt(t, asManifest(t, metricsToPorts[0], "metrics toPorts[0]"), "ports")
+	if len(metricsPorts) != 1 {
+		t.Fatalf("metrics policy ports = %#v, want only 9101", metricsPorts)
+	}
+	assertString(t, asManifest(t, metricsPorts[0], "metrics ports[0]"), "9101", "port")
+	assertString(t, asManifest(t, metricsPorts[0], "metrics ports[0]"), "TCP", "protocol")
 	assertNoObject(t, policies, "CiliumNetworkPolicy", "tenant-guardian", "allow-openbao-to-aws-kms")
+
+	observability := readManifests(t, "src/infrastructure/deployments/guardian/system/openbao-observability.yaml")
+	metricsService := findObject(t, observability, "Service", "tenant-guardian", "guardian-openbao-metrics")
+	assertString(t, metricsService, "openbao", "spec", "selector", "app.kubernetes.io/name")
+	assertString(t, metricsService, "guardian-openbao", "spec", "selector", "app.kubernetes.io/instance")
+	assertString(t, metricsService, "server", "spec", "selector", "component")
+	assertServicePort(t, metricsService, "metrics", 9101)
+
+	scrape := findObject(t, observability, "VMServiceScrape", "tenant-guardian", "guardian-openbao")
+	assertString(t, scrape, "operator.victoriametrics.com/v1beta1", "apiVersion")
+	assertString(t, scrape, "openbao", "spec", "selector", "matchLabels", "app.kubernetes.io/name")
+	assertString(t, scrape, "metrics", "spec", "selector", "matchLabels", "app.kubernetes.io/component")
+	endpoints := sliceAt(t, scrape, "spec", "endpoints")
+	if len(endpoints) != 1 {
+		t.Fatalf("guardian OpenBao VMServiceScrape endpoints = %#v, want one endpoint", endpoints)
+	}
+	endpoint := asManifest(t, endpoints[0], "VMServiceScrape endpoint")
+	assertString(t, endpoint, "metrics", "port")
+	assertString(t, endpoint, "/v1/sys/metrics", "path")
+	assertStringSlice(t, endpoint, []string{"prometheus"}, "params", "format")
+
+	rule := findObject(t, observability, "VMRule", "tenant-guardian", "guardian-openbao")
+	groups := sliceAt(t, rule, "spec", "groups")
+	if len(groups) != 1 {
+		t.Fatalf("guardian OpenBao VMRule groups = %#v, want one group", groups)
+	}
+	rules := sliceAt(t, asManifest(t, groups[0], "VMRule group"), "rules")
+	wantAlerts := []string{
+		"OpenBaoTargetDown",
+		"OpenBaoSealed",
+		"OpenBaoNoLeader",
+		"OpenBaoQuorumAtRisk",
+		"OpenBaoAuditFailures",
+		"OpenBaoDataPVCPressure",
+		"OpenBaoAuditPVCPressure",
+		"ExternalSecretOpenBaoSyncFailure",
+	}
+	if len(rules) != len(wantAlerts) {
+		t.Fatalf("guardian OpenBao VMRule rules = %d, want %d", len(rules), len(wantAlerts))
+	}
+	seenAlerts := map[string]bool{}
+	for _, value := range rules {
+		entry := asManifest(t, value, "VMRule rule")
+		seenAlerts[stringAt(entry, "alert")] = true
+		expr := stringAt(entry, "expr")
+		if expr == "" {
+			t.Fatalf("VMRule alert %q has empty expression", stringAt(entry, "alert"))
+		}
+		assertTextNotContains(t, expr, "TODO", "VMRule alert expression")
+	}
+	for _, want := range wantAlerts {
+		if !seenAlerts[want] {
+			t.Fatalf("guardian OpenBao VMRule missing alert %s", want)
+		}
+	}
+
+	rbac := readManifests(t, "src/infrastructure/deployments/guardian/system/openbao-rbac.yaml")
+	sa := findObject(t, rbac, "ServiceAccount", "tenant-guardian", "openbao-ops-controller")
+	assertString(t, sa, "openbao-ops-controller", "metadata", "name")
+	assertNoObject(t, rbac, "ClusterRole", "", "openbao-ops-controller")
+	assertNoObject(t, rbac, "ClusterRoleBinding", "", "openbao-ops-controller")
 }
 
 func testOpenBaoOpenTofuBootstrap(t *testing.T) {

@@ -1,0 +1,8 @@
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+http_archive(
+    name = "openbao_linux_amd64",
+    build_file_content = """exports_files(["bao"])""",
+    sha256 = "7690853adccaf9bc413768e6bfed4d0ac5222b67f808ba71af0930189f22f94f",
+    url = "https://github.com/openbao/openbao/releases/download/v2.5.4/bao_2.5.4_Linux_x86_64.tar.gz",
+)
