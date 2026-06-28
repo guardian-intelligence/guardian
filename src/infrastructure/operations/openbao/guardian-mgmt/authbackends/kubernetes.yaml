@@ -9,4 +9,8 @@ spec:
   kubernetes:
     kubernetesHost: https://kubernetes.default.svc:443
     disableISSValidation: true
+  tune:
+    defaultLeaseTTL: 15m
+    maxLeaseTTL: 1h
+    listingVisibility: hidden
   deletionPolicy: Retain
