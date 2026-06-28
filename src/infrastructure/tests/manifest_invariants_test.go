@@ -1229,6 +1229,7 @@ func testOpenBaoOpsControllerScaffold(t *testing.T) {
 
 	deployment := findObject(t, readManifests(t, base+"/deployment.yaml"), "Deployment", "", "openbao-ops-controller")
 	assertString(t, deployment, "openbao-ops-controller", "spec", "template", "spec", "serviceAccountName")
+	assertString(t, deployment, "true", "spec", "template", "metadata", "labels", "policy.cozystack.io/allow-to-apiserver")
 	podSecurityContext := asManifest(t, valueAt(deployment, "spec", "template", "spec", "securityContext"), "openbao ops controller pod securityContext")
 	assertBool(t, podSecurityContext, true, "runAsNonRoot")
 	assertInt(t, podSecurityContext, 65532, "runAsUser")
