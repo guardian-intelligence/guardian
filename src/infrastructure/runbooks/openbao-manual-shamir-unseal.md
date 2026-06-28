@@ -22,8 +22,9 @@ in Kubernetes, Git, CI, chat, shell history, or any OpenBao-backed secret path.
 ## Start OpenBao
 
 Flux keeps the OpenBao HelmRelease active. The declared StatefulSet update
-strategy is `RollingUpdate`, so OpenBao configuration and image changes roll
-through the raft set from the Flux-managed HelmRelease.
+strategy is `OnDelete` while Guardian uses Manual Shamir unseal. Helm applies
+the desired template, but pod replacement is an explicit unseal operation
+because Kubernetes cannot unseal a restarted OpenBao pod unattended.
 
 ```sh
 kubectl --kubeconfig=src/infrastructure/clusters/ash/bootstrap/talm/kubeconfig \
@@ -70,8 +71,8 @@ kubectl --kubeconfig=src/infrastructure/clusters/ash/bootstrap/talm/kubeconfig \
 Run the same command for `guardian-openbao-1` and `guardian-openbao-2` when
 they are sealed. Each invocation prompts for one unseal key.
 
-For an image or configuration rollout, watch each StatefulSet replacement pod
-and unseal it before the next ordinal needs quorum capacity.
+For an image or configuration rollout, replace and unseal one StatefulSet pod at
+a time. Keep raft quorum healthy before moving to the next ordinal.
 
 ## Verify
 

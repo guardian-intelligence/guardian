@@ -20,8 +20,9 @@ spec:
     remediation:
       retries: -1
   upgrade:
+    disableWait: true
     remediation:
-      retries: -1
+      retries: 0
   valuesFrom:
     - kind: Secret
       name: cozystack-values
