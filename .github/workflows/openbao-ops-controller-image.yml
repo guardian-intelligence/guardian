@@ -1,0 +1,68 @@
+name: openbao ops controller image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/openbao-ops-controller-image.yml
+      - MODULE.bazel
+      - MODULE.bazel.lock
+      - src/services/secrets/openbao/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: openbao-ops-controller-image
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - uses: bazelbuild/setup-bazelisk@b39c379c82683a5f25d34f0d062761f62693e0b2 # v3.0.0
+
+      - name: Build image and push target
+        run: |
+          bazelisk build \
+            --embed_label="$GITHUB_SHA" \
+            //src/services/secrets/openbao/operator:image \
+            //src/services/secrets/openbao/operator:push-ghcr
+
+      - name: Authenticate to GHCR
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          crane="bazel-bin/src/services/secrets/openbao/operator/push_push-ghcr.sh.runfiles/rules_oci++oci+oci_crane_linux_amd64/crane"
+          test -x "$crane"
+          printf '%s' "$GITHUB_TOKEN" | "$crane" auth login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
+      - name: Push image
+        run: |
+          bazelisk run \
+            --embed_label="$GITHUB_SHA" \
+            //src/services/secrets/openbao/operator:push-ghcr
+
+      - name: Summarize digest
+        run: |
+          jq_bin="bazel-bin/src/services/secrets/openbao/operator/push_push-ghcr.sh.runfiles/aspect_bazel_lib++toolchains+jq_linux_amd64/jq"
+          test -x "$jq_bin"
+          digest="$("$jq_bin" -r '.manifests[0].digest' bazel-bin/src/services/secrets/openbao/operator/image/index.json)"
+          {
+            echo "## OpenBao ops controller image"
+            echo
+            echo "- Repository: \`ghcr.io/guardian-intelligence/guardian/openbao-ops-controller\`"
+            echo "- Tag: \`edge\`"
+            echo "- Digest: \`$digest\`"
+          } >> "$GITHUB_STEP_SUMMARY"
