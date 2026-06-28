@@ -28,6 +28,7 @@ go_test(
         "//src/infrastructure/edge:edge_health_targets",
         "//src/infrastructure/operations/openbao/guardian-mgmt:manifests",
         "//src/infrastructure/talm:chart",
+        "//src/services/secrets/openbao/deploy/base/crds:manifests",
         "//src/services/secrets/openbao/deploy/base:manifests",
         "//src/services/secrets/openbao/operator:image",
     ],

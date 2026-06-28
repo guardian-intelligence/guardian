@@ -1054,10 +1054,43 @@ func testOpenBao(t *testing.T) {
 	assertString(t, sa, "openbao-ops-controller", "metadata", "name")
 	assertNoObject(t, rbac, "ClusterRole", "", "openbao-ops-controller")
 	assertNoObject(t, rbac, "ClusterRoleBinding", "", "openbao-ops-controller")
+
+	systemKustomization := readYAMLMap(t, "src/infrastructure/deployments/guardian/system/kustomization.yaml")
+	assertStringSlice(t, systemKustomization, []string{
+		"stage-tenants.yaml",
+		"openbao-helmrelease.yaml",
+		"openbao-networkpolicy.yaml",
+		"openbao-observability.yaml",
+		"openbao-ops-controller.yaml",
+		"openbao-rbac.yaml",
+	}, "resources")
+
+	opsController := readManifests(t, "src/infrastructure/deployments/guardian/system/openbao-ops-controller.yaml")
+	opsCRDs := findObject(t, opsController, "Kustomization", "cozy-fluxcd", "guardian-openbao-ops-crds")
+	assertString(t, opsCRDs, "kustomize.toolkit.fluxcd.io/v1", "apiVersion")
+	assertString(t, opsCRDs, "./src/services/secrets/openbao/deploy/base/crds", "spec", "path")
+	assertString(t, opsCRDs, "GitRepository", "spec", "sourceRef", "kind")
+	assertString(t, opsCRDs, "guardian", "spec", "sourceRef", "name")
+	assertBool(t, opsCRDs, true, "spec", "prune")
+	assertBool(t, opsCRDs, true, "spec", "wait")
+	opsCRDDeps := sliceAt(t, opsCRDs, "spec", "dependsOn")
+	if len(opsCRDDeps) != 1 || stringAt(asManifest(t, opsCRDDeps[0], "openbao ops CRDs spec.dependsOn[0]"), "name") != "guardian-system" {
+		t.Fatalf("guardian-openbao-ops-crds dependsOn = %#v, want only guardian-system", opsCRDDeps)
+	}
 }
 
 func testOpenBaoOpsControllerScaffold(t *testing.T) {
 	const base = "src/services/secrets/openbao/deploy/base"
+	crdKustomization := readYAMLMap(t, base+"/crds/kustomization.yaml")
+	assertStringSlice(t, crdKustomization, []string{
+		"openbao.guardian.dev_auditdevices.yaml",
+		"openbao.guardian.dev_authbackends.yaml",
+		"openbao.guardian.dev_kubernetesauthroles.yaml",
+		"openbao.guardian.dev_mounts.yaml",
+		"openbao.guardian.dev_mounttunes.yaml",
+		"openbao.guardian.dev_policies.yaml",
+	}, "resources")
+
 	crdFiles := map[string]string{
 		"OpenBaoAuditDevice":        base + "/crds/openbao.guardian.dev_auditdevices.yaml",
 		"OpenBaoAuthBackend":        base + "/crds/openbao.guardian.dev_authbackends.yaml",
