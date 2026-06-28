@@ -1424,6 +1424,7 @@ func testOpenBaoOperationsCRs(t *testing.T) {
 		"authroles/external-dns.yaml",
 		"authroles/ops-controller.yaml",
 		"mounts/kv.yaml",
+		"mounttunes/kv.yaml",
 		"policies/external-dns.yaml",
 		"policies/ops-controller.yaml",
 	}, "resources")
@@ -1441,6 +1442,10 @@ func testOpenBaoOperationsCRs(t *testing.T) {
 	assertString(t, mount, "kv-v2", "spec", "type")
 	assertString(t, mount, "Guardian management cluster secret material.", "spec", "description")
 	assertString(t, mount, "Retain", "spec", "deletionPolicy")
+
+	mountTune := findObject(t, readManifests(t, base+"/mounttunes/kv.yaml"), "OpenBaoMountTune", "", "kv")
+	assertString(t, mountTune, "kv", "spec", "mountPath")
+	assertString(t, mountTune, "hidden", "spec", "tune", "listingVisibility")
 
 	policy := findObject(t, readManifests(t, base+"/policies/external-dns.yaml"), "OpenBaoPolicy", "", "external-dns")
 	assertString(t, policy, "guardian-external-dns", "spec", "name")
@@ -1496,6 +1501,7 @@ func testOpenBaoOperationsCRs(t *testing.T) {
 		"authroles/external-dns.yaml",
 		"authroles/ops-controller.yaml",
 		"mounts/kv.yaml",
+		"mounttunes/kv.yaml",
 		"policies/external-dns.yaml",
 		"policies/ops-controller.yaml",
 	} {
