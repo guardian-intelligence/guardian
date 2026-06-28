@@ -69,6 +69,9 @@ type kubeObject struct {
 	} `json:"metadata"`
 	Spec struct {
 		Replicas int `json:"replicas"`
+		UpdateStrategy struct {
+			Type string `json:"type"`
+		} `json:"updateStrategy"`
 		Template struct {
 			Spec struct {
 				Containers []containerSpec `json:"containers"`
@@ -314,13 +317,13 @@ func validateStatefulSetRolled(raw string, name string) error {
 	if statefulSet.Status.UpdatedReplicas != replicas {
 		return fmt.Errorf("StatefulSet %q updatedReplicas=%d replicas=%d", name, statefulSet.Status.UpdatedReplicas, replicas)
 	}
-	if statefulSet.Status.CurrentRevision == "" || statefulSet.Status.UpdateRevision == "" {
+	if statefulSet.Status.UpdateRevision == "" {
 		return fmt.Errorf("StatefulSet %q has empty rollout revisions current=%q update=%q", name, statefulSet.Status.CurrentRevision, statefulSet.Status.UpdateRevision)
 	}
-	if statefulSet.Status.CurrentRevision != statefulSet.Status.UpdateRevision {
+	if statefulSet.Spec.UpdateStrategy.Type != "OnDelete" && statefulSet.Status.CurrentRevision != statefulSet.Status.UpdateRevision {
 		return fmt.Errorf("StatefulSet %q currentRevision=%q updateRevision=%q", name, statefulSet.Status.CurrentRevision, statefulSet.Status.UpdateRevision)
 	}
-	fmt.Printf("OpenBao StatefulSet rolled: statefulSet=%s replicas=%d revision=%s\n", name, replicas, statefulSet.Status.CurrentRevision)
+	fmt.Printf("OpenBao StatefulSet rolled: statefulSet=%s replicas=%d updateRevision=%s strategy=%s currentRevision=%s\n", name, replicas, statefulSet.Status.UpdateRevision, statefulSet.Spec.UpdateStrategy.Type, statefulSet.Status.CurrentRevision)
 	return nil
 }
 
