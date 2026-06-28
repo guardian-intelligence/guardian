@@ -1106,10 +1106,29 @@ func testOpenBao(t *testing.T) {
 	if len(opsStateDeps) != 1 || stringAt(asManifest(t, opsStateDeps[0], "openbao ops state spec.dependsOn[0]"), "name") != "guardian-openbao-ops-crds" {
 		t.Fatalf("guardian-openbao-ops-state dependsOn = %#v, want only guardian-openbao-ops-crds", opsStateDeps)
 	}
+
+	opsDeployment := findObject(t, opsController, "Kustomization", "cozy-fluxcd", "guardian-openbao-ops-controller")
+	assertString(t, opsDeployment, "kustomize.toolkit.fluxcd.io/v1", "apiVersion")
+	assertString(t, opsDeployment, "./src/services/secrets/openbao/deploy/guardian-mgmt", "spec", "path")
+	assertString(t, opsDeployment, "GitRepository", "spec", "sourceRef", "kind")
+	assertString(t, opsDeployment, "guardian", "spec", "sourceRef", "name")
+	assertBool(t, opsDeployment, true, "spec", "prune")
+	assertBool(t, opsDeployment, true, "spec", "wait")
+	opsDeploymentDeps := sliceAt(t, opsDeployment, "spec", "dependsOn")
+	if len(opsDeploymentDeps) != 1 || stringAt(asManifest(t, opsDeploymentDeps[0], "openbao ops controller spec.dependsOn[0]"), "name") != "guardian-openbao-ops-crds" {
+		t.Fatalf("guardian-openbao-ops-controller dependsOn = %#v, want only guardian-openbao-ops-crds", opsDeploymentDeps)
+	}
 }
 
 func testOpenBaoOpsControllerScaffold(t *testing.T) {
 	const base = "src/services/secrets/openbao/deploy/base"
+	baseKustomization := readYAMLMap(t, base+"/kustomization.yaml")
+	assertStringSlice(t, baseKustomization, []string{
+		"rbac.yaml",
+		"deployment.yaml",
+		"service.yaml",
+	}, "resources")
+
 	crdKustomization := readYAMLMap(t, base+"/crds/kustomization.yaml")
 	assertStringSlice(t, crdKustomization, []string{
 		"openbao.guardian.dev_auditdevices.yaml",
@@ -1200,6 +1219,7 @@ func testOpenBaoOpsControllerScaffold(t *testing.T) {
 	}
 
 	guardianMgmtOverlay := readYAMLMap(t, "src/services/secrets/openbao/deploy/guardian-mgmt/kustomization.yaml")
+	assertStringSlice(t, guardianMgmtOverlay, []string{"../base"}, "resources")
 	images := sliceAt(t, guardianMgmtOverlay, "images")
 	if len(images) != 1 {
 		t.Fatalf("openbao guardian-mgmt overlay images = %#v, want one pinned image override", images)

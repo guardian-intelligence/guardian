@@ -43,3 +43,26 @@ spec:
     name: guardian
   timeout: 5m
   wait: false
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: guardian-openbao-ops-controller
+  namespace: cozy-fluxcd
+  labels:
+    app.kubernetes.io/name: openbao-ops-controller
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: secrets
+    guardian.dev/tenant-id: gi-guardian
+spec:
+  dependsOn:
+    - name: guardian-openbao-ops-crds
+  interval: 10m
+  path: ./src/services/secrets/openbao/deploy/guardian-mgmt
+  prune: true
+  retryInterval: 1m
+  sourceRef:
+    kind: GitRepository
+    name: guardian
+  timeout: 5m
+  wait: true
