@@ -22,7 +22,7 @@ go_test(
         "//src/infrastructure/bootstrap:backend_config",
         "//src/infrastructure/bootstrap/guardian-mgmt:root",
         "//src/infrastructure/bootstrap/guardian-mgmt-dns:root",
-        "//src/infrastructure/bootstrap/guardian-mgmt-openbao:root",
+        "//src/infrastructure/bootstrap/openbao-root-bootstrap:root",
         "//src/infrastructure/deployments/company/prod:manifests",
         "//src/infrastructure/deployments/guardian/system:manifests",
         "//src/infrastructure/edge:edge_health_targets",
