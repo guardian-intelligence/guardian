@@ -161,7 +161,7 @@ func (r *AuthBackendReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			currentTune = bao.TuneConfig{}
 		}
 		currentTune.Description = current.Description
-		if !authTuneEqual(currentTune, desiredTune, backend.Spec.Tune) {
+		if !tuneConfigEqual(currentTune, desiredTune, backend.Spec.Tune) {
 			if err := openbaoClient.PutAuthTune(ctx, desired.Path, desiredTune); err != nil {
 				return r.updateAuthBackendErrorStatus(ctx, &backend, authBackendStatusInput{
 					authenticated: metav1.ConditionTrue,
@@ -313,17 +313,21 @@ func desiredKubernetesAuthConfig(config *openbaov1alpha1.OpenBaoKubernetesAuthCo
 }
 
 func desiredAuthTune(backend *openbaov1alpha1.OpenBaoAuthBackend) bao.TuneConfig {
-	tune := bao.TuneConfig{Description: backend.Spec.Description}
-	if backend.Spec.Tune == nil {
+	return desiredTuneConfig(backend.Spec.Description, backend.Spec.Tune)
+}
+
+func desiredTuneConfig(description string, spec *openbaov1alpha1.OpenBaoTuneSpec) bao.TuneConfig {
+	tune := bao.TuneConfig{Description: description}
+	if spec == nil {
 		return tune
 	}
-	tune.DefaultLeaseTTL = backend.Spec.Tune.DefaultLeaseTTL
-	tune.MaxLeaseTTL = backend.Spec.Tune.MaxLeaseTTL
-	tune.ListingVisibility = backend.Spec.Tune.ListingVisibility
-	tune.PassthroughRequestHeaders = append([]string(nil), backend.Spec.Tune.PassthroughRequestHeaders...)
-	tune.AllowedResponseHeaders = append([]string(nil), backend.Spec.Tune.AllowedResponseHeaders...)
-	tune.AuditNonHMACRequestKeys = append([]string(nil), backend.Spec.Tune.AuditNonHMACRequestKeys...)
-	tune.AuditNonHMACResponseKeys = append([]string(nil), backend.Spec.Tune.AuditNonHMACResponseKeys...)
+	tune.DefaultLeaseTTL = spec.DefaultLeaseTTL
+	tune.MaxLeaseTTL = spec.MaxLeaseTTL
+	tune.ListingVisibility = spec.ListingVisibility
+	tune.PassthroughRequestHeaders = append([]string(nil), spec.PassthroughRequestHeaders...)
+	tune.AllowedResponseHeaders = append([]string(nil), spec.AllowedResponseHeaders...)
+	tune.AuditNonHMACRequestKeys = append([]string(nil), spec.AuditNonHMACRequestKeys...)
+	tune.AuditNonHMACResponseKeys = append([]string(nil), spec.AuditNonHMACResponseKeys...)
 	return tune
 }
 
@@ -336,7 +340,7 @@ func kubernetesAuthConfigEqual(current bao.KubernetesAuthConfig, desired bao.Kub
 		current.DisableLocalCAJWT == desired.DisableLocalCAJWT
 }
 
-func authTuneEqual(current bao.TuneConfig, desired bao.TuneConfig, spec *openbaov1alpha1.OpenBaoTuneSpec) bool {
+func tuneConfigEqual(current bao.TuneConfig, desired bao.TuneConfig, spec *openbaov1alpha1.OpenBaoTuneSpec) bool {
 	if current.Description != desired.Description {
 		return false
 	}

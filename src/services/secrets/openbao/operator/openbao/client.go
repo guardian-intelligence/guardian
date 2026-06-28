@@ -41,6 +41,13 @@ type AuthBackend struct {
 	Description string
 }
 
+type Mount struct {
+	Path        string
+	Type        string
+	Description string
+	Options     map[string]string
+}
+
 type KubernetesAuthConfig struct {
 	KubernetesHost       string
 	KubernetesCACert     string
@@ -134,6 +141,58 @@ func (c *Client) DeletePolicy(ctx context.Context, name string) error {
 	return c.api.Sys().DeletePolicyWithContext(ctx, name)
 }
 
+func (c *Client) GetMount(ctx context.Context, path string) (Mount, bool, error) {
+	mountPath := strings.Trim(path, "/")
+	mounts, err := c.api.Sys().ListMountsWithContext(ctx)
+	if err != nil {
+		return Mount{}, false, err
+	}
+	mount, ok := mounts[mountKey(mountPath)]
+	if !ok {
+		mount, ok = mounts[mountPath]
+	}
+	if !ok {
+		return Mount{}, false, nil
+	}
+	return Mount{
+		Path:        mountPath,
+		Type:        mount.Type,
+		Description: mount.Description,
+		Options:     copyStringMap(mount.Options),
+	}, true, nil
+}
+
+func (c *Client) EnableMount(ctx context.Context, mount Mount) error {
+	return c.api.Sys().MountWithContext(ctx, strings.Trim(mount.Path, "/"), &baoapi.MountInput{
+		Type:        mount.Type,
+		Description: mount.Description,
+		Options:     copyStringMap(mount.Options),
+	})
+}
+
+func (c *Client) DisableMount(ctx context.Context, path string) error {
+	return c.api.Sys().UnmountWithContext(ctx, strings.Trim(path, "/"))
+}
+
+func (c *Client) GetMountTune(ctx context.Context, mountPath string) (TuneConfig, bool, error) {
+	secret, err := c.api.Logical().ReadWithContext(ctx, mountTunePath(mountPath))
+	if err != nil {
+		if isOpenBaoNotFound(err) {
+			return TuneConfig{}, false, nil
+		}
+		return TuneConfig{}, false, err
+	}
+	if secret == nil || secret.Data == nil {
+		return TuneConfig{}, false, nil
+	}
+	return tuneConfigFromSecret(secret.Data), true, nil
+}
+
+func (c *Client) PutMountTune(ctx context.Context, mountPath string, tune TuneConfig) error {
+	_, err := c.api.Logical().WriteWithContext(ctx, mountTunePath(mountPath), tuneConfigBody(tune))
+	return err
+}
+
 func (c *Client) GetAuthBackend(ctx context.Context, path string) (AuthBackend, bool, error) {
 	backendPath := strings.Trim(path, "/")
 	mounts, err := c.api.Sys().ListAuthWithContext(ctx)
@@ -210,44 +269,11 @@ func (c *Client) GetAuthTune(ctx context.Context, backendPath string) (TuneConfi
 	if secret == nil || secret.Data == nil {
 		return TuneConfig{}, false, nil
 	}
-	return TuneConfig{
-		Description:               stringFromSecret(secret.Data["description"]),
-		DefaultLeaseTTL:           stringFromSecret(secret.Data["default_lease_ttl"]),
-		MaxLeaseTTL:               stringFromSecret(secret.Data["max_lease_ttl"]),
-		ListingVisibility:         stringFromSecret(secret.Data["listing_visibility"]),
-		PassthroughRequestHeaders: stringSliceFromSecret(secret.Data["passthrough_request_headers"]),
-		AllowedResponseHeaders:    stringSliceFromSecret(secret.Data["allowed_response_headers"]),
-		AuditNonHMACRequestKeys:   stringSliceFromSecret(secret.Data["audit_non_hmac_request_keys"]),
-		AuditNonHMACResponseKeys:  stringSliceFromSecret(secret.Data["audit_non_hmac_response_keys"]),
-	}, true, nil
+	return tuneConfigFromSecret(secret.Data), true, nil
 }
 
 func (c *Client) PutAuthTune(ctx context.Context, backendPath string, tune TuneConfig) error {
-	body := map[string]interface{}{
-		"description": tune.Description,
-	}
-	if tune.DefaultLeaseTTL != "" {
-		body["default_lease_ttl"] = tune.DefaultLeaseTTL
-	}
-	if tune.MaxLeaseTTL != "" {
-		body["max_lease_ttl"] = tune.MaxLeaseTTL
-	}
-	if tune.ListingVisibility != "" {
-		body["listing_visibility"] = tune.ListingVisibility
-	}
-	if tune.PassthroughRequestHeaders != nil {
-		body["passthrough_request_headers"] = tune.PassthroughRequestHeaders
-	}
-	if tune.AllowedResponseHeaders != nil {
-		body["allowed_response_headers"] = tune.AllowedResponseHeaders
-	}
-	if tune.AuditNonHMACRequestKeys != nil {
-		body["audit_non_hmac_request_keys"] = tune.AuditNonHMACRequestKeys
-	}
-	if tune.AuditNonHMACResponseKeys != nil {
-		body["audit_non_hmac_response_keys"] = tune.AuditNonHMACResponseKeys
-	}
-	_, err := c.api.Logical().WriteWithContext(ctx, authTunePath(backendPath), body)
+	_, err := c.api.Logical().WriteWithContext(ctx, authTunePath(backendPath), tuneConfigBody(tune))
 	return err
 }
 
@@ -306,8 +332,16 @@ func authBackendKey(backendPath string) string {
 	return strings.Trim(backendPath, "/") + "/"
 }
 
+func mountKey(mountPath string) string {
+	return strings.Trim(mountPath, "/") + "/"
+}
+
 func authTunePath(backendPath string) string {
 	return "sys/auth/" + strings.Trim(backendPath, "/") + "/tune"
+}
+
+func mountTunePath(mountPath string) string {
+	return "sys/mounts/" + strings.Trim(mountPath, "/") + "/tune"
 }
 
 func kubernetesAuthConfigPath(backendPath string) string {
@@ -353,6 +387,58 @@ func boolFromSecret(value interface{}) bool {
 	default:
 		return false
 	}
+}
+
+func tuneConfigFromSecret(data map[string]interface{}) TuneConfig {
+	return TuneConfig{
+		Description:               stringFromSecret(data["description"]),
+		DefaultLeaseTTL:           stringFromSecret(data["default_lease_ttl"]),
+		MaxLeaseTTL:               stringFromSecret(data["max_lease_ttl"]),
+		ListingVisibility:         stringFromSecret(data["listing_visibility"]),
+		PassthroughRequestHeaders: stringSliceFromSecret(data["passthrough_request_headers"]),
+		AllowedResponseHeaders:    stringSliceFromSecret(data["allowed_response_headers"]),
+		AuditNonHMACRequestKeys:   stringSliceFromSecret(data["audit_non_hmac_request_keys"]),
+		AuditNonHMACResponseKeys:  stringSliceFromSecret(data["audit_non_hmac_response_keys"]),
+	}
+}
+
+func tuneConfigBody(tune TuneConfig) map[string]interface{} {
+	body := map[string]interface{}{
+		"description": tune.Description,
+	}
+	if tune.DefaultLeaseTTL != "" {
+		body["default_lease_ttl"] = tune.DefaultLeaseTTL
+	}
+	if tune.MaxLeaseTTL != "" {
+		body["max_lease_ttl"] = tune.MaxLeaseTTL
+	}
+	if tune.ListingVisibility != "" {
+		body["listing_visibility"] = tune.ListingVisibility
+	}
+	if tune.PassthroughRequestHeaders != nil {
+		body["passthrough_request_headers"] = tune.PassthroughRequestHeaders
+	}
+	if tune.AllowedResponseHeaders != nil {
+		body["allowed_response_headers"] = tune.AllowedResponseHeaders
+	}
+	if tune.AuditNonHMACRequestKeys != nil {
+		body["audit_non_hmac_request_keys"] = tune.AuditNonHMACRequestKeys
+	}
+	if tune.AuditNonHMACResponseKeys != nil {
+		body["audit_non_hmac_response_keys"] = tune.AuditNonHMACResponseKeys
+	}
+	return body
+}
+
+func copyStringMap(in map[string]string) map[string]string {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
 
 func stringSliceFromSecret(value interface{}) []string {

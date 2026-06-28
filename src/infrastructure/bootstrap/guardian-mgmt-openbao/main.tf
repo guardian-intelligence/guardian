@@ -66,7 +66,7 @@ resource "vault_policy" "ops_controller" {
     }
 
     path "sys/mounts/${local.kv_mount}" {
-      capabilities = ["create", "read", "update"]
+      capabilities = ["create", "read", "update", "delete"]
     }
 
     path "sys/mounts/${local.kv_mount}/tune" {
