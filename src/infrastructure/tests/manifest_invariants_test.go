@@ -47,6 +47,7 @@ type guardianMgmtNode struct {
 }
 
 func TestManifestInvariants(t *testing.T) {
+	t.Run("agent instructions", testAgentInstructions)
 	t.Run("guardian mgmt topology alignment", testGuardianMgmtTopologyAlignment)
 	t.Run("guardian mgmt dns bootstrap", testGuardianMgmtDNSBootstrap)
 	t.Run("talm install disk selectors", testTalmInstallDiskSelectors)
@@ -68,6 +69,23 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("openbao opentofu bootstrap", testOpenBaoOpenTofuBootstrap)
 	t.Run("runbooks", testRunbooks)
 	t.Run("flux handoff", testFluxHandoff)
+}
+
+func testAgentInstructions(t *testing.T) {
+	topology := guardianMgmtTopologyFixture(t)
+	currentAPIServer := fmt.Sprintf("https://%s:6443", topology.Network.VLAN.APIVIP)
+	agents := string(readRunfile(t, "AGENTS.md"))
+
+	assertTextContains(t, agents, "cozystack-management-cluster: guardian-mgmt", "AGENTS.md")
+	assertTextContains(t, agents, "kubernetes-api: "+currentAPIServer, "AGENTS.md")
+	assertTextContains(t, agents, "Kubernetes API clients should target the `guardian-mgmt` private API VIP:", "AGENTS.md")
+	assertTextContains(t, agents, "`src/infrastructure/bootstrap/guardian-mgmt/main.tf`", "AGENTS.md")
+	assertTextContains(t, agents, "`src/infrastructure/talm/values.yaml`", "AGENTS.md")
+	assertTextContains(t, agents, "`src/infrastructure/base/cozystack/platform.yaml`", "AGENTS.md")
+	assertTextContains(t, agents, "`src/infrastructure/base/flux/sync.yaml`", "AGENTS.md")
+	assertTextNotContains(t, agents, "cozystack-management-cluster: guardian-mgmt-ash", "AGENTS.md")
+	assertTextNotContains(t, agents, "Projects/verself", "AGENTS.md")
+	assertTextNotContains(t, agents, "Nomad-based", "AGENTS.md")
 }
 
 func testRunbooks(t *testing.T) {

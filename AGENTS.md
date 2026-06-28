@@ -42,11 +42,21 @@ in `tenant-root`. tenant-root owns:
 - External Secrets / SecretStore bootstrap needed for tenant secret projection
 - operational drills for cluster survival: backup restore, node outage, OpenBao unseal, system bucket validation
 
-Today the active region is Latitude ASH (`ash`).
+Today the active region is Latitude ASH (`ash`). The active management control
+plane is the `guardian-mgmt` Kubernetes cluster. Its Kubernetes API endpoint is
+the private VLAN VIP `https://10.8.0.250:6443`; public ingress still uses the
+three Latitude node origins behind Cloudflare. Treat these files as the current
+control-plane source of truth:
+
+- `src/infrastructure/bootstrap/guardian-mgmt/main.tf`
+- `src/infrastructure/talm/values.yaml`
+- `src/infrastructure/base/cozystack/platform.yaml`
+- `src/infrastructure/base/flux/sync.yaml`
 
 ```
 region: ash
-  cozystack-management-cluster: guardian-mgmt-ash
+  cozystack-management-cluster: guardian-mgmt
+    kubernetes-api: https://10.8.0.250:6443
     tenant-root                     # Cozystack substrate only
 
     tenant-guardian                 # Guardian-owned control planes/products
@@ -159,6 +169,9 @@ src/
 
 <technology>
 TLS terminates at Cloudflare edge.
+Kubernetes API clients should target the `guardian-mgmt` private API VIP:
+`https://10.8.0.250:6443`. Do not pin day-to-day kubeconfigs or drills to a
+single control-plane node IP.
 Cloudflare LB for the three control plane nodes. [206.223.228.101, 45.250.254.119, 206.223.228.87]
 MetalLB for L2/ARP inside the Latitude VLAN. `10.8.0.200 - 10.8.0.240`
 
@@ -177,8 +190,6 @@ Bazel owns the build graph and produces bytes using OCI for layout. `cosign`/SLS
 Planned: Use Flagger for progressive delivery after Flux applies an approved digest. Use Kargo/Freight to promote immutable release candidates to service+stage+region targets.
 
 Domain: guardianintelligence.org (abbreviated gi.org)
-
-See ~/Projects/verself-sh for reference https://github.com/guardian-intelligence/verself which was a Nomad-based version of this approach.
 
 Objectives:
 
