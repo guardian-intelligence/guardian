@@ -1448,6 +1448,9 @@ func testOpenBaoOperationsCRs(t *testing.T) {
 	assertString(t, authBackend, "Kubernetes service account auth for guardian-mgmt workloads.", "spec", "description")
 	assertString(t, authBackend, "https://kubernetes.default.svc:443", "spec", "kubernetes", "kubernetesHost")
 	assertBool(t, authBackend, true, "spec", "kubernetes", "disableISSValidation")
+	assertString(t, authBackend, "15m", "spec", "tune", "defaultLeaseTTL")
+	assertString(t, authBackend, "1h", "spec", "tune", "maxLeaseTTL")
+	assertString(t, authBackend, "hidden", "spec", "tune", "listingVisibility")
 	assertString(t, authBackend, "Retain", "spec", "deletionPolicy")
 
 	mount := findObject(t, readManifests(t, base+"/mounts/kv.yaml"), "OpenBaoMount", "", "kv")
