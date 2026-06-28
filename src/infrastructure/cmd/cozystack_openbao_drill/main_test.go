@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"strings"
 	"testing"
@@ -18,9 +19,9 @@ func TestDefaultSnapshotName(t *testing.T) {
 func TestValidateConfig(t *testing.T) {
 	cfg := openBaoConfig{
 		Kubectl:         "/kubectl",
-		Namespace:       "tenant-root",
-		StatefulSet:     "openbao-guardian",
-		BootstrapSecret: "openbao-guardian-bootstrap",
+		Namespace:       "tenant-guardian",
+		StatefulSet:     "guardian-openbao",
+		BootstrapSecret: "guardian-openbao-bootstrap",
 		Mode:            "snapshot",
 		SnapshotName:    "guardian-openbao-test.snap",
 	}
@@ -96,9 +97,9 @@ func TestParseNativeJSONWithWrapperOutput(t *testing.T) {
 
 func TestBootstrapSecretManifest(t *testing.T) {
 	material := bootstrapMaterial{UnsealKey: "unseal-value", RootToken: "root-value"}
-	got := bootstrapSecretManifest("tenant-root", "openbao-guardian-bootstrap", material)
+	got := bootstrapSecretManifest("tenant-guardian", "guardian-openbao-bootstrap", material)
 	for _, want := range []string{
-		"kind: Secret\nmetadata:\n  name: openbao-guardian-bootstrap\n  namespace: tenant-root\n",
+		"kind: Secret\nmetadata:\n  name: guardian-openbao-bootstrap\n  namespace: tenant-guardian\n",
 		"guardian.dev/secret-scope: openbao-bootstrap\n",
 		"unseal-key: " + base64.StdEncoding.EncodeToString([]byte(material.UnsealKey)) + "\n",
 		"root-token: " + base64.StdEncoding.EncodeToString([]byte(material.RootToken)) + "\n",
@@ -112,8 +113,40 @@ func TestBootstrapSecretManifest(t *testing.T) {
 	}
 }
 
+func TestRootTokenFromEnvOrBootstrapPrefersEnv(t *testing.T) {
+	t.Setenv("BAO_TOKEN", "bao-token")
+	t.Setenv("VAULT_TOKEN", "vault-token")
+
+	got, source, err := rootTokenFromEnvOrBootstrap(context.Background(), kubectlRunner{}, "guardian-openbao-bootstrap")
+	if err != nil {
+		t.Fatalf("rootTokenFromEnvOrBootstrap() error = %v", err)
+	}
+	if got != "bao-token" {
+		t.Fatalf("rootTokenFromEnvOrBootstrap() token = %q, want BAO_TOKEN value", got)
+	}
+	if source != "BAO_TOKEN" {
+		t.Fatalf("rootTokenFromEnvOrBootstrap() source = %q, want BAO_TOKEN", source)
+	}
+}
+
+func TestRootTokenFromEnvOrBootstrapUsesVaultEnv(t *testing.T) {
+	t.Setenv("BAO_TOKEN", "")
+	t.Setenv("VAULT_TOKEN", "vault-token")
+
+	got, source, err := rootTokenFromEnvOrBootstrap(context.Background(), kubectlRunner{}, "guardian-openbao-bootstrap")
+	if err != nil {
+		t.Fatalf("rootTokenFromEnvOrBootstrap() error = %v", err)
+	}
+	if got != "vault-token" {
+		t.Fatalf("rootTokenFromEnvOrBootstrap() token = %q, want VAULT_TOKEN value", got)
+	}
+	if source != "VAULT_TOKEN" {
+		t.Fatalf("rootTokenFromEnvOrBootstrap() source = %q, want VAULT_TOKEN", source)
+	}
+}
+
 func TestPodNameAndShellQuote(t *testing.T) {
-	if got, want := podName("openbao-guardian", 2), "openbao-guardian-2"; got != want {
+	if got, want := podName("guardian-openbao", 2), "guardian-openbao-2"; got != want {
 		t.Fatalf("podName() = %q, want %q", got, want)
 	}
 	if got, want := shellQuote("a'b"), `'a'"'"'b'`; got != want {
@@ -125,9 +158,9 @@ func TestKubectlBaseArgs(t *testing.T) {
 	got := kubectlRunner{
 		kubeconfig:     "/tmp/kubeconfig",
 		requestTimeout: "5s",
-		namespace:      "tenant-root",
+		namespace:      "tenant-guardian",
 	}.baseArgs("get", "pods")
-	want := []string{"--kubeconfig", "/tmp/kubeconfig", "--request-timeout=5s", "-n", "tenant-root", "get", "pods"}
+	want := []string{"--kubeconfig", "/tmp/kubeconfig", "--request-timeout=5s", "-n", "tenant-guardian", "get", "pods"}
 	if len(got) != len(want) {
 		t.Fatalf("baseArgs length = %d, want %d: %#v", len(got), len(want), got)
 	}

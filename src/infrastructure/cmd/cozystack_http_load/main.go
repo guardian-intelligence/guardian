@@ -308,24 +308,24 @@ func surfaceReadinessChecks(cfg loadConfig) ([]kubectlCommand, error) {
 		}, nil
 	case "openbao":
 		if stage != "root" {
-			return nil, errors.New("OpenBao is a root management-cluster surface; use --stage root")
+			return nil, errors.New("OpenBao is a Guardian management surface; use --stage root")
 		}
 		return []kubectlCommand{
 			{
-				Label: "OpenBao app yaml",
-				Args:  []string{"-n", "tenant-root", "get", "openbaos.apps.cozystack.io/guardian", "-o", "yaml"},
+				Label: "OpenBao HelmRelease yaml",
+				Args:  []string{"-n", "tenant-guardian", "get", "helmrelease.helm.toolkit.fluxcd.io/guardian-openbao", "-o", "yaml"},
 			},
 			{
 				Label: "OpenBao statefulset yaml",
-				Args:  []string{"-n", "tenant-root", "get", "statefulset.apps/openbao-guardian", "-o", "yaml"},
+				Args:  []string{"-n", "tenant-guardian", "get", "statefulset.apps/guardian-openbao", "-o", "yaml"},
 			},
 			{
-				Label: "wait OpenBao app Ready",
-				Args:  []string{"-n", "tenant-root", "wait", "--for=condition=Ready", "openbaos.apps.cozystack.io/guardian", "--timeout=" + cfg.WaitTimeout},
+				Label: "wait OpenBao HelmRelease Ready",
+				Args:  []string{"-n", "tenant-guardian", "wait", "--for=condition=Ready", "helmrelease.helm.toolkit.fluxcd.io/guardian-openbao", "--timeout=" + cfg.WaitTimeout},
 			},
 			{
 				Label: "wait OpenBao statefulset ready replicas",
-				Args:  []string{"-n", "tenant-root", "wait", "--for=jsonpath={.status.readyReplicas}=3", "statefulset.apps/openbao-guardian", "--timeout=" + cfg.WaitTimeout},
+				Args:  []string{"-n", "tenant-guardian", "wait", "--for=jsonpath={.status.readyReplicas}=3", "statefulset.apps/guardian-openbao", "--timeout=" + cfg.WaitTimeout},
 			},
 		}, nil
 	default:
@@ -364,7 +364,7 @@ func resolveTarget(cfg loadConfig, localPort int) (targetSpec, error) {
 		}, nil
 	case "openbao":
 		if stage != "root" {
-			return targetSpec{}, errors.New("OpenBao is a root management-cluster surface; use --stage root")
+			return targetSpec{}, errors.New("OpenBao is a Guardian management surface; use --stage root")
 		}
 		if localPort == 0 {
 			return targetSpec{
@@ -504,7 +504,7 @@ func startPortForward(ctx context.Context, cfg loadConfig, localPort int) (*port
 }
 
 func openBaoPortForwardArgs(cfg loadConfig, localPort int) []string {
-	return kubectlArgs(cfg, "-n", "tenant-root", "port-forward", "--address", "127.0.0.1", "svc/openbao-guardian", fmt.Sprintf("%d:8200", localPort))
+	return kubectlArgs(cfg, "-n", "tenant-guardian", "port-forward", "--address", "127.0.0.1", "svc/guardian-openbao", fmt.Sprintf("%d:8200", localPort))
 }
 
 func drainOutput(done chan string) string {

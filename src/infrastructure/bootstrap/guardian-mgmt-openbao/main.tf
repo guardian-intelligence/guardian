@@ -5,7 +5,7 @@ provider "vault" {
 locals {
   kubernetes_auth_mount = "kubernetes"
   kv_mount              = "kv"
-  external_dns_secret   = "guardian/guardian-mgmt/tenant-root/dns/external-dns"
+  external_dns_secret   = "guardian/guardian-mgmt/tenant-guardian/dns/external-dns"
 }
 
 resource "vault_mount" "kv" {
@@ -32,7 +32,7 @@ resource "vault_kubernetes_auth_backend_config" "guardian_mgmt" {
 }
 
 resource "vault_policy" "external_dns" {
-  name = "tenant-root-external-dns"
+  name = "guardian-external-dns"
 
   policy = <<-EOT
     path "${local.kv_mount}/data/${local.external_dns_secret}" {
@@ -47,7 +47,7 @@ resource "vault_policy" "external_dns" {
 
 resource "vault_kubernetes_auth_backend_role" "external_dns" {
   backend                          = vault_auth_backend.kubernetes.path
-  role_name                        = "tenant-root-external-dns"
+  role_name                        = "guardian-external-dns"
   bound_service_account_names      = ["external-dns-secrets"]
   bound_service_account_namespaces = ["external-dns"]
   audience                         = "openbao"

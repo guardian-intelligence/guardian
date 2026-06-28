@@ -527,11 +527,11 @@ func testExternalDNS(t *testing.T) {
 	assertBool(t, serviceAccount, false, "automountServiceAccountToken")
 
 	store := findObject(t, secretDocs, "SecretStore", "external-dns", "openbao")
-	assertString(t, store, "http://openbao-guardian.tenant-root.svc:8200", "spec", "provider", "vault", "server")
+	assertString(t, store, "http://guardian-openbao.tenant-guardian.svc:8200", "spec", "provider", "vault", "server")
 	assertString(t, store, "kv", "spec", "provider", "vault", "path")
 	assertString(t, store, "v2", "spec", "provider", "vault", "version")
 	assertString(t, store, "kubernetes", "spec", "provider", "vault", "auth", "kubernetes", "mountPath")
-	assertString(t, store, "tenant-root-external-dns", "spec", "provider", "vault", "auth", "kubernetes", "role")
+	assertString(t, store, "guardian-external-dns", "spec", "provider", "vault", "auth", "kubernetes", "role")
 	assertString(t, store, "external-dns-secrets", "spec", "provider", "vault", "auth", "kubernetes", "serviceAccountRef", "name")
 	assertStringSlice(t, store, []string{"openbao"}, "spec", "provider", "vault", "auth", "kubernetes", "serviceAccountRef", "audiences")
 
@@ -548,7 +548,7 @@ func testExternalDNS(t *testing.T) {
 	}
 	secretRef := asManifest(t, data[0], "external-dns ExternalSecret data[0]")
 	assertString(t, secretRef, "CF_API_TOKEN", "secretKey")
-	assertString(t, secretRef, "guardian/guardian-mgmt/tenant-root/dns/external-dns", "remoteRef", "key")
+	assertString(t, secretRef, "guardian/guardian-mgmt/tenant-guardian/dns/external-dns", "remoteRef", "key")
 	assertString(t, secretRef, "CF_API_TOKEN", "remoteRef", "property")
 
 	externalDNSDocs := readManifests(t, "src/infrastructure/base/dns/external-dns.yaml")
@@ -863,54 +863,82 @@ func testObservability(t *testing.T) {
 }
 
 func testOpenBao(t *testing.T) {
-	docs := readManifests(t, "src/infrastructure/base/openbao/openbao.yaml")
-	bao := findObject(t, docs, "OpenBAO", "tenant-root", "guardian")
+	tenantDocs := readManifests(t, "src/infrastructure/base/tenants/guardian.yaml")
+	guardian := findObject(t, tenantDocs, "Tenant", "tenant-root", "guardian")
+	assertString(t, guardian, "apps.cozystack.io/v1alpha1", "apiVersion")
+	assertString(t, guardian, "guardian.guardianintelligence.org", "spec", "host")
+	assertBool(t, guardian, false, "spec", "etcd")
+	assertBool(t, guardian, false, "spec", "ingress")
+	assertBool(t, guardian, false, "spec", "monitoring")
+	assertBool(t, guardian, false, "spec", "seaweedfs")
 
-	assertString(t, bao, "apps.cozystack.io/v1alpha1", "apiVersion")
-	assertInt(t, bao, 3, "spec", "replicas")
-	assertString(t, bao, "local-retain", "spec", "storageClass")
-	assertString(t, bao, "10Gi", "spec", "size")
-	assertBool(t, bao, true, "spec", "ui")
-	assertBool(t, bao, false, "spec", "external")
-	assertString(t, bao, "1", "spec", "resources", "cpu")
-	assertString(t, bao, "2Gi", "spec", "resources", "memory")
-
-	rbac := readManifests(t, "src/infrastructure/base/openbao/auth-delegator.yaml")
-	binding := findObject(t, rbac, "ClusterRoleBinding", "", "guardian-openbao-root-auth-delegator")
-	assertString(t, binding, "rbac.authorization.k8s.io/v1", "apiVersion")
-	assertString(t, binding, "system:auth-delegator", "roleRef", "name")
-	subjects := sliceAt(t, binding, "subjects")
-	if len(subjects) != 1 {
-		t.Fatalf("openbao auth-delegator subjects = %d, want 1", len(subjects))
+	stageDocs := readManifests(t, "src/infrastructure/deployments/guardian/system/stage-tenants.yaml")
+	for _, stage := range []string{"beta", "gamma", "prod"} {
+		stageTenant := findObject(t, stageDocs, "Tenant", "tenant-guardian", stage)
+		assertString(t, stageTenant, stage+".guardianintelligence.org", "spec", "host")
+		assertBool(t, stageTenant, false, "spec", "etcd")
+		assertBool(t, stageTenant, false, "spec", "ingress")
+		assertBool(t, stageTenant, false, "spec", "monitoring")
+		assertBool(t, stageTenant, false, "spec", "seaweedfs")
 	}
-	subject := asManifest(t, subjects[0], "openbao auth-delegator subject")
-	assertString(t, subject, "ServiceAccount", "kind")
-	assertString(t, subject, "openbao-guardian", "name")
-	assertString(t, subject, "tenant-root", "namespace")
 
-	policies := readManifests(t, "src/infrastructure/base/openbao/networkpolicy.yaml")
-	policy := findObject(t, policies, "CiliumNetworkPolicy", "tenant-root", "allow-openbao-to-apiserver")
+	docs := readManifests(t, "src/infrastructure/deployments/guardian/system/openbao.yaml")
+	seal := findObject(t, docs, "Secret", "tenant-guardian", "guardian-openbao-seal")
+	assertString(t, seal, "Opaque", "type")
+
+	hr := findObject(t, docs, "HelmRelease", "tenant-guardian", "guardian-openbao")
+	assertString(t, hr, "helm.toolkit.fluxcd.io/v2", "apiVersion")
+	assertBool(t, hr, true, "spec", "suspend")
+	assertString(t, hr, "ExternalArtifact", "spec", "chartRef", "kind")
+	assertString(t, hr, "cozystack-openbao-application-default-openbao-system", "spec", "chartRef", "name")
+	assertString(t, hr, "cozy-system", "spec", "chartRef", "namespace")
+	assertString(t, hr, "guardian-openbao", "spec", "values", "openbao", "fullnameOverride")
+	assertBool(t, hr, false, "spec", "values", "openbao", "ui", "enabled")
+	assertBool(t, hr, false, "spec", "values", "openbao", "injector", "enabled")
+	assertBool(t, hr, false, "spec", "values", "openbao", "csi", "enabled")
+	assertString(t, hr, "replicated", "spec", "values", "openbao", "server", "dataStorage", "storageClass")
+	assertString(t, hr, "replicated", "spec", "values", "openbao", "server", "auditStorage", "storageClass")
+	assertInt(t, hr, 3, "spec", "values", "openbao", "server", "ha", "replicas")
+	assertBool(t, hr, true, "spec", "values", "openbao", "server", "ha", "raft", "enabled")
+	assertBool(t, hr, true, "spec", "values", "openbao", "server", "ha", "raft", "setNodeId")
+	config := stringAt(hr, "spec", "values", "openbao", "server", "ha", "raft", "config")
+	assertTextContains(t, config, `seal "awskms" {}`, "guardian OpenBao raft config")
+	assertTextContains(t, config, `storage "raft"`, "guardian OpenBao raft config")
+	assertTextContains(t, config, `service_registration "kubernetes" {}`, "guardian OpenBao raft config")
+	secretEnv := sliceAt(t, hr, "spec", "values", "openbao", "server", "extraSecretEnvironmentVars")
+	assertOpenBaoSecretEnv(t, secretEnv, "AWS_ACCESS_KEY_ID", "guardian-openbao-seal", "AWS_ACCESS_KEY_ID")
+	assertOpenBaoSecretEnv(t, secretEnv, "AWS_SECRET_ACCESS_KEY", "guardian-openbao-seal", "AWS_SECRET_ACCESS_KEY")
+	assertOpenBaoSecretEnv(t, secretEnv, "AWS_REGION", "guardian-openbao-seal", "AWS_REGION")
+	assertOpenBaoSecretEnv(t, secretEnv, "VAULT_AWSKMS_SEAL_KEY_ID", "guardian-openbao-seal", "VAULT_AWSKMS_SEAL_KEY_ID")
+
+	policies := readManifests(t, "src/infrastructure/deployments/guardian/system/networkpolicy.yaml")
+	policy := findObject(t, policies, "CiliumNetworkPolicy", "tenant-guardian", "allow-openbao-to-apiserver")
 	assertString(t, policy, "cilium.io/v2", "apiVersion")
 	assertString(t, policy, "openbao", "spec", "endpointSelector", "matchLabels", "app.kubernetes.io/name")
 
 	egress := sliceAt(t, policy, "spec", "egress")
-	if len(egress) != 2 {
-		t.Fatalf("spec.egress has %d entries, want 2", len(egress))
+	if len(egress) != 1 {
+		t.Fatalf("spec.egress has %d entries, want 1", len(egress))
 	}
 	assertStringSlice(t, asManifest(t, egress[0], "spec.egress[0]"), []string{"kube-apiserver"}, "toEntities")
 
-	toPorts := sliceAt(t, asManifest(t, egress[1], "spec.egress[1]"), "toPorts")
+	toPorts := sliceAt(t, asManifest(t, egress[0], "spec.egress[0]"), "toPorts")
 	if len(toPorts) != 1 {
-		t.Fatalf("spec.egress[1].toPorts has %d entries, want 1", len(toPorts))
+		t.Fatalf("spec.egress[0].toPorts has %d entries, want 1", len(toPorts))
 	}
-	ports := sliceAt(t, asManifest(t, toPorts[0], "spec.egress[1].toPorts[0]"), "ports")
-	if len(ports) != 1 {
-		t.Fatalf("spec.egress[1].toPorts[0].ports has %d entries, want 1", len(ports))
+	ports := sliceAt(t, asManifest(t, toPorts[0], "spec.egress[0].toPorts[0]"), "ports")
+	if len(ports) != 2 {
+		t.Fatalf("spec.egress[0].toPorts[0].ports has %d entries, want 2", len(ports))
 	}
-	port := asManifest(t, ports[0], "spec.egress[1].toPorts[0].ports[0]")
+	port := asManifest(t, ports[0], "spec.egress[0].toPorts[0].ports[0]")
+	assertString(t, port, "443", "port")
+	assertString(t, port, "TCP", "protocol")
+	port = asManifest(t, ports[1], "spec.egress[0].toPorts[0].ports[1]")
 	assertString(t, port, "6443", "port")
 	assertString(t, port, "TCP", "protocol")
-	assertNoObject(t, policies, "CiliumNetworkPolicy", "tenant-root", "allow-external-secrets-to-openbao")
+
+	findObject(t, policies, "CiliumNetworkPolicy", "tenant-guardian", "allow-external-secrets-to-openbao")
+	findObject(t, policies, "CiliumNetworkPolicy", "tenant-guardian", "allow-openbao-to-aws-kms")
 }
 
 func testOpenBaoOpenTofuBootstrap(t *testing.T) {
@@ -935,12 +963,12 @@ func testOpenBaoOpenTofuBootstrap(t *testing.T) {
 	assertTextContains(t, mainTF, `resource "vault_kubernetes_auth_backend_config" "guardian_mgmt"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `kubernetes_host        = "https://kubernetes.default.svc:443"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `disable_iss_validation = true`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `external_dns_secret   = "guardian/guardian-mgmt/tenant-root/dns/external-dns"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `external_dns_secret   = "guardian/guardian-mgmt/tenant-guardian/dns/external-dns"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `resource "vault_policy" "external_dns"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `name = "tenant-root-external-dns"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `name = "guardian-external-dns"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `path "${local.kv_mount}/data/${local.external_dns_secret}"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `resource "vault_kubernetes_auth_backend_role" "external_dns"`, "guardian-mgmt-openbao main.tf")
-	assertTextContains(t, mainTF, `role_name                        = "tenant-root-external-dns"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `role_name                        = "guardian-external-dns"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `bound_service_account_names      = ["external-dns-secrets"]`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `bound_service_account_namespaces = ["external-dns"]`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `audience                         = "openbao"`, "guardian-mgmt-openbao main.tf")
@@ -1012,6 +1040,17 @@ func testFluxHandoff(t *testing.T) {
 		t.Fatalf("guardian-mgmt-base dependsOn = %#v, want guardian-mgmt-platform then guardian-mgmt-storage", baseDeps)
 	}
 
+	guardianSystem := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-system")
+	assertString(t, guardianSystem, "./src/infrastructure/deployments/guardian/system", "spec", "path")
+	assertString(t, guardianSystem, "GitRepository", "spec", "sourceRef", "kind")
+	assertString(t, guardianSystem, "guardian", "spec", "sourceRef", "name")
+	assertBool(t, guardianSystem, true, "spec", "prune")
+	assertBool(t, guardianSystem, false, "spec", "wait")
+	guardianSystemDeps := sliceAt(t, guardianSystem, "spec", "dependsOn")
+	if len(guardianSystemDeps) != 1 || stringAt(asManifest(t, guardianSystemDeps[0], "guardian system spec.dependsOn[0]"), "name") != "guardian-mgmt-base" {
+		t.Fatalf("guardian-system dependsOn = %#v, want only guardian-mgmt-base", guardianSystemDeps)
+	}
+
 	dnsController := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-mgmt-dns-controller")
 	assertString(t, dnsController, "./src/infrastructure/base/dns", "spec", "path")
 	assertString(t, dnsController, "GitRepository", "spec", "sourceRef", "kind")
@@ -1019,8 +1058,8 @@ func testFluxHandoff(t *testing.T) {
 	assertBool(t, dnsController, true, "spec", "prune")
 	assertBool(t, dnsController, true, "spec", "wait")
 	dnsControllerDeps := sliceAt(t, dnsController, "spec", "dependsOn")
-	if len(dnsControllerDeps) != 1 || stringAt(asManifest(t, dnsControllerDeps[0], "dns controller spec.dependsOn[0]"), "name") != "guardian-mgmt-base" {
-		t.Fatalf("guardian-mgmt-dns-controller dependsOn = %#v, want only guardian-mgmt-base", dnsControllerDeps)
+	if len(dnsControllerDeps) != 1 || stringAt(asManifest(t, dnsControllerDeps[0], "dns controller spec.dependsOn[0]"), "name") != "guardian-system" {
+		t.Fatalf("guardian-mgmt-dns-controller dependsOn = %#v, want only guardian-system", dnsControllerDeps)
 	}
 
 	companyProd := findObject(t, docs, "Kustomization", "cozy-fluxcd", "guardian-company-prod")
@@ -1030,8 +1069,8 @@ func testFluxHandoff(t *testing.T) {
 	assertBool(t, companyProd, true, "spec", "prune")
 	assertBool(t, companyProd, true, "spec", "wait")
 	companyProdDeps := sliceAt(t, companyProd, "spec", "dependsOn")
-	if len(companyProdDeps) != 1 || stringAt(asManifest(t, companyProdDeps[0], "company prod spec.dependsOn[0]"), "name") != "guardian-mgmt-base" {
-		t.Fatalf("guardian-company-prod dependsOn = %#v, want only guardian-mgmt-base", companyProdDeps)
+	if len(companyProdDeps) != 1 || stringAt(asManifest(t, companyProdDeps[0], "company prod spec.dependsOn[0]"), "name") != "guardian-system" {
+		t.Fatalf("guardian-company-prod dependsOn = %#v, want only guardian-system", companyProdDeps)
 	}
 }
 
@@ -1565,6 +1604,20 @@ func assertEnvSecretRef(t *testing.T, env []any, name, secretName, key string) {
 	entry := findEnv(t, env, name)
 	assertString(t, entry, secretName, "valueFrom", "secretKeyRef", "name")
 	assertString(t, entry, key, "valueFrom", "secretKeyRef", "key")
+}
+
+func assertOpenBaoSecretEnv(t *testing.T, env []any, envName, secretName, secretKey string) {
+	t.Helper()
+
+	for _, value := range env {
+		entry := asManifest(t, value, "extraSecretEnvironmentVars[]")
+		if stringAt(entry, "envName") == envName {
+			assertString(t, entry, secretName, "secretName")
+			assertString(t, entry, secretKey, "secretKey")
+			return
+		}
+	}
+	t.Fatalf("extraSecretEnvironmentVars missing envName %q", envName)
 }
 
 func findEnv(t *testing.T, env []any, name string) manifest {

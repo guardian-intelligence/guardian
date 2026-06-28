@@ -55,10 +55,10 @@ func main() {
 	flag.StringVar(&cfg.Kubeconfig, "kubeconfig", "", "kubeconfig for guardian-mgmt")
 	flag.StringVar(&cfg.RequestTimeout, "request-timeout", "15s", "kubectl API request timeout")
 	flag.StringVar(&cfg.WaitTimeout, "wait-timeout", "5m", "timeout for OpenBao StatefulSet readiness")
-	flag.StringVar(&cfg.Namespace, "namespace", "tenant-root", "OpenBao namespace")
-	flag.StringVar(&cfg.StatefulSet, "statefulset", "openbao-guardian", "OpenBao StatefulSet name")
-	flag.StringVar(&cfg.BootstrapSecret, "bootstrap-secret", "openbao-guardian-bootstrap", "Kubernetes Secret for cluster-local OpenBao bootstrap material")
-	flag.StringVar(&cfg.Mode, "mode", "status", "drill mode: status, init-unseal, or snapshot")
+	flag.StringVar(&cfg.Namespace, "namespace", "tenant-guardian", "OpenBao namespace")
+	flag.StringVar(&cfg.StatefulSet, "statefulset", "guardian-openbao", "OpenBao StatefulSet name")
+	flag.StringVar(&cfg.BootstrapSecret, "bootstrap-secret", "guardian-openbao-bootstrap", "fallback Kubernetes Secret for legacy Shamir bootstrap material")
+	flag.StringVar(&cfg.Mode, "mode", "status", "drill mode: status, snapshot, or legacy init-unseal")
 	flag.StringVar(&cfg.SnapshotName, "snapshot-name", "", "snapshot filename inside the OpenBao pod; defaults to a UTC timestamped name")
 	flag.Parse()
 
@@ -155,10 +155,11 @@ func printStatus(ctx context.Context, runner kubectlRunner, cfg openBaoConfig, r
 			return err
 		}
 	}
-	if material, err := readBootstrapMaterial(ctx, runner, cfg.BootstrapSecret); err == nil {
-		_ = baoRun(ctx, runner, podName(cfg.StatefulSet, 0), "raft autopilot state", material.RootToken, "operator", "raft", "autopilot", "state")
+	if token, source, err := rootTokenFromEnvOrBootstrap(ctx, runner, cfg.BootstrapSecret); err == nil {
+		fmt.Printf("read OpenBao root token from %s without printing secret material\n", source)
+		_ = baoRun(ctx, runner, podName(cfg.StatefulSet, 0), "raft autopilot state", token, "operator", "raft", "autopilot", "state")
 	} else {
-		fmt.Printf("bootstrap secret unavailable; skipping raft autopilot state: %v\n", err)
+		fmt.Printf("root token unavailable; skipping raft autopilot state: %v\n", err)
 	}
 	return nil
 }
@@ -212,16 +213,17 @@ func snapshot(ctx context.Context, runner kubectlRunner, cfg openBaoConfig, repl
 	if err := runner.run(ctx, "wait OpenBao StatefulSet Ready", "wait", "--for=jsonpath={.status.readyReplicas}="+strconv.Itoa(replicas), "statefulset.apps/"+cfg.StatefulSet, "--timeout="+cfg.WaitTimeout); err != nil {
 		return err
 	}
-	material, err := readBootstrapMaterial(ctx, runner, cfg.BootstrapSecret)
+	token, source, err := rootTokenFromEnvOrBootstrap(ctx, runner, cfg.BootstrapSecret)
 	if err != nil {
-		return fmt.Errorf("read bootstrap secret before snapshot: %w", err)
+		return fmt.Errorf("read OpenBao root token before snapshot: %w", err)
 	}
+	fmt.Printf("read OpenBao root token from %s without printing secret material\n", source)
 	if err := printStatus(ctx, runner, cfg, replicas); err != nil {
 		return err
 	}
 	pod := podName(cfg.StatefulSet, 0)
 	snapshotPath := filepath.Join("/tmp", cfg.SnapshotName)
-	if err := baoRun(ctx, runner, pod, "operator raft snapshot save", material.RootToken, "operator", "raft", "snapshot", "save", snapshotPath); err != nil {
+	if err := baoRun(ctx, runner, pod, "operator raft snapshot save", token, "operator", "raft", "snapshot", "save", snapshotPath); err != nil {
 		return err
 	}
 	if err := runner.run(ctx, "snapshot sha256", "exec", "pod/"+pod, "--", "sh", "-ceu", "test -s "+shellQuote(snapshotPath)+" && sha256sum "+shellQuote(snapshotPath)); err != nil {
@@ -334,6 +336,23 @@ func readBootstrapMaterial(ctx context.Context, runner kubectlRunner, name strin
 		return bootstrapMaterial{}, err
 	}
 	return bootstrapMaterial{UnsealKey: unsealKey, RootToken: rootToken}, nil
+}
+
+func rootTokenFromEnvOrBootstrap(ctx context.Context, runner kubectlRunner, secret string) (string, string, error) {
+	for _, key := range []string{"BAO_TOKEN", "VAULT_TOKEN"} {
+		token := strings.TrimSpace(os.Getenv(key))
+		if token != "" {
+			return token, key, nil
+		}
+	}
+	material, err := readBootstrapMaterial(ctx, runner, secret)
+	if err != nil {
+		return "", "", err
+	}
+	if material.RootToken == "" {
+		return "", "", errors.New("OpenBao bootstrap root-token is empty")
+	}
+	return material.RootToken, "Kubernetes Secret/" + secret, nil
 }
 
 func readSecretKey(ctx context.Context, runner kubectlRunner, name, key string) (string, error) {

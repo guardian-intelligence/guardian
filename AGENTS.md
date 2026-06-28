@@ -50,10 +50,13 @@ region: ash
     tenant-root                     # Cozystack substrate only
 
     tenant-guardian                 # Guardian-owned control planes/products
-      namespace: guardian-system    # OpenBao, release controllers, shared ops
-      namespace: guardian-beta      # first durable integration stage
-      namespace: guardian-gamma     # staging / release-candidate validation
-      namespace: guardian-prod      # production
+      # Guardian-owned root services such as OpenBao, release controllers, and
+      # shared ops live directly in tenant-guardian unless they need a separate
+      # account boundary.
+
+      tenant-guardian-beta          # first durable integration stage
+      tenant-guardian-gamma         # staging / release-candidate validation
+      tenant-guardian-prod          # production
 
       labels:
         guardian.dev/component: iam | secrets | audit | telemetry | release | billing | aisucks | workloads | company
@@ -138,7 +141,7 @@ src/
         observability/
         registry/
         policy/
-        tenants/                       # creates only tenant-guardian by default
+        tenants/                       # creates tenant-guardian by default
 
       deployments/
         guardian/                      # reconciled into tenant-guardian

@@ -1,0 +1,117 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: guardian-openbao-seal
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: openbao
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: secrets
+    guardian.dev/secret-scope: openbao-auto-unseal
+type: Opaque
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: guardian-openbao
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: openbao
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: secrets
+    guardian.dev/tenant-id: gi-guardian
+spec:
+  # Unsuspend after guardian-openbao-seal contains the AWS KMS unseal material.
+  suspend: true
+  chartRef:
+    kind: ExternalArtifact
+    name: cozystack-openbao-application-default-openbao-system
+    namespace: cozy-system
+  interval: 5m
+  timeout: 10m
+  install:
+    remediation:
+      retries: -1
+  upgrade:
+    remediation:
+      retries: -1
+  valuesFrom:
+    - kind: Secret
+      name: cozystack-values
+  values:
+    openbao:
+      fullnameOverride: guardian-openbao
+      global:
+        tlsDisable: true
+      injector:
+        enabled: false
+      csi:
+        enabled: false
+      ui:
+        enabled: false
+      server:
+        configAnnotation: true
+        podManagementPolicy: Parallel
+        extraSecretEnvironmentVars:
+          - envName: AWS_ACCESS_KEY_ID
+            secretName: guardian-openbao-seal
+            secretKey: AWS_ACCESS_KEY_ID
+          - envName: AWS_SECRET_ACCESS_KEY
+            secretName: guardian-openbao-seal
+            secretKey: AWS_SECRET_ACCESS_KEY
+          - envName: AWS_REGION
+            secretName: guardian-openbao-seal
+            secretKey: AWS_REGION
+          - envName: VAULT_AWSKMS_SEAL_KEY_ID
+            secretName: guardian-openbao-seal
+            secretKey: VAULT_AWSKMS_SEAL_KEY_ID
+        dataStorage:
+          enabled: true
+          size: 10Gi
+          storageClass: replicated
+        auditStorage:
+          enabled: true
+          size: 10Gi
+          storageClass: replicated
+        resources:
+          requests:
+            cpu: "0.1"
+            memory: 2Gi
+            ephemeral-storage: 128Mi
+          limits:
+            cpu: "1"
+            memory: 2Gi
+            ephemeral-storage: 2Gi
+        standalone:
+          enabled: false
+        ha:
+          enabled: true
+          replicas: 3
+          raft:
+            enabled: true
+            setNodeId: true
+            config: |
+              ui = false
+
+              listener "tcp" {
+                address = "[::]:8200"
+                cluster_address = "[::]:8201"
+                tls_disable = true
+              }
+
+              seal "awskms" {}
+
+              storage "raft" {
+                path = "/openbao/data"
+                retry_join {
+                  leader_api_addr = "http://guardian-openbao-0.guardian-openbao-internal:8200"
+                }
+                retry_join {
+                  leader_api_addr = "http://guardian-openbao-1.guardian-openbao-internal:8200"
+                }
+                retry_join {
+                  leader_api_addr = "http://guardian-openbao-2.guardian-openbao-internal:8200"
+                }
+              }
+
+              service_registration "kubernetes" {}

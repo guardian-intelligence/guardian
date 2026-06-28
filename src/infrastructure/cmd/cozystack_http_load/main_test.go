@@ -75,10 +75,10 @@ func TestOpenBaoPortForwardArgs(t *testing.T) {
 	want := []string{
 		"--kubeconfig", "/kubeconfig",
 		"--request-timeout=15s",
-		"-n", "tenant-root",
+		"-n", "tenant-guardian",
 		"port-forward",
 		"--address", "127.0.0.1",
-		"svc/openbao-guardian",
+		"svc/guardian-openbao",
 		"18200:8200",
 	}
 	if got := openBaoPortForwardArgs(cfg, 18200); !reflect.DeepEqual(got, want) {
@@ -244,10 +244,10 @@ func TestSurfaceReadinessChecks(t *testing.T) {
 			name: "openbao",
 			cfg:  loadConfig{Surface: "openbao", Stage: "root", WaitTimeout: "20m"},
 			required: []commandExpectation{
-				{label: "OpenBao app yaml", parts: []string{"tenant-root", "openbaos.apps.cozystack.io/guardian", "-o", "yaml"}},
-				{label: "OpenBao statefulset yaml", parts: []string{"tenant-root", "statefulset.apps/openbao-guardian", "-o", "yaml"}},
-				{label: "wait OpenBao app Ready", parts: []string{"--for=condition=Ready", "openbaos.apps.cozystack.io/guardian", "--timeout=20m"}},
-				{label: "wait OpenBao statefulset ready replicas", parts: []string{"--for=jsonpath={.status.readyReplicas}=3", "statefulset.apps/openbao-guardian", "--timeout=20m"}},
+				{label: "OpenBao HelmRelease yaml", parts: []string{"tenant-guardian", "helmrelease.helm.toolkit.fluxcd.io/guardian-openbao", "-o", "yaml"}},
+				{label: "OpenBao statefulset yaml", parts: []string{"tenant-guardian", "statefulset.apps/guardian-openbao", "-o", "yaml"}},
+				{label: "wait OpenBao HelmRelease Ready", parts: []string{"--for=condition=Ready", "helmrelease.helm.toolkit.fluxcd.io/guardian-openbao", "--timeout=20m"}},
+				{label: "wait OpenBao statefulset ready replicas", parts: []string{"--for=jsonpath={.status.readyReplicas}=3", "statefulset.apps/guardian-openbao", "--timeout=20m"}},
 			},
 		},
 	}

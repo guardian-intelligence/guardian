@@ -125,6 +125,24 @@ spec:
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
+  name: guardian-system
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/deployments/guardian/system
+  sourceRef:
+    kind: GitRepository
+    name: guardian
+  dependsOn:
+    - name: guardian-mgmt-base
+  prune: true
+  wait: false
+  timeout: 10m
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
   name: guardian-mgmt-dns-controller
   namespace: cozy-fluxcd
 spec:
@@ -135,7 +153,7 @@ spec:
     kind: GitRepository
     name: guardian
   dependsOn:
-    - name: guardian-mgmt-base
+    - name: guardian-system
   prune: true
   wait: true
   timeout: 10m
@@ -153,7 +171,7 @@ spec:
     kind: GitRepository
     name: guardian
   dependsOn:
-    - name: guardian-mgmt-base
+    - name: guardian-system
   prune: true
   wait: true
   timeout: 10m

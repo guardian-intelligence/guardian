@@ -4,16 +4,14 @@ import "testing"
 
 func testConfig() drillConfig {
 	return drillConfig{
-		Kubectl:                "/kubectl",
-		RequestTimeout:         "15s",
-		DrainTimeout:           "10m",
-		WaitTimeout:            "15m",
-		Node:                   "ash-earth",
-		ConfirmNode:            "ash-earth",
-		OpenBaoNamespace:       "tenant-root",
-		OpenBaoApp:             "guardian",
-		OpenBaoStatefulSet:     "openbao-guardian",
-		OpenBaoBootstrapSecret: "openbao-guardian-bootstrap",
+		Kubectl:            "/kubectl",
+		RequestTimeout:     "15s",
+		DrainTimeout:       "10m",
+		WaitTimeout:        "15m",
+		Node:               "ash-earth",
+		ConfirmNode:        "ash-earth",
+		OpenBaoNamespace:   "tenant-guardian",
+		OpenBaoStatefulSet: "guardian-openbao",
 	}
 }
 
@@ -43,9 +41,9 @@ func TestValidateConfig(t *testing.T) {
 	}
 
 	badOpenBaoName := base
-	badOpenBaoName.OpenBaoBootstrapSecret = "Not_A_Secret"
+	badOpenBaoName.OpenBaoStatefulSet = "Not_A_StatefulSet"
 	if err := validateConfig(badOpenBaoName); err == nil {
-		t.Fatalf("invalid OpenBao bootstrap Secret name was accepted")
+		t.Fatalf("invalid OpenBao StatefulSet name was accepted")
 	}
 }
 
@@ -105,8 +103,8 @@ func TestNodeUnschedulableArgs(t *testing.T) {
 func TestOutageWaitsProveServicesWhileNodeCordoned(t *testing.T) {
 	got := outageWaits(testConfig())
 	requireCheck(t, got, "wait outage target node cordoned", "node/ash-earth", "--for=jsonpath={.spec.unschedulable}=true", "--timeout=15m")
-	requireCheck(t, got, "wait outage root openbao app", "openbaos.apps.cozystack.io/guardian", "--timeout=15m")
-	rejectCheck(t, got, "wait outage root openbao statefulset")
+	requireCheck(t, got, "wait outage guardian openbao helmrelease", "helmreleases.helm.toolkit.fluxcd.io/guardian-openbao", "--timeout=15m")
+	rejectCheck(t, got, "wait outage root openbao app")
 	requireCheck(t, got, "wait outage tenant-root postgres workloads", "postgreses.apps.cozystack.io/guardian", "--timeout=15m")
 	requireCheck(t, got, "wait outage tenant-root harbor workloads", "harbors.apps.cozystack.io/guardian", "--timeout=15m")
 	requireCheck(t, got, "wait outage tenant-root harbor registry bucket ready", "--for=jsonpath={.status.bucketReady}=true", "bucketclaims.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=15m")
@@ -118,8 +116,8 @@ func TestOutageWaitsProveServicesWhileNodeCordoned(t *testing.T) {
 func TestRecoveryWaitsCoverGuardianSurfaces(t *testing.T) {
 	got := recoveryWaits(testConfig())
 	requireCheck(t, got, "wait recovered target node Ready", "node/ash-earth", "--timeout=15m")
-	requireCheck(t, got, "wait recovered root openbao app", "openbaos.apps.cozystack.io/guardian", "--timeout=15m")
-	rejectCheck(t, got, "wait recovered root openbao statefulset")
+	requireCheck(t, got, "wait recovered guardian openbao helmrelease", "helmreleases.helm.toolkit.fluxcd.io/guardian-openbao", "--timeout=15m")
+	rejectCheck(t, got, "wait recovered root openbao app")
 	requireCheck(t, got, "wait recovered tenant-root postgres workloads", "postgreses.apps.cozystack.io/guardian", "--timeout=15m")
 	requireCheck(t, got, "wait recovered tenant-root harbor workloads", "harbors.apps.cozystack.io/guardian", "--timeout=15m")
 	requireCheck(t, got, "wait recovered tenant-root harbor registry bucket ready", "--for=jsonpath={.status.bucketReady}=true", "bucketclaims.objectstorage.k8s.io/harbor-guardian-registry", "--timeout=15m")
@@ -204,12 +202,12 @@ func TestOpenBaoHelpers(t *testing.T) {
 	if !looksLikeBaoStatusJSON("warning\n{\"initialized\":false,\"sealed\":true}\n") {
 		t.Fatalf("looksLikeBaoStatusJSON() rejected status payload")
 	}
-	if got := podName("openbao-guardian", 2); got != "openbao-guardian-2" {
+	if got := podName("guardian-openbao", 2); got != "guardian-openbao-2" {
 		t.Fatalf("podName() = %q", got)
 	}
 
-	args := baoExecArgs("tenant-root", "openbao-guardian-0", "root-token", "status")
-	for _, want := range []string{"-n", "tenant-root", "pod/openbao-guardian-0", "BAO_ADDR=http://127.0.0.1:8200", "BAO_TOKEN=root-token", "bao", "status"} {
+	args := baoExecArgs("tenant-guardian", "guardian-openbao-0", "root-token", "status")
+	for _, want := range []string{"-n", "tenant-guardian", "pod/guardian-openbao-0", "BAO_ADDR=http://127.0.0.1:8200", "BAO_TOKEN=root-token", "bao", "status"} {
 		if !hasArg(args, want) {
 			t.Fatalf("baoExecArgs missing %q: %#v", want, args)
 		}

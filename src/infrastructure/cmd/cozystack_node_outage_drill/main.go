@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -16,17 +15,15 @@ import (
 )
 
 type drillConfig struct {
-	Kubectl                string
-	Kubeconfig             string
-	RequestTimeout         string
-	DrainTimeout           string
-	WaitTimeout            string
-	Node                   string
-	ConfirmNode            string
-	OpenBaoNamespace       string
-	OpenBaoApp             string
-	OpenBaoStatefulSet     string
-	OpenBaoBootstrapSecret string
+	Kubectl            string
+	Kubeconfig         string
+	RequestTimeout     string
+	DrainTimeout       string
+	WaitTimeout        string
+	Node               string
+	ConfirmNode        string
+	OpenBaoNamespace   string
+	OpenBaoStatefulSet string
 }
 
 type kubectlCheck struct {
@@ -57,10 +54,8 @@ func main() {
 	flag.StringVar(&cfg.WaitTimeout, "wait-timeout", "15m", "post-recovery readiness wait timeout")
 	flag.StringVar(&cfg.Node, "node", "", "Kubernetes node name to cordon and drain")
 	flag.StringVar(&cfg.ConfirmNode, "confirm-node", "", "must exactly match --node before the drill mutates the cluster")
-	flag.StringVar(&cfg.OpenBaoNamespace, "openbao-namespace", "tenant-root", "OpenBao namespace")
-	flag.StringVar(&cfg.OpenBaoApp, "openbao-app", "guardian", "OpenBao Cozystack app name")
-	flag.StringVar(&cfg.OpenBaoStatefulSet, "openbao-statefulset", "openbao-guardian", "OpenBao StatefulSet name")
-	flag.StringVar(&cfg.OpenBaoBootstrapSecret, "openbao-bootstrap-secret", "openbao-guardian-bootstrap", "Kubernetes Secret for cluster-local OpenBao bootstrap material")
+	flag.StringVar(&cfg.OpenBaoNamespace, "openbao-namespace", "tenant-guardian", "OpenBao namespace")
+	flag.StringVar(&cfg.OpenBaoStatefulSet, "openbao-statefulset", "guardian-openbao", "OpenBao StatefulSet name")
 	flag.Parse()
 
 	exitIfErr(validateConfig(cfg))
@@ -95,10 +90,8 @@ func validateConfig(cfg drillConfig) error {
 		}
 	}
 	for label, value := range map[string]string{
-		"openbao-namespace":        cfg.OpenBaoNamespace,
-		"openbao-app":              cfg.OpenBaoApp,
-		"openbao-statefulset":      cfg.OpenBaoStatefulSet,
-		"openbao-bootstrap-secret": cfg.OpenBaoBootstrapSecret,
+		"openbao-namespace":   cfg.OpenBaoNamespace,
+		"openbao-statefulset": cfg.OpenBaoStatefulSet,
 	} {
 		if !dnsSubdomainRE.MatchString(value) {
 			return fmt.Errorf("--%s %q is not a Kubernetes DNS subdomain", label, value)
@@ -241,8 +234,8 @@ func statusGets(node, phase string) []kubectlCheck {
 			Args:  []string{"get", "postgreses.apps.cozystack.io,harbors.apps.cozystack.io,clickhouses.apps.cozystack.io", "-A"},
 		},
 		{
-			Label: phase + " openbao apps",
-			Args:  []string{"get", "openbaos.apps.cozystack.io", "-A"},
+			Label: phase + " openbao helmreleases",
+			Args:  []string{"get", "helmreleases.helm.toolkit.fluxcd.io", "-A", "-l", "app.kubernetes.io/name=openbao"},
 		},
 		{
 			Label: phase + " dashboard deployments",
@@ -288,8 +281,8 @@ func serviceReadinessWaits(phase string, cfg drillConfig) []kubectlCheck {
 			Args:  []string{"-n", "cozy-dashboard", "wait", "--for=condition=Available", "deployment/incloud-web-gatekeeper"},
 		},
 		{
-			Label: "wait " + phase + " root openbao app",
-			Args:  []string{"-n", cfg.OpenBaoNamespace, "wait", "--for=condition=Ready", "openbaos.apps.cozystack.io/" + cfg.OpenBaoApp},
+			Label: "wait " + phase + " guardian openbao helmrelease",
+			Args:  []string{"-n", cfg.OpenBaoNamespace, "wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/guardian-openbao"},
 		},
 	}
 	for _, namespace := range []string{"tenant-root"} {
@@ -337,11 +330,11 @@ func serviceReadinessWaits(phase string, cfg drillConfig) []kubectlCheck {
 }
 
 func waitOpenBaoQuorum(ctx context.Context, runner kubectlRunner, cfg drillConfig) error {
-	return waitOpenBaoReplicas(ctx, runner, cfg, "wait outage root openbao statefulset quorum", quorumForReplicas)
+	return waitOpenBaoReplicas(ctx, runner, cfg, "wait outage guardian openbao statefulset quorum", quorumForReplicas)
 }
 
 func waitOpenBaoFullReadiness(ctx context.Context, runner kubectlRunner, cfg drillConfig) error {
-	return waitOpenBaoReplicas(ctx, runner, cfg, "wait recovered root openbao statefulset full readiness", func(replicas int) int {
+	return waitOpenBaoReplicas(ctx, runner, cfg, "wait recovered guardian openbao statefulset full readiness", func(replicas int) int {
 		if replicas <= 0 {
 			return 1
 		}
@@ -410,10 +403,6 @@ func ensureOpenBaoUnsealed(ctx context.Context, runner kubectlRunner, cfg drillC
 	if err != nil {
 		return err
 	}
-	unsealKey, err := readOpenBaoUnsealKey(ctx, runner, cfg)
-	if err != nil {
-		return fmt.Errorf("read OpenBao unseal key before recovery unseal: %w", err)
-	}
 	for i := 0; i < status.Replicas; i++ {
 		pod := podName(cfg.OpenBaoStatefulSet, i)
 		if err := waitPodContainerRunning(ctx, runner, cfg.WaitTimeout, cfg.OpenBaoNamespace, pod, "openbao", "wait recovered "+pod+" openbao container running"); err != nil {
@@ -426,13 +415,10 @@ func ensureOpenBaoUnsealed(ctx context.Context, runner kubectlRunner, cfg drillC
 		if !podStatus.Initialized {
 			return fmt.Errorf("OpenBao pod %s is not initialized", pod)
 		}
-		if !podStatus.Sealed {
-			fmt.Printf("pod %s already unsealed\n", pod)
-			continue
+		if podStatus.Sealed {
+			return fmt.Errorf("OpenBao pod %s is still sealed after auto-unseal recovery", pod)
 		}
-		if err := baoRun(ctx, runner, cfg.OpenBaoNamespace, pod, "operator unseal", "", "operator", "unseal", unsealKey); err != nil {
-			return err
-		}
+		fmt.Printf("pod %s auto-unsealed\n", pod)
 	}
 	return nil
 }
@@ -520,29 +506,6 @@ func quorumForReplicas(replicas int) int {
 
 func podName(statefulSet string, ordinal int) string {
 	return fmt.Sprintf("%s-%d", statefulSet, ordinal)
-}
-
-func readOpenBaoUnsealKey(ctx context.Context, runner kubectlRunner, cfg drillConfig) (string, error) {
-	unsealKey, err := readSecretKey(ctx, runner, cfg.OpenBaoNamespace, cfg.OpenBaoBootstrapSecret, "unseal-key")
-	if err != nil {
-		return "", err
-	}
-	return unsealKey, nil
-}
-
-func readSecretKey(ctx context.Context, runner kubectlRunner, namespace, name, key string) (string, error) {
-	raw, err := runner.output(ctx, "read Secret/"+name+" "+key, "-n", namespace, "get", "secret/"+name, "-o", `go-template={{index .data "`+key+`"}}`)
-	if err != nil {
-		return "", err
-	}
-	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(raw))
-	if err != nil {
-		return "", fmt.Errorf("decode Secret/%s %s: %w", name, key, err)
-	}
-	if len(decoded) == 0 {
-		return "", fmt.Errorf("Secret/%s %s is empty", name, key)
-	}
-	return string(decoded), nil
 }
 
 func baoStatusForPod(ctx context.Context, runner kubectlRunner, namespace, pod string, print bool) (baoStatus, error) {

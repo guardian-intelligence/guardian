@@ -54,10 +54,10 @@ func main() {
 	flag.StringVar(&cfg.RequestTimeout, "request-timeout", "15s", "kubectl API request timeout")
 	flag.StringVar(&cfg.WaitTimeout, "wait-timeout", "5m", "timeout waiting for OpenBao StatefulSet readiness")
 	flag.StringVar(&portForwardReadyWait, "port-forward-ready-timeout", "10s", "timeout waiting for kubectl port-forward readiness")
-	flag.StringVar(&cfg.Namespace, "namespace", "tenant-root", "OpenBao namespace")
-	flag.StringVar(&cfg.StatefulSet, "statefulset", "openbao-guardian", "OpenBao StatefulSet name")
-	flag.StringVar(&cfg.Service, "service", "openbao-guardian", "OpenBao Service name")
-	flag.StringVar(&cfg.BootstrapSecret, "bootstrap-secret", "openbao-guardian-bootstrap", "Kubernetes Secret containing cluster-local OpenBao bootstrap material")
+	flag.StringVar(&cfg.Namespace, "namespace", "tenant-guardian", "OpenBao namespace")
+	flag.StringVar(&cfg.StatefulSet, "statefulset", "guardian-openbao", "OpenBao StatefulSet name")
+	flag.StringVar(&cfg.Service, "service", "guardian-openbao", "OpenBao Service name")
+	flag.StringVar(&cfg.BootstrapSecret, "bootstrap-secret", "guardian-openbao-bootstrap", "fallback Kubernetes Secret containing legacy OpenBao bootstrap material")
 	flag.StringVar(&cfg.Root, "root", "", "OpenTofu root to apply")
 	flag.StringVar(&cfg.BackendEndpoint, "backend-endpoint", "", "S3-compatible OpenTofu backend endpoint")
 	flag.StringVar(&cfg.Mode, "mode", "apply", "OpenTofu operation: plan or apply")
@@ -126,11 +126,11 @@ func runApply(ctx context.Context, cfg applyConfig) error {
 	if err := waitStatefulSetReady(ctx, runner, cfg.StatefulSet, cfg.WaitTimeout); err != nil {
 		return err
 	}
-	token, err := rootToken(ctx, runner, cfg.BootstrapSecret)
+	token, tokenSource, err := rootTokenFromEnvOrSecret(ctx, runner, cfg.BootstrapSecret)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("read OpenBao bootstrap token from Kubernetes Secret without printing secret material\n")
+	fmt.Printf("read OpenBao root token from %s without printing secret material\n", tokenSource)
 
 	localPort, err := freeLocalPort()
 	if err != nil {
@@ -168,6 +168,20 @@ func rootToken(ctx context.Context, runner kubectlRunner, secret string) (string
 		return "", err
 	}
 	return decodeRootToken(strings.TrimSpace(out))
+}
+
+func rootTokenFromEnvOrSecret(ctx context.Context, runner kubectlRunner, secret string) (string, string, error) {
+	for _, key := range []string{"BAO_TOKEN", "VAULT_TOKEN"} {
+		token := strings.TrimSpace(os.Getenv(key))
+		if token != "" {
+			return token, key, nil
+		}
+	}
+	token, err := rootToken(ctx, runner, secret)
+	if err != nil {
+		return "", "", err
+	}
+	return token, "Kubernetes Secret/" + secret, nil
 }
 
 func decodeRootToken(encoded string) (string, error) {

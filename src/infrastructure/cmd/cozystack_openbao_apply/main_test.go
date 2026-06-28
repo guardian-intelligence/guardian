@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"reflect"
 	"strings"
@@ -12,10 +13,10 @@ func TestValidateConfig(t *testing.T) {
 	cfg := applyConfig{
 		Kubectl:              "/kubectl",
 		Tofu:                 "/tofu",
-		Namespace:            "tenant-root",
-		StatefulSet:          "openbao-guardian",
-		Service:              "openbao-guardian",
-		BootstrapSecret:      "openbao-guardian-bootstrap",
+		Namespace:            "tenant-guardian",
+		StatefulSet:          "guardian-openbao",
+		Service:              "guardian-openbao",
+		BootstrapSecret:      "guardian-openbao-bootstrap",
 		Root:                 "/repo/src/infrastructure/bootstrap/guardian-mgmt-openbao",
 		BackendEndpoint:      "https://account.r2.cloudflarestorage.com",
 		Mode:                 "apply",
@@ -58,6 +59,37 @@ func TestDecodeRootToken(t *testing.T) {
 	}
 	if _, err := decodeRootToken("not base64"); err == nil {
 		t.Fatalf("invalid base64 accepted")
+	}
+}
+
+func TestRootTokenFromEnvPrefersBaoToken(t *testing.T) {
+	t.Setenv("BAO_TOKEN", "env-token")
+	t.Setenv("VAULT_TOKEN", "vault-token")
+
+	got, source, err := rootTokenFromEnvOrSecret(context.Background(), kubectlRunner{}, "bootstrap")
+	if err != nil {
+		t.Fatalf("rootTokenFromEnvOrSecret() error = %v", err)
+	}
+	if got != "env-token" {
+		t.Fatalf("rootTokenFromEnvOrSecret() token = %q, want env-token", got)
+	}
+	if source != "BAO_TOKEN" {
+		t.Fatalf("rootTokenFromEnvOrSecret() source = %q, want BAO_TOKEN", source)
+	}
+}
+
+func TestRootTokenFromEnvFallsBackToVaultToken(t *testing.T) {
+	t.Setenv("VAULT_TOKEN", "vault-token")
+
+	got, source, err := rootTokenFromEnvOrSecret(context.Background(), kubectlRunner{}, "bootstrap")
+	if err != nil {
+		t.Fatalf("rootTokenFromEnvOrSecret() error = %v", err)
+	}
+	if got != "vault-token" {
+		t.Fatalf("rootTokenFromEnvOrSecret() token = %q, want vault-token", got)
+	}
+	if source != "VAULT_TOKEN" {
+		t.Fatalf("rootTokenFromEnvOrSecret() source = %q, want VAULT_TOKEN", source)
 	}
 }
 
@@ -130,9 +162,9 @@ func TestKubectlArgs(t *testing.T) {
 	runner := kubectlRunner{
 		kubeconfig:     "/kubeconfig",
 		requestTimeout: "15s",
-		namespace:      "tenant-root",
+		namespace:      "tenant-guardian",
 	}
-	want := []string{"--kubeconfig", "/kubeconfig", "--request-timeout=15s", "-n", "tenant-root", "get", "pods"}
+	want := []string{"--kubeconfig", "/kubeconfig", "--request-timeout=15s", "-n", "tenant-guardian", "get", "pods"}
 	if got := runner.args("get", "pods"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("kubectl args = %#v, want %#v", got, want)
 	}
@@ -142,18 +174,18 @@ func TestOpenBaoPortForwardArgs(t *testing.T) {
 	runner := kubectlRunner{
 		kubeconfig:     "/kubeconfig",
 		requestTimeout: "15s",
-		namespace:      "tenant-root",
+		namespace:      "tenant-guardian",
 	}
 	want := []string{
 		"--kubeconfig", "/kubeconfig",
 		"--request-timeout=15s",
-		"-n", "tenant-root",
+		"-n", "tenant-guardian",
 		"port-forward",
 		"--address", "127.0.0.1",
-		"svc/openbao-guardian",
+		"svc/guardian-openbao",
 		"18200:8200",
 	}
-	if got := openBaoPortForwardArgs(runner, "openbao-guardian", 18200); !reflect.DeepEqual(got, want) {
+	if got := openBaoPortForwardArgs(runner, "guardian-openbao", 18200); !reflect.DeepEqual(got, want) {
 		t.Fatalf("openBaoPortForwardArgs() = %#v, want %#v", got, want)
 	}
 }

@@ -1,0 +1,47 @@
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: beta
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: beta
+    guardian.dev/tenant-id: gi-guardian-beta
+spec:
+  host: beta.guardianintelligence.org
+  etcd: false
+  ingress: false
+  monitoring: false
+  seaweedfs: false
+---
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: gamma
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: gamma
+    guardian.dev/tenant-id: gi-guardian-gamma
+spec:
+  host: gamma.guardianintelligence.org
+  etcd: false
+  ingress: false
+  monitoring: false
+  seaweedfs: false
+---
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: prod
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+    guardian.dev/tenant-id: gi-guardian-prod
+spec:
+  host: prod.guardianintelligence.org
+  etcd: false
+  ingress: false
+  monitoring: false
+  seaweedfs: false

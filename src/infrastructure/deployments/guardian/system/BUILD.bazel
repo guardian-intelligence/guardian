@@ -1,9 +1,10 @@
 filegroup(
     name = "manifests",
     srcs = [
-        "auth-delegator.yaml",
+        "kustomization.yaml",
         "networkpolicy.yaml",
         "openbao.yaml",
+        "stage-tenants.yaml",
     ],
     visibility = ["//visibility:public"],
 )
