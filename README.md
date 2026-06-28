@@ -17,7 +17,7 @@ aspect infra tofu-init
 
 aspect infra bootstrap
 
-aspect infra openbao-bootstrap
+aspect infra openbao-cutover
 
 aspect infra openbao-drill --mode status
 
@@ -32,10 +32,10 @@ gitignored Talm kubeconfig, runs the Talos L2 gate, upgrades the Cozystack
 installer/operator to the repo-pinned version.
 `aspect infra upgrade-cozystack` is the narrow day-two path for existing
 clusters when only the Cozystack installer/operator release needs to move.
-Initialize and unseal OpenBao with the Manual Shamir runbook before using
-`aspect infra openbao-bootstrap`, which uses the interim OpenTofu root only to
-create the OpenBao ops-controller policy and Kubernetes auth role through a live
-port-forward. `aspect infra openbao-drill --mode status` verifies OpenBao
+OpenBao uses static auto-unseal and OpenBao self-init; see
+`src/infrastructure/runbooks/openbao-static-seal-self-init.md`.
+`aspect infra openbao-cutover` verifies the converged Flux/OpenBao state.
+`aspect infra openbao-drill --mode status` verifies OpenBao
 status, and `--mode snapshot` runs a Raft snapshot drill. `aspect infra
 observability-drill` creates a short root Postgres pgbench job, then queries
 VictoriaMetrics and VictoriaLogs for that exact workload and the CNPG scrape

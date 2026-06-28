@@ -5,7 +5,7 @@ filegroup(
         "openbao-helmrelease.yaml",
         "openbao-networkpolicy.yaml",
         "openbao-observability.yaml",
-        "openbao-ops-controller.yaml",
+        "openbao-pki.yaml",
         "openbao-rbac.yaml",
         "stage-tenants.yaml",
     ],

@@ -165,6 +165,13 @@ etcd:
 #         - bar=baz
 extraKernelModules: []
 
+# Extra Kubernetes node labels rendered into every machine config. Current ASH
+# management nodes are the key-bearing OpenBao static-seal nodes; key material is
+# placed out of band under /var/lib/guardian/openbao/static-seal and must not be
+# written through machine.files.
+extraNodeLabels:
+  guardian.dev/openbao-static-seal: "true"
+
 # Extra kubelet args added to the preset's kubelet.extraConfig
 # (cpuManagerPolicy: static, maxPods: 512). Operator keys must be
 # DISJOINT from the built-in set; a collision fails the render with

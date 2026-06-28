@@ -7,9 +7,8 @@ ORAS surfaced by focused infra tasks.
 load(".aspect/lib/helpers.axl", "checked_spawn", "ws_path")
 
 GUARDIAN_MGMT_ROOT = "src/infrastructure/bootstrap/guardian-mgmt"
-OPENBAO_ROOT_BOOTSTRAP_ROOT = "src/infrastructure/bootstrap/openbao-root-bootstrap"
 GUARDIAN_MGMT_DNS_ROOT = "src/infrastructure/bootstrap/guardian-mgmt-dns"
-GUARDIAN_MGMT_TALM_ROOT = "src/infrastructure/clusters/ash/bootstrap/talm"
+GUARDIAN_MGMT_TALM_ROOT = "src/infrastructure/talm"
 GUARDIAN_BACKEND_TFVARS = "src/infrastructure/bootstrap/backend.tfvars"
 TOFU_TARGET = "@opentofu_linux_amd64//:tofu_bin"
 TALM_TARGET = "@talm_linux_amd64//:talm"
@@ -27,7 +26,6 @@ HTTP_LOAD_TARGET = "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_
 EDGE_HEALTH_TARGET = "//src/infrastructure/cmd/edge_health:edge_health"
 EDGE_FAILOVER_DRILL_TARGET = "//src/infrastructure/cmd/edge_failover_drill:edge_failover_drill"
 NODE_OUTAGE_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill"
-OPENBAO_BOOTSTRAP_TARGET = "//src/infrastructure/cmd/cozystack_openbao_bootstrap:cozystack_openbao_bootstrap"
 OPENBAO_CUTOVER_TARGET = "//src/infrastructure/cmd/cozystack_openbao_cutover:cozystack_openbao_cutover"
 OPENBAO_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill"
 OPENBAO_OBSERVABILITY_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_openbao_observability_drill:cozystack_openbao_observability_drill"
@@ -63,11 +61,11 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/base/flux:manifests",
     "//src/infrastructure/base/networking:manifests",
     "//src/infrastructure/base/storage:manifests",
+    "//src/infrastructure/deployments/guardian/openbao-ops:manifests",
     "//src/infrastructure/deployments/guardian/system:manifests",
     "//src/infrastructure/deployments/company/prod:manifests",
     "//src/infrastructure/load:http_load_scripts",
     "//src/infrastructure/edge:edge_health_targets",
-    "//src/infrastructure/bootstrap/openbao-root-bootstrap:root",
     "//src/infrastructure/operations/openbao/guardian-mgmt:manifests",
     "//src/services/secrets/openbao/deploy/base/crds:manifests",
     "//src/services/secrets/openbao/deploy/base:manifests",
@@ -78,8 +76,9 @@ INFRA_TESTS = [
     "//src/infrastructure/cmd/edge_health:edge_health_test",
     "//src/infrastructure/cmd/cozystack_harbor_registry:cozystack_harbor_registry_test",
     "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load_test",
-    "//src/infrastructure/cmd/cozystack_openbao_bootstrap:cozystack_openbao_bootstrap_test",
     "//src/infrastructure/cmd/cozystack_openbao_cutover:cozystack_openbao_cutover_test",
+    "//src/infrastructure/cmd/openbao_secret_import:openbao_secret_import_test",
+    "//src/infrastructure/cmd/openbao_static_seal_key:openbao_static_seal_key_test",
     "//src/infrastructure/tests:talm_render_test",
     "//src/services/secrets/openbao/operator/controllers:controllers_test",
 ]
@@ -213,16 +212,13 @@ def _tofu_backend_roots(ctx, root):
     if root == "all":
         return [
             (GUARDIAN_MGMT_ROOT, "guardian-mgmt"),
-            (OPENBAO_ROOT_BOOTSTRAP_ROOT, "openbao-root-bootstrap"),
             (GUARDIAN_MGMT_DNS_ROOT, "guardian-mgmt-dns"),
         ]
     if root == "guardian-mgmt":
         return [(GUARDIAN_MGMT_ROOT, "guardian-mgmt")]
-    if root == "openbao-root-bootstrap":
-        return [(OPENBAO_ROOT_BOOTSTRAP_ROOT, "openbao-root-bootstrap")]
     if root == "guardian-mgmt-dns":
         return [(GUARDIAN_MGMT_DNS_ROOT, "guardian-mgmt-dns")]
-    ctx.std.io.stderr.write("ERROR: --root must be all, guardian-mgmt, openbao-root-bootstrap, or guardian-mgmt-dns\n")
+    ctx.std.io.stderr.write("ERROR: --root must be all, guardian-mgmt, or guardian-mgmt-dns\n")
     return None
 
 def _tofu_backend_init(ctx, roots, endpoint):
@@ -572,7 +568,6 @@ def _validate_impl(ctx):
 
     for root, label in [
         (GUARDIAN_MGMT_ROOT, "guardian-mgmt"),
-        (OPENBAO_ROOT_BOOTSTRAP_ROOT, "openbao-root-bootstrap"),
         (GUARDIAN_MGMT_DNS_ROOT, "guardian-mgmt-dns"),
     ]:
         tofu_env = _tofu_validate_env(ctx, label)
@@ -1360,75 +1355,6 @@ def _openbao_observability_drill_impl(ctx):
         label = "cozystack openbao observability drill",
     )
 
-def _openbao_bootstrap_impl(ctx):
-    kubectl = _kubectl_path(ctx)
-    if kubectl == None:
-        return 1
-    tofu = _tofu_path(ctx)
-    if tofu == None:
-        return 1
-
-    endpoint = _tofu_backend_endpoint(ctx, ctx.args.tofu_backend_endpoint)
-    if endpoint == None:
-        return 1
-
-    rc = _check_live_context_for(ctx, kubectl, ctx.args.kubeconfig, ctx.args.kube_api_server)
-    if rc != 0:
-        return rc
-    if ctx.args.revision != "":
-        rc = _check_flux_revision_for(ctx, kubectl, ctx.args.kubeconfig, ctx.args.revision, ctx.args.kube_api_server)
-        if rc != 0:
-            return rc
-
-    bootstrap_args = [
-        "--kubectl",
-        kubectl,
-        "--tofu",
-        tofu,
-        "--namespace",
-        ctx.args.namespace,
-        "--statefulset",
-        ctx.args.statefulset,
-        "--service",
-        ctx.args.service,
-        "--root",
-        ws_path(ctx, OPENBAO_ROOT_BOOTSTRAP_ROOT),
-        "--backend-endpoint",
-        endpoint,
-        "--mode",
-        ctx.args.mode,
-        "--auth-path",
-        ctx.args.auth_path,
-        "--ops-service-account",
-        ctx.args.ops_service_account,
-        "--ops-role",
-        ctx.args.ops_role,
-        "--token-audience",
-        ctx.args.token_audience,
-        "--token-duration",
-        ctx.args.token_duration,
-        "--login-verify-timeout",
-        ctx.args.login_verify_timeout,
-        "--request-timeout",
-        ctx.args.request_timeout,
-        "--wait-timeout",
-        ctx.args.wait_timeout,
-        "--port-forward-ready-timeout",
-        ctx.args.port_forward_ready_timeout,
-    ]
-    if ctx.args.kube_api_server != "":
-        bootstrap_args.extend(["--kube-api-server", ctx.args.kube_api_server])
-    if ctx.args.kubeconfig != "":
-        bootstrap_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
-
-    return checked_spawn(
-        ctx,
-        "bazelisk",
-        ["run", OPENBAO_BOOTSTRAP_TARGET, "--"] + bootstrap_args,
-        cwd = ws_path(ctx),
-        label = "cozystack openbao bootstrap",
-    )
-
 def _openbao_cutover_impl(ctx):
     kubectl = _kubectl_path(ctx)
     if kubectl == None:
@@ -1447,8 +1373,6 @@ def _openbao_cutover_impl(ctx):
         ctx.args.openbao_statefulset,
         "--controller-deployment",
         ctx.args.controller_deployment,
-        "--phase",
-        ctx.args.phase,
         "--request-timeout",
         ctx.args.request_timeout,
     ]
@@ -1495,7 +1419,7 @@ tofu_init = task(
     summary = "Initialize OpenTofu S3 backends for management bootstrap roots using standard AWS/R2 environment credentials.",
     args = {
         "endpoint": args.string(default = "", description = "Optional S3-compatible backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
-        "root": args.string(default = "all", description = "OpenTofu root to initialize: all, guardian-mgmt, openbao-root-bootstrap, or guardian-mgmt-dns."),
+        "root": args.string(default = "all", description = "OpenTofu root to initialize: all, guardian-mgmt, or guardian-mgmt-dns."),
     },
 )
 
@@ -1507,32 +1431,6 @@ dns_apply = task(
     args = {
         "endpoint": args.string(default = "", description = "Optional S3-compatible backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
         "mode": args.string(default = "plan", description = "OpenTofu operation: plan or apply."),
-    },
-)
-
-openbao_bootstrap = task(
-    implementation = _openbao_bootstrap_impl,
-    name = "openbao-bootstrap",
-    group = ["infra"],
-    summary = "Bootstrap the OpenBao ops-controller identity through the interim OpenTofu root.",
-    args = {
-        "auth_path": args.string(default = "kubernetes", description = "OpenBao Kubernetes auth mount path."),
-        "kube_api_server": args.string(default = "", description = "Optional Kubernetes API server override for off-VLAN proof runs."),
-        "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
-        "login_verify_timeout": args.string(default = "15s", description = "Timeout for post-apply OpenBao Kubernetes login verification."),
-        "mode": args.string(default = "apply", description = "OpenTofu operation: plan or apply."),
-        "namespace": args.string(default = "tenant-guardian", description = "OpenBao namespace."),
-        "ops_role": args.string(default = "guardian-openbao-ops-controller", description = "OpenBao Kubernetes auth role to verify after apply."),
-        "ops_service_account": args.string(default = "openbao-ops-controller", description = "Kubernetes ServiceAccount to verify after apply."),
-        "port_forward_ready_timeout": args.string(default = "10s", description = "Timeout waiting for OpenBao port-forward readiness."),
-        "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
-        "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before OpenBao identity bootstrap."),
-        "service": args.string(default = "guardian-openbao-active", description = "OpenBao active Service name."),
-        "statefulset": args.string(default = "guardian-openbao", description = "OpenBao StatefulSet name."),
-        "token_audience": args.string(default = "openbao", description = "TokenRequest audience for OpenBao Kubernetes auth."),
-        "token_duration": args.string(default = "10m", description = "TokenRequest duration for post-apply login verification."),
-        "tofu_backend_endpoint": args.string(default = "", description = "Optional S3-compatible OpenTofu backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
-        "wait_timeout": args.string(default = "5m", description = "Timeout for OpenBao bootstrap readiness."),
     },
 )
 
@@ -1550,7 +1448,6 @@ openbao_cutover = task(
         "openbao_helmrelease": args.string(default = "guardian-openbao", description = "OpenBao HelmRelease name."),
         "openbao_namespace": args.string(default = "tenant-guardian", description = "OpenBao namespace."),
         "openbao_statefulset": args.string(default = "guardian-openbao", description = "OpenBao StatefulSet name."),
-        "phase": args.string(default = "converged", description = "Cutover phase to verify: bootstrap-required or converged."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
         "required_kustomizations": args.string(default = "", description = "Optional comma-separated Flux Kustomizations required for cutover proof."),
         "required_openbao_objects": args.string(default = "", description = "Optional comma-separated Kind/name OpenBao CRs required for cutover proof."),

@@ -1,8 +1,0 @@
-filegroup(
-    name = "manifests",
-    srcs = [
-        "aisucks-product.yaml",
-        "kustomization.yaml",
-    ],
-    visibility = ["//visibility:public"],
-)

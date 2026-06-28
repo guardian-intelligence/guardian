@@ -14,12 +14,12 @@ import (
 
 const (
 	reasonAuthenticationFailed = "AuthenticationFailed"
-	reasonBootstrapRequired    = "BootstrapRequired"
+	reasonSelfInitIncomplete   = "SelfInitIncomplete"
 
 	messageAuthenticationFailed = "OpenBao Kubernetes auth login failed."
-	messageBootstrapRequired    = "OpenBao Kubernetes auth role is missing; run the one-time OpenBao bootstrap before this controller can reconcile."
+	messageSelfInitIncomplete   = "OpenBao self-init did not create the Kubernetes auth role required by the ops controller; inspect OpenBao startup logs and recreate the cluster with the declared self-init config."
 
-	bootstrapRequiredRequeueAfter = time.Minute
+	selfInitIncompleteRequeueAfter = time.Minute
 )
 
 type conditionReasonMessage struct {
@@ -49,8 +49,8 @@ func setCondition(status *openbaov1alpha1.OpenBaoStatus, conditionType string, c
 func openBaoAuthFailureStatus(err error) conditionReasonMessage {
 	if isOpenBaoKubernetesAuthRoleMissing(err) {
 		return conditionReasonMessage{
-			reason:  reasonBootstrapRequired,
-			message: messageBootstrapRequired,
+			reason:  reasonSelfInitIncomplete,
+			message: messageSelfInitIncomplete,
 		}
 	}
 	return conditionReasonMessage{

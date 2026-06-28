@@ -181,8 +181,8 @@ func (r *MountTuneReconciler) updateMountTuneErrorStatus(ctx context.Context, tu
 	if _, err := r.updateMountTuneStatus(ctx, tune, input); err != nil {
 		return ctrl.Result{}, err
 	}
-	if input.reason == reasonBootstrapRequired {
-		return ctrl.Result{RequeueAfter: bootstrapRequiredRequeueAfter}, nil
+	if input.reason == reasonSelfInitIncomplete {
+		return ctrl.Result{RequeueAfter: selfInitIncompleteRequeueAfter}, nil
 	}
 	return ctrl.Result{}, cause
 }

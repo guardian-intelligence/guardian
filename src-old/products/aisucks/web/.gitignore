@@ -1,7 +1,0 @@
-.output
-.tanstack
-.vinxi
-dist
-dist-ssr
-node_modules
-*.tsbuildinfo

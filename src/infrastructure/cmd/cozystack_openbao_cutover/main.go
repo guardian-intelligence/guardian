@@ -11,11 +11,6 @@ import (
 	"strings"
 )
 
-const (
-	phaseBootstrapRequired = "bootstrap-required"
-	phaseConverged         = "converged"
-)
-
 var defaultKustomizations = []string{
 	"guardian-mgmt-platform",
 	"guardian-mgmt-platform-patches",
@@ -23,6 +18,7 @@ var defaultKustomizations = []string{
 	"guardian-mgmt-base",
 	"guardian-mgmt-app-patches",
 	"guardian-system",
+	"guardian-openbao-ops",
 	"guardian-mgmt-dns-controller",
 	"guardian-company-prod",
 	"guardian-openbao-ops-crds",
@@ -51,7 +47,6 @@ type cutoverConfig struct {
 	OpenBaoStatefulSet     string
 	ControllerDeployment   string
 	ExpectedRevision       string
-	Phase                  string
 	RequiredKustomizations []string
 	RequiredOpenBaoObjects []string
 }
@@ -120,7 +115,6 @@ func main() {
 	flag.StringVar(&cfg.OpenBaoStatefulSet, "openbao-statefulset", "guardian-openbao", "OpenBao StatefulSet name")
 	flag.StringVar(&cfg.ControllerDeployment, "controller-deployment", "openbao-ops-controller", "OpenBao ops-controller Deployment name")
 	flag.StringVar(&cfg.ExpectedRevision, "expected-revision", "", "optional Git revision that all checked Flux Kustomizations must have applied")
-	flag.StringVar(&cfg.Phase, "phase", phaseConverged, "cutover phase to verify: bootstrap-required or converged")
 	flag.StringVar(&requiredKustomizations, "required-kustomizations", strings.Join(defaultKustomizations, ","), "comma-separated Flux Kustomizations required for cutover proof")
 	flag.StringVar(&requiredOpenBaoObjects, "required-openbao-objects", strings.Join(defaultOpenBaoObjects, ","), "comma-separated Kind/name OpenBao CRs required for cutover proof")
 	flag.Parse()
@@ -159,11 +153,6 @@ func validateConfig(cfg cutoverConfig) error {
 	if cfg.ControllerDeployment == "" {
 		return errors.New("--controller-deployment is required")
 	}
-	switch cfg.Phase {
-	case phaseBootstrapRequired, phaseConverged:
-	default:
-		return fmt.Errorf("--phase %q is not one of %s, %s", cfg.Phase, phaseBootstrapRequired, phaseConverged)
-	}
 	if len(cfg.RequiredKustomizations) == 0 {
 		return errors.New("--required-kustomizations must not be empty")
 	}
@@ -182,7 +171,7 @@ func runCutoverProof(ctx context.Context, cfg cutoverConfig) error {
 	}
 
 	fmt.Printf("guardian openbao cutover proof\n")
-	fmt.Printf("phase=%s fluxNamespace=%s openbaoNamespace=%s openbaoHelmRelease=%s openbaoStatefulSet=%s controllerDeployment=%s\n", cfg.Phase, cfg.FluxNamespace, cfg.OpenBaoNamespace, cfg.OpenBaoHelmRelease, cfg.OpenBaoStatefulSet, cfg.ControllerDeployment)
+	fmt.Printf("fluxNamespace=%s openbaoNamespace=%s openbaoHelmRelease=%s openbaoStatefulSet=%s controllerDeployment=%s\n", cfg.FluxNamespace, cfg.OpenBaoNamespace, cfg.OpenBaoHelmRelease, cfg.OpenBaoStatefulSet, cfg.ControllerDeployment)
 
 	fluxRaw, err := runner.output(ctx, "Flux Kustomizations", "-n", cfg.FluxNamespace, "get", "kustomizations.kustomize.toolkit.fluxcd.io", "-o", "json")
 	if err != nil {
@@ -220,11 +209,11 @@ func runCutoverProof(ctx context.Context, cfg cutoverConfig) error {
 	if err != nil {
 		return err
 	}
-	if err := validateOpenBaoCRs(openBaoRaw, cfg.RequiredOpenBaoObjects, cfg.Phase); err != nil {
+	if err := validateOpenBaoCRs(openBaoRaw, cfg.RequiredOpenBaoObjects); err != nil {
 		return err
 	}
 
-	fmt.Printf("openbao cutover proof passed: phase=%s\n", cfg.Phase)
+	fmt.Printf("openbao cutover proof passed\n")
 	return nil
 }
 
@@ -314,7 +303,7 @@ func validateStatefulSetRolled(raw string, name string) error {
 	return nil
 }
 
-func validateOpenBaoCRs(raw string, required []string, phase string) error {
+func validateOpenBaoCRs(raw string, required []string) error {
 	var list kubeList
 	if err := json.Unmarshal([]byte(raw), &list); err != nil {
 		return fmt.Errorf("parse OpenBao CRs: %w", err)
@@ -328,46 +317,11 @@ func validateOpenBaoCRs(raw string, required []string, phase string) error {
 		if !ok {
 			return fmt.Errorf("OpenBao CR %q is missing", key)
 		}
-		if err := validateOpenBaoCR(item, phase); err != nil {
+		if err := validateConvergedCR(item); err != nil {
 			return fmt.Errorf("%s: %w", key, err)
 		}
 	}
-	fmt.Printf("OpenBao CRs verified for phase=%s: %s\n", phase, strings.Join(required, ","))
-	return nil
-}
-
-func validateOpenBaoCR(item kubeObject, phase string) error {
-	switch phase {
-	case phaseBootstrapRequired:
-		return validateBootstrapRequiredCR(item)
-	case phaseConverged:
-		return validateConvergedCR(item)
-	default:
-		return fmt.Errorf("unsupported phase %q", phase)
-	}
-}
-
-func validateBootstrapRequiredCR(item kubeObject) error {
-	for _, expected := range []struct {
-		condition string
-		status    string
-	}{
-		{"Authenticated", "False"},
-		{"Applied", "False"},
-		{"Ready", "False"},
-		{"DriftDetected", "Unknown"},
-	} {
-		cond := conditionByType(item.Status.Conditions, expected.condition)
-		if cond == nil {
-			return fmt.Errorf("missing %s condition", expected.condition)
-		}
-		if cond.Status != expected.status || cond.Reason != "BootstrapRequired" {
-			return fmt.Errorf("%s = %s reason=%s, want %s reason=BootstrapRequired", expected.condition, cond.Status, cond.Reason, expected.status)
-		}
-	}
-	if !strings.Contains(item.Status.LastError, "invalid role name") {
-		return fmt.Errorf("lastError = %q, want missing OpenBao role detail", item.Status.LastError)
-	}
+	fmt.Printf("OpenBao CRs verified: %s\n", strings.Join(required, ","))
 	return nil
 }
 

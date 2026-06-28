@@ -26,7 +26,6 @@ load(
     infra_load_db = "load_db",
     infra_load_http = "load_http",
     infra_node_outage_drill = "node_outage_drill",
-    infra_openbao_bootstrap = "openbao_bootstrap",
     infra_openbao_cutover = "openbao_cutover",
     infra_openbao_drill = "openbao_drill",
     infra_openbao_observability_drill = "openbao_observability_drill",
@@ -63,7 +62,6 @@ def config(ctx):
     ctx.tasks.add(infra_load_db)
     ctx.tasks.add(infra_load_http)
     ctx.tasks.add(infra_node_outage_drill)
-    ctx.tasks.add(infra_openbao_bootstrap)
     ctx.tasks.add(infra_openbao_cutover)
     ctx.tasks.add(infra_openbao_drill)
     ctx.tasks.add(infra_openbao_observability_drill)

@@ -1,7 +1,0 @@
-filegroup(
-    name = "root",
-    srcs = glob(["*.tf"]) + [
-        ".terraform.lock.hcl",
-    ],
-    visibility = ["//visibility:public"],
-)

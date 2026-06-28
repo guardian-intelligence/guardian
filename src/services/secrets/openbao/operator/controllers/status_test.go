@@ -15,8 +15,8 @@ func TestOpenBaoAuthFailureStatus(t *testing.T) {
 		{
 			name:        "missing Kubernetes auth role",
 			err:         errors.New(`login to OpenBao with Kubernetes auth: invalid role name "guardian-openbao-ops-controller"`),
-			wantReason:  reasonBootstrapRequired,
-			wantMessage: messageBootstrapRequired,
+			wantReason:  reasonSelfInitIncomplete,
+			wantMessage: messageSelfInitIncomplete,
 		},
 		{
 			name:        "other authentication failure",

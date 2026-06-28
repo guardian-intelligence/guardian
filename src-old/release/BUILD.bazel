@@ -1,5 +1,0 @@
-load("//tools/format:defs.bzl", "go_format")
-
-package(default_visibility = ["//visibility:public"])
-
-go_format()

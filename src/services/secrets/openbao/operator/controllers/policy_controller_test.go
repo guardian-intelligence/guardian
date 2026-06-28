@@ -190,7 +190,7 @@ func TestPolicyReconcilerObserveModeReportsMatchingPolicyApplied(t *testing.T) {
 	}
 }
 
-func TestPolicyReconcilerReportsBootstrapRequiredForMissingAuthRole(t *testing.T) {
+func TestPolicyReconcilerReportsSelfInitIncompleteForMissingAuthRole(t *testing.T) {
 	ctx := context.Background()
 	scheme := testScheme(t)
 	obj := &openbaov1alpha1.OpenBaoPolicy{
@@ -218,15 +218,15 @@ func TestPolicyReconcilerReportsBootstrapRequiredForMissingAuthRole(t *testing.T
 	if err != nil {
 		t.Fatalf("Reconcile() error = %v, want nil", err)
 	}
-	if result.RequeueAfter != bootstrapRequiredRequeueAfter {
-		t.Fatalf("RequeueAfter = %s, want %s", result.RequeueAfter, bootstrapRequiredRequeueAfter)
+	if result.RequeueAfter != selfInitIncompleteRequeueAfter {
+		t.Fatalf("RequeueAfter = %s, want %s", result.RequeueAfter, selfInitIncompleteRequeueAfter)
 	}
 
 	var got openbaov1alpha1.OpenBaoPolicy
 	if err := kube.Get(ctx, client.ObjectKeyFromObject(obj), &got); err != nil {
 		t.Fatalf("get reconciled policy: %v", err)
 	}
-	assertBootstrapRequiredStatus(t, got.Status)
+	assertSelfInitIncompleteStatus(t, got.Status)
 	if !strings.Contains(got.Status.LastError, `invalid role name "guardian-openbao-ops-controller"`) {
 		t.Fatalf("LastError = %q, want missing role detail", got.Status.LastError)
 	}
@@ -328,12 +328,12 @@ func assertObservedDriftStatus(t *testing.T, status openbaov1alpha1.OpenBaoStatu
 	}
 }
 
-func assertBootstrapRequiredStatus(t *testing.T, status openbaov1alpha1.OpenBaoStatus) {
+func assertSelfInitIncompleteStatus(t *testing.T, status openbaov1alpha1.OpenBaoStatus) {
 	t.Helper()
-	assertConditionReason(t, status.Conditions, openbaov1alpha1.ConditionAuthenticated, metav1.ConditionFalse, reasonBootstrapRequired, "one-time OpenBao bootstrap")
-	assertConditionReason(t, status.Conditions, openbaov1alpha1.ConditionApplied, metav1.ConditionFalse, reasonBootstrapRequired, "one-time OpenBao bootstrap")
-	assertConditionReason(t, status.Conditions, openbaov1alpha1.ConditionDriftDetected, metav1.ConditionUnknown, reasonBootstrapRequired, "one-time OpenBao bootstrap")
-	assertConditionReason(t, status.Conditions, openbaov1alpha1.ConditionReady, metav1.ConditionFalse, reasonBootstrapRequired, "one-time OpenBao bootstrap")
+	assertConditionReason(t, status.Conditions, openbaov1alpha1.ConditionAuthenticated, metav1.ConditionFalse, reasonSelfInitIncomplete, "OpenBao self-init")
+	assertConditionReason(t, status.Conditions, openbaov1alpha1.ConditionApplied, metav1.ConditionFalse, reasonSelfInitIncomplete, "OpenBao self-init")
+	assertConditionReason(t, status.Conditions, openbaov1alpha1.ConditionDriftDetected, metav1.ConditionUnknown, reasonSelfInitIncomplete, "OpenBao self-init")
+	assertConditionReason(t, status.Conditions, openbaov1alpha1.ConditionReady, metav1.ConditionFalse, reasonSelfInitIncomplete, "OpenBao self-init")
 }
 
 type fakePolicyClient struct {
