@@ -1340,8 +1340,10 @@ func testOpenBaoOperationsCRs(t *testing.T) {
 	assertStringSlice(t, kustomization, []string{
 		"authbackends/kubernetes.yaml",
 		"authroles/external-dns.yaml",
+		"authroles/ops-controller.yaml",
 		"mounts/kv.yaml",
 		"policies/external-dns.yaml",
+		"policies/ops-controller.yaml",
 	}, "resources")
 
 	authBackend := findObject(t, readManifests(t, base+"/authbackends/kubernetes.yaml"), "OpenBaoAuthBackend", "", "kubernetes")
@@ -1378,11 +1380,42 @@ func testOpenBaoOperationsCRs(t *testing.T) {
 	assertString(t, role, "3600", "spec", "tokenMaxTTL")
 	assertString(t, role, "Retain", "spec", "deletionPolicy")
 
+	opsPolicy := findObject(t, readManifests(t, base+"/policies/ops-controller.yaml"), "OpenBaoPolicy", "", "ops-controller")
+	assertString(t, opsPolicy, "guardian-openbao-ops-controller", "spec", "name")
+	assertString(t, opsPolicy, "Retain", "spec", "deletionPolicy")
+	opsRules := stringAt(opsPolicy, "spec", "rules")
+	for _, want := range []string{
+		`path "sys/policies/acl/guardian-*"`,
+		`path "auth/kubernetes/role/guardian-*"`,
+		`path "sys/auth/kubernetes"`,
+		`path "sys/auth/kubernetes/tune"`,
+		`path "sys/mounts/kv"`,
+		`path "sys/mounts/kv/tune"`,
+	} {
+		assertTextContains(t, opsRules, want, "ops-controller OpenBaoPolicy")
+	}
+	for _, forbidden := range []string{`path "*"`, `path "sys/*"`, `path "auth/*"`, "rootToken"} {
+		assertTextNotContains(t, opsRules, forbidden, "ops-controller OpenBaoPolicy")
+	}
+
+	opsRole := findObject(t, readManifests(t, base+"/authroles/ops-controller.yaml"), "OpenBaoKubernetesAuthRole", "", "ops-controller")
+	assertString(t, opsRole, "kubernetes", "spec", "backendPath")
+	assertString(t, opsRole, "guardian-openbao-ops-controller", "spec", "roleName")
+	assertStringSlice(t, opsRole, []string{"openbao-ops-controller"}, "spec", "boundServiceAccountNames")
+	assertStringSlice(t, opsRole, []string{"tenant-guardian"}, "spec", "boundServiceAccountNamespaces")
+	assertString(t, opsRole, "openbao", "spec", "audience")
+	assertStringSlice(t, opsRole, []string{"guardian-openbao-ops-controller"}, "spec", "tokenPolicies")
+	assertString(t, opsRole, "900", "spec", "tokenTTL")
+	assertString(t, opsRole, "3600", "spec", "tokenMaxTTL")
+	assertString(t, opsRole, "Retain", "spec", "deletionPolicy")
+
 	for _, rel := range []string{
 		"authbackends/kubernetes.yaml",
 		"authroles/external-dns.yaml",
+		"authroles/ops-controller.yaml",
 		"mounts/kv.yaml",
 		"policies/external-dns.yaml",
+		"policies/ops-controller.yaml",
 	} {
 		text := string(readRunfile(t, base+"/"+rel))
 		for _, forbidden := range []string{"rootToken", "clientSecret", "password", "tokenReviewerJWT"} {
