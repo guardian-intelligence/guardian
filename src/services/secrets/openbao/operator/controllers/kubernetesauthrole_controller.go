@@ -75,13 +75,14 @@ func (r *KubernetesAuthRoleReconciler) Reconcile(ctx context.Context, req ctrl.R
 	desired := desiredKubernetesAuthRole(&role)
 	openbaoClient, err := r.OpenBao(ctx)
 	if err != nil {
+		authStatus := openBaoAuthFailureStatus(err)
 		return r.updateKubernetesAuthRoleErrorStatus(ctx, &role, kubernetesAuthRoleStatusInput{
 			authenticated: metav1.ConditionFalse,
 			applied:       metav1.ConditionFalse,
 			drift:         metav1.ConditionUnknown,
 			ready:         metav1.ConditionFalse,
-			reason:        "AuthenticationFailed",
-			message:       "OpenBao Kubernetes auth login failed.",
+			reason:        authStatus.reason,
+			message:       authStatus.message,
 			lastError:     err.Error(),
 		}, err)
 	}
@@ -152,13 +153,14 @@ func (r *KubernetesAuthRoleReconciler) reconcileDelete(ctx context.Context, role
 	if role.Spec.DeletionPolicy == openbaov1alpha1.DeletionPolicyDelete {
 		openbaoClient, err := r.OpenBao(ctx)
 		if err != nil {
+			authStatus := openBaoAuthFailureStatus(err)
 			return r.updateKubernetesAuthRoleErrorStatus(ctx, role, kubernetesAuthRoleStatusInput{
 				authenticated: metav1.ConditionFalse,
 				applied:       metav1.ConditionFalse,
 				drift:         metav1.ConditionUnknown,
 				ready:         metav1.ConditionFalse,
-				reason:        "AuthenticationFailed",
-				message:       "OpenBao Kubernetes auth login failed while deleting auth role.",
+				reason:        authStatus.reason,
+				message:       authStatus.message,
 				lastError:     err.Error(),
 			}, err)
 		}

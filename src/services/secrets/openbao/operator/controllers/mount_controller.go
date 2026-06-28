@@ -77,13 +77,14 @@ func (r *MountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	desired := desiredMount(&mount)
 	openbaoClient, err := r.OpenBao(ctx)
 	if err != nil {
+		authStatus := openBaoAuthFailureStatus(err)
 		return r.updateMountErrorStatus(ctx, &mount, mountStatusInput{
 			authenticated: metav1.ConditionFalse,
 			applied:       metav1.ConditionFalse,
 			drift:         metav1.ConditionUnknown,
 			ready:         metav1.ConditionFalse,
-			reason:        "AuthenticationFailed",
-			message:       "OpenBao Kubernetes auth login failed.",
+			reason:        authStatus.reason,
+			message:       authStatus.message,
 			lastError:     err.Error(),
 		}, err)
 	}
@@ -246,13 +247,14 @@ func (r *MountReconciler) reconcileDelete(ctx context.Context, mount *openbaov1a
 	if mount.Spec.DeletionPolicy == openbaov1alpha1.DeletionPolicyDelete {
 		openbaoClient, err := r.OpenBao(ctx)
 		if err != nil {
+			authStatus := openBaoAuthFailureStatus(err)
 			return r.updateMountErrorStatus(ctx, mount, mountStatusInput{
 				authenticated: metav1.ConditionFalse,
 				applied:       metav1.ConditionFalse,
 				drift:         metav1.ConditionUnknown,
 				ready:         metav1.ConditionFalse,
-				reason:        "AuthenticationFailed",
-				message:       "OpenBao Kubernetes auth login failed while deleting mount.",
+				reason:        authStatus.reason,
+				message:       authStatus.message,
 				lastError:     err.Error(),
 			}, err)
 		}

@@ -2,6 +2,8 @@ package controllers
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	openbaov1alpha1 "github.com/guardian-intelligence/guardian/src/services/secrets/openbao/api/v1alpha1"
@@ -188,6 +190,48 @@ func TestPolicyReconcilerObserveModeReportsMatchingPolicyApplied(t *testing.T) {
 	}
 }
 
+func TestPolicyReconcilerReportsBootstrapRequiredForMissingAuthRole(t *testing.T) {
+	ctx := context.Background()
+	scheme := testScheme(t)
+	obj := &openbaov1alpha1.OpenBaoPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "ops-controller", Namespace: "tenant-guardian"},
+		Spec: openbaov1alpha1.OpenBaoPolicySpec{
+			Name:  "guardian-openbao-ops-controller",
+			Rules: `path "sys/policies/acl/guardian-*" { capabilities = ["read"] }`,
+		},
+	}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&openbaov1alpha1.OpenBaoPolicy{}).
+		WithObjects(obj).
+		Build()
+	authErr := errors.New(`login to OpenBao with Kubernetes auth: invalid role name "guardian-openbao-ops-controller"`)
+	reconciler := &PolicyReconciler{
+		Client: kube,
+		Scheme: scheme,
+		OpenBao: func(context.Context) (PolicyClient, error) {
+			return nil, authErr
+		},
+	}
+
+	_, err := reconciler.Reconcile(ctx, requestFor(obj))
+	if !errors.Is(err, authErr) {
+		t.Fatalf("Reconcile() error = %v, want %v", err, authErr)
+	}
+
+	var got openbaov1alpha1.OpenBaoPolicy
+	if err := kube.Get(ctx, client.ObjectKeyFromObject(obj), &got); err != nil {
+		t.Fatalf("get reconciled policy: %v", err)
+	}
+	assertConditionReason(t, got.Status.Conditions, openbaov1alpha1.ConditionAuthenticated, metav1.ConditionFalse, reasonBootstrapRequired, "one-time OpenBao bootstrap")
+	assertConditionReason(t, got.Status.Conditions, openbaov1alpha1.ConditionApplied, metav1.ConditionFalse, reasonBootstrapRequired, "one-time OpenBao bootstrap")
+	assertConditionReason(t, got.Status.Conditions, openbaov1alpha1.ConditionDriftDetected, metav1.ConditionUnknown, reasonBootstrapRequired, "one-time OpenBao bootstrap")
+	assertConditionReason(t, got.Status.Conditions, openbaov1alpha1.ConditionReady, metav1.ConditionFalse, reasonBootstrapRequired, "one-time OpenBao bootstrap")
+	if !strings.Contains(got.Status.LastError, `invalid role name "guardian-openbao-ops-controller"`) {
+		t.Fatalf("LastError = %q, want missing role detail", got.Status.LastError)
+	}
+}
+
 func TestPolicyReconcilerAddsFinalizerForDeletePolicy(t *testing.T) {
 	ctx := context.Background()
 	scheme := testScheme(t)
@@ -246,6 +290,26 @@ func assertCondition(t *testing.T, conditions []metav1.Condition, conditionType 
 			}
 			return
 		}
+	}
+	t.Fatalf("missing condition %s in %#v", conditionType, conditions)
+}
+
+func assertConditionReason(t *testing.T, conditions []metav1.Condition, conditionType string, wantStatus metav1.ConditionStatus, wantReason string, wantMessageContains string) {
+	t.Helper()
+	for _, condition := range conditions {
+		if condition.Type != conditionType {
+			continue
+		}
+		if condition.Status != wantStatus {
+			t.Fatalf("condition %s status = %s, want %s", conditionType, condition.Status, wantStatus)
+		}
+		if condition.Reason != wantReason {
+			t.Fatalf("condition %s reason = %q, want %q", conditionType, condition.Reason, wantReason)
+		}
+		if !strings.Contains(condition.Message, wantMessageContains) {
+			t.Fatalf("condition %s message = %q, want it to contain %q", conditionType, condition.Message, wantMessageContains)
+		}
+		return
 	}
 	t.Fatalf("missing condition %s in %#v", conditionType, conditions)
 }
