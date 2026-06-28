@@ -74,13 +74,14 @@ func (r *PolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	policyName := policyName(&policy)
 	openbaoClient, err := r.OpenBao(ctx)
 	if err != nil {
+		authStatus := openBaoAuthFailureStatus(err)
 		return r.updatePolicyErrorStatus(ctx, &policy, policyStatusInput{
 			authenticated: metav1.ConditionFalse,
 			applied:       metav1.ConditionFalse,
 			drift:         metav1.ConditionUnknown,
 			ready:         metav1.ConditionFalse,
-			reason:        "AuthenticationFailed",
-			message:       "OpenBao Kubernetes auth login failed.",
+			reason:        authStatus.reason,
+			message:       authStatus.message,
 			lastError:     err.Error(),
 		}, err)
 	}
@@ -151,13 +152,14 @@ func (r *PolicyReconciler) reconcileDelete(ctx context.Context, policy *openbaov
 	if policy.Spec.DeletionPolicy == openbaov1alpha1.DeletionPolicyDelete {
 		openbaoClient, err := r.OpenBao(ctx)
 		if err != nil {
+			authStatus := openBaoAuthFailureStatus(err)
 			return r.updatePolicyErrorStatus(ctx, policy, policyStatusInput{
 				authenticated: metav1.ConditionFalse,
 				applied:       metav1.ConditionFalse,
 				drift:         metav1.ConditionUnknown,
 				ready:         metav1.ConditionFalse,
-				reason:        "AuthenticationFailed",
-				message:       "OpenBao Kubernetes auth login failed while deleting policy.",
+				reason:        authStatus.reason,
+				message:       authStatus.message,
 				lastError:     err.Error(),
 			}, err)
 		}

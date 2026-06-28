@@ -45,13 +45,14 @@ func (r *MountTuneReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	mountPath := strings.Trim(tune.Spec.MountPath, "/")
 	openbaoClient, err := r.OpenBao(ctx)
 	if err != nil {
+		authStatus := openBaoAuthFailureStatus(err)
 		return r.updateMountTuneErrorStatus(ctx, &tune, mountTuneStatusInput{
 			authenticated: metav1.ConditionFalse,
 			applied:       metav1.ConditionFalse,
 			drift:         metav1.ConditionUnknown,
 			ready:         metav1.ConditionFalse,
-			reason:        "AuthenticationFailed",
-			message:       "OpenBao Kubernetes auth login failed.",
+			reason:        authStatus.reason,
+			message:       authStatus.message,
 			lastError:     err.Error(),
 		}, err)
 	}

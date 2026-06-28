@@ -93,13 +93,14 @@ func (r *AuthBackendReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	openbaoClient, err := r.OpenBao(ctx)
 	if err != nil {
+		authStatus := openBaoAuthFailureStatus(err)
 		return r.updateAuthBackendErrorStatus(ctx, &backend, authBackendStatusInput{
 			authenticated: metav1.ConditionFalse,
 			applied:       metav1.ConditionFalse,
 			drift:         metav1.ConditionUnknown,
 			ready:         metav1.ConditionFalse,
-			reason:        "AuthenticationFailed",
-			message:       "OpenBao Kubernetes auth login failed.",
+			reason:        authStatus.reason,
+			message:       authStatus.message,
 			lastError:     err.Error(),
 		}, err)
 	}
@@ -290,13 +291,14 @@ func (r *AuthBackendReconciler) reconcileDelete(ctx context.Context, backend *op
 	if backend.Spec.DeletionPolicy == openbaov1alpha1.DeletionPolicyDelete {
 		openbaoClient, err := r.OpenBao(ctx)
 		if err != nil {
+			authStatus := openBaoAuthFailureStatus(err)
 			return r.updateAuthBackendErrorStatus(ctx, backend, authBackendStatusInput{
 				authenticated: metav1.ConditionFalse,
 				applied:       metav1.ConditionFalse,
 				drift:         metav1.ConditionUnknown,
 				ready:         metav1.ConditionFalse,
-				reason:        "AuthenticationFailed",
-				message:       "OpenBao Kubernetes auth login failed while deleting auth backend.",
+				reason:        authStatus.reason,
+				message:       authStatus.message,
 				lastError:     err.Error(),
 			}, err)
 		}
