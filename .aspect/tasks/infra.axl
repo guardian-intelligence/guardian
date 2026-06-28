@@ -92,6 +92,13 @@ FORBIDDEN_SOURCE_PATHS = [
     ("docs/mgmt-evidence", "management-cluster evidence is temporary PR validation output, not durable source"),
     ("src/infrastructure/mgmt-evidence", "management-cluster evidence is temporary PR validation output, not durable source"),
     ("src/infrastructure/inventory/guardian-mgmt.json", "guardian-mgmt topology belongs in OpenTofu locals, not a parallel inventory JSON file"),
+    ("src/infrastructure/clusters/ash/root/kustomization.yaml", "Flux reconciles the canonical src/infrastructure/base path directly; do not reintroduce ASH wrapper Kustomizations"),
+    ("src/infrastructure/clusters/ash/root/cozystack/kustomization.yaml", "Flux reconciles the canonical src/infrastructure/base/cozystack path directly; do not reintroduce ASH wrapper Kustomizations"),
+    ("src/infrastructure/clusters/ash/root/storage/kustomization.yaml", "Flux reconciles the canonical src/infrastructure/base/storage path directly; do not reintroduce ASH wrapper Kustomizations"),
+    ("src/infrastructure/clusters/ash/root/platform-patches/kustomization.yaml", "Flux reconciles the canonical src/infrastructure/base/platform-patches path directly; do not reintroduce ASH wrapper Kustomizations"),
+    ("src/infrastructure/clusters/ash/root/app-patches/kustomization.yaml", "Flux reconciles the canonical src/infrastructure/base/app-patches path directly; do not reintroduce ASH wrapper Kustomizations"),
+    ("src/infrastructure/clusters/ash/root/dns/kustomization.yaml", "Flux reconciles the canonical src/infrastructure/base/dns path directly; do not reintroduce ASH wrapper Kustomizations"),
+    ("src/infrastructure/clusters/ash/deployments/company/prod/kustomization.yaml", "Flux reconciles the canonical src/infrastructure/deployments/company/prod path directly; do not reintroduce ASH wrapper Kustomizations"),
     ("src-old/release/evidence", "custom release evidence schemas were removed; use standard OCI, in-toto, SLSA, and tool-native records"),
 ]
 
@@ -534,15 +541,6 @@ def _render_kustomizations(ctx):
         "src/services/secrets/openbao/deploy/base/crds",
         "src/services/secrets/openbao/deploy/base",
         "src/services/secrets/openbao/deploy/guardian-mgmt",
-        # Compatibility bridges for live Flux Kustomizations while reverting
-        # the ASH directory cutover back to src/infrastructure/base.
-        "src/infrastructure/clusters/ash/root/cozystack",
-        "src/infrastructure/clusters/ash/root/storage",
-        "src/infrastructure/clusters/ash/root",
-        "src/infrastructure/clusters/ash/root/platform-patches",
-        "src/infrastructure/clusters/ash/root/app-patches",
-        "src/infrastructure/clusters/ash/root/dns",
-        "src/infrastructure/clusters/ash/deployments/company/prod",
     ]:
         rc = _capture_success(
             ctx,
