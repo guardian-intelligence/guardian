@@ -13,7 +13,7 @@ func TestValidateConfig(t *testing.T) {
 		Tofu:                 "/tofu",
 		Namespace:            "tenant-guardian",
 		StatefulSet:          "guardian-openbao",
-		Service:              "guardian-openbao",
+		Service:              "guardian-openbao-active",
 		Root:                 "/repo/src/infrastructure/bootstrap/openbao-root-bootstrap",
 		BackendEndpoint:      "https://account.r2.cloudflarestorage.com",
 		Mode:                 "apply",
@@ -147,6 +147,68 @@ func TestRedactToken(t *testing.T) {
 	}
 }
 
+func TestRequiredReadyReplicas(t *testing.T) {
+	for _, tc := range []struct {
+		replicas int
+		want     int
+	}{
+		{replicas: 1, want: 1},
+		{replicas: 2, want: 2},
+		{replicas: 3, want: 2},
+		{replicas: 5, want: 3},
+	} {
+		if got := requiredReadyReplicas(tc.replicas); got != tc.want {
+			t.Fatalf("requiredReadyReplicas(%d) = %d, want %d", tc.replicas, got, tc.want)
+		}
+	}
+}
+
+func TestParseStatefulSetReplicaStatus(t *testing.T) {
+	got, err := parseStatefulSetReplicaStatus(`{"spec":{"replicas":3},"status":{"readyReplicas":2}}`)
+	if err != nil {
+		t.Fatalf("parseStatefulSetReplicaStatus() error = %v", err)
+	}
+	if got.Replicas != 3 || got.ReadyReplicas != 2 {
+		t.Fatalf("parseStatefulSetReplicaStatus() = %#v, want replicas=3 readyReplicas=2", got)
+	}
+
+	defaulted, err := parseStatefulSetReplicaStatus(`{"spec":{},"status":{}}`)
+	if err != nil {
+		t.Fatalf("parseStatefulSetReplicaStatus(defaulted) error = %v", err)
+	}
+	if defaulted.Replicas != 1 || defaulted.ReadyReplicas != 0 {
+		t.Fatalf("parseStatefulSetReplicaStatus(defaulted) = %#v, want replicas=1 readyReplicas=0", defaulted)
+	}
+}
+
+func TestParseStatefulSetReplicaStatusRejectsZeroReplicas(t *testing.T) {
+	if _, err := parseStatefulSetReplicaStatus(`{"spec":{"replicas":0},"status":{}}`); err == nil {
+		t.Fatalf("parseStatefulSetReplicaStatus() accepted zero replicas")
+	}
+}
+
+func TestParseReadyEndpointSliceAddresses(t *testing.T) {
+	const raw = `{
+		"items": [
+			{
+				"endpoints": [
+					{"addresses": ["10.244.9.15"], "conditions": {"ready": true}},
+					{"addresses": ["10.244.9.16"], "conditions": {"ready": false}},
+					{"addresses": ["10.244.9.17"], "conditions": {}}
+				]
+			}
+		]
+	}`
+
+	got, err := parseReadyEndpointSliceAddresses(raw)
+	if err != nil {
+		t.Fatalf("parseReadyEndpointSliceAddresses() error = %v", err)
+	}
+	if got != 2 {
+		t.Fatalf("parseReadyEndpointSliceAddresses() = %d, want 2", got)
+	}
+}
+
 func TestKubectlArgs(t *testing.T) {
 	runner := kubectlRunner{
 		kubeconfig:     "/kubeconfig",
@@ -171,10 +233,10 @@ func TestOpenBaoPortForwardArgs(t *testing.T) {
 		"-n", "tenant-guardian",
 		"port-forward",
 		"--address", "127.0.0.1",
-		"svc/guardian-openbao",
+		"svc/guardian-openbao-active",
 		"18200:8200",
 	}
-	if got := openBaoPortForwardArgs(runner, "guardian-openbao", 18200); !reflect.DeepEqual(got, want) {
+	if got := openBaoPortForwardArgs(runner, "guardian-openbao-active", 18200); !reflect.DeepEqual(got, want) {
 		t.Fatalf("openBaoPortForwardArgs() = %#v, want %#v", got, want)
 	}
 }

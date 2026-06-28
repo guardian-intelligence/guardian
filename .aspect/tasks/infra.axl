@@ -1468,10 +1468,10 @@ openbao_bootstrap = task(
         "port_forward_ready_timeout": args.string(default = "10s", description = "Timeout waiting for OpenBao port-forward readiness."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
         "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before OpenBao identity bootstrap."),
-        "service": args.string(default = "guardian-openbao", description = "OpenBao Service name."),
+        "service": args.string(default = "guardian-openbao-active", description = "OpenBao active Service name."),
         "statefulset": args.string(default = "guardian-openbao", description = "OpenBao StatefulSet name."),
         "tofu_backend_endpoint": args.string(default = "", description = "Optional S3-compatible OpenTofu backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
-        "wait_timeout": args.string(default = "5m", description = "Timeout for OpenBao StatefulSet readiness."),
+        "wait_timeout": args.string(default = "5m", description = "Timeout for OpenBao bootstrap readiness."),
     },
 )
 
