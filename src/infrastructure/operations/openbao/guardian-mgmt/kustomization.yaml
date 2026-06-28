@@ -4,8 +4,10 @@ namespace: tenant-guardian
 resources:
   - authbackends/kubernetes.yaml
   - authroles/external-dns.yaml
+  - authroles/ops-controller.yaml
   - mounts/kv.yaml
   - policies/external-dns.yaml
+  - policies/ops-controller.yaml
 labels:
   - pairs:
       app.kubernetes.io/part-of: guardian

@@ -3,9 +3,11 @@ filegroup(
     srcs = [
         "authbackends/kubernetes.yaml",
         "authroles/external-dns.yaml",
+        "authroles/ops-controller.yaml",
         "kustomization.yaml",
         "mounts/kv.yaml",
         "policies/external-dns.yaml",
+        "policies/ops-controller.yaml",
     ],
     visibility = ["//visibility:public"],
 )

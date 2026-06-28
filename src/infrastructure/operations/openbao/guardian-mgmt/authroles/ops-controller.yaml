@@ -1,0 +1,17 @@
+apiVersion: openbao.guardian.dev/v1alpha1
+kind: OpenBaoKubernetesAuthRole
+metadata:
+  name: ops-controller
+spec:
+  backendPath: kubernetes
+  roleName: guardian-openbao-ops-controller
+  boundServiceAccountNames:
+    - openbao-ops-controller
+  boundServiceAccountNamespaces:
+    - tenant-guardian
+  audience: openbao
+  tokenPolicies:
+    - guardian-openbao-ops-controller
+  tokenTTL: "900"
+  tokenMaxTTL: "3600"
+  deletionPolicy: Retain
