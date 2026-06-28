@@ -1,1 +1,6 @@
 package(default_visibility = ["//visibility:private"])
+
+exports_files(
+    ["openbao.MODULE.bazel"],
+    visibility = ["//src/infrastructure/tests:__pkg__"],
+)
