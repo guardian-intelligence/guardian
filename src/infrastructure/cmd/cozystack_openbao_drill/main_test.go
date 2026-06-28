@@ -73,7 +73,7 @@ func TestValidateStatusSetAcceptsHealthyMatchingPods(t *testing.T) {
 		{Pod: "guardian-openbao-1", Status: baoStatus{Initialized: true, Sealed: false, Version: "2.5.4"}},
 		{Pod: "guardian-openbao-2", Status: baoStatus{Initialized: true, Sealed: false, Version: "2.5.4"}},
 	}
-	if err := validateStatusSet(statuses); err != nil {
+	if err := validateStatusSet(statuses, "2.5.4"); err != nil {
 		t.Fatalf("validateStatusSet() error = %v", err)
 	}
 }
@@ -84,7 +84,7 @@ func TestValidateStatusSetRejectsUnhealthyPods(t *testing.T) {
 		{Pod: "guardian-openbao-1", Status: baoStatus{Initialized: false, Sealed: false, Version: "2.5.4"}},
 		{Pod: "guardian-openbao-2", Status: baoStatus{Initialized: true, Sealed: true, Version: "2.5.4"}},
 	}
-	err := validateStatusSet(statuses)
+	err := validateStatusSet(statuses, "2.5.4")
 	if err == nil {
 		t.Fatal("validateStatusSet() accepted uninitialized and sealed pods")
 	}
@@ -104,12 +104,43 @@ func TestValidateStatusSetRejectsVersionSkew(t *testing.T) {
 		{Pod: "guardian-openbao-0", Status: baoStatus{Initialized: true, Sealed: false, Version: "2.5.0"}},
 		{Pod: "guardian-openbao-1", Status: baoStatus{Initialized: true, Sealed: false, Version: "2.5.4"}},
 	}
-	err := validateStatusSet(statuses)
+	err := validateStatusSet(statuses, "2.5.4")
 	if err == nil {
 		t.Fatal("validateStatusSet() accepted version skew")
 	}
-	if !strings.Contains(err.Error(), "guardian-openbao-1 reports version 2.5.4; expected 2.5.0") {
+	if !strings.Contains(err.Error(), "guardian-openbao-0 reports version 2.5.0; expected 2.5.4") {
 		t.Fatalf("validateStatusSet() error = %v", err)
+	}
+}
+
+func TestOpenBaoVersionFromImage(t *testing.T) {
+	for _, tc := range []struct {
+		image string
+		want  string
+	}{
+		{image: "quay.io/openbao/openbao:2.5.4@sha256:436eaf", want: "2.5.4"},
+		{image: "quay.io/openbao/openbao:2.5.4", want: "2.5.4"},
+		{image: "registry:5000/openbao/openbao:2.5.4@sha256:436eaf", want: "2.5.4"},
+	} {
+		t.Run(tc.image, func(t *testing.T) {
+			got, err := openBaoVersionFromImage(tc.image)
+			if err != nil {
+				t.Fatalf("openBaoVersionFromImage() error = %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("openBaoVersionFromImage() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestOpenBaoVersionFromImageRejectsUntaggedImage(t *testing.T) {
+	for _, image := range []string{"", "quay.io/openbao/openbao", "quay.io/openbao/openbao:@sha256:436eaf"} {
+		t.Run(image, func(t *testing.T) {
+			if _, err := openBaoVersionFromImage(image); err == nil {
+				t.Fatalf("openBaoVersionFromImage(%q) accepted invalid image", image)
+			}
+		})
 	}
 }
 

@@ -115,12 +115,17 @@ func runDrill(ctx context.Context, cfg openBaoConfig) error {
 	if err != nil {
 		return err
 	}
+	expectedVersion, err := expectedOpenBaoVersion(ctx, runner, cfg.StatefulSet)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("expected OpenBao version from StatefulSet template: %s\n", expectedVersion)
 
 	switch cfg.Mode {
 	case "status":
-		return printStatus(ctx, runner, cfg, replicas)
+		return printStatus(ctx, runner, cfg, replicas, expectedVersion)
 	case "snapshot":
-		return snapshot(ctx, runner, cfg, replicas)
+		return snapshot(ctx, runner, cfg, replicas, expectedVersion)
 	default:
 		return fmt.Errorf("unsupported mode %q", cfg.Mode)
 	}
@@ -138,7 +143,38 @@ func statefulSetReplicas(ctx context.Context, runner kubectlRunner, statefulSet 
 	return replicas, nil
 }
 
-func printStatus(ctx context.Context, runner kubectlRunner, cfg openBaoConfig, replicas int) error {
+func expectedOpenBaoVersion(ctx context.Context, runner kubectlRunner, statefulSet string) (string, error) {
+	image, err := runner.output(ctx, "OpenBao StatefulSet template image", "get", "statefulset.apps/"+statefulSet, "-o", "jsonpath={.spec.template.spec.containers[?(@.name==\"openbao\")].image}")
+	if err != nil {
+		return "", err
+	}
+	version, err := openBaoVersionFromImage(strings.TrimSpace(image))
+	if err != nil {
+		return "", fmt.Errorf("parse OpenBao version from StatefulSet image %q: %w", strings.TrimSpace(image), err)
+	}
+	return version, nil
+}
+
+func openBaoVersionFromImage(image string) (string, error) {
+	if image == "" {
+		return "", errors.New("empty image")
+	}
+	nameAndTag := image
+	if digestStart := strings.Index(nameAndTag, "@"); digestStart >= 0 {
+		nameAndTag = nameAndTag[:digestStart]
+	}
+	tagStart := strings.LastIndex(nameAndTag, ":")
+	if tagStart == -1 || tagStart == len(nameAndTag)-1 {
+		return "", errors.New("image has no tag")
+	}
+	tag := nameAndTag[tagStart+1:]
+	if tag == "" {
+		return "", errors.New("image tag is empty")
+	}
+	return tag, nil
+}
+
+func printStatus(ctx context.Context, runner kubectlRunner, cfg openBaoConfig, replicas int, expectedVersion string) error {
 	statuses := make([]podBaoStatus, 0, replicas)
 	for i := 0; i < replicas; i++ {
 		pod := podName(cfg.StatefulSet, i)
@@ -148,7 +184,7 @@ func printStatus(ctx context.Context, runner kubectlRunner, cfg openBaoConfig, r
 		}
 		statuses = append(statuses, podBaoStatus{Pod: pod, Status: status})
 	}
-	if err := validateStatusSet(statuses); err != nil {
+	if err := validateStatusSet(statuses, expectedVersion); err != nil {
 		return err
 	}
 	if token, source, err := rootTokenFromEnv(); err == nil {
@@ -160,7 +196,7 @@ func printStatus(ctx context.Context, runner kubectlRunner, cfg openBaoConfig, r
 	return nil
 }
 
-func snapshot(ctx context.Context, runner kubectlRunner, cfg openBaoConfig, replicas int) error {
+func snapshot(ctx context.Context, runner kubectlRunner, cfg openBaoConfig, replicas int, expectedVersion string) error {
 	if err := runner.run(ctx, "wait OpenBao StatefulSet Ready", "wait", "--for=jsonpath={.status.readyReplicas}="+strconv.Itoa(replicas), "statefulset.apps/"+cfg.StatefulSet, "--timeout="+cfg.WaitTimeout); err != nil {
 		return err
 	}
@@ -169,7 +205,7 @@ func snapshot(ctx context.Context, runner kubectlRunner, cfg openBaoConfig, repl
 		return fmt.Errorf("read OpenBao root token before snapshot: %w", err)
 	}
 	fmt.Printf("read OpenBao root token from %s without printing secret material\n", source)
-	if err := printStatus(ctx, runner, cfg, replicas); err != nil {
+	if err := printStatus(ctx, runner, cfg, replicas, expectedVersion); err != nil {
 		return err
 	}
 	pod := podName(cfg.StatefulSet, 0)
@@ -204,12 +240,14 @@ func baoStatusForPod(ctx context.Context, runner kubectlRunner, pod string, prin
 	return status, nil
 }
 
-func validateStatusSet(statuses []podBaoStatus) error {
+func validateStatusSet(statuses []podBaoStatus, expectedVersion string) error {
 	if len(statuses) == 0 {
 		return errors.New("OpenBao status drill found no pods")
 	}
+	if expectedVersion == "" {
+		return errors.New("OpenBao status drill has empty expected version")
+	}
 	var problems []string
-	var version string
 	for _, item := range statuses {
 		status := item.Status
 		if !status.Initialized {
@@ -222,12 +260,8 @@ func validateStatusSet(statuses []podBaoStatus) error {
 			problems = append(problems, fmt.Sprintf("%s reported empty OpenBao version", item.Pod))
 			continue
 		}
-		if version == "" {
-			version = status.Version
-			continue
-		}
-		if status.Version != version {
-			problems = append(problems, fmt.Sprintf("%s reports version %s; expected %s", item.Pod, status.Version, version))
+		if status.Version != expectedVersion {
+			problems = append(problems, fmt.Sprintf("%s reports version %s; expected %s", item.Pod, status.Version, expectedVersion))
 		}
 	}
 	if len(problems) > 0 {
