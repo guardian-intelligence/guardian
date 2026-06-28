@@ -8,7 +8,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"regexp"
@@ -29,6 +32,12 @@ type bootstrapConfig struct {
 	Root                 string
 	BackendEndpoint      string
 	Mode                 string
+	AuthPath             string
+	OpsServiceAccount    string
+	OpsRole              string
+	TokenAudience        string
+	TokenDuration        string
+	LoginVerifyTimeout   time.Duration
 }
 
 type kubectlRunner struct {
@@ -47,6 +56,7 @@ var dnsSubdomainRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-
 func main() {
 	var cfg bootstrapConfig
 	var portForwardReadyWait string
+	var loginVerifyTimeout string
 	flag.StringVar(&cfg.Kubectl, "kubectl", "", "path to kubectl")
 	flag.StringVar(&cfg.Tofu, "tofu", "", "path to the repo-pinned OpenTofu runner")
 	flag.StringVar(&cfg.Kubeconfig, "kubeconfig", "", "kubeconfig for guardian-mgmt")
@@ -59,10 +69,18 @@ func main() {
 	flag.StringVar(&cfg.Root, "root", "", "OpenTofu root to bootstrap the OpenBao ops-controller identity")
 	flag.StringVar(&cfg.BackendEndpoint, "backend-endpoint", "", "S3-compatible OpenTofu backend endpoint")
 	flag.StringVar(&cfg.Mode, "mode", "apply", "OpenTofu operation: plan or apply")
+	flag.StringVar(&cfg.AuthPath, "auth-path", "kubernetes", "OpenBao Kubernetes auth mount path")
+	flag.StringVar(&cfg.OpsServiceAccount, "ops-service-account", "openbao-ops-controller", "ops-controller Kubernetes ServiceAccount name")
+	flag.StringVar(&cfg.OpsRole, "ops-role", "guardian-openbao-ops-controller", "ops-controller OpenBao Kubernetes auth role")
+	flag.StringVar(&cfg.TokenAudience, "token-audience", "openbao", "TokenRequest audience for OpenBao Kubernetes auth")
+	flag.StringVar(&cfg.TokenDuration, "token-duration", "10m", "TokenRequest duration for bootstrap login verification")
+	flag.StringVar(&loginVerifyTimeout, "login-verify-timeout", "15s", "timeout for post-apply OpenBao Kubernetes login verification")
 	flag.Parse()
 
 	var err error
 	cfg.PortForwardReadyWait, err = time.ParseDuration(portForwardReadyWait)
+	exitIfErr(err)
+	cfg.LoginVerifyTimeout, err = time.ParseDuration(loginVerifyTimeout)
 	exitIfErr(err)
 	exitIfErr(validateConfig(cfg))
 	exitIfErr(runBootstrap(context.Background(), cfg))
@@ -92,13 +110,29 @@ func validateConfig(cfg bootstrapConfig) error {
 	if cfg.PortForwardReadyWait <= 0 {
 		return errors.New("--port-forward-ready-timeout must be positive")
 	}
+	if cfg.LoginVerifyTimeout <= 0 {
+		return errors.New("--login-verify-timeout must be positive")
+	}
+	if _, err := time.ParseDuration(cfg.TokenDuration); err != nil {
+		return fmt.Errorf("--token-duration: %w", err)
+	}
 	for label, value := range map[string]string{
-		"namespace":   cfg.Namespace,
-		"statefulset": cfg.StatefulSet,
-		"service":     cfg.Service,
+		"namespace":           cfg.Namespace,
+		"statefulset":         cfg.StatefulSet,
+		"service":             cfg.Service,
+		"auth-path":           cfg.AuthPath,
+		"ops-service-account": cfg.OpsServiceAccount,
 	} {
 		if !dnsSubdomainRE.MatchString(value) {
 			return fmt.Errorf("--%s %q is not a Kubernetes DNS subdomain", label, value)
+		}
+	}
+	for label, value := range map[string]string{
+		"ops-role":       cfg.OpsRole,
+		"token-audience": cfg.TokenAudience,
+	} {
+		if strings.TrimSpace(value) == "" || strings.ContainsAny(value, " \t\r\n") {
+			return fmt.Errorf("--%s must be non-empty and must not contain whitespace", label)
 		}
 	}
 	switch cfg.Mode {
@@ -144,7 +178,13 @@ func runBootstrap(ctx context.Context, cfg bootstrapConfig) error {
 	if err := runTofu(ctx, cfg.Tofu, "tofu init openbao-root-bootstrap", tofuInitArgs(cfg.Root, cfg.BackendEndpoint), env, token); err != nil {
 		return err
 	}
-	return runTofu(ctx, cfg.Tofu, "tofu "+cfg.Mode+" openbao-root-bootstrap", tofuRunArgs(cfg.Mode, cfg.Root, openbaoAddr), env, token)
+	if err := runTofu(ctx, cfg.Tofu, "tofu "+cfg.Mode+" openbao-root-bootstrap", tofuRunArgs(cfg.Mode, cfg.Root, openbaoAddr), env, token); err != nil {
+		return err
+	}
+	if cfg.Mode == "apply" {
+		return verifyOpsControllerLogin(ctx, runner, openbaoAddr, cfg)
+	}
+	return nil
 }
 
 func waitOpenBaoBootstrapReady(ctx context.Context, runner kubectlRunner, statefulSet, service, timeout string) error {
@@ -291,6 +331,102 @@ func parseReadyEndpointSliceAddresses(raw string) (int, error) {
 		}
 	}
 	return total, nil
+}
+
+func verifyOpsControllerLogin(ctx context.Context, runner kubectlRunner, openbaoAddr string, cfg bootstrapConfig) error {
+	jwt, err := serviceAccountToken(ctx, runner, cfg.OpsServiceAccount, cfg.TokenAudience, cfg.TokenDuration)
+	if err != nil {
+		return err
+	}
+	if err := openBaoKubernetesLogin(ctx, openbaoAddr, cfg.AuthPath, cfg.OpsRole, jwt, cfg.LoginVerifyTimeout); err != nil {
+		return err
+	}
+	fmt.Printf("verified OpenBao Kubernetes auth login for serviceAccount=%s role=%s without printing token material\n", cfg.OpsServiceAccount, cfg.OpsRole)
+	return nil
+}
+
+func serviceAccountToken(ctx context.Context, runner kubectlRunner, serviceAccount, audience, duration string) (string, error) {
+	out, err := runner.output(ctx, "ops-controller ServiceAccount token request", serviceAccountTokenArgs(serviceAccount, audience, duration)...)
+	if err != nil {
+		return "", err
+	}
+	token := strings.TrimSpace(out)
+	if token == "" {
+		return "", errors.New("ops-controller ServiceAccount token request returned an empty token")
+	}
+	return token, nil
+}
+
+func serviceAccountTokenArgs(serviceAccount, audience, duration string) []string {
+	return []string{
+		"create",
+		"token",
+		serviceAccount,
+		"--audience=" + audience,
+		"--duration=" + duration,
+	}
+}
+
+func openBaoKubernetesLogin(ctx context.Context, openbaoAddr, authPath, role, jwt string, timeout time.Duration) error {
+	loginURL, err := openBaoKubernetesLoginURL(openbaoAddr, authPath)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(map[string]string{
+		"role": role,
+		"jwt":  jwt,
+	})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, loginURL, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("verify OpenBao Kubernetes auth login: %w", err)
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if err != nil {
+		return fmt.Errorf("read OpenBao Kubernetes auth login response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("verify OpenBao Kubernetes auth login: status=%s body=%s", resp.Status, strings.TrimSpace(redactToken(string(raw), jwt)))
+	}
+	var decoded struct {
+		Auth struct {
+			ClientToken string `json:"client_token"`
+		} `json:"auth"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return fmt.Errorf("decode OpenBao Kubernetes auth login response: %w", err)
+	}
+	if decoded.Auth.ClientToken == "" {
+		return errors.New("OpenBao Kubernetes auth login response did not include a client token")
+	}
+	return nil
+}
+
+func openBaoKubernetesLoginURL(openbaoAddr, authPath string) (string, error) {
+	base, err := url.Parse(strings.TrimRight(openbaoAddr, "/"))
+	if err != nil {
+		return "", err
+	}
+	if base.Scheme == "" || base.Host == "" {
+		return "", fmt.Errorf("OpenBao address %q must include scheme and host", openbaoAddr)
+	}
+	authPath = strings.Trim(authPath, "/")
+	if authPath == "" {
+		return "", errors.New("OpenBao auth path must not be empty")
+	}
+	base.Path = strings.TrimRight(base.Path, "/") + "/v1/auth/" + url.PathEscape(authPath) + "/login"
+	return base.String(), nil
 }
 
 func rootTokenFromEnv() (string, string, error) {

@@ -1,6 +1,11 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
@@ -17,7 +22,13 @@ func TestValidateConfig(t *testing.T) {
 		Root:                 "/repo/src/infrastructure/bootstrap/openbao-root-bootstrap",
 		BackendEndpoint:      "https://account.r2.cloudflarestorage.com",
 		Mode:                 "apply",
+		AuthPath:             "kubernetes",
+		OpsServiceAccount:    "openbao-ops-controller",
+		OpsRole:              "guardian-openbao-ops-controller",
+		TokenAudience:        "openbao",
+		TokenDuration:        "10m",
 		PortForwardReadyWait: time.Second,
+		LoginVerifyTimeout:   time.Second,
 	}
 	if err := validateConfig(cfg); err != nil {
 		t.Fatalf("valid config rejected: %v", err)
@@ -39,6 +50,18 @@ func TestValidateConfig(t *testing.T) {
 	missingEndpoint.BackendEndpoint = ""
 	if err := validateConfig(missingEndpoint); err == nil {
 		t.Fatalf("missing backend endpoint accepted")
+	}
+
+	badRole := cfg
+	badRole.OpsRole = "guardian openbao"
+	if err := validateConfig(badRole); err == nil {
+		t.Fatalf("invalid role accepted")
+	}
+
+	badTokenDuration := cfg
+	badTokenDuration.TokenDuration = "later"
+	if err := validateConfig(badTokenDuration); err == nil {
+		t.Fatalf("invalid token duration accepted")
 	}
 }
 
@@ -238,6 +261,72 @@ func TestOpenBaoPortForwardArgs(t *testing.T) {
 	}
 	if got := openBaoPortForwardArgs(runner, "guardian-openbao-active", 18200); !reflect.DeepEqual(got, want) {
 		t.Fatalf("openBaoPortForwardArgs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestServiceAccountTokenArgs(t *testing.T) {
+	want := []string{
+		"create",
+		"token",
+		"openbao-ops-controller",
+		"--audience=openbao",
+		"--duration=10m",
+	}
+	if got := serviceAccountTokenArgs("openbao-ops-controller", "openbao", "10m"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("serviceAccountTokenArgs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestOpenBaoKubernetesLogin(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/v1/auth/kubernetes/login" {
+			t.Fatalf("path = %s, want /v1/auth/kubernetes/login", r.URL.Path)
+		}
+		var got map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if got["role"] != "guardian-openbao-ops-controller" || got["jwt"] != "jwt-secret" {
+			t.Fatalf("login payload = %#v", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"auth":{"client_token":"client-token"}}`)
+	}))
+	defer server.Close()
+
+	if err := openBaoKubernetesLogin(context.Background(), server.URL, "kubernetes", "guardian-openbao-ops-controller", "jwt-secret", time.Second); err != nil {
+		t.Fatalf("openBaoKubernetesLogin() error = %v", err)
+	}
+}
+
+func TestOpenBaoKubernetesLoginRedactsJWTOnFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "invalid jwt-secret", http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	err := openBaoKubernetesLogin(context.Background(), server.URL, "kubernetes", "guardian-openbao-ops-controller", "jwt-secret", time.Second)
+	if err == nil {
+		t.Fatalf("openBaoKubernetesLogin() accepted failed login")
+	}
+	if strings.Contains(err.Error(), "jwt-secret") {
+		t.Fatalf("login error leaked jwt: %v", err)
+	}
+	if !strings.Contains(err.Error(), "<redacted>") {
+		t.Fatalf("login error did not include redaction marker: %v", err)
+	}
+}
+
+func TestOpenBaoKubernetesLoginURL(t *testing.T) {
+	got, err := openBaoKubernetesLoginURL("http://127.0.0.1:18200/", "/kubernetes/")
+	if err != nil {
+		t.Fatalf("openBaoKubernetesLoginURL() error = %v", err)
+	}
+	if got != "http://127.0.0.1:18200/v1/auth/kubernetes/login" {
+		t.Fatalf("openBaoKubernetesLoginURL() = %q", got)
 	}
 }
 
