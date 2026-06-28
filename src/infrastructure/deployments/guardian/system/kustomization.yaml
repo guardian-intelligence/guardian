@@ -5,4 +5,5 @@ resources:
   - openbao-helmrelease.yaml
   - openbao-networkpolicy.yaml
   - openbao-observability.yaml
+  - openbao-ops-controller.yaml
   - openbao-rbac.yaml
