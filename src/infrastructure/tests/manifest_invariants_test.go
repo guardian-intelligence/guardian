@@ -1061,7 +1061,7 @@ func testOpenBao(t *testing.T) {
 	assertOpenBaoTagVersionAndDigest(t, serverImageTag, openBaoVersion, "guardian OpenBao server image tag")
 	assertString(t, hr, "replicated", "spec", "values", "openbao", "server", "dataStorage", "storageClass")
 	assertString(t, hr, "replicated", "spec", "values", "openbao", "server", "auditStorage", "storageClass")
-	assertString(t, hr, "RollingUpdate", "spec", "values", "openbao", "server", "updateStrategyType")
+	assertString(t, hr, "OnDelete", "spec", "values", "openbao", "server", "updateStrategyType")
 	assertInt(t, hr, 3, "spec", "values", "openbao", "server", "ha", "replicas")
 	assertBool(t, hr, true, "spec", "values", "openbao", "server", "ha", "raft", "enabled")
 	assertBool(t, hr, true, "spec", "values", "openbao", "server", "ha", "raft", "setNodeId")

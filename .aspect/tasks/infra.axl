@@ -377,10 +377,12 @@ def _tofu_path(ctx):
 def _kubectl_args(ctx, args):
     return _kubectl_args_for(ctx, ctx.args.kubeconfig, args)
 
-def _kubectl_args_for(ctx, kubeconfig, args):
+def _kubectl_args_for(ctx, kubeconfig, args, kube_api_server = ""):
     out = []
     if kubeconfig != "":
         out.extend(["--kubeconfig", _workspace_path_if_relative(ctx, kubeconfig)])
+    if kube_api_server != "":
+        out.extend(["--server", kube_api_server])
     if ctx.args.request_timeout != "":
         out.append("--request-timeout=" + ctx.args.request_timeout)
     out.extend(args)
@@ -414,11 +416,11 @@ def _talosctl_args(ctx, args):
 def _kubectl_capture(ctx, kubectl, args, label):
     return _kubectl_capture_for(ctx, kubectl, ctx.args.kubeconfig, args, label)
 
-def _kubectl_capture_for(ctx, kubectl, kubeconfig, args, label):
+def _kubectl_capture_for(ctx, kubectl, kubeconfig, args, label, kube_api_server = ""):
     return _capture_stdout(
         ctx,
         kubectl,
-        _kubectl_args_for(ctx, kubeconfig, args),
+        _kubectl_args_for(ctx, kubeconfig, args, kube_api_server),
         cwd = ws_path(ctx),
         label = label,
     )
@@ -488,10 +490,12 @@ def _assert_equals(ctx, value, expected, label):
 def _check_live_context(ctx, kubectl):
     return _check_live_context_for(ctx, kubectl, ctx.args.kubeconfig)
 
-def _check_live_context_for(ctx, kubectl, kubeconfig):
-    server = _kubectl_capture_for(ctx, kubectl, kubeconfig, ["config", "view", "--minify", "--output=jsonpath={.clusters[0].cluster.server}"], "kubectl current cluster server")
-    if server == None:
-        return 1
+def _check_live_context_for(ctx, kubectl, kubeconfig, kube_api_server = ""):
+    server = kube_api_server
+    if server == "":
+        server = _kubectl_capture_for(ctx, kubectl, kubeconfig, ["config", "view", "--minify", "--output=jsonpath={.clusters[0].cluster.server}"], "kubectl current cluster server")
+        if server == None:
+            return 1
     if _contains(EXCLUDED_KUBE_APIS, server):
         ctx.std.io.stderr.write("ERROR: refusing to validate against excluded cluster API " + server + "\n")
         return 1
@@ -499,14 +503,14 @@ def _check_live_context_for(ctx, kubectl, kubeconfig):
         ctx.std.io.stderr.write("ERROR: kubeconfig points at " + server + "; expected guardian-mgmt API endpoint from src/infrastructure/bootstrap/guardian-mgmt/main.tf\n")
         return 1
 
-    nodes = _kubectl_capture_for(ctx, kubectl, kubeconfig, ["get", "nodes", "-o", "name"], "kubectl get nodes")
+    nodes = _kubectl_capture_for(ctx, kubectl, kubeconfig, ["get", "nodes", "-o", "name"], "kubectl get nodes", kube_api_server)
     if nodes == None:
         return 1
     if _line_count(nodes) != 3:
         ctx.std.io.stderr.write("ERROR: guardian-mgmt should have exactly 3 nodes; kubectl reported:\n" + nodes + "\n")
         return 1
 
-    node_details = _kubectl_capture_for(ctx, kubectl, kubeconfig, ["get", "nodes", "-o", "wide"], "kubectl get nodes -o wide")
+    node_details = _kubectl_capture_for(ctx, kubectl, kubeconfig, ["get", "nodes", "-o", "wide"], "kubectl get nodes -o wide", kube_api_server)
     if node_details == None:
         return 1
     return _assert_contains(ctx, node_details, "10.8.0.", "node InternalIP addresses")
@@ -514,7 +518,7 @@ def _check_live_context_for(ctx, kubectl, kubeconfig):
 def _check_flux_revision(ctx, kubectl, revision):
     return _check_flux_revision_for(ctx, kubectl, ctx.args.kubeconfig, revision)
 
-def _check_flux_revision_for(ctx, kubectl, kubeconfig, revision):
+def _check_flux_revision_for(ctx, kubectl, kubeconfig, revision, kube_api_server = ""):
     checks = [
         ("guardian GitRepository artifact revision", ["-n", "cozy-fluxcd", "get", "gitrepositories.source.toolkit.fluxcd.io/guardian", "-o", "jsonpath={.status.artifact.revision}"]),
         ("guardian-mgmt-platform last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform", "-o", "jsonpath={.status.lastAppliedRevision}"]),
@@ -524,7 +528,7 @@ def _check_flux_revision_for(ctx, kubectl, kubeconfig, revision):
         ("guardian-mgmt-app-patches last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-app-patches", "-o", "jsonpath={.status.lastAppliedRevision}"]),
     ]
     for label, kubectl_args in checks:
-        value = _kubectl_capture_for(ctx, kubectl, kubeconfig, kubectl_args, "kubectl read " + label)
+        value = _kubectl_capture_for(ctx, kubectl, kubeconfig, kubectl_args, "kubectl read " + label, kube_api_server)
         if value == None:
             return 1
         rc = _assert_contains(ctx, value, revision, label)
@@ -1049,11 +1053,11 @@ def _edge_failover_drill_impl(ctx):
     if talosctl == None:
         return 1
 
-    rc = _check_live_context(ctx, kubectl)
+    rc = _check_live_context_for(ctx, kubectl, ctx.args.kubeconfig, ctx.args.kube_api_server)
     if rc != 0:
         return rc
     if ctx.args.revision != "":
-        rc = _check_flux_revision(ctx, kubectl, ctx.args.revision)
+        rc = _check_flux_revision_for(ctx, kubectl, ctx.args.kubeconfig, ctx.args.revision, ctx.args.kube_api_server)
         if rc != 0:
             return rc
 
@@ -1281,11 +1285,11 @@ def _openbao_drill_impl(ctx):
     if kubectl == None:
         return 1
 
-    rc = _check_live_context(ctx, kubectl)
+    rc = _check_live_context_for(ctx, kubectl, ctx.args.kubeconfig, ctx.args.kube_api_server)
     if rc != 0:
         return rc
     if ctx.args.revision != "":
-        rc = _check_flux_revision(ctx, kubectl, ctx.args.revision)
+        rc = _check_flux_revision_for(ctx, kubectl, ctx.args.kubeconfig, ctx.args.revision, ctx.args.kube_api_server)
         if rc != 0:
             return rc
 
@@ -1303,6 +1307,8 @@ def _openbao_drill_impl(ctx):
         "--wait-timeout",
         ctx.args.wait_timeout,
     ]
+    if ctx.args.kube_api_server != "":
+        drill_args.extend(["--kube-api-server", ctx.args.kube_api_server])
     if ctx.args.kubeconfig != "":
         drill_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
     if ctx.args.snapshot_name != "":
@@ -1321,11 +1327,11 @@ def _openbao_observability_drill_impl(ctx):
     if kubectl == None:
         return 1
 
-    rc = _check_live_context(ctx, kubectl)
+    rc = _check_live_context_for(ctx, kubectl, ctx.args.kubeconfig, ctx.args.kube_api_server)
     if rc != 0:
         return rc
     if ctx.args.revision != "":
-        rc = _check_flux_revision(ctx, kubectl, ctx.args.revision)
+        rc = _check_flux_revision_for(ctx, kubectl, ctx.args.kubeconfig, ctx.args.revision, ctx.args.kube_api_server)
         if rc != 0:
             return rc
 
@@ -1351,6 +1357,8 @@ def _openbao_observability_drill_impl(ctx):
         "--port-forward-ready-timeout",
         ctx.args.port_forward_ready_timeout,
     ]
+    if ctx.args.kube_api_server != "":
+        drill_args.extend(["--kube-api-server", ctx.args.kube_api_server])
     if ctx.args.kubeconfig != "":
         drill_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
 
@@ -1374,11 +1382,11 @@ def _openbao_bootstrap_impl(ctx):
     if endpoint == None:
         return 1
 
-    rc = _check_live_context(ctx, kubectl)
+    rc = _check_live_context_for(ctx, kubectl, ctx.args.kubeconfig, ctx.args.kube_api_server)
     if rc != 0:
         return rc
     if ctx.args.revision != "":
-        rc = _check_flux_revision(ctx, kubectl, ctx.args.revision)
+        rc = _check_flux_revision_for(ctx, kubectl, ctx.args.kubeconfig, ctx.args.revision, ctx.args.kube_api_server)
         if rc != 0:
             return rc
 
@@ -1418,6 +1426,8 @@ def _openbao_bootstrap_impl(ctx):
         "--port-forward-ready-timeout",
         ctx.args.port_forward_ready_timeout,
     ]
+    if ctx.args.kube_api_server != "":
+        bootstrap_args.extend(["--kube-api-server", ctx.args.kube_api_server])
     if ctx.args.kubeconfig != "":
         bootstrap_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
 
@@ -1441,6 +1451,10 @@ def _openbao_cutover_impl(ctx):
         ctx.args.flux_namespace,
         "--openbao-namespace",
         ctx.args.openbao_namespace,
+        "--openbao-helmrelease",
+        ctx.args.openbao_helmrelease,
+        "--openbao-statefulset",
+        ctx.args.openbao_statefulset,
         "--controller-deployment",
         ctx.args.controller_deployment,
         "--phase",
@@ -1513,6 +1527,7 @@ openbao_bootstrap = task(
     summary = "Bootstrap the OpenBao ops-controller identity through the interim OpenTofu root.",
     args = {
         "auth_path": args.string(default = "kubernetes", description = "OpenBao Kubernetes auth mount path."),
+        "kube_api_server": args.string(default = "", description = "Optional Kubernetes API server override for off-VLAN proof runs."),
         "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
         "login_verify_timeout": args.string(default = "15s", description = "Timeout for post-apply OpenBao Kubernetes login verification."),
         "mode": args.string(default = "apply", description = "OpenTofu operation: plan or apply."),
@@ -1542,7 +1557,9 @@ openbao_cutover = task(
         "flux_namespace": args.string(default = "cozy-fluxcd", description = "Flux namespace."),
         "kube_api_server": args.string(default = "", description = "Optional Kubernetes API server override for off-VLAN proof runs."),
         "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
+        "openbao_helmrelease": args.string(default = "guardian-openbao", description = "OpenBao HelmRelease name."),
         "openbao_namespace": args.string(default = "tenant-guardian", description = "OpenBao namespace."),
+        "openbao_statefulset": args.string(default = "guardian-openbao", description = "OpenBao StatefulSet name."),
         "phase": args.string(default = "converged", description = "Cutover phase to verify: bootstrap-required or converged."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
         "required_kustomizations": args.string(default = "", description = "Optional comma-separated Flux Kustomizations required for cutover proof."),
@@ -1738,6 +1755,7 @@ openbao_drill = task(
     group = ["infra"],
     summary = "Run OpenBao status or Raft snapshot drills using native bao commands.",
     args = {
+        "kube_api_server": args.string(default = "", description = "Optional Kubernetes API server override for off-VLAN proof runs."),
         "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
         "mode": args.string(default = "status", description = "Drill mode: status or snapshot."),
         "namespace": args.string(default = "tenant-guardian", description = "OpenBao namespace."),
@@ -1755,6 +1773,7 @@ openbao_observability_drill = task(
     group = ["infra"],
     summary = "Verify OpenBao metrics, audit tailing, ops-controller metrics, and VictoriaLogs ingestion.",
     args = {
+        "kube_api_server": args.string(default = "", description = "Optional Kubernetes API server override for off-VLAN proof runs."),
         "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
         "monitoring_namespace": args.string(default = "tenant-root", description = "Cozystack monitoring namespace hosting vmselect/vlselect."),
         "namespace": args.string(default = "tenant-guardian", description = "OpenBao namespace."),

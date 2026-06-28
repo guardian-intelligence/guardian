@@ -47,6 +47,8 @@ type cutoverConfig struct {
 	RequestTimeout         string
 	FluxNamespace          string
 	OpenBaoNamespace       string
+	OpenBaoHelmRelease     string
+	OpenBaoStatefulSet     string
 	ControllerDeployment   string
 	ExpectedRevision       string
 	Phase                  string
@@ -71,6 +73,7 @@ type kubeObject struct {
 		Name string `json:"name"`
 	} `json:"metadata"`
 	Spec struct {
+		Replicas int `json:"replicas"`
 		Template struct {
 			Spec struct {
 				Containers []containerSpec `json:"containers"`
@@ -89,6 +92,9 @@ type objectStatus struct {
 	LastAppliedRevision string      `json:"lastAppliedRevision"`
 	ReadyReplicas       int         `json:"readyReplicas"`
 	Replicas            int         `json:"replicas"`
+	UpdatedReplicas     int         `json:"updatedReplicas"`
+	CurrentRevision     string      `json:"currentRevision"`
+	UpdateRevision      string      `json:"updateRevision"`
 	LastError           string      `json:"lastError"`
 	Conditions          []condition `json:"conditions"`
 }
@@ -110,6 +116,8 @@ func main() {
 	flag.StringVar(&cfg.RequestTimeout, "request-timeout", "15s", "kubectl API request timeout")
 	flag.StringVar(&cfg.FluxNamespace, "flux-namespace", "cozy-fluxcd", "Flux namespace")
 	flag.StringVar(&cfg.OpenBaoNamespace, "openbao-namespace", "tenant-guardian", "OpenBao namespace")
+	flag.StringVar(&cfg.OpenBaoHelmRelease, "openbao-helmrelease", "guardian-openbao", "OpenBao HelmRelease name")
+	flag.StringVar(&cfg.OpenBaoStatefulSet, "openbao-statefulset", "guardian-openbao", "OpenBao StatefulSet name")
 	flag.StringVar(&cfg.ControllerDeployment, "controller-deployment", "openbao-ops-controller", "OpenBao ops-controller Deployment name")
 	flag.StringVar(&cfg.ExpectedRevision, "expected-revision", "", "optional Git revision that all checked Flux Kustomizations must have applied")
 	flag.StringVar(&cfg.Phase, "phase", phaseConverged, "cutover phase to verify: bootstrap-required or converged")
@@ -142,6 +150,12 @@ func validateConfig(cfg cutoverConfig) error {
 	if cfg.OpenBaoNamespace == "" {
 		return errors.New("--openbao-namespace is required")
 	}
+	if cfg.OpenBaoHelmRelease == "" {
+		return errors.New("--openbao-helmrelease is required")
+	}
+	if cfg.OpenBaoStatefulSet == "" {
+		return errors.New("--openbao-statefulset is required")
+	}
 	if cfg.ControllerDeployment == "" {
 		return errors.New("--controller-deployment is required")
 	}
@@ -168,13 +182,29 @@ func runCutoverProof(ctx context.Context, cfg cutoverConfig) error {
 	}
 
 	fmt.Printf("guardian openbao cutover proof\n")
-	fmt.Printf("phase=%s fluxNamespace=%s openbaoNamespace=%s controllerDeployment=%s\n", cfg.Phase, cfg.FluxNamespace, cfg.OpenBaoNamespace, cfg.ControllerDeployment)
+	fmt.Printf("phase=%s fluxNamespace=%s openbaoNamespace=%s openbaoHelmRelease=%s openbaoStatefulSet=%s controllerDeployment=%s\n", cfg.Phase, cfg.FluxNamespace, cfg.OpenBaoNamespace, cfg.OpenBaoHelmRelease, cfg.OpenBaoStatefulSet, cfg.ControllerDeployment)
 
 	fluxRaw, err := runner.output(ctx, "Flux Kustomizations", "-n", cfg.FluxNamespace, "get", "kustomizations.kustomize.toolkit.fluxcd.io", "-o", "json")
 	if err != nil {
 		return err
 	}
 	if err := validateFluxKustomizations(fluxRaw, cfg.RequiredKustomizations, cfg.ExpectedRevision); err != nil {
+		return err
+	}
+
+	helmReleaseRaw, err := runner.output(ctx, "OpenBao HelmRelease", "-n", cfg.OpenBaoNamespace, "get", "helmreleases.helm.toolkit.fluxcd.io/"+cfg.OpenBaoHelmRelease, "-o", "json")
+	if err != nil {
+		return err
+	}
+	if err := validateReadyCondition(helmReleaseRaw, "HelmRelease", cfg.OpenBaoHelmRelease); err != nil {
+		return err
+	}
+
+	statefulSetRaw, err := runner.output(ctx, "OpenBao StatefulSet", "-n", cfg.OpenBaoNamespace, "get", "statefulset.apps/"+cfg.OpenBaoStatefulSet, "-o", "json")
+	if err != nil {
+		return err
+	}
+	if err := validateStatefulSetRolled(statefulSetRaw, cfg.OpenBaoStatefulSet); err != nil {
 		return err
 	}
 
@@ -240,6 +270,47 @@ func validateDeploymentReady(raw string, name string) error {
 		return fmt.Errorf("Deployment %q manager image = %q, want digest-pinned image", name, image)
 	}
 	fmt.Printf("OpenBao ops-controller ready: deployment=%s image=%s replicas=%d\n", name, image, deployment.Status.Replicas)
+	return nil
+}
+
+func validateReadyCondition(raw string, kind string, name string) error {
+	var item kubeObject
+	if err := json.Unmarshal([]byte(raw), &item); err != nil {
+		return fmt.Errorf("parse %s %q: %w", kind, name, err)
+	}
+	ready := conditionByType(item.Status.Conditions, "Ready")
+	if ready == nil || ready.Status != "True" {
+		return fmt.Errorf("%s %q Ready = %s reason=%s", kind, name, conditionStatus(ready), conditionReason(ready))
+	}
+	fmt.Printf("%s ready: %s\n", kind, name)
+	return nil
+}
+
+func validateStatefulSetRolled(raw string, name string) error {
+	var statefulSet kubeObject
+	if err := json.Unmarshal([]byte(raw), &statefulSet); err != nil {
+		return fmt.Errorf("parse StatefulSet %q: %w", name, err)
+	}
+	replicas := statefulSet.Spec.Replicas
+	if replicas == 0 {
+		replicas = statefulSet.Status.Replicas
+	}
+	if replicas == 0 {
+		return fmt.Errorf("StatefulSet %q has zero desired replicas", name)
+	}
+	if statefulSet.Status.ReadyReplicas != replicas {
+		return fmt.Errorf("StatefulSet %q readyReplicas=%d replicas=%d", name, statefulSet.Status.ReadyReplicas, replicas)
+	}
+	if statefulSet.Status.UpdatedReplicas != replicas {
+		return fmt.Errorf("StatefulSet %q updatedReplicas=%d replicas=%d", name, statefulSet.Status.UpdatedReplicas, replicas)
+	}
+	if statefulSet.Status.CurrentRevision == "" || statefulSet.Status.UpdateRevision == "" {
+		return fmt.Errorf("StatefulSet %q has empty rollout revisions current=%q update=%q", name, statefulSet.Status.CurrentRevision, statefulSet.Status.UpdateRevision)
+	}
+	if statefulSet.Status.CurrentRevision != statefulSet.Status.UpdateRevision {
+		return fmt.Errorf("StatefulSet %q currentRevision=%q updateRevision=%q", name, statefulSet.Status.CurrentRevision, statefulSet.Status.UpdateRevision)
+	}
+	fmt.Printf("OpenBao StatefulSet rolled: statefulSet=%s replicas=%d revision=%s\n", name, replicas, statefulSet.Status.CurrentRevision)
 	return nil
 }
 

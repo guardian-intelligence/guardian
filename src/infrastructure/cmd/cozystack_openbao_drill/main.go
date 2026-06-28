@@ -21,6 +21,7 @@ const baoAddr = "http://127.0.0.1:8200"
 type openBaoConfig struct {
 	Kubectl        string
 	Kubeconfig     string
+	KubeAPIServer  string
 	RequestTimeout string
 	WaitTimeout    string
 	Namespace      string
@@ -47,6 +48,7 @@ func main() {
 	var cfg openBaoConfig
 	flag.StringVar(&cfg.Kubectl, "kubectl", "", "path to kubectl")
 	flag.StringVar(&cfg.Kubeconfig, "kubeconfig", "", "kubeconfig for guardian-mgmt")
+	flag.StringVar(&cfg.KubeAPIServer, "kube-api-server", "", "optional Kubernetes API server override for off-VLAN proof runs")
 	flag.StringVar(&cfg.RequestTimeout, "request-timeout", "15s", "kubectl API request timeout")
 	flag.StringVar(&cfg.WaitTimeout, "wait-timeout", "5m", "timeout for OpenBao StatefulSet readiness")
 	flag.StringVar(&cfg.Namespace, "namespace", "tenant-guardian", "OpenBao namespace")
@@ -101,6 +103,7 @@ func runDrill(ctx context.Context, cfg openBaoConfig) error {
 	runner := kubectlRunner{
 		bin:            cfg.Kubectl,
 		kubeconfig:     cfg.Kubeconfig,
+		kubeAPIServer:  cfg.KubeAPIServer,
 		requestTimeout: cfg.RequestTimeout,
 		namespace:      cfg.Namespace,
 	}
@@ -371,6 +374,7 @@ func shellQuote(value string) string {
 type kubectlRunner struct {
 	bin            string
 	kubeconfig     string
+	kubeAPIServer  string
 	requestTimeout string
 	namespace      string
 }
@@ -379,6 +383,9 @@ func (r kubectlRunner) baseArgs(args ...string) []string {
 	out := make([]string, 0, len(args)+6)
 	if r.kubeconfig != "" {
 		out = append(out, "--kubeconfig", r.kubeconfig)
+	}
+	if r.kubeAPIServer != "" {
+		out = append(out, "--server", r.kubeAPIServer)
 	}
 	if r.requestTimeout != "" {
 		out = append(out, "--request-timeout="+r.requestTimeout)

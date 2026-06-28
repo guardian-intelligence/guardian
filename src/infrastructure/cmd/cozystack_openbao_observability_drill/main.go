@@ -23,6 +23,7 @@ import (
 type drillConfig struct {
 	Kubectl              string
 	Kubeconfig           string
+	KubeAPIServer        string
 	RequestTimeout       string
 	WaitTimeout          string
 	PollTimeout          time.Duration
@@ -55,6 +56,7 @@ type queryCheck struct {
 type kubectlRunner struct {
 	bin            string
 	kubeconfig     string
+	kubeAPIServer  string
 	requestTimeout string
 	namespace      string
 }
@@ -72,6 +74,7 @@ func main() {
 	var portForwardReadyWait string
 	flag.StringVar(&cfg.Kubectl, "kubectl", "", "path to kubectl")
 	flag.StringVar(&cfg.Kubeconfig, "kubeconfig", "", "kubeconfig for guardian-mgmt")
+	flag.StringVar(&cfg.KubeAPIServer, "kube-api-server", "", "optional Kubernetes API server override for off-VLAN proof runs")
 	flag.StringVar(&cfg.RequestTimeout, "request-timeout", "15s", "kubectl API request timeout")
 	flag.StringVar(&cfg.WaitTimeout, "wait-timeout", "10m", "timeout for readiness waits")
 	flag.StringVar(&pollTimeout, "poll-timeout", "5m", "timeout waiting for VictoriaMetrics and VictoriaLogs ingestion")
@@ -147,6 +150,7 @@ func runDrill(ctx context.Context, cfg drillConfig) error {
 	openbaoRunner := kubectlRunner{
 		bin:            cfg.Kubectl,
 		kubeconfig:     cfg.Kubeconfig,
+		kubeAPIServer:  cfg.KubeAPIServer,
 		requestTimeout: cfg.RequestTimeout,
 		namespace:      cfg.Namespace,
 	}
@@ -569,6 +573,9 @@ func (r kubectlRunner) baseArgs(args ...string) []string {
 	out := make([]string, 0, len(args)+6)
 	if r.kubeconfig != "" {
 		out = append(out, "--kubeconfig", r.kubeconfig)
+	}
+	if r.kubeAPIServer != "" {
+		out = append(out, "--server", r.kubeAPIServer)
 	}
 	if r.requestTimeout != "" {
 		out = append(out, "--request-timeout="+r.requestTimeout)

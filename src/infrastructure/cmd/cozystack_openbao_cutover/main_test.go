@@ -78,6 +78,35 @@ func TestValidateDeploymentReadyRequiresDigestPinnedManager(t *testing.T) {
 	}
 }
 
+func TestValidateReadyConditionRejectsFailedHelmRelease(t *testing.T) {
+	raw := `{"status":{"conditions":[{"type":"Ready","status":"False","reason":"RollbackSucceeded"}]}}`
+	err := validateReadyCondition(raw, "HelmRelease", "guardian-openbao")
+	if err == nil {
+		t.Fatalf("validateReadyCondition() accepted failed HelmRelease")
+	}
+	if !strings.Contains(err.Error(), "RollbackSucceeded") {
+		t.Fatalf("validateReadyCondition() error = %v, want rollback reason", err)
+	}
+}
+
+func TestValidateStatefulSetRolled(t *testing.T) {
+	raw := `{"spec":{"replicas":3},"status":{"readyReplicas":3,"updatedReplicas":3,"currentRevision":"guardian-openbao-new","updateRevision":"guardian-openbao-new"}}`
+	if err := validateStatefulSetRolled(raw, "guardian-openbao"); err != nil {
+		t.Fatalf("validateStatefulSetRolled() error = %v", err)
+	}
+}
+
+func TestValidateStatefulSetRolledRejectsMixedRevision(t *testing.T) {
+	raw := `{"spec":{"replicas":3},"status":{"readyReplicas":2,"updatedReplicas":1,"currentRevision":"guardian-openbao-old","updateRevision":"guardian-openbao-new"}}`
+	err := validateStatefulSetRolled(raw, "guardian-openbao")
+	if err == nil {
+		t.Fatalf("validateStatefulSetRolled() accepted mixed StatefulSet")
+	}
+	if !strings.Contains(err.Error(), "readyReplicas=2") {
+		t.Fatalf("validateStatefulSetRolled() error = %v, want readiness detail", err)
+	}
+}
+
 func TestKubectlRunnerArgs(t *testing.T) {
 	runner := kubectlRunner{
 		kubeconfig:     "/tmp/kubeconfig",

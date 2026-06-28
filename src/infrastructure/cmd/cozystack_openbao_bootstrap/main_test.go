@@ -235,10 +235,11 @@ func TestParseReadyEndpointSliceAddresses(t *testing.T) {
 func TestKubectlArgs(t *testing.T) {
 	runner := kubectlRunner{
 		kubeconfig:     "/kubeconfig",
+		kubeAPIServer:  "https://206.223.228.101:6443",
 		requestTimeout: "15s",
 		namespace:      "tenant-guardian",
 	}
-	want := []string{"--kubeconfig", "/kubeconfig", "--request-timeout=15s", "-n", "tenant-guardian", "get", "pods"}
+	want := []string{"--kubeconfig", "/kubeconfig", "--server", "https://206.223.228.101:6443", "--request-timeout=15s", "-n", "tenant-guardian", "get", "pods"}
 	if got := runner.args("get", "pods"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("kubectl args = %#v, want %#v", got, want)
 	}
@@ -247,11 +248,13 @@ func TestKubectlArgs(t *testing.T) {
 func TestOpenBaoPortForwardArgs(t *testing.T) {
 	runner := kubectlRunner{
 		kubeconfig:     "/kubeconfig",
+		kubeAPIServer:  "https://206.223.228.101:6443",
 		requestTimeout: "15s",
 		namespace:      "tenant-guardian",
 	}
 	want := []string{
 		"--kubeconfig", "/kubeconfig",
+		"--server", "https://206.223.228.101:6443",
 		"--request-timeout=15s",
 		"-n", "tenant-guardian",
 		"port-forward",

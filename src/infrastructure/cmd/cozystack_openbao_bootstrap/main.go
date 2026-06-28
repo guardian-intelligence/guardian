@@ -23,6 +23,7 @@ type bootstrapConfig struct {
 	Kubectl              string
 	Tofu                 string
 	Kubeconfig           string
+	KubeAPIServer        string
 	RequestTimeout       string
 	WaitTimeout          string
 	PortForwardReadyWait time.Duration
@@ -43,6 +44,7 @@ type bootstrapConfig struct {
 type kubectlRunner struct {
 	bin            string
 	kubeconfig     string
+	kubeAPIServer  string
 	requestTimeout string
 	namespace      string
 }
@@ -60,6 +62,7 @@ func main() {
 	flag.StringVar(&cfg.Kubectl, "kubectl", "", "path to kubectl")
 	flag.StringVar(&cfg.Tofu, "tofu", "", "path to the repo-pinned OpenTofu runner")
 	flag.StringVar(&cfg.Kubeconfig, "kubeconfig", "", "kubeconfig for guardian-mgmt")
+	flag.StringVar(&cfg.KubeAPIServer, "kube-api-server", "", "optional Kubernetes API server override for off-VLAN proof runs")
 	flag.StringVar(&cfg.RequestTimeout, "request-timeout", "15s", "kubectl API request timeout")
 	flag.StringVar(&cfg.WaitTimeout, "wait-timeout", "5m", "timeout waiting for OpenBao StatefulSet readiness")
 	flag.StringVar(&portForwardReadyWait, "port-forward-ready-timeout", "10s", "timeout waiting for kubectl port-forward readiness")
@@ -147,6 +150,7 @@ func runBootstrap(ctx context.Context, cfg bootstrapConfig) error {
 	runner := kubectlRunner{
 		bin:            cfg.Kubectl,
 		kubeconfig:     cfg.Kubeconfig,
+		kubeAPIServer:  cfg.KubeAPIServer,
 		requestTimeout: cfg.RequestTimeout,
 		namespace:      cfg.Namespace,
 	}
@@ -519,6 +523,9 @@ func (r kubectlRunner) args(args ...string) []string {
 	out := []string{}
 	if r.kubeconfig != "" {
 		out = append(out, "--kubeconfig", r.kubeconfig)
+	}
+	if r.kubeAPIServer != "" {
+		out = append(out, "--server", r.kubeAPIServer)
 	}
 	if r.requestTimeout != "" {
 		out = append(out, "--request-timeout="+r.requestTimeout)
