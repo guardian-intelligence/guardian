@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	baoapi "github.com/openbao/openbao/api/v2"
@@ -20,6 +21,17 @@ type Config struct {
 
 type Client struct {
 	api *baoapi.Client
+}
+
+type KubernetesAuthRole struct {
+	BackendPath                   string
+	RoleName                      string
+	BoundServiceAccountNames      []string
+	BoundServiceAccountNamespaces []string
+	Audience                      string
+	TokenPolicies                 []string
+	TokenTTL                      string
+	TokenMaxTTL                   string
 }
 
 func LoadConfigFromEnv() (Config, error) {
@@ -95,6 +107,107 @@ func (c *Client) DeletePolicy(ctx context.Context, name string) error {
 	return c.api.Sys().DeletePolicyWithContext(ctx, name)
 }
 
+func (c *Client) GetKubernetesAuthRole(ctx context.Context, backendPath string, roleName string) (KubernetesAuthRole, bool, error) {
+	path := kubernetesAuthRolePath(backendPath, roleName)
+	secret, err := c.api.Logical().ReadWithContext(ctx, path)
+	if err != nil {
+		return KubernetesAuthRole{}, false, err
+	}
+	if secret == nil || secret.Data == nil {
+		return KubernetesAuthRole{}, false, nil
+	}
+	return KubernetesAuthRole{
+		BackendPath:                   strings.Trim(backendPath, "/"),
+		RoleName:                      roleName,
+		BoundServiceAccountNames:      stringSliceFromSecret(secret.Data["bound_service_account_names"]),
+		BoundServiceAccountNamespaces: stringSliceFromSecret(secret.Data["bound_service_account_namespaces"]),
+		Audience:                      stringFromSecret(secret.Data["audience"]),
+		TokenPolicies:                 stringSliceFromSecret(secret.Data["token_policies"]),
+		TokenTTL:                      stringFromSecret(secret.Data["token_ttl"]),
+		TokenMaxTTL:                   stringFromSecret(secret.Data["token_max_ttl"]),
+	}, true, nil
+}
+
+func (c *Client) PutKubernetesAuthRole(ctx context.Context, role KubernetesAuthRole) error {
+	body := map[string]interface{}{
+		"bound_service_account_names":      role.BoundServiceAccountNames,
+		"bound_service_account_namespaces": role.BoundServiceAccountNamespaces,
+	}
+	if role.Audience != "" {
+		body["audience"] = role.Audience
+	}
+	if role.TokenPolicies != nil {
+		body["token_policies"] = role.TokenPolicies
+	}
+	if role.TokenTTL != "" {
+		body["token_ttl"] = role.TokenTTL
+	}
+	if role.TokenMaxTTL != "" {
+		body["token_max_ttl"] = role.TokenMaxTTL
+	}
+	_, err := c.api.Logical().WriteWithContext(ctx, kubernetesAuthRolePath(role.BackendPath, role.RoleName), body)
+	return err
+}
+
+func (c *Client) DeleteKubernetesAuthRole(ctx context.Context, backendPath string, roleName string) error {
+	_, err := c.api.Logical().DeleteWithContext(ctx, kubernetesAuthRolePath(backendPath, roleName))
+	return err
+}
+
 func loginPath(authPath string) string {
 	return "auth/" + strings.Trim(authPath, "/") + "/login"
+}
+
+func kubernetesAuthRolePath(backendPath string, roleName string) string {
+	return "auth/" + strings.Trim(backendPath, "/") + "/role/" + strings.Trim(roleName, "/")
+}
+
+func stringFromSecret(value interface{}) string {
+	switch v := value.(type) {
+	case string:
+		return v
+	case fmt.Stringer:
+		return v.String()
+	case int:
+		return strconv.Itoa(v)
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case float64:
+		if v == float64(int64(v)) {
+			return strconv.FormatInt(int64(v), 10)
+		}
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	default:
+		return ""
+	}
+}
+
+func stringSliceFromSecret(value interface{}) []string {
+	switch v := value.(type) {
+	case []string:
+		return append([]string(nil), v...)
+	case []interface{}:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if str, ok := item.(string); ok {
+				out = append(out, str)
+			}
+		}
+		return out
+	case string:
+		if v == "" {
+			return nil
+		}
+		parts := strings.Split(v, ",")
+		out := make([]string, 0, len(parts))
+		for _, part := range parts {
+			item := strings.TrimSpace(part)
+			if item != "" {
+				out = append(out, item)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
