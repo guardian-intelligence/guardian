@@ -2,6 +2,7 @@ package tests
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1228,6 +1229,10 @@ func testOpenBaoOpsControllerScaffold(t *testing.T) {
 
 	deployment := findObject(t, readManifests(t, base+"/deployment.yaml"), "Deployment", "", "openbao-ops-controller")
 	assertString(t, deployment, "openbao-ops-controller", "spec", "template", "spec", "serviceAccountName")
+	podSecurityContext := asManifest(t, valueAt(deployment, "spec", "template", "spec", "securityContext"), "openbao ops controller pod securityContext")
+	assertBool(t, podSecurityContext, true, "runAsNonRoot")
+	assertInt(t, podSecurityContext, 65532, "runAsUser")
+	assertInt(t, podSecurityContext, 65532, "runAsGroup")
 	containers := sliceAt(t, deployment, "spec", "template", "spec", "containers")
 	if len(containers) != 1 {
 		t.Fatalf("openbao ops controller containers = %#v, want one manager", containers)
@@ -1258,10 +1263,39 @@ func testOpenBaoOpsControllerScaffold(t *testing.T) {
 	image := asManifest(t, images[0], "openbao guardian-mgmt image override")
 	assertString(t, image, "guardian/openbao-ops-controller", "name")
 	assertString(t, image, "harbor.guardianintelligence.org/guardian/openbao-ops-controller", "newName")
-	assertString(t, image, "sha256:4bf8a4213772ec5cf404473f9a326a2657de1be18ab7a1a81bd60e0488a419a3", "digest")
+	assertString(t, image, "sha256:ef8eada670bf33d9fb5966362e3ad90282545274c2cf0feb078e59cbd835020b", "digest")
 	if valueAt(image, "newTag") != nil {
 		t.Fatalf("openbao guardian-mgmt overlay must pin by digest, not newTag")
 	}
+
+	assertOpenBaoOpsControllerImageConfig(t)
+}
+
+func assertOpenBaoOpsControllerImageConfig(t *testing.T) {
+	t.Helper()
+
+	const imageRel = "src/services/secrets/openbao/operator/image"
+
+	index := readJSONMap(t, imageRel+"/index.json")
+	manifests := sliceAt(t, index, "manifests")
+	if len(manifests) != 1 {
+		t.Fatalf("openbao ops controller image index manifests = %#v, want one manifest", manifests)
+	}
+	imageManifest := asManifest(t, manifests[0], "openbao ops controller image manifest descriptor")
+	manifestDigest := strings.TrimPrefix(stringAt(imageManifest, "digest"), "sha256:")
+	if manifestDigest == "" || manifestDigest == stringAt(imageManifest, "digest") {
+		t.Fatalf("openbao ops controller image manifest digest = %q, want sha256 digest", stringAt(imageManifest, "digest"))
+	}
+
+	manifest := readJSONMap(t, imageRel+"/blobs/sha256/"+manifestDigest)
+	configDescriptor := asManifest(t, valueAt(manifest, "config"), "openbao ops controller image config descriptor")
+	configDigest := strings.TrimPrefix(stringAt(configDescriptor, "digest"), "sha256:")
+	if configDigest == "" || configDigest == stringAt(configDescriptor, "digest") {
+		t.Fatalf("openbao ops controller image config digest = %q, want sha256 digest", stringAt(configDescriptor, "digest"))
+	}
+
+	config := readJSONMap(t, imageRel+"/blobs/sha256/"+configDigest)
+	assertString(t, config, "65532:65532", "config", "User")
 }
 
 func testOpenBaoOperationsCRs(t *testing.T) {
@@ -1851,6 +1885,16 @@ func readYAMLMap(t *testing.T, rel string) manifest {
 
 	var doc manifest
 	if err := yaml.Unmarshal(readRunfile(t, rel), &doc); err != nil {
+		t.Fatalf("parse %s: %v", rel, err)
+	}
+	return doc
+}
+
+func readJSONMap(t *testing.T, rel string) manifest {
+	t.Helper()
+
+	var doc manifest
+	if err := json.Unmarshal(readRunfile(t, rel), &doc); err != nil {
 		t.Fatalf("parse %s: %v", rel, err)
 	}
 	return doc
