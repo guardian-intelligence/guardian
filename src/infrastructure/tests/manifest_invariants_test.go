@@ -1050,6 +1050,8 @@ func testOpenBao(t *testing.T) {
 	assertString(t, hr, "ExternalArtifact", "spec", "chartRef", "kind")
 	assertString(t, hr, "cozystack-openbao-application-default-openbao-system", "spec", "chartRef", "name")
 	assertString(t, hr, "cozy-system", "spec", "chartRef", "namespace")
+	assertBool(t, hr, true, "spec", "upgrade", "disableWait")
+	assertInt(t, hr, 0, "spec", "upgrade", "remediation", "retries")
 	assertString(t, hr, "guardian-openbao", "spec", "values", "openbao", "fullnameOverride")
 	assertBool(t, hr, false, "spec", "values", "openbao", "ui", "enabled")
 	assertBool(t, hr, false, "spec", "values", "openbao", "injector", "enabled")
