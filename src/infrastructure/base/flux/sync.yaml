@@ -151,6 +151,10 @@ spec:
       kind: HelmRelease
       name: guardian-openbao
       namespace: tenant-guardian
+    - apiVersion: apps/v1
+      kind: StatefulSet
+      name: guardian-openbao
+      namespace: tenant-guardian
   timeout: 10m
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1

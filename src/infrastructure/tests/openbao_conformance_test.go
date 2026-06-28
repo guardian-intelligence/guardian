@@ -47,7 +47,8 @@ func TestOpenBaoStaticSealTLSAndStorageConformance(t *testing.T) {
 			`sys/policies/acl/guardian-secret-importer`,
 			`token_ttl = "600"`,
 			`tls_disable = false`,
-			`leader_api_addr = "https://guardian-openbao-0.guardian-openbao-internal:8200"`,
+			`leader_api_addr = "https://guardian-openbao-active.tenant-guardian.svc:8200"`,
+			`leader_tls_servername = "guardian-openbao-active.tenant-guardian.svc"`,
 		} {
 		assertTextContains(t, raw, want, path)
 	}
@@ -69,6 +70,26 @@ func TestOpenBaoLocalStorageClassConformance(t *testing.T) {
 	assertNestedString(t, sc, "storage", "parameters", "linstor.csi.linbit.com/layerList")
 }
 
+func TestOpenBaoTenantAllowsStaticSealHostPathConformance(t *testing.T) {
+	path := runfilePath("src/infrastructure/base/app-patches/tenant-guardian-namespace-pod-security.yaml")
+	raw := readText(t, path)
+	doc := singleYAMLDoc(t, path)
+
+	assertNestedString(t, doc, "tenant-guardian", "metadata", "name")
+	assertNestedString(t, doc, "tenant-root", "metadata", "namespace")
+	for _, want := range []string{
+		"kind: Namespace",
+		"name: tenant-guardian",
+		"path: /metadata/labels/pod-security.kubernetes.io~1enforce",
+		"value: privileged",
+		"path: /metadata/labels/pod-security.kubernetes.io~1audit",
+		"value: baseline",
+		"path: /metadata/labels/pod-security.kubernetes.io~1warn",
+	} {
+		assertTextContains(t, raw, want, path)
+	}
+}
+
 func TestOpenBaoFluxOrderingConformance(t *testing.T) {
 	docs := yamlDocs(t, runfilePath("src/infrastructure/base/flux/sync.yaml"))
 
@@ -77,6 +98,7 @@ func TestOpenBaoFluxOrderingConformance(t *testing.T) {
 	assertHealthCheck(t, system, "cert-manager.io/v1", "Certificate", "guardian-openbao-ca", "tenant-guardian")
 	assertHealthCheck(t, system, "cert-manager.io/v1", "Certificate", "guardian-openbao-api", "tenant-guardian")
 	assertHealthCheck(t, system, "helm.toolkit.fluxcd.io/v2", "HelmRelease", "guardian-openbao", "tenant-guardian")
+	assertHealthCheck(t, system, "apps/v1", "StatefulSet", "guardian-openbao", "tenant-guardian")
 
 	ops := findDoc(t, docs, "Kustomization", "guardian-openbao-ops")
 	assertNestedBool(t, ops, true, "spec", "wait")

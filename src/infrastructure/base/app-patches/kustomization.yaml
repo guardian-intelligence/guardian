@@ -3,3 +3,4 @@ kind: Kustomization
 resources:
   - clickhouse-system-bucket-endpoint.yaml
   - ingress-origin-edge.yaml
+  - tenant-guardian-namespace-pod-security.yaml
