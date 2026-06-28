@@ -24,6 +24,7 @@ type MountTuneReconciler struct {
 	client.Client
 	Scheme  *runtime.Scheme
 	OpenBao func(context.Context) (MountTuneClient, error)
+	Mode    ReconcileMode
 }
 
 func (r *MountTuneReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -69,6 +70,17 @@ func (r *MountTuneReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 	if !found {
 		err := fmt.Errorf("OpenBao mount %q does not exist", mountPath)
+		if !r.Mode.AllowsWrites() {
+			return r.updateMountTuneStatus(ctx, &tune, mountTuneStatusInput{
+				authenticated:   metav1.ConditionTrue,
+				applied:         metav1.ConditionFalse,
+				drift:           metav1.ConditionTrue,
+				ready:           metav1.ConditionFalse,
+				reason:          "DriftDetected",
+				message:         err.Error(),
+				lastAppliedHash: specHash(tune.Spec),
+			})
+		}
 		return r.updateMountTuneErrorStatus(ctx, &tune, mountTuneStatusInput{
 			authenticated: metav1.ConditionTrue,
 			applied:       metav1.ConditionFalse,
@@ -98,6 +110,17 @@ func (r *MountTuneReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 	current.Description = mount.Description
 	if !tuneConfigEqual(current, desired, &tune.Spec.Tune) {
+		if !r.Mode.AllowsWrites() {
+			return r.updateMountTuneStatus(ctx, &tune, mountTuneStatusInput{
+				authenticated:   metav1.ConditionTrue,
+				applied:         metav1.ConditionFalse,
+				drift:           metav1.ConditionTrue,
+				ready:           metav1.ConditionFalse,
+				reason:          "DriftDetected",
+				message:         fmt.Sprintf("OpenBao mount tune for %q differs from desired state; observe mode left it unchanged.", mountPath),
+				lastAppliedHash: specHash(tune.Spec),
+			})
+		}
 		if err := openbaoClient.PutMountTune(ctx, mountPath, desired); err != nil {
 			return r.updateMountTuneErrorStatus(ctx, &tune, mountTuneStatusInput{
 				authenticated: metav1.ConditionTrue,
@@ -116,7 +139,7 @@ func (r *MountTuneReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		applied:         metav1.ConditionTrue,
 		drift:           metav1.ConditionFalse,
 		ready:           metav1.ConditionTrue,
-		reason:          "Applied",
+		reason:          appliedReason(r.Mode),
 		message:         fmt.Sprintf("OpenBao mount tune for %q is applied.", mountPath),
 		lastAppliedHash: specHash(tune.Spec),
 	})

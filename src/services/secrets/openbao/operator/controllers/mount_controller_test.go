@@ -128,6 +128,113 @@ func TestMountReconcilerSkipsMatchingMount(t *testing.T) {
 	}
 }
 
+func TestMountReconcilerObserveModeReportsMissingMountWithoutApplying(t *testing.T) {
+	ctx := context.Background()
+	scheme := testScheme(t)
+	obj := &openbaov1alpha1.OpenBaoMount{
+		ObjectMeta: metav1.ObjectMeta{Name: "kv", Namespace: "tenant-guardian"},
+		Spec: openbaov1alpha1.OpenBaoMountSpec{
+			Path:        "kv",
+			Type:        "kv-v2",
+			Description: "Guardian management cluster secret material.",
+			Tune: &openbaov1alpha1.OpenBaoTuneSpec{
+				DefaultLeaseTTL: "1h",
+			},
+		},
+	}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&openbaov1alpha1.OpenBaoMount{}).
+		WithObjects(obj).
+		Build()
+	openbao := &fakeMountClient{
+		mounts: map[string]bao.Mount{},
+		tunes:  map[string]bao.TuneConfig{},
+	}
+	reconciler := &MountReconciler{
+		Client: kube,
+		Scheme: scheme,
+		Mode:   ReconcileModeObserve,
+		OpenBao: func(context.Context) (MountClient, error) {
+			return openbao, nil
+		},
+	}
+
+	_, err := reconciler.Reconcile(ctx, requestFor(obj))
+	if err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if openbao.enables != 0 {
+		t.Fatalf("enables = %d, want 0", openbao.enables)
+	}
+	if openbao.tunePuts != 0 {
+		t.Fatalf("tunePuts = %d, want 0", openbao.tunePuts)
+	}
+	if _, ok := openbao.mounts["kv"]; ok {
+		t.Fatalf("mount was created in observe mode")
+	}
+
+	var got openbaov1alpha1.OpenBaoMount
+	if err := kube.Get(ctx, client.ObjectKeyFromObject(obj), &got); err != nil {
+		t.Fatalf("get reconciled mount: %v", err)
+	}
+	assertObservedDriftStatus(t, got.Status)
+}
+
+func TestMountReconcilerObserveModeReportsTuneDriftWithoutApplying(t *testing.T) {
+	ctx := context.Background()
+	scheme := testScheme(t)
+	obj := &openbaov1alpha1.OpenBaoMount{
+		ObjectMeta: metav1.ObjectMeta{Name: "kv", Namespace: "tenant-guardian"},
+		Spec: openbaov1alpha1.OpenBaoMountSpec{
+			Path:        "kv",
+			Type:        "kv-v2",
+			Description: "Guardian management cluster secret material.",
+			Tune: &openbaov1alpha1.OpenBaoTuneSpec{
+				DefaultLeaseTTL: "1h",
+			},
+		},
+	}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&openbaov1alpha1.OpenBaoMount{}).
+		WithObjects(obj).
+		Build()
+	openbao := &fakeMountClient{
+		mounts: map[string]bao.Mount{
+			"kv": desiredMount(obj),
+		},
+		tunes: map[string]bao.TuneConfig{
+			"kv": {Description: obj.Spec.Description, DefaultLeaseTTL: "1800"},
+		},
+	}
+	reconciler := &MountReconciler{
+		Client: kube,
+		Scheme: scheme,
+		Mode:   ReconcileModeObserve,
+		OpenBao: func(context.Context) (MountClient, error) {
+			return openbao, nil
+		},
+	}
+
+	_, err := reconciler.Reconcile(ctx, requestFor(obj))
+	if err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if openbao.tunePuts != 0 {
+		t.Fatalf("tunePuts = %d, want 0", openbao.tunePuts)
+	}
+	if got := openbao.tunes["kv"].DefaultLeaseTTL; got != "1800" {
+		t.Fatalf("default lease ttl = %q, want unchanged old ttl", got)
+	}
+
+	var got openbaov1alpha1.OpenBaoMount
+	if err := kube.Get(ctx, client.ObjectKeyFromObject(obj), &got); err != nil {
+		t.Fatalf("get reconciled mount: %v", err)
+	}
+	assertObservedDriftStatus(t, got.Status)
+}
+
 func TestMountReconcilerReportsOptionsMismatch(t *testing.T) {
 	ctx := context.Background()
 	scheme := testScheme(t)
@@ -251,6 +358,53 @@ func TestMountReconcilerDeletePolicyDisablesMount(t *testing.T) {
 	}
 	if _, ok := openbao.mounts["delete-me"]; ok {
 		t.Fatalf("delete-me mount still exists")
+	}
+}
+
+func TestMountReconcilerObserveModeDeletePolicyRemovesFinalizerWithoutDisablingMount(t *testing.T) {
+	ctx := context.Background()
+	scheme := testScheme(t)
+	obj := &openbaov1alpha1.OpenBaoMount{
+		ObjectMeta: metav1.ObjectMeta{Name: "delete-me", Namespace: "tenant-guardian"},
+		Spec: openbaov1alpha1.OpenBaoMountSpec{
+			Path:           "delete-me",
+			Type:           "kv-v2",
+			DeletionPolicy: openbaov1alpha1.DeletionPolicyDelete,
+		},
+	}
+	controllerutil.AddFinalizer(obj, mountFinalizer)
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&openbaov1alpha1.OpenBaoMount{}).
+		WithObjects(obj).
+		Build()
+	openbao := &fakeMountClient{
+		mounts: map[string]bao.Mount{
+			"delete-me": {Path: "delete-me", Type: "kv"},
+		},
+		tunes: map[string]bao.TuneConfig{},
+	}
+	reconciler := &MountReconciler{
+		Client: kube,
+		Scheme: scheme,
+		Mode:   ReconcileModeObserve,
+		OpenBao: func(context.Context) (MountClient, error) {
+			return openbao, nil
+		},
+	}
+
+	_, err := reconciler.reconcileDelete(ctx, obj)
+	if err != nil {
+		t.Fatalf("reconcileDelete() error = %v", err)
+	}
+	if openbao.disables != 0 {
+		t.Fatalf("disables = %d, want 0", openbao.disables)
+	}
+	if _, ok := openbao.mounts["delete-me"]; !ok {
+		t.Fatalf("delete-me mount was removed in observe mode")
+	}
+	if controllerutil.ContainsFinalizer(obj, mountFinalizer) {
+		t.Fatalf("finalizer was not removed in observe mode")
 	}
 }
 

@@ -120,6 +120,59 @@ func TestMountTuneReconcilerSkipsMatchingTune(t *testing.T) {
 	}
 }
 
+func TestMountTuneReconcilerObserveModeReportsDriftWithoutApplying(t *testing.T) {
+	ctx := context.Background()
+	scheme := testScheme(t)
+	obj := &openbaov1alpha1.OpenBaoMountTune{
+		ObjectMeta: metav1.ObjectMeta{Name: "kv", Namespace: "tenant-guardian"},
+		Spec: openbaov1alpha1.OpenBaoMountTuneSpec{
+			MountPath: "kv",
+			Tune: openbaov1alpha1.OpenBaoTuneSpec{
+				DefaultLeaseTTL: "1h",
+				MaxLeaseTTL:     "2h",
+			},
+		},
+	}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&openbaov1alpha1.OpenBaoMountTune{}).
+		WithObjects(obj).
+		Build()
+	openbao := &fakeMountClient{
+		mounts: map[string]bao.Mount{
+			"kv": {Path: "kv", Type: "kv", Description: "Guardian management cluster secret material."},
+		},
+		tunes: map[string]bao.TuneConfig{
+			"kv": {Description: "Guardian management cluster secret material.", DefaultLeaseTTL: "1800"},
+		},
+	}
+	reconciler := &MountTuneReconciler{
+		Client: kube,
+		Scheme: scheme,
+		Mode:   ReconcileModeObserve,
+		OpenBao: func(context.Context) (MountTuneClient, error) {
+			return openbao, nil
+		},
+	}
+
+	_, err := reconciler.Reconcile(ctx, requestFor(obj))
+	if err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if openbao.tunePuts != 0 {
+		t.Fatalf("tunePuts = %d, want 0", openbao.tunePuts)
+	}
+	if got := openbao.tunes["kv"].DefaultLeaseTTL; got != "1800" {
+		t.Fatalf("default lease ttl = %q, want unchanged old ttl", got)
+	}
+
+	var got openbaov1alpha1.OpenBaoMountTune
+	if err := kube.Get(ctx, client.ObjectKeyFromObject(obj), &got); err != nil {
+		t.Fatalf("get reconciled mount tune: %v", err)
+	}
+	assertObservedDriftStatus(t, got.Status)
+}
+
 func TestMountTuneReconcilerReportsMissingMount(t *testing.T) {
 	ctx := context.Background()
 	scheme := testScheme(t)

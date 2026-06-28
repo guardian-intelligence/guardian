@@ -34,6 +34,7 @@ type AuthBackendReconciler struct {
 	client.Client
 	Scheme  *runtime.Scheme
 	OpenBao func(context.Context) (AuthBackendClient, error)
+	Mode    ReconcileMode
 }
 
 func (r *AuthBackendReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -55,7 +56,14 @@ func (r *AuthBackendReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return r.reconcileDelete(ctx, &backend)
 	}
 
-	if backend.Spec.DeletionPolicy == openbaov1alpha1.DeletionPolicyDelete && !controllerutil.ContainsFinalizer(&backend, authBackendFinalizer) {
+	if !r.Mode.AllowsWrites() && controllerutil.ContainsFinalizer(&backend, authBackendFinalizer) {
+		controllerutil.RemoveFinalizer(&backend, authBackendFinalizer)
+		if err := r.Update(ctx, &backend); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
+	}
+	if r.Mode.AllowsWrites() && backend.Spec.DeletionPolicy == openbaov1alpha1.DeletionPolicyDelete && !controllerutil.ContainsFinalizer(&backend, authBackendFinalizer) {
 		controllerutil.AddFinalizer(&backend, authBackendFinalizer)
 		if err := r.Update(ctx, &backend); err != nil {
 			return ctrl.Result{}, err
@@ -111,6 +119,17 @@ func (r *AuthBackendReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	if found && current.Type != desired.Type {
 		err := fmt.Errorf("OpenBao auth backend %q has type %q, want %q", desired.Path, current.Type, desired.Type)
+		if !r.Mode.AllowsWrites() {
+			return r.updateAuthBackendStatus(ctx, &backend, authBackendStatusInput{
+				authenticated:   metav1.ConditionTrue,
+				applied:         metav1.ConditionFalse,
+				drift:           metav1.ConditionTrue,
+				ready:           metav1.ConditionFalse,
+				reason:          "DriftDetected",
+				message:         err.Error(),
+				lastAppliedHash: specHash(backend.Spec),
+			})
+		}
 		return r.updateAuthBackendErrorStatus(ctx, &backend, authBackendStatusInput{
 			authenticated: metav1.ConditionTrue,
 			applied:       metav1.ConditionFalse,
@@ -123,6 +142,17 @@ func (r *AuthBackendReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	if !found {
+		if !r.Mode.AllowsWrites() {
+			return r.updateAuthBackendStatus(ctx, &backend, authBackendStatusInput{
+				authenticated:   metav1.ConditionTrue,
+				applied:         metav1.ConditionFalse,
+				drift:           metav1.ConditionTrue,
+				ready:           metav1.ConditionFalse,
+				reason:          "DriftDetected",
+				message:         fmt.Sprintf("OpenBao auth backend %q is missing; observe mode left it unchanged.", desired.Path),
+				lastAppliedHash: specHash(backend.Spec),
+			})
+		}
 		if err := openbaoClient.EnableAuthBackend(ctx, desired); err != nil {
 			return r.updateAuthBackendErrorStatus(ctx, &backend, authBackendStatusInput{
 				authenticated: metav1.ConditionTrue,
@@ -138,7 +168,8 @@ func (r *AuthBackendReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	if backend.Spec.Type == "kubernetes" && backend.Spec.Kubernetes != nil {
-		if err := r.reconcileKubernetesConfig(ctx, openbaoClient, &backend, desired.Path, desiredKubernetesAuthConfig(backend.Spec.Kubernetes)); err != nil {
+		stop, err := r.reconcileKubernetesConfig(ctx, openbaoClient, &backend, desired.Path, desiredKubernetesAuthConfig(backend.Spec.Kubernetes))
+		if err != nil || stop {
 			return ctrl.Result{}, err
 		}
 	}
@@ -162,6 +193,17 @@ func (r *AuthBackendReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 		currentTune.Description = current.Description
 		if !tuneConfigEqual(currentTune, desiredTune, backend.Spec.Tune) {
+			if !r.Mode.AllowsWrites() {
+				return r.updateAuthBackendStatus(ctx, &backend, authBackendStatusInput{
+					authenticated:   metav1.ConditionTrue,
+					applied:         metav1.ConditionFalse,
+					drift:           metav1.ConditionTrue,
+					ready:           metav1.ConditionFalse,
+					reason:          "DriftDetected",
+					message:         fmt.Sprintf("OpenBao auth backend %q tune differs from desired state; observe mode left it unchanged.", desired.Path),
+					lastAppliedHash: specHash(backend.Spec),
+				})
+			}
 			if err := openbaoClient.PutAuthTune(ctx, desired.Path, desiredTune); err != nil {
 				return r.updateAuthBackendErrorStatus(ctx, &backend, authBackendStatusInput{
 					authenticated: metav1.ConditionTrue,
@@ -181,7 +223,7 @@ func (r *AuthBackendReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		applied:         metav1.ConditionTrue,
 		drift:           metav1.ConditionFalse,
 		ready:           metav1.ConditionTrue,
-		reason:          "Applied",
+		reason:          appliedReason(r.Mode),
 		message:         fmt.Sprintf("OpenBao auth backend %q is applied.", desired.Path),
 		lastAppliedHash: specHash(backend.Spec),
 	})
@@ -193,7 +235,7 @@ func (r *AuthBackendReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func (r *AuthBackendReconciler) reconcileKubernetesConfig(ctx context.Context, openbaoClient AuthBackendClient, backend *openbaov1alpha1.OpenBaoAuthBackend, backendPath string, desired bao.KubernetesAuthConfig) error {
+func (r *AuthBackendReconciler) reconcileKubernetesConfig(ctx context.Context, openbaoClient AuthBackendClient, backend *openbaov1alpha1.OpenBaoAuthBackend, backendPath string, desired bao.KubernetesAuthConfig) (bool, error) {
 	current, found, err := openbaoClient.GetKubernetesAuthConfig(ctx, backendPath)
 	if err != nil {
 		_, statusErr := r.updateAuthBackendErrorStatus(ctx, backend, authBackendStatusInput{
@@ -205,10 +247,22 @@ func (r *AuthBackendReconciler) reconcileKubernetesConfig(ctx context.Context, o
 			message:       fmt.Sprintf("Failed to read OpenBao Kubernetes auth config for %q.", backendPath),
 			lastError:     err.Error(),
 		}, err)
-		return statusErr
+		return true, statusErr
 	}
 	if found && kubernetesAuthConfigEqual(current, desired) {
-		return nil
+		return false, nil
+	}
+	if !r.Mode.AllowsWrites() {
+		_, statusErr := r.updateAuthBackendStatus(ctx, backend, authBackendStatusInput{
+			authenticated:   metav1.ConditionTrue,
+			applied:         metav1.ConditionFalse,
+			drift:           metav1.ConditionTrue,
+			ready:           metav1.ConditionFalse,
+			reason:          "DriftDetected",
+			message:         fmt.Sprintf("OpenBao Kubernetes auth config for %q differs from desired state; observe mode left it unchanged.", backendPath),
+			lastAppliedHash: specHash(backend.Spec),
+		})
+		return true, statusErr
 	}
 	if err := openbaoClient.PutKubernetesAuthConfig(ctx, backendPath, desired); err != nil {
 		_, statusErr := r.updateAuthBackendErrorStatus(ctx, backend, authBackendStatusInput{
@@ -220,14 +274,18 @@ func (r *AuthBackendReconciler) reconcileKubernetesConfig(ctx context.Context, o
 			message:       fmt.Sprintf("Failed to apply OpenBao Kubernetes auth config for %q.", backendPath),
 			lastError:     err.Error(),
 		}, err)
-		return statusErr
+		return true, statusErr
 	}
-	return nil
+	return false, nil
 }
 
 func (r *AuthBackendReconciler) reconcileDelete(ctx context.Context, backend *openbaov1alpha1.OpenBaoAuthBackend) (ctrl.Result, error) {
 	if !controllerutil.ContainsFinalizer(backend, authBackendFinalizer) {
 		return ctrl.Result{}, nil
+	}
+	if !r.Mode.AllowsWrites() {
+		controllerutil.RemoveFinalizer(backend, authBackendFinalizer)
+		return ctrl.Result{}, r.Update(ctx, backend)
 	}
 	if backend.Spec.DeletionPolicy == openbaov1alpha1.DeletionPolicyDelete {
 		openbaoClient, err := r.OpenBao(ctx)

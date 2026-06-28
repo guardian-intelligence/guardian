@@ -30,6 +30,7 @@ type MountReconciler struct {
 	client.Client
 	Scheme  *runtime.Scheme
 	OpenBao func(context.Context) (MountClient, error)
+	Mode    ReconcileMode
 }
 
 func (r *MountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -51,7 +52,14 @@ func (r *MountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return r.reconcileDelete(ctx, &mount)
 	}
 
-	if mount.Spec.DeletionPolicy == openbaov1alpha1.DeletionPolicyDelete && !controllerutil.ContainsFinalizer(&mount, mountFinalizer) {
+	if !r.Mode.AllowsWrites() && controllerutil.ContainsFinalizer(&mount, mountFinalizer) {
+		controllerutil.RemoveFinalizer(&mount, mountFinalizer)
+		if err := r.Update(ctx, &mount); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
+	}
+	if r.Mode.AllowsWrites() && mount.Spec.DeletionPolicy == openbaov1alpha1.DeletionPolicyDelete && !controllerutil.ContainsFinalizer(&mount, mountFinalizer) {
 		controllerutil.AddFinalizer(&mount, mountFinalizer)
 		if err := r.Update(ctx, &mount); err != nil {
 			return ctrl.Result{}, err
@@ -95,6 +103,17 @@ func (r *MountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	if found && current.Type != desired.Type {
 		err := fmt.Errorf("OpenBao mount %q has type %q, want %q", desired.Path, current.Type, desired.Type)
+		if !r.Mode.AllowsWrites() {
+			return r.updateMountStatus(ctx, &mount, mountStatusInput{
+				authenticated:   metav1.ConditionTrue,
+				applied:         metav1.ConditionFalse,
+				drift:           metav1.ConditionTrue,
+				ready:           metav1.ConditionFalse,
+				reason:          "DriftDetected",
+				message:         err.Error(),
+				lastAppliedHash: specHash(mount.Spec),
+			})
+		}
 		return r.updateMountErrorStatus(ctx, &mount, mountStatusInput{
 			authenticated: metav1.ConditionTrue,
 			applied:       metav1.ConditionFalse,
@@ -107,6 +126,17 @@ func (r *MountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 	if found && !maps.Equal(current.Options, desired.Options) {
 		err := fmt.Errorf("OpenBao mount %q has options %#v, want %#v", desired.Path, current.Options, desired.Options)
+		if !r.Mode.AllowsWrites() {
+			return r.updateMountStatus(ctx, &mount, mountStatusInput{
+				authenticated:   metav1.ConditionTrue,
+				applied:         metav1.ConditionFalse,
+				drift:           metav1.ConditionTrue,
+				ready:           metav1.ConditionFalse,
+				reason:          "DriftDetected",
+				message:         err.Error(),
+				lastAppliedHash: specHash(mount.Spec),
+			})
+		}
 		return r.updateMountErrorStatus(ctx, &mount, mountStatusInput{
 			authenticated: metav1.ConditionTrue,
 			applied:       metav1.ConditionFalse,
@@ -119,6 +149,17 @@ func (r *MountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	if !found {
+		if !r.Mode.AllowsWrites() {
+			return r.updateMountStatus(ctx, &mount, mountStatusInput{
+				authenticated:   metav1.ConditionTrue,
+				applied:         metav1.ConditionFalse,
+				drift:           metav1.ConditionTrue,
+				ready:           metav1.ConditionFalse,
+				reason:          "DriftDetected",
+				message:         fmt.Sprintf("OpenBao mount %q is missing; observe mode left it unchanged.", desired.Path),
+				lastAppliedHash: specHash(mount.Spec),
+			})
+		}
 		if err := openbaoClient.EnableMount(ctx, desired); err != nil {
 			return r.updateMountErrorStatus(ctx, &mount, mountStatusInput{
 				authenticated: metav1.ConditionTrue,
@@ -152,6 +193,17 @@ func (r *MountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 		currentTune.Description = current.Description
 		if !tuneConfigEqual(currentTune, desiredTune, mount.Spec.Tune) {
+			if !r.Mode.AllowsWrites() {
+				return r.updateMountStatus(ctx, &mount, mountStatusInput{
+					authenticated:   metav1.ConditionTrue,
+					applied:         metav1.ConditionFalse,
+					drift:           metav1.ConditionTrue,
+					ready:           metav1.ConditionFalse,
+					reason:          "DriftDetected",
+					message:         fmt.Sprintf("OpenBao mount %q tune differs from desired state; observe mode left it unchanged.", desired.Path),
+					lastAppliedHash: specHash(mount.Spec),
+				})
+			}
 			if err := openbaoClient.PutMountTune(ctx, desired.Path, desiredTune); err != nil {
 				return r.updateMountErrorStatus(ctx, &mount, mountStatusInput{
 					authenticated: metav1.ConditionTrue,
@@ -171,7 +223,7 @@ func (r *MountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		applied:         metav1.ConditionTrue,
 		drift:           metav1.ConditionFalse,
 		ready:           metav1.ConditionTrue,
-		reason:          "Applied",
+		reason:          appliedReason(r.Mode),
 		message:         fmt.Sprintf("OpenBao mount %q is applied.", desired.Path),
 		lastAppliedHash: specHash(mount.Spec),
 	})
@@ -186,6 +238,10 @@ func (r *MountReconciler) SetupWithManager(mgr ctrl.Manager) error {
 func (r *MountReconciler) reconcileDelete(ctx context.Context, mount *openbaov1alpha1.OpenBaoMount) (ctrl.Result, error) {
 	if !controllerutil.ContainsFinalizer(mount, mountFinalizer) {
 		return ctrl.Result{}, nil
+	}
+	if !r.Mode.AllowsWrites() {
+		controllerutil.RemoveFinalizer(mount, mountFinalizer)
+		return ctrl.Result{}, r.Update(ctx, mount)
 	}
 	if mount.Spec.DeletionPolicy == openbaov1alpha1.DeletionPolicyDelete {
 		openbaoClient, err := r.OpenBao(ctx)

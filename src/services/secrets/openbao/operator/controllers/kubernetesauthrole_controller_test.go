@@ -116,6 +116,53 @@ func TestKubernetesAuthRoleReconcilerSkipsMatchingRole(t *testing.T) {
 	}
 }
 
+func TestKubernetesAuthRoleReconcilerObserveModeReportsMissingRoleWithoutApplying(t *testing.T) {
+	ctx := context.Background()
+	scheme := testScheme(t)
+	obj := &openbaov1alpha1.OpenBaoKubernetesAuthRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "external-dns", Namespace: "tenant-guardian"},
+		Spec: openbaov1alpha1.OpenBaoKubernetesAuthRoleSpec{
+			BackendPath:                   "kubernetes",
+			RoleName:                      "guardian-external-dns",
+			BoundServiceAccountNames:      []string{"external-dns-secrets"},
+			BoundServiceAccountNamespaces: []string{"external-dns"},
+			Audience:                      "openbao",
+			TokenPolicies:                 []string{"guardian-external-dns"},
+		},
+	}
+	kube := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&openbaov1alpha1.OpenBaoKubernetesAuthRole{}).
+		WithObjects(obj).
+		Build()
+	openbao := &fakeKubernetesAuthRoleClient{roles: map[string]bao.KubernetesAuthRole{}}
+	reconciler := &KubernetesAuthRoleReconciler{
+		Client: kube,
+		Scheme: scheme,
+		Mode:   ReconcileModeObserve,
+		OpenBao: func(context.Context) (KubernetesAuthRoleClient, error) {
+			return openbao, nil
+		},
+	}
+
+	_, err := reconciler.Reconcile(ctx, requestFor(obj))
+	if err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if openbao.puts != 0 {
+		t.Fatalf("puts = %d, want 0", openbao.puts)
+	}
+	if _, ok := openbao.roles["kubernetes/guardian-external-dns"]; ok {
+		t.Fatalf("role was created in observe mode")
+	}
+
+	var got openbaov1alpha1.OpenBaoKubernetesAuthRole
+	if err := kube.Get(ctx, client.ObjectKeyFromObject(obj), &got); err != nil {
+		t.Fatalf("get reconciled auth role: %v", err)
+	}
+	assertObservedDriftStatus(t, got.Status)
+}
+
 func TestKubernetesAuthRoleReconcilerAddsFinalizerForDeletePolicy(t *testing.T) {
 	ctx := context.Background()
 	scheme := testScheme(t)
