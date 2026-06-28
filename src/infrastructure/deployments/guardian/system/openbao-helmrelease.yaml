@@ -52,7 +52,7 @@ spec:
           enabled: true
           size: 10Gi
           storageClass: replicated
-        updateStrategyType: RollingUpdate
+        updateStrategyType: OnDelete
         extraPorts:
           - containerPort: 9101
             name: metrics

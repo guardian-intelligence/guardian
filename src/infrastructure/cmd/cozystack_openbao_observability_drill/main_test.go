@@ -1,6 +1,7 @@
 package main
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -115,5 +116,18 @@ func TestPrometheusValuePositive(t *testing.T) {
 	}
 	if prometheusValuePositive([]any{float64(1), "not-a-number"}) {
 		t.Fatal("invalid Prometheus value was accepted")
+	}
+}
+
+func TestKubectlBaseArgs(t *testing.T) {
+	got := kubectlRunner{
+		kubeconfig:     "/tmp/kubeconfig",
+		kubeAPIServer:  "https://206.223.228.101:6443",
+		requestTimeout: "5s",
+		namespace:      "tenant-root",
+	}.baseArgs("get", "pods")
+	want := []string{"--kubeconfig", "/tmp/kubeconfig", "--server", "https://206.223.228.101:6443", "--request-timeout=5s", "-n", "tenant-root", "get", "pods"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("baseArgs = %#v, want %#v", got, want)
 	}
 }

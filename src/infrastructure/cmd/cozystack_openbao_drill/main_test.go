@@ -197,10 +197,11 @@ func TestPodNameAndShellQuote(t *testing.T) {
 func TestKubectlBaseArgs(t *testing.T) {
 	got := kubectlRunner{
 		kubeconfig:     "/tmp/kubeconfig",
+		kubeAPIServer:  "https://206.223.228.101:6443",
 		requestTimeout: "5s",
 		namespace:      "tenant-guardian",
 	}.baseArgs("get", "pods")
-	want := []string{"--kubeconfig", "/tmp/kubeconfig", "--request-timeout=5s", "-n", "tenant-guardian", "get", "pods"}
+	want := []string{"--kubeconfig", "/tmp/kubeconfig", "--server", "https://206.223.228.101:6443", "--request-timeout=5s", "-n", "tenant-guardian", "get", "pods"}
 	if len(got) != len(want) {
 		t.Fatalf("baseArgs length = %d, want %d: %#v", len(got), len(want), got)
 	}
