@@ -1392,15 +1392,14 @@ func testOpenBaoOpsControllerDeployment(t *testing.T) {
 	image := asManifest(t, images[0], "openbao guardian-mgmt image override")
 	assertString(t, image, "guardian/openbao-ops-controller", "name")
 	assertString(t, image, "harbor.guardianintelligence.org/guardian/openbao-ops-controller", "newName")
-	assertString(t, image, "sha256:ef8eada670bf33d9fb5966362e3ad90282545274c2cf0feb078e59cbd835020b", "digest")
+	imageDigest := assertOpenBaoOpsControllerImageConfig(t)
+	assertString(t, image, imageDigest, "digest")
 	if valueAt(image, "newTag") != nil {
 		t.Fatalf("openbao guardian-mgmt overlay must pin by digest, not newTag")
 	}
-
-	assertOpenBaoOpsControllerImageConfig(t)
 }
 
-func assertOpenBaoOpsControllerImageConfig(t *testing.T) {
+func assertOpenBaoOpsControllerImageConfig(t *testing.T) string {
 	t.Helper()
 
 	const imageRel = "src/services/secrets/openbao/operator/image"
@@ -1425,6 +1424,7 @@ func assertOpenBaoOpsControllerImageConfig(t *testing.T) {
 
 	config := readJSONMap(t, imageRel+"/blobs/sha256/"+configDigest)
 	assertString(t, config, "65532:65532", "config", "User")
+	return stringAt(imageManifest, "digest")
 }
 
 func testOpenBaoOperationsCRs(t *testing.T) {
