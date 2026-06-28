@@ -27,11 +27,15 @@ through the raft set from the Flux-managed HelmRelease.
 
 ```sh
 kubectl --kubeconfig=src/infrastructure/clusters/ash/bootstrap/talm/kubeconfig \
-  -n tenant-guardian wait \
-  --for=jsonpath='{.status.readyReplicas}'=3 \
-  statefulset.apps/guardian-openbao \
-  --timeout=10m
+  -n tenant-guardian get pods \
+  -l app.kubernetes.io/name=openbao \
+  -o wide
 ```
+
+For a sealed pod, Kubernetes readiness can stay false until the unseal quorum is
+entered. Use the pod phase and container state to pick the pod that needs
+initialization or unseal; use the status drill below as the pass/fail gate after
+the keys are entered.
 
 ## Initialize Once
 
@@ -72,18 +76,17 @@ and unseal it before the next ordinal needs quorum capacity.
 ## Verify
 
 ```sh
-for pod in guardian-openbao-0 guardian-openbao-1 guardian-openbao-2; do
-  kubectl --kubeconfig=src/infrastructure/clusters/ash/bootstrap/talm/kubeconfig \
-    -n tenant-guardian exec "$pod" -- \
-    env BAO_ADDR=http://127.0.0.1:8200 \
-    bao status
-done
+aspect infra openbao-drill \
+  --mode status \
+  --revision "$(git rev-parse HEAD)" \
+  --kubeconfig=src/infrastructure/clusters/ash/bootstrap/talm/kubeconfig
 ```
 
 Pass criteria:
 
 - `Initialized` is `true` for every pod.
 - `Sealed` is `false` for every pod.
+- Every pod reports the OpenBao version declared by the StatefulSet template.
 - One pod is the active raft leader.
 
 When a root token is needed for bootstrap configuration, provide it only through
@@ -93,8 +96,20 @@ the operator environment:
 export BAO_TOKEN='<initial-root-token-from-break-glass-custody>'
 ```
 
-Then run the scoped bootstrap configuration tooling. Do not persist the root
-token after the bootstrap window.
+Then run the scoped bootstrap configuration tooling. This is the one-time bridge
+that creates the ops-controller policy and Kubernetes auth role; normal OpenBao
+state convergence belongs to Flux-applied CRs and the OpenBao ops controller.
+
+```sh
+aspect infra openbao-bootstrap \
+  --mode apply \
+  --revision "$(git rev-parse HEAD)" \
+  --kubeconfig=src/infrastructure/clusters/ash/bootstrap/talm/kubeconfig
+
+unset BAO_TOKEN VAULT_TOKEN
+```
+
+Do not persist the root token after the bootstrap window.
 
 ## Rotation And Loss
 
