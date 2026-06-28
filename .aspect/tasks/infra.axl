@@ -65,6 +65,8 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/load:http_load_scripts",
     "//src/infrastructure/edge:edge_health_targets",
     "//src/infrastructure/bootstrap/guardian-mgmt-openbao:root",
+    "//src/services/secrets/openbao/deploy/base:manifests",
+    "//src/services/secrets/openbao/deploy/guardian-mgmt:manifests",
 ]
 INFRA_TESTS = [
     "//src/infrastructure/cmd/cozystack_backup_drill:cozystack_backup_drill_test",
@@ -523,6 +525,8 @@ def _render_kustomizations(ctx):
     for path in [
         "src/infrastructure/base",
         "src/infrastructure/deployments/guardian/system",
+        "src/services/secrets/openbao/deploy/base",
+        "src/services/secrets/openbao/deploy/guardian-mgmt",
         # Compatibility bridges for live Flux Kustomizations while reverting
         # the ASH directory cutover back to src/infrastructure/base.
         "src/infrastructure/clusters/ash/root/cozystack",

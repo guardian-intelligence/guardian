@@ -62,6 +62,7 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("root tenant core services", testRootTenantCoreServices)
 	t.Run("observability", testObservability)
 	t.Run("openbao", testOpenBao)
+	t.Run("openbao ops controller scaffold", testOpenBaoOpsControllerScaffold)
 	t.Run("openbao opentofu bootstrap", testOpenBaoOpenTofuBootstrap)
 	t.Run("flux handoff", testFluxHandoff)
 }
@@ -1052,6 +1053,86 @@ func testOpenBao(t *testing.T) {
 	assertString(t, sa, "openbao-ops-controller", "metadata", "name")
 	assertNoObject(t, rbac, "ClusterRole", "", "openbao-ops-controller")
 	assertNoObject(t, rbac, "ClusterRoleBinding", "", "openbao-ops-controller")
+}
+
+func testOpenBaoOpsControllerScaffold(t *testing.T) {
+	const base = "src/services/secrets/openbao/deploy/base"
+	crdFiles := map[string]string{
+		"OpenBaoAuditDevice":        base + "/crds/openbao.guardian.dev_auditdevices.yaml",
+		"OpenBaoAuthBackend":        base + "/crds/openbao.guardian.dev_authbackends.yaml",
+		"OpenBaoKubernetesAuthRole": base + "/crds/openbao.guardian.dev_kubernetesauthroles.yaml",
+		"OpenBaoMount":              base + "/crds/openbao.guardian.dev_mounts.yaml",
+		"OpenBaoMountTune":          base + "/crds/openbao.guardian.dev_mounttunes.yaml",
+		"OpenBaoPolicy":             base + "/crds/openbao.guardian.dev_policies.yaml",
+	}
+	for kind, path := range crdFiles {
+		docs := readManifests(t, path)
+		crd := findObject(t, docs, "CustomResourceDefinition", "", stringAt(docs[0], "metadata", "name"))
+		assertString(t, crd, "openbao.guardian.dev", "spec", "group")
+		assertString(t, crd, "Namespaced", "spec", "scope")
+		assertString(t, crd, kind, "spec", "names", "kind")
+		versions := sliceAt(t, crd, "spec", "versions")
+		if len(versions) != 1 {
+			t.Fatalf("%s versions = %#v, want one storage version", path, versions)
+		}
+		version := asManifest(t, versions[0], path+" version")
+		assertString(t, version, "v1alpha1", "name")
+		assertBool(t, version, true, "served")
+		assertBool(t, version, true, "storage")
+		if valueAt(version, "subresources", "status") == nil {
+			t.Fatalf("%s must enable the status subresource", path)
+		}
+		status := asManifest(t, valueAt(version, "schema", "openAPIV3Schema", "properties", "status"), path+" status schema")
+		for _, field := range []string{"conditions", "observedGeneration", "lastAppliedHash", "lastError"} {
+			if valueAt(status, "properties", field) == nil {
+				t.Fatalf("%s status schema missing %s", path, field)
+			}
+		}
+		text := string(readRunfile(t, path))
+		for _, forbidden := range []string{"tokenReviewerJWT", "clientSecret", "password", "rootToken"} {
+			assertTextNotContains(t, text, forbidden, path)
+		}
+	}
+
+	rbac := readManifests(t, base+"/rbac.yaml")
+	role := findObject(t, rbac, "Role", "", "openbao-ops-controller")
+	rules := sliceAt(t, role, "rules")
+	for _, value := range rules {
+		rule := asManifest(t, value, "openbao ops controller rule")
+		for _, field := range []string{"apiGroups", "resources", "verbs"} {
+			for _, item := range sliceAt(t, rule, field) {
+				if item == "*" {
+					t.Fatalf("openbao ops controller RBAC uses wildcard %s in rule %#v", field, rule)
+				}
+			}
+		}
+	}
+	assertNoObject(t, rbac, "ClusterRole", "", "openbao-ops-controller")
+	assertNoObject(t, rbac, "ClusterRoleBinding", "", "openbao-ops-controller")
+
+	roleText := string(readRunfile(t, base+"/rbac.yaml"))
+	assertTextNotContains(t, roleText, "openbaoauditdevices", "openbao ops controller RBAC")
+
+	deployment := findObject(t, readManifests(t, base+"/deployment.yaml"), "Deployment", "", "openbao-ops-controller")
+	assertString(t, deployment, "openbao-ops-controller", "spec", "template", "spec", "serviceAccountName")
+	containers := sliceAt(t, deployment, "spec", "template", "spec", "containers")
+	if len(containers) != 1 {
+		t.Fatalf("openbao ops controller containers = %#v, want one manager", containers)
+	}
+	container := asManifest(t, containers[0], "openbao ops controller container")
+	assertString(t, container, "manager", "name")
+	assertString(t, container, "guardian/openbao-ops-controller:dev", "image")
+	env := sliceAt(t, container, "env")
+	seenEnv := map[string]bool{}
+	for _, value := range env {
+		entry := asManifest(t, value, "openbao ops controller env")
+		seenEnv[stringAt(entry, "name")] = true
+	}
+	for _, want := range []string{"WATCH_NAMESPACE", "OPENBAO_ADDR", "OPENBAO_AUTH_PATH", "OPENBAO_AUTH_ROLE"} {
+		if !seenEnv[want] {
+			t.Fatalf("openbao ops controller deployment missing env %s", want)
+		}
+	}
 }
 
 func testOpenBaoOpenTofuBootstrap(t *testing.T) {
