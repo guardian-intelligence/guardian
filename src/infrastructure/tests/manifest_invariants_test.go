@@ -84,6 +84,19 @@ func testRunbooks(t *testing.T) {
 			assertTextNotContains(t, text, staleKubeconfig, rel)
 		})
 	}
+
+	topology := guardianMgmtTopologyFixture(t)
+	currentAPIServer := fmt.Sprintf("https://%s:6443", topology.Network.VLAN.APIVIP)
+	edgeRunbookPath := "src/infrastructure/runbooks/edge-failover-drill.md"
+	edgeRunbook := string(readRunfile(t, edgeRunbookPath))
+	assertTextContains(t, edgeRunbook, "--kube-api-server="+currentAPIServer, edgeRunbookPath)
+	for _, node := range topology.Nodes {
+		assertTextNotContains(t, edgeRunbook, "--kube-api-server="+node.PublicIPv4+":6443", edgeRunbookPath)
+		assertTextNotContains(t, edgeRunbook, "--kube-api-server=https://"+node.PublicIPv4+":6443", edgeRunbookPath)
+	}
+
+	aspectTask := string(readRunfile(t, ".aspect/tasks/infra.axl"))
+	assertTextContains(t, aspectTask, `"kube_api_server": args.string(default = "`+currentAPIServer+`"`, ".aspect/tasks/infra.axl")
 }
 
 func testTalmInstallDiskSelectors(t *testing.T) {
