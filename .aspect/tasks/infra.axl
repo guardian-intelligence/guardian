@@ -80,6 +80,7 @@ INFRA_TESTS = [
     "//src/infrastructure/cmd/cozystack_openbao_apply:cozystack_openbao_apply_test",
     "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill_test",
     "//src/infrastructure/tests:manifest_invariants_test",
+    "//src/services/secrets/openbao/operator/controllers:controllers_test",
 ]
 FORBIDDEN_SOURCE_PATHS = [
     ("DELETE_ME.env", "operator Cloudflare credentials must stay out of the repo workspace and must not be load-bearing"),
