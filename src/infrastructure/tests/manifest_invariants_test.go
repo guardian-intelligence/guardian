@@ -65,7 +65,24 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("openbao ops controller scaffold", testOpenBaoOpsControllerScaffold)
 	t.Run("openbao operations crs", testOpenBaoOperationsCRs)
 	t.Run("openbao opentofu bootstrap", testOpenBaoOpenTofuBootstrap)
+	t.Run("runbooks", testRunbooks)
 	t.Run("flux handoff", testFluxHandoff)
+}
+
+func testRunbooks(t *testing.T) {
+	currentKubeconfig := "src/infrastructure/clusters/ash/bootstrap/talm/kubeconfig"
+	staleKubeconfig := "src/infrastructure/talm/kubeconfig"
+
+	for _, rel := range []string{
+		"src/infrastructure/runbooks/edge-failover-drill.md",
+		"src/infrastructure/runbooks/openbao-manual-shamir-unseal.md",
+	} {
+		t.Run(filepath.Base(rel), func(t *testing.T) {
+			text := string(readRunfile(t, rel))
+			assertTextContains(t, text, currentKubeconfig, rel)
+			assertTextNotContains(t, text, staleKubeconfig, rel)
+		})
+	}
 }
 
 func testTalmInstallDiskSelectors(t *testing.T) {
