@@ -25,12 +25,12 @@ OpenBao is declared suspended so GitOps can converge the topology before the
 manual initialization window.
 
 ```sh
-kubectl --kubeconfig=src/infrastructure/clusters/ash/bootstrap/talm/kubeconfig \
+kubectl --kubeconfig=src/infrastructure/talm/kubeconfig \
   -n tenant-guardian patch helmrelease guardian-openbao \
   --type=merge \
   -p '{"spec":{"suspend":false}}'
 
-kubectl --kubeconfig=src/infrastructure/clusters/ash/bootstrap/talm/kubeconfig \
+kubectl --kubeconfig=src/infrastructure/talm/kubeconfig \
   -n tenant-guardian wait \
   --for=jsonpath='{.status.readyReplicas}'=3 \
   statefulset.apps/guardian-openbao \
@@ -43,7 +43,7 @@ Run initialization exactly once, from a trusted operator workstation. Capture
 the output directly into the offline custody process.
 
 ```sh
-kubectl --kubeconfig=src/infrastructure/clusters/ash/bootstrap/talm/kubeconfig \
+kubectl --kubeconfig=src/infrastructure/talm/kubeconfig \
   -n tenant-guardian exec -it pod/guardian-openbao-0 -- \
   env BAO_ADDR=http://127.0.0.1:8200 \
   bao operator init \
@@ -61,7 +61,7 @@ Every sealed OpenBao pod needs three valid unseal key submissions. Repeat this
 for each sealed pod.
 
 ```sh
-kubectl --kubeconfig=src/infrastructure/clusters/ash/bootstrap/talm/kubeconfig \
+kubectl --kubeconfig=src/infrastructure/talm/kubeconfig \
   -n tenant-guardian exec -it pod/guardian-openbao-0 -- \
   env BAO_ADDR=http://127.0.0.1:8200 \
   bao operator unseal
@@ -74,7 +74,7 @@ they are sealed. Each invocation prompts for one unseal key.
 
 ```sh
 for pod in guardian-openbao-0 guardian-openbao-1 guardian-openbao-2; do
-  kubectl --kubeconfig=src/infrastructure/clusters/ash/bootstrap/talm/kubeconfig \
+  kubectl --kubeconfig=src/infrastructure/talm/kubeconfig \
     -n tenant-guardian exec "$pod" -- \
     env BAO_ADDR=http://127.0.0.1:8200 \
     bao status
