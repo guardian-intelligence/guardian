@@ -30,8 +30,14 @@ type openBaoConfig struct {
 }
 
 type baoStatus struct {
-	Initialized bool `json:"initialized"`
-	Sealed      bool `json:"sealed"`
+	Initialized bool   `json:"initialized"`
+	Sealed      bool   `json:"sealed"`
+	Version     string `json:"version"`
+}
+
+type podBaoStatus struct {
+	Pod    string
+	Status baoStatus
 }
 
 var dnsSubdomainRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
@@ -133,11 +139,17 @@ func statefulSetReplicas(ctx context.Context, runner kubectlRunner, statefulSet 
 }
 
 func printStatus(ctx context.Context, runner kubectlRunner, cfg openBaoConfig, replicas int) error {
+	statuses := make([]podBaoStatus, 0, replicas)
 	for i := 0; i < replicas; i++ {
 		pod := podName(cfg.StatefulSet, i)
-		if _, err := baoStatusForPod(ctx, runner, pod, true); err != nil {
+		status, err := baoStatusForPod(ctx, runner, pod, true)
+		if err != nil {
 			return err
 		}
+		statuses = append(statuses, podBaoStatus{Pod: pod, Status: status})
+	}
+	if err := validateStatusSet(statuses); err != nil {
+		return err
 	}
 	if token, source, err := rootTokenFromEnv(); err == nil {
 		fmt.Printf("read OpenBao root token from %s without printing secret material\n", source)
@@ -187,9 +199,41 @@ func baoStatusForPod(ctx context.Context, runner kubectlRunner, pod string, prin
 		return baoStatus{}, fmt.Errorf("parse bao status for %s: %w\n%s", pod, err, out)
 	}
 	if print {
-		fmt.Printf("pod=%s initialized=%t sealed=%t\n", pod, status.Initialized, status.Sealed)
+		fmt.Printf("pod=%s initialized=%t sealed=%t version=%s\n", pod, status.Initialized, status.Sealed, status.Version)
 	}
 	return status, nil
+}
+
+func validateStatusSet(statuses []podBaoStatus) error {
+	if len(statuses) == 0 {
+		return errors.New("OpenBao status drill found no pods")
+	}
+	var problems []string
+	var version string
+	for _, item := range statuses {
+		status := item.Status
+		if !status.Initialized {
+			problems = append(problems, fmt.Sprintf("%s is not initialized", item.Pod))
+		}
+		if status.Sealed {
+			problems = append(problems, fmt.Sprintf("%s is sealed", item.Pod))
+		}
+		if status.Version == "" {
+			problems = append(problems, fmt.Sprintf("%s reported empty OpenBao version", item.Pod))
+			continue
+		}
+		if version == "" {
+			version = status.Version
+			continue
+		}
+		if status.Version != version {
+			problems = append(problems, fmt.Sprintf("%s reports version %s; expected %s", item.Pod, status.Version, version))
+		}
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("OpenBao status drill failed: %s", strings.Join(problems, "; "))
+	}
+	return nil
 }
 
 func parseBaoStatus(raw string) (baoStatus, error) {

@@ -55,15 +55,61 @@ func TestValidateConfig(t *testing.T) {
 }
 
 func TestParseNativeJSONWithWrapperOutput(t *testing.T) {
-	status, err := parseBaoStatus("warning from wrapper\n{\"initialized\":true,\"sealed\":false}\n")
+	status, err := parseBaoStatus("warning from wrapper\n{\"initialized\":true,\"sealed\":false,\"version\":\"2.5.4\"}\n")
 	if err != nil {
 		t.Fatalf("parseBaoStatus() error = %v", err)
 	}
-	if !status.Initialized || status.Sealed {
+	if !status.Initialized || status.Sealed || status.Version != "2.5.4" {
 		t.Fatalf("parseBaoStatus() = %#v", status)
 	}
 	if !looksLikeBaoStatusJSON("warning\n{\"initialized\":false,\"sealed\":true}\n") {
 		t.Fatalf("looksLikeBaoStatusJSON() rejected status payload")
+	}
+}
+
+func TestValidateStatusSetAcceptsHealthyMatchingPods(t *testing.T) {
+	statuses := []podBaoStatus{
+		{Pod: "guardian-openbao-0", Status: baoStatus{Initialized: true, Sealed: false, Version: "2.5.4"}},
+		{Pod: "guardian-openbao-1", Status: baoStatus{Initialized: true, Sealed: false, Version: "2.5.4"}},
+		{Pod: "guardian-openbao-2", Status: baoStatus{Initialized: true, Sealed: false, Version: "2.5.4"}},
+	}
+	if err := validateStatusSet(statuses); err != nil {
+		t.Fatalf("validateStatusSet() error = %v", err)
+	}
+}
+
+func TestValidateStatusSetRejectsUnhealthyPods(t *testing.T) {
+	statuses := []podBaoStatus{
+		{Pod: "guardian-openbao-0", Status: baoStatus{Initialized: true, Sealed: false, Version: "2.5.4"}},
+		{Pod: "guardian-openbao-1", Status: baoStatus{Initialized: false, Sealed: false, Version: "2.5.4"}},
+		{Pod: "guardian-openbao-2", Status: baoStatus{Initialized: true, Sealed: true, Version: "2.5.4"}},
+	}
+	err := validateStatusSet(statuses)
+	if err == nil {
+		t.Fatal("validateStatusSet() accepted uninitialized and sealed pods")
+	}
+	got := err.Error()
+	for _, want := range []string{
+		"guardian-openbao-1 is not initialized",
+		"guardian-openbao-2 is sealed",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("validateStatusSet() error missing %q: %v", want, err)
+		}
+	}
+}
+
+func TestValidateStatusSetRejectsVersionSkew(t *testing.T) {
+	statuses := []podBaoStatus{
+		{Pod: "guardian-openbao-0", Status: baoStatus{Initialized: true, Sealed: false, Version: "2.5.0"}},
+		{Pod: "guardian-openbao-1", Status: baoStatus{Initialized: true, Sealed: false, Version: "2.5.4"}},
+	}
+	err := validateStatusSet(statuses)
+	if err == nil {
+		t.Fatal("validateStatusSet() accepted version skew")
+	}
+	if !strings.Contains(err.Error(), "guardian-openbao-1 reports version 2.5.4; expected 2.5.0") {
+		t.Fatalf("validateStatusSet() error = %v", err)
 	}
 }
 
