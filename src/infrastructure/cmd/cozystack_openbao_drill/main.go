@@ -9,11 +9,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 )
 
 const baoAddr = "http://127.0.0.1:8200"
@@ -23,11 +21,8 @@ type openBaoConfig struct {
 	Kubeconfig     string
 	KubeAPIServer  string
 	RequestTimeout string
-	WaitTimeout    string
 	Namespace      string
 	StatefulSet    string
-	Mode           string
-	SnapshotName   string
 }
 
 type baoStatus struct {
@@ -42,7 +37,6 @@ type podBaoStatus struct {
 }
 
 var dnsSubdomainRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
-var snapshotFileRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
 func main() {
 	var cfg openBaoConfig
@@ -50,16 +44,10 @@ func main() {
 	flag.StringVar(&cfg.Kubeconfig, "kubeconfig", "", "kubeconfig for guardian-mgmt")
 	flag.StringVar(&cfg.KubeAPIServer, "kube-api-server", "", "optional Kubernetes API server override for off-VLAN proof runs")
 	flag.StringVar(&cfg.RequestTimeout, "request-timeout", "15s", "kubectl API request timeout")
-	flag.StringVar(&cfg.WaitTimeout, "wait-timeout", "5m", "timeout for OpenBao StatefulSet readiness")
 	flag.StringVar(&cfg.Namespace, "namespace", "tenant-guardian", "OpenBao namespace")
 	flag.StringVar(&cfg.StatefulSet, "statefulset", "guardian-openbao", "OpenBao StatefulSet name")
-	flag.StringVar(&cfg.Mode, "mode", "status", "drill mode: status or snapshot")
-	flag.StringVar(&cfg.SnapshotName, "snapshot-name", "", "snapshot filename inside the OpenBao pod; defaults to a UTC timestamped name")
 	flag.Parse()
 
-	if cfg.SnapshotName == "" {
-		cfg.SnapshotName = defaultSnapshotName(time.Now().UTC())
-	}
 	exitIfErr(validateConfig(cfg))
 	exitIfErr(runDrill(context.Background(), cfg))
 }
@@ -72,10 +60,6 @@ func exitIfErr(err error) {
 	os.Exit(1)
 }
 
-func defaultSnapshotName(now time.Time) string {
-	return "guardian-openbao-" + now.Format("20060102t150405z") + ".snap"
-}
-
 func validateConfig(cfg openBaoConfig) error {
 	if cfg.Kubectl == "" {
 		return errors.New("--kubectl is required")
@@ -84,17 +68,12 @@ func validateConfig(cfg openBaoConfig) error {
 		"namespace":   cfg.Namespace,
 		"statefulset": cfg.StatefulSet,
 	} {
+		if len(value) > 253 {
+			return fmt.Errorf("--%s %q is longer than a Kubernetes DNS subdomain", label, value)
+		}
 		if !dnsSubdomainRE.MatchString(value) {
 			return fmt.Errorf("--%s %q is not a Kubernetes DNS subdomain", label, value)
 		}
-	}
-	switch cfg.Mode {
-	case "status", "snapshot":
-	default:
-		return fmt.Errorf("--mode %q is not one of status, snapshot", cfg.Mode)
-	}
-	if !snapshotFileRE.MatchString(cfg.SnapshotName) || strings.Contains(cfg.SnapshotName, "..") {
-		return fmt.Errorf("--snapshot-name %q must be a simple ASCII filename using letters, digits, dot, underscore, or hyphen", cfg.SnapshotName)
 	}
 	return nil
 }
@@ -109,7 +88,7 @@ func runDrill(ctx context.Context, cfg openBaoConfig) error {
 	}
 
 	fmt.Printf("guardian cozystack openbao drill\n")
-	fmt.Printf("namespace=%s statefulset=%s mode=%s\n", cfg.Namespace, cfg.StatefulSet, cfg.Mode)
+	fmt.Printf("namespace=%s statefulset=%s\n", cfg.Namespace, cfg.StatefulSet)
 
 	if err := runner.run(ctx, "get OpenBao StatefulSet", "get", "statefulset.apps/"+cfg.StatefulSet); err != nil {
 		return err
@@ -124,14 +103,7 @@ func runDrill(ctx context.Context, cfg openBaoConfig) error {
 	}
 	fmt.Printf("expected OpenBao version from StatefulSet template: %s\n", expectedVersion)
 
-	switch cfg.Mode {
-	case "status":
-		return printStatus(ctx, runner, cfg, replicas, expectedVersion)
-	case "snapshot":
-		return snapshot(ctx, runner, cfg, replicas, expectedVersion)
-	default:
-		return fmt.Errorf("unsupported mode %q", cfg.Mode)
-	}
+	return printStatus(ctx, runner, cfg, replicas, expectedVersion)
 }
 
 func statefulSetReplicas(ctx context.Context, runner kubectlRunner, statefulSet string) (int, error) {
@@ -196,31 +168,6 @@ func printStatus(ctx context.Context, runner kubectlRunner, cfg openBaoConfig, r
 	} else {
 		fmt.Printf("root token unavailable; skipping raft autopilot state: %v\n", err)
 	}
-	return nil
-}
-
-func snapshot(ctx context.Context, runner kubectlRunner, cfg openBaoConfig, replicas int, expectedVersion string) error {
-	if err := runner.run(ctx, "wait OpenBao StatefulSet Ready", "wait", "--for=jsonpath={.status.readyReplicas}="+strconv.Itoa(replicas), "statefulset.apps/"+cfg.StatefulSet, "--timeout="+cfg.WaitTimeout); err != nil {
-		return err
-	}
-	token, source, err := rootTokenFromEnv()
-	if err != nil {
-		return fmt.Errorf("read OpenBao root token before snapshot: %w", err)
-	}
-	fmt.Printf("read OpenBao root token from %s without printing secret material\n", source)
-	if err := printStatus(ctx, runner, cfg, replicas, expectedVersion); err != nil {
-		return err
-	}
-	pod := podName(cfg.StatefulSet, 0)
-	snapshotPath := filepath.Join("/tmp", cfg.SnapshotName)
-	if err := baoRun(ctx, runner, pod, "operator raft snapshot save", token, "operator", "raft", "snapshot", "save", snapshotPath); err != nil {
-		return err
-	}
-	if err := runner.run(ctx, "snapshot sha256", "exec", "pod/"+pod, "--", "sh", "-ceu", "test -s "+shellQuote(snapshotPath)+" && sha256sum "+shellQuote(snapshotPath)); err != nil {
-		return err
-	}
-	runner.bestEffort(ctx, "remove pod-local snapshot", "exec", "pod/"+pod, "--", "rm", "-f", snapshotPath)
-	fmt.Printf("openbao snapshot drill completed: pod=%s snapshot=%s\n", pod, snapshotPath)
 	return nil
 }
 
