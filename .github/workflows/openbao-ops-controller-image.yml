@@ -12,7 +12,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: openbao-ops-controller-image
@@ -38,31 +37,32 @@ jobs:
           bazelisk build \
             --embed_label="$GITHUB_SHA" \
             //src/services/secrets/openbao/operator:image \
-            //src/services/secrets/openbao/operator:push-ghcr
+            //src/services/secrets/openbao/operator:push-harbor
 
-      - name: Authenticate to GHCR
+      - name: Authenticate to Harbor
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GUARDIAN_OCI_USERNAME: guardian-release
+          GUARDIAN_OCI_PASSWORD: ${{ secrets.GUARDIAN_OCI_PASSWORD }}
         run: |
-          crane="bazel-bin/src/services/secrets/openbao/operator/push_push-ghcr.sh.runfiles/rules_oci++oci+oci_crane_linux_amd64/crane"
+          crane="bazel-bin/src/services/secrets/openbao/operator/push_push-harbor.sh.runfiles/rules_oci++oci+oci_crane_linux_amd64/crane"
           test -x "$crane"
-          printf '%s' "$GITHUB_TOKEN" | "$crane" auth login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          printf '%s' "$GUARDIAN_OCI_PASSWORD" | "$crane" auth login harbor.guardianintelligence.org -u "$GUARDIAN_OCI_USERNAME" --password-stdin
 
       - name: Push image
         run: |
           bazelisk run \
             --embed_label="$GITHUB_SHA" \
-            //src/services/secrets/openbao/operator:push-ghcr
+            //src/services/secrets/openbao/operator:push-harbor
 
       - name: Summarize digest
         run: |
-          jq_bin="bazel-bin/src/services/secrets/openbao/operator/push_push-ghcr.sh.runfiles/aspect_bazel_lib++toolchains+jq_linux_amd64/jq"
+          jq_bin="bazel-bin/src/services/secrets/openbao/operator/push_push-harbor.sh.runfiles/aspect_bazel_lib++toolchains+jq_linux_amd64/jq"
           test -x "$jq_bin"
           digest="$("$jq_bin" -r '.manifests[0].digest' bazel-bin/src/services/secrets/openbao/operator/image/index.json)"
           {
             echo "## OpenBao ops controller image"
             echo
-            echo "- Repository: \`ghcr.io/guardian-intelligence/guardian/openbao-ops-controller\`"
+            echo "- Repository: \`harbor.guardianintelligence.org/guardian/openbao-ops-controller\`"
             echo "- Tag: \`edge\`"
             echo "- Digest: \`$digest\`"
           } >> "$GITHUB_STEP_SUMMARY"
