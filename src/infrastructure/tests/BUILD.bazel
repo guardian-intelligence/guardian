@@ -8,6 +8,7 @@ go_test(
     ],
     data = [
         "//:.bazelignore",
+        "//:TRIBAL_KNOWLEDGE.md",
         "@talm_linux_amd64//:talm",
         "//src/infrastructure/base:kustomization",
         "//src/infrastructure/base/app-patches:manifests",
