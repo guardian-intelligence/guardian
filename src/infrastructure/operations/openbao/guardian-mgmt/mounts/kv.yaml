@@ -1,0 +1,9 @@
+apiVersion: openbao.guardian.dev/v1alpha1
+kind: OpenBaoMount
+metadata:
+  name: kv
+spec:
+  path: kv
+  type: kv-v2
+  description: Guardian management cluster secret material.
+  deletionPolicy: Retain

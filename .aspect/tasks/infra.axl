@@ -65,6 +65,7 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/load:http_load_scripts",
     "//src/infrastructure/edge:edge_health_targets",
     "//src/infrastructure/bootstrap/guardian-mgmt-openbao:root",
+    "//src/infrastructure/operations/openbao/guardian-mgmt:manifests",
     "//src/services/secrets/openbao/deploy/base:manifests",
     "//src/services/secrets/openbao/deploy/guardian-mgmt:manifests",
 ]
@@ -526,6 +527,7 @@ def _render_kustomizations(ctx):
     for path in [
         "src/infrastructure/base",
         "src/infrastructure/deployments/guardian/system",
+        "src/infrastructure/operations/openbao/guardian-mgmt",
         "src/services/secrets/openbao/deploy/base",
         "src/services/secrets/openbao/deploy/guardian-mgmt",
         # Compatibility bridges for live Flux Kustomizations while reverting

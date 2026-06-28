@@ -63,6 +63,7 @@ func TestManifestInvariants(t *testing.T) {
 	t.Run("observability", testObservability)
 	t.Run("openbao", testOpenBao)
 	t.Run("openbao ops controller scaffold", testOpenBaoOpsControllerScaffold)
+	t.Run("openbao operations crs", testOpenBaoOperationsCRs)
 	t.Run("openbao opentofu bootstrap", testOpenBaoOpenTofuBootstrap)
 	t.Run("flux handoff", testFluxHandoff)
 }
@@ -1131,6 +1132,65 @@ func testOpenBaoOpsControllerScaffold(t *testing.T) {
 	for _, want := range []string{"WATCH_NAMESPACE", "OPENBAO_ADDR", "OPENBAO_AUTH_PATH", "OPENBAO_AUTH_ROLE"} {
 		if !seenEnv[want] {
 			t.Fatalf("openbao ops controller deployment missing env %s", want)
+		}
+	}
+}
+
+func testOpenBaoOperationsCRs(t *testing.T) {
+	const base = "src/infrastructure/operations/openbao/guardian-mgmt"
+
+	kustomization := readYAMLMap(t, base+"/kustomization.yaml")
+	assertString(t, kustomization, "tenant-guardian", "namespace")
+	assertStringSlice(t, kustomization, []string{
+		"authbackends/kubernetes.yaml",
+		"authroles/external-dns.yaml",
+		"mounts/kv.yaml",
+		"policies/external-dns.yaml",
+	}, "resources")
+
+	authBackend := findObject(t, readManifests(t, base+"/authbackends/kubernetes.yaml"), "OpenBaoAuthBackend", "", "kubernetes")
+	assertString(t, authBackend, "kubernetes", "spec", "path")
+	assertString(t, authBackend, "kubernetes", "spec", "type")
+	assertString(t, authBackend, "Kubernetes service account auth for guardian-mgmt workloads.", "spec", "description")
+	assertString(t, authBackend, "https://kubernetes.default.svc:443", "spec", "kubernetes", "kubernetesHost")
+	assertBool(t, authBackend, true, "spec", "kubernetes", "disableISSValidation")
+	assertString(t, authBackend, "Retain", "spec", "deletionPolicy")
+
+	mount := findObject(t, readManifests(t, base+"/mounts/kv.yaml"), "OpenBaoMount", "", "kv")
+	assertString(t, mount, "kv", "spec", "path")
+	assertString(t, mount, "kv-v2", "spec", "type")
+	assertString(t, mount, "Guardian management cluster secret material.", "spec", "description")
+	assertString(t, mount, "Retain", "spec", "deletionPolicy")
+
+	policy := findObject(t, readManifests(t, base+"/policies/external-dns.yaml"), "OpenBaoPolicy", "", "external-dns")
+	assertString(t, policy, "guardian-external-dns", "spec", "name")
+	assertString(t, policy, "Retain", "spec", "deletionPolicy")
+	rules := stringAt(policy, "spec", "rules")
+	assertTextContains(t, rules, `path "kv/data/guardian/guardian-mgmt/tenant-guardian/dns/external-dns"`, "external-dns OpenBaoPolicy")
+	assertTextContains(t, rules, `path "kv/metadata/guardian/guardian-mgmt/tenant-guardian/dns/external-dns"`, "external-dns OpenBaoPolicy")
+	assertTextNotContains(t, rules, `path "*"`, "external-dns OpenBaoPolicy")
+	assertTextNotContains(t, rules, "rootToken", "external-dns OpenBaoPolicy")
+
+	role := findObject(t, readManifests(t, base+"/authroles/external-dns.yaml"), "OpenBaoKubernetesAuthRole", "", "external-dns")
+	assertString(t, role, "kubernetes", "spec", "backendPath")
+	assertString(t, role, "guardian-external-dns", "spec", "roleName")
+	assertStringSlice(t, role, []string{"external-dns-secrets"}, "spec", "boundServiceAccountNames")
+	assertStringSlice(t, role, []string{"external-dns"}, "spec", "boundServiceAccountNamespaces")
+	assertString(t, role, "openbao", "spec", "audience")
+	assertStringSlice(t, role, []string{"guardian-external-dns"}, "spec", "tokenPolicies")
+	assertString(t, role, "3600", "spec", "tokenTTL")
+	assertString(t, role, "3600", "spec", "tokenMaxTTL")
+	assertString(t, role, "Retain", "spec", "deletionPolicy")
+
+	for _, rel := range []string{
+		"authbackends/kubernetes.yaml",
+		"authroles/external-dns.yaml",
+		"mounts/kv.yaml",
+		"policies/external-dns.yaml",
+	} {
+		text := string(readRunfile(t, base+"/"+rel))
+		for _, forbidden := range []string{"rootToken", "clientSecret", "password", "tokenReviewerJWT"} {
+			assertTextNotContains(t, text, forbidden, base+"/"+rel)
 		}
 	}
 }
