@@ -2,6 +2,7 @@ package openbao
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -32,6 +33,32 @@ type KubernetesAuthRole struct {
 	TokenPolicies                 []string
 	TokenTTL                      string
 	TokenMaxTTL                   string
+}
+
+type AuthBackend struct {
+	Path        string
+	Type        string
+	Description string
+}
+
+type KubernetesAuthConfig struct {
+	KubernetesHost       string
+	KubernetesCACert     string
+	Issuer               string
+	PEMKeys              []string
+	DisableISSValidation bool
+	DisableLocalCAJWT    bool
+}
+
+type TuneConfig struct {
+	Description               string
+	DefaultLeaseTTL           string
+	MaxLeaseTTL               string
+	ListingVisibility         string
+	PassthroughRequestHeaders []string
+	AllowedResponseHeaders    []string
+	AuditNonHMACRequestKeys   []string
+	AuditNonHMACResponseKeys  []string
 }
 
 func LoadConfigFromEnv() (Config, error) {
@@ -107,6 +134,123 @@ func (c *Client) DeletePolicy(ctx context.Context, name string) error {
 	return c.api.Sys().DeletePolicyWithContext(ctx, name)
 }
 
+func (c *Client) GetAuthBackend(ctx context.Context, path string) (AuthBackend, bool, error) {
+	backendPath := strings.Trim(path, "/")
+	mounts, err := c.api.Sys().ListAuthWithContext(ctx)
+	if err != nil {
+		return AuthBackend{}, false, err
+	}
+	mount, ok := mounts[authBackendKey(backendPath)]
+	if !ok {
+		mount, ok = mounts[backendPath]
+	}
+	if !ok {
+		return AuthBackend{}, false, nil
+	}
+	return AuthBackend{
+		Path:        backendPath,
+		Type:        mount.Type,
+		Description: mount.Description,
+	}, true, nil
+}
+
+func (c *Client) EnableAuthBackend(ctx context.Context, backend AuthBackend) error {
+	return c.api.Sys().EnableAuthWithOptionsWithContext(ctx, strings.Trim(backend.Path, "/"), &baoapi.EnableAuthOptions{
+		Type:        backend.Type,
+		Description: backend.Description,
+	})
+}
+
+func (c *Client) DisableAuthBackend(ctx context.Context, path string) error {
+	return c.api.Sys().DisableAuthWithContext(ctx, strings.Trim(path, "/"))
+}
+
+func (c *Client) GetKubernetesAuthConfig(ctx context.Context, backendPath string) (KubernetesAuthConfig, bool, error) {
+	secret, err := c.api.Logical().ReadWithContext(ctx, kubernetesAuthConfigPath(backendPath))
+	if err != nil {
+		if isOpenBaoNotFound(err) {
+			return KubernetesAuthConfig{}, false, nil
+		}
+		return KubernetesAuthConfig{}, false, err
+	}
+	if secret == nil || secret.Data == nil {
+		return KubernetesAuthConfig{}, false, nil
+	}
+	return KubernetesAuthConfig{
+		KubernetesHost:       stringFromSecret(secret.Data["kubernetes_host"]),
+		KubernetesCACert:     stringFromSecret(secret.Data["kubernetes_ca_cert"]),
+		Issuer:               stringFromSecret(secret.Data["issuer"]),
+		PEMKeys:              stringSliceFromSecret(secret.Data["pem_keys"]),
+		DisableISSValidation: boolFromSecret(secret.Data["disable_iss_validation"]),
+		DisableLocalCAJWT:    boolFromSecret(secret.Data["disable_local_ca_jwt"]),
+	}, true, nil
+}
+
+func (c *Client) PutKubernetesAuthConfig(ctx context.Context, backendPath string, config KubernetesAuthConfig) error {
+	body := map[string]interface{}{
+		"kubernetes_host":        config.KubernetesHost,
+		"kubernetes_ca_cert":     config.KubernetesCACert,
+		"issuer":                 config.Issuer,
+		"pem_keys":               config.PEMKeys,
+		"disable_iss_validation": config.DisableISSValidation,
+		"disable_local_ca_jwt":   config.DisableLocalCAJWT,
+	}
+	_, err := c.api.Logical().WriteWithContext(ctx, kubernetesAuthConfigPath(backendPath), body)
+	return err
+}
+
+func (c *Client) GetAuthTune(ctx context.Context, backendPath string) (TuneConfig, bool, error) {
+	secret, err := c.api.Logical().ReadWithContext(ctx, authTunePath(backendPath))
+	if err != nil {
+		if isOpenBaoNotFound(err) {
+			return TuneConfig{}, false, nil
+		}
+		return TuneConfig{}, false, err
+	}
+	if secret == nil || secret.Data == nil {
+		return TuneConfig{}, false, nil
+	}
+	return TuneConfig{
+		Description:               stringFromSecret(secret.Data["description"]),
+		DefaultLeaseTTL:           stringFromSecret(secret.Data["default_lease_ttl"]),
+		MaxLeaseTTL:               stringFromSecret(secret.Data["max_lease_ttl"]),
+		ListingVisibility:         stringFromSecret(secret.Data["listing_visibility"]),
+		PassthroughRequestHeaders: stringSliceFromSecret(secret.Data["passthrough_request_headers"]),
+		AllowedResponseHeaders:    stringSliceFromSecret(secret.Data["allowed_response_headers"]),
+		AuditNonHMACRequestKeys:   stringSliceFromSecret(secret.Data["audit_non_hmac_request_keys"]),
+		AuditNonHMACResponseKeys:  stringSliceFromSecret(secret.Data["audit_non_hmac_response_keys"]),
+	}, true, nil
+}
+
+func (c *Client) PutAuthTune(ctx context.Context, backendPath string, tune TuneConfig) error {
+	body := map[string]interface{}{
+		"description": tune.Description,
+	}
+	if tune.DefaultLeaseTTL != "" {
+		body["default_lease_ttl"] = tune.DefaultLeaseTTL
+	}
+	if tune.MaxLeaseTTL != "" {
+		body["max_lease_ttl"] = tune.MaxLeaseTTL
+	}
+	if tune.ListingVisibility != "" {
+		body["listing_visibility"] = tune.ListingVisibility
+	}
+	if tune.PassthroughRequestHeaders != nil {
+		body["passthrough_request_headers"] = tune.PassthroughRequestHeaders
+	}
+	if tune.AllowedResponseHeaders != nil {
+		body["allowed_response_headers"] = tune.AllowedResponseHeaders
+	}
+	if tune.AuditNonHMACRequestKeys != nil {
+		body["audit_non_hmac_request_keys"] = tune.AuditNonHMACRequestKeys
+	}
+	if tune.AuditNonHMACResponseKeys != nil {
+		body["audit_non_hmac_response_keys"] = tune.AuditNonHMACResponseKeys
+	}
+	_, err := c.api.Logical().WriteWithContext(ctx, authTunePath(backendPath), body)
+	return err
+}
+
 func (c *Client) GetKubernetesAuthRole(ctx context.Context, backendPath string, roleName string) (KubernetesAuthRole, bool, error) {
 	path := kubernetesAuthRolePath(backendPath, roleName)
 	secret, err := c.api.Logical().ReadWithContext(ctx, path)
@@ -158,8 +302,25 @@ func loginPath(authPath string) string {
 	return "auth/" + strings.Trim(authPath, "/") + "/login"
 }
 
+func authBackendKey(backendPath string) string {
+	return strings.Trim(backendPath, "/") + "/"
+}
+
+func authTunePath(backendPath string) string {
+	return "sys/auth/" + strings.Trim(backendPath, "/") + "/tune"
+}
+
+func kubernetesAuthConfigPath(backendPath string) string {
+	return "auth/" + strings.Trim(backendPath, "/") + "/config"
+}
+
 func kubernetesAuthRolePath(backendPath string, roleName string) string {
 	return "auth/" + strings.Trim(backendPath, "/") + "/role/" + strings.Trim(roleName, "/")
+}
+
+func isOpenBaoNotFound(err error) bool {
+	var responseError *baoapi.ResponseError
+	return errors.As(err, &responseError) && responseError.StatusCode == 404
 }
 
 func stringFromSecret(value interface{}) string {
@@ -179,6 +340,18 @@ func stringFromSecret(value interface{}) string {
 		return strconv.FormatFloat(v, 'f', -1, 64)
 	default:
 		return ""
+	}
+}
+
+func boolFromSecret(value interface{}) bool {
+	switch v := value.(type) {
+	case bool:
+		return v
+	case string:
+		out, _ := strconv.ParseBool(v)
+		return out
+	default:
+		return false
 	}
 }
 

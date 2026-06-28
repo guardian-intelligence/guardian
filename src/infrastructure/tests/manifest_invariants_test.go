@@ -1172,6 +1172,9 @@ func testOpenBaoOpenTofuBootstrap(t *testing.T) {
 	assertTextContains(t, mainTF, `path "sys/policies/acl/guardian-*"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `path "auth/${local.kubernetes_auth_mount}/role/guardian-*"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `path "sys/auth/${local.kubernetes_auth_mount}"`, "guardian-mgmt-openbao main.tf")
+	assertTextContains(t, mainTF, `path "sys/auth/${local.kubernetes_auth_mount}" {
+      capabilities = ["create", "read", "update", "delete"]
+    }`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `path "sys/auth/${local.kubernetes_auth_mount}/tune"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `path "sys/mounts/${local.kv_mount}"`, "guardian-mgmt-openbao main.tf")
 	assertTextContains(t, mainTF, `path "sys/mounts/${local.kv_mount}/tune"`, "guardian-mgmt-openbao main.tf")

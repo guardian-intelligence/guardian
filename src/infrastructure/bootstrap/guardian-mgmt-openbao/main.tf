@@ -58,7 +58,7 @@ resource "vault_policy" "ops_controller" {
     }
 
     path "sys/auth/${local.kubernetes_auth_mount}" {
-      capabilities = ["create", "read", "update"]
+      capabilities = ["create", "read", "update", "delete"]
     }
 
     path "sys/auth/${local.kubernetes_auth_mount}/tune" {
