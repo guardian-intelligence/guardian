@@ -1,0 +1,100 @@
+package main
+
+import (
+	"reflect"
+	"strings"
+	"testing"
+)
+
+func TestValidateOpenBaoCRsBootstrapRequired(t *testing.T) {
+	raw := `{"items":[
+		{"kind":"OpenBaoPolicy","metadata":{"name":"ops-controller"},"status":{"lastError":"login failed: invalid role name \"guardian-openbao-ops-controller\"","conditions":[
+			{"type":"Authenticated","status":"False","reason":"BootstrapRequired"},
+			{"type":"Applied","status":"False","reason":"BootstrapRequired"},
+			{"type":"Ready","status":"False","reason":"BootstrapRequired"},
+			{"type":"DriftDetected","status":"Unknown","reason":"BootstrapRequired"}
+		]}}
+	]}`
+	if err := validateOpenBaoCRs(raw, []string{"OpenBaoPolicy/ops-controller"}, phaseBootstrapRequired); err != nil {
+		t.Fatalf("validateOpenBaoCRs() error = %v", err)
+	}
+}
+
+func TestValidateOpenBaoCRsConverged(t *testing.T) {
+	raw := `{"items":[
+		{"kind":"OpenBaoPolicy","metadata":{"name":"ops-controller"},"status":{"conditions":[
+			{"type":"Authenticated","status":"True","reason":"Applied"},
+			{"type":"Applied","status":"True","reason":"Applied"},
+			{"type":"Ready","status":"True","reason":"Applied"},
+			{"type":"DriftDetected","status":"False","reason":"Applied"}
+		]}}
+	]}`
+	if err := validateOpenBaoCRs(raw, []string{"OpenBaoPolicy/ops-controller"}, phaseConverged); err != nil {
+		t.Fatalf("validateOpenBaoCRs() error = %v", err)
+	}
+}
+
+func TestValidateOpenBaoCRsConvergedRejectsBootstrapRequired(t *testing.T) {
+	raw := `{"items":[
+		{"kind":"OpenBaoPolicy","metadata":{"name":"ops-controller"},"status":{"lastError":"login failed: invalid role name","conditions":[
+			{"type":"Authenticated","status":"False","reason":"BootstrapRequired"},
+			{"type":"Applied","status":"False","reason":"BootstrapRequired"},
+			{"type":"Ready","status":"False","reason":"BootstrapRequired"},
+			{"type":"DriftDetected","status":"Unknown","reason":"BootstrapRequired"}
+		]}}
+	]}`
+	err := validateOpenBaoCRs(raw, []string{"OpenBaoPolicy/ops-controller"}, phaseConverged)
+	if err == nil {
+		t.Fatalf("validateOpenBaoCRs() accepted bootstrap-required CR as converged")
+	}
+	if !strings.Contains(err.Error(), "Authenticated = False") {
+		t.Fatalf("validateOpenBaoCRs() error = %v, want condition detail", err)
+	}
+}
+
+func TestValidateFluxKustomizations(t *testing.T) {
+	raw := `{"items":[
+		{"metadata":{"name":"guardian-system"},"status":{"lastAppliedRevision":"main@sha1:abc123","conditions":[{"type":"Ready","status":"True","reason":"ReconciliationSucceeded"}]}}
+	]}`
+	if err := validateFluxKustomizations(raw, []string{"guardian-system"}, "abc123"); err != nil {
+		t.Fatalf("validateFluxKustomizations() error = %v", err)
+	}
+}
+
+func TestValidateFluxKustomizationsRequiresExpectedRevision(t *testing.T) {
+	raw := `{"items":[
+		{"metadata":{"name":"guardian-system"},"status":{"lastAppliedRevision":"main@sha1:old","conditions":[{"type":"Ready","status":"True","reason":"ReconciliationSucceeded"}]}}
+	]}`
+	err := validateFluxKustomizations(raw, []string{"guardian-system"}, "new")
+	if err == nil {
+		t.Fatalf("validateFluxKustomizations() accepted stale revision")
+	}
+}
+
+func TestValidateDeploymentReadyRequiresDigestPinnedManager(t *testing.T) {
+	raw := `{"spec":{"template":{"spec":{"containers":[{"name":"manager","image":"example.com/openbao-ops-controller@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}}},"status":{"readyReplicas":1,"replicas":1}}`
+	if err := validateDeploymentReady(raw, "openbao-ops-controller"); err != nil {
+		t.Fatalf("validateDeploymentReady() error = %v", err)
+	}
+}
+
+func TestKubectlRunnerArgs(t *testing.T) {
+	runner := kubectlRunner{
+		kubeconfig:     "/tmp/kubeconfig",
+		kubeAPIServer:  "https://206.223.228.101:6443",
+		requestTimeout: "10s",
+	}
+	got := runner.args("get", "nodes")
+	want := []string{"--kubeconfig", "/tmp/kubeconfig", "--server", "https://206.223.228.101:6443", "--request-timeout", "10s", "get", "nodes"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("args = %#v, want %#v", got, want)
+	}
+}
+
+func TestCSV(t *testing.T) {
+	got := csv(" a, ,b,c ")
+	want := []string{"a", "b", "c"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("csv() = %#v, want %#v", got, want)
+	}
+}

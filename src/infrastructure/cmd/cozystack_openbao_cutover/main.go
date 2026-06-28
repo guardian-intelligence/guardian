@@ -1,0 +1,408 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+)
+
+const (
+	phaseBootstrapRequired = "bootstrap-required"
+	phaseConverged         = "converged"
+)
+
+var defaultKustomizations = []string{
+	"guardian-mgmt-platform",
+	"guardian-mgmt-platform-patches",
+	"guardian-mgmt-storage",
+	"guardian-mgmt-base",
+	"guardian-mgmt-app-patches",
+	"guardian-system",
+	"guardian-mgmt-dns-controller",
+	"guardian-company-prod",
+	"guardian-openbao-ops-crds",
+	"guardian-openbao-ops-controller",
+	"guardian-openbao-ops-state",
+}
+
+var defaultOpenBaoObjects = []string{
+	"OpenBaoAuthBackend/kubernetes",
+	"OpenBaoKubernetesAuthRole/external-dns",
+	"OpenBaoKubernetesAuthRole/ops-controller",
+	"OpenBaoMount/kv",
+	"OpenBaoMountTune/kv",
+	"OpenBaoPolicy/external-dns",
+	"OpenBaoPolicy/ops-controller",
+}
+
+type cutoverConfig struct {
+	Kubectl                string
+	Kubeconfig             string
+	KubeAPIServer          string
+	RequestTimeout         string
+	FluxNamespace          string
+	OpenBaoNamespace       string
+	ControllerDeployment   string
+	ExpectedRevision       string
+	Phase                  string
+	RequiredKustomizations []string
+	RequiredOpenBaoObjects []string
+}
+
+type kubectlRunner struct {
+	bin            string
+	kubeconfig     string
+	kubeAPIServer  string
+	requestTimeout string
+}
+
+type kubeList struct {
+	Items []kubeObject `json:"items"`
+}
+
+type kubeObject struct {
+	Kind     string `json:"kind"`
+	Metadata struct {
+		Name string `json:"name"`
+	} `json:"metadata"`
+	Spec struct {
+		Template struct {
+			Spec struct {
+				Containers []containerSpec `json:"containers"`
+			} `json:"spec"`
+		} `json:"template"`
+	} `json:"spec"`
+	Status objectStatus `json:"status"`
+}
+
+type containerSpec struct {
+	Name  string `json:"name"`
+	Image string `json:"image"`
+}
+
+type objectStatus struct {
+	LastAppliedRevision string      `json:"lastAppliedRevision"`
+	ReadyReplicas       int         `json:"readyReplicas"`
+	Replicas            int         `json:"replicas"`
+	LastError           string      `json:"lastError"`
+	Conditions          []condition `json:"conditions"`
+}
+
+type condition struct {
+	Type    string `json:"type"`
+	Status  string `json:"status"`
+	Reason  string `json:"reason"`
+	Message string `json:"message"`
+}
+
+func main() {
+	var cfg cutoverConfig
+	var requiredKustomizations string
+	var requiredOpenBaoObjects string
+	flag.StringVar(&cfg.Kubectl, "kubectl", "", "path to kubectl")
+	flag.StringVar(&cfg.Kubeconfig, "kubeconfig", "", "kubeconfig for guardian-mgmt")
+	flag.StringVar(&cfg.KubeAPIServer, "kube-api-server", "", "optional Kubernetes API server override for off-VLAN proof runs")
+	flag.StringVar(&cfg.RequestTimeout, "request-timeout", "15s", "kubectl API request timeout")
+	flag.StringVar(&cfg.FluxNamespace, "flux-namespace", "cozy-fluxcd", "Flux namespace")
+	flag.StringVar(&cfg.OpenBaoNamespace, "openbao-namespace", "tenant-guardian", "OpenBao namespace")
+	flag.StringVar(&cfg.ControllerDeployment, "controller-deployment", "openbao-ops-controller", "OpenBao ops-controller Deployment name")
+	flag.StringVar(&cfg.ExpectedRevision, "expected-revision", "", "optional Git revision that all checked Flux Kustomizations must have applied")
+	flag.StringVar(&cfg.Phase, "phase", phaseConverged, "cutover phase to verify: bootstrap-required or converged")
+	flag.StringVar(&requiredKustomizations, "required-kustomizations", strings.Join(defaultKustomizations, ","), "comma-separated Flux Kustomizations required for cutover proof")
+	flag.StringVar(&requiredOpenBaoObjects, "required-openbao-objects", strings.Join(defaultOpenBaoObjects, ","), "comma-separated Kind/name OpenBao CRs required for cutover proof")
+	flag.Parse()
+
+	cfg.RequiredKustomizations = csv(requiredKustomizations)
+	cfg.RequiredOpenBaoObjects = csv(requiredOpenBaoObjects)
+
+	exitIfErr(validateConfig(cfg))
+	exitIfErr(runCutoverProof(context.Background(), cfg))
+}
+
+func exitIfErr(err error) {
+	if err == nil {
+		return
+	}
+	fmt.Fprintln(os.Stderr, "ERROR:", err)
+	os.Exit(1)
+}
+
+func validateConfig(cfg cutoverConfig) error {
+	if cfg.Kubectl == "" {
+		return errors.New("--kubectl is required")
+	}
+	if cfg.FluxNamespace == "" {
+		return errors.New("--flux-namespace is required")
+	}
+	if cfg.OpenBaoNamespace == "" {
+		return errors.New("--openbao-namespace is required")
+	}
+	if cfg.ControllerDeployment == "" {
+		return errors.New("--controller-deployment is required")
+	}
+	switch cfg.Phase {
+	case phaseBootstrapRequired, phaseConverged:
+	default:
+		return fmt.Errorf("--phase %q is not one of %s, %s", cfg.Phase, phaseBootstrapRequired, phaseConverged)
+	}
+	if len(cfg.RequiredKustomizations) == 0 {
+		return errors.New("--required-kustomizations must not be empty")
+	}
+	if len(cfg.RequiredOpenBaoObjects) == 0 {
+		return errors.New("--required-openbao-objects must not be empty")
+	}
+	return nil
+}
+
+func runCutoverProof(ctx context.Context, cfg cutoverConfig) error {
+	runner := kubectlRunner{
+		bin:            cfg.Kubectl,
+		kubeconfig:     cfg.Kubeconfig,
+		kubeAPIServer:  cfg.KubeAPIServer,
+		requestTimeout: cfg.RequestTimeout,
+	}
+
+	fmt.Printf("guardian openbao cutover proof\n")
+	fmt.Printf("phase=%s fluxNamespace=%s openbaoNamespace=%s controllerDeployment=%s\n", cfg.Phase, cfg.FluxNamespace, cfg.OpenBaoNamespace, cfg.ControllerDeployment)
+
+	fluxRaw, err := runner.output(ctx, "Flux Kustomizations", "-n", cfg.FluxNamespace, "get", "kustomizations.kustomize.toolkit.fluxcd.io", "-o", "json")
+	if err != nil {
+		return err
+	}
+	if err := validateFluxKustomizations(fluxRaw, cfg.RequiredKustomizations, cfg.ExpectedRevision); err != nil {
+		return err
+	}
+
+	deploymentRaw, err := runner.output(ctx, "OpenBao ops-controller Deployment", "-n", cfg.OpenBaoNamespace, "get", "deployment.apps/"+cfg.ControllerDeployment, "-o", "json")
+	if err != nil {
+		return err
+	}
+	if err := validateDeploymentReady(deploymentRaw, cfg.ControllerDeployment); err != nil {
+		return err
+	}
+
+	openBaoRaw, err := runner.output(ctx, "OpenBao operation CRs", "-n", cfg.OpenBaoNamespace, "get", strings.Join(openBaoResourceTypes(), ","), "-o", "json")
+	if err != nil {
+		return err
+	}
+	if err := validateOpenBaoCRs(openBaoRaw, cfg.RequiredOpenBaoObjects, cfg.Phase); err != nil {
+		return err
+	}
+
+	fmt.Printf("openbao cutover proof passed: phase=%s\n", cfg.Phase)
+	return nil
+}
+
+func validateFluxKustomizations(raw string, required []string, expectedRevision string) error {
+	var list kubeList
+	if err := json.Unmarshal([]byte(raw), &list); err != nil {
+		return fmt.Errorf("parse Flux Kustomizations: %w", err)
+	}
+	objects := map[string]kubeObject{}
+	for _, item := range list.Items {
+		objects[item.Metadata.Name] = item
+	}
+	for _, name := range required {
+		item, ok := objects[name]
+		if !ok {
+			return fmt.Errorf("Flux Kustomization %q is missing", name)
+		}
+		ready := conditionByType(item.Status.Conditions, "Ready")
+		if ready == nil || ready.Status != "True" {
+			return fmt.Errorf("Flux Kustomization %q Ready = %s reason=%s", name, conditionStatus(ready), conditionReason(ready))
+		}
+		if expectedRevision != "" && !strings.Contains(item.Status.LastAppliedRevision, expectedRevision) {
+			return fmt.Errorf("Flux Kustomization %q lastAppliedRevision = %q, want it to contain %q", name, item.Status.LastAppliedRevision, expectedRevision)
+		}
+	}
+	fmt.Printf("Flux Kustomizations ready: %s\n", strings.Join(required, ","))
+	return nil
+}
+
+func validateDeploymentReady(raw string, name string) error {
+	var deployment kubeObject
+	if err := json.Unmarshal([]byte(raw), &deployment); err != nil {
+		return fmt.Errorf("parse Deployment %q: %w", name, err)
+	}
+	if deployment.Status.Replicas == 0 {
+		return fmt.Errorf("Deployment %q has zero desired replicas", name)
+	}
+	if deployment.Status.ReadyReplicas != deployment.Status.Replicas {
+		return fmt.Errorf("Deployment %q readyReplicas=%d replicas=%d", name, deployment.Status.ReadyReplicas, deployment.Status.Replicas)
+	}
+	image := containerImage(deployment.Spec.Template.Spec.Containers, "manager")
+	if !strings.Contains(image, "@sha256:") {
+		return fmt.Errorf("Deployment %q manager image = %q, want digest-pinned image", name, image)
+	}
+	fmt.Printf("OpenBao ops-controller ready: deployment=%s image=%s replicas=%d\n", name, image, deployment.Status.Replicas)
+	return nil
+}
+
+func validateOpenBaoCRs(raw string, required []string, phase string) error {
+	var list kubeList
+	if err := json.Unmarshal([]byte(raw), &list); err != nil {
+		return fmt.Errorf("parse OpenBao CRs: %w", err)
+	}
+	objects := map[string]kubeObject{}
+	for _, item := range list.Items {
+		objects[item.Kind+"/"+item.Metadata.Name] = item
+	}
+	for _, key := range required {
+		item, ok := objects[key]
+		if !ok {
+			return fmt.Errorf("OpenBao CR %q is missing", key)
+		}
+		if err := validateOpenBaoCR(item, phase); err != nil {
+			return fmt.Errorf("%s: %w", key, err)
+		}
+	}
+	fmt.Printf("OpenBao CRs verified for phase=%s: %s\n", phase, strings.Join(required, ","))
+	return nil
+}
+
+func validateOpenBaoCR(item kubeObject, phase string) error {
+	switch phase {
+	case phaseBootstrapRequired:
+		return validateBootstrapRequiredCR(item)
+	case phaseConverged:
+		return validateConvergedCR(item)
+	default:
+		return fmt.Errorf("unsupported phase %q", phase)
+	}
+}
+
+func validateBootstrapRequiredCR(item kubeObject) error {
+	for _, expected := range []struct {
+		condition string
+		status    string
+	}{
+		{"Authenticated", "False"},
+		{"Applied", "False"},
+		{"Ready", "False"},
+		{"DriftDetected", "Unknown"},
+	} {
+		cond := conditionByType(item.Status.Conditions, expected.condition)
+		if cond == nil {
+			return fmt.Errorf("missing %s condition", expected.condition)
+		}
+		if cond.Status != expected.status || cond.Reason != "BootstrapRequired" {
+			return fmt.Errorf("%s = %s reason=%s, want %s reason=BootstrapRequired", expected.condition, cond.Status, cond.Reason, expected.status)
+		}
+	}
+	if !strings.Contains(item.Status.LastError, "invalid role name") {
+		return fmt.Errorf("lastError = %q, want missing OpenBao role detail", item.Status.LastError)
+	}
+	return nil
+}
+
+func validateConvergedCR(item kubeObject) error {
+	for _, expected := range []struct {
+		condition string
+		status    string
+	}{
+		{"Authenticated", "True"},
+		{"Applied", "True"},
+		{"Ready", "True"},
+		{"DriftDetected", "False"},
+	} {
+		cond := conditionByType(item.Status.Conditions, expected.condition)
+		if cond == nil {
+			return fmt.Errorf("missing %s condition", expected.condition)
+		}
+		if cond.Status != expected.status {
+			return fmt.Errorf("%s = %s reason=%s, want %s", expected.condition, cond.Status, cond.Reason, expected.status)
+		}
+	}
+	if item.Status.LastError != "" {
+		return fmt.Errorf("lastError = %q, want empty", item.Status.LastError)
+	}
+	return nil
+}
+
+func (r kubectlRunner) output(ctx context.Context, label string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, r.bin, r.args(args...)...)
+	var stdout strings.Builder
+	var stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("%s failed: %w\n%s", label, err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.String(), nil
+}
+
+func (r kubectlRunner) args(args ...string) []string {
+	out := make([]string, 0, len(args)+6)
+	if r.kubeconfig != "" {
+		out = append(out, "--kubeconfig", r.kubeconfig)
+	}
+	if r.kubeAPIServer != "" {
+		out = append(out, "--server", r.kubeAPIServer)
+	}
+	if r.requestTimeout != "" {
+		out = append(out, "--request-timeout", r.requestTimeout)
+	}
+	out = append(out, args...)
+	return out
+}
+
+func openBaoResourceTypes() []string {
+	return []string{
+		"openbaoauthbackends.openbao.guardian.dev",
+		"openbaokubernetesauthroles.openbao.guardian.dev",
+		"openbaomounts.openbao.guardian.dev",
+		"openbaomounttunes.openbao.guardian.dev",
+		"openbaopolicies.openbao.guardian.dev",
+	}
+}
+
+func csv(value string) []string {
+	var out []string
+	for _, item := range strings.Split(value, ",") {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func conditionByType(conditions []condition, conditionType string) *condition {
+	for i := range conditions {
+		if conditions[i].Type == conditionType {
+			return &conditions[i]
+		}
+	}
+	return nil
+}
+
+func conditionStatus(cond *condition) string {
+	if cond == nil {
+		return "<missing>"
+	}
+	return cond.Status
+}
+
+func conditionReason(cond *condition) string {
+	if cond == nil {
+		return "<missing>"
+	}
+	return cond.Reason
+}
+
+func containerImage(containers []containerSpec, name string) string {
+	for _, container := range containers {
+		if container.Name == name {
+			return container.Image
+		}
+	}
+	if len(containers) == 1 {
+		return containers[0].Image
+	}
+	return ""
+}
