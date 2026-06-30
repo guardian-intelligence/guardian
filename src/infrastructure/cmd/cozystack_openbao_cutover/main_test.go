@@ -83,7 +83,7 @@ func TestValidateStatefulSetRolled(t *testing.T) {
 }
 
 func TestValidateStatefulSetRolledAcceptsOnDeleteCurrentRevisionLag(t *testing.T) {
-	raw := `{"spec":{"replicas":3,"updateStrategy":{"type":"OnDelete"}},"status":{"readyReplicas":3,"updatedReplicas":3,"currentRevision":"guardian-openbao-old","updateRevision":"guardian-openbao-new"}}`
+	raw := `{"spec":{"replicas":3,"updateStrategy":{"type":"OnDelete"}},"status":{"readyReplicas":3,"updatedReplicas":0,"currentRevision":"guardian-openbao-old","updateRevision":"guardian-openbao-new"}}`
 	if err := validateStatefulSetRolled(raw, "guardian-openbao"); err != nil {
 		t.Fatalf("validateStatefulSetRolled() error = %v", err)
 	}
