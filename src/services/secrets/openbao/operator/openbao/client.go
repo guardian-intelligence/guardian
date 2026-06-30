@@ -284,6 +284,9 @@ func (c *Client) GetPKIIssuer(ctx context.Context, mountPath string, issuerRef s
 		if isOpenBaoNotFound(err) {
 			return PKIIssuer{}, false, nil
 		}
+		if isOpenBaoPKIIssuerNotFound(err) {
+			return PKIIssuer{}, false, nil
+		}
 		return PKIIssuer{}, false, err
 	}
 	if secret == nil || secret.Data == nil {
@@ -506,6 +509,14 @@ func kubernetesAuthRolePath(backendPath string, roleName string) string {
 func isOpenBaoNotFound(err error) bool {
 	var responseError *baoapi.ResponseError
 	return errors.As(err, &responseError) && responseError.StatusCode == 404
+}
+
+func isOpenBaoPKIIssuerNotFound(err error) bool {
+	var responseError *baoapi.ResponseError
+	if !errors.As(err, &responseError) || responseError.StatusCode != 500 {
+		return false
+	}
+	return strings.Contains(responseError.Error(), "unable to find PKI issuer for reference")
 }
 
 func stringFromSecret(value interface{}) string {
