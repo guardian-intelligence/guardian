@@ -79,13 +79,14 @@ Target shape:
 
 Handoff order:
 
-1. Keep the bootstrap `guardian-openbao-api-tls` Secret serving OpenBao.
+1. Keep the bootstrap `guardian-openbao-api-tls` Secret serving OpenBao during first
+   come-up.
 2. Converge the OpenBao PKI mount, role, policy, and Kubernetes auth role.
 3. Converge `OpenBaoPKIRootIssuer/openbao-api-root-2026` and wait for `Ready=True`.
 4. Create the cert-manager Vault Issuer and wait for `Ready=True`.
-5. Re-issue `Certificate/guardian-openbao-api` into the existing
-   `guardian-openbao-api-tls` Secret from the Vault Issuer.
-6. Verify the SIGHUP sidecar reloads the leaf and all three OpenBao pods remain
+5. Keep `Certificate/guardian-openbao-api` pointed at `Issuer/guardian-openbao-vault`
+   so the existing `guardian-openbao-api-tls` Secret is renewed by OpenBao PKI.
+6. Verify the SIGHUP sidecar reloads the OpenBao-issued leaf and all three OpenBao pods remain
    unsealed in one raft cluster.
 7. Remove the bootstrap self-signed issuer/CA Certificate only after the new CA
    is trusted everywhere that talks to the OpenBao API.
