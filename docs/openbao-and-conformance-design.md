@@ -60,11 +60,11 @@ trade-offs are called out explicitly.
   self-signed/CA issuer chain is **bootstrap only** so the `guardian-openbao-api-tls`
   Secret exists before the OpenBao pod mounts it. It must not remain the steady-state
   trust root.
-- **Steady state:** OpenBao PKI is the issuer behind cert-manager's Vault issuer. After
-  OpenBao self-init and ops convergence, enable the OpenBao PKI mount/role, create the
-  cert-manager Vault issuer that authenticates with Kubernetes auth, re-issue the
-  `guardian-openbao-api-tls` leaf from OpenBao PKI, then remove the bootstrap self-signed
-  issuer path after a trust-overlap window. The Talos cluster CA remains rejected as issuer;
+- **Steady state:** OpenBao PKI is the issuer behind cert-manager's Vault issuer, and
+  `Certificate/guardian-openbao-api` writes the `guardian-openbao-api-tls` leaf from
+  `Issuer/guardian-openbao-vault`. The bootstrap self-signed issuer path is only for
+  first come-up and trust overlap until the OpenBao-issued leaf is proven stable. The
+  Talos cluster CA remains rejected as issuer;
   using it requires exfiltrating the control-plane root key into a tenant workload.
 - **The 8201 raft cluster/peer cert is self-managed by OpenBao** (its own internal CA,
   rotated automatically). cert-manager does not touch 8201. `retry_join` uses the 8200 cert
@@ -118,13 +118,12 @@ trade-offs are called out explicitly.
   `pki/openbao-api/sign/openbao-api`, `caBundleSecretRef` from `guardian-openbao-api-tls`,
   and Kubernetes auth via `serviceAccountRef`. cert-manager v1.20.2 supports this
   short-lived-token path.
-- Handoff: the PKI mount/root issuer/role/policy/auth role and Vault issuer can converge
-  while the bootstrap `guardian-openbao-api-tls` is still serving. Repoint
-  `Certificate/guardian-openbao-api` to the Vault issuer only after
-  `OpenBaoPKIRootIssuer/openbao-api-root-2026` and `Issuer/guardian-openbao-vault` are
-  Ready. Re-issue the leaf, let the SIGHUP sidecar reload it, verify OpenBao API readiness
-  and raft status, then delete the bootstrap self-signed issuer/CA Certificate after trust
-  overlap.
+- Handoff: the PKI mount/root issuer/role/policy/auth role and Vault issuer converged
+  while the bootstrap `guardian-openbao-api-tls` leaf was serving. The durable
+  `Certificate/guardian-openbao-api` now uses the Vault issuer. After live verification
+  shows the SIGHUP sidecar reloads the OpenBao-issued leaf, the OpenBao API remains ready,
+  and raft stays healthy, remove the bootstrap self-signed issuer/CA Certificate in a
+  follow-up cleanup.
 
 ### Auth & self-init config
 - Kubernetes auth method; ESO and the ops-controller authenticate via SA tokens validated by

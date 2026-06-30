@@ -76,7 +76,7 @@ spec:
   issuerRef:
     group: cert-manager.io
     kind: Issuer
-    name: guardian-openbao-ca
+    name: guardian-openbao-vault
   dnsNames:
     - guardian-openbao
     - guardian-openbao.tenant-guardian
