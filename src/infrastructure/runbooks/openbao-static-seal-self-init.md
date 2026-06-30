@@ -46,9 +46,9 @@ retained raft snapshot needs them.
 
 ## Startup
 
-Flux reconciles:
+Flux reconciles the steady state:
 
-- cert-manager's bootstrap Issuer and Certificate for initial OpenBao API TLS;
+- cert-manager's Vault Issuer and OpenBao-issued API listener Certificate;
 - `HelmRelease/tenant-guardian/guardian-openbao`;
 - the OpenBao ops-controller CRDs and Deployment;
 - Flux-applied OpenBao operation CRs.
@@ -60,11 +60,9 @@ Kubernetes auth, its config, the ops-controller policy, and the ops-controller
 role. The temporary privileged token used internally by self-init is not
 returned and is revoked by OpenBao after initialization.
 
-The bootstrap cert-manager self-signed/CA issuer path exists only to create the
-`guardian-openbao-api-tls` Secret before the OpenBao pod can mount it. After
-OpenBao is initialized, steady state must move the OpenBao API leaf to a
-cert-manager Vault issuer backed by OpenBao PKI, then remove the bootstrap
-issuer/CA path after trust overlap.
+The bootstrap cert-manager self-signed/CA issuer path exists only for first
+come-up, when `guardian-openbao-api-tls` does not exist yet and OpenBao cannot
+serve the Vault issuer. It is not reconciled as steady state after handoff.
 
 ## PKI Handoff
 
