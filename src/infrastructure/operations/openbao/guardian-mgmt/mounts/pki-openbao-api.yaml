@@ -1,0 +1,13 @@
+apiVersion: openbao.guardian.dev/v1alpha1
+kind: OpenBaoMount
+metadata:
+  name: pki-openbao-api
+spec:
+  path: pki/openbao-api
+  type: pki
+  description: Guardian OpenBao API serving certificate intermediate PKI.
+  tune:
+    defaultLeaseTTL: 2160h
+    maxLeaseTTL: 8760h
+    listingVisibility: hidden
+  deletionPolicy: Retain

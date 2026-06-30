@@ -40,4 +40,16 @@ spec:
     path "sys/mounts/kv/tune" {
       capabilities = ["read", "update", "sudo"]
     }
+
+    path "sys/mounts/pki/openbao-api" {
+      capabilities = ["create", "read", "update", "delete", "sudo"]
+    }
+
+    path "sys/mounts/pki/openbao-api/tune" {
+      capabilities = ["read", "update", "sudo"]
+    }
+
+    path "pki/openbao-api/roles/openbao-api" {
+      capabilities = ["create", "read", "update", "delete"]
+    }
   deletionPolicy: Retain

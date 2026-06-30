@@ -28,6 +28,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&OpenBaoMountList{},
 		&OpenBaoMountTune{},
 		&OpenBaoMountTuneList{},
+		&OpenBaoPKIRole{},
+		&OpenBaoPKIRoleList{},
 		&OpenBaoPolicy{},
 		&OpenBaoPolicyList{},
 	)

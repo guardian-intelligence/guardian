@@ -1,0 +1,92 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: guardian-openbao-static-seal-hostpath
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - ""
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - pods
+  validations:
+    - expression: >-
+        !has(object.spec.volumes) ||
+        object.spec.volumes.all(volume,
+          !has(volume.hostPath) ||
+          !(
+            volume.hostPath.path == "/var/lib/guardian/openbao/static-seal" ||
+            volume.hostPath.path.startsWith("/var/lib/guardian/openbao/static-seal/") ||
+            "/var/lib/guardian/openbao/static-seal".startsWith(volume.hostPath.path + "/")
+          ) ||
+          (
+            object.metadata.namespace == "tenant-guardian" &&
+            has(object.metadata.labels) &&
+            "app.kubernetes.io/name" in object.metadata.labels &&
+            object.metadata.labels["app.kubernetes.io/name"] == "openbao" &&
+            "app.kubernetes.io/instance" in object.metadata.labels &&
+            object.metadata.labels["app.kubernetes.io/instance"] == "guardian-openbao" &&
+            "component" in object.metadata.labels &&
+            object.metadata.labels["component"] == "server" &&
+            volume.hostPath.path == "/var/lib/guardian/openbao/static-seal"
+          )
+        )
+      message: only guardian-openbao server pods may mount the static seal host path
+    - expression: >-
+        object.metadata.namespace != "tenant-guardian" ||
+        !has(object.spec.volumes) ||
+        object.spec.volumes.all(volume,
+          !has(volume.hostPath) ||
+          (
+            has(object.metadata.labels) &&
+            "app.kubernetes.io/name" in object.metadata.labels &&
+            object.metadata.labels["app.kubernetes.io/name"] == "openbao" &&
+            "app.kubernetes.io/instance" in object.metadata.labels &&
+            object.metadata.labels["app.kubernetes.io/instance"] == "guardian-openbao" &&
+            "component" in object.metadata.labels &&
+            object.metadata.labels["component"] == "server" &&
+            volume.hostPath.path == "/var/lib/guardian/openbao/static-seal"
+          )
+        )
+      message: tenant-guardian hostPath volumes are reserved for guardian-openbao static seal
+    - expression: >-
+        object.metadata.namespace != "tenant-guardian" ||
+        (
+          object.spec.containers.all(container,
+            !has(container.securityContext) ||
+            !has(container.securityContext.privileged) ||
+            container.securityContext.privileged == false
+          ) &&
+          (
+            !has(object.spec.initContainers) ||
+            object.spec.initContainers.all(container,
+              !has(container.securityContext) ||
+              !has(container.securityContext.privileged) ||
+              container.securityContext.privileged == false
+            )
+          ) &&
+          (
+            !has(object.spec.ephemeralContainers) ||
+            object.spec.ephemeralContainers.all(container,
+              !has(container.securityContext) ||
+              !has(container.securityContext.privileged) ||
+              container.securityContext.privileged == false
+            )
+          )
+        )
+      message: privileged containers are not allowed in tenant-guardian
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: guardian-openbao-static-seal-hostpath
+spec:
+  policyName: guardian-openbao-static-seal-hostpath
+  validationActions:
+    - Deny

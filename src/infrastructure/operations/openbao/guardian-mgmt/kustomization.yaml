@@ -3,10 +3,14 @@ kind: Kustomization
 namespace: tenant-guardian
 resources:
   - authbackends/kubernetes.yaml
+  - authroles/cert-manager-openbao-api-issuer.yaml
   - authroles/external-dns.yaml
   - authroles/ops-controller.yaml
   - mounts/kv.yaml
+  - mounts/pki-openbao-api.yaml
   - mounttunes/kv.yaml
+  - pkiroles/openbao-api.yaml
+  - policies/cert-manager-openbao-api-issuer.yaml
   - policies/external-dns.yaml
   - policies/ops-controller.yaml
 labels:

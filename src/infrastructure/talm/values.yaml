@@ -172,6 +172,12 @@ extraKernelModules: []
 extraNodeLabels:
   guardian.dev/openbao-static-seal: "true"
 
+# Extra Kubernetes node taints rendered into every machine config. The ASH
+# management nodes are dedicated OpenBao key-bearing nodes; general workloads
+# must not schedule here unless they carry an explicit toleration.
+extraNodeTaints:
+  guardian.dev/openbao-static-seal: "NoSchedule"
+
 # Extra kubelet args added to the preset's kubelet.extraConfig
 # (cpuManagerPolicy: static, maxPods: 512). Operator keys must be
 # DISJOINT from the built-in set; a collision fails the render with

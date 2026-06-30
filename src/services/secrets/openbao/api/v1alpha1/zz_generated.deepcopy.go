@@ -252,6 +252,52 @@ func (in *OpenBaoMountTuneList) DeepCopy() *OpenBaoMountTuneList {
 	return out
 }
 
+func (in *OpenBaoPKIRole) DeepCopyObject() runtime.Object {
+	if out := in.DeepCopy(); out != nil {
+		return out
+	}
+	return nil
+}
+
+func (in *OpenBaoPKIRole) DeepCopy() *OpenBaoPKIRole {
+	if in == nil {
+		return nil
+	}
+	out := new(OpenBaoPKIRole)
+	*out = *in
+	out.ObjectMeta = *in.ObjectMeta.DeepCopy()
+	out.Spec.AllowedDomains = copyStringSlice(in.Spec.AllowedDomains)
+	out.Spec.AllowedIPSANsCIDR = copyStringSlice(in.Spec.AllowedIPSANsCIDR)
+	out.Spec.KeyUsage = copyStringSlice(in.Spec.KeyUsage)
+	out.Spec.ExtKeyUsage = copyStringSlice(in.Spec.ExtKeyUsage)
+	out.Spec.CNValidations = copyStringSlice(in.Spec.CNValidations)
+	out.Status = in.Status.DeepCopy()
+	return out
+}
+
+func (in *OpenBaoPKIRoleList) DeepCopyObject() runtime.Object {
+	if out := in.DeepCopy(); out != nil {
+		return out
+	}
+	return nil
+}
+
+func (in *OpenBaoPKIRoleList) DeepCopy() *OpenBaoPKIRoleList {
+	if in == nil {
+		return nil
+	}
+	out := new(OpenBaoPKIRoleList)
+	*out = *in
+	out.ListMeta = in.ListMeta
+	if in.Items != nil {
+		out.Items = make([]OpenBaoPKIRole, len(in.Items))
+		for i := range in.Items {
+			out.Items[i] = *in.Items[i].DeepCopy()
+		}
+	}
+	return out
+}
+
 func (in *OpenBaoPolicy) DeepCopyObject() runtime.Object {
 	if out := in.DeepCopy(); out != nil {
 		return out

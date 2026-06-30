@@ -218,9 +218,10 @@ Important context:
 Constraints:
 - Secrets must be autoprovisioned/autorotated.
 - Guardian tenant OpenBao uses static auto-unseal plus OpenBao self-init. The
-  static seal key is 32 raw bytes, generated under `~/.guardian`, placed out of
-  band on each key-bearing node, and never stored in Kubernetes, Git, CI, chat,
-  shell history, or OpenBao-backed secret paths. The runbook is
+  static seal key is 32 raw bytes, placed out of band on each dedicated
+  key-bearing node, and never stored in Kubernetes, Git, CI, chat, shell
+  history, Talos machine files, or OpenBao-backed secret paths. Node/root
+  compromise on a key-bearing node is OpenBao compromise. The runbook is
   `src/infrastructure/runbooks/openbao-static-seal-self-init.md`.
 - Cozystack 1.5 backups use the platform-managed `cozy-default` BackupClass
   and system bucket. Do not add Guardian-specific backup strategies, backup

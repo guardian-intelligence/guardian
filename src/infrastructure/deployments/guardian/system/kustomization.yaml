@@ -3,6 +3,7 @@ kind: Kustomization
 resources:
   - stage-tenants.yaml
   - openbao-pki.yaml
+  - openbao-vault-issuer.yaml
   - openbao-helmrelease.yaml
   - openbao-networkpolicy.yaml
   - openbao-observability.yaml

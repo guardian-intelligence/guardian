@@ -22,6 +22,10 @@ machine:
     {{- toYaml . | nindent 4 }}
     {{- end }}
   {{- end }}
+  {{- with .Values.extraNodeTaints }}
+  nodeTaints:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   type: {{ .MachineType }}
   kubelet:
     nodeIP:
