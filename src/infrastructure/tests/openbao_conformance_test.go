@@ -51,6 +51,9 @@ func TestOpenBaoStaticSealTLSAndStorageConformance(t *testing.T) {
 		`path \"sys/mounts\"`,
 		`path \"sys/mounts/pki/openbao-api\"`,
 		`path \"pki/openbao-api/roles/openbao-api\"`,
+		`path \"pki/openbao-api/root/generate/internal\"`,
+		`path \"pki/openbao-api/issuer/openbao-api-root-2026\"`,
+		`path \"pki/openbao-api/config/issuers\"`,
 		`request "write_secret_importer_policy"`,
 		`request "write_secret_importer_role"`,
 		`kv/data/guardian/guardian-mgmt/tenant-guardian/dns/external-dns`,
@@ -116,6 +119,17 @@ func TestOpenBaoVaultIssuerAndPKIRoleConformance(t *testing.T) {
 	assertNestedBool(t, state, false, "spec", "allowWildcardCertificates")
 	assertTextContains(t, stateRaw, "127.0.0.1/32", statePath)
 	assertTextContains(t, stateRaw, "guardian-openbao-active.tenant-guardian.svc.cluster.local", statePath)
+
+	rootIssuerPath := runfilePath("src/infrastructure/operations/openbao/guardian-mgmt/pkirootissuers/openbao-api-root-2026.yaml")
+	rootIssuer := singleYAMLDoc(t, rootIssuerPath)
+	assertNestedString(t, rootIssuer, "OpenBaoPKIRootIssuer", "kind")
+	assertNestedString(t, rootIssuer, "pki/openbao-api", "spec", "mountPath")
+	assertNestedString(t, rootIssuer, "openbao-api-root-2026", "spec", "issuerName")
+	assertNestedString(t, rootIssuer, "Guardian OpenBao API Root 2026", "spec", "commonName")
+	assertNestedString(t, rootIssuer, "87600h", "spec", "ttl")
+	assertNestedString(t, rootIssuer, "ec", "spec", "keyType")
+	assertNestedInt(t, rootIssuer, 256, "spec", "keyBits")
+	assertNestedBool(t, rootIssuer, true, "spec", "setDefault")
 }
 
 func TestOpenBaoLocalStorageClassConformance(t *testing.T) {

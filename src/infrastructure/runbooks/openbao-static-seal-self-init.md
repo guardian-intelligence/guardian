@@ -63,8 +63,10 @@ issuer/CA path after trust overlap.
 
 Target shape:
 
-- Flux declares `OpenBaoMount/pki-openbao-api`; issuer material still must be
-  generated/imported without putting private CA material in Kubernetes, Git, or CI.
+- Flux declares `OpenBaoMount/pki-openbao-api`.
+- Flux declares `OpenBaoPKIRootIssuer/openbao-api-root-2026`; OpenBao generates the CA
+  private key internally and sets the issuer as the mount default. No CA private key goes in
+  Kubernetes, Git, CI, or a local operator file.
 - Flux declares `OpenBaoPKIRole/openbao-api`, which can sign only the OpenBao API
   listener names already present in `openbao-pki.yaml`.
 - Flux declares the cert-manager policy with only `update` on
@@ -79,12 +81,13 @@ Handoff order:
 
 1. Keep the bootstrap `guardian-openbao-api-tls` Secret serving OpenBao.
 2. Converge the OpenBao PKI mount, role, policy, and Kubernetes auth role.
-3. Create the cert-manager Vault Issuer and wait for `Ready=True`.
-4. Re-issue `Certificate/guardian-openbao-api` into the existing
+3. Converge `OpenBaoPKIRootIssuer/openbao-api-root-2026` and wait for `Ready=True`.
+4. Create the cert-manager Vault Issuer and wait for `Ready=True`.
+5. Re-issue `Certificate/guardian-openbao-api` into the existing
    `guardian-openbao-api-tls` Secret from the Vault Issuer.
-5. Verify the SIGHUP sidecar reloads the leaf and all three OpenBao pods remain
+6. Verify the SIGHUP sidecar reloads the leaf and all three OpenBao pods remain
    unsealed in one raft cluster.
-6. Remove the bootstrap self-signed issuer/CA Certificate only after the new CA
+7. Remove the bootstrap self-signed issuer/CA Certificate only after the new CA
    is trusted everywhere that talks to the OpenBao API.
 
 ## Verify

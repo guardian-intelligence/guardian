@@ -83,6 +83,30 @@ type PKIRole struct {
 	NotAfterBound             string
 }
 
+type PKIRootIssuer struct {
+	MountPath  string
+	IssuerName string
+	CommonName string
+	TTL        string
+	KeyType    string
+	KeyBits    int
+}
+
+type PKIIssuer struct {
+	MountPath   string
+	IssuerRef   string
+	IssuerID    string
+	IssuerName  string
+	KeyID       string
+	KeyName     string
+	Certificate string
+}
+
+type PKIIssuerConfig struct {
+	Default                    string
+	DefaultFollowsLatestIssuer bool
+}
+
 type KubernetesAuthConfig struct {
 	KubernetesHost       string
 	KubernetesCACert     string
@@ -253,6 +277,57 @@ func (c *Client) DeletePKIRole(ctx context.Context, mountPath string, roleName s
 	return err
 }
 
+func (c *Client) GetPKIIssuer(ctx context.Context, mountPath string, issuerRef string) (PKIIssuer, bool, error) {
+	path := pkiIssuerPath(mountPath, issuerRef)
+	secret, err := c.api.Logical().ReadWithContext(ctx, path)
+	if err != nil {
+		if isOpenBaoNotFound(err) {
+			return PKIIssuer{}, false, nil
+		}
+		return PKIIssuer{}, false, err
+	}
+	if secret == nil || secret.Data == nil {
+		return PKIIssuer{}, false, nil
+	}
+	return pkiIssuerFromSecret(mountPath, issuerRef, secret.Data), true, nil
+}
+
+func (c *Client) GeneratePKIRootIssuer(ctx context.Context, issuer PKIRootIssuer) (PKIIssuer, error) {
+	secret, err := c.api.Logical().WriteWithContext(ctx, pkiRootGenerateInternalPath(issuer.MountPath), pkiRootIssuerBody(issuer))
+	if err != nil {
+		return PKIIssuer{}, err
+	}
+	if secret == nil || secret.Data == nil {
+		return PKIIssuer{}, fmt.Errorf("OpenBao PKI root issuer generation returned no data")
+	}
+	return pkiIssuerFromSecret(issuer.MountPath, issuer.IssuerName, secret.Data), nil
+}
+
+func (c *Client) GetPKIIssuerConfig(ctx context.Context, mountPath string) (PKIIssuerConfig, bool, error) {
+	secret, err := c.api.Logical().ReadWithContext(ctx, pkiIssuerConfigPath(mountPath))
+	if err != nil {
+		if isOpenBaoNotFound(err) {
+			return PKIIssuerConfig{}, false, nil
+		}
+		return PKIIssuerConfig{}, false, err
+	}
+	if secret == nil || secret.Data == nil {
+		return PKIIssuerConfig{}, false, nil
+	}
+	return PKIIssuerConfig{
+		Default:                    stringFromSecret(secret.Data["default"]),
+		DefaultFollowsLatestIssuer: boolFromSecret(secret.Data["default_follows_latest_issuer"]),
+	}, true, nil
+}
+
+func (c *Client) PutPKIIssuerConfig(ctx context.Context, mountPath string, config PKIIssuerConfig) error {
+	_, err := c.api.Logical().WriteWithContext(ctx, pkiIssuerConfigPath(mountPath), map[string]interface{}{
+		"default":                       config.Default,
+		"default_follows_latest_issuer": config.DefaultFollowsLatestIssuer,
+	})
+	return err
+}
+
 func (c *Client) GetAuthBackend(ctx context.Context, path string) (AuthBackend, bool, error) {
 	backendPath := strings.Trim(path, "/")
 	mounts, err := c.api.Sys().ListAuthWithContext(ctx)
@@ -408,6 +483,18 @@ func pkiRolePath(mountPath string, roleName string) string {
 	return strings.Trim(mountPath, "/") + "/roles/" + strings.Trim(roleName, "/")
 }
 
+func pkiIssuerPath(mountPath string, issuerRef string) string {
+	return strings.Trim(mountPath, "/") + "/issuer/" + strings.Trim(issuerRef, "/")
+}
+
+func pkiIssuerConfigPath(mountPath string) string {
+	return strings.Trim(mountPath, "/") + "/config/issuers"
+}
+
+func pkiRootGenerateInternalPath(mountPath string) string {
+	return strings.Trim(mountPath, "/") + "/root/generate/internal"
+}
+
 func kubernetesAuthConfigPath(backendPath string) string {
 	return "auth/" + strings.Trim(backendPath, "/") + "/config"
 }
@@ -558,6 +645,32 @@ func pkiRoleBody(role PKIRole) map[string]interface{} {
 	}
 	if role.NotAfterBound != "" {
 		body["not_after_bound"] = role.NotAfterBound
+	}
+	return body
+}
+
+func pkiIssuerFromSecret(mountPath string, issuerRef string, data map[string]interface{}) PKIIssuer {
+	return PKIIssuer{
+		MountPath:   strings.Trim(mountPath, "/"),
+		IssuerRef:   strings.Trim(issuerRef, "/"),
+		IssuerID:    stringFromSecret(data["issuer_id"]),
+		IssuerName:  stringFromSecret(data["issuer_name"]),
+		KeyID:       stringFromSecret(data["key_id"]),
+		KeyName:     stringFromSecret(data["key_name"]),
+		Certificate: stringFromSecret(data["certificate"]),
+	}
+}
+
+func pkiRootIssuerBody(issuer PKIRootIssuer) map[string]interface{} {
+	body := map[string]interface{}{
+		"issuer_name": issuer.IssuerName,
+		"key_name":    issuer.IssuerName,
+		"common_name": issuer.CommonName,
+		"ttl":         issuer.TTL,
+		"key_type":    issuer.KeyType,
+	}
+	if issuer.KeyBits != 0 {
+		body["key_bits"] = issuer.KeyBits
 	}
 	return body
 }

@@ -52,4 +52,16 @@ spec:
     path "pki/openbao-api/roles/openbao-api" {
       capabilities = ["create", "read", "update", "delete"]
     }
+
+    path "pki/openbao-api/root/generate/internal" {
+      capabilities = ["update"]
+    }
+
+    path "pki/openbao-api/issuer/openbao-api-root-2026" {
+      capabilities = ["read"]
+    }
+
+    path "pki/openbao-api/config/issuers" {
+      capabilities = ["read", "update"]
+    }
   deletionPolicy: Retain
