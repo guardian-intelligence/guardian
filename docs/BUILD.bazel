@@ -1,0 +1,3 @@
+exports_files([
+    "openbao-and-conformance-design.md",
+])

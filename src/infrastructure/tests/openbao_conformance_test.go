@@ -28,6 +28,8 @@ func TestOpenBaoStaticSealTLSAndStorageConformance(t *testing.T) {
 	assertNestedString(t, server, "openbao-local", "dataStorage", "storageClass")
 	assertNestedString(t, server, "openbao-local", "auditStorage", "storageClass")
 	assertNestedString(t, server, "true", "nodeSelector", "guardian.dev/openbao-static-seal")
+	assertToleration(t, server, "guardian.dev/openbao-static-seal", "Exists", "NoSchedule")
+	assertHostPathVolume(t, server, "openbao-static-seal", "/var/lib/guardian/openbao/static-seal", "DirectoryOrCreate")
 	assertNestedString(t, server, "https://guardian-openbao-active.tenant-guardian.svc:8200", "ha", "apiAddr")
 	assertNestedBool(t, doc, true, "spec", "upgrade", "disableWait")
 	assertNestedInt(t, doc, 0, "spec", "upgrade", "remediation", "retries")
@@ -37,22 +39,28 @@ func TestOpenBaoStaticSealTLSAndStorageConformance(t *testing.T) {
 		`seal "static"`,
 		`current_key_id = "` + openBaoStaticSealKeyID + `"`,
 		`current_key = "` + wantFile + `"`,
+		`dir_mode="$(stat -c '%a' /openbao/secrets)"`,
+		`case "$dir_mode" in 700|750)`,
+		`key_mode="$(stat -c '%a' "$key")"`,
+		`case "$key_mode" in 400|440|600|640)`,
 		`test "$(sha256sum "$key" | awk '{print $1}')" = "` + openBaoStaticSealKeyID + `"`,
-			`initialize "guardian_self_init"`,
-			`request "write_ops_controller_role"`,
-			`path \"sys/auth\"`,
-			`path \"auth/kubernetes/config\"`,
-			`path \"sys/mounts\"`,
-			`request "write_secret_importer_policy"`,
-			`request "write_secret_importer_role"`,
-			`kv/data/guardian/guardian-mgmt/tenant-guardian/dns/external-dns`,
-			`auth/kubernetes/role/guardian-secret-importer`,
-			`sys/policies/acl/guardian-secret-importer`,
-			`token_ttl = "600"`,
-			`tls_disable = false`,
-			`leader_api_addr = "https://guardian-openbao-active.tenant-guardian.svc:8200"`,
-			`leader_tls_servername = "guardian-openbao-active.tenant-guardian.svc"`,
-		} {
+		`initialize "guardian_self_init"`,
+		`request "write_ops_controller_role"`,
+		`path \"sys/auth\"`,
+		`path \"auth/kubernetes/config\"`,
+		`path \"sys/mounts\"`,
+		`path \"sys/mounts/pki/openbao-api\"`,
+		`path \"pki/openbao-api/roles/openbao-api\"`,
+		`request "write_secret_importer_policy"`,
+		`request "write_secret_importer_role"`,
+		`kv/data/guardian/guardian-mgmt/tenant-guardian/dns/external-dns`,
+		`auth/kubernetes/role/guardian-secret-importer`,
+		`sys/policies/acl/guardian-secret-importer`,
+		`token_ttl = "600"`,
+		`tls_disable = false`,
+		`leader_api_addr = "https://guardian-openbao-active.tenant-guardian.svc:8200"`,
+		`leader_tls_servername = "guardian-openbao-active.tenant-guardian.svc"`,
+	} {
 		assertTextContains(t, raw, want, path)
 	}
 	assertTextNotContains(t, raw, "http://guardian-openbao", path)
@@ -60,6 +68,54 @@ func TestOpenBaoStaticSealTLSAndStorageConformance(t *testing.T) {
 	pki := readText(t, runfilePath("src/infrastructure/deployments/guardian/system/openbao-pki.yaml"))
 	assertTextContains(t, pki, "guardian-openbao-active.tenant-guardian.svc.cozy.local", "openbao PKI manifest")
 	assertTextContains(t, pki, "guardian-openbao-0.guardian-openbao-internal.tenant-guardian.svc.cozy.local", "openbao PKI manifest")
+}
+
+func TestOpenBaoVaultIssuerAndPKIRoleConformance(t *testing.T) {
+	issuerPath := runfilePath("src/infrastructure/deployments/guardian/system/openbao-vault-issuer.yaml")
+	issuerRaw := readText(t, issuerPath)
+	issuerDocs := yamlDocs(t, issuerPath)
+	findDoc(t, issuerDocs, "ServiceAccount", "cert-manager-openbao-issuer")
+	findDoc(t, issuerDocs, "Role", "cert-manager-openbao-tokenrequest")
+	findDoc(t, issuerDocs, "RoleBinding", "cert-manager-openbao-tokenrequest")
+	issuer := findDoc(t, issuerDocs, "Issuer", "guardian-openbao-vault")
+	assertNestedString(t, issuer, "https://guardian-openbao.tenant-guardian.svc:8200", "spec", "vault", "server")
+	assertNestedString(t, issuer, "pki/openbao-api/sign/openbao-api", "spec", "vault", "path")
+	assertNestedString(t, issuer, "guardian-openbao-api-tls", "spec", "vault", "caBundleSecretRef", "name")
+	assertNestedString(t, issuer, "/v1/auth/kubernetes", "spec", "vault", "auth", "kubernetes", "mountPath")
+	assertNestedString(t, issuer, "guardian-cert-manager-openbao-api-issuer", "spec", "vault", "auth", "kubernetes", "role")
+	for _, want := range []string{
+		"resources:",
+		"- serviceaccounts/token",
+		"resourceNames:",
+		"- cert-manager-openbao-issuer",
+		"namespace: cozy-cert-manager",
+		"- openbao",
+	} {
+		assertTextContains(t, issuerRaw, want, issuerPath)
+	}
+
+	networkPolicy := readText(t, runfilePath("src/infrastructure/deployments/guardian/system/openbao-networkpolicy.yaml"))
+	for _, want := range []string{
+		"name: allow-cert-manager-to-openbao",
+		"app.kubernetes.io/name: cert-manager",
+		"k8s:io.kubernetes.pod.namespace: cozy-cert-manager",
+		"port: \"8200\"",
+	} {
+		assertTextContains(t, networkPolicy, want, "openbao network policy")
+	}
+
+	statePath := runfilePath("src/infrastructure/operations/openbao/guardian-mgmt/pkiroles/openbao-api.yaml")
+	stateRaw := readText(t, statePath)
+	state := singleYAMLDoc(t, statePath)
+	assertNestedString(t, state, "OpenBaoPKIRole", "kind")
+	assertNestedString(t, state, "pki/openbao-api", "spec", "mountPath")
+	assertNestedString(t, state, "openbao-api", "spec", "roleName")
+	assertNestedBool(t, state, true, "spec", "serverFlag")
+	assertNestedBool(t, state, false, "spec", "clientFlag")
+	assertNestedBool(t, state, false, "spec", "allowAnyName")
+	assertNestedBool(t, state, false, "spec", "allowWildcardCertificates")
+	assertTextContains(t, stateRaw, "127.0.0.1/32", statePath)
+	assertTextContains(t, stateRaw, "guardian-openbao-active.tenant-guardian.svc.cluster.local", statePath)
 }
 
 func TestOpenBaoLocalStorageClassConformance(t *testing.T) {
@@ -90,6 +146,51 @@ func TestOpenBaoTenantAllowsStaticSealHostPathConformance(t *testing.T) {
 		"path: /metadata/labels/pod-security.kubernetes.io~1warn",
 	} {
 		assertTextContains(t, raw, want, path)
+	}
+}
+
+func TestOpenBaoStaticSealAdmissionConformance(t *testing.T) {
+	path := runfilePath("src/infrastructure/base/app-patches/openbao-static-seal-admission.yaml")
+	raw := readText(t, path)
+	docs := yamlDocs(t, path)
+	policy := findDoc(t, docs, "ValidatingAdmissionPolicy", "guardian-openbao-static-seal-hostpath")
+	binding := findDoc(t, docs, "ValidatingAdmissionPolicyBinding", "guardian-openbao-static-seal-hostpath")
+
+	assertNestedString(t, policy, "Fail", "spec", "failurePolicy")
+	assertNestedString(t, binding, "guardian-openbao-static-seal-hostpath", "spec", "policyName")
+	for _, want := range []string{
+		`resources:`,
+		`- pods`,
+		`/var/lib/guardian/openbao/static-seal`,
+		`startsWith(volume.hostPath.path + "/")`,
+		`object.metadata.namespace == "tenant-guardian"`,
+		`object.metadata.labels["app.kubernetes.io/name"] == "openbao"`,
+		`object.metadata.labels["app.kubernetes.io/instance"] == "guardian-openbao"`,
+		`object.metadata.labels["component"] == "server"`,
+		`privileged containers are not allowed in tenant-guardian`,
+		`validationActions:`,
+		`- Deny`,
+	} {
+		assertTextContains(t, raw, want, path)
+	}
+}
+
+func TestOpenBaoStaticSealDocsConformance(t *testing.T) {
+	for _, path := range []string{
+		runfilePath("docs/openbao-and-conformance-design.md"),
+		runfilePath("src/infrastructure/runbooks/openbao-static-seal-self-init.md"),
+	} {
+		raw := readText(t, path)
+		assertTextContains(t, raw, "Node/root compromise", path)
+		for _, forbidden := range []string{
+			"~/.guardian",
+			"TPM-sealed",
+			"Secure Boot",
+			"secure boot",
+			"generated under",
+		} {
+			assertTextNotContains(t, raw, forbidden, path)
+		}
 	}
 }
 
@@ -240,6 +341,40 @@ func assertHealthCheck(t *testing.T, doc map[string]interface{}, apiVersion, kin
 		}
 	}
 	t.Fatalf("%s/%s missing healthCheck %s %s/%s in %s", stringValue(doc["kind"]), stringValue(mapValue(doc["metadata"])["name"]), apiVersion, kind, name, namespace)
+}
+
+func assertToleration(t *testing.T, server map[string]interface{}, key, operator, effect string) {
+	t.Helper()
+
+	for _, item := range sliceValue(server["tolerations"]) {
+		toleration := mapValue(item)
+		if stringValue(toleration["key"]) == key &&
+			stringValue(toleration["operator"]) == operator &&
+			stringValue(toleration["effect"]) == effect {
+			return
+		}
+	}
+	t.Fatalf("server.tolerations missing %s/%s/%s", key, operator, effect)
+}
+
+func assertHostPathVolume(t *testing.T, server map[string]interface{}, name, path, hostPathType string) {
+	t.Helper()
+
+	for _, item := range sliceValue(server["volumes"]) {
+		volume := mapValue(item)
+		if stringValue(volume["name"]) != name {
+			continue
+		}
+		hostPath := mapValue(volume["hostPath"])
+		if stringValue(hostPath["path"]) != path {
+			t.Fatalf("volume %s hostPath.path = %q, want %q", name, stringValue(hostPath["path"]), path)
+		}
+		if stringValue(hostPath["type"]) != hostPathType {
+			t.Fatalf("volume %s hostPath.type = %q, want %q", name, stringValue(hostPath["type"]), hostPathType)
+		}
+		return
+	}
+	t.Fatalf("server.volumes missing hostPath volume %s", name)
 }
 
 func assertNestedString(t *testing.T, m map[string]interface{}, want string, path ...string) {

@@ -68,7 +68,7 @@ type kubeObject struct {
 		Name string `json:"name"`
 	} `json:"metadata"`
 	Spec struct {
-		Replicas int `json:"replicas"`
+		Replicas       int `json:"replicas"`
 		UpdateStrategy struct {
 			Type string `json:"type"`
 		} `json:"updateStrategy"`
@@ -455,6 +455,7 @@ func openBaoResourceTypes() []string {
 		"openbaokubernetesauthroles.openbao.guardian.dev",
 		"openbaomounts.openbao.guardian.dev",
 		"openbaomounttunes.openbao.guardian.dev",
+		"openbaopkiroles.openbao.guardian.dev",
 		"openbaopolicies.openbao.guardian.dev",
 	}
 }

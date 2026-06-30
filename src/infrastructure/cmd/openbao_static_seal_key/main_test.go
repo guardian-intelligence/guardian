@@ -13,7 +13,7 @@ import (
 )
 
 func TestRunWritesStaticSealKeyArtifact(t *testing.T) {
-	home := t.TempDir()
+	outDir := filepath.Join(t.TempDir(), "openbao-static-seal")
 	now := time.Date(2026, 6, 28, 12, 34, 56, 0, time.UTC)
 	keyBytes := bytes.Repeat([]byte{0x42}, staticSealKeyBytes)
 	sum := sha256.Sum256(keyBytes)
@@ -23,7 +23,7 @@ func TestRunWritesStaticSealKeyArtifact(t *testing.T) {
 	err := run(options{
 		cluster: "guardian-mgmt",
 		region:  "ash",
-		home:    home,
+		outDir:  outDir,
 		nodeDir: defaultNodeDir,
 		now:     now,
 		random:  bytes.NewReader(keyBytes),
@@ -33,7 +33,6 @@ func TestRunWritesStaticSealKeyArtifact(t *testing.T) {
 		t.Fatalf("run: %v", err)
 	}
 
-	outDir := filepath.Join(home, ".guardian", "openbao", "guardian-mgmt-ash", "static-seal", fingerprint)
 	keyPath := filepath.Join(outDir, "unseal-"+fingerprint+".key")
 	metadataPath := filepath.Join(outDir, "metadata.json")
 
@@ -76,11 +75,11 @@ func TestRunWritesStaticSealKeyArtifact(t *testing.T) {
 }
 
 func TestRunRefusesExistingArtifact(t *testing.T) {
-	home := t.TempDir()
+	outDir := filepath.Join(t.TempDir(), "openbao-static-seal")
 	opts := options{
 		cluster: "guardian-mgmt",
 		region:  "ash",
-		home:    home,
+		outDir:  outDir,
 		nodeDir: defaultNodeDir,
 		now:     time.Date(2026, 6, 28, 12, 34, 56, 0, time.UTC),
 		random:  bytes.NewReader(bytes.Repeat([]byte{0x11}, staticSealKeyBytes)),
@@ -107,23 +106,30 @@ func TestRunRejectsUnsafeNames(t *testing.T) {
 	}{
 		{
 			name: "cluster path traversal",
-			opts: options{cluster: "../guardian", region: "ash", keyID: "key1"},
+			opts: options{cluster: "../guardian", region: "ash", keyID: "key1", outDir: filepath.Join(t.TempDir(), "seal")},
 		},
 		{
 			name: "explicit key id path traversal",
-			opts: options{cluster: "guardian-mgmt", region: "ash", keyID: "../key"},
+			opts: options{cluster: "guardian-mgmt", region: "ash", keyID: "../key", outDir: filepath.Join(t.TempDir(), "seal")},
 		},
 		{
 			name: "filename path traversal",
-			opts: options{cluster: "guardian-mgmt", region: "ash", keyID: "key1", filename: "../key"},
+			opts: options{cluster: "guardian-mgmt", region: "ash", keyID: "key1", filename: "../key", outDir: filepath.Join(t.TempDir(), "seal")},
 		},
 		{
 			name: "relative node dir",
-			opts: options{cluster: "guardian-mgmt", region: "ash", keyID: "key1", filename: "key", nodeDir: "var/lib/openbao"},
+			opts: options{cluster: "guardian-mgmt", region: "ash", keyID: "key1", filename: "key", nodeDir: "var/lib/openbao", outDir: filepath.Join(t.TempDir(), "seal")},
+		},
+		{
+			name: "relative out dir",
+			opts: options{cluster: "guardian-mgmt", region: "ash", outDir: "openbao-seal"},
+		},
+		{
+			name: "missing out dir",
+			opts: options{cluster: "guardian-mgmt", region: "ash"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			tc.opts.home = t.TempDir()
 			tc.opts.now = time.Date(2026, 6, 28, 12, 34, 56, 0, time.UTC)
 			tc.opts.random = bytes.NewReader(bytes.Repeat([]byte{0x11}, staticSealKeyBytes))
 			tc.opts.stdout = &bytes.Buffer{}
@@ -139,7 +145,7 @@ func TestRunRejectsExplicitKeyIDMismatch(t *testing.T) {
 		cluster: "guardian-mgmt",
 		region:  "ash",
 		keyID:   "wrong-key-id",
-		home:    t.TempDir(),
+		outDir:  filepath.Join(t.TempDir(), "openbao-static-seal"),
 		nodeDir: defaultNodeDir,
 		now:     time.Date(2026, 6, 28, 12, 34, 56, 0, time.UTC),
 		random:  bytes.NewReader(bytes.Repeat([]byte{0x11}, staticSealKeyBytes)),

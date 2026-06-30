@@ -1,0 +1,17 @@
+apiVersion: openbao.guardian.dev/v1alpha1
+kind: OpenBaoKubernetesAuthRole
+metadata:
+  name: cert-manager-openbao-api-issuer
+spec:
+  backendPath: kubernetes
+  roleName: guardian-cert-manager-openbao-api-issuer
+  boundServiceAccountNames:
+    - cert-manager-openbao-issuer
+  boundServiceAccountNamespaces:
+    - tenant-guardian
+  audience: openbao
+  tokenPolicies:
+    - guardian-cert-manager-openbao-api-issuer
+  tokenTTL: "600"
+  tokenMaxTTL: "900"
+  deletionPolicy: Retain

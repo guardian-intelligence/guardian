@@ -28,7 +28,6 @@ type options struct {
 	cluster  string
 	region   string
 	keyID    string
-	home     string
 	outDir   string
 	filename string
 	nodeDir  string
@@ -54,16 +53,9 @@ type metadata struct {
 
 func main() {
 	now := time.Now().UTC()
-	home, err := os.UserHomeDir()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "resolve home directory: %v\n", err)
-		os.Exit(1)
-	}
-
 	opts := options{
 		cluster: defaultCluster,
 		region:  defaultRegion,
-		home:    home,
 		nodeDir: defaultNodeDir,
 		now:     now,
 		random:  rand.Reader,
@@ -73,8 +65,7 @@ func main() {
 	flag.StringVar(&opts.cluster, "cluster", opts.cluster, "management cluster name")
 	flag.StringVar(&opts.region, "region", opts.region, "region code")
 	flag.StringVar(&opts.keyID, "key-id", "", "expected static seal key identifier; defaults to the key SHA-256 fingerprint")
-	flag.StringVar(&opts.home, "home", opts.home, "home directory containing .guardian")
-	flag.StringVar(&opts.outDir, "out-dir", "", "output directory; defaults under ~/.guardian")
+	flag.StringVar(&opts.outDir, "out-dir", "", "required output custody directory")
 	flag.StringVar(&opts.filename, "filename", "", "key filename; defaults to unseal-<key-id>.key")
 	flag.StringVar(&opts.nodeDir, "node-dir", opts.nodeDir, "directory where the key is mounted on OpenBao nodes")
 	flag.Parse()
@@ -115,6 +106,12 @@ func run(opts options) error {
 	if opts.nodeDir == "" || !filepath.IsAbs(opts.nodeDir) {
 		return fmt.Errorf("node-dir must be absolute: %q", opts.nodeDir)
 	}
+	if opts.outDir == "" {
+		return errors.New("out-dir is required")
+	}
+	if !filepath.IsAbs(opts.outDir) {
+		return fmt.Errorf("out-dir must be absolute: %q", opts.outDir)
+	}
 
 	key := make([]byte, staticSealKeyBytes)
 	if _, err := io.ReadFull(opts.random, key); err != nil {
@@ -136,20 +133,12 @@ func run(opts options) error {
 		opts.filename = "unseal-" + opts.keyID + ".key"
 	}
 
-	outDir := opts.outDir
-	if outDir == "" {
-		if opts.home == "" {
-			return errors.New("home is required when out-dir is not set")
-		}
-		outDir = filepath.Join(opts.home, ".guardian", "openbao", opts.cluster+"-"+opts.region, "static-seal", opts.keyID)
-	}
-
-	keyPath := filepath.Join(outDir, opts.filename)
-	metadataPath := filepath.Join(outDir, "metadata.json")
-	if err := os.MkdirAll(outDir, 0o700); err != nil {
+	keyPath := filepath.Join(opts.outDir, opts.filename)
+	metadataPath := filepath.Join(opts.outDir, "metadata.json")
+	if err := os.MkdirAll(opts.outDir, 0o700); err != nil {
 		return fmt.Errorf("create output directory: %w", err)
 	}
-	if err := os.Chmod(outDir, 0o700); err != nil {
+	if err := os.Chmod(opts.outDir, 0o700); err != nil {
 		return fmt.Errorf("chmod output directory: %w", err)
 	}
 
