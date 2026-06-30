@@ -314,7 +314,7 @@ func validateStatefulSetRolled(raw string, name string) error {
 	if statefulSet.Status.ReadyReplicas != replicas {
 		return fmt.Errorf("StatefulSet %q readyReplicas=%d replicas=%d", name, statefulSet.Status.ReadyReplicas, replicas)
 	}
-	if statefulSet.Status.UpdatedReplicas != replicas {
+	if statefulSet.Spec.UpdateStrategy.Type != "OnDelete" && statefulSet.Status.UpdatedReplicas != replicas {
 		return fmt.Errorf("StatefulSet %q updatedReplicas=%d replicas=%d", name, statefulSet.Status.UpdatedReplicas, replicas)
 	}
 	if statefulSet.Status.UpdateRevision == "" {
@@ -323,7 +323,7 @@ func validateStatefulSetRolled(raw string, name string) error {
 	if statefulSet.Spec.UpdateStrategy.Type != "OnDelete" && statefulSet.Status.CurrentRevision != statefulSet.Status.UpdateRevision {
 		return fmt.Errorf("StatefulSet %q currentRevision=%q updateRevision=%q", name, statefulSet.Status.CurrentRevision, statefulSet.Status.UpdateRevision)
 	}
-	fmt.Printf("OpenBao StatefulSet rolled: statefulSet=%s replicas=%d updateRevision=%s strategy=%s currentRevision=%s\n", name, replicas, statefulSet.Status.UpdateRevision, statefulSet.Spec.UpdateStrategy.Type, statefulSet.Status.CurrentRevision)
+	fmt.Printf("OpenBao StatefulSet ready: statefulSet=%s replicas=%d updatedReplicas=%d updateRevision=%s strategy=%s currentRevision=%s\n", name, replicas, statefulSet.Status.UpdatedReplicas, statefulSet.Status.UpdateRevision, statefulSet.Spec.UpdateStrategy.Type, statefulSet.Status.CurrentRevision)
 	return nil
 }
 
