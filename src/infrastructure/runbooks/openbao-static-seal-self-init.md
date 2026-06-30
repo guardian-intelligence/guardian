@@ -26,10 +26,17 @@ OpenBao key-bearing node at:
 ```
 
 The OpenBao pod init container verifies that the mounted key is exactly 32 bytes
-and that its SHA-256 fingerprint equals the declared `current_key_id`. The node
-directory must be mode `0700` or `0750`; the key file must be mode `0400`,
-`0440`, `0600`, or `0640`, owned by root or a narrowly scoped OpenBao runtime
-user/group. Do not leave the directory or key world-readable.
+and that its SHA-256 fingerprint equals the declared `current_key_id`. For the
+pinned OpenBao image, use `0750 root:1000` on the node directory and `0440
+root:1000` on the key file:
+
+```text
+drwxr-x--- root 1000 /var/lib/guardian/openbao/static-seal
+-r--r----- root 1000 /var/lib/guardian/openbao/static-seal/unseal-<current_key_id>.key
+```
+
+`0700` is acceptable only if the directory owner is the OpenBao runtime user.
+Do not leave the directory or key world-readable.
 
 The static seal file is the security boundary for this deployment. Node/root compromise on a
 key-bearing node is an OpenBao compromise. The key is accepted as a long-term production
