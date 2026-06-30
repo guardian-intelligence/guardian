@@ -141,10 +141,6 @@ spec:
   healthChecks:
     - apiVersion: cert-manager.io/v1
       kind: Certificate
-      name: guardian-openbao-ca
-      namespace: tenant-guardian
-    - apiVersion: cert-manager.io/v1
-      kind: Certificate
       name: guardian-openbao-api
       namespace: tenant-guardian
     - apiVersion: helm.toolkit.fluxcd.io/v2
