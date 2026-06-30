@@ -163,11 +163,13 @@ spec:
                   next="$(sha256sum /openbao/tls/tls.crt /openbao/tls/tls.key /openbao/tls/ca.crt 2>/dev/null | sha256sum | awk '{print $1}')"
                   if [ -n "$last" ] && [ "$next" != "$last" ]; then
                     for comm in /proc/[0-9]*/comm; do
-                      if [ "$(cat "$comm" 2>/dev/null)" = "openbao" ]; then
-                        pid="${comm#/proc/}"
-                        pid="${pid%/comm}"
-                        kill -HUP "$pid" || true
-                      fi
+                      case "$(cat "$comm" 2>/dev/null)" in
+                        bao|openbao|vault)
+                          pid="${comm#/proc/}"
+                          pid="${pid%/comm}"
+                          kill -HUP "$pid" || true
+                          ;;
+                      esac
                     done
                   fi
                   last="$next"

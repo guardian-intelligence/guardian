@@ -77,7 +77,8 @@ trade-offs are called out explicitly.
 - **Reload:** a **SIGHUP sidecar** watching the mounted cert file (OpenBao reloads cert
   *content* at the same path on SIGHUP; there is no native file-watcher). Preferred over
   Stakater Reloader because it avoids restarts and any quorum risk — though restart-based
-  Reloader is now *tolerable* since static-seal makes restarts self-healing.
+  Reloader is now *tolerable* since static-seal makes restarts self-healing. The sidecar
+  matches the running `bao` server process before sending SIGHUP.
 - **Rolling order** under `OnDelete`: standbys first, one at a time → `operator step-down` →
   former-active last. Never `kubectl rollout restart`.
 - **CA rotation** (the hard part; leaf rotation is trivial) uses a trust-overlap window via
