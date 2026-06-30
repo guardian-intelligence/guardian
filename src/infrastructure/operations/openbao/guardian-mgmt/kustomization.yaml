@@ -10,6 +10,7 @@ resources:
   - mounts/pki-openbao-api.yaml
   - mounttunes/kv.yaml
   - pkiroles/openbao-api.yaml
+  - pkirootissuers/openbao-api-root-2026.yaml
   - policies/cert-manager-openbao-api-issuer.yaml
   - policies/external-dns.yaml
   - policies/ops-controller.yaml

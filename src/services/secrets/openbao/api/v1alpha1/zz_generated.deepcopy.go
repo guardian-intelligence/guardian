@@ -298,6 +298,47 @@ func (in *OpenBaoPKIRoleList) DeepCopy() *OpenBaoPKIRoleList {
 	return out
 }
 
+func (in *OpenBaoPKIRootIssuer) DeepCopyObject() runtime.Object {
+	if out := in.DeepCopy(); out != nil {
+		return out
+	}
+	return nil
+}
+
+func (in *OpenBaoPKIRootIssuer) DeepCopy() *OpenBaoPKIRootIssuer {
+	if in == nil {
+		return nil
+	}
+	out := new(OpenBaoPKIRootIssuer)
+	*out = *in
+	out.ObjectMeta = *in.ObjectMeta.DeepCopy()
+	out.Status = in.Status.DeepCopy()
+	return out
+}
+
+func (in *OpenBaoPKIRootIssuerList) DeepCopyObject() runtime.Object {
+	if out := in.DeepCopy(); out != nil {
+		return out
+	}
+	return nil
+}
+
+func (in *OpenBaoPKIRootIssuerList) DeepCopy() *OpenBaoPKIRootIssuerList {
+	if in == nil {
+		return nil
+	}
+	out := new(OpenBaoPKIRootIssuerList)
+	*out = *in
+	out.ListMeta = in.ListMeta
+	if in.Items != nil {
+		out.Items = make([]OpenBaoPKIRootIssuer, len(in.Items))
+		for i := range in.Items {
+			out.Items[i] = *in.Items[i].DeepCopy()
+		}
+	}
+	return out
+}
+
 func (in *OpenBaoPolicy) DeepCopyObject() runtime.Object {
 	if out := in.DeepCopy(); out != nil {
 		return out

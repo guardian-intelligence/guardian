@@ -28,10 +28,15 @@ var defaultKustomizations = []string{
 
 var defaultOpenBaoObjects = []string{
 	"OpenBaoAuthBackend/kubernetes",
+	"OpenBaoKubernetesAuthRole/cert-manager-openbao-api-issuer",
 	"OpenBaoKubernetesAuthRole/external-dns",
 	"OpenBaoKubernetesAuthRole/ops-controller",
 	"OpenBaoMount/kv",
+	"OpenBaoMount/pki-openbao-api",
 	"OpenBaoMountTune/kv",
+	"OpenBaoPKIRole/openbao-api",
+	"OpenBaoPKIRootIssuer/openbao-api-root-2026",
+	"OpenBaoPolicy/cert-manager-openbao-api-issuer",
 	"OpenBaoPolicy/external-dns",
 	"OpenBaoPolicy/ops-controller",
 }
@@ -456,6 +461,7 @@ func openBaoResourceTypes() []string {
 		"openbaomounts.openbao.guardian.dev",
 		"openbaomounttunes.openbao.guardian.dev",
 		"openbaopkiroles.openbao.guardian.dev",
+		"openbaopkirootissuers.openbao.guardian.dev",
 		"openbaopolicies.openbao.guardian.dev",
 	}
 }

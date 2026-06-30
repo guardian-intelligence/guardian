@@ -74,6 +74,7 @@ func main() {
 	must((&controllers.MountReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), Mode: reconcileMode}).SetupWithManager(mgr))
 	must((&controllers.MountTuneReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), Mode: reconcileMode}).SetupWithManager(mgr))
 	must((&controllers.PKIRoleReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), Mode: reconcileMode}).SetupWithManager(mgr))
+	must((&controllers.PKIRootIssuerReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), Mode: reconcileMode}).SetupWithManager(mgr))
 
 	must(mgr.AddHealthzCheck("healthz", healthz.Ping))
 	must(mgr.AddReadyzCheck("readyz", healthz.Ping))
