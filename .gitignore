@@ -30,3 +30,4 @@
 /src/products/*/render/node_modules/
 /src/products/company/web/.output/
 /src/products/company/web/.vite/
+/dist/

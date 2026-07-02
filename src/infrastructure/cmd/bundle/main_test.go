@@ -81,8 +81,10 @@ metadata:
   name: guardian-bundle-images
 spec:
   images:
-  - name: ghcr.io/example/app:v1.0.0@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-  - name: ghcr.io/example/chart:0.1.0@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  - exclude-extras: true
+    name: ghcr.io/example/app:v1.0.0@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  - exclude-extras: true
+    name: ghcr.io/example/chart:0.1.0@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 `
 	if string(payload) != golden {
 		t.Fatalf("haulerManifest() =\n%s\nwant\n%s", payload, golden)
@@ -133,5 +135,74 @@ func TestProductionImagesLockProjects(t *testing.T) {
 	}
 	if len(parsed.Spec.Images) != len(refs) {
 		t.Fatalf("production manifest has %d images, want %d", len(parsed.Spec.Images), len(refs))
+	}
+}
+
+func TestDescribeBundle(t *testing.T) {
+	dir := t.TempDir()
+	haulPath := dir + "/haul.tar.zst"
+	if err := os.WriteFile(haulPath, []byte("haul-bytes"), 0o644); err != nil {
+		t.Fatalf("write haul fixture: %v", err)
+	}
+	lock := []byte(fixtureLock)
+	refs, err := parseImagesLock(lock)
+	if err != nil {
+		t.Fatalf("parseImagesLock() error = %v", err)
+	}
+	payload, err := describeBundle(lock, refs, haulPath, "abc123")
+	if err != nil {
+		t.Fatalf("describeBundle() error = %v", err)
+	}
+	var parsed bundleManifest
+	if err := yaml.Unmarshal(payload, &parsed); err != nil {
+		t.Fatalf("bundle manifest does not unmarshal: %v", err)
+	}
+	if parsed.Revision != "abc123" || parsed.Refs != 2 || parsed.HaulPath != "haul.tar.zst" {
+		t.Fatalf("bundle manifest = %+v, want revision abc123, 2 refs, basename haul path", parsed)
+	}
+	if len(parsed.HaulSHA256) != 64 || len(parsed.ImagesLockSHA256) != 64 {
+		t.Fatalf("bundle manifest digests malformed: %+v", parsed)
+	}
+	second, err := describeBundle(lock, refs, haulPath, "abc123")
+	if err != nil {
+		t.Fatalf("describeBundle() second call error = %v", err)
+	}
+	if string(payload) != string(second) {
+		t.Fatalf("describeBundle() output is not deterministic")
+	}
+}
+
+func TestFilterStoredRefs(t *testing.T) {
+	dir := t.TempDir()
+	index := dir + "/index.json"
+	if err := os.WriteFile(index, []byte(`{"manifests":[{"digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}`), 0o644); err != nil {
+		t.Fatalf("write index fixture: %v", err)
+	}
+	refs, err := parseImagesLock([]byte(fixtureLock))
+	if err != nil {
+		t.Fatalf("parseImagesLock() error = %v", err)
+	}
+	missing, err := filterStoredRefs(refs, index)
+	if err != nil {
+		t.Fatalf("filterStoredRefs() error = %v", err)
+	}
+	if len(missing) != 1 || missing[0] != refs[1] {
+		t.Fatalf("filterStoredRefs() = %v, want only the chart ref", missing)
+	}
+}
+
+func TestFilterStoredRefsFullyStored(t *testing.T) {
+	dir := t.TempDir()
+	index := dir + "/index.json"
+	if err := os.WriteFile(index, []byte(`{"manifests":[{"digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},{"digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]}`), 0o644); err != nil {
+		t.Fatalf("write index fixture: %v", err)
+	}
+	refs, _ := parseImagesLock([]byte(fixtureLock))
+	missing, err := filterStoredRefs(refs, index)
+	if err != nil {
+		t.Fatalf("filterStoredRefs() error = %v", err)
+	}
+	if len(missing) != 0 {
+		t.Fatalf("filterStoredRefs() = %v, want empty (fully-synced store resumes to zero work)", missing)
 	}
 }
