@@ -12,7 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const openBaoStaticSealKeyID = "4dd033bda750c5e2e9718a6b571ba787a46443a412c2713727b7ab592001380d"
+const openBaoStaticSealKeyID = "d1bad73a1cc200c277ef24d23231d99ff6b424d4d4e397bc08f285a6767af013"
 
 func TestOpenBaoStaticSealTLSAndStorageConformance(t *testing.T) {
 	path := runfilePath("src/infrastructure/deployments/guardian/system/openbao-helmrelease.yaml")

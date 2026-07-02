@@ -347,6 +347,18 @@ cluster:
       docker.io:
         endpoints:
         - https://mirror.gcr.io
+      {{- with .Values.bootstrapHarborMirror }}
+      {{- if .enabled }}
+      # Bootstrap-only: serves Harbor-hosted images from the operator
+      # workstation registry (skopeo --scoped layout) until the in-cluster
+      # Harbor exists; containerd falls back to the real Harbor, so this is
+      # inert in steady state.
+      harbor.guardianintelligence.org:
+        endpoints:
+        - {{ trimSuffix "/" .endpoint }}/v2/harbor.guardianintelligence.org
+        overridePath: true
+      {{- end }}
+      {{- end }}
 {{- include "talos.config.network.legacy" . }}
 
 {{- include "talos.config.cluster" . }}
@@ -362,5 +374,19 @@ kind: RegistryMirrorConfig
 name: docker.io
 endpoints:
   - url: https://mirror.gcr.io
+{{- with .Values.bootstrapHarborMirror }}
+{{- if .enabled }}
+---
+# Bootstrap-only: serves Harbor-hosted images from the operator workstation
+# registry (skopeo --scoped layout) until the in-cluster Harbor exists;
+# containerd falls back to the real Harbor, so this is inert in steady state.
+apiVersion: v1alpha1
+kind: RegistryMirrorConfig
+name: harbor.guardianintelligence.org
+endpoints:
+  - url: {{ trimSuffix "/" .endpoint }}/v2/harbor.guardianintelligence.org
+    overridePath: true
+{{- end }}
+{{- end }}
 {{- include "talos.config.network.multidoc" . }}
 {{- end }}
