@@ -1,0 +1,5 @@
+filegroup(
+    name = "images_lock",
+    srcs = ["images.lock"],
+    visibility = ["//visibility:public"],
+)

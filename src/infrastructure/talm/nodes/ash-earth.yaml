@@ -30,7 +30,7 @@ machine:
     #    size: 960 GB
     diskSelector:
       serial: "362510FCEFB8"
-    image: ghcr.io/cozystack/cozystack/talos:v1.13.0
+    image: ghcr.io/cozystack/cozystack/talos:v1.13.0@sha256:c2c092ad742e8bdd4af6366c586d95bdf7f73cee6eef8318fb9da6d466f37044
   files:
     - content: |
         [plugins]
@@ -124,6 +124,16 @@ kind: RegistryMirrorConfig
 name: docker.io
 endpoints:
   - url: https://mirror.gcr.io
+---
+# Bootstrap-only: serves Harbor-hosted images from the operator workstation
+# registry (skopeo --scoped layout) until the in-cluster Harbor exists;
+# containerd falls back to the real Harbor, so this is inert in steady state.
+apiVersion: v1alpha1
+kind: RegistryMirrorConfig
+name: harbor.guardianintelligence.org
+endpoints:
+  - url: http://148.113.198.223:5000/v2/harbor.guardianintelligence.org
+    overridePath: true
 # -- Discovered interfaces:
 # enp1s0f0:
 #   hardwareAddr:90:5a:08:33:ba:9e

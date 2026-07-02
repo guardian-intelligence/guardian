@@ -1,11 +1,11 @@
-Bazel polyglot hermetically sealed monorepo for Guardian, a free open-source self-hostable private cloud capable of selling excess compute as QEMU VMs. Early days, still getting the infra set up.
+This is a Bazel polyglot hermetically sealed monorepo for Guardian, a free open-source self-hostable private cloud capable of selling excess compute as QEMU VMs. Early days, still getting the infra set up.
 
-We use CozyStack. Grep through Cozystack 1.5 docs from the exact `v1.5.0` tag when validating
-1.5.0 behavior, or the `release-1.5` branch when intentionally reading the
-maintained 1.5 line. Do not use v0 docs, v1.4 docs, or current main by
-accident.
+The purpose is to create a free and open-source system for any being to convert a source of compute into a self-healing intelligent system (in our case, a secure, disaster-proof software company capable of generating revenue by providing value to the world).
 
-Reference Cozystack for prior art for the cloud portion. Other inspiration: Zarf/UDS, AWS Landing Zone Accelerator
+We use CozyStack. Grep through Cozystack 1.5 docs from the exact `v1.5.0` tag when validating 1.5.0 behavior, or the `release-1.5` branch when intentionally reading the maintained 1.5 line. Do not use v0 docs, v1.4 docs, or current main by accident.
+
+Reference Cozystack for prior art for the cloud portion. Other inspiration: Zarf/UDS, AWS Landing Zone Accelerator, the airgapped landing zone pattern in general.
+
 <company_topology>
 Single Global Writer
 Public DNS stays globally managed, for now.
@@ -195,6 +195,9 @@ After doing some financial calculation I also realize I need to make provisionin
 
 Important context:
 - All dependencies version/commit pinned. Nothing during runtime, dev time, test time, or build time should require external non-version-pinned tooling, or shell out to binaries outside this repo or its build artifacts.
+- Never download unpinned versions of software or set an unpinned version as a dependency. Binaries are versioned, built, packaged, and installed by Bazel declarations.
+- Container images are digest-pinned wherever this repo renders them. `src/infrastructure/bootstrap/bundle/images.lock` is the cold-bootstrap image inventory; the infra conformance test enforces that every image reference rendered from this repo is digest-pinned and present in the lock. Update the lock in the same PR as any image change.
+- Cold-bootstrap trust model: the local checkout, its Bazel-built artifacts, and the operator custody bundle (static seal key + the operator env file) are everything a from-nothing bring-up may require. Bootstrap-only compromises are allowed, but the cluster must converge to the declared steady state afterward.
 - Dev tools: `aspect`. Run `aspect tidy` to format the codebase.
 - Don't use CUE. Avoid custom schemas, protocols, shell scripts, contracts. Lean towards production-ready implementations for CRDs and ensure Flux-operated Kubernetes can converge state without making CLI execution a second control plane.
 - API IDL in Protobuf/Connect. Define IAM, audit, risk, request-size, rate limit, and idempotency metadata as explicit operation policy on the RPC contract.

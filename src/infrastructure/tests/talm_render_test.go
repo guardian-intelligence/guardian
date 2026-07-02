@@ -41,7 +41,10 @@ func TestTalmControlplaneRender(t *testing.T) {
 	for _, want := range []string{
 		"clusterName: guardian-mgmt",
 		"endpoint: https://10.8.0.250:6443",
-		"image: ghcr.io/cozystack/cozystack/talos:v1.13.0",
+		"image: ghcr.io/cozystack/cozystack/talos:v1.13.0@sha256:c2c092ad742e8bdd4af6366c586d95bdf7f73cee6eef8318fb9da6d466f37044",
+		"name: harbor.guardianintelligence.org",
+		"url: http://148.113.198.223:5000/v2/harbor.guardianintelligence.org",
+		"overridePath: true",
 		"serviceSubnets:\n      - 10.96.0.0/16",
 		"cluster-cidr: 10.244.0.0/16",
 		"advertisedSubnets:\n      - 10.8.0.0/24",

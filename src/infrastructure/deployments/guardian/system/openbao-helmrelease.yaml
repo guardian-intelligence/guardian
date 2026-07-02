@@ -87,14 +87,14 @@ spec:
               - -ec
             args:
               - |
-                key=/openbao/secrets/unseal-4dd033bda750c5e2e9718a6b571ba787a46443a412c2713727b7ab592001380d.key
+                key=/openbao/secrets/unseal-d1bad73a1cc200c277ef24d23231d99ff6b424d4d4e397bc08f285a6767af013.key
                 test -r "$key"
                 dir_mode="$(stat -c '%a' /openbao/secrets)"
                 case "$dir_mode" in 700|750) ;; *) echo "static seal directory mode must be 0700 or 0750, got $dir_mode" >&2; exit 1;; esac
                 key_mode="$(stat -c '%a' "$key")"
                 case "$key_mode" in 400|440|600|640) ;; *) echo "static seal key mode must not grant broad access, got $key_mode" >&2; exit 1;; esac
                 test "$(wc -c < "$key" | tr -d ' ')" = "32"
-                test "$(sha256sum "$key" | awk '{print $1}')" = "4dd033bda750c5e2e9718a6b571ba787a46443a412c2713727b7ab592001380d"
+                test "$(sha256sum "$key" | awk '{print $1}')" = "d1bad73a1cc200c277ef24d23231d99ff6b424d4d4e397bc08f285a6767af013"
             resources:
               requests:
                 cpu: 10m
@@ -216,8 +216,8 @@ spec:
               ui = false
 
               seal "static" {
-                current_key_id = "4dd033bda750c5e2e9718a6b571ba787a46443a412c2713727b7ab592001380d"
-                current_key = "file:///openbao/secrets/unseal-4dd033bda750c5e2e9718a6b571ba787a46443a412c2713727b7ab592001380d.key"
+                current_key_id = "d1bad73a1cc200c277ef24d23231d99ff6b424d4d4e397bc08f285a6767af013"
+                current_key = "file:///openbao/secrets/unseal-d1bad73a1cc200c277ef24d23231d99ff6b424d4d4e397bc08f285a6767af013.key"
               }
 
               listener "tcp" {
