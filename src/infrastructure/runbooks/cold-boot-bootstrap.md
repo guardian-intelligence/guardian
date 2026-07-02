@@ -37,6 +37,34 @@ a public IP the nodes can reach. All other binaries (talm, talosctl, kubectl,
 helm, oras, boot-to-talos) are repo-pinned and materialize under
 `$(bazelisk info output_base)/external/…`.
 
+## Custody replication
+
+The custody bundle is secret-zero and replicating it is an operator
+obligation that cannot be automated: the seal key may never touch
+Kubernetes, Git, CI, R2, or any OpenBao-backed path (and transit exports are
+offline-custody only), so no system the cluster controls can ever hold a
+complete copy of the bundle. Cloud-KMS unseal or Shamir recovery shares
+would only relocate the root of trust, not remove it.
+
+- Keep at least two copies of the load-bearing set — the seal key plus its
+  metadata, the `DELETE_ME.env` backup, and any `transit/backup` exports —
+  on encrypted offline media in two physical locations, neither of them the
+  datacenter hosting the cluster.
+- Never co-locate a copy with raft snapshots or OpenBao ciphertext. Transit
+  exports are offline-custody only: never in R2, and never on the same
+  medium as the R2 credentials that can fetch snapshots — key material plus
+  ciphertext in one place is full OpenBao compromise.
+- Refresh every copy on each custody event (seal-key rotation, operator-key
+  change, durable Transit key creation) and record copy locations and
+  last-refresh dates — never contents — in the custody directory's README.
+- Loss math: custody lost while the cluster lives is recoverable (re-copy
+  the seal key from a key-bearing node, re-export the operator keys from
+  OpenBao KV, rebuild the bundle immediately). Custody and cluster lost
+  together forfeits OpenBao contents (accepted: no recovery keys) and forces
+  operator-credential reissue through each provider's console. Once the
+  first durable Transit consumer exists, its exported keyring is replaceable
+  nowhere — replication must be in place before that key ships.
+
 ## Pre-flight
 
 1. **Insurance capture** (if the old cluster still runs): copy the current
