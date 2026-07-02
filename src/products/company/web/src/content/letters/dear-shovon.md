@@ -15,23 +15,23 @@ And did you know he has a crush? He told me over breakfast that when they're nea
 
 You should see how tender he is with the parts of me I used to hide. He's been practicing his laugh in the car. “So it can sound just like yours,” he tells me. And I love how, when he makes me cry, he holds out more tissues than I could ever use. Through tears I see that there’s a crack in everything. That’s how his light gets in.
 
-While everyone was over for dinner yesterday, he got really quiet and walked past everyone to tug on my sleeve. I was worried at first, but he asked if I could homeschool him and all his classmates from last year when summer ends. He wants me to teach them every year until they all graduate from college together. He loudly counted up the grades as he was explaining, but I had to stop him when he got to the twenties.
+While everyone was over for dinner, he got really quiet and walked past everyone to tug on my sleeve. I was worried at first, but all he asked was if I could homeschool him and all his classmates from last year when summer ends. He wants me to teach them every year until they all graduate from college together. He loudly counted up the grades as he was explaining, but I had to stop him when he got to the twenties.
 
-I asked him why. “They beg me to ask you all the time. Ever since school ended”. He gave me permission to skip math if it'd be easier for me. I couldn’t argue. He continue, “But now I want it, too", looking around, he said "I wish the house was this full all the time.”
+I asked him why. “They beg me to ask you all the time. Ever since school ended”. He gave me permission to skip math if it'd be easier for me. I couldn’t argue. He continued, “But now I want it, too", looking around, he said "I wish the house was this full all the time.”
 
-I cherish the way his eyes go wide flipping over rocks and seeing the worms underneath, and when he tells me his dreams about being a bird searching for a cloud that looks like you. He shows me every day that curiosity and love are two sides of something bigger I don't have a word for yet.
+I cherish the way his eyes go wide flipping over rocks and seeing the worms underneath, and when he tells me his dreams about being a bird searching skies for a cloud that looks like you. He shows me every day that curiosity and love are two sides of something bigger I don't have a word for yet.
 
 Last night before bed, I was making sure he brushed his teeth and do you remember how it took years to get him to stop spitting out his toothpaste? He called it “spicy ice cream” one time and then decided he wants to try every flavor.
 
-And I wish someone told me having a daughter would be like meeting the two of us as one tiny human, but braver, stronger, and wiser. Someone who knocks on my door when I’m crying because I’m sad, and charges through it when I cry because I’ve been hurt.
+And I wish someone told me having a daughter would be like meeting the two of us as one tiny human, but braver, stronger, and wiser. Someone who knocks on my door when I’m crying because I’m sad, and knocks it down when I'm crying because I’ve been hurt.
 
-I treasure the piles of scrapbooks from our adventures. A million branches and she loves every one. I mentioned needing something from the market the other day and she jumped up from editing a music video to beg me to bring her. I was hoping she would because I adore the way she finds magic in things I stopped looking at.
+I treasure the piles of scrapbooks from our adventures. A million branches and she loves every one. I mentioned needing something from the market the other day and she jumped up from editing a music video to beg me to bring her along. I was hoping she would because I adore the way she finds magic in things I stopped looking at.
 
 There was a stall selling jewelry for pennies and, when we passed by, she froze — enchanted by an aquamarine seahorse necklace no bigger than a fingernail. At a few thousand words per second she debated how each of her favorite characters would love or hate the necklace in different ways. She used to stop herself but she no longer does because she knows, now, how much I admire the depth of her explanations.
 
-By the time we parked back home, we were only halfway done. “It’ll be easier if I make a flow chart,” she said, and ran out of the car.
+By the time we parked back home, she was only halfway done. “It’ll be easier if I make a flow chart,” she said, and raced up to her room.
 
-But I worry about her, too. There's something in the way she trembled standing between her friends and a spider, or the way she cried all morning when the spring flowers died. It's like a poet and a warrior made a home in her heart but they’re still learning to share.
+But I worry about her, too. There's something in the way she trembled standing between her friends and a spider, or the way she cried all morning when the spring flowers died. It's like a warrior and a poet made a home in her heart but they’re still learning to share.
 
 Over lunch, I finished making the shield from her XIV character, the one she’s been asking me for for months. When I gave it to her, she screamed and ran around the block with it so fast neither the dogs nor I could keep up. She suddenly stopped, turned around, pushed the shield into my chest and said, “If we only have one, I want you to have it. To keep you safe.”
 
