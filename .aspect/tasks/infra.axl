@@ -26,7 +26,7 @@ HTTP_LOAD_TARGET = "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_
 EDGE_HEALTH_TARGET = "//src/infrastructure/cmd/edge_health:edge_health"
 EDGE_FAILOVER_DRILL_TARGET = "//src/infrastructure/cmd/edge_failover_drill:edge_failover_drill"
 NODE_OUTAGE_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill"
-OPENBAO_CUTOVER_TARGET = "//src/infrastructure/cmd/cozystack_openbao_cutover:cozystack_openbao_cutover"
+CONVERGED_TARGET = "//src/infrastructure/cmd/converged:converged"
 OPENBAO_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill"
 OPENBAO_OBSERVABILITY_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_openbao_observability_drill:cozystack_openbao_observability_drill"
 OBSERVABILITY_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_observability_drill:cozystack_observability_drill"
@@ -76,7 +76,8 @@ INFRA_TESTS = [
     "//src/infrastructure/cmd/edge_health:edge_health_test",
     "//src/infrastructure/cmd/cozystack_harbor_registry:cozystack_harbor_registry_test",
     "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load_test",
-    "//src/infrastructure/cmd/cozystack_openbao_cutover:cozystack_openbao_cutover_test",
+    "//src/infrastructure/cmd/converged:converged_test",
+    "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill_test",
     "//src/infrastructure/cmd/openbao_secret_import:openbao_secret_import_test",
     "//src/infrastructure/cmd/openbao_static_seal_key:openbao_static_seal_key_test",
     "//src/infrastructure/tests:talm_render_test",
@@ -1355,12 +1356,12 @@ def _openbao_observability_drill_impl(ctx):
         label = "cozystack openbao observability drill",
     )
 
-def _openbao_cutover_impl(ctx):
+def _converged_impl(ctx):
     kubectl = _kubectl_path(ctx)
     if kubectl == None:
         return 1
 
-    cutover_args = [
+    proof_args = [
         "--kubectl",
         kubectl,
         "--flux-namespace",
@@ -1377,22 +1378,22 @@ def _openbao_cutover_impl(ctx):
         ctx.args.request_timeout,
     ]
     if ctx.args.expected_revision != "":
-        cutover_args.extend(["--expected-revision", ctx.args.expected_revision])
+        proof_args.extend(["--expected-revision", ctx.args.expected_revision])
     if ctx.args.kube_api_server != "":
-        cutover_args.extend(["--kube-api-server", ctx.args.kube_api_server])
+        proof_args.extend(["--kube-api-server", ctx.args.kube_api_server])
     if ctx.args.kubeconfig != "":
-        cutover_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
+        proof_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
     if ctx.args.required_kustomizations != "":
-        cutover_args.extend(["--required-kustomizations", ctx.args.required_kustomizations])
+        proof_args.extend(["--required-kustomizations", ctx.args.required_kustomizations])
     if ctx.args.required_openbao_objects != "":
-        cutover_args.extend(["--required-openbao-objects", ctx.args.required_openbao_objects])
+        proof_args.extend(["--required-openbao-objects", ctx.args.required_openbao_objects])
 
     return checked_spawn(
         ctx,
         "bazelisk",
-        ["run", OPENBAO_CUTOVER_TARGET, "--"] + cutover_args,
+        ["run", CONVERGED_TARGET, "--"] + proof_args,
         cwd = ws_path(ctx),
-        label = "cozystack openbao cutover proof",
+        label = "guardian converged proof",
     )
 
 validate = task(
@@ -1434,11 +1435,11 @@ dns_apply = task(
     },
 )
 
-openbao_cutover = task(
-    implementation = _openbao_cutover_impl,
-    name = "openbao-cutover",
+converged = task(
+    implementation = _converged_impl,
+    name = "converged",
     group = ["infra"],
-    summary = "Verify OpenBao cutover state from Flux, the ops-controller Deployment, and OpenBao operation CR conditions.",
+    summary = "Verify the cluster converged to the declared state: Flux Kustomizations at the expected revision, workloads rolled, and component CR conditions.",
     args = {
         "controller_deployment": args.string(default = "openbao-ops-controller", description = "OpenBao ops-controller Deployment name."),
         "expected_revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA."),
@@ -1449,8 +1450,8 @@ openbao_cutover = task(
         "openbao_namespace": args.string(default = "tenant-guardian", description = "OpenBao namespace."),
         "openbao_statefulset": args.string(default = "guardian-openbao", description = "OpenBao StatefulSet name."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
-        "required_kustomizations": args.string(default = "", description = "Optional comma-separated Flux Kustomizations required for cutover proof."),
-        "required_openbao_objects": args.string(default = "", description = "Optional comma-separated Kind/name OpenBao CRs required for cutover proof."),
+        "required_kustomizations": args.string(default = "", description = "Optional comma-separated Flux Kustomizations required for the converged proof."),
+        "required_openbao_objects": args.string(default = "", description = "Optional comma-separated Kind/name OpenBao CRs required for the converged proof."),
     },
 )
 

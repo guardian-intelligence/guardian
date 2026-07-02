@@ -1,0 +1,20 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+
+go_library(
+    name = "converged_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/infrastructure/cmd/converged",
+    visibility = ["//visibility:private"],
+)
+
+go_binary(
+    name = "converged",
+    embed = [":converged_lib"],
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "converged_test",
+    srcs = ["main_test.go"],
+    embed = [":converged_lib"],
+)

@@ -14,7 +14,11 @@ import (
 	"strings"
 )
 
-const baoAddr = "http://127.0.0.1:8200"
+// The 8200 listener serves the cert-manager-issued TLS cert. Verification is
+// skipped for this localhost status probe: the exec already crossed the pod
+// boundary, and listener transport identity is asserted by the converged
+// proof's Certificate checks.
+const baoAddr = "https://127.0.0.1:8200"
 
 type openBaoConfig struct {
 	Kubectl        string
@@ -28,6 +32,8 @@ type openBaoConfig struct {
 type baoStatus struct {
 	Initialized bool   `json:"initialized"`
 	Sealed      bool   `json:"sealed"`
+	HAEnabled   bool   `json:"ha_enabled"`
+	ClusterID   string `json:"cluster_id"`
 	Version     string `json:"version"`
 }
 
@@ -179,7 +185,7 @@ func baoStatusForPod(ctx context.Context, runner kubectlRunner, pod string, prin
 		return baoStatus{}, fmt.Errorf("parse bao status for %s: %w\n%s", pod, err, out)
 	}
 	if print {
-		fmt.Printf("pod=%s initialized=%t sealed=%t version=%s\n", pod, status.Initialized, status.Sealed, status.Version)
+		fmt.Printf("pod=%s initialized=%t sealed=%t ha_enabled=%t cluster_id=%s version=%s\n", pod, status.Initialized, status.Sealed, status.HAEnabled, status.ClusterID, status.Version)
 	}
 	return status, nil
 }
@@ -192,6 +198,7 @@ func validateStatusSet(statuses []podBaoStatus, expectedVersion string) error {
 		return errors.New("OpenBao status drill has empty expected version")
 	}
 	var problems []string
+	var clusterID string
 	for _, item := range statuses {
 		status := item.Status
 		if !status.Initialized {
@@ -199,6 +206,16 @@ func validateStatusSet(statuses []podBaoStatus, expectedVersion string) error {
 		}
 		if status.Sealed {
 			problems = append(problems, fmt.Sprintf("%s is sealed", item.Pod))
+		}
+		if !status.HAEnabled {
+			problems = append(problems, fmt.Sprintf("%s reports ha_enabled=false", item.Pod))
+		}
+		if status.ClusterID == "" {
+			problems = append(problems, fmt.Sprintf("%s reported empty cluster_id", item.Pod))
+		} else if clusterID == "" {
+			clusterID = status.ClusterID
+		} else if status.ClusterID != clusterID {
+			problems = append(problems, fmt.Sprintf("%s reports cluster_id=%s; expected %s", item.Pod, status.ClusterID, clusterID))
 		}
 		if status.Version == "" {
 			problems = append(problems, fmt.Sprintf("%s reported empty OpenBao version", item.Pod))
@@ -211,6 +228,7 @@ func validateStatusSet(statuses []podBaoStatus, expectedVersion string) error {
 	if len(problems) > 0 {
 		return fmt.Errorf("OpenBao status drill failed: %s", strings.Join(problems, "; "))
 	}
+	fmt.Printf("OpenBao raft membership verified: pods=%d cluster_id=%s\n", len(statuses), clusterID)
 	return nil
 }
 
@@ -255,7 +273,7 @@ func baoOutputAllowExit(ctx context.Context, runner kubectlRunner, pod, label st
 }
 
 func baoExecArgs(pod string, args ...string) []string {
-	execArgs := []string{"exec", "pod/" + pod, "--", "env", "BAO_ADDR=" + baoAddr, "VAULT_ADDR=" + baoAddr, "VAULT_CLIENT_TIMEOUT=120s"}
+	execArgs := []string{"exec", "pod/" + pod, "--", "env", "BAO_ADDR=" + baoAddr, "VAULT_ADDR=" + baoAddr, "BAO_SKIP_VERIFY=true", "VAULT_SKIP_VERIFY=true", "VAULT_CLIENT_TIMEOUT=120s"}
 	execArgs = append(execArgs, "bao")
 	execArgs = append(execArgs, args...)
 	return execArgs

@@ -42,7 +42,7 @@ var defaultCertificates = []string{
 	"guardian-openbao-api",
 }
 
-type cutoverConfig struct {
+type convergedConfig struct {
 	Kubectl                string
 	Kubeconfig             string
 	KubeAPIServer          string
@@ -113,16 +113,8 @@ type condition struct {
 	Message string `json:"message"`
 }
 
-type openBaoStatus struct {
-	Initialized bool   `json:"initialized"`
-	Sealed      bool   `json:"sealed"`
-	HAEnabled   bool   `json:"ha_enabled"`
-	ClusterID   string `json:"cluster_id"`
-	Version     string `json:"version"`
-}
-
 func main() {
-	var cfg cutoverConfig
+	var cfg convergedConfig
 	var requiredKustomizations string
 	var requiredOpenBaoObjects string
 	var requiredCertificates string
@@ -138,9 +130,9 @@ func main() {
 	flag.StringVar(&cfg.OpenBaoStatefulSet, "openbao-statefulset", "guardian-openbao", "OpenBao StatefulSet name")
 	flag.StringVar(&cfg.ControllerDeployment, "controller-deployment", "openbao-ops-controller", "OpenBao ops-controller Deployment name")
 	flag.StringVar(&cfg.ExpectedRevision, "expected-revision", "", "optional Git revision that all checked Flux Kustomizations must have applied")
-	flag.StringVar(&requiredKustomizations, "required-kustomizations", strings.Join(defaultKustomizations, ","), "comma-separated Flux Kustomizations required for cutover proof")
-	flag.StringVar(&requiredOpenBaoObjects, "required-openbao-objects", strings.Join(defaultOpenBaoObjects, ","), "comma-separated Kind/name OpenBao CRs required for cutover proof")
-	flag.StringVar(&requiredCertificates, "required-certificates", strings.Join(defaultCertificates, ","), "comma-separated cert-manager Certificates required for cutover proof")
+	flag.StringVar(&requiredKustomizations, "required-kustomizations", strings.Join(defaultKustomizations, ","), "comma-separated Flux Kustomizations required for the converged proof")
+	flag.StringVar(&requiredOpenBaoObjects, "required-openbao-objects", strings.Join(defaultOpenBaoObjects, ","), "comma-separated Kind/name OpenBao CRs required for the converged proof")
+	flag.StringVar(&requiredCertificates, "required-certificates", strings.Join(defaultCertificates, ","), "comma-separated cert-manager Certificates required for the converged proof")
 	flag.Parse()
 
 	cfg.RequiredKustomizations = csv(requiredKustomizations)
@@ -148,7 +140,7 @@ func main() {
 	cfg.RequiredCertificates = csv(requiredCertificates)
 
 	exitIfErr(validateConfig(cfg))
-	exitIfErr(runCutoverProof(context.Background(), cfg))
+	exitIfErr(runConvergedProof(context.Background(), cfg))
 }
 
 func exitIfErr(err error) {
@@ -159,7 +151,7 @@ func exitIfErr(err error) {
 	os.Exit(1)
 }
 
-func validateConfig(cfg cutoverConfig) error {
+func validateConfig(cfg convergedConfig) error {
 	if cfg.Kubectl == "" {
 		return errors.New("--kubectl is required")
 	}
@@ -196,7 +188,7 @@ func validateConfig(cfg cutoverConfig) error {
 	return nil
 }
 
-func runCutoverProof(ctx context.Context, cfg cutoverConfig) error {
+func runConvergedProof(ctx context.Context, cfg convergedConfig) error {
 	runner := kubectlRunner{
 		bin:            cfg.Kubectl,
 		kubeconfig:     cfg.Kubeconfig,
@@ -204,7 +196,7 @@ func runCutoverProof(ctx context.Context, cfg cutoverConfig) error {
 		requestTimeout: cfg.RequestTimeout,
 	}
 
-	fmt.Printf("guardian openbao cutover proof\n")
+	fmt.Printf("guardian converged proof\n")
 	fmt.Printf("fluxNamespace=%s openbaoNamespace=%s openbaoHelmRelease=%s openbaoStatefulSet=%s controllerDeployment=%s\n", cfg.FluxNamespace, cfg.OpenBaoNamespace, cfg.OpenBaoHelmRelease, cfg.OpenBaoStatefulSet, cfg.ControllerDeployment)
 
 	fluxRaw, err := runner.output(ctx, "Flux Kustomizations", "-n", cfg.FluxNamespace, "get", "kustomizations.kustomize.toolkit.fluxcd.io", "-o", "json")
@@ -247,22 +239,6 @@ func runCutoverProof(ctx context.Context, cfg cutoverConfig) error {
 	if err := validateStatefulSetRolled(statefulSetRaw, cfg.OpenBaoStatefulSet); err != nil {
 		return err
 	}
-	replicas, err := statefulSetReplicaCount(statefulSetRaw, cfg.OpenBaoStatefulSet)
-	if err != nil {
-		return err
-	}
-	statuses := map[string]string{}
-	for i := 0; i < replicas; i++ {
-		pod := fmt.Sprintf("%s-%d", cfg.OpenBaoStatefulSet, i)
-		statusRaw, err := runner.output(ctx, "OpenBao status "+pod, "-n", cfg.OpenBaoNamespace, "exec", pod, "-c", "openbao", "--", "bao", "status", "-format=json", "-tls-skip-verify")
-		if err != nil {
-			return err
-		}
-		statuses[pod] = statusRaw
-	}
-	if err := validateOpenBaoClusterStatus(statuses); err != nil {
-		return err
-	}
 
 	deploymentRaw, err := runner.output(ctx, "OpenBao ops-controller Deployment", "-n", cfg.OpenBaoNamespace, "get", "deployment.apps/"+cfg.ControllerDeployment, "-o", "json")
 	if err != nil {
@@ -280,7 +256,7 @@ func runCutoverProof(ctx context.Context, cfg cutoverConfig) error {
 		return err
 	}
 
-	fmt.Printf("openbao cutover proof passed\n")
+	fmt.Printf("converged proof passed\n")
 	return nil
 }
 
@@ -392,40 +368,6 @@ func statefulSetReplicaCount(raw string, name string) (int, error) {
 		return 0, fmt.Errorf("StatefulSet %q has zero desired replicas", name)
 	}
 	return replicas, nil
-}
-
-func validateOpenBaoClusterStatus(rawByPod map[string]string) error {
-	if len(rawByPod) == 0 {
-		return errors.New("no OpenBao pod statuses were collected")
-	}
-	var clusterID string
-	for pod, raw := range rawByPod {
-		var status openBaoStatus
-		if err := json.Unmarshal([]byte(raw), &status); err != nil {
-			return fmt.Errorf("parse OpenBao status for %s: %w", pod, err)
-		}
-		if !status.Initialized {
-			return fmt.Errorf("OpenBao pod %s initialized=false", pod)
-		}
-		if status.Sealed {
-			return fmt.Errorf("OpenBao pod %s sealed=true", pod)
-		}
-		if !status.HAEnabled {
-			return fmt.Errorf("OpenBao pod %s ha_enabled=false", pod)
-		}
-		if status.ClusterID == "" {
-			return fmt.Errorf("OpenBao pod %s cluster_id is empty", pod)
-		}
-		if clusterID == "" {
-			clusterID = status.ClusterID
-			continue
-		}
-		if status.ClusterID != clusterID {
-			return fmt.Errorf("OpenBao pod %s cluster_id=%s, want %s", pod, status.ClusterID, clusterID)
-		}
-	}
-	fmt.Printf("OpenBao cluster status verified: pods=%d clusterID=%s\n", len(rawByPod), clusterID)
-	return nil
 }
 
 func validateOpenBaoCRs(raw string, required []string) error {

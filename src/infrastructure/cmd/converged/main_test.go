@@ -129,30 +129,6 @@ func TestValidateStatefulSetRolledRejectsMixedRevision(t *testing.T) {
 	}
 }
 
-func TestValidateOpenBaoClusterStatus(t *testing.T) {
-	raw := map[string]string{
-		"guardian-openbao-0": `{"initialized":true,"sealed":false,"ha_enabled":true,"cluster_id":"cluster-a","version":"2.5.4"}`,
-		"guardian-openbao-1": `{"initialized":true,"sealed":false,"ha_enabled":true,"cluster_id":"cluster-a","version":"2.5.4"}`,
-	}
-	if err := validateOpenBaoClusterStatus(raw); err != nil {
-		t.Fatalf("validateOpenBaoClusterStatus() error = %v", err)
-	}
-}
-
-func TestValidateOpenBaoClusterStatusRejectsMixedClusterIDs(t *testing.T) {
-	raw := map[string]string{
-		"guardian-openbao-0": `{"initialized":true,"sealed":false,"ha_enabled":true,"cluster_id":"cluster-a","version":"2.5.4"}`,
-		"guardian-openbao-1": `{"initialized":true,"sealed":false,"ha_enabled":true,"cluster_id":"cluster-b","version":"2.5.4"}`,
-	}
-	err := validateOpenBaoClusterStatus(raw)
-	if err == nil {
-		t.Fatalf("validateOpenBaoClusterStatus() accepted mixed cluster IDs")
-	}
-	if !strings.Contains(err.Error(), "cluster_id=") {
-		t.Fatalf("validateOpenBaoClusterStatus() error = %v, want cluster ID detail", err)
-	}
-}
-
 func TestKubectlRunnerArgs(t *testing.T) {
 	runner := kubectlRunner{
 		kubeconfig:     "/tmp/kubeconfig",

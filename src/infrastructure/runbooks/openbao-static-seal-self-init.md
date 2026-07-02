@@ -87,13 +87,18 @@ OpenBao, an OpenBao-held intermediate, a workload-specific mount such as
 ## Verify
 
 ```sh
-aspect infra openbao-cutover \
+aspect infra converged \
   --expected-revision "$(git rev-parse HEAD)" \
+  --kubeconfig=src/infrastructure/talm/kubeconfig
+
+aspect infra openbao-drill \
   --kubeconfig=src/infrastructure/talm/kubeconfig
 ```
 
-The cutover proof requires Flux Kustomizations, the OpenBao HelmRelease,
+The converged proof requires Flux Kustomizations, the OpenBao HelmRelease,
 StatefulSet, ops-controller Deployment, and OpenBao operation CRs to be ready.
+The status drill verifies each member is initialized, unsealed, HA-enabled,
+and part of one raft cluster (a single `cluster_id` across pods).
 `SelfInitIncomplete` on OpenBao operation CRs means the cluster did not run the
 declared self-init block successfully; inspect OpenBao startup logs and
 recreate the wiped OpenBao raft state with the declared config.

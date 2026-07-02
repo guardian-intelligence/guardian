@@ -9,7 +9,7 @@ go_test(
     ],
     data = [
         "@talm_linux_amd64//:talm",
-        "//docs:openbao-and-conformance-design.md",
+        "//docs:openbao-design.md",
         "//src/infrastructure/base:kustomization",
         "//src/infrastructure/base/app-patches:manifests",
         "//src/infrastructure/base/apps:manifests",

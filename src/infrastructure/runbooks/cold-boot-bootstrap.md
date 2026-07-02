@@ -11,7 +11,7 @@ from-nothing bring-up may require.
 
 1. **Static seal key** — 32 raw bytes, held offline. Fresh cluster ⇒ mint a
    fresh key (all durable OpenBao state must be reimportable or exported per
-   the Transit custody rules in `docs/openbao-and-conformance-design.md`):
+   the Transit custody rules in `docs/openbao-design.md`):
 
    ```sh
    bazelisk run //src/infrastructure/cmd/openbao_static_seal_key:openbao_static_seal_key -- \
@@ -246,15 +246,18 @@ bazelisk run //src/infrastructure/cmd/openbao_secret_import:openbao_secret_impor
   --kubeconfig <off-vlan-kubeconfig-copy> \
   --env-file <custody>/DELETE_ME.env
 
-aspect infra openbao-cutover --expected-revision "$(git rev-parse HEAD)" \
+aspect infra converged --expected-revision "$(git rev-parse HEAD)" \
+  --kubeconfig <off-vlan-kubeconfig-copy>
+
+aspect infra openbao-drill \
   --kubeconfig <off-vlan-kubeconfig-copy>
 ```
 
 The importer writes the three KV paths with readback verification, removes its
-temporary role/policy, and deletes the env file. The cutover proof requires
-every Kustomization, certificate, the OpenBao StatefulSet (one raft
-clusterID across pods), the digest-pinned ops-controller, and all operation
-CRs Ready.
+temporary role/policy, and deletes the env file. The converged proof requires
+every Kustomization, certificate, the OpenBao StatefulSet, the digest-pinned
+ops-controller, and all operation CRs Ready. The status drill verifies one
+raft `cluster_id` across unsealed members.
 
 **DR gates** (definitions in `docs/openbao-residue-inventory.md`): the
 cold-start gate falls out of the steps above plus an ESO-synced consumer
