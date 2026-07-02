@@ -48,65 +48,6 @@ type Mount struct {
 	Options     map[string]string
 }
 
-type PKIRole struct {
-	MountPath                 string
-	RoleName                  string
-	IssuerRef                 string
-	TTL                       string
-	MaxTTL                    string
-	AllowLocalhost            bool
-	AllowedDomains            []string
-	AllowBareDomains          bool
-	AllowSubdomains           bool
-	AllowGlobDomains          bool
-	AllowWildcardCertificates bool
-	AllowAnyName              bool
-	EnforceHostnames          bool
-	AllowIPSANs               bool
-	AllowedIPSANsCIDR         []string
-	ServerFlag                bool
-	ClientFlag                bool
-	CodeSigningFlag           bool
-	EmailProtectionFlag       bool
-	KeyType                   string
-	KeyBits                   int
-	KeyUsage                  []string
-	ExtKeyUsage               []string
-	CNValidations             []string
-	UseCSRCommonName          bool
-	UseCSRSANs                bool
-	GenerateLease             bool
-	NoStore                   bool
-	RequireCN                 bool
-	NotBeforeDuration         string
-	NotBeforeBound            string
-	NotAfterBound             string
-}
-
-type PKIRootIssuer struct {
-	MountPath  string
-	IssuerName string
-	CommonName string
-	TTL        string
-	KeyType    string
-	KeyBits    int
-}
-
-type PKIIssuer struct {
-	MountPath   string
-	IssuerRef   string
-	IssuerID    string
-	IssuerName  string
-	KeyID       string
-	KeyName     string
-	Certificate string
-}
-
-type PKIIssuerConfig struct {
-	Default                    string
-	DefaultFollowsLatestIssuer bool
-}
-
 type KubernetesAuthConfig struct {
 	KubernetesHost       string
 	KubernetesCACert     string
@@ -249,85 +190,6 @@ func (c *Client) GetMountTune(ctx context.Context, mountPath string) (TuneConfig
 
 func (c *Client) PutMountTune(ctx context.Context, mountPath string, tune TuneConfig) error {
 	_, err := c.api.Logical().WriteWithContext(ctx, mountTunePath(mountPath), tuneConfigBody(tune))
-	return err
-}
-
-func (c *Client) GetPKIRole(ctx context.Context, mountPath string, roleName string) (PKIRole, bool, error) {
-	path := pkiRolePath(mountPath, roleName)
-	secret, err := c.api.Logical().ReadWithContext(ctx, path)
-	if err != nil {
-		if isOpenBaoNotFound(err) {
-			return PKIRole{}, false, nil
-		}
-		return PKIRole{}, false, err
-	}
-	if secret == nil || secret.Data == nil {
-		return PKIRole{}, false, nil
-	}
-	return pkiRoleFromSecret(mountPath, roleName, secret.Data), true, nil
-}
-
-func (c *Client) PutPKIRole(ctx context.Context, role PKIRole) error {
-	_, err := c.api.Logical().WriteWithContext(ctx, pkiRolePath(role.MountPath, role.RoleName), pkiRoleBody(role))
-	return err
-}
-
-func (c *Client) DeletePKIRole(ctx context.Context, mountPath string, roleName string) error {
-	_, err := c.api.Logical().DeleteWithContext(ctx, pkiRolePath(mountPath, roleName))
-	return err
-}
-
-func (c *Client) GetPKIIssuer(ctx context.Context, mountPath string, issuerRef string) (PKIIssuer, bool, error) {
-	path := pkiIssuerPath(mountPath, issuerRef)
-	secret, err := c.api.Logical().ReadWithContext(ctx, path)
-	if err != nil {
-		if isOpenBaoNotFound(err) {
-			return PKIIssuer{}, false, nil
-		}
-		if isOpenBaoPKIIssuerNotFound(err) {
-			return PKIIssuer{}, false, nil
-		}
-		return PKIIssuer{}, false, err
-	}
-	if secret == nil || secret.Data == nil {
-		return PKIIssuer{}, false, nil
-	}
-	return pkiIssuerFromSecret(mountPath, issuerRef, secret.Data), true, nil
-}
-
-func (c *Client) GeneratePKIRootIssuer(ctx context.Context, issuer PKIRootIssuer) (PKIIssuer, error) {
-	secret, err := c.api.Logical().WriteWithContext(ctx, pkiRootGenerateInternalPath(issuer.MountPath), pkiRootIssuerBody(issuer))
-	if err != nil {
-		return PKIIssuer{}, err
-	}
-	if secret == nil || secret.Data == nil {
-		return PKIIssuer{}, fmt.Errorf("OpenBao PKI root issuer generation returned no data")
-	}
-	return pkiIssuerFromSecret(issuer.MountPath, issuer.IssuerName, secret.Data), nil
-}
-
-func (c *Client) GetPKIIssuerConfig(ctx context.Context, mountPath string) (PKIIssuerConfig, bool, error) {
-	secret, err := c.api.Logical().ReadWithContext(ctx, pkiIssuerConfigPath(mountPath))
-	if err != nil {
-		if isOpenBaoNotFound(err) {
-			return PKIIssuerConfig{}, false, nil
-		}
-		return PKIIssuerConfig{}, false, err
-	}
-	if secret == nil || secret.Data == nil {
-		return PKIIssuerConfig{}, false, nil
-	}
-	return PKIIssuerConfig{
-		Default:                    stringFromSecret(secret.Data["default"]),
-		DefaultFollowsLatestIssuer: boolFromSecret(secret.Data["default_follows_latest_issuer"]),
-	}, true, nil
-}
-
-func (c *Client) PutPKIIssuerConfig(ctx context.Context, mountPath string, config PKIIssuerConfig) error {
-	_, err := c.api.Logical().WriteWithContext(ctx, pkiIssuerConfigPath(mountPath), map[string]interface{}{
-		"default":                       config.Default,
-		"default_follows_latest_issuer": config.DefaultFollowsLatestIssuer,
-	})
 	return err
 }
 
@@ -482,22 +344,6 @@ func mountTunePath(mountPath string) string {
 	return "sys/mounts/" + strings.Trim(mountPath, "/") + "/tune"
 }
 
-func pkiRolePath(mountPath string, roleName string) string {
-	return strings.Trim(mountPath, "/") + "/roles/" + strings.Trim(roleName, "/")
-}
-
-func pkiIssuerPath(mountPath string, issuerRef string) string {
-	return strings.Trim(mountPath, "/") + "/issuer/" + strings.Trim(issuerRef, "/")
-}
-
-func pkiIssuerConfigPath(mountPath string) string {
-	return strings.Trim(mountPath, "/") + "/config/issuers"
-}
-
-func pkiRootGenerateInternalPath(mountPath string) string {
-	return strings.Trim(mountPath, "/") + "/root/generate/internal"
-}
-
 func kubernetesAuthConfigPath(backendPath string) string {
 	return "auth/" + strings.Trim(backendPath, "/") + "/config"
 }
@@ -509,14 +355,6 @@ func kubernetesAuthRolePath(backendPath string, roleName string) string {
 func isOpenBaoNotFound(err error) bool {
 	var responseError *baoapi.ResponseError
 	return errors.As(err, &responseError) && responseError.StatusCode == 404
-}
-
-func isOpenBaoPKIIssuerNotFound(err error) bool {
-	var responseError *baoapi.ResponseError
-	if !errors.As(err, &responseError) || responseError.StatusCode != 500 {
-		return false
-	}
-	return strings.Contains(responseError.Error(), "unable to find PKI issuer for reference")
 }
 
 func stringFromSecret(value interface{}) string {
@@ -549,141 +387,6 @@ func boolFromSecret(value interface{}) bool {
 	default:
 		return false
 	}
-}
-
-func intFromSecret(value interface{}) int {
-	switch v := value.(type) {
-	case int:
-		return v
-	case int64:
-		return int(v)
-	case float64:
-		return int(v)
-	case string:
-		out, _ := strconv.Atoi(v)
-		return out
-	default:
-		return 0
-	}
-}
-
-func pkiRoleFromSecret(mountPath string, roleName string, data map[string]interface{}) PKIRole {
-	return PKIRole{
-		MountPath:                 strings.Trim(mountPath, "/"),
-		RoleName:                  roleName,
-		IssuerRef:                 stringFromSecret(data["issuer_ref"]),
-		TTL:                       stringFromSecret(data["ttl"]),
-		MaxTTL:                    stringFromSecret(data["max_ttl"]),
-		AllowLocalhost:            boolFromSecret(data["allow_localhost"]),
-		AllowedDomains:            stringSliceFromSecret(data["allowed_domains"]),
-		AllowBareDomains:          boolFromSecret(data["allow_bare_domains"]),
-		AllowSubdomains:           boolFromSecret(data["allow_subdomains"]),
-		AllowGlobDomains:          boolFromSecret(data["allow_glob_domains"]),
-		AllowWildcardCertificates: boolFromSecret(data["allow_wildcard_certificates"]),
-		AllowAnyName:              boolFromSecret(data["allow_any_name"]),
-		EnforceHostnames:          boolFromSecret(data["enforce_hostnames"]),
-		AllowIPSANs:               boolFromSecret(data["allow_ip_sans"]),
-		AllowedIPSANsCIDR:         stringSliceFromSecret(data["allowed_ip_sans_cidr"]),
-		ServerFlag:                boolFromSecret(data["server_flag"]),
-		ClientFlag:                boolFromSecret(data["client_flag"]),
-		CodeSigningFlag:           boolFromSecret(data["code_signing_flag"]),
-		EmailProtectionFlag:       boolFromSecret(data["email_protection_flag"]),
-		KeyType:                   stringFromSecret(data["key_type"]),
-		KeyBits:                   intFromSecret(data["key_bits"]),
-		KeyUsage:                  stringSliceFromSecret(data["key_usage"]),
-		ExtKeyUsage:               stringSliceFromSecret(data["ext_key_usage"]),
-		CNValidations:             stringSliceFromSecret(data["cn_validations"]),
-		UseCSRCommonName:          boolFromSecret(data["use_csr_common_name"]),
-		UseCSRSANs:                boolFromSecret(data["use_csr_sans"]),
-		GenerateLease:             boolFromSecret(data["generate_lease"]),
-		NoStore:                   boolFromSecret(data["no_store"]),
-		RequireCN:                 boolFromSecret(data["require_cn"]),
-		NotBeforeDuration:         stringFromSecret(data["not_before_duration"]),
-		NotBeforeBound:            stringFromSecret(data["not_before_bound"]),
-		NotAfterBound:             stringFromSecret(data["not_after_bound"]),
-	}
-}
-
-func pkiRoleBody(role PKIRole) map[string]interface{} {
-	body := map[string]interface{}{
-		"allow_localhost":             role.AllowLocalhost,
-		"allowed_domains":             role.AllowedDomains,
-		"allow_bare_domains":          role.AllowBareDomains,
-		"allow_subdomains":            role.AllowSubdomains,
-		"allow_glob_domains":          role.AllowGlobDomains,
-		"allow_wildcard_certificates": role.AllowWildcardCertificates,
-		"allow_any_name":              role.AllowAnyName,
-		"enforce_hostnames":           role.EnforceHostnames,
-		"allow_ip_sans":               role.AllowIPSANs,
-		"server_flag":                 role.ServerFlag,
-		"client_flag":                 role.ClientFlag,
-		"code_signing_flag":           role.CodeSigningFlag,
-		"email_protection_flag":       role.EmailProtectionFlag,
-		"key_type":                    role.KeyType,
-		"key_usage":                   role.KeyUsage,
-		"use_csr_common_name":         role.UseCSRCommonName,
-		"use_csr_sans":                role.UseCSRSANs,
-		"generate_lease":              role.GenerateLease,
-		"no_store":                    role.NoStore,
-		"require_cn":                  role.RequireCN,
-	}
-	if role.AllowedIPSANsCIDR != nil {
-		body["allowed_ip_sans_cidr"] = role.AllowedIPSANsCIDR
-	}
-	if role.ExtKeyUsage != nil {
-		body["ext_key_usage"] = role.ExtKeyUsage
-	}
-	if role.CNValidations != nil {
-		body["cn_validations"] = role.CNValidations
-	}
-	if role.IssuerRef != "" {
-		body["issuer_ref"] = role.IssuerRef
-	}
-	if role.TTL != "" {
-		body["ttl"] = role.TTL
-	}
-	if role.MaxTTL != "" {
-		body["max_ttl"] = role.MaxTTL
-	}
-	if role.KeyBits != 0 {
-		body["key_bits"] = role.KeyBits
-	}
-	if role.NotBeforeDuration != "" {
-		body["not_before_duration"] = role.NotBeforeDuration
-	}
-	if role.NotBeforeBound != "" {
-		body["not_before_bound"] = role.NotBeforeBound
-	}
-	if role.NotAfterBound != "" {
-		body["not_after_bound"] = role.NotAfterBound
-	}
-	return body
-}
-
-func pkiIssuerFromSecret(mountPath string, issuerRef string, data map[string]interface{}) PKIIssuer {
-	return PKIIssuer{
-		MountPath:   strings.Trim(mountPath, "/"),
-		IssuerRef:   strings.Trim(issuerRef, "/"),
-		IssuerID:    stringFromSecret(data["issuer_id"]),
-		IssuerName:  stringFromSecret(data["issuer_name"]),
-		KeyID:       stringFromSecret(data["key_id"]),
-		KeyName:     stringFromSecret(data["key_name"]),
-		Certificate: stringFromSecret(data["certificate"]),
-	}
-}
-
-func pkiRootIssuerBody(issuer PKIRootIssuer) map[string]interface{} {
-	body := map[string]interface{}{
-		"issuer_name": issuer.IssuerName,
-		"key_name":    issuer.IssuerName,
-		"common_name": issuer.CommonName,
-		"ttl":         issuer.TTL,
-		"key_type":    issuer.KeyType,
-	}
-	if issuer.KeyBits != 0 {
-		body["key_bits"] = issuer.KeyBits
-	}
-	return body
 }
 
 func tuneConfigFromSecret(data map[string]interface{}) TuneConfig {

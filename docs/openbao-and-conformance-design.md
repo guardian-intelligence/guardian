@@ -1,11 +1,12 @@
 # OpenBao secrets platform & manifest conformance — design (target state)
 
 Status: **IMPLEMENTATION IN PROGRESS.** The repo now declares static seal,
-self-init, native OpenBao TLS, `openbao-local` retained storage, and Tier 1
-semantic conformance checks. The old manual-unseal/operator-bootstrap path has been
-removed from the happy path. Remaining target-state gaps called out below
-include the exact `zfsThinPool` substrate, hostPath admission enforcement in the
-live cluster, and the OpenBao PKI/cert-manager handoff.
+self-init, independent cert-manager listener TLS, `openbao-local` retained
+storage, KV, Transit, and Tier 1 semantic conformance checks. The old
+manual-unseal/operator-bootstrap path and the OpenBao-issued listener
+certificate path have been removed from the happy path. Remaining target-state
+gaps called out below include the exact `zfsThinPool` substrate, hostPath
+admission enforcement in the live cluster, and tested stateful restore.
 
 Scope: the Guardian tenant OpenBao (3-node raft) secrets platform, and Tier 1 manifest
 conformance testing. Decisions below were reached deliberately; the load-bearing
@@ -55,16 +56,19 @@ trade-offs are called out explicitly.
 - A freshly rebuilt node intentionally has no key until an operator re-places it from
   backup custody. That is part of the DR posture, not a convergence failure.
 
-### Native listener TLS
-- cert-manager issues **one** cert — for the **8200 API listener**. The initial
-  self-signed/CA issuer chain is **bootstrap only** so the `guardian-openbao-api-tls`
-  Secret exists before the OpenBao pod mounts it. It must not remain the steady-state
-  trust root.
-- **Steady state:** OpenBao PKI is the issuer behind cert-manager's Vault issuer, and
-  `Certificate/guardian-openbao-api` writes the `guardian-openbao-api-tls` leaf from
-  `Issuer/guardian-openbao-vault`. The bootstrap self-signed issuer path is only for
-  first come-up and is not reconciled after handoff. The Talos cluster CA remains rejected
-  as issuer; using it requires exfiltrating the control-plane root key into a tenant workload.
+### Listener TLS
+- cert-manager issues **one** cert for the **8200 API listener**:
+  `Certificate/guardian-openbao-api` writes `Secret/guardian-openbao-api-tls`.
+- The OpenBao listener certificate is transport identity only. It is issued by
+  `Issuer/guardian-openbao-listener-ca`, backed by
+  `Certificate/guardian-openbao-listener-ca`, and does not depend on OpenBao.
+  A wiped OpenBao cluster can start as soon as cert-manager and the static seal
+  file are present.
+- This accepts the narrower Kubernetes/cert-manager risk: a compromised cluster
+  could mint listener transport identity, but it does not reveal the seal key,
+  root/recovery material, Transit keys, KV contents, or OpenBao raft data.
+- The Talos cluster CA remains rejected as issuer; using it requires
+  exfiltrating the control-plane root key into a tenant workload.
 - **The 8201 raft cluster/peer cert is self-managed by OpenBao** (its own internal CA,
   rotated automatically). cert-manager does not touch 8201. `retry_join` uses the 8200 cert
   only during first join (`leader_tls_servername` matching a SAN, `leader_ca_cert_file` trusting
@@ -81,48 +85,45 @@ trade-offs are called out explicitly.
 - **Rolling order** under `OnDelete`: standbys first, one at a time → `operator step-down` →
   former-active last. Never `kubectl rollout restart`.
 - **CA rotation** (the hard part; leaf rotation is trivial) uses a trust-overlap window via
-  **trust-manager**: publish an old+new CA bundle, wait for all nodes to trust both, switch
-  the issuer, re-issue leaves node-by-node, retire the old CA last. cert-manager's CA issuer
-  does not check whether a leaf outlives the CA — track CA expiry independently.
+  **trust-manager** once there are external OpenBao clients that need an explicit
+  public bundle: publish an old+new CA bundle, wait for clients to trust both,
+  switch the issuer, re-issue leaves node-by-node, retire the old CA last.
+  cert-manager's CA issuer does not check whether a leaf outlives the CA; track
+  CA expiry independently.
 - **Later option (not now):** OpenBao ≥2.2 native ACME auto-TLS for the 8200 listener could
   retire the mount+SIGHUP pipeline, but needs an external ACME server (e.g. step-ca) as a new
   dependency. Deferred; cert-manager + SIGHUP sidecar is the lower-dependency path.
 
-### OpenBao PKI → cert-manager target
-- Mount: `pki/openbao-api` (`type: pki`) is declared through
-  `OpenBaoMount/pki-openbao-api` with max/default TTLs that cover the requested OpenBao API
-  leaf duration (`2160h`) and renewal window (`360h`). Keep one CA/issuer per PKI mount;
-  use additional mounts for materially different CA scopes.
-- Issuer material: `OpenBaoPKIRootIssuer/openbao-api-root-2026` generates the current
-  internal root issuer inside `pki/openbao-api` and sets it as the default. The CA private
-  key is generated by OpenBao and never enters Git, Kubernetes, CI, or a local operator
-  file. The future higher-custody shape is still an offline root signing an
-  OpenBao-generated intermediate CSR, but that needs a real offline-root custody model
-  before it is safer than the OpenBao-held root.
-- Role: `OpenBaoPKIRole/openbao-api` reconciles
-  `pki/openbao-api/roles/openbao-api`. It allows only the exact OpenBao API listener names
-  from `openbao-pki.yaml`, localhost, and `127.0.0.1/32`; requires server-auth usage;
-  disables client/code-signing/email EKUs; disallows arbitrary names and wildcards; and caps
-  TTL at the Certificate duration.
-- cert-manager auth: `ServiceAccount/cert-manager-openbao-issuer`,
-  `Role/cert-manager-openbao-tokenrequest`, and the OpenBao Kubernetes auth role
-  `guardian-cert-manager-openbao-api-issuer` are declared so cert-manager can request a
-  short-lived, audience-bound token.
-- Policy: the cert-manager role gets the narrow signing surface only:
-  `update` on `pki/openbao-api/sign/openbao-api` and any minimal read endpoints needed by
-  the issuer/health path. It must not get `pki/root/*`, `pki/config/*`, `pki/roles/*`,
-  `sys/mounts/*`, or transit/KV capabilities.
-- cert-manager `Issuer`: `Issuer/guardian-openbao-vault` uses the built-in Vault issuer
-  pointed at
-  `https://guardian-openbao.tenant-guardian.svc:8200`, path
-  `pki/openbao-api/sign/openbao-api`, `caBundleSecretRef` from `guardian-openbao-api-tls`,
-  and Kubernetes auth via `serviceAccountRef`. cert-manager v1.20.2 supports this
-  short-lived-token path.
-- Handoff: the PKI mount/root issuer/role/policy/auth role and Vault issuer converged
-  while the bootstrap `guardian-openbao-api-tls` leaf was serving. The durable
-  `Certificate/guardian-openbao-api` now uses the Vault issuer, live verification proved
-  the SIGHUP sidecar reload and raft health, and the bootstrap self-signed issuer/CA
-  Certificate is removed from steady state.
+### Workload PKI
+- OpenBao PKI is not used for OpenBao's own listener certificate.
+- No workload PKI consumer exists yet, so the repo does not carry a PKI mount,
+  root issuer, role, cert-manager Vault issuer, or cert-manager TokenRequest
+  plumbing.
+- When a real workload PKI consumer appears, reintroduce it as workload PKI:
+  mount `pki/workload`, role `guardian-workload`, cert-manager issuer
+  `guardian-openbao-workload`, and policy limited to the approved
+  `pki/workload/sign/<role>` path.
+- The target custody model for workload PKI is an offline-held root CA outside
+  Kubernetes/OpenBao and an OpenBao-held intermediate. cert-manager requests
+  workload leaves through the Vault issuer; workloads trust the offline root
+  distributed by trust-manager. Do not generate a workload PKI root inside
+  OpenBao unless that is explicitly accepted as the custody boundary.
+
+### Transit
+- `OpenBaoMount/transit` declares the Transit engine so approved key-management
+  consumers can be added without reintroducing a bootstrap control plane.
+- Durable Transit keys are not declared generically. A Transit key that protects
+  durable ciphertext is data-loss-critical. **Decided custody model:** create
+  such keys with `exportable=true` and `allow_plaintext_backup=true`, and export
+  the keyring with `transit/backup` into offline custody at creation time.
+  The export is the full plaintext keyring — holding it means decrypting all
+  ciphertext under that key — so it lives in the same offline custody tier as
+  the static seal key, never in R2, and never co-located with the ciphertext it
+  protects. Exportability does not weaken the boundary: the seal key on node
+  disk is already the root of trust, and the export extends the same custody
+  discipline to one more artifact.
+- Non-durable drill keys may be created imperatively during DR verification and
+  deleted afterward.
 
 ### Auth & self-init config
 - Kubernetes auth method; ESO and the ops-controller authenticate via SA tokens validated by
@@ -147,9 +148,20 @@ trade-offs are called out explicitly.
   (WORM)** for tamper-evident offsite retention — strictly async/downstream, never in the
   request path. R2 is not an OpenBao audit device.
 
-### Disaster recovery — OpenBao is authoritative (decision b)
-- OpenBao **is** authoritative (it runs PKI and transit engines). The earlier "no restore /
-  rebuild-and-reproject" stance is **retired**. Recovery is **raft snapshots**.
+### Disaster recovery
+- Primary cold-start model: rebuild from Git, supply custody-held residue, and
+  verify the system converges. The residue inventory is checked in at
+  `docs/openbao-residue-inventory.md`.
+- Stateful restore model: the primary recovery for durable Transit keys is
+  `transit/restore` from the keyring export taken at key creation. A raft
+  snapshot is the optional second path for non-derivable OpenBao state; it is
+  barrier-encrypted (unreadable without the static seal key, so offsite storage
+  is acceptable) but still sensitive custody material, not an ordinary backup
+  artifact.
+- **No recovery keys.** Self-init emits no root token and no recovery keys, and
+  none are established afterward. Recovery keys cannot decrypt the barrier;
+  they only authorize `generate-root`. Break-glass admin access is regenerate:
+  wipe, cold-start from custody residue, `transit/restore` durable keys.
 - **Snapshot/restore automation is deferred pending Velero research.** Do not add a
   second backup control plane or a bespoke snapshot CronJob until we decide whether Velero
   can carry the OpenBao raft/PVC and restore-drill requirements cleanly. Until then, keep
@@ -165,12 +177,14 @@ trade-offs are called out explicitly.
   for as long as any snapshot they encrypted still exists** (this couples seal-key rotation to
   snapshot retention). Without the key, snapshots are unrecoverable ciphertext.
 - **Restore is whole-cluster only** in OSS (no partial/`inspect`/`recover`). DR = init a fresh
-  3-node cluster with the same static key, `snapshot restore -force`, unseal. PKI CA keys and
-  the transit keyring return intact because they live inside the barrier the snapshot carries.
-- **Tested restores:** required before relying on OpenBao as a transit/PKI authority for
-  more components, but the automation shape is deferred with the Velero research. The drill
-  must restore into a throwaway cluster with the same static key and assert unseal + a PKI
-  issue + a transit encrypt/decrypt round-trip.
+  3-node cluster with the same static key, `snapshot restore -force`, unseal. Transit
+  keyrings and KV state return intact because they live inside the barrier the
+  snapshot carries.
+- **Tested restores:** required before relying on OpenBao Transit for durable
+  ciphertext. The drill must cold-start a throwaway cluster, `transit/restore`
+  the exported keyring, and assert a Transit decrypt of pre-restore ciphertext;
+  when exercising the snapshot path, the throwaway cluster must start with the
+  same static key and pass the same decrypt check after snapshot restore.
 
 ### Seal-key rotation
 - `previous_key`/`current_key` under a new key-id; roll one pod at a time; keep the previous
@@ -215,13 +229,12 @@ pinned-value Go assertions.
 ## Bootstrap ordering (target sequence)
 
 Talos up → break-glass place seal key on the 3 pinned nodes → **cert-manager up** →
-bootstrap self-signed/CA issuer creates `guardian-openbao-api-tls` → **OpenBao up**
-(static-seal auto-unseals; consumes the bootstrap cert from birth) → self-init creates
-ops-controller/auth access → OpenBao ops enables steady-state PKI/transit/KV resources →
-cert-manager Vault issuer backed by OpenBao PKI re-issues the OpenBao 8200 leaf →
-bootstrap issuer/CA path is removed after trust overlap → ESO consumes. Flux ordering must
-be real (cert-manager Ready → bootstrap Certificate Ready → OpenBao pods → OpenBao ops
-Ready → steady-state Vault issuer Ready); `disableWait` makes this easy to race, so encode
+independent cert-manager listener CA creates `guardian-openbao-api-tls` →
+**OpenBao up** (static-seal auto-unseals; consumes the listener cert from birth) →
+self-init creates ops-controller/auth access → OpenBao ops enables KV, Transit,
+policies, and auth roles → ESO consumes. Flux ordering must be real
+(cert-manager Ready → listener CA Certificate Ready → listener leaf Certificate Ready →
+OpenBao pods → OpenBao ops Ready); `disableWait` makes this easy to race, so encode
 the dependency explicitly.
 
 ---
@@ -230,6 +243,7 @@ the dependency explicitly.
 
 Already declared and Ready in the current cluster:
 - `kv` mount and tune.
+- `transit` mount.
 - Kubernetes auth backend.
 - Ops-controller policy and Kubernetes auth role.
 - `external-dns` read policy and Kubernetes auth role.
@@ -244,10 +258,11 @@ Legacy live cruft removed on 2026-06-29:
   an OpenBao-backed credential projection.
 
 Ops resources still needed before OpenBao is the real vault/transit authority:
-- OpenBao API leaf handoff away from the bootstrap cert-manager CA once
-  `OpenBaoPKIRootIssuer/openbao-api-root-2026` and `Issuer/guardian-openbao-vault` are Ready.
-- `transit` mount and declarative transit-key resources. The current operator can declare
-  mounts/policies/auth roles, but it has no `OpenBaoTransitKey` CRD/controller yet.
+- Restore drill for any durable Transit key before that key protects production
+  ciphertext.
+- Declarative Transit-key resources only when a real consumer requires them. The
+  current operator can declare mounts/policies/auth roles, but it has no
+  `OpenBaoTransitKey` CRD/controller yet.
 - KV policies/auth roles/ExternalSecrets for any remaining consumers of imported
   Cloudflare/R2 credentials beyond `external-dns`.
 - Release/signing, artifact provenance, envelope encryption, or workload key-management
@@ -263,11 +278,10 @@ Ops resources still needed before OpenBao is the real vault/transit authority:
 - OpenBao static seal: https://openbao.org/docs/configuration/seal/static/
 - OpenBao seal/unseal concepts: https://openbao.org/docs/concepts/seal/
 - OpenBao Kubernetes auth: https://openbao.org/docs/auth/kubernetes/
-- OpenBao PKI setup: https://openbao.org/docs/secrets/pki/setup/
-- OpenBao PKI considerations: https://openbao.org/docs/secrets/pki/considerations/
-- OpenBao PKI API: https://openbao.org/api-docs/secret/pki/
-- cert-manager Vault issuer: https://cert-manager.io/docs/configuration/vault/
-- cert-manager API reference (`VaultIssuer`): https://cert-manager.io/docs/reference/api-docs/
+- OpenBao Transit secrets engine: https://openbao.org/docs/secrets/transit/
+- OpenBao PKI considerations for future workload PKI: https://openbao.org/docs/secrets/pki/considerations/
+- cert-manager CA issuer: https://cert-manager.io/docs/configuration/ca/
+- cert-manager Vault issuer for future workload PKI: https://cert-manager.io/docs/configuration/vault/
 - TCP listener `reloads-on-SIGHUP`: https://openbao.org/docs/configuration/listener/tcp/ ·
   https://developer.hashicorp.com/vault/docs/configuration/listener/tcp
 - Replace TLS cert without restart (SIGHUP): https://support.hashicorp.com/hc/en-us/articles/4417759906835

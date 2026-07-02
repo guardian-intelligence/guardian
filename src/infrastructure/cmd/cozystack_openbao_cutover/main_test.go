@@ -64,6 +64,24 @@ func TestValidateDeploymentReadyRequiresDigestPinnedManager(t *testing.T) {
 	}
 }
 
+func TestValidateDeploymentReplicasReady(t *testing.T) {
+	raw := `{"status":{"readyReplicas":1,"replicas":1}}`
+	if err := validateDeploymentReplicasReady(raw, "cert-manager", "cert-manager"); err != nil {
+		t.Fatalf("validateDeploymentReplicasReady() error = %v", err)
+	}
+}
+
+func TestValidateDeploymentReplicasReadyRejectsUnavailableDeployment(t *testing.T) {
+	raw := `{"status":{"readyReplicas":0,"replicas":1}}`
+	err := validateDeploymentReplicasReady(raw, "cert-manager", "cert-manager")
+	if err == nil {
+		t.Fatalf("validateDeploymentReplicasReady() accepted unavailable deployment")
+	}
+	if !strings.Contains(err.Error(), "readyReplicas=0") {
+		t.Fatalf("validateDeploymentReplicasReady() error = %v, want readiness detail", err)
+	}
+}
+
 func TestValidateReadyConditionRejectsFailedHelmRelease(t *testing.T) {
 	raw := `{"status":{"conditions":[{"type":"Ready","status":"False","reason":"RollbackSucceeded"}]}}`
 	err := validateReadyCondition(raw, "HelmRelease", "guardian-openbao")

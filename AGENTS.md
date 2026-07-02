@@ -1,8 +1,6 @@
 Bazel polyglot hermetically sealed monorepo for Guardian, a free open-source self-hostable private cloud capable of selling excess compute as QEMU VMs. Early days, still getting the infra set up.
 
-Pitch: CozyStack for agents.
-
-Grep through Cozystack 1.5 docs from the exact `v1.5.0` tag when validating
+We use CozyStack. Grep through Cozystack 1.5 docs from the exact `v1.5.0` tag when validating
 1.5.0 behavior, or the `release-1.5` branch when intentionally reading the
 maintained 1.5 line. Do not use v0 docs, v1.4 docs, or current main by
 accident.
@@ -226,7 +224,6 @@ Constraints:
 - Cozystack 1.5 backups use the platform-managed `cozy-default` BackupClass
   and system bucket. Do not add Guardian-specific backup strategies, backup
   credential Secrets, or checks for legacy backup object names.
-- Structure infra for BYOC on-prem
 - Traces are the only admissable proof -- ClickHouse (when stood up), Victoria Metrics, Victoria Logs. Collect traces/spans and relevant log lines to support your thesis that your task is complete to satisfaction. Test services under heavy load via k6 to surface subtle bugs.
 
 Service architecture:

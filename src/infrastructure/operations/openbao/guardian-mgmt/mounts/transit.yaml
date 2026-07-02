@@ -1,0 +1,13 @@
+apiVersion: openbao.guardian.dev/v1alpha1
+kind: OpenBaoMount
+metadata:
+  name: transit
+spec:
+  path: transit
+  type: transit
+  description: Guardian Transit engine for explicitly approved key-management consumers.
+  tune:
+    defaultLeaseTTL: 0s
+    maxLeaseTTL: 0s
+    listingVisibility: hidden
+  deletionPolicy: Retain
