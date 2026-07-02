@@ -21,7 +21,7 @@ You should see how tender he is with the parts of me I used to hide. He's been p
 
 While everyone was over for dinner, he got really quiet and walked past everyone to tug on my sleeve. I was worried at first, but all he asked was if I could homeschool him and all his classmates from last year when summer ends. He wants me to teach them every year until they all graduate from college together. He loudly counted up the grades as he was explaining, but I had to stop him when he got to the twenties.
 
-I asked him why. “They beg me to ask you all the time. Ever since school ended”. He gave me permission to skip math if it'd be easier for me. I couldn’t argue. He continued, “But now I want it, too", looking around, he said "I wish the house was this full all the time.”
+I asked him why. He looked around and paused and said "I wish the house was this full all the time” and gave me permission to skip math if it'd be easier for me. I couldn’t argue.
 
 I cherish the way his eyes go wide flipping over rocks and seeing the worms underneath, and when he tells me his dreams about being a bird searching skies for a cloud that looks like you. He shows me every day that curiosity and love are two sides of something bigger I don't have a word for yet.
 

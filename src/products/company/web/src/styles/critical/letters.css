@@ -4,6 +4,13 @@
   initial-value: 1px;
 }
 
+/* Reserve the classic-scrollbar gutter so navigations and view transitions
+   between short and long pages don't shift the column sideways. Overlay
+   scrollbars (macOS, mobile) reserve nothing and are unaffected. */
+html {
+  scrollbar-gutter: stable;
+}
+
 html,
 body {
   margin: 0;
