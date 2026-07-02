@@ -29,6 +29,19 @@ const LetterFrontmatterSchema = v.pipe(
     // nature rather than inheriting a silent default.
     kind: v.picklist(["dispatch", "correspondence"]),
     summary: v.optional(v.string(), ""),
+    // Machine-readable provenance, never rendered. A letter may be written to
+    // be open-ended on the page — a correspondence whose sender the reader is
+    // left to imagine — while still owing the record an account of what it is
+    // and who wrote it. `author` names the real author (the page may say
+    // otherwise or nothing at all) and `authorTitle` disambiguates them;
+    // `description` is the one-line account of the work; `note` is the
+    // author's own longer statement of context. All are carried as JSON-LD on
+    // /letters/$slug for crawlers, archives, and search — readers never see
+    // them.
+    author: v.optional(v.string(), ""),
+    authorTitle: v.optional(v.string(), ""),
+    description: v.optional(v.string(), ""),
+    note: v.optional(v.string(), ""),
   }),
   v.check(
     (fm) => fm.title.includes(fm.flare),

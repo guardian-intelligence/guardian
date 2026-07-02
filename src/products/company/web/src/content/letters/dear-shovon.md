@@ -5,6 +5,10 @@ publishedAt: 2036-07-04
 flare: Shovon
 kind: correspondence
 summary: "Dear Shovon"
+author: Shovon Hasan
+authorTitle: Founder, Guardian Intelligence Inc.
+description: >-
+  A letter I'll never receive, written by Shovon Hasan, founder of Guardian.
 ---
 
 I wish someone told me having a son would feel like meeting a smaller, kinder, funnier version of myself. Someone who holds my quirks like treasures instead of flaws.

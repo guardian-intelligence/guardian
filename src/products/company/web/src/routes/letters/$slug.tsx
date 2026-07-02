@@ -20,8 +20,49 @@ import {
   LETTER_RETURN_TRANSITION_NAME,
 } from "~/features/letters/transitions";
 import { LetterOgPreview, LetterOgPreviewHotkey } from "~/features/letters/og-preview";
-import { ogMeta } from "~/lib/head";
+import { ogMeta, SITE_URL } from "~/lib/head";
 import { emitSpan } from "~/lib/telemetry/browser";
+
+// Structured provenance for the record, invisible to the reader. A letter's
+// page can stay exactly as open-ended as it was written while the head
+// carries a JSON-LD account of what the work is: its real author, the
+// author's own note of context, and the distinction between the date the
+// letter wears (its dateline may be set in another time) and the date it was
+// published. Crawlers, archives, and search parse this; no reader sees it.
+function letterJsonLd(letter: Letter) {
+  if (!letter.note && !letter.author && !letter.description) {
+    return undefined;
+  }
+  const data: Record<string, unknown> = {
+    "@context": "https://schema.org",
+    "@type": "CreativeWork",
+    name: letter.title,
+    url: `${SITE_URL}/letters/${letter.slug}`,
+    inLanguage: "en",
+    // The frontmatter date is the letter's dateline — the date the letter
+    // wears in its own world, not necessarily when it was written.
+    temporalCoverage: letter.publishedAt,
+  };
+  if (letter.author) {
+    const person: Record<string, unknown> = { "@type": "Person", name: letter.author };
+    if (letter.authorTitle) {
+      person.jobTitle = letter.authorTitle;
+    }
+    data.author = person;
+  }
+  if (letter.description) {
+    data.description = letter.description;
+  }
+  if (letter.note) {
+    data.abstract = letter.note;
+  }
+  return [
+    {
+      type: "application/ld+json",
+      children: JSON.stringify(data),
+    },
+  ];
+}
 
 // A single letter. The form follows DESIGN.md: the date sits at the very
 // top, left-aligned to the column, sized to exactly two graph-paper cells
@@ -54,6 +95,7 @@ export const Route = createFileRoute("/letters/$slug")({
         title: `${letter.title} — Guardian`,
         description: letter.summary,
       }),
+      scripts: letterJsonLd(letter),
     };
   },
 });
