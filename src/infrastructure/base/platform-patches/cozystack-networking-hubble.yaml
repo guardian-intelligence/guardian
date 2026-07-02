@@ -18,6 +18,22 @@ metadata:
   name: cozystack.networking
 spec:
   components:
+    # MTU (2026-07-02 finding, post cold-boot): the Subnet specs in
+    # networking/subnet-mtu.yaml govern POD interfaces only. kube-ovn-cni
+    # derives the ovn0 node port MTU from its --mtu flag, defaulting to
+    # iface MTU - 100 (1420 - 100 = 1320) and re-enforcing that value in its
+    # reconcile loop, so manual `ip link set` is reverted. With pods at 1362
+    # (MSS 1322) but ovn0 at 1320, every externally-DNATed flow that Cilium
+    # load-balances to the node-local ingress pod black-holed full-MSS
+    # packets: the kernel forward path emitted "frag needed (mtu 1320)"
+    # ICMPs referencing the post-DNAT pod IP, which clients cannot associate
+    # with their connection. Symptom: ~1/3 of TLS handshakes/downloads to
+    # guardianintelligence.org stalled (fonts, JS chunks). --mtu must match
+    # the Subnet MTU: 1362 = 1420 VLAN path MTU - 58 GENEVE.
+    kubeovn:
+      values:
+        kube-ovn:
+          mtu: 1362
     cilium:
       values:
         cilium:

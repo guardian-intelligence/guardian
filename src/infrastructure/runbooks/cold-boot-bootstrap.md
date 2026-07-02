@@ -287,15 +287,30 @@ keyring and delete the drill CRs and sentinel afterwards.
    PR it.
 4. Retire the mirror whenever convenient; the machine-config mirror entry is
    inert once Harbor serves the digests.
+5. **Verify the datapath MTU pair on every node**: `ovn0` must match the
+   Subnet MTU (1362), not kube-ovn's iface−100 default (1320). The Subnet
+   specs only govern pod interfaces; ovn0 comes from the kube-ovn-cni
+   `--mtu` flag, declared as `kube-ovn.mtu` on the `cozystack.networking`
+   Package (platform-patches). kube-ovn-cni re-enforces its computed value,
+   so a manual `ip link set` does not stick. A mismatch black-holes full-MSS
+   external traffic whenever Cilium load-balances an externalIP flow to the
+   node-local backend: the kernel forward path emits "frag needed" ICMPs
+   referencing the post-DNAT pod IP, which clients cannot associate — ~1/3
+   of TLS handshakes and large downloads stall while health checks (small
+   payloads) stay green. Found live 2026-07-02 serving guardianintelligence.org.
+   Probe with repeated ≥100KB fetches against each origin IP, not `/healthz`.
 
 ## Why this runbook exists
 
 The 2026-07-01 drill rebuilt the cluster from Git + custody alone and caught
-seven classes of latent state that only a cold boot exposes: a Git-pinned
+eight classes of latent state that only a cold boot exposes: a Git-pinned
 image Harbor had garbage-collected, an all-nodes register-with-taints
 NoSchedule taint that never went live on registered nodes, pod-network
 components enabled inside the CNI's own helm release, a controller image
 predating its CRD schema, an operator installed out-of-band and never
-declared, a workload pointed at a hand-era namespace, and cross-tenant
-isolation admitting the old topology by accident. Treat "the live cluster
-works" as evidence of nothing; only Git + custody + this procedure count.
+declared, a workload pointed at a hand-era namespace, cross-tenant
+isolation admitting the old topology by accident, and a declared pod MTU
+whose node-side half (ovn0) was never declared and defaulted wrong
+(surfaced only under real full-MSS traffic the day after). Treat "the live
+cluster works" as evidence of nothing; only Git + custody + this procedure
+count.
