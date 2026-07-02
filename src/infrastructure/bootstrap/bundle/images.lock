@@ -20,6 +20,8 @@ ghcr.io/cozystack/cozystack/cozy-installer:1.5.0@sha256:5c2392d79b8ace58e78403ea
 ghcr.io/cozystack/cozystack/cozystack-packages@sha256:5472859fa5c7bf3c6c042c51d4dc5ec3c3d80bff64f79f47c13576b07f81172f
 # cozy-installer helm pre-install labeler hook Job image (ephemeral; absent from pod scrapes)
 docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
+# External Secrets Operator helm chart (pulled by source-controller, NOT containerd)
+ghcr.io/external-secrets/charts/external-secrets:0.10.4@sha256:ec681d8b8ee3b5d0a016b1d4dde28dc91ebafa106841dece35722c371b84f49c
 
 # --- Talos v1.13.0 system images (etcd/kubelet run outside Kubernetes; pulled by machined) ---
 ghcr.io/siderolabs/flannel:v0.28.4@sha256:18a6f85dc53f640915e8f1ee078cb710ef85948c35264e973557fe0d08f03128
