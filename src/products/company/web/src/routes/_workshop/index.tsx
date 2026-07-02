@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { FirstLight } from "~/features/first-light";
-import { ogMeta } from "~/lib/head";
+import { canonicalLink, ogMeta } from "~/lib/head";
 
 export const Route = createFileRoute("/_workshop/")({
   component: LandingPage,
@@ -10,7 +10,10 @@ export const Route = createFileRoute("/_workshop/")({
       title: "Guardian — The world needs your business to succeed.",
       description:
         "Guardian is an American applied intelligence firm. We build the reference architecture for the systems every founder has to build before they can build what matters.",
+      path: "/",
+      imageFormat: "png",
     }),
+    links: [canonicalLink("/")],
   }),
 });
 

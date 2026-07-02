@@ -20,7 +20,7 @@ import {
   LETTER_RETURN_TRANSITION_NAME,
 } from "~/features/letters/transitions";
 import { LetterOgPreview, LetterOgPreviewHotkey } from "~/features/letters/og-preview";
-import { ogMeta, SITE_URL } from "~/lib/head";
+import { canonicalLink, ogMeta, SITE_URL } from "~/lib/head";
 import { emitSpan } from "~/lib/telemetry/browser";
 
 // Structured provenance for the record, invisible to the reader. A letter's
@@ -93,8 +93,15 @@ export const Route = createFileRoute("/letters/$slug")({
       meta: ogMeta({
         slug: `letter/${letter.slug}`,
         title: `${letter.title} — Guardian`,
-        description: letter.summary,
+        // The provenance description doubles as the share text: what the
+        // link says about itself on X, in search, and in previews. Falls
+        // back to the bare summary for letters that declare nothing.
+        description: letter.description || letter.summary,
+        type: "article",
+        path: `/letters/${letter.slug}`,
+        imageFormat: "png",
       }),
+      links: [canonicalLink(`/letters/${letter.slug}`)],
       scripts: letterJsonLd(letter),
     };
   },
