@@ -23,26 +23,25 @@ docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f
 # External Secrets Operator helm chart (pulled by source-controller, NOT containerd)
 ghcr.io/external-secrets/charts/external-secrets:0.10.4@sha256:ec681d8b8ee3b5d0a016b1d4dde28dc91ebafa106841dece35722c371b84f49c
 
-# --- Talos v1.13.0 system images (etcd/kubelet run outside Kubernetes; pulled by machined) ---
-ghcr.io/siderolabs/flannel:v0.28.4@sha256:18a6f85dc53f640915e8f1ee078cb710ef85948c35264e973557fe0d08f03128
-registry.k8s.io/coredns/coredns:v1.14.2@sha256:e7e6440cfd1e919280958f5b5a6ab2b184d385bba774c12ad2a9e1e4183f90d9
+# --- Kubernetes system images actually held by the rebuilt cluster (2026-07-02 drill) ---
+# Chart.yaml pins kubernetesVersion v1.34.3 (NOT the Talos v1.13 default v1.36);
+# Cozystack replaces kube-proxy and flannel entirely (kube-ovn + cilium), so
+# those Talos defaults are never pulled. kubelet/etcd live in machined's system
+# containerd namespace (talosctl image ls --namespace system).
+ghcr.io/siderolabs/kubelet:v1.34.3@sha256:88508647e61f8a691c73420bfc5977153b7d21c5b8f1551a88429378213422f1
 registry.k8s.io/etcd:v3.6.9@sha256:38e46ab26aa2a82251d3f24cbbdaefe2e68a66346404ee4b7afe7e90db26805d
+registry.k8s.io/kube-apiserver:v1.34.3@sha256:5af1030676ceca025742ef5e73a504d11b59be0e5551cdb8c9cf0d3c1231b460
+registry.k8s.io/kube-controller-manager:v1.34.3@sha256:716a210d31ee5e27053ea0e1a3a3deb4910791a85ba4b1120410b5a4cbcf1954
+registry.k8s.io/kube-scheduler:v1.34.3@sha256:f9a9bc7948fd804ef02255fe82ac2e85d2a66534bae2fe1348c14849260a1fe2
 registry.k8s.io/pause:3.10.1@sha256:278fb9dbcca9518083ad1e11276933a2e96f23de604a3a08cc3c80002767d24c
-registry.k8s.io/kube-apiserver:v1.36.0@sha256:4ae8c24a97630f8cfc9eed02fb95e2371d172bb231915e83d27f6ea0e64fa297
-registry.k8s.io/kube-controller-manager:v1.36.0@sha256:886b5c5623206b7bddf0303484cf632e3f5514a20ef1a1b685f38634b42531dd
-registry.k8s.io/kube-scheduler:v1.36.0@sha256:00b57dfadc2e99fe85481f56ea15f391d5447ebc3ac243896f0e7afd869ef60e
-registry.k8s.io/kube-proxy:v1.36.0@sha256:0585504d29fee419791fdbc36c88a9d39773376a565d6f0c688673243df139fc
-ghcr.io/siderolabs/kubelet:v1.36.0@sha256:d8e2eb4eea79118678785961dadfffd80502630d8f102dfa30852c694beee4c7
-registry.k8s.io/networking/kube-network-policies:v1.0.0@sha256:1e3e79625828c8fdc9a579e3e587abaaadbb0eed317abc6912badb1b92f76135
+registry.k8s.io/coredns/coredns:v1.14.2@sha256:e7e6440cfd1e919280958f5b5a6ab2b184d385bba774c12ad2a9e1e4183f90d9
 
 # --- drill/bench job images (repo-pinned in Go tools, not resident on the cluster) ---
 ghcr.io/cloudnative-pg/postgresql@sha256:6f64c83d80def98ab5b61bf36b1bbecea01dede382eef781dd9d1638b0d840c8
 docker.io/clickhouse/clickhouse-server@sha256:cc8c5bf275148b2de01a31e8fd6b55ba1ba2b0d3d08c23fafcb25b06e3c5dec5
 
-# --- running workload images (scraped from live cluster, 2026-07-01, rev 8e4fdd4) ---
-# (repo,digest) pairs already listed in a section above are omitted here, and a
-# tag+digest form supersedes its digest-only twin: the conformance test rejects
-# duplicate (repo,digest) pairs regardless of tag.
+# --- running workload images (scraped from live cluster, 2026-07-02, post-cold-boot-drill) ---
+# Entries duplicating the drill/bench section above are omitted (dedup rule).
 cr.fluentbit.io/fluent/fluent-bit@sha256:14da4a52ecdbb9bd9cb7a16ff6b4c7f391a4006cb13f84b5957e4608cc613e2c
 docker-registry3.mariadb.com/mariadb-operator/mariadb-operator@sha256:14eeefa4956770f973ac707b7969f2e99e0af2cf2c34ac63d4c7eb3f7c3cf3eb
 docker.io/alerta/alerta-web@sha256:73bb724fcb091c4ce6f3a92aab76afcd3a2152ed96f95b629eca68351acbf3b0
@@ -91,21 +90,21 @@ ghcr.io/cozystack/cozystack/backup-controller@sha256:11d55b79cf136f9ec161410e235
 ghcr.io/cozystack/cozystack/backupstrategy-controller@sha256:d965283f935e4b24b655bc76e37dcb3b731bec832bb5c2e3e407b0284c7526a3
 ghcr.io/cozystack/cozystack/cilium@sha256:94dc74c9301f0da5695c80e77b77ee0486ad0086b5be60a94136a2cafd410b73
 ghcr.io/cozystack/cozystack/cozy-proxy@sha256:83bd46c16f6ae85b3d9e609a4f8c1e571948d29a87ace0990fd56e1eb1fa4776
-ghcr.io/cozystack/cozystack/cozystack-api:v1.5.0@sha256:ef50b155e419cf8f0b4d57af9fa385ecbacd5c1248f13591ffcca75c2f9f2a07
+ghcr.io/cozystack/cozystack/cozystack-api@sha256:ef50b155e419cf8f0b4d57af9fa385ecbacd5c1248f13591ffcca75c2f9f2a07
 ghcr.io/cozystack/cozystack/cozystack-controller@sha256:d3be63579fcabfa802a61ff2f4c2f54d5d6d52c1cbcdff52a3f14d101ca85afc
 ghcr.io/cozystack/cozystack/cozystack-operator@sha256:05027a381a8a97276ec426dabb87e1b7df753d4d76925b68e2dd8819f7eb22df
 ghcr.io/cozystack/cozystack/cozystack-scheduler@sha256:89c285c5c5fe3ed8d7d597acf32fc9f045394e0f8efafd1878d6080cf112f6c2
 ghcr.io/cozystack/cozystack/cozystack-ui@sha256:f0329ac5689447d3aec0e4d420196f42bda466a7789312ac5ce9b11405f1948d
 ghcr.io/cozystack/cozystack/flux-plunger@sha256:6a6ec938973e6583c5e1573f7d25beddc1852a6699a089116b2407e29a564a72
-ghcr.io/cozystack/cozystack/flux-shard-operator:v1.5.0@sha256:beeff843899d7f37db5bf739a20a9d7d93dd8949ef18458c0d55bf3a64fc67ba
+ghcr.io/cozystack/cozystack/flux-shard-operator@sha256:beeff843899d7f37db5bf739a20a9d7d93dd8949ef18458c0d55bf3a64fc67ba
 ghcr.io/cozystack/cozystack/grafana-dashboards@sha256:f56dc47b970ebf4720c555468aabfb0f6bad4e15efa5bbd6644bf3e5ae9d843e
 ghcr.io/cozystack/cozystack/grafana@sha256:086f1502edf64d2aabcda6e6505b7ee4673b0d3a14cdb7ca9e90a1d91d6e78f4
 ghcr.io/cozystack/cozystack/kamaji@sha256:130d5013a9b35be0013b96efefc656210cc30c6fe92a8c39c9d2ab8d47f791e0
 ghcr.io/cozystack/cozystack/keycloak-operator@sha256:27279247dfbd2d1e86fc4e827d34c891880ca65eefd75da1701bc0a1adf865a9
 ghcr.io/cozystack/cozystack/kubeovn-plunger@sha256:908b5903c014f6fa4348f57b1fced929a2ba823aadfbcda7ad9b76134bcf3fce
-ghcr.io/cozystack/cozystack/kubeovn-webhook:v1.5.0@sha256:ca354b6c2ae6f648bc63798d19a1316fe37cb142246bf08ebb7ce27e6e8f21b2
-ghcr.io/cozystack/cozystack/kubeovn:v1.15.10@sha256:741299cbd0081a786a6b60c460fa3156b3a42a38141c559dd8ac031f50c5504f
-ghcr.io/cozystack/cozystack/lineage-controller-webhook:v1.5.0@sha256:5868789439d1384cf78d9fb2f20d5457060b0d5dfcc4f93f96a13ea27ed73b81
+ghcr.io/cozystack/cozystack/kubeovn-webhook@sha256:ca354b6c2ae6f648bc63798d19a1316fe37cb142246bf08ebb7ce27e6e8f21b2
+ghcr.io/cozystack/cozystack/kubeovn@sha256:741299cbd0081a786a6b60c460fa3156b3a42a38141c559dd8ac031f50c5504f
+ghcr.io/cozystack/cozystack/lineage-controller-webhook@sha256:5868789439d1384cf78d9fb2f20d5457060b0d5dfcc4f93f96a13ea27ed73b81
 ghcr.io/cozystack/cozystack/linstor-csi@sha256:c60519d12aa8d078e4891d6e436c709ff53f2cc96457994390ca9424b6505903
 ghcr.io/cozystack/cozystack/metallb-controller@sha256:b290031f40bfc072c0b329e07d7c17eca3301e4aad2e1988fc962645d92b5fc0
 ghcr.io/cozystack/cozystack/metallb-speaker@sha256:3aad3ac50e8da94342332b363099c04316d8eda0dcb8cdc3d89f1bcf5dc04e7d
@@ -113,9 +112,8 @@ ghcr.io/cozystack/cozystack/multus-cni@sha256:f41d0d45bb3a654a6f024a8e4168845415
 ghcr.io/cozystack/cozystack/objectstorage-controller@sha256:e27da94691155fc3eb14a22cf23fba78e53c4ba524ca3042709efae3753c565b
 ghcr.io/cozystack/cozystack/objectstorage-sidecar@sha256:fdc09634688d5579a329b48aabf6706cc55bcd9503b0331fa47764706f0d6f62
 ghcr.io/cozystack/cozystack/piraeus-server@sha256:1a00af3642c4814c3552d1964daf2831a430bc451c55e786e5eee278fa50e9e1
-ghcr.io/cozystack/cozystack/platform-migrations@sha256:17390197a9b11d76a8dd1b24c6d1512adb7d3226b28b5bcba8551b14b1ec4be0
-ghcr.io/cozystack/cozystack/platform-migrations@sha256:2373973e88b98ed465f846ad5dd8cd9e9c3cee07e42024b0c74a1956611a938d
 ghcr.io/cozystack/cozystack/redis-operator@sha256:a4012e6a1b5daaedb57cc27edfdbff52124de4164b5ec0ee53c5ce5710ef4c25
+ghcr.io/cozystack/cozystack/s3manager@sha256:8b36ab67904e34b2fb843b964c20d4822f3a6673f6745afb6a834efd02e017e2
 ghcr.io/cozystack/ingress-nginx-with-protobuf-exporter/controller@sha256:beba8869ee370599e1f26557a9669ebdc9481c07b34059f348eb3e17b647e7e0
 ghcr.io/fluxcd/helm-controller@sha256:02621c382a3ce48775893e92a311d45b1c0cb03e65677515e9c4a074acf1e957
 ghcr.io/fluxcd/kustomize-controller@sha256:015fe21c0a788d39fed98664c3f4f7ee6dfc113dabc99748ee9c2d8bdf65bd89
@@ -133,12 +131,8 @@ quay.io/brancz/kube-rbac-proxy@sha256:2c7b120590cbe9f634f5099f2cbb91d0b668569023
 quay.io/brancz/kube-rbac-proxy@sha256:e6a323504999b2a4d2a6bf94f8580a050378eba0900fd31335cf9df5787d9a9b
 quay.io/capk/capk-manager@sha256:87c2a80413a0f64f65326d379f4905d3f3f2eaf9dab8a6a67a7f7973ca85aef6
 quay.io/cilium/cilium-envoy@sha256:ba0ab8adac082d50d525fd2c5ba096c8facea3a471561b7c61c7a5b9c2e0de0d
-quay.io/cilium/hubble-relay@sha256:5ee21d57b6ef2aa6db67e603a735fdceb162454b352b7335b651456e308f681b
-quay.io/cilium/hubble-ui-backend@sha256:db1454e45dc39ca41fbf7cad31eec95d99e5b9949c39daaad0fa81ef29d56953
-quay.io/cilium/hubble-ui@sha256:661d5de7050182d495c6497ff0b007a7a1e379648e60830dd68c4d78ae21761d
-quay.io/cilium/operator-generic:v1.19.3@sha256:205b09b0ed6accbf9fe688d312a9f0fcfc6a316fc081c23fbffb472af5dd62cd
+quay.io/cilium/operator-generic@sha256:205b09b0ed6accbf9fe688d312a9f0fcfc6a316fc081c23fbffb472af5dd62cd
 quay.io/frrouting/frr@sha256:8745af1f9bbbc26ab11d99ccdf35e07aa3427a199749bef0cd6bb5132bb130df
-quay.io/jetstack/cert-manager-acmesolver@sha256:cfa55e9c3dcfc6a3cba97575748c1549b04a30fd14d88a2fcb9e2dddef415e2f
 quay.io/jetstack/cert-manager-cainjector@sha256:6f5a644135887b2aa7d5cc145072fa56421560e3586ff1f184358022d490f4e1
 quay.io/jetstack/cert-manager-controller@sha256:fe0623d7d04a382c888f03343a3a2da716e0d96ad3d5d790c0ebcbcb2a4329a5
 quay.io/jetstack/cert-manager-webhook@sha256:baf651128b9f05c426cbd5e60e2036bf382c99ca270f49d0757d6f7d2452f4e5
@@ -173,12 +167,8 @@ registry.k8s.io/autoscaling/vpa-updater@sha256:b5ed7f948d14e520b8db44e3905096f9f
 registry.k8s.io/capi-operator/cluster-api-operator@sha256:632138b5ae37f4453319965715e2e9deaebc3d25b7a2f33227ecc87d1587dd15
 registry.k8s.io/cluster-api/cluster-api-controller@sha256:a36a3047d23766f261153e0d73537f2866456284d382c0774dd05aa7f4310b75
 registry.k8s.io/cluster-api/kubeadm-bootstrap-controller@sha256:f7c3bd449c3b902ec127483f66e4d51e9389a5686d397cfa9199dd227e5e54a1
-registry.k8s.io/coredns/coredns@sha256:94caebb89dcfb9d2c4be45bfda34410a3e1092458fbbbc0284365c9e4c9a7818
 registry.k8s.io/defaultbackend-amd64@sha256:4dc5e07c8ca4e23bddb3153737d7b8c556e5fb2f29c4558b7cd6e6df99c512c7
 registry.k8s.io/external-dns/external-dns@sha256:f53faaf71cb270d1ca9dce6ea0c94bfebf1a18696263487f0fbc74b9bf2bd7ff
-registry.k8s.io/kube-apiserver@sha256:5af1030676ceca025742ef5e73a504d11b59be0e5551cdb8c9cf0d3c1231b460
-registry.k8s.io/kube-controller-manager@sha256:716a210d31ee5e27053ea0e1a3a3deb4910791a85ba4b1120410b5a4cbcf1954
-registry.k8s.io/kube-scheduler@sha256:f9a9bc7948fd804ef02255fe82ac2e85d2a66534bae2fe1348c14849260a1fe2
 registry.k8s.io/kube-state-metrics/kube-state-metrics@sha256:db384bf43222b066c378e77027a675d4cd9911107adba46c2922b3a55e10d6fb
 registry.k8s.io/metrics-server/metrics-server@sha256:ffcb2bf004d6aa0a17d90e0247cf94f2865c8901dcab4427034c341951c239f9
 registry.k8s.io/sig-storage/csi-attacher@sha256:be59d0556508d3dd419cc34c53062f170a28902ef36e832b947c7796458a083d
