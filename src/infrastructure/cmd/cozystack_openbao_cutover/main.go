@@ -311,21 +311,18 @@ func validateFluxKustomizations(raw string, required []string, expectedRevision 
 }
 
 func validateDeploymentReady(raw string, name string) error {
+	if err := validateDeploymentReplicasReady(raw, "OpenBao ops-controller", name); err != nil {
+		return err
+	}
 	var deployment kubeObject
 	if err := json.Unmarshal([]byte(raw), &deployment); err != nil {
 		return fmt.Errorf("parse Deployment %q: %w", name, err)
-	}
-	if deployment.Status.Replicas == 0 {
-		return fmt.Errorf("Deployment %q has zero desired replicas", name)
-	}
-	if deployment.Status.ReadyReplicas != deployment.Status.Replicas {
-		return fmt.Errorf("Deployment %q readyReplicas=%d replicas=%d", name, deployment.Status.ReadyReplicas, deployment.Status.Replicas)
 	}
 	image := containerImage(deployment.Spec.Template.Spec.Containers, "manager")
 	if !strings.Contains(image, "@sha256:") {
 		return fmt.Errorf("Deployment %q manager image = %q, want digest-pinned image", name, image)
 	}
-	fmt.Printf("OpenBao ops-controller ready: deployment=%s image=%s replicas=%d\n", name, image, deployment.Status.Replicas)
+	fmt.Printf("OpenBao ops-controller image digest-pinned: deployment=%s image=%s\n", name, image)
 	return nil
 }
 
