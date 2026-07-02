@@ -1,4 +1,5 @@
 exports_files([
-    "openbao-and-conformance-design.md",
+    "manifest-conformance-design.md",
+    "openbao-design.md",
     "openbao-residue-inventory.md",
 ])

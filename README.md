@@ -1,8 +1,8 @@
 # guardian
 
-Guardian is being cut over to a Cozystack-native management cluster. The
-post-Kubernetes desired state is declared in this repo and converged by
-OpenTofu, Talm, Talos, Flux, Cozystack, and standard Kubernetes controllers.
+Guardian runs on a Cozystack-native management cluster. The desired state is
+declared in this repo and converged by OpenTofu, Talm, Talos, Flux, Cozystack,
+and standard Kubernetes controllers.
 Local commands are limited to bootstrap, validation, load, and disaster-recovery
 drills.
 
@@ -17,9 +17,9 @@ aspect infra tofu-init
 
 aspect infra bootstrap
 
-aspect infra openbao-cutover
+aspect infra converged
 
-aspect infra openbao-drill --mode status
+aspect infra openbao-drill
 
 aspect infra observability-drill
 ```
@@ -34,9 +34,11 @@ installer/operator to the repo-pinned version.
 clusters when only the Cozystack installer/operator release needs to move.
 OpenBao uses static auto-unseal and OpenBao self-init; see
 `src/infrastructure/runbooks/openbao-static-seal-self-init.md`.
-`aspect infra openbao-cutover` verifies the converged Flux/OpenBao state.
-`aspect infra openbao-drill --mode status` verifies OpenBao
-status, and `--mode snapshot` runs a Raft snapshot drill. `aspect infra
+`aspect infra converged` verifies the cluster converged to the declared state:
+Flux Kustomizations at the expected revision, workloads rolled, and component
+CR conditions.
+`aspect infra openbao-drill` verifies OpenBao status (initialized, unsealed,
+HA-enabled, one raft cluster ID across members). `aspect infra
 observability-drill` creates a short root Postgres pgbench job, then queries
 VictoriaMetrics and VictoriaLogs for that exact workload and the CNPG scrape
 path. Postgres and ClickHouse backups use Cozystack 1.5's platform-managed

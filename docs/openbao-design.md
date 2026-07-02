@@ -1,22 +1,23 @@
-# OpenBao secrets platform & manifest conformance — design (target state)
+# OpenBao secrets platform — design (target state)
 
 Status: **IMPLEMENTATION IN PROGRESS.** The repo now declares static seal,
 self-init, independent cert-manager listener TLS, `openbao-local` retained
-storage, KV, Transit, and Tier 1 semantic conformance checks. The old
-manual-unseal/operator-bootstrap path and the OpenBao-issued listener
-certificate path have been removed from the happy path. Remaining target-state
-gaps called out below include the exact `zfsThinPool` substrate, hostPath
-admission enforcement in the live cluster, and tested stateful restore.
+storage, KV, and Transit. The old manual-unseal/operator-bootstrap path and
+the OpenBao-issued listener certificate path have been removed from the happy
+path. Remaining target-state gaps called out below include the exact
+`zfsThinPool` substrate, hostPath admission enforcement in the live cluster,
+and tested stateful restore.
 
-Scope: the Guardian tenant OpenBao (3-node raft) secrets platform, and Tier 1 manifest
-conformance testing. Decisions below were reached deliberately; the load-bearing
-trade-offs are called out explicitly.
+Scope: the Guardian tenant OpenBao (3-node raft) secrets platform. OpenBao is
+one bootstrapping component of the system, not the system's end state; the
+platform-wide convergence proof is `aspect infra converged`, and manifest
+conformance testing is designed in `docs/manifest-conformance-design.md`.
+Decisions below were reached deliberately; the load-bearing trade-offs are
+called out explicitly.
 
 ---
 
-## Part 1 — OpenBao secrets platform
-
-### Topology & storage
+## Topology & storage
 - 3-node raft `StatefulSet` in `tenant-guardian`, one member per node, hard pod + node
   anti-affinity so a single node loss removes exactly one member (quorum 2/3).
 - **Local storage per member** — node-pinned `zfsThinPool` (replica=1) StorageClass, one
@@ -32,7 +33,7 @@ trade-offs are called out explicitly.
   — Flux never thrashes quorum; pods roll one at a time. (Trade-off: this can mask a
   non-converging release; the drills are the compensating convergence check.)
 
-### Seal — static auto-unseal
+## Seal — static auto-unseal
 - `seal "static"` with `current_key = file:///openbao/secrets/unseal-<id>.key`, a 32-byte
   raw AES-256-GCM key, read-only mounted from node storage.
 - An init container hard-fails the pod unless the key file exists **and its fingerprint
@@ -43,9 +44,10 @@ trade-offs are called out explicitly.
   `podManagementPolicy: OrderedReady`, `guardian-openbao-0` is the first eligible member. Later
   members retry-join through `guardian-openbao-active`; they must not list their own ordinal as a
   retry target, because a first-start follower can otherwise fall back to an independent
-  self-init. The cutover proof rejects mixed OpenBao `cluster_id` values across raft members.
+  self-init. The OpenBao status drill (`aspect infra openbao-drill`) rejects
+  mixed OpenBao `cluster_id` values across raft members.
 
-### Static seal security posture
+## Static seal security posture
 - The static seal key is a node-local bearer secret. It is placed out of band on the three
   dedicated OpenBao nodes and is never stored in Git, Kubernetes, CI, Talos `machine.files`,
   chat, shell history, or OpenBao-backed secret paths.
@@ -56,7 +58,7 @@ trade-offs are called out explicitly.
 - A freshly rebuilt node intentionally has no key until an operator re-places it from
   backup custody. That is part of the DR posture, not a convergence failure.
 
-### Listener TLS
+## Listener TLS
 - cert-manager issues **one** cert for the **8200 API listener**:
   `Certificate/guardian-openbao-api` writes `Secret/guardian-openbao-api-tls`.
 - The OpenBao listener certificate is transport identity only. It is issued by
@@ -94,7 +96,7 @@ trade-offs are called out explicitly.
   retire the mount+SIGHUP pipeline, but needs an external ACME server (e.g. step-ca) as a new
   dependency. Deferred; cert-manager + SIGHUP sidecar is the lower-dependency path.
 
-### Workload PKI
+## Workload PKI
 - OpenBao PKI is not used for OpenBao's own listener certificate.
 - No workload PKI consumer exists yet, so the repo does not carry a PKI mount,
   root issuer, role, cert-manager Vault issuer, or cert-manager TokenRequest
@@ -109,7 +111,7 @@ trade-offs are called out explicitly.
   distributed by trust-manager. Do not generate a workload PKI root inside
   OpenBao unless that is explicitly accepted as the custody boundary.
 
-### Transit
+## Transit
 - `OpenBaoMount/transit` declares the Transit engine so approved key-management
   consumers can be added without reintroducing a bootstrap control plane.
 - Durable Transit keys are not declared generically. A Transit key that protects
@@ -125,7 +127,7 @@ trade-offs are called out explicitly.
 - Non-durable drill keys may be created imperatively during DR verification and
   deleted afterward.
 
-### Auth & self-init config
+## Auth & self-init config
 - Kubernetes auth method; ESO and the ops-controller authenticate via SA tokens validated by
   TokenReview, bound to namespace + SA + audience, least-privilege policies.
 - Self-init creates the ops-controller policy + auth role required for steady state, plus a
@@ -138,7 +140,7 @@ trade-offs are called out explicitly.
 - ESO is the consumer: SecretStore/ClusterSecretStore → OpenBao KV; ExternalSecrets
   materialize native Secrets. OpenBao is source of truth; the k8s Secret is a synced cache.
 
-### Audit
+## Audit
 - A **single local `file` audit device** (the device OpenBao blocks on if audit writes fail).
   Rotate by **rename + SIGHUP** (not copytruncate); alert before disk pressure can block bao.
 - **No network audit "fallback" device.** A second socket/syslog device *enlarges* the
@@ -148,7 +150,7 @@ trade-offs are called out explicitly.
   (WORM)** for tamper-evident offsite retention — strictly async/downstream, never in the
   request path. R2 is not an OpenBao audit device.
 
-### Disaster recovery
+## Disaster recovery
 - Primary cold-start model: rebuild from Git, supply custody-held residue, and
   verify the system converges. The residue inventory is checked in at
   `docs/openbao-residue-inventory.md`.
@@ -186,43 +188,10 @@ trade-offs are called out explicitly.
   when exercising the snapshot path, the throwaway cluster must start with the
   same static key and pass the same decrypt check after snapshot restore.
 
-### Seal-key rotation
+## Seal-key rotation
 - `previous_key`/`current_key` under a new key-id; roll one pod at a time; keep the previous
   key until rewrap/seal-migration evidence clears it **and** no retained snapshot still needs
   it. Key contents never change without the key-id changing.
-
----
-
-## Part 2 — Manifest conformance (Tier 1)
-
-Principle: validate the **rendered artifact that ships**, against schema and against the real
-API server's admission — never source templates, never hand-restated field values. Tier 1
-owns three failure classes: structural validity, CRD-schema validity, admission/PSA
-admissibility. Policy-as-code (Kyverno) is a later tier. This replaces ~770 brittle
-pinned-value Go assertions.
-
-- **Stage A** (offline, hermetic, every PR, in `bazel test //...`): per-overlay render
-  (`kustomize build` / `flux build`) → `kubeconform -strict` against vendored core + CRD
-  schemas (version-pinned, generated from the exact deployed CRDs + community catalog).
-  **Fail on any un-allowlisted skip** (logging is not enough) so "skipped" never reads as
-  "passed."
-- **Stage B** (online, CI-gated): rendered output →
-  `kubectl apply --server-side --dry-run=server --validate=strict`, against a **per-run
-  ephemeral cluster seeded from the repo's own declared CRDs + PSA-labeled namespaces +
-  ValidatingAdmissionPolicies + webhook configs + ResourceQuotas/LimitRanges + storage
-  classes**. Chosen over a standing prod kubeconfig in CI (least dangerous; can't drift
-  because it's built from the same manifests prod is). **Capture API warnings as test output;
-  fail on unknown-field warnings.**
-- **Helm expanded**: HelmRelease-backed components are rendered to expanded manifests via
-  `helm install --dry-run=server` (faithful `.Capabilities`/`lookup` from the cluster), then
-  pass through kubeconform + dry-run. Only charts where we inject non-trivial values are in
-  scope. If a chart uses `lookup`, either seed exactly what prod has or ban `lookup`.
-  Acknowledged ~95% fidelity vs Flux's in-cluster HelmController render; the last 5% (Flux
-  value-merge/postRenderers/reconcile) is a later tier that runs the actual Flux controllers.
-- **Custom Go tests survive only for cross-field semantic invariants** no schema/admission
-  check can express (e.g. seal stanza `current_key_id` ↔ init-container filename agreement;
-  referenced runbook exists). Per-field value checks become snapshots; "all resources must…"
-  rules wait for the policy tier.
 
 ---
 
@@ -293,4 +262,3 @@ Ops resources still needed before OpenBao is the real vault/transit authority:
 - Vault snapshot restore (`-force`, seal compat): https://developer.hashicorp.com/vault/docs/sysadmin/snapshots/restore
 - OpenBao auto-snapshot gap (Enterprise-only in Vault): https://github.com/openbao/openbao/issues/795
 - R2 bucket locks (WORM): https://developers.cloudflare.com/r2/buckets/bucket-locks/ · R2 tokens: https://developers.cloudflare.com/r2/api/tokens/
-- kubeconform: https://github.com/yannh/kubeconform

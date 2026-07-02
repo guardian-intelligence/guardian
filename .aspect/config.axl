@@ -18,6 +18,7 @@ load(
     ".aspect/tasks/infra.axl",
     infra_backup_drill = "backup_drill",
     infra_bootstrap = "bootstrap",
+    infra_converged = "converged",
     infra_dns_apply = "dns_apply",
     infra_edge_failover_drill = "edge_failover_drill",
     infra_edge_health = "edge_health",
@@ -26,7 +27,6 @@ load(
     infra_load_db = "load_db",
     infra_load_http = "load_http",
     infra_node_outage_drill = "node_outage_drill",
-    infra_openbao_cutover = "openbao_cutover",
     infra_openbao_drill = "openbao_drill",
     infra_openbao_observability_drill = "openbao_observability_drill",
     infra_observability_drill = "observability_drill",
@@ -54,6 +54,7 @@ def config(ctx):
     # aspect infra ...
     ctx.tasks.add(infra_backup_drill)
     ctx.tasks.add(infra_bootstrap)
+    ctx.tasks.add(infra_converged)
     ctx.tasks.add(infra_dns_apply)
     ctx.tasks.add(infra_edge_failover_drill)
     ctx.tasks.add(infra_edge_health)
@@ -62,7 +63,6 @@ def config(ctx):
     ctx.tasks.add(infra_load_db)
     ctx.tasks.add(infra_load_http)
     ctx.tasks.add(infra_node_outage_drill)
-    ctx.tasks.add(infra_openbao_cutover)
     ctx.tasks.add(infra_openbao_drill)
     ctx.tasks.add(infra_openbao_observability_drill)
     ctx.tasks.add(infra_observability_drill)

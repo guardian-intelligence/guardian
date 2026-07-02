@@ -165,7 +165,7 @@ func TestOpenBaoStaticSealAdmissionConformance(t *testing.T) {
 
 func TestOpenBaoStaticSealDocsConformance(t *testing.T) {
 	for _, path := range []string{
-		runfilePath("docs/openbao-and-conformance-design.md"),
+		runfilePath("docs/openbao-design.md"),
 		runfilePath("src/infrastructure/runbooks/openbao-static-seal-self-init.md"),
 	} {
 		raw := readText(t, path)
