@@ -41,7 +41,7 @@ She tore her favorite cargo shorts the other day climbing the tree where the woo
 
 I sat with her and watched her sew and get so focused neither of us said a word and all you could hear was the whir of the machine while the sun sank into the ocean outside. When it felt right, I asked her what had been making her sad, and she didn’t say anything for a long time and then reached into her pocket and put a polaroid into my hand. I think you took this one. It’s me and her last year: I was holding her up to the sun, doing a Lion King bit. It had been torn apart, probably by the woodpeckers, but she had carefully taped it back up.
 
-She paused for a moment and then jumped into my arms and hugged me tight. “I miss being a baby” she said, holding back tears. I told her no matter how much she grows up that she’ll always be my little baby, and she liked that better and fell asleep on my lap and we stayed like that for I don’t know how long.
+She paused for a moment and then jumped into my arms and hugged me tight. “I miss being little" she said, holding back tears. I told her no matter how much she grows up that she’ll always be my little baby, and she liked that better and fell asleep on my lap and we stayed like that for I don’t know how long.
 
 No one told me having kids would make my heart a compass that always points home. And no matter how much we fight and yell and say things we don't mean, that no matter how much our family breaks, we'll find a way back to each other and become strong in the broken places.
 
