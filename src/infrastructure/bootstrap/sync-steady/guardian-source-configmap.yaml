@@ -1,0 +1,15 @@
+# Steady source pinning. This ConfigMap must exist even in steady state:
+# Flux runs postBuild variable substitution only when the variable map is
+# non-empty, so an absent (optional) guardian-source leaves the
+# ${GUARDIAN_SOURCE_*} placeholders literal and the Kustomization CRD enum
+# rejects them. With it present, every source resolves to the GitHub
+# GitRepository. Hand-applied (not in any Flux inventory), so nothing prunes
+# it; exiting dark mode re-applies this overlay to restore these values.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: guardian-source
+  namespace: cozy-fluxcd
+data:
+  GUARDIAN_SOURCE_KIND: GitRepository
+  GUARDIAN_SOURCE_NAME: guardian

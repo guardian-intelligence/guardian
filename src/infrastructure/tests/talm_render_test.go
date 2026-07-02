@@ -162,6 +162,34 @@ func imagesLockHosts(t *testing.T) []string {
 	return out
 }
 
+// The dark mirror serves every host in one flat, host-stripped namespace
+// (registry.k8s.io/pause and ghcr.io/x both become /v2/...), so two lock
+// refs from different hosts that share a repository path would collide on
+// the same served path with different content. Guard against it.
+func TestImagesLockNoHostStrippedPathCollision(t *testing.T) {
+	raw := readText(t, runfilePath("src/infrastructure/bootstrap/bundle/images.lock"))
+	seen := map[string]string{} // stripped repo path -> first full ref
+	for _, line := range strings.Split(raw, "\n") {
+		ref := strings.TrimSpace(line)
+		if comment := strings.Index(ref, "#"); comment >= 0 {
+			ref = strings.TrimSpace(ref[:comment])
+		}
+		if ref == "" {
+			continue
+		}
+		nameAndTag, _, _ := strings.Cut(ref, "@")
+		repo := nameAndTag
+		if colon := strings.LastIndex(nameAndTag, ":"); colon > strings.LastIndex(nameAndTag, "/") {
+			repo = nameAndTag[:colon]
+		}
+		_, stripped, _ := strings.Cut(repo, "/") // drop the registry host
+		if prior, ok := seen[stripped]; ok && prior != repo {
+			t.Fatalf("dark mirror path collision on /%s: %q and %q map to the same served path", stripped, prior, repo)
+		}
+		seen[stripped] = repo
+	}
+}
+
 func TestDarkBundleMirrorRegistriesMatchImagesLock(t *testing.T) {
 	values := singleYAMLDoc(t, runfilePath("src/infrastructure/talm/values.yaml"))
 	dark := mapValue(values["darkBundleMirror"])

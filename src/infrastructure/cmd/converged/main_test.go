@@ -25,6 +25,27 @@ func TestValidateFluxKustomizationsRequiresExpectedRevision(t *testing.T) {
 	}
 }
 
+// In dark-uplink mode the OCIRepository applied revision is <tag>@<digest>
+// and never contains the git sha; the pushed revision surfaces as
+// lastAppliedOriginRevision, which the proof must also accept.
+func TestValidateFluxKustomizationsMatchesOriginRevision(t *testing.T) {
+	raw := `{"items":[
+		{"metadata":{"name":"guardian-system"},"status":{"lastAppliedRevision":"dark@sha256:deadbeef","lastAppliedOriginRevision":"abc123","conditions":[{"type":"Ready","status":"True","reason":"ReconciliationSucceeded"}]}}
+	]}`
+	if err := validateFluxKustomizations(raw, []string{"guardian-system"}, "abc123"); err != nil {
+		t.Fatalf("validateFluxKustomizations() rejected origin-revision match: %v", err)
+	}
+}
+
+func TestValidateFluxKustomizationsRejectsWhenNeitherRevisionMatches(t *testing.T) {
+	raw := `{"items":[
+		{"metadata":{"name":"guardian-system"},"status":{"lastAppliedRevision":"dark@sha256:deadbeef","lastAppliedOriginRevision":"old","conditions":[{"type":"Ready","status":"True","reason":"ReconciliationSucceeded"}]}}
+	]}`
+	if err := validateFluxKustomizations(raw, []string{"guardian-system"}, "new"); err == nil {
+		t.Fatalf("validateFluxKustomizations() accepted a revision that matches neither lastAppliedRevision nor origin")
+	}
+}
+
 func TestValidateFluxKustomizationsRejectsMissingKustomization(t *testing.T) {
 	raw := `{"items":[]}`
 	err := validateFluxKustomizations(raw, []string{"guardian-system"}, "")

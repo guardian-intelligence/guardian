@@ -82,9 +82,13 @@ metadata:
 spec:
   images:
   - exclude-extras: true
-    name: ghcr.io/example/app:v1.0.0@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    name: ghcr.io/example/app@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   - exclude-extras: true
-    name: ghcr.io/example/chart:0.1.0@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    name: ghcr.io/example/app:v1.0.0
+  - exclude-extras: true
+    name: ghcr.io/example/chart@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  - exclude-extras: true
+    name: ghcr.io/example/chart:0.1.0
 `
 	if string(payload) != golden {
 		t.Fatalf("haulerManifest() =\n%s\nwant\n%s", payload, golden)
@@ -133,8 +137,10 @@ func TestProductionImagesLockProjects(t *testing.T) {
 	if err := yaml.Unmarshal(payload, &parsed); err != nil {
 		t.Fatalf("production manifest does not unmarshal: %v", err)
 	}
-	if len(parsed.Spec.Images) != len(refs) {
-		t.Fatalf("production manifest has %d images, want %d", len(parsed.Spec.Images), len(refs))
+	// Every ref yields at least its digest entry; tagged refs (the Talos
+	// system section) yield an extra tag entry, so images >= refs.
+	if len(parsed.Spec.Images) < len(refs) {
+		t.Fatalf("production manifest has %d images, want at least %d", len(parsed.Spec.Images), len(refs))
 	}
 }
 
@@ -204,5 +210,53 @@ func TestFilterStoredRefsFullyStored(t *testing.T) {
 	}
 	if len(missing) != 0 {
 		t.Fatalf("filterStoredRefs() = %v, want empty (fully-synced store resumes to zero work)", missing)
+	}
+}
+
+func TestHaulerRefFormsTagged(t *testing.T) {
+	digestForm, tagForm := haulerRefForms("registry.k8s.io/pause:3.10.1@sha256:278fb9dbcca9518083ad1e11276933a2e96f23de604a3a08cc3c80002767d24c")
+	if digestForm != "registry.k8s.io/pause@sha256:278fb9dbcca9518083ad1e11276933a2e96f23de604a3a08cc3c80002767d24c" {
+		t.Fatalf("digestForm = %q", digestForm)
+	}
+	if tagForm != "registry.k8s.io/pause:3.10.1" {
+		t.Fatalf("tagForm = %q, want the tag ref so the mirror answers tag pulls", tagForm)
+	}
+}
+
+func TestHaulerRefFormsDigestOnly(t *testing.T) {
+	digestForm, tagForm := haulerRefForms("ghcr.io/x/y@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	if digestForm != "ghcr.io/x/y@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("digestForm = %q", digestForm)
+	}
+	if tagForm != "" {
+		t.Fatalf("tagForm = %q, want empty for a digest-only ref", tagForm)
+	}
+}
+
+// A tagged lock ref must project to both a digest entry and a tag entry so a
+// dark mirror answers Talos's tag-addressed system-image pulls.
+func TestHaulerManifestExpandsTaggedRefs(t *testing.T) {
+	payload, err := haulerManifest([]string{"registry.k8s.io/pause:3.10.1@sha256:278fb9dbcca9518083ad1e11276933a2e96f23de604a3a08cc3c80002767d24c"})
+	if err != nil {
+		t.Fatalf("haulerManifest() error = %v", err)
+	}
+	var parsed haulerImages
+	if err := yaml.Unmarshal(payload, &parsed); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	names := map[string]bool{}
+	for _, img := range parsed.Spec.Images {
+		names[img.Name] = true
+		if !img.ExcludeExtras {
+			t.Fatalf("image %q missing exclude-extras", img.Name)
+		}
+	}
+	for _, want := range []string{
+		"registry.k8s.io/pause@sha256:278fb9dbcca9518083ad1e11276933a2e96f23de604a3a08cc3c80002767d24c",
+		"registry.k8s.io/pause:3.10.1",
+	} {
+		if !names[want] {
+			t.Fatalf("manifest missing %q; have %v", want, names)
+		}
 	}
 }

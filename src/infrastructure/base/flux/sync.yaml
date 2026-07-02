@@ -38,9 +38,12 @@ spec:
     name: ${GUARDIAN_SOURCE_NAME:=guardian}
   postBuild:
     substituteFrom:
+      # Required, not optional: Flux skips substitution entirely when the
+      # variable map is empty, which would leave the ${GUARDIAN_SOURCE_*}
+      # placeholders literal and fail the CRD enum. The bootstrap overlays
+      # always create guardian-source; a missing one should fail loudly.
       - kind: ConfigMap
         name: guardian-source
-        optional: true
   # Apply-only. The Platform package fans out into Cozystack-owned packages and
   # HelmReleases; the storage slice below retries until the Piraeus CRDs exist.
   prune: false
@@ -61,9 +64,12 @@ spec:
     name: ${GUARDIAN_SOURCE_NAME:=guardian}
   postBuild:
     substituteFrom:
+      # Required, not optional: Flux skips substitution entirely when the
+      # variable map is empty, which would leave the ${GUARDIAN_SOURCE_*}
+      # placeholders literal and fail the CRD enum. The bootstrap overlays
+      # always create guardian-source; a missing one should fail loudly.
       - kind: ConfigMap
         name: guardian-source
-        optional: true
   dependsOn:
     - name: guardian-mgmt-platform
   # These patches target Cozystack-generated platform Package objects. They
@@ -87,9 +93,12 @@ spec:
     name: ${GUARDIAN_SOURCE_NAME:=guardian}
   postBuild:
     substituteFrom:
+      # Required, not optional: Flux skips substitution entirely when the
+      # variable map is empty, which would leave the ${GUARDIAN_SOURCE_*}
+      # placeholders literal and fail the CRD enum. The bootstrap overlays
+      # always create guardian-source; a missing one should fail loudly.
       - kind: ConfigMap
         name: guardian-source
-        optional: true
   dependsOn:
     - name: guardian-mgmt-platform
   # Apply-only. The LINSTOR data-pool CRDs are created by the Platform package;
@@ -112,9 +121,12 @@ spec:
     name: ${GUARDIAN_SOURCE_NAME:=guardian}
   postBuild:
     substituteFrom:
+      # Required, not optional: Flux skips substitution entirely when the
+      # variable map is empty, which would leave the ${GUARDIAN_SOURCE_*}
+      # placeholders literal and fail the CRD enum. The bootstrap overlays
+      # always create guardian-source; a missing one should fail loudly.
       - kind: ConfigMap
         name: guardian-source
-        optional: true
   dependsOn:
     - name: guardian-mgmt-platform
     - name: guardian-mgmt-storage
@@ -141,9 +153,12 @@ spec:
     name: ${GUARDIAN_SOURCE_NAME:=guardian}
   postBuild:
     substituteFrom:
+      # Required, not optional: Flux skips substitution entirely when the
+      # variable map is empty, which would leave the ${GUARDIAN_SOURCE_*}
+      # placeholders literal and fail the CRD enum. The bootstrap overlays
+      # always create guardian-source; a missing one should fail loudly.
       - kind: ConfigMap
         name: guardian-source
-        optional: true
   dependsOn:
     - name: guardian-mgmt-base
   # These patches target Cozystack-generated HelmReleases. They must retry until
@@ -166,9 +181,12 @@ spec:
     name: ${GUARDIAN_SOURCE_NAME:=guardian}
   postBuild:
     substituteFrom:
+      # Required, not optional: Flux skips substitution entirely when the
+      # variable map is empty, which would leave the ${GUARDIAN_SOURCE_*}
+      # placeholders literal and fail the CRD enum. The bootstrap overlays
+      # always create guardian-source; a missing one should fail loudly.
       - kind: ConfigMap
         name: guardian-source
-        optional: true
   dependsOn:
     - name: guardian-mgmt-base
   prune: true
@@ -220,9 +238,12 @@ spec:
     name: ${GUARDIAN_SOURCE_NAME:=guardian}
   postBuild:
     substituteFrom:
+      # Required, not optional: Flux skips substitution entirely when the
+      # variable map is empty, which would leave the ${GUARDIAN_SOURCE_*}
+      # placeholders literal and fail the CRD enum. The bootstrap overlays
+      # always create guardian-source; a missing one should fail loudly.
       - kind: ConfigMap
         name: guardian-source
-        optional: true
   dependsOn:
     - name: guardian-system
   prune: true
@@ -243,9 +264,12 @@ spec:
     name: ${GUARDIAN_SOURCE_NAME:=guardian}
   postBuild:
     substituteFrom:
+      # Required, not optional: Flux skips substitution entirely when the
+      # variable map is empty, which would leave the ${GUARDIAN_SOURCE_*}
+      # placeholders literal and fail the CRD enum. The bootstrap overlays
+      # always create guardian-source; a missing one should fail loudly.
       - kind: ConfigMap
         name: guardian-source
-        optional: true
   dependsOn:
     - name: guardian-openbao-ops
   prune: true
@@ -278,9 +302,12 @@ spec:
     name: ${GUARDIAN_SOURCE_NAME:=guardian}
   postBuild:
     substituteFrom:
+      # Required, not optional: Flux skips substitution entirely when the
+      # variable map is empty, which would leave the ${GUARDIAN_SOURCE_*}
+      # placeholders literal and fail the CRD enum. The bootstrap overlays
+      # always create guardian-source; a missing one should fail loudly.
       - kind: ConfigMap
         name: guardian-source
-        optional: true
   dependsOn:
     - name: guardian-system
   prune: true

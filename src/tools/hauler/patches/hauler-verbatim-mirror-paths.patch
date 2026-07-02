@@ -11,21 +11,29 @@ mirror. Keep the path textual: split off the digest or tag and preserve the
 repository path exactly as stored.
 
 diff --git a/pkg/content/registry.go b/pkg/content/registry.go
-index edf8138..287cce5 100644
+index edf8138..ad605c5 100644
 --- a/pkg/content/registry.go
 +++ b/pkg/content/registry.go
-@@ -90,17 +90,20 @@ func (t *RegistryTarget) Pusher(ctx context.Context, ref string) (remotes.Pusher
- //
- //	"index.docker.io/library/nginx:latest" + "localhost:5000" → "localhost:5000/library/nginx:latest"
+@@ -85,22 +85,24 @@ func (t *RegistryTarget) Pusher(ctx context.Context, ref string) (remotes.Pusher
+ 	return t.resolver.Pusher(ctx, ref)
+ }
+ 
+-// RewriteRefToRegistry rewrites sourceRef to use targetRegistry as its host, preserving the
+-// repository path and tag or digest. For example:
+-//
+-//	"index.docker.io/library/nginx:latest" + "localhost:5000" → "localhost:5000/library/nginx:latest"
++// RewriteRefToRegistry rewrites sourceRef to use targetRegistry as its host,
++// preserving the repository path and tag or digest VERBATIM. Callers pass the
++// store's already-host-stripped ref annotations (e.g. "pause@sha256:..." or
++// "pause:3.10.1"), so no re-parsing is done: go-containerregistry's docker
++// normalization would prefix bare single-segment paths with "library/"
++// (pause -> library/pause), which breaks containerd registry-mirror path
++// expectations — a mirror request for registry.k8s.io/pause is GET /v2/pause.
++// Example: "alpine/k8s:1.33.4" + "localhost:5000" -> "localhost:5000/alpine/k8s:1.33.4".
  func RewriteRefToRegistry(sourceRef string, targetRegistry string) (string, error) {
 -	ref, err := goname.ParseReference(sourceRef)
 -	if err != nil {
 -		return "", fmt.Errorf("parsing reference %q: %w", sourceRef, err)
-+	// Keep the repository path VERBATIM: store annotations are already
-+	// host-stripped, and go-containerregistry's docker normalization would
-+	// turn bare single-segment paths into library/<name>, breaking
-+	// containerd registry-mirror path expectations (a mirror request for
-+	// registry.k8s.io/pause is GET /v2/pause/...).
 +	if sourceRef == "" {
 +		return "", fmt.Errorf("empty source reference")
  	}
