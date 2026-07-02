@@ -16,7 +16,12 @@ single_version_override(
     module_name = "gazelle",
     patch_strip = 1,
     patches = ["//src/tools/hauler/patches:gazelle-ignore-module-bazel-in-go-repos.patch"],
+    # Explicit version: without it the patch would apply to whatever gazelle
+    # version MVS selects, silently drifting past the release the patch was
+    # reviewed against.
+    version = "0.40.0",
 )
+
 bazel_dep(name = "rules_oci", version = "2.3.0")
 bazel_dep(name = "rules_pkg", version = "1.2.0")
 bazel_dep(name = "aspect_rules_js", version = "3.2.2")
@@ -96,6 +101,12 @@ use_repo(
 # the production operator (observed: client-go v0.36 breaking
 # controller-runtime v0.22). Nothing in the root module imports from this
 # graph; the only consumer is the //src/tools/hauler binary alias.
+#
+# Isolation exception: gazelle's _SHARED_REPOS (github.com/golang/protobuf and
+# google.golang.org/protobuf) are always taken from the ROOT instance to avoid
+# duplicate-package link errors, so the protobuf pins in
+# src/tools/hauler/go.sum are dead — the hauler binary links the root graph's
+# protobuf version.
 hauler_go_deps = use_extension(
     "@gazelle//:extensions.bzl",
     "go_deps",

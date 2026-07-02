@@ -83,8 +83,9 @@ func exitErr(err error) {
 }
 
 // parseImagesLock returns the lock's refs in file order. Comments (#) and
-// blank lines are skipped. Any ref without a sha256 digest is an error: this
-// tool projects pins, it never creates them.
+// blank lines are skipped. Any ref without a well-formed sha256 digest is an
+// error: this tool projects pins, it never creates them, and a malformed pin
+// must fail here rather than downstream inside hauler.
 func parseImagesLock(data []byte) ([]string, error) {
 	var refs []string
 	for i, line := range strings.Split(string(data), "\n") {
@@ -95,8 +96,9 @@ func parseImagesLock(data []byte) ([]string, error) {
 		if ref == "" {
 			continue
 		}
-		if !strings.Contains(ref, "@sha256:") {
-			return nil, fmt.Errorf("images.lock line %d: ref %q is not digest-pinned", i+1, ref)
+		name, digest, found := strings.Cut(ref, "@sha256:")
+		if !found || name == "" || !isHex64(digest) {
+			return nil, fmt.Errorf("images.lock line %d: ref %q is not digest-pinned (want <name>@sha256:<64 hex chars>)", i+1, ref)
 		}
 		refs = append(refs, ref)
 	}
@@ -104,6 +106,18 @@ func parseImagesLock(data []byte) ([]string, error) {
 		return nil, errors.New("images.lock contains no refs")
 	}
 	return refs, nil
+}
+
+func isHex64(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for _, c := range s {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // haulerManifest projects lock refs into a content.hauler.cattle.io/v1

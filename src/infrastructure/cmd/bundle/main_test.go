@@ -44,6 +44,19 @@ func TestParseImagesLockRejectsUnpinnedRef(t *testing.T) {
 	}
 }
 
+func TestParseImagesLockRejectsMalformedDigest(t *testing.T) {
+	for _, ref := range []string{
+		"ghcr.io/example/app@sha256:",
+		"ghcr.io/example/app@sha256:abc",
+		"ghcr.io/example/app@sha256:ZZaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	} {
+		if _, err := parseImagesLock([]byte(ref + "\n")); err == nil {
+			t.Fatalf("parseImagesLock() accepted malformed ref %q", ref)
+		}
+	}
+}
+
 func TestParseImagesLockRejectsEmptyLock(t *testing.T) {
 	if _, err := parseImagesLock([]byte("# only comments\n")); err == nil {
 		t.Fatalf("parseImagesLock() accepted an empty lock")

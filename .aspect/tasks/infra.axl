@@ -72,6 +72,7 @@ INFRA_FILEGROUPS = [
     "//src/services/secrets/openbao/deploy/guardian-mgmt:manifests",
 ]
 INFRA_TESTS = [
+    "//src/infrastructure/cmd/bundle:bundle_test",
     "//src/infrastructure/cmd/cozystack_db_load:cozystack_db_load_test",
     "//src/infrastructure/cmd/edge_health:edge_health_test",
     "//src/infrastructure/cmd/cozystack_harbor_registry:cozystack_harbor_registry_test",
