@@ -49,8 +49,8 @@ helm, oras, boot-to-talos) are repo-pinned and materialize under
    `//src/services/secrets/openbao/operator:image`) and repin.
 2. **Bootstrap mirror**: `podman run -d --name guardian-bootstrap-mirror
    -p 5000:5000 -v <dir>:/var/lib/registry docker.io/library/registry:2`,
-   firewalled to the three node public IPs. Seed the Harbor-hosted images in
-   scoped layout (repo path prefixed with `harbor.guardianintelligence.org/`)
+   firewalled to the three node public IPs. Seed the Harbor-hosted images (digests pinned in
+   `src/infrastructure/bootstrap/bundle/images.lock`) in scoped layout (repo path prefixed with `harbor.guardianintelligence.org/`)
    using the pinned oras, e.g.
    `oras cp --recursive --to-plain-http --from-oci-layout
    bazel-bin/…/image@sha256:<digest> 127.0.0.1:5000/harbor.guardianintelligence.org/guardian/<name>:edge`.
@@ -147,10 +147,24 @@ No repo tool exists; the working pattern is two-phase (a one-shot
 
 1. `kubectl -n kube-system debug node/<node> --profile=sysadmin
    --image=quay.io/openbao/openbao@sha256:436eaf…7c115 -- sleep 900`
-2. `kubectl exec -i <debugger-pod> -- sh -ec '<mkdir/cat/chown/chmod/mv/verify>' < <key-file>`
-   — key bytes travel only over the API-server exec channel; verify in-place
-   (sha256 == `current_key_id`, size == 32; print only the fingerprint), then
-   delete the pod.
+2. Stream the key into a synchronous exec (key bytes travel only over the
+   API-server exec channel; only the fingerprint is ever printed), then delete
+   the pod:
+
+   ```sh
+   kubectl -n kube-system exec -i <debugger-pod> -- sh -ec '
+     d=/host/var/lib/guardian/openbao/static-seal
+     mkdir -p "$d"
+     cat > "$d"/unseal-<id>.key.tmp
+     chown root:1000 "$d" "$d"/unseal-<id>.key.tmp
+     chmod 0750 "$d"
+     chmod 0440 "$d"/unseal-<id>.key.tmp
+     mv "$d"/unseal-<id>.key.tmp "$d"/unseal-<id>.key
+     got=$(sha256sum "$d"/unseal-<id>.key | cut -d" " -f1)
+     size=$(wc -c < "$d"/unseal-<id>.key | tr -d " ")
+     [ "$got" = "<id>" ] && [ "$size" = 32 ] && echo "PLACED-OK" || { echo "PLACE-FAILED"; exit 1; }
+   ' < <custody-dir>/static-seal/unseal-<id>.key
+   ```
 
 Target state on every key-bearing node (all three today):
 `/var/lib/guardian/openbao/static-seal/unseal-<id>.key`, dir `0750 root:1000`,
@@ -230,7 +244,8 @@ keyring and delete the drill CRs and sentinel afterwards.
 1. **Repopulate Harbor** so the workstation mirror stops being load-bearing.
    Pushes through the public edge fail for real blobs (Cloudflare limits;
    direct-to-origin dies mid-blob) — use an in-cluster one-shot skopeo pod
-   (`quay.io/skopeo/stable@sha256:94f5c5e2…`) with a hostAlias mapping
+   (`quay.io/skopeo/stable@sha256:94f5c5e26997e2e78c234ec9abf19a391c234b39eb22e6d1210d0b527c97dcc8`,
+   skopeo v1.16.1) with a hostAlias mapping
    `harbor.guardianintelligence.org` to the root-ingress-controller ClusterIP,
    login via stdin, `skopeo copy --all --preserve-digests` from the mirror.
    Create the `guardian` project with `metadata.public="true"` and verify
@@ -239,7 +254,7 @@ keyring and delete the drill CRs and sentinel afterwards.
    `aspect infra dns-apply --mode plan` with `CLOUDFLARE_API_TOKEN` set from
    the dns-lb-provisioner key (expect zero infrastructure changes — node IPs
    are unchanged).
-3. **Re-scrape `images.lock`** from the live cluster (workload section from
+3. **Re-scrape `src/infrastructure/bootstrap/bundle/images.lock`** from the live cluster (workload section from
    pod imageIDs; kubelet/etcd from `talosctl image ls --namespace system`) and
    PR it.
 4. Retire the mirror whenever convenient; the machine-config mirror entry is
