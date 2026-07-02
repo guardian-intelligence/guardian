@@ -265,6 +265,66 @@ func TestOpenBaoOperationsInventoryConformance(t *testing.T) {
 	}
 }
 
+// Every Flux Kustomization must source from the substitutable placeholders:
+// dark-uplink bring-up flips all sources to the mirror-served OCIRepository
+// via the guardian-source ConfigMap, and a literal sourceRef anywhere would
+// silently keep pulling from GitHub (or fail dark). The overlays under
+// bootstrap/sync-{steady,dark} resolve the placeholders for the one kubectl
+// apply that bootstraps Flux.
+func TestFluxSourceParameterizationConformance(t *testing.T) {
+	const wantKind = "${GUARDIAN_SOURCE_KIND:=GitRepository}"
+	const wantName = "${GUARDIAN_SOURCE_NAME:=guardian}"
+
+	for _, path := range []string{
+		"src/infrastructure/base/flux/sync.yaml",
+		"src/infrastructure/deployments/guardian/openbao-ops/openbao-ops-controller.yaml",
+	} {
+		for _, doc := range yamlDocs(t, runfilePath(path)) {
+			if stringValue(doc["kind"]) != "Kustomization" {
+				continue
+			}
+			name := stringValue(mapValue(doc["metadata"])["name"])
+			sourceRef := mapValue(nestedValue(t, doc, "spec", "sourceRef"))
+			if stringValue(sourceRef["kind"]) != wantKind || stringValue(sourceRef["name"]) != wantName {
+				t.Fatalf("%s Kustomization %s sourceRef = %v; every source must go through the GUARDIAN_SOURCE placeholders", path, name, sourceRef)
+			}
+			substituted := false
+			for _, from := range sliceValue(nestedValue(t, doc, "spec", "postBuild", "substituteFrom")) {
+				entry := mapValue(from)
+				if stringValue(entry["kind"]) == "ConfigMap" && stringValue(entry["name"]) == "guardian-source" && entry["optional"] == true {
+					substituted = true
+				}
+			}
+			if !substituted {
+				t.Fatalf("%s Kustomization %s lacks the optional guardian-source substituteFrom; Flux would apply the placeholders literally and the CRD enum would reject them", path, name)
+			}
+		}
+	}
+
+	configMap := singleYAMLDoc(t, runfilePath("src/infrastructure/bootstrap/sync-dark/guardian-source-configmap.yaml"))
+	ociRepo := singleYAMLDoc(t, runfilePath("src/infrastructure/bootstrap/sync-dark/oci-repository.yaml"))
+	data := mapValue(configMap["data"])
+	if stringValue(data["GUARDIAN_SOURCE_KIND"]) != "OCIRepository" || stringValue(data["GUARDIAN_SOURCE_NAME"]) != stringValue(mapValue(ociRepo["metadata"])["name"]) {
+		t.Fatalf("dark guardian-source ConfigMap %v does not point at the declared OCIRepository %v", data, mapValue(ociRepo["metadata"])["name"])
+	}
+	if nestedValue(t, ociRepo, "spec", "insecure") != true {
+		t.Fatalf("dark OCIRepository must set insecure: true (the haul mirror is plain HTTP)")
+	}
+	if !strings.HasPrefix(stringValue(nestedValue(t, ociRepo, "spec", "url")), "oci://148.113.198.223:5000/") {
+		t.Fatalf("dark OCIRepository url = %v, want the haul mirror endpoint", nestedValue(t, ociRepo, "spec", "url"))
+	}
+
+	for path, wantValue := range map[string]string{
+		"src/infrastructure/bootstrap/sync-steady/kustomization.yaml": "value: GitRepository",
+		"src/infrastructure/bootstrap/sync-dark/kustomization.yaml":   "value: OCIRepository",
+	} {
+		raw := readText(t, runfilePath(path))
+		for _, want := range []string{"kind: Kustomization", "op: replace", "path: /spec/sourceRef/kind", wantValue} {
+			assertTextContains(t, raw, want, path)
+		}
+	}
+}
+
 func TestOpenBaoConsumersUseTLSConformance(t *testing.T) {
 	deployment := readText(t, runfilePath("src/services/secrets/openbao/deploy/base/deployment.yaml"))
 	for _, want := range []string{

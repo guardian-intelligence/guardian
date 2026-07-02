@@ -61,15 +61,41 @@ The complete dark drive is: `haul.tar.zst`, the source-built hauler binary
 (`bazelisk build //src/tools/hauler:hauler`), the pinned flux CLI binary
 (from `$(bazelisk info output_base)/external/+http_archive+flux_linux_amd64/`
 — like every fetched tool it exists only where Bazel has run with network),
-this repo checkout at the same revision, and the custody bundle above. At
-bring-up time the mirror host runs
-`hauler store load --filename=haul.tar.zst` and
-`hauler store serve registry --readonly=false`, and the repo checkout is
-pushed into it as a Flux OCI artifact with the repo-pinned flux CLI
-(`flux push artifact`) so the cluster's source needs no Git server. Served
-repo paths are host-stripped and docker-normalized
-(`registry.k8s.io/pause` → `/v2/library/pause/...`); the dark
-RegistryMirrorConfig overlay accounts for this per registry.
+this repo checkout at the same revision, and the custody bundle above.
+
+Dark mode is entered and exited via PRs plus three bring-up steps:
+
+1. **Pre-drill PR**: flip `darkBundleMirror.enabled: true` in
+   `src/infrastructure/talm/values.yaml` and regenerate the node configs —
+   every locked upstream registry then mirrors to the haul with
+   `skipFallback: true` (a miss fails loudly instead of silently dialing
+   the internet; our hauler build serves repo paths verbatim, matching
+   containerd's mirror dialect), and node NTP points at the mirror host.
+2. **Serve + source push** (mirror host, before applying machine configs):
+
+   ```sh
+   hauler store load --filename=haul.tar.zst --store=store
+   hauler store serve registry --store=store --readonly=false &
+   flux push artifact oci://148.113.198.223:5000/guardian/source:dark \
+     --path . --source "$(git remote get-url origin)" \
+     --revision "$(git rev-parse HEAD)"
+   ```
+
+   The writable serve is what lets the repo checkout become the cluster's
+   Flux source with no Git server; a serve restart re-copies the store into
+   the backend without deleting the pushed artifact, but re-push after any
+   backend wipe.
+3. **Dark GitOps entrypoint**: `kubectl apply -k
+   src/infrastructure/bootstrap/sync-dark` — sync.yaml with every
+   Kustomization's source resolved to the `guardian-oci` OCIRepository, plus
+   the `guardian-source` ConfigMap that keeps Flux's own re-application of
+   sync.yaml resolving the same way. `aspect infra converged
+   --expected-revision <sha>` gates exactly as in steady state.
+
+Exiting dark: merge the aftermath PR flipping `darkBundleMirror.enabled`
+back off (regenerate node configs), delete the `guardian-source` ConfigMap
+(sources flip back to the GitHub GitRepository on the next reconcile), then
+delete the `guardian-oci` OCIRepository.
 
 ## Custody replication
 
@@ -250,10 +276,15 @@ first — the drill found a latent all-nodes NoSchedule taint this way. If a
 helm release fails terminally, `helm uninstall` it before rerunning
 (`upgrade --install` refuses a failed revision-1 release).
 
-Then the one-time GitOps apply and convergence:
+Then the one-time GitOps apply and convergence. The bootstrap entrypoint is
+an overlay, not sync.yaml itself: kubectl cannot resolve the
+`${GUARDIAN_SOURCE_*}` placeholders that let Flux flip between the GitHub
+GitRepository and a dark-mirror OCIRepository source.
 
 ```sh
-kubectl apply -f src/infrastructure/base/flux/sync.yaml
+kubectl apply -k src/infrastructure/bootstrap/sync-steady
+# dark uplink: kubectl apply -k src/infrastructure/bootstrap/sync-dark
+# (after serving the haul and pushing the repo artifact — see below)
 ```
 
 Flux is a single `flux` Deployment (5 containers) in cozy-fluxcd. Convergence

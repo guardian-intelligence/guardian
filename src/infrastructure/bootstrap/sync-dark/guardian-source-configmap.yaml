@@ -1,0 +1,15 @@
+# Dark-mode source pinning: every Kustomization in sync.yaml (and the
+# openbao-ops children) substitutes its sourceRef from these values via
+# postBuild.substituteFrom. The ConfigMap is optional there — absent in
+# steady state, the ${GUARDIAN_SOURCE_*:=...} defaults resolve to the GitHub
+# GitRepository. Hand-applied objects are not in any Flux inventory, so
+# pruning never removes this; deleting it is the first step of exiting dark
+# mode.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: guardian-source
+  namespace: cozy-fluxcd
+data:
+  GUARDIAN_SOURCE_KIND: OCIRepository
+  GUARDIAN_SOURCE_NAME: guardian-oci

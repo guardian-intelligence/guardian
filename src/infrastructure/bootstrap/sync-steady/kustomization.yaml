@@ -1,0 +1,23 @@
+# Bootstrap entrypoint (steady): `kubectl apply -k` this directory exactly
+# once on a fresh cluster. It renders base/flux/sync.yaml with the source
+# placeholders resolved to the GitHub GitRepository — kubectl performs no
+# Flux post-build substitution, and the Kustomization CRD's sourceRef.kind
+# enum rejects an unresolved placeholder. After this one apply, Flux manages
+# sync.yaml itself (the path includes flux/) and resolves the placeholders
+# via postBuild.substituteFrom (the guardian-source ConfigMap is optional and
+# absent in steady state, so the GitRepository defaults hold).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base/flux
+patches:
+  - target:
+      group: kustomize.toolkit.fluxcd.io
+      kind: Kustomization
+    patch: |-
+      - op: replace
+        path: /spec/sourceRef/kind
+        value: GitRepository
+      - op: replace
+        path: /spec/sourceRef/name
+        value: guardian

@@ -73,6 +73,8 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/base/flux:manifests",
     "//src/infrastructure/base/networking:manifests",
     "//src/infrastructure/base/storage:manifests",
+    "//src/infrastructure/bootstrap/sync-dark:manifests",
+    "//src/infrastructure/bootstrap/sync-steady:manifests",
     "//src/infrastructure/deployments/guardian/openbao-ops:manifests",
     "//src/infrastructure/deployments/guardian/system:manifests",
     "//src/infrastructure/deployments/company/prod:manifests",

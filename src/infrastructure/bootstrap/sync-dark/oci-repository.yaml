@@ -1,0 +1,20 @@
+# Dark-mode Flux source: the repo checkout pushed into the haul-served
+# mirror as a Flux OCI artifact (see the cold-boot runbook: the mirror is
+# served with --readonly=false and the pinned flux CLI pushes with
+# `flux push artifact oci://148.113.198.223:5000/guardian/source:dark
+#  --path <checkout> --source <origin-url> --revision <sha>`).
+# `insecure: true` — the mirror is plain HTTP; artifact integrity is carried
+# by the bundle manifest's digests and the converged proof's revision check,
+# and the mirror host is the same custody-controlled workstation that holds
+# the drive.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: guardian-oci
+  namespace: cozy-fluxcd
+spec:
+  interval: 1m
+  insecure: true
+  url: oci://148.113.198.223:5000/guardian/source
+  ref:
+    tag: dark

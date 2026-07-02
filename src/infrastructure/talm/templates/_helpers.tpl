@@ -12,6 +12,13 @@ machine:
   {{- if and (eq .MachineType "controlplane") (hasKey (.Values.extraNodeLabels | default dict) "node.kubernetes.io/exclude-from-external-load-balancers") }}
   {{- fail "values.yaml: extraNodeLabels.node.kubernetes.io/exclude-from-external-load-balancers collides with the cozystack preset's control-plane label patch; remove it or fork the preset." }}
   {{- end }}
+  {{- if .Values.darkBundleMirror.enabled }}
+  # DARK BOOTSTRAP: a dark node has no route to public NTP; the mirror host
+  # is the cluster's time source.
+  time:
+    servers:
+      - {{ .Values.darkBundleMirror.timeServer }}
+  {{- end }}
   {{- if or (eq .MachineType "controlplane") .Values.extraNodeLabels }}
   nodeLabels:
     {{- if eq .MachineType "controlplane" }}
@@ -344,21 +351,20 @@ cluster:
 {{- include "talos.config.machine.common" . }}
   registries:
     mirrors:
+{{- if .Values.darkBundleMirror.enabled }}
+      # DARK BOOTSTRAP: every locked upstream is served from the haul mirror
+      # and nothing may fall back to the internet. Entered/exited via PRs.
+{{- range .Values.darkBundleMirror.registries }}
+      {{ . }}:
+        endpoints:
+        - {{ trimSuffix "/" $.Values.darkBundleMirror.endpoint }}
+        skipFallback: true
+{{- end }}
+{{- else }}
       docker.io:
         endpoints:
         - https://mirror.gcr.io
-      {{- with .Values.bootstrapHarborMirror }}
-      {{- if .enabled }}
-      # Bootstrap-only: serves Harbor-hosted images from the operator
-      # workstation registry (skopeo --scoped layout) until the in-cluster
-      # Harbor exists; containerd falls back to the real Harbor, so this is
-      # inert in steady state.
-      harbor.guardianintelligence.org:
-        endpoints:
-        - {{ trimSuffix "/" .endpoint }}/v2/harbor.guardianintelligence.org
-        overridePath: true
-      {{- end }}
-      {{- end }}
+{{- end }}
 {{- include "talos.config.network.legacy" . }}
 
 {{- include "talos.config.cluster" . }}
@@ -368,25 +374,25 @@ cluster:
 {{- include "talos.config.machine.common" . }}
 
 {{- include "talos.config.cluster" . }}
+{{- if .Values.darkBundleMirror.enabled }}
+{{- range .Values.darkBundleMirror.registries }}
+---
+# DARK BOOTSTRAP: served from the haul mirror; skipFallback makes any miss
+# fail loudly instead of silently reaching the internet.
+apiVersion: v1alpha1
+kind: RegistryMirrorConfig
+name: {{ . }}
+endpoints:
+  - url: {{ trimSuffix "/" $.Values.darkBundleMirror.endpoint }}
+skipFallback: true
+{{- end }}
+{{- else }}
 ---
 apiVersion: v1alpha1
 kind: RegistryMirrorConfig
 name: docker.io
 endpoints:
   - url: https://mirror.gcr.io
-{{- with .Values.bootstrapHarborMirror }}
-{{- if .enabled }}
----
-# Bootstrap-only: serves Harbor-hosted images from the operator workstation
-# registry (skopeo --scoped layout) until the in-cluster Harbor exists;
-# containerd falls back to the real Harbor, so this is inert in steady state.
-apiVersion: v1alpha1
-kind: RegistryMirrorConfig
-name: harbor.guardianintelligence.org
-endpoints:
-  - url: {{ trimSuffix "/" .endpoint }}/v2/harbor.guardianintelligence.org
-    overridePath: true
-{{- end }}
 {{- end }}
 {{- include "talos.config.network.multidoc" . }}
 {{- end }}

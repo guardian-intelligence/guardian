@@ -16,8 +16,13 @@ spec:
   prune: true
   retryInterval: 1m
   sourceRef:
-    kind: GitRepository
-    name: guardian
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: guardian-source
+        optional: true
   timeout: 5m
   wait: true
 ---
@@ -40,8 +45,13 @@ spec:
   prune: true
   retryInterval: 1m
   sourceRef:
-    kind: GitRepository
-    name: guardian
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: guardian-source
+        optional: true
   timeout: 5m
   wait: true
   # Without these expressions, kstatus treats the OpenBao operation CRs as
@@ -93,7 +103,12 @@ spec:
   prune: true
   retryInterval: 1m
   sourceRef:
-    kind: GitRepository
-    name: guardian
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: guardian-source
+        optional: true
   timeout: 5m
   wait: true

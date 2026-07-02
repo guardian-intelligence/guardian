@@ -1,0 +1,8 @@
+# Referenced two ways: by ../kustomization.yaml (the guardian-mgmt-base
+# inventory) and by the bootstrap entrypoint overlays under
+# src/infrastructure/bootstrap/sync-{steady,dark}, which resolve the source
+# placeholders kubectl cannot substitute.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - sync.yaml

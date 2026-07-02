@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -42,9 +44,7 @@ func TestTalmControlplaneRender(t *testing.T) {
 		"clusterName: guardian-mgmt",
 		"endpoint: https://10.8.0.250:6443",
 		"image: ghcr.io/cozystack/cozystack/talos:v1.13.0@sha256:c2c092ad742e8bdd4af6366c586d95bdf7f73cee6eef8318fb9da6d466f37044",
-		"name: harbor.guardianintelligence.org",
-		"url: http://148.113.198.223:5000/v2/harbor.guardianintelligence.org",
-		"overridePath: true",
+		"url: https://mirror.gcr.io",
 		"serviceSubnets:\n      - 10.96.0.0/16",
 		"cluster-cidr: 10.244.0.0/16",
 		"advertisedSubnets:\n      - 10.8.0.0/24",
@@ -69,9 +69,110 @@ func TestTalmControlplaneRender(t *testing.T) {
 	// A register-with-taints NoSchedule taint on every node bricks cold
 	// bootstrap (nothing, including the Cozystack installer hook, can
 	// schedule); the 2026-07-01 drill hit this. Dedicated-node taints may
-	// return only alongside untainted general-workload nodes.
-	for _, forbidden := range []string{"kubespan", "KubeSpan", "WireGuard", "wireguard", "nodeTaints:"} {
+	// return only alongside untainted general-workload nodes. skipFallback
+	// and the haul mirror endpoint are dark-bootstrap-only: in steady state
+	// they would cut nodes off from upstream registries.
+	for _, forbidden := range []string{"kubespan", "KubeSpan", "WireGuard", "wireguard", "nodeTaints:", "skipFallback", "148.113.198.223"} {
 		assertTextNotContains(t, rendered, forbidden, "rendered controlplane talos config")
+	}
+}
+
+// TestTalmDarkBundleMirrorRender proves the dark-bootstrap values state:
+// every locked upstream registry is mirrored to the haul-served registry
+// with skipFallback, node NTP points at the mirror host, and the steady
+// mirror.gcr.io fallback for docker.io is replaced (a duplicate docker.io
+// mirror document would be invalid).
+func TestTalmDarkBundleMirrorRender(t *testing.T) {
+	scratch := t.TempDir()
+	talm := talmBinary(t)
+	env := isolatedTalmEnv(t, scratch)
+
+	runTalm(t, talm, env,
+		"init",
+		"--root", scratch,
+		"--name", "guardian-mgmt",
+		"--preset", "cozystack",
+		"--cluster-endpoint", "https://10.8.0.250:6443",
+		"--talos-version", "v1.13.0",
+		"--force",
+	)
+
+	chartRoot := filepath.Dir(runfilePath("src/infrastructure/talm/values.yaml"))
+	darkValues := filepath.Join(scratch, "values-dark.yaml")
+	if err := os.WriteFile(darkValues, []byte("darkBundleMirror:\n  enabled: true\n"), 0o644); err != nil {
+		t.Fatalf("write dark values override: %v", err)
+	}
+	rendered := runTalm(t, talm, env,
+		"template",
+		"--offline",
+		"--root", chartRoot,
+		"--values", filepath.Join(chartRoot, "values.yaml"),
+		"--values", darkValues,
+		"--template", filepath.Join(chartRoot, "templates/controlplane.yaml"),
+		"--with-secrets", filepath.Join(scratch, "secrets.yaml"),
+		"--talos-version", "v1.13.0",
+		"--kubernetes-version", "v1.34.3",
+	)
+
+	lockHosts := imagesLockHosts(t)
+	if len(lockHosts) < 5 {
+		t.Fatalf("images.lock yielded only %d registry hosts; expected the full upstream set", len(lockHosts))
+	}
+	for _, host := range lockHosts {
+		assertTextContains(t, rendered, "name: "+host, "dark render mirrors every locked registry")
+	}
+	for _, want := range []string{
+		"url: http://148.113.198.223:5000",
+		"skipFallback: true",
+		"time:\n    servers:\n      - 148.113.198.223",
+	} {
+		assertTextContains(t, rendered, want, "dark render")
+	}
+	assertTextNotContains(t, rendered, "mirror.gcr.io", "dark render must not fall back to public mirrors")
+}
+
+// imagesLockHosts returns the sorted, unique registry hosts referenced by
+// images.lock. The darkBundleMirror.registries list in values.yaml must
+// equal this set: an upstream host missing from the dark mirrors would make
+// nodes dial the internet (or fail) for a locked artifact.
+func imagesLockHosts(t *testing.T) []string {
+	t.Helper()
+
+	raw := readText(t, runfilePath("src/infrastructure/bootstrap/bundle/images.lock"))
+	hosts := map[string]bool{}
+	for _, line := range strings.Split(raw, "\n") {
+		ref := strings.TrimSpace(line)
+		if comment := strings.Index(ref, "#"); comment >= 0 {
+			ref = strings.TrimSpace(ref[:comment])
+		}
+		if ref == "" {
+			continue
+		}
+		host, _, found := strings.Cut(ref, "/")
+		if !found {
+			t.Fatalf("images.lock ref %q has no registry host", ref)
+		}
+		hosts[host] = true
+	}
+	var out []string
+	for host := range hosts {
+		out = append(out, host)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func TestDarkBundleMirrorRegistriesMatchImagesLock(t *testing.T) {
+	values := singleYAMLDoc(t, runfilePath("src/infrastructure/talm/values.yaml"))
+	dark := mapValue(values["darkBundleMirror"])
+	var declared []string
+	for _, host := range sliceValue(dark["registries"]) {
+		declared = append(declared, stringValue(host))
+	}
+	sort.Strings(declared)
+	lockHosts := imagesLockHosts(t)
+	if !reflect.DeepEqual(declared, lockHosts) {
+		t.Fatalf("values.yaml darkBundleMirror.registries = %v, images.lock hosts = %v; the dark mirror set must equal the locked upstreams", declared, lockHosts)
 	}
 }
 

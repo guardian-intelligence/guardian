@@ -11,4 +11,4 @@ resources:
   - secrets/external-secrets.yaml
   - networking/metallb.yaml
   - networking/subnet-mtu.yaml
-  - flux/sync.yaml
+  - flux

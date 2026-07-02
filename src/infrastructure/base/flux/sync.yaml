@@ -4,9 +4,14 @@
 # reconcile the management-cluster substrate in ordered slices, turning the
 # by-hand bring-up into a control loop.
 #
-# Bootstrap: `kubectl apply -f src/infrastructure/base/flux/sync.yaml` once. The
-# Kustomization then manages this file too (the path includes flux/), so further
-# changes flow through git.
+# Bootstrap: `kubectl apply -k src/infrastructure/bootstrap/sync-steady` once
+# (or sync-dark for a dark-uplink bring-up). The overlays resolve the
+# ${GUARDIAN_SOURCE_*} placeholders below, which kubectl cannot substitute;
+# once applied, Flux manages this file too (the path includes flux/) and
+# resolves the placeholders itself via postBuild.substituteFrom — the
+# guardian-source ConfigMap is optional and absent in steady state, so the
+# GitRepository defaults hold, while dark mode pins the OCIRepository source
+# without any edit to this file.
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: GitRepository
@@ -29,8 +34,13 @@ spec:
   retryInterval: 2m
   path: ./src/infrastructure/base/cozystack
   sourceRef:
-    kind: GitRepository
-    name: guardian
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: guardian-source
+        optional: true
   # Apply-only. The Platform package fans out into Cozystack-owned packages and
   # HelmReleases; the storage slice below retries until the Piraeus CRDs exist.
   prune: false
@@ -47,8 +57,13 @@ spec:
   retryInterval: 1m
   path: ./src/infrastructure/base/platform-patches
   sourceRef:
-    kind: GitRepository
-    name: guardian
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: guardian-source
+        optional: true
   dependsOn:
     - name: guardian-mgmt-platform
   # These patches target Cozystack-generated platform Package objects. They
@@ -68,8 +83,13 @@ spec:
   retryInterval: 30s
   path: ./src/infrastructure/base/storage
   sourceRef:
-    kind: GitRepository
-    name: guardian
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: guardian-source
+        optional: true
   dependsOn:
     - name: guardian-mgmt-platform
   # Apply-only. The LINSTOR data-pool CRDs are created by the Platform package;
@@ -88,8 +108,13 @@ spec:
   retryInterval: 2m
   path: ./src/infrastructure/base
   sourceRef:
-    kind: GitRepository
-    name: guardian
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: guardian-source
+        optional: true
   dependsOn:
     - name: guardian-mgmt-platform
     - name: guardian-mgmt-storage
@@ -112,8 +137,13 @@ spec:
   retryInterval: 1m
   path: ./src/infrastructure/base/app-patches
   sourceRef:
-    kind: GitRepository
-    name: guardian
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: guardian-source
+        optional: true
   dependsOn:
     - name: guardian-mgmt-base
   # These patches target Cozystack-generated HelmReleases. They must retry until
@@ -132,8 +162,13 @@ spec:
   retryInterval: 1m
   path: ./src/infrastructure/deployments/guardian/system
   sourceRef:
-    kind: GitRepository
-    name: guardian
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: guardian-source
+        optional: true
   dependsOn:
     - name: guardian-mgmt-base
   prune: true
@@ -181,8 +216,13 @@ spec:
   retryInterval: 1m
   path: ./src/infrastructure/deployments/guardian/openbao-ops
   sourceRef:
-    kind: GitRepository
-    name: guardian
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: guardian-source
+        optional: true
   dependsOn:
     - name: guardian-system
   prune: true
@@ -199,8 +239,13 @@ spec:
   retryInterval: 1m
   path: ./src/infrastructure/base/dns
   sourceRef:
-    kind: GitRepository
-    name: guardian
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: guardian-source
+        optional: true
   dependsOn:
     - name: guardian-openbao-ops
   prune: true
@@ -229,8 +274,13 @@ spec:
   retryInterval: 1m
   path: ./src/infrastructure/deployments/company/prod
   sourceRef:
-    kind: GitRepository
-    name: guardian
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: guardian-source
+        optional: true
   dependsOn:
     - name: guardian-system
   prune: true
