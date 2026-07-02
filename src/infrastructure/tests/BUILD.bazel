@@ -18,6 +18,7 @@ go_test(
         "//src/infrastructure/base/flux:manifests",
         "//src/infrastructure/base/networking:manifests",
         "//src/infrastructure/base/platform-patches:manifests",
+        "//src/infrastructure/base/secrets:manifests",
         "//src/infrastructure/base/storage:manifests",
         "//src/infrastructure/base/tenants:manifests",
         "//src/infrastructure/bootstrap/bundle:images_lock",
