@@ -179,7 +179,14 @@ func collectImageRefsFromNode(file string, node interface{}, refs *[]imageRef) {
 				}
 				collectImageRefsFromNode(file, child, refs)
 			case "images":
-				for _, item := range sliceValue(child) {
+				items, isSlice := child.([]interface{})
+				if !isSlice {
+					// Helm-style images maps (images: {controller: {...}})
+					// must still be walked, not silently skipped.
+					collectImageRefsFromNode(file, child, refs)
+					continue
+				}
+				for _, item := range items {
 					if ref, ok := kustomizeImageEntryRef(item); ok {
 						*refs = append(*refs, imageRef{file: file, source: "kustomize images entry", ref: ref})
 						continue
