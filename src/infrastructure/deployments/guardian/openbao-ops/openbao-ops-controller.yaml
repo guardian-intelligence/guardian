@@ -44,6 +44,35 @@ spec:
     name: guardian
   timeout: 5m
   wait: true
+  # Without these expressions, kstatus treats the OpenBao operation CRs as
+  # trivially Current (they carry none of the standard Reconciling/Stalled
+  # conditions), making `wait: true` vacuous for them. A CR is healthy only
+  # when the ops-controller has authenticated, applied it, and sees no drift.
+  healthCheckExprs:
+    - apiVersion: openbao.guardian.dev/v1alpha1
+      kind: OpenBaoAuthBackend
+      current: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'True') && status.conditions.exists(c, c.type == 'DriftDetected' && c.status == 'False')
+      failed: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'False')
+    - apiVersion: openbao.guardian.dev/v1alpha1
+      kind: OpenBaoKubernetesAuthRole
+      current: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'True') && status.conditions.exists(c, c.type == 'DriftDetected' && c.status == 'False')
+      failed: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'False')
+    - apiVersion: openbao.guardian.dev/v1alpha1
+      kind: OpenBaoMount
+      current: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'True') && status.conditions.exists(c, c.type == 'DriftDetected' && c.status == 'False')
+      failed: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'False')
+    - apiVersion: openbao.guardian.dev/v1alpha1
+      kind: OpenBaoMountTune
+      current: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'True') && status.conditions.exists(c, c.type == 'DriftDetected' && c.status == 'False')
+      failed: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'False')
+    - apiVersion: openbao.guardian.dev/v1alpha1
+      kind: OpenBaoPolicy
+      current: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'True') && status.conditions.exists(c, c.type == 'DriftDetected' && c.status == 'False')
+      failed: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'False')
+    # No OpenBaoAuditDevice entry: the ops-controller has no reconciler for
+    # that kind yet, so a CR of it would never receive status and the guard
+    # expression would wedge this Kustomization at timeout forever. Add the
+    # expression in the same PR that adds the reconciler.
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization

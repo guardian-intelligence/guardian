@@ -34,9 +34,9 @@ installer/operator to the repo-pinned version.
 clusters when only the Cozystack installer/operator release needs to move.
 OpenBao uses static auto-unseal and OpenBao self-init; see
 `src/infrastructure/runbooks/openbao-static-seal-self-init.md`.
-`aspect infra converged` verifies the cluster converged to the declared state:
-Flux Kustomizations at the expected revision, workloads rolled, and component
-CR conditions.
+`aspect infra converged` verifies every declared Flux Kustomization is Ready
+at the expected revision; workload and component health gate readiness via
+Flux health checks declared in the manifests (`healthChecks`/`healthCheckExprs`).
 `aspect infra openbao-drill` verifies OpenBao status (initialized, unsealed,
 HA-enabled, one raft cluster ID across members). `aspect infra
 observability-drill` creates a short root Postgres pgbench job, then queries

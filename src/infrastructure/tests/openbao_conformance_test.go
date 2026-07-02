@@ -187,6 +187,10 @@ func TestOpenBaoFluxOrderingConformance(t *testing.T) {
 
 	system := findDoc(t, docs, "Kustomization", "guardian-system")
 	assertNestedBool(t, system, false, "spec", "wait")
+	// Certificate Ready latches, so the issuing controller's liveness must be
+	// gated explicitly; without this a dead cert-manager converges green
+	// until a leaf misses renewal.
+	assertHealthCheck(t, system, "apps/v1", "Deployment", "cert-manager", "cozy-cert-manager")
 	assertHealthCheck(t, system, "cert-manager.io/v1", "Certificate", "guardian-openbao-listener-ca", "tenant-guardian")
 	assertHealthCheck(t, system, "cert-manager.io/v1", "Certificate", "guardian-openbao-api", "tenant-guardian")
 	assertHealthCheck(t, system, "helm.toolkit.fluxcd.io/v2", "HelmRelease", "guardian-openbao", "tenant-guardian")
@@ -198,6 +202,10 @@ func TestOpenBaoFluxOrderingConformance(t *testing.T) {
 
 	dns := findDoc(t, docs, "Kustomization", "guardian-mgmt-dns-controller")
 	assertDependsOn(t, dns, "guardian-openbao-ops")
+	// kstatus treats ESO CRs as trivially Current, so wait:true alone is
+	// vacuous for them; the CEL expressions are what make the wait real.
+	assertHealthCheckExpr(t, dns, "external-secrets.io/v1beta1", "ClusterSecretStore")
+	assertHealthCheckExpr(t, dns, "external-secrets.io/v1beta1", "ExternalSecret")
 
 	opsDocs := yamlDocs(t, runfilePath("src/infrastructure/deployments/guardian/openbao-ops/openbao-ops-controller.yaml"))
 	crds := findDoc(t, opsDocs, "Kustomization", "guardian-openbao-ops-crds")
@@ -211,6 +219,50 @@ func TestOpenBaoFluxOrderingConformance(t *testing.T) {
 	state := findDoc(t, opsDocs, "Kustomization", "guardian-openbao-ops-state")
 	assertNestedBool(t, state, true, "spec", "wait")
 	assertDependsOn(t, state, "guardian-openbao-ops-controller")
+	// Same kstatus vacuity applies to the OpenBao operation CRs: without these
+	// expressions the state slice reports Ready before the ops-controller has
+	// authenticated, applied, and drift-checked each CR. OpenBaoAuditDevice is
+	// deliberately absent: no reconciler writes its status yet, and a guard
+	// expression over a never-written status wedges the slice at timeout.
+	for _, kind := range []string{
+		"OpenBaoAuthBackend",
+		"OpenBaoKubernetesAuthRole",
+		"OpenBaoMount",
+		"OpenBaoMountTune",
+		"OpenBaoPolicy",
+	} {
+		assertHealthCheckExpr(t, state, "openbao.guardian.dev/v1alpha1", kind)
+	}
+	assertNoHealthCheckExpr(t, state, "openbao.guardian.dev/v1alpha1", "OpenBaoAuditDevice")
+}
+
+// The declared OpenBao security inventory must stay declared. Flux health
+// expressions assess only objects present in the inventory, so a CR
+// accidentally deleted from Git would be pruned and converge green; this
+// pins existence at the source instead.
+func TestOpenBaoOperationsInventoryConformance(t *testing.T) {
+	dir := "src/infrastructure/operations/openbao/guardian-mgmt"
+	kustomization := singleYAMLDoc(t, runfilePath(dir+"/kustomization.yaml"))
+	declared := map[string]bool{}
+	for _, resource := range sliceValue(nestedValue(t, kustomization, "resources")) {
+		for _, doc := range yamlDocs(t, runfilePath(dir+"/"+stringValue(resource))) {
+			declared[stringValue(doc["kind"])+"/"+stringValue(mapValue(doc["metadata"])["name"])] = true
+		}
+	}
+	for _, want := range []string{
+		"OpenBaoAuthBackend/kubernetes",
+		"OpenBaoKubernetesAuthRole/external-dns",
+		"OpenBaoKubernetesAuthRole/ops-controller",
+		"OpenBaoMount/kv",
+		"OpenBaoMount/transit",
+		"OpenBaoMountTune/kv",
+		"OpenBaoPolicy/external-dns",
+		"OpenBaoPolicy/ops-controller",
+	} {
+		if !declared[want] {
+			t.Fatalf("operations inventory is missing %s; removing a declared OpenBao security object must be deliberate", want)
+		}
+	}
 }
 
 func TestOpenBaoConsumersUseTLSConformance(t *testing.T) {
@@ -342,6 +394,38 @@ func assertHealthCheck(t *testing.T, doc map[string]interface{}, apiVersion, kin
 		}
 	}
 	t.Fatalf("%s/%s missing healthCheck %s %s/%s in %s", stringValue(doc["kind"]), stringValue(mapValue(doc["metadata"])["name"]), apiVersion, kind, name, namespace)
+}
+
+func assertHealthCheckExpr(t *testing.T, doc map[string]interface{}, apiVersion, kind string) {
+	t.Helper()
+
+	for _, healthCheckExpr := range sliceValue(nestedValue(t, doc, "spec", "healthCheckExprs")) {
+		expr := mapValue(healthCheckExpr)
+		if stringValue(expr["apiVersion"]) != apiVersion || stringValue(expr["kind"]) != kind {
+			continue
+		}
+		current := stringValue(expr["current"])
+		failed := stringValue(expr["failed"])
+		if !strings.Contains(current, "'Ready'") || !strings.Contains(current, "'True'") {
+			t.Fatalf("%s healthCheckExpr for %s: current = %q, want a Ready==True condition check", stringValue(mapValue(doc["metadata"])["name"]), kind, current)
+		}
+		if !strings.Contains(failed, "'Ready'") || !strings.Contains(failed, "'False'") {
+			t.Fatalf("%s healthCheckExpr for %s: failed = %q, want a Ready==False condition check", stringValue(mapValue(doc["metadata"])["name"]), kind, failed)
+		}
+		return
+	}
+	t.Fatalf("%s/%s missing healthCheckExpr for %s %s", stringValue(doc["kind"]), stringValue(mapValue(doc["metadata"])["name"]), apiVersion, kind)
+}
+
+func assertNoHealthCheckExpr(t *testing.T, doc map[string]interface{}, apiVersion, kind string) {
+	t.Helper()
+
+	for _, healthCheckExpr := range sliceValue(nestedValue(t, doc, "spec", "healthCheckExprs")) {
+		expr := mapValue(healthCheckExpr)
+		if stringValue(expr["apiVersion"]) == apiVersion && stringValue(expr["kind"]) == kind {
+			t.Fatalf("%s declares a healthCheckExpr for %s %s, which has no reconciler writing status and would wedge the slice at timeout", stringValue(mapValue(doc["metadata"])["name"]), apiVersion, kind)
+		}
+	}
 }
 
 func assertToleration(t *testing.T, server map[string]interface{}, key, operator, effect string) {
