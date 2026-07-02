@@ -273,7 +273,7 @@ func baoOutputAllowExit(ctx context.Context, runner kubectlRunner, pod, label st
 }
 
 func baoExecArgs(pod string, args ...string) []string {
-	execArgs := []string{"exec", "pod/" + pod, "--", "env", "BAO_ADDR=" + baoAddr, "VAULT_ADDR=" + baoAddr, "BAO_SKIP_VERIFY=true", "VAULT_SKIP_VERIFY=true", "VAULT_CLIENT_TIMEOUT=120s"}
+	execArgs := []string{"exec", "pod/" + pod, "-c", "openbao", "--", "env", "BAO_ADDR=" + baoAddr, "VAULT_ADDR=" + baoAddr, "BAO_SKIP_VERIFY=true", "VAULT_SKIP_VERIFY=true", "VAULT_CLIENT_TIMEOUT=120s"}
 	execArgs = append(execArgs, "bao")
 	execArgs = append(execArgs, args...)
 	return execArgs
@@ -338,12 +338,6 @@ func (r kubectlRunner) runWithStdin(ctx context.Context, label string, stdin str
 		return fmt.Errorf("%s: %w", label, err)
 	}
 	return nil
-}
-
-func (r kubectlRunner) bestEffort(ctx context.Context, label string, args ...string) {
-	if err := r.run(ctx, label, args...); err != nil {
-		fmt.Printf("best-effort command failed: %v\n", err)
-	}
 }
 
 func (r kubectlRunner) output(ctx context.Context, label string, args ...string) (string, error) {
