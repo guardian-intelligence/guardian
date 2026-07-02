@@ -1,0 +1,18 @@
+# Hauler is built from source (module hauler.dev/go/hauler/v2, pinned in the
+# adjacent go.mod with its distribution/v3 replace mirrored and the digest
+# regression fix included) rather than downloaded: upstream releases ship
+# unsigned with no SBOM, so our hermetic build is the provenance. The go.mod
+# here feeds an ISOLATED go_deps extension instance so hauler's dependency
+# tree never influences the root module's version resolution. tools.go
+# (build-tagged, never linked) keeps this module's dependency graph complete;
+# see its comment.
+exports_files([
+    "go.mod",
+    "go.sum",
+])
+
+alias(
+    name = "hauler",
+    actual = "@dev_hauler_go_hauler_v2//cmd/hauler",
+    visibility = ["//visibility:public"],
+)

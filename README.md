@@ -75,6 +75,7 @@ state stay out of Git.
 | k6 | `src/tools/k6/k6.MODULE.bazel` |
 | ORAS | `src/tools/oras/oras.MODULE.bazel` |
 | OpenBao CLI (`bao`) | `src/tools/openbao/openbao.MODULE.bazel` |
+| Hauler | `go.mod` (built from source; `//src/tools/hauler`) |
 | curl | `src/tools/curl/curl.MODULE.bazel` |
 | Cilium CLI | `src/tools/debug-clis/debug-clis.MODULE.bazel` |
 | Hubble CLI | `src/tools/debug-clis/debug-clis.MODULE.bazel` |
