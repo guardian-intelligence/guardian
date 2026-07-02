@@ -52,7 +52,6 @@ func TestTalmControlplaneRender(t *testing.T) {
 		"name: \"10.8.0.250\"",
 		"link: enp1s0f0.2140",
 		"guardian.dev/openbao-static-seal: \"true\"",
-		"nodeTaints:\n    guardian.dev/openbao-static-seal: NoSchedule",
 	} {
 		assertTextContains(t, rendered, want, "rendered controlplane talos config")
 	}
@@ -67,7 +66,11 @@ func TestTalmControlplaneRender(t *testing.T) {
 		assertTextContains(t, rendered, want, "rendered controlplane cert SANs")
 	}
 
-	for _, forbidden := range []string{"kubespan", "KubeSpan", "WireGuard", "wireguard"} {
+	// A register-with-taints NoSchedule taint on every node bricks cold
+	// bootstrap (nothing, including the Cozystack installer hook, can
+	// schedule); the 2026-07-01 drill hit this. Dedicated-node taints may
+	// return only alongside untainted general-workload nodes.
+	for _, forbidden := range []string{"kubespan", "KubeSpan", "WireGuard", "wireguard", "nodeTaints:"} {
 		assertTextNotContains(t, rendered, forbidden, "rendered controlplane talos config")
 	}
 }

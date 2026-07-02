@@ -184,11 +184,16 @@ extraKernelModules: []
 extraNodeLabels:
   guardian.dev/openbao-static-seal: "true"
 
-# Extra Kubernetes node taints rendered into every machine config. The ASH
-# management nodes are dedicated OpenBao key-bearing nodes; general workloads
-# must not schedule here unless they carry an explicit toleration.
-extraNodeTaints:
-  guardian.dev/openbao-static-seal: "NoSchedule"
+# Extra Kubernetes node taints rendered into every machine config via kubelet
+# register-with-taints. MUST stay empty while every management node is also a
+# general workload node: register-with-taints applies on FIRST registration,
+# so a cold boot with a cluster-wide NoSchedule taint leaves the whole
+# platform (including the Cozystack installer's own hook Jobs) unschedulable.
+# The 2026-07-01 cold-boot drill hit exactly this; the old cluster never saw
+# it because the taint was added after its nodes had registered. Reintroduce
+# a static-seal taint only for dedicated OpenBao nodes that are not expected
+# to run general workloads (the OpenBao pods already carry the toleration).
+extraNodeTaints: {}
 
 # Extra kubelet args added to the preset's kubelet.extraConfig
 # (cpuManagerPolicy: static, maxPods: 512). Operator keys must be
