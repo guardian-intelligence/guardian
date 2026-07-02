@@ -69,10 +69,10 @@ spec:
       kind: OpenBaoPolicy
       current: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'True') && status.conditions.exists(c, c.type == 'DriftDetected' && c.status == 'False')
       failed: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'False')
-    - apiVersion: openbao.guardian.dev/v1alpha1
-      kind: OpenBaoAuditDevice
-      current: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'True') && status.conditions.exists(c, c.type == 'DriftDetected' && c.status == 'False')
-      failed: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'False')
+    # No OpenBaoAuditDevice entry: the ops-controller has no reconciler for
+    # that kind yet, so a CR of it would never receive status and the guard
+    # expression would wedge this Kustomization at timeout forever. Add the
+    # expression in the same PR that adds the reconciler.
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization

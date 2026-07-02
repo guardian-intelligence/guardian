@@ -139,6 +139,15 @@ spec:
   prune: true
   wait: false
   healthChecks:
+    # Certificate Ready latches: nothing flips it if the issuing controller
+    # dies, so a dead cert-manager would pass until a leaf missed renewal.
+    # Gate on the controller Deployment itself (kstatus assesses Deployments
+    # fully; healthChecks entries may reference objects outside this
+    # Kustomization's inventory).
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: cert-manager
+      namespace: cozy-cert-manager
     - apiVersion: cert-manager.io/v1
       kind: Certificate
       name: guardian-openbao-listener-ca
