@@ -1,10 +1,10 @@
 # Dark-mode source pinning: every Kustomization in sync.yaml (and the
 # openbao-ops children) substitutes its sourceRef from these values via
-# postBuild.substituteFrom. The ConfigMap is optional there — absent in
-# steady state, the ${GUARDIAN_SOURCE_*:=...} defaults resolve to the GitHub
-# GitRepository. Hand-applied objects are not in any Flux inventory, so
-# pruning never removes this; deleting it is the first step of exiting dark
-# mode.
+# postBuild.substituteFrom. The ConfigMap is required (Flux skips
+# substitution on an empty variable map); the sync-steady overlay ships the
+# same object with GitRepository values. Hand-applied objects are not in any
+# Flux inventory, so pruning never removes this; exiting dark mode re-applies
+# sync-steady to restore the GitRepository values.
 apiVersion: v1
 kind: ConfigMap
 metadata:

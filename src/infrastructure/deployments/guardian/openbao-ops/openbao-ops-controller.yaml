@@ -20,9 +20,12 @@ spec:
     name: ${GUARDIAN_SOURCE_NAME:=guardian}
   postBuild:
     substituteFrom:
+      # Required, not optional: Flux skips substitution entirely when the
+      # variable map is empty, which would leave the ${GUARDIAN_SOURCE_*}
+      # placeholders literal and fail the CRD enum. The bootstrap overlays
+      # always create guardian-source; a missing one should fail loudly.
       - kind: ConfigMap
         name: guardian-source
-        optional: true
   timeout: 5m
   wait: true
 ---
@@ -49,9 +52,12 @@ spec:
     name: ${GUARDIAN_SOURCE_NAME:=guardian}
   postBuild:
     substituteFrom:
+      # Required, not optional: Flux skips substitution entirely when the
+      # variable map is empty, which would leave the ${GUARDIAN_SOURCE_*}
+      # placeholders literal and fail the CRD enum. The bootstrap overlays
+      # always create guardian-source; a missing one should fail loudly.
       - kind: ConfigMap
         name: guardian-source
-        optional: true
   timeout: 5m
   wait: true
   # Without these expressions, kstatus treats the OpenBao operation CRs as
@@ -107,8 +113,11 @@ spec:
     name: ${GUARDIAN_SOURCE_NAME:=guardian}
   postBuild:
     substituteFrom:
+      # Required, not optional: Flux skips substitution entirely when the
+      # variable map is empty, which would leave the ${GUARDIAN_SOURCE_*}
+      # placeholders literal and fail the CRD enum. The bootstrap overlays
+      # always create guardian-source; a missing one should fail loudly.
       - kind: ConfigMap
         name: guardian-source
-        optional: true
   timeout: 5m
   wait: true

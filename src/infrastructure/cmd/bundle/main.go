@@ -239,11 +239,21 @@ func isHex64(s string) bool {
 }
 
 // haulerManifest projects lock refs into a content.hauler.cattle.io/v1
-// Images manifest.
+// Images manifest. A ref pinned as <repo>:<tag>@<digest> becomes TWO entries:
+// the digest form (<repo>@<digest>, byte-pinned, serves digest pulls) and the
+// tag form (<repo>:<tag>, so the served mirror answers tag-addressed pulls).
+// The digest-only workload refs need only the single digest entry. Talos
+// renders its system images (kube-apiserver, kubelet, etcd, pause, coredns)
+// by TAG, and skipFallback makes an unserved tag a fatal 404 — so tag
+// coverage is not optional for a dark boot.
 func haulerManifest(refs []string) ([]byte, error) {
-	images := make([]haulerImage, 0, len(refs))
+	var images []haulerImage
 	for _, ref := range refs {
-		images = append(images, haulerImage{Name: ref, ExcludeExtras: true})
+		digestForm, tagForm := haulerRefForms(ref)
+		images = append(images, haulerImage{Name: digestForm, ExcludeExtras: true})
+		if tagForm != "" {
+			images = append(images, haulerImage{Name: tagForm, ExcludeExtras: true})
+		}
 	}
 	manifest := haulerImages{
 		APIVersion: "content.hauler.cattle.io/v1",
@@ -252,4 +262,18 @@ func haulerManifest(refs []string) ([]byte, error) {
 		Spec:       haulerImagesSpec{Images: images},
 	}
 	return yaml.Marshal(manifest)
+}
+
+// haulerRefForms splits a lock ref into its digest form and, when the ref
+// carries a tag, its tag form. Input is always <name>@sha256:<hex> where
+// <name> is <repo> or <repo>:<tag>.
+func haulerRefForms(ref string) (digestForm, tagForm string) {
+	name, digest, _ := strings.Cut(ref, "@sha256:")
+	repo := name
+	if lastColon := strings.LastIndex(name, ":"); lastColon > strings.LastIndex(name, "/") {
+		repo = name[:lastColon]
+		tagForm = name
+	}
+	digestForm = repo + "@sha256:" + digest
+	return digestForm, tagForm
 }

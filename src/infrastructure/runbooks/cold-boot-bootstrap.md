@@ -48,7 +48,10 @@ into a fresh `dist/bundle/`:
   build, so the haul is provably complete relative to what the repo renders).
 - `store/` + `haul.tar.zst` — every locked artifact (container images, OCI
   Helm charts, Flux OCI artifacts) pulled digest-exact into a Hauler content
-  store and saved as one portable archive.
+  store and saved as one portable archive. Tagged lock refs (the Talos system
+  images) are stored under both their digest and their tag so the served
+  mirror answers Talos's tag-addressed pulls (`skipFallback` makes an
+  unserved tag a fatal 404).
 - `bundle-manifest.yaml` — the git revision plus sha256 digests of the lock
   and the haul.
 
@@ -90,12 +93,28 @@ Dark mode is entered and exited via PRs plus three bring-up steps:
    Kustomization's source resolved to the `guardian-oci` OCIRepository, plus
    the `guardian-source` ConfigMap that keeps Flux's own re-application of
    sync.yaml resolving the same way. `aspect infra converged
-   --expected-revision <sha>` gates exactly as in steady state.
+   --expected-revision <sha>` gates as in steady state — pass the same git
+   sha you gave `flux push artifact --revision`; the proof matches it against
+   the Kustomization's origin revision (an OCIRepository's applied revision
+   is `<tag>@<manifest-digest>`, which does not contain the git sha).
 
-Exiting dark: merge the aftermath PR flipping `darkBundleMirror.enabled`
-back off (regenerate node configs), delete the `guardian-source` ConfigMap
-(sources flip back to the GitHub GitRepository on the next reconcile), then
-delete the `guardian-oci` OCIRepository.
+Exiting dark is ordered and gated, not fire-and-forget:
+
+1. Merge the aftermath PR flipping `darkBundleMirror.enabled` back off and
+   regenerate the node configs (restores public registry mirrors + NTP).
+2. `kubectl apply -k src/infrastructure/bootstrap/sync-steady` — restores the
+   `guardian-source` ConfigMap to GitRepository values and patches the
+   top-level Kustomizations back. Do NOT just delete the ConfigMap: Flux
+   skips substitution on an empty variable map, and the literal placeholders
+   then fail the CRD enum.
+3. Force the flip through both generations rather than waiting on the 10m
+   intervals: `flux reconcile kustomization guardian-mgmt-base`, then once it
+   is Ready `flux reconcile kustomization guardian-openbao-ops` (its three
+   children re-source from Git only after it re-applies them). Confirm every
+   Kustomization's `sourceRef.kind` reads `GitRepository` and
+   `aspect infra converged --expected-revision <steady-sha>` passes.
+4. Only then delete the `guardian-oci` OCIRepository — deleting it while any
+   Kustomization still sources from it strands that slice.
 
 ## Custody replication
 

@@ -6,11 +6,32 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 )
+
+// walkYAMLFiles decodes every *.yaml under dir (recursively) and passes each
+// file's documents to fn.
+func walkYAMLFiles(t *testing.T, dir string, fn func(path string, docs []map[string]interface{})) {
+	t.Helper()
+
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".yaml") {
+			return nil
+		}
+		fn(path, yamlDocs(t, path))
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", dir, err)
+	}
+}
 
 const openBaoStaticSealKeyID = "d1bad73a1cc200c277ef24d23231d99ff6b424d4d4e397bc08f285a6767af013"
 
@@ -291,14 +312,30 @@ func TestFluxSourceParameterizationConformance(t *testing.T) {
 			substituted := false
 			for _, from := range sliceValue(nestedValue(t, doc, "spec", "postBuild", "substituteFrom")) {
 				entry := mapValue(from)
-				if stringValue(entry["kind"]) == "ConfigMap" && stringValue(entry["name"]) == "guardian-source" && entry["optional"] == true {
-					substituted = true
+				if stringValue(entry["kind"]) != "ConfigMap" || stringValue(entry["name"]) != "guardian-source" {
+					continue
 				}
+				// Required, not optional: an absent (optional) ConfigMap yields
+				// an empty variable map, and Flux then skips substitution and
+				// applies the placeholders literally. The bootstrap overlays
+				// always create it.
+				if entry["optional"] == true {
+					t.Fatalf("%s Kustomization %s marks guardian-source substituteFrom optional; an empty variable map makes Flux skip substitution and the CRD rejects the literal placeholders", path, name)
+				}
+				substituted = true
 			}
 			if !substituted {
-				t.Fatalf("%s Kustomization %s lacks the optional guardian-source substituteFrom; Flux would apply the placeholders literally and the CRD enum would reject them", path, name)
+				t.Fatalf("%s Kustomization %s lacks the guardian-source substituteFrom; Flux would apply the placeholders literally and the CRD enum would reject them", path, name)
 			}
 		}
+	}
+
+	// Both bootstrap overlays must ship the guardian-source ConfigMap so the
+	// variable map is never empty; steady points it at the GitRepository.
+	steadyCM := singleYAMLDoc(t, runfilePath("src/infrastructure/bootstrap/sync-steady/guardian-source-configmap.yaml"))
+	steadyData := mapValue(steadyCM["data"])
+	if stringValue(steadyData["GUARDIAN_SOURCE_KIND"]) != "GitRepository" || stringValue(steadyData["GUARDIAN_SOURCE_NAME"]) != "guardian" {
+		t.Fatalf("steady guardian-source ConfigMap = %v, want GitRepository/guardian", steadyData)
 	}
 
 	configMap := singleYAMLDoc(t, runfilePath("src/infrastructure/bootstrap/sync-dark/guardian-source-configmap.yaml"))
@@ -322,6 +359,54 @@ func TestFluxSourceParameterizationConformance(t *testing.T) {
 		for _, want := range []string{"kind: Kustomization", "op: replace", "path: /spec/sourceRef/kind", wantValue} {
 			assertTextContains(t, raw, want, path)
 		}
+	}
+}
+
+// Flux postBuild variable substitution runs envsubst over every manifest a
+// Kustomization applies, blanking any unescaped ${...} it cannot resolve —
+// including shell parameter expansions like ${var#prefix}. The only vars we
+// declare are GUARDIAN_SOURCE_*; anything else under a substituted path must
+// either escape as $${...} or carry kustomize.toolkit.fluxcd.io/substitute:
+// disabled. This is the guard that would have caught the OpenBao
+// tls-reloader script being blanked.
+func TestFluxSubstitutionSafetyConformance(t *testing.T) {
+	// Paths reconciled by a Kustomization that declares postBuild
+	// substitution (guardian-mgmt-base applies all of base/, guardian-system
+	// applies deployments/guardian/system, guardian-openbao-ops-* apply the
+	// openbao operator + operations dirs).
+	roots := []string{
+		"src/infrastructure/base",
+		"src/infrastructure/deployments/guardian/system",
+		"src/infrastructure/deployments/guardian/openbao-ops",
+		"src/infrastructure/operations/openbao/guardian-mgmt",
+		"src/services/secrets/openbao/deploy/base",
+		"src/services/secrets/openbao/deploy/guardian-mgmt",
+	}
+	// ${GUARDIAN_SOURCE_KIND...} / ${GUARDIAN_SOURCE_NAME...} are the declared
+	// vars; $${ is an escaped literal. Anything else is unhandled collateral.
+	unresolved := regexp.MustCompile(`([^$]|^)\$\{[^}]*\}`)
+	allowed := regexp.MustCompile(`\$\{GUARDIAN_SOURCE_(KIND|NAME)`)
+
+	for _, root := range roots {
+		dir := filepath.Dir(runfilePath(root + "/kustomization.yaml"))
+		walkYAMLFiles(t, dir, func(path string, docs []map[string]interface{}) {
+			for _, doc := range docs {
+				annotations := mapValue(mapValue(doc["metadata"])["annotations"])
+				if stringValue(annotations["kustomize.toolkit.fluxcd.io/substitute"]) == "disabled" {
+					continue
+				}
+				raw, err := yaml.Marshal(doc)
+				if err != nil {
+					t.Fatalf("re-marshal doc in %s: %v", path, err)
+				}
+				for _, match := range unresolved.FindAllString(string(raw), -1) {
+					if allowed.MatchString(match) {
+						continue
+					}
+					t.Fatalf("%s: unescaped %q under a Flux-substituted path would be blanked by envsubst; escape as $${...} or annotate the object kustomize.toolkit.fluxcd.io/substitute: disabled", path, strings.TrimSpace(match))
+				}
+			}
+		})
 	}
 }
 

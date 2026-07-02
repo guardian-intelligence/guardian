@@ -8,6 +8,13 @@ metadata:
     app.kubernetes.io/part-of: guardian
     guardian.dev/component: secrets
     guardian.dev/tenant-id: gi-guardian
+  annotations:
+    # guardian-system carries postBuild var substitution (source-ref flip for
+    # dark bootstrap). Flux envsubst would blank the tls-reloader sidecar's
+    # shell parameter expansions (${comm#/proc/} etc.) to empty strings,
+    # silently breaking SIGHUP cert reload. This object references none of the
+    # ${GUARDIAN_SOURCE_*} vars, so exempt it from substitution entirely.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
 spec:
   suspend: false
   chartRef:

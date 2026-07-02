@@ -63,8 +63,15 @@ type kubeObject struct {
 }
 
 type objectStatus struct {
-	LastAppliedRevision string      `json:"lastAppliedRevision"`
-	Conditions          []condition `json:"conditions"`
+	LastAppliedRevision string `json:"lastAppliedRevision"`
+	// In dark-uplink mode the source is an OCIRepository, whose applied
+	// revision is <tag>@<manifest-digest> and does NOT contain the git sha;
+	// the pushed git revision surfaces here instead (kustomize-controller
+	// records the OCI org.opencontainers.image.revision annotation as the
+	// origin revision). Steady GitRepository revisions are main@sha1:<sha>,
+	// so LastAppliedRevision alone matches there.
+	LastAppliedOriginRevision string      `json:"lastAppliedOriginRevision"`
+	Conditions                []condition `json:"conditions"`
 }
 
 type condition struct {
@@ -154,8 +161,10 @@ func validateFluxKustomizations(raw string, required []string, expectedRevision 
 		if ready == nil || ready.Status != "True" {
 			return fmt.Errorf("Flux Kustomization %q Ready = %s reason=%s message=%s", name, conditionStatus(ready), conditionReason(ready), conditionMessage(ready))
 		}
-		if expectedRevision != "" && !strings.Contains(item.Status.LastAppliedRevision, expectedRevision) {
-			return fmt.Errorf("Flux Kustomization %q lastAppliedRevision = %q, want it to contain %q", name, item.Status.LastAppliedRevision, expectedRevision)
+		if expectedRevision != "" &&
+			!strings.Contains(item.Status.LastAppliedRevision, expectedRevision) &&
+			!strings.Contains(item.Status.LastAppliedOriginRevision, expectedRevision) {
+			return fmt.Errorf("Flux Kustomization %q lastAppliedRevision = %q originRevision = %q, want one to contain %q", name, item.Status.LastAppliedRevision, item.Status.LastAppliedOriginRevision, expectedRevision)
 		}
 	}
 	fmt.Printf("Flux Kustomizations ready: %s\n", strings.Join(required, ","))

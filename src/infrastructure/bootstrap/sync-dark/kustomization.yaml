@@ -2,12 +2,14 @@
 # exactly once on a fresh cluster whose only reachable endpoint is the
 # haul-served mirror. It is the steady entrypoint with three deltas:
 # sourceRefs resolve to the OCIRepository, the guardian-source ConfigMap
-# makes Flux's own re-application of sync.yaml keep resolving them that way
-# (postBuild substitution), and the OCIRepository itself is added. The
+# carries OCIRepository values (so Flux's own re-application of sync.yaml
+# keeps resolving them that way), and the OCIRepository itself is added. The
 # GitRepository stays declared but unused (Not Ready without uplink; nothing
-# sources from it). Exiting dark mode is the reverse: delete the ConfigMap,
-# let sources flip back to GitRepository on the next reconcile, then delete
-# the OCIRepository.
+# sources from it). Exiting dark mode: re-apply the sync-steady overlay
+# (restores the ConfigMap to GitRepository values and patches the top-level
+# Kustomizations back), then delete the guardian-oci OCIRepository. Do NOT
+# just delete the ConfigMap — an empty variable map makes Flux skip
+# substitution and the placeholders fail the CRD enum.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
