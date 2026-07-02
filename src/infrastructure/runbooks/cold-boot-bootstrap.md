@@ -34,8 +34,33 @@ from-nothing bring-up may require.
 
 Workstation needs: this checkout, `bazelisk`, `podman`, the `aspect` CLI, and
 a public IP the nodes can reach. All other binaries (talm, talosctl, kubectl,
-helm, oras, boot-to-talos) are repo-pinned and materialize under
+helm, oras, flux, hauler, boot-to-talos) are repo-pinned and materialize under
 `$(bazelisk info output_base)/external/…`.
+
+## Offline bundle (dark-uplink input)
+
+`aspect infra bundle` builds the artifact half of a dark-uplink cold boot
+into a fresh `dist/bundle/`:
+
+- `hauler-manifest.yaml` — `images.lock` projected into a
+  `content.hauler.cattle.io/v1` Images manifest (Tier-1 lock tests gate the
+  build, so the haul is provably complete relative to what the repo renders).
+- `store/` + `haul.tar.zst` — every locked artifact (container images, OCI
+  Helm charts, Flux OCI artifacts) pulled digest-exact into a Hauler content
+  store and saved as one portable archive.
+- `bundle-manifest.yaml` — the git revision plus sha256 digests of the lock
+  and the haul.
+
+The complete dark drive is: `haul.tar.zst`, the source-built hauler binary
+(`bazelisk build //src/tools/hauler:hauler`), this repo checkout at the same
+revision, and the custody bundle above. At bring-up time the mirror host runs
+`hauler store load --filename=haul.tar.zst` and
+`hauler store serve registry --readonly=false`, and the repo checkout is
+pushed into it as a Flux OCI artifact with the repo-pinned flux CLI
+(`flux push artifact`) so the cluster's source needs no Git server. Served
+repo paths are host-stripped and docker-normalized
+(`registry.k8s.io/pause` → `/v2/library/pause/...`); the dark
+RegistryMirrorConfig overlay accounts for this per registry.
 
 ## Custody replication
 

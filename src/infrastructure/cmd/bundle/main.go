@@ -12,10 +12,13 @@
 package main
 
 import (
+	"crypto/sha256"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"sigs.k8s.io/yaml"
@@ -49,16 +52,30 @@ type haulerImage struct {
 	Name string `json:"name"`
 }
 
+// bundleManifest records what a built bundle is: the exact revision and the
+// digests of its inputs and output. No timestamps — output is a pure
+// function of the inputs.
+type bundleManifest struct {
+	Revision         string `json:"revision"`
+	Refs             int    `json:"refs"`
+	ImagesLockSHA256 string `json:"imagesLockSha256"`
+	HaulPath         string `json:"haulPath"`
+	HaulSHA256       string `json:"haulSha256"`
+}
+
 func main() {
 	var imagesLock string
 	var haulerManifestOut string
+	var haulPath string
+	var revision string
+	var bundleManifestOut string
 	flag.StringVar(&imagesLock, "images-lock", "src/infrastructure/bootstrap/bundle/images.lock", "digest-pinned OCI artifact inventory")
 	flag.StringVar(&haulerManifestOut, "hauler-manifest-out", "", "path to write the generated content.hauler.cattle.io/v1 Images manifest")
+	flag.StringVar(&haulPath, "haul-path", "", "built haul archive to record in the bundle manifest")
+	flag.StringVar(&revision, "revision", "", "git revision the bundle was built from")
+	flag.StringVar(&bundleManifestOut, "bundle-manifest-out", "", "path to write the bundle manifest (requires --haul-path and --revision)")
 	flag.Parse()
 
-	if haulerManifestOut == "" {
-		exitErr(errors.New("--hauler-manifest-out is required"))
-	}
 	lock, err := os.ReadFile(imagesLock)
 	if err != nil {
 		exitErr(err)
@@ -67,14 +84,60 @@ func main() {
 	if err != nil {
 		exitErr(err)
 	}
-	manifest, err := haulerManifest(refs)
+
+	switch {
+	case haulerManifestOut != "":
+		manifest, err := haulerManifest(refs)
+		if err != nil {
+			exitErr(err)
+		}
+		if err := writeFile(haulerManifestOut, manifest); err != nil {
+			exitErr(err)
+		}
+		fmt.Printf("hauler manifest written: refs=%d out=%s\n", len(refs), haulerManifestOut)
+	case bundleManifestOut != "":
+		if haulPath == "" || revision == "" {
+			exitErr(errors.New("--bundle-manifest-out requires --haul-path and --revision"))
+		}
+		manifest, err := describeBundle(lock, refs, haulPath, revision)
+		if err != nil {
+			exitErr(err)
+		}
+		if err := writeFile(bundleManifestOut, manifest); err != nil {
+			exitErr(err)
+		}
+		fmt.Printf("bundle manifest written: revision=%s refs=%d out=%s\n", revision, len(refs), bundleManifestOut)
+	default:
+		exitErr(errors.New("one of --hauler-manifest-out or --bundle-manifest-out is required"))
+	}
+}
+
+func writeFile(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+// describeBundle hashes the lock and the built haul into a bundle manifest.
+// Hashing local outputs is projection, not transport.
+func describeBundle(lock []byte, refs []string, haulPath, revision string) ([]byte, error) {
+	haul, err := os.Open(haulPath)
 	if err != nil {
-		exitErr(err)
+		return nil, err
 	}
-	if err := os.WriteFile(haulerManifestOut, manifest, 0o644); err != nil {
-		exitErr(err)
+	defer haul.Close()
+	haulHash := sha256.New()
+	if _, err := io.Copy(haulHash, haul); err != nil {
+		return nil, err
 	}
-	fmt.Printf("hauler manifest written: refs=%d out=%s\n", len(refs), haulerManifestOut)
+	return yaml.Marshal(bundleManifest{
+		Revision:         revision,
+		Refs:             len(refs),
+		ImagesLockSHA256: fmt.Sprintf("%x", sha256.Sum256(lock)),
+		HaulPath:         filepath.Base(haulPath),
+		HaulSHA256:       fmt.Sprintf("%x", haulHash.Sum(nil)),
+	})
 }
 
 func exitErr(err error) {

@@ -17,6 +17,8 @@ aspect infra tofu-init
 
 aspect infra bootstrap
 
+aspect infra bundle
+
 aspect infra converged
 
 aspect infra openbao-drill
@@ -34,6 +36,14 @@ installer/operator to the repo-pinned version.
 clusters when only the Cozystack installer/operator release needs to move.
 OpenBao uses static auto-unseal and OpenBao self-init; see
 `src/infrastructure/runbooks/openbao-static-seal-self-init.md`.
+`aspect infra bundle` builds the offline bundle into a fresh `dist/bundle/`:
+it gates on the Tier-1 lock tests, projects
+`src/infrastructure/bootstrap/bundle/images.lock` into a Hauler manifest,
+syncs every locked artifact into a content store, saves the portable
+`haul.tar.zst`, and records a bundle manifest with the git revision and
+digests. The haul plus the source-built Hauler binary, the repo checkout, and
+the operator custody bundle are the complete inputs to a dark-uplink cold
+boot (`src/infrastructure/runbooks/cold-boot-bootstrap.md`).
 `aspect infra converged` verifies every declared Flux Kustomization is Ready
 at the expected revision; workload and component health gate readiness via
 Flux health checks declared in the manifests (`healthChecks`/`healthCheckExprs`).
@@ -76,6 +86,7 @@ state stay out of Git.
 | ORAS | `src/tools/oras/oras.MODULE.bazel` |
 | OpenBao CLI (`bao`) | `src/tools/openbao/openbao.MODULE.bazel` |
 | Hauler | `src/tools/hauler/go.mod` (built from source; `//src/tools/hauler`) |
+| Flux CLI | `src/tools/flux/flux.MODULE.bazel` |
 | curl | `src/tools/curl/curl.MODULE.bazel` |
 | Cilium CLI | `src/tools/debug-clis/debug-clis.MODULE.bazel` |
 | Hubble CLI | `src/tools/debug-clis/debug-clis.MODULE.bazel` |

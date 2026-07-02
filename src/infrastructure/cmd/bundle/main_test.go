@@ -135,3 +135,37 @@ func TestProductionImagesLockProjects(t *testing.T) {
 		t.Fatalf("production manifest has %d images, want %d", len(parsed.Spec.Images), len(refs))
 	}
 }
+
+func TestDescribeBundle(t *testing.T) {
+	dir := t.TempDir()
+	haulPath := dir + "/haul.tar.zst"
+	if err := os.WriteFile(haulPath, []byte("haul-bytes"), 0o644); err != nil {
+		t.Fatalf("write haul fixture: %v", err)
+	}
+	lock := []byte(fixtureLock)
+	refs, err := parseImagesLock(lock)
+	if err != nil {
+		t.Fatalf("parseImagesLock() error = %v", err)
+	}
+	payload, err := describeBundle(lock, refs, haulPath, "abc123")
+	if err != nil {
+		t.Fatalf("describeBundle() error = %v", err)
+	}
+	var parsed bundleManifest
+	if err := yaml.Unmarshal(payload, &parsed); err != nil {
+		t.Fatalf("bundle manifest does not unmarshal: %v", err)
+	}
+	if parsed.Revision != "abc123" || parsed.Refs != 2 || parsed.HaulPath != "haul.tar.zst" {
+		t.Fatalf("bundle manifest = %+v, want revision abc123, 2 refs, basename haul path", parsed)
+	}
+	if len(parsed.HaulSHA256) != 64 || len(parsed.ImagesLockSHA256) != 64 {
+		t.Fatalf("bundle manifest digests malformed: %+v", parsed)
+	}
+	second, err := describeBundle(lock, refs, haulPath, "abc123")
+	if err != nil {
+		t.Fatalf("describeBundle() second call error = %v", err)
+	}
+	if string(payload) != string(second) {
+		t.Fatalf("describeBundle() output is not deterministic")
+	}
+}

@@ -20,6 +20,18 @@ TALOSCTL_FILE_TARGET = "@talosctl_linux_amd64//file:file"
 COZYSTACK_INSTALLER_CHART = "oci://ghcr.io/cozystack/cozystack/cozy-installer"
 COZYSTACK_INSTALLER_VERSION = "1.5.0"
 BACKUP_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_backup_drill:cozystack_backup_drill"
+BUNDLE_TARGET = "//src/infrastructure/cmd/bundle:bundle"
+HAULER_TARGET = "//src/tools/hauler:hauler"
+IMAGES_LOCK_PATH = "src/infrastructure/bootstrap/bundle/images.lock"
+
+# Gate every bundle build on the Tier-1 invariants that make the projection
+# trustworthy: talm_render_test carries the images.lock completeness checks,
+# bundle_test carries the projection contract (digest pinning, determinism).
+BUNDLE_PRECONDITION_TESTS = [
+    "//src/infrastructure/cmd/bundle:bundle_test",
+    "//src/infrastructure/tests:talm_render_test",
+]
+
 DB_LOAD_TARGET = "//src/infrastructure/cmd/cozystack_db_load:cozystack_db_load"
 HARBOR_REGISTRY_TARGET = "//src/infrastructure/cmd/cozystack_harbor_registry:cozystack_harbor_registry"
 HTTP_LOAD_TARGET = "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load"
@@ -1357,6 +1369,125 @@ def _openbao_observability_drill_impl(ctx):
         label = "cozystack openbao observability drill",
     )
 
+def _path_exists(ctx, path):
+    r = ctx.std.process.command("test").args(["-e", path]).stdout("piped").stderr("piped").spawn().wait_with_output()
+    return r.status.code == 0
+
+def _bundle_impl(ctx):
+    out_dir = ws_path(ctx, ctx.args.out_dir)
+    resuming = _path_exists(ctx, out_dir)
+    if resuming and not ctx.args.resume:
+        ctx.std.io.stderr.write("ERROR: " + out_dir + " already exists. Syncing into an existing store can carry artifacts that are no longer in images.lock into the haul. Remove it for a clean build, or pass --resume to continue an interrupted sync of the SAME lock (verified by manifest comparison).\n")
+        return 1
+
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        ["test"] + BUNDLE_PRECONDITION_TESTS,
+        cwd = ws_path(ctx),
+        label = "bundle preconditions: images.lock completeness + projection contract",
+    )
+    if rc != 0:
+        return rc
+
+    revision = _capture_stdout(
+        ctx,
+        "git",
+        ["rev-parse", "HEAD"],
+        cwd = ws_path(ctx),
+        label = "git rev-parse HEAD",
+    )
+    if revision == None:
+        return 1
+
+    hauler_manifest = out_dir + "/hauler-manifest.yaml"
+    manifest_out = hauler_manifest
+    if resuming:
+        manifest_out = hauler_manifest + ".fresh"
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        [
+            "run",
+            BUNDLE_TARGET,
+            "--",
+            "--images-lock",
+            ws_path(ctx, IMAGES_LOCK_PATH),
+            "--hauler-manifest-out",
+            manifest_out,
+        ],
+        cwd = ws_path(ctx),
+        label = "project images.lock into hauler manifest",
+    )
+    if rc != 0:
+        return rc
+
+    if resuming:
+        # A resume is only safe when the interrupted bundle was built from the
+        # same lock: the projection is deterministic, so byte-compare it.
+        if _capture_success(ctx, "cmp", ["-s", hauler_manifest, manifest_out], label = "compare projected manifest with the interrupted bundle's") != 0:
+            ctx.std.io.stderr.write("ERROR: images.lock changed since the bundle in " + out_dir + " was started; its store may hold refs no longer in the lock. Remove the directory and build fresh.\n")
+            return 1
+        rc = _capture_success(ctx, "rm", [manifest_out], label = "drop comparison copy")
+        if rc != 0:
+            return rc
+
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        [
+            "run",
+            HAULER_TARGET,
+            "--",
+            "store",
+            "sync",
+            "--store=" + out_dir + "/store",
+            "--filename=" + hauler_manifest,
+        ],
+        cwd = ws_path(ctx),
+        label = "hauler store sync (pulls every locked artifact; needs network)",
+    )
+    if rc != 0:
+        return rc
+
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        [
+            "run",
+            HAULER_TARGET,
+            "--",
+            "store",
+            "save",
+            "--store=" + out_dir + "/store",
+            "--filename=" + out_dir + "/haul.tar.zst",
+        ],
+        cwd = ws_path(ctx),
+        label = "hauler store save",
+    )
+    if rc != 0:
+        return rc
+
+    return checked_spawn(
+        ctx,
+        "bazelisk",
+        [
+            "run",
+            BUNDLE_TARGET,
+            "--",
+            "--images-lock",
+            ws_path(ctx, IMAGES_LOCK_PATH),
+            "--haul-path",
+            out_dir + "/haul.tar.zst",
+            "--revision",
+            revision,
+            "--bundle-manifest-out",
+            out_dir + "/bundle-manifest.yaml",
+        ],
+        cwd = ws_path(ctx),
+        label = "write bundle manifest (revision + digests)",
+    )
+
 def _converged_impl(ctx):
     kubectl = _kubectl_path(ctx)
     if kubectl == None:
@@ -1423,6 +1554,17 @@ dns_apply = task(
     args = {
         "endpoint": args.string(default = "", description = "Optional S3-compatible backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
         "mode": args.string(default = "plan", description = "OpenTofu operation: plan or apply."),
+    },
+)
+
+bundle = task(
+    implementation = _bundle_impl,
+    name = "bundle",
+    group = ["infra"],
+    summary = "Build the offline bundle: project images.lock into a hauler manifest, sync every locked artifact into a store, save the haul archive, and record the bundle manifest (revision + digests). Needs network; docker.io refs practically require `hauler login` credentials (anonymous pulls are rate-limited to ~10/hour).",
+    args = {
+        "out_dir": args.string(default = "dist/bundle", description = "Output directory for the bundle, relative to the workspace root."),
+        "resume": args.boolean(default = False, description = "Continue an interrupted sync into an existing out_dir. Refused unless the projected manifest is byte-identical to the interrupted bundle's (same images.lock)."),
     },
 )
 
