@@ -75,8 +75,6 @@ machine:
     node.kubernetes.io/exclude-from-external-load-balancers:
       $patch: delete
     guardian.dev/openbao-static-seal: "true"
-  nodeTaints:
-    guardian.dev/openbao-static-seal: NoSchedule
 cluster:
   controlPlane:
     endpoint: https://10.8.0.250:6443
