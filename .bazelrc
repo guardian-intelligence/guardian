@@ -1,2 +1,10 @@
 build --incompatible_strict_action_env
 test --test_output=errors
+
+# Hauler's dependency tree is resolved in an isolated go_deps extension
+# instance (MODULE.bazel) so it cannot force version bumps on the production
+# operator's Go dependencies. Coupled to the Bazel version in .bazelversion:
+# when a Bazel bump stabilizes or removes this experimental flag, revisit it
+# together with `isolate = True` in MODULE.bazel (fail-closed — every command
+# errors on an unknown flag).
+common --experimental_isolated_extension_usages
