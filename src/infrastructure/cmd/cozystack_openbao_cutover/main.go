@@ -28,17 +28,18 @@ var defaultKustomizations = []string{
 
 var defaultOpenBaoObjects = []string{
 	"OpenBaoAuthBackend/kubernetes",
-	"OpenBaoKubernetesAuthRole/cert-manager-openbao-api-issuer",
 	"OpenBaoKubernetesAuthRole/external-dns",
 	"OpenBaoKubernetesAuthRole/ops-controller",
 	"OpenBaoMount/kv",
-	"OpenBaoMount/pki-openbao-api",
+	"OpenBaoMount/transit",
 	"OpenBaoMountTune/kv",
-	"OpenBaoPKIRole/openbao-api",
-	"OpenBaoPKIRootIssuer/openbao-api-root-2026",
-	"OpenBaoPolicy/cert-manager-openbao-api-issuer",
 	"OpenBaoPolicy/external-dns",
 	"OpenBaoPolicy/ops-controller",
+}
+
+var defaultCertificates = []string{
+	"guardian-openbao-listener-ca",
+	"guardian-openbao-api",
 }
 
 type cutoverConfig struct {
@@ -47,6 +48,8 @@ type cutoverConfig struct {
 	KubeAPIServer          string
 	RequestTimeout         string
 	FluxNamespace          string
+	CertManagerNamespace   string
+	CertManagerDeployment  string
 	OpenBaoNamespace       string
 	OpenBaoHelmRelease     string
 	OpenBaoStatefulSet     string
@@ -54,6 +57,7 @@ type cutoverConfig struct {
 	ExpectedRevision       string
 	RequiredKustomizations []string
 	RequiredOpenBaoObjects []string
+	RequiredCertificates   []string
 }
 
 type kubectlRunner struct {
@@ -121,11 +125,14 @@ func main() {
 	var cfg cutoverConfig
 	var requiredKustomizations string
 	var requiredOpenBaoObjects string
+	var requiredCertificates string
 	flag.StringVar(&cfg.Kubectl, "kubectl", "", "path to kubectl")
 	flag.StringVar(&cfg.Kubeconfig, "kubeconfig", "", "kubeconfig for guardian-mgmt")
 	flag.StringVar(&cfg.KubeAPIServer, "kube-api-server", "", "optional Kubernetes API server override for off-VLAN proof runs")
 	flag.StringVar(&cfg.RequestTimeout, "request-timeout", "15s", "kubectl API request timeout")
 	flag.StringVar(&cfg.FluxNamespace, "flux-namespace", "cozy-fluxcd", "Flux namespace")
+	flag.StringVar(&cfg.CertManagerNamespace, "cert-manager-namespace", "cozy-cert-manager", "cert-manager namespace")
+	flag.StringVar(&cfg.CertManagerDeployment, "cert-manager-deployment", "cert-manager", "cert-manager controller Deployment name")
 	flag.StringVar(&cfg.OpenBaoNamespace, "openbao-namespace", "tenant-guardian", "OpenBao namespace")
 	flag.StringVar(&cfg.OpenBaoHelmRelease, "openbao-helmrelease", "guardian-openbao", "OpenBao HelmRelease name")
 	flag.StringVar(&cfg.OpenBaoStatefulSet, "openbao-statefulset", "guardian-openbao", "OpenBao StatefulSet name")
@@ -133,10 +140,12 @@ func main() {
 	flag.StringVar(&cfg.ExpectedRevision, "expected-revision", "", "optional Git revision that all checked Flux Kustomizations must have applied")
 	flag.StringVar(&requiredKustomizations, "required-kustomizations", strings.Join(defaultKustomizations, ","), "comma-separated Flux Kustomizations required for cutover proof")
 	flag.StringVar(&requiredOpenBaoObjects, "required-openbao-objects", strings.Join(defaultOpenBaoObjects, ","), "comma-separated Kind/name OpenBao CRs required for cutover proof")
+	flag.StringVar(&requiredCertificates, "required-certificates", strings.Join(defaultCertificates, ","), "comma-separated cert-manager Certificates required for cutover proof")
 	flag.Parse()
 
 	cfg.RequiredKustomizations = csv(requiredKustomizations)
 	cfg.RequiredOpenBaoObjects = csv(requiredOpenBaoObjects)
+	cfg.RequiredCertificates = csv(requiredCertificates)
 
 	exitIfErr(validateConfig(cfg))
 	exitIfErr(runCutoverProof(context.Background(), cfg))
@@ -157,6 +166,12 @@ func validateConfig(cfg cutoverConfig) error {
 	if cfg.FluxNamespace == "" {
 		return errors.New("--flux-namespace is required")
 	}
+	if cfg.CertManagerNamespace == "" {
+		return errors.New("--cert-manager-namespace is required")
+	}
+	if cfg.CertManagerDeployment == "" {
+		return errors.New("--cert-manager-deployment is required")
+	}
 	if cfg.OpenBaoNamespace == "" {
 		return errors.New("--openbao-namespace is required")
 	}
@@ -174,6 +189,9 @@ func validateConfig(cfg cutoverConfig) error {
 	}
 	if len(cfg.RequiredOpenBaoObjects) == 0 {
 		return errors.New("--required-openbao-objects must not be empty")
+	}
+	if len(cfg.RequiredCertificates) == 0 {
+		return errors.New("--required-certificates must not be empty")
 	}
 	return nil
 }
@@ -195,6 +213,23 @@ func runCutoverProof(ctx context.Context, cfg cutoverConfig) error {
 	}
 	if err := validateFluxKustomizations(fluxRaw, cfg.RequiredKustomizations, cfg.ExpectedRevision); err != nil {
 		return err
+	}
+
+	certManagerRaw, err := runner.output(ctx, "cert-manager Deployment", "-n", cfg.CertManagerNamespace, "get", "deployment.apps/"+cfg.CertManagerDeployment, "-o", "json")
+	if err != nil {
+		return err
+	}
+	if err := validateDeploymentReplicasReady(certManagerRaw, "cert-manager", cfg.CertManagerDeployment); err != nil {
+		return err
+	}
+	for _, certificate := range cfg.RequiredCertificates {
+		certificateRaw, err := runner.output(ctx, "cert-manager Certificate "+certificate, "-n", cfg.OpenBaoNamespace, "get", "certificates.cert-manager.io/"+certificate, "-o", "json")
+		if err != nil {
+			return err
+		}
+		if err := validateReadyCondition(certificateRaw, "Certificate", certificate); err != nil {
+			return err
+		}
 	}
 
 	helmReleaseRaw, err := runner.output(ctx, "OpenBao HelmRelease", "-n", cfg.OpenBaoNamespace, "get", "helmreleases.helm.toolkit.fluxcd.io/"+cfg.OpenBaoHelmRelease, "-o", "json")
@@ -276,21 +311,33 @@ func validateFluxKustomizations(raw string, required []string, expectedRevision 
 }
 
 func validateDeploymentReady(raw string, name string) error {
+	if err := validateDeploymentReplicasReady(raw, "OpenBao ops-controller", name); err != nil {
+		return err
+	}
 	var deployment kubeObject
 	if err := json.Unmarshal([]byte(raw), &deployment); err != nil {
 		return fmt.Errorf("parse Deployment %q: %w", name, err)
-	}
-	if deployment.Status.Replicas == 0 {
-		return fmt.Errorf("Deployment %q has zero desired replicas", name)
-	}
-	if deployment.Status.ReadyReplicas != deployment.Status.Replicas {
-		return fmt.Errorf("Deployment %q readyReplicas=%d replicas=%d", name, deployment.Status.ReadyReplicas, deployment.Status.Replicas)
 	}
 	image := containerImage(deployment.Spec.Template.Spec.Containers, "manager")
 	if !strings.Contains(image, "@sha256:") {
 		return fmt.Errorf("Deployment %q manager image = %q, want digest-pinned image", name, image)
 	}
-	fmt.Printf("OpenBao ops-controller ready: deployment=%s image=%s replicas=%d\n", name, image, deployment.Status.Replicas)
+	fmt.Printf("OpenBao ops-controller image digest-pinned: deployment=%s image=%s\n", name, image)
+	return nil
+}
+
+func validateDeploymentReplicasReady(raw string, kind string, name string) error {
+	var deployment kubeObject
+	if err := json.Unmarshal([]byte(raw), &deployment); err != nil {
+		return fmt.Errorf("parse %s Deployment %q: %w", kind, name, err)
+	}
+	if deployment.Status.Replicas == 0 {
+		return fmt.Errorf("%s Deployment %q has zero desired replicas", kind, name)
+	}
+	if deployment.Status.ReadyReplicas != deployment.Status.Replicas {
+		return fmt.Errorf("%s Deployment %q readyReplicas=%d replicas=%d", kind, name, deployment.Status.ReadyReplicas, deployment.Status.Replicas)
+	}
+	fmt.Printf("%s Deployment ready: deployment=%s replicas=%d\n", kind, name, deployment.Status.Replicas)
 	return nil
 }
 
@@ -460,8 +507,6 @@ func openBaoResourceTypes() []string {
 		"openbaokubernetesauthroles.openbao.guardian.dev",
 		"openbaomounts.openbao.guardian.dev",
 		"openbaomounttunes.openbao.guardian.dev",
-		"openbaopkiroles.openbao.guardian.dev",
-		"openbaopkirootissuers.openbao.guardian.dev",
 		"openbaopolicies.openbao.guardian.dev",
 	}
 }

@@ -1,3 +1,4 @@
 exports_files([
     "openbao-and-conformance-design.md",
+    "openbao-residue-inventory.md",
 ])

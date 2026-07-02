@@ -49,11 +49,8 @@ func TestOpenBaoStaticSealTLSAndStorageConformance(t *testing.T) {
 		`path \"sys/auth\"`,
 		`path \"auth/kubernetes/config\"`,
 		`path \"sys/mounts\"`,
-		`path \"sys/mounts/pki/openbao-api\"`,
-		`path \"pki/openbao-api/roles/openbao-api\"`,
-		`path \"pki/openbao-api/root/generate/internal\"`,
-		`path \"pki/openbao-api/issuer/openbao-api-root-2026\"`,
-		`path \"pki/openbao-api/config/issuers\"`,
+		`path \"sys/mounts/transit\"`,
+		`path \"sys/mounts/transit/tune\"`,
 		`request "write_secret_importer_policy"`,
 		`request "write_secret_importer_role"`,
 		`kv/data/guardian/guardian-mgmt/tenant-guardian/dns/external-dns`,
@@ -67,69 +64,46 @@ func TestOpenBaoStaticSealTLSAndStorageConformance(t *testing.T) {
 		assertTextContains(t, raw, want, path)
 	}
 	assertTextNotContains(t, raw, "http://guardian-openbao", path)
+	assertTextNotContains(t, raw, "pki/openbao-api", path)
 
-	pki := readText(t, runfilePath("src/infrastructure/deployments/guardian/system/openbao-pki.yaml"))
-	assertTextContains(t, pki, "guardian-openbao-active.tenant-guardian.svc.cozy.local", "openbao PKI manifest")
-	assertTextContains(t, pki, "guardian-openbao-0.guardian-openbao-internal.tenant-guardian.svc.cozy.local", "openbao PKI manifest")
+	listener := readText(t, runfilePath("src/infrastructure/deployments/guardian/system/openbao-listener-tls.yaml"))
+	assertTextContains(t, listener, "guardian-openbao-listener-ca", "openbao listener TLS manifest")
+	assertTextContains(t, listener, "secretName: guardian-openbao-api-tls", "openbao listener TLS manifest")
+	assertTextContains(t, listener, "guardian-openbao-active.tenant-guardian.svc.cozy.local", "openbao listener TLS manifest")
+	assertTextContains(t, listener, "guardian-openbao-0.guardian-openbao-internal.tenant-guardian.svc.cozy.local", "openbao listener TLS manifest")
 }
 
-func TestOpenBaoVaultIssuerAndPKIRoleConformance(t *testing.T) {
-	issuerPath := runfilePath("src/infrastructure/deployments/guardian/system/openbao-vault-issuer.yaml")
-	issuerRaw := readText(t, issuerPath)
-	issuerDocs := yamlDocs(t, issuerPath)
-	findDoc(t, issuerDocs, "ServiceAccount", "cert-manager-openbao-issuer")
-	findDoc(t, issuerDocs, "Role", "cert-manager-openbao-tokenrequest")
-	findDoc(t, issuerDocs, "RoleBinding", "cert-manager-openbao-tokenrequest")
-	issuer := findDoc(t, issuerDocs, "Issuer", "guardian-openbao-vault")
-	assertNestedString(t, issuer, "https://guardian-openbao.tenant-guardian.svc:8200", "spec", "vault", "server")
-	assertNestedString(t, issuer, "pki/openbao-api/sign/openbao-api", "spec", "vault", "path")
-	assertNestedString(t, issuer, "guardian-openbao-api-tls", "spec", "vault", "caBundleSecretRef", "name")
-	assertNestedString(t, issuer, "/v1/auth/kubernetes", "spec", "vault", "auth", "kubernetes", "mountPath")
-	assertNestedString(t, issuer, "guardian-cert-manager-openbao-api-issuer", "spec", "vault", "auth", "kubernetes", "role")
-	for _, want := range []string{
-		"resources:",
-		"- serviceaccounts/token",
-		"resourceNames:",
-		"- cert-manager-openbao-issuer",
-		"namespace: cozy-cert-manager",
-		"- openbao",
-	} {
-		assertTextContains(t, issuerRaw, want, issuerPath)
-	}
+func TestOpenBaoListenerTLSAndTransitConformance(t *testing.T) {
+	listenerPath := runfilePath("src/infrastructure/deployments/guardian/system/openbao-listener-tls.yaml")
+	listenerDocs := yamlDocs(t, listenerPath)
+	findDoc(t, listenerDocs, "Issuer", "guardian-openbao-listener-selfsigned")
+	ca := findDoc(t, listenerDocs, "Certificate", "guardian-openbao-listener-ca")
+	assertNestedString(t, ca, "guardian-openbao-listener-ca-tls", "spec", "secretName")
+	assertNestedBool(t, ca, true, "spec", "isCA")
+	issuer := findDoc(t, listenerDocs, "Issuer", "guardian-openbao-listener-ca")
+	assertNestedString(t, issuer, "guardian-openbao-listener-ca-tls", "spec", "ca", "secretName")
+	leaf := findDoc(t, listenerDocs, "Certificate", "guardian-openbao-api")
+	assertNestedString(t, leaf, "guardian-openbao-api-tls", "spec", "secretName")
+	assertNestedString(t, leaf, "guardian-openbao-listener-ca", "spec", "issuerRef", "name")
 
 	networkPolicy := readText(t, runfilePath("src/infrastructure/deployments/guardian/system/openbao-networkpolicy.yaml"))
-	for _, want := range []string{
-		"name: allow-cert-manager-to-openbao",
-		"app.kubernetes.io/name: cert-manager",
-		"k8s:io.kubernetes.pod.namespace: cozy-cert-manager",
-		"port: \"8200\"",
+	assertTextNotContains(t, networkPolicy, "allow-cert-manager-to-openbao", "openbao network policy")
+	assertTextNotContains(t, networkPolicy, "cozy-cert-manager", "openbao network policy")
+
+	transitPath := runfilePath("src/infrastructure/operations/openbao/guardian-mgmt/mounts/transit.yaml")
+	transit := singleYAMLDoc(t, transitPath)
+	assertNestedString(t, transit, "OpenBaoMount", "kind")
+	assertNestedString(t, transit, "transit", "spec", "path")
+	assertNestedString(t, transit, "transit", "spec", "type")
+
+	for _, deleted := range []string{
+		"src/infrastructure/deployments/guardian/system/openbao-vault-issuer.yaml",
+		"src/infrastructure/operations/openbao/guardian-mgmt/mounts/pki-openbao-api.yaml",
+		"src/infrastructure/operations/openbao/guardian-mgmt/pkiroles/openbao-api.yaml",
+		"src/infrastructure/operations/openbao/guardian-mgmt/pkirootissuers/openbao-api-root-2026.yaml",
 	} {
-		assertTextContains(t, networkPolicy, want, "openbao network policy")
+		assertPathMissing(t, runfilePath(deleted))
 	}
-
-	statePath := runfilePath("src/infrastructure/operations/openbao/guardian-mgmt/pkiroles/openbao-api.yaml")
-	stateRaw := readText(t, statePath)
-	state := singleYAMLDoc(t, statePath)
-	assertNestedString(t, state, "OpenBaoPKIRole", "kind")
-	assertNestedString(t, state, "pki/openbao-api", "spec", "mountPath")
-	assertNestedString(t, state, "openbao-api", "spec", "roleName")
-	assertNestedBool(t, state, true, "spec", "serverFlag")
-	assertNestedBool(t, state, false, "spec", "clientFlag")
-	assertNestedBool(t, state, false, "spec", "allowAnyName")
-	assertNestedBool(t, state, false, "spec", "allowWildcardCertificates")
-	assertTextContains(t, stateRaw, "127.0.0.1/32", statePath)
-	assertTextContains(t, stateRaw, "guardian-openbao-active.tenant-guardian.svc.cluster.local", statePath)
-
-	rootIssuerPath := runfilePath("src/infrastructure/operations/openbao/guardian-mgmt/pkirootissuers/openbao-api-root-2026.yaml")
-	rootIssuer := singleYAMLDoc(t, rootIssuerPath)
-	assertNestedString(t, rootIssuer, "OpenBaoPKIRootIssuer", "kind")
-	assertNestedString(t, rootIssuer, "pki/openbao-api", "spec", "mountPath")
-	assertNestedString(t, rootIssuer, "openbao-api-root-2026", "spec", "issuerName")
-	assertNestedString(t, rootIssuer, "Guardian OpenBao API Root 2026", "spec", "commonName")
-	assertNestedString(t, rootIssuer, "87600h", "spec", "ttl")
-	assertNestedString(t, rootIssuer, "ec", "spec", "keyType")
-	assertNestedInt(t, rootIssuer, 256, "spec", "keyBits")
-	assertNestedBool(t, rootIssuer, true, "spec", "setDefault")
 }
 
 func TestOpenBaoLocalStorageClassConformance(t *testing.T) {
@@ -213,7 +187,7 @@ func TestOpenBaoFluxOrderingConformance(t *testing.T) {
 
 	system := findDoc(t, docs, "Kustomization", "guardian-system")
 	assertNestedBool(t, system, false, "spec", "wait")
-	assertHealthCheck(t, system, "cert-manager.io/v1", "Certificate", "guardian-openbao-ca", "tenant-guardian")
+	assertHealthCheck(t, system, "cert-manager.io/v1", "Certificate", "guardian-openbao-listener-ca", "tenant-guardian")
 	assertHealthCheck(t, system, "cert-manager.io/v1", "Certificate", "guardian-openbao-api", "tenant-guardian")
 	assertHealthCheck(t, system, "helm.toolkit.fluxcd.io/v2", "HelmRelease", "guardian-openbao", "tenant-guardian")
 	assertHealthCheck(t, system, "apps/v1", "StatefulSet", "guardian-openbao", "tenant-guardian")
@@ -277,6 +251,19 @@ func readText(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(payload)
+}
+
+func assertPathMissing(t *testing.T, path string) {
+	t.Helper()
+
+	_, err := os.Stat(filepath.Clean(path))
+	if errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	t.Fatalf("%s exists; expected it to be removed", path)
 }
 
 func singleYAMLDoc(t *testing.T, path string) map[string]interface{} {

@@ -3,11 +3,10 @@ filegroup(
     srcs = [
         "kustomization.yaml",
         "openbao-helmrelease.yaml",
+        "openbao-listener-tls.yaml",
         "openbao-networkpolicy.yaml",
         "openbao-observability.yaml",
-        "openbao-pki.yaml",
         "openbao-rbac.yaml",
-        "openbao-vault-issuer.yaml",
         "stage-tenants.yaml",
     ],
     visibility = ["//visibility:public"],

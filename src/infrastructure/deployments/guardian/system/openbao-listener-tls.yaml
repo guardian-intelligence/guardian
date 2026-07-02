@@ -1,4 +1,56 @@
 apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: guardian-openbao-listener-selfsigned
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: openbao
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: secrets
+    guardian.dev/tenant-id: gi-guardian
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: guardian-openbao-listener-ca
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: openbao
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: secrets
+    guardian.dev/tenant-id: gi-guardian
+spec:
+  secretName: guardian-openbao-listener-ca-tls
+  commonName: Guardian OpenBao Listener CA
+  isCA: true
+  duration: 87600h
+  renewBefore: 720h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    group: cert-manager.io
+    kind: Issuer
+    name: guardian-openbao-listener-selfsigned
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: guardian-openbao-listener-ca
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: openbao
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: secrets
+    guardian.dev/tenant-id: gi-guardian
+spec:
+  ca:
+    secretName: guardian-openbao-listener-ca-tls
+---
+apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: guardian-openbao-api
@@ -24,7 +76,7 @@ spec:
   issuerRef:
     group: cert-manager.io
     kind: Issuer
-    name: guardian-openbao-vault
+    name: guardian-openbao-listener-ca
   dnsNames:
     - guardian-openbao
     - guardian-openbao.tenant-guardian

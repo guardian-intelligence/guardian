@@ -48,7 +48,7 @@ retained raft snapshot needs them.
 
 Flux reconciles the steady state:
 
-- cert-manager's Vault Issuer and OpenBao-issued API listener Certificate;
+- cert-manager's independent listener CA and OpenBao API listener Certificate;
 - `HelmRelease/tenant-guardian/guardian-openbao`;
 - the OpenBao ops-controller CRDs and Deployment;
 - Flux-applied OpenBao operation CRs.
@@ -60,41 +60,29 @@ Kubernetes auth, its config, the ops-controller policy, and the ops-controller
 role. The temporary privileged token used internally by self-init is not
 returned and is revoked by OpenBao after initialization.
 
-The bootstrap cert-manager self-signed/CA issuer path exists only for first
-come-up, when `guardian-openbao-api-tls` does not exist yet and OpenBao cannot
-serve the Vault issuer. It is not reconciled as steady state after handoff.
+The cert-manager listener CA is steady state, not a temporary bootstrap issuer.
+It creates `guardian-openbao-api-tls` before the OpenBao pod mounts the Secret.
+OpenBao PKI is not used for OpenBao's own listener certificate.
 
-## PKI Handoff
+## Listener TLS And Workload PKI
 
 Target shape:
 
-- Flux declares `OpenBaoMount/pki-openbao-api`.
-- Flux declares `OpenBaoPKIRootIssuer/openbao-api-root-2026`; OpenBao generates the CA
-  private key internally and sets the issuer as the mount default. No CA private key goes in
-  Kubernetes, Git, CI, or a local operator file.
-- Flux declares `OpenBaoPKIRole/openbao-api`, which can sign only the OpenBao API
-  listener names already present in `openbao-pki.yaml`.
-- Flux declares the cert-manager policy with only `update` on
-  `pki/openbao-api/sign/openbao-api`.
-- cert-manager authenticates to OpenBao through Kubernetes auth with
-  `ServiceAccount/cert-manager-openbao-issuer` and a short-lived projected token.
-- `Issuer/guardian-openbao-vault` points at
-  `https://guardian-openbao.tenant-guardian.svc:8200`, path
-  `pki/openbao-api/sign/openbao-api`, and the OpenBao API CA bundle.
+- Flux declares `Issuer/guardian-openbao-listener-selfsigned`.
+- Flux declares `Certificate/guardian-openbao-listener-ca`, stored in
+  `Secret/guardian-openbao-listener-ca-tls`.
+- Flux declares `Issuer/guardian-openbao-listener-ca`.
+- Flux declares `Certificate/guardian-openbao-api`, stored in
+  `Secret/guardian-openbao-api-tls` and mounted by the OpenBao pod.
+- The listener CA is transport identity only. Kubernetes/cert-manager
+  compromise can mint a listener cert but cannot unseal OpenBao or read OpenBao
+  state.
 
-Handoff order:
-
-1. Keep the bootstrap `guardian-openbao-api-tls` Secret serving OpenBao during first
-   come-up.
-2. Converge the OpenBao PKI mount, role, policy, and Kubernetes auth role.
-3. Converge `OpenBaoPKIRootIssuer/openbao-api-root-2026` and wait for `Ready=True`.
-4. Create the cert-manager Vault Issuer and wait for `Ready=True`.
-5. Keep `Certificate/guardian-openbao-api` pointed at `Issuer/guardian-openbao-vault`
-   so the existing `guardian-openbao-api-tls` Secret is renewed by OpenBao PKI.
-6. Verify the SIGHUP sidecar reloads the OpenBao-issued leaf and all three OpenBao pods remain
-   unsealed in one raft cluster.
-7. Remove the bootstrap self-signed issuer/CA Certificate only after the new CA
-   is trusted everywhere that talks to the OpenBao API.
+There is no OpenBao PKI handoff for the listener. If workload PKI is needed
+later, add it as workload PKI only: an offline-held root outside Kubernetes and
+OpenBao, an OpenBao-held intermediate, a workload-specific mount such as
+`pki/workload`, and a cert-manager Vault issuer limited to the approved
+`sign/<role>` path.
 
 ## Verify
 
