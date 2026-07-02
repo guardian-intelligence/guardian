@@ -198,6 +198,10 @@ func TestOpenBaoFluxOrderingConformance(t *testing.T) {
 
 	dns := findDoc(t, docs, "Kustomization", "guardian-mgmt-dns-controller")
 	assertDependsOn(t, dns, "guardian-openbao-ops")
+	// kstatus treats ESO CRs as trivially Current, so wait:true alone is
+	// vacuous for them; the CEL expressions are what make the wait real.
+	assertHealthCheckExpr(t, dns, "external-secrets.io/v1beta1", "ClusterSecretStore")
+	assertHealthCheckExpr(t, dns, "external-secrets.io/v1beta1", "ExternalSecret")
 
 	opsDocs := yamlDocs(t, runfilePath("src/infrastructure/deployments/guardian/openbao-ops/openbao-ops-controller.yaml"))
 	crds := findDoc(t, opsDocs, "Kustomization", "guardian-openbao-ops-crds")
@@ -211,6 +215,19 @@ func TestOpenBaoFluxOrderingConformance(t *testing.T) {
 	state := findDoc(t, opsDocs, "Kustomization", "guardian-openbao-ops-state")
 	assertNestedBool(t, state, true, "spec", "wait")
 	assertDependsOn(t, state, "guardian-openbao-ops-controller")
+	// Same kstatus vacuity applies to the OpenBao operation CRs: without these
+	// expressions the state slice reports Ready before the ops-controller has
+	// authenticated, applied, and drift-checked each CR.
+	for _, kind := range []string{
+		"OpenBaoAuthBackend",
+		"OpenBaoKubernetesAuthRole",
+		"OpenBaoMount",
+		"OpenBaoMountTune",
+		"OpenBaoPolicy",
+		"OpenBaoAuditDevice",
+	} {
+		assertHealthCheckExpr(t, state, "openbao.guardian.dev/v1alpha1", kind)
+	}
 }
 
 func TestOpenBaoConsumersUseTLSConformance(t *testing.T) {
@@ -342,6 +359,27 @@ func assertHealthCheck(t *testing.T, doc map[string]interface{}, apiVersion, kin
 		}
 	}
 	t.Fatalf("%s/%s missing healthCheck %s %s/%s in %s", stringValue(doc["kind"]), stringValue(mapValue(doc["metadata"])["name"]), apiVersion, kind, name, namespace)
+}
+
+func assertHealthCheckExpr(t *testing.T, doc map[string]interface{}, apiVersion, kind string) {
+	t.Helper()
+
+	for _, healthCheckExpr := range sliceValue(nestedValue(t, doc, "spec", "healthCheckExprs")) {
+		expr := mapValue(healthCheckExpr)
+		if stringValue(expr["apiVersion"]) != apiVersion || stringValue(expr["kind"]) != kind {
+			continue
+		}
+		current := stringValue(expr["current"])
+		failed := stringValue(expr["failed"])
+		if !strings.Contains(current, "'Ready'") || !strings.Contains(current, "'True'") {
+			t.Fatalf("%s healthCheckExpr for %s: current = %q, want a Ready==True condition check", stringValue(mapValue(doc["metadata"])["name"]), kind, current)
+		}
+		if !strings.Contains(failed, "'Ready'") || !strings.Contains(failed, "'False'") {
+			t.Fatalf("%s healthCheckExpr for %s: failed = %q, want a Ready==False condition check", stringValue(mapValue(doc["metadata"])["name"]), kind, failed)
+		}
+		return
+	}
+	t.Fatalf("%s/%s missing healthCheckExpr for %s %s", stringValue(doc["kind"]), stringValue(mapValue(doc["metadata"])["name"]), apiVersion, kind)
 }
 
 func assertToleration(t *testing.T, server map[string]interface{}, key, operator, effect string) {

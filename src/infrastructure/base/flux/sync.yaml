@@ -151,6 +151,11 @@ spec:
       kind: HelmRelease
       name: guardian-openbao
       namespace: tenant-guardian
+    # kstatus is lenient for OnDelete StatefulSets (no rollout to track), so
+    # this entry only catches generation staleness. Runtime member health is
+    # asserted functionally: the openbao-ops-state healthCheckExprs prove the
+    # ops-controller can transact against bao, and `aspect infra openbao-drill`
+    # checks per-member seal/raft state.
     - apiVersion: apps/v1
       kind: StatefulSet
       name: guardian-openbao
@@ -191,6 +196,18 @@ spec:
     - name: guardian-openbao-ops
   prune: true
   wait: true
+  # kstatus treats ESO custom resources as trivially Current (no standard
+  # Reconciling/Stalled conditions), so declare their Ready contract; a synced
+  # ExternalSecret is what proves the OpenBao→Secret projection works.
+  healthCheckExprs:
+    - apiVersion: external-secrets.io/v1beta1
+      kind: ClusterSecretStore
+      current: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
+      failed: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'False')
+    - apiVersion: external-secrets.io/v1beta1
+      kind: ExternalSecret
+      current: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
+      failed: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'False')
   timeout: 10m
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1

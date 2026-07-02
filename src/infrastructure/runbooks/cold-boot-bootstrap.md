@@ -255,9 +255,10 @@ aspect infra openbao-drill \
 
 The importer writes the three KV paths with readback verification, removes its
 temporary role/policy, and deletes the env file. The converged proof requires
-every Kustomization, certificate, the OpenBao StatefulSet, the digest-pinned
-ops-controller, and all operation CRs Ready. The status drill verifies one
-raft `cluster_id` across unsealed members.
+every declared Kustomization Ready at the expected revision; certificates,
+the OpenBao StatefulSet, operation CRs, and ESO stores gate Kustomization
+readiness through Flux health checks declared in the manifests. The status
+drill verifies one raft `cluster_id` across unsealed members.
 
 **DR gates** (definitions in `docs/openbao-residue-inventory.md`): the
 cold-start gate falls out of the steps above plus an ESO-synced consumer

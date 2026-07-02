@@ -95,10 +95,14 @@ aspect infra openbao-drill \
   --kubeconfig=src/infrastructure/talm/kubeconfig
 ```
 
-The converged proof requires Flux Kustomizations, the OpenBao HelmRelease,
-StatefulSet, ops-controller Deployment, and OpenBao operation CRs to be ready.
-The status drill verifies each member is initialized, unsealed, HA-enabled,
-and part of one raft cluster (a single `cluster_id` across pods).
+The converged proof requires every declared Flux Kustomization to be Ready at
+the expected revision. Component health gates Kustomization readiness through
+Flux health checks declared in the manifests: `guardian-system` waits on the
+listener Certificates, HelmRelease, and StatefulSet; `guardian-openbao-ops-state`
+waits on every OpenBao operation CR reporting `Ready=True` and
+`DriftDetected=False` via `healthCheckExprs`. The status drill verifies each
+member is initialized, unsealed, HA-enabled, and part of one raft cluster
+(a single `cluster_id` across pods).
 `SelfInitIncomplete` on OpenBao operation CRs means the cluster did not run the
 declared self-init block successfully; inspect OpenBao startup logs and
 recreate the wiped OpenBao raft state with the declared config.

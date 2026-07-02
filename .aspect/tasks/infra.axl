@@ -1366,14 +1366,6 @@ def _converged_impl(ctx):
         kubectl,
         "--flux-namespace",
         ctx.args.flux_namespace,
-        "--openbao-namespace",
-        ctx.args.openbao_namespace,
-        "--openbao-helmrelease",
-        ctx.args.openbao_helmrelease,
-        "--openbao-statefulset",
-        ctx.args.openbao_statefulset,
-        "--controller-deployment",
-        ctx.args.controller_deployment,
         "--request-timeout",
         ctx.args.request_timeout,
     ]
@@ -1385,8 +1377,6 @@ def _converged_impl(ctx):
         proof_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
     if ctx.args.required_kustomizations != "":
         proof_args.extend(["--required-kustomizations", ctx.args.required_kustomizations])
-    if ctx.args.required_openbao_objects != "":
-        proof_args.extend(["--required-openbao-objects", ctx.args.required_openbao_objects])
 
     return checked_spawn(
         ctx,
@@ -1439,19 +1429,14 @@ converged = task(
     implementation = _converged_impl,
     name = "converged",
     group = ["infra"],
-    summary = "Verify the cluster converged to the declared state: Flux Kustomizations at the expected revision, workloads rolled, and component CR conditions.",
+    summary = "Verify every declared Flux Kustomization is Ready at the expected revision. Component health gates readiness via Flux health checks declared in the manifests.",
     args = {
-        "controller_deployment": args.string(default = "openbao-ops-controller", description = "OpenBao ops-controller Deployment name."),
         "expected_revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA."),
         "flux_namespace": args.string(default = "cozy-fluxcd", description = "Flux namespace."),
         "kube_api_server": args.string(default = "", description = "Optional Kubernetes API server override for off-VLAN proof runs."),
         "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
-        "openbao_helmrelease": args.string(default = "guardian-openbao", description = "OpenBao HelmRelease name."),
-        "openbao_namespace": args.string(default = "tenant-guardian", description = "OpenBao namespace."),
-        "openbao_statefulset": args.string(default = "guardian-openbao", description = "OpenBao StatefulSet name."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
         "required_kustomizations": args.string(default = "", description = "Optional comma-separated Flux Kustomizations required for the converged proof."),
-        "required_openbao_objects": args.string(default = "", description = "Optional comma-separated Kind/name OpenBao CRs required for the converged proof."),
     },
 )
 
