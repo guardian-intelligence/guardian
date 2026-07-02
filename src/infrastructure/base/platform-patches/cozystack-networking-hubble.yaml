@@ -1,6 +1,17 @@
 # Cozystack 1.5 exposes Hubble through the generated cozystack.networking
 # Package. The platform chart owns the base Cilium/KubeOVN values; this partial
 # Package owns only the Hubble observability fields.
+#
+# COLD-BOOT CONSTRAINT (2026-07-01 drill finding): this partial must not
+# enable Cilium components that need POD networking. The generated CNI conflist
+# chains kube-ovn before cilium-cni, and the kubeovn HelmRelease only installs
+# after the cilium HelmRelease is Ready — so any pod-network workload added to
+# the cilium chart (hubble-relay, hubble-ui) can never start on a fresh
+# cluster, the helm upgrade stalls on it, and the whole platform deadlocks
+# behind "dependency 'cozy-cilium/cilium' is not ready". Hubble stays enabled
+# on the agents (hostNetwork, no CNI dependency) with metrics; run the Hubble
+# CLI against the agent sockets, or reintroduce relay/ui only in a package
+# layer that reconciles after kubeovn is Ready.
 apiVersion: cozystack.io/v1alpha1
 kind: Package
 metadata:
@@ -15,38 +26,9 @@ spec:
             peerService:
               clusterDomain: cozy.local
             relay:
-              enabled: true
-              rollOutPods: true
-              prometheus:
-                enabled: true
-                serviceMonitor:
-                  enabled: true
-              resources:
-                requests:
-                  cpu: 50m
-                  memory: 64Mi
-                limits:
-                  cpu: 250m
-                  memory: 256Mi
+              enabled: false
             ui:
-              enabled: true
-              rollOutPods: true
-              backend:
-                resources:
-                  requests:
-                    cpu: 25m
-                    memory: 64Mi
-                  limits:
-                    cpu: 250m
-                    memory: 256Mi
-              frontend:
-                resources:
-                  requests:
-                    cpu: 25m
-                    memory: 64Mi
-                  limits:
-                    cpu: 250m
-                    memory: 256Mi
+              enabled: false
             metrics:
               enabled:
                 - dns
