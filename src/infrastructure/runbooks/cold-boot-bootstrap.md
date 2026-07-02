@@ -40,10 +40,11 @@ helm, oras, boot-to-talos) are repo-pinned and materialize under
 ## Custody replication
 
 The custody bundle is secret-zero and replicating it is an operator
-obligation that cannot be automated: by design nothing in Kubernetes, Git,
-CI, R2, or any OpenBao-backed path may hold these secrets, so no controller
-can back them up. Cloud-KMS unseal or Shamir recovery shares would only
-relocate the root of trust, not remove it.
+obligation that cannot be automated: the seal key may never touch
+Kubernetes, Git, CI, R2, or any OpenBao-backed path (and transit exports are
+offline-custody only), so no system the cluster controls can ever hold a
+complete copy of the bundle. Cloud-KMS unseal or Shamir recovery shares
+would only relocate the root of trust, not remove it.
 
 - Keep at least two copies of the load-bearing set — the seal key plus its
   metadata, the `DELETE_ME.env` backup, and any `transit/backup` exports —
