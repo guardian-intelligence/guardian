@@ -41,9 +41,9 @@ it gates on the Tier-1 lock tests, projects
 `src/infrastructure/bootstrap/bundle/images.lock` into a Hauler manifest,
 syncs every locked artifact into a content store, saves the portable
 `haul.tar.zst`, and records a bundle manifest with the git revision and
-digests. The haul plus the source-built Hauler binary, the repo checkout, and
-the operator custody bundle are the complete inputs to a dark-uplink cold
-boot (`src/infrastructure/runbooks/cold-boot-bootstrap.md`).
+digests. The haul plus the source-built Hauler binary, the pinned flux CLI,
+the repo checkout, and the operator custody bundle are the complete inputs to
+a dark-uplink cold boot (`src/infrastructure/runbooks/cold-boot-bootstrap.md`).
 `aspect infra converged` verifies every declared Flux Kustomization is Ready
 at the expected revision; workload and component health gate readiness via
 Flux health checks declared in the manifests (`healthChecks`/`healthCheckExprs`).

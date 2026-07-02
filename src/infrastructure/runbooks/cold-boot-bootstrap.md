@@ -33,9 +33,10 @@ from-nothing bring-up may require.
    account (`ssh_W9EKa3oBbaRoB` = the guardian-controller key).
 
 Workstation needs: this checkout, `bazelisk`, `podman`, the `aspect` CLI, and
-a public IP the nodes can reach. All other binaries (talm, talosctl, kubectl,
-helm, oras, flux, hauler, boot-to-talos) are repo-pinned and materialize under
-`$(bazelisk info output_base)/external/…`.
+a public IP the nodes can reach. All other binaries are repo-pinned: the
+downloaded ones (talm, talosctl, kubectl, helm, oras, flux, boot-to-talos)
+materialize under `$(bazelisk info output_base)/external/…`, and hauler is
+Bazel-built from source (`bazelisk build //src/tools/hauler:hauler`).
 
 ## Offline bundle (dark-uplink input)
 
@@ -51,9 +52,17 @@ into a fresh `dist/bundle/`:
 - `bundle-manifest.yaml` — the git revision plus sha256 digests of the lock
   and the haul.
 
+docker.io anonymously rate-limits pulls (~10/hour), so a full sync
+practically requires `bazelisk run //src/tools/hauler -- login docker.io`
+credentials or several `aspect infra bundle --resume` windows; resume
+re-fetches only the refs the store is missing.
+
 The complete dark drive is: `haul.tar.zst`, the source-built hauler binary
-(`bazelisk build //src/tools/hauler:hauler`), this repo checkout at the same
-revision, and the custody bundle above. At bring-up time the mirror host runs
+(`bazelisk build //src/tools/hauler:hauler`), the pinned flux CLI binary
+(from `$(bazelisk info output_base)/external/+http_archive+flux_linux_amd64/`
+— like every fetched tool it exists only where Bazel has run with network),
+this repo checkout at the same revision, and the custody bundle above. At
+bring-up time the mirror host runs
 `hauler store load --filename=haul.tar.zst` and
 `hauler store serve registry --readonly=false`, and the repo checkout is
 pushed into it as a Flux OCI artifact with the repo-pinned flux CLI

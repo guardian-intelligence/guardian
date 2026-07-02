@@ -1369,15 +1369,47 @@ def _openbao_observability_drill_impl(ctx):
         label = "cozystack openbao observability drill",
     )
 
-def _path_exists(ctx, path):
-    r = ctx.std.process.command("test").args(["-e", path]).stdout("piped").stderr("piped").spawn().wait_with_output()
-    return r.status.code == 0
+def _project_manifest(ctx, out_path, skip_digests_in = None):
+    project_args = [
+        "run",
+        BUNDLE_TARGET,
+        "--",
+        "--images-lock",
+        ws_path(ctx, IMAGES_LOCK_PATH),
+        "--hauler-manifest-out",
+        out_path,
+    ]
+    if skip_digests_in != None:
+        project_args.extend(["--skip-digests-in", skip_digests_in])
+    return checked_spawn(
+        ctx,
+        "bazelisk",
+        project_args,
+        cwd = ws_path(ctx),
+        label = "project images.lock into hauler manifest",
+    )
 
 def _bundle_impl(ctx):
-    out_dir = ws_path(ctx, ctx.args.out_dir)
-    resuming = _path_exists(ctx, out_dir)
+    out_dir = _workspace_path_if_relative(ctx, ctx.args.out_dir)
+    resuming = ctx.std.fs.exists(out_dir)
     if resuming and not ctx.args.resume:
         ctx.std.io.stderr.write("ERROR: " + out_dir + " already exists. Syncing into an existing store can carry artifacts that are no longer in images.lock into the haul. Remove it for a clean build, or pass --resume to continue an interrupted sync of the SAME lock (verified by manifest comparison).\n")
+        return 1
+
+    # The recorded revision must actually describe the lock that gets
+    # projected, synced, and hashed; a dirty lock would make the bundle
+    # manifest's provenance false.
+    lock_status = _capture_stdout(
+        ctx,
+        "git",
+        ["status", "--porcelain", "--", IMAGES_LOCK_PATH],
+        cwd = ws_path(ctx),
+        label = "git status " + IMAGES_LOCK_PATH,
+    )
+    if lock_status == None:
+        return 1
+    if lock_status != "":
+        ctx.std.io.stderr.write("ERROR: " + IMAGES_LOCK_PATH + " has uncommitted changes; the bundle manifest would attribute the haul to a revision whose lock differs. Commit the lock first.\n")
         return 1
 
     rc = checked_spawn(
@@ -1401,34 +1433,38 @@ def _bundle_impl(ctx):
         return 1
 
     hauler_manifest = out_dir + "/hauler-manifest.yaml"
-    manifest_out = hauler_manifest
+    sync_manifest = hauler_manifest
     if resuming:
-        manifest_out = hauler_manifest + ".fresh"
-    rc = checked_spawn(
-        ctx,
-        "bazelisk",
-        [
-            "run",
-            BUNDLE_TARGET,
-            "--",
-            "--images-lock",
-            ws_path(ctx, IMAGES_LOCK_PATH),
-            "--hauler-manifest-out",
-            manifest_out,
-        ],
-        cwd = ws_path(ctx),
-        label = "project images.lock into hauler manifest",
-    )
-    if rc != 0:
-        return rc
+        if not ctx.std.fs.exists(hauler_manifest):
+            ctx.std.io.stderr.write("ERROR: " + out_dir + " exists but holds no hauler-manifest.yaml — it is not an interrupted bundle (or was interrupted before projection). Remove the directory and build fresh.\n")
+            return 1
+        fresh = hauler_manifest + ".fresh"
+        rc = _project_manifest(ctx, fresh)
+        if rc != 0:
+            return rc
 
-    if resuming:
         # A resume is only safe when the interrupted bundle was built from the
         # same lock: the projection is deterministic, so byte-compare it.
-        if _capture_success(ctx, "cmp", ["-s", hauler_manifest, manifest_out], label = "compare projected manifest with the interrupted bundle's") != 0:
+        if _capture_success(ctx, "cmp", ["-s", hauler_manifest, fresh], label = "compare projected manifest with the interrupted bundle's") != 0:
+            _capture_success(ctx, "rm", ["-f", fresh], label = "drop comparison copy")
             ctx.std.io.stderr.write("ERROR: images.lock changed since the bundle in " + out_dir + " was started; its store may hold refs no longer in the lock. Remove the directory and build fresh.\n")
             return 1
-        rc = _capture_success(ctx, "rm", [manifest_out], label = "drop comparison copy")
+        rc = _capture_success(ctx, "rm", [fresh], label = "drop comparison copy")
+        if rc != 0:
+            return rc
+
+        # Hauler re-fetches every listed ref's manifest from upstream even
+        # when the blobs are already local, and anonymous docker.io requests
+        # are scarce — so a real resume must sync only the refs the store is
+        # missing. Project the residual manifest against the store index.
+        store_index = out_dir + "/store/index.json"
+        if ctx.std.fs.exists(store_index):
+            sync_manifest = out_dir + "/hauler-manifest.resume.yaml"
+            rc = _project_manifest(ctx, sync_manifest, skip_digests_in = store_index)
+            if rc != 0:
+                return rc
+    else:
+        rc = _project_manifest(ctx, hauler_manifest)
         if rc != 0:
             return rc
 
@@ -1442,13 +1478,17 @@ def _bundle_impl(ctx):
             "store",
             "sync",
             "--store=" + out_dir + "/store",
-            "--filename=" + hauler_manifest,
+            "--filename=" + sync_manifest,
         ],
         cwd = ws_path(ctx),
         label = "hauler store sync (pulls every locked artifact; needs network)",
     )
     if rc != 0:
         return rc
+    if sync_manifest != hauler_manifest:
+        rc = _capture_success(ctx, "rm", [sync_manifest], label = "drop residual resume manifest")
+        if rc != 0:
+            return rc
 
     rc = checked_spawn(
         ctx,
@@ -1465,6 +1505,21 @@ def _bundle_impl(ctx):
         cwd = ws_path(ctx),
         label = "hauler store save",
     )
+    if rc != 0:
+        return rc
+
+    # The sync can run for hours; re-project and byte-compare so a lock edit
+    # made mid-sync cannot produce a bundle manifest describing a lock the
+    # haul was not synced from.
+    verify = hauler_manifest + ".verify"
+    rc = _project_manifest(ctx, verify)
+    if rc != 0:
+        return rc
+    if _capture_success(ctx, "cmp", ["-s", hauler_manifest, verify], label = "verify images.lock unchanged across the sync") != 0:
+        _capture_success(ctx, "rm", ["-f", verify], label = "drop verification copy")
+        ctx.std.io.stderr.write("ERROR: images.lock changed while the bundle was building; the haul does not match the current lock. Remove " + out_dir + " and build fresh.\n")
+        return 1
+    rc = _capture_success(ctx, "rm", [verify], label = "drop verification copy")
     if rc != 0:
         return rc
 
@@ -1563,8 +1618,8 @@ bundle = task(
     group = ["infra"],
     summary = "Build the offline bundle: project images.lock into a hauler manifest, sync every locked artifact into a store, save the haul archive, and record the bundle manifest (revision + digests). Needs network; docker.io refs practically require `hauler login` credentials (anonymous pulls are rate-limited to ~10/hour).",
     args = {
-        "out_dir": args.string(default = "dist/bundle", description = "Output directory for the bundle, relative to the workspace root."),
-        "resume": args.boolean(default = False, description = "Continue an interrupted sync into an existing out_dir. Refused unless the projected manifest is byte-identical to the interrupted bundle's (same images.lock)."),
+        "out_dir": args.string(default = "dist/bundle", description = "Output directory for the bundle. Relative paths resolve against the workspace root; absolute paths (e.g. a mounted drive) are used as-is."),
+        "resume": args.boolean(default = False, description = "Continue an interrupted sync into an existing out_dir. Refused unless the projected manifest is byte-identical to the interrupted bundle's (same images.lock); only refs missing from the store are re-fetched."),
     },
 )
 
