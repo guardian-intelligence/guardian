@@ -266,6 +266,84 @@ spec:
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
+  name: guardian-promotion
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/deployments/guardian/promotion
+  sourceRef:
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      # Required, not optional: Flux skips substitution entirely when the
+      # variable map is empty, which would leave the ${GUARDIAN_SOURCE_*}
+      # placeholders literal and fail the CRD enum. The bootstrap overlays
+      # always create guardian-source; a missing one should fail loudly.
+      - kind: ConfigMap
+        name: guardian-source
+  dependsOn:
+    # cert-manager (health-checked by guardian-system) must be serving before
+    # the chart's self-signed Issuer can mint the webhooks-server cert.
+    - name: guardian-system
+  prune: true
+  wait: false
+  healthChecks:
+    - apiVersion: helm.toolkit.fluxcd.io/v2
+      kind: HelmRelease
+      name: kargo
+      namespace: kargo
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: kargo-controller
+      namespace: kargo
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: kargo-management-controller
+      namespace: kargo
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: kargo-webhooks-server
+      namespace: kargo
+  timeout: 10m
+---
+# Kargo CRs live in a separate slice: their CRDs and validating webhooks only
+# exist once the HelmRelease above is installed and healthy, so applying them
+# from the same slice would fail every reconcile until then. dependsOn makes
+# the ordering explicit instead of leaning on retry noise.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: guardian-promotion-pipelines
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/deployments/guardian/promotion/pipelines
+  sourceRef:
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      # Required, not optional: Flux skips substitution entirely when the
+      # variable map is empty, which would leave the ${GUARDIAN_SOURCE_*}
+      # placeholders literal and fail the CRD enum. The bootstrap overlays
+      # always create guardian-source; a missing one should fail loudly.
+      - kind: ConfigMap
+        name: guardian-source
+  dependsOn:
+    - name: guardian-promotion
+  prune: true
+  # Apply-only: Kargo's management controller creates the project namespace
+  # asynchronously, and Kargo CR conditions are still settling right after
+  # install; functional verification is the Warehouse discovering Freight.
+  wait: false
+  timeout: 5m
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
   name: guardian-company-prod
   namespace: cozy-fluxcd
 spec:

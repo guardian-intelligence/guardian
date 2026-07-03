@@ -22,6 +22,8 @@ ghcr.io/cozystack/cozystack/cozystack-packages@sha256:5472859fa5c7bf3c6c042c51d4
 docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
 # External Secrets Operator helm chart (pulled by source-controller, NOT containerd)
 ghcr.io/external-secrets/charts/external-secrets:0.10.4@sha256:ec681d8b8ee3b5d0a016b1d4dde28dc91ebafa106841dece35722c371b84f49c
+# Kargo helm chart (pulled by source-controller, NOT containerd)
+ghcr.io/akuity/kargo-charts/kargo:1.10.8@sha256:3090ccc64bc89a04138be187a4dbb7cd4be4a10a29cc6c7f336e16d7770c985c
 
 # --- Kubernetes system images actually held by the rebuilt cluster (2026-07-02 drill) ---
 # Chart.yaml pins kubernetesVersion v1.34.3 (NOT the Talos v1.13 default v1.36);
@@ -107,6 +109,7 @@ ghcr.io/cozystack/cozystack/piraeus-server@sha256:1a00af3642c4814c3552d1964daf28
 ghcr.io/cozystack/cozystack/redis-operator@sha256:a4012e6a1b5daaedb57cc27edfdbff52124de4164b5ec0ee53c5ce5710ef4c25
 ghcr.io/cozystack/cozystack/s3manager@sha256:8b36ab67904e34b2fb843b964c20d4822f3a6673f6745afb6a834efd02e017e2
 ghcr.io/cozystack/ingress-nginx-with-protobuf-exporter/controller@sha256:beba8869ee370599e1f26557a9669ebdc9481c07b34059f348eb3e17b647e7e0
+ghcr.io/akuity/kargo:v1.10.8@sha256:b55c1a7ee61ba7277cf1d5c02cef0982e208c6bb1bdeaad10868ccbbde93f17a
 ghcr.io/fluxcd/helm-controller@sha256:02621c382a3ce48775893e92a311d45b1c0cb03e65677515e9c4a074acf1e957
 ghcr.io/fluxcd/kustomize-controller@sha256:015fe21c0a788d39fed98664c3f4f7ee6dfc113dabc99748ee9c2d8bdf65bd89
 ghcr.io/fluxcd/notification-controller@sha256:f5f7e8023c01617f11e2533d3effb3c82ff73fb57d711b0e27ef9f15edca6cc3

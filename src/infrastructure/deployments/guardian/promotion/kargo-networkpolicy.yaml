@@ -1,0 +1,40 @@
+# One policy selects every Kargo pod; Cilium denies whatever is not listed.
+# Egress: kube-apiserver (all components), DNS, and world:443 (the controller
+# talks to ghcr.io for Warehouse discovery and github.com for git promotion).
+# Ingress: only the Kubernetes API server, which calls the webhooks server on
+# 9443 to validate Kargo CRs.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: kargo
+  namespace: kargo
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: kargo
+  ingress:
+    - fromEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "9443"
+              protocol: TCP
+  egress:
+    - toEntities:
+        - kube-apiserver
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
