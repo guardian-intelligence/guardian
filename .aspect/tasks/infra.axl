@@ -22,6 +22,16 @@ BACKUP_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_backup_drill:cozystack
 BUNDLE_TARGET = "//src/infrastructure/cmd/bundle:bundle"
 HAULER_TARGET = "//src/tools/hauler:hauler"
 IMAGES_LOCK_PATH = "src/infrastructure/bootstrap/bundle/images.lock"
+COSIGN_FILE_TARGET = "//src/tools/cosign:cosign"
+ORAS_FILE_TARGET = "@oras_linux_amd64//:oras_file"
+
+# Supply-chain trust anchors (docs/supply-chain-design.md). The identity is
+# the CI workflow that signs images.lock on main; the trusted root is the
+# pinned Sigstore root so verification needs no TUF network fetch.
+IMAGES_LOCK_SIGN_IDENTITY = "https://github.com/guardian-intelligence/guardian/.github/workflows/images-lock-sign.yml@refs/heads/main"
+SIGSTORE_OIDC_ISSUER = "https://token.actions.githubusercontent.com"
+SIGSTORE_TRUSTED_ROOT_PATH = "src/infrastructure/bootstrap/bundle/sigstore-trusted-root.json"
+SUPPLY_CHAIN_REPO = "ghcr.io/guardian-intelligence/supply-chain"
 
 # Gate every bundle build on the Tier-1 invariants that make the projection
 # trustworthy: talm_render_test carries the images.lock completeness checks,
@@ -287,6 +297,48 @@ def _helm_path(ctx):
     if output_base == None:
         return None
     return output_base + "/external/+http_archive+helm_linux_amd64/helm"
+
+def _cosign_path(ctx):
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        ["build", COSIGN_FILE_TARGET],
+        cwd = ws_path(ctx),
+        label = "bazelisk build " + COSIGN_FILE_TARGET,
+    )
+    if rc != 0:
+        return None
+    output_base = _capture_stdout(
+        ctx,
+        "bazelisk",
+        ["info", "output_base"],
+        cwd = ws_path(ctx),
+        label = "bazelisk info output_base",
+    )
+    if output_base == None:
+        return None
+    return output_base + "/external/+http_file+cosign_linux_amd64/file/cosign"
+
+def _oras_path(ctx):
+    rc = checked_spawn(
+        ctx,
+        "bazelisk",
+        ["build", ORAS_FILE_TARGET],
+        cwd = ws_path(ctx),
+        label = "bazelisk build " + ORAS_FILE_TARGET,
+    )
+    if rc != 0:
+        return None
+    output_base = _capture_stdout(
+        ctx,
+        "bazelisk",
+        ["info", "output_base"],
+        cwd = ws_path(ctx),
+        label = "bazelisk info output_base",
+    )
+    if output_base == None:
+        return None
+    return output_base + "/external/+http_archive+oras_linux_amd64/oras"
 
 def _k6_path(ctx):
     rc = checked_spawn(
@@ -1442,7 +1494,7 @@ def _bundle_impl(ctx):
     if rc != 0:
         return rc
 
-    return checked_spawn(
+    rc = checked_spawn(
         ctx,
         "bazelisk",
         [
@@ -1460,6 +1512,83 @@ def _bundle_impl(ctx):
         ],
         cwd = ws_path(ctx),
         label = "write bundle manifest (revision + digests)",
+    )
+    if rc != 0:
+        return rc
+
+    # Supply-chain gate: the drive must carry CI's signature over the exact
+    # lock this haul was synced from. Fetch the signature bundle keyed by the
+    # lock's sha256 (published by the images-lock-sign workflow on main),
+    # verify it against the pinned identity and Sigstore root, then run the
+    # same offline verification the operator repeats at dark bring-up.
+    oras = _oras_path(ctx)
+    if oras == None:
+        return 1
+    cosign = _cosign_path(ctx)
+    if cosign == None:
+        return 1
+    lockhash = _capture_stdout(
+        ctx,
+        "sha256sum",
+        [ws_path(ctx, IMAGES_LOCK_PATH)],
+        label = "hash images.lock for the signature lookup",
+    )
+    if lockhash == None:
+        return 1
+    lockhash = lockhash.split(" ")[0]
+    rc = checked_spawn(
+        ctx,
+        oras,
+        [
+            "pull",
+            SUPPLY_CHAIN_REPO + ":images.lock-" + lockhash,
+            "--output",
+            out_dir,
+        ],
+        cwd = ws_path(ctx),
+        label = "fetch CI signature bundle for images.lock",
+    )
+    if rc != 0:
+        ctx.std.io.stderr.write("ERROR: no CI signature bundle for images.lock sha256 " + lockhash + " — this exact lock has not been signed by the images-lock-sign workflow on main. Merge the lock (or dispatch the workflow) before building a drive.\n")
+        return 1
+    rc = checked_spawn(
+        ctx,
+        cosign,
+        [
+            "verify-blob",
+            "--bundle",
+            out_dir + "/images.lock.sigbundle",
+            "--certificate-identity",
+            IMAGES_LOCK_SIGN_IDENTITY,
+            "--certificate-oidc-issuer",
+            SIGSTORE_OIDC_ISSUER,
+            "--trusted-root",
+            ws_path(ctx, SIGSTORE_TRUSTED_ROOT_PATH),
+            ws_path(ctx, IMAGES_LOCK_PATH),
+        ],
+        cwd = ws_path(ctx),
+        label = "verify images.lock signature (pinned identity + Sigstore root)",
+    )
+    if rc != 0:
+        return rc
+
+    return checked_spawn(
+        ctx,
+        "bazelisk",
+        [
+            "run",
+            BUNDLE_TARGET,
+            "--",
+            "--verify",
+            "--bundle-dir",
+            out_dir,
+            "--images-lock",
+            ws_path(ctx, IMAGES_LOCK_PATH),
+            "--revision",
+            revision,
+        ],
+        cwd = ws_path(ctx),
+        label = "bundle --verify (lock, haul, and hauler-manifest hash bindings)",
     )
 
 def _converged_impl(ctx):
@@ -1535,7 +1664,7 @@ bundle = task(
     implementation = _bundle_impl,
     name = "bundle",
     group = ["infra"],
-    summary = "Build the offline bundle: project images.lock into a hauler manifest, sync every locked artifact into a store, save the haul archive, and record the bundle manifest (revision + digests). Needs network; docker.io refs practically require `hauler login` credentials (anonymous pulls are rate-limited to ~10/hour).",
+    summary = "Build the offline bundle: project images.lock into a hauler manifest, sync every locked artifact into a store, save the haul archive, record the bundle manifest (revision + digests), fetch and verify CI's signature over the lock, and run the offline hash verification the operator repeats at dark bring-up. Needs network; docker.io refs practically require `hauler login` credentials (anonymous pulls are rate-limited to ~10/hour); the signature fetch needs a ghcr-authenticated docker config.",
     args = {
         "out_dir": args.string(default = "dist/bundle", description = "Output directory for the bundle. Relative paths resolve against the workspace root; absolute paths (e.g. a mounted drive) are used as-is."),
         "resume": args.boolean(default = False, description = "Continue an interrupted sync into an existing out_dir. Refused unless the projected manifest is byte-identical to the interrupted bundle's (same images.lock); only refs missing from the store are re-fetched."),

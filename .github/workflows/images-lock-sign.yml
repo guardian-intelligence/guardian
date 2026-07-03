@@ -1,0 +1,67 @@
+# Signs src/infrastructure/bootstrap/bundle/images.lock on every main push
+# that changes it, and publishes the signature bundle to ghcr keyed by the
+# lock's own sha256. The dark-uplink haul is derived from the lock and every
+# blob in it is digest-addressed, so a verified lock plus offline digest
+# verification of the haul covers the whole bundle — no key infrastructure.
+# The sign-blob bundle JSON embeds the Fulcio certificate and Rekor proof, so
+# verification works offline given the pinned Sigstore trusted root and the
+# canonical identity recorded in docs/supply-chain-design.md.
+name: images-lock-sign
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/infrastructure/bootstrap/bundle/images.lock"
+      - ".github/workflows/images-lock-sign.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    # workflow_dispatch is allowed only where it is equivalent to a main push:
+    # signing reviewed history is fine, signing arbitrary branches is not.
+    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # cosign keyless signing
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+
+      - uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3 # v2.0.0
+
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # oras push (not cosign upload blob) so the layer carries the filename
+      # title annotation — `oras pull` in the bundle task fetches it by name.
+      - name: Sign images.lock and publish the signature bundle
+        run: |
+          lock=src/infrastructure/bootstrap/bundle/images.lock
+          lockhash="$(sha256sum "$lock" | cut -d' ' -f1)"
+          cosign sign-blob --yes --bundle images.lock.sigbundle "$lock"
+          oras push "ghcr.io/guardian-intelligence/supply-chain:images.lock-${lockhash}" \
+            images.lock.sigbundle:application/json
+          oras push "ghcr.io/guardian-intelligence/supply-chain:images.lock-latest" \
+            images.lock.sigbundle:application/json
+          echo "signed lock sha256:${lockhash}"
+
+      - name: Verify the published bundle against the pinned identity
+        env:
+          IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/images-lock-sign.yml@refs/heads/main
+          ISSUER: https://token.actions.githubusercontent.com
+        run: |
+          cosign verify-blob --bundle images.lock.sigbundle \
+            --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" \
+            src/infrastructure/bootstrap/bundle/images.lock

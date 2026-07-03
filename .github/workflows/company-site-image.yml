@@ -87,6 +87,18 @@ jobs:
       - name: Verify images.lock and rendered manifests agree
         run: bazelisk test //src/infrastructure/tests:talm_render_test
 
+      # SBOM is generated from the local OCI layout on every run (PRs included)
+      # so a broken SBOM pipeline fails before merge, not after.
+      - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        id: syft
+
+      - name: Generate SBOM (SPDX)
+        run: |
+          "${{ steps.syft.outputs.cmd }}" scan \
+            oci-dir:bazel-bin/src/products/company/web/image \
+            -o spdx-json=sbom.spdx.json
+          test -s sbom.spdx.json
+
       # Push and sign only for the canonical main history — not for PRs, and
       # not for workflow_dispatch on arbitrary branches (a dispatch push would
       # retag `edge` and sign bytes that never went through review).
@@ -104,3 +116,25 @@ jobs:
       - name: Sign image (keyless)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: cosign sign --yes "ghcr.io/guardian-intelligence/company-site@${{ steps.digest.outputs.digest }}"
+
+      - name: Attach SBOM attestation
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          cosign attest --yes --type spdxjson --predicate sbom.spdx.json \
+            "ghcr.io/guardian-intelligence/company-site@${{ steps.digest.outputs.digest }}"
+
+      # Close the loop: verify what we just published against the pinned
+      # identity. This is the same policy an offline verifier uses — the
+      # identity string below is the canonical trust anchor for guardian
+      # artifacts (recorded in docs/supply-chain-design.md).
+      - name: Verify signature and SBOM attestation
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/company-site-image.yml@refs/heads/main
+          ISSUER: https://token.actions.githubusercontent.com
+        run: |
+          img="ghcr.io/guardian-intelligence/company-site@${{ steps.digest.outputs.digest }}"
+          cosign verify --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" "$img"
+          cosign verify-attestation --type spdxjson \
+            --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" "$img"
+
