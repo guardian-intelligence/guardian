@@ -85,16 +85,26 @@ func main() {
 	var haulPath string
 	var revision string
 	var bundleManifestOut string
+	var verify bool
+	var bundleDir string
 	flag.StringVar(&imagesLock, "images-lock", "src/infrastructure/bootstrap/bundle/images.lock", "digest-pinned OCI artifact inventory")
 	flag.StringVar(&haulerManifestOut, "hauler-manifest-out", "", "path to write the generated content.hauler.cattle.io/v1 Images manifest")
 	flag.StringVar(&skipDigestsIn, "skip-digests-in", "", "optional OCI layout index.json; lock refs whose digest it already holds are omitted from the projection (true incremental resume)")
 	flag.StringVar(&haulPath, "haul-path", "", "built haul archive to record in the bundle manifest")
-	flag.StringVar(&revision, "revision", "", "git revision the bundle was built from")
+	flag.StringVar(&revision, "revision", "", "git revision the bundle was built from (with --verify: expected revision to enforce)")
 	flag.StringVar(&bundleManifestOut, "bundle-manifest-out", "", "path to write the bundle manifest (requires --haul-path and --revision)")
+	flag.BoolVar(&verify, "verify", false, "recompute the bundle bindings from --bundle-dir and compare against its bundle-manifest.yaml")
+	flag.StringVar(&bundleDir, "bundle-dir", "", "built bundle directory to verify (requires --verify)")
 	flag.Parse()
 
-	if haulerManifestOut != "" && bundleManifestOut != "" {
-		exitErr(errors.New("--hauler-manifest-out and --bundle-manifest-out are separate modes; pass exactly one"))
+	modes := 0
+	for _, set := range []bool{haulerManifestOut != "", bundleManifestOut != "", verify} {
+		if set {
+			modes++
+		}
+	}
+	if modes > 1 {
+		exitErr(errors.New("--hauler-manifest-out, --bundle-manifest-out, and --verify are separate modes; pass exactly one"))
 	}
 
 	lock, err := os.ReadFile(imagesLock)
@@ -136,8 +146,19 @@ func main() {
 			exitErr(err)
 		}
 		fmt.Printf("bundle manifest written: revision=%s refs=%d out=%s\n", revision, len(refs), bundleManifestOut)
+	case verify:
+		if bundleDir == "" {
+			exitErr(errors.New("--verify requires --bundle-dir"))
+		}
+		lines, err := verifyBundle(bundleDir, lock, refs, revision)
+		if err != nil {
+			exitErr(err)
+		}
+		for _, line := range lines {
+			fmt.Println(line)
+		}
 	default:
-		exitErr(errors.New("one of --hauler-manifest-out or --bundle-manifest-out is required"))
+		exitErr(errors.New("one of --hauler-manifest-out, --bundle-manifest-out, or --verify is required"))
 	}
 }
 
@@ -177,13 +198,8 @@ func filterStoredRefs(refs []string, indexPath string) ([]string, error) {
 // describeBundle hashes the lock and the built haul into a bundle manifest.
 // Hashing local outputs is projection, not transport.
 func describeBundle(lock []byte, refs []string, haulPath, revision string) ([]byte, error) {
-	haul, err := os.Open(haulPath)
+	haulSum, err := sha256File(haulPath)
 	if err != nil {
-		return nil, err
-	}
-	defer haul.Close()
-	haulHash := sha256.New()
-	if _, err := io.Copy(haulHash, haul); err != nil {
 		return nil, err
 	}
 	return yaml.Marshal(bundleManifest{
@@ -191,8 +207,123 @@ func describeBundle(lock []byte, refs []string, haulPath, revision string) ([]by
 		Refs:             len(refs),
 		ImagesLockSHA256: fmt.Sprintf("%x", sha256.Sum256(lock)),
 		HaulPath:         filepath.Base(haulPath),
-		HaulSHA256:       fmt.Sprintf("%x", haulHash.Sum(nil)),
+		HaulSHA256:       haulSum,
 	})
+}
+
+func sha256File(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil)), nil
+}
+
+// verifyBundle is dark bring-up step 0: recompute every binding recorded in
+// the bundle's bundle-manifest.yaml from the drive contents and compare.
+// Hash digests are hard failures; the revision is compared only when the
+// caller passes one (report-only otherwise, since a dark host may have no
+// git to ask). It also re-derives the hauler projection of every lock ref
+// and requires each derived entry to appear in the bundle's
+// hauler-manifest.yaml — a pure local set check. Rehashing local files is
+// projection, not transport; signature verification of the lock stays in
+// the separate pinned tool the runbook invokes before this step.
+func verifyBundle(dir string, lock []byte, refs []string, revision string) ([]string, error) {
+	manifestPath := filepath.Join(dir, "bundle-manifest.yaml")
+	payload, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return nil, err
+	}
+	var recorded bundleManifest
+	if err := yaml.Unmarshal(payload, &recorded); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", manifestPath, err)
+	}
+
+	var lines []string
+
+	lockSum := fmt.Sprintf("%x", sha256.Sum256(lock))
+	if lockSum != recorded.ImagesLockSHA256 {
+		return nil, fmt.Errorf("images.lock binding failed: manifest records sha256 %s, lock on disk hashes to %s", recorded.ImagesLockSHA256, lockSum)
+	}
+	lines = append(lines, fmt.Sprintf("verified: images.lock sha256=%s", lockSum))
+
+	if len(refs) != recorded.Refs {
+		return nil, fmt.Errorf("refs binding failed: manifest records %d refs, lock on disk parses to %d", recorded.Refs, len(refs))
+	}
+	lines = append(lines, fmt.Sprintf("verified: refs=%d", len(refs)))
+
+	haulPath := filepath.Join(dir, filepath.Base(recorded.HaulPath))
+	haulSum, err := sha256File(haulPath)
+	if err != nil {
+		return nil, err
+	}
+	if haulSum != recorded.HaulSHA256 {
+		return nil, fmt.Errorf("haul binding failed: manifest records sha256 %s, %s hashes to %s", recorded.HaulSHA256, haulPath, haulSum)
+	}
+	lines = append(lines, fmt.Sprintf("verified: %s sha256=%s", recorded.HaulPath, haulSum))
+
+	haulerPath := filepath.Join(dir, "hauler-manifest.yaml")
+	if err := verifyHaulerCoverage(haulerPath, refs); err != nil {
+		return nil, err
+	}
+	lines = append(lines, fmt.Sprintf("verified: hauler-manifest.yaml covers all %d lock refs", len(refs)))
+
+	switch {
+	case revision == "":
+		lines = append(lines, fmt.Sprintf("recorded: revision=%s (pass --revision to enforce)", recorded.Revision))
+	case revision != recorded.Revision:
+		return nil, fmt.Errorf("revision binding failed: manifest records %s, --revision is %s", recorded.Revision, revision)
+	default:
+		lines = append(lines, fmt.Sprintf("verified: revision=%s", revision))
+	}
+
+	return lines, nil
+}
+
+// verifyHaulerCoverage checks that the bundle's hauler manifest entry set
+// EQUALS the set derived from the lock refs (digest form, plus tag form for
+// tagged refs — the same derivation rules haulerManifest applies). A missing
+// entry means the haul was built from a projection that never saw a lock
+// ref; an extra entry means the haul carries content the lock never
+// declared. Both are binding failures.
+func verifyHaulerCoverage(haulerPath string, refs []string) error {
+	payload, err := os.ReadFile(haulerPath)
+	if err != nil {
+		return err
+	}
+	var manifest haulerImages
+	if err := yaml.Unmarshal(payload, &manifest); err != nil {
+		return fmt.Errorf("parse %s: %w", haulerPath, err)
+	}
+	names := make(map[string]bool, len(manifest.Spec.Images))
+	for _, image := range manifest.Spec.Images {
+		names[image.Name] = true
+	}
+	derived := make(map[string]bool, 2*len(refs))
+	for _, ref := range refs {
+		digestForm, tagForm := haulerRefForms(ref)
+		derived[digestForm] = true
+		if !names[digestForm] {
+			return fmt.Errorf("hauler manifest binding failed: lock ref %s has no digest entry %s in %s", ref, digestForm, haulerPath)
+		}
+		if tagForm != "" {
+			derived[tagForm] = true
+			if !names[tagForm] {
+				return fmt.Errorf("hauler manifest binding failed: lock ref %s has no tag entry %s in %s", ref, tagForm, haulerPath)
+			}
+		}
+	}
+	for _, image := range manifest.Spec.Images {
+		if !derived[image.Name] {
+			return fmt.Errorf("hauler manifest binding failed: entry %s in %s derives from no lock ref", image.Name, haulerPath)
+		}
+	}
+	return nil
 }
 
 func exitErr(err error) {

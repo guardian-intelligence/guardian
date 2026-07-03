@@ -1,0 +1,45 @@
+# The previews-branch source pair. Deliberately NOT in base/flux/sync.yaml:
+# every source there must flip to the dark-uplink OCI mirror
+# (TestFluxSourceParameterizationConformance), while previews are a
+# connected-mode convenience — per-PR state written by GitHub CI, meaningless
+# without GitHub/ghcr/Cloudflare. In dark mode this GitRepository simply
+# fails to fetch and the Kustomization starves alone; nothing depends on it.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: guardian-previews
+  namespace: cozy-fluxcd
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: company
+spec:
+  interval: 30s
+  url: https://github.com/guardian-intelligence/guardian
+  ref:
+    branch: previews
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: guardian-company-previews
+  namespace: cozy-fluxcd
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: company
+spec:
+  interval: 1m
+  retryInterval: 30s
+  path: ./manifests
+  sourceRef:
+    kind: GitRepository
+    name: guardian-previews
+  # Guardrail: the previews branch is CI-written; force every namespaced
+  # object it declares into the previews tenant regardless of what it says.
+  targetNamespace: tenant-guardian-previews
+  dependsOn:
+    - name: guardian-company-previews-infra
+  prune: true
+  # A crash-looping preview must not wedge reconciliation of later previews;
+  # health is reported per-PR by the workflow's URL poll instead.
+  wait: false
+  timeout: 5m

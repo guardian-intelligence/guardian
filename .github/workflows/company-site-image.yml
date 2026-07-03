@@ -1,10 +1,13 @@
 # Builds the company-site OCI image and enforces the digest-pin invariant:
 # the digest pinned in src/infrastructure/deployments/company/prod/web.yaml
-# must equal the digest Bazel builds from the same commit. A content change
-# without a repin cannot merge; a repin without the matching content cannot
-# merge. On main, the verified image is pushed to ghcr.io and cosign-signed
-# (keyless, bound to this workflow's OIDC identity), so the pinned digest is
-# publicly pullable by the time Flux reconciles the merge.
+# must equal the digest CI builds from the same commit (CI is the canonical
+# builder; the vite output is not bit-reproducible across machines, so
+# workstation builds are advisory — repin from this workflow's output). A
+# content change without a repin cannot merge; a repin without the matching
+# content cannot merge. On main, the verified image is pushed to ghcr.io and
+# cosign-signed (keyless, bound to this workflow's OIDC identity). Flux may
+# reconcile the merge before the push completes; the rollout self-heals via
+# image pull backoff and maxUnavailable: 0 keeps the old ReplicaSet serving.
 name: company-site-image
 
 on:
@@ -16,6 +19,8 @@ on:
       - ".github/workflows/company-site-image.yml"
       - "MODULE.bazel"
       - "MODULE.bazel.lock"
+      - ".bazelrc"
+      - ".bazelversion"
   push:
     branches: [main]
     paths:
@@ -25,6 +30,8 @@ on:
       - ".github/workflows/company-site-image.yml"
       - "MODULE.bazel"
       - "MODULE.bazel.lock"
+      - ".bazelrc"
+      - ".bazelversion"
   workflow_dispatch:
 
 permissions:
@@ -51,7 +58,10 @@ jobs:
         run: bazelisk build //src/products/company/site:image
 
       - name: Verify pinned digest matches built digest
+        id: digest
         run: |
+          # //src/products/company/site:image aliases //src/products/company/web:image,
+          # so the OCI layout lands under web/.
           built="$(jq -r '.manifests[0].digest' bazel-bin/src/products/company/web/image/index.json)"
           pinned="$(grep -o 'ghcr.io/guardian-intelligence/company-site@sha256:[a-f0-9]\{64\}' \
             src/infrastructure/deployments/company/prod/web.yaml | cut -d@ -f2)"
@@ -61,20 +71,70 @@ jobs:
             echo "::error::Digest pin is stale. Repin web.yaml and images.lock to $built (built from this commit) and push again." >&2
             exit 1
           fi
+          echo "digest=$built" >> "$GITHUB_OUTPUT"
 
+      # Diagnostic for cross-machine digest drift: the app layer tar is the
+      # only non-hermetic input, so on a pin mismatch upload it for offline
+      # diffing against a workstation build.
+      - name: Upload output tar on digest mismatch
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: company-site-output
+          path: bazel-bin/src/products/company/web/company-site-output.tar
+          retention-days: 3
+
+      - name: Verify images.lock and rendered manifests agree
+        run: bazelisk test //src/infrastructure/tests:talm_render_test
+
+      # SBOM is generated from the local OCI layout on every run (PRs included)
+      # so a broken SBOM pipeline fails before merge, not after.
+      - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        id: syft
+
+      - name: Generate SBOM (SPDX)
+        run: |
+          "${{ steps.syft.outputs.cmd }}" scan \
+            oci-dir:bazel-bin/src/products/company/web/image \
+            -o spdx-json=sbom.spdx.json
+          test -s sbom.spdx.json
+
+      # Push and sign only for the canonical main history — not for PRs, and
+      # not for workflow_dispatch on arbitrary branches (a dispatch push would
+      # retag `edge` and sign bytes that never went through review).
       - name: Log in to ghcr.io
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Push image
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: bazelisk run //src/products/company/site:push
 
       - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
       - name: Sign image (keyless)
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: cosign sign --yes "ghcr.io/guardian-intelligence/company-site@${{ steps.digest.outputs.digest }}"
+
+      - name: Attach SBOM attestation
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          digest="$(jq -r '.manifests[0].digest' bazel-bin/src/products/company/web/image/index.json)"
-          cosign sign --yes "ghcr.io/guardian-intelligence/company-site@${digest}"
+          cosign attest --yes --type spdxjson --predicate sbom.spdx.json \
+            "ghcr.io/guardian-intelligence/company-site@${{ steps.digest.outputs.digest }}"
+
+      # Close the loop: verify what we just published against the pinned
+      # identity. This is the same policy an offline verifier uses — the
+      # identity string below is the canonical trust anchor for guardian
+      # artifacts (recorded in docs/supply-chain-design.md).
+      - name: Verify signature and SBOM attestation
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/company-site-image.yml@refs/heads/main
+          ISSUER: https://token.actions.githubusercontent.com
+        run: |
+          img="ghcr.io/guardian-intelligence/company-site@${{ steps.digest.outputs.digest }}"
+          cosign verify --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" "$img"
+          cosign verify-attestation --type spdxjson \
+            --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" "$img"
+

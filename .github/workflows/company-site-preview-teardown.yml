@@ -38,7 +38,7 @@ jobs:
 
       - name: Remove preview manifests
         run: |
-          if [ ! -d ".previews/manifests/pr-${PR}" ]; then
+          if [ ! -e ".previews/manifests/pr-${PR}.yaml" ]; then
             echo "no preview for pr-${PR}; nothing to tear down"
             exit 0
           fi
