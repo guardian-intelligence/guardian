@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 )
@@ -33,8 +34,10 @@ func TestParseEnvRejectsMalformedLine(t *testing.T) {
 	}
 }
 
-func TestImportPlan(t *testing.T) {
-	env := map[string]string{
+const testGithubAppPEM = "-----BEGIN PRIVATE KEY-----\nnot-a-real-key\n-----END PRIVATE KEY-----\n"
+
+func testImportEnv() map[string]string {
+	return map[string]string{
 		"cloudflare_account_id":                                   "account",
 		"cloudflare_r2_api_token":                                 "r2-api",
 		"cloudflare_r2_secret_access_key":                         "r2-secret",
@@ -43,13 +46,17 @@ func TestImportPlan(t *testing.T) {
 		"cloudflare_guardian_intelligence_org_dnz_zone_api_token": "zone",
 		"cloudflare_external_dns_api_token":                       "external",
 		"cloudflare_dns_lb_provisioner_api_token":                 "lb",
+		"github_promotions_app_private_key_b64":                   base64.StdEncoding.EncodeToString([]byte(testGithubAppPEM)),
 	}
-	plan, err := importPlan(env)
+}
+
+func TestImportPlan(t *testing.T) {
+	plan, err := importPlan(testImportEnv())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 3 {
-		t.Fatalf("plan length = %d, want 3", len(plan))
+	if len(plan) != 4 {
+		t.Fatalf("plan length = %d, want 4", len(plan))
 	}
 	external := plan[0]
 	if external.APIPath != "kv/data/guardian/guardian-mgmt/tenant-guardian/dns/external-dns" {
@@ -64,6 +71,25 @@ func TestImportPlan(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(paths, "\n"), "operator/r2") {
 		t.Fatalf("operator r2 path missing from %#v", paths)
+	}
+	promotion := plan[3]
+	if promotion.APIPath != "kv/data/guardian/guardian-mgmt/company-site/promotion/github-app" {
+		t.Fatalf("promotion path = %q", promotion.APIPath)
+	}
+	if promotion.Data["githubAppPrivateKey"] != testGithubAppPEM {
+		t.Fatal("githubAppPrivateKey did not round-trip through base64")
+	}
+}
+
+func TestImportPlanRejectsBadGithubKey(t *testing.T) {
+	env := testImportEnv()
+	env["github_promotions_app_private_key_b64"] = "%%% not base64 %%%"
+	if _, err := importPlan(env); err == nil {
+		t.Fatal("importPlan accepted invalid base64")
+	}
+	env["github_promotions_app_private_key_b64"] = base64.StdEncoding.EncodeToString([]byte("plain text, not a PEM"))
+	if _, err := importPlan(env); err == nil {
+		t.Fatal("importPlan accepted a non-PEM payload")
 	}
 }
 

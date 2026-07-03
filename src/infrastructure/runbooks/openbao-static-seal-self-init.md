@@ -133,6 +133,52 @@ Kubernetes auth role created by self-init. It writes:
 - `kv/guardian/guardian-mgmt/tenant-guardian/dns/external-dns`
 - `kv/guardian/guardian-mgmt/operator/cloudflare`
 - `kv/guardian/guardian-mgmt/operator/r2`
+- `kv/guardian/guardian-mgmt/company-site/promotion/github-app`
+
+The promotion entry carries the `guardian-promotions` GitHub App private key.
+The env file transports it base64-encoded (the file is line-oriented) as
+`github_promotions_app_private_key_b64`. Build the import file as a working
+copy from custody without printing any value, then pass it via `--env-file`:
+
+```sh
+umask 077
+cp ~/guardian-custody/DELETE_ME.env import.env
+printf 'github_promotions_app_private_key_b64=%s\n' \
+  "$(base64 -w0 < ~/guardian-custody/github-promotions-app.private-key.pem)" >> import.env
+# then run the import command above with: --env-file import.env
+```
 
 After successful write and readback verification, the importer deletes the
 temporary OpenBao auth role and policy, then deletes the local import file.
+Keep the custody originals; the import file is a working copy.
+
+## Adding A Consumer (Re-Initialization)
+
+`initialize` runs only at first initialization and there is no standing admin
+credential (the self-init token is revoked, the importer role self-deletes),
+so OpenBao configuration changes ship as a Git edit to the self-init block
+followed by a state reset. All KV state is re-importable from custody by
+design; this is the same path a cold boot exercises.
+
+1. Land the PR editing the `initialize` block (policy + role + importer path +
+   conformance inventory) and the consumer's ESO manifests.
+2. Wait for Flux to reconcile `guardian-system` so the HelmRelease renders the
+   new OpenBao config.
+3. Reset raft state (the seal key on the nodes and the audit PVCs stay):
+
+   ```sh
+   kubectl -n tenant-guardian scale statefulset guardian-openbao --replicas=0
+   kubectl -n tenant-guardian wait pod -l app.kubernetes.io/name=openbao --for=delete --timeout=5m
+   kubectl -n tenant-guardian delete pvc data-guardian-openbao-0 data-guardian-openbao-1 data-guardian-openbao-2
+   kubectl -n tenant-guardian scale statefulset guardian-openbao --replicas=3
+   ```
+
+4. Pod 0 initializes and runs the new self-init block; the others join.
+5. Re-run the bootstrap secret import (above) with a fresh env file built from
+   custody.
+6. Verify every ExternalSecret returns to `Ready=True` and force a refresh if
+   needed (`kubectl annotate externalsecret ... force-sync=$(date +%s)`).
+
+ExternalSecrets use `creationPolicy: Orphan` / `deletionPolicy: Retain`, so
+already-materialized Secrets keep serving their consumers throughout the
+reset window.

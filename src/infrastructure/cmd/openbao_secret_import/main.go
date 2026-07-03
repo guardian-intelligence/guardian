@@ -235,6 +235,7 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 		"cloudflare_guardian_intelligence_org_dnz_zone_api_token",
 		"cloudflare_external_dns_api_token",
 		"cloudflare_dns_lb_provisioner_api_token",
+		"github_promotions_app_private_key_b64",
 	}
 	var missing []string
 	for _, key := range required {
@@ -244,6 +245,14 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 	}
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("missing required import variables: %s", strings.Join(missing, ","))
+	}
+	// The PEM travels base64-encoded because the env file is line-oriented.
+	githubAppKey, err := base64.StdEncoding.DecodeString(strings.TrimSpace(env["github_promotions_app_private_key_b64"]))
+	if err != nil {
+		return nil, fmt.Errorf("decode github_promotions_app_private_key_b64: %w", err)
+	}
+	if !strings.HasPrefix(string(githubAppKey), "-----BEGIN") {
+		return nil, errors.New("github_promotions_app_private_key_b64 does not decode to a PEM block")
 	}
 	return []secretWrite{
 		{
@@ -268,6 +277,12 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 				"cloudflare_r2_api_token":         env["cloudflare_r2_api_token"],
 				"cloudflare_r2_s3_api_endpoint":   env["cloudflare_r2_s3_api_endpoint"],
 				"cloudflare_r2_secret_access_key": env["cloudflare_r2_secret_access_key"],
+			},
+		},
+		{
+			APIPath: "kv/data/guardian/guardian-mgmt/company-site/promotion/github-app",
+			Data: map[string]string{
+				"githubAppPrivateKey": string(githubAppKey),
 			},
 		},
 	}, nil
