@@ -125,32 +125,36 @@ jobs:
         continue-on-error: true
         run: |
           echo "polling https://${HOST} for guardian:commit-sha == ${HEAD_SHA}"
-          # Healthy convergence is FAST (Flux polls previews at 30s; the host
-          # is a Cloudflare-proxied CNAME so TLS is instant) — 6m is already
-          # generous, and past it something is wrong and should say so loudly.
-          # Resolve via 1.1.1.1 directly: the runner's stub resolver caches
-          # the NXDOMAIN from before external-dns created the record, and will
-          # happily report "not serving" long after the preview is live for
-          # everyone else (pr-354 went live in minutes while the poll saw
-          # nothing).
+          # Tight on purpose: measured convergence is ~1m (pr-354's ReplicaSet
+          # appeared 13s after the manifest push, image already node-cached),
+          # so past 6m something is wrong and should say so loudly, not grind.
+          # Resolve via 1.1.1.1 (fresh records; the runner's stub resolver
+          # negative-caches pre-creation NXDOMAINs) and log status + title per
+          # probe: the pr-354 poll printed "nothing yet" for its whole window
+          # WHILE the pod was serving — a runner-only blindness that smells
+          # like Cloudflare challenging datacenter IPs, which curl -f would
+          # swallow silently. No -f: we want to SEE the 403/challenge.
           deadline=$((SECONDS + 360))
           while [ $SECONDS -lt $deadline ]; do
             ip="$(dig +short @1.1.1.1 A "$HOST" 2>/dev/null | grep -E '^[0-9.]+$' | head -1)"
             resolve=()
             [ -n "$ip" ] && resolve=(--resolve "${HOST}:443:${ip}")
-            served="$(curl -fsSL --max-time 10 "${resolve[@]}" "https://${HOST}/" 2>/dev/null \
-              | grep -o 'name="guardian:commit-sha" content="[a-f0-9]*"' \
+            resp="$(curl -sSL --max-time 10 "${resolve[@]}" -w $'\n%{http_code}' "https://${HOST}/" 2>/dev/null || true)"
+            code="${resp##*$'\n'}"
+            body="${resp%$'\n'*}"
+            served="$(grep -o 'name="guardian:commit-sha" content="[a-f0-9]*"' <<< "$body" \
               | grep -o '[a-f0-9]\{40\}' || true)"
             if [ "$served" = "$HEAD_SHA" ]; then
               echo "live: https://${HOST}"
               echo "status=live" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            echo "…serving '${served:-nothing yet}' via ${ip:-system-dns} ($((deadline - SECONDS))s left)"
+            title="$(grep -o '<title>[^<]*' <<< "$body" | head -1 | cut -c8-70 || true)"
+            echo "$(date -u +%T) …serving '${served:-nothing}' http=${code:-none} title='${title:-}' via ${ip:-system-dns} ($((deadline - SECONDS))s left)"
             sleep 10
           done
           echo "status=pending" >> "$GITHUB_OUTPUT"
-          echo "::warning::preview did not converge within 6m — check Flux, external-dns, or the previews branch"
+          echo "::warning::preview did not converge within 6m — check the http/title probe lines above: 403s or challenge titles mean Cloudflare is blocking the runner, not a broken preview"
           exit 1
 
       - name: Report deployment state
