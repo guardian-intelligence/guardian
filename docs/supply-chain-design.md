@@ -1,18 +1,23 @@
 # Supply-chain design: signing, SBOM, and the trust model
 
 Status: active as of 2026-07-03 (PR for task: SBOM attestation + images.lock
-signing). Complements `manifest-conformance-design.md` (Git-time invariants)
-and the cold-boot runbook (offline consumption).
+signing; updated same week for promotion decoupling — pin moves are
+provenance-verified, not rebuild-verified). Complements
+`manifest-conformance-design.md` (Git-time invariants) and the cold-boot
+runbook (offline consumption).
 
 ## The trust model in one paragraph
 
-The root of trust is Git plus a reproducible build: every first-party image
-digest is a pure function of a reviewed commit, enforced by the
-`company-site-image` workflow (pin == digest CI builds from the same commit).
-Signing adds an identity attestation on top — "the reviewed main history of
-guardian-intelligence/guardian built this" — using cosign keyless signatures
-bound to the GitHub Actions OIDC workload identity via Fulcio and logged in
-Rekor. There are no signing keys anywhere: nothing to store, rotate, leak, or
+The root of trust is Git plus CI as the canonical builder: a deployment pin
+may only move to a digest that CI built, pushed, and cosign-signed from
+reviewed main history, enforced by the `company-site-image` workflow — a
+pin-changing PR must name a digest carrying the canonical identity's
+signature (verified without a rebuild), and content PRs do not move pins at
+all. The signature is therefore the gate, not an add-on: a cosign keyless
+signature bound to the GitHub Actions OIDC workload identity via Fulcio and
+logged in Rekor, attesting "the reviewed main history of
+guardian-intelligence/guardian built this". There are no signing keys
+anywhere: nothing to store, rotate, leak, or
 custody. Registries (ghcr.io included) are untrusted distribution; a
 verifier checks the signature identity, not the registry it pulled from.
 
@@ -46,6 +51,32 @@ cold-boot runbook). The residual trust in the haul→manifest binding is the
 custody model itself: the drive is custody, assembled and carried by the
 operator who also holds the seal key — signatures defend the Git-derivation
 and upstream-registry axes, not the operator.
+
+## Promotion: how digests move
+
+Deployment pins are decoupled from content changes. A content PR never
+moves a pin; when it merges, CI on main builds, pushes, and signs the new
+digest, which makes it *eligible* for promotion — nothing more. Promotion
+is a separate pin-only PR that bumps the manifest pin and the matching
+`images.lock` entry together (the conformance tests force the pair). CI
+verifies exactly two things on that PR: the proposed digest carries a
+cosign signature by the canonical image identity above (the verification
+itself takes seconds and needs no rebuild, though today's workflow still
+builds on pin-only PRs — trimming that is the latency lever), and the lock
+conformance tests still pass. The promoter is
+untrusted by construction: branch protection plus these checks mean
+nothing reaches a pin that CI did not sign from main history, whether the
+PR was opened by a human or by the promotion controller (Kargo; opened by
+hand until it lands).
+
+This deliberately weakens the old invariant "pin == the digest CI builds
+from this same commit" to "pin ∈ digests the canonical identity has
+signed". What is bought: content merges stop requiring a round-trip repin
+commit, and promotion becomes an automatable, independently-gated step per
+service. What is given up: Git alone no longer proves the pin is the
+*latest* build — freshness is the promoter's job — and pinning an older
+signed digest (rollback) remains a legitimate one-line operation rather
+than a violation.
 
 ## Verification
 

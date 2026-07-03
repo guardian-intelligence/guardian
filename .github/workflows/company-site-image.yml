@@ -1,13 +1,17 @@
-# Builds the company-site OCI image and enforces the digest-pin invariant:
+# Builds the company-site OCI image and enforces digest-pin provenance:
 # the digest pinned in src/infrastructure/deployments/company/prod/web.yaml
-# must equal the digest CI builds from the same commit (CI is the canonical
-# builder; the vite output is not bit-reproducible across machines, so
-# workstation builds are advisory — repin from this workflow's output). A
-# content change without a repin cannot merge; a repin without the matching
-# content cannot merge. On main, the verified image is pushed to ghcr.io and
-# cosign-signed (keyless, bound to this workflow's OIDC identity). Flux may
-# reconcile the merge before the push completes; the rollout self-heals via
-# image pull backoff and maxUnavailable: 0 keeps the old ReplicaSet serving.
+# may only move to an image cosign-signed by this workflow's canonical
+# identity — i.e. built by CI from reviewed main history. Content PRs never
+# move the pin and do not gate on it; promotion is a separate pin-only PR
+# (opened by the promotion controller once Kargo lands, by hand until then)
+# whose proposed digest is signature-verified here without a rebuild. On
+# main, every build is pushed to ghcr.io and cosign-signed (keyless, bound
+# to this workflow's OIDC identity), which is what makes a digest eligible
+# for promotion. CI stays the canonical builder (the vite output is not
+# bit-reproducible across machines); the built digest is logged next to the
+# pin on every run for observability. Flux may reconcile a repin merge
+# before ghcr replication settles; the rollout self-heals via image pull
+# backoff and maxUnavailable: 0 keeps the old ReplicaSet serving.
 name: company-site-image
 
 on:
@@ -57,7 +61,7 @@ jobs:
       - name: Build image
         run: bazelisk build //src/products/company/site:image
 
-      - name: Verify pinned digest matches built digest
+      - name: Compute built digest
         id: digest
         run: |
           # //src/products/company/site:image aliases //src/products/company/web:image,
@@ -67,22 +71,35 @@ jobs:
             src/infrastructure/deployments/company/prod/web.yaml | cut -d@ -f2)"
           echo "built:  $built"
           echo "pinned: $pinned"
-          if [[ "$built" != "$pinned" ]]; then
-            echo "::error::Digest pin is stale. Repin web.yaml and images.lock to $built (built from this commit) and push again." >&2
-            exit 1
-          fi
           echo "digest=$built" >> "$GITHUB_OUTPUT"
 
-      # Diagnostic for cross-machine digest drift: the app layer tar is the
-      # only non-hermetic input, so on a pin mismatch upload it for offline
-      # diffing against a workstation build.
-      - name: Upload output tar on digest mismatch
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: company-site-output
-          path: bazel-bin/src/products/company/web/company-site-output.tar
-          retention-days: 3
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+
+      # Promotion gate: a PR may move the pin only to a digest signed by the
+      # canonical identity. A pin identical to the base branch needs no check
+      # (it was verified when it landed); a stale pin on main is healed by
+      # promotion, not by blocking content merges.
+      - name: Verify a changed pin is canonically signed
+        if: github.event_name == 'pull_request'
+        env:
+          IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/company-site-image.yml@refs/heads/main
+          ISSUER: https://token.actions.githubusercontent.com
+        run: |
+          web_yaml=src/infrastructure/deployments/company/prod/web.yaml
+          pin_re='ghcr.io/guardian-intelligence/company-site@sha256:[a-f0-9]\{64\}'
+          pinned="$(grep -o "$pin_re" "$web_yaml" | cut -d@ -f2)"
+          git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
+          base_pinned="$(git show "FETCH_HEAD:$web_yaml" | grep -o "$pin_re" | cut -d@ -f2)"
+          if [[ "$pinned" == "$base_pinned" ]]; then
+            echo "pin unchanged from base ($pinned); nothing to verify"
+            exit 0
+          fi
+          echo "pin moves $base_pinned -> $pinned; verifying provenance"
+          # stdout is the multi-MB signature payload that stalls the Actions
+          # log streamer; the verification summary goes to stderr.
+          cosign verify --certificate-identity "$IDENTITY" \
+            --certificate-oidc-issuer "$ISSUER" \
+            "ghcr.io/guardian-intelligence/company-site@$pinned" > /dev/null
 
       - name: Verify images.lock and rendered manifests agree
         run: bazelisk test //src/infrastructure/tests:talm_render_test
@@ -109,9 +126,6 @@ jobs:
       - name: Push image
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: bazelisk run //src/products/company/site:push
-
-      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
       - name: Sign image (keyless)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -140,4 +154,3 @@ jobs:
           # goes to stderr and stays in the log.
           cosign verify-attestation --type spdxjson \
             --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" "$img" > /dev/null
-
