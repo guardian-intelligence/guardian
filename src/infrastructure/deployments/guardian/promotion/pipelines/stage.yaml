@@ -41,12 +41,12 @@ spec:
             path: ./repo/src/infrastructure/deployments/company/prod/web.yaml
             updates:
               - key: spec.template.spec.containers.0.image
-                value: ${{ vars.imageRepo }}@${{ imageFrom(vars.imageRepo).digest }}
+                value: ${{ vars.imageRepo }}@${{ imageFrom(vars.imageRepo).Digest }}
         - uses: git-commit
           as: commit
           config:
             path: ./repo
-            message: promote company-site to ${{ imageFrom(vars.imageRepo).digest }}
+            message: promote company-site to ${{ imageFrom(vars.imageRepo).Digest }}
         - uses: git-push
           as: push
           config:
@@ -59,7 +59,7 @@ spec:
             provider: github
             sourceBranch: ${{ outputs.push.branch }}
             targetBranch: main
-            title: promote company-site to ${{ imageFrom(vars.imageRepo).digest }}
+            title: promote company-site to ${{ imageFrom(vars.imageRepo).Digest }}
         - uses: git-wait-for-pr
           config:
             repoURL: ${{ vars.repoURL }}
