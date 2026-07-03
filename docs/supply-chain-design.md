@@ -58,16 +58,23 @@ Deployment pins are decoupled from content changes. A content PR never
 moves a pin; when it merges, CI on main builds, pushes, and signs the new
 digest, which makes it *eligible* for promotion — nothing more. Promotion
 is a separate pin-only PR that bumps the manifest pin and the matching
-`images.lock` entry together (the conformance tests force the pair). CI
-verifies exactly two things on that PR: the proposed digest carries a
-cosign signature by the canonical image identity above (the verification
-itself takes seconds and needs no rebuild, though today's workflow still
-builds on pin-only PRs — trimming that is the latency lever), and the lock
-conformance tests still pass. The promoter is
-untrusted by construction: branch protection plus these checks mean
-nothing reaches a pin that CI did not sign from main history, whether the
-PR was opened by a human or by the promotion controller (Kargo; opened by
-hand until it lands).
+`images.lock` entry together (the conformance tests force the pair). The
+`site-gate` check verifies exactly two things on that PR: the proposed
+digest carries a cosign signature by the canonical image identity above
+(seconds, no rebuild — the gate classifies the diff and skips the build on
+pin-only PRs), and the lock conformance tests still pass.
+
+The promoter is Kargo (deployments/guardian/promotion): the Warehouse
+tracks the digest behind `company-site:edge`, and the prod Stage's
+promotion opens the pin-bump PR as the `guardian-promotions` GitHub App.
+The `promotion-lock-sync` workflow syncs the `images.lock` line from the
+PR's pin (Kargo cannot edit the plain-text lock) and arms automerge. The
+promoter is untrusted by construction: branch protection requires `build`
+and `site-gate` on main, so nothing reaches a pin that CI did not sign
+from main history, whether the PR was opened by a human or the bot. The
+required-checks + allow-auto-merge repo settings are the enforcement's
+load-bearing half and live outside Git — re-assert them when recreating
+the repo (exact commands in TRIBAL_KNOWLEDGE.md).
 
 This deliberately weakens the old invariant "pin == the digest CI builds
 from this same commit" to "pin ∈ digests the canonical identity has

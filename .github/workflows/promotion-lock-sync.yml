@@ -1,0 +1,71 @@
+# Companion to the prod promotion Stage: Kargo's pin-bump PR changes only
+# web.yaml (its promotion steps cannot edit the plain-text images.lock), so
+# this workflow re-derives the company-site lock line from the PR's pin,
+# pushes the fix to the PR branch, and arms automerge. Interim mechanism —
+# the images.lock derivation tool replaces the sed when it lands.
+#
+# It pushes with the guardian-promotions App token, NOT GITHUB_TOKEN: pushes
+# made with GITHUB_TOKEN do not trigger workflows, so the site-gate would
+# never run on the synced head and automerge would wait forever. The bot is
+# untrusted either way — the site-gate required check and branch protection
+# decide whether the PR merges; this workflow only proposes and arms.
+name: promotion-lock-sync
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  sync:
+    if: github.event.pull_request.user.login == 'guardian-promotions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        id: app
+        with:
+          app-id: ${{ secrets.PROMOTIONS_APP_ID }}
+          private-key: ${{ secrets.PROMOTIONS_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ steps.app.outputs.token }}
+
+      - name: Sync images.lock to the pinned digest
+        id: sync
+        run: |
+          web_yaml=src/infrastructure/deployments/company/prod/web.yaml
+          lock=src/infrastructure/bootstrap/bundle/images.lock
+          pinned="$(grep -o 'ghcr.io/guardian-intelligence/company-site@sha256:[a-f0-9]\{64\}' "$web_yaml")"
+          sed -i "s|^ghcr.io/guardian-intelligence/company-site@sha256:[a-f0-9]\{64\}$|$pinned|" "$lock"
+          grep -q "^$pinned$" "$lock"
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push the lock sync
+        if: steps.sync.outputs.changed == 'true'
+        run: |
+          git config user.name "guardian-promotions[bot]"
+          git config user.email "guardian-promotions[bot]@users.noreply.github.com"
+          git commit -am "sync images.lock to the promoted digest"
+          git push
+
+      # Only armed once the lock is already in step (the push above triggers
+      # a fresh run that lands here). Automerge waits for the required checks
+      # on the synced head — the site-gate's provenance verification included.
+      - name: Arm automerge
+        if: steps.sync.outputs.changed == 'false'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: gh pr merge --auto --merge "${{ github.event.pull_request.number }}" --repo "${{ github.repository }}"

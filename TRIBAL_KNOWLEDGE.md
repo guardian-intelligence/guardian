@@ -56,3 +56,32 @@ to 10, and a panic self-reboot contaminates the result), then
 the chipset recording that it caused the last reset). Watchdog recoveries
 are silent by design; the dead-man's-switch alerting work is what makes
 them observable.
+
+## Promotion enforcement lives partly in repo settings (not Git)
+
+The Kargo promotion bot is untrusted by construction only while GitHub
+enforces the checks: branch protection on `main` requiring the `build` and
+`site-gate` contexts, plus repo-level allow-auto-merge. Those settings are
+not represented in Git — re-assert them if the repo is ever recreated or
+protection is accidentally dropped:
+
+```sh
+gh api -X PATCH repos/guardian-intelligence/guardian \
+  -F allow_auto_merge=true
+gh api -X PUT repos/guardian-intelligence/guardian/branches/main/protection \
+  --input - <<'JSON'
+{
+  "required_status_checks": {"strict": false, "contexts": ["build", "site-gate"]},
+  "enforce_admins": false,
+  "required_pull_request_reviews": null,
+  "restrictions": null
+}
+JSON
+```
+
+Both checks run on every PR (`site-gate` classifies the diff itself and
+exits fast when nothing relevant changed — required checks cannot be
+path-filtered without hanging unrelated PRs). The `guardian-promotions`
+GitHub App (private key in operator custody; also in the repo Actions
+secrets for promotion-lock-sync) must stay scoped to Contents + Pull
+requests read/write.

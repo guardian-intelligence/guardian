@@ -1,30 +1,27 @@
-# Builds the company-site OCI image and enforces digest-pin provenance:
-# the digest pinned in src/infrastructure/deployments/company/prod/web.yaml
-# may only move to an image cosign-signed by this workflow's canonical
-# identity — i.e. built by CI from reviewed main history. Content PRs never
-# move the pin and do not gate on it; promotion is a separate pin-only PR
-# (opened by the promotion controller once Kargo lands, by hand until then)
-# whose proposed digest is signature-verified here without a rebuild. On
-# main, every build is pushed to ghcr.io and cosign-signed (keyless, bound
-# to this workflow's OIDC identity), which is what makes a digest eligible
-# for promotion. CI stays the canonical builder (the vite output is not
-# bit-reproducible across machines); the built digest is logged next to the
-# pin on every run for observability. Flux may reconcile a repin merge
-# before ghcr replication settles; the rollout self-heals via image pull
-# backoff and maxUnavailable: 0 keeps the old ReplicaSet serving.
+# The site-gate: one always-running PR check that (a) verifies any digest-pin
+# move names an image cosign-signed by this workflow's canonical identity —
+# i.e. built by CI from reviewed main history — (b) rebuilds the site when
+# its inputs change (CI is the canonical builder; the vite output is not
+# bit-reproducible across machines), and (c) runs the manifest/lock
+# conformance suite when infrastructure manifests or images.lock change.
+#
+# It runs on EVERY pull request and classifies the diff itself, exiting fast
+# when nothing relevant changed: required status checks cannot be
+# path-filtered without hanging unrelated PRs, and this job is a required
+# check on main — it is the enforcement point that makes the promotion bot
+# (Kargo) untrusted-by-construction. Promotion is a separate pin-only PR
+# whose digest is signature-verified here without a rebuild (see
+# docs/supply-chain-design.md, "Promotion: how digests move").
+#
+# On main, every build is pushed to ghcr.io and cosign-signed (keyless,
+# OIDC-bound), which is what makes a digest eligible for promotion. Flux may
+# reconcile a repin merge before ghcr replication settles; the rollout
+# self-heals via image pull backoff and maxUnavailable: 0 keeps the old
+# ReplicaSet serving.
 name: company-site-image
 
 on:
   pull_request:
-    paths:
-      - "src/products/company/**"
-      - "src/viteplus-monorepo/**"
-      - "src/infrastructure/deployments/company/prod/web.yaml"
-      - ".github/workflows/company-site-image.yml"
-      - "MODULE.bazel"
-      - "MODULE.bazel.lock"
-      - ".bazelrc"
-      - ".bazelversion"
   push:
     branches: [main]
     paths:
@@ -45,8 +42,12 @@ defaults:
   run:
     shell: bash
 
+concurrency:
+  group: site-gate-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  build:
+  site-gate:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -55,13 +56,71 @@ jobs:
       id-token: write # cosign keyless signing
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Classify the diff
+        id: classify
+        run: |
+          web_yaml=src/infrastructure/deployments/company/prod/web.yaml
+          pin_re='ghcr.io/guardian-intelligence/company-site@sha256:[a-f0-9]\{64\}'
+          build=false conformance=false pin=false
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base="origin/$GITHUB_BASE_REF"
+            while IFS= read -r f; do
+              case "$f" in
+                src/products/company/*|src/viteplus-monorepo/*|.github/workflows/company-site-image.yml|MODULE.bazel|MODULE.bazel.lock|.bazelrc|.bazelversion)
+                  build=true ;;
+              esac
+              case "$f" in
+                src/infrastructure/*) conformance=true ;;
+              esac
+            done < <(git diff --name-only "$base"...HEAD)
+            pinned="$(grep -o "$pin_re" "$web_yaml" | cut -d@ -f2)"
+            base_pinned="$(git show "$base:$web_yaml" | grep -o "$pin_re" | cut -d@ -f2)"
+            [[ "$pinned" != "$base_pinned" ]] && pin=true
+          else
+            # push to main / workflow_dispatch: full build path, as before.
+            build=true conformance=true
+          fi
+          # A rebuild exercises the manifests' inputs too.
+          [[ "$build" == true ]] && conformance=true
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "conformance=$conformance" >> "$GITHUB_OUTPUT"
+          echo "pin=$pin" >> "$GITHUB_OUTPUT"
+          echo "classified: build=$build conformance=$conformance pin=$pin"
+
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+        if: steps.classify.outputs.pin == 'true' || github.event_name == 'push'
+
+      # Promotion gate: a PR may move the pin only to a digest signed by the
+      # canonical identity. A pin identical to the base branch needs no check
+      # (it was verified when it landed); a stale pin on main is healed by
+      # promotion, not by blocking content merges.
+      - name: Verify the changed pin is canonically signed
+        if: steps.classify.outputs.pin == 'true' && github.event_name == 'pull_request'
+        env:
+          IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/company-site-image.yml@refs/heads/main
+          ISSUER: https://token.actions.githubusercontent.com
+        run: |
+          pinned="$(grep -o 'ghcr.io/guardian-intelligence/company-site@sha256:[a-f0-9]\{64\}' \
+            src/infrastructure/deployments/company/prod/web.yaml | cut -d@ -f2)"
+          echo "verifying provenance of $pinned"
+          # stdout is the multi-MB signature payload that stalls the Actions
+          # log streamer; the verification summary goes to stderr.
+          cosign verify --certificate-identity "$IDENTITY" \
+            --certificate-oidc-issuer "$ISSUER" \
+            "ghcr.io/guardian-intelligence/company-site@$pinned" > /dev/null
 
       - uses: bazelbuild/setup-bazelisk@b39c379c82683a5f25d34f0d062761f62693e0b2 # v3.0.0
+        if: steps.classify.outputs.build == 'true' || steps.classify.outputs.conformance == 'true'
 
       - name: Build image
+        if: steps.classify.outputs.build == 'true'
         run: bazelisk build //src/products/company/site:image
 
       - name: Compute built digest
+        if: steps.classify.outputs.build == 'true'
         id: digest
         run: |
           # //src/products/company/site:image aliases //src/products/company/web:image,
@@ -73,43 +132,18 @@ jobs:
           echo "pinned: $pinned"
           echo "digest=$built" >> "$GITHUB_OUTPUT"
 
-      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
-
-      # Promotion gate: a PR may move the pin only to a digest signed by the
-      # canonical identity. A pin identical to the base branch needs no check
-      # (it was verified when it landed); a stale pin on main is healed by
-      # promotion, not by blocking content merges.
-      - name: Verify a changed pin is canonically signed
-        if: github.event_name == 'pull_request'
-        env:
-          IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/company-site-image.yml@refs/heads/main
-          ISSUER: https://token.actions.githubusercontent.com
-        run: |
-          web_yaml=src/infrastructure/deployments/company/prod/web.yaml
-          pin_re='ghcr.io/guardian-intelligence/company-site@sha256:[a-f0-9]\{64\}'
-          pinned="$(grep -o "$pin_re" "$web_yaml" | cut -d@ -f2)"
-          git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
-          base_pinned="$(git show "FETCH_HEAD:$web_yaml" | grep -o "$pin_re" | cut -d@ -f2)"
-          if [[ "$pinned" == "$base_pinned" ]]; then
-            echo "pin unchanged from base ($pinned); nothing to verify"
-            exit 0
-          fi
-          echo "pin moves $base_pinned -> $pinned; verifying provenance"
-          # stdout is the multi-MB signature payload that stalls the Actions
-          # log streamer; the verification summary goes to stderr.
-          cosign verify --certificate-identity "$IDENTITY" \
-            --certificate-oidc-issuer "$ISSUER" \
-            "ghcr.io/guardian-intelligence/company-site@$pinned" > /dev/null
-
       - name: Verify images.lock and rendered manifests agree
+        if: steps.classify.outputs.conformance == 'true'
         run: bazelisk test //src/infrastructure/tests:talm_render_test
 
-      # SBOM is generated from the local OCI layout on every run (PRs included)
-      # so a broken SBOM pipeline fails before merge, not after.
+      # SBOM is generated from the local OCI layout on every build (PRs
+      # included) so a broken SBOM pipeline fails before merge, not after.
       - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        if: steps.classify.outputs.build == 'true'
         id: syft
 
       - name: Generate SBOM (SPDX)
+        if: steps.classify.outputs.build == 'true'
         run: |
           "${{ steps.syft.outputs.cmd }}" scan \
             oci-dir:bazel-bin/src/products/company/web/image \
