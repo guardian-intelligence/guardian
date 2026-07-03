@@ -1,8 +1,0 @@
-filegroup(
-    name = "manifests",
-    srcs = [
-        "kustomization.yaml",
-        "openbao-ops-controller.yaml",
-    ],
-    visibility = ["//visibility:public"],
-)

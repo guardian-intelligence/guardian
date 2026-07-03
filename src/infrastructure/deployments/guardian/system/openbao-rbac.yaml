@@ -1,10 +1,14 @@
+# The only remaining identity in tenant-guardian that needs a mintable token is
+# the bootstrap secret importer. It presents this ServiceAccount's token to the
+# temporary guardian-secret-importer OpenBao Kubernetes auth role (created by
+# self-init) during a cold boot. There is no reconciling operator to run.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: openbao-ops-controller
+  name: guardian-secret-importer
   namespace: tenant-guardian
   labels:
-    app.kubernetes.io/name: openbao-ops-controller
+    app.kubernetes.io/name: guardian-secret-importer
     app.kubernetes.io/part-of: guardian
     guardian.dev/component: secrets
     guardian.dev/tenant-id: gi-guardian

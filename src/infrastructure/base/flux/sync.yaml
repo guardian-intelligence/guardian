@@ -215,39 +215,14 @@ spec:
       namespace: tenant-guardian
     # kstatus is lenient for OnDelete StatefulSets (no rollout to track), so
     # this entry only catches generation staleness. Runtime member health is
-    # asserted functionally: the openbao-ops-state healthCheckExprs prove the
-    # ops-controller can transact against bao, and `aspect infra openbao-drill`
-    # checks per-member seal/raft state.
+    # asserted functionally: guardian-mgmt-dns-controller's ExternalSecret only
+    # goes Ready when OpenBao self-init has created the kv mount and the
+    # external-dns auth role and ESO can read them, and `aspect infra
+    # openbao-drill` checks per-member seal/raft state.
     - apiVersion: apps/v1
       kind: StatefulSet
       name: guardian-openbao
       namespace: tenant-guardian
-  timeout: 10m
----
-apiVersion: kustomize.toolkit.fluxcd.io/v1
-kind: Kustomization
-metadata:
-  name: guardian-openbao-ops
-  namespace: cozy-fluxcd
-spec:
-  interval: 10m
-  retryInterval: 1m
-  path: ./src/infrastructure/deployments/guardian/openbao-ops
-  sourceRef:
-    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
-    name: ${GUARDIAN_SOURCE_NAME:=guardian}
-  postBuild:
-    substituteFrom:
-      # Required, not optional: Flux skips substitution entirely when the
-      # variable map is empty, which would leave the ${GUARDIAN_SOURCE_*}
-      # placeholders literal and fail the CRD enum. The bootstrap overlays
-      # always create guardian-source; a missing one should fail loudly.
-      - kind: ConfigMap
-        name: guardian-source
-  dependsOn:
-    - name: guardian-system
-  prune: true
-  wait: true
   timeout: 10m
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
@@ -271,7 +246,7 @@ spec:
       - kind: ConfigMap
         name: guardian-source
   dependsOn:
-    - name: guardian-openbao-ops
+    - name: guardian-system
   prune: true
   wait: true
   # kstatus treats ESO custom resources as trivially Current (no standard

@@ -1,10 +1,26 @@
-This is a Bazel polyglot hermetically sealed monorepo for Guardian, a free open-source self-hostable private cloud capable of selling excess compute as QEMU VMs. Early days, still getting the infra set up.
+This is a Bazel polyglot hermetically sealed monorepo for Guardian, a free open-source system that converts bare-metal servers into the operational substrate for a one-person software company. Early days, still getting the infra set up.
 
 The purpose is to create a free and open-source system for any being to convert a source of compute into a self-healing intelligent system (in our case, a secure, disaster-proof software company capable of generating revenue by providing value to the world).
+
+The audience is a single individual with high technical ability who wants to build a company. Verself is the reference example — a value-providing, revenue-generating business proving the concept works — but it was hand-built (Nomad et al.); Guardian is the generalization, built so the next one isn't. The proof is autobiographical: the operator builds a successful company on Guardian first, then shows others the path.
+
+The value proposition:
+
+1. We make release and deployment automation easy.
+2. We make supply chain, network, and application security easy.
+3. We make it easy to add integrations (Stripe, GitHub, and the like) securely.
+4. We make disaster recovery easy.
+5. We make monitoring easy: the system detects its own degradation, remediates what it can, and pages the human only when it can't. Nothing else pages the human.
+
+We do all of this by gluing together excellent existing tools and letting the user focus on building and iterating on their products. The economics: bootstrap once onto powerful fixed-cost metal, then iterate at near-zero marginal cost until product-market fit — ideas are fragile before they are refined, so shipping the next refined version must be nearly free. Every pillar is proven by a drill, not a claim: if it isn't drilled, it isn't true yet.
 
 We use CozyStack. Grep through Cozystack 1.5 docs from the exact `v1.5.0` tag when validating 1.5.0 behavior, or the `release-1.5` branch when intentionally reading the maintained 1.5 line. Do not use v0 docs, v1.4 docs, or current main by accident.
 
 Reference Cozystack for prior art for the cloud portion. Other inspiration: Zarf/UDS, AWS Landing Zone Accelerator, the airgapped landing zone pattern in general.
+
+CozyStack is the platform; Hauler is the seed (the complete digest-pinned artifact bundle from which a Guardian is planted or revived, internet or not); provider profiles are the soil adapters (Latitude today). Guardian itself owns what no upstream can: the custody model, the proofs, and the bootstrap protocol. A provider must offer: boot of an arbitrary image, an isolated private segment with declared MTU, out-of-band reinstall/console, public IPv4, stable machine identity, and a reachable time source. That contract — not any provider's API — is the portability boundary.
+
+Admission test for new components: anything added to Guardian must be (a) configuration of CozyStack, (b) content in the haul, (c) a value in a provider profile, or (d) custody, proof, or bootstrap protocol. If it is none of these, it does not get in.
 
 <company_topology>
 Single Global Writer
@@ -184,6 +200,8 @@ around unhealthy origins per request.
 
 Bazel owns the build graph and produces bytes using OCI for layout. `cosign`/SLSA proves its authentic Guardian Intelligence LLC software. Cozystack management cluster reconciles our declared state.
 
+Technology inventories live in the repo, not in this file: `src/infrastructure/bootstrap/bundle/images.lock` is what runs (digest-pinned, conformance-tested); `src/tools/` is what we operate with (pinned CLIs: talm, talosctl, flux, kubectl, hauler, openbao, oras, k6); `MODULE.bazel` is what we build with.
+
 Planned: Use Flagger for progressive delivery after Flux applies an approved digest. Use Kargo/Freight to promote immutable release candidates to service+stage+region targets.
 
 Domain: guardianintelligence.org (abbreviated gi.org)
@@ -191,7 +209,7 @@ Domain: guardianintelligence.org (abbreviated gi.org)
 Objectives:
 
 We're maximizing for safe operations (disaster-recovery from wiped box + offsite backups as priority 1, behind ongoing security checks + hardening) and highly continuous rapidly delivered software to external vendors like NPM/PyPi/Crates.io and so on.
-After doing some financial calculation I also realize I need to make provisioning N workload nodes (rs4.metal.xlarge CPU: AMD 9554P, 64 Cores @ 3.1 GHz / RAM: 1.5 TB / Storage: 2 x 480 GB NVME + 4 x 8 TB NVME / NIC: 2 x 100 Gbps) a first class concept as well, otherwise we don't break even.
+Provisioning N workload nodes (rs4.metal.xlarge CPU: AMD 9554P, 64 Cores @ 3.1 GHz / RAM: 1.5 TB / Storage: 2 x 480 GB NVME + 4 x 8 TB NVME / NIC: 2 x 100 Gbps) is a first-class concept, but capacity is only added when a concrete workload pulls it — never provisioned ahead of expected demand.
 
 Important context:
 - All dependencies version/commit pinned. Nothing during runtime, dev time, test time, or build time should require external non-version-pinned tooling, or shell out to binaries outside this repo or its build artifacts.
@@ -203,7 +221,7 @@ Important context:
 - API IDL in Protobuf/Connect. Define IAM, audit, risk, request-size, rate limit, and idempotency metadata as explicit operation policy on the RPC contract.
 - Protobuf governance uses the repo-pinned Buf toolchain through Bazel: linting, formatting, and breaking-change checks run from `rules_buf`; code generation uses local pinned generators only. Do not use Buf remote plugins in build/test/release paths.
 - All operations must run unattended, no human-in-the-loop.
-- Invent nothing. If we write our own code, it should be glue code over existing libraries and apeing reference implementations of solutions to problems only. Always do the boring industry-standard thing.
+- Invent nothing. If we write our own code, it should be glue code over existing libraries and apeing reference implementations of solutions to problems only. Always do the boring industry-standard thing. Component choices are made by bake-off: candidates researched, losers rejected with recorded reasons, the winner pinned (the Hauler decision is the template). Months spent recreating an existing tool poorly is the cardinal failure mode.
 - Code is not the truth for how the system works. Traces are.
 - Use SQLC.
 - Do not provide time estimates.
@@ -261,18 +279,18 @@ Release doctrine:
 
 Fleet (all Latitude.sh ASH, f4.metal.small; the Latitude project is `guardian`).
 
-Objectives (outdated but mildly useful historical context)
-
 Planned Product Surfaces:
 
-- GitHub App (20x faster CI than GitHub Actions). (Not Yet Implemented, must be adapted from Verself repo)
+- GitHub App (20x faster CI than GitHub Actions; adapted from the Verself repo; running untrusted customer CI requires TEE on the rs4 workload nodes first). (Not Yet Implemented)
 - Software Company from an API call or web surface; host come-up tooling only prepares machines for the management cluster. (Not Yet Implemented)
 
+Milestones:
 
-Phase 1 - Lay the groundwork: management-cluster bootstrap is repo-declared infrastructure plus narrowly scoped host come-up tooling. Do not recreate the retired `guardian` CLI as a generic operator surface. Disaster recovery and load testing live as explicit infra drill/load helpers; day-to-day convergence belongs to OpenTofu, Talm, Cozystack, Flux, and standard Kubernetes controllers.
+Guardian advances only by drills passed and products shipped — never by components added. Substrate work must be pulled by a product need, a drill, or a milestone gate; it is never pushed because it would be elegant. Automate an operation on its second occurrence — the first time, do it by runbook and write the runbook down. Do not recreate the retired `guardian` CLI as a generic operator surface; day-to-day convergence belongs to OpenTofu, Talm, Cozystack, Flux, and standard Kubernetes controllers.
 
-Phase 2 - We assimilate the gamma and prod boxes from Verself and then figure out a GitOps pipeline: development boxes ship a single-box version of Guardian. Merges to main continuously deploy to Gamma. Synthetics canaries continuously run against all environments. On Gamma they gate promotion to Prod. on Prod they trigger alerts/rollbacks. This is the critical phase. We get confidence in our release process and then we rapidly release software, create a pipeline to automate announcements to the guardianintelligence.org/news, begin getting publicity, traction, contributing useful free open source software. Gate: we have automated or nearly automated releases/yank-drills practiced for
-
-Phase 3 - We figure out how to be a real cloud, provisioning capacity ahead of expected demand.
-
-Phase 4 - The fun part, we rapidly build feature parity with Verself. Starting with "Sign in with GitHub" and onboard our first customer. We'll be done with this phase and on to building new features once we have TEE on the rs4.xlarge workload nodes for customer CI.
+- M1 — The substrate is invincible. Drill #1 (all-node cold boot from Git + custody) has passed. Remaining: the wiped-node drill (including etcd-member and Node-object debris cleanup) and the dark cold-boot drill from the haul alone. Gate: revival with zero internet and zero undocumented steps.
+- M2 — One product flows unattended. The company site through the full loop: merge → converge → canary → promote, synthetics watching all environments, alerts wired. Gate: a deliberately bad deploy detects itself and rolls back with hands off the keyboard; a yank drill passes. Flagger and Kargo earn admission here, pulled by this gate.
+- M3 — Verself, by strangler. One service at a time onto Guardian; Nomad keeps running until each service proves parity. Stripe and GitHub integration patterns become reusable platform capability here, pulled by real need — never speculatively. Gate: a revenue-bearing Verself path served by Guardian for 30 days without regression.
+- M4 — Guardian is downloadable. Canonical iPXE image + haul + CLI, with a single-box dev variant shipping the same way; most of the machinery falls out of M1's dark drill. Gate: a from-zero Guardian stood up on a second provider from the public artifact and docs alone. External adoption becomes a live option here, not before.
+- M5 — Iteration is free. Many products, one fixed-cost fleet. Gate: shipping a new product idea requires no new infrastructure decisions and no new spend; the counterfactual invoice — what this month's actual workloads would have cost on managed cloud services — is computed from live metrics and published.
+- M6 — The pair. Two Guardians (a second region, or one trusted peer) exchange encrypted backups. Gate: a cross-Guardian restore drill passes. The Guardian network grows from this seed if it should; the pair alone already solves offsite backup and the bus factor.

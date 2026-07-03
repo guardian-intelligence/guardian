@@ -59,13 +59,13 @@ func TestValidateFluxKustomizationsRejectsMissingKustomization(t *testing.T) {
 
 func TestValidateFluxKustomizationsSurfacesHealthCheckFailureMessage(t *testing.T) {
 	raw := `{"items":[
-		{"metadata":{"name":"guardian-openbao-ops-state"},"status":{"lastAppliedRevision":"main@sha1:abc123","conditions":[{"type":"Ready","status":"False","reason":"HealthCheckFailed","message":"OpenBaoPolicy/ops-controller status: 'InProgress'"}]}}
+		{"metadata":{"name":"guardian-system"},"status":{"lastAppliedRevision":"main@sha1:abc123","conditions":[{"type":"Ready","status":"False","reason":"HealthCheckFailed","message":"StatefulSet/guardian-openbao status: 'InProgress'"}]}}
 	]}`
-	err := validateFluxKustomizations(raw, []string{"guardian-openbao-ops-state"}, "abc123")
+	err := validateFluxKustomizations(raw, []string{"guardian-system"}, "abc123")
 	if err == nil {
 		t.Fatalf("validateFluxKustomizations() accepted failed health check")
 	}
-	if !strings.Contains(err.Error(), "HealthCheckFailed") || !strings.Contains(err.Error(), "OpenBaoPolicy/ops-controller") {
+	if !strings.Contains(err.Error(), "HealthCheckFailed") || !strings.Contains(err.Error(), "StatefulSet/guardian-openbao") {
 		t.Fatalf("validateFluxKustomizations() error = %v, want reason and message detail", err)
 	}
 }

@@ -25,7 +25,7 @@ const (
 	defaultEnvFile        = "DELETE_ME.env"
 	defaultNamespace      = "tenant-guardian"
 	defaultService        = "guardian-openbao-active"
-	defaultServiceAccount = "openbao-ops-controller"
+	defaultServiceAccount = "guardian-secret-importer"
 	defaultAuthPath       = "kubernetes"
 	defaultAuthRole       = "guardian-secret-importer"
 	defaultCASecret       = "guardian-openbao-api-tls"

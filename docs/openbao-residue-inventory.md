@@ -27,10 +27,10 @@ through an independent listener CA; OpenBao owns secret custody after it starts.
 - Independent cert-manager listener CA resources for
   `guardian-openbao-api-tls`.
 - OpenBao HelmRelease, static-seal configuration, storage, TLS volume mount,
-  and self-init block.
-- OpenBao ops-controller CRDs, Deployment, RBAC, and declared OpenBao operation
-  resources.
-- KV mount, Transit mount, Kubernetes auth backend, policies, and auth roles.
+  and the self-init `initialize` block.
+- KV mount, Transit mount, Kubernetes auth backend, the external-dns policy and
+  auth role — all created by the self-init block (there is no custom operator,
+  CRDs, or hand-authored operation CRs).
 - External Secrets Operator stores and ExternalSecrets.
 
 ## Cold-Start DR Gate

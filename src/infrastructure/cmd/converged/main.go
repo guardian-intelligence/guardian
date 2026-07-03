@@ -2,9 +2,8 @@
 // declared Flux Kustomization is Ready at the expected Git revision and
 // nothing more. Workload and component health gate Kustomization readiness
 // through Flux health checks declared in the manifests themselves
-// (src/infrastructure/base/flux/sync.yaml and the openbao-ops layer), so this
-// command stays a reader over Flux's own conditions rather than a second
-// check engine.
+// (src/infrastructure/base/flux/sync.yaml), so this command stays a reader
+// over Flux's own conditions rather than a second check engine.
 package main
 
 import (
@@ -25,12 +24,8 @@ var defaultKustomizations = []string{
 	"guardian-mgmt-base",
 	"guardian-mgmt-app-patches",
 	"guardian-system",
-	"guardian-openbao-ops",
 	"guardian-mgmt-dns-controller",
 	"guardian-company-prod",
-	"guardian-openbao-ops-crds",
-	"guardian-openbao-ops-controller",
-	"guardian-openbao-ops-state",
 }
 
 type convergedConfig struct {

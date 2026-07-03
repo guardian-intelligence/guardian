@@ -49,16 +49,19 @@ retained raft snapshot needs them.
 Flux reconciles the steady state:
 
 - cert-manager's independent listener CA and OpenBao API listener Certificate;
-- `HelmRelease/tenant-guardian/guardian-openbao`;
-- the OpenBao ops-controller CRDs and Deployment;
-- Flux-applied OpenBao operation CRs.
+- `HelmRelease/tenant-guardian/guardian-openbao`.
 
-On first startup, exactly one raft member initializes the cluster and runs the
-OpenBao `initialize` block. The other raft members join an already initialized
-cluster. Self-init creates only the minimum needed for steady state:
-Kubernetes auth, its config, the ops-controller policy, and the ops-controller
-role. The temporary privileged token used internally by self-init is not
-returned and is revoked by OpenBao after initialization.
+There is no custom operator, no CRDs, and no hand-authored operation CRs. On
+first startup, exactly one raft member initializes the cluster and runs the
+OpenBao `initialize` block; the other raft members join an already initialized
+cluster. Self-init is the sole source of truth for OpenBao configuration and
+creates the complete steady state directly: the Kubernetes auth method and its
+config, the `kv` (v2) and `transit` engines and their tunes, the `external-dns`
+read policy and Kubernetes auth role, and a temporary `guardian-secret-importer`
+policy + role for the bootstrap importer. The temporary privileged token used
+internally by self-init is not returned and is revoked by OpenBao after
+initialization. Because `initialize` runs only at first initialization, config
+added later is applied imperatively against the running cluster.
 
 The cert-manager listener CA is steady state, not a temporary bootstrap issuer.
 It creates `guardian-openbao-api-tls` before the OpenBao pod mounts the Secret.
@@ -98,14 +101,16 @@ aspect infra openbao-drill \
 The converged proof requires every declared Flux Kustomization to be Ready at
 the expected revision. Component health gates Kustomization readiness through
 Flux health checks declared in the manifests: `guardian-system` waits on the
-listener Certificates, HelmRelease, and StatefulSet; `guardian-openbao-ops-state`
-waits on every OpenBao operation CR reporting `Ready=True` and
-`DriftDetected=False` via `healthCheckExprs`. The status drill verifies each
-member is initialized, unsealed, HA-enabled, and part of one raft cluster
-(a single `cluster_id` across pods).
-`SelfInitIncomplete` on OpenBao operation CRs means the cluster did not run the
-declared self-init block successfully; inspect OpenBao startup logs and
-recreate the wiped OpenBao raft state with the declared config.
+listener Certificates, HelmRelease, and StatefulSet; `guardian-mgmt-dns-controller`
+waits on its `ClusterSecretStore` and `ExternalSecret` reporting `Ready=True` via
+`healthCheckExprs`. That ExternalSecret only goes Ready once self-init has created
+the kv mount and the external-dns auth role and ESO can read them, so it is the
+functional proof that self-init succeeded. The status drill verifies each member
+is initialized, unsealed, HA-enabled, and part of one raft cluster (a single
+`cluster_id` across pods).
+If the external-dns ExternalSecret never goes Ready, the cluster likely did not
+run the declared self-init block successfully; inspect OpenBao startup logs and,
+if the raft state was wiped, recreate it with the declared config.
 
 ## Bootstrap Secret Import
 

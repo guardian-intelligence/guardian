@@ -27,7 +27,6 @@ const imagesLockRunfile = "src/infrastructure/bootstrap/bundle/images.lock"
 var imageManifestTrees = []string{
 	"src/infrastructure/deployments",
 	"src/infrastructure/base",
-	"src/services/secrets/openbao/deploy",
 }
 
 var sha256DigestPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)

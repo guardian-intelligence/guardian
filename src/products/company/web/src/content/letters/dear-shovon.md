@@ -21,9 +21,9 @@ You should see how tender he is with the parts of me I used to hide. He's been p
 
 While everyone was over for dinner, he got really quiet and walked past everyone to tug on my sleeve. I was worried at first, but all he asked was if I could homeschool him and all his classmates from last year when summer ends. He wants me to teach them every year until they all graduate from college together. He loudly counted up the grades as he was explaining, but I had to stop him when he got to the twenties.
 
-I asked him why. He looked around and paused and said "I wish the house was this full all the time” and gave me permission to skip math if it'd be easier for me. I couldn’t argue.
+I asked him why. He looked around and paused and said "I wish the house was this full all the time” and gave me permission to skip math if that'd make homechooling easier for me. I couldn’t argue.
 
-I cherish the way his eyes go wide flipping over rocks and seeing the worms underneath, and when he tells me his dreams about being a bird searching skies for a cloud that looks like you. He shows me every day that curiosity and love are two sides of something bigger I don't have a word for yet.
+He shows me every day that curiosity and love are two sides of something bigger I don't have a word for yet. I cherish the way his eyes go wide flipping over rocks and seeing the worms underneath, and how he dreams of being a bird searching skies for a cloud that looks like you.
 
 Last night before bed, I was making sure he brushed his teeth and do you remember how it took years to get him to stop spitting out his toothpaste? He called it “spicy ice cream” one time and then decided he wants to try every flavor.
 

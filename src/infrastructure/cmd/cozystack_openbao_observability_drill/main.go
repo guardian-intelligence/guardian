@@ -196,11 +196,8 @@ func waitOpenBaoReady(ctx context.Context, runner kubectlRunner, cfg drillConfig
 		{"get", "helmreleases.helm.toolkit.fluxcd.io/guardian-openbao"},
 		{"wait", "--for=condition=Ready", "helmreleases.helm.toolkit.fluxcd.io/guardian-openbao", "--timeout=" + cfg.WaitTimeout},
 		{"get", "vmservicescrapes.operator.victoriametrics.com/guardian-openbao"},
-		{"get", "vmservicescrapes.operator.victoriametrics.com/guardian-openbao-ops-controller"},
 		{"get", "vmrules.operator.victoriametrics.com/guardian-openbao"},
 		{"get", "ciliumnetworkpolicies.cilium.io/allow-vmagent-to-openbao-metrics"},
-		{"get", "ciliumnetworkpolicies.cilium.io/allow-vmagent-to-openbao-ops-controller-metrics"},
-		{"wait", "--for=condition=Ready", "pod", "-l", "app.kubernetes.io/name=openbao-ops-controller", "--timeout=" + cfg.WaitTimeout},
 		{"wait", "--for=condition=Ready", "pod", "-l", "app.kubernetes.io/instance=guardian-openbao,app.kubernetes.io/name=openbao,component=server", "--timeout=" + cfg.WaitTimeout},
 	} {
 		if err := runner.run(ctx, strings.Join(args, " "), args...); err != nil {
@@ -324,10 +321,6 @@ func victoriaMetricsQueries(cfg drillConfig) []queryCheck {
 			label: "OpenBao audit tailer running in VictoriaMetrics",
 			query: fmt.Sprintf(`sum(kube_pod_container_status_running{namespace=%q,container="audit-log-tailer",pod=~"%s-.*"})`, cfg.Namespace, cfg.StatefulSet),
 		},
-		{
-			label: "OpenBao ops controller scrape target in VictoriaMetrics",
-			query: fmt.Sprintf(`sum(up{namespace=%q,job="openbao-ops-controller"})`, cfg.Namespace),
-		},
 	}
 }
 
@@ -430,10 +423,6 @@ func victoriaLogsQueries(cfg drillConfig) []queryCheck {
 		{
 			label: "OpenBao audit tailer logs in VictoriaLogs",
 			query: fmt.Sprintf(`kubernetes_namespace_name:%s kubernetes_container_name:audit-log-tailer kubernetes_pod_name:%s-*`, cfg.Namespace, cfg.StatefulSet),
-		},
-		{
-			label: "OpenBao ops controller logs in VictoriaLogs",
-			query: fmt.Sprintf(`kubernetes_namespace_name:%s kubernetes_container_name:manager kubernetes_pod_name:openbao-ops-controller-*`, cfg.Namespace),
 		},
 	}
 }

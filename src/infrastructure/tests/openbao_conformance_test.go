@@ -65,15 +65,22 @@ func TestOpenBaoStaticSealTLSAndStorageConformance(t *testing.T) {
 		`key_mode="$(stat -c '%a' "$key")"`,
 		`case "$key_mode" in 400|440|600|640)`,
 		`test "$(sha256sum "$key" | awk '{print $1}')" = "` + openBaoStaticSealKeyID + `"`,
+		// Self-init is now the sole source of truth for steady-state OpenBao
+		// config (there is no reconciling operator): Kubernetes auth, the kv
+		// and transit engines, and the external-dns consumer's policy+role.
 		`initialize "guardian_self_init"`,
-		`request "write_ops_controller_role"`,
-		`path \"sys/auth\"`,
-		`path \"auth/kubernetes/config\"`,
-		`path \"sys/mounts\"`,
-		`path \"sys/mounts/transit\"`,
-		`path \"sys/mounts/transit/tune\"`,
+		`request "enable_kubernetes_auth"`,
+		`request "enable_kv_mount"`,
+		`type = "kv-v2"`,
+		`request "enable_transit_mount"`,
+		`type = "transit"`,
+		`request "write_external_dns_policy"`,
+		`request "write_external_dns_role"`,
+		`bound_service_account_names = ["external-dns-secrets"]`,
+		`token_policies = ["guardian-external-dns"]`,
 		`request "write_secret_importer_policy"`,
 		`request "write_secret_importer_role"`,
+		`bound_service_account_names = ["guardian-secret-importer"]`,
 		`kv/data/guardian/guardian-mgmt/tenant-guardian/dns/external-dns`,
 		`auth/kubernetes/role/guardian-secret-importer`,
 		`sys/policies/acl/guardian-secret-importer`,
@@ -86,6 +93,10 @@ func TestOpenBaoStaticSealTLSAndStorageConformance(t *testing.T) {
 	}
 	assertTextNotContains(t, raw, "http://guardian-openbao", path)
 	assertTextNotContains(t, raw, "pki/openbao-api", path)
+	// The reconciling operator is gone; self-init must not re-create the
+	// operator's own bootstrap access.
+	assertTextNotContains(t, raw, "write_ops_controller_role", path)
+	assertTextNotContains(t, raw, "guardian-openbao-ops-controller", path)
 
 	listener := readText(t, runfilePath("src/infrastructure/deployments/guardian/system/openbao-listener-tls.yaml"))
 	assertTextContains(t, listener, "guardian-openbao-listener-ca", "openbao listener TLS manifest")
@@ -111,17 +122,19 @@ func TestOpenBaoListenerTLSAndTransitConformance(t *testing.T) {
 	assertTextNotContains(t, networkPolicy, "allow-cert-manager-to-openbao", "openbao network policy")
 	assertTextNotContains(t, networkPolicy, "cozy-cert-manager", "openbao network policy")
 
-	transitPath := runfilePath("src/infrastructure/operations/openbao/guardian-mgmt/mounts/transit.yaml")
-	transit := singleYAMLDoc(t, transitPath)
-	assertNestedString(t, transit, "OpenBaoMount", "kind")
-	assertNestedString(t, transit, "transit", "spec", "path")
-	assertNestedString(t, transit, "transit", "spec", "type")
-
+	// The custom operator, its CRDs, and the hand-authored operation CRs are
+	// gone: the transit engine (and every other mount/role/policy) is now
+	// created by the OpenBao self-init block, asserted in
+	// TestOpenBaoStaticSealTLSAndStorageConformance.
 	for _, deleted := range []string{
 		"src/infrastructure/deployments/guardian/system/openbao-vault-issuer.yaml",
+		"src/infrastructure/operations/openbao/guardian-mgmt/mounts/transit.yaml",
 		"src/infrastructure/operations/openbao/guardian-mgmt/mounts/pki-openbao-api.yaml",
 		"src/infrastructure/operations/openbao/guardian-mgmt/pkiroles/openbao-api.yaml",
 		"src/infrastructure/operations/openbao/guardian-mgmt/pkirootissuers/openbao-api-root-2026.yaml",
+		"src/infrastructure/deployments/guardian/openbao-ops/openbao-ops-controller.yaml",
+		"src/services/secrets/openbao/deploy/base/deployment.yaml",
+		"src/services/secrets/openbao/api/v1alpha1/mount_types.go",
 	} {
 		assertPathMissing(t, runfilePath(deleted))
 	}
@@ -217,72 +230,41 @@ func TestOpenBaoFluxOrderingConformance(t *testing.T) {
 	assertHealthCheck(t, system, "helm.toolkit.fluxcd.io/v2", "HelmRelease", "guardian-openbao", "tenant-guardian")
 	assertHealthCheck(t, system, "apps/v1", "StatefulSet", "guardian-openbao", "tenant-guardian")
 
-	ops := findDoc(t, docs, "Kustomization", "guardian-openbao-ops")
-	assertNestedBool(t, ops, true, "spec", "wait")
-	assertDependsOn(t, ops, "guardian-system")
-
+	// With the operator gone, the OpenBao operation config lives in the
+	// self-init block (created before the StatefulSet reports Ready), so the
+	// dns controller depends directly on guardian-system. Its ExternalSecret
+	// only goes Ready once self-init has created the kv mount and external-dns
+	// role and ESO can read them — that is the functional proof the config
+	// landed, standing in for the removed operation-CR health checks.
 	dns := findDoc(t, docs, "Kustomization", "guardian-mgmt-dns-controller")
-	assertDependsOn(t, dns, "guardian-openbao-ops")
+	assertDependsOn(t, dns, "guardian-system")
 	// kstatus treats ESO CRs as trivially Current, so wait:true alone is
 	// vacuous for them; the CEL expressions are what make the wait real.
 	assertHealthCheckExpr(t, dns, "external-secrets.io/v1beta1", "ClusterSecretStore")
 	assertHealthCheckExpr(t, dns, "external-secrets.io/v1beta1", "ExternalSecret")
-
-	opsDocs := yamlDocs(t, runfilePath("src/infrastructure/deployments/guardian/openbao-ops/openbao-ops-controller.yaml"))
-	crds := findDoc(t, opsDocs, "Kustomization", "guardian-openbao-ops-crds")
-	assertDependsOn(t, crds, "guardian-system")
-
-	controller := findDoc(t, opsDocs, "Kustomization", "guardian-openbao-ops-controller")
-	assertNestedBool(t, controller, true, "spec", "wait")
-	assertDependsOn(t, controller, "guardian-openbao-ops-crds")
-	assertDependsOn(t, controller, "guardian-system")
-
-	state := findDoc(t, opsDocs, "Kustomization", "guardian-openbao-ops-state")
-	assertNestedBool(t, state, true, "spec", "wait")
-	assertDependsOn(t, state, "guardian-openbao-ops-controller")
-	// Same kstatus vacuity applies to the OpenBao operation CRs: without these
-	// expressions the state slice reports Ready before the ops-controller has
-	// authenticated, applied, and drift-checked each CR. OpenBaoAuditDevice is
-	// deliberately absent: no reconciler writes its status yet, and a guard
-	// expression over a never-written status wedges the slice at timeout.
-	for _, kind := range []string{
-		"OpenBaoAuthBackend",
-		"OpenBaoKubernetesAuthRole",
-		"OpenBaoMount",
-		"OpenBaoMountTune",
-		"OpenBaoPolicy",
-	} {
-		assertHealthCheckExpr(t, state, "openbao.guardian.dev/v1alpha1", kind)
-	}
-	assertNoHealthCheckExpr(t, state, "openbao.guardian.dev/v1alpha1", "OpenBaoAuditDevice")
 }
 
-// The declared OpenBao security inventory must stay declared. Flux health
-// expressions assess only objects present in the inventory, so a CR
-// accidentally deleted from Git would be pruned and converge green; this
-// pins existence at the source instead.
+// The declared OpenBao security inventory must stay declared. It now lives in
+// the self-init block: on a cold boot this is the ONLY thing that creates the
+// mounts, auth, roles, and policies (no reconciling operator re-asserts them),
+// so a request silently dropped from Git would leave a fresh cluster missing
+// that object with nothing to notice. Pin every required request by name.
 func TestOpenBaoOperationsInventoryConformance(t *testing.T) {
-	dir := "src/infrastructure/operations/openbao/guardian-mgmt"
-	kustomization := singleYAMLDoc(t, runfilePath(dir+"/kustomization.yaml"))
-	declared := map[string]bool{}
-	for _, resource := range sliceValue(nestedValue(t, kustomization, "resources")) {
-		for _, doc := range yamlDocs(t, runfilePath(dir+"/"+stringValue(resource))) {
-			declared[stringValue(doc["kind"])+"/"+stringValue(mapValue(doc["metadata"])["name"])] = true
-		}
-	}
+	raw := readText(t, runfilePath("src/infrastructure/deployments/guardian/system/openbao-helmrelease.yaml"))
 	for _, want := range []string{
-		"OpenBaoAuthBackend/kubernetes",
-		"OpenBaoKubernetesAuthRole/external-dns",
-		"OpenBaoKubernetesAuthRole/ops-controller",
-		"OpenBaoMount/kv",
-		"OpenBaoMount/transit",
-		"OpenBaoMountTune/kv",
-		"OpenBaoPolicy/external-dns",
-		"OpenBaoPolicy/ops-controller",
+		`request "enable_kubernetes_auth"`,
+		`request "configure_kubernetes_auth"`,
+		`request "tune_kubernetes_auth"`,
+		`request "enable_kv_mount"`,
+		`request "tune_kv_mount"`,
+		`request "enable_transit_mount"`,
+		`request "tune_transit_mount"`,
+		`request "write_external_dns_policy"`,
+		`request "write_external_dns_role"`,
+		`request "write_secret_importer_policy"`,
+		`request "write_secret_importer_role"`,
 	} {
-		if !declared[want] {
-			t.Fatalf("operations inventory is missing %s; removing a declared OpenBao security object must be deliberate", want)
-		}
+		assertTextContains(t, raw, want, "openbao self-init inventory")
 	}
 }
 
@@ -298,7 +280,6 @@ func TestFluxSourceParameterizationConformance(t *testing.T) {
 
 	for _, path := range []string{
 		"src/infrastructure/base/flux/sync.yaml",
-		"src/infrastructure/deployments/guardian/openbao-ops/openbao-ops-controller.yaml",
 	} {
 		for _, doc := range yamlDocs(t, runfilePath(path)) {
 			if stringValue(doc["kind"]) != "Kustomization" {
@@ -372,15 +353,10 @@ func TestFluxSourceParameterizationConformance(t *testing.T) {
 func TestFluxSubstitutionSafetyConformance(t *testing.T) {
 	// Paths reconciled by a Kustomization that declares postBuild
 	// substitution (guardian-mgmt-base applies all of base/, guardian-system
-	// applies deployments/guardian/system, guardian-openbao-ops-* apply the
-	// openbao operator + operations dirs).
+	// applies deployments/guardian/system).
 	roots := []string{
 		"src/infrastructure/base",
 		"src/infrastructure/deployments/guardian/system",
-		"src/infrastructure/deployments/guardian/openbao-ops",
-		"src/infrastructure/operations/openbao/guardian-mgmt",
-		"src/services/secrets/openbao/deploy/base",
-		"src/services/secrets/openbao/deploy/guardian-mgmt",
 	}
 	// ${GUARDIAN_SOURCE_KIND...} / ${GUARDIAN_SOURCE_NAME...} are the declared
 	// vars; $${ is an escaped literal. Anything else is unhandled collateral.
@@ -411,20 +387,6 @@ func TestFluxSubstitutionSafetyConformance(t *testing.T) {
 }
 
 func TestOpenBaoConsumersUseTLSConformance(t *testing.T) {
-	deployment := readText(t, runfilePath("src/services/secrets/openbao/deploy/base/deployment.yaml"))
-	for _, want := range []string{
-		"value: https://guardian-openbao-active:8200",
-		"name: BAO_CACERT",
-		"name: OPENBAO_KUBERNETES_JWT_PATH",
-		"value: /var/run/secrets/openbao/token",
-		"secretName: guardian-openbao-api-tls",
-		"name: openbao-auth-token",
-		"audience: openbao",
-	} {
-		assertTextContains(t, deployment, want, "ops-controller deployment")
-	}
-	assertTextNotContains(t, deployment, "value: http://guardian-openbao", "ops-controller deployment")
-
 	dns := readText(t, runfilePath("src/infrastructure/base/dns/secrets.yaml"))
 	for _, want := range []string{
 		"kind: ClusterSecretStore",
@@ -560,17 +522,6 @@ func assertHealthCheckExpr(t *testing.T, doc map[string]interface{}, apiVersion,
 		return
 	}
 	t.Fatalf("%s/%s missing healthCheckExpr for %s %s", stringValue(doc["kind"]), stringValue(mapValue(doc["metadata"])["name"]), apiVersion, kind)
-}
-
-func assertNoHealthCheckExpr(t *testing.T, doc map[string]interface{}, apiVersion, kind string) {
-	t.Helper()
-
-	for _, healthCheckExpr := range sliceValue(nestedValue(t, doc, "spec", "healthCheckExprs")) {
-		expr := mapValue(healthCheckExpr)
-		if stringValue(expr["apiVersion"]) == apiVersion && stringValue(expr["kind"]) == kind {
-			t.Fatalf("%s declares a healthCheckExpr for %s %s, which has no reconciler writing status and would wedge the slice at timeout", stringValue(mapValue(doc["metadata"])["name"]), apiVersion, kind)
-		}
-	}
 }
 
 func assertToleration(t *testing.T, server map[string]interface{}, key, operator, effect string) {
