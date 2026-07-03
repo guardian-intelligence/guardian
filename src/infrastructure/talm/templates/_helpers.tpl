@@ -183,7 +183,32 @@ machine:
     image: {{ . }}
     {{- end }}
     {{- (include "talm.discovered.disks_info" .) | nindent 4 }}
-    disk: {{ include "talm.discovered.system_disk_name" . | quote }}
+    {{- include "talos.install.disk_pin" . | trim | nindent 4 }}
+{{- end }}
+
+{{- /*
+  talos.install.disk_pin emits a stable install-disk pin. Enumeration-ordered
+  device names (/dev/nvme0n1) can swap between boots, and install.disk is
+  consulted exactly at reimage time — a swapped name installs Talos over the
+  wrong disk. Pin by the serial discovery reports for the system disk; fall
+  back to the device name only when discovery has no serial to offer
+  (offline render, exotic transports).
+*/ -}}
+{{- define "talos.install.disk_pin" }}
+{{- $diskName := include "talm.discovered.system_disk_name" . }}
+{{- $serial := "" }}
+{{- range (lookup "disks" "" "").items }}
+{{- if and (eq .spec.dev_path $diskName) .spec.serial }}
+{{- $serial = .spec.serial }}
+{{- break }}
+{{- end }}
+{{- end }}
+{{- if $serial }}
+diskSelector:
+  serial: {{ $serial | quote }}
+{{- else }}
+disk: {{ $diskName | quote }}
+{{- end }}
 {{- end }}
 
 {{- /* Shared cluster section */ -}}

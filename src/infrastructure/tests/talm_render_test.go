@@ -54,6 +54,11 @@ func TestTalmControlplaneRender(t *testing.T) {
 		"guardian.dev/openbao-static-seal: \"true\"",
 		"kind: WatchdogTimerConfig",
 		"device: /dev/watchdog0",
+		// Offline discovery has no disks, so the install pin falls back to
+		// the device name. Online regen must emit diskSelector.serial — a
+		// bare /dev/nvmeXn1 name can point at a different physical disk on
+		// the next boot, and install.disk is consulted exactly at reimage.
+		"disk: /dev/sda",
 	} {
 		assertTextContains(t, rendered, want, "rendered controlplane talos config")
 	}
