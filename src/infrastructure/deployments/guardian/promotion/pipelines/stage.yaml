@@ -60,7 +60,15 @@ spec:
             sourceBranch: ${{ outputs.push.branch }}
             targetBranch: main
             title: promote company-site to ${{ imageFrom(vars.imageRepo).Digest }}
+        # The if-guard makes the no-change promotion a clean no-op: when the
+        # pin already carries the freight digest, git-commit and git-open-pr
+        # self-skip, the skipped open-pr registers a nil output, and building
+        # this step's config would error on outputs['open-pr'].pr.id. A false
+        # `if` is evaluated BEFORE the config expressions, so the reference is
+        # never touched and the promotion ends Succeeded. This is the
+        # idempotence path — retries after a merged promotion land here too.
         - uses: git-wait-for-pr
+          if: ${{ status('open-pr') == 'Succeeded' }}
           config:
             repoURL: ${{ vars.repoURL }}
             prNumber: ${{ outputs['open-pr'].pr.id }}
