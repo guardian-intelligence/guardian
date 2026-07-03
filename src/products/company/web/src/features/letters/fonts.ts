@@ -56,8 +56,14 @@ export interface LettersFont {
 // builds the same line box and the registration below is exact.
 const CRIMSON_XHEIGHT = 430 / 1024; // measured from the x outline; OS/2 agrees
 const HAND_XHEIGHT_FILL = 0.55; // lowercase fill of one square, off the pages
+const CRIMSON_CAP = 587 / 1024; // measured from the H outline
 const CRIMSON_ASCENT = 918 / 1024;
 const CRIMSON_CONTENT = (918 + 220) / 1024;
+
+// The date header is the one place caps DO anchor: on the pages it was
+// written with deliberate care — grade-school discipline — its capitals
+// always exactly two squares tall, while the body below flowed at x-height.
+const DATE_CAP_SQUARES = 2;
 
 const GRID_SQUARE_PX = 17;
 const GRID_SQUARE_MOBILE_PX = 14; // below the 40rem (sm) breakpoint
@@ -78,6 +84,7 @@ interface SheetScale {
   readonly square: number;
   readonly pitch: number;
   readonly bodySize: number;
+  readonly dateSize: number;
   // Vertical offset that slides the ruling into registration: the body's
   // first baseline sits ON a rule, statically — no measuring JS, no flash.
   readonly phase: number;
@@ -86,10 +93,11 @@ interface SheetScale {
 function sheetScale(square: number): SheetScale {
   const pitch = square * 2;
   const bodySize = (square * HAND_XHEIGHT_FILL) / CRIMSON_XHEIGHT;
+  const dateSize = (square * DATE_CAP_SQUARES) / CRIMSON_CAP;
   // First-baseline offset inside a line box one pitch tall.
   const baselineInBox = (pitch - bodySize * CRIMSON_CONTENT) / 2 + bodySize * CRIMSON_ASCENT;
   const firstBaseline = MASTHEAD_FIXED_PX + MASTHEAD_PITCHES * pitch + baselineInBox;
-  return { square, pitch, bodySize, phase: firstBaseline % pitch };
+  return { square, pitch, bodySize, dateSize, phase: firstBaseline % pitch };
 }
 
 const SHEET = sheetScale(GRID_SQUARE_PX);
@@ -98,6 +106,7 @@ const SHEET_MOBILE = sheetScale(GRID_SQUARE_MOBILE_PX);
 function sheetScaleVars(s: SheetScale): string {
   return (
     `--letters-body-size:${s.bodySize.toFixed(2)}px;` +
+    `--letters-date-size:${s.dateSize.toFixed(2)}px;` +
     `--letters-line-pitch:${s.pitch}px;` +
     `--letters-grid-minor:${s.square}px;` +
     `--letters-grid-major:${s.pitch * 5}px;`

@@ -135,11 +135,13 @@ export function LetterDate({
 }) {
   // On the letter page the date box is exactly two ruled pitches (four graph
   // squares) so the masthead stack advances in whole rules and the body's
-  // baselines land in registration with the graph below it.
+  // baselines land in registration with the graph below it. The header size
+  // is cap-anchored — capitals exactly two squares tall (--letters-date-size,
+  // fonts.ts), the way the pages always dated themselves.
   const metrics =
     scale === "index"
       ? { fontSize: "clamp(34px,8vw,40px)", lineHeight: "52px" }
-      : { fontSize: "clamp(38px,9vw,44px)", lineHeight: "calc(var(--letters-line-pitch)*2)" };
+      : { fontSize: "var(--letters-date-size)", lineHeight: "calc(var(--letters-line-pitch)*2)" };
 
   return (
     <p
@@ -161,18 +163,16 @@ export function LetterDate({
   );
 }
 
-// The two hands of the header (see letterDateParts). The print run sits at
-// ~0.58em of the script size — Pinyon's flourishes run tall while its body
-// runs small, so the prim print matches its optical weight there — with the
-// letter-spacing a careful hand would put on a blackboard, one more notch of
-// it between the year's digits, and the ordinal raised the way it was always
-// written after the day number.
+// The two hands of the header (see letterDateParts), at ONE font size — on
+// the pages the script day and the print date share the header's two-square
+// cap band. The print carries the letter-spacing a careful hand would put on
+// a blackboard, one more notch of it between the year's digits, and the
+// ordinal raised the way it was always written after the day number.
 function LetterDateHands({ iso }: { readonly iso: string }) {
   const parts = letterDateParts(iso);
   const printStyle = {
     fontFamily: "var(--treatment-body-font)",
     fontWeight: "var(--letters-body-weight)" as const,
-    fontSize: "0.58em",
     letterSpacing: "0.08em",
   };
   return (
