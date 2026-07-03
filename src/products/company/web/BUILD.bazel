@@ -61,6 +61,11 @@ test -s .output/server/index.mjs
 # company-site-image workflow enforces pin == built digest on that basis.
 sed -i 's/"date": "[^"]*"/"date": "1970-01-01T00:00:00.000Z"/' .output/nitro.json
 find .output/server -name '*.mjs' -exec sed -i 's/"mtime": "[^"]*"/"mtime": "1970-01-01T00:00:00.000Z"/g' {} +
+# The bundler's //#region comments embed relative paths that traverse into
+# the machine-specific Bazel output base (…/_bazel_<user>/<hash>/execroot/
+# _main/…). Strip everything up to the machine-invariant execroot/_main/
+# marker so the comments stay useful but identical everywhere.
+find .output/server \\( -name '*.mjs' -o -name '*.json' \\) -exec sed -i -E 's#(\\.\\./)+[^ ]*/execroot/_main/##g' {} +
 "$$node" -e '
 const fs = require("fs");
 const p = ".output/server/index.mjs";
