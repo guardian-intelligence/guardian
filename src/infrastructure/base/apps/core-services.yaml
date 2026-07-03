@@ -2,7 +2,7 @@
 #
 # These resources are Cozystack app CRs. The aggregated apps API converts them
 # into Flux HelmReleases in tenant-root. SeaweedFS provides the tenant-root COSI
-# bucket classes that Harbor and bucket-style apps consume.
+# bucket classes that bucket-style apps consume.
 #
 # Backups use Cozystack's platform-managed cozy-default BackupClass and system
 # bucket. Do not place S3 coordinates or credentials in these app CRs.
@@ -74,24 +74,6 @@ spec:
     storageClass: replicated
   s3:
     replicas: 3
----
-apiVersion: apps.cozystack.io/v1alpha1
-kind: Harbor
-metadata:
-  name: guardian
-  namespace: tenant-root
-spec:
-  host: harbor.guardianintelligence.org
-  storageClass: replicated
-  database:
-    replicas: 3
-    size: 10Gi
-  redis:
-    replicas: 3
-    size: 2Gi
-  trivy:
-    enabled: true
-    size: 5Gi
 ---
 apiVersion: apps.cozystack.io/v1alpha1
 kind: ClickHouse

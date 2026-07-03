@@ -14,7 +14,7 @@ func TestLoadDNSTargetsFromPrometheusFileSD(t *testing.T) {
 	writeFile(t, path, `
 - targets:
     - edge-health-wildcard.guardianintelligence.org
-    - harbor.guardianintelligence.org.
+    - openbao.guardianintelligence.org.
   labels:
     guardian_record_type: A
 `)
@@ -38,8 +38,8 @@ func TestLoadDNSTargetsFromPrometheusFileSD(t *testing.T) {
 func TestLoadHTTPTargetsFromPrometheusFileSD(t *testing.T) {
 	dnsTargets := []dnsTarget{
 		{
-			DNSName:    "harbor.guardianintelligence.org",
-			QueryName:  "harbor.guardianintelligence.org",
+			DNSName:    "dashboard.guardianintelligence.org",
+			QueryName:  "dashboard.guardianintelligence.org",
 			RecordType: "A",
 		},
 	}
@@ -47,9 +47,9 @@ func TestLoadHTTPTargetsFromPrometheusFileSD(t *testing.T) {
 	path := filepath.Join(dir, "targets.yaml")
 	writeFile(t, path, `
 - targets:
-    - https://harbor.guardianintelligence.org/v2/
+    - https://dashboard.guardianintelligence.org/v2/
   labels:
-    guardian_surface: harbor
+    guardian_surface: dashboard
     guardian_stage: root
     guardian_expected_statuses: "200,401"
 `)
@@ -62,7 +62,7 @@ func TestLoadHTTPTargetsFromPrometheusFileSD(t *testing.T) {
 		t.Fatalf("targets = %d, want 1", len(targets))
 	}
 	target := targets[0]
-	if target.Host != "harbor.guardianintelligence.org" {
+	if target.Host != "dashboard.guardianintelligence.org" {
 		t.Fatalf("Host = %q", target.Host)
 	}
 	if got, want := target.ExpectedStatuses, []int{200, 401}; !sameInts(got, want) {
@@ -75,9 +75,9 @@ func TestLoadHTTPTargetsRejectsHostOutsideDNS(t *testing.T) {
 	path := filepath.Join(dir, "targets.yaml")
 	writeFile(t, path, `
 - targets:
-    - https://harbor.guardianintelligence.org/v2/
+    - https://dashboard.guardianintelligence.org/v2/
   labels:
-    guardian_surface: harbor
+    guardian_surface: dashboard
 `)
 
 	_, err := loadHTTPTargets([]string{path}, nil, "guardianintelligence.org")
@@ -118,8 +118,8 @@ JSON
 	}
 	err := runDNS(context.Background(), cfg, []dnsTarget{
 		{
-			DNSName:    "harbor.guardianintelligence.org",
-			QueryName:  "harbor.guardianintelligence.org",
+			DNSName:    "dashboard.guardianintelligence.org",
+			QueryName:  "dashboard.guardianintelligence.org",
 			RecordType: "A",
 		},
 	}, []string{"1.1.1.1"})
@@ -145,11 +145,11 @@ func TestRunHTTPPropagatesK6Failure(t *testing.T) {
 	}
 	err := runHTTP(context.Background(), cfg, []httpTarget{
 		{
-			URL:              "https://harbor.guardianintelligence.org/v2/",
-			Host:             "harbor.guardianintelligence.org",
-			Surface:          "harbor",
+			URL:              "https://dashboard.guardianintelligence.org/v2/",
+			Host:             "dashboard.guardianintelligence.org",
+			Surface:          "dashboard",
 			Stage:            "root",
-			Name:             "guardian-edge-root-harbor",
+			Name:             "guardian-edge-root-dashboard",
 			ExpectedStatuses: []int{200, 401},
 		},
 	})

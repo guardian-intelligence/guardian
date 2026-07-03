@@ -23,12 +23,6 @@
     guardian_stage: root
     guardian_expected_statuses: "200"
 - targets:
-    - https://harbor.guardianintelligence.org/v2/
-  labels:
-    guardian_surface: harbor
-    guardian_stage: root
-    guardian_expected_statuses: "200,401"
-- targets:
     - https://keycloak.guardianintelligence.org/realms/cozy/
   labels:
     guardian_surface: keycloak

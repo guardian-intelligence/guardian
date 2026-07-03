@@ -1,0 +1,80 @@
+# Builds the company-site OCI image and enforces the digest-pin invariant:
+# the digest pinned in src/infrastructure/deployments/company/prod/web.yaml
+# must equal the digest Bazel builds from the same commit. A content change
+# without a repin cannot merge; a repin without the matching content cannot
+# merge. On main, the verified image is pushed to ghcr.io and cosign-signed
+# (keyless, bound to this workflow's OIDC identity), so the pinned digest is
+# publicly pullable by the time Flux reconciles the merge.
+name: company-site-image
+
+on:
+  pull_request:
+    paths:
+      - "src/products/company/**"
+      - "src/viteplus-monorepo/**"
+      - "src/infrastructure/deployments/company/prod/web.yaml"
+      - ".github/workflows/company-site-image.yml"
+      - "MODULE.bazel"
+      - "MODULE.bazel.lock"
+  push:
+    branches: [main]
+    paths:
+      - "src/products/company/**"
+      - "src/viteplus-monorepo/**"
+      - "src/infrastructure/deployments/company/prod/web.yaml"
+      - ".github/workflows/company-site-image.yml"
+      - "MODULE.bazel"
+      - "MODULE.bazel.lock"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # cosign keyless signing
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - uses: bazelbuild/setup-bazelisk@b39c379c82683a5f25d34f0d062761f62693e0b2 # v3.0.0
+
+      - name: Build image
+        run: bazelisk build //src/products/company/site:image
+
+      - name: Verify pinned digest matches built digest
+        run: |
+          built="$(jq -r '.manifests[0].digest' bazel-bin/src/products/company/web/image/index.json)"
+          pinned="$(grep -o 'ghcr.io/guardian-intelligence/company-site@sha256:[a-f0-9]\{64\}' \
+            src/infrastructure/deployments/company/prod/web.yaml | cut -d@ -f2)"
+          echo "built:  $built"
+          echo "pinned: $pinned"
+          if [[ "$built" != "$pinned" ]]; then
+            echo "::error::Digest pin is stale. Repin web.yaml and images.lock to $built (built from this commit) and push again." >&2
+            exit 1
+          fi
+
+      - name: Log in to ghcr.io
+        if: github.event_name != 'pull_request'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Push image
+        if: github.event_name != 'pull_request'
+        run: bazelisk run //src/products/company/site:push
+
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+        if: github.event_name != 'pull_request'
+
+      - name: Sign image (keyless)
+        if: github.event_name != 'pull_request'
+        run: |
+          digest="$(jq -r '.manifests[0].digest' bazel-bin/src/products/company/web/image/index.json)"
+          cosign sign --yes "ghcr.io/guardian-intelligence/company-site@${digest}"

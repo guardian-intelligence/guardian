@@ -1,1 +1,1 @@
-harbor.guardianintelligence.org/guardian/company-site:edge
+ghcr.io/guardian-intelligence/company-site:edge

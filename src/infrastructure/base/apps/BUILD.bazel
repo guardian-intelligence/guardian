@@ -2,7 +2,6 @@ filegroup(
     name = "manifests",
     srcs = [
         "core-services.yaml",
-        "harbor-rwo-rollout-strategy.yaml",
         "observability.yaml",
         "seaweedfs-s3-ingress-service.yaml",
     ],

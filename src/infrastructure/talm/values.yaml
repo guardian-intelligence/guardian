@@ -104,7 +104,6 @@ darkBundleMirror:
     - docker-registry3.mariadb.com
     - docker.io
     - ghcr.io
-    - harbor.guardianintelligence.org
     - oci.external-secrets.io
     - quay.io
     - registry.k8s.io

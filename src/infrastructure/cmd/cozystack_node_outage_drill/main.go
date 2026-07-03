@@ -231,7 +231,7 @@ func statusGets(node, phase string) []kubectlCheck {
 		},
 		{
 			Label: phase + " cozystack stateful apps",
-			Args:  []string{"get", "postgreses.apps.cozystack.io,harbors.apps.cozystack.io,clickhouses.apps.cozystack.io", "-A"},
+			Args:  []string{"get", "postgreses.apps.cozystack.io,clickhouses.apps.cozystack.io", "-A"},
 		},
 		{
 			Label: phase + " openbao helmreleases",
@@ -287,7 +287,6 @@ func serviceReadinessWaits(phase string, cfg drillConfig) []kubectlCheck {
 	}
 	for _, namespace := range []string{"tenant-root"} {
 		label := namespace
-		registry := "harbor-guardian-registry"
 		checks = append(checks,
 			kubectlCheck{
 				Label: "wait " + phase + " " + label + " postgres app",
@@ -296,22 +295,6 @@ func serviceReadinessWaits(phase string, cfg drillConfig) []kubectlCheck {
 			kubectlCheck{
 				Label: "wait " + phase + " " + label + " postgres workloads",
 				Args:  []string{"-n", namespace, "wait", "--for=condition=WorkloadsReady", "postgreses.apps.cozystack.io/guardian"},
-			},
-			kubectlCheck{
-				Label: "wait " + phase + " " + label + " harbor app",
-				Args:  []string{"-n", namespace, "wait", "--for=condition=Ready", "harbors.apps.cozystack.io/guardian"},
-			},
-			kubectlCheck{
-				Label: "wait " + phase + " " + label + " harbor registry bucket ready",
-				Args:  []string{"-n", namespace, "wait", "--for=jsonpath={.status.bucketReady}=true", "bucketclaims.objectstorage.k8s.io/" + registry},
-			},
-			kubectlCheck{
-				Label: "wait " + phase + " " + label + " harbor registry bucket access granted",
-				Args:  []string{"-n", namespace, "wait", "--for=jsonpath={.status.accessGranted}=true", "bucketaccesses.objectstorage.k8s.io/" + registry},
-			},
-			kubectlCheck{
-				Label: "wait " + phase + " " + label + " harbor workloads",
-				Args:  []string{"-n", namespace, "wait", "--for=condition=WorkloadsReady", "harbors.apps.cozystack.io/guardian"},
 			},
 			kubectlCheck{
 				Label: "wait " + phase + " " + label + " clickhouse app",
