@@ -136,6 +136,36 @@ export function flowClassName(slug: string, wordIndex: number): string {
   return `${FLOW_CLASS_PREFIX}${flowBucketIndex(slug, wordIndex)}`;
 }
 
+// --- The tilt: leaning into the curve --------------------------------------
+//
+// A pen doesn't just ride the wander — it leans into where the wander is
+// heading. Tilt is the discrete derivative of the flow curve: when the wave
+// carries the NEXT word lower, this word tips a fraction of a degree
+// forward-down, pivoting at its first character (transform-origin at the
+// word's start, on the baseline). Because it derives from the same curve,
+// tilt and drift can never disagree — a word never leans uphill while
+// sinking.
+export const TILT_CLASS_PREFIX = "letter-tilt-";
+const TILT_STEPS = 9; // odd, so the centre bucket is exactly level
+const TILT_SLOPE_MAX = 0.25; // px of drift between neighbouring words
+const TILT_MAX_DEG = 0.5;
+
+export function flowSlope(slug: string, wordIndex: number): number {
+  return flowOffset(slug, wordIndex + 1) - flowOffset(slug, wordIndex);
+}
+
+export function tiltBucketIndex(slug: string, wordIndex: number): number {
+  const t = Math.max(
+    0,
+    Math.min(1, (flowSlope(slug, wordIndex) + TILT_SLOPE_MAX) / (2 * TILT_SLOPE_MAX)),
+  );
+  return Math.min(TILT_STEPS - 1, Math.floor(t * TILT_STEPS));
+}
+
+export function tiltClassName(slug: string, wordIndex: number): string {
+  return `${TILT_CLASS_PREFIX}${tiltBucketIndex(slug, wordIndex)}`;
+}
+
 // Word-gap rhythm: on the reference pages, spacing WITHIN words stays
 // disciplined but the gaps BETWEEN words breathe — it's the first discipline
 // the hand lets go of in flow. Gap noise is horizontal and between words, so
@@ -149,7 +179,7 @@ function flowGapEm(bucket: number): string {
 // The full class list a word span wears. Single source for both writers, so
 // the index excerpt and the letter body can never drift apart.
 export function inkSpanClasses(slug: string, wordIndex: number): string {
-  return `${inkClassName(slug, wordIndex)} ${flowClassName(slug, wordIndex)}`;
+  return `${inkClassName(slug, wordIndex)} ${flowClassName(slug, wordIndex)} ${tiltClassName(slug, wordIndex)}`;
 }
 
 // CSS for the ink buckets, scoped to the letters treatment.
@@ -173,6 +203,22 @@ export function flowClassRules(scope: string): string {
     const top = (-FLOW_MAX + step * (j + 0.5)).toFixed(3);
     return `${scope} .${FLOW_CLASS_PREFIX}${j}{position:relative;top:${top}px;padding-right:${flowGapEm(j)}em;}`;
   }).join("");
+}
+
+// CSS for the tilt classes. rotate needs a transformable box, so tilted words
+// become inline-block — atomic, but words never break internally anyway, and
+// spaces stay outside the spans so line wrapping is untouched. The pivot sits
+// at the word's first character on the baseline: the hand tips forward from
+// where the nib landed.
+export function tiltClassRules(scope: string): string {
+  const rules = Array.from({ length: TILT_STEPS }, (_, j) => {
+    const deg = ((2 * (j + 0.5)) / TILT_STEPS - 1) * TILT_MAX_DEG;
+    return `${scope} .${TILT_CLASS_PREFIX}${j}{display:inline-block;transform:rotate(${deg.toFixed(3)}deg);transform-origin:0 78%;}`;
+  }).join("");
+  // An atomic inline swallows the parent's text-decoration: a word inside a
+  // link would lose its underline. Words inside links write flat instead.
+  const links = `${scope} a [class*="${TILT_CLASS_PREFIX}"]{display:inline;transform:none;}`;
+  return rules + links;
 }
 
 // Wrap every word of rendered letter HTML in an ink span. Only text between

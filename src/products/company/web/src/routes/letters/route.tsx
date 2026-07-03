@@ -3,7 +3,7 @@ import { type CSSProperties, type ReactNode } from "react";
 import { AppChrome } from "@guardian/brand";
 import { TopNav } from "~/components/top-nav";
 import { criticalTreatmentHead, criticalTreatmentRootStyle } from "~/lib/critical-treatment";
-import { lettersTypographyCss } from "~/features/letters/fonts";
+import { lettersBodyFont, lettersTypographyCss } from "~/features/letters/fonts";
 import lettersCriticalCss from "~/styles/critical/letters.css?inline";
 
 // Letters layout — /letters and /letters/$slug share this chrome. Paper
@@ -135,18 +135,15 @@ function belowCurveClip(slug: string, offsetY = 0): string {
 }
 
 // Cumulative opacity reaches 100% after a six-pitch descent (one ruled line
-// of writing per step — the grid is registered to the typography, so the
-// natural fade unit is the line pitch, 32px). The first stop is deliberately
-// faint so the transition starts as atmosphere, not an outline.
-const CURVE_FADE_STOPS: ReadonlyArray<Readonly<{ offsetY: number; opacity: number }>> = [
-  { offsetY: 0, opacity: 0.05 },
-  { offsetY: 32, opacity: 0.07 },
-  { offsetY: 64, opacity: 0.09 },
-  { offsetY: 96, opacity: 0.12 },
-  { offsetY: 128, opacity: 0.16 },
-  { offsetY: 160, opacity: 0.21 },
-  { offsetY: 192, opacity: 0.3 },
-];
+// of writing per step — the fade unit IS the line pitch, imported from the
+// typography it registers to). The first stop is deliberately faint so the
+// transition starts as atmosphere, not an outline.
+const CURVE_FADE_OPACITIES = [0.05, 0.07, 0.09, 0.12, 0.16, 0.21, 0.3] as const;
+const CURVE_FADE_STOPS: ReadonlyArray<Readonly<{ offsetY: number; opacity: number }>> =
+  CURVE_FADE_OPACITIES.map((opacity, i) => ({
+    offsetY: i * lettersBodyFont.linePitch,
+    opacity,
+  }));
 
 // Absolute, not fixed: layer is the size of the whole document and scrolls
 // with it. No fade-in — the paper paints with the page.
@@ -195,6 +192,9 @@ function LettersLayout() {
   return (
     <div
       data-treatment="letters"
+      // detail pages get the computed grid phase (fonts.ts registration): the
+      // body's first baseline sits ON a rule, statically — no measuring JS.
+      data-letters-page={params.slug ? "detail" : "index"}
       className="relative flex min-h-svh flex-col bg-[var(--treatment-ground)] text-[var(--treatment-ink)]"
       style={{
         ...criticalTreatmentRootStyle("letters"),

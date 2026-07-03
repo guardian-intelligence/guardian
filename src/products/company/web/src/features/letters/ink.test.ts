@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   flowClassRules,
   flowOffset,
+  flowSlope,
   INK_BUCKETS,
   inkBucketIndex,
   inkClassRules,
   inkWrapHtml,
+  tiltBucketIndex,
+  tiltClassRules,
 } from "./ink";
 
 // The ink is a pure function of (slug, word index). This is load-bearing
@@ -35,6 +38,7 @@ describe("ink", () => {
     expect(wrapped).toContain(`>It&#39;s</span>`);
     expect(wrapped.match(/letter-ink-\d/g)).toHaveLength(4);
     expect(wrapped.match(/letter-flow-\d+/g)).toHaveLength(4);
+    expect(wrapped.match(/letter-tilt-\d/g)).toHaveLength(4);
     // Same input, same ink.
     expect(inkWrapHtml(html, "dear-shovon")).toBe(wrapped);
   });
@@ -47,6 +51,27 @@ describe("ink", () => {
     expect(flowCss.match(/\.letter-flow-\d+\{/g)).toHaveLength(16);
     expect(flowCss).toContain("position:relative;top:");
     expect(flowCss).toContain("padding-right:");
+    const tiltCss = tiltClassRules('[data-treatment="letters"]');
+    expect(tiltCss.match(/\.letter-tilt-\d\{/g)).toHaveLength(9);
+    // The centre bucket is exactly level; words inside links stay flat.
+    expect(tiltCss).toContain("rotate(0.000deg)");
+    expect(tiltCss).toContain("display:inline;transform:none;");
+  });
+
+  // The tilt is the derivative of the flow curve: a word leans toward where
+  // the wander is heading — down-forward when the next word sits lower, level
+  // where the curve is flat. Derived from the same curve, so they can never
+  // disagree.
+  it("tilt follows the flow curve's slope", () => {
+    for (const slug of ["dear-shovon", "letters"]) {
+      for (let i = 0; i < 300; i++) {
+        const slope = flowSlope(slug, i);
+        const bucket = tiltBucketIndex(slug, i);
+        if (slope > 0.06) expect(bucket).toBeGreaterThan(4);
+        if (slope < -0.06) expect(bucket).toBeLessThan(4);
+        if (Math.abs(slope) < 0.02) expect(bucket).toBe(4);
+      }
+    }
   });
 
   // The wander must read as a hand, not a glitch: a continuous curve, so
