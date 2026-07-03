@@ -148,27 +148,16 @@ would only relocate the root of trust, not remove it.
 
 1. **Insurance capture** (if the old cluster still runs): copy the current
    seal key (verify sha256 == filename fingerprint), a `DELETE_ME.env` backup,
-   and optionally a raft filesystem tar to custody. Copy any Harbor-only
-   images out — **do not trust that Git-pinned digests still exist in
-   Harbor**: the drill found the pinned company-site manifest garbage-collected
-   (pods ran from containerd cache only). Recovery is rebuild-from-source
-   (`bazelisk build //src/products/company/site:image`) and repin. `company-site`
-   is the only Harbor-hosted guardian image — OpenBao runs the public
-   `quay.io/openbao/openbao` image and there is no longer a custom operator image.
-2. **Bootstrap mirror**: `podman run -d --name guardian-bootstrap-mirror
-   -p 5000:5000 -v <dir>:/var/lib/registry docker.io/library/registry:2`,
-   firewalled to the three node public IPs. Seed the Harbor-hosted images (digests pinned in
-   `src/infrastructure/bootstrap/bundle/images.lock`) in scoped layout (repo path prefixed with `harbor.guardianintelligence.org/`)
-   using the pinned oras, e.g.
-   `oras cp --recursive --to-plain-http --from-oci-layout
-   bazel-bin/…/image@sha256:<digest> 127.0.0.1:5000/harbor.guardianintelligence.org/guardian/<name>:edge`.
-   The talm chart's `bootstrapHarborMirror` value renders a
-   RegistryMirrorConfig with `overridePath: true` pointing at this registry;
-   containerd falls back to the real Harbor once it exists, so the mirror is
-   inert in steady state. Verify reachability from a cluster pod (node SNAT
-   uses the public IPs).
-3. **Pre-drill PR on main**: fresh seal fingerprint, mirror endpoint, any
-   repins, `images.lock` current (`//src/infrastructure/tests:talm_render_test`
+   and optionally a raft filesystem tar to custody. Every image the cluster
+   pulls — including the guardian-built `company-site` — lives on public
+   registries (`company-site` on ghcr.io, pushed and cosign-signed by CI on
+   every merge that changes it), so no registry contents need capturing and a
+   steady-uplink cold boot needs no bootstrap mirror. If a pinned digest has
+   vanished upstream, recovery is rebuild-from-source
+   (`bazelisk build //src/products/company/site:image`) and repin — CI refuses
+   to merge a content change whose digest pin is stale.
+2. **Pre-drill PR on main**: fresh seal fingerprint, any repins,
+   `images.lock` current (`//src/infrastructure/tests:talm_render_test`
    enforces rendered-refs ⊆ lock). Flux converges from main — nothing lands on
    the cluster that is not merged.
 
@@ -342,7 +331,7 @@ aspect infra openbao-drill \
 The importer writes the three KV paths with readback verification, removes its
 temporary role/policy, and deletes the env file. The converged proof requires
 every declared Kustomization Ready at the expected revision; certificates,
-the OpenBao StatefulSet, operation CRs, and ESO stores gate Kustomization
+the OpenBao StatefulSet, and ESO stores gate Kustomization
 readiness through Flux health checks declared in the manifests. The status
 drill verifies one raft `cluster_id` across unsealed members.
 
@@ -350,34 +339,25 @@ drill verifies one raft `cluster_id` across unsealed members.
 cold-start gate falls out of the steps above plus an ESO-synced consumer
 (ExternalDNS reporting "All records are already up to date" against
 Cloudflare) and a Transit encrypt/decrypt roundtrip. For the stateful gate,
-create a temporary drill policy/auth-role pair as OpenBao operation CRs
-(hand-applied CRs are not pruned — Flux prune only removes inventory-labeled
-objects), then: sentinel key `exportable=true allow_plaintext_backup=true` →
+create a temporary drill policy/auth-role pair imperatively with `bao`
+(self-init owns steady-state OpenBao config and runs only at first
+initialization; hand-applied OpenBao config is outside Flux and must be
+cleaned up by hand), then: sentinel key
+`exportable=true allow_plaintext_backup=true` →
 encrypt → `transit/backup` export → restore into a throwaway
 `bao server -dev` container → decrypt the cluster's ciphertext. Shred the test
-keyring and delete the drill CRs and sentinel afterwards.
+keyring and delete the drill policy/role and sentinel afterwards.
 
 ## Aftermath
 
-1. **Repopulate Harbor** so the workstation mirror stops being load-bearing.
-   Pushes through the public edge fail for real blobs (Cloudflare limits;
-   direct-to-origin dies mid-blob) — use an in-cluster one-shot skopeo pod
-   (`quay.io/skopeo/stable@sha256:94f5c5e26997e2e78c234ec9abf19a391c234b39eb22e6d1210d0b527c97dcc8`,
-   skopeo v1.16.1) with a hostAlias mapping
-   `harbor.guardianintelligence.org` to the root-ingress-controller ClusterIP,
-   login via stdin, `skopeo copy --all --preserve-digests` from the mirror.
-   Create the `guardian` project with `metadata.public="true"` and verify
-   anonymous pulls at the pinned digests through the edge.
-2. `aspect infra edge-health` (expect all targets green) and
+1. `aspect infra edge-health` (expect all targets green) and
    `aspect infra dns-apply --mode plan` with `CLOUDFLARE_API_TOKEN` set from
    the dns-lb-provisioner key (expect zero infrastructure changes — node IPs
    are unchanged).
-3. **Re-scrape `src/infrastructure/bootstrap/bundle/images.lock`** from the live cluster (workload section from
+2. **Re-scrape `src/infrastructure/bootstrap/bundle/images.lock`** from the live cluster (workload section from
    pod imageIDs; kubelet/etcd from `talosctl image ls --namespace system`) and
    PR it.
-4. Retire the mirror whenever convenient; the machine-config mirror entry is
-   inert once Harbor serves the digests.
-5. **Verify the datapath MTU pair on every node**: `ovn0` must match the
+3. **Verify the datapath MTU pair on every node**: `ovn0` must match the
    Subnet MTU (1362), not kube-ovn's iface−100 default (1320). The Subnet
    specs only govern pod interfaces; ovn0 comes from the kube-ovn-cni
    `--mtu` flag, declared as `kube-ovn.mtu` on the `cozystack.networking`

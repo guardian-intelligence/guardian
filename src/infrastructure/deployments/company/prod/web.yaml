@@ -41,7 +41,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: web
-          image: harbor.guardianintelligence.org/guardian/company-site@sha256:4ca1bc11d1eebeddee826554513780dca0fdf229b5ba1a02ebd7d386446bfd51
+          image: ghcr.io/guardian-intelligence/company-site@sha256:1d6eb9c6131d8fcd751318cc587b9415cb65d2611a0e0705d4a19da070e07e02
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

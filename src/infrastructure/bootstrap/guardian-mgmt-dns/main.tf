@@ -24,7 +24,6 @@ locals {
     "alerta.guardianintelligence.org",
     "dashboard.guardianintelligence.org",
     "grafana.guardianintelligence.org",
-    "harbor.guardianintelligence.org",
     "keycloak.guardianintelligence.org",
     "s3.guardianintelligence.org",
   ]

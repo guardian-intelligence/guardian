@@ -57,7 +57,7 @@ func main() {
 	flag.StringVar(&cfg.Kubeconfig, "kubeconfig", "", "kubeconfig for guardian-mgmt")
 	flag.StringVar(&cfg.RequestTimeout, "request-timeout", "15s", "kubectl API request timeout")
 	flag.StringVar(&cfg.WaitTimeout, "wait-timeout", "15m", "timeout waiting for Kubernetes surface readiness")
-	flag.StringVar(&cfg.Surface, "surface", "", "surface to load: harbor, dashboard, openbao, or custom with --url")
+	flag.StringVar(&cfg.Surface, "surface", "", "surface to load: dashboard, openbao, or custom with --url")
 	flag.StringVar(&cfg.Stage, "stage", "root", "Guardian bootstrap stage: root")
 	flag.StringVar(&cfg.URL, "url", "", "explicit URL to load; overrides --surface target mapping")
 	flag.StringVar(&cfg.ExpectedStatuses, "expected-statuses", "", "comma-separated acceptable HTTP status codes")
@@ -264,26 +264,6 @@ func surfaceReadinessChecks(cfg loadConfig) ([]kubectlCommand, error) {
 	stage := strings.ToLower(cfg.Stage)
 	surface := normalizeSurface(cfg.Surface)
 	switch surface {
-	case "harbor":
-		namespace, err := namespaceForStage(stage)
-		if err != nil {
-			return nil, err
-		}
-		ref := "harbors.apps.cozystack.io/guardian"
-		return []kubectlCommand{
-			{
-				Label: "Harbor app yaml",
-				Args:  []string{"-n", namespace, "get", ref, "-o", "yaml"},
-			},
-			{
-				Label: "wait Harbor app Ready",
-				Args:  []string{"-n", namespace, "wait", "--for=condition=Ready", ref, "--timeout=" + cfg.WaitTimeout},
-			},
-			{
-				Label: "wait Harbor workloads Ready",
-				Args:  []string{"-n", namespace, "wait", "--for=condition=WorkloadsReady", ref, "--timeout=" + cfg.WaitTimeout},
-			},
-		}, nil
 	case "dashboard":
 		if stage != "root" {
 			return nil, errors.New("dashboard is a root management-cluster surface; use --stage root")
@@ -329,7 +309,7 @@ func surfaceReadinessChecks(cfg loadConfig) ([]kubectlCommand, error) {
 			},
 		}, nil
 	default:
-		return nil, fmt.Errorf("--surface %q is not one of harbor, dashboard, openbao, custom", cfg.Surface)
+		return nil, fmt.Errorf("--surface %q is not one of dashboard, openbao, custom", cfg.Surface)
 	}
 }
 
@@ -343,16 +323,6 @@ func resolveTarget(cfg loadConfig, localPort int) (targetSpec, error) {
 		return targetSpec{}, errors.New("--surface is required when --url is not set")
 	}
 	switch surface {
-	case "harbor":
-		host, err := harborHost(stage)
-		if err != nil {
-			return targetSpec{}, err
-		}
-		return targetSpec{
-			URL:              "https://" + host + "/v2/",
-			ExpectedStatuses: defaultExpectedStatusesOr(cfg.ExpectedStatuses, "200,401"),
-			RequestName:      requestName(surface, stage),
-		}, nil
 	case "dashboard":
 		if stage != "root" {
 			return targetSpec{}, errors.New("dashboard is a root management-cluster surface; use --stage root")
@@ -380,14 +350,12 @@ func resolveTarget(cfg loadConfig, localPort int) (targetSpec, error) {
 			NeedsOpenBaoPort: true,
 		}, nil
 	default:
-		return targetSpec{}, fmt.Errorf("--surface %q is not one of harbor, dashboard, openbao, custom", cfg.Surface)
+		return targetSpec{}, fmt.Errorf("--surface %q is not one of dashboard, openbao, custom", cfg.Surface)
 	}
 }
 
 func normalizeSurface(surface string) string {
 	switch strings.ToLower(surface) {
-	case "harbor", "registry":
-		return "harbor"
 	case "dashboard", "cozystack-dashboard":
 		return "dashboard"
 	case "openbao", "bao", "vault":
@@ -396,24 +364,6 @@ func normalizeSurface(surface string) string {
 		return "custom"
 	default:
 		return strings.ToLower(surface)
-	}
-}
-
-func namespaceForStage(stage string) (string, error) {
-	switch stage {
-	case "root":
-		return "tenant-root", nil
-	default:
-		return "", fmt.Errorf("stage %q is not root", stage)
-	}
-}
-
-func harborHost(stage string) (string, error) {
-	switch stage {
-	case "root":
-		return "harbor.guardianintelligence.org", nil
-	default:
-		return "", errors.New("harbor supports --stage root")
 	}
 }
 

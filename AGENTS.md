@@ -49,7 +49,6 @@ in `tenant-root`. tenant-root owns:
 - MetalLB / Cilium / Gateway substrate if cluster-scoped
 - root DNS/bootstrap glue for cluster entrypoints: guardianintelligence.org
 - root Monitoring for Kubernetes/Cozystack/storage/ingress health
-- root Harbor/cache only if it is a cluster artifact cache, not a product registry
 - bootstrap/break-glass OpenBao only if needed for regional substrate recovery
 - cluster-wide NetworkPolicy/RBAC/admission defaults
 - cert-manager/issuer substrate if it serves all tenants
@@ -141,9 +140,7 @@ src/
       components/                      # reusable Kustomize bases/components
         cozystack-root/
         root-monitoring/
-        root-harbor-cache/
         openbao-kms/
-        harbor-registry/
         postgres-service/
         clickhouse-service/
 
@@ -229,7 +226,7 @@ Important context:
 <development_loop>
 - This section is WIP, follow best practices. The below is just a few things to add to normal development workflow
 - Do not use CLI commands as a control plane. Rely on flux to converge the cluster on merged commits.
-- Run `aspect infra edge-health` to smoke-test edge reachability post convergence. Verify DNS resolution for every configured `guardianintelligence.org` hostname, HTTPS behavior through the public edge and origin consistency checks; the next milestone is moving the same stateless prober to a VPS and integrating it with in-cluster Flagger gates.
+- Run `aspect infra edge-health` to smoke-test edge reachability post convergence. Verify DNS resolution for every configured `guardianintelligence.org` hostname, HTTPS behavior through the public edge and origin consistency checks.
 - Edge failover drills are single-node exercises. Run the drill once per node by explicit node IP, wait for the node and public edge to recover, document that node's outage window, then move to the next node. A node whose loss breaches 60 seconds of public-edge disruption is load bearing and must be fixed before continuing.
 - RTO policy lives in `docs/reliability-rto.md`.
 </development_loop>

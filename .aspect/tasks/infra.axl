@@ -1,7 +1,7 @@
 """aspect infra validate - checks for the management-cluster substrate.
 
-Available live debugging CLIs: repo-pinned kubectl, talosctl, helm, k6, and
-ORAS surfaced by focused infra tasks.
+Available live debugging CLIs: repo-pinned kubectl, talosctl, helm, and k6
+surfaced by focused infra tasks.
 """
 
 load(".aspect/lib/helpers.axl", "checked_spawn", "ws_path")
@@ -14,7 +14,6 @@ TOFU_TARGET = "@opentofu_linux_amd64//:tofu_bin"
 TALM_TARGET = "@talm_linux_amd64//:talm"
 HELM_FILE_TARGET = "@helm_linux_amd64//:helm"
 K6_FILE_TARGET = "@k6_linux_amd64//:k6"
-ORAS_FILE_TARGET = "@oras_linux_amd64//:oras_file"
 KUBECTL_FILE_TARGET = "@kubectl_linux_amd64//file:file"
 TALOSCTL_FILE_TARGET = "@talosctl_linux_amd64//file:file"
 COZYSTACK_INSTALLER_CHART = "oci://ghcr.io/cozystack/cozystack/cozy-installer"
@@ -33,7 +32,6 @@ BUNDLE_PRECONDITION_TESTS = [
 ]
 
 DB_LOAD_TARGET = "//src/infrastructure/cmd/cozystack_db_load:cozystack_db_load"
-HARBOR_REGISTRY_TARGET = "//src/infrastructure/cmd/cozystack_harbor_registry:cozystack_harbor_registry"
 HTTP_LOAD_TARGET = "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load"
 EDGE_HEALTH_TARGET = "//src/infrastructure/cmd/edge_health:edge_health"
 EDGE_FAILOVER_DRILL_TARGET = "//src/infrastructure/cmd/edge_failover_drill:edge_failover_drill"
@@ -84,7 +82,6 @@ INFRA_TESTS = [
     "//src/infrastructure/cmd/bundle:bundle_test",
     "//src/infrastructure/cmd/cozystack_db_load:cozystack_db_load_test",
     "//src/infrastructure/cmd/edge_health:edge_health_test",
-    "//src/infrastructure/cmd/cozystack_harbor_registry:cozystack_harbor_registry_test",
     "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load_test",
     "//src/infrastructure/cmd/converged:converged_test",
     "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill_test",
@@ -311,27 +308,6 @@ def _k6_path(ctx):
     if output_base == None:
         return None
     return output_base + "/external/+http_archive+k6_linux_amd64/k6"
-
-def _oras_path(ctx):
-    rc = checked_spawn(
-        ctx,
-        "bazelisk",
-        ["build", ORAS_FILE_TARGET],
-        cwd = ws_path(ctx),
-        label = "bazelisk build " + ORAS_FILE_TARGET,
-    )
-    if rc != 0:
-        return None
-    output_base = _capture_stdout(
-        ctx,
-        "bazelisk",
-        ["info", "output_base"],
-        cwd = ws_path(ctx),
-        label = "bazelisk info output_base",
-    )
-    if output_base == None:
-        return None
-    return output_base + "/external/+http_archive+oras_linux_amd64/oras"
 
 def _talosctl_path(ctx):
     rc = checked_spawn(
@@ -1169,55 +1145,6 @@ def _load_db_impl(ctx):
         label = "cozystack db load",
     )
 
-def _load_harbor_registry_impl(ctx):
-    kubectl = _kubectl_path(ctx)
-    if kubectl == None:
-        return 1
-    oras = _oras_path(ctx)
-    if oras == None:
-        return 1
-
-    rc = _check_live_context(ctx, kubectl)
-    if rc != 0:
-        return rc
-    if ctx.args.revision != "":
-        rc = _check_flux_revision(ctx, kubectl, ctx.args.revision)
-        if rc != 0:
-            return rc
-
-    load_args = [
-        "--oras",
-        oras,
-        "--kubectl",
-        kubectl,
-        "--stage",
-        ctx.args.stage,
-        "--repository",
-        ctx.args.repository,
-        "--iterations",
-        ctx.args.iterations,
-        "--payload-bytes",
-        ctx.args.payload_bytes,
-        "--request-timeout",
-        ctx.args.request_timeout,
-        "--wait-timeout",
-        ctx.args.wait_timeout,
-    ]
-    if ctx.args.kubeconfig != "":
-        load_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
-    if ctx.args.host != "":
-        load_args.extend(["--host", ctx.args.host])
-    if ctx.args.tag != "":
-        load_args.extend(["--tag", ctx.args.tag])
-
-    return checked_spawn(
-        ctx,
-        "bazelisk",
-        ["run", HARBOR_REGISTRY_TARGET, "--"] + load_args,
-        cwd = ws_path(ctx),
-        label = "cozystack harbor registry load",
-    )
-
 def _observability_drill_impl(ctx):
     kubectl = _kubectl_path(ctx)
     if kubectl == None:
@@ -1700,7 +1627,7 @@ load_http = task(
         "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before the load test."),
         "sleep_seconds": args.string(default = "1", description = "Sleep seconds between requests in each k6 VU."),
         "stage": args.string(default = "root", description = "Guardian bootstrap stage: root."),
-        "surface": args.string(default = "harbor", description = "HTTP surface: harbor, dashboard, openbao, or custom with --url."),
+        "surface": args.string(default = "dashboard", description = "HTTP surface: dashboard, openbao, or custom with --url."),
         "url": args.string(default = "", description = "Explicit URL to load; overrides surface target mapping."),
         "vus": args.string(default = "1", description = "k6 virtual users."),
         "wait_timeout": args.string(default = "15m", description = "Timeout for surface readiness waits before k6 starts."),
@@ -1765,25 +1692,6 @@ load_db = task(
         "stage": args.string(default = "root", description = "Guardian bootstrap stage: root."),
         "ttl_seconds_after_finished": args.string(default = "86400", description = "Kubernetes Job ttlSecondsAfterFinished."),
         "wait_timeout": args.string(default = "20m", description = "Timeout for load Job completion."),
-    },
-)
-
-load_harbor_registry = task(
-    implementation = _load_harbor_registry_impl,
-    name = "load-harbor-registry",
-    group = ["infra"],
-    summary = "Run a standard ORAS push/pull smoke load against a Cozystack Harbor registry.",
-    args = {
-        "host": args.string(default = "", description = "Optional Harbor host override. Defaults from --stage."),
-        "iterations": args.string(default = "1", description = "Number of ORAS push/pull iterations."),
-        "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
-        "payload_bytes": args.string(default = "4096", description = "Payload size per ORAS push."),
-        "repository": args.string(default = "library/guardian-smoke", description = "Harbor repository path."),
-        "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
-        "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before the registry load."),
-        "stage": args.string(default = "root", description = "Guardian bootstrap stage: root."),
-        "tag": args.string(default = "", description = "Optional tag or tag prefix. Defaults to a timestamped tag."),
-        "wait_timeout": args.string(default = "15m", description = "Timeout waiting for the Harbor app readiness preflight."),
     },
 )
 

@@ -14,12 +14,6 @@ func TestResolveTarget(t *testing.T) {
 		status string
 	}{
 		{
-			name:   "harbor root",
-			cfg:    loadConfig{Surface: "harbor", Stage: "root"},
-			url:    "https://harbor.guardianintelligence.org/v2/",
-			status: "200,401",
-		},
-		{
 			name:   "dashboard root",
 			cfg:    loadConfig{Surface: "dashboard", Stage: "root"},
 			url:    "https://dashboard.guardianintelligence.org/",
@@ -51,7 +45,6 @@ func TestResolveTarget(t *testing.T) {
 
 func TestResolveTargetValidation(t *testing.T) {
 	for _, cfg := range []loadConfig{
-		{Surface: "harbor", Stage: "gamma"},
 		{Surface: "dashboard", Stage: "dev"},
 		{Surface: "openbao", Stage: "dev"},
 		{Surface: "nope", Stage: "dev"},
@@ -91,7 +84,7 @@ func TestValidateConfig(t *testing.T) {
 		K6:                   "/k6",
 		Script:               "http-smoke.js",
 		Kubectl:              "/kubectl",
-		Surface:              "harbor",
+		Surface:              "dashboard",
 		Stage:                "root",
 		VUs:                  "1",
 		Duration:             "1s",
@@ -118,7 +111,7 @@ func TestValidateConfig(t *testing.T) {
 	}
 
 	hostOverride := base
-	hostOverride.HostOverrides = "harbor.guardianintelligence.org=45.250.254.119"
+	hostOverride.HostOverrides = "dashboard.guardianintelligence.org=45.250.254.119"
 	if err := validateConfig(hostOverride); err != nil {
 		t.Fatalf("config with host override rejected: %v", err)
 	}
@@ -136,7 +129,7 @@ func TestValidateConfig(t *testing.T) {
 	}
 
 	badHostOverride := base
-	badHostOverride.HostOverrides = "harbor.guardianintelligence.org=not-an-ip"
+	badHostOverride.HostOverrides = "dashboard.guardianintelligence.org=not-an-ip"
 	if err := validateConfig(badHostOverride); err == nil {
 		t.Fatalf("invalid host override accepted")
 	}
@@ -156,8 +149,8 @@ func TestNormalizeHostOverrides(t *testing.T) {
 		},
 		{
 			name:  "normalizes spacing case and order",
-			input: " Harbor.GuardianIntelligence.Org = 45.250.254.119, dashboard.guardianintelligence.org=206.223.228.87 ",
-			want:  "dashboard.guardianintelligence.org=206.223.228.87,harbor.guardianintelligence.org=45.250.254.119",
+			input: " Openbao.GuardianIntelligence.Org = 45.250.254.119, dashboard.guardianintelligence.org=206.223.228.87 ",
+			want:  "dashboard.guardianintelligence.org=206.223.228.87,openbao.guardianintelligence.org=45.250.254.119",
 		},
 		{
 			name:  "ipv6 literal",
@@ -166,12 +159,12 @@ func TestNormalizeHostOverrides(t *testing.T) {
 		},
 		{
 			name:    "missing separator",
-			input:   "harbor.guardianintelligence.org:45.250.254.119",
+			input:   "dashboard.guardianintelligence.org:45.250.254.119",
 			wantErr: true,
 		},
 		{
 			name:    "host must not include port",
-			input:   "harbor.guardianintelligence.org:443=45.250.254.119",
+			input:   "dashboard.guardianintelligence.org:443=45.250.254.119",
 			wantErr: true,
 		},
 		{
@@ -181,17 +174,17 @@ func TestNormalizeHostOverrides(t *testing.T) {
 		},
 		{
 			name:    "invalid ip",
-			input:   "harbor.guardianintelligence.org=not-an-ip",
+			input:   "dashboard.guardianintelligence.org=not-an-ip",
 			wantErr: true,
 		},
 		{
 			name:    "duplicate host",
-			input:   "harbor.guardianintelligence.org=206.223.228.87,harbor.guardianintelligence.org=45.250.254.119",
+			input:   "dashboard.guardianintelligence.org=206.223.228.87,dashboard.guardianintelligence.org=45.250.254.119",
 			wantErr: true,
 		},
 		{
 			name:    "trailing comma",
-			input:   "harbor.guardianintelligence.org=206.223.228.87,",
+			input:   "dashboard.guardianintelligence.org=206.223.228.87,",
 			wantErr: true,
 		},
 	}
@@ -221,15 +214,6 @@ func TestSurfaceReadinessChecks(t *testing.T) {
 		cfg      loadConfig
 		required []commandExpectation
 	}{
-		{
-			name: "harbor",
-			cfg:  loadConfig{Surface: "harbor", Stage: "root", WaitTimeout: "20m"},
-			required: []commandExpectation{
-				{label: "Harbor app yaml", parts: []string{"tenant-root", "harbors.apps.cozystack.io/guardian", "-o", "yaml"}},
-				{label: "wait Harbor app Ready", parts: []string{"--for=condition=Ready", "harbors.apps.cozystack.io/guardian", "--timeout=20m"}},
-				{label: "wait Harbor workloads Ready", parts: []string{"--for=condition=WorkloadsReady", "harbors.apps.cozystack.io/guardian", "--timeout=20m"}},
-			},
-		},
 		{
 			name: "dashboard",
 			cfg:  loadConfig{Surface: "dashboard", Stage: "root", WaitTimeout: "20m"},
