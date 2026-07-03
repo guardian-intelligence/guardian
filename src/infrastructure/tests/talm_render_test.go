@@ -52,6 +52,8 @@ func TestTalmControlplaneRender(t *testing.T) {
 		"name: \"10.8.0.250\"",
 		"link: enp1s0f0.2140",
 		"guardian.dev/openbao-static-seal: \"true\"",
+		"kind: WatchdogTimerConfig",
+		"device: /dev/watchdog0",
 	} {
 		assertTextContains(t, rendered, want, "rendered controlplane talos config")
 	}

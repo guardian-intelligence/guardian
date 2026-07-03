@@ -394,5 +394,13 @@ name: docker.io
 endpoints:
   - url: https://mirror.gcr.io
 {{- end }}
+---
+# Arm the chipset watchdog (SP5100 TCO on the Latitude nodes). machined pets
+# the device; a hard hang (kernel lockup, machined freeze) stops the petting
+# and the hardware reboots the node with no software cooperation.
+apiVersion: v1alpha1
+kind: WatchdogTimerConfig
+device: /dev/watchdog0
+timeout: 1m
 {{- include "talos.config.network.multidoc" . }}
 {{- end }}
