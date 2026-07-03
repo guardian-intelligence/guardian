@@ -78,7 +78,13 @@ const m = s.match(/var public_assets_data_default = (\\{[\\s\\S]*?\\n\\});/);
 if (!m) throw new Error("public assets manifest not found in " + p);
 const obj = JSON.parse(m[1]);
 const sorted = Object.fromEntries(Object.keys(obj).sort().map((k) => [k, obj[k]]));
-fs.writeFileSync(p, s.replace(m[1], JSON.stringify(sorted, null, "\t")));
+s = s.replace(m[1], JSON.stringify(sorted, null, "\t"));
+// Nitro derives its lazy-handler variable suffixes from machine-specific
+// paths (_lazy_<suffix>). index.mjs is not content-hash-named, so renaming
+// them by order of first appearance is safe and machine-invariant.
+const ids = [...new Set(s.match(/_lazy_[A-Za-z0-9]+/g) || [])];
+ids.forEach((id, i) => { s = s.split(id).join("_lazy_h" + i); });
+fs.writeFileSync(p, s);
 '
 tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
   --transform 's#^\\./#app/#' \
