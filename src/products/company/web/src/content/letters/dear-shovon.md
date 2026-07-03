@@ -19,7 +19,7 @@ And did you know he has a crush? He told me over breakfast that when they're nea
 
 You should see how tender he is with the parts of me I used to hide. He's been practicing his laugh in the car. “So it can sound just like yours,” he tells me. And I love how, when he makes me cry, he holds out more tissues than I could ever use. Through tears I see that there’s a crack in everything. That’s how his light gets in.
 
-While everyone was over for dinner, he got really quiet and walked past everyone to tug on my sleeve. I was worried at first, but all he asked was if I could homeschool him and all his classmates from last year when summer ends. He wants me to teach them every year until they all graduate from college together. He loudly counted up the grades as he was explaining, but I had to stop him when he got to the twenties.
+While everyone was over for dinner, he got really quiet and walked past everyone to tug on my sleeve. I was worried something was wrong, but all he asked was if I could homeschool him and all his classmates from last year when summer ends. He wants me to teach them every year until they all graduate from college together. He loudly counted up the grades as he was explaining, but I had to stop him when he got to the twenties.
 
 I asked him why. He looked around and paused and said "I wish the house was this full all the time” and gave me permission to skip math if that'd make homechooling easier for me. I couldn’t argue.
 
@@ -47,7 +47,7 @@ I sat with her and watched her sew and get so focused neither of us said a word 
 
 She paused for a moment and then jumped into my arms and hugged me tight. “I miss being little" she said, and I felt her tears pool up on my sweater. I told her no matter how much she grows up that she’ll always be my little baby, and she liked that better and fell asleep on my lap and we stayed like that for I don’t know how long.
 
-No one told me having kids would make my heart a compass that always points home. That no matter how much we fight and yell and say things we don't mean, that no matter how much our family breaks, we'll find a way back to each other and become strong in the broken places.
+No one told me having kids would make my heart a compass that always points home. That no matter how much we fight and yell and say things we don't mean, and no matter how much our family breaks, we'll find a way back to each other and become strong in the broken places.
 
 No one told me any of this. But it's better, I think, because I got to learn it from them.
 
