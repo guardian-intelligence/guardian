@@ -67,12 +67,12 @@ function ordinal(n: number): string {
 }
 
 // Same ordinal voice everywhere the letter appears, so the index date is the
-// same object that opens the full letter. (This plain form still serves the
-// OG card kicker; the page itself renders the two-hand header below.)
+// same object that opens the full letter. No comma before the year — the
+// pages never dated themselves with one.
 export function formatLetterDate(iso: string): string {
   const d = new Date(`${iso}T12:00:00Z`);
   const month = d.toLocaleDateString("en-US", { month: "long", timeZone: "UTC" });
-  return `${month} ${ordinal(d.getUTCDate())}, ${d.getUTCFullYear()}`;
+  return `${month} ${ordinal(d.getUTCDate())} ${d.getUTCFullYear()}`;
 }
 
 // The header carries the actual day of the week, computed from the letter's
