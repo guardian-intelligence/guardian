@@ -44,6 +44,51 @@ func TestImagesLockWellFormed(t *testing.T) {
 	}
 }
 
+var imagesLockSectionHeaderPattern = regexp.MustCompile(`^# --- (.+) ---$`)
+
+// TestImagesLockSectionsWellFormed enforces invariant #5 from
+// docs/images-lock-spec.md: every "# --- <title> ---" section header must
+// be followed, before EOF or the next header, by at least one non-comment,
+// non-blank entry line. A silently-empty section would make the in-toto
+// attestation's per-section counts (src/infrastructure/cmd/images_lock_attest)
+// meaningless without any test catching it.
+func TestImagesLockSectionsWellFormed(t *testing.T) {
+	raw := readText(t, runfilePath(imagesLockRunfile))
+
+	var currentSection string
+	sectionEntries := map[string]int{}
+	var sectionOrder []string
+	for _, line := range strings.Split(raw, "\n") {
+		if m := imagesLockSectionHeaderPattern.FindStringSubmatch(line); m != nil {
+			currentSection = m[1]
+			if _, seen := sectionEntries[currentSection]; !seen {
+				sectionEntries[currentSection] = 0
+				sectionOrder = append(sectionOrder, currentSection)
+			}
+			continue
+		}
+
+		entry := line
+		if idx := strings.Index(entry, "#"); idx >= 0 {
+			entry = entry[:idx]
+		}
+		entry = strings.TrimSpace(entry)
+		if entry == "" || currentSection == "" {
+			continue
+		}
+		sectionEntries[currentSection]++
+	}
+
+	if len(sectionOrder) == 0 {
+		t.Fatalf("%s has no '# --- <title> ---' section headers", imagesLockRunfile)
+	}
+	for _, section := range sectionOrder {
+		if sectionEntries[section] == 0 {
+			t.Errorf("%s: section %q has no entries before EOF or the next header", imagesLockRunfile, section)
+		}
+	}
+}
+
 func TestRenderedImagesDigestPinnedAndLocked(t *testing.T) {
 	locked := parseImagesLock(t)
 	refs := collectRenderedImageRefs(t)

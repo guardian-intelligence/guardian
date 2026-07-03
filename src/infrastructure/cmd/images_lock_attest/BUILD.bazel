@@ -1,0 +1,22 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+
+go_library(
+    name = "images_lock_attest_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/infrastructure/cmd/images_lock_attest",
+    visibility = ["//visibility:private"],
+)
+
+go_binary(
+    name = "images_lock_attest",
+    embed = [":images_lock_attest_lib"],
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "images_lock_attest_test",
+    srcs = ["main_test.go"],
+    data = ["//src/infrastructure/bootstrap/bundle:images_lock"],
+    embed = [":images_lock_attest_lib"],
+    deps = ["@rules_go//go/runfiles"],
+)

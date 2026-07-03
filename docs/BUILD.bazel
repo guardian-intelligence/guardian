@@ -1,4 +1,5 @@
 exports_files([
+    "images-lock-spec.md",
     "manifest-conformance-design.md",
     "openbao-design.md",
     "openbao-residue-inventory.md",
