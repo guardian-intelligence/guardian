@@ -120,18 +120,13 @@ jobs:
       - name: Post sticky preview comment
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DIGEST: ${{ steps.digest.outputs.digest }}
           STATUS: ${{ steps.converge.outputs.status || 'pending' }}
         run: |
           marker="<!-- company-site-preview -->"
-          if [ "$STATUS" = "live" ]; then
-            headline="✅ **Preview live:** https://${HOST}"
-          else
-            headline="⏳ **Preview publishing:** https://${HOST} — manifests are on the \`previews\` branch; the URL goes live once Flux and external-dns converge (requires the previews infra on \`main\`)."
+          body="$(printf '%s\nPreview URL: https://%s' "$marker" "$HOST")"
+          if [ "$STATUS" != "live" ]; then
+            body="$body"$'\n\n'"_(publishing — not serving this commit yet)_"
           fi
-          # Backticks are literal inside the single-quoted format string.
-          body="$(printf '%s\n%s\n\n| | |\n|---|---|\n| Commit | %s |\n| Image | `%s` |\n| Updated | %s |\n\n_Rebuilds on every push; torn down when the PR closes._' \
-            "$marker" "$headline" "$HEAD_SHA" "ghcr.io/guardian-intelligence/company-site@${DIGEST}" "$(date -u +%FT%TZ)")"
           existing="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --paginate \
             --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -1)"
           if [ -n "$existing" ]; then
