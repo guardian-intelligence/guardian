@@ -13,7 +13,7 @@ description: >-
 
 I wish someone told me having a son would feel like meeting a smaller, kinder, funnier version of myself. Someone who holds my quirks like treasures instead of flaws.
 
-I love our morning walks and how he stops to teach me the laughing gulls names. There was a new one today and we picked out a name together. It’s “Donnie,” just so you know.
+I love our morning walks and how he stops to teach me the laughing gulls names. There was a new one today so we picked out a name together. It’s “Donnie,” just so you know.
 
 And did you know he has a crush? He told me over breakfast that when they're nearby, his stomach tries to escape through his chest, so he asked me what he should do. It reminded me of when we met — those first few months — falling in love at our first Odesza. Do you remember? So I smiled and told him, “Ask them to watch you play their favorite game”. He rolled his eyes because he’s sick of hearing our story, but I wonder what you’d say if he asked you.
 
@@ -41,7 +41,7 @@ Over lunch, I finished making the shield from her XIV character, the one she’s
 
 I asked what would keep her safe and she furrowed one brow and said, “You, silly!” and did you know that pride and grief are the same thing?
 
-She tore her favorite cargo shorts the other day climbing the tree where the woodpeckers live. She acted like she's fine but during dinner she barely ate Mom’s sinigang. So I happened to need her help afterward to clean out the attic, and when we found the sewing machine I haven’t used since PAX, it must have had some magic left because she was awestruck. “Is this how you made Meteion?” she asked, and then demanded I teach her how to use it. So I did.
+The other day, while climbing the tree where the woodpeckers live, she tore her favorite cargo shorts. She acted like it was fine but during dinner she barely ate Mom’s sinigang. So I happened to need her help afterward to clean out the attic, and when we found the sewing machine I haven’t used since PAX, she was frozen again just like at the stall. “Is this how you made Meteion?” she asked, and demanded I teach her how to use it. So I did.
 
 I sat with her and watched her sew and get so focused neither of us said a word and all you could hear was the whir of the machine while the sun sank into the ocean outside. When it felt right, I asked her what had been making her sad, and she didn’t say anything for a long time and then reached into her pocket and put a polaroid into my hand. I think you took this one. It’s me and her last year: I was holding her up to the sun, doing a Lion King bit. It had been torn apart, probably by the woodpeckers, but she had carefully taped it back up.
 

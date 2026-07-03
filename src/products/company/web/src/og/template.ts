@@ -13,7 +13,9 @@ const HEIGHT = 630;
 const IRON = "#0e0e0e";
 const INK = "#0b0b0b";
 const ARGENT = "#FFFFFF";
-const PAPER = "#fff4dc";
+// Matches the letters page ground (critical-treatment.ts / letters.css); the
+// card's 28px ruling stays its own illustration-scale choice.
+const PAPER = "#fff6e6";
 const FLARE = "#ccff00";
 const MUTED = "rgba(245,245,245,0.6)";
 const STONE_STRONG = "rgba(11,11,11,0.9)";

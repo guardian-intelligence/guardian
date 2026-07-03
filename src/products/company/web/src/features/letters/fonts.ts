@@ -12,7 +12,7 @@
 // Per-word ink variation (the gel-pen hand) lives in ink.ts; its class rules
 // are appended here so first paint already has the ink.
 
-import { inkClassRules } from "~/features/letters/ink";
+import { flowClassRules, inkClassRules } from "~/features/letters/ink";
 
 export interface LetterFontFace {
   readonly file: string;
@@ -28,17 +28,27 @@ export interface LettersFont {
   readonly stack: string;
   readonly weight: number; // body copy weight
   readonly bodySize: string; // body copy font-size (a CSS length / clamp)
+  readonly linePitch: number; // px between baselines; the ruling derives from it
   readonly ogFile: string; // upright face baked into the OG rasteriser
   readonly faces: readonly LetterFontFace[];
 }
 
 // The reading face. Crimson Pro runs small on the body, so it takes a larger
 // measure than a typical text face would.
+//
+// linePitch is the sheet's registration constant: on the original pages the
+// hand writes on every other cell of the graph — x-height filling the lower
+// cell, one quiet cell above, baseline on the rule. So the minor cell is
+// half the pitch, the major rule is five pitches, and body line-height IS
+// the pitch: the ruling and the writing are one system, not a background
+// behind a foreground. Grid vars emitted below; consumed by
+// .letters-paper-grid in app.css and the paragraph rhythm in typography.tsx.
 export const lettersBodyFont: LettersFont = {
   family: "Crimson Pro",
   stack: "'Crimson Pro', Georgia, serif",
   weight: 500,
   bodySize: "clamp(20px, 1.5vw, 22px)",
+  linePitch: 32,
   ogFile: "CrimsonPro-OG.ttf",
   faces: [
     { file: "CrimsonPro-Variable.woff2", style: "normal", weight: "400 700", variable: true },
@@ -81,6 +91,9 @@ export function lettersTypographyCss(): string {
     `--treatment-body-font:${lettersBodyFont.stack};` +
     `--letters-body-weight:${lettersBodyFont.weight};` +
     `--letters-body-size:${lettersBodyFont.bodySize};` +
+    `--letters-line-pitch:${lettersBodyFont.linePitch}px;` +
+    `--letters-grid-minor:${lettersBodyFont.linePitch / 2}px;` +
+    `--letters-grid-major:${lettersBodyFont.linePitch * 5}px;` +
     // Ink on paper, not pixels on glass: grayscale antialiasing (the same
     // rasterisation design tools force) instead of subpixel RGB fringing,
     // real kerning/ligatures, and no synthesised faces — the variable file
@@ -101,11 +114,20 @@ export function lettersTypographyCss(): string {
     `[data-treatment="letters"] [data-letter-body] p,` +
     `[data-treatment="letters"] [data-letter-body] li,` +
     `[data-treatment="letters"] [data-letter-body] blockquote` +
-    `{font-weight:var(--letters-body-weight);font-size:var(--letters-body-size);}` +
+    `{font-weight:var(--letters-body-weight);font-size:var(--letters-body-size);line-height:var(--letters-line-pitch);}` +
     `[data-treatment="letters"] [data-letter-slot="body"]` +
-    `{font-weight:var(--letters-body-weight);font-size:var(--letters-body-size);}` +
+    `{font-weight:var(--letters-body-weight);font-size:var(--letters-body-size);line-height:var(--letters-line-pitch);}` +
     `[data-treatment="letters"] [data-letter-slot="salutation"]` +
     `{font-weight:var(--letters-body-weight);}`;
+  // The hand's paint-time distortion: an SVG displacement field defined by
+  // routes/letters/route.tsx (#letters-hand-filter). Long-wavelength vertical
+  // displacement leans each word a degree or two while it stays anchored to
+  // the ruling; a fine second stage roughens glyph edges like ink wicking
+  // into fibre. Paint-only: the DOM stays selectable, findable text.
+  const hand =
+    `[data-treatment="letters"] [data-letter-slot="body"],` +
+    `[data-treatment="letters"] [data-letter-slot="salutation"]` +
+    `{filter:url(#letters-hand-filter);}`;
   // The gel bloom: a zero-offset hairline shadow in the ink's own colour.
   // Browsers antialias each glyph in isolation against the alpha ramp gamma
   // gives them; design tools (Figma) rasterise with gamma-aware blending, so
@@ -120,5 +142,13 @@ export function lettersTypographyCss(): string {
     `[data-treatment="letters"] [data-letter-slot="body"],` +
     `[data-treatment="letters"] [data-letter-slot="salutation"]` +
     `{text-shadow:0 0 0.5px color-mix(in oklab,currentColor 38%,transparent);}`;
-  return faces + vars + body + bloom + inkClassRules('[data-treatment="letters"]');
+  return (
+    faces +
+    vars +
+    body +
+    hand +
+    bloom +
+    inkClassRules('[data-treatment="letters"]') +
+    flowClassRules('[data-treatment="letters"]')
+  );
 }

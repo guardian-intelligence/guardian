@@ -134,16 +134,18 @@ function belowCurveClip(slug: string, offsetY = 0): string {
   return `polygon(${curve}, 100% 100%, 0% 100%)`;
 }
 
-// Cumulative opacity reaches 100% after a six-cell descent. The first stop is
-// deliberately faint so the transition starts as atmosphere, not an outline.
+// Cumulative opacity reaches 100% after a six-pitch descent (one ruled line
+// of writing per step — the grid is registered to the typography, so the
+// natural fade unit is the line pitch, 32px). The first stop is deliberately
+// faint so the transition starts as atmosphere, not an outline.
 const CURVE_FADE_STOPS: ReadonlyArray<Readonly<{ offsetY: number; opacity: number }>> = [
   { offsetY: 0, opacity: 0.05 },
-  { offsetY: 28, opacity: 0.07 },
-  { offsetY: 56, opacity: 0.09 },
-  { offsetY: 84, opacity: 0.12 },
-  { offsetY: 112, opacity: 0.16 },
-  { offsetY: 140, opacity: 0.21 },
-  { offsetY: 168, opacity: 0.3 },
+  { offsetY: 32, opacity: 0.07 },
+  { offsetY: 64, opacity: 0.09 },
+  { offsetY: 96, opacity: 0.12 },
+  { offsetY: 128, opacity: 0.16 },
+  { offsetY: 160, opacity: 0.21 },
+  { offsetY: 192, opacity: 0.3 },
 ];
 
 // Absolute, not fixed: layer is the size of the whole document and scrolls
@@ -200,6 +202,8 @@ function LettersLayout() {
         ...PAPER_GEOMETRY_VARS,
       }}
     >
+      <HandFilterDefs slug={slug} />
+      <PaperSplotches slug={slug} />
       <PaperWash />
       <PaperGrain />
       <FeatheredGridLayer
@@ -230,6 +234,121 @@ function LettersLayout() {
 
 function PaperGrain() {
   return <div aria-hidden className={`${PAPER_LAYER_CLASS} letters-paper-tooth`} />;
+}
+
+// The hand's displacement field, referenced by the letters typography CSS
+// (fonts.ts) as filter:url(#letters-hand-filter). Two stages, both Perlin
+// noise (feTurbulence is the specced, seeded Perlin function — deterministic
+// markup, deterministic render):
+//
+//   • lean — a long-wavelength (~70px across, ~200px down) field, displacing
+//     VERTICALLY ONLY: the feComponentTransfer pins the R channel (the X
+//     displacement input) to neutral 0.5. At word scale the ramp across a
+//     word reads as the word leaning a degree or so while staying anchored
+//     to the ruling — the per-word tilt of the original pages, without
+//     per-glyph markup.
+//   • fibre — a ~3px-wavelength field at ±0.25px roughening glyph edges,
+//     ink wicking into paper fibre instead of a vector-perfect boundary.
+//
+// Paint-time only: selection, find-in-page, and screen readers see plain
+// text. Seeds are pure hash reads per slug, like every other page fixture.
+function HandFilterDefs({ slug }: { slug: string }) {
+  const leanSeed = 1 + Math.floor(pick(slug, "hand.lean") * 9973);
+  const fibreSeed = 1 + Math.floor(pick(slug, "hand.fibre") * 9973);
+  return (
+    <svg aria-hidden width="0" height="0" style={{ position: "absolute" }}>
+      <filter
+        id="letters-hand-filter"
+        x="-5%"
+        y="-5%"
+        width="110%"
+        height="110%"
+        colorInterpolationFilters="sRGB"
+      >
+        <feTurbulence
+          type="fractalNoise"
+          baseFrequency="0.014 0.005"
+          numOctaves={2}
+          seed={leanSeed}
+          result="lean"
+        />
+        <feComponentTransfer in="lean" result="leanY">
+          <feFuncR type="linear" slope={0} intercept={0.5} />
+        </feComponentTransfer>
+        <feDisplacementMap
+          in="SourceGraphic"
+          in2="leanY"
+          scale={1.3}
+          xChannelSelector="R"
+          yChannelSelector="G"
+          result="leaned"
+        />
+        <feTurbulence
+          type="fractalNoise"
+          baseFrequency="0.3"
+          numOctaves={2}
+          seed={fibreSeed}
+          result="fibre"
+        />
+        <feDisplacementMap
+          in="leaned"
+          in2="fibre"
+          scale={0.5}
+          xChannelSelector="R"
+          yChannelSelector="G"
+        />
+      </filter>
+    </svg>
+  );
+}
+
+// Sun-fade splotches: the sheet's base is a touch less yellow than it used to
+// be, and these pools — drawn in the OLD cream — are where the original tone
+// survives. Because the splotch colour IS the previous base, the page can
+// only ever sit between the two creams; no blob can go lurid. Deterministic
+// per slug via the same pick-by-label reads as the boundary. The layer is
+// rendered twice with the complementary column masks: full strength in the
+// page margins, dimmed inside the reading column so a pool under the words
+// stays atmosphere, never a distraction.
+const SPLOTCH_COUNT = 18;
+const SPLOTCH_CREAM = "255 244 220"; // the previous base, #fff4dc
+
+function splotchBackground(slug: string): string {
+  return Array.from({ length: SPLOTCH_COUNT }, (_, i) => {
+    const x = 100 * pick(slug, `splotch.x${i}`);
+    const y = 100 * pick(slug, `splotch.y${i}`);
+    const w = 200 + 340 * pick(slug, `splotch.w${i}`);
+    const h = 160 + 280 * pick(slug, `splotch.h${i}`);
+    const a = 0.3 + 0.5 * pick(slug, `splotch.a${i}`);
+    return (
+      `radial-gradient(${w.toFixed(0)}px ${h.toFixed(0)}px at ${x.toFixed(2)}% ${y.toFixed(2)}%,` +
+      `rgb(${SPLOTCH_CREAM} / ${a.toFixed(3)}) 0%,` +
+      `rgb(${SPLOTCH_CREAM} / ${(a * 0.45).toFixed(3)}) 48%,transparent 72%)`
+    );
+  }).join(",");
+}
+
+function PaperSplotches({ slug }: { slug: string }) {
+  const backgroundImage = splotchBackground(slug);
+  const layer = (mask: string, opacity?: number) => (
+    <div
+      aria-hidden
+      className="pointer-events-none absolute inset-0 z-0"
+      style={{
+        backgroundImage,
+        backgroundRepeat: "no-repeat",
+        opacity,
+        WebkitMaskImage: mask,
+        maskImage: mask,
+      }}
+    />
+  );
+  return (
+    <>
+      {layer(MARGIN_ZONE_MASK)}
+      {layer(TEXT_ZONE_MASK, 0.35)}
+    </>
+  );
 }
 
 // Watercolor wash: soft splotches where the cream sheet dried lighter, toward
