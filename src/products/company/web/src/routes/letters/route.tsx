@@ -121,29 +121,86 @@ function makeBoundary(slug: string): (t: number) => number {
   return (t: number) => clamp(base(t) + envelope(t) * wiggle(warp(t)));
 }
 
-// The clip region kept on each zone layer: everything BELOW the seeded curve,
-// optionally shifted down by a fade stop. x as % (responsive width), y as px
-// (no vertical stretch); the 100% rows take the polygon to the true document
-// bottom so the grid is solid for the whole scroll once all fade stops apply.
-function belowCurveClip(slug: string, offsetY = 0): string {
-  const f = makeBoundary(slug);
-  const curve = Array.from({ length: SAMPLES }, (_, i) => {
-    const t = i / (SAMPLES - 1);
-    return `${(t * 100).toFixed(3)}% ${(f(t) + offsetY).toFixed(2)}px`;
-  }).join(", ");
-  return `polygon(${curve}, 100% 100%, 0% 100%)`;
-}
-
 // Cumulative opacity reaches 100% after a six-pitch descent (one ruled line
 // of writing per step — the fade unit IS the line pitch, imported from the
 // typography it registers to). The first stop is deliberately faint so the
 // transition starts as atmosphere, not an outline.
 const CURVE_FADE_OPACITIES = [0.05, 0.07, 0.09, 0.12, 0.16, 0.21, 0.3] as const;
-const CURVE_FADE_STOPS: ReadonlyArray<Readonly<{ offsetY: number; opacity: number }>> =
-  CURVE_FADE_OPACITIES.map((opacity, i) => ({
-    offsetY: i * lettersBodyFont.linePitch,
-    opacity,
-  }));
+
+// --- The fade as one mask, not stacked clips ------------------------------
+//
+// clip-path is binary, so this fade used to be seven document-sized copies
+// of the grid per zone, each clipped one pitch lower. Gecko repaints that
+// whole stack on every scroll tick (measured: 58ms/frame average on the
+// letter page, 17ms with the stack hidden; will-change/translateZ/contain
+// change nothing). Painting the grid ONCE per zone and expressing the same
+// seven steps in the alpha channel of an SVG mask removes the stack without
+// moving a pixel.
+//
+// Fidelity is arithmetic, not eyeballing: the old copies composited with
+// mix-blend-mode:multiply, so k stacked paints at opacities o_i darken a
+// rule pixel by 1−∏(1−o_i·x) — NOT Σo_i — where x is the rule's paint
+// alpha times (1−ink channel). The mask alphas bake that product per step,
+// solved at the zone's major-rule alpha (the darkest, most visible case;
+// the residual on minor rules is under half an 8-bit level).
+const GRID_INK_MEAN = (40 + 44 + 52) / (3 * 255); // rgb of the rule color
+
+// Per-step fill opacities for a stack of seven source-over "below curve+k
+// pitches" fills — the SVG mirrors the old clip stack shape for shape, so
+// step edges are overlap boundaries, never shared path edges (no AA seams).
+function fadeStackFills(majorAlpha: number): { fills: number[]; solid: number } {
+  const x = majorAlpha * (1 - GRID_INK_MEAN);
+  let product = 1;
+  const cumulative = CURVE_FADE_OPACITIES.map((o) => {
+    product *= 1 - o * x;
+    return (1 - product) / x;
+  });
+  let prev = 0;
+  const fills = cumulative.map((m) => {
+    const fill = (m - prev) / (1 - prev);
+    prev = m;
+    return fill;
+  });
+  return { fills, solid: prev };
+}
+
+// The mask raster only spans the curve region (deepest step edge = curve
+// ceiling + six pitches); below it a flat gradient layer at the settled
+// alpha carries the grid to the document bottom, so mask memory stays
+// bounded no matter how long the letter scrolls.
+const FADE_MASK_H = Y_CEIL + (CURVE_FADE_OPACITIES.length - 1) * lettersBodyFont.linePitch;
+
+function curveFadeMask(
+  slug: string,
+  majorAlpha: number,
+): { image: string; size: string; position: string } {
+  const f = makeBoundary(slug);
+  const { fills, solid } = fadeStackFills(majorAlpha);
+  const paths = fills
+    .map((alpha, k) => {
+      const top = Array.from({ length: SAMPLES }, (_, i) => {
+        const t = i / (SAMPLES - 1);
+        // x in viewBox units 0..100; preserveAspectRatio="none" + a
+        // width-relative mask-size stretch it exactly like the old
+        // percentage clip coordinates. y stays true px.
+        return `${(t * 100).toFixed(3)},${(f(t) + k * lettersBodyFont.linePitch).toFixed(2)}`;
+      }).join(" L");
+      // Overshoot the viewBox bottom: the image viewport crops at
+      // FADE_MASK_H with no edge AA, so the flat layer below continues
+      // seamlessly.
+      return `<path d='M${top} L100,${FADE_MASK_H + 9} L0,${FADE_MASK_H + 9} Z' fill='#fff' fill-opacity='${alpha.toFixed(5)}'/>`;
+    })
+    .join("");
+  const svg =
+    `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 ${FADE_MASK_H}' ` +
+    `preserveAspectRatio='none'>${paths}</svg>`;
+  const flat = `linear-gradient(rgb(0 0 0/${solid.toFixed(5)}),rgb(0 0 0/${solid.toFixed(5)}))`;
+  return {
+    image: `url("data:image/svg+xml,${encodeURIComponent(svg)}"), ${flat}`,
+    size: `100% ${FADE_MASK_H}px, 100% calc(100% - ${FADE_MASK_H}px)`,
+    position: `0 0, 0 ${FADE_MASK_H}px`,
+  };
+}
 
 // Absolute, not fixed: layer is the size of the whole document and scrolls
 // with it. No fade-in — the paper paints with the page.
@@ -182,13 +239,6 @@ function LettersLayout() {
   const params = useParams({ strict: false }) as { slug?: string };
   const slug = params.slug ?? "letters";
 
-  // The seeded boundary, feathered by offset clip-path layers.
-  const fadeClips = CURVE_FADE_STOPS.map((stop) => ({
-    offsetY: stop.offsetY,
-    opacity: stop.opacity,
-    clipPath: belowCurveClip(slug, stop.offsetY),
-  }));
-
   return (
     <div
       data-treatment="letters"
@@ -209,12 +259,14 @@ function LettersLayout() {
       <FeatheredGridLayer
         toneClass="letters-paper-grid--text"
         zoneMask={TEXT_ZONE_MASK}
-        fadeClips={fadeClips}
+        slug={slug}
+        majorAlpha={GRID_MAJOR_ALPHA.text}
       />
       <FeatheredGridLayer
         toneClass="letters-paper-grid--margin"
         zoneMask={MARGIN_ZONE_MASK}
-        fadeClips={fadeClips}
+        slug={slug}
+        majorAlpha={GRID_MAJOR_ALPHA.margin}
       />
       <div className="relative z-10 flex flex-1 flex-col">
         <AppChrome
@@ -363,56 +415,48 @@ function PaperWash() {
   );
 }
 
-// One band of the sheet: the checked-in CSS grid, shown only inside its
-// horizontal zone and feathered below the seeded boundary.
+// Mirrors --letters-grid-major-alpha per tone in app.css — the value the
+// fade-step correction is solved against. Keep the two in step.
+const GRID_MAJOR_ALPHA = { text: 0.039, margin: 0.15 } as const;
+
+// One band of the sheet: the checked-in CSS grid painted ONCE, shown only
+// inside its horizontal zone and feathered below the seeded boundary by the
+// curve mask. aria-hidden decoration; the text DOM is not clipped or
+// blended. Two nested divs, not one: a mask forms an isolated group, so the
+// multiply blend must sit on the wrapper (where the zone mask lives) — on
+// the grid child it would only ever see the group's own transparency.
 function FeatheredGridLayer({
   toneClass,
   zoneMask,
-  fadeClips,
+  slug,
+  majorAlpha,
 }: {
   toneClass: string;
   zoneMask: string;
-  fadeClips: ReadonlyArray<Readonly<{ offsetY: number; opacity: number; clipPath: string }>>;
+  slug: string;
+  majorAlpha: number;
 }) {
-  return (
-    <>
-      {fadeClips.map((stop) => (
-        <GridLayer
-          key={stop.offsetY}
-          toneClass={toneClass}
-          zoneMask={zoneMask}
-          clipPath={stop.clipPath}
-          opacity={stop.opacity}
-        />
-      ))}
-    </>
-  );
-}
-
-// aria-hidden decoration; the text DOM is not clipped or blended.
-function GridLayer({
-  toneClass,
-  zoneMask,
-  clipPath,
-  opacity,
-}: {
-  toneClass: string;
-  zoneMask: string;
-  clipPath: string;
-  opacity: number;
-}) {
+  const fade = curveFadeMask(slug, majorAlpha);
   return (
     <div
       aria-hidden
-      className={`${PAPER_LAYER_CLASS} letters-paper-grid ${toneClass}`}
-      style={{
-        opacity,
-        WebkitMaskImage: zoneMask,
-        maskImage: zoneMask,
-        clipPath,
-        WebkitClipPath: clipPath,
-      }}
-    />
+      className={`${PAPER_LAYER_CLASS} letters-paper-zone`}
+      style={{ WebkitMaskImage: zoneMask, maskImage: zoneMask }}
+    >
+      <div
+        className={`absolute inset-0 letters-paper-grid ${toneClass}`}
+        style={{
+          WebkitMaskImage: fade.image,
+          maskImage: fade.image,
+          WebkitMaskSize: fade.size,
+          maskSize: fade.size,
+          WebkitMaskPosition: fade.position,
+          maskPosition: fade.position,
+          WebkitMaskRepeat: "no-repeat",
+          maskRepeat: "no-repeat",
+        }}
+      />
+    </div>
   );
 }
 
