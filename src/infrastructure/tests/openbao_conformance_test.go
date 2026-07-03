@@ -78,10 +78,15 @@ func TestOpenBaoStaticSealTLSAndStorageConformance(t *testing.T) {
 		`request "write_external_dns_role"`,
 		`bound_service_account_names = ["external-dns-secrets"]`,
 		`token_policies = ["guardian-external-dns"]`,
+		`request "write_promotion_policy"`,
+		`request "write_promotion_role"`,
+		`bound_service_account_names = ["promotion-secrets"]`,
+		`token_policies = ["guardian-promotion"]`,
 		`request "write_secret_importer_policy"`,
 		`request "write_secret_importer_role"`,
 		`bound_service_account_names = ["guardian-secret-importer"]`,
 		`kv/data/guardian/guardian-mgmt/tenant-guardian/dns/external-dns`,
+		`kv/data/guardian/guardian-mgmt/company-site/promotion/github-app`,
 		`auth/kubernetes/role/guardian-secret-importer`,
 		`sys/policies/acl/guardian-secret-importer`,
 		`token_ttl = "600"`,
@@ -261,6 +266,8 @@ func TestOpenBaoOperationsInventoryConformance(t *testing.T) {
 		`request "tune_transit_mount"`,
 		`request "write_external_dns_policy"`,
 		`request "write_external_dns_role"`,
+		`request "write_promotion_policy"`,
+		`request "write_promotion_role"`,
 		`request "write_secret_importer_policy"`,
 		`request "write_secret_importer_role"`,
 	} {
@@ -400,6 +407,23 @@ func TestOpenBaoConsumersUseTLSConformance(t *testing.T) {
 		assertTextContains(t, dns, want, "external-dns SecretStore")
 	}
 	assertTextNotContains(t, dns, "server: http://guardian-openbao", "external-dns SecretStore")
+
+	promotion := readText(t, runfilePath("src/infrastructure/deployments/guardian/promotion/pipelines/secrets.yaml"))
+	for _, want := range []string{
+		"kind: ClusterSecretStore",
+		"name: promotion-openbao",
+		"server: https://guardian-openbao.tenant-guardian.svc:8200",
+		"caProvider:",
+		"name: guardian-openbao-api-tls",
+		"role: guardian-promotion",
+		"kargo.akuity.io/cred-type: git",
+	} {
+		assertTextContains(t, promotion, want, "promotion SecretStore")
+	}
+	assertTextNotContains(t, promotion, "server: http://guardian-openbao", "promotion SecretStore")
+	// Only the App private key is OpenBao-backed; a plaintext key in Git or a
+	// value-bearing template would defeat the custody model.
+	assertTextNotContains(t, promotion, "BEGIN RSA PRIVATE KEY", "promotion SecretStore")
 }
 
 func readText(t *testing.T, path string) string {

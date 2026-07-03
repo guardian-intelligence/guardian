@@ -274,9 +274,12 @@ spec:
               # Self-init runs once, at first cluster initialization, with a
               # temporary privileged token OpenBao revokes afterward. It creates
               # the complete steady state directly: Kubernetes auth, the kv and
-              # transit engines, and the external-dns consumer's policy+role.
-              # There is no reconciling operator — this block IS the source of
-              # truth, so a cold boot converges the same config natively.
+              # transit engines, and each consumer's policy+role (external-dns,
+              # promotion). There is no reconciling operator — this block IS the
+              # source of truth, so a cold boot converges the same config
+              # natively. Adding a consumer later means editing this block and
+              # re-initializing (wipe raft data, keep the seal key and audit
+              # PVCs, re-import from custody) — see the static-seal runbook.
               initialize "guardian_self_init" {
                 request "enable_kubernetes_auth" {
                   operation = "update"
@@ -361,11 +364,32 @@ spec:
                   }
                 }
 
+                request "write_promotion_policy" {
+                  operation = "update"
+                  path = "sys/policies/acl/guardian-promotion"
+                  data = {
+                    policy = "path \"kv/data/guardian/guardian-mgmt/company-site/promotion/github-app\" {\n  capabilities = [\"read\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/company-site/promotion/github-app\" {\n  capabilities = [\"read\"]\n}\n"
+                  }
+                }
+
+                request "write_promotion_role" {
+                  operation = "update"
+                  path = "auth/kubernetes/role/guardian-promotion"
+                  data = {
+                    bound_service_account_names = ["promotion-secrets"]
+                    bound_service_account_namespaces = ["company-site"]
+                    audience = "openbao"
+                    token_policies = ["guardian-promotion"]
+                    token_ttl = "3600"
+                    token_max_ttl = "3600"
+                  }
+                }
+
                 request "write_secret_importer_policy" {
                   operation = "update"
                   path = "sys/policies/acl/guardian-secret-importer"
                   data = {
-                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-guardian/dns/external-dns\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/data/guardian/guardian-mgmt/operator/cloudflare\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/data/guardian/guardian-mgmt/operator/r2\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"auth/kubernetes/role/guardian-secret-importer\" {\n  capabilities = [\"delete\"]\n}\n\npath \"sys/policies/acl/guardian-secret-importer\" {\n  capabilities = [\"delete\"]\n}\n"
+                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-guardian/dns/external-dns\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/data/guardian/guardian-mgmt/operator/cloudflare\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/data/guardian/guardian-mgmt/operator/r2\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/data/guardian/guardian-mgmt/company-site/promotion/github-app\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"auth/kubernetes/role/guardian-secret-importer\" {\n  capabilities = [\"delete\"]\n}\n\npath \"sys/policies/acl/guardian-secret-importer\" {\n  capabilities = [\"delete\"]\n}\n"
                   }
                 }
 
