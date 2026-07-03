@@ -134,7 +134,10 @@ jobs:
           ISSUER: https://token.actions.githubusercontent.com
         run: |
           img="ghcr.io/guardian-intelligence/company-site@${{ steps.digest.outputs.digest }}"
-          cosign verify --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" "$img"
+          cosign verify --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" "$img" > /dev/null
+          # stdout is the multi-MB DSSE payload on a single line, which stalls
+          # the Actions log streamer indefinitely; the verification summary
+          # goes to stderr and stays in the log.
           cosign verify-attestation --type spdxjson \
-            --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" "$img"
+            --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" "$img" > /dev/null
 
