@@ -53,6 +53,24 @@ ln -s "$$node_modules_root" node_modules
 rm -rf .output
 "$$node" "$$vp" build
 test -s .output/server/index.mjs
+# Nitro's output carries the only nondeterminism in the image: nitro.json
+# stamps the build wall-clock, the server bundle embeds static-asset "mtime"
+# metadata, and the public-assets manifest's key order follows readdir order.
+# Normalize timestamps to the epoch (matching the tar's --mtime) and sort the
+# manifest keys so the same sources always produce the same digest — the
+# company-site-image workflow enforces pin == built digest on that basis.
+sed -i 's/"date": "[^"]*"/"date": "1970-01-01T00:00:00.000Z"/' .output/nitro.json
+find .output/server -name '*.mjs' -exec sed -i 's/"mtime": "[^"]*"/"mtime": "1970-01-01T00:00:00.000Z"/g' {} +
+"$$node" -e '
+const fs = require("fs");
+const p = ".output/server/index.mjs";
+let s = fs.readFileSync(p, "utf8");
+const m = s.match(/var public_assets_data_default = (\\{[\\s\\S]*?\\n\\});/);
+if (!m) throw new Error("public assets manifest not found in " + p);
+const obj = JSON.parse(m[1]);
+const sorted = Object.fromEntries(Object.keys(obj).sort().map((k) => [k, obj[k]]));
+fs.writeFileSync(p, s.replace(m[1], JSON.stringify(sorted, null, "\t")));
+'
 tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
   --transform 's#^\\./#app/#' \
   -cf "$$execroot/$@" -C .output .
