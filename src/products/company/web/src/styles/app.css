@@ -270,8 +270,12 @@
   );
 }
 
+/* No paint containment here: WebKit refuses to paint SVG url() filters (the
+   letters hand filter) on descendants of a contain:paint subtree — iPhones
+   rendered the whole continuation blank. The unfurl already clips itself via
+   its clip-path keyframes, so containment only ever bought the brief
+   translateY overhang, which opacity 0 covers. */
 [data-letter-continuation] {
-  contain: paint;
   transform-origin: top left;
 }
 

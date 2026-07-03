@@ -114,19 +114,27 @@ export function formatLetterSalutation(letter: Letter): string {
 export function LetterDate({
   letter,
   scale = "post",
+  morph = true,
 }: {
   readonly letter: Letter;
   readonly scale?: "index" | "post";
+  readonly morph?: boolean;
 }) {
   // On the letter page the date box is exactly two ruled pitches (four graph
   // squares) so the masthead stack advances in whole rules and the body's
   // baselines land in registration with the graph below it. The header size
   // is cap-anchored — capitals exactly two squares tall (--letters-date-size,
-  // fonts.ts), the way the pages always dated themselves.
+  // fonts.ts), the way the pages always dated themselves. The vw cap only
+  // bites on phones (below ~625px the two-square size would wrap the header
+  // to a second written line); the box stays two pitches either way, so the
+  // registration below is untouched.
   const metrics =
     scale === "index"
       ? { fontSize: "clamp(34px,8vw,40px)", lineHeight: "52px" }
-      : { fontSize: "var(--letters-date-size)", lineHeight: "calc(var(--letters-line-pitch)*2)" };
+      : {
+          fontSize: "min(var(--letters-date-size), 9.5vw)",
+          lineHeight: "calc(var(--letters-line-pitch)*2)",
+        };
 
   return (
     <p
@@ -140,7 +148,7 @@ export function LetterDate({
     >
       <span
         data-letter-transition-slot="date"
-        style={{ ...transitionStyle(letter, "date"), display: "inline-block" }}
+        style={{ ...(morph ? transitionStyle(letter, "date") : null), display: "inline-block" }}
       >
         {formatLetterDateWithWeekday(letter.publishedAt)}
       </span>
@@ -148,7 +156,13 @@ export function LetterDate({
   );
 }
 
-export function LetterSalutation({ letter }: { readonly letter: Letter }) {
+export function LetterSalutation({
+  letter,
+  morph = true,
+}: {
+  readonly letter: Letter;
+  readonly morph?: boolean;
+}) {
   // Dispatches open straight into the body under the date — they were never
   // written to a title. Only received correspondence opens with a salutation
   // ("Dear Shovon,"). The frontmatter title still drives the <head> + OG card.
@@ -168,7 +182,10 @@ export function LetterSalutation({ letter }: { readonly letter: Letter }) {
     >
       <span
         data-letter-transition-slot="salutation"
-        style={{ ...transitionStyle(letter, "salutation"), display: "inline-block" }}
+        style={{
+          ...(morph ? transitionStyle(letter, "salutation") : null),
+          display: "inline-block",
+        }}
       >
         {formatLetterSalutation(letter)}
       </span>
@@ -179,9 +196,11 @@ export function LetterSalutation({ letter }: { readonly letter: Letter }) {
 export function LetterExcerpt({
   letter,
   excerpt,
+  morph = true,
 }: {
   readonly letter: Letter;
   readonly excerpt: string;
+  readonly morph?: boolean;
 }) {
   if (!excerpt) return null;
   return (
@@ -191,7 +210,7 @@ export function LetterExcerpt({
       data-letter-transition-slot="body"
       className={`${LETTER_BODY_CLASS} mt-7`}
       style={{
-        ...transitionStyle(letter, "body"),
+        ...(morph ? transitionStyle(letter, "body") : null),
         marginBottom: 0,
         maxHeight: "calc(var(--letters-line-pitch) * 4)",
         overflow: "hidden",
