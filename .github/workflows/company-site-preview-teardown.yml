@@ -25,6 +25,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      deployments: write # retire the pr-<N> environment's deployments
     env:
       PR: ${{ github.event.pull_request.number }}
     steps:
@@ -56,6 +57,19 @@ jobs:
           done
           echo "::error::could not push to previews branch after 5 attempts" >&2
           exit 1
+
+      - name: Retire GitHub deployments
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Deleting an environment needs repo-admin, which GITHUB_TOKEN never
+          # gets — inactive statuses are the API-shaped way to say "gone".
+          gh api "repos/${GITHUB_REPOSITORY}/deployments?environment=pr-${PR}" --paginate \
+            --jq '.[].id' | while read -r id; do
+            gh api "repos/${GITHUB_REPOSITORY}/deployments/${id}/statuses" \
+              -f state=inactive -f description="preview torn down" > /dev/null
+            echo "deployment ${id}: inactive"
+          done
 
       - name: Update sticky preview comment
         env:
