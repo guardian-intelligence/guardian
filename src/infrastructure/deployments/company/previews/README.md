@@ -9,12 +9,15 @@ close.
 
 1. `.github/workflows/company-site-preview.yml` runs on the PR: builds the
    image with Bazel, pushes it to ghcr.io **by digest only** (no tag — the
-   `edge` tag stays owned by merges to main), renders per-PR manifests, and
-   commits them to the `previews` orchestration branch under
-   `manifests/pr-<N>/`.
+   `edge` tag stays owned by merges to main), and commits a **values-only
+   HelmRelease** (`manifests/pr-<N>.yaml`: pr number, image digest, head sha)
+   to the `previews` orchestration branch. The manifest shape lives in the
+   reviewed chart here on main (`./chart`).
 2. Flux (`guardian-company-previews` in base/flux/sync.yaml) watches the
    `previews` branch and applies `manifests/` into `tenant-guardian-previews`,
-   pruning whatever the branch no longer declares.
+   pruning whatever the branch no longer declares; helm-controller renders
+   each release from the chart (same cross-namespace GitRepository sourceRef
+   pattern Cozystack itself uses for tenant apps).
 3. Each preview ships a `DNSEndpoint` CR; external-dns (CRD source) creates a
    Cloudflare-proxied CNAME `pr-<N>` → apex, so TLS terminates at the
    Cloudflare edge exactly like prod (single-label hostname keeps it inside
@@ -26,10 +29,11 @@ close.
    `manifests/pr-<N>/` from the `previews` branch; Flux prunes the workload
    and external-dns (policy: sync) removes the DNS record.
 
-This directory holds the static, trust-sensitive half that lives on `main`:
-the Cilium policy pair admitting the tenant-root ingress controller to
-preview pods. The per-PR halves live only on the `previews` branch and are
-entirely machine-managed — do not edit that branch by hand.
+This directory holds the halves that live on `main`: the Cilium policy pair
+admitting the tenant-root ingress controller to preview pods (trust-sensitive)
+and the `company-site-preview` chart (the reviewed manifest shape). The per-PR
+HelmReleases live only on the `previews` branch and are entirely
+machine-managed — do not edit that branch by hand.
 
 Trust note: anything pushed to the `previews` branch is applied by Flux into
 `tenant-guardian-previews` (constrained by the Kustomization's

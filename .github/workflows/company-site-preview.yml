@@ -129,7 +129,8 @@ jobs:
           else
             headline="⏳ **Preview publishing:** https://${HOST} — manifests are on the \`previews\` branch; the URL goes live once Flux and external-dns converge (requires the previews infra on \`main\`)."
           fi
-          body="$(printf '%s\n%s\n\n| | |\n|---|---|\n| Commit | %s |\n| Image | \`%s\` |\n| Updated | %s |\n\n_Rebuilds on every push; torn down when the PR closes._' \
+          # Backticks are literal inside the single-quoted format string.
+          body="$(printf '%s\n%s\n\n| | |\n|---|---|\n| Commit | %s |\n| Image | `%s` |\n| Updated | %s |\n\n_Rebuilds on every push; torn down when the PR closes._' \
             "$marker" "$headline" "$HEAD_SHA" "ghcr.io/guardian-intelligence/company-site@${DIGEST}" "$(date -u +%FT%TZ)")"
           existing="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --paginate \
             --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -1)"

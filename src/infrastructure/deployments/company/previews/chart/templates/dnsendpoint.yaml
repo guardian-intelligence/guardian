@@ -1,0 +1,18 @@
+# external-dns (sources: [crd]) turns this into a Cloudflare-proxied CNAME to
+# the apex: same edge cert, same origins, zero per-PR Terraform. policy: sync
+# deletes the record when the release is uninstalled on teardown.
+apiVersion: externaldns.k8s.io/v1alpha1
+kind: DNSEndpoint
+metadata:
+  name: {{ include "preview.name" . }}
+  labels:
+    {{- include "preview.labels" . | nindent 4 }}
+spec:
+  endpoints:
+    - dnsName: {{ include "preview.host" . }}
+      recordType: CNAME
+      targets:
+        - {{ .Values.domain }}
+      providerSpecific:
+        - name: external-dns.alpha.kubernetes.io/cloudflare-proxied
+          value: "true"
