@@ -197,9 +197,19 @@
     var(--letters-grid-major, 170px) var(--letters-grid-major, 170px),
     var(--letters-grid-minor, 17px) var(--letters-grid-minor, 17px),
     var(--letters-grid-minor, 17px) var(--letters-grid-minor, 17px);
+}
+
+/* The zone wrapper carries the multiply into the page, not the grid child:
+   the wrapper's zone mask makes it an isolated group, so a blend on the
+   child would only composite against the group's own transparency and the
+   rules would paint as flat grey over the ink. */
+.letters-paper-zone {
   mix-blend-mode: multiply;
 }
 
+/* Major-rule alphas are mirrored by GRID_MAJOR_ALPHA in routes/letters/
+   route.tsx (the curve-fade mask solves its multiply correction against
+   them). Keep the two in step. */
 .letters-paper-grid--text {
   --letters-grid-minor-alpha: 0.0195;
   --letters-grid-major-alpha: 0.039;
