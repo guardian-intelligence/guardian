@@ -1,0 +1,70 @@
+# Removes a PR's preview when it closes (merged or not): deletes
+# manifests/pr-<N>/ from the `previews` branch, so Flux prunes the workload
+# and external-dns (policy: sync) deletes the pr-<N> DNS record.
+name: company-site-preview-teardown
+
+on:
+  pull_request:
+    types: [closed]
+
+concurrency:
+  group: company-site-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  teardown:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      PR: ${{ github.event.pull_request.number }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Check out previews branch
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: previews
+          path: .previews
+
+      - name: Remove preview manifests
+        run: |
+          if [ ! -d ".previews/manifests/pr-${PR}" ]; then
+            echo "no preview for pr-${PR}; nothing to tear down"
+            exit 0
+          fi
+          .github/scripts/company-site-preview.sh remove .previews "$PR"
+          cd .previews
+          git config user.name "company-site-preview[bot]"
+          git config user.email "actions@github.com"
+          git add -A
+          git commit -m "preview: tear down pr-${PR}"
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:previews; then exit 0; fi
+            echo "push rejected (attempt ${attempt}), rebasing"
+            git fetch origin previews
+            git rebase origin/previews
+          done
+          echo "::error::could not push to previews branch after 5 attempts" >&2
+          exit 1
+
+      - name: Update sticky preview comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          marker="<!-- company-site-preview -->"
+          body="$(printf '%s\n🧹 Preview torn down (PR closed) — %s' "$marker" "$(date -u +%FT%TZ)")"
+          existing="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --paginate \
+            --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -1)"
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" -f body="$body" > /dev/null
+          fi

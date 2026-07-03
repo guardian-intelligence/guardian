@@ -1,0 +1,55 @@
+# Preview deploys live in tenant-guardian-previews (see stage-tenants.yaml)
+# and are reached through the same tenant-root ingress controller as prod.
+# The Cozystack tenant chart's generated isolation does not admit tenant-root
+# into the stage tenant, so this is the previews twin of
+# ../prod/root-ingress-networkpolicy.yaml — one static pair covering every
+# preview pod (they all carry app.kubernetes.io/name: company-site-preview),
+# so per-PR manifests on the `previews` branch never need to ship policy.
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-guardian-previews-allow-root-ingress-company-site
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: company
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-guardian-previews
+      k8s:app.kubernetes.io/name: company-site-preview
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            k8s:app.kubernetes.io/name: ingress-nginx
+            k8s:app.kubernetes.io/component: controller
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+---
+# Egress half, same reasoning as the prod pair: tenant-root's generated egress
+# policy only admits destinations labeled tenant.cozystack.io/tenant-root, so
+# admit the root ingress controller outbound to the preview pods.
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-root-ingress-egress-company-site-previews
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: company
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-root
+      k8s:app.kubernetes.io/name: ingress-nginx
+      k8s:app.kubernetes.io/component: controller
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-guardian-previews
+            k8s:app.kubernetes.io/name: company-site-preview
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP

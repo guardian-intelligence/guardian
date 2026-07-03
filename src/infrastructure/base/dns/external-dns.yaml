@@ -37,6 +37,10 @@ spec:
       - crd
     managedRecordTypes:
       - A
+      # CNAME: company-site PR previews publish DNSEndpoint CRs whose pr-<N>
+      # records alias the apex (proxied at Cloudflare, so the edge cert and
+      # origin routing are identical to prod).
+      - CNAME
     policy: sync
     registry: txt
     txtOwnerId: guardian-mgmt-ash
