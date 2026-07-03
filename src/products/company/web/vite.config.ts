@@ -50,6 +50,16 @@ const lettersMarkdown = {
 };
 
 export default defineConfig({
+  build: {
+    rollupOptions: {
+      // Rolldown's debug //#region comments embed relative paths into the
+      // Bazel output base, which differs per machine and lands in the
+      // content-hashed chunk names — breaking reproducible image digests.
+      // The company-site-image workflow enforces pin == built digest, which
+      // requires the build to be a pure function of the sources.
+      experimental: { attachDebugInfo: "none" },
+    },
+  },
   server: {
     host: "127.0.0.1",
     port: 4252,
