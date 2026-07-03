@@ -60,8 +60,10 @@ digest, which makes it *eligible* for promotion — nothing more. Promotion
 is a separate pin-only PR that bumps the manifest pin and the matching
 `images.lock` entry together (the conformance tests force the pair). CI
 verifies exactly two things on that PR: the proposed digest carries a
-cosign signature by the canonical image identity above (cheap — seconds,
-no rebuild), and the lock conformance tests still pass. The promoter is
+cosign signature by the canonical image identity above (the verification
+itself takes seconds and needs no rebuild, though today's workflow still
+builds on pin-only PRs — trimming that is the latency lever), and the lock
+conformance tests still pass. The promoter is
 untrusted by construction: branch protection plus these checks mean
 nothing reaches a pin that CI did not sign from main history, whether the
 PR was opened by a human or by the promotion controller (Kargo; opened by

@@ -195,9 +195,13 @@ would only relocate the root of trust, not remove it.
    registries (`company-site` on ghcr.io, pushed and cosign-signed by CI on
    every merge that changes it), so no registry contents need capturing and a
    steady-uplink cold boot needs no bootstrap mirror. If a pinned digest has
-   vanished upstream, recovery is rebuild-from-source
-   (`bazelisk build //src/products/company/site:image`) and repin — CI refuses
-   to merge a content change whose digest pin is stale.
+   vanished upstream, recovery is a rebuild through main: re-run the last
+   main-push run of `company-site-image` (or merge a trivial content
+   change), CI rebuilds, pushes, and cosign-signs a fresh digest, then a
+   pin-only PR
+   promotes it — the provenance gate only accepts digests signed by the
+   canonical CI identity, so a workstation-built digest cannot be pinned
+   (see docs/supply-chain-design.md, "Promotion: how digests move").
 2. **Pre-drill PR on main**: fresh seal fingerprint, any repins,
    `images.lock` current (`//src/infrastructure/tests:talm_render_test`
    enforces rendered-refs ⊆ lock). Flux converges from main — nothing lands on
