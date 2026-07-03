@@ -45,3 +45,24 @@ spec:
   ingress: false
   monitoring: false
   seaweedfs: false
+---
+# previews is not a promotion stage: it holds ephemeral per-PR deployments of
+# company-site, written to the `previews` branch by CI and reconciled by the
+# guardian-company-previews Kustomization. Same isolation posture as the
+# stages; the tenant-root ingress is admitted by the Cilium pair in
+# deployments/company/previews.
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Tenant
+metadata:
+  name: previews
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: previews
+    guardian.dev/tenant-id: gi-guardian-previews
+spec:
+  host: previews.guardianintelligence.org
+  etcd: false
+  ingress: false
+  monitoring: false
+  seaweedfs: false

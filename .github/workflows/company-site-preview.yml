@@ -1,0 +1,141 @@
+# Vercel-style preview deploys for company-site. On every push to a PR that
+# touches the site: build the image, push it to ghcr.io by digest (no tag),
+# render per-PR manifests onto the `previews` orchestration branch, wait for
+# Flux + external-dns to converge, and pin a sticky comment with the URL.
+# Teardown on close lives in company-site-preview-teardown.yml; the static
+# cluster half is documented in src/infrastructure/deployments/company/previews.
+name: company-site-preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "src/products/company/**"
+      - "src/viteplus-monorepo/**"
+      - ".github/workflows/company-site-preview.yml"
+      - ".github/scripts/company-site-preview.sh"
+      - "MODULE.bazel"
+      - "MODULE.bazel.lock"
+
+# One preview pipeline per PR; a new push supersedes the in-flight run.
+concurrency:
+  group: company-site-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  preview:
+    # Fork PRs get no preview: the job pushes to ghcr and to the previews
+    # branch, which is deploy access — same-repo PRs only.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write # push rendered manifests to the previews branch
+      packages: write # push the preview image digest to ghcr.io
+      pull-requests: write # sticky preview comment
+    env:
+      PR: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      HOST: pr-${{ github.event.pull_request.number }}.guardianintelligence.org
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - uses: bazelbuild/setup-bazelisk@b39c379c82683a5f25d34f0d062761f62693e0b2 # v3.0.0
+
+      - name: Build image
+        run: bazelisk build //src/products/company/site:image
+
+      - name: Read built digest
+        id: digest
+        run: |
+          digest="$(jq -r '.manifests[0].digest' bazel-bin/src/products/company/web/image/index.json)"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "built $digest"
+
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Push image (digest only)
+        run: bazelisk run //src/products/company/site:push_preview
+
+      - name: Check out previews branch
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: previews
+          path: .previews
+
+      - name: Render preview manifests and push to previews branch
+        env:
+          DIGEST: ${{ steps.digest.outputs.digest }}
+        run: |
+          .github/scripts/company-site-preview.sh render .previews "$PR" "$DIGEST" "$HEAD_SHA"
+          cd .previews
+          git config user.name "company-site-preview[bot]"
+          git config user.email "actions@github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "previews branch already current"
+            exit 0
+          fi
+          git commit -m "preview: pr-${PR} @ ${HEAD_SHA}"
+          # Serialize against concurrent preview pipelines for other PRs.
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:previews; then exit 0; fi
+            echo "push rejected (attempt ${attempt}), rebasing"
+            git fetch origin previews
+            git rebase origin/previews
+          done
+          echo "::error::could not push to previews branch after 5 attempts" >&2
+          exit 1
+
+      - name: Wait for preview to serve this commit
+        id: converge
+        continue-on-error: true
+        run: |
+          echo "polling https://${HOST} for guardian:commit-sha == ${HEAD_SHA}"
+          deadline=$((SECONDS + 720))
+          while [ $SECONDS -lt $deadline ]; do
+            served="$(curl -fsSL --max-time 10 "https://${HOST}/" 2>/dev/null \
+              | grep -o 'name="guardian:commit-sha" content="[a-f0-9]*"' \
+              | grep -o '[a-f0-9]\{40\}' || true)"
+            if [ "$served" = "$HEAD_SHA" ]; then
+              echo "live: https://${HOST}"
+              echo "status=live" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "…serving '${served:-nothing yet}' ($((deadline - SECONDS))s left)"
+            sleep 15
+          done
+          echo "status=pending" >> "$GITHUB_OUTPUT"
+          echo "::warning::preview did not converge within 12m — Flux/DNS may still be settling, or the previews infra is not on main yet"
+          exit 1
+
+      - name: Post sticky preview comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DIGEST: ${{ steps.digest.outputs.digest }}
+          STATUS: ${{ steps.converge.outputs.status || 'pending' }}
+        run: |
+          marker="<!-- company-site-preview -->"
+          if [ "$STATUS" = "live" ]; then
+            headline="✅ **Preview live:** https://${HOST}"
+          else
+            headline="⏳ **Preview publishing:** https://${HOST} — manifests are on the \`previews\` branch; the URL goes live once Flux and external-dns converge (requires the previews infra on \`main\`)."
+          fi
+          # Backticks are literal inside the single-quoted format string.
+          body="$(printf '%s\n%s\n\n| | |\n|---|---|\n| Commit | %s |\n| Image | `%s` |\n| Updated | %s |\n\n_Rebuilds on every push; torn down when the PR closes._' \
+            "$marker" "$headline" "$HEAD_SHA" "ghcr.io/guardian-intelligence/company-site@${DIGEST}" "$(date -u +%FT%TZ)")"
+          existing="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --paginate \
+            --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -1)"
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" -f body="$body" > /dev/null
+          else
+            gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" -f body="$body" > /dev/null
+          fi
