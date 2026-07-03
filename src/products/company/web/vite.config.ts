@@ -49,6 +49,20 @@ const lettersMarkdown = {
   },
 };
 
+// TanStack Start's generated route manifest embeds absolute filePath entries
+// for the route sources. Those paths differ per machine (workstation vs CI
+// runner) and feed the manifest chunk's content hash, breaking reproducible
+// image digests — and they point at .tsx sources that don't exist in the
+// container anyway. Relativize them to the package root before bundling.
+const stripRouteManifestPaths = {
+  name: "company:strip-route-manifest-paths",
+  enforce: "post" as const,
+  transform(code: string, id: string) {
+    if (!id.includes("tanstack-start-manifest")) return null;
+    return code.replace(/("filePath":\s*")[^"]*\/src\/products\/company\/web\//g, "$1");
+  },
+};
+
 export default defineConfig({
   build: {
     rollupOptions: {
@@ -70,6 +84,7 @@ export default defineConfig({
   },
   plugins: [
     lettersMarkdown,
+    stripRouteManifestPaths,
     tailwindcss(),
     tanstackStart({ srcDirectory: "src" }),
     viteReact(),

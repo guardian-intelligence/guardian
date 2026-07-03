@@ -61,12 +61,13 @@ test -s .output/server/index.mjs
 # company-site-image workflow enforces pin == built digest on that basis.
 sed -i 's/"date": "[^"]*"/"date": "1970-01-01T00:00:00.000Z"/' .output/nitro.json
 find .output/server -name '*.mjs' -exec sed -i 's/"mtime": "[^"]*"/"mtime": "1970-01-01T00:00:00.000Z"/g' {} +
-# Machine-specific bazel paths in chunk contents (and therefore in the
+# Machine-specific absolute paths in chunk contents (and therefore in the
 # content-hashed chunk names) are prevented at the source: vite.config.ts
-# sets rolldown's experimental.attachDebugInfo to "none". Guard that it
-# stays effective — paths baked in at hash time cannot be scrubbed here.
-if grep -rl "execroot/_main" .output/server >/dev/null 2>&1; then
-  echo "machine-specific bazel paths leaked into the server bundle" >&2
+# sets rolldown's experimental.attachDebugInfo to "none" and relativizes the
+# TanStack route-manifest filePaths. Guard that both stay effective — paths
+# baked in at hash time cannot be scrubbed here.
+if grep -rlE 'execroot/_main|"filePath": "/' .output/server >/dev/null 2>&1; then
+  echo "machine-specific absolute paths leaked into the server bundle" >&2
   exit 1
 fi
 "$$node" -e '
