@@ -289,10 +289,14 @@ spec:
   wait: true
   timeout: 10m
 ---
-# --- company-site PR previews ------------------------------------------------
-# The static half (Cilium admits for the previews tenant) comes from main like
-# every other slice. The per-PR half is read from the machine-managed
-# `previews` branch below. See deployments/company/previews/README.md.
+# company-site PR previews: static cluster half (Cilium admits for the
+# previews tenant) plus the previews-branch source objects, both declared in
+# deployments/company/previews. The GitRepository/Kustomization pair that
+# watches the machine-managed `previews` branch lives THERE, not here:
+# sync.yaml sources must all be flippable to the dark-uplink OCI mirror
+# (TestFluxSourceParameterizationConformance), and the previews source is
+# deliberately connected-only — in dark mode it starves alone, and nothing
+# depends on it. See deployments/company/previews/README.md.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -318,43 +322,4 @@ spec:
     - name: guardian-mgmt-dns-controller
   prune: true
   wait: true
-  timeout: 5m
----
-# Per-PR preview manifests, written by .github/workflows/company-site-preview*
-# to the `previews` branch. Deliberately pinned to the GitHub GitRepository
-# (never the dark-uplink OCI source): previews are a connected-mode
-# convenience, and in dark mode this Kustomization simply fails alone —
-# nothing dependsOn it.
-apiVersion: source.toolkit.fluxcd.io/v1
-kind: GitRepository
-metadata:
-  name: guardian-previews
-  namespace: cozy-fluxcd
-spec:
-  interval: 30s
-  url: https://github.com/guardian-intelligence/guardian
-  ref:
-    branch: previews
----
-apiVersion: kustomize.toolkit.fluxcd.io/v1
-kind: Kustomization
-metadata:
-  name: guardian-company-previews
-  namespace: cozy-fluxcd
-spec:
-  interval: 1m
-  retryInterval: 30s
-  path: ./manifests
-  sourceRef:
-    kind: GitRepository
-    name: guardian-previews
-  # Guardrail: the previews branch is CI-written; force every namespaced
-  # object it declares into the previews tenant regardless of what it says.
-  targetNamespace: tenant-guardian-previews
-  dependsOn:
-    - name: guardian-company-previews-infra
-  prune: true
-  # A crash-looping preview must not wedge reconciliation of later previews;
-  # health is reported per-PR by the workflow's URL poll instead.
-  wait: false
   timeout: 5m

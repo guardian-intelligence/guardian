@@ -3,6 +3,7 @@ filegroup(
     srcs = [
         "kustomization.yaml",
         "preview-networkpolicy.yaml",
+        "previews-source.yaml",
     ],
     visibility = ["//visibility:public"],
 )
