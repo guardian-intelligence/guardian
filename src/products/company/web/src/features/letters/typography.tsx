@@ -170,9 +170,11 @@ export function LetterDate({
 // ordinal raised the way it was always written after the day number.
 function LetterDateHands({ iso }: { readonly iso: string }) {
   const parts = letterDateParts(iso);
+  // Weight 400, not the body's 500: at header size the stems read like wood
+  // type at 500, and the pages' careful print was still a thin pen line.
   const printStyle = {
     fontFamily: "var(--treatment-body-font)",
-    fontWeight: "var(--letters-body-weight)" as const,
+    fontWeight: 400,
     letterSpacing: "0.08em",
   };
   return (
