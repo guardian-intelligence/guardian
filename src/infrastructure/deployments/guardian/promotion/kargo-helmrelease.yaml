@@ -1,0 +1,107 @@
+# Kargo — the promotion controller. It moves digest pins into Git (bump the
+# manifest pin, open a PR); the provenance gate in company-site-image.yml and
+# branch protection are the enforcement, so Kargo is an untrusted bot by
+# construction (docs/supply-chain-design.md, "Promotion: how digests move").
+#
+# Deliberately headless and minimal: the API server (UI/CLI) is disabled —
+# Projects/Warehouses/Stages are GitOps-managed, so the API's secret
+# management and admin account would only add attack surface. Argo CD and
+# Argo Rollouts integrations are disabled (we run Flux; verification gates
+# live in CI on the promotion PR, not in AnalysisRuns). The external webhooks
+# receiver server is disabled until the promotion-latency work wires ghcr
+# push events to it; until then Warehouses poll.
+#
+# Git credentials (GitHub App guardian-promotions) arrive out-of-band as a
+# Secret labeled kargo.akuity.io/cred-type=git in the project namespace —
+# never in Git. Until that Secret exists, promotions fail and retry;
+# Warehouse discovery of the public company-site package needs no creds.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: kargo-chart
+  namespace: kargo
+spec:
+  interval: 1h
+  url: oci://ghcr.io/akuity/kargo-charts/kargo
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: extract
+  ref:
+    tag: 1.10.8
+    digest: sha256:3090ccc64bc89a04138be187a4dbb7cd4be4a10a29cc6c7f336e16d7770c985c
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kargo
+  namespace: kargo
+spec:
+  interval: 10m
+  timeout: 5m
+  chartRef:
+    kind: OCIRepository
+    name: kargo-chart
+  install:
+    crds: Create
+    remediation:
+      retries: -1
+  upgrade:
+    crds: CreateReplace
+  values:
+    api:
+      enabled: false
+    externalWebhooksServer:
+      enabled: false
+    controller:
+      argocd:
+        integrationEnabled: false
+      rollouts:
+        integrationEnabled: false
+  postRenderers:
+    - kustomize:
+        # Single-image design: controller, management controller, webhooks
+        # server, and garbage collector all run ghcr.io/akuity/kargo.
+        images:
+          - name: ghcr.io/akuity/kargo
+            digest: sha256:b55c1a7ee61ba7277cf1d5c02cef0982e208c6bb1bdeaad10868ccbbde93f17a
+        # The chart renders no securityContext at all; the kargo namespace
+        # enforces PodSecurity restricted, which requires these fields
+        # declared. No readOnlyRootFilesystem: the controller clones git
+        # repos onto its filesystem during promotions.
+        patches:
+          - target:
+              kind: Deployment
+              labelSelector: app.kubernetes.io/name=kargo
+            patch: |
+              - op: add
+                path: /spec/template/spec/securityContext
+                value:
+                  runAsNonRoot: true
+                  runAsUser: 65532
+                  runAsGroup: 65532
+                  seccompProfile:
+                    type: RuntimeDefault
+              - op: add
+                path: /spec/template/spec/containers/0/securityContext
+                value:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop: ["ALL"]
+          - target:
+              kind: CronJob
+              labelSelector: app.kubernetes.io/name=kargo
+            patch: |
+              - op: add
+                path: /spec/jobTemplate/spec/template/spec/securityContext
+                value:
+                  runAsNonRoot: true
+                  runAsUser: 65532
+                  runAsGroup: 65532
+                  seccompProfile:
+                    type: RuntimeDefault
+              - op: add
+                path: /spec/jobTemplate/spec/template/spec/containers/0/securityContext
+                value:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop: ["ALL"]
