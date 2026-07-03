@@ -1,11 +1,27 @@
 # images.lock — every OCI artifact a cold guardian-mgmt bootstrap must be able to
 # serve from the workstation mirror. One ref@digest per line; # starts a comment.
 #
-# Derivation (re-run to refresh; CI job to own this is planned):
+# Derivation:
 #   workload section:  kubectl get pods -A -o json -> containerStatuses imageID
+#                      (manual re-scrape; still no CI job, see task #26 -- this
+#                      is the one section that reflects live runtime state, so
+#                      it's a poor fit for a Git-side scrape at all; the plan
+#                      is a live VAP admission backstop instead, not a scraper)
 #   system section:    talosctl images default (pinned talosctl, matches machine.install.image)
-#   artifact section:  cozystack-operator args + OCIRepository status on the live cluster,
-#                      ghcr manifest HEAD for installer/chart digests
+#                      (manual re-scrape; static derivability from the pinned
+#                      talos/kubernetesVersion alone is unconfirmed, not yet automated)
+#   artifact section:  GATED at PR time by oci-ref-drift.yml -- when infra
+#                      YAML changes, CI verifies each Flux OCIRepository's
+#                      pinned tag still resolves to its pinned digest
+#                      upstream (stateless curl+jq, no cluster access) and
+#                      fails with a copy-paste fix on mismatch. No schedule:
+#                      Flux pulls by the pinned digest and never re-resolves
+#                      the tag, so upstream re-tagging cannot affect the
+#                      cluster. See .github/scripts/check-oci-ref-drift.sh.
+#   bootstrap artifacts (Talos installer): fully Git-declared already
+#                      (src/infrastructure/talm/values.yaml `image:`), no
+#                      derivation step needed -- kept in sync by the existing
+#                      TestRenderedImagesDigestPinnedAndLocked conformance test.
 #
 # Invariants (enforced by conformance test, Tier 1):
 #   - every entry is digest-pinned
