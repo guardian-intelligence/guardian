@@ -10,11 +10,14 @@
 #   system section:    talosctl images default (pinned talosctl, matches machine.install.image)
 #                      (manual re-scrape; static derivability from the pinned
 #                      talos/kubernetesVersion alone is unconfirmed, not yet automated)
-#   artifact section:  AUTOMATED as of images-lock-artifact-drift.yml -- daily,
-#                      stateless (curl+jq against each Flux OCIRepository's
-#                      pinned tag, no cluster access), opens a bot PR through
-#                      the same provenance-gated lane as any other digest
-#                      change on drift. See .github/scripts/check-oci-ref-drift.sh.
+#   artifact section:  GATED at PR time by oci-ref-drift.yml -- when infra
+#                      YAML changes, CI verifies each Flux OCIRepository's
+#                      pinned tag still resolves to its pinned digest
+#                      upstream (stateless curl+jq, no cluster access) and
+#                      fails with a copy-paste fix on mismatch. No schedule:
+#                      Flux pulls by the pinned digest and never re-resolves
+#                      the tag, so upstream re-tagging cannot affect the
+#                      cluster. See .github/scripts/check-oci-ref-drift.sh.
 #   bootstrap artifacts (Talos installer): fully Git-declared already
 #                      (src/infrastructure/talm/values.yaml `image:`), no
 #                      derivation step needed -- kept in sync by the existing

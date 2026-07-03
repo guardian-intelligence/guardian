@@ -1,25 +1,29 @@
 #!/usr/bin/env bash
-# Finds every Flux OCIRepository CR in the repo pinned by tag+digest (the
-# "artifact section" of images.lock: Helm/Flux OCI charts pulled by
-# source-controller, not containerd) and checks whether the pinned tag still
-# resolves to the pinned digest upstream. Purely stateless: one anonymous
-# registry-token exchange plus one manifest HEAD per ref, no cluster access,
-# no cosign/oras/crane binary — just curl+jq, already on every GitHub Actions
-# runner. This is the generalization of the manual "artifact section" scrape
-# images.lock's header still describes.
+# Checks every Flux OCIRepository CR pinned by tag+digest (the "artifact
+# section" of images.lock: Helm/Flux OCI charts pulled by source-controller,
+# not containerd) against the upstream registry: does the pinned tag still
+# resolve to the pinned digest? Check-only — never edits anything. Purely
+# stateless: one anonymous registry-token exchange plus one manifest lookup
+# per ref (curl+jq, already on every GitHub Actions runner), no cluster
+# access, no cosign/oras/crane binary.
 #
 #   check-oci-ref-drift.sh <repo-root>
 #
-# On drift, rewrites both the OCIRepository YAML's `digest:` field and the
-# matching images.lock line in place, and prints the list of changed files to
-# stdout (one path per line). Prints nothing and exits 0 if nothing drifted.
-# Exits non-zero only on a genuine lookup failure (network/auth error) —
-# a clean "tag still matches" is not a failure.
-set -euo pipefail
+# Exit 0: every pinned tag resolves to its pinned digest.
+# Exit 1: at least one mismatch — the report names each file and the exact
+#         digest line to paste, so the fix is a copy-paste in the same PR
+#         (the matching images.lock line is separately enforced by the
+#         TestRenderedImagesDigestPinnedAndLocked conformance test).
+# Exit 2: a lookup genuinely failed (network/auth), distinct from a mismatch.
+#
+# This guards one mistake: a human bumping a tag and pasting a wrong or stale
+# digest. It deliberately does NOT watch for upstream re-tagging over time —
+# Flux pulls by the pinned digest and never re-resolves the tag, so a moved
+# tag has no effect on the cluster and is not worth a standing schedule.
+set -uo pipefail
 
 root="${1:?usage: check-oci-ref-drift.sh <repo-root>}"
-lock="$root/src/infrastructure/bootstrap/bundle/images.lock"
-changed_files=()
+mismatches=0
 
 # Anonymous pull token + manifest digest lookup. ghcr.io-shaped (token host
 # == registry host) because every OCIRepository in this repo today points at
@@ -27,7 +31,7 @@ changed_files=()
 # token-endpoint table (docker.io's is auth.docker.io, not docker.io itself).
 resolve_digest() {
   local host="$1" repo="$2" tag="$3" token
-  token="$(curl -fsSL "https://${host}/token?scope=repository:${repo}:pull" | jq -r .token)"
+  token="$(curl -fsSL "https://${host}/token?scope=repository:${repo}:pull" | jq -r .token)" || return 1
   curl -fsSL \
     -H "Authorization: Bearer ${token}" \
     -H "Accept: application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.index.v1+json" \
@@ -37,10 +41,9 @@ resolve_digest() {
 }
 
 while IFS= read -r -d '' file; do
-  # Only files with a Flux OCIRepository CR whose ref pins both tag and
-  # digest qualify — HelmRepository (external-dns.yaml) and the dark-mode
-  # OCIRepository (sync-dark, tracks a branch tip, not a release tag) are
-  # deliberately out of scope.
+  # Only OCIRepository CRs pinning both tag and digest qualify —
+  # HelmRepository (external-dns.yaml) and the dark-mode OCIRepository
+  # (sync-dark, tracks a branch tip, no digest pin) are out of scope.
   grep -q '^kind: OCIRepository$' "$file" || continue
   grep -q '^\s*tag:' "$file" || continue
   grep -q '^\s*digest: sha256:' "$file" || continue
@@ -49,37 +52,31 @@ while IFS= read -r -d '' file; do
   host="${url%%/*}"
   repo="${url#*/}"
   tag="$(grep -m1 '^\s*tag:' "$file" | awk '{print $2}')"
-  pinned_digest="$(grep -m1 '^\s*digest: sha256:' "$file" | awk '{print $2}')"
+  pinned="$(grep -m1 '^\s*digest: sha256:' "$file" | awk '{print $2}')"
 
-  live_digest="$(resolve_digest "$host" "$repo" "$tag")"
-  if [[ -z "$live_digest" ]]; then
-    echo "check-oci-ref-drift: could not resolve $host/$repo:$tag (empty digest)" >&2
-    exit 1
+  live="$(resolve_digest "$host" "$repo" "$tag")"
+  if [[ -z "$live" ]]; then
+    echo "check-oci-ref-drift: ERROR could not resolve ${host}/${repo}:${tag}" >&2
+    exit 2
   fi
 
-  if [[ "$live_digest" == "$pinned_digest" ]]; then
-    echo "check-oci-ref-drift: $repo:$tag unchanged ($pinned_digest)" >&2
+  if [[ "$live" == "$pinned" ]]; then
+    echo "ok: ${repo}:${tag} == ${pinned}" >&2
     continue
   fi
 
-  echo "check-oci-ref-drift: DRIFT $repo:$tag $pinned_digest -> $live_digest" >&2
-  sed -i "s|digest: ${pinned_digest}|digest: ${live_digest}|" "$file"
-  changed_files+=("$file")
-
-  # images.lock lines for artifact-section entries are bare `ref@sha256:...`
-  # (no oci:// scheme, host+repo joined with '/'); update the matching line
-  # by its (repo) prefix so the tag suffix embedded in some refs (e.g.
-  # ":1.10.8@sha256:...") is preserved.
-  if grep -q "^${host}/${repo}:${tag}@sha256:${pinned_digest#sha256:}\$" "$lock"; then
-    sed -i "s|^${host}/${repo}:${tag}@sha256:${pinned_digest#sha256:}\$|${host}/${repo}:${tag}@sha256:${live_digest#sha256:}|" "$lock"
-    changed_files+=("$lock")
-  else
-    echo "check-oci-ref-drift: WARNING no matching images.lock line found for ${host}/${repo}:${tag}@${pinned_digest} — updated $file but could not update images.lock, needs a manual line added" >&2
-  fi
+  mismatches=$((mismatches + 1))
+  cat >&2 <<EOF
+MISMATCH: ${file}
+  ${host}/${repo}:${tag}
+  pinned:   ${pinned}
+  upstream: ${live}
+  fix: set 'digest: ${live}' in this file and update the matching
+       images.lock line to ${host}/${repo}:${tag}@${live}
+EOF
 done < <(find "$root/src/infrastructure" -name '*.yaml' -print0)
 
-if [[ ${#changed_files[@]} -eq 0 ]]; then
-  exit 0
+if [[ $mismatches -gt 0 ]]; then
+  echo "check-oci-ref-drift: $mismatches pinned ref(s) do not match upstream" >&2
+  exit 1
 fi
-
-printf '%s\n' "${changed_files[@]}" | sort -u
