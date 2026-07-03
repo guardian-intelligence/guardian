@@ -65,10 +65,13 @@ const GRID_SQUARE_MOBILE_PX = 14; // below the 40rem (sm) breakpoint
 // The letter page's masthead above the ruled stack, top of sheet → top of the
 // date box — all viewport-independent constants, kept that way on purpose
 // (the page top padding is fixed across breakpoints for exactly this reason):
-// chrome header 45px (edge gap 10 + lockup 22 + rule gap 13, see letters.css)
-// plus page top padding 24px. Below it the masthead advances in whole
-// pitches: date box two, salutation margin + box + body margin one each.
-const MASTHEAD_FIXED_PX = 45 + 24;
+// chrome header 45px (edge gap 10 + lockup 22 + rule gap 13, see letters.css),
+// page top padding 24px, and the return-link row above the date, 52px.
+// Validated against the live DOM at 390/768/1024/1440px viewports (the date's
+// offset from the sheet top measures 121 at all four). Below it the masthead
+// advances in whole pitches: date box two, salutation margin + box + body
+// margin one each — so the phase computed from this stack is exact.
+const MASTHEAD_FIXED_PX = 45 + 24 + 52;
 const MASTHEAD_PITCHES = 5;
 
 interface SheetScale {
