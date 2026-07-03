@@ -22,12 +22,17 @@ name: company-site-image
 
 on:
   pull_request:
+    branches: [main]
   push:
     branches: [main]
+    # web.yaml is deliberately NOT here: a pin-only promotion merge changes
+    # no build input, and rebuilding on it would re-sign and retag `edge` —
+    # if the image ever lost bit-reproducibility again, every promotion
+    # merge would mint a new edge digest and the system would promote
+    # itself in a loop with no breaker.
     paths:
       - "src/products/company/**"
       - "src/viteplus-monorepo/**"
-      - "src/infrastructure/deployments/company/prod/web.yaml"
       - ".github/workflows/company-site-image.yml"
       - "MODULE.bazel"
       - "MODULE.bazel.lock"
@@ -76,9 +81,9 @@ jobs:
                 src/infrastructure/*) conformance=true ;;
               esac
             done < <(git diff --name-only "$base"...HEAD)
-            pinned="$(grep -o "$pin_re" "$web_yaml" | cut -d@ -f2)"
-            base_pinned="$(git show "$base:$web_yaml" | grep -o "$pin_re" | cut -d@ -f2)"
-            [[ "$pinned" != "$base_pinned" ]] && pin=true
+            pinned="$(grep -o "$pin_re" "$web_yaml" | cut -d@ -f2 || true)"
+            base_pinned="$(git show "$base:$web_yaml" 2>/dev/null | grep -o "$pin_re" | cut -d@ -f2 || true)"
+            if [[ "$pinned" != "$base_pinned" ]]; then pin=true; fi
           else
             # push to main / workflow_dispatch: full build path, as before.
             build=true conformance=true
