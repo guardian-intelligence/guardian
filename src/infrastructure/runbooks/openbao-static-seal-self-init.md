@@ -137,12 +137,15 @@ Kubernetes auth role created by self-init. It writes:
 
 The promotion entry carries the `guardian-promotions` GitHub App private key.
 The env file transports it base64-encoded (the file is line-oriented) as
-`github_promotions_app_private_key_b64`; append it from custody without
-printing the value:
+`github_promotions_app_private_key_b64`. Build the import file as a working
+copy from custody without printing any value, then pass it via `--env-file`:
 
 ```sh
+umask 077
+cp ~/guardian-custody/DELETE_ME.env import.env
 printf 'github_promotions_app_private_key_b64=%s\n' \
   "$(base64 -w0 < ~/guardian-custody/github-promotions-app.private-key.pem)" >> import.env
+# then run the import command above with: --env-file import.env
 ```
 
 After successful write and readback verification, the importer deletes the

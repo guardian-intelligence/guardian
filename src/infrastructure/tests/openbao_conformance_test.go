@@ -422,8 +422,9 @@ func TestOpenBaoConsumersUseTLSConformance(t *testing.T) {
 	}
 	assertTextNotContains(t, promotion, "server: http://guardian-openbao", "promotion SecretStore")
 	// Only the App private key is OpenBao-backed; a plaintext key in Git or a
-	// value-bearing template would defeat the custody model.
-	assertTextNotContains(t, promotion, "BEGIN RSA PRIVATE KEY", "promotion SecretStore")
+	// value-bearing template would defeat the custody model. "PRIVATE KEY"
+	// matches every PEM label (PKCS#1, PKCS#8, OpenSSH).
+	assertTextNotContains(t, promotion, "PRIVATE KEY", "promotion SecretStore")
 }
 
 func readText(t *testing.T, path string) string {
