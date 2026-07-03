@@ -75,28 +75,13 @@ export function formatLetterDate(iso: string): string {
   return `${month} ${ordinal(d.getUTCDate())}, ${d.getUTCFullYear()}`;
 }
 
-// The date header's two hands, from the original pages: the weekday in
-// cursive — real care in the capital — then the rest of the date in prim,
-// deliberately-spaced print, the way grade-school assignments were dated:
-// "Friday," in script, "July 4th 2036" all straight and proper (raised
-// ordinal, spaced year digits, no comma — the pages don't carry one), before
-// the body drops back into the everyday hand.
-export function letterDateParts(iso: string): {
-  weekday: string;
-  month: string;
-  day: number;
-  daySuffix: string;
-  year: string;
-} {
+// The header carries the actual day of the week, computed from the letter's
+// date (July 4th, 2036 is a Friday) — the pages always dated themselves with
+// it. One hand for the whole header: the writer's script.
+export function formatLetterDateWithWeekday(iso: string): string {
   const d = new Date(`${iso}T12:00:00Z`);
-  const day = d.getUTCDate();
-  return {
-    weekday: d.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" }),
-    month: d.toLocaleDateString("en-US", { month: "long", timeZone: "UTC" }),
-    day,
-    daySuffix: ordinal(day).slice(String(day).length),
-    year: String(d.getUTCFullYear()),
-  };
+  const weekday = d.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
+  return `${weekday}, ${formatLetterDate(iso)}`;
 }
 
 // The letter's opening, in plain text. The index renders the real first words
@@ -157,37 +142,9 @@ export function LetterDate({
         data-letter-transition-slot="date"
         style={{ ...transitionStyle(letter, "date"), display: "inline-block" }}
       >
-        <LetterDateHands iso={letter.publishedAt} />
+        {formatLetterDateWithWeekday(letter.publishedAt)}
       </span>
     </p>
-  );
-}
-
-// The two hands of the header (see letterDateParts), at ONE font size — on
-// the pages the script day and the print date share the header's two-square
-// cap band. The print carries the letter-spacing a careful hand would put on
-// a blackboard, one more notch of it between the year's digits, and the
-// ordinal raised the way it was always written after the day number.
-function LetterDateHands({ iso }: { readonly iso: string }) {
-  const parts = letterDateParts(iso);
-  // Weight 400, not the body's 500: at header size the stems read like wood
-  // type at 500, and the pages' careful print was still a thin pen line.
-  const printStyle = {
-    fontFamily: "var(--treatment-body-font)",
-    fontWeight: 400,
-    letterSpacing: "0.08em",
-  };
-  return (
-    <>
-      {parts.weekday},{" "}
-      <span style={printStyle}>
-        {parts.month} {parts.day}
-        <span style={{ fontSize: "0.55em", position: "relative", top: "-0.5em" }}>
-          {parts.daySuffix}
-        </span>{" "}
-        <span style={{ letterSpacing: "0.22em", marginLeft: "0.1em" }}>{parts.year}</span>
-      </span>
-    </>
   );
 }
 
