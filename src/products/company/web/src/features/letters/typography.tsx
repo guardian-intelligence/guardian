@@ -1,5 +1,6 @@
 import type { Letter } from "~/content/letters";
 import { lettersSignatureFont } from "~/features/letters/fonts";
+import { InkText } from "~/features/letters/ink-text";
 import { syncLetterContinuationMetrics } from "~/features/letters/transitions.intent";
 import { transitionStyle } from "~/features/letters/transitions";
 
@@ -16,18 +17,24 @@ export const LETTER_POST_PAGE_PADDING_CLASS = "pb-24 pt-4 sm:pb-28 sm:pt-5 md:pb
 // letter — so the sheet opens and closes in the writer's own script.
 const LETTER_DATE_CLASS = "text-[var(--treatment-ink)]";
 
+// Weight comes from --letters-body-weight (fonts.ts, the single source of
+// truth) everywhere the letter's hand appears — salutation, index excerpt,
+// body — so the index can never drift thinner than the page it opens into.
+// (The old font-normal here did exactly that: a 400 excerpt against the 500
+// body. The stale 'opsz'/'SOFT' variation settings were Fraunces axes;
+// Crimson Pro carries neither.)
 const LETTER_SALUTATION_CLASS =
-  "font-display font-normal text-[var(--treatment-ink)] [font-variation-settings:'opsz'_18,'SOFT'_0]";
+  "font-display [font-weight:var(--letters-body-weight)] text-[var(--treatment-ink)]";
 
 const LETTER_BODY_CLASS =
-  "font-display font-normal text-[var(--treatment-muted-strong)] [font-variation-settings:'opsz'_18,'SOFT'_0] text-[18px] leading-[1.62] md:text-[clamp(19px,1.4vw,20px)]";
+  "font-display [font-weight:var(--letters-body-weight)] text-[var(--treatment-muted-strong)] text-[18px] leading-[1.62] md:text-[clamp(19px,1.4vw,20px)]";
 
 export const letterProseClassName = [
   "w-full",
   LETTER_BODY_CLASS,
   "[overflow-wrap:break-word]",
   "[&>*+*]:mt-7",
-  "[&>p]:text-[18px] [&>p]:font-normal [&>p]:leading-[1.62] md:[&>p]:text-[clamp(19px,1.4vw,20px)]",
+  "[&>p]:text-[18px] [&>p]:leading-[1.62] md:[&>p]:text-[clamp(19px,1.4vw,20px)]",
   "[&>blockquote]:border-l-2 [&>blockquote]:border-[var(--color-bordeaux)] [&>blockquote]:pl-5 [&>blockquote]:italic",
   "[&>blockquote]:text-[18px] [&>blockquote]:leading-[1.62] md:[&>blockquote]:text-[clamp(19px,1.4vw,20px)]",
   "[&>ul]:list-disc [&>ol]:list-decimal [&>ul]:pl-7 [&>ol]:pl-7",
@@ -168,7 +175,7 @@ export function LetterExcerpt({
         maskImage: "linear-gradient(to bottom, #000 0 82%, transparent 100%)",
       }}
     >
-      {excerpt}
+      <InkText slug={letter.slug} text={excerpt} />
     </p>
   );
 }

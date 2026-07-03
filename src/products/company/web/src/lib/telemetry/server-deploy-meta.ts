@@ -20,5 +20,11 @@ export function deployMetaTags(): DeployMetaTag[] {
     { name: DEPLOY_META.commitSha, content: env.GUARDIAN_COMMIT_SHA ?? "" },
     { name: DEPLOY_META.supervisor, content: env.GUARDIAN_SUPERVISOR ?? "" },
   ];
+  // Any non-prod site (pr-<N> previews, future stages) must never be indexed
+  // or ranked against the apex: canonical/OG URLs are compile-time constants
+  // pointing at prod, so an indexed preview would be a duplicate.
+  if ((env.GUARDIAN_SITE ?? "") !== "" && env.GUARDIAN_SITE !== "prod") {
+    tags.push({ name: "robots", content: "noindex, nofollow" });
+  }
   return tags.filter((tag) => tag.content !== "");
 }

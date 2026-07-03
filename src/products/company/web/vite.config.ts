@@ -10,6 +10,10 @@ import { defineConfig } from "vite-plus";
 // Local bundled Nitro hooks. Keeping them as .mjs files avoids introducing a
 // separate plugin package into the vp build module graph.
 import { rewriteCjsRequireOnCompiled } from "./rewrite-cjs-require.mjs";
+// Per-word ink variation for the letters treatment. Pure hash of
+// (slug, word index) — deterministic, so rebuilds of the same content keep
+// producing the same bytes (the image digest pin depends on that).
+import { inkWrapHtml } from "./src/features/letters/ink";
 
 const observabilityPlugin = fileURLToPath(new URL("./observability-plugin.mjs", import.meta.url));
 
@@ -37,9 +41,20 @@ const lettersMarkdown = {
     const tokens = marked.lexer(content);
     const flowTokens = tokens.filter((token) => token.type !== "space");
     const [leadToken, ...continuationTokens] = flowTokens;
+    // Every rendered word of the letter wears its own ink (see
+    // features/letters/ink.ts). Word indices count from 0 per fragment; the
+    // index excerpt re-counts the lead's words from 0 at render time, so both
+    // sides of the view transition agree on each word's ink. The full `html`
+    // stays unwrapped: it never renders (LetterBody reads lead/continuation;
+    // the excerpt fallback strips tags), and the letter already ships in the
+    // payload once as markup and once as loader data — no third inked copy.
+    const slug = String(normalised.slug ?? "");
     const html = marked.parser(tokens);
-    const leadHtml = leadToken ? marked.parser([leadToken]) : "";
-    const continuationHtml = continuationTokens.length > 0 ? marked.parser(continuationTokens) : "";
+    const leadHtml = leadToken ? inkWrapHtml(marked.parser([leadToken]), slug) : "";
+    const continuationHtml =
+      continuationTokens.length > 0
+        ? inkWrapHtml(marked.parser(continuationTokens), slug)
+        : "";
     return `export default ${JSON.stringify({
       frontmatter: normalised,
       html,

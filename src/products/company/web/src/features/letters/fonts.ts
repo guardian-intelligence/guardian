@@ -8,6 +8,11 @@
 //   - the dispatch signature             → routes/letters/$slug.tsx
 //
 // woff2 files live in public/fonts (self-hosted; CSP is font-src 'self').
+//
+// Per-word ink variation (the gel-pen hand) lives in ink.ts; its class rules
+// are appended here so first paint already has the ink.
+
+import { inkClassRules } from "~/features/letters/ink";
 
 export interface LetterFontFace {
   readonly file: string;
@@ -75,15 +80,31 @@ export function lettersTypographyCss(): string {
     `--treatment-display-font:${lettersBodyFont.stack};` +
     `--treatment-body-font:${lettersBodyFont.stack};` +
     `--letters-body-weight:${lettersBodyFont.weight};` +
-    `--letters-body-size:${lettersBodyFont.bodySize};}`;
-  // Body copy carries the configured size + weight; the salutation/date keep
-  // their own. Outranks the prose utilities (unlayered beats Tailwind layers).
+    `--letters-body-size:${lettersBodyFont.bodySize};` +
+    // Ink on paper, not pixels on glass: grayscale antialiasing (the same
+    // rasterisation design tools force) instead of subpixel RGB fringing,
+    // real kerning/ligatures, and no synthesised faces — the variable file
+    // carries every weight the treatment asks for.
+    `-webkit-font-smoothing:antialiased;` +
+    `-moz-osx-font-smoothing:grayscale;` +
+    `text-rendering:optimizeLegibility;` +
+    `font-kerning:normal;` +
+    `font-synthesis:none;}`;
+  // Body copy AND the index preview carry the configured size + weight — the
+  // preview is the same sheet the letter opens into, so it must never render
+  // a weight thinner than the body it becomes (it did: this rule used to give
+  // [data-letter-slot="body"] only the size, and the Tailwind font-normal
+  // underneath dropped the excerpt to 400 against the body's 500). The
+  // salutation is written by the same hand. Outranks the prose utilities
+  // (unlayered beats Tailwind layers).
   const body =
     `[data-treatment="letters"] [data-letter-body] p,` +
     `[data-treatment="letters"] [data-letter-body] li,` +
     `[data-treatment="letters"] [data-letter-body] blockquote` +
     `{font-weight:var(--letters-body-weight);font-size:var(--letters-body-size);}` +
-    // The index preview is the same measure as the body it opens into.
-    `[data-treatment="letters"] [data-letter-slot="body"]{font-size:var(--letters-body-size);}`;
-  return faces + vars + body;
+    `[data-treatment="letters"] [data-letter-slot="body"]` +
+    `{font-weight:var(--letters-body-weight);font-size:var(--letters-body-size);}` +
+    `[data-treatment="letters"] [data-letter-slot="salutation"]` +
+    `{font-weight:var(--letters-body-weight);}`;
+  return faces + vars + body + inkClassRules('[data-treatment="letters"]');
 }
