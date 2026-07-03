@@ -12,7 +12,7 @@
 // Per-word ink variation (the gel-pen hand) lives in ink.ts; its class rules
 // are appended here so first paint already has the ink.
 
-import { flowClassRules, inkClassRules, tiltClassRules } from "~/features/letters/ink";
+import { flowClassRules, inkClassRules } from "~/features/letters/ink";
 
 export interface LetterFontFace {
   readonly file: string;
@@ -27,81 +27,28 @@ export interface LettersFont {
   readonly family: string;
   readonly stack: string;
   readonly weight: number; // body copy weight
-  readonly bodySize: string; // body copy font-size (derived from the square)
-  readonly linePitch: number; // px between baselines; two graph squares
+  readonly bodySize: string; // body copy font-size (a CSS length / clamp)
+  readonly linePitch: number; // px between baselines; the ruling derives from it
   readonly ogFile: string; // upright face baked into the OG rasteriser
   readonly faces: readonly LetterFontFace[];
 }
 
-// --- The sheet's pattern ----------------------------------------------------
+// The reading face. Crimson Pro runs small on the body, so it takes a larger
+// measure than a typical text face would.
 //
-// The pattern of the original pages, as the writer kept it: the height of one
-// graph square IS the cap height of the hand; g and j sink a little below the
-// square; one empty square between lines — empty of letter bodies, that is:
-// the tails cross it, the way tails do. So everything derives from the square:
-//
-//   square     — the one aesthetic free variable (mobile takes a smaller one)
-//   body size  = square / cap-height ratio   (capitals exactly fill a square)
-//   line pitch = 2 squares                   (baseline on every other rule)
-//
-// Crimson Pro accommodates the pattern literally: its full vertical content
-// span is 1.111em (typo ascender 918 + descender 220 over upm 1024 — hhea
-// agrees and USE_TYPO_METRICS is set, so every modern browser builds the same
-// line box) against a pitch of 2 × 0.5732em = 1.146em. Tails and ascenders
-// fit inside the pitch with a hair to spare; nothing ever collides.
-const CRIMSON_CAP = 587 / 1024; // measured from the H outline; OS/2 agrees
-const CRIMSON_ASCENT = 918 / 1024;
-const CRIMSON_CONTENT = (918 + 220) / 1024;
-
-const GRID_SQUARE_PX = 17;
-const GRID_SQUARE_MOBILE_PX = 14; // below the 40rem (sm) breakpoint
-
-// The letter page's masthead above the ruled stack, top of sheet → top of the
-// date box — all viewport-independent constants, kept that way on purpose
-// (the page top padding is fixed across breakpoints for exactly this reason):
-// chrome header 45px (edge gap 10 + lockup 22 + rule gap 13, see letters.css)
-// plus page top padding 24px. Below it the masthead advances in whole
-// pitches: date box two, salutation margin + box + body margin one each.
-const MASTHEAD_FIXED_PX = 45 + 24;
-const MASTHEAD_PITCHES = 5;
-
-interface SheetScale {
-  readonly square: number;
-  readonly pitch: number;
-  readonly bodySize: number;
-  // Vertical offset that slides the ruling into registration: the body's
-  // first baseline sits ON a rule, statically — no measuring JS, no flash.
-  readonly phase: number;
-}
-
-function sheetScale(square: number): SheetScale {
-  const pitch = square * 2;
-  const bodySize = square / CRIMSON_CAP;
-  // First-baseline offset inside a line box one pitch tall.
-  const baselineInBox = (pitch - bodySize * CRIMSON_CONTENT) / 2 + bodySize * CRIMSON_ASCENT;
-  const firstBaseline = MASTHEAD_FIXED_PX + MASTHEAD_PITCHES * pitch + baselineInBox;
-  return { square, pitch, bodySize, phase: firstBaseline % pitch };
-}
-
-const SHEET = sheetScale(GRID_SQUARE_PX);
-const SHEET_MOBILE = sheetScale(GRID_SQUARE_MOBILE_PX);
-
-function sheetScaleVars(s: SheetScale): string {
-  return (
-    `--letters-body-size:${s.bodySize.toFixed(2)}px;` +
-    `--letters-line-pitch:${s.pitch}px;` +
-    `--letters-grid-minor:${s.square}px;` +
-    `--letters-grid-major:${s.pitch * 5}px;`
-  );
-}
-
-// The reading face. Sized by the square (above), not by taste per breakpoint.
+// linePitch is the sheet's registration constant: on the original pages the
+// hand writes on every other cell of the graph — x-height filling the lower
+// cell, one quiet cell above, baseline on the rule. So the minor cell is
+// half the pitch, the major rule is five pitches, and body line-height IS
+// the pitch: the ruling and the writing are one system, not a background
+// behind a foreground. Grid vars emitted below; consumed by
+// .letters-paper-grid in app.css and the paragraph rhythm in typography.tsx.
 export const lettersBodyFont: LettersFont = {
   family: "Crimson Pro",
   stack: "'Crimson Pro', Georgia, serif",
   weight: 500,
-  bodySize: `${SHEET.bodySize.toFixed(2)}px`,
-  linePitch: SHEET.pitch,
+  bodySize: "clamp(20px, 1.5vw, 22px)",
+  linePitch: 32,
   ogFile: "CrimsonPro-OG.ttf",
   faces: [
     { file: "CrimsonPro-Variable.woff2", style: "normal", weight: "400 700", variable: true },
@@ -131,8 +78,7 @@ function faceCss(family: string, f: LetterFontFace): string {
 
 // CSS for the letters treatment: @font-face rules, the font variables the shell
 // + typography read, and the body size/weight. Concatenated into the inlined
-// critical CSS so first paint already has the face — the ruling is layout, and
-// it must never flash into place.
+// critical CSS so first paint already has the face.
 export function lettersTypographyCss(): string {
   const faces = [
     ...lettersBodyFont.faces.map((f) => faceCss(lettersBodyFont.family, f)),
@@ -144,7 +90,10 @@ export function lettersTypographyCss(): string {
     `--treatment-display-font:${lettersBodyFont.stack};` +
     `--treatment-body-font:${lettersBodyFont.stack};` +
     `--letters-body-weight:${lettersBodyFont.weight};` +
-    sheetScaleVars(SHEET) +
+    `--letters-body-size:${lettersBodyFont.bodySize};` +
+    `--letters-line-pitch:${lettersBodyFont.linePitch}px;` +
+    `--letters-grid-minor:${lettersBodyFont.linePitch / 2}px;` +
+    `--letters-grid-major:${lettersBodyFont.linePitch * 5}px;` +
     // Ink on paper, not pixels on glass: grayscale antialiasing (the same
     // rasterisation design tools force) instead of subpixel RGB fringing,
     // real kerning/ligatures, and no synthesised faces — the variable file
@@ -154,22 +103,13 @@ export function lettersTypographyCss(): string {
     `text-rendering:optimizeLegibility;` +
     `font-kerning:normal;` +
     `font-synthesis:none;}`;
-  // Registration: on the letter page (route.tsx marks it data-letters-page)
-  // the ruling slides by the computed phase so the body's first baseline sits
-  // ON a rule. Mobile takes the smaller square, and its own phase with it.
-  const registration =
-    `[data-treatment="letters"][data-letters-page="detail"]{--letters-grid-phase-y:${SHEET.phase.toFixed(2)}px;}` +
-    `@media (width < 40rem){` +
-    `[data-treatment="letters"]{${sheetScaleVars(SHEET_MOBILE)}}` +
-    `[data-treatment="letters"][data-letters-page="detail"]{--letters-grid-phase-y:${SHEET_MOBILE.phase.toFixed(2)}px;}` +
-    `}`;
   // Body copy AND the index preview carry the configured size + weight — the
   // preview is the same sheet the letter opens into, so it must never render
   // a weight thinner than the body it becomes (it did: this rule used to give
   // [data-letter-slot="body"] only the size, and the Tailwind font-normal
   // underneath dropped the excerpt to 400 against the body's 500). The
-  // salutation is written by the same hand. Line-height IS the ruled pitch.
-  // Outranks the prose utilities (unlayered beats Tailwind layers).
+  // salutation is written by the same hand. Outranks the prose utilities
+  // (unlayered beats Tailwind layers).
   const body =
     `[data-treatment="letters"] [data-letter-body] p,` +
     `[data-treatment="letters"] [data-letter-body] li,` +
@@ -205,12 +145,10 @@ export function lettersTypographyCss(): string {
   return (
     faces +
     vars +
-    registration +
     body +
     hand +
     bloom +
     inkClassRules('[data-treatment="letters"]') +
-    flowClassRules('[data-treatment="letters"]') +
-    tiltClassRules('[data-treatment="letters"]')
+    flowClassRules('[data-treatment="letters"]')
   );
 }

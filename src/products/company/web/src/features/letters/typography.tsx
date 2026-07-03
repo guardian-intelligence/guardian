@@ -11,9 +11,7 @@ export const LETTER_TEXT_MEASURE_CLASS = "max-w-[46rem]";
 export const LETTER_INDEX_PAGE_PADDING_CLASS =
   "pb-24 pt-14 sm:pb-28 sm:pt-[72px] md:pb-32 md:pt-20";
 
-// The letter page's top padding is a registration constant: fonts.ts computes
-// the grid phase from the masthead stack, so pt must not vary by breakpoint.
-export const LETTER_POST_PAGE_PADDING_CLASS = "pb-24 pt-6 sm:pb-28 md:pb-32";
+export const LETTER_POST_PAGE_PADDING_CLASS = "pb-24 pt-4 sm:pb-28 sm:pt-5 md:pb-32 md:pt-6";
 
 // The date is set in the signature hand — the same cursive that signs the
 // letter — so the sheet opens and closes in the writer's own script.
@@ -108,13 +106,13 @@ export function LetterDate({
   readonly letter: Letter;
   readonly scale?: "index" | "post";
 }) {
-  // On the letter page the date box is exactly two ruled pitches (four graph
-  // squares) so the masthead stack advances in whole rules and the body's
+  // On the letter page the date box is exactly two ruled pitches (64px, four
+  // minor cells) so the masthead stack advances in whole rules and the body's
   // baselines land in registration with the graph below it.
   const metrics =
     scale === "index"
       ? { fontSize: "clamp(34px,8vw,40px)", lineHeight: "52px" }
-      : { fontSize: "clamp(38px,9vw,44px)", lineHeight: "calc(var(--letters-line-pitch)*2)" };
+      : { fontSize: "clamp(38px,9vw,44px)", lineHeight: "64px" };
 
   return (
     <p
@@ -148,9 +146,7 @@ export function LetterSalutation({ letter }: { readonly letter: Letter }) {
       style={{
         margin: 0,
         marginTop: "var(--letters-line-pitch)",
-        // The salutation is the same hand as the body — same square-derived
-        // size, one ruled pitch of line box.
-        fontSize: "var(--letters-body-size)",
+        fontSize: "clamp(20px,1.6vw,22px)",
         lineHeight: "var(--letters-line-pitch)",
       }}
     >
@@ -197,7 +193,7 @@ export function LetterBody({ letter }: { readonly letter: Letter }) {
   const continuationHtml = letter.continuationHtml.trim();
 
   return (
-    <div data-letter-body data-letter-slot="body" className="mt-[var(--letters-line-pitch)]">
+    <div data-letter-body data-letter-slot="body" className="mt-7">
       {leadHtml ? (
         <div
           data-letter-body-lead

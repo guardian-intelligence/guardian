@@ -173,10 +173,9 @@
   /* Cell geometry is typography: the minor cell is half the ruled line pitch
      and the major rule is five pitches, both emitted as vars by fonts.ts
      (linePitch), so the writing sits ON this ruling instead of floating over
-     an unrelated pattern: one square is one cap height, the pitch two
-     squares. --letters-grid-phase-y slides the ruling vertically into
-     registration (computed statically in fonts.ts); fallbacks here mirror the
-     desktop sheetScale. */
+     an unrelated pattern. --letters-grid-phase-y slides the ruling vertically
+     to register the body baselines onto the rules; calibrated against the
+     letter page. */
   background-image:
     linear-gradient(to right, rgb(40 44 52 / var(--letters-grid-major-alpha)) 1px, transparent 1px),
     linear-gradient(
@@ -193,10 +192,10 @@
     -1px var(--letters-grid-phase-y, -1px);
   background-repeat: repeat;
   background-size:
-    var(--letters-grid-major, 170px) var(--letters-grid-major, 170px),
-    var(--letters-grid-major, 170px) var(--letters-grid-major, 170px),
-    var(--letters-grid-minor, 17px) var(--letters-grid-minor, 17px),
-    var(--letters-grid-minor, 17px) var(--letters-grid-minor, 17px);
+    var(--letters-grid-major, 140px) var(--letters-grid-major, 140px),
+    var(--letters-grid-major, 140px) var(--letters-grid-major, 140px),
+    var(--letters-grid-minor, 28px) var(--letters-grid-minor, 28px),
+    var(--letters-grid-minor, 28px) var(--letters-grid-minor, 28px);
   mix-blend-mode: multiply;
 }
 
