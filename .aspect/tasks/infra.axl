@@ -75,15 +75,10 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/base/storage:manifests",
     "//src/infrastructure/bootstrap/sync-dark:manifests",
     "//src/infrastructure/bootstrap/sync-steady:manifests",
-    "//src/infrastructure/deployments/guardian/openbao-ops:manifests",
     "//src/infrastructure/deployments/guardian/system:manifests",
     "//src/infrastructure/deployments/company/prod:manifests",
     "//src/infrastructure/load:http_load_scripts",
     "//src/infrastructure/edge:edge_health_targets",
-    "//src/infrastructure/operations/openbao/guardian-mgmt:manifests",
-    "//src/services/secrets/openbao/deploy/base/crds:manifests",
-    "//src/services/secrets/openbao/deploy/base:manifests",
-    "//src/services/secrets/openbao/deploy/guardian-mgmt:manifests",
 ]
 INFRA_TESTS = [
     "//src/infrastructure/cmd/bundle:bundle_test",
@@ -96,7 +91,6 @@ INFRA_TESTS = [
     "//src/infrastructure/cmd/openbao_secret_import:openbao_secret_import_test",
     "//src/infrastructure/cmd/openbao_static_seal_key:openbao_static_seal_key_test",
     "//src/infrastructure/tests:talm_render_test",
-    "//src/services/secrets/openbao/operator/controllers:controllers_test",
 ]
 FORBIDDEN_SOURCE_PATHS = [
     ("DELETE_ME.env", "operator Cloudflare credentials must stay out of the repo workspace and must not be load-bearing"),
@@ -550,10 +544,6 @@ def _render_kustomizations(ctx):
     for path in [
         "src/infrastructure/base",
         "src/infrastructure/deployments/guardian/system",
-        "src/infrastructure/operations/openbao/guardian-mgmt",
-        "src/services/secrets/openbao/deploy/base/crds",
-        "src/services/secrets/openbao/deploy/base",
-        "src/services/secrets/openbao/deploy/guardian-mgmt",
     ]:
         rc = _capture_success(
             ctx,
@@ -1841,7 +1831,7 @@ openbao_observability_drill = task(
     implementation = _openbao_observability_drill_impl,
     name = "openbao-observability-drill",
     group = ["infra"],
-    summary = "Verify OpenBao metrics, audit tailing, ops-controller metrics, and VictoriaLogs ingestion.",
+    summary = "Verify OpenBao metrics, audit tailing, and VictoriaLogs ingestion.",
     args = {
         "kube_api_server": args.string(default = "", description = "Optional Kubernetes API server override for off-VLAN proof runs."),
         "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),

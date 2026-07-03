@@ -1,5 +1,5 @@
-# Dark-mode source pinning: every Kustomization in sync.yaml (and the
-# openbao-ops children) substitutes its sourceRef from these values via
+# Dark-mode source pinning: every Kustomization in sync.yaml substitutes its
+# sourceRef from these values via
 # postBuild.substituteFrom. The ConfigMap is required (Flux skips
 # substitution on an empty variable map); the sync-steady overlay ships the
 # same object with GitRepository values. Hand-applied objects are not in any

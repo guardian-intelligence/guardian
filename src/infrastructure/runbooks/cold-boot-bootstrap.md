@@ -109,8 +109,8 @@ Exiting dark is ordered and gated, not fire-and-forget:
    then fail the CRD enum.
 3. Force the flip through both generations rather than waiting on the 10m
    intervals: `flux reconcile kustomization guardian-mgmt-base`, then once it
-   is Ready `flux reconcile kustomization guardian-openbao-ops` (its three
-   children re-source from Git only after it re-applies them). Confirm every
+   is Ready `flux reconcile kustomization guardian-system` (guardian-mgmt-dns-controller
+   re-sources from Git only after guardian-system re-applies it). Confirm every
    Kustomization's `sourceRef.kind` reads `GitRepository` and
    `aspect infra converged --expected-revision <steady-sha>` passes.
 4. Only then delete the `guardian-oci` OCIRepository — deleting it while any
@@ -152,8 +152,9 @@ would only relocate the root of trust, not remove it.
    images out — **do not trust that Git-pinned digests still exist in
    Harbor**: the drill found the pinned company-site manifest garbage-collected
    (pods ran from containerd cache only). Recovery is rebuild-from-source
-   (`bazelisk build //src/products/company/site:image`,
-   `//src/services/secrets/openbao/operator:image`) and repin.
+   (`bazelisk build //src/products/company/site:image`) and repin. `company-site`
+   is the only Harbor-hosted guardian image — OpenBao runs the public
+   `quay.io/openbao/openbao` image and there is no longer a custom operator image.
 2. **Bootstrap mirror**: `podman run -d --name guardian-bootstrap-mirror
    -p 5000:5000 -v <dir>:/var/lib/registry docker.io/library/registry:2`,
    firewalled to the three node public IPs. Seed the Harbor-hosted images (digests pinned in
@@ -308,8 +309,9 @@ kubectl apply -k src/infrastructure/bootstrap/sync-steady
 
 Flux is a single `flux` Deployment (5 containers) in cozy-fluxcd. Convergence
 order: platform/platform-patches → storage (LINSTOR claims the blank data
-disks) → base (tenant-root, core services) → guardian-system (OpenBao) →
-openbao-ops → dns-controller/company-prod. Expected transients that self-heal:
+disks) → base (tenant-root, core services) → guardian-system (OpenBao, whose
+self-init creates the KV/Transit/auth config) → dns-controller/company-prod.
+Expected transients that self-heal:
 
 - pods ContainerCreating until the kubeovn HelmRelease installs the CNI
   plugin binary (the conflist chains kube-ovn before cilium-cni);

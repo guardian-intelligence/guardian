@@ -2,11 +2,12 @@
 
 Status: **IMPLEMENTATION IN PROGRESS.** The repo now declares static seal,
 self-init, independent cert-manager listener TLS, `openbao-local` retained
-storage, KV, and Transit. The old manual-unseal/operator-bootstrap path and
-the OpenBao-issued listener certificate path have been removed from the happy
-path. Remaining target-state gaps called out below include the exact
-`zfsThinPool` substrate, hostPath admission enforcement in the live cluster,
-and tested stateful restore.
+storage, KV, and Transit. The old manual-unseal/operator-bootstrap path, the
+OpenBao-issued listener certificate path, and the custom `openbao-ops-controller`
+operator (with its CRDs and hand-authored operation CRs) have all been removed:
+OpenBao config now lives entirely in the self-init `initialize` block. Remaining
+target-state gaps called out below include the exact `zfsThinPool` substrate,
+hostPath admission enforcement in the live cluster, and tested stateful restore.
 
 Scope: the Guardian tenant OpenBao (3-node raft) secrets platform. OpenBao is
 one bootstrapping component of the system, not the system's end state; the
@@ -112,8 +113,8 @@ called out explicitly.
   OpenBao unless that is explicitly accepted as the custody boundary.
 
 ## Transit
-- `OpenBaoMount/transit` declares the Transit engine so approved key-management
-  consumers can be added without reintroducing a bootstrap control plane.
+- Self-init's `enable_transit_mount` request declares the Transit engine so approved
+  key-management consumers can be added without reintroducing a bootstrap control plane.
 - Durable Transit keys are not declared generically. A Transit key that protects
   durable ciphertext is data-loss-critical. **Decided custody model:** create
   such keys with `exportable=true` and `allow_plaintext_backup=true`, and export
@@ -128,17 +129,26 @@ called out explicitly.
   deleted afterward.
 
 ## Auth & self-init config
-- Kubernetes auth method; ESO and the ops-controller authenticate via SA tokens validated by
-  TokenReview, bound to namespace + SA + audience, least-privilege policies.
-- Self-init creates the ops-controller policy + auth role required for steady state, plus a
-  temporary `guardian-secret-importer` role used only to move local break-glass credential files
-  into OpenBao. The importer is a one-time, bootstrap-only, heavily cordoned, non-load-bearing
-  task; it must be sunset once the initial local credentials are inside OpenBao. The importer
-  deletes its own role and policy after a successful import. OpenBao config then converges via
-  Flux-applied CRs + the OpenBao ops controller. There is no operator-held privileged token in
-  the steady-state path.
+- Kubernetes auth method; ESO and the bootstrap importer authenticate via SA tokens validated
+  by TokenReview, bound to namespace + SA + audience, least-privilege policies.
+- **Self-init is the sole source of truth for steady-state OpenBao config.** The `initialize`
+  block runs once, at first cluster initialization, with a temporary privileged token OpenBao
+  revokes immediately afterward. In that one block it creates the complete steady state: the
+  Kubernetes auth method + config, the `kv` (v2) and `transit` engines and their tunes, and the
+  `external-dns` read policy + Kubernetes auth role. There is no reconciling operator and no
+  hand-authored operation CRs — a cold boot converges the same config natively, and there is no
+  operator-held privileged token in the steady-state path.
+- Self-init also creates a temporary `guardian-secret-importer` policy + role used only to move
+  local break-glass credential files into OpenBao. The importer is a one-time, bootstrap-only,
+  heavily cordoned, non-load-bearing task; it must be sunset once the initial local credentials
+  are inside OpenBao, and it deletes its own role and policy after a successful import.
+- Config that changes after first init is applied imperatively against a running cluster (the
+  `initialize` block only runs at initialization); steady state persists in raft, so this is a
+  rare bootstrap/DR-time concern, not a routine path.
 - ESO is the consumer: SecretStore/ClusterSecretStore → OpenBao KV; ExternalSecrets
-  materialize native Secrets. OpenBao is source of truth; the k8s Secret is a synced cache.
+  materialize native Secrets. OpenBao is source of truth; the k8s Secret is a synced cache. The
+  `external-dns` ExternalSecret going Ready is the functional proof that self-init created the
+  kv mount and auth role and ESO can read them.
 
 ## Audit
 - A **single local `file` audit device** (the device OpenBao blocks on if audit writes fail).
@@ -200,22 +210,25 @@ called out explicitly.
 Talos up → break-glass place seal key on the 3 pinned nodes → **cert-manager up** →
 independent cert-manager listener CA creates `guardian-openbao-api-tls` →
 **OpenBao up** (static-seal auto-unseals; consumes the listener cert from birth) →
-self-init creates ops-controller/auth access → OpenBao ops enables KV, Transit,
-policies, and auth roles → ESO consumes. Flux ordering must be real
-(cert-manager Ready → listener CA Certificate Ready → listener leaf Certificate Ready →
-OpenBao pods → OpenBao ops Ready); `disableWait` makes this easy to race, so encode
-the dependency explicitly.
+self-init's `initialize` block creates Kubernetes auth, the KV and Transit engines,
+and the external-dns policy + auth role in one shot → ESO consumes. Flux ordering must
+be real (cert-manager Ready → listener CA Certificate Ready → listener leaf Certificate
+Ready → OpenBao pods → the external-dns ExternalSecret Ready); `disableWait` makes this
+easy to race, so encode the dependency explicitly.
 
 ---
 
 ## Remaining Ops Inventory
 
-Already declared and Ready in the current cluster:
+Created by the self-init `initialize` block and Ready in the current cluster:
 - `kv` mount and tune.
-- `transit` mount.
-- Kubernetes auth backend.
-- Ops-controller policy and Kubernetes auth role.
+- `transit` mount and tune.
+- Kubernetes auth backend and tune.
 - `external-dns` read policy and Kubernetes auth role.
+- Temporary `guardian-secret-importer` policy and role (bootstrap-only; the importer deletes
+  them after a successful import).
+
+Declared alongside self-init:
 - `ClusterSecretStore/external-dns-openbao` and `ExternalSecret/cloudflare-external-dns`.
 
 Legacy live cruft removed on 2026-06-29:
@@ -229,9 +242,10 @@ Legacy live cruft removed on 2026-06-29:
 Ops resources still needed before OpenBao is the real vault/transit authority:
 - Restore drill for any durable Transit key before that key protects production
   ciphertext.
-- Declarative Transit-key resources only when a real consumer requires them. The
-  current operator can declare mounts/policies/auth roles, but it has no
-  `OpenBaoTransitKey` CRD/controller yet.
+- Durable Transit-key provisioning only when a real consumer requires it. Self-init
+  declares mounts/policies/auth roles; a durable Transit key would be added as an
+  `initialize` request (or created imperatively with its keyring exported to custody at
+  creation), not via a custom operator or CRD.
 - KV policies/auth roles/ExternalSecrets for any remaining consumers of imported
   Cloudflare/R2 credentials beyond `external-dns`.
 - Release/signing, artifact provenance, envelope encryption, or workload key-management

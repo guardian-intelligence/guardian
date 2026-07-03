@@ -50,29 +50,6 @@ spec:
           - prometheus
 ---
 apiVersion: operator.victoriametrics.com/v1beta1
-kind: VMServiceScrape
-metadata:
-  name: guardian-openbao-ops-controller
-  namespace: tenant-guardian
-  labels:
-    app.kubernetes.io/name: openbao-ops-controller
-    app.kubernetes.io/part-of: guardian
-    guardian.dev/component: secrets
-    guardian.dev/tenant-id: gi-guardian
-spec:
-  namespaceSelector:
-    matchNames:
-      - tenant-guardian
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: openbao-ops-controller
-  endpoints:
-    - port: metrics
-      path: /metrics
-      interval: 30s
-      scrapeTimeout: 10s
----
-apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMRule
 metadata:
   name: guardian-openbao
@@ -151,14 +128,6 @@ spec:
             guardian.dev/component: secrets
           annotations:
             summary: Guardian OpenBao audit PVC free space is below 15%.
-        - alert: OpenBaoOpsControllerReconcileFailures
-          expr: increase(controller_runtime_reconcile_errors_total{namespace="tenant-guardian",job="openbao-ops-controller"}[5m]) > 0
-          for: 5m
-          labels:
-            severity: warning
-            guardian.dev/component: secrets
-          annotations:
-            summary: Guardian OpenBao ops controller reconcile errors increased.
         - alert: ExternalSecretOpenBaoSyncFailure
           expr: increase(externalsecret_status_condition{namespace="external-dns",name="cloudflare-external-dns",condition="Ready",status!="True"}[10m]) > 0
           for: 5m

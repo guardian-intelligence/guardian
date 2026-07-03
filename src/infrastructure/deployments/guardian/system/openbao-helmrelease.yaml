@@ -271,6 +271,12 @@ spec:
                 }
               }
 
+              # Self-init runs once, at first cluster initialization, with a
+              # temporary privileged token OpenBao revokes afterward. It creates
+              # the complete steady state directly: Kubernetes auth, the kv and
+              # transit engines, and the external-dns consumer's policy+role.
+              # There is no reconciling operator — this block IS the source of
+              # truth, so a cold boot converges the same config natively.
               initialize "guardian_self_init" {
                 request "enable_kubernetes_auth" {
                   operation = "update"
@@ -290,23 +296,67 @@ spec:
                   }
                 }
 
-                request "write_ops_controller_policy" {
+                request "tune_kubernetes_auth" {
                   operation = "update"
-                  path = "sys/policies/acl/guardian-openbao-ops-controller"
+                  path = "sys/auth/kubernetes/tune"
                   data = {
-                    policy = "path \"sys/policies/acl/guardian-*\" {\n  capabilities = [\"create\", \"read\", \"update\", \"delete\"]\n}\n\npath \"sys/auth\" {\n  capabilities = [\"read\", \"sudo\"]\n}\n\npath \"sys/auth/kubernetes\" {\n  capabilities = [\"create\", \"read\", \"update\", \"delete\", \"sudo\"]\n}\n\npath \"sys/auth/kubernetes/tune\" {\n  capabilities = [\"read\", \"update\", \"sudo\"]\n}\n\npath \"auth/kubernetes/config\" {\n  capabilities = [\"read\", \"update\"]\n}\n\npath \"auth/kubernetes/role/guardian-*\" {\n  capabilities = [\"create\", \"read\", \"update\", \"delete\"]\n}\n\npath \"sys/mounts\" {\n  capabilities = [\"read\", \"sudo\"]\n}\n\npath \"sys/mounts/kv\" {\n  capabilities = [\"create\", \"read\", \"update\", \"delete\", \"sudo\"]\n}\n\npath \"sys/mounts/kv/tune\" {\n  capabilities = [\"read\", \"update\", \"sudo\"]\n}\n\npath \"sys/mounts/transit\" {\n  capabilities = [\"create\", \"read\", \"update\", \"delete\", \"sudo\"]\n}\n\npath \"sys/mounts/transit/tune\" {\n  capabilities = [\"read\", \"update\", \"sudo\"]\n}\n"
+                    default_lease_ttl = "15m"
+                    max_lease_ttl = "1h"
+                    listing_visibility = "hidden"
                   }
                 }
 
-                request "write_ops_controller_role" {
+                request "enable_kv_mount" {
                   operation = "update"
-                  path = "auth/kubernetes/role/guardian-openbao-ops-controller"
+                  path = "sys/mounts/kv"
                   data = {
-                    bound_service_account_names = ["openbao-ops-controller"]
-                    bound_service_account_namespaces = ["tenant-guardian"]
+                    type = "kv-v2"
+                    description = "Guardian management cluster secret material."
+                  }
+                }
+
+                request "tune_kv_mount" {
+                  operation = "update"
+                  path = "sys/mounts/kv/tune"
+                  data = {
+                    listing_visibility = "hidden"
+                  }
+                }
+
+                request "enable_transit_mount" {
+                  operation = "update"
+                  path = "sys/mounts/transit"
+                  data = {
+                    type = "transit"
+                    description = "Guardian Transit engine for explicitly approved key-management consumers."
+                  }
+                }
+
+                request "tune_transit_mount" {
+                  operation = "update"
+                  path = "sys/mounts/transit/tune"
+                  data = {
+                    listing_visibility = "hidden"
+                  }
+                }
+
+                request "write_external_dns_policy" {
+                  operation = "update"
+                  path = "sys/policies/acl/guardian-external-dns"
+                  data = {
+                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-guardian/dns/external-dns\" {\n  capabilities = [\"read\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/tenant-guardian/dns/external-dns\" {\n  capabilities = [\"read\"]\n}\n"
+                  }
+                }
+
+                request "write_external_dns_role" {
+                  operation = "update"
+                  path = "auth/kubernetes/role/guardian-external-dns"
+                  data = {
+                    bound_service_account_names = ["external-dns-secrets"]
+                    bound_service_account_namespaces = ["external-dns"]
                     audience = "openbao"
-                    token_policies = ["guardian-openbao-ops-controller"]
-                    token_ttl = "900"
+                    token_policies = ["guardian-external-dns"]
+                    token_ttl = "3600"
                     token_max_ttl = "3600"
                   }
                 }
@@ -323,7 +373,7 @@ spec:
                   operation = "update"
                   path = "auth/kubernetes/role/guardian-secret-importer"
                   data = {
-                    bound_service_account_names = ["openbao-ops-controller"]
+                    bound_service_account_names = ["guardian-secret-importer"]
                     bound_service_account_namespaces = ["tenant-guardian"]
                     audience = "openbao"
                     token_policies = ["guardian-secret-importer"]

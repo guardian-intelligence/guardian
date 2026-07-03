@@ -1,7 +1,6 @@
 exports_files([
     ".aspect/tasks/infra.axl",
     ".bazelignore",
-    ".github/workflows/openbao-ops-controller-image.yml",
     "AGENTS.md",
     "TRIBAL_KNOWLEDGE.md",
     "buf.yaml",
@@ -15,7 +14,6 @@ filegroup(
         "//src/infrastructure/base/flux:manifests",
         "//src/infrastructure/base/networking:manifests",
         "//src/infrastructure/base/storage:manifests",
-        "//src/infrastructure/deployments/guardian/openbao-ops:manifests",
         "//src/infrastructure/deployments/guardian/system:manifests",
         "//src/infrastructure/cmd/cozystack_backup_drill:cozystack_backup_drill",
         "//src/infrastructure/cmd/cozystack_db_load:cozystack_db_load",
@@ -31,8 +29,6 @@ filegroup(
         "//src/infrastructure/cmd/openbao_static_seal_key:openbao_static_seal_key",
         "//src/infrastructure/load:http_load_scripts",
         "//src/tools/hauler:hauler",
-        "//src/services/secrets/openbao/deploy/base:manifests",
-        "//src/services/secrets/openbao/operator:image",
     ],
     visibility = ["//visibility:public"],
 )
