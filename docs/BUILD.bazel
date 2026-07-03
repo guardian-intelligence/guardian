@@ -2,4 +2,5 @@ exports_files([
     "manifest-conformance-design.md",
     "openbao-design.md",
     "openbao-residue-inventory.md",
+    "supply-chain-design.md",
 ])

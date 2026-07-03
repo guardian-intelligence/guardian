@@ -178,6 +178,174 @@ func TestDescribeBundle(t *testing.T) {
 	}
 }
 
+// writeBundleDir lays out a bundle directory exactly as `aspect infra
+// bundle` leaves it — haul.tar.zst, hauler-manifest.yaml, and a
+// bundle-manifest.yaml derived from the same lock and haul bytes — so
+// verifyBundle exercises the real describeBundle/haulerManifest bindings.
+func writeBundleDir(t *testing.T, lock []byte, haul []byte, revision string) (dir string, refs []string) {
+	t.Helper()
+	dir = t.TempDir()
+	refs, err := parseImagesLock(lock)
+	if err != nil {
+		t.Fatalf("parseImagesLock() error = %v", err)
+	}
+	haulPath := dir + "/haul.tar.zst"
+	if err := os.WriteFile(haulPath, haul, 0o644); err != nil {
+		t.Fatalf("write haul fixture: %v", err)
+	}
+	haulerPayload, err := haulerManifest(refs)
+	if err != nil {
+		t.Fatalf("haulerManifest() error = %v", err)
+	}
+	if err := os.WriteFile(dir+"/hauler-manifest.yaml", haulerPayload, 0o644); err != nil {
+		t.Fatalf("write hauler manifest fixture: %v", err)
+	}
+	manifest, err := describeBundle(lock, refs, haulPath, revision)
+	if err != nil {
+		t.Fatalf("describeBundle() error = %v", err)
+	}
+	if err := os.WriteFile(dir+"/bundle-manifest.yaml", manifest, 0o644); err != nil {
+		t.Fatalf("write bundle manifest fixture: %v", err)
+	}
+	return dir, refs
+}
+
+func TestVerifyBundle(t *testing.T) {
+	lock := []byte(fixtureLock)
+	dir, refs := writeBundleDir(t, lock, []byte("haul-bytes"), "abc123")
+	lines, err := verifyBundle(dir, lock, refs, "abc123")
+	if err != nil {
+		t.Fatalf("verifyBundle() error = %v", err)
+	}
+	// One line per binding: lock hash, ref count, haul hash, hauler
+	// coverage, revision.
+	if len(lines) != 5 {
+		t.Fatalf("verifyBundle() = %d lines, want 5:\n%s", len(lines), strings.Join(lines, "\n"))
+	}
+	for _, line := range lines {
+		if !strings.HasPrefix(line, "verified: ") {
+			t.Fatalf("verifyBundle() line %q is not a verified binding", line)
+		}
+	}
+}
+
+func TestVerifyBundleRevisionReportOnly(t *testing.T) {
+	lock := []byte(fixtureLock)
+	dir, refs := writeBundleDir(t, lock, []byte("haul-bytes"), "abc123")
+	lines, err := verifyBundle(dir, lock, refs, "")
+	if err != nil {
+		t.Fatalf("verifyBundle() without --revision error = %v", err)
+	}
+	last := lines[len(lines)-1]
+	if !strings.HasPrefix(last, "recorded: revision=abc123") {
+		t.Fatalf("verifyBundle() revision line = %q, want report-only recorded revision", last)
+	}
+}
+
+func TestVerifyBundleRevisionMismatch(t *testing.T) {
+	lock := []byte(fixtureLock)
+	dir, refs := writeBundleDir(t, lock, []byte("haul-bytes"), "abc123")
+	_, err := verifyBundle(dir, lock, refs, "def456")
+	if err == nil {
+		t.Fatalf("verifyBundle() accepted a revision mismatch")
+	}
+	if !strings.Contains(err.Error(), "revision binding failed") {
+		t.Fatalf("verifyBundle() error = %v, want revision binding detail", err)
+	}
+}
+
+func TestVerifyBundleTamperedHaul(t *testing.T) {
+	lock := []byte(fixtureLock)
+	dir, refs := writeBundleDir(t, lock, []byte("haul-bytes"), "abc123")
+	if err := os.WriteFile(dir+"/haul.tar.zst", []byte("tampered-haul"), 0o644); err != nil {
+		t.Fatalf("tamper haul fixture: %v", err)
+	}
+	_, err := verifyBundle(dir, lock, refs, "abc123")
+	if err == nil {
+		t.Fatalf("verifyBundle() accepted a tampered haul")
+	}
+	if !strings.Contains(err.Error(), "haul binding failed") {
+		t.Fatalf("verifyBundle() error = %v, want haul binding detail", err)
+	}
+}
+
+func TestVerifyBundleTamperedLock(t *testing.T) {
+	lock := []byte(fixtureLock)
+	dir, _ := writeBundleDir(t, lock, []byte("haul-bytes"), "abc123")
+	tampered := []byte("ghcr.io/evil/app@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n")
+	refs, err := parseImagesLock(tampered)
+	if err != nil {
+		t.Fatalf("parseImagesLock(tampered) error = %v", err)
+	}
+	_, err = verifyBundle(dir, tampered, refs, "abc123")
+	if err == nil {
+		t.Fatalf("verifyBundle() accepted a tampered lock")
+	}
+	if !strings.Contains(err.Error(), "images.lock binding failed") {
+		t.Fatalf("verifyBundle() error = %v, want images.lock binding detail", err)
+	}
+}
+
+func TestVerifyBundleMissingManifest(t *testing.T) {
+	dir := t.TempDir()
+	lock := []byte(fixtureLock)
+	refs, err := parseImagesLock(lock)
+	if err != nil {
+		t.Fatalf("parseImagesLock() error = %v", err)
+	}
+	if _, err := verifyBundle(dir, lock, refs, "abc123"); err == nil {
+		t.Fatalf("verifyBundle() accepted a bundle dir with no bundle-manifest.yaml")
+	}
+}
+
+// A lock ref absent from the hauler manifest means the haul was built from a
+// projection that never saw that ref — verify must fail even when the
+// recorded lock hash matches, because the manifest binds the lock bytes, not
+// the projection's coverage.
+func TestVerifyBundleHaulerManifestMissingRef(t *testing.T) {
+	lock := []byte(fixtureLock)
+	dir, refs := writeBundleDir(t, lock, []byte("haul-bytes"), "abc123")
+	partial, err := haulerManifest(refs[:1])
+	if err != nil {
+		t.Fatalf("haulerManifest() error = %v", err)
+	}
+	if err := os.WriteFile(dir+"/hauler-manifest.yaml", partial, 0o644); err != nil {
+		t.Fatalf("write partial hauler manifest: %v", err)
+	}
+	// The bundle manifest still matches the lock and haul, so only the
+	// hauler coverage binding differs.
+	_, err = verifyBundle(dir, lock, refs, "abc123")
+	if err == nil {
+		t.Fatalf("verifyBundle() accepted a hauler manifest missing a lock ref")
+	}
+	if !strings.Contains(err.Error(), "hauler manifest binding failed") {
+		t.Fatalf("verifyBundle() error = %v, want hauler manifest binding detail", err)
+	}
+}
+
+// An entry in the hauler manifest that derives from no lock ref means the
+// haul carries content the lock never declared — the entry sets must be
+// EQUAL, not merely lock-covering, so verify must fail and name the extra.
+func TestVerifyBundleHaulerManifestExtraRef(t *testing.T) {
+	lock := []byte(fixtureLock)
+	dir, refs := writeBundleDir(t, lock, []byte("haul-bytes"), "abc123")
+	extra := "ghcr.io/evil/extra@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	padded, err := haulerManifest(append(append([]string{}, refs...), extra))
+	if err != nil {
+		t.Fatalf("haulerManifest() error = %v", err)
+	}
+	if err := os.WriteFile(dir+"/hauler-manifest.yaml", padded, 0o644); err != nil {
+		t.Fatalf("write padded hauler manifest: %v", err)
+	}
+	_, err = verifyBundle(dir, lock, refs, "abc123")
+	if err == nil {
+		t.Fatalf("verifyBundle() accepted a hauler manifest with an entry not derived from the lock")
+	}
+	if !strings.Contains(err.Error(), "hauler manifest binding failed") || !strings.Contains(err.Error(), extra) {
+		t.Fatalf("verifyBundle() error = %v, want hauler manifest binding detail naming %s", err, extra)
+	}
+}
+
 func TestFilterStoredRefs(t *testing.T) {
 	dir := t.TempDir()
 	index := dir + "/index.json"

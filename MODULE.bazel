@@ -29,6 +29,7 @@ bazel_dep(name = "rules_nodejs", version = "6.7.4")
 
 include("//src/tools/kubectl:kubectl.MODULE.bazel")
 include("//src/tools/boot-to-talos:boot-to-talos.MODULE.bazel")
+include("//src/tools/cosign:cosign.MODULE.bazel")
 include("//src/tools/curl:curl.MODULE.bazel")
 include("//src/tools/debug-clis:debug-clis.MODULE.bazel")
 include("//src/tools/flux:flux.MODULE.bazel")
