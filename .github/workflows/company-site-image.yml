@@ -73,6 +73,17 @@ jobs:
           fi
           echo "digest=$built" >> "$GITHUB_OUTPUT"
 
+      # Diagnostic for cross-machine digest drift: the app layer tar is the
+      # only non-hermetic input, so on a pin mismatch upload it for offline
+      # diffing against a workstation build.
+      - name: Upload output tar on digest mismatch
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: company-site-output
+          path: bazel-bin/src/products/company/web/company-site-output.tar
+          retention-days: 3
+
       - name: Verify images.lock and rendered manifests agree
         run: bazelisk test //src/infrastructure/tests:talm_render_test
 
