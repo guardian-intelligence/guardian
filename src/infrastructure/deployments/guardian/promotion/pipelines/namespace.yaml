@@ -1,0 +1,17 @@
+# Pre-created so this slice can apply at all: Flux dry-run-validates every
+# object in the batch, and the namespaced CRs below fail validation until the
+# project namespace exists — but Kargo only creates it while reconciling the
+# Project CR, which the failed validation prevents from ever applying. The
+# kargo.akuity.io/project label is Kargo's namespace-adoption contract;
+# without it the management controller refuses a pre-existing namespace
+# (anti-hijacking guard).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: company-site
+  labels:
+    kargo.akuity.io/project: "true"
+    app.kubernetes.io/part-of: guardian
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
