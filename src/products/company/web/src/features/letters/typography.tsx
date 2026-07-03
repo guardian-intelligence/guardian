@@ -11,7 +11,9 @@ export const LETTER_TEXT_MEASURE_CLASS = "max-w-[46rem]";
 export const LETTER_INDEX_PAGE_PADDING_CLASS =
   "pb-24 pt-14 sm:pb-28 sm:pt-[72px] md:pb-32 md:pt-20";
 
-export const LETTER_POST_PAGE_PADDING_CLASS = "pb-24 pt-4 sm:pb-28 sm:pt-5 md:pb-32 md:pt-6";
+// The letter page's top padding is a registration constant: fonts.ts computes
+// the grid phase from the masthead stack, so pt must not vary by breakpoint.
+export const LETTER_POST_PAGE_PADDING_CLASS = "pb-24 pt-6 sm:pb-28 md:pb-32";
 
 // The date is set in the signature hand — the same cursive that signs the
 // letter — so the sheet opens and closes in the writer's own script.
@@ -26,19 +28,24 @@ const LETTER_DATE_CLASS = "text-[var(--treatment-ink)]";
 const LETTER_SALUTATION_CLASS =
   "font-display [font-weight:var(--letters-body-weight)] text-[var(--treatment-ink)]";
 
+// Size, weight, and leading all resolve through the fonts.ts variables — the
+// unlayered rules there own the hand, and line-height IS the ruled pitch, so
+// every baseline advances exactly one graph rule (see linePitch in fonts.ts).
 const LETTER_BODY_CLASS =
-  "font-display [font-weight:var(--letters-body-weight)] text-[var(--treatment-muted-strong)] text-[18px] leading-[1.62] md:text-[clamp(19px,1.4vw,20px)]";
+  "font-display [font-weight:var(--letters-body-weight)] text-[var(--treatment-muted-strong)] text-[18px] md:text-[clamp(19px,1.4vw,20px)]";
 
 export const letterProseClassName = [
   "w-full",
   LETTER_BODY_CLASS,
   "[overflow-wrap:break-word]",
-  "[&>*+*]:mt-7",
-  "[&>p]:text-[18px] [&>p]:leading-[1.62] md:[&>p]:text-[clamp(19px,1.4vw,20px)]",
+  // One ruled pitch between blocks: a paragraph break skips exactly one line
+  // of the graph, like the pages it's set after.
+  "[&>*+*]:mt-[var(--letters-line-pitch)]",
+  "[&>p]:text-[18px] md:[&>p]:text-[clamp(19px,1.4vw,20px)]",
   "[&>blockquote]:border-l-2 [&>blockquote]:border-[var(--color-bordeaux)] [&>blockquote]:pl-5 [&>blockquote]:italic",
-  "[&>blockquote]:text-[18px] [&>blockquote]:leading-[1.62] md:[&>blockquote]:text-[clamp(19px,1.4vw,20px)]",
+  "[&>blockquote]:text-[18px] md:[&>blockquote]:text-[clamp(19px,1.4vw,20px)]",
   "[&>ul]:list-disc [&>ol]:list-decimal [&>ul]:pl-7 [&>ol]:pl-7",
-  "[&_li]:mt-2 [&_li]:text-[18px] [&_li]:leading-[1.62] md:[&_li]:text-[clamp(19px,1.4vw,20px)]",
+  "[&_li]:mt-2 [&_li]:text-[18px] md:[&_li]:text-[clamp(19px,1.4vw,20px)]",
   "[&_a]:text-[var(--treatment-ink)] [&_a]:underline [&_a]:decoration-[1px] [&_a]:underline-offset-[0.18em]",
   "[&>h2]:mt-14 [&>h2]:font-display [&>h2]:text-[clamp(24px,2.4vw,30px)] [&>h2]:font-normal [&>h2]:leading-[1.18]",
   "[&>h3]:mt-12 [&>h3]:font-display [&>h3]:text-[clamp(20px,2vw,24px)] [&>h3]:font-normal [&>h3]:leading-[1.22]",
@@ -60,11 +67,21 @@ function ordinal(n: number): string {
 }
 
 // Same ordinal voice everywhere the letter appears, so the index date is the
-// same object that opens the full letter.
+// same object that opens the full letter. No comma before the year — the
+// pages never dated themselves with one.
 export function formatLetterDate(iso: string): string {
   const d = new Date(`${iso}T12:00:00Z`);
   const month = d.toLocaleDateString("en-US", { month: "long", timeZone: "UTC" });
-  return `${month} ${ordinal(d.getUTCDate())}, ${d.getUTCFullYear()}`;
+  return `${month} ${ordinal(d.getUTCDate())} ${d.getUTCFullYear()}`;
+}
+
+// The header carries the actual day of the week, computed from the letter's
+// date (July 4th, 2036 is a Friday) — the pages always dated themselves with
+// it. One hand for the whole header: the writer's script.
+export function formatLetterDateWithWeekday(iso: string): string {
+  const d = new Date(`${iso}T12:00:00Z`);
+  const weekday = d.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
+  return `${weekday}, ${formatLetterDate(iso)}`;
 }
 
 // The letter's opening, in plain text. The index renders the real first words
@@ -101,10 +118,15 @@ export function LetterDate({
   readonly letter: Letter;
   readonly scale?: "index" | "post";
 }) {
+  // On the letter page the date box is exactly two ruled pitches (four graph
+  // squares) so the masthead stack advances in whole rules and the body's
+  // baselines land in registration with the graph below it. The header size
+  // is cap-anchored — capitals exactly two squares tall (--letters-date-size,
+  // fonts.ts), the way the pages always dated themselves.
   const metrics =
     scale === "index"
       ? { fontSize: "clamp(34px,8vw,40px)", lineHeight: "52px" }
-      : { fontSize: "clamp(38px,9vw,44px)", lineHeight: "56px" };
+      : { fontSize: "var(--letters-date-size)", lineHeight: "calc(var(--letters-line-pitch)*2)" };
 
   return (
     <p
@@ -120,7 +142,7 @@ export function LetterDate({
         data-letter-transition-slot="date"
         style={{ ...transitionStyle(letter, "date"), display: "inline-block" }}
       >
-        {formatLetterDate(letter.publishedAt)}
+        {formatLetterDateWithWeekday(letter.publishedAt)}
       </span>
     </p>
   );
@@ -137,9 +159,11 @@ export function LetterSalutation({ letter }: { readonly letter: Letter }) {
       className={LETTER_SALUTATION_CLASS}
       style={{
         margin: 0,
-        marginTop: "28px",
-        fontSize: "clamp(20px,1.6vw,22px)",
-        lineHeight: 1.4,
+        marginTop: "var(--letters-line-pitch)",
+        // The salutation is the same hand as the body — same square-derived
+        // size, one ruled pitch of line box.
+        fontSize: "var(--letters-body-size)",
+        lineHeight: "var(--letters-line-pitch)",
       }}
     >
       <span
@@ -169,7 +193,7 @@ export function LetterExcerpt({
       style={{
         ...transitionStyle(letter, "body"),
         marginBottom: 0,
-        maxHeight: "calc(1.62em * 4)",
+        maxHeight: "calc(var(--letters-line-pitch) * 4)",
         overflow: "hidden",
         WebkitMaskImage: "linear-gradient(to bottom, #000 0 82%, transparent 100%)",
         maskImage: "linear-gradient(to bottom, #000 0 82%, transparent 100%)",
@@ -185,7 +209,7 @@ export function LetterBody({ letter }: { readonly letter: Letter }) {
   const continuationHtml = letter.continuationHtml.trim();
 
   return (
-    <div data-letter-body data-letter-slot="body" className="mt-7">
+    <div data-letter-body data-letter-slot="body" className="mt-[var(--letters-line-pitch)]">
       {leadHtml ? (
         <div
           data-letter-body-lead
@@ -202,7 +226,7 @@ export function LetterBody({ letter }: { readonly letter: Letter }) {
         <div
           ref={syncLetterContinuationMetrics}
           data-letter-continuation
-          className={`${letterProseClassName} mt-7`}
+          className={`${letterProseClassName} mt-[var(--letters-line-pitch)]`}
           dangerouslySetInnerHTML={{ __html: continuationHtml }}
         />
       ) : null}

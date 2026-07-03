@@ -1,5 +1,5 @@
 import { Fragment } from "react";
-import { inkClassName } from "~/features/letters/ink";
+import { inkSpanClasses } from "~/features/letters/ink";
 
 // Render-time twin of ink.ts's inkWrapHtml, for text the server renders as
 // React rather than pre-built HTML (the index excerpt). Words count from 0 in
@@ -14,7 +14,7 @@ export function InkText({ slug, text }: { readonly slug: string; readonly text: 
         token === "" || /^\s+$/.test(token) ? (
           <Fragment key={i}>{token}</Fragment>
         ) : (
-          <span key={i} className={inkClassName(slug, wordIndex++)}>
+          <span key={i} className={inkSpanClasses(slug, wordIndex++)}>
             {token}
           </span>
         ),

@@ -11,10 +11,14 @@ html {
   scrollbar-gutter: stable;
 }
 
+/* The sheet's base: a touch less yellow than the original #fff4dc — the old
+   cream survives only in the seeded sun-fade pools (PaperSplotches in
+   routes/letters/route.tsx), so the page reads as unevenly aged rather than
+   uniformly tinted. */
 html,
 body {
   margin: 0;
-  background: #fff4dc;
+  background: #fff6e6;
   color: #0b0b0b;
   color-scheme: light;
 }
@@ -26,7 +30,7 @@ body {
   --chrome-lockup-h: 22px;
   --header-h: calc(var(--chrome-edge-gap) + var(--chrome-lockup-h) + var(--chrome-rule-gap));
   --header-scroll-offset: calc(var(--header-h) + 1.5rem);
-  --treatment-ground: #fff4dc;
+  --treatment-ground: #fff6e6;
   --treatment-ink: #0b0b0b;
   --treatment-accent: #0b0b0b;
   --treatment-wordmark: #0b0b0b;

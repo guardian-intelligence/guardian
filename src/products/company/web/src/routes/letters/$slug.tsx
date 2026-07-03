@@ -65,8 +65,9 @@ function letterJsonLd(letter: Letter) {
 }
 
 // A single letter. The form follows DESIGN.md: the date sits at the very
-// top, left-aligned to the column, sized to exactly two graph-paper cells
-// (2 × 28px) the way it was always written by hand. The title is the
+// top, left-aligned to the column, sized to exactly two ruled pitches
+// (2 × 32px — see linePitch in features/letters/fonts.ts, which the graph
+// itself derives from) the way it was always written by hand. The title is the
 // salutation — "Dear Shovon," — and renders directly under the date, in the
 // body's hand, the way a letter is actually addressed. The body opens
 // underneath on the same measure as the index preview, so browser view
