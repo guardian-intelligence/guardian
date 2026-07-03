@@ -67,11 +67,36 @@ function ordinal(n: number): string {
 }
 
 // Same ordinal voice everywhere the letter appears, so the index date is the
-// same object that opens the full letter.
+// same object that opens the full letter. (This plain form still serves the
+// OG card kicker; the page itself renders the two-hand header below.)
 export function formatLetterDate(iso: string): string {
   const d = new Date(`${iso}T12:00:00Z`);
   const month = d.toLocaleDateString("en-US", { month: "long", timeZone: "UTC" });
   return `${month} ${ordinal(d.getUTCDate())}, ${d.getUTCFullYear()}`;
+}
+
+// The date header's two hands, from the original pages: the weekday in
+// cursive — real care in the capital — then the rest of the date in prim,
+// deliberately-spaced print, the way grade-school assignments were dated:
+// "Friday," in script, "July 4th 2036" all straight and proper (raised
+// ordinal, spaced year digits, no comma — the pages don't carry one), before
+// the body drops back into the everyday hand.
+export function letterDateParts(iso: string): {
+  weekday: string;
+  month: string;
+  day: number;
+  daySuffix: string;
+  year: string;
+} {
+  const d = new Date(`${iso}T12:00:00Z`);
+  const day = d.getUTCDate();
+  return {
+    weekday: d.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" }),
+    month: d.toLocaleDateString("en-US", { month: "long", timeZone: "UTC" }),
+    day,
+    daySuffix: ordinal(day).slice(String(day).length),
+    year: String(d.getUTCFullYear()),
+  };
 }
 
 // The letter's opening, in plain text. The index renders the real first words
@@ -130,9 +155,37 @@ export function LetterDate({
         data-letter-transition-slot="date"
         style={{ ...transitionStyle(letter, "date"), display: "inline-block" }}
       >
-        {formatLetterDate(letter.publishedAt)}
+        <LetterDateHands iso={letter.publishedAt} />
       </span>
     </p>
+  );
+}
+
+// The two hands of the header (see letterDateParts). The print run sits at
+// ~0.58em of the script size — Pinyon's flourishes run tall while its body
+// runs small, so the prim print matches its optical weight there — with the
+// letter-spacing a careful hand would put on a blackboard, one more notch of
+// it between the year's digits, and the ordinal raised the way it was always
+// written after the day number.
+function LetterDateHands({ iso }: { readonly iso: string }) {
+  const parts = letterDateParts(iso);
+  const printStyle = {
+    fontFamily: "var(--treatment-body-font)",
+    fontWeight: "var(--letters-body-weight)" as const,
+    fontSize: "0.58em",
+    letterSpacing: "0.08em",
+  };
+  return (
+    <>
+      {parts.weekday},{" "}
+      <span style={printStyle}>
+        {parts.month} {parts.day}
+        <span style={{ fontSize: "0.55em", position: "relative", top: "-0.5em" }}>
+          {parts.daySuffix}
+        </span>{" "}
+        <span style={{ letterSpacing: "0.22em", marginLeft: "0.1em" }}>{parts.year}</span>
+      </span>
+    </>
   );
 }
 
