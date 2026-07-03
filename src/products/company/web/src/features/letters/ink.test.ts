@@ -34,5 +34,16 @@ describe("ink", () => {
     const css = inkClassRules('[data-treatment="letters"]');
     expect(css.match(/\.letter-ink-\d\{/g)).toHaveLength(INK_BUCKETS.length);
     expect(css).toContain(`'wght' ${INK_BUCKETS[0]?.wght}`);
+    expect(css).toContain(`top:${INK_BUCKETS[0]?.baselineShift}px`);
+    expect(css).toContain(`letter-spacing:${INK_BUCKETS[0]?.tracking}em`);
+  });
+
+  // The drift must stay atmosphere: individual words wobble, but a line of
+  // many words averages back onto the ruled baseline at its designed rhythm.
+  it("hand drift averages out to the ruled line", () => {
+    const meanShift = INK_BUCKETS.reduce((s, b) => s + b.baselineShift, 0) / INK_BUCKETS.length;
+    const meanTracking = INK_BUCKETS.reduce((s, b) => s + b.tracking, 0) / INK_BUCKETS.length;
+    expect(Math.abs(meanShift)).toBeLessThan(0.05);
+    expect(Math.abs(meanTracking)).toBeLessThan(0.002);
   });
 });

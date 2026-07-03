@@ -106,5 +106,19 @@ export function lettersTypographyCss(): string {
     `{font-weight:var(--letters-body-weight);font-size:var(--letters-body-size);}` +
     `[data-treatment="letters"] [data-letter-slot="salutation"]` +
     `{font-weight:var(--letters-body-weight);}`;
-  return faces + vars + body + inkClassRules('[data-treatment="letters"]');
+  // The gel bloom: a zero-offset hairline shadow in the ink's own colour.
+  // Browsers antialias each glyph in isolation against the alpha ramp gamma
+  // gives them; design tools (Figma) rasterise with gamma-aware blending, so
+  // their stems hold weight and their edges finish soft instead of thin.
+  // Filling the outer half of that alpha ramp with 38% ink is the closest CSS
+  // gets: edges read soft, stems read inked, nothing reads blurred. Inherited
+  // text-shadow, so the ink spans (and their opacity) carry it for free.
+  // text-shadow is the third knob next to ink.ts INK_BUCKETS: blur radius =
+  // bloom size (device px at 2x), colour percentage = bloom strength.
+  const bloom =
+    `[data-treatment="letters"] [data-letter-body],` +
+    `[data-treatment="letters"] [data-letter-slot="body"],` +
+    `[data-treatment="letters"] [data-letter-slot="salutation"]` +
+    `{text-shadow:0 0 0.5px color-mix(in oklab,currentColor 38%,transparent);}`;
+  return faces + vars + body + bloom + inkClassRules('[data-treatment="letters"]');
 }
