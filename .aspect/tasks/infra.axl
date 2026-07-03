@@ -1549,7 +1549,7 @@ def _bundle_impl(ctx):
         label = "fetch CI signature bundle for images.lock",
     )
     if rc != 0:
-        ctx.std.io.stderr.write("ERROR: no CI signature bundle for images.lock sha256 " + lockhash + " — this exact lock has not been signed by the images-lock-sign workflow on main. Merge the lock (or dispatch the workflow) before building a drive.\n")
+        ctx.std.io.stderr.write("ERROR: could not fetch the CI signature bundle for images.lock sha256 " + lockhash + ". Most common cause: this exact lock has not been signed by the images-lock-sign workflow on main (merge the lock or dispatch the workflow). Also check that the local docker config is authenticated to ghcr.io — the supply-chain package is private.\n")
         return 1
     rc = checked_spawn(
         ctx,
@@ -1570,6 +1570,10 @@ def _bundle_impl(ctx):
         label = "verify images.lock signature (pinned identity + Sigstore root)",
     )
     if rc != 0:
+        # Do not leave a drive dir that looks complete with a signature that
+        # failed verification.
+        _capture_success(ctx, "rm", ["-f", out_dir + "/images.lock.sigbundle"], label = "drop unverifiable signature bundle")
+        ctx.std.io.stderr.write("ERROR: the fetched signature bundle did not verify against the pinned identity + Sigstore root; removed it from " + out_dir + ". The drive is NOT complete.\n")
         return rc
 
     return checked_spawn(

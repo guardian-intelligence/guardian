@@ -46,22 +46,28 @@ jobs:
 
       # oras push (not cosign upload blob) so the layer carries the filename
       # title annotation — `oras pull` in the bundle task fetches it by name.
+      # One tag only, keyed by the lock's sha256: a floating "latest" tag has
+      # no consumer and would race concurrent pushes.
       - name: Sign images.lock and publish the signature bundle
+        id: sign
         run: |
           lock=src/infrastructure/bootstrap/bundle/images.lock
           lockhash="$(sha256sum "$lock" | cut -d' ' -f1)"
           cosign sign-blob --yes --bundle images.lock.sigbundle "$lock"
           oras push "ghcr.io/guardian-intelligence/supply-chain:images.lock-${lockhash}" \
             images.lock.sigbundle:application/json
-          oras push "ghcr.io/guardian-intelligence/supply-chain:images.lock-latest" \
-            images.lock.sigbundle:application/json
           echo "signed lock sha256:${lockhash}"
+          echo "lockhash=$lockhash" >> "$GITHUB_OUTPUT"
 
+      # Verify what ghcr actually serves, not the local file — a corrupted
+      # or partial push must fail here, not at the next drive build.
       - name: Verify the published bundle against the pinned identity
         env:
           IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/images-lock-sign.yml@refs/heads/main
           ISSUER: https://token.actions.githubusercontent.com
         run: |
+          mkdir published && cd published
+          oras pull "ghcr.io/guardian-intelligence/supply-chain:images.lock-${{ steps.sign.outputs.lockhash }}"
           cosign verify-blob --bundle images.lock.sigbundle \
             --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" \
-            src/infrastructure/bootstrap/bundle/images.lock
+            ../src/infrastructure/bootstrap/bundle/images.lock

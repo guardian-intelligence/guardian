@@ -285,10 +285,12 @@ func verifyBundle(dir string, lock []byte, refs []string, revision string) ([]st
 	return lines, nil
 }
 
-// verifyHaulerCoverage checks that every lock ref's derived hauler entries
-// (digest form, plus tag form for tagged refs — the same derivation rules
-// haulerManifest applies) appear in the bundle's hauler manifest, so the
-// haul was built from a projection covering the whole lock.
+// verifyHaulerCoverage checks that the bundle's hauler manifest entry set
+// EQUALS the set derived from the lock refs (digest form, plus tag form for
+// tagged refs — the same derivation rules haulerManifest applies). A missing
+// entry means the haul was built from a projection that never saw a lock
+// ref; an extra entry means the haul carries content the lock never
+// declared. Both are binding failures.
 func verifyHaulerCoverage(haulerPath string, refs []string) error {
 	payload, err := os.ReadFile(haulerPath)
 	if err != nil {
@@ -302,13 +304,23 @@ func verifyHaulerCoverage(haulerPath string, refs []string) error {
 	for _, image := range manifest.Spec.Images {
 		names[image.Name] = true
 	}
+	derived := make(map[string]bool, 2*len(refs))
 	for _, ref := range refs {
 		digestForm, tagForm := haulerRefForms(ref)
+		derived[digestForm] = true
 		if !names[digestForm] {
 			return fmt.Errorf("hauler manifest binding failed: lock ref %s has no digest entry %s in %s", ref, digestForm, haulerPath)
 		}
-		if tagForm != "" && !names[tagForm] {
-			return fmt.Errorf("hauler manifest binding failed: lock ref %s has no tag entry %s in %s", ref, tagForm, haulerPath)
+		if tagForm != "" {
+			derived[tagForm] = true
+			if !names[tagForm] {
+				return fmt.Errorf("hauler manifest binding failed: lock ref %s has no tag entry %s in %s", ref, tagForm, haulerPath)
+			}
+		}
+	}
+	for _, image := range manifest.Spec.Images {
+		if !derived[image.Name] {
+			return fmt.Errorf("hauler manifest binding failed: entry %s in %s derives from no lock ref", image.Name, haulerPath)
 		}
 	}
 	return nil

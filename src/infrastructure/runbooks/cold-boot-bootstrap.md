@@ -68,14 +68,16 @@ practically requires `bazelisk run //src/tools/hauler -- login docker.io`
 credentials or several `aspect infra bundle --resume` windows; resume
 re-fetches only the refs the store is missing.
 
-The complete dark drive is: `haul.tar.zst`, `bundle-manifest.yaml`,
-`images.lock.sigbundle`, the source-built hauler and bundle binaries
-(`bazelisk build //src/tools/hauler:hauler //src/infrastructure/cmd/bundle:bundle`),
-the pinned flux CLI binary
+The complete dark drive is: the `dist/bundle/` output (`haul.tar.zst`,
+`bundle-manifest.yaml`, `images.lock.sigbundle`, `hauler-manifest.yaml`) as
+`<drive>/bundle/`, the source-built hauler and bundle binaries
+(`bazelisk build //src/tools/hauler:hauler //src/infrastructure/cmd/bundle:bundle`
+— copy the bundle binary to the drive as `bundle-bin` so it cannot be
+confused with the `bundle/` directory), the pinned flux CLI binary
 (from `$(bazelisk info output_base)/external/+http_archive+flux_linux_amd64/`
 — like every fetched tool it exists only where Bazel has run with network),
-the pinned cosign binary (from
-`$(bazelisk info output_base)/external/+http_file+cosign_linux_amd64/file/`),
+the pinned cosign binary (copied from
+`$(bazelisk info output_base)/external/+http_file+cosign_linux_amd64/file/cosign`),
 this repo checkout at the same revision (which carries the pinned Sigstore
 trusted root at `src/infrastructure/bootstrap/bundle/sigstore-trusted-root.json`
 — refresh it when refreshing the drive; Sigstore rotates it on the order of
@@ -84,26 +86,29 @@ months), and the custody bundle above.
 Dark mode is entered and exited via PRs plus four bring-up steps:
 
 0. **Verify the drive** (mirror host, offline — no network needed; identities
-   are recorded in `docs/supply-chain-design.md`):
+   are recorded in `docs/supply-chain-design.md`). Run from the repo checkout
+   root, with `<drive>` the mounted drive and both binaries the prebuilt
+   copies the drive carries (do not `bazelisk run` here: `bazel run`
+   executes in the runfiles directory, so the repo-relative paths below
+   would not resolve):
 
    ```sh
-   cosign verify-blob --bundle images.lock.sigbundle \
+   <drive>/cosign verify-blob --bundle <drive>/bundle/images.lock.sigbundle \
      --certificate-identity "https://github.com/guardian-intelligence/guardian/.github/workflows/images-lock-sign.yml@refs/heads/main" \
      --certificate-oidc-issuer https://token.actions.githubusercontent.com \
      --trusted-root src/infrastructure/bootstrap/bundle/sigstore-trusted-root.json \
      src/infrastructure/bootstrap/bundle/images.lock
 
-   bazelisk run //src/infrastructure/cmd/bundle -- --verify \
+   <drive>/bundle-bin --verify \
      --bundle-dir <drive>/bundle \
-     --images-lock src/infrastructure/bootstrap/bundle/images.lock \
+     --images-lock "$(pwd)/src/infrastructure/bootstrap/bundle/images.lock" \
      --revision "$(git rev-parse HEAD)"
    ```
 
-   The first command proves the lock is the one reviewed main history
-   signed; the second proves the haul and hauler-manifest on the drive are
-   hash-bound to that lock. (If Bazel has never run on the mirror host, run
-   the prebuilt `bundle` binary carried on the drive instead of
-   `bazelisk run`.) Only then load the store.
+   The first command proves the drive's lock signature covers exactly the
+   checkout's `images.lock` and was made by reviewed main history; the
+   second proves the haul and hauler-manifest on the drive are hash-bound
+   to that same lock. Only then load the store.
 
 1. **Pre-drill PR**: flip `darkBundleMirror.enabled: true` in
    `src/infrastructure/talm/values.yaml` and regenerate the node configs —

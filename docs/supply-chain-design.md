@@ -31,7 +31,7 @@ Verifiers MUST pin these exact identity strings (OIDC issuer
 | Artifact | Producer | Signature/attestation | Location |
 |---|---|---|---|
 | `company-site` image | `company-site-image` workflow on main | cosign keyless signature + SPDX SBOM attestation (`--type spdxjson`) | ghcr.io, attached to the digest |
-| `images.lock` | `images-lock-sign` workflow on main pushes touching the lock | `cosign sign-blob --bundle` (embeds Fulcio cert + Rekor proof), pushed with `oras push` so the layer carries a filename title | `ghcr.io/guardian-intelligence/supply-chain:images.lock-<sha256>` and `:images.lock-latest` (package stays private — only authenticated drive builds fetch it; dark bring-up reads it from the drive) |
+| `images.lock` | `images-lock-sign` workflow on main pushes touching the lock | `cosign sign-blob --bundle` (embeds Fulcio cert + Rekor proof), pushed with `oras push` so the layer carries a filename title | `ghcr.io/guardian-intelligence/supply-chain:images.lock-<sha256>` (one tag per lock hash, no floating tag; package stays private — only authenticated drive builds fetch it, dark bring-up reads it from the drive) |
 
 The dark-uplink haul is *derived* from `images.lock` and every blob in it is
 digest-addressed, so a verified lock plus hash verification of the haul

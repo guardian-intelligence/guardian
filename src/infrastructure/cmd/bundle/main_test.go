@@ -323,6 +323,29 @@ func TestVerifyBundleHaulerManifestMissingRef(t *testing.T) {
 	}
 }
 
+// An entry in the hauler manifest that derives from no lock ref means the
+// haul carries content the lock never declared — the entry sets must be
+// EQUAL, not merely lock-covering, so verify must fail and name the extra.
+func TestVerifyBundleHaulerManifestExtraRef(t *testing.T) {
+	lock := []byte(fixtureLock)
+	dir, refs := writeBundleDir(t, lock, []byte("haul-bytes"), "abc123")
+	extra := "ghcr.io/evil/extra@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	padded, err := haulerManifest(append(append([]string{}, refs...), extra))
+	if err != nil {
+		t.Fatalf("haulerManifest() error = %v", err)
+	}
+	if err := os.WriteFile(dir+"/hauler-manifest.yaml", padded, 0o644); err != nil {
+		t.Fatalf("write padded hauler manifest: %v", err)
+	}
+	_, err = verifyBundle(dir, lock, refs, "abc123")
+	if err == nil {
+		t.Fatalf("verifyBundle() accepted a hauler manifest with an entry not derived from the lock")
+	}
+	if !strings.Contains(err.Error(), "hauler manifest binding failed") || !strings.Contains(err.Error(), extra) {
+		t.Fatalf("verifyBundle() error = %v, want hauler manifest binding detail naming %s", err, extra)
+	}
+}
+
 func TestFilterStoredRefs(t *testing.T) {
 	dir := t.TempDir()
 	index := dir + "/index.json"
