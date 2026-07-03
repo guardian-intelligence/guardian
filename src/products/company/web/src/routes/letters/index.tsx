@@ -44,9 +44,9 @@ function LettersIndex() {
       className={`${LETTER_READING_COLUMN_CLASS} ${LETTER_INDEX_PAGE_PADDING_CLASS}`}
     >
       <ul className={LETTER_TEXT_MEASURE_CLASS}>
-        {letters.map((letter) => (
+        {letters.map((letter, index) => (
           <li key={letter.slug}>
-            <LetterEntry letter={letter} />
+            <LetterEntry letter={letter} morph={index === 0} />
           </li>
         ))}
       </ul>
@@ -54,7 +54,11 @@ function LettersIndex() {
   );
 }
 
-function LetterEntry({ letter }: { letter: Letter }) {
+// Only the top-most sheet morphs into the letter page: a morph from an entry
+// lower on the index tweens its slots across the whole viewport, which reads
+// as the sheet flying rather than settling. The rest of the entries hand off
+// through the plain root crossfade.
+function LetterEntry({ letter, morph }: { letter: Letter; morph: boolean }) {
   const excerpt = excerptOf(letter.leadHtml || letter.bodyHtml);
 
   return (
@@ -67,9 +71,9 @@ function LetterEntry({ letter }: { letter: Letter }) {
       className="block py-14 no-underline outline-none focus-visible:ring-2 focus-visible:ring-[var(--treatment-rule-color)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--treatment-ground)] sm:py-16"
     >
       <div style={{ margin: 0 }}>
-        <LetterDate letter={letter} scale="index" />
-        <LetterSalutation letter={letter} />
-        <LetterExcerpt letter={letter} excerpt={excerpt} />
+        <LetterDate letter={letter} scale="index" morph={morph} />
+        <LetterSalutation letter={letter} morph={morph} />
+        <LetterExcerpt letter={letter} excerpt={excerpt} morph={morph} />
         <div className="mt-8 flex justify-end">
           <span className="font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--treatment-muted-meta)] underline decoration-[var(--treatment-rule-color)] decoration-[1px] underline-offset-[6px]">
             Read letter

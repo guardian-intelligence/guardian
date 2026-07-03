@@ -202,8 +202,18 @@ export function lettersTypographyCss(): string {
   // displacement leans each word a degree or two while it stays anchored to
   // the ruling; a fine second stage roughens glyph edges like ink wicking
   // into fibre. Paint-only: the DOM stays selectable, findable text.
+  // Applied per block, never to the [data-letter-body] container: WebKit
+  // refuses to rasterise an SVG filter over a region the size of the whole
+  // letter (~44MP at 3x) and paints NOTHING — iPhones showed a blank sheet
+  // below the salutation. Per-paragraph regions are ~1MP each; the noise
+  // field restarts at each block's origin, indistinguishable for noise.
   const hand =
-    `[data-treatment="letters"] [data-letter-slot="body"],` +
+    `[data-treatment="letters"] [data-letter-body] p,` +
+    `[data-treatment="letters"] [data-letter-body] li,` +
+    `[data-treatment="letters"] [data-letter-body] blockquote,` +
+    `[data-treatment="letters"] [data-letter-body] h2,` +
+    `[data-treatment="letters"] [data-letter-body] h3,` +
+    `[data-treatment="letters"] p[data-letter-slot="body"],` +
     `[data-treatment="letters"] [data-letter-slot="salutation"]` +
     `{filter:url(#letters-hand-filter);}`;
   // The gel bloom: a zero-offset hairline shadow in the ink's own colour.
