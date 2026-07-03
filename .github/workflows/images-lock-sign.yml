@@ -53,14 +53,19 @@ jobs:
         run: |
           lock=src/infrastructure/bootstrap/bundle/images.lock
           lockhash="$(sha256sum "$lock" | cut -d' ' -f1)"
-          cosign sign-blob --yes --bundle images.lock.sigbundle "$lock"
+          # --new-bundle-format: the protobuf sigstore bundle is the only
+          # format cosign accepts with --trusted-root, i.e. the only one
+          # verifiable offline at dark bring-up.
+          cosign sign-blob --yes --new-bundle-format --bundle images.lock.sigbundle "$lock"
           oras push "ghcr.io/guardian-intelligence/supply-chain:images.lock-${lockhash}" \
             images.lock.sigbundle:application/json
           echo "signed lock sha256:${lockhash}"
           echo "lockhash=$lockhash" >> "$GITHUB_OUTPUT"
 
       # Verify what ghcr actually serves, not the local file — a corrupted
-      # or partial push must fail here, not at the next drive build.
+      # or partial push must fail here, not at the next drive build. Uses the
+      # repo-pinned trusted root so every signing run rehearses the exact
+      # offline verification from the cold-boot runbook's step 0.
       - name: Verify the published bundle against the pinned identity
         env:
           IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/images-lock-sign.yml@refs/heads/main
@@ -70,4 +75,5 @@ jobs:
           oras pull "ghcr.io/guardian-intelligence/supply-chain:images.lock-${{ steps.sign.outputs.lockhash }}"
           cosign verify-blob --bundle images.lock.sigbundle \
             --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" \
+            --trusted-root ../src/infrastructure/bootstrap/bundle/sigstore-trusted-root.json \
             ../src/infrastructure/bootstrap/bundle/images.lock
