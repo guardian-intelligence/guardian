@@ -13,3 +13,46 @@ state credentials outside the cluster so a wiped cluster can still be rebuilt.
 | `cloudflare_r2_access_key_id` and `cloudflare_r2_secret_access_key` | OpenTofu S3-compatible backend for repo-owned state | Off-cluster break-glass or CI secret store; injected only into the apply environment | R2 `Object Read & Write`, scoped to the OpenTofu state bucket `guardian-vault` |
 
 User must pay $10/mo to enable CloudFlare LB with 3 endpoints (1 for each ingress node). This is not enabled by default.
+
+## Talos access from the operator workstation
+
+- The live talosconfig is `src/infrastructure/talm/talosconfig` (gitignored;
+  its encrypted twin `talosconfig.encrypted` is committed — decryption is
+  covered by the cold-boot runbook). **Do not trust `~/.talos/config`**: it
+  holds endpoints of a previous cluster generation and every one of them
+  times out. If `talosctl` hangs on port 50000, you are almost certainly
+  using the stale global config.
+- Current node public IPs are recorded in the `# talm:` modeline on the
+  first line of each `src/infrastructure/talm/nodes/*.yaml` — that is the
+  source of truth and it changes on reimage. Port 50000 is open on those
+  IPs from the operator workstation.
+- The kube API is reachable via the kubeconfig kept off-repo at
+  `~/guardian-custody/kubeconfig-public` on the operator workstation.
+- Machine config applies are per-node, base plus overlay:
+  `talm apply -f nodes/<node>.yaml -f nodes/<node>-overlay.yaml`.
+
+## Regenerating node configs (`talm template -I`)
+
+The install-disk regression is fixed (`talos.install.disk_pin` emits
+`diskSelector.serial`; a bare `/dev/nvmeXn1` can point at a different
+physical disk on the next boot). Regen output is still not byte-convergent:
+talm's re-marshal drops quotes and reorders map keys, discovered-disk
+comments follow boot enumeration order, and live network state (hostname,
+MTU, VLANConfig) echoes into the base files that the `*-overlay.yaml` files
+own. Review regen diffs hunk-by-hunk before committing them; never commit a
+`diskSelector` → `disk:` change.
+
+## Hardware watchdog (armed on all nodes since PR #338)
+
+Every node arms its AMD SP5100 TCO chipset watchdog (`/dev/watchdog0`,
+1m timeout) via a `WatchdogTimerConfig` document; a hard kernel hang
+reboots the node with no operator action (measured: 2m22s crash → Ready,
+OpenBao replica auto-unsealed at +4m). Verify with
+`talosctl get watchdogtimerstatuses` (sysfs `state` must read `active`).
+To re-run the positive test: set `kernel.panic=0` first (Talos defaults it
+to 10, and a panic self-reboot contaminates the result), then
+`echo c > /proc/sysrq-trigger` from a privileged debug pod; afterwards
+`/sys/class/watchdog/watchdog0/bootstatus` must read 32 (WDIOF_CARDRESET —
+the chipset recording that it caused the last reset). Watchdog recoveries
+are silent by design; the dead-man's-switch alerting work is what makes
+them observable.
