@@ -15,7 +15,7 @@ I wish someone told me having a son would feel like meeting a smaller, kinder, f
 
 I love our morning walks and how he stops to teach me the laughing gulls names. There was a new one today so we picked out a name together. It’s “Donnie,” just so you know.
 
-And did you know he has a crush? He told me over breakfast that when they're nearby, his stomach tries to escape through his chest, so he asked me what he should do. It reminded me of when we met — those first few months — falling in love at our first Odesza. Do you remember? So I smiled and told him, “Ask them to watch you play their favorite game”. He rolled his eyes because he’s sick of hearing our story, but I wonder what you’d say if he asked you.
+And did you know he has a crush? He told me over breakfast that when they're nearby, his stomach tries to escape through his chest, so he asked me what he should do. It reminded me of when we met — those first few months — falling in love at our first Odesza. Do you remember? So I smiled and told him, “Find out what their favorite game is, then ask them to watch you play!” He rolled his eyes because he’s sick of hearing our story, but I wonder what you’d say if he asked you.
 
 You should see how tender he is with the parts of me I used to hide. He's been practicing his laugh in the car. “So it can sound just like yours,” he tells me. And I love how, when he makes me cry, he holds out more tissues than I could ever use. Through tears I see that there’s a crack in everything. That’s how his light gets in.
 
