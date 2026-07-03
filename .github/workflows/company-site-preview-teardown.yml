@@ -62,7 +62,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           marker="<!-- company-site-preview -->"
-          body="$(printf '%s\n🧹 Preview torn down (PR closed) — %s' "$marker" "$(date -u +%FT%TZ)")"
+          body="$(printf '%s\nPreview torn down.' "$marker")"
           existing="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --paginate \
             --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -1)"
           if [ -n "$existing" ]; then
