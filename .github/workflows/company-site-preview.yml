@@ -1,9 +1,16 @@
 # Vercel-style preview deploys for company-site. On every push to a PR that
 # touches the site: build the image, push it to ghcr.io by digest (no tag),
-# render per-PR manifests onto the `previews` orchestration branch, wait for
-# Flux + external-dns to converge, and pin a sticky comment with the URL.
-# Teardown on close lives in company-site-preview-teardown.yml; the static
-# cluster half is documented in src/infrastructure/deployments/company/previews.
+# render per-PR manifests onto the `previews` orchestration branch, register a
+# GitHub deployment (transient environment pr-<N> — this is what populates the
+# PR's deployment card and the branch's deployments panel), wait for Flux +
+# external-dns to converge, then flip the deployment to success/failure and pin
+# a sticky comment with the URL. Teardown on close lives in
+# company-site-preview-teardown.yml; the static cluster half is documented in
+# src/infrastructure/deployments/company/previews.
+#
+# Kargo deliberately does NOT drive previews: its Stages are long-lived CRs
+# with no ephemeral-per-PR primitive and no deployments-API awareness — it
+# promotes merged work to prod, and that's the whole of its job.
 name: company-site-preview
 
 on:
@@ -40,6 +47,7 @@ jobs:
       contents: write # push rendered manifests to the previews branch
       packages: write # push the preview image digest to ghcr.io
       pull-requests: write # sticky preview comment
+      deployments: write # register the pr-<N> transient environment
     env:
       PR: ${{ github.event.pull_request.number }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -95,27 +103,78 @@ jobs:
           echo "::error::could not push to previews branch after 5 attempts" >&2
           exit 1
 
+      - name: Register GitHub deployment
+        id: deployment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # required_contexts:[] — the deployment must not gate on this PR's
+          # own in-flight checks; the environment IS how we report state.
+          payload="$(jq -n --arg ref "$HEAD_SHA" --arg env "pr-${PR}" \
+            '{ref:$ref, environment:$env, transient_environment:true, auto_merge:false,
+              required_contexts:[], description:"company-site preview"}')"
+          id="$(gh api "repos/${GITHUB_REPOSITORY}/deployments" --input - --jq '.id' <<< "$payload")"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          gh api "repos/${GITHUB_REPOSITORY}/deployments/${id}/statuses" \
+            -f state=in_progress -f environment_url="https://${HOST}" \
+            -f description="pushed to previews branch; waiting for Flux + DNS + TLS" > /dev/null
+          echo "deployment ${id} registered for pr-${PR}"
+
       - name: Wait for preview to serve this commit
         id: converge
         continue-on-error: true
         run: |
           echo "polling https://${HOST} for guardian:commit-sha == ${HEAD_SHA}"
-          deadline=$((SECONDS + 720))
+          # Tight on purpose: measured convergence is ~1m (pr-354's ReplicaSet
+          # appeared 13s after the manifest push, image already node-cached),
+          # so past 6m something is wrong and should say so loudly, not grind.
+          # Resolve via 1.1.1.1 (fresh records; the runner's stub resolver
+          # negative-caches pre-creation NXDOMAINs) and log status + title per
+          # probe: the pr-354 poll printed "nothing yet" for its whole window
+          # WHILE the pod was serving — a runner-only blindness that smells
+          # like Cloudflare challenging datacenter IPs, which curl -f would
+          # swallow silently. No -f: we want to SEE the 403/challenge.
+          deadline=$((SECONDS + 360))
           while [ $SECONDS -lt $deadline ]; do
-            served="$(curl -fsSL --max-time 10 "https://${HOST}/" 2>/dev/null \
-              | grep -o 'name="guardian:commit-sha" content="[a-f0-9]*"' \
+            ip="$(dig +short @1.1.1.1 A "$HOST" 2>/dev/null | grep -E '^[0-9.]+$' | head -1)"
+            resolve=()
+            [ -n "$ip" ] && resolve=(--resolve "${HOST}:443:${ip}")
+            resp="$(curl -sSL --max-time 10 "${resolve[@]}" -w $'\n%{http_code}' "https://${HOST}/" 2>/dev/null || true)"
+            code="${resp##*$'\n'}"
+            body="${resp%$'\n'*}"
+            served="$(grep -o 'name="guardian:commit-sha" content="[a-f0-9]*"' <<< "$body" \
               | grep -o '[a-f0-9]\{40\}' || true)"
             if [ "$served" = "$HEAD_SHA" ]; then
               echo "live: https://${HOST}"
               echo "status=live" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            echo "…serving '${served:-nothing yet}' ($((deadline - SECONDS))s left)"
-            sleep 15
+            title="$(grep -o '<title>[^<]*' <<< "$body" | head -1 | cut -c8-70 || true)"
+            echo "$(date -u +%T) …serving '${served:-nothing}' http=${code:-none} title='${title:-}' via ${ip:-system-dns} ($((deadline - SECONDS))s left)"
+            sleep 10
           done
           echo "status=pending" >> "$GITHUB_OUTPUT"
-          echo "::warning::preview did not converge within 12m — Flux/DNS may still be settling, or the previews infra is not on main yet"
+          echo "::warning::preview did not converge within 6m — check the http/title probe lines above: 403s or challenge titles mean Cloudflare is blocking the runner, not a broken preview"
           exit 1
+
+      - name: Report deployment state
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STATUS: ${{ steps.converge.outputs.status || 'pending' }}
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.id }}
+        run: |
+          if [ "$STATUS" = "live" ]; then
+            state=success
+            desc="serving ${HEAD_SHA}"
+          else
+            state=failure
+            desc="did not converge within 6m — check Flux, external-dns, or the previews branch"
+          fi
+          # A success auto-inactivates this environment's older deployments.
+          gh api "repos/${GITHUB_REPOSITORY}/deployments/${DEPLOYMENT_ID}/statuses" \
+            -f state="$state" -f environment_url="https://${HOST}" \
+            -f description="$desc" > /dev/null
+          echo "deployment ${DEPLOYMENT_ID}: ${state}"
 
       - name: Post sticky preview comment
         env:
