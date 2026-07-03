@@ -321,5 +321,9 @@ spec:
     - name: guardian-system
     - name: guardian-mgmt-dns-controller
   prune: true
-  wait: true
+  # Apply-only, deliberately: this slice applies the guardian-company-previews
+  # Kustomization, which dependsOn THIS slice — wait: true would deadlock on
+  # that cycle (infra waits for the child's Ready; the child waits for infra).
+  # Everything else here (Cilium policies, GitRepository) is trivially ready.
+  wait: false
   timeout: 5m
