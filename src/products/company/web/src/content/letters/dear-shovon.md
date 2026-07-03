@@ -47,7 +47,7 @@ I sat with her and watched her sew and get so focused neither of us said a word 
 
 She paused for a moment and then jumped into my arms and hugged me tight. “I miss being little" she said, and I felt her tears pool up on my sweater. I told her no matter how much she grows up that she’ll always be my little baby, and she liked that better and fell asleep on my lap and we stayed like that for I don’t know how long.
 
-No one told me having kids would make my heart a compass that always points home. That no matter how much we fight and yell and say things we don't mean, and no matter how much our family breaks, we'll find a way back to each other and become strong in the broken places.
+No one told me having kids would make my heart a compass that always points home. That no matter how much we fight and yell and say things we don't mean, and no matter how much our hearts break, we'll come home to each other and become strong in the broken places.
 
 No one told me any of this. But it's better, I think, because I got to learn it from them.
 
