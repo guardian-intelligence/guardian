@@ -40,6 +40,14 @@ docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f
 ghcr.io/external-secrets/charts/external-secrets:0.10.4@sha256:ec681d8b8ee3b5d0a016b1d4dde28dc91ebafa106841dece35722c371b84f49c
 # Kargo helm chart (pulled by source-controller, NOT containerd)
 ghcr.io/akuity/kargo-charts/kargo:1.10.8@sha256:3090ccc64bc89a04138be187a4dbb7cd4be4a10a29cc6c7f336e16d7770c985c
+# Flagger helm chart (pulled by source-controller, NOT containerd)
+ghcr.io/fluxcd/charts/flagger:1.43.0@sha256:31d6fad48f45fd5d73190ff80f9b047689e14cef762b5b7073a3dc643f3619aa
+
+# --- Flagger controller image (pinned this PR via postRenderers in
+# guardian/flagger/flagger-helmrelease.yaml; not yet in the "running
+# workload" scrape below because this install hasn't gone live yet --
+# move it down there once a post-deploy scrape confirms it) ---
+ghcr.io/fluxcd/flagger@sha256:bbf959d58586b403b2a67167042e90a36c941665478ffba67afd7cdfbb571572
 
 # --- Kubernetes system images actually held by the rebuilt cluster (2026-07-02 drill) ---
 # Chart.yaml pins kubernetesVersion v1.34.3 (NOT the Talos v1.13 default v1.36);

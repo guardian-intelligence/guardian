@@ -1,0 +1,79 @@
+# Flagger — the progressive-delivery controller. It watches Canary CRs
+# alongside a target Deployment, drives blue/green (or weighted-canary)
+# rollouts, and gates promotion on Prometheus-compatible metric analysis plus
+# webhook checks. This install is deliberately mesh-free: `meshProvider:
+# kubernetes` means Flagger does its traffic switch with plain ClusterIP
+# Service selector swaps (clone target Deployment -> `<name>-primary`, run
+# analysis against the canary Service, flip the apex Service selector once
+# healthy) — no Istio/Linkerd/ingress-annotation dependency, matching
+# AGENTS.md's progressive-delivery doctrine without adding a service mesh.
+#
+# metricsServer points at this cluster's VictoriaMetrics cluster-mode select
+# endpoint (same Prometheus-compatible query API the observability drills
+# already use: tenant-root's vmselect-shortternm on 8481, path
+# /select/0/prometheus — Flagger appends /api/v1/query itself).
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: flagger-chart
+  namespace: flagger
+spec:
+  interval: 1h
+  url: oci://ghcr.io/fluxcd/charts/flagger
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: extract
+  ref:
+    tag: 1.43.0
+    digest: sha256:31d6fad48f45fd5d73190ff80f9b047689e14cef762b5b7073a3dc643f3619aa
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: flagger
+  namespace: flagger
+spec:
+  interval: 10m
+  timeout: 5m
+  chartRef:
+    kind: OCIRepository
+    name: flagger-chart
+  install:
+    crds: Create
+    remediation:
+      retries: -1
+  upgrade:
+    crds: CreateReplace
+  values:
+    meshProvider: kubernetes
+    metricsServer: http://vmselect-shortterm.tenant-root.svc:8481/select/0/prometheus
+    prometheus:
+      install: false
+  postRenderers:
+    - kustomize:
+        images:
+          - name: ghcr.io/fluxcd/flagger
+            digest: sha256:bbf959d58586b403b2a67167042e90a36c941665478ffba67afd7cdfbb571572
+        # The chart renders no securityContext at all; the flagger namespace
+        # enforces PodSecurity restricted, which requires these fields
+        # declared (same fix applied to Kargo's Deployment in
+        # ../promotion/kargo-helmrelease.yaml).
+        patches:
+          - target:
+              kind: Deployment
+              labelSelector: app.kubernetes.io/name=flagger
+            patch: |
+              - op: add
+                path: /spec/template/spec/securityContext
+                value:
+                  runAsNonRoot: true
+                  runAsUser: 65534
+                  runAsGroup: 65534
+                  seccompProfile:
+                    type: RuntimeDefault
+              - op: add
+                path: /spec/template/spec/containers/0/securityContext
+                value:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop: ["ALL"]
