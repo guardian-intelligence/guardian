@@ -1,0 +1,36 @@
+load("@rules_oci//oci:defs.bzl", "oci_load", "oci_push")
+
+alias(
+    name = "image",
+    actual = "//src/products/viteplus-monorepo/apps/guardianintelligence-web:image",
+    visibility = ["//visibility:public"],
+)
+
+oci_load(
+    name = "load",
+    image = ":image",
+    repo_tags = ":repo_tags.txt",
+)
+
+# Pushed by CI (.github/workflows/company-site-image.yml) on merges to main,
+# after verifying the built digest matches the pin in
+# src/infrastructure/deployments/company/prod/web.yaml. ghcr.io is public and
+# survives cluster reimages, so cold boots need no registry repopulation.
+oci_push(
+    name = "push",
+    image = ":image",
+    remote_tags = ["edge"],
+    repository = "ghcr.io/guardian-intelligence/company-site",
+    visibility = ["//visibility:public"],
+)
+
+# Pushed by CI (.github/workflows/company-site-preview.yml) for every PR
+# preview: digest only, no tag, so `edge` remains owned by merges to main and
+# concurrent PRs cannot race each other. Preview deployments pin the digest.
+oci_push(
+    name = "push_preview",
+    image = ":image",
+    remote_tags = [],
+    repository = "ghcr.io/guardian-intelligence/company-site",
+    visibility = ["//visibility:public"],
+)

@@ -41,3 +41,21 @@ spec:
         - ports:
             - port: "8481"
               protocol: TCP
+    # Per-stage flagger-loadtester webhook receivers (pre-rollout/rollout
+    # checks for the Keycloak Canaries).
+    - toEndpoints:
+        - matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: In
+              values:
+                - tenant-guardian-beta
+                - tenant-guardian-gamma
+                - tenant-guardian-prod
+            - key: k8s:app.kubernetes.io/name
+              operator: In
+              values:
+                - flagger-loadtester
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP

@@ -85,6 +85,7 @@ func TestOpenBaoStaticSealTLSAndStorageConformance(t *testing.T) {
 		`request "write_reader_policy_company_site"`,
 		`token_policies = ["guardian-reader-company-site"]`,
 		`kv/data/guardian/guardian-mgmt/company-site/*`,
+		`kv/data/guardian/guardian-mgmt/guardian-iam/*`,
 		`kv/data/guardian/guardian-mgmt/tenant-guardian-beta/*`,
 		`kv/data/guardian/guardian-mgmt/tenant-guardian-gamma/*`,
 		`kv/data/guardian/guardian-mgmt/tenant-guardian-prod/*`,
@@ -283,6 +284,7 @@ func TestOpenBaoOperationsInventoryConformance(t *testing.T) {
 	for _, scope := range []string{
 		"external_dns",
 		"company_site",
+		"guardian_iam",
 		"tenant_guardian_beta",
 		"tenant_guardian_gamma",
 		"tenant_guardian_prod",

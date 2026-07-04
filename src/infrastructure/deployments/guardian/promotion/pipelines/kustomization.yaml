@@ -5,3 +5,7 @@ resources:
   - project.yaml
   - secrets.yaml
   - stage.yaml
+  - iam-namespace.yaml
+  - iam-project.yaml
+  - iam-secrets.yaml
+  - iam-stage-beta.yaml

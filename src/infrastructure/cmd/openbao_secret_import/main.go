@@ -289,6 +289,15 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 				"githubAppPrivateKey": string(githubAppKey),
 			},
 		},
+		// Same App identity, second consumer namespace: Kargo credentials
+		// are project-namespaced, and the scope model requires each
+		// namespace to read only its own subtree.
+		{
+			APIPath: "kv/data/guardian/guardian-mgmt/guardian-iam/promotion/github-app",
+			Data: map[string]string{
+				"githubAppPrivateKey": string(githubAppKey),
+			},
+		},
 	}
 
 	// Per-stage Keycloak secrets are optional: unlike the writes above, an

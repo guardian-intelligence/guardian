@@ -38,6 +38,15 @@ spec:
         - ports:
             - port: "7800"
               protocol: TCP
+    # flagger-loadtester runs the login gate and hey load against the canary
+    # Service during Flagger analysis.
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: flagger-loadtester
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
   egress:
     - toEndpoints:
         - matchLabels:
@@ -76,6 +85,53 @@ spec:
       toPorts:
         - ports:
             - port: "443"
+              protocol: TCP
+---
+# flagger-loadtester: webhook calls arrive from the Flagger controller; the
+# checks it executes go to the Keycloak pods (canary Service) plus DNS.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: flagger-loadtester
+  namespace: tenant-guardian-beta
+  labels:
+    app.kubernetes.io/name: flagger-loadtester
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: beta
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: flagger-loadtester
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: flagger
+            k8s:app.kubernetes.io/name: flagger
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values:
+                - keycloak
+                - keycloak-primary
+      toPorts:
+        - ports:
+            - port: "8080"
               protocol: TCP
 ---
 # The public edge is the tenant-root ingress controller. Cozystack's

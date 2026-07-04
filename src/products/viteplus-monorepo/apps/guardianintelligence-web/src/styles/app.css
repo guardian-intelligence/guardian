@@ -1,0 +1,387 @@
+@import "tailwindcss";
+@import "@guardian/brand/tokens.css";
+
+/*
+ * Tailwind v4 auto-detects source files in this app's directory tree but
+ * does not follow the module graph into sibling workspace packages. Any
+ * utility class referenced only inside @guardian/brand primitives must be
+ * registered here or it never reaches the final stylesheet.
+ * https://tailwindcss.com/docs/detecting-classes-in-source-files
+ */
+@source "../../../../packages/brand/src";
+
+/* Self-hosted Guardian typography. CSP `font-src 'self' data:` makes Google
+   Fonts CDN unreachable from the browser, so the variable WOFF2 files ship
+   from /fonts/ alongside the app. SIL OFL — see public/fonts/OFL-*.txt. */
+@font-face {
+  font-family: "Fraunces";
+  src: url("/fonts/Fraunces-Variable.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Fraunces";
+  src: url("/fonts/Fraunces-Italic-Variable.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/Geist-Variable.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/Geist-Italic-Variable.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("/fonts/GeistMono-Variable.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("/fonts/GeistMono-Italic-Variable.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+/* Letters faces (Lora reading face + Pinyon Script signature) are self-hosted
+   too, but declared in src/features/letters/fonts.ts and inlined into the
+   letters critical CSS — the single source of truth for the Letters face. */
+
+@layer base {
+  body {
+    @apply antialiased;
+    overflow-x: clip;
+    font-family:
+      "Geist",
+      ui-sans-serif,
+      system-ui,
+      -apple-system,
+      sans-serif;
+  }
+  html {
+    scroll-padding-top: var(--header-scroll-offset);
+  }
+  button,
+  [role="button"] {
+    cursor: default;
+  }
+}
+
+/* Visually-hidden unless focused. Used by the Skip-to-main-content link so
+   keyboard users can bypass the sticky header. */
+.sr-only-focusable:not(:focus):not(:active) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.firstlight-headline {
+  max-width: 18ch;
+  margin: 0;
+  color: var(--color-type-iron);
+  font-family: "Geist", ui-sans-serif, system-ui, sans-serif;
+  font-size: clamp(42px, 8vw, 92px);
+  font-weight: 500;
+  line-height: 0.98;
+  letter-spacing: 0;
+}
+
+.firstlight-target {
+  --firstlight-luminance: 0;
+  color: color-mix(
+    in oklch,
+    var(--color-type-iron) calc(100% - (var(--firstlight-luminance) * 24%)),
+    #fffaf0 calc(var(--firstlight-luminance) * 24%)
+  );
+  filter: brightness(calc(1 + var(--firstlight-luminance) * 0.32));
+  text-shadow: 0 0 calc(var(--firstlight-luminance) * 22px)
+    rgba(255, 250, 240, calc(var(--firstlight-luminance) * 0.52));
+  transform: translateZ(0);
+}
+
+/* Checked-in letters paper pattern. These CSS gradients replace SVG data URI
+   filters so the graph paper paints with CSS during first render. */
+.letters-paper-tooth {
+  background-image:
+    radial-gradient(circle at 11px 17px, rgb(91 58 38 / 0.035) 0 0.55px, transparent 0.8px),
+    radial-gradient(circle at 37px 9px, rgb(40 44 52 / 0.024) 0 0.45px, transparent 0.75px),
+    radial-gradient(circle at 59px 46px, rgb(91 58 38 / 0.026) 0 0.5px, transparent 0.8px),
+    linear-gradient(118deg, transparent 0 42%, rgb(91 58 38 / 0.024) 49%, transparent 56%),
+    linear-gradient(28deg, transparent 0 46%, rgb(255 255 255 / 0.26) 50%, transparent 58%);
+  background-position:
+    0 0,
+    13px 19px,
+    7px 3px,
+    0 0,
+    0 0;
+  background-repeat: repeat;
+  background-size:
+    71px 83px,
+    97px 89px,
+    113px 131px,
+    420px 360px,
+    540px 460px;
+  mix-blend-mode: multiply;
+  opacity: 0.24;
+}
+
+/* Watercolor wash: irregular splotches where the cream sheet dried lighter,
+   toward white. Pure layered radial gradients — no SVG filter, no blend mode,
+   no animation — so the whole effect rasterises once with first paint and costs
+   nothing at runtime. The layer sits BELOW the text (z-0), so white alpha only
+   lightens the paper and never washes out the ink; the graph ruling multiplies
+   on top. Y is px (anchored to the masthead, so pools never stretch down a long
+   letter); X is % so they track viewport width. Each cluster overlaps two
+   ellipses of different ratios so the bloom edge reads irregular, not a clean
+   oval. */
+.letters-paper-wash {
+  background-image:
+    radial-gradient(
+      560px 420px at 28% 90px,
+      rgb(255 255 255 / 0.34) 0%,
+      rgb(255 255 255 / 0.13) 40%,
+      transparent 72%
+    ),
+    radial-gradient(520px 380px at 82% 60px, rgb(255 255 255 / 0.3) 0%, transparent 66%),
+    radial-gradient(440px 340px at 62% 320px, rgb(255 255 255 / 0.24) 0%, transparent 68%),
+    radial-gradient(360px 300px at 12% 300px, rgb(255 255 255 / 0.24) 0%, transparent 64%),
+    radial-gradient(720px 500px at 50% 460px, rgb(255 255 255 / 0.2) 0%, transparent 72%);
+  background-repeat: no-repeat;
+}
+
+.letters-paper-grid {
+  --letters-grid-minor-alpha: 0.0225;
+  --letters-grid-major-alpha: 0.041;
+  /* Cell geometry is typography: the minor cell is half the ruled line pitch
+     and the major rule is five pitches, both emitted as vars by fonts.ts
+     (linePitch), so the writing sits ON this ruling instead of floating over
+     an unrelated pattern: one square is one cap height, the pitch two
+     squares. --letters-grid-phase-y slides the ruling vertically into
+     registration (computed statically in fonts.ts); fallbacks here mirror the
+     desktop sheetScale. */
+  background-image:
+    linear-gradient(to right, rgb(40 44 52 / var(--letters-grid-major-alpha)) 1px, transparent 1px),
+    linear-gradient(
+      to bottom,
+      rgb(40 44 52 / var(--letters-grid-major-alpha)) 1px,
+      transparent 1px
+    ),
+    linear-gradient(to right, rgb(40 44 52 / var(--letters-grid-minor-alpha)) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(40 44 52 / var(--letters-grid-minor-alpha)) 1px, transparent 1px);
+  background-position:
+    -1px var(--letters-grid-phase-y, -1px),
+    -1px var(--letters-grid-phase-y, -1px),
+    -1px var(--letters-grid-phase-y, -1px),
+    -1px var(--letters-grid-phase-y, -1px);
+  background-repeat: repeat;
+  background-size:
+    var(--letters-grid-major, 170px) var(--letters-grid-major, 170px),
+    var(--letters-grid-major, 170px) var(--letters-grid-major, 170px),
+    var(--letters-grid-minor, 17px) var(--letters-grid-minor, 17px),
+    var(--letters-grid-minor, 17px) var(--letters-grid-minor, 17px);
+}
+
+/* The zone wrapper carries the multiply into the page, not the grid child:
+   the wrapper's zone mask makes it an isolated group, so a blend on the
+   child would only composite against the group's own transparency and the
+   rules would paint as flat grey over the ink. */
+.letters-paper-zone {
+  mix-blend-mode: multiply;
+}
+
+/* Major-rule alphas are mirrored by GRID_MAJOR_ALPHA in routes/letters/
+   route.tsx (the curve-fade mask solves its multiply correction against
+   them). Keep the two in step. */
+.letters-paper-grid--text {
+  --letters-grid-minor-alpha: 0.0195;
+  --letters-grid-major-alpha: 0.039;
+}
+
+.letters-paper-grid--margin {
+  --letters-grid-minor-alpha: 0.09;
+  --letters-grid-major-alpha: 0.15;
+}
+
+:root {
+  --letter-transition-duration: 900ms;
+  --letter-transition-root-duration: 240ms;
+  --letter-return-fade-duration: 560ms;
+  --letter-continuation-unfurl-duration: 500ms;
+  /* Spring with the ring-out clipped: the ramp (0–31.2%) is untouched, then
+     ONE overshoot decays monotonically to rest by ~55% (≈500ms) — no
+     undershoot, no second oscillation. The old curve dipped to 0.985 at
+     64.8% and crept back for the final third; on a viewport-scale move that
+     read as the title vibrating in place before settling. */
+  --letter-spring-move: linear(
+    0,
+    0.014 2.4%,
+    0.052 4.8%,
+    0.112 7.2%,
+    0.19 9.6%,
+    0.282 12%,
+    0.382 14.4%,
+    0.487 16.8%,
+    0.591 19.2%,
+    0.691 21.6%,
+    0.783 24%,
+    0.864 26.4%,
+    0.933 28.8%,
+    0.987 31.2%,
+    1.024 33.6%,
+    1.046 36%,
+    1.058 38.4%,
+    1.054 40.8%,
+    1.042 43.2%,
+    1.028 45.6%,
+    1.016 48%,
+    1.008 50.4%,
+    1.003 52.8%,
+    1.001 55.2%,
+    1 57.6%,
+    1
+  );
+  --letter-spring-reveal: linear(
+    0,
+    0.049 3%,
+    0.178 8%,
+    0.335 14%,
+    0.49 20%,
+    0.625 27%,
+    0.736 34%,
+    0.824 42%,
+    0.889 50%,
+    0.936 59%,
+    0.968 69%,
+    0.987 80%,
+    0.997 91%,
+    1
+  );
+}
+
+/* No paint containment here: WebKit refuses to paint SVG url() filters (the
+   letters hand filter) on descendants of a contain:paint subtree — iPhones
+   rendered the whole continuation blank. The unfurl already clips itself via
+   its clip-path keyframes, so containment only ever bought the brief
+   translateY overhang, which opacity 0 covers. */
+[data-letter-continuation] {
+  transform-origin: top left;
+}
+
+[data-letter-continuation][data-letter-continuation-animate] {
+  animation: letter-continuation-unfurl var(--letter-continuation-unfurl-duration)
+    var(--letter-spring-reveal) both;
+}
+
+@keyframes letter-return-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes letter-return-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes letter-continuation-unfurl {
+  from {
+    opacity: 0;
+    clip-path: inset(0 0 100% 0);
+    transform: translateY(-12px);
+  }
+
+  14% {
+    opacity: 0.42;
+  }
+
+  to {
+    opacity: 1;
+    clip-path: inset(0 0 0 0);
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :root::view-transition {
+    pointer-events: none;
+  }
+
+  :root::view-transition-group(*) {
+    animation-duration: var(--letter-transition-duration);
+    animation-timing-function: var(--letter-spring-move);
+  }
+
+  :root::view-transition-image-pair(*) {
+    isolation: isolate;
+  }
+
+  :root::view-transition-old(*),
+  :root::view-transition-new(*) {
+    animation-duration: var(--letter-transition-duration);
+    animation-timing-function: var(--letter-spring-reveal);
+    mix-blend-mode: normal;
+  }
+
+  :root::view-transition-old(root),
+  :root::view-transition-new(root) {
+    animation-duration: var(--letter-transition-root-duration);
+    animation-timing-function: ease-out;
+  }
+
+  :root::view-transition-group(letter-return) {
+    animation-duration: var(--letter-return-fade-duration);
+    animation-timing-function: var(--letter-spring-reveal);
+  }
+
+  :root::view-transition-old(letter-return) {
+    animation: letter-return-out 180ms ease-out both;
+  }
+
+  :root::view-transition-new(letter-return) {
+    animation: letter-return-in var(--letter-return-fade-duration) var(--letter-spring-reveal) both;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-letter-continuation][data-letter-continuation-animate] {
+    animation-duration: 1ms !important;
+  }
+
+  :root::view-transition-group(*),
+  :root::view-transition-old(*),
+  :root::view-transition-new(*) {
+    animation-delay: 0ms !important;
+    animation-duration: 1ms !important;
+  }
+}

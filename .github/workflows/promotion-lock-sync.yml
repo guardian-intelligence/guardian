@@ -47,6 +47,25 @@ jobs:
           pinned="$(grep -o 'ghcr.io/guardian-intelligence/company-site@sha256:[a-f0-9]\{64\}' "$web_yaml")"
           sed -i "s|^ghcr.io/guardian-intelligence/company-site@sha256:[a-f0-9]\{64\}$|$pinned|" "$lock"
           grep -q "^$pinned$" "$lock"
+
+          # Keycloak pin-bump PRs (guardian-iam pipeline): upstream digests
+          # accumulate rather than replace — the lock deliberately carries
+          # both the running and the incoming digest so the blue/green
+          # window (and a Git-revert rollback) stay mirror-servable. Insert
+          # any pinned digest the lock does not know yet next to its section.
+          for kc_yaml in src/infrastructure/deployments/iam/*/keycloak.yaml; do
+            [ -f "$kc_yaml" ] || continue
+            kc_pin="$(grep -o 'quay.io/keycloak/keycloak@sha256:[a-f0-9]\{64\}' "$kc_yaml" | head -1)"
+            [ -n "$kc_pin" ] || continue
+            if ! grep -q "^$kc_pin$" "$lock"; then
+              awk -v pin="$kc_pin" '
+                /^quay\.io\/keycloak\/keycloak@sha256:/ && !done { print pin; done=1 }
+                { print }
+              ' "$lock" > "$lock.tmp" && mv "$lock.tmp" "$lock"
+              grep -q "^$kc_pin$" "$lock"
+            fi
+          done
+
           if git diff --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else

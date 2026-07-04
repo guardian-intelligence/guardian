@@ -17,8 +17,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
-      - "src/products/company/**"
-      - "src/viteplus-monorepo/**"
+      - "src/products/viteplus-monorepo/**"
       - ".github/workflows/company-site-preview.yml"
       - ".github/scripts/company-site-preview.sh"
       - "MODULE.bazel"
@@ -58,12 +57,12 @@ jobs:
       - uses: bazelbuild/setup-bazelisk@b39c379c82683a5f25d34f0d062761f62693e0b2 # v3.0.0
 
       - name: Build image
-        run: bazelisk build //src/products/company/site:image
+        run: bazelisk build //src/products/viteplus-monorepo/apps/guardianintelligence-web/site:image
 
       - name: Read built digest
         id: digest
         run: |
-          digest="$(jq -r '.manifests[0].digest' bazel-bin/src/products/company/web/image/index.json)"
+          digest="$(jq -r '.manifests[0].digest' bazel-bin/src/products/viteplus-monorepo/apps/guardianintelligence-web/image/index.json)"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
           echo "built $digest"
 
@@ -71,7 +70,7 @@ jobs:
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Push image (digest only)
-        run: bazelisk run //src/products/company/site:push_preview
+        run: bazelisk run //src/products/viteplus-monorepo/apps/guardianintelligence-web/site:push_preview
 
       - name: Check out previews branch
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3

@@ -55,8 +55,8 @@ func TestImportPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 4 {
-		t.Fatalf("plan length = %d, want 4", len(plan))
+	if len(plan) != 5 {
+		t.Fatalf("plan length = %d, want 5", len(plan))
 	}
 	external := plan[0]
 	if external.APIPath != "kv/data/guardian/guardian-mgmt/external-dns/cloudflare" {
@@ -103,8 +103,8 @@ func TestImportPlanOptionalKeycloakStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 6 {
-		t.Fatalf("plan length = %d, want 6 (4 base + beta + prod)", len(plan))
+	if len(plan) != 7 {
+		t.Fatalf("plan length = %d, want 7 (5 base + beta + prod)", len(plan))
 	}
 	byPath := map[string]secretWrite{}
 	for _, w := range plan {

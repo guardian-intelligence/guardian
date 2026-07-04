@@ -28,10 +28,11 @@ The below is the target shape -- repo still in flux and does not match this quit
 
 src/
     products/
-      company/
-        web/
-        deploy/base/                   # reusable company website Deployment/
-        Service
+      viteplus-monorepo/               # vite-plus (vp) web workspace
+        apps/
+          guardianintelligence-web/    # gi.org company site; site/ holds the OCI push targets
+        packages/
+          brand/
 
       aisucks/
         api/
