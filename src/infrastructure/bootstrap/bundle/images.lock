@@ -49,6 +49,14 @@ ghcr.io/fluxcd/charts/flagger:1.43.0@sha256:31d6fad48f45fd5d73190ff80f9b047689e1
 # move it down there once a post-deploy scrape confirms it) ---
 ghcr.io/fluxcd/flagger@sha256:bbf959d58586b403b2a67167042e90a36c941665478ffba67afd7cdfbb571572
 
+# --- Verself IAM: Keycloak (deployments/iam/<stage>/keycloak.yaml). 26.6.2
+# is the deliberately-older pin; 26.6.4 is the upgrade target the first
+# Kargo-gated Flagger blue/green will move beta to — both must be
+# mirror-servable so the upgrade drill also works dark. amd64 manifest
+# digests (containerStatuses.imageID convention). ---
+quay.io/keycloak/keycloak@sha256:3e58dc82a9b72f364f37dac17f99fcaf53d0052a3c1ad7f00b069a1ed43201c0
+quay.io/keycloak/keycloak@sha256:22c8cf9e79af88d320499c93994bb2c319ca255092d8ae7c7a45dd46d68192e2
+
 # --- Kubernetes system images actually held by the rebuilt cluster (2026-07-02 drill) ---
 # Chart.yaml pins kubernetesVersion v1.34.3 (NOT the Talos v1.13 default v1.36);
 # Cozystack replaces kube-proxy and flannel entirely (kube-ovn + cilium), so

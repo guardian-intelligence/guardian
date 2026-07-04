@@ -406,6 +406,45 @@ spec:
   wait: true
   timeout: 10m
 ---
+# Verself IAM beta stage: Keycloak + stage Postgres + ESO wiring + Flagger
+# Canary. Depends on guardian-system (OpenBao roles + kv paths from
+# self-init) and guardian-flagger (Canary CRD + controller). The
+# ExternalSecret healthCheckExprs make the wait real: the stage only reports
+# Ready once ESO can actually read this namespace's OpenBao subtree (kstatus
+# treats ESO CRs as trivially Current otherwise).
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: guardian-iam-beta
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/deployments/iam/beta
+  sourceRef:
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      # Required, not optional — see guardian-company-prod above.
+      - kind: ConfigMap
+        name: guardian-source
+  dependsOn:
+    - name: guardian-system
+    - name: guardian-flagger
+  prune: true
+  wait: true
+  timeout: 15m
+  healthCheckExprs:
+    - apiVersion: external-secrets.io/v1beta1
+      kind: ClusterSecretStore
+      current: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'True')
+      failed: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'False')
+    - apiVersion: external-secrets.io/v1beta1
+      kind: ExternalSecret
+      current: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'True')
+      failed: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'False')
+---
 # company-site PR previews: static cluster half (Cilium admits for the
 # previews tenant) plus the previews-branch source objects, both declared in
 # deployments/company/previews. The GitRepository/Kustomization pair that

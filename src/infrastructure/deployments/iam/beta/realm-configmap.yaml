@@ -1,0 +1,88 @@
+# verself realm, imported at first boot via --import-realm. ${...}
+# placeholders are resolved by Keycloak FROM THE CONTAINER'S ENVIRONMENT at
+# import time (documented startup-import behavior), so no secret value ever
+# lands in this ConfigMap. The substitute:disabled annotation is mandatory:
+# this manifest is applied by a Flux Kustomization with postBuild
+# substitution, whose envsubst would otherwise blank every ${...} before
+# Keycloak ever saw it.
+#
+# Known limitation (deliberate, documented in the plan): --import-realm only
+# imports when the realm does not exist yet. Post-creation realm changes need
+# an idempotent upsert against the Admin REST API — deferred to the
+# iam-service integration, not built speculatively here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-realm-verself
+  namespace: tenant-guardian-beta
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: beta
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  verself-realm.json: |
+    {
+      "realm": "verself",
+      "enabled": true,
+      "sslRequired": "external",
+      "registrationAllowed": false,
+      "resetPasswordAllowed": false,
+      "rememberMe": false,
+      "loginWithEmailAllowed": false,
+      "duplicateEmailsAllowed": false,
+      "bruteForceProtected": true,
+      "permanentLockout": false,
+      "failureFactor": 10,
+      "waitIncrementSeconds": 60,
+      "maxFailureWaitSeconds": 900,
+      "accessTokenLifespan": 300,
+      "ssoSessionIdleTimeout": 1800,
+      "ssoSessionMaxLifespan": 36000,
+      "revokeRefreshToken": true,
+      "refreshTokenMaxReuse": 0,
+      "identityProviders": [
+        {
+          "alias": "github",
+          "providerId": "github",
+          "enabled": true,
+          "trustEmail": false,
+          "storeToken": false,
+          "firstBrokerLoginFlowAlias": "first broker login",
+          "config": {
+            "clientId": "Ov23liQCzyzCZ0Vr8SCf",
+            "clientSecret": "${GITHUB_CLIENT_SECRET}",
+            "defaultScope": "read:user user:email"
+          }
+        }
+      ],
+      "clients": [
+        {
+          "clientId": "canary",
+          "name": "Synthetic login checks (Flagger gate + k6 canary)",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": true,
+          "directAccessGrantsEnabled": true,
+          "standardFlowEnabled": false,
+          "implicitFlowEnabled": false,
+          "serviceAccountsEnabled": false
+        }
+      ],
+      "users": [
+        {
+          "username": "canary",
+          "enabled": true,
+          "email": "canary@guardianintelligence.org",
+          "emailVerified": true,
+          "credentials": [
+            {
+              "type": "password",
+              "value": "${KEYCLOAK_CANARY_PASSWORD}",
+              "temporary": false
+            }
+          ]
+        }
+      ]
+    }
