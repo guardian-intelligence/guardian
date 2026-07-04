@@ -1,0 +1,31 @@
+# Flagger blue/green for Keycloak (provider: kubernetes — plain
+# Service-selector switching, no mesh). Flagger owns the keycloak /
+# keycloak-primary / keycloak-canary ClusterIP Services and clones the
+# Deployment to keycloak-primary; the Ingress points at the apex Service.
+# With no metrics or webhooks declared, promotion is readiness-gated: a new
+# version that cannot boot against the realm import + Postgres never becomes
+# primary. The pre-rollout login-check webhook and metric analysis land with
+# the k6 canary increment.
+apiVersion: flagger.app/v1beta1
+kind: Canary
+metadata:
+  name: keycloak
+  namespace: tenant-guardian-beta
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: beta
+spec:
+  provider: kubernetes
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: keycloak
+  progressDeadlineSeconds: 900
+  service:
+    port: 80
+    targetPort: 8080
+  analysis:
+    interval: 30s
+    threshold: 3
+    iterations: 5

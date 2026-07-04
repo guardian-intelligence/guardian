@@ -291,24 +291,47 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 		},
 	}
 
-	// Per-stage Keycloak "Sign in with GitHub" client secrets are optional:
-	// unlike the writes above, an env file may legitimately carry only a
-	// subset of stages (e.g. beta+gamma before a prod OAuth App exists).
-	// Everything about these apps other than the client secret (app name,
-	// settings id, homepage/callback URL, realm, idp alias, client ID) is
-	// not sensitive and is checked into
+	// Per-stage Keycloak secrets are optional: unlike the writes above, an
+	// env file may legitimately carry only a subset of stages (e.g.
+	// beta+gamma before a prod OAuth App exists). Everything about the
+	// GitHub OAuth Apps other than the client secret (app name, settings
+	// id, homepage/callback URL, realm, idp alias, client ID) is not
+	// sensitive and is checked into
 	// src/infrastructure/deployments/iam/github-oauth-apps.yaml instead.
+	// admin-bootstrap and canary-user are guardian-generated credentials;
+	// they live in custody so a DR re-seed restores values consistent with
+	// the stage's surviving (or re-imported) Keycloak database.
 	for _, stage := range []string{"beta", "gamma", "prod"} {
-		secret := strings.TrimSpace(env[strings.ToUpper(stage)+"_GITHUB_CLIENT_SECRET"])
-		if secret == "" {
-			continue
+		prefix := strings.ToUpper(stage)
+		base := fmt.Sprintf("kv/data/guardian/guardian-mgmt/tenant-guardian-%s/keycloak", stage)
+		if secret := strings.TrimSpace(env[prefix+"_GITHUB_CLIENT_SECRET"]); secret != "" {
+			writes = append(writes, secretWrite{
+				APIPath: base + "/github-oauth",
+				Data: map[string]string{
+					"GITHUB_CLIENT_SECRET": secret,
+				},
+			})
 		}
-		writes = append(writes, secretWrite{
-			APIPath: fmt.Sprintf("kv/data/guardian/guardian-mgmt/tenant-guardian-%s/keycloak/github-oauth", stage),
-			Data: map[string]string{
-				"GITHUB_CLIENT_SECRET": secret,
-			},
-		})
+		for name, envSuffix := range map[string]string{
+			"admin-bootstrap": "_KEYCLOAK_ADMIN_BOOTSTRAP",
+			"canary-user":     "_KEYCLOAK_CANARY_USER",
+		} {
+			username := strings.TrimSpace(env[prefix+envSuffix+"_USERNAME"])
+			password := strings.TrimSpace(env[prefix+envSuffix+"_PASSWORD"])
+			if username == "" && password == "" {
+				continue
+			}
+			if username == "" || password == "" {
+				return nil, fmt.Errorf("%s%s_USERNAME and %s%s_PASSWORD must be set together", prefix, envSuffix, prefix, envSuffix)
+			}
+			writes = append(writes, secretWrite{
+				APIPath: base + "/" + name,
+				Data: map[string]string{
+					"username": username,
+					"password": password,
+				},
+			})
+		}
 	}
 
 	return writes, nil

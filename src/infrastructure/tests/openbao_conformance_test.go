@@ -384,10 +384,12 @@ func TestFluxSourceParameterizationConformance(t *testing.T) {
 func TestFluxSubstitutionSafetyConformance(t *testing.T) {
 	// Paths reconciled by a Kustomization that declares postBuild
 	// substitution (guardian-mgmt-base applies all of base/, guardian-system
-	// applies deployments/guardian/system).
+	// applies deployments/guardian/system, guardian-iam-beta applies
+	// deployments/iam/beta).
 	roots := []string{
 		"src/infrastructure/base",
 		"src/infrastructure/deployments/guardian/system",
+		"src/infrastructure/deployments/iam/beta",
 	}
 	// ${GUARDIAN_SOURCE_KIND...} / ${GUARDIAN_SOURCE_NAME...} are the declared
 	// vars; $${ is an escaped literal. Anything else is unhandled collateral.

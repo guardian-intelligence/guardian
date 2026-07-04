@@ -1,0 +1,16 @@
+# Stage-local Postgres for Keycloak (Cozystack app CR → CNPG behind the
+# aggregated apps API, same machinery as tenant-root's core-services
+# cluster). Single replica for beta; prod gets quorum + backups when its
+# stage lands. Keycloak connects via Secret/postgres-keycloak-app
+# (host/port/dbname/username/password) against the default app database.
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Postgres
+metadata:
+  name: keycloak
+  namespace: tenant-guardian-beta
+spec:
+  replicas: 1
+  size: 5Gi
+  storageClass: replicated
+  external: false
+  version: v18

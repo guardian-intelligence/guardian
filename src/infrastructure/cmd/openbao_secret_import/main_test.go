@@ -129,6 +129,44 @@ func TestImportPlanOptionalKeycloakStages(t *testing.T) {
 	}
 }
 
+func TestImportPlanKeycloakGeneratedCredentials(t *testing.T) {
+	env := testImportEnv()
+	env["BETA_KEYCLOAK_ADMIN_BOOTSTRAP_USERNAME"] = "guardian-admin"
+	env["BETA_KEYCLOAK_ADMIN_BOOTSTRAP_PASSWORD"] = "admin-pass"
+	env["BETA_KEYCLOAK_CANARY_USER_USERNAME"] = "canary"
+	env["BETA_KEYCLOAK_CANARY_USER_PASSWORD"] = "canary-pass"
+
+	plan, err := importPlan(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byPath := map[string]secretWrite{}
+	for _, w := range plan {
+		byPath[w.APIPath] = w
+	}
+	admin, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-guardian-beta/keycloak/admin-bootstrap"]
+	if !ok {
+		t.Fatal("beta admin-bootstrap write missing")
+	}
+	if admin.Data["username"] != "guardian-admin" || admin.Data["password"] != "admin-pass" {
+		t.Fatalf("admin-bootstrap data = %#v", admin.Data)
+	}
+	canary, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-guardian-beta/keycloak/canary-user"]
+	if !ok {
+		t.Fatal("beta canary-user write missing")
+	}
+	if canary.Data["password"] != "canary-pass" {
+		t.Fatalf("canary-user data = %#v", canary.Data)
+	}
+
+	// A username without its password (or vice versa) is a custody file bug,
+	// not a partial import.
+	env["GAMMA_KEYCLOAK_CANARY_USER_USERNAME"] = "canary"
+	if _, err := importPlan(env); err == nil {
+		t.Fatal("importPlan accepted a username without its password")
+	}
+}
+
 func TestImportPlanMissingRequired(t *testing.T) {
 	_, err := importPlan(map[string]string{})
 	if err == nil {
