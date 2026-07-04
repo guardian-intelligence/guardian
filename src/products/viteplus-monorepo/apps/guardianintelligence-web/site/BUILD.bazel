@@ -2,7 +2,7 @@ load("@rules_oci//oci:defs.bzl", "oci_load", "oci_push")
 
 alias(
     name = "image",
-    actual = "//src/products/company/web:image",
+    actual = "//src/products/viteplus-monorepo/apps/guardianintelligence-web:image",
     visibility = ["//visibility:public"],
 )
 

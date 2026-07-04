@@ -1,6 +1,6 @@
 # Company Site Architecture
 
-This file applies to `src/products/company/**`.
+This file applies to `src/products/viteplus-monorepo/**`.
 
 The company site is the public Guardian Intelligence web surface:
 `guardianintelligence.org`, `dev.gi.org`, `gamma.gi.org`, letters, news,
@@ -15,9 +15,9 @@ operations.
   hydration, and fast post-SSR client navigation through TanStack Router.
 - Vite+ is the package manager/build runner for the web workspace. It is not a
   runtime dependency in Kubernetes. Build the app through Bazel targets such as
-  `aspect build //src/products/company/site:image`.
-- `//src/products/company/site:image` is the deploy-facing compatibility label.
-  It aliases the real TanStack image at `//src/products/company/web:image`.
+  `aspect build //src/products/viteplus-monorepo/apps/guardianintelligence-web/site:image`.
+- `//src/products/viteplus-monorepo/apps/guardianintelligence-web/site:image` is the deploy-facing compatibility label.
+  It aliases the real TanStack image at `//src/products/viteplus-monorepo/apps/guardianintelligence-web:image`.
 - Kubernetes serves immutable OCI images built by Bazel. Public traffic should
   hit the company web app pods and their static assets.
 

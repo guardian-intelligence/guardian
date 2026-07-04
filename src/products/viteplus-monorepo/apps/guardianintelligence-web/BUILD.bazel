@@ -30,16 +30,16 @@ genrule(
         ":node_modules",
         ":node_modules/vite-plus",
         ":sources",
-        "//src/viteplus-monorepo:.aspect_rules_js/node_modules/@voidzero-dev+vite-plus-linux-x64-gnu@0.1.16/dir",
-        "//src/viteplus-monorepo:vp_node",
-        "//src/viteplus-monorepo:workspace_sources",
+        "//src/products/viteplus-monorepo:.aspect_rules_js/node_modules/@voidzero-dev+vite-plus-linux-x64-gnu@0.1.16/dir",
+        "//src/products/viteplus-monorepo:vp_node",
+        "//src/products/viteplus-monorepo:workspace_sources",
     ],
     outs = ["company-site-output.tar"],
     cmd = """
 set -euo pipefail
 execroot="$$(pwd)"
-node="$$execroot/$(location //src/viteplus-monorepo:vp_node)"
-node_modules_root="$$execroot/$(BINDIR)/src/products/company/web/node_modules"
+node="$$execroot/$(location //src/products/viteplus-monorepo:vp_node)"
+node_modules_root="$$execroot/$(BINDIR)/src/products/viteplus-monorepo/apps/guardianintelligence-web/node_modules"
 vp="$$node_modules_root/vite-plus/bin/vp"
 test -n "$$node_modules_root"
 test -x "$$vp"
@@ -47,7 +47,7 @@ export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
 export NODE_OPTIONS="--preserve-symlinks-main $${NODE_OPTIONS:-}"
 export NODE_PATH="$$node_modules_root$${NODE_PATH:+:$$NODE_PATH}"
 export CI=true
-cd "$$execroot/src/products/company/web"
+cd "$$execroot/src/products/viteplus-monorepo/apps/guardianintelligence-web"
 rm -rf node_modules
 ln -s "$$node_modules_root" node_modules
 rm -rf .output
@@ -101,7 +101,7 @@ rm -rf .output node_modules
 pkg_tar(
     name = "node_layer",
     files = {
-        "//src/viteplus-monorepo:vp_node": "usr/bin/node",
+        "//src/products/viteplus-monorepo:vp_node": "usr/bin/node",
         "@cacert_pem//file": "etc/ssl/certs/ca-certificates.crt",
     },
     modes = {

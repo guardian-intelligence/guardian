@@ -48,7 +48,7 @@ const lettersMarkdown = {
     // stays unwrapped: it never renders (LetterBody reads lead/continuation;
     // the excerpt fallback strips tags), and the letter already ships in the
     // payload once as markup and once as loader data — no third inked copy.
-    const slug = String(normalised.slug ?? "");
+    const slug = typeof normalised.slug === "string" ? normalised.slug : "";
     const html = marked.parser(tokens);
     const leadHtml = leadToken ? inkWrapHtml(marked.parser([leadToken]), slug) : "";
     const continuationHtml =
@@ -74,7 +74,7 @@ const stripRouteManifestPaths = {
   enforce: "post" as const,
   transform(code: string, id: string) {
     if (!id.includes("tanstack-start-manifest")) return null;
-    return code.replace(/("filePath":\s*")[^"]*\/src\/products\/company\/web\//g, "$1");
+    return code.replace(/("filePath":\s*")[^"]*\/src\/products\/viteplus-monorepo\/apps\/guardianintelligence-web\//g, "$1");
   },
 };
 

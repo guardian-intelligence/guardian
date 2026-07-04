@@ -38,8 +38,8 @@ def guardian_ts_proto_codegen_check(
         generated_root,
         opts = ["target=ts", "import_extension=js"],
         descriptor_srcs = "@protobuf//:descriptor_proto_srcs",
-        node = "//src/viteplus-monorepo:vp_node",
-        plugin = "//src/viteplus-monorepo:node_modules/@bufbuild/protoc-gen-es",
+        node = "//src/products/viteplus-monorepo:vp_node",
+        plugin = "//src/products/viteplus-monorepo:node_modules/@bufbuild/protoc-gen-es",
         protoc = "@protobuf//:protoc",
         visibility = None):
     """Verify checked-in TypeScript proto output is current.

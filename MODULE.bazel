@@ -150,8 +150,8 @@ use_repo(node, "nodejs_toolchains")
 npm = use_extension("@aspect_rules_js//npm:extensions.bzl", "npm")
 npm.npm_translate_lock(
     name = "npm",
-    npmrc = "//src/viteplus-monorepo:.npmrc",
-    pnpm_lock = "//src/viteplus-monorepo:pnpm-lock.yaml",
+    npmrc = "//src/products/viteplus-monorepo:.npmrc",
+    pnpm_lock = "//src/products/viteplus-monorepo:pnpm-lock.yaml",
 )
 use_repo(npm, "npm")
 

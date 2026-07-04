@@ -28,7 +28,9 @@ export default {
     },
     overrides: [
       {
-        files: ["apps/*/scripts/**"],
+        // Tool tier, not shipped code: dev/perf harnesses and the app-local
+        // nitro build plugins log to the terminal by design.
+        files: ["apps/*/scripts/**", "apps/*/perf/**", "apps/*/*.mjs"],
         rules: {
           "no-console": "off",
         },

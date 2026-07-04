@@ -51,8 +51,8 @@ filegroup(
         "package.json",
         "pnpm-lock.yaml",
         "pnpm-workspace.yaml",
-        "//src/products/company/web:package_manifest",
-        "//src/viteplus-monorepo/packages/brand:package_manifest",
+        "//src/products/viteplus-monorepo/apps/guardianintelligence-web:package_manifest",
+        "//src/products/viteplus-monorepo/packages/brand:package_manifest",
     ] + glob(
         [
             ".changeset/*.md",
@@ -74,8 +74,8 @@ filegroup(
         "tsconfig.base.json",
         "tsconfig.json",
         "vite.config.ts",
-        "//src/products/company/web:sources",
-        "//src/viteplus-monorepo/packages/brand:sources",
+        "//src/products/viteplus-monorepo/apps/guardianintelligence-web:sources",
+        "//src/products/viteplus-monorepo/packages/brand:sources",
     ] + glob(
         [
             ".changeset/*.md",
@@ -113,9 +113,9 @@ done
 test -n "$$vp"
 export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
 export NODE_OPTIONS="--preserve-symlinks-main $${NODE_OPTIONS:-}"
-export NODE_PATH="$$execroot/$(BINDIR)/src/viteplus-monorepo/node_modules$${NODE_PATH:+:$$NODE_PATH}"
+export NODE_PATH="$$execroot/$(BINDIR)/src/products/viteplus-monorepo/node_modules$${NODE_PATH:+:$$NODE_PATH}"
 export CI=true
-cd src/viteplus-monorepo
+cd src/products/viteplus-monorepo
 printf 'viteplus install ok\\n' > "$$execroot/$@"
 """,
     local = True,
@@ -154,9 +154,9 @@ done
 test -n "$$vp"
 export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
 export NODE_OPTIONS="--preserve-symlinks-main $${NODE_OPTIONS:-}"
-export NODE_PATH="$$execroot/$(BINDIR)/src/viteplus-monorepo/node_modules$${NODE_PATH:+:$$NODE_PATH}"
+export NODE_PATH="$$execroot/$(BINDIR)/src/products/viteplus-monorepo/node_modules$${NODE_PATH:+:$$NODE_PATH}"
 export CI=true
-cd src/viteplus-monorepo
+cd src/products/viteplus-monorepo
 "$$node" "$$vp" run -w lint
 printf 'viteplus lint ok\\n' > "$$execroot/$@"
 """,
@@ -197,9 +197,9 @@ done
 test -n "$$vp"
 export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
 export NODE_OPTIONS="--preserve-symlinks-main $${NODE_OPTIONS:-}"
-export NODE_PATH="$$execroot/$(BINDIR)/src/viteplus-monorepo/node_modules$${NODE_PATH:+:$$NODE_PATH}"
+export NODE_PATH="$$execroot/$(BINDIR)/src/products/viteplus-monorepo/node_modules$${NODE_PATH:+:$$NODE_PATH}"
 export CI=true
-cd "$$execroot/src/products/company/web"
+cd "$$execroot/src/products/viteplus-monorepo/apps/guardianintelligence-web"
 "$$node" "$$vp" build
 printf 'viteplus build ok\\n' > "$$execroot/$@"
 """,

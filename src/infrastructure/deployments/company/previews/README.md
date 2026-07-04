@@ -1,6 +1,6 @@
 # company-site PR previews
 
-Vercel-style preview deploys for `src/products/company/web`. Each open PR that
+Vercel-style preview deploys for `src/products/viteplus-monorepo/apps/guardianintelligence-web`. Each open PR that
 touches the site gets its own deployment at
 `https://pr-<N>.guardianintelligence.org`, updated on every push, torn down on
 close.

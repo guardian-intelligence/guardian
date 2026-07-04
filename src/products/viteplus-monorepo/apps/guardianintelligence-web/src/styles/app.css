@@ -8,7 +8,7 @@
  * registered here or it never reaches the final stylesheet.
  * https://tailwindcss.com/docs/detecting-classes-in-source-files
  */
-@source "../../../../../viteplus-monorepo/packages/brand/src";
+@source "../../../../packages/brand/src";
 
 /* Self-hosted Guardian typography. CSP `font-src 'self' data:` makes Google
    Fonts CDN unreachable from the browser, so the variable WOFF2 files ship

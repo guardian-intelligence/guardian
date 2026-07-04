@@ -7,7 +7,7 @@
     "changeset": "changeset",
     "changeset:status": "changeset status",
     "changeset:version": "changeset version",
-    "dev": "vp run @guardian/company-web#dev",
+    "dev": "vp run @guardian/guardianintelligence-web#dev",
     "generate": "vp run -r generate",
     "format": "vp fmt . --write",
     "check": "vp check",

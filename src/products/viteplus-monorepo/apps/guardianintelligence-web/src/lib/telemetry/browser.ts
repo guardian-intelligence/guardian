@@ -10,7 +10,7 @@ import {
 } from "@opentelemetry/semantic-conventions/incubating";
 import { DEPLOY_META, RESOURCE_ATTR_KEYS } from "./meta-keys";
 
-const TRACER_NAME = "guardian/company-web";
+const TRACER_NAME = "guardian/guardianintelligence-web";
 const TRACER_VERSION = "0.1.0";
 // Same-origin proxy in apps/company/src/routes/api/otel/v1/traces.ts. The
 // company CSP pins connect-src 'self', which forbids the browser from posting
@@ -29,7 +29,7 @@ function readMetaContent(name: string): string {
 
 function buildResourceAttributes() {
   const attrs: Record<string, string> = {
-    [ATTR_SERVICE_NAME]: "company-web",
+    [ATTR_SERVICE_NAME]: "guardianintelligence-web",
   };
   const site = readMetaContent(DEPLOY_META.site);
   const runKey = readMetaContent(DEPLOY_META.runKey);
