@@ -76,6 +76,8 @@ data:
           "enabled": true,
           "email": "canary@guardianintelligence.org",
           "emailVerified": true,
+          "firstName": "Synthetic",
+          "lastName": "Canary",
           "credentials": [
             {
               "type": "password",
