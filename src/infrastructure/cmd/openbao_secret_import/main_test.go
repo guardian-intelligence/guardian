@@ -59,7 +59,7 @@ func TestImportPlan(t *testing.T) {
 		t.Fatalf("plan length = %d, want 4", len(plan))
 	}
 	external := plan[0]
-	if external.APIPath != "kv/data/guardian/guardian-mgmt/tenant-guardian/dns/external-dns" {
+	if external.APIPath != "kv/data/guardian/guardian-mgmt/external-dns/cloudflare" {
 		t.Fatalf("external path = %q", external.APIPath)
 	}
 	if external.Data["CF_API_TOKEN"] != "external" {
@@ -90,6 +90,42 @@ func TestImportPlanRejectsBadGithubKey(t *testing.T) {
 	env["github_promotions_app_private_key_b64"] = base64.StdEncoding.EncodeToString([]byte("plain text, not a PEM"))
 	if _, err := importPlan(env); err == nil {
 		t.Fatal("importPlan accepted a non-PEM payload")
+	}
+}
+
+func TestImportPlanOptionalKeycloakStages(t *testing.T) {
+	env := testImportEnv()
+	env["BETA_GITHUB_CLIENT_SECRET"] = "beta-secret"
+	env["PROD_GITHUB_CLIENT_SECRET"] = "prod-secret"
+	// gamma deliberately absent: an env file may carry only a subset of stages.
+
+	plan, err := importPlan(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan) != 6 {
+		t.Fatalf("plan length = %d, want 6 (4 base + beta + prod)", len(plan))
+	}
+	byPath := map[string]secretWrite{}
+	for _, w := range plan {
+		byPath[w.APIPath] = w
+	}
+	beta, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-guardian-beta/keycloak/github-oauth"]
+	if !ok {
+		t.Fatal("beta keycloak write missing")
+	}
+	if beta.Data["GITHUB_CLIENT_SECRET"] != "beta-secret" {
+		t.Fatalf("beta GITHUB_CLIENT_SECRET = %q", beta.Data["GITHUB_CLIENT_SECRET"])
+	}
+	prod, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-guardian-prod/keycloak/github-oauth"]
+	if !ok {
+		t.Fatal("prod keycloak write missing")
+	}
+	if prod.Data["GITHUB_CLIENT_SECRET"] != "prod-secret" {
+		t.Fatalf("prod GITHUB_CLIENT_SECRET = %q", prod.Data["GITHUB_CLIENT_SECRET"])
+	}
+	if _, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-guardian-gamma/keycloak/github-oauth"]; ok {
+		t.Fatal("gamma keycloak write present despite no gamma secret in env")
 	}
 }
 

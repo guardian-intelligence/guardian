@@ -254,9 +254,13 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 	if !strings.HasPrefix(string(githubAppKey), "-----BEGIN") {
 		return nil, errors.New("github_promotions_app_private_key_b64 does not decode to a PEM block")
 	}
-	return []secretWrite{
+	// Every path's first segment under guardian-mgmt/ is the consuming
+	// namespace (the per-namespace reader/writer roles are scoped to that
+	// subtree); operator/ is the exception — custody reference material no
+	// in-cluster role can read.
+	writes := []secretWrite{
 		{
-			APIPath: "kv/data/guardian/guardian-mgmt/tenant-guardian/dns/external-dns",
+			APIPath: "kv/data/guardian/guardian-mgmt/external-dns/cloudflare",
 			Data: map[string]string{
 				"CF_API_TOKEN": env["cloudflare_external_dns_api_token"],
 			},
@@ -285,7 +289,29 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 				"githubAppPrivateKey": string(githubAppKey),
 			},
 		},
-	}, nil
+	}
+
+	// Per-stage Keycloak "Sign in with GitHub" client secrets are optional:
+	// unlike the writes above, an env file may legitimately carry only a
+	// subset of stages (e.g. beta+gamma before a prod OAuth App exists).
+	// Everything about these apps other than the client secret (app name,
+	// settings id, homepage/callback URL, realm, idp alias, client ID) is
+	// not sensitive and is checked into
+	// src/infrastructure/deployments/iam/github-oauth-apps.yaml instead.
+	for _, stage := range []string{"beta", "gamma", "prod"} {
+		secret := strings.TrimSpace(env[strings.ToUpper(stage)+"_GITHUB_CLIENT_SECRET"])
+		if secret == "" {
+			continue
+		}
+		writes = append(writes, secretWrite{
+			APIPath: fmt.Sprintf("kv/data/guardian/guardian-mgmt/tenant-guardian-%s/keycloak/github-oauth", stage),
+			Data: map[string]string{
+				"GITHUB_CLIENT_SECRET": secret,
+			},
+		})
+	}
+
+	return writes, nil
 }
 
 func openBaoCA(ctx context.Context, runner kubectlRunner, secretName string) ([]byte, error) {

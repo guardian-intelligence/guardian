@@ -67,26 +67,31 @@ func TestOpenBaoStaticSealTLSAndStorageConformance(t *testing.T) {
 		`test "$(sha256sum "$key" | awk '{print $1}')" = "` + openBaoStaticSealKeyID + `"`,
 		// Self-init is now the sole source of truth for steady-state OpenBao
 		// config (there is no reconciling operator): Kubernetes auth, the kv
-		// and transit engines, and the external-dns consumer's policy+role.
+		// and transit engines, and one reader+writer policy/role pair per
+		// consumer namespace, each scoped to that namespace's own kv subtree.
 		`initialize "guardian_self_init"`,
 		`request "enable_kubernetes_auth"`,
 		`request "enable_kv_mount"`,
 		`type = "kv-v2"`,
 		`request "enable_transit_mount"`,
 		`type = "transit"`,
-		`request "write_external_dns_policy"`,
-		`request "write_external_dns_role"`,
-		`bound_service_account_names = ["external-dns-secrets"]`,
-		`token_policies = ["guardian-external-dns"]`,
-		`request "write_promotion_policy"`,
-		`request "write_promotion_role"`,
-		`bound_service_account_names = ["promotion-secrets"]`,
-		`token_policies = ["guardian-promotion"]`,
+		`request "write_reader_policy_external_dns"`,
+		`request "write_reader_role_external_dns"`,
+		`bound_service_account_names = ["secrets-reader"]`,
+		`bound_service_account_names = ["secrets-writer"]`,
+		`token_policies = ["guardian-reader-external-dns"]`,
+		`token_policies = ["guardian-writer-external-dns"]`,
+		`kv/data/guardian/guardian-mgmt/external-dns/*`,
+		`request "write_reader_policy_company_site"`,
+		`token_policies = ["guardian-reader-company-site"]`,
+		`kv/data/guardian/guardian-mgmt/company-site/*`,
+		`kv/data/guardian/guardian-mgmt/tenant-guardian-beta/*`,
+		`kv/data/guardian/guardian-mgmt/tenant-guardian-gamma/*`,
+		`kv/data/guardian/guardian-mgmt/tenant-guardian-prod/*`,
 		`request "write_secret_importer_policy"`,
 		`request "write_secret_importer_role"`,
 		`bound_service_account_names = ["guardian-secret-importer"]`,
-		`kv/data/guardian/guardian-mgmt/tenant-guardian/dns/external-dns`,
-		`kv/data/guardian/guardian-mgmt/company-site/promotion/github-app`,
+		`kv/data/guardian/guardian-mgmt/*`,
 		`auth/kubernetes/role/guardian-secret-importer`,
 		`sys/policies/acl/guardian-secret-importer`,
 		`token_ttl = "600"`,
@@ -102,6 +107,11 @@ func TestOpenBaoStaticSealTLSAndStorageConformance(t *testing.T) {
 	// operator's own bootstrap access.
 	assertTextNotContains(t, raw, "write_ops_controller_role", path)
 	assertTextNotContains(t, raw, "guardian-openbao-ops-controller", path)
+	// The per-integration consumer model (one policy per secret path, reinit
+	// per integration) is gone; access is per-namespace subtree only.
+	assertTextNotContains(t, raw, `guardian-external-dns`, path)
+	assertTextNotContains(t, raw, `token_policies = ["guardian-promotion"]`, path)
+	assertTextNotContains(t, raw, "tenant-guardian/dns/external-dns", path)
 
 	listener := readText(t, runfilePath("src/infrastructure/deployments/guardian/system/openbao-listener-tls.yaml"))
 	assertTextContains(t, listener, "guardian-openbao-listener-ca", "openbao listener TLS manifest")
@@ -256,7 +266,7 @@ func TestOpenBaoFluxOrderingConformance(t *testing.T) {
 // that object with nothing to notice. Pin every required request by name.
 func TestOpenBaoOperationsInventoryConformance(t *testing.T) {
 	raw := readText(t, runfilePath("src/infrastructure/deployments/guardian/system/openbao-helmrelease.yaml"))
-	for _, want := range []string{
+	inventory := []string{
 		`request "enable_kubernetes_auth"`,
 		`request "configure_kubernetes_auth"`,
 		`request "tune_kubernetes_auth"`,
@@ -264,13 +274,27 @@ func TestOpenBaoOperationsInventoryConformance(t *testing.T) {
 		`request "tune_kv_mount"`,
 		`request "enable_transit_mount"`,
 		`request "tune_transit_mount"`,
-		`request "write_external_dns_policy"`,
-		`request "write_external_dns_role"`,
-		`request "write_promotion_policy"`,
-		`request "write_promotion_role"`,
 		`request "write_secret_importer_policy"`,
 		`request "write_secret_importer_role"`,
+	}
+	// Consumer namespaces get exactly one reader+writer policy/role set each.
+	// Adding an INTEGRATION never extends this list; adding a NAMESPACE does
+	// (that is the structural change that re-initializes).
+	for _, scope := range []string{
+		"external_dns",
+		"company_site",
+		"tenant_guardian_beta",
+		"tenant_guardian_gamma",
+		"tenant_guardian_prod",
 	} {
+		inventory = append(inventory,
+			`request "write_reader_policy_`+scope+`"`,
+			`request "write_reader_role_`+scope+`"`,
+			`request "write_writer_policy_`+scope+`"`,
+			`request "write_writer_role_`+scope+`"`,
+		)
+	}
+	for _, want := range inventory {
 		assertTextContains(t, raw, want, "openbao self-init inventory")
 	}
 }
@@ -403,6 +427,7 @@ func TestOpenBaoConsumersUseTLSConformance(t *testing.T) {
 		"name: guardian-openbao-api-tls",
 		"namespace: tenant-guardian",
 		"kind: ClusterSecretStore",
+		"role: guardian-reader-external-dns",
 	} {
 		assertTextContains(t, dns, want, "external-dns SecretStore")
 	}
@@ -415,7 +440,7 @@ func TestOpenBaoConsumersUseTLSConformance(t *testing.T) {
 		"server: https://guardian-openbao.tenant-guardian.svc:8200",
 		"caProvider:",
 		"name: guardian-openbao-api-tls",
-		"role: guardian-promotion",
+		"role: guardian-reader-company-site",
 		"kargo.akuity.io/cred-type: git",
 	} {
 		assertTextContains(t, promotion, want, "promotion SecretStore")
@@ -425,6 +450,82 @@ func TestOpenBaoConsumersUseTLSConformance(t *testing.T) {
 	// value-bearing template would defeat the custody model. "PRIVATE KEY"
 	// matches every PEM label (PKCS#1, PKCS#8, OpenSSH).
 	assertTextNotContains(t, promotion, "PRIVATE KEY", "promotion SecretStore")
+}
+
+// Every ExternalSecret must read exclusively from its own namespace's kv
+// subtree (guardian/guardian-mgmt/<namespace>/...), and every vault-backed
+// (Cluster)SecretStore must authenticate as that namespace's secrets-reader
+// SA through its guardian-reader-<namespace> role. The per-namespace OpenBao
+// policies enforce this at runtime; this test enforces it at review time, so
+// a gamma manifest referencing a prod path (or vice versa) fails CI instead
+// of failing — or worse, succeeding — live.
+func TestOpenBaoSecretScopeConformance(t *testing.T) {
+	const anchor = "src/infrastructure/base/flux/sync.yaml"
+	anchorPath := filepath.ToSlash(runfilePath(anchor))
+	root := strings.TrimSuffix(anchorPath, anchor)
+	if root == anchorPath {
+		t.Fatalf("cannot derive runfiles repo root from %s", anchorPath)
+	}
+
+	externalSecrets, stores := 0, 0
+	walk := func(path string, docs []map[string]interface{}) {
+		for _, doc := range docs {
+			switch stringValue(doc["kind"]) {
+			case "ExternalSecret":
+				externalSecrets++
+				metadata := mapValue(doc["metadata"])
+				namespace := stringValue(metadata["namespace"])
+				name := stringValue(metadata["name"])
+				if namespace == "" {
+					t.Fatalf("%s: ExternalSecret %s declares no namespace; scope enforcement needs an explicit one", path, name)
+				}
+				wantPrefix := "guardian/guardian-mgmt/" + namespace + "/"
+				var keys []string
+				for _, item := range sliceValue(mapValue(doc["spec"])["data"]) {
+					keys = append(keys, stringValue(mapValue(mapValue(item)["remoteRef"])["key"]))
+				}
+				for _, item := range sliceValue(mapValue(doc["spec"])["dataFrom"]) {
+					keys = append(keys, stringValue(mapValue(mapValue(item)["extract"])["key"]))
+				}
+				if len(keys) == 0 {
+					t.Fatalf("%s: ExternalSecret %s/%s declares no remoteRef keys", path, namespace, name)
+				}
+				for _, key := range keys {
+					if !strings.HasPrefix(key, wantPrefix) {
+						t.Fatalf("%s: ExternalSecret %s/%s reads %q; every remoteRef must stay inside %q (its own namespace's subtree)", path, namespace, name, key, wantPrefix)
+					}
+				}
+			case "ClusterSecretStore", "SecretStore":
+				vault := mapValue(mapValue(mapValue(doc["spec"])["provider"])["vault"])
+				if len(vault) == 0 {
+					continue
+				}
+				stores++
+				name := stringValue(mapValue(doc["metadata"])["name"])
+				kubernetes := mapValue(mapValue(vault["auth"])["kubernetes"])
+				saRef := mapValue(kubernetes["serviceAccountRef"])
+				saName := stringValue(saRef["name"])
+				saNamespace := stringValue(saRef["namespace"])
+				role := stringValue(kubernetes["role"])
+				if saName != "secrets-reader" {
+					t.Fatalf("%s: SecretStore %s authenticates as SA %q; stores must use the namespace's dedicated secrets-reader SA", path, name, saName)
+				}
+				if saNamespace == "" {
+					t.Fatalf("%s: SecretStore %s has no serviceAccountRef namespace", path, name)
+				}
+				if want := "guardian-reader-" + saNamespace; role != want {
+					t.Fatalf("%s: SecretStore %s uses role %q with SA namespace %q; want role %q so the store can only read its own namespace's subtree", path, name, role, saNamespace, want)
+				}
+			}
+		}
+	}
+	// base + deployments cover every Flux-applied manifest; talm/ holds Go
+	// templates that are not plain YAML and carries no ESO objects.
+	walkYAMLFiles(t, filepath.Join(root, "src/infrastructure/base"), walk)
+	walkYAMLFiles(t, filepath.Join(root, "src/infrastructure/deployments"), walk)
+	if externalSecrets == 0 || stores == 0 {
+		t.Fatalf("scope conformance walked %d ExternalSecrets and %d vault SecretStores; the walk roots or data deps are wrong", externalSecrets, stores)
+	}
 }
 
 func readText(t *testing.T, path string) string {
