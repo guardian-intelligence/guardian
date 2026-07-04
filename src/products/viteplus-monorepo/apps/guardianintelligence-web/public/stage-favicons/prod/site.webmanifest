@@ -1,0 +1,26 @@
+{
+  "name": "Guardian Prod",
+  "short_name": "Guardian prod",
+  "icons": [
+    {
+      "src": "/stage-favicons/prod/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any"
+    },
+    {
+      "src": "/stage-favicons/prod/maskable-icon.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/stage-favicons/prod/apple-touch-icon.png",
+      "type": "image/png",
+      "sizes": "180x180"
+    }
+  ],
+  "theme_color": "#0B0B0B",
+  "background_color": "#0B0B0B",
+  "display": "standalone",
+  "start_url": "/"
+}

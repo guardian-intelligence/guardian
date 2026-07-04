@@ -1,0 +1,26 @@
+{
+  "name": "Guardian Beta",
+  "short_name": "Guardian beta",
+  "icons": [
+    {
+      "src": "/stage-favicons/beta/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any"
+    },
+    {
+      "src": "/stage-favicons/beta/maskable-icon.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/stage-favicons/beta/apple-touch-icon.png",
+      "type": "image/png",
+      "sizes": "180x180"
+    }
+  ],
+  "theme_color": "#0B0B0B",
+  "background_color": "#0B0B0B",
+  "display": "standalone",
+  "start_url": "/"
+}
