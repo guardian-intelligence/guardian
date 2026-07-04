@@ -13,7 +13,7 @@ description: >-
 
 I wish someone told me having a son would feel like meeting a smaller, kinder, funnier version of myself. Someone who holds my quirks like treasures instead of flaws.
 
-I love our morning walks and how he stops to teach me the laughing gulls names. There was a new one today so we picked out a name together. It’s “Donnie,” just so you know.
+I love our morning walks and how he stops to teach me the laughing gulls’ names. There was a new one today so we picked out a name together. It’s “Donnie,” just so you know.
 
 And did you know he has a crush? He told me over breakfast that when they're nearby, his stomach tries to escape through his chest, so he asked me what he should do. It reminded me of when we met — those first few months — falling in love at our first Odesza. Do you remember? So I smiled and told him, “Find out what their favorite game is, then ask them to watch you play!” He rolled his eyes because he’s sick of hearing our story, but I wonder what you’d say if he asked you.
 
@@ -21,7 +21,7 @@ You should see how tender he is with the parts of me I used to hide. He's been p
 
 While everyone was over for dinner, he got really quiet and walked past everyone to tug on my sleeve. I was worried something was wrong, but all he asked was if I could homeschool him and all his classmates from last year when summer ends. He wants me to teach them every year until they all graduate from college together. He loudly counted up the grades as he was explaining, but I had to stop him when he got to the twenties.
 
-I asked him why. He looked around and paused and said "I wish the house was this full all the time” and gave me permission to skip math if that'd make homechooling easier for me. I couldn’t argue.
+I asked him why. He looked around and paused and said “I wish the house was this full all the time” and gave me permission to skip math if that'd make homeschooling easier for me. I couldn’t argue.
 
 He shows me every day that curiosity and love are two sides of something bigger I don't have a word for yet. I cherish the way his eyes go wide flipping over rocks and seeing the worms underneath, and how he dreams of being a bird searching skies for a cloud that looks like you.
 
@@ -45,7 +45,7 @@ The other day, while climbing the tree where the woodpeckers live, she tore her 
 
 I sat with her and watched her sew and get so focused neither of us said a word and all you could hear was the whir of the machine while the sun sank into the ocean outside. When it felt right, I asked her what had been making her sad, and she didn’t say anything for a long time and then reached into her pocket and put a polaroid into my hand. I think you took this one. It’s me and her last year: I was holding her up to the sun, doing a Lion King bit. It had been torn apart, probably by the woodpeckers, but she had carefully taped it back up.
 
-She paused for a moment and then jumped into my arms and hugged me tight. “I miss being little" she said, and I felt her tears pool up on my sweater. I told her no matter how much she grows up that she’ll always be my little baby, and she liked that better and fell asleep on my lap and we stayed like that for I don’t know how long.
+She paused for a moment and then jumped into my arms and hugged me tight. “I miss being little,” she said, and I felt her tears pool up on my sweater. I told her no matter how much she grows up that she’ll always be my little baby, and she liked that better and fell asleep on my lap and we stayed like that for I don’t know how long.
 
 No one told me having kids would make my heart a compass that always points home. That no matter how much we fight and yell and say things we don't mean, and no matter how much our hearts break, we'll come home to each other and become strong in the broken places.
 
