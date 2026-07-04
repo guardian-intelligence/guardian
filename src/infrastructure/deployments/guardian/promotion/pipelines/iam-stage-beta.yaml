@@ -1,0 +1,69 @@
+# The beta promotion Stage: new Freight (an upstream Keycloak release within
+# the Warehouse's SemVer constraint) becomes a pin-bump PR against main.
+# Kargo is the untrusted proposer — CI checks and branch protection decide
+# whether the PR merges (promotion-lock-sync keeps images.lock in step and
+# arms automerge), and the deploy is then gated in-cluster by the Flagger
+# blue/green login gate before any user traffic reaches the new version.
+#
+# substitute: disabled — the ${{ ... }} promotion expressions must reach
+# Kargo verbatim, not be mangled by Flux's envsubst pass.
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: beta
+  namespace: guardian-iam
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+spec:
+  requestedFreight:
+    - origin:
+        kind: Warehouse
+        name: keycloak
+      sources:
+        direct: true
+  promotionTemplate:
+    spec:
+      vars:
+        - name: repoURL
+          value: https://github.com/guardian-intelligence/guardian.git
+        - name: imageRepo
+          value: quay.io/keycloak/keycloak
+      steps:
+        - uses: git-clone
+          config:
+            repoURL: ${{ vars.repoURL }}
+            checkout:
+              - branch: main
+                path: ./repo
+        - uses: yaml-update
+          config:
+            path: ./repo/src/infrastructure/deployments/iam/beta/keycloak.yaml
+            updates:
+              - key: spec.template.spec.containers.0.image
+                value: ${{ vars.imageRepo }}@${{ imageFrom(vars.imageRepo).Digest }}
+        - uses: git-commit
+          as: commit
+          config:
+            path: ./repo
+            message: promote keycloak (beta) to ${{ imageFrom(vars.imageRepo).Digest }}
+        - uses: git-push
+          as: push
+          config:
+            path: ./repo
+            generateTargetBranch: true
+        - uses: git-open-pr
+          as: open-pr
+          config:
+            repoURL: ${{ vars.repoURL }}
+            provider: github
+            sourceBranch: ${{ outputs.push.branch }}
+            targetBranch: main
+            title: promote keycloak (beta) to ${{ imageFrom(vars.imageRepo).Digest }}
+        # Same idempotence guard as the company-site Stage: a false `if` is
+        # evaluated before the config expressions, so a self-skipped open-pr
+        # never errors on the nil output and no-op promotions end Succeeded.
+        - uses: git-wait-for-pr
+          if: ${{ status('open-pr') == 'Succeeded' }}
+          config:
+            repoURL: ${{ vars.repoURL }}
+            prNumber: ${{ outputs['open-pr'].pr.id }}
