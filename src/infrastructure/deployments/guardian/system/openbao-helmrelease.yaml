@@ -568,6 +568,48 @@ spec:
                   }
                 }
 
+                request "write_reader_policy_guardian_iam" {
+                  operation = "update"
+                  path = "sys/policies/acl/guardian-reader-guardian-iam"
+                  data = {
+                    policy = "path \"kv/data/guardian/guardian-mgmt/guardian-iam/*\" {\n  capabilities = [\"read\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/guardian-iam/*\" {\n  capabilities = [\"read\"]\n}\n"
+                  }
+                }
+
+                request "write_reader_role_guardian_iam" {
+                  operation = "update"
+                  path = "auth/kubernetes/role/guardian-reader-guardian-iam"
+                  data = {
+                    bound_service_account_names = ["secrets-reader"]
+                    bound_service_account_namespaces = ["guardian-iam"]
+                    audience = "openbao"
+                    token_policies = ["guardian-reader-guardian-iam"]
+                    token_ttl = "3600"
+                    token_max_ttl = "3600"
+                  }
+                }
+
+                request "write_writer_policy_guardian_iam" {
+                  operation = "update"
+                  path = "sys/policies/acl/guardian-writer-guardian-iam"
+                  data = {
+                    policy = "path \"kv/data/guardian/guardian-mgmt/guardian-iam/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/guardian-iam/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n"
+                  }
+                }
+
+                request "write_writer_role_guardian_iam" {
+                  operation = "update"
+                  path = "auth/kubernetes/role/guardian-writer-guardian-iam"
+                  data = {
+                    bound_service_account_names = ["secrets-writer"]
+                    bound_service_account_namespaces = ["guardian-iam"]
+                    audience = "openbao"
+                    token_policies = ["guardian-writer-guardian-iam"]
+                    token_ttl = "600"
+                    token_max_ttl = "600"
+                  }
+                }
+
                 # The bootstrap importer seeds the whole guardian-mgmt subtree
                 # in one run (bootstrap and DR re-seed are the only times a
                 # cross-namespace write credential exists), then deletes its

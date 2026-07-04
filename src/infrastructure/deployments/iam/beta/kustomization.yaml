@@ -6,5 +6,6 @@ resources:
   - realm-configmap.yaml
   - keycloak.yaml
   - canary.yaml
+  - loadtester.yaml
   - ingress.yaml
   - networkpolicy.yaml
