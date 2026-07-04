@@ -1,0 +1,43 @@
+# Flagger's controller has no inbound admission webhook (Canary/MetricTemplate
+# CRDs validate against their OpenAPI schema, not a webhook server) — this
+# policy is egress-only. Egress: kube-apiserver (watch Canaries/Deployments/
+# Services and drive promotion), DNS, and tenant-root's vmselect-shortterm
+# (Prometheus-compatible metric analysis queries). Any pre-rollout/rollout
+# webhook targets Flagger calls (e.g. the Keycloak login-canary check) live
+# in the same tenant namespace as the Canary and are reached via
+# fromEndpoints rules declared alongside that Canary, not here.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: flagger
+  namespace: flagger
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: flagger
+  egress:
+    - toEntities:
+        - kube-apiserver
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # tenant-root's VictoriaMetrics vmselect-shortterm, queried for canary
+    # analysis (request-success-rate / request-duration MetricTemplates).
+    # Label match is the VictoriaMetrics Operator's usual
+    # app.kubernetes.io/name convention — verify against the live
+    # vmselect-shortterm pods post-deploy and adjust if it drifts.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            k8s:app.kubernetes.io/name: vmselect
+      toPorts:
+        - ports:
+            - port: "8481"
+              protocol: TCP

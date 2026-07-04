@@ -2,102 +2,26 @@ This is a Bazel polyglot hermetically sealed monorepo for Guardian, a free open-
 
 The purpose is to create a free and open-source system for any being to convert a source of compute into a self-healing intelligent system (in our case, a secure, disaster-proof software company capable of generating revenue by providing value to the world).
 
-The audience is a single individual with high technical ability who wants to build a company. Verself is the reference example — a value-providing, revenue-generating business proving the concept works — but it was hand-built (Nomad et al.); Guardian is the generalization, built so the next one isn't. The proof is autobiographical: the operator builds a successful company on Guardian first, then shows others the path.
+* Cozystack 1.5 `isp-full` - when researching CozyStack, use 1.5 docs from the exact `v1.5.0` tag / `release-1.5` branch. See `src/infrastructure/base/cozystack/platform.yaml` and `src/infrastructure/base/apps/core-services.yaml`
+* Other useful reference architectures: Zarf/UDS, AWS Landing Zone Accelerator
+* Repo ships specific products within the architecture. First major product: Verself (reference Blacksmith.sh)
+* Airgapped hermetically-sealed come up done through images.lock + Rancher Hauler + Sidero Labs `talm` for Talos on bare metal soil (currently Latitude.sh)
+* DNS managed through Cloudflare. TLS terminates at Cloudflare edge. Cloudflare LB for the three control plane nodes. [206.223.228.101, 45.250.254.119, 206.223.228.87].
+* Cozystack tenancy - `guardian` tenant for product workloads, product databases, shared business logic, services, split per stage (gamma, beta, prod). `tenant-root` is the required Cozystack root/admin tenant for a regional management cluster. Cozystack packages/operators, Flux handoff, storage classes, COSI/BackupClass/system bucket, root ingress/load-balancer substrate, root infrastructure monitoring, child Tenant CRs, and cluster-wide policy go in `tenant-root`.
+* Today the active region is Latitude ASH (`ash`). The active management control plane is the `guardian-mgmt` Kubernetes cluster. Its Kubernetes API endpoint is the private VLAN VIP `https://10.8.0.250:6443`. Reference files:
+  - `src/infrastructure/bootstrap/guardian-mgmt/main.tf`
+  - `src/infrastructure/talm/values.yaml`
+  - `src/infrastructure/base/cozystack/platform.yaml`
+  - `src/infrastructure/base/flux/sync.yaml`
+* Stripe is payment rail only -- we don't use Stripe Subscriptions / Usage-Based Billing. We meter on our own (planned)
+* Zero customers as of present day besides us: no compatibility shims or legacy wrappers
+* Auth n/z is multitenant by default: Keycloak instance per stage. SpiceDB/Zanzibar for permissions
+* VictoriaLogs for logs. VictoriaMetrics for Metrics. TigerBeetle for OLTP. CNPG (single writer per stage, fan out read replicas) for system stage and misc.
 
-The value proposition:
-
-1. We make release and deployment automation easy.
-2. We make supply chain, network, and application security easy.
-3. We make it easy to add integrations (Stripe, GitHub, and the like) securely.
-4. We make disaster recovery easy.
-5. We make monitoring easy: the system detects its own degradation, remediates what it can, and pages the human only when it can't. Nothing else pages the human.
-
-We do all of this by gluing together excellent existing tools and letting the user focus on building and iterating on their products. The economics: bootstrap once onto powerful fixed-cost metal, then iterate at near-zero marginal cost until product-market fit — ideas are fragile before they are refined, so shipping the next refined version must be nearly free. Every pillar is proven by a drill, not a claim: if it isn't drilled, it isn't true yet.
-
-We use CozyStack. Grep through Cozystack 1.5 docs from the exact `v1.5.0` tag when validating 1.5.0 behavior, or the `release-1.5` branch when intentionally reading the maintained 1.5 line. Do not use v0 docs, v1.4 docs, or current main by accident.
-
-Reference Cozystack for prior art for the cloud portion. Other inspiration: Zarf/UDS, AWS Landing Zone Accelerator, the airgapped landing zone pattern in general.
-
-CozyStack is the platform; Hauler is the seed (the complete digest-pinned artifact bundle from which a Guardian is planted or revived, internet or not); provider profiles are the soil adapters (Latitude today). Guardian itself owns what no upstream can: the custody model, the proofs, and the bootstrap protocol. A provider must offer: boot of an arbitrary image, an isolated private segment with declared MTU, out-of-band reinstall/console, public IPv4, stable machine identity, and a reachable time source. That contract — not any provider's API — is the portability boundary.
-
-Admission test for new components: anything added to Guardian must be (a) configuration of CozyStack, (b) content in the haul, (c) a value in a provider profile, or (d) custody, proof, or bootstrap protocol. If it is none of these, it does not get in.
-
-<company_topology>
-Single Global Writer
-Public DNS stays globally managed, for now.
-
-Cozystack tenants are coarse account boundaries, not the default unit of
-application isolation. Start with one Guardian tenant under the required
-Cozystack root/admin tenant. Use Kubernetes namespaces, labels, RBAC,
-NetworkPolicy, service accounts, and release evidence for Guardian component
-and stage isolation until a concrete operational need justifies another
-Cozystack Tenant.
-
-`tenant-root` is the required Cozystack root/admin tenant for a regional
-management cluster. Cozystack packages/operators, Flux handoff, storage classes,
-COSI/BackupClass/system bucket, root ingress/load-balancer substrate, root
-infrastructure monitoring, child Tenant CRs, and cluster-wide policy belong
-there. Do not put product workloads, product databases, or shared business logic
-in `tenant-root`. tenant-root owns:
-
-- Cozystack Package / operator declarations
-- Flux source and Kustomizations that reconcile the management cluster
-- the single `guardian` Tenant CR and any future account-boundary Tenant CRs
-- storage substrate: StorageClasses, LINSTOR config, COSI classes
-- backup substrate: BackupClass/cozy-default, system bucket plumbing
-- root ingress/load-balancer substrate
-- MetalLB / Cilium / Gateway substrate if cluster-scoped
-- root DNS/bootstrap glue for cluster entrypoints: guardianintelligence.org
-- root Monitoring for Kubernetes/Cozystack/storage/ingress health
-- bootstrap/break-glass OpenBao only if needed for regional substrate recovery
-- cluster-wide NetworkPolicy/RBAC/admission defaults
-- cert-manager/issuer substrate if it serves all tenants
-- External Secrets / SecretStore bootstrap needed for tenant secret projection
-- operational drills for cluster survival: backup restore, node outage, OpenBao static-seal restart, system bucket validation
-
-Today the active region is Latitude ASH (`ash`). The active management control
-plane is the `guardian-mgmt` Kubernetes cluster. Its Kubernetes API endpoint is
-the private VLAN VIP `https://10.8.0.250:6443`; public ingress still uses the
-three Latitude node origins behind Cloudflare. Treat these files as the current
-control-plane source of truth:
-
-- `src/infrastructure/bootstrap/guardian-mgmt/main.tf`
-- `src/infrastructure/talm/values.yaml`
-- `src/infrastructure/base/cozystack/platform.yaml`
-- `src/infrastructure/base/flux/sync.yaml`
-
-```
-region: ash
-  cozystack-management-cluster: guardian-mgmt
-    kubernetes-api: https://10.8.0.250:6443
-    tenant-root                     # Cozystack substrate only
-
-    tenant-guardian                 # Guardian-owned control planes/products
-      # Guardian-owned root services such as OpenBao, release controllers, and
-      # shared ops live directly in tenant-guardian unless they need a separate
-      # account boundary.
-
-      tenant-guardian-beta          # first durable integration stage
-      tenant-guardian-gamma         # staging / release-candidate validation
-      tenant-guardian-prod          # production
-
-      labels:
-        guardian.dev/component: iam | secrets | audit | telemetry | release | billing | aisucks | workloads | company
-        guardian.dev/stage: beta | gamma | prod
-        guardian.dev/tenant-id: gi-guardian
-
-region: cmh                         # hypothetical future region
-  cozystack-management-cluster: guardian-mgmt-cmh
-    tenant-root
-    tenant-guardian
-```
-
+<releases>
 Default release channels: Edge (CD on main), nightly, RC, stable.
-Default deployment stages: beta, gamma, prod. Use `dev` only for local or
-PR-preview workflows, not durable regional namespace names.
-Release channels and deployment stages are not the same thing. Do not encode
-release channels as Cozystack Tenants.
-</company_topology>
+Default deployment stages: beta, gamma, prod.
+</releases>
 
 <repo_shape>
 The below is the target shape -- repo still in flux and does not match this quite yet
@@ -123,17 +47,6 @@ src/
         api/                           # future Connect KMS/Secrets API when needed
         service/                       # future wrapper/control plane if needed
         release/
-        deploy/base/
-
-      release/
-        api/
-        service/
-        release/
-        deploy/base/                   # Kargo/admission/registry policy surface
-
-      telemetry/
-        api/
-        service/
         deploy/base/
 
     infrastructure/
@@ -178,11 +91,10 @@ src/
 </repo_shape>
 
 <technology>
-TLS terminates at Cloudflare edge.
+
 Kubernetes API clients should target the `guardian-mgmt` private API VIP:
-`https://10.8.0.250:6443`. Do not pin day-to-day kubeconfigs or drills to a
-single control-plane node IP.
-Cloudflare LB for the three control plane nodes. [206.223.228.101, 45.250.254.119, 206.223.228.87]
+`https://10.8.0.250:6443`.
+
 MetalLB for L2/ARP inside the Latitude VLAN. `10.8.0.200 - 10.8.0.240`
 
 Public edge should follow the standard Kubernetes shape wherever the provider
@@ -225,23 +137,15 @@ Important context:
 
 <development_loop>
 - This section is WIP, follow best practices. The below is just a few things to add to normal development workflow
-- Do not use CLI commands as a control plane. Rely on flux to converge the cluster on merged commits.
-- Run `aspect infra edge-health` to smoke-test edge reachability post convergence. Verify DNS resolution for every configured `guardianintelligence.org` hostname, HTTPS behavior through the public edge and origin consistency checks.
-- Edge failover drills are single-node exercises. Run the drill once per node by explicit node IP, wait for the node and public edge to recover, document that node's outage window, then move to the next node. A node whose loss breaches 60 seconds of public-edge disruption is load bearing and must be fixed before continuing.
+- Do not use CLI commands as a second control plane. Rely on flux to converge the cluster on merged commits.
+- You can run `aspect infra edge-health` to smoke-test edge reachability post convergence. Verify DNS resolution for every configured `guardianintelligence.org` hostname, HTTPS behavior through the public edge and origin consistency checks.
+- For drills (not part of normal development) run them once per node by explicit node IP, wait for the node and public edge to recover, document that node's outage window, then move to the next node. A node whose loss breaches 60 seconds of public-edge disruption is load bearing and must be fixed before continuing.
 - RTO policy lives in `docs/reliability-rto.md`.
 </development_loop>
 
 Constraints:
 - Secrets must be autoprovisioned/autorotated.
-- Guardian tenant OpenBao uses static auto-unseal plus OpenBao self-init. The
-  static seal key is 32 raw bytes, placed out of band on each dedicated
-  key-bearing node, and never stored in Kubernetes, Git, CI, chat, shell
-  history, Talos machine files, or OpenBao-backed secret paths. Node/root
-  compromise on a key-bearing node is OpenBao compromise. The runbook is
-  `src/infrastructure/runbooks/openbao-static-seal-self-init.md`.
-- Cozystack 1.5 backups use the platform-managed `cozy-default` BackupClass
-  and system bucket. Do not add Guardian-specific backup strategies, backup
-  credential Secrets, or checks for legacy backup object names.
+- Cozystack 1.5 backups use the platform-managed `cozy-default` BackupClass  and system bucket. Do not add Guardian-specific backup strategies, backup credential Secrets, or checks.
 - Traces are the only admissable proof -- ClickHouse (when stood up), Victoria Metrics, Victoria Logs. Collect traces/spans and relevant log lines to support your thesis that your task is complete to satisfaction. Test services under heavy load via k6 to surface subtle bugs.
 
 Service architecture:
@@ -260,33 +164,17 @@ Sandbox isolation doctrine (multi-tenant QEMU), the below is advisory for when w
 - Network isolation: one TAP + dedicated netns per VM, default-deny egress with explicit NAT, anti-spoof nftables on MAC+IP, per-VM bandwidth cap, no inter-VM L2 reachability, metadata reachable only at our controlled link-local endpoint. Ape OpenComputer's per-VM /30 but terminate it in a netns, not a shared bridge.
 - Memory density without cross-tenant leakage: no cross-tenant KSM (write-timing side channel + Flip Feng Shui Rowhammer). Golden-image RAM savings come from a read-only shared base image (page-cache shared, never written) plus a per-sandbox COW overlay (ZFS clone) — only known-public content is ever shared. The density multiplier is hibernation/oversubscription of idle VMs, which shares nothing live.
 
-Release doctrine:
-
-- A release is a typed operation over a release target, not a workflow file. The release target is the tuple of distributable, source commit, package/ecosystem version or coordinate, publisher, platform, build flavor, and channel intent.
-- In OCI artifact paths, `npm` means the npm package/tarball format, not npmjs.com as publisher; npmjs publication is a downstream projection.
-- Promotion preserves source lineage and release intent. Bit identity is package/ecosystem-specific: OCI images may promote the same digest, while npm/crates/iOS/Electron may rebuild because version, signing, or channel metadata changes bytes.
-- Inside the Bazel monorepo, the only internal version is the commit. Ecosystem versions, dist-tags, app versions, OCI tags, and channel pointers are external projections of a commit and artifact evidence; Guardian code must not depend on internal semver between repo modules.
-- Package-owned release tooling owns release semantics: version derivation, release notes, build targets, supported platforms/flavors/publishers, publisher-specific packaging, and retry behavior. Shared release infrastructure owns source resolution, subject normalization, provenance shape, signing hooks, idempotency, audit events, and result records.
-- `aspect release ...` is the durable operator surface and should stay thin. It builds/runs the package release binary and passes flags through; it does not encode package policy itself.
-- Every release target must be idempotent and retryable. If an external artifact/version already exists with matching bytes or digest, no-op; if it exists with different bytes, fail loudly. Partial release runs must resume by verifying already-published targets before continuing.
-- API operation policy should live with the operation contract where practical: auth, audit level, risk tier, request body limit, rate limit, and idempotency requirements should be generated into Connect/Go interceptors or equivalent boring enforcement code.
-- Do not hand-roll a release promotion product. Target Kargo for distributable promotion graphs, staged gates, approvals, verification, and release-train visibility. Guardian-owned release code should be limited to small policy/verifier commands that check cosign signatures, SLSA/in-toto attestations, expected builder identity, subject digest, source commit, package/version, required gate attestations, and taint/rejection status.
-- Target Flagger for deployed-service progressive delivery after Flux applies an approved workload digest: canary, blue/green, metric checks, webhooks, promotion, and rollback. Flagger is not the distributable promotion system.
-- Release channels and stage names are not the same thing. Distributed software advances through increasing evidence gates such as edge -> nightly -> rc -> stable. Deployed software advances through runtime environments and rollout strategies such as dev/gamma/prod plus canary or blue/green.
-
-Fleet (all Latitude.sh ASH, f4.metal.small; the Latitude project is `guardian`).
-
 Planned Product Surfaces:
 
-- GitHub App (20x faster CI than GitHub Actions; adapted from the Verself repo; running untrusted customer CI requires TEE on the rs4 workload nodes first). (Not Yet Implemented)
-- Software Company from an API call or web surface; host come-up tooling only prepares machines for the management cluster. (Not Yet Implemented)
+- Verself - GitHub App (20x faster CI than GitHub Actions; adapted from the Verself repo; running untrusted customer CI requires TEE on the rs4 workload nodes first). (Not Yet Implemented)
+- Empire - Software Company from an API call or web surface; host come-up tooling only prepares machines for the management cluster. (Not Yet Implemented)
 
 Milestones:
 
-Guardian advances only by drills passed and products shipped — never by components added. Substrate work must be pulled by a product need, a drill, or a milestone gate; it is never pushed because it would be elegant. Automate an operation on its second occurrence — the first time, do it by runbook and write the runbook down. Do not recreate the retired `guardian` CLI as a generic operator surface; day-to-day convergence belongs to OpenTofu, Talm, Cozystack, Flux, and standard Kubernetes controllers.
+Guardian advances only by drills passed and products shipped. Automate an operation on its second occurrence — the first time, do it by runbook and write the runbook down. Do not recreate the retired `guardian` CLI as a generic operator surface (yet, that's for the unscoped work on "Empire" ).
 
-- M1 — The substrate is invincible. Drill #1 (all-node cold boot from Git + custody) has passed. Remaining: the wiped-node drill (including etcd-member and Node-object debris cleanup) and the dark cold-boot drill from the haul alone. Gate: revival with zero internet and zero undocumented steps.
-- M2 — One product flows unattended. The company site through the full loop: merge → converge → canary → promote, synthetics watching all environments, alerts wired. Gate: a deliberately bad deploy detects itself and rolls back with hands off the keyboard; a yank drill passes. Flagger and Kargo earn admission here, pulled by this gate.
+- M1 — The substrate is invincible. Drill #1 (all-node cold boot from Git + custody) has passed. Remaining: the wiped-node drill (including etcd-member and Node-object debris cleanup) and the dark cold-boot drill from the haul alone. Gate: revival with zero internet and zero undocumented steps. (complete)
+- M2 — One product flows unattended. The company site through the full loop: merge → converge → canary → promote, synthetics watching all environments, alerts wired. Gate: a deliberately bad deploy detects itself and rolls back with hands off the keyboard; a yank drill passes. Flagger and Kargo earn admission here, pulled by this gate. (complete)
 - M3 — Verself, by strangler. One service at a time onto Guardian; Nomad keeps running until each service proves parity. Stripe and GitHub integration patterns become reusable platform capability here, pulled by real need — never speculatively. Gate: a revenue-bearing Verself path served by Guardian for 30 days without regression.
 - M4 — Guardian is downloadable. Canonical iPXE image + haul + CLI, with a single-box dev variant shipping the same way; most of the machinery falls out of M1's dark drill. Gate: a from-zero Guardian stood up on a second provider from the public artifact and docs alone. External adoption becomes a live option here, not before.
 - M5 — Iteration is free. Many products, one fixed-cost fleet. Gate: shipping a new product idea requires no new infrastructure decisions and no new spend; the counterfactual invoice — what this month's actual workloads would have cost on managed cloud services — is computed from live metrics and published.
