@@ -134,17 +134,28 @@ called out explicitly.
 - **Self-init is the sole source of truth for steady-state OpenBao config.** The `initialize`
   block runs once, at first cluster initialization, with a temporary privileged token OpenBao
   revokes immediately afterward. In that one block it creates the complete steady state: the
-  Kubernetes auth method + config, the `kv` (v2) and `transit` engines and their tunes, and the
-  `external-dns` read policy + Kubernetes auth role. There is no reconciling operator and no
+  Kubernetes auth method + config, the `kv` (v2) and `transit` engines and their tunes, and one
+  reader+writer policy/role pair per consumer namespace. There is no reconciling operator and no
   hand-authored operation CRs — a cold boot converges the same config natively, and there is no
   operator-held privileged token in the steady-state path.
-- Self-init also creates a temporary `guardian-secret-importer` policy + role used only to move
-  local break-glass credential files into OpenBao. The importer is a one-time, bootstrap-only,
-  heavily cordoned, non-load-bearing task; it must be sunset once the initial local credentials
-  are inside OpenBao, and it deletes its own role and policy after a successful import.
-- Config that changes after first init is applied imperatively against a running cluster (the
-  `initialize` block only runs at initialization); steady state persists in raft, so this is a
-  rare bootstrap/DR-time concern, not a routine path.
+- **Access is scoped per namespace subtree, not per secret path.** Each consumer namespace gets
+  `guardian-reader-<ns>` (ESO, SA `secrets-reader`, read-only on
+  `kv/guardian/guardian-mgmt/<ns>/*`) and `guardian-writer-<ns>` (SA `secrets-writer`,
+  short-TTL, write-only within the same subtree; minting its token requires custody kubeconfig
+  access). This makes OpenBao config O(1) in the number of integrations: a new secret in an
+  existing namespace is a Git-only change (ExternalSecret + workload) plus one scoped value
+  write via the official CLI — no policy edit, no re-init. A writer token for one stage
+  physically cannot write another stage's paths, so prod/gamma mixups are prevented by the
+  server, not by care. `TestOpenBaoSecretScopeConformance` enforces the same invariant at
+  review time over every ExternalSecret and SecretStore in the repo.
+- Self-init also creates a temporary `guardian-secret-importer` policy + role (write access to
+  the whole `guardian-mgmt` subtree) used only to move custody credential files into OpenBao at
+  bootstrap or DR re-seed. It deletes its own role and policy after a successful import; its
+  import plan in `openbao_secret_import/main.go` is the authoritative DR re-seed manifest.
+- Only structural config changes (a new consumer namespace, a new mount or auth method) touch
+  the `initialize` block, and they ship as Git edit + re-initialization (raft reset +
+  custody re-import — the same path a cold boot exercises, zero-downtime for consumers because
+  materialized Secrets are Orphan/Retain). Routine integration adds never re-init.
 - ESO is the consumer: SecretStore/ClusterSecretStore → OpenBao KV; ExternalSecrets
   materialize native Secrets. OpenBao is source of truth; the k8s Secret is a synced cache. The
   `external-dns` ExternalSecret going Ready is the functional proof that self-init created the
@@ -211,7 +222,7 @@ Talos up → break-glass place seal key on the 3 pinned nodes → **cert-manager
 independent cert-manager listener CA creates `guardian-openbao-api-tls` →
 **OpenBao up** (static-seal auto-unseals; consumes the listener cert from birth) →
 self-init's `initialize` block creates Kubernetes auth, the KV and Transit engines,
-and the external-dns policy + auth role in one shot → ESO consumes. Flux ordering must
+and the per-namespace reader/writer policies + auth roles in one shot → ESO consumes. Flux ordering must
 be real (cert-manager Ready → listener CA Certificate Ready → listener leaf Certificate
 Ready → OpenBao pods → the external-dns ExternalSecret Ready); `disableWait` makes this
 easy to race, so encode the dependency explicitly.
@@ -224,7 +235,8 @@ Created by the self-init `initialize` block and Ready in the current cluster:
 - `kv` mount and tune.
 - `transit` mount and tune.
 - Kubernetes auth backend and tune.
-- `external-dns` read policy and Kubernetes auth role.
+- Per-namespace `guardian-reader-<ns>`/`guardian-writer-<ns>` policies and Kubernetes auth
+  roles (external-dns, company-site, tenant-guardian-{beta,gamma,prod}).
 - Temporary `guardian-secret-importer` policy and role (bootstrap-only; the importer deletes
   them after a successful import).
 
@@ -246,8 +258,9 @@ Ops resources still needed before OpenBao is the real vault/transit authority:
   declares mounts/policies/auth roles; a durable Transit key would be added as an
   `initialize` request (or created imperatively with its keyring exported to custody at
   creation), not via a custom operator or CRD.
-- KV policies/auth roles/ExternalSecrets for any remaining consumers of imported
-  Cloudflare/R2 credentials beyond `external-dns`.
+- ExternalSecrets for any remaining consumers of imported Cloudflare/R2 credentials beyond
+  `external-dns` (the per-namespace roles already cover them; only the Git-side ESO wiring
+  is missing).
 - Release/signing, artifact provenance, envelope encryption, or workload key-management
   components should use Transit rather than Kubernetes Secrets as the key authority.
   DNS does not need Transit; it only needs a Cloudflare API token from KV.

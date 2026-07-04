@@ -56,12 +56,18 @@ first startup, exactly one raft member initializes the cluster and runs the
 OpenBao `initialize` block; the other raft members join an already initialized
 cluster. Self-init is the sole source of truth for OpenBao configuration and
 creates the complete steady state directly: the Kubernetes auth method and its
-config, the `kv` (v2) and `transit` engines and their tunes, the `external-dns`
-read policy and Kubernetes auth role, and a temporary `guardian-secret-importer`
-policy + role for the bootstrap importer. The temporary privileged token used
-internally by self-init is not returned and is revoked by OpenBao after
-initialization. Because `initialize` runs only at first initialization, config
-added later is applied imperatively against the running cluster.
+config, the `kv` (v2) and `transit` engines and their tunes, one
+reader+writer policy/role pair per consumer namespace (each scoped to that
+namespace's own `kv/guardian/guardian-mgmt/<namespace>/*` subtree), and a
+temporary `guardian-secret-importer` policy + role for the bootstrap importer.
+The temporary privileged token used internally by self-init is not returned
+and is revoked by OpenBao after initialization.
+
+Because access is granted per namespace subtree rather than per secret path,
+OpenBao configuration is O(1) in the number of integrations: adding a secret
+for an existing namespace never changes this block (see Adding An
+Integration below). Only structural changes — a new consumer namespace, a new
+mount or auth method — edit the block and re-initialize.
 
 The cert-manager listener CA is steady state, not a temporary bootstrap issuer.
 It creates `guardian-openbao-api-tls` before the OpenBao pod mounts the Secret.
@@ -128,12 +134,21 @@ bazelisk run //src/infrastructure/cmd/openbao_secret_import:openbao_secret_impor
 ```
 
 The importer authenticates through the temporary `guardian-secret-importer`
-Kubernetes auth role created by self-init. It writes:
+Kubernetes auth role created by self-init (write access to the whole
+`guardian-mgmt` subtree — bootstrap and DR re-seed are the only times a
+cross-namespace write credential exists, and the importer deletes its own
+role and policy when it finishes). Its import plan in
+`src/infrastructure/cmd/openbao_secret_import/main.go` is the DR re-seed
+manifest: the authoritative list of every secret the system needs after a
+raft wipe, keyed by custody env variables. It currently writes:
 
-- `kv/guardian/guardian-mgmt/tenant-guardian/dns/external-dns`
+- `kv/guardian/guardian-mgmt/external-dns/cloudflare`
 - `kv/guardian/guardian-mgmt/operator/cloudflare`
 - `kv/guardian/guardian-mgmt/operator/r2`
 - `kv/guardian/guardian-mgmt/company-site/promotion/github-app`
+- `kv/guardian/guardian-mgmt/tenant-guardian-{beta,gamma,prod}/keycloak/github-oauth`
+  (optional per stage: imported only when the env file carries that stage's
+  `<STAGE>_GITHUB_CLIENT_SECRET`)
 
 The promotion entry carries the `guardian-promotions` GitHub App private key.
 The env file transports it base64-encoded (the file is line-oriented) as
@@ -152,16 +167,61 @@ After successful write and readback verification, the importer deletes the
 temporary OpenBao auth role and policy, then deletes the local import file.
 Keep the custody originals; the import file is a working copy.
 
-## Adding A Consumer (Re-Initialization)
+## Adding An Integration (Routine, No OpenBao Changes)
+
+Access is per namespace subtree, so a new integration for an existing
+namespace never touches OpenBao configuration. It is a Git PR plus one scoped
+value write:
+
+1. **Git**: add the `ExternalSecret` (and workload wiring) in the consuming
+   namespace, reading `guardian/guardian-mgmt/<namespace>/<integration>`.
+   CI (`TestOpenBaoSecretScopeConformance`) rejects any remoteRef outside the
+   namespace's own subtree, so a beta manifest cannot reference a prod path.
+2. **Custody**: append the secret value to the custody env file and extend the
+   importer plan (`openbao_secret_import/main.go`) in the same PR — the plan
+   is the DR re-seed manifest, so DR keeps working without remembering
+   anything out of band.
+3. **Value write**: mint a short-lived token for the namespace's
+   `secrets-writer` SA and write the value with the official CLI. The OpenBao
+   role `guardian-writer-<namespace>` can only write that namespace's
+   subtree, so cross-stage mixups are impossible by construction:
+
+   ```sh
+   kubectl -n tenant-guardian port-forward svc/guardian-openbao-active 18200:8200 &
+   kubectl -n tenant-guardian get secret guardian-openbao-api-tls \
+     -o jsonpath='{.data.ca\.crt}' | base64 -d > openbao-ca.crt
+   export BAO_ADDR=https://127.0.0.1:18200 BAO_CACERT=$PWD/openbao-ca.crt \
+     BAO_TLS_SERVER_NAME=guardian-openbao-active.tenant-guardian.svc
+   BAO_TOKEN=$(bao write -field=token auth/kubernetes/login \
+     role=guardian-writer-tenant-guardian-beta \
+     jwt="$(kubectl -n tenant-guardian-beta create token secrets-writer \
+       --audience=openbao --duration=10m)")
+   # value via stdin; never on the command line / shell history
+   BAO_TOKEN=$BAO_TOKEN bao kv put \
+     kv/guardian/guardian-mgmt/tenant-guardian-beta/keycloak/github-oauth \
+     GITHUB_CLIENT_SECRET=-
+   ```
+
+4. Verify the `ExternalSecret` reports `Ready=True`; force a refresh if
+   needed (`kubectl annotate externalsecret ... force-sync=$(date +%s)`).
+
+The `secrets-writer` SAs mount nothing and run nothing; minting their tokens
+requires custody kubeconfig access. Steady state keeps zero standing
+secret-reading admin: readers are per-namespace ESO roles, writers are
+per-namespace short-TTL roles, and nothing can cross subtrees.
+
+## Structural Changes (Re-Initialization)
 
 `initialize` runs only at first initialization and there is no standing admin
 credential (the self-init token is revoked, the importer role self-deletes),
-so OpenBao configuration changes ship as a Git edit to the self-init block
-followed by a state reset. All KV state is re-importable from custody by
-design; this is the same path a cold boot exercises.
+so *structural* changes — a new consumer namespace, a new mount or auth
+method — ship as a Git edit to the self-init block followed by a state reset.
+All KV state is re-importable from custody by design; this is the same path a
+cold boot exercises.
 
-1. Land the PR editing the `initialize` block (policy + role + importer path +
-   conformance inventory) and the consumer's ESO manifests.
+1. Land the PR editing the `initialize` block (the namespace's reader+writer
+   policy/role pairs + conformance inventory) and the consumer's ESO
+   manifests.
 2. Wait for Flux to reconcile `guardian-system` so the HelmRelease renders the
    new OpenBao config.
 3. Reset raft state (the seal key on the nodes and the audit PVCs stay):

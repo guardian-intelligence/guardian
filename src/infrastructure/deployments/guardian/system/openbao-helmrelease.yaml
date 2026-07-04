@@ -274,12 +274,18 @@ spec:
               # Self-init runs once, at first cluster initialization, with a
               # temporary privileged token OpenBao revokes afterward. It creates
               # the complete steady state directly: Kubernetes auth, the kv and
-              # transit engines, and each consumer's policy+role (external-dns,
-              # promotion). There is no reconciling operator — this block IS the
-              # source of truth, so a cold boot converges the same config
-              # natively. Adding a consumer later means editing this block and
-              # re-initializing (wipe raft data, keep the seal key and audit
-              # PVCs, re-import from custody) — see the static-seal runbook.
+              # transit engines, and one reader+writer policy/role pair per
+              # consumer NAMESPACE (not per integration). Each namespace's pair
+              # is scoped to that namespace's own KV subtree
+              # (kv/guardian/guardian-mgmt/<namespace>/*), so adding an
+              # integration inside an existing namespace is a Git-only change
+              # (ExternalSecret + workload) plus one scoped value write — it
+              # never touches this block. There is no reconciling operator —
+              # this block IS the source of truth, so a cold boot converges the
+              # same config natively. Only STRUCTURAL changes (a new consumer
+              # namespace, a new mount) edit this block and re-initialize (wipe
+              # raft data, keep the seal key and audit PVCs, re-import from
+              # custody) — see the static-seal runbook.
               initialize "guardian_self_init" {
                 request "enable_kubernetes_auth" {
                   operation = "update"
@@ -343,53 +349,235 @@ spec:
                   }
                 }
 
-                request "write_external_dns_policy" {
+                # One reader+writer pair per consumer namespace. Readers are
+                # what ESO authenticates as (SA secrets-reader in that
+                # namespace); writers are standing but narrowly scoped roles
+                # for routine value loads and rotations (SA secrets-writer in
+                # that namespace — minting its token requires cluster-admin
+                # custody access, and the token can only write that
+                # namespace's subtree, so a beta credential can never land on
+                # a prod path).
+
+                request "write_reader_policy_external_dns" {
                   operation = "update"
-                  path = "sys/policies/acl/guardian-external-dns"
+                  path = "sys/policies/acl/guardian-reader-external-dns"
                   data = {
-                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-guardian/dns/external-dns\" {\n  capabilities = [\"read\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/tenant-guardian/dns/external-dns\" {\n  capabilities = [\"read\"]\n}\n"
+                    policy = "path \"kv/data/guardian/guardian-mgmt/external-dns/*\" {\n  capabilities = [\"read\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/external-dns/*\" {\n  capabilities = [\"read\"]\n}\n"
                   }
                 }
 
-                request "write_external_dns_role" {
+                request "write_reader_role_external_dns" {
                   operation = "update"
-                  path = "auth/kubernetes/role/guardian-external-dns"
+                  path = "auth/kubernetes/role/guardian-reader-external-dns"
                   data = {
-                    bound_service_account_names = ["external-dns-secrets"]
+                    bound_service_account_names = ["secrets-reader"]
                     bound_service_account_namespaces = ["external-dns"]
                     audience = "openbao"
-                    token_policies = ["guardian-external-dns"]
+                    token_policies = ["guardian-reader-external-dns"]
                     token_ttl = "3600"
                     token_max_ttl = "3600"
                   }
                 }
 
-                request "write_promotion_policy" {
+                request "write_writer_policy_external_dns" {
                   operation = "update"
-                  path = "sys/policies/acl/guardian-promotion"
+                  path = "sys/policies/acl/guardian-writer-external-dns"
                   data = {
-                    policy = "path \"kv/data/guardian/guardian-mgmt/company-site/promotion/github-app\" {\n  capabilities = [\"read\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/company-site/promotion/github-app\" {\n  capabilities = [\"read\"]\n}\n"
+                    policy = "path \"kv/data/guardian/guardian-mgmt/external-dns/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/external-dns/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n"
                   }
                 }
 
-                request "write_promotion_role" {
+                request "write_writer_role_external_dns" {
                   operation = "update"
-                  path = "auth/kubernetes/role/guardian-promotion"
+                  path = "auth/kubernetes/role/guardian-writer-external-dns"
                   data = {
-                    bound_service_account_names = ["promotion-secrets"]
+                    bound_service_account_names = ["secrets-writer"]
+                    bound_service_account_namespaces = ["external-dns"]
+                    audience = "openbao"
+                    token_policies = ["guardian-writer-external-dns"]
+                    token_ttl = "600"
+                    token_max_ttl = "600"
+                  }
+                }
+
+                request "write_reader_policy_company_site" {
+                  operation = "update"
+                  path = "sys/policies/acl/guardian-reader-company-site"
+                  data = {
+                    policy = "path \"kv/data/guardian/guardian-mgmt/company-site/*\" {\n  capabilities = [\"read\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/company-site/*\" {\n  capabilities = [\"read\"]\n}\n"
+                  }
+                }
+
+                request "write_reader_role_company_site" {
+                  operation = "update"
+                  path = "auth/kubernetes/role/guardian-reader-company-site"
+                  data = {
+                    bound_service_account_names = ["secrets-reader"]
                     bound_service_account_namespaces = ["company-site"]
                     audience = "openbao"
-                    token_policies = ["guardian-promotion"]
+                    token_policies = ["guardian-reader-company-site"]
                     token_ttl = "3600"
                     token_max_ttl = "3600"
                   }
                 }
 
+                request "write_writer_policy_company_site" {
+                  operation = "update"
+                  path = "sys/policies/acl/guardian-writer-company-site"
+                  data = {
+                    policy = "path \"kv/data/guardian/guardian-mgmt/company-site/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/company-site/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n"
+                  }
+                }
+
+                request "write_writer_role_company_site" {
+                  operation = "update"
+                  path = "auth/kubernetes/role/guardian-writer-company-site"
+                  data = {
+                    bound_service_account_names = ["secrets-writer"]
+                    bound_service_account_namespaces = ["company-site"]
+                    audience = "openbao"
+                    token_policies = ["guardian-writer-company-site"]
+                    token_ttl = "600"
+                    token_max_ttl = "600"
+                  }
+                }
+
+                request "write_reader_policy_tenant_guardian_beta" {
+                  operation = "update"
+                  path = "sys/policies/acl/guardian-reader-tenant-guardian-beta"
+                  data = {
+                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-guardian-beta/*\" {\n  capabilities = [\"read\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/tenant-guardian-beta/*\" {\n  capabilities = [\"read\"]\n}\n"
+                  }
+                }
+
+                request "write_reader_role_tenant_guardian_beta" {
+                  operation = "update"
+                  path = "auth/kubernetes/role/guardian-reader-tenant-guardian-beta"
+                  data = {
+                    bound_service_account_names = ["secrets-reader"]
+                    bound_service_account_namespaces = ["tenant-guardian-beta"]
+                    audience = "openbao"
+                    token_policies = ["guardian-reader-tenant-guardian-beta"]
+                    token_ttl = "3600"
+                    token_max_ttl = "3600"
+                  }
+                }
+
+                request "write_writer_policy_tenant_guardian_beta" {
+                  operation = "update"
+                  path = "sys/policies/acl/guardian-writer-tenant-guardian-beta"
+                  data = {
+                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-guardian-beta/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/tenant-guardian-beta/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n"
+                  }
+                }
+
+                request "write_writer_role_tenant_guardian_beta" {
+                  operation = "update"
+                  path = "auth/kubernetes/role/guardian-writer-tenant-guardian-beta"
+                  data = {
+                    bound_service_account_names = ["secrets-writer"]
+                    bound_service_account_namespaces = ["tenant-guardian-beta"]
+                    audience = "openbao"
+                    token_policies = ["guardian-writer-tenant-guardian-beta"]
+                    token_ttl = "600"
+                    token_max_ttl = "600"
+                  }
+                }
+
+                request "write_reader_policy_tenant_guardian_gamma" {
+                  operation = "update"
+                  path = "sys/policies/acl/guardian-reader-tenant-guardian-gamma"
+                  data = {
+                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-guardian-gamma/*\" {\n  capabilities = [\"read\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/tenant-guardian-gamma/*\" {\n  capabilities = [\"read\"]\n}\n"
+                  }
+                }
+
+                request "write_reader_role_tenant_guardian_gamma" {
+                  operation = "update"
+                  path = "auth/kubernetes/role/guardian-reader-tenant-guardian-gamma"
+                  data = {
+                    bound_service_account_names = ["secrets-reader"]
+                    bound_service_account_namespaces = ["tenant-guardian-gamma"]
+                    audience = "openbao"
+                    token_policies = ["guardian-reader-tenant-guardian-gamma"]
+                    token_ttl = "3600"
+                    token_max_ttl = "3600"
+                  }
+                }
+
+                request "write_writer_policy_tenant_guardian_gamma" {
+                  operation = "update"
+                  path = "sys/policies/acl/guardian-writer-tenant-guardian-gamma"
+                  data = {
+                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-guardian-gamma/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/tenant-guardian-gamma/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n"
+                  }
+                }
+
+                request "write_writer_role_tenant_guardian_gamma" {
+                  operation = "update"
+                  path = "auth/kubernetes/role/guardian-writer-tenant-guardian-gamma"
+                  data = {
+                    bound_service_account_names = ["secrets-writer"]
+                    bound_service_account_namespaces = ["tenant-guardian-gamma"]
+                    audience = "openbao"
+                    token_policies = ["guardian-writer-tenant-guardian-gamma"]
+                    token_ttl = "600"
+                    token_max_ttl = "600"
+                  }
+                }
+
+                request "write_reader_policy_tenant_guardian_prod" {
+                  operation = "update"
+                  path = "sys/policies/acl/guardian-reader-tenant-guardian-prod"
+                  data = {
+                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-guardian-prod/*\" {\n  capabilities = [\"read\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/tenant-guardian-prod/*\" {\n  capabilities = [\"read\"]\n}\n"
+                  }
+                }
+
+                request "write_reader_role_tenant_guardian_prod" {
+                  operation = "update"
+                  path = "auth/kubernetes/role/guardian-reader-tenant-guardian-prod"
+                  data = {
+                    bound_service_account_names = ["secrets-reader"]
+                    bound_service_account_namespaces = ["tenant-guardian-prod"]
+                    audience = "openbao"
+                    token_policies = ["guardian-reader-tenant-guardian-prod"]
+                    token_ttl = "3600"
+                    token_max_ttl = "3600"
+                  }
+                }
+
+                request "write_writer_policy_tenant_guardian_prod" {
+                  operation = "update"
+                  path = "sys/policies/acl/guardian-writer-tenant-guardian-prod"
+                  data = {
+                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-guardian-prod/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/tenant-guardian-prod/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n"
+                  }
+                }
+
+                request "write_writer_role_tenant_guardian_prod" {
+                  operation = "update"
+                  path = "auth/kubernetes/role/guardian-writer-tenant-guardian-prod"
+                  data = {
+                    bound_service_account_names = ["secrets-writer"]
+                    bound_service_account_namespaces = ["tenant-guardian-prod"]
+                    audience = "openbao"
+                    token_policies = ["guardian-writer-tenant-guardian-prod"]
+                    token_ttl = "600"
+                    token_max_ttl = "600"
+                  }
+                }
+
+                # The bootstrap importer seeds the whole guardian-mgmt subtree
+                # in one run (bootstrap and DR re-seed are the only times a
+                # cross-namespace write credential exists), then deletes its
+                # own role and policy. The wildcard keeps this block O(1) in
+                # the number of integrations: new secrets never edit it.
                 request "write_secret_importer_policy" {
                   operation = "update"
                   path = "sys/policies/acl/guardian-secret-importer"
                   data = {
-                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-guardian/dns/external-dns\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/data/guardian/guardian-mgmt/operator/cloudflare\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/data/guardian/guardian-mgmt/operator/r2\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/data/guardian/guardian-mgmt/company-site/promotion/github-app\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"auth/kubernetes/role/guardian-secret-importer\" {\n  capabilities = [\"delete\"]\n}\n\npath \"sys/policies/acl/guardian-secret-importer\" {\n  capabilities = [\"delete\"]\n}\n"
+                    policy = "path \"kv/data/guardian/guardian-mgmt/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"auth/kubernetes/role/guardian-secret-importer\" {\n  capabilities = [\"delete\"]\n}\n\npath \"sys/policies/acl/guardian-secret-importer\" {\n  capabilities = [\"delete\"]\n}\n"
                   }
                 }
 
