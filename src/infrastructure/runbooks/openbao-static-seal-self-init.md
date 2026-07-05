@@ -145,6 +145,10 @@ raft wipe, keyed by custody env variables. It currently writes:
 - `kv/guardian/guardian-mgmt/external-dns/cloudflare`
 - `kv/guardian/guardian-mgmt/operator/cloudflare`
 - `kv/guardian/guardian-mgmt/operator/r2`
+- `kv/guardian/guardian-mgmt/tenant-root/backups-r2` (bucket-scoped
+  `guardian-backups` R2 keypair in the flat-key format Cozystack's
+  backupstrategy-controller consumes; ESO projects it as
+  `Secret/guardian-backups-creds` in `tenant-root`)
 - `kv/guardian/guardian-mgmt/company-site/promotion/github-app`
 - `kv/guardian/guardian-mgmt/tenant-guardian-{beta,gamma,prod}/keycloak/github-oauth`
   (optional per stage: imported only when the env file carries that stage's

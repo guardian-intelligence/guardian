@@ -612,6 +612,90 @@ spec:
                   }
                 }
 
+                request "write_reader_policy_tenant_root" {
+                  operation = "update"
+                  path = "sys/policies/acl/guardian-reader-tenant-root"
+                  data = {
+                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-root/*\" {\n  capabilities = [\"read\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/tenant-root/*\" {\n  capabilities = [\"read\"]\n}\n"
+                  }
+                }
+
+                request "write_reader_role_tenant_root" {
+                  operation = "update"
+                  path = "auth/kubernetes/role/guardian-reader-tenant-root"
+                  data = {
+                    bound_service_account_names = ["secrets-reader"]
+                    bound_service_account_namespaces = ["tenant-root"]
+                    audience = "openbao"
+                    token_policies = ["guardian-reader-tenant-root"]
+                    token_ttl = "3600"
+                    token_max_ttl = "3600"
+                  }
+                }
+
+                request "write_writer_policy_tenant_root" {
+                  operation = "update"
+                  path = "sys/policies/acl/guardian-writer-tenant-root"
+                  data = {
+                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-root/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/tenant-root/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n"
+                  }
+                }
+
+                request "write_writer_role_tenant_root" {
+                  operation = "update"
+                  path = "auth/kubernetes/role/guardian-writer-tenant-root"
+                  data = {
+                    bound_service_account_names = ["secrets-writer"]
+                    bound_service_account_namespaces = ["tenant-root"]
+                    audience = "openbao"
+                    token_policies = ["guardian-writer-tenant-root"]
+                    token_ttl = "600"
+                    token_max_ttl = "600"
+                  }
+                }
+
+                request "write_reader_policy_guardian_analytics" {
+                  operation = "update"
+                  path = "sys/policies/acl/guardian-reader-guardian-analytics"
+                  data = {
+                    policy = "path \"kv/data/guardian/guardian-mgmt/guardian-analytics/*\" {\n  capabilities = [\"read\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/guardian-analytics/*\" {\n  capabilities = [\"read\"]\n}\n"
+                  }
+                }
+
+                request "write_reader_role_guardian_analytics" {
+                  operation = "update"
+                  path = "auth/kubernetes/role/guardian-reader-guardian-analytics"
+                  data = {
+                    bound_service_account_names = ["secrets-reader"]
+                    bound_service_account_namespaces = ["guardian-analytics"]
+                    audience = "openbao"
+                    token_policies = ["guardian-reader-guardian-analytics"]
+                    token_ttl = "3600"
+                    token_max_ttl = "3600"
+                  }
+                }
+
+                request "write_writer_policy_guardian_analytics" {
+                  operation = "update"
+                  path = "sys/policies/acl/guardian-writer-guardian-analytics"
+                  data = {
+                    policy = "path \"kv/data/guardian/guardian-mgmt/guardian-analytics/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/guardian-analytics/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n"
+                  }
+                }
+
+                request "write_writer_role_guardian_analytics" {
+                  operation = "update"
+                  path = "auth/kubernetes/role/guardian-writer-guardian-analytics"
+                  data = {
+                    bound_service_account_names = ["secrets-writer"]
+                    bound_service_account_namespaces = ["guardian-analytics"]
+                    audience = "openbao"
+                    token_policies = ["guardian-writer-guardian-analytics"]
+                    token_ttl = "600"
+                    token_max_ttl = "600"
+                  }
+                }
+
                 # The bootstrap importer seeds the whole guardian-mgmt subtree
                 # in one run (bootstrap and DR re-seed are the only times a
                 # cross-namespace write credential exists), then deletes its

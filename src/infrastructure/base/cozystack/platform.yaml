@@ -9,10 +9,6 @@ spec:
       values:
         bundles:
           disabledPackages:
-            # Stays disabled until the off-cluster (Cloudflare R2) backup path
-            # lands: the controller needs an S3 endpoint, and Guardian runs no
-            # in-cluster object storage to point it at.
-            - cozystack.backupstrategy-controller
             # authentication.oidc.enabled: false reconfigures consumers but
             # does not remove the keycloak packages from the bundle in
             # Cozystack 1.5 — disable them explicitly (platform Keycloak UI
@@ -57,4 +53,23 @@ spec:
           logoText: Guardian
           brandName: Guardian
           brandHtmlName: "<b>Guardian</b>"
+    # Platform backup machinery pointed at off-cluster Cloudflare R2 (Guardian
+    # runs no in-cluster object storage; an in-cluster backup target would be
+    # circular). provisionBucket: false skips the COSI Bucket entirely and
+    # makes bucketName authoritative; guardian-backups-creds is materialized
+    # in tenant-root by ESO from OpenBao (flat keys accessKey/secretKey/
+    # endpoint/bucketName — base/secrets/backup-storage-credentials.yaml).
+    # The endpoint hostname carries the Cloudflare account ID: an identifier,
+    # not a credential — it appears in every R2 URL and is useless without
+    # the bucket-scoped token, which lives only in OpenBao/custody.
+    # R2 accepts path-style requests and the literal region "auto".
+    backupstrategy-controller:
+      values:
+        backupStorage:
+          provisionBucket: false
+          bucketName: guardian-backups
+          endpoint: https://c3eaeffaadf7d4847684d4775c16d598.r2.cloudflarestorage.com
+          region: auto
+          forcePathStyle: true
+          systemSecretName: guardian-backups-creds
     # MTU is set authoritatively on the kube-ovn Subnets in networking/subnet-mtu.yaml.

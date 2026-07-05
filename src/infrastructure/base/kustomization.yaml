@@ -7,6 +7,7 @@ resources:
   - apps/observability.yaml
   - tenants/guardian.yaml
   - secrets/external-secrets.yaml
+  - secrets/backup-storage-credentials.yaml
   - networking/metallb.yaml
   - networking/subnet-mtu.yaml
   - flux
