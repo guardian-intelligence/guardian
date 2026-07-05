@@ -132,23 +132,17 @@ metadata:
   name: company-site
   namespace: tenant-guardian-prod
   annotations:
-    # Enforce Authenticated Origin Pulls: only clients presenting a
-    # certificate signed by Cloudflare's origin-pull CA (i.e. the edge
-    # itself) reach this host. Zone-level AOP is enabled in the
-    # guardian-mgmt-edge-policy tofu root; without this verification the
-    # origin is directly reachable and CF-Connecting-IP is forgeable.
-    # $ssl_client_verify=SUCCESS is also what gates the controller-level
-    # x-guardian-client-ip header mapping (app-patches ingress-origin-edge).
+    # AOP: request Cloudflare's origin-pull client cert; $ssl_client_verify=
+    # SUCCESS (real chain validation) gates the x-guardian-* header maps.
+    # optional_no_ca, not optional: with zone AOP live, "optional" would 400
+    # the whole site if the presented cert ever fails validation; no_ca
+    # degrades that to empty headers. Flip to "on" (closes direct-to-origin)
+    # only after logs show client_ip_source=cloudflare on all real traffic,
+    # covering the co-hosted prod keycloak Ingress and the :80 path
+    # (X-Forwarded-Proto is client-settable) in the same change.
     nginx.ingress.kubernetes.io/auth-tls-secret: tenant-guardian-prod/cloudflare-origin-pull-ca
-    # Stage 1: "optional" verifies the edge's certificate (SUCCESS gates the
-    # x-guardian-* headers) without refusing certless direct traffic, so a
-    # misbehaving cert presentation cannot 400 the site. Flip to "on" once
-    # logs show client_ip_source=cloudflare on all real traffic; only then is
-    # direct-to-origin access actually closed.
-    nginx.ingress.kubernetes.io/auth-tls-verify-client: "optional"
+    nginx.ingress.kubernetes.io/auth-tls-verify-client: "optional_no_ca"
     nginx.ingress.kubernetes.io/auth-tls-verify-depth: "1"
-    # Cloudflare connects over TLS (zone SSL mode is full); direct plaintext
-    # hits get a redirect into the client-cert wall instead of the app.
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
   labels:
     app.kubernetes.io/name: company-site

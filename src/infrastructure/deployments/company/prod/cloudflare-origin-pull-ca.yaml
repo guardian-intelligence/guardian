@@ -1,11 +1,6 @@
-# Cloudflare's public Authenticated Origin Pulls client CA
-# (https://developers.cloudflare.com/ssl/static/authenticated_origin_pull_ca.pem,
-# CN=origin-pull.cloudflare.net, expires 2029-11-01). Public certificate, not a
-# secret in the confidentiality sense; a Secret only because ingress-nginx
-# auth-tls-secret requires one. The edge presents a client certificate signed
-# by this CA on every origin fetch once zone-level AOP is enabled
-# (guardian-mgmt-edge-policy tofu root); the company-site Ingress verifies it
-# so direct-to-origin traffic cannot reach the app or forge CF-Connecting-IP.
+# Cloudflare's PUBLIC origin-pull client CA (developers.cloudflare.com/ssl/
+# static/authenticated_origin_pull_ca.pem, expires 2029-11-01); a Secret only
+# because ingress-nginx auth-tls-secret requires one.
 apiVersion: v1
 kind: Secret
 metadata:

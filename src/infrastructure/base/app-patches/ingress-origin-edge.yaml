@@ -30,14 +30,9 @@ spec:
                 topologyKey: kubernetes.io/hostname
         config:
           use-http2: "false"
-          # Trust labeling for the analytics/fraud pipeline: the x-guardian-*
-          # headers exist only on connections that passed Authenticated Origin
-          # Pulls client-cert verification ($ssl_client_verify=SUCCESS, see the
-          # company-site Ingress auth-tls annotations). Everything else gets
-          # empty values, which proxy_set_header strips — so a client-supplied
-          # x-guardian-client-ip can never reach an upstream, and apps can
-          # treat x-guardian-client-ip-source=cloudflare as proof the address
-          # came from the edge, not from a spoofable header.
+          # x-guardian-* headers exist only on AOP-verified connections
+          # ($ssl_client_verify=SUCCESS); empty elsewhere, and proxy_set_header
+          # with an empty value strips client-supplied values.
           http-snippet: |
             map $ssl_client_verify $guardian_client_ip {
               "SUCCESS" $http_cf_connecting_ip;
@@ -50,7 +45,9 @@ spec:
         proxySetHeaders:
           x-guardian-client-ip: $guardian_client_ip
           x-guardian-client-ip-source: $guardian_client_ip_source
-          x-guardian-edge-peer-ip: $remote_addr
+          # Not $remote_addr: the realip module rewrites it from the
+          # client-settable CF-Connecting-IP. $realip_remote_addr is the TCP peer.
+          x-guardian-edge-peer-ip: $realip_remote_addr
         service:
           externalTrafficPolicy: Cluster
         updateStrategy:
