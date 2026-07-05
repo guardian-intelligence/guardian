@@ -8,3 +8,5 @@ resources:
   - ddl-job.yaml
   - networkpolicy.yaml
   - ingest.yaml
+  - traces-configmap.yaml
+  - otel-collector.yaml

@@ -54,6 +54,7 @@ ghcr.io/fluxcd/flagger@sha256:bbf959d58586b403b2a67167042e90a36c941665478ffba67a
 docker.io/clickhouse/clickhouse-server:26.3.17.4@sha256:31c8e88e9f675f93fd9c9152fc729e4a1141f95b818c0d889ad4d8cd6f9342dd
 docker.io/clickhouse/clickhouse-keeper:26.3.17.4-alpine@sha256:6d1727bfdf2614b16c83aaeeba50ca8c64d66ca5c90d2f7ce7293014ca857089
 ghcr.io/guardian-intelligence/analytics-ingest@sha256:e44b53f843cd6a3df17e5544fe13ad17a49c25f4bb809ee89c3df407844c8d56
+docker.io/otel/opentelemetry-collector-contrib:0.155.0@sha256:bee818e09d3fb643d2c59a612ae42169fb3dad0620c74145f84d63babcfd4283
 
 # --- Verself IAM: Keycloak (deployments/iam/<stage>/keycloak.yaml). 26.6.2
 # is the deliberately-older pin; 26.6.4 is the upgrade target the first

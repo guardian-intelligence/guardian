@@ -32,7 +32,8 @@ spec:
               protocol: TCP
             - port: "9009"
               protocol: TCP
-    # Same-namespace clients: the DDL job and the ingest service.
+    # Same-namespace clients: the DDL job, the ingest service, and the OTel
+    # collector (all carry guardian.dev/role: analytics-client).
     - fromEndpoints:
         - matchLabels:
             guardian.dev/role: analytics-client
@@ -172,6 +173,14 @@ spec:
               protocol: TCP
             - port: "8123"
               protocol: TCP
+    # Trace export to the in-namespace OTel collector.
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: otel-collector
+      toPorts:
+        - ports:
+            - port: "4317"
+              protocol: TCP
 ---
 # Egress half for the root ingress controller (its generated egress policy
 # only admits tenant-root-labeled destinations) — same shape as the
@@ -202,4 +211,49 @@ spec:
       toPorts:
         - ports:
             - port: "8080"
+              protocol: TCP
+---
+# OTel collector: receives OTLP from in-namespace producers (ingest today;
+# web SSR + Keycloak later join by carrying the producer label). Egress is
+# DNS + ClickHouse only (the analytics-client label above admits it there).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: otel-collector
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: otel-collector
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            guardian.dev/otel: producer
+      toPorts:
+        - ports:
+            - port: "4317"
+              protocol: TCP
+            - port: "4318"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # Span writes to ClickHouse.
+    - toEndpoints:
+        - matchLabels:
+            clickhouse.altinity.com/chi: analytics
+      toPorts:
+        - ports:
+            - port: "9000"
               protocol: TCP

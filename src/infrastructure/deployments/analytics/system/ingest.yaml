@@ -24,6 +24,7 @@ spec:
         app.kubernetes.io/name: analytics-ingest
         app.kubernetes.io/part-of: guardian
         guardian.dev/role: analytics-client
+        guardian.dev/otel: producer
     spec:
       securityContext:
         runAsNonRoot: true
