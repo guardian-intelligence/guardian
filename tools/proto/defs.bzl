@@ -1,6 +1,6 @@
 load("@rules_buf//buf:defs.bzl", "buf_breaking_test", "buf_lint_test")
 
-def guardian_buf_lint_test(name, targets, config = "//:buf.yaml", module = "", visibility = None):
+def guardian_buf_lint_test(name, targets, config = "//src/proto:buf.yaml", module = "", visibility = None):
     """Lint proto_library targets with the repo-pinned Buf toolchain."""
     buf_lint_test(
         name = name,
@@ -14,7 +14,7 @@ def guardian_buf_breaking_test(
         name,
         targets,
         against,
-        config = "//:buf.yaml",
+        config = "//src/proto:buf.yaml",
         exclude_imports = True,
         module = "",
         visibility = None):

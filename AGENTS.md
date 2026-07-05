@@ -29,10 +29,29 @@ The purpose is to create a free and open-source system for any being to convert 
 * Kargo for deployment promotions from beta -> gamma -> prod. GitHub app configured for auto-commits. Release channels for distributed binaries: Edge (CD on main), nightly, RC, stable.
 * Domain: guardianintelligence.org (abbreviated in conversation with user as "gi.org")
 * Object Storage is handled by R2, including backups. Fully bare metal topology on NVME so it makes no economical sense to reserve expensive fast drives for object storage. No SeaweedFS.
+* `guardian-mgmt` private API VIP: `https://10.8.0.250:6443`. MetalLB for L2/ARP inside the Latitude VLAN. `10.8.0.200 - 10.8.0.240`. Public edge is `Service.type=LoadBalancer` backed by MetalLB/Cilium allocation and announcement, with Cloudflare Load Balancing in front for WAF, TLS, health checks, and failover. Cloudflare origins are the three Latitude public node IPs, and the public edge must stay stateless so Cloudflare can steer around unhealthy origins per request.
+* Never download unpinned versions of software or set an unpinned version as a dependency. Binaries are versioned, built, packaged, and installed by Bazel declarations.
+* Container images are digest-pinned wherever this repo renders them. `src/infrastructure/bootstrap/bundle/images.lock` is the cold-bootstrap image inventory; the infra conformance test enforces that every image reference rendered from this repo is digest-pinned and present in the lock. Update the lock in the same PR as any image change.
+* Cold-bootstrap trust model: the local checkout, its Bazel-built artifacts, and the operator custody bundle (static seal key + the operator env file) are everything a from-nothing bring-up may require. Bootstrap-only compromises are allowed, but the cluster must converge to the declared steady state afterward.
+* Dev tools: `aspect`. Run `aspect tidy` to format the codebase.
+* Don't use CUE. Avoid custom schemas, protocols, shell scripts, contracts. Lean towards production-ready implementations for CRDs and ensure Flux-operated Kubernetes can converge state without making CLI execution a second control plane.
+* Protobuf governance uses the repo-pinned Buf toolchain through Bazel: linting, formatting, and breaking-change checks run from `rules_buf`; code generation uses local pinned generators only. Do not use Buf remote plugins in build/test/release paths.
+* All operations must run unattended, no human-in-the-loop.
+* Invent nothing. If we write our own code, it should be glue code over existing libraries and apeing reference implementations of solutions to problems only. Always do the boring industry-standard thing. Component choices are made by bake-off: candidates researched, losers rejected with recorded reasons, the winner pinned (the Hauler decision is the template). Months spent recreating an existing tool poorly is the cardinal failure mode.
+* Code is not the truth for how the system works. Traces are.
+* Use SQLC.
+* Do not provide time estimates.
+
+<observability>
+- Logs: `kubectl port-forward -n tenant-root svc/vlselect-generic 9471:9471`, then LogsQL via `curl 127.0.0.1:9471/select/logsql/query --data-urlencode 'query=...'`.
+- Metrics: `kubectl port-forward -n tenant-root svc/vmselect-shortterm 8481:8481`, then PromQL via `curl 127.0.0.1:8481/select/0/prometheus/api/v1/query --data-urlencode 'query=...'`.
+- Traces, spans, and analytics events: `kubectl port-forward -n guardian-analytics svc/clickhouse-analytics 9000:9000`, get the `ingest` password from `kubectl get secret -n guardian-analytics analytics-clickhouse-users -o jsonpath='{.data.ingest}' | base64 -d`, then `clickhouse-client --host 127.0.0.1 --user ingest` and `SHOW CREATE TABLE guardian_analytics.events` / `guardian_analytics.otel_traces` for the schema actually being served.
+- Schema source: `src/infrastructure/analytics/events-table.sql` (canonical events DDL) and `src/infrastructure/deployments/analytics/system/{ddl-configmap.yaml,traces-configmap.yaml}` (what's actually rendered and applied in-cluster).
+</observability>
 
 <repo_shape>
 The below is the target shape -- repo still changing and does not match this quite yet
-
+.aspect                                # Aspect tasks
 src/
     products/
       viteplus-monorepo/               # vite-plus (vp) web workspace
@@ -100,42 +119,22 @@ src/
 
 <technology>
 
-Kubernetes API clients should target the `guardian-mgmt` private API VIP:
-`https://10.8.0.250:6443`.
+The audience for cloners of this repo is a single individual or a small team with high technical ability that want to transform an idea into a serious software company. Verself is the reference example — a value-providing, revenue-generating business proving the concept works — but it was hand-built (Nomad et al.); Guardian is the generalization, built so the next one isn't. The proof is autobiographical: the user (Shovon Hasan/"anveio") builds a successful company on Guardian's core infrastructure first, proving the core platform works and can be used to rapidly build any kind of product.
 
-MetalLB for L2/ARP inside the Latitude VLAN. `10.8.0.200 - 10.8.0.240`
+The value proposition:
 
-Public edge should follow the standard Kubernetes shape wherever the provider
-network supports it: `Service.type=LoadBalancer` backed by MetalLB/Cilium
-allocation and announcement, with Cloudflare Load Balancing in front for WAF,
-TLS, health checks, and failover. The current private MetalLB range is only
-reachable on the Latitude VLAN, so it must not be used as a Cloudflare origin.
-Using MetalLB as a public origin requires routable service IPs or BGP from the
-provider network. Until that exists, Cloudflare origins are the three Latitude
-public node IPs, and the public edge must stay stateless so Cloudflare can steer
-around unhealthy origins per request.
+1. We make release and deployment automation easy.
+2. We make supply chain, network, and application security easy.
+3. We make it easy to add integrations (Stripe, GitHub, and the like) securely.
+4. We make disaster recovery easy.
+5. We make monitoring easy: the system detects its own degradation, remediates what it can, and pages the human only when it can't. Nothing else pages the human.
 
-Objectives:
-
-We're maximizing for safe operations (disaster-recovery from wiped box + offsite backups as priority 1, behind ongoing security checks + hardening) and highly continuous rapidly delivered software to external vendors like NPM/PyPi/Crates.io and so on.
-Provisioning N workload nodes (rs4.metal.xlarge CPU: AMD 9554P, 64 Cores @ 3.1 GHz / RAM: 1.5 TB / Storage: 2 x 480 GB NVME + 4 x 8 TB NVME / NIC: 2 x 100 Gbps) is a first-class concept, but capacity is only added when a concrete workload pulls it — never provisioned ahead of expected demand.
-
-Important context:
-- All dependencies version/commit pinned. Nothing during runtime, dev time, test time, or build time should require external non-version-pinned tooling, or shell out to binaries outside this repo or its build artifacts.
-- Never download unpinned versions of software or set an unpinned version as a dependency. Binaries are versioned, built, packaged, and installed by Bazel declarations.
-- Container images are digest-pinned wherever this repo renders them. `src/infrastructure/bootstrap/bundle/images.lock` is the cold-bootstrap image inventory; the infra conformance test enforces that every image reference rendered from this repo is digest-pinned and present in the lock. Update the lock in the same PR as any image change.
-- Cold-bootstrap trust model: the local checkout, its Bazel-built artifacts, and the operator custody bundle (static seal key + the operator env file) are everything a from-nothing bring-up may require. Bootstrap-only compromises are allowed, but the cluster must converge to the declared steady state afterward.
-- Dev tools: `aspect`. Run `aspect tidy` to format the codebase.
-- Don't use CUE. Avoid custom schemas, protocols, shell scripts, contracts. Lean towards production-ready implementations for CRDs and ensure Flux-operated Kubernetes can converge state without making CLI execution a second control plane.
-- Protobuf governance uses the repo-pinned Buf toolchain through Bazel: linting, formatting, and breaking-change checks run from `rules_buf`; code generation uses local pinned generators only. Do not use Buf remote plugins in build/test/release paths.
-- All operations must run unattended, no human-in-the-loop.
-- Invent nothing. If we write our own code, it should be glue code over existing libraries and apeing reference implementations of solutions to problems only. Always do the boring industry-standard thing. Component choices are made by bake-off: candidates researched, losers rejected with recorded reasons, the winner pinned (the Hauler decision is the template). Months spent recreating an existing tool poorly is the cardinal failure mode.
-- Code is not the truth for how the system works. Traces are.
-- Use SQLC.
-- Do not provide time estimates.
+We do all of this by gluing together excellent existing tools and letting the user focus on building and iterating on their products. The economics: bootstrap once onto powerful fixed-cost metal, then iterate at near-zero marginal cost until product-market fit — ideas are fragile before they are refined, so shipping the next refined version must be nearly free.
+We're currently maximizing for highly continuous rapidly delivered software to external vendors like NPM/PyPi/Crates.io and so on.
 
 <development_loop>
 - This section is WIP, follow best practices. The below is just a few things to add to normal development workflow
+- Development tools are version pinned and 
 - Do not use CLI commands as a second control plane. Rely on flux to converge the cluster on merged commits.
 - You can run `aspect infra edge-health` to smoke-test edge reachability post convergence. Verify DNS resolution for every configured `guardianintelligence.org` hostname, HTTPS behavior through the public edge and origin consistency checks.
 - For drills (not part of normal development) run them once per node by explicit node IP, wait for the node and public edge to recover, document that node's outage window, then move to the next node. A node whose loss breaches 60 seconds of public-edge disruption is load bearing and must be fixed before continuing.
@@ -172,7 +171,5 @@ Guardian advances only by drills passed and products shipped. Automate an operat
 
 - M1 — The substrate is invincible. Drill #1 (all-node cold boot from Git + custody) has passed. Remaining: the wiped-node drill (including etcd-member and Node-object debris cleanup) and the dark cold-boot drill from the haul alone. Gate: revival with zero internet and zero undocumented steps. (complete)
 - M2 — One product flows unattended. The company site through the full loop: merge → converge → canary → promote, synthetics watching all environments, alerts wired. Gate: a deliberately bad deploy detects itself and rolls back with hands off the keyboard; a yank drill passes. Flagger and Kargo earn admission here, pulled by this gate. (complete)
-- M3 — Verself, by strangler. One service at a time onto Guardian; Nomad keeps running until each service proves parity. Stripe and GitHub integration patterns become reusable platform capability here, pulled by real need — never speculatively. Gate: a revenue-bearing Verself path served by Guardian for 30 days without regression.
+- M3 — Verself ported over. Stripe and GitHub integration patterns become reusable platform capability here. Gate: a revenue-bearing Verself path served by Guardian for 30 days without regression.
 - M4 — Guardian is downloadable. Canonical iPXE image + haul + CLI, with a single-box dev variant shipping the same way; most of the machinery falls out of M1's dark drill. Gate: a from-zero Guardian stood up on a second provider from the public artifact and docs alone. External adoption becomes a live option here, not before.
-- M5 — Iteration is free. Many products, one fixed-cost fleet. Gate: shipping a new product idea requires no new infrastructure decisions and no new spend; the counterfactual invoice — what this month's actual workloads would have cost on managed cloud services — is computed from live metrics and published.
-- M6 — The pair. Two Guardians (a second region, or one trusted peer) exchange encrypted backups. Gate: a cross-Guardian restore drill passes. The Guardian network grows from this seed if it should; the pair alone already solves offsite backup and the bus factor.

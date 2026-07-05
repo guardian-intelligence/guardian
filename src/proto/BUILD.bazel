@@ -8,7 +8,10 @@ load(
 
 package(default_visibility = ["//visibility:public"])
 
-exports_files(["testdata/buf/analytics-events.binpb"])
+exports_files([
+    "buf.yaml",
+    "testdata/buf/analytics-events.binpb",
+])
 
 # Vendored third-party (buf.build/bufbuild/protovalidate); not linted (see
 # buf.yaml ignore). Importable as buf/validate/validate.proto.
@@ -33,14 +36,14 @@ proto_library(
 
 guardian_buf_lint_test(
     name = "analytics_events_buf_lint_test",
-    module = "src/proto",
+    module = ".",
     targets = [":analytics_events_proto"],
 )
 
 guardian_buf_breaking_test(
     name = "analytics_events_buf_breaking_test",
     against = "testdata/buf/analytics-events.binpb",
-    module = "src/proto",
+    module = ".",
     targets = [":analytics_events_proto"],
 )
 

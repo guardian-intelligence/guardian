@@ -3,7 +3,6 @@ exports_files([
     ".bazelignore",
     "AGENTS.md",
     "TRIBAL_KNOWLEDGE.md",
-    "buf.yaml",
 ])
 
 filegroup(
