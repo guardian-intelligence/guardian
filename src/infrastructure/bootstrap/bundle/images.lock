@@ -60,6 +60,9 @@ quay.io/keycloak/keycloak@sha256:22c8cf9e79af88d320499c93994bb2c319ca255092d8ae7
 # flagger-loadtester 0.37.0 (per-stage webhook runner for the Keycloak
 # Canary gates; deployments/iam/<stage>/loadtester.yaml)
 ghcr.io/fluxcd/flagger-loadtester@sha256:f98a35ab7aca0f2efdd8e397b4002e283637f5c9e31e4e2a6c1e97af07c50454
+# grafana/k6 2.1.0 (minutely IAM login canary CronJob;
+# deployments/iam/<stage>/login-canary.yaml)
+docker.io/grafana/k6@sha256:68e78d94140704ec4ee0cb7c5cf6cd12a32b7d310a6f98d94931ee9b0b9dc629
 
 # --- Kubernetes system images actually held by the rebuilt cluster (2026-07-02 drill) ---
 # Chart.yaml pins kubernetesVersion v1.34.3 (NOT the Talos v1.13 default v1.36);

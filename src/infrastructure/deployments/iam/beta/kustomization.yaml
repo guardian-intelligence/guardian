@@ -9,3 +9,5 @@ resources:
   - loadtester.yaml
   - ingress.yaml
   - networkpolicy.yaml
+  - login-canary.yaml
+  - observability.yaml

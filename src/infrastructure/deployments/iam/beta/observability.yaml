@@ -1,0 +1,116 @@
+# Keycloak metrics scrape (management port) + the stage's IAM SLO alerts.
+# The scrape Service selects labels BOTH Flagger colors share, so primary
+# and canary pods are scraped whichever is serving.
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-metrics
+  namespace: tenant-guardian-beta
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/component: metrics
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: beta
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/component: iam
+    guardian.dev/product: verself
+  ports:
+    - name: management
+      port: 9000
+      targetPort: 9000
+      protocol: TCP
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: keycloak
+  namespace: tenant-guardian-beta
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: beta
+spec:
+  namespaceSelector:
+    matchNames:
+      - tenant-guardian-beta
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: keycloak
+      app.kubernetes.io/component: metrics
+  endpoints:
+    - port: management
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: keycloak-login-canary
+  namespace: tenant-guardian-beta
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: beta
+spec:
+  groups:
+    - name: keycloak-login-canary-beta.rules
+      interval: 30s
+      rules:
+        - alert: KeycloakLoginCanaryFailing
+          expr: increase(k6_canary_failures_total{stage="beta"}[10m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+            guardian_stage: beta
+          annotations:
+            summary: "IAM login canary is failing in beta"
+            description: "One or more synthetic login flows (existing-user, new-user, cancellation) have failed for 5m+. Check the newest keycloak-login-canary Job logs in tenant-guardian-beta."
+        - alert: KeycloakLoginCanaryAbsent
+          expr: absent(k6_canary_success_total{stage="beta"})
+          for: 15m
+          labels:
+            severity: warning
+            guardian_stage: beta
+          annotations:
+            summary: "IAM login canary has stopped reporting in beta"
+            description: "No k6 canary metrics for 15m — the CronJob is not running or cannot remote-write to VictoriaMetrics."
+        - alert: KeycloakScrapeDown
+          expr: up{namespace="tenant-guardian-beta",job="keycloak-metrics"} == 0
+          for: 5m
+          labels:
+            severity: warning
+            guardian_stage: beta
+          annotations:
+            summary: "Keycloak metrics scrape is down in beta"
+            description: "vmagent cannot scrape the Keycloak management endpoint."
+---
+# vmagent scrapes the management port from cozy-monitoring.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-vmagent-to-keycloak-metrics
+  namespace: tenant-guardian-beta
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: beta
+spec:
+  endpointSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - keycloak
+          - keycloak-primary
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:app.kubernetes.io/name: vmagent
+            k8s:io.kubernetes.pod.namespace: cozy-monitoring
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
