@@ -30,6 +30,24 @@ spec:
                 topologyKey: kubernetes.io/hostname
         config:
           use-http2: "false"
+          # x-guardian-* headers exist only on AOP-verified connections
+          # ($ssl_client_verify=SUCCESS); empty elsewhere, and proxy_set_header
+          # with an empty value strips client-supplied values.
+          http-snippet: |
+            map $ssl_client_verify $guardian_client_ip {
+              "SUCCESS" $http_cf_connecting_ip;
+              default "";
+            }
+            map $ssl_client_verify $guardian_client_ip_source {
+              "SUCCESS" "cloudflare";
+              default "";
+            }
+        proxySetHeaders:
+          x-guardian-client-ip: $guardian_client_ip
+          x-guardian-client-ip-source: $guardian_client_ip_source
+          # Not $remote_addr: the realip module rewrites it from the
+          # client-settable CF-Connecting-IP. $realip_remote_addr is the TCP peer.
+          x-guardian-edge-peer-ip: $realip_remote_addr
         service:
           externalTrafficPolicy: Cluster
         updateStrategy:
