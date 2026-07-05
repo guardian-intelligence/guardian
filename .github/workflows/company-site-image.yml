@@ -155,12 +155,22 @@ jobs:
         if: steps.classify.outputs.build == 'true'
         working-directory: src/products/viteplus-monorepo/apps/guardianintelligence-web
         run: |
-          # --prefix installs into an isolated tree instead of `npm install`
-          # in this directory, which would read this app's package.json and
-          # choke on pnpm's `catalog:` protocol in its dependency versions.
-          npm install --no-save --prefix /tmp/perf-gate-deps playwright@1.61.1
-          NODE_PATH=/tmp/perf-gate-deps/node_modules /tmp/perf-gate-deps/node_modules/.bin/playwright install --with-deps chromium firefox webkit
-          NODE_PATH=/tmp/perf-gate-deps/node_modules BASE=http://127.0.0.1:8080 node perf/scroll-jank-gate.mjs
+          # Installed in an empty scratch dir, not in place: `npm install` in
+          # this directory would read this app's package.json and choke on
+          # pnpm's `catalog:` protocol in its dependency versions. Copied in
+          # rather than resolved via NODE_PATH: Node's ESM loader does not
+          # search NODE_PATH at all (CJS-only, verified against a real CI run
+          # -- ERR_MODULE_NOT_FOUND despite NODE_PATH being set), so the
+          # package has to be a real node_modules/ entry to import-resolve.
+          mkdir -p /tmp/perf-gate-deps && cd /tmp/perf-gate-deps
+          npm init -y >/dev/null
+          npm install playwright@1.61.1
+          cd - >/dev/null
+          mkdir -p node_modules
+          cp -r /tmp/perf-gate-deps/node_modules/playwright node_modules/
+          cp -r /tmp/perf-gate-deps/node_modules/playwright-core node_modules/
+          node node_modules/playwright/cli.js install --with-deps chromium firefox webkit
+          BASE=http://127.0.0.1:8080 node perf/scroll-jank-gate.mjs
 
       - name: Stop perf-gate container
         if: always() && steps.classify.outputs.build == 'true'
