@@ -1,0 +1,169 @@
+# OTel Collector for the analytics/observability ClickHouse. Receives OTLP
+# spans from in-cluster producers (the ingest service today; web SSR +
+# Keycloak next) and writes them to the owned guardian_analytics.otel_traces
+# schema with create_schema:false — the DDL is applied by the ddl-apply Job,
+# not the exporter, so the ORDER BY / codecs / TTL stay ours.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/part-of: guardian
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 80
+        spike_limit_percentage: 20
+      batch:
+        timeout: 5s
+        send_batch_size: 10000
+    exporters:
+      clickhouse:
+        # The exporter always authenticates against the "default" database
+        # (upstream TODO) but writes to the fully-qualified table below.
+        endpoint: tcp://clickhouse-analytics.guardian-analytics.svc.cozy.local:9000?dial_timeout=10s&compress=lz4
+        username: ingest
+        database: guardian_analytics
+        traces_table_name: otel_traces
+        create_schema: false
+        async_insert: true
+        timeout: 10s
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+        sending_queue:
+          enabled: true
+          queue_size: 1000
+    service:
+      telemetry:
+        metrics:
+          level: none
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [clickhouse]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/part-of: guardian
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: otel-collector
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: otel-collector
+        app.kubernetes.io/part-of: guardian
+        # Writes to ClickHouse — the CH Cilium policy admits this label.
+        guardian.dev/role: analytics-client
+      annotations:
+        checksum/config: "rev1"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: otel-collector
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: collector
+          image: docker.io/otel/opentelemetry-collector-contrib:0.155.0@sha256:bee818e09d3fb643d2c59a612ae42169fb3dad0620c74145f84d63babcfd4283
+          args: ["--config=/etc/otel/config.yaml"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: otlp-http
+              containerPort: 4318
+          readinessProbe:
+            tcpSocket:
+              port: otlp-grpc
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: otlp-grpc
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otel
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: otel-collector-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/part-of: guardian
+spec:
+  selector:
+    app.kubernetes.io/name: otel-collector
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: otel-collector
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/part-of: guardian
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: otel-collector

@@ -155,6 +155,76 @@ agree on:
   the escape hatch is one `Map(LowCardinality(String), String)` overflow
   column, not a redesign.
 
+## As-deployed verification (in-cluster CHI, 2026-07-05)
+
+The whole vertical is live in `guardian-analytics` (raw Altinity CHI,
+`clickhouse-server:26.3.17.4`, 1×3 ReplicatedMergeTree over a 3-host CHK
+quorum). Every lab number reproduced on the deployed image, and the
+operational gates passed against the live cluster:
+
+- **Compression** re-run on the deployed image against the same 20M
+  generator: **16.71 B/event exact** (334,105,129 B / 20M, ratio 6.18) —
+  identical to the lab. Insert of 20M rows in 5.7 s.
+- **Ingest throughput** (single stream, JSONEachRow through the wire form,
+  in-pod localhost socket, 4-CPU limit): **1.22M events/s**.
+- **Replica-kill test**: 60 × 20k acknowledged batches with one passive and
+  one active replica deleted mid-run; all three replicas converged to
+  exactly `TOTAL_ACKED` (1,200,000) — zero acknowledged-row loss, zero
+  duplicates.
+- **End-to-end trust boundary** through the live `/api/events` ingress: a
+  request via Cloudflare lands `edge_verified` with the real client IP and a
+  server-minted correlation cookie that round-trips into `correlation_id`;
+  a forged direct-to-origin request with spoofed `X-Guardian-Client-Ip` +
+  `…-Source: cloudflare` lands `client_claimed` with an empty IP (the
+  ingress strips the spoofed headers because no client cert verified). This
+  is the load-bearing gate — the trust tier cannot be lied into.
+- **Canonical queries** on 20M real-shaped rows, raw rows only (no
+  pre-aggregation, no dashboard layer): funnel 0.098 s, visitor-history
+  timeline 0.068 s, ASN abuse rollup 0.219 s, high-velocity-IP rollup
+  0.328 s, per-path p75 LCP 0.068 s. Funnels and abuse views assemble
+  directly from the event rows, as intended.
+- **Retention**: a synthetic 26-month-old row does not survive the
+  `INTERVAL 25 MONTH DELETE` TTL; current data is retained.
+- **Self-observation** (no external alerting is deployed): ingest rate,
+  unique visitors, and reject counts are all queryable from ClickHouse
+  itself (hourly `count()` / `uniqExact(correlation_id)`); the ingest
+  service logs per-reason reject counts structured.
+
+Durability rests on app-level replication (ReplicatedMergeTree over Keeper)
+on `local-retain` volumes: a pod loss re-syncs from a surviving replica, and
+the PVCs survive pod deletion. A full backup/restore-into-scratch-namespace
+drill is the remaining operational item, tracked for the DR runbook alongside
+the CHK snapshot story.
+
+## Traces (OTel spans in the same store)
+
+The second consumer of this ClickHouse: OTLP spans, so a log line's
+`correlation_id`/`trace_id` leads to the full trace in the same place we
+query business analytics. An OTel Collector (contrib v0.155.0, digest-pinned)
+receives OTLP and writes to `guardian_analytics.otel_traces` with
+`create_schema: false` — the exporter's INSERT column set is matched exactly,
+but the engine (ReplicatedMergeTree over Keeper), ORDER BY, codecs,
+partitioning, TTL, and indexes are ours. ORDER BY is
+`(ServiceName, toStartOfHour(Timestamp), TraceId, Timestamp)`: trace-adjacent
+within each service/hour bucket, honoring the lab finding that guardian's
+trace-correlated span attributes compress best when co-located by trace
+(trace-adjacent 46.0 vs resource-first 61.5 B/span) while keeping
+service-scoped scans cheap. A `otel_traces_trace_id_ts` table + MV give
+trace_id → time-range lookup. 6-month TTL (higher volume, shorter value than
+the 25-month business events).
+
+**Verified live**: a synthetic OTLP span through the deployed collector
+landed in the owned schema with `guardian.correlation_id` queryable as a
+span attribute (the same id that keys the event rows — this is the join that
+makes "follow a visitor from analytics into their server trace" one query),
+and the lookup MV populated automatically.
+
+**Revisit trigger (traces ORDER BY)**: the trace-adjacent choice was measured
+on synthetic spans with lab-assumed attribute correlation. Re-measure B/span
+on ≥1 week of real production spans once producers are emitting, and freeze or
+adjust the ORDER BY with that evidence (hybrid `(service, hour, trace_id, ts)`
+= 58.7 is the query-ergonomic fallback).
+
 ## Revisit triggers
 
 - **UA cardinality**: if production UA distinct-count per part exceeds

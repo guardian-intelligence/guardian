@@ -1,0 +1,89 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: analytics-traces-ddl
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: analytics-traces-ddl
+    app.kubernetes.io/part-of: guardian
+data:
+  # Owned trace schema for the OTel Collector clickhouse exporter running with
+  # create_schema:false. The COLUMN names/types/order match exactly what the
+  # exporter's INSERT binds at the pinned collector version (v0.155.0, Map
+  # schema, flattened Nested) — the exporter does no schema validation on this
+  # path, so everything else (engine, ORDER BY, codecs, partitioning, TTL,
+  # indexes) is ours to tune. Diverging from the exporter's defaults:
+  #   - ReplicatedMergeTree over the CHK quorum (3-way like events).
+  #   - ORDER BY (ServiceName, hour, TraceId, Timestamp): trace-adjacent
+  #     WITHIN each service/hour bucket. Our span attributes are
+  #     trace-correlated (the ingest producer stamps correlation_id/route per
+  #     span), which the lab measured as the layout that compresses best for
+  #     this attribute structure (trace-adjacent 46.0 vs resource-first 61.5
+  #     B/span; docs/analytics-storage-design.md). Revisit on real spans.
+  #   - 6-month TTL (traces are higher-volume, shorter-lived than the
+  #     25-month business events).
+  #   - Kept the exporter's trace_id bloom index (the lookup path).
+  otel-traces.sql: |
+    CREATE DATABASE IF NOT EXISTS guardian_analytics ON CLUSTER 'analytics';
+
+    CREATE TABLE IF NOT EXISTS guardian_analytics.otel_traces ON CLUSTER 'analytics'
+    (
+        Timestamp          DateTime64(9) CODEC(Delta(8), ZSTD(1)),
+        TraceId            String CODEC(ZSTD(1)),
+        SpanId             String CODEC(ZSTD(1)),
+        ParentSpanId       String CODEC(ZSTD(1)),
+        TraceState         String CODEC(ZSTD(1)),
+        SpanName           LowCardinality(String) CODEC(ZSTD(1)),
+        SpanKind           LowCardinality(String) CODEC(ZSTD(1)),
+        ServiceName        LowCardinality(String) CODEC(ZSTD(1)),
+        ResourceAttributes Map(LowCardinality(String), String) CODEC(ZSTD(1)),
+        ScopeName          String CODEC(ZSTD(1)),
+        ScopeVersion       String CODEC(ZSTD(1)),
+        SpanAttributes     Map(LowCardinality(String), String) CODEC(ZSTD(1)),
+        Duration           UInt64 CODEC(T64, ZSTD(1)),
+        StatusCode         LowCardinality(String) CODEC(ZSTD(1)),
+        StatusMessage      String CODEC(ZSTD(1)),
+        Events Nested (
+            Timestamp  DateTime64(9),
+            Name       LowCardinality(String),
+            Attributes Map(LowCardinality(String), String)
+        ) CODEC(ZSTD(1)),
+        Links Nested (
+            TraceId    String,
+            SpanId     String,
+            TraceState String,
+            Attributes Map(LowCardinality(String), String)
+        ) CODEC(ZSTD(1)),
+        INDEX idx_trace_id TraceId TYPE bloom_filter(0.001) GRANULARITY 1,
+        INDEX idx_duration Duration TYPE minmax GRANULARITY 1
+    )
+    ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/guardian_analytics/otel_traces', '{replica}')
+    PARTITION BY toDate(Timestamp)
+    ORDER BY (ServiceName, toStartOfHour(Timestamp), TraceId, Timestamp)
+    TTL toDateTime(Timestamp) + INTERVAL 6 MONTH DELETE
+    SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;
+
+    -- trace_id -> [minTs, maxTs] lookup: given a trace_id from a log line,
+    -- bound the time window before scanning the main table.
+    CREATE TABLE IF NOT EXISTS guardian_analytics.otel_traces_trace_id_ts ON CLUSTER 'analytics'
+    (
+        TraceId String CODEC(ZSTD(1)),
+        Start   DateTime64(9) CODEC(Delta(8), ZSTD(1)),
+        End     DateTime64(9) CODEC(Delta(8), ZSTD(1)),
+        INDEX idx_trace_id TraceId TYPE bloom_filter(0.001) GRANULARITY 1
+    )
+    ENGINE = ReplicatedAggregatingMergeTree('/clickhouse/tables/{shard}/guardian_analytics/otel_traces_trace_id_ts', '{replica}')
+    PARTITION BY toDate(Start)
+    ORDER BY (TraceId, Start)
+    TTL toDateTime(Start) + INTERVAL 6 MONTH DELETE
+    SETTINGS ttl_only_drop_parts = 1;
+
+    CREATE MATERIALIZED VIEW IF NOT EXISTS guardian_analytics.otel_traces_trace_id_ts_mv ON CLUSTER 'analytics'
+    TO guardian_analytics.otel_traces_trace_id_ts AS
+    SELECT
+        TraceId,
+        min(Timestamp) AS Start,
+        max(Timestamp) AS End
+    FROM guardian_analytics.otel_traces
+    WHERE TraceId != ''
+    GROUP BY TraceId;
