@@ -40,6 +40,9 @@ message Event {
   // (OTel logs.proto semantics). Only rpc/error events carry one.
   bytes trace_id = 4;
   // Milliseconds before sent_at that the event occurred (PostHog "offset").
+  // Not yet stored: server_ts is batch receipt time and in-session order
+  // comes from session_seq; reserved for skew-corrected event time
+  // (server_ts - client_skew_ms - offset_ms).
   uint32 offset_ms = 5;
   // Monotonic within the correlation cookie's session. (cookie, seq) is
   // the dedup key and gap/replay detector.

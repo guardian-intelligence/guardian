@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -29,6 +30,12 @@ func TestValidateEvent(t *testing.T) {
 		{"vital without web_vital name", &analyticsv1.Event{Name: "page_view", VitalName: "LCP"}, rejectVital},
 		{"web_vital with unknown vital", &analyticsv1.Event{Name: "web_vital.lcp", VitalName: "BOGUS"}, rejectVital},
 		{"web_vital ok", ok(&analyticsv1.Event{Name: "web_vital.lcp", VitalName: "LCP", VitalValue: 1234.5}), ""},
+		{"vital NaN rejected", &analyticsv1.Event{Name: "web_vital.lcp", VitalName: "LCP", VitalValue: math.NaN()}, rejectVital},
+		{"vital +Inf rejected", &analyticsv1.Event{Name: "web_vital.lcp", VitalName: "LCP", VitalValue: math.Inf(1)}, rejectVital},
+		{"vital negative rejected", &analyticsv1.Event{Name: "web_vital.inp", VitalName: "INP", VitalValue: -5}, rejectVital},
+		{"vital ms over bound", &analyticsv1.Event{Name: "web_vital.lcp", VitalName: "LCP", VitalValue: 1e9}, rejectVital},
+		{"CLS over bound", &analyticsv1.Event{Name: "web_vital.cls", VitalName: "CLS", VitalValue: 42}, rejectVital},
+		{"CLS in range ok", ok(&analyticsv1.Event{Name: "web_vital.cls", VitalName: "CLS", VitalValue: 0.17}), ""},
 		{"props invalid json", &analyticsv1.Event{Name: "click", PropsJson: "{oops"}, rejectProps},
 		{"props not an object", &analyticsv1.Event{Name: "click", PropsJson: `[1,2]`}, rejectProps},
 		{"props over cap", &analyticsv1.Event{Name: "click", PropsJson: `{"k":"` + strings.Repeat("v", maxPropsLen) + `"}`}, rejectProps},

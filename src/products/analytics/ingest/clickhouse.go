@@ -48,7 +48,9 @@ func (s *clickhouseSink) Insert(ctx context.Context, rows []eventRow) error {
 			r.ServerTs,
 			r.Site,
 			r.EventName,
-			r.TrustTier,
+			// clickhouse-go's Enum8 column accepts int/int8/string but NOT
+			// uint8 — passing TrustTier raw aborts every insert block.
+			int(r.TrustTier),
 			r.SchemaVersion,
 			string(r.TraceID[:]),
 			string(r.CorrelationID[:]),

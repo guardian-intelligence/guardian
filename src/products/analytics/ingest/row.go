@@ -24,8 +24,11 @@ type eventRow struct {
 	UA            string
 	ClientIP      netip.Addr
 	IPSource      string
-	Country       string
-	ASN           uint32
+	// Country/ASN stay zero until the GeoIP/ASN lookup lands (needs an MMDB
+	// source + refresh story). The design doc promises server derivation —
+	// deferred, not dropped.
+	Country string
+	ASN     uint32
 	Status        uint16
 	DurationMs    uint32
 	ClientSkewMs  int32

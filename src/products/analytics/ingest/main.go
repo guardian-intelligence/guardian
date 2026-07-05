@@ -66,12 +66,17 @@ func main() {
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	// ListenAndServe returns the moment Shutdown is CALLED, not when the
+	// drain finishes — closing the batcher before Shutdown returns would
+	// drop rows from still-draining handlers that were already Accepted.
+	drained := make(chan struct{})
 	go func() {
 		<-stop
 		slog.Info("shutting down")
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(ctx)
+		close(drained)
 	}()
 
 	slog.Info("listening", "addr", addr, "clickhouse", chAddr)
@@ -79,5 +84,6 @@ func main() {
 		slog.Error("serve", "err", err)
 		os.Exit(1)
 	}
+	<-drained
 	batch.Close()
 }

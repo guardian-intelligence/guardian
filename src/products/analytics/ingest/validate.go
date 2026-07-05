@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 
 	analyticsv1 "github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/analytics/v1"
@@ -106,6 +107,20 @@ func validateEvent(e *analyticsv1.Event) rejectReason {
 	}
 	if strings.HasPrefix(e.GetName(), "web_vital.") {
 		if _, ok := knownVitals[e.GetVitalName()]; !ok {
+			return rejectVital
+		}
+		// protojson accepts "NaN"/"Infinity" strings for doubles; one NaN
+		// row poisons every avg/quantile over the vital. Bound to plausible
+		// physics: CLS is unitless [0,10], the rest are ms under ~10min.
+		v := e.GetVitalValue()
+		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+			return rejectVital
+		}
+		if e.GetVitalName() == "CLS" {
+			if v > 10 {
+				return rejectVital
+			}
+		} else if v > 600_000 {
 			return rejectVital
 		}
 	} else if e.GetVitalName() != "" || e.GetVitalValue() != 0 {

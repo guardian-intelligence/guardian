@@ -149,6 +149,9 @@ type Event struct {
 	// (OTel logs.proto semantics). Only rpc/error events carry one.
 	TraceId []byte `protobuf:"bytes,4,opt,name=trace_id,json=traceId,proto3" json:"trace_id,omitempty"`
 	// Milliseconds before sent_at that the event occurred (PostHog "offset").
+	// Not yet stored: server_ts is batch receipt time and in-session order
+	// comes from session_seq; reserved for skew-corrected event time
+	// (server_ts - client_skew_ms - offset_ms).
 	OffsetMs uint32 `protobuf:"varint,5,opt,name=offset_ms,json=offsetMs,proto3" json:"offset_ms,omitempty"`
 	// Monotonic within the correlation cookie's session. (cookie, seq) is
 	// the dedup key and gap/replay detector.
