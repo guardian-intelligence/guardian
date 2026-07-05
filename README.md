@@ -19,7 +19,7 @@ The loops you'll actually run, from the repo root:
 
 | Task | Command |
 | - | - |
-| Build / test | `bazelisk build //...` · `bazelisk test //...` |
+| Build / test everything (incl. the site image) | `bazelisk build //...` · `bazelisk test //...` |
 | Format before pushing | `aspect tidy` |
 | Put repo-pinned CLIs + build tools on `PATH` | `aspect tools install && eval "$(aspect tools path)"` |
 | Regenerate proto stubs (pinned `buf` + plugins) | `buf generate --path src/proto/guardian` |
@@ -28,16 +28,8 @@ The loops you'll actually run, from the repo root:
 Ad-hoc `bazel build|test|query` stays raw bazel; `aspect` tasks exist only for
 workflows with shape worth documenting (see below).
 
-Web app — `src/products/viteplus-monorepo`:
-
-```bash
-cd src/products/viteplus-monorepo
-pnpm install
-pnpm run dev            # guardianintelligence-web dev server
-pnpm run ready          # pre-merge gate: lint + test + typecheck + build
-```
-
 Deeper reading: `AGENTS.md` (conventions and the durable command surface), the
+web frontend dev loop in `src/products/viteplus-monorepo/README.md`, the
 runbooks in `src/infrastructure/runbooks/`, and the design docs in `docs/`.
 
 ## Commands
