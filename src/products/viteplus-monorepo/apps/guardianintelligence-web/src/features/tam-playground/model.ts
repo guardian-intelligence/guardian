@@ -75,7 +75,8 @@ export function segmentCagrPctForOpportunity(
 ): number {
   if (currentSegmentBillion <= 0 || opportunity2030Billion <= 0) return 0;
   const rate =
-    (Math.pow(opportunity2030Billion / currentSegmentBillion, 1 / SEGMENT_CAGR_YEARS) - 1) * 100;
+    (Math.pow(opportunity2030Billion / currentSegmentBillion, 1 / SEGMENT_CAGR_YEARS) - 1) *
+    100;
   return roundToStep(rate, SEGMENT_CAGR_STEP);
 }
 
@@ -97,7 +98,8 @@ export function project(input: TamProjectionInput): readonly TamProjectionPoint[
   // The standard projection grows exponentially across the window. The
   // enthusiast segment also compounds, but only shows up in the visible market
   // once the 2027 adoption ramp begins.
-  const ratio = currentCloudTamBillion > 0 ? cloudTam2030Billion / currentCloudTamBillion : 1;
+  const ratio =
+    currentCloudTamBillion > 0 ? cloudTam2030Billion / currentCloudTamBillion : 1;
   const segmentRate = 1 + segmentCagrPct / 100;
 
   const points: TamProjectionPoint[] = [];
@@ -133,7 +135,9 @@ export function endpointOf(points: readonly TamProjectionPoint[]): TamProjection
 // Single source of truth for the two plotted lines. The chart, legend, KPIs,
 // and CSV columns all derive from this so they cannot drift apart.
 
-export type TamSeriesKey = "standardProjectionTamBillion" | "guardianProjectionTamBillion";
+export type TamSeriesKey =
+  | "standardProjectionTamBillion"
+  | "guardianProjectionTamBillion";
 
 export interface TamSeriesSpec {
   readonly key: TamSeriesKey;

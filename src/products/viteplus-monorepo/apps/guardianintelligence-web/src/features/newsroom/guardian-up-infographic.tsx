@@ -35,7 +35,12 @@ const ARIA_LABEL =
 
 export function GuardianUpInfographic() {
   return (
-    <figure role="img" aria-label={ARIA_LABEL} data-guardian-up-infographic className="m-0 w-full">
+    <figure
+      role="img"
+      aria-label={ARIA_LABEL}
+      data-guardian-up-infographic
+      className="m-0 w-full"
+    >
       <div
         className="flex flex-col items-center justify-center gap-5 rounded-sm p-6 md:flex-row md:gap-8 md:p-8"
         style={{
@@ -112,7 +117,9 @@ export function GuardianUpInfographic() {
                 style={{
                   background: "var(--treatment-ground)",
                   borderRight:
-                    index < FUNCTIONS.length - 1 ? "1px solid var(--treatment-hairline)" : "none",
+                    index < FUNCTIONS.length - 1
+                      ? "1px solid var(--treatment-hairline)"
+                      : "none",
                 }}
               >
                 <Icon size={20} strokeWidth={1.6} style={{ color: "var(--treatment-ink)" }} />
@@ -131,7 +138,8 @@ export function GuardianUpInfographic() {
             style={{
               height: "36px",
               background: "var(--treatment-ink)",
-              backgroundImage: "radial-gradient(rgba(255,255,255,0.16) 1px, transparent 1px)",
+              backgroundImage:
+                "radial-gradient(rgba(255,255,255,0.16) 1px, transparent 1px)",
               backgroundSize: "10px 10px",
               backgroundPosition: "center",
             }}

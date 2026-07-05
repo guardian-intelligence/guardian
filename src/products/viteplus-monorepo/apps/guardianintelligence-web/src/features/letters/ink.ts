@@ -52,7 +52,8 @@ function fnv1a(s: string): number {
 }
 
 // pick: slug → label → Unit ∈ [0,1). A pure hash read, not a stateful RNG.
-const pickUnit = (slug: string, label: string): number => fnv1a(`${slug}:${label}`) / 4294967296;
+const pickUnit = (slug: string, label: string): number =>
+  fnv1a(`${slug}:${label}`) / 4294967296;
 
 // Word index → ink bucket, keyed by index alone (not the word's text) so the
 // index excerpt and the letter body agree even where HTML entities make the
