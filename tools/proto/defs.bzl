@@ -29,6 +29,85 @@ def guardian_buf_breaking_test(
         visibility = visibility,
     )
 
+def guardian_go_proto_codegen_check(
+        name,
+        proto_srcs,
+        proto_files,
+        proto_path,
+        generated_sources,
+        generated_root,
+        go_module,
+        descriptor_srcs = "@protobuf//:descriptor_proto_srcs",
+        protoc = "@protobuf//:protoc",
+        visibility = None):
+    """Verify checked-in Go proto/connect output is current.
+
+    Mirrors guardian_ts_proto_codegen_check: the plugins are the go.mod-pinned
+    protoc-gen-go and protoc-gen-connect-go built by rules_go, so regeneration
+    drift (or hand-edits to gen/) fails here before merge. The `protoc`
+    version header line differs between generators (buf writes "(unknown)",
+    protoc writes its own version), so it is normalized out of the diff.
+    """
+    proto_file_args = " \\\n  ".join(proto_files)
+
+    native.genrule(
+        name = name,
+        srcs = proto_srcs + [
+            generated_sources,
+            descriptor_srcs,
+        ],
+        outs = [name + ".stamp"],
+        tools = [
+            protoc,
+            "@org_golang_google_protobuf//cmd/protoc-gen-go",
+            "@com_connectrpc_connect//cmd/protoc-gen-connect-go",
+        ],
+        cmd = """
+set -euo pipefail
+execroot="$$(pwd)"
+protoc="$$execroot/$(location {protoc})"
+descriptor="$(location {descriptor_srcs})"
+proto_include="$${{descriptor%/google/protobuf/descriptor.proto}}"
+gen_go="$$execroot/$(location @org_golang_google_protobuf//cmd/protoc-gen-go)"
+gen_connect="$$execroot/$(location @com_connectrpc_connect//cmd/protoc-gen-connect-go)"
+out="$(@D)/go-generated"
+rm -rf "$$out"
+mkdir -p "$$out"
+"$$protoc" \
+  --proto_path={proto_path} \
+  --proto_path="$$proto_include" \
+  --plugin=protoc-gen-go="$$gen_go" \
+  --plugin=protoc-gen-connect-go="$$gen_connect" \
+  --go_out="$$out" --go_opt=module={go_module} \
+  --connect-go_out="$$out" --connect-go_opt=module={go_module} \
+  {proto_files}
+normalize() {{
+  find "$$1" -type f -name '*.go' -exec sed -i -e '/^\\/\\/ \\tprotoc  */d' {{}} +
+}}
+staged="$(@D)/go-checked-in"
+rm -rf "$$staged"
+mkdir -p "$$staged"
+for f in $(locations {generated_sources}); do
+  rel="$${{f#{generated_root}/}}"
+  mkdir -p "$$staged/$$(dirname "$$rel")"
+  cp "$$f" "$$staged/$$rel"
+done
+normalize "$$out"
+normalize "$$staged"
+diff -ru "$$staged" "$$out"
+printf 'go proto generated code is current\\n' > "$@"
+""".format(
+            descriptor_srcs = descriptor_srcs,
+            generated_root = generated_root,
+            generated_sources = generated_sources,
+            go_module = go_module,
+            proto_files = proto_file_args,
+            proto_path = proto_path,
+            protoc = protoc,
+        ),
+        visibility = visibility,
+    )
+
 def guardian_ts_proto_codegen_check(
         name,
         proto_srcs,

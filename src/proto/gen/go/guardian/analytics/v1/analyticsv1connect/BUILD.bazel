@@ -1,0 +1,18 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "analyticsv1connect",
+    srcs = ["events.connect.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/analytics/v1/analyticsv1connect",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/proto/gen/go/guardian/analytics/v1:analyticsv1",
+        "@com_connectrpc_connect//:connect",
+    ],
+)
+
+filegroup(
+    name = "sources",
+    srcs = glob(["*.go"]),
+    visibility = ["//src/proto:__pkg__"],
+)

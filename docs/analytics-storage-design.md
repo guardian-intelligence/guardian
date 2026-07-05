@@ -124,6 +124,11 @@ agree on:
 - **Server derives; no wire fields exist**: receipt time, IP, UA, geo, ASN,
   trust tier, and clock skew (`received_at − sent_at`, the Segment/PostHog
   pattern — clients never compute skew or send absolute times).
+  Implementation state (ingest v1): geo/ASN derivation is deferred (needs an
+  MMDB source + refresh story), `country`/`asn` stay zero until then;
+  `offset_ms` is accepted on the wire but not yet stored — `server_ts` is
+  batch receipt time, in-session order comes from `session_seq`, and the
+  field is reserved for skew-corrected event time.
 - **Identity is the HMAC correlation cookie**, not a body field — unlike
   Segment's client-settable `anonymousId`, ours is server-minted and
   verified; a body-level id would be a second, weaker channel.

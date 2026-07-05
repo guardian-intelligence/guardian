@@ -3,6 +3,7 @@ load(
     "//tools/proto:defs.bzl",
     "guardian_buf_breaking_test",
     "guardian_buf_lint_test",
+    "guardian_go_proto_codegen_check",
 )
 
 package(default_visibility = ["//visibility:public"])
@@ -26,4 +27,22 @@ guardian_buf_breaking_test(
     against = "testdata/buf/analytics-events.binpb",
     module = "src/proto",
     targets = [":analytics_events_proto"],
+)
+
+filegroup(
+    name = "analytics_events_gen_go",
+    srcs = [
+        "//src/proto/gen/go/guardian/analytics/v1:sources",
+        "//src/proto/gen/go/guardian/analytics/v1/analyticsv1connect:sources",
+    ],
+)
+
+guardian_go_proto_codegen_check(
+    name = "analytics_events_go_codegen_check",
+    generated_root = "src/proto/gen/go",
+    generated_sources = ":analytics_events_gen_go",
+    go_module = "github.com/guardian-intelligence/guardian/src/proto/gen/go",
+    proto_files = ["guardian/analytics/v1/events.proto"],
+    proto_path = "src/proto",
+    proto_srcs = ["guardian/analytics/v1/events.proto"],
 )
