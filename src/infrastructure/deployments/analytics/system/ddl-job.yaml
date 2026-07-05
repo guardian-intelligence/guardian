@@ -35,16 +35,18 @@ spec:
             - /bin/bash
             - -ec
             - |
-              host=clickhouse-analytics.guardian-analytics.svc.cozy.local
+              host=chendpoint-clickhouse-analytics.tenant-root.svc.cozy.local
               # Every replica must see the full cluster, not just whichever
               # one the Service routes to: the operator propagates
               # remote_servers per-pod during rollout, and an ON CLUSTER DDL
               # submitted through a replica with a partial view only reaches
               # the hosts that replica knows (bit us live on first deploy).
               # clusterAllReplicas errors while any host is unreachable,
-              # which the retry loop treats as not-ready.
-              until [ "$(clickhouse-client --host "$host" --user ingest --query "SELECT countIf(c = 3) FROM (SELECT hostName() AS h, count() AS c FROM clusterAllReplicas('analytics', system.clusters) WHERE cluster = 'analytics' GROUP BY h)" 2>/dev/null)" = "3" ]; do
-                echo "waiting for all 3 replicas to see the full cluster"; sleep 5
+              # which the retry loop treats as not-ready. Cluster name
+              # 'clickhouse' and the 2-replica layout come from the
+              # tenant-root Cozystack ClickHouse app.
+              until [ "$(clickhouse-client --host "$host" --user ingest --query "SELECT countIf(c = 2) FROM (SELECT hostName() AS h, count() AS c FROM clusterAllReplicas('clickhouse', system.clusters) WHERE cluster = 'clickhouse' GROUP BY h)" 2>/dev/null)" = "2" ]; do
+                echo "waiting for all 2 replicas to see the full cluster"; sleep 5
               done
               clickhouse-client --host "$host" --user ingest --receive_timeout 300 --queries-file /ddl/events.sql
               clickhouse-client --host "$host" --user ingest --receive_timeout 300 --queries-file /traces/otel-traces.sql
@@ -54,10 +56,10 @@ spec:
             - name: CLICKHOUSE_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: analytics-clickhouse-users
+                  name: analytics-ch-ingest
                   key: ingest
             - name: GUARDIAN_DDL_REVISION
-              value: "4"
+              value: "5"
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

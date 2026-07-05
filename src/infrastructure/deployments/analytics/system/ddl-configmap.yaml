@@ -11,11 +11,13 @@ data:
   # (src/infrastructure/analytics/events-table.sql — bake-off winner, 17.0
   # B/event; see docs/analytics-storage-design.md). Identical columns,
   # codecs, ORDER BY, partitioning, and TTL; only the engine differs:
-  # ReplicatedMergeTree over the CHK quorum for 3-way app-level replication.
+  # ReplicatedMergeTree over the CHK quorum. Targets the tenant-root
+  # Cozystack ClickHouse app (cluster name 'clickhouse' is fixed by the
+  # chart; 2 replicas, DRBD-replicated volumes carry the durability).
   events.sql: |
-    CREATE DATABASE IF NOT EXISTS guardian_analytics ON CLUSTER 'analytics';
+    CREATE DATABASE IF NOT EXISTS guardian_analytics ON CLUSTER 'clickhouse';
 
-    CREATE TABLE IF NOT EXISTS guardian_analytics.events ON CLUSTER 'analytics'
+    CREATE TABLE IF NOT EXISTS guardian_analytics.events ON CLUSTER 'clickhouse'
     (
         server_ts      DateTime64(3) CODEC(Delta(8), ZSTD(1)),
         site           LowCardinality(String) CODEC(ZSTD(1)),
