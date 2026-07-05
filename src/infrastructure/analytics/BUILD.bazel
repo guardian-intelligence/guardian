@@ -1,0 +1,5 @@
+filegroup(
+    name = "events_table_sql",
+    srcs = ["events-table.sql"],
+    visibility = ["//src/infrastructure/tests:__pkg__"],
+)

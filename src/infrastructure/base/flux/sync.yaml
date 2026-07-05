@@ -538,8 +538,20 @@ spec:
     - name: guardian-mgmt-storage
     - name: guardian-mgmt-base
   prune: true
+  # wait:false + explicit healthChecks: readiness gates on exactly the CHI
+  # and CHK (via the exprs below) without gating on the DDL Job. With
+  # wait:false alone, Flux would never evaluate healthCheckExprs at all.
   wait: false
   timeout: 15m
+  healthChecks:
+    - apiVersion: clickhouse.altinity.com/v1
+      kind: ClickHouseInstallation
+      name: analytics
+      namespace: guardian-analytics
+    - apiVersion: clickhouse-keeper.altinity.com/v1
+      kind: ClickHouseKeeperInstallation
+      name: analytics-keeper
+      namespace: guardian-analytics
   healthCheckExprs:
     - apiVersion: clickhouse.altinity.com/v1
       kind: ClickHouseInstallation
