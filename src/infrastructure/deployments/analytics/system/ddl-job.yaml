@@ -36,11 +36,11 @@ spec:
             - -ec
             - |
               host=clickhouse-analytics.guardian-analytics.svc.cozy.local
-              until clickhouse-client --host "$host" --query "SELECT count() FROM system.clusters WHERE cluster = 'analytics'" | grep -q 3; do
+              until clickhouse-client --host "$host" --user ingest --query "SELECT count() FROM system.clusters WHERE cluster = 'analytics'" | grep -q 3; do
                 echo "waiting for 3 cluster members"; sleep 5
               done
-              clickhouse-client --host "$host" --receive_timeout 300 --queries-file /ddl/events.sql
-              clickhouse-client --host "$host" --query "EXISTS TABLE guardian_analytics.events"
+              clickhouse-client --host "$host" --user ingest --receive_timeout 300 --queries-file /ddl/events.sql
+              clickhouse-client --host "$host" --user ingest --query "EXISTS TABLE guardian_analytics.events"
           env:
             - name: GUARDIAN_DDL_REVISION
               value: "1"

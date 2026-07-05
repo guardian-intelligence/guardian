@@ -75,6 +75,18 @@ spec:
         </clickhouse>
     profiles:
       readonly/readonly: "1"
+    users:
+      # The operator pins the default user to the CHI's own pods, so
+      # same-namespace clients (DDL job, ingest service) authenticate as
+      # `ingest`. Empty password by design for now: the Cilium policy in
+      # networkpolicy.yaml is the access boundary (in-cluster only,
+      # enumerated peers); a custody-managed password arrives with the
+      # OpenBao scope for this namespace (k8s_secret reference), at which
+      # point this line changes rather than the topology.
+      ingest/networks/ip: ["::/0"]
+      ingest/password: ""
+      ingest/profile: default
+      ingest/quota: default
   defaults:
     templates:
       podTemplate: clickhouse
