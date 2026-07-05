@@ -43,6 +43,8 @@ func testImportEnv() map[string]string {
 		"cloudflare_r2_secret_access_key":                         "r2-secret",
 		"cloudflare_r2_s3_api_endpoint":                           "r2-endpoint",
 		"cloudflare_r2_access_key_id":                             "r2-access",
+		"cloudflare_r2_backups_access_key_id":                     "backups-access",
+		"cloudflare_r2_backups_secret_access_key":                 "backups-secret",
 		"cloudflare_guardian_intelligence_org_dnz_zone_api_token": "zone",
 		"cloudflare_external_dns_api_token":                       "external",
 		"cloudflare_dns_lb_provisioner_api_token":                 "lb",
@@ -55,8 +57,8 @@ func TestImportPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 5 {
-		t.Fatalf("plan length = %d, want 5", len(plan))
+	if len(plan) != 6 {
+		t.Fatalf("plan length = %d, want 6", len(plan))
 	}
 	external := plan[0]
 	if external.APIPath != "kv/data/guardian/guardian-mgmt/external-dns/cloudflare" {
@@ -72,7 +74,19 @@ func TestImportPlan(t *testing.T) {
 	if !strings.Contains(strings.Join(paths, "\n"), "operator/r2") {
 		t.Fatalf("operator r2 path missing from %#v", paths)
 	}
-	promotion := plan[3]
+	backups := plan[3]
+	if backups.APIPath != "kv/data/guardian/guardian-mgmt/tenant-root/backups-r2" {
+		t.Fatalf("backups path = %q", backups.APIPath)
+	}
+	// Key names are the backupstrategy-controller's flat-key credentials
+	// contract; the tenant-root ExternalSecret maps them 1:1.
+	if backups.Data["accessKey"] != "backups-access" || backups.Data["secretKey"] != "backups-secret" {
+		t.Fatalf("backups keypair = %#v", backups.Data)
+	}
+	if backups.Data["endpoint"] != "r2-endpoint" || backups.Data["bucketName"] != "guardian-backups" {
+		t.Fatalf("backups coordinates = %#v", backups.Data)
+	}
+	promotion := plan[4]
 	if promotion.APIPath != "kv/data/guardian/guardian-mgmt/company-site/promotion/github-app" {
 		t.Fatalf("promotion path = %q", promotion.APIPath)
 	}
@@ -103,8 +117,8 @@ func TestImportPlanOptionalKeycloakStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 7 {
-		t.Fatalf("plan length = %d, want 7 (5 base + beta + prod)", len(plan))
+	if len(plan) != 8 {
+		t.Fatalf("plan length = %d, want 8 (6 base + beta + prod)", len(plan))
 	}
 	byPath := map[string]secretWrite{}
 	for _, w := range plan {

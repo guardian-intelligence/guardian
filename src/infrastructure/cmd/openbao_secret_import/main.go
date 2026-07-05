@@ -232,6 +232,8 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 		"cloudflare_r2_secret_access_key",
 		"cloudflare_r2_s3_api_endpoint",
 		"cloudflare_r2_access_key_id",
+		"cloudflare_r2_backups_access_key_id",
+		"cloudflare_r2_backups_secret_access_key",
 		"cloudflare_guardian_intelligence_org_dnz_zone_api_token",
 		"cloudflare_external_dns_api_token",
 		"cloudflare_dns_lb_provisioner_api_token",
@@ -281,6 +283,22 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 				"cloudflare_r2_api_token":         env["cloudflare_r2_api_token"],
 				"cloudflare_r2_s3_api_endpoint":   env["cloudflare_r2_s3_api_endpoint"],
 				"cloudflare_r2_secret_access_key": env["cloudflare_r2_secret_access_key"],
+			},
+		},
+		// Cozystack platform backup storage: the S3 keypair of the
+		// bucket-scoped guardian-backups token (Object Read & Write on that
+		// one bucket, nothing else). Key names here ARE the flat-key format
+		// the backupstrategy-controller's credentials projector consumes, so
+		// the ExternalSecret in tenant-root maps them 1:1 into
+		// Secret/guardian-backups-creds. endpoint/bucketName are identifiers,
+		// not secrets; they ride along so the projected Secret is complete.
+		{
+			APIPath: "kv/data/guardian/guardian-mgmt/tenant-root/backups-r2",
+			Data: map[string]string{
+				"accessKey":  env["cloudflare_r2_backups_access_key_id"],
+				"secretKey":  env["cloudflare_r2_backups_secret_access_key"],
+				"endpoint":   env["cloudflare_r2_s3_api_endpoint"],
+				"bucketName": "guardian-backups",
 			},
 		},
 		{

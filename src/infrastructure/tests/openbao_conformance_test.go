@@ -285,6 +285,8 @@ func TestOpenBaoOperationsInventoryConformance(t *testing.T) {
 		"external_dns",
 		"company_site",
 		"guardian_iam",
+		"guardian_analytics",
+		"tenant_root",
 		"tenant_guardian_beta",
 		"tenant_guardian_gamma",
 		"tenant_guardian_prod",
