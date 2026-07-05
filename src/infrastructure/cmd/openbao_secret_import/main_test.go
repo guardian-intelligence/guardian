@@ -86,6 +86,9 @@ func TestImportPlan(t *testing.T) {
 	if backups.Data["endpoint"] != "r2-endpoint" || backups.Data["bucketName"] != "guardian-backups" {
 		t.Fatalf("backups coordinates = %#v", backups.Data)
 	}
+	if backups.Data["region"] != "auto" {
+		t.Fatalf("backups region = %q, want auto (clickhouse-backup sidecar reads it via secretKeyRef)", backups.Data["region"])
+	}
 	promotion := plan[4]
 	if promotion.APIPath != "kv/data/guardian/guardian-mgmt/company-site/promotion/github-app" {
 		t.Fatalf("promotion path = %q", promotion.APIPath)

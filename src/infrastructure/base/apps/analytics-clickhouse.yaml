@@ -54,9 +54,24 @@ spec:
   # section of runbooks/postgres-backup-restore.md's sibling procedure).
   users:
     ingest: {}
+  # Chart bug workaround #2 (v1.5.0): backup.useSystemBucket is broken for
+  # any https external S3 — the platform credentials projector strips the
+  # scheme off the projected `endpoint` key (SeaweedFS-era assumption) and
+  # clickhouse-backup's AWS SDK rejects the schemeless URI outright
+  # ("was not a valid URI", hit live on the first BackupJob). Until the
+  # projector preserves the scheme, point the sidecar directly at the same
+  # ESO-materialized guardian-backups-creds Secret the platform itself is
+  # fed from (full https endpoint; key names match the chart defaults) and
+  # pin s3PathOverride to the exact <namespace>/<release> prefix the
+  # useSystemBucket flow would have used, so flipping back later is a
+  # values-only change with no data movement. Same cozy-default Plan and
+  # Altinity strategy drive the sidecar either way.
   backup:
     enabled: true
-    useSystemBucket: true
+    useSystemBucket: false
+    s3PathOverride: tenant-root/analytics
+    s3CredentialsSecret:
+      name: guardian-backups-creds
   clickhouseKeeper:
     enabled: true
     replicas: 3
