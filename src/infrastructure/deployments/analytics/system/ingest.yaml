@@ -51,8 +51,11 @@ spec:
           env:
             - name: CLICKHOUSE_ADDR
               value: clickhouse-analytics.guardian-analytics.svc.cozy.local:9000
-            # Bare host:port (not a URL): every Publish RPC is exported as a
-            # span to the in-namespace collector. Unset ⇒ tracing no-ops.
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: analytics-clickhouse-users
+                  key: ingest
             - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
               value: otel-collector.guardian-analytics.svc.cozy.local:4317
           ports:

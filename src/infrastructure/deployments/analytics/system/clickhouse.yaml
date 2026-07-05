@@ -76,19 +76,13 @@ spec:
     profiles:
       readonly/readonly: "1"
     users:
-      # The operator pins the default user to the CHI's own pods, so
-      # same-namespace clients (DDL job, ingest service) authenticate as
-      # `ingest`. Passwordless by design for now: the Cilium policy in
-      # networkpolicy.yaml is the access boundary (in-cluster only,
-      # enumerated peers); a custody-managed password arrives with the
-      # OpenBao scope for this namespace (k8s_secret_password_sha256_hex),
-      # at which point this line changes rather than the topology.
-      # Expressed as the sha256 of the empty string because the operator's
-      # normalizer substitutes its configured default password for any
-      # non-default user with an EMPTY plaintext password — an explicit
-      # sha256 hash is kept verbatim.
+      # Password from the namespace-local Secret (credentials.yaml).
       ingest/networks/ip: ["::/0"]
-      ingest/password_sha256_hex: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+      ingest/password:
+        valueFrom:
+          secretKeyRef:
+            name: analytics-clickhouse-users
+            key: ingest
       ingest/profile: default
       ingest/quota: default
   defaults:
