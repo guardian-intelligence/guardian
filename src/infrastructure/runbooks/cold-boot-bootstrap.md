@@ -415,10 +415,15 @@ deleted mid-ingest lost zero acknowledged rows). Cold-boot notes:
 
 ## Aftermath
 
-1. `aspect infra edge-health` (expect all targets green) and
-   `aspect infra dns-apply --mode plan` with `CLOUDFLARE_API_TOKEN` set from
-   the dns-lb-provisioner key (expect zero infrastructure changes — node IPs
-   are unchanged).
+1. `aspect infra edge-health` (expect all targets green) and, with
+   `CLOUDFLARE_API_TOKEN` set from the dns-lb-provisioner key,
+   `aspect infra tofu-init --root guardian-mgmt-dns` followed by
+   `bazelisk run @opentofu_linux_amd64//:tofu_bin -- -chdir=src/infrastructure/bootstrap/guardian-mgmt-dns plan -input=false -var-file=src/infrastructure/bootstrap/backend.tfvars`
+   (expect zero infrastructure changes — node IPs are unchanged). DNS records
+   themselves are owned by the in-cluster `external-dns` controller, not this
+   root; this plan only covers the Cloudflare Load Balancer pool/monitor
+   objects, which is why it stays raw OpenTofu rather than an `aspect`
+   subcommand.
 2. **Re-scrape `src/infrastructure/bootstrap/bundle/images.lock`** from the live cluster (workload section from
    pod imageIDs; kubelet/etcd from `talosctl image ls --namespace system`) and
    PR it.

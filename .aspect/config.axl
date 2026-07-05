@@ -19,7 +19,6 @@ load(
     infra_bootstrap = "bootstrap",
     infra_bundle = "bundle",
     infra_converged = "converged",
-    infra_dns_apply = "dns_apply",
     infra_edge_failover_drill = "edge_failover_drill",
     infra_edge_health = "edge_health",
     infra_kubeconfig = "kubeconfig",
@@ -54,7 +53,6 @@ def config(ctx):
     ctx.tasks.add(infra_bootstrap)
     ctx.tasks.add(infra_bundle)
     ctx.tasks.add(infra_converged)
-    ctx.tasks.add(infra_dns_apply)
     ctx.tasks.add(infra_edge_failover_drill)
     ctx.tasks.add(infra_edge_health)
     ctx.tasks.add(infra_kubeconfig)

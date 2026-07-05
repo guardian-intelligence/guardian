@@ -653,33 +653,6 @@ def _tofu_init_impl(ctx):
         return 1
     return _tofu_backend_init(ctx, roots, endpoint)
 
-def _dns_apply_impl(ctx):
-    if ctx.args.mode not in ["plan", "apply"]:
-        ctx.std.io.stderr.write("ERROR: --mode must be plan or apply\n")
-        return 1
-
-    endpoint = _tofu_backend_endpoint(ctx, ctx.args.endpoint)
-    if endpoint == None:
-        return 1
-    rc = _tofu_backend_init(ctx, [(GUARDIAN_MGMT_DNS_ROOT, "guardian-mgmt-dns")], endpoint)
-    if rc != 0:
-        return rc
-
-    tofu_args = [
-        ctx.args.mode,
-        "-input=false",
-        "-var-file=" + ws_path(ctx, GUARDIAN_BACKEND_TFVARS),
-    ]
-    if ctx.args.mode == "apply":
-        tofu_args.append("-auto-approve")
-
-    return _tofu_root(
-        ctx,
-        GUARDIAN_MGMT_DNS_ROOT,
-        tofu_args,
-        "tofu " + ctx.args.mode + " guardian-mgmt-dns",
-    )
-
 def _require_talm_operator_state(ctx, root):
     missing = []
     for filename in [
@@ -1586,17 +1559,6 @@ tofu_init = task(
     args = {
         "endpoint": args.string(default = "", description = "Optional S3-compatible backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
         "root": args.string(default = "all", description = "OpenTofu root to initialize: all, guardian-mgmt, or guardian-mgmt-dns."),
-    },
-)
-
-dns_apply = task(
-    implementation = _dns_apply_impl,
-    name = "dns-apply",
-    group = ["infra"],
-    summary = "Plan or apply public guardian-mgmt DNS records through OpenTofu.",
-    args = {
-        "endpoint": args.string(default = "", description = "Optional S3-compatible backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
-        "mode": args.string(default = "plan", description = "OpenTofu operation: plan or apply."),
     },
 )
 
