@@ -145,7 +145,7 @@ Important context:
 </development_loop>
 
 Constraints:
-- Secrets must be autoprovisioned/autorotated.
+- Secrets must be autoprovisioned/autorotated. To safely configure secrets per-environment, read `docs/secrets.md`.
 - Cozystack 1.5 backups use the platform-managed `cozy-default` BackupClass  and system bucket. Do not add Guardian-specific backup strategies, backup credential Secrets, or checks.
 - Traces are the only admissable proof -- ClickHouse (when stood up), Victoria Metrics, Victoria Logs. Collect traces/spans and relevant log lines to support your thesis that your task is complete to satisfaction. Test services under heavy load via k6 to surface subtle bugs.
 
