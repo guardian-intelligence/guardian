@@ -29,6 +29,7 @@ let seq = 0;
 let pending: WireEvent[] = [];
 let timer: ReturnType<typeof setInterval> | undefined;
 let started = false;
+let replaying = false;
 
 function lowData(): boolean {
   const c = (navigator as { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
@@ -111,7 +112,11 @@ function takeBatch(): WireEvent[] {
 function persist(events: WireEvent[]): void {
   try {
     const stored: WireEvent[] = JSON.parse(localStorage.getItem(LS_KEY) ?? "[]");
-    const merged = stored.concat(events);
+    // offsetMs is relative to THIS page's performance.now() origin; once it
+    // survives to another page load that timeline is gone, so drop it —
+    // session_seq still orders the events.
+    const durable = events.map(({ offsetMs: _drop, ...rest }) => rest);
+    const merged = stored.concat(durable);
     localStorage.setItem(LS_KEY, JSON.stringify(merged.slice(-LS_CAP)));
   } catch {
     // storage denied/full: drop (best-effort)
@@ -147,6 +152,10 @@ function flush(sync = false): void {
 }
 
 function replay(): void {
+  // 'online' can fire repeatedly on flaky links; without this guard each
+  // firing re-POSTs the same batch (ingest does not dedup) before the first
+  // success clears it.
+  if (replaying) return;
   let stored: WireEvent[];
   try {
     stored = JSON.parse(localStorage.getItem(LS_KEY) ?? "[]");
@@ -154,23 +163,31 @@ function replay(): void {
     return;
   }
   if (!Array.isArray(stored) || stored.length === 0) return;
+  replaying = true;
+  const sentCount = Math.min(stored.length, BATCH_CAP);
   fetch(ENDPOINT, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: body(stored.slice(0, BATCH_CAP)),
+    body: body(stored.slice(0, sentCount)),
     priority: "low",
   } as RequestInit).then(
     (res) => {
-      if (res.ok) {
-        try {
-          localStorage.removeItem(LS_KEY);
-        } catch {
-          // ignore
-        }
+      replaying = false;
+      if (!res.ok) return;
+      // Re-read rather than removeItem: persist() only ever appends, so the
+      // snapshot we sent is a prefix — drop exactly it, keeping anything
+      // persisted concurrently during the request.
+      try {
+        const cur: WireEvent[] = JSON.parse(localStorage.getItem(LS_KEY) ?? "[]");
+        const rest = cur.slice(sentCount);
+        if (rest.length === 0) localStorage.removeItem(LS_KEY);
+        else localStorage.setItem(LS_KEY, JSON.stringify(rest));
+      } catch {
+        // ignore
       }
     },
     () => {
-      // still offline; next load/online retries
+      replaying = false; // still offline; next load/online retries
     },
   );
 }
