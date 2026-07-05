@@ -60,7 +60,7 @@ function toWire(e: TelemetryEvent, nowPerf: number): WireEvent {
   };
   if (referrer) w.referrer = referrer;
   if (e.name.startsWith("web_vital.")) {
-    w.vitalName = rest["web_vital.name"];
+    w.vitalName = rest["web_vital.name"] ?? "";
     w.vitalValue = Number(rest["web_vital.value"]) || 0;
     delete rest["web_vital.name"];
     delete rest["web_vital.value"];
@@ -98,6 +98,7 @@ function takeBatch(): WireEvent[] {
   let bytes = 64;
   while (pending.length > 0 && batch.length < BATCH_CAP) {
     const next = pending[0];
+    if (next === undefined) break;
     const cost = JSON.stringify(next).length + 1;
     if (batch.length > 0 && bytes + cost > BYTE_CAP) break;
     batch.push(next);
