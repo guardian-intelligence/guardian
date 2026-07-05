@@ -155,9 +155,12 @@ jobs:
         if: steps.classify.outputs.build == 'true'
         working-directory: src/products/viteplus-monorepo/apps/guardianintelligence-web
         run: |
-          npm install --no-save playwright@1.61.1
-          npx playwright install --with-deps chromium firefox webkit
-          BASE=http://127.0.0.1:8080 node perf/scroll-jank-gate.mjs
+          # --prefix installs into an isolated tree instead of `npm install`
+          # in this directory, which would read this app's package.json and
+          # choke on pnpm's `catalog:` protocol in its dependency versions.
+          npm install --no-save --prefix /tmp/perf-gate-deps playwright@1.61.1
+          NODE_PATH=/tmp/perf-gate-deps/node_modules /tmp/perf-gate-deps/node_modules/.bin/playwright install --with-deps chromium firefox webkit
+          NODE_PATH=/tmp/perf-gate-deps/node_modules BASE=http://127.0.0.1:8080 node perf/scroll-jank-gate.mjs
 
       - name: Stop perf-gate container
         if: always() && steps.classify.outputs.build == 'true'
