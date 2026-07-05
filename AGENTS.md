@@ -7,8 +7,8 @@ The purpose is to create a free and open-source system for any being to convert 
 * Repo ships specific products within the architecture. First major product: Verself (reference Blacksmith.sh)
 * Airgapped hermetically-sealed come up done through images.lock + Rancher Hauler + Sidero Labs `talm` for Talos on bare metal soil (currently Latitude.sh)
 * DNS managed through Cloudflare. TLS terminates at Cloudflare edge. Cloudflare LB for the three control plane nodes. [206.223.228.101, 45.250.254.119, 206.223.228.87].
-* Cozystack tenancy - `guardian` tenant for product workloads, product databases, shared business logic, services, split per stage (gamma, beta, prod). `tenant-root` is the required Cozystack root/admin tenant for a regional management cluster. Cozystack packages/operators, Flux handoff, storage classes, COSI/BackupClass/system bucket, root ingress/load-balancer substrate, root infrastructure monitoring, child Tenant CRs, and cluster-wide policy go in `tenant-root`.
-* Today the active region is Latitude ASH (`ash`). The active management control plane is the `guardian-mgmt` Kubernetes cluster. Its Kubernetes API endpoint is the private VLAN VIP `https://10.8.0.250:6443`. Reference files:
+* Cozystack tenancy - `guardian` tenant for product workloads, product databases, shared business logic, services, split per stage (gamma, beta, prod). `tenant-root` is the required Cozystack root/admin tenant for a regional management cluster. Cozystack packages/operators, Flux handoff, storage classes, BackupClass, root ingress/load-balancer substrate, root infrastructure monitoring, child Tenant CRs, and cluster-wide policy go in `tenant-root`.
+* Single region right now (`ash` Ashburn, Virginia Latitude region). The active management control plane is the `guardian-mgmt` Kubernetes cluster. Its Kubernetes API endpoint is the private VLAN VIP `https://10.8.0.250:6443`. Reference files:
   - `src/infrastructure/bootstrap/guardian-mgmt/main.tf`
   - `src/infrastructure/talm/values.yaml`
   - `src/infrastructure/base/cozystack/platform.yaml`
@@ -21,12 +21,14 @@ The purpose is to create a free and open-source system for any being to convert 
   - beta: https://beta.guardianintelligence.org/realms/verself/broker/github/endpoint
   - gamma: https://gamma.guardianintelligence.org/realms/verself/broker/github/endpoint
   - prod: https://guardianintelligence.org/realms/verself/broker/github/endpoint
+- API IDL in Buf/Connect + (AIP-193). Declare each operation's policy surface (e.g. required permission, idempotency key, request-size, rate-limit class, audit level) outside of the core event contract as method-options metadata on the RPC contract. We need to be able to fine tune operational characterstics that don't break the schema. See `src/proto/guardian`. `connect.Interceptor`s enforce it fails-closed.
 * VictoriaLogs for logs. VictoriaMetrics for Metrics. TigerBeetle for financial truth and OLTP (planned). ClickHouse for analytics and Otel correlations/traces/spans. CNPG (single writer per stage, fan out read replicas) for system stage and misc.
 * Bazel owns the build graph and produces bytes using OCI for layout. `cosign`/SLSA proves that it's authentic Guardian Intelligence LLC software.
 * Runtime technology inventory: `src/infrastructure/bootstrap/bundle/images.lock` is what runs (digest-pinned, conformance-tested); `src/tools/` is what we operate with (pinned CLIs: talm, talosctl, flux, kubectl, hauler, openbao, oras, k6); `MODULE.bazel` is what we build with.
-* Flagger used for blue/green deployments (Keycloak).
+* Flagger used for blue/green deployments for Keycloak (see `src/infrastructure/deployments/iam/`). Canary releases for non-tier-1 service components.
 * Kargo for deployment promotions from beta -> gamma -> prod. GitHub app configured for auto-commits. Release channels for distributed binaries: Edge (CD on main), nightly, RC, stable.
 * Domain: guardianintelligence.org (abbreviated in conversation with user as "gi.org")
+* Object Storage is handled by R2, including backups. Fully bare metal topology on NVME so it makes no economical sense to reserve expensive fast drives for object storage. No SeaweedFS.
 
 <repo_shape>
 The below is the target shape -- repo still changing and does not match this quite yet
@@ -125,7 +127,6 @@ Important context:
 - Cold-bootstrap trust model: the local checkout, its Bazel-built artifacts, and the operator custody bundle (static seal key + the operator env file) are everything a from-nothing bring-up may require. Bootstrap-only compromises are allowed, but the cluster must converge to the declared steady state afterward.
 - Dev tools: `aspect`. Run `aspect tidy` to format the codebase.
 - Don't use CUE. Avoid custom schemas, protocols, shell scripts, contracts. Lean towards production-ready implementations for CRDs and ensure Flux-operated Kubernetes can converge state without making CLI execution a second control plane.
-- API IDL in Protobuf/Connect. Define IAM, audit, risk, request-size, rate limit, and idempotency metadata as explicit operation policy on the RPC contract.
 - Protobuf governance uses the repo-pinned Buf toolchain through Bazel: linting, formatting, and breaking-change checks run from `rules_buf`; code generation uses local pinned generators only. Do not use Buf remote plugins in build/test/release paths.
 - All operations must run unattended, no human-in-the-loop.
 - Invent nothing. If we write our own code, it should be glue code over existing libraries and apeing reference implementations of solutions to problems only. Always do the boring industry-standard thing. Component choices are made by bake-off: candidates researched, losers rejected with recorded reasons, the winner pinned (the Hauler decision is the template). Months spent recreating an existing tool poorly is the cardinal failure mode.
@@ -143,7 +144,7 @@ Important context:
 
 Constraints:
 - Secrets must be autoprovisioned/autorotated. To safely configure secrets per-environment, read `docs/secrets.md`.
-- Cozystack 1.5 backups use the platform-managed `cozy-default` BackupClass  and system bucket. Do not add Guardian-specific backup strategies, backup credential Secrets, or checks.
+- Database backups target off-cluster Cloudflare R2 through Cozystack's platform backup machinery (path pending; no in-cluster object storage exists to back up to). Do not add Guardian-specific backup strategies, backup credential Secrets, or checks.
 - Traces are the only admissable proof -- ClickHouse (when stood up), Victoria Metrics, Victoria Logs. Collect traces/spans and relevant log lines to support your thesis that your task is complete to satisfaction. Test services under heavy load via k6 to surface subtle bugs.
 
 Service architecture:
