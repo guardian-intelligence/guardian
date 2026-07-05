@@ -3,6 +3,7 @@ load("@rules_go//go:def.bzl", "go_test")
 go_test(
     name = "talm_render_test",
     srcs = [
+        "analytics_ddl_conformance_test.go",
         "images_lock_test.go",
         "openbao_conformance_test.go",
         "talm_render_test.go",
@@ -21,9 +22,11 @@ go_test(
         "//src/infrastructure/base/secrets:manifests",
         "//src/infrastructure/base/storage:manifests",
         "//src/infrastructure/base/tenants:manifests",
+        "//src/infrastructure/analytics:events_table_sql",
         "//src/infrastructure/bootstrap/bundle:images_lock",
         "//src/infrastructure/bootstrap/sync-dark:manifests",
         "//src/infrastructure/bootstrap/sync-steady:manifests",
+        "//src/infrastructure/deployments/analytics/system:manifests",
         "//src/infrastructure/deployments/company/previews:manifests",
         "//src/infrastructure/deployments/company/prod:manifests",
         "//src/infrastructure/deployments/guardian/flagger:manifests",
