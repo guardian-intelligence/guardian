@@ -290,6 +290,29 @@
   }
 }
 
+/* The salutation used to carry its own view-transition-name, cross-fading
+   in on --letter-spring-reveal like the date. That curve is heavily
+   eased-in (~5-18% opacity through the first 10-15% of its 900ms run) --
+   fine for the date, whose big position/scale tween is what the eye
+   actually follows, but for the salutation (no meaningful position change
+   of its own) that slow ramp read as invisible-then-a-sudden-pop, arriving
+   well after the date had already settled. Recorded on video
+   (perf/transition-video.mjs): "Dear Shovon," was absent from the frame at
+   t+40ms and popped in whole around t+150-200ms. Plain, fast, ease-out
+   entrance instead -- moves in step with the date rather than lagging
+   behind it on a separate, slower clock. */
+@keyframes letter-salutation-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @keyframes letter-continuation-unfurl {
   from {
     opacity: 0;
@@ -346,6 +369,10 @@
 
   :root::view-transition-new(letter-return) {
     animation: letter-return-in var(--letter-return-fade-duration) var(--letter-spring-reveal) both;
+  }
+
+  [data-letter-transition-route="post"] [data-letter-slot="salutation"] {
+    animation: letter-salutation-reveal 260ms ease-out both;
   }
 }
 

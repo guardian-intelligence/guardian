@@ -72,7 +72,7 @@ function LetterEntry({ letter, morph }: { letter: Letter; morph: boolean }) {
     >
       <div style={{ margin: 0 }}>
         <LetterDate letter={letter} scale="index" morph={morph} />
-        <LetterSalutation letter={letter} morph={morph} />
+        <LetterSalutation letter={letter} />
         <LetterExcerpt letter={letter} excerpt={excerpt} morph={morph} />
         <div className="mt-8 flex justify-end">
           <span className="font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--treatment-muted-meta)] underline decoration-[var(--treatment-rule-color)] decoration-[1px] underline-offset-[6px]">
