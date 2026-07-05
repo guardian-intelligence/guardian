@@ -59,6 +59,19 @@ data:
       ],
       "clients": [
         {
+          "clientId": "verself-web",
+          "name": "Verself web (placeholder OOBE)",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": true,
+          "standardFlowEnabled": true,
+          "directAccessGrantsEnabled": false,
+          "implicitFlowEnabled": false,
+          "serviceAccountsEnabled": false,
+          "redirectUris": ["https://guardianintelligence.org/verself", "https://guardianintelligence.org/verself/*", "https://beta.guardianintelligence.org/verself", "https://beta.guardianintelligence.org/verself/*"],
+          "webOrigins": ["https://beta.guardianintelligence.org", "https://guardianintelligence.org"]
+        },
+        {
           "clientId": "canary",
           "name": "Synthetic login checks (Flagger gate + k6 canary)",
           "enabled": true,

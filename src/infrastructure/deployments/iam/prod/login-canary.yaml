@@ -1,0 +1,340 @@
+# Minutely synthetic login canary (k6). Three flows, per Shovon's directive
+# (2026-07-05), synthetic until a real GitHub test account exists — the full
+# browser OOBE canary (real GitHub login + API-driven state wipe including
+# the GitHub grant) replaces flow coverage here later:
+#   1. existing-user happy path — direct-grant login as the permanent canary
+#      realm user against the in-cluster apex Service (the exact primary
+#      path users hit, minus the edge, which edge-health covers);
+#   2. new-user happy path — create a fresh user via the admin API, first
+#      login, land on the Verself OOBE placeholder page, then wipe the user
+#      (the wipe is what makes every run a true first-time signup);
+#   3. cancellation — the OIDC auth page must render with the GitHub IdP
+#      link, and a brokered cancel callback (GitHub redirecting back with
+#      error=access_denied) must be handled gracefully, never a 5xx.
+# Results remote-write to VictoriaMetrics as k6_canary_* series tagged with
+# stage; VMRule alerts live in observability.yaml.
+#
+# The new-user flow uses the bootstrap-admin credential (already present in
+# this namespace) — narrow to a dedicated service-account client with only
+# manage-users once realm config management (post-import upserts) lands.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-login-canary
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: keycloak-login-canary
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+  annotations:
+    # k6 JS template literals use ${...}; Flux envsubst must not touch them.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  login-canary.js: |
+    import http from 'k6/http';
+    import { check } from 'k6';
+    import { Counter } from 'k6/metrics';
+
+    const failures = new Counter('canary_failures');
+    const successes = new Counter('canary_success');
+
+    export const options = {
+      iterations: 1,
+      thresholds: { canary_failures: ['count<1'] },
+    };
+
+    const KC = __ENV.KC_INTERNAL;
+    const PUB = __ENV.PUBLIC_BASE;
+    const OOBE = __ENV.OOBE_URL;
+
+    function flow(name, fn) {
+      let ok = false;
+      try {
+        ok = fn();
+      } catch (e) {
+        console.error(`${name}: ${e}`);
+      }
+      (ok ? successes : failures).add(1, { flow: name });
+    }
+
+    function tokenRequest(realmURL, body) {
+      return http.post(`${realmURL}/protocol/openid-connect/token`, body);
+    }
+
+    function existingUser() {
+      const res = tokenRequest(`${KC}/realms/verself`, {
+        grant_type: 'password',
+        client_id: 'canary',
+        username: __ENV.CANARY_USERNAME,
+        password: __ENV.CANARY_PASSWORD,
+      });
+      return check(res, {
+        'existing-user: token issued': (r) =>
+          r.status === 200 && r.json('access_token') !== undefined,
+      });
+    }
+
+    function adminHeaders() {
+      const res = tokenRequest(`${KC}/realms/master`, {
+        grant_type: 'password',
+        client_id: 'admin-cli',
+        username: __ENV.KC_ADMIN_USERNAME,
+        password: __ENV.KC_ADMIN_PASSWORD,
+      });
+      if (res.status !== 200) throw new Error(`admin token: ${res.status}`);
+      return {
+        headers: {
+          Authorization: `Bearer ${res.json('access_token')}`,
+          'Content-Type': 'application/json',
+        },
+      };
+    }
+
+    function wipeNewUser(base, auth) {
+      const found = http.get(`${base}/users?username=canary-newuser&exact=true`, auth);
+      let wiped = true;
+      for (const u of found.json() || []) {
+        wiped = http.del(`${base}/users/${u.id}`, null, auth).status === 204 && wiped;
+      }
+      return wiped;
+    }
+
+    function newUser() {
+      const auth = adminHeaders();
+      const base = `${KC}/admin/realms/verself`;
+      wipeNewUser(base, auth); // clear residue from any previous failed run
+      const created = http.post(
+        `${base}/users`,
+        JSON.stringify({
+          username: 'canary-newuser',
+          enabled: true,
+          emailVerified: true,
+          firstName: 'Synthetic',
+          lastName: 'NewUser',
+          email: 'canary-newuser@guardianintelligence.org',
+          credentials: [
+            { type: 'password', value: __ENV.CANARY_PASSWORD, temporary: false },
+          ],
+        }),
+        auth,
+      );
+      const login = tokenRequest(`${KC}/realms/verself`, {
+        grant_type: 'password',
+        client_id: 'canary',
+        username: 'canary-newuser',
+        password: __ENV.CANARY_PASSWORD,
+      });
+      const oobe = http.get(OOBE);
+      const wiped = wipeNewUser(base, auth);
+      return check(
+        { created, login, oobe, wiped },
+        {
+          'new-user: created': (o) => o.created.status === 201,
+          'new-user: first login': (o) =>
+            o.login.status === 200 && o.login.json('access_token') !== undefined,
+          'new-user: OOBE page served': (o) =>
+            o.oobe.status === 200 && o.oobe.body.includes('data-verself-oobe'),
+          'new-user: state wiped': (o) => o.wiped === true,
+        },
+      );
+    }
+
+    function cancellation() {
+      const authPage = http.get(
+        `${PUB}/realms/verself/protocol/openid-connect/auth` +
+          `?client_id=verself-web&redirect_uri=${encodeURIComponent(OOBE)}` +
+          `&response_type=code&scope=openid`,
+      );
+      const cancel = http.get(
+        `${PUB}/realms/verself/broker/github/endpoint?error=access_denied&state=synthetic-cancel`,
+      );
+      return check(
+        { authPage, cancel },
+        {
+          'cancellation: auth page renders with GitHub IdP': (o) =>
+            o.authPage.status === 200 && o.authPage.body.includes('broker/github'),
+          'cancellation: brokered cancel is not a server error': (o) =>
+            o.cancel.status < 500,
+        },
+      );
+    }
+
+    export default function () {
+      flow('existing-user', existingUser);
+      flow('new-user', newUser);
+      flow('cancellation', cancellation);
+    }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: keycloak-login-canary
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: keycloak-login-canary
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  schedule: "* * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 55
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: keycloak-login-canary
+            app.kubernetes.io/part-of: guardian
+            guardian.dev/stage: prod
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 12345
+            runAsGroup: 12345
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: k6
+              image: grafana/k6@sha256:68e78d94140704ec4ee0cb7c5cf6cd12a32b7d310a6f98d94931ee9b0b9dc629 # 2.1.0
+              imagePullPolicy: IfNotPresent
+              args:
+                - run
+                - --tag
+                - stage=prod
+                - -o
+                - experimental-prometheus-rw
+                - /scripts/login-canary.js
+              env:
+                - name: KC_INTERNAL
+                  value: http://keycloak.tenant-guardian-prod.svc
+                - name: PUBLIC_BASE
+                  value: https://guardianintelligence.org
+                - name: OOBE_URL
+                  value: https://guardianintelligence.org/verself
+                - name: K6_PROMETHEUS_RW_SERVER_URL
+                  value: http://vminsert-shortterm.tenant-root.svc:8480/insert/0/prometheus/api/v1/write
+                - name: CANARY_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: keycloak-canary-user
+                      key: username
+                - name: CANARY_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: keycloak-canary-user
+                      key: password
+                - name: KC_ADMIN_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: keycloak-admin-bootstrap
+                      key: username
+                - name: KC_ADMIN_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: keycloak-admin-bootstrap
+                      key: password
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                  ephemeral-storage: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+                  ephemeral-storage: 256Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+          volumes:
+            - name: scripts
+              configMap:
+                name: keycloak-login-canary
+---
+# Canary pod flows: keycloak in-namespace, the public edge (auth page,
+# OOBE placeholder, broker cancel callback — all through Cloudflare), DNS,
+# and the VictoriaMetrics remote-write ingester in tenant-root.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: keycloak-login-canary
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: keycloak-login-canary
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: keycloak-login-canary
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values:
+                - keycloak
+                - keycloak-primary
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            k8s:app.kubernetes.io/name: vminsert
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+# Ingress half of the remote-write path: tenant-root's generated isolation
+# does not admit grandchild-tenant namespaces (same reason as the
+# root-ingress pair); admit exactly the canary pods to vminsert.
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-root-vminsert-from-keycloak-login-canary-prod
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: verself
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-root
+      k8s:app.kubernetes.io/name: vminsert
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-guardian-prod
+            k8s:app.kubernetes.io/name: keycloak-login-canary
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
