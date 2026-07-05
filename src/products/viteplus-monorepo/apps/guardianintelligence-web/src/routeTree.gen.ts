@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as VerselfRouteImport } from './routes/verself'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as MetricsRouteImport } from './routes/metrics'
 import { Route as LivezRouteImport } from './routes/livez'
@@ -36,6 +37,11 @@ import { Route as WorkshopDesignNewsroomRouteImport } from './routes/_workshop/d
 import { Route as WorkshopDesignLettersRouteImport } from './routes/_workshop/design/letters'
 import { Route as ApiOtelV1TracesRouteImport } from './routes/api/otel/v1/traces'
 
+const VerselfRoute = VerselfRouteImport.update({
+  id: '/verself',
+  path: '/verself',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
   id: '/sitemap.xml',
   path: '/sitemap.xml',
@@ -174,6 +180,7 @@ export interface FileRoutesByFullPath {
   '/livez': typeof LivezRoute
   '/metrics': typeof MetricsRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/verself': typeof VerselfRoute
   '/design': typeof WorkshopDesignRouteRouteWithChildren
   '/careers': typeof WorkshopCareersRoute
   '/changelog': typeof WorkshopChangelogRoute
@@ -198,6 +205,7 @@ export interface FileRoutesByTo {
   '/livez': typeof LivezRoute
   '/metrics': typeof MetricsRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/verself': typeof VerselfRoute
   '/careers': typeof WorkshopCareersRoute
   '/changelog': typeof WorkshopChangelogRoute
   '/company': typeof WorkshopCompanyRoute
@@ -226,6 +234,7 @@ export interface FileRoutesById {
   '/livez': typeof LivezRoute
   '/metrics': typeof MetricsRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/verself': typeof VerselfRoute
   '/_workshop/design': typeof WorkshopDesignRouteRouteWithChildren
   '/_workshop/careers': typeof WorkshopCareersRoute
   '/_workshop/changelog': typeof WorkshopChangelogRoute
@@ -256,6 +265,7 @@ export interface FileRouteTypes {
     | '/livez'
     | '/metrics'
     | '/sitemap.xml'
+    | '/verself'
     | '/design'
     | '/careers'
     | '/changelog'
@@ -280,6 +290,7 @@ export interface FileRouteTypes {
     | '/livez'
     | '/metrics'
     | '/sitemap.xml'
+    | '/verself'
     | '/careers'
     | '/changelog'
     | '/company'
@@ -307,6 +318,7 @@ export interface FileRouteTypes {
     | '/livez'
     | '/metrics'
     | '/sitemap.xml'
+    | '/verself'
     | '/_workshop/design'
     | '/_workshop/careers'
     | '/_workshop/changelog'
@@ -336,6 +348,7 @@ export interface RootRouteChildren {
   LivezRoute: typeof LivezRoute
   MetricsRoute: typeof MetricsRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
+  VerselfRoute: typeof VerselfRoute
   OgSlugRoute: typeof OgSlugRoute
   OgLetterSlugRoute: typeof OgLetterSlugRoute
   ApiOtelV1TracesRoute: typeof ApiOtelV1TracesRoute
@@ -343,6 +356,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/verself': {
+      id: '/verself'
+      path: '/verself'
+      fullPath: '/verself'
+      preLoaderRoute: typeof VerselfRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sitemap.xml': {
       id: '/sitemap.xml'
       path: '/sitemap.xml'
@@ -607,6 +627,7 @@ const rootRouteChildren: RootRouteChildren = {
   LivezRoute: LivezRoute,
   MetricsRoute: MetricsRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
+  VerselfRoute: VerselfRoute,
   OgSlugRoute: OgSlugRoute,
   OgLetterSlugRoute: OgLetterSlugRoute,
   ApiOtelV1TracesRoute: ApiOtelV1TracesRoute,
