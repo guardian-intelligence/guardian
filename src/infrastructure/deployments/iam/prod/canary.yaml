@@ -39,7 +39,12 @@ spec:
   analysis:
     interval: 30s
     threshold: 3
-    iterations: 5
+    # Deliberately tight for the initial stand-up (Shovon, 2026-07-05): a
+    # single passing iteration (one login-gate + one load run after the
+    # pre-rollout gate) promotes. Raise toward an industry-standard soak
+    # (e.g. iterations: 120 at 30s ~= 1h of steady canary successes) once
+    # the k6 canary and SLO metrics are feeding analysis.
+    iterations: 1
     webhooks:
       - name: login-gate
         type: pre-rollout
