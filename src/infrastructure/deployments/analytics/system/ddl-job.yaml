@@ -36,14 +36,21 @@ spec:
             - -ec
             - |
               host=clickhouse-analytics.guardian-analytics.svc.cozy.local
-              until clickhouse-client --host "$host" --user ingest --query "SELECT count() FROM system.clusters WHERE cluster = 'analytics'" | grep -q 3; do
-                echo "waiting for 3 cluster members"; sleep 5
+              # Every replica must see the full cluster, not just whichever
+              # one the Service routes to: the operator propagates
+              # remote_servers per-pod during rollout, and an ON CLUSTER DDL
+              # submitted through a replica with a partial view only reaches
+              # the hosts that replica knows (bit us live on first deploy).
+              # clusterAllReplicas errors while any host is unreachable,
+              # which the retry loop treats as not-ready.
+              until [ "$(clickhouse-client --host "$host" --user ingest --query "SELECT countIf(c = 3) FROM (SELECT hostName() AS h, count() AS c FROM clusterAllReplicas('analytics', system.clusters) WHERE cluster = 'analytics' GROUP BY h)" 2>/dev/null)" = "3" ]; do
+                echo "waiting for all 3 replicas to see the full cluster"; sleep 5
               done
               clickhouse-client --host "$host" --user ingest --receive_timeout 300 --queries-file /ddl/events.sql
               clickhouse-client --host "$host" --user ingest --query "EXISTS TABLE guardian_analytics.events"
           env:
             - name: GUARDIAN_DDL_REVISION
-              value: "1"
+              value: "2"
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

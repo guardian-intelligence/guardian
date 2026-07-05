@@ -7,3 +7,4 @@ resources:
   - ddl-configmap.yaml
   - ddl-job.yaml
   - networkpolicy.yaml
+  - ingest.yaml
