@@ -53,16 +53,37 @@ spec:
           logoText: Guardian
           brandName: Guardian
           brandHtmlName: "<b>Guardian</b>"
-    # Platform backup machinery pointed at off-cluster Cloudflare R2 (Guardian
-    # runs no in-cluster object storage; an in-cluster backup target would be
-    # circular). provisionBucket: false skips the COSI Bucket entirely and
-    # makes bucketName authoritative; guardian-backups-creds is materialized
-    # in tenant-root by ESO from OpenBao (flat keys accessKey/secretKey/
-    # endpoint/bucketName — base/secrets/backup-storage-credentials.yaml).
-    # The endpoint hostname carries the Cloudflare account ID: an identifier,
-    # not a credential — it appears in every R2 URL and is useless without
-    # the bucket-scoped token, which lives only in OpenBao/custody.
-    # R2 accepts path-style requests and the literal region "auto".
+    # MTU is set authoritatively on the kube-ovn Subnets in networking/subnet-mtu.yaml.
+---
+# Platform backup machinery pointed at off-cluster Cloudflare R2 (Guardian
+# runs no in-cluster object storage; an in-cluster backup target would be
+# circular). provisionBucket: false skips the COSI Bucket entirely and makes
+# bucketName authoritative; guardian-backups-creds is materialized in
+# tenant-root by ESO from OpenBao (flat keys accessKey/secretKey/endpoint/
+# bucketName — base/secrets/backup-storage-credentials.yaml).
+#
+# The override MUST live on this Package CR, not as a component of
+# cozystack.cozystack-platform: the package reconciler merges
+# spec.components[<name>].values only for components its own PackageSource
+# declares, and cozystack-platform declares exactly one component
+# ("platform") — a backupstrategy-controller key there is silently ignored
+# (verified against the v1.5.0 package_reconciler; the upstream
+# backup-classes.md example is wrong on this point). The platform bundle
+# renders this same Package CR with a bare spec; Helm's three-way merge
+# never strips spec.components because the bundle manifest doesn't carry
+# that field, so both owners coexist.
+#
+# The endpoint hostname carries the Cloudflare account ID: an identifier,
+# not a credential — it appears in every R2 URL and is useless without the
+# bucket-scoped token, which lives only in OpenBao/custody. R2 accepts
+# path-style requests and the literal region "auto".
+apiVersion: cozystack.io/v1alpha1
+kind: Package
+metadata:
+  name: cozystack.backupstrategy-controller
+spec:
+  variant: default
+  components:
     backupstrategy-controller:
       values:
         backupStorage:
@@ -72,4 +93,3 @@ spec:
           region: auto
           forcePathStyle: true
           systemSecretName: guardian-backups-creds
-    # MTU is set authoritatively on the kube-ovn Subnets in networking/subnet-mtu.yaml.
