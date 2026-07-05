@@ -1,0 +1,128 @@
+# The analytics ingest service: Connect Publish -> guardian_analytics.events.
+# Carries guardian.dev/role: analytics-client, which is the label the
+# ClickHouse Cilium policy admits on 8123/9000.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics-ingest
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: analytics-ingest
+    app.kubernetes.io/part-of: guardian
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: analytics-ingest
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: analytics-ingest
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/role: analytics-client
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: analytics-ingest
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: ingest
+          image: ghcr.io/guardian-intelligence/analytics-ingest@sha256:e44b53f843cd6a3df17e5544fe13ad17a49c25f4bb809ee89c3df407844c8d56
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: CLICKHOUSE_ADDR
+              value: clickhouse-analytics.guardian-analytics.svc.cozy.local:9000
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: analytics-ingest
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: analytics-ingest
+    app.kubernetes.io/part-of: guardian
+spec:
+  selector:
+    app.kubernetes.io/name: analytics-ingest
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: analytics-ingest
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: analytics-ingest
+    app.kubernetes.io/part-of: guardian
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: analytics-ingest
+---
+# /api/events on the SAME apex host company-site owns — path-prefix routing
+# ahead of the catch-all `/`, the same pattern as IAM prod's /realms. The
+# apex TLS + origin-pull (AOP) config lives on the company-site Ingress and
+# applies server-wide, so requests here carry the same verified-IP headers.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: analytics-ingest
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: analytics-ingest
+    app.kubernetes.io/part-of: guardian
+spec:
+  ingressClassName: tenant-root
+  rules:
+    - host: guardianintelligence.org
+      http:
+        paths:
+          - path: /api/events
+            pathType: Prefix
+            backend:
+              service:
+                name: analytics-ingest
+                port:
+                  number: 80
