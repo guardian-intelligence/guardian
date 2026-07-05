@@ -145,7 +145,7 @@ jobs:
         if: steps.classify.outputs.build == 'true'
         run: |
           bazelisk run //src/products/viteplus-monorepo/apps/guardianintelligence-web/site:load
-          docker run -d --name perf-gate -p 8080:8080 guardian/company-site:dev
+          docker run -d --name perf-gate -p 8080:8080 ghcr.io/guardian-intelligence/company-site:edge
           for i in $(seq 1 30); do
             curl -sf http://127.0.0.1:8080/letters/dear-shovon >/dev/null && break
             sleep 1
