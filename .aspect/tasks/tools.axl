@@ -30,11 +30,23 @@ DEBUG_CLI_SHIMS = [
     ("pgbench", "@percona_postgresql_18_linux_amd64//:pgbench"),
 ]
 
+# Repo-pinned build tools. Same shim mechanism, but these are cross-platform
+# Bazel targets (not host-specific archives), so `buf generate` uses the
+# pinned buf + plugins the codegen-drift check enforces — no system tools.
+BUILD_TOOL_SHIMS = [
+    ("buf", "@rules_buf_toolchains//:buf"),
+    ("protoc", "@protobuf//:protoc"),
+    ("protoc-gen-go", "@org_golang_google_protobuf//cmd/protoc-gen-go"),
+    ("protoc-gen-connect-go", "@com_connectrpc_connect//cmd/protoc-gen-connect-go"),
+]
+
+ALL_SHIMS = DEBUG_CLI_SHIMS + BUILD_TOOL_SHIMS
+
 def _path_export(bin_dir):
     return "export PATH=\"" + bin_dir + ":${PATH}\"\n"
 
 def _install_impl(ctx):
-    bin_dir = install_bazel_tool_shims(ctx, DEBUG_CLI_SHIMS, ctx.args.bin_dir)
+    bin_dir = install_bazel_tool_shims(ctx, ALL_SHIMS, ctx.args.bin_dir)
     if bin_dir == "":
         return 1
     if ctx.args.print_path:
@@ -42,7 +54,7 @@ def _install_impl(ctx):
     return 0
 
 def _uninstall_impl(ctx):
-    return uninstall_bazel_tool_shims(ctx, DEBUG_CLI_SHIMS, ctx.args.bin_dir)
+    return uninstall_bazel_tool_shims(ctx, ALL_SHIMS, ctx.args.bin_dir)
 
 def _path_impl(ctx):
     bin_dir = ctx.args.bin_dir
@@ -55,7 +67,7 @@ install = task(
     implementation = _install_impl,
     name = "install",
     group = ["tools"],
-    summary = "Install symlinks for repo-pinned live debugging CLIs.",
+    summary = "Install symlinks for repo-pinned CLIs and build tools (buf, protoc, gen plugins).",
     args = {
         "bin_dir": args.string(default = ".guardian/tools/bin", description = "Directory for installed CLI shims."),
         "print_path": args.boolean(default = False, description = "Print the full PATH value with the shim directory prepended after install."),
@@ -66,7 +78,7 @@ uninstall = task(
     implementation = _uninstall_impl,
     name = "uninstall",
     group = ["tools"],
-    summary = "Remove repo-pinned live debugging CLI shims from a bin directory.",
+    summary = "Remove repo-pinned CLI + build-tool shims from a bin directory.",
     args = {
         "bin_dir": args.string(default = ".guardian/tools/bin", description = "Directory containing installed CLI shims."),
     },
