@@ -45,6 +45,7 @@ const (
 
 // EventServiceClient is a client for the guardian.analytics.v1.EventService service.
 type EventServiceClient interface {
+	// Public ingest: no caller auth (edge + network + trust tier own security).
 	Publish(context.Context, *connect.Request[v1.PublishRequest]) (*connect.Response[v1.PublishResponse], error)
 }
 
@@ -80,6 +81,7 @@ func (c *eventServiceClient) Publish(ctx context.Context, req *connect.Request[v
 
 // EventServiceHandler is an implementation of the guardian.analytics.v1.EventService service.
 type EventServiceHandler interface {
+	// Public ingest: no caller auth (edge + network + trust tier own security).
 	Publish(context.Context, *connect.Request[v1.PublishRequest]) (*connect.Response[v1.PublishResponse], error)
 }
 

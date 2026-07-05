@@ -1,0 +1,25 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "connectpolicy",
+    srcs = ["policy.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/platform/connectpolicy",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/proto/gen/go/guardian/api/v1:apiv1",
+        "@com_connectrpc_connect//:connect",
+        "@org_golang_google_protobuf//proto",
+        "@org_golang_google_protobuf//reflect/protoreflect",
+        "@org_golang_google_protobuf//reflect/protoregistry",
+    ],
+)
+
+go_test(
+    name = "connectpolicy_test",
+    srcs = ["policy_test.go"],
+    embed = [":connectpolicy"],
+    deps = [
+        "//src/proto/gen/go/guardian/analytics/v1:analyticsv1",
+        "@com_connectrpc_connect//:connect",
+    ],
+)

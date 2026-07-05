@@ -8,12 +8,23 @@ load(
 
 package(default_visibility = ["//visibility:public"])
 
-exports_files(["testdata/buf/analytics-events.binpb"])
+exports_files([
+    "testdata/buf/analytics-events.binpb",
+    "testdata/buf/policy.binpb",
+])
+
+proto_library(
+    name = "policy_proto",
+    srcs = ["guardian/api/v1/policy.proto"],
+    strip_import_prefix = "/src/proto",
+    deps = ["@protobuf//:descriptor_proto"],
+)
 
 proto_library(
     name = "analytics_events_proto",
     srcs = ["guardian/analytics/v1/events.proto"],
     strip_import_prefix = "/src/proto",
+    deps = [":policy_proto"],
 )
 
 guardian_buf_lint_test(
@@ -29,11 +40,25 @@ guardian_buf_breaking_test(
     targets = [":analytics_events_proto"],
 )
 
+guardian_buf_lint_test(
+    name = "policy_buf_lint_test",
+    module = "src/proto",
+    targets = [":policy_proto"],
+)
+
+guardian_buf_breaking_test(
+    name = "policy_buf_breaking_test",
+    against = "testdata/buf/policy.binpb",
+    module = "src/proto",
+    targets = [":policy_proto"],
+)
+
 filegroup(
     name = "analytics_events_gen_go",
     srcs = [
         "//src/proto/gen/go/guardian/analytics/v1:sources",
         "//src/proto/gen/go/guardian/analytics/v1/analyticsv1connect:sources",
+        "//src/proto/gen/go/guardian/api/v1:sources",
     ],
 )
 
@@ -42,7 +67,13 @@ guardian_go_proto_codegen_check(
     generated_root = "src/proto/gen/go",
     generated_sources = ":analytics_events_gen_go",
     go_module = "github.com/guardian-intelligence/guardian/src/proto/gen/go",
-    proto_files = ["guardian/analytics/v1/events.proto"],
+    proto_files = [
+        "guardian/analytics/v1/events.proto",
+        "guardian/api/v1/policy.proto",
+    ],
     proto_path = "src/proto",
-    proto_srcs = ["guardian/analytics/v1/events.proto"],
+    proto_srcs = [
+        "guardian/analytics/v1/events.proto",
+        "guardian/api/v1/policy.proto",
+    ],
 )

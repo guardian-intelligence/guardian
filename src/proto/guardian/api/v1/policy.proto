@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+// Per-operation policy metadata. A method carries its policy surface here; a
+// central Connect interceptor reads it and enforces fail-closed (a method
+// with no policy is denied). Parameters and grants live in their owning
+// layers — Keycloak for permission grants, the edge/limiter for rate, the
+// mesh for workload identity — this only declares intent.
+package guardian.api.v1;
+
+option go_package = "github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/api/v1;apiv1";
+
+import "google/protobuf/descriptor.proto";
+
+message OperationPolicy {
+  // Empty = public (no caller authorization). Non-empty = the interceptor
+  // requires this permission on the verified principal.
+  string required_permission = 1;
+  // Bucket key the rate limiter maps to a limit; enforced at the edge/limiter.
+  string rate_limit_class = 2;
+  // Advisory max request size; the HTTP layer is the enforcer.
+  uint32 max_request_bytes = 3;
+  AuditLevel audit = 4;
+  bool idempotent = 5;
+}
+
+enum AuditLevel {
+  AUDIT_LEVEL_UNSPECIFIED = 0;
+  AUDIT_LEVEL_NONE = 1;
+  AUDIT_LEVEL_METADATA = 2;
+  AUDIT_LEVEL_FULL = 3;
+}
+
+extend google.protobuf.MethodOptions {
+  // A method without this option is denied by the policy interceptor.
+  OperationPolicy policy = 50001;
+}

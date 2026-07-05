@@ -1,14 +1,14 @@
 load("@rules_go//go:def.bzl", "go_library")
 
 go_library(
-    name = "analyticsv1",
-    srcs = ["events.pb.go"],
-    importpath = "github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/analytics/v1",
+    name = "apiv1",
+    srcs = ["policy.pb.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/api/v1",
     visibility = ["//visibility:public"],
     deps = [
-        "//src/proto/gen/go/guardian/api/v1:apiv1",
         "@org_golang_google_protobuf//reflect/protoreflect",
         "@org_golang_google_protobuf//runtime/protoimpl",
+        "@org_golang_google_protobuf//types/descriptorpb",
     ],
 )
 

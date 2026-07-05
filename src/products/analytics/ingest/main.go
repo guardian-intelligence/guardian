@@ -19,6 +19,8 @@ import (
 
 	"connectrpc.com/connect"
 	"connectrpc.com/otelconnect"
+
+	"github.com/guardian-intelligence/guardian/src/platform/connectpolicy"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 )
@@ -79,7 +81,12 @@ func main() {
 		Addr: addr,
 		// h2c lets the ingress speak HTTP/2 to us if configured; plain
 		// HTTP/1.1 works identically for Connect unary.
-		Handler:           h2c.NewHandler(newHandler(svc, connect.WithInterceptors(interceptor)), &http2.Server{}),
+		// Policy interceptor runs first (fail-closed on unpoliced methods),
+		// then OTel. No authenticator yet — Publish declares no permission.
+		Handler: h2c.NewHandler(
+			newHandler(svc, connect.WithInterceptors(connectpolicy.NewInterceptor(nil), interceptor)),
+			&http2.Server{},
+		),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,

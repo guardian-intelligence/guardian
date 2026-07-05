@@ -14,6 +14,7 @@
 package analyticsv1
 
 import (
+	_ "github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/api/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -262,7 +263,7 @@ var File_guardian_analytics_v1_events_proto protoreflect.FileDescriptor
 
 const file_guardian_analytics_v1_events_proto_rawDesc = "" +
 	"\n" +
-	"\"guardian/analytics/v1/events.proto\x12\x15guardian.analytics.v1\"m\n" +
+	"\"guardian/analytics/v1/events.proto\x12\x15guardian.analytics.v1\x1a\x1cguardian/api/v1/policy.proto\"m\n" +
 	"\x0ePublishRequest\x12%\n" +
 	"\x0fsent_at_unix_ms\x18\x01 \x01(\x04R\fsentAtUnixMs\x124\n" +
 	"\x06events\x18\x02 \x03(\v2\x1c.guardian.analytics.v1.EventR\x06events\"I\n" +
@@ -282,9 +283,9 @@ const file_guardian_analytics_v1_events_proto_rawDesc = "" +
 	"\vvital_value\x18\b \x01(\x01R\n" +
 	"vitalValue\x12\x1d\n" +
 	"\n" +
-	"props_json\x18\t \x01(\tR\tpropsJson2h\n" +
-	"\fEventService\x12X\n" +
-	"\aPublish\x12%.guardian.analytics.v1.PublishRequest\x1a&.guardian.analytics.v1.PublishResponseB^Z\\github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/analytics/v1;analyticsv1b\x06proto3"
+	"props_json\x18\t \x01(\tR\tpropsJson2\x85\x01\n" +
+	"\fEventService\x12u\n" +
+	"\aPublish\x12%.guardian.analytics.v1.PublishRequest\x1a&.guardian.analytics.v1.PublishResponse\"\x1b\x8a\xb5\x18\x17\x12\rbeacon-public\x18\x80\x80\x10 \x02(\x01B^Z\\github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/analytics/v1;analyticsv1b\x06proto3"
 
 var (
 	file_guardian_analytics_v1_events_proto_rawDescOnce sync.Once

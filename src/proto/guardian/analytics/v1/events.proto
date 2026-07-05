@@ -10,8 +10,18 @@ package guardian.analytics.v1;
 
 option go_package = "github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/analytics/v1;analyticsv1";
 
+import "guardian/api/v1/policy.proto";
+
 service EventService {
-  rpc Publish(PublishRequest) returns (PublishResponse);
+  // Public ingest: no caller auth (edge + network + trust tier own security).
+  rpc Publish(PublishRequest) returns (PublishResponse) {
+    option (guardian.api.v1.policy) = {
+      rate_limit_class: "beacon-public"
+      max_request_bytes: 262144
+      audit: AUDIT_LEVEL_METADATA
+      idempotent: true
+    };
+  }
 }
 
 message PublishRequest {
