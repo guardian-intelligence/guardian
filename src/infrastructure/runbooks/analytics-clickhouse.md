@@ -57,3 +57,25 @@ Postgres (see runbooks/postgres-backup-restore.md for the drill pattern).
    template consumes it; data PVCs land on the cluster default (DRBD
    `replicated`). Accepted at current volume (6x raw at 2 replicas);
    revisit at scale or when upstream wires it.
+4. **Service-type recreate abort**: the chart's serviceTemplate omits
+   `type`, so the first post-install spec change makes the operator try to
+   recreate `chendpoint-<release>` ("service type change 'ClusterIP'=>''")
+   and the whole CHI reconcile can land in `Aborted`. Recovery: delete the
+   chendpoint Service and bump `spec.taskID` on the CHI to force a
+   reconcile — it recreates cleanly.
+
+## Operational lessons (hit live 2026-07-05)
+
+- **Failed create_remote leaves local backups that OOM the sidecar.** The
+  sidecar has chart-fixed 256Mi limits; stale local backups under
+  `/var/lib/clickhouse/backup/` (hardlinks — REAL disk once source parts
+  are dropped) push subsequent operations over the limit → OOMKilled
+  crashloop → strategy Jobs fail with "Could not connect ... port 7171".
+  After any failed BackupJob: `rm -rf /var/lib/clickhouse/backup/*` on
+  every replica (exec via the clickhouse container) before retrying, and
+  never run benches/bulk loads while a backup could snapshot them.
+- BackupJobs racing a CHI rollout fail on unreachable per-host sidecars;
+  wait for CHI `Completed` AND sidecar `ready=true` before firing.
+- A partial remote archive from a failed attempt stays in R2 (bucket lock
+  blocks deletion for 7 days); clean it after lock expiry or let it age
+  out of retention.
