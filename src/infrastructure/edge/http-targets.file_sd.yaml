@@ -23,12 +23,6 @@
     guardian_stage: root
     guardian_expected_statuses: "200"
 - targets:
-    - https://keycloak.guardianintelligence.org/realms/cozy/
-  labels:
-    guardian_surface: keycloak
-    guardian_stage: root
-    guardian_expected_statuses: "200"
-- targets:
     - https://beta.guardianintelligence.org/realms/verself/.well-known/openid-configuration
   labels:
     guardian_surface: iam

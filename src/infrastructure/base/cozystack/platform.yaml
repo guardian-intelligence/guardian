@@ -33,9 +33,16 @@ spec:
           serviceCIDR: 10.96.0.0/16
           joinCIDR: 100.64.0.0/16
         authentication:
+          # Platform OIDC (cozy-keycloak) disabled 2026-07-05: its only clients
+          # were dashboard SSO and kubectl OIDC login, neither of which we use
+          # (cluster access is custody cert kubeconfigs; dashboard falls back
+          # to token login), and the platform ingress publicly routed the
+          # Keycloak admin console at keycloak.guardianintelligence.org.
+          # Keycloak is used headlessly per-stage under deployments/iam/ only.
+          # Follow-up: strip the now-inert oidc-issuer-url apiserver flags from
+          # talm node configs at the next Talos config touch.
           oidc:
-            enabled: true
-            keycloakInternalUrl: http://keycloak-http.cozy-keycloak.svc:8080/realms/cozy
+            enabled: false
         branding:
           titleText: Guardian
           footerText: Guardian Intelligence
