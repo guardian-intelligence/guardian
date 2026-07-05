@@ -51,8 +51,13 @@ spec:
               clickhouse-client --host "$host" --user ingest --query "EXISTS TABLE guardian_analytics.events"
               clickhouse-client --host "$host" --user ingest --query "EXISTS TABLE guardian_analytics.otel_traces"
           env:
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: analytics-clickhouse-users
+                  key: ingest
             - name: GUARDIAN_DDL_REVISION
-              value: "3"
+              value: "4"
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
