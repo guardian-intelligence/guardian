@@ -24,9 +24,9 @@ data:
   #     25-month business events).
   #   - Kept the exporter's trace_id bloom index (the lookup path).
   otel-traces.sql: |
-    CREATE DATABASE IF NOT EXISTS guardian_analytics ON CLUSTER 'analytics';
+    CREATE DATABASE IF NOT EXISTS guardian_analytics ON CLUSTER 'clickhouse';
 
-    CREATE TABLE IF NOT EXISTS guardian_analytics.otel_traces ON CLUSTER 'analytics'
+    CREATE TABLE IF NOT EXISTS guardian_analytics.otel_traces ON CLUSTER 'clickhouse'
     (
         Timestamp          DateTime64(9) CODEC(Delta(8), ZSTD(1)),
         TraceId            String CODEC(ZSTD(1)),
@@ -65,7 +65,7 @@ data:
 
     -- trace_id -> [minTs, maxTs] lookup: given a trace_id from a log line,
     -- bound the time window before scanning the main table.
-    CREATE TABLE IF NOT EXISTS guardian_analytics.otel_traces_trace_id_ts ON CLUSTER 'analytics'
+    CREATE TABLE IF NOT EXISTS guardian_analytics.otel_traces_trace_id_ts ON CLUSTER 'clickhouse'
     (
         TraceId String CODEC(ZSTD(1)),
         Start   DateTime64(9) CODEC(Delta(8), ZSTD(1)),
@@ -78,7 +78,7 @@ data:
     TTL toDateTime(Start) + INTERVAL 6 MONTH DELETE
     SETTINGS ttl_only_drop_parts = 1;
 
-    CREATE MATERIALIZED VIEW IF NOT EXISTS guardian_analytics.otel_traces_trace_id_ts_mv ON CLUSTER 'analytics'
+    CREATE MATERIALIZED VIEW IF NOT EXISTS guardian_analytics.otel_traces_trace_id_ts_mv ON CLUSTER 'clickhouse'
     TO guardian_analytics.otel_traces_trace_id_ts AS
     SELECT
         TraceId,

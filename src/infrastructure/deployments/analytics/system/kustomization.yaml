@@ -3,6 +3,7 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - credentials.yaml
+  - secrets.yaml
   - keeper.yaml
   - clickhouse.yaml
   - ddl-configmap.yaml

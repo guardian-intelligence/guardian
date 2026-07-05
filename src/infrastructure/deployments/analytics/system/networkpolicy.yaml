@@ -43,6 +43,17 @@ spec:
               protocol: TCP
             - port: "9000"
               protocol: TCP
+    # TRANSITIONAL (remove with this whole CHI at teardown): the tenant-root
+    # Cozystack ClickHouse app pulls the historical rows during the
+    # migration copy (INSERT ... SELECT FROM remote(<this CHI>)).
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            clickhouse.altinity.com/chi: clickhouse-analytics
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
     # Altinity operator: reconcile-time schema/config management and the
     # metrics-exporter sidecar both speak HTTP to every host.
     - fromEndpoints:
@@ -173,6 +184,18 @@ spec:
               protocol: TCP
             - port: "8123"
               protocol: TCP
+    # Events to the tenant-root Cozystack ClickHouse app (the old
+    # same-namespace rule above goes away with the CHI at teardown).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            clickhouse.altinity.com/chi: clickhouse-analytics
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
+            - port: "8123"
+              protocol: TCP
     # Trace export to the in-namespace OTel collector.
     - toEndpoints:
         - matchLabels:
@@ -249,10 +272,19 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
-    # Span writes to ClickHouse.
+    # Span writes to ClickHouse (old same-namespace CHI until teardown, plus
+    # the tenant-root Cozystack app it migrates to).
     - toEndpoints:
         - matchLabels:
             clickhouse.altinity.com/chi: analytics
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            clickhouse.altinity.com/chi: clickhouse-analytics
       toPorts:
         - ports:
             - port: "9000"

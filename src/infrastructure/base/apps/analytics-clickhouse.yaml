@@ -1,0 +1,164 @@
+# Analytics/observability ClickHouse on Cozystack's tenant ClickHouse app —
+# the query home for business analytics and OTel traces. Replaces the raw
+# Altinity CHI that lived in guardian-analytics (removed after cutover):
+# the app CR must live in a tenant-* namespace (cozy-lib's RBAC helper
+# hard-fails Helm render anywhere else), so the server moved to tenant-root
+# while its consumers (ingest, OTel collector, DDL job) stay in
+# guardian-analytics and cross the namespace boundary under the Cilium
+# policies below.
+#
+# Deliberate trade-offs vs the old raw CHI, accepted 2026-07-05 to ride the
+# platform (backups via cozy-default → R2, chart-managed users/keeper):
+# - Server 24.9.2.42 (chart hard-pin) instead of 26.3: the deployed schemas
+#   use nothing newer than 24.9 (traces are the collector's Map schema; the
+#   old CHI header's native-JSON claim was stale). Bench re-run on 24.9
+#   before cutover.
+# - Data PVCs land on the DEFAULT StorageClass (DRBD `replicated`): the
+#   chart's storageClass value is dead code in v1.5.0 — neither template
+#   consumes it (verified against the rendered CHI of the drill-target
+#   app). replicated(3x) under ReplicatedMergeTree(2 replicas) = 6x raw
+#   NVMe per byte. Fine at today's volume; REVISIT AT SCALE — when upstream
+#   wires storageClass, recreate onto `local` and recopy (data is TTL'd and
+#   replayable).
+# - 2 CH replicas (was 3): DRBD already provides block durability; CH
+#   replicas are for serving HA. Cuts the raw amplification 9x → 6x.
+apiVersion: apps.cozystack.io/v1alpha1
+kind: ClickHouse
+metadata:
+  name: analytics
+  namespace: tenant-root
+spec:
+  replicas: 2
+  shards: 1
+  size: 20Gi
+  logStorageSize: 5Gi
+  logTTL: 15
+  resources:
+    cpu: 2
+    memory: 8Gi
+  # Chart generates a random password for users declared without one and
+  # persists it in Secret/clickhouse-analytics-credentials (this namespace).
+  # The operator relays it once into OpenBao
+  # (guardian/guardian-mgmt/guardian-analytics/clickhouse, property
+  # `ingest`) so ESO can materialize it for the guardian-analytics
+  # consumers — no plaintext in Git. After a DR rebuild the chart
+  # regenerates a different password: re-run the relay (see the analytics
+  # section of runbooks/postgres-backup-restore.md's sibling procedure).
+  users:
+    ingest: {}
+  backup:
+    enabled: true
+    useSystemBucket: true
+  clickhouseKeeper:
+    enabled: true
+    replicas: 3
+    size: 2Gi
+---
+# Nightly base backup via the Altinity strategy (clickhouse-backup sidecar →
+# guardian-backups R2, prefix tenant-root/analytics). Offset from the two
+# Postgres Plans (03:00 / 04:00).
+apiVersion: backups.cozystack.io/v1alpha1
+kind: Plan
+metadata:
+  name: analytics-clickhouse-nightly
+  namespace: tenant-root
+spec:
+  applicationRef:
+    apiGroup: apps.cozystack.io
+    kind: ClickHouse
+    name: analytics
+  backupClassName: cozy-default
+  schedule:
+    type: cron
+    cron: "0 5 * * *"
+---
+# tenant-root's Cozystack policies are wide open (allow-internal-communication
+# admits every cluster endpoint), so the in-cluster boundary the old CHI had
+# in guardian-analytics is re-created here: selecting the CH pods flips them
+# to default-deny ingress; the rules below are the complete allowed set.
+# Ingress-only on purpose — no egress section, so keeper sessions, DNS, and
+# the backup sidecar's R2 uploads stay unrestricted.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: analytics-clickhouse
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: analytics-clickhouse
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      clickhouse.altinity.com/chi: clickhouse-analytics
+  ingress:
+    # Replica <-> replica: native protocol + interserver part fetch.
+    - fromEndpoints:
+        - matchLabels:
+            clickhouse.altinity.com/chi: clickhouse-analytics
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
+            - port: "9009"
+              protocol: TCP
+    # Analytics clients across the namespace boundary: ingest service, OTel
+    # collector, and the DDL job all carry guardian.dev/role: analytics-client.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: guardian-analytics
+            guardian.dev/role: analytics-client
+      toPorts:
+        - ports:
+            - port: "8123"
+              protocol: TCP
+            - port: "9000"
+              protocol: TCP
+    # Altinity operator: reconcile-time schema/config management + metrics.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: cozy-clickhouse-operator
+      toPorts:
+        - ports:
+            - port: "8123"
+              protocol: TCP
+    # clickhouse-backup sidecar HTTP API: the Altinity backup strategy Job
+    # runs in this namespace (BackupJob's namespace) and drives the sidecar
+    # over 7171 with basic auth.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+      toPorts:
+        - ports:
+            - port: "7171"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: analytics-keeper
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: analytics-keeper
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      clickhouse-keeper.altinity.com/chk: clickhouse-analytics-keeper
+  ingress:
+    # ClickHouse replicas hold ZK sessions; Keeper is unauthenticated, so
+    # this allowlist is the access control.
+    - fromEndpoints:
+        - matchLabels:
+            clickhouse.altinity.com/chi: clickhouse-analytics
+      toPorts:
+        - ports:
+            - port: "2181"
+              protocol: TCP
+    # Keeper raft between quorum members.
+    - fromEndpoints:
+        - matchLabels:
+            clickhouse-keeper.altinity.com/chk: clickhouse-analytics-keeper
+      toPorts:
+        - ports:
+            - port: "9444"
+              protocol: TCP
