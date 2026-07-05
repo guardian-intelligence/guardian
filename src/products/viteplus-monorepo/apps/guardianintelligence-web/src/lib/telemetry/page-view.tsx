@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { useRouterState } from "@tanstack/react-router";
 import { onCLS, onINP, onLCP, type Metric } from "web-vitals";
-import { emitSpan, initBrowserTelemetry } from "./browser";
+import { emitSpan } from "./browser";
 
 let webVitalsInstalled = false;
 
@@ -35,7 +35,6 @@ export function TelemetryProbe() {
   const previousPath = useRef<string | undefined>(undefined);
 
   useEffect(() => {
-    initBrowserTelemetry();
     installWebVitals();
   }, []);
 
