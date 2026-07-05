@@ -36,6 +36,17 @@ export function TelemetryProbe() {
 
   useEffect(() => {
     installWebVitals();
+    // The beacon loads strictly off the critical path: dynamic import on
+    // idle, so it is a lazy chunk (never modulepreloaded) and its cost is
+    // paid after LCP/TTI. Events emitted before it loads wait in the
+    // bounded queue.
+    const idle: (cb: () => void) => void =
+      typeof window.requestIdleCallback === "function"
+        ? (cb) => window.requestIdleCallback(cb, { timeout: 5000 })
+        : (cb) => void setTimeout(cb, 2000);
+    idle(() => {
+      void import("./beacon").then((m) => m.initBeacon());
+    });
   }, []);
 
   useEffect(() => {
