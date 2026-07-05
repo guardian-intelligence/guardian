@@ -232,8 +232,8 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 		"cloudflare_r2_secret_access_key",
 		"cloudflare_r2_s3_api_endpoint",
 		"cloudflare_r2_access_key_id",
-		"cloudflare_guardian_backups_rw_access_key_id",
-		"cloudflare_guardian_backups_rw_secret_access_key",
+		"cloudflare_r2_backups_access_key_id",
+		"cloudflare_r2_backups_secret_access_key",
 		"cloudflare_guardian_intelligence_org_dnz_zone_api_token",
 		"cloudflare_external_dns_api_token",
 		"cloudflare_dns_lb_provisioner_api_token",
@@ -295,8 +295,8 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 		{
 			APIPath: "kv/data/guardian/guardian-mgmt/tenant-root/backups-r2",
 			Data: map[string]string{
-				"accessKey":  env["cloudflare_guardian_backups_rw_access_key_id"],
-				"secretKey":  env["cloudflare_guardian_backups_rw_secret_access_key"],
+				"accessKey":  env["cloudflare_r2_backups_access_key_id"],
+				"secretKey":  env["cloudflare_r2_backups_secret_access_key"],
 				"endpoint":   env["cloudflare_r2_s3_api_endpoint"],
 				"bucketName": "guardian-backups",
 			},
