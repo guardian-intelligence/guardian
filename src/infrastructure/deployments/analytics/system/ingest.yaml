@@ -43,7 +43,7 @@ spec:
                 topologyKey: kubernetes.io/hostname
       containers:
         - name: ingest
-          image: ghcr.io/guardian-intelligence/analytics-ingest@sha256:e44b53f843cd6a3df17e5544fe13ad17a49c25f4bb809ee89c3df407844c8d56
+          image: ghcr.io/guardian-intelligence/analytics-ingest@sha256:738213a23a935c801b7832c05dc77f41c36e501bb4c5524306610d2a111efa36
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -51,6 +51,10 @@ spec:
           env:
             - name: CLICKHOUSE_ADDR
               value: clickhouse-analytics.guardian-analytics.svc.cozy.local:9000
+            # Bare host:port (not a URL): every Publish RPC is exported as a
+            # span to the in-namespace collector. Unset ⇒ tracing no-ops.
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              value: otel-collector.guardian-analytics.svc.cozy.local:4317
           ports:
             - name: http
               containerPort: 8080
