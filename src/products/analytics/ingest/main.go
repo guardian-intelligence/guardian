@@ -46,7 +46,12 @@ func main() {
 		tpShutdown = func(context.Context) error { return nil }
 	}
 
-	interceptor, err := otelconnect.NewInterceptor(otelconnect.WithTrustRemote())
+	// No WithTrustRemote: /api/events is public and unauthenticated, so a
+	// client-supplied traceparent must never become the parent of our server
+	// span (it would let anyone mint or graft trace IDs in the owned trace
+	// store). The default records the remote context as a link on a fresh
+	// root instead. Client trace linkage still flows through events.trace_id.
+	interceptor, err := otelconnect.NewInterceptor()
 	if err != nil {
 		slog.Error("otelconnect init", "err", err)
 		os.Exit(1)

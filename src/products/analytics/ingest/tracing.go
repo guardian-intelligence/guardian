@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -27,10 +28,17 @@ func initTracing(ctx context.Context, endpoint string) (func(context.Context) er
 		otel.SetTracerProvider(noop.NewTracerProvider())
 		return func(context.Context) error { return nil }, nil
 	}
-	exp, err := otlptracegrpc.New(ctx,
+	// WithEndpoint wants bare host:port; the OTEL_EXPORTER_OTLP_* spec form is
+	// a full URL. Accept either — a scheme-prefixed value goes through
+	// WithEndpointURL (http:// implies insecure), a bare one stays insecure.
+	opts := []otlptracegrpc.Option{
 		otlptracegrpc.WithEndpoint(endpoint),
 		otlptracegrpc.WithInsecure(),
-	)
+	}
+	if strings.Contains(endpoint, "://") {
+		opts = []otlptracegrpc.Option{otlptracegrpc.WithEndpointURL(endpoint)}
+	}
+	exp, err := otlptracegrpc.New(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}
