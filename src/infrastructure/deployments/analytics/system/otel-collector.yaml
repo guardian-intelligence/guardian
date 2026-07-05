@@ -80,7 +80,7 @@ spec:
         # Writes to ClickHouse — the CH Cilium policy admits this label.
         guardian.dev/role: analytics-client
       annotations:
-        checksum/config: "rev1"
+        checksum/config: "rev2"
     spec:
       securityContext:
         runAsNonRoot: true
