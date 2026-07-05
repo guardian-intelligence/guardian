@@ -1,0 +1,29 @@
+load("@protobuf//bazel:proto_library.bzl", "proto_library")
+load(
+    "//tools/proto:defs.bzl",
+    "guardian_buf_breaking_test",
+    "guardian_buf_lint_test",
+)
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["testdata/buf/analytics-events.binpb"])
+
+proto_library(
+    name = "analytics_events_proto",
+    srcs = ["guardian/analytics/v1/events.proto"],
+    strip_import_prefix = "/src/proto",
+)
+
+guardian_buf_lint_test(
+    name = "analytics_events_buf_lint_test",
+    module = "src/proto",
+    targets = [":analytics_events_proto"],
+)
+
+guardian_buf_breaking_test(
+    name = "analytics_events_buf_breaking_test",
+    against = "testdata/buf/analytics-events.binpb",
+    module = "src/proto",
+    targets = [":analytics_events_proto"],
+)

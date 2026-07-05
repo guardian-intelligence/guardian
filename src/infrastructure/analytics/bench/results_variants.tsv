@@ -1,0 +1,20 @@
+variant	insert_s	rows_per_s	compressed	uncompressed	ratio	bytes_per_event
+v0_naive	2.1	9523810	1879730333	6646440076	3.54	93.99
+v1_typed	1.6	12500000	1302028086	2266067119	1.74	65.1
+v2_codec	1.6	12500000	1098901227	2266062703	2.06	54.95
+v3_deep_order	1.8	11111111	1119150905	2266028799	2.02	55.96
+v4_ts_order	1.4	14285714	1114481012	2265839855	2.03	55.72
+v5_zstd3	1.5	13333333	1098953816	2266064239	2.06	54.95
+v6_cold6	2.1	9523810	1086245222	2266063183	2.09	54.31
+v7_lean	1.9	10526316	663476991	2093664755	3.16	33.17
+v8_lc_corr	2.2	9090909	339089720	1814079914	5.35	16.95
+v9_lean_day_corr	2.3	8695652	603369260	1971593215	3.27	30.17
+shipping_ddl	1.9	10526316	334172962	2066107279	6.18	16.71
+ingest_json_1client	3.1	1602309	3142791647			628.6
+ingest_json_8clients	1.6	3167070
+query_timeslice_lab.v8_lc_corr	0.039
+query_funnel_lab.v8_lc_corr	0.058
+query_visitor_history_lab.v8_lc_corr	0.024
+query_timeslice_guardian_analytics.events	0.040
+query_funnel_guardian_analytics.events	0.054
+query_visitor_history_guardian_analytics.events	0.017
