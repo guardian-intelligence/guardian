@@ -394,6 +394,25 @@ encrypt → `transit/backup` export → restore into a throwaway
 `bao server -dev` container → decrypt the cluster's ciphertext. Shred the test
 keyring and delete the drill policy/role and sentinel afterwards.
 
+## Analytics ClickHouse (guardian-analytics)
+
+The analytics/observability ClickHouse (`deployments/analytics/system`) is a
+raw Altinity CHI + CHK on `local-retain` volumes with 3-way
+ReplicatedMergeTree, so a single node loss re-syncs from a surviving replica
+(proven live: a 60×20k-batch kill test with one passive and one active replica
+deleted mid-ingest lost zero acknowledged rows). Cold-boot notes:
+
+- The CHI/CHK/collector images (`clickhouse-server`, `clickhouse-keeper`,
+  `otel-collector-contrib`) are digest-pinned in `images.lock`, so the dark
+  bundle carries them; the namespace comes up from Git with no custody input.
+- The stored data is **not** in any custody bundle by design: it is
+  25-month-TTL business analytics + 6-month OTel traces, reconstructable from
+  the ongoing event stream, not from-nothing-critical state. A full-cluster
+  wipe loses history but not the pipeline — the schema re-applies from the
+  idempotent DDL Job and ingestion resumes on the next request. A periodic
+  `clickhouse-backup`→S3 sidecar (as tenant-root's CHI has) is the tracked
+  follow-up if analytics history ever becomes recovery-critical.
+
 ## Aftermath
 
 1. `aspect infra edge-health` (expect all targets green) and
