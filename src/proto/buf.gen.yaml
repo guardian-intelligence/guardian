@@ -1,8 +1,11 @@
 # Go stubs are checked in under gen/go (repo convention: generated output is
-# committed and conformance-checked, not built on the fly). Plugin versions
-# are pinned by the go.mod `tool` directive; regenerate with:
-#   go build -o /tmp/pp/ google.golang.org/protobuf/cmd/protoc-gen-go connectrpc.com/connect/cmd/protoc-gen-connect-go
-#   cd src/proto && PATH=/tmp/pp:$PATH buf generate
+# committed and conformance-checked, not built on the fly). buf and the
+# plugins are repo-pinned (rules_buf toolchain + go.mod); regenerate with the
+# pinned tools on PATH — no system installs:
+#   aspect tools install
+#   eval "$(aspect tools path)"
+#   cd src/proto && buf generate --path guardian
+# (guardian_go_proto_codegen_check runs the same pinned tools in CI.)
 version: v2
 plugins:
   - local: protoc-gen-go

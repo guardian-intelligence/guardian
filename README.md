@@ -6,6 +6,32 @@ and standard Kubernetes controllers.
 Local commands are limited to bootstrap, validation, load, and disaster-recovery
 drills.
 
+## Quickstart
+
+Two host tools, both self-pinning to versions in this repo — everything else
+(compilers, `buf`, `protoc`, CLIs) is fetched at its pinned version on first
+use, so this is the whole install on Ubuntu or macOS:
+
+- **Aspect CLI** — the launcher reads `.aspect/version.axl`
+- **bazelisk** — reads `.bazelversion`
+
+The loops you'll actually run, from the repo root:
+
+| Task | Command |
+| - | - |
+| Build / test everything (incl. the site image) | `bazelisk build //...` · `bazelisk test //...` |
+| Format before pushing | `aspect tidy` |
+| Put repo-pinned CLIs + build tools on `PATH` | `aspect tools install && eval "$(aspect tools path)"` |
+| Regenerate proto stubs (pinned `buf` + plugins) | `buf generate --path src/proto/guardian` |
+| Validate the infra substrate | `aspect infra validate` |
+
+Ad-hoc `bazel build|test|query` stays raw bazel; `aspect` tasks exist only for
+workflows with shape worth documenting (see below).
+
+Deeper reading: `AGENTS.md` (conventions and the durable command surface), the
+web frontend dev loop in `src/products/viteplus-monorepo/README.md`, the
+runbooks in `src/infrastructure/runbooks/`, and the design docs in `docs/`.
+
 ## Commands
 
 Run from the repo root.
