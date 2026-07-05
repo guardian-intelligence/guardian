@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"time"
 
+	"connectrpc.com/connect"
+	"connectrpc.com/otelconnect"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 )
@@ -35,6 +37,25 @@ func main() {
 	chAddr := envOr("CLICKHOUSE_ADDR", "clickhouse-analytics.guardian-analytics.svc.cozy.local:9000")
 	chUser := envOr("CLICKHOUSE_USER", "ingest")
 	chPassword := os.Getenv("CLICKHOUSE_PASSWORD")
+	// OTLP gRPC endpoint of the in-namespace collector; unset ⇒ no-op tracer.
+	otelEndpoint := os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+
+	tpShutdown, err := initTracing(context.Background(), otelEndpoint)
+	if err != nil {
+		slog.Warn("tracing init failed; continuing without traces", "err", err)
+		tpShutdown = func(context.Context) error { return nil }
+	}
+
+	// No WithTrustRemote: /api/events is public and unauthenticated, so a
+	// client-supplied traceparent must never become the parent of our server
+	// span (it would let anyone mint or graft trace IDs in the owned trace
+	// store). The default records the remote context as a link on a fresh
+	// root instead. Client trace linkage still flows through events.trace_id.
+	interceptor, err := otelconnect.NewInterceptor()
+	if err != nil {
+		slog.Error("otelconnect init", "err", err)
+		os.Exit(1)
+	}
 
 	sink, err := newClickHouseSink(chAddr, "guardian_analytics", chUser, chPassword)
 	if err != nil {
@@ -58,7 +79,7 @@ func main() {
 		Addr: addr,
 		// h2c lets the ingress speak HTTP/2 to us if configured; plain
 		// HTTP/1.1 works identically for Connect unary.
-		Handler:           h2c.NewHandler(newHandler(svc), &http2.Server{}),
+		Handler:           h2c.NewHandler(newHandler(svc, connect.WithInterceptors(interceptor)), &http2.Server{}),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -86,4 +107,7 @@ func main() {
 	}
 	<-drained
 	batch.Close()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	_ = tpShutdown(shutdownCtx)
+	cancel()
 }
