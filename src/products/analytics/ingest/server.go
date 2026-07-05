@@ -47,6 +47,9 @@ func (s *eventService) Publish(
 	if meta == nil {
 		return nil, connect.NewError(connect.CodeInternal, nil)
 	}
+	// Join the request's trace (from the otelconnect interceptor) to the
+	// visitor: analytics rows and this span now share correlation_id.
+	stampCorrelation(ctx, meta.corrID, meta.ctx.TrustTier, meta.ctx.Site)
 	events := req.Msg.GetEvents()
 	if len(events) == 0 {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errEmptyBatch)
@@ -121,9 +124,9 @@ func (e constError) Error() string { return string(e) }
 // route is /api/events/guardian.analytics.v1.EventService/Publish —
 // path-prefix routed to this service by the ingress, same apex-sharing
 // pattern as IAM prod.
-func newHandler(svc *eventService) http.Handler {
+func newHandler(svc *eventService, opts ...connect.HandlerOption) http.Handler {
 	mux := http.NewServeMux()
-	path, handler := analyticsv1connect.NewEventServiceHandler(svc)
+	path, handler := analyticsv1connect.NewEventServiceHandler(svc, opts...)
 	mux.Handle("/api/events"+path, http.StripPrefix("/api/events", handler))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
