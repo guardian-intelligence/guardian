@@ -49,6 +49,11 @@ ghcr.io/fluxcd/charts/flagger:1.43.0@sha256:31d6fad48f45fd5d73190ff80f9b047689e1
 # move it down there once a post-deploy scrape confirms it) ---
 ghcr.io/fluxcd/flagger@sha256:bbf959d58586b403b2a67167042e90a36c941665478ffba67afd7cdfbb571572
 
+# --- Analytics ClickHouse (deployments/analytics/system/). Raw Altinity CHI,
+# 26.3 LTS pinned by the manifests; DDL job reuses the server image.
+docker.io/clickhouse/clickhouse-server:26.3.17.4@sha256:31c8e88e9f675f93fd9c9152fc729e4a1141f95b818c0d889ad4d8cd6f9342dd
+docker.io/clickhouse/clickhouse-keeper:26.3.17.4-alpine@sha256:6d1727bfdf2614b16c83aaeeba50ca8c64d66ca5c90d2f7ce7293014ca857089
+
 # --- Verself IAM: Keycloak (deployments/iam/<stage>/keycloak.yaml). 26.6.2
 # is the deliberately-older pin; 26.6.4 is the upgrade target the first
 # Kargo-gated Flagger blue/green will move beta to — both must be

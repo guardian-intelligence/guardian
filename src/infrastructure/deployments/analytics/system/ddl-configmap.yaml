@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: analytics-ddl
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: analytics-ddl
+    app.kubernetes.io/part-of: guardian
+data:
+  # Replicated form of the canonical events DDL
+  # (src/infrastructure/analytics/events-table.sql — bake-off winner, 17.0
+  # B/event; see docs/analytics-storage-design.md). Identical columns,
+  # codecs, ORDER BY, partitioning, and TTL; only the engine differs:
+  # ReplicatedMergeTree over the CHK quorum for 3-way app-level replication.
+  events.sql: |
+    CREATE DATABASE IF NOT EXISTS guardian_analytics ON CLUSTER 'analytics';
+
+    CREATE TABLE IF NOT EXISTS guardian_analytics.events ON CLUSTER 'analytics'
+    (
+        server_ts      DateTime64(3) CODEC(Delta(8), ZSTD(1)),
+        site           LowCardinality(String) CODEC(ZSTD(1)),
+        event_name     LowCardinality(String) CODEC(ZSTD(1)),
+        trust_tier     Enum8('unspecified' = 0, 'server_observed' = 1, 'edge_verified' = 2, 'client_claimed' = 3) CODEC(ZSTD(1)),
+        schema_version UInt8 CODEC(ZSTD(1)),
+        trace_id       FixedString(16) CODEC(ZSTD(1)),
+        correlation_id FixedString(16) CODEC(ZSTD(1)),
+        session_seq    UInt32 CODEC(T64, ZSTD(1)),
+        path           LowCardinality(String) CODEC(ZSTD(1)),
+        referrer       LowCardinality(String) CODEC(ZSTD(1)),
+        ua             LowCardinality(String) CODEC(ZSTD(1)),
+        client_ip      IPv6 CODEC(ZSTD(1)),
+        ip_source      LowCardinality(String) CODEC(ZSTD(1)),
+        country        LowCardinality(String) CODEC(ZSTD(1)),
+        asn            UInt32 CODEC(T64, ZSTD(1)),
+        status         UInt16 CODEC(T64, ZSTD(1)),
+        duration_ms    UInt32 CODEC(T64, ZSTD(1)),
+        client_skew_ms Int32 CODEC(T64, ZSTD(1)),
+        vital_name     LowCardinality(String) CODEC(ZSTD(1)),
+        vital_value    Float64 CODEC(Gorilla, ZSTD(1)),
+        props          String CODEC(ZSTD(1))
+    )
+    ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/guardian_analytics/events', '{replica}')
+    PARTITION BY toYYYYMM(server_ts)
+    ORDER BY (site, correlation_id, server_ts)
+    TTL toDateTime(server_ts) + INTERVAL 25 MONTH DELETE;
