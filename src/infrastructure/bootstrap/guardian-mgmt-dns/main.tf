@@ -24,7 +24,6 @@ locals {
     "alerta.guardianintelligence.org",
     "dashboard.guardianintelligence.org",
     "grafana.guardianintelligence.org",
-    "keycloak.guardianintelligence.org",
   ]
 
   public_ingress_ipv4s = [
