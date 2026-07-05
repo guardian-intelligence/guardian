@@ -77,3 +77,45 @@ func TestSchemaConstraints(t *testing.T) {
 		})
 	}
 }
+func TestClampSkew(t *testing.T) {
+	now := int64(1_800_000_000_000)
+	cases := []struct {
+		name string
+		sent uint64
+		want int32
+	}{
+		{"zero sent_at", 0, 0},
+		{"honest small skew", uint64(now - 1500), 1500},
+		{"future clock", uint64(now + 4000), -4000},
+		{"absurd past clamps", uint64(now) - 1<<40, maxAbsSkewMs},
+		{"absurd future clamps", uint64(now) + 1<<40, -maxAbsSkewMs},
+		{"garbage huge value", 1 << 63, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := clampSkewMs(now, tc.sent); got != tc.want {
+				t.Fatalf("clampSkewMs() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSiteFromHost(t *testing.T) {
+	cases := map[string]string{
+		"guardianintelligence.org":         "prod",
+		"www.guardianintelligence.org":     "prod",
+		"GUARDIANINTELLIGENCE.ORG":         "prod",
+		"guardianintelligence.org:443":     "prod",
+		"pr-42.guardianintelligence.org":   "pr-42",
+		"beta.guardianintelligence.org":    "beta",
+		"evil.example.com":                 "local",
+		"guardianintelligence.org.evil.io": "local",
+		"10.0.0.5:8080":                    "local",
+		"":                                 "local",
+	}
+	for host, want := range cases {
+		if got := siteFromHost(host); got != want {
+			t.Errorf("siteFromHost(%q) = %q, want %q", host, got, want)
+		}
+	}
+}
