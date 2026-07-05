@@ -91,6 +91,8 @@ go_deps.from_file(go_mod = "//:go.mod")
 use_repo(go_deps, "in_gopkg_yaml_v3")
 use_repo(
     go_deps,
+    "build_buf_gen_go_bufbuild_protovalidate_protocolbuffers_go",
+    "build_buf_go_protovalidate",
     "com_connectrpc_connect",
     "com_connectrpc_otelconnect",
     "com_github_clickhouse_clickhouse_go_v2",

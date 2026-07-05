@@ -16,10 +16,6 @@ import (
 
 const (
 	maxBatchEvents = 500
-	maxPathLen     = 1024
-	maxReferrerLen = 1024
-	maxNameLen     = 64
-	maxPropsLen    = 2048
 	// A batch's sent_at more than this far from server receipt marks the
 	// whole batch's skew as untrustworthy; skew is clamped, never rejected
 	// (broken client clocks are a signal worth storing, not dropping).
@@ -54,12 +50,12 @@ var (
 type rejectReason string
 
 const (
-	rejectName     rejectReason = "name"
-	rejectPath     rejectReason = "path"
-	rejectReferrer rejectReason = "referrer"
-	rejectTraceID  rejectReason = "trace_id"
-	rejectVital    rejectReason = "vital"
-	rejectProps    rejectReason = "props"
+	// Structural violations (length, pattern, trace_id size) are reported by
+	// protovalidate under this reason; the field is in the log detail.
+	rejectSchema rejectReason = "schema"
+	rejectName   rejectReason = "name"
+	rejectVital  rejectReason = "vital"
+	rejectProps  rejectReason = "props"
 )
 
 func nameRegistered(name string) bool {
@@ -74,36 +70,13 @@ func nameRegistered(name string) bool {
 	return false
 }
 
-func validName(name string) bool {
-	if len(name) == 0 || len(name) > maxNameLen {
-		return false
-	}
-	for i := 0; i < len(name); i++ {
-		c := name[i]
-		if c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_' || c == '.' {
-			continue
-		}
-		return false
-	}
-	return nameRegistered(name)
-}
-
-// validateEvent returns "" when the event is acceptable, else the reject
-// reason. Validation never mutates the event.
+// validateEvent covers the checks that are not expressible as protovalidate
+// field constraints: the event-name registry, the web-vital cross-field
+// rules, and props JSON-object shape. It runs after protovalidate has
+// enforced the structural constraints, and never mutates the event.
 func validateEvent(e *analyticsv1.Event) rejectReason {
-	if !validName(e.GetName()) {
+	if !nameRegistered(e.GetName()) {
 		return rejectName
-	}
-	if len(e.GetPath()) > maxPathLen || (e.GetPath() != "" && !strings.HasPrefix(e.GetPath(), "/")) {
-		return rejectPath
-	}
-	if len(e.GetReferrer()) > maxReferrerLen {
-		return rejectReferrer
-	}
-	// FixedString(16) zero-pads short values silently and aborts the insert
-	// block on long ones — length must be exact or absent.
-	if l := len(e.GetTraceId()); l != 0 && l != 16 {
-		return rejectTraceID
 	}
 	if strings.HasPrefix(e.GetName(), "web_vital.") {
 		if _, ok := knownVitals[e.GetVitalName()]; !ok {
@@ -127,7 +100,7 @@ func validateEvent(e *analyticsv1.Event) rejectReason {
 		return rejectVital
 	}
 	if p := e.GetPropsJson(); p != "" {
-		if len(p) > maxPropsLen || !json.Valid([]byte(p)) || !strings.HasPrefix(strings.TrimSpace(p), "{") {
+		if !json.Valid([]byte(p)) || !strings.HasPrefix(strings.TrimSpace(p), "{") {
 			return rejectProps
 		}
 	}

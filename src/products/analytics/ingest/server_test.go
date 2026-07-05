@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"buf.build/go/protovalidate"
 	"connectrpc.com/connect"
 
 	analyticsv1 "github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/analytics/v1"
@@ -40,7 +41,11 @@ func newTestStack(t *testing.T) (*httptest.Server, *captureSink) {
 	sink := &captureSink{}
 	b := newBatcher(sink, 1, time.Hour, 1000)
 	t.Cleanup(b.Close)
-	svc := &eventService{batch: b, now: func() time.Time { return time.UnixMilli(1_800_000_000_000) }}
+	v, err := protovalidate.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &eventService{batch: b, now: func() time.Time { return time.UnixMilli(1_800_000_000_000) }, validate: v}
 	srv := httptest.NewServer(newHandler(svc))
 	t.Cleanup(srv.Close)
 	return srv, sink

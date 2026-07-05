@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"buf.build/go/protovalidate"
 	"connectrpc.com/connect"
 	"connectrpc.com/otelconnect"
 	"golang.org/x/net/http2"
@@ -72,8 +73,13 @@ func main() {
 		cancel()
 	}
 
+	validator, err := protovalidate.New()
+	if err != nil {
+		slog.Error("protovalidate init", "err", err)
+		os.Exit(1)
+	}
 	batch := newBatcher(sink, 10_000, 10*time.Second, 100_000)
-	svc := &eventService{batch: batch, now: time.Now}
+	svc := &eventService{batch: batch, now: time.Now, validate: validator}
 
 	srv := &http.Server{
 		Addr: addr,

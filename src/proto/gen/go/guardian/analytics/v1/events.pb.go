@@ -10,10 +10,16 @@
 // server-derived — they have no wire fields at all. Shape follows the
 // pattern shared by Segment/PostHog/Plausible and the OTel event model;
 // rationale and storage schema: docs/analytics-storage-design.md.
+//
+// Structural limits are enforced declaratively by protovalidate
+// (buf.validate); the name registry, props JSON shape, and web-vital
+// cross-field rules stay server-side (validate.go) because they are not
+// expressible as field constraints.
 
 package analyticsv1
 
 import (
+	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -34,7 +40,9 @@ type PublishRequest struct {
 	// received_at - sent_at (Segment/PostHog pattern); clients never compute
 	// skew or send absolute event times.
 	SentAtUnixMs uint64 `protobuf:"varint,1,opt,name=sent_at_unix_ms,json=sentAtUnixMs,proto3" json:"sent_at_unix_ms,omitempty"`
-	// Server caps batch size; oversized batches are rejected, not truncated.
+	// Batch size is a whole-request property enforced by the handler (an empty
+	// or oversized batch is a request error); per-event constraints below are
+	// validated per event so one bad event never fails the batch.
 	Events        []*Event `protobuf:"bytes,2,rep,name=events,proto3" json:"events,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -140,13 +148,14 @@ func (x *PublishResponse) GetRejected() uint32 {
 
 type Event struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Registered vocabulary (page_view, web_vital, rpc, click, ...);
-	// unknown names reject the event.
-	Name     string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// Registered vocabulary (page_view, web_vital, rpc, click, ...); the exact
+	// registry is checked server-side, this bounds shape only.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// Rooted request path; empty is allowed (not every event has one).
 	Path     string `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
 	Referrer string `protobuf:"bytes,3,opt,name=referrer,proto3" json:"referrer,omitempty"`
-	// W3C trace id, 16 bytes; absent/all-zero = joins no server trace
-	// (OTel logs.proto semantics). Only rpc/error events carry one.
+	// W3C trace id, 16 bytes; absent = joins no server trace (OTel logs.proto
+	// semantics). Only rpc/error events carry one.
 	TraceId []byte `protobuf:"bytes,4,opt,name=trace_id,json=traceId,proto3" json:"trace_id,omitempty"`
 	// Milliseconds before sent_at that the event occurred (PostHog "offset").
 	// Not yet stored: server_ts is batch receipt time and in-session order
@@ -159,7 +168,7 @@ type Event struct {
 	// web_vital events only; mirrors the OTel browser.web_vital shape.
 	VitalName  string  `protobuf:"bytes,7,opt,name=vital_name,json=vitalName,proto3" json:"vital_name,omitempty"`
 	VitalValue float64 `protobuf:"fixed64,8,opt,name=vital_value,json=vitalValue,proto3" json:"vital_value,omitempty"`
-	// Flat JSON, server-capped size.
+	// Flat JSON object; JSON validity is checked server-side.
 	PropsJson     string `protobuf:"bytes,9,opt,name=props_json,json=propsJson,proto3" json:"props_json,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -262,27 +271,29 @@ var File_guardian_analytics_v1_events_proto protoreflect.FileDescriptor
 
 const file_guardian_analytics_v1_events_proto_rawDesc = "" +
 	"\n" +
-	"\"guardian/analytics/v1/events.proto\x12\x15guardian.analytics.v1\"m\n" +
+	"\"guardian/analytics/v1/events.proto\x12\x15guardian.analytics.v1\x1a\x1bbuf/validate/validate.proto\"m\n" +
 	"\x0ePublishRequest\x12%\n" +
 	"\x0fsent_at_unix_ms\x18\x01 \x01(\x04R\fsentAtUnixMs\x124\n" +
 	"\x06events\x18\x02 \x03(\v2\x1c.guardian.analytics.v1.EventR\x06events\"I\n" +
 	"\x0fPublishResponse\x12\x1a\n" +
 	"\baccepted\x18\x01 \x01(\rR\baccepted\x12\x1a\n" +
-	"\brejected\x18\x02 \x01(\rR\brejected\"\x83\x02\n" +
-	"\x05Event\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
-	"\x04path\x18\x02 \x01(\tR\x04path\x12\x1a\n" +
-	"\breferrer\x18\x03 \x01(\tR\breferrer\x12\x19\n" +
-	"\btrace_id\x18\x04 \x01(\fR\atraceId\x12\x1b\n" +
+	"\brejected\x18\x02 \x01(\rR\brejected\"\xfc\x03\n" +
+	"\x05Event\x12,\n" +
+	"\x04name\x18\x01 \x01(\tB\x18\xbaH\x15r\x13\x10\x01\x18@2\r^[a-z0-9_.]+$R\x04name\x12t\n" +
+	"\x04path\x18\x02 \x01(\tB`\xbaH]\xba\x01U\n" +
+	"\vpath.rooted\x12\"path must be empty or start with /\x1a\"this == '' || this.startsWith('/')r\x03(\x80\bR\x04path\x12$\n" +
+	"\breferrer\x18\x03 \x01(\tB\b\xbaH\x05r\x03(\x80\bR\breferrer\x12\x81\x01\n" +
+	"\btrace_id\x18\x04 \x01(\fBf\xbaHc\xba\x01`\n" +
+	"\ftrace_id.len\x12+trace_id must be absent or exactly 16 bytes\x1a#size(this) == 0 || size(this) == 16R\atraceId\x12\x1b\n" +
 	"\toffset_ms\x18\x05 \x01(\rR\boffsetMs\x12\x1f\n" +
 	"\vsession_seq\x18\x06 \x01(\rR\n" +
 	"sessionSeq\x12\x1d\n" +
 	"\n" +
 	"vital_name\x18\a \x01(\tR\tvitalName\x12\x1f\n" +
 	"\vvital_value\x18\b \x01(\x01R\n" +
-	"vitalValue\x12\x1d\n" +
+	"vitalValue\x12'\n" +
 	"\n" +
-	"props_json\x18\t \x01(\tR\tpropsJson2h\n" +
+	"props_json\x18\t \x01(\tB\b\xbaH\x05r\x03(\x80\x10R\tpropsJson2h\n" +
 	"\fEventService\x12X\n" +
 	"\aPublish\x12%.guardian.analytics.v1.PublishRequest\x1a&.guardian.analytics.v1.PublishResponseB^Z\\github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/analytics/v1;analyticsv1b\x06proto3"
 

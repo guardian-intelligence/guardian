@@ -5,9 +5,13 @@ import (
 	"strings"
 	"testing"
 
+	"buf.build/go/protovalidate"
+
 	analyticsv1 "github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/analytics/v1"
 )
 
+// validateEvent covers the semantic checks that are not protovalidate field
+// constraints: the name registry, web-vital cross-field rules, props JSON shape.
 func TestValidateEvent(t *testing.T) {
 	ok := func(e *analyticsv1.Event) *analyticsv1.Event { return e }
 	cases := []struct {
@@ -18,15 +22,7 @@ func TestValidateEvent(t *testing.T) {
 		{"registered exact name", ok(&analyticsv1.Event{Name: "page_view", Path: "/"}), ""},
 		{"registered prefix name", ok(&analyticsv1.Event{Name: "company.route_view", Path: "/letters"}), ""},
 		{"unregistered name", &analyticsv1.Event{Name: "cryptominer.ping"}, rejectName},
-		{"empty name", &analyticsv1.Event{Name: ""}, rejectName},
 		{"prefix alone is not a name", &analyticsv1.Event{Name: "company."}, rejectName},
-		{"uppercase rejected", &analyticsv1.Event{Name: "PAGE_VIEW"}, rejectName},
-		{"name over cap", &analyticsv1.Event{Name: "company." + strings.Repeat("a", 64)}, rejectName},
-		{"path not rooted", &analyticsv1.Event{Name: "page_view", Path: "javascript:alert(1)"}, rejectPath},
-		{"path over cap", &analyticsv1.Event{Name: "page_view", Path: "/" + strings.Repeat("a", maxPathLen)}, rejectPath},
-		{"referrer over cap", &analyticsv1.Event{Name: "page_view", Referrer: strings.Repeat("r", maxReferrerLen+1)}, rejectReferrer},
-		{"trace id wrong length", &analyticsv1.Event{Name: "page_view", TraceId: []byte("short")}, rejectTraceID},
-		{"trace id 16 bytes ok", ok(&analyticsv1.Event{Name: "page_view", TraceId: make([]byte, 16)}), ""},
 		{"vital without web_vital name", &analyticsv1.Event{Name: "page_view", VitalName: "LCP"}, rejectVital},
 		{"web_vital with unknown vital", &analyticsv1.Event{Name: "web_vital.lcp", VitalName: "BOGUS"}, rejectVital},
 		{"web_vital ok", ok(&analyticsv1.Event{Name: "web_vital.lcp", VitalName: "LCP", VitalValue: 1234.5}), ""},
@@ -38,7 +34,6 @@ func TestValidateEvent(t *testing.T) {
 		{"CLS in range ok", ok(&analyticsv1.Event{Name: "web_vital.cls", VitalName: "CLS", VitalValue: 0.17}), ""},
 		{"props invalid json", &analyticsv1.Event{Name: "click", PropsJson: "{oops"}, rejectProps},
 		{"props not an object", &analyticsv1.Event{Name: "click", PropsJson: `[1,2]`}, rejectProps},
-		{"props over cap", &analyticsv1.Event{Name: "click", PropsJson: `{"k":"` + strings.Repeat("v", maxPropsLen) + `"}`}, rejectProps},
 		{"props ok", ok(&analyticsv1.Event{Name: "click", PropsJson: `{"target":"cta"}`}), ""},
 	}
 	for _, tc := range cases {
@@ -50,6 +45,38 @@ func TestValidateEvent(t *testing.T) {
 	}
 }
 
+// The structural constraints declared on events.proto are enforced by
+// protovalidate — this checks they are wired and behave.
+func TestSchemaConstraints(t *testing.T) {
+	v, err := protovalidate.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name    string
+		event   *analyticsv1.Event
+		wantErr bool
+	}{
+		{"valid", &analyticsv1.Event{Name: "page_view", Path: "/", TraceId: make([]byte, 16)}, false},
+		{"empty trace ok", &analyticsv1.Event{Name: "page_view", Path: "/"}, false},
+		{"empty name", &analyticsv1.Event{Name: ""}, true},
+		{"uppercase name", &analyticsv1.Event{Name: "PAGE_VIEW"}, true},
+		{"name over 64", &analyticsv1.Event{Name: "company." + strings.Repeat("a", 64)}, true},
+		{"path not rooted", &analyticsv1.Event{Name: "page_view", Path: "javascript:alert(1)"}, true},
+		{"path over 1024", &analyticsv1.Event{Name: "page_view", Path: "/" + strings.Repeat("a", 1024)}, true},
+		{"referrer over 1024", &analyticsv1.Event{Name: "page_view", Referrer: strings.Repeat("r", 1025)}, true},
+		{"trace id wrong length", &analyticsv1.Event{Name: "page_view", TraceId: []byte("short")}, true},
+		{"props over 2048", &analyticsv1.Event{Name: "click", PropsJson: strings.Repeat("x", 2049)}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := v.Validate(tc.event)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("Validate() err = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
 func TestClampSkew(t *testing.T) {
 	now := int64(1_800_000_000_000)
 	cases := []struct {
@@ -75,16 +102,16 @@ func TestClampSkew(t *testing.T) {
 
 func TestSiteFromHost(t *testing.T) {
 	cases := map[string]string{
-		"guardianintelligence.org":          "prod",
-		"www.guardianintelligence.org":      "prod",
-		"GUARDIANINTELLIGENCE.ORG":          "prod",
-		"guardianintelligence.org:443":      "prod",
-		"pr-42.guardianintelligence.org":    "pr-42",
-		"beta.guardianintelligence.org":     "beta",
-		"evil.example.com":                  "local",
-		"guardianintelligence.org.evil.io":  "local",
-		"10.0.0.5:8080":                     "local",
-		"":                                  "local",
+		"guardianintelligence.org":         "prod",
+		"www.guardianintelligence.org":     "prod",
+		"GUARDIANINTELLIGENCE.ORG":         "prod",
+		"guardianintelligence.org:443":     "prod",
+		"pr-42.guardianintelligence.org":   "pr-42",
+		"beta.guardianintelligence.org":    "beta",
+		"evil.example.com":                 "local",
+		"guardianintelligence.org.evil.io": "local",
+		"10.0.0.5:8080":                    "local",
+		"":                                 "local",
 	}
 	for host, want := range cases {
 		if got := siteFromHost(host); got != want {
