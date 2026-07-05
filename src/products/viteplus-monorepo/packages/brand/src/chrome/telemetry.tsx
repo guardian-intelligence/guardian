@@ -5,11 +5,11 @@ import { createContext, useContext, type ReactNode } from "react";
 // when the wordmark is clicked. Rather than import an app-specific emitSpan
 // directly (which would couple @guardian/brand to @guardian/guardianintelligence-web),
 // the chrome reads an injectable EmitSpan from context. The app wires its
-// own emitSpan (which in turn wraps @opentelemetry/api) at __root.tsx and
-// the brand layer remains a leaf dependency.
+// own emitSpan (the analytics event queue) at __root.tsx and the brand
+// layer remains a leaf dependency.
 //
 // Default: no-op. A brand component rendered outside a provider does not
-// throw and does not produce spans.
+// throw and does not produce events.
 
 export type EmitSpan = (name: string, attrs: Record<string, string>) => void;
 
