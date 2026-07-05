@@ -8,6 +8,8 @@ syntax = "proto3";
 // rationale and storage schema: docs/analytics-storage-design.md.
 package guardian.analytics.v1;
 
+option go_package = "github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/analytics/v1;analyticsv1";
+
 service EventService {
   rpc Publish(PublishRequest) returns (PublishResponse);
 }

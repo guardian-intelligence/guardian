@@ -1,0 +1,88 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load", "oci_push")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+
+go_library(
+    name = "ingest_lib",
+    srcs = [
+        "batch.go",
+        "clickhouse.go",
+        "identity.go",
+        "main.go",
+        "row.go",
+        "server.go",
+        "validate.go",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/products/analytics/ingest",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//src/proto/gen/go/guardian/analytics/v1:analyticsv1",
+        "//src/proto/gen/go/guardian/analytics/v1/analyticsv1connect",
+        "@com_connectrpc_connect//:connect",
+        "@com_github_clickhouse_clickhouse_go_v2//:clickhouse-go",
+        "@com_github_clickhouse_clickhouse_go_v2//lib/driver",
+        "@org_golang_x_net//http2",
+        "@org_golang_x_net//http2/h2c",
+    ],
+)
+
+go_binary(
+    name = "ingest",
+    embed = [":ingest_lib"],
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "ingest_test",
+    srcs = [
+        "batch_test.go",
+        "server_test.go",
+        "validate_test.go",
+    ],
+    embed = [":ingest_lib"],
+    deps = [
+        "//src/proto/gen/go/guardian/analytics/v1:analyticsv1",
+        "//src/proto/gen/go/guardian/analytics/v1/analyticsv1connect",
+        "@com_connectrpc_connect//:connect",
+    ],
+)
+
+pkg_tar(
+    name = "ingest_layer",
+    files = {
+        ":ingest": "app/ingest",
+    },
+    modes = {
+        "app/ingest": "0755",
+    },
+)
+
+oci_image(
+    name = "image",
+    annotations = {
+        "org.opencontainers.image.description": "Guardian analytics event ingest (Connect -> ClickHouse)",
+        "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
+        "org.opencontainers.image.title": "guardian-analytics-ingest",
+    },
+    base = "@ubuntu_noble_base_linux_amd64",
+    entrypoint = ["/app/ingest"],
+    exposed_ports = ["8080/tcp"],
+    tars = [":ingest_layer"],
+    visibility = ["//visibility:public"],
+)
+
+oci_load(
+    name = "load",
+    image = ":image",
+    repo_tags = ["guardian/analytics-ingest:dev"],
+)
+
+# Pushed by CI (.github/workflows/analytics-ingest-image.yml) on merges to
+# main; the workflow file path is the cosign trust anchor for this image.
+oci_push(
+    name = "push",
+    image = ":image",
+    remote_tags = ["edge"],
+    repository = "ghcr.io/guardian-intelligence/analytics-ingest",
+    visibility = ["//visibility:public"],
+)

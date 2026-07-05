@@ -52,12 +52,8 @@ export function BareMetalTamPlayground({ slug, defaults }: BareMetalTamPlaygroun
     cloud_now_billion: String(input.currentCloudTamBillion),
     cloud_2030_billion: String(input.cloudTam2030Billion),
     segment_cagr_pct: String(input.segmentCagrPct),
-    endpoint_standard_projection_billion: String(
-      Math.round(endpoint.standardProjectionTamBillion),
-    ),
-    endpoint_guardian_projection_billion: String(
-      Math.round(endpoint.guardianProjectionTamBillion),
-    ),
+    endpoint_standard_projection_billion: String(Math.round(endpoint.standardProjectionTamBillion)),
+    endpoint_guardian_projection_billion: String(Math.round(endpoint.guardianProjectionTamBillion)),
     endpoint_enthusiast_demand_billion: String(Math.round(endpoint.enthusiastDemandBillion)),
   });
 
@@ -154,8 +150,16 @@ export function BareMetalTamPlayground({ slug, defaults }: BareMetalTamPlaygroun
 // projection with enthusiast demand stacked in.
 function KpiRow({ endpoint }: { endpoint: TamProjectionPoint }) {
   const kpis = [
-    { label: "Standard Projection · 2030", value: endpoint.standardProjectionTamBillion, accent: false },
-    { label: "Guardian Projection · 2030", value: endpoint.guardianProjectionTamBillion, accent: true },
+    {
+      label: "Standard Projection · 2030",
+      value: endpoint.standardProjectionTamBillion,
+      accent: false,
+    },
+    {
+      label: "Guardian Projection · 2030",
+      value: endpoint.guardianProjectionTamBillion,
+      accent: true,
+    },
   ];
   return (
     <div

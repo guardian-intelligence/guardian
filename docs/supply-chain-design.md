@@ -26,16 +26,23 @@ verifier checks the signature identity, not the registry it pulled from.
 Verifiers MUST pin these exact identity strings (OIDC issuer
 `https://token.actions.githubusercontent.com` for both):
 
-- Container images + SBOM attestations:
+- `company-site` image + SBOM attestations:
   `https://github.com/guardian-intelligence/guardian/.github/workflows/company-site-image.yml@refs/heads/main`
+- `analytics-ingest` image + SBOM attestations:
+  `https://github.com/guardian-intelligence/guardian/.github/workflows/analytics-ingest-image.yml@refs/heads/main`
 - images.lock signature bundles:
   `https://github.com/guardian-intelligence/guardian/.github/workflows/images-lock-sign.yml@refs/heads/main`
+
+Identities are per-workflow-file by construction — a new first-party image
+gets a new workflow file, never a stanza in an existing one, so no single
+identity can sign more than one artifact family.
 
 ## What gets signed and where it lives
 
 | Artifact | Producer | Signature/attestation | Location |
 |---|---|---|---|
 | `company-site` image | `company-site-image` workflow on main | cosign keyless signature + SPDX SBOM attestation (`--type spdxjson`) | ghcr.io, attached to the digest |
+| `analytics-ingest` image | `analytics-ingest-image` workflow on main | cosign keyless signature + SPDX SBOM attestation (`--type spdxjson`) | ghcr.io, attached to the digest |
 | `images.lock` | `images-lock-sign` workflow on main pushes touching the lock | `cosign sign-blob --bundle` (embeds Fulcio cert + Rekor proof), pushed with `oras push` so the layer carries a filename title | `ghcr.io/guardian-intelligence/supply-chain:images.lock-<sha256>` (one tag per lock hash, no floating tag; package stays private — only authenticated drive builds fetch it, dark bring-up reads it from the drive) |
 
 The dark-uplink haul is *derived* from `images.lock` and every blob in it is
