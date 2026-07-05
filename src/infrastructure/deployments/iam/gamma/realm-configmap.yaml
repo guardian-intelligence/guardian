@@ -1,10 +1,16 @@
-# verself realm, imported at first boot via --import-realm. ${...}
-# placeholders are resolved by Keycloak FROM THE CONTAINER'S ENVIRONMENT at
-# import time (documented startup-import behavior), so no secret value ever
-# lands in this ConfigMap. The substitute:disabled annotation is mandatory:
-# this manifest is applied by a Flux Kustomization with postBuild
-# substitution, whose envsubst would otherwise blank every ${...} before
-# Keycloak ever saw it.
+# verself realm, imported at first boot via --import-realm. Two placeholder
+# mechanisms, deliberately different:
+# - The canary password placeholder is resolved by Keycloak FROM THE
+#   CONTAINER'S ENVIRONMENT at import time (documented startup-import
+#   behavior); the value reaches the database only as a password hash.
+# - The IdP clientSecret is a vault expression: Keycloak stores it VERBATIM
+#   at import and resolves it at use time through the file-vault provider
+#   (KC_VAULT=file in keycloak.yaml), so the GitHub OAuth secret never
+#   enters the database — database backups carry no live credential.
+# No secret value ever lands in this ConfigMap. The substitute:disabled
+# annotation is mandatory: this manifest is applied by a Flux Kustomization
+# with postBuild substitution, whose envsubst would otherwise blank every
+# ${...} — including the vault expression — before Keycloak ever saw it.
 #
 # Known limitation (deliberate, documented in the plan): --import-realm only
 # imports when the realm does not exist yet. Post-creation realm changes need
@@ -52,7 +58,7 @@ data:
           "firstBrokerLoginFlowAlias": "first broker login",
           "config": {
             "clientId": "Ov23liNtFL1mlWORb946",
-            "clientSecret": "${GITHUB_CLIENT_SECRET}",
+            "clientSecret": "${vault.github-client-secret}",
             "defaultScope": "read:user user:email"
           }
         }

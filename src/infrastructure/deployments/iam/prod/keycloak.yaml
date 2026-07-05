@@ -134,13 +134,18 @@ spec:
                 secretKeyRef:
                   name: keycloak-admin-bootstrap
                   key: password
-            # Consumed by ${...} placeholders in the realm import JSON; the
-            # secret values never appear in the ConfigMap.
-            - name: GITHUB_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: keycloak-github-oauth
-                  key: GITHUB_CLIENT_SECRET
+            # File-vault provider: the realm's GitHub IdP clientSecret is a
+            # vault expression resolved at USE time from the mounted file
+            # below, so the OAuth secret never enters the Keycloak database —
+            # and therefore never a database backup. Rotation lands via the
+            # kubelet Secret-mount sync, no pod roll needed (env vars would
+            # need one).
+            - name: KC_VAULT
+              value: file
+            - name: KC_VAULT_DIR
+              value: /opt/keycloak/data/vault
+            # Consumed by the canary-password placeholder in the realm import
+            # JSON; the value lands in the database only as a password hash.
             - name: KEYCLOAK_CANARY_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -184,10 +189,23 @@ spec:
             - name: realm-import
               mountPath: /opt/keycloak/data/import
               readOnly: true
+            - name: vault
+              mountPath: /opt/keycloak/data/vault
+              readOnly: true
       volumes:
         - name: realm-import
           configMap:
             name: keycloak-realm-verself
+        # The file name follows the file-vault provider's REALM_UNDERSCORE_KEY
+        # convention (<realm>_<key>); the Secret keeps its existing key and the
+        # mount does the renaming, so the ExternalSecret and any pod still
+        # running the previous spec are untouched.
+        - name: vault
+          secret:
+            secretName: keycloak-github-oauth
+            items:
+              - key: GITHUB_CLIENT_SECRET
+                path: verself_github-client-secret
 ---
 # Per-color JGroups discovery targets (DNS_PING). publishNotReadyAddresses is
 # required: pods must find each other before they report Ready.
