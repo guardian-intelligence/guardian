@@ -1,5 +1,6 @@
 version: v2
-modules: []
+modules:
+  - path: src/proto
 lint:
   use:
     - STANDARD

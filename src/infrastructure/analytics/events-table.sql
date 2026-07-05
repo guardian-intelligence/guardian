@@ -8,16 +8,22 @@ CREATE TABLE IF NOT EXISTS guardian_analytics.events
     server_ts      DateTime64(3) CODEC(Delta(8), ZSTD(1)),
     site           LowCardinality(String) CODEC(ZSTD(1)),
     event_name     LowCardinality(String) CODEC(ZSTD(1)),
-    trust_tier     Enum8('server_observed' = 1, 'edge_verified' = 2, 'client_claimed' = 3) CODEC(ZSTD(1)),
+    -- 'unspecified' = 0 so an insert that omits the column cannot silently
+    -- claim the highest-trust tier (Enum8 defaults to 0).
+    trust_tier     Enum8('unspecified' = 0, 'server_observed' = 1, 'edge_verified' = 2, 'client_claimed' = 3) CODEC(ZSTD(1)),
     schema_version UInt8 CODEC(ZSTD(1)),
 
-    -- All-zero unless the event joins a server trace (sparse: 16 -> ~2 B/event).
+    -- All-zero unless the event joins a server trace (~11% of events;
+    -- sparse: 16 -> ~2 B/event). Ingest must length-validate: FixedString
+    -- zero-pads short values silently and aborts the block on long ones.
     trace_id       FixedString(16) CODEC(ZSTD(1)),
 
-    -- HMAC correlation cookie. LowCardinality is deliberate: the per-part
-    -- dictionary turns 16 random bytes into ~1.6 B/event (revisit >1M/part).
-    correlation_id LowCardinality(FixedString(16)) CODEC(ZSTD(1)),
-    session_seq    UInt16 CODEC(T64, ZSTD(1)),
+    -- HMAC correlation cookie. Plain FixedString, not LowCardinality: the
+    -- ORDER BY clusters each visitor into runs, which ZSTD compresses better
+    -- than a dictionary (1.37 vs 1.61 B/event, A/B in the design doc) with
+    -- no dictionary-spill regime to manage.
+    correlation_id FixedString(16) CODEC(ZSTD(1)),
+    session_seq    UInt32 CODEC(T64, ZSTD(1)),
 
     path           LowCardinality(String) CODEC(ZSTD(1)),
     referrer       LowCardinality(String) CODEC(ZSTD(1)),
@@ -40,5 +46,7 @@ CREATE TABLE IF NOT EXISTS guardian_analytics.events
 ENGINE = MergeTree
 PARTITION BY toYYYYMM(server_ts)
 ORDER BY (site, correlation_id, server_ts)
-TTL toDateTime(server_ts) + INTERVAL 13 MONTH RECOMPRESS CODEC(ZSTD(6)),
-    toDateTime(server_ts) + INTERVAL 25 MONTH DELETE;
+-- No RECOMPRESS TTL: it skips columns with explicit codecs (verified live —
+-- a scheduled full-part rewrite with zero compression change), and full
+-- ZSTD(6) measured only ~2.7% smaller anyway.
+TTL toDateTime(server_ts) + INTERVAL 25 MONTH DELETE;
