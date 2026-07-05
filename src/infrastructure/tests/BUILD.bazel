@@ -28,6 +28,8 @@ go_test(
         "//src/infrastructure/deployments/company/prod:manifests",
         "//src/infrastructure/deployments/guardian/flagger:manifests",
         "//src/infrastructure/deployments/iam/beta:manifests",
+        "//src/infrastructure/deployments/iam/gamma:manifests",
+        "//src/infrastructure/deployments/iam/prod:manifests",
         "//src/infrastructure/deployments/guardian/promotion:manifests",
         "//src/infrastructure/deployments/guardian/promotion/pipelines:manifests",
         "//src/infrastructure/deployments/guardian/system:manifests",

@@ -392,6 +392,8 @@ func TestFluxSubstitutionSafetyConformance(t *testing.T) {
 		"src/infrastructure/base",
 		"src/infrastructure/deployments/guardian/system",
 		"src/infrastructure/deployments/iam/beta",
+		"src/infrastructure/deployments/iam/gamma",
+		"src/infrastructure/deployments/iam/prod",
 	}
 	// ${GUARDIAN_SOURCE_KIND...} / ${GUARDIAN_SOURCE_NAME...} are the declared
 	// vars; $${ is an escaped literal. Anything else is unhandled collateral.
