@@ -155,6 +155,22 @@ agree on:
   the escape hatch is one `Map(LowCardinality(String), String)` overflow
   column, not a redesign.
 
+## Migration to the Cozystack tenant app (2026-07-05, same day)
+
+The raw CHI below was replaced the same evening by the Cozystack tenant
+ClickHouse app in `tenant-root` (release `clickhouse-analytics`,
+`clickhouse-server:24.9.2.42` — the chart hard-pin) so analytics joins the
+platform backup system. The version downgrade is safe for this schema:
+nothing deployed uses a post-24.9 feature (traces are the collector's Map
+schema; the native-JSON requirement this doc once anticipated never
+shipped). **Compression re-verified on 24.9 with the same 20M generator
+and the shipping DDL: 16.67 B/event (ratio 5.8)** vs 16.71 on 26.3 — the
+explicit codecs carry the entire result; server version is immaterial.
+Storage now rides the cluster-default DRBD `replicated` class (the chart's
+storageClass value is unwired in v1.5.0), accepted at current volume;
+revisit at scale. The section below is retained as the record of the
+original CHI verification.
+
 ## As-deployed verification (in-cluster CHI, 2026-07-05)
 
 The whole vertical is live in `guardian-analytics` (raw Altinity CHI,

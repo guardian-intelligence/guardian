@@ -299,6 +299,7 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 				"secretKey":  env["cloudflare_r2_backups_secret_access_key"],
 				"endpoint":   env["cloudflare_r2_s3_api_endpoint"],
 				"bucketName": "guardian-backups",
+				"region":     "auto",
 			},
 		},
 		{
