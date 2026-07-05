@@ -204,7 +204,9 @@ spec:
         resources:
           requests:
             cpu: "0.1"
-            memory: 2Gi
+            # Measured steady-state draw is ~50Mi/member for the current KV
+            # inventory; the 2Gi limit keeps headroom for raft snapshots.
+            memory: 256Mi
             ephemeral-storage: 128Mi
           limits:
             cpu: "1"

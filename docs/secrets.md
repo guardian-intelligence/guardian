@@ -98,6 +98,42 @@ bootstrap, DR, re-initialization).
   re-seed root: a single plaintext file whose custody discipline is
   load-bearing.
 
+## OpenBao vs a plain Kubernetes Secret
+
+The dividing line is **where the value's source of truth lives** — ask
+"after a cluster wipe, where does this come back from?":
+
+- **OpenBao (via ExternalSecret)** — the source of truth is *outside* the
+  cluster and the cluster cannot regenerate it: third-party API keys, OAuth
+  client secrets, GitHub App private keys, anything a human or agent obtained
+  from an external system. These must survive DR, so they live in custody,
+  re-seed through the importer plan, and distribute through OpenBao's scoped,
+  audited, server-side-enforced write path.
+- **Operator-generated Kubernetes Secret** — the credential is *born inside*
+  the cluster and both ends live here: CNPG role passwords
+  (e.g. `postgres-keycloak-app`), ClickHouse users, inter-service tokens
+  minted by an operator. DR for these is **regenerate, never restore**: no
+  custody entry, no importer-plan line, no ExternalSecret. Routing them
+  through OpenBao would add a custody loop and a dependency for a value
+  nobody outside the cluster ever needs — ESO's output is a Kubernetes
+  Secret anyway, so nothing is gained at rest.
+- **No credential at all** — some services authenticate by network position,
+  not secrets (TigerBeetle has no authn layer; access control is the Cilium
+  policy). Don't invent a credential to decorate a network boundary.
+
+Corollaries:
+
+- Never add an in-cluster-generated credential to the custody env file or
+  the importer plan; if DR can regenerate it, a custody listing is a bug (a
+  stale copy that will one day be wrong).
+- Rotation cadence is bounded by the consumer's pickup path: mounted Secret
+  files update in place, **env-var consumers need a pod roll**. Prefer
+  eliminating the credential (CNPG TLS client-cert auth, Kubernetes auth)
+  over rotating it fast.
+- The scope conformance test governs everything OpenBao-backed; the
+  in-cluster class is convention — reviewers should reject PRs that project
+  operator-generated credentials through OpenBao.
+
 ## Adding a secret for a third-party integration (routine)
 
 No OpenBao changes. One PR plus one scoped write — full commands in the
