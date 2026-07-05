@@ -87,6 +87,20 @@ data:
           "standardFlowEnabled": false,
           "implicitFlowEnabled": false,
           "serviceAccountsEnabled": false
+        },
+        {
+          "clientId": "guardian-cli",
+          "name": "Guardian CLI (device authorization grant)",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": true,
+          "standardFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "implicitFlowEnabled": false,
+          "serviceAccountsEnabled": false,
+          "attributes": {
+            "oauth2.device.authorization.grant.enabled": "true"
+          }
         }
       ],
       "users": [
