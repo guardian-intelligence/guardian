@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+// Wire contract for the single analytics/fraud event pipeline. Clients send
+// only what the server cannot observe; visitor identity rides the HMAC
+// correlation cookie, and receipt time, IP, UA, geo, ASN and trust tier are
+// server-derived — they have no wire fields at all. Shape follows the
+// pattern shared by Segment/PostHog/Plausible and the OTel event model;
+// rationale and storage schema: docs/analytics-storage-design.md.
+package guardian.analytics.v1;
+
+service EventService {
+  rpc Publish(PublishRequest) returns (PublishResponse);
+}
+
+message PublishRequest {
+  // Client clock at send time, epoch ms. The server derives clock skew as
+  // received_at - sent_at (Segment/PostHog pattern); clients never compute
+  // skew or send absolute event times.
+  uint64 sent_at_unix_ms = 1;
+  // Server caps batch size; oversized batches are rejected, not truncated.
+  repeated Event events = 2;
+}
+
+message PublishResponse {
+  uint32 accepted = 1;
+  // Rejects are counted and recorded server-side with reasons — schema
+  // fuzzing is a fraud signal, not a silent drop.
+  uint32 rejected = 2;
+}
+
+message Event {
+  // Registered vocabulary (page_view, web_vital, rpc, click, ...);
+  // unknown names reject the event.
+  string name = 1;
+  string path = 2;
+  string referrer = 3;
+  // W3C trace id, 16 bytes; absent/all-zero = joins no server trace
+  // (OTel logs.proto semantics). Only rpc/error events carry one.
+  bytes trace_id = 4;
+  // Milliseconds before sent_at that the event occurred (PostHog "offset").
+  uint32 offset_ms = 5;
+  // Monotonic within the correlation cookie's session. (cookie, seq) is
+  // the dedup key and gap/replay detector.
+  uint32 session_seq = 6;
+  // web_vital events only; mirrors the OTel browser.web_vital shape.
+  string vital_name = 7;
+  double vital_value = 8;
+  // Flat JSON, server-capped size.
+  string props_json = 9;
+}
