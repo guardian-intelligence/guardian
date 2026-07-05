@@ -35,7 +35,6 @@ import { Route as OgLetterSlugRouteImport } from './routes/og/letter/$slug'
 import { Route as WorkshopDesignWorkshopRouteImport } from './routes/_workshop/design/workshop'
 import { Route as WorkshopDesignNewsroomRouteImport } from './routes/_workshop/design/newsroom'
 import { Route as WorkshopDesignLettersRouteImport } from './routes/_workshop/design/letters'
-import { Route as ApiOtelV1TracesRouteImport } from './routes/api/otel/v1/traces'
 
 const VerselfRoute = VerselfRouteImport.update({
   id: '/verself',
@@ -166,11 +165,6 @@ const WorkshopDesignLettersRoute = WorkshopDesignLettersRouteImport.update({
   path: '/letters',
   getParentRoute: () => WorkshopDesignRouteRoute,
 } as any)
-const ApiOtelV1TracesRoute = ApiOtelV1TracesRouteImport.update({
-  id: '/api/otel/v1/traces',
-  path: '/api/otel/v1/traces',
-  getParentRoute: () => rootRouteImport,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof WorkshopIndexRoute
@@ -198,7 +192,6 @@ export interface FileRoutesByFullPath {
   '/design/workshop': typeof WorkshopDesignWorkshopRoute
   '/og/letter/$slug': typeof OgLetterSlugRoute
   '/design/': typeof WorkshopDesignIndexRoute
-  '/api/otel/v1/traces': typeof ApiOtelV1TracesRoute
 }
 export interface FileRoutesByTo {
   '/healthz': typeof HealthzRoute
@@ -223,7 +216,6 @@ export interface FileRoutesByTo {
   '/design/workshop': typeof WorkshopDesignWorkshopRoute
   '/og/letter/$slug': typeof OgLetterSlugRoute
   '/design': typeof WorkshopDesignIndexRoute
-  '/api/otel/v1/traces': typeof ApiOtelV1TracesRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -253,7 +245,6 @@ export interface FileRoutesById {
   '/_workshop/design/workshop': typeof WorkshopDesignWorkshopRoute
   '/og/letter/$slug': typeof OgLetterSlugRoute
   '/_workshop/design/': typeof WorkshopDesignIndexRoute
-  '/api/otel/v1/traces': typeof ApiOtelV1TracesRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -283,7 +274,6 @@ export interface FileRouteTypes {
     | '/design/workshop'
     | '/og/letter/$slug'
     | '/design/'
-    | '/api/otel/v1/traces'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/healthz'
@@ -308,7 +298,6 @@ export interface FileRouteTypes {
     | '/design/workshop'
     | '/og/letter/$slug'
     | '/design'
-    | '/api/otel/v1/traces'
   id:
     | '__root__'
     | '/_workshop'
@@ -337,7 +326,6 @@ export interface FileRouteTypes {
     | '/_workshop/design/workshop'
     | '/og/letter/$slug'
     | '/_workshop/design/'
-    | '/api/otel/v1/traces'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -351,7 +339,6 @@ export interface RootRouteChildren {
   VerselfRoute: typeof VerselfRoute
   OgSlugRoute: typeof OgSlugRoute
   OgLetterSlugRoute: typeof OgLetterSlugRoute
-  ApiOtelV1TracesRoute: typeof ApiOtelV1TracesRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -538,13 +525,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkshopDesignLettersRouteImport
       parentRoute: typeof WorkshopDesignRouteRoute
     }
-    '/api/otel/v1/traces': {
-      id: '/api/otel/v1/traces'
-      path: '/api/otel/v1/traces'
-      fullPath: '/api/otel/v1/traces'
-      preLoaderRoute: typeof ApiOtelV1TracesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
   }
 }
 
@@ -630,7 +610,6 @@ const rootRouteChildren: RootRouteChildren = {
   VerselfRoute: VerselfRoute,
   OgSlugRoute: OgSlugRoute,
   OgLetterSlugRoute: OgLetterSlugRoute,
-  ApiOtelV1TracesRoute: ApiOtelV1TracesRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
