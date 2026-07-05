@@ -49,14 +49,14 @@ message Event {
   }];
   // Rooted request path; empty is allowed (not every event has one).
   string path = 2 [
-    (buf.validate.field).string.max_len = 1024,
+    (buf.validate.field).string.max_bytes = 1024,
     (buf.validate.field).cel = {
       id: "path.rooted"
       message: "path must be empty or start with /"
       expression: "this == '' || this.startsWith('/')"
     }
   ];
-  string referrer = 3 [(buf.validate.field).string.max_len = 1024];
+  string referrer = 3 [(buf.validate.field).string.max_bytes = 1024];
   // W3C trace id, 16 bytes; absent = joins no server trace (OTel logs.proto
   // semantics). Only rpc/error events carry one.
   bytes trace_id = 4 [(buf.validate.field).cel = {
@@ -76,5 +76,5 @@ message Event {
   string vital_name = 7;
   double vital_value = 8;
   // Flat JSON object; JSON validity is checked server-side.
-  string props_json = 9 [(buf.validate.field).string.max_len = 2048];
+  string props_json = 9 [(buf.validate.field).string.max_bytes = 2048];
 }

@@ -281,8 +281,8 @@ const file_guardian_analytics_v1_events_proto_rawDesc = "" +
 	"\x05Event\x12,\n" +
 	"\x04name\x18\x01 \x01(\tB\x18\xbaH\x15r\x13\x10\x01\x18@2\r^[a-z0-9_.]+$R\x04name\x12t\n" +
 	"\x04path\x18\x02 \x01(\tB`\xbaH]\xba\x01U\n" +
-	"\vpath.rooted\x12\"path must be empty or start with /\x1a\"this == '' || this.startsWith('/')r\x03\x18\x80\bR\x04path\x12$\n" +
-	"\breferrer\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\x80\bR\breferrer\x12\x81\x01\n" +
+	"\vpath.rooted\x12\"path must be empty or start with /\x1a\"this == '' || this.startsWith('/')r\x03(\x80\bR\x04path\x12$\n" +
+	"\breferrer\x18\x03 \x01(\tB\b\xbaH\x05r\x03(\x80\bR\breferrer\x12\x81\x01\n" +
 	"\btrace_id\x18\x04 \x01(\fBf\xbaHc\xba\x01`\n" +
 	"\ftrace_id.len\x12+trace_id must be absent or exactly 16 bytes\x1a#size(this) == 0 || size(this) == 16R\atraceId\x12\x1b\n" +
 	"\toffset_ms\x18\x05 \x01(\rR\boffsetMs\x12\x1f\n" +
@@ -293,7 +293,7 @@ const file_guardian_analytics_v1_events_proto_rawDesc = "" +
 	"\vvital_value\x18\b \x01(\x01R\n" +
 	"vitalValue\x12'\n" +
 	"\n" +
-	"props_json\x18\t \x01(\tB\b\xbaH\x05r\x03\x18\x80\x10R\tpropsJson2h\n" +
+	"props_json\x18\t \x01(\tB\b\xbaH\x05r\x03(\x80\x10R\tpropsJson2h\n" +
 	"\fEventService\x12X\n" +
 	"\aPublish\x12%.guardian.analytics.v1.PublishRequest\x1a&.guardian.analytics.v1.PublishResponseB^Z\\github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/analytics/v1;analyticsv1b\x06proto3"
 
