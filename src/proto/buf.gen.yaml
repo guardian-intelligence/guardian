@@ -1,13 +1,13 @@
-# Go stubs are checked in under src/proto/gen/go (repo convention: generated
-# output is committed and conformance-checked, not built on the fly). Plugin
-# versions are pinned by the go.mod `tool` directive; regenerate with:
+# Go stubs are checked in under gen/go (repo convention: generated output is
+# committed and conformance-checked, not built on the fly). Plugin versions
+# are pinned by the go.mod `tool` directive; regenerate with:
 #   go build -o /tmp/pp/ google.golang.org/protobuf/cmd/protoc-gen-go connectrpc.com/connect/cmd/protoc-gen-connect-go
-#   PATH=/tmp/pp:$PATH buf generate
+#   cd src/proto && PATH=/tmp/pp:$PATH buf generate
 version: v2
 plugins:
   - local: protoc-gen-go
-    out: src/proto/gen/go
+    out: gen/go
     opt: module=github.com/guardian-intelligence/guardian/src/proto/gen/go
   - local: protoc-gen-connect-go
-    out: src/proto/gen/go
+    out: gen/go
     opt: module=github.com/guardian-intelligence/guardian/src/proto/gen/go

@@ -1,13 +1,13 @@
 version: v2
 modules:
-  - path: src/proto
+  - path: .
 lint:
   use:
     - STANDARD
   ignore:
-    - src/proto/buf
+    - buf
 breaking:
   use:
     - FILE
   ignore:
-    - src/proto/buf
+    - buf
