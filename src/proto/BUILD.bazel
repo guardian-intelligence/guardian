@@ -10,10 +10,25 @@ package(default_visibility = ["//visibility:public"])
 
 exports_files(["testdata/buf/analytics-events.binpb"])
 
+# Vendored third-party (buf.build/bufbuild/protovalidate); not linted (see
+# buf.yaml ignore). Importable as buf/validate/validate.proto.
+proto_library(
+    name = "buf_validate_proto",
+    srcs = ["buf/validate/validate.proto"],
+    strip_import_prefix = "/src/proto",
+    deps = [
+        "@protobuf//:descriptor_proto",
+        "@protobuf//:duration_proto",
+        "@protobuf//:field_mask_proto",
+        "@protobuf//:timestamp_proto",
+    ],
+)
+
 proto_library(
     name = "analytics_events_proto",
     srcs = ["guardian/analytics/v1/events.proto"],
     strip_import_prefix = "/src/proto",
+    deps = [":buf_validate_proto"],
 )
 
 guardian_buf_lint_test(
@@ -44,5 +59,12 @@ guardian_go_proto_codegen_check(
     go_module = "github.com/guardian-intelligence/guardian/src/proto/gen/go",
     proto_files = ["guardian/analytics/v1/events.proto"],
     proto_path = "src/proto",
-    proto_srcs = ["guardian/analytics/v1/events.proto"],
+    # events.proto imports the vendored buf/validate/validate.proto (which in
+    # turn imports these WKTs); stage them so protoc resolves the import. Only
+    # events.proto is generated (proto_files).
+    proto_srcs = [
+        "guardian/analytics/v1/events.proto",
+        "buf/validate/validate.proto",
+        "@protobuf//:well_known_protos",
+    ],
 )

@@ -6,9 +6,16 @@ syntax = "proto3";
 // server-derived — they have no wire fields at all. Shape follows the
 // pattern shared by Segment/PostHog/Plausible and the OTel event model;
 // rationale and storage schema: docs/analytics-storage-design.md.
+//
+// Structural limits are enforced declaratively by protovalidate
+// (buf.validate); the name registry, props JSON shape, and web-vital
+// cross-field rules stay server-side (validate.go) because they are not
+// expressible as field constraints.
 package guardian.analytics.v1;
 
 option go_package = "github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/analytics/v1;analyticsv1";
+
+import "buf/validate/validate.proto";
 
 service EventService {
   rpc Publish(PublishRequest) returns (PublishResponse);
@@ -19,7 +26,9 @@ message PublishRequest {
   // received_at - sent_at (Segment/PostHog pattern); clients never compute
   // skew or send absolute event times.
   uint64 sent_at_unix_ms = 1;
-  // Server caps batch size; oversized batches are rejected, not truncated.
+  // Batch size is a whole-request property enforced by the handler (an empty
+  // or oversized batch is a request error); per-event constraints below are
+  // validated per event so one bad event never fails the batch.
   repeated Event events = 2;
 }
 
@@ -31,14 +40,30 @@ message PublishResponse {
 }
 
 message Event {
-  // Registered vocabulary (page_view, web_vital, rpc, click, ...);
-  // unknown names reject the event.
-  string name = 1;
-  string path = 2;
-  string referrer = 3;
-  // W3C trace id, 16 bytes; absent/all-zero = joins no server trace
-  // (OTel logs.proto semantics). Only rpc/error events carry one.
-  bytes trace_id = 4;
+  // Registered vocabulary (page_view, web_vital, rpc, click, ...); the exact
+  // registry is checked server-side, this bounds shape only.
+  string name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+    pattern: "^[a-z0-9_.]+$"
+  }];
+  // Rooted request path; empty is allowed (not every event has one).
+  string path = 2 [
+    (buf.validate.field).string.max_len = 1024,
+    (buf.validate.field).cel = {
+      id: "path.rooted"
+      message: "path must be empty or start with /"
+      expression: "this == '' || this.startsWith('/')"
+    }
+  ];
+  string referrer = 3 [(buf.validate.field).string.max_len = 1024];
+  // W3C trace id, 16 bytes; absent = joins no server trace (OTel logs.proto
+  // semantics). Only rpc/error events carry one.
+  bytes trace_id = 4 [(buf.validate.field).cel = {
+    id: "trace_id.len"
+    message: "trace_id must be absent or exactly 16 bytes"
+    expression: "size(this) == 0 || size(this) == 16"
+  }];
   // Milliseconds before sent_at that the event occurred (PostHog "offset").
   // Not yet stored: server_ts is batch receipt time and in-session order
   // comes from session_seq; reserved for skew-corrected event time
@@ -50,6 +75,6 @@ message Event {
   // web_vital events only; mirrors the OTel browser.web_vital shape.
   string vital_name = 7;
   double vital_value = 8;
-  // Flat JSON, server-capped size.
-  string props_json = 9;
+  // Flat JSON object; JSON validity is checked server-side.
+  string props_json = 9 [(buf.validate.field).string.max_len = 2048];
 }

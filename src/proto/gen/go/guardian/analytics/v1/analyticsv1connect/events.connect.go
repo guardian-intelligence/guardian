@@ -8,6 +8,11 @@
 // server-derived — they have no wire fields at all. Shape follows the
 // pattern shared by Segment/PostHog/Plausible and the OTel event model;
 // rationale and storage schema: docs/analytics-storage-design.md.
+//
+// Structural limits are enforced declaratively by protovalidate
+// (buf.validate); the name registry, props JSON shape, and web-vital
+// cross-field rules stay server-side (validate.go) because they are not
+// expressible as field constraints.
 package analyticsv1connect
 
 import (

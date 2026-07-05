@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"buf.build/go/protovalidate"
 	"connectrpc.com/connect"
 
 	analyticsv1 "github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/analytics/v1"
@@ -15,8 +16,9 @@ import (
 const schemaVersion = 1
 
 type eventService struct {
-	batch *batcher
-	now   func() time.Time
+	batch    *batcher
+	now      func() time.Time
+	validate protovalidate.Validator
 }
 
 // Connect handlers see only the RPC message; the trust-bearing material
@@ -65,6 +67,11 @@ func (s *eventService) Publish(
 	rows := make([]eventRow, 0, len(events))
 	rejects := map[rejectReason]int{}
 	for _, e := range events {
+		if err := s.validate.Validate(e); err != nil {
+			rejects[rejectSchema]++
+			slog.Warn("event failed schema validation", "err", err.Error())
+			continue
+		}
 		if reason := validateEvent(e); reason != "" {
 			rejects[reason]++
 			continue
@@ -78,7 +85,7 @@ func (s *eventService) Publish(
 			CorrelationID: meta.corrID,
 			SessionSeq:    e.GetSessionSeq(),
 			Path:          e.GetPath(),
-			Referrer:      truncate(e.GetReferrer(), maxReferrerLen),
+			Referrer:      e.GetReferrer(),
 			UA:            meta.ctx.UA,
 			ClientIP:      meta.ctx.ClientIP,
 			IPSource:      meta.ctx.IPSource,
