@@ -169,7 +169,8 @@ jobs:
           mkdir -p node_modules
           cp -r /tmp/perf-gate-deps/node_modules/playwright node_modules/
           cp -r /tmp/perf-gate-deps/node_modules/playwright-core node_modules/
-          node node_modules/playwright/cli.js install --with-deps chromium firefox webkit
+          # webkit is excluded: unusable on this runner (see scroll-jank-gate.mjs header).
+          node node_modules/playwright/cli.js install --with-deps chromium firefox
           BASE=http://127.0.0.1:8080 node perf/scroll-jank-gate.mjs
 
       - name: Stop perf-gate container

@@ -5,20 +5,25 @@
 //   vp build && PORT=4179 HOST=127.0.0.1 node .output/server/index.mjs &
 //   node perf/scroll-jank-gate.mjs
 //
-// Thresholds are calibrated against measured baselines (2026-07-05, see
-// perf/scroll-jank.mjs history) with headroom for CI runner variance:
-// Chromium holds a flat ~16.7ms/frame; Firefox has a known, accepted residual
-// cost from the paper-layer compositing (~17-26ms avg, PR #359); WebKit was
-// the dominant offender (~55ms avg, 15% of frames >33ms) until the hand-
-// filter's feTurbulence numOctaves was cut from 2 to 1. Each threshold sits
-// above its engine's fixed-state ceiling and below its broken-state floor.
+// Thresholds are calibrated against a REAL run of this exact job on the
+// GitHub-hosted runner (2026-07-05), not just local measurements -- the
+// runner turned out noisier than expected for Chromium/Firefox (shared
+// 2-vCPU, no dedicated GPU) and WebKit specifically is not viable to gate
+// on there at all: a real run measured avg 1957-3051ms/frame (vs ~40ms on
+// real hardware) with as few as 2 sampled frames in a 5s window -- multiple
+// orders of magnitude beyond anything seen locally, consistent with WebKit
+// falling back to an unusable software path with no GPU on this runner.
+// WebKit is therefore excluded from the CI gate; verify WebKit-specific
+// changes with perf/scroll-jank.mjs / perf/transition-jank.mjs locally (on
+// hardware with a GPU) or on a real device -- this is exactly why the
+// letters-scroll-perf memory has Shovon testing on iOS separately. Chromium
+// and Firefox budgets below have headroom over the real CI numbers observed
+// (chromium: avg 20.5-21.6ms, jank 7-11; firefox: avg 40.4-43.6ms, jank 20).
 // Three attempts per engine; the MEDIAN run is compared against budget --
 // resistant to a single outlier sample in either direction, unlike a
 // best-of-N (which would let one lucky sample from a genuinely regressed
-// build slip under budget). Thresholds were picked from measurements on a
-// quiet machine; if this flakes on the actual CI runner, re-baseline against
-// real runs there rather than loosening blindly.
-import { chromium, firefox, webkit } from "playwright";
+// build slip under budget).
+import { chromium, firefox } from "playwright";
 import { measureScrollJank } from "./lib/scroll-measure.mjs";
 
 const base = process.env.BASE ?? "http://127.0.0.1:4179";
@@ -26,9 +31,8 @@ const path = process.env.PAGE ?? "/letters/dear-shovon";
 const ATTEMPTS = 3;
 
 const BUDGETS = {
-  chromium: { avg: 25, jank: 5 },
-  firefox: { avg: 35, jank: 15 },
-  webkit: { avg: 45, jank: 20 },
+  chromium: { avg: 30, jank: 15 },
+  firefox: { avg: 55, jank: 25 },
 };
 
 let failures = 0;
@@ -53,7 +57,7 @@ async function medianOf(engine, engineName) {
 }
 
 console.log(`\n=== scroll-jank-gate @ ${base}${path} ===`);
-for (const [engineName, engine] of Object.entries({ chromium, firefox, webkit })) {
+for (const [engineName, engine] of Object.entries({ chromium, firefox })) {
   const budget = BUDGETS[engineName];
   const r = await medianOf(engine, engineName);
   check(`${engineName} avg <= ${budget.avg}ms`, r.avg <= budget.avg, `median ${r.avg}ms`);
