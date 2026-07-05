@@ -9,3 +9,5 @@ resources:
   - iam-project.yaml
   - iam-secrets.yaml
   - iam-stage-beta.yaml
+  - iam-stage-gamma.yaml
+  - iam-stage-prod.yaml

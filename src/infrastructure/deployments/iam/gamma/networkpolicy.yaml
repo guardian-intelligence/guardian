@@ -1,0 +1,204 @@
+# Keycloak's flows, following the repo's Cilium conventions (selecting an
+# endpoint flips it to default-deny for the selected direction; every rule
+# below is therefore the complete allowed set). All keycloak selectors match
+# BOTH app label values because Flagger's primary clone suffixes the selector
+# label value with -primary. Kubelet probes arrive from the reserved host
+# entity, which Cilium admits implicitly. The CNPG postgres pods are NOT
+# selected by any policy here — Cozystack tenant isolation plus the CNPG
+# operator's own management traffic stay untouched.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: keycloak
+  namespace: tenant-guardian-gamma
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: gamma
+spec:
+  endpointSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - keycloak
+          - keycloak-primary
+  ingress:
+    # JGroups cluster traffic between Keycloak pods (each color only ever
+    # discovers its own peers via its per-color headless Service, but the
+    # port-level allowance is shared).
+    - fromEndpoints:
+        - matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values:
+                - keycloak
+                - keycloak-primary
+      toPorts:
+        - ports:
+            - port: "7800"
+              protocol: TCP
+    # flagger-loadtester runs the login gate and hey load against the canary
+    # Service during Flagger analysis.
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: flagger-loadtester
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # Stage-local CNPG Postgres.
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: postgres-keycloak
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    # JGroups to peers.
+    - toEndpoints:
+        - matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values:
+                - keycloak
+                - keycloak-primary
+      toPorts:
+        - ports:
+            - port: "7800"
+              protocol: TCP
+    # GitHub token/userinfo exchange for the github identity provider: the
+    # server-side broker calls github.com / api.github.com during login.
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+# flagger-loadtester: webhook calls arrive from the Flagger controller; the
+# checks it executes go to the Keycloak pods (canary Service) plus DNS.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: flagger-loadtester
+  namespace: tenant-guardian-gamma
+  labels:
+    app.kubernetes.io/name: flagger-loadtester
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: gamma
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: flagger-loadtester
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: flagger
+            k8s:app.kubernetes.io/name: flagger
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values:
+                - keycloak
+                - keycloak-primary
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+---
+# The public edge is the tenant-root ingress controller. Cozystack's
+# generated tenant isolation admits only the parent tenant, system
+# namespaces, and the apiserver into tenant-guardian-gamma — not tenant-root.
+# This additive clusterwide pair admits exactly the root ingress controller
+# to the Keycloak pods (same shape as company-site prod's).
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-guardian-gamma-allow-root-ingress-keycloak
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: verself
+spec:
+  endpointSelector:
+    matchExpressions:
+      - key: k8s:io.kubernetes.pod.namespace
+        operator: In
+        values:
+          - tenant-guardian-gamma
+      - key: k8s:app.kubernetes.io/name
+        operator: In
+        values:
+          - keycloak
+          - keycloak-primary
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            k8s:app.kubernetes.io/name: ingress-nginx
+            k8s:app.kubernetes.io/component: controller
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+---
+# Egress half: tenant-root's generated egress policy only admits destinations
+# labeled tenant.cozystack.io/tenant-root; grandchild tenant namespaces carry
+# only parent+self ancestry labels. Admit the root ingress controller
+# outbound to the Keycloak pods (Cilium policies are additive).
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-root-ingress-egress-keycloak-gamma
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: verself
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-root
+      k8s:app.kubernetes.io/name: ingress-nginx
+      k8s:app.kubernetes.io/component: controller
+  egress:
+    - toEndpoints:
+        - matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: In
+              values:
+                - tenant-guardian-gamma
+            - key: k8s:app.kubernetes.io/name
+              operator: In
+              values:
+                - keycloak
+                - keycloak-primary
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP

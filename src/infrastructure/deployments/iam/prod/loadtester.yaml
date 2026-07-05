@@ -1,0 +1,144 @@
+# Flagger's official webhook runner: receives the Canary's pre-rollout /
+# rollout webhooks and executes the actual checks (bash login gate, hey load
+# generation) against the canary-color Service. This is the component that
+# turns "readiness-gated" into "login-gated" blue/green, and its hey runs are
+# the first raw TPS numbers we collect for Keycloak (logCmdOutput streams
+# them into this pod's logs on every rollout).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flagger-loadtester
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: flagger-loadtester
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: flagger-loadtester
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: flagger-loadtester
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/stage: prod
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: loadtester
+          image: ghcr.io/fluxcd/flagger-loadtester@sha256:f98a35ab7aca0f2efdd8e397b4002e283637f5c9e31e4e2a6c1e97af07c50454 # 0.37.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          command:
+            - ./loadtester
+            - -port=8080
+            - -log-level=info
+            - -timeout=1h
+          env:
+            # Consumed by the login-gate script; never appears in the Canary
+            # CR or this manifest.
+            - name: CANARY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-canary-user
+                  key: password
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+              ephemeral-storage: 128Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi
+              ephemeral-storage: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: gate-scripts
+              mountPath: /gate
+              readOnly: true
+      volumes:
+        - name: gate-scripts
+          configMap:
+            name: keycloak-gate-scripts
+            defaultMode: 0555
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flagger-loadtester
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: flagger-loadtester
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: flagger-loadtester
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+---
+# The login gate Flagger runs against the CANARY color before and during
+# analysis: OIDC discovery must serve, and a direct-grant login as the
+# non-privileged canary realm user must return an access token. A new
+# Keycloak version that cannot actually authenticate never becomes primary.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-gate-scripts
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: flagger-loadtester
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+  annotations:
+    # The script's ${CANARY_PASSWORD} must reach bash, not Flux's envsubst.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  login-gate.sh: |
+    #!/usr/bin/env bash
+    set -euo pipefail
+    base="http://keycloak-canary.tenant-guardian-prod"
+
+    curl -fsS --max-time 10 \
+      "$base/realms/verself/.well-known/openid-configuration" \
+      | grep -q '"issuer"'
+
+    token="$(curl -fsS --max-time 10 \
+      -d 'grant_type=password&client_id=canary&username=canary' \
+      --data-urlencode "password=${CANARY_PASSWORD}" \
+      "$base/realms/verself/protocol/openid-connect/token" \
+      | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
+    test -n "$token"
+    echo "login-gate: OK (discovery + direct grant against canary color)"

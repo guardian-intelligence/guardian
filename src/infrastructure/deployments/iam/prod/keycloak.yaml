@@ -1,0 +1,253 @@
+# Keycloak for the Verself IAM prod stage. Hand-rolled Deployment (not the
+# official Operator or keycloakx chart — both render StatefulSets, and
+# Flagger's targetRef only supports Deployment/DaemonSet). Durable state is
+# the stage's CNPG Postgres; multi-pod cache clustering uses the Quarkus
+# "kubernetes" stack (DNS_PING against a headless Service, no in-cluster RBAC
+# needed, so no ServiceAccount token is mounted).
+#
+# Flagger interplay (Canary declared in canary.yaml):
+# - Flagger owns the apex/primary/canary ClusterIP Services; none is declared
+#   here, or Flux and Flagger would fight over the selector.
+# - Flagger clones this Deployment to keycloak-primary and suffixes the
+#   selector label value, so anything matching pods must match BOTH
+#   keycloak and keycloak-primary (network policies, PDB).
+# - JGroups discovery must NOT span colors (a mixed-version Infinispan
+#   cluster mid-upgrade is exactly what blue/green avoids), so the DNS_PING
+#   query is derived from the pod's own app label via fieldRef:
+#   keycloak-jgroups for the canary color, keycloak-primary-jgroups for
+#   primary — one headless Service per color below.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: guardian
+    app.kubernetes.io/component: iam
+    guardian.dev/product: verself
+    guardian.dev/stage: prod
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: keycloak
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: keycloak
+        app.kubernetes.io/part-of: guardian
+        app.kubernetes.io/component: iam
+        guardian.dev/product: verself
+        guardian.dev/stage: prod
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak@sha256:3e58dc82a9b72f364f37dac17f99fcaf53d0052a3c1ad7f00b069a1ed43201c0 # 26.6.2
+          imagePullPolicy: IfNotPresent
+          # start (not start --optimized): the official image augments at
+          # startup for KC_DB=postgres; baking an optimized image is a later
+          # supply-chain step, not worth a custom build yet.
+          args: ["start", "--import-realm"]
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: management
+              containerPort: 9000
+              protocol: TCP
+            - name: jgroups
+              containerPort: 7800
+              protocol: TCP
+          env:
+            - name: KC_HTTP_ENABLED
+              value: "true"
+            # TLS terminates at Cloudflare; ingress-nginx forwards plain HTTP
+            # with X-Forwarded-* headers, same as company-site.
+            - name: KC_PROXY_HEADERS
+              value: xforwarded
+            - name: KC_HOSTNAME
+              value: https://guardianintelligence.org
+            - name: KC_HEALTH_ENABLED
+              value: "true"
+            - name: KC_METRICS_ENABLED
+              value: "true"
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-keycloak-app
+                  key: host
+            - name: KC_DB_URL_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-keycloak-app
+                  key: port
+            - name: KC_DB_URL_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-keycloak-app
+                  key: dbname
+            - name: KC_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-keycloak-app
+                  key: username
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-keycloak-app
+                  key: password
+            - name: KC_CACHE
+              value: ispn
+            - name: KC_CACHE_STACK
+              value: kubernetes
+            - name: KC_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            # The pod's own app label value ("keycloak" or, on the Flagger
+            # clone, "keycloak-primary") selects its color's headless
+            # Service, keeping each color's Infinispan cluster isolated.
+            - name: KC_APP_LABEL
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['app.kubernetes.io/name']
+            - name: JAVA_OPTS_APPEND
+              value: "-Djgroups.dns.query=$(KC_APP_LABEL)-jgroups.$(KC_POD_NAMESPACE).svc.cozy.local"
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-admin-bootstrap
+                  key: username
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-admin-bootstrap
+                  key: password
+            # Consumed by ${...} placeholders in the realm import JSON; the
+            # secret values never appear in the ConfigMap.
+            - name: GITHUB_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-github-oauth
+                  key: GITHUB_CLIENT_SECRET
+            - name: KEYCLOAK_CANARY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-canary-user
+                  key: password
+          startupProbe:
+            httpGet:
+              path: /health/started
+              port: management
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: management
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: management
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+              ephemeral-storage: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+              ephemeral-storage: 2Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: realm-import
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+      volumes:
+        - name: realm-import
+          configMap:
+            name: keycloak-realm-verself
+---
+# Per-color JGroups discovery targets (DNS_PING). publishNotReadyAddresses is
+# required: pods must find each other before they report Ready.
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-jgroups
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  type: ClusterIP
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: keycloak
+  ports:
+    - name: jgroups
+      port: 7800
+      targetPort: jgroups
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-primary-jgroups
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  type: ClusterIP
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: keycloak-primary
+  ports:
+    - name: jgroups
+      port: 7800
+      targetPort: jgroups
+      protocol: TCP
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: keycloak
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  minAvailable: 1
+  selector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - keycloak
+          - keycloak-primary

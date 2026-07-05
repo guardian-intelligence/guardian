@@ -1,0 +1,63 @@
+# prod receives Freight only after gamma has verified it. Deliberate
+# promotion only — see the gamma Stage's note.
+#
+# substitute: disabled — the ${{ ... }} promotion expressions must reach
+# Kargo verbatim, not be mangled by Flux's envsubst pass.
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: prod
+  namespace: guardian-iam
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+spec:
+  requestedFreight:
+    - origin:
+        kind: Warehouse
+        name: keycloak
+      sources:
+        stages:
+          - gamma
+  promotionTemplate:
+    spec:
+      vars:
+        - name: repoURL
+          value: https://github.com/guardian-intelligence/guardian.git
+        - name: imageRepo
+          value: quay.io/keycloak/keycloak
+      steps:
+        - uses: git-clone
+          config:
+            repoURL: ${{ vars.repoURL }}
+            checkout:
+              - branch: main
+                path: ./repo
+        - uses: yaml-update
+          config:
+            path: ./repo/src/infrastructure/deployments/iam/prod/keycloak.yaml
+            updates:
+              - key: spec.template.spec.containers.0.image
+                value: ${{ vars.imageRepo }}@${{ imageFrom(vars.imageRepo).Digest }}
+        - uses: git-commit
+          as: commit
+          config:
+            path: ./repo
+            message: promote keycloak (prod) to ${{ imageFrom(vars.imageRepo).Digest }}
+        - uses: git-push
+          as: push
+          config:
+            path: ./repo
+            generateTargetBranch: true
+        - uses: git-open-pr
+          as: open-pr
+          config:
+            repoURL: ${{ vars.repoURL }}
+            provider: github
+            sourceBranch: ${{ outputs.push.branch }}
+            targetBranch: main
+            title: promote keycloak (prod) to ${{ imageFrom(vars.imageRepo).Digest }}
+        - uses: git-wait-for-pr
+          if: ${{ status('open-pr') == 'Succeeded' }}
+          config:
+            repoURL: ${{ vars.repoURL }}
+            prNumber: ${{ outputs['open-pr'].pr.id }}
