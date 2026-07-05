@@ -14,17 +14,22 @@ The purpose is to create a free and open-source system for any being to convert 
   - `src/infrastructure/base/cozystack/platform.yaml`
   - `src/infrastructure/base/flux/sync.yaml`
 * Stripe is payment rail only -- we don't use Stripe Subscriptions / Usage-Based Billing. We meter on our own (planned)
-* Zero customers as of present day besides us: no compatibility shims or legacy wrappers
-* Auth n/z is multitenant by default: Keycloak instance per stage. SpiceDB/Zanzibar for permissions
-* VictoriaLogs for logs. VictoriaMetrics for Metrics. TigerBeetle for OLTP. CNPG (single writer per stage, fan out read replicas) for system stage and misc.
-
-<releases>
-Default release channels: Edge (CD on main), nightly, RC, stable.
-Default deployment stages: beta, gamma, prod.
-</releases>
+* Secrets via a single OpenBao instance for the whole cluster; stage isolation is at the policy layer, not the instance layer. Access is scoped per consumer Kubernetes namespace: `guardian-reader-<ns>` / `guardian-writer-<ns>` role pairs confined to `kv/guardian/guardian-mgmt/<namespace>/*`
+* Zero customers as of present day besides us: no compatibility shims or legacy wrappers.
+* OCI images are shipped to ghcr.io. See https://github.com/orgs/guardian-intelligence/packages
+* Auth n/z is multitenant by default: Keycloak instance per stage. SpiceDB/Zanzibar for permissions. Currently just "Sign in With GitHub" supported. Future "Sign in With Guardian" with us as the OIDC provider and multiple connected accounts planned.
+  - beta: https://beta.guardianintelligence.org/realms/verself/broker/github/endpoint
+  - gamma: https://gamma.guardianintelligence.org/realms/verself/broker/github/endpoint
+  - prod: https://guardianintelligence.org/realms/verself/broker/github/endpoint
+* VictoriaLogs for logs. VictoriaMetrics for Metrics. TigerBeetle for financial truth and OLTP (planned). ClickHouse for analytics and Otel correlations/traces/spans. CNPG (single writer per stage, fan out read replicas) for system stage and misc.
+* Bazel owns the build graph and produces bytes using OCI for layout. `cosign`/SLSA proves that it's authentic Guardian Intelligence LLC software.
+* Runtime technology inventory: `src/infrastructure/bootstrap/bundle/images.lock` is what runs (digest-pinned, conformance-tested); `src/tools/` is what we operate with (pinned CLIs: talm, talosctl, flux, kubectl, hauler, openbao, oras, k6); `MODULE.bazel` is what we build with.
+* Flagger used for blue/green deployments (Keycloak).
+* Kargo for deployment promotions from beta -> gamma -> prod. GitHub app configured for auto-commits. Release channels for distributed binaries: Edge (CD on main), nightly, RC, stable.
+* Domain: guardianintelligence.org (abbreviated in conversation with user as "gi.org")
 
 <repo_shape>
-The below is the target shape -- repo still in flux and does not match this quite yet
+The below is the target shape -- repo still changing and does not match this quite yet
 
 src/
     products/
@@ -88,7 +93,7 @@ src/
       tests/
       cmd/                             # infra validation/drill helpers
       load/
-    tools/
+    tools/                             # Non-runtime tooling (doggo for DNS etc.)
 </repo_shape>
 
 <technology>
@@ -107,14 +112,6 @@ Using MetalLB as a public origin requires routable service IPs or BGP from the
 provider network. Until that exists, Cloudflare origins are the three Latitude
 public node IPs, and the public edge must stay stateless so Cloudflare can steer
 around unhealthy origins per request.
-
-Bazel owns the build graph and produces bytes using OCI for layout. `cosign`/SLSA proves its authentic Guardian Intelligence LLC software. Cozystack management cluster reconciles our declared state.
-
-Technology inventories live in the repo, not in this file: `src/infrastructure/bootstrap/bundle/images.lock` is what runs (digest-pinned, conformance-tested); `src/tools/` is what we operate with (pinned CLIs: talm, talosctl, flux, kubectl, hauler, openbao, oras, k6); `MODULE.bazel` is what we build with.
-
-Planned: Use Flagger for progressive delivery after Flux applies an approved digest. Use Kargo/Freight to promote immutable release candidates to service+stage+region targets.
-
-Domain: guardianintelligence.org (abbreviated gi.org)
 
 Objectives:
 
@@ -151,8 +148,6 @@ Constraints:
 
 Service architecture:
 
-- Cozystack
-- Guardian distinguishes distributed software from deployed software. Distributed software runs on the user's device; deployed software runs on Guardian-owned capacity. Promotions between release channels will be done through Kargo. Promotions for deployments will be done through Flux.
 - Releasing distributed software is a one-way door: after a CLI, SDK, crate, wheel, or desktop/mobile artifact is public, rollback means publishing a new artifact and helping consumers move. Its gates must get stricter as it approaches stable.
 
 Sandbox isolation doctrine (multi-tenant QEMU), the below is advisory for when we stand up our QEMU warm pool:
