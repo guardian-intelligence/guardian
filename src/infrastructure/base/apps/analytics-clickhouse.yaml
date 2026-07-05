@@ -28,6 +28,14 @@ metadata:
   name: analytics
   namespace: tenant-root
 spec:
+  # Chart bug workaround (v1.5.0): the CHI template's zookeeper block reads
+  # `.Values.clusterDomain` (undefined — every other reference uses the
+  # injected `._cluster "cluster-domain"`), rendering keeper hosts as
+  # absolute FQDNs ending in `.svc.` that never resolve, which breaks ALL
+  # Replicated* engines on chart CH apps. The schema allows extra fields,
+  # so declaring the value the template expects fixes the render. Drop
+  # when upstream fixes the template.
+  clusterDomain: cozy.local
   replicas: 2
   shards: 1
   size: 20Gi
