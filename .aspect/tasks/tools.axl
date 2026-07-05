@@ -33,6 +33,8 @@ DEBUG_CLI_SHIMS = [
 # Repo-pinned build tools. Same shim mechanism, but these are cross-platform
 # Bazel targets (not host-specific archives), so `buf generate` uses the
 # pinned buf + plugins the codegen-drift check enforces — no system tools.
+# The three built-from-source outputs live under bazel-out, so rerun
+# `aspect tools install` after a `bazel clean` to refresh those shims.
 BUILD_TOOL_SHIMS = [
     ("buf", "@rules_buf_toolchains//:buf"),
     ("protoc", "@protobuf//:protoc"),
