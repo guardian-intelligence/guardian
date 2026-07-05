@@ -41,7 +41,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: web
-          image: ghcr.io/guardian-intelligence/company-site@sha256:60775f17d6bb26b5059049afc918d5cd41eac69f2138b5de8d09ad4e78a64d10
+          image: ghcr.io/guardian-intelligence/company-site@sha256:adc157326076d3174263eb38d52be1b2180dc5996dd0053c876c79f0103e9de6
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
