@@ -136,6 +136,33 @@ jobs:
           echo "pinned: $pinned"
           echo "digest=$built" >> "$GITHUB_OUTPUT"
 
+      # Runtime performance promotion gate: load the exact image just built,
+      # run it, and fail the check if the letters page's scroll-frame timing
+      # regresses (perf/scroll-jank-gate.mjs, thresholds + rationale there).
+      # Runs against the shipped artifact, not a dev server, so it catches
+      # anything a bundler/runtime difference would otherwise hide.
+      - name: Load and run the built image
+        if: steps.classify.outputs.build == 'true'
+        run: |
+          bazelisk run //src/products/viteplus-monorepo/apps/guardianintelligence-web/site:load
+          docker run -d --name perf-gate -p 8080:8080 guardian/company-site:dev
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8080/letters/dear-shovon >/dev/null && break
+            sleep 1
+          done
+
+      - name: Runtime performance gate
+        if: steps.classify.outputs.build == 'true'
+        working-directory: src/products/viteplus-monorepo/apps/guardianintelligence-web
+        run: |
+          npm install --no-save playwright@1.61.1
+          npx playwright install --with-deps chromium firefox webkit
+          BASE=http://127.0.0.1:8080 node perf/scroll-jank-gate.mjs
+
+      - name: Stop perf-gate container
+        if: always() && steps.classify.outputs.build == 'true'
+        run: docker rm -f perf-gate || true
+
       - name: Verify images.lock and rendered manifests agree
         if: steps.classify.outputs.conformance == 'true'
         run: bazelisk test //src/infrastructure/tests:talm_render_test
