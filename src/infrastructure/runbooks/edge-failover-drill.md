@@ -15,10 +15,11 @@ time.
 - All three Kubernetes nodes are `Ready`.
 - Ingress has at least one ready controller pod on each node.
 - The probe URL has a high-availability backend. The default is
-  `https://s3.guardianintelligence.org/`, backed by the Cozystack system
-  SeaweedFS S3 deployment. Do not use the Cozystack dashboard as the default
-  failover probe unless its chart exposes a durable HA setting; Cozystack 1.5.0
-  and 1.5.1 hard-code the dashboard console and gatekeeper to one replica.
+  `https://guardianintelligence.org/`, backed by the 3-replica company-site
+  Deployment behind the 3-replica tenant-root ingress. Do not use the Cozystack
+  dashboard as the default failover probe unless its chart exposes a durable HA
+  setting; Cozystack 1.5.0 and 1.5.1 hard-code the dashboard console and
+  gatekeeper to one replica.
 
 ## Commands
 
@@ -37,8 +38,8 @@ aspect infra edge-failover-drill \
   --node-ip=206.223.228.101 \
   --confirm-node-ip=206.223.228.101 \
   --kube-api-server=https://10.8.0.250:6443 \
-  --url=https://s3.guardianintelligence.org/ \
-  --expected-statuses=200,403 \
+  --url=https://guardianintelligence.org/ \
+  --expected-statuses=200 \
   --report=/tmp/guardian-edge-failover-ash-earth.json
 
 aspect infra edge-failover-drill \
@@ -47,8 +48,8 @@ aspect infra edge-failover-drill \
   --node-ip=45.250.254.119 \
   --confirm-node-ip=45.250.254.119 \
   --kube-api-server=https://10.8.0.250:6443 \
-  --url=https://s3.guardianintelligence.org/ \
-  --expected-statuses=200,403 \
+  --url=https://guardianintelligence.org/ \
+  --expected-statuses=200 \
   --report=/tmp/guardian-edge-failover-ash-wind.json
 
 aspect infra edge-failover-drill \
@@ -57,8 +58,8 @@ aspect infra edge-failover-drill \
   --node-ip=206.223.228.87 \
   --confirm-node-ip=206.223.228.87 \
   --kube-api-server=https://10.8.0.250:6443 \
-  --url=https://s3.guardianintelligence.org/ \
-  --expected-statuses=200,403 \
+  --url=https://guardianintelligence.org/ \
+  --expected-statuses=200 \
   --report=/tmp/guardian-edge-failover-ash-water.json
 ```
 

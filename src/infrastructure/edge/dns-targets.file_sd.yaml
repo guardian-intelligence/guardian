@@ -6,7 +6,6 @@
     - dashboard.guardianintelligence.org
     - grafana.guardianintelligence.org
     - keycloak.guardianintelligence.org
-    - s3.guardianintelligence.org
     - beta.guardianintelligence.org
     - gamma.guardianintelligence.org
   labels:

@@ -18,7 +18,6 @@ KUBECTL_FILE_TARGET = "@kubectl_linux_amd64//file:file"
 TALOSCTL_FILE_TARGET = "@talosctl_linux_amd64//file:file"
 COZYSTACK_INSTALLER_CHART = "oci://ghcr.io/cozystack/cozystack/cozy-installer"
 COZYSTACK_INSTALLER_VERSION = "1.5.0"
-BACKUP_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_backup_drill:cozystack_backup_drill"
 BUNDLE_TARGET = "//src/infrastructure/cmd/bundle:bundle"
 HAULER_TARGET = "//src/tools/hauler:hauler"
 IMAGES_LOCK_PATH = "src/infrastructure/bootstrap/bundle/images.lock"
@@ -876,69 +875,6 @@ def _bootstrap_impl(ctx):
         return rc
 
     return 0
-
-def _backup_drill_impl(ctx):
-    kubectl = _kubectl_path(ctx)
-    if kubectl == None:
-        return 1
-
-    rc = _check_live_context(ctx, kubectl)
-    if rc != 0:
-        return rc
-    if ctx.args.revision != "":
-        rc = _check_flux_revision(ctx, kubectl, ctx.args.revision)
-        if rc != 0:
-            return rc
-
-    if ctx.args.allow_in_place_restore != "" and ctx.args.allow_in_place_restore != "true" and ctx.args.allow_in_place_restore != "false":
-        ctx.std.io.stderr.write("ERROR: --allow-in-place-restore must be true or false\n")
-        return 1
-    if ctx.args.create_restore_target != "" and ctx.args.create_restore_target != "true" and ctx.args.create_restore_target != "false":
-        ctx.std.io.stderr.write("ERROR: --create-restore-target must be true or false\n")
-        return 1
-    if ctx.args.cleanup_created_restore_target != "" and ctx.args.cleanup_created_restore_target != "true" and ctx.args.cleanup_created_restore_target != "false":
-        ctx.std.io.stderr.write("ERROR: --cleanup-created-restore-target must be true or false\n")
-        return 1
-    if ctx.args.activate_system_bucket != "" and ctx.args.activate_system_bucket != "true" and ctx.args.activate_system_bucket != "false":
-        ctx.std.io.stderr.write("ERROR: --activate-system-bucket must be true or false\n")
-        return 1
-
-    drill_args = [
-        "--kubectl",
-        kubectl,
-        "--stage",
-        ctx.args.stage,
-        "--component",
-        ctx.args.component,
-        "--application",
-        ctx.args.application,
-        "--request-timeout",
-        ctx.args.request_timeout,
-        "--wait-timeout",
-        ctx.args.wait_timeout,
-    ]
-    if ctx.args.kubeconfig != "":
-        drill_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
-    if ctx.args.name != "":
-        drill_args.extend(["--name", ctx.args.name])
-    if ctx.args.restore_target != "":
-        drill_args.extend(["--restore-target", ctx.args.restore_target])
-    if ctx.args.allow_in_place_restore == "true":
-        drill_args.append("--allow-in-place-restore=true")
-    if ctx.args.create_restore_target == "true":
-        drill_args.append("--create-restore-target=true")
-    if ctx.args.cleanup_created_restore_target == "false":
-        drill_args.append("--cleanup-created-restore-target=false")
-    if ctx.args.activate_system_bucket == "false":
-        drill_args.append("--activate-system-bucket=false")
-
-    return checked_spawn(
-        ctx,
-        "bazelisk",
-        ["run", BACKUP_DRILL_TARGET, "--"] + drill_args,
-        cwd = ws_path(ctx),
-        label = "cozystack backup drill",
-    )
 
 def _node_outage_drill_impl(ctx):
     if ctx.args.node == "":
@@ -1886,28 +1822,6 @@ openbao_observability_drill = task(
         "stage": args.string(default = "root", description = "Guardian bootstrap stage: root."),
         "statefulset": args.string(default = "guardian-openbao", description = "OpenBao StatefulSet name."),
         "wait_timeout": args.string(default = "10m", description = "Timeout for OpenBao and monitoring readiness waits."),
-    },
-)
-
-backup_drill = task(
-    implementation = _backup_drill_impl,
-    name = "backup-drill",
-    group = ["infra"],
-    summary = "Run an ad-hoc Cozystack BackupJob, and optionally a RestoreJob, for a Guardian app.",
-    args = {
-        "allow_in_place_restore": args.string(default = "false", description = "Set true only for an intentional restore into the source app."),
-        "activate_system_bucket": args.string(default = "true", description = "For ClickHouse useSystemBucket, prime projected credentials and roll backup sidecars before the drill."),
-        "application": args.string(default = "guardian", description = "Cozystack app name."),
-        "cleanup_created_restore_target": args.string(default = "true", description = "Delete a restore target created by this drill before exiting."),
-        "component": args.string(default = "clickhouse", description = "Component to drill: clickhouse or postgres."),
-        "create_restore_target": args.string(default = "false", description = "Create --restore-target from the live source app spec before restoring."),
-        "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
-        "name": args.string(default = "", description = "Optional BackupJob name. Defaults to a timestamped DNS label."),
-        "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
-        "restore_target": args.string(default = "", description = "Optional app name to restore into after the backup succeeds."),
-        "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before the drill."),
-        "stage": args.string(default = "root", description = "Guardian bootstrap stage: root."),
-        "wait_timeout": args.string(default = "30m", description = "Timeout for BackupJob, Backup, and RestoreJob waits."),
     },
 )
 

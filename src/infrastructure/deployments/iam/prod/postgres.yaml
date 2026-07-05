@@ -1,7 +1,7 @@
-# Prod Keycloak Postgres: quorum replication + platform-managed backups
-# (cozy-default BackupClass + system bucket, same shape as tenant-root's
-# core-services cluster — no S3 coordinates or credentials here). Keycloak
-# connects via Secret/postgres-keycloak-app against the default app database.
+# Prod Keycloak Postgres: quorum replication. Backup config returns when the
+# off-cluster (Cloudflare R2) backup path lands — no S3 coordinates or
+# credentials belong here. Keycloak connects via Secret/postgres-keycloak-app
+# against the default app database.
 apiVersion: apps.cozystack.io/v1alpha1
 kind: Postgres
 metadata:
@@ -16,23 +16,3 @@ spec:
   quorum:
     minSyncReplicas: 1
     maxSyncReplicas: 2
-  backup:
-    enabled: true
-    retentionPolicy: 30d
-    schedule: ""
-    useSystemBucket: true
----
-apiVersion: backups.cozystack.io/v1alpha1
-kind: Plan
-metadata:
-  name: keycloak-postgres-daily
-  namespace: tenant-guardian-prod
-spec:
-  applicationRef:
-    apiGroup: apps.cozystack.io
-    kind: Postgres
-    name: keycloak
-  backupClassName: cozy-default
-  schedule:
-    type: cron
-    cron: "23 1 * * *"

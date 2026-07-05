@@ -9,6 +9,9 @@ spec:
       values:
         bundles:
           disabledPackages:
+            # Stays disabled until the off-cluster (Cloudflare R2) backup path
+            # lands: the controller needs an S3 endpoint, and Guardian runs no
+            # in-cluster object storage to point it at.
             - cozystack.backupstrategy-controller
         publishing:
           host: guardianintelligence.org

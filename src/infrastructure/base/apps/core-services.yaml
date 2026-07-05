@@ -1,11 +1,12 @@
 # Root tenant infrastructure services shared by the management cluster.
 #
 # These resources are Cozystack app CRs. The aggregated apps API converts them
-# into Flux HelmReleases in tenant-root. SeaweedFS provides the tenant-root COSI
-# bucket classes that bucket-style apps consume.
+# into Flux HelmReleases in tenant-root.
 #
-# Backups use Cozystack's platform-managed cozy-default BackupClass and system
-# bucket. Do not place S3 coordinates or credentials in these app CRs.
+# Guardian runs no in-cluster object storage: the bare-metal NVMe pool is too
+# expensive to spend on an S3 tier, and an in-cluster backup target is circular
+# (losing the cluster loses the backups). Database backups target off-cluster
+# Cloudflare R2; until that path lands, these app CRs carry no backup config.
 apiVersion: apps.cozystack.io/v1alpha1
 kind: Postgres
 metadata:
@@ -20,26 +21,6 @@ spec:
   quorum:
     minSyncReplicas: 1
     maxSyncReplicas: 2
-  backup:
-    enabled: true
-    retentionPolicy: 30d
-    schedule: ""
-    useSystemBucket: true
----
-apiVersion: backups.cozystack.io/v1alpha1
-kind: Plan
-metadata:
-  name: guardian-postgres-daily
-  namespace: tenant-root
-spec:
-  applicationRef:
-    apiGroup: apps.cozystack.io
-    kind: Postgres
-    name: guardian
-  backupClassName: cozy-default
-  schedule:
-    type: cron
-    cron: "7 1 * * *"
 ---
 apiVersion: apps.cozystack.io/v1alpha1
 kind: Ingress
@@ -52,30 +33,6 @@ spec:
   cloudflareProxy: true
 ---
 apiVersion: apps.cozystack.io/v1alpha1
-kind: SeaweedFS
-metadata:
-  name: seaweedfs
-  namespace: tenant-root
-spec:
-  host: s3.guardianintelligence.org
-  topology: Simple
-  replicationFactor: 3
-  db:
-    replicas: 3
-    size: 10Gi
-    storageClass: replicated
-  master:
-    replicas: 3
-  filer:
-    replicas: 3
-  volume:
-    replicas: 3
-    size: 20Gi
-    storageClass: replicated
-  s3:
-    replicas: 3
----
-apiVersion: apps.cozystack.io/v1alpha1
 kind: ClickHouse
 metadata:
   name: guardian
@@ -86,26 +43,7 @@ spec:
   size: 20Gi
   storageClass: replicated
   logStorageSize: 5Gi
-  backup:
-    enabled: true
-    schedule: ""
-    useSystemBucket: true
   clickhouseKeeper:
     enabled: true
     replicas: 3
     size: 2Gi
----
-apiVersion: backups.cozystack.io/v1alpha1
-kind: Plan
-metadata:
-  name: guardian-clickhouse-daily
-  namespace: tenant-root
-spec:
-  applicationRef:
-    apiGroup: apps.cozystack.io
-    kind: ClickHouse
-    name: guardian
-  backupClassName: cozy-default
-  schedule:
-    type: cron
-    cron: "17 1 * * *"

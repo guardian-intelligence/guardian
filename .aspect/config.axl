@@ -16,7 +16,6 @@ load(
 )
 load(
     ".aspect/tasks/infra.axl",
-    infra_backup_drill = "backup_drill",
     infra_bootstrap = "bootstrap",
     infra_bundle = "bundle",
     infra_converged = "converged",
@@ -52,7 +51,6 @@ def config(ctx):
     ctx.tasks.add(bazel_bzlmod)
 
     # aspect infra ...
-    ctx.tasks.add(infra_backup_drill)
     ctx.tasks.add(infra_bootstrap)
     ctx.tasks.add(infra_bundle)
     ctx.tasks.add(infra_converged)
