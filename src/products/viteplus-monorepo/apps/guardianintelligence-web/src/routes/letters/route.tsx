@@ -320,7 +320,7 @@ function HandFilterDefs({ slug }: { slug: string }) {
         <feTurbulence
           type="fractalNoise"
           baseFrequency="0.014 0.005"
-          numOctaves={2}
+          numOctaves={1}
           seed={leanSeed}
           result="lean"
         />
@@ -338,7 +338,7 @@ function HandFilterDefs({ slug }: { slug: string }) {
         <feTurbulence
           type="fractalNoise"
           baseFrequency="0.3"
-          numOctaves={2}
+          numOctaves={1}
           seed={fibreSeed}
           result="fibre"
         />
