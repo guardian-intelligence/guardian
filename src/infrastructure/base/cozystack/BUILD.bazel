@@ -1,7 +1,6 @@
 filegroup(
     name = "manifests",
     srcs = [
-        "backupstrategy-controller.yaml",
         "kustomization.yaml",
         "platform.yaml",
     ],

@@ -51,10 +51,9 @@ Flux health checks declared in the manifests (`healthChecks`/`healthCheckExprs`)
 HA-enabled, one raft cluster ID across members). `aspect infra
 observability-drill` creates a short root Postgres pgbench job, then queries
 VictoriaMetrics and VictoriaLogs for that exact workload and the CNPG scrape
-path. Postgres and ClickHouse backups use Cozystack 1.5's platform-managed
-`BackupClass/cozy-default` and system bucket via
-`spec.backup.useSystemBucket: true`; the repo does not carry Guardian-specific
-backup strategies or per-app backup credential Secrets.
+path. Guardian runs no in-cluster object storage; database backups will target
+off-cluster Cloudflare R2 (path pending), and the repo does not carry
+Guardian-specific backup strategies or per-app backup credential Secrets.
 
 Available live debugging CLIs are repo-pinned and can be installed as local
 shims:

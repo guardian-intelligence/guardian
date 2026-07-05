@@ -46,9 +46,3 @@
     guardian_surface: iam
     guardian_stage: prod
     guardian_expected_statuses: "200"
-- targets:
-    - https://s3.guardianintelligence.org/
-  labels:
-    guardian_surface: seaweedfs-s3
-    guardian_stage: root
-    guardian_expected_statuses: "200,403"

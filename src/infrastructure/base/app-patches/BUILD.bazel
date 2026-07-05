@@ -1,7 +1,6 @@
 filegroup(
     name = "manifests",
     srcs = [
-        "clickhouse-system-bucket-endpoint.yaml",
         "ingress-origin-edge.yaml",
         "kustomization.yaml",
         "openbao-static-seal-admission.yaml",

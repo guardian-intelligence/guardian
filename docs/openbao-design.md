@@ -247,9 +247,9 @@ Legacy live cruft removed on 2026-06-29:
 - Deleted `tenant-root/ExternalSecret guardian-cnpg-backup-creds`,
   `tenant-root/ExternalSecret guardian-clickhouse-backup-creds`,
   `tenant-root/SecretStore openbao`, and `tenant-root/SecretStore openbao-clickhouse-backup`.
-  They pointed at retired `http://openbao-guardian.tenant-root.svc:8200`. Cozystack 1.5
-  system bucket/backups should remain platform-managed unless we intentionally reintroduce
-  an OpenBao-backed credential projection.
+  They pointed at retired `http://openbao-guardian.tenant-root.svc:8200`. Database backups
+  should remain platform-managed (Cozystack backup machinery pointed at off-cluster R2)
+  unless we intentionally reintroduce an OpenBao-backed credential projection.
 
 Ops resources still needed before OpenBao is the real vault/transit authority:
 - Restore drill for any durable Transit key before that key protects production

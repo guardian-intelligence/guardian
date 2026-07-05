@@ -3,7 +3,6 @@ filegroup(
     srcs = [
         "core-services.yaml",
         "observability.yaml",
-        "seaweedfs-s3-ingress-service.yaml",
     ],
     visibility = ["//visibility:public"],
 )
