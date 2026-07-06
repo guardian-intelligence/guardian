@@ -22,6 +22,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -232,14 +233,14 @@ type ntfySink struct {
 	url    string
 	token  string
 	client *http.Client
-	sleep  func(time.Duration)
+	sleep  func(context.Context, time.Duration)
 }
 
 func (s *ntfySink) deliver(ctx context.Context, n notification) error {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
-			s.sleep(time.Duration(attempt*2) * time.Second)
+			s.sleep(ctx, time.Duration(attempt*2)*time.Second)
 		}
 		if lastErr = s.post(ctx, n); lastErr == nil {
 			return nil
@@ -248,17 +249,45 @@ func (s *ntfySink) deliver(ctx context.Context, n notification) error {
 	return lastErr
 }
 
+// sleepCtx sleeps for d but wakes early when ctx is done, so backoff never
+// outlives the delivery deadline.
+func sleepCtx(ctx context.Context, d time.Duration) {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+	case <-t.C:
+	}
+}
+
+// sanitizeHeader makes an alert-derived value safe as an HTTP header value:
+// header values must be single-line, and Go's transport rejects the whole
+// request over any control byte — which would deterministically fail all
+// retries and lose the page. Every byte below 0x20 (CR/LF included) and
+// 0x7F (DEL) becomes a space.
+func sanitizeHeader(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, s)
+}
+
 func (s *ntfySink) post(ctx context.Context, n notification) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.url, strings.NewReader(n.Body))
 	if err != nil {
 		// The topic URL is a credential: never let it escape in an error.
 		return errors.New("ntfy request build failed")
 	}
-	// Header values must be single-line.
-	req.Header.Set("X-Title", strings.ReplaceAll(strings.ReplaceAll(n.Title, "\r", " "), "\n", " "))
+	req.Header.Set("X-Title", sanitizeHeader(n.Title))
 	req.Header.Set("X-Priority", strconv.Itoa(n.Priority))
 	if len(n.Tags) > 0 {
-		req.Header.Set("X-Tags", strings.Join(n.Tags, ","))
+		tags := make([]string, len(n.Tags))
+		for i, tag := range n.Tags {
+			tags[i] = sanitizeHeader(tag)
+		}
+		req.Header.Set("X-Tags", strings.Join(tags, ","))
 	}
 	if s.token != "" {
 		req.Header.Set("Authorization", "Bearer "+s.token)
@@ -296,7 +325,12 @@ type deadman struct {
 	timeout     time.Duration
 	repageEvery time.Duration
 	lastSeen    time.Time
+	// lastPage is the time of the last page that actually reached the sink
+	// (recorded via pageDelivered, not by observe): a failed page leaves
+	// pagePending set so the next poll tick retries instead of waiting out
+	// the repage window.
 	lastPage    time.Time
+	pagePending bool
 	silent      bool
 }
 
@@ -309,6 +343,7 @@ func (d *deadman) observe(now time.Time, watchdogActive bool) deadmanAction {
 		d.lastSeen = now
 		if d.silent {
 			d.silent = false
+			d.pagePending = false
 			return dmRecover
 		}
 		return dmNone
@@ -318,14 +353,22 @@ func (d *deadman) observe(now time.Time, watchdogActive bool) deadmanAction {
 	}
 	if !d.silent {
 		d.silent = true
-		d.lastPage = now
+		d.pagePending = true
 		return dmPage
 	}
-	if now.Sub(d.lastPage) >= d.repageEvery {
-		d.lastPage = now
+	if d.pagePending || now.Sub(d.lastPage) >= d.repageEvery {
+		d.pagePending = true
 		return dmRepage
 	}
 	return dmNone
+}
+
+// pageDelivered records a successful page. Only delivered pages start the
+// hourly repage cadence; until one lands, observe keeps returning dmRepage
+// every tick.
+func (d *deadman) pageDelivered(now time.Time) {
+	d.lastPage = now
+	d.pagePending = false
 }
 
 type config struct {
@@ -361,11 +404,18 @@ func loadConfig() (config, error) {
 	return cfg, nil
 }
 
+// deliveryBudget bounds one full sink delivery: 3 attempts at up to 10s each
+// plus 2s+4s of backoff (~36s worst case), with headroom.
+const deliveryBudget = 45 * time.Second
+
 type server struct {
 	cfg    config
 	m      *metrics
 	out    sink
 	client *http.Client
+	// inflight tracks detached delivery goroutines so graceful shutdown can
+	// wait for accepted alerts to finish delivering.
+	inflight sync.WaitGroup
 }
 
 func (s *server) handleSlack(w http.ResponseWriter, r *http.Request) {
@@ -394,15 +444,28 @@ func (s *server) handleSlack(w http.ResponseWriter, r *http.Request) {
 		n = compose(p)
 	}
 
-	if err := s.out.deliver(r.Context(), n); err != nil {
-		s.m.forwardFailures.Add(1)
-		slog.Error("forward failed", "event", eventName(p), "err", err)
-		http.Error(w, "delivery failed", http.StatusBadGateway)
-		return
-	}
-	s.m.forwarded.Add(1)
-	slog.Info("alert forwarded", "event", eventName(p), "priority", n.Priority)
-	w.WriteHeader(http.StatusOK)
+	// Delivery runs in a tracked goroutine under a context detached from the
+	// producer's: Flagger's alert client hangs up after a hard 5s with no
+	// retries, and its disconnect must not cancel the remaining sink
+	// attempts. The producer gets 202 as soon as the payload is accepted
+	// (delivery outcome is visible via relay_forward_failures_total), and
+	// graceful shutdown waits on inflight so an accepted alert is never
+	// abandoned.
+	ev := eventName(p)
+	s.inflight.Add(1)
+	go func() {
+		defer s.inflight.Done()
+		dctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), deliveryBudget)
+		defer cancel()
+		if err := s.out.deliver(dctx, n); err != nil {
+			s.m.forwardFailures.Add(1)
+			slog.Error("forward failed", "event", ev, "err", err)
+			return
+		}
+		s.m.forwarded.Add(1)
+		slog.Info("alert forwarded", "event", ev, "priority", n.Priority)
+	}()
+	w.WriteHeader(http.StatusAccepted)
 }
 
 // watchdogActive queries Alertmanager for the always-firing Watchdog alert.
@@ -480,13 +543,22 @@ func (s *server) runDeadman(ctx context.Context, d *deadman) {
 		default:
 			continue
 		}
-		dctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		// Detached from the run context so shutdown never cuts off an
+		// in-flight page; inflight lets main wait for it. A page is only
+		// recorded once the sink accepted it — a failed page retries on the
+		// next 60s tick instead of waiting out the repage window.
+		s.inflight.Add(1)
+		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deliveryBudget)
 		if err := s.out.deliver(dctx, n); err != nil {
 			slog.Error("dead-man page delivery failed", "err", err)
 		} else {
 			slog.Info("dead-man notification sent", "title", n.Title)
+			if action == dmPage || action == dmRepage {
+				d.pageDelivered(now)
+			}
 		}
 		cancel()
+		s.inflight.Done()
 	}
 }
 
@@ -508,7 +580,7 @@ func main() {
 	srv := &server{
 		cfg:    cfg,
 		m:      m,
-		out:    &ntfySink{url: cfg.ntfyURL, token: cfg.ntfyToken, client: &http.Client{Timeout: 10 * time.Second}, sleep: time.Sleep},
+		out:    &ntfySink{url: cfg.ntfyURL, token: cfg.ntfyToken, client: &http.Client{Timeout: 10 * time.Second}, sleep: sleepCtx},
 		client: &http.Client{Timeout: 10 * time.Second},
 	}
 
@@ -528,9 +600,9 @@ func main() {
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       10 * time.Second,
-		// Covers handler time: worst-case /slack is 3 ntfy attempts at 10s
-		// plus 6s of backoff.
-		WriteTimeout: 45 * time.Second,
+		// Handlers respond before delivery (202 + detached goroutine), so
+		// this only covers parsing the payload and writing the response.
+		WriteTimeout: 15 * time.Second,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -542,7 +614,9 @@ func main() {
 		<-stop
 		slog.Info("shutting down")
 		cancel()
-		sctx, scancel := context.WithTimeout(context.Background(), 10*time.Second)
+		// Grace covers a full in-flight delivery (deliveryBudget) so a page
+		// mid-retry survives the restart.
+		sctx, scancel := context.WithTimeout(context.Background(), deliveryBudget)
 		defer scancel()
 		_ = httpSrv.Shutdown(sctx)
 	}()
@@ -552,4 +626,8 @@ func main() {
 		slog.Error("serve", "err", err)
 		os.Exit(1)
 	}
+	// Delivery goroutines are deadline-bounded (deliveryBudget), so this
+	// wait terminates; without it an accepted alert could be abandoned at
+	// exit.
+	srv.inflight.Wait()
 }

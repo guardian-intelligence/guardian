@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -146,6 +148,12 @@ func (f *fakeSink) deliver(_ context.Context, n notification) error {
 	return nil
 }
 
+type funcSink struct {
+	fn func(context.Context, notification) error
+}
+
+func (f *funcSink) deliver(ctx context.Context, n notification) error { return f.fn(ctx, n) }
+
 func newTestServer(out sink) *server {
 	return &server{cfg: config{}, m: &metrics{}, out: out}
 }
@@ -167,10 +175,11 @@ func TestHandleSlackSuppressesHeartbeats(t *testing.T) {
 			s := newTestServer(out)
 			w := httptest.NewRecorder()
 			s.handleSlack(w, httptest.NewRequest("POST", "/slack", strings.NewReader(tc.payload)))
-			if w.Code != 200 {
-				t.Fatalf("status = %d, want 200", w.Code)
-			}
+			s.inflight.Wait()
 			if tc.suppress {
+				if w.Code != 200 {
+					t.Fatalf("status = %d, want 200", w.Code)
+				}
 				if len(out.sent) != 0 {
 					t.Errorf("suppressed payload was forwarded: %+v", out.sent)
 				}
@@ -178,6 +187,9 @@ func TestHandleSlackSuppressesHeartbeats(t *testing.T) {
 					t.Errorf("suppressed counter = %d, want 1", got)
 				}
 			} else {
+				if w.Code != 202 {
+					t.Fatalf("status = %d, want 202", w.Code)
+				}
 				if len(out.sent) != 1 {
 					t.Fatalf("forwarded %d notifications, want 1", len(out.sent))
 				}
@@ -195,8 +207,9 @@ func TestHandleSlackParseFallback(t *testing.T) {
 	long := "this is not json " + strings.Repeat("x", 8192)
 	w := httptest.NewRecorder()
 	s.handleSlack(w, httptest.NewRequest("POST", "/slack", strings.NewReader(long)))
-	if w.Code != 200 {
-		t.Fatalf("status = %d, want 200", w.Code)
+	s.inflight.Wait()
+	if w.Code != 202 {
+		t.Fatalf("status = %d, want 202", w.Code)
 	}
 	if len(out.sent) != 1 {
 		t.Fatalf("forwarded %d notifications, want 1", len(out.sent))
@@ -221,11 +234,146 @@ func TestHandleSlackDeliveryFailure(t *testing.T) {
 	s := newTestServer(out)
 	w := httptest.NewRecorder()
 	s.handleSlack(w, httptest.NewRequest("POST", "/slack", strings.NewReader(alertaPayload)))
-	if w.Code != 502 {
-		t.Errorf("status = %d, want 502", w.Code)
+	// The payload is accepted before delivery; failure surfaces via metrics.
+	if w.Code != 202 {
+		t.Errorf("status = %d, want 202", w.Code)
 	}
+	s.inflight.Wait()
 	if got := s.m.forwardFailures.Load(); got != 1 {
 		t.Errorf("failure counter = %d, want 1", got)
+	}
+	if got := s.m.forwarded.Load(); got != 0 {
+		t.Errorf("forwarded counter = %d, want 0", got)
+	}
+}
+
+// TestHandleSlackSurvivesProducerDisconnect drives the real ntfySink through
+// the handler against a sink that fails twice, and cancels the producer's
+// request context during the first attempt — as Flagger's 5s-timeout,
+// no-retry alert client does. All three attempts must still run.
+func TestHandleSlackSurvivesProducerDisconnect(t *testing.T) {
+	var attempts atomic.Int32
+	rctx, rcancel := context.WithCancel(context.Background())
+	defer rcancel()
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		switch attempts.Add(1) {
+		case 1:
+			rcancel() // producer hangs up mid-delivery
+			w.WriteHeader(http.StatusInternalServerError)
+		case 2:
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer up.Close()
+
+	out := &ntfySink{url: up.URL, client: up.Client(), sleep: func(context.Context, time.Duration) {}}
+	s := newTestServer(out)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/slack", strings.NewReader(alertaPayload)).WithContext(rctx)
+	s.handleSlack(w, req)
+	if w.Code != 202 {
+		t.Fatalf("status = %d, want 202", w.Code)
+	}
+	s.inflight.Wait()
+	if got := attempts.Load(); got != 3 {
+		t.Errorf("sink attempts = %d, want 3 (producer disconnect must not cancel retries)", got)
+	}
+	if got := s.m.forwarded.Load(); got != 1 {
+		t.Errorf("forwarded counter = %d, want 1", got)
+	}
+	if got := s.m.forwardFailures.Load(); got != 0 {
+		t.Errorf("failure counter = %d, want 0", got)
+	}
+}
+
+// TestShutdownWaitsForInflightDelivery pins the shutdown contract: the
+// inflight waitgroup main blocks on at exit must not release while an
+// accepted alert is still delivering.
+func TestShutdownWaitsForInflightDelivery(t *testing.T) {
+	release := make(chan struct{})
+	out := &funcSink{fn: func(_ context.Context, _ notification) error {
+		<-release
+		return nil
+	}}
+	s := newTestServer(out)
+	w := httptest.NewRecorder()
+	s.handleSlack(w, httptest.NewRequest("POST", "/slack", strings.NewReader(alertaPayload)))
+	if w.Code != 202 {
+		t.Fatalf("status = %d, want 202", w.Code)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		s.inflight.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("inflight.Wait returned while delivery was still running")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("inflight.Wait did not return after delivery finished")
+	}
+	if got := s.m.forwarded.Load(); got != 1 {
+		t.Errorf("forwarded counter = %d, want 1", got)
+	}
+}
+
+// TestNtfySinkSanitizesHeaders asserts the exact outbound header values: any
+// control byte (<0x20 or 0x7F) in alert-derived content becomes a space, so
+// the transport never rejects the request.
+func TestNtfySinkSanitizesHeaders(t *testing.T) {
+	cases := []struct {
+		name      string
+		n         notification
+		wantTitle string
+		wantTags  string
+	}{
+		{
+			name:      "newline and carriage return",
+			n:         notification{Title: "line1\r\nline2", Priority: 5, Tags: []string{"crit\nical", "prod\ruction"}, Body: "b"},
+			wantTitle: "line1  line2",
+			wantTags:  "crit ical,prod uction",
+		},
+		{
+			name:      "low control bytes and DEL",
+			n:         notification{Title: "a\x00b\x1fc\x7fd", Priority: 3, Tags: []string{"t\x01a\x08g"}, Body: "b"},
+			wantTitle: "a b c d",
+			wantTags:  "t a g",
+		},
+		{
+			name:      "clean values pass through unchanged",
+			n:         notification{Title: "PodCrashLooping on tenant-root/openbao-0", Priority: 5, Tags: []string{"critical", "production"}, Body: "b"},
+			wantTitle: "PodCrashLooping on tenant-root/openbao-0",
+			wantTags:  "critical,production",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotTitle, gotTags string
+			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotTitle = r.Header.Get("X-Title")
+				gotTags = r.Header.Get("X-Tags")
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer up.Close()
+			s := &ntfySink{url: up.URL, client: up.Client(), sleep: func(context.Context, time.Duration) {}}
+			if err := s.deliver(context.Background(), tc.n); err != nil {
+				t.Fatalf("deliver: %v", err)
+			}
+			if gotTitle != tc.wantTitle {
+				t.Errorf("X-Title = %q, want %q", gotTitle, tc.wantTitle)
+			}
+			if gotTags != tc.wantTags {
+				t.Errorf("X-Tags = %q, want %q", gotTags, tc.wantTags)
+			}
+		})
 	}
 }
 
@@ -254,8 +402,48 @@ func TestDeadmanStateMachine(t *testing.T) {
 		{"new timeout pages again", 151 * time.Minute, false, dmPage},
 	}
 	for _, s := range steps {
-		if got := d.observe(at(s.offset), s.active); got != s.want {
+		got := d.observe(at(s.offset), s.active)
+		if got != s.want {
 			t.Fatalf("%s (t+%s): action = %d, want %d", s.name, s.offset, got, s.want)
+		}
+		// This table models pages that always reach the sink.
+		if got == dmPage || got == dmRepage {
+			d.pageDelivered(at(s.offset))
+		}
+	}
+}
+
+// TestDeadmanFailedPageRetriesNextTick pins the delivery-failure contract: a
+// page only starts the hourly repage cadence once it actually reached the
+// sink, so a failed page is retried on the next poll tick.
+func TestDeadmanFailedPageRetriesNextTick(t *testing.T) {
+	start := time.Date(2026, 7, 5, 0, 0, 0, 0, time.UTC)
+	d := newDeadman(start, 10*time.Minute, time.Hour)
+	at := func(offset time.Duration) time.Time { return start.Add(offset) }
+
+	steps := []struct {
+		name      string
+		offset    time.Duration
+		active    bool
+		want      deadmanAction
+		delivered bool // whether the page attempt for this step succeeds
+	}{
+		{"silence crosses timeout pages", 12 * time.Minute, false, dmPage, false},
+		{"failed page retries on next tick", 13 * time.Minute, false, dmRepage, false},
+		{"still failing keeps retrying", 14 * time.Minute, false, dmRepage, true},
+		{"delivered page quiets the next tick", 15 * time.Minute, false, dmNone, false},
+		{"hourly cadence counts from the delivered page", 73 * time.Minute, false, dmNone, false},
+		{"repage an hour after the delivered page", 74 * time.Minute, false, dmRepage, false},
+		{"failed repage also retries on next tick", 75 * time.Minute, false, dmRepage, true},
+		{"quiet again after the repage lands", 76 * time.Minute, false, dmNone, false},
+	}
+	for _, s := range steps {
+		got := d.observe(at(s.offset), s.active)
+		if got != s.want {
+			t.Fatalf("%s (t+%s): action = %d, want %d", s.name, s.offset, got, s.want)
+		}
+		if s.delivered {
+			d.pageDelivered(at(s.offset))
 		}
 	}
 }
