@@ -1,21 +1,40 @@
-# Shadow the platform Keycloak's admin surface off the public host. The
-# upstream keycloak package (Cozystack 1.5.2) renders a single Ingress
-# routing path / on keycloak.<root-host> — admin console included — with no
-# values knob to disable or restrict it; publicly routing /admin is exactly
-# why the stack was disabled on 2026-07-05 (f82b8e2). ingress-nginx merges
-# same-host rules across Ingress objects and longest prefix wins, so these
-# paths outrank the chart's / and land on an endpointless Service: 503 at
-# the origin itself, which also covers direct-to-node-IP requests that
-# bypass Cloudflare (AOP marks those connections but does not reject them —
-# see app-patches/ingress-origin-edge.yaml). The edge prober asserts the
-# 503 stays true (edge/http-targets.file_sd.yaml).
+# Keep the platform Keycloak's admin surface off the public host. Upstream
+# 1.5.2 renders a single Ingress routing path / on keycloak.<root-host> —
+# admin console included, no values knob to restrict it — which is why the
+# stack was disabled on 2026-07-05 (f82b8e2). ingress-nginx merges same-host
+# rules across Ingress objects and longest prefix wins, so /admin and
+# /realms/master outrank the chart's / and land on an endpointless Service:
+# 503 at the origin itself, covering direct-to-node-IP requests that bypass
+# Cloudflare (AOP marks those connections but does not reject them — see
+# app-patches/ingress-origin-edge.yaml).
 #
-# /admin covers the console + admin REST API; /realms/master covers master-
-# realm logins (the only account there is the operator's bootstrap admin).
-# The EDP keycloak-operator is unaffected: it talks to
-# keycloak-http.cozy-keycloak.svc in-cluster, never through the Ingress.
-# Console access for humans is kubectl port-forward only, same posture as
-# the per-stage IAM Keycloaks (deployments/iam/*/ingress.yaml).
+# /admin covers the console + admin REST API; /realms/master covers the
+# master realm, whose admin-cli client accepts public direct password grants
+# against the bootstrap admin. Neither blocks anything legitimate: kubectl
+# OIDC and the dashboard use /realms/cozy, and the EDP keycloak-operator
+# talks to keycloak-http.cozy-keycloak.svc in-cluster, never through the
+# Ingress. Console access for humans is kubectl port-forward only, same
+# posture as the per-stage IAM Keycloaks (deployments/iam/*/ingress.yaml).
+#
+# The guard's shape is pinned by TestPlatformKeycloakAdminGuardConformance
+# (must exist whenever platform.yaml sets oidc.enabled), and
+# edge/http-targets.file_sd.yaml gates both guarded prefixes on 503 in every
+# `aspect infra edge-health` run.
+#
+# The Namespace is declared here, ahead of the platform package that will
+# populate it, for ordering: it lets the guard Ingress apply BEFORE the
+# chart's / Ingress ever exists (no first-enable window where /admin serves
+# publicly) and keeps guardian-mgmt-platform from failing its apply while
+# Cozystack has not created the namespace yet. Safe to own: cozy-* system
+# namespaces carry no helm ownership metadata (Cozystack's applier, not
+# helm, creates them), so a pre-existing namespace adopts cleanly.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cozy-keycloak
+  labels:
+    cozystack.io/system: "true"
+---
 apiVersion: v1
 kind: Service
 metadata:

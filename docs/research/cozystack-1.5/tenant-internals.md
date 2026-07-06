@@ -62,9 +62,11 @@ create nested tenants (`apps.cozystack.io/*` verbs `*`, lines 265-281); plain ad
 
 The Keycloak side (`templates/keycloakgroups.yaml:3`) renders `KeycloakRealmGroup`s **only when
 `_cluster.oidc-enabled == "true"` AND the EDP Keycloak-operator CRD exists** — silently skipped
-otherwise. Consequence for this cluster: platform OIDC is disabled
-(`src/infrastructure/base/cozystack/platform.yaml:39-44`), so the per-tenant group machinery is
-inert here; the RBAC argument for tenants does not currently apply to us.
+otherwise. Consequence for this cluster: platform OIDC was disabled 2026-07-05 and re-enabled
+2026-07-06 to gate cluster-admin access (`src/infrastructure/base/cozystack/platform.yaml`), so
+the per-tenant group machinery is ACTIVE: expect `tenant-<ns>-{view,use,admin,super-admin}`
+KeycloakRealmGroups in the cozy realm, and remember the depth-2 label bug above still shapes
+which of them mean anything.
 
 ## Network model: isolation rides on SENDER EGRESS
 

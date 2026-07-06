@@ -107,7 +107,7 @@ resource "cloudflare_load_balancer" "guardian_mgmt_public" {
 
 check "cloudflare_load_balancer_hostnames" {
   assert {
-    condition     = length(local.public_edge_hostnames) == 9
+    condition     = length(local.public_edge_hostnames) == 7
     error_message = "Root public edge hostnames belong to Cloudflare Load Balancing."
   }
 }

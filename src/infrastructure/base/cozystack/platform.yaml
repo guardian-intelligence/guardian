@@ -30,16 +30,13 @@ spec:
           # Platform OIDC (cozy-keycloak) re-enabled 2026-07-06 to gate
           # cluster-admin access: kubectl authenticates via OIDC against the
           # cozy realm (the apiserver oidc-issuer-url flags baked into the
-          # talm node configs are load-bearing again), and the custody x509
-          # kubeconfig becomes breakglass-only. The 2026-07-05 disable
-          # (f82b8e2) was about the chart's Ingress publicly routing the
-          # Keycloak admin console at keycloak.guardianintelligence.org on
-          # path / — upstream 1.5.2 exposes no values knob to restrict it, so
-          # keycloak-admin-guard.yaml shadows /admin and /realms/master with
-          # longer-prefix paths to an endpointless Service (503 at origin,
-          # edge-probed). The per-stage Verself Keycloaks under
-          # deployments/iam/ are a separate product-facing system and stay
-          # headless.
+          # talm node configs are load-bearing again — do NOT strip them),
+          # and the custody x509 kubeconfig becomes breakglass-only. The
+          # 2026-07-05 disable (f82b8e2) was about the admin console being
+          # publicly routed; that surface is now shadowed off the public
+          # host — see keycloak-admin-guard.yaml. The per-stage Verself
+          # Keycloaks under deployments/iam/ are a separate product-facing
+          # system and stay headless.
           oidc:
             enabled: true
             keycloakInternalUrl: http://keycloak-http.cozy-keycloak.svc:8080/realms/cozy

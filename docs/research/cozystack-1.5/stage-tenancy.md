@@ -38,10 +38,11 @@ live `guardian-mgmt` cluster (pinned `cozy-installer:1.5.2` since #434).
    hostname on the shared root nginx. Single-operator cluster: accepted.
 3. **resourceQuotas/schedulingClass** as first-class per-stage knobs (unused here so far; note
    the LimitRange-only-with-quotas coupling).
-4. **Per-stage RBAC groups** (`tenant-<ns>-{view,use,admin,super-admin}`) — INERT on this
-   cluster: they require platform OIDC (`oidc-enabled` + EDP Keycloak operator), which we
-   disabled 2026-07-05 (`platform.yaml:39-44`). Do not count RBAC as a benefit of stage
-   tenants here unless platform OIDC is ever re-enabled.
+4. **Per-stage RBAC groups** (`tenant-<ns>-{view,use,admin,super-admin}`) — ACTIVE since
+   platform OIDC was re-enabled 2026-07-06 to gate cluster-admin access (disabled 2026-07-05
+   to 2026-07-06; see `platform.yaml`). The groups render into the cozy realm again; whether
+   to actually bind operators to them is a separate decision — current access model is the
+   single `cozystack-cluster-admin` group.
 5. **Subtree lifecycle**: child namespaces are ownerReference'd to the parent — deleting a
    stage tenant garbage-collects everything in it (double-edged; see deletion bugs below).
 
