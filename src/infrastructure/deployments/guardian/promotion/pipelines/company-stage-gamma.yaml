@@ -1,10 +1,33 @@
 # gamma receives Freight only after beta has verified it (sources.stages).
 # No autoPromotionEnabled entry in the ProjectConfig — promotion is a
-# deliberate act (human or agent) after checking beta's Flagger Canary
-# verdict, same trade-off IAM's gamma Stage already made (Kargo's native
-# verification needs the Argo Rollouts integration this repo has
-# deliberately skipped). Stated trade-off, not a silently-implied closed
-# loop.
+# deliberate act (human or agent), gated on beta's http-latency-canary
+# health via the http promotion step below.
+#
+# Kargo's reconciler pod runs in-cluster (namespace kargo) with normal
+# in-cluster networking, so it can query vmselect-shortterm directly --
+# no CI job needs network access into the cluster, no new inbound exposure
+# is needed. This resolves what IAM's Stage comments (written before this
+# PR) called "Kargo's native verification needs the Argo Rollouts
+# integration this repo has deliberately skipped" -- that referred
+# specifically to Kargo's spec.verification field (which does require
+# Argo Rollouts' AnalysisTemplate CRD as its backing engine); the http
+# promotion step is a different, simpler, always-available Kargo 1.10
+# built-in that needs no such dependency.
+#
+# The two http steps below are a hard gate, not a soft check: if either
+# failureExpression trips (a definitively bad measurement, not just an
+# absence of data yet), the whole promotion fails terminally and no PR is
+# ever opened -- better than opening a promotion PR doomed to be blocked,
+# and it means a stale/never-populated metric (e.g. right after this PR
+# first lands, before beta has emitted any canary data) leaves the step
+# Running/retrying rather than hard-failing, bounded by retry.timeout.
+#
+# NOTE: the exact expr-lang syntax in successExpression/failureExpression
+# (response.body.data.result[0].value[1], the float() conversion) is
+# written to Kargo 1.10's documented HTTP step schema but has not been
+# exercised against a live Kargo instance -- verify against a real
+# promotion once this lands, per this repo's "local pass != CI/live pass"
+# lesson from the CI perf-gate work in PR #409.
 #
 # substitute: disabled — the ${{ ... }} promotion expressions must reach
 # Kargo verbatim, not be mangled by Flux's envsubst pass.
@@ -30,7 +53,35 @@ spec:
           value: https://github.com/guardian-intelligence/guardian.git
         - name: imageRepo
           value: ghcr.io/guardian-intelligence/company-site
+        - name: sourceStageNamespace
+          value: tenant-guardian-beta
+        - name: vmQueryURL
+          value: http://vmselect-shortterm.tenant-root.svc:8481/select/0/prometheus/api/v1/query
       steps:
+        - uses: http
+          as: check-source-stage-success
+          retry:
+            timeout: 10m
+          config:
+            method: GET
+            url: ${{ vars.vmQueryURL }}
+            queryParams:
+              - name: query
+                value: avg_over_time(http_canary_success{namespace="${{ vars.sourceStageNamespace }}"}[5m])
+            successExpression: len(response.body.data.result) > 0 && response.body.data.result[0].value[1] == '1'
+            failureExpression: len(response.body.data.result) > 0 && response.body.data.result[0].value[1] != '1'
+        - uses: http
+          as: check-source-stage-p95-duration
+          retry:
+            timeout: 10m
+          config:
+            method: GET
+            url: ${{ vars.vmQueryURL }}
+            queryParams:
+              - name: query
+                value: quantile_over_time(0.95, http_canary_duration_seconds{namespace="${{ vars.sourceStageNamespace }}",phase="total"}[5m])
+            successExpression: len(response.body.data.result) > 0 && float(response.body.data.result[0].value[1]) <= 1.0
+            failureExpression: len(response.body.data.result) > 0 && float(response.body.data.result[0].value[1]) > 1.0
         - uses: git-clone
           config:
             repoURL: ${{ vars.repoURL }}

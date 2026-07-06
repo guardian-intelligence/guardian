@@ -95,3 +95,31 @@ spec:
         - ports:
             - port: "8080"
               protocol: TCP
+---
+# Ingress half of the metric-analysis path: this was missing entirely until
+# now — the egress rule above (toEndpoints vmselect, port 8481) has existed
+# since Flagger was first stood up, but no Canary referenced a
+# MetricTemplate until company/{beta,gamma,prod}/canary.yaml's
+# analysis.metrics (this repo's PR adding the http-latency-canary), so the
+# gap was never exercised. Same reason as the alert-relay pair above:
+# tenant-root's generated isolation does not admit other namespaces.
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-root-vmselect-from-flagger
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-root
+      k8s:app.kubernetes.io/name: vmselect
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: flagger
+            k8s:app.kubernetes.io/name: flagger
+      toPorts:
+        - ports:
+            - port: "8481"
+              protocol: TCP
