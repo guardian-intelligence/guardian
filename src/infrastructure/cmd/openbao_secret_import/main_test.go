@@ -51,6 +51,8 @@ func testImportEnv() map[string]string {
 		"cloudflare_external_dns_api_token":                       "external",
 		"cloudflare_dns_lb_provisioner_api_token":                 "lb",
 		"guardian_alerting_ntfy_url":                              "https://ntfy.sh/guardian-topic",
+		"platform_admin_shovon_password":                          "shovon-pass",
+		"platform_admin_guardian_ops_password":                    "guardian-ops-pass",
 		"github_promotions_app_private_key_b64":                   base64.StdEncoding.EncodeToString([]byte(testGithubAppPEM)),
 		"github_runner_app_prod_app_id":                           "3370540",
 		"github_runner_app_prod_client_id":                        "Iv23xxxx",
@@ -65,8 +67,8 @@ func TestImportPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 8 {
-		t.Fatalf("plan length = %d, want 8", len(plan))
+	if len(plan) != 9 {
+		t.Fatalf("plan length = %d, want 9", len(plan))
 	}
 	external := plan[0]
 	if external.APIPath != "kv/data/guardian/guardian-mgmt/external-dns/cloudflare" {
@@ -106,14 +108,24 @@ func TestImportPlan(t *testing.T) {
 	if alerting.Data["ntfy_url"] != "https://ntfy.sh/guardian-topic" {
 		t.Fatalf("alerting data = %#v", alerting.Data)
 	}
-	promotion := plan[5]
+	admins := plan[5]
+	if admins.APIPath != "kv/data/guardian/guardian-mgmt/tenant-root/platform-admins" {
+		t.Fatalf("platform-admins path = %q", admins.APIPath)
+	}
+	// Key names are the platform-admin-passwords ExternalSecret's remoteRef
+	// properties (base/cozystack/platform-admins.yaml maps them 1:1 to the
+	// KeycloakRealmUser passwordSecret keys).
+	if admins.Data["shovon"] != "shovon-pass" || admins.Data["guardian-ops"] != "guardian-ops-pass" {
+		t.Fatalf("platform-admins data = %#v", admins.Data)
+	}
+	promotion := plan[6]
 	if promotion.APIPath != "kv/data/guardian/guardian-mgmt/company-site/promotion/github-app" {
 		t.Fatalf("promotion path = %q", promotion.APIPath)
 	}
 	if promotion.Data["githubAppPrivateKey"] != testGithubAppPEM {
 		t.Fatal("githubAppPrivateKey did not round-trip through base64")
 	}
-	runner := plan[7]
+	runner := plan[8]
 	if runner.APIPath != "kv/data/guardian/guardian-mgmt/verself-runner/github-app" {
 		t.Fatalf("verself-runner path = %q", runner.APIPath)
 	}
@@ -160,8 +172,8 @@ func TestImportPlanOptionalKeycloakStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 10 {
-		t.Fatalf("plan length = %d, want 10 (8 base + beta + prod)", len(plan))
+	if len(plan) != 11 {
+		t.Fatalf("plan length = %d, want 11 (9 base + beta + prod)", len(plan))
 	}
 	byPath := map[string]secretWrite{}
 	for _, w := range plan {

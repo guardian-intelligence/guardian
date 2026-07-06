@@ -3,6 +3,7 @@ filegroup(
     srcs = [
         "keycloak-admin-guard.yaml",
         "kustomization.yaml",
+        "platform-admins.yaml",
         "platform.yaml",
     ],
     visibility = ["//visibility:public"],

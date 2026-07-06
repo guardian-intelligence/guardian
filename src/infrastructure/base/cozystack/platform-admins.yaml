@@ -1,0 +1,96 @@
+# Named admin identities for the platform Keycloak (cozy realm). Each human
+# and each long-horizon agent gets its OWN user so access is attributable
+# and individually revocable — the single shared credential this replaces is
+# the custody x509 kubeconfig, now breakglass-only. Membership in
+# cozystack-cluster-admin (chart-shipped group, bound to the
+# cozystack-cluster-admin ClusterRole) is what grants cluster-admin; the
+# apiserver maps preferred_username -> user and groups -> RBAC groups.
+#
+# The CRs live in tenant-root, not cozy-keycloak: the EDP keycloak-operator
+# watches all namespaces (WATCH_NAMESPACE unset), and tenant-root is the
+# namespace with an OpenBao secret scope, so the passwords ride the standard
+# ESO path (kv/guardian/guardian-mgmt/tenant-root/platform-admins, seeded
+# via the importer plan + a scoped secrets-writer write — see the
+# static-seal runbook, "Adding An Integration"). Passwords never appear in
+# Git or in the CR; the operator reads them from the projected Secret.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: platform-admin-passwords
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: platform-admins
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/secret-scope: tenant-root
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: tenant-root-openbao
+  target:
+    name: platform-admin-passwords
+    creationPolicy: Orphan
+    deletionPolicy: Retain
+    template:
+      type: Opaque
+      engineVersion: v2
+  data:
+    - secretKey: shovon
+      remoteRef:
+        key: guardian/guardian-mgmt/tenant-root/platform-admins
+        property: shovon
+    - secretKey: guardian-ops
+      remoteRef:
+        key: guardian/guardian-mgmt/tenant-root/platform-admins
+        property: guardian-ops
+---
+# Shovon — the human operator.
+apiVersion: v1.edp.epam.com/v1
+kind: KeycloakRealmUser
+metadata:
+  name: platform-admin-shovon
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: platform-admins
+    app.kubernetes.io/part-of: guardian
+spec:
+  realmRef:
+    kind: ClusterKeycloakRealm
+    name: keycloakrealm-cozy
+  username: shovon
+  email: im.shovonhasan@gmail.com
+  emailVerified: true
+  enabled: true
+  groups:
+    - cozystack-cluster-admin
+  passwordSecret:
+    name: platform-admin-passwords
+    key: shovon
+---
+# guardian-ops — the shared identity for long-horizon agent sessions on the
+# release runner and laptop (Devin/Codex/Claude). Distinct from shovon so an
+# agent credential leak is revocable without locking the human out, and so
+# audit logs separate agent actions from human ones. Split further into
+# per-agent users when more than one agent runs concurrently enough to need
+# distinguishing.
+apiVersion: v1.edp.epam.com/v1
+kind: KeycloakRealmUser
+metadata:
+  name: platform-admin-guardian-ops
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: platform-admins
+    app.kubernetes.io/part-of: guardian
+spec:
+  realmRef:
+    kind: ClusterKeycloakRealm
+    name: keycloakrealm-cozy
+  username: guardian-ops
+  email: 0.integrations.anveio@gmail.com
+  emailVerified: true
+  enabled: true
+  groups:
+    - cozystack-cluster-admin
+  passwordSecret:
+    name: platform-admin-passwords
+    key: guardian-ops
