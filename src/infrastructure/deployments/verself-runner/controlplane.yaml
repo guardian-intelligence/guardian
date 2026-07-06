@@ -1,0 +1,113 @@
+# verself-controlplane — the runner control plane for stage (a): GitHub
+# workflow_job webhook ingest, delivery ledger in the CNPG Postgres, PR
+# comments. Contract: src/services/verself/controlplane/. Single replica:
+# GitHub retries undelivered webhooks and the worker loop is idempotent over
+# the ledger, so a pod reschedule loses nothing.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: verself-controlplane
+  namespace: verself-runner
+  labels:
+    app.kubernetes.io/name: verself-controlplane
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: verself
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: verself-controlplane
+  template:
+    metadata:
+      labels:
+        # app.kubernetes.io/name is load-bearing: the CiliumNetworkPolicy and
+        # the tenant-root ingress-egress pair in networkpolicy.yaml select
+        # control-plane pods by exactly this label.
+        app.kubernetes.io/name: verself-controlplane
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/product: verself
+        guardian.dev/otel: producer
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: controlplane
+          image: ghcr.io/guardian-intelligence/verself-controlplane@sha256:cae601911d86b08b906bca69d6e70ec3a9247e3455bb44a0ceccb2f103c3d850
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            # CNPG app credential; the operator-generated `uri` key is a
+            # complete postgresql:// URL (user, password, rw service host,
+            # default app database).
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-controlplane-app
+                  key: uri
+            - name: GITHUB_APP_ID
+              valueFrom:
+                secretKeyRef:
+                  name: github-app
+                  key: GITHUB_APP_ID
+            - name: GITHUB_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: github-app
+                  key: GITHUB_WEBHOOK_SECRET
+            - name: GITHUB_APP_PRIVATE_KEY_PEM
+              valueFrom:
+                secretKeyRef:
+                  name: github-app
+                  key: GITHUB_APP_PRIVATE_KEY_PEM
+            # Stage (a) is single-tenant: one pinned installation. The id is
+            # public identity (visible in any App-authored PR comment), not a
+            # credential.
+            - name: GITHUB_APP_INSTALLATION_ID
+              value: "123769944"
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              value: otel-collector.guardian-analytics.svc.cozy.local:4317
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: verself-controlplane
+  namespace: verself-runner
+  labels:
+    app.kubernetes.io/name: verself-controlplane
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: verself
+spec:
+  selector:
+    app.kubernetes.io/name: verself-controlplane
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
