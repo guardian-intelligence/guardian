@@ -8,17 +8,26 @@ drills.
 
 ## Quickstart
 
-Two host tools, both self-pinning to versions in this repo — everything else
-(compilers, `buf`, `protoc`, CLIs) is fetched at its pinned version on first
-use, so this is the whole install on Ubuntu or macOS:
+One command installs the whole pivot toolchain (bazelisk + Aspect CLI, hash-
+pinned) into a scoped `~/.cache/guardian/bootstrap-bin`, never a system path,
+and exports it onto `PATH` for the current shell — this is the whole install
+on Ubuntu or macOS:
 
-- **Aspect CLI** — the launcher reads `.aspect/version.axl`
-- **bazelisk** — reads `.bazelversion`
+```bash
+eval "$(scripts/bootstrap.sh path)"
+```
+
+Everything else (compilers, `buf`, `protoc`, CLIs) is fetched at its pinned
+version on first use. Re-running is idempotent (checksum short-circuits) and
+safe to put in a shell profile. `scripts/bootstrap.sh` dispatches to the
+matching `scripts/bootstrap/bootstrap-<os>-<arch>` script for your platform;
+see that script for exactly what gets installed and why.
 
 The loops you'll actually run, from the repo root:
 
 | Task | Command |
 | - | - |
+| Install the pivot toolchain and put it on `PATH` | `eval "$(scripts/bootstrap.sh path)"` |
 | Build / test everything (incl. the site image) | `bazelisk build //...` · `bazelisk test //...` |
 | Format before pushing | `aspect tidy` |
 | Put repo-pinned CLIs + build tools on `PATH` | `aspect tools install && eval "$(aspect tools path)"` |
