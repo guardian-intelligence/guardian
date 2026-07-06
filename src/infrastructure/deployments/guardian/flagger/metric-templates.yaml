@@ -33,3 +33,42 @@ spec:
     address: http://vmselect-shortterm.tenant-root.svc:8481/select/0/prometheus
   query: |
     quantile_over_time(0.95, http_canary_duration_seconds{namespace="{{ namespace }}",phase="total"}[{{ interval }}])
+---
+# Detection over the http-latency-canary series directly (independent of
+# any pending promotion — this pages on sustained canary failure whether or
+# not anyone is trying to promote right now). Modeled on
+# ../promotion/kargo-alerts.yaml's rules; routes through the same
+# VMRule -> vmalert -> Alertmanager -> Alerta -> relay -> ntfy pipeline
+# proven end to end by the alerting-loop drill (PR #425) — no new plumbing.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: http-canary
+  namespace: flagger
+  labels:
+    app.kubernetes.io/name: http-canary
+    app.kubernetes.io/part-of: guardian
+spec:
+  groups:
+    - name: http-canary.rules
+      interval: 30s
+      rules:
+        - alert: HttpCanaryFailing
+          expr: avg_over_time(http_canary_success{namespace=~"tenant-guardian-.+"}[5m]) < 1
+          for: 5m
+          labels:
+            severity: warning
+            guardian.dev/component: company-site
+          annotations:
+            summary: company-site's synthetic HTTP canary has been failing in {{ $labels.namespace }} for 5+ minutes.
+        - alert: HttpCanaryAbsent
+          # The canary runs every minute in every stage; total silence for
+          # 10+ minutes means the CronJob or its push path broke, not that
+          # traffic is merely slow.
+          expr: absent(http_canary_success{namespace=~"tenant-guardian-.+"})
+          for: 10m
+          labels:
+            severity: warning
+            guardian.dev/component: company-site
+          annotations:
+            summary: No company-site HTTP canary metrics are being reported at all.

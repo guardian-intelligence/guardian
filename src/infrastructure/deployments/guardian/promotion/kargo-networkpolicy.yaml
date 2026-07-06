@@ -1,6 +1,10 @@
 # One policy selects every Kargo pod; Cilium denies whatever is not listed.
-# Egress: kube-apiserver (all components), DNS, and world:443 (the controller
-# talks to ghcr.io for Warehouse discovery and github.com for git promotion).
+# Egress: kube-apiserver (all components), DNS, world:443 (the controller
+# talks to ghcr.io for Warehouse discovery and github.com for git promotion),
+# and tenant-root's vmselect-shortterm (the http promotion steps in
+# company-stage-gamma.yaml/company-stage-prod.yaml query it directly from
+# Kargo's own reconciler pod — this runs in-cluster already, so no CI job
+# ever needs network access into the cluster for this gate).
 # Ingress: only the Kubernetes API server, which calls the webhooks server on
 # 9443 to validate Kargo CRs.
 apiVersion: cilium.io/v2
@@ -37,4 +41,36 @@ spec:
       toPorts:
         - ports:
             - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            k8s:app.kubernetes.io/name: vmselect
+      toPorts:
+        - ports:
+            - port: "8481"
+              protocol: TCP
+---
+# Ingress half: tenant-root's generated isolation does not admit other
+# namespaces (same reason as flagger-networkpolicy.yaml's vmselect/
+# alert-relay pairs); admit exactly the Kargo controller to vmselect.
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-root-vmselect-from-kargo
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-root
+      k8s:app.kubernetes.io/name: vmselect
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kargo
+            k8s:app.kubernetes.io/name: kargo
+      toPorts:
+        - ports:
+            - port: "8481"
               protocol: TCP
