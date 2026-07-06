@@ -4,6 +4,7 @@ go_test(
     name = "talm_render_test",
     srcs = [
         "analytics_ddl_conformance_test.go",
+        "cozystack_app_namespace_test.go",
         "images_lock_test.go",
         "openbao_conformance_test.go",
         "talm_render_test.go",
