@@ -32,6 +32,15 @@ rules:
       - get
       - list
       - watch
+  # CRS store construction needs CRD discovery: without list/watch on CRDs the
+  # exporter runs healthy but serves zero kargo_* metrics.
+  - apiGroups:
+      - apiextensions.k8s.io
+    resources:
+      - customresourcedefinitions
+    verbs:
+      - list
+      - watch
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
