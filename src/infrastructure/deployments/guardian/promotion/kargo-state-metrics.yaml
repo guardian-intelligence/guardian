@@ -200,10 +200,13 @@ spec:
           resources:
             requests:
               cpu: 10m
-              memory: 32Mi
+              memory: 64Mi
             limits:
               cpu: 200m
-              memory: 128Mi
+              # The CRD-discovery informer caches every CRD in the cluster
+              # (~390 on Cozystack, some very large); the platform KSM's
+              # working set is ~206Mi under the same load. 128Mi OOMs at boot.
+              memory: 384Mi
           volumeMounts:
             - name: config
               mountPath: /etc/kargo-state-metrics
