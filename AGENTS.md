@@ -7,7 +7,10 @@ The purpose is to create a free and open-source system for any being to convert 
 * Repo ships specific products within the architecture. First major product: Verself (reference Blacksmith.sh)
 * Airgapped hermetically-sealed come up done through images.lock + Rancher Hauler + Sidero Labs `talm` for Talos on bare metal soil (currently Latitude.sh)
 * DNS managed through Cloudflare. TLS terminates at Cloudflare edge. Cloudflare LB for the three control plane nodes. [206.223.228.101, 45.250.254.119, 206.223.228.87].
-* Cozystack tenancy - `guardian` tenant for product workloads, product databases, shared business logic, services, split per stage (gamma, beta, prod). `tenant-root` is the required Cozystack root/admin tenant for a regional management cluster. Cozystack packages/operators, Flux handoff, storage classes, BackupClass, root ingress/load-balancer substrate, root infrastructure monitoring, child Tenant CRs, and cluster-wide policy go in `tenant-root`.
+* Cozystack tenancy IS the stage-isolation mechanism: stages are child Tenants of `tenant-guardian`, declared in `src/infrastructure/deployments/guardian/system/stage-tenants.yaml` (beta/gamma/prod/previews, each with `spec.host: <stage>.guardianintelligence.org`). Staged product workloads deploy into the derived namespaces `tenant-guardian-<stage>` (reference: `src/infrastructure/deployments/iam/<stage>/`). Cozystack's generated Cilium policies give sibling default-deny between stages for free; the hand-written per-stage `CiliumClusterwideNetworkPolicy` pairs in `deployments/iam/*/networkpolicy.yaml` compensate for a Cozystack v1.5.x depth-2 ancestor-label bug that blocks the root ingress from reaching grandchild tenants (see `docs/research/cozystack-1.5/`), and become partially droppable after the upstream fix ships. Never model stages as per-application tenants: tenant names ban dashes, app×stage nesting hits the depth bug, siblings have no first-class peering.
+* Kargo is decoupled from tenancy: namespaces like `guardian-iam` and `company-site` are Kargo *project* namespaces holding only promotion CRs and secrets plumbing — not workloads. Stage promotion steps edit Git paths (`deployments/<vertical>/<stage>/…`), never workload namespaces, so tenancy changes cannot break promotions. Reference wiring: `src/infrastructure/deployments/guardian/promotion/pipelines/`. Cross-stage system services (analytics, alerting, verself-runner, OpenBao in `tenant-guardian`) deliberately live outside stage tenants because they serve all stages.
+* Stage tenants are static and long-lived; never delete/recreate one and never create tenant-per-PR (previews are Deployments inside the one static `previews` tenant). Cozystack 1.5.x tenant deletion runs an unpinned `bitnami/kubectl:latest` pre-delete hook that is absent from `images.lock` — guaranteed-broken in dark mode — and upstream has deletion wedge modes; static tenants sidestep all of it.
+* `tenant-root` is the required Cozystack root/admin tenant for a regional management cluster. Cozystack packages/operators, Flux handoff, storage classes, BackupClass, root ingress/load-balancer substrate, root infrastructure monitoring, child Tenant CRs, and cluster-wide policy go in `tenant-root`.
 * Single region right now (`ash` Ashburn, Virginia Latitude region). The active management control plane is the `guardian-mgmt` Kubernetes cluster. Its Kubernetes API endpoint is the private VLAN VIP `https://10.8.0.250:6443`. Reference files:
   - `src/infrastructure/bootstrap/guardian-mgmt/main.tf`
   - `src/infrastructure/talm/values.yaml`
@@ -17,7 +20,7 @@ The purpose is to create a free and open-source system for any being to convert 
 * Secrets via a single OpenBao instance for the whole cluster; stage isolation is at the policy layer, not the instance layer. Access is scoped per consumer Kubernetes namespace: `guardian-reader-<ns>` / `guardian-writer-<ns>` role pairs confined to `kv/guardian/guardian-mgmt/<namespace>/*`
 * Zero customers as of present day besides us: no compatibility shims or legacy wrappers.
 * OCI images are shipped to ghcr.io. See https://github.com/orgs/guardian-intelligence/packages
-* Auth n/z is multitenant by default: Keycloak instance per stage. SpiceDB/Zanzibar for permissions. Currently just "Sign in With GitHub" supported. Future "Sign in With Guardian" with us as the OIDC provider and multiple connected accounts planned.
+* Auth n/z is multitenant by default: Keycloak instance per stage (product IAM, running in `tenant-guardian-<stage>`). Distinct from Cozystack's bundled *platform* Keycloak (operator identity for dashboard/kubectl OIDC), which is disabled — see `src/infrastructure/base/cozystack/platform.yaml` for the rationale. SpiceDB/Zanzibar for permissions. Currently just "Sign in With GitHub" supported. Future "Sign in With Guardian" with us as the OIDC provider and multiple connected accounts planned.
   - beta: https://beta.guardianintelligence.org/realms/verself/broker/github/endpoint
   - gamma: https://gamma.guardianintelligence.org/realms/verself/broker/github/endpoint
   - prod: https://guardianintelligence.org/realms/verself/broker/github/endpoint
@@ -99,12 +102,15 @@ src/
         tenants/                       # creates tenant-guardian by default
 
       deployments/
-        guardian/                      # reconciled into tenant-guardian
-          system/                      # OpenBao, release controllers, shared ops
-          beta/
-          gamma/
-          prod/
-        company/prod/                  # compatibility path until folded in
+        guardian/
+          system/                      # OpenBao, stage Tenant CRs, shared ops (→ tenant-guardian)
+          promotion/                   # Kargo controller + pipelines (project namespaces)
+          flagger/
+        iam/{beta,gamma,prod}/         # per-stage Keycloak (→ tenant-guardian-<stage>)
+        company/{prod,previews}/       # company site (→ tenant-guardian-prod / -previews)
+        analytics/system/              # cross-stage (→ guardian-analytics)
+        alerting/                      # cross-stage (→ tenant-root)
+        verself-runner/                # cross-stage (→ verself-runner)
 
       tests/
       cmd/                             # infra validation/drill helpers
