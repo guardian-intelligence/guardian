@@ -65,7 +65,7 @@ spec:
       terminationGracePeriodSeconds: 60
       containers:
         - name: relay
-          image: ghcr.io/guardian-intelligence/alert-relay@sha256:9e3fd4c4d0bb08f16a01514764d45458c38f17cb8343e6dc0c858834ffb317a9
+          image: ghcr.io/guardian-intelligence/alert-relay@sha256:df49dc946d019fb7ce91d11257cfb1991eca47e718342d838b738e17065044e8
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
