@@ -39,7 +39,7 @@ spec:
     threshold: 3
     # Deliberately tight for the initial stand-up, same call IAM's Canaries
     # already made: a single passing iteration promotes. Raise toward a real
-    # soak once the CWV synthetic canary is feeding analysis.metrics.
+    # soak now that the http-latency-canary is feeding analysis.metrics.
     iterations: 1
     # severity warn: failed checks and rollbacks page through the
     # alert-relay; routine info-level promotion events do not.
@@ -49,6 +49,27 @@ spec:
         providerRef:
           name: alert-relay
           namespace: flagger
+    # http-latency-canary.yaml pushes these every minute; a 2m lookback
+    # tolerates alignment jitter between that schedule and this analysis
+    # loop while still only ever including recent samples. Success must be
+    # 1.0 (any of the 4 probed paths failing is real); p95 duration budget
+    # is a conservative starting point for an in-cluster static-site hop,
+    # tightened once a week of live data sets the real baseline.
+    metrics:
+      - name: http-canary-success-rate
+        templateRef:
+          name: http-canary-success-rate
+          namespace: flagger
+        thresholdRange:
+          min: 1
+        interval: 2m
+      - name: http-canary-p95-duration
+        templateRef:
+          name: http-canary-p95-duration
+          namespace: flagger
+        thresholdRange:
+          max: 1
+        interval: 2m
     webhooks:
       - name: http-gate
         type: pre-rollout

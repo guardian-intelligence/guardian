@@ -1,0 +1,35 @@
+# The first MetricTemplates in the repo. Queries VictoriaMetrics
+# (vmselect-shortterm, same Prometheus-compatible endpoint Flagger's own
+# egress policy already opens — see flagger-networkpolicy.yaml's comment
+# on this) for company-site's synthetic http-latency-canary series
+# (company/*/http-latency-canary.yaml). {{ namespace }} is Flagger's
+# built-in substitution for the analyzed Canary's own namespace; the
+# canary's metric labels are written as the literal namespace string for
+# exactly this reason (see http-latency-canary.yaml's script comment).
+#
+# Referenced from each stage's Canary via analysis.metrics — this is what
+# gates a rollout's in-stage cutover on real synthetic traffic, not just
+# the one-shot pre-rollout/rollout webhook checks in loadtester.yaml.
+apiVersion: flagger.app/v1beta1
+kind: MetricTemplate
+metadata:
+  name: http-canary-success-rate
+  namespace: flagger
+spec:
+  provider:
+    type: prometheus
+    address: http://vmselect-shortterm.tenant-root.svc:8481/select/0/prometheus
+  query: |
+    avg(http_canary_success{namespace="{{ namespace }}"})
+---
+apiVersion: flagger.app/v1beta1
+kind: MetricTemplate
+metadata:
+  name: http-canary-p95-duration
+  namespace: flagger
+spec:
+  provider:
+    type: prometheus
+    address: http://vmselect-shortterm.tenant-root.svc:8481/select/0/prometheus
+  query: |
+    quantile_over_time(0.95, http_canary_duration_seconds{namespace="{{ namespace }}",phase="total"}[{{ interval }}])
