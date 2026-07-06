@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+"""cluster-watch — one command to watch the Guardian cluster converge.
+
+Two read-only views:
+
+  cluster-watch                Tail the alert stream the cluster publishes to
+                               ntfy (VMRule -> Alertmanager -> Alerta ->
+                               alert-relay -> ntfy). Needs no cluster access —
+                               works from anywhere, even off the VPN. The
+                               underlying rules debounce ~15m, so this reports
+                               *sustained* failure (a change that never
+                               converged), not a fresh push.
+
+  cluster-watch --convergence  Same stream, narrowed to Flux convergence
+                               alerts only (Kustomization / HelmRelease /
+                               source-controller).
+
+  cluster-watch --status       Live Flux convergence status read straight from
+                               the cluster (needs KUBECONFIG). Refreshes every
+                               few seconds and shows exactly the Kustomizations
+                               and HelmReleases that are not Ready, with reason
+                               and message. This is the sub-15m view for
+                               babysitting a PR: a BuildFailed or
+                               HealthCheckFailed shows in seconds, long before
+                               it would ever page.
+
+Env:
+  NTFY_BASE    ntfy server base URL         (default https://ntfy.sh)
+  NTFY_TOPIC   topic the relay publishes to (default guardian-operations-fable)
+  KUBECONFIG   used by --status             (default ~/.kube/config)
+"""
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.request
+
+NTFY_BASE = os.environ.get("NTFY_BASE", "https://ntfy.sh").rstrip("/")
+NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "guardian-operations-fable")
+
+# Alertnames the stock cozy-monitoring flux-resources rules emit, plus the
+# source-controller ones. Titles read "KustomizationNotApplied on ..." or
+# "[Closed] HelmReleaseNotReady on ...", so a substring match catches both.
+FLUX_ALERT_MARKERS = (
+    "Kustomization",
+    "HelmRelease",
+    "GitRepository",
+    "OCIRepository",
+    "Bucket",
+    "ImagePolicy",
+    "ImageRepository",
+    "ImageUpdateAutomation",
+)
+
+# ntfy priority (1..5) -> (label, ANSI colour). 3 is the default Alerta's
+# text-only Slack payload carries when it has no severity; 4/5 want eyes.
+PRIORITY = {
+    5: ("P5", "\033[1;37;41m"),  # white on red
+    4: ("P4", "\033[1;31m"),     # bold red
+    3: ("P3", "\033[0;33m"),     # yellow
+    2: ("P2", "\033[0;32m"),     # green (resolves land here)
+    1: ("P1", "\033[2;37m"),     # dim
+}
+RESET = "\033[0m"
+DIM = "\033[2m"
+GREEN = "\033[0;32m"
+
+
+def colour_on(stream):
+    return stream.isatty() and os.environ.get("NO_COLOR") is None
+
+
+def paint(text, code, on):
+    return f"{code}{text}{RESET}" if on else text
+
+
+def hhmmss(epoch):
+    return time.strftime("%H:%M:%S", time.localtime(epoch))
+
+
+def is_flux_alert(title):
+    return any(marker in title for marker in FLUX_ALERT_MARKERS)
+
+
+def clean_slack(text):
+    """Alerta's text-only Slack payload wraps the body in `*bold*`, `_italic_`
+    and `<url|label>` markup and a dashboard-relative alert permalink. Strip it
+    so the body line is readable in a terminal."""
+    text = re.sub(r"<[^>|]*\|([^>]*)>", r"\1", text)  # <url|label> -> label
+    text = re.sub(r"<[^>]*>", "", text)               # <url> or stray link -> drop
+    text = re.sub(r"_(.+?)_", r"\1", text)            # _italic_ -> italic
+    text = text.replace("*", "")
+    return text.strip()
+
+
+def render(msg, convergence, grep, on):
+    title = msg.get("title") or "(no title)"
+    body = clean_slack((msg.get("message") or "").strip())
+    tags = msg.get("tags") or []
+    prio = int(msg.get("priority") or 3)
+
+    if convergence and not is_flux_alert(title):
+        return
+    if grep and grep.lower() not in (title + " " + body).lower():
+        return
+
+    plabel, pcolour = PRIORITY.get(prio, ("P?", ""))
+    stamp = paint(hhmmss(msg.get("time", time.time())), DIM, on)
+    tagstr = (" " + paint("[" + ", ".join(tags) + "]", DIM, on)) if tags else ""
+    print(f"{stamp} {paint(plabel, pcolour, on)} {title}{tagstr}")
+    # The body is worth a second line only when it says more than the title
+    # already does (e.g. a CPUThrottling percentage); for Flux alerts it just
+    # restates the title, so drop it.
+    if body and body not in title and title.split(" on ")[0] not in body:
+        for line in body.splitlines():
+            print(f"           {paint(line, DIM, on)}")
+
+
+def watch_ntfy(args):
+    on = colour_on(sys.stdout)
+    scope = "Flux convergence" if args.convergence else "all"
+    print(paint(f"cluster-watch: {NTFY_TOPIC} ({scope} alerts, replaying last {args.since})",
+                DIM, on))
+    url = f"{NTFY_BASE}/{NTFY_TOPIC}/json?since={args.since}"
+    while True:
+        try:
+            with urllib.request.urlopen(url, timeout=90) as resp:
+                for raw in resp:
+                    line = raw.decode("utf-8", "replace").strip()
+                    if not line:
+                        continue
+                    try:
+                        msg = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if msg.get("event") == "message":
+                        render(msg, args.convergence, args.grep, on)
+        except KeyboardInterrupt:
+            return 0
+        except Exception as exc:  # network drop, server hiccup — reconnect
+            print(paint(f"  (reconnecting: {exc})", DIM, on), file=sys.stderr)
+            time.sleep(3)
+            # Only a short backlog on reconnect, so a flaky link doesn't replay
+            # the whole window each time.
+            url = f"{NTFY_BASE}/{NTFY_TOPIC}/json?since=30s"
+
+
+def kubectl_json(get_args):
+    kc = os.environ.get("KUBECONFIG", os.path.expanduser("~/.kube/config"))
+    if not os.path.exists(kc):
+        raise SystemExit(f"cluster-watch --status needs a kubeconfig; "
+                         f"KUBECONFIG={kc} not found")
+    out = subprocess.run(["kubectl", *get_args, "-o", "json"],
+                         capture_output=True, text=True)
+    if out.returncode != 0:
+        raise SystemExit(f"kubectl failed: {out.stderr.strip()}")
+    return json.loads(out.stdout)
+
+
+def ready_condition(obj):
+    for c in obj.get("status", {}).get("conditions", []):
+        if c.get("type") == "Ready":
+            return c.get("status"), c.get("reason", ""), c.get("message", "")
+    return "Unknown", "NoStatus", ""
+
+
+def watch_status(args):
+    on = colour_on(sys.stdout)
+    kinds = [("kustomizations.kustomize.toolkit.fluxcd.io", "Kustomization"),
+             ("helmreleases.helm.toolkit.fluxcd.io", "HelmRelease")]
+    try:
+        while True:
+            lines, not_ready = [], 0
+            for resource, kind in kinds:
+                for obj in kubectl_json(["get", resource, "-A"]).get("items", []):
+                    status, reason, message = ready_condition(obj)
+                    if status == "True":
+                        continue
+                    not_ready += 1
+                    md = obj["metadata"]
+                    who = f"{md['namespace']}/{md['name']}"
+                    colour = "\033[1;31m" if status == "False" else "\033[0;33m"
+                    lines.append(paint(f"{kind:13} {who:44} {reason}", colour, on))
+                    if message:
+                        lines.append(f"  {paint(message.strip()[:200], DIM, on)}")
+            if on:
+                sys.stdout.write("\033[2J\033[H")
+            print(paint(f"cluster-watch --status  {hhmmss(time.time())}  "
+                        f"({not_ready} not converged)", DIM, on))
+            if not_ready == 0:
+                print(paint("  all Kustomizations and HelmReleases Ready", GREEN, on))
+            else:
+                print("\n".join(lines))
+            time.sleep(args.interval)
+    except KeyboardInterrupt:
+        return 0
+
+
+def main():
+    p = argparse.ArgumentParser(description="Watch the Guardian cluster converge.")
+    p.add_argument("--status", action="store_true",
+                   help="live Flux convergence status from the cluster (needs KUBECONFIG)")
+    p.add_argument("--convergence", action="store_true",
+                   help="ntfy mode: show only Flux convergence alerts")
+    p.add_argument("--since", default="15m",
+                   help="ntfy backlog window replayed on connect (default 15m)")
+    p.add_argument("--grep", default="",
+                   help="ntfy mode: only alerts whose title/body contains this substring")
+    p.add_argument("--interval", type=float, default=5.0,
+                   help="--status refresh seconds (default 5)")
+    args = p.parse_args()
+    return watch_status(args) if args.status else watch_ntfy(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

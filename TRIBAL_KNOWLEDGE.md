@@ -85,3 +85,34 @@ path-filtered without hanging unrelated PRs). The `guardian-promotions`
 GitHub App (private key in operator custody; also in the repo Actions
 secrets for promotion-lock-sync) must stay scoped to Contents + Pull
 requests read/write.
+
+## Watching the cluster converge (`tools/ops/cluster-watch`)
+
+When you push a change, watch whether it actually reconciles instead of
+guessing. Two read-only views:
+
+```sh
+tools/ops/cluster-watch            # tail the alert stream (ntfy, no cluster access)
+tools/ops/cluster-watch --convergence   # ...only Flux Kustomization/HelmRelease alerts
+tools/ops/cluster-watch --status   # live Flux status from the cluster (needs KUBECONFIG)
+```
+
+Use `--status` to babysit a PR: it reads Kustomization and HelmRelease
+Ready conditions every few seconds and prints exactly the ones that are not
+Ready, with the reason and message (`BuildFailed`, `HealthCheckFailed`,
+`UpgradeFailed`, ...). A bad manifest shows up in seconds — the ntfy alerts
+debounce ~15m before they page, so the stream tells you about *sustained*
+failure, not a fresh push.
+
+The stream view needs nothing but network: the cluster already publishes
+every alert to the `guardian-operations-fable` ntfy topic (via
+`alert-relay`), and that topic is world-subscribable, so from any machine:
+
+```sh
+curl -s "https://ntfy.sh/guardian-operations-fable/json?since=15m"
+```
+
+is the zero-dependency equivalent of the stream view. Override the topic
+with `NTFY_TOPIC` / `NTFY_BASE` if the sink ever moves. (If the topic is
+later locked down, subscribers will need a token — the relay is the single
+place that knows the URL today.)
