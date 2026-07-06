@@ -612,6 +612,52 @@ spec:
       current: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
       failed: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'False')
 ---
+# Verself runner control plane: the stage (a) Deployment in verself-runner
+# plus its CNPG Postgres, ESO wiring, Cilium policy, and apex webhook Ingress
+# (deployments/verself-runner/). Depends on storage (the Postgres PVCs) and
+# the base slice, the guardian-analytics pattern; the OpenBao roles for this
+# namespace come from self-init and Flux retry rides out the gap. wait:false
+# + explicit healthChecks: gate on exactly the Deployment and the
+# ExternalSecret — kstatus knows nothing about ESO CRs, so the exprs below
+# declare their Ready contract.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: guardian-verself-runner
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/deployments/verself-runner
+  sourceRef:
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      # Required, not optional — see guardian-company-prod above.
+      - kind: ConfigMap
+        name: guardian-source
+  dependsOn:
+    - name: guardian-mgmt-storage
+    - name: guardian-mgmt-base
+  prune: true
+  wait: false
+  timeout: 15m
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: verself-controlplane
+      namespace: verself-runner
+    - apiVersion: external-secrets.io/v1beta1
+      kind: ExternalSecret
+      name: github-app
+      namespace: verself-runner
+  healthCheckExprs:
+    - apiVersion: external-secrets.io/v1beta1
+      kind: ExternalSecret
+      current: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
+      failed: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'False')
+---
 # company-site PR previews: static cluster half (Cilium admits for the
 # previews tenant) plus the previews-branch source objects, both declared in
 # deployments/company/previews. The GitRepository/Kustomization pair that

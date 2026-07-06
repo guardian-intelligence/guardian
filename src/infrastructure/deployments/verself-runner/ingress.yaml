@@ -1,0 +1,28 @@
+# GitHub webhook delivery on the SAME apex host company-site owns —
+# path-prefix routing ahead of the catch-all `/`, the same pattern as
+# analytics /api/events and IAM prod's /realms. The apex TLS + origin-pull
+# (AOP) config lives on the company-site Ingress and applies server-wide, so
+# requests here carry the same verified-IP headers; the /api edge bypass
+# already exempts this path from browser checks.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: verself-controlplane
+  namespace: verself-runner
+  labels:
+    app.kubernetes.io/name: verself-controlplane
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: verself
+spec:
+  ingressClassName: tenant-root
+  rules:
+    - host: guardianintelligence.org
+      http:
+        paths:
+          - path: /api/v1/github/webhooks
+            pathType: Prefix
+            backend:
+              service:
+                name: verself-controlplane
+                port:
+                  number: 8080

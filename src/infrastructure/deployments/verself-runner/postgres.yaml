@@ -1,0 +1,47 @@
+# Control-plane Postgres: the delivery ledger + runner-class state. Quorum
+# replication, backed up through Cozystack's platform backup machinery
+# (cozy-default BackupClass → off-cluster R2, see base/cozystack/platform.yaml)
+# — no S3 coordinates or credentials belong here. The operator generates
+# Secret/postgres-controlplane-app whose `uri` key is the DATABASE_URL the
+# control plane consumes (controlplane.yaml).
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Postgres
+metadata:
+  name: controlplane
+  namespace: verself-runner
+spec:
+  replicas: 3
+  size: 10Gi
+  storageClass: replicated
+  external: false
+  version: v18
+  quorum:
+    minSyncReplicas: 1
+    maxSyncReplicas: 2
+  # Platform-managed backup flow: barmanObjectStore is SSA-patched onto the
+  # live Cluster by the CNPG backup driver at first BackupJob time; continuous
+  # WAL archiving starts then, not at merge — fire an ad-hoc BackupJob right
+  # after enabling (and remember the two-BackupJob rule: the first base backup
+  # after enabling is not restorable on its own).
+  backup:
+    enabled: true
+    useSystemBucket: true
+---
+# Nightly base backup. Continuous WAL archiving covers RPO; the cron bounds
+# restore replay time. Offset from the other Plans (iam prod 03:00,
+# tenant-root guardian 04:00, analytics ClickHouse 05:00) so base backups
+# don't contend for the same uplink window.
+apiVersion: backups.cozystack.io/v1alpha1
+kind: Plan
+metadata:
+  name: controlplane-postgres-nightly
+  namespace: verself-runner
+spec:
+  applicationRef:
+    apiGroup: apps.cozystack.io
+    kind: Postgres
+    name: controlplane
+  backupClassName: cozy-default
+  schedule:
+    type: cron
+    cron: "0 2 * * *"

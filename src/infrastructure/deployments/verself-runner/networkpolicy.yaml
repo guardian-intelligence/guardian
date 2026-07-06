@@ -1,0 +1,131 @@
+# Control-plane flows, following the repo's Cilium conventions (selecting an
+# endpoint flips it to default-deny for the selected direction; every rule
+# below is therefore the complete allowed set). Kubelet probes arrive from
+# the reserved host entity, which Cilium admits implicitly. The CNPG postgres
+# pods are NOT selected by any policy here — the CNPG operator's own
+# management traffic stays untouched (same stance as iam/*).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: verself-controlplane
+  namespace: verself-runner
+  labels:
+    app.kubernetes.io/name: verself-controlplane
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: verself
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: verself-controlplane
+  ingress:
+    # Webhook deliveries arrive through the tenant-root ingress controller
+    # (the apex Ingress in ingress.yaml).
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            k8s:app.kubernetes.io/name: ingress-nginx
+            k8s:app.kubernetes.io/component: controller
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # In-namespace CNPG Postgres (delivery ledger).
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: postgres-controlplane
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    # Trace export to the analytics OTel collector.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: guardian-analytics
+            k8s:app.kubernetes.io/name: otel-collector
+      toPorts:
+        - ports:
+            - port: "4317"
+              protocol: TCP
+    # GitHub REST API (runner registration tokens, PR comments). Same
+    # mechanism as alert-relay's pager sink: world:443 rather than a pinned
+    # FQDN — api.github.com resolves through GitHub's anycast fleet and a
+    # hostname pin here would depend on Cilium's DNS proxy for no isolation
+    # gain (443 to the world is already the only hole).
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+# Egress half for the root ingress controller (its generated egress policy
+# only admits tenant-root-labeled destinations) — same shape as the
+# analytics-ingest and keycloak-prod pairs.
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-root-ingress-egress-verself-controlplane
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: verself
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-root
+      k8s:app.kubernetes.io/name: ingress-nginx
+      k8s:app.kubernetes.io/component: controller
+  egress:
+    - toEndpoints:
+        - matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: In
+              values:
+                - verself-runner
+            - key: k8s:app.kubernetes.io/name
+              operator: In
+              values:
+                - verself-controlplane
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+---
+# Ingress half for the analytics OTel collector: its namespaced policy admits
+# guardian.dev/otel: producer endpoints from its OWN namespace only (a
+# fromEndpoints selector without a namespace key never crosses namespaces),
+# so this first cross-namespace producer needs an additive clusterwide admit.
+# Scoped to exactly the control-plane pods, not the producer label, so
+# joining the trace pipeline from yet another namespace stays a deliberate
+# policy change.
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: guardian-analytics-otel-from-verself-controlplane
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: verself
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: guardian-analytics
+      k8s:app.kubernetes.io/name: otel-collector
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: verself-runner
+            k8s:app.kubernetes.io/name: verself-controlplane
+      toPorts:
+        - ports:
+            - port: "4317"
+              protocol: TCP

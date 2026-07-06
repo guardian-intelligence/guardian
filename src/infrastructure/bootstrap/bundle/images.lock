@@ -164,6 +164,8 @@ ghcr.io/grafana/grafana-operator@sha256:a2d35af04ec0773f62d9b75966d0a3f8b24998e1
 # alert-relay (tenant-root pager sink; deployments/alerting/relay.yaml)
 ghcr.io/guardian-intelligence/alert-relay@sha256:3b98b56c8e30cb0178af2dbbeccabdca8ffcdd5fed97d4a9d810dd8afb69db25
 ghcr.io/guardian-intelligence/company-site@sha256:860736aa5ed5213bce16498fe7dc06a39375f81388dd762dc1e779fe3b4fd3ea
+# verself-controlplane (runner control plane; deployments/verself-runner/controlplane.yaml)
+ghcr.io/guardian-intelligence/verself-controlplane@sha256:cae601911d86b08b906bca69d6e70ec3a9247e3455bb44a0ceccb2f103c3d850
 ghcr.io/kvaps/ingress-nginx-with-protobuf-exporter/protobuf-exporter@sha256:6d9235a9ee6f2be1921db4687afbdcd85d145b087dd916b5a96455bdb5cff560
 ghcr.io/stakater/reloader@sha256:61e2cd350a366059b19d922badfd2a1b35a3f5ee7b872c43d9853c27387637fb
 oci.external-secrets.io/external-secrets/external-secrets@sha256:da1a2ea3f7e855b2fafed792740151edffd7935cfc34542ec6715da30e65ac92
