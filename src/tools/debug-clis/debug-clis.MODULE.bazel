@@ -72,6 +72,38 @@ filegroup(
 )
 
 http_archive(
+    name = "gh_linux_amd64",
+    build_file_content = """
+filegroup(
+    name = "gh",
+    srcs = ["bin/gh"],
+    visibility = ["//visibility:public"],
+)
+""",
+    sha256 = "83d5c2ccad5498f58bf6368acb1ab32588cf43ab3a4b1c301bf36328b1c8bd60",
+    strip_prefix = "gh_2.96.0_linux_amd64",
+    url = "https://github.com/cli/cli/releases/download/v2.96.0/gh_2.96.0_linux_amd64.tar.gz",
+)
+
+# Homebrew's portable-ruby bottle: a relocatable, self-contained Ruby build
+# (dynamically linked only against glibc, not a fixed Homebrew prefix) rather
+# than a from-source build via rules_foreign_cc, which this repo has no other
+# use for. Dev tooling only - no guardian code depends on ruby.
+http_archive(
+    name = "ruby_linux_amd64",
+    build_file_content = """
+filegroup(
+    name = "ruby",
+    srcs = ["bin/ruby"],
+    visibility = ["//visibility:public"],
+)
+""",
+    sha256 = "40932a3950ccc8bf9d13d98e692e5518427cc66b4f9520956cec349629d25259",
+    strip_prefix = "portable-ruby/3.4.6",
+    url = "https://github.com/Homebrew/homebrew-portable-ruby/releases/download/3.4.6/portable-ruby-3.4.6.x86_64_linux.bottle.tar.gz",
+)
+
+http_archive(
     name = "percona_postgresql_18_linux_amd64",
     build_file_content = """
 filegroup(

@@ -28,6 +28,8 @@ DEBUG_CLI_SHIMS = [
     ("clickhouse-benchmark", "@clickhouse_common_static_linux_amd64//:clickhouse"),
     ("psql", "@percona_postgresql_18_linux_amd64//:psql"),
     ("pgbench", "@percona_postgresql_18_linux_amd64//:pgbench"),
+    ("gh", "@gh_linux_amd64//:gh"),
+    ("ruby", "@ruby_linux_amd64//:ruby"),
 ]
 
 # Repo-pinned build tools. Same shim mechanism, but these are cross-platform
