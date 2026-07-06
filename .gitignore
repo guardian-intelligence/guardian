@@ -31,3 +31,5 @@
 /src/products/viteplus-monorepo/apps/guardianintelligence-web/.output/
 /src/products/viteplus-monorepo/apps/guardianintelligence-web/.vite/
 /dist/
+
+*.pem
