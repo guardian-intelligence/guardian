@@ -4,3 +4,5 @@ resources:
   - namespace.yaml
   - kargo-helmrelease.yaml
   - kargo-networkpolicy.yaml
+  - kargo-state-metrics.yaml
+  - kargo-alerts.yaml

@@ -1,0 +1,281 @@
+# Kargo 1.10 exposes no Prometheus metrics of its own; the CR status fields
+# are the only signal. This is a customResourceState-only kube-state-metrics
+# instance that turns Promotion/Stage/Warehouse status into scrapeable gauges
+# (same pattern as the platform's Flux gotk_resource_info exporter in
+# cozy-monitoring). Alerts over these series live in kargo-alerts.yaml.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kargo-state-metrics
+  namespace: kargo
+  labels:
+    app.kubernetes.io/name: kargo-state-metrics
+    app.kubernetes.io/part-of: guardian
+# The exporter watches CRs cluster-wide through the apiserver.
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kargo-state-metrics
+  labels:
+    app.kubernetes.io/name: kargo-state-metrics
+    app.kubernetes.io/part-of: guardian
+rules:
+  - apiGroups:
+      - kargo.akuity.io
+    resources:
+      - promotions
+      - stages
+      - warehouses
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kargo-state-metrics
+  labels:
+    app.kubernetes.io/name: kargo-state-metrics
+    app.kubernetes.io/part-of: guardian
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kargo-state-metrics
+subjects:
+  - kind: ServiceAccount
+    name: kargo-state-metrics
+    namespace: kargo
+---
+# CRS metrics carry no CR-namespace label by default (the scrape's `namespace`
+# label is this pod's namespace), so every metric adds exported_namespace from
+# metadata.namespace — the Kargo project. Condition labels read the metav1
+# condition status verbatim (True/False/Unknown); alerts must key on ="False"
+# because NoFreight stages report Healthy=Unknown.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kargo-state-metrics-config
+  namespace: kargo
+  labels:
+    app.kubernetes.io/name: kargo-state-metrics
+    app.kubernetes.io/part-of: guardian
+data:
+  config.yaml: |
+    kind: CustomResourceStateMetrics
+    spec:
+      resources:
+        - groupVersionKind:
+            group: kargo.akuity.io
+            version: v1alpha1
+            kind: Promotion
+          metricNamePrefix: kargo
+          metrics:
+            - name: promotion_info
+              help: Current phase of a Kargo Promotion.
+              each:
+                type: Info
+                info:
+                  labelsFromPath:
+                    name: [metadata, name]
+                    stage: [spec, stage]
+                    phase: [status, phase]
+              labelsFromPath:
+                exported_namespace: [metadata, namespace]
+            - name: promotion_created
+              help: Creation time of a Kargo Promotion as a unix epoch.
+              each:
+                type: Gauge
+                gauge:
+                  # RFC3339 timestamps are parsed to a float epoch by
+                  # kube-state-metrics.
+                  path: [metadata, creationTimestamp]
+              labelsFromPath:
+                name: [metadata, name]
+                exported_namespace: [metadata, namespace]
+        - groupVersionKind:
+            group: kargo.akuity.io
+            version: v1alpha1
+            kind: Stage
+          metricNamePrefix: kargo
+          metrics:
+            - name: stage_info
+              help: Ready/Healthy condition status of a Kargo Stage.
+              each:
+                type: Info
+                info:
+                  labelsFromPath:
+                    name: [metadata, name]
+              labelsFromPath:
+                exported_namespace: [metadata, namespace]
+                ready: [status, conditions, "[type=Ready]", status]
+                healthy: [status, conditions, "[type=Healthy]", status]
+        - groupVersionKind:
+            group: kargo.akuity.io
+            version: v1alpha1
+            kind: Warehouse
+          metricNamePrefix: kargo
+          metrics:
+            - name: warehouse_info
+              help: Ready/Healthy condition status of a Kargo Warehouse.
+              each:
+                type: Info
+                info:
+                  labelsFromPath:
+                    name: [metadata, name]
+              labelsFromPath:
+                exported_namespace: [metadata, namespace]
+                ready: [status, conditions, "[type=Ready]", status]
+                healthy: [status, conditions, "[type=Healthy]", status]
+---
+# app.kubernetes.io/name must NOT be "kargo": the kargo CiliumNetworkPolicy
+# selects that label and would flip this pod default-deny with no vmagent
+# ingress rule.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kargo-state-metrics
+  namespace: kargo
+  labels:
+    app.kubernetes.io/name: kargo-state-metrics
+    app.kubernetes.io/part-of: guardian
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kargo-state-metrics
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kargo-state-metrics
+        app.kubernetes.io/part-of: guardian
+    spec:
+      serviceAccountName: kargo-state-metrics
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kube-state-metrics
+          # v2.15.0
+          image: registry.k8s.io/kube-state-metrics/kube-state-metrics@sha256:db384bf43222b066c378e77027a675d4cd9911107adba46c2922b3a55e10d6fb
+          args:
+            - --custom-resource-state-config-file=/etc/kargo-state-metrics/config.yaml
+            - --custom-resource-state-only=true
+            - --port=8080
+            - --telemetry-port=8081
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: metrics
+              containerPort: 8080
+            - name: telemetry
+              containerPort: 8081
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: metrics
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: telemetry
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/kargo-state-metrics
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: kargo-state-metrics-config
+---
+# The Service name is the scrape job label the kargo-alerts VMRule filters on.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kargo-state-metrics
+  namespace: kargo
+  labels:
+    app.kubernetes.io/name: kargo-state-metrics
+    app.kubernetes.io/component: metrics
+    app.kubernetes.io/part-of: guardian
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: kargo-state-metrics
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: metrics
+      protocol: TCP
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: kargo-state-metrics
+  namespace: kargo
+  labels:
+    app.kubernetes.io/name: kargo-state-metrics
+    app.kubernetes.io/part-of: guardian
+spec:
+  namespaceSelector:
+    matchNames:
+      - kargo
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kargo-state-metrics
+      app.kubernetes.io/component: metrics
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+---
+# Ingress: only vmagent scrapes. Egress: only the apiserver (CR watches) and
+# DNS. Kubelet probes arrive from the host entity, which Cilium allows.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: kargo-state-metrics
+  namespace: kargo
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: kargo-state-metrics
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: vmagent
+            k8s:io.kubernetes.pod.namespace: cozy-monitoring
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    - toEntities:
+        - kube-apiserver
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP

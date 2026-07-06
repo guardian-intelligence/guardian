@@ -1,0 +1,76 @@
+# Detection over the kargo-state-metrics series (kargo-state-metrics.yaml).
+#
+# Label contract for the promotion joins: kargo_promotion_info carries
+# {name, stage, phase, exported_namespace}; kargo_promotion_created carries
+# {name, exported_namespace}. Promotion names are unique per project
+# namespace, so `and on(exported_namespace, name)` matches one-to-one.
+# Terminal promotions linger until Kargo GC (well past 6h), so the failure
+# alert only considers promotions created in the last 6h — otherwise every
+# old Failed object would page forever.
+#
+# Stage/Warehouse condition labels are the raw metav1 status strings: key on
+# ="False", never !="True" — NoFreight stages (idle gamma/prod) report
+# Healthy=Unknown and must not page.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: kargo
+  namespace: kargo
+  labels:
+    app.kubernetes.io/name: kargo-state-metrics
+    app.kubernetes.io/part-of: guardian
+spec:
+  groups:
+    - name: kargo.rules
+      interval: 30s
+      rules:
+        - alert: KargoPromotionFailed
+          expr: kargo_promotion_info{job="kargo-state-metrics",phase=~"Failed|Errored"} and on(exported_namespace, name) ((time() - kargo_promotion_created{job="kargo-state-metrics"}) < 21600)
+          for: 1m
+          labels:
+            severity: critical
+            guardian.dev/component: promotion
+          annotations:
+            summary: A Kargo promotion created in the last 6h is Failed or Errored.
+        - alert: KargoPromotionStuck
+          expr: kargo_promotion_info{job="kargo-state-metrics",phase=~"Pending|Running"} and on(exported_namespace, name) ((time() - kargo_promotion_created{job="kargo-state-metrics"}) > 1800)
+          for: 5m
+          labels:
+            severity: warning
+            guardian.dev/component: promotion
+          annotations:
+            summary: A Kargo promotion has been Pending or Running for over 30 minutes.
+        - alert: KargoWarehouseNotHealthy
+          expr: kargo_warehouse_info{job="kargo-state-metrics",healthy="False"} or kargo_warehouse_info{job="kargo-state-metrics",ready="False"}
+          for: 15m
+          labels:
+            severity: critical
+            guardian.dev/component: promotion
+          annotations:
+            summary: A Kargo warehouse is not healthy — artifact discovery or Git credentials are failing.
+        - alert: KargoStageUnhealthy
+          expr: kargo_stage_info{job="kargo-state-metrics",healthy="False"}
+          for: 15m
+          labels:
+            severity: warning
+            guardian.dev/component: promotion
+          annotations:
+            summary: A Kargo stage reports Healthy=False.
+        - alert: KargoStateMetricsDown
+          expr: up{job="kargo-state-metrics"} == 0
+          for: 10m
+          labels:
+            severity: warning
+            guardian.dev/component: promotion
+          annotations:
+            summary: The kargo-state-metrics scrape target is down.
+        - alert: KargoStateMetricsAbsent
+          # Stages always exist in Git-managed pipelines; no kargo_stage_info
+          # series at all means the exporter or its scrape silently vanished.
+          expr: absent(kargo_stage_info{job="kargo-state-metrics"})
+          for: 15m
+          labels:
+            severity: warning
+            guardian.dev/component: promotion
+          annotations:
+            summary: No Kargo stage metrics are being reported at all.
