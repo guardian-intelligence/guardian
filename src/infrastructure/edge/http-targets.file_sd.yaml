@@ -23,6 +23,21 @@
     guardian_stage: root
     guardian_expected_statuses: "200"
 - targets:
+    - https://keycloak.guardianintelligence.org/realms/cozy/.well-known/openid-configuration
+  labels:
+    guardian_surface: keycloak
+    guardian_stage: root
+    guardian_expected_statuses: "200"
+# Guard invariant, not availability: the admin console must NOT be served on
+# the public host (base/cozystack/keycloak-admin-guard.yaml shadows /admin to
+# an endpointless Service). 503 is the guard working; anything else pages.
+- targets:
+    - https://keycloak.guardianintelligence.org/admin/master/console/
+  labels:
+    guardian_surface: keycloak-admin-guard
+    guardian_stage: root
+    guardian_expected_statuses: "503"
+- targets:
     - https://beta.guardianintelligence.org/realms/verself/.well-known/openid-configuration
   labels:
     guardian_surface: iam

@@ -1,0 +1,61 @@
+# Shadow the platform Keycloak's admin surface off the public host. The
+# upstream keycloak package (Cozystack 1.5.2) renders a single Ingress
+# routing path / on keycloak.<root-host> — admin console included — with no
+# values knob to disable or restrict it; publicly routing /admin is exactly
+# why the stack was disabled on 2026-07-05 (f82b8e2). ingress-nginx merges
+# same-host rules across Ingress objects and longest prefix wins, so these
+# paths outrank the chart's / and land on an endpointless Service: 503 at
+# the origin itself, which also covers direct-to-node-IP requests that
+# bypass Cloudflare (AOP marks those connections but does not reject them —
+# see app-patches/ingress-origin-edge.yaml). The edge prober asserts the
+# 503 stays true (edge/http-targets.file_sd.yaml).
+#
+# /admin covers the console + admin REST API; /realms/master covers master-
+# realm logins (the only account there is the operator's bootstrap admin).
+# The EDP keycloak-operator is unaffected: it talks to
+# keycloak-http.cozy-keycloak.svc in-cluster, never through the Ingress.
+# Console access for humans is kubectl port-forward only, same posture as
+# the per-stage IAM Keycloaks (deployments/iam/*/ingress.yaml).
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-admin-blackhole
+  namespace: cozy-keycloak
+  labels:
+    app.kubernetes.io/name: keycloak-admin-guard
+    app.kubernetes.io/part-of: guardian
+spec:
+  # No selector, no Endpoints, ever: ingress-nginx resolves the backend to
+  # its 503 handler. Do not add a selector.
+  ports:
+    - name: http
+      port: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: keycloak-admin-guard
+  namespace: cozy-keycloak
+  labels:
+    app.kubernetes.io/name: keycloak-admin-guard
+    app.kubernetes.io/part-of: guardian
+spec:
+  ingressClassName: tenant-root
+  rules:
+    - host: keycloak.guardianintelligence.org
+      http:
+        paths:
+          - path: /admin
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak-admin-blackhole
+                port:
+                  number: 80
+          - path: /realms/master
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak-admin-blackhole
+                port:
+                  number: 80

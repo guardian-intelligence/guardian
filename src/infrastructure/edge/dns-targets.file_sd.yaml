@@ -5,6 +5,7 @@
     - alerta.guardianintelligence.org
     - dashboard.guardianintelligence.org
     - grafana.guardianintelligence.org
+    - keycloak.guardianintelligence.org
     - beta.guardianintelligence.org
     - gamma.guardianintelligence.org
   labels:
