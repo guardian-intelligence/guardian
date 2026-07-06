@@ -42,7 +42,15 @@ data:
     lines=()
     overall_ok=1
     for path in "${paths[@]}"; do
-      read -r code total ttfb < <(curl -o /dev/null -s -w '%{http_code} %{time_total} %{time_starttransfer}' --max-time 10 "$base$path" || echo "000 0 0")
+      # -w's format string MUST end in \n: `read` returns exit 1 when its
+      # input has no trailing newline, even though it still populates the
+      # variables correctly -- under `set -e` that aborted this script on
+      # every SUCCESSFUL curl (the || echo fallback only fires on failure,
+      # and only that path had a real trailing newline via echo). Confirmed
+      # live: every real run failed with a bare `curl ... $(process
+      # substitution)` in an otherwise-empty trace, right after a manual
+      # curl to the same URL proved the target was perfectly healthy.
+      read -r code total ttfb < <(curl -o /dev/null -s -w '%{http_code} %{time_total} %{time_starttransfer}\n' --max-time 10 "$base$path" || echo "000 0 0")
       ok=0
       if [[ "$code" == "200" ]]; then ok=1; else overall_ok=0; fi
       lines+=("http_canary_duration_seconds{namespace=\"$namespace\",path=\"$path\",phase=\"total\"} $total")
