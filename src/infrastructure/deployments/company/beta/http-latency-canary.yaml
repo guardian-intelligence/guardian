@@ -16,6 +16,10 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: company-site-http-canary
+  # substitute: disabled -- the embedded bash uses ${paths[@]}/${#paths[@]},
+  # which Flux's post-build envsubst rejects ("missing closing brace").
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
   namespace: tenant-guardian-beta
   labels:
     app.kubernetes.io/name: company-site-http-canary
