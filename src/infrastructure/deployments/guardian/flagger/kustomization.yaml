@@ -5,3 +5,4 @@ resources:
   - flagger-helmrelease.yaml
   - flagger-networkpolicy.yaml
   - alert-provider.yaml
+  - metric-templates.yaml

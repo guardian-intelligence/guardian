@@ -8,3 +8,4 @@ resources:
   - canary.yaml
   - loadtester.yaml
   - networkpolicy.yaml
+  - http-latency-canary.yaml
