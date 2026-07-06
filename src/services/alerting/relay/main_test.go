@@ -12,37 +12,50 @@ import (
 	"time"
 )
 
-// alertaPayload mirrors what Alerta's slack plugin posts: text summary plus
-// one attachment with a color and event/resource/severity/environment fields.
+// alertaPayload mirrors what Alerta's slack plugin (alerta-contrib
+// alerta_slack.py) actually posts under the Cozystack v1.5.0 chart, where
+// only SLACK_WEBHOOK_URL is set and SLACK_ATTACHMENTS defaults to False: a
+// TEXT-ONLY message rendered from SLACK_DEFAULT_SUMMARY_FMT — no
+// attachments, no fields, no color.
 const alertaPayload = `{
-	"text": "*[Production] CRITICAL PodCrashLooping on tenant-root/openbao-0*",
-	"attachments": [{
-		"color": "danger",
-		"title": "PodCrashLooping on tenant-root/openbao-0",
-		"text": "container keeps restarting",
-		"fields": [
-			{"title": "event", "value": "PodCrashLooping", "short": true},
-			{"title": "resource", "value": "tenant-root/openbao-0", "short": true},
-			{"title": "severity", "value": "critical", "short": true},
-			{"title": "environment", "value": "Production", "short": true}
-		],
-		"mrkdwn_in": ["text"]
-	}]
+	"username": "alerta",
+	"channel": "",
+	"text": "*[Open] PRODUCTION Guardian Critical* - _KubePodCrashLooping on tenant-root/openbao-0_ <http://alerta.tenant-root.svc/#/alert/9d4c8a1e-5b2f-4f4e-9c9f-1c2c3d4e5f6a|9d4c8a1e>"
 }`
 
-// flaggerPayload mirrors a Flagger AlertProvider slack message: no attachment
-// title, no severity field, color carries the outcome.
+// alertaText renders the plugin's default summary line the way
+// alerta_slack.py does: status/severity capitalized upstream, environment
+// uppercased, service comma-joined, event/resource raw, trailing dashboard
+// link.
+func alertaText(status, env, service, severity, event, resource string) string {
+	return "*[" + status + "] " + env + " " + service + " " + severity + "* - _" +
+		event + " on " + resource + "_ <http://alerta.tenant-root.svc/#/alert/9d4c8a1e-5b2f-4f4e-9c9f-1c2c3d4e5f6a|9d4c8a1e>"
+}
+
+func alertaJSON(text string) string {
+	b, _ := json.Marshal(map[string]string{"username": "alerta", "channel": "", "text": text})
+	return string(b)
+}
+
+// flaggerPayload mirrors a Flagger AlertProvider slack message, verified
+// against flagger v1.43.0 pkg/notifier/slack.go Post(): Flagger genuinely
+// sends attachments — no top-level text (omitempty, never set), one
+// attachment with color good|danger (danger when severity=="error"),
+// author_name "{workload}.{namespace}", the message in attachment text, and
+// fields with short=false.
 const flaggerPayload = `{
-	"channel": "",
+	"channel": "flagger",
 	"username": "flagger",
-	"text": "keycloak-passthrough.guardian-iam-beta",
+	"icon_url": "",
+	"icon_emoji": ":rocket:",
 	"attachments": [{
 		"color": "danger",
-		"author_name": "flagger",
+		"author_name": "keycloak.guardian-iam-beta",
 		"text": "Canary analysis failed, rolling back.",
+		"mrkdwn_in": ["text"],
 		"fields": [
-			{"title": "Target", "value": "Deployment/keycloak", "short": true},
-			{"title": "Failed checks threshold", "value": "2", "short": true}
+			{"title": "Target", "value": "Deployment/keycloak", "short": false},
+			{"title": "Failed checks threshold", "value": "2", "short": false}
 		]
 	}]
 }`
@@ -57,17 +70,52 @@ func TestCompose(t *testing.T) {
 		wantInBody   []string
 	}{
 		{
-			name:         "alerta style",
+			name:         "alerta text-only open critical",
 			payload:      alertaPayload,
-			wantTitle:    "PodCrashLooping on tenant-root/openbao-0",
+			wantTitle:    "KubePodCrashLooping on tenant-root/openbao-0",
 			wantPriority: 5,
 			wantTags:     []string{"critical", "production"},
-			wantInBody:   []string{"container keeps restarting", "event: PodCrashLooping", "resource: tenant-root/openbao-0"},
+			wantInBody:   []string{"*[Open] PRODUCTION Guardian Critical*", "KubePodCrashLooping on tenant-root/openbao-0"},
 		},
 		{
-			name:         "flagger style falls back to first line of text",
+			name:         "alerta text-only closed ok pages low with status prefix",
+			payload:      alertaJSON(alertaText("Closed", "PRODUCTION", "Guardian", "Ok", "KubePodCrashLooping", "tenant-root/openbao-0")),
+			wantTitle:    "[Closed] KubePodCrashLooping on tenant-root/openbao-0",
+			wantPriority: 2,
+			wantTags:     []string{"ok", "production"},
+			wantInBody:   []string{"*[Closed] PRODUCTION Guardian Ok*"},
+		},
+		{
+			name:         "alerta text-only comma-joined multi-word service list",
+			payload:      alertaJSON(alertaText("Open", "BETA", "Keycloak,Guardian Web", "Major", "HighErrorRate", "guardian-iam-beta/keycloak-0")),
+			wantTitle:    "HighErrorRate on guardian-iam-beta/keycloak-0",
+			wantPriority: 4,
+			wantTags:     []string{"major", "beta"},
+			wantInBody:   []string{"Keycloak,Guardian Web"},
+		},
+		{
+			// The event itself contains " on ": the parser must split the
+			// italic segment at the LAST " on " so the resource stays a
+			// namespace/pod path.
+			name:         "alerta text-only event containing ' on ' splits at the last one",
+			payload:      alertaJSON(alertaText("Open", "PRODUCTION", "Guardian", "Warning", "FailedMount on startup", "tenant-root/openbao-0")),
+			wantTitle:    "FailedMount on startup on tenant-root/openbao-0",
+			wantPriority: 3,
+			wantTags:     []string{"warning", "production"},
+			wantInBody:   []string{"FailedMount on startup"},
+		},
+		{
+			name:         "text-only payload that is not an alerta summary keeps the fallback",
+			payload:      `{"username":"someone","text":"free-form message\nwith a second line"}`,
+			wantTitle:    "free-form message",
+			wantPriority: 3,
+			wantTags:     nil,
+			wantInBody:   []string{"free-form message", "with a second line"},
+		},
+		{
+			name:         "flagger style titles from attachment author_name",
 			payload:      flaggerPayload,
-			wantTitle:    "keycloak-passthrough.guardian-iam-beta",
+			wantTitle:    "keycloak.guardian-iam-beta",
 			wantPriority: 5,
 			wantTags:     nil,
 			wantInBody:   []string{"Canary analysis failed, rolling back.", "Target: Deployment/keycloak", "Failed checks threshold: 2"},
@@ -110,6 +158,62 @@ func TestCompose(t *testing.T) {
 	}
 }
 
+// TestParseAlertaSummary pins the parsing contract against
+// SLACK_DEFAULT_SUMMARY_FMT as alerta_slack.py renders it.
+func TestParseAlertaSummary(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+		want alertaSummary
+		ok   bool
+	}{
+		{
+			name: "full summary with dashboard link",
+			text: "*[Open] PRODUCTION Guardian Critical* - _KubePodCrashLooping on tenant-root/openbao-0_ <http://alerta.tenant-root.svc/#/alert/9d4c8a1e-5b2f-4f4e-9c9f-1c2c3d4e5f6a|9d4c8a1e>",
+			want: alertaSummary{status: "Open", environment: "PRODUCTION", service: "Guardian", severity: "Critical", event: "KubePodCrashLooping", resource: "tenant-root/openbao-0"},
+			ok:   true,
+		},
+		{
+			name: "empty DASHBOARD_URL still emits the link wrapper",
+			text: "*[Ack] BETA Keycloak Major* - _HighErrorRate on guardian-iam-beta/keycloak-0_ </#/alert/9d4c8a1e-5b2f-4f4e-9c9f-1c2c3d4e5f6a|9d4c8a1e>",
+			want: alertaSummary{status: "Ack", environment: "BETA", service: "Keycloak", severity: "Major", event: "HighErrorRate", resource: "guardian-iam-beta/keycloak-0"},
+			ok:   true,
+		},
+		{
+			name: "comma-joined service list with a space in a service name",
+			text: "*[Open] BETA Keycloak,Guardian Web Major* - _HighErrorRate on guardian-iam-beta/keycloak-0_ <http://a/#/alert/x|x>",
+			want: alertaSummary{status: "Open", environment: "BETA", service: "Keycloak,Guardian Web", severity: "Major", event: "HighErrorRate", resource: "guardian-iam-beta/keycloak-0"},
+			ok:   true,
+		},
+		{
+			name: "empty service list renders adjacent spaces",
+			text: "*[Open] PRODUCTION  Critical* - _KubePodCrashLooping on tenant-root/openbao-0_ <http://a/#/alert/x|x>",
+			want: alertaSummary{status: "Open", environment: "PRODUCTION", service: "", severity: "Critical", event: "KubePodCrashLooping", resource: "tenant-root/openbao-0"},
+			ok:   true,
+		},
+		{
+			name: "event containing ' on ' splits at the last occurrence",
+			text: "*[Open] PRODUCTION Guardian Warning* - _FailedMount on startup on tenant-root/openbao-0_ <http://a/#/alert/x|x>",
+			want: alertaSummary{status: "Open", environment: "PRODUCTION", service: "Guardian", severity: "Warning", event: "FailedMount on startup", resource: "tenant-root/openbao-0"},
+			ok:   true,
+		},
+		{name: "free-form text does not match", text: "Canary analysis failed, rolling back."},
+		{name: "empty text does not match", text: ""},
+		{name: "bold header without italic segment does not match", text: "*[Open] PRODUCTION Guardian Critical* - something else"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := parseAlertaSummary(tc.text)
+			if ok != tc.ok {
+				t.Fatalf("ok = %v, want %v", ok, tc.ok)
+			}
+			if got != tc.want {
+				t.Errorf("parsed = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestPriorityFor(t *testing.T) {
 	cases := []struct {
 		severity, color string
@@ -119,8 +223,11 @@ func TestPriorityFor(t *testing.T) {
 		{"", "danger", 5},
 		{"major", "", 4},
 		{"warning", "", 3},
-		{"minor", "", 2},
+		{"minor", "", 3},
 		{"informational", "", 2},
+		{"indeterminate", "", 2},
+		{"cleared", "", 2},
+		{"normal", "", 2},
 		{"", "ok", 2},
 		{"", "good", 2},
 		{"WARNING", "", 3},
@@ -168,6 +275,12 @@ func TestHandleSlackSuppressesHeartbeats(t *testing.T) {
 		{"heartbeat alertname field", `{"attachments":[{"fields":[{"title":"alertname","value":"Heartbeat"}]}]}`, true},
 		{"case insensitive", `{"attachments":[{"fields":[{"title":"event","value":"WATCHDOG"}]}]}`, true},
 		{"real alert forwards", `{"attachments":[{"fields":[{"title":"event","value":"DiskFull"}]}]}`, false},
+		// Text-only Alerta summaries: a repeat=False receive of the
+		// always-firing Watchdog (fresh DB post-DR, re-created alert) must be
+		// suppressed on the parsed event, not forwarded as a stray page.
+		{"alerta text-only watchdog", alertaJSON(alertaText("Open", "PRODUCTION", "Guardian", "Informational", "Watchdog", "vmalert")), true},
+		{"alerta text-only heartbeat case insensitive", alertaJSON(alertaText("Open", "PRODUCTION", "Guardian", "Informational", "HEARTBEAT", "alerta")), true},
+		{"alerta text-only real alert forwards", alertaPayload, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -457,6 +570,8 @@ func TestEventName(t *testing.T) {
 		{"event field wins over attachment title", `{"attachments":[{"title":"some title","fields":[{"title":"event","value":"DiskFull"}]}]}`, "DiskFull"},
 		{"alertname field", `{"attachments":[{"fields":[{"title":"alertname","value":"KubePodCrashLooping"}]}]}`, "KubePodCrashLooping"},
 		{"attachment title fallback", `{"attachments":[{"title":"canary failed"}]}`, "canary failed"},
+		{"flagger author_name fallback", flaggerPayload, "keycloak.guardian-iam-beta"},
+		{"alerta text-only summary parses the event", alertaPayload, "KubePodCrashLooping"},
 		{"text first line fallback", `{"text":"first line\nsecond line"}`, "first line"},
 	}
 	for _, tc := range cases {
