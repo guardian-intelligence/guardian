@@ -18,16 +18,25 @@ close.
    pruning whatever the branch no longer declares; helm-controller renders
    each release from the chart (same cross-namespace GitRepository sourceRef
    pattern Cozystack itself uses for tenant apps).
-3. Each preview ships a `DNSEndpoint` CR; external-dns (CRD source) creates a
-   Cloudflare-proxied CNAME `pr-<N>` → apex, so TLS terminates at the
-   Cloudflare edge exactly like prod (single-label hostname keeps it inside
-   the Universal SSL wildcard).
+3. `pr-<N>.guardianintelligence.org` resolves with **no per-preview DNS
+   record at all**: `*.guardianintelligence.org` is already a Cloudflare
+   Load Balancer pointed at the same ASH origin pool the apex uses
+   (`src/infrastructure/bootstrap/guardian-mgmt-dns/main.tf`), proxied and
+   covered by the zone's Universal SSL wildcard cert, same as prod. Routing
+   to the right preview happens entirely via the chart's per-PR `Ingress`
+   Host rule inside the shared tenant-root ingress controller — nothing
+   needs to wait on DNS-record creation or propagation, which used to be a
+   real (and sometimes flaky — Cloudflare occasionally challenges the
+   GitHub Actions runner IP mid-poll) contributor to how long a preview
+   took to become reachable. A `DNSEndpoint` CR (external-dns, CRD source)
+   was used here previously; removed once the always-present wildcard was
+   confirmed to already cover the same hostnames.
 4. The workflow polls the preview URL until the served
    `guardian:commit-sha` meta equals the PR head SHA, then posts/updates a
    sticky PR comment with the URL.
 5. On PR close, `company-site-preview-teardown.yml` deletes
-   `manifests/pr-<N>/` from the `previews` branch; Flux prunes the workload
-   and external-dns (policy: sync) removes the DNS record.
+   `manifests/pr-<N>/` from the `previews` branch; Flux prunes the workload.
+   Nothing DNS-side to clean up — the wildcard record was never per-preview.
 
 This directory holds the halves that live on `main`: the Cilium policy pair
 admitting the tenant-root ingress controller to preview pods (trust-sensitive)

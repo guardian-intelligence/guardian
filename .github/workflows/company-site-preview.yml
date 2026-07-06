@@ -2,9 +2,11 @@
 # touches the site: build the image, push it to ghcr.io by digest (no tag),
 # render per-PR manifests onto the `previews` orchestration branch, register a
 # GitHub deployment (transient environment pr-<N> — this is what populates the
-# PR's deployment card and the branch's deployments panel), wait for Flux +
-# external-dns to converge, then flip the deployment to success/failure and pin
-# a sticky comment with the URL. Teardown on close lives in
+# PR's deployment card and the branch's deployments panel), wait for Flux to
+# converge (DNS resolves immediately -- pr-<N> lives under the always-present
+# *.guardianintelligence.org wildcard, no per-preview record), then flip the
+# deployment to success/failure and pin a sticky comment with the URL.
+# Teardown on close lives in
 # company-site-preview-teardown.yml; the static cluster half is documented in
 # src/infrastructure/deployments/company/previews.
 #
@@ -116,7 +118,7 @@ jobs:
           echo "id=$id" >> "$GITHUB_OUTPUT"
           gh api "repos/${GITHUB_REPOSITORY}/deployments/${id}/statuses" \
             -f state=in_progress -f environment_url="https://${HOST}" \
-            -f description="pushed to previews branch; waiting for Flux + DNS + TLS" > /dev/null
+            -f description="pushed to previews branch; waiting for Flux + ingress + TLS" > /dev/null
           echo "deployment ${id} registered for pr-${PR}"
 
       - name: Wait for preview to serve this commit
@@ -127,12 +129,15 @@ jobs:
           # Tight on purpose: measured convergence is ~1m (pr-354's ReplicaSet
           # appeared 13s after the manifest push, image already node-cached),
           # so past 6m something is wrong and should say so loudly, not grind.
-          # Resolve via 1.1.1.1 (fresh records; the runner's stub resolver
-          # negative-caches pre-creation NXDOMAINs) and log status + title per
-          # probe: the pr-354 poll printed "nothing yet" for its whole window
-          # WHILE the pod was serving — a runner-only blindness that smells
-          # like Cloudflare challenging datacenter IPs, which curl -f would
-          # swallow silently. No -f: we want to SEE the 403/challenge.
+          # pr-<N> resolves via the always-present *.guardianintelligence.org
+          # wildcard (no per-preview DNSEndpoint anymore -- see ../README.md),
+          # so there's no DNS-record-creation race left to dodge here; still
+          # resolve via 1.1.1.1 explicitly (not the runner's own stub
+          # resolver) and log status + title per probe, since the pr-354 poll
+          # once printed "nothing yet" for its whole window WHILE the pod was
+          # serving -- a runner-only blindness that smells like Cloudflare
+          # challenging datacenter IPs, which curl -f would swallow silently.
+          # No -f: we want to SEE the 403/challenge.
           deadline=$((SECONDS + 360))
           while [ $SECONDS -lt $deadline ]; do
             ip="$(dig +short @1.1.1.1 A "$HOST" 2>/dev/null | grep -E '^[0-9.]+$' | head -1)"
