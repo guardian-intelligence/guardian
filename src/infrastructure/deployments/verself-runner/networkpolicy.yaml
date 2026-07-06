@@ -1,9 +1,10 @@
 # Control-plane flows, following the repo's Cilium conventions (selecting an
 # endpoint flips it to default-deny for the selected direction; every rule
 # below is therefore the complete allowed set). Kubelet probes arrive from
-# the reserved host entity, which Cilium admits implicitly. The CNPG postgres
-# pods are NOT selected by any policy here — the CNPG operator's own
-# management traffic stays untouched (same stance as iam/*).
+# the reserved host entity, which Cilium admits implicitly. The delivery-ledger
+# CNPG Postgres lives in tenant-root, whose baseline policy is wide-open
+# ingress (see base/apps/core-services.yaml's tenant-root stance) — only the
+# egress half from this namespace needs declaring, below.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -40,10 +41,12 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
-    # In-namespace CNPG Postgres (delivery ledger).
+    # The delivery-ledger CNPG Postgres lives in tenant-root (Cozystack app
+    # CR constraint — see base/apps/verself-controlplane-postgres.yaml).
     - toEndpoints:
         - matchLabels:
-            cnpg.io/cluster: postgres-controlplane
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            cnpg.io/cluster: postgres-verself-controlplane
       toPorts:
         - ports:
             - port: "5432"

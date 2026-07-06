@@ -44,14 +44,14 @@ spec:
             capabilities:
               drop: ["ALL"]
           env:
-            # CNPG app credential; the operator-generated `uri` key is a
-            # complete postgresql:// URL (user, password, rw service host,
-            # default app database).
+            # The CNPG app credential lives in tenant-root (Cozystack
+            # constraint) and is relayed into this namespace's OpenBao scope
+            # by an operator; see secrets.yaml's postgres ExternalSecret.
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: postgres-controlplane-app
-                  key: uri
+                  name: postgres
+                  key: DATABASE_URL
             - name: GITHUB_APP_ID
               valueFrom:
                 secretKeyRef:

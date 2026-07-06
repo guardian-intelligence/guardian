@@ -3,7 +3,6 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - secrets.yaml
-  - postgres.yaml
   - controlplane.yaml
   - ingress.yaml
   - networkpolicy.yaml
