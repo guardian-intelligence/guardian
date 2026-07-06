@@ -3,7 +3,16 @@
 
 Two read-only views:
 
-  cluster-watch                Tail the alert stream the cluster publishes to
+  cluster-watch                Live Flux convergence status read straight from
+                               the cluster (needs KUBECONFIG). Refreshes every
+                               few seconds and shows exactly the Kustomizations
+                               and HelmReleases that are not Ready, with reason
+                               and message. This is the fast view for
+                               babysitting a PR: a BuildFailed or
+                               HealthCheckFailed shows in seconds, long before
+                               it would ever page.
+
+  cluster-watch --stream       Tail the alert stream the cluster publishes to
                                ntfy (VMRule -> Alertmanager -> Alerta ->
                                alert-relay -> ntfy). Needs no cluster access —
                                works from anywhere, even off the VPN. The
@@ -11,23 +20,15 @@ Two read-only views:
                                *sustained* failure (a change that never
                                converged), not a fresh push.
 
-  cluster-watch --convergence  Same stream, narrowed to Flux convergence
+  cluster-watch --convergence  Same alert stream, narrowed to Flux convergence
                                alerts only (Kustomization / HelmRelease /
                                source-controller).
 
-  cluster-watch --status       Live Flux convergence status read straight from
-                               the cluster (needs KUBECONFIG). Refreshes every
-                               few seconds and shows exactly the Kustomizations
-                               and HelmReleases that are not Ready, with reason
-                               and message. This is the sub-15m view for
-                               babysitting a PR: a BuildFailed or
-                               HealthCheckFailed shows in seconds, long before
-                               it would ever page.
-
 Env:
+  KUBECTL      kubectl binary used by live status (default kubectl)
   NTFY_BASE    ntfy server base URL         (default https://ntfy.sh)
   NTFY_TOPIC   topic the relay publishes to (default guardian-operations-fable)
-  KUBECONFIG   used by --status             (default ~/.kube/config)
+  KUBECONFIG   used by live status          (default ~/.kube/config)
 """
 
 import argparse
@@ -151,10 +152,12 @@ def watch_ntfy(args):
 
 def kubectl_json(get_args):
     kc = os.environ.get("KUBECONFIG", os.path.expanduser("~/.kube/config"))
-    if not os.path.exists(kc):
-        raise SystemExit(f"cluster-watch --status needs a kubeconfig; "
+    paths = [os.path.expanduser(path) for path in kc.split(os.pathsep) if path]
+    if not any(os.path.exists(path) for path in paths):
+        raise SystemExit(f"cluster-watch needs a kubeconfig for live status; "
                          f"KUBECONFIG={kc} not found")
-    out = subprocess.run(["kubectl", *get_args, "-o", "json"],
+    kubectl = os.environ.get("KUBECTL", "kubectl")
+    out = subprocess.run([kubectl, *get_args, "-o", "json"],
                          capture_output=True, text=True)
     if out.returncode != 0:
         raise SystemExit(f"kubectl failed: {out.stderr.strip()}")
@@ -203,7 +206,9 @@ def watch_status(args):
 def main():
     p = argparse.ArgumentParser(description="Watch the Guardian cluster converge.")
     p.add_argument("--status", action="store_true",
-                   help="live Flux convergence status from the cluster (needs KUBECONFIG)")
+                   help="live Flux convergence status from the cluster (default; needs KUBECONFIG)")
+    p.add_argument("--stream", action="store_true",
+                   help="tail the ntfy alert stream instead of polling live Flux status")
     p.add_argument("--convergence", action="store_true",
                    help="ntfy mode: show only Flux convergence alerts")
     p.add_argument("--since", default="15m",
@@ -213,7 +218,7 @@ def main():
     p.add_argument("--interval", type=float, default=5.0,
                    help="--status refresh seconds (default 5)")
     args = p.parse_args()
-    return watch_status(args) if args.status else watch_ntfy(args)
+    return watch_ntfy(args) if args.stream or args.convergence else watch_status(args)
 
 
 if __name__ == "__main__":

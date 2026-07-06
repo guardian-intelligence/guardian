@@ -2,15 +2,15 @@ This is a Bazel polyglot hermetically sealed monorepo for Guardian, a free open-
 
 The purpose is to create a free and open-source system for any being to convert a source of compute into a self-healing intelligent system (in our case, a secure, disaster-proof software company capable of generating revenue by providing value to the world) as a platform to build sophisticated software products such as Verself, a GitHub App that speeds up your CI.
 
-* Cozystack 1.5 `isp-full` - when researching CozyStack, use 1.5 docs from the exact `v1.5.2` tag / `release-1.5` branch. See `src/infrastructure/base/cozystack/platform.yaml` and `src/infrastructure/base/apps/core-services.yaml`
+* Cozystack 1.5.2 `isp-full` - when researching CozyStack, use 1.5 docs from the exact [`release-1.5`](https://github.com/cozystack/cozystack/tree/v1.5.2) tag. See `src/infrastructure/base/cozystack/platform.yaml` and `src/infrastructure/base/apps/core-services.yaml`
 * Other useful reference architectures: Zarf/UDS, AWS Landing Zone Accelerator
 * Repo ships specific products within the architecture. First major product: Verself (reference Blacksmith.sh)
-* Airgapped hermetically-sealed come up done through images.lock + Rancher Hauler + Sidero Labs `talm` for Talos on bare metal soil (currently Latitude.sh)
+* Airgapped hermetically-sealed come up done through images.lock + Rancher Hauler + Sidero Labs `talm` for Talos on bare metal soil (currently Latitude.sh). 
 * DNS managed through Cloudflare. TLS terminates at Cloudflare edge. Cloudflare LB for the three control plane nodes. [206.223.228.101, 45.250.254.119, 206.223.228.87].
-* Cozystack tenancy IS the stage-isolation mechanism: stages are child Tenants of `tenant-guardian`, declared in `src/infrastructure/deployments/guardian/system/stage-tenants.yaml` (beta/gamma/prod/previews, each with `spec.host: <stage>.guardianintelligence.org`). Staged product workloads deploy into the derived namespaces `tenant-guardian-<stage>` (reference: `src/infrastructure/deployments/iam/<stage>/`). Cozystack's generated Cilium policies give sibling default-deny between stages for free; the hand-written per-stage `CiliumClusterwideNetworkPolicy` pairs in `deployments/iam/*/networkpolicy.yaml` compensate for a Cozystack v1.5.x depth-2 ancestor-label bug that blocks the root ingress from reaching grandchild tenants (see `docs/research/cozystack-1.5/`), and become partially droppable after the upstream fix ships. Never model stages as per-application tenants: tenant names ban dashes, app×stage nesting hits the depth bug, siblings have no first-class peering.
-* Kargo is decoupled from tenancy: namespaces like `guardian-iam` and `company-site` are Kargo *project* namespaces holding only promotion CRs and secrets plumbing — not workloads. Stage promotion steps edit Git paths (`deployments/<vertical>/<stage>/…`), never workload namespaces, so tenancy changes cannot break promotions. Reference wiring: `src/infrastructure/deployments/guardian/promotion/pipelines/`. Cross-stage system services (analytics, alerting, verself-runner, OpenBao in `tenant-guardian`) deliberately live outside stage tenants because they serve all stages.
-* Stage tenants are static and long-lived; never delete/recreate one and never create tenant-per-PR (previews are Deployments inside the one static `previews` tenant). Cozystack 1.5.x tenant deletion runs an unpinned `bitnami/kubectl:latest` pre-delete hook that is absent from `images.lock` — guaranteed-broken in dark mode — and upstream has deletion wedge modes; static tenants sidestep all of it.
 * `tenant-root` is the required Cozystack root/admin tenant for a regional management cluster. Cozystack packages/operators, Flux handoff, storage classes, BackupClass, root ingress/load-balancer substrate, root infrastructure monitoring, child Tenant CRs, and cluster-wide policy go in `tenant-root`.
+* Cozystack tenancy is the stage-isolation mechanism: stages are child Tenants of `tenant-guardian`, declared in `src/infrastructure/deployments/guardian/system/stage-tenants.yaml` (beta/gamma/prod/previews, each with `spec.host: <stage>.guardianintelligence.org`). Staged product workloads deploy into the derived namespaces `tenant-guardian-<stage>` (reference: `src/infrastructure/deployments/iam/<stage>/`). Cozystack's generated Cilium policies give sibling default-deny between stages for free; the hand-written per-stage `CiliumClusterwideNetworkPolicy` pairs in `deployments/iam/*/networkpolicy.yaml` compensate for a Cozystack v1.5.x depth-2 ancestor-label bug that blocks the root ingress from reaching grandchild tenants (see `docs/research/cozystack-1.5/`), and become partially droppable after the upstream fix ships. Never model stages as per-application tenants: tenant names ban dashes, app×stage nesting hits the depth bug, siblings have no first-class peering.
+* Kargo is decoupled from tenancy: namespaces like `guardian-iam` and `company-site` are Kargo *project* namespaces holding only promotion CRs and secrets plumbing — not workloads. Stage promotion steps edit Git paths (`deployments/<vertical>/<stage>/…`), never workload namespaces, so tenancy changes cannot break promotions. Reference wiring: `src/infrastructure/deployments/guardian/promotion/pipelines/`. Cross-stage system services (analytics, alerting, verself-runner, OpenBao in `tenant-guardian`) deliberately live outside stage tenants because they serve all stages.
+* Stage tenants are static and long-lived; never delete/recreate one and never create tenant-per-PR (previews are Deployments inside the one static `previews` tenant).
 * Single region right now (`ash` Ashburn, Virginia Latitude region). The active management control plane is the `guardian-mgmt` Kubernetes cluster. Its Kubernetes API endpoint is the private VLAN VIP `https://10.8.0.250:6443`. Reference files:
   - `src/infrastructure/bootstrap/guardian-mgmt/main.tf`
   - `src/infrastructure/talm/values.yaml`
@@ -48,6 +48,9 @@ The purpose is to create a free and open-source system for any being to convert 
 * No need to be precious with git hygiene. If you see a doc update, it's fine to fold it into your worktree or branch, even if it's unrelated.
 * For every feature we ship, we must assume that if we don't have a canary actively asserting it works, that it's broken. If the user suggests a feature or large project, work backwards from the monitoring and operations story: how can we be notified when the feature breaks, or when performance or availability drops, and how do we avoid shipping regressions in the first place using promotion gates and responsible deployment practices? We have the technology necessary to do so, we just have to remember to use them.
 * This cluster is k8s v1.34.3 (VAP is GA)
+* Drills are not part of normal development — run them when asked on one node at a time by explicit node IP, wait for the node and public edge to recover, document that node's outage window, then move to the next. A node whose loss breaches 60 seconds of public-edge disruption is load-bearing and must be fixed before continuing.
+* Development tools are version-pinned in `src/tools/` (talm, talosctl, flux, kubectl, hauler, openbao, oras, k6); use those and run the install, never an ambient install.
+* RTO policy lives in `docs/reliability-rto.md`.
 
 <observability>
 - Logs: `kubectl port-forward -n tenant-root svc/vlselect-generic 9471:9471`, then LogsQL via `curl 127.0.0.1:9471/select/logsql/query --data-urlencode 'query=...'`.
@@ -135,32 +138,38 @@ We do all of this by gluing together excellent existing tools and letting the us
 We're currently maximizing for highly continuous rapidly delivered software to external vendors like NPM/PyPi/Crates.io and so on.
 </overall_strategy>
 
+<coding_guidelines>
+* Improvements and refactors should leave no trace that the old approach ever existed unless someone spelunks through git history. At this stage of development, prefer to make upgrades as clean cutovers instead of slowly sequenced. This means that comments should not reference the previous approach nor should any compatibility shims be provided. E.g. if migrating from Cozystack v1.4.0 -> v1.5.0 avoid comments like "this is required for 1.5.0 whereas 1.4.0 did XYZ". 
+* Only add comments for genuinely complex workarounds for bugs or surprising deviations from best practices. Clean up comments that don't adhere to this rule.
+
+</coding_guidelines>
+
 <development_loop>
-The loop is: worktree → change → PR/CI → merge → babysit convergence → babysit promotion/canary → stop at green. You are not done at merge. A push to `main` is the deploy, not the finish line; you are done when the change has converged and is healthy in the cluster. Merging and walking away is the most common mistake here.
+Not all tasks require this loop. Use this loop when pursuing autonomous development that requires a change to the repository's source code.
+
+The loop is: worktree → change → PR/CI → merge → babysit convergence → babysit promotion/canary → babysit user signals → report to user. You are done when the change has converged and is healthy in the cluster.
+
+Optional:
+
+* Learn what development tooling exists with `aspect --help`
 
 Step by step:
-1. Branch in a git worktree off `origin/main` — never edit the shared checkout. Many agents share this one clone; a stray edit in the shared root silently rides onto another branch. All state-changing git work happens in a worktree.
-2. Make the change and run the relevant conformance tests locally (`//src/infrastructure/tests/...`). They exist to fail the footguns that otherwise only surface in-cluster: Flux `envsubst` safety, OpenBao per-namespace scope, `images.lock` digest-pinning, Cozystack app namespace placement. Update `images.lock` in the same PR as any image change.
-3. Open a PR. A PR cannot deploy anything — it never pushes images or applies manifests. The required checks are `build` and `site-gate`; get them green. Image workflows build and sign only on a push to `main`.
-4. Merging is the deploy. Flux pulls the merged revision and applies it — there is no separate deploy step and no rollback button. Everything after merge is actively watching the rollout, not idle waiting.
-5. Babysit convergence with `tools/ops/cluster-watch --status` (live Flux Ready conditions, sub-15m). The default `cluster-watch` tails the alert stream, but those rules debounce ~15m, so `--status` is the fast view while you wait for your slice's Kustomization to reach Ready.
+0. Install tools and confirm access
+1. Branch in a git worktree off `origin/main`
+2. Run conformance tests locally. There is no pre-commit hook.
+3. Open GitHub PR using `gh` cli, monitor CI, perform adversarial review if asked, address blocking comments if any are posted, and then merge if all green.
+5. Babysit Flux convergence, Kargo promotion, and Flagger deployment rollout: `tools/ops/cluster-watch --status` (live Flux Ready conditions, sub-15m). Default `cluster-watch` tails Alerta stream but most checks take 15 minutes of sustained failure so `--status` is the fast view while you wait for your changes' Kustomization to reach Ready.
+6. If you're making a product change, monitor incoming traffic from prod and query ClickHouse to make sure users are having a good time with your feature.
+7. Report progress to the user via relevant aggregate metrics e.g. "LCP down for route /letters/<slug> from 3.4s to 3.2s base on last 30m of traffic to prod".
 
-What goes wrong — each is a signal, not a flake:
-- Flux `BuildFailed`: an `envsubst` error, usually an unescaped `${...}` under a substituted path. Escape it `$${...}` or annotate the object `kustomize.toolkit.fluxcd.io/substitute: disabled`.
-- Flux apply `denied by ValidatingAdmissionPolicy ...`: a policy rejected your manifest as structurally wrong (e.g. a Cozystack app CR outside a `tenant-*` namespace). The Kustomization goes `Ready=False` and the message names the policy and the reason — this is how you tell a VAP blocked your change, and `cluster-watch --status` surfaces it. Fix the manifest; retrying will not help. (A policy in Warn mode allows-with-warning rather than denying, so it may not appear as a failure — assume Deny semantics and fix regardless.)
-- Flux `HealthCheckFailed` / `dependency '...' is not ready`: a health-gated resource (a CHI/CHK, a Deployment, an ExternalSecret) or an upstream `dependsOn` Kustomization did not reach Ready. Chase the dependency, not the symptom.
-- Kargo (image changes only): promotions flow beta → gamma → prod via the Kargo bot. NEVER hand-roll a promotion PR — the bot races and wins, and a manual merge strands its Promotion. After a merge Kargo owns, watch, don't act. Kargo pages if a promotion errors or a Warehouse goes unhealthy (expired creds, unreachable repo).
-- Flagger (canaried Deployments): a change runs canary analysis (k6 load + metric checks) before it reaches the primary. A failed canary rolls back automatically and pages — that is Flagger protecting prod. Read the canary's analysis; do not force the rollout through.
-- Alerta noise vs signal: the stream carries standing noise — `CPUThrottlingHigh` on bursty components, stale `KubeJobFailed` from an old canary run, tenant `HelmRelease` churn during a platform upgrade. Learn the standing set so a NEW major/critical tied to your change stands out.
+Common post-merge issues:
+- Flux: `BuildFailed`, `denied by ValidatingAdmissionPolicy ...`,  `HealthCheckFailed`, `dependency '...' is not ready`
+- Kargo (image changes only): promotions are done by Kargo GitHub app bot commits.
+- Flagger: A failed canary rolls back automatically and pages.
+- Alerta: intended to be extremely high signal, if there's unnecessary/unrelated noise, continue to monitor but assume it's your duty to fix noise unless you can make a strong case to flag to the user to fix separately. If it's a small fixup, even if unrelated, just tack on the change instead of bothering the user.
 
-Do not fight the automation: the Kargo bot, a Flagger rollback, and a VAP denial are the system working as designed, not obstacles to route around. When the cluster is green and converged, stop.
-
-Standing rules:
-- Do not use CLI commands as a second control plane. Rely on Flux to converge the cluster on merged commits; read-only inspection (`kubectl get`, `cluster-watch`) is fine, mutation is not.
-- Development tools are version-pinned in `src/tools/` (talm, talosctl, flux, kubectl, hauler, openbao, oras, k6); use those, never an ambient install.
-- `aspect infra edge-health` smoke-tests edge reachability post-convergence: DNS for every configured `guardianintelligence.org` host, HTTPS through the public edge, and origin consistency.
-- Drills are not part of normal development — run them one node at a time by explicit node IP, wait for the node and public edge to recover, document that node's outage window, then move to the next. A node whose loss breaches 60 seconds of public-edge disruption is load-bearing and must be fixed before continuing.
-- RTO policy lives in `docs/reliability-rto.md`.
+House rules:
+- Do not use CLI commands as a second control plane. Rely on Flux to converge the cluster on merged commits and clean up stale resources using write credentials through the platform Keycloak instance for cluster administration.
 </development_loop>
 
 Constraints:

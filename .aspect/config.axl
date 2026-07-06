@@ -33,6 +33,7 @@ load(
     infra_topology = "topology",
     infra_upgrade_cozystack = "upgrade_cozystack",
     infra_validate = "validate",
+    infra_watch = "watch",
 )
 load(
     ".aspect/tasks/tidy.axl",
@@ -67,6 +68,7 @@ def config(ctx):
     ctx.tasks.add(infra_topology)
     ctx.tasks.add(infra_upgrade_cozystack)
     ctx.tasks.add(infra_validate)
+    ctx.tasks.add(infra_watch)
 
     # aspect tidy
     ctx.tasks.add(tidy)

@@ -1,0 +1,227 @@
+#!/usr/bin/env bash
+# Install the bootstrap-pivot dev tools that have to land before any other
+# delivery channel can run. Developer, agent, and CI environments install the
+# same Bazelisk and Aspect CLI pivot into a scoped, namespaced cache directory
+# (never a system-wide bin dir) so this never clobbers a host-owned toolchain.
+# Everything else is Bazel-resolved via `aspect tools install`.
+#
+# These constants are hand-mirrored because this script bootstraps Bazelisk
+# before Bazel-owned repository rules (or .aspect/version.axl's own launcher)
+# can run.
+#
+# After install, bazel is symlinked next to bazelisk so the Aspect CLI's
+# ctx.bazel.{build,test,run,query} APIs (which spawn `bazel` directly) resolve
+# through Bazelisk's version-pinned download.
+#
+# Usage:
+#   bootstrap-darwin-arm64          # install (idempotent), log to stderr
+#   bootstrap-darwin-arm64 path     # install, then print an eval-able PATH
+#                                   # export on stdout only (safe to eval)
+set -euo pipefail
+
+bazelisk_version="1.28.1"
+bazelisk_sha256="dea3f3f5de2dbc5e269e0132cdd369d5efe738f7b973d5d4eb2b4f7055a97b39"
+bazelisk_url="https://github.com/bazelbuild/bazelisk/releases/download/v${bazelisk_version}/bazelisk-darwin-arm64"
+
+aspect_version="2026.17.17"
+aspect_sha256="51260131e52885d6f51c651b3b56101e7f9aaf7468f7cb71ac2e7fdcefdf3f89"
+aspect_url="https://github.com/aspect-build/aspect-cli/releases/download/v${aspect_version}/aspect-cli-aarch64-apple-darwin"
+
+install_dir="${BOOTSTRAP_INSTALL_DIR:-${HOME}/.cache/guardian/bootstrap-bin}"
+last_installed_path=""
+mode="install"
+
+if [[ "$#" -gt 0 ]]; then
+  case "$1" in
+  path)
+    mode="path"
+    ;;
+  -h | --help)
+    echo "usage: $0 [path]" >&2
+    echo "  (no args)  install the pivot toolchain, idempotent, logs to stderr" >&2
+    echo "  path       install, then print 'export PATH=...' on stdout only" >&2
+    echo "set BOOTSTRAP_INSTALL_DIR to opt into a different install directory" >&2
+    exit 0
+    ;;
+  *)
+    echo "usage: $0 [path]" >&2
+    exit 1
+    ;;
+  esac
+fi
+
+# All informational logging goes to stderr, unconditionally. Stdout is
+# reserved for the `path` mode's single export line, so
+# `eval "$(bootstrap-darwin-arm64 path)"` is always safe to eval even if a
+# caller forgets which mode they invoked.
+log() {
+  echo "$@" >&2
+}
+
+if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
+  echo "unsupported bootstrap platform: $(uname -s) $(uname -m)" >&2
+  echo "scripts/bootstrap/bootstrap-darwin-arm64 pins the Darwin arm64 bootstrap-pivot artifacts." >&2
+  exit 1
+fi
+
+hash_file() {
+  local path="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "${path}" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "${path}" | awk '{print $1}'
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 - "${path}" <<'PY'
+import hashlib
+import pathlib
+import sys
+
+print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())
+PY
+  else
+    echo "missing sha256sum, shasum, or python3 for checksum verification" >&2
+    exit 1
+  fi
+}
+
+download() {
+  local url="$1"
+  local output="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "${url}" -o "${output}"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "${output}" "${url}"
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 - "${url}" "${output}" <<'PY'
+import sys
+import urllib.request
+
+urllib.request.urlretrieve(sys.argv[1], sys.argv[2])
+PY
+  else
+    echo "missing curl, wget, or python3 for downloading bootstrap binaries" >&2
+    exit 1
+  fi
+}
+
+# install_pivot <name> <version> <sha256> <url>
+#
+# Idempotent: short-circuits when the binary already exists in install_dir with
+# the expected sha256. Only ever writes inside install_dir - never a system
+# path - so a failed or partial run can't leave a host toolchain in a broken
+# state.
+install_pivot() {
+  local name="$1"
+  local version="$2"
+  local sha256="$3"
+  local url="$4"
+  last_installed_path=""
+
+  if ! mkdir -p "${install_dir}"; then
+    echo "cannot create ${install_dir}" >&2
+    return 1
+  fi
+
+  local existing_path="${install_dir}/${name}"
+  if [[ -x "${existing_path}" && "$(hash_file "${existing_path}")" == "${sha256}" ]]; then
+    log "${name} ${version} already installed at ${existing_path}"
+    last_installed_path="${existing_path}"
+    return 0
+  fi
+
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  trap 'rm -rf "'"${tmp_dir}"'"' RETURN
+
+  download "${url}" "${tmp_dir}/${name}"
+  local actual_sha256
+  actual_sha256="$(hash_file "${tmp_dir}/${name}")"
+  if [[ "${actual_sha256}" != "${sha256}" ]]; then
+    echo "${name} checksum mismatch: expected ${sha256}, got ${actual_sha256}" >&2
+    return 1
+  fi
+  chmod 0755 "${tmp_dir}/${name}"
+
+  local installed_path
+  if [[ -w "${install_dir}" ]]; then
+    install -m 0755 "${tmp_dir}/${name}" "${install_dir}/${name}"
+    installed_path="${install_dir}/${name}"
+  else
+    echo "cannot install ${name} to ${install_dir}: directory not writable" >&2
+    return 1
+  fi
+
+  log "installed ${name} ${version} at ${installed_path}"
+  last_installed_path="${installed_path}"
+}
+
+publish_bootstrap_path() {
+  local bin_dir="$1"
+  if [[ -z "${GITHUB_PATH:-}" ]]; then
+    return 0
+  fi
+  if [[ -f "${GITHUB_PATH}" ]] && grep -Fx -- "${bin_dir}" "${GITHUB_PATH}" >/dev/null 2>&1; then
+    return 0
+  fi
+  printf '%s\n' "${bin_dir}" >>"${GITHUB_PATH}"
+  log "added ${bin_dir} to GITHUB_PATH"
+}
+
+warn_bootstrap_path() {
+  local bin_dir="$1"
+  case ":${PATH}:" in
+  *":${bin_dir}:"*) return 0 ;;
+  esac
+  if [[ -n "${GITHUB_PATH:-}" ]]; then
+    return 0
+  fi
+  log "not on PATH yet - run: eval \"\$(\"$0\" path)\""
+}
+
+# bazelisk_path resolves to the exact binary this run accepted or installed.
+# We point bazel at that exact bazelisk so Aspect CLI's
+# ctx.bazel.{build,test,run,query} APIs (which spawn `bazel` directly) flow
+# through Bazelisk's pinned-version downloader. Bazelisk officially supports
+# being invoked under the name `bazel`.
+ensure_bazel_symlink() {
+  local bazelisk_path="$1"
+  if [[ -z "${bazelisk_path}" || ! -x "${bazelisk_path}" ]]; then
+    echo "ensure_bazel_symlink: missing executable bazelisk path: ${bazelisk_path}" >&2
+    return 1
+  fi
+  local target_dir
+  target_dir="$(dirname "${bazelisk_path}")"
+  local link_path="${target_dir}/bazel"
+  if [[ -L "${link_path}" && "$(readlink "${link_path}")" == "${bazelisk_path}" ]]; then
+    return 0
+  fi
+  # Replacing a package-manager-owned bazel binary would hide the version pin.
+  if [[ -e "${link_path}" && ! -L "${link_path}" ]]; then
+    echo "cannot symlink ${link_path} -> ${bazelisk_path}: ${link_path} exists and is not a symlink" >&2
+    return 1
+  fi
+  if [[ -w "${target_dir}" ]]; then
+    ln -sf "${bazelisk_path}" "${link_path}"
+  else
+    echo "cannot symlink ${link_path} -> ${bazelisk_path}: ${target_dir} not writable" >&2
+    return 1
+  fi
+  log "symlinked ${link_path} -> ${bazelisk_path}"
+}
+
+install_pivot bazelisk "${bazelisk_version}" "${bazelisk_sha256}" "${bazelisk_url}"
+bazelisk_path="${last_installed_path}"
+ensure_bazel_symlink "${bazelisk_path}"
+
+install_pivot aspect "${aspect_version}" "${aspect_sha256}" "${aspect_url}"
+
+if [[ "${mode}" == "path" ]]; then
+  printf 'export PATH="%s:${PATH}"\n' "${install_dir}"
+else
+  publish_bootstrap_path "${install_dir}"
+  warn_bootstrap_path "${install_dir}"
+fi
+
+# The pivot ends here. Everything else - kubectl, talosctl, helm, talm, bao,
+# buf, protoc, etc. - is fetched hermetically by Bazel and surfaced via
+# `aspect tools install && eval "$(aspect tools path)"`.

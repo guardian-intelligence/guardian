@@ -86,23 +86,23 @@ GitHub App (private key in operator custody; also in the repo Actions
 secrets for promotion-lock-sync) must stay scoped to Contents + Pull
 requests read/write.
 
-## Watching the cluster converge (`tools/ops/cluster-watch`)
+## Watching the cluster converge (`aspect infra watch`)
 
 When you push a change, watch whether it actually reconciles instead of
 guessing. Two read-only views:
 
 ```sh
-tools/ops/cluster-watch            # tail the alert stream (ntfy, no cluster access)
-tools/ops/cluster-watch --convergence   # ...only Flux Kustomization/HelmRelease alerts
-tools/ops/cluster-watch --status   # live Flux status from the cluster (needs KUBECONFIG)
+aspect infra watch                       # live Flux status with repo-pinned kubectl
+aspect infra watch --mode=convergence    # ntfy stream: Flux convergence alerts only
+aspect infra watch --mode=stream         # ntfy stream: all alerts, no cluster access
 ```
 
-Use `--status` to babysit a PR: it reads Kustomization and HelmRelease
+Use the default live status view to babysit a PR: it reads Kustomization and HelmRelease
 Ready conditions every few seconds and prints exactly the ones that are not
 Ready, with the reason and message (`BuildFailed`, `HealthCheckFailed`,
-`UpgradeFailed`, ...). A bad manifest shows up in seconds — the ntfy alerts
-debounce ~15m before they page, so the stream tells you about *sustained*
-failure, not a fresh push.
+`UpgradeFailed`, ...). A bad manifest shows up in seconds. The ntfy stream is
+pager-oriented: many rules intentionally hold for ~15m before firing, so it
+tells you about *sustained* failure, not a fresh push.
 
 The stream view needs nothing but network: the cluster already publishes
 every alert to the `guardian-operations-fable` ntfy topic (via
