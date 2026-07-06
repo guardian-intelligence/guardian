@@ -96,6 +96,7 @@ use_repo(
     "com_connectrpc_connect",
     "com_connectrpc_otelconnect",
     "com_github_clickhouse_clickhouse_go_v2",
+    "com_github_jackc_pgx_v5",
     "com_github_openbao_openbao_api_v2",
     "io_k8s_sigs_yaml",
     "io_opentelemetry_go_otel",
