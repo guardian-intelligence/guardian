@@ -72,8 +72,6 @@ spec:
             # credential.
             - name: GITHUB_APP_INSTALLATION_ID
               value: "123769944"
-            - name: RUNNER_CLASS_PREFIX
-              value: verself-
             - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
               value: otel-collector.guardian-analytics.svc.cozy.local:4317
           ports:
