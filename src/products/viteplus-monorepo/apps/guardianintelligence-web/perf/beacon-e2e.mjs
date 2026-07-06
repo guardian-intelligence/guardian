@@ -24,14 +24,22 @@ const page = await ctx.newPage();
 const bodies = [];
 await page.route(RPC, async (route) => {
   bodies.push(route.request().postData() ?? "");
-  await route.fulfill({ status: 200, contentType: "application/json", body: '{"accepted":1,"rejected":0}' });
+  await route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: '{"accepted":1,"rejected":0}',
+  });
 });
 await page.goto(base + "/", { waitUntil: "networkidle" });
 await page.waitForTimeout(2500); // idle-load window
 // Emit a synthetic event through the public interface, then hide the tab.
 await page.evaluate(() => {
   window.__guardianEvents ??= [];
-  window.__guardianEvents.push({ name: "company.route_view", attrs: { "route.path": "/synthetic" }, t: performance.now() });
+  window.__guardianEvents.push({
+    name: "company.route_view",
+    attrs: { "route.path": "/synthetic" },
+    t: performance.now(),
+  });
   Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
   document.dispatchEvent(new Event("visibilitychange"));
 });
@@ -39,9 +47,16 @@ await page.waitForTimeout(1500);
 check("hidden flush publishes", bodies.length >= 1, `${bodies.length} POSTs`);
 if (bodies.length > 0) {
   const parsed = JSON.parse(bodies[bodies.length - 1]);
-  check("Connect JSON shape", typeof parsed.sentAtUnixMs === "string" && Array.isArray(parsed.events));
+  check(
+    "Connect JSON shape",
+    typeof parsed.sentAtUnixMs === "string" && Array.isArray(parsed.events),
+  );
   const seqs = parsed.events.map((e) => e.sessionSeq);
-  check("monotonic sessionSeq", seqs.every((s, i) => i === 0 || s > seqs[i - 1]), JSON.stringify(seqs));
+  check(
+    "monotonic sessionSeq",
+    seqs.every((s, i) => i === 0 || s > seqs[i - 1]),
+    JSON.stringify(seqs),
+  );
   const synthetic = parsed.events.find((e) => e.path === "/synthetic");
   check("route_view mapped", Boolean(synthetic) && synthetic.name === "company.route_view");
 }
@@ -66,12 +81,19 @@ await page.unroute(RPC);
 const replayBodies = [];
 await page.route(RPC, async (route) => {
   replayBodies.push(route.request().postData() ?? "");
-  await route.fulfill({ status: 200, contentType: "application/json", body: '{"accepted":1,"rejected":0}' });
+  await route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: '{"accepted":1,"rejected":0}',
+  });
 });
 await page.goto(base + "/", { waitUntil: "networkidle" });
 await page.waitForTimeout(3500);
 const afterReplay = await page.evaluate(() => localStorage.getItem("guardian_events_v1"));
-check("replay on load", replayBodies.some((b) => b.includes('"click"')));
+check(
+  "replay on load",
+  replayBodies.some((b) => b.includes('"click"')),
+);
 check("LS cleared after replay", afterReplay === null || JSON.parse(afterReplay).length === 0);
 
 await browser.close();

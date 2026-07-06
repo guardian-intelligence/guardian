@@ -22,7 +22,10 @@ const engine = engines[engineName];
 if (!engine) throw new Error(`unknown engine ${engineName}`);
 
 const browser = await engine.launch();
-const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2 });
+const page = await browser.newPage({
+  viewport: { width: 1280, height: 900 },
+  deviceScaleFactor: 2,
+});
 await page.goto(`${base}/letters`, { waitUntil: "networkidle" });
 await page.waitForTimeout(300);
 
@@ -45,7 +48,9 @@ const animations = await page.evaluate(() => {
     .filter((a) => a.pseudoElement);
 });
 
-console.log(`\n=== ${engineName} @ ${base}/letters -- live view-transition animations at t+150ms ===`);
+console.log(
+  `\n=== ${engineName} @ ${base}/letters -- live view-transition animations at t+150ms ===`,
+);
 for (const a of animations) console.log(JSON.stringify(a));
 
 await page.waitForTimeout(1200);

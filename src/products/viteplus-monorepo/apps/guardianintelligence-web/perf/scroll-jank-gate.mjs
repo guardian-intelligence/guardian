@@ -43,7 +43,10 @@ const check = (name, ok, detail) => {
 
 async function medianOf(engine, engineName) {
   const browser = await engine.launch();
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2 });
+  const page = await browser.newPage({
+    viewport: { width: 1280, height: 900 },
+    deviceScaleFactor: 2,
+  });
   await page.goto(`${base}${path}`, { waitUntil: "networkidle" });
   await page.waitForTimeout(1500);
   const runs = [];
@@ -61,7 +64,11 @@ for (const [engineName, engine] of Object.entries({ chromium, firefox })) {
   const budget = BUDGETS[engineName];
   const r = await medianOf(engine, engineName);
   check(`${engineName} avg <= ${budget.avg}ms`, r.avg <= budget.avg, `median ${r.avg}ms`);
-  check(`${engineName} jank>33ms <= ${budget.jank}`, r["jank>33ms"] <= budget.jank, `median ${r["jank>33ms"]}`);
+  check(
+    `${engineName} jank>33ms <= ${budget.jank}`,
+    r["jank>33ms"] <= budget.jank,
+    `median ${r["jank>33ms"]}`,
+  );
 }
 
 console.log(failures === 0 ? "ALL PASS" : `${failures} FAILURES`);
