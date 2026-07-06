@@ -2,7 +2,7 @@ This is a Bazel polyglot hermetically sealed monorepo for Guardian, a free open-
 
 The purpose is to create a free and open-source system for any being to convert a source of compute into a self-healing intelligent system (in our case, a secure, disaster-proof software company capable of generating revenue by providing value to the world) as a platform to build sophisticated software products such as Verself, a GitHub App that speeds up your CI.
 
-* Cozystack 1.5 `isp-full` - when researching CozyStack, use 1.5 docs from the exact `v1.5.0` tag / `release-1.5` branch. See `src/infrastructure/base/cozystack/platform.yaml` and `src/infrastructure/base/apps/core-services.yaml`
+* Cozystack 1.5 `isp-full` - when researching CozyStack, use 1.5 docs from the exact `v1.5.2` tag / `release-1.5` branch. See `src/infrastructure/base/cozystack/platform.yaml` and `src/infrastructure/base/apps/core-services.yaml`
 * Other useful reference architectures: Zarf/UDS, AWS Landing Zone Accelerator
 * Repo ships specific products within the architecture. First major product: Verself (reference Blacksmith.sh)
 * Airgapped hermetically-sealed come up done through images.lock + Rancher Hauler + Sidero Labs `talm` for Talos on bare metal soil (currently Latitude.sh)
