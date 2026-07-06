@@ -1,0 +1,53 @@
+# Control-plane Postgres: the delivery ledger + runner-class state. The
+# Cozystack Postgres app CR only renders in a tenant-* namespace (cozy-lib's
+# RBAC helper hard-fails Helm render anywhere else — see
+# analytics-clickhouse.yaml for the same constraint), so the server lives in
+# tenant-root while its only consumer, the control plane, stays in
+# verself-runner and crosses the namespace boundary under the Cilium policy
+# in that namespace's networkpolicy.yaml. The operator generates
+# Secret/postgres-verself-controlplane-app (this namespace) whose `uri` key
+# is relayed once into OpenBao (guardian/guardian-mgmt/verself-runner/postgres,
+# property `uri`) the same way the analytics ClickHouse ingest password is
+# relayed; after a DR rebuild the chart regenerates a different value and the
+# relay must be re-run.
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Postgres
+metadata:
+  name: verself-controlplane
+  namespace: tenant-root
+spec:
+  replicas: 3
+  size: 10Gi
+  storageClass: replicated
+  external: false
+  version: v18
+  quorum:
+    minSyncReplicas: 1
+    maxSyncReplicas: 2
+  # Platform-managed backup flow: barmanObjectStore is SSA-patched onto the
+  # live Cluster by the CNPG backup driver at first BackupJob time; continuous
+  # WAL archiving starts then, not at merge — fire an ad-hoc BackupJob right
+  # after enabling (and remember the two-BackupJob rule: the first base backup
+  # after enabling is not restorable on its own).
+  backup:
+    enabled: true
+    useSystemBucket: true
+---
+# Nightly base backup. Continuous WAL archiving covers RPO; the cron bounds
+# restore replay time. Offset from the other Plans (iam prod 03:00, tenant-root
+# guardian 04:00, analytics ClickHouse 05:00) so base backups don't contend
+# for the same uplink window.
+apiVersion: backups.cozystack.io/v1alpha1
+kind: Plan
+metadata:
+  name: verself-controlplane-postgres-nightly
+  namespace: tenant-root
+spec:
+  applicationRef:
+    apiGroup: apps.cozystack.io
+    kind: Postgres
+    name: verself-controlplane
+  backupClassName: cozy-default
+  schedule:
+    type: cron
+    cron: "0 2 * * *"

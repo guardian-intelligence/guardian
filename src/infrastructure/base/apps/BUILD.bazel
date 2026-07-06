@@ -3,6 +3,7 @@ filegroup(
     srcs = [
         "core-services.yaml",
         "observability.yaml",
+        "verself-controlplane-postgres.yaml",
     ],
     visibility = ["//visibility:public"],
 )
