@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -39,10 +40,11 @@ type slackPayload struct {
 }
 
 type slackAttachment struct {
-	Color  string       `json:"color"`
-	Title  string       `json:"title"`
-	Text   string       `json:"text"`
-	Fields []slackField `json:"fields"`
+	Color      string       `json:"color"`
+	Title      string       `json:"title"`
+	AuthorName string       `json:"author_name"`
+	Text       string       `json:"text"`
+	Fields     []slackField `json:"fields"`
 }
 
 type slackField struct {
@@ -65,16 +67,21 @@ type sink interface {
 }
 
 // priorityMap covers both Alerta severities and Slack attachment colors
-// (danger/good are colors, the rest severities). Unmapped values page at
-// the default priority 3 rather than being dropped or demoted.
+// (danger/good are colors, the rest severities): critical→5, major→4,
+// minor/warning→3, informational/indeterminate→2, ok/cleared/normal→2.
+// Unmapped values page at the default priority 3 rather than being dropped
+// or demoted.
 var priorityMap = map[string]int{
 	"critical":      5,
 	"danger":        5,
 	"major":         4,
+	"minor":         3,
 	"warning":       3,
-	"minor":         2,
 	"informational": 2,
+	"indeterminate": 2,
 	"ok":            2,
+	"cleared":       2,
+	"normal":        2,
 	"good":          2,
 }
 
@@ -111,9 +118,84 @@ func firstLine(s string) string {
 	return strings.TrimSpace(s)
 }
 
+// alertaSummary holds the fields recovered from the text-only summary line
+// posted by Alerta's slack plugin.
+type alertaSummary struct {
+	status      string
+	environment string
+	service     string
+	severity    string
+	event       string
+	resource    string
+}
+
+// The primary producer — Alerta's slack plugin (alerta-contrib
+// plugins/slack/alerta_slack.py) as rendered by the Cozystack v1.5.0 chart,
+// where only SLACK_WEBHOOK_URL is set and SLACK_ATTACHMENTS defaults to
+// False — posts TEXT-ONLY payloads: {"username", "channel", "text"} with no
+// attachments. The text is SLACK_DEFAULT_SUMMARY_FMT, which is the parsing
+// contract for this regex:
+//
+//	'*[{status}] {environment} {service} {severity}* - _{event} on {resource}_ <{dashboard}/#/alert/{alert_id}|{short_id}>'
+//
+// with status and severity .capitalize()d, environment .upper()ed, service
+// ','.join()ed (individual service names may contain spaces), and
+// event/resource raw. Environment and severity are single tokens, so the
+// lazy middle group absorbs the service list (including an empty one, which
+// renders as two adjacent spaces). The dashboard link is left optional only
+// for tolerance: DASHBOARD_URL defaults to the empty string but the
+// '<...|...>' wrapper is always emitted.
+//
+// The italic segment is split at the LAST " on " — the greedy (?P<event>.+)
+// encodes that choice — because the event itself can contain " on " (e.g.
+// "FailedMount on startup") while resources here are namespace/pod-style
+// paths that never do.
+var alertaSummaryRe = regexp.MustCompile(`^\*\[(?P<status>[^\]]+)\] +(?P<environment>\S+) +(?P<service>.*?) +(?P<severity>\S+)\* - _(?P<event>.+) on (?P<resource>.+?)_(?: <[^>]*>)?$`)
+
+// parseAlertaSummary attempts to recover the Alerta alert fields from the
+// first line of a text-only payload. A non-match reports ok=false and the
+// caller falls back to the generic composition — a page is never dropped
+// over a format drift, it just loses severity/tags.
+func parseAlertaSummary(text string) (alertaSummary, bool) {
+	m := alertaSummaryRe.FindStringSubmatch(firstLine(text))
+	if m == nil {
+		return alertaSummary{}, false
+	}
+	group := func(name string) string {
+		return strings.TrimSpace(m[alertaSummaryRe.SubexpIndex(name)])
+	}
+	return alertaSummary{
+		status:      group("status"),
+		environment: group("environment"),
+		service:     group("service"),
+		severity:    group("severity"),
+		event:       group("event"),
+		resource:    group("resource"),
+	}, true
+}
+
+// notification maps a parsed summary onto the sink model through the same
+// machinery attachment payloads use: severity drives priorityFor, tags carry
+// severity + environment, and the title restores Alerta's "{event} on
+// {resource}" identity — prefixed with the status when the alert is no
+// longer open, so a Closed/Ack page reads as one at a glance.
+func (s alertaSummary) notification(fullText string) notification {
+	title := s.event + " on " + s.resource
+	if !strings.EqualFold(s.status, "open") {
+		title = "[" + s.status + "] " + title
+	}
+	return notification{
+		Title:    title,
+		Priority: priorityFor(s.severity, ""),
+		Tags:     []string{strings.ToLower(s.severity), strings.ToLower(s.environment)},
+		Body:     strings.TrimSpace(fullText),
+	}
+}
+
 // eventName resolves the alert's identity for suppression and logging:
-// Alerta emits an "event" field, Alertmanager-shaped payloads an
-// "alertname", Flagger neither (its attachment title / text leads).
+// Alerta's text-only summaries carry it in the parsed event, fielded
+// payloads in an "event" (Alerta) or "alertname" (Alertmanager) field,
+// Flagger in the attachment author_name ("{workload}.{namespace}").
 func eventName(p slackPayload) string {
 	if v := fieldValue(p, "event", "alertname"); v != "" {
 		return v
@@ -122,6 +204,14 @@ func eventName(p slackPayload) string {
 		if t := strings.TrimSpace(a.Title); t != "" {
 			return t
 		}
+	}
+	for _, a := range p.Attachments {
+		if an := strings.TrimSpace(a.AuthorName); an != "" {
+			return an
+		}
+	}
+	if s, ok := parseAlertaSummary(p.Text); ok {
+		return s.event
 	}
 	return firstLine(p.Text)
 }
@@ -135,6 +225,16 @@ func isHeartbeat(p slackPayload) bool {
 }
 
 func compose(p slackPayload) notification {
+	// When no attachment carries severity or event fields, this is not an
+	// attachment-style payload: try the Alerta text-only summary before the
+	// generic fallbacks, so severity reaches priorityFor instead of every
+	// Alerta page landing at the default priority with no tags.
+	if fieldValue(p, "severity") == "" && fieldValue(p, "event", "alertname") == "" {
+		if s, ok := parseAlertaSummary(p.Text); ok {
+			return s.notification(p.Text)
+		}
+	}
+
 	title := ""
 	for _, a := range p.Attachments {
 		if t := strings.TrimSpace(a.Title); t != "" {
@@ -145,6 +245,14 @@ func compose(p slackPayload) notification {
 	if title == "" {
 		if ev := fieldValue(p, "event", "alertname"); ev != "" {
 			title = strings.TrimSpace(ev + " " + fieldValue(p, "resource"))
+		}
+	}
+	if title == "" {
+		for _, a := range p.Attachments {
+			if an := strings.TrimSpace(a.AuthorName); an != "" {
+				title = an
+				break
+			}
 		}
 	}
 	if title == "" {
