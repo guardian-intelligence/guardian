@@ -7,15 +7,6 @@ spec:
   components:
     platform:
       values:
-        bundles:
-          disabledPackages:
-            # authentication.oidc.enabled: false reconfigures consumers but
-            # does not remove the keycloak packages from the bundle in
-            # Cozystack 1.5 — disable them explicitly (platform Keycloak UI
-            # must not be exposed; Keycloak is headless per-stage under
-            # deployments/iam/ only).
-            - cozystack.keycloak
-            - cozystack.keycloak-operator
         publishing:
           host: guardianintelligence.org
           # k8s API rides a Talos Layer2 VIP on the Latitude Virtual Network.
@@ -36,16 +27,19 @@ spec:
           serviceCIDR: 10.96.0.0/16
           joinCIDR: 100.64.0.0/16
         authentication:
-          # Platform OIDC (cozy-keycloak) disabled 2026-07-05: its only clients
-          # were dashboard SSO and kubectl OIDC login, neither of which we use
-          # (cluster access is custody cert kubeconfigs; dashboard falls back
-          # to token login), and the platform ingress publicly routed the
-          # Keycloak admin console at keycloak.guardianintelligence.org.
-          # Keycloak is used headlessly per-stage under deployments/iam/ only.
-          # Follow-up: strip the now-inert oidc-issuer-url apiserver flags from
-          # talm node configs at the next Talos config touch.
+          # Platform OIDC (cozy-keycloak) re-enabled 2026-07-06 to gate
+          # cluster-admin access: kubectl authenticates via OIDC against the
+          # cozy realm (the apiserver oidc-issuer-url flags baked into the
+          # talm node configs are load-bearing again — do NOT strip them),
+          # and the custody x509 kubeconfig becomes breakglass-only. The
+          # 2026-07-05 disable (f82b8e2) was about the admin console being
+          # publicly routed; that surface is now shadowed off the public
+          # host — see keycloak-admin-guard.yaml. The per-stage Verself
+          # Keycloaks under deployments/iam/ are a separate product-facing
+          # system and stay headless.
           oidc:
-            enabled: false
+            enabled: true
+            keycloakInternalUrl: http://keycloak-http.cozy-keycloak.svc:8080/realms/cozy
         branding:
           titleText: Guardian
           footerText: Guardian Intelligence
