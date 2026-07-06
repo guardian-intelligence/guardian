@@ -26,6 +26,7 @@ go_test(
         "//src/infrastructure/bootstrap/bundle:images_lock",
         "//src/infrastructure/bootstrap/sync-dark:manifests",
         "//src/infrastructure/bootstrap/sync-steady:manifests",
+        "//src/infrastructure/deployments/alerting:manifests",
         "//src/infrastructure/deployments/analytics/system:manifests",
         "//src/infrastructure/deployments/company/previews:manifests",
         "//src/infrastructure/deployments/company/prod:manifests",

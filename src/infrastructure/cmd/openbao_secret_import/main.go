@@ -237,6 +237,7 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 		"cloudflare_guardian_intelligence_org_dnz_zone_api_token",
 		"cloudflare_external_dns_api_token",
 		"cloudflare_dns_lb_provisioner_api_token",
+		"guardian_alerting_ntfy_url",
 		"github_promotions_app_private_key_b64",
 		"github_runner_app_prod_app_id",
 		"github_runner_app_prod_client_id",
@@ -306,6 +307,17 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 				"endpoint":   env["cloudflare_r2_s3_api_endpoint"],
 				"bucketName": "guardian-backups",
 				"region":     "auto",
+			},
+		},
+		// Alerting pager sink: the ntfy topic URL the tenant-root alert-relay
+		// delivers to (deployments/alerting/secrets.yaml projects it as
+		// Secret/alert-relay-config). The URL is a low-grade credential — the
+		// topic name is the secret — which is why it lives in custody and
+		// OpenBao rather than Git.
+		{
+			APIPath: "kv/data/guardian/guardian-mgmt/tenant-root/alerting",
+			Data: map[string]string{
+				"ntfy_url": env["guardian_alerting_ntfy_url"],
 			},
 		},
 		{

@@ -77,6 +77,12 @@ spec:
   alerta:
     storage: 2Gi
     storageClassName: replicated
+    alerts:
+      # Not a Slack credential — the in-cluster alert-relay's URL. Alerta's
+      # slack plugin emits Slack-webhook-format JSON; the relay converts it
+      # to ntfy (deployments/alerting/). The schema requires only `url`.
+      slack:
+        url: http://alert-relay.tenant-root.svc:8080/slack
     resources:
       requests:
         cpu: 25m

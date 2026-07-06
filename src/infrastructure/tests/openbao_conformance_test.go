@@ -393,6 +393,7 @@ func TestFluxSubstitutionSafetyConformance(t *testing.T) {
 	// deployments/iam/beta).
 	roots := []string{
 		"src/infrastructure/base",
+		"src/infrastructure/deployments/alerting",
 		"src/infrastructure/deployments/analytics/system",
 		"src/infrastructure/deployments/guardian/system",
 		"src/infrastructure/deployments/iam/beta",
