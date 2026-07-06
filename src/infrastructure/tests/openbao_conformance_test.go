@@ -290,6 +290,7 @@ func TestOpenBaoOperationsInventoryConformance(t *testing.T) {
 		"tenant_guardian_beta",
 		"tenant_guardian_gamma",
 		"tenant_guardian_prod",
+		"verself_runner",
 	} {
 		inventory = append(inventory,
 			`request "write_reader_policy_`+scope+`"`,

@@ -238,6 +238,11 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 		"cloudflare_external_dns_api_token",
 		"cloudflare_dns_lb_provisioner_api_token",
 		"github_promotions_app_private_key_b64",
+		"github_runner_app_prod_app_id",
+		"github_runner_app_prod_client_id",
+		"github_runner_app_prod_webhook_secret",
+		"github_runner_app_prod_client_secret",
+		"github_runner_app_prod_private_key_b64",
 	}
 	var missing []string
 	for _, key := range required {
@@ -248,13 +253,14 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("missing required import variables: %s", strings.Join(missing, ","))
 	}
-	// The PEM travels base64-encoded because the env file is line-oriented.
-	githubAppKey, err := base64.StdEncoding.DecodeString(strings.TrimSpace(env["github_promotions_app_private_key_b64"]))
+	// The PEMs travel base64-encoded because the env file is line-oriented.
+	githubAppKey, err := decodePEMEnv(env, "github_promotions_app_private_key_b64")
 	if err != nil {
-		return nil, fmt.Errorf("decode github_promotions_app_private_key_b64: %w", err)
+		return nil, err
 	}
-	if !strings.HasPrefix(string(githubAppKey), "-----BEGIN") {
-		return nil, errors.New("github_promotions_app_private_key_b64 does not decode to a PEM block")
+	runnerAppKey, err := decodePEMEnv(env, "github_runner_app_prod_private_key_b64")
+	if err != nil {
+		return nil, err
 	}
 	// Every path's first segment under guardian-mgmt/ is the consuming
 	// namespace (the per-namespace reader/writer roles are scoped to that
@@ -305,7 +311,7 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 		{
 			APIPath: "kv/data/guardian/guardian-mgmt/company-site/promotion/github-app",
 			Data: map[string]string{
-				"githubAppPrivateKey": string(githubAppKey),
+				"githubAppPrivateKey": githubAppKey,
 			},
 		},
 		// Same App identity, second consumer namespace: Kargo credentials
@@ -314,7 +320,22 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 		{
 			APIPath: "kv/data/guardian/guardian-mgmt/guardian-iam/promotion/github-app",
 			Data: map[string]string{
-				"githubAppPrivateKey": string(githubAppKey),
+				"githubAppPrivateKey": githubAppKey,
+			},
+		},
+		// Verself Runner GitHub App (prod): webhook HMAC secret, OAuth
+		// client secret, and the App private key that signs the JWTs
+		// installation tokens are minted from. appId/clientId are public
+		// identity, not secrets; they ride along so the projected Secret is
+		// a complete client configuration.
+		{
+			APIPath: "kv/data/guardian/guardian-mgmt/verself-runner/github-app",
+			Data: map[string]string{
+				"appId":               env["github_runner_app_prod_app_id"],
+				"clientId":            env["github_runner_app_prod_client_id"],
+				"webhookSecret":       env["github_runner_app_prod_webhook_secret"],
+				"clientSecret":        env["github_runner_app_prod_client_secret"],
+				"githubAppPrivateKey": runnerAppKey,
 			},
 		},
 	}
@@ -363,6 +384,17 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 	}
 
 	return writes, nil
+}
+
+func decodePEMEnv(env map[string]string, key string) (string, error) {
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(env[key]))
+	if err != nil {
+		return "", fmt.Errorf("decode %s: %w", key, err)
+	}
+	if !strings.HasPrefix(string(decoded), "-----BEGIN") {
+		return "", fmt.Errorf("%s does not decode to a PEM block", key)
+	}
+	return string(decoded), nil
 }
 
 func openBaoCA(ctx context.Context, runner kubectlRunner, secretName string) ([]byte, error) {

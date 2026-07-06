@@ -150,6 +150,13 @@ raft wipe, keyed by custody env variables. It currently writes:
   backupstrategy-controller consumes; ESO projects it as
   `Secret/guardian-backups-creds` in `tenant-root`)
 - `kv/guardian/guardian-mgmt/company-site/promotion/github-app`
+- `kv/guardian/guardian-mgmt/guardian-iam/promotion/github-app` (same App
+  identity as company-site's; Kargo credentials are project-namespaced)
+- `kv/guardian/guardian-mgmt/verself-runner/github-app` (the Verself Runner
+  GitHub App: webhook HMAC secret, OAuth client secret, and the App private
+  key, transported base64-encoded as
+  `github_runner_app_prod_private_key_b64`; appId/clientId ride along as
+  public identity)
 - `kv/guardian/guardian-mgmt/tenant-guardian-{beta,gamma,prod}/keycloak/github-oauth`
   (optional per stage: imported only when the env file carries that stage's
   `<STAGE>_GITHUB_CLIENT_SECRET`)
