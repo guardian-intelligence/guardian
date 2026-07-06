@@ -29,6 +29,13 @@ import (
 	"time"
 
 	"log/slog"
+
+	// The @ubuntu_noble_base image ships no ca-certificates bundle, so the
+	// system cert pool is empty and every public-TLS dial (ntfy) fails x509
+	// verification. This blank import embeds the Go team's Mozilla root
+	// bundle, used only when the system pool is empty — the bundle versions
+	// via go.mod like any other dependency.
+	_ "golang.org/x/crypto/x509roots/fallback"
 )
 
 // slackPayload is the subset of the Slack incoming-webhook format the relay
