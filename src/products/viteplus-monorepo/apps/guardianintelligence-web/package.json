@@ -6,7 +6,7 @@
   "sideEffects": false,
   "scripts": {
     "dev": "vp dev",
-    "build": "vp build",
+    "build": "vp exec tsc -p tsconfig.json && vp test run && vp build",
     "preview": "vp preview",
     "start": "node ./.output/server/index.mjs",
     "test": "vp test run",

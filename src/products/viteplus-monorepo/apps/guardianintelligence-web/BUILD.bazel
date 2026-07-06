@@ -33,6 +33,12 @@ genrule(
         "//src/products/viteplus-monorepo:.aspect_rules_js/node_modules/@voidzero-dev+vite-plus-linux-x64-gnu@0.1.16/dir",
         "//src/products/viteplus-monorepo:vp_node",
         "//src/products/viteplus-monorepo:workspace_sources",
+        # tsc resolves @guardian/brand's package.json "exports" straight to
+        # its .tsx SOURCE (no prebuilt .d.ts), so typechecking the app
+        # type-checks brand's source in place -- which needs brand's own
+        # node_modules (react/react-dom/@types) reachable by directory
+        # walk-up from brand's location in this sandbox, not just the app's.
+        "//src/products/viteplus-monorepo/packages/brand:node_modules",
     ],
     outs = ["company-site-output.tar"],
     cmd = """
@@ -51,6 +57,13 @@ cd "$$execroot/src/products/viteplus-monorepo/apps/guardianintelligence-web"
 rm -rf node_modules
 ln -s "$$node_modules_root" node_modules
 rm -rf .output
+# Mirrors package.json's own "build" script exactly (single source of
+# truth: typecheck + test + build, in that order) -- a developer running
+# `pnpm run build` locally gets the identical gate CI enforces here, and a
+# real type error or test regression fails the image build itself rather
+# than shipping silently through Vite's transpile-only bundler.
+"$$node" "$$vp" exec tsc -p tsconfig.json
+"$$node" "$$vp" test run
 "$$node" "$$vp" build
 test -s .output/server/index.mjs
 # Nitro's output carries the only nondeterminism in the image: nitro.json
