@@ -1,0 +1,52 @@
+# Cozystack renders every apps.cozystack.io CR (Postgres, ClickHouse, Tenant,
+# Monitoring, ...) through a per-object HelmRelease that resolves its chart
+# values from a `cozystack-values` Secret in the CR's OWN namespace. That
+# Secret exists only in tenant-* namespaces (tenant-root plus every namespace
+# a Tenant CR creates). Declaring such a CR anywhere else leaves the
+# HelmRelease stuck on `secrets "cozystack-values" not found`, the operator
+# never mints the app's credential Secret, and the consuming workload sits in
+# CreateContainerConfigError — the only signal a live HelmReleaseNotReady.
+#
+# TestCozystackAppNamespaceConformance catches this in CI, but only for
+# source-tree manifests; a hand-applied `kubectl` CR bypasses it entirely
+# (which is exactly how the guardian-analytics dryrun-probe orphan happened).
+# This admission policy closes that gap: it rejects any apps.cozystack.io CR
+# whose namespace is not tenant-* at the API server, for every actor.
+#
+# Rollout: Warn + Audit first (surfaces violations to the client and the audit
+# log without blocking), then flip validationActions to [Deny] once the audit
+# stream is confirmed clean and the Cozystack 1.5.2 tenant upgrade has settled.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: guardian-cozystack-app-tenant-namespace
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - apps.cozystack.io
+        apiVersions:
+          - '*'
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - '*'
+  validations:
+    - expression: >-
+        object.metadata.namespace.startsWith("tenant-")
+      message: >-
+        apps.cozystack.io resources render only inside a tenant-* namespace
+        (the cozystack-values Secret exists nowhere else); a non-tenant
+        namespace leaves the HelmRelease stuck on "cozystack-values not found"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: guardian-cozystack-app-tenant-namespace
+spec:
+  policyName: guardian-cozystack-app-tenant-namespace
+  validationActions:
+    - Warn
+    - Audit
