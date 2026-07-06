@@ -1614,6 +1614,42 @@ def _converged_impl(ctx):
         label = "guardian converged proof",
     )
 
+def _watch_impl(ctx):
+    watch_args = []
+    env = {}
+    if ctx.args.mode == "status":
+        kubectl = _kubectl_path(ctx)
+        if kubectl == None:
+            return 1
+        env["KUBECTL"] = kubectl
+        if ctx.args.kubeconfig != "":
+            env["KUBECONFIG"] = _kubeconfig_path(ctx)
+        watch_args.extend(["--status", "--interval", ctx.args.interval])
+    elif ctx.args.mode == "stream":
+        watch_args.append("--stream")
+    elif ctx.args.mode == "convergence":
+        watch_args.append("--convergence")
+    else:
+        ctx.std.io.stderr.write("ERROR: --mode must be status, stream, or convergence\n")
+        return 1
+
+    if ctx.args.mode != "status":
+        watch_args.extend(["--since", ctx.args.since])
+        if ctx.args.grep != "":
+            watch_args.extend(["--grep", ctx.args.grep])
+    elif ctx.args.grep != "":
+        ctx.std.io.stderr.write("ERROR: --grep only applies to --mode=stream or --mode=convergence\n")
+        return 1
+
+    return checked_spawn(
+        ctx,
+        ws_path(ctx, "tools/ops/cluster-watch"),
+        watch_args,
+        cwd = ws_path(ctx),
+        env = env,
+        label = "cluster-watch " + ctx.args.mode,
+    )
+
 validate = task(
     implementation = _validate_impl,
     name = "validate",
@@ -1665,6 +1701,20 @@ converged = task(
         "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
         "required_kustomizations": args.string(default = "", description = "Optional comma-separated Flux Kustomizations required for the converged proof."),
+    },
+)
+
+watch = task(
+    implementation = _watch_impl,
+    name = "watch",
+    group = ["infra"],
+    summary = "Watch live Flux convergence status with repo-pinned kubectl; stream ntfy alerts with --mode=stream or --mode=convergence.",
+    args = {
+        "grep": args.string(default = "", description = "Alert stream substring filter. Applies to --mode=stream and --mode=convergence."),
+        "interval": args.string(default = "5", description = "Live status refresh seconds."),
+        "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
+        "mode": args.string(default = "status", description = "Watch mode: status, stream, or convergence."),
+        "since": args.string(default = "15m", description = "ntfy backlog window replayed on connect for stream modes."),
     },
 )
 
