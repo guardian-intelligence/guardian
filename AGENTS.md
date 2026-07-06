@@ -1,6 +1,6 @@
 This is a Bazel polyglot hermetically sealed monorepo for Guardian, a free open-source system that converts bare-metal servers into the operational substrate for a one-person software company. Early days, still getting the infra set up.
 
-The purpose is to create a free and open-source system for any being to convert a source of compute into a self-healing intelligent system (in our case, a secure, disaster-proof software company capable of generating revenue by providing value to the world).
+The purpose is to create a free and open-source system for any being to convert a source of compute into a self-healing intelligent system (in our case, a secure, disaster-proof software company capable of generating revenue by providing value to the world) as a platform to build sophisticated software products such as Verself, a GitHub App that speeds up your CI.
 
 * Cozystack 1.5 `isp-full` - when researching CozyStack, use 1.5 docs from the exact `v1.5.0` tag / `release-1.5` branch. See `src/infrastructure/base/cozystack/platform.yaml` and `src/infrastructure/base/apps/core-services.yaml`
 * Other useful reference architectures: Zarf/UDS, AWS Landing Zone Accelerator
@@ -39,8 +39,11 @@ The purpose is to create a free and open-source system for any being to convert 
 * All operations must run unattended, no human-in-the-loop.
 * Invent nothing. If we write our own code, it should be glue code over existing libraries and apeing reference implementations of solutions to problems only. Always do the boring industry-standard thing. Component choices are made by bake-off: candidates researched, losers rejected with recorded reasons, the winner pinned (the Hauler decision is the template). Months spent recreating an existing tool poorly is the cardinal failure mode.
 * Code is not the truth for how the system works. Traces are.
-* Use SQLC.
-* Do not provide time estimates.
+* Use SQLC for Go service PG queries.
+* To safely configure secrets per-environment, read `docs/secrets.md`.
+* You are not alone in this repo. Expect parallel changes by the user or other agents and work around them to avoid destructive action.
+* No need to be precious with git hygiene. If you see a doc update, it's fine to fold it into your worktree or branch, even if it's unrelated.
+* For every feature we ship, we must assume that if we don't have a canary actively asserting it works, that it's broken. If the user suggests a feature or large project, work backwards from the monitoring and operations story: how can we be notified when the feature breaks, or when performance or availability drops, and how do we avoid shipping regressions in the first place using promotion gates and responsible deployment practices? We have the technology necessary to do so, we just have to remember to use them.
 
 <observability>
 - Logs: `kubectl port-forward -n tenant-root svc/vlselect-generic 9471:9471`, then LogsQL via `curl 127.0.0.1:9471/select/logsql/query --data-urlencode 'query=...'`.
@@ -59,14 +62,6 @@ src/
           guardianintelligence-web/    # gi.org company site; site/ holds the OCI push targets
         packages/
           brand/
-
-      aisucks/
-        api/
-        service/
-        web/
-        sdk/
-        release/
-        deploy/base/
 
     services/
       secrets/
@@ -117,7 +112,7 @@ src/
     tools/                             # Non-runtime tooling (doggo for DNS etc.)
 </repo_shape>
 
-<technology>
+<overall_strategy>
 
 The audience for cloners of this repo is a single individual or a small team with high technical ability that want to transform an idea into a serious software company. Verself is the reference example — a value-providing, revenue-generating business proving the concept works — but it was hand-built (Nomad et al.); Guardian is the generalization, built so the next one isn't. The proof is autobiographical: the user (Shovon Hasan/"anveio") builds a successful company on Guardian's core infrastructure first, proving the core platform works and can be used to rapidly build any kind of product.
 
@@ -131,6 +126,7 @@ The value proposition:
 
 We do all of this by gluing together excellent existing tools and letting the user focus on building and iterating on their products. The economics: bootstrap once onto powerful fixed-cost metal, then iterate at near-zero marginal cost until product-market fit — ideas are fragile before they are refined, so shipping the next refined version must be nearly free.
 We're currently maximizing for highly continuous rapidly delivered software to external vendors like NPM/PyPi/Crates.io and so on.
+</overall_strategy>
 
 <development_loop>
 - This section is WIP, follow best practices. The below is just a few things to add to normal development workflow
@@ -142,7 +138,6 @@ We're currently maximizing for highly continuous rapidly delivered software to e
 </development_loop>
 
 Constraints:
-- Secrets must be autoprovisioned/autorotated. To safely configure secrets per-environment, read `docs/secrets.md`.
 - Database backups target off-cluster Cloudflare R2 through Cozystack's platform backup machinery (path pending; no in-cluster object storage exists to back up to). Do not add Guardian-specific backup strategies, backup credential Secrets, or checks.
 - Traces are the only admissable proof -- ClickHouse (when stood up), Victoria Metrics, Victoria Logs. Collect traces/spans and relevant log lines to support your thesis that your task is complete to satisfaction. Test services under heavy load via k6 to surface subtle bugs.
 

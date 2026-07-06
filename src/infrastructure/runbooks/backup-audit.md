@@ -187,5 +187,6 @@ Append one row per drill/audit. This table is the SOC2 evidence trail.
 | Date | Type | Target | Result | RTO (apply→healthy) | RPO evidence | Size | Notes |
 |---|---|---|---|---|---|---|---|
 | 2026-07-05 | Restore drill (PITR) | tenant-root/guardian PG | PASS | 68s to Succeeded, ~2min healthy | marker via WAL replay, archived ≤2s after switch | 4.1 MiB base | First drill; surfaced first-backup WAL hole → two-BackupJob rule |
+| 2026-07-05 | Restore drill (PITR) | tenant-root/guardian PG | PASS | 71s to Succeeded, ~85s healthy | marker id=3 @23:41:34 (2h08m post-base) recovered via WAL seg ...00E; archived ~2s after switch | 4.25 MiB base (guardian-second) | 2nd drill, to-copy; re-confirmed WAL-hole in guardian-initial (begin_wal ...008 absent) vs full chain in guardian-second; artifacts + PV torn down clean |
 | 2026-07-05 | Backup verify | tenant-root/analytics CH | PASS (attempt 4) | — | nightly archive | 105 KiB | Surfaced sidecar OOM on stale local backups + service-recreate abort |
 | 2026-07-05 | Security probes | guardian-backups bucket | PASS | — | — | — | Scope denials + lock delete-refusal verified at bucket creation |
