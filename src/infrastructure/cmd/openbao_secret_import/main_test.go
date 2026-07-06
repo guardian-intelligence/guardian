@@ -36,6 +36,8 @@ func TestParseEnvRejectsMalformedLine(t *testing.T) {
 
 const testGithubAppPEM = "-----BEGIN PRIVATE KEY-----\nnot-a-real-key\n-----END PRIVATE KEY-----\n"
 
+const testRunnerAppPEM = "-----BEGIN PRIVATE KEY-----\nnot-a-real-runner-key\n-----END PRIVATE KEY-----\n"
+
 func testImportEnv() map[string]string {
 	return map[string]string{
 		"cloudflare_account_id":                                   "account",
@@ -49,6 +51,11 @@ func testImportEnv() map[string]string {
 		"cloudflare_external_dns_api_token":                       "external",
 		"cloudflare_dns_lb_provisioner_api_token":                 "lb",
 		"github_promotions_app_private_key_b64":                   base64.StdEncoding.EncodeToString([]byte(testGithubAppPEM)),
+		"github_runner_app_prod_app_id":                           "3370540",
+		"github_runner_app_prod_client_id":                        "Iv23xxxx",
+		"github_runner_app_prod_webhook_secret":                   "runner-webhook",
+		"github_runner_app_prod_client_secret":                    "runner-client",
+		"github_runner_app_prod_private_key_b64":                  base64.StdEncoding.EncodeToString([]byte(testRunnerAppPEM)),
 	}
 }
 
@@ -57,8 +64,8 @@ func TestImportPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 6 {
-		t.Fatalf("plan length = %d, want 6", len(plan))
+	if len(plan) != 7 {
+		t.Fatalf("plan length = %d, want 7", len(plan))
 	}
 	external := plan[0]
 	if external.APIPath != "kv/data/guardian/guardian-mgmt/external-dns/cloudflare" {
@@ -96,6 +103,19 @@ func TestImportPlan(t *testing.T) {
 	if promotion.Data["githubAppPrivateKey"] != testGithubAppPEM {
 		t.Fatal("githubAppPrivateKey did not round-trip through base64")
 	}
+	runner := plan[6]
+	if runner.APIPath != "kv/data/guardian/guardian-mgmt/verself-runner/github-app" {
+		t.Fatalf("verself-runner path = %q", runner.APIPath)
+	}
+	if runner.Data["webhookSecret"] != "runner-webhook" || runner.Data["clientSecret"] != "runner-client" {
+		t.Fatalf("verself-runner secrets = %#v", runner.Data)
+	}
+	if runner.Data["appId"] != "3370540" || runner.Data["clientId"] != "Iv23xxxx" {
+		t.Fatalf("verself-runner identity = %#v", runner.Data)
+	}
+	if runner.Data["githubAppPrivateKey"] != testRunnerAppPEM {
+		t.Fatal("verself-runner githubAppPrivateKey did not round-trip through base64")
+	}
 }
 
 func TestImportPlanRejectsBadGithubKey(t *testing.T) {
@@ -107,6 +127,16 @@ func TestImportPlanRejectsBadGithubKey(t *testing.T) {
 	env["github_promotions_app_private_key_b64"] = base64.StdEncoding.EncodeToString([]byte("plain text, not a PEM"))
 	if _, err := importPlan(env); err == nil {
 		t.Fatal("importPlan accepted a non-PEM payload")
+	}
+
+	env = testImportEnv()
+	env["github_runner_app_prod_private_key_b64"] = "%%% not base64 %%%"
+	if _, err := importPlan(env); err == nil {
+		t.Fatal("importPlan accepted invalid base64 for the runner app key")
+	}
+	env["github_runner_app_prod_private_key_b64"] = base64.StdEncoding.EncodeToString([]byte("plain text, not a PEM"))
+	if _, err := importPlan(env); err == nil {
+		t.Fatal("importPlan accepted a non-PEM payload for the runner app key")
 	}
 }
 
@@ -120,8 +150,8 @@ func TestImportPlanOptionalKeycloakStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 8 {
-		t.Fatalf("plan length = %d, want 8 (6 base + beta + prod)", len(plan))
+	if len(plan) != 9 {
+		t.Fatalf("plan length = %d, want 9 (7 base + beta + prod)", len(plan))
 	}
 	byPath := map[string]secretWrite{}
 	for _, w := range plan {

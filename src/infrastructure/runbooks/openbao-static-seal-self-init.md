@@ -150,13 +150,21 @@ raft wipe, keyed by custody env variables. It currently writes:
   backupstrategy-controller consumes; ESO projects it as
   `Secret/guardian-backups-creds` in `tenant-root`)
 - `kv/guardian/guardian-mgmt/company-site/promotion/github-app`
+- `kv/guardian/guardian-mgmt/guardian-iam/promotion/github-app` (same App
+  identity as company-site's; Kargo credentials are project-namespaced)
+- `kv/guardian/guardian-mgmt/verself-runner/github-app` (the Verself Runner
+  GitHub App: webhook HMAC secret, OAuth client secret, and the App private
+  key, transported base64-encoded as
+  `github_runner_app_prod_private_key_b64`; appId/clientId ride along as
+  public identity)
 - `kv/guardian/guardian-mgmt/tenant-guardian-{beta,gamma,prod}/keycloak/github-oauth`
   (optional per stage: imported only when the env file carries that stage's
   `<STAGE>_GITHUB_CLIENT_SECRET`)
 
-The promotion entry carries the `guardian-promotions` GitHub App private key.
-The env file transports it base64-encoded (the file is line-oriented) as
-`github_promotions_app_private_key_b64`. Build the import file as a working
+GitHub App private keys live in custody as PEM files and travel in the env
+file base64-encoded (the file is line-oriented): the `guardian-promotions`
+key as `github_promotions_app_private_key_b64` and the Verself Runner key as
+`github_runner_app_prod_private_key_b64`. Build the import file as a working
 copy from custody without printing any value, then pass it via `--env-file`:
 
 ```sh
@@ -164,6 +172,8 @@ umask 077
 cp ~/guardian-custody/DELETE_ME.env import.env
 printf 'github_promotions_app_private_key_b64=%s\n' \
   "$(base64 -w0 < ~/guardian-custody/github-promotions-app.private-key.pem)" >> import.env
+printf 'github_runner_app_prod_private_key_b64=%s\n' \
+  "$(base64 -w0 < ~/guardian-custody/verself-runner.private-key.pem)" >> import.env
 # then run the import command above with: --env-file import.env
 ```
 
