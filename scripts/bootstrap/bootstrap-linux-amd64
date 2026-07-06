@@ -216,7 +216,7 @@ ensure_bazel_symlink "${bazelisk_path}"
 install_pivot aspect "${aspect_version}" "${aspect_sha256}" "${aspect_url}"
 
 if [[ "${mode}" == "path" ]]; then
-  printf 'export PATH="%s:${PATH}"\n' "${install_dir}"
+  printf "export PATH=%q:\"\${PATH}\"\n" "${install_dir}"
 else
   publish_bootstrap_path "${install_dir}"
   warn_bootstrap_path "${install_dir}"
