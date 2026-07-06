@@ -136,10 +136,30 @@ We're currently maximizing for highly continuous rapidly delivered software to e
 </overall_strategy>
 
 <development_loop>
-- This section is WIP, follow best practices. The below is just a few things to add to normal development workflow
-- Do not use CLI commands as a second control plane. Rely on flux to converge the cluster on merged commits.
-- You can run `aspect infra edge-health` to smoke-test edge reachability post convergence. Verify DNS resolution for every configured `guardianintelligence.org` hostname, HTTPS behavior through the public edge and origin consistency checks.
-- For drills (not part of normal development) run them once per node by explicit node IP, wait for the node and public edge to recover, document that node's outage window, then move to the next node. A node whose loss breaches 60 seconds of public-edge disruption is load bearing and must be fixed before continuing.
+The loop is: worktree → change → PR/CI → merge → babysit convergence → babysit promotion/canary → stop at green. You are not done at merge. A push to `main` is the deploy, not the finish line; you are done when the change has converged and is healthy in the cluster. Merging and walking away is the most common mistake here.
+
+Step by step:
+1. Branch in a git worktree off `origin/main` — never edit the shared checkout. Many agents share this one clone; a stray edit in the shared root silently rides onto another branch. All state-changing git work happens in a worktree.
+2. Make the change and run the relevant conformance tests locally (`//src/infrastructure/tests/...`). They exist to fail the footguns that otherwise only surface in-cluster: Flux `envsubst` safety, OpenBao per-namespace scope, `images.lock` digest-pinning, Cozystack app namespace placement. Update `images.lock` in the same PR as any image change.
+3. Open a PR. A PR cannot deploy anything — it never pushes images or applies manifests. The required checks are `build` and `site-gate`; get them green. Image workflows build and sign only on a push to `main`.
+4. Merging is the deploy. Flux pulls the merged revision and applies it — there is no separate deploy step and no rollback button. Everything after merge is actively watching the rollout, not idle waiting.
+5. Babysit convergence with `tools/ops/cluster-watch --status` (live Flux Ready conditions, sub-15m). The default `cluster-watch` tails the alert stream, but those rules debounce ~15m, so `--status` is the fast view while you wait for your slice's Kustomization to reach Ready.
+
+What goes wrong — each is a signal, not a flake:
+- Flux `BuildFailed`: an `envsubst` error, usually an unescaped `${...}` under a substituted path. Escape it `$${...}` or annotate the object `kustomize.toolkit.fluxcd.io/substitute: disabled`.
+- Flux apply `denied by ValidatingAdmissionPolicy ...`: a policy rejected your manifest as structurally wrong (e.g. a Cozystack app CR outside a `tenant-*` namespace). The Kustomization goes `Ready=False` and the message names the policy and the reason — this is how you tell a VAP blocked your change, and `cluster-watch --status` surfaces it. Fix the manifest; retrying will not help. (A policy in Warn mode allows-with-warning rather than denying, so it may not appear as a failure — assume Deny semantics and fix regardless.)
+- Flux `HealthCheckFailed` / `dependency '...' is not ready`: a health-gated resource (a CHI/CHK, a Deployment, an ExternalSecret) or an upstream `dependsOn` Kustomization did not reach Ready. Chase the dependency, not the symptom.
+- Kargo (image changes only): promotions flow beta → gamma → prod via the Kargo bot. NEVER hand-roll a promotion PR — the bot races and wins, and a manual merge strands its Promotion. After a merge Kargo owns, watch, don't act. Kargo pages if a promotion errors or a Warehouse goes unhealthy (expired creds, unreachable repo).
+- Flagger (canaried Deployments): a change runs canary analysis (k6 load + metric checks) before it reaches the primary. A failed canary rolls back automatically and pages — that is Flagger protecting prod. Read the canary's analysis; do not force the rollout through.
+- Alerta noise vs signal: the stream carries standing noise — `CPUThrottlingHigh` on bursty components, stale `KubeJobFailed` from an old canary run, tenant `HelmRelease` churn during a platform upgrade. Learn the standing set so a NEW major/critical tied to your change stands out.
+
+Do not fight the automation: the Kargo bot, a Flagger rollback, and a VAP denial are the system working as designed, not obstacles to route around. When the cluster is green and converged, stop.
+
+Standing rules:
+- Do not use CLI commands as a second control plane. Rely on Flux to converge the cluster on merged commits; read-only inspection (`kubectl get`, `cluster-watch`) is fine, mutation is not.
+- Development tools are version-pinned in `src/tools/` (talm, talosctl, flux, kubectl, hauler, openbao, oras, k6); use those, never an ambient install.
+- `aspect infra edge-health` smoke-tests edge reachability post-convergence: DNS for every configured `guardianintelligence.org` host, HTTPS through the public edge, and origin consistency.
+- Drills are not part of normal development — run them one node at a time by explicit node IP, wait for the node and public edge to recover, document that node's outage window, then move to the next. A node whose loss breaches 60 seconds of public-edge disruption is load-bearing and must be fixed before continuing.
 - RTO policy lives in `docs/reliability-rto.md`.
 </development_loop>
 

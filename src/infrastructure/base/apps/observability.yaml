@@ -21,10 +21,10 @@ spec:
           memory: 512Mi
       vmselect:
         minAllowed:
-          cpu: 50m
+          cpu: 250m
           memory: 128Mi
         maxAllowed:
-          cpu: 500m
+          cpu: "2"
           memory: 512Mi
       vmstorage:
         minAllowed:
