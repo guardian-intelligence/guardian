@@ -406,12 +406,13 @@ spec:
         name: guardian-source
   dependsOn:
     - name: guardian-system
+    - name: guardian-flagger
   prune: true
   wait: true
   timeout: 10m
 ---
-# company-site beta stage. No guardian-flagger dependency yet — this stage
-# is plain rolling-update only until Flagger's Canary lands alongside it.
+# company-site beta stage. Depends on guardian-flagger for the Canary CRD +
+# controller, same as guardian-iam-beta below.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -431,6 +432,7 @@ spec:
         name: guardian-source
   dependsOn:
     - name: guardian-system
+    - name: guardian-flagger
   prune: true
   wait: true
   timeout: 10m
@@ -455,6 +457,7 @@ spec:
         name: guardian-source
   dependsOn:
     - name: guardian-system
+    - name: guardian-flagger
   prune: true
   wait: true
   timeout: 10m
