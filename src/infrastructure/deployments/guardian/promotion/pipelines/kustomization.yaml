@@ -4,7 +4,9 @@ resources:
   - namespace.yaml
   - project.yaml
   - secrets.yaml
-  - stage.yaml
+  - company-stage-beta.yaml
+  - company-stage-gamma.yaml
+  - company-stage-prod.yaml
   - iam-namespace.yaml
   - iam-project.yaml
   - iam-secrets.yaml

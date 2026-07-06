@@ -1,0 +1,22 @@
+# external-dns (sources: [crd]) turns this into a Cloudflare-proxied CNAME to
+# the apex: same edge cert, same origins as company-site prod/previews —
+# same mechanism as iam/beta's keycloak-beta DNSEndpoint. Prod needs none of
+# this (DNS managed out-of-band for the bare apex).
+apiVersion: externaldns.k8s.io/v1alpha1
+kind: DNSEndpoint
+metadata:
+  name: company-site-gamma
+  namespace: tenant-guardian-gamma
+  labels:
+    app.kubernetes.io/name: company-site
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: gamma
+spec:
+  endpoints:
+    - dnsName: gamma.guardianintelligence.org
+      recordType: CNAME
+      targets:
+        - guardianintelligence.org
+      providerSpecific:
+        - name: external-dns.alpha.kubernetes.io/cloudflare-proxied
+          value: "true"

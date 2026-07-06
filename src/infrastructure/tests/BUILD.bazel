@@ -28,6 +28,8 @@ go_test(
         "//src/infrastructure/bootstrap/sync-steady:manifests",
         "//src/infrastructure/deployments/alerting:manifests",
         "//src/infrastructure/deployments/analytics/system:manifests",
+        "//src/infrastructure/deployments/company/beta:manifests",
+        "//src/infrastructure/deployments/company/gamma:manifests",
         "//src/infrastructure/deployments/company/previews:manifests",
         "//src/infrastructure/deployments/company/prod:manifests",
         "//src/infrastructure/deployments/guardian/flagger:manifests",

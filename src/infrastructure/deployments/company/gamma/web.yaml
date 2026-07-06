@@ -1,0 +1,159 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: company-site
+  namespace: tenant-guardian-gamma
+  labels:
+    app.kubernetes.io/name: company-site
+    app.kubernetes.io/part-of: guardian
+    app.kubernetes.io/component: web
+    guardian.dev/product: company
+    guardian.dev/stage: gamma
+spec:
+  replicas: 3
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: company-site
+      app.kubernetes.io/part-of: guardian
+      guardian.dev/stage: gamma
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: company-site
+        app.kubernetes.io/part-of: guardian
+        app.kubernetes.io/component: web
+        guardian.dev/product: company
+        guardian.dev/stage: gamma
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: ghcr.io/guardian-intelligence/company-site@sha256:860736aa5ed5213bce16498fe7dc06a39375f81388dd762dc1e779fe3b4fd3ea
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: GUARDIAN_SITE
+              value: gamma
+            - name: GUARDIAN_DEPLOY_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+              ephemeral-storage: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+              ephemeral-storage: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: company-site
+  namespace: tenant-guardian-gamma
+  labels:
+    app.kubernetes.io/name: company-site
+    app.kubernetes.io/part-of: guardian
+    app.kubernetes.io/component: web
+    guardian.dev/product: company
+    guardian.dev/stage: gamma
+spec:
+  type: ClusterIP
+  internalTrafficPolicy: Cluster
+  selector:
+    app.kubernetes.io/name: company-site
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: gamma
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: company-site
+  namespace: tenant-guardian-gamma
+  labels:
+    app.kubernetes.io/name: company-site
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: company
+    guardian.dev/stage: gamma
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: company-site
+      app.kubernetes.io/part-of: guardian
+      guardian.dev/stage: gamma
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: company-site
+  namespace: tenant-guardian-gamma
+  annotations:
+    # Same AOP posture as prod (optional_no_ca — see prod/web.yaml for why not
+    # "on" yet); beta/gamma get their own subdomain but share the product's
+    # security posture.
+    nginx.ingress.kubernetes.io/auth-tls-secret: tenant-guardian-gamma/cloudflare-origin-pull-ca
+    nginx.ingress.kubernetes.io/auth-tls-verify-client: "optional_no_ca"
+    nginx.ingress.kubernetes.io/auth-tls-verify-depth: "1"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+  labels:
+    app.kubernetes.io/name: company-site
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: company
+    guardian.dev/stage: gamma
+spec:
+  ingressClassName: tenant-root
+  rules:
+    - host: gamma.guardianintelligence.org
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: company-site
+                port:
+                  number: 80
