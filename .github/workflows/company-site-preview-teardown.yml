@@ -1,6 +1,7 @@
 # Removes a PR's preview when it closes (merged or not): deletes
-# manifests/pr-<N>/ from the `previews` branch, so Flux prunes the workload
-# and external-dns (policy: sync) deletes the pr-<N> DNS record.
+# manifests/pr-<N>/ from the `previews` branch, so Flux prunes the workload.
+# Nothing DNS-side to clean up -- pr-<N> resolves via the always-present
+# *.guardianintelligence.org wildcard, never a per-preview record.
 name: company-site-preview-teardown
 
 on:
