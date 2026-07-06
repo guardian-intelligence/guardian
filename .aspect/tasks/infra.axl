@@ -68,6 +68,8 @@ EXPECTED_KUBE_APIS = [
     "https://45.250.254.119:6443",
     "https://206.223.228.87:6443",
 ]
+PUBLIC_TALOS_KUBECONFIG_ENDPOINTS = "206.223.228.87,206.223.228.101,45.250.254.119"
+PUBLIC_TALOS_KUBECONFIG_NODE = "206.223.228.87"
 
 INFRA_FILEGROUPS = [
     "//src/infrastructure/bootstrap/guardian-mgmt:root",
@@ -424,6 +426,21 @@ def _workspace_path_if_relative(ctx, path):
         return path
     return ws_path(ctx, path)
 
+def _expand_operator_path(ctx, path):
+    if path == "~":
+        home = ctx.std.env.var("HOME") or ""
+        if home == "":
+            ctx.std.io.stderr.write("ERROR: HOME is not set; pass an absolute --install-path\n")
+            return None
+        return home
+    if path.startswith("~/"):
+        home = ctx.std.env.var("HOME") or ""
+        if home == "":
+            ctx.std.io.stderr.write("ERROR: HOME is not set; pass an absolute --install-path\n")
+            return None
+        return home + path[1:]
+    return _workspace_path_if_relative(ctx, path)
+
 def _talosconfig_path(ctx):
     if ctx.args.talosconfig != "":
         return ctx.args.talosconfig
@@ -726,7 +743,70 @@ def _kubeconfig_impl(ctx):
     if rc != 0:
         return rc
 
-    ctx.std.io.stderr.write("wrote guardian-mgmt kubeconfig to " + root + "/kubeconfig\n")
+    kubeconfig = root + "/kubeconfig"
+    kubectl = _kubectl_path(ctx)
+    if kubectl == None:
+        return 1
+    server = _capture_stdout(
+        ctx,
+        kubectl,
+        ["--kubeconfig", kubeconfig, "config", "view", "--minify", "--output=jsonpath={.clusters[0].cluster.server}"],
+        cwd = ws_path(ctx),
+        label = "kubectl inspect generated guardian-mgmt kubeconfig",
+    )
+    if server == None:
+        return 1
+    if not _contains(EXPECTED_KUBE_APIS, server):
+        ctx.std.io.stderr.write("ERROR: generated kubeconfig points at " + server + "; expected guardian-mgmt API endpoint from src/infrastructure/bootstrap/guardian-mgmt/main.tf\n")
+        return 1
+
+    ctx.std.io.stderr.write("wrote guardian-mgmt kubeconfig to " + kubeconfig + " (" + server + ")\n")
+    if ctx.args.install:
+        return _install_kubeconfig(ctx, kubectl, kubeconfig)
+    return 0
+
+def _install_kubeconfig(ctx, kubectl, source):
+    target = ctx.args.install_path
+    if target == "":
+        target = "~/.kube/config"
+    target = _expand_operator_path(ctx, target)
+    if target == None:
+        return 1
+    if target == source:
+        ctx.std.io.stderr.write("guardian-mgmt kubeconfig already installed at " + target + "\n")
+        return 0
+
+    target_dir = _capture_stdout(ctx, "dirname", [target], label = "dirname " + target)
+    if target_dir == None:
+        return 1
+    rc = checked_spawn(ctx, "mkdir", ["-p", target_dir], label = "mkdir -p " + target_dir)
+    if rc != 0:
+        return rc
+
+    backup = ""
+    if ctx.std.fs.exists(target):
+        stamp = _capture_stdout(ctx, "date", ["+%Y%m%d%H%M%S"], label = "date kubeconfig backup stamp")
+        if stamp == None:
+            return 1
+        backup = target + ".backup-" + stamp
+        rc = checked_spawn(ctx, "cp", [target, backup], label = "backup existing kubeconfig")
+        if rc != 0:
+            return rc
+
+    rc = checked_spawn(ctx, "cp", [source, target], label = "install guardian-mgmt kubeconfig")
+    if rc != 0:
+        return rc
+    rc = checked_spawn(ctx, "chmod", ["600", target], label = "chmod 600 guardian-mgmt kubeconfig")
+    if rc != 0:
+        return rc
+    rc = _capture_success(ctx, kubectl, ["--kubeconfig", target, "config", "use-context", "admin@guardian-mgmt"], cwd = ws_path(ctx), label = "kubectl select guardian-mgmt context")
+    if rc != 0:
+        return rc
+
+    message = "installed guardian-mgmt kubeconfig at " + target
+    if backup != "":
+        message = message + " (backup: " + backup + ")"
+    ctx.std.io.stderr.write(message + "\n")
     return 0
 
 def _talos_impl(ctx):
@@ -1592,10 +1672,12 @@ kubeconfig = task(
     implementation = _kubeconfig_impl,
     name = "kubeconfig",
     group = ["infra"],
-    summary = "Refresh the gitignored guardian-mgmt kubeconfig from the repo-pinned Talm state.",
+    summary = "Refresh the gitignored guardian-mgmt kubeconfig from the repo-pinned Talm state; pass --install to make plain kubectl use it.",
     args = {
-        "endpoints": args.string(default = "10.8.0.250", description = "Talos API endpoint used to fetch kubeconfig."),
-        "nodes": args.string(default = "10.8.0.11,10.8.0.12,10.8.0.13", description = "Talos nodes used to fetch kubeconfig."),
+        "endpoints": args.string(default = PUBLIC_TALOS_KUBECONFIG_ENDPOINTS, description = "Talos API endpoints used to fetch kubeconfig. Defaults to public control-plane addresses so off-VLAN operators can refresh custody credentials."),
+        "install": args.boolean(default = False, description = "Install the refreshed kubeconfig as the default kubectl config, backing up any existing file first."),
+        "install_path": args.string(default = "", description = "Where --install writes the kubeconfig. Defaults to ~/.kube/config."),
+        "nodes": args.string(default = PUBLIC_TALOS_KUBECONFIG_NODE, description = "Talos node used to fetch kubeconfig. Use 10.8.0.11,10.8.0.12,10.8.0.13 from inside the private VLAN if desired."),
         "root": args.string(default = GUARDIAN_MGMT_TALM_ROOT, description = "Talm root containing gitignored secrets.yaml and talosconfig."),
         "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
     },

@@ -24,6 +24,7 @@ The loops you'll actually run, from the repo root:
 | Put repo-pinned CLIs + build tools on `PATH` | `aspect tools install && eval "$(aspect tools path)"` |
 | Regenerate proto stubs (pinned `buf` + plugins) | `buf generate --path src/proto/guardian` |
 | Validate the infra substrate | `aspect infra validate` |
+| Refresh and install the guardian-mgmt kubeconfig | `aspect infra kubeconfig --install` |
 
 Ad-hoc `bazel build|test|query` stays raw bazel; `aspect` tasks exist only for
 workflows with shape worth documenting (see below).
@@ -41,6 +42,8 @@ aspect infra validate
 
 aspect infra tofu-init
 
+aspect infra kubeconfig --install
+
 aspect infra bootstrap
 
 aspect infra bundle
@@ -51,6 +54,14 @@ aspect infra openbao-drill
 
 aspect infra observability-drill
 ```
+
+`aspect infra kubeconfig --install` refreshes the gitignored custody kubeconfig
+from Talm operator state, verifies it points at one of the declared
+guardian-mgmt API endpoints, backs up any existing `~/.kube/config`, and
+installs the refreshed context so plain `kubectl` targets `guardian-mgmt`.
+The kubeconfig refresh defaults to a public control-plane address for off-VLAN
+operators; pass private `--endpoints`/`--nodes` only from inside the Latitude
+VLAN.
 
 `aspect infra bootstrap` initializes the standard OpenTofu S3 backend from the
 checked-in Cloudflare account id in `src/infrastructure/bootstrap/backend.tfvars`
