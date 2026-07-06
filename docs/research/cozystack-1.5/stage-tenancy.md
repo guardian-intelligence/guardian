@@ -3,7 +3,7 @@
 Companion to `tenant-internals.md`. Question under research: is modeling beta/gamma/prod as
 Cozystack Tenants an intended pattern, what does it buy over plain namespaces in one tenant,
 and what does the v1.5.0 line get wrong. Verified against the v1.5.0/v1.5.1/v1.5.2 tags and the
-live `guardian-mgmt` cluster (pinned `cozy-installer:1.5.0`).
+live `guardian-mgmt` cluster (pinned `cozy-installer:1.5.2` since #434).
 
 ## Intent: blessed, but not the maintainers' default mental model
 
