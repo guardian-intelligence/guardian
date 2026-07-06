@@ -39,6 +39,7 @@ genrule(
         # node_modules (react/react-dom/@types) reachable by directory
         # walk-up from brand's location in this sandbox, not just the app's.
         "//src/products/viteplus-monorepo/packages/brand:node_modules",
+        ":node_modules/typescript",
     ],
     outs = ["company-site-output.tar"],
     cmd = """
@@ -47,8 +48,10 @@ execroot="$$(pwd)"
 node="$$execroot/$(location //src/products/viteplus-monorepo:vp_node)"
 node_modules_root="$$execroot/$(BINDIR)/src/products/viteplus-monorepo/apps/guardianintelligence-web/node_modules"
 vp="$$node_modules_root/vite-plus/bin/vp"
+tsc="$$node_modules_root/typescript/bin/tsc"
 test -n "$$node_modules_root"
 test -x "$$vp"
+test -f "$$tsc"
 export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
 export NODE_OPTIONS="--preserve-symlinks-main $${NODE_OPTIONS:-}"
 export NODE_PATH="$$node_modules_root$${NODE_PATH:+:$$NODE_PATH}"
@@ -57,12 +60,19 @@ cd "$$execroot/src/products/viteplus-monorepo/apps/guardianintelligence-web"
 rm -rf node_modules
 ln -s "$$node_modules_root" node_modules
 rm -rf .output
-# Mirrors package.json's own "build" script exactly (single source of
-# truth: typecheck + test + build, in that order) -- a developer running
+# Mirrors package.json's own "build" script (single source of truth:
+# typecheck + test + build, in that order) -- a developer running
 # `pnpm run build` locally gets the identical gate CI enforces here, and a
 # real type error or test regression fails the image build itself rather
-# than shipping silently through Vite's transpile-only bundler.
-"$$node" "$$vp" exec tsc -p tsconfig.json
+# than shipping silently through Vite's transpile-only bundler. tsc is
+# invoked via its exact Bazel-resolved path, NOT `vp exec tsc` (which
+# package.json's own script uses) -- `vp exec` spawns external binaries via
+# PATH lookup, and this sandbox's node_modules has no .bin/ symlink farm
+# (unlike a real `pnpm install`, which is what makes `vp exec` safe to use
+# from package.json); a real run on a GitHub Actions runner proved this the
+# hard way, resolving a stray broken global `tsc` shim on the runner image
+# instead of the correct local one.
+"$$node" "$$tsc" -p tsconfig.json
 "$$node" "$$vp" test run
 "$$node" "$$vp" build
 test -s .output/server/index.mjs
