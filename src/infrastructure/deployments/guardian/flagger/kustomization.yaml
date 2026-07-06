@@ -4,3 +4,4 @@ resources:
   - namespace.yaml
   - flagger-helmrelease.yaml
   - flagger-networkpolicy.yaml
+  - alert-provider.yaml

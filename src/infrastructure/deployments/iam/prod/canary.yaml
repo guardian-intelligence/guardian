@@ -45,6 +45,14 @@ spec:
     # (e.g. iterations: 120 at 30s ~= 1h of steady canary successes) once
     # the k6 canary and SLO metrics are feeding analysis.
     iterations: 1
+    # severity warn: failed checks and rollbacks page through the alert-relay;
+    # routine info-level promotion events do not.
+    alerts:
+      - name: ops
+        severity: warn
+        providerRef:
+          name: alert-relay
+          namespace: flagger
     webhooks:
       - name: login-gate
         type: pre-rollout
