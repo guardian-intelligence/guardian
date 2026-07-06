@@ -515,12 +515,12 @@ spec:
       current: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'True')
       failed: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'False')
 ---
-# Analytics ClickHouse: the query home for business analytics and OTel
-# traces (raw Altinity CHI + CHK; the operator ships with the Cozystack
-# platform). Depends only on storage classes and the base slice; OpenBao
-# wiring for this namespace arrives with the ingest service's secrets.
-# kstatus knows nothing about CHI/CHK, so health is the operator's own
-# status fields.
+# Analytics ingest plane: the Connect ingest service, OTel collector, DDL
+# job, and ESO wiring for guardian-analytics. ClickHouse itself is the
+# tenant-root Cozystack app and is not managed (or health-gated) here — the
+# stock flux-resources alerts cover its HelmRelease. Depends only on storage
+# classes and the base slice; OpenBao wiring for this namespace arrives with
+# the ingest service's secrets.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -542,29 +542,30 @@ spec:
     - name: guardian-mgmt-storage
     - name: guardian-mgmt-base
   prune: true
-  # wait:false + explicit healthChecks: readiness gates on exactly the CHI
-  # and CHK (via the exprs below) without gating on the DDL Job. With
-  # wait:false alone, Flux would never evaluate healthCheckExprs at all.
+  # wait:false + explicit healthChecks: readiness gates on exactly the two
+  # Deployments and the ExternalSecret without gating on the DDL Job.
+  # kstatus knows nothing about ESO CRs, so the exprs below declare their
+  # Ready contract.
   wait: false
-  timeout: 15m
+  timeout: 5m
   healthChecks:
-    - apiVersion: clickhouse.altinity.com/v1
-      kind: ClickHouseInstallation
-      name: analytics
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: analytics-ingest
       namespace: guardian-analytics
-    - apiVersion: clickhouse-keeper.altinity.com/v1
-      kind: ClickHouseKeeperInstallation
-      name: analytics-keeper
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: otel-collector
+      namespace: guardian-analytics
+    - apiVersion: external-secrets.io/v1beta1
+      kind: ExternalSecret
+      name: analytics-ch-ingest
       namespace: guardian-analytics
   healthCheckExprs:
-    - apiVersion: clickhouse.altinity.com/v1
-      kind: ClickHouseInstallation
-      current: has(status.status) && status.status == 'Completed'
-      failed: has(status.status) && status.status == 'Aborted'
-    - apiVersion: clickhouse-keeper.altinity.com/v1
-      kind: ClickHouseKeeperInstallation
-      current: has(status.status) && status.status == 'Completed'
-      failed: has(status.status) && status.status == 'Aborted'
+    - apiVersion: external-secrets.io/v1beta1
+      kind: ExternalSecret
+      current: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
+      failed: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'False')
 ---
 # Alerting delivery seam: the alert-relay Deployment in tenant-root plus its
 # ESO wiring, Cilium policy, and self-monitoring (deployments/alerting/).
