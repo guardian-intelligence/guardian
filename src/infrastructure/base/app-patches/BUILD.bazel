@@ -1,6 +1,7 @@
 filegroup(
     name = "manifests",
     srcs = [
+        "cozystack-app-namespace-admission.yaml",
         "ingress-origin-edge.yaml",
         "kustomization.yaml",
         "openbao-static-seal-admission.yaml",
