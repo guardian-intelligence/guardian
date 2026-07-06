@@ -9,6 +9,7 @@ require (
 	connectrpc.com/otelconnect v0.9.0
 	github.com/ClickHouse/clickhouse-go/v2 v2.47.0
 	github.com/bazelbuild/rules_go v0.59.0
+	github.com/jackc/pgx/v5 v5.10.0
 	github.com/openbao/openbao/api/v2 v2.5.1
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.44.0
@@ -45,6 +46,9 @@ require (
 	github.com/hashicorp/go-secure-stdlib/strutil v0.1.2 // indirect
 	github.com/hashicorp/go-sockaddr v1.0.7 // indirect
 	github.com/hashicorp/hcl v1.0.1-vault-7 // indirect
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/paulmach/orb v0.13.0 // indirect
@@ -59,6 +63,7 @@ require (
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/exp v0.0.0-20250813145105-42675adae3e6 // indirect
+	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
 	golang.org/x/time v0.14.0 // indirect

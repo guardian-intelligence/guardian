@@ -1,0 +1,101 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load", "oci_push")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+
+go_library(
+    name = "controlplane_lib",
+    srcs = [
+        "class.go",
+        "comments.go",
+        "config.go",
+        "events.go",
+        "github_api.go",
+        "main.go",
+        "migrations.go",
+        "problems.go",
+        "reconcile.go",
+        "render.go",
+        "store.go",
+        "trust.go",
+        "webhook.go",
+        "worker.go",
+    ],
+    embedsrcs = ["migrations/001_initial.sql"],
+    importpath = "github.com/guardian-intelligence/guardian/src/services/verself/controlplane",
+    visibility = ["//visibility:private"],
+    deps = [
+        "@com_github_jackc_pgx_v5//:pgx",
+        "@com_github_jackc_pgx_v5//pgconn",
+        "@com_github_jackc_pgx_v5//pgxpool",
+        "@io_opentelemetry_go_otel//:otel",
+        "@io_opentelemetry_go_otel//attribute",
+        "@io_opentelemetry_go_otel//semconv/v1.26.0:v1_26_0",
+        "@io_opentelemetry_go_otel_exporters_otlp_otlptrace_otlptracegrpc//:otlptracegrpc",
+        "@io_opentelemetry_go_otel_sdk//resource",
+        "@io_opentelemetry_go_otel_sdk//trace",
+        "@io_opentelemetry_go_otel_trace//:trace",
+        "@io_opentelemetry_go_otel_trace//noop",
+    ],
+)
+
+go_binary(
+    name = "controlplane",
+    embed = [":controlplane_lib"],
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "controlplane_test",
+    srcs = [
+        "class_test.go",
+        "render_test.go",
+        "trust_test.go",
+        "webhook_test.go",
+        "worker_test.go",
+    ],
+    embed = [":controlplane_lib"],
+    deps = [
+        "@com_github_jackc_pgx_v5//:pgx",
+        "@io_opentelemetry_go_otel_trace//noop",
+    ],
+)
+
+pkg_tar(
+    name = "controlplane_layer",
+    files = {
+        ":controlplane": "app/controlplane",
+    },
+    modes = {
+        "app/controlplane": "0755",
+    },
+)
+
+oci_image(
+    name = "image",
+    annotations = {
+        "org.opencontainers.image.description": "Verself runner control plane (GitHub workflow_job ingest, delivery ledger, PR comments)",
+        "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
+        "org.opencontainers.image.title": "verself-controlplane",
+    },
+    base = "@ubuntu_noble_base_linux_amd64",
+    entrypoint = ["/app/controlplane"],
+    exposed_ports = ["8080/tcp"],
+    tars = [":controlplane_layer"],
+    visibility = ["//visibility:public"],
+)
+
+oci_load(
+    name = "load",
+    image = ":image",
+    repo_tags = ["guardian/verself-controlplane:dev"],
+)
+
+# Pushed by CI (.github/workflows/verself-controlplane-image.yml) on merges to
+# main; the workflow file path is the cosign trust anchor for this image.
+oci_push(
+    name = "push",
+    image = ":image",
+    remote_tags = ["edge"],
+    repository = "ghcr.io/guardian-intelligence/verself-controlplane",
+    visibility = ["//visibility:public"],
+)
