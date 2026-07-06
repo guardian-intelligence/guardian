@@ -410,6 +410,55 @@ spec:
   wait: true
   timeout: 10m
 ---
+# company-site beta stage. No guardian-flagger dependency yet — this stage
+# is plain rolling-update only until Flagger's Canary lands alongside it.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: guardian-company-beta
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/deployments/company/beta
+  sourceRef:
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      # Required, not optional — see guardian-company-prod above.
+      - kind: ConfigMap
+        name: guardian-source
+  dependsOn:
+    - name: guardian-system
+  prune: true
+  wait: true
+  timeout: 10m
+---
+# company-site gamma stage. See guardian-company-beta above.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: guardian-company-gamma
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/deployments/company/gamma
+  sourceRef:
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      # Required, not optional — see guardian-company-prod above.
+      - kind: ConfigMap
+        name: guardian-source
+  dependsOn:
+    - name: guardian-system
+  prune: true
+  wait: true
+  timeout: 10m
+---
 # Verself IAM beta stage: Keycloak + stage Postgres + ESO wiring + Flagger
 # Canary. Depends on guardian-system (OpenBao roles + kv paths from
 # self-init) and guardian-flagger (Canary CRD + controller). The

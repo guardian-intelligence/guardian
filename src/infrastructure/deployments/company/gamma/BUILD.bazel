@@ -1,0 +1,11 @@
+filegroup(
+    name = "manifests",
+    srcs = [
+        "kustomization.yaml",
+        "web.yaml",
+        "cloudflare-origin-pull-ca.yaml",
+        "root-ingress-networkpolicy.yaml",
+        "dnsendpoint.yaml",
+    ],
+    visibility = ["//visibility:public"],
+)

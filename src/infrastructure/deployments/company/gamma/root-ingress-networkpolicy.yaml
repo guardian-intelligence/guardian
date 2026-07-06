@@ -1,0 +1,55 @@
+# The public edge is the tenant-root ingress controller on the node public
+# IPs (Cloudflare origins). The Cozystack tenant chart's generated isolation
+# policy admits only the parent tenant (tenant-guardian), system namespaces,
+# and the apiserver into tenant-guardian-gamma — not tenant-root. This
+# additive policy admits exactly the root ingress controller to the
+# company-site pods (same shape as prod's).
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-guardian-gamma-allow-root-ingress-company-site
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: company
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-guardian-gamma
+      k8s:app.kubernetes.io/name: company-site
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            k8s:app.kubernetes.io/name: ingress-nginx
+            k8s:app.kubernetes.io/component: controller
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+---
+# Egress half: tenant-root's generated egress policy only admits destinations
+# labeled tenant.cozystack.io/tenant-root, and grandchild tenant namespaces
+# carry only parent+self ancestry labels. Admit the root ingress controller
+# outbound to the company-site pods (Cilium policies are additive).
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-root-ingress-egress-company-site-gamma
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: company
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-root
+      k8s:app.kubernetes.io/name: ingress-nginx
+      k8s:app.kubernetes.io/component: controller
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-guardian-gamma
+            k8s:app.kubernetes.io/name: company-site
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP

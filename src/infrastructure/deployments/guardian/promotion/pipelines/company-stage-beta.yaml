@@ -1,17 +1,15 @@
-# The prod promotion pipeline: new Freight (a digest CI pushed and
-# cosign-signed behind company-site:edge) becomes a pin-bump PR against main.
-# Kargo is the untrusted proposer — the site-gate check (pin provenance +
-# conformance) and branch protection decide whether the PR merges, and the
-# promotion-lock-sync workflow keeps images.lock in step and arms automerge.
-# git-wait-for-pr closes the loop so the Stage records the promotion only
-# once the PR actually merges.
+# The beta promotion Stage: new Freight (a digest CI pushed and cosign-signed
+# behind company-site:edge) becomes a pin-bump PR against main. Kargo is the
+# untrusted proposer — CI checks and branch protection decide whether the PR
+# merges, and the deploy is then gated in-cluster by Flagger's blue/green
+# rollout before any user traffic on beta reaches the new version.
 #
 # substitute: disabled — the ${{ ... }} promotion expressions must reach
 # Kargo verbatim, not be mangled by Flux's envsubst pass.
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Stage
 metadata:
-  name: prod
+  name: beta
   namespace: company-site
   annotations:
     kustomize.toolkit.fluxcd.io/substitute: disabled
@@ -38,7 +36,7 @@ spec:
                 path: ./repo
         - uses: yaml-update
           config:
-            path: ./repo/src/infrastructure/deployments/company/prod/web.yaml
+            path: ./repo/src/infrastructure/deployments/company/beta/web.yaml
             updates:
               - key: spec.template.spec.containers.0.image
                 value: ${{ vars.imageRepo }}@${{ imageFrom(vars.imageRepo).Digest }}
@@ -46,7 +44,7 @@ spec:
           as: commit
           config:
             path: ./repo
-            message: promote company-site to ${{ imageFrom(vars.imageRepo).Digest }}
+            message: promote company-site (beta) to ${{ imageFrom(vars.imageRepo).Digest }}
         - uses: git-push
           as: push
           config:
@@ -59,14 +57,10 @@ spec:
             provider: github
             sourceBranch: ${{ outputs.push.branch }}
             targetBranch: main
-            title: promote company-site to ${{ imageFrom(vars.imageRepo).Digest }}
-        # The if-guard makes the no-change promotion a clean no-op: when the
-        # pin already carries the freight digest, git-commit and git-open-pr
-        # self-skip, the skipped open-pr registers a nil output, and building
-        # this step's config would error on outputs['open-pr'].pr.id. A false
-        # `if` is evaluated BEFORE the config expressions, so the reference is
-        # never touched and the promotion ends Succeeded. This is the
-        # idempotence path — retries after a merged promotion land here too.
+            title: promote company-site (beta) to ${{ imageFrom(vars.imageRepo).Digest }}
+        # A false `if` is evaluated before the config expressions, so a
+        # self-skipped open-pr never errors on the nil output and a no-op
+        # promotion (pin already at this digest) ends Succeeded.
         - uses: git-wait-for-pr
           if: ${{ status('open-pr') == 'Succeeded' }}
           config:
