@@ -1,8 +1,10 @@
-# Companion to the prod promotion Stage: Kargo's pin-bump PR changes only
-# web.yaml (its promotion steps cannot edit the plain-text images.lock), so
-# this workflow re-derives the company-site lock line from the PR's pin,
-# pushes the fix to the PR branch, and arms automerge. Interim mechanism —
-# the images.lock derivation tool replaces the sed when it lands.
+# Companion to the company-site (beta/gamma/prod) and guardian-iam
+# (beta/gamma/prod) promotion Stages: Kargo's pin-bump PR changes only
+# web.yaml/keycloak.yaml (its promotion steps cannot edit the plain-text
+# images.lock), so this workflow re-derives the affected lock line(s) from
+# the PR's pin, pushes the fix to the PR branch, and arms automerge.
+# Interim mechanism — the images.lock derivation tool replaces the sed
+# when it lands.
 #
 # It pushes with the guardian-promotions App token, NOT GITHUB_TOKEN: pushes
 # made with GITHUB_TOKEN do not trigger workflows, so the site-gate would
@@ -42,11 +44,34 @@ jobs:
       - name: Sync images.lock to the pinned digest
         id: sync
         run: |
-          web_yaml=src/infrastructure/deployments/company/prod/web.yaml
           lock=src/infrastructure/bootstrap/bundle/images.lock
-          pinned="$(grep -o 'ghcr.io/guardian-intelligence/company-site@sha256:[a-f0-9]\{64\}' "$web_yaml")"
-          sed -i "s|^ghcr.io/guardian-intelligence/company-site@sha256:[a-f0-9]\{64\}$|$pinned|" "$lock"
-          grep -q "^$pinned$" "$lock"
+
+          # company-site pin-bump PRs (beta/gamma/prod, one Stage each):
+          # same accumulate-not-replace model as Keycloak below, for the
+          # same reason -- promotion isn't instant/synchronized across
+          # stages, so beta/gamma/prod can each be pinned to a DIFFERENT
+          # digest at any moment (this is exactly what a beta-only
+          # promotion PR looks like: beta's web.yaml changes, gamma/prod's
+          # don't). The lock must carry every currently-referenced digest,
+          # not just whichever stage this specific PR happens to touch.
+          # A single sed-replace against one hardcoded stage file (prod)
+          # was correct back when company-site had only one Stage; it
+          # silently no-op'd once beta/gamma existed, since a beta-only PR
+          # never changes prod's pin.
+          for cs_yaml in src/infrastructure/deployments/company/beta/web.yaml \
+                         src/infrastructure/deployments/company/gamma/web.yaml \
+                         src/infrastructure/deployments/company/prod/web.yaml; do
+            [ -f "$cs_yaml" ] || continue
+            cs_pin="$(grep -o 'ghcr.io/guardian-intelligence/company-site@sha256:[a-f0-9]\{64\}' "$cs_yaml" | head -1)"
+            [ -n "$cs_pin" ] || continue
+            if ! grep -q "^$cs_pin$" "$lock"; then
+              awk -v pin="$cs_pin" '
+                /^ghcr\.io\/guardian-intelligence\/company-site@sha256:/ && !done { print pin; done=1 }
+                { print }
+              ' "$lock" > "$lock.tmp" && mv "$lock.tmp" "$lock"
+              grep -q "^$cs_pin$" "$lock"
+            fi
+          done
 
           # Keycloak pin-bump PRs (guardian-iam pipeline): upstream digests
           # accumulate rather than replace — the lock deliberately carries
