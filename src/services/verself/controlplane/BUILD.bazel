@@ -49,6 +49,7 @@ go_test(
     srcs = [
         "class_test.go",
         "render_test.go",
+        "store_test.go",
         "trust_test.go",
         "webhook_test.go",
         "worker_test.go",

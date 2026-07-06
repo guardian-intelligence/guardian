@@ -41,3 +41,42 @@ func TestJobLockKeysMaskedPositive(t *testing.T) {
 		t.Error("distinct job ids must map to distinct key pairs")
 	}
 }
+
+func TestValidRepoFullName(t *testing.T) {
+	valid := []string{
+		"guardian-intelligence/guardian",
+		"org/repo.name",
+		"a/b",
+		"user_name/repo-name",
+		"o.rg/re_po",
+		"...a/b", // ugly but not a traversal segment
+	}
+	for _, s := range valid {
+		if !validRepoFullName(s) {
+			t.Errorf("validRepoFullName(%q) = false, want true", s)
+		}
+	}
+	invalid := []string{
+		"",
+		"norepo",
+		"org/",
+		"/repo",
+		"org/repo/extra",
+		"org/../secrets",        // traversal segment
+		"../repo",               // traversal segment
+		"org/.",                 // self segment
+		"./repo",                // self segment
+		"org/repo?x=1",          // query smuggling
+		"org/repo#frag",         // fragment smuggling
+		"org/repo%2f..",         // percent smuggling
+		"org/repo repo",         // whitespace
+		"org\\repo",             // backslash
+		"org/repo\n",            // control char
+		"app/installations/123", // would re-aim at another endpoint
+	}
+	for _, s := range invalid {
+		if validRepoFullName(s) {
+			t.Errorf("validRepoFullName(%q) = true, want false", s)
+		}
+	}
+}

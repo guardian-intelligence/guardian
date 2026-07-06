@@ -151,11 +151,17 @@ func (c *githubClient) invalidateToken() {
 	c.mu.Unlock()
 }
 
-// doJSON performs one authenticated API call. Retry-After and
-// x-ratelimit-remaining=0 are honored with a bounded sleep and a single
-// retry; a 401 re-mints the installation token once. Anything else is the
+// doJSON performs one authenticated API call. A 401 re-mints the
+// installation token once, and Retry-After / x-ratelimit-remaining=0 are
+// honored once with a bounded sleep — independently, so a remint followed by
+// a rate limit still waits instead of erroring. Anything else is the
 // caller's problem — for worker paths that means the delivery ledger's
 // retry/backoff machinery.
+//
+// The bounded sleep runs on the caller's goroutine. For the worker that is
+// THE single sweeper goroutine, so a rate-limit wait stalls all delivery
+// processing for up to rateLimitWaitMax; waits longer than that fail fast
+// and fall back to the ledger's backoff instead.
 func (c *githubClient) doJSON(ctx context.Context, method, path string, body, out any) error {
 	var payload []byte
 	if body != nil {
@@ -164,7 +170,8 @@ func (c *githubClient) doJSON(ctx context.Context, method, path string, body, ou
 			return err
 		}
 	}
-	for attempt := 0; ; attempt++ {
+	reminted, rateWaited := false, false
+	for {
 		token, err := c.installationToken(ctx)
 		if err != nil {
 			return err
@@ -201,20 +208,20 @@ func (c *githubClient) doJSON(ctx context.Context, method, path string, body, ou
 		}
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 		resp.Body.Close()
-		if attempt == 0 {
-			if resp.StatusCode == http.StatusUnauthorized {
-				c.invalidateToken()
-				continue
+		if resp.StatusCode == http.StatusUnauthorized && !reminted {
+			reminted = true
+			c.invalidateToken()
+			continue
+		}
+		if wait, ok := rateLimitWait(resp, c.now()); ok && !rateWaited {
+			rateWaited = true
+			if wait > rateLimitWaitMax {
+				return fmt.Errorf("github %s %s: rate limited for %s", method, path, wait)
 			}
-			if wait, ok := rateLimitWait(resp, c.now()); ok {
-				if wait > rateLimitWaitMax {
-					return fmt.Errorf("github %s %s: rate limited for %s", method, path, wait)
-				}
-				if err := sleepCtx(ctx, wait); err != nil {
-					return err
-				}
-				continue
+			if err := sleepCtx(ctx, wait); err != nil {
+				return err
 			}
+			continue
 		}
 		return fmt.Errorf("github %s %s: responded %d", method, path, resp.StatusCode)
 	}
@@ -335,4 +342,35 @@ func (c *githubClient) createIssueComment(ctx context.Context, repo string, issu
 func (c *githubClient) updateIssueComment(ctx context.Context, repo string, commentID int64, body string) error {
 	return c.doJSON(ctx, http.MethodPatch, fmt.Sprintf("/repos/%s/issues/comments/%d", repo, commentID),
 		map[string]string{"body": body}, nil)
+}
+
+// findMarkerComment returns the id of the first bot-authored comment on the
+// issue whose body starts with the marker, or 0. Recovery path for a lost
+// comment id (create succeeded, the posted-state write failed): adopt instead
+// of creating a duplicate. Bot-authored + marker-prefix so a human comment
+// merely quoting the marker is never adopted (and PATCHed over).
+func (c *githubClient) findMarkerComment(ctx context.Context, repo string, issueNumber int64, marker string) (int64, error) {
+	for page := 1; page <= apiMaxPages; page++ {
+		var comments []struct {
+			ID   int64  `json:"id"`
+			Body string `json:"body"`
+			User struct {
+				Type string `json:"type"`
+			} `json:"user"`
+		}
+		path := fmt.Sprintf("/repos/%s/issues/%d/comments?per_page=%d&page=%d",
+			repo, issueNumber, apiPageSize, page)
+		if err := c.doJSON(ctx, http.MethodGet, path, nil, &comments); err != nil {
+			return 0, err
+		}
+		for _, cm := range comments {
+			if cm.User.Type == "Bot" && strings.HasPrefix(cm.Body, marker) {
+				return cm.ID, nil
+			}
+		}
+		if len(comments) < apiPageSize {
+			return 0, nil
+		}
+	}
+	return 0, nil
 }

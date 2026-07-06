@@ -1,9 +1,6 @@
 package main
 
-import (
-	"errors"
-	"testing"
-)
+import "testing"
 
 func TestRunnerClassForLabels(t *testing.T) {
 	cases := []struct {
@@ -46,17 +43,7 @@ func TestRunnerClassForLabels(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := runnerClassForLabels(tc.labels, tc.prefix)
-			if tc.want == "" {
-				if !errors.Is(err, errRunnerClassUnresolved) {
-					t.Fatalf("err = %v, want errRunnerClassUnresolved", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("err = %v", err)
-			}
-			if got != tc.want {
+			if got := runnerClassForLabels(tc.labels, tc.prefix); got != tc.want {
 				t.Fatalf("class = %q, want %q", got, tc.want)
 			}
 		})

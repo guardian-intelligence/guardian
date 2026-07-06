@@ -656,6 +656,11 @@ type prCommentRow struct {
 	ProviderCommentID    int64
 	LastRenderedSHA256   string
 	AttemptCount         int32
+	// UpdatedAt as read by ListDirtyPRComments. The posted/clean statements
+	// compare against it: a MarkPRCommentDirty landing mid-sync bumps
+	// updated_at, so the clear leaves dirty=true and the newer state renders
+	// on the next tick instead of being lost.
+	UpdatedAt time.Time
 }
 
 const sqlMarkPRCommentDirty = `
@@ -673,7 +678,7 @@ func (s *pgStore) MarkPRCommentDirty(ctx context.Context, repositoryID int64, re
 
 const sqlListDirtyPRComments = `
 SELECT provider_repository_id, repository_full_name, pr_number,
-    provider_comment_id, last_rendered_sha256, attempt_count
+    provider_comment_id, last_rendered_sha256, attempt_count, updated_at
 FROM pr_comment_state
 WHERE dirty AND (next_attempt_at IS NULL OR next_attempt_at <= now())
 ORDER BY updated_at
@@ -689,7 +694,7 @@ func (s *pgStore) ListDirtyPRComments(ctx context.Context, batch int) ([]prComme
 	for rows.Next() {
 		var r prCommentRow
 		if err := rows.Scan(&r.ProviderRepositoryID, &r.RepositoryFullName, &r.PRNumber,
-			&r.ProviderCommentID, &r.LastRenderedSHA256, &r.AttemptCount); err != nil {
+			&r.ProviderCommentID, &r.LastRenderedSHA256, &r.AttemptCount, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -697,23 +702,28 @@ func (s *pgStore) ListDirtyPRComments(ctx context.Context, batch int) ([]prComme
 	return out, rows.Err()
 }
 
+// The dirty flag is only cleared when updated_at still equals the value the
+// sync started from ($n): a concurrent MarkPRCommentDirty bumps updated_at,
+// so the SET leaves dirty=true and the newer job state is re-rendered next
+// tick rather than silently dropped.
 const sqlMarkPRCommentPosted = `
 UPDATE pr_comment_state
-SET provider_comment_id = $3, last_rendered_sha256 = $4, dirty = false,
+SET provider_comment_id = $3, last_rendered_sha256 = $4,
+    dirty = (updated_at <> $5),
     attempt_count = 0, next_attempt_at = NULL, updated_at = now()
 WHERE provider_repository_id = $1 AND pr_number = $2`
 
-func (s *pgStore) MarkPRCommentPosted(ctx context.Context, repositoryID, prNumber, commentID int64, renderedSHA256 string) error {
-	_, err := s.pool.Exec(ctx, sqlMarkPRCommentPosted, repositoryID, prNumber, commentID, renderedSHA256)
+func (s *pgStore) MarkPRCommentPosted(ctx context.Context, repositoryID, prNumber, commentID int64, renderedSHA256 string, listedUpdatedAt time.Time) error {
+	_, err := s.pool.Exec(ctx, sqlMarkPRCommentPosted, repositoryID, prNumber, commentID, renderedSHA256, listedUpdatedAt)
 	return err
 }
 
 const sqlMarkPRCommentClean = `
-UPDATE pr_comment_state SET dirty = false, updated_at = now()
+UPDATE pr_comment_state SET dirty = (updated_at <> $3), updated_at = now()
 WHERE provider_repository_id = $1 AND pr_number = $2`
 
-func (s *pgStore) MarkPRCommentClean(ctx context.Context, repositoryID, prNumber int64) error {
-	_, err := s.pool.Exec(ctx, sqlMarkPRCommentClean, repositoryID, prNumber)
+func (s *pgStore) MarkPRCommentClean(ctx context.Context, repositoryID, prNumber int64, listedUpdatedAt time.Time) error {
+	_, err := s.pool.Exec(ctx, sqlMarkPRCommentClean, repositoryID, prNumber, listedUpdatedAt)
 	return err
 }
 

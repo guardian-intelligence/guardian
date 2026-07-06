@@ -52,7 +52,7 @@ func renderComment(jobs []commentJob) string {
 			name = j.WorkflowName + " / " + j.Name
 		}
 		fmt.Fprintf(&b, "| %s | `%s` | %s | — | — |\n",
-			escapeCell(name), j.RunnerClass, renderStatus(j))
+			escapeCell(name), escapeCell(j.RunnerClass), renderStatus(j))
 	}
 	return b.String()
 }
@@ -67,9 +67,14 @@ func renderStatus(j commentJob) string {
 	return j.Status
 }
 
-// escapeCell keeps job names from breaking the Markdown table.
+// escapeCell keeps attacker-influenced strings (job names and runner-class
+// labels come from workflow YAML, which fork-PR authors control) from
+// breaking out of the Markdown table or the runner-class code span:
+// backticks are stripped, pipes escaped, newlines flattened.
 func escapeCell(s string) string {
+	s = strings.ReplaceAll(s, "`", "")
 	s = strings.ReplaceAll(s, "|", "\\|")
+	s = strings.ReplaceAll(s, "\r", " ")
 	s = strings.ReplaceAll(s, "\n", " ")
 	return s
 }

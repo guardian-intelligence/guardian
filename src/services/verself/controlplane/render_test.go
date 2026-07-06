@@ -63,6 +63,35 @@ func TestRenderCommentEscapesPipes(t *testing.T) {
 	}
 }
 
+func TestRenderCommentEscapesRunnerClass(t *testing.T) {
+	// Runner-class labels come from workflow YAML (fork-PR-author controlled):
+	// backticks must not close the code span, pipes must not break the table.
+	body := renderComment([]commentJob{
+		{Name: "job", RunnerClass: "verself-x` | [evil](https://evil.example) `", Status: "queued"},
+	})
+	if strings.Contains(body, "verself-x`") {
+		t.Fatalf("backtick survived escaping:\n%s", body)
+	}
+	if !strings.Contains(body, "`verself-x \\| [evil](https://evil.example) `") {
+		t.Fatalf("expected stripped-backtick, escaped-pipe rendering inside the code span:\n%s", body)
+	}
+}
+
+func TestEscapeCell(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"plain", "plain"},
+		{"a|b", `a\|b`},
+		{"a`b`c", "abc"},
+		{"a\r\nb", "a  b"},
+		{"a\nb", "a b"},
+	}
+	for _, tc := range cases {
+		if got := escapeCell(tc.in); got != tc.want {
+			t.Errorf("escapeCell(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestRenderCommentNoJobs(t *testing.T) {
 	body := renderComment(nil)
 	if !strings.HasPrefix(body, commentMarker+"\n") {

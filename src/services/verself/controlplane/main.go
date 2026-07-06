@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -66,8 +67,16 @@ func main() {
 	tracer := otel.Tracer(serviceName)
 
 	ws := &webhookServer{secret: []byte(cfg.webhookSecret), inbox: st, tracer: tracer, now: time.Now}
-	go (&worker{st: st, gh: gh, cfg: cfg, tracer: tracer}).run(ctx)
-	go (&commenter{st: st, gh: gh, cfg: cfg, tracer: tracer}).run(ctx)
+	var loops sync.WaitGroup
+	loops.Add(2)
+	go func() {
+		defer loops.Done()
+		(&worker{st: st, gh: gh, cfg: cfg, tracer: tracer}).run(ctx)
+	}()
+	go func() {
+		defer loops.Done()
+		(&commenter{st: st, gh: gh, cfg: cfg, tracer: tracer}).run(ctx)
+	}()
 
 	mux := http.NewServeMux()
 	// Method handling is the handler's own (405 + Allow with a problem doc),
@@ -113,5 +122,11 @@ func main() {
 		slog.Error("serve", "err", err)
 		os.Exit(1)
 	}
+	// Drain the worker and commenter before exit: their in-flight tick
+	// (running on a non-cancelable work context, see worker.run) finishes its
+	// delivery transitions instead of leaving rows in 'processing' for the 2m
+	// stale reclaim on every deploy.
+	cancel()
+	loops.Wait()
 	_ = shutdownTracing(context.Background())
 }

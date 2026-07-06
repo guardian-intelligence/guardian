@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
+	"strings"
 	"time"
 
 	"log/slog"
@@ -118,6 +120,12 @@ type worker struct {
 // SKIP LOCKED + per-job advisory locks) but has never run; prove it before
 // scaling past one.
 func (w *worker) run(ctx context.Context) {
+	// Tick work runs on a non-cancelable child: a SIGTERM between ticks stops
+	// the loop, but an in-flight batch finishes its delivery transitions
+	// (bounded by the GitHub client timeout) instead of leaving rows stuck in
+	// 'processing' to burn an attempt and wait out the 2m stale reclaim on
+	// every deploy.
+	work := context.WithoutCancel(ctx)
 	ticker := time.NewTicker(w.cfg.workerInterval)
 	defer ticker.Stop()
 	for {
@@ -126,9 +134,9 @@ func (w *worker) run(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
-		w.reclaimStale(ctx)
-		w.processReady(ctx)
-		w.reconcileQueued(ctx)
+		w.reclaimStale(work)
+		w.processReady(work)
+		w.reconcileQueued(work)
 	}
 }
 
@@ -267,6 +275,24 @@ func (w *worker) handleDelivery(ctx context.Context, d lockedDelivery) error {
 	}
 }
 
+// repoFullNameRe: owner/name — exactly one slash, GitHub's name charset on
+// both sides.
+var repoFullNameRe = regexp.MustCompile(`^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`)
+
+// validRepoFullName is the single choke point guarding every place
+// repository.full_name is interpolated into a GitHub API path: the worker,
+// the reconciler, and the commenter all operate on names this handler
+// persisted. A signed-but-hostile payload (webhook-secret compromise) must
+// not be able to steer installation-token requests at other API endpoints
+// via "..", extra "/", "?" or "#" in the name.
+func validRepoFullName(s string) bool {
+	if !repoFullNameRe.MatchString(s) {
+		return false
+	}
+	owner, name, _ := strings.Cut(s, "/")
+	return owner != "." && owner != ".." && name != "." && name != ".."
+}
+
 func (w *worker) handleWorkflowJob(ctx context.Context, d lockedDelivery) error {
 	var payload workflowJobWebhook
 	if err := json.Unmarshal(d.PayloadJSON, &payload); err != nil {
@@ -275,6 +301,9 @@ func (w *worker) handleWorkflowJob(ctx context.Context, d lockedDelivery) error 
 	if payload.WorkflowJob.ID <= 0 || payload.Repository.ID <= 0 ||
 		payload.Installation.ID <= 0 || payload.Repository.FullName == "" {
 		return terminalError{problemPayloadInvalid("workflow_job envelope incomplete")}
+	}
+	if !validRepoFullName(payload.Repository.FullName) {
+		return terminalError{problemPayloadInvalid("repository.full_name is not a valid owner/name")}
 	}
 	// FIXME(multi-tenant): verself resolved installation+repository bindings
 	// here (lookupRuntimeBinding); stage (a) verifies against the single
@@ -311,7 +340,7 @@ func (w *worker) handleWorkflowJob(ctx context.Context, d lockedDelivery) error 
 
 	// Persist the webhook hint BEFORE the action switch: even ignored
 	// actions leave provider evidence.
-	class, _ := runnerClassForLabels(ev.Job.Labels, w.cfg.runnerClassPrefix)
+	class := runnerClassForLabels(ev.Job.Labels, w.cfg.runnerClassPrefix)
 	if err := w.st.UpsertWorkflowJob(ctx, jobRowFrom(ev, class, nil)); err != nil {
 		return fmt.Errorf("persist workflow job: %w", err)
 	}
@@ -366,7 +395,7 @@ func (w *worker) submitQueuedJob(ctx context.Context, ev jobEvent, deliveryID st
 		RepositoryFullName: ev.RepositoryFullName,
 		Job:                payloadFromAPIJob(*apiJob),
 	}
-	class, _ := runnerClassForLabels(apiEv.Job.Labels, w.cfg.runnerClassPrefix)
+	class := runnerClassForLabels(apiEv.Job.Labels, w.cfg.runnerClassPrefix)
 	now := time.Now()
 	if err := w.st.UpsertWorkflowJob(ctx, jobRowFrom(apiEv, class, &now)); err != nil {
 		return fmt.Errorf("persist API job: %w", err)
@@ -474,7 +503,7 @@ func (w *worker) refreshRunAndJobs(ctx context.Context, ev jobEvent, deliveryID 
 	ourClassSeen := false
 	for _, aj := range jobs {
 		p := payloadFromAPIJob(aj)
-		class, _ := runnerClassForLabels(p.Labels, w.cfg.runnerClassPrefix)
+		class := runnerClassForLabels(p.Labels, w.cfg.runnerClassPrefix)
 		if class != "" {
 			ourClassSeen = true
 		}
