@@ -136,6 +136,47 @@ jobs:
           echo "pinned: $pinned"
           echo "digest=$built" >> "$GITHUB_OUTPUT"
 
+      # Runtime performance promotion gate: load the exact image just built,
+      # run it, and fail the check if the letters page's scroll-frame timing
+      # regresses (perf/scroll-jank-gate.mjs, thresholds + rationale there).
+      # Runs against the shipped artifact, not a dev server, so it catches
+      # anything a bundler/runtime difference would otherwise hide.
+      - name: Load and run the built image
+        if: steps.classify.outputs.build == 'true'
+        run: |
+          bazelisk run //src/products/viteplus-monorepo/apps/guardianintelligence-web/site:load
+          docker run -d --name perf-gate -p 8080:8080 ghcr.io/guardian-intelligence/company-site:edge
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8080/letters/dear-shovon >/dev/null && break
+            sleep 1
+          done
+
+      - name: Runtime performance gate
+        if: steps.classify.outputs.build == 'true'
+        working-directory: src/products/viteplus-monorepo/apps/guardianintelligence-web
+        run: |
+          # Installed in an empty scratch dir, not in place: `npm install` in
+          # this directory would read this app's package.json and choke on
+          # pnpm's `catalog:` protocol in its dependency versions. Copied in
+          # rather than resolved via NODE_PATH: Node's ESM loader does not
+          # search NODE_PATH at all (CJS-only, verified against a real CI run
+          # -- ERR_MODULE_NOT_FOUND despite NODE_PATH being set), so the
+          # package has to be a real node_modules/ entry to import-resolve.
+          mkdir -p /tmp/perf-gate-deps && cd /tmp/perf-gate-deps
+          npm init -y >/dev/null
+          npm install playwright@1.61.1
+          cd - >/dev/null
+          mkdir -p node_modules
+          cp -r /tmp/perf-gate-deps/node_modules/playwright node_modules/
+          cp -r /tmp/perf-gate-deps/node_modules/playwright-core node_modules/
+          # webkit is excluded: unusable on this runner (see scroll-jank-gate.mjs header).
+          node node_modules/playwright/cli.js install --with-deps chromium firefox
+          BASE=http://127.0.0.1:8080 node perf/scroll-jank-gate.mjs
+
+      - name: Stop perf-gate container
+        if: always() && steps.classify.outputs.build == 'true'
+        run: docker rm -f perf-gate || true
+
       - name: Verify images.lock and rendered manifests agree
         if: steps.classify.outputs.conformance == 'true'
         run: bazelisk test //src/infrastructure/tests:talm_render_test

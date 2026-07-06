@@ -156,16 +156,15 @@ export function LetterDate({
   );
 }
 
-export function LetterSalutation({
-  letter,
-  morph = true,
-}: {
-  readonly letter: Letter;
-  readonly morph?: boolean;
-}) {
+export function LetterSalutation({ letter }: { readonly letter: Letter }) {
   // Dispatches open straight into the body under the date — they were never
   // written to a title. Only received correspondence opens with a salutation
   // ("Dear Shovon,"). The frontmatter title still drives the <head> + OG card.
+  //
+  // No view-transition-name here (unlike date/excerpt): its own cross-fade
+  // read as a delayed pop rather than moving in step with the date (see the
+  // letter-salutation-reveal comment in app.css). It gets a plain, fast
+  // entrance keyframe on the detail page instead.
   if (letter.kind !== "correspondence") return null;
   return (
     <p
@@ -180,13 +179,7 @@ export function LetterSalutation({
         lineHeight: "var(--letters-line-pitch)",
       }}
     >
-      <span
-        data-letter-transition-slot="salutation"
-        style={{
-          ...(morph ? transitionStyle(letter, "salutation") : null),
-          display: "inline-block",
-        }}
-      >
+      <span data-letter-transition-slot="salutation" style={{ display: "inline-block" }}>
         {formatLetterSalutation(letter)}
       </span>
     </p>

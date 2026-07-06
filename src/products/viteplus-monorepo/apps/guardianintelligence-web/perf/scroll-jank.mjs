@@ -16,6 +16,7 @@
 // clip-path grid fade was the whole letter-page jank (58ms -> 18ms); the
 // per-paragraph SVG hand filter was free; layerization hints did nothing.
 import { chromium, firefox, webkit } from "playwright";
+import { measureScrollJank } from "./lib/scroll-measure.mjs";
 
 const base = process.env.BASE ?? "http://127.0.0.1:4179";
 const path = process.env.PAGE ?? "/letters/dear-shovon";
@@ -56,58 +57,6 @@ const ABLATIONS = [
   },
 ];
 
-async function measure(page) {
-  return page.evaluate(async () => {
-    scrollTo(0, 0);
-    await new Promise((r) => setTimeout(r, 300));
-    const deltas = [];
-    const longtasks = [];
-    try {
-      new PerformanceObserver((l) =>
-        l.getEntries().forEach((e) => longtasks.push(Math.round(e.duration))),
-      ).observe({ type: "longtask" });
-    } catch {
-      // longtask observer is Chromium-only; frame deltas still tell the story
-    }
-    let last = performance.now();
-    let running = true;
-    const tick = (t) => {
-      deltas.push(t - last);
-      last = t;
-      if (running) requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-    const H = document.documentElement.scrollHeight - innerHeight;
-    const start = performance.now();
-    const dur = 5000;
-    await new Promise((res) => {
-      const step = () => {
-        const p = (performance.now() - start) / dur;
-        if (p >= 1) {
-          running = false;
-          return res();
-        }
-        const tri = p < 0.5 ? p * 2 : 2 - p * 2;
-        scrollTo(0, Math.round(H * tri));
-        requestAnimationFrame(step);
-      };
-      step();
-    });
-    deltas.shift();
-    deltas.sort((a, b) => a - b);
-    const q = (f) => deltas[Math.floor(f * (deltas.length - 1))];
-    return {
-      frames: deltas.length,
-      avg: +(deltas.reduce((s, d) => s + d, 0) / deltas.length).toFixed(1),
-      p50: +q(0.5).toFixed(1),
-      p95: +q(0.95).toFixed(1),
-      max: +q(1).toFixed(1),
-      "jank>33ms": deltas.filter((d) => d > 33.4).length,
-      longtasks: longtasks.length,
-    };
-  });
-}
-
 const browser = await engine.launch();
 const page = await browser.newPage({
   viewport: { width: 1280, height: 900 },
@@ -121,7 +70,7 @@ for (const a of ABLATIONS) {
   let handle = null;
   if (a.css) handle = await page.addStyleTag({ content: a.css });
   await page.waitForTimeout(400);
-  const r = await measure(page);
+  const r = await measureScrollJank(page);
   console.log(a.name.padEnd(16), JSON.stringify(r));
   if (handle) await handle.evaluate((el) => el.remove());
 }
