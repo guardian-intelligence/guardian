@@ -59,3 +59,39 @@ spec:
         - ports:
             - port: "8080"
               protocol: TCP
+    # tenant-root's alert-relay: Slack-format delivery target for Canary
+    # spec.analysis.alerts (see alert-provider.yaml). Inert until the relay
+    # pods exist.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            k8s:app.kubernetes.io/name: alert-relay
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+---
+# Ingress half of the alert path: tenant-root's generated isolation does not
+# admit other namespaces (same reason as the vminsert-from-login-canary
+# pair in ../../iam/*/login-canary.yaml); admit exactly the Flagger
+# controller to the alert-relay.
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-root-alert-relay-from-flagger
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-root
+      k8s:app.kubernetes.io/name: alert-relay
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: flagger
+            k8s:app.kubernetes.io/name: flagger
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP

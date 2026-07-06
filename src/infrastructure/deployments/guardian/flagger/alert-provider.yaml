@@ -1,0 +1,13 @@
+# Rollback/failure alert delivery: Flagger POSTs Slack-incoming-webhook-format
+# payloads here; the alert-relay in tenant-root converts them to ntfy. The
+# address is an internal Service URL, not a credential — safe in Git. Flagger
+# resolves it only when sending an alert, so this resource is inert until the
+# relay Deployment exists.
+apiVersion: flagger.app/v1beta1
+kind: AlertProvider
+metadata:
+  name: alert-relay
+  namespace: flagger
+spec:
+  type: slack
+  address: http://alert-relay.tenant-root.svc:8080/slack
