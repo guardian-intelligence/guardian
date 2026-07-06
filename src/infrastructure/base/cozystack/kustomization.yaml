@@ -3,3 +3,4 @@ kind: Kustomization
 resources:
   - platform.yaml
   - keycloak-admin-guard.yaml
+  - platform-admins.yaml

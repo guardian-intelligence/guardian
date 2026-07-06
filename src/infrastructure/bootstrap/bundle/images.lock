@@ -139,6 +139,9 @@ ghcr.io/cozystack/cozystack/flux-shard-operator@sha256:a75b88c03e5d969b322d41895
 ghcr.io/cozystack/cozystack/grafana-dashboards@sha256:ec97b9ee9aa591b5737da595ed7772b22714b9517f9a365d67e7977dd45dd77c
 ghcr.io/cozystack/cozystack/grafana@sha256:086f1502edf64d2aabcda6e6505b7ee4673b0d3a14cdb7ca9e90a1d91d6e78f4
 ghcr.io/cozystack/cozystack/kamaji@sha256:fcf5f4451dc935d141d12ef40a966cb6f7bdb46461431a64803e1f018b0c89de
+# keycloak-operator returned with platform OIDC re-enable (#448); the
+# keycloak/postgres images it drives were already locked for other consumers.
+ghcr.io/cozystack/cozystack/keycloak-operator@sha256:27279247dfbd2d1e86fc4e827d34c891880ca65eefd75da1701bc0a1adf865a9
 ghcr.io/cozystack/cozystack/kubeovn-plunger@sha256:908b5903c014f6fa4348f57b1fced929a2ba823aadfbcda7ad9b76134bcf3fce
 ghcr.io/cozystack/cozystack/kubeovn-webhook@sha256:ca354b6c2ae6f648bc63798d19a1316fe37cb142246bf08ebb7ce27e6e8f21b2
 ghcr.io/cozystack/cozystack/kubeovn@sha256:741299cbd0081a786a6b60c460fa3156b3a42a38141c559dd8ac031f50c5504f

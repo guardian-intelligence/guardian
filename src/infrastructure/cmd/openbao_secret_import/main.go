@@ -238,6 +238,8 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 		"cloudflare_external_dns_api_token",
 		"cloudflare_dns_lb_provisioner_api_token",
 		"guardian_alerting_ntfy_url",
+		"platform_admin_shovon_password",
+		"platform_admin_guardian_ops_password",
 		"github_promotions_app_private_key_b64",
 		"github_runner_app_prod_app_id",
 		"github_runner_app_prod_client_id",
@@ -318,6 +320,18 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 			APIPath: "kv/data/guardian/guardian-mgmt/tenant-root/alerting",
 			Data: map[string]string{
 				"ntfy_url": env["guardian_alerting_ntfy_url"],
+			},
+		},
+		// Platform Keycloak admin identities (cozy realm): per-identity
+		// login passwords for the KeycloakRealmUser CRs declared in
+		// base/cozystack/platform-admins.yaml. ESO projects them 1:1 into
+		// Secret/platform-admin-passwords in tenant-root, which the EDP
+		// keycloak-operator reads via each user's passwordSecret ref.
+		{
+			APIPath: "kv/data/guardian/guardian-mgmt/tenant-root/platform-admins",
+			Data: map[string]string{
+				"shovon":       env["platform_admin_shovon_password"],
+				"guardian-ops": env["platform_admin_guardian_ops_password"],
 			},
 		},
 		{
