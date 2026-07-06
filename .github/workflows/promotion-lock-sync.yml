@@ -1,8 +1,15 @@
-# Companion to the prod promotion Stage: Kargo's pin-bump PR changes only
-# web.yaml (its promotion steps cannot edit the plain-text images.lock), so
-# this workflow re-derives the company-site lock line from the PR's pin,
-# pushes the fix to the PR branch, and arms automerge. Interim mechanism —
-# the images.lock derivation tool replaces the sed when it lands.
+# Companion to every Kargo promotion Stage (company-site's beta/gamma/prod,
+# guardian-iam's beta/gamma/prod): a pin-bump PR changes only web.yaml or
+# keycloak.yaml -- Kargo's promotion steps cannot edit the plain-text
+# images.lock -- so this workflow re-derives the affected lock line(s) from
+# the PR's pin, pushes the fix to the PR branch, and arms automerge. This
+# has to react to the promotion PR itself, not run at image-build time:
+# each product's Stages promote independently and asynchronously (a
+# beta-only promotion changes only beta's pin), so the lock must always
+# carry every digest any Stage currently references, and the only moment
+# that's known for certain is when a given PR actually changes a pin.
+# Interim mechanism -- the images.lock derivation tool replaces the sed
+# when it lands.
 #
 # It pushes with the guardian-promotions App token, NOT GITHUB_TOKEN: pushes
 # made with GITHUB_TOKEN do not trigger workflows, so the site-gate would
@@ -42,28 +49,37 @@ jobs:
       - name: Sync images.lock to the pinned digest
         id: sync
         run: |
-          web_yaml=src/infrastructure/deployments/company/prod/web.yaml
           lock=src/infrastructure/bootstrap/bundle/images.lock
-          pinned="$(grep -o 'ghcr.io/guardian-intelligence/company-site@sha256:[a-f0-9]\{64\}' "$web_yaml")"
-          sed -i "s|^ghcr.io/guardian-intelligence/company-site@sha256:[a-f0-9]\{64\}$|$pinned|" "$lock"
-          grep -q "^$pinned$" "$lock"
 
-          # Keycloak pin-bump PRs (guardian-iam pipeline): upstream digests
-          # accumulate rather than replace — the lock deliberately carries
-          # both the running and the incoming digest so the blue/green
-          # window (and a Git-revert rollback) stay mirror-servable. Insert
-          # any pinned digest the lock does not know yet next to its section.
-          for kc_yaml in src/infrastructure/deployments/iam/*/keycloak.yaml; do
-            [ -f "$kc_yaml" ] || continue
-            kc_pin="$(grep -o 'quay.io/keycloak/keycloak@sha256:[a-f0-9]\{64\}' "$kc_yaml" | head -1)"
-            [ -n "$kc_pin" ] || continue
-            if ! grep -q "^$kc_pin$" "$lock"; then
-              awk -v pin="$kc_pin" '
-                /^quay\.io\/keycloak\/keycloak@sha256:/ && !done { print pin; done=1 }
-                { print }
-              ' "$lock" > "$lock.tmp" && mv "$lock.tmp" "$lock"
-              grep -q "^$kc_pin$" "$lock"
-            fi
+          # Digests accumulate rather than replace: each product's Stages
+          # promote independently, so at any moment its own beta/gamma/prod
+          # can each reference a different digest, and the lock has to
+          # carry all of them (also what keeps a blue/green window, or a
+          # Git-revert rollback, mirror-servable). Insert any pin a Stage's
+          # manifest references that the lock doesn't already have, next
+          # to that image's existing entries.
+          sync_pin() {
+            local manifest="$1" repo="$2"
+            [ -f "$manifest" ] || return 0
+            local pin
+            pin="$(grep -o "${repo}@sha256:[a-f0-9]\{64\}" "$manifest" | head -1)"
+            [ -n "$pin" ] || return 0
+            grep -q "^$pin$" "$lock" && return 0
+            awk -v pin="$pin" -v repo="$repo" '
+              index($0, repo "@sha256:") == 1 && !done { print pin; done=1 }
+              { print }
+            ' "$lock" > "$lock.tmp" && mv "$lock.tmp" "$lock"
+            grep -q "^$pin$" "$lock"
+          }
+
+          for manifest in src/infrastructure/deployments/company/beta/web.yaml \
+                          src/infrastructure/deployments/company/gamma/web.yaml \
+                          src/infrastructure/deployments/company/prod/web.yaml; do
+            sync_pin "$manifest" "ghcr.io/guardian-intelligence/company-site"
+          done
+
+          for manifest in src/infrastructure/deployments/iam/*/keycloak.yaml; do
+            sync_pin "$manifest" "quay.io/keycloak/keycloak"
           done
 
           if git diff --quiet; then
