@@ -294,7 +294,9 @@ function drawChart(
   if (plotW <= 0 || plotH <= 0 || count === 0) return;
   const plotBottom = PAD.top + plotH;
 
-  const x = scaleLinear().domain([WINDOW.startT, WINDOW.endT]).range([PAD.left, PAD.left + plotW]);
+  const x = scaleLinear()
+    .domain([WINDOW.startT, WINDOW.endT])
+    .range([PAD.left, PAD.left + plotW]);
   const y = scaleLinear().domain([0, yMax]).range([plotBottom, PAD.top]);
 
   // Horizontal gridlines + y tick labels.

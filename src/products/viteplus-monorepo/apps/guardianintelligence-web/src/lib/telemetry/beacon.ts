@@ -32,7 +32,8 @@ let started = false;
 let replaying = false;
 
 function lowData(): boolean {
-  const c = (navigator as { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+  const c = (navigator as { connection?: { saveData?: boolean; effectiveType?: string } })
+    .connection;
   return Boolean(c?.saveData) || /(^|-)2g$/.test(c?.effectiveType ?? "");
 }
 

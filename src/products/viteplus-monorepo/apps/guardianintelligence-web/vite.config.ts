@@ -52,9 +52,7 @@ const lettersMarkdown = {
     const html = marked.parser(tokens);
     const leadHtml = leadToken ? inkWrapHtml(marked.parser([leadToken]), slug) : "";
     const continuationHtml =
-      continuationTokens.length > 0
-        ? inkWrapHtml(marked.parser(continuationTokens), slug)
-        : "";
+      continuationTokens.length > 0 ? inkWrapHtml(marked.parser(continuationTokens), slug) : "";
     return `export default ${JSON.stringify({
       frontmatter: normalised,
       html,
@@ -74,7 +72,10 @@ const stripRouteManifestPaths = {
   enforce: "post" as const,
   transform(code: string, id: string) {
     if (!id.includes("tanstack-start-manifest")) return null;
-    return code.replace(/("filePath":\s*")[^"]*\/src\/products\/viteplus-monorepo\/apps\/guardianintelligence-web\//g, "$1");
+    return code.replace(
+      /("filePath":\s*")[^"]*\/src\/products\/viteplus-monorepo\/apps\/guardianintelligence-web\//g,
+      "$1",
+    );
   },
 };
 

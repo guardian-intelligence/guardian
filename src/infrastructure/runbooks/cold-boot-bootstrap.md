@@ -276,12 +276,14 @@ All from `src/infrastructure/talm/` with the pinned binaries.
 4. **Kubeconfig** (off-VLAN workstation cannot reach the VIP):
 
    ```sh
-   talm kubeconfig --nodes <public-ip> --endpoints <public-ip> --merge=false --force
-   kubectl --kubeconfig kubeconfig config set-cluster guardian-mgmt --server=https://<public-ip>:6443
+   aspect infra kubeconfig --install
    ```
 
-   Keep an off-VLAN copy OUTSIDE the repo for `--kubeconfig` flags (public IPs
-   are in the cert SANs).
+   The task fetches the kubeconfig through a public Talos endpoint, verifies
+   that the rendered Kubernetes server is one of the declared guardian-mgmt API
+   endpoints, backs up any existing `~/.kube/config`, and installs the refreshed
+   `admin@guardian-mgmt` context. Keep an off-VLAN copy OUTSIDE the repo for
+   `--kubeconfig` flags (public IPs are in the cert SANs).
 
 ## Seal-key placement
 
