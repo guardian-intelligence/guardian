@@ -162,6 +162,7 @@ ghcr.io/fluxcd/source-watcher@sha256:7b67c651c20ec838c832b2165fa65efbc109ee7db33
 ghcr.io/grafana/grafana-operator@sha256:a2d35af04ec0773f62d9b75966d0a3f8b24998e126b8ad243afb0377deb8e635
 # alert-relay (tenant-root pager sink; deployments/alerting/relay.yaml)
 ghcr.io/guardian-intelligence/alert-relay@sha256:3b98b56c8e30cb0178af2dbbeccabdca8ffcdd5fed97d4a9d810dd8afb69db25
+ghcr.io/guardian-intelligence/company-site@sha256:501a4fe3b7c267c10c686a56c3c94fc80542bc1ec8ebd6a3f721c998fdea4fbe
 ghcr.io/guardian-intelligence/company-site@sha256:860736aa5ed5213bce16498fe7dc06a39375f81388dd762dc1e779fe3b4fd3ea
 # verself-controlplane (runner control plane; deployments/verself-runner/controlplane.yaml)
 ghcr.io/guardian-intelligence/verself-controlplane@sha256:cae601911d86b08b906bca69d6e70ec3a9247e3455bb44a0ceccb2f103c3d850
