@@ -31,9 +31,9 @@
 # Talos installer (machine.install.image)
 ghcr.io/cozystack/cozystack/talos:v1.13.0@sha256:c2c092ad742e8bdd4af6366c586d95bdf7f73cee6eef8318fb9da6d466f37044
 # Cozystack installer Helm chart (OCI)
-ghcr.io/cozystack/cozystack/cozy-installer:1.5.0@sha256:5c2392d79b8ace58e78403eaad814c5cee27e2a8148cb1fa5be883bfd0306c0a
+ghcr.io/cozystack/cozystack/cozy-installer:1.5.2@sha256:6fab302b90f3a49fb4e5783d14bd696b1308b0f216b7de606e99e021535f1eac
 # Cozystack platform packages Flux artifact (pulled by source-controller, NOT containerd)
-ghcr.io/cozystack/cozystack/cozystack-packages@sha256:5472859fa5c7bf3c6c042c51d4dc5ec3c3d80bff64f79f47c13576b07f81172f
+ghcr.io/cozystack/cozystack/cozystack-packages@sha256:b2d3fc7a706b6e755d98385dcfc514945610166c4f5e61ba8cdc1a1acd8188e9
 # cozy-installer helm pre-install labeler hook Job image (ephemeral; absent from pod scrapes)
 docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
 # External Secrets Operator helm chart (pulled by source-controller, NOT containerd)
