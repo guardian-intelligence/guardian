@@ -3,7 +3,10 @@
 # policy admits only the parent tenant (tenant-guardian), system namespaces,
 # and the apiserver into tenant-guardian-gamma — not tenant-root. This
 # additive policy admits exactly the root ingress controller to the
-# company-site pods (same shape as prod's).
+# company-site pods (same shape as prod's). Matches both label values
+# because Flagger's apex Service routes to the primary clone
+# (company-site-primary), not the plain company-site pods, once the Canary
+# takes over the Deployment.
 apiVersion: cilium.io/v2
 kind: CiliumClusterwideNetworkPolicy
 metadata:
@@ -13,9 +16,16 @@ metadata:
     guardian.dev/product: company
 spec:
   endpointSelector:
-    matchLabels:
-      k8s:io.kubernetes.pod.namespace: tenant-guardian-gamma
-      k8s:app.kubernetes.io/name: company-site
+    matchExpressions:
+      - key: k8s:io.kubernetes.pod.namespace
+        operator: In
+        values:
+          - tenant-guardian-gamma
+      - key: k8s:app.kubernetes.io/name
+        operator: In
+        values:
+          - company-site
+          - company-site-primary
   ingress:
     - fromEndpoints:
         - matchLabels:
@@ -46,9 +56,16 @@ spec:
       k8s:app.kubernetes.io/component: controller
   egress:
     - toEndpoints:
-        - matchLabels:
-            k8s:io.kubernetes.pod.namespace: tenant-guardian-gamma
-            k8s:app.kubernetes.io/name: company-site
+        - matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: In
+              values:
+                - tenant-guardian-gamma
+            - key: k8s:app.kubernetes.io/name
+              operator: In
+              values:
+                - company-site
+                - company-site-primary
       toPorts:
         - ports:
             - port: "8080"

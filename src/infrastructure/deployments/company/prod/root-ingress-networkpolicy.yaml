@@ -8,6 +8,10 @@
 # the flat hand-era tenant-prod namespace, which the root tenant's isolation
 # happened to admit; the declared stage tenant tenant-guardian-prod does not.
 # Revisit when stage tenants get their own exposed ingress (BGP/routable LB).
+#
+# Matches both label values because Flagger's apex Service routes to the
+# primary clone (company-site-primary), not the plain company-site pods,
+# once the Canary (added alongside this policy) takes over the Deployment.
 apiVersion: cilium.io/v2
 kind: CiliumClusterwideNetworkPolicy
 metadata:
@@ -17,9 +21,16 @@ metadata:
     guardian.dev/product: company
 spec:
   endpointSelector:
-    matchLabels:
-      k8s:io.kubernetes.pod.namespace: tenant-guardian-prod
-      k8s:app.kubernetes.io/name: company-site
+    matchExpressions:
+      - key: k8s:io.kubernetes.pod.namespace
+        operator: In
+        values:
+          - tenant-guardian-prod
+      - key: k8s:app.kubernetes.io/name
+        operator: In
+        values:
+          - company-site
+          - company-site-primary
   ingress:
     - fromEndpoints:
         - matchLabels:
@@ -50,9 +61,16 @@ spec:
       k8s:app.kubernetes.io/component: controller
   egress:
     - toEndpoints:
-        - matchLabels:
-            k8s:io.kubernetes.pod.namespace: tenant-guardian-prod
-            k8s:app.kubernetes.io/name: company-site
+        - matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: In
+              values:
+                - tenant-guardian-prod
+            - key: k8s:app.kubernetes.io/name
+              operator: In
+              values:
+                - company-site
+                - company-site-primary
       toPorts:
         - ports:
             - port: "8080"

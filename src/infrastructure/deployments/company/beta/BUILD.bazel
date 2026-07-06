@@ -6,6 +6,9 @@ filegroup(
         "cloudflare-origin-pull-ca.yaml",
         "root-ingress-networkpolicy.yaml",
         "dnsendpoint.yaml",
+        "canary.yaml",
+        "loadtester.yaml",
+        "networkpolicy.yaml",
     ],
     visibility = ["//visibility:public"],
 )

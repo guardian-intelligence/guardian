@@ -3,6 +3,11 @@ filegroup(
     srcs = [
         "kustomization.yaml",
         "web.yaml",
+        "cloudflare-origin-pull-ca.yaml",
+        "root-ingress-networkpolicy.yaml",
+        "canary.yaml",
+        "loadtester.yaml",
+        "networkpolicy.yaml",
     ],
     visibility = ["//visibility:public"],
 )

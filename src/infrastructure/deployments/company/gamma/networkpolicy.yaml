@@ -1,0 +1,92 @@
+# company-site's own flows, following the repo's Cilium conventions
+# (selecting an endpoint flips it to default-deny for the selected
+# direction; every rule below is therefore the complete allowed set).
+# Both selectors match BOTH app label values because Flagger's primary
+# clone suffixes the selector label value with -primary. company-site is a
+# stateless static-site server (no clustering, no DB, no outbound API
+# calls at request time), so egress here is DNS only.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: company-site
+  namespace: tenant-guardian-gamma
+  labels:
+    app.kubernetes.io/name: company-site
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: gamma
+spec:
+  endpointSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - company-site
+          - company-site-primary
+  ingress:
+    # flagger-loadtester runs the http gate against the canary Service
+    # during Flagger analysis.
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: flagger-loadtester
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+---
+# flagger-loadtester: webhook calls arrive from the Flagger controller; the
+# checks it executes go to the company-site pods (canary Service) plus DNS.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: flagger-loadtester
+  namespace: tenant-guardian-gamma
+  labels:
+    app.kubernetes.io/name: flagger-loadtester
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: gamma
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: flagger-loadtester
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: flagger
+            k8s:app.kubernetes.io/name: flagger
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values:
+                - company-site
+                - company-site-primary
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP

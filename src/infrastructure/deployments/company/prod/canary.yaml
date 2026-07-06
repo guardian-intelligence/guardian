@@ -1,0 +1,66 @@
+# Flagger blue/green for company-site (provider: kubernetes — plain
+# Service-selector switching, no mesh). Flagger owns the company-site /
+# company-site-primary / company-site-canary ClusterIP Services and clones
+# the Deployment to company-site-primary; the Ingress points at the apex
+# Service. Same shape as guardian-iam's Keycloak Canaries.
+#
+# Gate stack (user traffic never touches the canary color; cutover is atomic
+# after analysis passes):
+#   1. readiness — pods must pass /healthz within progressDeadlineSeconds or
+#      the rollout fails;
+#   2. http-gate (pre-rollout, once) — a plain HTTP reachability check
+#      against the canary Service, executed by flagger-loadtester;
+#   3. http-iterate (every iteration) — the same check, repeated; a canary
+#      that's flaky under warm-up fails here.
+# threshold: 3 failed checks → automatic rollback (canary scaled to zero,
+# primary untouched, status Failed). Post-cutover regressions roll back via
+# Git revert through this same gate.
+apiVersion: flagger.app/v1beta1
+kind: Canary
+metadata:
+  name: company-site
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: company-site
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  provider: kubernetes
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: company-site
+  progressDeadlineSeconds: 900
+  service:
+    port: 80
+    targetPort: http
+  analysis:
+    interval: 30s
+    threshold: 3
+    # Deliberately tight for the initial stand-up, same call IAM's Canaries
+    # already made: a single passing iteration promotes. Raise toward a real
+    # soak once the CWV synthetic canary is feeding analysis.metrics.
+    iterations: 1
+    # severity warn: failed checks and rollbacks page through the
+    # alert-relay; routine info-level promotion events do not.
+    alerts:
+      - name: ops
+        severity: warn
+        providerRef:
+          name: alert-relay
+          namespace: flagger
+    webhooks:
+      - name: http-gate
+        type: pre-rollout
+        url: http://flagger-loadtester.tenant-guardian-prod/
+        timeout: 30s
+        metadata:
+          type: bash
+          cmd: bash /gate/http-gate.sh
+      - name: http-iterate
+        type: rollout
+        url: http://flagger-loadtester.tenant-guardian-prod/
+        timeout: 30s
+        metadata:
+          type: bash
+          cmd: bash /gate/http-gate.sh

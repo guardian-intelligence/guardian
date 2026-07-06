@@ -1,0 +1,122 @@
+# Flagger's official webhook runner: receives the Canary's pre-rollout /
+# rollout webhooks and executes the actual checks (a plain HTTP reachability
+# gate — company-site has no auth, so unlike Keycloak's login-gate this is
+# just curl -f against the canary-color Service) against the canary Service.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flagger-loadtester
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: flagger-loadtester
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: flagger-loadtester
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: flagger-loadtester
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/stage: prod
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: loadtester
+          image: ghcr.io/fluxcd/flagger-loadtester@sha256:f98a35ab7aca0f2efdd8e397b4002e283637f5c9e31e4e2a6c1e97af07c50454 # 0.37.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          command:
+            - ./loadtester
+            - -port=8080
+            - -log-level=info
+            - -timeout=1h
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+              ephemeral-storage: 128Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi
+              ephemeral-storage: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: gate-scripts
+              mountPath: /gate
+              readOnly: true
+      volumes:
+        - name: gate-scripts
+          configMap:
+            name: company-site-gate-scripts
+            defaultMode: 0555
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flagger-loadtester
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: flagger-loadtester
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: flagger-loadtester
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+---
+# The gate Flagger runs against the CANARY color before and during analysis:
+# a plain 200 on /healthz and on a representative real page. A new build
+# that can't serve either never becomes primary.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: company-site-gate-scripts
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: flagger-loadtester
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+data:
+  http-gate.sh: |
+    #!/usr/bin/env bash
+    set -euo pipefail
+    base="http://company-site-canary.tenant-guardian-prod"
+
+    curl -fsS --max-time 10 -o /dev/null "$base/healthz"
+    curl -fsS --max-time 10 -o /dev/null "$base/letters/dear-shovon"
+    echo "http-gate: OK (healthz + a representative page reachable on canary color)"
