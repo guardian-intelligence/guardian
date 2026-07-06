@@ -345,6 +345,10 @@ spec:
       kind: Deployment
       name: kargo-webhooks-server
       namespace: kargo
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: kargo-state-metrics
+      namespace: kargo
   timeout: 10m
 ---
 # Kargo CRs live in a separate slice: their CRDs and validating webhooks only
