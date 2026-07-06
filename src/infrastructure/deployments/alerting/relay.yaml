@@ -1,0 +1,142 @@
+# alert-relay — the delivery seam that closes the alerting loop:
+# VMRules -> vmalert -> Alertmanager -> Alerta -> relay -> ntfy. It accepts
+# Slack-webhook-format posts on /slack (what Alerta's slack plugin and the
+# Flagger AlertProvider emit) and forwards them to the ntfy topic; it also
+# polls Alertmanager for the always-firing Watchdog and pages on silence,
+# so a broken scrape/vmalert/alertmanager path pages instead of going quiet.
+# Contract: src/services/alerting/relay/main.go.
+#
+# 2 replicas because this is the only pager — a node loss must not silence
+# it. Accepted trade-off: both replicas run the dead-man poll independently,
+# so a pipeline-silent event pages twice. A duplicate page is noise; a lost
+# page is an unwatched outage.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alert-relay
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: alert-relay
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: alert-relay
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        # app.kubernetes.io/name: alert-relay is load-bearing: the merged
+        # CiliumClusterwideNetworkPolicy tenant-root-alert-relay-from-flagger
+        # (deployments/guardian/flagger/flagger-networkpolicy.yaml) and the
+        # CiliumNetworkPolicy in networkpolicy.yaml select relay pods by
+        # exactly this label.
+        app.kubernetes.io/name: alert-relay
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/component: alerting
+    spec:
+      automountServiceAccountToken: false
+      # tenant-root enforces no PodSecurity level; full restricted-compliant
+      # context anyway (precedent: analytics/system/ingest.yaml,
+      # company/prod/web.yaml).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: alert-relay
+                topologyKey: kubernetes.io/hostname
+      # Above the relay's 45s delivery budget: shutdown waits for in-flight
+      # deliveries, so a page mid-retry survives a rollout or drain.
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: relay
+          image: ghcr.io/guardian-intelligence/alert-relay@sha256:df49dc946d019fb7ce91d11257cfb1991eca47e718342d838b738e17065044e8
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            # The ntfy topic URL is a low-grade credential (the topic name is
+            # the secret): OpenBao-held, projected by the ExternalSecret in
+            # secrets.yaml, never in Git.
+            - name: NTFY_URL
+              valueFrom:
+                secretKeyRef:
+                  name: alert-relay-config
+                  key: ntfy_url
+            # Same value the binary defaults to — explicit so the dead-man's
+            # Alertmanager coordinate is declared here, not buried in code.
+            - name: ALERTMANAGER_URL
+              value: http://vmalertmanager-alertmanager.tenant-root.svc:9093
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+# The Service name is load-bearing twice over: it is the target Alerta and
+# the Flagger AlertProvider post to
+# (http://alert-relay.tenant-root.svc:8080/slack) AND the job label the
+# VMServiceScrape-derived metrics carry (job="alert-relay", matched by the
+# AlertRelayDown rule in observability.yaml).
+apiVersion: v1
+kind: Service
+metadata:
+  name: alert-relay
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: alert-relay
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  selector:
+    app.kubernetes.io/name: alert-relay
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: alert-relay
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: alert-relay
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: alert-relay

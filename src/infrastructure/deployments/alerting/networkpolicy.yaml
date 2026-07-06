@@ -1,0 +1,62 @@
+# Ingress: exactly the in-namespace producer (Alerta) and the monitoring
+# scraper. Flagger's cross-namespace ingress is admitted separately by the
+# CiliumClusterwideNetworkPolicy tenant-root-alert-relay-from-flagger
+# (deployments/guardian/flagger/flagger-networkpolicy.yaml) because
+# tenant-root's generated isolation does not admit other namespaces.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: alert-relay
+  namespace: tenant-root
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: alert-relay
+  ingress:
+    # Alerta's slack plugin posting to /slack. The live Alerta pods carry
+    # app: alerta and no app.kubernetes.io/name — verified against the
+    # running cluster, not assumed from chart conventions.
+    - fromEndpoints:
+        - matchLabels:
+            app: alerta
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # vmagent scraping /metrics (VMServiceScrape in observability.yaml).
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: vmagent
+            k8s:io.kubernetes.pod.namespace: cozy-monitoring
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # Same-namespace Alertmanager: the dead-man's Watchdog poll.
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: vmalertmanager
+      toPorts:
+        - ports:
+            - port: "9093"
+              protocol: TCP
+    # The pager sink (ntfy.sh today). The sink URL is config (an OpenBao
+    # secret), so world:443 is the honest scope — pinning a hostname here
+    # would just be a second, staler copy of that config.
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

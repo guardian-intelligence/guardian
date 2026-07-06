@@ -1,0 +1,63 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: alert-relay
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: alert-relay
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  namespaceSelector:
+    matchNames:
+      - tenant-root
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: alert-relay
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: alert-relay
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: alert-relay
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  groups:
+    - name: alert-relay.rules
+      interval: 30s
+      rules:
+        - alert: AlertRelayDown
+          expr: up{namespace="tenant-root",job="alert-relay"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            guardian.dev/component: alerting
+          annotations:
+            summary: An alert-relay replica is unscrapeable; the pager path is degraded.
+        - alert: AlertRelayForwardFailures
+          expr: increase(relay_forward_failures_total{namespace="tenant-root",job="alert-relay"}[10m]) > 0
+          labels:
+            severity: warning
+            guardian.dev/component: alerting
+          annotations:
+            summary: alert-relay failed to deliver alerts to the ntfy sink after all retries.
+        # Dashboard mirror of the relay's own dead-man page: the relay pages
+        # ntfy directly when the Watchdog goes missing; this rule makes the
+        # same condition visible through the normal alert pipeline (when that
+        # pipeline still works enough to carry it).
+        - alert: AlertRelayPipelineSilent
+          expr: max(relay_pipeline_silent{namespace="tenant-root",job="alert-relay"}) == 1
+          for: 2m
+          labels:
+            severity: critical
+            guardian.dev/component: alerting
+          annotations:
+            summary: The alerting pipeline dead-man tripped — no active Watchdog seen in Alertmanager.

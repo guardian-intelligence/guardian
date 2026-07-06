@@ -50,6 +50,7 @@ func testImportEnv() map[string]string {
 		"cloudflare_guardian_intelligence_org_dnz_zone_api_token": "zone",
 		"cloudflare_external_dns_api_token":                       "external",
 		"cloudflare_dns_lb_provisioner_api_token":                 "lb",
+		"guardian_alerting_ntfy_url":                              "https://ntfy.sh/guardian-topic",
 		"github_promotions_app_private_key_b64":                   base64.StdEncoding.EncodeToString([]byte(testGithubAppPEM)),
 		"github_runner_app_prod_app_id":                           "3370540",
 		"github_runner_app_prod_client_id":                        "Iv23xxxx",
@@ -64,8 +65,8 @@ func TestImportPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 7 {
-		t.Fatalf("plan length = %d, want 7", len(plan))
+	if len(plan) != 8 {
+		t.Fatalf("plan length = %d, want 8", len(plan))
 	}
 	external := plan[0]
 	if external.APIPath != "kv/data/guardian/guardian-mgmt/external-dns/cloudflare" {
@@ -96,14 +97,23 @@ func TestImportPlan(t *testing.T) {
 	if backups.Data["region"] != "auto" {
 		t.Fatalf("backups region = %q, want auto (clickhouse-backup sidecar reads it via secretKeyRef)", backups.Data["region"])
 	}
-	promotion := plan[4]
+	alerting := plan[4]
+	if alerting.APIPath != "kv/data/guardian/guardian-mgmt/tenant-root/alerting" {
+		t.Fatalf("alerting path = %q", alerting.APIPath)
+	}
+	// Key name is the alert-relay-config ExternalSecret's remoteRef property
+	// (deployments/alerting/secrets.yaml maps it 1:1).
+	if alerting.Data["ntfy_url"] != "https://ntfy.sh/guardian-topic" {
+		t.Fatalf("alerting data = %#v", alerting.Data)
+	}
+	promotion := plan[5]
 	if promotion.APIPath != "kv/data/guardian/guardian-mgmt/company-site/promotion/github-app" {
 		t.Fatalf("promotion path = %q", promotion.APIPath)
 	}
 	if promotion.Data["githubAppPrivateKey"] != testGithubAppPEM {
 		t.Fatal("githubAppPrivateKey did not round-trip through base64")
 	}
-	runner := plan[6]
+	runner := plan[7]
 	if runner.APIPath != "kv/data/guardian/guardian-mgmt/verself-runner/github-app" {
 		t.Fatalf("verself-runner path = %q", runner.APIPath)
 	}
@@ -150,8 +160,8 @@ func TestImportPlanOptionalKeycloakStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 9 {
-		t.Fatalf("plan length = %d, want 9 (7 base + beta + prod)", len(plan))
+	if len(plan) != 10 {
+		t.Fatalf("plan length = %d, want 10 (8 base + beta + prod)", len(plan))
 	}
 	byPath := map[string]secretWrite{}
 	for _, w := range plan {
