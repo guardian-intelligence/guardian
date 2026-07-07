@@ -31,8 +31,13 @@ data:
         interval: 60s
         rules:
           - alert: X509TrustFailure
+            # Two phrasings: Go's x509 ("certificate signed by unknown
+            # authority") and OpenSSL's (fluent-bit et al: "unable to get
+            # local issuer certificate") — fluent-bit sat in exactly this
+            # state for a day, unmatched, spewing 36M lines and losing all
+            # k8s log metadata, because only the Go phrasing was watched.
             expr: |
-              log_source:container_log "certificate signed by unknown authority"
+              log_source:container_log ("certificate signed by unknown authority" OR "unable to get local issuer certificate")
               | stats by (kubernetes_namespace_name, kubernetes_pod_name) count() as hits
             for: 10m
             keep_firing_for: 15m
