@@ -567,6 +567,75 @@ spec:
       current: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'True')
       failed: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'False')
 ---
+# Shared product Postgres beta stage. The Cozystack app CR is served through
+# the aggregated apps API; Flux cannot health-check it natively. Runtime
+# readiness is watched operationally and by postgres-health alerts.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: guardian-products-beta
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/deployments/products/beta
+  sourceRef:
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      # Required, not optional — see guardian-company-prod above.
+      - kind: ConfigMap
+        name: guardian-source
+  dependsOn:
+    - name: guardian-system
+  prune: true
+  wait: false
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: guardian-products-gamma
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/deployments/products/gamma
+  sourceRef:
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      # Required, not optional — see guardian-company-prod above.
+      - kind: ConfigMap
+        name: guardian-source
+  dependsOn:
+    - name: guardian-system
+  prune: true
+  wait: false
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: guardian-products-prod
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/deployments/products/prod
+  sourceRef:
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      # Required, not optional — see guardian-company-prod above.
+      - kind: ConfigMap
+        name: guardian-source
+  dependsOn:
+    - name: guardian-system
+  prune: true
+  wait: false
+---
 # Analytics ingest plane: the Connect ingest service, OTel collector, DDL
 # job, and ESO wiring for guardian-analytics. ClickHouse itself is the
 # tenant-root Cozystack app and is not managed (or health-gated) here — the
