@@ -10,10 +10,15 @@ metadata:
     guardian.dev/stage: beta
 data:
   cockpit.sql: |
+    -- Objects are owned by the chart's cockpit_admin group role so every
+    -- database admin user (cockpit, electric) passes owner checks -- Electric
+    -- requires table ownership to manage the publication for its shapes.
+    SET ROLE cockpit_admin;
     CREATE TABLE IF NOT EXISTS status_heartbeat (
         id integer PRIMARY KEY,
         note text NOT NULL,
         updated_at timestamptz NOT NULL DEFAULT now()
     );
+    ALTER TABLE status_heartbeat OWNER TO cockpit_admin;
     INSERT INTO status_heartbeat (id, note) VALUES (1, 'cockpit seed heartbeat')
         ON CONFLICT (id) DO UPDATE SET updated_at = now();
