@@ -735,16 +735,64 @@ def _kubeconfig_impl(ctx):
         return _install_kubeconfig(ctx, kubectl, kubeconfig)
     return 0
 
+CUSTODY_BUNDLE_DIR = "/dev/shm/guardian-custody"
+CUSTODY_MINT_ROOT = "/dev/shm/guardian-talm-mint"
+
+def _assemble_mint_root(ctx, root):
+    """Archive-only custody: build a tmpfs Talm root from the tracked chart
+    plus the secrets in the restored custody bundle, so plaintext never
+    touches the repo tree. Caller shreds CUSTODY_MINT_ROOT when done."""
+    if not ctx.std.fs.exists(CUSTODY_BUNDLE_DIR + "/talm/secrets.yaml"):
+        ctx.std.io.stderr.write(
+            "ERROR: no plaintext Talm state in the tree and no restored custody bundle at "
+            + CUSTODY_BUNDLE_DIR
+            + "; run `aspect infra custody --action restore` first (and `--action wipe` after).\n",
+        )
+        return None
+    rc = checked_spawn(
+        ctx,
+        "sh",
+        [
+            "-c",
+            "rm -rf '" + CUSTODY_MINT_ROOT + "' && mkdir -m 700 '" + CUSTODY_MINT_ROOT +
+            "' && cp -a '" + root + "/.' '" + CUSTODY_MINT_ROOT +
+            "' && cp '" + CUSTODY_BUNDLE_DIR + "/talm/secrets.yaml' '" + CUSTODY_BUNDLE_DIR + "/talm/talm.key' '" + CUSTODY_BUNDLE_DIR + "/talm/talosconfig' '" + CUSTODY_MINT_ROOT + "/'",
+        ],
+        label = "assemble tmpfs talm mint root from custody bundle",
+    )
+    if rc != 0:
+        return None
+    return CUSTODY_MINT_ROOT
+
+def _cleanup_mint_root(ctx):
+    checked_spawn(
+        ctx,
+        "sh",
+        ["-c", "if [ -d '" + CUSTODY_MINT_ROOT + "' ]; then find '" + CUSTODY_MINT_ROOT + "' -type f -exec shred -u {} + && rm -rf '" + CUSTODY_MINT_ROOT + "'; fi"],
+        label = "shred tmpfs talm mint root",
+    )
+
 def _mint_custody_kubeconfig(ctx):
-    root = ws_path(ctx, ctx.args.root)
+    root = _workspace_path_if_relative(ctx, ctx.args.root)
     talosconfig = ctx.args.talosconfig
+    if not ctx.std.fs.exists(root + "/secrets.yaml"):
+        root = _assemble_mint_root(ctx, root)
+        if root == None:
+            return None
+        if talosconfig == "":
+            talosconfig = root + "/talosconfig"
+        out = _mint_custody_kubeconfig_from(ctx, root, talosconfig)
+        _cleanup_mint_root(ctx)
+        return out
     if talosconfig == "":
         talosconfig = root + "/talosconfig"
 
     rc = _require_talm_operator_state(ctx, root)
     if rc != 0:
         return None
+    return _mint_custody_kubeconfig_from(ctx, root, talosconfig)
 
+def _mint_custody_kubeconfig_from(ctx, root, talosconfig):
     rc = checked_spawn(
         ctx,
         "bazelisk",
@@ -758,7 +806,7 @@ def _mint_custody_kubeconfig(ctx):
             "--talosconfig",
             talosconfig,
         ],
-        cwd = root,
+        cwd = ws_path(ctx),
         label = "talm talosconfig guardian-mgmt",
     )
     if rc != 0:
@@ -783,7 +831,7 @@ def _mint_custody_kubeconfig(ctx):
             "--merge=false",
             "--force",
         ],
-        cwd = root,
+        cwd = ws_path(ctx),
         label = "talm kubeconfig guardian-mgmt",
     )
     if rc != 0:
