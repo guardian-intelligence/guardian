@@ -26,6 +26,11 @@ bundle that would be trusted and useless is worse than none.
 | `custody.env` | yes | operator env keys (importer source of truth; formerly `DELETE_ME.env`) |
 | `keys/*`, `latitude.token` | no | provider keys — re-issuable through consoles, but their presence sets DR speed |
 
+Not yet in the manifest: OpenBao `transit/backup` keyring exports — none
+exist (no durable Transit consumer ships yet). The cold-boot runbook already
+gates the first durable Transit key on custody replication being in place;
+that PR must add the export as a required manifest member here.
+
 Deliberately excluded: minted kubeconfigs (re-derivable from `talosconfig`,
 and including them would replicate live credentials), the `.encrypted` Talm
 variants (ciphertext derivable from the plaintext + `talm.key`), drill logs,
@@ -37,7 +42,7 @@ without the bundle password).
 All actions run as `aspect infra custody --action <name>`.
 
 - **create** — resolves the manifest (from the open tmpfs bundle if one
-  exists, from `--from-dir`, or from the legacy plaintext locations during
+  exists, else from the legacy plaintext locations during
   migration/genesis), stages on tmpfs, backs up into the repository
   (`~/.guardian/custody/repo`), runs `restic check`, shreds the staging, and
   prints the replication instructions. Run it after **every custody event**:

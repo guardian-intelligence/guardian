@@ -75,7 +75,6 @@ type options struct {
 	bundleDir  string
 	talmRoot   string
 	custodyDir string
-	from       string
 	yes        bool
 	readData   bool
 
@@ -117,7 +116,6 @@ func realMain(opts *options, argv []string) error {
 	fl.StringVar(&opts.bundleDir, "bundle-dir", defaultBundleDir, "fixed tmpfs bundle directory (stage/restore/wipe target)")
 	fl.StringVar(&opts.talmRoot, "talm-root", "", "legacy Talm root holding plaintext secrets.yaml/talm.key/talosconfig")
 	fl.StringVar(&opts.custodyDir, "custody-dir", filepath.Join(home, "guardian-custody"), "legacy custody directory")
-	fl.StringVar(&opts.from, "from", "", "bundle-layout directory to back up (defaults to --bundle-dir when it exists)")
 	fl.BoolVar(&opts.yes, "yes", false, "skip interactive confirmation")
 	fl.BoolVar(&opts.readData, "read-data", false, "verify: also re-read and hash every pack (slow, run against offline copies)")
 	if err := fl.Parse(rest); err != nil {
@@ -142,8 +140,18 @@ func realMain(opts *options, argv []string) error {
 	}
 }
 
+// Both runners pass --no-cache: restic would otherwise keep encrypted
+// repository metadata under ~/.cache/restic, a durable on-disk artifact the
+// "repository is the only at-rest form" model does not account for. The
+// custody repo is small enough that the cache buys nothing.
+//
+// Accepted limit: when a password rides in extraEnv it is visible at
+// /proc/<pid>/environ to same-UID processes for the life of the restic
+// child, and Go strings holding it are not zeroed. A same-UID attacker can
+// already ptrace restic or read the prompt; local process isolation is out
+// of scope here.
 func runRestic(opts *options, extraEnv []string, args ...string) error {
-	cmd := exec.Command(opts.restic, append([]string{"--repo", opts.repo}, args...)...)
+	cmd := exec.Command(opts.restic, append([]string{"--repo", opts.repo, "--no-cache"}, args...)...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = opts.stdout
 	cmd.Stderr = opts.stderr
@@ -152,7 +160,7 @@ func runRestic(opts *options, extraEnv []string, args ...string) error {
 }
 
 func runResticOutput(opts *options, extraEnv []string, args ...string) ([]byte, error) {
-	cmd := exec.Command(opts.restic, append([]string{"--repo", opts.repo}, args...)...)
+	cmd := exec.Command(opts.restic, append([]string{"--repo", opts.repo, "--no-cache"}, args...)...)
 	cmd.Stdin = os.Stdin
 	cmd.Stderr = opts.stderr
 	cmd.Env = append(os.Environ(), extraEnv...)
@@ -225,16 +233,21 @@ type sources struct {
 }
 
 func resolveSources(opts *options) (*sources, error) {
-	from := opts.from
-	if from == "" {
-		if _, err := os.Stat(opts.bundleDir); err == nil {
-			from = opts.bundleDir
-		}
-	}
-	if from != "" {
-		return resolveFromBundleLayout(opts, from)
+	if _, err := os.Stat(opts.bundleDir); err == nil {
+		return resolveFromBundleLayout(opts, opts.bundleDir)
 	}
 	return resolveFromLegacy(opts)
+}
+
+// requireTmpfs pins every path that will ever hold plaintext to /dev/shm.
+// create, restore, and wipe all route through it, so a snapshot can only
+// ever record — and restore can only ever re-materialize — the fixed tmpfs
+// location.
+func requireTmpfs(dir string) error {
+	if !strings.HasPrefix(dir, "/dev/shm/") {
+		return fmt.Errorf("%s is not on /dev/shm; plaintext custody material must stay on tmpfs", dir)
+	}
+	return nil
 }
 
 // resolveFromBundleLayout validates a directory already in bundle layout
@@ -334,42 +347,42 @@ func resolveFromLegacy(opts *options) (*sources, error) {
 }
 
 // findUnsealKey walks dir for unseal-<sha256>.key files, requires exactly
-// one distinct key, and verifies the content hash matches the filename
+// one — even byte-identical copies are refused, because metadata.json is
+// resolved from the key's directory and two copies make that binding
+// path-order-dependent — and verifies the content hash matches the filename
 // fingerprint so a truncated or swapped key cannot enter the bundle.
 func findUnsealKey(dir string) (string, error) {
 	var found []string
-	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+	walkErr := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
-			return nil
+			return err
 		}
 		if unsealKeyRE.MatchString(d.Name()) {
 			found = append(found, path)
 		}
 		return nil
 	})
+	if walkErr != nil {
+		// A partial walk could hide a second key and defeat the exactly-one
+		// guard, so an aborted traversal fails closed.
+		return "", fmt.Errorf("walking %s for unseal keys: %w", dir, walkErr)
+	}
 	if len(found) == 0 {
 		return "", fmt.Errorf("no unseal-<sha256>.key under %s", dir)
 	}
-	fingerprints := map[string]string{}
-	for _, p := range found {
-		b, err := os.ReadFile(p)
-		if err != nil {
-			return "", err
-		}
-		sum := hex.EncodeToString(func() []byte { h := sha256.Sum256(b); return h[:] }())
-		want := unsealKeyRE.FindStringSubmatch(filepath.Base(p))[1]
-		if sum != want {
-			return "", fmt.Errorf("%s content hash %s does not match its filename fingerprint", p, sum)
-		}
-		fingerprints[want] = p
+	if len(found) > 1 {
+		sort.Strings(found)
+		return "", fmt.Errorf("multiple unseal key files found, refusing to guess which directory owns the live key and its metadata — remove the stale copies:\n  %s", strings.Join(found, "\n  "))
 	}
-	if len(fingerprints) > 1 {
-		var keys []string
-		for _, p := range fingerprints {
-			keys = append(keys, p)
-		}
-		sort.Strings(keys)
-		return "", fmt.Errorf("multiple distinct unseal keys found, refusing to guess:\n  %s", strings.Join(keys, "\n  "))
+	b, err := os.ReadFile(found[0])
+	if err != nil {
+		return "", err
+	}
+	h := sha256.Sum256(b)
+	sum := hex.EncodeToString(h[:])
+	want := unsealKeyRE.FindStringSubmatch(filepath.Base(found[0]))[1]
+	if sum != want {
+		return "", fmt.Errorf("%s content hash %s does not match its filename fingerprint", found[0], sum)
 	}
 	return found[0], nil
 }
@@ -386,17 +399,14 @@ func findSealSibling(dir, name string) (string, error) {
 // it fresh (fresh staging is shredded by create; a directory the operator
 // already had open is not).
 func stageBundle(opts *options, src *sources) (string, bool, error) {
-	if opts.from != "" {
-		return opts.from, false, nil
+	if err := requireTmpfs(opts.bundleDir); err != nil {
+		return "", false, err
 	}
 	if _, err := os.Stat(opts.bundleDir); err == nil {
 		// resolveSources already validated this layout in place.
 		return opts.bundleDir, false, nil
 	}
 	dir := opts.bundleDir
-	if !strings.HasPrefix(dir, "/dev/shm/") {
-		return "", false, fmt.Errorf("bundle dir %s is not on /dev/shm; plaintext staging must stay on tmpfs", dir)
-	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", false, err
 	}
@@ -506,12 +516,23 @@ func latestSnapshot(opts *options) (*snapshot, error) {
 	}
 	var snaps []snapshot
 	if err := json.Unmarshal(out, &snaps); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parsing restic snapshots output: %w", err)
 	}
 	if len(snaps) == 0 {
 		return nil, errors.New("repository holds no snapshots")
 	}
-	return &snaps[len(snaps)-1], nil
+	// `snapshots latest` returns one entry per host+path group with no
+	// ordering guarantee, so pick the globally newest by timestamp.
+	newest := &snaps[0]
+	for i := range snaps {
+		if snaps[i].Time.After(newest.Time) {
+			newest = &snaps[i]
+		}
+	}
+	if len(newest.ID) < 8 {
+		return nil, fmt.Errorf("restic returned malformed snapshot id %q", newest.ID)
+	}
+	return newest, nil
 }
 
 func cmdVerify(opts *options) error {
@@ -624,6 +645,9 @@ func plaintextResidue(opts *options) []string {
 // --- restore / wipe ---
 
 func cmdRestore(opts *options) error {
+	if err := requireTmpfs(opts.bundleDir); err != nil {
+		return err
+	}
 	if _, err := os.Stat(opts.bundleDir); err == nil {
 		return fmt.Errorf("%s already exists; wipe it first (`aspect infra custody --action wipe`) so stale and fresh state cannot mix", opts.bundleDir)
 	}
@@ -632,7 +656,17 @@ func cmdRestore(opts *options) error {
 		return err
 	}
 	// Snapshots record the fixed tmpfs path, so restoring against / puts
-	// the bundle back exactly where wipe and create expect it.
+	// the bundle back exactly where wipe and create expect it. A snapshot
+	// recording any other path (foreign repo, changed --bundle-dir) is
+	// refused before plaintext lands anywhere.
+	for _, p := range snap.Paths {
+		if p != opts.bundleDir {
+			return fmt.Errorf("snapshot %s records path %s, not %s; refusing to restore plaintext to an unmanaged location", snap.ID[:8], p, opts.bundleDir)
+		}
+	}
+	if len(snap.Paths) == 0 {
+		return fmt.Errorf("snapshot %s records no paths; refusing to restore blind", snap.ID[:8])
+	}
 	if err := opts.run(opts, nil, "restore", snap.ID, "--target", "/"); err != nil {
 		return fmt.Errorf("restic restore: %w", err)
 	}
@@ -645,8 +679,8 @@ func cmdRestore(opts *options) error {
 }
 
 func cmdWipe(opts *options) error {
-	if !strings.HasPrefix(opts.bundleDir, "/dev/shm/") {
-		return fmt.Errorf("refusing to wipe %s: not on /dev/shm", opts.bundleDir)
+	if err := requireTmpfs(opts.bundleDir); err != nil {
+		return fmt.Errorf("refusing to wipe: %w", err)
 	}
 	if _, err := os.Stat(opts.bundleDir); err != nil {
 		fmt.Fprintf(opts.stdout, "nothing to wipe at %s\n", opts.bundleDir)
@@ -659,9 +693,10 @@ func cmdWipe(opts *options) error {
 	return nil
 }
 
-// shredDir overwrites every file before unlinking. On tmpfs this is cheap
-// and closes the page-reuse window; it must never silently fall back to a
-// plain delete.
+// shredDir overwrites every file in place before unlinking. The open must
+// NOT truncate: on tmpfs, truncate-then-write frees the secret-bearing pages
+// intact and zeroes fresh ones, which is just a delete wearing a disguise.
+// Writing over the existing extent is what actually scrubs the pages.
 func shredDir(dir string) error {
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -671,8 +706,20 @@ func shredDir(dir string) error {
 		if err != nil {
 			return err
 		}
+		f, err := os.OpenFile(path, os.O_WRONLY, 0)
+		if err != nil {
+			return err
+		}
 		zero := make([]byte, info.Size())
-		if err := os.WriteFile(path, zero, 0o600); err != nil {
+		if _, err := f.WriteAt(zero, 0); err != nil {
+			f.Close()
+			return err
+		}
+		if err := f.Sync(); err != nil {
+			f.Close()
+			return err
+		}
+		if err := f.Close(); err != nil {
 			return err
 		}
 		return os.Remove(path)

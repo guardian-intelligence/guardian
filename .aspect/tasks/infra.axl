@@ -870,8 +870,6 @@ def _custody_impl(ctx):
         if repo == None:
             return 1
         custody_args.extend(["--repo", repo])
-    if ctx.args.from_dir != "":
-        custody_args.extend(["--from", ctx.args.from_dir])
     if ctx.args.yes:
         custody_args.append("--yes")
     if ctx.args.read_data:
@@ -2096,7 +2094,6 @@ custody = task(
     summary = "Manage the encrypted custody bundle (secret-zero: Talos genesis secrets, OpenBao seal key, operator env). The restic repository is the ONLY at-rest form; plaintext exists only in the tmpfs bundle dir between restore and wipe. Actions: create (stage fail-closed + backup + instructions), verify (repo integrity + required members, point --repo at offline copies), restore (to tmpfs), wipe (shred the tmpfs bundle), status (staleness + plaintext-residue warnings), key-add (second password for the password-manager recovery flow).",
     args = {
         "action": args.string(default = "status", description = "One of create, verify, restore, wipe, status, key-add."),
-        "from_dir": args.string(default = "", description = "Bundle-layout directory to back up (defaults to the tmpfs bundle dir when it exists, else legacy plaintext locations)."),
         "read_data": args.boolean(default = False, description = "verify: re-read and hash every pack (slow; run this against each offline copy)."),
         "repo": args.string(default = "", description = "restic repository directory. Defaults to ~/.guardian/custody/repo; point at mounted offline media to verify copies."),
         "yes": args.boolean(default = False, description = "Skip the interactive confirmation before create."),

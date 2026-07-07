@@ -387,7 +387,7 @@ helm-controller stops retrying once retries exhaust — a values change or a
 bazelisk run //src/infrastructure/cmd/openbao_secret_import:openbao_secret_import -- \
   --kubectl "$(bazelisk info output_base)/external/+http_file+kubectl_linux_amd64/file/kubectl" \
   --kubeconfig <off-vlan-kubeconfig-copy> \
-  --env-file <custody>/custody.env
+  --env-file /dev/shm/guardian-custody/custody.env  # after: aspect infra custody --action restore
 
 aspect infra converged --expected-revision "$(git rev-parse HEAD)" \
   --kubeconfig <off-vlan-kubeconfig-copy>

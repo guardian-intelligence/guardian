@@ -71,7 +71,7 @@ type kubeSecret struct {
 func main() {
 	var opts options
 	flag.StringVar(&opts.EnvFile, "env-file", defaultEnvFile, "local env file to import")
-	flag.BoolVar(&opts.DeleteEnvFile, "delete-env-file", true, "delete env file after a successful import and importer cleanup")
+	flag.BoolVar(&opts.DeleteEnvFile, "delete-env-file", false, "delete env file after a successful import (custody.env normally lives in the restored custody bundle; wipe the bundle instead)")
 	flag.StringVar(&opts.Kubectl, "kubectl", "", "path to kubectl")
 	flag.StringVar(&opts.Kubeconfig, "kubeconfig", "", "kubeconfig for guardian-mgmt")
 	flag.StringVar(&opts.KubeAPIServer, "kube-api-server", "", "optional Kubernetes API server override for off-VLAN proof runs")

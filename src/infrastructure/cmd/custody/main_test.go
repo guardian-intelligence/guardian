@@ -220,13 +220,66 @@ func TestCreateDoesNotShredOperatorOpenedBundle(t *testing.T) {
 		}
 	}
 	writeUnsealKey(t, filepath.Join(opts.bundleDir, "openbao"))
-	// findUnsealKey walks the whole bundle dir; the key must live under
-	// openbao/ per layout. Rewrite metadata to canonical location.
 	if err := cmdCreate(opts); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(opts.bundleDir); err != nil {
 		t.Error("an operator-opened bundle dir must survive create; only explicit wipe removes it")
+	}
+	// The snapshot must capture the operator's edited bundle, not a fresh
+	// staging of some other source.
+	backedUp := false
+	for _, c := range fake.calls {
+		if c.args[0] == "backup" && c.args[len(c.args)-1] == opts.bundleDir {
+			backedUp = true
+		}
+	}
+	if !backedUp {
+		t.Errorf("backup must target the open bundle dir %s, calls: %+v", opts.bundleDir, fake.calls)
+	}
+}
+
+func TestCreateShredsStagingWhenBackupFails(t *testing.T) {
+	fake := &fakeRestic{fail: map[string]bool{"backup": true}}
+	opts := testOptions(t, fake)
+	opts.talmRoot = populateLegacy(t, opts)
+	opts.yes = true
+	writeFile(t, filepath.Join(opts.repo, "config"), "restic config")
+	opts.bundleDir = filepath.Join("/dev/shm", fmt.Sprintf("guardian-custody-test-bfail-%d", os.Getpid()))
+	defer os.RemoveAll(opts.bundleDir)
+
+	err := cmdCreate(opts)
+	if err == nil || !strings.Contains(err.Error(), "restic backup") {
+		t.Fatalf("want backup failure surfaced, got %v", err)
+	}
+	if _, err := os.Stat(opts.bundleDir); !os.IsNotExist(err) {
+		t.Error("fresh staging must be shredded even when backup fails — plaintext must not outlive create")
+	}
+}
+
+func TestCreateInitializesRepoWithEnvPassword(t *testing.T) {
+	fake := &fakeRestic{}
+	opts := testOptions(t, fake)
+	opts.talmRoot = populateLegacy(t, opts)
+	opts.yes = true
+	t.Setenv("RESTIC_PASSWORD", "from-env-password-123")
+	opts.bundleDir = filepath.Join("/dev/shm", fmt.Sprintf("guardian-custody-test-init-%d", os.Getpid()))
+	defer os.RemoveAll(opts.bundleDir)
+
+	if err := cmdCreate(opts); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.calls) == 0 || fake.calls[0].args[0] != "init" {
+		t.Fatalf("first restic call must be init for a fresh repo, got %+v", fake.calls)
+	}
+	passed := false
+	for _, e := range fake.calls[0].env {
+		if strings.HasPrefix(e, "RESTIC_PASSWORD=") {
+			passed = true
+		}
+	}
+	if !passed {
+		t.Error("init must receive the repository password via the environment")
 	}
 }
 
@@ -285,9 +338,100 @@ func TestWipeRefusesOffTmpfs(t *testing.T) {
 func TestRestoreRefusesWhenBundleOpen(t *testing.T) {
 	fake := &fakeRestic{}
 	opts := testOptions(t, fake)
-	opts.bundleDir = t.TempDir() // exists
+	opts.bundleDir = filepath.Join("/dev/shm", fmt.Sprintf("guardian-custody-test-ropen-%d", os.Getpid()))
+	if err := os.MkdirAll(opts.bundleDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(opts.bundleDir)
 	if err := cmdRestore(opts); err == nil || !strings.Contains(err.Error(), "wipe") {
 		t.Fatalf("restore must refuse over an open bundle, got %v", err)
+	}
+}
+
+func TestRestoreRefusesOffTmpfsAndForeignPaths(t *testing.T) {
+	fake := &fakeRestic{outputs: map[string][]byte{
+		"snapshots": []byte(`[{"id":"abcdef1234567890","time":"2026-07-07T00:00:00Z","paths":["/home/op/custody"]}]`),
+	}}
+	opts := testOptions(t, fake)
+
+	// Non-tmpfs bundle dir refused before any restic call.
+	opts.bundleDir = t.TempDir()
+	if err := cmdRestore(opts); err == nil || !strings.Contains(err.Error(), "/dev/shm") {
+		t.Fatalf("restore must refuse non-tmpfs bundle dirs, got %v", err)
+	}
+
+	// Snapshot recording a foreign absolute path refused before plaintext lands.
+	opts.bundleDir = filepath.Join("/dev/shm", fmt.Sprintf("guardian-custody-test-foreign-%d", os.Getpid()))
+	err := cmdRestore(opts)
+	if err == nil || !strings.Contains(err.Error(), "unmanaged location") {
+		t.Fatalf("restore must refuse snapshots recording foreign paths, got %v", err)
+	}
+	for _, c := range fake.calls {
+		if c.args[0] == "restore" {
+			t.Fatal("restic restore must not run for a foreign-path snapshot")
+		}
+	}
+}
+
+func TestRestoreSuccess(t *testing.T) {
+	bundle := filepath.Join("/dev/shm", fmt.Sprintf("guardian-custody-test-rok-%d", os.Getpid()))
+	defer os.RemoveAll(bundle)
+	fake := &fakeRestic{outputs: map[string][]byte{
+		"snapshots": []byte(`[{"id":"abcdef1234567890","time":"2026-07-07T00:00:00Z","paths":["` + bundle + `"]}]`),
+	}}
+	opts := testOptions(t, fake)
+	opts.bundleDir = bundle
+	realRun := fake.run
+	opts.run = func(o *options, env []string, args ...string) error {
+		if args[0] == "restore" {
+			if err := os.MkdirAll(bundle, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return realRun(o, env, args...)
+	}
+	if err := cmdRestore(opts); err != nil {
+		t.Fatal(err)
+	}
+	out := opts.stdout.(*bytes.Buffer).String()
+	if !strings.Contains(out, "wipe") {
+		t.Error("restore must tell the operator to wipe when done")
+	}
+	info, err := os.Stat(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o700 {
+		t.Errorf("restored bundle dir must be 0700, got %v", info.Mode().Perm())
+	}
+}
+
+func TestLatestSnapshotPicksNewestAcrossGroups(t *testing.T) {
+	// `snapshots latest --json` returns one entry per host+path group with
+	// no ordering guarantee; newest-first here would fool a take-the-last
+	// implementation.
+	fake := &fakeRestic{outputs: map[string][]byte{
+		"snapshots": []byte(`[{"id":"bbbbbbbb1111","time":"2026-07-06T00:00:00Z"},{"id":"aaaaaaaa2222","time":"2026-07-01T00:00:00Z"}]`),
+	}}
+	opts := testOptions(t, fake)
+	snap, err := latestSnapshot(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.ID != "bbbbbbbb1111" {
+		t.Fatalf("want globally newest snapshot bbbbbbbb1111, got %s", snap.ID)
+	}
+}
+
+func TestLatestSnapshotRejectsMalformedOutput(t *testing.T) {
+	fake := &fakeRestic{outputs: map[string][]byte{"snapshots": []byte(`not json`)}}
+	opts := testOptions(t, fake)
+	if _, err := latestSnapshot(opts); err == nil || !strings.Contains(err.Error(), "parsing") {
+		t.Fatalf("want parse error, got %v", err)
+	}
+	fake.outputs["snapshots"] = []byte(`[{"id":"abc","time":"2026-07-07T00:00:00Z"}]`)
+	if _, err := latestSnapshot(opts); err == nil || !strings.Contains(err.Error(), "malformed snapshot id") {
+		t.Fatalf("want malformed-id error (no slice panic), got %v", err)
 	}
 }
 
