@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Checks every Flux OCIRepository CR pinned by tag+digest (the "artifact
-# section" of images.lock: Helm/Flux OCI charts pulled by source-controller,
-# not containerd) against the upstream registry: does the pinned tag still
-# resolve to the pinned digest? Check-only — never edits anything. Purely
+# Checks every Flux OCIRepository CR pinned by tag+digest (Helm/Flux OCI
+# charts pulled by source-controller, not containerd) against the upstream
+# registry: does the pinned tag still resolve to the pinned digest? Check-only — never edits anything. Purely
 # stateless: one anonymous registry-token exchange plus one manifest lookup
 # per ref (curl+jq, already on every GitHub Actions runner), no cluster
 # access, no cosign/oras/crane binary.
@@ -12,8 +11,8 @@
 # Exit 0: every pinned tag resolves to its pinned digest.
 # Exit 1: at least one mismatch — the report names each file and the exact
 #         digest line to paste, so the fix is a copy-paste in the same PR
-#         (the matching images.lock line is separately enforced by the
-#         TestRenderedImagesDigestPinnedAndLocked conformance test).
+#         (these pins are rendered inputs to the generated union lock, so
+#         no separate inventory edit exists).
 # Exit 2: a lookup genuinely failed (network/auth), distinct from a mismatch.
 #
 # This guards one mistake: a human bumping a tag and pasting a wrong or stale
@@ -71,8 +70,7 @@ MISMATCH: ${file}
   ${host}/${repo}:${tag}
   pinned:   ${pinned}
   upstream: ${live}
-  fix: set 'digest: ${live}' in this file and update the matching
-       images.lock line to ${host}/${repo}:${tag}@${live}
+  fix: set 'digest: ${live}' in this file
 EOF
 done < <(find "$root/src/infrastructure" -name '*.yaml' -print0)
 

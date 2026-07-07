@@ -46,18 +46,45 @@ identity can sign more than one artifact family.
 | `company-site` image | `company-site-image` workflow on main | cosign keyless signature + SPDX SBOM attestation (`--type spdxjson`) | ghcr.io, attached to the digest |
 | `analytics-ingest` image | `analytics-ingest-image` workflow on main | cosign keyless signature + SPDX SBOM attestation (`--type spdxjson`) | ghcr.io, attached to the digest |
 | `alert-relay` image | `alert-relay-image` workflow on main | cosign keyless signature + SPDX SBOM attestation (`--type spdxjson`) | ghcr.io, attached to the digest |
-| `images.lock` | `images-lock-sign` workflow on main pushes touching the lock | `cosign sign-blob --bundle` (embeds Fulcio cert + Rekor proof), pushed with `oras push` so the layer carries a filename title | `ghcr.io/guardian-intelligence/supply-chain:images.lock-<sha256>` (one tag per lock hash, no floating tag; package stays private — only authenticated drive builds fetch it, dark bring-up reads it from the drive) |
+| union images lock (generated) | `images-lock-sign` workflow on main pushes touching any union input (declared lock, manifest trees, the imageset tool) | derives the union with `//src/infrastructure/cmd/imageset`, then `cosign sign-blob --bundle` (embeds Fulcio cert + Rekor proof), pushed with `oras push` so the layer carries a filename title | `ghcr.io/guardian-intelligence/supply-chain:images.lock-<sha256>` (one tag per union hash, no floating tag; package stays private — only authenticated drive builds fetch it, dark bring-up reads it from the drive) |
 
-The dark-uplink haul is *derived* from `images.lock` and every blob in it is
-digest-addressed, so a verified lock plus hash verification of the haul
+The artifact inventory itself is split and mostly generated:
+`src/infrastructure/bootstrap/bundle/images.declared.lock` hand-declares
+only what no repo manifest renders (bootstrap artifacts, Talos/k8s system
+images, operator-spawned workloads, Go-tool-referenced job images), and
+`//src/infrastructure/cmd/imageset` derives the complete **union lock** by
+adding every digest-pinned image ref extracted from the manifest trees. The
+derivation is a pure function of the checkout — CI, drive builds, and
+offline operators all reproduce identical bytes from the same revision.
+
+The union is revision-exact by design: it contains what the checkout
+declares and renders, nothing more. The retired hand-maintained lock
+instead *accumulated* superseded pins so an in-flight blue/green window or
+a Git-revert rollback stayed mirror-servable from one haul. That property
+is deliberately traded away: a dark rollback now means building (or
+retaining) a bundle at the revision being rolled back to, and a standing
+air-gapped cluster doing live upgrades must keep its mirror store additive
+across syncs rather than serving a single revision's haul. Bring-up from a
+drive is unaffected — Flagger deploys fresh from the manifests, so no
+superseded digest is ever needed.
+
+The dark-uplink haul is *derived* from the union lock and every blob in it
+is digest-addressed, so a verified union plus hash verification of the haul
 against it covers the entire bundle. Signing the haul itself would add no
-integrity the lock signature does not already provide. The chain is
-enforced twice: `aspect infra bundle` refuses to build a drive whose lock
-CI never signed, verifies the signature (pinned identity + pinned Sigstore
-trusted root at `src/infrastructure/bootstrap/bundle/sigstore-trusted-root.json`),
-and runs `bundle --verify` (lock/haul/hauler-manifest hash bindings); the
-operator repeats both checks offline as step 0 of dark bring-up (see the
-cold-boot runbook). The residual trust in the haul→manifest binding is the
+integrity the union signature does not already provide. The chain is
+enforced twice: `aspect infra bundle` derives the union, refuses to build a
+drive whose union CI never signed, verifies the signature (pinned identity
++ pinned Sigstore trusted root at
+`src/infrastructure/bootstrap/bundle/sigstore-trusted-root.json`),
+and runs `bundle --verify` (union/haul/hauler-manifest hash bindings); the
+operator repeats the checks offline as step 0 of dark bring-up (see the
+cold-boot runbook), re-deriving the union from the checkout and
+byte-comparing it against the drive copy. The offline re-derivation runs
+the drive-carried `imageset-bin`, so its binding of drive bytes to checkout
+bytes holds under the custody model (the drive and its binaries travel
+with the operator, like the seal key) — the cosign check is what defends
+the Git-derivation axis, proving the union was produced from reviewed main
+history. The residual trust in the haul→manifest binding is the
 custody model itself: the drive is custody, assembled and carried by the
 operator who also holds the seal key — signatures defend the Git-derivation
 and upstream-registry axes, not the operator.
@@ -67,19 +94,20 @@ and upstream-registry axes, not the operator.
 Deployment pins are decoupled from content changes. A content PR never
 moves a pin; when it merges, CI on main builds, pushes, and signs the new
 digest, which makes it *eligible* for promotion — nothing more. Promotion
-is a separate pin-only PR that bumps the manifest pin and the matching
-`images.lock` entry together (the conformance tests force the pair). The
-`site-gate` check verifies exactly two things on that PR: the proposed
-digest carries a cosign signature by the canonical image identity above
-(seconds, no rebuild — the gate classifies the diff and skips the build on
-pin-only PRs), and the lock conformance tests still pass.
+is a separate pin-only PR that bumps the manifest pin and nothing else:
+the inventory is the generated union, so the moved pin joins it by
+derivation, not by a second edit. The `site-gate` check verifies exactly
+two things on that PR: the proposed digest carries a cosign signature by
+the canonical image identity above (seconds, no rebuild — the gate
+classifies the diff and skips the build on pin-only PRs), and the
+conformance tests still pass.
 
 The promoter is Kargo (deployments/guardian/promotion): the Warehouse
 tracks the digest behind `company-site:edge`, and the prod Stage's
 promotion opens the pin-bump PR as the `guardian-promotions` GitHub App.
-The `promotion-lock-sync` workflow syncs the `images.lock` line from the
-PR's pin (Kargo cannot edit the plain-text lock) and arms automerge. The
-promoter is untrusted by construction: branch protection requires `build`
+The `promotion-automerge` workflow arms automerge on the bot's PRs; no
+inventory sync exists or is needed. The promoter is untrusted by
+construction: branch protection requires `build`
 and `site-gate` on main, so nothing reaches a pin that CI did not sign
 from main history, whether the PR was opened by a human or the bot. The
 required-checks + allow-auto-merge repo settings are the enforcement's
@@ -116,8 +144,9 @@ the Rekor inclusion proof, so `cosign verify-blob --bundle
 images.lock.sigbundle --certificate-identity "<lock identity above>" …` needs
 no network — only the Sigstore trusted root, which the dark drive carries as
 a pinned file (refresh it when refreshing the drive; it rotates on the order
-of months). After verifying the lock, verify the haul against it (blob
-digests are checked by hauler at load; the lock conformance test pins the
+of months). After verifying the drive's union lock, re-derive the union from
+the checkout and byte-compare, then verify the haul against it (blob
+digests are checked by hauler at load; the conformance tests pin the
 manifest side).
 
 ## Decision: no Transit (or any KMS) in the signing path

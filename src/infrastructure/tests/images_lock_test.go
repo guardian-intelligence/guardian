@@ -1,271 +1,91 @@
 package tests
 
-// Tier-1 images.lock conformance: every image reference rendered from this
-// repo must be digest-pinned and present in
-// src/infrastructure/bootstrap/bundle/images.lock with the same digest, so a
-// cold guardian-mgmt bootstrap can serve every artifact from the workstation
-// mirror.
+// Tier-1 image inventory conformance:
+//   - images.declared.lock is well-formed (digest-pinned, no duplicate
+//     (repo, digest) pairs)
+//   - every artifact reference rendered from the manifest trees is
+//     digest-pinned and registry-qualified
+//   - declared and rendered are disjoint and their union derives cleanly —
+//     the exact derivation CI signs on main and `aspect infra bundle`
+//     re-runs, so a cold guardian-mgmt bootstrap can serve every artifact
+//     from the workstation mirror.
 //
-// Extraction rules (pragmatic, see collectImageRefsFromNode):
-//   - "image:" scalar fields whose value looks like an OCI reference
-//     (contains "/", registry-ish first segment, not templated)
-//   - "image:" mapping fields in Helm values (registry/repository/tag/digest)
-//   - kustomize "images:" transformer entries (name/newName/newTag/digest)
+// Extraction rules live in //src/infrastructure/imageset, shared with the
+// imageset generator: a ref these tests see is a ref the tool sees, by
+// construction.
 
 import (
-	"fmt"
-	"io/fs"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/guardian-intelligence/guardian/src/infrastructure/imageset"
 )
 
-const imagesLockRunfile = "src/infrastructure/bootstrap/bundle/images.lock"
+const declaredLockRunfile = "src/infrastructure/bootstrap/bundle/images.declared.lock"
 
-// Manifest trees whose rendered image references must appear in images.lock.
-var imageManifestTrees = []string{
-	"src/infrastructure/deployments",
-	"src/infrastructure/base",
-}
-
-var sha256DigestPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
-
-type imageRef struct {
-	file   string
-	source string
-	ref    string
-}
-
-func TestImagesLockWellFormed(t *testing.T) {
-	locked := parseImagesLock(t)
-	if len(locked) == 0 {
-		t.Fatal("images.lock contains no image entries")
-	}
-}
-
-func TestRenderedImagesDigestPinnedAndLocked(t *testing.T) {
-	locked := parseImagesLock(t)
-	refs := collectRenderedImageRefs(t)
-	if len(refs) == 0 {
-		t.Fatal("extracted no image references from rendered manifests; the extractor is broken")
-	}
-
-	for _, ref := range refs {
-		repo, digest, err := splitImageRef(ref.ref)
-		if err != nil {
-			t.Errorf("%s: %s %q: %v", ref.file, ref.source, ref.ref, err)
-			continue
-		}
-		if !locked[repo][digest] {
-			t.Errorf("%s: %s %q: %s@%s is not in %s", ref.file, ref.source, ref.ref, repo, digest, imagesLockRunfile)
-		}
-	}
-}
-
-// parseImagesLock reads images.lock and returns repo -> set of digests. It
-// enforces the lock's own invariants: every non-comment line is digest-pinned
-// and no (repo, digest) pair appears twice (tag+digest and digest-only forms
-// of the same pair count as duplicates).
-func parseImagesLock(t *testing.T) map[string]map[string]bool {
+func declaredLockEntries(t *testing.T) []string {
 	t.Helper()
-
-	raw := readText(t, runfilePath(imagesLockRunfile))
-	locked := map[string]map[string]bool{}
-	for i, line := range strings.Split(raw, "\n") {
-		entry := line
-		if idx := strings.Index(entry, "#"); idx >= 0 {
-			entry = entry[:idx]
-		}
-		entry = strings.TrimSpace(entry)
-		if entry == "" {
-			continue
-		}
-		repo, digest, err := splitImageRef(entry)
-		if err != nil {
-			t.Errorf("images.lock:%d: %v", i+1, err)
-			continue
-		}
-		if locked[repo][digest] {
-			t.Errorf("images.lock:%d: duplicate (repo, digest) pair %s@%s", i+1, repo, digest)
-			continue
-		}
-		if locked[repo] == nil {
-			locked[repo] = map[string]bool{}
-		}
-		locked[repo][digest] = true
+	refs, err := imageset.ParseLock([]byte(readText(t, runfilePath(declaredLockRunfile))))
+	if err != nil {
+		t.Fatalf("%s: %v", declaredLockRunfile, err)
 	}
-	return locked
+	return refs
 }
 
-// splitImageRef normalizes an OCI reference to (repository, digest), stripping
-// any :tag so that tag+digest and digest-only forms compare equal.
-func splitImageRef(ref string) (string, string, error) {
-	if strings.ContainsAny(ref, " \t\"'") {
-		return "", "", fmt.Errorf("%q is not a valid image reference", ref)
-	}
-	name, digest, pinned := strings.Cut(ref, "@")
-	if !pinned {
-		return "", "", fmt.Errorf("%q is not digest-pinned (missing @sha256:<digest>)", ref)
-	}
-	if !sha256DigestPattern.MatchString(digest) {
-		return "", "", fmt.Errorf("%q has malformed digest %q", ref, digest)
-	}
-	if idx := strings.LastIndex(name, ":"); idx > strings.LastIndex(name, "/") {
-		name = name[:idx]
-	}
-	if name == "" || strings.HasPrefix(name, "/") || strings.HasSuffix(name, "/") {
-		return "", "", fmt.Errorf("%q has malformed repository %q", ref, name)
-	}
-	return name, digest, nil
-}
-
-func collectRenderedImageRefs(t *testing.T) []imageRef {
+// repoRootFromRunfiles derives the runfiles repo root so the shared
+// extractor can walk the manifest trees exactly as the imageset CLI walks a
+// checkout.
+func repoRootFromRunfiles(t *testing.T) string {
 	t.Helper()
-
 	const anchor = "src/infrastructure/base/flux/sync.yaml"
 	anchorPath := filepath.ToSlash(runfilePath(anchor))
 	root := strings.TrimSuffix(anchorPath, anchor)
 	if root == anchorPath {
 		t.Fatalf("cannot derive runfiles repo root from %s", anchorPath)
 	}
-
-	var refs []imageRef
-	for _, tree := range imageManifestTrees {
-		manifests := 0
-		err := filepath.WalkDir(filepath.Join(root, tree), func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if d.IsDir() || (filepath.Ext(path) != ".yaml" && filepath.Ext(path) != ".yml") {
-				return nil
-			}
-			manifests++
-			rel, err := filepath.Rel(root, path)
-			if err != nil {
-				return err
-			}
-			for _, doc := range yamlDocs(t, path) {
-				collectImageRefsFromNode(filepath.ToSlash(rel), doc, &refs)
-			}
-			return nil
-		})
-		if err != nil {
-			t.Fatalf("walk %s: %v", tree, err)
-		}
-		if manifests == 0 {
-			t.Fatalf("no YAML manifests found under %s in runfiles; check the test's data deps", tree)
-		}
-	}
-	return refs
+	return root
 }
 
-func collectImageRefsFromNode(file string, node interface{}, refs *[]imageRef) {
-	switch value := node.(type) {
-	case map[string]interface{}:
-		for key, child := range value {
-			switch key {
-			case "image":
-				if scalar, ok := child.(string); ok {
-					if looksLikeImageRef(scalar) {
-						*refs = append(*refs, imageRef{file: file, source: "image field", ref: scalar})
-					}
-					continue
-				}
-				if ref, ok := helmImageMapRef(child); ok {
-					*refs = append(*refs, imageRef{file: file, source: "helm image values", ref: ref})
-					continue
-				}
-				collectImageRefsFromNode(file, child, refs)
-			case "images":
-				items, isSlice := child.([]interface{})
-				if !isSlice {
-					// Helm-style images maps (images: {controller: {...}})
-					// must still be walked, not silently skipped.
-					collectImageRefsFromNode(file, child, refs)
-					continue
-				}
-				for _, item := range items {
-					if ref, ok := kustomizeImageEntryRef(item); ok {
-						*refs = append(*refs, imageRef{file: file, source: "kustomize images entry", ref: ref})
-						continue
-					}
-					collectImageRefsFromNode(file, item, refs)
-				}
-			default:
-				collectImageRefsFromNode(file, child, refs)
-			}
-		}
-	case []interface{}:
-		for _, item := range value {
-			collectImageRefsFromNode(file, item, refs)
-		}
+func renderedLockEntries(t *testing.T) []string {
+	t.Helper()
+	extracted, err := imageset.CollectRendered(repoRootFromRunfiles(t))
+	if err != nil {
+		t.Fatal(err)
 	}
+	rendered, err := imageset.Rendered(extracted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rendered
 }
 
-// looksLikeImageRef reports whether a scalar plausibly names a concrete OCI
-// image: not templated, has a repository path, and its first segment is
-// registry-ish (contains "." or ":", or is "localhost"). Registry-less
-// placeholders such as kustomize pre-transform names are excluded; the
-// transformer entry that rewrites them is checked instead.
-func looksLikeImageRef(value string) bool {
-	if value == "" || strings.ContainsAny(value, " \t\"'") {
-		return false
-	}
-	if strings.Contains(value, "{{") || strings.Contains(value, "${") || strings.Contains(value, "$(") {
-		return false
-	}
-	slash := strings.Index(value, "/")
-	if slash <= 0 {
-		return false
-	}
-	first := value[:slash]
-	return first == "localhost" || strings.ContainsAny(first, ".:")
+// The library enforces well-formedness, digest pinning, registry
+// qualification, and anti-vacuity in its own error paths; these tests
+// exercise those paths against the real declared lock and manifest trees.
+func TestDeclaredLockWellFormed(t *testing.T) {
+	declaredLockEntries(t)
 }
 
-// helmImageMapRef recomposes Helm-style image values maps, e.g.
-// {registry: quay.io, repository: openbao/openbao, tag: 2.5.4@sha256:...}.
-func helmImageMapRef(node interface{}) (string, bool) {
-	image := mapValue(node)
-	repository := stringValue(image["repository"])
-	if repository == "" || strings.Contains(repository, "{{") {
-		return "", false
-	}
-	ref := repository
-	if registry := stringValue(image["registry"]); registry != "" {
-		ref = registry + "/" + repository
-	}
-	if tag := stringValue(image["tag"]); tag != "" {
-		ref += ":" + tag
-	}
-	if digest := stringValue(image["digest"]); digest != "" && !strings.Contains(ref, "@") {
-		ref += "@" + digest
-	}
-	if strings.Contains(ref, "{{") {
-		return "", false
-	}
-	return ref, true
+func TestRenderedImagesDigestPinned(t *testing.T) {
+	renderedLockEntries(t)
 }
 
-// kustomizeImageEntryRef recomposes the effective reference produced by a
-// kustomize images transformer entry (name/newName/newTag/digest).
-func kustomizeImageEntryRef(node interface{}) (string, bool) {
-	entry := mapValue(node)
-	name := stringValue(entry["newName"])
-	if name == "" {
-		name = stringValue(entry["name"])
+// TestUnionLockDerives proves the full inventory derivation: disjointness
+// between the declared and rendered halves, and a union that re-parses
+// under the lock invariants.
+func TestUnionLockDerives(t *testing.T) {
+	declared := declaredLockEntries(t)
+	rendered := renderedLockEntries(t)
+	payload, err := imageset.UnionFile(declared, rendered)
+	if err != nil {
+		t.Fatal(err)
 	}
-	newTag := stringValue(entry["newTag"])
-	digest := stringValue(entry["digest"])
-	if name == "" || (stringValue(entry["newName"]) == "" && newTag == "" && digest == "") {
-		return "", false
+	union, err := imageset.ParseLock(payload)
+	if err != nil {
+		t.Fatalf("generated union does not re-parse as a lock: %v", err)
 	}
-	ref := name
-	if newTag != "" {
-		ref += ":" + newTag
+	if len(union) != len(declared)+len(rendered) {
+		t.Fatalf("union has %d entries, want %d declared + %d rendered", len(union), len(declared), len(rendered))
 	}
-	if digest != "" {
-		ref += "@" + digest
-	}
-	return ref, true
 }

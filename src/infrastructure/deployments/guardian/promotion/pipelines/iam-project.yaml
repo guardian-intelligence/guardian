@@ -3,7 +3,7 @@
 # new minor/major is a deliberate Git edit of this constraint, because major
 # upgrades migrate the shared DB schema and must go through a backup-first
 # path, not casual blue/green). platform: linux/amd64 makes Freight carry the
-# amd64 manifest digest, matching the repo's images.lock convention
+# amd64 manifest digest, matching the repo's image lock convention
 # (containerStatuses.imageID), not the multi-arch index digest.
 #
 # beta auto-promotes on new Freight; the promotion PR still passes branch

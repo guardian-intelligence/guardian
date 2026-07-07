@@ -1,0 +1,17 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "imageset_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/infrastructure/cmd/imageset",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//src/infrastructure/imageset",
+    ],
+)
+
+go_binary(
+    name = "imageset",
+    embed = [":imageset_lib"],
+    visibility = ["//visibility:public"],
+)

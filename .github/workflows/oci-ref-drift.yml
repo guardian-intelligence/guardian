@@ -1,11 +1,10 @@
-# PR-time gate for Flux OCIRepository tag+digest pins (the "artifact
-# section" of images.lock): when a PR touches infrastructure YAML, verify
-# every pinned tag still resolves to its pinned digest upstream. Check-only —
-# it fails with a copy-paste fix, it never edits or pushes. The mistake this
-# guards is a human bumping a tag and pasting a wrong or stale digest; the
-# matching images.lock line is separately enforced by the existing
-# conformance test, so a failure here is fixed in the same PR, not a
-# follow-up commit.
+# PR-time gate for Flux OCIRepository tag+digest pins: when a PR touches
+# infrastructure YAML, verify every pinned tag still resolves to its pinned
+# digest upstream. Check-only — it fails with a copy-paste fix, it never
+# edits or pushes. The mistake this guards is a human bumping a tag and
+# pasting a wrong or stale digest; these pins are rendered inputs to the
+# generated union images lock, so the fix is one digest line in the same
+# PR, not a follow-up commit.
 #
 # Deliberately NOT scheduled: Flux pulls by the pinned digest and never
 # re-resolves the tag, so upstream re-tagging has no effect on the cluster —

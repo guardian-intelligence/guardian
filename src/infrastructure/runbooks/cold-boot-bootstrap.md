@@ -43,7 +43,11 @@ Bazel-built from source (`bazelisk build //src/tools/hauler:hauler`).
 `aspect infra bundle` builds the artifact half of a dark-uplink cold boot
 into a fresh `dist/bundle/`:
 
-- `hauler-manifest.yaml` — `images.lock` projected into a
+- `images.lock` — the GENERATED union inventory (declared lock + every
+  digest-pinned image ref rendered from the manifest trees), derived by
+  `//src/infrastructure/cmd/imageset`. A pure function of the checkout, so
+  the operator can re-derive it offline and byte-compare.
+- `hauler-manifest.yaml` — the union lock projected into a
   `content.hauler.cattle.io/v1` Images manifest (Tier-1 lock tests gate the
   build, so the haul is provably complete relative to what the repo renders).
 - `store/` + `haul.tar.zst` — every locked artifact (container images, OCI
@@ -55,11 +59,11 @@ into a fresh `dist/bundle/`:
 - `bundle-manifest.yaml` — the git revision plus sha256 digests of the lock
   and the haul.
 - `images.lock.sigbundle` — CI's keyless cosign signature over the exact
-  lock this haul was synced from, fetched from
-  `ghcr.io/guardian-intelligence/supply-chain:images.lock-<lock-sha256>`
-  (published by the `images-lock-sign` workflow on main). The bundle build
-  fails if the lock was never signed — an unsigned lock is an unreviewed
-  lock. It also verifies the signature and runs `bundle --verify`
+  union lock this haul was synced from, fetched from
+  `ghcr.io/guardian-intelligence/supply-chain:images.lock-<union-sha256>`
+  (published by the `images-lock-sign` workflow on main, which derives the
+  identical union from the same revision). The bundle build fails if the
+  union was never signed — an unsigned inventory is an unreviewed one. It also verifies the signature and runs `bundle --verify`
   end-to-end, so a drive that finished building has already passed the
   exact checks the operator repeats offline at bring-up.
 
@@ -69,11 +73,13 @@ credentials or several `aspect infra bundle --resume` windows; resume
 re-fetches only the refs the store is missing.
 
 The complete dark drive is: the `dist/bundle/` output (`haul.tar.zst`,
-`bundle-manifest.yaml`, `images.lock.sigbundle`, `hauler-manifest.yaml`) as
-`<drive>/bundle/`, the source-built hauler and bundle binaries
-(`bazelisk build //src/tools/hauler:hauler //src/infrastructure/cmd/bundle:bundle`
-— copy the bundle binary to the drive as `bundle-bin` so it cannot be
-confused with the `bundle/` directory), the pinned flux CLI binary
+`bundle-manifest.yaml`, `images.lock`, `images.lock.sigbundle`,
+`hauler-manifest.yaml`) as `<drive>/bundle/`, the source-built hauler,
+bundle, and imageset binaries
+(`bazelisk build //src/tools/hauler:hauler //src/infrastructure/cmd/bundle:bundle //src/infrastructure/cmd/imageset:imageset`
+— copy the bundle and imageset binaries to the drive as `bundle-bin` and
+`imageset-bin` so they cannot be confused with the `bundle/` directory),
+the pinned flux CLI binary
 (from `$(bazelisk info output_base)/external/+http_archive+flux_linux_amd64/`
 — like every fetched tool it exists only where Bazel has run with network),
 the pinned cosign binary (copied from
@@ -93,22 +99,30 @@ Dark mode is entered and exited via PRs plus four bring-up steps:
    would not resolve):
 
    ```sh
+   <drive>/imageset-bin \
+     --declared src/infrastructure/bootstrap/bundle/images.declared.lock \
+     --repo-root "$(pwd)" --out /tmp/images.lock.derived
+   cmp /tmp/images.lock.derived <drive>/bundle/images.lock
+
    <drive>/cosign verify-blob --bundle <drive>/bundle/images.lock.sigbundle \
      --certificate-identity "https://github.com/guardian-intelligence/guardian/.github/workflows/images-lock-sign.yml@refs/heads/main" \
      --certificate-oidc-issuer https://token.actions.githubusercontent.com \
      --trusted-root src/infrastructure/bootstrap/bundle/sigstore-trusted-root.json \
-     src/infrastructure/bootstrap/bundle/images.lock
+     <drive>/bundle/images.lock
 
    <drive>/bundle-bin --verify \
      --bundle-dir <drive>/bundle \
-     --images-lock "$(pwd)/src/infrastructure/bootstrap/bundle/images.lock" \
+     --images-lock <drive>/bundle/images.lock \
      --revision "$(git rev-parse HEAD)"
    ```
 
-   The first command proves the drive's lock signature covers exactly the
-   checkout's `images.lock` and was made by reviewed main history; the
-   second proves the haul and hauler-manifest on the drive are hash-bound
-   to that same lock. Only then load the store.
+   The first pair proves the drive's union lock is exactly what this
+   checkout derives (declared + rendered); the cosign command proves that
+   union was signed from reviewed main history; the last proves the haul
+   and hauler-manifest on the drive are hash-bound to that same union.
+   The re-derivation runs the drive-carried binaries, so the
+   drive-to-checkout binding holds under the custody model — the drive
+   travels with the operator, like the seal key. Only then load the store.
 
 1. **Pre-drill PR**: flip `darkBundleMirror.enabled: true` in
    `src/infrastructure/talm/values.yaml` and regenerate the node configs —
@@ -203,9 +217,10 @@ would only relocate the root of trust, not remove it.
    canonical CI identity, so a workstation-built digest cannot be pinned
    (see docs/supply-chain-design.md, "Promotion: how digests move").
 2. **Pre-drill PR on main**: fresh seal fingerprint, any repins,
-   `images.lock` current (`//src/infrastructure/tests:talm_render_test`
-   enforces rendered-refs ⊆ lock). Flux converges from main — nothing lands on
-   the cluster that is not merged.
+   `images.declared.lock` current (`//src/infrastructure/tests:talm_render_test`
+   enforces the union-lock derivation: rendered refs digest-pinned, declared
+   disjoint, dark-mirror hosts covered). Flux converges from main — nothing
+   lands on the cluster that is not merged.
 
 ## Reimage (Latitude)
 
@@ -405,8 +420,9 @@ ReplicatedMergeTree, so a single node loss re-syncs from a surviving replica
 deleted mid-ingest lost zero acknowledged rows). Cold-boot notes:
 
 - The CHI/CHK/collector images (`clickhouse-server`, `clickhouse-keeper`,
-  `otel-collector-contrib`) are digest-pinned in `images.lock`, so the dark
-  bundle carries them; the namespace comes up from Git with no custody input.
+  `otel-collector-contrib`) are digest-pinned in the manifests and declared
+  lock, so the dark bundle carries them; the namespace comes up from Git
+  with no custody input.
 - The stored data is **not** in any custody bundle by design: it is
   25-month-TTL business analytics + 6-month OTel traces, reconstructable from
   the ongoing event stream, not from-nothing-critical state. A full-cluster
@@ -426,8 +442,10 @@ deleted mid-ingest lost zero acknowledged rows). Cold-boot notes:
    root; this plan only covers the Cloudflare Load Balancer pool/monitor
    objects, which is why it stays raw OpenTofu rather than an `aspect`
    subcommand.
-2. **Re-scrape `src/infrastructure/bootstrap/bundle/images.lock`** from the live cluster (workload section from
-   pod imageIDs; kubelet/etcd from `talosctl image ls --namespace system`) and
+2. **Re-scrape `src/infrastructure/bootstrap/bundle/images.declared.lock`**
+   from the live cluster (operator-spawned section from pod imageIDs, minus
+   anything the manifests render — the disjointness invariant rejects
+   overlaps; kubelet/etcd from `talosctl image ls --namespace system`) and
    PR it.
 3. **Verify the datapath MTU pair on every node**: `ovn0` must match the
    Subnet MTU (1362), not kube-ovn's iface−100 default (1320). The Subnet

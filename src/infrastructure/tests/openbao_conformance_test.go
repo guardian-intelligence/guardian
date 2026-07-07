@@ -472,12 +472,7 @@ func TestOpenBaoConsumersUseTLSConformance(t *testing.T) {
 // a gamma manifest referencing a prod path (or vice versa) fails CI instead
 // of failing — or worse, succeeding — live.
 func TestOpenBaoSecretScopeConformance(t *testing.T) {
-	const anchor = "src/infrastructure/base/flux/sync.yaml"
-	anchorPath := filepath.ToSlash(runfilePath(anchor))
-	root := strings.TrimSuffix(anchorPath, anchor)
-	if root == anchorPath {
-		t.Fatalf("cannot derive runfiles repo root from %s", anchorPath)
-	}
+	root := repoRootFromRunfiles(t)
 
 	externalSecrets, stores := 0, 0
 	walk := func(path string, docs []map[string]interface{}) {

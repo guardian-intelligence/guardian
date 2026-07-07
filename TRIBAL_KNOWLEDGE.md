@@ -60,9 +60,12 @@ them observable.
 ## Promotion enforcement lives partly in repo settings (not Git)
 
 The Kargo promotion bot is untrusted by construction only while GitHub
-enforces the checks: branch protection on `main` requiring the `build` and
-`site-gate` contexts, plus repo-level allow-auto-merge. Those settings are
-not represented in Git — re-assert them if the repo is ever recreated or
+enforces the checks: branch protection on `main` requiring the `build`,
+`site-gate`, `analytics-gate`, and `derive` contexts (`derive` is the
+images-lock-sign job that derives the union images lock from the full
+checkout — digest pinning, declared/rendered disjointness, dark-mirror host
+coverage), plus repo-level allow-auto-merge. Those settings are not
+represented in Git — re-assert them if the repo is ever recreated or
 protection is accidentally dropped:
 
 ```sh
@@ -71,7 +74,7 @@ gh api -X PATCH repos/guardian-intelligence/guardian \
 gh api -X PUT repos/guardian-intelligence/guardian/branches/main/protection \
   --input - <<'JSON'
 {
-  "required_status_checks": {"strict": false, "contexts": ["build", "site-gate"]},
+  "required_status_checks": {"strict": false, "contexts": ["build", "site-gate", "analytics-gate", "derive"]},
   "enforce_admins": false,
   "required_pull_request_reviews": null,
   "restrictions": null
@@ -79,11 +82,11 @@ gh api -X PUT repos/guardian-intelligence/guardian/branches/main/protection \
 JSON
 ```
 
-Both checks run on every PR (`site-gate` classifies the diff itself and
-exits fast when nothing relevant changed — required checks cannot be
-path-filtered without hanging unrelated PRs). The `guardian-promotions`
+All required checks run on every PR (`site-gate` and `derive` classify the
+diff themselves and exit fast when nothing relevant changed — required
+checks cannot be path-filtered without hanging unrelated PRs). The `guardian-promotions`
 GitHub App (private key in operator custody; also in the repo Actions
-secrets for promotion-lock-sync) must stay scoped to Contents + Pull
+secrets for promotion-automerge) must stay scoped to Contents + Pull
 requests read/write.
 
 ## Watching the cluster converge (`aspect infra watch`)
