@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/bazelbuild/rules_go/go/runfiles"
+	"github.com/guardian-intelligence/guardian/src/infrastructure/imageset"
 )
 
 func TestTalmControlplaneRender(t *testing.T) {
@@ -138,35 +139,30 @@ func TestTalmDarkBundleMirrorRender(t *testing.T) {
 	assertTextNotContains(t, rendered, "mirror.gcr.io", "dark render must not fall back to public mirrors")
 }
 
+// unionLockEntries derives the complete inventory (declared + rendered)
+// exactly as the imageset generator does.
+func unionLockEntries(t *testing.T) []string {
+	t.Helper()
+
+	union, err := imageset.Union(declaredLockEntries(t), renderedLockEntries(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return union
+}
+
 // imagesLockHosts returns the sorted, unique registry hosts referenced by
-// images.lock. The darkBundleMirror.registries list in values.yaml must
-// equal this set: an upstream host missing from the dark mirrors would make
-// nodes dial the internet (or fail) for a locked artifact.
+// the union inventory. The darkBundleMirror.registries list in values.yaml
+// must equal this set: an upstream host missing from the dark mirrors would
+// make nodes dial the internet (or fail) for a locked artifact.
 func imagesLockHosts(t *testing.T) []string {
 	t.Helper()
 
-	raw := readText(t, runfilePath("src/infrastructure/bootstrap/bundle/images.lock"))
-	hosts := map[string]bool{}
-	for _, line := range strings.Split(raw, "\n") {
-		ref := strings.TrimSpace(line)
-		if comment := strings.Index(ref, "#"); comment >= 0 {
-			ref = strings.TrimSpace(ref[:comment])
-		}
-		if ref == "" {
-			continue
-		}
-		host, _, found := strings.Cut(ref, "/")
-		if !found {
-			t.Fatalf("images.lock ref %q has no registry host", ref)
-		}
-		hosts[host] = true
+	hosts, err := imageset.Hosts(unionLockEntries(t))
+	if err != nil {
+		t.Fatal(err)
 	}
-	var out []string
-	for host := range hosts {
-		out = append(out, host)
-	}
-	sort.Strings(out)
-	return out
+	return hosts
 }
 
 // The dark mirror serves every host in one flat, host-stripped namespace
@@ -174,16 +170,8 @@ func imagesLockHosts(t *testing.T) []string {
 // refs from different hosts that share a repository path would collide on
 // the same served path with different content. Guard against it.
 func TestImagesLockNoHostStrippedPathCollision(t *testing.T) {
-	raw := readText(t, runfilePath("src/infrastructure/bootstrap/bundle/images.lock"))
-	seen := map[string]string{} // stripped repo path -> first full ref
-	for _, line := range strings.Split(raw, "\n") {
-		ref := strings.TrimSpace(line)
-		if comment := strings.Index(ref, "#"); comment >= 0 {
-			ref = strings.TrimSpace(ref[:comment])
-		}
-		if ref == "" {
-			continue
-		}
+	seen := map[string]string{} // stripped repo path -> first full repo
+	for _, ref := range unionLockEntries(t) {
 		nameAndTag, _, _ := strings.Cut(ref, "@")
 		repo := nameAndTag
 		if colon := strings.LastIndex(nameAndTag, ":"); colon > strings.LastIndex(nameAndTag, "/") {
@@ -207,7 +195,7 @@ func TestDarkBundleMirrorRegistriesMatchImagesLock(t *testing.T) {
 	sort.Strings(declared)
 	lockHosts := imagesLockHosts(t)
 	if !reflect.DeepEqual(declared, lockHosts) {
-		t.Fatalf("values.yaml darkBundleMirror.registries = %v, images.lock hosts = %v; the dark mirror set must equal the locked upstreams", declared, lockHosts)
+		t.Fatalf("values.yaml darkBundleMirror.registries = %v, union lock hosts = %v; the dark mirror set must equal the locked upstreams", declared, lockHosts)
 	}
 }
 

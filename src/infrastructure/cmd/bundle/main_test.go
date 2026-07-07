@@ -110,17 +110,18 @@ func TestHaulerManifestDeterministic(t *testing.T) {
 	}
 }
 
-// The production lock must project cleanly: every ref pinned, count preserved,
-// order preserved. This is the generator's contract with the Tier-1
-// conformance test that keeps the lock complete.
+// The production declared lock must project cleanly: every ref pinned,
+// count preserved, order preserved. The generated union lock obeys the same
+// invariants (enforced by //src/infrastructure/imageset and its Tier-1
+// tests), so a lock this tool accepts is a lock the union derivation built.
 func TestProductionImagesLockProjects(t *testing.T) {
-	path, err := runfiles.Rlocation("_main/src/infrastructure/bootstrap/bundle/images.lock")
+	path, err := runfiles.Rlocation("_main/src/infrastructure/bootstrap/bundle/images.declared.lock")
 	if err != nil {
-		t.Fatalf("locate images.lock runfile: %v", err)
+		t.Fatalf("locate images.declared.lock runfile: %v", err)
 	}
 	lock, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("read production images.lock: %v", err)
+		t.Fatalf("read production declared lock: %v", err)
 	}
 	refs, err := parseImagesLock(lock)
 	if err != nil {

@@ -200,7 +200,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: k6
-              image: grafana/k6@sha256:68e78d94140704ec4ee0cb7c5cf6cd12a32b7d310a6f98d94931ee9b0b9dc629 # 2.1.0
+              image: docker.io/grafana/k6@sha256:68e78d94140704ec4ee0cb7c5cf6cd12a32b7d310a6f98d94931ee9b0b9dc629 # 2.1.0
               imagePullPolicy: IfNotPresent
               args:
                 - run

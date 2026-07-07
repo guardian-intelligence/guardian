@@ -1,0 +1,37 @@
+# Companion to every Kargo promotion Stage: a pin-bump PR opened by the
+# guardian-promotions bot changes only the stage manifest (web.yaml,
+# keycloak.yaml, ...) — the artifact inventory is a GENERATED union of the
+# declared lock and rendered refs (see //src/infrastructure/imageset), so a
+# pin move needs no lock edit. This workflow only arms automerge; the bot is
+# untrusted either way — the required checks and branch protection decide
+# whether the PR merges (the site-gate's provenance verification included).
+#
+# Automerge is armed with the guardian-promotions App token, NOT
+# GITHUB_TOKEN: the eventual merge is attributed to the arming actor, and
+# pushes attributed to GITHUB_TOKEN do not trigger workflows — the main-push
+# workflows (image signing, images-lock-sign) must fire on the merge commit.
+name: promotion-automerge
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  arm:
+    if: github.event.pull_request.user.login == 'guardian-promotions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        id: app
+        with:
+          app-id: ${{ secrets.PROMOTIONS_APP_ID }}
+          private-key: ${{ secrets.PROMOTIONS_APP_PRIVATE_KEY }}
+
+      - name: Arm automerge
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: gh pr merge --auto --merge "${{ github.event.pull_request.number }}" --repo "${{ github.repository }}"

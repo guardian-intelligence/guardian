@@ -87,7 +87,7 @@ func main() {
 	var bundleManifestOut string
 	var verify bool
 	var bundleDir string
-	flag.StringVar(&imagesLock, "images-lock", "src/infrastructure/bootstrap/bundle/images.lock", "digest-pinned OCI artifact inventory")
+	flag.StringVar(&imagesLock, "images-lock", "", "digest-pinned OCI artifact inventory (the generated union lock from //src/infrastructure/cmd/imageset)")
 	flag.StringVar(&haulerManifestOut, "hauler-manifest-out", "", "path to write the generated content.hauler.cattle.io/v1 Images manifest")
 	flag.StringVar(&skipDigestsIn, "skip-digests-in", "", "optional OCI layout index.json; lock refs whose digest it already holds are omitted from the projection (true incremental resume)")
 	flag.StringVar(&haulPath, "haul-path", "", "built haul archive to record in the bundle manifest")
@@ -105,6 +105,9 @@ func main() {
 	}
 	if modes > 1 {
 		exitErr(errors.New("--hauler-manifest-out, --bundle-manifest-out, and --verify are separate modes; pass exactly one"))
+	}
+	if imagesLock == "" {
+		exitErr(errors.New("--images-lock is required (generate the union lock with //src/infrastructure/cmd/imageset)"))
 	}
 
 	lock, err := os.ReadFile(imagesLock)

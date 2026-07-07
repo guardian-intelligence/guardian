@@ -19,7 +19,7 @@ go_binary(
 go_test(
     name = "bundle_test",
     srcs = ["main_test.go"],
-    data = ["//src/infrastructure/bootstrap/bundle:images_lock"],
+    data = ["//src/infrastructure/bootstrap/bundle:images_declared_lock"],
     embed = [":bundle_lib"],
     deps = ["@rules_go//go/runfiles"],
 )

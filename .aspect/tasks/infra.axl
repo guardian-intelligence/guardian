@@ -20,23 +20,37 @@ COZYSTACK_INSTALLER_CHART = "oci://ghcr.io/cozystack/cozystack/cozy-installer"
 COZYSTACK_INSTALLER_VERSION = "1.5.2"
 BUNDLE_TARGET = "//src/infrastructure/cmd/bundle:bundle"
 HAULER_TARGET = "//src/tools/hauler:hauler"
-IMAGES_LOCK_PATH = "src/infrastructure/bootstrap/bundle/images.lock"
+IMAGESET_TARGET = "//src/infrastructure/cmd/imageset:imageset"
+DECLARED_LOCK_PATH = "src/infrastructure/bootstrap/bundle/images.declared.lock"
 COSIGN_FILE_TARGET = "//src/tools/cosign:cosign"
 ORAS_FILE_TARGET = "@oras_linux_amd64//:oras_file"
 
+# The complete artifact inventory is GENERATED: the union of the declared
+# lock and the image refs rendered from these trees (see
+# //src/infrastructure/imageset). Anything dirty among these inputs would
+# make the bundle manifest's provenance false.
+UNION_LOCK_INPUTS = [
+    DECLARED_LOCK_PATH,
+    "src/infrastructure/deployments",
+    "src/infrastructure/base",
+]
+
 # Supply-chain trust anchors (docs/supply-chain-design.md). The identity is
-# the CI workflow that signs images.lock on main; the trusted root is the
-# pinned Sigstore root so verification needs no TUF network fetch.
+# the CI workflow that derives and signs the union lock on main; the trusted
+# root is the pinned Sigstore root so verification needs no TUF network fetch.
 IMAGES_LOCK_SIGN_IDENTITY = "https://github.com/guardian-intelligence/guardian/.github/workflows/images-lock-sign.yml@refs/heads/main"
 SIGSTORE_OIDC_ISSUER = "https://token.actions.githubusercontent.com"
 SIGSTORE_TRUSTED_ROOT_PATH = "src/infrastructure/bootstrap/bundle/sigstore-trusted-root.json"
 SUPPLY_CHAIN_REPO = "ghcr.io/guardian-intelligence/supply-chain"
 
 # Gate every bundle build on the Tier-1 invariants that make the projection
-# trustworthy: talm_render_test carries the images.lock completeness checks,
-# bundle_test carries the projection contract (digest pinning, determinism).
+# trustworthy: talm_render_test carries the union-lock derivation checks
+# (declared well-formed, rendered digest-pinned, disjointness, dark-mirror
+# host coverage), imageset_test the extraction rules, bundle_test the
+# projection contract (digest pinning, determinism).
 BUNDLE_PRECONDITION_TESTS = [
     "//src/infrastructure/cmd/bundle:bundle_test",
+    "//src/infrastructure/imageset:imageset_test",
     "//src/infrastructure/tests:talm_render_test",
 ]
 
@@ -1329,13 +1343,32 @@ def _openbao_observability_drill_impl(ctx):
         label = "cozystack openbao observability drill",
     )
 
-def _project_manifest(ctx, out_path, skip_digests_in = None):
+def _derive_union_lock(ctx, out_path):
+    return checked_spawn(
+        ctx,
+        "bazelisk",
+        [
+            "run",
+            IMAGESET_TARGET,
+            "--",
+            "--declared",
+            ws_path(ctx, DECLARED_LOCK_PATH),
+            "--repo-root",
+            ws_path(ctx),
+            "--out",
+            out_path,
+        ],
+        cwd = ws_path(ctx),
+        label = "derive union images lock (declared + rendered)",
+    )
+
+def _project_manifest(ctx, union_lock, out_path, skip_digests_in = None):
     project_args = [
         "run",
         BUNDLE_TARGET,
         "--",
         "--images-lock",
-        ws_path(ctx, IMAGES_LOCK_PATH),
+        union_lock,
         "--hauler-manifest-out",
         out_path,
     ]
@@ -1346,30 +1379,30 @@ def _project_manifest(ctx, out_path, skip_digests_in = None):
         "bazelisk",
         project_args,
         cwd = ws_path(ctx),
-        label = "project images.lock into hauler manifest",
+        label = "project union lock into hauler manifest",
     )
 
 def _bundle_impl(ctx):
     out_dir = _workspace_path_if_relative(ctx, ctx.args.out_dir)
     resuming = ctx.std.fs.exists(out_dir)
     if resuming and not ctx.args.resume:
-        ctx.std.io.stderr.write("ERROR: " + out_dir + " already exists. Syncing into an existing store can carry artifacts that are no longer in images.lock into the haul. Remove it for a clean build, or pass --resume to continue an interrupted sync of the SAME lock (verified by manifest comparison).\n")
+        ctx.std.io.stderr.write("ERROR: " + out_dir + " already exists. Syncing into an existing store can carry artifacts that are no longer in the union lock into the haul. Remove it for a clean build, or pass --resume to continue an interrupted sync of the SAME lock (verified by union comparison).\n")
         return 1
 
-    # The recorded revision must actually describe the lock that gets
-    # projected, synced, and hashed; a dirty lock would make the bundle
-    # manifest's provenance false.
+    # The recorded revision must actually describe the union that gets
+    # derived, projected, synced, and hashed; a dirty union input would make
+    # the bundle manifest's provenance false.
     lock_status = _capture_stdout(
         ctx,
         "git",
-        ["status", "--porcelain", "--", IMAGES_LOCK_PATH],
+        ["status", "--porcelain", "--"] + UNION_LOCK_INPUTS,
         cwd = ws_path(ctx),
-        label = "git status " + IMAGES_LOCK_PATH,
+        label = "git status of union lock inputs",
     )
     if lock_status == None:
         return 1
     if lock_status != "":
-        ctx.std.io.stderr.write("ERROR: " + IMAGES_LOCK_PATH + " has uncommitted changes; the bundle manifest would attribute the haul to a revision whose lock differs. Commit the lock first.\n")
+        ctx.std.io.stderr.write("ERROR: union lock inputs (declared lock or manifest trees) have uncommitted changes; the bundle manifest would attribute the haul to a revision whose inventory differs. Commit first:\n" + lock_status + "\n")
         return 1
 
     rc = checked_spawn(
@@ -1377,7 +1410,7 @@ def _bundle_impl(ctx):
         "bazelisk",
         ["test"] + BUNDLE_PRECONDITION_TESTS,
         cwd = ws_path(ctx),
-        label = "bundle preconditions: images.lock completeness + projection contract",
+        label = "bundle preconditions: union lock derivation + projection contract",
     )
     if rc != 0:
         return rc
@@ -1392,22 +1425,24 @@ def _bundle_impl(ctx):
     if revision == None:
         return 1
 
+    union_lock = out_dir + "/images.lock"
     hauler_manifest = out_dir + "/hauler-manifest.yaml"
     sync_manifest = hauler_manifest
     if resuming:
-        if not ctx.std.fs.exists(hauler_manifest):
-            ctx.std.io.stderr.write("ERROR: " + out_dir + " exists but holds no hauler-manifest.yaml — it is not an interrupted bundle (or was interrupted before projection). Remove the directory and build fresh.\n")
+        if not ctx.std.fs.exists(union_lock):
+            ctx.std.io.stderr.write("ERROR: " + out_dir + " exists but holds no images.lock — it is not an interrupted bundle (or was interrupted before derivation). Remove the directory and build fresh.\n")
             return 1
-        fresh = hauler_manifest + ".fresh"
-        rc = _project_manifest(ctx, fresh)
+        fresh = union_lock + ".fresh"
+        rc = _derive_union_lock(ctx, fresh)
         if rc != 0:
             return rc
 
-        # A resume is only safe when the interrupted bundle was built from the
-        # same lock: the projection is deterministic, so byte-compare it.
-        if _capture_success(ctx, "cmp", ["-s", hauler_manifest, fresh], label = "compare projected manifest with the interrupted bundle's") != 0:
+        # A resume is only safe when the interrupted bundle was built from
+        # the same inventory: the derivation is deterministic, so
+        # byte-compare the union.
+        if _capture_success(ctx, "cmp", ["-s", union_lock, fresh], label = "compare derived union with the interrupted bundle's") != 0:
             _capture_success(ctx, "rm", ["-f", fresh], label = "drop comparison copy")
-            ctx.std.io.stderr.write("ERROR: images.lock changed since the bundle in " + out_dir + " was started; its store may hold refs no longer in the lock. Remove the directory and build fresh.\n")
+            ctx.std.io.stderr.write("ERROR: the union lock inputs changed since the bundle in " + out_dir + " was started; its store may hold refs no longer in the inventory. Remove the directory and build fresh.\n")
             return 1
         rc = _capture_success(ctx, "rm", [fresh], label = "drop comparison copy")
         if rc != 0:
@@ -1420,13 +1455,20 @@ def _bundle_impl(ctx):
         store_index = out_dir + "/store/index.json"
         if ctx.std.fs.exists(store_index):
             sync_manifest = out_dir + "/hauler-manifest.resume.yaml"
-            rc = _project_manifest(ctx, sync_manifest, skip_digests_in = store_index)
+            rc = _project_manifest(ctx, union_lock, sync_manifest, skip_digests_in = store_index)
             if rc != 0:
                 return rc
     else:
-        rc = _project_manifest(ctx, hauler_manifest)
+        rc = _derive_union_lock(ctx, union_lock)
         if rc != 0:
             return rc
+
+    # The hauler manifest is a pure function of the union lock; (re)project
+    # it unconditionally so the drive always carries the pair it was synced
+    # from.
+    rc = _project_manifest(ctx, union_lock, hauler_manifest)
+    if rc != 0:
+        return rc
 
     rc = checked_spawn(
         ctx,
@@ -1468,16 +1510,16 @@ def _bundle_impl(ctx):
     if rc != 0:
         return rc
 
-    # The sync can run for hours; re-project and byte-compare so a lock edit
-    # made mid-sync cannot produce a bundle manifest describing a lock the
-    # haul was not synced from.
-    verify = hauler_manifest + ".verify"
-    rc = _project_manifest(ctx, verify)
+    # The sync can run for hours; re-derive and byte-compare so an inventory
+    # edit made mid-sync cannot produce a bundle manifest describing a union
+    # the haul was not synced from.
+    verify = union_lock + ".verify"
+    rc = _derive_union_lock(ctx, verify)
     if rc != 0:
         return rc
-    if _capture_success(ctx, "cmp", ["-s", hauler_manifest, verify], label = "verify images.lock unchanged across the sync") != 0:
+    if _capture_success(ctx, "cmp", ["-s", union_lock, verify], label = "verify union lock inputs unchanged across the sync") != 0:
         _capture_success(ctx, "rm", ["-f", verify], label = "drop verification copy")
-        ctx.std.io.stderr.write("ERROR: images.lock changed while the bundle was building; the haul does not match the current lock. Remove " + out_dir + " and build fresh.\n")
+        ctx.std.io.stderr.write("ERROR: the union lock inputs changed while the bundle was building; the haul does not match the current inventory. Remove " + out_dir + " and build fresh.\n")
         return 1
     rc = _capture_success(ctx, "rm", [verify], label = "drop verification copy")
     if rc != 0:
@@ -1491,7 +1533,7 @@ def _bundle_impl(ctx):
             BUNDLE_TARGET,
             "--",
             "--images-lock",
-            ws_path(ctx, IMAGES_LOCK_PATH),
+            union_lock,
             "--haul-path",
             out_dir + "/haul.tar.zst",
             "--revision",
@@ -1506,10 +1548,11 @@ def _bundle_impl(ctx):
         return rc
 
     # Supply-chain gate: the drive must carry CI's signature over the exact
-    # lock this haul was synced from. Fetch the signature bundle keyed by the
-    # lock's sha256 (published by the images-lock-sign workflow on main),
-    # verify it against the pinned identity and Sigstore root, then run the
-    # same offline verification the operator repeats at dark bring-up.
+    # union lock this haul was synced from. Fetch the signature bundle keyed
+    # by the union's sha256 (published by the images-lock-sign workflow on
+    # main, which derives the identical union from the same revision), verify
+    # it against the pinned identity and Sigstore root, then run the same
+    # offline verification the operator repeats at dark bring-up.
     oras = _oras_path(ctx)
     if oras == None:
         return 1
@@ -1519,8 +1562,8 @@ def _bundle_impl(ctx):
     lockhash = _capture_stdout(
         ctx,
         "sha256sum",
-        [ws_path(ctx, IMAGES_LOCK_PATH)],
-        label = "hash images.lock for the signature lookup",
+        [union_lock],
+        label = "hash the union lock for the signature lookup",
     )
     if lockhash == None:
         return 1
@@ -1538,7 +1581,7 @@ def _bundle_impl(ctx):
         label = "fetch CI signature bundle for images.lock",
     )
     if rc != 0:
-        ctx.std.io.stderr.write("ERROR: could not fetch the CI signature bundle for images.lock sha256 " + lockhash + ". Most common cause: this exact lock has not been signed by the images-lock-sign workflow on main (merge the lock or dispatch the workflow). Also check that the local docker config is authenticated to ghcr.io — the supply-chain package is private.\n")
+        ctx.std.io.stderr.write("ERROR: could not fetch the CI signature bundle for union lock sha256 " + lockhash + ". Most common cause: this exact union has not been signed by the images-lock-sign workflow on main (merge the inventory change or dispatch the workflow). Also check that the local docker config is authenticated to ghcr.io — the supply-chain package is private.\n")
         return 1
     rc = checked_spawn(
         ctx,
@@ -1553,10 +1596,10 @@ def _bundle_impl(ctx):
             SIGSTORE_OIDC_ISSUER,
             "--trusted-root",
             ws_path(ctx, SIGSTORE_TRUSTED_ROOT_PATH),
-            ws_path(ctx, IMAGES_LOCK_PATH),
+            union_lock,
         ],
         cwd = ws_path(ctx),
-        label = "verify images.lock signature (pinned identity + Sigstore root)",
+        label = "verify union lock signature (pinned identity + Sigstore root)",
     )
     if rc != 0:
         # Do not leave a drive dir that looks complete with a signature that
@@ -1576,7 +1619,7 @@ def _bundle_impl(ctx):
             "--bundle-dir",
             out_dir,
             "--images-lock",
-            ws_path(ctx, IMAGES_LOCK_PATH),
+            union_lock,
             "--revision",
             revision,
         ],
@@ -1682,10 +1725,10 @@ bundle = task(
     implementation = _bundle_impl,
     name = "bundle",
     group = ["infra"],
-    summary = "Build the offline bundle: project images.lock into a hauler manifest, sync every locked artifact into a store, save the haul archive, record the bundle manifest (revision + digests), fetch and verify CI's signature over the lock, and run the offline hash verification the operator repeats at dark bring-up. Needs network; docker.io refs practically require `hauler login` credentials (anonymous pulls are rate-limited to ~10/hour); the signature fetch needs a ghcr-authenticated docker config.",
+    summary = "Build the offline bundle: derive the union images lock (declared + rendered), project it into a hauler manifest, sync every locked artifact into a store, save the haul archive, record the bundle manifest (revision + digests), fetch and verify CI's signature over the union, and run the offline hash verification the operator repeats at dark bring-up. Needs network; docker.io refs practically require `hauler login` credentials (anonymous pulls are rate-limited to ~10/hour); the signature fetch needs a ghcr-authenticated docker config.",
     args = {
         "out_dir": args.string(default = "dist/bundle", description = "Output directory for the bundle. Relative paths resolve against the workspace root; absolute paths (e.g. a mounted drive) are used as-is."),
-        "resume": args.boolean(default = False, description = "Continue an interrupted sync into an existing out_dir. Refused unless the projected manifest is byte-identical to the interrupted bundle's (same images.lock); only refs missing from the store are re-fetched."),
+        "resume": args.boolean(default = False, description = "Continue an interrupted sync into an existing out_dir. Refused unless the derived union lock is byte-identical to the interrupted bundle's (same inventory); only refs missing from the store are re-fetched."),
     },
 )
 

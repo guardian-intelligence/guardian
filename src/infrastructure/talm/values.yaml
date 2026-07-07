@@ -87,14 +87,14 @@ image: "ghcr.io/cozystack/cozystack/talos:v1.13.0@sha256:c2c092ad742e8bdd4af6366
 # Dark-uplink bundle mirror, OFF in steady state. Enabling it is a
 # bootstrap-only compromise entered and exited via PRs (pre-drill flip on,
 # aftermath flip off — regenerate the node configs both times): every
-# upstream registry the images.lock inventory references is mirrored to the
+# upstream registry the union lock inventory references is mirrored to the
 # haul-served registry (`hauler store serve registry` over
 # `aspect infra bundle` output) with skipFallback, so a miss fails loudly
 # instead of silently reaching the internet, and node NTP is pointed at the
 # mirror host (a dark node has no other time source; Cozystack's air-gap
 # guidance requires local NTP). The registries list must equal the set of
-# hosts in src/infrastructure/bootstrap/bundle/images.lock — enforced by the
-# infra conformance test.
+# hosts in the generated union lock (images.declared.lock + rendered refs)
+# — enforced by the infra conformance test.
 darkBundleMirror:
   enabled: false
   endpoint: http://148.113.198.223:5000

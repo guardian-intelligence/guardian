@@ -83,7 +83,7 @@ Both checks run on every PR (`site-gate` classifies the diff itself and
 exits fast when nothing relevant changed — required checks cannot be
 path-filtered without hanging unrelated PRs). The `guardian-promotions`
 GitHub App (private key in operator custody; also in the repo Actions
-secrets for promotion-lock-sync) must stay scoped to Contents + Pull
+secrets for promotion-automerge) must stay scoped to Contents + Pull
 requests read/write.
 
 ## Watching the cluster converge (`aspect infra watch`)
