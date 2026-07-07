@@ -399,6 +399,7 @@ func TestFluxSubstitutionSafetyConformance(t *testing.T) {
 		"src/infrastructure/deployments/iam/beta",
 		"src/infrastructure/deployments/iam/gamma",
 		"src/infrastructure/deployments/iam/prod",
+		"src/infrastructure/deployments/products",
 		"src/infrastructure/deployments/verself-runner",
 	}
 	// ${GUARDIAN_SOURCE_KIND...} / ${GUARDIAN_SOURCE_NAME...} are the declared
@@ -408,6 +409,11 @@ func TestFluxSubstitutionSafetyConformance(t *testing.T) {
 
 	for _, root := range roots {
 		dir := filepath.Dir(runfilePath(root + "/kustomization.yaml"))
+		if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+			dir = filepath.Join(repoRootFromRunfiles(t), root)
+		} else if err != nil {
+			t.Fatalf("stat %s: %v", dir, err)
+		}
 		walkYAMLFiles(t, dir, func(path string, docs []map[string]interface{}) {
 			for _, doc := range docs {
 				annotations := mapValue(mapValue(doc["metadata"])["annotations"])

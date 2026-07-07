@@ -41,11 +41,14 @@ spec:
       max_slot_wal_keep_size: 4GB
   users:
     cockpit: {}
+    electric:
+      replication: true
   databases:
     cockpit:
       roles:
         admin:
           - cockpit
+          - electric
   quorum:
     minSyncReplicas: 1
     maxSyncReplicas: 2
