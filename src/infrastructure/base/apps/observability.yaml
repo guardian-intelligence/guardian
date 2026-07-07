@@ -26,13 +26,19 @@ spec:
         maxAllowed:
           cpu: "2"
           memory: 512Mi
+      # Floor raised after 2026-07-07: a vmstorage admitted at the VPA's
+      # low-water recommendation (200m CPU) throttled into a silent
+      # ingestion stall — writes 2XX'd and spooled while half of new
+      # series never became queryable. The floor must carry the live
+      # scrape load on its own; the ceiling leaves OOM headroom for
+      # series-registration storms (mass pod churn).
       vmstorage:
         minAllowed:
-          cpu: 50m
-          memory: 256Mi
-        maxAllowed:
-          cpu: 500m
+          cpu: 250m
           memory: 1Gi
+        maxAllowed:
+          cpu: "1"
+          memory: 2Gi
     - name: longterm
       retentionPeriod: 14d
       deduplicationInterval: 5m
