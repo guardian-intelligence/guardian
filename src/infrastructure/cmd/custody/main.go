@@ -237,7 +237,7 @@ func cmdCreate(opts *options) error {
 }
 
 func proveRoundTrip(opts *options, env []string, staged string) error {
-	snap, err := latestSnapshot(opts)
+	snap, err := latestSnapshot(opts, env)
 	if err != nil {
 		return err
 	}
@@ -494,6 +494,25 @@ func stageBundle(opts *options, src *sources) (string, bool, error) {
 	return dir, true, nil
 }
 
+// promptRepoPassword prompts once for an existing repository's password and
+// returns it as a RESTIC_PASSWORD env entry, so a command's several restic
+// invocations (check, snapshots, ls, restore...) do not each re-prompt.
+// Returns a nil env — restic sources the password itself — when RESTIC_PASSWORD
+// is already set or there is no terminal to prompt. The password rides in the
+// environment only; see the runRestic note on the accepted /proc visibility.
+func promptRepoPassword(opts *options) ([]string, error) {
+	if os.Getenv("RESTIC_PASSWORD") != "" || !term.IsTerminal(int(os.Stdin.Fd())) {
+		return nil, nil
+	}
+	fmt.Fprint(opts.stdout, "Custody repository password: ")
+	password, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Fprintln(opts.stdout)
+	if err != nil {
+		return nil, err
+	}
+	return []string{"RESTIC_PASSWORD=" + string(password)}, nil
+}
+
 // ensureRepo initializes the restic repository on first use, owning the
 // password prompt so a length floor and double entry can be enforced. The
 // password is handed to restic via the environment only; it never touches
@@ -502,16 +521,7 @@ func ensureRepo(opts *options) ([]string, error) {
 	if _, err := os.Stat(filepath.Join(opts.repo, "config")); err == nil {
 		// Existing repo: prompt once here so backup and the follow-up check
 		// don't each ask; with RESTIC_PASSWORD set restic inherits it.
-		if os.Getenv("RESTIC_PASSWORD") != "" || !term.IsTerminal(int(os.Stdin.Fd())) {
-			return nil, nil
-		}
-		fmt.Fprint(opts.stdout, "Custody repository password: ")
-		password, err := term.ReadPassword(int(os.Stdin.Fd()))
-		fmt.Fprintln(opts.stdout)
-		if err != nil {
-			return nil, err
-		}
-		return []string{"RESTIC_PASSWORD=" + string(password)}, nil
+		return promptRepoPassword(opts)
 	}
 	if err := os.MkdirAll(opts.repo, 0o700); err != nil {
 		return nil, err
@@ -577,8 +587,8 @@ type snapshot struct {
 	Paths []string  `json:"paths"`
 }
 
-func latestSnapshot(opts *options) (*snapshot, error) {
-	out, err := opts.runOut(opts, nil, "snapshots", "latest", "--json")
+func latestSnapshot(opts *options, env []string) (*snapshot, error) {
+	out, err := opts.runOut(opts, env, "snapshots", "latest", "--json")
 	if err != nil {
 		return nil, fmt.Errorf("restic snapshots: %w", err)
 	}
@@ -604,19 +614,23 @@ func latestSnapshot(opts *options) (*snapshot, error) {
 }
 
 func cmdVerify(opts *options) error {
+	env, err := promptRepoPassword(opts)
+	if err != nil {
+		return err
+	}
 	checkArgs := []string{"check"}
 	if opts.readData {
 		checkArgs = append(checkArgs, "--read-data")
 	}
-	if err := opts.run(opts, nil, checkArgs...); err != nil {
+	if err := opts.run(opts, env, checkArgs...); err != nil {
 		return fmt.Errorf("restic check: %w", err)
 	}
 
-	snap, err := latestSnapshot(opts)
+	snap, err := latestSnapshot(opts, env)
 	if err != nil {
 		return err
 	}
-	out, err := opts.runOut(opts, nil, "ls", "--json", snap.ID)
+	out, err := opts.runOut(opts, env, "ls", "--json", snap.ID)
 	if err != nil {
 		return fmt.Errorf("restic ls: %w", err)
 	}
@@ -673,7 +687,11 @@ func cmdStatus(opts *options) error {
 	if _, err := os.Stat(filepath.Join(opts.repo, "config")); err != nil {
 		return fmt.Errorf("no custody repository at %s — run `aspect infra custody --action create`", opts.repo)
 	}
-	snap, err := latestSnapshot(opts)
+	env, err := promptRepoPassword(opts)
+	if err != nil {
+		return err
+	}
+	snap, err := latestSnapshot(opts, env)
 	if err != nil {
 		return err
 	}
@@ -717,7 +735,11 @@ func cmdRestore(opts *options) error {
 	if _, err := os.Stat(opts.bundleDir); err == nil {
 		return fmt.Errorf("%s already exists; wipe it first (`aspect infra custody --action wipe`) so stale and fresh state cannot mix", opts.bundleDir)
 	}
-	snap, err := latestSnapshot(opts)
+	env, err := promptRepoPassword(opts)
+	if err != nil {
+		return err
+	}
+	snap, err := latestSnapshot(opts, env)
 	if err != nil {
 		return err
 	}
@@ -733,7 +755,7 @@ func cmdRestore(opts *options) error {
 	if len(snap.Paths) == 0 {
 		return fmt.Errorf("snapshot %s records no paths; refusing to restore blind", snap.ID[:8])
 	}
-	if err := opts.run(opts, nil, "restore", snap.ID, "--target", "/"); err != nil {
+	if err := opts.run(opts, env, "restore", snap.ID, "--target", "/"); err != nil {
 		return fmt.Errorf("restic restore: %w", err)
 	}
 	if err := os.Chmod(opts.bundleDir, 0o700); err != nil {
