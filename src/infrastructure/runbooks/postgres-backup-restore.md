@@ -61,6 +61,13 @@ EOF
 #    kubectl exec <primary> -c postgres -- psql -U postgres -c "SELECT pg_switch_wal();"
 # 5. Verify begin_wal..end_wal objects exist in R2 before trusting it
 #    (compare backup.info begin_wal/end_wal against wals/ listing).
+#    pg_stat_archiver can show zero failures while a segment inside the
+#    second backup's begin_wal..end_wal range is absent from R2. Probe
+#    begin_wal with barman-cloud-wal-restore; if it is absent and the
+#    segment is still on the primary, archive it from pg_wal using the same
+#    destination/serverName:
+#    barman-cloud-wal-restore <destination-url> <serverName> <begin_wal> /tmp/<begin_wal>
+#    barman-cloud-wal-archive --gzip <destination-url> <serverName> /var/lib/postgresql/data/pgdata/pg_wal/<wal>
 ```
 
 ## Restore drill (to-copy, non-destructive)

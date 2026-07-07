@@ -175,6 +175,7 @@ spec:
         - https://guardianintelligence.org/
         - https://guardianintelligence.org/letters
         - https://guardianintelligence.org/letters/dear-shovon
+        - https://guardianintelligence.org/electric/v1/shape?table=status_heartbeat&offset=-1
       labels:
         probe_class: edge
         probe_namespace: tenant-guardian-prod
@@ -212,7 +213,7 @@ spec:
               service passes, the problem is between the user and the
               ingress (DNS, Cloudflare, LB, origin ingress).
         - alert: ProbeAbsent
-          # 24 targets x 15s: total silence means the exporter, vmagent, or
+          # 25 targets x 15s: total silence means the exporter, vmagent, or
           # the scrape path broke — not that traffic is slow.
           expr: absent(probe_success)
           for: 10m

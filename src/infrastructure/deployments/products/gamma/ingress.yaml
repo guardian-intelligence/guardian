@@ -1,0 +1,26 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: electric
+  namespace: tenant-guardian-gamma
+  labels:
+    app.kubernetes.io/name: electric
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: cockpit
+    guardian.dev/stage: gamma
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/use-regex: "true"
+spec:
+  ingressClassName: tenant-root
+  rules:
+    - host: gamma.guardianintelligence.org
+      http:
+        paths:
+          - path: /electric(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: electric
+                port:
+                  number: 80

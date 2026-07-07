@@ -1,0 +1,66 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cockpit-ddl-apply
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: cockpit-ddl
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: cockpit
+    guardian.dev/stage: prod
+  annotations:
+    kustomize.toolkit.fluxcd.io/force: Enabled
+spec:
+  backoffLimit: 20
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cockpit-ddl
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/product: cockpit
+        guardian.dev/stage: prod
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: apply
+          image: ghcr.io/cloudnative-pg/postgresql:18.1@sha256:cc78f0c280978dd93fa6f49ce6cef60015cf4b56fd0e6a47c8ca49020b875f74
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /ddl/cockpit.sql
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-products-credentials
+                  key: cockpit
+            - name: DATABASE_URL
+              value: postgresql://cockpit:$(PGPASSWORD)@postgres-products-rw.tenant-guardian-prod.svc:5432/cockpit?sslmode=require
+            - name: GUARDIAN_DDL_REVISION
+              value: "1"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: ddl
+              mountPath: /ddl
+              readOnly: true
+      volumes:
+        - name: ddl
+          configMap:
+            name: cockpit-ddl

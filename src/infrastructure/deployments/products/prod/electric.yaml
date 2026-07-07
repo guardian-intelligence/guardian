@@ -1,0 +1,100 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: electric
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: electric
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: cockpit
+    guardian.dev/stage: prod
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: electric
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: electric
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/product: cockpit
+        guardian.dev/stage: prod
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: electric
+          image: docker.io/electricsql/electric:1.7.6@sha256:4b0746aff922a3b05c631a71623636d5767792a9362f20a9710998781feb5436
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-products-credentials
+                  key: electric
+            - name: DATABASE_URL
+              value: postgresql://electric:$(PGPASSWORD)@postgres-products-rw.tenant-guardian-prod.svc:5432/cockpit?sslmode=require
+            - name: ELECTRIC_DB_POOL_SIZE
+              value: "20"
+            # Shape logs are rebuildable from Postgres; a pod reschedule or
+            # failover triggers re-snapshot by design.
+            - name: ELECTRIC_STORAGE_DIR
+              value: /var/lib/electric
+            # The shape API serves the cockpit database only, which is
+            # public-status-page data by design; the database contains
+            # nothing else and the ingress exposes read paths only.
+            - name: ELECTRIC_INSECURE
+              value: "true"
+          ports:
+            - name: http
+              containerPort: 3000
+          readinessProbe:
+            httpGet:
+              path: /v1/health
+              port: 3000
+          livenessProbe:
+            httpGet:
+              path: /v1/health
+              port: 3000
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: shape-log
+              mountPath: /var/lib/electric
+      volumes:
+        - name: shape-log
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: electric
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: electric
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: cockpit
+    guardian.dev/stage: prod
+spec:
+  selector:
+    app.kubernetes.io/name: electric
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000
