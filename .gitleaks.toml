@@ -41,5 +41,6 @@ description = "operator custody env file"
 path = '''custody\.env$'''
 
 [allowlist]
-description = "Synthetic fixtures: clearly-fake PEM bodies in unit tests (not-a-real-key)"
+description = "Synthetic fixtures (clearly-fake PEM bodies in unit tests) and dark-bundle build output (pinned public image blobs; not tracked, scanned upstream)"
+paths = ['''^dist/''']
 regexes = ['''-----BEGIN PRIVATE KEY-----\\nnot-a-real''']
