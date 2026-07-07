@@ -29,7 +29,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: apply
-          image: ghcr.io/cloudnative-pg/postgresql:18.1@sha256:cc78f0c280978dd93fa6f49ce6cef60015cf4b56fd0e6a47c8ca49020b875f74
+          image: docker.io/library/postgres:18.1@sha256:1090bc3a8ccfb0b55f78a494d76f8d603434f7e4553543d6e807bc7bd6bbd17f
           command:
             - /bin/sh
             - -ec
