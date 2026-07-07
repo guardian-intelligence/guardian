@@ -463,7 +463,7 @@ func TestLatestSnapshotPicksNewestAcrossGroups(t *testing.T) {
 		"snapshots": []byte(`[{"id":"bbbbbbbb1111","time":"2026-07-06T00:00:00Z"},{"id":"aaaaaaaa2222","time":"2026-07-01T00:00:00Z"}]`),
 	}}
 	opts := testOptions(t, fake)
-	snap, err := latestSnapshot(opts)
+	snap, err := latestSnapshot(opts, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -475,11 +475,11 @@ func TestLatestSnapshotPicksNewestAcrossGroups(t *testing.T) {
 func TestLatestSnapshotRejectsMalformedOutput(t *testing.T) {
 	fake := &fakeRestic{outputs: map[string][]byte{"snapshots": []byte(`not json`)}}
 	opts := testOptions(t, fake)
-	if _, err := latestSnapshot(opts); err == nil || !strings.Contains(err.Error(), "parsing") {
+	if _, err := latestSnapshot(opts, nil); err == nil || !strings.Contains(err.Error(), "parsing") {
 		t.Fatalf("want parse error, got %v", err)
 	}
 	fake.outputs["snapshots"] = []byte(`[{"id":"abc","time":"2026-07-07T00:00:00Z"}]`)
-	if _, err := latestSnapshot(opts); err == nil || !strings.Contains(err.Error(), "malformed snapshot id") {
+	if _, err := latestSnapshot(opts, nil); err == nil || !strings.Contains(err.Error(), "malformed snapshot id") {
 		t.Fatalf("want malformed-id error (no slice panic), got %v", err)
 	}
 }
