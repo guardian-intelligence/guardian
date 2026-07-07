@@ -28,9 +28,19 @@ CREATE TABLE IF NOT EXISTS guardian_analytics.events
     path           LowCardinality(String) CODEC(ZSTD(1)),
     referrer       LowCardinality(String) CODEC(ZSTD(1)),
     ua             LowCardinality(String) CODEC(ZSTD(1)),
+    -- Parsed from ua at ingest; the raw string stays for re-derivation.
+    device_class   LowCardinality(String) CODEC(ZSTD(1)),
+    os_family      LowCardinality(String) CODEC(ZSTD(1)),
+    browser_family LowCardinality(String) CODEC(ZSTD(1)),
 
-    client_ip      IPv6 CODEC(ZSTD(1)),
+    -- Raw IP is abuse forensics only: the column TTL zeroes it at 90 days
+    -- while the derived country/asn/device fields live the row's full 25
+    -- months. Derivations happen at ingest, so nothing dies with the IP.
+    client_ip      IPv6 CODEC(ZSTD(1)) TTL toDateTime(server_ts) + INTERVAL 90 DAY,
     ip_source      LowCardinality(String) CODEC(ZSTD(1)),
+    -- CF-IPCountry via the verify-gated ingress map (edge-observed);
+    -- asn resolved at ingest from the image-baked BGP snapshot (fresh as
+    -- of the last snapshot refresh, frozen on the row thereafter).
     country        LowCardinality(String) CODEC(ZSTD(1)),
     asn            UInt32 CODEC(T64, ZSTD(1)),
 

@@ -46,9 +46,21 @@ func newTestStack(t *testing.T) (*httptest.Server, *captureSink) {
 		t.Fatal(err)
 	}
 	svc := &eventService{batch: b, now: func() time.Time { return time.UnixMilli(1_800_000_000_000) }, validate: v}
-	srv := httptest.NewServer(newHandler(svc))
+	srv := httptest.NewServer(newHandler(svc, testASNTable(t)))
 	t.Cleanup(srv.Close)
 	return srv, sink
+}
+
+// testASNTable covers the documentation ranges the trust tests send.
+func testASNTable(t *testing.T) *asnTable {
+	t.Helper()
+	tab, err := loadASNTable(writeGzTSV(t,
+		"203.0.113.0\t203.0.113.255\t64496\tZZ\tDOC-AS\n"+
+			"2001:db8::\t2001:db8:ffff:ffff:ffff:ffff:ffff:ffff\t64500\tZZ\tDOC6-AS\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tab
 }
 
 func publishClient(srv *httptest.Server, opts ...connect.ClientOption) analyticsv1connect.EventServiceClient {
@@ -127,6 +139,7 @@ func TestTrustTierDerivation(t *testing.T) {
 	// controller's proxySetHeaders overwrite; simulate the forged-direct
 	// case by setting the IP header without the source header.
 	forged.Header().Set("X-Guardian-Client-Ip", "203.0.113.99")
+	forged.Header().Set("X-Guardian-Client-Country", "US")
 	if _, err := publishClient(srv).Publish(context.Background(), forged); err != nil {
 		t.Fatal(err)
 	}
@@ -137,12 +150,16 @@ func TestTrustTierDerivation(t *testing.T) {
 	if rows[0].IPSource != "" || rows[0].ClientIP.String() != "::" {
 		t.Fatalf("forged: ip=%s source=%q, want unspecified/empty", rows[0].ClientIP, rows[0].IPSource)
 	}
+	if rows[0].Country != "" || rows[0].ASN != 0 {
+		t.Fatalf("forged: country=%q asn=%d, want empty/0", rows[0].Country, rows[0].ASN)
+	}
 
 	verified := connect.NewRequest(&analyticsv1.PublishRequest{
 		SentAtUnixMs: 1, Events: []*analyticsv1.Event{{Name: "page_view", Path: "/"}},
 	})
 	verified.Header().Set("X-Guardian-Client-Ip", "2001:db8::7")
 	verified.Header().Set("X-Guardian-Client-Ip-Source", "cloudflare")
+	verified.Header().Set("X-Guardian-Client-Country", "CA")
 	if _, err := publishClient(srv).Publish(context.Background(), verified); err != nil {
 		t.Fatal(err)
 	}
@@ -150,6 +167,33 @@ func TestTrustTierDerivation(t *testing.T) {
 	last := rows[len(rows)-1]
 	if last.TrustTier != tierEdgeVerified || last.IPSource != "cloudflare" || last.ClientIP.String() != "2001:db8::7" {
 		t.Fatalf("verified: tier=%d ip=%s source=%q", last.TrustTier, last.ClientIP, last.IPSource)
+	}
+	if last.Country != "CA" || last.ASN != 64500 {
+		t.Fatalf("verified: country=%q asn=%d, want CA/64500", last.Country, last.ASN)
+	}
+}
+
+// The verified-path enrichment must also hold for v4 clients: the ASN table
+// stores v4 ranges v4-mapped, and the lookup key is the mapToV6-normalized
+// client address.
+func TestEnrichmentIPv4(t *testing.T) {
+	srv, sink := newTestStack(t)
+	req := connect.NewRequest(&analyticsv1.PublishRequest{
+		SentAtUnixMs: 1, Events: []*analyticsv1.Event{{Name: "page_view", Path: "/"}},
+	})
+	req.Header().Set("X-Guardian-Client-Ip", "203.0.113.99")
+	req.Header().Set("X-Guardian-Client-Ip-Source", "cloudflare")
+	req.Header().Set("X-Guardian-Client-Country", "T1")
+	req.Header().Set("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1")
+	if _, err := publishClient(srv).Publish(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	row := waitRows(t, sink, 1)[0]
+	if row.Country != "T1" || row.ASN != 64496 {
+		t.Fatalf("country=%q asn=%d, want T1/64496", row.Country, row.ASN)
+	}
+	if row.DeviceClass != "mobile" || row.OSFamily != "iOS" || row.BrowserFamily != "Safari" {
+		t.Fatalf("device=%q os=%q browser=%q, want mobile/iOS/Safari", row.DeviceClass, row.OSFamily, row.BrowserFamily)
 	}
 }
 

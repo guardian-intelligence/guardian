@@ -30,7 +30,10 @@ data:
         path           LowCardinality(String) CODEC(ZSTD(1)),
         referrer       LowCardinality(String) CODEC(ZSTD(1)),
         ua             LowCardinality(String) CODEC(ZSTD(1)),
-        client_ip      IPv6 CODEC(ZSTD(1)),
+        device_class   LowCardinality(String) CODEC(ZSTD(1)),
+        os_family      LowCardinality(String) CODEC(ZSTD(1)),
+        browser_family LowCardinality(String) CODEC(ZSTD(1)),
+        client_ip      IPv6 CODEC(ZSTD(1)) TTL toDateTime(server_ts) + INTERVAL 90 DAY,
         ip_source      LowCardinality(String) CODEC(ZSTD(1)),
         country        LowCardinality(String) CODEC(ZSTD(1)),
         asn            UInt32 CODEC(T64, ZSTD(1)),
@@ -45,3 +48,18 @@ data:
     PARTITION BY toYYYYMM(server_ts)
     ORDER BY (site, correlation_id, server_ts)
     TTL toDateTime(server_ts) + INTERVAL 25 MONTH DELETE;
+  # Idempotent ALTERs bringing a pre-existing populated table up to the
+  # events.sql schema — CREATE ... IF NOT EXISTS is a no-op on live tables,
+  # so column additions and TTL changes must be restated here. Keyed
+  # separately because the DDL conformance test pins events.sql verbatim to
+  # the canonical file; a companion test asserts these statements match the
+  # canonical column definitions. This is the PENDING set: once a statement
+  # has applied in-cluster, prune it in the next DDL revision (a fresh
+  # bootstrap gets the full schema from CREATE, and re-running MODIFY
+  # COLUMN TTL on large tables risks repeat mutations).
+  migrations.sql: |
+    ALTER TABLE guardian_analytics.events ON CLUSTER 'clickhouse'
+        ADD COLUMN IF NOT EXISTS device_class LowCardinality(String) CODEC(ZSTD(1)) AFTER ua,
+        ADD COLUMN IF NOT EXISTS os_family LowCardinality(String) CODEC(ZSTD(1)) AFTER device_class,
+        ADD COLUMN IF NOT EXISTS browser_family LowCardinality(String) CODEC(ZSTD(1)) AFTER os_family,
+        MODIFY COLUMN client_ip IPv6 CODEC(ZSTD(1)) TTL toDateTime(server_ts) + INTERVAL 90 DAY;

@@ -36,9 +36,9 @@ func (s *clickhouseSink) Ping(ctx context.Context) error {
 func (s *clickhouseSink) Insert(ctx context.Context, rows []eventRow) error {
 	batch, err := s.conn.PrepareBatch(ctx, `INSERT INTO guardian_analytics.events
 		(server_ts, site, event_name, trust_tier, schema_version, trace_id,
-		 correlation_id, session_seq, path, referrer, ua, client_ip, ip_source,
-		 country, asn, status, duration_ms, client_skew_ms, vital_name,
-		 vital_value, props)`)
+		 correlation_id, session_seq, path, referrer, ua, device_class,
+		 os_family, browser_family, client_ip, ip_source, country, asn,
+		 status, duration_ms, client_skew_ms, vital_name, vital_value, props)`)
 	if err != nil {
 		return fmt.Errorf("prepare batch: %w", err)
 	}
@@ -58,6 +58,9 @@ func (s *clickhouseSink) Insert(ctx context.Context, rows []eventRow) error {
 			r.Path,
 			r.Referrer,
 			r.UA,
+			r.DeviceClass,
+			r.OSFamily,
+			r.BrowserFamily,
 			r.ClientIP,
 			r.IPSource,
 			r.Country,

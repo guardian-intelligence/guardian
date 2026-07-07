@@ -78,6 +78,16 @@ func main() {
 		slog.Error("protovalidate init", "err", err)
 		os.Exit(1)
 	}
+	// Baked into the image by //src/products/analytics/ingest:ip2asn_layer;
+	// absence is an image-build defect, so fail fast rather than serve
+	// permanently unenriched rows.
+	asnPath := envOr("IP2ASN_PATH", "/app/data/ip2asn-combined.tsv.gz")
+	asnTab, err := loadASNTable(asnPath)
+	if err != nil {
+		slog.Error("ip2asn load", "err", err, "path", asnPath)
+		os.Exit(1)
+	}
+	slog.Info("ip2asn table loaded", "ranges", len(asnTab.ranges), "path", asnPath)
 	batch := newBatcher(sink, 10_000, 10*time.Second, 100_000)
 	svc := &eventService{batch: batch, now: time.Now, validate: validator}
 
@@ -85,7 +95,7 @@ func main() {
 		Addr: addr,
 		// h2c lets the ingress speak HTTP/2 to us if configured; plain
 		// HTTP/1.1 works identically for Connect unary.
-		Handler:           h2c.NewHandler(newHandler(svc, connect.WithInterceptors(interceptor)), &http2.Server{}),
+		Handler:           h2c.NewHandler(newHandler(svc, asnTab, connect.WithInterceptors(interceptor)), &http2.Server{}),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,

@@ -34,17 +34,25 @@ spec:
           # ($ssl_client_verify=SUCCESS); empty elsewhere, and proxy_set_header
           # with an empty value strips client-supplied values.
           http-snippet: |
-            map $ssl_client_verify $guardian_client_ip {
-              "SUCCESS" $http_cf_connecting_ip;
-              default "";
-            }
             map $ssl_client_verify $guardian_client_ip_source {
               "SUCCESS" "cloudflare";
+              default "";
+            }
+            # The verify gate lives in exactly one map; per-header values
+            # derive from it, so a new header can't ship with its own
+            # (divergent) copy of the trust check.
+            map $guardian_client_ip_source $guardian_client_ip {
+              "cloudflare" $http_cf_connecting_ip;
+              default "";
+            }
+            map $guardian_client_ip_source $guardian_client_country {
+              "cloudflare" $http_cf_ipcountry;
               default "";
             }
         proxySetHeaders:
           x-guardian-client-ip: $guardian_client_ip
           x-guardian-client-ip-source: $guardian_client_ip_source
+          x-guardian-client-country: $guardian_client_country
           # Not $remote_addr: the realip module rewrites it from the
           # client-settable CF-Connecting-IP. $realip_remote_addr is the TCP peer.
           x-guardian-edge-peer-ip: $realip_remote_addr

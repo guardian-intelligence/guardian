@@ -5,10 +5,13 @@ load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 go_library(
     name = "ingest_lib",
     srcs = [
+        "asn.go",
         "batch.go",
         "clickhouse.go",
+        "device.go",
         "identity.go",
         "main.go",
+        "metrics.go",
         "row.go",
         "server.go",
         "tracing.go",
@@ -24,6 +27,10 @@ go_library(
         "@com_connectrpc_otelconnect//:otelconnect",
         "@com_github_clickhouse_clickhouse_go_v2//:clickhouse-go",
         "@com_github_clickhouse_clickhouse_go_v2//lib/driver",
+        "@com_github_mileusna_useragent//:useragent",
+        "@com_github_prometheus_client_golang//prometheus",
+        "@com_github_prometheus_client_golang//prometheus/promauto",
+        "@com_github_prometheus_client_golang//prometheus/promhttp",
         "@io_opentelemetry_go_otel//:otel",
         "@io_opentelemetry_go_otel//attribute",
         "@io_opentelemetry_go_otel//semconv/v1.26.0:v1_26_0",
@@ -46,7 +53,9 @@ go_binary(
 go_test(
     name = "ingest_test",
     srcs = [
+        "asn_test.go",
         "batch_test.go",
+        "device_test.go",
         "server_test.go",
         "validate_test.go",
     ],
@@ -69,6 +78,15 @@ pkg_tar(
     },
 )
 
+# BGP-derived IP->ASN snapshot, sha256-pinned in MODULE.bazel. Its own layer
+# so a data refresh doesn't invalidate the binary layer (and vice versa).
+pkg_tar(
+    name = "ip2asn_layer",
+    files = {
+        "@ip2asn_combined//file": "app/data/ip2asn-combined.tsv.gz",
+    },
+)
+
 oci_image(
     name = "image",
     annotations = {
@@ -79,7 +97,10 @@ oci_image(
     base = "@ubuntu_noble_base_linux_amd64",
     entrypoint = ["/app/ingest"],
     exposed_ports = ["8080/tcp"],
-    tars = [":ingest_layer"],
+    tars = [
+        ":ingest_layer",
+        ":ip2asn_layer",
+    ],
     visibility = ["//visibility:public"],
 )
 
