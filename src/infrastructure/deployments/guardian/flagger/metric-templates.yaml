@@ -1,74 +1,37 @@
-# The first MetricTemplates in the repo. Queries VictoriaMetrics
-# (vmselect-shortterm, same Prometheus-compatible endpoint Flagger's own
-# egress policy already opens — see flagger-networkpolicy.yaml's comment
-# on this) for company-site's synthetic http-latency-canary series
-# (company/*/http-latency-canary.yaml). {{ namespace }} is Flagger's
-# built-in substitution for the analyzed Canary's own namespace; the
-# canary's metric labels are written as the literal namespace string for
-# exactly this reason (see http-latency-canary.yaml's script comment).
+# Queries VictoriaMetrics (vmselect-shortterm, same Prometheus-compatible
+# endpoint Flagger's own egress policy already opens — see
+# flagger-networkpolicy.yaml) for the blackbox synthetic probe series
+# (deployments/alerting/synthetic-probes.yaml). {{ namespace }} is
+# Flagger's built-in substitution for the analyzed Canary's own namespace;
+# the VMProbe targets carry probe_namespace as the literal namespace
+# string for exactly this reason. service-class only: a Cloudflare blip
+# must not fail a deploy the cluster served correctly (the edge class has
+# its own VMRule alerts).
 #
 # Referenced from each stage's Canary via analysis.metrics — this is what
-# gates a rollout's in-stage cutover on real synthetic traffic, not just
-# the one-shot pre-rollout/rollout webhook checks in loadtester.yaml.
+# gates a rollout's in-stage cutover on continuously-refreshed synthetic
+# traffic. min()/max() collapse the per-path series so the gate is the
+# WORST path, not whichever series the API returns first.
 apiVersion: flagger.app/v1beta1
 kind: MetricTemplate
 metadata:
-  name: http-canary-success-rate
+  name: probe-success-rate
   namespace: flagger
 spec:
   provider:
     type: prometheus
     address: http://vmselect-shortterm.tenant-root.svc:8481/select/0/prometheus
   query: |
-    avg(http_canary_success{namespace="{{ namespace }}"})
+    min(avg_over_time(probe_success{probe_namespace="{{ namespace }}",probe_class="service"}[{{ interval }}]))
 ---
 apiVersion: flagger.app/v1beta1
 kind: MetricTemplate
 metadata:
-  name: http-canary-p95-duration
+  name: probe-p95-duration
   namespace: flagger
 spec:
   provider:
     type: prometheus
     address: http://vmselect-shortterm.tenant-root.svc:8481/select/0/prometheus
   query: |
-    quantile_over_time(0.95, http_canary_duration_seconds{namespace="{{ namespace }}",phase="total"}[{{ interval }}])
----
-# Detection over the http-latency-canary series directly (independent of
-# any pending promotion — this pages on sustained canary failure whether or
-# not anyone is trying to promote right now). Modeled on
-# ../promotion/kargo-alerts.yaml's rules; routes through the same
-# VMRule -> vmalert -> Alertmanager -> Alerta -> relay -> ntfy pipeline
-# proven end to end by the alerting-loop drill (PR #425) — no new plumbing.
-apiVersion: operator.victoriametrics.com/v1beta1
-kind: VMRule
-metadata:
-  name: http-canary
-  namespace: flagger
-  labels:
-    app.kubernetes.io/name: http-canary
-    app.kubernetes.io/part-of: guardian
-spec:
-  groups:
-    - name: http-canary.rules
-      interval: 30s
-      rules:
-        - alert: HttpCanaryFailing
-          expr: avg_over_time(http_canary_success{namespace=~"tenant-guardian-.+"}[5m]) < 1
-          for: 5m
-          labels:
-            severity: warning
-            guardian.dev/component: company-site
-          annotations:
-            summary: company-site's synthetic HTTP canary has been failing in {{ $labels.namespace }} for 5+ minutes.
-        - alert: HttpCanaryAbsent
-          # The canary runs every minute in every stage; total silence for
-          # 10+ minutes means the CronJob or its push path broke, not that
-          # traffic is merely slow.
-          expr: absent(http_canary_success{namespace=~"tenant-guardian-.+"})
-          for: 10m
-          labels:
-            severity: warning
-            guardian.dev/component: company-site
-          annotations:
-            summary: No company-site HTTP canary metrics are being reported at all.
+    max(quantile_over_time(0.95, probe_duration_seconds{probe_namespace="{{ namespace }}",probe_class="service"}[{{ interval }}]))

@@ -8,7 +8,6 @@ filegroup(
         "canary.yaml",
         "loadtester.yaml",
         "networkpolicy.yaml",
-        "http-latency-canary.yaml",
         "//src/infrastructure/deployments/company/load/prod:manifests",
     ],
     visibility = ["//visibility:public"],

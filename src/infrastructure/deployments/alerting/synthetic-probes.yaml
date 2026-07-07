@@ -1,0 +1,243 @@
+# Synthetic probe targets and their alert rules. Two probe classes per
+# stage, every 15s, through blackbox-exporter.yaml:
+#
+#   probe_class=service — the in-cluster apex Service. Isolates the cluster
+#     path; this is what Flagger's analysis metrics and the Kargo promotion
+#     gates read (a Cloudflare blip should not fail a deploy the cluster
+#     served correctly).
+#   probe_class=edge — the public hostname, hairpinning out through
+#     Cloudflare and back in via the LB to the origin. Whole-path truth:
+#     DNS, edge TLS, LB health, origin ingress, pod. This is the layer that
+#     had NO watcher on 2026-07-07 when a stale ingress replica retried
+#     dead upstreams for hours (availability held via retries, TTFB
+#     didn't, nothing paged).
+#
+# The probe_namespace label is the literal stage namespace so Flagger's
+# {{ namespace }} MetricTemplate substitution matches it directly. Key
+# series:
+# probe_success, probe_duration_seconds, and
+# probe_http_duration_seconds{phase=resolve|connect|tls|processing|transfer}
+# — phase=processing is time-to-first-byte.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMProbe
+metadata:
+  name: company-site-beta-service
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  jobName: probe/company-site/beta/service
+  interval: 15s
+  module: http_2xx
+  vmProberSpec:
+    url: blackbox-exporter.tenant-root.svc:9115
+    path: /probe
+  targets:
+    staticConfig:
+      targets:
+        - http://company-site.tenant-guardian-beta.svc/healthz
+        - http://company-site.tenant-guardian-beta.svc/
+        - http://company-site.tenant-guardian-beta.svc/letters
+        - http://company-site.tenant-guardian-beta.svc/letters/dear-shovon
+      labels:
+        probe_class: service
+        probe_namespace: tenant-guardian-beta
+        guardian_surface: company-site
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMProbe
+metadata:
+  name: company-site-beta-edge
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  jobName: probe/company-site/beta/edge
+  interval: 15s
+  module: http_2xx
+  vmProberSpec:
+    url: blackbox-exporter.tenant-root.svc:9115
+    path: /probe
+  targets:
+    staticConfig:
+      targets:
+        - https://beta.guardianintelligence.org/healthz
+        - https://beta.guardianintelligence.org/
+        - https://beta.guardianintelligence.org/letters
+        - https://beta.guardianintelligence.org/letters/dear-shovon
+      labels:
+        probe_class: edge
+        probe_namespace: tenant-guardian-beta
+        guardian_surface: company-site
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMProbe
+metadata:
+  name: company-site-gamma-service
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  jobName: probe/company-site/gamma/service
+  interval: 15s
+  module: http_2xx
+  vmProberSpec:
+    url: blackbox-exporter.tenant-root.svc:9115
+    path: /probe
+  targets:
+    staticConfig:
+      targets:
+        - http://company-site.tenant-guardian-gamma.svc/healthz
+        - http://company-site.tenant-guardian-gamma.svc/
+        - http://company-site.tenant-guardian-gamma.svc/letters
+        - http://company-site.tenant-guardian-gamma.svc/letters/dear-shovon
+      labels:
+        probe_class: service
+        probe_namespace: tenant-guardian-gamma
+        guardian_surface: company-site
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMProbe
+metadata:
+  name: company-site-gamma-edge
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  jobName: probe/company-site/gamma/edge
+  interval: 15s
+  module: http_2xx
+  vmProberSpec:
+    url: blackbox-exporter.tenant-root.svc:9115
+    path: /probe
+  targets:
+    staticConfig:
+      targets:
+        - https://gamma.guardianintelligence.org/healthz
+        - https://gamma.guardianintelligence.org/
+        - https://gamma.guardianintelligence.org/letters
+        - https://gamma.guardianintelligence.org/letters/dear-shovon
+      labels:
+        probe_class: edge
+        probe_namespace: tenant-guardian-gamma
+        guardian_surface: company-site
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMProbe
+metadata:
+  name: company-site-prod-service
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  jobName: probe/company-site/prod/service
+  interval: 15s
+  module: http_2xx
+  vmProberSpec:
+    url: blackbox-exporter.tenant-root.svc:9115
+    path: /probe
+  targets:
+    staticConfig:
+      targets:
+        - http://company-site.tenant-guardian-prod.svc/healthz
+        - http://company-site.tenant-guardian-prod.svc/
+        - http://company-site.tenant-guardian-prod.svc/letters
+        - http://company-site.tenant-guardian-prod.svc/letters/dear-shovon
+      labels:
+        probe_class: service
+        probe_namespace: tenant-guardian-prod
+        guardian_surface: company-site
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMProbe
+metadata:
+  name: company-site-prod-edge
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  jobName: probe/company-site/prod/edge
+  interval: 15s
+  module: http_2xx
+  vmProberSpec:
+    url: blackbox-exporter.tenant-root.svc:9115
+    path: /probe
+  targets:
+    staticConfig:
+      targets:
+        - https://guardianintelligence.org/healthz
+        - https://guardianintelligence.org/
+        - https://guardianintelligence.org/letters
+        - https://guardianintelligence.org/letters/dear-shovon
+      labels:
+        probe_class: edge
+        probe_namespace: tenant-guardian-prod
+        guardian_surface: company-site
+---
+# Detection over the probe series, independent of any pending promotion.
+# Routes through the proven VMRule -> vmalert -> Alertmanager -> Alerta ->
+# relay -> ntfy pipeline.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: synthetic-probes
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: synthetic-probes
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  groups:
+    - name: synthetic-probes.rules
+      interval: 30s
+      rules:
+        - alert: ProbeFailing
+          expr: avg_over_time(probe_success[5m]) < 1
+          for: 5m
+          labels:
+            severity: warning
+            guardian_component: synthetic-probes
+          annotations:
+            summary: 'synthetic probe failing: {{ $labels.instance }} ({{ $labels.probe_class }}) in {{ $labels.probe_namespace }}'
+            description: >-
+              {{ $labels.instance }} has failed {{ $labels.probe_class }}
+              probes for 5+ minutes. service-class = the cluster path;
+              edge-class = the public Cloudflare path. If edge fails while
+              service passes, the problem is between the user and the
+              ingress (DNS, Cloudflare, LB, origin ingress).
+        - alert: ProbeAbsent
+          # 24 targets x 15s: total silence means the exporter, vmagent, or
+          # the scrape path broke — not that traffic is slow.
+          expr: absent(probe_success)
+          for: 10m
+          labels:
+            severity: warning
+            guardian_component: synthetic-probes
+          annotations:
+            summary: No synthetic probe metrics are being reported at all.
+        - alert: EdgeTTFBHigh
+          # phase=processing is time-to-first-byte as seen through the full
+          # public path. Normal edge TTFB here is ~100ms; the 2026-07-07
+          # stale-ingress incident sat at multi-second TTFB for hours with
+          # no watcher. 1s p95 over 15m is a deliberately loose first
+          # threshold — tighten after a week of live data.
+          expr: >-
+            quantile_over_time(0.95,
+              probe_http_duration_seconds{probe_class="edge",phase="processing"}[15m]) > 1
+          for: 15m
+          labels:
+            severity: warning
+            guardian_component: synthetic-probes
+          annotations:
+            summary: 'edge TTFB p95 above 1s: {{ $labels.instance }}'
+            description: >-
+              Time-to-first-byte through the public edge has been above 1s
+              (p95, 15m) for {{ $labels.instance }}. Check probe phase
+              breakdown (resolve/connect/tls/processing) to localize, then
+              origin ingress logs for upstream retries.

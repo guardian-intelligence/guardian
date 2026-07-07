@@ -6,5 +6,7 @@ resources:
   - networkpolicy.yaml
   - observability.yaml
   - audit-alerts.yaml
+  - blackbox-exporter.yaml
+  - synthetic-probes.yaml
   - trust-alerts.yaml
   - vmalert-vlogs.yaml

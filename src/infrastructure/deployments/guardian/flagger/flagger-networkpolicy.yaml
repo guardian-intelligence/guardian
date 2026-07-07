@@ -105,8 +105,7 @@ spec:
 # now — the egress rule above (toEndpoints vmselect, port 8481) has existed
 # since Flagger was first stood up, but no Canary referenced a
 # MetricTemplate until company/{beta,gamma,prod}/canary.yaml's
-# analysis.metrics (this repo's PR adding the http-latency-canary), so the
-# gap was never exercised. Same reason as the alert-relay pair above:
+# analysis.metrics, so the gap was never exercised. Same reason as the alert-relay pair above:
 # tenant-root's generated isolation does not admit other namespaces.
 apiVersion: cilium.io/v2
 kind: CiliumClusterwideNetworkPolicy

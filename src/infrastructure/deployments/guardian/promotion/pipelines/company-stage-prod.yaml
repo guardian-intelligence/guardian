@@ -2,7 +2,7 @@
 # formerly this Stage took Freight direct from the Warehouse (single-stage
 # pipeline); beta/gamma now sit in front of it. No autoPromotionEnabled
 # entry — promotion to prod is always a deliberate act (human or agent),
-# gated on gamma's http-latency-canary health via the http promotion step
+# gated on gamma's synthetic probe health via the http promotion step
 # below. See company-stage-gamma.yaml's header comment for the full
 # rationale (Kargo's reconciler queries vmselect-shortterm in-cluster
 # directly; no CI network access into the cluster needed; the two-step
@@ -46,7 +46,7 @@ spec:
             url: ${{ vars.vmQueryURL }}
             queryParams:
               - name: query
-                value: avg_over_time(http_canary_success{namespace="${{ vars.sourceStageNamespace }}"}[5m])
+                value: min(avg_over_time(probe_success{probe_namespace="${{ vars.sourceStageNamespace }}",probe_class="service"}[5m]))
             successExpression: len(response.body.data.result) > 0 && response.body.data.result[0].value[1] == '1'
             failureExpression: len(response.body.data.result) > 0 && response.body.data.result[0].value[1] != '1'
         - uses: http
@@ -58,7 +58,7 @@ spec:
             url: ${{ vars.vmQueryURL }}
             queryParams:
               - name: query
-                value: quantile_over_time(0.95, http_canary_duration_seconds{namespace="${{ vars.sourceStageNamespace }}",phase="total"}[5m])
+                value: max(quantile_over_time(0.95, probe_duration_seconds{probe_namespace="${{ vars.sourceStageNamespace }}",probe_class="service"}[5m]))
             successExpression: len(response.body.data.result) > 0 && float(response.body.data.result[0].value[1]) <= 1.0
             failureExpression: len(response.body.data.result) > 0 && float(response.body.data.result[0].value[1]) > 1.0
         - uses: git-clone
