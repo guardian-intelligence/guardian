@@ -45,13 +45,35 @@ BUILD_TOOL_SHIMS = [
     ("protoc-gen-connect-go", "@com_connectrpc_connect//cmd/protoc-gen-connect-go"),
 ]
 
-ALL_SHIMS = DEBUG_CLI_SHIMS + BUILD_TOOL_SHIMS
-
 def _path_export(bin_dir):
     return "export PATH=\"" + bin_dir + ":${PATH}\"\n"
 
+def _host_platform(ctx):
+    os = _capture_stdout(ctx, "uname", ["-s"])
+    arch = _capture_stdout(ctx, "uname", ["-m"])
+    if os == "Darwin" and arch == "arm64":
+        return "darwin_arm64"
+    return "linux_amd64"
+
+def _capture_stdout(ctx, program, args):
+    r = ctx.std.process.command(program).args(args).stdout("piped").stderr("piped").spawn().wait_with_output()
+    if r.status.code != 0:
+        return ""
+    return r.stdout.strip()
+
+def _all_shims(ctx):
+    platform = _host_platform(ctx)
+    out = []
+    for name, target in DEBUG_CLI_SHIMS:
+        if platform == "darwin_arm64" and name == "kubectl":
+            target = "@kubectl_darwin_arm64//file:file"
+        if platform == "darwin_arm64" and name == "kubectl-oidc_login":
+            target = "@kubelogin_darwin_arm64//:kubelogin"
+        out.append((name, target))
+    return out + BUILD_TOOL_SHIMS
+
 def _install_impl(ctx):
-    bin_dir = install_bazel_tool_shims(ctx, ALL_SHIMS, ctx.args.bin_dir)
+    bin_dir = install_bazel_tool_shims(ctx, _all_shims(ctx), ctx.args.bin_dir)
     if bin_dir == "":
         return 1
     if ctx.args.print_path:
@@ -59,7 +81,7 @@ def _install_impl(ctx):
     return 0
 
 def _uninstall_impl(ctx):
-    return uninstall_bazel_tool_shims(ctx, ALL_SHIMS, ctx.args.bin_dir)
+    return uninstall_bazel_tool_shims(ctx, _all_shims(ctx), ctx.args.bin_dir)
 
 def _path_impl(ctx):
     bin_dir = ctx.args.bin_dir
