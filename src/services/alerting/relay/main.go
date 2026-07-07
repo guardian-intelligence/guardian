@@ -7,7 +7,11 @@
 // It also runs the pipeline's dead-man's switch: vmalert evaluates an
 // always-firing Watchdog rule, the relay polls Alertmanager for it, and a
 // missing Watchdog becomes a page — silence anywhere in the
-// scrape→vmalert→alertmanager path pages instead of staying quiet.
+// scrape→vmalert→alertmanager path pages instead of staying quiet. The poll
+// fans out to every replica behind the Alertmanager Service: gossip
+// replicates silences and the notification log but NOT alert state, and
+// vmalert's notifier delivers each alert to one replica per keep-alive
+// connection, so the Watchdog is only guaranteed to exist on some replica.
 package main
 
 import (
@@ -16,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -528,6 +533,9 @@ type server struct {
 	m      *metrics
 	out    sink
 	client *http.Client
+	// lookupHost resolves the Alertmanager hostname to per-replica
+	// addresses for the dead-man poll; injectable for tests.
+	lookupHost func(ctx context.Context, host string) ([]string, error)
 	// inflight tracks detached delivery goroutines so graceful shutdown can
 	// wait for accepted alerts to finish delivering.
 	inflight sync.WaitGroup
@@ -583,9 +591,96 @@ func (s *server) handleSlack(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
-// watchdogActive queries Alertmanager for the always-firing Watchdog alert.
+// watchdogActive asks whether any Alertmanager replica holds the active
+// Watchdog. A replica that answers "no alerts" is a healthy replica that
+// vmalert's notifier connection is simply not pinned to, so a single
+// load-balanced query would flap between true and false with the connection
+// reshuffle of every pod restart.
 func (s *server) watchdogActive(ctx context.Context) (bool, error) {
-	u := s.cfg.alertmanagerURL + "/api/v2/alerts?filter=" + url.QueryEscape(`alertname="Watchdog"`)
+	urls, err := s.replicaURLs(ctx)
+	if err != nil {
+		return false, err
+	}
+	return s.watchdogActiveAny(ctx, urls)
+}
+
+// watchdogActiveAny reports whether any of the given replicas holds the
+// active Watchdog. Replicas are queried in parallel: the headless Service
+// publishes not-ready addresses, so a blackholed replica stays in DNS and
+// must not be allowed to eat the poll budget ahead of the replica that
+// actually holds the Watchdog.
+func (s *server) watchdogActiveAny(ctx context.Context, urls []string) (bool, error) {
+	type result struct {
+		active bool
+		err    error
+	}
+	// Buffered to len(urls) so stragglers finish into the channel and exit
+	// after an early return; the caller cancels ctx right after.
+	results := make(chan result, len(urls))
+	for _, u := range urls {
+		go func(u string) {
+			active, err := s.watchdogActiveAt(ctx, u)
+			results <- result{active: active, err: err}
+		}(u)
+	}
+	var errs []error
+	for range urls {
+		r := <-results
+		if r.err != nil {
+			errs = append(errs, r.err)
+			continue
+		}
+		if r.active {
+			return true, nil
+		}
+	}
+	if len(errs) == len(urls) {
+		return false, errors.Join(errs...)
+	}
+	// Partial failures with no Watchdog anywhere reachable count as "not
+	// seen" — the replica holding it may be the one that is down — but are
+	// still logged so a flapping replica is visible before the page fires.
+	for _, e := range errs {
+		slog.Warn("watchdog replica query failed", "err", e)
+	}
+	return false, nil
+}
+
+// replicaURLs expands the configured Alertmanager URL into one base URL per
+// replica. The Service in front of Alertmanager is headless, so a host
+// lookup returns every pod IP; if resolution fails (or the host is already
+// an address), the URL is used as configured.
+func (s *server) replicaURLs(ctx context.Context) ([]string, error) {
+	base, err := url.Parse(s.cfg.alertmanagerURL)
+	if err != nil {
+		return nil, err
+	}
+	if s.lookupHost == nil {
+		return []string{s.cfg.alertmanagerURL}, nil
+	}
+	addrs, err := s.lookupHost(ctx, base.Hostname())
+	if err != nil || len(addrs) == 0 {
+		return []string{s.cfg.alertmanagerURL}, nil
+	}
+	urls := make([]string, 0, len(addrs))
+	for _, addr := range addrs {
+		u := *base
+		if port := base.Port(); port != "" {
+			u.Host = net.JoinHostPort(addr, port)
+		} else if strings.Contains(addr, ":") {
+			u.Host = "[" + addr + "]"
+		} else {
+			u.Host = addr
+		}
+		urls = append(urls, u.String())
+	}
+	return urls, nil
+}
+
+// watchdogActiveAt queries one Alertmanager replica for the always-firing
+// Watchdog alert.
+func (s *server) watchdogActiveAt(ctx context.Context, baseURL string) (bool, error) {
+	u := baseURL + "/api/v2/alerts?filter=" + url.QueryEscape(`alertname="Watchdog"`)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return false, err
@@ -693,10 +788,11 @@ func main() {
 	m.watchdogLastSeen.Store(start.Unix())
 
 	srv := &server{
-		cfg:    cfg,
-		m:      m,
-		out:    &ntfySink{url: cfg.ntfyURL, token: cfg.ntfyToken, client: &http.Client{Timeout: 10 * time.Second}, sleep: sleepCtx},
-		client: &http.Client{Timeout: 10 * time.Second},
+		cfg:        cfg,
+		m:          m,
+		out:        &ntfySink{url: cfg.ntfyURL, token: cfg.ntfyToken, client: &http.Client{Timeout: 10 * time.Second}, sleep: sleepCtx},
+		client:     &http.Client{Timeout: 10 * time.Second},
+		lookupHost: net.DefaultResolver.LookupHost,
 	}
 
 	mux := http.NewServeMux()
