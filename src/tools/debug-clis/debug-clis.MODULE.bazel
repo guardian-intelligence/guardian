@@ -72,6 +72,13 @@ filegroup(
 )
 
 http_archive(
+    name = "kubelogin_linux_amd64",
+    build_file_content = """exports_files(["kubelogin"])""",
+    sha256 = "0f9b35e82469dbf1e1ed7cfa8cbaa27ffde733e18930dbaed590518a58eb11cc",
+    url = "https://github.com/int128/kubelogin/releases/download/v1.36.2/kubelogin_linux_amd64.zip",
+)
+
+http_archive(
     name = "gh_linux_amd64",
     build_file_content = """
 filegroup(
