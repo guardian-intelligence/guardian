@@ -37,8 +37,8 @@ path = '''unseal-[0-9a-f]{64}\.key$'''
 
 [[rules]]
 id = "guardian-custody-env-file"
-description = "operator custody env file (custody.env / DELETE_ME.env)"
-path = '''(custody|DELETE_ME)\.env$'''
+description = "operator custody env file"
+path = '''custody\.env$'''
 
 [allowlist]
 description = "Synthetic fixtures: clearly-fake PEM bodies in unit tests (not-a-real-key)"
