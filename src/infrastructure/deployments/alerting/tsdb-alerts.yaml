@@ -1,0 +1,58 @@
+# Ingestion-path backpressure alerts for the metrics TSDB itself. The
+# 2026-07-07 wedge went unnoticed for ~3.5h: a vmstorage replica came back
+# from an OOM accepting connections but not ingesting, scrapes stayed "up",
+# remote-write returned 2XX, and half of all new series were silently
+# unqueryable — every downstream absence alert then fired as noise while
+# the actual fault had no watcher. Backpressure is the one signal that is
+# visible the whole time: vmagent's spool and vminsert's per-storage
+# pending rows both grow monotonically while any storage node stalls.
+#
+# Caveat both rules share: they are evaluated against the same shortterm
+# datastore they guard, so a TOTAL shortterm outage silences them — that
+# case is covered by the dead-man (relay watchdog). These catch the
+# partial/stalled states the dead-man cannot see.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: tsdb-ingestion
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: tsdb-ingestion
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  groups:
+    - name: tsdb-ingestion.rules
+      interval: 30s
+      rules:
+        - alert: TSDBRemoteWriteBacklog
+          # Steady state is ~0; the wedge spooled 250MB+. 50MB for 15m is
+          # far above scrape-burst noise and hours before disk pressure.
+          expr: max(vmagent_remotewrite_pending_data_bytes) by (url) > 50e6
+          for: 15m
+          labels:
+            severity: warning
+            guardian_component: tsdb
+          annotations:
+            summary: 'vmagent remote-write backlog: {{ $value | humanize }}B spooled'
+            description: >-
+              vmagent has been spooling remote-write data for 15+ minutes —
+              a downstream vminsert/vmstorage is slow or stalled. Check
+              vm_rpc_rows_pending on vminsert to find the wedged storage
+              node, then delete that pod (queue replays; nothing is lost).
+              Runbook context: memory of 2026-07-07 in
+              deployments/alerting/tsdb-alerts.yaml header.
+        - alert: TSDBIngestPending
+          expr: max(vm_rpc_rows_pending{name="vminsert"}) by (addr) > 10000
+          for: 15m
+          labels:
+            severity: warning
+            guardian_component: tsdb
+          annotations:
+            summary: 'vminsert rows pending toward {{ $labels.addr }}'
+            description: >-
+              vminsert has had {{ $value }} rows pending toward
+              {{ $labels.addr }} for 15+ minutes: that storage node is
+              accepting connections but not ingesting (the 2026-07-07
+              post-OOM wedge shape). Delete the pod; its PVC persists and
+              buffered rows replay.
