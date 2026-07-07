@@ -201,7 +201,10 @@ spec:
       interval: 30s
       rules:
         - alert: ProbeFailing
-          expr: avg_over_time(probe_success[5m]) < 1
+          # < 0.9 tolerates two failed 15s samples per window (~30s), so a
+          # single-pod Recreate rollout or a PG switchover blip does not
+          # page; a real outage drives the average to 0 within a minute.
+          expr: avg_over_time(probe_success[5m]) < 0.9
           for: 5m
           labels:
             severity: warning

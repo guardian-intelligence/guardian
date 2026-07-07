@@ -12,8 +12,9 @@ spec:
   replicas: 1
   revisionHistoryLimit: 3
   # Electric holds the database's single logical replication slot, so a
-  # surged replacement pod can never become ready while the old one lives;
-  # the rollout gap is absorbed by the edge cache's stale-while-revalidate.
+  # surged replacement pod can never become ready while the old one lives.
+  # Rollouts take a brief serving gap: edge-cached shape reads keep working,
+  # uncached ones fail until the new pod is Ready.
   strategy:
     type: Recreate
   selector:

@@ -21,3 +21,29 @@ spec:
     - port: metrics
       path: /metrics
       interval: 30s
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: electric-scrape
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: electric
+    app.kubernetes.io/part-of: guardian
+spec:
+  groups:
+    - name: electric-scrape.rules
+      interval: 30s
+      rules:
+        - alert: ElectricScrapeDown
+          expr: up{container="electric"} == 0
+          for: 5m
+          labels:
+            severity: warning
+            guardian_component: electric
+          annotations:
+            summary: "Electric metrics scrape is down in {{ $labels.namespace }}"
+            description: >-
+              vmagent cannot scrape the Electric prometheus endpoint.
+              Electric accumulates distribution metrics in memory between
+              scrapes, so a dead scrape eventually OOMs the pod.
