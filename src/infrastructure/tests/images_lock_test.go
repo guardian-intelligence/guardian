@@ -1,10 +1,10 @@
 package tests
 
-// Tier-1 image inventory conformance over the split lock:
+// Tier-1 image inventory conformance:
 //   - images.declared.lock is well-formed (digest-pinned, no duplicate
 //     (repo, digest) pairs)
-//   - every image reference rendered from the manifest trees is
-//     digest-pinned
+//   - every artifact reference rendered from the manifest trees is
+//     digest-pinned and registry-qualified
 //   - declared and rendered are disjoint and their union derives cleanly —
 //     the exact derivation CI signs on main and `aspect infra bundle`
 //     re-runs, so a cold guardian-mgmt bootstrap can serve every artifact
@@ -15,6 +15,7 @@ package tests
 // construction.
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -38,7 +39,7 @@ func declaredLockEntries(t *testing.T) []string {
 func repoRootFromRunfiles(t *testing.T) string {
 	t.Helper()
 	const anchor = "src/infrastructure/base/flux/sync.yaml"
-	anchorPath := runfilePath(anchor)
+	anchorPath := filepath.ToSlash(runfilePath(anchor))
 	root := strings.TrimSuffix(anchorPath, anchor)
 	if root == anchorPath {
 		t.Fatalf("cannot derive runfiles repo root from %s", anchorPath)
@@ -59,17 +60,15 @@ func renderedLockEntries(t *testing.T) []string {
 	return rendered
 }
 
+// The library enforces well-formedness, digest pinning, registry
+// qualification, and anti-vacuity in its own error paths; these tests
+// exercise those paths against the real declared lock and manifest trees.
 func TestDeclaredLockWellFormed(t *testing.T) {
-	if len(declaredLockEntries(t)) == 0 {
-		t.Fatal("images.declared.lock contains no image entries")
-	}
+	declaredLockEntries(t)
 }
 
 func TestRenderedImagesDigestPinned(t *testing.T) {
-	rendered := renderedLockEntries(t)
-	if len(rendered) == 0 {
-		t.Fatal("extracted no image references from the manifest trees; the extractor is broken")
-	}
+	renderedLockEntries(t)
 }
 
 // TestUnionLockDerives proves the full inventory derivation: disjointness

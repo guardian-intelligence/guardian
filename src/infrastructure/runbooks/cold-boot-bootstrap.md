@@ -120,7 +120,9 @@ Dark mode is entered and exited via PRs plus four bring-up steps:
    checkout derives (declared + rendered); the cosign command proves that
    union was signed from reviewed main history; the last proves the haul
    and hauler-manifest on the drive are hash-bound to that same union.
-   Only then load the store.
+   The re-derivation runs the drive-carried binaries, so the
+   drive-to-checkout binding holds under the custody model — the drive
+   travels with the operator, like the seal key. Only then load the store.
 
 1. **Pre-drill PR**: flip `darkBundleMirror.enabled: true` in
    `src/infrastructure/talm/values.yaml` and regenerate the node configs —

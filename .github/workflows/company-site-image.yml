@@ -3,7 +3,7 @@
 # i.e. built by CI from reviewed main history — (b) rebuilds the site when
 # its inputs change (CI is the canonical builder; the vite output is not
 # bit-reproducible across machines), and (c) runs the manifest/lock
-# conformance suite when infrastructure manifests or images.lock change.
+# conformance suite when infrastructure manifests change.
 #
 # It runs on EVERY pull request and classifies the diff itself, exiting fast
 # when nothing relevant changed: required status checks cannot be
@@ -177,7 +177,7 @@ jobs:
         if: always() && steps.classify.outputs.build == 'true'
         run: docker rm -f perf-gate || true
 
-      - name: Verify images.lock and rendered manifests agree
+      - name: Run the manifest/lock conformance suite
         if: steps.classify.outputs.conformance == 'true'
         run: bazelisk test //src/infrastructure/tests:talm_render_test
 

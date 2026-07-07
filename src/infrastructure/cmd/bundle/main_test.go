@@ -7,6 +7,8 @@ import (
 
 	"github.com/bazelbuild/rules_go/go/runfiles"
 	"sigs.k8s.io/yaml"
+
+	"github.com/guardian-intelligence/guardian/src/infrastructure/imageset"
 )
 
 const fixtureLock = `# comment line
@@ -15,61 +17,13 @@ ghcr.io/example/app:v1.0.0@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 ghcr.io/example/chart:0.1.0@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb # trailing comment
 `
 
-func TestParseImagesLock(t *testing.T) {
-	refs, err := parseImagesLock([]byte(fixtureLock))
-	if err != nil {
-		t.Fatalf("parseImagesLock() error = %v", err)
-	}
-	want := []string{
-		"ghcr.io/example/app:v1.0.0@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		"ghcr.io/example/chart:0.1.0@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-	}
-	if len(refs) != len(want) {
-		t.Fatalf("parseImagesLock() = %d refs, want %d", len(refs), len(want))
-	}
-	for i := range want {
-		if refs[i] != want[i] {
-			t.Fatalf("parseImagesLock()[%d] = %q, want %q", i, refs[i], want[i])
-		}
-	}
-}
-
-func TestParseImagesLockRejectsUnpinnedRef(t *testing.T) {
-	_, err := parseImagesLock([]byte("ghcr.io/example/app:v1.0.0\n"))
-	if err == nil {
-		t.Fatalf("parseImagesLock() accepted a tag-only ref; this tool must never resolve tags")
-	}
-	if !strings.Contains(err.Error(), "not digest-pinned") {
-		t.Fatalf("parseImagesLock() error = %v, want pin detail", err)
-	}
-}
-
-func TestParseImagesLockRejectsMalformedDigest(t *testing.T) {
-	for _, ref := range []string{
-		"ghcr.io/example/app@sha256:",
-		"ghcr.io/example/app@sha256:abc",
-		"ghcr.io/example/app@sha256:ZZaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		"@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-	} {
-		if _, err := parseImagesLock([]byte(ref + "\n")); err == nil {
-			t.Fatalf("parseImagesLock() accepted malformed ref %q", ref)
-		}
-	}
-}
-
-func TestParseImagesLockRejectsEmptyLock(t *testing.T) {
-	if _, err := parseImagesLock([]byte("# only comments\n")); err == nil {
-		t.Fatalf("parseImagesLock() accepted an empty lock")
-	}
-}
-
 // The golden shape is what the pinned hauler consumes; the store-sync smoke
 // in the drill pipeline is the live schema-compatibility check. Field names
 // verified against pkg/apis/hauler.cattle.io/v1 at the pinned commit.
 func TestHaulerManifestGolden(t *testing.T) {
-	refs, err := parseImagesLock([]byte(fixtureLock))
+	refs, err := imageset.ParseLock([]byte(fixtureLock))
 	if err != nil {
-		t.Fatalf("parseImagesLock() error = %v", err)
+		t.Fatalf("imageset.ParseLock() error = %v", err)
 	}
 	payload, err := haulerManifest(refs)
 	if err != nil {
@@ -96,7 +50,7 @@ spec:
 }
 
 func TestHaulerManifestDeterministic(t *testing.T) {
-	refs, _ := parseImagesLock([]byte(fixtureLock))
+	refs, _ := imageset.ParseLock([]byte(fixtureLock))
 	first, err := haulerManifest(refs)
 	if err != nil {
 		t.Fatalf("haulerManifest() error = %v", err)
@@ -123,9 +77,9 @@ func TestProductionImagesLockProjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read production declared lock: %v", err)
 	}
-	refs, err := parseImagesLock(lock)
+	refs, err := imageset.ParseLock(lock)
 	if err != nil {
-		t.Fatalf("parseImagesLock(production lock) error = %v", err)
+		t.Fatalf("imageset.ParseLock(production lock) error = %v", err)
 	}
 	if len(refs) < 100 {
 		t.Fatalf("production lock projected only %d refs; expected the full inventory (anti-vacuity floor 100)", len(refs))
@@ -152,9 +106,9 @@ func TestDescribeBundle(t *testing.T) {
 		t.Fatalf("write haul fixture: %v", err)
 	}
 	lock := []byte(fixtureLock)
-	refs, err := parseImagesLock(lock)
+	refs, err := imageset.ParseLock(lock)
 	if err != nil {
-		t.Fatalf("parseImagesLock() error = %v", err)
+		t.Fatalf("imageset.ParseLock() error = %v", err)
 	}
 	payload, err := describeBundle(lock, refs, haulPath, "abc123")
 	if err != nil {
@@ -186,9 +140,9 @@ func TestDescribeBundle(t *testing.T) {
 func writeBundleDir(t *testing.T, lock []byte, haul []byte, revision string) (dir string, refs []string) {
 	t.Helper()
 	dir = t.TempDir()
-	refs, err := parseImagesLock(lock)
+	refs, err := imageset.ParseLock(lock)
 	if err != nil {
-		t.Fatalf("parseImagesLock() error = %v", err)
+		t.Fatalf("imageset.ParseLock() error = %v", err)
 	}
 	haulPath := dir + "/haul.tar.zst"
 	if err := os.WriteFile(haulPath, haul, 0o644); err != nil {
@@ -274,9 +228,9 @@ func TestVerifyBundleTamperedLock(t *testing.T) {
 	lock := []byte(fixtureLock)
 	dir, _ := writeBundleDir(t, lock, []byte("haul-bytes"), "abc123")
 	tampered := []byte("ghcr.io/evil/app@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n")
-	refs, err := parseImagesLock(tampered)
+	refs, err := imageset.ParseLock(tampered)
 	if err != nil {
-		t.Fatalf("parseImagesLock(tampered) error = %v", err)
+		t.Fatalf("imageset.ParseLock(tampered) error = %v", err)
 	}
 	_, err = verifyBundle(dir, tampered, refs, "abc123")
 	if err == nil {
@@ -290,9 +244,9 @@ func TestVerifyBundleTamperedLock(t *testing.T) {
 func TestVerifyBundleMissingManifest(t *testing.T) {
 	dir := t.TempDir()
 	lock := []byte(fixtureLock)
-	refs, err := parseImagesLock(lock)
+	refs, err := imageset.ParseLock(lock)
 	if err != nil {
-		t.Fatalf("parseImagesLock() error = %v", err)
+		t.Fatalf("imageset.ParseLock() error = %v", err)
 	}
 	if _, err := verifyBundle(dir, lock, refs, "abc123"); err == nil {
 		t.Fatalf("verifyBundle() accepted a bundle dir with no bundle-manifest.yaml")
@@ -353,9 +307,9 @@ func TestFilterStoredRefs(t *testing.T) {
 	if err := os.WriteFile(index, []byte(`{"manifests":[{"digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}`), 0o644); err != nil {
 		t.Fatalf("write index fixture: %v", err)
 	}
-	refs, err := parseImagesLock([]byte(fixtureLock))
+	refs, err := imageset.ParseLock([]byte(fixtureLock))
 	if err != nil {
-		t.Fatalf("parseImagesLock() error = %v", err)
+		t.Fatalf("imageset.ParseLock() error = %v", err)
 	}
 	missing, err := filterStoredRefs(refs, index)
 	if err != nil {
@@ -372,7 +326,7 @@ func TestFilterStoredRefsFullyStored(t *testing.T) {
 	if err := os.WriteFile(index, []byte(`{"manifests":[{"digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},{"digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]}`), 0o644); err != nil {
 		t.Fatalf("write index fixture: %v", err)
 	}
-	refs, _ := parseImagesLock([]byte(fixtureLock))
+	refs, _ := imageset.ParseLock([]byte(fixtureLock))
 	missing, err := filterStoredRefs(refs, index)
 	if err != nil {
 		t.Fatalf("filterStoredRefs() error = %v", err)

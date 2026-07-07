@@ -6,6 +6,7 @@ go_library(
     importpath = "github.com/guardian-intelligence/guardian/src/infrastructure/cmd/bundle",
     visibility = ["//visibility:private"],
     deps = [
+        "//src/infrastructure/imageset",
         "@io_k8s_sigs_yaml//:yaml",
     ],
 )
@@ -21,5 +22,8 @@ go_test(
     srcs = ["main_test.go"],
     data = ["//src/infrastructure/bootstrap/bundle:images_declared_lock"],
     embed = [":bundle_lib"],
-    deps = ["@rules_go//go/runfiles"],
+    deps = [
+        "//src/infrastructure/imageset",
+        "@rules_go//go/runfiles",
+    ],
 )

@@ -1,14 +1,15 @@
 // imageset derives the generated union images lock from a checkout.
 //
 // CHARTER — this command is a deterministic projection of declared state and
-// must stay one. Its complete inputs are the declared lock and the YAML
-// manifest trees of the checkout named by --repo-root; its only output is
-// the union lock file. It must never: resolve a tag to a digest (an unpinned
-// rendered ref is a build failure, not a lookup), talk to a Kubernetes API
-// or any registry, execute kustomize/helm rendering, or read a config file.
-// The extraction rules live in //src/infrastructure/imageset and are shared
-// with the Tier-1 conformance tests — a ref this tool sees is a ref the
-// tests see, by construction.
+// must stay one. Its complete inputs are the declared lock, the YAML
+// manifest trees of the checkout named by --repo-root, and the optional
+// dark-mirror values file; its only output is the union lock file. It must
+// never: resolve a tag to a digest (an unpinned rendered ref is a build
+// failure, not a lookup), talk to a Kubernetes API or any registry, execute
+// kustomize/helm rendering, or read a config file. The extraction rules
+// live in //src/infrastructure/imageset and are shared with the Tier-1
+// conformance tests — a ref this tool sees is a ref the tests see, by
+// construction.
 package main
 
 import (
@@ -24,9 +25,11 @@ func main() {
 	var declaredPath string
 	var repoRoot string
 	var out string
+	var darkMirrorValues string
 	flag.StringVar(&declaredPath, "declared", "", "path to images.declared.lock")
 	flag.StringVar(&repoRoot, "repo-root", "", "checkout root containing the manifest trees")
 	flag.StringVar(&out, "out", "", "path to write the generated union lock")
+	flag.StringVar(&darkMirrorValues, "dark-mirror-values", "", "optional talm values.yaml; requires darkBundleMirror.registries to equal the union's registry host set")
 	flag.Parse()
 
 	if declaredPath == "" || repoRoot == "" || out == "" {
@@ -54,6 +57,15 @@ func main() {
 	union, err := imageset.UnionFile(declared, rendered)
 	if err != nil {
 		exitErr(err)
+	}
+	if darkMirrorValues != "" {
+		refs, err := imageset.ParseLock(union)
+		if err != nil {
+			exitErr(err)
+		}
+		if err := imageset.VerifyDarkMirrorHosts(darkMirrorValues, refs); err != nil {
+			exitErr(err)
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 		exitErr(err)

@@ -22,12 +22,7 @@ import (
 // the constraint to CI: any apps.cozystack.io CR whose namespace is not a
 // tenant-* namespace fails here instead of hanging in the cluster.
 func TestCozystackAppNamespaceConformance(t *testing.T) {
-	const anchor = "src/infrastructure/base/flux/sync.yaml"
-	anchorPath := filepath.ToSlash(runfilePath(anchor))
-	root := strings.TrimSuffix(anchorPath, anchor)
-	if root == anchorPath {
-		t.Fatalf("cannot derive runfiles repo root from %s", anchorPath)
-	}
+	root := repoRootFromRunfiles(t)
 
 	apps := 0
 	walk := func(path string, docs []map[string]interface{}) {

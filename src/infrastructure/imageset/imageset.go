@@ -1,7 +1,7 @@
 // Package imageset derives the complete OCI artifact inventory of a
 // guardian checkout: the union of the hand-declared lock
 // (src/infrastructure/bootstrap/bundle/images.declared.lock — artifacts
-// that run without being rendered from repo manifests) and the image
+// that run without being rendered from repo manifests) and the artifact
 // references extracted from the rendered manifest trees. The union is a
 // pure function of the checkout — no registry, cluster, or network access —
 // so CI signing, bundle builds, and offline operators all derive
@@ -24,9 +24,10 @@ import (
 )
 
 // ManifestTrees are the repo-relative trees whose YAML documents contribute
-// rendered image references to the union. Every caller (conformance tests,
-// the imageset CLI, CI signing, bundle builds) must use this list — a tree
-// added in one place but not the others would silently split the inventory.
+// rendered artifact references to the union. Every caller (conformance
+// tests, the imageset CLI, CI signing, bundle builds) must use this list —
+// a tree added in one place but not the others would silently split the
+// inventory.
 var ManifestTrees = []string{
 	"src/infrastructure/deployments",
 	"src/infrastructure/base",
@@ -34,7 +35,7 @@ var ManifestTrees = []string{
 
 var sha256DigestPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 
-// RenderedRef is one image reference extracted from a manifest tree,
+// RenderedRef is one artifact reference extracted from a manifest tree,
 // carrying enough provenance to make a violation actionable.
 type RenderedRef struct {
 	File   string // repo-relative path of the manifest
@@ -45,9 +46,11 @@ type RenderedRef struct {
 // ParseLock parses lock-file bytes into refs in file order. Comments (#)
 // and blank lines are skipped. It enforces the lock invariants: every entry
 // is digest-pinned and no (repo, digest) pair appears twice (tag+digest and
-// digest-only forms of the same pair count as duplicates).
+// digest-only forms of the same pair count as duplicates). All violations
+// are reported in one error, not just the first.
 func ParseLock(data []byte) ([]string, error) {
 	var refs []string
+	var problems []string
 	seen := map[string]bool{}
 	for i, line := range strings.Split(string(data), "\n") {
 		entry := line
@@ -60,14 +63,19 @@ func ParseLock(data []byte) ([]string, error) {
 		}
 		repo, digest, err := SplitRef(entry)
 		if err != nil {
-			return nil, fmt.Errorf("lock line %d: %w", i+1, err)
+			problems = append(problems, fmt.Sprintf("lock line %d: %v", i+1, err))
+			continue
 		}
 		pair := repo + "@" + digest
 		if seen[pair] {
-			return nil, fmt.Errorf("lock line %d: duplicate (repo, digest) pair %s", i+1, pair)
+			problems = append(problems, fmt.Sprintf("lock line %d: duplicate (repo, digest) pair %s", i+1, pair))
+			continue
 		}
 		seen[pair] = true
 		refs = append(refs, entry)
+	}
+	if len(problems) > 0 {
+		return nil, fmt.Errorf("%d lock violation(s):\n  %s", len(problems), strings.Join(problems, "\n  "))
 	}
 	if len(refs) == 0 {
 		return nil, errors.New("lock contains no image entries")
@@ -98,21 +106,39 @@ func SplitRef(ref string) (string, string, error) {
 }
 
 // CollectRendered walks the manifest trees under root and extracts every
-// concrete image reference. Extraction rules (pragmatic, structural — no
+// concrete artifact reference. Extraction rules (pragmatic, structural — no
 // kustomize/helm execution):
 //   - "image:" scalar fields whose value looks like an OCI reference
 //     (contains "/", registry-ish first segment, not templated)
 //   - "image:" mapping fields in Helm values (registry/repository/tag/digest)
 //   - kustomize "images:" transformer entries (name/newName/newTag/digest)
+//   - Flux OCIRepository CRs pinned by digest (spec.url + spec.ref)
+//
+// Directories containing a Chart.yaml are skipped whole: Helm chart
+// templates are not plain YAML and a chart's values are per-release
+// placeholders, consumable only through rendering. Everywhere else a YAML
+// parse error is fatal — a manifest that cannot parse cannot be audited.
+//
+// Concrete-but-malformed references are hard errors, all reported at once:
+// registry-less refs under an "image:" key (the runtime would default the
+// registry invisibly, and host-keyed dark mirrors cannot serve them) and
+// Helm image maps whose tag-embedded digest conflicts with their digest
+// field or that pin neither tag nor digest.
 func CollectRendered(root string) ([]RenderedRef, error) {
-	var refs []RenderedRef
+	c := &treeCollector{}
 	for _, tree := range ManifestTrees {
 		manifests := 0
 		err := filepath.WalkDir(filepath.Join(root, tree), func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
-			if d.IsDir() || (filepath.Ext(path) != ".yaml" && filepath.Ext(path) != ".yml") {
+			if d.IsDir() {
+				if _, statErr := os.Stat(filepath.Join(path, "Chart.yaml")); statErr == nil {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if filepath.Ext(path) != ".yaml" && filepath.Ext(path) != ".yml" {
 				return nil
 			}
 			manifests++
@@ -124,8 +150,12 @@ func CollectRendered(root string) ([]RenderedRef, error) {
 			if err != nil {
 				return err
 			}
+			file := filepath.ToSlash(rel)
 			for _, doc := range docs {
-				collectFromNode(filepath.ToSlash(rel), doc, &refs)
+				if ref, ok := ociRepositoryRef(doc); ok {
+					c.refs = append(c.refs, RenderedRef{File: file, Source: "oci repository pin", Ref: ref})
+				}
+				c.collect(file, doc)
 			}
 			return nil
 		})
@@ -136,22 +166,19 @@ func CollectRendered(root string) ([]RenderedRef, error) {
 			return nil, fmt.Errorf("no YAML manifests found under %s; wrong --repo-root?", tree)
 		}
 	}
-	if len(refs) == 0 {
-		return nil, errors.New("extracted no image references from the manifest trees; the extractor is broken")
+	if len(c.problems) > 0 {
+		return nil, fmt.Errorf("%d rendered-reference violation(s):\n  %s", len(c.problems), strings.Join(c.problems, "\n  "))
 	}
-	var hostless []string
-	for _, ref := range refs {
-		if ref.Source == sourceRegistryless {
-			hostless = append(hostless, fmt.Sprintf("%s: %q", ref.File, ref.Ref))
-		}
+	if len(c.refs) == 0 {
+		return nil, errors.New("extracted no artifact references from the manifest trees; the extractor is broken")
 	}
-	if len(hostless) > 0 {
-		return nil, fmt.Errorf("registry-less digest-pinned image ref(s) — containerd would default the registry invisibly; name it explicitly (e.g. docker.io/...):\n  %s", strings.Join(hostless, "\n  "))
-	}
-	return refs, nil
+	return c.refs, nil
 }
 
-const sourceRegistryless = "registry-less digest ref"
+type treeCollector struct {
+	refs     []RenderedRef
+	problems []string
+}
 
 func yamlDocuments(path string) ([]interface{}, error) {
 	payload, err := os.ReadFile(path)
@@ -166,14 +193,6 @@ func yamlDocuments(path string) ([]interface{}, error) {
 			if errors.Is(err, io.EOF) {
 				return docs, nil
 			}
-			// Helm chart templates (previews chart) are legitimately not
-			// plain YAML; their image refs are values-templated and thus
-			// excluded by the extraction rules anyway. Malformed YAML
-			// WITHOUT templating stays a hard error — a manifest that
-			// cannot parse cannot be audited for image refs.
-			if bytes.Contains(payload, []byte("{{")) {
-				return docs, nil
-			}
 			return nil, fmt.Errorf("parse %s: %w", path, err)
 		}
 		if doc != nil {
@@ -182,117 +201,155 @@ func yamlDocuments(path string) ([]interface{}, error) {
 	}
 }
 
-func collectFromNode(file string, node interface{}, refs *[]RenderedRef) {
+// asStringMap normalizes a decoded YAML mapping. yaml.v3 produces
+// map[string]interface{} for string-keyed mappings but falls back to
+// map[interface{}]interface{} when any key is not a string — a subtree that
+// must still be walked, not silently skipped.
+func asStringMap(node interface{}) (map[string]interface{}, bool) {
 	switch value := node.(type) {
 	case map[string]interface{}:
+		return value, true
+	case map[interface{}]interface{}:
+		out := make(map[string]interface{}, len(value))
 		for key, child := range value {
-			switch key {
-			case "image":
-				if scalar, ok := child.(string); ok {
-					if looksLikeImageRef(scalar) {
-						*refs = append(*refs, RenderedRef{File: file, Source: "image field", Ref: scalar})
-					} else if strings.Contains(scalar, "@sha256:") && !strings.ContainsAny(scalar, "{$") {
-						// A digest-pinned ref whose first segment is not
-						// registry-ish is a concrete image relying on the
-						// runtime's default-registry resolution — invisible
-						// to host-keyed dark mirrors. CollectRendered turns
-						// these into a hard error.
-						*refs = append(*refs, RenderedRef{File: file, Source: sourceRegistryless, Ref: scalar})
-					}
-					continue
-				}
-				if ref, ok := helmImageMapRef(child); ok {
-					*refs = append(*refs, RenderedRef{File: file, Source: "helm image values", Ref: ref})
-					continue
-				}
-				collectFromNode(file, child, refs)
-			case "images":
-				items, isSlice := child.([]interface{})
-				if !isSlice {
-					// Helm-style images maps (images: {controller: {...}})
-					// must still be walked, not silently skipped.
-					collectFromNode(file, child, refs)
-					continue
-				}
-				for _, item := range items {
-					if ref, ok := kustomizeImageEntryRef(item); ok {
-						*refs = append(*refs, RenderedRef{File: file, Source: "kustomize images entry", Ref: ref})
-						continue
-					}
-					collectFromNode(file, item, refs)
-				}
-			default:
-				collectFromNode(file, child, refs)
-			}
+			out[fmt.Sprint(key)] = child
 		}
-	case []interface{}:
-		for _, item := range value {
-			collectFromNode(file, item, refs)
+		return out, true
+	}
+	return nil, false
+}
+
+func (c *treeCollector) collect(file string, node interface{}) {
+	if items, ok := node.([]interface{}); ok {
+		for _, item := range items {
+			c.collect(file, item)
+		}
+		return
+	}
+	value, ok := asStringMap(node)
+	if !ok {
+		return
+	}
+	for key, child := range value {
+		switch key {
+		case "image":
+			if scalar, ok := child.(string); ok {
+				switch {
+				case looksLikeImageRef(scalar):
+					c.refs = append(c.refs, RenderedRef{File: file, Source: "image field", Ref: scalar})
+				case isTemplated(scalar) || !strings.Contains(scalar, "/"):
+					// Templated values and registry-less bare names
+					// (kustomize pre-transform placeholders) are not
+					// concrete refs; the transformer entry or rendered
+					// values that realize them are checked instead.
+				default:
+					c.problems = append(c.problems, fmt.Sprintf("%s: registry-less image ref %q — the runtime would default the registry invisibly; name it explicitly (e.g. docker.io/...)", file, scalar))
+				}
+				continue
+			}
+			if ref, problem, ok := helmImageMapRef(child); ok {
+				if problem != "" {
+					c.problems = append(c.problems, fmt.Sprintf("%s: %s", file, problem))
+				} else {
+					c.refs = append(c.refs, RenderedRef{File: file, Source: "helm image values", Ref: ref})
+				}
+				continue
+			}
+			c.collect(file, child)
+		case "images":
+			items, isSlice := child.([]interface{})
+			if !isSlice {
+				// Helm-style images maps (images: {controller: {...}})
+				// must still be walked, not silently skipped.
+				c.collect(file, child)
+				continue
+			}
+			for _, item := range items {
+				if ref, ok := kustomizeImageEntryRef(item); ok {
+					c.refs = append(c.refs, RenderedRef{File: file, Source: "kustomize images entry", Ref: ref})
+					continue
+				}
+				c.collect(file, item)
+			}
+		default:
+			c.collect(file, child)
 		}
 	}
 }
 
+func isTemplated(value string) bool {
+	return strings.Contains(value, "{{") || strings.Contains(value, "${") || strings.Contains(value, "$(")
+}
+
 // looksLikeImageRef reports whether a scalar plausibly names a concrete OCI
 // image: not templated, has a repository path, and its first segment is
-// registry-ish (contains "." or ":", or is "localhost"). Registry-less
-// placeholders such as kustomize pre-transform names are excluded; the
-// transformer entry that rewrites them is checked instead.
+// registry-ish (contains "." or ":", or is "localhost").
 func looksLikeImageRef(value string) bool {
 	if value == "" || strings.ContainsAny(value, " \t\"'") {
 		return false
 	}
-	if strings.Contains(value, "{{") || strings.Contains(value, "${") || strings.Contains(value, "$(") {
+	if isTemplated(value) {
 		return false
 	}
 	slash := strings.Index(value, "/")
 	if slash <= 0 {
 		return false
 	}
-	first := value[:slash]
+	return registryish(value[:slash])
+}
+
+func registryish(first string) bool {
 	return first == "localhost" || strings.ContainsAny(first, ".:")
 }
 
 // helmImageMapRef recomposes Helm-style image values maps, e.g.
 // {registry: quay.io, repository: openbao/openbao, tag: 2.5.4@sha256:...}.
-// A map carrying neither tag nor digest names a repository, not an
-// artifact — a per-release placeholder (previews chart) — and is excluded
-// like registry-less kustomize names; the moment a tag or digest appears,
-// the recomposed ref is enforced.
-func helmImageMapRef(node interface{}) (string, bool) {
-	image, ok := node.(map[string]interface{})
-	if !ok {
-		return "", false
+// ok reports whether the node is an image values map at all; problem is
+// non-empty when the map is one but cannot be a sound lock entry: it pins
+// neither tag nor digest (the chart would default the tag — an invisible,
+// unmirrorable dependency), or its tag-embedded digest conflicts with its
+// digest field.
+func helmImageMapRef(node interface{}) (ref string, problem string, ok bool) {
+	image, isMap := asStringMap(node)
+	if !isMap {
+		return "", "", false
 	}
 	repository := stringValue(image["repository"])
 	if repository == "" || strings.Contains(repository, "{{") {
-		return "", false
+		return "", "", false
 	}
-	ref := repository
+	ref = repository
 	if registry := stringValue(image["registry"]); registry != "" {
 		ref = registry + "/" + repository
 	}
 	tag := stringValue(image["tag"])
 	digest := stringValue(image["digest"])
 	if tag == "" && digest == "" {
-		return "", false
+		return "", fmt.Sprintf("helm image values map for %q pins neither tag nor digest — the chart would default the tag invisibly; pin a digest", ref), true
 	}
 	if tag != "" {
 		ref += ":" + tag
 	}
-	if digest != "" && !strings.Contains(ref, "@") {
-		ref += "@" + digest
+	if digest != "" {
+		if _, embedded, found := strings.Cut(ref, "@"); found {
+			if embedded != digest {
+				return "", fmt.Sprintf("helm image values map for %q embeds digest %s in its tag but sets digest: %s — resolve the conflict to one digest", repository, embedded, digest), true
+			}
+		} else {
+			ref += "@" + digest
+		}
 	}
 	if strings.Contains(ref, "{{") {
-		return "", false
+		return "", "", false
 	}
-	return ref, true
+	return ref, "", true
 }
 
 // kustomizeImageEntryRef recomposes the effective reference produced by a
 // kustomize images transformer entry (name/newName/newTag/digest).
 func kustomizeImageEntryRef(node interface{}) (string, bool) {
-	entry, ok := node.(map[string]interface{})
-	if !ok {
+	entry, isMap := asStringMap(node)
+	if !isMap {
 		return "", false
 	}
 	name := stringValue(entry["newName"])
@@ -314,24 +371,64 @@ func kustomizeImageEntryRef(node interface{}) (string, bool) {
 	return ref, true
 }
 
+// ociRepositoryRef extracts the pinned artifact reference from a Flux
+// OCIRepository document (spec.url oci://host/repo + spec.ref.tag/digest).
+// These are pulled by source-controller, not containerd, but the dark
+// mirror must serve them all the same. Digest-less OCIRepositories (the
+// dark-mode branch-tip source) are not pinned artifacts and are skipped.
+func ociRepositoryRef(doc interface{}) (string, bool) {
+	m, ok := asStringMap(doc)
+	if !ok || stringValue(m["kind"]) != "OCIRepository" {
+		return "", false
+	}
+	spec, ok := asStringMap(m["spec"])
+	if !ok {
+		return "", false
+	}
+	url := stringValue(spec["url"])
+	if !strings.HasPrefix(url, "oci://") {
+		return "", false
+	}
+	pin, ok := asStringMap(spec["ref"])
+	if !ok {
+		return "", false
+	}
+	digest := stringValue(pin["digest"])
+	if digest == "" {
+		return "", false
+	}
+	ref := strings.TrimPrefix(url, "oci://")
+	if tag := stringValue(pin["tag"]); tag != "" {
+		ref += ":" + tag
+	}
+	return ref + "@" + digest, true
+}
+
 func stringValue(value interface{}) string {
 	s, _ := value.(string)
 	return s
 }
 
 // Rendered reduces extracted refs to the canonical, sorted, deduplicated
-// entry list that joins the union. Every ref must be digest-pinned. Refs
-// deduplicate by (repo, digest); when both tagged and digest-only forms of
-// the same pair are rendered, the tagged form wins (the dark mirror must
-// answer tag-addressed pulls), and two different tags for one pair is an
-// error — the lock format treats them as duplicates.
+// entry list that joins the union. Every ref must be digest-pinned and name
+// a registry-ish host. Refs deduplicate by (repo, digest); when both tagged
+// and digest-only forms of the same pair are rendered, the tagged form wins
+// (the dark mirror must answer tag-addressed pulls), and two different tags
+// for one pair is an error — the lock format treats them as duplicates.
+// All violations are reported in one error.
 func Rendered(refs []RenderedRef) ([]string, error) {
 	forms := map[string]map[string]bool{} // repo@digest -> full-ref forms
 	provenance := map[string]string{}     // repo@digest -> first file seen
+	var problems []string
 	for _, rendered := range refs {
 		repo, digest, err := SplitRef(rendered.Ref)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %s %q: %w", rendered.File, rendered.Source, rendered.Ref, err)
+			problems = append(problems, fmt.Sprintf("%s: %s %q: %v", rendered.File, rendered.Source, rendered.Ref, err))
+			continue
+		}
+		if first, _, _ := strings.Cut(repo, "/"); !registryish(first) {
+			problems = append(problems, fmt.Sprintf("%s: %s %q: registry-less repository %q — name the registry explicitly (e.g. docker.io/...)", rendered.File, rendered.Source, rendered.Ref, repo))
+			continue
 		}
 		pair := repo + "@" + digest
 		if forms[pair] == nil {
@@ -340,13 +437,17 @@ func Rendered(refs []RenderedRef) ([]string, error) {
 		}
 		forms[pair][rendered.Ref] = true
 	}
+	if len(problems) > 0 {
+		return nil, fmt.Errorf("%d rendered-reference violation(s):\n  %s", len(problems), strings.Join(problems, "\n  "))
+	}
 
 	var entries []string
 	for pair, set := range forms {
+		repoAndDigest, _, _ := strings.Cut(pair, "@")
 		var tagged, digestOnly []string
 		for form := range set {
 			name, _, _ := strings.Cut(form, "@")
-			if idx := strings.LastIndex(name, ":"); idx > strings.LastIndex(name, "/") {
+			if name != repoAndDigest {
 				tagged = append(tagged, form)
 			} else {
 				digestOnly = append(digestOnly, form)
@@ -368,8 +469,8 @@ func Rendered(refs []RenderedRef) ([]string, error) {
 
 // Union assembles the complete inventory: declared entries in file order,
 // then rendered entries sorted. The two sets must be disjoint by (repo,
-// digest) — a declared entry that is also rendered is stale bookkeeping
-// that would re-grow the hand-maintained duplication the split removed.
+// digest) — the declared lock lists only what no manifest renders, so a
+// declared entry that a manifest also renders is stale bookkeeping.
 func Union(declared []string, rendered []string) ([]string, error) {
 	declaredPairs := map[string]bool{}
 	for _, ref := range declared {
@@ -425,14 +526,11 @@ const unionHeader = `# images.lock — GENERATED complete OCI artifact inventory
 # regenerate with //src/infrastructure/cmd/imageset. Union of:
 #   declared: src/infrastructure/bootstrap/bundle/images.declared.lock
 #             (artifacts that run without being rendered from repo manifests)
-#   rendered: image references extracted from src/infrastructure/deployments
+#   rendered: artifact references extracted from src/infrastructure/deployments
 #             and src/infrastructure/base (all digest-pinned, conformance-tested)
 `
 
-// Hosts returns the sorted, unique registry hosts referenced by refs. The
-// darkBundleMirror.registries list in talm values.yaml must equal this set
-// over the union: an upstream host missing from the dark mirrors would make
-// nodes dial the internet (or fail) for a locked artifact.
+// Hosts returns the sorted, unique registry hosts referenced by refs.
 func Hosts(refs []string) ([]string, error) {
 	hosts := map[string]bool{}
 	for _, ref := range refs {
@@ -448,4 +546,33 @@ func Hosts(refs []string) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// VerifyDarkMirrorHosts checks that the darkBundleMirror.registries list in
+// the given talm values file equals the union's registry host set. A host
+// missing from the dark mirrors would make nodes dial the internet (or
+// fail) for a locked artifact; an extra host is a stale mirror entry.
+func VerifyDarkMirrorHosts(valuesPath string, unionRefs []string) error {
+	payload, err := os.ReadFile(valuesPath)
+	if err != nil {
+		return err
+	}
+	var values struct {
+		DarkBundleMirror struct {
+			Registries []string `yaml:"registries"`
+		} `yaml:"darkBundleMirror"`
+	}
+	if err := yaml.Unmarshal(payload, &values); err != nil {
+		return fmt.Errorf("parse %s: %w", valuesPath, err)
+	}
+	declared := append([]string{}, values.DarkBundleMirror.Registries...)
+	sort.Strings(declared)
+	hosts, err := Hosts(unionRefs)
+	if err != nil {
+		return err
+	}
+	if strings.Join(declared, "\n") != strings.Join(hosts, "\n") {
+		return fmt.Errorf("darkBundleMirror.registries in %s = %v, union lock hosts = %v; the dark mirror set must equal the locked upstreams", valuesPath, declared, hosts)
+	}
+	return nil
 }

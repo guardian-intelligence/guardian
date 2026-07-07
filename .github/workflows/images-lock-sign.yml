@@ -5,27 +5,25 @@
 # so a verified union plus offline digest verification of the haul covers
 # the whole bundle — no key infrastructure.
 #
-# On pull requests the derive job runs alone: it is the full-checkout
-# enforcement that every rendered image ref is digest-pinned and disjoint
-# from the declared lock (the Bazel conformance tests check the same
-# invariants over their runfiles subset; this job walks the real tree).
+# On pull requests only the derive job runs: it is the full-checkout
+# enforcement that every rendered artifact ref is digest-pinned, disjoint
+# from the declared lock, and covered by the dark-mirror registries (the
+# Bazel conformance tests check the same invariants over their runfiles
+# subset; this job walks the real tree). It runs on every PR and classifies
+# the diff itself — required checks cannot be path-filtered without hanging
+# unrelated PRs — exiting in seconds when no union input changed.
 #
 # The sign-blob bundle JSON embeds the Fulcio certificate and Rekor proof,
 # so verification works offline given the pinned Sigstore trusted root and
 # the canonical identity recorded in docs/supply-chain-design.md. The
 # derivation is deterministic: `aspect infra bundle` re-derives the same
-# bytes from the same revision and looks the signature up by hash.
+# bytes from the same revision and looks the signature up by hash. The push
+# paths include the Go/Bazel toolchain pins because union bytes are a
+# function of the extraction toolchain, not just the inventory inputs.
 name: images-lock-sign
 
 on:
   pull_request:
-    paths:
-      - "src/infrastructure/bootstrap/bundle/images.declared.lock"
-      - "src/infrastructure/deployments/**"
-      - "src/infrastructure/base/**"
-      - "src/infrastructure/imageset/**"
-      - "src/infrastructure/cmd/imageset/**"
-      - ".github/workflows/images-lock-sign.yml"
   push:
     branches: [main]
     paths:
@@ -34,6 +32,12 @@ on:
       - "src/infrastructure/base/**"
       - "src/infrastructure/imageset/**"
       - "src/infrastructure/cmd/imageset/**"
+      - "src/infrastructure/talm/values.yaml"
+      - "go.mod"
+      - "go.sum"
+      - "MODULE.bazel"
+      - "MODULE.bazel.lock"
+      - ".bazelversion"
       - ".github/workflows/images-lock-sign.yml"
   workflow_dispatch:
 
@@ -46,23 +50,39 @@ defaults:
 
 jobs:
   derive:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Classify the diff
+        id: classify
+        run: |
+          changed="$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")"
+          if grep -qE '^(src/infrastructure/(bootstrap/bundle/images\.declared\.lock|deployments/|base/|imageset/|cmd/imageset/|talm/values\.yaml)|go\.(mod|sum)|MODULE\.bazel(\.lock)?$|\.bazelversion|\.github/workflows/images-lock-sign\.yml)' <<<"$changed"; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "no union lock inputs changed; nothing to derive"
+          fi
 
       - uses: bazelbuild/setup-bazelisk@b39c379c82683a5f25d34f0d062761f62693e0b2 # v3.0.0
+        if: steps.classify.outputs.relevant == 'true'
 
       - name: Derive the union lock
+        if: steps.classify.outputs.relevant == 'true'
         run: |
           bazelisk run //src/infrastructure/cmd/imageset -- \
             --declared "$PWD/src/infrastructure/bootstrap/bundle/images.declared.lock" \
             --repo-root "$PWD" \
+            --dark-mirror-values "$PWD/src/infrastructure/talm/values.yaml" \
             --out "$PWD/images.lock.union"
           sha256sum images.lock.union
 
   sign:
-    needs: derive
     # workflow_dispatch is allowed only where it is equivalent to a main
     # push: signing reviewed history is fine, signing arbitrary branches is
     # not.
@@ -85,13 +105,14 @@ jobs:
       - name: Log in to ghcr.io
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-      # Deterministic derivation: identical to the derive job and to what
-      # `aspect infra bundle` re-runs at drive-build time.
+      # Deterministic derivation: identical to what `aspect infra bundle`
+      # re-runs at drive-build time.
       - name: Derive the union lock
         run: |
           bazelisk run //src/infrastructure/cmd/imageset -- \
             --declared "$PWD/src/infrastructure/bootstrap/bundle/images.declared.lock" \
             --repo-root "$PWD" \
+            --dark-mirror-values "$PWD/src/infrastructure/talm/values.yaml" \
             --out "$PWD/images.lock.union"
 
       # oras push (not cosign upload blob) so the layer carries the filename

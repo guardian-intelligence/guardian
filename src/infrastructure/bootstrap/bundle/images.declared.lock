@@ -13,8 +13,11 @@
 # ref@digest per line; # starts a comment.
 #
 # What belongs here (and only here):
-#   bootstrap artifacts: Talos installer, installer charts, Flux OCI
-#                        artifacts (gated at PR time by oci-ref-drift.yml)
+#   bootstrap artifacts: Talos installer + Cozystack installer chart and
+#                        packages artifact, referenced by bootstrap tooling
+#                        rather than manifests (in-tree Flux OCIRepository
+#                        chart pins are RENDERED and live in the union's
+#                        rendered half)
 #   system images:       talosctl images default (pinned talosctl, matches
 #                        machine.install.image)
 #   operator-spawned:    images run by Cozystack/app operators that no repo
@@ -37,12 +40,6 @@ ghcr.io/cozystack/cozystack/cozy-installer:1.5.2@sha256:6fab302b90f3a49fb4e5783d
 ghcr.io/cozystack/cozystack/cozystack-packages@sha256:b2d3fc7a706b6e755d98385dcfc514945610166c4f5e61ba8cdc1a1acd8188e9
 # cozy-installer helm pre-install labeler hook Job image (ephemeral; absent from pod scrapes)
 docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
-# External Secrets Operator helm chart (pulled by source-controller, NOT containerd)
-ghcr.io/external-secrets/charts/external-secrets:0.10.4@sha256:ec681d8b8ee3b5d0a016b1d4dde28dc91ebafa106841dece35722c371b84f49c
-# Kargo helm chart (pulled by source-controller, NOT containerd)
-ghcr.io/akuity/kargo-charts/kargo:1.10.8@sha256:3090ccc64bc89a04138be187a4dbb7cd4be4a10a29cc6c7f336e16d7770c985c
-# Flagger helm chart (pulled by source-controller, NOT containerd)
-ghcr.io/fluxcd/charts/flagger:1.43.0@sha256:31d6fad48f45fd5d73190ff80f9b047689e14cef762b5b7073a3dc643f3619aa
 
 # --- analytics ClickHouse keeper (spawned for the CHK by the Altinity
 # operator; the server/ingest/otel-collector images are rendered from

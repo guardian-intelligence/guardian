@@ -22,6 +22,7 @@ BUNDLE_TARGET = "//src/infrastructure/cmd/bundle:bundle"
 HAULER_TARGET = "//src/tools/hauler:hauler"
 IMAGESET_TARGET = "//src/infrastructure/cmd/imageset:imageset"
 DECLARED_LOCK_PATH = "src/infrastructure/bootstrap/bundle/images.declared.lock"
+TALM_VALUES_PATH = "src/infrastructure/talm/values.yaml"
 COSIGN_FILE_TARGET = "//src/tools/cosign:cosign"
 ORAS_FILE_TARGET = "@oras_linux_amd64//:oras_file"
 
@@ -33,6 +34,9 @@ UNION_LOCK_INPUTS = [
     DECLARED_LOCK_PATH,
     "src/infrastructure/deployments",
     "src/infrastructure/base",
+    "src/infrastructure/imageset",
+    "src/infrastructure/cmd/imageset",
+    TALM_VALUES_PATH,
 ]
 
 # Supply-chain trust anchors (docs/supply-chain-design.md). The identity is
@@ -1355,6 +1359,8 @@ def _derive_union_lock(ctx, out_path):
             ws_path(ctx, DECLARED_LOCK_PATH),
             "--repo-root",
             ws_path(ctx),
+            "--dark-mirror-values",
+            ws_path(ctx, TALM_VALUES_PATH),
             "--out",
             out_path,
         ],
@@ -1391,18 +1397,28 @@ def _bundle_impl(ctx):
 
     # The recorded revision must actually describe the union that gets
     # derived, projected, synced, and hashed; a dirty union input would make
-    # the bundle manifest's provenance false.
+    # the bundle manifest's provenance false. --ignored matters: the
+    # extractor walks the on-disk trees, so a gitignored YAML file changes
+    # the union without ever showing in plain porcelain output.
     lock_status = _capture_stdout(
         ctx,
         "git",
-        ["status", "--porcelain", "--"] + UNION_LOCK_INPUTS,
+        ["status", "--porcelain", "--ignored", "--"] + UNION_LOCK_INPUTS,
         cwd = ws_path(ctx),
         label = "git status of union lock inputs",
     )
     if lock_status == None:
         return 1
-    if lock_status != "":
-        ctx.std.io.stderr.write("ERROR: union lock inputs (declared lock or manifest trees) have uncommitted changes; the bundle manifest would attribute the haul to a revision whose inventory differs. Commit first:\n" + lock_status + "\n")
+    dirty = []
+    for line in lock_status.split("\n"):
+        if line == "":
+            continue
+        if not line.startswith("!!"):
+            dirty.append(line)
+        elif line.endswith(".yaml") or line.endswith(".yml"):
+            dirty.append(line + "  (gitignored YAML still feeds the extractor)")
+    if dirty:
+        ctx.std.io.stderr.write("ERROR: union lock inputs (declared lock, manifest trees, or extractor sources) differ from the committed revision; the bundle manifest would attribute the haul to a revision whose inventory differs. Resolve first:\n" + "\n".join(dirty) + "\n")
         return 1
 
     rc = checked_spawn(
@@ -1429,8 +1445,8 @@ def _bundle_impl(ctx):
     hauler_manifest = out_dir + "/hauler-manifest.yaml"
     sync_manifest = hauler_manifest
     if resuming:
-        if not ctx.std.fs.exists(union_lock):
-            ctx.std.io.stderr.write("ERROR: " + out_dir + " exists but holds no images.lock — it is not an interrupted bundle (or was interrupted before derivation). Remove the directory and build fresh.\n")
+        if not ctx.std.fs.exists(union_lock) or not ctx.std.fs.exists(hauler_manifest):
+            ctx.std.io.stderr.write("ERROR: " + out_dir + " exists but holds no images.lock + hauler-manifest.yaml pair — it is not an interrupted bundle (or was interrupted before projection). Remove the directory and build fresh.\n")
             return 1
         fresh = union_lock + ".fresh"
         rc = _derive_union_lock(ctx, fresh)
@@ -1448,6 +1464,22 @@ def _bundle_impl(ctx):
         if rc != 0:
             return rc
 
+        # The stored hauler manifest must equal what the CURRENT projection
+        # code derives from that same union — a cmd/bundle change landed
+        # mid-interruption would otherwise sync the rest of the store under
+        # one projection while the drive records another.
+        manifest_fresh = hauler_manifest + ".fresh"
+        rc = _project_manifest(ctx, union_lock, manifest_fresh)
+        if rc != 0:
+            return rc
+        if _capture_success(ctx, "cmp", ["-s", hauler_manifest, manifest_fresh], label = "compare projected manifest with the interrupted bundle's") != 0:
+            _capture_success(ctx, "rm", ["-f", manifest_fresh], label = "drop comparison copy")
+            ctx.std.io.stderr.write("ERROR: the hauler projection of this union no longer matches the interrupted bundle's hauler-manifest.yaml (projection code changed?). Remove " + out_dir + " and build fresh.\n")
+            return 1
+        rc = _capture_success(ctx, "rm", [manifest_fresh], label = "drop comparison copy")
+        if rc != 0:
+            return rc
+
         # Hauler re-fetches every listed ref's manifest from upstream even
         # when the blobs are already local, and anonymous docker.io requests
         # are scarce — so a real resume must sync only the refs the store is
@@ -1462,13 +1494,9 @@ def _bundle_impl(ctx):
         rc = _derive_union_lock(ctx, union_lock)
         if rc != 0:
             return rc
-
-    # The hauler manifest is a pure function of the union lock; (re)project
-    # it unconditionally so the drive always carries the pair it was synced
-    # from.
-    rc = _project_manifest(ctx, union_lock, hauler_manifest)
-    if rc != 0:
-        return rc
+        rc = _project_manifest(ctx, union_lock, hauler_manifest)
+        if rc != 0:
+            return rc
 
     rc = checked_spawn(
         ctx,

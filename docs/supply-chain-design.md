@@ -57,6 +57,17 @@ adding every digest-pinned image ref extracted from the manifest trees. The
 derivation is a pure function of the checkout — CI, drive builds, and
 offline operators all reproduce identical bytes from the same revision.
 
+The union is revision-exact by design: it contains what the checkout
+declares and renders, nothing more. The retired hand-maintained lock
+instead *accumulated* superseded pins so an in-flight blue/green window or
+a Git-revert rollback stayed mirror-servable from one haul. That property
+is deliberately traded away: a dark rollback now means building (or
+retaining) a bundle at the revision being rolled back to, and a standing
+air-gapped cluster doing live upgrades must keep its mirror store additive
+across syncs rather than serving a single revision's haul. Bring-up from a
+drive is unaffected — Flagger deploys fresh from the manifests, so no
+superseded digest is ever needed.
+
 The dark-uplink haul is *derived* from the union lock and every blob in it
 is digest-addressed, so a verified union plus hash verification of the haul
 against it covers the entire bundle. Signing the haul itself would add no
@@ -68,7 +79,12 @@ drive whose union CI never signed, verifies the signature (pinned identity
 and runs `bundle --verify` (union/haul/hauler-manifest hash bindings); the
 operator repeats the checks offline as step 0 of dark bring-up (see the
 cold-boot runbook), re-deriving the union from the checkout and
-byte-comparing it against the drive copy. The residual trust in the haul→manifest binding is the
+byte-comparing it against the drive copy. The offline re-derivation runs
+the drive-carried `imageset-bin`, so its binding of drive bytes to checkout
+bytes holds under the custody model (the drive and its binaries travel
+with the operator, like the seal key) — the cosign check is what defends
+the Git-derivation axis, proving the union was produced from reviewed main
+history. The residual trust in the haul→manifest binding is the
 custody model itself: the drive is custody, assembled and carried by the
 operator who also holds the seal key — signatures defend the Git-derivation
 and upstream-registry axes, not the operator.
