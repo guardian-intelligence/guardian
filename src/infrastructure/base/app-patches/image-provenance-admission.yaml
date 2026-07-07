@@ -90,10 +90,7 @@ spec:
     name: guardian-image-provenance-params
     namespace: tenant-guardian
     parameterNotFoundAction: Deny
-  # Observe-only during the soak; the flip to Deny is a one-line change to
-  # this list, gated on a clean soak window that includes at least one
-  # Kargo promotion.
-  validationActions: ["Warn", "Audit"]
+  validationActions: ["Deny"]
   matchResources:
     namespaceSelector:
       matchExpressions:

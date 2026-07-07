@@ -173,12 +173,12 @@ else must be digest-pinned from an allowlisted prefix. Admitting a new
 operator image is therefore the same reviewed act as any dependency
 change: a one-line declared-lock PR.
 
-Current mode is `Warn, Audit`, not `Deny`: the flip is a one-line
-validationActions change gated on a clean soak window that includes at
-least one Kargo promotion. Note the apiserver exposes no per-policy VAP
-metrics on this cluster (verified 1.34.3), so Audit-mode violations are
-not alertable; enforcement visibility comes from Deny-mode Flux failures
-plus a periodic dry-run denial canary once Deny is live.
+Enforcement is `Deny`: a violation fails the apply (Flux surfaces the CEL
+message in the Kustomization status) or the pod creation (operator
+controllers retry against the same denial). The vap-denial-canary asserts
+every 10 minutes that the policy still flags a violating probe — pages
+critical on silence, since the apiserver exposes no per-policy VAP metrics
+on this cluster (verified 1.34.3).
 
 ## Decision: no Transit (or any KMS) in the signing path
 
