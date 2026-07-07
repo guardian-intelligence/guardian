@@ -4,7 +4,13 @@ Available live debugging CLIs: repo-pinned kubectl, talosctl, helm, and k6
 surfaced by focused infra tasks.
 """
 
-load(".aspect/lib/helpers.axl", "checked_spawn", "ws_path")
+load(
+    ".aspect/lib/helpers.axl",
+    "bazel_output_file",
+    "checked_spawn",
+    "install_bazel_tool_shims",
+    "ws_path",
+)
 
 GUARDIAN_MGMT_ROOT = "src/infrastructure/bootstrap/guardian-mgmt"
 GUARDIAN_MGMT_DNS_ROOT = "src/infrastructure/bootstrap/guardian-mgmt-dns"
@@ -25,6 +31,14 @@ DECLARED_LOCK_PATH = "src/infrastructure/bootstrap/bundle/images.declared.lock"
 TALM_VALUES_PATH = "src/infrastructure/talm/values.yaml"
 COSIGN_FILE_TARGET = "//src/tools/cosign:cosign"
 ORAS_FILE_TARGET = "@oras_linux_amd64//:oras_file"
+KUBELOGIN_TARGET = "@kubelogin_linux_amd64//:kubelogin"
+CURL_FILE_TARGET = "@curl_linux_amd64//:curl"
+CLUSTER_CA_PATH = "src/infrastructure/bootstrap/guardian-mgmt/cluster-ca.crt"
+PLATFORM_OIDC_ISSUER = "https://keycloak.guardianintelligence.org/realms/cozy"
+PLATFORM_OIDC_CLIENT_ID = "kubernetes"
+BREAKGLASS_NTFY_URL = "https://ntfy.sh/guardian-operations-fable"
+BREAKGLASS_LEDGER_NAMESPACE = "tenant-root"
+BREAKGLASS_LEDGER_CONFIGMAP = "breakglass-audit"
 
 # The complete artifact inventory is GENERATED: the union of the declared
 # lock and the image refs rendered from these trees (see
@@ -708,6 +722,17 @@ def _require_talm_operator_state(ctx, root):
     return 0
 
 def _kubeconfig_impl(ctx):
+    kubeconfig = _mint_custody_kubeconfig(ctx)
+    if kubeconfig == None:
+        return 1
+    if ctx.args.install:
+        kubectl = _kubectl_path(ctx)
+        if kubectl == None:
+            return 1
+        return _install_kubeconfig(ctx, kubectl, kubeconfig)
+    return 0
+
+def _mint_custody_kubeconfig(ctx):
     root = ws_path(ctx, ctx.args.root)
     talosconfig = ctx.args.talosconfig
     if talosconfig == "":
@@ -715,7 +740,7 @@ def _kubeconfig_impl(ctx):
 
     rc = _require_talm_operator_state(ctx, root)
     if rc != 0:
-        return rc
+        return None
 
     rc = checked_spawn(
         ctx,
@@ -734,7 +759,7 @@ def _kubeconfig_impl(ctx):
         label = "talm talosconfig guardian-mgmt",
     )
     if rc != 0:
-        return rc
+        return None
 
     rc = checked_spawn(
         ctx,
@@ -759,12 +784,12 @@ def _kubeconfig_impl(ctx):
         label = "talm kubeconfig guardian-mgmt",
     )
     if rc != 0:
-        return rc
+        return None
 
     kubeconfig = root + "/kubeconfig"
     kubectl = _kubectl_path(ctx)
     if kubectl == None:
-        return 1
+        return None
     server = _capture_stdout(
         ctx,
         kubectl,
@@ -773,15 +798,13 @@ def _kubeconfig_impl(ctx):
         label = "kubectl inspect generated guardian-mgmt kubeconfig",
     )
     if server == None:
-        return 1
+        return None
     if not _contains(EXPECTED_KUBE_APIS, server):
         ctx.std.io.stderr.write("ERROR: generated kubeconfig points at " + server + "; expected guardian-mgmt API endpoint from src/infrastructure/bootstrap/guardian-mgmt/main.tf\n")
-        return 1
+        return None
 
     ctx.std.io.stderr.write("wrote guardian-mgmt kubeconfig to " + kubeconfig + " (" + server + ")\n")
-    if ctx.args.install:
-        return _install_kubeconfig(ctx, kubectl, kubeconfig)
-    return 0
+    return kubeconfig
 
 def _install_kubeconfig(ctx, kubectl, source):
     target = ctx.args.install_path
@@ -1721,6 +1744,216 @@ def _watch_impl(ctx):
         label = "cluster-watch " + ctx.args.mode,
     )
 
+
+def _auth_impl(ctx):
+    if ctx.args.platform_agent == ctx.args.platform_admin:
+        ctx.std.io.stderr.write("ERROR: pass exactly one of --platform-agent or --platform-admin\n")
+        return 1
+
+    target = ctx.args.install_path
+    if target == "":
+        target = "~/.kube/config"
+    target = _expand_operator_path(ctx, target)
+    if target == None:
+        return 1
+
+    kubectl = _kubectl_path(ctx)
+    if kubectl == None:
+        return 1
+
+    target_dir = _capture_stdout(ctx, "dirname", [target], label = "dirname " + target)
+    if target_dir == None:
+        return 1
+    rc = checked_spawn(ctx, "mkdir", ["-p", target_dir], label = "mkdir -p " + target_dir)
+    if rc != 0:
+        return rc
+
+    if ctx.args.platform_agent:
+        return _auth_platform_agent(ctx, kubectl, target)
+    return _auth_platform_admin(ctx, kubectl, target)
+
+def _auth_platform_agent(ctx, kubectl, target):
+    ca = ws_path(ctx, CLUSTER_CA_PATH)
+    if not ctx.std.fs.exists(ca):
+        ctx.std.io.stderr.write("ERROR: missing " + CLUSTER_CA_PATH + "; the committed cluster CA is required to bootstrap the OIDC context\n")
+        return 1
+
+    bin_dir = install_bazel_tool_shims(ctx, [("kubectl-oidc_login", KUBELOGIN_TARGET)], ".guardian/tools/bin")
+    if bin_dir == "":
+        return 1
+    kubelogin = bin_dir + "/kubectl-oidc_login"
+
+    home = ctx.std.env.var("HOME") or ""
+    if home == "":
+        ctx.std.io.stderr.write("ERROR: HOME is not set\n")
+        return 1
+    cache_dir = home + "/.kube/cache/oidc-login-platform-agent"
+    server = "https://" + PUBLIC_TALOS_KUBECONFIG_NODE + ":6443"
+
+    # set-credentials appends --exec-arg values to an existing user, so drop
+    # any previous entry to keep reruns idempotent.
+    rc = checked_spawn(
+        ctx,
+        "sh",
+        ["-c", "'" + kubectl + "' --kubeconfig '" + target + "' config unset users.platform-agent >/dev/null 2>&1 || true"],
+        label = "kubeconfig reset platform-agent user",
+    )
+    if rc != 0:
+        return rc
+
+    steps = [
+        (["config", "set-cluster", "guardian-mgmt", "--server=" + server, "--certificate-authority=" + ca, "--embed-certs=true"], "kubeconfig set-cluster guardian-mgmt"),
+        ([
+            "config",
+            "set-credentials",
+            "platform-agent",
+            "--exec-api-version=client.authentication.k8s.io/v1beta1",
+            "--exec-command=" + kubelogin,
+            "--exec-arg=get-token",
+            "--exec-arg=--oidc-issuer-url=" + PLATFORM_OIDC_ISSUER,
+            "--exec-arg=--oidc-client-id=" + PLATFORM_OIDC_CLIENT_ID,
+            "--exec-arg=--oidc-extra-scope=offline_access",
+            "--exec-arg=--token-cache-dir=" + cache_dir,
+        ], "kubeconfig set-credentials platform-agent"),
+        (["config", "set-context", "platform-agent@guardian-mgmt", "--cluster=guardian-mgmt", "--user=platform-agent"], "kubeconfig set-context platform-agent@guardian-mgmt"),
+        (["config", "use-context", "platform-agent@guardian-mgmt"], "kubeconfig use-context platform-agent@guardian-mgmt"),
+    ]
+    for step_args, label in steps:
+        rc = checked_spawn(ctx, kubectl, ["--kubeconfig", target] + step_args, label = label)
+        if rc != 0:
+            return rc
+    rc = checked_spawn(ctx, "chmod", ["600", target], label = "chmod 600 " + target)
+    if rc != 0:
+        return rc
+
+    ctx.std.io.stderr.write("selected platform-agent@guardian-mgmt in " + target + "; verifying (first login opens a browser)\n")
+    return checked_spawn(ctx, kubectl, ["--kubeconfig", target, "auth", "whoami"], label = "kubectl auth whoami")
+
+def _auth_platform_admin(ctx, kubectl, target):
+    reason = ctx.args.reason.strip()
+    if reason == "":
+        ctx.std.io.stderr.write("ERROR: --reason is required: breakglass escalation to system:masters is audit-logged\n")
+        return 1
+
+    minted = _mint_custody_kubeconfig(ctx)
+    if minted == None:
+        return 1
+
+    backup = ""
+    if ctx.std.fs.exists(target):
+        stamp = _capture_stdout(ctx, "date", ["+%Y%m%d%H%M%S"], label = "date kubeconfig backup stamp")
+        if stamp == None:
+            return 1
+        backup = target + ".backup-" + stamp
+        rc = checked_spawn(ctx, "cp", [target, backup], label = "backup existing kubeconfig")
+        if rc != 0:
+            return rc
+
+    # Merge rather than replace: fresh admin credentials win on conflict
+    # (minted file listed first), every other context survives.
+    tmp = target + ".merge-tmp"
+    rc = checked_spawn(
+        ctx,
+        "sh",
+        ["-c", "umask 077 && '" + kubectl + "' config view --flatten --raw > '" + tmp + "' && mv '" + tmp + "' '" + target + "'"],
+        env = {"KUBECONFIG": minted + ":" + target},
+        label = "merge breakglass admin context into " + target,
+    )
+    if rc != 0:
+        return rc
+    rc = checked_spawn(ctx, kubectl, ["--kubeconfig", target, "config", "use-context", "admin@guardian-mgmt"], label = "kubeconfig use-context admin@guardian-mgmt")
+    if rc != 0:
+        return rc
+    rc = checked_spawn(ctx, "chmod", ["600", target], label = "chmod 600 " + target)
+    if rc != 0:
+        return rc
+
+    rc = _breakglass_audit(ctx, kubectl, target, reason)
+    if rc != 0:
+        return rc
+
+    message = "breakglass: admin@guardian-mgmt (system:masters) selected in " + target
+    if backup != "":
+        message = message + " (backup: " + backup + ")"
+    ctx.std.io.stderr.write(message + "\n")
+    return 0
+
+def _breakglass_audit(ctx, kubectl, target, reason):
+    stamp = _capture_stdout(ctx, "date", ["-u", "+%Y-%m-%dT%H:%M:%SZ"], label = "date breakglass stamp")
+    if stamp == None:
+        return 1
+    user = ctx.std.env.var("USER") or "unknown"
+    host = _capture_stdout(ctx, "hostname", [], label = "hostname")
+    if host == None:
+        host = "unknown"
+    entry = stamp + " user=" + user + " host=" + host + " reason=" + reason
+
+    # Local ledger next to the custody state that minted the credentials.
+    # This is the only leg allowed to fail the escalation: it has no network
+    # or cluster dependency, so if it fails something is wrong locally.
+    log_path = ws_path(ctx, ctx.args.root) + "/breakglass.log"
+    rc = checked_spawn(
+        ctx,
+        "sh",
+        ["-c", "printf '%s\\n' \"$BREAKGLASS_ENTRY\" >> '" + log_path + "'"],
+        env = {"BREAKGLASS_ENTRY": entry},
+        label = "append breakglass ledger " + log_path,
+    )
+    if rc != 0:
+        return rc
+
+    # Page the operations topic. Best-effort: breakglass exists precisely for
+    # moments when infrastructure is broken, so a failed page must not block
+    # the escalation.
+    curl = bazel_output_file(ctx, CURL_FILE_TARGET)
+    paged = False
+    if curl != "":
+        rc = _capture_success(
+            ctx,
+            curl,
+            [
+                "-fsS",
+                "-m",
+                "10",
+                "-H",
+                "Title: BREAKGLASS: guardian-mgmt system:masters minted",
+                "-H",
+                "Priority: urgent",
+                "-H",
+                "Tags: rotating_light",
+                "-d",
+                entry,
+                ctx.args.audit_ntfy_url,
+            ],
+            label = "page " + ctx.args.audit_ntfy_url,
+        )
+        paged = rc == 0
+    if not paged:
+        ctx.std.io.stderr.write("WARN: could not page " + ctx.args.audit_ntfy_url + "; the escalation is recorded in " + log_path + " — notify the operator manually\n")
+
+    # In-cluster ledger. Best-effort for the same reason: the cluster may be
+    # exactly what is broken.
+    key = "bg-" + stamp.replace(":", ".")
+    escaped = entry.replace("\\", "\\\\").replace("\"", "\\\"")
+    payload = "{\"data\":{\"" + key + "\":\"" + escaped + "\"}}"
+    script = (
+        "'" + kubectl + "' --kubeconfig '" + target + "' -n " + BREAKGLASS_LEDGER_NAMESPACE +
+        " create configmap " + BREAKGLASS_LEDGER_CONFIGMAP + " --dry-run=client -o yaml | " +
+        "'" + kubectl + "' --kubeconfig '" + target + "' apply -f - >/dev/null && " +
+        "'" + kubectl + "' --kubeconfig '" + target + "' -n " + BREAKGLASS_LEDGER_NAMESPACE +
+        " patch configmap " + BREAKGLASS_LEDGER_CONFIGMAP + " --type=merge -p \"$BREAKGLASS_PATCH\""
+    )
+    rc = checked_spawn(
+        ctx,
+        "sh",
+        ["-c", script],
+        env = {"BREAKGLASS_PATCH": payload},
+        label = "append in-cluster breakglass ledger " + BREAKGLASS_LEDGER_NAMESPACE + "/" + BREAKGLASS_LEDGER_CONFIGMAP,
+    )
+    if rc != 0:
+        ctx.std.io.stderr.write("WARN: could not write the in-cluster breakglass ledger; the escalation is recorded in " + log_path + "\n")
+    return 0
+
 validate = task(
     implementation = _validate_impl,
     name = "validate",
@@ -1799,6 +2032,24 @@ kubeconfig = task(
         "install": args.boolean(default = False, description = "Install the refreshed kubeconfig as the default kubectl config, backing up any existing file first."),
         "install_path": args.string(default = "", description = "Where --install writes the kubeconfig. Defaults to ~/.kube/config."),
         "nodes": args.string(default = PUBLIC_TALOS_KUBECONFIG_NODE, description = "Talos node used to fetch kubeconfig. Use 10.8.0.11,10.8.0.12,10.8.0.13 from inside the private VLAN if desired."),
+        "root": args.string(default = GUARDIAN_MGMT_TALM_ROOT, description = "Talm root containing gitignored secrets.yaml and talosconfig."),
+        "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
+    },
+)
+
+auth = task(
+    implementation = _auth_impl,
+    name = "auth",
+    group = ["infra"],
+    summary = "Authenticate kubectl to guardian-mgmt. --platform-agent installs and selects the OIDC daily-driver context (pinned kubelogin, committed cluster CA, 30-day offline token). --platform-admin is breakglass: escalated x509 system:masters minted from the Talos custody bundle, requires --reason, and every use is audit-logged (ntfy page + in-cluster ledger + local custody log).",
+    args = {
+        "audit_ntfy_url": args.string(default = BREAKGLASS_NTFY_URL, description = "ntfy URL paged with the breakglass reason."),
+        "endpoints": args.string(default = PUBLIC_TALOS_KUBECONFIG_ENDPOINTS, description = "Talos API endpoints used for the breakglass kubeconfig mint."),
+        "install_path": args.string(default = "", description = "Kubeconfig file to write. Defaults to ~/.kube/config."),
+        "nodes": args.string(default = PUBLIC_TALOS_KUBECONFIG_NODE, description = "Talos node used for the breakglass kubeconfig mint."),
+        "platform_admin": args.boolean(default = False, description = "Breakglass: escalated x509 system:masters credentials from the Talos custody bundle (secrets.yaml + talm.key). Audit-logged; requires --reason."),
+        "platform_agent": args.boolean(default = False, description = "Daily driver: OIDC via the platform Keycloak with an offline token (30-day idle window, resets on use, revocable in Keycloak)."),
+        "reason": args.string(default = "", description = "Why breakglass escalation is needed. Required with --platform-admin; paged to the operations topic and appended to the breakglass ledgers."),
         "root": args.string(default = GUARDIAN_MGMT_TALM_ROOT, description = "Talm root containing gitignored secrets.yaml and talosconfig."),
         "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
     },
