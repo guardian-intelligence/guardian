@@ -8,13 +8,15 @@
 # after analysis passes):
 #   1. readiness — pods must pass /healthz within progressDeadlineSeconds or
 #      the rollout fails;
-#   2. http-gate (pre-rollout, once) — a plain HTTP reachability check
-#      against the canary Service, executed by company-site-loadtester;
-#   3. k6-stress (pre-rollout, once) — an open-model 500 rps stress run
-#      against the canary Service, with k6 thresholds remote-written to
-#      VictoriaMetrics for observe-only analysis;
-#   4. http-iterate (every iteration) — the same check, repeated; a canary
-#      that's flaky under warm-up fails here.
+#   2. k6-stress (pre-rollout, once, SYNCHRONOUS via the loadtester bash
+#      task) — an open-model 250 rps stress run against the canary-color
+#      Service covering the same paths the synthetic probes watch. k6's
+#      thresholds (error rate, dropped iterations) fail the webhook and the
+#      rollout; latency is recorded to VictoriaMetrics but not yet gating
+#      (observe-only until a week of soak calibrates the threshold);
+#   3. per-interval metric checks — the blackbox service-class probe series
+#      (deployments/alerting/synthetic-probes.yaml, 15s cadence) must show
+#      every probed path healthy over the lookback window.
 # threshold: 3 failed checks → automatic rollback (canary scaled to zero,
 # primary untouched, status Failed). Post-cutover regressions roll back via
 # Git revert through this same gate.
@@ -42,7 +44,7 @@ spec:
     threshold: 3
     # Deliberately tight for the initial stand-up, same call IAM's Canaries
     # already made: a single passing iteration promotes. Raise toward a real
-    # soak now that the http-latency-canary is feeding analysis.metrics.
+    # soak now that the synthetic probes are feeding analysis.metrics.
     iterations: 1
     # severity warn: failed checks and rollbacks page through the
     # alert-relay; routine info-level promotion events do not.
@@ -52,48 +54,37 @@ spec:
         providerRef:
           name: alert-relay
           namespace: flagger
-    # http-latency-canary.yaml pushes these every minute; a 2m lookback
-    # tolerates alignment jitter between that schedule and this analysis
-    # loop while still only ever including recent samples. Success must be
-    # 1.0 (any of the 4 probed paths failing is real); p95 duration budget
-    # is a conservative starting point for an in-cluster static-site hop,
-    # tightened once a week of live data sets the real baseline.
+    # Blackbox probes push every 15s; the 2m lookback keeps several samples
+    # per path in every window. Success must be 1.0 (any of the 4 probed
+    # paths failing is real); the p95 duration budget is a conservative
+    # in-cluster bound, tightened once a week of live data sets the real
+    # baseline.
     metrics:
-      - name: http-canary-success-rate
+      - name: probe-success-rate
         templateRef:
-          name: http-canary-success-rate
+          name: probe-success-rate
           namespace: flagger
         thresholdRange:
           min: 1
         interval: 2m
-      - name: http-canary-p95-duration
+      - name: probe-p95-duration
         templateRef:
-          name: http-canary-p95-duration
+          name: probe-p95-duration
           namespace: flagger
         thresholdRange:
           max: 1
         interval: 2m
     webhooks:
-      - name: http-gate
-        type: pre-rollout
-        url: http://company-site-loadtester.tenant-guardian-prod/
-        timeout: 30s
-        metadata:
-          type: bash
-          cmd: bash /gate/http-gate.sh
       - name: k6-stress
         type: pre-rollout
         url: http://company-site-loadtester.tenant-guardian-prod/
-        timeout: 180s
+        # bash-type loadtester tasks run synchronously: the webhook blocks
+        # until k6 exits, so a threshold breach (error rate, dropped
+        # iterations) fails the rollout before any traffic cutover. The
+        # run itself is ~2m10s; 300s covers VU setup and teardown.
+        timeout: 300s
         metadata:
-          type: cmd
+          type: bash
           cmd: >-
             k6 run -e TARGET_URL=http://company-site-canary.tenant-guardian-prod --tag stage=prod --tag surface=company-site --tag scenario=stress -o experimental-prometheus-rw /gate/stress.js
           logCmdOutput: "true"
-      - name: http-iterate
-        type: rollout
-        url: http://company-site-loadtester.tenant-guardian-prod/
-        timeout: 30s
-        metadata:
-          type: bash
-          cmd: bash /gate/http-gate.sh

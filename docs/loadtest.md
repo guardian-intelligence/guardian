@@ -12,10 +12,14 @@ engine). It is the only load tool in the repo; do not add another.
 
 A surface earns "load-tested" by composing these, not by running one of them:
 
-1. **Continuous correctness canary** — a minutely `CronJob` running one
-   iteration of the real user flows, alerting when the surface is broken.
-   Reference: `src/infrastructure/deployments/iam/login-canary/login-canary.js`
-   (three Keycloak flows) and `deployments/company/*/http-latency-canary.yaml`.
+1. **Continuous correctness canary** — a continuous assertion that the real
+   user flows work, alerting when the surface is broken. Two shapes: a
+   `CronJob` running real flows for logic-bearing surfaces
+   (`src/infrastructure/deployments/iam/login-canary/login-canary.js`, three
+   Keycloak flows), or blackbox_exporter probes on a 15s scrape for HTTP
+   surfaces (`deployments/alerting/{blackbox-exporter,synthetic-probes}.yaml`
+   — two classes per stage: in-cluster Service and public-edge hairpin, with
+   per-phase timing incl. TTFB).
 2. **Deploy-time stress gate** — a k6 arrival-rate run against the *canary
    color* before traffic shifts, thresholds-as-code, wired as a Flagger
    `pre-rollout` webhook. Landing with company-site as first consumer; see
@@ -144,8 +148,8 @@ Execution and assertion are split on purpose:
   which is why we do not use its `spec.verification`/AnalysisTemplate machinery.
   A Kargo `http` step queries `vmselect` for the *source stage's* recorded
   series and fails the promotion if a threshold is unmet. Live pattern:
-  `company-stage-gamma.yaml` checks `http_canary_success == 1` and
-  `http_canary_duration_seconds` p95 ≤ 1.0s for the beta namespace before
+  `company-stage-gamma.yaml` checks the service-class `probe_success == 1`
+  and `probe_duration_seconds` p95 ≤ 1.0s for the beta namespace before
   opening the promotion PR. A stress gate adds an error-rate-under-load and a
   TPS-floor check in the same shape, keyed on the freight's image digest so the
   gate proves *this* build was stress-passed.

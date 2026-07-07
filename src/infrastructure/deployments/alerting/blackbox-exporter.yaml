@@ -1,0 +1,227 @@
+# Active HTTP prober for the synthetic probe vertical (see
+# synthetic-probes.yaml for the targets and alert rules). One long-lived
+# exporter, pull-model: vmagent scrapes /probe?target=<url> on the VMProbe
+# schedule and the exporter performs that one probe synchronously — probe
+# cadence is the scrape interval, a failed probe is a probe_success=0
+# sample, and an exporter outage is up=0 on the scrape itself. No Job pods,
+# no push path that can die before recording (both failure modes of the
+# bash CronJob canaries this replaces).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: blackbox-exporter
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: blackbox-exporter
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+data:
+  blackbox.yml: |
+    modules:
+      http_2xx:
+        prober: http
+        timeout: 5s
+        http:
+          preferred_ip_protocol: ip4
+          follow_redirects: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blackbox-exporter
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: blackbox-exporter
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: blackbox-exporter
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: blackbox-exporter
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/component: alerting
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: blackbox-exporter
+          image: quay.io/prometheus/blackbox-exporter:v0.28.0@sha256:e753ff9f3fc458d02cca5eddab5a77e1c175eee484a8925ac7d524f04366c2fc
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config.file=/etc/blackbox/blackbox.yml
+          ports:
+            - name: http
+              containerPort: 9115
+          readinessProbe:
+            httpGet:
+              path: /-/healthy
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: http
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: config
+              mountPath: /etc/blackbox
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: blackbox-exporter
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: blackbox-exporter
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: blackbox-exporter
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  selector:
+    app.kubernetes.io/name: blackbox-exporter
+  ports:
+    - name: http
+      port: 9115
+      targetPort: http
+      protocol: TCP
+---
+# Prober flows. Egress is exactly the probe surface: DNS (with the Cilium
+# DNS proxy enabled — toFQDNs below needs it to learn name->IP bindings),
+# the in-cluster company-site Services in the three stage tenants, and the
+# three public hostnames for the edge-hairpin probes. The hairpin
+# deliberately leaves the cluster and re-enters via Cloudflare — that is
+# the point (it exercises DNS -> CF -> LB -> origin -> ingress -> pod, the
+# path that degraded silently on 2026-07-07) — so world:443 is scoped to
+# the exact hostnames, not the internet.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: blackbox-exporter
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: blackbox-exporter
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: blackbox-exporter
+  ingress:
+    # vmagent scraping /probe (the VMProbes in synthetic-probes.yaml).
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: vmagent
+            k8s:io.kubernetes.pod.namespace: cozy-monitoring
+      toPorts:
+        - ports:
+            - port: "9115"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
+    # In-cluster service probes (probe_class=service). Both label values
+    # because the apex Service routes to the primary clone once Flagger
+    # owns the Deployment.
+    - toEndpoints:
+        - matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: In
+              values:
+                - tenant-guardian-beta
+                - tenant-guardian-gamma
+                - tenant-guardian-prod
+            - key: k8s:app.kubernetes.io/name
+              operator: In
+              values:
+                - company-site
+                - company-site-primary
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # Edge-hairpin probes (probe_class=edge): the public hostnames only.
+    - toFQDNs:
+        - matchName: guardianintelligence.org
+        - matchName: beta.guardianintelligence.org
+        - matchName: gamma.guardianintelligence.org
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+# Cross-tenant halves for the in-cluster probes: the Cozystack-generated
+# stage isolation admits only the parent tenant, system namespaces, and the
+# apiserver — not tenant-root — and tenant-root's generated egress only
+# admits tenant-root-labeled destinations (same depth-2 ancestor-label gap
+# the root ingress compensates for in company/*/root-ingress-networkpolicy.yaml).
+# One clusterwide pair covers all three stages.
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-guardian-stages-allow-blackbox-company-site
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  endpointSelector:
+    matchExpressions:
+      - key: k8s:io.kubernetes.pod.namespace
+        operator: In
+        values:
+          - tenant-guardian-beta
+          - tenant-guardian-gamma
+          - tenant-guardian-prod
+      - key: k8s:app.kubernetes.io/name
+        operator: In
+        values:
+          - company-site
+          - company-site-primary
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            k8s:app.kubernetes.io/name: blackbox-exporter
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP

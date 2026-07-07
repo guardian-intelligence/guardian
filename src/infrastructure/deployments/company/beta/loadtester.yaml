@@ -113,13 +113,9 @@ spec:
               readOnly: true
       volumes:
         - name: gate-scripts
-          projected:
+          configMap:
+            name: company-site-stress-gate
             defaultMode: 0555
-            sources:
-              - configMap:
-                  name: company-site-gate-scripts
-              - configMap:
-                  name: company-site-stress-gate
         - name: k6-tools
           emptyDir:
             # Holds the ~67MiB k6 binary the initContainer copies in; 32Mi
@@ -144,25 +140,3 @@ spec:
       port: 80
       targetPort: http
       protocol: TCP
----
-# The gate Flagger runs against the CANARY color before and during analysis:
-# a plain 200 on /healthz and on a representative real page. A new build
-# that can't serve either never becomes primary.
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: company-site-gate-scripts
-  namespace: tenant-guardian-beta
-  labels:
-    app.kubernetes.io/name: company-site-loadtester
-    app.kubernetes.io/part-of: guardian
-    guardian.dev/stage: beta
-data:
-  http-gate.sh: |
-    #!/usr/bin/env bash
-    set -euo pipefail
-    base="http://company-site-canary.tenant-guardian-beta"
-
-    curl -fsS --max-time 10 -o /dev/null "$base/healthz"
-    curl -fsS --max-time 10 -o /dev/null "$base/letters/dear-shovon"
-    echo "http-gate: OK (healthz + a representative page reachable on canary color)"
