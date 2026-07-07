@@ -92,9 +92,12 @@ data:
 
     function wipeNewUser(base, auth) {
       const found = http.get(`${base}/users?username=canary-newuser&exact=true`, auth);
+      // Pin the URL-grouping tag: without it every per-UUID delete mints a new
+      // VictoriaMetrics series across the whole k6_http_* family (~1440/day/stage).
+      const del = { ...auth, tags: { name: `${base}/users/{id}` } };
       let wiped = true;
       for (const u of found.json() || []) {
-        wiped = http.del(`${base}/users/${u.id}`, null, auth).status === 204 && wiped;
+        wiped = http.del(`${base}/users/${u.id}`, null, del).status === 204 && wiped;
       }
       return wiped;
     }
