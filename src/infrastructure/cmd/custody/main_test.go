@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,6 +38,45 @@ func (f *fakeRestic) runOut(opts *options, extraEnv []string, args ...string) ([
 		return nil, fmt.Errorf("fake restic %s failed", args[0])
 	}
 	return f.outputs[args[0]], nil
+}
+
+// withRestoreMaterializer wires the fake so "restore <id> --target <dir>"
+// copies the currently staged bundle under the target, mimicking restic's
+// re-rooting of absolute snapshot paths. mutate lets a test corrupt the
+// restored bytes to prove the comparison bites.
+func withRestoreMaterializer(t *testing.T, opts *options, fake *fakeRestic, mutate func([]byte) []byte) {
+	t.Helper()
+	realRun := fake.run
+	opts.run = func(o *options, env []string, args ...string) error {
+		if args[0] == "restore" {
+			target := args[len(args)-1]
+			err := filepath.WalkDir(o.bundleDir, func(path string, d fs.DirEntry, werr error) error {
+				if werr != nil || d.IsDir() {
+					return werr
+				}
+				b, rerr := os.ReadFile(path)
+				if rerr != nil {
+					return rerr
+				}
+				if mutate != nil {
+					b = mutate(b)
+				}
+				dst := filepath.Join(target, path)
+				if merr := os.MkdirAll(filepath.Dir(dst), 0o700); merr != nil {
+					return merr
+				}
+				return os.WriteFile(dst, b, 0o600)
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		return realRun(o, env, args...)
+	}
+	if fake.outputs == nil {
+		fake.outputs = map[string][]byte{}
+	}
+	fake.outputs["snapshots"] = []byte(`[{"id":"abcdef1234567890","time":"2026-07-07T00:00:00Z"}]`)
 }
 
 func testOptions(t *testing.T, fake *fakeRestic) *options {
@@ -155,6 +195,7 @@ func TestCreateBacksUpChecksAndPrintsInstructions(t *testing.T) {
 	opts.bundleDir = filepath.Join("/dev/shm", fmt.Sprintf("guardian-custody-test-%d", os.Getpid()))
 	defer os.RemoveAll(opts.bundleDir)
 
+	withRestoreMaterializer(t, opts, fake, nil)
 	if err := cmdCreate(opts); err != nil {
 		t.Fatal(err)
 	}
@@ -163,11 +204,23 @@ func TestCreateBacksUpChecksAndPrintsInstructions(t *testing.T) {
 	for _, c := range fake.calls {
 		gotVerbs = append(gotVerbs, c.args[0])
 	}
-	if len(gotVerbs) != 2 || gotVerbs[0] != "backup" || gotVerbs[1] != "check" {
-		t.Fatalf("want [backup check], got %v", gotVerbs)
+	want := []string{"backup", "check", "snapshots", "restore"}
+	if len(gotVerbs) != len(want) {
+		t.Fatalf("want %v, got %v", want, gotVerbs)
+	}
+	for i := range want {
+		if gotVerbs[i] != want[i] {
+			t.Fatalf("want %v, got %v", want, gotVerbs)
+		}
 	}
 	if _, err := os.Stat(opts.bundleDir); !os.IsNotExist(err) {
 		t.Error("fresh staging dir must be shredded after create")
+	}
+	if _, err := os.Stat(filepath.Join(opts.talmRoot, "secrets.yaml")); !os.IsNotExist(err) {
+		t.Error("proven round trip must shred the plaintext sources")
+	}
+	if _, err := os.Stat(filepath.Join(opts.custodyDir, envName)); !os.IsNotExist(err) {
+		t.Error("proven round trip must shred the custody-dir sources")
 	}
 	out := opts.stdout.(*bytes.Buffer).String()
 	for _, phrase := range []string{"TWO offline media", "NO other way to recover", "If you are an agent", "key-add"} {
@@ -212,6 +265,28 @@ func TestCreateDoesNotShredOperatorOpenedBundle(t *testing.T) {
 	}
 }
 
+func TestCreateKeepsSourcesWhenRoundTripFails(t *testing.T) {
+	fake := &fakeRestic{}
+	opts := testOptions(t, fake)
+	opts.talmRoot = populateLegacy(t, opts)
+	opts.yes = true
+	writeFile(t, filepath.Join(opts.repo, "config"), "restic config")
+	opts.bundleDir = filepath.Join("/dev/shm", fmt.Sprintf("guardian-custody-test-corrupt-%d", os.Getpid()))
+	defer os.RemoveAll(opts.bundleDir)
+	withRestoreMaterializer(t, opts, fake, func(b []byte) []byte { return append(b, 'x') })
+
+	err := cmdCreate(opts)
+	if err == nil || !strings.Contains(err.Error(), "round-trip proof failed") {
+		t.Fatalf("want round-trip failure, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(opts.talmRoot, "secrets.yaml")); err != nil {
+		t.Error("a failed round trip must leave every plaintext source untouched")
+	}
+	if _, err := os.Stat(opts.bundleDir + ".proof"); !os.IsNotExist(err) {
+		t.Error("proof dir must be shredded even on failure")
+	}
+}
+
 func TestCreateShredsStagingWhenBackupFails(t *testing.T) {
 	fake := &fakeRestic{fail: map[string]bool{"backup": true}}
 	opts := testOptions(t, fake)
@@ -239,6 +314,7 @@ func TestCreateInitializesRepoWithEnvPassword(t *testing.T) {
 	opts.bundleDir = filepath.Join("/dev/shm", fmt.Sprintf("guardian-custody-test-init-%d", os.Getpid()))
 	defer os.RemoveAll(opts.bundleDir)
 
+	withRestoreMaterializer(t, opts, fake, nil)
 	if err := cmdCreate(opts); err != nil {
 		t.Fatal(err)
 	}
