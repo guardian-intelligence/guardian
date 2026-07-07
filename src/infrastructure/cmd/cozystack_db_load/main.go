@@ -50,7 +50,7 @@ func main() {
 	flag.StringVar(&cfg.WaitTimeout, "wait-timeout", "20m", "timeout for load Job completion")
 	flag.StringVar(&cfg.Stage, "stage", "root", "Guardian bootstrap stage: root")
 	flag.StringVar(&cfg.Component, "component", "postgres", "database component to load: postgres or clickhouse")
-	flag.StringVar(&cfg.ApplicationName, "application", "guardian", "Cozystack app name")
+	flag.StringVar(&cfg.ApplicationName, "application", "verself-controlplane", "Cozystack app name")
 	flag.StringVar(&cfg.Name, "name", "", "Job name; defaults to a UTC timestamped DNS label")
 	flag.StringVar(&cfg.TTLSecondsAfterFinished, "ttl-seconds-after-finished", "86400", "Kubernetes Job ttlSecondsAfterFinished")
 	flag.StringVar(&cfg.PgbenchScale, "pgbench-scale", "10", "pgbench scale factor")

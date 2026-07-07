@@ -50,9 +50,8 @@ spec:
     useSystemBucket: true
 ---
 # Nightly base backup. Continuous WAL archiving covers RPO; the cron bounds
-# restore replay time. Offset from the other Plans (iam prod 03:00, tenant-root
-# guardian 04:00, analytics ClickHouse 05:00) so base backups don't contend
-# for the same uplink window.
+# restore replay time. Offset from the other Plans (iam prod 03:00, analytics
+# ClickHouse 05:00) so base backups don't contend for the same uplink window.
 apiVersion: backups.cozystack.io/v1alpha1
 kind: Plan
 metadata:
