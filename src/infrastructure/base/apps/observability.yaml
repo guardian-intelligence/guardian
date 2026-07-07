@@ -68,7 +68,10 @@ spec:
   logsStorages:
     - name: generic
       retentionPeriod: "3"
-      storage: 5Gi
+      # 5Gi hit 88% during the 2026-07-07 incident day (x509 error storms
+      # + cluster-wide pod churn); an incident's own log flood must never
+      # take out the observability needed to debug it.
+      storage: 15Gi
       storageClassName: replicated
   grafana:
     db:
