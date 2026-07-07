@@ -163,7 +163,7 @@ Step by step:
 7. Report progress to the user via relevant aggregate metrics e.g. "LCP down for route /letters/<slug> from 3.4s to 3.2s base on last 30m of traffic to prod".
 
 Common post-merge issues:
-- Flux: `BuildFailed`, `denied by ValidatingAdmissionPolicy ...`,  `HealthCheckFailed`, `dependency '...' is not ready`
+- Flux: `BuildFailed`, `denied by ValidatingAdmissionPolicy ...` (image-provenance denials name the offending image and the fix: pin the digest, extend base/app-patches/registry-prefixes.txt, or declare the operator-spawned ref in images.declared.lock — each in its own reviewed PR), `HealthCheckFailed`, `dependency '...' is not ready`
 - Kargo (image changes only): promotions are done by Kargo GitHub app bot commits.
 - Flagger: A failed canary rolls back automatically and pages.
 - Alerta: intended to be extremely high signal, if there's unnecessary/unrelated noise, continue to monitor but assume it's your duty to fix noise unless you can make a strong case to flag to the user to fix separately. If it's a small fixup, even if unrelated, just tack on the change instead of bothering the user.

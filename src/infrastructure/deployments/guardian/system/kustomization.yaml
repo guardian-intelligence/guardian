@@ -7,3 +7,4 @@ resources:
   - openbao-networkpolicy.yaml
   - openbao-observability.yaml
   - openbao-rbac.yaml
+  - vap-denial-canary.yaml
