@@ -23,6 +23,9 @@ spec:
         guardian.dev/stage: gamma
     spec:
       automountServiceAccountToken: false
+      # Kubelet's docker-link env for the 'electric' Service (ELECTRIC_PORT=tcp://...)
+      # collides with Electric's ELECTRIC_* config namespace and crashes boot.
+      enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
