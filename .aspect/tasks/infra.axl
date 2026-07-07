@@ -1725,7 +1725,7 @@ validate = task(
     implementation = _validate_impl,
     name = "validate",
     group = ["infra"],
-    summary = "Validate the checked-in management-cluster OpenTofu, Talm, and Kustomize substrate.",
+    summary = "Validate the checked-in management-cluster substrate: OpenTofu fmt/init/validate, infra filegroups, Tier-1 tests including union-lock invariants, and kustomize renders.",
 )
 
 topology = task(
@@ -1742,7 +1742,7 @@ tofu_init = task(
     implementation = _tofu_init_impl,
     name = "tofu-init",
     group = ["infra"],
-    summary = "Initialize OpenTofu S3 backends for management bootstrap roots using standard AWS/R2 environment credentials.",
+    summary = "Initialize OpenTofu S3 backends for management bootstrap roots; endpoint defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars.",
     args = {
         "endpoint": args.string(default = "", description = "Optional S3-compatible backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
         "root": args.string(default = "all", description = "OpenTofu root to initialize: all, guardian-mgmt, or guardian-mgmt-dns."),
@@ -1753,7 +1753,7 @@ bundle = task(
     implementation = _bundle_impl,
     name = "bundle",
     group = ["infra"],
-    summary = "Build the offline bundle: derive the union images lock (declared + rendered), project it into a hauler manifest, sync every locked artifact into a store, save the haul archive, record the bundle manifest (revision + digests), fetch and verify CI's signature over the union, and run the offline hash verification the operator repeats at dark bring-up. Needs network; docker.io refs practically require `hauler login` credentials (anonymous pulls are rate-limited to ~10/hour); the signature fetch needs a ghcr-authenticated docker config.",
+    summary = "Build the offline bundle from the generated union images lock: derive images.lock from images.declared.lock plus rendered refs, refuse dirty union inputs, project to a Hauler manifest, sync/save the haul, write bundle-manifest.yaml, fetch and verify CI's signature over that exact union, then run the same hash-binding verification used at dark bring-up. Needs network; docker.io refs practically require `hauler login` credentials, and the signature fetch needs ghcr.io auth.",
     args = {
         "out_dir": args.string(default = "dist/bundle", description = "Output directory for the bundle. Relative paths resolve against the workspace root; absolute paths (e.g. a mounted drive) are used as-is."),
         "resume": args.boolean(default = False, description = "Continue an interrupted sync into an existing out_dir. Refused unless the derived union lock is byte-identical to the interrupted bundle's (same inventory); only refs missing from the store are re-fetched."),
@@ -1764,7 +1764,7 @@ converged = task(
     implementation = _converged_impl,
     name = "converged",
     group = ["infra"],
-    summary = "Verify every declared Flux Kustomization is Ready at the expected revision. Component health gates readiness via Flux health checks declared in the manifests.",
+    summary = "Verify every declared Flux Kustomization is Ready at the expected revision; component health is gated by Flux healthChecks/healthCheckExprs in the manifests.",
     args = {
         "expected_revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA."),
         "flux_namespace": args.string(default = "cozy-fluxcd", description = "Flux namespace."),
@@ -1793,7 +1793,7 @@ kubeconfig = task(
     implementation = _kubeconfig_impl,
     name = "kubeconfig",
     group = ["infra"],
-    summary = "Refresh the gitignored guardian-mgmt kubeconfig from the repo-pinned Talm state; pass --install to make plain kubectl use it.",
+    summary = "Refresh the gitignored guardian-mgmt custody kubeconfig from repo-pinned Talm operator state, verify it targets a declared guardian-mgmt API endpoint, and optionally install it with a backup.",
     args = {
         "endpoints": args.string(default = PUBLIC_TALOS_KUBECONFIG_ENDPOINTS, description = "Talos API endpoints used to fetch kubeconfig. Defaults to public control-plane addresses so off-VLAN operators can refresh custody credentials."),
         "install": args.boolean(default = False, description = "Install the refreshed kubeconfig as the default kubectl config, backing up any existing file first."),
@@ -1821,7 +1821,7 @@ bootstrap = task(
     implementation = _bootstrap_impl,
     name = "bootstrap",
     group = ["infra"],
-    summary = "Exercise the guardian-mgmt OpenTofu, Talm, Talos, and Cozystack installer bootstrap path.",
+    summary = "Exercise the guardian-mgmt bootstrap path: initialize the OpenTofu backend, print topology outputs, validate the substrate, refresh kubeconfig, run the Talos L2 gate, and upgrade the repo-pinned Cozystack installer/operator.",
     args = {
         "cozystack_upgrade_timeout": args.string(default = "10m", description = "Timeout for the official Cozystack installer/operator Helm upgrade inside bootstrap."),
         "endpoints": args.string(default = "10.8.0.250", description = "Talos API endpoint used to fetch kubeconfig and validate L2 state."),
@@ -1837,7 +1837,7 @@ upgrade_cozystack = task(
     implementation = _upgrade_cozystack_impl,
     name = "upgrade-cozystack",
     group = ["infra"],
-    summary = "Upgrade the guardian-mgmt Cozystack installer/operator release to the repo-pinned version.",
+    summary = "Run the narrow day-two Helm path that upgrades only the guardian-mgmt Cozystack installer/operator release to the repo-pinned version.",
     args = {
         "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
         "wait_timeout": args.string(default = "10m", description = "Timeout for the official Helm installer upgrade."),
@@ -1933,7 +1933,7 @@ observability_drill = task(
     implementation = _observability_drill_impl,
     name = "observability-drill",
     group = ["infra"],
-    summary = "Run a pgbench workload and verify VictoriaMetrics and VictoriaLogs can query the root Postgres path.",
+    summary = "Run or reuse a root Postgres pgbench workload, then query VictoriaMetrics and VictoriaLogs for that exact workload and CNPG scrape/log path.",
     args = {
         "application": args.string(default = "guardian", description = "Cozystack Postgres app name."),
         "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
@@ -1958,7 +1958,7 @@ openbao_drill = task(
     implementation = _openbao_drill_impl,
     name = "openbao-drill",
     group = ["infra"],
-    summary = "Run the OpenBao status drill using native bao commands.",
+    summary = "Run the OpenBao status drill using native bao commands: initialized, unsealed, HA-enabled, and one raft cluster ID across members.",
     args = {
         "kube_api_server": args.string(default = "", description = "Optional Kubernetes API server override for off-VLAN proof runs."),
         "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
