@@ -47,7 +47,7 @@ The purpose is to create a free and open-source system for any being to convert 
 * You are not alone in this repo. Expect parallel changes by the user or other agents and work around them to avoid destructive action.
 * No need to be precious with git hygiene. If you see a doc update, it's fine to fold it into your worktree or branch, even if it's unrelated.
 * For every feature we ship, we must assume that if we don't have a canary actively asserting it works, that it's broken. If the user suggests a feature or large project, work backwards from the monitoring and operations story: how can we be notified when the feature breaks, or when performance or availability drops, and how do we avoid shipping regressions in the first place using promotion gates and responsible deployment practices? We have the technology necessary to do so, we just have to remember to use them.
-* This cluster is k8s v1.35.6 (VAP is GA)
+* This cluster is k8s v1.36.2 (VAP is GA)
 * Drills are not part of normal development — run them when asked on one node at a time by explicit node IP, wait for the node and public edge to recover, document that node's outage window, then move to the next. A node whose loss breaches 60 seconds of public-edge disruption is load-bearing and must be fixed before continuing.
 * Development tools are version-pinned in `src/tools/` (talm, talosctl, flux, kubectl, hauler, openbao, oras, k6); use those and run the install, never an ambient install.
 * RTO policy lives in `docs/reliability-rto.md`.
