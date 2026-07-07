@@ -605,16 +605,32 @@ func (s *server) watchdogActive(ctx context.Context) (bool, error) {
 }
 
 // watchdogActiveAny reports whether any of the given replicas holds the
-// active Watchdog.
+// active Watchdog. Replicas are queried in parallel: the headless Service
+// publishes not-ready addresses, so a blackholed replica stays in DNS and
+// must not be allowed to eat the poll budget ahead of the replica that
+// actually holds the Watchdog.
 func (s *server) watchdogActiveAny(ctx context.Context, urls []string) (bool, error) {
-	var errs []error
+	type result struct {
+		active bool
+		err    error
+	}
+	// Buffered to len(urls) so stragglers finish into the channel and exit
+	// after an early return; the caller cancels ctx right after.
+	results := make(chan result, len(urls))
 	for _, u := range urls {
-		active, qerr := s.watchdogActiveAt(ctx, u)
-		if qerr != nil {
-			errs = append(errs, qerr)
+		go func(u string) {
+			active, err := s.watchdogActiveAt(ctx, u)
+			results <- result{active: active, err: err}
+		}(u)
+	}
+	var errs []error
+	for range urls {
+		r := <-results
+		if r.err != nil {
+			errs = append(errs, r.err)
 			continue
 		}
-		if active {
+		if r.active {
 			return true, nil
 		}
 	}

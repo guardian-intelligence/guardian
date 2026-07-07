@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -708,5 +709,59 @@ func TestReplicaURLs(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A blackholed replica must not shadow the one holding the Watchdog: the
+// headless Service publishes not-ready addresses, so a dead pod's IP stays
+// in DNS and the poll has to reach past it within the same budget.
+func TestWatchdogActiveAnyHungReplicaDoesNotShadowHolder(t *testing.T) {
+	hung := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	t.Cleanup(hung.Close)
+	active := amReplica(t, true)
+
+	s := newTestServer(&fakeSink{})
+	s.client = &http.Client{Timeout: 5 * time.Second}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	got, err := s.watchdogActiveAny(ctx, []string{hung.URL, active.URL})
+	if err != nil {
+		t.Fatalf("watchdogActiveAny: %v", err)
+	}
+	if !got {
+		t.Fatal("watchdogActiveAny = false, want true: hung replica shadowed the holder")
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("answer took %v, want well under the poll budget", elapsed)
+	}
+}
+
+// End-to-end wiring: watchdogActive resolves the configured host and reaches
+// the replica through the rebuilt per-address URL.
+func TestWatchdogActiveResolvesReplicas(t *testing.T) {
+	active := amReplica(t, true)
+	u, err := url.Parse(active.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newTestServer(&fakeSink{})
+	s.client = &http.Client{Timeout: 2 * time.Second}
+	s.cfg.alertmanagerURL = "http://alertmanager.example.internal:" + u.Port()
+	s.lookupHost = func(_ context.Context, host string) ([]string, error) {
+		if host != "alertmanager.example.internal" {
+			return nil, errors.New("unexpected host " + host)
+		}
+		return []string{u.Hostname()}, nil
+	}
+	got, err := s.watchdogActive(context.Background())
+	if err != nil {
+		t.Fatalf("watchdogActive: %v", err)
+	}
+	if !got {
+		t.Fatal("watchdogActive = false, want true")
 	}
 }
