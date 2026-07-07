@@ -5,3 +5,4 @@ resources:
   - relay.yaml
   - networkpolicy.yaml
   - observability.yaml
+  - audit-alerts.yaml
