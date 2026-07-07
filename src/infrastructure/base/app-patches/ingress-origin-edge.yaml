@@ -42,9 +42,14 @@ spec:
               "SUCCESS" "cloudflare";
               default "";
             }
+            map $ssl_client_verify $guardian_client_country {
+              "SUCCESS" $http_cf_ipcountry;
+              default "";
+            }
         proxySetHeaders:
           x-guardian-client-ip: $guardian_client_ip
           x-guardian-client-ip-source: $guardian_client_ip_source
+          x-guardian-client-country: $guardian_client_country
           # Not $remote_addr: the realip module rewrites it from the
           # client-settable CF-Connecting-IP. $realip_remote_addr is the TCP peer.
           x-guardian-edge-peer-ip: $realip_remote_addr

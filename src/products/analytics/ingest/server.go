@@ -8,6 +8,7 @@ import (
 
 	"buf.build/go/protovalidate"
 	"connectrpc.com/connect"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	analyticsv1 "github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/analytics/v1"
 	"github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/analytics/v1/analyticsv1connect"
@@ -33,10 +34,10 @@ type requestMeta struct {
 	minted *http.Cookie
 }
 
-func withRequestMeta(next http.Handler) http.Handler {
+func withRequestMeta(next http.Handler, asn *asnTable) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id, minted := correlationID(r)
-		meta := &requestMeta{ctx: deriveRequestContext(r), corrID: id, minted: minted}
+		meta := &requestMeta{ctx: deriveRequestContext(r, asn), corrID: id, minted: minted}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), requestCtxKey{}, meta)))
 	})
 }
@@ -87,8 +88,13 @@ func (s *eventService) Publish(
 			Path:          e.GetPath(),
 			Referrer:      e.GetReferrer(),
 			UA:            meta.ctx.UA,
+			DeviceClass:   meta.ctx.DeviceClass,
+			OSFamily:      meta.ctx.OSFamily,
+			BrowserFamily: meta.ctx.BrowserFamily,
 			ClientIP:      meta.ctx.ClientIP,
 			IPSource:      meta.ctx.IPSource,
+			Country:       meta.ctx.Country,
+			ASN:           meta.ctx.ASN,
 			ClientSkewMs:  skew,
 			VitalName:     e.GetVitalName(),
 			VitalValue:    e.GetVitalValue(),
@@ -99,6 +105,11 @@ func (s *eventService) Publish(
 	}
 	if len(rows) > 0 {
 		s.batch.Add(rows)
+		eventsIngested.WithLabelValues(
+			tierLabel(meta.ctx.TrustTier),
+			presenceLabel(meta.ctx.Country != ""),
+			presenceLabel(meta.ctx.ASN != 0),
+		).Add(float64(len(rows)))
 	}
 
 	rejected := 0
@@ -131,14 +142,17 @@ func (e constError) Error() string { return string(e) }
 // route is /api/events/guardian.analytics.v1.EventService/Publish —
 // path-prefix routed to this service by the ingress, same apex-sharing
 // pattern as IAM prod.
-func newHandler(svc *eventService, opts ...connect.HandlerOption) http.Handler {
+func newHandler(svc *eventService, asn *asnTable, opts ...connect.HandlerOption) http.Handler {
 	mux := http.NewServeMux()
 	path, handler := analyticsv1connect.NewEventServiceHandler(svc, opts...)
 	mux.Handle("/api/events"+path, http.StripPrefix("/api/events", handler))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	return withRequestMeta(withBodyLimit(mux, 256<<10))
+	// In-cluster only: the public Ingress routes the /api/events prefix,
+	// never this path. Scraped by the analytics-ingest VMServiceScrape.
+	mux.Handle("/metrics", promhttp.Handler())
+	return withRequestMeta(withBodyLimit(mux, 256<<10), asn)
 }
 
 func withBodyLimit(next http.Handler, limit int64) http.Handler {

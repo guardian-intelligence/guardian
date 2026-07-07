@@ -78,6 +78,16 @@ http_file(
     url = "https://curl.se/ca/cacert.pem",
 )
 
+# BGP-derived IP->ASN ranges (public routing data), mirrored from
+# iptoasn.com as a repo release because the upstream URL is mutable.
+# Refresh: src/infrastructure/runbooks/ip2asn-refresh.md.
+http_file(
+    name = "ip2asn_combined",
+    downloaded_file_path = "ip2asn-combined.tsv.gz",
+    sha256 = "47a70c5bd178a72d0f27507da8f1ec94910eb5088b00a3d5e9cd0ac12c2a2811",
+    url = "https://github.com/guardian-intelligence/guardian/releases/download/data-ip2asn-20260707/ip2asn-combined.tsv.gz",
+)
+
 buf = use_extension("@rules_buf//buf:extensions.bzl", "buf")
 buf.toolchains(
     sha256 = "ce4a14aeff08a01585c6ffd2a7743473ab3354275181de0ee10f792a21f7d56e",
@@ -99,7 +109,9 @@ use_repo(
     "com_connectrpc_otelconnect",
     "com_github_clickhouse_clickhouse_go_v2",
     "com_github_jackc_pgx_v5",
+    "com_github_mileusna_useragent",
     "com_github_openbao_openbao_api_v2",
+    "com_github_prometheus_client_golang",
     "io_k8s_sigs_yaml",
     "io_opentelemetry_go_otel",
     "io_opentelemetry_go_otel_exporters_otlp_otlptrace_otlptracegrpc",

@@ -1,0 +1,81 @@
+# Ingest metrics scrape + the enrichment canary. Header-based country
+# enrichment fails silently (a Cloudflare or ingress config change and the
+# field goes empty with zero errors anywhere), so the alert watches the
+# outcome — the empty-country rate on edge_verified traffic — not the config.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: analytics-ingest
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: analytics-ingest
+    app.kubernetes.io/part-of: guardian
+spec:
+  namespaceSelector:
+    matchNames:
+      - guardian-analytics
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: analytics-ingest
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: analytics-ingest
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: analytics-ingest
+    app.kubernetes.io/part-of: guardian
+spec:
+  groups:
+    - name: analytics-ingest.rules
+      interval: 30s
+      rules:
+        - alert: AnalyticsIngestCountryEnrichmentEmpty
+          expr: |
+            sum(rate(analytics_ingest_events_total{trust_tier="edge_verified",country="empty"}[10m]))
+              /
+            sum(rate(analytics_ingest_events_total{trust_tier="edge_verified"}[10m])) > 0.05
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Analytics country enrichment is missing on edge-verified traffic"
+            description: ">5% of edge-verified events arrived without a country for 15m. CF-IPCountry is not reaching ingest: check the zone's IP-geolocation setting and the x-guardian-client-country map in base/app-patches/ingress-origin-edge.yaml."
+        - alert: AnalyticsIngestScrapeDown
+          expr: up{namespace="guardian-analytics",job="analytics-ingest"} == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Analytics ingest metrics scrape is down"
+            description: "vmagent cannot scrape analytics-ingest /metrics; the enrichment canary is blind while this fires."
+---
+# vmagent scrapes /metrics from cozy-monitoring; the existing ingest CCNP
+# only admits tenant-root (public edge) and ClickHouse egress.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-vmagent-to-analytics-ingest
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: analytics-ingest
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: analytics-ingest
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:app.kubernetes.io/name: vmagent
+            k8s:io.kubernetes.pod.namespace: cozy-monitoring
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP

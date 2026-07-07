@@ -49,6 +49,7 @@ spec:
                 echo "waiting for all 2 replicas to see the full cluster"; sleep 5
               done
               clickhouse-client --host "$host" --user ingest --receive_timeout 300 --queries-file /ddl/events.sql
+              clickhouse-client --host "$host" --user ingest --receive_timeout 300 --queries-file /ddl/migrations.sql
               clickhouse-client --host "$host" --user ingest --receive_timeout 300 --queries-file /traces/otel-traces.sql
               clickhouse-client --host "$host" --user ingest --query "EXISTS TABLE guardian_analytics.events"
               clickhouse-client --host "$host" --user ingest --query "EXISTS TABLE guardian_analytics.otel_traces"
@@ -59,7 +60,7 @@ spec:
                   name: analytics-ch-ingest
                   key: ingest
             - name: GUARDIAN_DDL_REVISION
-              value: "5"
+              value: "6"
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
