@@ -9,7 +9,7 @@
 #   1. readiness — pods must pass /healthz within progressDeadlineSeconds or
 #      the rollout fails;
 #   2. http-gate (pre-rollout, once) — a plain HTTP reachability check
-#      against the canary Service, executed by flagger-loadtester;
+#      against the canary Service, executed by company-site-loadtester;
 #   3. k6-stress (pre-rollout, once) — an open-model 500 rps stress run
 #      against the canary Service, with k6 thresholds remote-written to
 #      VictoriaMetrics for observe-only analysis;
@@ -76,14 +76,14 @@ spec:
     webhooks:
       - name: http-gate
         type: pre-rollout
-        url: http://flagger-loadtester.tenant-guardian-beta/
+        url: http://company-site-loadtester.tenant-guardian-beta/
         timeout: 30s
         metadata:
           type: bash
           cmd: bash /gate/http-gate.sh
       - name: k6-stress
         type: pre-rollout
-        url: http://flagger-loadtester.tenant-guardian-beta/
+        url: http://company-site-loadtester.tenant-guardian-beta/
         timeout: 180s
         metadata:
           type: cmd
@@ -92,7 +92,7 @@ spec:
           logCmdOutput: "true"
       - name: http-iterate
         type: rollout
-        url: http://flagger-loadtester.tenant-guardian-beta/
+        url: http://company-site-loadtester.tenant-guardian-beta/
         timeout: 30s
         metadata:
           type: bash

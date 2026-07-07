@@ -5,10 +5,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: flagger-loadtester
+  name: company-site-loadtester
   namespace: tenant-guardian-beta
   labels:
-    app.kubernetes.io/name: flagger-loadtester
+    app.kubernetes.io/name: company-site-loadtester
     app.kubernetes.io/part-of: guardian
     guardian.dev/stage: beta
 spec:
@@ -16,11 +16,11 @@ spec:
   revisionHistoryLimit: 2
   selector:
     matchLabels:
-      app.kubernetes.io/name: flagger-loadtester
+      app.kubernetes.io/name: company-site-loadtester
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: flagger-loadtester
+        app.kubernetes.io/name: company-site-loadtester
         app.kubernetes.io/part-of: guardian
         guardian.dev/stage: beta
     spec:
@@ -129,16 +129,16 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: flagger-loadtester
+  name: company-site-loadtester
   namespace: tenant-guardian-beta
   labels:
-    app.kubernetes.io/name: flagger-loadtester
+    app.kubernetes.io/name: company-site-loadtester
     app.kubernetes.io/part-of: guardian
     guardian.dev/stage: beta
 spec:
   type: ClusterIP
   selector:
-    app.kubernetes.io/name: flagger-loadtester
+    app.kubernetes.io/name: company-site-loadtester
   ports:
     - name: http
       port: 80
@@ -154,7 +154,7 @@ metadata:
   name: company-site-gate-scripts
   namespace: tenant-guardian-beta
   labels:
-    app.kubernetes.io/name: flagger-loadtester
+    app.kubernetes.io/name: company-site-loadtester
     app.kubernetes.io/part-of: guardian
     guardian.dev/stage: beta
 data:

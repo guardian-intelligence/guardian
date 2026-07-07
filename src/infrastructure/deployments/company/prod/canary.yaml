@@ -9,7 +9,7 @@
 #   1. readiness — pods must pass /healthz within progressDeadlineSeconds or
 #      the rollout fails;
 #   2. http-gate (pre-rollout, once) — a plain HTTP reachability check
-#      against the canary Service, executed by flagger-loadtester;
+#      against the canary Service, executed by company-site-loadtester;
 #   3. http-iterate (every iteration) — the same check, repeated; a canary
 #      that's flaky under warm-up fails here.
 # threshold: 3 failed checks → automatic rollback (canary scaled to zero,
@@ -73,14 +73,14 @@ spec:
     webhooks:
       - name: http-gate
         type: pre-rollout
-        url: http://flagger-loadtester.tenant-guardian-prod/
+        url: http://company-site-loadtester.tenant-guardian-prod/
         timeout: 30s
         metadata:
           type: bash
           cmd: bash /gate/http-gate.sh
       - name: http-iterate
         type: rollout
-        url: http://flagger-loadtester.tenant-guardian-prod/
+        url: http://company-site-loadtester.tenant-guardian-prod/
         timeout: 30s
         metadata:
           type: bash
