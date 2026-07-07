@@ -238,8 +238,8 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 		"cloudflare_external_dns_api_token",
 		"cloudflare_dns_lb_provisioner_api_token",
 		"guardian_alerting_ntfy_url",
-		"platform_admin_shovon_password",
-		"platform_admin_guardian_ops_password",
+		"platform_admin_password",
+		"platform_agent_password",
 		"github_promotions_app_private_key_b64",
 		"github_runner_app_prod_app_id",
 		"github_runner_app_prod_client_id",
@@ -330,8 +330,8 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 		{
 			APIPath: "kv/data/guardian/guardian-mgmt/tenant-root/platform-admins",
 			Data: map[string]string{
-				"shovon":       env["platform_admin_shovon_password"],
-				"guardian-ops": env["platform_admin_guardian_ops_password"],
+				"platform-admin": env["platform_admin_password"],
+				"platform-agent": env["platform_agent_password"],
 			},
 		},
 		{
