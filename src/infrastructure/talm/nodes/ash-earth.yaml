@@ -115,6 +115,8 @@ cluster:
       quota-backend-bytes: "8589934592"
     advertisedSubnets:
       - 10.8.0.0/24
+  adminKubeconfig:
+    certLifetime: 8h0m0s
   allowSchedulingOnControlPlanes: true
 ---
 apiVersion: v1alpha1

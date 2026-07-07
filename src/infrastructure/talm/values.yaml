@@ -130,6 +130,13 @@ advertisedSubnets:
   - "10.8.0.0/24"
 
 oidcIssuerUrl: "https://keycloak.guardianintelligence.org/realms/cozy"
+# Lifetime of admin kubeconfigs minted from the cluster CA (talosctl/talm
+# kubeconfig). CN=admin,O=system:masters is un-revocable in RBAC, so expiry
+# is the only revocation there is: with this set, every breakglass mint dies
+# on its own instead of living the Talos default of a year. Re-minting is
+# one custody-gated command (aspect infra auth --platform-admin), so the
+# short window costs nothing — even a long DR just mints again.
+adminKubeconfigCertLifetime: "8h0m0s"
 # Cluster-wide cert SANs: the VLAN VIP (10.8.0.250) plus each node's public IP so
 # the API/Talos stays manageable from a runner off the private VLAN.
 certSANs:
