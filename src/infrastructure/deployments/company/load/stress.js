@@ -30,9 +30,15 @@ export const options = {
       ],
     },
   },
+  // Observe-only soak: http_req_failed and dropped_iterations are
+  // calibration-free invariants (a static site serving >1% errors, or a
+  // generator that can't sustain the arrival rate, is wrong at any scale), so
+  // they hard-fail the deploy gate now. The latency budget is a guess until a
+  // week of stress data sets it; p95 is still remote-written for calibration
+  // but is NOT gated yet. Re-add `http_req_duration: ['p(95)<NNN']` here once
+  // calibrated to flip latency to blocking. See docs/loadtest.md.
   thresholds: {
     http_req_failed: ['rate<0.01'],
-    http_req_duration: ['p(95)<250'],
     dropped_iterations: ['count<1'],
   },
 };
