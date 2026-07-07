@@ -1,0 +1,45 @@
+# Secret-scanning rules shared verbatim by the pre-commit hook
+# (tools/git-hooks/pre-commit) and the CI scan (build.yml), so the local and
+# enforced layers cannot drift. Stock rules stay on; the custom rules below
+# cover custody-shaped material that generic scanners do not know.
+#
+# A hit here is a leak-response event, not a lint: see
+# src/infrastructure/runbooks/custody.md "Leak response" — rotation, not
+# history rewriting, is the remedy.
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "guardian-talos-secrets-bundle"
+description = "Talos genesis secrets bundle (secrets.yaml) content"
+regex = '''(?i)(bootstraptoken|secretboxencryptionkey|trustdinfo|aescbcencryptionsecret):'''
+
+[[rules]]
+id = "guardian-age-secret-key"
+description = "age identity (talm.key)"
+regex = '''AGE-SECRET-KEY-1[0-9A-Z]{58}'''
+
+[[rules]]
+id = "guardian-kubeconfig-client-key"
+description = "kubeconfig embedded client key material"
+regex = '''client-key-data:\s*[A-Za-z0-9+/=]{64,}'''
+
+[[rules]]
+id = "guardian-talosconfig-key"
+description = "talosconfig embedded client key material"
+regex = '''(?m)^\s+key:\s*LS0t[A-Za-z0-9+/=]{64,}'''
+
+[[rules]]
+id = "guardian-openbao-unseal-key-file"
+description = "OpenBao static-seal unseal key file"
+path = '''unseal-[0-9a-f]{64}\.key$'''
+
+[[rules]]
+id = "guardian-custody-env-file"
+description = "operator custody env file (custody.env / DELETE_ME.env)"
+path = '''(custody|DELETE_ME)\.env$'''
+
+[allowlist]
+description = "Synthetic fixtures: clearly-fake PEM bodies in unit tests (not-a-real-key)"
+regexes = ['''-----BEGIN PRIVATE KEY-----\\nnot-a-real''']

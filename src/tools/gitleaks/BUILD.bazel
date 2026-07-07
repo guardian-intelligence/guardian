@@ -1,0 +1,7 @@
+package(default_visibility = ["//visibility:private"])
+
+alias(
+    name = "gitleaks",
+    actual = "@gitleaks_linux_amd64//:gitleaks",
+    visibility = ["//visibility:public"],
+)
