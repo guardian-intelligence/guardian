@@ -3,6 +3,7 @@ filegroup(
     srcs = [
         "cozystack-app-namespace-admission.yaml",
         "image-provenance-admission.yaml",
+        "registry-prefixes.txt",
         "ingress-origin-edge.yaml",
         "kustomization.yaml",
         "openbao-static-seal-admission.yaml",
