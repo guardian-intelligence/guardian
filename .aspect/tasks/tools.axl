@@ -71,9 +71,9 @@ install = task(
     implementation = _install_impl,
     name = "install",
     group = ["tools"],
-    summary = "Install symlinks for repo-pinned CLIs and build tools (buf, protoc, gen plugins).",
+    summary = "Install local symlinks for repo-pinned debugging CLIs and build tools (buf, protoc, gen plugins).",
     args = {
-        "bin_dir": args.string(default = ".guardian/tools/bin", description = "Directory for installed CLI shims."),
+        "bin_dir": args.string(default = ".guardian/tools/bin", description = "Directory for installed CLI shims. Pass an absolute path such as ${HOME}/.local/bin to install into an existing user bin directory."),
         "print_path": args.boolean(default = False, description = "Print the full PATH value with the shim directory prepended after install."),
     },
 )
@@ -82,7 +82,7 @@ uninstall = task(
     implementation = _uninstall_impl,
     name = "uninstall",
     group = ["tools"],
-    summary = "Remove repo-pinned CLI + build-tool shims from a bin directory.",
+    summary = "Remove the known repo-pinned CLI and build-tool shim names from a bin directory.",
     args = {
         "bin_dir": args.string(default = ".guardian/tools/bin", description = "Directory containing installed CLI shims."),
     },
@@ -92,7 +92,7 @@ path = task(
     implementation = _path_impl,
     name = "path",
     group = ["tools"],
-    summary = "Print the PATH export for the repo-pinned CLI shim directory.",
+    summary = "Print an eval-able PATH export for the repo-pinned CLI shim directory.",
     args = {
         "bin_dir": args.string(default = ".guardian/tools/bin", description = "Directory containing installed CLI shims."),
     },
