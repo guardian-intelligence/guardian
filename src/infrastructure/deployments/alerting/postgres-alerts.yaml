@@ -1,0 +1,102 @@
+# Guardian-owned Postgres alerts cover stateful database risks that need to
+# page independent of individual cluster names: every current and future CNPG
+# instance is selected by metric labels, with job identifying the namespace and
+# cluster.
+#
+# Cozystack's cozy-postgres-operator/cnpg-default-alerts already covers generic
+# CNPG health signals such as replication lag, archiver failures, long
+# transactions, waiting backends, deadlocks, XID age, and cluster offline. These
+# rules deliberately cover only the gaps left to Guardian: backup freshness and
+# failure, connection saturation, and replication-slot health.
+#
+# PVC fill is already covered by the platform's generic
+# KubePersistentVolumeFillingUp rules, so database disk usage is not duplicated
+# here.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: postgres-health
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: postgres-health
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  groups:
+    - name: postgres-health.rules
+      interval: 30s
+      rules:
+        - alert: PGBackupStale
+          expr: time() - max by (namespace, job) (cnpg_collector_last_available_backup_timestamp > 0) > 93600
+          for: 30m
+          labels:
+            severity: critical
+            guardian_component: postgres
+          annotations:
+            summary: 'Postgres backup stale for {{ $labels.job }}'
+            description: >-
+              The newest available base backup for {{ $labels.job }} is older
+              than 26 hours, which exceeds the nightly schedule plus slack. The
+              rule ignores clusters that do not emit a positive backup
+              timestamp, so backup-disabled and decommissioned clusters do not
+              page. Audit the backup chain with
+              src/infrastructure/runbooks/backup-audit.md.
+        - alert: PGBackupFailed
+          expr: max by (namespace, job) (cnpg_collector_last_failed_backup_timestamp) > max by (namespace, job) (cnpg_collector_last_available_backup_timestamp)
+          for: 30m
+          labels:
+            severity: warning
+            guardian_component: postgres
+          annotations:
+            summary: 'Postgres backup failed for {{ $labels.job }}'
+            description: >-
+              The most recent backup attempt for {{ $labels.job }} failed and
+              no later successful backup has superseded it. The 30 minute hold
+              is deliberate: nightly runs have shown a transient first-attempt
+              failure at :00 followed by success at :06 on all backup-enabled
+              clusters. Treat a sustained alert as a broken backup path rather
+              than a single scheduler retry.
+        - alert: PGConnectionSaturation
+          expr: max by (namespace, job, pod) (cnpg_backends_total) / max by (namespace, job, pod) (cnpg_pg_settings_setting{name="max_connections"}) > 0.7
+          for: 15m
+          labels:
+            severity: warning
+            guardian_component: postgres
+          annotations:
+            summary: 'Postgres connections saturated for {{ $labels.job }}'
+            description: >-
+              A pod in {{ $labels.job }} has used more than 70% of
+              max_connections for 15 minutes. This guards the per-instance
+              connection budget: consumer pools must sum to 60% or less so
+              operators and failover have headroom. Sustained pressure is also
+              the adoption trigger for a server-side pooler.
+        - alert: PGReplicationSlotInactive
+          expr: (max by (namespace, job, pod, slot_name) (cnpg_pg_replication_slots_active) == 0) and on (namespace, pod) (cnpg_pg_replication_in_recovery == 0)
+          for: 15m
+          labels:
+            severity: critical
+            guardian_component: postgres
+          annotations:
+            summary: 'Postgres replication slot {{ $labels.slot_name }} inactive for {{ $labels.job }}'
+            description: >-
+              Replication slot {{ $labels.slot_name }} on the primary for
+              {{ $labels.job }} has no active consumer. The primary-only scope
+              is intentional because CNPG mirrors HA slots onto standbys where
+              they are inactive by design. An abandoned logical slot pins WAL
+              and can eventually fill the volume and take down the primary;
+              this is the standing guard for ElectricSQL consumers.
+        - alert: PGReplicationSlotWALRetained
+          expr: max by (namespace, job, pod, slot_name) (cnpg_pg_replication_slots_pg_wal_lsn_diff) > 2e9
+          for: 10m
+          labels:
+            severity: critical
+            guardian_component: postgres
+          annotations:
+            summary: 'Postgres replication slot {{ $labels.slot_name }} retaining WAL for {{ $labels.job }}'
+            description: >-
+              Replication slot {{ $labels.slot_name }} on {{ $labels.job }} is
+              holding back more than 2GiB of WAL. Instances cap slot retention
+              at 4GiB with max_slot_wal_keep_size, so this pages at half the
+              cap before Postgres invalidates the slot. Restore and recovery
+              context lives in
+              src/infrastructure/runbooks/postgres-backup-restore.md.
