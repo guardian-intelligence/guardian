@@ -5,10 +5,14 @@
 // Local runs must add --tag run_source=local so gate queries never see them.
 import http from 'k6/http';
 
-const target = (__ENV.TARGET_URL || 'http://company-site-canary.tenant-guardian-beta').replace(
-  /\/+$/,
-  '',
-);
+// TARGET_URL is required and set per stage by the webhook cmd — never default
+// it. A hardcoded default silently sent gamma/prod runs at the beta canary
+// (cross-tenant, denied → 100% failure), because the stage tenants can't reach
+// each other's Services.
+if (!__ENV.TARGET_URL) {
+  throw new Error('TARGET_URL is required (e.g. http://company-site-canary.tenant-guardian-<stage>)');
+}
+const target = __ENV.TARGET_URL.replace(/\/+$/, '');
 
 const requests = [
   { path: '/healthz', name: 'GET /healthz' },

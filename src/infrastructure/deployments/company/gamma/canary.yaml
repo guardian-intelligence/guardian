@@ -88,7 +88,7 @@ spec:
         metadata:
           type: cmd
           cmd: >-
-            k6 run --tag stage=gamma --tag surface=company-site --tag scenario=stress -o experimental-prometheus-rw /gate/stress.js
+            k6 run -e TARGET_URL=http://company-site-canary.tenant-guardian-gamma --tag stage=gamma --tag surface=company-site --tag scenario=stress -o experimental-prometheus-rw /gate/stress.js
           logCmdOutput: "true"
       - name: http-iterate
         type: rollout
