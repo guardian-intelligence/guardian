@@ -442,11 +442,17 @@ deleted mid-ingest lost zero acknowledged rows). Cold-boot notes:
    root; this plan only covers the Cloudflare Load Balancer pool/monitor
    objects, which is why it stays raw OpenTofu rather than an `aspect`
    subcommand.
-2. **Re-scrape `src/infrastructure/bootstrap/bundle/images.declared.lock`**
-   from the live cluster (operator-spawned section from pod imageIDs, minus
-   anything the manifests render — the disjointness invariant rejects
-   overlaps; kubelet/etcd from `talosctl image ls --namespace system`) and
-   PR it.
+2. **Audit the declared inventory against the live cluster**: compare
+   running pod imageIDs in the covered namespaces against
+   `src/infrastructure/bootstrap/bundle/images.declared.lock` and PR only
+   the additions the drill newly spawned (operator images no manifest
+   renders; kubelet/etcd from `talosctl image ls --namespace system`). This
+   is an additive audit, not a scrape-replace: the disjointness invariant
+   rejects entries the manifests render, the guardian-image-provenance
+   admission policy flags undeclared images as they are created, and the
+   vap-denial-canary pages if that enforcement ever goes silent. Prune
+   declared entries only with live evidence that nothing schedules them
+   (mind intermittent CronJob images).
 3. **Verify the datapath MTU pair on every node**: `ovn0` must match the
    Subnet MTU (1362), not kube-ovn's iface−100 default (1320). The Subnet
    specs only govern pod interfaces; ovn0 comes from the kube-ovn-cni
