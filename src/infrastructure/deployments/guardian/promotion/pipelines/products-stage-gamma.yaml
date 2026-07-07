@@ -1,0 +1,72 @@
+# gamma receives Freight only after beta has verified it (sources.stages).
+#
+# substitute: disabled — the ${{ ... }} promotion expressions must reach
+# Kargo verbatim, not be mangled by Flux's envsubst pass.
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: gamma
+  namespace: guardian-products
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+spec:
+  requestedFreight:
+    - origin:
+        kind: Warehouse
+        name: electric
+      sources:
+        stages:
+          - beta
+  promotionTemplate:
+    spec:
+      vars:
+        - name: repoURL
+          value: https://github.com/guardian-intelligence/guardian.git
+        - name: imageRepo
+          value: docker.io/electricsql/electric
+        - name: sourceStageURL
+          value: https://beta.guardianintelligence.org/electric/v1/shape?table=status_heartbeat&offset=-1
+      steps:
+        - uses: http
+          as: check-source-stage-success
+          retry:
+            timeout: 10m
+          config:
+            method: GET
+            url: ${{ vars.sourceStageURL }}
+            successExpression: response.status == 200
+        - uses: git-clone
+          config:
+            repoURL: ${{ vars.repoURL }}
+            checkout:
+              - branch: main
+                path: ./repo
+        - uses: yaml-update
+          config:
+            path: ./repo/src/infrastructure/deployments/products/gamma/electric.yaml
+            updates:
+              - key: spec.template.spec.containers.0.image
+                value: ${{ vars.imageRepo }}:${{ imageFrom(vars.imageRepo).Tag }}@${{ imageFrom(vars.imageRepo).Digest }}
+        - uses: git-commit
+          as: commit
+          config:
+            path: ./repo
+            message: promote electric (gamma) to ${{ imageFrom(vars.imageRepo).Tag }}@${{ imageFrom(vars.imageRepo).Digest }}
+        - uses: git-push
+          as: push
+          config:
+            path: ./repo
+            generateTargetBranch: true
+        - uses: git-open-pr
+          as: open-pr
+          config:
+            repoURL: ${{ vars.repoURL }}
+            provider: github
+            sourceBranch: ${{ outputs.push.branch }}
+            targetBranch: main
+            title: promote electric (gamma) to ${{ imageFrom(vars.imageRepo).Tag }}@${{ imageFrom(vars.imageRepo).Digest }}
+        - uses: git-wait-for-pr
+          if: ${{ status('open-pr') == 'Succeeded' }}
+          config:
+            repoURL: ${{ vars.repoURL }}
+            prNumber: ${{ outputs['open-pr'].pr.id }}

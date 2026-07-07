@@ -612,6 +612,48 @@ spec:
                   }
                 }
 
+                request "write_reader_policy_guardian_products" {
+                  operation = "update"
+                  path = "sys/policies/acl/guardian-reader-guardian-products"
+                  data = {
+                    policy = "path \"kv/data/guardian/guardian-mgmt/guardian-products/*\" {\n  capabilities = [\"read\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/guardian-products/*\" {\n  capabilities = [\"read\"]\n}\n"
+                  }
+                }
+
+                request "write_reader_role_guardian_products" {
+                  operation = "update"
+                  path = "auth/kubernetes/role/guardian-reader-guardian-products"
+                  data = {
+                    bound_service_account_names = ["secrets-reader"]
+                    bound_service_account_namespaces = ["guardian-products"]
+                    audience = "openbao"
+                    token_policies = ["guardian-reader-guardian-products"]
+                    token_ttl = "3600"
+                    token_max_ttl = "3600"
+                  }
+                }
+
+                request "write_writer_policy_guardian_products" {
+                  operation = "update"
+                  path = "sys/policies/acl/guardian-writer-guardian-products"
+                  data = {
+                    policy = "path \"kv/data/guardian/guardian-mgmt/guardian-products/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/guardian-products/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n"
+                  }
+                }
+
+                request "write_writer_role_guardian_products" {
+                  operation = "update"
+                  path = "auth/kubernetes/role/guardian-writer-guardian-products"
+                  data = {
+                    bound_service_account_names = ["secrets-writer"]
+                    bound_service_account_namespaces = ["guardian-products"]
+                    audience = "openbao"
+                    token_policies = ["guardian-writer-guardian-products"]
+                    token_ttl = "600"
+                    token_max_ttl = "600"
+                  }
+                }
+
                 request "write_reader_policy_tenant_root" {
                   operation = "update"
                   path = "sys/policies/acl/guardian-reader-tenant-root"
