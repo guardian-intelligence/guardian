@@ -97,12 +97,12 @@ restore IN-PLACE and destructive — never do that in a drill.
 
 ## Known limits (stated, not hidden)
 
-- **Idle-database RPO**: CNPG sets no `archive_timeout`, so an idle
-  database's current WAL segment stays local until it fills or something
-  forces a switch. Active databases archive within ~1s of segment
-  completion; a fully idle one is bounded only by the nightly base backup.
-  The Cozystack Postgres chart exposes no server-config surface to set
-  `archive_timeout`; revisit if a low-traffic-but-critical database appears.
+- **Idle-database RPO**: bounded at ~5 minutes. Every Guardian Postgres CR
+  stamps `archive_timeout: 300s` through the chart's
+  `postgresql.parameters` surface, so an idle database force-switches its
+  WAL segment and archives it within 5 minutes; active databases archive
+  within ~1s of segment completion. Mostly-empty forced segments compress
+  to near nothing under barman's gzip.
 - The first BackupJob per instance is a WAL-activation artifact, not a
   restore point (see the two-BackupJob rule above). Its base objects age out
   via barman's 30d retention.
