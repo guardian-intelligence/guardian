@@ -94,9 +94,11 @@ bootstrap, DR, re-initialization).
   manual `bao operator raft snapshot` is the known primitive. Snapshots are
   barrier-encrypted — worthless without the seal key, so key custody couples
   to snapshot retention.
-- The custody env file (`~/guardian-custody/DELETE_ME.env`, 0600) is the DR
-  re-seed root: a single plaintext file whose custody discipline is
-  load-bearing.
+- The custody env file (`custody.env`) is the DR re-seed root. It lives
+  inside the encrypted custody bundle (`aspect infra custody`,
+  `runbooks/custody.md`); plaintext exists only at
+  `/dev/shm/guardian-custody/custody.env` between an explicit restore and
+  wipe, never at rest in the operator home.
 
 ## OpenBao vs a plain Kubernetes Secret
 
@@ -143,8 +145,10 @@ runbook's "Adding An Integration" section:
   namespace reading `guardian/guardian-mgmt/<namespace>/<integration>`, and
   extend the importer plan in `openbao_secret_import/main.go` (+ its test) so
   DR re-seeds the new value.
-- **Custody**: append the value to the custody env file (never echo it; use
-  `umask 077` working copies).
+- **Custody**: `aspect infra custody --action restore`, append the value to
+  `/dev/shm/guardian-custody/custody.env` (never echo it), then
+  `--action create` to snapshot and `--action wipe`. Refresh the offline
+  copies — this is a custody event.
 - **Value write**: mint a short-lived `secrets-writer` token for that
   namespace and `bao kv put` with the value on stdin. The role cannot write
   outside its subtree, so the wrong-stage failure mode does not exist.

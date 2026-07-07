@@ -31,6 +31,8 @@ DECLARED_LOCK_PATH = "src/infrastructure/bootstrap/bundle/images.declared.lock"
 TALM_VALUES_PATH = "src/infrastructure/talm/values.yaml"
 COSIGN_FILE_TARGET = "//src/tools/cosign:cosign"
 ORAS_FILE_TARGET = "@oras_linux_amd64//:oras_file"
+RESTIC_TARGET = "//src/tools/restic:restic"
+CUSTODY_TARGET = "//src/infrastructure/cmd/custody:custody"
 KUBELOGIN_TARGET = "@kubelogin_linux_amd64//:kubelogin"
 CURL_FILE_TARGET = "@curl_linux_amd64//:curl"
 CLUSTER_CA_PATH = "src/infrastructure/bootstrap/guardian-mgmt/cluster-ca.crt"
@@ -128,12 +130,14 @@ INFRA_TESTS = [
     "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load_test",
     "//src/infrastructure/cmd/converged:converged_test",
     "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill_test",
+    "//src/infrastructure/cmd/custody:custody_test",
     "//src/infrastructure/cmd/openbao_secret_import:openbao_secret_import_test",
     "//src/infrastructure/cmd/openbao_static_seal_key:openbao_static_seal_key_test",
     "//src/infrastructure/tests:talm_render_test",
 ]
 FORBIDDEN_SOURCE_PATHS = [
-    ("DELETE_ME.env", "operator Cloudflare credentials must stay out of the repo workspace and must not be load-bearing"),
+    ("DELETE_ME.env", "operator credentials must stay out of the repo workspace and must not be load-bearing"),
+    ("custody.env", "operator credentials live in the encrypted custody bundle (aspect infra custody), never the repo workspace"),
     ("mgmt-evidence", "management-cluster evidence is temporary PR validation output, not durable source"),
     ("docs/mgmt-evidence", "management-cluster evidence is temporary PR validation output, not durable source"),
     ("src/infrastructure/mgmt-evidence", "management-cluster evidence is temporary PR validation output, not durable source"),
@@ -849,6 +853,34 @@ def _install_kubeconfig(ctx, kubectl, source):
         message = message + " (backup: " + backup + ")"
     ctx.std.io.stderr.write(message + "\n")
     return 0
+
+def _custody_impl(ctx):
+    restic = bazel_output_file(ctx, RESTIC_TARGET)
+    if restic == "":
+        return 1
+    custody_args = [
+        ctx.args.action,
+        "--restic",
+        restic,
+        "--talm-root",
+        ws_path(ctx, GUARDIAN_MGMT_TALM_ROOT),
+    ]
+    if ctx.args.repo != "":
+        repo = _expand_operator_path(ctx, ctx.args.repo)
+        if repo == None:
+            return 1
+        custody_args.extend(["--repo", repo])
+    if ctx.args.yes:
+        custody_args.append("--yes")
+    if ctx.args.read_data:
+        custody_args.append("--read-data")
+    return checked_spawn(
+        ctx,
+        "bazelisk",
+        ["run", CUSTODY_TARGET, "--"] + custody_args,
+        cwd = ws_path(ctx),
+        label = "custody " + ctx.args.action,
+    )
 
 def _talos_impl(ctx):
     talosctl = _talosctl_path(ctx)
@@ -2052,6 +2084,19 @@ auth = task(
         "reason": args.string(default = "", description = "Why breakglass escalation is needed. Required with --platform-admin; paged to the operations topic and appended to the breakglass ledgers."),
         "root": args.string(default = GUARDIAN_MGMT_TALM_ROOT, description = "Talm root containing gitignored secrets.yaml and talosconfig."),
         "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
+    },
+)
+
+custody = task(
+    implementation = _custody_impl,
+    name = "custody",
+    group = ["infra"],
+    summary = "Manage the encrypted custody bundle (secret-zero: Talos genesis secrets, OpenBao seal key, operator env). The restic repository is the ONLY at-rest form; plaintext exists only in the tmpfs bundle dir between restore and wipe. Actions: create (stage fail-closed + backup + instructions), verify (repo integrity + required members, point --repo at offline copies), restore (to tmpfs), wipe (shred the tmpfs bundle), status (staleness + plaintext-residue warnings), key-add (second password for the password-manager recovery flow).",
+    args = {
+        "action": args.string(default = "status", description = "One of create, verify, restore, wipe, status, key-add."),
+        "read_data": args.boolean(default = False, description = "verify: re-read and hash every pack (slow; run this against each offline copy)."),
+        "repo": args.string(default = "", description = "restic repository directory. Defaults to ~/.guardian/custody/repo; point at mounted offline media to verify copies."),
+        "yes": args.boolean(default = False, description = "Skip the interactive confirmation before create."),
     },
 )
 

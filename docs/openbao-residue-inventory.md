@@ -14,7 +14,7 @@ through an independent listener CA; OpenBao owns secret custody after it starts.
 | - | - | - | - | - |
 | Static seal key and key id | Data-loss-critical | Offline custody, placed out of band on the three dedicated OpenBao nodes | OpenBao raft snapshots and retained data cannot be unsealed | Keep old key versions for as long as any snapshot encrypted under them is retained. |
 | Recovery keys | Intentionally not established | None | Break-glass admin access is regenerate: wipe, cold-start from custody residue, restore durable Transit keys from their exported backups | Self-init emits no root token and no recovery keys. Recovery keys cannot decrypt the barrier; they only authorize `generate-root`, which the regenerate model replaces. |
-| Cloudflare ExternalDNS token | Reimportable custody residue | `DELETE_ME.env` only during bootstrap import; then OpenBao KV path `kv/guardian/guardian-mgmt/external-dns/cloudflare` | DNS reconciliation stops until reimported | Importer must delete `DELETE_ME.env` after write/readback verification. |
+| Cloudflare ExternalDNS token | Reimportable custody residue | `custody.env` only during bootstrap import; then OpenBao KV path `kv/guardian/guardian-mgmt/external-dns/cloudflare` | DNS reconciliation stops until reimported | `custody.env` lives in the encrypted custody bundle; after import the operator wipes the restored plaintext (`aspect infra custody --action wipe`). |
 | Cloudflare DNS load-balancer provisioner token | Reimportable custody residue | Off-cluster break-glass or CI secret store; imported to `kv/guardian/guardian-mgmt/operator/cloudflare` only when needed by an OpenBao-backed consumer | Edge provisioning and recovery workflows cannot run until supplied | Keep out of Kubernetes steady state unless a real consumer exists. |
 | Cloudflare R2 state/backend credentials | Reimportable custody residue | Off-cluster break-glass or CI secret store; imported to `kv/guardian/guardian-mgmt/operator/r2` only when needed by an OpenBao-backed consumer | OpenTofu state or backup workflows cannot run until supplied | R2 backup custody is distinct from OpenBao seal-key custody. |
 | Transit keys protecting durable ciphertext | Data-loss-critical | OpenBao barrier plus a `transit/backup` plaintext keyring export in offline custody | Losing the key is data loss for that ciphertext | Create with `exportable=true` and `allow_plaintext_backup=true`; export at creation. The export is the full plaintext keyring: anyone holding it can decrypt everything under that key. Offline custody only, same tier as the static seal key — never R2, never co-located with the ciphertext it protects, snapshots, or R2 credentials. |
@@ -47,8 +47,9 @@ start from scratch using only custody-held residue.
    three members report the same non-empty raft `cluster_id`.
 6. Verify OpenBao operation resources converge.
 7. Import only custody-held bootstrap secrets needed for live integrations.
-8. Verify the bootstrap importer deletes `DELETE_ME.env` after successful
-   write/readback and importer role cleanup.
+8. Wipe the restored custody bundle after successful write/readback and
+   importer role cleanup (`aspect infra custody --action wipe`); verify no
+   plaintext `custody.env` remains anywhere.
 9. Verify ESO syncs a real consumer, currently ExternalDNS.
 10. Verify Cloudflare DNS reconciliation works.
 11. Verify Transit encrypt/decrypt with a non-durable test key.

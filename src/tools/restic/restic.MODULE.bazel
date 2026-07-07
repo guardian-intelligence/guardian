@@ -1,0 +1,14 @@
+http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+
+# Pinned restic for the custody bundle lifecycle (aspect infra custody).
+# restic owns the hard parts — password-derived repository encryption,
+# multi-key recovery (`key add`), integrity verification (`check`), and
+# snapshot history for staleness — so the custody command stays a thin
+# manifest-validating wrapper. Upstream ships the Linux binary bz2-compressed
+# rather than archived, hence the genrule in BUILD.bazel.
+http_file(
+    name = "restic_linux_amd64_bz2",
+    downloaded_file_path = "restic.bz2",
+    sha256 = "f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c",
+    url = "https://github.com/restic/restic/releases/download/v0.19.1/restic_0.19.1_linux_amd64.bz2",
+)

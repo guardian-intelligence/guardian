@@ -24,7 +24,7 @@ from-nothing bring-up may require.
    in `openBaoStaticSealKeyID` in
    `src/infrastructure/tests/openbao_conformance_test.go`. Never print or
    commit the key bytes.
-2. **`DELETE_ME.env`** — the 8 operator keys (Cloudflare tokens, R2
+2. **`custody.env`** — the 8 operator keys (Cloudflare tokens, R2
    credentials, account id) matching the `openbao_secret_import` schema. Keep
    it OUTSIDE the repo: `aspect infra validate` (run inside `bootstrap`)
    refuses an in-repo env file, and the importer deletes the file on success —
@@ -181,8 +181,13 @@ offline-custody only), so no system the cluster controls can ever hold a
 complete copy of the bundle. Cloud-KMS unseal or Shamir recovery shares
 would only relocate the root of trust, not remove it.
 
+`aspect infra custody` is the mechanism (see `runbooks/custody.md`): the
+encrypted restic repository it maintains is the bundle's only at-rest form,
+and the offline copies below are copies of that repository, verified in
+place with `--action verify --read-data --repo <mounted-copy>`.
+
 - Keep at least two copies of the load-bearing set — the seal key plus its
-  metadata, the `DELETE_ME.env` backup, and any `transit/backup` exports —
+  metadata, the `custody.env` backup, and any `transit/backup` exports —
   on encrypted offline media in two physical locations, neither of them the
   datacenter hosting the cluster.
 - Never co-locate a copy with raft snapshots or OpenBao ciphertext. Transit
@@ -203,7 +208,7 @@ would only relocate the root of trust, not remove it.
 ## Pre-flight
 
 1. **Insurance capture** (if the old cluster still runs): copy the current
-   seal key (verify sha256 == filename fingerprint), a `DELETE_ME.env` backup,
+   seal key (verify sha256 == filename fingerprint), a `custody.env` backup,
    and optionally a raft filesystem tar to custody. Every image the cluster
    pulls — including the guardian-built `company-site` — lives on public
    registries (`company-site` on ghcr.io, pushed and cosign-signed by CI on
@@ -334,7 +339,7 @@ scheduler).
 ## Declarative handoff
 
 ```sh
-# env from the custody DELETE_ME.env: AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+# env from the custody custody.env: AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
 # (cloudflare_r2_* keys), AWS_ENDPOINT_URL_S3, AWS_EC2_METADATA_DISABLED=true
 aspect infra bootstrap --kubeconfig <off-vlan-kubeconfig-copy> \
   --endpoints <node-public-ip> --nodes "<ip1>,<ip2>,<ip3>"
@@ -382,7 +387,7 @@ helm-controller stops retrying once retries exhaust — a values change or a
 bazelisk run //src/infrastructure/cmd/openbao_secret_import:openbao_secret_import -- \
   --kubectl "$(bazelisk info output_base)/external/+http_file+kubectl_linux_amd64/file/kubectl" \
   --kubeconfig <off-vlan-kubeconfig-copy> \
-  --env-file <custody>/DELETE_ME.env
+  --env-file /dev/shm/guardian-custody/custody.env  # after: aspect infra custody --action restore
 
 aspect infra converged --expected-revision "$(git rev-parse HEAD)" \
   --kubeconfig <off-vlan-kubeconfig-copy>

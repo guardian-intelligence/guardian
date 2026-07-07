@@ -120,7 +120,7 @@ if the raft state was wiped, recreate it with the declared config.
 
 ## Bootstrap Secret Import
 
-One-time imports from local operator files such as `DELETE_ME.env` must happen
+One-time imports from local operator files such as `custody.env` must happen
 after the new OpenBao cluster is initialized and the `kv` mount has converged.
 Do not encode those values in Git or Kubernetes manifests. This command is a
 bootstrap-only, heavily cordoned, non-load-bearing tool; do not use it as a
@@ -130,7 +130,7 @@ routine secret-management path.
 bazelisk run //src/infrastructure/cmd/openbao_secret_import:openbao_secret_import -- \
   --kubectl "$(bazelisk info output_base)/external/+http_file+kubectl_linux_amd64/file/kubectl" \
   --kubeconfig "$HOME/.kube/config" \
-  --env-file DELETE_ME.env
+  --env-file custody.env
 ```
 
 The importer authenticates through the temporary `guardian-secret-importer`
@@ -168,18 +168,23 @@ key as `github_promotions_app_private_key_b64` and the Verself Runner key as
 copy from custody without printing any value, then pass it via `--env-file`:
 
 ```sh
+aspect infra custody --action restore    # plaintext bundle at /dev/shm/guardian-custody
 umask 077
-cp ~/guardian-custody/DELETE_ME.env import.env
+B=/dev/shm/guardian-custody
+cp "$B/custody.env" "$B/import.env"
 printf 'github_promotions_app_private_key_b64=%s\n' \
-  "$(base64 -w0 < ~/guardian-custody/github-promotions-app.private-key.pem)" >> import.env
+  "$(base64 -w0 < "$B/keys/github-promotions-app.private-key.pem")" >> "$B/import.env"
 printf 'github_runner_app_prod_private_key_b64=%s\n' \
-  "$(base64 -w0 < ~/guardian-custody/verself-runner.private-key.pem)" >> import.env
-# then run the import command above with: --env-file import.env
+  "$(base64 -w0 < "$B/keys/verself-runner.private-key.pem")" >> "$B/import.env"
+# then run the import command above with:
+#   --env-file /dev/shm/guardian-custody/import.env -delete-env-file
+aspect infra custody --action wipe       # the moment the import verifies
 ```
 
 After successful write and readback verification, the importer deletes the
-temporary OpenBao auth role and policy, then deletes the local import file.
-Keep the custody originals; the import file is a working copy.
+temporary OpenBao auth role and policy, then (with `-delete-env-file`)
+deletes the working copy; the wipe removes the whole plaintext bundle. The
+encrypted custody repository keeps the originals.
 
 ## Adding An Integration (Routine, No OpenBao Changes)
 
@@ -191,7 +196,9 @@ value write:
    namespace, reading `guardian/guardian-mgmt/<namespace>/<integration>`.
    CI (`TestOpenBaoSecretScopeConformance`) rejects any remoteRef outside the
    namespace's own subtree, so a beta manifest cannot reference a prod path.
-2. **Custody**: append the secret value to the custody env file and extend the
+2. **Custody**: restore the custody bundle, append the secret value to
+   `/dev/shm/guardian-custody/custody.env`, snapshot with
+   `aspect infra custody --action create`, wipe, and extend the
    importer plan (`openbao_secret_import/main.go`) in the same PR — the plan
    is the DR re-seed manifest, so DR keeps working without remembering
    anything out of band.

@@ -1,0 +1,8 @@
+genrule(
+    name = "restic",
+    srcs = ["@restic_linux_amd64_bz2//file"],
+    outs = ["restic_bin"],
+    cmd = "bunzip2 -c $(location @restic_linux_amd64_bz2//file) > $@ && chmod +x $@",
+    executable = True,
+    visibility = ["//visibility:public"],
+)
