@@ -1,0 +1,14 @@
+filegroup(
+    name = "manifests",
+    srcs = [
+        "kustomization.yaml",
+        "stress.js",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "stress_script",
+    srcs = ["stress.js"],
+    visibility = ["//visibility:public"],
+)

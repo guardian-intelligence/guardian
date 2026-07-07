@@ -23,8 +23,8 @@ spec:
           - company-site
           - company-site-primary
   ingress:
-    # flagger-loadtester runs the http gate against the canary Service
-    # during Flagger analysis.
+    # flagger-loadtester runs the HTTP and k6 gates against the canary
+    # Service during Flagger analysis.
     - fromEndpoints:
         - matchLabels:
             app.kubernetes.io/name: flagger-loadtester
@@ -45,7 +45,8 @@ spec:
               protocol: TCP
 ---
 # flagger-loadtester: webhook calls arrive from the Flagger controller; the
-# checks it executes go to the company-site pods (canary Service) plus DNS.
+# checks it executes go to the company-site pods (canary Service), DNS, and
+# VictoriaMetrics remote-write for the k6 stress gate.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -89,4 +90,37 @@ spec:
       toPorts:
         - ports:
             - port: "8080"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            k8s:app.kubernetes.io/name: vminsert
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
+# Ingress half of the remote-write path: tenant-root's generated isolation
+# does not admit grandchild-tenant namespaces; admit exactly the loadtester
+# pod that runs the deploy-time k6 stress gate.
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-root-vminsert-from-company-site-loadtester-beta
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: company
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-root
+      k8s:app.kubernetes.io/name: vminsert
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-guardian-beta
+            k8s:app.kubernetes.io/name: flagger-loadtester
+      toPorts:
+        - ports:
+            - port: "8480"
               protocol: TCP

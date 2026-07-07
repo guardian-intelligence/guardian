@@ -9,3 +9,4 @@ resources:
   - loadtester.yaml
   - networkpolicy.yaml
   - http-latency-canary.yaml
+  - ../load
