@@ -27,7 +27,7 @@ spec:
       annotations:
         # Bump to force a Flagger canary re-analysis (the pod-template hash
         # change is what Flagger watches).
-        guardian.dev/rollout-nonce: "3"
+        guardian.dev/rollout-nonce: "4"
       labels:
         app.kubernetes.io/name: company-site
         app.kubernetes.io/part-of: guardian
