@@ -41,8 +41,12 @@ spec:
         - ports:
             - port: "8481"
               protocol: TCP
-    # Per-stage flagger-loadtester webhook receivers (pre-rollout/rollout
-    # checks for the Keycloak Canaries).
+    # Per-stage loadtester webhook receivers (pre-rollout/rollout checks
+    # for the Keycloak and company-site Canaries). Every loadtester name a
+    # Canary webhook targets must be listed here: this egress allowlist is
+    # the flagger-side half of the pair (the stage namespace holds the
+    # ingress half), and a name missing here is a silent SYN drop that
+    # surfaces as "webhook ... context deadline exceeded".
     - toEndpoints:
         - matchExpressions:
             - key: k8s:io.kubernetes.pod.namespace
@@ -55,6 +59,7 @@ spec:
               operator: In
               values:
                 - flagger-loadtester
+                - company-site-loadtester
       toPorts:
         - ports:
             - port: "8080"
