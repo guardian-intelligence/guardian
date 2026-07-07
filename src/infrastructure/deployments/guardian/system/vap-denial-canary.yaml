@@ -1,0 +1,228 @@
+# Denial canary for the guardian-image-provenance admission policy: every
+# 10 minutes, server-side dry-run a deliberately violating pod (unpinned,
+# unlisted, undeclared image that is never pulled) into
+# tenant-guardian-previews and assert the policy flags it. Mode-agnostic by
+# construction: in Warn the flag is the policy's warning text, in Deny it
+# is the rejection message — both carry the policy name. A canary run that
+# sees neither means image-provenance admission has silently stopped
+# enforcing, which is exactly the state that must page.
+#
+# Results land in VictoriaMetrics as vap_canary_policy_flagged (1 flagged /
+# 0 admitted-silently) over the same vminsert import path the IAM login
+# canary uses; the VMRules below page on a zero and on absence.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vap-denial-canary
+  namespace: tenant-guardian
+---
+# The probe target namespace is previews: covered by the policy binding,
+# ephemeral surface, no secrets. Dry-run creation still authorizes the
+# create verb, so the canary needs it for real.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: vap-denial-canary-probe
+  namespace: tenant-guardian-previews
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: vap-denial-canary-probe
+  namespace: tenant-guardian-previews
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: vap-denial-canary-probe
+subjects:
+  - kind: ServiceAccount
+    name: vap-denial-canary
+    namespace: tenant-guardian
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vap-denial-canary
+  namespace: tenant-guardian
+  annotations:
+    # The probe script's shell variables must reach the pod verbatim, not
+    # be blanked by Flux's envsubst pass.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  probe.sh: |
+    #!/bin/sh
+    set -u
+    # The probe image is unpinned, from no allowlisted prefix, and not a
+    # declared entry; it must never be pulled — the request is dry-run.
+    out=$(kubectl run vap-denial-canary-probe \
+      --image=docker.io/library/guardian-vap-canary:never-pulled \
+      -n tenant-guardian-previews --dry-run=server -o name 2>&1) || true
+    if printf '%s' "$out" | grep -q "guardian-image-provenance"; then
+      flagged=1
+    else
+      flagged=0
+    fi
+    curl -fsS --retry 3 --data-binary \
+      "vap_canary_policy_flagged{policy=\"guardian-image-provenance\"} ${flagged}" \
+      http://vminsert-shortterm.tenant-root.svc:8480/insert/0/prometheus/api/v1/import/prometheus
+    if [ "${flagged}" != "1" ]; then
+      echo "image-provenance policy did NOT flag the violating probe:"
+      printf '%s\n' "$out"
+      exit 1
+    fi
+    echo "policy flagged the violating probe (enforcement live)"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: vap-denial-canary
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: vap-denial-canary
+    app.kubernetes.io/part-of: guardian
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 120
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: vap-denial-canary
+        spec:
+          serviceAccountName: vap-denial-canary
+          restartPolicy: Never
+          containers:
+            - name: probe
+              # Same image the cozy-installer labeler hook pulls at
+              # bootstrap; rendered here, so it reaches the union (and the
+              # haul) as a rendered ref.
+              image: docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
+              command: ["/bin/sh", "/scripts/probe.sh"]
+              env:
+                # kubectl needs a writable cache dir under restricted PSS.
+                - name: HOME
+                  value: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 65534
+                capabilities:
+                  drop: ["ALL"]
+                seccompProfile:
+                  type: RuntimeDefault
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: scripts
+              configMap:
+                name: vap-denial-canary
+            - name: tmp
+              emptyDir: {}
+---
+# Canary pod flows: DNS, the apiserver (the dry-run probe), and the
+# VictoriaMetrics import path in tenant-root.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: vap-denial-canary
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: vap-denial-canary
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: vap-denial-canary
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+            - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            k8s:app.kubernetes.io/name: vminsert
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
+# Ingress half of the import path: tenant-root's generated isolation does
+# not admit child-tenant namespaces (same reason as the root-ingress pair);
+# admit exactly the canary pods to vminsert.
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-root-vminsert-from-vap-denial-canary
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-root
+      k8s:app.kubernetes.io/name: vminsert
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-guardian
+            k8s:app.kubernetes.io/name: vap-denial-canary
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: vap-denial-canary
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  groups:
+    - name: vap-denial-canary.rules
+      rules:
+        - alert: ImageProvenancePolicyNotEnforcing
+          expr: max_over_time(vap_canary_policy_flagged[30m]) == 0
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "image-provenance admission is not flagging violating pods"
+            description: "The vap-denial-canary's deliberately violating dry-run pod was admitted without the guardian-image-provenance policy flagging it for 30m+. Unreviewed images could reach the rendered namespaces. Check the policy, binding, and param ConfigMap in base/app-patches."
+        - alert: ImageProvenanceCanaryAbsent
+          expr: absent(vap_canary_policy_flagged)
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "vap-denial-canary metrics absent for 30m"
+            description: "No vap_canary_policy_flagged samples — the canary CronJob is not running or cannot reach vminsert. Enforcement state of guardian-image-provenance is unverified. Check the newest vap-denial-canary Job logs in tenant-guardian."

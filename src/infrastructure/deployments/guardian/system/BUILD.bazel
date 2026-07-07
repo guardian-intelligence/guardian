@@ -8,6 +8,7 @@ filegroup(
         "openbao-observability.yaml",
         "openbao-rbac.yaml",
         "stage-tenants.yaml",
+        "vap-denial-canary.yaml",
     ],
     visibility = ["//visibility:public"],
 )
