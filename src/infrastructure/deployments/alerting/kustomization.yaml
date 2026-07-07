@@ -6,3 +6,5 @@ resources:
   - networkpolicy.yaml
   - observability.yaml
   - audit-alerts.yaml
+  - trust-alerts.yaml
+  - vmalert-vlogs.yaml
