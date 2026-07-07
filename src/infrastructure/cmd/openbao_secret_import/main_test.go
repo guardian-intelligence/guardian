@@ -51,8 +51,8 @@ func testImportEnv() map[string]string {
 		"cloudflare_external_dns_api_token":                       "external",
 		"cloudflare_dns_lb_provisioner_api_token":                 "lb",
 		"guardian_alerting_ntfy_url":                              "https://ntfy.sh/guardian-topic",
-		"platform_admin_shovon_password":                          "shovon-pass",
-		"platform_admin_guardian_ops_password":                    "guardian-ops-pass",
+		"platform_admin_password":                                 "admin-pass",
+		"platform_agent_password":                                 "agent-pass",
 		"github_promotions_app_private_key_b64":                   base64.StdEncoding.EncodeToString([]byte(testGithubAppPEM)),
 		"github_runner_app_prod_app_id":                           "3370540",
 		"github_runner_app_prod_client_id":                        "Iv23xxxx",
@@ -115,7 +115,7 @@ func TestImportPlan(t *testing.T) {
 	// Key names are the platform-admin-passwords ExternalSecret's remoteRef
 	// properties (base/cozystack/platform-admins.yaml maps them 1:1 to the
 	// KeycloakRealmUser passwordSecret keys).
-	if admins.Data["shovon"] != "shovon-pass" || admins.Data["guardian-ops"] != "guardian-ops-pass" {
+	if admins.Data["platform-admin"] != "admin-pass" || admins.Data["platform-agent"] != "agent-pass" {
 		t.Fatalf("platform-admins data = %#v", admins.Data)
 	}
 	promotion := plan[6]

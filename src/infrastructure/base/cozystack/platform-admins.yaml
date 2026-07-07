@@ -35,20 +35,20 @@ spec:
       type: Opaque
       engineVersion: v2
   data:
-    - secretKey: shovon
+    - secretKey: platform-admin
       remoteRef:
         key: guardian/guardian-mgmt/tenant-root/platform-admins
-        property: shovon
-    - secretKey: guardian-ops
+        property: platform-admin
+    - secretKey: platform-agent
       remoteRef:
         key: guardian/guardian-mgmt/tenant-root/platform-admins
-        property: guardian-ops
+        property: platform-agent
 ---
-# Shovon — the human operator.
+# platform-admin — the human operator's interactive identity.
 apiVersion: v1.edp.epam.com/v1
 kind: KeycloakRealmUser
 metadata:
-  name: platform-admin-shovon
+  name: platform-admin
   namespace: tenant-root
   labels:
     app.kubernetes.io/name: platform-admins
@@ -57,26 +57,33 @@ spec:
   realmRef:
     kind: ClusterKeycloakRealm
     name: keycloakrealm-cozy
-  username: shovon
-  email: im.shovonhasan@gmail.com
+  username: platform-admin
+  email: platform-admin@guardianintelligence.org
   emailVerified: true
+  firstName: Platform
+  lastName: Admin
   enabled: true
   groups:
     - cozystack-cluster-admin
   passwordSecret:
     name: platform-admin-passwords
-    key: shovon
+    key: platform-admin
 ---
-# guardian-ops — the shared identity for long-horizon agent sessions on the
-# release runner and laptop (Devin/Codex/Claude). Distinct from shovon so an
-# agent credential leak is revocable without locking the human out, and so
-# audit logs separate agent actions from human ones. Split further into
-# per-agent users when more than one agent runs concurrently enough to need
-# distinguishing.
+# platform-agent — the identity for long-horizon agent sessions on the
+# release runner and laptop (Devin/Codex/Claude). Distinct from
+# platform-admin so an agent credential leak is revocable without locking
+# the human out, and so audit logs separate agent actions from human ones.
+# Split into per-agent users when concurrency warrants it. The
+# offline_access realm role is what authorizes offline tokens
+# (kubelogin --oidc-extra-scope=offline_access): 30-day-idle refresh
+# tokens that reset on use, so an agent acting monthly stays logged in
+# indefinitely while remaining one-click revocable in Keycloak
+# (Sessions -> Offline). Without the role Keycloak fails code exchange
+# with "Offline tokens not allowed for the user or client".
 apiVersion: v1.edp.epam.com/v1
 kind: KeycloakRealmUser
 metadata:
-  name: platform-admin-guardian-ops
+  name: platform-agent
   namespace: tenant-root
   labels:
     app.kubernetes.io/name: platform-admins
@@ -85,12 +92,16 @@ spec:
   realmRef:
     kind: ClusterKeycloakRealm
     name: keycloakrealm-cozy
-  username: guardian-ops
-  email: 0.integrations.anveio@gmail.com
+  username: platform-agent
+  email: platform-agent@guardianintelligence.org
   emailVerified: true
+  firstName: Platform
+  lastName: Agent
   enabled: true
   groups:
     - cozystack-cluster-admin
+  roles:
+    - offline_access
   passwordSecret:
     name: platform-admin-passwords
-    key: guardian-ops
+    key: platform-agent
