@@ -15,6 +15,22 @@ spec:
   storageClass: replicated
   external: false
   version: v18
+  resources:
+    cpu: 2
+    memory: 2Gi
+  # Operational stamp (uniform across Guardian Postgres instances): bounded
+  # session/statement timeouts, slot WAL retention capped at 4GB so an
+  # abandoned logical replication slot invalidates itself instead of filling
+  # the volume (paired with the postgres-health slot alerts), and a 5m
+  # archive_timeout bounding idle-database RPO at ~5m instead of the nightly
+  # base backup.
+  postgresql:
+    parameters:
+      statement_timeout: 120s
+      idle_in_transaction_session_timeout: 300s
+      lock_timeout: 10s
+      archive_timeout: 300s
+      max_slot_wal_keep_size: 4GB
   quorum:
     minSyncReplicas: 1
     maxSyncReplicas: 2
