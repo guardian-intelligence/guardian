@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -763,5 +765,135 @@ func TestWatchdogActiveResolvesReplicas(t *testing.T) {
 	}
 	if !got {
 		t.Fatal("watchdogActive = false, want true")
+	}
+}
+
+// recordingSink captures every delivered notification.
+type recordingSink struct {
+	mu    sync.Mutex
+	sent  []notification
+	fail  error
+	delay time.Duration
+}
+
+func (r *recordingSink) deliver(_ context.Context, n notification) error {
+	if r.delay > 0 {
+		time.Sleep(r.delay)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.fail != nil {
+		return r.fail
+	}
+	r.sent = append(r.sent, n)
+	return nil
+}
+
+func (r *recordingSink) snapshot() []notification {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]notification(nil), r.sent...)
+}
+
+func TestPacedSinkCoalescesStorm(t *testing.T) {
+	inner := &recordingSink{delay: 20 * time.Millisecond}
+	var coalesced atomic.Uint64
+	paced := newPacedSink(inner, 30*time.Millisecond, &coalesced)
+
+	// One leader to occupy the sender, then a burst that must merge.
+	var wg sync.WaitGroup
+	for i := 0; i < 6; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			n := notification{Title: fmt.Sprintf("alert-%d", i), Priority: 3 + i%3}
+			if err := paced.deliver(context.Background(), n); err != nil {
+				t.Errorf("deliver %d: %v", i, err)
+			}
+		}(i)
+		if i == 0 {
+			time.Sleep(5 * time.Millisecond) // let the leader start sending
+		}
+	}
+	wg.Wait()
+
+	sent := inner.snapshot()
+	if len(sent) >= 6 {
+		t.Fatalf("expected coalescing, got %d individual sends", len(sent))
+	}
+	if coalesced.Load() == 0 {
+		t.Fatal("expected coalesced counter to advance")
+	}
+	foundDigest := false
+	for _, n := range sent {
+		if strings.Contains(n.Title, "storm coalesced") {
+			foundDigest = true
+			if n.Priority < 4 {
+				t.Fatalf("digest must carry the max member priority, got %d", n.Priority)
+			}
+		}
+	}
+	if !foundDigest {
+		t.Fatalf("no digest among %d sends: %+v", len(sent), sent)
+	}
+}
+
+func TestPacedSinkPacesSends(t *testing.T) {
+	inner := &recordingSink{}
+	var coalesced atomic.Uint64
+	paced := newPacedSink(inner, 60*time.Millisecond, &coalesced)
+
+	start := time.Now()
+	if err := paced.deliver(context.Background(), notification{Title: "a"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := paced.deliver(context.Background(), notification{Title: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed < 60*time.Millisecond {
+		t.Fatalf("second send not paced: %v elapsed", elapsed)
+	}
+	if got := len(inner.snapshot()); got != 2 {
+		t.Fatalf("want 2 sends, got %d", got)
+	}
+}
+
+func TestNtfySinkHonorsRetryAfter(t *testing.T) {
+	var calls atomic.Int64
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			w.Header().Set("Retry-After", "7")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer up.Close()
+
+	var slept []time.Duration
+	s := &ntfySink{
+		url:    up.URL,
+		client: up.Client(),
+		sleep:  func(_ context.Context, d time.Duration) { slept = append(slept, d) },
+	}
+	if err := s.deliver(context.Background(), notification{Title: "t"}); err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+	if len(slept) != 1 || slept[0] != 7*time.Second {
+		t.Fatalf("want one 7s Retry-After sleep, got %v", slept)
+	}
+}
+
+func TestParseRetryAfterClamps(t *testing.T) {
+	for in, want := range map[string]time.Duration{
+		"7":    7 * time.Second,
+		"1":    5 * time.Second,
+		"9999": 5 * time.Minute,
+		"":     30 * time.Second,
+		"soon": 30 * time.Second,
+	} {
+		if got := parseRetryAfter(in); got != want {
+			t.Errorf("parseRetryAfter(%q) = %v, want %v", in, got, want)
+		}
 	}
 }

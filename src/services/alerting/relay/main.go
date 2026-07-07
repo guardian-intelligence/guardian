@@ -325,6 +325,7 @@ type metrics struct {
 	forwarded        atomic.Uint64
 	forwardFailures  atomic.Uint64
 	suppressed       atomic.Uint64
+	coalesced        atomic.Uint64
 	watchdogLastSeen atomic.Int64
 	pipelineSilent   atomic.Int64
 }
@@ -339,6 +340,9 @@ func (m *metrics) render(w io.Writer) {
 	fmt.Fprintf(w, "# HELP relay_heartbeats_suppressed_total Watchdog/Heartbeat payloads counted but not forwarded.\n")
 	fmt.Fprintf(w, "# TYPE relay_heartbeats_suppressed_total counter\n")
 	fmt.Fprintf(w, "relay_heartbeats_suppressed_total %d\n", m.suppressed.Load())
+	fmt.Fprintf(w, "# HELP relay_notifications_coalesced_total Notifications merged into a digest instead of sent individually.\n")
+	fmt.Fprintf(w, "# TYPE relay_notifications_coalesced_total counter\n")
+	fmt.Fprintf(w, "relay_notifications_coalesced_total %d\n", m.coalesced.Load())
 	fmt.Fprintf(w, "# HELP relay_watchdog_last_seen_timestamp_seconds Unix time an active Watchdog was last observed in Alertmanager.\n")
 	fmt.Fprintf(w, "# TYPE relay_watchdog_last_seen_timestamp_seconds gauge\n")
 	fmt.Fprintf(w, "relay_watchdog_last_seen_timestamp_seconds %d\n", m.watchdogLastSeen.Load())
@@ -356,11 +360,44 @@ type ntfySink struct {
 	sleep  func(context.Context, time.Duration)
 }
 
+// rateLimitedError carries the sink's Retry-After so the retry loop paces
+// itself to the server's clock instead of hammering through its own
+// backoff — retrying straight into a 429 is how the 2026-07-07 alert storm
+// escalated a rate limit into an IP-level ban.
+type rateLimitedError struct{ retryAfter time.Duration }
+
+func (e rateLimitedError) Error() string { return "ntfy responded 429" }
+
+// parseRetryAfter reads the delay-seconds form of Retry-After, clamped to
+// [5s, 5m]; anything unparseable gets a conservative 30s.
+func parseRetryAfter(v string) time.Duration {
+	secs, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || secs <= 0 {
+		return 30 * time.Second
+	}
+	d := time.Duration(secs) * time.Second
+	if d < 5*time.Second {
+		d = 5 * time.Second
+	}
+	if d > 5*time.Minute {
+		d = 5 * time.Minute
+	}
+	return d
+}
+
 func (s *ntfySink) deliver(ctx context.Context, n notification) error {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
-			s.sleep(ctx, time.Duration(attempt*2)*time.Second)
+			delay := time.Duration(attempt*2) * time.Second
+			var rl rateLimitedError
+			if errors.As(lastErr, &rl) {
+				delay = rl.retryAfter
+			}
+			s.sleep(ctx, delay)
+			if ctx.Err() != nil {
+				return lastErr
+			}
 		}
 		if lastErr = s.post(ctx, n); lastErr == nil {
 			return nil
@@ -424,10 +461,125 @@ func (s *ntfySink) post(ctx context.Context, n notification) error {
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return rateLimitedError{retryAfter: parseRetryAfter(resp.Header.Get("Retry-After"))}
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("ntfy responded %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// pacedSink serializes deliveries through a single sender paced to the
+// sink's public rate limits, coalescing whatever arrives while the sender
+// is busy or cooling down into one digest notification. This is what
+// stands between an alert storm and the pager's rate limiter: on
+// 2026-07-07 a metric-lag storm of absence alerts retried its way into an
+// IP-level ntfy.sh ban, and the pager was dark exactly when it was needed
+// (including for its own AlertRelayForwardFailures).
+type pacedSink struct {
+	inner       sink
+	minInterval time.Duration
+	now         func() time.Time
+	sleep       func(context.Context, time.Duration)
+	coalesced   *atomic.Uint64
+
+	mu       sync.Mutex
+	pending  []notification
+	waiters  []chan error
+	sending  bool
+	lastSend time.Time
+}
+
+func newPacedSink(inner sink, minInterval time.Duration, coalesced *atomic.Uint64) *pacedSink {
+	return &pacedSink{
+		inner:       inner,
+		minInterval: minInterval,
+		now:         time.Now,
+		sleep:       sleepCtx,
+		coalesced:   coalesced,
+	}
+}
+
+func (s *pacedSink) deliver(ctx context.Context, n notification) error {
+	done := make(chan error, 1)
+	s.mu.Lock()
+	s.pending = append(s.pending, n)
+	s.waiters = append(s.waiters, done)
+	if !s.sending {
+		s.sending = true
+		go s.run()
+	}
+	s.mu.Unlock()
+
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		// The buffered channel lets the sender resolve this batch later
+		// without blocking; the caller just stops waiting for the outcome.
+		return ctx.Err()
+	}
+}
+
+func (s *pacedSink) run() {
+	for {
+		s.mu.Lock()
+		if len(s.pending) == 0 {
+			s.sending = false
+			s.mu.Unlock()
+			return
+		}
+		if wait := s.minInterval - s.now().Sub(s.lastSend); wait > 0 {
+			s.mu.Unlock()
+			s.sleep(context.Background(), wait)
+			continue
+		}
+		batch := s.pending
+		waiters := s.waiters
+		s.pending, s.waiters = nil, nil
+		s.lastSend = s.now()
+		s.mu.Unlock()
+
+		n := batch[0]
+		if len(batch) > 1 {
+			n = digest(batch)
+			s.coalesced.Add(uint64(len(batch) - 1))
+		}
+		dctx, cancel := context.WithTimeout(context.Background(), deliveryBudget)
+		err := s.inner.deliver(dctx, n)
+		cancel()
+		for _, w := range waiters {
+			w <- err
+		}
+	}
+}
+
+// digest merges a storm batch into one page: highest member priority, one
+// title line per alert, union of tags.
+func digest(batch []notification) notification {
+	var b strings.Builder
+	maxPriority := 0
+	seen := map[string]struct{}{}
+	var tags []string
+	for _, n := range batch {
+		if n.Priority > maxPriority {
+			maxPriority = n.Priority
+		}
+		fmt.Fprintf(&b, "- %s\n", firstLine(n.Title))
+		for _, t := range n.Tags {
+			if _, ok := seen[t]; !ok {
+				seen[t] = struct{}{}
+				tags = append(tags, t)
+			}
+		}
+	}
+	return notification{
+		Title:    fmt.Sprintf("%d alerts (storm coalesced)", len(batch)),
+		Priority: maxPriority,
+		Tags:     tags,
+		Body:     truncate(b.String(), 4096),
+	}
 }
 
 type deadmanAction int
@@ -790,7 +942,14 @@ func main() {
 	srv := &server{
 		cfg:        cfg,
 		m:          m,
-		out:        &ntfySink{url: cfg.ntfyURL, token: cfg.ntfyToken, client: &http.Client{Timeout: 10 * time.Second}, sleep: sleepCtx},
+		// The pace floor mirrors ntfy.sh's free-tier replenish rate (one
+		// visitor request per ~5s): a storm coalesces into digests instead
+		// of racing the sink's limiter into an IP ban.
+		out: newPacedSink(
+			&ntfySink{url: cfg.ntfyURL, token: cfg.ntfyToken, client: &http.Client{Timeout: 10 * time.Second}, sleep: sleepCtx},
+			5*time.Second,
+			&m.coalesced,
+		),
 		client:     &http.Client{Timeout: 10 * time.Second},
 		lookupHost: net.DefaultResolver.LookupHost,
 	}
