@@ -22,9 +22,9 @@ func TestPostgresJobManifest(t *testing.T) {
 		"namespace: tenant-root\n",
 		"guardian.dev/component: postgres\n",
 		"image: " + postgresBenchImage + "\n",
-		"value: postgres-guardian-rw\n",
-		"name: postgres-guardian-superuser\n                  key: username\n",
-		"name: postgres-guardian-superuser\n                  key: password\n",
+		"value: postgres-verself-controlplane-rw\n",
+		"name: postgres-verself-controlplane-superuser\n                  key: username\n",
+		"name: postgres-verself-controlplane-superuser\n                  key: password\n",
 		"name: HOME\n              value: /tmp\n",
 		"pgbench --initialize --scale \"$PGBENCH_SCALE\"",
 		"pgbench --client \"$PGBENCH_CLIENTS\"",
@@ -113,6 +113,10 @@ func TestNamespaceAndComponentValidation(t *testing.T) {
 
 func baseConfig(component string) dbLoadConfig {
 	name := "guardian-root-" + component + "-load-test"
+	applicationName := "guardian"
+	if component == "postgres" {
+		applicationName = "verself-controlplane"
+	}
 	return dbLoadConfig{
 		Kubectl:                   "/kubectl",
 		RequestTimeout:            "15s",
@@ -120,7 +124,7 @@ func baseConfig(component string) dbLoadConfig {
 		Stage:                     "root",
 		Namespace:                 "tenant-root",
 		Component:                 component,
-		ApplicationName:           "guardian",
+		ApplicationName:           applicationName,
 		Name:                      name,
 		TTLSecondsAfterFinished:   "86400",
 		PgbenchScale:              "10",

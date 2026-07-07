@@ -481,9 +481,9 @@ recovery is finished only when the stateful stores are back from R2:
 1. `backup-audit.md` is the entrypoint: freshness checks against the
    `guardian-backups` bucket, then the restore drills. Its siblings carry
    the mechanics — `postgres-backup-restore.md` (CNPG/barman PITR for
-   `tenant-root/guardian` and `tenant-guardian-prod/keycloak`) and
-   `analytics-clickhouse.md` (clickhouse-backup, plus the chart bugs that
-   bite during restore).
+   `tenant-root/verself-controlplane` and `tenant-guardian-prod/keycloak`)
+   and `analytics-clickhouse.md` (clickhouse-backup, plus the chart bugs
+   that bite during restore).
 2. Post-restore re-relays: the analytics ingest password must be relayed
    again after any guardian-analytics re-seed (`analytics-clickhouse.md`),
    and Keycloak realm state rides in its Postgres — verify logins after the

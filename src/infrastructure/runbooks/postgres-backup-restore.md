@@ -19,7 +19,7 @@ Succeeded in 68s, restored cluster healthy ≈ 2min).
 
 ## In scope
 
-- `tenant-root/guardian` — nightly Plan 04:00 UTC (`base/apps/core-services.yaml`)
+- `tenant-root/verself-controlplane` — nightly Plan 02:00 UTC (`base/apps/verself-controlplane-postgres.yaml`)
 - `tenant-guardian-prod/keycloak` — nightly Plan 03:00 UTC (`deployments/iam/prod/postgres.yaml`)
 
 Beta/gamma Keycloak are deliberately out. Adding an instance is:
@@ -66,27 +66,28 @@ EOF
 ## Restore drill (to-copy, non-destructive)
 
 Create an empty scratch Postgres app and point a RestoreJob at it; the
-source keeps running untouched. Write a marker row on the source AFTER the
-base backup and force a WAL switch first — the marker can then only appear
-in the restored copy via WAL replay, which proves PITR rather than just
-base-backup restore.
+source keeps running untouched. For the example below, use a BackupJob from
+`tenant-root/verself-controlplane`. Write a marker row on the source AFTER
+the base backup and force a WAL switch first — the marker can then only
+appear in the restored copy via WAL replay, which proves PITR rather than
+just base-backup restore.
 
 ```sh
 kubectl apply -f - <<EOF
 apiVersion: apps.cozystack.io/v1alpha1
 kind: Postgres
-metadata: {name: guardian-drill, namespace: tenant-root}
+metadata: {name: verself-controlplane-drill, namespace: tenant-root}
 spec: {replicas: 1, size: 10Gi, storageClass: replicated, external: false, version: v18}
 ---
 apiVersion: backups.cozystack.io/v1alpha1
 kind: RestoreJob
-metadata: {name: guardian-drill-restore, namespace: tenant-root}
+metadata: {name: verself-controlplane-drill-restore, namespace: tenant-root}
 spec:
   backupRef: {name: <BackupJob name>}
-  targetApplicationRef: {apiGroup: apps.cozystack.io, kind: Postgres, name: guardian-drill}
+  targetApplicationRef: {apiGroup: apps.cozystack.io, kind: Postgres, name: verself-controlplane-drill}
 EOF
 # watch: kubectl -n tenant-root get restorejob <name> -o jsonpath='{.status.phase}'
-# verify marker: kubectl exec postgres-guardian-drill-1 -c postgres -- \
+# verify marker: kubectl exec postgres-verself-controlplane-drill-1 -c postgres -- \
 #   psql -U postgres -c "SELECT * FROM restore_drill_marker ORDER BY id;"
 # teardown: delete the RestoreJob and the scratch Postgres app CR.
 ```
@@ -106,5 +107,10 @@ restore IN-PLACE and destructive — never do that in a drill.
 - The first BackupJob per instance is a WAL-activation artifact, not a
   restore point (see the two-BackupJob rule above). Its base objects age out
   via barman's 30d retention.
+- The instance name `guardian` is retired. Its barman prefix remains in the
+  `guardian-backups` bucket until retention ages it out; the bucket's 7-day
+  Age lock prevents immediate cleanup. CNPG refuses WAL archiving into a
+  non-empty destination, so the name must not be reused for a new tenant-root
+  Postgres with `useSystemBucket` until the prefix is gone.
 - Scheduled/automated drills with recorded RPO/RTO metrics are a follow-up;
   this runbook is the manual procedure they will automate.

@@ -8,49 +8,8 @@
 # (losing the cluster loses the backups). Database backups go through
 # Cozystack's platform backup machinery (cozy-default BackupClass) pointed at
 # off-cluster Cloudflare R2 — see base/cozystack/platform.yaml. Apps opt in
-# with backup.useSystemBucket; per-app cadence lives on the Plan CRs below.
-apiVersion: apps.cozystack.io/v1alpha1
-kind: Postgres
-metadata:
-  name: guardian
-  namespace: tenant-root
-spec:
-  replicas: 3
-  size: 10Gi
-  storageClass: replicated
-  external: false
-  version: v18
-  quorum:
-    minSyncReplicas: 1
-    maxSyncReplicas: 2
-  # Platform-managed backup flow: the chart leaves barmanObjectStore unset;
-  # the CNPG backup driver SSA-patches the live Cluster with the system R2
-  # coordinates at first BackupJob time. archive_command (continuous WAL,
-  # the actual RPO driver) is NOT active until that first BackupJob — fire
-  # an ad-hoc one immediately after enabling, don't wait for the Plan tick.
-  backup:
-    enabled: true
-    useSystemBucket: true
----
-# Nightly base backup for the root guardian Postgres (the future product
-# database — billing/profile-shaped state). RPO between base backups is
-# covered by continuous WAL archiving; the cron only bounds restore replay
-# time. Retention (30d) and compression are cozy-default policy.
-apiVersion: backups.cozystack.io/v1alpha1
-kind: Plan
-metadata:
-  name: guardian-postgres-nightly
-  namespace: tenant-root
-spec:
-  applicationRef:
-    apiGroup: apps.cozystack.io
-    kind: Postgres
-    name: guardian
-  backupClassName: cozy-default
-  schedule:
-    type: cron
-    cron: "0 4 * * *"
----
+# with backup.useSystemBucket; per-app cadence lives on Plan CRs beside each
+# app's own manifest.
 apiVersion: apps.cozystack.io/v1alpha1
 kind: Ingress
 metadata:
