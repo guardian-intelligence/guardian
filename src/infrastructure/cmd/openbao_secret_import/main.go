@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	defaultEnvFile        = "DELETE_ME.env"
+	defaultEnvFile        = "custody.env"
 	defaultNamespace      = "tenant-guardian"
 	defaultService        = "guardian-openbao-active"
 	defaultServiceAccount = "guardian-secret-importer"

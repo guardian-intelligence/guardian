@@ -36,6 +36,7 @@ include("//src/tools/flux:flux.MODULE.bazel")
 include("//src/tools/k6:k6.MODULE.bazel")
 include("//src/tools/openbao:openbao.MODULE.bazel")
 include("//src/tools/oras:oras.MODULE.bazel")
+include("//src/tools/restic:restic.MODULE.bazel")
 include("//src/tools/talm:talm.MODULE.bazel")
 include("//src/tools/talosctl:talosctl.MODULE.bazel")
 
@@ -106,6 +107,7 @@ use_repo(
     "org_golang_google_protobuf",
     "org_golang_x_crypto_x509roots_fallback",
     "org_golang_x_net",
+    "org_golang_x_term",
 )
 
 # The OpenTelemetry Go modules import each other's internal/ packages across

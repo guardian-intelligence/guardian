@@ -120,7 +120,7 @@ if the raft state was wiped, recreate it with the declared config.
 
 ## Bootstrap Secret Import
 
-One-time imports from local operator files such as `DELETE_ME.env` must happen
+One-time imports from local operator files such as `custody.env` must happen
 after the new OpenBao cluster is initialized and the `kv` mount has converged.
 Do not encode those values in Git or Kubernetes manifests. This command is a
 bootstrap-only, heavily cordoned, non-load-bearing tool; do not use it as a
@@ -130,7 +130,7 @@ routine secret-management path.
 bazelisk run //src/infrastructure/cmd/openbao_secret_import:openbao_secret_import -- \
   --kubectl "$(bazelisk info output_base)/external/+http_file+kubectl_linux_amd64/file/kubectl" \
   --kubeconfig "$HOME/.kube/config" \
-  --env-file DELETE_ME.env
+  --env-file custody.env
 ```
 
 The importer authenticates through the temporary `guardian-secret-importer`
@@ -169,7 +169,7 @@ copy from custody without printing any value, then pass it via `--env-file`:
 
 ```sh
 umask 077
-cp ~/guardian-custody/DELETE_ME.env import.env
+cp ~/guardian-custody/custody.env import.env
 printf 'github_promotions_app_private_key_b64=%s\n' \
   "$(base64 -w0 < ~/guardian-custody/github-promotions-app.private-key.pem)" >> import.env
 printf 'github_runner_app_prod_private_key_b64=%s\n' \

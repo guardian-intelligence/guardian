@@ -94,7 +94,7 @@ bootstrap, DR, re-initialization).
   manual `bao operator raft snapshot` is the known primitive. Snapshots are
   barrier-encrypted — worthless without the seal key, so key custody couples
   to snapshot retention.
-- The custody env file (`~/guardian-custody/DELETE_ME.env`, 0600) is the DR
+- The custody env file (`~/guardian-custody/custody.env`, 0600) is the DR
   re-seed root: a single plaintext file whose custody discipline is
   load-bearing.
 
