@@ -9,4 +9,5 @@ resources:
   - blackbox-exporter.yaml
   - synthetic-probes.yaml
   - trust-alerts.yaml
+  - tsdb-alerts.yaml
   - vmalert-vlogs.yaml
