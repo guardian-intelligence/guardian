@@ -87,7 +87,7 @@ func main() {
 		slog.Error("ip2asn load", "err", err, "path", asnPath)
 		os.Exit(1)
 	}
-	slog.Info("ip2asn table loaded", "ranges", len(asnTab.asns), "path", asnPath)
+	slog.Info("ip2asn table loaded", "ranges", len(asnTab.ranges), "path", asnPath)
 	batch := newBatcher(sink, 10_000, 10*time.Second, 100_000)
 	svc := &eventService{batch: batch, now: time.Now, validate: validator}
 

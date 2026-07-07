@@ -43,6 +43,20 @@ const (
 	tierClientClaimed  = 3
 )
 
+// tierLabel mirrors the trust_tier Enum8 in events-table.sql; the
+// observability alerts match on these strings.
+func tierLabel(t uint8) string {
+	switch t {
+	case tierServerObserved:
+		return "server_observed"
+	case tierEdgeVerified:
+		return "edge_verified"
+	case tierClientClaimed:
+		return "client_claimed"
+	}
+	return "unspecified"
+}
+
 // Headers stamped by the tenant-root ingress controller (PR #375). The maps
 // behind them are keyed on $ssl_client_verify, so a value only ever appears
 // when the TLS client cert chain verified against the Cloudflare origin-pull

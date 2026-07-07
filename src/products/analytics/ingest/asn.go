@@ -18,10 +18,14 @@ import (
 // src/infrastructure/runbooks/ip2asn-refresh.md). Lookups are in-memory so
 // the write path has no runtime dependency, and rows record what the
 // routing table said at event time.
+type asnRange struct {
+	start [16]byte
+	end   [16]byte
+	asn   uint32
+}
+
 type asnTable struct {
-	starts [][16]byte
-	ends   [][16]byte
-	asns   []uint32
+	ranges []asnRange
 }
 
 // loadASNTable parses the gzipped "start\tend\tas_number\tcountry\tname"
@@ -40,7 +44,7 @@ func loadASNTable(path string) (*asnTable, error) {
 	}
 	defer gz.Close()
 
-	t := &asnTable{}
+	t := &asnTable{ranges: make([]asnRange, 0, 1<<19)}
 	sc := bufio.NewScanner(gz)
 	sc.Buffer(make([]byte, 64<<10), 64<<10)
 	line := 0
@@ -65,30 +69,20 @@ func loadASNTable(path string) (*asnTable, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s:%d: range_end: %w", path, line, err)
 		}
-		t.starts = append(t.starts, start.As16())
-		t.ends = append(t.ends, end.As16())
-		t.asns = append(t.asns, uint32(asn))
+		t.ranges = append(t.ranges, asnRange{start: start.As16(), end: end.As16(), asn: uint32(asn)})
 	}
 	if err := sc.Err(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	if len(t.asns) == 0 {
+	if len(t.ranges) == 0 {
 		return nil, fmt.Errorf("%s: no routed ranges", path)
 	}
 	// The upstream file is sorted within each family, but v4-mapped rows
 	// must interleave with low v6 space for the binary search to hold.
-	sort.Sort(t)
+	sort.Slice(t.ranges, func(i, j int) bool {
+		return bytes.Compare(t.ranges[i].start[:], t.ranges[j].start[:]) < 0
+	})
 	return t, nil
-}
-
-func (t *asnTable) Len() int { return len(t.asns) }
-func (t *asnTable) Less(i, j int) bool {
-	return bytes.Compare(t.starts[i][:], t.starts[j][:]) < 0
-}
-func (t *asnTable) Swap(i, j int) {
-	t.starts[i], t.starts[j] = t.starts[j], t.starts[i]
-	t.ends[i], t.ends[j] = t.ends[j], t.ends[i]
-	t.asns[i], t.asns[j] = t.asns[j], t.asns[i]
 }
 
 // lookup returns the AS number originating a (v4-mapped or native v6)
@@ -98,11 +92,11 @@ func (t *asnTable) lookup(a netip.Addr) uint32 {
 		return 0
 	}
 	k := a.As16()
-	i := sort.Search(len(t.starts), func(i int) bool {
-		return bytes.Compare(t.starts[i][:], k[:]) > 0
+	i := sort.Search(len(t.ranges), func(i int) bool {
+		return bytes.Compare(t.ranges[i].start[:], k[:]) > 0
 	}) - 1
-	if i < 0 || bytes.Compare(t.ends[i][:], k[:]) < 0 {
+	if i < 0 || bytes.Compare(t.ranges[i].end[:], k[:]) < 0 {
 		return 0
 	}
-	return t.asns[i]
+	return t.ranges[i].asn
 }

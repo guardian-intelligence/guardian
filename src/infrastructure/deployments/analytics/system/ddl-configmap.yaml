@@ -52,7 +52,11 @@ data:
   # events.sql schema — CREATE ... IF NOT EXISTS is a no-op on live tables,
   # so column additions and TTL changes must be restated here. Keyed
   # separately because the DDL conformance test pins events.sql verbatim to
-  # the canonical file.
+  # the canonical file; a companion test asserts these statements match the
+  # canonical column definitions. This is the PENDING set: once a statement
+  # has applied in-cluster, prune it in the next DDL revision (a fresh
+  # bootstrap gets the full schema from CREATE, and re-running MODIFY
+  # COLUMN TTL on large tables risks repeat mutations).
   migrations.sql: |
     ALTER TABLE guardian_analytics.events ON CLUSTER 'clickhouse'
         ADD COLUMN IF NOT EXISTS device_class LowCardinality(String) CODEC(ZSTD(1)) AFTER ua,

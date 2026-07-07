@@ -39,7 +39,8 @@ CREATE TABLE IF NOT EXISTS guardian_analytics.events
     client_ip      IPv6 CODEC(ZSTD(1)) TTL toDateTime(server_ts) + INTERVAL 90 DAY,
     ip_source      LowCardinality(String) CODEC(ZSTD(1)),
     -- CF-IPCountry via the verify-gated ingress map (edge-observed);
-    -- asn from the image-baked BGP snapshot (event-time truth).
+    -- asn resolved at ingest from the image-baked BGP snapshot (fresh as
+    -- of the last snapshot refresh, frozen on the row thereafter).
     country        LowCardinality(String) CODEC(ZSTD(1)),
     asn            UInt32 CODEC(T64, ZSTD(1)),
 

@@ -20,15 +20,3 @@ func presenceLabel(present bool) string {
 	}
 	return "empty"
 }
-
-func tierLabel(t uint8) string {
-	switch t {
-	case tierServerObserved:
-		return "server_observed"
-	case tierEdgeVerified:
-		return "edge_verified"
-	case tierClientClaimed:
-		return "client_claimed"
-	}
-	return "unspecified"
-}

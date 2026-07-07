@@ -105,9 +105,12 @@ func (s *eventService) Publish(
 	}
 	if len(rows) > 0 {
 		s.batch.Add(rows)
+		// XX is Cloudflare's geolocation-unknown placeholder: the header
+		// arrived but carries no signal, so the canary counts it as
+		// unenriched (a zone misconfig sending XX en masse must fire).
 		eventsIngested.WithLabelValues(
 			tierLabel(meta.ctx.TrustTier),
-			presenceLabel(meta.ctx.Country != ""),
+			presenceLabel(meta.ctx.Country != "" && meta.ctx.Country != "XX"),
 			presenceLabel(meta.ctx.ASN != 0),
 		).Add(float64(len(rows)))
 	}

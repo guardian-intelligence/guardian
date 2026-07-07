@@ -40,7 +40,7 @@ func TestLoadASNTableAndLookup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := len(tab.asns); got != 3 {
+	if got := len(tab.ranges); got != 3 {
 		t.Fatalf("routed ranges = %d, want 3 (AS0 dropped)", got)
 	}
 

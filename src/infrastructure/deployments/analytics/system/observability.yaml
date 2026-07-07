@@ -47,14 +47,30 @@ spec:
           annotations:
             summary: "Analytics country enrichment is missing on edge-verified traffic"
             description: ">5% of edge-verified events arrived without a country for 15m. CF-IPCountry is not reaching ingest: check the zone's IP-geolocation setting and the x-guardian-client-country map in base/app-patches/ingress-origin-edge.yaml."
+        - alert: AnalyticsIngestASNEnrichmentEmpty
+          expr: |
+            sum(rate(analytics_ingest_events_total{trust_tier="edge_verified",asn="empty"}[10m]))
+              /
+            sum(rate(analytics_ingest_events_total{trust_tier="edge_verified"}[10m])) > 0.10
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Analytics ASN enrichment is missing on edge-verified traffic"
+            description: ">10% of edge-verified events resolved no ASN for 30m. Publicly routed clients should nearly always match the baked ip2asn snapshot — suspect a lookup regression or a badly stale snapshot (src/infrastructure/runbooks/ip2asn-refresh.md)."
         - alert: AnalyticsIngestScrapeDown
-          expr: up{namespace="guardian-analytics",job="analytics-ingest"} == 0
+          # == 0 alone misses the misconfigured-scrape case where the up
+          # series never exists at all.
+          expr: |
+            up{namespace="guardian-analytics",job="analytics-ingest"} == 0
+              or
+            absent(up{namespace="guardian-analytics",job="analytics-ingest"})
           for: 10m
           labels:
             severity: warning
           annotations:
             summary: "Analytics ingest metrics scrape is down"
-            description: "vmagent cannot scrape analytics-ingest /metrics; the enrichment canary is blind while this fires."
+            description: "vmagent cannot scrape analytics-ingest /metrics (or the scrape target was never discovered); the enrichment canary is blind while this fires."
 ---
 # vmagent scrapes /metrics from cozy-monitoring; the existing ingest CCNP
 # only admits tenant-root (public edge) and ClickHouse egress.

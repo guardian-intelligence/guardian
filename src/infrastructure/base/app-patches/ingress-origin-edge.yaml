@@ -34,16 +34,19 @@ spec:
           # ($ssl_client_verify=SUCCESS); empty elsewhere, and proxy_set_header
           # with an empty value strips client-supplied values.
           http-snippet: |
-            map $ssl_client_verify $guardian_client_ip {
-              "SUCCESS" $http_cf_connecting_ip;
-              default "";
-            }
             map $ssl_client_verify $guardian_client_ip_source {
               "SUCCESS" "cloudflare";
               default "";
             }
-            map $ssl_client_verify $guardian_client_country {
-              "SUCCESS" $http_cf_ipcountry;
+            # The verify gate lives in exactly one map; per-header values
+            # derive from it, so a new header can't ship with its own
+            # (divergent) copy of the trust check.
+            map $guardian_client_ip_source $guardian_client_ip {
+              "cloudflare" $http_cf_connecting_ip;
+              default "";
+            }
+            map $guardian_client_ip_source $guardian_client_country {
+              "cloudflare" $http_cf_ipcountry;
               default "";
             }
         proxySetHeaders:

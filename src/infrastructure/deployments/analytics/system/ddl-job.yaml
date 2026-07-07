@@ -53,6 +53,11 @@ spec:
               clickhouse-client --host "$host" --user ingest --receive_timeout 300 --queries-file /traces/otel-traces.sql
               clickhouse-client --host "$host" --user ingest --query "EXISTS TABLE guardian_analytics.events"
               clickhouse-client --host "$host" --user ingest --query "EXISTS TABLE guardian_analytics.otel_traces"
+              # Column-presence gate: EXISTS can't see a live table the
+              # migrations failed to bring forward; ingest's INSERT list
+              # would then fail on every batch. LIMIT 0 errors on any
+              # missing column.
+              clickhouse-client --host "$host" --user ingest --query "SELECT device_class, os_family, browser_family, country, asn, client_ip FROM guardian_analytics.events LIMIT 0"
           env:
             - name: CLICKHOUSE_PASSWORD
               valueFrom:
