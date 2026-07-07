@@ -124,33 +124,6 @@ func TestResolveFromLegacyFailClosed(t *testing.T) {
 	}
 }
 
-func TestResolveLegacyEnvFileNameFallback(t *testing.T) {
-	fake := &fakeRestic{}
-	opts := testOptions(t, fake)
-	opts.talmRoot = populateLegacy(t, opts)
-
-	// Replace custody.env with the deprecated name; resolve should warn and
-	// still store it under the canonical bundle path.
-	if err := os.Remove(filepath.Join(opts.custodyDir, envName)); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, filepath.Join(opts.custodyDir, legacyEnvName), "KEY=value")
-
-	src, err := resolveSources(opts)
-	if err != nil {
-		t.Fatalf("legacy env name should resolve: %v", err)
-	}
-	for _, r := range src.resolved {
-		if r.bundlePath == envName && strings.HasSuffix(r.source, legacyEnvName) {
-			if !strings.Contains(opts.stderr.(*bytes.Buffer).String(), "legacy") {
-				t.Error("expected a deprecation warning for the legacy env file name")
-			}
-			return
-		}
-	}
-	t.Fatalf("expected %s resolved from legacy name, got %+v", envName, src.resolved)
-}
-
 func TestFindUnsealKeyFingerprintMismatch(t *testing.T) {
 	dir := t.TempDir()
 	sum := sha256.Sum256([]byte("right"))
@@ -444,7 +417,7 @@ func TestStatusWarnsOnStaleSnapshotAndResidue(t *testing.T) {
 	writeFile(t, filepath.Join(opts.repo, "config"), "restic config")
 	opts.talmRoot = t.TempDir()
 	writeFile(t, filepath.Join(opts.talmRoot, "secrets.yaml"), "plaintext")
-	writeFile(t, filepath.Join(opts.custodyDir, legacyEnvName), "KEY=value")
+	writeFile(t, filepath.Join(opts.custodyDir, envName), "KEY=value")
 
 	if err := cmdStatus(opts); err != nil {
 		t.Fatal(err)
@@ -453,7 +426,7 @@ func TestStatusWarnsOnStaleSnapshotAndResidue(t *testing.T) {
 	if !strings.Contains(out, "older than") {
 		t.Error("status must warn on stale snapshots")
 	}
-	if !strings.Contains(out, "secrets.yaml") || !strings.Contains(out, legacyEnvName) {
+	if !strings.Contains(out, "secrets.yaml") || !strings.Contains(out, envName) {
 		t.Errorf("status must warn on plaintext residue, got:\n%s", out)
 	}
 }

@@ -136,7 +136,6 @@ INFRA_TESTS = [
     "//src/infrastructure/tests:talm_render_test",
 ]
 FORBIDDEN_SOURCE_PATHS = [
-    ("DELETE_ME.env", "operator credentials must stay out of the repo workspace and must not be load-bearing"),
     ("custody.env", "operator credentials live in the encrypted custody bundle (aspect infra custody), never the repo workspace"),
     ("mgmt-evidence", "management-cluster evidence is temporary PR validation output, not durable source"),
     ("docs/mgmt-evidence", "management-cluster evidence is temporary PR validation output, not durable source"),
