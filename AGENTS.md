@@ -28,7 +28,7 @@ The purpose is to create a free and open-source system for any being to convert 
 * VictoriaLogs for logs. VictoriaMetrics for Metrics. TigerBeetle for financial truth and OLTP (planned). ClickHouse for analytics and Otel correlations/traces/spans. CNPG (single writer per stage, fan out read replicas) for system stage and misc.
 * Bazel owns the build graph and produces bytes using OCI for layout. `cosign`/SLSA proves that it's authentic Guardian Intelligence LLC software.
 * Runtime technology inventory: what runs is the union of the digest-pinned image refs rendered from the manifest trees and `src/infrastructure/bootstrap/bundle/images.declared.lock` (what runs WITHOUT being rendered: bootstrap artifacts, system images, operator-spawned workloads, Go-tool-referenced job images) — the union lock is generated, never edited; `src/tools/` is what we operate with (pinned CLIs: talm, talosctl, flux, kubectl, hauler, openbao, oras, k6); `MODULE.bazel` is what we build with.
-* Flagger used for blue/green deployments for Keycloak (see `src/infrastructure/deployments/iam/`). Canary releases for non-tier-1 service components.
+* Flagger used for blue/green deployments for non-platform Keycloak (see `src/infrastructure/deployments/iam/`). Canary releases for non-tier-1 service components.
 * Kargo for deployment promotions from beta -> gamma -> prod. GitHub app configured for auto-commits. Release channels for distributed binaries: Edge (CD on main), nightly, RC, stable.
 * Domain: guardianintelligence.org (abbreviated in conversation with user as "gi.org")
 * Object Storage is handled by R2, including backups. Fully bare metal topology on NVME so it makes no economical sense to reserve expensive fast drives for object storage. No SeaweedFS.
@@ -141,7 +141,7 @@ We're currently maximizing for highly continuous rapidly delivered software to e
 <coding_guidelines>
 * Improvements and refactors should leave no trace that the old approach ever existed unless someone spelunks through git history. At this stage of development, prefer to make upgrades as clean cutovers instead of slowly sequenced. This means that comments should not reference the previous approach nor should any compatibility shims be provided. E.g. if migrating from Cozystack v1.4.0 -> v1.5.0 avoid comments like "this is required for 1.5.0 whereas 1.4.0 did XYZ".
 * Only add comments for genuinely complex workarounds for bugs or surprising deviations from best practices. Clean up comments that don't adhere to this rule.
-
+* Run load tests, add them as a Kargo-linked gate if they're missing and include load testing as part of planning. Load tests are the best way to measure the durability and performance of our system. Act accordingly on the data.
 </coding_guidelines>
 
 <development_loop>
@@ -154,27 +154,24 @@ Optional:
 * Learn what development tooling exists with `aspect --help`
 
 Step by step:
-0. Install tools and confirm access
+0. Install tools and confirm access: `eval "$(scripts/bootstrap.sh path)" && aspect tools install && eval "$(aspect tools path)" && aspect infra auth --platform-agent`
 1. Branch in a git worktree off `origin/main`
-2. Run conformance tests locally. There is no pre-commit hook.
-3. Open GitHub PR using `gh` cli, monitor CI, perform adversarial review if asked, address blocking comments if any are posted, and then merge if all green.
-5. Babysit Flux convergence, Kargo promotion, and Flagger deployment rollout: `tools/ops/cluster-watch --status` (live Flux Ready conditions, sub-15m). Default `cluster-watch` tails Alerta stream but most checks take 15 minutes of sustained failure so `--status` is the fast view while you wait for your changes' Kustomization to reach Ready.
-6. If you're making a product change, monitor incoming traffic from prod and query ClickHouse to make sure users are having a good time with your feature.
-7. Report progress to the user via relevant aggregate metrics e.g. "LCP down for route /letters/<slug> from 3.4s to 3.2s base on last 30m of traffic to prod".
+2. Open GitHub PR using `gh` cli, monitor CI, perform adversarial review if needed, address blocking comments if any are posted, and then merge if all green.
+3. Babysit Flux convergence, Kargo promotion, and Flagger deployment rollout: `tools/ops/cluster-watch --status` (live Flux Ready conditions, sub-15m). Default `cluster-watch` tails Alerta stream but most checks take 15 minutes of sustained failure so `--status` is the fast view while you wait for your changes' Kustomization to reach Ready.
+4. If you're making a product change, monitor incoming traffic from prod and query ClickHouse to make sure users are having a good time with your feature.
+5. Report task completion to the user with relevant metrics/logs/traces e.g. "LCP down for route /letters/<slug> from 3.4s to 3.2s base on last 30m of traffic to prod".
 
 Common post-merge issues:
 - Flux: `BuildFailed`, `denied by ValidatingAdmissionPolicy ...` (image-provenance denials name the offending image and the fix: pin the digest, extend base/app-patches/registry-prefixes.txt, or declare the operator-spawned ref in images.declared.lock — each in its own reviewed PR), `HealthCheckFailed`, `dependency '...' is not ready`
 - Kargo (image changes only): promotions are done by Kargo GitHub app bot commits.
 - Flagger: A failed canary rolls back automatically and pages.
-- Alerta: intended to be extremely high signal, if there's unnecessary/unrelated noise, continue to monitor but assume it's your duty to fix noise unless you can make a strong case to flag to the user to fix separately. If it's a small fixup, even if unrelated, just tack on the change instead of bothering the user.
+- Alerta: typically high signal, if there's unnecessary/unrelated noise, continue to monitor but assume it's your duty to fix noise unless you can make a strong case to flag to the user to fix separately. If it's a small fixup, even if unrelated, just tack on the fix instead of bothering the user.
 
 House rules:
-- Do not use CLI commands as a second control plane. Rely on Flux to converge the cluster on merged commits and clean up stale resources using write credentials through the platform Keycloak instance for cluster administration.
+- Do not use CLI commands as a second control plane. Rely on Flux to converge the cluster on merged commits and clean up stale resources using write credentials through the platform Keycloak instance for cluster administration. If breakglass access is required you may run `aspect infra auth --platform-agent`
 </development_loop>
 
 Constraints:
-- Database backups target off-cluster Cloudflare R2 through Cozystack's platform backup machinery (path pending; no in-cluster object storage exists to back up to). Do not add Guardian-specific backup strategies, backup credential Secrets, or checks.
-- Traces are the only admissable proof -- ClickHouse (when stood up), Victoria Metrics, Victoria Logs. Collect traces/spans and relevant log lines to support your thesis that your task is complete to satisfaction. Test services under heavy load via k6 to surface subtle bugs.
 
 Service architecture:
 
