@@ -1,0 +1,8 @@
+filegroup(
+    name = "manifests",
+    srcs = [
+        "kustomization.yaml",
+        "//src/infrastructure/deployments/company/load/base:manifests",
+    ],
+    visibility = ["//visibility:public"],
+)

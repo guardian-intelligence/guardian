@@ -10,7 +10,7 @@ filegroup(
         "loadtester.yaml",
         "networkpolicy.yaml",
         "http-latency-canary.yaml",
-        "//src/infrastructure/deployments/company/load:manifests",
+        "//src/infrastructure/deployments/company/load/beta:manifests",
     ],
     visibility = ["//visibility:public"],
 )
