@@ -1,0 +1,49 @@
+# LogsQL rule evaluator over VictoriaLogs. Why a dedicated VMAlert with
+# static rule files instead of VMRule CRs: vmalert-shortterm selects ALL
+# VMRules cluster-wide (selectAllByDefault) and evaluates them against its
+# Prometheus datasource — a `type: vlogs` group there would error on every
+# evaluation (probed live 2026-07-07). This instance points at VictoriaLogs
+# and owns exactly the rule ConfigMaps mounted below (one per concern:
+# audit-alerts.yaml, trust-alerts.yaml); the no-match ruleSelector keeps the
+# operator from also injecting every VMRule.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMAlert
+metadata:
+  name: vmalert-vlogs
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: vmalert-vlogs
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  replicaCount: 1
+  image:
+    repository: docker.io/victoriametrics/vmalert
+    # Digest-pinned + explicit registry (repo image-lock gate); matches the live
+    # vmalert-shortterm image.
+    tag: v1.136.0@sha256:e756ea8839f295b4e789a739c3ac80d70404e11b918973506a6182aacca2b11e
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+  evaluationInterval: 60s
+  datasource:
+    url: http://vlselect-generic.tenant-root.svc:9471
+  notifiers:
+    - url: http://vmalertmanager-alertmanager.tenant-root.svc:9093
+  # Own exactly the mounted rule files; the never-matching selector keeps the
+  # operator from injecting every VMRule in the cluster (shortterm already
+  # evaluates those).
+  selectAllByDefault: false
+  ruleSelector:
+    matchLabels:
+      guardian.dev/rule-type: vlogs-none
+  configMaps:
+    - guardian-audit-vlogs-rules
+    - guardian-trust-vlogs-rules
+  rulePath:
+    - /etc/vm/configs/guardian-audit-vlogs-rules/*.yaml
+    - /etc/vm/configs/guardian-trust-vlogs-rules/*.yaml

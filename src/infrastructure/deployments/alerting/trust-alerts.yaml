@@ -1,0 +1,52 @@
+# Cluster-wide trust-chain canary, fed by container logs. Any pod that logs
+# x509 "certificate signed by unknown authority" for 10 sustained minutes is
+# holding a dead CA — the classic case is a pod that predates a CA rotation
+# and cached the projected bundle at startup (client-go never re-reads it).
+# These pods are Running-and-Ready with silently dead API watches: readiness
+# probes cannot see this class, logs are the only signal. Proven live
+# 2026-07-07: the post-rotation sweep found ~14 such pods, including a
+# CoreDNS replica serving a frozen DNS snapshot and a root-ingress replica
+# routing prod traffic to dead upstreams.
+#
+# The 10m `for:` filters the benign burst a pod emits while the apiserver
+# itself restarts; a genuinely stale pod retries its watch every few seconds
+# and never goes quiet. Fix is always the same: DELETE the pod (container
+# restart re-reads the same stale projection). Empty namespace/pod labels
+# mean the stream lacks k8s metadata — attribute by reading _msg via the
+# acceptance query in runbooks/cert-rotation.md.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: guardian-trust-vlogs-rules
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: vmalert-vlogs
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+data:
+  trust.yaml: |
+    groups:
+      - name: guardian-trust-chain
+        type: vlogs
+        interval: 60s
+        rules:
+          - alert: X509TrustFailure
+            expr: |
+              log_source:container_log "certificate signed by unknown authority"
+              | stats by (kubernetes_namespace_name, kubernetes_pod_name) count() as hits
+            for: 10m
+            keep_firing_for: 15m
+            labels:
+              severity: critical
+              guardian_component: trust
+            annotations:
+              summary: 'stale trust chain: {{ $labels.kubernetes_namespace_name }}/{{ $labels.kubernetes_pod_name }}'
+              description: >-
+                {{ $labels.kubernetes_namespace_name }}/{{ $labels.kubernetes_pod_name }}
+                has logged x509 "certificate signed by unknown authority"
+                ({{ $labels.hits }}/min) for 10+ minutes: it is verifying the
+                apiserver against a dead CA (usually a pod predating a CA
+                rotation). Delete the pod — a container restart re-reads the
+                same stale projection and stays broken. Empty labels = a log
+                stream without k8s metadata; attribute via the acceptance
+                query in runbooks/cert-rotation.md.
