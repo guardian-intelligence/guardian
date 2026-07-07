@@ -11,3 +11,4 @@ kubeconfig
 # facts such as disk serials, public endpoints, and VLAN addresses. Keep them
 # tracked so a clean checkout can exercise the management-cluster bootstrap path
 # without local inventory state.
+breakglass.log
