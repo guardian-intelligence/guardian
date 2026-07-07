@@ -11,3 +11,17 @@ resources:
   - networkpolicy.yaml
   - login-canary.yaml
   - observability.yaml
+generatorOptions:
+  disableNameSuffixHash: true
+  labels:
+    app.kubernetes.io/name: keycloak-login-canary
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+  annotations:
+    # k6 JS template literals use ${...}; Flux envsubst must not touch them.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+configMapGenerator:
+  - name: keycloak-login-canary
+    namespace: tenant-guardian-prod
+    files:
+      - login-canary.js=../login-canary/login-canary.js
