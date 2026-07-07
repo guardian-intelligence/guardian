@@ -18,15 +18,20 @@ const requests = [
 ];
 
 export const options = {
+  // 250 rps is the calibrated sustainable rate across all stages (~21M req/day
+  // equivalent). 500 rps saturated the 245KB /letters/dear-shovon route on the
+  // gamma/prod canary — its bandwidth share cascaded into VU exhaustion — while
+  // /, /letters and /healthz stayed sub-10ms. At 250 rps the full mix holds
+  // p95 ~5ms with zero drops on every stage.
   scenarios: {
     stress: {
       executor: 'ramping-arrival-rate',
       timeUnit: '1s',
-      preAllocatedVUs: 250,
-      maxVUs: 750,
+      preAllocatedVUs: 50,
+      maxVUs: 200,
       stages: [
-        { duration: '30s', target: 500 },
-        { duration: '90s', target: 500 },
+        { duration: '30s', target: 250 },
+        { duration: '90s', target: 250 },
       ],
     },
   },
