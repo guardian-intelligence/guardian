@@ -149,6 +149,31 @@ the checkout and byte-compare, then verify the haul against it (blob
 digests are checked by hauler at load; the conformance tests pin the
 manifest side).
 
+## Admission backstop (ValidatingAdmissionPolicy)
+
+Git-side enforcement covers what the repo renders; the in-cluster backstop
+covers what actually reaches the apiserver. `guardian-image-provenance`
+(base/app-patches/image-provenance-admission.yaml) requires every container
+image in the rendered workload namespaces (tenant-guardian*,
+guardian-analytics, verself-runner) to be digest-pinned and to start with
+an allowlisted registry prefix (param ConfigMap
+`tenant-guardian/guardian-image-registry-allowlist`; extending it is a
+supply-chain decision made in its own reviewed PR). It matches workload
+templates as well as Pods so a violation fails the Flux apply synchronously
+— the CEL message lands verbatim in the Kustomization status — rather than
+admitting cleanly and failing later in ReplicaSet events. VAP is in-process
+apiserver CEL: no webhook, no availability dependency in the DR path.
+
+Current mode is `Warn, Audit`, not `Deny`: Cozystack's managed-app
+machinery spawns tag-pinned CNPG images (`cloudnative-pg`, `postgresql`) in
+the stage tenants — real, reviewed workloads this policy cannot distinguish
+from drift until the declared lock is projected into an admission param
+(the inventory-membership policy). The flip to Deny is gated on that
+landing. Note the apiserver exposes no per-policy VAP metrics on this
+cluster (verified 1.34.3), so Audit-mode violations are not alertable;
+enforcement visibility comes from Deny-mode Flux failures plus a periodic
+dry-run denial canary once Deny is live.
+
 ## Decision: no Transit (or any KMS) in the signing path
 
 OpenBao Transit could hold a company-wide signing key (`cosign --key

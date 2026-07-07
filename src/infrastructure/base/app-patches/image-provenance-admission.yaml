@@ -1,0 +1,114 @@
+# Admission backstop for image provenance in the rendered workload
+# namespaces: every container image must be digest-pinned and come from an
+# allowlisted registry prefix. Git-side conformance (the imageset derivation)
+# enforces this for what the repo renders; this policy enforces it against
+# what actually reaches the apiserver — operator-spawned pods, manual
+# creations, compromised controllers.
+#
+# Matching the workload templates (not just Pods) is deliberate: a violating
+# Deployment fails at Flux apply time with this policy's message in the
+# Kustomization status, instead of admitting cleanly and failing minutes
+# later deep in ReplicaSet events.
+#
+# Enforcement is Warn+Audit while the known violation class is routed
+# through the declared-lock param policy: Cozystack's managed-app machinery
+# spawns tag-pinned CNPG images (cloudnative-pg, postgresql) in the stage
+# tenants, which this policy's digest-pin rule flags by design. The flip to
+# Deny is gated on that coverage landing (docs/supply-chain-design.md,
+# "Admission backstop").
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: guardian-image-registry-allowlist
+  namespace: tenant-guardian
+data:
+  # Values are reference PREFIXES; an image passes when it starts with any
+  # of them. Keys are mnemonic only. Additions are supply-chain decisions:
+  # a new prefix admits a new artifact source and belongs in its own
+  # reviewed PR.
+  clickhouse: docker.io/clickhouse/
+  cloudnative-pg: ghcr.io/cloudnative-pg/
+  fluxcd: ghcr.io/fluxcd/
+  grafana: docker.io/grafana/
+  guardian: ghcr.io/guardian-intelligence/
+  keycloak: quay.io/keycloak/
+  openbao: quay.io/openbao/
+  otel: docker.io/otel/
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: guardian-image-provenance
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+      - apiGroups: ["batch"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["jobs", "cronjobs"]
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  variables:
+    - name: podSpec
+      expression: >-
+        request.kind.kind == 'Pod' ? object.spec :
+        (request.kind.kind == 'CronJob' ? object.spec.jobTemplate.spec.template.spec :
+        object.spec.template.spec)
+    - name: images
+      expression: >-
+        variables.podSpec.containers.map(c, c.image) +
+        (has(variables.podSpec.initContainers) ? variables.podSpec.initContainers.map(c, c.image) : []) +
+        (has(variables.podSpec.ephemeralContainers) ? variables.podSpec.ephemeralContainers.map(c, c.image) : [])
+  validations:
+    - expression: >-
+        variables.images.all(image, image.matches('.*@sha256:[a-f0-9]{64}$'))
+      messageExpression: >-
+        'image(s) [' +
+        variables.images.filter(image, !image.matches('.*@sha256:[a-f0-9]{64}$')).join(', ') +
+        '] are not digest-pinned; pin as <repo>[:<tag>]@sha256:<digest> (see AGENTS.md image rules)'
+      reason: Invalid
+    - expression: >-
+        variables.images.all(image,
+          params.data.exists(key, image.startsWith(params.data[key])))
+      messageExpression: >-
+        'image(s) [' +
+        variables.images.filter(image, !params.data.exists(key, image.startsWith(params.data[key]))).join(', ') +
+        '] are not from an allowlisted registry prefix; extend ConfigMap tenant-guardian/guardian-image-registry-allowlist in its own reviewed PR if this source is intended'
+      reason: Invalid
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: guardian-image-provenance
+spec:
+  policyName: guardian-image-provenance
+  paramRef:
+    name: guardian-image-registry-allowlist
+    namespace: tenant-guardian
+    parameterNotFoundAction: Deny
+  # Observe-only until the declared-lock coverage for operator-spawned
+  # images lands; the flip to Deny is a one-line change to this list.
+  validationActions: ["Warn", "Audit"]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values:
+            - tenant-guardian
+            - tenant-guardian-beta
+            - tenant-guardian-gamma
+            - tenant-guardian-prod
+            - tenant-guardian-previews
+            - guardian-analytics
+            - verself-runner
