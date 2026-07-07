@@ -1,0 +1,47 @@
+# Gamma shared product Postgres: one instance per stage, with a database per
+# product inside it; never per-product instances, never cross-stage sharing.
+# The first database is cockpit, the status-cockpit event ledger, consumed via
+# ElectricSQL logical replication for the read path. Credentials for declared
+# users are generated into Secret/postgres-products-credentials.
+#
+# Connection budget (max_connections=100):
+# - electric pool: 20 when the Electric consumer lands
+# - cockpit-api pool: 10
+# - operators/ad-hoc: 5
+# - consumers' pools must sum to <=60; PGConnectionSaturation pages at 70%
+# A product graduates to its own instance only when it demonstrably needs one.
+#
+# Operational stamp (uniform across Guardian Postgres instances): bounded
+# session/statement timeouts, slot WAL retention capped at 4GB so an
+# abandoned logical replication slot invalidates itself instead of filling
+# the volume (paired with the postgres-health slot alerts), and a 5m
+# archive_timeout so idle-database RPO is bounded by WAL archiving rather
+# than the nightly base backup on archiving-enabled instances.
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Postgres
+metadata:
+  name: products
+  namespace: tenant-guardian-gamma
+spec:
+  replicas: 1
+  size: 5Gi
+  storageClass: replicated
+  external: false
+  version: v18
+  resources:
+    cpu: 1
+    memory: 1Gi
+  postgresql:
+    parameters:
+      statement_timeout: 120s
+      idle_in_transaction_session_timeout: 300s
+      lock_timeout: 10s
+      archive_timeout: 300s
+      max_slot_wal_keep_size: 4GB
+  users:
+    cockpit: {}
+  databases:
+    cockpit:
+      roles:
+        admin:
+          - cockpit
