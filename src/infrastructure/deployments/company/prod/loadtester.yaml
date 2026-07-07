@@ -29,8 +29,38 @@ spec:
         runAsNonRoot: true
         runAsUser: 100
         runAsGroup: 101
+        fsGroup: 101
+        fsGroupChangePolicy: OnRootMismatch
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        - name: install-k6
+          image: docker.io/grafana/k6@sha256:68e78d94140704ec4ee0cb7c5cf6cd12a32b7d310a6f98d94931ee9b0b9dc629 # 2.1.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -ec
+          args:
+            - cp "$(command -v k6)" /tools/k6 && chmod 0555 /tools/k6
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+              ephemeral-storage: 128Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+              # The k6 binary is ~67MiB; give the copy headroom over the
+              # k6-tools emptyDir it writes into (sizeLimit 128Mi below).
+              ephemeral-storage: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: k6-tools
+              mountPath: /tools
       containers:
         - name: loadtester
           image: ghcr.io/fluxcd/flagger-loadtester@sha256:f98a35ab7aca0f2efdd8e397b4002e283637f5c9e31e4e2a6c1e97af07c50454 # 0.37.0
@@ -44,6 +74,9 @@ spec:
             - -port=8080
             - -log-level=info
             - -timeout=1h
+          env:
+            - name: K6_PROMETHEUS_RW_SERVER_URL
+              value: http://vminsert-shortterm.tenant-root.svc:8480/insert/0/prometheus/api/v1/write
           livenessProbe:
             httpGet:
               path: /healthz
@@ -58,13 +91,13 @@ spec:
             timeoutSeconds: 3
           resources:
             requests:
-              cpu: 50m
-              memory: 64Mi
+              cpu: 250m
+              memory: 512Mi
               ephemeral-storage: 128Mi
             limits:
-              cpu: "1"
-              memory: 256Mi
-              ephemeral-storage: 512Mi
+              cpu: "2"
+              memory: 1Gi
+              ephemeral-storage: 1Gi
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -74,11 +107,24 @@ spec:
             - name: gate-scripts
               mountPath: /gate
               readOnly: true
+            - name: k6-tools
+              mountPath: /usr/local/bin/k6
+              subPath: k6
+              readOnly: true
       volumes:
         - name: gate-scripts
-          configMap:
-            name: company-site-gate-scripts
+          projected:
             defaultMode: 0555
+            sources:
+              - configMap:
+                  name: company-site-gate-scripts
+              - configMap:
+                  name: company-site-stress-gate
+        - name: k6-tools
+          emptyDir:
+            # Holds the ~67MiB k6 binary the initContainer copies in; 32Mi
+            # evicted the pod on every rollout.
+            sizeLimit: 128Mi
 ---
 apiVersion: v1
 kind: Service

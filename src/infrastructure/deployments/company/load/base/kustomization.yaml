@@ -5,12 +5,10 @@ generatorOptions:
   labels:
     app.kubernetes.io/name: company-site-stress-gate
     app.kubernetes.io/part-of: guardian
-    guardian.dev/stage: beta
   annotations:
     # k6 JS template literals use ${...}; Flux envsubst must not touch them.
     kustomize.toolkit.fluxcd.io/substitute: disabled
 configMapGenerator:
   - name: company-site-stress-gate
-    namespace: tenant-guardian-beta
     files:
       - stress.js
