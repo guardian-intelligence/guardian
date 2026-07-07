@@ -591,3 +591,122 @@ func mustParse(t *testing.T, s string) slackPayload {
 	}
 	return p
 }
+
+// amReplica serves the /api/v2/alerts endpoint of one fake Alertmanager
+// replica: watchdog=true answers with an active Watchdog, false with an
+// empty alert list — the answer of a healthy replica that vmalert's
+// notifier connection is not pinned to.
+func amReplica(t *testing.T, watchdog bool) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v2/alerts" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if watchdog {
+			_, _ = w.Write([]byte(`[{"labels":{"alertname":"Watchdog"},"status":{"state":"active"}}]`))
+			return
+		}
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestWatchdogActiveAnyReplica(t *testing.T) {
+	empty := amReplica(t, false)
+	active := amReplica(t, true)
+	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	t.Cleanup(down.Close)
+
+	s := newTestServer(&fakeSink{})
+	s.client = &http.Client{Timeout: 2 * time.Second}
+	ctx := context.Background()
+
+	cases := []struct {
+		name    string
+		urls    []string
+		want    bool
+		wantErr bool
+	}{
+		{"one replica holds it", []string{empty.URL, active.URL}, true, false},
+		{"no replica holds it", []string{empty.URL, empty.URL}, false, false},
+		{"holder unreachable counts as not seen", []string{empty.URL, down.URL}, false, false},
+		{"all replicas unreachable is an error", []string{down.URL, down.URL}, false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := s.watchdogActiveAny(ctx, tc.urls)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)
+			}
+			if got != tc.want {
+				t.Errorf("watchdogActiveAny = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestReplicaURLs(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name   string
+		url    string
+		lookup func(context.Context, string) ([]string, error)
+		want   []string
+	}{
+		{
+			"headless service expands to every pod",
+			"http://am.tenant-root.svc:9093",
+			func(_ context.Context, host string) ([]string, error) {
+				if host != "am.tenant-root.svc" {
+					return nil, errors.New("unexpected host " + host)
+				}
+				return []string{"10.244.0.183", "10.244.0.185", "fd00::1"}, nil
+			},
+			[]string{"http://10.244.0.183:9093", "http://10.244.0.185:9093", "http://[fd00::1]:9093"},
+		},
+		{
+			"resolution failure falls back to the configured URL",
+			"http://am.tenant-root.svc:9093",
+			func(context.Context, string) ([]string, error) { return nil, errors.New("no such host") },
+			[]string{"http://am.tenant-root.svc:9093"},
+		},
+		{
+			"nil resolver falls back to the configured URL",
+			"http://am.tenant-root.svc:9093",
+			nil,
+			[]string{"http://am.tenant-root.svc:9093"},
+		},
+		{
+			"portless URL keeps addresses bare",
+			"http://am.tenant-root.svc",
+			func(context.Context, string) ([]string, error) {
+				return []string{"10.244.0.183", "fd00::1"}, nil
+			},
+			[]string{"http://10.244.0.183", "http://[fd00::1]"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestServer(&fakeSink{})
+			s.cfg.alertmanagerURL = tc.url
+			s.lookupHost = tc.lookup
+			got, err := s.replicaURLs(ctx)
+			if err != nil {
+				t.Fatalf("replicaURLs: %v", err)
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("replicaURLs = %v, want %v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("url[%d] = %q, want %q", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}

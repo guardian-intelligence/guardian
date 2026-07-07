@@ -2,8 +2,10 @@
 # VMRules -> vmalert -> Alertmanager -> Alerta -> relay -> ntfy. It accepts
 # Slack-webhook-format posts on /slack (what Alerta's slack plugin and the
 # Flagger AlertProvider emit) and forwards them to the ntfy topic; it also
-# polls Alertmanager for the always-firing Watchdog and pages on silence,
-# so a broken scrape/vmalert/alertmanager path pages instead of going quiet.
+# polls every Alertmanager replica for the always-firing Watchdog (gossip
+# does not replicate alert state, so only some replica holds it) and pages
+# on silence, so a broken scrape/vmalert/alertmanager path pages instead of
+# going quiet.
 # Contract: src/services/alerting/relay/main.go.
 #
 # 2 replicas because this is the only pager — a node loss must not silence
