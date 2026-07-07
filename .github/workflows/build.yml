@@ -26,5 +26,8 @@ jobs:
       - name: Bootstrap toolchain
         run: scripts/bootstrap.sh
 
+      - name: Secret scan
+        run: tools/ops/secret-scan tree
+
       - name: Build
         run: bazelisk build --embed_label="$GITHUB_SHA" //:build

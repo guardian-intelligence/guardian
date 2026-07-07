@@ -215,6 +215,13 @@ ensure_bazel_symlink "${bazelisk_path}"
 
 install_pivot aspect "${aspect_version}" "${aspect_sha256}" "${aspect_url}"
 
+# Point git at the tracked hooks so the secret scan (tools/git-hooks/
+# pre-commit -> tools/ops/secret-scan) guards every commit from every
+# checkout that bootstraps. Worktrees inherit the repo-local setting.
+if git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --git-dir >/dev/null 2>&1; then
+  git -C "$(dirname "${BASH_SOURCE[0]}")" config core.hooksPath tools/git-hooks
+fi
+
 if [[ "${mode}" == "path" ]]; then
   printf "export PATH=%q:\"\${PATH}\"\n" "${install_dir}"
 else
