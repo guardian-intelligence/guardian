@@ -156,9 +156,6 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
-          rules:
-            dns:
-              - matchPattern: "*"
     # In-cluster service probes (probe_class=service). Both label values
     # because the apex Service routes to the primary clone once Flagger
     # owns the Deployment.
@@ -179,11 +176,16 @@ spec:
         - ports:
             - port: "8080"
               protocol: TCP
-    # Edge-hairpin probes (probe_class=edge): the public hostnames only.
-    - toFQDNs:
-        - matchName: guardianintelligence.org
-        - matchName: beta.guardianintelligence.org
-        - matchName: gamma.guardianintelligence.org
+    # Edge-hairpin probes (probe_class=edge). world:443 rather than
+    # toFQDNs: FQDN policies need Cilium's L7 DNS proxy (a `rules.dns`
+    # redirect on the kube-dns egress), and in this cluster's chained
+    # kube-ovn+Cilium datapath that redirect black-holes ALL pod DNS
+    # (verified live 2026-07-07: every lookup timed out until the dns
+    # rules were dropped). The exporter probes only the targets its
+    # VMProbes declare, so the world scope is bounded by config the same
+    # way alert-relay's pager egress is (see networkpolicy.yaml).
+    - toEntities:
+        - world
       toPorts:
         - ports:
             - port: "443"
