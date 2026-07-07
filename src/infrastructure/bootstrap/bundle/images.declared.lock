@@ -21,7 +21,9 @@
 #   system images:       talosctl images default (pinned talosctl, matches
 #                        machine.install.image)
 #   operator-spawned:    images run by Cozystack/app operators that no repo
-#                        manifest names (scraped from live pod imageIDs)
+#                        manifest names (additive live audit; the
+#                        image-provenance admission policy flags undeclared
+#                        images in covered namespaces as they appear)
 #   Go-tool-referenced:  drill/bench job images pinned in Go sources, which
 #                        the manifest extractor cannot see
 #
@@ -61,11 +63,13 @@ registry.k8s.io/coredns/coredns:v1.14.2@sha256:e7e6440cfd1e919280958f5b5a6ab2b18
 ghcr.io/cloudnative-pg/postgresql@sha256:6f64c83d80def98ab5b61bf36b1bbecea01dede382eef781dd9d1638b0d840c8
 docker.io/clickhouse/clickhouse-server@sha256:cc8c5bf275148b2de01a31e8fd6b55ba1ba2b0d3d08c23fafcb25b06e3c5dec5
 
-# --- operator-spawned workload images (scraped from live cluster,
-# 2026-07-02, post-cold-boot-drill): what Cozystack/app operators run that
-# no repo manifest names. Entries duplicating the drill/bench section above
-# are omitted (dedup rule); entries a manifest renders are FORBIDDEN here
-# (disjointness invariant). ---
+# --- operator-spawned workload images (baseline: live audit 2026-07-02,
+# post-cold-boot-drill): what Cozystack/app operators run that no repo
+# manifest names. Entries duplicating the drill/bench section above are
+# omitted (dedup rule); entries a manifest renders are FORBIDDEN here
+# (disjointness invariant). Additions arrive via live audit or admission
+# findings; prune only with evidence nothing schedules the image (mind
+# intermittent CronJob images). ---
 cr.fluentbit.io/fluent/fluent-bit@sha256:14da4a52ecdbb9bd9cb7a16ff6b4c7f391a4006cb13f84b5957e4608cc613e2c
 docker-registry3.mariadb.com/mariadb-operator/mariadb-operator@sha256:14eeefa4956770f973ac707b7969f2e99e0af2cf2c34ac63d4c7eb3f7c3cf3eb
 docker.io/alerta/alerta-web@sha256:73bb724fcb091c4ce6f3a92aab76afcd3a2152ed96f95b629eca68351acbf3b0
