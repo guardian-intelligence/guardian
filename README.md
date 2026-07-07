@@ -28,9 +28,10 @@ claim); their passwords live in OpenBao under
 `kv/guardian/guardian-mgmt/tenant-root/platform-admins` and are seeded from
 the custody env by the importer plan.
 
-**Humans (`platform-admin`)** — install [int128/kubelogin](https://github.com/int128/kubelogin)
-(`brew install int128/kubelogin/kubelogin` or `kubectl krew install oidc-login`),
-then add an exec user to your kubeconfig and point a context at it:
+**Humans (`platform-admin`)** — the repo pins [int128/kubelogin](https://github.com/int128/kubelogin)
+as `kubectl-oidc_login` (installed with the rest of the toolchain by
+`aspect tools install`; nothing external to install). Add an exec user to
+your kubeconfig and point a context at it:
 
 ```yaml
 users:

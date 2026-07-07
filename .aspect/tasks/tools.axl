@@ -21,6 +21,7 @@ DEBUG_CLI_SHIMS = [
     ("stern", "@stern_linux_amd64//:stern"),
     ("velero", "@velero_linux_amd64//:velero"),
     ("kubectl-cnpg", "@kubectl_cnpg_linux_amd64//:kubectl-cnpg"),
+    ("kubectl-oidc_login", "@kubelogin_linux_amd64//:kubelogin"),
     ("doggo", "@doggo_linux_amd64//:doggo"),
     ("step", "@step_linux_amd64//:step"),
     ("clickhouse", "@clickhouse_common_static_linux_amd64//:clickhouse"),
