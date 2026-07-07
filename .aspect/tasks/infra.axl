@@ -747,11 +747,32 @@ def _kubeconfig_impl(ctx):
         kubectl = _kubectl_path(ctx)
         if kubectl == None:
             return 1
-        return _install_kubeconfig(ctx, kubectl, kubeconfig)
+        rc = _install_kubeconfig(ctx, kubectl, kubeconfig)
+        # Installed into ~/.kube/config; the staged bundle-path copy (if any)
+        # has served its purpose. Without --install the staged file IS the
+        # deliverable, so leave it.
+        _shred_staged_breakglass_kubeconfig(ctx)
+        return rc
     return 0
 
 CUSTODY_BUNDLE_DIR = "/dev/shm/guardian-custody"
 CUSTODY_MINT_ROOT = "/dev/shm/guardian-talm-mint"
+
+# When breakglass mints from the restored bundle, the kubeconfig is staged here
+# (tmpfs, 0600) so it survives the mint-root shred long enough for the caller to
+# install it; the caller shreds it immediately after. Never a durable artifact.
+CUSTODY_BREAKGLASS_KUBECONFIG = "/dev/shm/guardian-breakglass.kubeconfig"
+
+def _shred_staged_breakglass_kubeconfig(ctx):
+    # No-op unless the bundle path staged one; the tree path returns a workspace
+    # file we must not touch.
+    if ctx.std.fs.exists(CUSTODY_BREAKGLASS_KUBECONFIG):
+        checked_spawn(
+            ctx,
+            "sh",
+            ["-c", "shred -u '" + CUSTODY_BREAKGLASS_KUBECONFIG + "' 2>/dev/null || rm -f '" + CUSTODY_BREAKGLASS_KUBECONFIG + "'"],
+            label = "shred staged breakglass kubeconfig",
+        )
 
 def _assemble_mint_root(ctx, root):
     """Archive-only custody: build a tmpfs Talm root from the tracked chart
@@ -797,8 +818,26 @@ def _mint_custody_kubeconfig(ctx):
         if talosconfig == "":
             talosconfig = root + "/talosconfig"
         out = _mint_custody_kubeconfig_from(ctx, root, talosconfig)
+        if out == None:
+            _cleanup_mint_root(ctx)
+            return None
+
+        # The mint root (and the kubeconfig inside it) is about to be shredded,
+        # but callers still need to consume the kubeconfig. Copy it out to a
+        # stable tmpfs path first; the caller shreds it once installed. Without
+        # this the bundle path returns a path to an already-deleted file and
+        # `use-context admin@guardian-mgmt` fails (regression exposed once the
+        # tree no longer holds secrets.yaml and this branch became the only one).
+        rc = checked_spawn(
+            ctx,
+            "sh",
+            ["-c", "umask 077 && cp '" + out + "' '" + CUSTODY_BREAKGLASS_KUBECONFIG + "'"],
+            label = "stage breakglass kubeconfig off the mint root",
+        )
         _cleanup_mint_root(ctx)
-        return out
+        if rc != 0:
+            return None
+        return CUSTODY_BREAKGLASS_KUBECONFIG
     if talosconfig == "":
         talosconfig = root + "/talosconfig"
 
@@ -1955,6 +1994,10 @@ def _auth_platform_admin(ctx, kubectl, target):
         env = {"KUBECONFIG": minted + ":" + target},
         label = "merge breakglass admin context into " + target,
     )
+    # The merge is the only consumer of the minted kubeconfig; shred the staged
+    # bundle-path copy now (its cert is already in target regardless of what
+    # follows). No-op on the tree path.
+    _shred_staged_breakglass_kubeconfig(ctx)
     if rc != 0:
         return rc
     rc = checked_spawn(ctx, kubectl, ["--kubeconfig", target, "config", "use-context", "admin@guardian-mgmt"], label = "kubeconfig use-context admin@guardian-mgmt")
