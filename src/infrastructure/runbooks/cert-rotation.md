@@ -160,9 +160,31 @@ Needs intervention #1 — the big one (this dominated recovery time):
   the same stale file and keeps failing; restart counts climb without
   progress. This does **not** self-heal on any useful timescale.
 
-  **Fix: recreate the pods** so they get a fresh projection. Proven both ways
-  in the drill — a fresh `run` pod reached `/healthz` immediately, and
-  deleting a crashlooping pod brought it Ready in seconds:
+  **Order matters: restart the CNI/networking stack FIRST.** The worst
+  offenders are *not* crashlooping — they are `Running` with a stale CA, so a
+  symptom-based crashloop sweep skips them, yet they sit on the critical path
+  for every new pod. In the drill the `ContainerCreating` backlog would not
+  drain because `cozy-multus` (and behind it cilium + kube-ovn) failed its
+  per-pod apiserver call
+  (`Multus: ... Get https://10.96.0.1:443/... x509: unknown authority`), so
+  no recreated pod could get networking. Roll the whole networking stack
+  before sweeping anything else — and notReady drops sharply once it lands:
+
+  ```sh
+  kubectl -n cozy-multus  rollout restart ds/cozy-multus
+  kubectl -n cozy-cilium  rollout restart ds/cilium ds/cilium-envoy deploy/cilium-operator
+  kubectl -n cozy-kubeovn rollout restart ds/kube-ovn-cni ds/ovs-ovn \
+    deploy/kube-ovn-controller deploy/ovn-central
+  ```
+
+  (These are hostNetwork pods, so they do not need CNI to restart — they come
+  back on the new CA and unblock everyone else. The PodSecurity
+  `restricted:latest` warnings they print on restart are pre-existing and
+  harmless.)
+
+  **Then recreate the remaining pods** so they get a fresh projection. Proven
+  both ways in the drill — a fresh `run` pod reached `/healthz` immediately,
+  and deleting a crashlooping pod brought it Ready in seconds:
 
   ```sh
   # confirm the mechanism once:
@@ -183,11 +205,44 @@ Needs intervention #1 — the big one (this dominated recovery time):
   done
   ```
 
-  Only `CrashLoopBackOff`/`Error` pods need this — a pod that predates the
-  rotation but never re-dials the apiserver keeps working on its cached CA
-  until it restarts for some other reason, so sweep by symptom, not by age.
-  Measure against a known-healthy apiserver
-  (`kubectl --server https://<healthy-node>:6443`).
+  Crashloop-sweeping only catches pods that *fail loudly*. Measure against a
+  known-healthy apiserver (`kubectl --server https://<healthy-node>:6443`).
+
+  **Then the quiet blockers: every webhook backend and aggregated apiserver.**
+  This was the long tail of the drill. Admission-webhook and
+  aggregated-API pods stay `Running` on a stale CA, but their
+  `SubjectAccessReview`/validation calls to `10.96.0.1:443` fail
+  `x509: unknown authority` — which surfaces indirectly as **Flux
+  Kustomizations stuck `ReconciliationFailed`** on dry-run
+  (`admission webhook "...metallb.io" denied the request: ... x509`, or
+  `ClickHouse/... dry-run failed` behind `cozy-system/cozystack-api`). You
+  chase these one error at a time unless you just roll them all. The blunt,
+  correct instrument is to restart every controller Deployment in the
+  platform namespaces — they are stateless operators, safe to bounce:
+
+  ```sh
+  for ns in $(kubectl get ns -o name | sed 's|namespace/||' | grep '^cozy-') \
+            external-secrets kargo; do
+    kubectl -n "$ns" rollout restart deploy 2>/dev/null
+  done
+  # enumerate webhook backends if you'd rather be surgical:
+  kubectl get validatingwebhookconfigurations mutatingwebhookconfigurations \
+    -o jsonpath='{range .items[*].webhooks[*]}{.clientConfig.service.namespace}/{.clientConfig.service.name}{"\n"}{end}' | sort -u
+  ```
+
+  Then force Flux to re-run the dry-runs (it won't retry fast enough on its
+  own): `kubectl -n cozy-fluxcd annotate kustomization <k> reconcile.fluxcd.io/requestedAt="$(date -u +%FT%TZ)" --overwrite`
+  for each not-`Ready` one. A stateful DB pod stuck in `Error` (its cached
+  token/CA died when the node did) just needs the same delete-to-recreate;
+  its operator brings it back.
+
+The through-line for all of #1: **a Kubernetes CA rotation does not
+gracefully propagate to already-running workloads.** Anything holding a
+projected serviceaccount CA from before the rotation — CNI, webhooks,
+aggregated APIs, controllers, DB pods — keeps using the dead CA until its
+pod is recreated. Plan to restart essentially the whole non-static-pod
+control plane, in dependency order: CNI first, then webhook/aggregated-API
+backends, then the rest.
 
 Needs intervention #2 — a wedged control-plane node (budget for it):
 
@@ -297,4 +352,4 @@ for credential hygiene.
 
 | Date | Type | CA | Result | Convergence | Notes |
 |---|---|---|---|---|---|
-| 2026-07-07 | Drill (planned) | Kubernetes API | PASS (with node reboot) | ~15 min incl. reboot | First rotation. Retired 6+ year-long admin certs seen in audit logs. Gotchas found: VIP unreachable from VPS → `--k8s-endpoint <nodeIP>`; `-n`/`-e` required alongside `--control-plane-nodes`. **ash-earth wedged**: apiserver lost the `:6443` bind race AND its kubelet was locked out (old-CA client cert, missed rotation window) → node NotReady, ~138 pods churned; `talosctl reboot` recovered it (kubelet re-bootstrapped cert, apiserver re-bound). etcd quorum (2/3) held throughout. Reconciled bundle `secrets.yaml`, committed `cluster-ca.crt`, `~/.kube/config`; re-archived custody (snapshot c1836abb). |
+| 2026-07-07 | Drill (planned) | Kubernetes API | PASS (hands-on recovery) | ~40 min to full green | First rotation. Retired 6+ year-long admin certs seen in audit logs. Invocation gotchas: VIP unreachable from VPS → `--k8s-endpoint <nodeIP>`; `-n`/`-e` required alongside `--control-plane-nodes`. Recovery was NOT automatic — the rotation does not propagate to running workloads (stale projected SA CA): had to roll CNI (multus/cilium/kube-ovn) first, recreate ~47 crashlooping pods, then roll all platform-namespace controllers + webhook/aggregated-API backends (metallb webhook & cozystack-api were the Flux dry-run blockers), and re-trigger Flux. Separately, **ash-earth wedged** (apiserver `:6443` bind race + kubelet locked out on old-CA client cert) → `talosctl reboot` recovered it; etcd quorum (2/3) held throughout. Reconciled bundle `secrets.yaml`, committed `cluster-ca.crt`, `~/.kube/config`; re-archived custody (snapshot c1836abb). |
