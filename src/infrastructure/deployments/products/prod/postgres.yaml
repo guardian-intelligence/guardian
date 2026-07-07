@@ -33,6 +33,7 @@ spec:
     memory: 2Gi
   postgresql:
     parameters:
+      max_connections: 100
       statement_timeout: 120s
       idle_in_transaction_session_timeout: 300s
       lock_timeout: 10s
