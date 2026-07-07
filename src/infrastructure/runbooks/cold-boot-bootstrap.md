@@ -473,6 +473,24 @@ deleted mid-ingest lost zero acknowledged rows). Cold-boot notes:
 
 ## Why this runbook exists
 
+## Data restore (the platform converging is not the end)
+
+Everything above yields a healthy cluster with EMPTY databases. Disaster
+recovery is finished only when the stateful stores are back from R2:
+
+1. `backup-audit.md` is the entrypoint: freshness checks against the
+   `guardian-backups` bucket, then the restore drills. Its siblings carry
+   the mechanics — `postgres-backup-restore.md` (CNPG/barman PITR for
+   `tenant-root/guardian` and `tenant-guardian-prod/keycloak`) and
+   `analytics-clickhouse.md` (clickhouse-backup, plus the chart bugs that
+   bite during restore).
+2. Post-restore re-relays: the analytics ingest password must be relayed
+   again after any guardian-analytics re-seed (`analytics-clickhouse.md`),
+   and Keycloak realm state rides in its Postgres — verify logins after the
+   PITR, not just pod health.
+3. Declare recovery complete only when `aspect infra converged` passes AND
+   a query returns real pre-disaster data from each restored store.
+
 The 2026-07-01 drill rebuilt the cluster from Git + custody alone and caught
 eight classes of latent state that only a cold boot exposes: a Git-pinned
 image Harbor had garbage-collected, an all-nodes register-with-taints
