@@ -26,10 +26,8 @@ spec:
     metadata:
       annotations:
         # Bump to force a Flagger canary re-analysis (the pod-template hash
-        # change is what Flagger watches). Used here to exercise the k6 stress
-        # gate through Flagger's own analysis and clear the stale Failed canary
-        # left by the resolved loadtester name-collision.
-        guardian.dev/rollout-nonce: "1"
+        # change is what Flagger watches).
+        guardian.dev/rollout-nonce: "2"
       labels:
         app.kubernetes.io/name: company-site
         app.kubernetes.io/part-of: guardian
