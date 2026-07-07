@@ -36,8 +36,7 @@ const (
 	// target. /dev/shm keeps plaintext out of any disk-backed filesystem.
 	defaultBundleDir = "/dev/shm/guardian-custody"
 
-	legacyEnvName = "DELETE_ME.env"
-	envName       = "custody.env"
+	envName = "custody.env"
 
 	staleWarnAge = 30 * 24 * time.Hour
 	minPassword  = 12
@@ -295,16 +294,7 @@ func resolveFromLegacy(opts *options) (*sources, error) {
 		case strings.HasPrefix(m.bundlePath, "talm/"):
 			return filepath.Join(opts.talmRoot, base), true
 		case m.bundlePath == envName:
-			p := filepath.Join(opts.custodyDir, envName)
-			if _, err := os.Stat(p); err == nil {
-				return p, true
-			}
-			legacy := filepath.Join(opts.custodyDir, legacyEnvName)
-			if _, err := os.Stat(legacy); err == nil {
-				fmt.Fprintf(opts.stderr, "WARN: using legacy %s; it is stored in the bundle as %s — rename the live file too\n", legacyEnvName, envName)
-				return legacy, true
-			}
-			return p, true
+			return filepath.Join(opts.custodyDir, envName), true
 		case m.bundlePath == "openbao/metadata.json":
 			p, err := findSealSibling(opts.custodyDir, "metadata.json")
 			if err != nil {
@@ -633,11 +623,9 @@ func plaintextResidue(opts *options) []string {
 			}
 		}
 	}
-	for _, name := range []string{envName, legacyEnvName} {
-		p := filepath.Join(opts.custodyDir, name)
-		if _, err := os.Stat(p); err == nil {
-			out = append(out, p)
-		}
+	p := filepath.Join(opts.custodyDir, envName)
+	if _, err := os.Stat(p); err == nil {
+		out = append(out, p)
 	}
 	return out
 }

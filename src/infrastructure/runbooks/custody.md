@@ -23,7 +23,7 @@ bundle that would be trusted and useless is worse than none.
 | `talm/talosconfig` | yes | Talos API client credentials |
 | `openbao/unseal-<sha256>.key` | yes | OpenBao static-seal key; content hash must match the filename fingerprint |
 | `openbao/metadata.json` | yes | seal-key metadata |
-| `custody.env` | yes | operator env keys (importer source of truth; formerly `DELETE_ME.env`) |
+| `custody.env` | yes | operator env keys (importer source of truth) |
 | `keys/*`, `latitude.token` | no | provider keys — re-issuable through consoles, but their presence sets DR speed |
 
 Not yet in the manifest: OpenBao `transit/backup` keyring exports — none
