@@ -83,7 +83,8 @@ spec:
   replicaCount: 1
   image:
     repository: victoriametrics/vmalert
-    tag: v1.136.0
+    # Digest-pinned (repo image-lock gate); matches the live vmalert-shortterm image.
+    tag: v1.136.0@sha256:e756ea8839f295b4e789a739c3ac80d70404e11b918973506a6182aacca2b11e
   resources:
     requests:
       cpu: 20m
