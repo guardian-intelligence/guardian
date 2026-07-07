@@ -8,3 +8,4 @@ ghcr.io/guardian-intelligence/
 quay.io/keycloak/
 quay.io/openbao/
 quay.io/prometheus/
+docker.io/electricsql/
