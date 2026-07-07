@@ -46,11 +46,13 @@ spec:
             requests:
               cpu: 25m
               memory: 32Mi
-              ephemeral-storage: 64Mi
+              ephemeral-storage: 128Mi
             limits:
               cpu: 250m
               memory: 128Mi
-              ephemeral-storage: 128Mi
+              # The k6 binary is ~67MiB; give the copy headroom over the
+              # k6-tools emptyDir it writes into (sizeLimit 128Mi below).
+              ephemeral-storage: 256Mi
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -120,7 +122,9 @@ spec:
                   name: company-site-stress-gate
         - name: k6-tools
           emptyDir:
-            sizeLimit: 32Mi
+            # Holds the ~67MiB k6 binary the initContainer copies in; 32Mi
+            # evicted the pod on every rollout.
+            sizeLimit: 128Mi
 ---
 apiVersion: v1
 kind: Service
