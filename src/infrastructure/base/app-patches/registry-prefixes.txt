@@ -1,0 +1,8 @@
+docker.io/clickhouse/
+docker.io/grafana/
+docker.io/otel/
+ghcr.io/cloudnative-pg/
+ghcr.io/fluxcd/
+ghcr.io/guardian-intelligence/
+quay.io/keycloak/
+quay.io/openbao/

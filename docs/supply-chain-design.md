@@ -164,15 +164,21 @@ templates as well as Pods so a violation fails the Flux apply synchronously
 admitting cleanly and failing later in ReplicaSet events. VAP is in-process
 apiserver CEL: no webhook, no availability dependency in the DR path.
 
-Current mode is `Warn, Audit`, not `Deny`: Cozystack's managed-app
-machinery spawns tag-pinned CNPG images (`cloudnative-pg`, `postgresql`) in
-the stage tenants — real, reviewed workloads this policy cannot distinguish
-from drift until the declared lock is projected into an admission param
-(the inventory-membership policy). The flip to Deny is gated on that
-landing. Note the apiserver exposes no per-policy VAP metrics on this
-cluster (verified 1.34.3), so Audit-mode violations are not alertable;
-enforcement visibility comes from Deny-mode Flux failures plus a periodic
-dry-run denial canary once Deny is live.
+The declared lock is projected into the policy's param ConfigMap
+(kustomize `configMapGenerator` over `images.declared.lock` — the file in
+git IS the param), so operator-spawned images that reach admission as tag
+refs pass by exact declared entry (tag+digest form, e.g. the CNPG images
+Cozystack's managed-app machinery spawns in the stage tenants). Everything
+else must be digest-pinned from an allowlisted prefix. Admitting a new
+operator image is therefore the same reviewed act as any dependency
+change: a one-line declared-lock PR.
+
+Current mode is `Warn, Audit`, not `Deny`: the flip is a one-line
+validationActions change gated on a clean soak window that includes at
+least one Kargo promotion. Note the apiserver exposes no per-policy VAP
+metrics on this cluster (verified 1.34.3), so Audit-mode violations are
+not alertable; enforcement visibility comes from Deny-mode Flux failures
+plus a periodic dry-run denial canary once Deny is live.
 
 ## Decision: no Transit (or any KMS) in the signing path
 
