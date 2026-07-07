@@ -26,8 +26,12 @@ User must pay $10/mo to enable CloudFlare LB with 3 endpoints (1 for each ingres
   first line of each `src/infrastructure/talm/nodes/*.yaml` — that is the
   source of truth and it changes on reimage. Port 50000 is open on those
   IPs from the operator workstation.
-- The kube API is reachable via the kubeconfig kept off-repo at
-  `~/guardian-custody/kubeconfig-public` on the operator workstation.
+- The kube API is reachable via the default `~/.kube/config`, whose only
+  standing identity is the `platform-agent` OIDC context (set up with
+  `aspect infra auth --platform-agent`). There is no standing admin
+  kubeconfig anywhere on disk; breakglass x509 is minted on demand with
+  `aspect infra auth --platform-admin --reason "<why>"` and dies with its
+  short cert lifetime.
 - Machine config applies are per-node, base plus overlay:
   `talm apply -f nodes/<node>.yaml -f nodes/<node>-overlay.yaml`.
 
