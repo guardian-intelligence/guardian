@@ -44,8 +44,11 @@ All actions run as `aspect infra custody --action <name>`.
 - **create** — resolves the manifest (from the open tmpfs bundle if one
   exists, else from the legacy plaintext locations during
   migration/genesis), stages on tmpfs, backs up into the repository
-  (`~/.guardian/custody/repo`), runs `restic check`, shreds the staging, and
-  prints the replication instructions. Run it after **every custody event**:
+  (`~/.guardian/custody/repo`), runs `restic check`, then closes the loop
+  itself: restores the fresh snapshot to a scratch dir, byte-compares every
+  member against its source, and only on a proven round trip shreds the
+  plaintext sources (including the talm root's minted kubeconfig and
+  `.encrypted` residue). A failed proof leaves every source untouched. Run it after **every custody event**:
   seal-key rotation, operator-key change, importer env change, CA rotation,
   new provider key.
 - **verify** — repository integrity plus a fail-closed check that the latest

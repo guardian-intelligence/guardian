@@ -11,6 +11,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -217,7 +218,84 @@ func cmdCreate(opts *options) error {
 	if err := opts.run(opts, env, "check"); err != nil {
 		return fmt.Errorf("restic check after backup: %w", err)
 	}
+
+	// The lifecycle closes itself: prove the round trip (restore the fresh
+	// snapshot to a scratch dir and byte-compare every member against its
+	// source), and only then shred the plaintext sources. Deletion is gated
+	// on a demonstrated restore, never on faith in the writer.
+	if stagedFresh {
+		if err := proveRoundTrip(opts, env, staged); err != nil {
+			return fmt.Errorf("round-trip proof failed — plaintext sources left untouched: %w", err)
+		}
+		if err := shredSources(opts, src); err != nil {
+			return err
+		}
+		fmt.Fprintf(opts.stdout, "round trip proven; plaintext sources shredded — the repository is now the only at-rest form\n")
+	}
 	printInstructions(opts)
+	return nil
+}
+
+func proveRoundTrip(opts *options, env []string, staged string) error {
+	snap, err := latestSnapshot(opts)
+	if err != nil {
+		return err
+	}
+	proof := opts.bundleDir + ".proof"
+	if err := requireTmpfs(proof); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(proof); err != nil {
+		return err
+	}
+	defer func() {
+		if err := shredDir(proof); err != nil {
+			fmt.Fprintf(opts.stderr, "WARN: could not shred proof dir %s: %v — wipe it by hand\n", proof, err)
+		}
+	}()
+	if err := opts.run(opts, env, "restore", snap.ID, "--target", proof); err != nil {
+		return fmt.Errorf("restic restore to proof dir: %w", err)
+	}
+	// restore --target re-roots the snapshot's absolute paths under proof.
+	return filepath.WalkDir(staged, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		want, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		got, err := os.ReadFile(filepath.Join(proof, path))
+		if err != nil {
+			return fmt.Errorf("restored copy missing for %s: %w", path, err)
+		}
+		if !bytes.Equal(want, got) {
+			return fmt.Errorf("restored bytes differ from source for %s", path)
+		}
+		return nil
+	})
+}
+
+// shredSources removes the resolved plaintext sources plus the talm root's
+// derived residue (minted kubeconfig, .encrypted variants) after the round
+// trip is proven. Copies the resolver never saw (stray checkouts) are the
+// scan layer's job, not this function's.
+func shredSources(opts *options, src *sources) error {
+	for _, r := range src.resolved {
+		if err := shredFile(r.source); err != nil {
+			return err
+		}
+	}
+	if opts.talmRoot != "" {
+		for _, name := range []string{"kubeconfig", "secrets.encrypted.yaml", "talosconfig.encrypted"} {
+			p := filepath.Join(opts.talmRoot, name)
+			if _, err := os.Stat(p); err == nil {
+				if err := shredFile(p); err != nil {
+					return err
+				}
+			}
+		}
+	}
 	return nil
 }
 
@@ -690,32 +768,36 @@ func shredDir(dir string) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		f, err := os.OpenFile(path, os.O_WRONLY, 0)
-		if err != nil {
-			return err
-		}
-		zero := make([]byte, info.Size())
-		if _, err := f.WriteAt(zero, 0); err != nil {
-			f.Close()
-			return err
-		}
-		if err := f.Sync(); err != nil {
-			f.Close()
-			return err
-		}
-		if err := f.Close(); err != nil {
-			return err
-		}
-		return os.Remove(path)
+		return shredFile(path)
 	})
 	if err != nil {
 		return fmt.Errorf("shred %s: %w", dir, err)
 	}
 	return os.RemoveAll(dir)
+}
+
+func shredFile(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	zero := make([]byte, info.Size())
+	if _, err := f.WriteAt(zero, 0); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Remove(path)
 }
 
 // --- instructions ---
