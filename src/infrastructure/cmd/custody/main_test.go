@@ -521,6 +521,200 @@ func TestShredDirOverwritesBeforeUnlink(t *testing.T) {
 	}
 }
 
+func TestEnvSetPure(t *testing.T) {
+	base := []byte("# operator env\ncloudflare_r2_api_token=old\n\nlatitude_token=abc\n")
+
+	got, err := envSet(base, "ntfy_token", "tok-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "# operator env\ncloudflare_r2_api_token=old\n\nlatitude_token=abc\nntfy_token=tok-1\n"; string(got) != want {
+		t.Errorf("new key must append, preserving everything else:\nwant %q\ngot  %q", want, got)
+	}
+
+	got, err = envSet(base, "cloudflare_r2_api_token", "new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "# operator env\ncloudflare_r2_api_token=new\n\nlatitude_token=abc\n"; string(got) != want {
+		t.Errorf("replaced key must keep its position, comments, and blanks:\nwant %q\ngot  %q", want, got)
+	}
+
+	// Values holding '=' and spaces must survive a set→unset-of-others read.
+	got, err = envSet(base, "pg_uri", "postgres://u:p=x@h/db?a=b c d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "\npg_uri=postgres://u:p=x@h/db?a=b c d\n") {
+		t.Errorf("value with '=' and spaces must round-trip, got %q", got)
+	}
+
+	if _, err := envSet(base, "ntfy_token", ""); err == nil || !strings.Contains(err.Error(), "refusing to set empty value") {
+		t.Fatalf("want empty-value refusal, got %v", err)
+	}
+	if _, err := envSet(base, "Bad-Key", "v"); err == nil {
+		t.Fatal("invalid key name must be rejected")
+	}
+	if _, err := envSet(base, "ntfy_token", "a\nb"); err == nil {
+		t.Fatal("multi-line value must be rejected")
+	}
+	if got, err := envSet(nil, "first_key", "v"); err != nil || string(got) != "first_key=v\n" {
+		t.Fatalf("set into empty content must not grow stray blank lines, got %q, %v", got, err)
+	}
+}
+
+func TestEnvUnsetPure(t *testing.T) {
+	base := []byte("# operator env\ncloudflare_r2_api_token=old\n\nlatitude_token=abc\n")
+
+	got, err := envUnset(base, "cloudflare_r2_api_token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "# operator env\n\nlatitude_token=abc\n"; string(got) != want {
+		t.Errorf("unset must remove only the key's line:\nwant %q\ngot  %q", want, got)
+	}
+
+	if _, err := envUnset(base, "absent_key"); err == nil || !strings.Contains(err.Error(), "not present") {
+		t.Fatalf("want missing-key error, got %v", err)
+	}
+	if _, err := envUnset(base, "Bad-Key"); err == nil {
+		t.Fatal("invalid key name must be rejected")
+	}
+}
+
+// withEnvEditMaterializer wires the fake so the initial "restore --target /"
+// lands a full bundle at bundleDir with the given custody.env, the proof
+// restore re-roots the bundle under its target, and the env content restic
+// saw at backup time is captured for assertions.
+func withEnvEditMaterializer(t *testing.T, opts *options, fake *fakeRestic, envContent string, backedUp *string) {
+	t.Helper()
+	if fake.outputs == nil {
+		fake.outputs = map[string][]byte{}
+	}
+	fake.outputs["snapshots"] = []byte(`[{"id":"abcdef1234567890","time":"2026-07-07T00:00:00Z","paths":["` + opts.bundleDir + `"]}]`)
+	realRun := fake.run
+	opts.run = func(o *options, env []string, args ...string) error {
+		switch args[0] {
+		case "restore":
+			target := args[len(args)-1]
+			if target == "/" {
+				for _, m := range manifest {
+					if m.required {
+						writeFile(t, filepath.Join(o.bundleDir, m.bundlePath), "x")
+					}
+				}
+				writeUnsealKey(t, filepath.Join(o.bundleDir, "openbao"))
+				writeFile(t, filepath.Join(o.bundleDir, envName), envContent)
+			} else {
+				err := filepath.WalkDir(o.bundleDir, func(path string, d fs.DirEntry, werr error) error {
+					if werr != nil || d.IsDir() {
+						return werr
+					}
+					b, rerr := os.ReadFile(path)
+					if rerr != nil {
+						return rerr
+					}
+					dst := filepath.Join(target, path)
+					if merr := os.MkdirAll(filepath.Dir(dst), 0o700); merr != nil {
+						return merr
+					}
+					return os.WriteFile(dst, b, 0o600)
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+		case "backup":
+			b, err := os.ReadFile(filepath.Join(o.bundleDir, envName))
+			if err != nil {
+				t.Fatal(err)
+			}
+			*backedUp = string(b)
+		}
+		return realRun(o, env, args...)
+	}
+}
+
+func TestEnvSetEndToEnd(t *testing.T) {
+	fake := &fakeRestic{}
+	opts := testOptions(t, fake)
+	opts.bundleDir = filepath.Join("/dev/shm", fmt.Sprintf("guardian-custody-test-envset-%d", os.Getpid()))
+	defer os.RemoveAll(opts.bundleDir)
+	opts.yes = true
+	opts.envKey = "ntfy_token"
+	opts.stdin = strings.NewReader("tok-secret-value\n")
+	writeFile(t, filepath.Join(opts.repo, "config"), "restic config")
+	var backedUp string
+	withEnvEditMaterializer(t, opts, fake, "# ops\nlatitude_token=abc\n", &backedUp)
+
+	if err := cmdEnvSet(opts); err != nil {
+		t.Fatal(err)
+	}
+	if want := "# ops\nlatitude_token=abc\nntfy_token=tok-secret-value\n"; backedUp != want {
+		t.Errorf("snapshot must capture the edited env:\nwant %q\ngot  %q", want, backedUp)
+	}
+	if _, err := os.Stat(opts.bundleDir); !os.IsNotExist(err) {
+		t.Error("bundle must be wiped after env-set")
+	}
+	out := opts.stdout.(*bytes.Buffer).String()
+	if !strings.Contains(out, "env-set ntfy_token: new snapshot abcdef12") {
+		t.Errorf("want summary line naming the key and snapshot, got:\n%s", out)
+	}
+	if !strings.Contains(out, "TWO offline media") {
+		t.Error("env-set must re-print the offline-copy instructions")
+	}
+	if strings.Contains(out, "tok-secret-value") || strings.Contains(opts.stderr.(*bytes.Buffer).String(), "tok-secret-value") {
+		t.Error("the value must never be printed")
+	}
+}
+
+func TestEnvUnsetMissingKeyStillWipes(t *testing.T) {
+	fake := &fakeRestic{}
+	opts := testOptions(t, fake)
+	opts.bundleDir = filepath.Join("/dev/shm", fmt.Sprintf("guardian-custody-test-envunset-%d", os.Getpid()))
+	defer os.RemoveAll(opts.bundleDir)
+	opts.yes = true
+	opts.envKey = "absent_key"
+	var backedUp string
+	withEnvEditMaterializer(t, opts, fake, "latitude_token=abc\n", &backedUp)
+
+	err := cmdEnvUnset(opts)
+	if err == nil || !strings.Contains(err.Error(), "not present") {
+		t.Fatalf("want missing-key error, got %v", err)
+	}
+	if _, err := os.Stat(opts.bundleDir); !os.IsNotExist(err) {
+		t.Error("a failed edit must still wipe the restored plaintext")
+	}
+	for _, c := range fake.calls {
+		if c.args[0] == "backup" {
+			t.Error("no snapshot must be taken for a failed edit")
+		}
+	}
+}
+
+func TestEnvEditRejectsBadInputBeforeRestore(t *testing.T) {
+	fake := &fakeRestic{}
+	opts := testOptions(t, fake)
+	for _, key := range []string{"", "Bad-Key", "UPPER", "has space"} {
+		opts.envKey = key
+		opts.stdin = strings.NewReader("value\n")
+		if err := cmdEnvSet(opts); err == nil {
+			t.Errorf("env-set must reject key %q", key)
+		}
+		if err := cmdEnvUnset(opts); err == nil {
+			t.Errorf("env-unset must reject key %q", key)
+		}
+	}
+	opts.envKey = "good_key"
+	opts.stdin = strings.NewReader("\n")
+	if err := cmdEnvSet(opts); err == nil || !strings.Contains(err.Error(), "refusing to set empty value") {
+		t.Errorf("env-set must reject an empty stdin value, got %v", err)
+	}
+	if len(fake.calls) != 0 {
+		t.Errorf("bad input must fail before any restic call, got %+v", fake.calls)
+	}
+}
+
 func TestRealMainRejectsUnknownSubcommand(t *testing.T) {
 	fake := &fakeRestic{}
 	opts := testOptions(t, fake)

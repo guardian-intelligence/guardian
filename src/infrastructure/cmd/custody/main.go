@@ -7,7 +7,9 @@
 // Lifecycle: create (stage + validate fail-closed + backup), verify (repo
 // integrity + latest snapshot carries every required member), restore (to
 // tmpfs), wipe (shred the tmpfs bundle), status (staleness + plaintext
-// residue), key-add (second password for the password-manager recovery flow).
+// residue), key-add (second password for the password-manager recovery flow),
+// env-set/env-unset (atomic single-key custody.env edit: restore, edit,
+// snapshot, wipe).
 package main
 
 import (
@@ -43,7 +45,10 @@ const (
 	minPassword  = 12
 )
 
-var unsealKeyRE = regexp.MustCompile(`^unseal-([0-9a-f]{64})\.key$`)
+var (
+	unsealKeyRE = regexp.MustCompile(`^unseal-([0-9a-f]{64})\.key$`)
+	envKeyRE    = regexp.MustCompile(`^[a-z0-9_]+$`)
+)
 
 type member struct {
 	bundlePath string
@@ -77,6 +82,7 @@ type options struct {
 	custodyDir string
 	yes        bool
 	readData   bool
+	envKey     string
 
 	stdin  io.Reader
 	stdout io.Writer
@@ -101,7 +107,7 @@ func main() {
 
 func realMain(opts *options, argv []string) error {
 	if len(argv) == 0 {
-		return errors.New("usage: custody <create|verify|restore|wipe|status|key-add> [flags]")
+		return errors.New("usage: custody <create|verify|restore|wipe|status|key-add|env-set|env-unset> [flags]")
 	}
 	sub, rest := argv[0], argv[1:]
 
@@ -118,6 +124,7 @@ func realMain(opts *options, argv []string) error {
 	fl.StringVar(&opts.custodyDir, "custody-dir", filepath.Join(home, "guardian-custody"), "legacy custody directory")
 	fl.BoolVar(&opts.yes, "yes", false, "skip interactive confirmation")
 	fl.BoolVar(&opts.readData, "read-data", false, "verify: also re-read and hash every pack (slow, run against offline copies)")
+	fl.StringVar(&opts.envKey, "env-key", "", "env-set/env-unset: custody.env key to set (value read from stdin) or remove")
 	if err := fl.Parse(rest); err != nil {
 		return err
 	}
@@ -135,8 +142,12 @@ func realMain(opts *options, argv []string) error {
 		return cmdStatus(opts)
 	case "key-add":
 		return opts.run(opts, nil, "key", "add")
+	case "env-set":
+		return cmdEnvSet(opts)
+	case "env-unset":
+		return cmdEnvUnset(opts)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want create|verify|restore|wipe|status|key-add)", sub)
+		return fmt.Errorf("unknown subcommand %q (want create|verify|restore|wipe|status|key-add|env-set|env-unset)", sub)
 	}
 }
 
@@ -170,6 +181,14 @@ func runResticOutput(opts *options, extraEnv []string, args ...string) ([]byte, 
 // --- create ---
 
 func cmdCreate(opts *options) error {
+	if err := createSnapshot(opts); err != nil {
+		return err
+	}
+	printInstructions(opts)
+	return nil
+}
+
+func createSnapshot(opts *options) error {
 	src, err := resolveSources(opts)
 	if err != nil {
 		return err
@@ -232,7 +251,6 @@ func cmdCreate(opts *options) error {
 		}
 		fmt.Fprintf(opts.stdout, "round trip proven; plaintext sources shredded — the repository is now the only at-rest form\n")
 	}
-	printInstructions(opts)
 	return nil
 }
 
@@ -729,19 +747,27 @@ func plaintextResidue(opts *options) []string {
 // --- restore / wipe ---
 
 func cmdRestore(opts *options) error {
-	if err := requireTmpfs(opts.bundleDir); err != nil {
+	if _, err := restoreLatest(opts); err != nil {
 		return err
 	}
+	fmt.Fprintf(opts.stdout, "wipe it the moment you are done: aspect infra custody --action wipe\n")
+	return nil
+}
+
+func restoreLatest(opts *options) ([]string, error) {
+	if err := requireTmpfs(opts.bundleDir); err != nil {
+		return nil, err
+	}
 	if _, err := os.Stat(opts.bundleDir); err == nil {
-		return fmt.Errorf("%s already exists; wipe it first (`aspect infra custody --action wipe`) so stale and fresh state cannot mix", opts.bundleDir)
+		return nil, fmt.Errorf("%s already exists; wipe it first (`aspect infra custody --action wipe`) so stale and fresh state cannot mix", opts.bundleDir)
 	}
 	env, err := promptRepoPassword(opts)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	snap, err := latestSnapshot(opts, env)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// Snapshots record the fixed tmpfs path, so restoring against / puts
 	// the bundle back exactly where wipe and create expect it. A snapshot
@@ -749,21 +775,20 @@ func cmdRestore(opts *options) error {
 	// refused before plaintext lands anywhere.
 	for _, p := range snap.Paths {
 		if p != opts.bundleDir {
-			return fmt.Errorf("snapshot %s records path %s, not %s; refusing to restore plaintext to an unmanaged location", snap.ID[:8], p, opts.bundleDir)
+			return nil, fmt.Errorf("snapshot %s records path %s, not %s; refusing to restore plaintext to an unmanaged location", snap.ID[:8], p, opts.bundleDir)
 		}
 	}
 	if len(snap.Paths) == 0 {
-		return fmt.Errorf("snapshot %s records no paths; refusing to restore blind", snap.ID[:8])
+		return nil, fmt.Errorf("snapshot %s records no paths; refusing to restore blind", snap.ID[:8])
 	}
 	if err := opts.run(opts, env, "restore", snap.ID, "--target", "/"); err != nil {
-		return fmt.Errorf("restic restore: %w", err)
+		return nil, fmt.Errorf("restic restore: %w", err)
 	}
 	if err := os.Chmod(opts.bundleDir, 0o700); err != nil {
-		return err
+		return nil, err
 	}
 	fmt.Fprintf(opts.stdout, "restored snapshot %s (%s) to %s\n", snap.ID[:8], snap.Time.Format(time.RFC3339), opts.bundleDir)
-	fmt.Fprintf(opts.stdout, "wipe it the moment you are done: aspect infra custody --action wipe\n")
-	return nil
+	return env, nil
 }
 
 func cmdWipe(opts *options) error {
@@ -779,6 +804,152 @@ func cmdWipe(opts *options) error {
 	}
 	fmt.Fprintf(opts.stdout, "wiped %s\n", opts.bundleDir)
 	return nil
+}
+
+// --- env-set / env-unset ---
+
+func cmdEnvSet(opts *options) error {
+	value, err := readEnvValue(opts.stdin)
+	if err != nil {
+		return err
+	}
+	return editBundleEnv(opts, "env-set", func(content []byte) ([]byte, error) {
+		return envSet(content, opts.envKey, value)
+	})
+}
+
+func cmdEnvUnset(opts *options) error {
+	return editBundleEnv(opts, "env-unset", func(content []byte) ([]byte, error) {
+		return envUnset(content, opts.envKey)
+	})
+}
+
+// readEnvValue takes the whole of stdin as the value, trimming exactly one
+// trailing newline so `echo`-piped values round-trip.
+func readEnvValue(r io.Reader) (string, error) {
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return "", err
+	}
+	value := strings.TrimSuffix(string(b), "\n")
+	if value == "" {
+		return "", errors.New("refusing to set empty value")
+	}
+	return value, nil
+}
+
+// editBundleEnv is the atomic single-key custody.env edit: restore the latest
+// snapshot to tmpfs, apply the edit, snapshot the result, prove the round
+// trip, wipe. Once the restore has landed plaintext, the wipe runs on every
+// exit path — a failed edit or backup must not leave the bundle open.
+func editBundleEnv(opts *options, action string, edit func([]byte) ([]byte, error)) error {
+	if !envKeyRE.MatchString(opts.envKey) {
+		return fmt.Errorf("--env-key %q must match %s", opts.envKey, envKeyRE)
+	}
+	env, err := restoreLatest(opts)
+	if err != nil {
+		return err
+	}
+	snap, err := func() (*snapshot, error) {
+		path := filepath.Join(opts.bundleDir, envName)
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		edited, err := edit(content)
+		if err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(path, edited, 0o600); err != nil {
+			return nil, err
+		}
+		if err := createSnapshot(opts); err != nil {
+			return nil, err
+		}
+		// createSnapshot only proves the round trip for bundles it staged
+		// itself; this bundle pre-exists (restored above), so prove the new
+		// snapshot here before the wipe deletes the only plaintext copy of
+		// the edit.
+		if err := proveRoundTrip(opts, env, opts.bundleDir); err != nil {
+			return nil, err
+		}
+		return latestSnapshot(opts, env)
+	}()
+	if wipeErr := cmdWipe(opts); wipeErr != nil {
+		if err == nil {
+			err = wipeErr
+		} else {
+			fmt.Fprintf(opts.stderr, "WARN: wipe after failed %s also failed: %v — run `aspect infra custody --action wipe` by hand\n", action, wipeErr)
+		}
+	}
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(opts.stdout, "%s %s: new snapshot %s\n", action, opts.envKey, snap.ID[:8])
+	printInstructions(opts)
+	return nil
+}
+
+// envSet sets or replaces key's line, leaving every other line — comments and
+// blanks included — byte-for-byte intact: a replaced key keeps its position,
+// a new key is appended.
+func envSet(content []byte, key, value string) ([]byte, error) {
+	if !envKeyRE.MatchString(key) {
+		return nil, fmt.Errorf("env key %q must match %s", key, envKeyRE)
+	}
+	if value == "" {
+		return nil, errors.New("refusing to set empty value")
+	}
+	if strings.Contains(value, "\n") {
+		return nil, fmt.Errorf("refusing to set multi-line value for %s", key)
+	}
+	lines := envLines(content)
+	replaced := false
+	for i, line := range lines {
+		if strings.HasPrefix(line, key+"=") {
+			lines[i] = key + "=" + value
+			replaced = true
+		}
+	}
+	if !replaced {
+		lines = append(lines, key+"="+value)
+	}
+	return joinEnvLines(lines), nil
+}
+
+func envUnset(content []byte, key string) ([]byte, error) {
+	if !envKeyRE.MatchString(key) {
+		return nil, fmt.Errorf("env key %q must match %s", key, envKeyRE)
+	}
+	lines := envLines(content)
+	kept := lines[:0]
+	found := false
+	for _, line := range lines {
+		if strings.HasPrefix(line, key+"=") {
+			found = true
+			continue
+		}
+		kept = append(kept, line)
+	}
+	if !found {
+		return nil, fmt.Errorf("%s not present in %s", key, envName)
+	}
+	return joinEnvLines(kept), nil
+}
+
+func envLines(content []byte) []string {
+	s := strings.TrimSuffix(string(content), "\n")
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, "\n")
+}
+
+func joinEnvLines(lines []string) []byte {
+	if len(lines) == 0 {
+		return []byte{}
+	}
+	return []byte(strings.Join(lines, "\n") + "\n")
 }
 
 // shredDir overwrites every file in place before unlinking. The open must
