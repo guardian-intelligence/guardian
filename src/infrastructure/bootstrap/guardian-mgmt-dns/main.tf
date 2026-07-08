@@ -105,45 +105,6 @@ resource "cloudflare_load_balancer" "guardian_mgmt_public" {
   }
 }
 
-resource "cloudflare_ruleset" "guardian_edge_cache_policy" {
-  zone_id = data.cloudflare_zone.guardianintelligence_org.id
-  name    = "guardian edge cache policy"
-  kind    = "zone"
-  phase   = "http_request_cache_settings"
-
-  rules {
-    ref         = "bypass_api_cache"
-    description = "Never edge-cache /api/ (event beacons, RPCs)"
-    expression  = "(starts_with(http.request.uri.path, \"/api/\"))"
-    action      = "set_cache_settings"
-    enabled     = true
-
-    action_parameters {
-      cache = false
-    }
-  }
-
-  rules {
-    ref         = "electric_shape_cache"
-    description = "Electric shape API: edge-cache per origin Cache-Control (request collapsing for cockpit reads)"
-    expression  = "(http.host in {\"guardianintelligence.org\" \"beta.guardianintelligence.org\" \"gamma.guardianintelligence.org\"}) and starts_with(http.request.uri.path, \"/electric/v1/shape\")"
-    action      = "set_cache_settings"
-    enabled     = true
-
-    action_parameters {
-      cache = true
-
-      edge_ttl {
-        mode = "respect_origin"
-      }
-
-      browser_ttl {
-        mode = "respect_origin"
-      }
-    }
-  }
-}
-
 check "cloudflare_load_balancer_hostnames" {
   assert {
     condition     = length(local.public_edge_hostnames) == 7

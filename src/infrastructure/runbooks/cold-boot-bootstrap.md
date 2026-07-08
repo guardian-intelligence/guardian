@@ -444,11 +444,12 @@ deleted mid-ingest lost zero acknowledged rows). Cold-boot notes:
    `bazelisk run @opentofu_linux_amd64//:tofu_bin -- -chdir=src/infrastructure/bootstrap/guardian-mgmt-dns plan -input=false -var-file=src/infrastructure/bootstrap/backend.tfvars`
    (expect zero infrastructure changes — node IPs are unchanged). DNS records
    themselves are owned by the in-cluster `external-dns` controller, not this
-   root; this plan covers the Cloudflare Load Balancer pool/monitor objects
-   and the zone cache ruleset (the `dns-lb-provisioner` token is zone-scoped
-   to guardianintelligence.org with Load Balancers Read/Write, Cache Settings
-   Read/Write, and Cache Purge), which is why it stays raw OpenTofu rather
-   than an `aspect` subcommand.
+   root; this plan only covers the Cloudflare Load Balancer pool/monitor
+   objects, which is why it stays raw OpenTofu rather than an `aspect`
+   subcommand. Zone edge policy (AOP, the cache ruleset, bot management) is
+   the separate `guardian-mgmt-edge-policy` root, applied with the
+   edge-policy-provisioner token — verify its plan is empty too when that
+   token is at hand.
 2. **Audit the declared inventory against the live cluster**: compare
    running pod imageIDs in the covered namespaces against
    `src/infrastructure/bootstrap/bundle/images.declared.lock` and PR only
