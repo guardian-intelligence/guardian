@@ -1,6 +1,6 @@
-# Verself — Product Document v0.6
+# Postflight — Product Document v0.7
 
-2026-07-05. Source document for the sales training deck. Market and buyer claims are research-verified (July 2026); technical claims are verified against Verself source or measured on our metal. Sections and lines marked ⚙ are internal — they inform the deck but never appear in customer material.
+2026-07-07. Source document for the sales training deck. Market and buyer claims are research-verified (July 2026); technical claims are verified against Postflight source or measured on our metal. Sections and lines marked ⚙ are internal — they inform the deck but never appear in customer material. (v0.7: renamed from Verself to Postflight by Guardian; content otherwise unchanged from v0.6.)
 
 ---
 
@@ -11,7 +11,7 @@
 Differentiation, two claims only:
 
 1. **We are faster than everyone else.** Bare metal, warm capacity, and source + caches present as local NVMe block devices before the VM boots. Every other claim in this document is evidence for this one.
-2. **Agents are first-class users.** Debugging CI is a prompt to an agent. Your engineers never learn a CLI — they type `/verself` and Claude or Codex takes care of the rest.
+2. **Agents are first-class users.** Debugging CI is a prompt to an agent. Your engineers never learn a CLI — they type `/postflight` and Claude or Codex takes care of the rest.
 
 ⚙ Each claim carries an obligation. "Faster than everyone else" is benchmarkable against vendors who publish scoreboards (RunsOn's tables are the industry's neutral eval; Namespace currently tops single-thread) — we win that benchmark and publish in their format, or we soften the claim. The hardware selection (§14.1) gates the headline, not just the rate card. "Agents are first-class users" must be shipped capability (§6), not copy.
 
@@ -33,7 +33,7 @@ Evidence behind the story, for the proof slides:
 
 Early customers aren't buying a runner; they're buying the person operating it. The bio is the warranty, and it maps onto this product with unusual precision:
 
-- **Shovon Hasan — capacity products are the day job.** At AWS, leads development of the consoles and developer tooling for EC2's capacity products — **Capacity Reservations, Spot, and Capacity Blocks for ML** — and builds the developer tooling used across ~25 engineers' surfaces including Bedrock inference (Mantle), Console to Code, Launch Wizard, and Fleet Manager. Deck translation: reserved capacity, spot markets, and metered ML capacity are what he builds at planetary scale; Verself is the same product category, operated at boutique scale with one name on the pager.
+- **Shovon Hasan — capacity products are the day job.** At AWS, leads development of the consoles and developer tooling for EC2's capacity products — **Capacity Reservations, Spot, and Capacity Blocks for ML** — and builds the developer tooling used across ~25 engineers' surfaces including Bedrock inference (Mantle), Console to Code, Launch Wizard, and Fleet Manager. Deck translation: reserved capacity, spot markets, and metered ML capacity are what he builds at planetary scale; Postflight is the same product category, operated at boutique scale with one name on the pager.
 - **Agent-native practitioner, not tourist.** Daily agent-driven development since Cline in May 2025 — roughly twelve hours a day since. The product's user is an agent because the founder has spent over a year living that way; the skill and CLI are designed from use, not from spec. ⚙ Verbal-only color, never in writing: the reason moonlighting works is that he's automated his own day job (and much of his team's) with agents — the product's thesis, demonstrated on its founder. Great bar story, contractual/optics hazard in a deck.
 - **The FDE commitment, in writing:** Shovon personally forward-deploys into your org. Any bug, outage, latency regression, or janky feature is prioritized immediately — not triaged into a backlog. The headline for the common case: a fix ships within 24 hours. Founder-paged support isn't a support tier — it's an engineer on your team you don't have to hire.
 
@@ -43,7 +43,7 @@ Early customers aren't buying a runner; they're buying the person operating it. 
   - **Sev-3 (minor bug, janky feature):** prioritized ASAP; a committed timeline communicated within 24 hours.
   Response and mitigation are on the clock; root-cause resolution is committed as continuous effort plus a communicated timeline — the industry-standard shape, generous at the tier levels because there are ten customers and one very motivated engineer.
 
-⚙ AWS status — resolved: Shovon is at AWS until outside investment (or revenue) makes Verself the full-time job, and the material says so honestly rather than hiding it. Handle it *proactively* in every deal (see §9's talk track) — raised by us before they ask, paired with why the platform doesn't depend on founder-hours: the substrate is built for unattended operation and pages a human only when self-healing fails.
+⚙ AWS status — resolved: Shovon is at AWS until outside investment (or revenue) makes Postflight the full-time job, and the material says so honestly rather than hiding it. Handle it *proactively* in every deal (see §9's talk track) — raised by us before they ask, paired with why the platform doesn't depend on founder-hours: the substrate is built for unattended operation and pages a human only when self-healing fails.
 
 ## 4. Who buys (evidence-based ICP)
 
@@ -93,15 +93,15 @@ Where these people are: HN incident/pricing threads (the proven channel — ever
 Surfaces, in the order customers meet them:
 
 1. **The GitHub App** — where the daily loop lives: PR comments and checks. Minimal permissions are the security headline: **Actions (read) + org Self-hosted runners (read/write) + Metadata (read)**. We cannot request access to secrets or code — GitHub doesn't offer it.
-2. **The skill — a major part of the product, not documentation.** Humans never learn the CLI; they type `/verself` (or ask their agent) and Claude or Codex does the rest: onboard, integrate a repo, diagnose a failure, pull usage, manage the org. Design principles:
+2. **The skill — a major part of the product, not documentation.** Humans never learn the CLI; they type `/postflight` (or ask their agent) and Claude or Codex does the rest: onboard, integrate a repo, diagnose a failure, pull usage, manage the org. Design principles:
    - **User-invokable only by default, zero ambient context cost.** The skill occupies no tokens until called. An agent-native product must not tax the agent's context window to exist — this is a design requirement, not an accident.
    - The skill encodes the golden paths and teaches the agent to self-serve diagnosis; it is versioned, shipped, and supported like the CLI itself (the §3 FDE commitment covers skill bugs explicitly).
-   - Distribution: official marketplaces (Claude Code plugins, Codex plugins, Cursor rules — thin adapters generated from one source) plus `curl verself.sh/agents | sh`. The marketing page serves AGENTS.md to agent traffic.
-3. **The CLI — the substrate the skill drives.** Engineers can use it directly; agents always can: `--json` everywhere (JSON by default when stdout isn't a TTY), non-interactive by default, distinct exit codes, structured errors with remediation text, idempotent commands, a `verself api` escape hatch.
+   - Distribution: official marketplaces (Claude Code plugins, Codex plugins, Cursor rules — thin adapters generated from one source) plus `curl postflight.sh/agents | sh`. The marketing page serves AGENTS.md to agent traffic.
+3. **The CLI — the substrate the skill drives.** Engineers can use it directly; agents always can: `--json` everywhere (JSON by default when stdout isn't a TTY), non-interactive by default, distinct exit codes, structured errors with remediation text, idempotent commands, a `postflight api` escape hatch.
 
 **"Debugging CI is a prompt" — the shipped capability behind claim #2:**
 
-- `verself jobs describe --json` returns agent-actionable failure context: failing step, exit code, log tail, diff-vs-last-green-on-main, cache-state deltas.
+- `postflight jobs describe --json` returns agent-actionable failure context: failing step, exit code, log tail, diff-vs-last-green-on-main, cache-state deltas.
 - The GitHub App's failure comment carries the same context in agent-readable form — the agent in the customer's PR loop diagnoses without being asked.
 - The skill teaches the agent to pull context and propose the fix. Incumbents built dashboards for humans staring at logs; that's the behavior our story says is dying.
 
@@ -111,9 +111,9 @@ Surfaces, in the order customers meet them:
 
 - Finance: Stripe-hosted Customer Portal is the billing console (invoices, receipts, payment methods; email+OTP login for the CFO). Committed deals get invoices.
 - Security: audit-log export/streaming as a first-class CLI feature (SIEM export is what larger customers prefer anyway) + public trust page, which publishes the data-retention policy: everything we hold is encrypted, expires in 30 days, and is rebuildable from the customer's repo (§12).
-- Spend: hard default caps + real-time `verself usage` + human approval on anything that raises the bill.
+- Spend: hard default caps + real-time `postflight usage` + human approval on anything that raises the bill.
 
-Auth: PKCE loopback is the default `verself login` (agent does everything; human clicks approve once); device flow behind `--headless` only (device-code phishing spiked 37× in 2026; security teams block the grant — AWS CLI made the same default switch). `auth.md`/ID-JAG platform-attested agent registration when the standard stabilizes.
+Auth: PKCE loopback is the default `postflight login` (agent does everything; human clicks approve once); device flow behind `--headless` only (device-code phishing spiked 37× in 2026; security teams block the grant — AWS CLI made the same default switch). `auth.md`/ID-JAG platform-attested agent registration when the standard stabilizes.
 
 ⚙ No-console is a sequencing bet: instrument every "I needed a UI for X" ticket; the escape hatch (read-only status/usage page) is a feature release, not a strategy reversal.
 
@@ -122,8 +122,8 @@ Auth: PKCE loopback is the default `verself login` (agent does everything; human
 The line: *"Take 5 minutes. Install our GitHub App, tell your agent to finish the job, and watch your next PR."*
 
 1. Human installs the GitHub App (or the skill first — either entry works).
-2. Agent invokes `/verself` → runs `verself login` — PKCE loopback, one human approve click. The skill's install step verifies cosign/SLSA provenance before anything executes.
-3. Agent runs `verself init` — detects repos and opens migration PRs **with the customer's own credentials**: swaps `runs-on`, swaps `actions/checkout` → `verself/checkout`, authors `.verself/cache.yml` from repo analysis (bazel/pnpm/cargo/gradle paths — judgment work a customer's agent does well).
+2. Agent invokes `/postflight` → runs `postflight login` — PKCE loopback, one human approve click. The skill's install step verifies cosign/SLSA provenance before anything executes.
+3. Agent runs `postflight init` — detects repos and opens migration PRs **with the customer's own credentials**: swaps `runs-on`, swaps `actions/checkout` → `postflight/checkout`, authors `.postflight/cache.yml` from repo analysis (bazel/pnpm/cargo/gradle paths — judgment work a customer's agent does well).
 4. First merged PR → next job lands warm → the GitHub App comments before/after timing on the PR. The product demos itself in the customer's own repo.
 
 ⚙ Step 3 is structural advantage twice: competitors' migration wizards need code/PR write on *their* App (the permission security reviewers reject) — ours needs nothing because the customer's agent does it; and wizards only do mechanical `runs-on` swaps — an agent authors the cache manifest that unlocks the real speedup. Honest demo nuance: a bare `runs-on` swap gets faster CPU but leaves `actions/cache` on GitHub's backend (~20 MB/s from external DCs — worse than GH-hosted). The full win needs all three changes, which is why the agent does them in one PR. Stock actions still work as a compatibility fallback; they're not the product.
@@ -190,11 +190,11 @@ WarpBuild's playbook: straight to SOC 2 Type II — 3-month window, ~$8–10k, ~
 
 **Warm pool on QEMU — measured on guardian-w1 NVMe 2026-07-05:** ~520ms full warm restore vs 8.8s cold; 8-parallel restores in 774ms wall (~10 VMs/s); disk hot-attach 227ms with revoke verified. Assignment = resume + clock resync (kvmclock + guest-agent time set) + identity + JIT config fetched in-guest (attempt-scoped token). One-shot VMs, always. Workers: plain Ubuntu 24.04, no Kubernetes — every resource is customer compute; host daemon as a systemd unit dialing out to the control plane (egress-only, workload identity). Shared-nothing nodes; org→node affinity keeps caches warm; placement is a control-plane decision.
 
-**Cache model — the moat (Verself-source-verified semantics on the new QEMU mechanism):**
+**Cache model — the moat (Postflight-source-verified semantics on the new QEMU mechanism):**
 
 - Source and caches are **local NVMe block devices, never a download protocol** — the customer-facing claim and the structural answer to every competitor's cache benchmark. **The core mechanism is hot-plugging zvols into running QEMU VMs** — tracer-proven 2026-07-05: 227ms attach, revoke verified, virtio-scsi controller must be in the VM template. Hot-plug is what turns a generic warm pooled VM into *your* VM at assignment time (the org isn't known at pool-boot), and is the expected path for non-enterprise customers; staging drives before boot remains available for golden-restore and dedicated-capacity paths. ⚙ The old "mount before boot, never hot-plug" invariant was the Firecracker-era design — do not carry it forward as a constraint.
-- `verself/checkout`: guest fetches a single-commit git pack from the host's bare mirror, advances the durable workspace to the exact SHA, preserves untracked build state. Laptop-style incremental builds across CI runs.
-- `.verself/cache.yml`: named cache mounts as ZFS zvol generations, CAS pointer promotion, scoped by branch + job-shape + trust class, 7-day TTL + watermark eviction.
+- `postflight/checkout`: guest fetches a single-commit git pack from the host's bare mirror, advances the durable workspace to the exact SHA, preserves untracked build state. Laptop-style incremental builds across CI runs.
+- `.postflight/cache.yml`: named cache mounts as ZFS zvol generations, CAS pointer promotion, scoped by branch + job-shape + trust class, 7-day TTL + watermark eviction.
 - Green on push-to-main → golden checkpoint: vmstate+memory snapshot atomically coupled to the zvol generation set (including `_work`), CAS-promoted. PR runs consume goldens; only protected-branch pushes create them.
 
 **Data lifecycle & isolation policy (canonical — agents keep getting this wrong; this is the reference):**
@@ -228,13 +228,13 @@ The market is converging on this exact ladder (Depot CI → agent sandboxes; Ope
 1. **Hardware + rate card (gates the "faster than everyone else" headline).** f4.metal.small (EPYC 4484PX — desktop-class single-thread, competitive with premium vendors) until $4k MRR; rs4.metal.xlarge (9554P, 64c/1.5TB) adds density but its 3.1GHz base likely *regresses* single-thread — possibly right for sandbox density, wrong for CI slots. Benchmark rs4.metal.xlarge and f4.metal.large (9275F-class, 4.1GHz) one hour each: single-thread + a real CI suite (`bare-metal-ci-bench` is prior art). Publish the winner in RunsOn-comparable format.
 2. **Design-partner terms:** months free (how many?), written feedback/reference ask, card-on-file (recommend: always).
 3. **SOC 2 start:** now vs first paying customer (recommend: first paying customer; trust page now).
-4. **Runner label namespace** (`runs-on: verself-16vcpu`?) — lives in customer workflow files forever; decide before first install.
+4. **Runner label namespace** (`runs-on: postflight-16vcpu`?) — lives in customer workflow files forever; decide before first install.
 5. **macOS referral partner** — one named vendor for the objection script.
 6. **Cirrus Linux run-off + Blacksmith-refugee outreach** — direct outreach, or SF-in-person only for the first 10?
 7. **Metered rate + spend-cap defaults** — after the benchmark; caps default low and raise on request.
 8. **Design-partner support one-pager** — draft the severity-tiered commitment from §3 into signable form.
 
-Resolved: 3-month pilot term · name stays Verself for now (label namespace + GitHub App name are the two customer-visible rename surfaces) · millisecond metering universal, commitments negotiated bespoke · QEMU warm pool, workers on plain Ubuntu · skill is user-invokable-only with zero ambient context cost · install path is cosign/SLSA-verifiable by the installing agent · AWS stays in the bio, disclosed proactively, until outside investment (§3, §9).
+Resolved: 3-month pilot term · name stays Postflight for now (label namespace + GitHub App name are the two customer-visible rename surfaces) · millisecond metering universal, commitments negotiated bespoke · QEMU warm pool, workers on plain Ubuntu · skill is user-invokable-only with zero ambient context cost · install path is cosign/SLSA-verifiable by the installing agent · AWS stays in the bio, disclosed proactively, until outside investment (§3, §9).
 
 ## 15. Known risks ⚙
 
