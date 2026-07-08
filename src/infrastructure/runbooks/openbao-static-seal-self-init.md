@@ -152,6 +152,8 @@ raft wipe, keyed by custody env variables. It currently writes:
 - `kv/guardian/guardian-mgmt/company-site/promotion/github-app`
 - `kv/guardian/guardian-mgmt/guardian-iam/promotion/github-app` (same App
   identity as company-site's; Kargo credentials are project-namespaced)
+- `kv/guardian/guardian-mgmt/guardian-products/promotion/github-app` (same
+  App identity, the products vertical's project-namespaced copy)
 - `kv/guardian/guardian-mgmt/verself-runner/github-app` (the Verself Runner
   GitHub App: webhook HMAC secret, OAuth client secret, and the App private
   key, transported base64-encoded as
@@ -256,7 +258,11 @@ cold boot exercises.
 
 4. Pod 0 initializes and runs the new self-init block; the others join.
 5. Re-run the bootstrap secret import (above) with a fresh env file built from
-   custody.
+   custody. Build and run the importer from a checkout at the merged
+   revision: the binary embeds the import plan, so a stale checkout silently
+   seeds the old plan and the importer's one-shot role is already gone by
+   the time the gap is noticed (recover via the namespace's scoped
+   `secrets-writer` role, which the new self-init block has just created).
 6. Verify every ExternalSecret returns to `Ready=True` and force a refresh if
    needed (`kubectl annotate externalsecret ... force-sync=$(date +%s)`).
 

@@ -29,9 +29,9 @@ spec:
   ingress:
     - fromEndpoints:
         - matchLabels:
-            app.kubernetes.io/instance: external-secrets-operator
+            app.kubernetes.io/instance: external-secrets
             app.kubernetes.io/name: external-secrets
-            k8s:io.kubernetes.pod.namespace: cozy-external-secrets-operator
+            k8s:io.kubernetes.pod.namespace: external-secrets
       toPorts:
         - ports:
             - port: "8200"
