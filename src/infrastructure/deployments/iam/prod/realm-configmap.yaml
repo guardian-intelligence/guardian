@@ -74,8 +74,8 @@ data:
           "directAccessGrantsEnabled": false,
           "implicitFlowEnabled": false,
           "serviceAccountsEnabled": false,
-          "redirectUris": ["https://guardianintelligence.org/postflight", "https://guardianintelligence.org/postflight/*", "https://guardianintelligence.org/postflight", "https://guardianintelligence.org/postflight/*"],
-          "webOrigins": ["https://guardianintelligence.org", "https://guardianintelligence.org"]
+          "redirectUris": ["https://guardianintelligence.org/postflight", "https://guardianintelligence.org/postflight/*"],
+          "webOrigins": ["https://guardianintelligence.org"]
         },
         {
           "clientId": "canary",
