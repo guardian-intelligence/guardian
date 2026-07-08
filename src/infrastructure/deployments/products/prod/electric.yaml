@@ -41,7 +41,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: electric
-          image: docker.io/electricsql/electric:1.7.6@sha256:4b0746aff922a3b05c631a71623636d5767792a9362f20a9710998781feb5436
+          image: docker.io/electricsql/electric:1.7.7@sha256:15e9a25d5f6c515ad9113392291e34c6751b8b31d563ee4c496fde499a5ce14f
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
