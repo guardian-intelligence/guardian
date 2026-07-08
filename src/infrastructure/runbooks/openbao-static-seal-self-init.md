@@ -65,9 +65,9 @@ and is revoked by OpenBao after initialization.
 
 Because access is granted per namespace subtree rather than per secret path,
 OpenBao configuration is O(1) in the number of integrations: adding a secret
-for an existing namespace never changes this block (see Adding An
-Integration below). Only structural changes — a new consumer namespace, a new
-mount or auth method — edit the block and re-initialize.
+for an existing namespace never changes this block (see Adding A Secret
+below). Only structural changes — a new consumer namespace, a new
+mount or auth method — edit the block and re-initialize (see Reinit).
 
 The cert-manager listener CA is steady state, not a temporary bootstrap issuer.
 It creates `guardian-openbao-api-tls` before the OpenBao pod mounts the Secret.
@@ -188,26 +188,42 @@ temporary OpenBao auth role and policy, then (with `-delete-env-file`)
 deletes the working copy; the wipe removes the whole plaintext bundle. The
 encrypted custody repository keeps the originals.
 
-## Adding An Integration (Routine, No OpenBao Changes)
+## Which Path? (Read This First)
 
-Access is per namespace subtree, so a new integration for an existing
-namespace never touches OpenBao configuration. It is a Git PR plus one scoped
-value write:
+Almost every secret change is the routine path. Reinit is rare.
 
-1. **Git**: add the `ExternalSecret` (and workload wiring) in the consuming
-   namespace, reading `guardian/guardian-mgmt/<namespace>/<integration>`.
-   CI (`TestOpenBaoSecretScopeConformance`) rejects any remoteRef outside the
-   namespace's own subtree, so a beta manifest cannot reference a prod path.
-2. **Custody**: restore the custody bundle, append the secret value to
-   `/dev/shm/guardian-custody/custody.env`, snapshot with
-   `aspect infra custody --action create`, wipe, and extend the
-   importer plan (`openbao_secret_import/main.go`) in the same PR — the plan
-   is the DR re-seed manifest, so DR keeps working without remembering
-   anything out of band.
-3. **Value write**: mint a short-lived token for the namespace's
-   `secrets-writer` SA and write the value with the official CLI. The OpenBao
-   role `guardian-writer-<namespace>` can only write that namespace's
-   subtree, so cross-stage mixups are impossible by construction:
+- **New secret in a namespace that already has a scope** (a new third-party
+  key, a new per-stage value for an existing consumer) → **routine, no
+  reinit.** OpenBao config does not change.
+- **New consumer namespace, or a new mount/auth method** → **reinit.** This is
+  the only trigger. It is not triggered by adding a secret; it is triggered by
+  a namespace that has no `guardian-reader-<ns>`/`guardian-writer-<ns>` pair
+  yet.
+
+The scoped namespaces that already exist (no reinit needed to write into them):
+`external-dns`, `operator`, `company-site`, `guardian-iam`,
+`guardian-products`, `guardian-analytics`, `verself-runner`, `tenant-root`,
+`tenant-guardian`, and `tenant-guardian-{beta,gamma,prod}`. Confirm the live
+list with `TestOpenBaoSecretScopeConformance`'s inventory.
+
+## Adding A Secret (Routine, No OpenBao Changes)
+
+A secret for a namespace that already has a scope never touches OpenBao
+config. One PR, then one scoped write:
+
+1. **Git PR** — add the `ExternalSecret` (and workload wiring) in the consuming
+   namespace, reading `guardian/guardian-mgmt/<namespace>/<integration>`, and
+   extend the importer plan in `openbao_secret_import/main.go` (+ its test) so
+   DR re-seeds it. `TestOpenBaoSecretScopeConformance` rejects any remoteRef
+   outside the namespace's own subtree — a beta manifest cannot reference a
+   prod path.
+2. **Custody** — `aspect infra custody --action restore`, append the value to
+   `/dev/shm/guardian-custody/custody.env` (never echo it), `--action create`,
+   `--action wipe`.
+3. **Value write** — mint a 10-minute `secrets-writer` token for that namespace
+   and `bao kv put` with the value on stdin (never argv). The
+   `guardian-writer-<ns>` role can only write its own subtree, so wrong-stage
+   writes fail server-side:
 
    ```sh
    kubectl -n tenant-guardian port-forward svc/guardian-openbao-active 18200:8200 &
@@ -219,59 +235,74 @@ value write:
      role=guardian-writer-tenant-guardian-beta \
      jwt="$(kubectl -n tenant-guardian-beta create token secrets-writer \
        --audience=openbao --duration=10m)")
-   # value via stdin; never on the command line / shell history
    BAO_TOKEN=$BAO_TOKEN bao kv put \
      kv/guardian/guardian-mgmt/tenant-guardian-beta/keycloak/github-oauth \
-     GITHUB_CLIENT_SECRET=-
+     GITHUB_CLIENT_SECRET=-   # value on stdin
    ```
 
-4. Verify the `ExternalSecret` reports `Ready=True`; force a refresh if
-   needed (`kubectl annotate externalsecret ... force-sync=$(date +%s)`).
+4. **Verify** — `ExternalSecret` reports `Ready=True`
+   (`kubectl annotate externalsecret ... force-sync=$(date +%s)` to refresh
+   now).
 
-The `secrets-writer` SAs mount nothing and run nothing; minting their tokens
-requires custody kubeconfig access. Steady state keeps zero standing
-secret-reading admin: readers are per-namespace ESO roles, writers are
-per-namespace short-TTL roles, and nothing can cross subtrees.
+Crib from these PRs (each is a routine add, no reinit):
 
-## Structural Changes (Re-Initialization)
+- `d34fb5a` — OpenBao-back the Kargo git credential: importer-plan entry +
+  ESO wiring for a new secret in an existing namespace.
+- `2a44ca6` — Verself IAM beta: per-stage secret resolving into env vars,
+  `substitute: disabled` where `${...}` must survive Flux envsubst.
 
-`initialize` runs only at first initialization and there is no standing admin
-credential (the self-init token is revoked, the importer role self-deletes),
-so *structural* changes — a new consumer namespace, a new mount or auth
-method — ship as a Git edit to the self-init block followed by a state reset.
-All KV state is re-importable from custody by design; this is the same path a
-cold boot exercises.
+Watch out for:
 
-1. Land the PR editing the `initialize` block (the namespace's reader+writer
-   policy/role pairs + conformance inventory) and the consumer's ESO
-   manifests.
-2. Wait for Flux to reconcile `guardian-system` so the HelmRelease renders the
-   new OpenBao config.
-3. Reset raft state (the seal key on the nodes and the audit PVCs stay):
+- **Value on stdin (`key=-`), never on argv** — argv lands in shell history.
+- **Extend the importer plan in the same PR.** Skip it and DR silently loses
+  the secret; the plan is the re-seed manifest, kept honest by review.
 
-   ```sh
-   kubectl -n tenant-guardian scale statefulset guardian-openbao --replicas=0
-   kubectl -n tenant-guardian wait pod -l app.kubernetes.io/name=openbao --for=delete --timeout=5m
-   kubectl -n tenant-guardian delete pvc data-guardian-openbao-0 data-guardian-openbao-1 data-guardian-openbao-2
-   kubectl -n tenant-guardian scale statefulset guardian-openbao --replicas=3
-   ```
+## Reinit (Structural Changes Only)
 
-4. Pod 0 initializes and runs the new self-init block; the others join.
-5. Re-run the bootstrap secret import (above) with a fresh env file built from
-   custody. Build and run the importer from a checkout at the merged
-   revision: the binary embeds the import plan, so a stale checkout silently
-   seeds the old plan and the importer's one-shot role is already gone by
-   the time the gap is noticed (recover via the namespace's scoped
-   `secrets-writer` role, which the new self-init block has just created).
-6. Re-relay the in-cluster-generated values the importer does not carry —
-   they are lost with the raft state, and their still-materialized Secrets
-   are the source (each is a scoped `secrets-writer` write, value on stdin):
-   - analytics ClickHouse ingest password → `guardian-analytics/clickhouse`
-     property `ingest`
-   - verself-controlplane Postgres `uri` → `verself-runner/postgres`
-7. Verify every ExternalSecret returns to `Ready=True` and force a refresh if
-   needed (`kubectl annotate externalsecret ... force-sync=$(date +%s)`).
+Only when adding a **new consumer namespace** or a **new mount/auth method**.
+There is no standing admin, so a self-init edit ships with a raft reset. KV
+state is re-importable from custody by design — this is the cold-boot path.
+Consumers stay up throughout: ExternalSecrets are `Orphan`/`Retain`.
 
-ExternalSecrets use `creationPolicy: Orphan` / `deletionPolicy: Retain`, so
-already-materialized Secrets keep serving their consumers throughout the
-reset window.
+Land the PR editing the `initialize` block (new reader+writer pair +
+conformance inventory + consumer ESO manifests), wait for Flux to reconcile
+`guardian-system`, then:
+
+```sh
+# 1. reset raft (seal keys on nodes and audit PVCs stay)
+kubectl -n tenant-guardian scale statefulset guardian-openbao --replicas=0
+kubectl -n tenant-guardian wait pod -l app.kubernetes.io/name=openbao --for=delete --timeout=5m
+kubectl -n tenant-guardian delete pvc data-guardian-openbao-0 data-guardian-openbao-1 data-guardian-openbao-2
+kubectl -n tenant-guardian scale statefulset guardian-openbao --replicas=3
+
+# 2. wait until all three members are up and one raft cluster
+aspect infra openbao-drill --kubeconfig=src/infrastructure/talm/kubeconfig
+
+# 3. re-seed from custody — build the importer from MERGED main (see below)
+#    (Bootstrap Secret Import section has the full custody/env-file recipe)
+
+# 4. verify: the external-dns ExternalSecret Ready=True proves self-init +
+#    kv mount + auth roles are live
+aspect infra converged --expected-revision "$(git rev-parse HEAD)" \
+  --kubeconfig=src/infrastructure/talm/kubeconfig
+```
+
+Then re-relay the two in-cluster-generated values the importer does not carry
+(each a scoped `secrets-writer` write, value on stdin, sourced from its
+still-materialized Secret):
+
+- analytics ClickHouse ingest password → `guardian-analytics/clickhouse`
+  property `ingest`
+- verself-controlplane Postgres `uri` → `verself-runner/postgres`
+
+Force-sync every ExternalSecret and confirm `Ready=True`.
+
+Watch out for:
+
+- **Build the importer from merged `main`, not your branch.** The binary embeds
+  the import plan; a stale checkout seeds the OLD plan and its one-shot role
+  self-deletes before you notice (recover via the new namespace's scoped
+  `secrets-writer` role, which self-init just created).
+- **`test -s` the value file before `bao kv put`.** A failed
+  `kubectl … | base64 > f` pipeline does not stop `set -euo pipefail`, so an
+  empty file silently overwrites a good secret.
