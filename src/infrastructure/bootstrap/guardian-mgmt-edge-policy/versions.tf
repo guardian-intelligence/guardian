@@ -12,8 +12,9 @@ terraform {
   # policy (AOP, cache rules, bot management) is deliberately a different
   # tofu root than DNS/LB: dns-lb-provisioner stays a minimal DR actor whose
   # empty plan is a drift oracle, and the edge-policy-provisioner token
-  # cannot move traffic. Applies run with CLOUDFLARE_API_TOKEN set from the
-  # cloudflare_edge_policy_provisioner custody key.
+  # cannot move traffic. Applies run with CLOUDFLARE_API_TOKEN read from the
+  # guardian-mgmt-cloudflare-tokens root:
+  #   tofu -chdir=../guardian-mgmt-cloudflare-tokens output -raw edge_policy_provisioner_token_value
   backend "s3" {
     bucket = "guardian-vault"
     key    = "opentofu/guardian-mgmt-edge-policy.tfstate"

@@ -23,3 +23,14 @@ output "external_dns_token_value" {
   value       = cloudflare_account_token.external_dns.value
   sensitive   = true
 }
+
+output "edge_policy_provisioner_token_id" {
+  description = "Token id of the edge-policy provisioner lane token."
+  value       = cloudflare_account_token.edge_policy_provisioner.id
+}
+
+output "edge_policy_provisioner_token_value" {
+  description = "Secret value of the edge-policy provisioner lane token."
+  value       = cloudflare_account_token.edge_policy_provisioner.value
+  sensitive   = true
+}
