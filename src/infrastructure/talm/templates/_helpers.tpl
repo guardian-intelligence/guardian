@@ -453,5 +453,71 @@ apiVersion: v1alpha1
 kind: WatchdogTimerConfig
 device: /dev/watchdog0
 timeout: 1m
+---
+# Host ingress firewall: default-deny. Talos rate-limits ICMP itself but
+# does NOT exempt pod-sourced traffic (proven live: pod→host SYNs arrive
+# on ovn0 with pod-subnet sources and are dropped), so the cluster fabric
+# is admitted explicitly: the Latitude VLAN (etcd, DRBD/LINSTOR, geneve,
+# MetalLB memberlist), the pod subnets (pod→apid for etcd snapshots,
+# pod→host scrapes), and kube-ovn's join subnet (ovn0-originated
+# gateway traffic). All three are private to these machines. The public
+# interface admits only the Cloudflare-fronted edge ports and the
+# operator subnets. A wrong rule can sever apid: apply with --mode=try
+# first; lockout recovery is the Latitude OOB console.
+apiVersion: v1alpha1
+kind: NetworkDefaultActionConfig
+ingress: block
+{{- range $proto := list "tcp" "udp" }}
+---
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: cluster-internal-{{ $proto }}
+portSelector:
+  ports:
+    - 1-65535
+  protocol: {{ $proto }}
+ingress:
+  - subnet: {{ $.Values.ingressFirewall.vlanSubnet }}
+  {{- range $.Values.podSubnets }}
+  - subnet: {{ . }}
+  {{- end }}
+  - subnet: {{ $.Values.ingressFirewall.joinSubnet }}
+{{- end }}
+---
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: operator-talos-api
+portSelector:
+  ports:
+    - 50000
+  protocol: tcp
+ingress:
+  {{- range .Values.ingressFirewall.operatorSubnets }}
+  - subnet: {{ . }}
+  {{- end }}
+---
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: operator-kubernetes-api
+portSelector:
+  ports:
+    - 6443
+  protocol: tcp
+ingress:
+  {{- range .Values.ingressFirewall.operatorSubnets }}
+  - subnet: {{ . }}
+  {{- end }}
+---
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: public-edge
+portSelector:
+  ports:
+    - 80
+    - 443
+  protocol: tcp
+ingress:
+  - subnet: 0.0.0.0/0
+  - subnet: ::/0
 {{- include "talos.config.network.multidoc" . }}
 {{- end }}

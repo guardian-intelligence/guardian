@@ -77,10 +77,13 @@ func TestTalmControlplaneRender(t *testing.T) {
 	// A register-with-taints NoSchedule taint on every node bricks cold
 	// bootstrap (nothing, including the Cozystack installer hook, can
 	// schedule); the 2026-07-01 drill hit this. Dedicated-node taints may
-	// return only alongside untainted general-workload nodes. skipFallback
-	// and the haul mirror endpoint are dark-bootstrap-only: in steady state
-	// they would cut nodes off from upstream registries.
-	for _, forbidden := range []string{"kubespan", "KubeSpan", "WireGuard", "wireguard", "nodeTaints:", "skipFallback", "148.113.198.223"} {
+	// return only alongside untainted general-workload nodes. skipFallback,
+	// the haul mirror endpoint, and the mirror-host NTP block are
+	// dark-bootstrap-only: in steady state they would cut nodes off from
+	// upstream registries and public time. The bare mirror-host IP is NOT
+	// forbidden — the same box is the operations VPS and appears in the
+	// steady-state ingress-firewall operator rules.
+	for _, forbidden := range []string{"kubespan", "KubeSpan", "WireGuard", "wireguard", "nodeTaints:", "skipFallback", "148.113.198.223:5000", "\n  time:\n"} {
 		assertTextNotContains(t, rendered, forbidden, "rendered controlplane talos config")
 	}
 }
