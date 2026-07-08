@@ -114,7 +114,8 @@ the kv mount and the external-dns auth role and ESO can read them, so it is the
 functional proof that self-init succeeded. The status drill verifies each member
 is initialized, unsealed, HA-enabled, and part of one raft cluster (a single
 `cluster_id` across pods).
-If the external-dns ExternalSecret never goes Ready, the cluster likely did not
+If the external-dns ExternalSecret never goes Ready after its value has been
+re-relayed (see the re-relay checklist), the cluster likely did not
 run the declared self-init block successfully; inspect OpenBao startup logs and,
 if the raft state was wiped, recreate it with the declared config.
 
@@ -282,7 +283,9 @@ aspect infra openbao-drill --kubeconfig=src/infrastructure/talm/kubeconfig
 #    (Bootstrap Secret Import section has the full custody/env-file recipe)
 
 # 4. verify: the external-dns ExternalSecret Ready=True proves self-init +
-#    kv mount + auth roles are live
+#    kv mount + auth roles are live. It reaches Ready only AFTER the
+#    external-dns re-relay in the checklist below — run that first, then
+#    read this signal.
 aspect infra converged --expected-revision "$(git rev-parse HEAD)" \
   --kubeconfig=src/infrastructure/talm/kubeconfig
 ```
