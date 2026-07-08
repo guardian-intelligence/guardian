@@ -70,7 +70,6 @@ docker.io/clickhouse/clickhouse-server@sha256:cc8c5bf275148b2de01a31e8fd6b55ba1b
 # (disjointness invariant). Additions arrive via live audit or admission
 # findings; prune only with evidence nothing schedules the image (mind
 # intermittent CronJob images). ---
-cr.fluentbit.io/fluent/fluent-bit@sha256:14da4a52ecdbb9bd9cb7a16ff6b4c7f391a4006cb13f84b5957e4608cc613e2c
 docker-registry3.mariadb.com/mariadb-operator/mariadb-operator@sha256:14eeefa4956770f973ac707b7969f2e99e0af2cf2c34ac63d4c7eb3f7c3cf3eb
 docker.io/alerta/alerta-web@sha256:73bb724fcb091c4ce6f3a92aab76afcd3a2152ed96f95b629eca68351acbf3b0
 docker.io/altinity/clickhouse-operator@sha256:8f71e14094c582b08712ffdf9c76f1c0750d2a049982e7e071a7a208a22c1898
