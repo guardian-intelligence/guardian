@@ -10,3 +10,4 @@ quay.io/openbao/
 quay.io/prometheus/
 docker.io/electricsql/
 docker.io/library/postgres
+ghcr.io/siderolabs/talos-backup
