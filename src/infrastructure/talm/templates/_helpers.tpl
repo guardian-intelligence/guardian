@@ -34,6 +34,18 @@ machine:
     {{- toYaml . | nindent 4 }}
   {{- end }}
   type: {{ .MachineType }}
+  {{- if eq .MachineType "controlplane" }}
+  # Scoped credential channel for the etcd-snapshot CronJob (base/backup/):
+  # only pods in tenant-root may request Talos API access, and the only role
+  # they can hold is os:etcd:backup.
+  features:
+    kubernetesTalosAPIAccess:
+      enabled: true
+      allowedRoles:
+        - os:etcd:backup
+      allowedKubernetesNamespaces:
+        - tenant-root
+  {{- end }}
   kubelet:
     nodeIP:
       validSubnets:
