@@ -349,6 +349,12 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 				"githubAppPrivateKey": githubAppKey,
 			},
 		},
+		{
+			APIPath: "kv/data/guardian/guardian-mgmt/guardian-products/promotion/github-app",
+			Data: map[string]string{
+				"githubAppPrivateKey": githubAppKey,
+			},
+		},
 		// Verself Runner GitHub App (prod): webhook HMAC secret, OAuth
 		// client secret, and the App private key that signs the JWTs
 		// installation tokens are minted from. appId/clientId are public

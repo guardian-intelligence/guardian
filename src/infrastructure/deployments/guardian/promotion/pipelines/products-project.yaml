@@ -1,0 +1,35 @@
+# The products promotion pipeline. The Warehouse tracks upstream Electric
+# releases on docker.io directly (SemVer within the pinned major).
+#
+# beta auto-promotes on new Freight; gamma/prod receive Freight only from the
+# verified upstream Stage and gate on Electric's public shape endpoint before
+# opening a promotion PR.
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Project
+metadata:
+  name: guardian-products
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: ProjectConfig
+metadata:
+  name: guardian-products
+  namespace: guardian-products
+spec:
+  promotionPolicies:
+    - stageSelector:
+        name: beta
+      autoPromotionEnabled: true
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Warehouse
+metadata:
+  name: electric
+  namespace: guardian-products
+spec:
+  interval: 5m0s
+  subscriptions:
+    - image:
+        repoURL: docker.io/electricsql/electric
+        imageSelectionStrategy: SemVer
+        constraint: ">=1.7.6 <2.0.0"
+        platform: linux/amd64

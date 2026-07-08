@@ -67,8 +67,8 @@ func TestImportPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 9 {
-		t.Fatalf("plan length = %d, want 9", len(plan))
+	if len(plan) != 10 {
+		t.Fatalf("plan length = %d, want 10", len(plan))
 	}
 	external := plan[0]
 	if external.APIPath != "kv/data/guardian/guardian-mgmt/external-dns/cloudflare" {
@@ -125,7 +125,14 @@ func TestImportPlan(t *testing.T) {
 	if promotion.Data["githubAppPrivateKey"] != testGithubAppPEM {
 		t.Fatal("githubAppPrivateKey did not round-trip through base64")
 	}
-	runner := plan[8]
+	productsPromotion := plan[8]
+	if productsPromotion.APIPath != "kv/data/guardian/guardian-mgmt/guardian-products/promotion/github-app" {
+		t.Fatalf("products promotion path = %q", productsPromotion.APIPath)
+	}
+	if productsPromotion.Data["githubAppPrivateKey"] != testGithubAppPEM {
+		t.Fatal("products githubAppPrivateKey did not round-trip through base64")
+	}
+	runner := plan[9]
 	if runner.APIPath != "kv/data/guardian/guardian-mgmt/verself-runner/github-app" {
 		t.Fatalf("verself-runner path = %q", runner.APIPath)
 	}
@@ -172,8 +179,8 @@ func TestImportPlanOptionalKeycloakStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 11 {
-		t.Fatalf("plan length = %d, want 11 (9 base + beta + prod)", len(plan))
+	if len(plan) != 12 {
+		t.Fatalf("plan length = %d, want 12 (10 base + beta + prod)", len(plan))
 	}
 	byPath := map[string]secretWrite{}
 	for _, w := range plan {

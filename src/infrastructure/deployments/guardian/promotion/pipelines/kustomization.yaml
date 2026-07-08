@@ -13,3 +13,9 @@ resources:
   - iam-stage-beta.yaml
   - iam-stage-gamma.yaml
   - iam-stage-prod.yaml
+  - products-namespace.yaml
+  - products-project.yaml
+  - products-secrets.yaml
+  - products-stage-beta.yaml
+  - products-stage-gamma.yaml
+  - products-stage-prod.yaml
