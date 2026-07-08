@@ -51,7 +51,7 @@ spec:
                 - name: PUBLIC_BASE
                   value: https://guardianintelligence.org
                 - name: OOBE_URL
-                  value: https://guardianintelligence.org/verself
+                  value: https://guardianintelligence.org/postflight
                 - name: K6_PROMETHEUS_RW_SERVER_URL
                   value: http://vminsert-shortterm.tenant-root.svc:8480/insert/0/prometheus/api/v1/write
                 - name: CANARY_USERNAME
@@ -159,7 +159,7 @@ metadata:
   name: tenant-root-vminsert-from-keycloak-login-canary-prod
   labels:
     app.kubernetes.io/part-of: guardian
-    guardian.dev/product: verself
+    guardian.dev/product: postflight
 spec:
   endpointSelector:
     matchLabels:

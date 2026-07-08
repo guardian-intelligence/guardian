@@ -22,9 +22,9 @@ The purpose is to create a free and open-source system for any being to convert 
 * Zero customers as of present day besides us: no compatibility shims or legacy wrappers.
 * OCI images are shipped to ghcr.io. See https://github.com/orgs/guardian-intelligence/packages
 * Auth n/z is multitenant by default: Keycloak instance per stage (product IAM, running in `tenant-guardian-<stage>`). Distinct from Cozystack's bundled *platform* Keycloak (operator identity for dashboard/kubectl OIDC), which is enabled and gates cluster-admin access: kubectl authenticates via `aspect infra auth --platform-agent` (OIDC against the `cozy` realm); the custody x509 kubeconfig is breakglass-only, minted by `aspect infra auth --platform-admin --reason "<why>"` (audit-logged), and the Keycloak admin console is never publicly routed — see `src/infrastructure/base/cozystack/platform.yaml` and `keycloak-admin-guard.yaml` there. SpiceDB/Zanzibar for permissions. Currently just "Sign in With GitHub" supported. Future "Sign in With Guardian" with us as the OIDC provider and multiple connected accounts planned.
-  - beta: https://beta.guardianintelligence.org/realms/verself/broker/github/endpoint
-  - gamma: https://gamma.guardianintelligence.org/realms/verself/broker/github/endpoint
-  - prod: https://guardianintelligence.org/realms/verself/broker/github/endpoint
+  - beta: https://beta.guardianintelligence.org/realms/postflight/broker/github/endpoint
+  - gamma: https://gamma.guardianintelligence.org/realms/postflight/broker/github/endpoint
+  - prod: https://guardianintelligence.org/realms/postflight/broker/github/endpoint
 - API IDL in Buf/Connect + (AIP-193). Declare each operation's policy surface (e.g. required permission, idempotency key, request-size, rate-limit class, audit level) outside of the core event contract as method-options metadata on the RPC contract. We need to be able to fine tune operational characterstics that don't break the schema. See `src/proto/guardian`. `connect.Interceptor`s enforce it fails-closed.
 * VictoriaLogs for logs. VictoriaMetrics for Metrics. TigerBeetle for financial truth and OLTP (planned). ClickHouse for analytics and Otel correlations/traces/spans. CNPG (single writer per stage, fan out read replicas) for system stage and misc.
 * Bazel owns the build graph and produces bytes using OCI for layout. `cosign`/SLSA proves that it's authentic Guardian Intelligence LLC software.

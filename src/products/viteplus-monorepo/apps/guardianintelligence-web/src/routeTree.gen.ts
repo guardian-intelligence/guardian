@@ -9,8 +9,8 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as VerselfRouteImport } from './routes/verself'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
+import { Route as PostflightRouteImport } from './routes/postflight'
 import { Route as MetricsRouteImport } from './routes/metrics'
 import { Route as LivezRouteImport } from './routes/livez'
 import { Route as HealthzRouteImport } from './routes/healthz'
@@ -36,14 +36,14 @@ import { Route as WorkshopDesignWorkshopRouteImport } from './routes/_workshop/d
 import { Route as WorkshopDesignNewsroomRouteImport } from './routes/_workshop/design/newsroom'
 import { Route as WorkshopDesignLettersRouteImport } from './routes/_workshop/design/letters'
 
-const VerselfRoute = VerselfRouteImport.update({
-  id: '/verself',
-  path: '/verself',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
   id: '/sitemap.xml',
   path: '/sitemap.xml',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PostflightRoute = PostflightRouteImport.update({
+  id: '/postflight',
+  path: '/postflight',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MetricsRoute = MetricsRouteImport.update({
@@ -173,8 +173,8 @@ export interface FileRoutesByFullPath {
   '/healthz': typeof HealthzRoute
   '/livez': typeof LivezRoute
   '/metrics': typeof MetricsRoute
+  '/postflight': typeof PostflightRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
-  '/verself': typeof VerselfRoute
   '/design': typeof WorkshopDesignRouteRouteWithChildren
   '/careers': typeof WorkshopCareersRoute
   '/changelog': typeof WorkshopChangelogRoute
@@ -197,8 +197,8 @@ export interface FileRoutesByTo {
   '/healthz': typeof HealthzRoute
   '/livez': typeof LivezRoute
   '/metrics': typeof MetricsRoute
+  '/postflight': typeof PostflightRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
-  '/verself': typeof VerselfRoute
   '/careers': typeof WorkshopCareersRoute
   '/changelog': typeof WorkshopChangelogRoute
   '/company': typeof WorkshopCompanyRoute
@@ -225,8 +225,8 @@ export interface FileRoutesById {
   '/healthz': typeof HealthzRoute
   '/livez': typeof LivezRoute
   '/metrics': typeof MetricsRoute
+  '/postflight': typeof PostflightRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
-  '/verself': typeof VerselfRoute
   '/_workshop/design': typeof WorkshopDesignRouteRouteWithChildren
   '/_workshop/careers': typeof WorkshopCareersRoute
   '/_workshop/changelog': typeof WorkshopChangelogRoute
@@ -255,8 +255,8 @@ export interface FileRouteTypes {
     | '/healthz'
     | '/livez'
     | '/metrics'
+    | '/postflight'
     | '/sitemap.xml'
-    | '/verself'
     | '/design'
     | '/careers'
     | '/changelog'
@@ -279,8 +279,8 @@ export interface FileRouteTypes {
     | '/healthz'
     | '/livez'
     | '/metrics'
+    | '/postflight'
     | '/sitemap.xml'
-    | '/verself'
     | '/careers'
     | '/changelog'
     | '/company'
@@ -306,8 +306,8 @@ export interface FileRouteTypes {
     | '/healthz'
     | '/livez'
     | '/metrics'
+    | '/postflight'
     | '/sitemap.xml'
-    | '/verself'
     | '/_workshop/design'
     | '/_workshop/careers'
     | '/_workshop/changelog'
@@ -335,26 +335,26 @@ export interface RootRouteChildren {
   HealthzRoute: typeof HealthzRoute
   LivezRoute: typeof LivezRoute
   MetricsRoute: typeof MetricsRoute
+  PostflightRoute: typeof PostflightRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
-  VerselfRoute: typeof VerselfRoute
   OgSlugRoute: typeof OgSlugRoute
   OgLetterSlugRoute: typeof OgLetterSlugRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/verself': {
-      id: '/verself'
-      path: '/verself'
-      fullPath: '/verself'
-      preLoaderRoute: typeof VerselfRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/sitemap.xml': {
       id: '/sitemap.xml'
       path: '/sitemap.xml'
       fullPath: '/sitemap.xml'
       preLoaderRoute: typeof SitemapDotxmlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/postflight': {
+      id: '/postflight'
+      path: '/postflight'
+      fullPath: '/postflight'
+      preLoaderRoute: typeof PostflightRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/metrics': {
@@ -606,8 +606,8 @@ const rootRouteChildren: RootRouteChildren = {
   HealthzRoute: HealthzRoute,
   LivezRoute: LivezRoute,
   MetricsRoute: MetricsRoute,
+  PostflightRoute: PostflightRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
-  VerselfRoute: VerselfRoute,
   OgSlugRoute: OgSlugRoute,
   OgLetterSlugRoute: OgLetterSlugRoute,
 }

@@ -44,7 +44,7 @@ spec:
 ---
 # Nightly base backup for prod Keycloak. Continuous WAL archiving covers RPO;
 # the cron bounds restore replay time. Offset from the tenant-root
-# verself-controlplane Plan (02:00) and analytics ClickHouse Plan (05:00) so
+# postflight-controlplane Plan (02:00) and analytics ClickHouse Plan (05:00) so
 # base backups don't contend for the same uplink window.
 apiVersion: backups.cozystack.io/v1alpha1
 kind: Plan

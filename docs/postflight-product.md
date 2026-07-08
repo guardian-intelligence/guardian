@@ -96,7 +96,7 @@ Surfaces, in the order customers meet them:
 2. **The skill — a major part of the product, not documentation.** Humans never learn the CLI; they type `/postflight` (or ask their agent) and Claude or Codex does the rest: onboard, integrate a repo, diagnose a failure, pull usage, manage the org. Design principles:
    - **User-invokable only by default, zero ambient context cost.** The skill occupies no tokens until called. An agent-native product must not tax the agent's context window to exist — this is a design requirement, not an accident.
    - The skill encodes the golden paths and teaches the agent to self-serve diagnosis; it is versioned, shipped, and supported like the CLI itself (the §3 FDE commitment covers skill bugs explicitly).
-   - Distribution: official marketplaces (Claude Code plugins, Codex plugins, Cursor rules — thin adapters generated from one source) plus `curl postflight.sh/agents | sh`. The marketing page serves AGENTS.md to agent traffic.
+   - Distribution: official marketplaces (Claude Code plugins, Codex plugins, Cursor rules — thin adapters generated from one source) plus `curl https://guardianintelligence.org/postflight/agents | sh`. The marketing page serves AGENTS.md to agent traffic.
 3. **The CLI — the substrate the skill drives.** Engineers can use it directly; agents always can: `--json` everywhere (JSON by default when stdout isn't a TTY), non-interactive by default, distinct exit codes, structured errors with remediation text, idempotent commands, a `postflight api` escape hatch.
 
 **"Debugging CI is a prompt" — the shipped capability behind claim #2:**

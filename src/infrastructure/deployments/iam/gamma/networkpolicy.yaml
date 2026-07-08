@@ -145,7 +145,7 @@ metadata:
   name: tenant-guardian-gamma-allow-root-ingress-keycloak
   labels:
     app.kubernetes.io/part-of: guardian
-    guardian.dev/product: verself
+    guardian.dev/product: postflight
 spec:
   endpointSelector:
     matchExpressions:
@@ -179,7 +179,7 @@ metadata:
   name: tenant-root-ingress-egress-keycloak-gamma
   labels:
     app.kubernetes.io/part-of: guardian
-    guardian.dev/product: verself
+    guardian.dev/product: postflight
 spec:
   endpointSelector:
     matchLabels:

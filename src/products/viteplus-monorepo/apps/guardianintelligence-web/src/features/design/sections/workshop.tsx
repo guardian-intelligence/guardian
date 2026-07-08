@@ -503,7 +503,8 @@ export function SectionWorkshop() {
               <span style={{ color: "#C0C0F2" }}>import</span>
               {" { sandbox } "}
               <span style={{ color: "#C0C0F2" }}>from</span>{" "}
-              <span style={{ color: "var(--color-amber)" }}>{`"@verself/compute"`}</span>;{"\n\n"}
+              <span style={{ color: "var(--color-amber)" }}>{`"@postflight/compute"`}</span>;
+              {"\n\n"}
               <span style={{ color: "#C0C0F2" }}>await</span> sandbox.run({"{"}
               {"\n"}
               {"  tenant:   "}

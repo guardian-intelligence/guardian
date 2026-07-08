@@ -74,5 +74,5 @@ spec:
         timeout: 45s
         metadata:
           type: cmd
-          cmd: "hey -z 20s -q 20 -c 10 -disable-keepalive http://keycloak-canary.tenant-guardian-beta/realms/verself/.well-known/openid-configuration"
+          cmd: "hey -z 20s -q 20 -c 10 -disable-keepalive http://keycloak-canary.tenant-guardian-beta/realms/postflight/.well-known/openid-configuration"
           logCmdOutput: "true"

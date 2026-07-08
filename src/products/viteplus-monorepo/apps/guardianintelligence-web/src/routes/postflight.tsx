@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-// Placeholder for the Verself out-of-box experience (OOBE). The IAM login
+// Placeholder for the Postflight out-of-box experience (OOBE). The IAM login
 // canary GETs this page as the post-login landing step of its new-user
-// flow; the real OOBE replaces this route when the Verself surface lands.
+// flow; the real OOBE replaces this route when the Postflight surface lands.
 // Server-rendered plain HTML on purpose: no client bundle, no styling
 // dependencies, stable for synthetic checks.
 const html = `<!doctype html>
@@ -11,7 +11,7 @@ const html = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>Verself</title>
+<title>Postflight</title>
 <style>
   body { margin: 0; min-height: 100vh; display: grid; place-items: center;
          font: 16px/1.5 system-ui, sans-serif; background: #0b0c0e; color: #e8e6e1; }
@@ -21,8 +21,8 @@ const html = `<!doctype html>
 </style>
 </head>
 <body>
-<main data-verself-oobe="placeholder">
-  <h1>Verself</h1>
+<main data-postflight-oobe="placeholder">
+  <h1>Postflight</h1>
   <p>Account setup is not open yet.</p>
 </main>
 </body>
@@ -34,7 +34,7 @@ const headers = {
   "content-type": "text/html; charset=utf-8",
 } as const;
 
-export const Route = createFileRoute("/verself")({
+export const Route = createFileRoute("/postflight")({
   server: {
     handlers: {
       HEAD: () => new Response(null, { status: 200, headers }),

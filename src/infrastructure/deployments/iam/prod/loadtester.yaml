@@ -132,13 +132,13 @@ data:
     base="http://keycloak-canary.tenant-guardian-prod"
 
     curl -fsS --max-time 10 \
-      "$base/realms/verself/.well-known/openid-configuration" \
+      "$base/realms/postflight/.well-known/openid-configuration" \
       | grep -q '"issuer"'
 
     token="$(curl -fsS --max-time 10 \
       -d 'grant_type=password&client_id=canary&username=canary' \
       --data-urlencode "password=${CANARY_PASSWORD}" \
-      "$base/realms/verself/protocol/openid-connect/token" \
+      "$base/realms/postflight/protocol/openid-connect/token" \
       | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
     test -n "$token"
     echo "login-gate: OK (discovery + direct grant against canary color)"
