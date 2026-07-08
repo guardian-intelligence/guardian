@@ -317,6 +317,51 @@ func TestHandleSlackSuppressesHeartbeats(t *testing.T) {
 	}
 }
 
+func TestHandleSlackSeverityFloor(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload string
+		dropped bool
+	}{
+		{"informational attachment field", `{"attachments":[{"fields":[{"title":"event","value":"CPUThrottlingHigh"},{"title":"severity","value":"informational"}]}]}`, true},
+		{"indeterminate attachment field", `{"attachments":[{"fields":[{"title":"event","value":"SomethingOdd"},{"title":"severity","value":"Indeterminate"}]}]}`, true},
+		{"alerta text-only informational", alertaJSON(alertaText("Open", "PRODUCTION", "kubernetes-resources", "Informational", "CPUThrottlingHigh", "tenant-root/vmselect-shortterm-1/vmselect")), true},
+		{"warning still pages", alertaJSON(alertaText("Open", "PRODUCTION", "postgres", "Warning", "PGConnectionSaturation", "postgres-products-1")), false},
+		{"critical still pages", `{"attachments":[{"fields":[{"title":"event","value":"PGScrapeDown"},{"title":"severity","value":"critical"}]}]}`, false},
+		{"missing severity still pages", `{"attachments":[{"fields":[{"title":"event","value":"MysteryAlert"}]}]}`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := &fakeSink{}
+			s := newTestServer(out)
+			w := httptest.NewRecorder()
+			s.handleSlack(w, httptest.NewRequest("POST", "/slack", strings.NewReader(tc.payload)))
+			s.inflight.Wait()
+			if tc.dropped {
+				if w.Code != 200 {
+					t.Fatalf("status = %d, want 200", w.Code)
+				}
+				if len(out.sent) != 0 {
+					t.Errorf("below-floor payload was forwarded: %+v", out.sent)
+				}
+				if got := s.m.belowFloor.Load(); got != 1 {
+					t.Errorf("belowFloor counter = %d, want 1", got)
+				}
+			} else {
+				if w.Code != 202 {
+					t.Fatalf("status = %d, want 202", w.Code)
+				}
+				if len(out.sent) != 1 {
+					t.Fatalf("forwarded %d notifications, want 1", len(out.sent))
+				}
+				if got := s.m.belowFloor.Load(); got != 0 {
+					t.Errorf("belowFloor counter = %d, want 0", got)
+				}
+			}
+		})
+	}
+}
+
 func TestHandleSlackParseFallback(t *testing.T) {
 	out := &fakeSink{}
 	s := newTestServer(out)

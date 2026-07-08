@@ -82,7 +82,9 @@ type sink interface {
 // (danger/good are colors, the rest severities): critical→5, major→4,
 // minor/warning→3, informational/indeterminate→2, ok/cleared/normal→2.
 // Unmapped values page at the default priority 3 rather than being dropped
-// or demoted.
+// or demoted. informational/indeterminate never reach the sink at all (see
+// unpageableSeverities); their entries here only matter if the floor set
+// ever shrinks.
 var priorityMap = map[string]int{
 	"critical":      5,
 	"danger":        5,
@@ -236,6 +238,33 @@ func isHeartbeat(p slackPayload) bool {
 	return strings.EqualFold(ev, "Watchdog") || strings.EqualFold(ev, "Heartbeat")
 }
 
+// unpageableSeverities is the pager's severity floor: alerts below it stay
+// visible in Alerta (the system of record) but never reach ntfy — the pager
+// carries only what needs a response. Only explicitly matched severities are
+// withheld; an empty or unknown severity still pages rather than risking a
+// silently dropped alert.
+var unpageableSeverities = map[string]bool{
+	"informational": true,
+	"indeterminate": true,
+}
+
+// severityOf extracts the alert severity from either payload shape:
+// machinery attachments carry a severity field, Alerta's slack plugin
+// carries it inside the text-only summary.
+func severityOf(p slackPayload) string {
+	if sev := fieldValue(p, "severity"); sev != "" {
+		return sev
+	}
+	if s, ok := parseAlertaSummary(p.Text); ok {
+		return s.severity
+	}
+	return ""
+}
+
+func isUnpageable(p slackPayload) bool {
+	return unpageableSeverities[strings.ToLower(strings.TrimSpace(severityOf(p)))]
+}
+
 func compose(p slackPayload) notification {
 	// When no attachment carries severity or event fields, this is not an
 	// attachment-style payload: try the Alerta text-only summary before the
@@ -325,6 +354,7 @@ type metrics struct {
 	forwarded        atomic.Uint64
 	forwardFailures  atomic.Uint64
 	suppressed       atomic.Uint64
+	belowFloor       atomic.Uint64
 	coalesced        atomic.Uint64
 	watchdogLastSeen atomic.Int64
 	pipelineSilent   atomic.Int64
@@ -340,6 +370,9 @@ func (m *metrics) render(w io.Writer) {
 	fmt.Fprintf(w, "# HELP relay_heartbeats_suppressed_total Watchdog/Heartbeat payloads counted but not forwarded.\n")
 	fmt.Fprintf(w, "# TYPE relay_heartbeats_suppressed_total counter\n")
 	fmt.Fprintf(w, "relay_heartbeats_suppressed_total %d\n", m.suppressed.Load())
+	fmt.Fprintf(w, "# HELP relay_below_severity_floor_total Informational/indeterminate alerts left in Alerta instead of paged.\n")
+	fmt.Fprintf(w, "# TYPE relay_below_severity_floor_total counter\n")
+	fmt.Fprintf(w, "relay_below_severity_floor_total %d\n", m.belowFloor.Load())
 	fmt.Fprintf(w, "# HELP relay_notifications_coalesced_total Notifications merged into a digest instead of sent individually.\n")
 	fmt.Fprintf(w, "# TYPE relay_notifications_coalesced_total counter\n")
 	fmt.Fprintf(w, "relay_notifications_coalesced_total %d\n", m.coalesced.Load())
@@ -713,6 +746,11 @@ func (s *server) handleSlack(w http.ResponseWriter, r *http.Request) {
 	case isHeartbeat(p):
 		s.m.suppressed.Add(1)
 		slog.Info("heartbeat suppressed", "event", eventName(p))
+		w.WriteHeader(http.StatusOK)
+		return
+	case isUnpageable(p):
+		s.m.belowFloor.Add(1)
+		slog.Info("below severity floor, not paged", "event", eventName(p), "severity", severityOf(p))
 		w.WriteHeader(http.StatusOK)
 		return
 	default:
