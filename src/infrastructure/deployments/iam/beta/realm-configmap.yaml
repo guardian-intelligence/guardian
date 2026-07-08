@@ -1,4 +1,4 @@
-# verself realm, imported at first boot via --import-realm. Two placeholder
+# postflight realm, imported at first boot via --import-realm. Two placeholder
 # mechanisms, deliberately different:
 # - The canary password placeholder is resolved by Keycloak FROM THE
 #   CONTAINER'S ENVIRONMENT at import time (documented startup-import
@@ -19,7 +19,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: keycloak-realm-verself
+  name: keycloak-realm-postflight
   namespace: tenant-guardian-beta
   labels:
     app.kubernetes.io/name: keycloak
@@ -28,9 +28,9 @@ metadata:
   annotations:
     kustomize.toolkit.fluxcd.io/substitute: disabled
 data:
-  verself-realm.json: |
+  postflight-realm.json: |
     {
-      "realm": "verself",
+      "realm": "postflight",
       "enabled": true,
       "sslRequired": "external",
       "registrationAllowed": false,
@@ -65,8 +65,8 @@ data:
       ],
       "clients": [
         {
-          "clientId": "verself-web",
-          "name": "Verself web (placeholder OOBE)",
+          "clientId": "postflight-web",
+          "name": "Postflight web (placeholder OOBE)",
           "enabled": true,
           "protocol": "openid-connect",
           "publicClient": true,
@@ -74,7 +74,7 @@ data:
           "directAccessGrantsEnabled": false,
           "implicitFlowEnabled": false,
           "serviceAccountsEnabled": false,
-          "redirectUris": ["https://guardianintelligence.org/verself", "https://guardianintelligence.org/verself/*", "https://beta.guardianintelligence.org/verself", "https://beta.guardianintelligence.org/verself/*"],
+          "redirectUris": ["https://guardianintelligence.org/postflight", "https://guardianintelligence.org/postflight/*", "https://beta.guardianintelligence.org/postflight", "https://beta.guardianintelligence.org/postflight/*"],
           "webOrigins": ["https://beta.guardianintelligence.org", "https://guardianintelligence.org"]
         },
         {

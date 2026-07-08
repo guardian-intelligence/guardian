@@ -1,4 +1,4 @@
-# Keycloak for the Verself IAM beta stage. Hand-rolled Deployment (not the
+# Keycloak for the Postflight IAM beta stage. Hand-rolled Deployment (not the
 # official Operator or keycloakx chart — both render StatefulSets, and
 # Flagger's targetRef only supports Deployment/DaemonSet). Durable state is
 # the stage's CNPG Postgres; multi-pod cache clustering uses the Quarkus
@@ -25,7 +25,7 @@ metadata:
     app.kubernetes.io/name: keycloak
     app.kubernetes.io/part-of: guardian
     app.kubernetes.io/component: iam
-    guardian.dev/product: verself
+    guardian.dev/product: postflight
     guardian.dev/stage: beta
 spec:
   replicas: 2
@@ -39,7 +39,7 @@ spec:
         app.kubernetes.io/name: keycloak
         app.kubernetes.io/part-of: guardian
         app.kubernetes.io/component: iam
-        guardian.dev/product: verself
+        guardian.dev/product: postflight
         guardian.dev/stage: beta
     spec:
       automountServiceAccountToken: false
@@ -195,7 +195,7 @@ spec:
       volumes:
         - name: realm-import
           configMap:
-            name: keycloak-realm-verself
+            name: keycloak-realm-postflight
         # The file name follows the file-vault provider's REALM_UNDERSCORE_KEY
         # convention (<realm>_<key>); the Secret keeps its existing key and the
         # mount does the renaming, so the ExternalSecret and any pod still
@@ -205,7 +205,7 @@ spec:
             secretName: keycloak-github-oauth
             items:
               - key: GITHUB_CLIENT_SECRET
-                path: verself_github-client-secret
+                path: postflight_github-client-secret
 ---
 # Per-color JGroups discovery targets (DNS_PING). publishNotReadyAddresses is
 # required: pods must find each other before they report Ready.

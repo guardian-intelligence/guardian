@@ -6,7 +6,7 @@
 //      realm user against the in-cluster apex Service (the exact primary
 //      path users hit, minus the edge, which edge-health covers);
 //   2. new-user happy path — create a fresh user via the admin API, first
-//      login, land on the Verself OOBE placeholder page, then wipe the user
+//      login, land on the Postflight OOBE placeholder page, then wipe the user
 //      (the wipe is what makes every run a true first-time signup);
 //   3. cancellation — the OIDC auth page must render with the GitHub IdP
 //      link, and a brokered cancel callback (GitHub redirecting back with
@@ -50,7 +50,7 @@ function tokenRequest(realmURL, body) {
 }
 
 function existingUser() {
-  const res = tokenRequest(`${KC}/realms/verself`, {
+  const res = tokenRequest(`${KC}/realms/postflight`, {
     grant_type: 'password',
     client_id: 'canary',
     username: __ENV.CANARY_USERNAME,
@@ -92,7 +92,7 @@ function wipeNewUser(base, auth) {
 
 function newUser() {
   const auth = adminHeaders();
-  const base = `${KC}/admin/realms/verself`;
+  const base = `${KC}/admin/realms/postflight`;
   wipeNewUser(base, auth); // clear residue from any previous failed run
   const created = http.post(
     `${base}/users`,
@@ -109,7 +109,7 @@ function newUser() {
     }),
     auth,
   );
-  const login = tokenRequest(`${KC}/realms/verself`, {
+  const login = tokenRequest(`${KC}/realms/postflight`, {
     grant_type: 'password',
     client_id: 'canary',
     username: 'canary-newuser',
@@ -124,7 +124,7 @@ function newUser() {
       'new-user: first login': (o) =>
         o.login.status === 200 && o.login.json('access_token') !== undefined,
       'new-user: OOBE page served': (o) =>
-        o.oobe.status === 200 && o.oobe.body.includes('data-verself-oobe'),
+        o.oobe.status === 200 && o.oobe.body.includes('data-postflight-oobe'),
       'new-user: state wiped': (o) => o.wiped === true,
     },
   );
@@ -132,12 +132,12 @@ function newUser() {
 
 function cancellation() {
   const authPage = http.get(
-    `${PUB}/realms/verself/protocol/openid-connect/auth` +
-      `?client_id=verself-web&redirect_uri=${encodeURIComponent(OOBE)}` +
+    `${PUB}/realms/postflight/protocol/openid-connect/auth` +
+      `?client_id=postflight-web&redirect_uri=${encodeURIComponent(OOBE)}` +
       `&response_type=code&scope=openid`,
   );
   const cancel = http.get(
-    `${PUB}/realms/verself/broker/github/endpoint?error=access_denied&state=synthetic-cancel`,
+    `${PUB}/realms/postflight/broker/github/endpoint?error=access_denied&state=synthetic-cancel`,
   );
   return check(
     { authPage, cancel },

@@ -46,19 +46,19 @@
     guardian_stage: root
     guardian_expected_statuses: "503"
 - targets:
-    - https://beta.guardianintelligence.org/realms/verself/.well-known/openid-configuration
+    - https://beta.guardianintelligence.org/realms/postflight/.well-known/openid-configuration
   labels:
     guardian_surface: iam
     guardian_stage: beta
     guardian_expected_statuses: "200"
 - targets:
-    - https://gamma.guardianintelligence.org/realms/verself/.well-known/openid-configuration
+    - https://gamma.guardianintelligence.org/realms/postflight/.well-known/openid-configuration
   labels:
     guardian_surface: iam
     guardian_stage: gamma
     guardian_expected_statuses: "200"
 - targets:
-    - https://guardianintelligence.org/realms/verself/.well-known/openid-configuration
+    - https://guardianintelligence.org/realms/postflight/.well-known/openid-configuration
   labels:
     guardian_surface: iam
     guardian_stage: prod

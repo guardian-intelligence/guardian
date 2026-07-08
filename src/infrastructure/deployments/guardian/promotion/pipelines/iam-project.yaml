@@ -1,4 +1,4 @@
-# The Verself IAM promotion pipeline. The Warehouse tracks upstream Keycloak
+# The Postflight IAM promotion pipeline. The Warehouse tracks upstream Keycloak
 # releases on quay.io directly (SemVer within the pinned minor — moving to a
 # new minor/major is a deliberate Git edit of this constraint, because major
 # upgrades migrate the shared DB schema and must go through a backup-first

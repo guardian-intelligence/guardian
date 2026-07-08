@@ -161,7 +161,7 @@ Example commits to crib from:
   add — importer-plan entry carrying a private key (base64 in the env file),
   ESO wiring with a consumer-specific label, IDs that are public identity
   staying in Git.
-- `2a44ca6` — *Verself IAM beta*: per-stage consumer wiring — ExternalSecrets
+- `2a44ca6` — *Postflight IAM beta*: per-stage consumer wiring — ExternalSecrets
   resolving into env vars, `substitute: disabled` where `${...}` must
   survive, optional per-stage importer entries.
 - `256958e` — *per-namespace secret scopes*: the structural change shape —
