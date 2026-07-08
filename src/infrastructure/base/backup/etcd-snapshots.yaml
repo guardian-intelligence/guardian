@@ -1,0 +1,176 @@
+# Scheduled etcd snapshots to R2. Git + custody can rebuild the declared
+# cluster, but etcd also holds state that is declared nowhere: Kargo
+# freight/promotion status, Flagger canary state, cert-manager-issued
+# secrets, leases. A snapshot every six hours makes "restore yesterday's
+# cluster" possible without a full re-bootstrap and re-convergence.
+#
+# The credential channel is Talos's kubernetesTalosAPIAccess feature
+# (src/infrastructure/talm): apid watches ServiceAccount CRs in tenant-root
+# and provisions a Secret holding a short-lived talosconfig whose only
+# power is os:etcd:backup — it can stream an etcd snapshot and nothing
+# else. The pod reaches apid through the `talos` Service that the feature
+# maintains in the `default` namespace (control-plane node IPs, port
+# 50000).
+#
+# Snapshots are age-encrypted before upload: an etcd db contains every
+# cluster Secret in the clear. The recipient public key below is public
+# material; the identity (private) key lives only in the operator custody
+# bundle (custody.env GUARDIAN_ETCD_SNAPSHOT_AGE_KEY). Restore procedure:
+# src/infrastructure/runbooks/etcd-snapshot-restore.md.
+apiVersion: talos.dev/v1alpha1
+kind: ServiceAccount
+metadata:
+  name: talos-backup-secrets
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: talos-backup
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: backup
+spec:
+  roles:
+    - os:etcd:backup
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: talos-backup
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: talos-backup
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: backup
+spec:
+  # :20 offset keeps the run clear of the :00 nightly CNPG backups.
+  schedule: '20 */6 * * *'
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1200
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: talos-backup
+            app.kubernetes.io/part-of: guardian
+        spec:
+          restartPolicy: OnFailure
+          automountServiceAccountToken: false
+          containers:
+            - name: talos-backup
+              image: ghcr.io/siderolabs/talos-backup:v0.1.0-beta.3@sha256:05c86663b251a407551dc948097e32e163a345818117eb52c573b0447bd0c7a7
+              command:
+                - /talos-backup
+              workingDir: /tmp
+              env:
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: guardian-backups-creds
+                      key: accessKey
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: guardian-backups-creds
+                      key: secretKey
+                - name: AWS_REGION
+                  valueFrom:
+                    secretKeyRef:
+                      name: guardian-backups-creds
+                      key: region
+                - name: CUSTOM_S3_ENDPOINT
+                  valueFrom:
+                    secretKeyRef:
+                      name: guardian-backups-creds
+                      key: endpoint
+                - name: BUCKET
+                  valueFrom:
+                    secretKeyRef:
+                      name: guardian-backups-creds
+                      key: bucketName
+                - name: USE_PATH_STYLE
+                  value: 'true'
+                - name: CLUSTER_NAME
+                  value: guardian-mgmt
+                - name: S3_PREFIX
+                  value: talos-etcd/guardian-mgmt
+                - name: AGE_RECIPIENT_PUBLIC_KEY
+                  value: age18ykjst8aftuesxn3z68cfjghkpsk5jft9klehlwl47ua5r9mxevqr02ygh
+                - name: ENABLE_COMPRESSION
+                  value: 'true'
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  memory: 512Mi
+              securityContext:
+                runAsUser: 1000
+                runAsGroup: 1000
+                runAsNonRoot: true
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+                seccompProfile:
+                  type: RuntimeDefault
+              volumeMounts:
+                - mountPath: /tmp
+                  name: tmp
+                - mountPath: /.talos
+                  name: talos
+                - mountPath: /var/run/secrets/talos.dev
+                  name: talos-secrets
+          volumes:
+            - name: tmp
+              emptyDir: {}
+            - name: talos
+              emptyDir: {}
+            - name: talos-secrets
+              secret:
+                secretName: talos-backup-secrets
+---
+# Egress: DNS (the `talos` Service name and the R2 endpoint hostname),
+# apid on the control-plane nodes (post-DNAT identity of the `talos`
+# Service backends is host/remote-node), and R2 over 443. The endpoint
+# URL is config (an OpenBao secret), so world:443 is the honest scope —
+# same reasoning as alert-relay's pager sink.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: talos-backup
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: talos-backup
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: backup
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: talos-backup
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: '53'
+              protocol: UDP
+            - port: '53'
+              protocol: TCP
+    - toEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: '50000'
+              protocol: TCP
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: '443'
+              protocol: TCP

@@ -10,6 +10,7 @@ resources:
   - tenants/guardian.yaml
   - secrets/external-secrets.yaml
   - secrets/backup-storage-credentials.yaml
+  - backup/etcd-snapshots.yaml
   - networking/metallb.yaml
   - networking/subnet-mtu.yaml
   - observability/talos-log-receiver.yaml

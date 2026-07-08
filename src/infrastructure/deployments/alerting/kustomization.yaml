@@ -8,6 +8,7 @@ resources:
   - audit-alerts.yaml
   - blackbox-exporter.yaml
   - electric-scrape.yaml
+  - etcd-snapshot-alerts.yaml
   - postgres-alerts.yaml
   - synthetic-probes.yaml
   - talos-host-log-alerts.yaml

@@ -1,0 +1,59 @@
+# Freshness and failure alerts for the talos-backup CronJob
+# (base/backup/etcd-snapshots.yaml). Same posture as postgres-alerts: a
+# backup that is not asserted fresh is assumed broken. All three rules
+# read kube-state-metrics series, so EtcdSnapshotMetricsAbsent doubles as
+# the guard against the other two going silently blind.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: etcd-snapshot-health
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: etcd-snapshot-health
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  groups:
+    - name: etcd-snapshot-health.rules
+      interval: 60s
+      rules:
+        - alert: EtcdSnapshotStale
+          expr: time() - max(kube_cronjob_status_last_successful_time{namespace="tenant-root", cronjob="talos-backup"}) > 28800
+          for: 15m
+          labels:
+            severity: critical
+            guardian_component: backup
+          annotations:
+            summary: 'etcd snapshot stale'
+            description: >-
+              The newest successful talos-backup run is older than 8 hours
+              (six-hour schedule plus slack). Cluster state newer than the
+              last snapshot in R2 is only recoverable by full
+              re-convergence from Git. Restore and debugging context:
+              src/infrastructure/runbooks/etcd-snapshot-restore.md.
+        - alert: EtcdSnapshotJobFailed
+          expr: max(kube_job_status_failed{namespace="tenant-root", job_name=~"talos-backup-.*"}) > 0
+          for: 10m
+          labels:
+            severity: warning
+            guardian_component: backup
+          annotations:
+            summary: 'etcd snapshot job failed'
+            description: >-
+              A talos-backup Job has failed pods and no later attempt has
+              replaced it yet. This also covers the never-succeeded case
+              after first deploy, which EtcdSnapshotStale cannot see
+              (last_successful_time does not exist until a first success).
+        - alert: EtcdSnapshotMetricsAbsent
+          expr: absent(kube_cronjob_status_last_schedule_time{namespace="tenant-root", cronjob="talos-backup"})
+          for: 30m
+          labels:
+            severity: critical
+            guardian_component: backup
+          annotations:
+            summary: 'etcd snapshot CronJob missing from metrics'
+            description: >-
+              kube-state-metrics no longer reports the talos-backup
+              CronJob: either the object was deleted or KSM is blind, and
+              in both cases every etcd-snapshot rule is dark. Treat with
+              the same urgency as a failed backup.

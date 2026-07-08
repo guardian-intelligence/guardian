@@ -14,9 +14,12 @@ What this covers: the `guardian-backups` R2 bucket fed by Cozystack's
 `cozy-default` BackupClass — CNPG/barman for
 `tenant-root/postflight-controlplane` and `tenant-guardian-prod/keycloak`
 Postgres (continuous WAL + nightly base), clickhouse-backup for
-`tenant-root/analytics` (nightly archive). Sibling procedure docs:
-`postgres-backup-restore.md` (enablement, two-BackupJob rule, drill
-mechanics), `analytics-clickhouse.md` (CH specifics + chart bugs).
+`tenant-root/analytics` (nightly archive), and talos-backup for
+age-encrypted etcd snapshots every six hours (`talos-etcd/` prefix).
+Sibling procedure docs: `postgres-backup-restore.md` (enablement,
+two-BackupJob rule, drill mechanics), `analytics-clickhouse.md` (CH
+specifics + chart bugs), `etcd-snapshot-restore.md` (etcd recovery
+ladder + drill log).
 
 ## Cadence
 
@@ -139,7 +142,8 @@ is the alarm, not the absolute):
   backup audit.
 - **No foreign prefixes.** Only `tenant-root/postflight-controlplane/`,
   `tenant-guardian-prod/keycloak/`, `tenant-root/analytics/`, `velero/`
-  (when VMs exist), and `probe/` belong in this bucket.
+  (when VMs exist), `talos-etcd/` (age-encrypted etcd snapshots), and
+  `probe/` belong in this bucket.
 
 ## 4. Restore drill (usability)
 
