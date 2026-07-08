@@ -17,11 +17,11 @@ import (
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
-const serviceName = "verself-runner-controlplane"
+const serviceName = "postflight-runner-controlplane"
 
-// Event names — verself's github-integration taxonomy for the ingest slice,
+// Event names — postflight's github-integration taxonomy for the ingest slice,
 // plus the new comment-engine pair. Emitted as span events and structured
-// logs; verself wrote these straight to ClickHouse, here the OTel collector
+// logs; postflight wrote these straight to ClickHouse, here the OTel collector
 // owns transport.
 const (
 	evWebhookReceived       = "github.webhook.received"
@@ -41,8 +41,8 @@ const (
 	evRefreshCompleted      = "github.provider.refresh.completed"
 	evAssignmentObserved    = "github.runner.assignment.observed"
 	evJobTerminalObserved   = "github.job.terminal.observed"
-	evCommentPosted         = "verself.comment.posted"
-	evCommentFailed         = "verself.comment.failed"
+	evCommentPosted         = "postflight.comment.posted"
+	evCommentFailed         = "postflight.comment.failed"
 )
 
 // initTracing registers a global tracer exporting to the OTLP gRPC collector

@@ -50,7 +50,7 @@ func applyMigration(ctx context.Context, pool *pgxpool.Pool, name string) error 
 
 	// int8 keyspace, distinct from the worker's int4-pair job locks.
 	if _, err := tx.Exec(ctx,
-		`SELECT pg_advisory_xact_lock(hashtextextended('verself-controlplane:migrations', 0))`); err != nil {
+		`SELECT pg_advisory_xact_lock(hashtextextended('postflight-controlplane:migrations', 0))`); err != nil {
 		return err
 	}
 	var applied bool

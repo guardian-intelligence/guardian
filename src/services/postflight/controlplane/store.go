@@ -310,7 +310,7 @@ SET state = 'failed', processed_at = now(), processing_started_at = NULL, update
 WHERE delivery_id = $1 AND state = 'processing'`
 )
 
-// transitionDelivery is verself's updateDeliveryWithProblems: one tx =
+// transitionDelivery is postflight's updateDeliveryWithProblems: one tx =
 // problem appends + guarded state UPDATE.
 func (s *pgStore) transitionDelivery(ctx context.Context, deliveryID, sql string, problems []problem, args ...any) error {
 	tx, err := s.pool.Begin(ctx)
@@ -611,7 +611,7 @@ func (s *pgStore) ListQueuedJobsForReconcile(ctx context.Context, batch int, qui
 
 // jobLockKeys derives the pg_try_advisory_lock (int4, int4) pair from the
 // provider job id alone: big-endian split, each half masked positive — the
-// same masking verself used for its pair-key locks. This int4-pair keyspace
+// same masking postflight used for its pair-key locks. This int4-pair keyspace
 // is distinct from pg_advisory_xact_lock(int8) users (e.g. the migration
 // lock), so they cannot collide.
 func jobLockKeys(jobID int64) (int32, int32) {

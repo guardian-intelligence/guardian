@@ -23,7 +23,7 @@ import (
 
 const (
 	githubAPIVersion = "2022-11-28"
-	githubUserAgent  = "verself-runner-controlplane"
+	githubUserAgent  = "postflight-runner-controlplane"
 	// Installation tokens live 1h; refresh at 45m so a token is never
 	// presented near expiry.
 	installationTokenRefreshAge = 45 * time.Minute

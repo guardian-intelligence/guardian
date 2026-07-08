@@ -21,7 +21,7 @@ go_library(
         "worker.go",
     ],
     embedsrcs = ["migrations/001_initial.sql"],
-    importpath = "github.com/guardian-intelligence/guardian/src/services/verself/controlplane",
+    importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/controlplane",
     visibility = ["//visibility:private"],
     deps = [
         "@com_github_jackc_pgx_v5//:pgx",
@@ -74,9 +74,9 @@ pkg_tar(
 oci_image(
     name = "image",
     annotations = {
-        "org.opencontainers.image.description": "Verself runner control plane (GitHub workflow_job ingest, delivery ledger, PR comments)",
+        "org.opencontainers.image.description": "Postflight runner control plane (GitHub workflow_job ingest, delivery ledger, PR comments)",
         "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
-        "org.opencontainers.image.title": "verself-controlplane",
+        "org.opencontainers.image.title": "postflight-controlplane",
     },
     base = "@ubuntu_noble_base_linux_amd64",
     entrypoint = ["/app/controlplane"],
@@ -88,15 +88,15 @@ oci_image(
 oci_load(
     name = "load",
     image = ":image",
-    repo_tags = ["guardian/verself-controlplane:dev"],
+    repo_tags = ["guardian/postflight-controlplane:dev"],
 )
 
-# Pushed by CI (.github/workflows/verself-controlplane-image.yml) on merges to
+# Pushed by CI (.github/workflows/postflight-controlplane-image.yml) on merges to
 # main; the workflow file path is the cosign trust anchor for this image.
 oci_push(
     name = "push",
     image = ":image",
     remote_tags = ["edge"],
-    repository = "ghcr.io/guardian-intelligence/verself-controlplane",
+    repository = "ghcr.io/guardian-intelligence/postflight-controlplane",
     visibility = ["//visibility:public"],
 )

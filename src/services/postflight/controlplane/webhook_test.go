@@ -60,7 +60,7 @@ func signBody(body []byte) string {
 	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
 }
 
-var testPayload = []byte(`{"action":"queued","installation":{"id":42},"repository":{"id":7,"full_name":"guardian-intelligence/guardian"},"workflow_job":{"id":100,"run_id":200,"run_attempt":0,"labels":["verself-4cpu-16gb"]}}`)
+var testPayload = []byte(`{"action":"queued","installation":{"id":42},"repository":{"id":7,"full_name":"guardian-intelligence/guardian"},"workflow_job":{"id":100,"run_id":200,"run_attempt":0,"labels":["postflight-4cpu-16gb"]}}`)
 
 type reqOpt func(*http.Request)
 
@@ -250,7 +250,7 @@ func TestWebhookReplayConflict(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
 		t.Fatalf("decode problem doc: %v", err)
 	}
-	if doc.Type != "urn:guardian:verself-runner:problem:provider_webhook.delivery_replay_conflict" {
+	if doc.Type != "urn:guardian:postflight-runner:problem:provider_webhook.delivery_replay_conflict" {
 		t.Fatalf("problem type = %q", doc.Type)
 	}
 }

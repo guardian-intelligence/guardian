@@ -25,7 +25,7 @@ type problem struct {
 }
 
 func (p problem) typeURI() string {
-	return "urn:guardian:verself-runner:problem:" + p.Code
+	return "urn:guardian:postflight-runner:problem:" + p.Code
 }
 
 func problemMethodNotAllowed() problem {
