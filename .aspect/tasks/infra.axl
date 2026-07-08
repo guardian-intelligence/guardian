@@ -1500,6 +1500,27 @@ def _openbao_reinit_impl(ctx):
     if local == None:
         return 1
 
+    # HEAD == origin/main is not enough: bazel builds the importer from the
+    # WORKING TREE, so an uncommitted edit to the import plan would pass the
+    # revision gate and re-seed the whole KV from unreviewed code. Require a
+    # clean tree before building. (The Go tool re-checks via --repo-root.)
+    tree_status = _capture_stdout(
+        ctx,
+        "git",
+        ["status", "--porcelain"],
+        cwd = ws_path(ctx),
+        label = "git status --porcelain",
+    )
+    if tree_status == None:
+        return 1
+    if tree_status != "":
+        ctx.std.io.stderr.write(
+            "ERROR: the working tree is dirty; the importer is built from the working tree, " +
+            "so uncommitted changes would re-seed OpenBao from unreviewed code. Commit, stash, " +
+            "or clean these first:\n" + tree_status + "\n",
+        )
+        return 1
+
     # The importer binary embeds the DR re-seed plan; build it from this
     # checkout (the tool refuses to run unless the checkout IS origin/main).
     importer = bazel_output_file(ctx, OPENBAO_SECRET_IMPORT_TARGET)
@@ -1511,6 +1532,8 @@ def _openbao_reinit_impl(ctx):
         kubectl,
         "--importer",
         importer,
+        "--repo-root",
+        ws_path(ctx),
         "--env-file",
         ctx.args.env_file,
         "--expected-revision",
@@ -1521,6 +1544,8 @@ def _openbao_reinit_impl(ctx):
         ctx.args.namespace,
         "--statefulset",
         ctx.args.statefulset,
+        "--replicas",
+        ctx.args.replicas,
         "--request-timeout",
         ctx.args.request_timeout,
         "--pod-wait-timeout",
@@ -2471,6 +2496,7 @@ openbao_reinit = task(
         "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
         "namespace": args.string(default = "tenant-guardian", description = "OpenBao namespace."),
         "pod_wait_timeout": args.string(default = "10m", description = "Timeout for the raft members to reach Running/Ready after the reset."),
+        "replicas": args.string(default = "0", description = "Raft member count to restore after the reset. 0 reads the live StatefulSet spec (the source of truth for the PVC set and scale-back); a non-zero value must match it and is required only when an interrupted reset left the StatefulSet at 0."),
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
         "statefulset": args.string(default = "guardian-openbao", description = "OpenBao StatefulSet name."),
         "sync_timeout": args.string(default = "10m", description = "Timeout for every ExternalSecret to report synced after the force-sync."),

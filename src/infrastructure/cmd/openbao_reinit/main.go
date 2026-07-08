@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,6 +54,7 @@ type options struct {
 
 	EnvFile  string
 	Importer string
+	RepoRoot string
 
 	ExpectedRevision string
 	LocalRevision    string
@@ -77,11 +79,12 @@ func main() {
 	flag.StringVar(&opts.RequestTimeout, "request-timeout", "15s", "kubectl API request timeout")
 	flag.StringVar(&opts.Namespace, "namespace", "tenant-guardian", "OpenBao namespace")
 	flag.StringVar(&opts.StatefulSet, "statefulset", "guardian-openbao", "OpenBao StatefulSet name")
-	flag.IntVar(&opts.Replicas, "replicas", 3, "raft member count to restore after the reset")
+	flag.IntVar(&opts.Replicas, "replicas", 0, "raft member count to restore after the reset; 0 reads the live StatefulSet spec, a non-zero value must match it (required when an interrupted reset left the StatefulSet at 0)")
 	flag.StringVar(&opts.Service, "service", "guardian-openbao-active", "OpenBao service used for port-forward")
 	flag.StringVar(&opts.CASecret, "ca-secret", "guardian-openbao-api-tls", "Secret containing the OpenBao API ca.crt")
 	flag.StringVar(&opts.EnvFile, "env-file", "", "custody import env file (absolute path; prepared per the runbook, consumed and deleted by the importer)")
 	flag.StringVar(&opts.Importer, "importer", "", "path to the openbao_secret_import binary built from this checkout")
+	flag.StringVar(&opts.RepoRoot, "repo-root", "", "repository root the importer was built from; its working tree must be clean")
 	flag.StringVar(&opts.ExpectedRevision, "expected-revision", "", "origin/main HEAD commit the cluster and checkout must both be at")
 	flag.StringVar(&opts.LocalRevision, "local-revision", "", "HEAD commit of the checkout that built the importer")
 	flag.StringVar(&opts.FluxNamespace, "flux-namespace", "cozy-fluxcd", "Flux namespace")
@@ -119,10 +122,11 @@ func run(ctx context.Context, opts options) error {
 
 	fmt.Printf("guardian openbao reinit\nnamespace=%s statefulset=%s expected-revision=%s\n", opts.Namespace, opts.StatefulSet, opts.ExpectedRevision)
 
-	if err := checkPreconditions(ctx, runner, opts); err != nil {
+	replicas, err := checkPreconditions(ctx, runner, opts)
+	if err != nil {
 		return err
 	}
-	if err := resetRaft(ctx, runner, opts); err != nil {
+	if err := resetRaft(ctx, runner, opts, replicas); err != nil {
 		return err
 	}
 	if err := baodrill.Run(ctx, baodrill.Config{
@@ -144,7 +148,7 @@ func run(ctx context.Context, opts options) error {
 	if err := forceSyncExternalSecrets(ctx, runner, opts); err != nil {
 		return err
 	}
-	fmt.Printf("\nOpenBao reinit complete: raft reset, %d members verified, custody re-imported, %d generated values re-relayed, every ExternalSecret synced\n", opts.Replicas, len(relayPlan()))
+	fmt.Printf("\nOpenBao reinit complete: raft reset, %d members verified, custody re-imported, %d generated values re-relayed, every ExternalSecret synced\n", replicas, len(relayPlan()))
 	return nil
 }
 
@@ -161,49 +165,85 @@ func validateOptions(opts options) error {
 	if !filepath.IsAbs(opts.EnvFile) {
 		return fmt.Errorf("--env-file %q must be absolute: the tool runs from a Bazel runfiles directory, so a relative path would not resolve to the custody working copy", opts.EnvFile)
 	}
+	if opts.RepoRoot == "" {
+		return errors.New("--repo-root is required (the checkout the importer was built from; its working tree is verified clean)")
+	}
 	if opts.ExpectedRevision == "" || opts.LocalRevision == "" {
 		return errors.New("--expected-revision and --local-revision are required")
 	}
-	if opts.Replicas <= 0 {
-		return fmt.Errorf("--replicas %d must be positive", opts.Replicas)
+	if opts.Replicas < 0 {
+		return fmt.Errorf("--replicas %d must not be negative (0 reads the live StatefulSet)", opts.Replicas)
 	}
 	return nil
 }
 
 // --- preconditions -----------------------------------------------------------
 
-func checkPreconditions(ctx context.Context, runner kubectlRunner, opts options) error {
+// checkPreconditions fails fast on every gate that must hold before the raft
+// wipe, and returns the raft member count read from the live StatefulSet.
+func checkPreconditions(ctx context.Context, runner kubectlRunner, opts options) (int, error) {
 	fmt.Printf("\n## precondition: checkout matches origin/main\n")
 	if err := localRevisionProblem(opts.LocalRevision, opts.ExpectedRevision); err != nil {
-		return err
+		return 0, err
 	}
 	fmt.Printf("checkout at %s\n", opts.LocalRevision)
+
+	fmt.Printf("\n## precondition: clean working tree at %s\n", opts.RepoRoot)
+	status, err := gitPorcelainStatus(ctx, opts.RepoRoot)
+	if err != nil {
+		return 0, err
+	}
+	if err := dirtyTreeProblem(status); err != nil {
+		return 0, err
+	}
+	fmt.Printf("working tree clean\n")
+
+	fmt.Printf("\n## precondition: importer binary\n")
+	if err := importerProblem(opts.Importer); err != nil {
+		return 0, err
+	}
+	fmt.Printf("%s present and executable\n", opts.Importer)
 
 	fmt.Printf("\n## precondition: %s Kustomization Ready at origin/main\n", opts.SystemKustomization)
 	raw, err := runner.output(ctx, "read "+opts.SystemKustomization+" Kustomization", "-n", opts.FluxNamespace, "get", "kustomization.kustomize.toolkit.fluxcd.io/"+opts.SystemKustomization, "-o", "json")
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if problems := kustomizationProblems(raw, opts.ExpectedRevision); len(problems) > 0 {
-		return fmt.Errorf("%s is not reconciled at origin/main (%s): %s — the self-init block the raft reset boots into would be stale; wait for Flux (tools/ops/cluster-watch --status) before retrying", opts.SystemKustomization, opts.ExpectedRevision, strings.Join(problems, "; "))
+		return 0, fmt.Errorf("%s is not reconciled at origin/main (%s): %s — the self-init block the raft reset boots into would be stale; wait for Flux (tools/ops/cluster-watch --status) before retrying", opts.SystemKustomization, opts.ExpectedRevision, strings.Join(problems, "; "))
 	}
 	fmt.Printf("%s Ready at %s\n", opts.SystemKustomization, opts.ExpectedRevision)
 
+	fmt.Printf("\n## precondition: raft member count from the live StatefulSet\n")
+	liveOut, err := runner.output(ctx, "read StatefulSet replicas", "-n", opts.Namespace, "get", "statefulset.apps/"+opts.StatefulSet, "-o", "jsonpath={.spec.replicas}")
+	if err != nil {
+		return 0, err
+	}
+	live, err := strconv.Atoi(strings.TrimSpace(liveOut))
+	if err != nil {
+		return 0, fmt.Errorf("parse live StatefulSet replicas %q: %w", strings.TrimSpace(liveOut), err)
+	}
+	replicas, err := resolveReplicas(opts.Replicas, live)
+	if err != nil {
+		return 0, err
+	}
+	fmt.Printf("raft member count: %d\n", replicas)
+
 	fmt.Printf("\n## precondition: %s namespace enforces privileged Pod Security\n", opts.Namespace)
 	if err := ensurePrivilegedPSALabel(ctx, runner, opts); err != nil {
-		return err
+		return 0, err
 	}
 
 	fmt.Printf("\n## precondition: custody import env file\n")
 	info, err := os.Stat(opts.EnvFile)
 	if err != nil {
-		return fmt.Errorf("custody import env file %s: %w — prepare it first (aspect infra custody --action restore, then build import.env per the runbook's Bootstrap Secret Import section)", opts.EnvFile, err)
+		return 0, fmt.Errorf("custody import env file %s: %w — prepare it first (aspect infra custody --action restore, then build import.env per the runbook's Bootstrap Secret Import section)", opts.EnvFile, err)
 	}
 	if info.Size() == 0 {
-		return fmt.Errorf("custody import env file %s is empty", opts.EnvFile)
+		return 0, fmt.Errorf("custody import env file %s is empty", opts.EnvFile)
 	}
 	fmt.Printf("%s present (%d bytes)\n", opts.EnvFile, info.Size())
-	return nil
+	return replicas, nil
 }
 
 func localRevisionProblem(local, expected string) error {
@@ -211,6 +251,64 @@ func localRevisionProblem(local, expected string) error {
 		return fmt.Errorf("checkout HEAD %s is not origin/main %s: the importer binary embeds the import plan, and seeding from a stale plan is the reinit's #1 historical footgun — run from an up-to-date origin/main checkout", local, expected)
 	}
 	return nil
+}
+
+func gitPorcelainStatus(ctx context.Context, repoRoot string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "status", "--porcelain")
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git status --porcelain in %s: %w\n%s", repoRoot, err, buf.String())
+	}
+	return buf.String(), nil
+}
+
+// dirtyTreeProblem enforces that the checkout the importer is built from has
+// no uncommitted changes: the HEAD-vs-origin/main gate alone would let an
+// uncommitted edit to the import plan re-seed the whole KV from unreviewed
+// code, because bazel builds from the working tree, not from HEAD.
+func dirtyTreeProblem(porcelainStatus string) error {
+	trimmed := strings.TrimSpace(porcelainStatus)
+	if trimmed == "" {
+		return nil
+	}
+	return fmt.Errorf("the working tree is dirty; the importer is built from the working tree, so uncommitted changes would re-seed OpenBao from unreviewed code — commit, stash, or clean first:\n%s", trimmed)
+}
+
+// importerProblem verifies the importer binary before anything destructive
+// runs: it is only exec'd after the raft wipe, and a bad path discovered then
+// would leave OpenBao empty.
+func importerProblem(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("importer binary %s: %w — the importer runs only after the raft wipe, so it must exist before anything destructive starts", path, err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("importer binary %s is a directory", path)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		return fmt.Errorf("importer binary %s is not executable (mode %s)", path, info.Mode())
+	}
+	return nil
+}
+
+// resolveReplicas picks the raft member count for the reset. The live
+// StatefulSet spec is the source of truth (a flag-only count under-deletes
+// PVCs if the member count ever changes, leaving pre-wipe raft state that
+// crashloops unattended); an explicit flag must agree with it, and is the
+// only way forward when an interrupted reset left the StatefulSet at 0.
+func resolveReplicas(flagged, live int) (int, error) {
+	if live > 0 {
+		if flagged != 0 && flagged != live {
+			return 0, fmt.Errorf("--replicas %d disagrees with the live StatefulSet spec.replicas %d; the live spec is the source of truth for the PVC set and the scale-back — drop the flag or fix the StatefulSet first", flagged, live)
+		}
+		return live, nil
+	}
+	if flagged > 0 {
+		return flagged, nil
+	}
+	return 0, fmt.Errorf("the live StatefulSet is scaled to %d (interrupted earlier reset?); pass an explicit --replicas so the tool knows the member count to restore", live)
 }
 
 // ensurePrivilegedPSALabel verifies pod-security.kubernetes.io/enforce=privileged
@@ -362,7 +460,7 @@ func reconcileHandled(raw, stamp string) (bool, error) {
 
 // --- raft reset --------------------------------------------------------------
 
-func resetRaft(ctx context.Context, runner kubectlRunner, opts options) error {
+func resetRaft(ctx context.Context, runner kubectlRunner, opts options, replicas int) error {
 	sts := "statefulset.apps/" + opts.StatefulSet
 	if err := runner.run(ctx, "scale OpenBao to 0", "-n", opts.Namespace, "scale", sts, "--replicas=0"); err != nil {
 		return err
@@ -370,16 +468,16 @@ func resetRaft(ctx context.Context, runner kubectlRunner, opts options) error {
 	if err := runner.run(ctx, "wait for OpenBao pods to terminate", "-n", opts.Namespace, "wait", "pod", "-l", openBaoPodSelector, "--for=delete", "--timeout=5m"); err != nil {
 		return err
 	}
-	pvcs := dataPVCNames(opts.StatefulSet, opts.Replicas)
+	pvcs := dataPVCNames(opts.StatefulSet, replicas)
 	deleteArgs := append([]string{"-n", opts.Namespace, "delete", "pvc"}, pvcs...)
 	deleteArgs = append(deleteArgs, "--ignore-not-found")
 	if err := runner.run(ctx, "delete raft data PVCs (audit PVCs stay)", deleteArgs...); err != nil {
 		return err
 	}
-	if err := runner.run(ctx, fmt.Sprintf("scale OpenBao to %d", opts.Replicas), "-n", opts.Namespace, "scale", sts, fmt.Sprintf("--replicas=%d", opts.Replicas)); err != nil {
+	if err := runner.run(ctx, fmt.Sprintf("scale OpenBao to %d", replicas), "-n", opts.Namespace, "scale", sts, fmt.Sprintf("--replicas=%d", replicas)); err != nil {
 		return err
 	}
-	return waitPodsReady(ctx, runner, opts)
+	return waitPodsReady(ctx, runner, opts, replicas)
 }
 
 func dataPVCNames(statefulSet string, replicas int) []string {
@@ -395,7 +493,7 @@ func dataPVCNames(statefulSet string, replicas int) []string {
 // state") is auto-recovered exactly once by deleting its pod and data PVC so
 // the StatefulSet re-creates both fresh; any other crashloop, or a second one
 // on the same member, fails the run.
-func waitPodsReady(ctx context.Context, runner kubectlRunner, opts options) error {
+func waitPodsReady(ctx context.Context, runner kubectlRunner, opts options, replicas int) error {
 	recovered := map[string]bool{}
 	deadline := time.Now().Add(opts.PodWaitTimeout)
 	for {
@@ -403,12 +501,12 @@ func waitPodsReady(ctx context.Context, runner kubectlRunner, opts options) erro
 		if err != nil {
 			return err
 		}
-		state, err := classifyPods(raw, opts.Replicas)
+		state, err := classifyPods(raw, replicas)
 		if err != nil {
 			return err
 		}
 		if state.AllReady {
-			fmt.Printf("all %d OpenBao pods Running and ready\n", opts.Replicas)
+			fmt.Printf("all %d OpenBao pods Running and ready\n", replicas)
 			return nil
 		}
 		for _, pod := range state.CrashLooping {
@@ -511,7 +609,7 @@ func runImporter(ctx context.Context, opts options) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("custody importer: %w", err)
+		return fmt.Errorf("custody importer: %w — the raft wipe already happened, so OpenBao is a freshly initialized EMPTY kv right now; the import env file is preserved on failure, so fix the cause and re-run the reinit command to complete the re-seed", err)
 	}
 	return nil
 }

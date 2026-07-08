@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/base64"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +20,72 @@ func TestLocalRevisionProblemRejectsStaleCheckout(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "import plan") {
 		t.Fatalf("localRevisionProblem() error = %v, want stale-import-plan detail", err)
+	}
+}
+
+func TestDirtyTreeProblem(t *testing.T) {
+	if err := dirtyTreeProblem(""); err != nil {
+		t.Fatalf("dirtyTreeProblem() rejected a clean tree: %v", err)
+	}
+	if err := dirtyTreeProblem("\n"); err != nil {
+		t.Fatalf("dirtyTreeProblem() rejected whitespace-only status: %v", err)
+	}
+	// An uncommitted import-plan edit is exactly the case the gate exists for:
+	// HEAD can equal origin/main while the built importer carries the edit.
+	status := " M src/infrastructure/cmd/openbao_secret_import/main.go\n?? scratch.env\n"
+	err := dirtyTreeProblem(status)
+	if err == nil {
+		t.Fatalf("dirtyTreeProblem() accepted a dirty tree")
+	}
+	if !strings.Contains(err.Error(), "openbao_secret_import/main.go") || !strings.Contains(err.Error(), "scratch.env") {
+		t.Fatalf("dirtyTreeProblem() error = %v, want it to name the dirty files", err)
+	}
+}
+
+func TestResolveReplicas(t *testing.T) {
+	if got, err := resolveReplicas(0, 3); err != nil || got != 3 {
+		t.Fatalf("resolveReplicas(0, 3) = %d, %v; want 3 from the live spec", got, err)
+	}
+	if got, err := resolveReplicas(3, 3); err != nil || got != 3 {
+		t.Fatalf("resolveReplicas(3, 3) = %d, %v; want agreement accepted", got, err)
+	}
+	// A stale flag against a moved member count would under-delete PVCs and
+	// leave pre-wipe raft state to crashloop unattended.
+	if _, err := resolveReplicas(3, 5); err == nil {
+		t.Fatalf("resolveReplicas(3, 5) accepted a flag that disagrees with the live spec")
+	} else if !strings.Contains(err.Error(), "5") {
+		t.Fatalf("resolveReplicas(3, 5) error = %v, want the live count named", err)
+	}
+	if got, err := resolveReplicas(3, 0); err != nil || got != 3 {
+		t.Fatalf("resolveReplicas(3, 0) = %d, %v; want explicit flag to recover an interrupted reset", got, err)
+	}
+	if _, err := resolveReplicas(0, 0); err == nil {
+		t.Fatalf("resolveReplicas(0, 0) accepted a scaled-to-zero StatefulSet without an explicit --replicas")
+	}
+}
+
+func TestImporterProblem(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "no-such-importer")
+	if err := importerProblem(missing); err == nil {
+		t.Fatalf("importerProblem() accepted a missing binary (would be discovered only after the raft wipe)")
+	}
+	notExecutable := filepath.Join(dir, "importer-plain")
+	if err := os.WriteFile(notExecutable, []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	if err := importerProblem(notExecutable); err == nil {
+		t.Fatalf("importerProblem() accepted a non-executable file")
+	}
+	if err := importerProblem(dir); err == nil {
+		t.Fatalf("importerProblem() accepted a directory")
+	}
+	executable := filepath.Join(dir, "importer")
+	if err := os.WriteFile(executable, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	if err := importerProblem(executable); err != nil {
+		t.Fatalf("importerProblem() rejected an executable binary: %v", err)
 	}
 }
 
@@ -273,10 +341,10 @@ func TestValidateOptions(t *testing.T) {
 	base := options{
 		Kubectl:          "/tools/kubectl",
 		Importer:         "/bazel-bin/importer",
+		RepoRoot:         "/home/op/guardian",
 		EnvFile:          "/dev/shm/guardian-custody/import.env",
 		ExpectedRevision: "abc",
 		LocalRevision:    "abc",
-		Replicas:         3,
 		PodWaitTimeout:   time.Minute,
 	}
 	if err := validateOptions(base); err != nil {
@@ -291,6 +359,16 @@ func TestValidateOptions(t *testing.T) {
 	noImporter.Importer = ""
 	if err := validateOptions(noImporter); err == nil {
 		t.Fatalf("validateOptions() accepted a missing importer path")
+	}
+	noRepoRoot := base
+	noRepoRoot.RepoRoot = ""
+	if err := validateOptions(noRepoRoot); err == nil {
+		t.Fatalf("validateOptions() accepted a missing repo root (dirty-tree gate would be skipped)")
+	}
+	negativeReplicas := base
+	negativeReplicas.Replicas = -1
+	if err := validateOptions(negativeReplicas); err == nil {
+		t.Fatalf("validateOptions() accepted negative replicas")
 	}
 	noRevisions := base
 	noRevisions.ExpectedRevision = ""
