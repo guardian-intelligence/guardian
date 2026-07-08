@@ -9,7 +9,7 @@ import (
 )
 
 // commentMarker identifies the one comment per PR this service owns.
-const commentMarker = "<!-- verself-runner -->"
+const commentMarker = "<!-- postflight-runner -->"
 
 type commentJob struct {
 	WorkflowName string
@@ -39,9 +39,9 @@ func renderComment(jobs []commentJob) string {
 
 	var b strings.Builder
 	b.WriteString(commentMarker + "\n")
-	b.WriteString("### Verself runners\n\n")
+	b.WriteString("### Postflight runners\n\n")
 	if len(sorted) == 0 {
-		b.WriteString("_No verself jobs observed for this pull request._\n")
+		b.WriteString("_No postflight jobs observed for this pull request._\n")
 		return b.String()
 	}
 	b.WriteString("| Job | Runner class | Status | Cache | Volume |\n")

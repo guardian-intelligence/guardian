@@ -1,6 +1,6 @@
--- 001_initial.sql — verself-runner control plane, stage (a).
+-- 001_initial.sql — postflight-runner control plane, stage (a).
 --
--- Table shapes are ported from verself's github-integration-service collapsed
+-- Table shapes are ported from postflight's github-integration-service collapsed
 -- baseline migration. Deliberate stage-(a) omissions: installations /
 -- repositories mirror tables (single-tenant, installation pinned in config),
 -- github_runner_instances and job_shapes (stage b), idempotency records (no
@@ -69,7 +69,7 @@ CREATE TABLE github_workflow_jobs (
     labels_json            JSONB NOT NULL DEFAULT '[]'::jsonb,
     -- Resolved in Go (payload-order first prefix match) at every persist, so
     -- the reconciliation sweeper reads the exact class the webhook path
-    -- resolved. verself resolved the sweeper's class separately in SQL
+    -- resolved. postflight resolved the sweeper's class separately in SQL
     -- (lexicographically first prefixed label), which could disagree with the
     -- payload-order rule on multi-label jobs.
     runner_class           TEXT NOT NULL DEFAULT '',

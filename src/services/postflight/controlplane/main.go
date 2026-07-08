@@ -1,4 +1,4 @@
-// verself-runner control plane — stage (a): GitHub workflow_job webhook
+// postflight-runner control plane — stage (a): GitHub workflow_job webhook
 // ingest with a durable delivery ledger, an async worker + reconciliation
 // sweeper (webhook payloads are hints, the GitHub API is truth), provider
 // demand/assignment records, and a per-PR comment engine. No runner

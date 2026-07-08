@@ -305,7 +305,7 @@ func (w *worker) handleWorkflowJob(ctx context.Context, d lockedDelivery) error 
 	if !validRepoFullName(payload.Repository.FullName) {
 		return terminalError{problemPayloadInvalid("repository.full_name is not a valid owner/name")}
 	}
-	// FIXME(multi-tenant): verself resolved installation+repository bindings
+	// FIXME(multi-tenant): postflight resolved installation+repository bindings
 	// here (lookupRuntimeBinding); stage (a) verifies against the single
 	// config-pinned installation instead.
 	if payload.Installation.ID != w.cfg.installationID {

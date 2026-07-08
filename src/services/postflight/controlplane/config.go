@@ -11,7 +11,7 @@ import (
 // config is the full environment surface of the control plane.
 //
 // Stage (a) is single-tenant: one GitHub App installation, pinned here.
-// FIXME(multi-tenant): the pinned installation id is what replaces verself's
+// FIXME(multi-tenant): the pinned installation id is what replaces postflight's
 // installation/repository binding lookup; multi-tenancy reintroduces the
 // mirror tables and drops this field.
 type config struct {
@@ -83,7 +83,7 @@ func loadConfig() (config, error) {
 		privateKeyPEM:     required("GITHUB_APP_PRIVATE_KEY_PEM"),
 		databaseURL:       required("DATABASE_URL"),
 		apiBaseURL:        envOr("GITHUB_API_BASE_URL", "https://api.github.com"),
-		runnerClassPrefix: envOr("RUNNER_CLASS_PREFIX", "verself-"),
+		runnerClassPrefix: envOr("RUNNER_CLASS_PREFIX", "postflight-"),
 		listenAddr:        envOr("LISTEN_ADDR", ":8080"),
 		workerInterval:    duration("WORKER_INTERVAL", "500ms"),
 		workerBatchSize:   positiveInt("WORKER_BATCH_SIZE", "16"),
