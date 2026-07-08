@@ -29,8 +29,9 @@ resource "cloudflare_bot_management" "guardianintelligence_org" {
 
 # The edge must never cache API responses: event beacons, RPCs, and anything
 # else under /api/ are per-visitor and often authenticated. Cloudflare does
-# not cache HTML by default, so /api/ is the one surface that needs an
-# explicit rule today; add rules here rather than dashboard cache settings.
+# not cache JSON API paths by default, so cacheable API surfaces (Electric
+# shapes) need an explicit eligibility rule and per-visitor surfaces need an
+# explicit bypass; add rules here rather than dashboard cache settings.
 resource "cloudflare_ruleset" "cache_policy" {
   zone_id = data.cloudflare_zone.guardianintelligence_org.id
   name    = "guardian edge cache policy"
@@ -46,6 +47,26 @@ resource "cloudflare_ruleset" "cache_policy" {
 
     action_parameters {
       cache = false
+    }
+  }
+
+  rules {
+    ref         = "electric_shape_cache"
+    description = "Electric shape API: edge-cache per origin Cache-Control (request collapsing for cockpit reads)"
+    expression  = "(http.host in {\"guardianintelligence.org\" \"beta.guardianintelligence.org\" \"gamma.guardianintelligence.org\"}) and starts_with(http.request.uri.path, \"/electric/v1/shape\")"
+    action      = "set_cache_settings"
+    enabled     = true
+
+    action_parameters {
+      cache = true
+
+      edge_ttl {
+        mode = "respect_origin"
+      }
+
+      browser_ttl {
+        mode = "respect_origin"
+      }
     }
   }
 }

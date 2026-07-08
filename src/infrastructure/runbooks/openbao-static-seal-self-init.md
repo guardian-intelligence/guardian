@@ -263,7 +263,13 @@ cold boot exercises.
    seeds the old plan and the importer's one-shot role is already gone by
    the time the gap is noticed (recover via the namespace's scoped
    `secrets-writer` role, which the new self-init block has just created).
-6. Verify every ExternalSecret returns to `Ready=True` and force a refresh if
+6. Re-relay the in-cluster-generated values the importer does not carry —
+   they are lost with the raft state, and their still-materialized Secrets
+   are the source (each is a scoped `secrets-writer` write, value on stdin):
+   - analytics ClickHouse ingest password → `guardian-analytics/clickhouse`
+     property `ingest`
+   - verself-controlplane Postgres `uri` → `verself-runner/postgres`
+7. Verify every ExternalSecret returns to `Ready=True` and force a refresh if
    needed (`kubectl annotate externalsecret ... force-sync=$(date +%s)`).
 
 ExternalSecrets use `creationPolicy: Orphan` / `deletionPolicy: Retain`, so
