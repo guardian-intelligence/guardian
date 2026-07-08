@@ -1,0 +1,56 @@
+# Flow assertion for the Talos host-log pipeline
+# (base/observability/talos-log-receiver.yaml). The increase()-over-7d
+# gate keeps the rule silent until the pipeline has ever carried data
+# (nodes only send once their machine config gains the logging
+# destination), then guards it forever after — including across counter
+# resets, which an `offset` gate would not survive. Per-node silence
+# detection (one node's sender dying while the others flow) ships with
+# the machine-config rollout, as a vmalert-vlogs LogsQL rule.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: talos-host-log-health
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: talos-host-log-health
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  groups:
+    - name: talos-host-log-health.rules
+      interval: 60s
+      rules:
+        - alert: TalosHostLogFlowStopped
+          expr: >-
+            sum(rate(fluentbit_input_records_total{namespace="tenant-root",
+            pod=~"talos-log-receiver.*"}[30m])) == 0 and
+            sum(increase(fluentbit_input_records_total{namespace="tenant-root",
+            pod=~"talos-log-receiver.*"}[7d])) > 0
+          for: 15m
+          labels:
+            severity: warning
+            guardian_component: observability
+          annotations:
+            summary: 'Talos host-log flow stopped'
+            description: >-
+              The talos-log-receiver has ingested nothing for 30+ minutes
+              on a pipeline that has carried data within the last week.
+              Either every node stopped sending (machine config
+              regression) or the receiver/LB path is broken. Host logs
+              are fire-and-forget from the Talos side, so this gap is
+              silent data loss until fixed.
+        - alert: TalosHostLogReceiverAbsent
+          expr: >-
+            count(up{pod=~"talos-log-receiver.*"} offset 1h) unless
+            count(up{pod=~"talos-log-receiver.*"})
+          for: 15m
+          labels:
+            severity: warning
+            guardian_component: observability
+          annotations:
+            summary: 'Talos host-log receiver vanished from metrics'
+            description: >-
+              The receiver emitted scrape targets an hour ago and none
+              exist now — deleted Deployment, broken VMPodScrape, or
+              vmagent discovery loss. TalosHostLogFlowStopped is blind
+              without these series; treat as the same outage.

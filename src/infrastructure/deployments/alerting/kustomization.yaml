@@ -10,6 +10,7 @@ resources:
   - electric-scrape.yaml
   - postgres-alerts.yaml
   - synthetic-probes.yaml
+  - talos-host-log-alerts.yaml
   - trust-alerts.yaml
   - tsdb-alerts.yaml
   - vmalert-vlogs.yaml

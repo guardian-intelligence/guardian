@@ -12,4 +12,5 @@ resources:
   - secrets/backup-storage-credentials.yaml
   - networking/metallb.yaml
   - networking/subnet-mtu.yaml
+  - observability/talos-log-receiver.yaml
   - flux
