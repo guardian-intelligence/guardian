@@ -26,6 +26,10 @@ spec:
           value: docker.io/electricsql/electric
         - name: sourceStageURL
           value: https://beta.guardianintelligence.org/electric/v1/shape?table=status_heartbeat&offset=-1
+        - name: sourceStageNamespace
+          value: tenant-guardian-beta
+        - name: vmQueryURL
+          value: http://vmselect-shortterm.tenant-root.svc:8481/select/0/prometheus/api/v1/query
       steps:
         - uses: http
           as: check-source-stage-success
@@ -35,6 +39,38 @@ spec:
             method: GET
             url: ${{ vars.sourceStageURL }}
             successExpression: response.status == 200
+        # The shape check above proves the read path serves, but it passes
+        # from Cloudflare cache even with the source database at 91% of
+        # max_connections (2026-07-08 drill). These two vmselect gates block
+        # promotion on the database states that make an Electric Recreate
+        # rollout dangerous: no connection headroom for its pool of 20, or a
+        # slot already retaining page-worthy WAL. Hard-gate semantics follow
+        # company-stage-gamma: empty result retries until timeout, a
+        # definitive bad measurement fails terminally.
+        - uses: http
+          as: check-source-db-connection-headroom
+          retry:
+            timeout: 10m
+          config:
+            method: GET
+            url: ${{ vars.vmQueryURL }}
+            queryParams:
+              - name: query
+                value: max(sum by (pod) (cnpg_backends_total{job="${{ vars.sourceStageNamespace }}/postgres-products"})) / min(cnpg_pg_settings_setting{name="max_connections",job="${{ vars.sourceStageNamespace }}/postgres-products"})
+            successExpression: len(response.body.data.result) > 0 && float(response.body.data.result[0].value[1]) < 0.8
+            failureExpression: len(response.body.data.result) > 0 && float(response.body.data.result[0].value[1]) >= 0.8
+        - uses: http
+          as: check-source-db-slot-retention
+          retry:
+            timeout: 10m
+          config:
+            method: GET
+            url: ${{ vars.vmQueryURL }}
+            queryParams:
+              - name: query
+                value: max(cnpg_pg_replication_slots_pg_wal_lsn_diff{job="${{ vars.sourceStageNamespace }}/postgres-products"})
+            successExpression: len(response.body.data.result) > 0 && float(response.body.data.result[0].value[1]) <= 2000000000.0
+            failureExpression: len(response.body.data.result) > 0 && float(response.body.data.result[0].value[1]) > 2000000000.0
         - uses: git-clone
           config:
             repoURL: ${{ vars.repoURL }}
