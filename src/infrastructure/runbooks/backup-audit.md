@@ -142,7 +142,8 @@ is the alarm, not the absolute):
   backup audit.
 - **No foreign prefixes.** Only `tenant-root/postflight-controlplane/`,
   `tenant-guardian-prod/keycloak/`, `tenant-root/analytics/`, `velero/`
-  (when VMs exist), and `probe/` belong in this bucket.
+  (when VMs exist), `talos-etcd/` (age-encrypted etcd snapshots), and
+  `probe/` belong in this bucket.
 
 ## 4. Restore drill (usability)
 
