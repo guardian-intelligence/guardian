@@ -1,10 +1,10 @@
 This is a Bazel polyglot hermetically sealed monorepo for Guardian, a free open-source system that converts bare-metal servers into the operational substrate for a one-person software company. Early days, still getting the infra set up.
 
-The purpose is to create a free and open-source system for any being to convert a source of compute into a self-healing intelligent system (in our case, a secure, disaster-proof software company capable of generating revenue by providing value to the world) as a platform to build sophisticated software products such as Verself, a GitHub App that speeds up your CI.
+The purpose is to create a free and open-source system for any being to convert a source of compute into a self-healing intelligent system (in our case, a secure, disaster-proof software company capable of generating revenue by providing value to the world) as a platform to build sophisticated software products such as Postflight, a GitHub App that speeds up your CI.
 
 * Cozystack 1.5.2 `isp-full` - when researching CozyStack, use 1.5 docs from the exact [`release-1.5`](https://github.com/cozystack/cozystack/tree/v1.5.2) tag. See `src/infrastructure/base/cozystack/platform.yaml` and `src/infrastructure/base/apps/core-services.yaml`
 * Other useful reference architectures: Zarf/UDS, AWS Landing Zone Accelerator
-* Repo ships specific products within the architecture. First major product: Verself (reference Blacksmith.sh)
+* Repo ships specific products within the architecture. First major product: Postflight (reference Blacksmith.sh)
 * Airgapped hermetically-sealed come up done through the generated union images lock (declared + rendered, `//src/infrastructure/cmd/imageset`) + Rancher Hauler + Sidero Labs `talm` for Talos on bare metal soil (currently Latitude.sh).
 * DNS managed through Cloudflare. TLS terminates at Cloudflare edge. Cloudflare LB for the three control plane nodes. [206.223.228.101, 45.250.254.119, 206.223.228.87].
 * Cloudflare config has exactly four owners; drift between declared and live edge config is a defect. Workloads own only their origin HTTP contract (Cache-Control/ETag headers — Electric is the reference) and never hold edge credentials. The in-cluster external-dns controller owns DNS records, reconciled from Git-declared CRs with a DNS-only token. Traffic substrate (load balancers, monitors, pools) is declared in `src/infrastructure/bootstrap/guardian-mgmt-dns/`, applied with the custody dns-lb-provisioner token — a minimal DR actor whose empty plan is the cold-boot drift oracle. Zone edge policy (AOP, cache rulesets, bot management, zone settings) is declared in `src/infrastructure/bootstrap/guardian-mgmt-edge-policy/`, applied with the edge-policy-provisioner token, which cannot move traffic. Nothing is edited in the dashboard: a dashboard change is either backported into its root or reverted by the next apply.
@@ -125,7 +125,7 @@ src/
 
 <overall_strategy>
 
-The audience for cloners of this repo is a single individual or a small team with high technical ability that want to transform an idea into a serious software company. Verself is the reference example — a value-providing, revenue-generating business proving the concept works — but it was hand-built (Nomad et al.); Guardian is the generalization, built so the next one isn't. The proof is autobiographical: the user (Shovon Hasan/"anveio") builds a successful company on Guardian's core infrastructure first, proving the core platform works and can be used to rapidly build any kind of product.
+The audience for cloners of this repo is a single individual or a small team with high technical ability that want to transform an idea into a serious software company. Postflight is the reference example — a value-providing, revenue-generating business proving the concept works — but it was hand-built: the [`verself` repo](https://github.com/guardian-intelligence/verself) is Postflight's reference implementation, running on Nomad + Firecracker on a single node, not our current tech stack. Guardian is the generalization, built so the next one isn't. The proof is autobiographical: the user (Shovon Hasan/"anveio") builds a successful company on Guardian's core infrastructure first, proving the core platform works and can be used to rapidly build any kind of product.
 
 The value proposition:
 
@@ -182,7 +182,7 @@ Service architecture:
 
 Planned Product Surfaces:
 
-- Verself - GitHub App (20x faster CI than GitHub Actions; adapted from the Verself repo; running untrusted customer CI requires TEE on the rs4 workload nodes first). (Not Yet Implemented)
+- Postflight - GitHub App (20x faster CI than GitHub Actions; running untrusted customer CI requires TEE on the rs4 workload nodes first). (Not Yet Implemented)
 - Empire - Software Company from an API call or web surface; host come-up tooling only prepares machines for the management cluster. (Not Yet Implemented)
 
 Milestones:
@@ -191,5 +191,5 @@ Guardian advances only by drills passed and products shipped. Automate an operat
 
 - M1 — The substrate is invincible. Drill #1 (all-node cold boot from Git + custody) has passed. Remaining: the wiped-node drill (including etcd-member and Node-object debris cleanup) and the dark cold-boot drill from the haul alone. Gate: revival with zero internet and zero undocumented steps. (complete)
 - M2 — One product flows unattended. The company site through the full loop: merge → converge → canary → promote, synthetics watching all environments, alerts wired. Gate: a deliberately bad deploy detects itself and rolls back with hands off the keyboard; a yank drill passes. Flagger and Kargo earn admission here, pulled by this gate. (complete)
-- M3 — Verself ported over. Stripe and GitHub integration patterns become reusable platform capability here. Gate: a revenue-bearing Verself path served by Guardian for 30 days without regression.
+- M3 — Postflight ported over. Stripe and GitHub integration patterns become reusable platform capability here. Gate: a revenue-bearing Postflight path served by Guardian for 30 days without regression.
 - M4 — Guardian is downloadable. Canonical iPXE image + haul + CLI, with a single-box dev variant shipping the same way; most of the machinery falls out of M1's dark drill. Gate: a from-zero Guardian stood up on a second provider from the public artifact and docs alone. External adoption becomes a live option here, not before.
