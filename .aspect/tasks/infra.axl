@@ -975,6 +975,8 @@ def _custody_impl(ctx):
         custody_args.append("--yes")
     if ctx.args.read_data:
         custody_args.append("--read-data")
+    if ctx.args.env_key != "":
+        custody_args.extend(["--env-key", ctx.args.env_key])
     return checked_spawn(
         ctx,
         "bazelisk",
@@ -2198,9 +2200,10 @@ custody = task(
     implementation = _custody_impl,
     name = "custody",
     group = ["infra"],
-    summary = "Manage the encrypted custody bundle (secret-zero: Talos genesis secrets, OpenBao seal key, operator env). The restic repository is the ONLY at-rest form; plaintext exists only in the tmpfs bundle dir between restore and wipe. Actions: create (stage fail-closed + backup + instructions), verify (repo integrity + required members, point --repo at offline copies), restore (to tmpfs), wipe (shred the tmpfs bundle), status (staleness + plaintext-residue warnings), key-add (second password for the password-manager recovery flow).",
+    summary = "Manage the encrypted custody bundle (secret-zero: Talos genesis secrets, OpenBao seal key, operator env). The restic repository is the ONLY at-rest form; plaintext exists only in the tmpfs bundle dir between restore and wipe. Actions: create (stage fail-closed + backup + instructions), verify (repo integrity + required members, point --repo at offline copies), restore (to tmpfs), wipe (shred the tmpfs bundle), status (staleness + plaintext-residue warnings), key-add (second password for the password-manager recovery flow), env-set/env-unset (atomic single-key custody.env edit: restore, edit, snapshot, wipe; value read from stdin).",
     args = {
-        "action": args.string(default = "status", description = "One of create, verify, restore, wipe, status, key-add."),
+        "action": args.string(default = "status", description = "One of create, verify, restore, wipe, status, key-add, env-set, env-unset."),
+        "env_key": args.string(default = "", description = "env-set/env-unset: custody.env key to set (value read from stdin) or remove."),
         "read_data": args.boolean(default = False, description = "verify: re-read and hash every pack (slow; run this against each offline copy)."),
         "repo": args.string(default = "", description = "restic repository directory. Defaults to ~/.guardian/custody/repo; point at mounted offline media to verify copies."),
         "yes": args.boolean(default = False, description = "Skip the interactive confirmation before create."),
