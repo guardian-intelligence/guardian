@@ -153,23 +153,24 @@ The loop is: worktree → change → PR/CI → merge → babysit convergence →
 Optional:
 
 * Learn what development tooling exists with `aspect --help`
+* Install tools and confirm access if this is first time setup: `eval "$(scripts/bootstrap.sh path)" && aspect tools install && eval "$(aspect tools path)" && aspect infra auth --platform-agent` (auth required for babysitting your change after merge).
 
 Step by step:
-0. Install tools and confirm access: `eval "$(scripts/bootstrap.sh path)" && aspect tools install && eval "$(aspect tools path)" && aspect infra auth --platform-agent`
-1. Branch in a git worktree off `origin/main`
-2. Open GitHub PR using `gh` cli, monitor CI, perform adversarial review if needed, address blocking comments if any are posted, and then merge if all green.
-3. Babysit Flux convergence, Kargo promotion, and Flagger deployment rollout: `tools/ops/cluster-watch --status` (live Flux Ready conditions, sub-15m). Default `cluster-watch` tails Alerta stream but most checks take 15 minutes of sustained failure so `--status` is the fast view while you wait for your changes' Kustomization to reach Ready.
-4. If you're making a product change, monitor incoming traffic from prod and query ClickHouse to make sure users are having a good time with your feature.
-5. Report task completion to the user with relevant metrics/logs/traces e.g. "LCP down for route /letters/<slug> from 3.4s to 3.2s base on last 30m of traffic to prod".
+1. Branch in a git worktree off `origin/main` and make the planned edits.
+2. Open a PR via `gh` cli, monitor CI, perform adversarial review if needed, address blocking comments if any are posted, and then merge if all green.
+3. Babysit Flux convergence, Kargo promotion, and Flagger deployment rollout: `tools/ops/cluster-watch --status`. `--status` is the fast view while you wait for your changes' Kustomizations to reach Ready.
+4. If you're making a user-facing change to prod, monitor incoming traffic and query ClickHouse analytics to make sure users are having a good time.
+5. Report task completion to the user with relevant metrics/logs/traces e.g. "LCP down for route /letters/<slug> from 3.4s to 3.2s based on last 30m of traffic to prod".
 
 Common post-merge issues:
 - Flux: `BuildFailed`, `denied by ValidatingAdmissionPolicy ...` (image-provenance denials name the offending image and the fix: pin the digest, extend base/app-patches/registry-prefixes.txt, or declare the operator-spawned ref in images.declared.lock — each in its own reviewed PR), `HealthCheckFailed`, `dependency '...' is not ready`
 - Kargo (image changes only): promotions are done by Kargo GitHub app bot commits.
-- Flagger: A failed canary rolls back automatically and pages.
-- Alerta: typically high signal, if there's unnecessary/unrelated noise, continue to monitor but assume it's your duty to fix noise unless you can make a strong case to flag to the user to fix separately. If it's a small fixup, even if unrelated, just tack on the fix instead of bothering the user.
+- Flagger: A failed canary rolls back automatically and pages. 
+- Alerta: typically high signal, if there's unnecessary/unrelated noise, continue to monitor but assume it's your duty to fix noise unless you can make a strong case to flag to the user to fix separately. If it's a small fixup, even if unrelated, just tack on the fix instead of bothering the user. Default `cluster-watch` tails Alerta but alerts take ~15 minutes of sustained failure.
 
 House rules:
-- Do not use CLI commands as a second control plane. Rely on Flux to converge the cluster on merged commits and clean up stale resources using write credentials through the platform Keycloak instance for cluster administration. If breakglass access is required you may run `aspect infra auth --platform-agent`
+- Do not use CLI commands as a second control plane. Rely on Flux to converge the cluster on merged commits and clean up stale resources using write credentials through the platform Keycloak instance for cluster administration.
+- If relevant to your task, clean up any hanging resources post-merge. Write access is audit logged and pages a human. Write access requires `aspect infra auth --platform-admin --reason "<why>"`.
 </development_loop>
 
 Constraints:
