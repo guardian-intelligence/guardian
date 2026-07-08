@@ -12,3 +12,14 @@ output "dns_lb_provisioner_token_value" {
   value       = cloudflare_account_token.dns_lb_provisioner.value
   sensitive   = true
 }
+
+output "external_dns_token_id" {
+  description = "Token id of the external-dns lane token."
+  value       = cloudflare_account_token.external_dns.id
+}
+
+output "external_dns_token_value" {
+  description = "Secret value of the external-dns lane token (relayed into OpenBao, never consumed directly)."
+  value       = cloudflare_account_token.external_dns.value
+  sensitive   = true
+}
