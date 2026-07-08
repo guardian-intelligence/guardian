@@ -87,8 +87,10 @@ func TestNamespaceAndComponentValidation(t *testing.T) {
 	if got, err := namespaceForStage("root"); err != nil || got != "tenant-root" {
 		t.Fatalf("namespaceForStage(root) = %q, %v", got, err)
 	}
-	if _, err := namespaceForStage("prod"); err == nil {
-		t.Fatalf("retired product stage was accepted")
+	for _, stage := range []string{"beta", "gamma", "prod"} {
+		if got, err := namespaceForStage(stage); err != nil || got != "tenant-guardian-"+stage {
+			t.Fatalf("namespaceForStage(%s) = %q, %v", stage, got, err)
+		}
 	}
 	if _, err := namespaceForStage("staging"); err == nil {
 		t.Fatalf("invalid stage was accepted")

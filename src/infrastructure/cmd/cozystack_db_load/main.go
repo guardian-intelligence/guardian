@@ -48,7 +48,7 @@ func main() {
 	flag.StringVar(&cfg.Kubeconfig, "kubeconfig", "", "kubeconfig for guardian-mgmt")
 	flag.StringVar(&cfg.RequestTimeout, "request-timeout", "15s", "kubectl API request timeout")
 	flag.StringVar(&cfg.WaitTimeout, "wait-timeout", "20m", "timeout for load Job completion")
-	flag.StringVar(&cfg.Stage, "stage", "root", "Guardian bootstrap stage: root")
+	flag.StringVar(&cfg.Stage, "stage", "root", "Guardian stage: root, beta, gamma, or prod")
 	flag.StringVar(&cfg.Component, "component", "postgres", "database component to load: postgres or clickhouse")
 	flag.StringVar(&cfg.ApplicationName, "application", "verself-controlplane", "Cozystack app name")
 	flag.StringVar(&cfg.Name, "name", "", "Job name; defaults to a UTC timestamped DNS label")
@@ -87,8 +87,10 @@ func namespaceForStage(stage string) (string, error) {
 	switch stage {
 	case "root":
 		return "tenant-root", nil
+	case "beta", "gamma", "prod":
+		return "tenant-guardian-" + stage, nil
 	default:
-		return "", fmt.Errorf("stage %q is not root", stage)
+		return "", fmt.Errorf("stage %q is not one of root, beta, gamma, prod", stage)
 	}
 }
 
