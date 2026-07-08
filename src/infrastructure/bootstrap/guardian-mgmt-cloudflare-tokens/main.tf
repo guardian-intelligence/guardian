@@ -30,12 +30,14 @@ locals {
   }
 
   backups_bucket_resource = "com.cloudflare.edge.r2.bucket.${var.cloudflare_account_id}_default_guardian-backups"
+  vault_bucket_resource   = "com.cloudflare.edge.r2.bucket.${var.cloudflare_account_id}_default_guardian-vault"
 
   expires = {
     dns_lb_provisioner    = "2026-10-06T00:00:00Z"
     external_dns          = "2026-10-06T00:00:00Z"
     edge_policy_provision = "2026-10-06T00:00:00Z"
     r2_backups            = "2026-10-06T00:00:00Z"
+    r2_state              = "2026-10-06T00:00:00Z"
   }
 }
 
@@ -137,6 +139,30 @@ resource "cloudflare_account_token" "r2_backups" {
         { id = local.permission_groups.r2_bucket_item_write },
       ]
       resources = jsonencode({ (local.backups_bucket_resource) = "*" })
+    },
+  ]
+}
+
+# Tofu state-backend credential (guardian-vault bucket only — tighter than
+# the account-wide R2 token it replaces). Self-reference caveat: THIS root's
+# backend also uses it, so the pair must be custody-mirrored (env-set
+# cloudflare_r2_access_key_id / cloudflare_r2_secret_access_key) after every
+# rotation — at DR time the backend needs the keys before any state is
+# readable. Rotate by minting the successor while applying with the
+# predecessor; the swap is an env change, never a state edit.
+resource "cloudflare_account_token" "r2_state" {
+  account_id = var.cloudflare_account_id
+  name       = "guardian-r2-tofu-state"
+  expires_on = local.expires.r2_state
+
+  policies = [
+    {
+      effect = "allow"
+      permission_groups = [
+        { id = local.permission_groups.r2_bucket_item_read },
+        { id = local.permission_groups.r2_bucket_item_write },
+      ]
+      resources = jsonencode({ (local.vault_bucket_resource) = "*" })
     },
   ]
 }

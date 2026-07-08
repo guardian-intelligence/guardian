@@ -45,3 +45,14 @@ output "r2_backups_secret_access_key" {
   value       = sha256(cloudflare_account_token.r2_backups.value)
   sensitive   = true
 }
+
+output "r2_state_access_key_id" {
+  description = "S3 access key id for the guardian-vault state bucket (custody-mirrored: cloudflare_r2_access_key_id)."
+  value       = cloudflare_account_token.r2_state.id
+}
+
+output "r2_state_secret_access_key" {
+  description = "S3 secret access key for the guardian-vault state bucket (custody-mirrored: cloudflare_r2_secret_access_key)."
+  value       = sha256(cloudflare_account_token.r2_state.value)
+  sensitive   = true
+}
