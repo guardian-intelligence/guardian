@@ -114,18 +114,18 @@ func TestImportPlan(t *testing.T) {
 	if productsPromotion.Data["githubAppPrivateKey"] != testGithubAppPEM {
 		t.Fatal("products githubAppPrivateKey did not round-trip through base64")
 	}
-	runner, ok := byPath["kv/data/guardian/guardian-mgmt/verself-runner/github-app"]
+	runner, ok := byPath["kv/data/guardian/guardian-mgmt/postflight-runner/github-app"]
 	if !ok {
-		t.Fatal("verself-runner write missing")
+		t.Fatal("postflight-runner write missing")
 	}
 	if runner.Data["webhookSecret"] != "runner-webhook" || runner.Data["clientSecret"] != "runner-client" {
-		t.Fatalf("verself-runner secrets = %#v", runner.Data)
+		t.Fatalf("postflight-runner secrets = %#v", runner.Data)
 	}
 	if runner.Data["appId"] != "3370540" || runner.Data["clientId"] != "Iv23xxxx" {
-		t.Fatalf("verself-runner identity = %#v", runner.Data)
+		t.Fatalf("postflight-runner identity = %#v", runner.Data)
 	}
 	if runner.Data["githubAppPrivateKey"] != testRunnerAppPEM {
-		t.Fatal("verself-runner githubAppPrivateKey did not round-trip through base64")
+		t.Fatal("postflight-runner githubAppPrivateKey did not round-trip through base64")
 	}
 }
 

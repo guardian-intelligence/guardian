@@ -103,4 +103,4 @@ spec:
             - tenant-guardian-prod
             - tenant-guardian-previews
             - guardian-analytics
-            - verself-runner
+            - postflight-runner

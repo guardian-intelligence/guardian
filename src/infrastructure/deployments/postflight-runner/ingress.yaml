@@ -7,12 +7,12 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: verself-controlplane
-  namespace: verself-runner
+  name: postflight-controlplane
+  namespace: postflight-runner
   labels:
-    app.kubernetes.io/name: verself-controlplane
+    app.kubernetes.io/name: postflight-controlplane
     app.kubernetes.io/part-of: guardian
-    guardian.dev/product: verself
+    guardian.dev/product: postflight
 spec:
   ingressClassName: tenant-root
   rules:
@@ -23,6 +23,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: verself-controlplane
+                name: postflight-controlplane
                 port:
                   number: 8080

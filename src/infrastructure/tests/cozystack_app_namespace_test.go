@@ -17,7 +17,7 @@ import (
 // runtime signal a HelmReleaseNotReady alert.
 //
 // This has bitten twice (the original analytics ClickHouse, then the
-// verself-runner Postgres in PR #426, fixed by #427 moving it to tenant-root).
+// postflight-runner Postgres in PR #426, fixed by #427 moving it to tenant-root).
 // Both times the manifest passed review and only failed live. This test moves
 // the constraint to CI: any apps.cozystack.io CR whose namespace is not a
 // tenant-* namespace fails here instead of hanging in the cluster.

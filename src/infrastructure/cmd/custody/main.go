@@ -68,7 +68,7 @@ var manifest = []member{
 	{"openbao/metadata.json", true, "OpenBao static-seal key metadata"},
 	{envName, true, "operator env keys (importer source of truth)"},
 	{"keys/github-promotions-app.private-key.pem", false, "GitHub promotions App key (re-issuable via GitHub)"},
-	{"keys/verself-runner.private-key.pem", false, "Verself runner App key (re-issuable via GitHub)"},
+	{"keys/postflight-runner.private-key.pem", false, "Postflight runner App key (re-issuable via GitHub)"},
 	{"keys/guardian-worker-ssh", false, "worker SSH private key (re-issuable by reimage)"},
 	{"keys/guardian-worker-ssh.pub", false, "worker SSH public key"},
 	{"latitude.token", false, "Latitude API token (re-issuable via console)"},

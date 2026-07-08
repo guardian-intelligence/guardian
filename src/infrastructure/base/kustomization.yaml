@@ -6,7 +6,7 @@ resources:
   - apps/core-services.yaml
   - apps/analytics-clickhouse.yaml
   - apps/observability.yaml
-  - apps/verself-controlplane-postgres.yaml
+  - apps/postflight-controlplane-postgres.yaml
   - tenants/guardian.yaml
   - secrets/external-secrets.yaml
   - secrets/backup-storage-credentials.yaml

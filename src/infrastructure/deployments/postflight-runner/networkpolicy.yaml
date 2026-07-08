@@ -8,16 +8,16 @@
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
-  name: verself-controlplane
-  namespace: verself-runner
+  name: postflight-controlplane
+  namespace: postflight-runner
   labels:
-    app.kubernetes.io/name: verself-controlplane
+    app.kubernetes.io/name: postflight-controlplane
     app.kubernetes.io/part-of: guardian
-    guardian.dev/product: verself
+    guardian.dev/product: postflight
 spec:
   endpointSelector:
     matchLabels:
-      app.kubernetes.io/name: verself-controlplane
+      app.kubernetes.io/name: postflight-controlplane
   ingress:
     # Webhook deliveries arrive through the tenant-root ingress controller
     # (the apex Ingress in ingress.yaml).
@@ -42,11 +42,11 @@ spec:
             - port: "53"
               protocol: TCP
     # The delivery-ledger CNPG Postgres lives in tenant-root (Cozystack app
-    # CR constraint — see base/apps/verself-controlplane-postgres.yaml).
+    # CR constraint — see base/apps/postflight-controlplane-postgres.yaml).
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: tenant-root
-            cnpg.io/cluster: postgres-verself-controlplane
+            cnpg.io/cluster: postgres-postflight-controlplane
       toPorts:
         - ports:
             - port: "5432"
@@ -78,10 +78,10 @@ spec:
 apiVersion: cilium.io/v2
 kind: CiliumClusterwideNetworkPolicy
 metadata:
-  name: tenant-root-ingress-egress-verself-controlplane
+  name: tenant-root-ingress-egress-postflight-controlplane
   labels:
     app.kubernetes.io/part-of: guardian
-    guardian.dev/product: verself
+    guardian.dev/product: postflight
 spec:
   endpointSelector:
     matchLabels:
@@ -94,11 +94,11 @@ spec:
             - key: k8s:io.kubernetes.pod.namespace
               operator: In
               values:
-                - verself-runner
+                - postflight-runner
             - key: k8s:app.kubernetes.io/name
               operator: In
               values:
-                - verself-controlplane
+                - postflight-controlplane
       toPorts:
         - ports:
             - port: "8080"
@@ -114,10 +114,10 @@ spec:
 apiVersion: cilium.io/v2
 kind: CiliumClusterwideNetworkPolicy
 metadata:
-  name: guardian-analytics-otel-from-verself-controlplane
+  name: guardian-analytics-otel-from-postflight-controlplane
   labels:
     app.kubernetes.io/part-of: guardian
-    guardian.dev/product: verself
+    guardian.dev/product: postflight
 spec:
   endpointSelector:
     matchLabels:
@@ -126,8 +126,8 @@ spec:
   ingress:
     - fromEndpoints:
         - matchLabels:
-            k8s:io.kubernetes.pod.namespace: verself-runner
-            k8s:app.kubernetes.io/name: verself-controlplane
+            k8s:io.kubernetes.pod.namespace: postflight-runner
+            k8s:app.kubernetes.io/name: postflight-controlplane
       toPorts:
         - ports:
             - port: "4317"

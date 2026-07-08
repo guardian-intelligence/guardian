@@ -462,7 +462,7 @@ spec:
   wait: true
   timeout: 10m
 ---
-# Verself IAM beta stage: Keycloak + stage Postgres + ESO wiring + Flagger
+# Postflight IAM beta stage: Keycloak + stage Postgres + ESO wiring + Flagger
 # Canary. Depends on guardian-system (OpenBao roles + kv paths from
 # self-init) and guardian-flagger (Canary CRD + controller). The
 # ExternalSecret healthCheckExprs make the wait real: the stage only reports
@@ -734,9 +734,9 @@ spec:
       current: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
       failed: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'False')
 ---
-# Verself runner control plane: the stage (a) Deployment in verself-runner
+# Postflight runner control plane: the stage (a) Deployment in postflight-runner
 # plus its CNPG Postgres, ESO wiring, Cilium policy, and apex webhook Ingress
-# (deployments/verself-runner/). Depends on storage (the Postgres PVCs) and
+# (deployments/postflight-runner/). Depends on storage (the Postgres PVCs) and
 # the base slice, the guardian-analytics pattern; the OpenBao roles for this
 # namespace come from self-init and Flux retry rides out the gap. wait:false
 # + explicit healthChecks: gate on exactly the Deployment and the
@@ -745,12 +745,12 @@ spec:
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
-  name: guardian-verself-runner
+  name: guardian-postflight-runner
   namespace: cozy-fluxcd
 spec:
   interval: 10m
   retryInterval: 1m
-  path: ./src/infrastructure/deployments/verself-runner
+  path: ./src/infrastructure/deployments/postflight-runner
   sourceRef:
     kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
     name: ${GUARDIAN_SOURCE_NAME:=guardian}
@@ -768,12 +768,12 @@ spec:
   healthChecks:
     - apiVersion: apps/v1
       kind: Deployment
-      name: verself-controlplane
-      namespace: verself-runner
+      name: postflight-controlplane
+      namespace: postflight-runner
     - apiVersion: external-secrets.io/v1beta1
       kind: ExternalSecret
       name: github-app
-      namespace: verself-runner
+      namespace: postflight-runner
   healthCheckExprs:
     - apiVersion: external-secrets.io/v1beta1
       kind: ExternalSecret

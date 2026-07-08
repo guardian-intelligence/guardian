@@ -3,17 +3,17 @@
 # RBAC helper hard-fails Helm render anywhere else — see
 # analytics-clickhouse.yaml for the same constraint), so the server lives in
 # tenant-root while its only consumer, the control plane, stays in
-# verself-runner and crosses the namespace boundary under the Cilium policy
+# postflight-runner and crosses the namespace boundary under the Cilium policy
 # in that namespace's networkpolicy.yaml. The operator generates
-# Secret/postgres-verself-controlplane-app (this namespace) whose `uri` key
-# is relayed once into OpenBao (guardian/guardian-mgmt/verself-runner/postgres,
+# Secret/postgres-postflight-controlplane-app (this namespace) whose `uri` key
+# is relayed once into OpenBao (guardian/guardian-mgmt/postflight-runner/postgres,
 # property `uri`) the same way the analytics ClickHouse ingest password is
 # relayed; after a DR rebuild the chart regenerates a different value and the
 # relay must be re-run.
 apiVersion: apps.cozystack.io/v1alpha1
 kind: Postgres
 metadata:
-  name: verself-controlplane
+  name: postflight-controlplane
   namespace: tenant-root
 spec:
   replicas: 3
@@ -55,13 +55,13 @@ spec:
 apiVersion: backups.cozystack.io/v1alpha1
 kind: Plan
 metadata:
-  name: verself-controlplane-postgres-nightly
+  name: postflight-controlplane-postgres-nightly
   namespace: tenant-root
 spec:
   applicationRef:
     apiGroup: apps.cozystack.io
     kind: Postgres
-    name: verself-controlplane
+    name: postflight-controlplane
   backupClassName: cozy-default
   schedule:
     type: cron

@@ -34,7 +34,7 @@ spec:
           # and the custody x509 kubeconfig becomes breakglass-only. The
           # 2026-07-05 disable (f82b8e2) was about the admin console being
           # publicly routed; that surface is now shadowed off the public
-          # host — see keycloak-admin-guard.yaml. The per-stage Verself
+          # host — see keycloak-admin-guard.yaml. The per-stage Postflight
           # Keycloaks under deployments/iam/ are a separate product-facing
           # system and stay headless.
           oidc:

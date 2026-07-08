@@ -72,7 +72,7 @@ spec:
 ---
 # Nightly base backup for prod products Postgres. Continuous WAL archiving
 # covers RPO; the cron bounds restore replay time. Staggered against the
-# surviving Plans (verself-controlplane 02:00, iam prod 03:00, analytics
+# surviving Plans (postflight-controlplane 02:00, iam prod 03:00, analytics
 # ClickHouse 05:00) so base backups do not contend for the same uplink window.
 apiVersion: backups.cozystack.io/v1alpha1
 kind: Plan
