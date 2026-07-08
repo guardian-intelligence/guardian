@@ -60,10 +60,11 @@ spec:
         # a wedged controller freezes those at their last healthy values and
         # pages nothing (2026-07-08: 30 minutes of silent wedge, Running pod,
         # zero log lines, all statuses green). Discovery freshness is the one
-        # signal the controller must actively renew. Staleness with the
-        # warehouse still Healthy=True means the controller is wedged —
-        # restart the pod; staleness alongside KargoWarehouseNotHealthy means
-        # discovery itself is failing upstream.
+        # signal the controller must actively renew. guardian-remediator
+        # (remediator.yaml) restarts the controller at 10 minutes stale, so
+        # this firing means self-healing already failed: the restart didn't
+        # clear it, the remediator is down, or discovery itself is failing
+        # upstream (then KargoWarehouseNotHealthy fires alongside).
         - alert: KargoDiscoveryHeartbeatStale
           expr: (time() - kargo_warehouse_last_discovery{job="kargo-state-metrics"}) > 900
           for: 5m
@@ -71,7 +72,7 @@ spec:
             severity: critical
             guardian.dev/component: promotion
           annotations:
-            summary: 'Warehouse {{ $labels.exported_namespace }}/{{ $labels.name }} has not completed artifact discovery in over 15 minutes (interval is at most 5m) — the Kargo controller is likely wedged.'
+            summary: 'Warehouse {{ $labels.exported_namespace }}/{{ $labels.name }} has not completed artifact discovery in over 15 minutes despite auto-remediation — the wedge survived a controller restart.'
         - alert: KargoStateMetricsDown
           expr: up{job="kargo-state-metrics"} == 0
           for: 10m

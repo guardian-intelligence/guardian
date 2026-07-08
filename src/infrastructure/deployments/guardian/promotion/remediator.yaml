@@ -1,0 +1,301 @@
+# guardian-remediator: the first alert→action loop. It watches the same
+# discovery-freshness signal KargoDiscoveryHeartbeatStale pages on, but acts
+# earlier (10 minutes stale vs the alert's 15+5) and directly — restart the
+# wedged controller pod — so the page only fires when self-healing did NOT
+# work. The 2026-07-08 wedge proved the remediation is always the same pod
+# delete; a human adds nothing but latency.
+#
+# Adding a remediation = one more check block in remediate.sh plus whatever
+# RBAC the action needs, scoped as narrowly as this one (pods in kargo only).
+# Every check pushes its observation metric each run and a
+# guardian_remediation_performed sample when it acts; the VMRules below page
+# when remediation flaps (root cause needs a mind, not a restart) and when
+# the remediator itself goes silent.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: guardian-remediator
+  namespace: kargo
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: guardian-remediator
+  namespace: kargo
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list", "delete"]
+  # Reads spec.replicas to stand down when the controller is deliberately
+  # scaled to zero (drills).
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: guardian-remediator
+  namespace: kargo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: guardian-remediator
+subjects:
+  - kind: ServiceAccount
+    name: guardian-remediator
+    namespace: kargo
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: guardian-remediator
+  namespace: kargo
+  annotations:
+    # The script's shell variables must reach the pod verbatim, not be
+    # blanked by Flux's envsubst pass.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  remediate.sh: |
+    #!/bin/bash
+    set -u
+    VMSELECT=http://vmselect-shortterm.tenant-root.svc:8481/select/0/prometheus/api/v1/query
+    VMINSERT=http://vminsert-shortterm.tenant-root.svc:8480/insert/0/prometheus/api/v1/import/prometheus
+
+    # --- check: kargo-discovery ---------------------------------------
+    # Warehouse discovery rewrites its timestamp every spec.interval (at
+    # most 5m fleet-wide) even with no new artifacts; a wedged controller
+    # is the only thing that stops the clock while its pod stays Running.
+    resp=$(curl -fsS --retry 3 "$VMSELECT" \
+      --data-urlencode 'query=max(time() - kargo_warehouse_last_discovery)') || {
+      echo "vmselect unreachable; standing down"; exit 0; }
+    stale=$(printf '%s' "$resp" | jq -r '.data.result[0].value[1] // empty')
+    if [ -z "$stale" ]; then
+      echo "no discovery series; the kargo-state-metrics alerts own that failure"
+      exit 0
+    fi
+    stale=${stale%.*}
+    curl -fsS --retry 3 --data-binary \
+      "guardian_remediator_check_stale_seconds{check=\"kargo-discovery\"} ${stale}" \
+      "$VMINSERT"
+    if [ "$stale" -le 600 ]; then
+      echo "discovery fresh (${stale}s)"
+      exit 0
+    fi
+    replicas=$(kubectl get deploy kargo-controller -n kargo -o jsonpath='{.spec.replicas}')
+    if [ "$replicas" = "0" ]; then
+      echo "controller deliberately scaled to zero; not interfering"
+      exit 0
+    fi
+    # One restart per staleness episode: a controller pod younger than the
+    # alert's own fuse means a restart already happened — if it did not
+    # help, KargoDiscoveryHeartbeatStale escalates to the pager instead of
+    # this loop killing the pod forever.
+    newest=$(kubectl get pods -n kargo -l app.kubernetes.io/component=controller -o json \
+      | jq -r '[.items[].metadata.creationTimestamp | fromdateiso8601] | max // empty')
+    if [ -n "$newest" ] && [ $(( $(date +%s) - newest )) -lt 1200 ]; then
+      echo "controller pod is $(( $(date +%s) - newest ))s old; restart already tried, leaving escalation to the alert"
+      exit 0
+    fi
+    echo "discovery ${stale}s stale with a running controller: restarting kargo-controller"
+    kubectl delete pod -n kargo -l app.kubernetes.io/component=controller --wait=false
+    curl -fsS --retry 3 --data-binary \
+      "guardian_remediation_performed{check=\"kargo-discovery\",action=\"restart-kargo-controller\"} 1" \
+      "$VMINSERT"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: guardian-remediator
+  namespace: kargo
+  labels:
+    # Not app.kubernetes.io/name: kargo — that label would put the pod
+    # under the kargo CiliumNetworkPolicy's default-deny with no vminsert
+    # egress (same reason kargo-state-metrics carries its own name).
+    app.kubernetes.io/name: guardian-remediator
+    app.kubernetes.io/part-of: guardian
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 120
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: guardian-remediator
+        spec:
+          serviceAccountName: guardian-remediator
+          restartPolicy: Never
+          containers:
+            - name: remediate
+              image: docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
+              command: ["/bin/bash", "/scripts/remediate.sh"]
+              env:
+                # kubectl needs a writable cache dir under restricted PSS.
+                - name: HOME
+                  value: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 65534
+                capabilities:
+                  drop: ["ALL"]
+                seccompProfile:
+                  type: RuntimeDefault
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: scripts
+              configMap:
+                name: guardian-remediator
+            - name: tmp
+              emptyDir: {}
+---
+# Remediator pod flows: DNS, the apiserver (pod delete), vmselect (the
+# check), vminsert (the observation metrics).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: guardian-remediator
+  namespace: kargo
+  labels:
+    app.kubernetes.io/name: guardian-remediator
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: guardian-remediator
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+            - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            k8s:app.kubernetes.io/name: vmselect
+      toPorts:
+        - ports:
+            - port: "8481"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            k8s:app.kubernetes.io/name: vminsert
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
+# Ingress halves: tenant-root's generated isolation does not admit other
+# namespaces (same reason as the kargo and vap-denial-canary pairs).
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-root-vmselect-from-guardian-remediator
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-root
+      k8s:app.kubernetes.io/name: vmselect
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kargo
+            k8s:app.kubernetes.io/name: guardian-remediator
+      toPorts:
+        - ports:
+            - port: "8481"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-root-vminsert-from-guardian-remediator
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-root
+      k8s:app.kubernetes.io/name: vminsert
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kargo
+            k8s:app.kubernetes.io/name: guardian-remediator
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: guardian-remediator
+  namespace: kargo
+  labels:
+    app.kubernetes.io/name: guardian-remediator
+    app.kubernetes.io/part-of: guardian
+spec:
+  groups:
+    - name: guardian-remediator.rules
+      interval: 60s
+      rules:
+        # A successful remediation is Alerta-visible history, not a page —
+        # the system healed itself. Repetition is what needs a mind: three
+        # restarts in six hours means the controller keeps re-wedging and
+        # the root cause is live.
+        - alert: GuardianRemediationFlapping
+          expr: count_over_time(guardian_remediation_performed{check="kargo-discovery"}[6h]) >= 3
+          for: 1m
+          labels:
+            severity: warning
+            guardian_component: remediator
+          annotations:
+            summary: 'Self-healing is looping: {{ $labels.action }} ran {{ $value }} times in 6h'
+            description: >-
+              The remediator keeps restarting the Kargo controller and the
+              wedge keeps returning. Automatic recovery is masking a live
+              root cause — capture a goroutine dump from the wedged pod
+              (kubectl debug + SIGQUIT) before the next restart and
+              investigate what it is stuck on.
+        - alert: GuardianRemediatorSilent
+          expr: absent(guardian_remediator_check_stale_seconds{check="kargo-discovery"})
+          for: 30m
+          labels:
+            severity: warning
+            guardian_component: remediator
+          annotations:
+            summary: 'guardian-remediator has pushed no check samples for 30m'
+            description: >-
+              The remediator CronJob is not running or cannot reach
+              vminsert; wedge auto-recovery is offline.
+              KargoDiscoveryHeartbeatStale still pages as the backstop, but
+              a wedge now needs a hand again. Check the newest
+              guardian-remediator Job logs in the kargo namespace.
