@@ -40,25 +40,19 @@ const testRunnerAppPEM = "-----BEGIN PRIVATE KEY-----\nnot-a-real-runner-key\n--
 
 func testImportEnv() map[string]string {
 	return map[string]string{
-		"cloudflare_account_id":                                   "account",
-		"cloudflare_r2_api_token":                                 "r2-api",
-		"cloudflare_r2_secret_access_key":                         "r2-secret",
-		"cloudflare_r2_s3_api_endpoint":                           "r2-endpoint",
-		"cloudflare_r2_access_key_id":                             "r2-access",
-		"cloudflare_r2_backups_access_key_id":                     "backups-access",
-		"cloudflare_r2_backups_secret_access_key":                 "backups-secret",
-		"cloudflare_guardian_intelligence_org_dnz_zone_api_token": "zone",
-		"cloudflare_external_dns_api_token":                       "external",
-		"cloudflare_dns_lb_provisioner_api_token":                 "lb",
-		"guardian_alerting_ntfy_url":                              "https://ntfy.sh/guardian-topic",
-		"platform_admin_password":                                 "admin-pass",
-		"platform_agent_password":                                 "agent-pass",
-		"github_promotions_app_private_key_b64":                   base64.StdEncoding.EncodeToString([]byte(testGithubAppPEM)),
-		"github_runner_app_prod_app_id":                           "3370540",
-		"github_runner_app_prod_client_id":                        "Iv23xxxx",
-		"github_runner_app_prod_webhook_secret":                   "runner-webhook",
-		"github_runner_app_prod_client_secret":                    "runner-client",
-		"github_runner_app_prod_private_key_b64":                  base64.StdEncoding.EncodeToString([]byte(testRunnerAppPEM)),
+		"cloudflare_account_id":                  "account",
+		"cloudflare_r2_secret_access_key":        "r2-secret",
+		"cloudflare_r2_s3_api_endpoint":          "r2-endpoint",
+		"cloudflare_r2_access_key_id":            "r2-access",
+		"guardian_alerting_ntfy_url":             "https://ntfy.sh/guardian-topic",
+		"platform_admin_password":                "admin-pass",
+		"platform_agent_password":                "agent-pass",
+		"github_promotions_app_private_key_b64":  base64.StdEncoding.EncodeToString([]byte(testGithubAppPEM)),
+		"github_runner_app_prod_app_id":          "3370540",
+		"github_runner_app_prod_client_id":       "Iv23xxxx",
+		"github_runner_app_prod_webhook_secret":  "runner-webhook",
+		"github_runner_app_prod_client_secret":   "runner-client",
+		"github_runner_app_prod_private_key_b64": base64.StdEncoding.EncodeToString([]byte(testRunnerAppPEM)),
 	}
 }
 
@@ -67,50 +61,38 @@ func TestImportPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 10 {
-		t.Fatalf("plan length = %d, want 10", len(plan))
+	if len(plan) != 7 {
+		t.Fatalf("plan length = %d, want 7", len(plan))
 	}
-	external := plan[0]
-	if external.APIPath != "kv/data/guardian/guardian-mgmt/external-dns/cloudflare" {
-		t.Fatalf("external path = %q", external.APIPath)
+	byPath := map[string]secretWrite{}
+	for _, w := range plan {
+		byPath[w.APIPath] = w
 	}
-	if external.Data["CF_API_TOKEN"] != "external" {
-		t.Fatalf("CF_API_TOKEN = %q", external.Data["CF_API_TOKEN"])
+	r2, ok := byPath["kv/data/guardian/guardian-mgmt/operator/r2"]
+	if !ok {
+		t.Fatal("operator r2 write missing")
 	}
-	paths := []string{plan[1].APIPath, plan[2].APIPath}
-	if !strings.Contains(strings.Join(paths, "\n"), "operator/cloudflare") {
-		t.Fatalf("operator cloudflare path missing from %#v", paths)
+	if r2.Data["cloudflare_r2_access_key_id"] != "r2-access" || r2.Data["cloudflare_r2_secret_access_key"] != "r2-secret" {
+		t.Fatalf("operator r2 keypair = %#v", r2.Data)
 	}
-	if !strings.Contains(strings.Join(paths, "\n"), "operator/r2") {
-		t.Fatalf("operator r2 path missing from %#v", paths)
+	if r2.Data["cloudflare_r2_s3_api_endpoint"] != "r2-endpoint" {
+		t.Fatalf("operator r2 endpoint = %q", r2.Data["cloudflare_r2_s3_api_endpoint"])
 	}
-	backups := plan[3]
-	if backups.APIPath != "kv/data/guardian/guardian-mgmt/tenant-root/backups-r2" {
-		t.Fatalf("backups path = %q", backups.APIPath)
+	if _, ok := r2.Data["cloudflare_r2_api_token"]; ok {
+		t.Fatalf("operator r2 carries cloudflare_r2_api_token: %#v", r2.Data)
 	}
-	// Key names are the backupstrategy-controller's flat-key credentials
-	// contract; the tenant-root ExternalSecret maps them 1:1.
-	if backups.Data["accessKey"] != "backups-access" || backups.Data["secretKey"] != "backups-secret" {
-		t.Fatalf("backups keypair = %#v", backups.Data)
-	}
-	if backups.Data["endpoint"] != "r2-endpoint" || backups.Data["bucketName"] != "guardian-backups" {
-		t.Fatalf("backups coordinates = %#v", backups.Data)
-	}
-	if backups.Data["region"] != "auto" {
-		t.Fatalf("backups region = %q, want auto (clickhouse-backup sidecar reads it via secretKeyRef)", backups.Data["region"])
-	}
-	alerting := plan[4]
-	if alerting.APIPath != "kv/data/guardian/guardian-mgmt/tenant-root/alerting" {
-		t.Fatalf("alerting path = %q", alerting.APIPath)
+	alerting, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-root/alerting"]
+	if !ok {
+		t.Fatal("alerting write missing")
 	}
 	// Key name is the alert-relay-config ExternalSecret's remoteRef property
 	// (deployments/alerting/secrets.yaml maps it 1:1).
 	if alerting.Data["ntfy_url"] != "https://ntfy.sh/guardian-topic" {
 		t.Fatalf("alerting data = %#v", alerting.Data)
 	}
-	admins := plan[5]
-	if admins.APIPath != "kv/data/guardian/guardian-mgmt/tenant-root/platform-admins" {
-		t.Fatalf("platform-admins path = %q", admins.APIPath)
+	admins, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-root/platform-admins"]
+	if !ok {
+		t.Fatal("platform-admins write missing")
 	}
 	// Key names are the platform-admin-passwords ExternalSecret's remoteRef
 	// properties (base/cozystack/platform-admins.yaml maps them 1:1 to the
@@ -118,23 +100,23 @@ func TestImportPlan(t *testing.T) {
 	if admins.Data["platform-admin"] != "admin-pass" || admins.Data["platform-agent"] != "agent-pass" {
 		t.Fatalf("platform-admins data = %#v", admins.Data)
 	}
-	promotion := plan[6]
-	if promotion.APIPath != "kv/data/guardian/guardian-mgmt/company-site/promotion/github-app" {
-		t.Fatalf("promotion path = %q", promotion.APIPath)
+	promotion, ok := byPath["kv/data/guardian/guardian-mgmt/company-site/promotion/github-app"]
+	if !ok {
+		t.Fatal("company-site promotion write missing")
 	}
 	if promotion.Data["githubAppPrivateKey"] != testGithubAppPEM {
 		t.Fatal("githubAppPrivateKey did not round-trip through base64")
 	}
-	productsPromotion := plan[8]
-	if productsPromotion.APIPath != "kv/data/guardian/guardian-mgmt/guardian-products/promotion/github-app" {
-		t.Fatalf("products promotion path = %q", productsPromotion.APIPath)
+	productsPromotion, ok := byPath["kv/data/guardian/guardian-mgmt/guardian-products/promotion/github-app"]
+	if !ok {
+		t.Fatal("products promotion write missing")
 	}
 	if productsPromotion.Data["githubAppPrivateKey"] != testGithubAppPEM {
 		t.Fatal("products githubAppPrivateKey did not round-trip through base64")
 	}
-	runner := plan[9]
-	if runner.APIPath != "kv/data/guardian/guardian-mgmt/verself-runner/github-app" {
-		t.Fatalf("verself-runner path = %q", runner.APIPath)
+	runner, ok := byPath["kv/data/guardian/guardian-mgmt/verself-runner/github-app"]
+	if !ok {
+		t.Fatal("verself-runner write missing")
 	}
 	if runner.Data["webhookSecret"] != "runner-webhook" || runner.Data["clientSecret"] != "runner-client" {
 		t.Fatalf("verself-runner secrets = %#v", runner.Data)
@@ -179,8 +161,8 @@ func TestImportPlanOptionalKeycloakStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 12 {
-		t.Fatalf("plan length = %d, want 12 (10 base + beta + prod)", len(plan))
+	if len(plan) != 9 {
+		t.Fatalf("plan length = %d, want 9 (7 base + beta + prod)", len(plan))
 	}
 	byPath := map[string]secretWrite{}
 	for _, w := range plan {

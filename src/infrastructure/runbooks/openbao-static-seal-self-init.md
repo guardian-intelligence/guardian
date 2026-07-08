@@ -287,13 +287,21 @@ aspect infra converged --expected-revision "$(git rev-parse HEAD)" \
   --kubeconfig=src/infrastructure/talm/kubeconfig
 ```
 
-Then re-relay the two in-cluster-generated values the importer does not carry
-(each a scoped `secrets-writer` write, value on stdin, sourced from its
-still-materialized Secret):
+Then re-relay the values the importer does not carry (each a scoped
+`secrets-writer` write, value on stdin; the in-cluster-generated ones are
+sourced from their still-materialized Secrets):
 
 - analytics ClickHouse ingest password → `guardian-analytics/clickhouse`
   property `ingest`
 - verself-controlplane Postgres `uri` → `verself-runner/postgres`
+- external-dns Cloudflare token →
+  `kv/guardian/guardian-mgmt/external-dns/cloudflare` property `CF_API_TOKEN`,
+  sourced from `tofu -chdir=src/infrastructure/bootstrap/guardian-mgmt-cloudflare-tokens output -raw external_dns_token_value`,
+  written via the `guardian-writer-external-dns` scoped role
+- backups R2 keypair → `kv/guardian/guardian-mgmt/tenant-root/backups-r2`
+  (flat keys `accessKey`/`secretKey`/`endpoint`/`bucketName=guardian-backups`/`region=auto`),
+  `accessKey` from output `r2_backups_access_key_id`, `secretKey` from output
+  `r2_backups_secret_access_key`, written via `guardian-writer-tenant-root`
 
 Force-sync every ExternalSecret and confirm `Ready=True`.
 
