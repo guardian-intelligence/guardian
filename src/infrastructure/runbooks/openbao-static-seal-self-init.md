@@ -128,8 +128,9 @@ bootstrap-only, heavily cordoned, non-load-bearing tool; do not use it as a
 routine secret-management path.
 
 ```sh
+aspect tools install   # provides the pinned kubectl shim used below
 bazelisk run //src/infrastructure/cmd/openbao_secret_import:openbao_secret_import -- \
-  --kubectl "$(bazelisk info output_base)/external/+http_file+kubectl_linux_amd64/file/kubectl" \
+  --kubectl "$(git rev-parse --show-toplevel)/.guardian/tools/bin/kubectl" \
   --kubeconfig "$HOME/.kube/config" \
   --env-file custody.env
 ```
@@ -138,31 +139,14 @@ The importer authenticates through the temporary `guardian-secret-importer`
 Kubernetes auth role created by self-init (write access to the whole
 `guardian-mgmt` subtree — bootstrap and DR re-seed are the only times a
 cross-namespace write credential exists, and the importer deletes its own
-role and policy when it finishes). Its import plan in
-`src/infrastructure/cmd/openbao_secret_import/main.go` is the DR re-seed
+role and policy when it finishes). Its import plan — `importPlan` in
+`src/infrastructure/cmd/openbao_secret_import/main.go` — is the DR re-seed
 manifest: the authoritative list of every secret the system needs after a
-raft wipe, keyed by custody env variables. It currently writes:
-
-- `kv/guardian/guardian-mgmt/external-dns/cloudflare`
-- `kv/guardian/guardian-mgmt/operator/cloudflare`
-- `kv/guardian/guardian-mgmt/operator/r2`
-- `kv/guardian/guardian-mgmt/tenant-root/backups-r2` (bucket-scoped
-  `guardian-backups` R2 keypair in the flat-key format Cozystack's
-  backupstrategy-controller consumes; ESO projects it as
-  `Secret/guardian-backups-creds` in `tenant-root`)
-- `kv/guardian/guardian-mgmt/company-site/promotion/github-app`
-- `kv/guardian/guardian-mgmt/guardian-iam/promotion/github-app` (same App
-  identity as company-site's; Kargo credentials are project-namespaced)
-- `kv/guardian/guardian-mgmt/guardian-products/promotion/github-app` (same
-  App identity, the products vertical's project-namespaced copy)
-- `kv/guardian/guardian-mgmt/postflight-runner/github-app` (the Postflight Runner
-  GitHub App: webhook HMAC secret, OAuth client secret, and the App private
-  key, transported base64-encoded as
-  `github_runner_app_prod_private_key_b64`; appId/clientId ride along as
-  public identity)
-- `kv/guardian/guardian-mgmt/tenant-guardian-{beta,gamma,prod}/keycloak/github-oauth`
-  (optional per stage: imported only when the env file carries that stage's
-  `<STAGE>_GITHUB_CLIENT_SECRET`)
+raft wipe, keyed by custody env variables. Read the plan in the code, not a
+prose mirror of it: as of this writing it carries seven always-written paths
+plus up to nine optional per-stage Keycloak writes (imported only when the
+env file carries that stage's values), and each entry's comment explains its
+consumer.
 
 GitHub App private keys live in custody as PEM files and travel in the env
 file base64-encoded (the file is line-oriented): the `guardian-promotions`
@@ -267,46 +251,139 @@ Consumers stay up throughout: ExternalSecrets are `Orphan`/`Retain`.
 
 Land the PR editing the `initialize` block (new reader+writer pair +
 conformance inventory + consumer ESO manifests), wait for Flux to reconcile
-`guardian-system`, then:
+`guardian-system`, then run the whole reinit as one unattended command from
+an up-to-date `origin/main` checkout:
 
 ```sh
+# 1. build the import env file from custody (never print a value)
+aspect infra custody --action restore    # plaintext bundle at /dev/shm/guardian-custody
+umask 077
+B=/dev/shm/guardian-custody
+cp "$B/custody.env" "$B/import.env"
+printf 'github_promotions_app_private_key_b64=%s\n' \
+  "$(base64 -w0 < "$B/keys/github-promotions-app.private-key.pem")" >> "$B/import.env"
+printf 'github_runner_app_prod_private_key_b64=%s\n' \
+  "$(base64 -w0 < "$B/keys/postflight-runner.private-key.pem")" >> "$B/import.env"
+
+# 2. the whole reinit, unattended (consumes and deletes import.env)
+aspect infra openbao-reinit
+
+# 3. wipe the plaintext bundle the moment the command succeeds
+aspect infra custody --action wipe
+```
+
+The command executes, in order, and fails fast with a specific message at
+each gate:
+
+1. **Preconditions.** The checkout is `origin/main` HEAD (the importer binary
+   embeds the import plan; seeding from a stale plan is the reinit's #1
+   historical footgun); the `guardian-system` Kustomization is Ready at that
+   same revision, so the raft reset boots into the merged self-init block;
+   `tenant-guardian` carries `pod-security.kubernetes.io/enforce=privileged`;
+   and the import env file exists and is non-empty. The Pod Security check
+   exists because a Cozystack tenant-chart regeneration can SSA-stomp the
+   postRenderer that sets the labels
+   (`base/app-patches/tenant-guardian-namespace-pod-security.yaml`); with the
+   label missing the StatefulSet cannot recreate pods (the hostPath seal
+   volume violates baseline PSA) and a partial boot leaves dirty raft state
+   (`cluster already has state` crashloop). When the label is missing the
+   tool reconciles `guardian-mgmt-app-patches`, then the `tenant-guardian`
+   HelmRelease, and proceeds only once the label is back.
+2. **Raft reset.** Scale to 0, wait for pod deletion, delete the
+   `data-guardian-openbao-{0,1,2}` PVCs (seal keys on nodes and `audit-*`
+   PVCs stay), scale back to 3, wait for all members to run ready. A member
+   that crashloops on `cluster already has state` is auto-recovered exactly
+   once with a fresh pod + data PVC — the proven fix for leftover raft
+   debris.
+3. **Drill.** The same verification `aspect infra openbao-drill` runs: three
+   members, one `cluster_id`, initialized, unsealed, HA-enabled.
+4. **Custody re-import.** Runs the importer built from this checkout with
+   `--delete-env-file`; the importer removes its own one-shot role and policy
+   after verified writes.
+5. **Re-relay.** The four in-cluster-generated values the importer does not
+   carry, each written through its own scoped `guardian-writer-<ns>` role and
+   sourced from its still-materialized `Orphan`/`Retain` Secret (values stay
+   in memory, never printed): analytics ClickHouse `ingest` (Secret
+   `analytics-ch-ingest`, ns `guardian-analytics`), postflight control-plane
+   Postgres `uri` (Secret `postgres-postflight-controlplane-app`, ns
+   `tenant-root`), external-dns `CF_API_TOKEN` (Secret
+   `cloudflare-external-dns`, ns `external-dns`), and the backups R2 keypair
+   (Secret `guardian-backups-creds`, ns `tenant-root`). A missing source
+   Secret stops the run and names the upstream source of truth (the
+   `guardian-mgmt-cloudflare-tokens` tofu outputs for the Cloudflare-lane
+   values); an empty value is never written (`test -s` semantics).
+6. **Convergence.** Force-syncs every ClusterSecretStore/SecretStore and
+   every ExternalSecret cluster-wide, then polls until all report Ready,
+   listing the stragglers on timeout. The store nudge is load-bearing: a
+   store that validated while OpenBao was down wedges on a stale
+   `InvalidProviderConfig/unable to create client` condition until poked.
+
+Afterwards, the full-system proof:
+
+```sh
+aspect infra converged --expected-revision "$(git rev-parse HEAD)"
+```
+
+<details>
+<summary>Manual steps (DR reference — only when the reinit tool itself is broken)</summary>
+
+```sh
+# 0. preconditions — all enforced by the tool, all still required by hand:
+#    guardian-system Ready at origin/main HEAD, checkout == origin/main,
+#    and the privileged Pod Security label present:
+kubectl get ns tenant-guardian \
+  -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}'
+# if not "privileged": annotate reconcile.fluxcd.io/requestedAt on
+# Kustomization cozy-fluxcd/guardian-mgmt-app-patches, then on
+# HelmRelease tenant-root/tenant-guardian, and re-check before continuing.
+
 # 1. reset raft (seal keys on nodes and audit PVCs stay)
 kubectl -n tenant-guardian scale statefulset guardian-openbao --replicas=0
 kubectl -n tenant-guardian wait pod -l app.kubernetes.io/name=openbao --for=delete --timeout=5m
 kubectl -n tenant-guardian delete pvc data-guardian-openbao-0 data-guardian-openbao-1 data-guardian-openbao-2
 kubectl -n tenant-guardian scale statefulset guardian-openbao --replicas=3
+# if a member crashloops on "cluster already has state": delete that pod and
+# its data-<pod> PVC once and let it boot fresh.
 
 # 2. wait until all three members are up and one raft cluster
 aspect infra openbao-drill --kubeconfig=src/infrastructure/talm/kubeconfig
 
-# 3. re-seed from custody — build the importer from MERGED main (see below)
+# 3. re-seed from custody — build the importer from MERGED main
 #    (Bootstrap Secret Import section has the full custody/env-file recipe)
 
-# 4. verify: the external-dns ExternalSecret Ready=True proves self-init +
+# 4. re-relay the values the importer does not carry (each a scoped
+#    secrets-writer write, value on stdin, `test -s` before every put; the
+#    in-cluster-generated ones are sourced from their still-materialized
+#    Orphan/Retain Secrets):
+#    - analytics ClickHouse ingest password (Secret analytics-ch-ingest key
+#      ingest, ns guardian-analytics) → guardian-analytics/clickhouse
+#      property ingest
+#    - postflight-controlplane Postgres uri (Secret
+#      postgres-postflight-controlplane-app key uri, ns tenant-root) →
+#      postflight-runner/postgres
+#    - external-dns Cloudflare token (Secret cloudflare-external-dns key
+#      CF_API_TOKEN, ns external-dns; upstream source when missing:
+#      tofu -chdir=src/infrastructure/bootstrap/guardian-mgmt-cloudflare-tokens \
+#        output -raw external_dns_token_value) →
+#      external-dns/cloudflare property CF_API_TOKEN
+#    - backups R2 keypair (Secret guardian-backups-creds, ns tenant-root;
+#      upstream outputs r2_backups_access_key_id /
+#      r2_backups_secret_access_key) → tenant-root/backups-r2 flat keys
+#      accessKey/secretKey/endpoint/bucketName=guardian-backups/region=auto
+
+# 5. nudge every ClusterSecretStore AND force-sync every ExternalSecret
+#    (a store validated while OpenBao was down stays wedged on
+#    InvalidProviderConfig until annotated):
+kubectl annotate clustersecretstore --all force-sync=$(date +%s) --overwrite
+kubectl annotate externalsecret --all -A force-sync=$(date +%s) --overwrite
+# then confirm every ExternalSecret reports Ready=True.
+
+# 6. verify: the external-dns ExternalSecret Ready=True proves self-init +
 #    kv mount + auth roles are live. It reaches Ready only AFTER the
-#    external-dns re-relay in the checklist below — run that first, then
-#    read this signal.
+#    external-dns re-relay above.
 aspect infra converged --expected-revision "$(git rev-parse HEAD)" \
   --kubeconfig=src/infrastructure/talm/kubeconfig
 ```
-
-Then re-relay the values the importer does not carry (each a scoped
-`secrets-writer` write, value on stdin; the in-cluster-generated ones are
-sourced from their still-materialized Secrets):
-
-- analytics ClickHouse ingest password → `guardian-analytics/clickhouse`
-  property `ingest`
-- postflight-controlplane Postgres `uri` → `postflight-runner/postgres`
-- external-dns Cloudflare token →
-  `kv/guardian/guardian-mgmt/external-dns/cloudflare` property `CF_API_TOKEN`,
-  sourced from `tofu -chdir=src/infrastructure/bootstrap/guardian-mgmt-cloudflare-tokens output -raw external_dns_token_value`,
-  written via the `guardian-writer-external-dns` scoped role
-- backups R2 keypair → `kv/guardian/guardian-mgmt/tenant-root/backups-r2`
-  (flat keys `accessKey`/`secretKey`/`endpoint`/`bucketName=guardian-backups`/`region=auto`),
-  `accessKey` from output `r2_backups_access_key_id`, `secretKey` from output
-  `r2_backups_secret_access_key`, written via `guardian-writer-tenant-root`
-
-Force-sync every ExternalSecret and confirm `Ready=True`.
 
 Watch out for:
 
@@ -317,3 +394,5 @@ Watch out for:
 - **`test -s` the value file before `bao kv put`.** A failed
   `kubectl … | base64 > f` pipeline does not stop `set -euo pipefail`, so an
   empty file silently overwrites a good secret.
+
+</details>

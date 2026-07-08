@@ -28,6 +28,7 @@ load(
     infra_load_http = "load_http",
     infra_node_outage_drill = "node_outage_drill",
     infra_openbao_drill = "openbao_drill",
+    infra_openbao_reinit = "openbao_reinit",
     infra_openbao_observability_drill = "openbao_observability_drill",
     infra_observability_drill = "observability_drill",
     infra_talos = "talos",
@@ -65,6 +66,7 @@ def config(ctx):
     ctx.tasks.add(infra_load_http)
     ctx.tasks.add(infra_node_outage_drill)
     ctx.tasks.add(infra_openbao_drill)
+    ctx.tasks.add(infra_openbao_reinit)
     ctx.tasks.add(infra_openbao_observability_drill)
     ctx.tasks.add(infra_observability_drill)
     ctx.tasks.add(infra_talos)
