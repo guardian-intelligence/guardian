@@ -12,7 +12,7 @@ wrote the backups (the writer lying to you is the failure mode).
 
 What this covers: the `guardian-backups` R2 bucket fed by Cozystack's
 `cozy-default` BackupClass — CNPG/barman for
-`tenant-root/verself-controlplane` and `tenant-guardian-prod/keycloak`
+`tenant-root/postflight-controlplane` and `tenant-guardian-prod/keycloak`
 Postgres (continuous WAL + nightly base), clickhouse-backup for
 `tenant-root/analytics` (nightly archive). Sibling procedure docs:
 `postgres-backup-restore.md` (enablement, two-BackupJob rule, drill
@@ -43,7 +43,7 @@ BOTH sides — the CR record and the object store:
 ```sh
 kubectl get backups.backups.cozystack.io -A --sort-by=.metadata.creationTimestamp
 # and per-instance WAL liveness (the real RPO signal for Postgres):
-kubectl exec -n tenant-root postgres-verself-controlplane-<primary> -c postgres -- \
+kubectl exec -n tenant-root postgres-postflight-controlplane-<primary> -c postgres -- \
   psql -U postgres -tc "SELECT last_archived_wal, last_archived_time, failed_count FROM pg_stat_archiver;"
 ```
 
@@ -137,7 +137,7 @@ is the alarm, not the absolute):
   fast on an idle database means something is churning (autovacuum
   storms, a runaway writer) — that is a database finding, surfaced by the
   backup audit.
-- **No foreign prefixes.** Only `tenant-root/verself-controlplane/`,
+- **No foreign prefixes.** Only `tenant-root/postflight-controlplane/`,
   `tenant-guardian-prod/keycloak/`, `tenant-root/analytics/`, `velero/`
   (when VMs exist), and `probe/` belong in this bucket.
 

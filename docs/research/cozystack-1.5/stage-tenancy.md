@@ -94,7 +94,7 @@ tenant backends** path.
   the right shape).
 - **Naming law**: tenant names cannot contain dashes (`_helpers.tpl` hard-fail). Any
   per-application tenant scheme has to squeeze app names into single words
-  (`verself-runner` → `verselfrunner`), and nesting app×stage tenants
+  (`postflight-runner` → `postflightrunner`), and nesting app×stage tenants
   (`tenant-guardian-iam-beta`) puts every workload at depth 3 — deeper into the label-bug
   regime v1.5.x doesn't handle, closer to the 63-char namespace limit, and each app×stage
   cell needs its own hand-written peering to reach shared services. Sibling-stage tenants at

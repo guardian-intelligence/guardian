@@ -155,7 +155,7 @@ Git-side enforcement covers what the repo renders; the in-cluster backstop
 covers what actually reaches the apiserver. `guardian-image-provenance`
 (base/app-patches/image-provenance-admission.yaml) requires every container
 image in the rendered workload namespaces (tenant-guardian*,
-guardian-analytics, verself-runner) to be digest-pinned and to start with
+guardian-analytics, postflight-runner) to be digest-pinned and to start with
 an allowlisted registry prefix (param ConfigMap
 `tenant-guardian/guardian-image-registry-allowlist`; extending it is a
 supply-chain decision made in its own reviewed PR). It matches workload

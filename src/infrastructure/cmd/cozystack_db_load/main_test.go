@@ -22,9 +22,9 @@ func TestPostgresJobManifest(t *testing.T) {
 		"namespace: tenant-root\n",
 		"guardian.dev/component: postgres\n",
 		"image: " + postgresBenchImage + "\n",
-		"value: postgres-verself-controlplane-rw\n",
-		"name: postgres-verself-controlplane-superuser\n                  key: username\n",
-		"name: postgres-verself-controlplane-superuser\n                  key: password\n",
+		"value: postgres-postflight-controlplane-rw\n",
+		"name: postgres-postflight-controlplane-superuser\n                  key: username\n",
+		"name: postgres-postflight-controlplane-superuser\n                  key: password\n",
 		"name: HOME\n              value: /tmp\n",
 		"pgbench --initialize --scale \"$PGBENCH_SCALE\"",
 		"pgbench --client \"$PGBENCH_CLIENTS\"",
@@ -117,7 +117,7 @@ func baseConfig(component string) dbLoadConfig {
 	name := "guardian-root-" + component + "-load-test"
 	applicationName := "guardian"
 	if component == "postgres" {
-		applicationName = "verself-controlplane"
+		applicationName = "postflight-controlplane"
 	}
 	return dbLoadConfig{
 		Kubectl:                   "/kubectl",

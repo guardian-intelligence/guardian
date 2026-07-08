@@ -1,13 +1,13 @@
 # The name is load-bearing: the OpenBao per-namespace scope (self-init
-# requests write_reader_role_verself_runner / write_writer_role_verself_runner
+# requests write_reader_role_postflight_runner / write_writer_role_postflight_runner
 # in guardian/system/openbao-helmrelease.yaml) binds the secrets-reader and
-# secrets-writer ServiceAccounts in exactly `verself-runner`.
+# secrets-writer ServiceAccounts in exactly `postflight-runner`.
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: verself-runner
+  name: postflight-runner
   labels:
-    app.kubernetes.io/name: verself-runner
+    app.kubernetes.io/name: postflight-runner
     app.kubernetes.io/part-of: guardian
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted

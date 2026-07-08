@@ -91,7 +91,7 @@ GUARDIAN_MGMT_TALOS_NODES = [
     "10.8.0.13",
 ]
 EXCLUDED_KUBE_APIS = [
-    # AGENTS.md marks this as Verself prod. It is not guardian-mgmt and must not
+    # AGENTS.md marks this as Postflight prod. It is not guardian-mgmt and must not
     # be used for guardian-mgmt operations.
     "https://206.223.228.99:6443",
 ]

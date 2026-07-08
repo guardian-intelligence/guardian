@@ -1,32 +1,32 @@
-# verself-controlplane — the runner control plane for stage (a): GitHub
+# postflight-controlplane — the runner control plane for stage (a): GitHub
 # workflow_job webhook ingest, delivery ledger in the CNPG Postgres, PR
-# comments. Contract: src/services/verself/controlplane/. Single replica:
+# comments. Contract: src/services/postflight/controlplane/. Single replica:
 # GitHub retries undelivered webhooks and the worker loop is idempotent over
 # the ledger, so a pod reschedule loses nothing.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: verself-controlplane
-  namespace: verself-runner
+  name: postflight-controlplane
+  namespace: postflight-runner
   labels:
-    app.kubernetes.io/name: verself-controlplane
+    app.kubernetes.io/name: postflight-controlplane
     app.kubernetes.io/part-of: guardian
-    guardian.dev/product: verself
+    guardian.dev/product: postflight
 spec:
   replicas: 1
   revisionHistoryLimit: 3
   selector:
     matchLabels:
-      app.kubernetes.io/name: verself-controlplane
+      app.kubernetes.io/name: postflight-controlplane
   template:
     metadata:
       labels:
         # app.kubernetes.io/name is load-bearing: the CiliumNetworkPolicy and
         # the tenant-root ingress-egress pair in networkpolicy.yaml select
         # control-plane pods by exactly this label.
-        app.kubernetes.io/name: verself-controlplane
+        app.kubernetes.io/name: postflight-controlplane
         app.kubernetes.io/part-of: guardian
-        guardian.dev/product: verself
+        guardian.dev/product: postflight
         guardian.dev/otel: producer
     spec:
       automountServiceAccountToken: false
@@ -38,7 +38,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: controlplane
-          image: ghcr.io/guardian-intelligence/verself-controlplane@sha256:cae601911d86b08b906bca69d6e70ec3a9247e3455bb44a0ceccb2f103c3d850
+          image: ghcr.io/guardian-intelligence/postflight-controlplane@sha256:f178971e6720aaba9cfa5c6eeb8ab63956b28fa40adc95e4d76f3479d2346476
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -98,15 +98,15 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: verself-controlplane
-  namespace: verself-runner
+  name: postflight-controlplane
+  namespace: postflight-runner
   labels:
-    app.kubernetes.io/name: verself-controlplane
+    app.kubernetes.io/name: postflight-controlplane
     app.kubernetes.io/part-of: guardian
-    guardian.dev/product: verself
+    guardian.dev/product: postflight
 spec:
   selector:
-    app.kubernetes.io/name: verself-controlplane
+    app.kubernetes.io/name: postflight-controlplane
   ports:
     - name: http
       port: 8080

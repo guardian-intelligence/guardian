@@ -51,7 +51,7 @@ go_test(
         "//src/infrastructure/deployments/guardian/promotion:manifests",
         "//src/infrastructure/deployments/guardian/promotion/pipelines:manifests",
         "//src/infrastructure/deployments/guardian/system:manifests",
-        "//src/infrastructure/deployments/verself-runner:manifests",
+        "//src/infrastructure/deployments/postflight-runner:manifests",
         "//src/infrastructure/runbooks:docs",
         "//src/infrastructure/talm:chart",
     ],

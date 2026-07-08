@@ -290,7 +290,7 @@ func TestOpenBaoOperationsInventoryConformance(t *testing.T) {
 		"tenant_guardian_beta",
 		"tenant_guardian_gamma",
 		"tenant_guardian_prod",
-		"verself_runner",
+		"postflight_runner",
 	} {
 		inventory = append(inventory,
 			`request "write_reader_policy_`+scope+`"`,
@@ -400,7 +400,7 @@ func TestFluxSubstitutionSafetyConformance(t *testing.T) {
 		"src/infrastructure/deployments/iam/gamma",
 		"src/infrastructure/deployments/iam/prod",
 		"src/infrastructure/deployments/products",
-		"src/infrastructure/deployments/verself-runner",
+		"src/infrastructure/deployments/postflight-runner",
 	}
 	// ${GUARDIAN_SOURCE_KIND...} / ${GUARDIAN_SOURCE_NAME...} are the declared
 	// vars; $${ is an escaped literal. Anything else is unhandled collateral.

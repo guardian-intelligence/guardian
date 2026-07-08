@@ -155,7 +155,7 @@ raft wipe, keyed by custody env variables. It currently writes:
   identity as company-site's; Kargo credentials are project-namespaced)
 - `kv/guardian/guardian-mgmt/guardian-products/promotion/github-app` (same
   App identity, the products vertical's project-namespaced copy)
-- `kv/guardian/guardian-mgmt/verself-runner/github-app` (the Verself Runner
+- `kv/guardian/guardian-mgmt/postflight-runner/github-app` (the Postflight Runner
   GitHub App: webhook HMAC secret, OAuth client secret, and the App private
   key, transported base64-encoded as
   `github_runner_app_prod_private_key_b64`; appId/clientId ride along as
@@ -166,7 +166,7 @@ raft wipe, keyed by custody env variables. It currently writes:
 
 GitHub App private keys live in custody as PEM files and travel in the env
 file base64-encoded (the file is line-oriented): the `guardian-promotions`
-key as `github_promotions_app_private_key_b64` and the Verself Runner key as
+key as `github_promotions_app_private_key_b64` and the Postflight Runner key as
 `github_runner_app_prod_private_key_b64`. Build the import file as a working
 copy from custody without printing any value, then pass it via `--env-file`:
 
@@ -178,7 +178,7 @@ cp "$B/custody.env" "$B/import.env"
 printf 'github_promotions_app_private_key_b64=%s\n' \
   "$(base64 -w0 < "$B/keys/github-promotions-app.private-key.pem")" >> "$B/import.env"
 printf 'github_runner_app_prod_private_key_b64=%s\n' \
-  "$(base64 -w0 < "$B/keys/verself-runner.private-key.pem")" >> "$B/import.env"
+  "$(base64 -w0 < "$B/keys/postflight-runner.private-key.pem")" >> "$B/import.env"
 # then run the import command above with:
 #   --env-file /dev/shm/guardian-custody/import.env -delete-env-file
 aspect infra custody --action wipe       # the moment the import verifies
@@ -203,7 +203,7 @@ Almost every secret change is the routine path. Reinit is rare.
 
 The scoped namespaces that already exist (no reinit needed to write into them):
 `external-dns`, `operator`, `company-site`, `guardian-iam`,
-`guardian-products`, `guardian-analytics`, `verself-runner`, `tenant-root`,
+`guardian-products`, `guardian-analytics`, `postflight-runner`, `tenant-root`,
 `tenant-guardian`, and `tenant-guardian-{beta,gamma,prod}`. Confirm the live
 list with `TestOpenBaoSecretScopeConformance`'s inventory.
 
@@ -249,7 +249,7 @@ Crib from these PRs (each is a routine add, no reinit):
 
 - `d34fb5a` — OpenBao-back the Kargo git credential: importer-plan entry +
   ESO wiring for a new secret in an existing namespace.
-- `2a44ca6` — Verself IAM beta: per-stage secret resolving into env vars,
+- `2a44ca6` — Postflight IAM beta: per-stage secret resolving into env vars,
   `substitute: disabled` where `${...}` must survive Flux envsubst.
 
 Watch out for:
@@ -296,7 +296,7 @@ sourced from their still-materialized Secrets):
 
 - analytics ClickHouse ingest password → `guardian-analytics/clickhouse`
   property `ingest`
-- verself-controlplane Postgres `uri` → `verself-runner/postgres`
+- postflight-controlplane Postgres `uri` → `postflight-runner/postgres`
 - external-dns Cloudflare token →
   `kv/guardian/guardian-mgmt/external-dns/cloudflare` property `CF_API_TOKEN`,
   sourced from `tofu -chdir=src/infrastructure/bootstrap/guardian-mgmt-cloudflare-tokens output -raw external_dns_token_value`,
