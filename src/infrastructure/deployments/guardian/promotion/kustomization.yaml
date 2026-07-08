@@ -6,3 +6,4 @@ resources:
   - kargo-networkpolicy.yaml
   - kargo-state-metrics.yaml
   - kargo-alerts.yaml
+  - remediator.yaml
