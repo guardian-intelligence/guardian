@@ -55,3 +55,28 @@ spec:
         - ports:
             - port: "3000"
               protocol: TCP
+---
+# vmagent scrapes the prometheus port from cozy-monitoring.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-vmagent-to-electric-metrics
+  namespace: tenant-guardian-gamma
+  labels:
+    app.kubernetes.io/name: electric
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: cockpit
+    guardian.dev/stage: gamma
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: electric
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:app.kubernetes.io/name: vmagent
+            k8s:io.kubernetes.pod.namespace: cozy-monitoring
+      toPorts:
+        - ports:
+            - port: "4000"
+              protocol: TCP

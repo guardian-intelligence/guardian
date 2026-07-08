@@ -11,6 +11,12 @@ metadata:
 spec:
   replicas: 1
   revisionHistoryLimit: 3
+  # Electric holds the database's single logical replication slot, so a
+  # surged replacement pod can never become ready while the old one lives.
+  # Rollouts take a brief serving gap: edge-cached shape reads keep working,
+  # uncached ones fail until the new pod is Ready.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: electric
@@ -50,8 +56,9 @@ spec:
               value: postgresql://electric:$(PGPASSWORD)@postgres-products-rw.tenant-guardian-gamma.svc:5432/cockpit?sslmode=require
             - name: ELECTRIC_DB_POOL_SIZE
               value: "20"
-            # Shape logs are rebuildable from Postgres; a pod reschedule or
-            # failover triggers re-snapshot by design.
+            # Shape logs persist across pod restarts so existing shape
+            # handles stay valid for cached clients; a database failover
+            # still rotates them (slot loss forces re-snapshot).
             - name: ELECTRIC_STORAGE_DIR
               value: /var/lib/electric
             # The shape API serves the cockpit database only, which is
@@ -59,9 +66,13 @@ spec:
             # nothing else and the ingress exposes read paths only.
             - name: ELECTRIC_INSECURE
               value: "true"
+            - name: ELECTRIC_PROMETHEUS_PORT
+              value: "4000"
           ports:
             - name: http
               containerPort: 3000
+            - name: metrics
+              containerPort: 4000
           readinessProbe:
             httpGet:
               path: /v1/health
@@ -82,7 +93,26 @@ spec:
               mountPath: /var/lib/electric
       volumes:
         - name: shape-log
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: electric-shape-log
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: electric-shape-log
+  namespace: tenant-guardian-gamma
+  labels:
+    app.kubernetes.io/name: electric
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: cockpit
+    guardian.dev/stage: gamma
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: replicated
+  resources:
+    requests:
+      storage: 2Gi
 ---
 apiVersion: v1
 kind: Service

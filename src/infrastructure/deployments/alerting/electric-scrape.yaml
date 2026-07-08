@@ -1,0 +1,49 @@
+# One cluster-wide scrape covers every stage's Electric (vmagent
+# selectAllByDefault). Electric accumulates distribution metrics in memory
+# between scrapes, so ELECTRIC_PROMETHEUS_PORT must never be set on a
+# Deployment without this scrape collecting from it — the unscraped
+# accumulation grows unboundedly and eventually OOMs the pod.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: electric
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: electric
+    app.kubernetes.io/part-of: guardian
+spec:
+  namespaceSelector:
+    any: true
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: electric
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: electric-scrape
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: electric
+    app.kubernetes.io/part-of: guardian
+spec:
+  groups:
+    - name: electric-scrape.rules
+      interval: 30s
+      rules:
+        - alert: ElectricScrapeDown
+          expr: up{container="electric"} == 0
+          for: 5m
+          labels:
+            severity: warning
+            guardian_component: electric
+          annotations:
+            summary: "Electric metrics scrape is down in {{ $labels.namespace }}"
+            description: >-
+              vmagent cannot scrape the Electric prometheus endpoint.
+              Electric accumulates distribution metrics in memory between
+              scrapes, so a dead scrape eventually OOMs the pod.
