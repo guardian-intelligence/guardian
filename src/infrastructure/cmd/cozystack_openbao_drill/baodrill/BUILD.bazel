@@ -1,0 +1,14 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "baodrill",
+    srcs = ["baodrill.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/infrastructure/cmd/cozystack_openbao_drill/baodrill",
+    visibility = ["//src/infrastructure/cmd:__subpackages__"],
+)
+
+go_test(
+    name = "baodrill_test",
+    srcs = ["baodrill_test.go"],
+    embed = [":baodrill"],
+)

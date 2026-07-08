@@ -83,6 +83,8 @@ EDGE_FAILOVER_DRILL_TARGET = "//src/infrastructure/cmd/edge_failover_drill:edge_
 NODE_OUTAGE_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill"
 CONVERGED_TARGET = "//src/infrastructure/cmd/converged:converged"
 OPENBAO_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill"
+OPENBAO_REINIT_TARGET = "//src/infrastructure/cmd/openbao_reinit:openbao_reinit"
+OPENBAO_SECRET_IMPORT_TARGET = "//src/infrastructure/cmd/openbao_secret_import:openbao_secret_import"
 OPENBAO_OBSERVABILITY_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_openbao_observability_drill:cozystack_openbao_observability_drill"
 OBSERVABILITY_DRILL_TARGET = "//src/infrastructure/cmd/cozystack_observability_drill:cozystack_observability_drill"
 GUARDIAN_MGMT_TALOS_NODES = [
@@ -131,8 +133,9 @@ INFRA_TESTS = [
     "//src/infrastructure/cmd/edge_health:edge_health_test",
     "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load_test",
     "//src/infrastructure/cmd/converged:converged_test",
-    "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill_test",
+    "//src/infrastructure/cmd/cozystack_openbao_drill/baodrill:baodrill_test",
     "//src/infrastructure/cmd/custody:custody_test",
+    "//src/infrastructure/cmd/openbao_reinit:openbao_reinit_test",
     "//src/infrastructure/cmd/openbao_secret_import:openbao_secret_import_test",
     "//src/infrastructure/cmd/openbao_static_seal_key:openbao_static_seal_key_test",
     "//src/infrastructure/tests:talm_render_test",
@@ -1457,6 +1460,87 @@ def _openbao_drill_impl(ctx):
         label = "cozystack openbao drill",
     )
 
+def _openbao_reinit_impl(ctx):
+    # The runbook's bare bazel external kubectl path does not exist until the
+    # target is built; the tools-install shim is the reliable pinned kubectl.
+    kubectl_target = KUBECTL_FILE_TARGET
+    if _host_platform(ctx) == "darwin_arm64":
+        kubectl_target = KUBECTL_DARWIN_ARM64_FILE_TARGET
+    bin_dir = install_bazel_tool_shims(ctx, [("kubectl", kubectl_target)], ".guardian/tools/bin")
+    if bin_dir == "":
+        return 1
+    kubectl = bin_dir + "/kubectl"
+
+    rc = _check_live_context_for(ctx, kubectl, ctx.args.kubeconfig, ctx.args.kube_api_server)
+    if rc != 0:
+        return rc
+
+    expected = ctx.args.expected_revision
+    if expected == "":
+        ls_remote = _capture_stdout(
+            ctx,
+            "git",
+            ["ls-remote", "origin", "refs/heads/main"],
+            cwd = ws_path(ctx),
+            label = "git ls-remote origin refs/heads/main",
+        )
+        if ls_remote == None:
+            return 1
+        expected = ls_remote.split("\t")[0].strip()
+    if expected == "":
+        ctx.std.io.stderr.write("ERROR: could not determine origin/main HEAD; pass --expected-revision\n")
+        return 1
+    local = _capture_stdout(
+        ctx,
+        "git",
+        ["rev-parse", "HEAD"],
+        cwd = ws_path(ctx),
+        label = "git rev-parse HEAD",
+    )
+    if local == None:
+        return 1
+
+    # The importer binary embeds the DR re-seed plan; build it from this
+    # checkout (the tool refuses to run unless the checkout IS origin/main).
+    importer = bazel_output_file(ctx, OPENBAO_SECRET_IMPORT_TARGET)
+    if importer == "":
+        return 1
+
+    reinit_args = [
+        "--kubectl",
+        kubectl,
+        "--importer",
+        importer,
+        "--env-file",
+        ctx.args.env_file,
+        "--expected-revision",
+        expected,
+        "--local-revision",
+        local,
+        "--namespace",
+        ctx.args.namespace,
+        "--statefulset",
+        ctx.args.statefulset,
+        "--request-timeout",
+        ctx.args.request_timeout,
+        "--pod-wait-timeout",
+        ctx.args.pod_wait_timeout,
+        "--sync-timeout",
+        ctx.args.sync_timeout,
+    ]
+    if ctx.args.kubeconfig != "":
+        reinit_args.extend(["--kubeconfig", _kubeconfig_path(ctx)])
+    if ctx.args.kube_api_server != "":
+        reinit_args.extend(["--kube-api-server", ctx.args.kube_api_server])
+
+    return checked_spawn(
+        ctx,
+        "bazelisk",
+        ["run", OPENBAO_REINIT_TARGET, "--"] + reinit_args,
+        cwd = ws_path(ctx),
+        label = "guardian openbao reinit",
+    )
+
 def _openbao_observability_drill_impl(ctx):
     kubectl = _kubectl_path(ctx)
     if kubectl == None:
@@ -2372,6 +2456,24 @@ openbao_drill = task(
         "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
         "revision": args.string(default = "", description = "Optional expected Flux-reconciled commit SHA to check before the drill."),
         "statefulset": args.string(default = "guardian-openbao", description = "OpenBao StatefulSet name."),
+    },
+)
+
+openbao_reinit = task(
+    implementation = _openbao_reinit_impl,
+    name = "openbao-reinit",
+    group = ["infra"],
+    summary = "Execute the OpenBao reinit (raft-reset re-seed) unattended: preconditions (guardian-system Ready at origin/main, tenant-guardian privileged Pod Security label with auto-remediation, custody import env file), raft reset with one-shot dirty-state recovery, raft membership drill, custody re-import, scoped re-relay of the in-cluster-generated values, then a cluster-wide secret-store and ExternalSecret force-sync until everything reports Ready. Prepare /dev/shm/guardian-custody/import.env per the static-seal runbook first and wipe custody after.",
+    args = {
+        "env_file": args.string(default = "/dev/shm/guardian-custody/import.env", description = "Custody import env file (absolute path). Built per the runbook's Bootstrap Secret Import recipe; the importer deletes it after a verified import."),
+        "expected_revision": args.string(default = "", description = "origin/main HEAD the cluster and checkout must both be at. Defaults to git ls-remote origin refs/heads/main."),
+        "kube_api_server": args.string(default = "", description = "Optional Kubernetes API server override for off-VLAN runs."),
+        "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
+        "namespace": args.string(default = "tenant-guardian", description = "OpenBao namespace."),
+        "pod_wait_timeout": args.string(default = "10m", description = "Timeout for the raft members to reach Running/Ready after the reset."),
+        "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
+        "statefulset": args.string(default = "guardian-openbao", description = "OpenBao StatefulSet name."),
+        "sync_timeout": args.string(default = "10m", description = "Timeout for every ExternalSecret to report synced after the force-sync."),
     },
 )
 
