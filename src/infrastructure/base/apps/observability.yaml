@@ -19,9 +19,14 @@ spec:
         maxAllowed:
           cpu: 500m
           memory: 512Mi
+      # Floor raised 2026-07-08: shortterm vmselect serves every 30s vmalert
+      # evaluation and ran at 40% CFS throttle for a week (CPUThrottlingHigh's
+      # top chronic offender). Query bursts truncated by the limit never show
+      # up in the VPA's usage percentiles, so it cannot raise the bound on its
+      # own — the same trap as the vmstorage floor below.
       vmselect:
         minAllowed:
-          cpu: 250m
+          cpu: 500m
           memory: 128Mi
         maxAllowed:
           cpu: "2"
@@ -92,12 +97,15 @@ spec:
       # to ntfy (deployments/alerting/). The schema requires only `url`.
       slack:
         url: http://alert-relay.tenant-root.svc:8080/slack
+    # Alert processing is bursty (storms arrive in batches, and Alerta also
+    # serves the dashboard); 250m ran at 40% CFS throttle for a week, delaying
+    # the pipeline that reports everything else. Sized for burst headroom.
     resources:
       requests:
-        cpu: 25m
+        cpu: 100m
         memory: 128Mi
       limits:
-        cpu: 250m
+        cpu: "1"
         memory: 512Mi
   vmagent:
     externalLabels:
