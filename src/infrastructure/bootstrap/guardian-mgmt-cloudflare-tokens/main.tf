@@ -19,11 +19,18 @@ locals {
     load_balancers_write    = "6d7f2f5f5b1d4a0e9081fdc98d432fd1" # Load Balancers Write (zone)
     lb_monitors_pools_read  = "9d24387c6e8544e2bc4024a03991339f" # Load Balancing: Monitors and Pools Read (account)
     lb_monitors_pools_write = "d2a1802cc9a34e30852f8b33869b2f3c" # Load Balancing: Monitors and Pools Write (account)
+    zone_settings_write     = "3030687196b94b638145a3953da2b699" # Zone Settings Write (zone)
+    zone_dns_settings_write = "c4df38be41c247b3b4b7702e76eadae0" # Zone DNS Settings Write (zone)
+    cache_settings_write    = "9ff81cbbe65c400b97d92c3c1033cab6" # Cache Settings Write (zone)
+    bot_management_write    = "3b94c49258ec4573b06d51d99b6416c0" # Bot Management Write (zone)
+    ssl_certificates_write  = "c03055bc037c4ea9afb9a9f104b7b721" # SSL and Certificates Write (zone)
+    firewall_services_write = "43137f8d07884d3198dc0ee77ca6e79b" # Firewall Services Write (zone)
   }
 
   expires = {
-    dns_lb_provisioner = "2026-10-06T00:00:00Z"
-    external_dns       = "2026-10-06T00:00:00Z"
+    dns_lb_provisioner    = "2026-10-06T00:00:00Z"
+    external_dns          = "2026-10-06T00:00:00Z"
+    edge_policy_provision = "2026-10-06T00:00:00Z"
   }
 }
 
@@ -74,6 +81,30 @@ resource "cloudflare_account_token" "external_dns" {
         { id = local.permission_groups.zone_read },
         { id = local.permission_groups.dns_read },
         { id = local.permission_groups.dns_write },
+      ]
+      resources = jsonencode({ (local.zone_resource) = "*" })
+    },
+  ]
+}
+
+# Apply-time credential for the guardian-mgmt-edge-policy root. Zone policy
+# writes only — no DNS-record or LB permission, so it cannot move traffic.
+resource "cloudflare_account_token" "edge_policy_provisioner" {
+  account_id = var.cloudflare_account_id
+  name       = "guardian-edge-policy-provisioner"
+  expires_on = local.expires.edge_policy_provision
+
+  policies = [
+    {
+      effect = "allow"
+      permission_groups = [
+        { id = local.permission_groups.zone_read },
+        { id = local.permission_groups.zone_settings_write },
+        { id = local.permission_groups.zone_dns_settings_write },
+        { id = local.permission_groups.cache_settings_write },
+        { id = local.permission_groups.bot_management_write },
+        { id = local.permission_groups.ssl_certificates_write },
+        { id = local.permission_groups.firewall_services_write },
       ]
       resources = jsonencode({ (local.zone_resource) = "*" })
     },
