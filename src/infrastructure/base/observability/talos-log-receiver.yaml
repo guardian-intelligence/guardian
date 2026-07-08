@@ -1,0 +1,215 @@
+# Receiver for Talos host logs (machined, kubelet wrapper, etcd, apid —
+# everything `talosctl logs` can see and container tailing cannot). Talos
+# `machine.logging.destinations` speaks raw JSON-lines over TCP from the
+# host network, and VictoriaLogs only ingests over HTTP, so this bridges:
+# nodes send to a MetalLB VLAN IP, fluent-bit forwards to the same
+# vlinsert jsonline endpoint the Cozystack monitoring agents use. The IP
+# is pinned so the talm machine configs can reference it statically; the
+# sender is fire-and-forget on the Talos side, so receiver downtime drops
+# host logs but never affects a node.
+#
+# Node attribution comes from `extraTags: {node: <name>}` in each node's
+# machine config, not from source IP (the LB path SNATs).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: talos-log-receiver
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: talos-log-receiver
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: observability
+data:
+  fluent-bit.conf: |
+    [SERVICE]
+        Daemon Off
+        Flush 1
+        Log_Level info
+        HTTP_Server On
+        HTTP_Listen 0.0.0.0
+        HTTP_Port 2020
+        Health_Check On
+
+    [INPUT]
+        Name tcp
+        Listen 0.0.0.0
+        Port 5170
+        Format json
+        Tag talos
+        Mem_Buf_Limit 10MB
+
+    [FILTER]
+        Name modify
+        Match talos
+        Add log_source talos_service
+
+    [OUTPUT]
+        Name http
+        Match talos
+        Host vlinsert-generic.tenant-root.svc
+        port 9481
+        compress gzip
+        uri /insert/jsonline?_stream_fields=log_source,node,talos-service&_msg_field=msg&_time_field=date
+        format json_lines
+        json_date_format iso8601
+        header AccountID 0
+        header ProjectID 0
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: talos-log-receiver
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: talos-log-receiver
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: talos-log-receiver
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: talos-log-receiver
+        app.kubernetes.io/part-of: guardian
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: talos-log-receiver
+          image: cr.fluentbit.io/fluent/fluent-bit:3.2.8@sha256:14da4a52ecdbb9bd9cb7a16ff6b4c7f391a4006cb13f84b5957e4608cc613e2c
+          command:
+            - /fluent-bit/bin/fluent-bit
+          args:
+            - -c
+            - /fluent-bit/etc/conf/fluent-bit.conf
+          ports:
+            - name: tcp-json
+              containerPort: 5170
+            - name: http-metrics
+              containerPort: 2020
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http-metrics
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http-metrics
+            initialDelaySeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: config
+              mountPath: /fluent-bit/etc/conf
+      volumes:
+        - name: config
+          configMap:
+            name: talos-log-receiver
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: talos-log-receiver
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: talos-log-receiver
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: observability
+  annotations:
+    # Pinned: the talm machine configs dial this address literally.
+    metallb.io/loadBalancerIPs: 10.8.0.200
+spec:
+  type: LoadBalancer
+  allocateLoadBalancerNodePorts: false
+  selector:
+    app.kubernetes.io/name: talos-log-receiver
+  ports:
+    - name: tcp-json
+      port: 5170
+      targetPort: tcp-json
+      protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: talos-log-receiver
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: talos-log-receiver
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: observability
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: talos-log-receiver
+  ingress:
+    # Talos senders live in the host netns; after the LB hop their
+    # identity is host/remote-node.
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: '5170'
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: vmagent
+            k8s:io.kubernetes.pod.namespace: cozy-monitoring
+      toPorts:
+        - ports:
+            - port: '2020'
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: '53'
+              protocol: UDP
+            - port: '53'
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: vlinsert
+      toPorts:
+        - ports:
+            - port: '9481'
+              protocol: TCP
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: talos-log-receiver
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: talos-log-receiver
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: observability
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: talos-log-receiver
+  podMetricsEndpoints:
+    - port: http-metrics
+      path: /api/v2/metrics/prometheus

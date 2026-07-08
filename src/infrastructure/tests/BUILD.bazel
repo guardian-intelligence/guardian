@@ -23,6 +23,7 @@ go_test(
         "//src/infrastructure/base/dns:manifests",
         "//src/infrastructure/base/flux:manifests",
         "//src/infrastructure/base/networking:manifests",
+        "//src/infrastructure/base/observability:manifests",
         "//src/infrastructure/base/platform-patches:manifests",
         "//src/infrastructure/base/secrets:manifests",
         "//src/infrastructure/base/storage:manifests",
