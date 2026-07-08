@@ -7,7 +7,9 @@
 # CNPG health signals such as replication lag, archiver failures, long
 # transactions, waiting backends, deadlocks, XID age, and cluster offline. These
 # rules deliberately cover only the gaps left to Guardian: backup freshness and
-# failure, connection saturation, and replication-slot health.
+# failure, connection saturation, replication-slot health, and scrape
+# liveness (the platform's CNPGClusterOffline cannot fire for a single dark
+# cluster because absent series match nothing).
 #
 # PVC fill is already covered by the platform's generic
 # KubePersistentVolumeFillingUp rules, so database disk usage is not duplicated
@@ -56,8 +58,12 @@ spec:
               failure at :00 followed by success at :06 on all backup-enabled
               clusters. Treat a sustained alert as a broken backup path rather
               than a single scheduler retry.
+        # cnpg_backends_total is exported as one series per (datname, state,
+        # application_name); only sum reconstructs the pod's real backend
+        # count. A max here reads the largest single slice and sat blind at
+        # 91/100 real backends in the 2026-07-08 saturation drill.
         - alert: PGConnectionSaturation
-          expr: max by (namespace, job, pod) (cnpg_backends_total) / max by (namespace, job, pod) (cnpg_pg_settings_setting{name="max_connections"}) > 0.7
+          expr: sum by (namespace, job, pod) (cnpg_backends_total) / max by (namespace, job, pod) (cnpg_pg_settings_setting{name="max_connections"}) > 0.7
           for: 15m
           labels:
             severity: warning
@@ -70,6 +76,41 @@ spec:
               connection budget: consumer pools must sum to 60% or less so
               operators and failover have headroom. Sustained pressure is also
               the adoption trigger for a server-side pooler.
+        - alert: PGScrapeDown
+          expr: up{container="postgres", endpoint="metrics"} == 0
+          for: 10m
+          labels:
+            severity: critical
+            guardian_component: postgres
+          annotations:
+            summary: 'Postgres metrics scrape failing for {{ $labels.job }}'
+            description: >-
+              The CNPG metrics endpoint on {{ $labels.pod }} has been failing
+              its scrape for 10 minutes. Every postgres-health rule reads
+              cnpg_* series, so a failing scrape silently disables all
+              database alerting for this instance; treat it with the same
+              urgency as the database being down.
+        # Failed scrapes mark a target's series stale immediately, and a
+        # deleted target leaves no series at all -- an == 0 comparison can
+        # never see either case, and the platform's CNPGClusterOffline only
+        # fires when every CNPG target in the cluster is gone at once. The
+        # offset/unless pair is the only shape that pages for one cluster
+        # going dark.
+        - alert: PGMetricsAbsent
+          expr: count by (namespace, job) (cnpg_collector_up offset 1h) unless count by (namespace, job) (cnpg_collector_up)
+          for: 15m
+          labels:
+            severity: critical
+            guardian_component: postgres
+          annotations:
+            summary: 'Postgres metrics vanished for {{ $labels.job }}'
+            description: >-
+              {{ $labels.job }} emitted cnpg_* metrics an hour ago and emits
+              none now, so every postgres-health rule is blind to it. Causes
+              range from a deleted PodMonitor to vmagent discovery loss to the
+              whole cluster being gone. An intentional decommission pages
+              through this rule for up to an hour after removal; expect and
+              acknowledge that page when deleting an instance.
         - alert: PGReplicationSlotInactive
           expr: (max by (namespace, job, pod, slot_name) (cnpg_pg_replication_slots_active) == 0) and on (namespace, pod) (cnpg_pg_replication_in_recovery == 0)
           for: 15m
