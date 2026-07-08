@@ -25,12 +25,17 @@ locals {
     bot_management_write    = "3b94c49258ec4573b06d51d99b6416c0" # Bot Management Write (zone)
     ssl_certificates_write  = "c03055bc037c4ea9afb9a9f104b7b721" # SSL and Certificates Write (zone)
     firewall_services_write = "43137f8d07884d3198dc0ee77ca6e79b" # Firewall Services Write (zone)
+    r2_bucket_item_read     = "6a018a9f2fc74eb6b293b0c548f38b39" # Workers R2 Storage Bucket Item Read (bucket)
+    r2_bucket_item_write    = "2efd5506f9c8494dacb1fa10a3e7d5b6" # Workers R2 Storage Bucket Item Write (bucket)
   }
+
+  backups_bucket_resource = "com.cloudflare.edge.r2.bucket.${var.cloudflare_account_id}_default_guardian-backups"
 
   expires = {
     dns_lb_provisioner    = "2026-10-06T00:00:00Z"
     external_dns          = "2026-10-06T00:00:00Z"
     edge_policy_provision = "2026-10-06T00:00:00Z"
+    r2_backups            = "2026-10-06T00:00:00Z"
   }
 }
 
@@ -107,6 +112,31 @@ resource "cloudflare_account_token" "edge_policy_provisioner" {
         { id = local.permission_groups.firewall_services_write },
       ]
       resources = jsonencode({ (local.zone_resource) = "*" })
+    },
+  ]
+}
+
+# Backup-storage credential (guardian-backups bucket only). R2 tokens ARE
+# account tokens; the S3 keypair is derived, not returned: access key = token
+# id, secret key = SHA-256 hex of the token value (verified live with a probe
+# token: derived pair authenticates, wrong secret fails signature validation).
+# The value is relayed to kv/guardian/guardian-mgmt/tenant-root/backups-r2 as
+# the flat accessKey/secretKey keys the backupstrategy-controller projector
+# consumes; the ClickHouse backup sidecar loads the Secret at container start,
+# so a rotation is relay + force-sync + CH pod recycle.
+resource "cloudflare_account_token" "r2_backups" {
+  account_id = var.cloudflare_account_id
+  name       = "guardian-r2-backups"
+  expires_on = local.expires.r2_backups
+
+  policies = [
+    {
+      effect = "allow"
+      permission_groups = [
+        { id = local.permission_groups.r2_bucket_item_read },
+        { id = local.permission_groups.r2_bucket_item_write },
+      ]
+      resources = jsonencode({ (local.backups_bucket_resource) = "*" })
     },
   ]
 }

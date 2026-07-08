@@ -34,3 +34,14 @@ output "edge_policy_provisioner_token_value" {
   value       = cloudflare_account_token.edge_policy_provisioner.value
   sensitive   = true
 }
+
+output "r2_backups_access_key_id" {
+  description = "S3 access key id for the guardian-backups bucket (the R2 token's id)."
+  value       = cloudflare_account_token.r2_backups.id
+}
+
+output "r2_backups_secret_access_key" {
+  description = "S3 secret access key for the guardian-backups bucket (SHA-256 of the R2 token value)."
+  value       = sha256(cloudflare_account_token.r2_backups.value)
+  sensitive   = true
+}
