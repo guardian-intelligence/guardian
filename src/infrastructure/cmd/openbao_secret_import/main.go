@@ -228,15 +228,9 @@ func unquoteEnvValue(value string) (string, error) {
 func importPlan(env map[string]string) ([]secretWrite, error) {
 	required := []string{
 		"cloudflare_account_id",
-		"cloudflare_r2_api_token",
 		"cloudflare_r2_secret_access_key",
 		"cloudflare_r2_s3_api_endpoint",
 		"cloudflare_r2_access_key_id",
-		"cloudflare_r2_backups_access_key_id",
-		"cloudflare_r2_backups_secret_access_key",
-		"cloudflare_guardian_intelligence_org_dnz_zone_api_token",
-		"cloudflare_external_dns_api_token",
-		"cloudflare_dns_lb_provisioner_api_token",
 		"guardian_alerting_ntfy_url",
 		"platform_admin_password",
 		"platform_agent_password",
@@ -269,46 +263,18 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 	// namespace (the per-namespace reader/writer roles are scoped to that
 	// subtree); operator/ is the exception — custody reference material no
 	// in-cluster role can read.
+	// Cloudflare lane credentials (external-dns token, backups-r2 keypair)
+	// are minted by the guardian-mgmt-cloudflare-tokens tofu root and relayed
+	// post-import via scoped writers — see the static-seal runbook's re-relay
+	// checklist. Only the tofu state-backend R2 keypair rides in custody: the
+	// tokens root's own backend needs it before any state is readable.
 	writes := []secretWrite{
-		{
-			APIPath: "kv/data/guardian/guardian-mgmt/external-dns/cloudflare",
-			Data: map[string]string{
-				"CF_API_TOKEN": env["cloudflare_external_dns_api_token"],
-			},
-		},
-		{
-			APIPath: "kv/data/guardian/guardian-mgmt/operator/cloudflare",
-			Data: map[string]string{
-				"cloudflare_account_id":                                   env["cloudflare_account_id"],
-				"cloudflare_dns_lb_provisioner_api_token":                 env["cloudflare_dns_lb_provisioner_api_token"],
-				"cloudflare_external_dns_api_token":                       env["cloudflare_external_dns_api_token"],
-				"cloudflare_guardian_intelligence_org_dnz_zone_api_token": env["cloudflare_guardian_intelligence_org_dnz_zone_api_token"],
-			},
-		},
 		{
 			APIPath: "kv/data/guardian/guardian-mgmt/operator/r2",
 			Data: map[string]string{
 				"cloudflare_r2_access_key_id":     env["cloudflare_r2_access_key_id"],
-				"cloudflare_r2_api_token":         env["cloudflare_r2_api_token"],
 				"cloudflare_r2_s3_api_endpoint":   env["cloudflare_r2_s3_api_endpoint"],
 				"cloudflare_r2_secret_access_key": env["cloudflare_r2_secret_access_key"],
-			},
-		},
-		// Cozystack platform backup storage: the S3 keypair of the
-		// bucket-scoped guardian-backups token (Object Read & Write on that
-		// one bucket, nothing else). Key names here ARE the flat-key format
-		// the backupstrategy-controller's credentials projector consumes, so
-		// the ExternalSecret in tenant-root maps them 1:1 into
-		// Secret/guardian-backups-creds. endpoint/bucketName are identifiers,
-		// not secrets; they ride along so the projected Secret is complete.
-		{
-			APIPath: "kv/data/guardian/guardian-mgmt/tenant-root/backups-r2",
-			Data: map[string]string{
-				"accessKey":  env["cloudflare_r2_backups_access_key_id"],
-				"secretKey":  env["cloudflare_r2_backups_secret_access_key"],
-				"endpoint":   env["cloudflare_r2_s3_api_endpoint"],
-				"bucketName": "guardian-backups",
-				"region":     "auto",
 			},
 		},
 		// Alerting pager sink: the ntfy topic URL the tenant-root alert-relay
