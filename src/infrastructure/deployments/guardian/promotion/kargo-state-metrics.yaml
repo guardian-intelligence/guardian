@@ -138,6 +138,20 @@ data:
                 exported_namespace: [metadata, namespace]
                 ready: [status, conditions, "[type=Ready]", status]
                 healthy: [status, conditions, "[type=Healthy]", status]
+            # The controller's dead-man switch: discovery rewrites this
+            # timestamp every spec.interval (<=5m fleet-wide) even when no new
+            # artifacts exist, so it is the only Kargo signal that goes stale
+            # when the controller wedges instead of freezing at its last
+            # healthy value.
+            - name: warehouse_last_discovery
+              help: Completion time of a Warehouse's last artifact discovery as a unix epoch.
+              each:
+                type: Gauge
+                gauge:
+                  path: [status, discoveredArtifacts, discoveredAt]
+              labelsFromPath:
+                name: [metadata, name]
+                exported_namespace: [metadata, namespace]
 ---
 # app.kubernetes.io/name must NOT be "kargo": the kargo CiliumNetworkPolicy
 # selects that label and would flip this pod default-deny with no vmagent
