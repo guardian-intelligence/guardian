@@ -90,16 +90,17 @@ spec:
                     secretKeyRef:
                       name: guardian-backups-creds
                       key: bucketName
+                # talos-backup v0.1.0-beta.3 parses this inverted
+                # (UsePathStyle = env == "false"); "false" is what yields
+                # path-style requests, which R2 expects.
                 - name: USE_PATH_STYLE
-                  value: 'true'
+                  value: 'false'
                 - name: CLUSTER_NAME
                   value: guardian-mgmt
                 - name: S3_PREFIX
                   value: talos-etcd/guardian-mgmt
-                - name: AGE_RECIPIENT_PUBLIC_KEY
+                - name: AGE_X25519_PUBLIC_KEY
                   value: age18ykjst8aftuesxn3z68cfjghkpsk5jft9klehlwl47ua5r9mxevqr02ygh
-                - name: ENABLE_COMPRESSION
-                  value: 'true'
               resources:
                 requests:
                   cpu: 100m

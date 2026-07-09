@@ -15,8 +15,8 @@ snapshot time, including Secrets in the clear — which is why snapshots are
 age-encrypted and the bucket token is write-scoped to one bucket.
 
 Snapshots land every six hours at
-`s3://guardian-backups/talos-etcd/guardian-mgmt/guardian-mgmt-<RFC3339>.snap.zst.age`
-(zstd inside age). Freshness is asserted by the `etcd-snapshot-health`
+`s3://guardian-backups/talos-etcd/guardian-mgmt/guardian-mgmt-<RFC3339>.snap.age`.
+Freshness is asserted by the `etcd-snapshot-health`
 VMRule; a stale or failed snapshot pages.
 
 Node map: ash-earth `206.223.228.101`, ash-wind `45.250.254.119`,
@@ -35,9 +35,9 @@ aspect infra custody --action restore --yes
 #    mirrored in custody.env.
 oras ...  # or aws-cli/rclone equivalent against the R2 endpoint
 
-# 3. Decrypt + decompress to a raw bbolt db.
+# 3. Decrypt to a raw bbolt db.
 printf '%s' "$GUARDIAN_ETCD_SNAPSHOT_AGE_KEY" | age -d -i - \
-  guardian-mgmt-<stamp>.snap.zst.age | zstd -d -o db.snapshot
+  -o db.snapshot guardian-mgmt-<stamp>.snap.age
 ```
 
 ## Restore
