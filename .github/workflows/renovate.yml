@@ -1,0 +1,52 @@
+# Scheduled Renovate run — the proposer for source-plane pins (renovate.json5
+# is the policy; this workflow is only the scheduler). Runs as the
+# guardian-renovate App, NOT GITHUB_TOKEN, for the same reason as
+# promotion-automerge: its PRs and commits must be attributed to a distinct
+# bot identity and must trigger the normal PR workflows.
+#
+# A silently dead scheduler is the Kargo-wedge failure mode (every alert it
+# would raise freezes green), so a failed run pages instead of rotting.
+name: renovate
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: renovate
+
+jobs:
+  renovate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        id: app
+        with:
+          app-id: ${{ secrets.RENOVATE_APP_ID }}
+          private-key: ${{ secrets.RENOVATE_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - uses: renovatebot/github-action@b50d2ba2bd928235abdcc14d06dfafc217f1c565 # v46.1.18
+        with:
+          configurationFile: renovate.json5
+          token: ${{ steps.app.outputs.token }}
+          # -full ships the package managers preinstalled; the slim image
+          # would install Go/pnpm on every run just to update lockfiles.
+          renovate-version: 43.256.3-full
+        env:
+          RENOVATE_AUTODISCOVER: "false"
+          RENOVATE_REPOSITORIES: ${{ github.repository }}
+          LOG_LEVEL: info
+
+      - name: Page on failure
+        if: failure()
+        run: |
+          curl -fsS -m 10 \
+            -d "renovate: scheduled run failed — the dependency proposer is dark. https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            ntfy.sh/guardian-operations-fable
