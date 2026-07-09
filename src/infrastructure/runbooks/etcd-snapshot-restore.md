@@ -26,7 +26,7 @@ ash-water `206.223.228.87`.
 
 ```sh
 # 1. Custody holds both the R2 credential source-of-truth and the age
-#    identity key (custody.env GUARDIAN_ETCD_SNAPSHOT_AGE_KEY).
+#    identity key (custody.env guardian_etcd_snapshot_age_key).
 aspect infra custody --action restore --yes
 . /dev/shm/guardian-custody/custody.env
 
@@ -36,7 +36,7 @@ aspect infra custody --action restore --yes
 oras ...  # or aws-cli/rclone equivalent against the R2 endpoint
 
 # 3. Decrypt to a raw bbolt db.
-printf '%s' "$GUARDIAN_ETCD_SNAPSHOT_AGE_KEY" | age -d -i - \
+printf '%s' "$guardian_etcd_snapshot_age_key" | age -d -i - \
   -o db.snapshot guardian-mgmt-<stamp>.snap.age
 ```
 
