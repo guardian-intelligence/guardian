@@ -99,7 +99,19 @@ talm apply --talosconfig "$MINT/talosconfig" \
 talosctl --talosconfig "$MINT/talosconfig" -e "$IP" -n "$IP" get volumestatus
 kubectl wait node "$NODE" --for=condition=Ready --timeout=15m
 
-# 5. Wait for replicated storage to heal before calling it done:
+# 5. Recreate the data volume group — the Latitude reinstall wipes BOTH
+#    NVMe disks, and Piraeus only runs its first-time device prep when
+#    the pool is absent from the LINSTOR db; a wiped node's pool row
+#    survives (state Ok, 0 KiB) so the operator never re-preps. The
+#    node's DRBD resources sit in `Unknown` with lvcreate errors in the
+#    satellite log until the VG exists again. Device by serial from
+#    base/storage/linstor-data-pools.yaml — NEVER by /dev/nvmeXnY name:
+kubectl -n cozy-linstor exec linstor-satellite.<node>-<hash> -c linstor-satellite -- \
+  sh -c 'pvcreate /dev/disk/by-id/<data-disk-serial-id> && vgcreate data /dev/disk/by-id/<data-disk-serial-id>'
+#    LINSTOR's DeviceManager retry loop picks the VG up within a minute
+#    and starts recreating LVs + resync unprompted.
+
+# 6. Wait for replicated storage to heal before calling it done:
 kubectl -n cozy-linstor exec deploy/linstor-controller -- linstor resource list | grep DRBD | grep -v UpToDate
 ```
 
