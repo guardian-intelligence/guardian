@@ -44,6 +44,8 @@ spec:
   configMaps:
     - guardian-audit-vlogs-rules
     - guardian-trust-vlogs-rules
+    - guardian-talos-vlogs-rules
   rulePath:
     - /etc/vm/configs/guardian-audit-vlogs-rules/*.yaml
     - /etc/vm/configs/guardian-trust-vlogs-rules/*.yaml
+    - /etc/vm/configs/guardian-talos-vlogs-rules/*.yaml

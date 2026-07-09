@@ -1,11 +1,12 @@
-# Flow assertion for the Talos host-log pipeline
+# Flow assertions for the Talos host-log pipeline
 # (base/observability/talos-log-receiver.yaml). The increase()-over-7d
-# gate keeps the rule silent until the pipeline has ever carried data
-# (nodes only send once their machine config gains the logging
-# destination), then guards it forever after — including across counter
-# resets, which an `offset` gate would not survive. Per-node silence
-# detection (one node's sender dying while the others flow) ships with
-# the machine-config rollout, as a vmalert-vlogs LogsQL rule.
+# gate keeps the aggregate rule silent until the pipeline has ever
+# carried data (nodes only send once their machine config gains the
+# logging destination), then guards it forever after — including across
+# counter resets, which an `offset` gate would not survive. Per-node
+# silence (one node's sender dying while the others flow) is invisible
+# to the aggregate metric, so a LogsQL rule at the bottom of this file
+# counts distinct senders instead.
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMRule
 metadata:
@@ -54,3 +55,39 @@ spec:
               exist now — deleted Deployment, broken VMPodScrape, or
               vmagent discovery loss. TalosHostLogFlowStopped is blind
               without these series; treat as the same outage.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: guardian-talos-vlogs-rules
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: vmalert-vlogs
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+data:
+  talos-host-logs.yaml: |
+    groups:
+      - name: guardian-talos-host-logs
+        type: vlogs
+        interval: 60s
+        rules:
+          - alert: TalosNodeLogSilent
+            expr: |
+              log_source:talos_service _time:15m | stats count_uniq(node) as nodes | filter nodes:<3
+            for: 10m
+            keep_firing_for: 15m
+            labels:
+              severity: warning
+              guardian_component: observability
+            annotations:
+              summary: 'A Talos node stopped sending host logs'
+              description: >-
+                Fewer than 3 distinct nodes appear in talos_service
+                streams over the last 15 minutes. The aggregate flow
+                alert cannot see one dead sender while the others still
+                flow. Compare `log_source:talos_service _time:15m | stats
+                by (node) count()` against the node map to find the
+                silent one; the usual causes are a machine-config
+                regression on that node or its TCP path to
+                10.8.0.200:5170.
