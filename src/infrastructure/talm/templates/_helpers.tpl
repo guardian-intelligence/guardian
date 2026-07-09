@@ -46,6 +46,16 @@ machine:
       allowedKubernetesNamespaces:
         - tenant-root
   {{- end }}
+  # Host logs (machined, etcd, apid — what `talosctl logs` sees) to the
+  # in-cluster receiver (base/observability/talos-log-receiver.yaml,
+  # pinned MetalLB IP). Fire-and-forget: a dead receiver drops host logs
+  # but never blocks the node.
+  logging:
+    destinations:
+      - endpoint: tcp://10.8.0.200:5170
+        format: json_lines
+        extraTags:
+          node: {{ include "talm.discovered.hostname" . }}
   kubelet:
     nodeIP:
       validSubnets:

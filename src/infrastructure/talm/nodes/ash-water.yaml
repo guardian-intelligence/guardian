@@ -12,6 +12,16 @@ machine:
         - os:etcd:backup
       allowedKubernetesNamespaces:
         - tenant-root
+  # Host logs (machined, etcd, apid — what `talosctl logs` sees) to the
+  # in-cluster receiver (base/observability/talos-log-receiver.yaml,
+  # pinned MetalLB IP). Fire-and-forget: a dead receiver drops host logs
+  # but never blocks the node.
+  logging:
+    destinations:
+      - endpoint: tcp://10.8.0.200:5170
+        format: json_lines
+        extraTags:
+          node: ash-water
   certSANs:
     - 127.0.0.1
     - api.guardianintelligence.org
