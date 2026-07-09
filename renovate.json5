@@ -104,12 +104,16 @@
       automerge: false,
     },
 
-    // The dns root deliberately stays on the v4 Cloudflare provider (the
-    // tokens root rides v5); hold majors here until that root migrates.
+    // The dns and edge-policy roots deliberately stay on the v4 Cloudflare
+    // provider (only the tokens root rides v5); hold both until they
+    // migrate.
     {
       matchManagers: ["terraform"],
-      matchPackageNames: ["cloudflare/cloudflare"],
-      matchFileNames: ["src/infrastructure/bootstrap/guardian-mgmt-dns/**"],
+      matchDepNames: ["cloudflare"],
+      matchFileNames: [
+        "src/infrastructure/bootstrap/guardian-mgmt-dns/**",
+        "src/infrastructure/bootstrap/guardian-mgmt-edge-policy/**",
+      ],
       allowedVersions: "/^4\\./",
     },
 
