@@ -111,7 +111,15 @@ kubectl -n cozy-linstor exec linstor-satellite.<node>-<hash> -c linstor-satellit
 #    LINSTOR's DeviceManager retry loop picks the VG up within a minute
 #    and starts recreating LVs + resync unprompted.
 
-# 6. Wait for replicated storage to heal before calling it done:
+# 6. Re-place the OpenBao static seal key — every node is key-bearing
+#    and the key lived on the wiped disk, so the node's OpenBao replica
+#    crashloops in verify-static-seal-key (Init:Error) until the key is
+#    back. Follow "Seal-key placement" in cold-boot-bootstrap.md
+#    (debug-pod + streamed exec from the custody bundle; only the
+#    fingerprint is ever printed), then delete the replica pod so it
+#    remounts and rejoins raft.
+
+# 7. Wait for replicated storage to heal before calling it done:
 kubectl -n cozy-linstor exec deploy/linstor-controller -- linstor resource list | grep DRBD | grep -v UpToDate
 ```
 
