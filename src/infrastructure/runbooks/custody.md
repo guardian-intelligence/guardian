@@ -64,6 +64,23 @@ All actions run as `aspect infra custody --action <name>`.
 - **status** — latest-snapshot age (warns past 30 days), open-bundle and
   plaintext-residue warnings.
 - **key-add** — adds a second repository password.
+- **env-set / env-unset** — atomic single-key `custody.env` edit:
+  restore-latest → edit → snapshot → prove → wipe. Keys must match
+  `^[a-z0-9_]+$`. The value arrives on **stdin**, which costs you both
+  interactive prompts — the repository password (restic reads EOF from
+  the pipe) and the proceed confirmation. The working shape, from a real
+  terminal, with the bundle NOT already open (`env-set` refuses over an
+  open bundle):
+
+  ```sh
+  read -rs RESTIC_PASSWORD; export RESTIC_PASSWORD
+  <emit value> | aspect infra custody --action env-set --env-key <key> --yes
+  unset RESTIC_PASSWORD
+  ```
+
+  The silent pause after enter is `read` waiting for the password.
+  Success prints `env-set <key>: new snapshot <id>` — no snapshot line
+  means no write, whatever else scrolled by.
 
 ## Passwords
 
