@@ -1,17 +1,24 @@
 http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
 
+# dl.k8s.io is invisible to Renovate's bazel manager (it infers datasources
+# from github.com URLs only), so a custom manager in renovate.json5 bumps
+# these version strings — the sha256 pair must be re-pinned by hand from
+# https://dl.k8s.io/release/<v>/bin/<platform>/kubectl.sha256 as part of
+# completing that PR. The version-skew conformance test holds this pin to
+# ±1 minor of the cluster's kubernetesVersion (src/infrastructure/talm).
+
 http_file(
     name = "kubectl_linux_amd64",
     downloaded_file_path = "kubectl",
     executable = True,
-    sha256 = "ab60ca5f0fd60c1eb81b52909e67060e3ba0bd27e55a8ac147cbc2172ff14212",
-    url = "https://dl.k8s.io/release/v1.34.3/bin/linux/amd64/kubectl",
+    sha256 = "1e9045ec32bea85da43de85f0065358529ea7c7a152eca78154fba5b58c27d82",
+    url = "https://dl.k8s.io/release/v1.36.2/bin/linux/amd64/kubectl",
 )
 
 http_file(
     name = "kubectl_darwin_arm64",
     downloaded_file_path = "kubectl",
     executable = True,
-    sha256 = "e51367d2107d605f4edd7c2fb25897b0c0695a7de1a9f9d04cd6c9356b890b14",
-    url = "https://dl.k8s.io/release/v1.34.3/bin/darwin/arm64/kubectl",
+    sha256 = "4408c85c83fd3a31adaa555bdf3c7a6c81f74b19449a9060ba31ab91926f023d",
+    url = "https://dl.k8s.io/release/v1.36.2/bin/darwin/arm64/kubectl",
 )

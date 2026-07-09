@@ -112,5 +112,67 @@
       matchFileNames: ["src/infrastructure/bootstrap/guardian-mgmt-dns/**"],
       allowedVersions: "/^4\\./",
     },
+
+    // Substrate doorbells (the custom managers below): the PR is the upgrade
+    // runbook's starting gun and merging it is the runbook's last step, so
+    // Git never claims a version the cluster does not run. No cooldown —
+    // the doorbell should ring promptly; the drill provides the soak.
+    {
+      matchManagers: ["custom.regex"],
+      addLabels: ["substrate-upgrade"],
+      minimumReleaseAge: null,
+      automerge: false,
+    },
+
+    // The kubectl pin and the cluster kubernetesVersion share one depName on
+    // purpose: they move in one doorbell PR, and the version-skew conformance
+    // test refuses any state where they drift more than one minor apart.
+    {
+      matchManagers: ["custom.regex"],
+      matchPackageNames: ["kubernetes/kubernetes"],
+      groupName: "kubernetes (substrate)",
+      addLabels: ["cluster-coupled"],
+    },
+  ],
+
+  customManagers: [
+    // kubectl tool pin — dl.k8s.io URLs are invisible to the bazel manager.
+    // Bumps the version in both platform URLs; the sha256 pair is completed
+    // by hand (see the note in kubectl.MODULE.bazel).
+    {
+      customType: "regex",
+      managerFilePatterns: ["/^src/tools/kubectl/kubectl\\.MODULE\\.bazel$/"],
+      matchStrings: [
+        'url = "https://dl\\.k8s\\.io/release/(?<currentValue>v[0-9.]+)/bin/',
+      ],
+      depNameTemplate: "kubernetes/kubernetes",
+      datasourceTemplate: "github-releases",
+    },
+
+    // Talos installer image — pinned identically in the talm values and the
+    // declared lock (machine.install.image is a bootstrap artifact, not a
+    // rendered pod image). One dep, one PR, both files.
+    {
+      customType: "regex",
+      managerFilePatterns: [
+        "/^src/infrastructure/talm/values\\.yaml$/",
+        "/^src/infrastructure/bootstrap/bundle/images\\.declared\\.lock$/",
+      ],
+      matchStrings: [
+        "(?<packageName>ghcr\\.io/cozystack/cozystack/talos):(?<currentValue>v[0-9.]+)@(?<currentDigest>sha256:[a-f0-9]{64})",
+      ],
+      datasourceTemplate: "docker",
+    },
+
+    // `# renovate: datasource=... depName=...` annotation convention for
+    // version strings in YAML (the cluster kubernetesVersion in the talm
+    // Chart.yaml today; annotate new substrate pins the same way).
+    {
+      customType: "regex",
+      managerFilePatterns: ["/^src/infrastructure/talm/Chart\\.yaml$/"],
+      matchStrings: [
+        '# renovate: datasource=(?<datasource>[a-z-.]+) depName=(?<depName>[^\\s]+)\\n\\s*[A-Za-z]+: "(?<currentValue>v?[0-9][^"]*)"',
+      ],
+    },
   ],
 }

@@ -12,9 +12,12 @@ go_test(
         "keycloak_admin_guard_test.go",
         "openbao_conformance_test.go",
         "talm_render_test.go",
+        "version_skew_test.go",
     ],
     data = [
         "@talm_linux_amd64//:talm",
+        "//src/tools/kubectl:kubectl.MODULE.bazel",
+        "//src/tools/talosctl:talosctl.MODULE.bazel",
         "//docs:openbao-design.md",
         "//src/infrastructure/base:kustomization",
         "//src/infrastructure/base/app-patches:manifests",
