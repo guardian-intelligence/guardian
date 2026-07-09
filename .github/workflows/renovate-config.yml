@@ -1,0 +1,25 @@
+# A broken renovate.json5 does not fail the scheduled run — Renovate files a
+# config-error issue, skips the repo, and exits 0, which is exactly the
+# silent-dead-proposer failure mode the scheduler's failure page cannot see.
+# So config edits are validated at PR time instead. The version here is the
+# same pinned Renovate release renovate.yml runs.
+name: renovate-config
+
+on:
+  pull_request:
+    paths:
+      - renovate.json5
+      - .github/workflows/renovate.yml
+      - .github/workflows/renovate-config.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Validate Renovate config
+        run: npx --yes -p renovate@43.256.3 renovate-config-validator --strict

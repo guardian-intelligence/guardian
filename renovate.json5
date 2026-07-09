@@ -1,0 +1,116 @@
+// Renovate is the proposer for every source-plane pin that is not a rendered
+// runtime image: Bazel tool archives (src/tools/*/*.MODULE.bazel), bazel_dep
+// and oci.pull in MODULE.bazel, go.mod, the pnpm catalog, GitHub Actions
+// digests, and tofu provider pins. Rendered runtime images are Kargo's
+// territory (Warehouse → pin-bump PR); Renovate must never touch those paths.
+// Both proposers are untrusted: CI + branch protection decide every merge.
+//
+// Trust tiers (see docs/dependency-management.md once written):
+//   first-party actions        — no cooldown
+//   standalone tools & libs    — 3-day cooldown
+//   cluster-coupled tools      — grouped, labeled, never automerged; merges
+//                                ride the paired substrate/skew change
+//   substrate (Talos/k8s/tofu) — doorbell only: the PR starts the upgrade
+//                                runbook, merging it is the runbook's last step
+//
+// No automerge anywhere yet: observe-mode first, tiers earn automerge after
+// watched cycles (same arc as the image-provenance VAP Warn→Deny flip).
+//
+// Known-uncovered pins (no datasource can see them; the version-skew and
+// conformance tests are the backstop): the Percona PostgreSQL tarball in
+// src/tools/debug-clis (downloads.percona.com) and the kubectl sha256 pair
+// (the kubectl custom manager below bumps the version but cannot recompute
+// hashes — finishing that PR is a hand step, same as any substrate doorbell).
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: ["config:best-practices"],
+
+  // Kargo's territory plus the standard junk dirs (setting ignorePaths
+  // replaces the preset default, so the node_modules entries come along).
+  ignorePaths: [
+    "**/node_modules/**",
+    "**/bower_components/**",
+    "src/infrastructure/deployments/**",
+  ],
+
+  // The tool pins live in src/tools/<tool>/<tool>.MODULE.bazel as
+  // http_archive/http_file. Only the legacy `bazel` manager parses those
+  // rules (and recomputes sha256 on bump); `bazel-module` matches the same
+  // files but reads bazel_dep/overrides only. Patterns add to the manager's
+  // defaults, they do not replace them.
+  bazel: {
+    managerFilePatterns: ["/\\.MODULE\\.bazel$/"],
+  },
+
+  // These managers extract image refs from the rendered manifest trees
+  // (src/infrastructure/base, helm values, kustomizations). That plane is
+  // owned by the generated union lock + Kargo Warehouses + the provenance
+  // VAP, and each ref there is digest-pinned deliberately — Renovate must
+  // not be a second proposer for it.
+  "helm-values": { enabled: false },
+  helmv3: { enabled: false },
+  kustomize: { enabled: false },
+  flux: { enabled: false },
+
+  // Everything not overridden below waits out a 3-day cooldown, mirroring
+  // pnpm-workspace.yaml's minimumReleaseAge: 4320 (Renovate does not read
+  // pnpm's setting; if the two drift, pnpm fails the lockfile update loudly).
+  minimumReleaseAge: "3 days",
+
+  osvVulnerabilityAlerts: true,
+  dependencyDashboardOSVVulnerabilitySummary: "unresolved",
+  vulnerabilityAlerts: {
+    addLabels: ["security"],
+  },
+
+  platformCommit: "enabled",
+  labels: ["dependencies"],
+
+  packageRules: [
+    // Majors are one dashboard click away, never an unprompted PR.
+    {
+      matchUpdateTypes: ["major"],
+      dependencyDashboardApproval: true,
+    },
+
+    // First-party actions: no cooldown.
+    {
+      matchManagers: ["github-actions"],
+      matchPackageNames: ["actions/**", "renovatebot/**"],
+      minimumReleaseAge: null,
+    },
+
+    // Cluster-coupled tools: one grouped PR, merged only alongside the
+    // substrate move the version-skew conformance test demands.
+    {
+      matchManagers: ["bazel"],
+      matchPackageNames: [
+        "cozystack/talm",
+        "cozystack/boot-to-talos",
+        "siderolabs/talos",
+        "fluxcd/flux2",
+      ],
+      groupName: "cluster-coupled tools",
+      addLabels: ["cluster-coupled"],
+      automerge: false,
+    },
+
+    // Tofu provider pins: doorbell tier. Applying a root is a custody
+    // operation, so the PR is a signal, not a deploy.
+    {
+      matchManagers: ["terraform"],
+      addLabels: ["substrate-upgrade"],
+      minimumReleaseAge: null,
+      automerge: false,
+    },
+
+    // The dns root deliberately stays on the v4 Cloudflare provider (the
+    // tokens root rides v5); hold majors here until that root migrates.
+    {
+      matchManagers: ["terraform"],
+      matchPackageNames: ["cloudflare/cloudflare"],
+      matchFileNames: ["src/infrastructure/bootstrap/guardian-mgmt-dns/**"],
+      allowedVersions: "/^4\\./",
+    },
+  ],
+}
