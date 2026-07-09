@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+// Wire contract for the status-cockpit live telemetry stream (the CPU/memory
+// widget on the guardianintelligence.org homepage). Nodes are sampled at
+// 10 Hz; the hub flushes one Frame per second carrying that second's ticks,
+// so a viewer costs one message per second regardless of node count.
+//
+// Budget reasoning (measured on live nodes): CPU% at 100 ms moves ~2 bits per
+// sample, so per-tick values are delta-coded as zigzag varints in basis
+// points — a packed repeated sint32 where steady-state deltas are one byte
+// each. Memory measured ~0 bits of entropy at 100 ms, so it rides along
+// absolute at 1 Hz. Steady state is ~20 B/node/s (~tens of bytes per frame);
+// keyframes every 10 frames re-anchor absolutes and node names so a client
+// that lost a frame resyncs within 10 s.
+//
+// Join semantics: the first Frame on a connection is a keyframe carrying the
+// most recent full second of ticks, so clients start with a full playout
+// buffer and render 1 s behind the live edge (constant-playout-delay jitter
+// buffer). Tick timestamps are implicit: base_ts_ms + 100 ms per tick.
+package guardian.cockpit.v1;
+
+option go_package = "github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/cockpit/v1;cockpitv1";
+
+// Public stream served by the cockpit hub.
+service CockpitStreamService {
+  rpc Subscribe(SubscribeRequest) returns (stream Frame);
+}
+
+message SubscribeRequest {}
+
+// One second of telemetry for all nodes.
+message Frame {
+  // Wall time of the first tick in this frame; fixed64 because epoch-ms
+  // never varint-compresses below 7 bytes anyway.
+  fixed64 base_ts_ms = 1;
+  repeated NodeSeries nodes = 2;
+}
+
+// One node's ticks within a frame. A series is a keyframe when
+// cpu_keyframe_bp is present (explicit presence, since 0 bp is a valid
+// absolute value); keyframe series also carry the node name. Delta series
+// identify the node by index alone.
+message NodeSeries {
+  // Small stable per-connection index; the name→index binding is announced
+  // by keyframes.
+  uint32 node = 1;
+  // Node name; set in keyframe series only.
+  string name = 2;
+  // Absolute CPU busy share of the first tick, basis points (0-10000).
+  // Present only in keyframe series.
+  optional uint32 cpu_keyframe_bp = 3;
+  // Per-tick CPU changes in basis points, each relative to the previous
+  // tick. In a keyframe series the first delta follows cpu_keyframe_bp
+  // (10 ticks = keyframe + 9 deltas); in a delta series the first delta is
+  // relative to the last tick of the previous frame (10 deltas).
+  repeated sint32 cpu_deltas_bp = 4;
+  // Absolute memory used share at the frame's last tick, basis points.
+  // Once per frame (1 Hz) — memory carries no information at 10 Hz.
+  uint32 mem_used_bp = 5;
+}
+
+// Internal hop: each node's sampler serves its raw 10 Hz tick stream to the
+// hub. Ticks are absolute — the sampler is stateless; delta/keyframe
+// framing is the hub's job.
+service SamplerService {
+  rpc StreamTicks(StreamTicksRequest) returns (stream StreamTicksResponse);
+}
+
+message StreamTicksRequest {}
+
+message StreamTicksResponse {
+  string node = 1;
+  fixed64 ts_ms = 2;
+  // CPU busy share since the previous 100 ms sample, basis points.
+  uint32 cpu_bp = 3;
+  // MemTotal minus MemAvailable over MemTotal, basis points.
+  uint32 mem_used_bp = 4;
+}

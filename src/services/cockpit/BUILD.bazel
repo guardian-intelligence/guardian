@@ -1,0 +1,90 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load", "oci_push")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+
+go_library(
+    name = "cockpit_lib",
+    srcs = [
+        "codec.go",
+        "hub.go",
+        "main.go",
+        "metrics.go",
+        "procfs.go",
+        "ring.go",
+        "sampler.go",
+        "synthetic.go",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/services/cockpit",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//src/proto/gen/go/guardian/cockpit/v1:cockpitv1",
+        "//src/proto/gen/go/guardian/cockpit/v1/cockpitv1connect",
+        "@com_connectrpc_connect//:connect",
+        "@org_golang_x_net//http2",
+        "@org_golang_x_net//http2/h2c",
+    ],
+)
+
+go_binary(
+    name = "cockpit",
+    embed = [":cockpit_lib"],
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "cockpit_test",
+    srcs = [
+        "codec_test.go",
+        "hub_test.go",
+        "procfs_test.go",
+        "ring_test.go",
+    ],
+    data = glob(["testdata/**"]),
+    embed = [":cockpit_lib"],
+    deps = [
+        "//src/proto/gen/go/guardian/cockpit/v1:cockpitv1",
+        "//src/proto/gen/go/guardian/cockpit/v1/cockpitv1connect",
+        "@com_connectrpc_connect//:connect",
+        "@org_golang_google_protobuf//proto",
+    ],
+)
+
+pkg_tar(
+    name = "cockpit_layer",
+    files = {
+        ":cockpit": "app/cockpit",
+    },
+    modes = {
+        "app/cockpit": "0755",
+    },
+)
+
+oci_image(
+    name = "image",
+    annotations = {
+        "org.opencontainers.image.description": "Guardian status-cockpit telemetry (procfs sampler / stream hub / synthetic stub)",
+        "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
+        "org.opencontainers.image.title": "guardian-cockpit",
+    },
+    base = "@ubuntu_noble_base_linux_amd64",
+    entrypoint = ["/app/cockpit"],
+    exposed_ports = ["8080/tcp"],
+    tars = [":cockpit_layer"],
+    visibility = ["//visibility:public"],
+)
+
+oci_load(
+    name = "load",
+    image = ":image",
+    repo_tags = ["guardian/cockpit:dev"],
+)
+
+# Pushed by CI (.github/workflows/cockpit-image.yml) on merges to main; the
+# workflow file path is the cosign trust anchor for this image.
+oci_push(
+    name = "push",
+    image = ":image",
+    remote_tags = ["edge"],
+    repository = "ghcr.io/guardian-intelligence/cockpit",
+    visibility = ["//visibility:public"],
+)

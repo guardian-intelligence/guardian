@@ -6,6 +6,12 @@ lint:
     - STANDARD
   ignore:
     - buf
+  # Subscribe streams the shared Frame message rather than a Subscribe-named
+  # wrapper: the response type IS the wire format the widget decodes, and a
+  # one-field wrapper would cost bytes on every frame for naming's sake.
+  ignore_only:
+    RPC_RESPONSE_STANDARD_NAME:
+      - guardian/cockpit/v1/cockpit.proto
 breaking:
   use:
     - FILE

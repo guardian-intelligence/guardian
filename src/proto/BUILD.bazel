@@ -11,6 +11,7 @@ package(default_visibility = ["//visibility:public"])
 exports_files([
     "buf.yaml",
     "testdata/buf/analytics-events.binpb",
+    "testdata/buf/cockpit.binpb",
 ])
 
 # Vendored third-party (buf.build/bufbuild/protovalidate); not linted (see
@@ -53,6 +54,43 @@ filegroup(
         "//src/proto/gen/go/guardian/analytics/v1:sources",
         "//src/proto/gen/go/guardian/analytics/v1/analyticsv1connect:sources",
     ],
+)
+
+proto_library(
+    name = "cockpit_proto",
+    srcs = ["guardian/cockpit/v1/cockpit.proto"],
+    strip_import_prefix = "/src/proto",
+)
+
+guardian_buf_lint_test(
+    name = "cockpit_buf_lint_test",
+    module = ".",
+    targets = [":cockpit_proto"],
+)
+
+guardian_buf_breaking_test(
+    name = "cockpit_buf_breaking_test",
+    against = "testdata/buf/cockpit.binpb",
+    module = ".",
+    targets = [":cockpit_proto"],
+)
+
+filegroup(
+    name = "cockpit_gen_go",
+    srcs = [
+        "//src/proto/gen/go/guardian/cockpit/v1:sources",
+        "//src/proto/gen/go/guardian/cockpit/v1/cockpitv1connect:sources",
+    ],
+)
+
+guardian_go_proto_codegen_check(
+    name = "cockpit_go_codegen_check",
+    generated_root = "src/proto/gen/go",
+    generated_sources = ":cockpit_gen_go",
+    go_module = "github.com/guardian-intelligence/guardian/src/proto/gen/go",
+    proto_files = ["guardian/cockpit/v1/cockpit.proto"],
+    proto_path = "src/proto",
+    proto_srcs = ["guardian/cockpit/v1/cockpit.proto"],
 )
 
 guardian_go_proto_codegen_check(
