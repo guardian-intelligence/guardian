@@ -7,8 +7,8 @@
 // 10 Hz; the hub flushes one Frame per second carrying that second's ticks,
 // so a viewer costs one message per second regardless of node count.
 //
-// Budget reasoning (measured on live nodes): CPU% at 100 ms moves ~2 bits per
-// sample, so per-tick values are delta-coded as zigzag varints in basis
+// Budget reasoning (measured at 10 Hz over 60 s on a Linux host under
+// typical load): CPU% at 100 ms moves ~2 bits per sample, so per-tick values are delta-coded as zigzag varints in basis
 // points — a packed repeated sint32 where steady-state deltas are one byte
 // each. Memory measured ~0 bits of entropy at 100 ms, so it rides along
 // absolute at 1 Hz. Steady state is ~20 B/node/s (~tens of bytes per frame);

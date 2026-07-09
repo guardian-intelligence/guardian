@@ -1,0 +1,65 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: cockpit-hub
+  namespace: guardian-cockpit
+  labels:
+    app.kubernetes.io/name: cockpit-hub
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: cockpit
+spec:
+  namespaceSelector:
+    matchNames:
+      - guardian-cockpit
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cockpit-hub
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: cockpit
+  namespace: guardian-cockpit
+  labels:
+    app.kubernetes.io/name: cockpit-hub
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: cockpit
+spec:
+  groups:
+    - name: cockpit.rules
+      interval: 30s
+      rules:
+        - alert: CockpitHubDown
+          expr: up{namespace="guardian-cockpit",job="cockpit-hub"} == 0
+          for: 5m
+          labels:
+            severity: warning
+            guardian.dev/product: cockpit
+          annotations:
+            summary: A cockpit-hub replica is unscrapeable; the homepage telemetry stream is degraded.
+        # Each hub replica should hold three live sampler streams — one per
+        # node. min() over replicas: any hub missing a node's ticks serves
+        # that node frozen on screen to every viewer it has.
+        - alert: CockpitSamplerStreamMissing
+          expr: min(cockpit_samplers_connected{namespace="guardian-cockpit",job="cockpit-hub"}) < 3
+          for: 10m
+          labels:
+            severity: warning
+            guardian.dev/product: cockpit
+          annotations:
+            summary: A cockpit hub replica has fewer than three sampler tick streams; a node is dark on the homepage widget.
+        # Ticks flow at 30/s per hub whether or not anyone is watching, so a
+        # flat counter is a wedged hub even when the widget has no viewers.
+        - alert: CockpitTicksStalled
+          expr: increase(cockpit_ticks_ingested_total{namespace="guardian-cockpit",job="cockpit-hub"}[10m]) == 0
+          for: 5m
+          labels:
+            severity: warning
+            guardian.dev/product: cockpit
+          annotations:
+            summary: A cockpit-hub replica ingested no sampler ticks for 10 minutes; its ring is stale.

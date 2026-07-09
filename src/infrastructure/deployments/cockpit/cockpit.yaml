@@ -1,0 +1,274 @@
+# cockpit — the telemetry pipeline behind the live CPU/memory widget on the
+# guardianintelligence.org homepage: one sampler per node reads host procfs
+# at 10 Hz, the hub merges the tick streams into a 60-minute ring and serves
+# the public Connect stream. Contract: src/services/cockpit/main.go and
+# src/proto/guardian/cockpit/v1/cockpit.proto.
+#
+# The samplers are a StatefulSet, not a DaemonSet: the hub dials each
+# sampler by a static --sampler address, and only StatefulSet pods get
+# stable per-pod DNS names. Required anti-affinity keeps one sampler per
+# node; when a node is down its pod stays Pending, which is correct — that
+# node has no ticks to serve. /proc/stat and /proc/meminfo are host-global
+# inside any container, so sampling needs no hostPath, hostPID, or
+# privilege, and the namespace stays PSA-restricted.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: cockpit-sampler
+  namespace: guardian-cockpit
+  labels:
+    app.kubernetes.io/name: cockpit-sampler
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: cockpit
+spec:
+  replicas: 3
+  revisionHistoryLimit: 3
+  serviceName: cockpit-sampler
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cockpit-sampler
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cockpit-sampler
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/product: cockpit
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: cockpit-sampler
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: sampler
+          image: ghcr.io/guardian-intelligence/cockpit@sha256:979e144ac19294c6de9b72a167803f24a130bb1e686de2101c4182af618b16df
+          args:
+            - sampler
+            - --node=$(NODE_NAME)
+          env:
+            # os.Hostname() in a pod is the pod name; the widget labels
+            # series by node, so pass the real node name in.
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: 9101
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              # Headroom well above steady state: CPU throttling would skew
+              # the 100 ms sampling cadence itself.
+              cpu: 200m
+              memory: 64Mi
+---
+# Headless governing Service: gives sampler pods their stable DNS names
+# (cockpit-sampler-{0,1,2}.cockpit-sampler.guardian-cockpit.svc). Not-ready
+# addresses are published so the hub's reconnect loop can start dialing as
+# soon as a pod exists instead of waiting out a DNS miss.
+apiVersion: v1
+kind: Service
+metadata:
+  name: cockpit-sampler
+  namespace: guardian-cockpit
+  labels:
+    app.kubernetes.io/name: cockpit-sampler
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: cockpit
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: cockpit-sampler
+  ports:
+    - name: http
+      port: 9101
+      targetPort: http
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: cockpit-sampler
+  namespace: guardian-cockpit
+  labels:
+    app.kubernetes.io/name: cockpit-sampler
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: cockpit
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cockpit-sampler
+---
+# Two hub replicas, each holding its own in-memory ring built from the same
+# three tick streams: a subscriber gets a consistent stream from whichever
+# replica it lands on, and a reconnect after a rollout re-bursts a full
+# playout buffer from the other one.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cockpit-hub
+  namespace: guardian-cockpit
+  labels:
+    app.kubernetes.io/name: cockpit-hub
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: cockpit
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cockpit-hub
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cockpit-hub
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/product: cockpit
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: cockpit-hub
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: hub
+          image: ghcr.io/guardian-intelligence/cockpit@sha256:979e144ac19294c6de9b72a167803f24a130bb1e686de2101c4182af618b16df
+          args:
+            - hub
+            - --sampler=cockpit-sampler-0.cockpit-sampler.guardian-cockpit.svc.cluster.local:9101
+            - --sampler=cockpit-sampler-1.cockpit-sampler.guardian-cockpit.svc.cluster.local:9101
+            - --sampler=cockpit-sampler-2.cockpit-sampler.guardian-cockpit.svc.cluster.local:9101
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cockpit-hub
+  namespace: guardian-cockpit
+  labels:
+    app.kubernetes.io/name: cockpit-hub
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: cockpit
+spec:
+  selector:
+    app.kubernetes.io/name: cockpit-hub
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: cockpit-hub
+  namespace: guardian-cockpit
+  labels:
+    app.kubernetes.io/name: cockpit-hub
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: cockpit
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cockpit-hub
+---
+# Path-prefix co-tenant on the apex host ahead of the company-site catch-all
+# `/` (the analytics /api/events pattern); the apex TLS + origin-pull config
+# lives on the company-site Ingress and applies server-wide. Clients use
+# base URL https://guardianintelligence.org/api/cockpit — the rewrite hands
+# the Connect route (/guardian.cockpit.v1.CockpitStreamService/Subscribe) to
+# the hub. Cloudflare bypasses cache for /api/ (bypass_api_cache), so the
+# stream is never edge-buffered; proxy-buffering off keeps nginx from
+# holding frames back, which would defeat a 10 Hz stream entirely.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cockpit-hub
+  namespace: guardian-cockpit
+  labels:
+    app.kubernetes.io/name: cockpit-hub
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: cockpit
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+spec:
+  ingressClassName: tenant-root
+  rules:
+    - host: guardianintelligence.org
+      http:
+        paths:
+          - path: /api/cockpit(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: cockpit-hub
+                port:
+                  number: 80

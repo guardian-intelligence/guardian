@@ -41,6 +41,7 @@ go_test(
         "//src/infrastructure/bootstrap/sync-steady:manifests",
         "//src/infrastructure/deployments/alerting:manifests",
         "//src/infrastructure/deployments/analytics/system:manifests",
+        "//src/infrastructure/deployments/cockpit:manifests",
         "//src/infrastructure/deployments/company/beta:manifests",
         "//src/infrastructure/deployments/company/gamma:manifests",
         "//src/infrastructure/deployments/company/previews:manifests",
