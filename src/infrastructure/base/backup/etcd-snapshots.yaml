@@ -15,7 +15,7 @@
 # Snapshots are age-encrypted before upload: an etcd db contains every
 # cluster Secret in the clear. The recipient public key below is public
 # material; the identity (private) key lives only in the operator custody
-# bundle (custody.env GUARDIAN_ETCD_SNAPSHOT_AGE_KEY). Restore procedure:
+# bundle (custody.env guardian_etcd_snapshot_age_key). Restore procedure:
 # src/infrastructure/runbooks/etcd-snapshot-restore.md.
 apiVersion: talos.dev/v1alpha1
 kind: ServiceAccount
