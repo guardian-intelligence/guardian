@@ -1,0 +1,62 @@
+# One cluster-wide scrape covers every stage's cockpit events writer (the
+# cockpit-rollup pattern). The gauge that matters is poll freshness: a
+# wedged poller means the homepage timeline silently stops at its last
+# event while the metrics stream keeps flowing.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: cockpit-events
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: cockpit-events
+    app.kubernetes.io/part-of: guardian
+spec:
+  namespaceSelector:
+    any: true
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cockpit-events
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: cockpit-events
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: cockpit-events
+    app.kubernetes.io/part-of: guardian
+spec:
+  groups:
+    - name: cockpit-events.rules
+      interval: 30s
+      rules:
+        - alert: CockpitEventsScrapeDown
+          expr: up{container="events"} == 0
+          for: 5m
+          labels:
+            severity: warning
+            guardian.dev/product: cockpit
+          annotations:
+            summary: "The cockpit events writer in {{ $labels.namespace }} is unscrapeable."
+        - alert: CockpitEventsAbsent
+          expr: absent(up{container="events"})
+          for: 10m
+          labels:
+            severity: warning
+            guardian.dev/product: cockpit
+          annotations:
+            summary: No cockpit events writer scrape targets exist anywhere; timeline alerting is blind.
+        # Polls succeed every minute (304s included), so a stale gauge is a
+        # wedged or rate-limit-stuck poller, not a quiet repo.
+        - alert: CockpitEventsPollStale
+          expr: time() * 1000 - max by (namespace) (cockpit_events_last_poll_timestamp_ms) > 900000
+          for: 5m
+          labels:
+            severity: warning
+            guardian.dev/product: cockpit
+          annotations:
+            summary: "The events writer in {{ $labels.namespace }} has not completed a poll for 15 minutes; the homepage timeline is frozen."

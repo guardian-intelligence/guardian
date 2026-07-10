@@ -18,6 +18,7 @@ data:
     -- member of cockpit_admin (idempotent re-run) -- both pass the owner check.
     ALTER TABLE IF EXISTS status_heartbeat OWNER TO cockpit_admin;
     ALTER TABLE IF EXISTS cockpit_metrics OWNER TO cockpit_admin;
+    ALTER TABLE IF EXISTS cockpit_events OWNER TO cockpit_admin;
     SET ROLE cockpit_admin;
     CREATE TABLE IF NOT EXISTS status_heartbeat (
         id integer PRIMARY KEY,
@@ -37,4 +38,15 @@ data:
         cpu_avg_bp integer NOT NULL,
         mem_used_bp integer NOT NULL,
         PRIMARY KEY (ts, node)
+    );
+    -- One row per default-branch commit (landed PRs, Kargo promotions,
+    -- pushes), written by the cockpit events writer and served as the
+    -- widget's timeline shape; the writer prunes past 24 h.
+    CREATE TABLE IF NOT EXISTS cockpit_events (
+        id text PRIMARY KEY,
+        ts timestamptz NOT NULL,
+        kind text NOT NULL,
+        actor text NOT NULL,
+        title text NOT NULL,
+        url text NOT NULL
     );

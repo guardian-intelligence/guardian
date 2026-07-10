@@ -58,7 +58,10 @@ jobs:
           pin_files="src/infrastructure/deployments/cockpit/cockpit.yaml
           src/infrastructure/deployments/products/beta/cockpit-rollup.yaml
           src/infrastructure/deployments/products/gamma/cockpit-rollup.yaml
-          src/infrastructure/deployments/products/prod/cockpit-rollup.yaml"
+          src/infrastructure/deployments/products/prod/cockpit-rollup.yaml
+          src/infrastructure/deployments/products/beta/cockpit-events.yaml
+          src/infrastructure/deployments/products/gamma/cockpit-events.yaml
+          src/infrastructure/deployments/products/prod/cockpit-events.yaml"
           pin_re='ghcr.io/guardian-intelligence/cockpit@sha256:[a-f0-9]\{64\}'
           build=false proto=false pin=false
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
@@ -101,6 +104,7 @@ jobs:
           grep -rho 'ghcr.io/guardian-intelligence/cockpit@sha256:[a-f0-9]\{64\}' \
             src/infrastructure/deployments/cockpit/cockpit.yaml \
             src/infrastructure/deployments/products/*/cockpit-rollup.yaml \
+            src/infrastructure/deployments/products/*/cockpit-events.yaml \
             | cut -d@ -f2 | sort -u |
           while read -r pinned; do
             echo "verifying provenance of $pinned"
