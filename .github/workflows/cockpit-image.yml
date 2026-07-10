@@ -53,9 +53,12 @@ jobs:
       - name: Classify the diff
         id: classify
         run: |
-          # The pin file does not exist until the deployment PR lands; an
+          # Pin files do not exist until their deployment PRs land; an
           # absent file greps to empty on both sides, so pin stays false.
-          pin_file=src/infrastructure/deployments/cockpit/cockpit.yaml
+          pin_files="src/infrastructure/deployments/cockpit/cockpit.yaml
+          src/infrastructure/deployments/products/beta/cockpit-rollup.yaml
+          src/infrastructure/deployments/products/gamma/cockpit-rollup.yaml
+          src/infrastructure/deployments/products/prod/cockpit-rollup.yaml"
           pin_re='ghcr.io/guardian-intelligence/cockpit@sha256:[a-f0-9]\{64\}'
           build=false proto=false pin=false
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
@@ -69,9 +72,11 @@ jobs:
                 src/proto/*) proto=true build=true ;;
               esac
             done < <(git diff --name-only "$base"...HEAD)
-            pinned="$(grep -o "$pin_re" "$pin_file" 2>/dev/null | cut -d@ -f2 || true)"
-            base_pinned="$(git show "$base:$pin_file" 2>/dev/null | grep -o "$pin_re" | cut -d@ -f2 || true)"
-            if [[ "$pinned" != "$base_pinned" ]]; then pin=true; fi
+            for pin_file in $pin_files; do
+              pinned="$(grep -o "$pin_re" "$pin_file" 2>/dev/null | cut -d@ -f2 || true)"
+              base_pinned="$(git show "$base:$pin_file" 2>/dev/null | grep -o "$pin_re" | cut -d@ -f2 || true)"
+              if [[ "$pinned" != "$base_pinned" ]]; then pin=true; fi
+            done
           else
             build=true proto=true
           fi
@@ -91,10 +96,12 @@ jobs:
           IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/cockpit-image.yml@refs/heads/main
           ISSUER: https://token.actions.githubusercontent.com
         run: |
-          # The manifest pins the digest once per workload (sampler + hub),
-          # so verify each distinct digest.
-          grep -o 'ghcr.io/guardian-intelligence/cockpit@sha256:[a-f0-9]\{64\}' \
-            src/infrastructure/deployments/cockpit/cockpit.yaml | cut -d@ -f2 | sort -u |
+          # The image is pinned once per workload across the cockpit and
+          # products trees, so verify each distinct digest.
+          grep -rho 'ghcr.io/guardian-intelligence/cockpit@sha256:[a-f0-9]\{64\}' \
+            src/infrastructure/deployments/cockpit/cockpit.yaml \
+            src/infrastructure/deployments/products/*/cockpit-rollup.yaml \
+            | cut -d@ -f2 | sort -u |
           while read -r pinned; do
             echo "verifying provenance of $pinned"
             cosign verify --certificate-identity "$IDENTITY" \
