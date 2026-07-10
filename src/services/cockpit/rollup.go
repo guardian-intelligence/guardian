@@ -39,7 +39,9 @@ func runRollup(args []string) error {
 
 	// Connection config comes from the libpq PG* environment variables
 	// (PGHOST, PGDATABASE, PGUSER, PGPASSWORD), which pgx honors natively.
-	pool, err := pgxpool.New(ctx, "")
+	// Two connections bound the writer's share of the stage's PG
+	// connection budget: one batch per second plus a minutely prune.
+	pool, err := pgxpool.New(ctx, "pool_max_conns=2")
 	if err != nil {
 		return fmt.Errorf("pg config: %w", err)
 	}
