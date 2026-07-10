@@ -57,3 +57,25 @@ func (m *rollupMetrics) render(w io.Writer) {
 	fmt.Fprintf(w, "# TYPE cockpit_rollup_last_write_timestamp_ms gauge\n")
 	fmt.Fprintf(w, "cockpit_rollup_last_write_timestamp_ms %d\n", m.lastWriteTsMs.Load())
 }
+
+type eventsMetrics struct {
+	rowsWritten  atomic.Uint64
+	pollFailures atomic.Uint64
+	rowsPruned   atomic.Uint64
+	lastPollTsMs atomic.Int64
+}
+
+func (m *eventsMetrics) render(w io.Writer) {
+	fmt.Fprintf(w, "# HELP cockpit_events_rows_written_total Timeline rows persisted.\n")
+	fmt.Fprintf(w, "# TYPE cockpit_events_rows_written_total counter\n")
+	fmt.Fprintf(w, "cockpit_events_rows_written_total %d\n", m.rowsWritten.Load())
+	fmt.Fprintf(w, "# HELP cockpit_events_poll_failures_total Polls that ended in an error.\n")
+	fmt.Fprintf(w, "# TYPE cockpit_events_poll_failures_total counter\n")
+	fmt.Fprintf(w, "cockpit_events_poll_failures_total %d\n", m.pollFailures.Load())
+	fmt.Fprintf(w, "# HELP cockpit_events_rows_pruned_total Rows deleted past the retention horizon.\n")
+	fmt.Fprintf(w, "# TYPE cockpit_events_rows_pruned_total counter\n")
+	fmt.Fprintf(w, "cockpit_events_rows_pruned_total %d\n", m.rowsPruned.Load())
+	fmt.Fprintf(w, "# HELP cockpit_events_last_poll_timestamp_ms Wall time of the last successful poll.\n")
+	fmt.Fprintf(w, "# TYPE cockpit_events_last_poll_timestamp_ms gauge\n")
+	fmt.Fprintf(w, "cockpit_events_last_poll_timestamp_ms %d\n", m.lastPollTsMs.Load())
+}

@@ -6,6 +6,7 @@ go_library(
     name = "cockpit_lib",
     srcs = [
         "codec.go",
+        "events.go",
         "hub.go",
         "main.go",
         "metrics.go",
@@ -38,6 +39,7 @@ go_test(
     name = "cockpit_test",
     srcs = [
         "codec_test.go",
+        "events_test.go",
         "hub_test.go",
         "procfs_test.go",
         "ring_test.go",
