@@ -31,3 +31,29 @@ func (m *hubMetrics) render(w io.Writer) {
 	fmt.Fprintf(w, "# TYPE cockpit_samplers_connected gauge\n")
 	fmt.Fprintf(w, "cockpit_samplers_connected %d\n", m.samplersConnected.Load())
 }
+
+type rollupMetrics struct {
+	rowsWritten   atomic.Uint64
+	writeFailures atomic.Uint64
+	rowsPruned    atomic.Uint64
+	reconnects    atomic.Uint64
+	lastWriteTsMs atomic.Int64
+}
+
+func (m *rollupMetrics) render(w io.Writer) {
+	fmt.Fprintf(w, "# HELP cockpit_rollup_rows_written_total Rollup rows persisted.\n")
+	fmt.Fprintf(w, "# TYPE cockpit_rollup_rows_written_total counter\n")
+	fmt.Fprintf(w, "cockpit_rollup_rows_written_total %d\n", m.rowsWritten.Load())
+	fmt.Fprintf(w, "# HELP cockpit_rollup_write_failures_total Frame writes that failed after the stream delivered them.\n")
+	fmt.Fprintf(w, "# TYPE cockpit_rollup_write_failures_total counter\n")
+	fmt.Fprintf(w, "cockpit_rollup_write_failures_total %d\n", m.writeFailures.Load())
+	fmt.Fprintf(w, "# HELP cockpit_rollup_rows_pruned_total Rows deleted past the retention horizon.\n")
+	fmt.Fprintf(w, "# TYPE cockpit_rollup_rows_pruned_total counter\n")
+	fmt.Fprintf(w, "cockpit_rollup_rows_pruned_total %d\n", m.rowsPruned.Load())
+	fmt.Fprintf(w, "# HELP cockpit_rollup_stream_reconnects_total Hub subscription attempts after the first.\n")
+	fmt.Fprintf(w, "# TYPE cockpit_rollup_stream_reconnects_total counter\n")
+	fmt.Fprintf(w, "cockpit_rollup_stream_reconnects_total %d\n", m.reconnects.Load())
+	fmt.Fprintf(w, "# HELP cockpit_rollup_last_write_timestamp_ms Wall time of the last successful write.\n")
+	fmt.Fprintf(w, "# TYPE cockpit_rollup_last_write_timestamp_ms gauge\n")
+	fmt.Fprintf(w, "cockpit_rollup_last_write_timestamp_ms %d\n", m.lastWriteTsMs.Load())
+}

@@ -220,7 +220,9 @@ const streamSilenceTimeout = 10 * time.Second
 
 // runSamplerClient keeps one sampler's tick stream flowing into the hub,
 // reconnecting with a flat backoff — a sampler restart is routine, not an
-// error worth escalating past the connected-gauge.
+// error worth escalating past the connected-gauge. Connection-state logging
+// is edge-triggered: a dark sampler retries every second for hours, and one
+// warn per attempt is log noise, not signal.
 func (h *hub) runSamplerClient(ctx context.Context, node int, addr string) {
 	client := cockpitv1connect.NewSamplerServiceClient(
 		// No client timeout (it would sever the stream); the dial itself is
@@ -231,18 +233,22 @@ func (h *hub) runSamplerClient(ctx context.Context, node int, addr string) {
 		}},
 		samplerBaseURL(addr),
 	)
+	degraded := false
 	for ctx.Err() == nil {
-		h.consumeTickStream(ctx, client, node, addr)
+		h.consumeTickStream(ctx, client, node, addr, &degraded)
 		sleepCtx(ctx, time.Second)
 	}
 }
 
-func (h *hub) consumeTickStream(ctx context.Context, client cockpitv1connect.SamplerServiceClient, node int, addr string) {
+func (h *hub) consumeTickStream(ctx context.Context, client cockpitv1connect.SamplerServiceClient, node int, addr string, degraded *bool) {
 	sctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stream, err := client.StreamTicks(sctx, connect.NewRequest(&cockpitv1.StreamTicksRequest{}))
 	if err != nil {
-		slog.Warn("sampler dial failed", "node", node, "addr", addr, "err", err)
+		if !*degraded && ctx.Err() == nil {
+			slog.Warn("sampler unreachable; retrying every second", "node", node, "addr", addr, "err", err)
+			*degraded = true
+		}
 		return
 	}
 	defer func() { _ = stream.Close() }()
@@ -271,6 +277,12 @@ func (h *hub) consumeTickStream(ctx context.Context, client cockpitv1connect.Sam
 	h.m.samplersConnected.Add(1)
 	defer h.m.samplersConnected.Add(-1)
 	for stream.Receive() {
+		// Connect dials lazily, so a flowing tick — not the call above — is
+		// what proves the sampler reachable again.
+		if *degraded {
+			slog.Info("sampler stream recovered", "node", node, "addr", addr)
+			*degraded = false
+		}
 		lastTick.Store(time.Now().UnixMilli())
 		msg := stream.Msg()
 		h.ingest(node, msg.GetNode(), tick{
@@ -279,8 +291,9 @@ func (h *hub) consumeTickStream(ctx context.Context, client cockpitv1connect.Sam
 			memBp: msg.GetMemUsedBp(),
 		})
 	}
-	if err := stream.Err(); err != nil && ctx.Err() == nil {
+	if err := stream.Err(); err != nil && ctx.Err() == nil && !*degraded {
 		slog.Warn("sampler stream ended", "node", node, "addr", addr, "err", err)
+		*degraded = true
 	}
 }
 
