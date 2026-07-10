@@ -80,3 +80,60 @@ spec:
         - ports:
             - port: "4000"
               protocol: TCP
+---
+# The rollup writer's complete policy. Ingress: only vmagent's metrics
+# scrape. Egress must be explicit — the Cozystack-generated tenant policies
+# grant world (off-cluster) and DNS, but the hub lives in the plain
+# guardian-cockpit namespace, which is the cluster entity, not world; the
+# keycloak CNP is the precedent for a tenant pod's hand-written allow list.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cockpit-rollup
+  namespace: tenant-guardian-beta
+  labels:
+    app.kubernetes.io/name: cockpit-rollup
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: cockpit
+    guardian.dev/stage: beta
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: cockpit-rollup
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:app.kubernetes.io/name: vmagent
+            k8s:io.kubernetes.pod.namespace: cozy-monitoring
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # This stage's product Postgres.
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: postgres-products
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    # The cluster-singleton cockpit hub's frame stream.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: guardian-cockpit
+            k8s:app.kubernetes.io/name: cockpit-hub
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP

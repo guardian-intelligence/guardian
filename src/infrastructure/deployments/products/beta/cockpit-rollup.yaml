@@ -1,0 +1,83 @@
+# The warm-tier writer: subscribes to the cluster-singleton cockpit hub and
+# persists 1 s min/max/avg rollups into this stage's product Postgres, where
+# Electric serves them as the homepage widget's history shape. One replica:
+# writes are idempotent (ON CONFLICT DO NOTHING), and a rollout's gap of a
+# second or two in hour-old history is invisible; a second replica would
+# just double every write. Contract: src/services/cockpit/rollup.go.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cockpit-rollup
+  namespace: tenant-guardian-beta
+  labels:
+    app.kubernetes.io/name: cockpit-rollup
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: cockpit
+    guardian.dev/stage: beta
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cockpit-rollup
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cockpit-rollup
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/product: cockpit
+        guardian.dev/stage: beta
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: rollup
+          image: ghcr.io/guardian-intelligence/cockpit@sha256:bf644fefc105ea45a6f682ea1d121831c60b079c3eb57eeef65129cfe8e836da
+          args:
+            - rollup
+            - --hub=cockpit-hub.guardian-cockpit.svc:80
+          env:
+            - name: PGHOST
+              value: postgres-products-rw.tenant-guardian-beta.svc
+            - name: PGPORT
+              value: "5432"
+            - name: PGDATABASE
+              value: cockpit
+            - name: PGUSER
+              value: cockpit_writer
+            - name: PGSSLMODE
+              value: require
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-products-credentials
+                  key: cockpit_writer
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi

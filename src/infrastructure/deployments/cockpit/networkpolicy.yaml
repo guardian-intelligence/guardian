@@ -58,6 +58,24 @@ spec:
         - ports:
             - port: "8080"
               protocol: TCP
+    # Each stage's warm-tier rollup writer subscribing to the stream
+    # (products/<stage>/cockpit-rollup.yaml).
+    - fromEndpoints:
+        - matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: In
+              values:
+                - tenant-guardian-beta
+                - tenant-guardian-gamma
+                - tenant-guardian-prod
+            - key: k8s:app.kubernetes.io/name
+              operator: In
+              values:
+                - cockpit-rollup
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
   egress:
     - toEndpoints:
         - matchLabels:

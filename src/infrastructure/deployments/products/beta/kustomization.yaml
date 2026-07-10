@@ -3,6 +3,7 @@ kind: Kustomization
 resources:
   - ddl-configmap.yaml
   - ddl-job.yaml
+  - cockpit-rollup.yaml
   - electric.yaml
   - ingress.yaml
   - networkpolicy.yaml
