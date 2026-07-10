@@ -14,6 +14,9 @@
 //	rollup:    subscribes to a hub like any client and persists 1 s
 //	           min/max/avg rows into Postgres — the Electric-served warm
 //	           tier — pruned to the stream's horizon.
+//	events:    polls the repo's main branch (GitHub commits API, ETag
+//	           conditional requests) into the cockpit_events timeline —
+//	           landed PRs, Kargo promotions, pushes.
 //
 // Wire-format rationale lives in src/proto/guardian/cockpit/v1/cockpit.proto.
 package main
@@ -43,7 +46,7 @@ func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: cockpit <sampler|hub|synthetic|rollup> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: cockpit <sampler|hub|synthetic|rollup|events> [flags]")
 		os.Exit(2)
 	}
 	var err error
@@ -56,8 +59,10 @@ func main() {
 		err = runSynthetic(os.Args[2:])
 	case "rollup":
 		err = runRollup(os.Args[2:])
+	case "events":
+		err = runEvents(os.Args[2:])
 	default:
-		fmt.Fprintf(os.Stderr, "unknown mode %q; want sampler, hub, synthetic, or rollup\n", os.Args[1])
+		fmt.Fprintf(os.Stderr, "unknown mode %q; want sampler, hub, synthetic, rollup, or events\n", os.Args[1])
 		os.Exit(2)
 	}
 	if err != nil {
