@@ -4,6 +4,7 @@ resources:
   - ddl-configmap.yaml
   - ddl-job.yaml
   - cockpit-rollup.yaml
+  - cockpit-events.yaml
   - electric.yaml
   - ingress.yaml
   - networkpolicy.yaml

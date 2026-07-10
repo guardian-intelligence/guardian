@@ -44,7 +44,7 @@ spec:
             - name: DATABASE_URL
               value: postgresql://cockpit:$(PGPASSWORD)@postgres-products-rw.tenant-guardian-prod.svc:5432/cockpit?sslmode=require
             - name: GUARDIAN_DDL_REVISION
-              value: "4"
+              value: "5"
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

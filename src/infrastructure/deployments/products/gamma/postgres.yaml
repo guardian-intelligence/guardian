@@ -7,7 +7,7 @@
 # Connection budget (max_connections=100):
 # - electric pool: 20 when the Electric consumer lands
 # - cockpit-api pool: 10
-# - cockpit rollup writer pool: 2
+# - cockpit writers (rollup + events) pool: 4
 # - operators/ad-hoc: 5
 # - consumers' pools must sum to <=60; PGConnectionSaturation pages at 70%
 # A product graduates to its own instance only when it demonstrably needs one.

@@ -1,32 +1,32 @@
-# The warm-tier writer: subscribes to the cluster-singleton cockpit hub and
-# persists 1 s min/max/avg rollups into this stage's product Postgres, where
-# Electric serves them as the homepage widget's history shape. One replica:
-# writes are idempotent (ON CONFLICT DO NOTHING), and a rollout's gap of a
-# second or two in hour-old history is invisible; a second replica would
-# just double every write. Contract: src/services/cockpit/rollup.go.
+# The timeline writer: polls the repo's default branch (GitHub commits API,
+# ETag conditional requests) and persists landed PRs / Kargo promotions /
+# pushes into this stage's cockpit_events, served by Electric as the
+# widget's timeline shape. One replica: inserts are idempotent by sha and a
+# poll gap costs nothing (the next poll re-reads the branch head). Contract:
+# src/services/cockpit/events.go.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: cockpit-rollup
-  namespace: tenant-guardian-prod
+  name: cockpit-events
+  namespace: tenant-guardian-beta
   labels:
-    app.kubernetes.io/name: cockpit-rollup
+    app.kubernetes.io/name: cockpit-events
     app.kubernetes.io/part-of: guardian
     guardian.dev/product: cockpit
-    guardian.dev/stage: prod
+    guardian.dev/stage: beta
 spec:
   replicas: 1
   revisionHistoryLimit: 3
   selector:
     matchLabels:
-      app.kubernetes.io/name: cockpit-rollup
+      app.kubernetes.io/name: cockpit-events
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: cockpit-rollup
+        app.kubernetes.io/name: cockpit-events
         app.kubernetes.io/part-of: guardian
         guardian.dev/product: cockpit
-        guardian.dev/stage: prod
+        guardian.dev/stage: beta
     spec:
       automountServiceAccountToken: false
       securityContext:
@@ -36,14 +36,14 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: rollup
+        - name: events
           image: ghcr.io/guardian-intelligence/cockpit@sha256:834d434d8d29f7aa551f3958a09b560e2aafdb0f4c591e135d10910c4fb2980c
           args:
-            - rollup
-            - --hub=cockpit-hub.guardian-cockpit.svc:80
+            - events
+            - --repo=guardian-intelligence/guardian
           env:
             - name: PGHOST
-              value: postgres-products-rw.tenant-guardian-prod.svc
+              value: postgres-products-rw.tenant-guardian-beta.svc
             - name: PGPORT
               value: "5432"
             - name: PGDATABASE
