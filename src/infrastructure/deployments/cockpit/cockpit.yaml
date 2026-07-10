@@ -51,7 +51,7 @@ spec:
               topologyKey: kubernetes.io/hostname
       containers:
         - name: sampler
-          image: ghcr.io/guardian-intelligence/cockpit@sha256:979e144ac19294c6de9b72a167803f24a130bb1e686de2101c4182af618b16df
+          image: ghcr.io/guardian-intelligence/cockpit@sha256:bf644fefc105ea45a6f682ea1d121831c60b079c3eb57eeef65129cfe8e836da
           args:
             - sampler
             - --node=$(NODE_NAME)
@@ -175,7 +175,7 @@ spec:
                 topologyKey: kubernetes.io/hostname
       containers:
         - name: hub
-          image: ghcr.io/guardian-intelligence/cockpit@sha256:979e144ac19294c6de9b72a167803f24a130bb1e686de2101c4182af618b16df
+          image: ghcr.io/guardian-intelligence/cockpit@sha256:bf644fefc105ea45a6f682ea1d121831c60b079c3eb57eeef65129cfe8e836da
           args:
             - hub
             - --sampler=cockpit-sampler-0.cockpit-sampler.guardian-cockpit.svc:9101

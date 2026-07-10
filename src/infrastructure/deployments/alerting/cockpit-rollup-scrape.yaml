@@ -1,0 +1,62 @@
+# One cluster-wide scrape covers every stage's cockpit rollup writer, the
+# electric-scrape pattern. The writer is the warm tier's only producer, so
+# its staleness gauge is the alert that matters: a wedged writer serves
+# every homepage visitor an hour of history that quietly stops advancing.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: cockpit-rollup
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: cockpit-rollup
+    app.kubernetes.io/part-of: guardian
+spec:
+  namespaceSelector:
+    any: true
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cockpit-rollup
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: cockpit-rollup
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: cockpit-rollup
+    app.kubernetes.io/part-of: guardian
+spec:
+  groups:
+    - name: cockpit-rollup.rules
+      interval: 30s
+      rules:
+        - alert: CockpitRollupScrapeDown
+          expr: up{container="rollup"} == 0
+          for: 5m
+          labels:
+            severity: warning
+            guardian.dev/product: cockpit
+          annotations:
+            summary: "The cockpit rollup writer in {{ $labels.namespace }} is unscrapeable."
+        - alert: CockpitRollupAbsent
+          expr: absent(up{container="rollup"})
+          for: 10m
+          labels:
+            severity: warning
+            guardian.dev/product: cockpit
+          annotations:
+            summary: No cockpit rollup writer scrape targets exist anywhere; warm-tier alerting is blind.
+        # The gauge starts at 0, so a writer that comes up but never
+        # completes a write fires this too — that is the point.
+        - alert: CockpitRollupStale
+          expr: time() * 1000 - max by (namespace) (cockpit_rollup_last_write_timestamp_ms) > 300000
+          for: 5m
+          labels:
+            severity: warning
+            guardian.dev/product: cockpit
+          annotations:
+            summary: "The warm tier in {{ $labels.namespace }} has not written a rollup row for 5 minutes; homepage history is frozen."

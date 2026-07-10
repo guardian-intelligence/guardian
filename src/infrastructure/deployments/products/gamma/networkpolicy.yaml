@@ -80,3 +80,30 @@ spec:
         - ports:
             - port: "4000"
               protocol: TCP
+---
+# vmagent scrapes the rollup writer's staleness metrics; selecting the pod
+# for ingress default-denies everything else, which is correct — the writer
+# only dials out (hub + Postgres).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-vmagent-to-cockpit-rollup-metrics
+  namespace: tenant-guardian-gamma
+  labels:
+    app.kubernetes.io/name: cockpit-rollup
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: cockpit
+    guardian.dev/stage: gamma
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: cockpit-rollup
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:app.kubernetes.io/name: vmagent
+            k8s:io.kubernetes.pod.namespace: cozy-monitoring
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
