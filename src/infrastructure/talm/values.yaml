@@ -82,7 +82,7 @@ floatingIP: "10.8.0.250"
 # The Latitude Virtual Network (VID 2140) rides the private NIC enp1s0f0; the
 # per-node overlay brings it up with a VLANConfig.
 vipLink: "enp1s0f0.2140"
-image: "ghcr.io/cozystack/cozystack/talos:v1.13.0@sha256:c2c092ad742e8bdd4af6366c586d95bdf7f73cee6eef8318fb9da6d466f37044"
+image: "ghcr.io/cozystack/cozystack/talos:v1.13.0@sha256:37caed57ac67316af15ecf55f05b04864527bed9f4b379abd681ea6ece9a64a4"
 
 # Dark-uplink bundle mirror, OFF in steady state. Enabling it is a
 # bootstrap-only compromise entered and exited via PRs (pre-drill flip on,
