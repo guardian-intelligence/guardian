@@ -1,0 +1,110 @@
+# Sampler pods: admit only the hub's tick-stream dials (kubelet probes
+# bypass CNP). The sampler dials nothing and exposes no /metrics, so there
+# is no scraper rule and no egress section — egress stays Cilium-default
+# rather than inventing a deny-all rule with no house precedent.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cockpit-sampler
+  namespace: guardian-cockpit
+  labels:
+    app.kubernetes.io/name: cockpit-sampler
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: cockpit
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: cockpit-sampler
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: cockpit-hub
+      toPorts:
+        - ports:
+            - port: "9101"
+              protocol: TCP
+---
+# Hub pods: admit the root ingress controller (public stream) and vmagent
+# (/metrics); egress only DNS + the in-namespace samplers.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cockpit-hub
+  namespace: guardian-cockpit
+  labels:
+    app.kubernetes.io/name: cockpit-hub
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: cockpit
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: cockpit-hub
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            k8s:app.kubernetes.io/name: ingress-nginx
+            k8s:app.kubernetes.io/component: controller
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # vmagent scraping /metrics (VMServiceScrape in observability.yaml).
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: vmagent
+            k8s:io.kubernetes.pod.namespace: cozy-monitoring
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: cockpit-sampler
+      toPorts:
+        - ports:
+            - port: "9101"
+              protocol: TCP
+---
+# Egress half for the root ingress controller (its generated egress policy
+# only admits tenant-root-labeled destinations) — same shape as the
+# analytics-ingest pair.
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-root-ingress-egress-cockpit-hub
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: cockpit
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-root
+      k8s:app.kubernetes.io/name: ingress-nginx
+      k8s:app.kubernetes.io/component: controller
+  egress:
+    - toEndpoints:
+        - matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: In
+              values:
+                - guardian-cockpit
+            - key: k8s:app.kubernetes.io/name
+              operator: In
+              values:
+                - cockpit-hub
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP

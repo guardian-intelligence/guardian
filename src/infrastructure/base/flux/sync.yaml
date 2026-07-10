@@ -688,6 +688,44 @@ spec:
       current: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
       failed: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'False')
 ---
+# Cockpit telemetry plane: the per-node sampler StatefulSet, the hub serving
+# the public homepage stream, Cilium policy, and self-monitoring
+# (deployments/cockpit/). No secrets — the stream is public read-only data —
+# so only the base slice (Cilium + VM operator CRDs) is needed.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: guardian-cockpit
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/deployments/cockpit
+  sourceRef:
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      # Required, not optional — see guardian-company-prod above.
+      - kind: ConfigMap
+        name: guardian-source
+  dependsOn:
+    - name: guardian-mgmt-base
+  prune: true
+  wait: false
+  timeout: 5m
+  healthChecks:
+    # The hub only: the sampler StatefulSet deliberately leaves its pod
+    # Pending while a node is down (required anti-affinity), so gating on it
+    # would flip this Kustomization red for every drain and Talos upgrade.
+    # Sampler coverage is owned by CockpitSamplerStreamMissing in
+    # observability.yaml, which watches the thing that matters — live tick
+    # streams — not pod phase.
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: cockpit-hub
+      namespace: guardian-cockpit
+---
 # Alerting delivery seam: the alert-relay Deployment in tenant-root plus its
 # ESO wiring, Cilium policy, and self-monitoring (deployments/alerting/).
 # Depends on guardian-system for the same reason as
