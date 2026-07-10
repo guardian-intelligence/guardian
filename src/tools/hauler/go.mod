@@ -14,7 +14,7 @@ go 1.26.4
 // commit d912cfa ("digest only regression fix", PR #643): v2.0.1 silently
 // drops digest-only refs from index.json on `store load`, which breaks every
 // entry projected from images.lock.
-replace hauler.dev/go/hauler/v2 => github.com/hauler-dev/hauler/v2 v2.0.2-0.20260626135551-d912cfa85f2d
+replace hauler.dev/go/hauler/v2 => github.com/hauler-dev/hauler/v2 v2.0.2-0.20260710175309-4195c4695ea7
 
 // Mirror of hauler's own replace directive. Replace directives do not
 // propagate from dependency modules, and hauler's embedded `store serve
