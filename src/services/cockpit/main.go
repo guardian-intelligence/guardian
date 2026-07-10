@@ -1,5 +1,5 @@
 // cockpit — the telemetry pipeline behind the live CPU/memory widget on the
-// guardianintelligence.org homepage. One binary, three modes:
+// guardianintelligence.org homepage. One binary, four modes:
 //
 //	sampler:   reads host /proc/stat and /proc/meminfo at 10 Hz and serves
 //	           the raw tick stream (SamplerService) to the hub. Stateless.
@@ -11,6 +11,9 @@
 //	           on.
 //	synthetic: a sampler that emits deterministic fake ticks (seeded) — the
 //	           CI test substrate and the frontend design-time stub.
+//	rollup:    subscribes to a hub like any client and persists 1 s
+//	           min/max/avg rows into Postgres — the Electric-served warm
+//	           tier — pruned to the stream's horizon.
 //
 // Wire-format rationale lives in src/proto/guardian/cockpit/v1/cockpit.proto.
 package main
@@ -40,7 +43,7 @@ func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: cockpit <sampler|hub|synthetic> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: cockpit <sampler|hub|synthetic|rollup> [flags]")
 		os.Exit(2)
 	}
 	var err error
@@ -51,8 +54,10 @@ func main() {
 		err = runHub(os.Args[2:])
 	case "synthetic":
 		err = runSynthetic(os.Args[2:])
+	case "rollup":
+		err = runRollup(os.Args[2:])
 	default:
-		fmt.Fprintf(os.Stderr, "unknown mode %q; want sampler, hub, or synthetic\n", os.Args[1])
+		fmt.Fprintf(os.Stderr, "unknown mode %q; want sampler, hub, synthetic, or rollup\n", os.Args[1])
 		os.Exit(2)
 	}
 	if err != nil {
