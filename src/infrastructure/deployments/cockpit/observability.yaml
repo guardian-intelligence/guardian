@@ -42,6 +42,16 @@ spec:
             guardian.dev/product: cockpit
           annotations:
             summary: A cockpit-hub replica is unscrapeable; the homepage telemetry stream is degraded.
+        # Every rule here needs the scrape to exist; a lost VMServiceScrape
+        # would otherwise blind them all silently (the analytics pattern).
+        - alert: CockpitScrapeAbsent
+          expr: absent(up{namespace="guardian-cockpit",job="cockpit-hub"})
+          for: 10m
+          labels:
+            severity: warning
+            guardian.dev/product: cockpit
+          annotations:
+            summary: No cockpit-hub scrape targets exist; cockpit alerting is blind.
         # Each hub replica should hold three live sampler streams — one per
         # node. min() over replicas: any hub missing a node's ticks serves
         # that node frozen on screen to every viewer it has.

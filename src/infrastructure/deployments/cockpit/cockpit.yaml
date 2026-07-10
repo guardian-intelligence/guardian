@@ -243,9 +243,11 @@ spec:
 # lives on the company-site Ingress and applies server-wide. Clients use
 # base URL https://guardianintelligence.org/api/cockpit — the rewrite hands
 # the Connect route (/guardian.cockpit.v1.CockpitStreamService/Subscribe) to
-# the hub. Cloudflare bypasses cache for /api/ (bypass_api_cache), so the
-# stream is never edge-buffered; proxy-buffering off keeps nginx from
-# holding frames back, which would defeat a 10 Hz stream entirely.
+# the hub. The regex admits only the Connect service mount: the hub's
+# /metrics and /healthz stay in-cluster, as main.go promises. Cloudflare
+# bypasses cache for /api/ (bypass_api_cache), so the stream is never
+# edge-buffered; proxy-buffering off keeps nginx from holding frames back,
+# which would defeat a 10 Hz stream entirely.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -256,7 +258,7 @@ metadata:
     app.kubernetes.io/part-of: guardian
     guardian.dev/product: cockpit
   annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/rewrite-target: /$1
     nginx.ingress.kubernetes.io/use-regex: "true"
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
 spec:
@@ -265,7 +267,7 @@ spec:
     - host: guardianintelligence.org
       http:
         paths:
-          - path: /api/cockpit(/|$)(.*)
+          - path: /api/cockpit/(guardian\.cockpit\.v1\.CockpitStreamService/.*)
             pathType: ImplementationSpecific
             backend:
               service:

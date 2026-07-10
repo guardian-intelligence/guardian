@@ -715,10 +715,12 @@ spec:
   wait: false
   timeout: 5m
   healthChecks:
-    - apiVersion: apps/v1
-      kind: StatefulSet
-      name: cockpit-sampler
-      namespace: guardian-cockpit
+    # The hub only: the sampler StatefulSet deliberately leaves its pod
+    # Pending while a node is down (required anti-affinity), so gating on it
+    # would flip this Kustomization red for every drain and Talos upgrade.
+    # Sampler coverage is owned by CockpitSamplerStreamMissing in
+    # observability.yaml, which watches the thing that matters — live tick
+    # streams — not pod phase.
     - apiVersion: apps/v1
       kind: Deployment
       name: cockpit-hub

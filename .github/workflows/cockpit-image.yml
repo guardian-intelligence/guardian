@@ -91,12 +91,16 @@ jobs:
           IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/cockpit-image.yml@refs/heads/main
           ISSUER: https://token.actions.githubusercontent.com
         run: |
-          pinned="$(grep -o 'ghcr.io/guardian-intelligence/cockpit@sha256:[a-f0-9]\{64\}' \
-            src/infrastructure/deployments/cockpit/cockpit.yaml | cut -d@ -f2)"
-          echo "verifying provenance of $pinned"
-          cosign verify --certificate-identity "$IDENTITY" \
-            --certificate-oidc-issuer "$ISSUER" \
-            "ghcr.io/guardian-intelligence/cockpit@$pinned" > /dev/null
+          # The manifest pins the digest once per workload (sampler + hub),
+          # so verify each distinct digest.
+          grep -o 'ghcr.io/guardian-intelligence/cockpit@sha256:[a-f0-9]\{64\}' \
+            src/infrastructure/deployments/cockpit/cockpit.yaml | cut -d@ -f2 | sort -u |
+          while read -r pinned; do
+            echo "verifying provenance of $pinned"
+            cosign verify --certificate-identity "$IDENTITY" \
+              --certificate-oidc-issuer "$ISSUER" \
+              "ghcr.io/guardian-intelligence/cockpit@$pinned" > /dev/null
+          done
 
       - uses: bazelbuild/setup-bazelisk@b39c379c82683a5f25d34f0d062761f62693e0b2 # v3.0.0
         if: steps.classify.outputs.build == 'true' || steps.classify.outputs.proto == 'true'

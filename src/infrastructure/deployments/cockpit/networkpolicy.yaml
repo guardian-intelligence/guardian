@@ -1,6 +1,7 @@
-# Sampler pods: admit only the hub's tick-stream dials and the monitoring
-# scraper's probe port. The sampler dials nothing — no egress rules exist
-# for it to need.
+# Sampler pods: admit only the hub's tick-stream dials (kubelet probes
+# bypass CNP). The sampler dials nothing and exposes no /metrics, so there
+# is no scraper rule and no egress section — egress stays Cilium-default
+# rather than inventing a deny-all rule with no house precedent.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
