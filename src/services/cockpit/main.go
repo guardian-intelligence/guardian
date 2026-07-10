@@ -36,6 +36,12 @@ import (
 
 	"log/slog"
 
+	// The @ubuntu_noble_base image ships no ca-certificates bundle, so the
+	// system cert pool is empty and every public-TLS dial (the events
+	// mode's GitHub API polls) fails x509 verification. This blank import
+	// embeds the Go team's Mozilla root bundle, used only when the system
+	// pool is empty — the alert-relay precedent.
+	_ "golang.org/x/crypto/x509roots/fallback"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 
