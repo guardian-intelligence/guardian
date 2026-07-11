@@ -49,6 +49,12 @@ func TestDRBDAlertsMatchFaultDomainsAndPreserveSustainedFailures(t *testing.T) {
 		seen[alert] = true
 		byAlert[alert] = rule
 	}
+	for alert, rule := range byAlert {
+		severity := nestedValue(t, rule, "labels", "severity")
+		if severity != "critical" && severity != "warning" {
+			t.Fatalf("DRBD alert %q uses Alerta-incompatible severity %q", alert, severity)
+		}
+	}
 
 	connection := byAlert["drbdConnectionNotConnected"]
 	assertNestedString(t, connection, "2m", "for")
