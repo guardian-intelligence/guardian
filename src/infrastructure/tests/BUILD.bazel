@@ -16,6 +16,7 @@ go_test(
         "images_lock_test.go",
         "k6_script_conformance_test.go",
         "keycloak_admin_guard_test.go",
+        "keycloak_device_client_test.go",
         "kube_pod_not_ready_test.go",
         "log_redaction_test.go",
         "multus_resources_test.go",
@@ -27,6 +28,7 @@ go_test(
         "vmselect_resources_test.go",
     ],
     data = [
+        "//:.aspect/tasks/infra.axl",
         "//:MODULE.bazel",
         "//docs:openbao-design.md",
         "//src/infrastructure/analytics:events_table_sql",
