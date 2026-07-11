@@ -231,19 +231,25 @@ spec:
           # phase=processing is time-to-first-byte as seen through the full
           # public path. Normal edge TTFB here is ~100ms; the 2026-07-07
           # stale-ingress incident sat at multi-second TTFB for hours with
-          # no watcher. 1s p95 over 15m is a deliberately loose first
-          # threshold — tighten after a week of live data.
+          # no watcher. Transient edge stalls can cluster just above 1s, so
+          # 1.5s p95 for 15m preserves a large gap from the healthy baseline.
+          # Aggregate by stage to retain any-route coverage without sending
+          # one notification for every affected probe target.
           expr: >-
-            quantile_over_time(0.95,
-              probe_http_duration_seconds{probe_class="edge",phase="processing"}[15m]) > 1
+            max by (probe_namespace, guardian_surface) (
+              quantile_over_time(0.95,
+                probe_http_duration_seconds{probe_class="edge",phase="processing"}[15m])
+            ) > 1.5
           for: 15m
           labels:
             severity: warning
             guardian_component: synthetic-probes
+            exported_instance: '{{ $labels.probe_namespace }}/edge-ttfb'
           annotations:
-            summary: 'edge TTFB p95 above 1s: {{ $labels.instance }}'
+            summary: 'edge TTFB p95 above 1.5s in {{ $labels.probe_namespace }}'
             description: >-
-              Time-to-first-byte through the public edge has been above 1s
-              (p95, 15m) for {{ $labels.instance }}. Check probe phase
+              At least one route through the public edge has had
+              time-to-first-byte above 1.5s (p95, 15m) in
+              {{ $labels.probe_namespace }}. Check the per-route probe phase
               breakdown (resolve/connect/tls/processing) to localize, then
               origin ingress logs for upstream retries.
