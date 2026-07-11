@@ -56,11 +56,11 @@
     "binaries": [
       {
         "kind": "archive",
-        "url": "https://github.com/ClickHouse/ClickHouse/releases/download/v26.3.15.4-lts/clickhouse-common-static-26.3.15.4-amd64.tgz",
-        "sha256": "ac4a6158e0be60c1a9394e3ca5822957d603e26ef94731ca586fc50177d4182c",
+        "url": "https://github.com/ClickHouse/ClickHouse/releases/download/v26.3.16.16-lts/clickhouse-common-static-26.3.16.16-amd64.tgz",
+        "sha256": "178a3bebfc76ba3eeaf2e37c57fbb2abb9baf8e22fca21c55b83445e9cfcedda",
         "os": "linux",
         "cpu": "x86_64",
-        "file": "clickhouse-common-static-26.3.15.4/usr/bin/clickhouse"
+        "file": "clickhouse-common-static-26.3.16.16/usr/bin/clickhouse"
       }
     ]
   },
