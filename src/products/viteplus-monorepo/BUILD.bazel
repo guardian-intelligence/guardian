@@ -89,7 +89,7 @@ filegroup(
 genrule(
     name = "workspace_install",
     srcs = [
-        ":.aspect_rules_js/node_modules/@voidzero-dev+vite-plus-linux-x64-gnu@0.1.16/dir",
+        ":.aspect_rules_js/node_modules/@voidzero-dev+vite-plus-linux-x64-gnu@0.1.24/dir",
         ":workspace_install_inputs",
         ":vp_node",
         ":node_modules/vite-plus",
@@ -129,7 +129,7 @@ printf 'viteplus install ok\\n' > "$$execroot/$@"
 genrule(
     name = "workspace_lint",
     srcs = [
-        ":.aspect_rules_js/node_modules/@voidzero-dev+vite-plus-linux-x64-gnu@0.1.16/dir",
+        ":.aspect_rules_js/node_modules/@voidzero-dev+vite-plus-linux-x64-gnu@0.1.24/dir",
         ":workspace_sources",
         ":workspace_install",
         ":vp_node",
@@ -171,7 +171,7 @@ printf 'viteplus lint ok\\n' > "$$execroot/$@"
 genrule(
     name = "workspace_build",
     srcs = [
-        ":.aspect_rules_js/node_modules/@voidzero-dev+vite-plus-linux-x64-gnu@0.1.16/dir",
+        ":.aspect_rules_js/node_modules/@voidzero-dev+vite-plus-linux-x64-gnu@0.1.24/dir",
         ":workspace_sources",
         ":workspace_install",
         ":workspace_lint",
