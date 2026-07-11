@@ -3,8 +3,12 @@ locals {
 }
 
 data "cloudflare_zone" "guardianintelligence_org" {
-  name       = local.cloudflare_zone_name
-  account_id = var.cloudflare_account_id
+  filter = {
+    name = local.cloudflare_zone_name
+    account = {
+      id = var.cloudflare_account_id
+    }
+  }
 }
 
 # Zone-level Authenticated Origin Pulls: the edge presents Cloudflare's
@@ -13,7 +17,7 @@ data "cloudflare_zone" "guardianintelligence_org" {
 # ingress-nginx verifies the certificate and refuses direct-to-origin
 # traffic. Only after that verification is CF-Connecting-IP trustworthy
 # enough to map into x-guardian-client-ip.
-resource "cloudflare_authenticated_origin_pulls" "guardianintelligence_org" {
+resource "cloudflare_authenticated_origin_pulls_settings" "guardianintelligence_org" {
   zone_id = data.cloudflare_zone.guardianintelligence_org.id
   enabled = true
 }
@@ -38,35 +42,36 @@ resource "cloudflare_ruleset" "cache_policy" {
   kind    = "zone"
   phase   = "http_request_cache_settings"
 
-  rules {
-    ref         = "bypass_api_cache"
-    description = "Never edge-cache /api/ (event beacons, RPCs)"
-    expression  = "(starts_with(http.request.uri.path, \"/api/\"))"
-    action      = "set_cache_settings"
-    enabled     = true
+  rules = [
+    {
+      ref         = "bypass_api_cache"
+      description = "Never edge-cache /api/ (event beacons, RPCs)"
+      expression  = "(starts_with(http.request.uri.path, \"/api/\"))"
+      action      = "set_cache_settings"
+      enabled     = true
 
-    action_parameters {
-      cache = false
-    }
-  }
-
-  rules {
-    ref         = "electric_shape_cache"
-    description = "Electric shape API: edge-cache per origin Cache-Control (request collapsing for cockpit reads)"
-    expression  = "(http.host in {\"guardianintelligence.org\" \"beta.guardianintelligence.org\" \"gamma.guardianintelligence.org\"}) and starts_with(http.request.uri.path, \"/electric/v1/shape\")"
-    action      = "set_cache_settings"
-    enabled     = true
-
-    action_parameters {
-      cache = true
-
-      edge_ttl {
-        mode = "respect_origin"
+      action_parameters = {
+        cache = false
       }
+    },
+    {
+      ref         = "electric_shape_cache"
+      description = "Electric shape API: edge-cache per origin Cache-Control (request collapsing for cockpit reads)"
+      expression  = "(http.host in {\"guardianintelligence.org\" \"beta.guardianintelligence.org\" \"gamma.guardianintelligence.org\"}) and starts_with(http.request.uri.path, \"/electric/v1/shape\")"
+      action      = "set_cache_settings"
+      enabled     = true
 
-      browser_ttl {
-        mode = "respect_origin"
+      action_parameters = {
+        cache = true
+
+        edge_ttl = {
+          mode = "respect_origin"
+        }
+
+        browser_ttl = {
+          mode = "respect_origin"
+        }
       }
-    }
-  }
+    },
+  ]
 }

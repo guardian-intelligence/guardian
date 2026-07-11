@@ -1,6 +1,6 @@
 output "authenticated_origin_pulls_enabled" {
   description = "Whether zone-level Authenticated Origin Pulls is enabled; origin-side enforcement is configured in ingress-nginx."
-  value       = cloudflare_authenticated_origin_pulls.guardianintelligence_org.enabled
+  value       = cloudflare_authenticated_origin_pulls_settings.guardianintelligence_org.enabled
 }
 
 output "bot_fight_mode" {

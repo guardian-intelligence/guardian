@@ -34,8 +34,12 @@ locals {
 }
 
 data "cloudflare_zone" "guardianintelligence_org" {
-  name       = local.cloudflare_zone_name
-  account_id = var.cloudflare_account_id
+  filter = {
+    name = local.cloudflare_zone_name
+    account = {
+      id = var.cloudflare_account_id
+    }
+  }
 }
 
 resource "cloudflare_load_balancer_monitor" "guardian_mgmt_ingress" {
@@ -53,9 +57,8 @@ resource "cloudflare_load_balancer_monitor" "guardian_mgmt_ingress" {
   consecutive_up   = 1
   probe_zone       = local.cloudflare_zone_name
 
-  header {
-    header = "Host"
-    values = [
+  header = {
+    Host = [
       "dashboard.guardianintelligence.org",
     ]
   }
@@ -70,18 +73,18 @@ resource "cloudflare_load_balancer_pool" "guardian_mgmt_ash" {
   monitor         = cloudflare_load_balancer_monitor.guardian_mgmt_ingress.id
   check_regions   = var.cloudflare_lb_check_regions
 
-  dynamic "origins" {
-    for_each = toset(local.public_ingress_origin_names)
-
-    content {
-      name    = origins.value
-      address = local.public_ingress_origins[origins.value].public_ipv4
+  # The API returns pool origins sorted by name and origins is an ordered
+  # list, so the config must emit the same order or every plan is a reorder.
+  origins = [
+    for name in sort(local.public_ingress_origin_names) : {
+      name    = name
+      address = local.public_ingress_origins[name].public_ipv4
       enabled = true
       weight  = 1
     }
-  }
+  ]
 
-  origin_steering {
+  origin_steering = {
     policy = "random"
   }
 }
@@ -89,18 +92,18 @@ resource "cloudflare_load_balancer_pool" "guardian_mgmt_ash" {
 resource "cloudflare_load_balancer" "guardian_mgmt_public" {
   for_each = toset(local.public_edge_hostnames)
 
-  zone_id          = data.cloudflare_zone.guardianintelligence_org.id
-  name             = each.value
-  description      = "guardian-mgmt ASH public edge"
-  enabled          = true
-  fallback_pool_id = cloudflare_load_balancer_pool.guardian_mgmt_ash.id
-  default_pool_ids = [
+  zone_id       = data.cloudflare_zone.guardianintelligence_org.id
+  name          = each.value
+  description   = "guardian-mgmt ASH public edge"
+  enabled       = true
+  fallback_pool = cloudflare_load_balancer_pool.guardian_mgmt_ash.id
+  default_pools = [
     cloudflare_load_balancer_pool.guardian_mgmt_ash.id,
   ]
   proxied         = true
   steering_policy = "off"
 
-  adaptive_routing {
+  adaptive_routing = {
     failover_across_pools = false
   }
 }

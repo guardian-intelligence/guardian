@@ -104,19 +104,6 @@
       automerge: false,
     },
 
-    // The dns and edge-policy roots deliberately stay on the v4 Cloudflare
-    // provider (only the tokens root rides v5); hold both until they
-    // migrate.
-    {
-      matchManagers: ["terraform"],
-      matchDepNames: ["cloudflare"],
-      matchFileNames: [
-        "src/infrastructure/bootstrap/guardian-mgmt-dns/**",
-        "src/infrastructure/bootstrap/guardian-mgmt-edge-policy/**",
-      ],
-      allowedVersions: "/^4\\./",
-    },
-
     // Substrate doorbells (the custom managers below): the PR is the upgrade
     // runbook's starting gun and merging it is the runbook's last step, so
     // Git never claims a version the cluster does not run. No cooldown —
