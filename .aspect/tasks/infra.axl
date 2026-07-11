@@ -1913,7 +1913,19 @@ def _auth_platform_agent(ctx, kubectl, target):
         return rc
 
     ctx.std.io.stderr.write("selected platform-agent@guardian-mgmt in " + target + "; verifying (first login opens a browser)\n")
-    return checked_spawn(ctx, kubectl, ["--kubeconfig", target, "auth", "whoami"], label = "kubectl auth whoami")
+    rc = checked_spawn(ctx, kubectl, ["--kubeconfig", target, "auth", "whoami"], label = "kubectl auth whoami")
+    if rc != 0:
+        return rc
+
+    cleanup_steps = [
+        (["config", "unset", "users.admin@guardian-mgmt"], "kubeconfig remove breakglass user"),
+        (["config", "unset", "contexts.admin@guardian-mgmt"], "kubeconfig remove breakglass context"),
+    ]
+    for step_args, label in cleanup_steps:
+        rc = checked_spawn(ctx, kubectl, ["--kubeconfig", target] + step_args, label = label)
+        if rc != 0:
+            return rc
+    return 0
 
 def _auth_platform_admin(ctx, kubectl, target):
     reason = ctx.args.reason.strip()
@@ -2131,14 +2143,14 @@ auth = task(
     implementation = _auth_impl,
     name = "auth",
     group = ["infra"],
-    summary = "Authenticate kubectl to guardian-mgmt. --platform-agent installs and selects the OIDC daily-driver context (pinned kubelogin, committed cluster CA, 30-day offline token). --platform-admin is breakglass: escalated x509 system:masters minted from the Talos custody bundle, requires --reason, and every use is audit-logged (ntfy page + in-cluster ledger + local custody log).",
+    summary = "Authenticate kubectl to guardian-mgmt. --platform-agent installs and selects the OIDC daily-driver context (pinned kubelogin, committed cluster CA, 30-day offline token) and removes breakglass credentials. --platform-admin is breakglass: escalated x509 system:masters minted from the Talos custody bundle, requires --reason, and every use is audit-logged (ntfy page + in-cluster ledger + local custody log).",
     args = {
         "audit_ntfy_url": args.string(default = BREAKGLASS_NTFY_URL, description = "ntfy URL paged with the breakglass reason."),
         "endpoints": args.string(default = PUBLIC_TALOS_KUBECONFIG_ENDPOINTS, description = "Talos API endpoints used for the breakglass kubeconfig mint."),
         "install_path": args.string(default = "", description = "Kubeconfig file to write. Defaults to ~/.kube/config."),
         "nodes": args.string(default = PUBLIC_TALOS_KUBECONFIG_NODE, description = "Talos node used for the breakglass kubeconfig mint."),
         "platform_admin": args.boolean(default = False, description = "Breakglass: escalated x509 system:masters credentials from the Talos custody bundle (secrets.yaml + talm.key). Audit-logged; requires --reason."),
-        "platform_agent": args.boolean(default = False, description = "Daily driver: OIDC via the platform Keycloak with an offline token (30-day idle window, resets on use, revocable in Keycloak)."),
+        "platform_agent": args.boolean(default = False, description = "Daily driver: OIDC via the platform Keycloak with an offline token (30-day idle window, resets on use, revocable in Keycloak); removes any breakglass context and credentials after OIDC verification."),
         "reason": args.string(default = "", description = "Why breakglass escalation is needed. Required with --platform-admin; paged to the operations topic and appended to the breakglass ledgers."),
         "root": args.string(default = GUARDIAN_MGMT_TALM_ROOT, description = "Talm root containing gitignored secrets.yaml and talosconfig."),
         "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
