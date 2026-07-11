@@ -47,7 +47,7 @@ actually exercise the artifact.
 ## Due diligence per PR
 
 1. CI gates (automatic): the universal Bazel gate — `test //...` carries
-   the manifest/version-skew conformance suite, the actions-allowlist and
+   the source-policy/version-skew tests, the actions-allowlist and
    renovate-config checks, and fresh-download verification of every
    lockfile entry on both platforms (`//src/tools:multitool_lock_test`) —
    plus the secret scan and, on tool-pin diffs, `//src/tools:pins`
@@ -63,8 +63,8 @@ TODO: replace fetch/unpack verification with a real binary vetting
 pipeline — upstream signature/attestation verification per tool (most of
 `src/tools` ships sigstore signatures or signed checksums) and hermetic
 behavioral exercise where the tool's real job runs offline (restic repo
-roundtrip, cosign offline bundle verify, k6 local run). talm and gitleaks
-already get real exercise (render suite, secret scan on every PR).
+roundtrip, cosign offline bundle verify, k6 local run). Gitleaks already gets
+real exercise through the secret scan on every PR.
 
 ## The Actions allowlist (lockstep or startup_failure)
 
