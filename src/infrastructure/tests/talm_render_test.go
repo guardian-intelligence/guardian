@@ -50,6 +50,7 @@ func TestTalmControlplaneRender(t *testing.T) {
 		"cluster-cidr: 10.244.0.0/16",
 		"advertisedSubnets:\n      - 10.8.0.0/24",
 		"listen-metrics-urls: http://127.0.0.1:2381",
+		"metrics: extensive",
 		"kind: Layer2VIPConfig",
 		"name: \"10.8.0.250\"",
 		"link: enp1s0f0.2140",

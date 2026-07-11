@@ -184,6 +184,9 @@ etcd:
   # host-networked processes; vmagent reaches it through the authenticated
   # proxy rather than directly.
   metricsListenURL: "http://127.0.0.1:2381"
+  # Cozystack's stock gRPC latency rule consumes the server-side histogram,
+  # which etcd emits only at the extensive metrics level.
+  metricsLevel: extensive
   # Max etcd backend DB size before etcd raises a NOSPACE alarm and
   # rejects writes. The default raises etcd's own 2GiB ceiling to 8GiB
   # (etcd's documented upper bound) so a LINSTOR-heavy cluster - many

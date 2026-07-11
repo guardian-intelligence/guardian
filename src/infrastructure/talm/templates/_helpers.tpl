@@ -307,6 +307,7 @@ cluster:
          authenticates vmagent before exposing the scrape. */}}
     extraArgs:
       listen-metrics-urls: {{ required "values.yaml: `etcd.metricsListenURL` must match the monitoring-agents etcd proxy upstream" (index (.Values.etcd | default dict) "metricsListenURL") | quote }}
+      metrics: {{ required "values.yaml: `etcd.metricsLevel` must expose the histogram consumed by Cozystack's etcd gRPC latency alert" (index (.Values.etcd | default dict) "metricsLevel") | quote }}
     {{- /* etcd backend quota, tunable via values. Raises etcd's 2GiB
            default backend ceiling so a LINSTOR-heavy control plane -
            thousands of DRBD-resource CRDs in aggregate - does not trip

@@ -133,6 +133,7 @@ cluster:
   etcd:
     extraArgs:
       listen-metrics-urls: "http://127.0.0.1:2381"
+      metrics: extensive
       quota-backend-bytes: "8589934592"
     advertisedSubnets:
       - 10.8.0.0/24
