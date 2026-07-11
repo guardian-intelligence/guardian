@@ -11,6 +11,7 @@ configMapGenerator:
       - registry-prefixes.txt
       - images.declared.lock=../../bootstrap/bundle/images.declared.lock
 resources:
+  - cozy-kubevirt-cdi-alerts.yaml
   - cozy-linstor-drbd-alerts.yaml
   - cozy-multus-cpu-resources.yaml
   - cozystack-app-namespace-admission.yaml
