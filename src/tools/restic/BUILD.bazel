@@ -1,16 +1,12 @@
 genrule(
     name = "restic",
-    srcs = [
-        "@restic_darwin_arm64_bz2//file",
-        "@restic_linux_amd64_bz2//file",
-    ],
+    srcs = select({
+        "@platforms//os:macos": ["@restic_darwin_arm64_bz2//file"],
+        "//conditions:default": ["@restic_linux_amd64_bz2//file"],
+    }),
     outs = ["restic_bin"],
     cmd = """
-case "$$(uname -s)-$$(uname -m)" in
-  Darwin-arm64) src="$(location @restic_darwin_arm64_bz2//file)" ;;
-  *) src="$(location @restic_linux_amd64_bz2//file)" ;;
-esac
-bunzip2 -c "$$src" > "$@" && chmod +x "$@"
+bunzip2 -c "$(SRCS)" > "$@" && chmod +x "$@"
 """,
     executable = True,
     visibility = ["//visibility:public"],

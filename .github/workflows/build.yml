@@ -13,10 +13,15 @@ defaults:
   run:
     shell: bash
 
+concurrency:
+  group: build-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # The full cold graph — no remote cache until Postflight supplies one.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -36,12 +41,15 @@ jobs:
         run: .github/scripts/check-actions-allowlist.sh "$(pwd)"
 
       - name: Build
-        run: bazelisk build --embed_label="$GITHUB_SHA" //:build
+        run: bazelisk build //...
 
-      # Tool pins are fetched lazily and //:build does not depend on them, so
-      # only this proves a bumped archive still fetches, unpacks, and carries
-      # the declared binary paths. Scoped to diffs that can move a pin — the
-      # full set is multi-GB and most PRs touch none of it.
+      - name: Test
+        run: bazelisk test //...
+
+      # //src/tools:pins is tagged manual (the archive set is multi-GB and
+      # fetched lazily), so only this proves a bumped archive still fetches,
+      # unpacks, and carries the declared binary paths. Scoped to diffs that
+      # can move a pin — most PRs touch none of it.
       - name: Verify tool pins fetch and unpack
         if: github.event_name == 'pull_request'
         run: |

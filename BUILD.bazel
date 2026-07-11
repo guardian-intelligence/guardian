@@ -5,29 +5,3 @@ exports_files([
     "AGENTS.md",
     "TRIBAL_KNOWLEDGE.md",
 ])
-
-filegroup(
-    name = "build",
-    srcs = [
-        "//src/infrastructure/base/apps:manifests",
-        "//src/infrastructure/base/cozystack:manifests",
-        "//src/infrastructure/base/flux:manifests",
-        "//src/infrastructure/base/networking:manifests",
-        "//src/infrastructure/base/storage:manifests",
-        "//src/infrastructure/deployments/guardian/system:manifests",
-        "//src/infrastructure/cmd/cozystack_db_load:cozystack_db_load",
-        "//src/infrastructure/cmd/cozystack_http_load:cozystack_http_load",
-        "//src/infrastructure/cmd/cozystack_node_outage_drill:cozystack_node_outage_drill",
-        "//src/infrastructure/cmd/bundle:bundle",
-        "//src/infrastructure/cmd/converged:converged",
-        "//src/infrastructure/cmd/custody:custody",
-        "//src/infrastructure/cmd/cozystack_observability_drill:cozystack_observability_drill",
-        "//src/infrastructure/cmd/cozystack_openbao_observability_drill:cozystack_openbao_observability_drill",
-        "//src/infrastructure/cmd/cozystack_openbao_drill:cozystack_openbao_drill",
-        "//src/infrastructure/cmd/openbao_secret_import:openbao_secret_import",
-        "//src/infrastructure/cmd/openbao_static_seal_key:openbao_static_seal_key",
-        "//src/infrastructure/load:http_load_scripts",
-        "//src/tools/hauler:hauler",
-    ],
-    visibility = ["//visibility:public"],
-)

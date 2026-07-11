@@ -68,4 +68,7 @@ go_test(
         "@rules_go//go/runfiles",
         "@in_gopkg_yaml_v3//:yaml_v3",
     ],
+    # The suite shells the talm binary across every node/stage render; a cold
+    # two-core CI runner needs more than the 300s medium-size default.
+    size = "large",
 )

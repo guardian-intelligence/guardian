@@ -7,11 +7,15 @@ exports_files(
     visibility = ["//src/infrastructure/tests:__pkg__"],
 )
 
-# Every pinned tool artifact, buildable as one target. Nothing else in CI
-# fetches most of these archives (bazel fetches lazily and //:build does not
-# depend on them), so without this a pin bump with a bad hash, a re-tagged
-# upstream artifact, or a moved binary path merges green and fails at first
-# operator use. Building this target proves fetch + unpack + declared layout
+# Every pinned tool artifact, buildable as one target. Tagged manual to stay
+# out of the `//...` CI wildcard: the archive set is multi-GB and fetched
+# lazily, so CI builds this explicitly only on diffs that can move a pin.
+# (A few tools are real data deps of targets inside `//...` — talm via the
+# conformance suite, k6/doggo via edge_health — and fetch on every run
+# regardless; the tag covers everything reachable only through here.)
+# Without it a pin bump with a bad hash, a re-tagged upstream artifact, or a
+# moved binary path merges green and fails at first operator use. Building
+# this target proves fetch + unpack + declared layout
 # (and compiles hauler from source) — nothing more; it does not execute the
 # binaries or validate behavior. Toolchain resolution fetches the host
 # platform's half of the lockfile (linux in CI); the macOS half is proven by
@@ -28,6 +32,11 @@ filegroup(
     srcs = [
         "//src/tools/hauler",
         "//src/tools/restic",
+        # Both restic archives directly: the genrule's platform select() only
+        # pulls the host's half, so without these the darwin pin would merge
+        # unverified.
+        "@restic_darwin_arm64_bz2//file",
+        "@restic_linux_amd64_bz2//file",
         "@multitool//tools/bao",
         "@multitool//tools/boot-to-talos",
         "@multitool//tools/cilium",
@@ -55,4 +64,5 @@ filegroup(
         "@multitool//tools/velero",
         "@ruby_linux_amd64//:ruby",
     ],
+    tags = ["manual"],
 )

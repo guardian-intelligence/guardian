@@ -14,8 +14,10 @@ filegroup(
     name = "sources",
     srcs = glob([
         "package.json",
+        "perf/**/*",
         "public/**/*",
         "rewrite-cjs-require.mjs",
+        "rewrite-cjs-require.d.mts",
         "observability-plugin.mjs",
         "src/**/*",
         "tsconfig.json",
