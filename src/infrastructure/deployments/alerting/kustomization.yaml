@@ -5,6 +5,7 @@ resources:
   - relay.yaml
   - networkpolicy.yaml
   - observability.yaml
+  - alertmanager-config.yaml
   - audit-alerts.yaml
   - blackbox-exporter.yaml
   - cockpit-events-scrape.yaml

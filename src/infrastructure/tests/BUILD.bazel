@@ -29,6 +29,7 @@ go_test(
         "//src/tools:multitool.lock.json",
         "//docs:openbao-design.md",
         "//src/infrastructure/base:kustomization",
+        "//src/infrastructure/base/admission:manifests",
         "//src/infrastructure/base/app-patches:manifests",
         "//src/infrastructure/base/apps:manifests",
         "//src/infrastructure/base/backup:manifests",

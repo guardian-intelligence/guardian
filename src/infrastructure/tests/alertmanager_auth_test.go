@@ -6,7 +6,7 @@ import (
 )
 
 func TestAlertmanagerUsesHeaderAuthentication(t *testing.T) {
-	configPath := runfilePath("src/infrastructure/base/app-patches/monitoring-alertmanager-config.yaml")
+	configPath := runfilePath("src/infrastructure/deployments/alerting/alertmanager-config.yaml")
 	secret := singleYAMLDoc(t, configPath)
 	assertNestedString(t, secret, "Secret", "kind")
 	assertNestedString(t, secret, "guardian-alertmanager", "metadata", "name")

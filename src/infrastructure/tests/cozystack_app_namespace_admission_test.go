@@ -9,7 +9,7 @@ import "testing"
 // shape so the policy can't silently regress to matching the wrong group,
 // dropping the tenant-* check, or losing its enforcement action.
 func TestCozystackAppNamespaceAdmissionConformance(t *testing.T) {
-	path := runfilePath("src/infrastructure/base/app-patches/cozystack-app-namespace-admission.yaml")
+	path := runfilePath("src/infrastructure/base/admission/cozystack-app-namespace.yaml")
 	raw := readText(t, path)
 	docs := yamlDocs(t, path)
 	policy := findDoc(t, docs, "ValidatingAdmissionPolicy", "guardian-cozystack-app-tenant-namespace")
