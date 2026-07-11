@@ -561,6 +561,9 @@ func TestEnvSetPure(t *testing.T) {
 	if got, err := envSet(nil, "first_key", "v"); err != nil || string(got) != "first_key=v\n" {
 		t.Fatalf("set into empty content must not grow stray blank lines, got %q, %v", got, err)
 	}
+	if got, err := envSet(nil, "GUARDIAN_ETCD_SNAPSHOT_AGE_KEY", "v"); err != nil || string(got) != "GUARDIAN_ETCD_SNAPSHOT_AGE_KEY=v\n" {
+		t.Fatalf("uppercase keys are the custody.env convention and must be accepted, got %q, %v", got, err)
+	}
 }
 
 func TestEnvUnsetPure(t *testing.T) {
@@ -695,7 +698,7 @@ func TestEnvUnsetMissingKeyStillWipes(t *testing.T) {
 func TestEnvEditRejectsBadInputBeforeRestore(t *testing.T) {
 	fake := &fakeRestic{}
 	opts := testOptions(t, fake)
-	for _, key := range []string{"", "Bad-Key", "UPPER", "has space"} {
+	for _, key := range []string{"", "Bad-Key", "has space"} {
 		opts.envKey = key
 		opts.stdin = strings.NewReader("value\n")
 		if err := cmdEnvSet(opts); err == nil {
