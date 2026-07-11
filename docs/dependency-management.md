@@ -1,30 +1,21 @@
 # Dependency management: proposers, tiers, and rollout safety
 
-Status: active as of 2026-07-11. Complements `supply-chain-design.md` (the
-trust model for first-party images) and
-`adrs/0003-validate-rendered-manifests.md` (Git-time invariants). Policy
-lives in `renovate.json5`; this doc is the operating manual.
+See `supply-chain-design.md` for the first-party image trust model,
+`adrs/0003-validate-rendered-manifests.md` for Git-time invariants, and
+`renovate.json5` for executable policy.
 
 ## One proposer per pin
 
-Every pin has exactly one proposer, and both proposers are untrusted — CI
-plus branch protection decide every merge:
+Every pin has exactly one untrusted proposer; CI and branch protection
+decide every merge:
 
-- **Renovate** proposes the source plane: Bazel tool archives
-  (`src/tools/*/*.MODULE.bazel`), `bazel_dep` and `oci.pull` in
-  `MODULE.bazel`, `go.mod`, the pnpm catalog, GitHub Actions digests, tofu
-  provider pins, the bootstrap pivots (`scripts/bootstrap/`), the Talos
-  installer image, the cozy-installer platform pin, the Flux
-  source-controller chart pins and infrastructure HelmRelease image pins
-  (the scoped `flux` manager), and Renovate itself.
-- **Kargo** proposes the stage-manifest trees its Stage pipelines
-  git-push to (`deployments/{company,iam,products}/**` — `ignorePaths`
-  for Renovate, with the helm-values/kustomize managers disabled
-  outright). Never hand-roll or duplicate its promotion PRs.
+- **Renovate** owns source-plane pins configured in `renovate.json5`.
+- **Kargo** owns the stage-manifest trees its Stage pipelines write under
+  `src/infrastructure/deployments/{company,iam,products}/**`. Never
+  hand-roll or duplicate its promotion PRs.
 
-A config error does not fail the scheduled run (Renovate files an issue
-and exits 0), so `//:renovate_config_test` validates `renovate.json5` in
-the universal Bazel gate.
+Renovate configuration errors do not fail scheduled runs, so
+`//:renovate_config_test` validates the config in the universal Bazel gate.
 
 ## Trust tiers
 
@@ -79,9 +70,5 @@ two-step lockstep:
 2. On merge (repo admin): re-apply the setting —
    `gh api -X PUT repos/guardian-intelligence/guardian/actions/permissions/selected-actions --input .github/actions-allowlist.json`
 
-Skipping step 2 kills every workflow that uses the new digest as a
-`startup_failure`: no jobs, no logs, no run for anything to observe.
-`github_owned_allowed` covers `actions/*`, so first-party
-action bumps need no lockstep. A standing read-only drift check between the
-file and the live setting is future work, same pattern as the approved tofu
-drift cron.
+Skipping step 2 causes a GitHub `startup_failure` before any job exists.
+First-party `actions/*` refs are exempt through `github_owned_allowed`.
