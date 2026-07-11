@@ -14,11 +14,13 @@ plus branch protection decide every merge:
   (`src/tools/*/*.MODULE.bazel`), `bazel_dep` and `oci.pull` in
   `MODULE.bazel`, `go.mod`, the pnpm catalog, GitHub Actions digests, tofu
   provider pins, the bootstrap pivots (`scripts/bootstrap/`), the Talos
-  installer image, the cozy-installer platform pin, and Renovate itself.
-- **Kargo** proposes rendered stage paths
-  (`src/infrastructure/deployments/**` — `ignorePaths` for Renovate, with
-  the helm/kustomize/flux managers disabled outright). Never hand-roll or
-  duplicate its promotion PRs.
+  installer image, the cozy-installer platform pin, the Flux
+  source-controller chart pins and infrastructure HelmRelease image pins
+  (the scoped `flux` manager), and Renovate itself.
+- **Kargo** proposes the stage-manifest trees its Stage pipelines
+  git-push to (`deployments/{company,iam,products}/**` — `ignorePaths`
+  for Renovate, with the helm-values/kustomize managers disabled
+  outright). Never hand-roll or duplicate its promotion PRs.
 
 The scheduled proposer pages if its run fails (`renovate.yml`); a config
 error does not fail the run, so `renovate-config.yml` validates
