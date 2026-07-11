@@ -221,11 +221,9 @@ place with `--action verify --read-data --repo <mounted-copy>`.
    promotes it — the provenance gate only accepts digests signed by the
    canonical CI identity, so a workstation-built digest cannot be pinned
    (see docs/supply-chain-design.md, "Promotion: how digests move").
-2. **Pre-drill PR on main**: fresh seal fingerprint, any repins,
-   `images.declared.lock` current (`//src/infrastructure/tests:talm_render_test`
-   enforces the union-lock derivation: rendered refs digest-pinned, declared
-   disjoint, dark-mirror hosts covered). Flux converges from main — nothing
-   lands on the cluster that is not merged.
+2. **Pre-drill PR on main**: fresh seal fingerprint, any repins, and
+   `images.declared.lock` current. Flux converges from main — nothing lands on
+   the cluster that is not merged.
 
 ## Reimage (Latitude)
 

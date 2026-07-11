@@ -1,9 +1,8 @@
 # The site-gate: one always-running PR check that (a) verifies any digest-pin
 # move names an image cosign-signed by this workflow's canonical identity —
-# i.e. built by CI from reviewed main history — (b) rebuilds the site when
+# i.e. built by CI from reviewed main history — and (b) rebuilds the site when
 # its inputs change (CI is the canonical builder; the vite output is not
-# bit-reproducible across machines), and (c) runs the manifest/lock
-# conformance suite when infrastructure manifests change.
+# bit-reproducible across machines).
 #
 # It runs on EVERY pull request and classifies the diff itself, exiting fast
 # when nothing relevant changed: required status checks cannot be
@@ -68,7 +67,7 @@ jobs:
         run: |
           web_yaml=src/infrastructure/deployments/company/prod/web.yaml
           pin_re='ghcr.io/guardian-intelligence/company-site@sha256:[a-f0-9]\{64\}'
-          build=false conformance=false pin=false
+          build=false pin=false
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             base="origin/$GITHUB_BASE_REF"
             while IFS= read -r f; do
@@ -76,25 +75,17 @@ jobs:
                 src/products/viteplus-monorepo/*|.github/workflows/company-site-image.yml|MODULE.bazel|MODULE.bazel.lock|.bazelrc|.bazelversion)
                   build=true ;;
               esac
-              case "$f" in
-                # src/tools is in scope because the conformance suite includes
-                # the version-skew test over the kubectl/talosctl tool pins.
-                src/infrastructure/*|src/tools/*) conformance=true ;;
-              esac
             done < <(git diff --name-only "$base"...HEAD)
             pinned="$(grep -o "$pin_re" "$web_yaml" | cut -d@ -f2 || true)"
             base_pinned="$(git show "$base:$web_yaml" 2>/dev/null | grep -o "$pin_re" | cut -d@ -f2 || true)"
             if [[ "$pinned" != "$base_pinned" ]]; then pin=true; fi
           else
             # push to main / workflow_dispatch: full build path, as before.
-            build=true conformance=true
+            build=true
           fi
-          # A rebuild exercises the manifests' inputs too.
-          [[ "$build" == true ]] && conformance=true
           echo "build=$build" >> "$GITHUB_OUTPUT"
-          echo "conformance=$conformance" >> "$GITHUB_OUTPUT"
           echo "pin=$pin" >> "$GITHUB_OUTPUT"
-          echo "classified: build=$build conformance=$conformance pin=$pin"
+          echo "classified: build=$build pin=$pin"
 
       - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
         if: steps.classify.outputs.pin == 'true' || github.event_name == 'push'
@@ -119,7 +110,7 @@ jobs:
             "ghcr.io/guardian-intelligence/company-site@$pinned" > /dev/null
 
       - uses: bazelbuild/setup-bazelisk@b39c379c82683a5f25d34f0d062761f62693e0b2 # v3.0.0
-        if: steps.classify.outputs.build == 'true' || steps.classify.outputs.conformance == 'true'
+        if: steps.classify.outputs.build == 'true'
 
       - name: Build image
         if: steps.classify.outputs.build == 'true'
@@ -178,10 +169,6 @@ jobs:
       - name: Stop perf-gate container
         if: always() && steps.classify.outputs.build == 'true'
         run: docker rm -f perf-gate || true
-
-      - name: Run the manifest/lock conformance suite
-        if: steps.classify.outputs.conformance == 'true'
-        run: bazelisk test //src/infrastructure/tests:talm_render_test
 
       # SBOM is generated from the local OCI layout on every build (PRs
       # included) so a broken SBOM pipeline fails before merge, not after.

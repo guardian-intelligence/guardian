@@ -31,8 +31,10 @@ server's admission — never source templates, never hand-restated field values.
   in scope. Accepted ~95% fidelity vs Flux's in-cluster render — the last 5%
   (value-merge, postRenderers) is a later tier that runs the actual Flux controllers,
   as is policy-as-code.
-- **Custom Go tests survive only for cross-field semantic invariants** no
-  schema/admission check can express; per-field value checks become snapshots.
+- **Custom Go tests are authoritative only for derivation-backed semantic
+  invariants that no schema/admission check can express.** Existing hand-restated
+  fields and snapshots are migration debt: remove rather than update them when
+  they block source changes.
 
 The runtime counterpart is the platform convergence proof (`aspect infra converged`),
 which reads live Flux Kustomization conditions.

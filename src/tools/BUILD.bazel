@@ -12,9 +12,9 @@ exports_files(
 # Every pinned tool artifact, buildable as one target. Tagged manual to stay
 # out of the `//...` CI wildcard: the archive set is multi-GB and fetched
 # lazily, so CI builds this explicitly only on diffs that can move a pin.
-# (A few tools are real data deps of targets inside `//...` — talm via the
-# conformance suite, k6/doggo via edge_health — and fetch on every run
-# regardless; the tag covers everything reachable only through here.)
+# (A few tools are real data deps of targets inside `//...` — k6/doggo via
+# edge_health — and fetch on every run regardless; the tag covers everything
+# reachable only through here.)
 # Without it a pin bump with a bad hash, a re-tagged upstream artifact, or a
 # moved binary path merges green and fails at first operator use. Building
 # this target proves fetch + unpack + declared layout
@@ -27,8 +27,8 @@ exports_files(
 # TODO: replace with a real binary vetting pipeline — upstream signature or
 # attestation verification per tool, and behavioral exercise of each tool's
 # actual job where it can run hermetically (restic repo roundtrip, cosign
-# offline bundle verify, k6 local run). talm and gitleaks already get real
-# exercise in CI (render suite, secret-scan).
+# offline bundle verify, k6 local run). Gitleaks already gets real exercise
+# through the secret scan.
 filegroup(
     name = "pins",
     srcs = [
