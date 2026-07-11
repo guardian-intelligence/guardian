@@ -1,0 +1,33 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: guardian-vlogs-patcher-update-only
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - operator.victoriametrics.com
+        apiVersions:
+          - "*"
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - vlclusters
+  validations:
+    - expression: >-
+        request.userInfo.username != 'system:serviceaccount:cozy-fluxcd:guardian-vlogs-patcher' ||
+        request.namespace != 'tenant-root' ||
+        object.metadata.name != 'generic' ||
+        oldObject != null
+      message: guardian-vlogs-patcher may update VLCluster tenant-root/generic but must not create it
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: guardian-vlogs-patcher-update-only
+spec:
+  policyName: guardian-vlogs-patcher-update-only
+  validationActions:
+    - Deny

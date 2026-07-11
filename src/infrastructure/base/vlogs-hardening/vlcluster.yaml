@@ -1,0 +1,26 @@
+# Cozystack owns the generated cluster's topology and sizing. Guardian owns only
+# the security boundaries and disk-pressure relief that its API omits.
+apiVersion: operator.victoriametrics.com/v1
+kind: VLCluster
+metadata:
+  name: generic
+  namespace: tenant-root
+  annotations:
+    kustomize.toolkit.fluxcd.io/ssa: Override
+spec:
+  useStrictSecurity: true
+  vlinsert:
+    useStrictSecurity: true
+    disableAutomountServiceAccountToken: true
+    extraArgs:
+      select.disable: "true"
+  vlselect:
+    useStrictSecurity: true
+    disableAutomountServiceAccountToken: true
+    extraArgs:
+      insert.disable: "true"
+  vlstorage:
+    useStrictSecurity: true
+    disableAutomountServiceAccountToken: true
+    extraArgs:
+      retention.maxDiskUsagePercent: "85"
