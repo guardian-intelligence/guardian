@@ -1,0 +1,19 @@
+# The Multus chart fixes both the request and limit at 100m. Its daemon on
+# ash-wind spends over half of its CFS periods throttled even though
+# sustained usage is low, so keep the chart-owned request and give CNI bursts
+# room at the limit. This partial object owns only that one resource leaf.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: cozy-multus
+  namespace: cozy-multus
+  annotations:
+    kustomize.toolkit.fluxcd.io/ssa: Override
+spec:
+  template:
+    spec:
+      containers:
+        - name: kube-multus
+          resources:
+            limits:
+              cpu: 500m
