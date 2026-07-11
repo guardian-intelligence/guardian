@@ -161,8 +161,8 @@ spec:
         name: guardian-source
   dependsOn:
     - name: guardian-mgmt-base
-  # These patches target Cozystack-generated HelmReleases. They must retry until
-  # the app API has created the target and should never prune generated objects.
+  # These patches target Cozystack-generated application objects. They must
+  # retry until the app API has created each target and should never prune them.
   prune: false
   wait: false
   timeout: 5m
