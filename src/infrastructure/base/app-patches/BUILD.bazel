@@ -1,6 +1,7 @@
 filegroup(
     name = "manifests",
     srcs = [
+        "cozy-kubevirt-cdi-alerts.yaml",
         "cozy-linstor-drbd-alerts.yaml",
         "cozy-multus-cpu-resources.yaml",
         "cozystack-app-namespace-admission.yaml",

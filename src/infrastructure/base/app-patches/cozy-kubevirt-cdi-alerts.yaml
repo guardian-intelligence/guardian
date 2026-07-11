@@ -1,0 +1,102 @@
+# PrometheusRule groups merge by name, while each group's rules list is atomic
+# under server-side apply. Keep the complete upstream alert group so correcting
+# one delivery label cannot prune adjacent CDI failure signals.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: prometheus-cdi-rules
+  namespace: cozy-kubevirt-cdi
+  annotations:
+    kustomize.toolkit.fluxcd.io/ssa: Override
+spec:
+  groups:
+    - name: alerts.rules
+      rules:
+        - alert: CDIDataImportCronOutdated
+          annotations:
+            runbook_url: https://kubevirt.io/monitoring/runbooks/CDIDataImportCronOutdated
+            summary: DataImportCron (recurring polling of VM templates disk image sources, also known as golden images) PVCs are not being updated on the defined schedule
+          expr: sum by(namespace,cron_name) (kubevirt_cdi_dataimportcron_outdated{pending="false"}) > 0
+          for: 15m
+          labels:
+            kubernetes_operator_component: containerized-data-importer
+            kubernetes_operator_part_of: kubevirt
+            operator_health_impact: none
+            severity: warning
+        - alert: CDIDataVolumeUnusualRestartCount
+          annotations:
+            runbook_url: https://kubevirt.io/monitoring/runbooks/CDIDataVolumeUnusualRestartCount
+            summary: Some CDI population workloads have an unusual restart count, meaning they are probably failing and need to be investigated
+          expr: kubevirt_cdi_import_pods_high_restart > 0 or kubevirt_cdi_upload_pods_high_restart > 0 or kubevirt_cdi_clone_pods_high_restart > 0
+          for: 5m
+          labels:
+            kubernetes_operator_component: containerized-data-importer
+            kubernetes_operator_part_of: kubevirt
+            operator_health_impact: none
+            severity: warning
+        - alert: CDIDefaultStorageClassDegraded
+          annotations:
+            runbook_url: https://kubevirt.io/monitoring/runbooks/CDIDefaultStorageClassDegraded
+            summary: Default storage class has no smart clone or ReadWriteMany
+          expr: "sum(kubevirt_cdi_storageprofile_info{default=\"true\",degraded=\"false\"} or on() vector(0)) +\n\t\t\t\t\t\t\t\t sum(kubevirt_cdi_storageprofile_info{virtdefault=\"true\",degraded=\"false\"} or on() vector(0)) +\n\t\t\t\t\t\t\t\t on () (0*(sum(kubevirt_cdi_storageprofile_info{default=\"true\"}) or sum(kubevirt_cdi_storageprofile_info{virtdefault=\"true\"}))) == 0"
+          for: 5m
+          labels:
+            kubernetes_operator_component: containerized-data-importer
+            kubernetes_operator_part_of: kubevirt
+            operator_health_impact: none
+            severity: warning
+        - alert: CDIMultipleDefaultVirtStorageClasses
+          annotations:
+            runbook_url: https://kubevirt.io/monitoring/runbooks/CDIMultipleDefaultVirtStorageClasses
+            summary: More than one default virtualization StorageClass detected
+          expr: sum(kubevirt_cdi_storageprofile_info{virtdefault="true"} or on() vector(0)) > 1
+          for: 5m
+          labels:
+            kubernetes_operator_component: containerized-data-importer
+            kubernetes_operator_part_of: kubevirt
+            operator_health_impact: none
+            severity: warning
+        - alert: CDINoDefaultStorageClass
+          annotations:
+            runbook_url: https://kubevirt.io/monitoring/runbooks/CDINoDefaultStorageClass
+            summary: No default StorageClass or virtualization StorageClass, and a DataVolume is pending for one
+          expr: "sum(kubevirt_cdi_storageprofile_info{default=\"true\"} or on() vector(0)) +\n\t\t\t\t\t\t\t\t sum(kubevirt_cdi_storageprofile_info{virtdefault=\"true\"} or on() vector(0)) +\n\t\t\t\t\t\t\t\t (count(kubevirt_cdi_datavolume_pending == 0) or on() vector(0)) == 0"
+          for: 5m
+          labels:
+            kubernetes_operator_component: containerized-data-importer
+            kubernetes_operator_part_of: kubevirt
+            operator_health_impact: none
+            severity: warning
+        - alert: CDINotReady
+          annotations:
+            runbook_url: https://kubevirt.io/monitoring/runbooks/CDINotReady
+            summary: CDI is not available to use
+          expr: kubevirt_cdi_cr_ready == 0
+          for: 10m
+          labels:
+            kubernetes_operator_component: containerized-data-importer
+            kubernetes_operator_part_of: kubevirt
+            operator_health_impact: critical
+            severity: critical
+        - alert: CDIOperatorDown
+          annotations:
+            runbook_url: https://kubevirt.io/monitoring/runbooks/CDIOperatorDown
+            summary: CDI operator is down
+          expr: kubevirt_cdi_operator_up == 0
+          for: 10m
+          labels:
+            kubernetes_operator_component: containerized-data-importer
+            kubernetes_operator_part_of: kubevirt
+            operator_health_impact: critical
+            severity: critical
+        - alert: CDIStorageProfilesIncomplete
+          annotations:
+            runbook_url: https://kubevirt.io/monitoring/runbooks/CDIStorageProfilesIncomplete
+            summary: Incomplete StorageProfile {{ $labels.storageclass }}, accessMode/volumeMode cannot be inferred by CDI for PVC population request
+          expr: sum by(storageclass,provisioner) ((kubevirt_cdi_storageprofile_info{complete="false"}>0))
+          for: 5m
+          labels:
+            kubernetes_operator_component: containerized-data-importer
+            kubernetes_operator_part_of: kubevirt
+            operator_health_impact: none
+            severity: informational
