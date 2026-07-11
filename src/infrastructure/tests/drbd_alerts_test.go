@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestDRBDAlertsMatchFaultDomainsAndPreserveSustainedFailures(t *testing.T) {
+func TestPiraeusAlertsPreserveRulesAndUseDeliverableSeverities(t *testing.T) {
 	path := runfilePath("src/infrastructure/base/app-patches/cozy-linstor-drbd-alerts.yaml")
 	patch := singleYAMLDoc(t, path)
 	assertNestedString(t, patch, "PrometheusRule", "kind")
@@ -14,11 +14,22 @@ func TestDRBDAlertsMatchFaultDomainsAndPreserveSustainedFailures(t *testing.T) {
 	assertNestedString(t, patch, "Override", "metadata", "annotations", "kustomize.toolkit.fluxcd.io/ssa")
 
 	groups := sliceValue(nestedValue(t, patch, "spec", "groups"))
-	if len(groups) != 1 {
-		t.Fatalf("spec.groups has %d entries, want the DRBD group", len(groups))
+	if len(groups) != 2 {
+		t.Fatalf("spec.groups has %d entries, want complete LINSTOR and DRBD groups", len(groups))
 	}
-	group := mapValue(groups[0])
-	assertNestedString(t, group, "drbd.rules", "name")
+	groupsByName := make(map[string]map[string]interface{}, len(groups))
+	for _, raw := range groups {
+		group := mapValue(raw)
+		name, ok := group["name"].(string)
+		if !ok || groupsByName[name] != nil {
+			t.Fatalf("invalid or duplicate PrometheusRule group %q", name)
+		}
+		groupsByName[name] = group
+	}
+	group := groupsByName["drbd.rules"]
+	if group == nil {
+		t.Fatal("drbd.rules group is missing")
+	}
 
 	wantAlerts := map[string]bool{
 		"drbdReactorOffline":                 true,
@@ -82,5 +93,42 @@ func TestDRBDAlertsMatchFaultDomainsAndPreserveSustainedFailures(t *testing.T) {
 	stalled := byAlert["drbdResourceResyncWithoutProgress"]
 	if expr := nestedValue(t, stalled, "expr").(string); !strings.Contains(expr, "delta(drbd_peerdevice_outofsync_bytes[5m]) >= 0") {
 		t.Fatalf("stalled-resync alert lost its five-minute progress test: %s", expr)
+	}
+
+	linstor := groupsByName["linstor.rules"]
+	if linstor == nil {
+		t.Fatal("linstor.rules group is missing")
+	}
+	wantLINSTORAlerts := map[string]bool{
+		"linstorControllerUnavailable":          true,
+		"linstorControllerMetricsScrapeFailing": true,
+		"linstorSatelliteErrorRate":             true,
+		"linstorControllerErrorRate":            true,
+		"linstorSatelliteNotOnline":             true,
+		"linstorStoragePoolErrors":              true,
+		"linstorStoragePoolAtCapacity":          true,
+	}
+	linstorRules := sliceValue(nestedValue(t, linstor, "rules"))
+	if len(linstorRules) != len(wantLINSTORAlerts) {
+		t.Fatalf("linstor.rules has %d rules, want all %d upstream rules", len(linstorRules), len(wantLINSTORAlerts))
+	}
+	seenLINSTOR := make(map[string]bool, len(linstorRules))
+	for _, raw := range linstorRules {
+		rule := mapValue(raw)
+		alert, ok := rule["alert"].(string)
+		if !ok || !wantLINSTORAlerts[alert] || seenLINSTOR[alert] {
+			t.Fatalf("unexpected or duplicate LINSTOR alert %q", alert)
+		}
+		seenLINSTOR[alert] = true
+		severity := nestedValue(t, rule, "labels", "severity")
+		if severity != "critical" && severity != "warning" {
+			t.Fatalf("LINSTOR alert %q uses Alerta-incompatible severity %q", alert, severity)
+		}
+		if alert == "linstorStoragePoolAtCapacity" {
+			assertNestedString(t, rule, "warning", "labels", "severity")
+			if expr := nestedValue(t, rule, "expr").(string); !strings.Contains(expr, "< 0.20") {
+				t.Fatalf("storage-capacity alert lost its 20%% free-space threshold: %s", expr)
+			}
+		}
 	}
 }
