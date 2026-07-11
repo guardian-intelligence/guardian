@@ -6,6 +6,7 @@ go_test(
         "analytics_ddl_conformance_test.go",
         "cozystack_app_namespace_admission_test.go",
         "cozystack_app_namespace_test.go",
+        "core_metrics_wiring_test.go",
         "oci_base_conformance_test.go",
         "electric_budget_test.go",
         "images_lock_test.go",

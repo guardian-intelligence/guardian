@@ -1,0 +1,20 @@
+# Enable the monitoring paths consumed by the platform's own core rules.
+# etcd uses the chart's per-control-plane RBAC proxy; kube-state-metrics
+# exposes its list/watch/sharding telemetry on the service's metrics port.
+apiVersion: cozystack.io/v1alpha1
+kind: Package
+metadata:
+  name: cozystack.monitoring-agents
+spec:
+  components:
+    monitoring-agents:
+      values:
+        kube-state-metrics:
+          selfMonitor:
+            enabled: true
+        scrapeRules:
+          etcd:
+            enabled: true
+        vmagent:
+          extraArgs:
+            promscrape.maxScrapeSize: 64MB
