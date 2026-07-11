@@ -53,6 +53,7 @@ data:
             labels:
               severity: critical
               guardian_component: audit
+              exported_instance: '{{ $labels.user_username }}@{{ $labels.sourceIPs }}/{{ $labels.userAgent }}/{{ $labels.verb }}'
             annotations:
               summary: 'system:masters used: {{ $labels.user_username }} from {{ $labels.sourceIPs }}'
               description: >-

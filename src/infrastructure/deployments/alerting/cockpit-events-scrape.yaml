@@ -58,5 +58,6 @@ spec:
           labels:
             severity: warning
             guardian.dev/product: cockpit
+            exported_instance: '{{ $labels.namespace }}/cockpit-events'
           annotations:
             summary: "The events writer in {{ $labels.namespace }} has not completed a poll for 15 minutes; the homepage timeline is frozen."

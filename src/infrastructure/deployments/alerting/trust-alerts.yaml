@@ -44,6 +44,7 @@ data:
             labels:
               severity: critical
               guardian_component: trust
+              exported_instance: '{{ $labels.kubernetes_namespace_name }}/{{ $labels.kubernetes_pod_name }}'
             annotations:
               summary: 'stale trust chain: {{ $labels.kubernetes_namespace_name }}/{{ $labels.kubernetes_pod_name }}'
               description: >-
