@@ -28,10 +28,15 @@
 
   // Kargo's territory plus the standard junk dirs (setting ignorePaths
   // replaces the preset default, so the node_modules entries come along).
+  // Kargo's Stage pipelines git-push image bumps into exactly these three
+  // stage-manifest trees; the rest of deployments/ is infrastructure
+  // components whose chart pins Renovate proposes like any other dep.
   ignorePaths: [
     "**/node_modules/**",
     "**/bower_components/**",
-    "src/infrastructure/deployments/**",
+    "src/infrastructure/deployments/company/**",
+    "src/infrastructure/deployments/iam/**",
+    "src/infrastructure/deployments/products/**",
   ],
 
   // The bespoke tool pins (restic, ruby) live in
@@ -52,7 +57,20 @@
   "helm-values": { enabled: false },
   helmv3: { enabled: false },
   kustomize: { enabled: false },
-  flux: { enabled: false },
+
+  // The flux manager is different: source-controller chart pins
+  // (OCIRepository tag+digest, HelmRepository-backed HelmRelease versions)
+  // are source-plane deps like any other, so Renovate is their one
+  // proposer. The scope below cannot reach the rendered plane — stage
+  // manifests are plain Deployments and cozystack HelmReleases use
+  // ExternalArtifact chartRefs, neither of which this manager reads — and
+  // it excludes bootstrap/, where the dark-mode OCIRepository points at a
+  // registry no datasource lookup can reach.
+  flux: {
+    managerFilePatterns: [
+      "/^src\\/infrastructure\\/(base|deployments)\\/.+\\.ya?ml$/",
+    ],
+  },
 
   // Everything not overridden below waits out a 3-day cooldown, mirroring
   // pnpm-workspace.yaml's minimumReleaseAge: 4320 (Renovate does not read

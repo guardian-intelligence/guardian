@@ -20,6 +20,10 @@ guardian-intelligence/guardian built this". There are no signing keys
 anywhere: nothing to store, rotate, leak, or
 custody. Registries (ghcr.io included) are untrusted distribution; a
 verifier checks the signature identity, not the registry it pulled from.
+Signing authority exists only at the merge boundary: the running system —
+a dark cold start included — only ever verifies. Bring-up needs no signing
+capability, just the pinned identities and the Sigstore trusted root,
+both of which travel with the drive.
 
 ## Canonical identities
 
