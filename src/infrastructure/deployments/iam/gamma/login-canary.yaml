@@ -14,7 +14,7 @@ spec:
   schedule: "* * * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
-  failedJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 0
   jobTemplate:
     spec:
       backoffLimit: 0

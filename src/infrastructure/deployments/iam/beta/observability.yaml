@@ -68,7 +68,7 @@ spec:
             exported_instance: 'beta/login-canary/{{ $labels.flow }}/{{ $labels.scenario }}'
           annotations:
             summary: "IAM login canary is failing in beta"
-            description: "One or more synthetic login flows (existing-user, new-user, cancellation) have failed for 5m+. Check the newest keycloak-login-canary Job logs in tenant-guardian-beta."
+            description: "One or more synthetic login flows (existing-user, new-user, cancellation) have failed for 5m+. Check the keycloak-login-canary pod logs for tenant-guardian-beta in VictoriaLogs."
         - alert: KeycloakLoginCanaryAbsent
           expr: absent(k6_canary_success_total{stage="beta"})
           for: 15m
