@@ -91,6 +91,8 @@ months), and the custody bundle above.
 
 Dark mode is entered and exited via PRs plus four bring-up steps:
 
+$TODO -- move image signing to a dual-signing model, move images-lock-sign.yaml out of GitHub actions.
+
 0. **Verify the drive** (mirror host, offline — no network needed; identities
    are recorded in `docs/supply-chain-design.md`). Run from the repo checkout
    root, with `<drive>` the mounted drive and both binaries the prebuilt

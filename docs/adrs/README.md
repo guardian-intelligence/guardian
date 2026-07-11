@@ -24,3 +24,4 @@ track reality; ADRs are history, not state. Current truth lives in code and mani
 | [0006](0006-dark-bundle-tooling.md) | Hauler builds and serves the dark bundle | Accepted | 2026-07-05 |
 | [0007](0007-openbao-policy-management.md) | OpenBao policy changes ride PRs, not a policy controller | Accepted | 2026-07-04 |
 | [0008](0008-dark-bundle-as-distribution.md) | The dark bundle is product distribution, not just DR | Accepted | 2026-07-03 |
+| [0009](0009-node-local-zfs-not-ceph.md) | VM substrate storage is node-local ZFS, not Ceph | Accepted | 2026-07-11 |
