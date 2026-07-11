@@ -13,6 +13,7 @@ go_library(
 go_binary(
     name = "relay",
     embed = [":relay_lib"],
+    pure = "on",
     visibility = ["//visibility:public"],
 )
 
@@ -39,7 +40,8 @@ oci_image(
         "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
         "org.opencontainers.image.title": "guardian-alert-relay",
     },
-    base = "@ubuntu_noble_base_linux_amd64",
+    architecture = "amd64",
+    os = "linux",
     entrypoint = ["/app/relay"],
     exposed_ports = ["8080/tcp"],
     tars = [":relay_layer"],

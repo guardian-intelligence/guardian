@@ -192,11 +192,13 @@ npm.npm_translate_lock(
 )
 use_repo(npm, "npm")
 
+# glibc/libstdc++-only base for the one dynamically linked binary we ship
+# (the company-site node runtime); everything else runs from scratch.
 oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
 oci.pull(
-    name = "ubuntu_noble_base",
-    digest = "sha256:023f8a753c22258c9fe2d0005a7d28258038da7d620e9f93e9ad78aa266f9f11",
-    image = "docker.io/library/ubuntu",
+    name = "distroless_cc_base",
+    digest = "sha256:a90cf0f046efb32466b38b0972fef3a95e7c580e392e79ff1b7ac08c15fed0bc",
+    image = "gcr.io/distroless/cc-debian12",
     platforms = ["linux/amd64"],
 )
-use_repo(oci, "ubuntu_noble_base", "ubuntu_noble_base_linux_amd64")
+use_repo(oci, "distroless_cc_base", "distroless_cc_base_linux_amd64")

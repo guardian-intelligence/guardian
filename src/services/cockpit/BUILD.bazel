@@ -33,6 +33,7 @@ go_library(
 go_binary(
     name = "cockpit",
     embed = [":cockpit_lib"],
+    pure = "on",
     visibility = ["//visibility:public"],
 )
 
@@ -73,7 +74,8 @@ oci_image(
         "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
         "org.opencontainers.image.title": "guardian-cockpit",
     },
-    base = "@ubuntu_noble_base_linux_amd64",
+    architecture = "amd64",
+    os = "linux",
     entrypoint = ["/app/cockpit"],
     exposed_ports = ["8080/tcp"],
     tars = [":cockpit_layer"],
