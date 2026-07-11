@@ -450,6 +450,18 @@ kind: RegistryMirrorConfig
 name: docker.io
 endpoints:
   - url: https://mirror.gcr.io
+---
+# Steady-state ghcr.io mirror: the in-cluster zot pull-through tier
+# (deployments/guardian/system/zot-helmrelease.yaml pins the VIP; design in
+# docs/registry-design.md). The VIP is deliberately the ONLY endpoint:
+# containerd falls back to upstream ghcr implicitly on a miss or outage,
+# and listing the upstream explicitly would disable that fallback and
+# deadlock pulls on a mirror 404.
+apiVersion: v1alpha1
+kind: RegistryMirrorConfig
+name: ghcr.io
+endpoints:
+  - url: http://10.8.0.201:5000
 {{- end }}
 ---
 # Arm the chipset watchdog (SP5100 TCO on the Latitude nodes). machined pets
