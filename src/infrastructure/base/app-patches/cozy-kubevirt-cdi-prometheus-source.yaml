@@ -1,0 +1,11 @@
+# CDI owns and reconciles the source PrometheusRule. Keep its identity in the
+# Flux inventory while leaving every rule field under operator control; the
+# evaluated VMRule carries the delivery-specific normalization.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: prometheus-cdi-rules
+  namespace: cozy-kubevirt-cdi
+  annotations:
+    kustomize.toolkit.fluxcd.io/ssa: Merge
+spec: {}

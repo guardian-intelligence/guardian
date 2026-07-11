@@ -1,15 +1,26 @@
-# PrometheusRule groups merge by name, while each group's rules list is atomic
-# under server-side apply. Keep the complete upstream alert group so correcting
-# one delivery label cannot prune adjacent CDI failure signals.
-apiVersion: monitoring.coreos.com/v1
-kind: PrometheusRule
+# The VictoriaMetrics converter normally mirrors every update from CDI's
+# operator-owned PrometheusRule. Freeze conversion for this evaluated VMRule
+# and keep both complete groups because its groups list is atomic.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
 metadata:
   name: prometheus-cdi-rules
   namespace: cozy-kubevirt-cdi
   annotations:
     kustomize.toolkit.fluxcd.io/ssa: Override
+    operator.victoriametrics.com/ignore-prometheus-updates: enabled
 spec:
   groups:
+    - name: recordingRules.rules
+      rules:
+        - record: kubevirt_cdi_clone_pods_high_restart
+          expr: count(kube_pod_container_status_restarts_total{pod=~'.*-source-pod', container='cdi-clone-source'} > 3) or on() vector(0)
+        - record: kubevirt_cdi_import_pods_high_restart
+          expr: count(kube_pod_container_status_restarts_total{pod=~'importer-.*', container='importer'} > 3) or on() vector(0)
+        - record: kubevirt_cdi_operator_up
+          expr: sum(up{namespace='cozy-kubevirt-cdi', pod=~'cdi-operator-.*'} or vector(0))
+        - record: kubevirt_cdi_upload_pods_high_restart
+          expr: count(kube_pod_container_status_restarts_total{pod=~'cdi-upload-.*', container='cdi-upload-server'} > 3) or on() vector(0)
     - name: alerts.rules
       rules:
         - alert: CDIDataImportCronOutdated
