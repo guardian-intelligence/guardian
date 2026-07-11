@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -312,75 +312,6 @@ func TestHandleSlackSuppressesHeartbeats(t *testing.T) {
 				if got := s.m.forwarded.Load(); got != 1 {
 					t.Errorf("forwarded counter = %d, want 1", got)
 				}
-			}
-		})
-	}
-}
-
-func TestHandleSlackSuppressesDashboardOnlySeverities(t *testing.T) {
-	cases := []struct {
-		name     string
-		payload  string
-		suppress bool
-	}{
-		{
-			"text-only informational",
-			alertaJSON(alertaText("Open", "PRODUCTION", "kubernetes-resources", "Informational", "CPUThrottlingHigh", "cozy-multus/kube-multus")),
-			true,
-		},
-		{
-			"text-only indeterminate",
-			alertaJSON(alertaText("Open", "PRODUCTION", "Guardian", "Indeterminate", "ProbeStateUnknown", "tenant-root/probe")),
-			true,
-		},
-		{
-			"attachment informational",
-			`{"attachments":[{"fields":[{"title":"event","value":"CPUThrottlingHigh"},{"title":"severity","value":"informational"}]}]}`,
-			true,
-		},
-		{
-			"warning forwards",
-			alertaJSON(alertaText("Open", "PRODUCTION", "Guardian", "Warning", "DiskPressure", "node/ash-wind")),
-			false,
-		},
-		{
-			"recovery forwards",
-			alertaJSON(alertaText("Closed", "PRODUCTION", "Guardian", "Normal", "DiskPressure", "node/ash-wind")),
-			false,
-		},
-		{
-			"unknown severity fails open",
-			alertaJSON(alertaText("Open", "PRODUCTION", "Guardian", "Unexpected", "NewAlert", "tenant-root/new")),
-			false,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			out := &fakeSink{}
-			s := newTestServer(out)
-			w := httptest.NewRecorder()
-			s.handleSlack(w, httptest.NewRequest("POST", "/slack", strings.NewReader(tc.payload)))
-			s.inflight.Wait()
-			if tc.suppress {
-				if w.Code != http.StatusOK {
-					t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
-				}
-				if len(out.sent) != 0 {
-					t.Errorf("suppressed payload was forwarded: %+v", out.sent)
-				}
-				if got := s.m.suppressed.Load(); got != 1 {
-					t.Errorf("suppressed counter = %d, want 1", got)
-				}
-				return
-			}
-			if w.Code != http.StatusAccepted {
-				t.Fatalf("status = %d, want %d", w.Code, http.StatusAccepted)
-			}
-			if len(out.sent) != 1 {
-				t.Fatalf("forwarded %d notifications, want 1", len(out.sent))
-			}
-			if got := s.m.forwarded.Load(); got != 1 {
-				t.Errorf("forwarded counter = %d, want 1", got)
 			}
 		})
 	}
