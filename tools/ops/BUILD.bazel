@@ -1,0 +1,4 @@
+exports_files(
+    ["multitool-repin"],
+    visibility = ["//src/tools:__pkg__"],
+)

@@ -1,3 +1,5 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
 exports_files([
     ".aspect/tasks/infra.axl",
     "MODULE.bazel",
@@ -5,3 +7,30 @@ exports_files([
     "AGENTS.md",
     "TRIBAL_KNOWLEDGE.md",
 ])
+
+# A workflow using a third-party action ref that the GitHub-side allowlist
+# does not carry dies post-merge as a startup_failure: no jobs, no logs, no
+# page. This holds every `uses:` ref to .github/actions-allowlist.json (the
+# declared source of truth for the setting) at PR time instead.
+sh_test(
+    name = "actions_allowlist_test",
+    size = "small",
+    srcs = [".github/scripts/check-actions-allowlist.sh"],
+    data = [".github/actions-allowlist.json"] + glob([".github/workflows/*.yml"]),
+)
+
+# renovate-config-validator ships only inside the renovate distribution, so
+# the test fetches the pinned release through npx when it actually runs —
+# i.e. when renovate.json5 (or the pin) changes.
+sh_test(
+    name = "renovate_config_test",
+    timeout = "long",
+    srcs = [".github/scripts/check-renovate-config.sh"],
+    args = ["$(rootpath @nodejs//:npx)"],
+    data = [
+        "renovate.json5",
+        "@nodejs//:npm_files",
+        "@nodejs//:npx",
+    ],
+    tags = ["requires-network"],
+)

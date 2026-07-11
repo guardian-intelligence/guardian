@@ -1,3 +1,5 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
 package(default_visibility = ["//visibility:private"])
 
 # The version-skew conformance test reads the kubectl and talosctl pins to
@@ -19,8 +21,8 @@ exports_files(
 # (and compiles hauler from source) — nothing more; it does not execute the
 # binaries or validate behavior. Toolchain resolution fetches the host
 # platform's half of the lockfile (linux in CI); the macOS half is proven by
-# `multitool-repin --check` in CI on lockfile diffs (hash, archive member,
-# and tag/filename agreement — not extraction by rules_multitool itself).
+# :multitool_lock_test (hash, archive member, and tag/filename agreement —
+# not extraction by rules_multitool itself).
 #
 # TODO: replace with a real binary vetting pipeline — upstream signature or
 # attestation verification per tool, and behavioral exercise of each tool's
@@ -65,4 +67,19 @@ filegroup(
         "@ruby_linux_amd64//:ruby",
     ],
     tags = ["manual"],
+)
+
+# Re-downloads every lockfile entry on both platforms and fails on any stale
+# sha256, missing archive member, tag/filename disagreement, or content
+# change under an unchanged URL — a hand- or Renovate-bumped pin cannot
+# merge stale. The script fetches straight from the upstreams (urllib), so
+# Bazel's repository cache cannot mask a dead URL; test caching re-runs it
+# exactly when the lockfile or the tool itself changes.
+sh_test(
+    name = "multitool_lock_test",
+    timeout = "long",
+    srcs = ["//tools/ops:multitool-repin"],
+    args = ["--check"],
+    data = ["multitool.lock.json"],
+    tags = ["requires-network"],
 )

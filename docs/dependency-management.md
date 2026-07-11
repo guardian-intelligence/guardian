@@ -23,8 +23,8 @@ plus branch protection decide every merge:
   outright). Never hand-roll or duplicate its promotion PRs.
 
 A config error does not fail the scheduled run (Renovate files an issue
-and exits 0), so `renovate-config.yml` validates `renovate.json5` on
-every PR that touches it.
+and exits 0), so `//:renovate_config_test` validates `renovate.json5` in
+the universal Bazel gate.
 
 ## Trust tiers
 
@@ -46,10 +46,12 @@ actually exercise the artifact.
 
 ## Due diligence per PR
 
-1. CI gates (automatic): build, the manifest/version-skew conformance suite
-   (runs on any `src/infrastructure/**` **or** `src/tools/**` diff), tool-pin
-   fetch/unpack verification (`//src/tools:pins`), secret scan, actions
-   allowlist check.
+1. CI gates (automatic): the universal Bazel gate — `test //...` carries
+   the manifest/version-skew conformance suite, the actions-allowlist and
+   renovate-config checks, and fresh-download verification of every
+   lockfile entry on both platforms (`//src/tools:multitool_lock_test`) —
+   plus the secret scan and, on tool-pin diffs, `//src/tools:pins`
+   fetch/unpack verification.
 2. Review (human/agent): read the upstream changelog Renovate embeds; for
    anything cluster-coupled or substrate, that means the release notes, not
    the diff summary.
@@ -68,7 +70,7 @@ already get real exercise (render suite, secret scan on every PR).
 
 The repo runs `allowed_actions: selected` with exact-digest patterns.
 `.github/actions-allowlist.json` is the declared source of truth, and
-`check-actions-allowlist.sh` fails any PR whose workflows use a third-party
+`//:actions_allowlist_test` fails any PR whose workflows use a third-party
 ref the file does not carry. Bumping a third-party action digest is a
 two-step lockstep:
 

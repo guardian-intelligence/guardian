@@ -27,6 +27,7 @@ bazel_dep(name = "rules_oci", version = "2.3.0")
 bazel_dep(name = "rules_pkg", version = "1.2.0")
 bazel_dep(name = "aspect_rules_js", version = "3.2.2")
 bazel_dep(name = "rules_nodejs", version = "6.7.4")
+bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "rules_multitool", version = "1.11.1")
 
 # Repo-pinned host CLIs, resolved to the host os/cpu via toolchains:
@@ -157,7 +158,7 @@ use_repo(hauler_go_deps, "dev_hauler_go_hauler_v2")
 
 node = use_extension("@rules_nodejs//nodejs:extensions.bzl", "node")
 node.toolchain(node_version = "22.22.2")
-use_repo(node, "nodejs_toolchains")
+use_repo(node, "nodejs", "nodejs_toolchains")
 
 npm = use_extension("@aspect_rules_js//npm:extensions.bzl", "npm")
 npm.npm_translate_lock(

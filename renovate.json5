@@ -312,13 +312,13 @@
     },
 
     // Renovate updates itself: the runner tag in renovate.yml and the
-    // validator pin in renovate-config.yml carry the same version and must
+    // validator pin in the config gate carry the same version and must
     // move together (the -full suffix stays in the file, outside the match).
     {
       customType: "regex",
       managerFilePatterns: [
         "/^\\.github/workflows/renovate\\.yml$/",
-        "/^\\.github/workflows/renovate-config\\.yml$/",
+        "/^\\.github/scripts/check-renovate-config\\.sh$/",
       ],
       matchStrings: [
         "renovate-version: (?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)",
