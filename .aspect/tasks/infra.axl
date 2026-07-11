@@ -1899,6 +1899,7 @@ def _auth_platform_agent(ctx, kubectl, target):
             "--exec-arg=get-token",
             "--exec-arg=--oidc-issuer-url=" + PLATFORM_OIDC_ISSUER,
             "--exec-arg=--oidc-client-id=" + PLATFORM_OIDC_CLIENT_ID,
+            "--exec-arg=--oidc-extra-scope=offline_access",
             "--exec-arg=--token-cache-dir=" + cache_dir,
         ], "kubeconfig set-credentials platform-agent"),
         (["config", "set-context", "platform-agent@guardian-mgmt", "--cluster=guardian-mgmt", "--user=platform-agent"], "kubeconfig set-context platform-agent@guardian-mgmt"),
