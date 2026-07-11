@@ -6,6 +6,7 @@ go_test(
         "alertmanager_auth_test.go",
         "analytics_ddl_conformance_test.go",
         "cdi_alerts_test.go",
+        "cluster_domain_test.go",
         "cozystack_app_namespace_admission_test.go",
         "cozystack_app_namespace_test.go",
         "core_metrics_wiring_test.go",

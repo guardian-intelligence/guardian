@@ -20,3 +20,7 @@ track reality; ADRs are history, not state. Current truth lives in code and mani
 | [0002](0002-analytics-event-storage-and-wire-contract.md) | Analytics event storage and wire contract | Accepted | 2026-07-04 |
 | [0003](0003-validate-rendered-manifests.md) | Validate rendered manifests, not source templates | Accepted | 2026-07-02 |
 | [0004](0004-stages-are-cozystack-tenants.md) | Deployment stages are Cozystack tenants | Accepted | 2026-06-27 |
+| [0005](0005-no-in-cluster-object-storage.md) | No in-cluster object storage; R2 is the object tier | Accepted | 2026-07-07 |
+| [0006](0006-dark-bundle-tooling.md) | Hauler builds and serves the dark bundle | Accepted | 2026-07-05 |
+| [0007](0007-openbao-policy-management.md) | OpenBao policy changes ride PRs, not a policy controller | Accepted | 2026-07-04 |
+| [0008](0008-dark-bundle-as-distribution.md) | The dark bundle is product distribution, not just DR | Accepted | 2026-07-03 |
