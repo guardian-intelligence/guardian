@@ -70,7 +70,7 @@ metrics, PDB, topology spread, and digest-pinned image rollout.
 - Use Vite+ commands through Bazel-managed actions for build/release paths.
 - Package build scripts should use `vp build` for app builds.
 - Bazel build/test targets must include the generated web artifacts. A top-level
-  `aspect build //:build` must leave the company package squared away.
+  `aspect build //...` must leave the company package squared away.
 - Kubernetes images must contain built output only. Pods must not run package
   managers, Vite dev servers, or markdown/content generation.
 

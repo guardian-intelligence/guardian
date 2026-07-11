@@ -119,8 +119,12 @@ cd src/products/viteplus-monorepo
 printf 'viteplus install ok\\n' > "$$execroot/$@"
 """,
     local = True,
+    # Built explicitly by label from .aspect/tasks/tidy.axl (aspect tidy) to
+    # materialize vp and node into bazel-bin for the formatter; manual keeps
+    # this non-hermetic support action out of the `//...` wildcard.
     tags = [
         "local",
+        "manual",
         "no-remote",
         "no-sandbox",
     ],
@@ -131,9 +135,11 @@ genrule(
     srcs = [
         ":.aspect_rules_js/node_modules/@voidzero-dev+vite-plus-linux-x64-gnu@0.1.24/dir",
         ":workspace_sources",
-        ":workspace_install",
         ":vp_node",
+        ":node_modules",
         ":node_modules/vite-plus",
+        "//src/products/viteplus-monorepo/apps/guardianintelligence-web:node_modules",
+        "//src/products/viteplus-monorepo/packages/brand:node_modules",
     ],
     outs = ["workspace_lint.stamp"],
     cmd = """
@@ -152,56 +158,38 @@ for candidate in $(locations :node_modules/vite-plus); do
   esac
 done
 test -n "$$vp"
-export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
-export NODE_OPTIONS="--preserve-symlinks-main $${NODE_OPTIONS:-}"
-export NODE_PATH="$$execroot/$(BINDIR)/src/products/viteplus-monorepo/node_modules$${NODE_PATH:+:$$NODE_PATH}"
-export CI=true
-cd src/products/viteplus-monorepo
-"$$node" "$$vp" run -w lint
-printf 'viteplus lint ok\\n' > "$$execroot/$@"
-""",
-    local = True,
-    tags = [
-        "local",
-        "no-remote",
-        "no-sandbox",
-    ],
-)
-
-genrule(
-    name = "workspace_build",
-    srcs = [
-        ":.aspect_rules_js/node_modules/@voidzero-dev+vite-plus-linux-x64-gnu@0.1.24/dir",
-        ":workspace_sources",
-        ":workspace_install",
-        ":workspace_lint",
-        ":vp_node",
-        ":node_modules/vite-plus",
-    ],
-    outs = ["workspace_build.stamp"],
-    cmd = """
-set -euo pipefail
-execroot="$$(pwd)"
-node="$$execroot/$(location :vp_node)"
-vp=""
-for candidate in $(locations :node_modules/vite-plus); do
-  case "$$candidate" in
-    */node_modules/vite-plus)
-      candidate_abs="$$execroot/$$candidate"
-      if [ -x "$$candidate_abs/bin/vp" ]; then
-        vp="$$candidate_abs/bin/vp"
-      fi
-      ;;
-  esac
+# Lint runs on a scratch copy of the workspace sources with the Bazel-linked
+# node_modules linked in at each package level: oxlint's type-aware rules
+# resolve @types/* by directory walk-up (NODE_PATH does not apply), and
+# linting the real source tree would both depend on whatever node_modules a
+# developer happens to have installed and race the image genrule's
+# node_modules symlink swap in apps/guardianintelligence-web.
+work="$$(mktemp -d)"
+trap 'rm -rf "$$work"' EXIT
+for f in $(locations :workspace_sources); do
+  rel="$${f#src/products/viteplus-monorepo/}"
+  mkdir -p "$$work/$$(dirname "$$rel")"
+  cp "$$f" "$$work/$$rel"
 done
-test -n "$$vp"
+# Each node_modules is a real directory of per-entry symlinks, not a symlink
+# to the bindir tree: vp writes its .vite task-cache into
+# <workspaceRoot>/node_modules, and a directory symlink would route those
+# writes into bazel-out, mutating this action's own declared inputs.
+link_node_modules() {
+  mkdir -p "$$2"
+  find "$$1" -mindepth 1 -maxdepth 1 -exec ln -s {} "$$2/" \\;
+}
+link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/node_modules" "$$work/node_modules"
+link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/apps/guardianintelligence-web/node_modules" "$$work/apps/guardianintelligence-web/node_modules"
+link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/brand/node_modules" "$$work/packages/brand/node_modules"
 export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
 export NODE_OPTIONS="--preserve-symlinks-main $${NODE_OPTIONS:-}"
 export NODE_PATH="$$execroot/$(BINDIR)/src/products/viteplus-monorepo/node_modules$${NODE_PATH:+:$$NODE_PATH}"
 export CI=true
-cd "$$execroot/src/products/viteplus-monorepo/apps/guardianintelligence-web"
-"$$node" "$$vp" build
-printf 'viteplus build ok\\n' > "$$execroot/$@"
+cd "$$work"
+"$$node" "$$vp" run -w lint
+cd "$$execroot"
+printf 'viteplus lint ok\\n' > "$@"
 """,
     local = True,
     tags = [

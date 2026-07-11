@@ -3,6 +3,7 @@ module(
     version = "0.0.0",
 )
 
+bazel_dep(name = "platforms", version = "1.0.0")
 bazel_dep(name = "protobuf", version = "33.4")
 bazel_dep(name = "rules_buf", version = "0.5.4")
 bazel_dep(name = "rules_go", version = "0.59.0")
@@ -42,11 +43,14 @@ http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "ht
 
 http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
 
+# Dated snapshot, not https://curl.se/ca/cacert.pem: the undated URL is
+# mutable, so every Mozilla bundle rotation would sha256-fail the required
+# build check on unrelated PRs. Refresh by bumping the date and hash together.
 http_file(
     name = "cacert_pem",
     downloaded_file_path = "cacert.pem",
     sha256 = "86a1f3366afac7c6f8ae9f3c779ac221129328c43f0ab2b8817eb2f362a5025c",
-    url = "https://curl.se/ca/cacert.pem",
+    url = "https://curl.se/ca/cacert-2026-05-14.pem",
 )
 
 # BGP-derived IP->ASN ranges (public routing data), mirrored from
