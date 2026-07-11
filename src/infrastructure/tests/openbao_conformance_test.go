@@ -277,6 +277,12 @@ func TestOpenBaoOperationsInventoryConformance(t *testing.T) {
 		`request "tune_kv_mount"`,
 		`request "enable_transit_mount"`,
 		`request "tune_transit_mount"`,
+		// The image countersigner's standing transit-sign capability. The
+		// guardian-images KEY itself is importer-created/restored from
+		// custody, not a self-init request — a request here would mint fresh
+		// material on every reinit and orphan existing countersignatures.
+		`request "write_countersigner_policy"`,
+		`request "write_countersigner_role"`,
 		`request "write_secret_importer_policy"`,
 		`request "write_secret_importer_role"`,
 	}
@@ -288,7 +294,9 @@ func TestOpenBaoOperationsInventoryConformance(t *testing.T) {
 		"company_site",
 		"guardian_iam",
 		"guardian_analytics",
+		"guardian_products",
 		"tenant_root",
+		"tenant_guardian",
 		"tenant_guardian_beta",
 		"tenant_guardian_gamma",
 		"tenant_guardian_prod",

@@ -143,10 +143,23 @@ role and policy when it finishes). Its import plan — `importPlan` in
 `src/infrastructure/cmd/openbao_secret_import/main.go` — is the DR re-seed
 manifest: the authoritative list of every secret the system needs after a
 raft wipe, keyed by custody env variables. Read the plan in the code, not a
-prose mirror of it: as of this writing it carries seven always-written paths
+prose mirror of it: as of this writing it carries eight always-written paths
 plus up to nine optional per-stage Keycloak writes (imported only when the
 env file carries that stage's values), and each entry's comment explains its
 consumer.
+
+Beyond the kv plan, the importer also owns the `guardian-images` transit
+signing key (the image countersigner's key). A reinit recreates the transit
+mount empty, and fresh key material would orphan every countersignature
+already attached in the registry, so custody is the source of truth: when
+`custody.env` carries `openbao_transit_images_signing_key_backup` the key is
+restored from that blob verbatim; on first run the importer creates the key
+(`exportable` + `allow_plaintext_backup`, required by the backup endpoint and
+irreversible) and exports its plaintext backup next to the env file, printing
+the custody-append instruction. The exported blob is private key material —
+fold it into `custody.env`, snapshot the bundle, and delete the exported
+file. Prove the blob restores (see the restore drill in
+`docs/openbao-design.md`) before anything relies on the key's signatures.
 
 GitHub App private keys live in custody as PEM files and travel in the env
 file base64-encoded (the file is line-oriented): the `guardian-promotions`
@@ -186,10 +199,12 @@ Almost every secret change is the routine path. Reinit is rare.
   yet.
 
 The scoped namespaces that already exist (no reinit needed to write into them):
-`external-dns`, `operator`, `company-site`, `guardian-iam`,
-`guardian-products`, `guardian-analytics`, `postflight-runner`, `tenant-root`,
-`tenant-guardian`, and `tenant-guardian-{beta,gamma,prod}`. Confirm the live
-list with `TestOpenBaoSecretScopeConformance`'s inventory.
+`external-dns`, `company-site`, `guardian-iam`, `guardian-products`,
+`guardian-analytics`, `postflight-runner`, `tenant-root`, `tenant-guardian`,
+and `tenant-guardian-{beta,gamma,prod}`. The `operator/` subtree is the
+exception: custody reference material the importer writes but no standing
+role can read. Confirm the live list against the self-init block's
+reader/writer pairs (pinned by `TestOpenBaoOperationsInventoryConformance`).
 
 ## Adding A Secret (Routine, No OpenBao Changes)
 
@@ -268,7 +283,16 @@ printf 'github_runner_app_prod_private_key_b64=%s\n' \
 # 2. the whole reinit, unattended (consumes and deletes import.env)
 aspect infra openbao-reinit
 
-# 3. wipe the plaintext bundle the moment the command succeeds
+# 3. FIRST RUN OF THE guardian-images TRANSIT KEY ONLY: the importer exported
+#    the key's plaintext backup next to import.env and printed the
+#    instruction. Append it to custody.env (never echo it), snapshot, and
+#    delete the export before the wipe:
+#      printf 'openbao_transit_images_signing_key_backup=%s\n' \
+#        "$(cat "$B/openbao-transit-guardian-images.backup.b64")" >> "$B/custody.env"
+#      aspect infra custody --action create
+#      rm "$B/openbao-transit-guardian-images.backup.b64"
+
+# 4. wipe the plaintext bundle the moment the command succeeds
 aspect infra custody --action wipe
 ```
 
