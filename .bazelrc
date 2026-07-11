@@ -1,6 +1,14 @@
 build --incompatible_strict_action_env
 test --test_output=errors
 
+# CI persists this root across runs via actions/cache (build.yml): action
+# outputs and fetched external archives survive the ephemeral runner, so a
+# PR build re-executes only what its diff invalidates. GC bounds what a main
+# run saves back.
+common:ci --disk_cache=~/.cache/bazel-ci/disk
+common:ci --repository_cache=~/.cache/bazel-ci/repo
+common:ci --experimental_disk_cache_gc_max_size=5G
+
 # Hauler's dependency tree is resolved in an isolated go_deps extension
 # instance (MODULE.bazel) so it cannot force version bumps on the production
 # operator's Go dependencies. Coupled to the Bazel version in .bazelversion:
