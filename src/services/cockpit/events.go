@@ -22,16 +22,18 @@ import (
 // branch through the GitHub commits API and persists one row per commit —
 // squash merges carry the PR title and number in the subject, promotion
 // bot commits are how Kargo ships, so the default branch's history IS the
-// build/ship event stream. Conditional requests keep the poll nearly free:
-// a 304 does not count against the unauthenticated rate limit, so steady
-// state costs one counted request per burst of new commits.
+// build/ship event stream. Conditional requests avoid transferring an
+// unchanged commit list, but GitHub only exempts authorized 304 responses
+// from its primary rate limit. These writers intentionally use the public
+// API without credentials, so the five-minute cadence caps the three stage
+// pollers at 36 requests per hour against the shared 60-request IP budget.
 
 func runEvents(args []string) error {
 	fs := flag.NewFlagSet("events", flag.ExitOnError)
 	repo := fs.String("repo", "", "GitHub owner/repo to poll (required)")
 	branch := fs.String("branch", "main", "branch whose history feeds the timeline")
 	listen := fs.String("listen", ":8080", "healthz/metrics listen address")
-	poll := fs.Duration("poll", time.Minute, "poll cadence")
+	poll := fs.Duration("poll", 5*time.Minute, "poll cadence")
 	retention := fs.Duration("retention", 24*time.Hour, "row retention horizon")
 	_ = fs.Parse(args)
 	if *repo == "" {
