@@ -100,7 +100,7 @@ spec:
                 - name: S3_PREFIX
                   value: talos-etcd/guardian-mgmt
                 - name: AGE_X25519_PUBLIC_KEY
-                  value: age18ykjst8aftuesxn3z68cfjghkpsk5jft9klehlwl47ua5r9mxevqr02ygh
+                  value: age1q5p5c0gpwzlujfy3zlqaegnw762syxhlu58l0sz042xa4ukfn5kq0ggq3l
               resources:
                 requests:
                   cpu: 100m
