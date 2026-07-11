@@ -446,19 +446,19 @@
     "binaries": [
       {
         "kind": "archive",
-        "url": "https://github.com/vmware-tanzu/velero/releases/download/v1.18.1/velero-v1.18.1-linux-amd64.tar.gz",
-        "sha256": "f483cf07b0fa09f33d91f264528492f362e031afa85546b47cbfdf9f77662067",
+        "url": "https://github.com/vmware-tanzu/velero/releases/download/v1.18.2/velero-v1.18.2-linux-amd64.tar.gz",
+        "sha256": "a4e273de70ea2d9555fee7568742ae175fc8746fdb464139edb428cc3abd9705",
         "os": "linux",
         "cpu": "x86_64",
-        "file": "velero-v1.18.1-linux-amd64/velero"
+        "file": "velero-v1.18.2-linux-amd64/velero"
       },
       {
         "kind": "archive",
-        "url": "https://github.com/vmware-tanzu/velero/releases/download/v1.18.1/velero-v1.18.1-darwin-arm64.tar.gz",
-        "sha256": "e483722b5a38b60903c9f2bd77bd4e8fbbc5a04aefd5dbe2917808a338e2efae",
+        "url": "https://github.com/vmware-tanzu/velero/releases/download/v1.18.2/velero-v1.18.2-darwin-arm64.tar.gz",
+        "sha256": "87e67e35550b8514bc1830d2632c6746ecf98c83400ee7ebad0948b81835d409",
         "os": "macos",
         "cpu": "arm64",
-        "file": "velero-v1.18.1-darwin-arm64/velero"
+        "file": "velero-v1.18.2-darwin-arm64/velero"
       }
     ]
   }
