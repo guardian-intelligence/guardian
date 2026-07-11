@@ -154,6 +154,14 @@ hauler_go_deps.module_override(
     patches = ["//src/tools/hauler/patches:hauler-verbatim-mirror-paths.patch"],
     path = "hauler.dev/go/hauler/v2",
 )
+
+# helm v4 panics in init() when the binary carries no Go module build info,
+# which rules_go binaries never do; see the patch header.
+hauler_go_deps.module_override(
+    patch_strip = 1,
+    patches = ["//src/tools/hauler/patches:helm-v4-default-capabilities-without-buildinfo.patch"],
+    path = "helm.sh/helm/v4",
+)
 use_repo(hauler_go_deps, "dev_hauler_go_hauler_v2")
 
 node = use_extension("@rules_nodejs//nodejs:extensions.bzl", "node")
