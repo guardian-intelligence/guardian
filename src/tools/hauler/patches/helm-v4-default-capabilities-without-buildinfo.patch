@@ -1,0 +1,28 @@
+Tolerate binaries without Go module build info instead of panicking.
+
+helm v4 derives default chart .Capabilities and its reported kube-client
+version from the k8s.io/client-go entry in the binary's Go module build
+info. Bazel/rules_go binaries carry no module build info, so
+pkg/chart/common panics in init() (every command dies at startup) and
+internal/version slog.Errors on every run. Fall back to the same stable
+capabilities helm substitutes for test builds and leave the decorative
+version string empty; hauler stores and serves charts as artifacts and
+never renders against these defaults.
+
+diff --git a/pkg/chart/common/capabilities.go b/pkg/chart/common/capabilities.go
+--- a/pkg/chart/common/capabilities.go
++++ b/pkg/chart/common/capabilities.go
+@@ -155 +155,5 @@ func makeDefaultCapabilities() (*Capabilities, error) {
+-		return nil, fmt.Errorf("failed to retrieve k8s.io/client-go version: %w", err)
++		// Binaries built without Go module build info (e.g. Bazel/rules_go)
++		// cannot resolve the client-go version at runtime; fall back to the
++		// same stable capabilities test builds use instead of panicking in
++		// this package's init.
++		return newCapabilities(kubeVersionMajorTesting, kubeVersionMinorTesting)
+diff --git a/internal/version/version.go b/internal/version/version.go
+--- a/internal/version/version.go
++++ b/internal/version/version.go
+@@ -91 +91,2 @@ func Get() BuildInfo {
+-			slog.Error("failed to retrieve k8s.io/client-go version", slog.Any("error", err))
++			// No Go module build info (e.g. Bazel/rules_go builds); the
++			// version is decorative here, so degrade without log noise.
