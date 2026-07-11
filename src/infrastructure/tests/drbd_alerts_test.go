@@ -64,6 +64,8 @@ func TestDRBDAlertsMatchFaultDomainsAndPreserveSustainedFailures(t *testing.T) {
 	assertOperation("/spec/groups/1/rules/2/for", "add", "2m")
 	assertOperation("/spec/groups/1/rules/1/labels/exported_instance", "add", "{{ $labels.node }}->{{ $labels.conn_name }}")
 	assertOperation("/spec/groups/1/rules/2/labels/exported_instance", "add", "{{ $labels.node }}/drbd-devices")
+	assertOperation("/spec/groups/1/rules/1/labels/severity", "replace", "warning")
+	assertOperation("/spec/groups/1/rules/2/labels/severity", "replace", "warning")
 	assertOperation("/spec/groups/1/rules/1/expr", "replace", `sum by (cluster, tenant, tier, prometheus, job, node, conn_name) (drbd_connection_state{drbd_connection_state!="Connected"} > 0) > 0`)
 	assertOperation("/spec/groups/1/rules/2/expr", "replace", `sum by (cluster, tenant, tier, prometheus, job, node) (drbd_device_state{drbd_device_state!~"UpToDate|Diskless"} > 0) > 0`)
 	if strings.Contains(ops, "drbdResourceWithNoUpToDateReplicas") || strings.Contains(ops, "drbdResourceResyncWithoutProgress") {

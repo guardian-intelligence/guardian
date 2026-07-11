@@ -34,6 +34,9 @@ spec:
                 path: /spec/groups/1/rules/1/labels/exported_instance
                 value: '{{ $labels.node }}->{{ $labels.conn_name }}'
               - op: replace
+                path: /spec/groups/1/rules/1/labels/severity
+                value: warning
+              - op: replace
                 path: /spec/groups/1/rules/1/annotations/description
                 value: |
                   {{ $value }} DRBD resources on "{{ $labels.node }}" have not been connected to "{{ $labels.conn_name }}" for at least 2 minutes.
@@ -49,6 +52,9 @@ spec:
               - op: add
                 path: /spec/groups/1/rules/2/labels/exported_instance
                 value: '{{ $labels.node }}/drbd-devices'
+              - op: replace
+                path: /spec/groups/1/rules/2/labels/severity
+                value: warning
               - op: replace
                 path: /spec/groups/1/rules/2/annotations/description
                 value: |
