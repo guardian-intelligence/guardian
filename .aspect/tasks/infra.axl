@@ -37,7 +37,9 @@ KUBELOGIN_TARGET = "@multitool//tools/kubectl-oidc_login"
 CURL_TARGET = "@multitool//tools/curl"
 CLUSTER_CA_PATH = "src/infrastructure/bootstrap/guardian-mgmt/cluster-ca.crt"
 PLATFORM_OIDC_ISSUER = "https://keycloak.guardianintelligence.org/realms/cozy"
-PLATFORM_OIDC_CLIENT_ID = "kubernetes"
+# Guardian-owned device-grant client (base/cozystack/kubernetes-device-client.yaml);
+# its tokens carry aud=kubernetes for the apiserver via the realm's audience scope.
+PLATFORM_OIDC_CLIENT_ID = "kubernetes-device"
 BREAKGLASS_NTFY_URL = "https://ntfy.sh/guardian-operations-fable"
 BREAKGLASS_LEDGER_NAMESPACE = "tenant-root"
 BREAKGLASS_LEDGER_CONFIGMAP = "breakglass-audit"
@@ -1899,6 +1901,9 @@ def _auth_platform_agent(ctx, kubectl, target):
             "--exec-arg=get-token",
             "--exec-arg=--oidc-issuer-url=" + PLATFORM_OIDC_ISSUER,
             "--exec-arg=--oidc-client-id=" + PLATFORM_OIDC_CLIENT_ID,
+            # Device grant: no localhost callback listener, so login works
+            # identically on a desktop and over SSH on a headless box.
+            "--exec-arg=--grant-type=device-code",
             "--exec-arg=--oidc-extra-scope=offline_access",
             "--exec-arg=--token-cache-dir=" + cache_dir,
         ], "kubeconfig set-credentials platform-agent"),
@@ -1913,7 +1918,7 @@ def _auth_platform_agent(ctx, kubectl, target):
     if rc != 0:
         return rc
 
-    ctx.std.io.stderr.write("selected platform-agent@guardian-mgmt in " + target + "; verifying (first login opens a browser)\n")
+    ctx.std.io.stderr.write("selected platform-agent@guardian-mgmt in " + target + "; verifying (first login prints a device-code URL — open it in a browser on any machine)\n")
     rc = checked_spawn(ctx, kubectl, ["--kubeconfig", target, "auth", "whoami"], label = "kubectl auth whoami")
     if rc != 0:
         return rc
@@ -2144,7 +2149,7 @@ auth = task(
     implementation = _auth_impl,
     name = "auth",
     group = ["infra"],
-    summary = "Authenticate kubectl to guardian-mgmt. --platform-agent installs and selects the OIDC daily-driver context (pinned kubelogin, committed cluster CA, 30-day offline token) and removes breakglass credentials. --platform-admin is breakglass: escalated x509 system:masters minted from the Talos custody bundle, requires --reason, and every use is audit-logged (ntfy page + in-cluster ledger + local custody log).",
+    summary = "Authenticate kubectl to guardian-mgmt. --platform-agent installs and selects the OIDC daily-driver context (pinned kubelogin, committed cluster CA, device-code login that works headless/over SSH, 30-day offline token) and removes breakglass credentials. --platform-admin is breakglass: escalated x509 system:masters minted from the Talos custody bundle, requires --reason, and every use is audit-logged (ntfy page + in-cluster ledger + local custody log).",
     args = {
         "audit_ntfy_url": args.string(default = BREAKGLASS_NTFY_URL, description = "ntfy URL paged with the breakglass reason."),
         "endpoints": args.string(default = PUBLIC_TALOS_KUBECONFIG_ENDPOINTS, description = "Talos API endpoints used for the breakglass kubeconfig mint."),

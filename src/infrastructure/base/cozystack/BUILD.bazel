@@ -2,6 +2,7 @@ filegroup(
     name = "manifests",
     srcs = [
         "keycloak-admin-guard.yaml",
+        "kubernetes-device-client.yaml",
         "kustomization.yaml",
         "platform-admins.yaml",
         "platform.yaml",

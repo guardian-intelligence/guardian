@@ -1,0 +1,41 @@
+# The OIDC client behind `aspect infra auth --platform-agent`. kubectl logins
+# use the OAuth 2.0 Device Authorization Grant, which has no localhost
+# callback: kubelogin prints a verification URL, the login completes in a
+# browser on any device, and kubelogin polls the token endpoint. The same
+# flow therefore works on a desktop and over SSH on a headless box, where an
+# authorization-code redirect to localhost can never reach the listener.
+# Upstream's `kubernetes` client is authorization-code only (helm-owned,
+# device grant off, redirect URIs pinned to localhost), so the device surface
+# is this separate guardian-owned client rather than a patch fighting helm
+# for ownership.
+#
+# Tokens still authenticate against the apiserver's `oidc-client-id:
+# kubernetes` because the realm's `kubernetes-client` scope maps an
+# `aud: kubernetes` claim into every token; `groups` carries the RBAC
+# groups. Both scopes are chart-shipped (cozystack keycloak-configure).
+#
+# Lives in tenant-root with the platform-admins CRs: the EDP
+# keycloak-operator watches all namespaces.
+apiVersion: v1.edp.epam.com/v1
+kind: KeycloakClient
+metadata:
+  name: kubernetes-device
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: kubernetes-device
+    app.kubernetes.io/part-of: guardian
+spec:
+  realmRef:
+    kind: ClusterKeycloakRealm
+    name: keycloakrealm-cozy
+  clientId: kubernetes-device
+  name: kubernetes-device
+  public: true
+  # Device grant only: no redirect-based flows, so no redirect URIs to keep
+  # in sync and no surface for redirect hijacking.
+  standardFlowEnabled: false
+  attributes:
+    oauth2.device.authorization.grant.enabled: "true"
+  defaultClientScopes:
+    - groups
+    - kubernetes-client
