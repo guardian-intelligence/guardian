@@ -98,5 +98,6 @@ expect a duplicate; two pages beat zero.
   VMRule labels if it grates.
 - The ntfy topic is an unauthenticated public topic; the relay is the single
   swap point when it moves to a reserved topic or self-hosted ntfy.
-- No severity floor: informational alerts page too (deliberate, revisit in
-  relay config when volume warrants).
+- Informational and indeterminate alerts remain visible in Alerta but are not
+  forwarded to ntfy. Unknown severities fail open; recovery severities
+  (`normal`, `ok`, and `cleared`) still deliver at priority 2.
