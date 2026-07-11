@@ -99,9 +99,11 @@ func TestOpenBaoStaticSealTLSAndStorageConformance(t *testing.T) {
 		`tls_disable = false`,
 		`leader_api_addr = "https://guardian-openbao-active.tenant-guardian.svc:8200"`,
 		`leader_tls_servername = "guardian-openbao-active.tenant-guardian.svc"`,
+		`exec tail -n 0 -F /openbao/audit/audit.log`,
 	} {
 		assertTextContains(t, raw, want, path)
 	}
+	assertTextNotContains(t, raw, "tail -n+1", path)
 	assertTextNotContains(t, raw, "http://guardian-openbao", path)
 	assertTextNotContains(t, raw, "pki/openbao-api", path)
 	// The reconciling operator is gone; self-init must not re-create the

@@ -137,7 +137,7 @@ spec:
                 while [ ! -e /openbao/audit/audit.log ]; do
                   sleep 1
                 done
-                exec tail -n+1 -F /openbao/audit/audit.log
+                exec tail -n 0 -F /openbao/audit/audit.log
             resources:
               requests:
                 cpu: 10m
