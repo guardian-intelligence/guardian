@@ -1,0 +1,18 @@
+diff --git a/dist/adapters/node.mjs b/dist/adapters/node.mjs
+--- a/dist/adapters/node.mjs
++++ b/dist/adapters/node.mjs
+@@ -871,7 +871,13 @@ var NodeServer = class {
+ 			});
+ 			request.waitUntil = this.#wait?.waitUntil;
+ 			const res = fetchHandler(request);
+-			return res instanceof Promise ? res.then((resolvedRes) => sendNodeResponseDetached(nodeRes, resolvedRes)) : sendNodeResponseDetached(nodeRes, res);
++			// Duck-type the thenable check instead of `instanceof Promise`. In dev
++			// mode the response originates inside a Node worker (env-runner) so
++			// the Promise crosses realm boundaries; `instanceof Promise` returns
++			// false for cross-realm Promises and srvx hands the unresolved thenable
++			// to sendNodeResponseDetached, which crashes while reading its headers.
++			// Matches h3's own thenable check (typeof val?.then === "function").
++			return typeof res?.then === "function" ? res.then((resolvedRes) => sendNodeResponseDetached(nodeRes, resolvedRes)) : sendNodeResponseDetached(nodeRes, res);
+ 		};
+ 		this.node = {
+ 			handler,
