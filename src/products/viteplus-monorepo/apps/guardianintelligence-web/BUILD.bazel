@@ -140,7 +140,7 @@ oci_image(
         "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
         "org.opencontainers.image.title": "guardian-company-site",
     },
-    base = "@ubuntu_noble_base_linux_amd64",
+    base = "@distroless_cc_base_linux_amd64",
     entrypoint = [
         "/usr/bin/node",
         "/app/server/index.mjs",

@@ -35,12 +35,14 @@ go_library(
         "@io_opentelemetry_go_otel_sdk//trace",
         "@io_opentelemetry_go_otel_trace//:trace",
         "@io_opentelemetry_go_otel_trace//noop",
+        "@org_golang_x_crypto_x509roots_fallback//:fallback",
     ],
 )
 
 go_binary(
     name = "controlplane",
     embed = [":controlplane_lib"],
+    pure = "on",
     visibility = ["//visibility:public"],
 )
 
@@ -78,7 +80,8 @@ oci_image(
         "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
         "org.opencontainers.image.title": "postflight-controlplane",
     },
-    base = "@ubuntu_noble_base_linux_amd64",
+    architecture = "amd64",
+    os = "linux",
     entrypoint = ["/app/controlplane"],
     exposed_ports = ["8080/tcp"],
     tars = [":controlplane_layer"],

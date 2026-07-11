@@ -20,6 +20,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/otel"
+
+	// The image has no system CA store; embed the roots for the GitHub API's TLS.
+	_ "golang.org/x/crypto/x509roots/fallback"
 )
 
 func main() {
