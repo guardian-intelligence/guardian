@@ -80,10 +80,10 @@ bundle, and imageset binaries
 — copy the bundle and imageset binaries to the drive as `bundle-bin` and
 `imageset-bin` so they cannot be confused with the `bundle/` directory),
 the pinned flux CLI binary
-(from `$(bazelisk info output_base)/external/+http_archive+flux_linux_amd64/`
+(`bazelisk build @multitool//tools/flux`, then copy
+`$(bazelisk info execution_root)/$(bazelisk cquery --output=files @multitool//tools/flux)`
 — like every fetched tool it exists only where Bazel has run with network),
-the pinned cosign binary (copied from
-`$(bazelisk info output_base)/external/+http_file+cosign_linux_amd64/file/cosign`),
+the pinned cosign binary (same recipe with `@multitool//tools/cosign`),
 this repo checkout at the same revision (which carries the pinned Sigstore
 trusted root at `src/infrastructure/bootstrap/bundle/sigstore-trusted-root.json`
 — refresh it when refreshing the drive; Sigstore rotates it on the order of
@@ -385,7 +385,7 @@ helm-controller stops retrying once retries exhaust — a values change or a
 
 ```sh
 bazelisk run //src/infrastructure/cmd/openbao_secret_import:openbao_secret_import -- \
-  --kubectl "$(bazelisk info output_base)/external/+http_file+kubectl_linux_amd64/file/kubectl" \
+  --kubectl "$(pwd)/.guardian/tools/bin/kubectl" \  # from: aspect tools install
   --kubeconfig <off-vlan-kubeconfig-copy> \
   --env-file /dev/shm/guardian-custody/custody.env  # after: aspect infra custody --action restore
 
@@ -441,7 +441,7 @@ deleted mid-ingest lost zero acknowledged rows). Cold-boot notes:
 1. `aspect infra edge-health` (expect all targets green) and, with
    `CLOUDFLARE_API_TOKEN` set from the dns-lb-provisioner key,
    `aspect infra tofu-init --root guardian-mgmt-dns` followed by
-   `bazelisk run @opentofu_linux_amd64//:tofu_bin -- -chdir=src/infrastructure/bootstrap/guardian-mgmt-dns plan -input=false -var-file=src/infrastructure/bootstrap/backend.tfvars`
+   `bazelisk run @multitool//tools/tofu:workspace_root -- -chdir=src/infrastructure/bootstrap/guardian-mgmt-dns plan -input=false -var-file=src/infrastructure/bootstrap/backend.tfvars`
    (expect zero infrastructure changes — node IPs are unchanged). DNS records
    themselves are owned by the in-cluster `external-dns` controller, not this
    root; this plan only covers the Cloudflare Load Balancer pool/monitor

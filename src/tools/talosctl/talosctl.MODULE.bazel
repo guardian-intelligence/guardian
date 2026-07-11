@@ -1,9 +1,0 @@
-http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
-
-http_file(
-    name = "talosctl_linux_amd64",
-    downloaded_file_path = "talosctl",
-    executable = True,
-    sha256 = "4aa5cd191c708b8c1a3b358bfd7dd21fb0cc6bd4dc7a07f2aa925cd2a8473bae",
-    url = "https://github.com/siderolabs/talos/releases/download/v1.13.0/talosctl-linux-amd64",
-)

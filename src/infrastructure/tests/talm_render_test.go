@@ -205,7 +205,7 @@ func TestDarkBundleMirrorRegistriesMatchImagesLock(t *testing.T) {
 func talmBinary(t *testing.T) string {
 	t.Helper()
 
-	path, err := runfiles.Rlocation("talm_linux_amd64/talm")
+	path, err := runfiles.Rlocation("multitool/tools/talm/talm")
 	if err != nil {
 		t.Fatalf("locate pinned talm binary: %v", err)
 	}

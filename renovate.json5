@@ -1,9 +1,10 @@
 // Renovate is the proposer for every source-plane pin that is not a rendered
-// runtime image: Bazel tool archives (src/tools/*/*.MODULE.bazel), bazel_dep
-// and oci.pull in MODULE.bazel, go.mod, the pnpm catalog, GitHub Actions
-// digests, and tofu provider pins. Rendered runtime images are Kargo's
-// territory (Warehouse → pin-bump PR); Renovate must never touch those paths.
-// Both proposers are untrusted: CI + branch protection decide every merge.
+// runtime image: the host-CLI lockfile (src/tools/multitool.lock.json), the
+// bespoke tool archives (src/tools/*/*.MODULE.bazel), bazel_dep and oci.pull
+// in MODULE.bazel, go.mod, the pnpm catalog, GitHub Actions digests, and
+// tofu provider pins. Rendered runtime images are Kargo's territory
+// (Warehouse → pin-bump PR); Renovate must never touch those paths. Both
+// proposers are untrusted: CI + branch protection decide every merge.
 //
 // Trust tiers (operating manual: docs/dependency-management.md):
 //   first-party actions        — no cooldown
@@ -16,12 +17,11 @@
 // No automerge anywhere yet: observe-mode first, tiers earn automerge after
 // watched cycles (same arc as the image-provenance VAP Warn→Deny flip).
 //
-// Known-uncovered pins (no datasource can see them; the version-skew and
-// conformance tests are the backstop): the Percona PostgreSQL tarball in
-// src/tools/debug-clis (downloads.percona.com), and every sha256 that pairs
-// with a regex-bumped version string (kubectl, the bootstrap pivots) — the
-// regex managers bump versions but cannot recompute hashes, so finishing
-// those PRs is a hand step and the checksum mismatch fails CI until done.
+// Lockfile sha256 pairs are rederived automatically: postUpgradeTasks runs
+// tools/ops/multitool-repin on every lockfile bump, and CI reruns it with
+// --check. The bootstrap pivots (bazelisk + aspect) remain the only
+// hand-completed sha pairs — a stale hash fails every CI job's bootstrap
+// step until finished.
 {
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
   extends: ["config:best-practices"],
@@ -34,11 +34,12 @@
     "src/infrastructure/deployments/**",
   ],
 
-  // The tool pins live in src/tools/<tool>/<tool>.MODULE.bazel as
-  // http_archive/http_file. Only the legacy `bazel` manager parses those
-  // rules (and recomputes sha256 on bump); `bazel-module` matches the same
-  // files but reads bazel_dep/overrides only. Patterns add to the manager's
-  // defaults, they do not replace them.
+  // The bespoke tool pins (restic, ruby) live in
+  // src/tools/<tool>/<tool>.MODULE.bazel as http_archive/http_file. Only the
+  // legacy `bazel` manager parses those rules (and recomputes sha256 on
+  // bump); `bazel-module` matches the same files but reads
+  // bazel_dep/overrides only. Patterns add to the manager's defaults, they
+  // do not replace them.
   bazel: {
     managerFilePatterns: ["/\\.MODULE\\.bazel$/"],
   },
@@ -85,10 +86,55 @@
       minimumReleaseAge: null,
     },
 
+    // Every lockfile bump completes itself: repin reconciles asset
+    // filenames and archive member paths with the bumped release tag,
+    // recomputes the sha256 pairs, and refuses hash changes for unbumped
+    // URLs — all in the renovate sandbox, so the PR lands green instead of
+    // sitting red awaiting a hand step. The command must stay listed in
+    // RENOVATE_ALLOWED_COMMANDS (renovate.yml).
+    {
+      matchFileNames: ["src/tools/multitool.lock.json"],
+      postUpgradeTasks: {
+        commands: ["tools/ops/multitool-repin"],
+        fileFilters: ["src/tools/multitool.lock.json"],
+        executionMode: "branch",
+      },
+    },
+
+    // Percona tags docker images for every tarball release; only the plain
+    // X.Y tags are the tarball versions (the -N/-ubi8/-arch suffixed tags
+    // are image rebuilds).
+    {
+      matchPackageNames: ["percona/percona-distribution-postgresql"],
+      allowedVersions: "/^\\d+\\.\\d+$/",
+    },
+
+    // ClickHouse stays on the -lts channel: tags that do not match this
+    // pattern (-stable, -prestable) are not versions at all to Renovate, and
+    // the 4th component compares as a patch so lts hotfixes surface.
+    {
+      matchPackageNames: ["ClickHouse/ClickHouse"],
+      versioning: "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)\\.(?<build>\\d+)-lts$",
+    },
+
+    // Review-time couplings that lived as comments next to the old
+    // .MODULE.bazel pins; the lockfile is JSON, so they ride the PR body.
+    {
+      matchPackageNames: ["sigstore/cosign"],
+      prBodyNotes: [
+        "cosign must stay on the same major as the sigstore/cosign-installer pin in the CI workflows — the dark-drive copy verifies what CI signs (docs/supply-chain-design.md).",
+      ],
+    },
+    {
+      matchPackageNames: ["fluxcd/flux2"],
+      prBodyNotes: [
+        "flux CLI stays on the release line shipping the kustomize-controller series guardian-mgmt runs.",
+      ],
+    },
+
     // Cluster-coupled tools: one grouped PR, merged only alongside the
     // substrate move the version-skew conformance test demands.
     {
-      matchManagers: ["bazel"],
       matchPackageNames: [
         "cozystack/talm",
         "cozystack/boot-to-talos",
@@ -109,14 +155,16 @@
       automerge: false,
     },
 
-    // Substrate doorbells (the custom managers below): the PR is the upgrade
-    // runbook's starting gun and merging it is the runbook's last step, so
-    // Git never claims a version the cluster does not run. No cooldown —
-    // the doorbell should ring promptly; the drill provides the soak.
-    // Renovate itself and the bootstrap pivots are regex-managed but are dev
-    // tooling, not substrate — excluded here, tiered below.
+    // Substrate doorbells: every regex-managed pin that is not a lockfile
+    // tool or a dev-tooling pivot — new substrate custom managers get
+    // doorbell semantics by default, no second registration step. The PR is
+    // the upgrade runbook's starting gun and merging it is the runbook's
+    // last step, so Git never claims a version the cluster does not run. No
+    // cooldown — the doorbell should ring promptly; the drill provides the
+    // soak.
     {
       matchManagers: ["custom.regex"],
+      matchFileNames: ["!src/tools/multitool.lock.json"],
       matchPackageNames: [
         "!renovatebot/renovate",
         "!bazelbuild/bazelisk",
@@ -138,26 +186,70 @@
     // The kubectl pin and the cluster kubernetesVersion share one depName on
     // purpose: they move in one doorbell PR, and the version-skew conformance
     // test refuses any state where they drift more than one minor apart.
+    // kubectl lives in the lockfile, which the blanket doorbell rule
+    // excludes, so the doorbell attributes are restated here.
     {
-      matchManagers: ["custom.regex"],
       matchPackageNames: ["kubernetes/kubernetes"],
       groupName: "kubernetes (substrate)",
-      addLabels: ["cluster-coupled"],
+      addLabels: ["cluster-coupled", "substrate-upgrade"],
+      minimumReleaseAge: null,
+      automerge: false,
     },
   ],
 
   customManagers: [
-    // kubectl tool pin — dl.k8s.io URLs are invisible to the bazel manager.
-    // Bumps the version in both platform URLs; the sha256 pair is completed
-    // by hand (see the note in kubectl.MODULE.bazel).
+    // Host-CLI lockfile, GitHub-hosted tools: the release tag in each
+    // download URL is the version, and the per-platform URLs of one tool
+    // share a tag, so a bump moves them together. Only the tag segment is
+    // rewritten here — the postUpgradeTasks repin reconciles the version
+    // echoed in asset filenames and archive member paths from the tag.
     {
       customType: "regex",
-      managerFilePatterns: ["/^src/tools/kubectl/kubectl\\.MODULE\\.bazel$/"],
+      managerFilePatterns: ["/^src/tools/multitool\\.lock\\.json$/"],
       matchStrings: [
-        'url = "https://dl\\.k8s\\.io/release/(?<currentValue>v[0-9.]+)/bin/',
+        '"url": "https://github\\.com/(?<depName>[^/"]+/[^/"]+)/releases/download/(?<currentValue>[^/"]+)/',
+      ],
+      datasourceTemplate: "github-releases",
+    },
+
+    // Host-CLI lockfile, helm: get.helm.sh is invisible to the GitHub
+    // matcher above but the project releases on GitHub.
+    {
+      customType: "regex",
+      managerFilePatterns: ["/^src/tools/multitool\\.lock\\.json$/"],
+      matchStrings: ['"url": "https://get\\.helm\\.sh/helm-(?<currentValue>v[0-9.]+)-'],
+      depNameTemplate: "helm/helm",
+      datasourceTemplate: "github-releases",
+    },
+
+    // Host-CLI lockfile, kubectl: dl.k8s.io is invisible to the GitHub
+    // matcher above.
+    {
+      customType: "regex",
+      managerFilePatterns: ["/^src/tools/multitool\\.lock\\.json$/"],
+      matchStrings: [
+        '"url": "https://dl\\.k8s\\.io/release/(?<currentValue>v[0-9.]+)/bin/',
       ],
       depNameTemplate: "kubernetes/kubernetes",
       datasourceTemplate: "github-releases",
+    },
+
+    // Host-CLI lockfile, percona psql/pgbench: downloads.percona.com has no
+    // datasource, so the docker image percona tags for every tarball release
+    // is the version oracle (constrained to plain X.Y tags above). The
+    // version appears twice per URL; the template rewrites both. A major
+    // bump also moves the distribution path segment, which this template
+    // does not — majors are dashboard-gated and the dead URL fails repin
+    // loudly, making the doorbell PR visibly incomplete until hand-shaped.
+    {
+      customType: "regex",
+      managerFilePatterns: ["/^src/tools/multitool\\.lock\\.json$/"],
+      matchStrings: [
+        '"url": "https://downloads\\.percona\\.com/downloads/postgresql-distribution-(?<pgMajor>\\d+)/(?<currentValue>[0-9.]+)/binary/tarball/percona-postgresql-[0-9.]+-(?<buildSuffix>ssl\\d+)',
+      ],
+      autoReplaceStringTemplate: '"url": "https://downloads.percona.com/downloads/postgresql-distribution-{{{pgMajor}}}/{{{newValue}}}/binary/tarball/percona-postgresql-{{{newValue}}}-{{{buildSuffix}}}',
+      depNameTemplate: "percona/percona-distribution-postgresql",
+      datasourceTemplate: "docker",
     },
 
     // Talos installer image — pinned identically in the talm values and the
@@ -177,7 +269,8 @@
 
     // `# renovate: datasource=... depName=...` annotation convention for
     // version strings in YAML (the cluster kubernetesVersion in the talm
-    // Chart.yaml today; annotate new substrate pins the same way).
+    // Chart.yaml today; annotate new substrate pins the same way and add
+    // their depName to the substrate doorbell rule).
     {
       customType: "regex",
       managerFilePatterns: ["/^src/infrastructure/talm/Chart\\.yaml$/"],

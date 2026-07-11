@@ -1,0 +1,21 @@
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+# Homebrew's portable-ruby bottle: a relocatable, self-contained Ruby build
+# (dynamically linked only against glibc, not a fixed Homebrew prefix) rather
+# than a from-source build via rules_foreign_cc, which this repo has no other
+# use for. Dev tooling only - no guardian code depends on ruby. The binary
+# resolves libraries relative to its own path, so it cannot be served from the
+# multitool lockfile (which stages a single executable, not the bottle tree).
+http_archive(
+    name = "ruby_linux_amd64",
+    build_file_content = """
+filegroup(
+    name = "ruby",
+    srcs = ["bin/ruby"],
+    visibility = ["//visibility:public"],
+)
+""",
+    sha256 = "40932a3950ccc8bf9d13d98e692e5518427cc66b4f9520956cec349629d25259",
+    strip_prefix = "portable-ruby/3.4.6",
+    url = "https://github.com/Homebrew/homebrew-portable-ruby/releases/download/3.4.6/portable-ruby-3.4.6.x86_64_linux.bottle.tar.gz",
+)

@@ -5,8 +5,8 @@ surface. Follow it and the conformance tests pass, results land where gates can
 read them, and you cannot introduce a supply-chain leak. Deviate and CI stops
 you before review.
 
-k6 is the pinned tool (`src/tools/k6`, one Go binary with a built-in JS
-engine). It is the only load tool in the repo; do not add another.
+k6 is the pinned tool (`@multitool//tools/k6`, one Go binary with a built-in
+JS engine). It is the only load tool in the repo; do not add another.
 
 ## The model: three layers per surface
 
@@ -53,8 +53,9 @@ Two more rules the platform depends on (keep them or the results are wrong):
   Cloudflare and trips bot management. Edge behaviour is covered separately by
   `src/infrastructure/load/edge-health.js`.
 - **Digest-pin the k6 image** (`docker.io/grafana/k6@sha256:...`), matching the
-  version in `src/tools/k6/k6.MODULE.bazel`. The image renders into the union
-  lock and the dark bundle automatically because the manifest references it.
+  k6 version in `src/tools/multitool.lock.json`. The image renders into the
+  union lock and the dark bundle automatically because the manifest
+  references it.
 
 ## Adding a test to a surface
 
@@ -130,7 +131,7 @@ same script the CronJob runs, minus Kubernetes:
 
 ```
 kubectl port-forward -n tenant-guardian-beta svc/<service> 8080:80
-bazel run @k6_linux_amd64//:k6 -- run \
+bazel run @multitool//tools/k6:workspace_root -- run \
   --tag run_source=local --tag surface=<name> --tag scenario=stress \
   -e TARGET_URL=http://127.0.0.1:8080 \
   src/infrastructure/deployments/<vertical>/load/<name>.js

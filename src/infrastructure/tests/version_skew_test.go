@@ -21,8 +21,7 @@ import (
 )
 
 const (
-	kubectlPinRunfile = "src/tools/kubectl/kubectl.MODULE.bazel"
-	talosctlPinRunfile = "src/tools/talosctl/talosctl.MODULE.bazel"
+	toolLockRunfile   = "src/tools/multitool.lock.json"
 	talmChartRunfile  = "src/infrastructure/talm/Chart.yaml"
 	talmValuesRunfile = "src/infrastructure/talm/values.yaml"
 )
@@ -67,7 +66,7 @@ func extractMinor(t *testing.T, runfile, pattern string) minorVersion {
 }
 
 func TestKubectlTracksClusterKubernetesVersion(t *testing.T) {
-	kubectl := extractMinor(t, kubectlPinRunfile,
+	kubectl := extractMinor(t, toolLockRunfile,
 		`dl\.k8s\.io/release/v(\d+)\.(\d+)\.\d+/bin/`)
 	cluster := extractMinor(t, talmChartRunfile,
 		`kubernetesVersion: "v(\d+)\.(\d+)\.\d+"`)
@@ -81,7 +80,7 @@ func TestKubectlTracksClusterKubernetesVersion(t *testing.T) {
 }
 
 func TestTalosctlTracksInstallerImage(t *testing.T) {
-	talosctl := extractMinor(t, talosctlPinRunfile,
+	talosctl := extractMinor(t, toolLockRunfile,
 		`siderolabs/talos/releases/download/v(\d+)\.(\d+)\.\d+/talosctl`)
 	installer := extractMinor(t, talmValuesRunfile,
 		`ghcr\.io/cozystack/cozystack/talos:v(\d+)\.(\d+)\.\d+@sha256:`)

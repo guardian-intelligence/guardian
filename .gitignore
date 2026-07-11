@@ -32,4 +32,4 @@
 /src/products/viteplus-monorepo/apps/guardianintelligence-web/.vite/
 /dist/
 
-*.pem
+*.pem__pycache__/

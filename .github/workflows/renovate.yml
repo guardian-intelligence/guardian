@@ -42,6 +42,9 @@ jobs:
         env:
           RENOVATE_AUTODISCOVER: "false"
           RENOVATE_REPOSITORIES: ${{ github.repository }}
+          # Permits the lockfile postUpgradeTasks repin (renovate.json5);
+          # commands not on this list are refused by the runner.
+          RENOVATE_ALLOWED_COMMANDS: '["tools/ops/multitool-repin"]'
           LOG_LEVEL: info
 
       - name: Page on failure
