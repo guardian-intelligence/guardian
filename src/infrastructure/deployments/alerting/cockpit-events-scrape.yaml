@@ -50,8 +50,9 @@ spec:
             guardian.dev/product: cockpit
           annotations:
             summary: No cockpit events writer scrape targets exist anywhere; timeline alerting is blind.
-        # Polls succeed every minute (304s included), so a stale gauge is a
-        # wedged or rate-limit-stuck poller, not a quiet repo.
+        # Polls succeed every five minutes (304s included), so the 15-minute
+        # threshold tolerates two missed cadences before treating the
+        # timeline as wedged or rate-limit-stuck.
         - alert: CockpitEventsPollStale
           expr: time() * 1000 - max by (namespace) (cockpit_events_last_poll_timestamp_ms) > 900000
           for: 5m
