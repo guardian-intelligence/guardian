@@ -52,7 +52,20 @@
   "helm-values": { enabled: false },
   helmv3: { enabled: false },
   kustomize: { enabled: false },
-  flux: { enabled: false },
+
+  // The flux manager is different: source-controller chart pins
+  // (OCIRepository tag+digest, HelmRepository-backed HelmRelease versions)
+  // are source-plane deps like any other, so Renovate is their one
+  // proposer. The scope below cannot reach the rendered plane — stage
+  // manifests are plain Deployments and cozystack HelmReleases use
+  // ExternalArtifact chartRefs, neither of which this manager reads — and
+  // it excludes bootstrap/, where the dark-mode OCIRepository points at a
+  // registry no datasource lookup can reach.
+  flux: {
+    managerFilePatterns: [
+      "/^src\\/infrastructure\\/(base|deployments)\\/.+\\.ya?ml$/",
+    ],
+  },
 
   // Everything not overridden below waits out a 3-day cooldown, mirroring
   // pnpm-workspace.yaml's minimumReleaseAge: 4320 (Renovate does not read

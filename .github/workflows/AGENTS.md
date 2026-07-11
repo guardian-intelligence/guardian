@@ -7,8 +7,7 @@ guidelines). A workflow earns a file here for exactly one of two reasons:
    PR code. The safelist: the universal Bazel gate (`build.yml`: build+test
    `//...`, secret scan, actions allowlist, tool-pin fetch verification)
    and the pin-provenance gates (the `*-gate` jobs in `*-image.yml`, which
-   cosign-verify moved image pins; `oci-ref-drift.yml`, which re-resolves
-   OCIRepository tag+digest pins upstream). A new gate belongs in the Bazel
+   cosign-verify moved image pins). A new gate belongs in the Bazel
    graph as a test reachable from `//...` unless the network is its
    subject or it needs git/GitHub context a hermetic action cannot have.
 2. **Trusted publisher identity** — post-merge jobs that build, sign, and
