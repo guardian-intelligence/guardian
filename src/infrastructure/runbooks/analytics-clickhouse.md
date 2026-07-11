@@ -8,7 +8,8 @@ the namespace boundary under the Cilium allowlists in
 `base/apps/analytics-clickhouse.yaml`. Schema/DDL remain repo-owned
 (`deployments/analytics/system/*-configmap.yaml`, cluster name
 `clickhouse`, 2 replicas). Compression re-verified on the chart's 24.9
-server: 16.67 B/event vs the 16.71 baseline (docs/analytics-storage-design.md).
+server: 16.67 B/event vs the 16.71 baseline
+(docs/adrs/0002-analytics-event-storage-and-wire-contract.md).
 
 ## Ingest credential (chart-generated, OpenBao-relayed)
 

@@ -1,0 +1,22 @@
+# Architecture Decision Records
+
+An ADR records one decision: the forces at play, what we chose, and what it costs.
+ADRs are **immutable** — when a decision changes, write a new ADR that supersedes the
+old one and flip the old one's status to Superseded. Never edit an Accepted ADR to
+track reality; ADRs are history, not state. Current truth lives in code and manifests.
+
+`docs/` has three lanes:
+
+- **`docs/adrs/`** — why a past fork was taken (this directory).
+- **Living policy docs** (`docs/*.md`) — present-tense SLOs and operating manuals,
+  kept thin enough that one human can hold them in their head.
+- **Runbooks** (`src/infrastructure/runbooks/`) — executable procedures.
+
+## Index
+
+| ADR | Title | Status | Date |
+| --- | --- | --- | --- |
+| [0001](0001-record-architecture-decisions.md) | Record architecture decisions | Accepted | 2026-07-11 |
+| [0002](0002-analytics-event-storage-and-wire-contract.md) | Analytics event storage and wire contract | Accepted | 2026-07-04 |
+| [0003](0003-validate-rendered-manifests.md) | Validate rendered manifests, not source templates | Accepted | 2026-07-02 |
+| [0004](0004-stages-are-cozystack-tenants.md) | Deployment stages are Cozystack tenants | Accepted | 2026-06-27 |

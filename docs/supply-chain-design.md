@@ -3,8 +3,8 @@
 Status: active as of 2026-07-03 (PR for task: SBOM attestation + images.lock
 signing; updated same week for promotion decoupling — pin moves are
 provenance-verified, not rebuild-verified). Complements
-`manifest-conformance-design.md` (Git-time invariants) and the cold-boot
-runbook (offline consumption).
+`adrs/0003-validate-rendered-manifests.md` (Git-time invariants) and the
+cold-boot runbook (offline consumption).
 
 ## The trust model in one paragraph
 

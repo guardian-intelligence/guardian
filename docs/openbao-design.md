@@ -12,7 +12,7 @@ hostPath admission enforcement in the live cluster, and tested stateful restore.
 Scope: the Guardian tenant OpenBao (3-node raft) secrets platform. OpenBao is
 one bootstrapping component of the system, not the system's end state; the
 platform-wide convergence proof is `aspect infra converged`, and manifest
-conformance testing is designed in `docs/manifest-conformance-design.md`.
+conformance testing is decided in `docs/adrs/0003-validate-rendered-manifests.md`.
 Decisions below were reached deliberately; the load-bearing trade-offs are
 called out explicitly.
 
