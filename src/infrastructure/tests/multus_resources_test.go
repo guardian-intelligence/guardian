@@ -9,6 +9,8 @@ func TestMultusCPUHeadroomPatch(t *testing.T) {
 	assertNestedString(t, patch, "cozy-multus", "metadata", "name")
 	assertNestedString(t, patch, "cozy-multus", "metadata", "namespace")
 	assertNestedString(t, patch, "Override", "metadata", "annotations", "kustomize.toolkit.fluxcd.io/ssa")
+	assertNestedString(t, patch, "multus", "spec", "selector", "matchLabels", "name")
+	assertNestedString(t, patch, "multus", "spec", "template", "metadata", "labels", "name")
 
 	containers := sliceValue(nestedValue(t, patch, "spec", "template", "spec", "containers"))
 	if len(containers) != 1 {
