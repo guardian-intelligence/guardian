@@ -107,9 +107,7 @@ overrides:
 packageExtensionsChecksum: sha256-I0lv5QXNkaT7B6m7ZhbYI1GanfJSdtbNa5fDNaoJsVw=
 
 patchedDependencies:
-  srvx@0.11.15:
-    hash: e450cdeceba3af7174a2090936d3dcdbfc6167ccde9cc891efb8c96e90522a57
-    path: patches/srvx@0.11.15.patch
+  srvx@0.11.15: e450cdeceba3af7174a2090936d3dcdbfc6167ccde9cc891efb8c96e90522a57
 
 importers:
 

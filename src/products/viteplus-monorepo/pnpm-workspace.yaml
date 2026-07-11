@@ -91,3 +91,6 @@ trustPolicy: no-downgrade
 # not live incidents. 525600 minutes = 365 days.
 trustPolicyIgnoreAfter: 525600
 verifyDepsBeforeRun: error
+minimumReleaseAgeExclude:
+  # Renovate security update: pnpm@11.8.0
+  - pnpm@11.8.0
