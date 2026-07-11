@@ -20,6 +20,460 @@ metadata:
     app.kubernetes.io/part-of: guardian
     guardian.dev/component: observability
 data:
+  redact_credentials.lua: |
+    local REDACTED = "[REDACTED]"
+
+    local BASE_SENSITIVE_NAMES = {
+      "access_token",
+      "api_key",
+      "authorization",
+      "client_secret",
+      "id_token",
+      "password",
+      "private_key",
+      "refresh_token",
+      "x_api_key",
+    }
+
+    local function normalize_key(key)
+      return string.gsub(string.lower(key), "[_-]", "")
+    end
+
+    local SENSITIVE_KEYS = {}
+    local SENSITIVE_NAMES = {}
+    local seen_names = {}
+    for _, base in ipairs(BASE_SENSITIVE_NAMES) do
+      local canonical = normalize_key(base)
+      SENSITIVE_KEYS[canonical] = true
+      for _, name in ipairs({ base, string.gsub(base, "_", "-"), canonical }) do
+        if not seen_names[name] then
+          table.insert(SENSITIVE_NAMES, name)
+          seen_names[name] = true
+        end
+      end
+    end
+
+    local RULE_ORDER = {
+      "authorization",
+      "known_credential",
+      "sensitive_field",
+      "url_query",
+    }
+
+    local function case_insensitive(literal)
+      return string.gsub(literal, ".", function(char)
+        if string.match(char, "%a") then
+          return "[" .. string.lower(char) .. string.upper(char) .. "]"
+        end
+        if string.match(char, "[%w_]") then
+          return char
+        end
+        return "%" .. char
+      end)
+    end
+
+    local ASSIGNMENT_PATTERNS = {}
+    for _, name in ipairs(SENSITIVE_NAMES) do
+      local literal = case_insensitive(name)
+      table.insert(ASSIGNMENT_PATTERNS, {
+        name = name,
+        search = string.lower(name),
+        key = "%f[%w_-]" .. literal .. "%f[^%w_-]",
+        url = "([?&]" .. literal .. "%f[^%w_-][ \t]*=[ \t]*)([^&#%s\"']+)",
+      })
+    end
+
+    local function authorization_value(value)
+      for _, pattern in ipairs({
+        "^([bB][eE][aA][rR][eE][rR][ \t]+)",
+        "^([bB][aA][sS][iI][cC][ \t]+)",
+      }) do
+        local scheme = string.match(value, pattern)
+        if scheme then
+          return scheme .. REDACTED
+        end
+      end
+      return REDACTED
+    end
+
+    local function replace_values(text, pattern, rules, rule, preserve_scheme, skip_scheme_word)
+      return string.gsub(text, pattern, function(prefix, value)
+        if value == REDACTED then
+          return prefix .. value
+        end
+        local lower = string.lower(value)
+        if skip_scheme_word and (lower == "bearer" or lower == "basic") then
+          return prefix .. value
+        end
+        rules[rule] = true
+        if preserve_scheme then
+          return prefix .. authorization_value(value)
+        end
+        return prefix .. REDACTED
+      end)
+    end
+
+    local function redact_quoted_values(text, stem, rules, rule, preserve_scheme)
+      local from = 1
+      while from <= #text do
+        local _, quote_end, quote = string.find(text, stem .. "([\"'])", from)
+        if not quote_end then
+          break
+        end
+        local value_start = quote_end + 1
+        local position = value_start
+        while position <= #text do
+          local char = string.sub(text, position, position)
+          if char == "\n" or char == "\r" then
+            break
+          elseif char == "\\" then
+            local after = string.sub(text, position + 1, position + 1)
+            if after == "\n" or after == "\r" then
+              break
+            end
+            position = math.min(position + 2, #text + 1)
+          elseif char == quote then
+            break
+          else
+            position = position + 1
+          end
+        end
+
+        local value_end = position - 1
+        local value = string.sub(text, value_start, value_end)
+        local replacement = REDACTED
+        if preserve_scheme then
+          replacement = authorization_value(value)
+        end
+        if value ~= "" and value ~= replacement then
+          text = string.sub(text, 1, value_start - 1)
+            .. replacement .. string.sub(text, value_end + 1)
+          rules[rule] = true
+          from = value_start + #replacement
+        else
+          from = math.max(position + 1, value_start + 1)
+        end
+      end
+      return text
+    end
+
+    local function redact_unquoted_authorization(text, stem, rules)
+      local from = 1
+      while from <= #text do
+        local _, prefix_end = string.find(text, stem, from)
+        if not prefix_end then
+          break
+        end
+        local value_start = prefix_end + 1
+        local first = string.sub(text, value_start, value_start)
+        if first == "\"" or first == "'" then
+          local position = value_start + 1
+          while position <= #text do
+            local char = string.sub(text, position, position)
+            if char == "\n" or char == "\r" then
+              break
+            elseif char == "\\" then
+              position = math.min(position + 2, #text + 1)
+            elseif char == first then
+              break
+            else
+              position = position + 1
+            end
+          end
+          from = math.max(position + 1, value_start + 1)
+        elseif string.sub(text, value_start, value_start + #REDACTED - 1) == REDACTED then
+          from = value_start + #REDACTED
+        elseif first == "" or first == "\n" or first == "\r" then
+          from = value_start + 1
+        else
+          local line_end = #text + 1
+          for _, newline in ipairs({ "\n", "\r" }) do
+            local candidate = string.find(text, newline, value_start, true)
+            if candidate and candidate < line_end then
+              line_end = candidate
+            end
+          end
+          local value = string.sub(text, value_start, line_end - 1)
+          local replacement = authorization_value(value)
+          text = string.sub(text, 1, value_start - 1)
+            .. replacement .. string.sub(text, line_end)
+          if value ~= replacement then
+            rules.authorization = true
+          end
+          from = value_start + #replacement
+        end
+      end
+      return text
+    end
+
+    local function redact_assignments(text, rules)
+      local lower = string.lower(text)
+      for _, patterns in ipairs(ASSIGNMENT_PATTERNS) do
+        local name = patterns.name
+        if string.find(lower, patterns.search, 1, true) then
+          text = replace_values(text, patterns.url, rules, "url_query", false, false)
+
+          local stem = patterns.key .. "[\"']?[ \t]*[:=][ \t]*"
+          local rule = "sensitive_field"
+          local preserve_scheme = false
+          if name == "authorization" then
+            rule = "authorization"
+            preserve_scheme = true
+          end
+          text = redact_quoted_values(text, stem, rules, rule, preserve_scheme)
+          if name == "authorization" then
+            text = redact_unquoted_authorization(text, stem, rules)
+          else
+            text = replace_values(text, "(" .. stem .. ")([^%s&,;{}%[%]\"']+)", rules, rule, false, false)
+          end
+        end
+      end
+      return text
+    end
+
+    local function redact_authorization_schemes(text, rules)
+      local schemes = {
+        { "bearer", "([bB][eE][aA][rR][eE][rR][ \t]+)", "[%w%._~%+/%-=]+", false },
+        { "basic", "([bB][aA][sS][iI][cC][ \t]+)", "[%w%+/=]+", true },
+      }
+      for _, scheme in ipairs(schemes) do
+        if string.find(string.lower(text), scheme[1], 1, true) then
+          local pattern = "%f[%w_-]" .. scheme[2] .. "(" .. scheme[3] .. ")"
+          text = string.gsub(text, pattern, function(prefix, value)
+            local eligible = #value >= 16 and (#value >= 24 or string.find(value, "[0-9%._~%+/%=]") ~= nil)
+            if scheme[4] then
+              eligible = #value >= 12 and #value % 4 == 0
+            end
+            if eligible and value ~= REDACTED then
+              rules.authorization = true
+              return prefix .. REDACTED
+            end
+            return prefix .. value
+          end)
+        end
+      end
+      return text
+    end
+
+    local function redact_jwts(text, rules)
+      if not string.find(text, "eyJ", 1, true) then
+        return text
+      end
+      local pattern = "%f[%w_-](eyJ[%w_-]+%.[%w_-]+%.[%w_.-]+)%f[^%w_.-]"
+      return string.gsub(text, pattern, function(value)
+        local segments = 0
+        for segment in string.gmatch(value, "[^.]+") do
+          segments = segments + 1
+          if #segment < 8 then
+            return value
+          end
+        end
+        if segments >= 3 then
+          rules.known_credential = true
+          return REDACTED
+        end
+        return value
+      end)
+    end
+
+    local function redact_github_tokens(text, rules)
+      for _, prefix in ipairs({ "github_pat_", "ghp_", "gho_", "ghu_", "ghs_", "ghr_" }) do
+        if string.find(text, prefix, 1, true) then
+          local pattern = "%f[%w_](" .. prefix .. "[%w_]+)%f[^%w_]"
+          text = string.gsub(text, pattern, function(value)
+            if #value >= #prefix + 20 then
+              rules.known_credential = true
+              return REDACTED
+            end
+            return value
+          end)
+        end
+      end
+      return text
+    end
+
+    local function redact_openbao_tokens(text, rules)
+      text = string.gsub(text, "%f[%w_]([sbr]%.([A-Za-z0-9]+))%f[^%w_]", function(token, body)
+        if #body >= 24 then
+          rules.known_credential = true
+          return REDACTED
+        end
+        return token
+      end)
+      for _, prefix in ipairs({ "hvs", "hvb", "hvr" }) do
+        local pattern = "%f[%w_](" .. prefix .. "%.([A-Za-z0-9]+))%f[^%w_]"
+        text = string.gsub(text, pattern, function(token, body)
+          if #body >= 24 then
+            rules.known_credential = true
+            return REDACTED
+          end
+          return token
+        end)
+      end
+      return text
+    end
+
+    local function redact_pem_private_keys(text, rules)
+      local from = 1
+      while from <= #text do
+        local begin_start, prefix_end = string.find(text, "-----BEGIN ", from, true)
+        if not begin_start then
+          break
+        end
+        local label_end = string.find(text, "-----", prefix_end + 1, true)
+        if not label_end then
+          from = prefix_end + 1
+        else
+          local label = string.sub(text, prefix_end + 1, label_end - 1)
+          if string.match(label, "^[A-Z0-9 ]*PRIVATE KEY$") then
+            local begin_marker = "-----BEGIN " .. label .. "-----"
+            local end_marker = "-----END " .. label .. "-----"
+            local _, end_end = string.find(text, end_marker, label_end + 5, true)
+            if not end_end then
+              from = label_end + 5
+            else
+              local replacement = begin_marker .. "\n" .. REDACTED .. "\n" .. end_marker
+              if string.sub(text, begin_start, end_end) ~= replacement then
+                text = string.sub(text, 1, begin_start - 1)
+                  .. replacement .. string.sub(text, end_end + 1)
+                rules.known_credential = true
+                from = begin_start + #replacement
+              else
+                from = end_end + 1
+              end
+            end
+          else
+            from = label_end + 5
+          end
+        end
+      end
+      -- A PEM block split across CRI records cannot be recognized without cross-record state.
+      return text
+    end
+
+    local function redact_text(text, rules)
+      text = redact_assignments(text, rules)
+      text = redact_authorization_schemes(text, rules)
+      text = redact_pem_private_keys(text, rules)
+      text = redact_openbao_tokens(text, rules)
+      text = redact_jwts(text, rules)
+      return redact_github_tokens(text, rules)
+    end
+
+    local function redact_table(value, rules, seen)
+      if seen[value] then
+        return
+      end
+      seen[value] = true
+      for key, nested in pairs(value) do
+        local canonical = type(key) == "string" and normalize_key(key)
+        if canonical and SENSITIVE_KEYS[canonical] then
+          if nested ~= REDACTED then
+            value[key] = REDACTED
+            if canonical == "authorization" then
+              rules.authorization = true
+            else
+              rules.sensitive_field = true
+            end
+          end
+        elseif type(nested) == "table" then
+          redact_table(nested, rules, seen)
+        elseif type(nested) == "string" then
+          value[key] = redact_text(nested, rules)
+        end
+      end
+    end
+
+    function redact_credentials(tag, timestamp, record)
+      local rules = {}
+      redact_table(record, rules, {})
+      local applied = {}
+      for _, rule in ipairs(RULE_ORDER) do
+        if rules[rule] then
+          table.insert(applied, rule)
+        end
+      end
+      if #applied == 0 then
+        return 0, timestamp, record
+      end
+      record.guardian_redacted = "true"
+      record.guardian_redaction_rule = table.concat(applied, ",")
+      return 2, timestamp, record
+    end
+
+    local function self_test()
+      assert(flb_null ~= nil)
+      local split_pem = "-----BEGIN " .. "PRIVATE KEY-----"
+      local pem_begin = "-----BEGIN " .. "ED25519 PRIVATE KEY-----"
+      local pem_end = "-----END " .. "ED25519 PRIVATE KEY-----"
+      local normal = {
+        log = "tls: x509: certificate signed by unknown authority\nstack trace preserved",
+        message = "Back-off restarting failed container openbao-0",
+        msg = "OpenBao core: security barrier not initialized; service account token expired",
+        requestURI = "/api/v1/namespaces/default/secrets?limit=500&token=page&key=name",
+        nested = { reason = "FailedMount", detail = "secret guardian-tls was not found" },
+        null_value = flb_null,
+        short_openbao = "s." .. string.rep("a", 23),
+        split_pem = split_pem,
+      }
+      local unchanged_code, _, unchanged = redact_credentials("self-test", 0, normal)
+      assert(unchanged_code == 0)
+      assert(unchanged.log == "tls: x509: certificate signed by unknown authority\nstack trace preserved")
+      assert(unchanged.message == "Back-off restarting failed container openbao-0")
+      assert(unchanged.msg == "OpenBao core: security barrier not initialized; service account token expired")
+      assert(unchanged.requestURI == "/api/v1/namespaces/default/secrets?limit=500&token=page&key=name")
+      assert(unchanged.nested.detail == "secret guardian-tls was not found")
+      assert(unchanged.null_value == flb_null)
+      assert(unchanged.short_openbao == "s." .. string.rep("a", 23))
+      assert(unchanged.split_pem == split_pem)
+      assert(unchanged.guardian_redacted == nil and unchanged.guardian_redaction_rule == nil)
+
+      local fake = "guardian-fake-" .. "credential-v1"
+      local token_body = string.rep("A", 24)
+      local sensitive = {
+        log = "POST https://alerta.invalid/api?api-key=" .. fake .. "&limit=1",
+        message = "Authorization: Bearer " .. fake,
+        msg = "password=" .. fake .. "\nstack trace preserved",
+        requestURI = "/callback?clientSecret=" .. fake .. "&next=/ok",
+        unknown_auth = "Authorization: ApiKey \"" .. fake .. "\" leaked-suffix",
+        multiple_auth = "authorization=\"quoted\" authorization=ApiKey \"" .. fake .. "\"",
+        quoted = "password=\"first\\\"second\\\\third\" suffix=preserved",
+        quoted_auth = "authorization=\"ApiKey " .. fake .. "\\\"leaked\" suffix=preserved",
+        jwt = "eyJhbGciOiJIUzI1NiJ9." .. "eyJzdWIiOiJndWFyZGlhbiJ9." .. "c2lnbmF0dXJl",
+        github = "gh" .. "p_1234567890abcdefghijklmnopqrstuvwxyz",
+        openbao = "s." .. token_body .. " b." .. token_body .. " r." .. token_body,
+        vault = "hvs." .. token_body .. " hvb." .. token_body .. " hvr." .. token_body,
+        pem = "prefix " .. pem_begin .. "\nZmFrZQ==\n" .. pem_end .. " suffix",
+        nested = { password = fake, privateKey = fake, accessToken = fake, xApiKey = fake, status = 401 },
+        null_value = flb_null,
+      }
+      local redacted_code, _, redacted = redact_credentials("self-test", 0, sensitive)
+      assert(redacted_code == 2)
+      assert(redacted.log == "POST https://alerta.invalid/api?api-key=[REDACTED]&limit=1")
+      assert(redacted.message == "Authorization: Bearer [REDACTED]")
+      assert(redacted.msg == "password=[REDACTED]\nstack trace preserved")
+      assert(redacted.requestURI == "/callback?clientSecret=[REDACTED]&next=/ok")
+      assert(redacted.unknown_auth == "Authorization: [REDACTED]")
+      assert(redacted.multiple_auth == "authorization=\"[REDACTED]\" authorization=[REDACTED]")
+      assert(redacted.quoted == "password=\"[REDACTED]\" suffix=preserved")
+      assert(redacted.quoted_auth == "authorization=\"[REDACTED]\" suffix=preserved")
+      assert(redacted.jwt == REDACTED and redacted.github == REDACTED)
+      assert(redacted.openbao == REDACTED .. " " .. REDACTED .. " " .. REDACTED)
+      assert(redacted.vault == REDACTED .. " " .. REDACTED .. " " .. REDACTED)
+      assert(redacted.pem == "prefix " .. pem_begin .. "\n[REDACTED]\n" .. pem_end .. " suffix")
+      assert(redacted.nested.password == REDACTED and redacted.nested.accessToken == REDACTED)
+      assert(redacted.nested.privateKey == REDACTED and redacted.nested.xApiKey == REDACTED)
+      assert(redacted.nested.status == 401)
+      assert(redacted.null_value == flb_null)
+      assert(redacted.guardian_redacted == "true")
+      assert(redacted.guardian_redaction_rule == "authorization,known_credential,sensitive_field,url_query")
+
+      local _, _, structured = redact_credentials("self-test", 0, { Authorization = fake })
+      assert(structured.Authorization == REDACTED)
+      assert(structured.guardian_redaction_rule == "authorization")
+    end
+
+    self_test()
   fluent-bit.conf: |
     [SERVICE]
         Daemon Off
@@ -42,6 +496,14 @@ data:
         Name modify
         Match talos
         Add log_source talos_service
+
+    [FILTER]
+        Name lua
+        Alias guardian_redactor
+        Match *
+        Script /fluent-bit/etc/conf/redact_credentials.lua
+        Call redact_credentials
+        Enable_Flb_Null On
 
     [OUTPUT]
         Name http
@@ -71,6 +533,8 @@ spec:
       app.kubernetes.io/name: talos-log-receiver
   template:
     metadata:
+      annotations:
+        guardian.dev/config-checksum: "sha256:029b5d31fe7f25dcba47423af4fc581eaeb6a9f4bc5f80f06cdca640bb1e24e7"
       labels:
         app.kubernetes.io/name: talos-log-receiver
         app.kubernetes.io/part-of: guardian
