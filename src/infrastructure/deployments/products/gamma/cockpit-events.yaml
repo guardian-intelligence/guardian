@@ -37,7 +37,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: events
-          image: ghcr.io/guardian-intelligence/cockpit@sha256:1930829e8a31551c241d124681d2938d133cda0770d5cb08e9f7aa9cc37e2b97
+          image: ghcr.io/guardian-intelligence/cockpit@sha256:88b0695139602c935371365c4ed57216773dd9f1070c87544ca9839f2fae7438
           args:
             - events
             - --repo=guardian-intelligence/guardian
