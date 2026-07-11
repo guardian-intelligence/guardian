@@ -51,3 +51,18 @@ jobs:
           else
             echo "no tool-pin paths in diff; skipping"
           fi
+
+      # //src/tools:pins exercises only the host (linux) half of the
+      # lockfile; this re-downloads every entry on both platforms and fails
+      # on any stale sha256, missing archive member, tag/filename
+      # disagreement, or content change under an unchanged URL, so a
+      # hand-bumped macOS pin cannot merge stale.
+      - name: Verify multitool lockfile hashes on both platforms
+        if: github.event_name == 'pull_request'
+        run: |
+          if git diff --name-only "origin/$GITHUB_BASE_REF"...HEAD |
+            grep -q '^src/tools/multitool\.lock\.json$'; then
+            tools/ops/multitool-repin --check
+          else
+            echo "lockfile untouched; skipping"
+          fi

@@ -16,13 +16,12 @@ GUARDIAN_MGMT_ROOT = "src/infrastructure/bootstrap/guardian-mgmt"
 GUARDIAN_MGMT_DNS_ROOT = "src/infrastructure/bootstrap/guardian-mgmt-dns"
 GUARDIAN_MGMT_TALM_ROOT = "src/infrastructure/talm"
 GUARDIAN_BACKEND_TFVARS = "src/infrastructure/bootstrap/backend.tfvars"
-TOFU_TARGET = "@opentofu_linux_amd64//:tofu_bin"
-TALM_TARGET = "@talm_linux_amd64//:talm"
-HELM_FILE_TARGET = "@helm_linux_amd64//:helm"
-K6_FILE_TARGET = "@k6_linux_amd64//:k6"
-KUBECTL_FILE_TARGET = "@kubectl_linux_amd64//file:file"
-KUBECTL_DARWIN_ARM64_FILE_TARGET = "@kubectl_darwin_arm64//file:file"
-TALOSCTL_FILE_TARGET = "@talosctl_linux_amd64//file:file"
+TOFU_TARGET = "@multitool//tools/tofu"
+TALM_TARGET = "@multitool//tools/talm"
+HELM_TARGET = "@multitool//tools/helm"
+K6_TARGET = "@multitool//tools/k6"
+KUBECTL_TARGET = "@multitool//tools/kubectl"
+TALOSCTL_TARGET = "@multitool//tools/talosctl"
 COZYSTACK_INSTALLER_CHART = "oci://ghcr.io/cozystack/cozystack/cozy-installer"
 COZYSTACK_INSTALLER_VERSION = "1.5.2"
 BUNDLE_TARGET = "//src/infrastructure/cmd/bundle:bundle"
@@ -30,13 +29,12 @@ HAULER_TARGET = "//src/tools/hauler:hauler"
 IMAGESET_TARGET = "//src/infrastructure/cmd/imageset:imageset"
 DECLARED_LOCK_PATH = "src/infrastructure/bootstrap/bundle/images.declared.lock"
 TALM_VALUES_PATH = "src/infrastructure/talm/values.yaml"
-COSIGN_FILE_TARGET = "//src/tools/cosign:cosign"
-ORAS_FILE_TARGET = "@oras_linux_amd64//:oras_file"
+COSIGN_TARGET = "@multitool//tools/cosign"
+ORAS_TARGET = "@multitool//tools/oras"
 RESTIC_TARGET = "//src/tools/restic:restic"
 CUSTODY_TARGET = "//src/infrastructure/cmd/custody:custody"
-KUBELOGIN_TARGET = "@kubelogin_linux_amd64//:kubelogin"
-KUBELOGIN_DARWIN_ARM64_TARGET = "@kubelogin_darwin_arm64//:kubelogin"
-CURL_FILE_TARGET = "@curl_linux_amd64//:curl"
+KUBELOGIN_TARGET = "@multitool//tools/kubectl-oidc_login"
+CURL_TARGET = "@multitool//tools/curl"
 CLUSTER_CA_PATH = "src/infrastructure/bootstrap/guardian-mgmt/cluster-ca.crt"
 PLATFORM_OIDC_ISSUER = "https://keycloak.guardianintelligence.org/realms/cozy"
 PLATFORM_OIDC_CLIENT_ID = "kubernetes"
@@ -297,165 +295,14 @@ def _tofu_backend_init(ctx, roots, endpoint):
             return rc
     return 0
 
+def _tool_path(ctx, target):
+    path = bazel_output_file(ctx, target)
+    if path == "":
+        return None
+    return path
+
 def _kubectl_path(ctx):
-    target = KUBECTL_FILE_TARGET
-    repo_path = "external/+http_file+kubectl_linux_amd64/file/kubectl"
-    platform = _host_platform(ctx)
-    if platform == "darwin_arm64":
-        target = KUBECTL_DARWIN_ARM64_FILE_TARGET
-        repo_path = "external/+http_file+kubectl_darwin_arm64/file/kubectl"
-    rc = checked_spawn(
-        ctx,
-        "bazelisk",
-        ["build", target],
-        cwd = ws_path(ctx),
-        label = "bazelisk build " + target,
-    )
-    if rc != 0:
-        return None
-    output_base = _capture_stdout(
-        ctx,
-        "bazelisk",
-        ["info", "output_base"],
-        cwd = ws_path(ctx),
-        label = "bazelisk info output_base",
-    )
-    if output_base == None:
-        return None
-    return output_base + "/" + repo_path
-
-def _host_platform(ctx):
-    os = _capture_stdout(ctx, "uname", ["-s"], label = "uname -s")
-    arch = _capture_stdout(ctx, "uname", ["-m"], label = "uname -m")
-    if os == "Darwin" and arch == "arm64":
-        return "darwin_arm64"
-    return "linux_amd64"
-
-def _helm_path(ctx):
-    rc = checked_spawn(
-        ctx,
-        "bazelisk",
-        ["build", HELM_FILE_TARGET],
-        cwd = ws_path(ctx),
-        label = "bazelisk build " + HELM_FILE_TARGET,
-    )
-    if rc != 0:
-        return None
-    output_base = _capture_stdout(
-        ctx,
-        "bazelisk",
-        ["info", "output_base"],
-        cwd = ws_path(ctx),
-        label = "bazelisk info output_base",
-    )
-    if output_base == None:
-        return None
-    return output_base + "/external/+http_archive+helm_linux_amd64/helm"
-
-def _cosign_path(ctx):
-    rc = checked_spawn(
-        ctx,
-        "bazelisk",
-        ["build", COSIGN_FILE_TARGET],
-        cwd = ws_path(ctx),
-        label = "bazelisk build " + COSIGN_FILE_TARGET,
-    )
-    if rc != 0:
-        return None
-    output_base = _capture_stdout(
-        ctx,
-        "bazelisk",
-        ["info", "output_base"],
-        cwd = ws_path(ctx),
-        label = "bazelisk info output_base",
-    )
-    if output_base == None:
-        return None
-    return output_base + "/external/+http_file+cosign_linux_amd64/file/cosign"
-
-def _oras_path(ctx):
-    rc = checked_spawn(
-        ctx,
-        "bazelisk",
-        ["build", ORAS_FILE_TARGET],
-        cwd = ws_path(ctx),
-        label = "bazelisk build " + ORAS_FILE_TARGET,
-    )
-    if rc != 0:
-        return None
-    output_base = _capture_stdout(
-        ctx,
-        "bazelisk",
-        ["info", "output_base"],
-        cwd = ws_path(ctx),
-        label = "bazelisk info output_base",
-    )
-    if output_base == None:
-        return None
-    return output_base + "/external/+http_archive+oras_linux_amd64/oras"
-
-def _k6_path(ctx):
-    rc = checked_spawn(
-        ctx,
-        "bazelisk",
-        ["build", K6_FILE_TARGET],
-        cwd = ws_path(ctx),
-        label = "bazelisk build " + K6_FILE_TARGET,
-    )
-    if rc != 0:
-        return None
-    output_base = _capture_stdout(
-        ctx,
-        "bazelisk",
-        ["info", "output_base"],
-        cwd = ws_path(ctx),
-        label = "bazelisk info output_base",
-    )
-    if output_base == None:
-        return None
-    return output_base + "/external/+http_archive+k6_linux_amd64/k6"
-
-def _talosctl_path(ctx):
-    rc = checked_spawn(
-        ctx,
-        "bazelisk",
-        ["build", TALOSCTL_FILE_TARGET],
-        cwd = ws_path(ctx),
-        label = "bazelisk build " + TALOSCTL_FILE_TARGET,
-    )
-    if rc != 0:
-        return None
-    output_base = _capture_stdout(
-        ctx,
-        "bazelisk",
-        ["info", "output_base"],
-        cwd = ws_path(ctx),
-        label = "bazelisk info output_base",
-    )
-    if output_base == None:
-        return None
-    return output_base + "/external/+http_file+talosctl_linux_amd64/file/talosctl"
-
-def _tofu_path(ctx):
-    rc = checked_spawn(
-        ctx,
-        "bazelisk",
-        ["build", TOFU_TARGET],
-        cwd = ws_path(ctx),
-        label = "bazelisk build " + TOFU_TARGET,
-    )
-    if rc != 0:
-        return None
-    output_path = _capture_stdout(
-        ctx,
-        "bazelisk",
-        ["cquery", TOFU_TARGET, "--output=files"],
-        cwd = ws_path(ctx),
-        label = "bazelisk cquery " + TOFU_TARGET + " --output=files",
-    )
-    if output_path == None:
-        return None
-    return ws_path(ctx, output_path)
+    return _tool_path(ctx, KUBECTL_TARGET)
 
 def _kubectl_args(ctx, args):
     return _kubectl_args_for(ctx, ctx.args.kubeconfig, args)
@@ -496,7 +343,7 @@ def _expand_operator_path(ctx, path):
 
 def _talosconfig_path(ctx):
     if ctx.args.talosconfig != "":
-        return ctx.args.talosconfig
+        return _workspace_path_if_relative(ctx, ctx.args.talosconfig)
     return ws_path(ctx, ctx.args.root) + "/talosconfig"
 
 def _talosctl_args(ctx, args):
@@ -813,7 +660,7 @@ def _cleanup_mint_root(ctx):
 
 def _mint_custody_kubeconfig(ctx):
     root = _workspace_path_if_relative(ctx, ctx.args.root)
-    talosconfig = ctx.args.talosconfig
+    talosconfig = _workspace_path_if_relative(ctx, ctx.args.talosconfig)
     if not ctx.std.fs.exists(root + "/secrets.yaml"):
         root = _assemble_mint_root(ctx, root)
         if root == None:
@@ -989,7 +836,7 @@ def _custody_impl(ctx):
     )
 
 def _talos_impl(ctx):
-    talosctl = _talosctl_path(ctx)
+    talosctl = _tool_path(ctx, TALOSCTL_TARGET)
     if talosctl == None:
         return 1
 
@@ -1035,7 +882,7 @@ def _upgrade_cozystack_impl(ctx):
     return _upgrade_cozystack_with_kubeconfig(ctx, ctx.args.kubeconfig, ctx.args.wait_timeout)
 
 def _upgrade_cozystack_with_kubeconfig(ctx, kubeconfig, wait_timeout):
-    helm = _helm_path(ctx)
+    helm = _tool_path(ctx, HELM_TARGET)
     if helm == None:
         return 1
 
@@ -1162,7 +1009,7 @@ def _load_http_impl(ctx):
         ctx.std.io.stderr.write("ERROR: --require-live must be true or false\n")
         return 1
 
-    k6 = _k6_path(ctx)
+    k6 = _tool_path(ctx, K6_TARGET)
     if k6 == None:
         return 1
 
@@ -1236,13 +1083,13 @@ def _edge_failover_drill_impl(ctx):
         ctx.std.io.stderr.write("ERROR: --confirm-node-ip must exactly match --node-ip before rebooting a node\n")
         return 1
 
-    k6 = _k6_path(ctx)
+    k6 = _tool_path(ctx, K6_TARGET)
     if k6 == None:
         return 1
     kubectl = _kubectl_path(ctx)
     if kubectl == None:
         return 1
-    talosctl = _talosctl_path(ctx)
+    talosctl = _tool_path(ctx, TALOSCTL_TARGET)
     if talosctl == None:
         return 1
 
@@ -1461,15 +1308,9 @@ def _openbao_drill_impl(ctx):
     )
 
 def _openbao_reinit_impl(ctx):
-    # The runbook's bare bazel external kubectl path does not exist until the
-    # target is built; the tools-install shim is the reliable pinned kubectl.
-    kubectl_target = KUBECTL_FILE_TARGET
-    if _host_platform(ctx) == "darwin_arm64":
-        kubectl_target = KUBECTL_DARWIN_ARM64_FILE_TARGET
-    bin_dir = install_bazel_tool_shims(ctx, [("kubectl", kubectl_target)], ".guardian/tools/bin")
-    if bin_dir == "":
+    kubectl = _kubectl_path(ctx)
+    if kubectl == None:
         return 1
-    kubectl = bin_dir + "/kubectl"
 
     rc = _check_live_context_for(ctx, kubectl, ctx.args.kubeconfig, ctx.args.kube_api_server)
     if rc != 0:
@@ -1848,10 +1689,10 @@ def _bundle_impl(ctx):
     # main, which derives the identical union from the same revision), verify
     # it against the pinned identity and Sigstore root, then run the same
     # offline verification the operator repeats at dark bring-up.
-    oras = _oras_path(ctx)
+    oras = _tool_path(ctx, ORAS_TARGET)
     if oras == None:
         return 1
-    cosign = _cosign_path(ctx)
+    cosign = _tool_path(ctx, COSIGN_TARGET)
     if cosign == None:
         return 1
     lockhash = _capture_stdout(
@@ -2022,10 +1863,7 @@ def _auth_platform_agent(ctx, kubectl, target):
         ctx.std.io.stderr.write("ERROR: missing " + CLUSTER_CA_PATH + "; the committed cluster CA is required to bootstrap the OIDC context\n")
         return 1
 
-    kubelogin_target = KUBELOGIN_TARGET
-    if _host_platform(ctx) == "darwin_arm64":
-        kubelogin_target = KUBELOGIN_DARWIN_ARM64_TARGET
-    bin_dir = install_bazel_tool_shims(ctx, [("kubectl-oidc_login", kubelogin_target)], ".guardian/tools/bin")
+    bin_dir = install_bazel_tool_shims(ctx, [("kubectl-oidc_login", KUBELOGIN_TARGET)], ".guardian/tools/bin")
     if bin_dir == "":
         return 1
     kubelogin = bin_dir + "/kubectl-oidc_login"
@@ -2155,7 +1993,7 @@ def _breakglass_audit(ctx, kubectl, target, reason):
     # Page the operations topic. Best-effort: breakglass exists precisely for
     # moments when infrastructure is broken, so a failed page must not block
     # the escalation.
-    curl = bazel_output_file(ctx, CURL_FILE_TARGET)
+    curl = bazel_output_file(ctx, CURL_TARGET)
     paged = False
     if curl != "":
         rc = _capture_success(

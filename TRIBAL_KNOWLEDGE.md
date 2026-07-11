@@ -128,7 +128,7 @@ place that knows the URL today.)
 * Cluster autorotates CA every 90 days
 * Disk encryption done via TPM 2.0 keyring with Talos paired with M4 SecureBoot.
 * Automated etcd snapshots to R2
-* Talos host logs 
+* Talos host logs
 </scratchpad>
 
 * Cozystack 1.5.2 `isp-full` - when researching CozyStack, use 1.5 docs from the exact [`release-1.5`](https://github.com/cozystack/cozystack/tree/v1.5.2) tag. See `src/infrastructure/base/cozystack/platform.yaml` and `src/infrastructure/base/apps/core-services.yaml`

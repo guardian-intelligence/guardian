@@ -6,32 +6,40 @@ load(
     "uninstall_bazel_tool_shims",
 )
 
+# Host CLIs, resolved to the host os/cpu by toolchains. On macOS the
+# installer consults //src/tools:multitool.lock.json and skips tools with no
+# macos entry rather than failing the whole install. The three clickhouse
+# names are one multi-call binary dispatching on argv[0].
 DEBUG_CLI_SHIMS = [
-    ("kubectl", "@kubectl_linux_amd64//file:file"),
-    ("talosctl", "@talosctl_linux_amd64//file:file"),
-    ("helm", "@helm_linux_amd64//:helm"),
-    ("k6", "@k6_linux_amd64//:k6"),
-    ("oras", "@oras_linux_amd64//:oras_file"),
-    ("tofu", "@opentofu_linux_amd64//:tofu_bin"),
-    ("talm", "@talm_linux_amd64//:talm"),
-    ("bao", "@openbao_linux_amd64//:bao"),
-    ("curl", "@curl_linux_amd64//:curl"),
-    ("cilium", "@cilium_cli_linux_amd64//:cilium"),
-    ("hubble", "@hubble_linux_amd64//:hubble"),
-    ("stern", "@stern_linux_amd64//:stern"),
-    ("velero", "@velero_linux_amd64//:velero"),
-    ("kubectl-cnpg", "@kubectl_cnpg_linux_amd64//:kubectl-cnpg"),
-    ("kubectl-oidc_login", "@kubelogin_linux_amd64//:kubelogin"),
-    ("doggo", "@doggo_linux_amd64//:doggo"),
-    ("step", "@step_linux_amd64//:step"),
-    ("clickhouse", "@clickhouse_common_static_linux_amd64//:clickhouse"),
-    ("clickhouse-client", "@clickhouse_common_static_linux_amd64//:clickhouse"),
-    ("clickhouse-benchmark", "@clickhouse_common_static_linux_amd64//:clickhouse"),
-    ("psql", "@percona_postgresql_18_linux_amd64//:psql"),
-    ("pgbench", "@percona_postgresql_18_linux_amd64//:pgbench"),
-    ("gh", "@gh_linux_amd64//:gh"),
+    ("kubectl", "@multitool//tools/kubectl"),
+    ("talosctl", "@multitool//tools/talosctl"),
+    ("helm", "@multitool//tools/helm"),
+    ("k6", "@multitool//tools/k6"),
+    ("oras", "@multitool//tools/oras"),
+    ("tofu", "@multitool//tools/tofu"),
+    ("talm", "@multitool//tools/talm"),
+    ("bao", "@multitool//tools/bao"),
+    ("curl", "@multitool//tools/curl"),
+    ("cilium", "@multitool//tools/cilium"),
+    ("hubble", "@multitool//tools/hubble"),
+    ("stern", "@multitool//tools/stern"),
+    ("velero", "@multitool//tools/velero"),
+    ("kubectl-cnpg", "@multitool//tools/kubectl-cnpg"),
+    ("kubectl-oidc_login", "@multitool//tools/kubectl-oidc_login"),
+    ("doggo", "@multitool//tools/doggo"),
+    ("step", "@multitool//tools/step"),
+    ("gh", "@multitool//tools/gh"),
+    ("clickhouse", "@multitool//tools/clickhouse"),
+    ("clickhouse-client", "@multitool//tools/clickhouse"),
+    ("clickhouse-benchmark", "@multitool//tools/clickhouse"),
+    ("psql", "@multitool//tools/psql"),
+    ("pgbench", "@multitool//tools/pgbench"),
     ("ruby", "@ruby_linux_amd64//:ruby"),
 ]
+
+# Bespoke (non-lockfile) shims that only exist for linux. Lockfile tools
+# never belong here — their platform coverage is read from the lockfile.
+LINUX_ONLY_BESPOKE_SHIMS = ["ruby"]
 
 # Repo-pinned build tools. Same shim mechanism, but these are cross-platform
 # Bazel targets (not host-specific archives), so `buf generate` uses the
@@ -48,32 +56,44 @@ BUILD_TOOL_SHIMS = [
 def _path_export(bin_dir):
     return "export PATH=\"" + bin_dir + ":${PATH}\"\n"
 
-def _host_platform(ctx):
-    os = _capture_stdout(ctx, "uname", ["-s"])
-    arch = _capture_stdout(ctx, "uname", ["-m"])
-    if os == "Darwin" and arch == "arm64":
-        return "darwin_arm64"
-    return "linux_amd64"
+def _host_is_linux(ctx):
+    r = ctx.std.process.command("uname").args(["-s"]).stdout("piped").stderr("piped").spawn().wait_with_output()
+    return r.status.code == 0 and r.stdout.strip() == "Linux"
 
-def _capture_stdout(ctx, program, args):
-    r = ctx.std.process.command(program).args(args).stdout("piped").stderr("piped").spawn().wait_with_output()
-    if r.status.code != 0:
-        return ""
-    return r.stdout.strip()
+def _lockfile_tool_name(target):
+    prefix = "@multitool//tools/"
+    if target.startswith(prefix):
+        return target[len(prefix):]
+    return None
 
-def _all_shims(ctx):
-    platform = _host_platform(ctx)
+def _macos_supported(ctx, name, target, lock):
+    tool = _lockfile_tool_name(target)
+    if tool == None:
+        return name not in LINUX_ONLY_BESPOKE_SHIMS
+    if tool not in lock:
+        fail("shim " + name + " points at " + target + " but the lockfile has no tool named " + tool)
+    for binary in lock[tool]["binaries"]:
+        if binary["os"] == "macos":
+            return True
+    return False
+
+def _install_shims(ctx):
+    if _host_is_linux(ctx):
+        return DEBUG_CLI_SHIMS + BUILD_TOOL_SHIMS
+    lock = json.decode(ctx.std.fs.read_to_string(ctx.std.env.root_dir() + "/src/tools/multitool.lock.json"))
     out = []
+    skipped = []
     for name, target in DEBUG_CLI_SHIMS:
-        if platform == "darwin_arm64" and name == "kubectl":
-            target = "@kubectl_darwin_arm64//file:file"
-        if platform == "darwin_arm64" and name == "kubectl-oidc_login":
-            target = "@kubelogin_darwin_arm64//:kubelogin"
-        out.append((name, target))
+        if _macos_supported(ctx, name, target, lock):
+            out.append((name, target))
+        else:
+            skipped.append(name)
+    if skipped:
+        ctx.std.io.stderr.write("skipping tools with no macOS artifact: " + ", ".join(skipped) + "\n")
     return out + BUILD_TOOL_SHIMS
 
 def _install_impl(ctx):
-    bin_dir = install_bazel_tool_shims(ctx, _all_shims(ctx), ctx.args.bin_dir)
+    bin_dir = install_bazel_tool_shims(ctx, _install_shims(ctx), ctx.args.bin_dir)
     if bin_dir == "":
         return 1
     if ctx.args.print_path:
@@ -81,7 +101,7 @@ def _install_impl(ctx):
     return 0
 
 def _uninstall_impl(ctx):
-    return uninstall_bazel_tool_shims(ctx, _all_shims(ctx), ctx.args.bin_dir)
+    return uninstall_bazel_tool_shims(ctx, DEBUG_CLI_SHIMS + BUILD_TOOL_SHIMS, ctx.args.bin_dir)
 
 def _path_impl(ctx):
     bin_dir = ctx.args.bin_dir

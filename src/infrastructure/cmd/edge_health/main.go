@@ -20,8 +20,8 @@ import (
 )
 
 const (
-	defaultDoggoRunfile       = "+http_archive+doggo_linux_amd64/doggo"
-	defaultK6Runfile          = "+http_archive+k6_linux_amd64/k6"
+	defaultDoggoRunfile       = "multitool/tools/doggo/doggo"
+	defaultK6Runfile          = "multitool/tools/k6/k6"
 	defaultScriptRunfile      = "_main/src/infrastructure/load/edge-health.js"
 	defaultDNSTargetsRunfile  = "_main/src/infrastructure/edge/dns-targets.file_sd.yaml"
 	defaultHTTPTargetsRunfile = "_main/src/infrastructure/edge/http-targets.file_sd.yaml"

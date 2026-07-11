@@ -16,10 +16,9 @@ go_test(
         "version_skew_test.go",
     ],
     data = [
-        "@talm_linux_amd64//:talm",
+        "@multitool//tools/talm",
         "//:MODULE.bazel",
-        "//src/tools/kubectl:kubectl.MODULE.bazel",
-        "//src/tools/talosctl:talosctl.MODULE.bazel",
+        "//src/tools:multitool.lock.json",
         "//docs:openbao-design.md",
         "//src/infrastructure/base:kustomization",
         "//src/infrastructure/base/app-patches:manifests",

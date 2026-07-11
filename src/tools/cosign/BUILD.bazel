@@ -1,7 +1,0 @@
-package(default_visibility = ["//visibility:private"])
-
-alias(
-    name = "cosign",
-    actual = "@cosign_linux_amd64//file",
-    visibility = ["//visibility:public"],
-)

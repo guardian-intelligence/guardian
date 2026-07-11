@@ -112,7 +112,12 @@ def bazel_output_file(ctx, target):
     return output_base + "/" + files[0]
 
 def install_bazel_tool_shims(ctx, shims, bin_dir):
-    """Install local symlinks for Bazel-resolved executable targets."""
+    """Install local symlinks for Bazel-resolved executable targets.
+
+    Symlinks point at the fully resolved file (readlink -f), not the
+    bazel-out symlink: fetched-repo binaries then survive `bazel clean`,
+    which wipes bazel-out but not the external repos in output_base.
+    """
     out_dir = _absolute_or_workspace_path(ctx, bin_dir)
     rc = checked_spawn(ctx, "mkdir", ["-p", out_dir], label = "mkdir -p " + out_dir)
     if rc != 0:
@@ -121,7 +126,10 @@ def install_bazel_tool_shims(ctx, shims, bin_dir):
         tool = bazel_output_file(ctx, target)
         if tool == "":
             return ""
-        rc = checked_spawn(ctx, "ln", ["-sf", tool, out_dir + "/" + name], label = "ln -sf " + name)
+        resolved = _capture_stdout(ctx, "readlink", ["-f", tool], label = "readlink -f " + name)
+        if resolved == None or resolved == "":
+            return ""
+        rc = checked_spawn(ctx, "ln", ["-sf", resolved, out_dir + "/" + name], label = "ln -sf " + name)
         if rc != 0:
             return ""
     return out_dir

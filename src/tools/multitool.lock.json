@@ -1,0 +1,465 @@
+{
+  "$schema": "https://raw.githubusercontent.com/theoremlp/rules_multitool/main/lockfile.schema.json",
+  "bao": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/openbao/openbao/releases/download/v2.5.4/bao_2.5.4_Linux_x86_64.tar.gz",
+        "sha256": "7690853adccaf9bc413768e6bfed4d0ac5222b67f808ba71af0930189f22f94f",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "bao"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/openbao/openbao/releases/download/v2.5.4/bao_2.5.4_Darwin_arm64.tar.gz",
+        "sha256": "7cce0f8d6a45f277562b7fe6bcd064488446ebe09ad329ee5aaa91c221597fba",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "bao"
+      }
+    ]
+  },
+  "boot-to-talos": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/cozystack/boot-to-talos/releases/download/v0.7.1/boot-to-talos-linux-amd64.tar.gz",
+        "sha256": "46946b1c0862f2f1de0e01cb5be16002734a090f831b7a2d7b6efba7a895738b",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "boot-to-talos"
+      }
+    ]
+  },
+  "cilium": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/cilium/cilium-cli/releases/download/v0.19.4/cilium-linux-amd64.tar.gz",
+        "sha256": "98ecd554591a592b0ee32f5d73871133bcee06639619f1c032bcba339340dc26",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "cilium"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/cilium/cilium-cli/releases/download/v0.19.4/cilium-darwin-arm64.tar.gz",
+        "sha256": "9e58b4b8cb6d926946b2e59eb25fc2fb923965d3e000e00325e0227704fcd318",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "cilium"
+      }
+    ]
+  },
+  "clickhouse": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/ClickHouse/ClickHouse/releases/download/v26.3.15.4-lts/clickhouse-common-static-26.3.15.4-amd64.tgz",
+        "sha256": "ac4a6158e0be60c1a9394e3ca5822957d603e26ef94731ca586fc50177d4182c",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "clickhouse-common-static-26.3.15.4/usr/bin/clickhouse"
+      }
+    ]
+  },
+  "cosign": {
+    "binaries": [
+      {
+        "kind": "file",
+        "url": "https://github.com/sigstore/cosign/releases/download/v3.1.1/cosign-linux-amd64",
+        "sha256": "ae1ecd212663f3693ad9edf8b1a183900c9a52d3155ba6e354237f9a0f6463fc",
+        "os": "linux",
+        "cpu": "x86_64"
+      },
+      {
+        "kind": "file",
+        "url": "https://github.com/sigstore/cosign/releases/download/v3.1.1/cosign-darwin-arm64",
+        "sha256": "94b42a9e697be95675f6160ab031a9a5f1ec1e646d6f648d7b2f5cd59ececbc5",
+        "os": "macos",
+        "cpu": "arm64"
+      }
+    ]
+  },
+  "curl": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/stunnel/static-curl/releases/download/8.21.0/curl-linux-x86_64-musl-8.21.0.tar.xz",
+        "sha256": "e955f211202ded2536164588331acfc987dc4b7857efa3577717b1ffeab22029",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "curl"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/stunnel/static-curl/releases/download/8.21.0/curl-macos-arm64-8.21.0.tar.xz",
+        "sha256": "fdfe9ca5bc60d615b0a379864056f61437a3e9ed50ab746a05abad7c50be766f",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "curl"
+      }
+    ]
+  },
+  "doggo": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/mr-karan/doggo/releases/download/v1.2.0/doggo-linux-x86_64.tar.gz",
+        "sha256": "aa6760e7f163958e7626420447385ab938fdc127983edaceb121f809bd3e2bca",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "doggo"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/mr-karan/doggo/releases/download/v1.2.0/doggo-darwin-aarch64.tar.gz",
+        "sha256": "aa8b866d8bc96ce7a004f3d2f99c26e4bb0dd140c7bd151b2eb12a1d0b01cc06",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "doggo"
+      }
+    ]
+  },
+  "flux": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/fluxcd/flux2/releases/download/v2.8.8/flux_2.8.8_linux_amd64.tar.gz",
+        "sha256": "3791d8fbb73b967ada021186f7b46686a2b180ce206d3c279c3f2ad183877a7f",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "flux"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/fluxcd/flux2/releases/download/v2.8.8/flux_2.8.8_darwin_arm64.tar.gz",
+        "sha256": "f54bb4d83cfc9563fd3213381d50fe1102215ef904ecf9c38afa183b02c74eb7",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "flux"
+      }
+    ]
+  },
+  "gh": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/cli/cli/releases/download/v2.96.0/gh_2.96.0_linux_amd64.tar.gz",
+        "sha256": "83d5c2ccad5498f58bf6368acb1ab32588cf43ab3a4b1c301bf36328b1c8bd60",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "gh_2.96.0_linux_amd64/bin/gh"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/cli/cli/releases/download/v2.96.0/gh_2.96.0_macOS_arm64.zip",
+        "sha256": "f23a0c37d963aacc3bed703ccbd59b41c5ca22101fab7f00eb2b7cad23aba463",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "gh_2.96.0_macOS_arm64/bin/gh"
+      }
+    ]
+  },
+  "gitleaks": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz",
+        "sha256": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "gitleaks"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_darwin_arm64.tar.gz",
+        "sha256": "b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "gitleaks"
+      }
+    ]
+  },
+  "helm": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://get.helm.sh/helm-v3.19.1-linux-amd64.tar.gz",
+        "sha256": "966bed9b1e0dda11268f59bd7268c3cd3e308b37b070546e1d78a02526ff63f2",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "linux-amd64/helm"
+      },
+      {
+        "kind": "archive",
+        "url": "https://get.helm.sh/helm-v3.19.1-darwin-arm64.tar.gz",
+        "sha256": "080f320cfc4ee3816fd6c8f73820f4b3d941b10f709e69bf9afd78f8f8e7c92a",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "darwin-arm64/helm"
+      }
+    ]
+  },
+  "hubble": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/cilium/hubble/releases/download/v1.18.0/hubble-linux-amd64.tar.gz",
+        "sha256": "9f1b8167f1beef3656b96def19a75478582579e8d7702307cc0c0c5330eef969",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "hubble"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/cilium/hubble/releases/download/v1.18.0/hubble-darwin-arm64.tar.gz",
+        "sha256": "3f54e576cde7cc9313fd991bf27637cac2f2abcc6853e48cdc29dc38c64bed71",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "hubble"
+      }
+    ]
+  },
+  "k6": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/grafana/k6/releases/download/v1.7.1/k6-v1.7.1-linux-amd64.tar.gz",
+        "sha256": "cc127a656f734f8ea1e89f8a417777905ae6a93d42f3e763e95313518180655b",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "k6-v1.7.1-linux-amd64/k6"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/grafana/k6/releases/download/v1.7.1/k6-v1.7.1-macos-arm64.zip",
+        "sha256": "9cace748ebeddb92432f606c6c53d964772176fdf1a0ebb4db5ead3df39ba761",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "k6-v1.7.1-macos-arm64/k6"
+      }
+    ]
+  },
+  "kubectl": {
+    "binaries": [
+      {
+        "kind": "file",
+        "url": "https://dl.k8s.io/release/v1.36.2/bin/linux/amd64/kubectl",
+        "sha256": "1e9045ec32bea85da43de85f0065358529ea7c7a152eca78154fba5b58c27d82",
+        "os": "linux",
+        "cpu": "x86_64"
+      },
+      {
+        "kind": "file",
+        "url": "https://dl.k8s.io/release/v1.36.2/bin/darwin/arm64/kubectl",
+        "sha256": "4408c85c83fd3a31adaa555bdf3c7a6c81f74b19449a9060ba31ab91926f023d",
+        "os": "macos",
+        "cpu": "arm64"
+      }
+    ]
+  },
+  "kubectl-cnpg": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v1.29.1/kubectl-cnpg_1.29.1_linux_x86_64.tar.gz",
+        "sha256": "2a550d5ee2224e5bb66b95602f8052fc50da50485f59f97b817a0c3b44b58581",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "kubectl-cnpg"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v1.29.1/kubectl-cnpg_1.29.1_darwin_arm64.tar.gz",
+        "sha256": "d26019d8cb4deac553a6d5c31203a6332b71c2eddf76d762f5179fe4cac8624c",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "kubectl-cnpg"
+      }
+    ]
+  },
+  "kubectl-oidc_login": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/int128/kubelogin/releases/download/v1.36.2/kubelogin_linux_amd64.zip",
+        "sha256": "0f9b35e82469dbf1e1ed7cfa8cbaa27ffde733e18930dbaed590518a58eb11cc",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "kubelogin"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/int128/kubelogin/releases/download/v1.36.2/kubelogin_darwin_arm64.zip",
+        "sha256": "bf90d24882875641b8f89218b13900769e17677e8cfa6c12d05f1bf59acca1f7",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "kubelogin"
+      }
+    ]
+  },
+  "oras": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/oras-project/oras/releases/download/v1.3.2/oras_1.3.2_linux_amd64.tar.gz",
+        "sha256": "9229ccc6d17bb282039ad4a69abb16dcb887a5bce567c075d731d9b3c7ad8eaf",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "oras"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/oras-project/oras/releases/download/v1.3.2/oras_1.3.2_darwin_arm64.tar.gz",
+        "sha256": "7929f792cf272268412375ecad6f0fb3c20f164368d5b57966e67ad6d36eca53",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "oras"
+      }
+    ]
+  },
+  "pgbench": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://downloads.percona.com/downloads/postgresql-distribution-18/18.4/binary/tarball/percona-postgresql-18.4-ssl3-linux-x86_64.tar.gz",
+        "sha256": "8aa2aeeba395c306a5e2b4f121c77f654ddb3145d8617bd3d23e81e5980ca767",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "percona-postgresql18/bin/pgbench"
+      }
+    ]
+  },
+  "psql": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://downloads.percona.com/downloads/postgresql-distribution-18/18.4/binary/tarball/percona-postgresql-18.4-ssl3-linux-x86_64.tar.gz",
+        "sha256": "8aa2aeeba395c306a5e2b4f121c77f654ddb3145d8617bd3d23e81e5980ca767",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "percona-postgresql18/bin/psql.bin"
+      }
+    ]
+  },
+  "step": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/smallstep/cli/releases/download/v0.30.6/step_linux_amd64.tar.gz",
+        "sha256": "f9ebb5a078c713abe286a02e64ad9b78197c5bda3e729a8de44f739c5cb3c0ac",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "step_linux_amd64/bin/step"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/smallstep/cli/releases/download/v0.30.6/step_darwin_arm64.tar.gz",
+        "sha256": "ae4016bd7da2d00db4e370fa918e94f144ddce7610fb46c2ec0d6dd00e153238",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "step_darwin_arm64/bin/step"
+      }
+    ]
+  },
+  "stern": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/stern/stern/releases/download/v1.34.0/stern_1.34.0_linux_amd64.tar.gz",
+        "sha256": "7754adfa653939240f7d20fff4ada9b69cda40c9e70732301f67bb8045f1ef3e",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "stern"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/stern/stern/releases/download/v1.34.0/stern_1.34.0_darwin_arm64.tar.gz",
+        "sha256": "4014d84096e1e603ee115864e03a1e15fb9bae9876647bf7bb8031eee278dcd3",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "stern"
+      }
+    ]
+  },
+  "talm": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/cozystack/talm/releases/download/v0.31.0/talm-linux-amd64.tar.gz",
+        "sha256": "da407792f970356381953d96aaa4b902453482e3ddb56e893de17cb2e177d964",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "talm"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/cozystack/talm/releases/download/v0.31.0/talm-darwin-arm64.tar.gz",
+        "sha256": "4ff4ed203df2b9de4084d381351671dbb2270d1e5fde2b921db4647ac62203e7",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "talm"
+      }
+    ]
+  },
+  "talosctl": {
+    "binaries": [
+      {
+        "kind": "file",
+        "url": "https://github.com/siderolabs/talos/releases/download/v1.13.0/talosctl-linux-amd64",
+        "sha256": "4aa5cd191c708b8c1a3b358bfd7dd21fb0cc6bd4dc7a07f2aa925cd2a8473bae",
+        "os": "linux",
+        "cpu": "x86_64"
+      },
+      {
+        "kind": "file",
+        "url": "https://github.com/siderolabs/talos/releases/download/v1.13.0/talosctl-darwin-arm64",
+        "sha256": "728cb09e34eadcb2c122c626daba8202281944f4851b43e9e37836551c8e9d19",
+        "os": "macos",
+        "cpu": "arm64"
+      }
+    ]
+  },
+  "tofu": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/opentofu/opentofu/releases/download/v1.12.3/tofu_1.12.3_linux_amd64.zip",
+        "sha256": "46b48c3438c65cf479fc076c9281422ffa2f493548d1e813d154c835c5986a08",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "tofu"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/opentofu/opentofu/releases/download/v1.12.3/tofu_1.12.3_darwin_arm64.tar.gz",
+        "sha256": "0c8ddee4294f7cea34d82b122fa805febce41d21905a54dc9ce9f79ee8145284",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "tofu"
+      }
+    ]
+  },
+  "velero": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/vmware-tanzu/velero/releases/download/v1.18.1/velero-v1.18.1-linux-amd64.tar.gz",
+        "sha256": "f483cf07b0fa09f33d91f264528492f362e031afa85546b47cbfdf9f77662067",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "velero-v1.18.1-linux-amd64/velero"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/vmware-tanzu/velero/releases/download/v1.18.1/velero-v1.18.1-darwin-arm64.tar.gz",
+        "sha256": "e483722b5a38b60903c9f2bd77bd4e8fbbc5a04aefd5dbe2917808a338e2efae",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "velero-v1.18.1-darwin-arm64/velero"
+      }
+    ]
+  }
+}

@@ -26,50 +26,21 @@ bazel_dep(name = "rules_oci", version = "2.3.0")
 bazel_dep(name = "rules_pkg", version = "1.2.0")
 bazel_dep(name = "aspect_rules_js", version = "3.2.2")
 bazel_dep(name = "rules_nodejs", version = "6.7.4")
+bazel_dep(name = "rules_multitool", version = "1.11.1")
 
-include("//src/tools/kubectl:kubectl.MODULE.bazel")
-include("//src/tools/boot-to-talos:boot-to-talos.MODULE.bazel")
-include("//src/tools/cosign:cosign.MODULE.bazel")
-include("//src/tools/curl:curl.MODULE.bazel")
-include("//src/tools/debug-clis:debug-clis.MODULE.bazel")
-include("//src/tools/flux:flux.MODULE.bazel")
-include("//src/tools/gitleaks:gitleaks.MODULE.bazel")
-include("//src/tools/k6:k6.MODULE.bazel")
-include("//src/tools/openbao:openbao.MODULE.bazel")
-include("//src/tools/oras:oras.MODULE.bazel")
+# Repo-pinned host CLIs, resolved to the host os/cpu via toolchains:
+# @multitool//tools/<name>. Pins (URL + sha256 per platform) live in the
+# lockfile; refresh hashes after a version bump with tools/ops/multitool-repin.
+multitool = use_extension("@rules_multitool//multitool:extension.bzl", "multitool")
+multitool.hub(lockfile = "//src/tools:multitool.lock.json")
+use_repo(multitool, "multitool")
+
 include("//src/tools/restic:restic.MODULE.bazel")
-include("//src/tools/talm:talm.MODULE.bazel")
-include("//src/tools/talosctl:talosctl.MODULE.bazel")
+include("//src/tools/ruby:ruby.MODULE.bazel")
 
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
-
-http_archive(
-    name = "helm_linux_amd64",
-    build_file_content = """exports_files(["helm"])""",
-    sha256 = "966bed9b1e0dda11268f59bd7268c3cd3e308b37b070546e1d78a02526ff63f2",
-    strip_prefix = "linux-amd64",
-    url = "https://get.helm.sh/helm-v3.19.1-linux-amd64.tar.gz",
-)
-
-http_archive(
-    name = "opentofu_linux_amd64",
-    build_file_content = """
-exports_files(["tofu"])
-
-genrule(
-    name = "tofu_bin",
-    srcs = ["tofu"],
-    outs = ["tofu-runner"],
-    cmd = "cp $(location tofu) $@ && chmod +x $@",
-    executable = True,
-    visibility = ["//visibility:public"],
-)
-""",
-    sha256 = "46b48c3438c65cf479fc076c9281422ffa2f493548d1e813d154c835c5986a08",
-    url = "https://github.com/opentofu/opentofu/releases/download/v1.12.3/tofu_1.12.3_linux_amd64.zip",
-)
 
 http_file(
     name = "cacert_pem",

@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+"""Complete and verify the pins in src/tools/multitool.lock.json.
+
+Renovate (and any hand edit) bumps the release tag inside a download URL but
+cannot recompute the paired sha256, so a bumped entry is stale until this
+runs. Every entry is downloaded every run; for archives the declared `file`
+member must exist in the archive. The committed lockfile at git HEAD is the
+tamper baseline: an entry whose URL is unchanged from HEAD but whose content
+hash moved is an upstream re-tag or tamper and always a hard error — only
+entries whose URL actually changed may have their sha256 rewritten.
+
+A version bump only rewrites the release-tag segment of the URL (that is
+all a Renovate regex manager can do), but most upstreams repeat the version
+in the asset filename and some in the archive's internal directory. For
+GitHub release URLs this script reconciles both from the tag: every
+dotted-numeric token in the filename and the `file` member is rewritten to
+the tag's version before fetching.
+
+Usage: tools/ops/multitool-repin [--check]
+  --check  verify every entry (hash + archive member + tag/filename
+           agreement) without rewriting; exit nonzero on any drift. This is
+           the CI gate.
+"""
+
+import hashlib
+import json
+import re
+import subprocess
+import sys
+import tarfile
+import tempfile
+import urllib.request
+import zipfile
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[2]
+LOCKFILE = REPO / "src/tools/multitool.lock.json"
+LOCKFILE_REPO_PATH = "src/tools/multitool.lock.json"
+
+GITHUB_DOWNLOAD = re.compile(r"^(https://github\.com/[^/]+/[^/]+/releases/download/)([^/]+)/(.+)$")
+DOTTED_VERSION = re.compile(r"\d+(?:\.\d+)+")
+
+
+def reconcile(binary):
+    """Rewrite version tokens in a GitHub URL's filename and the archive
+    member to agree with the URL's release tag. Returns True if changed."""
+    m = GITHUB_DOWNLOAD.match(binary["url"])
+    if not m:
+        return False
+    prefix, tag, filename = m.groups()
+    version = DOTTED_VERSION.match(tag.lstrip("v"))
+    if not version:
+        return False
+    changed = False
+    fixed = DOTTED_VERSION.sub(version.group(0), filename)
+    if fixed != filename:
+        binary["url"] = prefix + tag + "/" + fixed
+        changed = True
+    if binary.get("file"):
+        fixed = DOTTED_VERSION.sub(version.group(0), binary["file"])
+        if fixed != binary["file"]:
+            binary["file"] = fixed
+            changed = True
+    return changed
+
+
+def fetch(url):
+    """Download url to a temp file, returning (path, sha256)."""
+    req = urllib.request.Request(url, headers={"User-Agent": "guardian-multitool-repin"})
+    h = hashlib.sha256()
+    tmp = tempfile.NamedTemporaryFile(delete=False)
+    with urllib.request.urlopen(req, timeout=60) as r:
+        while chunk := r.read(1 << 20):
+            h.update(chunk)
+            tmp.write(chunk)
+    tmp.close()
+    return Path(tmp.name), h.hexdigest()
+
+
+def archive_members(path, url):
+    if url.endswith(".zip"):
+        with zipfile.ZipFile(path) as z:
+            names = z.namelist()
+    else:
+        with tarfile.open(path, "r:*") as t:
+            names = t.getnames()
+    # Some upstreams store "./"-prefixed member names; extraction strips them.
+    return [n[2:] if n.startswith("./") else n for n in names]
+
+
+def baseline_urls():
+    """(tool, os, cpu) -> (url, sha256) from the lockfile committed at HEAD."""
+    r = subprocess.run(
+        ["git", "-C", str(REPO), "show", f"HEAD:{LOCKFILE_REPO_PATH}"],
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode != 0:
+        return {}
+    out = {}
+    for tool, spec in json.loads(r.stdout).items():
+        if tool == "$schema":
+            continue
+        for b in spec["binaries"]:
+            out[(tool, b["os"], b["cpu"])] = (b["url"], b.get("sha256", ""))
+    return out
+
+
+def main():
+    check = "--check" in sys.argv[1:]
+    lock = json.loads(LOCKFILE.read_text())
+    base = baseline_urls()
+    repinned, errors = [], []
+    for tool, spec in lock.items():
+        if tool == "$schema":
+            continue
+        for binary in spec["binaries"]:
+            key = (tool, binary["os"], binary["cpu"])
+            if reconcile(binary):
+                if check:
+                    errors.append(
+                        f"{tool} {binary['os']}/{binary['cpu']}: filename or member disagrees with the "
+                        f"URL's release tag; run tools/ops/multitool-repin"
+                    )
+                    continue
+                repinned.append(f"{tool} {binary['os']}/{binary['cpu']}: reconciled to tag")
+            print(f"{tool} {binary['os']}/{binary['cpu']}: fetching", file=sys.stderr)
+            try:
+                path, got = fetch(binary["url"])
+            except Exception as e:
+                errors.append(f"{tool} {binary['os']}/{binary['cpu']}: fetch failed: {e}")
+                continue
+            try:
+                if binary["kind"] == "archive" and binary["file"] not in archive_members(path, binary["url"]):
+                    errors.append(
+                        f"{tool} {binary['os']}/{binary['cpu']}: member {binary['file']!r} not in archive"
+                    )
+                    continue
+            finally:
+                path.unlink()
+            if got == binary.get("sha256"):
+                continue
+            base_url, _ = base.get(key, (None, None))
+            if base_url == binary["url"]:
+                errors.append(
+                    f"{tool} {binary['os']}/{binary['cpu']}: content changed under an unchanged URL "
+                    f"(committed {binary.get('sha256')}, upstream now {got}) — upstream re-tag or tamper; "
+                    f"refusing to launder the pin"
+                )
+                continue
+            if check:
+                errors.append(
+                    f"{tool} {binary['os']}/{binary['cpu']}: sha256 stale for bumped URL "
+                    f"({binary.get('sha256')} -> {got}); run tools/ops/multitool-repin"
+                )
+                continue
+            binary["sha256"] = got
+            repinned.append(f"{tool} {binary['os']}/{binary['cpu']}: {got}")
+    if errors:
+        print("FAILED:\n" + "\n".join(errors), file=sys.stderr)
+        return 1
+    if repinned:
+        LOCKFILE.write_text(json.dumps(lock, indent=2) + "\n")
+        print("repinned:\n" + "\n".join(repinned), file=sys.stderr)
+    else:
+        print("all pins verified", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

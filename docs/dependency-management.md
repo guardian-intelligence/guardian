@@ -10,7 +10,8 @@ operating manual.
 Every pin has exactly one proposer, and both proposers are untrusted — CI
 plus branch protection decide every merge:
 
-- **Renovate** proposes the source plane: Bazel tool archives
+- **Renovate** proposes the source plane: the host-CLI lockfile
+  (`src/tools/multitool.lock.json`), the bespoke tool archives
   (`src/tools/*/*.MODULE.bazel`), `bazel_dep` and `oci.pull` in
   `MODULE.bazel`, `go.mod`, the pnpm catalog, GitHub Actions digests, tofu
   provider pins, the bootstrap pivots (`scripts/bootstrap/`), the Talos
@@ -23,6 +24,16 @@ plus branch protection decide every merge:
 The scheduled proposer pages if its run fails (`renovate.yml`); a config
 error does not fail the run, so `renovate-config.yml` validates
 `renovate.json5` on every PR that touches it.
+
+A lockfile bump completes itself: `postUpgradeTasks` runs
+`tools/ops/multitool-repin` in the Renovate sandbox, which reconciles
+asset filenames and archive member paths with the bumped release tag,
+re-downloads every entry, and rewrites the sha256s the bump staled — so
+the PR lands whole. A hash that moves under an *unchanged* URL is an
+upstream re-tag or tamper and is always a hard error, never silently
+laundered into a bump PR. CI re-verifies independently —
+`//src/tools:pins` builds the host half hermetically, and the `--check`
+pass re-downloads both platforms on any lockfile diff.
 
 ## Trust tiers
 
@@ -46,8 +57,9 @@ actually exercise the artifact.
 
 1. CI gates (automatic): build, the manifest/version-skew conformance suite
    (runs on any `src/infrastructure/**` **or** `src/tools/**` diff), tool-pin
-   fetch/unpack verification (`//src/tools:pins`), secret scan, actions
-   allowlist check.
+   fetch/unpack verification (`//src/tools:pins` for the host platform,
+   `multitool-repin --check` for both platforms on lockfile diffs), secret
+   scan, actions allowlist check.
 2. Review (human/agent): read the upstream changelog Renovate embeds; for
    anything cluster-coupled or substrate, that means the release notes, not
    the diff summary.
@@ -86,12 +98,15 @@ drift cron.
 
 No datasource can see these; each has a stated backstop:
 
-- The Percona PostgreSQL tarball in `src/tools/debug-clis`
-  (downloads.percona.com) — debug tooling only, no backstop beyond use.
-- Every sha256 that pairs with a regex-bumped version string (kubectl, the
-  bootstrap pivots): Renovate bumps the version, the hash pair is completed
-  by hand, and the stale hash fails CI (`//src/tools:pins` fetch for
-  kubectl, every job's bootstrap step for the pivots) until done.
+- The bootstrap pivots' sha256 pairs (bazelisk + aspect): Renovate bumps
+  the version, the hash pair is completed by hand, and the stale hash
+  fails every CI job's bootstrap step until done. (Lockfile hashes are
+  NOT in this class — `multitool-repin` rederives them automatically.)
 - The hauler go.mod self-reference (`hauler.dev/go/hauler/v2`) is
   `ignoreDeps` — its registry lookup can never succeed; hauler is built
   from source precisely because upstream releases are unsigned.
+
+Percona left this list with the lockfile migration: downloads.percona.com
+still has no datasource, but Percona tags a docker image for every tarball
+release, so `percona/percona-distribution-postgresql` docker tags are the
+version oracle (constrained to plain `X.Y` tags in `renovate.json5`).

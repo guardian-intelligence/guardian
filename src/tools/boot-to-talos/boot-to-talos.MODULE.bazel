@@ -1,8 +1,0 @@
-http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-
-http_archive(
-    name = "boot_to_talos_linux_amd64",
-    build_file_content = """exports_files(["boot-to-talos"])""",
-    sha256 = "46946b1c0862f2f1de0e01cb5be16002734a090f831b7a2d7b6efba7a895738b",
-    url = "https://github.com/cozystack/boot-to-talos/releases/download/v0.7.1/boot-to-talos-linux-amd64.tar.gz",
-)
