@@ -4,8 +4,8 @@
 # promotion-automerge: its PRs and commits must be attributed to a distinct
 # bot identity and must trigger the normal PR workflows.
 #
-# A silently dead scheduler is the Kargo-wedge failure mode (every alert it
-# would raise freezes green), so a failed run pages instead of rotting.
+# A silently dead scheduler is the Kargo-wedge failure mode: every proposal
+# it would raise freezes, and nothing downstream notices the absence.
 name: renovate
 
 on:

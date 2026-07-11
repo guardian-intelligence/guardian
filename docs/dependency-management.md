@@ -22,9 +22,9 @@ plus branch protection decide every merge:
   for Renovate, with the helm-values/kustomize managers disabled
   outright). Never hand-roll or duplicate its promotion PRs.
 
-The scheduled proposer pages if its run fails (`renovate.yml`); a config
-error does not fail the run, so `renovate-config.yml` validates
-`renovate.json5` on every PR that touches it.
+A config error does not fail the scheduled run (Renovate files an issue
+and exits 0), so `renovate-config.yml` validates `renovate.json5` on
+every PR that touches it.
 
 ## Trust tiers
 
@@ -78,8 +78,8 @@ two-step lockstep:
    `gh api -X PUT repos/guardian-intelligence/guardian/actions/permissions/selected-actions --input .github/actions-allowlist.json`
 
 Skipping step 2 kills every workflow that uses the new digest as a
-`startup_failure`: no jobs, no logs, and the in-workflow failure→ntfy page
-never runs. `github_owned_allowed` covers `actions/*`, so first-party
+`startup_failure`: no jobs, no logs, no run for anything to observe.
+`github_owned_allowed` covers `actions/*`, so first-party
 action bumps need no lockstep. A standing read-only drift check between the
 file and the live setting is future work, same pattern as the approved tofu
 drift cron.

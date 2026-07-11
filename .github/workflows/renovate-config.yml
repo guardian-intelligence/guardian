@@ -1,6 +1,5 @@
 # A broken renovate.json5 does not fail the scheduled run — Renovate files a
-# config-error issue, skips the repo, and exits 0, which is exactly the
-# silent-dead-proposer failure mode the scheduler's failure page cannot see.
+# config-error issue, skips the repo, and exits 0: a silently dead proposer.
 # So config edits are validated at PR time instead. The version here is the
 # same pinned Renovate release renovate.yml runs.
 name: renovate-config
