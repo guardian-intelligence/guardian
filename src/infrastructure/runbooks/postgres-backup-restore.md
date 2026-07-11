@@ -66,7 +66,9 @@ EOF
 #    begin_wal with barman-cloud-wal-restore; if it is absent and the
 #    segment is still on the primary, archive it from pg_wal using the same
 #    destination/serverName:
-#    barman-cloud-wal-restore <destination-url> <serverName> <begin_wal> /tmp/<begin_wal>
+#    (write the probe under /var/lib/postgresql/data — /tmp is read-only in
+#    the postgres container)
+#    barman-cloud-wal-restore <destination-url> <serverName> <begin_wal> /var/lib/postgresql/data/<begin_wal>
 #    barman-cloud-wal-archive --gzip <destination-url> <serverName> /var/lib/postgresql/data/pgdata/pg_wal/<wal>
 ```
 
