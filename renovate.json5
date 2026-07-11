@@ -28,10 +28,15 @@
 
   // Kargo's territory plus the standard junk dirs (setting ignorePaths
   // replaces the preset default, so the node_modules entries come along).
+  // Kargo's Stage pipelines git-push image bumps into exactly these three
+  // stage-manifest trees; the rest of deployments/ is infrastructure
+  // components whose chart pins Renovate proposes like any other dep.
   ignorePaths: [
     "**/node_modules/**",
     "**/bower_components/**",
-    "src/infrastructure/deployments/**",
+    "src/infrastructure/deployments/company/**",
+    "src/infrastructure/deployments/iam/**",
+    "src/infrastructure/deployments/products/**",
   ],
 
   // The bespoke tool pins (restic, ruby) live in
