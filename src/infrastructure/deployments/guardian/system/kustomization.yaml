@@ -8,3 +8,7 @@ resources:
   - openbao-observability.yaml
   - openbao-rbac.yaml
   - vap-denial-canary.yaml
+  - zot-helmrelease.yaml
+  - zot-mirror-canary.yaml
+  - zot-networkpolicy.yaml
+  - zot-observability.yaml

@@ -9,6 +9,10 @@ filegroup(
         "openbao-rbac.yaml",
         "stage-tenants.yaml",
         "vap-denial-canary.yaml",
+        "zot-helmrelease.yaml",
+        "zot-mirror-canary.yaml",
+        "zot-networkpolicy.yaml",
+        "zot-observability.yaml",
     ],
     visibility = ["//visibility:public"],
 )

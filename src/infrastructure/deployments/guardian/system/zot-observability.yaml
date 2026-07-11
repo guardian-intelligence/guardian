@@ -1,0 +1,79 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: zot
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: zot
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: registry
+    guardian.dev/tenant-id: gi-guardian
+spec:
+  namespaceSelector:
+    matchNames:
+      - tenant-guardian
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: zot
+      app.kubernetes.io/instance: zot
+  endpoints:
+    - port: zot
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: zot
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: zot
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: registry
+    guardian.dev/tenant-id: gi-guardian
+spec:
+  groups:
+    - name: zot.rules
+      interval: 30s
+      rules:
+        # Node pulls fall back to upstream ghcr implicitly while zot is down,
+        # so nothing else fails when this fires — which is exactly why it must
+        # page: a dead mirror with working fallback is silent by construction.
+        - alert: ZotRegistryDown
+          expr: up{namespace="tenant-guardian",job="zot"} == 0
+          for: 10m
+          labels:
+            severity: critical
+            guardian.dev/component: registry
+          annotations:
+            summary: zot registry is down; node pulls are silently falling back to upstream ghcr.
+            description: >-
+              The zot scrape target has been down for 10m. Image pulls keep
+              working via containerd's implicit fallback to ghcr.io, so no
+              workload symptom will surface this. Check the zot StatefulSet in
+              tenant-guardian and the zot-pvc-zot-0 volume.
+        - alert: ZotRegistryScrapeAbsent
+          expr: absent(up{namespace="tenant-guardian",job="zot"})
+          for: 15m
+          labels:
+            severity: critical
+            guardian.dev/component: registry
+          annotations:
+            summary: zot scrape target has vanished; mirror health is unverified.
+            description: >-
+              No up series for the zot scrape for 15m — the Service,
+              VMServiceScrape, or vmagent path is broken. The mirror may or may
+              not be serving; its health is unobserved until this is fixed.
+        - alert: ZotStoragePVCPressure
+          expr: kubelet_volume_stats_available_bytes{namespace="tenant-guardian",persistentvolumeclaim=~"zot-pvc-zot-.*"} / kubelet_volume_stats_capacity_bytes{namespace="tenant-guardian",persistentvolumeclaim=~"zot-pvc-zot-.*"} < 0.15
+          for: 10m
+          labels:
+            severity: warning
+            guardian.dev/component: registry
+          annotations:
+            summary: zot cache PVC free space is below 15%.
+            description: >-
+              The registry cache is filling. It is rebuildable — the blunt fix
+              is to wipe the PVC and let on-demand sync repopulate, or grow the
+              volume; blob GC alone cannot shrink it below the live estate.

@@ -1,0 +1,191 @@
+# zot — the in-cluster OCI registry tier (docs/registry-design.md). Runs as a
+# pull-through mirror of ghcr.io on a MetalLB VIP so Talos containerd can pull
+# through it (mirror flip happens in talm, separately). The registry is a
+# rebuildable cache: git and ghcr remain the sources of truth, the PVC is
+# never backed up, and losing it costs one re-sync.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: zot-chart
+  namespace: tenant-guardian
+spec:
+  interval: 1h
+  url: oci://ghcr.io/project-zot/helm-charts/zot
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: extract
+  ref:
+    tag: 0.1.121
+    digest: sha256:044acf11c63f8497128306d63cb6f15aaf4947499ee702682c5bebc5e9fbfa17
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: zot
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: zot
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: registry
+    guardian.dev/tenant-id: gi-guardian
+spec:
+  interval: 10m
+  timeout: 5m
+  chartRef:
+    kind: OCIRepository
+    name: zot-chart
+  install:
+    remediation:
+      retries: -1
+  upgrade:
+    remediation:
+      retries: 0
+  values:
+    image:
+      repository: ghcr.io/project-zot/zot-linux-amd64
+      tag: "v2.1.18@sha256:34f18f783037f967dba10df02f9d4086c4d626f5643ef9f5e51e4a4547280a0b"
+    replicaCount: 1
+    service:
+      type: LoadBalancer
+      port: 5000
+      annotations:
+        metallb.io/loadBalancerIPs: 10.8.0.201
+    persistence: true
+    pvc:
+      create: true
+      accessModes: ["ReadWriteOnce"]
+      storage: 128Gi
+      storageClassName: replicated
+    mountConfig: true
+    configFiles:
+      # Validated against this exact zot build with `zot verify` plus a live
+      # pull-through smoke test before shipping. Two settings are load-bearing
+      # for the digest-pinned estate and must never be relaxed:
+      # preserveDigest + http.compat docker2s2. zot's default sync CONVERTS
+      # docker-media-type manifests to OCI, which changes digests and would
+      # break every pinned ref and cosign signature served through the mirror.
+      #
+      # accessControl is the write lock, not an auth system: without it zot
+      # serves anonymous read-WRITE. Anonymous read-only holds while the
+      # mirror's content is a strict subset of public ghcr; the moment any
+      # non-public artifact lands here, authenticated pulls must already be
+      # in place (trigger condition in docs/registry-design.md). The first
+      # writer (the R2 countersigner) arrives with bearer ServiceAccount
+      # federation and its own accessControl policies — nothing is
+      # pre-provisioned for it here.
+      #
+      # The retention block is load-bearing, not optional: with gc enabled
+      # and NO retention config, zot defaults to deleteUntagged=true — and
+      # the estate pulls by digest, so everything this mirror caches for
+      # real consumers is stored UNTAGGED. The bare default was proven to
+      # delete a by-digest-synced manifest on the first GC pass
+      # ("reason":"deleteUntagged") in a local run of this exact image;
+      # with this block the same manifest survived. deleteReferrers stays
+      # false so future countersignatures survive their subjects' churn.
+      config.json: |-
+        {
+          "distSpecVersion": "1.1.1",
+          "storage": {
+            "rootDirectory": "/var/lib/registry",
+            "dedupe": true,
+            "gc": true,
+            "gcDelay": "1h",
+            "gcInterval": "24h",
+            "retention": {
+              "policies": [
+                {
+                  "repositories": ["**"],
+                  "deleteUntagged": false,
+                  "deleteReferrers": false
+                }
+              ]
+            }
+          },
+          "http": {
+            "address": "0.0.0.0",
+            "port": "5000",
+            "compat": ["docker2s2"],
+            "accessControl": {
+              "repositories": {
+                "**": {
+                  "anonymousPolicy": ["read"],
+                  "defaultPolicy": []
+                }
+              },
+              "metrics": {
+                "anonymousPolicy": ["read"]
+              }
+            }
+          },
+          "log": {
+            "level": "info"
+          },
+          "extensions": {
+            "sync": {
+              "enable": true,
+              "registries": [
+                {
+                  "urls": ["https://ghcr.io"],
+                  "onDemand": true,
+                  "tlsVerify": true,
+                  "preserveDigest": true,
+                  "maxRetries": 3,
+                  "retryDelay": "5m"
+                }
+              ]
+            },
+            "metrics": {
+              "enable": true,
+              "prometheus": {
+                "path": "/metrics"
+              }
+            }
+          }
+        }
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 65534
+      runAsGroup: 65534
+      fsGroup: 65534
+      # Without this, every pod start recursively chowns the whole cache
+      # volume.
+      fsGroupChangePolicy: OnRootMismatch
+      seccompProfile:
+        type: RuntimeDefault
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+      readOnlyRootFilesystem: true
+    extraVolumes:
+      - name: tmp
+        emptyDir: {}
+    extraVolumeMounts:
+      - name: tmp
+        mountPath: /tmp
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+        ephemeral-storage: 128Mi
+      limits:
+        cpu: "1"
+        memory: 2Gi
+        ephemeral-storage: 1Gi
+  postRenderers:
+    - kustomize:
+        patches:
+          # The chart's Service template has no allocateLoadBalancerNodePorts
+          # knob; the VIP is L2-only on the VLAN and must not also open
+          # NodePorts.
+          - target:
+              kind: Service
+              name: zot
+            patch: |
+              apiVersion: v1
+              kind: Service
+              metadata:
+                name: zot
+                namespace: tenant-guardian
+              spec:
+                allocateLoadBalancerNodePorts: false
