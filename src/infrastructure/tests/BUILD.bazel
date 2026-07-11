@@ -12,6 +12,7 @@ go_test(
         "images_lock_test.go",
         "k6_script_conformance_test.go",
         "keycloak_admin_guard_test.go",
+        "kube_pod_not_ready_test.go",
         "multus_resources_test.go",
         "openbao_conformance_test.go",
         "talm_render_test.go",

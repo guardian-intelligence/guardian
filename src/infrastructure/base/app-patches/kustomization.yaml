@@ -15,6 +15,7 @@ resources:
   - cozystack-app-namespace-admission.yaml
   - image-provenance-admission.yaml
   - ingress-origin-edge.yaml
+  - monitoring-agents-kube-pod-not-ready.yaml
   - monitoring-agents-vmagent-resources.yaml
   - openbao-static-seal-admission.yaml
   - tenant-guardian-namespace-pod-security.yaml
