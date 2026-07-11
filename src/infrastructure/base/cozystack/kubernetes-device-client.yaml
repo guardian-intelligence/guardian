@@ -12,7 +12,13 @@
 # Tokens still authenticate against the apiserver's `oidc-client-id:
 # kubernetes` because the realm's `kubernetes-client` scope maps an
 # `aud: kubernetes` claim into every token; `groups` carries the RBAC
-# groups. Both scopes are chart-shipped (cozystack keycloak-configure).
+# groups (both chart-shipped by cozystack keycloak-configure); `profile`
+# carries preferred_username, the apiserver's username claim. offline_access
+# is what turns the cached refresh token into a 30-day-idle offline token
+# (resets on use), so agent sessions stay unattended after one device
+# approval per machine. The scope lists are explicit rather than trusting
+# Keycloak's client-creation defaults: the token pipeline the apiserver
+# depends on should be readable from this file alone.
 #
 # Lives in tenant-root with the platform-admins CRs: the EDP
 # keycloak-operator watches all namespaces.
@@ -39,3 +45,6 @@ spec:
   defaultClientScopes:
     - groups
     - kubernetes-client
+    - profile
+  optionalClientScopes:
+    - offline_access

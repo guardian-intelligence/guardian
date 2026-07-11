@@ -1918,7 +1918,10 @@ def _auth_platform_agent(ctx, kubectl, target):
     if rc != 0:
         return rc
 
-    ctx.std.io.stderr.write("selected platform-agent@guardian-mgmt in " + target + "; verifying (first login prints a device-code URL — open it in a browser on any machine)\n")
+    ctx.std.io.stderr.write(
+        "selected platform-agent@guardian-mgmt in " + target + "; verifying (first login prints a device-code URL — open it in a browser on any machine)\n"
+        + "IMPORTANT: approve the device login as the platform-agent user (use a private window if another Keycloak session is active); only platform-agent holds the offline_access role, so any other identity fails the exchange with 'not_allowed'\n",
+    )
     rc = checked_spawn(ctx, kubectl, ["--kubeconfig", target, "auth", "whoami"], label = "kubectl auth whoami")
     if rc != 0:
         return rc
