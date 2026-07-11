@@ -516,14 +516,27 @@ func stageBundle(opts *options, src *sources) (string, bool, error) {
 // returns it as a RESTIC_PASSWORD env entry, so a command's several restic
 // invocations (check, snapshots, ls, restore...) do not each re-prompt.
 // Returns a nil env — restic sources the password itself — when RESTIC_PASSWORD
-// is already set or there is no terminal to prompt. The password rides in the
-// environment only; see the runRestic note on the accepted /proc visibility.
+// is already set or no terminal is reachable. When stdin is not a terminal
+// (env-set pipes the VALUE through stdin), the prompt falls back to
+// /dev/tty: stdin is exhausted by the value read, so restic's own prompt
+// would otherwise see EOF and die on an empty password. The password rides
+// in the environment only; see the runRestic note on the accepted /proc
+// visibility.
 func promptRepoPassword(opts *options) ([]string, error) {
-	if os.Getenv("RESTIC_PASSWORD") != "" || !term.IsTerminal(int(os.Stdin.Fd())) {
+	if os.Getenv("RESTIC_PASSWORD") != "" {
 		return nil, nil
 	}
+	in := os.Stdin
+	if !term.IsTerminal(int(in.Fd())) {
+		tty, err := os.Open("/dev/tty")
+		if err != nil {
+			return nil, nil
+		}
+		defer tty.Close()
+		in = tty
+	}
 	fmt.Fprint(opts.stdout, "Custody repository password: ")
-	password, err := term.ReadPassword(int(os.Stdin.Fd()))
+	password, err := term.ReadPassword(int(in.Fd()))
 	fmt.Fprintln(opts.stdout)
 	if err != nil {
 		return nil, err
