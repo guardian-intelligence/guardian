@@ -3,6 +3,7 @@ load("@rules_go//go:def.bzl", "go_test")
 go_test(
     name = "talm_render_test",
     srcs = [
+        "alertmanager_auth_test.go",
         "analytics_ddl_conformance_test.go",
         "cdi_alerts_test.go",
         "cozystack_app_namespace_admission_test.go",

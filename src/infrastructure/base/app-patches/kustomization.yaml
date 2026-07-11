@@ -18,6 +18,8 @@ resources:
   - cozystack-app-namespace-admission.yaml
   - image-provenance-admission.yaml
   - ingress-origin-edge.yaml
+  - monitoring-alertmanager-auth.yaml
+  - monitoring-alertmanager-config.yaml
   - monitoring-agents-kube-pod-not-ready.yaml
   - monitoring-agents-vmagent-resources.yaml
   - monitoring-shortterm-vmselect-resources.yaml

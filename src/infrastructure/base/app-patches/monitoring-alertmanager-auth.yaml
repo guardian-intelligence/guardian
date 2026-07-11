@@ -1,0 +1,11 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMAlertmanager
+metadata:
+  name: alertmanager
+  namespace: tenant-root
+  annotations:
+    kustomize.toolkit.fluxcd.io/ssa: Override
+spec:
+  configSecret: guardian-alertmanager
+  secrets:
+    - alerta

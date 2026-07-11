@@ -10,6 +10,8 @@ filegroup(
         "registry-prefixes.txt",
         "ingress-origin-edge.yaml",
         "kustomization.yaml",
+        "monitoring-alertmanager-auth.yaml",
+        "monitoring-alertmanager-config.yaml",
         "monitoring-agents-kube-pod-not-ready.yaml",
         "monitoring-agents-vmagent-resources.yaml",
         "monitoring-shortterm-vmselect-resources.yaml",
