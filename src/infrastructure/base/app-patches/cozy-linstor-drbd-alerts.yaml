@@ -1,6 +1,6 @@
 # PrometheusRule groups merge by name, while each group's rules list is atomic
-# under server-side apply. Keep the complete upstream DRBD group so the two
-# recovery refinements cannot prune its immediate failure signals.
+# under server-side apply. Keep both complete upstream groups so alert delivery
+# corrections cannot prune adjacent failure signals.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -10,6 +10,65 @@ metadata:
     kustomize.toolkit.fluxcd.io/ssa: Override
 spec:
   groups:
+    - name: linstor.rules
+      rules:
+        - alert: linstorControllerUnavailable
+          annotations:
+            description: |
+              LINSTOR Controller deployment has no available replicas.
+          expr: kube_deployment_status_replicas_available{namespace="cozy-linstor",deployment="linstor-controller"} < 1
+          for: 3m
+          labels:
+            severity: critical
+        - alert: linstorControllerMetricsScrapeFailing
+          annotations:
+            description: |
+              LINSTOR Controller metrics endpoint is not being scraped successfully.
+          expr: up{job="linstor-controller"} == 0
+          for: 10m
+          labels:
+            severity: warning
+        - alert: linstorSatelliteErrorRate
+          annotations:
+            description: |
+              LINSTOR Satellite "{{ $labels.hostname }}" reports {{ $value }} errors in the last 15 minutes.
+              Use "linstor error-reports list --nodes {{ $labels.hostname }}" to inspect the reports.
+          expr: |
+            increase(linstor_error_reports_count{module="SATELLITE"}[15m]) > 0
+            and on(instance, job)
+            min_over_time(up{job="linstor-controller"}[15m]) == 1
+          labels:
+            severity: warning
+        - alert: linstorControllerErrorRate
+          annotations:
+            description: |
+              LINSTOR Controller reports {{ $value }} errors in the last 15 minutes.
+              Use "linstor error-reports list --since 15minutes" to see them.
+          expr: increase(linstor_error_reports_count{module="CONTROLLER"}[15m]) > 0
+          labels:
+            severity: warning
+        - alert: linstorSatelliteNotOnline
+          annotations:
+            description: |
+              LINSTOR Satellite "{{ $labels.hostname }}" is not ONLINE.
+              Check that the Satellite is running and reachable from the LINSTOR Controller.
+          expr: linstor_node_state{nodetype="SATELLITE"} != 2
+          labels:
+            severity: critical
+        - alert: linstorStoragePoolErrors
+          annotations:
+            description: |
+              Storage pool "{{ $labels.storage_pool }}" on node "{{ $labels.node }}" ({{ $labels.driver }}={{ $labels.backing_pool }}) is reporting errors.
+          expr: linstor_storage_pool_error_count > 0
+          labels:
+            severity: critical
+        - alert: linstorStoragePoolAtCapacity
+          annotations:
+            description: |
+              Storage pool "{{ $labels.storage_pool }}" on node "{{ $labels.node }}" ({{ $labels.driver }}={{ $labels.backing_pool }}) has less than 20% free space available.
+          expr: (linstor_storage_pool_capacity_free_bytes / linstor_storage_pool_capacity_total_bytes) < 0.20
+          labels:
+            severity: warning
     - name: drbd.rules
       rules:
         - alert: drbdReactorOffline
