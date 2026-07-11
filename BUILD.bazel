@@ -1,5 +1,6 @@
 exports_files([
     ".aspect/tasks/infra.axl",
+    "MODULE.bazel",
     ".bazelignore",
     "AGENTS.md",
     "TRIBAL_KNOWLEDGE.md",
