@@ -22,6 +22,7 @@ go_test(
         "openbao_conformance_test.go",
         "version_skew_test.go",
         "vlogs_streams_test.go",
+        "vm_rollup_wiring_test.go",
         "vmselect_resources_test.go",
     ],
     data = [

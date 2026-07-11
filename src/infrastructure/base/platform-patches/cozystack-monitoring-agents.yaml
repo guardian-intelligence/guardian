@@ -56,3 +56,5 @@ spec:
         vmagent:
           extraArgs:
             promscrape.maxScrapeSize: 64MB
+            # Per-URL values follow the chart's shortterm, longterm order.
+            remoteWrite.streamAggr.dedupInterval: 0s,1m

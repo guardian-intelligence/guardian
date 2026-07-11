@@ -9,7 +9,7 @@ spec:
   metricsStorages:
     - name: shortterm
       retentionPeriod: 3d
-      deduplicationInterval: 15s
+      deduplicationInterval: 1s
       storage: 5Gi
       storageClassName: replicated
       vminsert:
@@ -46,7 +46,7 @@ spec:
           memory: 2Gi
     - name: longterm
       retentionPeriod: 14d
-      deduplicationInterval: 5m
+      deduplicationInterval: 1m
       storage: 10Gi
       storageClassName: replicated
       vminsert:
@@ -107,11 +107,3 @@ spec:
       limits:
         cpu: "1"
         memory: 512Mi
-  vmagent:
-    externalLabels:
-      cluster: guardian-mgmt
-      guardian_tenant: root
-    remoteWrite:
-      urls:
-        - http://vminsert-shortterm:8480/insert/0/prometheus
-        - http://vminsert-longterm:8480/insert/0/prometheus
