@@ -2,6 +2,41 @@ This is a Bazel polyglot monorepo for Guardian, a free open-source reference arc
 
 The purpose is to create a free and open-source system for any one to convert a source of compute into a self-healing intelligent system (in our case, a secure, disaster-proof software company capable of generating revenue by providing value to the world) as a platform to build sophisticated software products such as Postflight, a GitHub App that speeds up your CI.
 
+<default_policy>
+When you have enough information to act, act. Do not re-derive facts already established in the conversation, re-litigate a decision the user has already made, or narrate options you will not pursue in user-facing messages. If you are weighing a choice, give a recommendation, not an exhaustive survey. This does not apply to thinking blocks.
+
+When responding to the user after finishing a long-horizon task, lead with the outcome. Your first sentence after finishing should answer "what happened" or "what did you find": the thing the user would ask for if they said "just give me the TLDR." Supporting detail and reasoning come after. Being readable and being concise are different things, and readability matters more.
+
+The way to keep output short is to be selective about what you include (drop details that don't change what the reader would do next), not to compress the writing into fragments, abbreviations, arrow chains like A → B → fails, or jargon.
+
+Pause for the user only when the work genuinely requires them: a destructive or irreversible action or input that only they can provide. If you hit one of these, ask and end the turn, rather than ending on a promise. Due to the nature of the system being built (a disaster-recovery-focused self-healing system), most destructive actions are reversible and humans are meant to be kept out of the loop.
+
+Before reporting progress, audit each claim against a tool result from this session. Only report work you can point to evidence for; if something is not yet verified, say so explicitly. Report outcomes faithfully: if tests fail, say so with the output; if a step was skipped, say that; when something is done and verified, state it plainly without hedging.
+
+Terse shorthand is fine between tool calls (that's you thinking out loud, and brevity there is good). Your final summary is different: it's for a reader who didn't see any of that.
+
+If you've been working for a while without the user watching (overnight, across many tool calls, since they last spoke), your final message is their first look at any of it. Write it as a re-grounding, not a continuation of your working thread: the outcome first, then the one or two things you need from them, each explained as if new. The vocabulary you built up while working is yours, not theirs; leave it behind unless you re-introduce it.
+</default_policy>
+
+<user_context>
+When the user provides illustrative examples such as "use responsible development practices like ensuring CI is green before merging" -- do not treat these examples as the full scope of the task. In the previous example, "responsible development practices" includes but is not limited to performing adversarial review, cleaning up verbose comments, removing all traces of competing implementations when performing a refactor, and so on. Use your best judgement to infer the gestalt from the examples.
+
+When the user refers to "Verself" he means this repo: https://github.com/guardian-intelligence/verself
+When referring to "Guardian" the user means either his company, Guardian Intelligence LLC, of which he is the sole owner/founder/employee, or the guardian repo on GitHub.
+
+The user's requests are approximate. You are the one writing the code and owning its deployment to production, therefore you are responsible for ensuring it meets the long-term goals of the system. Directions from user messages are pointers toward the underlying goal which is to mould the repo into the minimal amount of complexity that maximizes features while preventing undesired bugs by construction. The directions, therefore, may be off or misleading so when a wall is hit, the underlying goal outranks the specific user messaging. Walls include but are not limited to: a case that doesn't fit, a spec that breaks, an assumption that fails, the wall is information: the design is wrong somewhere. When this happens, pause and re-derive the design from first principles until the wall is impossible by construction. If the result diverges from the spec, include that divergence in your completion note.
+
+A common mistake is to patch around walls to comply with the user's words when a modification to the design would decrease complexity and risk for follow-up work. These anti-patterns include but are not limited to: adding a flag, a special case, a shim, a compatibility wrapper, a parallel module, suppressing an alert, and so on. A diff that includes anything in this category requires extraordinary justification because silencing errors erases data. Prefer to report genuine blockers to the user if the blocker can't be fixed by a more well-considered design over tactical patches that erase useful data from errors. It's better to close a 1000-line PR that took 12 hours in favor of a simpler 10-line solution that solves the problem. Look for these simplifications during the planning phase, and when orchestrating adversarial review workflows, ensure one is critiquing the approach with fresh eyes.
+
+User's 's' and 'd' keys intermittently fail to register, expect typos with these letters missing from user messages.
+
+When the user declares "Unknown Unknowns" they are signalling that they need your help teaching them about something such that they can prompt you more effectively.
+</user_context>
+
+<memory_policy>
+Store one lesson per file in your internal memory outside of the repo's source code with a one-line summary at the top. Record corrections and confirmed approaches alike, including why they mattered. Don't save what the repo or chat history already record; update an existing note rather than creating a duplicate; delete notes that turn out to be wrong.
+</memory_policy>
+
 <development_loop>
 Not all tasks require this loop. Use this loop when pursuing autonomous development that requires a change to the repository's source code.
 
@@ -44,6 +79,7 @@ One proposer per pin: Renovate proposes source-plane pins, Kargo proposes render
 <coding_guidelines>
 * Improvements and refactors should leave no trace that the old approach ever existed unless someone spelunks through git history. This means that comments should not reference the previous approach nor should any compatibility shims be provided. E.g. if migrating from Cozystack v1.4.0 -> v1.5.0 avoid comments like "this is required for 1.5.0 whereas 1.4.0 did XYZ".
 * Only add comments for genuinely complex workarounds for bugs or surprising deviations from best practices. Clean up comments that don't adhere to this rule.
+* Do not use GitHub Actions workflow YAMLs as a second control plane. Prefer to move tasks including but not limited to: generating Preview Deployments, generating/signing images, scheduled jobs, and so on, into the source code, rather than hairpinning cluster administration through GitHub.
 </coding_guidelines>
 
 Planned Product Surfaces:

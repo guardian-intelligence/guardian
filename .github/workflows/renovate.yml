@@ -46,10 +46,3 @@ jobs:
           # commands not on this list are refused by the runner.
           RENOVATE_ALLOWED_COMMANDS: '["tools/ops/multitool-repin"]'
           LOG_LEVEL: info
-
-      - name: Page on failure
-        if: failure()
-        run: |
-          curl -fsS -m 10 \
-            -d "renovate: scheduled run failed — the dependency proposer is dark. https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            ntfy.sh/guardian-operations-fable
