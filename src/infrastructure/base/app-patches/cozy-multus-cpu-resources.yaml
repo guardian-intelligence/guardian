@@ -1,7 +1,7 @@
 # The Multus chart fixes both the request and limit at 100m. Its daemon on
-# ash-wind spends over half of its CFS periods throttled even though
-# sustained usage is low, so keep the chart-owned request and give CNI bursts
-# room at the limit. This partial object owns only that one resource leaf.
+# ash-wind spends over half of its CFS periods throttled even though sustained
+# usage is low. Keep the request chart-owned and include the immutable workload
+# identity required to validate this partial server-side apply.
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -10,7 +10,13 @@ metadata:
   annotations:
     kustomize.toolkit.fluxcd.io/ssa: Override
 spec:
+  selector:
+    matchLabels:
+      name: multus
   template:
+    metadata:
+      labels:
+        name: multus
     spec:
       containers:
         - name: kube-multus
