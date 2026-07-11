@@ -19,10 +19,12 @@
 #                                  # export on stdout only (safe to eval)
 set -euo pipefail
 
+# renovate: datasource=github-releases depName=bazelbuild/bazelisk
 bazelisk_version="1.28.1"
 bazelisk_sha256="22e7d3a188699982f661cf4687137ee52d1f24fec1ec893d91a6c4d791a75de8"
 bazelisk_url="https://github.com/bazelbuild/bazelisk/releases/download/v${bazelisk_version}/bazelisk-linux-amd64"
 
+# renovate: datasource=github-releases depName=aspect-build/aspect-cli
 aspect_version="2026.17.17"
 aspect_sha256="db45968e114c22af0e0d3dddadfb7091c81983f66499eed9d01d782bb09483d0"
 aspect_url="https://github.com/aspect-build/aspect-cli/releases/download/v${aspect_version}/aspect-cli-x86_64-unknown-linux-musl"

@@ -5,7 +5,7 @@
 // territory (Warehouse → pin-bump PR); Renovate must never touch those paths.
 // Both proposers are untrusted: CI + branch protection decide every merge.
 //
-// Trust tiers (see docs/dependency-management.md once written):
+// Trust tiers (operating manual: docs/dependency-management.md):
 //   first-party actions        — no cooldown
 //   standalone tools & libs    — 3-day cooldown
 //   cluster-coupled tools      — grouped, labeled, never automerged; merges
@@ -18,9 +18,10 @@
 //
 // Known-uncovered pins (no datasource can see them; the version-skew and
 // conformance tests are the backstop): the Percona PostgreSQL tarball in
-// src/tools/debug-clis (downloads.percona.com) and the kubectl sha256 pair
-// (the kubectl custom manager below bumps the version but cannot recompute
-// hashes — finishing that PR is a hand step, same as any substrate doorbell).
+// src/tools/debug-clis (downloads.percona.com), and every sha256 that pairs
+// with a regex-bumped version string (kubectl, the bootstrap pivots) — the
+// regex managers bump versions but cannot recompute hashes, so finishing
+// those PRs is a hand step and the checksum mismatch fails CI until done.
 {
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
   extends: ["config:best-practices"],
@@ -56,6 +57,10 @@
   // pnpm-workspace.yaml's minimumReleaseAge: 4320 (Renovate does not read
   // pnpm's setting; if the two drift, pnpm fails the lockfile update loudly).
   minimumReleaseAge: "3 days",
+
+  // hauler's vendored go.mod names its own module; the registry lookup can
+  // never succeed and the permanent dashboard WARN it produces is noise.
+  ignoreDeps: ["hauler.dev/go/hauler/v2"],
 
   osvVulnerabilityAlerts: true,
   dependencyDashboardOSVVulnerabilitySummary: "unresolved",
@@ -108,11 +113,26 @@
     // runbook's starting gun and merging it is the runbook's last step, so
     // Git never claims a version the cluster does not run. No cooldown —
     // the doorbell should ring promptly; the drill provides the soak.
+    // Renovate itself and the bootstrap pivots are regex-managed but are dev
+    // tooling, not substrate — excluded here, tiered below.
     {
       matchManagers: ["custom.regex"],
+      matchPackageNames: [
+        "!renovatebot/renovate",
+        "!bazelbuild/bazelisk",
+        "!aspect-build/aspect-cli",
+      ],
       addLabels: ["substrate-upgrade"],
       minimumReleaseAge: null,
       automerge: false,
+    },
+
+    // The bootstrap pivots ship a hand-completed sha256 pair per platform
+    // (regex managers cannot recompute hashes), so an unprompted PR would sit
+    // red until someone finishes it. Dashboard approval makes it opt-in.
+    {
+      matchPackageNames: ["bazelbuild/bazelisk", "aspect-build/aspect-cli"],
+      dependencyDashboardApproval: true,
     },
 
     // The kubectl pin and the cluster kubernetesVersion share one depName on
@@ -164,6 +184,51 @@
       matchStrings: [
         '# renovate: datasource=(?<datasource>[a-z-.]+) depName=(?<depName>[^\\s]+)\\n\\s*[A-Za-z]+: "(?<currentValue>v?[0-9][^"]*)"',
       ],
+    },
+
+    // Cozystack platform doorbell — the cozy-installer pin in the declared
+    // lock is the platform version the cluster runs (applied by the upgrade
+    // runbook, never by Flux), and no manager reads lock files.
+    {
+      customType: "regex",
+      managerFilePatterns: [
+        "/^src/infrastructure/bootstrap/bundle/images\\.declared\\.lock$/",
+      ],
+      matchStrings: [
+        "(?<packageName>ghcr\\.io/cozystack/cozystack/cozy-installer):(?<currentValue>[0-9.]+)@(?<currentDigest>sha256:[a-f0-9]{64})",
+      ],
+      datasourceTemplate: "docker",
+    },
+
+    // Renovate updates itself: the runner tag in renovate.yml and the
+    // validator pin in renovate-config.yml carry the same version and must
+    // move together (the -full suffix stays in the file, outside the match).
+    {
+      customType: "regex",
+      managerFilePatterns: [
+        "/^\\.github/workflows/renovate\\.yml$/",
+        "/^\\.github/workflows/renovate-config\\.yml$/",
+      ],
+      matchStrings: [
+        "renovate-version: (?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)",
+        "-p renovate@(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)",
+      ],
+      depNameTemplate: "renovatebot/renovate",
+      datasourceTemplate: "github-releases",
+    },
+
+    // The bootstrap pivots (bazelisk + aspect) in scripts/bootstrap/ — shell
+    // assignments no manager reads, annotated in place like the Chart.yaml
+    // convention. The adjacent sha256 pins are completed by hand; a stale
+    // hash fails every CI job's bootstrap step, so a half-finished PR cannot
+    // merge quietly.
+    {
+      customType: "regex",
+      managerFilePatterns: ["/^scripts/bootstrap/bootstrap-[a-z0-9-]+$/"],
+      matchStrings: [
+        '# renovate: datasource=(?<datasource>[a-z-.]+) depName=(?<depName>[^\\s]+)\\n[a-z_]+_version="(?<currentValue>[0-9][^"]*)"',
+      ],
+      extractVersionTemplate: "^v?(?<version>.*)$",
     },
   ],
 }

@@ -1,0 +1,47 @@
+# Every pinned tool artifact, buildable as one target. Nothing else in CI
+# fetches most of these archives (bazel fetches lazily and //:build does not
+# depend on them), so without this a pin bump with a bad hash, a re-tagged
+# upstream artifact, or a moved binary path merges green and fails at first
+# operator use. Building this target proves fetch + unpack + declared layout
+# (and compiles hauler from source) — nothing more; it does not execute the
+# binaries or validate behavior.
+#
+# TODO: replace with a real binary vetting pipeline — upstream signature or
+# attestation verification per tool, and behavioral exercise of each tool's
+# actual job where it can run hermetically (restic repo roundtrip, cosign
+# offline bundle verify, k6 local run). talm and gitleaks already get real
+# exercise in CI (render suite, secret-scan).
+filegroup(
+    name = "pins",
+    srcs = [
+        "//src/tools/cosign",
+        "//src/tools/hauler",
+        "//src/tools/restic",
+        "@boot_to_talos_linux_amd64//:boot-to-talos",
+        "@cilium_cli_linux_amd64//:cilium",
+        "@clickhouse_common_static_linux_amd64//:clickhouse",
+        "@curl_linux_amd64//:curl",
+        "@doggo_linux_amd64//:doggo",
+        "@flux_linux_amd64//:flux",
+        "@gh_linux_amd64//:gh",
+        "@gitleaks_darwin_arm64//:gitleaks",
+        "@gitleaks_linux_amd64//:gitleaks",
+        "@hubble_linux_amd64//:hubble",
+        "@k6_linux_amd64//:k6",
+        "@kubectl_cnpg_linux_amd64//:kubectl-cnpg",
+        "@kubectl_darwin_arm64//file",
+        "@kubectl_linux_amd64//file",
+        "@kubelogin_darwin_arm64//:kubelogin",
+        "@kubelogin_linux_amd64//:kubelogin",
+        "@openbao_linux_amd64//:bao",
+        "@oras_linux_amd64//:oras_file",
+        "@percona_postgresql_18_linux_amd64//:pgbench",
+        "@percona_postgresql_18_linux_amd64//:psql",
+        "@ruby_linux_amd64//:ruby",
+        "@step_linux_amd64//:step",
+        "@stern_linux_amd64//:stern",
+        "@talm_linux_amd64//:talm",
+        "@talosctl_linux_amd64//file",
+        "@velero_linux_amd64//:velero",
+    ],
+)

@@ -29,5 +29,25 @@ jobs:
       - name: Secret scan
         run: tools/ops/secret-scan tree
 
+      # Fails at PR time when a workflow uses a third-party action ref the
+      # declared allowlist does not carry — the GitHub-side alternative is a
+      # log-less, page-invisible startup_failure after merge.
+      - name: Actions allowlist check
+        run: .github/scripts/check-actions-allowlist.sh "$(pwd)"
+
       - name: Build
         run: bazelisk build --embed_label="$GITHUB_SHA" //:build
+
+      # Tool pins are fetched lazily and //:build does not depend on them, so
+      # only this proves a bumped archive still fetches, unpacks, and carries
+      # the declared binary paths. Scoped to diffs that can move a pin — the
+      # full set is multi-GB and most PRs touch none of it.
+      - name: Verify tool pins fetch and unpack
+        if: github.event_name == 'pull_request'
+        run: |
+          if git diff --name-only "origin/$GITHUB_BASE_REF"...HEAD |
+            grep -qE '^(src/tools/|MODULE\.bazel)'; then
+            bazelisk build //src/tools:pins
+          else
+            echo "no tool-pin paths in diff; skipping"
+          fi
