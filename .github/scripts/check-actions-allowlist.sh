@@ -43,7 +43,9 @@ while IFS=: read -r file _ ref; do
     echo "NOT IN ALLOWLIST: ${file}: uses: ${ref}" >&2
     failures=$((failures + 1))
   fi
-done < <(grep -rn -E '^\s*-?\s*uses:' "${repo_root}/.github/workflows" | sed -E 's/^([^:]+):([0-9]+):\s*-?\s*uses:\s*/\1:\2:/')
+# -R, not -r: a Bazel runfiles tree presents the workflow files as symlinks,
+# which -r silently skips — the check would pass vacuously.
+done < <(grep -Rn -E '^\s*-?\s*uses:' "${repo_root}/.github/workflows" | sed -E 's/^([^:]+):([0-9]+):\s*-?\s*uses:\s*/\1:\2:/')
 
 if ((failures > 0)); then
   cat >&2 <<EOF
