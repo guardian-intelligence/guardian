@@ -65,6 +65,26 @@ spec:
               No up series for the zot scrape for 15m — the Service,
               VMServiceScrape, or vmagent path is broken. The mirror may or may
               not be serving; its health is unobserved until this is fixed.
+        # With the node mirror flip live, every pull is a digest-pinned ref
+        # that exists upstream, so steady-state 404s on the pull path should
+        # be ~zero: a sustained 404/5xx stream means the sync path is broken
+        # (egress, ghcr auth/rate-limit, sync wedge) and misses are silently
+        # falling back to upstream — the one fallback state neither the
+        # canary (warm cache) nor ZotRegistryDown (zot is up) can see.
+        - alert: ZotMirrorSyncBroken
+          expr: sum(rate(zot_http_requests_total{code=~"404|5..",method=~"GET|HEAD"}[15m])) > 0.02
+          for: 30m
+          labels:
+            severity: critical
+            guardian.dev/component: registry
+          annotations:
+            summary: zot is serving sustained pull errors; cache misses are silently falling back to upstream ghcr.
+            description: >-
+              The mirror is up but failing to fulfill misses (sustained
+              404/5xx on GET/HEAD). Node pulls keep working via containerd's
+              implicit ghcr fallback, so nothing else will surface this.
+              Check zot-0 logs for sync errors and the zot-egress
+              CiliumNetworkPolicy path to ghcr.
         - alert: ZotStoragePVCPressure
           expr: kubelet_volume_stats_available_bytes{namespace="tenant-guardian",persistentvolumeclaim=~"zot-pvc-zot-.*"} / kubelet_volume_stats_capacity_bytes{namespace="tenant-guardian",persistentvolumeclaim=~"zot-pvc-zot-.*"} < 0.15
           for: 10m

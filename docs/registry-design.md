@@ -48,12 +48,10 @@ construction. Three mechanisms make the state observable:
 
 Fallback-to-ghcr is the availability posture, not a hidden crutch: it stays
 configured permanently as the DR path for the registry tier itself. Paging
-covers the mirror being down and the mirror serving wrong bytes. One
-fallback state is knowingly unpaged in R1: a healthy mirror whose upstream
-sync path has broken keeps serving its warm cache while cache misses 404
-and fall back silently. Closing that gap needs real pull traffic to measure
-— a sustained miss/error-rate alert on zot's request metrics ships with the
-mirror-flip PR, once misses become an observable steady-state signal.
+covers the mirror being down, the mirror serving wrong bytes, and — now
+that the mirror flip makes misses an observable steady-state signal — the
+mirror failing to fulfill misses (`ZotMirrorSyncBroken`: sustained 404/5xx
+on the pull path while cache misses fall back silently to upstream).
 
 ## Auth: rings and their trigger conditions
 
