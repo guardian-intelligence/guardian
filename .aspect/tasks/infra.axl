@@ -110,6 +110,7 @@ PUBLIC_TALOS_KUBECONFIG_NODE = "206.223.228.87"
 INFRA_FILEGROUPS = [
     "//src/infrastructure/bootstrap/guardian-mgmt:root",
     "//src/infrastructure/bootstrap/guardian-mgmt-dns:root",
+    "//src/infrastructure/base/admission:manifests",
     "//src/infrastructure/base/app-patches:manifests",
     "//src/infrastructure/base/platform-patches:manifests",
     "//src/infrastructure/talm:chart",
@@ -470,6 +471,7 @@ def _check_flux_revision_for(ctx, kubectl, kubeconfig, revision, kube_api_server
         ("guardian-mgmt-platform-patches last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-platform-patches", "-o", "jsonpath={.status.lastAppliedRevision}"]),
         ("guardian-mgmt-storage last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-storage", "-o", "jsonpath={.status.lastAppliedRevision}"]),
         ("guardian-mgmt-base last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-base", "-o", "jsonpath={.status.lastAppliedRevision}"]),
+        ("guardian-mgmt-admission last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-admission", "-o", "jsonpath={.status.lastAppliedRevision}"]),
         ("guardian-mgmt-app-patches last applied revision", ["-n", "cozy-fluxcd", "get", "kustomizations.kustomize.toolkit.fluxcd.io/guardian-mgmt-app-patches", "-o", "jsonpath={.status.lastAppliedRevision}"]),
     ]
     for label, kubectl_args in checks:
