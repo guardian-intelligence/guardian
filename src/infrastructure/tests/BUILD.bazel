@@ -6,6 +6,7 @@ go_test(
         "analytics_ddl_conformance_test.go",
         "cozystack_app_namespace_admission_test.go",
         "cozystack_app_namespace_test.go",
+        "oci_base_conformance_test.go",
         "electric_budget_test.go",
         "images_lock_test.go",
         "k6_script_conformance_test.go",
@@ -16,6 +17,7 @@ go_test(
     ],
     data = [
         "@talm_linux_amd64//:talm",
+        "//:MODULE.bazel",
         "//src/tools/kubectl:kubectl.MODULE.bazel",
         "//src/tools/talosctl:talosctl.MODULE.bazel",
         "//docs:openbao-design.md",
