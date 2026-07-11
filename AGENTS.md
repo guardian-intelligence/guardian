@@ -44,5 +44,5 @@ House rules:
 
 Planned Product Surfaces:
 
-- Postflight - GitHub App (20x faster CI than GitHub Actions; running untrusted customer CI requires TEE on the rs4 workload nodes first). (Not Yet Implemented)
+- Postflight - GitHub App (20x faster CI than GitHub Actions; running untrusted customer CI requires TEE on the rs4 workload nodes first). (In Progress)
 - Empire - Software Company from an API call or web surface; host come-up tooling only prepares machines for the management cluster. (Not Yet Implemented)

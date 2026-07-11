@@ -65,6 +65,7 @@ spec:
           labels:
             severity: warning
             guardian_stage: prod
+            exported_instance: 'prod/login-canary/{{ $labels.flow }}/{{ $labels.scenario }}'
           annotations:
             summary: "IAM login canary is failing in prod"
             description: "One or more synthetic login flows (existing-user, new-user, cancellation) have failed for 5m+. Check the newest keycloak-login-canary Job logs in tenant-guardian-prod."
@@ -74,6 +75,7 @@ spec:
           labels:
             severity: warning
             guardian_stage: prod
+            exported_instance: prod/login-canary
           annotations:
             summary: "IAM login canary has stopped reporting in prod"
             description: "No k6 canary metrics for 15m — the CronJob is not running or cannot remote-write to VictoriaMetrics."
