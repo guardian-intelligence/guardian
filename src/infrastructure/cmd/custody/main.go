@@ -47,7 +47,7 @@ const (
 
 var (
 	unsealKeyRE = regexp.MustCompile(`^unseal-([0-9a-f]{64})\.key$`)
-	envKeyRE    = regexp.MustCompile(`^[a-z0-9_]+$`)
+	envKeyRE    = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 )
 
 type member struct {
