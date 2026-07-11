@@ -81,8 +81,8 @@ type sink interface {
 // priorityMap covers both Alerta severities and Slack attachment colors
 // (danger/good are colors, the rest severities): critical→5, major→4,
 // minor/warning→3, informational/indeterminate→2, ok/cleared/normal→2.
-// Unmapped values page at the default priority 3 rather than being dropped
-// or demoted.
+// Informational and indeterminate alerts are filtered before delivery; their
+// mappings keep composition total. Unmapped values fail open at priority 3.
 var priorityMap = map[string]int{
 	"critical":      5,
 	"danger":        5,
@@ -184,6 +184,23 @@ func parseAlertaSummary(text string) (alertaSummary, bool) {
 		event:       group("event"),
 		resource:    group("resource"),
 	}, true
+}
+
+// isDashboardOnly reports whether a producer supplied a recognized
+// non-paging severity. Unknown or missing severities deliberately fail open.
+func isDashboardOnly(p slackPayload) bool {
+	severity := fieldValue(p, "severity")
+	if severity == "" {
+		if summary, ok := parseAlertaSummary(p.Text); ok {
+			severity = summary.severity
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(severity)) {
+	case "informational", "indeterminate":
+		return true
+	default:
+		return false
+	}
 }
 
 // notification maps a parsed summary onto the sink model through the same
@@ -715,6 +732,11 @@ func (s *server) handleSlack(w http.ResponseWriter, r *http.Request) {
 		slog.Info("heartbeat suppressed", "event", eventName(p))
 		w.WriteHeader(http.StatusOK)
 		return
+	case isDashboardOnly(p):
+		s.m.suppressed.Add(1)
+		slog.Info("dashboard-only alert suppressed", "event", eventName(p))
+		w.WriteHeader(http.StatusOK)
+		return
 	default:
 		n = compose(p)
 	}
@@ -940,8 +962,8 @@ func main() {
 	m.watchdogLastSeen.Store(start.Unix())
 
 	srv := &server{
-		cfg:        cfg,
-		m:          m,
+		cfg: cfg,
+		m:   m,
 		// The pace floor mirrors ntfy.sh's free-tier replenish rate (one
 		// visitor request per ~5s): a storm coalesces into digests instead
 		// of racing the sink's limiter into an IP ban.
