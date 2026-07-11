@@ -1,61 +1,78 @@
-# Piraeus emits one warning for every volume on a degraded DRBD link and for
-# every device being resynced. Collapse those into their actionable fault
-# domains and require two minutes of persistence, while leaving the immediate
-# data-loss and stalled-resync alerts unchanged. The test operations make a
-# chart rule reorder fail rendering instead of modifying the wrong rule.
-apiVersion: helm.toolkit.fluxcd.io/v2
-kind: HelmRelease
+# PrometheusRule groups merge by name, while each group's rules list is atomic
+# under server-side apply. Keep the complete upstream DRBD group so the two
+# recovery refinements cannot prune its immediate failure signals.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
 metadata:
-  name: piraeus-operator
+  name: piraeus-datastore
   namespace: cozy-linstor
+  annotations:
+    kustomize.toolkit.fluxcd.io/ssa: Override
 spec:
-  postRenderers:
-    - kustomize:
-        patches:
-          - target:
-              group: monitoring.coreos.com
-              version: v1
-              kind: PrometheusRule
-              name: piraeus-datastore
-            patch: |-
-              - op: test
-                path: /spec/groups/1/name
-                value: drbd.rules
-              - op: test
-                path: /spec/groups/1/rules/1/alert
-                value: drbdConnectionNotConnected
-              - op: replace
-                path: /spec/groups/1/rules/1/expr
-                value: sum by (cluster, tenant, tier, prometheus, job, node, conn_name) (drbd_connection_state{drbd_connection_state!="Connected"} > 0) > 0
-              - op: add
-                path: /spec/groups/1/rules/1/for
-                value: 2m
-              - op: add
-                path: /spec/groups/1/rules/1/labels/exported_instance
-                value: '{{ $labels.node }}->{{ $labels.conn_name }}'
-              - op: replace
-                path: /spec/groups/1/rules/1/labels/severity
-                value: warning
-              - op: replace
-                path: /spec/groups/1/rules/1/annotations/description
-                value: |
-                  {{ $value }} DRBD resources on "{{ $labels.node }}" have not been connected to "{{ $labels.conn_name }}" for at least 2 minutes.
-              - op: test
-                path: /spec/groups/1/rules/2/alert
-                value: drbdDeviceNotUpToDate
-              - op: replace
-                path: /spec/groups/1/rules/2/expr
-                value: sum by (cluster, tenant, tier, prometheus, job, node) (drbd_device_state{drbd_device_state!~"UpToDate|Diskless"} > 0) > 0
-              - op: add
-                path: /spec/groups/1/rules/2/for
-                value: 2m
-              - op: add
-                path: /spec/groups/1/rules/2/labels/exported_instance
-                value: '{{ $labels.node }}/drbd-devices'
-              - op: replace
-                path: /spec/groups/1/rules/2/labels/severity
-                value: warning
-              - op: replace
-                path: /spec/groups/1/rules/2/annotations/description
-                value: |
-                  {{ $value }} DRBD devices on "{{ $labels.node }}" have not been UpToDate or intentionally Diskless for at least 2 minutes.
+  groups:
+    - name: drbd.rules
+      rules:
+        - alert: drbdReactorOffline
+          annotations:
+            description: |
+              DRBD Reactor on "{{ $labels.node }}" is not reachable.
+          expr: up{job="piraeus-datastore/linstor-satellite"} == 0
+          labels:
+            severity: critical
+        - alert: drbdConnectionNotConnected
+          annotations:
+            description: |
+              {{ $value }} DRBD resources on "{{ $labels.node }}" have not been connected to "{{ $labels.conn_name }}" for at least 2 minutes.
+          expr: sum by (cluster, tenant, tier, prometheus, job, node, conn_name) (drbd_connection_state{drbd_connection_state!="Connected"} > 0) > 0
+          for: 2m
+          labels:
+            exported_instance: '{{ $labels.node }}->{{ $labels.conn_name }}'
+            severity: warning
+        - alert: drbdDeviceNotUpToDate
+          annotations:
+            description: |
+              {{ $value }} DRBD devices on "{{ $labels.node }}" have not been UpToDate or intentionally Diskless for at least 2 minutes.
+          expr: sum by (cluster, tenant, tier, prometheus, job, node) (drbd_device_state{drbd_device_state!~"UpToDate|Diskless"} > 0) > 0
+          for: 2m
+          labels:
+            exported_instance: '{{ $labels.node }}/drbd-devices'
+            severity: warning
+        - alert: drbdDeviceUnintentionalDiskless
+          annotations:
+            description: |
+              DRBD device "{{ $labels.name }}" on "{{ $labels.node }}" is unintenionally diskless.
+              This usually indicates IO errors reported on the backing device. Check the kernel log.
+          expr: drbd_device_unintentionaldiskless > 0
+          labels:
+            severity: warn
+        - alert: drbdDeviceWithoutQuorum
+          annotations:
+            description: |
+              DRBD device "{{ $labels.name }}" on "{{ $labels.node }}" has no quorum.
+              This usually indicates connectivity issues.
+          expr: drbd_device_quorum == 0
+          labels:
+            severity: warn
+        - alert: drbdResourceSuspended
+          annotations:
+            description: |
+              DRBD resource "{{ $labels.name }}" on "{{ $labels.node }}" has been suspended for 1m.
+          expr: drbd_resource_suspended > 0
+          for: 1m
+          labels:
+            severity: warn
+        - alert: drbdResourceResyncWithoutProgress
+          annotations:
+            description: |
+              DRBD resource "{{ $labels.name }}" on "{{ $labels.node }}" has been in Inconsistent without resync progress for 5 minutes.
+              This may indicate there is no connection to UpToDate data, or a stuck resync.
+          expr: drbd_device_state{drbd_device_state="Inconsistent"} and delta(drbd_peerdevice_outofsync_bytes[5m]) >= 0
+          labels:
+            severity: warn
+        - alert: drbdResourceWithNoUpToDateReplicas
+          annotations:
+            description: |
+              DRBD resource "{{ $labels.name }}" has no UpToDate replicas.
+          expr: sum by (name) (drbd_device_state{drbd_device_state="UpToDate"}) == 0
+          labels:
+            severity: critical

@@ -3,72 +3,78 @@ package tests
 import (
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
 
 func TestDRBDAlertsMatchFaultDomainsAndPreserveSustainedFailures(t *testing.T) {
 	path := runfilePath("src/infrastructure/base/app-patches/cozy-linstor-drbd-alerts.yaml")
 	patch := singleYAMLDoc(t, path)
-	assertNestedString(t, patch, "HelmRelease", "kind")
-	assertNestedString(t, patch, "piraeus-operator", "metadata", "name")
+	assertNestedString(t, patch, "PrometheusRule", "kind")
+	assertNestedString(t, patch, "piraeus-datastore", "metadata", "name")
 	assertNestedString(t, patch, "cozy-linstor", "metadata", "namespace")
+	assertNestedString(t, patch, "Override", "metadata", "annotations", "kustomize.toolkit.fluxcd.io/ssa")
 
-	postRenderers := sliceValue(nestedValue(t, patch, "spec", "postRenderers"))
-	if len(postRenderers) != 1 {
-		t.Fatalf("spec.postRenderers has %d entries, want one", len(postRenderers))
+	groups := sliceValue(nestedValue(t, patch, "spec", "groups"))
+	if len(groups) != 1 {
+		t.Fatalf("spec.groups has %d entries, want the DRBD group", len(groups))
 	}
-	patches := sliceValue(nestedValue(t, mapValue(postRenderers[0]), "kustomize", "patches"))
-	if len(patches) != 1 {
-		t.Fatalf("post-renderer has %d patches, want one", len(patches))
-	}
-	rulePatch := mapValue(patches[0])
-	assertNestedString(t, rulePatch, "monitoring.coreos.com", "target", "group")
-	assertNestedString(t, rulePatch, "v1", "target", "version")
-	assertNestedString(t, rulePatch, "PrometheusRule", "target", "kind")
-	assertNestedString(t, rulePatch, "piraeus-datastore", "target", "name")
+	group := mapValue(groups[0])
+	assertNestedString(t, group, "drbd.rules", "name")
 
-	ops, ok := rulePatch["patch"].(string)
-	if !ok {
-		t.Fatal("post-renderer rule patch is not a string")
+	wantAlerts := map[string]bool{
+		"drbdReactorOffline":                 true,
+		"drbdConnectionNotConnected":         true,
+		"drbdDeviceNotUpToDate":              true,
+		"drbdDeviceUnintentionalDiskless":    true,
+		"drbdDeviceWithoutQuorum":            true,
+		"drbdResourceSuspended":              true,
+		"drbdResourceResyncWithoutProgress":  true,
+		"drbdResourceWithNoUpToDateReplicas": true,
 	}
-	var operations []map[string]interface{}
-	if err := yaml.Unmarshal([]byte(ops), &operations); err != nil {
-		t.Fatalf("parse DRBD post-renderer operations: %v", err)
+	rules := sliceValue(nestedValue(t, group, "rules"))
+	if len(rules) != len(wantAlerts) {
+		t.Fatalf("drbd.rules has %d rules, want all %d upstream rules", len(rules), len(wantAlerts))
 	}
-	byPath := make(map[string]map[string]interface{}, len(operations))
-	for _, operation := range operations {
-		path, ok := operation["path"].(string)
-		if !ok {
-			t.Fatalf("DRBD post-renderer operation has no string path: %#v", operation)
+
+	seen := make(map[string]bool, len(rules))
+	byAlert := make(map[string]map[string]interface{}, len(rules))
+	for _, raw := range rules {
+		rule := mapValue(raw)
+		alert, ok := rule["alert"].(string)
+		if !ok || !wantAlerts[alert] {
+			t.Fatalf("unexpected DRBD alert %q", alert)
 		}
-		if _, exists := byPath[path]; exists {
-			t.Fatalf("DRBD post-renderer repeats path %q", path)
+		if seen[alert] {
+			t.Fatalf("duplicate DRBD alert %q", alert)
 		}
-		byPath[path] = operation
+		seen[alert] = true
+		byAlert[alert] = rule
 	}
-	assertOperation := func(path, operation, value string) {
-		t.Helper()
-		got, ok := byPath[path]
-		if !ok {
-			t.Fatalf("DRBD post-renderer is missing path %q", path)
-		}
-		if got["op"] != operation || got["value"] != value {
-			t.Fatalf("DRBD post-renderer path %q = %#v, want op=%q value=%q", path, got, operation, value)
-		}
+
+	connection := byAlert["drbdConnectionNotConnected"]
+	assertNestedString(t, connection, "2m", "for")
+	assertNestedString(t, connection, "warning", "labels", "severity")
+	assertNestedString(t, connection, "{{ $labels.node }}->{{ $labels.conn_name }}", "labels", "exported_instance")
+	connectionExpr := nestedValue(t, connection, "expr").(string)
+	if !strings.Contains(connectionExpr, "sum by (cluster, tenant, tier, prometheus, job, node, conn_name)") {
+		t.Fatalf("connection alert is not aggregated by DRBD link: %s", connectionExpr)
 	}
-	assertOperation("/spec/groups/1/name", "test", "drbd.rules")
-	assertOperation("/spec/groups/1/rules/1/alert", "test", "drbdConnectionNotConnected")
-	assertOperation("/spec/groups/1/rules/2/alert", "test", "drbdDeviceNotUpToDate")
-	assertOperation("/spec/groups/1/rules/1/for", "add", "2m")
-	assertOperation("/spec/groups/1/rules/2/for", "add", "2m")
-	assertOperation("/spec/groups/1/rules/1/labels/exported_instance", "add", "{{ $labels.node }}->{{ $labels.conn_name }}")
-	assertOperation("/spec/groups/1/rules/2/labels/exported_instance", "add", "{{ $labels.node }}/drbd-devices")
-	assertOperation("/spec/groups/1/rules/1/labels/severity", "replace", "warning")
-	assertOperation("/spec/groups/1/rules/2/labels/severity", "replace", "warning")
-	assertOperation("/spec/groups/1/rules/1/expr", "replace", `sum by (cluster, tenant, tier, prometheus, job, node, conn_name) (drbd_connection_state{drbd_connection_state!="Connected"} > 0) > 0`)
-	assertOperation("/spec/groups/1/rules/2/expr", "replace", `sum by (cluster, tenant, tier, prometheus, job, node) (drbd_device_state{drbd_device_state!~"UpToDate|Diskless"} > 0) > 0`)
-	if strings.Contains(ops, "drbdResourceWithNoUpToDateReplicas") || strings.Contains(ops, "drbdResourceResyncWithoutProgress") {
-		t.Fatal("DRBD post-renderer must not delay immediate data-loss or stalled-resync alerts")
+
+	device := byAlert["drbdDeviceNotUpToDate"]
+	assertNestedString(t, device, "2m", "for")
+	assertNestedString(t, device, "warning", "labels", "severity")
+	assertNestedString(t, device, "{{ $labels.node }}/drbd-devices", "labels", "exported_instance")
+	deviceExpr := nestedValue(t, device, "expr").(string)
+	if !strings.Contains(deviceExpr, "sum by (cluster, tenant, tier, prometheus, job, node)") {
+		t.Fatalf("device alert is not aggregated by node: %s", deviceExpr)
+	}
+
+	noReplicas := byAlert["drbdResourceWithNoUpToDateReplicas"]
+	assertNestedString(t, noReplicas, "critical", "labels", "severity")
+	if _, delayed := noReplicas["for"]; delayed {
+		t.Fatal("no-UpToDate-replicas alert must remain immediate")
+	}
+	stalled := byAlert["drbdResourceResyncWithoutProgress"]
+	if expr := nestedValue(t, stalled, "expr").(string); !strings.Contains(expr, "delta(drbd_peerdevice_outofsync_bytes[5m]) >= 0") {
+		t.Fatalf("stalled-resync alert lost its five-minute progress test: %s", expr)
 	}
 }
