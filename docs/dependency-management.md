@@ -1,9 +1,9 @@
 # Dependency management: proposers, tiers, and rollout safety
 
 Status: active as of 2026-07-11. Complements `supply-chain-design.md` (the
-trust model for first-party images) and `manifest-conformance-design.md`
-(Git-time invariants). Policy lives in `renovate.json5`; this doc is the
-operating manual.
+trust model for first-party images) and
+`adrs/0003-validate-rendered-manifests.md` (Git-time invariants). Policy
+lives in `renovate.json5`; this doc is the operating manual.
 
 ## One proposer per pin
 

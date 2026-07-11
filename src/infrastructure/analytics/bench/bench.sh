@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Schema bake-off harness (docs/analytics-storage-design.md). Regenerates
+# Schema bake-off harness
+# (docs/adrs/0002-analytics-event-storage-and-wire-contract.md). Regenerates
 # every decision-critical number: variant sizes v0-v9 + the shipping DDL,
 # JSONEachRow ingest throughput, and the three query archetypes.
 # Usage: bench.sh <clickhouse-port> [repo-root]   (needs lab.events_source

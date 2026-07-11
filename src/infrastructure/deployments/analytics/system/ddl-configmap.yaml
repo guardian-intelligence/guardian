@@ -9,7 +9,9 @@ metadata:
 data:
   # Replicated form of the canonical events DDL
   # (src/infrastructure/analytics/events-table.sql — bake-off winner, 17.0
-  # B/event; see docs/analytics-storage-design.md). Identical columns,
+  # B/event; see
+  # docs/adrs/0002-analytics-event-storage-and-wire-contract.md).
+  # Identical columns,
   # codecs, ORDER BY, partitioning, and TTL; only the engine differs:
   # ReplicatedMergeTree over the CHK quorum. Targets the tenant-root
   # Cozystack ClickHouse app (cluster name 'clickhouse' is fixed by the
