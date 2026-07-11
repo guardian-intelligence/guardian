@@ -4,6 +4,7 @@ packages:
 allowBuilds:
   esbuild: true
   protobufjs: true
+blockExoticSubdeps: true
 
 catalog:
   "@bufbuild/protobuf": 2.12.1
@@ -49,7 +50,7 @@ catalog:
   # Pinned to specific versions so the on-host Verdaccio mirror does not
   # have to keep up with @latest publish drift on every install.
   vite: npm:@voidzero-dev/vite-plus-core@0.1.19
-  vite-plus: ^0.1.16
+  vite-plus: 0.1.24
   vitest: npm:@voidzero-dev/vite-plus-test@0.1.16
   web-vitals: 4.2.4
 
@@ -57,14 +58,6 @@ catalogMode: prefer
 dangerouslyAllowAllBuilds: false
 
 minimumReleaseAge: 4320
-trustPolicy: no-downgrade
-# The downgrade check exists to catch fresh package takeovers; pre-provenance
-# versions that have sat unflagged for a year (semver@6.3.1, undici-types) are
-# not live incidents. 525600 minutes = 365 days.
-trustPolicyIgnoreAfter: 525600
-blockExoticSubdeps: true
-verifyDepsBeforeRun: error
-strictDepBuilds: true
 onlyBuiltDependencies:
   - "@resvg/resvg-js"
   - esbuild
@@ -91,6 +84,10 @@ peerDependencyRules:
   allowedVersions:
     vite: "*"
     vitest: "*"
-minimumReleaseAgeExclude:
-  # Renovate security update: pnpm@11.5.3
-  - pnpm@11.5.3
+strictDepBuilds: true
+trustPolicy: no-downgrade
+# The downgrade check exists to catch fresh package takeovers; pre-provenance
+# versions that have sat unflagged for a year (semver@6.3.1, undici-types) are
+# not live incidents. 525600 minutes = 365 days.
+trustPolicyIgnoreAfter: 525600
+verifyDepsBeforeRun: error
