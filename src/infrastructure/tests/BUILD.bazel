@@ -17,6 +17,7 @@ go_test(
         "k6_script_conformance_test.go",
         "keycloak_admin_guard_test.go",
         "kube_pod_not_ready_test.go",
+        "log_pipeline_health_test.go",
         "log_redaction_test.go",
         "multus_resources_test.go",
         "oci_base_conformance_test.go",
