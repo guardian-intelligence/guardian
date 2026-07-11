@@ -31,6 +31,19 @@ jobs:
       - name: Bootstrap toolchain
         run: scripts/bootstrap.sh
 
+      # Bazel's disk + repository caches (the :ci config), persisted by main
+      # and restored by everyone: a PR re-executes only what its diff
+      # invalidates. Only trusted main history writes — a PR run's cache is
+      # never saved, so nothing a PR builds can feed a later main build
+      # through this path.
+      - name: Restore Bazel cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bazel-ci
+          key: bazel-ci-${{ github.sha }}
+          restore-keys: |
+            bazel-ci-
+
       - name: Secret scan
         run: tools/ops/secret-scan tree
 
@@ -41,15 +54,16 @@ jobs:
         run: .github/scripts/check-actions-allowlist.sh "$(pwd)"
 
       - name: Build
-        run: bazelisk build //...
+        run: bazelisk build --config=ci //...
 
       - name: Test
-        run: bazelisk test //...
+        run: bazelisk test --config=ci //...
 
       # //src/tools:pins is tagged manual (the archive set is multi-GB and
       # fetched lazily), so only this proves a bumped archive still fetches,
       # unpacks, and carries the declared binary paths. Scoped to diffs that
-      # can move a pin — most PRs touch none of it.
+      # can move a pin — most PRs touch none of it. Deliberately not
+      # --config=ci: the step exists to prove a fresh fetch works.
       - name: Verify tool pins fetch and unpack
         if: github.event_name == 'pull_request'
         run: |
@@ -74,3 +88,10 @@ jobs:
           else
             echo "lockfile untouched; skipping"
           fi
+
+      - name: Save Bazel cache
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bazel-ci
+          key: bazel-ci-${{ github.sha }}
