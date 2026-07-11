@@ -217,7 +217,7 @@ spec:
             severity: critical
           annotations:
             summary: "image-provenance admission is not flagging violating pods"
-            description: "The vap-denial-canary's deliberately violating dry-run pod was admitted without the guardian-image-provenance policy flagging it for 30m+. Unreviewed images could reach the rendered namespaces. Check the policy, binding, and param ConfigMap in base/app-patches."
+            description: "The vap-denial-canary's deliberately violating dry-run pod was admitted without the guardian-image-provenance policy flagging it for 30m+. Unreviewed images could reach the rendered namespaces. Check the policy, binding, and param ConfigMap in base/admission."
         - alert: ImageProvenanceCanaryAbsent
           expr: absent(vap_canary_policy_flagged)
           for: 30m

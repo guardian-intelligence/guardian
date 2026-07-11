@@ -190,7 +190,7 @@ func TestOpenBaoTenantAllowsStaticSealHostPathConformance(t *testing.T) {
 }
 
 func TestOpenBaoStaticSealAdmissionConformance(t *testing.T) {
-	path := runfilePath("src/infrastructure/base/app-patches/openbao-static-seal-admission.yaml")
+	path := runfilePath("src/infrastructure/base/admission/openbao-static-seal.yaml")
 	raw := readText(t, path)
 	docs := yamlDocs(t, path)
 	policy := findDoc(t, docs, "ValidatingAdmissionPolicy", "guardian-openbao-static-seal-hostpath")

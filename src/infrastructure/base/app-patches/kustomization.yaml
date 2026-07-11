@@ -1,27 +1,13 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-generatorOptions:
-  # The VAP binding's paramRef names this ConfigMap statically; params are
-  # resolved live at admission, so content updates take effect on apply.
-  disableNameSuffixHash: true
-configMapGenerator:
-  - name: guardian-image-provenance-params
-    namespace: tenant-guardian
-    files:
-      - registry-prefixes.txt
-      - images.declared.lock=../../bootstrap/bundle/images.declared.lock
 resources:
   - cozy-kubevirt-cdi-alerts.yaml
   - cozy-kubevirt-cdi-prometheus-source.yaml
   - cozy-linstor-drbd-alerts.yaml
   - cozy-multus-cpu-resources.yaml
-  - cozystack-app-namespace-admission.yaml
-  - image-provenance-admission.yaml
   - ingress-origin-edge.yaml
   - monitoring-alertmanager-auth.yaml
-  - monitoring-alertmanager-config.yaml
   - monitoring-agents-kube-pod-not-ready.yaml
   - monitoring-agents-vmagent-resources.yaml
   - monitoring-shortterm-vmselect-resources.yaml
-  - openbao-static-seal-admission.yaml
   - tenant-guardian-namespace-pod-security.yaml

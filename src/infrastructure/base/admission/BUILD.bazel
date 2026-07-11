@@ -1,0 +1,11 @@
+filegroup(
+    name = "manifests",
+    srcs = [
+        "cozystack-app-namespace.yaml",
+        "image-provenance.yaml",
+        "kustomization.yaml",
+        "openbao-static-seal.yaml",
+        "registry-prefixes.txt",
+    ],
+    visibility = ["//visibility:public"],
+)

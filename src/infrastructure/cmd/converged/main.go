@@ -22,6 +22,7 @@ var defaultKustomizations = []string{
 	"guardian-mgmt-platform-patches",
 	"guardian-mgmt-storage",
 	"guardian-mgmt-base",
+	"guardian-mgmt-admission",
 	"guardian-mgmt-app-patches",
 	"guardian-system",
 	"guardian-mgmt-dns-controller",

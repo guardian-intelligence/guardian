@@ -157,11 +157,11 @@ manifest side).
 
 Git-side enforcement covers what the repo renders; the in-cluster backstop
 covers what actually reaches the apiserver. `guardian-image-provenance`
-(base/app-patches/image-provenance-admission.yaml) requires every container
+(base/admission/image-provenance.yaml) requires every container
 image in the rendered workload namespaces (tenant-guardian*,
-guardian-analytics, postflight-runner) to be digest-pinned and to start with
+guardian-analytics, guardian-cockpit, postflight-runner) to be digest-pinned and to start with
 an allowlisted registry prefix (param ConfigMap
-`tenant-guardian/guardian-image-registry-allowlist`; extending it is a
+`tenant-guardian/guardian-image-provenance-params`; extending it is a
 supply-chain decision made in its own reviewed PR). It matches workload
 templates as well as Pods so a violation fails the Flux apply synchronously
 — the CEL message lands verbatim in the Kustomization status — rather than
