@@ -11,11 +11,6 @@ data "cloudflare_zone" "guardianintelligence_org" {
   }
 }
 
-moved {
-  from = cloudflare_authenticated_origin_pulls.guardianintelligence_org
-  to   = cloudflare_authenticated_origin_pulls_settings.guardianintelligence_org
-}
-
 # Zone-level Authenticated Origin Pulls: the edge presents Cloudflare's
 # managed client certificate on every origin fetch. Enabling this is
 # non-breaking on its own; enforcement lives at the origin, where

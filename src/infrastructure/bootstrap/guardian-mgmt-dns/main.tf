@@ -73,8 +73,10 @@ resource "cloudflare_load_balancer_pool" "guardian_mgmt_ash" {
   monitor         = cloudflare_load_balancer_monitor.guardian_mgmt_ingress.id
   check_regions   = var.cloudflare_lb_check_regions
 
+  # The API returns pool origins sorted by name and origins is an ordered
+  # list, so the config must emit the same order or every plan is a reorder.
   origins = [
-    for name in local.public_ingress_origin_names : {
+    for name in sort(local.public_ingress_origin_names) : {
       name    = name
       address = local.public_ingress_origins[name].public_ipv4
       enabled = true
