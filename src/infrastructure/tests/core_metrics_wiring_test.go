@@ -6,10 +6,13 @@ func TestCoreMetricsWiringConformance(t *testing.T) {
 	talmValuesPath := runfilePath("src/infrastructure/talm/values.yaml")
 	talmValues := singleYAMLDoc(t, talmValuesPath)
 	assertNestedString(t, talmValues, "http://127.0.0.1:2381", "etcd", "metricsListenURL")
+	assertNestedString(t, talmValues, "extensive", "etcd", "metricsLevel")
 	talmTemplatePath := runfilePath("src/infrastructure/talm/templates/_helpers.tpl")
 	talmTemplate := readText(t, talmTemplatePath)
 	assertTextContains(t, talmTemplate, "etcd.metricsListenURL", talmTemplatePath)
+	assertTextContains(t, talmTemplate, "etcd.metricsLevel", talmTemplatePath)
 	assertTextNotContains(t, talmTemplate, "http://127.0.0.1:2381", talmTemplatePath)
+	assertTextNotContains(t, talmTemplate, "metrics: extensive", talmTemplatePath)
 
 	packagePath := runfilePath("src/infrastructure/base/platform-patches/cozystack-monitoring-agents.yaml")
 	monitoringPackage := singleYAMLDoc(t, packagePath)
@@ -38,6 +41,7 @@ func TestCoreMetricsWiringConformance(t *testing.T) {
 	rules := readText(t, wiringPath)
 	for _, alert := range []string{
 		"EtcdMetricsAbsent",
+		"EtcdGRPCLatencyMetricsAbsent",
 		"KubeStateMetricsSelfMetricsAbsent",
 		"KubeStateObjectMetricsAbsent",
 		"FluxResourceMetricsAbsent",

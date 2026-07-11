@@ -58,6 +58,20 @@ spec:
               etcd quorum, request, peer, disk-latency, and capacity alert is
               blind. Check the monitoring-agents kube-rbac-proxy DaemonSet,
               its VMPodScrape, and the Talos etcd :2381 listener.
+        - alert: EtcdGRPCLatencyMetricsAbsent
+          expr: absent(grpc_server_handling_seconds_bucket{job=~".*etcd.*"})
+          for: 15m
+          labels:
+            severity: critical
+            guardian_component: observability
+            exported_instance: guardian-mgmt/etcd-grpc-latency-metrics
+          annotations:
+            summary: etcd gRPC latency metrics are absent
+            description: >-
+              The server-side gRPC duration histogram is absent. Cozystack's
+              stock etcdGRPCRequestsSlow alert is blind. Check that Talos runs
+              etcd with the extensive metrics level on every control-plane
+              node.
         - alert: KubeStateMetricsSelfMetricsAbsent
           expr: absent(kube_state_metrics_total_shards{job="kube-state-metrics"})
           for: 15m
