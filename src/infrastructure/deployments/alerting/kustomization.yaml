@@ -9,6 +9,7 @@ resources:
   - blackbox-exporter.yaml
   - cockpit-events-scrape.yaml
   - cockpit-rollup-scrape.yaml
+  - core-metrics-wiring.yaml
   - electric-scrape.yaml
   - etcd-snapshot-alerts.yaml
   - postgres-alerts.yaml

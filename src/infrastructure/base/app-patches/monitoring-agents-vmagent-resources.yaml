@@ -1,12 +1,20 @@
 # The monitoring-agents chart renders an empty resource block, which leaves
-# the generated pod at the operator's 200m CPU limit. This partial object owns
-# only the resource fields while the chart continues to own scrape behavior.
+# the generated pod at the operator's 200m CPU limit. Its cAdvisor scrape is
+# labelled job="cadvisor", while the chart's kube-prometheus recording rules
+# select job="kubelet" plus metrics_path="/metrics/cadvisor". The global
+# relabel fixes that contract once before both remote-write destinations.
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMAgent
 metadata:
   name: vmagent
   namespace: cozy-monitoring
 spec:
+  inlineRelabelConfig:
+    - action: replace
+      sourceLabels: [job, metrics_path]
+      regex: cadvisor;/metrics/cadvisor
+      targetLabel: job
+      replacement: kubelet
   resources:
     requests:
       cpu: 100m

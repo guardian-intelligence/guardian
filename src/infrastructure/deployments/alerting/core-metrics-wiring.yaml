@@ -1,0 +1,113 @@
+# kube-state-metrics serves Kubernetes object metrics on :8080 and its own
+# list/watch/sharding health on :8081. Cozystack's selfMonitor value exposes
+# this named service port; this scrape feeds the stock kube-state-metrics
+# alert group without duplicating the much larger object-metrics scrape.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: kube-state-metrics-self
+  namespace: cozy-monitoring
+  labels:
+    app.kubernetes.io/name: kube-state-metrics-self
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kube-state-metrics
+  endpoints:
+    - port: metrics
+      honorLabels: true
+      relabelConfigs:
+        - replacement: kube-state-metrics
+          targetLabel: job
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node
+        - replacement: cluster
+          targetLabel: tier
+  jobLabel: app.kubernetes.io/name
+---
+# The stock rules generally alert when a metric crosses a threshold. A deleted
+# scrape object or a label-contract regression instead produces an empty
+# vector, so guard each core family that would otherwise fail silently.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: cozystack-core-metrics-presence
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: cozystack-core-metrics-presence
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  groups:
+    - name: cozystack-core-metrics-presence.rules
+      interval: 30s
+      rules:
+        - alert: EtcdMetricsAbsent
+          expr: absent(up{job=~".*etcd.*"})
+          for: 15m
+          labels:
+            severity: critical
+            guardian_component: observability
+            exported_instance: guardian-mgmt/etcd-metrics
+          annotations:
+            summary: etcd server metrics are absent
+            description: >-
+              No etcd scrape target exists in VictoriaMetrics. Every stock
+              etcd quorum, request, peer, disk-latency, and capacity alert is
+              blind. Check the monitoring-agents kube-rbac-proxy DaemonSet,
+              its VMPodScrape, and the Talos etcd :2381 listener.
+        - alert: KubeStateMetricsSelfMetricsAbsent
+          expr: absent(kube_state_metrics_total_shards{job="kube-state-metrics"})
+          for: 15m
+          labels:
+            severity: critical
+            guardian_component: observability
+            exported_instance: guardian-mgmt/kube-state-metrics-self
+          annotations:
+            summary: kube-state-metrics self-health metrics are absent
+            description: >-
+              The :8081 telemetry scrape is absent. The stock list-error,
+              watch-error, and sharding alerts are blind even if Kubernetes
+              object metrics on :8080 continue to look healthy.
+        - alert: KubeStateObjectMetricsAbsent
+          expr: absent(kube_node_info{job="kube-state-metrics"})
+          for: 15m
+          labels:
+            severity: critical
+            guardian_component: observability
+            exported_instance: guardian-mgmt/kube-state-metrics-objects
+          annotations:
+            summary: kube-state-metrics object metrics are absent
+            description: >-
+              No Kubernetes Node object metrics are present. Workload,
+              storage, node-readiness, quota, and rollout alerts that consume
+              kube-state-metrics are blind.
+        - alert: FluxResourceMetricsAbsent
+          expr: absent(gotk_resource_info{customresource_kind="Kustomization"})
+          for: 15m
+          labels:
+            severity: critical
+            guardian_component: observability
+            exported_instance: guardian-mgmt/flux-resource-metrics
+          annotations:
+            summary: Flux resource-state metrics are absent
+            description: >-
+              kube-state-metrics no longer emits gotk_resource_info for Flux
+              Kustomizations. The stock Flux readiness and suspension alerts
+              are blind.
+        - alert: CadvisorRecordingsAbsent
+          expr: absent(node_namespace_pod_container:container_cpu_usage_seconds_total:sum_irate)
+          for: 15m
+          labels:
+            severity: warning
+            guardian_component: observability
+            exported_instance: guardian-mgmt/cadvisor-recordings
+          annotations:
+            summary: standard cAdvisor recordings are absent
+            description: >-
+              The kube-prometheus cAdvisor recording series is empty. Check
+              the vmagent cadvisor-to-kubelet job relabel and the cAdvisor
+              node scrape before relying on container resource dashboards or
+              rules derived from these recordings.

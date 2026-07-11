@@ -301,6 +301,12 @@ cluster:
       - {{ . }}
       {{- end }}
       {{- end }}
+    {{/* Cozystack's monitoring-agents etcd proxy runs host-networked on
+         every control-plane node and reads localhost:2381. Keep etcd's
+         unauthenticated listener on that shared host loopback; the proxy
+         authenticates vmagent before exposing the scrape. */}}
+    extraArgs:
+      listen-metrics-urls: {{ required "values.yaml: `etcd.metricsListenURL` must match the monitoring-agents etcd proxy upstream" (index (.Values.etcd | default dict) "metricsListenURL") | quote }}
     {{- /* etcd backend quota, tunable via values. Raises etcd's 2GiB
            default backend ceiling so a LINSTOR-heavy control plane -
            thousands of DRBD-resource CRDs in aggregate - does not trip
@@ -312,7 +318,6 @@ cluster:
            size of any single object - per-object writes are still gated
            by kube-apiserver's fixed 3MiB request-body limit. */ -}}
     {{- with (.Values.etcd | default dict).quotaBackendBytes }}
-    extraArgs:
       quota-backend-bytes: {{ . | quote }}
     {{- end }}
   {{- end }}

@@ -179,6 +179,11 @@ tcpKeepaliveTuning: false
 
 # Control-plane etcd tuning. Emitted only on controlplane nodes.
 etcd:
+  # Must match monitoring-agents' host-networked RBAC proxy upstream. Keeping
+  # this on loopback exposes the unauthenticated etcd metrics listener only to
+  # host-networked processes; vmagent reaches it through the authenticated
+  # proxy rather than directly.
+  metricsListenURL: "http://127.0.0.1:2381"
   # Max etcd backend DB size before etcd raises a NOSPACE alarm and
   # rejects writes. The default raises etcd's own 2GiB ceiling to 8GiB
   # (etcd's documented upper bound) so a LINSTOR-heavy cluster - many
