@@ -68,7 +68,7 @@ spec:
             exported_instance: 'gamma/login-canary/{{ $labels.flow }}/{{ $labels.scenario }}'
           annotations:
             summary: "IAM login canary is failing in gamma"
-            description: "One or more synthetic login flows (existing-user, new-user, cancellation) have failed for 5m+. Check the newest keycloak-login-canary Job logs in tenant-guardian-gamma."
+            description: "One or more synthetic login flows (existing-user, new-user, cancellation) have failed for 5m+. Check the keycloak-login-canary pod logs for tenant-guardian-gamma in VictoriaLogs."
         - alert: KeycloakLoginCanaryAbsent
           expr: absent(k6_canary_success_total{stage="gamma"})
           for: 15m
