@@ -1,0 +1,19 @@
+# VPA uses Initial admission for vmselect, which can be unavailable while the
+# cluster recovers. Keep the VPA policy and put its CPU floor and ceiling on the
+# owning VMCluster so recovery pods never fall back to the operator defaults.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMCluster
+metadata:
+  name: shortterm
+  namespace: tenant-root
+  annotations:
+    kustomize.toolkit.fluxcd.io/ssa: Override
+spec:
+  vmselect:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 500Mi
+      limits:
+        cpu: "2"
+        memory: 1000Mi

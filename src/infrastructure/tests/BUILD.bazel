@@ -17,6 +17,7 @@ go_test(
         "openbao_conformance_test.go",
         "talm_render_test.go",
         "version_skew_test.go",
+        "vmselect_resources_test.go",
     ],
     data = [
         "@multitool//tools/talm",
