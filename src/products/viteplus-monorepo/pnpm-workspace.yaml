@@ -91,3 +91,6 @@ peerDependencyRules:
   allowedVersions:
     vite: "*"
     vitest: "*"
+minimumReleaseAgeExclude:
+  # Renovate security update: pnpm@11.5.3
+  - pnpm@11.5.3
