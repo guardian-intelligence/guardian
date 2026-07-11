@@ -77,7 +77,9 @@ jobs:
                   build=true ;;
               esac
               case "$f" in
-                src/infrastructure/*) conformance=true ;;
+                # src/tools is in scope because the conformance suite includes
+                # the version-skew test over the kubectl/talosctl tool pins.
+                src/infrastructure/*|src/tools/*) conformance=true ;;
               esac
             done < <(git diff --name-only "$base"...HEAD)
             pinned="$(grep -o "$pin_re" "$web_yaml" | cut -d@ -f2 || true)"

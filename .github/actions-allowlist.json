@@ -1,0 +1,11 @@
+{
+  "github_owned_allowed": true,
+  "verified_allowed": false,
+  "patterns_allowed": [
+    "sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5",
+    "bazelbuild/setup-bazelisk@b39c379c82683a5f25d34f0d062761f62693e0b2",
+    "anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610",
+    "oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3",
+    "renovatebot/github-action@b50d2ba2bd928235abdcc14d06dfafc217f1c565"
+  ]
+}
