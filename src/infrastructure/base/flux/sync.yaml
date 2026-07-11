@@ -254,6 +254,11 @@ spec:
       kind: StatefulSet
       name: guardian-openbao
       namespace: tenant-guardian
+    # zot is deliberately NOT health-checked here: nothing in the graph
+    # depends on the mirror (containerd falls back to upstream implicitly),
+    # so gating guardian-system — and its many dependents — on zot health
+    # would invert the tier's rebuildable-cache posture. Loudness comes from
+    # the ZotRegistryDown and mirror-canary pages instead.
   timeout: 10m
 ---
 # Flagger — progressive-delivery controller, no consumers yet (Canary CRs are

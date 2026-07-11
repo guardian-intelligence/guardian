@@ -1,0 +1,218 @@
+# Mirror canary for the zot registry tier: every 10 minutes, fetch a pinned
+# release manifest through the VIP the nodes will pull through and require the
+# exact digest containerd would compute. containerd's implicit fallback to
+# upstream ghcr means a dead or digest-rewriting mirror produces zero workload
+# symptoms — this canary is what makes that state page instead of staying
+# silent.
+#
+# The probed ref is zot's own release, by TAG: that exercises the tag->digest
+# mapping and byte preservation (preserveDigest + docker2s2) end to end, and
+# on a cold cache it exercises the on-demand sync path too. The expected
+# digest is a constant because a published release tag is immutable upstream;
+# it stays valid across zot image bumps and only ever changes deliberately,
+# together with a re-verification.
+#
+# Results land in VictoriaMetrics as zot_mirror_canary_digest_ok over the
+# same vminsert import path the vap-denial-canary uses; the VMRules below
+# page on a zero and on absence.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zot-mirror-canary
+  namespace: tenant-guardian
+  annotations:
+    # The probe script's shell variables must reach the pod verbatim, not
+    # be blanked by Flux's envsubst pass.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  probe.sh: |
+    #!/bin/sh
+    set -u
+    expected="sha256:34f18f783037f967dba10df02f9d4086c4d626f5643ef9f5e51e4a4547280a0b"
+    fetched="$(curl -fsS --max-time 60 \
+      -H "Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json" \
+      http://10.8.0.201:5000/v2/project-zot/zot-linux-amd64/manifests/v2.1.18 \
+      2>/tmp/curl-err | sha256sum | awk '{print $1}')"
+    if [ "sha256:${fetched}" = "${expected}" ]; then
+      ok=1
+    else
+      ok=0
+    fi
+    curl -fsS --retry 3 --max-time 15 --data-binary \
+      "zot_mirror_canary_digest_ok ${ok}" \
+      http://vminsert-shortterm.tenant-root.svc:8480/insert/0/prometheus/api/v1/import/prometheus \
+      || { echo "failed to record canary result in vminsert"; exit 1; }
+    if [ "${ok}" != "1" ]; then
+      echo "zot mirror digest probe FAILED: got sha256:${fetched}, want ${expected}"
+      cat /tmp/curl-err 2>/dev/null
+      exit 1
+    fi
+    echo "zot mirror served the pinned manifest byte-identical"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: zot-mirror-canary
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: zot-mirror-canary
+    app.kubernetes.io/part-of: guardian
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 120
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: zot-mirror-canary
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: probe
+              # Same image and digest the vap-denial-canary runs; only curl
+              # and sha256sum are used.
+              image: docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
+              command: ["/bin/sh", "/scripts/probe.sh"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 65534
+                capabilities:
+                  drop: ["ALL"]
+                seccompProfile:
+                  type: RuntimeDefault
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: scripts
+              configMap:
+                name: zot-mirror-canary
+            - name: tmp
+              emptyDir: {}
+---
+# Canary pod flows: DNS, the zot VIP, and the VictoriaMetrics import path in
+# tenant-root. Cilium's socket-LB translates the VIP to the zot pod IP at
+# connect(), so the probe's egress destination is the zot pod itself (the
+# toEndpoints rule). The entity rule stays as belt-and-braces for datapath
+# configurations where the VIP is not socket-translated.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: zot-mirror-canary
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: zot-mirror-canary
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: zot-mirror-canary
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: zot
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
+    - toEntities:
+        - host
+        - remote-node
+        - world
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            k8s:app.kubernetes.io/name: vminsert
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
+# Ingress half of the import path: tenant-root's generated isolation does
+# not admit child-tenant namespaces; admit exactly the canary pods to
+# vminsert.
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-root-vminsert-from-zot-mirror-canary
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-root
+      k8s:app.kubernetes.io/name: vminsert
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-guardian
+            k8s:app.kubernetes.io/name: zot-mirror-canary
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: zot-mirror-canary
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  groups:
+    - name: zot-mirror-canary.rules
+      rules:
+        - alert: ZotMirrorDigestBroken
+          expr: max_over_time(zot_mirror_canary_digest_ok[30m]) == 0
+          for: 0m
+          labels:
+            severity: critical
+            guardian.dev/component: registry
+          annotations:
+            summary: "zot mirror failed the pinned-digest pull probe for 30m+"
+            description: >-
+              The canary could not fetch the pinned manifest through the zot
+              VIP with the expected digest for 30m. Either the mirror is
+              unreachable through the pull path the nodes use, or — worse — it
+              is serving rewritten manifest bytes (preserveDigest/docker2s2
+              regression). Node pulls are on implicit ghcr fallback either
+              way. Check the newest zot-mirror-canary Job logs and the zot
+              StatefulSet in tenant-guardian.
+        - alert: ZotMirrorCanaryAbsent
+          expr: absent(zot_mirror_canary_digest_ok)
+          for: 30m
+          labels:
+            severity: critical
+            guardian.dev/component: registry
+          annotations:
+            summary: "zot-mirror-canary metrics absent for 30m"
+            description: >-
+              No zot_mirror_canary_digest_ok samples — the canary CronJob is
+              not running or cannot reach vminsert. Mirror integrity is
+              unverified. Check the newest zot-mirror-canary Job logs in
+              tenant-guardian.

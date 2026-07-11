@@ -1,0 +1,89 @@
+# containerd pulls arrive through the MetalLB VIP from the nodes' host
+# netns; Cilium's socket-LB (kube-proxy replacement) translates the VIP to
+# the pod IP at connect(), so the traffic reaches the pod with
+# host/remote-node identity. The mirror canary's probe takes the same VIP
+# but from a pod, where the socket-LB translation preserves the canary's
+# own pod identity — hence the separate fromEndpoints rule.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-nodes-to-zot
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: zot
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: zot
+  ingress:
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: zot-mirror-canary
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-vmagent-to-zot-metrics
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: zot
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: zot
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: vmagent
+            k8s:io.kubernetes.pod.namespace: cozy-monitoring
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
+---
+# zot's only legitimate egress is DNS and the upstream registry it mirrors
+# (ghcr manifest endpoints plus the object-storage hosts its blob downloads
+# redirect to — all world:443). Everything else is denied by this policy
+# existing.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: zot-egress
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: zot
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: zot
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
