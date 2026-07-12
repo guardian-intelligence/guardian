@@ -780,16 +780,97 @@ spec:
                   }
                 }
 
+                request "write_reader_policy_tenant_guardian" {
+                  operation = "update"
+                  path = "sys/policies/acl/guardian-reader-tenant-guardian"
+                  data = {
+                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-guardian/*\" {\n  capabilities = [\"read\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/tenant-guardian/*\" {\n  capabilities = [\"read\"]\n}\n"
+                  }
+                }
+
+                request "write_reader_role_tenant_guardian" {
+                  operation = "update"
+                  path = "auth/kubernetes/role/guardian-reader-tenant-guardian"
+                  data = {
+                    bound_service_account_names = ["secrets-reader"]
+                    bound_service_account_namespaces = ["tenant-guardian"]
+                    audience = "openbao"
+                    token_policies = ["guardian-reader-tenant-guardian"]
+                    token_ttl = "3600"
+                    token_max_ttl = "3600"
+                  }
+                }
+
+                request "write_writer_policy_tenant_guardian" {
+                  operation = "update"
+                  path = "sys/policies/acl/guardian-writer-tenant-guardian"
+                  data = {
+                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-guardian/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/tenant-guardian/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n"
+                  }
+                }
+
+                request "write_writer_role_tenant_guardian" {
+                  operation = "update"
+                  path = "auth/kubernetes/role/guardian-writer-tenant-guardian"
+                  data = {
+                    bound_service_account_names = ["secrets-writer"]
+                    bound_service_account_namespaces = ["tenant-guardian"]
+                    audience = "openbao"
+                    token_policies = ["guardian-writer-tenant-guardian"]
+                    token_ttl = "600"
+                    token_max_ttl = "600"
+                  }
+                }
+
+                # The image countersigner (the registry tier's first authenticated
+                # writer) signs first-party image digests with the transit key
+                # guardian-images. The KEY is deliberately not created here:
+                # self-init runs on every reinit's fresh raft, so a key request in
+                # this block would mint new key material each ceremony and orphan
+                # every existing countersignature. The bootstrap importer owns the
+                # key lifecycle instead — restore from the custody backup blob, or
+                # create-and-export on first run (openbao_secret_import). This
+                # block grants only the standing capability: sign, plus the key
+                # read cosign needs to fetch the public half.
+                # The wildcard is load-bearing: cosign signs at
+                # transit/sign/guardian-images/sha2-256 (the hash algorithm
+                # rides the path), which an exact-match rule does not cover.
+                request "write_countersigner_policy" {
+                  operation = "update"
+                  path = "sys/policies/acl/guardian-countersigner"
+                  data = {
+                    policy = "path \"transit/sign/guardian-images\" {\n  capabilities = [\"update\"]\n}\n\npath \"transit/sign/guardian-images/*\" {\n  capabilities = [\"update\"]\n}\n\npath \"transit/keys/guardian-images\" {\n  capabilities = [\"read\"]\n}\n"
+                  }
+                }
+
+                request "write_countersigner_role" {
+                  operation = "update"
+                  path = "auth/kubernetes/role/guardian-countersigner"
+                  data = {
+                    bound_service_account_names = ["countersigner"]
+                    bound_service_account_namespaces = ["tenant-guardian"]
+                    audience = "openbao"
+                    token_policies = ["guardian-countersigner"]
+                    token_ttl = "600"
+                    token_max_ttl = "600"
+                  }
+                }
+
                 # The bootstrap importer seeds the whole guardian-mgmt subtree
                 # in one run (bootstrap and DR re-seed are the only times a
                 # cross-namespace write credential exists), then deletes its
                 # own role and policy. The wildcard keeps this block O(1) in
                 # the number of integrations: new secrets never edit it.
+                # The transit paths are the guardian-images key lifecycle:
+                # restore from custody, or create + plaintext-backup export on
+                # first run. Backup export hands out private key material, so
+                # the capability exists only inside this same self-deleting
+                # bootstrap window.
                 request "write_secret_importer_policy" {
                   operation = "update"
                   path = "sys/policies/acl/guardian-secret-importer"
                   data = {
-                    policy = "path \"kv/data/guardian/guardian-mgmt/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"auth/kubernetes/role/guardian-secret-importer\" {\n  capabilities = [\"delete\"]\n}\n\npath \"sys/policies/acl/guardian-secret-importer\" {\n  capabilities = [\"delete\"]\n}\n"
+                    policy = "path \"kv/data/guardian/guardian-mgmt/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"transit/keys/guardian-images\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"transit/restore/guardian-images\" {\n  capabilities = [\"update\"]\n}\n\npath \"transit/backup/guardian-images\" {\n  capabilities = [\"read\"]\n}\n\npath \"auth/kubernetes/role/guardian-secret-importer\" {\n  capabilities = [\"delete\"]\n}\n\npath \"sys/policies/acl/guardian-secret-importer\" {\n  capabilities = [\"delete\"]\n}\n"
                   }
                 }
 

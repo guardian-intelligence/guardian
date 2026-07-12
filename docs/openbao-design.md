@@ -127,6 +127,19 @@ called out explicitly.
   discipline to one more artifact.
 - Non-durable drill keys may be created imperatively during DR verification and
   deleted afterward.
+- The first durable key is `guardian-images` (ecdsa-p256), the image
+  countersigner's signing key. Its stakes are lower than an encryption key's —
+  loss means re-key and re-sign the estate, not data loss — but it follows the
+  same custody model because its material must survive reinits (fresh material
+  would orphan every existing countersignature). The bootstrap importer owns
+  its lifecycle: restore from the `openbao_transit_images_signing_key_backup`
+  custody blob, or create-and-export on first run
+  (`openbao_secret_import/main.go`). Backup-export capability exists only in
+  the importer's self-deleting bootstrap window; the standing
+  `guardian-countersigner` policy grants sign plus public-key read only. The
+  key must never be casually rotated: cosign's transit verification assumes a
+  fixed key version, and old countersignatures verify only against the version
+  that made them.
 
 ## Auth & self-init config
 - Kubernetes auth method; ESO and the bootstrap importer authenticate via SA tokens validated
@@ -236,7 +249,10 @@ Created by the self-init `initialize` block and Ready in the current cluster:
 - `transit` mount and tune.
 - Kubernetes auth backend and tune.
 - Per-namespace `guardian-reader-<ns>`/`guardian-writer-<ns>` policies and Kubernetes auth
-  roles (external-dns, company-site, tenant-guardian-{beta,gamma,prod}).
+  roles (the scoped-namespace list lives in the self-init block, pinned by
+  `TestOpenBaoOperationsInventoryConformance`).
+- The `guardian-countersigner` policy and role (transit sign + key read for the image
+  countersigner's SA).
 - Temporary `guardian-secret-importer` policy and role (bootstrap-only; the importer deletes
   them after a successful import).
 
@@ -253,11 +269,16 @@ Legacy live cruft removed on 2026-06-29:
 
 Ops resources still needed before OpenBao is the real vault/transit authority:
 - Restore drill for any durable Transit key before that key protects production
-  ciphertext.
-- Durable Transit-key provisioning only when a real consumer requires it. Self-init
-  declares mounts/policies/auth roles; a durable Transit key would be added as an
-  `initialize` request (or created imperatively with its keyring exported to custody at
-  creation), not via a custom operator or CRD.
+  ciphertext or signatures anything verifies. For `guardian-images`: restore
+  the custody blob into a throwaway OpenBao, sign a test digest, and assert
+  the public key matches the production key's fingerprint (printed by the
+  importer on every run).
+- Durable Transit-key provisioning only when a real consumer requires it.
+  Self-init declares mounts/policies/auth roles; durable key material is
+  importer-owned (restore-or-create against custody, the `guardian-images`
+  pattern), never a self-init request — self-init re-runs on every reinit's
+  fresh raft and would mint new material each time — and never a custom
+  operator or CRD.
 - ExternalSecrets for any remaining consumers of imported Cloudflare/R2 credentials beyond
   `external-dns` (the per-namespace roles already cover them; only the Git-side ESO wiring
   is missing).

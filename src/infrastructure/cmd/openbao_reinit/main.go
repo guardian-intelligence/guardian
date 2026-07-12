@@ -242,7 +242,14 @@ func checkPreconditions(ctx context.Context, runner kubectlRunner, opts options)
 	if info.Size() == 0 {
 		return 0, fmt.Errorf("custody import env file %s is empty", opts.EnvFile)
 	}
-	fmt.Printf("%s present (%d bytes)\n", opts.EnvFile, info.Size())
+	// The importer validates its whole plan against the env file NOW, while
+	// the raft is still intact: discovering a missing custody variable after
+	// the wipe would strand OpenBao empty until the file is fixed.
+	validate := exec.CommandContext(ctx, opts.Importer, "--env-file", opts.EnvFile, "--validate-only")
+	if out, err := validate.CombinedOutput(); err != nil {
+		return 0, fmt.Errorf("custody import env file %s does not satisfy the import plan: %w\n%s", opts.EnvFile, err, strings.TrimSpace(string(out)))
+	}
+	fmt.Printf("%s present (%d bytes), import plan validates\n", opts.EnvFile, info.Size())
 	return replicas, nil
 }
 

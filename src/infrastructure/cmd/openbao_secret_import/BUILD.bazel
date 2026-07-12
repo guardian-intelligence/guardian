@@ -5,7 +5,10 @@ go_library(
     srcs = ["main.go"],
     importpath = "github.com/guardian-intelligence/guardian/src/infrastructure/cmd/openbao_secret_import",
     visibility = ["//visibility:private"],
-    deps = ["@com_github_openbao_openbao_api_v2//:api"],
+    deps = [
+        "@com_github_openbao_openbao_api_v2//:api",
+        "@org_golang_x_crypto//bcrypt",
+    ],
 )
 
 go_binary(

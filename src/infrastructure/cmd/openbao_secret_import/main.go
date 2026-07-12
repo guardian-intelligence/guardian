@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -19,6 +21,7 @@ import (
 	"time"
 
 	baoapi "github.com/openbao/openbao/api/v2"
+	"golang.org/x/crypto/bcrypt"
 )
 
 const (
@@ -31,12 +34,20 @@ const (
 	defaultCASecret       = "guardian-openbao-api-tls"
 	defaultLocalPort      = 18200
 	importerPolicy        = "guardian-secret-importer"
+
+	// The transit signing key behind image countersignatures. Its material
+	// must survive reinits (fresh material would orphan every existing
+	// countersignature), so custody is the source of truth and this importer
+	// is the restore-or-create path — see ensureTransitSigningKey.
+	transitSigningKey = "guardian-images"
+	transitBackupEnv  = "openbao_transit_images_signing_key_backup"
 )
 
 var envNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 type options struct {
 	EnvFile        string
+	ValidateOnly   bool
 	DeleteEnvFile  bool
 	Kubectl        string
 	Kubeconfig     string
@@ -71,6 +82,7 @@ type kubeSecret struct {
 func main() {
 	var opts options
 	flag.StringVar(&opts.EnvFile, "env-file", defaultEnvFile, "local env file to import")
+	flag.BoolVar(&opts.ValidateOnly, "validate-only", false, "parse the env file and construct the import plan, then exit without touching the cluster (the reinit ceremony's pre-wipe gate)")
 	flag.BoolVar(&opts.DeleteEnvFile, "delete-env-file", false, "delete env file after a successful import (custody.env normally lives in the restored custody bundle; wipe the bundle instead)")
 	flag.StringVar(&opts.Kubectl, "kubectl", "", "path to kubectl")
 	flag.StringVar(&opts.Kubeconfig, "kubeconfig", "", "kubeconfig for guardian-mgmt")
@@ -112,6 +124,10 @@ func run(ctx context.Context, opts options) error {
 	if err != nil {
 		return err
 	}
+	if opts.ValidateOnly {
+		fmt.Printf("import plan valid: %d kv writes from %s\n", len(writes), opts.EnvFile)
+		return nil
+	}
 
 	runner := kubectlRunner{
 		bin:            opts.Kubectl,
@@ -144,6 +160,9 @@ func run(ctx context.Context, opts options) error {
 		}
 		fmt.Printf("imported %s properties: %s\n", write.APIPath, strings.Join(sortedKeys(write.Data), ","))
 	}
+	if err := ensureTransitSigningKey(ctx, client, env, opts.EnvFile); err != nil {
+		return err
+	}
 	if err := cleanupImporter(ctx, client, opts.AuthPath, opts.AuthRole); err != nil {
 		return err
 	}
@@ -158,7 +177,7 @@ func run(ctx context.Context, opts options) error {
 }
 
 func validateOptions(opts options) error {
-	if opts.Kubectl == "" {
+	if opts.Kubectl == "" && !opts.ValidateOnly {
 		return errors.New("--kubectl is required")
 	}
 	for label, value := range map[string]string{
@@ -240,6 +259,7 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 		"github_runner_app_prod_webhook_secret",
 		"github_runner_app_prod_client_secret",
 		"github_runner_app_prod_private_key_b64",
+		"zot_countersigner_password",
 	}
 	var missing []string
 	for _, key := range required {
@@ -259,6 +279,11 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 	if err != nil {
 		return nil, err
 	}
+	zotHash, err := bcrypt.GenerateFromPassword([]byte(env["zot_countersigner_password"]), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, fmt.Errorf("bcrypt zot_countersigner_password: %w", err)
+	}
+	zotPasswordHash := string(zotHash)
 	// Every path's first segment under guardian-mgmt/ is the consuming
 	// namespace (the per-namespace reader/writer roles are scoped to that
 	// subtree); operator/ is the exception — custody reference material no
@@ -334,6 +359,20 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 				"webhookSecret":       env["github_runner_app_prod_webhook_secret"],
 				"clientSecret":        env["github_runner_app_prod_client_secret"],
 				"githubAppPrivateKey": runnerAppKey,
+			},
+		},
+		// zot push credential for the image countersigner: operator-minted
+		// (like the Keycloak canary user), so a DR re-seed restores a value
+		// consistent with the htpasswd hash zot mounts. `password` is the
+		// docker login the countersigner presents; `htpasswd` is the file
+		// line zot's auth mount consumes. zot accepts only bcrypt, and the
+		// hash is derived here so custody carries a single secret (the hash
+		// re-salts on every import, which zot is indifferent to).
+		{
+			APIPath: "kv/data/guardian/guardian-mgmt/tenant-guardian/zot-countersigner",
+			Data: map[string]string{
+				"password": env["zot_countersigner_password"],
+				"htpasswd": "countersigner:" + zotPasswordHash,
 			},
 		},
 	}
@@ -472,6 +511,78 @@ func writeAndVerify(ctx context.Context, client *baoapi.Client, write secretWrit
 			return fmt.Errorf("verify %s: property %s mismatch", write.APIPath, key)
 		}
 	}
+	return nil
+}
+
+// ensureTransitSigningKey makes the guardian-images transit signing key live
+// and custody-durable. A reinit recreates the transit mount empty, and fresh
+// key material would orphan every countersignature already attached in the
+// registry, so custody is the source of truth: when the env file carries the
+// transit/backup blob the key is restored from it verbatim; on first run the
+// key is created (exportable + allow_plaintext_backup, both required for the
+// backup endpoint and irreversible once set) and its backup is exported next
+// to the env file for the operator to fold into custody.
+func ensureTransitSigningKey(ctx context.Context, client *baoapi.Client, env map[string]string, envFile string) error {
+	if blob := strings.TrimSpace(env[transitBackupEnv]); blob != "" {
+		// force makes a re-run after a partial import idempotent: restoring
+		// the same backup over the same key is a no-op for the material.
+		if _, err := client.Logical().WriteWithContext(ctx, "transit/restore/"+transitSigningKey, map[string]interface{}{
+			"backup": blob,
+			"force":  true,
+		}); err != nil {
+			return fmt.Errorf("restore transit signing key %s from custody backup: %w", transitSigningKey, err)
+		}
+		fmt.Printf("restored transit signing key %s from the custody backup\n", transitSigningKey)
+		return printTransitKeyFingerprint(ctx, client)
+	}
+	if _, err := client.Logical().WriteWithContext(ctx, "transit/keys/"+transitSigningKey, map[string]interface{}{
+		"type":                   "ecdsa-p256",
+		"exportable":             true,
+		"allow_plaintext_backup": true,
+	}); err != nil {
+		return fmt.Errorf("create transit signing key %s: %w", transitSigningKey, err)
+	}
+	backup, err := client.Logical().ReadWithContext(ctx, "transit/backup/"+transitSigningKey)
+	if err != nil {
+		return fmt.Errorf("export transit signing key %s backup: %w", transitSigningKey, err)
+	}
+	blob := ""
+	if backup != nil && backup.Data != nil {
+		blob, _ = backup.Data["backup"].(string)
+	}
+	if blob == "" {
+		return fmt.Errorf("transit signing key %s backup export returned no payload", transitSigningKey)
+	}
+	outPath := filepath.Join(filepath.Dir(envFile), "openbao-transit-guardian-images.backup.b64")
+	if err := os.WriteFile(outPath, []byte(blob), 0o600); err != nil {
+		return fmt.Errorf("write transit signing key backup to %s: %w", outPath, err)
+	}
+	fmt.Printf("created transit signing key %s and exported its plaintext backup to %s\n", transitSigningKey, outPath)
+	fmt.Printf("CUSTODY ACTION REQUIRED: append %s=<contents of %s> to custody.env, snapshot the bundle (aspect infra custody --action create), then delete the exported file — the key is not DR-durable until the snapshot lands, and the next reinit would otherwise mint new material and orphan every countersignature\n", transitBackupEnv, filepath.Base(outPath))
+	return printTransitKeyFingerprint(ctx, client)
+}
+
+// printTransitKeyFingerprint records the public half for custody cross-checks
+// (the same role the seal-key fingerprint plays): the operator can compare it
+// against prior importer runs and against what a restore drill reproduces,
+// without any private material leaving OpenBao.
+func printTransitKeyFingerprint(ctx context.Context, client *baoapi.Client) error {
+	key, err := client.Logical().ReadWithContext(ctx, "transit/keys/"+transitSigningKey)
+	if err != nil {
+		return fmt.Errorf("read transit signing key %s: %w", transitSigningKey, err)
+	}
+	if key == nil || key.Data == nil {
+		return fmt.Errorf("read transit signing key %s: empty response", transitSigningKey)
+	}
+	latest := fmt.Sprintf("%v", key.Data["latest_version"])
+	versions, _ := key.Data["keys"].(map[string]interface{})
+	entry, _ := versions[latest].(map[string]interface{})
+	publicKey, _ := entry["public_key"].(string)
+	if publicKey == "" {
+		return fmt.Errorf("transit signing key %s version %s has no public key in the read response", transitSigningKey, latest)
+	}
+	fmt.Printf("transit signing key %s: type=%v latest_version=%s public-key-sha256=%x\n",
+		transitSigningKey, key.Data["type"], latest, sha256.Sum256([]byte(publicKey)))
 	return nil
 }
 

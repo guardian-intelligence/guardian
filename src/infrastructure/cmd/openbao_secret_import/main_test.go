@@ -4,6 +4,8 @@ import (
 	"encoding/base64"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestParseEnv(t *testing.T) {
@@ -53,6 +55,7 @@ func testImportEnv() map[string]string {
 		"github_runner_app_prod_webhook_secret":  "runner-webhook",
 		"github_runner_app_prod_client_secret":   "runner-client",
 		"github_runner_app_prod_private_key_b64": base64.StdEncoding.EncodeToString([]byte(testRunnerAppPEM)),
+		"zot_countersigner_password":             "zot-push-pass",
 	}
 }
 
@@ -61,8 +64,8 @@ func TestImportPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 7 {
-		t.Fatalf("plan length = %d, want 7", len(plan))
+	if len(plan) != 8 {
+		t.Fatalf("plan length = %d, want 8", len(plan))
 	}
 	byPath := map[string]secretWrite{}
 	for _, w := range plan {
@@ -127,6 +130,22 @@ func TestImportPlan(t *testing.T) {
 	if runner.Data["githubAppPrivateKey"] != testRunnerAppPEM {
 		t.Fatal("postflight-runner githubAppPrivateKey did not round-trip through base64")
 	}
+	zot, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-guardian/zot-countersigner"]
+	if !ok {
+		t.Fatal("zot-countersigner write missing")
+	}
+	if zot.Data["password"] != "zot-push-pass" {
+		t.Fatalf("zot-countersigner password = %q", zot.Data["password"])
+	}
+	// The htpasswd line is what zot's auth file mounts; the hash re-salts per
+	// import, so verify it against the password instead of a fixed string.
+	user, hash, found := strings.Cut(zot.Data["htpasswd"], ":")
+	if !found || user != "countersigner" {
+		t.Fatalf("zot-countersigner htpasswd line = %q, want countersigner:<bcrypt>", zot.Data["htpasswd"])
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte("zot-push-pass")); err != nil {
+		t.Fatalf("zot-countersigner htpasswd hash does not verify against the password: %v", err)
+	}
 }
 
 func TestImportPlanRejectsBadGithubKey(t *testing.T) {
@@ -161,8 +180,8 @@ func TestImportPlanOptionalKeycloakStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 9 {
-		t.Fatalf("plan length = %d, want 9 (7 base + beta + prod)", len(plan))
+	if len(plan) != 10 {
+		t.Fatalf("plan length = %d, want 10 (8 base + beta + prod)", len(plan))
 	}
 	byPath := map[string]secretWrite{}
 	for _, w := range plan {
