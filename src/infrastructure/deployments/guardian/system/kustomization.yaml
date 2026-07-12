@@ -1,5 +1,15 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+generatorOptions:
+  # The countersigner mounts this ConfigMap by its static name.
+  disableNameSuffixHash: true
+configMapGenerator:
+  # The same pinned Sigstore trusted root the drive builds and dark bring-up
+  # verify against — one copy, projected from the bundle.
+  - name: sigstore-trusted-root
+    namespace: tenant-guardian
+    files:
+      - ../../../bootstrap/bundle/sigstore-trusted-root.json
 resources:
   - stage-tenants.yaml
   - openbao-listener-tls.yaml
@@ -8,6 +18,7 @@ resources:
   - openbao-observability.yaml
   - openbao-rbac.yaml
   - vap-denial-canary.yaml
+  - zot-countersigner.yaml
   - zot-helmrelease.yaml
   - zot-mirror-canary.yaml
   - zot-networkpolicy.yaml

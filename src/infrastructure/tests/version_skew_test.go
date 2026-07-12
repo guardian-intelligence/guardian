@@ -93,6 +93,39 @@ func TestTalosctlTracksInstallerImage(t *testing.T) {
 	}
 }
 
+// The countersigner extracts its cosign binary from the pinned cosign image;
+// the multitool release binary is that image's trust anchor (verified
+// keyless at adoption) and the dark-drive copy verifies what the
+// countersigner signs — so all three cosign pins move together: a bump PR
+// for any one of them goes red until the others follow.
+func TestCountersignerCosignPinsMoveTogether(t *testing.T) {
+	countersignerYAML := "src/infrastructure/deployments/guardian/system/zot-countersigner.yaml"
+	declaredLock := "src/infrastructure/bootstrap/bundle/images.declared.lock"
+
+	release := regexp.MustCompile(`sigstore/cosign/releases/download/(v\d+\.\d+\.\d+)/cosign-linux-amd64`).
+		FindStringSubmatch(readText(t, runfilePath(toolLockRunfile)))
+	if release == nil {
+		t.Fatalf("%s: no cosign release pin found", toolLockRunfile)
+	}
+	image := regexp.MustCompile(`ghcr\.io/sigstore/cosign/cosign:(v\d+\.\d+\.\d+)@(sha256:[a-f0-9]{64})`).
+		FindStringSubmatch(readText(t, runfilePath(countersignerYAML)))
+	if image == nil {
+		t.Fatalf("%s: no COSIGN_IMAGE tag@digest pin found", countersignerYAML)
+	}
+	declared := regexp.MustCompile(`ghcr\.io/sigstore/cosign/cosign@(sha256:[a-f0-9]{64})`).
+		FindStringSubmatch(readText(t, runfilePath(declaredLock)))
+	if declared == nil {
+		t.Fatalf("%s: no cosign image digest declared", declaredLock)
+	}
+
+	if image[1] != release[1] {
+		t.Fatalf("countersigner COSIGN_IMAGE is %s but the multitool cosign release pin is %s: move them together", image[1], release[1])
+	}
+	if image[2] != declared[1] {
+		t.Fatalf("countersigner COSIGN_IMAGE digest %s and the images.declared.lock entry %s differ: the dark haul would carry a different image than the countersigner fetches", image[2], declared[1])
+	}
+}
+
 func TestTalmChartTalosVersionAgreesWithInstallerImage(t *testing.T) {
 	chart := extractMinor(t, talmChartRunfile,
 		`talosVersion: "v(\d+)\.(\d+)"`)
