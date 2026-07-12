@@ -82,6 +82,7 @@ func TestPlatformAgentIsReadOnlyWithMaintenanceExceptions(t *testing.T) {
 		"name: guardian-platform-agent-readonly",
 		`request.userInfo.username.endsWith("#platform-agent")`,
 		`"guardian-platform-agent" in request.userInfo.groups`,
+		`!has(request.subResource)`,
 		`request.subResource == "portforward"`,
 		`request.resource.resource == "jobs"`,
 	} {
