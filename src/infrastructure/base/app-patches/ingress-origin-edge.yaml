@@ -7,12 +7,23 @@ metadata:
   name: ingress-nginx-system
   namespace: tenant-root
 spec:
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              group: apps
+              version: v1
+              kind: Deployment
+              name: root-ingress-controller
+            patch: |-
+              - op: add
+                path: /spec/template/spec/runtimeClassName
+                value: guardian-system-ingress
   values:
     ingress-nginx:
       controller:
         hostNetwork: true
         dnsPolicy: ClusterFirstWithHostNet
-        runtimeClassName: guardian-system-ingress
         extraArgs:
           default-ssl-certificate: tenant-root/cloudflare-origin-tls
         affinity:
