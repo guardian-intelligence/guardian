@@ -1,6 +1,7 @@
 # Registry design: the in-cluster OCI tier
 
-Status: active as of 2026-07-11 (PR for task: zot registry tier, slice R1).
+Status: active as of 2026-07-11 (slices R1 zot tier + mirror flip, and R2
+countersigner write path).
 Complements `supply-chain-design.md` (trust model, signing) and
 `adrs/0005-no-in-cluster-object-storage.md` (why the registry stores on a
 PVC, not an object store).
@@ -57,16 +58,25 @@ on the pull path while cache misses fall back silently to upstream).
 
 - **Nodes (read).** Anonymous read, network-scoped (VIP on the node VLAN,
   ingress admitted only from host/remote-node identities). This holds only
-  while the registry's content is a strict subset of what is publicly
-  served by ghcr. **Trigger condition, not a date: the moment any
-  non-public artifact would land in zot, authenticated node pulls (Talos
-  per-registry auth in machine config) must already be in place.**
-- **In-cluster writers.** None exist in R1, so no write path exists in R1:
-  `accessControl` grants anonymous read only, and without a matching policy
-  every push is 401. The first writer — the countersigner (R2) — arrives
-  with zot's bearer ServiceAccount-token federation (`http.auth.bearer.oidc`
-  against the cluster issuer) and per-repo write policies, tested against
-  its real consumer. No credentials are pre-provisioned.
+  while everything the registry serves is safe for anonymous eyes. **Trigger
+  condition, not a date: the moment any confidential artifact would land in
+  zot, authenticated node pulls (Talos per-registry auth in machine config)
+  must already be in place.** Countersignatures do not trip this:
+  they are zot-local (not on ghcr) but public by nature — verifiable
+  statements whose whole purpose is to be read against a public key.
+- **In-cluster writers.** Exactly one: the countersigner's `countersigner`
+  htpasswd user, granted create/update under `guardian-intelligence/**`
+  (where its signature referrers land) while `**` stays anonymous
+  read-only. htpasswd rather than bearer SA-token federation is a verified
+  constraint, not a shortcut: in the pinned zot, enabling ANY `http.auth.bearer`
+  config makes the bearer handler the exclusive authn middleware with no
+  anonymous fallthrough — it would break anonymous node pull-through
+  (confirmed in v2.1.18 source; the OIDC bearer support added in v2.1.14 is
+  real but all-or-nothing). If node pulls ever authenticate (the ring above
+  escalates), bearer SA-token federation becomes the natural replacement for
+  the htpasswd user. The credential is custody-held
+  (`zot_countersigner_password`); the importer derives zot's bcrypt htpasswd
+  line from it, and ESO projects both halves into `zot-countersigner-auth`.
 - **Humans.** Platform-admin `kubectl` (port-forward/exec) is the R1
   break-glass surface. A Keycloak OpenID client (cozy realm, PR-able via
   the EDP operator) becomes worth wiring only when a human-facing surface
@@ -76,6 +86,32 @@ on the pull path while cache misses fall back silently to upstream).
   exposure, which deletes that attack surface rather than authenticating
   it.
 
+## The countersigner (R2)
+
+`zot-countersigner.yaml`: a level-triggered assurance loop over the
+first-party image digests the cluster's workload specs declare. Each run,
+per digest, addressed through the mirror (`10.8.0.201:5000/...@digest`): if
+a countersignature already verifies against the transit key's public half,
+done; otherwise verify the digest's Fulcio signature against its canonical
+per-workflow identity (pinned Sigstore trusted root, fully offline — zot
+proxies the signature material from ghcr) and only then sign with
+`openbao://guardian-images` and re-verify. Countersignatures attach as OCI
+1.1 referrers, never legacy `.sig` tags — a tag GET re-triggers on-demand
+sync, which would clobber a locally-modified tag, while sync never touches
+local referrers. The loop's egress is entirely in-cluster (OpenBao, zot,
+apiserver, vminsert): no world route exists for it.
+
+Loudness: `GuardianCountersignerUnsignedImages` pages when the unsigned
+count fails to touch zero across 45 minutes (Fulcio verification failing,
+an unmapped first-party repo, transit signing unavailable, or the write
+path broken), and `GuardianCountersignerSilent` pages on metric absence.
+A new first-party image is unsigned until its identity is added to the
+script's map — the page is the onboarding reminder.
+
+The signing key's custody model (importer-owned restore-or-create, backup
+blob in custody.env, restore drill before reliance, never rotate casually)
+lives in `docs/openbao-design.md`.
+
 ## Where this goes (the inversion)
 
 End state: zot is the operational origin; ghcr.io demotes to one publish
@@ -83,8 +119,10 @@ marketplace among npm/PyPI/crates. Until in-cluster builders exist, GitHub
 publishers keep pushing ghcr first — that is the only place Fulcio
 identities are mintable, so ghcr-as-origin is currently correct, not debt.
 The inversion is gated on: in-cluster CI capacity, a passed re-cache drill
-(wipe the PVC, watch on-demand sync repopulate under the canary), and the
-countersigner proving the ServiceAccount write path. Outbound publication
+(wipe the PVC, watch on-demand sync repopulate under the canary — the drill
+must also confirm countersignature referrers are re-mintable afterwards,
+since a wiped PVC loses them until the countersigner's next runs re-sign),
+and the countersigner's write path proven in production. Outbound publication
 from zot to marketplaces must use signature-carrying copies (`cosign copy`
 / regsync) — plain image copies silently drop cosign referrers.
 

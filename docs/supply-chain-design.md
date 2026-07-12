@@ -36,8 +36,18 @@ Verifiers MUST pin these exact identity strings (OIDC issuer
   `https://github.com/guardian-intelligence/guardian/.github/workflows/analytics-ingest-image.yml@refs/heads/main`
 - `alert-relay` image + SBOM attestations:
   `https://github.com/guardian-intelligence/guardian/.github/workflows/alert-relay-image.yml@refs/heads/main`
+- `cockpit` image + SBOM attestations:
+  `https://github.com/guardian-intelligence/guardian/.github/workflows/cockpit-image.yml@refs/heads/main`
+- `postflight-controlplane` image + SBOM attestations:
+  `https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-controlplane-image.yml@refs/heads/main`
 - images.lock signature bundles:
   `https://github.com/guardian-intelligence/guardian/.github/workflows/images-lock-sign.yml@refs/heads/main`
+
+The in-cluster countersigner (`docs/registry-design.md`) carries the same
+list as its identity map: it refuses to countersign any digest that does not
+verify against its repo's canonical identity, so adding a first-party image
+means updating this list, the countersigner map, and creating the new
+workflow file together.
 
 Identities are per-workflow-file by construction — a new first-party image
 gets a new workflow file, never a stanza in an existing one, so no single
@@ -50,6 +60,7 @@ identity can sign more than one artifact family.
 | `company-site` image | `company-site-image` workflow on main | cosign keyless signature + SPDX SBOM attestation (`--type spdxjson`) | ghcr.io, attached to the digest |
 | `analytics-ingest` image | `analytics-ingest-image` workflow on main | cosign keyless signature + SPDX SBOM attestation (`--type spdxjson`) | ghcr.io, attached to the digest |
 | `alert-relay` image | `alert-relay-image` workflow on main | cosign keyless signature + SPDX SBOM attestation (`--type spdxjson`) | ghcr.io, attached to the digest |
+| every deployed first-party digest | in-cluster countersigner (`docs/registry-design.md`) | Transit countersignature (`openbao://guardian-images`, no tlog) as an OCI 1.1 referrer, minted only after the digest's Fulcio signature re-verifies | zot, attached to the digest |
 | union images lock (generated) | `images-lock-sign` workflow on main pushes touching any union input (declared lock, manifest trees, the imageset tool) | derives the union with `//src/infrastructure/cmd/imageset`, then `cosign sign-blob --bundle` (embeds Fulcio cert + Rekor proof), pushed with `oras push` so the layer carries a filename title | `ghcr.io/guardian-intelligence/supply-chain:images.lock-<sha256>` (one tag per union hash, no floating tag; package stays private — only authenticated drive builds fetch it, dark bring-up reads it from the drive) |
 
 The artifact inventory itself is split and mostly generated:
@@ -184,10 +195,10 @@ every 10 minutes that the policy still flags a violating probe — pages
 critical on silence, since the apiserver exposes no per-policy VAP metrics
 on this cluster (verified 1.34.3).
 
-## Decision: no Transit (or any KMS) in the signing path
+## Decision: no Transit (or any KMS) in the CI signing path
 
 OpenBao Transit could hold a company-wide signing key (`cosign --key
-hashivault://…` works against OpenBao). We deliberately do not do this:
+openbao://…` is native). We deliberately keep it out of CI's signing path:
 
 1. **Coupling**: the factory is CI. A Transit-held key means CI must reach
    OpenBao to sign, so artifact production halts whenever the management
@@ -195,17 +206,30 @@ hashivault://…` works against OpenBao). We deliberately do not do this:
    inside the cluster it bootstraps, one level up.
 2. **Exposure**: it puts a network path from public CI runners to the
    secret store that exists for cluster-internal custody.
-3. **No benefit**: signing wants a verifiable *builder identity*, and the
-   builder is CI. Keyless binds exactly that. Transit's job in guardian is
-   data-encryption custody for disaster recovery, not artifact signing.
+3. **No benefit there**: CI signing wants a verifiable *builder identity*,
+   and the builder is CI. Keyless binds exactly that.
+
+The in-cluster **countersigner** sits on the other side of all three
+reasons and is the deliberate exception: it runs inside the cluster (no CI
+coupling, no public-runner network path), and its signature states
+something keyless cannot — a Guardian-held key, under the custody model,
+vouches for the digest after re-verifying the Fulcio original. That second
+signature is the sovereignty lane: drive builds and dark bring-up get a
+verification path anchored in a plain public key with no GitHub identity
+or Sigstore-TUF freshness coupling. CI's signatures remain the merge-gate
+currency; the countersignature is what the estate can verify when GitHub
+is unreachable by design.
 
 ## Exit path (sovereignty upgrade)
 
-Keyless signatures name GitHub identities. If Guardian later self-hosts its
-factory, the upgrade is a verification-policy change, not a re-architecture:
-run a private Sigstore (or switch to a key held under the custody model,
-used only by the self-hosted CI), re-sign the current pins, and update the
-identity strings here and in the verify steps. Old signatures remain valid
-statements about who built what. Until then, registries stay untrusted,
-Git stays the source of truth, and the dark bundle stays the
+Keyless signatures name GitHub identities. The countersigner is the first
+step off that dependency: every deployed first-party digest now also
+carries a signature by a Guardian-held key, so the eventual verification
+flip (dark bring-up and drive builds checking the Transit lane's public
+key instead of — or before — the Fulcio identities) is a policy change,
+not a re-architecture. If Guardian later self-hosts its factory, images
+born in-cluster sign with the same custody-held key at build time and the
+countersigner's role collapses into the builder. Old signatures remain
+valid statements about who built what. Until then, registries stay
+untrusted, Git stays the source of truth, and the dark bundle stays the
 registry-independence tier.

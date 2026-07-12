@@ -1,0 +1,561 @@
+# The image countersigner: the sovereignty half of the dual-signature model
+# (docs/supply-chain-design.md). Every first-party image digest the cluster's
+# workload specs declare gets a second signature, minted in-cluster with the
+# OpenBao transit key guardian-images and attached to the zot registry as an
+# OCI 1.1 referrer — so the estate verifies with a plain public key, offline,
+# with no GitHub or Sigstore-TUF coupling. Level-triggered assurance loop:
+# each run re-verifies every digest's countersignature and signs only what is
+# missing, after first re-verifying the digest's Fulcio signature against its
+# canonical CI identity.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: countersigner
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: zot-countersigner
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: registry
+    guardian.dev/tenant-id: gi-guardian
+---
+# ESO identity for the tenant-guardian kv scope (guardian-reader-tenant-guardian
+# role). The SA mounts nothing and runs nothing.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: secrets-reader
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/tenant-id: gi-guardian
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: guardian-countersigner-image-reader
+  labels:
+    app.kubernetes.io/name: zot-countersigner
+    app.kubernetes.io/part-of: guardian
+rules:
+  # Read-only enumeration of the workload specs whose image pins define the
+  # countersigning estate. No pod access, no secrets, no writes.
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: guardian-countersigner-image-reader
+  labels:
+    app.kubernetes.io/name: zot-countersigner
+    app.kubernetes.io/part-of: guardian
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: guardian-countersigner-image-reader
+subjects:
+  - kind: ServiceAccount
+    name: countersigner
+    namespace: tenant-guardian
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ClusterSecretStore
+metadata:
+  name: tenant-guardian-openbao
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  provider:
+    vault:
+      server: https://guardian-openbao.tenant-guardian.svc:8200
+      path: kv
+      version: v2
+      caProvider:
+        type: Secret
+        name: guardian-openbao-api-tls
+        key: ca.crt
+        namespace: tenant-guardian
+      auth:
+        kubernetes:
+          mountPath: kubernetes
+          role: guardian-reader-tenant-guardian
+          serviceAccountRef:
+            name: secrets-reader
+            namespace: tenant-guardian
+            audiences:
+              - openbao
+---
+# The zot push credential, custody-held and imported by the bootstrap
+# importer (kv .../tenant-guardian/zot-countersigner): `htpasswd` is the file
+# line zot's auth mount consumes, `password` is the docker login the
+# countersigner presents.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: zot-countersigner-auth
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: zot-countersigner
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/tenant-id: gi-guardian
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: tenant-guardian-openbao
+  target:
+    name: zot-countersigner-auth
+    creationPolicy: Orphan
+    deletionPolicy: Retain
+  data:
+    - secretKey: htpasswd
+      remoteRef:
+        key: guardian/guardian-mgmt/tenant-guardian/zot-countersigner
+        property: htpasswd
+    - secretKey: password
+      remoteRef:
+        key: guardian/guardian-mgmt/tenant-guardian/zot-countersigner
+        property: password
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zot-countersigner
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: zot-countersigner
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: registry
+    guardian.dev/tenant-id: gi-guardian
+  annotations:
+    # The scripts' shell variables must reach the pod verbatim, not be
+    # blanked by Flux's envsubst pass.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  # cosign's image is ko-built and shell-less, and this cluster does not
+  # enable the ImageVolume source, so the binary is extracted from the pinned
+  # image through the zot mirror itself: manifest by pinned digest, every
+  # layer blob verified against its manifest digest before extraction. The
+  # image is never run as a container. Upstream publishes no cosign signature
+  # for these images (verified: no .sig tag, no referrers, no GitHub
+  # attestation); the trust anchors are the digest pin taken at adoption and
+  # the version/commit parity check against the independently sha256-pinned
+  # release binary in src/tools/multitool.lock.json.
+  extract-cosign.sh: |
+    #!/bin/sh
+    set -eu
+    ZOT="10.8.0.201:5000"
+    REPO="${COSIGN_IMAGE#ghcr.io/}"
+    REPO="${REPO%%[@:]*}"
+    DIGEST="${COSIGN_IMAGE##*@}"
+    cd /tmp
+    fetch_manifest() {
+      curl -fsS "http://$ZOT/v2/$REPO/manifests/$1" \
+        -H 'Accept: application/vnd.oci.image.index.v1+json' \
+        -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+        -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
+        -H 'Accept: application/vnd.docker.distribution.manifest.v2+json'
+    }
+    fetch_manifest "$DIGEST" > root.json
+    case "$(jq -r .mediaType root.json)" in
+      application/vnd.oci.image.index.v1+json|application/vnd.docker.distribution.manifest.list.v2+json)
+        arch_digest="$(jq -r '.manifests[] | select(.platform.os=="linux" and .platform.architecture=="amd64") | .digest' root.json | head -1)"
+        fetch_manifest "$arch_digest" > manifest.json
+        ;;
+      *)
+        cp root.json manifest.json
+        ;;
+    esac
+    for layer in $(jq -r '.layers[].digest' manifest.json); do
+      curl -fsS "http://$ZOT/v2/$REPO/blobs/$layer" -o layer.tgz
+      echo "${layer#sha256:}  layer.tgz" | sha256sum -c - >/dev/null
+      # Stream the member out instead of extracting the tree: ko layers ship
+      # their directories read-only (0555), which a non-root extract cannot
+      # write into.
+      member="$(tar tzf layer.tgz 2>/dev/null | grep -E '^/?ko-app/cosign$' || true)"
+      if [ -n "$member" ]; then
+        tar xzOf layer.tgz "$member" > /cosign-bin/cosign
+        chmod 0755 /cosign-bin/cosign
+      fi
+      rm -f layer.tgz
+    done
+    /cosign-bin/cosign version
+  countersign.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    ZOT="10.8.0.201:5000"
+    VMINSERT="http://vminsert-shortterm.tenant-root.svc:8480/insert/0/prometheus/api/v1/import/prometheus"
+    COSIGN=/cosign-bin/cosign
+    export HOME=/tmp
+    export DOCKER_CONFIG=/tmp/docker
+    export VAULT_ADDR="https://guardian-openbao.tenant-guardian.svc:8200"
+    export VAULT_CACERT=/openbao-ca/ca.crt
+
+    # cosign's KMS provider only reads a pre-minted token, so mint one from
+    # the projected openbao-audience ServiceAccount token first.
+    VAULT_TOKEN="$(curl -fsS --cacert "$VAULT_CACERT" \
+      --data "{\"role\":\"guardian-countersigner\",\"jwt\":\"$(cat /var/run/secrets/openbao/token)\"}" \
+      "$VAULT_ADDR/v1/auth/kubernetes/login" | jq -r .auth.client_token)"
+    test -n "$VAULT_TOKEN" && test "$VAULT_TOKEN" != null
+    export VAULT_TOKEN
+
+    "$COSIGN" public-key --key openbao://guardian-images > /tmp/pub.pem
+
+    mkdir -p /tmp/docker
+    printf '{"auths":{"%s":{"auth":"%s"}}}' \
+      "$ZOT" "$(printf 'countersigner:%s' "$ZOT_PASSWORD" | base64 -w0)" \
+      > /tmp/docker/config.json
+
+    # The countersigning estate: first-party digests the cluster's workload
+    # specs actually declare.
+    refs="$(kubectl get deployments,statefulsets,daemonsets,cronjobs -A -o json \
+      | jq -r '.. | .image? // empty' \
+      | grep -E '^ghcr\.io/guardian-intelligence/[a-z0-9-]+@sha256:[a-f0-9]{64}$' \
+      | sort -u)"
+
+    total=0 signed=0 unsigned=0 signed_this_run=0
+    for ref in $refs; do
+      total=$((total + 1))
+      name="${ref#ghcr.io/guardian-intelligence/}"
+      name="${name%%@*}"
+      digest="${ref##*@}"
+      zref="$ZOT/guardian-intelligence/$name@$digest"
+      if "$COSIGN" verify --key /tmp/pub.pem --insecure-ignore-tlog=true \
+          --allow-http-registry "$zref" >/dev/null 2>&1; then
+        signed=$((signed + 1))
+        continue
+      fi
+      # Per-workflow-file Fulcio identities (docs/supply-chain-design.md). A
+      # repo missing from this map stays unsigned and pages: onboarding a new
+      # first-party image includes teaching this map its identity.
+      case "$name" in
+        cockpit|company-site|analytics-ingest|alert-relay|postflight-controlplane)
+          identity="https://github.com/guardian-intelligence/guardian/.github/workflows/${name}-image.yml@refs/heads/main"
+          ;;
+        *)
+          echo "no Fulcio identity mapped for $name; leaving unsigned"
+          unsigned=$((unsigned + 1))
+          continue
+          ;;
+      esac
+      # Never countersign what the canonical CI identity did not sign. The
+      # pinned trusted root keeps this verify fully offline (zot proxies the
+      # signature material from ghcr; no TUF or Rekor egress).
+      if ! "$COSIGN" verify \
+          --certificate-identity "$identity" \
+          --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+          --trusted-root /trusted-root/sigstore-trusted-root.json \
+          --allow-http-registry "$zref" >/dev/null 2>&1; then
+        echo "Fulcio verification FAILED for $zref; refusing to countersign"
+        unsigned=$((unsigned + 1))
+        continue
+      fi
+      if "$COSIGN" sign --yes --key openbao://guardian-images \
+          --tlog-upload=false --use-signing-config=false \
+          --allow-http-registry "$zref" \
+          && "$COSIGN" verify --key /tmp/pub.pem --insecure-ignore-tlog=true \
+              --allow-http-registry "$zref" >/dev/null 2>&1; then
+        echo "countersigned $zref"
+        signed=$((signed + 1))
+        signed_this_run=$((signed_this_run + 1))
+      else
+        echo "countersign FAILED for $zref"
+        unsigned=$((unsigned + 1))
+      fi
+    done
+
+    echo "first-party images: $total countersigned: $signed unsigned: $unsigned newly signed: $signed_this_run"
+    push() {
+      curl -fsS --retry 3 --max-time 15 --data-binary "$1" "$VMINSERT" \
+        || { echo "failed to record countersigner result in vminsert"; exit 1; }
+    }
+    push "guardian_countersigner_first_party_images $total"
+    push "guardian_countersigner_countersigned_images $signed"
+    push "guardian_countersigner_unsigned_images $unsigned"
+    push "guardian_countersigner_signed_this_run $signed_this_run"
+    test "$unsigned" -eq 0
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: zot-countersigner
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: zot-countersigner
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: registry
+    guardian.dev/tenant-id: gi-guardian
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      # Larger than the canaries' 120s: a cold run Fulcio-verifies and signs
+      # the whole first-party estate.
+      activeDeadlineSeconds: 300
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: zot-countersigner
+            app.kubernetes.io/part-of: guardian
+        spec:
+          serviceAccountName: countersigner
+          restartPolicy: Never
+          initContainers:
+            - name: extract-cosign
+              image: docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
+              command: ["/bin/sh", "/scripts/extract-cosign.sh"]
+              env:
+                # Full ref so the union images lock picks the pin up by
+                # derivation and the dark haul carries it; the script uses
+                # only the digest. cosign v3.1.1; the version must stay in
+                # lockstep with the multitool cosign pin — the parity check
+                # against that verified release binary is this image's trust
+                # anchor.
+                - name: COSIGN_IMAGE
+                  value: "ghcr.io/sigstore/cosign/cosign:v3.1.1@sha256:6bbe0d281d955c79f85b325f0f7e651c1bcab5a4fa4ad4903d74955178a3b2eb"
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 65534
+                capabilities:
+                  drop: ["ALL"]
+                seccompProfile:
+                  type: RuntimeDefault
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                  ephemeral-storage: 512Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+                  ephemeral-storage: 1Gi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                - name: cosign-bin
+                  mountPath: /cosign-bin
+                - name: tmp
+                  mountPath: /tmp
+          containers:
+            - name: countersign
+              image: docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
+              command: ["/bin/bash", "/scripts/countersign.sh"]
+              env:
+                # kubectl needs a writable cache dir under restricted PSS.
+                - name: HOME
+                  value: /tmp
+                - name: ZOT_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: zot-countersigner-auth
+                      key: password
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 65534
+                capabilities:
+                  drop: ["ALL"]
+                seccompProfile:
+                  type: RuntimeDefault
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                  ephemeral-storage: 256Mi
+                limits:
+                  cpu: "1"
+                  memory: 512Mi
+                  ephemeral-storage: 1Gi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                - name: cosign-bin
+                  mountPath: /cosign-bin
+                - name: tmp
+                  mountPath: /tmp
+                - name: trusted-root
+                  mountPath: /trusted-root
+                  readOnly: true
+                - name: openbao-ca
+                  mountPath: /openbao-ca
+                  readOnly: true
+                - name: openbao-token
+                  mountPath: /var/run/secrets/openbao
+                  readOnly: true
+          volumes:
+            - name: scripts
+              configMap:
+                name: zot-countersigner
+            - name: cosign-bin
+              emptyDir: {}
+            - name: tmp
+              emptyDir: {}
+            - name: trusted-root
+              configMap:
+                name: sigstore-trusted-root
+            - name: openbao-ca
+              secret:
+                secretName: guardian-openbao-api-tls
+                items:
+                  - key: ca.crt
+                    path: ca.crt
+            - name: openbao-token
+              projected:
+                sources:
+                  - serviceAccountToken:
+                      path: token
+                      audience: openbao
+                      expirationSeconds: 600
+---
+# Egress half. Everything the loop touches is in-cluster: OpenBao for the
+# transit key, zot for all registry content (it proxies ghcr for both
+# subjects and their Fulcio signatures), the apiserver for enumeration,
+# vminsert for the heartbeat. Deliberately NO world egress.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: zot-countersigner-egress
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: zot-countersigner
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: zot-countersigner
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+            - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: openbao
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
+    # Cilium socket-LB translates the zot VIP to the pod IP at connect(), so
+    # pod-origin traffic to 10.8.0.201 hits the zot pod identity; the
+    # entities are belt-and-braces for non-socket-translated datapaths.
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: zot
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
+    - toEntities:
+        - host
+        - remote-node
+        - world
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            k8s:app.kubernetes.io/name: vminsert
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
+# Ingress half of the vminsert import path: tenant-root's generated isolation
+# does not admit child-tenant namespaces; admit exactly the countersigner
+# pods.
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-root-vminsert-from-zot-countersigner
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-root
+      k8s:app.kubernetes.io/name: vminsert
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-guardian
+            k8s:app.kubernetes.io/name: zot-countersigner
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: zot-countersigner
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: zot-countersigner
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: registry
+    guardian.dev/tenant-id: gi-guardian
+spec:
+  groups:
+    - name: zot-countersigner.rules
+      rules:
+        # A digest that stays uncountersigned across every run for 45m means
+        # the loop cannot make progress: Fulcio verification failing, an
+        # unmapped first-party repo, the transit key unreachable, or the zot
+        # write path broken. Nothing else surfaces any of these.
+        - alert: GuardianCountersignerUnsignedImages
+          expr: min_over_time(guardian_countersigner_unsigned_images[45m]) > 0
+          labels:
+            severity: critical
+            guardian.dev/component: registry
+          annotations:
+            summary: first-party images are staying uncountersigned; the sovereignty signature lane is not converging.
+            description: >-
+              guardian_countersigner_unsigned_images has not touched zero in
+              45m. Rollouts create transient unsigned digests that the next
+              run signs; a persistent count means Fulcio verification is
+              failing, a first-party repo is missing from the identity map,
+              OpenBao transit signing is unavailable, or zot is rejecting the
+              push. Check the newest zot-countersigner Job logs in
+              tenant-guardian.
+        - alert: GuardianCountersignerSilent
+          expr: absent(guardian_countersigner_unsigned_images)
+          for: 30m
+          labels:
+            severity: critical
+            guardian.dev/component: registry
+          annotations:
+            summary: the countersigner has stopped reporting; countersignature coverage is unverified.
+            description: >-
+              No guardian_countersigner_unsigned_images samples for 30m — the
+              CronJob is failing before its metrics push (OpenBao login, cosign
+              extraction, enumeration) or not running at all. Countersignature
+              coverage is unknown until this is fixed. Check the newest
+              zot-countersigner Job logs in tenant-guardian.

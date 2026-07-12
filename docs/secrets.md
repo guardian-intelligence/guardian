@@ -35,7 +35,11 @@ bootstrap, DR, re-initialization).
 - Workloads never talk to OpenBao. External Secrets Operator materializes
   native Kubernetes Secrets (`creationPolicy: Orphan` /
   `deletionPolicy: Retain`, 1h refresh), so an OpenBao outage degrades secret
-  *rotation*, not running consumers.
+  *rotation*, not running consumers. One deliberate exception: the image
+  countersigner signs with the `guardian-images` Transit key directly —
+  signing is an online operation whose whole point is that the private key
+  never leaves OpenBao, so ESO cannot materialize it. An OpenBao outage
+  pauses countersigning (its own alert covers the silence), nothing else.
 
 ## Permission model
 

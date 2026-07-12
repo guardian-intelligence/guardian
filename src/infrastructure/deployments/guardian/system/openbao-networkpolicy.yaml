@@ -37,6 +37,27 @@ spec:
             - port: "8200"
               protocol: TCP
 ---
+# The image countersigner is the first direct workload OpenBao client
+# (transit signing cannot be materialized into a Secret by ESO — the private
+# key never leaves OpenBao; signing is an online operation).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-countersigner-to-openbao
+  namespace: tenant-guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: openbao
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: zot-countersigner
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
+---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:

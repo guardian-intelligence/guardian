@@ -66,13 +66,15 @@ spec:
       # break every pinned ref and cosign signature served through the mirror.
       #
       # accessControl is the write lock, not an auth system: without it zot
-      # serves anonymous read-WRITE. Anonymous read-only holds while the
-      # mirror's content is a strict subset of public ghcr; the moment any
-      # non-public artifact lands here, authenticated pulls must already be
-      # in place (trigger condition in docs/registry-design.md). The first
-      # writer (the R2 countersigner) arrives with bearer ServiceAccount
-      # federation and its own accessControl policies — nothing is
-      # pre-provisioned for it here.
+      # serves anonymous read-WRITE. The one writer is the countersigner's
+      # htpasswd user, scoped to create/update under guardian-intelligence/**
+      # (where its signature referrers land); everything else stays
+      # anonymous read-only. htpasswd, not bearer OIDC, is deliberate: in
+      # this zot version enabling ANY bearer auth makes the bearer handler
+      # the exclusive authn middleware with no anonymous fallthrough, which
+      # would kill anonymous node pull-through. Bearer SA-token federation
+      # becomes the natural upgrade if node pulls ever authenticate
+      # (docs/registry-design.md).
       #
       # The retention block is load-bearing, not optional: with gc enabled
       # and NO retention config, zot defaults to deleteUntagged=true — and
@@ -105,10 +107,26 @@ spec:
             "address": "0.0.0.0",
             "port": "5000",
             "compat": ["docker2s2"],
+            "auth": {
+              "htpasswd": {
+                "path": "/secret/htpasswd"
+              },
+              "failDelay": 5
+            },
             "accessControl": {
               "repositories": {
                 "**": {
                   "anonymousPolicy": ["read"],
+                  "defaultPolicy": []
+                },
+                "guardian-intelligence/**": {
+                  "anonymousPolicy": ["read"],
+                  "policies": [
+                    {
+                      "users": ["countersigner"],
+                      "actions": ["read", "create", "update"]
+                    }
+                  ],
                   "defaultPolicy": []
                 }
               },
@@ -160,9 +178,21 @@ spec:
     extraVolumes:
       - name: tmp
         emptyDir: {}
+      # The countersigner's htpasswd line, projected by ESO from the
+      # custody-held credential (zot-countersigner.yaml). zot re-reads the
+      # file per request, so ESO refreshes propagate without a pod roll.
+      - name: htpasswd
+        secret:
+          secretName: zot-countersigner-auth
+          items:
+            - key: htpasswd
+              path: htpasswd
     extraVolumeMounts:
       - name: tmp
         mountPath: /tmp
+      - name: htpasswd
+        mountPath: /secret
+        readOnly: true
     resources:
       requests:
         cpu: 100m
