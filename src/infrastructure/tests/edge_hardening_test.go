@@ -26,7 +26,8 @@ func TestCloudflareOriginTLSConformance(t *testing.T) {
 	for _, want := range []string{
 		"hostNetwork: true",
 		"dnsPolicy: ClusterFirstWithHostNet",
-		"runtimeClassName: guardian-system-ingress",
+		"path: /spec/template/spec/runtimeClassName",
+		"value: guardian-system-ingress",
 		"externalIPs: []",
 	} {
 		assertTextContains(t, ingress, want, ingressPath)
