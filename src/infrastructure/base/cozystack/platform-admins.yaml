@@ -1,10 +1,7 @@
-# Named admin identities for the platform Keycloak (cozy realm). Each human
-# and each long-horizon agent gets its OWN user so access is attributable
-# and individually revocable — the single shared credential this replaces is
-# the custody x509 kubeconfig, now breakglass-only. Membership in
-# cozystack-cluster-admin (chart-shipped group, bound to the
-# cozystack-cluster-admin ClusterRole) is what grants cluster-admin; the
-# apiserver maps preferred_username -> user and groups -> RBAC groups.
+# Named operator identities for the platform Keycloak (cozy realm). Each human
+# and each long-horizon agent gets its own user so access is attributable and
+# individually revocable. The apiserver maps preferred_username to the user
+# and Keycloak groups to Kubernetes RBAC groups.
 #
 # The CRs live in tenant-root, not cozy-keycloak: the EDP keycloak-operator
 # watches all namespaces (WATCH_NAMESPACE unset), and tenant-root is the
@@ -69,6 +66,20 @@ spec:
     name: platform-admin-passwords
     key: platform-admin
 ---
+apiVersion: v1.edp.epam.com/v1
+kind: KeycloakRealmGroup
+metadata:
+  name: guardian-platform-agent
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: platform-admins
+    app.kubernetes.io/part-of: guardian
+spec:
+  name: guardian-platform-agent
+  realmRef:
+    kind: ClusterKeycloakRealm
+    name: keycloakrealm-cozy
+---
 # platform-agent — the identity for long-horizon agent sessions on the
 # release runner and laptop (Devin/Codex/Claude). Distinct from
 # platform-admin so an agent credential leak is revocable without locking
@@ -99,9 +110,112 @@ spec:
   lastName: Agent
   enabled: true
   groups:
-    - cozystack-cluster-admin
+    - guardian-platform-agent
   roles:
     - offline_access
   passwordSecret:
     name: platform-admin-passwords
     key: platform-agent
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: guardian-platform-agent-maintenance
+  labels:
+    app.kubernetes.io/name: platform-agent
+    app.kubernetes.io/part-of: guardian
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - delete
+  - apiGroups:
+      - batch
+    resources:
+      - jobs
+    verbs:
+      - delete
+  - apiGroups:
+      - ""
+    resources:
+      - pods/portforward
+    verbs:
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: guardian-platform-agent-view
+  labels:
+    app.kubernetes.io/name: platform-agent
+    app.kubernetes.io/part-of: guardian
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: guardian-platform-agent
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: guardian-platform-agent-maintenance
+  labels:
+    app.kubernetes.io/name: platform-agent
+    app.kubernetes.io/part-of: guardian
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: guardian-platform-agent-maintenance
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: guardian-platform-agent
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: guardian-platform-agent-readonly
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - "*"
+        apiVersions:
+          - "*"
+        operations:
+          - CREATE
+          - UPDATE
+          - DELETE
+          - CONNECT
+        resources:
+          - "*/*"
+  matchConditions:
+    - name: platform-agent-identity
+      expression: >-
+        request.userInfo.username.endsWith("#platform-agent") ||
+        "guardian-platform-agent" in request.userInfo.groups
+  validations:
+    - expression: >-
+        (request.operation == "DELETE" && request.subResource == "" &&
+          ((request.resource.group == "" && request.resource.resource == "pods") ||
+           (request.resource.group == "batch" && request.resource.resource == "jobs"))) ||
+        (request.operation == "CONNECT" && request.resource.group == "" &&
+          request.resource.resource == "pods" && request.subResource == "portforward")
+      message: >-
+        platform-agent is read-only except for deleting pods and jobs and
+        opening pod port-forwards
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: guardian-platform-agent-readonly
+spec:
+  policyName: guardian-platform-agent-readonly
+  validationActions:
+    - Deny
