@@ -3,9 +3,9 @@
 # VMRules cluster-wide (selectAllByDefault) and evaluates them against its
 # Prometheus datasource — a `type: vlogs` group there would error on every
 # evaluation (probed live 2026-07-07). This instance points at VictoriaLogs
-# and owns exactly the rule ConfigMaps mounted below (one per concern:
-# audit-alerts.yaml, trust-alerts.yaml); the no-match ruleSelector keeps the
-# operator from also injecting every VMRule.
+# and owns exactly the rule ConfigMaps mounted below (one per log concern);
+# the no-match ruleSelector keeps the operator from also injecting every
+# VMRule.
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMAlert
 metadata:
@@ -43,9 +43,11 @@ spec:
       guardian.dev/rule-type: vlogs-none
   configMaps:
     - guardian-audit-vlogs-rules
+    - guardian-log-pipeline-vlogs-rules
     - guardian-trust-vlogs-rules
     - guardian-talos-vlogs-rules
   rulePath:
     - /etc/vm/configs/guardian-audit-vlogs-rules/*.yaml
+    - /etc/vm/configs/guardian-log-pipeline-vlogs-rules/*.yaml
     - /etc/vm/configs/guardian-trust-vlogs-rules/*.yaml
     - /etc/vm/configs/guardian-talos-vlogs-rules/*.yaml

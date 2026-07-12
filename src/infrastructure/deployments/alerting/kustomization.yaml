@@ -13,6 +13,7 @@ resources:
   - core-metrics-wiring.yaml
   - electric-scrape.yaml
   - etcd-snapshot-alerts.yaml
+  - log-pipeline-health.yaml
   - postgres-alerts.yaml
   - synthetic-probes.yaml
   - talos-host-log-alerts.yaml

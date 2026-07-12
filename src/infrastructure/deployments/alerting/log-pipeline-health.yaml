@@ -1,0 +1,337 @@
+# Scrape the Cozystack Fluent Bit DaemonSet directly. Cozystack v1.5.2 exposes
+# a Service selected by app.kubernetes.io/name=fluent-bit, with named port
+# http -> 2020, while leaving its Prometheus ServiceMonitor disabled. This
+# Guardian-owned scrape avoids a second controller dialect and duplicate
+# samples. The Talos receiver has its own VMPodScrape in base/observability.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: fluent-bit
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: fluent-bit
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  namespaceSelector:
+    matchNames:
+      - cozy-monitoring
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fluent-bit
+  endpoints:
+    - port: http
+      path: /api/v2/metrics/prometheus
+      interval: 30s
+      scrapeTimeout: 10s
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: log-pipeline-health
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: log-pipeline-health
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  groups:
+    - name: fluent-bit-pipeline-health.rules
+      interval: 30s
+      rules:
+        - alert: KubernetesFluentBitCollectorsMissing
+          expr: >-
+            (count(count by (pod)
+              (fluentbit_build_info{namespace="cozy-monitoring"})) or vector(0)) < 3
+          for: 10m
+          labels:
+            severity: warning
+            guardian_component: observability
+            exported_instance: guardian-mgmt/kubernetes-fluent-bit-collectors
+          annotations:
+            summary: Fewer than three Kubernetes Fluent Bit collectors are reporting
+            description: >-
+              Guardian has three nodes and expects one Fluent Bit DaemonSet
+              target from each. Fewer than three distinct pods have reported
+              for ten minutes, so one node's logs may be missing even while the
+              others flow. Check the DaemonSet, Service endpoints, and vmagent.
+        - alert: FluentBitOutputDeliveryDegraded
+          expr: >-
+            (sum by (namespace, pod, name)
+              (increase(fluentbit_output_errors_total[5m]))
+            + sum by (namespace, pod, name)
+              (increase(fluentbit_output_retries_total[5m]))) > 0
+          # A single recovered retry remains in a five-minute range but cannot
+          # satisfy this ten-minute hold. This only fires while failures keep
+          # recurring, without hiding the definitive loss counters below.
+          for: 10m
+          labels:
+            severity: warning
+            guardian_component: observability
+          annotations:
+            summary: 'Fluent Bit output delivery remains degraded on {{ $labels.pod }}'
+            description: >-
+              Output {{ $labels.name }} in {{ $labels.namespace }}/{{ $labels.pod }}
+              has continuously reported errors or retries. Records may still
+              arrive late; inspect the output backlog and VictoriaLogs insert
+              path before treating the interval as complete.
+        - alert: FluentBitOutputRecordsLost
+          expr: >-
+            (sum by (namespace, pod, name)
+              (increase(fluentbit_output_retries_failed_total[5m]))
+            + sum by (namespace, pod, name)
+              (increase(fluentbit_output_dropped_records_total[5m]))) > 0
+          keep_firing_for: 15m
+          labels:
+            severity: critical
+            guardian_component: observability
+          annotations:
+            summary: 'Fluent Bit lost output records on {{ $labels.pod }}'
+            description: >-
+              Output {{ $labels.name }} in {{ $labels.namespace }}/{{ $labels.pod }}
+              exhausted a retry or dropped records. The affected interval has
+              an irreversible logging gap; determine its bounds from the
+              counters before relying on negative log-search results.
+        - alert: FluentBitSanitizerDroppedRecords
+          expr: >-
+            sum by (namespace, pod, name)
+              (increase(fluentbit_filter_drop_records_total{name="guardian_redactor"}[5m])) > 0
+          keep_firing_for: 15m
+          labels:
+            severity: critical
+            guardian_component: observability
+          annotations:
+            summary: 'The Fluent Bit sanitizer dropped log records on {{ $labels.pod }}'
+            description: >-
+              guardian_redactor in {{ $labels.namespace }}/{{ $labels.pod }}
+              removed records instead of returning its documented modified-record
+              result. Logs from the affected interval may be incomplete.
+    # Evaluated by the metrics-plane vmalert-shortterm, this group remains
+    # able to report failures in the separate LogsQL evaluator below.
+    - name: vmalert-vlogs-health.rules
+      interval: 30s
+      rules:
+        - alert: VLogsRuleEvaluatorMissing
+          expr: >-
+            (count(up{namespace="tenant-root",pod=~"vmalert-vlogs.*"} == 1)
+            or vector(0)) < 1
+          for: 10m
+          labels:
+            severity: critical
+            guardian_component: observability
+            exported_instance: guardian-mgmt/vmalert-vlogs
+          annotations:
+            summary: The VictoriaLogs rule evaluator is unavailable
+            description: >-
+              No healthy vmalert-vlogs target has been scraped for ten
+              minutes. Log-derived alerts, including the sanitizer canary,
+              cannot be trusted until the evaluator is healthy again.
+        - alert: VLogsRuleEvaluatorConfigReloadFailed
+          expr: >-
+            vmalert_config_last_reload_successful{namespace="tenant-root",
+            pod=~"vmalert-vlogs.*"} != 1
+          for: 5m
+          labels:
+            severity: critical
+            guardian_component: observability
+          annotations:
+            summary: 'vmalert-vlogs failed to load its rule configuration on {{ $labels.pod }}'
+            description: >-
+              The LogsQL evaluator has rejected a configuration reload for
+              five minutes. It keeps its previous rules, so newly deployed
+              health or security rules may be absent.
+        - alert: VLogsRuleEvaluatorRuleErrors
+          expr: >-
+            sum by (namespace, pod)
+              (increase(vmalert_alerting_rules_errors_total{namespace="tenant-root",
+              pod=~"vmalert-vlogs.*"}[5m])) > 0
+          for: 5m
+          labels:
+            severity: critical
+            guardian_component: observability
+          annotations:
+            summary: 'vmalert-vlogs rule evaluation is failing on {{ $labels.pod }}'
+            description: >-
+              LogsQL alert evaluations have continued failing. A datasource,
+              query, or response error can make a missing/leak canary fail open.
+        - alert: VLogsRuleEvaluatorNotificationErrors
+          expr: >-
+            sum by (namespace, pod)
+              (increase(vmalert_alerts_send_errors_total{namespace="tenant-root",
+              pod=~"vmalert-vlogs.*"}[5m])) > 0
+          for: 5m
+          labels:
+            severity: critical
+            guardian_component: observability
+          annotations:
+            summary: 'vmalert-vlogs cannot notify Alertmanager from {{ $labels.pod }}'
+            description: >-
+              The LogsQL evaluator has repeatedly failed to deliver alerts to
+              Alertmanager, so canary failures may not reach the pager path.
+---
+# Continuous end-to-end proof through the ordinary Kubernetes stdout path.
+# The fixture is intentionally inert and stable: it resembles an assignment
+# that the sanitizer recognizes, but it is not accepted by any real service.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: guardian-log-sanitizer-canary
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: guardian-log-sanitizer-canary
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: observability
+spec:
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: guardian-log-sanitizer-canary
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: guardian-log-sanitizer-canary
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/component: observability
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: canary
+          # Already used by Guardian's load and login canaries; its Alpine
+          # shell keeps this idle loop much smaller than the kubectl image.
+          image: docker.io/grafana/k6@sha256:68e78d94140704ec4ee0cb7c5cf6cd12a32b7d310a6f98d94931ee9b0b9dc629
+          command:
+            - /bin/sh
+            - -ec
+          args:
+            - |
+              terminate() {
+                kill "$sleep_pid" 2>/dev/null || true
+                exit 0
+              }
+              trap terminate TERM INT
+              while true; do
+                printf '{"guardian_log_pipeline_canary":"diagnostic_ok","guardian_node":"%s"}\n' "$GUARDIAN_NODE"
+                printf '{"guardian_log_sanitizer_canary":"api-key=guardian-fake-credential-v1","guardian_node":"%s"}\n' "$GUARDIAN_NODE"
+                sleep 60 &
+                sleep_pid=$!
+                wait "$sleep_pid"
+              done
+          env:
+            - name: GUARDIAN_NODE
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          resources:
+            requests:
+              cpu: 1m
+              memory: 8Mi
+            limits:
+              memory: 32Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: guardian-log-sanitizer-canary
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: guardian-log-sanitizer-canary
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: observability
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: guardian-log-sanitizer-canary
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: guardian-log-pipeline-vlogs-rules
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: vmalert-vlogs
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+data:
+  log-pipeline.yaml: |
+    groups:
+      - name: guardian-log-pipeline
+        type: vlogs
+        interval: 60s
+        rules:
+          - alert: LogPipelineDiagnosticCanaryMissing
+            expr: |
+              _time:10m {kubernetes_namespace_name="tenant-root",kubernetes_container_name="canary"}
+                guardian_log_pipeline_canary:="diagnostic_ok" guardian_node:*
+              | stats count_uniq(guardian_node) as nodes
+              | filter nodes:<3
+            for: 5m
+            labels:
+              severity: warning
+              guardian_component: observability
+            annotations:
+              summary: 'The unmodified log-pipeline canary is missing'
+              description: >-
+                Fewer than three distinct nodes have delivered
+                the normal diagnostic sentinel in ten minutes. At least one
+                Kubernetes collector or its VictoriaLogs path is not functioning.
+          - alert: LogSanitizerCanaryMissing
+            expr: |
+              _time:10m {kubernetes_namespace_name="tenant-root",kubernetes_container_name="canary"}
+                guardian_log_sanitizer_canary:="api-key=[REDACTED]"
+                guardian_node:*
+                guardian_redacted:="true"
+                guardian_redaction_rule:="sensitive_field"
+              | stats count_uniq(guardian_node) as nodes
+              | filter nodes:<3
+            for: 5m
+            labels:
+              severity: critical
+              guardian_component: observability
+            annotations:
+              summary: 'The log-sanitizer canary is missing its redaction proof'
+              description: >-
+                Fewer than three nodes contain the redacted canary field
+                and expected bounded marker fields. A collector may be bypassing
+                the sanitizer, over-redacting, or losing record metadata.
+          - alert: LogSanitizerCanaryCredentialLeaked
+            # pack_json makes the post-filter inspect every stored field, not
+            # merely _msg. The stream selector keeps that broader scan bounded
+            # to three low-volume containers and produces one alert series.
+            expr: |
+              _time:10m {kubernetes_namespace_name="tenant-root",kubernetes_container_name="canary"}
+              | pack_json as guardian_all_fields
+              | filter guardian_all_fields:*guardian-fake-credential-v1*
+              | stats count() as leaks
+              | filter leaks:>0
+            keep_firing_for: 15m
+            labels:
+              severity: critical
+              guardian_component: observability
+            annotations:
+              summary: 'The synthetic log credential survived sanitization'
+              description: >-
+                At least one canary row retained its inert credential fixture
+                in a VictoriaLogs field. This continuously exercises the
+                Kubernetes collector path; the Talos receiver uses the same
+                startup-tested script and independent drop/output metrics. Treat
+                the sanitizer as failed for real credentials until this alert is
+                resolved and the interval audited.
