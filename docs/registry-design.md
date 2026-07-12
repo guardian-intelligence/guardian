@@ -1,7 +1,7 @@
 # Registry design: the in-cluster OCI tier
 
-Status: active as of 2026-07-11 (slices R1 zot tier + mirror flip, and R2
-countersigner write path).
+Status: active as of 2026-07-12 (slices R1 zot tier + mirror flip, and R2
+countersigner write path; next: the projection reconciler).
 Complements `supply-chain-design.md` (trust model, signing) and
 `adrs/0005-no-in-cluster-object-storage.md` (why the registry stores on a
 PVC, not an object store).
@@ -88,10 +88,12 @@ on the pull path while cache misses fall back silently to upstream).
 
 ## The countersigner (R2)
 
-`zot-countersigner.yaml`: a level-triggered assurance loop over the
-first-party image digests the cluster's workload specs declare (preview
-namespaces excluded: previews run unreviewed PR builds the canonical
-identity never signs, and they sit outside the DR estate). Each run,
+`zot-countersigner.yaml`: a level-triggered assurance loop that mints
+Guardian's release signature. Its estate is the released first-party
+images, enumerated from the digests the cluster's workload specs declare —
+every release runs here — with preview namespaces excluded (previews run
+unreviewed PR builds, not releases, which the canonical identity never
+signs). Each run,
 per digest, addressed through the mirror (`10.8.0.201:5000/...@digest`): if
 a countersignature already verifies against the transit key's public half,
 done; otherwise verify the digest's Fulcio signature against its canonical
@@ -114,6 +116,13 @@ path broken), and `GuardianCountersignerSilent` pages on metric absence.
 A new first-party image is unsigned until its identity is added to the
 script's map — the page is the onboarding reminder.
 
+The signature's scope is deliberately bounded: it exists for what Guardian
+*releases*, not for what runs. There is no requirement that a pod run a
+Guardian-signed image — what runs is governed by the merge gate and the
+provenance VAP — and no admission-time signature verification (a verifying
+webhook would put a new SPOF in the pod-create path for a guarantee the
+release boundary already carries).
+
 The signing key's custody model (importer-owned restore-or-create, backup
 blob in custody.env, restore drill before reliance, never rotate casually)
 lives in `docs/openbao-design.md`.
@@ -124,13 +133,24 @@ End state: zot is the operational origin; ghcr.io demotes to one publish
 marketplace among npm/PyPI/crates. Until in-cluster builders exist, GitHub
 publishers keep pushing ghcr first — that is the only place Fulcio
 identities are mintable, so ghcr-as-origin is currently correct, not debt.
-The inversion is gated on: in-cluster CI capacity, a passed re-cache drill
-(wipe the PVC, watch on-demand sync repopulate under the canary — the drill
-must also confirm countersignature referrers are re-mintable afterwards,
-since a wiped PVC loses them until the countersigner's next runs re-sign),
-and the countersigner's write path proven in production. Outbound publication
-from zot to marketplaces must use signature-carrying copies (`cosign copy`
-/ regsync) — plain image copies silently drop cosign referrers.
+
+The publication boundary carries the invariant: **nothing Guardian releases
+to a public marketplace ships without a verified Guardian countersignature.**
+It is enforced by the projection reconciler — the single writer at that
+boundary — which verifies each artifact against the committed public key
+and then copies, refusing (and paging) otherwise. Publication must use
+signature-carrying copies (regsync with referrers enabled, or `cosign
+copy`) — plain image copies silently drop cosign referrers, which is
+exactly the failure the gate exists to make impossible. Marketplaces that
+only accept CI-platform OIDC provenance (npm, PyPI) keep their keyless
+publishes; the Guardian signature is the OCI lane's release signature.
+
+The inversion itself is gated on: in-cluster CI capacity, a passed re-cache
+drill (wipe the PVC, watch on-demand sync repopulate under the canary — the
+drill must also confirm countersignature referrers are re-mintable
+afterwards, since a wiped PVC loses them until the countersigner's next
+runs re-sign), and renegotiating the rebuildable-cache invariant above,
+which stops holding the moment zot is the only copy of anything.
 
 GC note for future writers: the estate pulls by digest, so mirrored
 manifests are stored untagged — and zot's default when GC is on and no
