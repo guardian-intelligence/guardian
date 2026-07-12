@@ -63,6 +63,14 @@ registry.k8s.io/coredns/coredns:v1.14.2@sha256:e7e6440cfd1e919280958f5b5a6ab2b18
 ghcr.io/cloudnative-pg/postgresql@sha256:6f64c83d80def98ab5b61bf36b1bbecea01dede382eef781dd9d1638b0d840c8
 docker.io/clickhouse/clickhouse-server@sha256:cc8c5bf275148b2de01a31e8fd6b55ba1ba2b0d3d08c23fafcb25b06e3c5dec5
 
+# --- fetched-not-run artifacts (pinned in manifest env values, which the ---
+# --- extractor cannot see; declared here so the dark haul carries them)  ---
+# The countersigner's cosign binary source (zot-countersigner.yaml
+# COSIGN_IMAGE — keep in lockstep, and on the same release as the multitool
+# cosign pin). Never admitted as a pod image: its layers are fetched through
+# the zot mirror and digest-verified by the extract script.
+ghcr.io/sigstore/cosign/cosign@sha256:6bbe0d281d955c79f85b325f0f7e651c1bcab5a4fa4ad4903d74955178a3b2eb
+
 # --- operator-spawned workload images (baseline: live audit 2026-07-02,
 # post-cold-boot-drill): what Cozystack/app operators run that no repo
 # manifest names. Entries duplicating the drill/bench section above are

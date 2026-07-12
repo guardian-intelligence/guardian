@@ -98,8 +98,12 @@ proxies the signature material from ghcr) and only then sign with
 `openbao://guardian-images` and re-verify. Countersignatures attach as OCI
 1.1 referrers, never legacy `.sig` tags — a tag GET re-triggers on-demand
 sync, which would clobber a locally-modified tag, while sync never touches
-local referrers. The loop's egress is entirely in-cluster (OpenBao, zot,
-apiserver, vminsert): no world route exists for it.
+local referrers. Everything the loop talks to is in-cluster (OpenBao, zot,
+apiserver, vminsert); its only entities-scoped allowance is TCP/5000 to the
+zot VIP for non-socket-LB datapaths. The write grant itself carries a tag
+condition: signature referrers are by-digest pushes and digest content is
+self-addressing, so a leaked countersigner credential cannot repoint any
+tag nodes pull.
 
 Loudness: `GuardianCountersignerUnsignedImages` pages when the unsigned
 count fails to touch zero across 45 minutes (Fulcio verification failing,

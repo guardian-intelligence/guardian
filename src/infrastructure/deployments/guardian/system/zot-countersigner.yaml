@@ -30,6 +30,20 @@ metadata:
     guardian.dev/tenant-id: gi-guardian
 automountServiceAccountToken: false
 ---
+# Writer twin: exists only so an operator with custody kubeconfig access can
+# mint a short-lived token against guardian-writer-tenant-guardian for
+# routine value loads and rotations. Rotating the zot credential must update
+# both kv properties together (password plus the bcrypt htpasswd line).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: secrets-writer
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/tenant-id: gi-guardian
+automountServiceAccountToken: false
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -218,9 +232,12 @@ data:
 
     # The countersigning estate: first-party digests the cluster's workload
     # specs actually declare.
+    # The no-match grep must not kill the run under pipefail: an empty
+    # estate flows through to the loud total=0 exit below instead of dying
+    # here with nothing pushed and nothing logged.
     refs="$(kubectl get deployments,statefulsets,daemonsets,cronjobs -A -o json \
       | jq -r '.. | .image? // empty' \
-      | grep -E '^ghcr\.io/guardian-intelligence/[a-z0-9-]+@sha256:[a-f0-9]{64}$' \
+      | { grep -E '^ghcr\.io/guardian-intelligence/[a-z0-9-]+@sha256:[a-f0-9]{64}$' || true; } \
       | sort -u)"
 
     total=0 signed=0 unsigned=0 signed_this_run=0
@@ -324,12 +341,12 @@ spec:
               image: docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
               command: ["/bin/sh", "/scripts/extract-cosign.sh"]
               env:
-                # Full ref so the union images lock picks the pin up by
-                # derivation and the dark haul carries it; the script uses
-                # only the digest. cosign v3.1.1; the version must stay in
-                # lockstep with the multitool cosign pin — the parity check
-                # against that verified release binary is this image's trust
-                # anchor.
+                # An env value is invisible to the imageset extractor, so
+                # this pin is hand-declared in images.declared.lock (keep the
+                # two digests in lockstep) — that is what puts it in the
+                # union lock and the dark haul. The version must also stay on
+                # the same release as the multitool cosign pin, whose
+                # verified release binary is this image's trust anchor.
                 - name: COSIGN_IMAGE
                   value: "ghcr.io/sigstore/cosign/cosign:v3.1.1@sha256:6bbe0d281d955c79f85b325f0f7e651c1bcab5a4fa4ad4903d74955178a3b2eb"
               securityContext:
@@ -427,10 +444,13 @@ spec:
                       audience: openbao
                       expirationSeconds: 600
 ---
-# Egress half. Everything the loop touches is in-cluster: OpenBao for the
+# Egress half. Everything the loop talks to is in-cluster: OpenBao for the
 # transit key, zot for all registry content (it proxies ghcr for both
 # subjects and their Fulcio signatures), the apiserver for enumeration,
-# vminsert for the heartbeat. Deliberately NO world egress.
+# vminsert for the heartbeat. No general internet egress exists; the
+# host/remote-node/world entities allowance is port-5000-only,
+# belt-and-braces for datapaths where socket-LB does not translate the zot
+# VIP.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -538,8 +558,14 @@ spec:
         # the loop cannot make progress: Fulcio verification failing, an
         # unmapped first-party repo, the transit key unreachable, or the zot
         # write path broken. Nothing else surfaces any of these.
+        # The sample-count guard keeps a lone first sample (first deploy,
+        # recovery after a gap) from firing this instantly: three samples at
+        # the 10-minute cadence means the window genuinely spans multiple
+        # runs that never touched zero.
         - alert: GuardianCountersignerUnsignedImages
-          expr: min_over_time(guardian_countersigner_unsigned_images[45m]) > 0
+          expr: >-
+            min_over_time(guardian_countersigner_unsigned_images[45m]) > 0
+            and count_over_time(guardian_countersigner_unsigned_images[45m]) >= 3
           labels:
             severity: critical
             guardian.dev/component: registry
@@ -551,8 +577,10 @@ spec:
               run signs; a persistent count means Fulcio verification is
               failing, a first-party repo is missing from the identity map,
               OpenBao transit signing is unavailable, or zot is rejecting the
-              push. Check the newest zot-countersigner Job logs in
-              tenant-guardian.
+              push. The run also exits nonzero, so KubeJobFailed fires first
+              on the same Job and can linger up to an hour after recovery
+              (failed Jobs age out slowly). Check the newest
+              zot-countersigner Job logs in tenant-guardian.
         # Coverage claims are hollow if enumeration returns nothing: zero
         # first-party images means broken RBAC or a broken filter, not an
         # empty estate — the cluster always runs first-party workloads.

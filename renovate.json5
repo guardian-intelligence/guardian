@@ -140,7 +140,7 @@
     {
       matchPackageNames: ["sigstore/cosign"],
       prBodyNotes: [
-        "cosign must stay on the same major as the sigstore/cosign-installer pin in the CI workflows — the dark-drive copy verifies what CI signs (docs/supply-chain-design.md).",
+        "cosign must stay on the same major as the sigstore/cosign-installer pin in the CI workflows — the dark-drive copy verifies what CI signs (docs/supply-chain-design.md). The countersigner's COSIGN_IMAGE pin (deployments/guardian/system/zot-countersigner.yaml) and its images.declared.lock digest ride the same release; TestCountersignerCosignPinsMoveTogether keeps this PR red until they move too.",
       ],
     },
     {
