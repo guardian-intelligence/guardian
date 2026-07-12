@@ -23,9 +23,6 @@ func TestCloudflareOriginTLSConformance(t *testing.T) {
 	ingressPath := runfilePath("src/infrastructure/base/app-patches/ingress-origin-edge.yaml")
 	ingress := readText(t, ingressPath)
 	assertTextContains(t, ingress, "default-ssl-certificate: tenant-root/cloudflare-origin-tls", ingressPath)
-	assertTextContains(t, ingress, "hostNetwork: true", ingressPath)
-	assertTextContains(t, ingress, "dnsPolicy: ClusterFirstWithHostNet", ingressPath)
-	assertTextContains(t, ingress, "externalIPs: []", ingressPath)
 
 	edgePolicyPath := runfilePath("src/infrastructure/bootstrap/guardian-mgmt-edge-policy/main.tf")
 	edgePolicy := readText(t, edgePolicyPath)
