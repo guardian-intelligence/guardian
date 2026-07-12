@@ -202,7 +202,7 @@ spec:
         "guardian-platform-agent" in request.userInfo.groups
   validations:
     - expression: >-
-        (request.operation == "DELETE" && request.subResource == "" &&
+        (request.operation == "DELETE" && !has(request.subResource) &&
           ((request.resource.group == "" && request.resource.resource == "pods") ||
            (request.resource.group == "batch" && request.resource.resource == "jobs"))) ||
         (request.operation == "CONNECT" && request.resource.group == "" &&
