@@ -10,6 +10,8 @@ spec:
   values:
     ingress-nginx:
       controller:
+        hostNetwork: true
+        dnsPolicy: ClusterFirstWithHostNet
         extraArgs:
           default-ssl-certificate: tenant-root/cloudflare-origin-tls
         affinity:
@@ -59,6 +61,7 @@ spec:
           # client-settable CF-Connecting-IP. $realip_remote_addr is the TCP peer.
           x-guardian-edge-peer-ip: $realip_remote_addr
         service:
+          externalIPs: []
           externalTrafficPolicy: Cluster
         updateStrategy:
           type: RollingUpdate
