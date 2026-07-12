@@ -259,6 +259,7 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 		"github_runner_app_prod_webhook_secret",
 		"github_runner_app_prod_client_secret",
 		"github_runner_app_prod_private_key_b64",
+		"github_projector_pat",
 		"zot_countersigner_password",
 	}
 	var missing []string
@@ -373,6 +374,19 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 			Data: map[string]string{
 				"password": env["zot_countersigner_password"],
 				"htpasswd": "countersigner:" + zotPasswordHash,
+			},
+		},
+		// ghcr publish credential for the release projector: a classic PAT
+		// scoped to write:packages only, held by the machine account
+		// guardian-projector — GitHub App installation tokens cannot write
+		// ghcr organization packages, so this is the one standing PAT
+		// (docs/secrets.md). Expires 2027-07-11: re-mint and re-import
+		// before then, re-testing the App write path while at it — the PAT
+		// exists only to be deleted.
+		{
+			APIPath: "kv/data/guardian/guardian-mgmt/tenant-guardian/github-projector",
+			Data: map[string]string{
+				"token": env["github_projector_pat"],
 			},
 		},
 	}

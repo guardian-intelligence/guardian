@@ -1,0 +1,517 @@
+# The release projector: the single writer at the publication boundary
+# (docs/registry-design.md). For every digest in the release manifest it
+# verifies the Guardian countersignature in zot against the committed public
+# key and projects the image — countersignature referrer and legacy .sig
+# digest-tags included — to the public ghcr path, refusing (and paging)
+# otherwise. Level-triggered assurance loop: each run re-verifies the whole
+# released set at the target and copies only what is missing, so nothing
+# Guardian releases to a public registry ships without a verified Guardian
+# countersignature.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: release-projector
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: release-projector
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: registry
+    guardian.dev/tenant-id: gi-guardian
+automountServiceAccountToken: false
+---
+# The ghcr publish credential, custody-held and imported by the bootstrap
+# importer (kv .../tenant-guardian/github-projector): a classic PAT scoped
+# to write:packages only, held by the machine account guardian-projector
+# (docs/secrets.md).
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: release-projector-ghcr
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: release-projector
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/tenant-id: gi-guardian
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: tenant-guardian-openbao
+  target:
+    name: release-projector-ghcr
+    creationPolicy: Orphan
+    deletionPolicy: Retain
+  data:
+    - secretKey: token
+      remoteRef:
+        key: guardian/guardian-mgmt/tenant-guardian/github-projector
+        property: token
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: release-projector
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: release-projector
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: registry
+    guardian.dev/tenant-id: gi-guardian
+  annotations:
+    # The scripts' shell variables must reach the pod verbatim, not be
+    # blanked by Flux's envsubst pass.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  # cosign's and regctl's images are shell-less, and this cluster does not
+  # enable the ImageVolume source, so both binaries are extracted from their
+  # pinned images through the zot mirror itself: manifest by pinned digest,
+  # every layer blob verified against its manifest digest before extraction.
+  # The images are never run as containers. Trust anchors: the digest pins
+  # taken at adoption and the version parity checks against the
+  # independently sha256-pinned release binaries in
+  # src/tools/multitool.lock.json (regctl's image is additionally
+  # keyless-signed by its upstream CI, verified at adoption).
+  extract-tools.sh: |
+    #!/bin/sh
+    set -eu
+    ZOT="10.8.0.201:5000"
+    cd /tmp
+    fetch_manifest() {
+      curl -fsS "http://$ZOT/v2/$1/manifests/$2" \
+        -H 'Accept: application/vnd.oci.image.index.v1+json' \
+        -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+        -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
+        -H 'Accept: application/vnd.docker.distribution.manifest.v2+json'
+    }
+    # The registry is not trusted: every fetched byte is verified against
+    # the digest that named it, manifests included — the chain from the
+    # pinned digest to the extracted binary has no unverified link.
+    extract() {
+      image="$1"; member="$2"; out="$3"
+      repo="${image#ghcr.io/}"
+      repo="${repo%%[@:]*}"
+      digest="${image##*@}"
+      fetch_manifest "$repo" "$digest" > root.json
+      echo "${digest#sha256:}  root.json" | sha256sum -c - >/dev/null
+      case "$(jq -r .mediaType root.json)" in
+        application/vnd.oci.image.index.v1+json|application/vnd.docker.distribution.manifest.list.v2+json)
+          arch_digest="$(jq -r '.manifests[] | select(.platform.os=="linux" and .platform.architecture=="amd64") | .digest' root.json | head -1)"
+          fetch_manifest "$repo" "$arch_digest" > manifest.json
+          echo "${arch_digest#sha256:}  manifest.json" | sha256sum -c - >/dev/null
+          ;;
+        *)
+          cp root.json manifest.json
+          ;;
+      esac
+      for layer in $(jq -r '.layers[].digest' manifest.json); do
+        curl -fsS "http://$ZOT/v2/$repo/blobs/$layer" -o layer.tgz
+        echo "${layer#sha256:}  layer.tgz" | sha256sum -c - >/dev/null
+        # Stream the member out instead of extracting the tree: the layers
+        # ship their directories read-only, which a non-root extract cannot
+        # write into.
+        found="$(tar tzf layer.tgz 2>/dev/null | grep -E "^/?$member\$" || true)"
+        if [ -n "$found" ]; then
+          tar xzOf layer.tgz "$found" > "$out"
+          chmod 0755 "$out"
+        fi
+        rm -f layer.tgz
+      done
+      test -x "$out"
+    }
+    extract "$COSIGN_IMAGE" 'ko-app/cosign' /tools-bin/cosign
+    extract "$REGCTL_IMAGE" 'regctl' /tools-bin/regctl
+    /tools-bin/cosign version
+    /tools-bin/regctl version
+  project.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    ZOT="10.8.0.201:5000"
+    VMINSERT="http://vminsert-shortterm.tenant-root.svc:8480/insert/0/prometheus/api/v1/import/prometheus"
+    COSIGN=/tools-bin/cosign
+    REGCTL=/tools-bin/regctl
+    PUBKEY=/release-trust/guardian-images.pub.pem
+    export HOME=/tmp
+    export XDG_CONFIG_HOME=/tmp/config
+    export DOCKER_CONFIG=/tmp/docker
+
+    # ghcr auth for the push (regctl) and the target-side verify (cosign);
+    # zot is read anonymously.
+    "$REGCTL" registry set --tls disabled "$ZOT"
+    "$REGCTL" registry login ghcr.io -u "$GHCR_USERNAME" --pass-stdin <<<"$GHCR_TOKEN"
+    mkdir -p /tmp/docker
+    printf '{"auths":{"ghcr.io":{"auth":"%s"}}}' \
+      "$(printf '%s:%s' "$GHCR_USERNAME" "$GHCR_TOKEN" | base64 -w0)" \
+      > /tmp/docker/config.json
+
+    # The released set is exactly the manifest's pinned refs; lane structure
+    # is for reviewers and Kargo, only the refs matter here. The no-match
+    # grep must not kill the run under pipefail: an empty manifest flows
+    # through to the loud total=0 exit below instead of dying here with
+    # nothing projected and nothing logged.
+    refs="$(cat /release-manifest/release-manifest.yaml \
+      | { grep -Eo 'ghcr\.io/guardian-intelligence/[a-z0-9-]+@sha256:[a-f0-9]{64}' || true; } \
+      | sort -u)"
+
+    verify_countersigned() {
+      "$COSIGN" verify --key "$PUBKEY" --insecure-ignore-tlog=true \
+        ${2:+--allow-http-registry} "$1" >/dev/null 2>&1
+    }
+
+    BUNDLE_TYPE=application/vnd.dev.sigstore.bundle.v0.3+json
+    total=0 projected=0 unprojected=0 projected_this_run=0 run_failed=0
+    for ref in $refs; do
+      total=$((total + 1))
+      zref="$ZOT/${ref#ghcr.io/}"
+      # A release with no countersignature yet is routine convergence lag
+      # (the countersigner's next run signs it) — counted unprojected so the
+      # 45m alert catches persistence, but not a run failure. A release
+      # whose countersignature EXISTS but fails verification is tamper or
+      # key drift, and fails the run.
+      bundles="$("$REGCTL" artifact list "$zref" \
+        --filter-artifact-type "$BUNDLE_TYPE" \
+        --format '{{range .Descriptors}}{{.Digest}}{{"\n"}}{{end}}' 2>/dev/null || true)"
+      if [ -z "$bundles" ]; then
+        echo "no countersignature yet in zot for $zref; awaiting the countersigner"
+        unprojected=$((unprojected + 1))
+        continue
+      fi
+      # The gate: nothing crosses the boundary without a countersignature
+      # that verifies against the committed public key.
+      if ! verify_countersigned "$zref" http; then
+        echo "countersignature present but INVALID in zot for $zref; refusing to project"
+        unprojected=$((unprojected + 1))
+        run_failed=1
+        continue
+      fi
+      if verify_countersigned "$ref"; then
+        projected=$((projected + 1))
+        continue
+      fi
+      # Project the subject and exactly the countersignature referrers —
+      # never a blanket referrer copy: the projector is the trusted writer
+      # at the boundary, and anything else attached to the digest in zot
+      # must not ride its credential to the public registry. (Copying the
+      # referrer manifest by digest preserves the subject linkage at the
+      # target; blobs already there are skipped.)
+      copied=1
+      "$REGCTL" image copy "$zref" "$ref" || copied=0
+      for bundle in $bundles; do
+        "$REGCTL" image copy "${zref%%@*}@$bundle" "${ref%%@*}@$bundle" \
+          || copied=0
+      done
+      if [ "$copied" -eq 1 ] && verify_countersigned "$ref"; then
+        echo "projected $ref"
+        projected=$((projected + 1))
+        projected_this_run=$((projected_this_run + 1))
+      else
+        echo "projection FAILED for $ref"
+        unprojected=$((unprojected + 1))
+        run_failed=1
+      fi
+    done
+
+    echo "release images: $total projected: $projected unprojected: $unprojected newly projected: $projected_this_run"
+    push() {
+      curl -fsS --retry 3 --max-time 15 --data-binary "$1" "$VMINSERT" \
+        || { echo "failed to record projector result in vminsert"; exit 1; }
+    }
+    push "guardian_projector_release_images $total"
+    push "guardian_projector_projected_images $projected"
+    push "guardian_projector_unprojected_images $unprojected"
+    push "guardian_projector_projected_this_run $projected_this_run"
+    # An empty manifest means the grep or the mount broke — the coverage
+    # claim would be hollow, so it fails loudly. A release merely awaiting
+    # its countersignature does NOT fail the run (the next tick projects
+    # it; persistence pages via the 45m alert) — only verification and copy
+    # failures do, so a KubeJobFailed on this Job always means something
+    # abnormal, not routine promotion lag.
+    test "$total" -gt 0 || exit 1
+    exit "$run_failed"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: release-projector
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: release-projector
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: registry
+    guardian.dev/tenant-id: gi-guardian
+spec:
+  # Offset from the countersigner's */10 so a fresh countersignature
+  # projects on the next tick, not a full cadence later.
+  schedule: "5-55/10 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      # A cold run verifies and copies the whole released set against a
+      # public registry over the internet; give it headroom over the
+      # countersigner's in-cluster 300s.
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: release-projector
+            app.kubernetes.io/part-of: guardian
+        spec:
+          serviceAccountName: release-projector
+          automountServiceAccountToken: false
+          restartPolicy: Never
+          initContainers:
+            - name: extract-tools
+              image: docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
+              command: ["/bin/sh", "/scripts/extract-tools.sh"]
+              env:
+                # Env values are invisible to the imageset extractor, so
+                # these pins are hand-declared in images.declared.lock (keep
+                # the digests in lockstep). COSIGN_IMAGE must match the
+                # countersigner's pin and REGCTL_IMAGE must stay on the same
+                # release as the multitool regctl pin, whose verified release
+                # binary is this image's trust anchor —
+                # TestReleaseProjectorToolPinsMoveTogether enforces both.
+                - name: COSIGN_IMAGE
+                  value: "ghcr.io/sigstore/cosign/cosign:v3.1.1@sha256:6bbe0d281d955c79f85b325f0f7e651c1bcab5a4fa4ad4903d74955178a3b2eb"
+                - name: REGCTL_IMAGE
+                  value: "ghcr.io/regclient/regctl:v0.11.5@sha256:dbe356c6cf9f8f85e302b9e47fed481ef3f1b04807350e99b02ab2cadee0a993"
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 65534
+                capabilities:
+                  drop: ["ALL"]
+                seccompProfile:
+                  type: RuntimeDefault
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                  ephemeral-storage: 512Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+                  ephemeral-storage: 1Gi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                - name: tools-bin
+                  mountPath: /tools-bin
+                - name: tmp
+                  mountPath: /tmp
+          containers:
+            - name: project
+              image: docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
+              command: ["/bin/bash", "/scripts/project.sh"]
+              env:
+                - name: GHCR_USERNAME
+                  value: guardian-projector
+                - name: GHCR_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: release-projector-ghcr
+                      key: token
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 65534
+                capabilities:
+                  drop: ["ALL"]
+                seccompProfile:
+                  type: RuntimeDefault
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                  ephemeral-storage: 256Mi
+                limits:
+                  cpu: "1"
+                  memory: 512Mi
+                  ephemeral-storage: 1Gi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                - name: tools-bin
+                  mountPath: /tools-bin
+                - name: tmp
+                  mountPath: /tmp
+                - name: release-manifest
+                  mountPath: /release-manifest
+                  readOnly: true
+                - name: release-trust
+                  mountPath: /release-trust
+                  readOnly: true
+          volumes:
+            - name: scripts
+              configMap:
+                name: release-projector
+            - name: tools-bin
+              emptyDir: {}
+            - name: tmp
+              emptyDir: {}
+            - name: release-manifest
+              configMap:
+                name: release-manifest
+            - name: release-trust
+              configMap:
+                name: guardian-images-pub
+---
+# Egress half. The projector reads zot (all registry content, anonymous) and
+# writes ghcr — the one deliberate internet path in the registry lane, port
+# 443 only. The host/remote-node/world entities allowance on 5000 is
+# belt-and-braces for datapaths where socket-LB does not translate the zot
+# VIP.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: release-projector-egress
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: release-projector
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: release-projector
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: zot
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
+    - toEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
+            - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            k8s:app.kubernetes.io/name: vminsert
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
+# Ingress half of the vminsert import path: tenant-root's generated isolation
+# does not admit child-tenant namespaces; admit exactly the projector pods.
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-root-vminsert-from-release-projector
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-root
+      k8s:app.kubernetes.io/name: vminsert
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-guardian
+            k8s:app.kubernetes.io/name: release-projector
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: release-projector
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: release-projector
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: registry
+    guardian.dev/tenant-id: gi-guardian
+spec:
+  groups:
+    - name: release-projector.rules
+      rules:
+        # A release digest that stays unprojected across every run for 45m
+        # means the publication invariant cannot be re-established: the
+        # countersignature is missing or invalid in zot, ghcr is rejecting
+        # the push, or the credential is broken. Nothing else surfaces any
+        # of these. The sample-count guard keeps a lone first sample (first
+        # deploy, recovery after a gap) from firing this instantly: three
+        # samples at the 10-minute cadence means the window genuinely spans
+        # multiple runs that never touched zero.
+        - alert: GuardianProjectorUnprojectedReleases
+          expr: >-
+            min_over_time(guardian_projector_unprojected_images[45m]) > 0
+            and count_over_time(guardian_projector_unprojected_images[45m]) >= 3
+          labels:
+            severity: critical
+            guardian.dev/component: registry
+          annotations:
+            summary: released images are staying unprojected; the publication invariant is not converging.
+            description: >-
+              guardian_projector_unprojected_images has not touched zero in
+              45m. New releases create transient unprojected digests that the
+              next run projects; a persistent count means a countersignature
+              is missing or failing verification in zot, ghcr is rejecting
+              the push, or the guardian-projector credential is broken. Runs
+              exit nonzero only on verification or copy failures — never on
+              a release still awaiting its countersignature — so a
+              KubeJobFailed on the same Job means tamper, key drift, or a
+              broken push, not promotion lag (and it can linger up to an
+              hour after recovery; failed Jobs age out slowly). Check the
+              newest release-projector Job logs in tenant-guardian.
+        # Coverage claims are hollow if the manifest reads empty: zero
+        # release images means the mount or the ref extraction broke, not an
+        # empty release set — the manifest always lists releases.
+        - alert: GuardianProjectorEmptyManifest
+          expr: max_over_time(guardian_projector_release_images[45m]) == 0
+          labels:
+            severity: critical
+            guardian.dev/component: registry
+          annotations:
+            summary: the release projector is reading zero release images; its coverage signal is meaningless.
+            description: >-
+              guardian_projector_release_images has been zero for every run
+              in 45m. The release-manifest ConfigMap mount or the ref
+              extraction is broken while the unprojected gauge reads a
+              vacuous zero. Check the newest release-projector Job logs in
+              tenant-guardian.
+        - alert: GuardianProjectorSilent
+          expr: absent(guardian_projector_unprojected_images)
+          for: 30m
+          labels:
+            severity: critical
+            guardian.dev/component: registry
+          annotations:
+            summary: the release projector has stopped reporting; publication coverage is unverified.
+            description: >-
+              No guardian_projector_unprojected_images samples for 30m — the
+              CronJob is failing before its metrics push (tool extraction,
+              ghcr login, manifest read) or not running at all. Publication
+              coverage is unknown until this is fixed. Check the newest
+              release-projector Job logs in tenant-guardian.

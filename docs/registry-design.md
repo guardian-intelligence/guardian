@@ -1,7 +1,8 @@
 # Registry design: the in-cluster OCI tier
 
-Status: active as of 2026-07-12 (slices R1 zot tier + mirror flip, and R2
-countersigner write path; next: the projection reconciler).
+Status: active as of 2026-07-12 (slices R1 zot tier + mirror flip, R2
+countersigner write path, and R3 release projector; next: the inversion,
+gated on in-cluster CI).
 Complements `supply-chain-design.md` (trust model, signing) and
 `adrs/0005-no-in-cluster-object-storage.md` (why the registry stores on a
 PVC, not an object store).
@@ -136,13 +137,31 @@ identities are mintable, so ghcr-as-origin is currently correct, not debt.
 
 The publication boundary carries the invariant: **nothing Guardian releases
 to a public marketplace ships without a verified Guardian countersignature.**
-It is enforced by the projection reconciler — the single writer at that
-boundary — which verifies each artifact against the committed public key
-and then copies, refusing (and paging) otherwise. Publication must use
-signature-carrying copies (regsync with referrers enabled, or `cosign
-copy`) — plain image copies silently drop cosign referrers, which is
-exactly the failure the gate exists to make impossible. Marketplaces that
-only accept CI-platform OIDC provenance (npm, PyPI) keep their keyless
+The release projector holds it — a CronJob beside the countersigner
+(`deployments/guardian/system/release-projector.yaml`), a level-triggered
+assurance loop that guarantees every released digest carries a verifiable
+Guardian countersignature at the public registry, paging
+(`GuardianProjectorUnprojectedReleases`) when that cannot converge. While
+GitHub publishers keep pushing ghcr first (see above), image bytes reach
+ghcr before their countersignature does, so the projector's steady-state
+work is moving signature material; at inversion it becomes the single —
+and verifying — writer at the boundary. Its estate is the release manifest
+(`release-manifest.yaml` in the same directory), the reviewable definition
+of what Guardian releases: promotions bump a lane in the same commit as
+the workload pin (the company-site Kargo pipelines carry the extra
+`yaml-update`; `TestReleaseManifestCoversRenderedReleases` holds hand-made
+bumps to the same rule). Per digest it verifies the countersignature in
+zot against the committed public key
+(`bootstrap/bundle/guardian-images.pub.pem` — deliberately independent of
+Transit, so publication verification survives an OpenBao outage and a key
+rotation is a reviewed diff here), then copies the subject and exactly the
+countersignature referrers by digest with regctl, refusing otherwise. The
+copy is deliberately selective twice over: plain image copies — and
+`cosign copy`, which does not carry bundle-format referrers — silently
+drop the countersignature, while a blanket `--referrers` copy would let
+anything a zot-write-capable attacker attached to a released digest ride
+the projector's credential to the public registry. Marketplaces that only
+accept CI-platform OIDC provenance (npm, PyPI) keep their keyless
 publishes; the Guardian signature is the OCI lane's release signature.
 
 The inversion itself is gated on: in-cluster CI capacity, a passed re-cache

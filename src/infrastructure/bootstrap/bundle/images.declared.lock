@@ -65,11 +65,17 @@ docker.io/clickhouse/clickhouse-server@sha256:cc8c5bf275148b2de01a31e8fd6b55ba1b
 
 # --- fetched-not-run artifacts (pinned in manifest env values, which the ---
 # --- extractor cannot see; declared here so the dark haul carries them)  ---
-# The countersigner's cosign binary source (zot-countersigner.yaml
-# COSIGN_IMAGE — keep in lockstep, and on the same release as the multitool
-# cosign pin). Never admitted as a pod image: its layers are fetched through
-# the zot mirror and digest-verified by the extract script.
+# The countersigner's and release projector's cosign binary source
+# (COSIGN_IMAGE in zot-countersigner.yaml and release-projector.yaml — keep
+# all three in lockstep, and on the same release as the multitool cosign
+# pin). Never admitted as a pod image: its layers are fetched through the
+# zot mirror and digest-verified by the extract script.
 ghcr.io/sigstore/cosign/cosign@sha256:6bbe0d281d955c79f85b325f0f7e651c1bcab5a4fa4ad4903d74955178a3b2eb
+# The release projector's regctl binary source (release-projector.yaml
+# REGCTL_IMAGE — keep in lockstep, and on the same release as the multitool
+# regctl pin). Never admitted as a pod image: same extraction path as
+# cosign's.
+ghcr.io/regclient/regctl@sha256:dbe356c6cf9f8f85e302b9e47fed481ef3f1b04807350e99b02ab2cadee0a993
 
 # --- operator-spawned workload images (baseline: live audit 2026-07-02,
 # post-cold-boot-drill): what Cozystack/app operators run that no repo

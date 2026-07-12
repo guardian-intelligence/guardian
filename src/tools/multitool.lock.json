@@ -344,6 +344,24 @@
       }
     ]
   },
+  "regctl": {
+    "binaries": [
+      {
+        "kind": "file",
+        "url": "https://github.com/regclient/regclient/releases/download/v0.11.5/regctl-linux-amd64",
+        "sha256": "c93aa7638749f5aaac1a8e01787321889c78f0101809bb2880343478d0ba0467",
+        "os": "linux",
+        "cpu": "x86_64"
+      },
+      {
+        "kind": "file",
+        "url": "https://github.com/regclient/regclient/releases/download/v0.11.5/regctl-darwin-arm64",
+        "sha256": "f4d536d64d0c3cc1db7400902175a1c314675991d22e87e15c319501a2676d3f",
+        "os": "macos",
+        "cpu": "arm64"
+      }
+    ]
+  },
   "step": {
     "binaries": [
       {

@@ -94,6 +94,15 @@ spec:
             updates:
               - key: spec.template.spec.containers.0.image
                 value: ${{ vars.imageRepo }}@${{ imageFrom(vars.imageRepo).Digest }}
+        # The release manifest's lane moves in the same commit as the
+        # workload pin — TestReleaseManifestCoversRenderedReleases keeps the
+        # PR red otherwise.
+        - uses: yaml-update
+          config:
+            path: ./repo/src/infrastructure/deployments/guardian/system/release-manifest.yaml
+            updates:
+              - key: releases.company-site.gamma.image
+                value: ${{ vars.imageRepo }}@${{ imageFrom(vars.imageRepo).Digest }}
         - uses: git-commit
           as: commit
           config:

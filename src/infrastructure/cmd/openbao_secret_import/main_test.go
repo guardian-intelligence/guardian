@@ -56,6 +56,7 @@ func testImportEnv() map[string]string {
 		"github_runner_app_prod_client_secret":   "runner-client",
 		"github_runner_app_prod_private_key_b64": base64.StdEncoding.EncodeToString([]byte(testRunnerAppPEM)),
 		"zot_countersigner_password":             "zot-push-pass",
+		"github_projector_pat":                   "ghp-projector-pat",
 	}
 }
 
@@ -64,8 +65,8 @@ func TestImportPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 8 {
-		t.Fatalf("plan length = %d, want 8", len(plan))
+	if len(plan) != 9 {
+		t.Fatalf("plan length = %d, want 9", len(plan))
 	}
 	byPath := map[string]secretWrite{}
 	for _, w := range plan {
@@ -146,6 +147,13 @@ func TestImportPlan(t *testing.T) {
 	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte("zot-push-pass")); err != nil {
 		t.Fatalf("zot-countersigner htpasswd hash does not verify against the password: %v", err)
 	}
+	projector, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-guardian/github-projector"]
+	if !ok {
+		t.Fatal("github-projector write missing")
+	}
+	if projector.Data["token"] != "ghp-projector-pat" {
+		t.Fatalf("github-projector token = %q", projector.Data["token"])
+	}
 }
 
 func TestImportPlanRejectsBadGithubKey(t *testing.T) {
@@ -180,8 +188,8 @@ func TestImportPlanOptionalKeycloakStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 10 {
-		t.Fatalf("plan length = %d, want 10 (8 base + beta + prod)", len(plan))
+	if len(plan) != 11 {
+		t.Fatalf("plan length = %d, want 11 (9 base + beta + prod)", len(plan))
 	}
 	byPath := map[string]secretWrite{}
 	for _, w := range plan {

@@ -1,0 +1,36 @@
+# The release manifest: the reviewable definition of what Guardian releases
+# to public registries (docs/registry-design.md). The release projector
+# verifies each digest's Guardian countersignature in zot against the
+# committed public key and projects it — signature included — to the ghcr
+# path in the ref. Lanes mirror the promotion stages so one promotion moves
+# one leaf: the company-site Kargo pipelines bump their lane in the same
+# commit as the workload pin, and TestReleaseManifestCoversRenderedReleases
+# holds every hand-made pin bump to the same rule.
+#
+# This file is a configMapGenerator input, not a Kubernetes resource; the
+# `image:` leaf keys are deliberate — the imageset extractor enforces digest
+# pinning on them and carries the refs into the image union.
+releases:
+  alert-relay:
+    prod:
+      image: ghcr.io/guardian-intelligence/alert-relay@sha256:ca7b3b9ba13a3fa38c735ccce4ee43dcceaced9cd8435d7f4dabcc1b2af87778
+  analytics-ingest:
+    prod:
+      image: ghcr.io/guardian-intelligence/analytics-ingest@sha256:720bd0a0d191955bbbe3a229b266d1fdd8f7b26bb5daa1b88fe043dc11ae7899
+  cockpit:
+    beta:
+      image: ghcr.io/guardian-intelligence/cockpit@sha256:0589274466069f6c2e6df0f67ab38f7ac1288887d71d73085f80bce2b72e0ca2
+    gamma:
+      image: ghcr.io/guardian-intelligence/cockpit@sha256:0589274466069f6c2e6df0f67ab38f7ac1288887d71d73085f80bce2b72e0ca2
+    prod:
+      image: ghcr.io/guardian-intelligence/cockpit@sha256:0589274466069f6c2e6df0f67ab38f7ac1288887d71d73085f80bce2b72e0ca2
+  company-site:
+    beta:
+      image: ghcr.io/guardian-intelligence/company-site@sha256:abee8b4726b43f8ce598543ab927dc12ddd4055dfd94cd584680f6ccb392ffe7
+    gamma:
+      image: ghcr.io/guardian-intelligence/company-site@sha256:3e00b062f2e44ca39d912036bd8d683074d69bf85ccb44ced73d46bf92ca3b69
+    prod:
+      image: ghcr.io/guardian-intelligence/company-site@sha256:3e00b062f2e44ca39d912036bd8d683074d69bf85ccb44ced73d46bf92ca3b69
+  postflight-controlplane:
+    prod:
+      image: ghcr.io/guardian-intelligence/postflight-controlplane@sha256:e23e0241247107ec5f494881f04424c3e6fe6ecc188e8901f3e457637a215230

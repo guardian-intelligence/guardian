@@ -38,6 +38,13 @@ spec:
         - ports:
             - port: "5000"
               protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: release-projector
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
