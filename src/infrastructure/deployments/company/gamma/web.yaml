@@ -132,11 +132,10 @@ metadata:
   name: company-site
   namespace: tenant-guardian-gamma
   annotations:
-    # Same AOP posture as prod (optional_no_ca — see prod/web.yaml for why not
-    # "on" yet); beta/gamma get their own subdomain but share the product's
-    # security posture.
+    # The Talos firewall admits only Cloudflare's origin-facing ranges, while
+    # this mTLS check makes the edge prove its identity at HTTP termination.
     nginx.ingress.kubernetes.io/auth-tls-secret: tenant-guardian-gamma/cloudflare-origin-pull-ca
-    nginx.ingress.kubernetes.io/auth-tls-verify-client: "optional_no_ca"
+    nginx.ingress.kubernetes.io/auth-tls-verify-client: "on"
     nginx.ingress.kubernetes.io/auth-tls-verify-depth: "1"
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
   labels:

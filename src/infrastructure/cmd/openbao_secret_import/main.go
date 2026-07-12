@@ -250,6 +250,8 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 		"cloudflare_r2_secret_access_key",
 		"cloudflare_r2_s3_api_endpoint",
 		"cloudflare_r2_access_key_id",
+		"cloudflare_origin_certificate_b64",
+		"cloudflare_origin_private_key_b64",
 		"guardian_alerting_ntfy_url",
 		"platform_admin_password",
 		"platform_agent_password",
@@ -280,6 +282,14 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 	if err != nil {
 		return nil, err
 	}
+	originCertificate, err := decodePEMEnv(env, "cloudflare_origin_certificate_b64")
+	if err != nil {
+		return nil, err
+	}
+	originPrivateKey, err := decodePEMEnv(env, "cloudflare_origin_private_key_b64")
+	if err != nil {
+		return nil, err
+	}
 	zotHash, err := bcrypt.GenerateFromPassword([]byte(env["zot_countersigner_password"]), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, fmt.Errorf("bcrypt zot_countersigner_password: %w", err)
@@ -301,6 +311,13 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 				"cloudflare_r2_access_key_id":     env["cloudflare_r2_access_key_id"],
 				"cloudflare_r2_s3_api_endpoint":   env["cloudflare_r2_s3_api_endpoint"],
 				"cloudflare_r2_secret_access_key": env["cloudflare_r2_secret_access_key"],
+			},
+		},
+		{
+			APIPath: "kv/data/guardian/guardian-mgmt/tenant-root/cloudflare-origin-tls",
+			Data: map[string]string{
+				"tls.crt": originCertificate,
+				"tls.key": originPrivateKey,
 			},
 		},
 		// Alerting pager sink: the ntfy topic URL the tenant-root alert-relay

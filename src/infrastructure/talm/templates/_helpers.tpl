@@ -535,7 +535,8 @@ portSelector:
     - 443
   protocol: tcp
 ingress:
-  - subnet: 0.0.0.0/0
-  - subnet: ::/0
+  {{- range .Values.ingressFirewall.cloudflareEdgeSubnets }}
+  - subnet: {{ . }}
+  {{- end }}
 {{- include "talos.config.network.multidoc" . }}
 {{- end }}

@@ -22,6 +22,12 @@ resource "cloudflare_authenticated_origin_pulls_settings" "guardianintelligence_
   enabled = true
 }
 
+resource "cloudflare_zone_setting" "origin_ssl" {
+  zone_id    = data.cloudflare_zone.guardianintelligence_org.id
+  setting_id = "ssl"
+  value      = "strict"
+}
+
 # Bot Fight Mode is unscopeable (no path/hostname exemptions) and challenges
 # first-party POST beacons, which silently drops analytics and fraud events.
 # Abuse filtering belongs to the provenance/trust-tier pipeline where every

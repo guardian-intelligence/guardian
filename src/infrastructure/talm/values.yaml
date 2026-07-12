@@ -132,10 +132,12 @@ advertisedSubnets:
 # Host ingress firewall sources. vlanSubnet is admitted on all ports —
 # it is private to these machines and carries every node-to-node
 # internal (etcd, DRBD/LINSTOR, geneve, MetalLB memberlist).
-# operatorSubnets reach the Talos (50000) and Kubernetes (6443) APIs;
-# everything else sees only 80/443. 148.113.198.223 is the operations
-# VPS (also the dark-mirror host). If it ever changes: update here,
-# talm apply from the VLAN or Latitude OOB console.
+# operatorSubnets reach the Talos (50000) and Kubernetes (6443) APIs.
+# Cloudflare publishes one shared address inventory for proxied origin
+# connections and Load Balancer health monitors; only that inventory reaches
+# public 80/443. 148.113.198.223 is the operations VPS (also the dark-mirror
+# host). If it ever changes: update here, talm apply from the VLAN or Latitude
+# OOB console.
 ingressFirewall:
   vlanSubnet: "10.8.0.0/24"
   # kube-ovn's join subnet (the ovn0 interconnect; `kubectl get
@@ -145,6 +147,29 @@ ingressFirewall:
   joinSubnet: "100.64.0.0/16"
   operatorSubnets:
     - "148.113.198.223/32"
+  cloudflareEdgeSubnets:
+    - "173.245.48.0/20"
+    - "103.21.244.0/22"
+    - "103.22.200.0/22"
+    - "103.31.4.0/22"
+    - "141.101.64.0/18"
+    - "108.162.192.0/18"
+    - "190.93.240.0/20"
+    - "188.114.96.0/20"
+    - "197.234.240.0/22"
+    - "198.41.128.0/17"
+    - "162.158.0.0/15"
+    - "104.16.0.0/13"
+    - "104.24.0.0/14"
+    - "172.64.0.0/13"
+    - "131.0.72.0/22"
+    - "2400:cb00::/32"
+    - "2606:4700::/32"
+    - "2803:f800::/32"
+    - "2405:b500::/32"
+    - "2405:8100::/32"
+    - "2a06:98c0::/29"
+    - "2c0f:f248::/32"
 
 oidcIssuerUrl: "https://keycloak.guardianintelligence.org/realms/cozy"
 # Lifetime of admin kubeconfigs minted from the cluster CA (talosctl/talm
