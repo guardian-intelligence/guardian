@@ -162,10 +162,20 @@ packages — the Packages App permission does not govern container-registry
 writes (create and update both denied for a token carrying
 `packages: write`), and fine-grained PATs do not support Packages at all.
 The single standing exception is therefore ghcr write: a classic PAT with
-`write:packages`, custody-held, its expiry recorded on its importer-plan
-entry where the repo can see it — never only in the minting UI. Re-test
-the App write path on GitHub feature announcements; the PAT exists only
-to be deleted.
+`write:packages`, held by the machine account `guardian-projector` and
+consumed by the release projector. The account is a Write collaborator on
+the `guardian` repository (per-package grants don't exist while packages
+inherit repository access), and that latent repo access stays inert
+because the account only ever mints `write:packages` tokens — the
+token∩identity intersection is what keeps the in-cluster credential
+packages-only. Packages-only is still every package linked to the repo: a
+compromised holder can push and retag all first-party public images, which
+external tag-pulling consumers would receive (in-cluster consumers pull by
+digest and are unaffected). That blast radius is accepted because GitHub
+offers nothing narrower. The PAT is custody-held, its expiry recorded on
+its importer-plan entry where the repo can see it — never only in the
+minting UI. Re-test the App write path on GitHub feature announcements;
+the PAT exists only to be deleted.
 
 Other App keys (the Kargo promotion bot, the Postflight runner App)
 follow the same custody handling. New GitHub automation joins

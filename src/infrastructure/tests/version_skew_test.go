@@ -126,6 +126,50 @@ func TestCountersignerCosignPinsMoveTogether(t *testing.T) {
 	}
 }
 
+// The release projector extracts cosign and regctl the same way the
+// countersigner extracts cosign, with the same anchoring: the multitool
+// regctl release binary is the regctl image's trust anchor, the declared
+// lock carries what the pod fetches, and the projector's cosign pin may
+// never drift from the countersigner's — one cosign verifies what the other
+// signs.
+func TestReleaseProjectorToolPinsMoveTogether(t *testing.T) {
+	projectorYAML := "src/infrastructure/deployments/guardian/system/release-projector.yaml"
+	countersignerYAML := "src/infrastructure/deployments/guardian/system/zot-countersigner.yaml"
+	declaredLock := "src/infrastructure/bootstrap/bundle/images.declared.lock"
+
+	release := regexp.MustCompile(`regclient/regclient/releases/download/(v\d+\.\d+\.\d+)/regctl-linux-amd64`).
+		FindStringSubmatch(readText(t, runfilePath(toolLockRunfile)))
+	if release == nil {
+		t.Fatalf("%s: no regctl release pin found", toolLockRunfile)
+	}
+	image := regexp.MustCompile(`ghcr\.io/regclient/regctl:(v\d+\.\d+\.\d+)@(sha256:[a-f0-9]{64})`).
+		FindStringSubmatch(readText(t, runfilePath(projectorYAML)))
+	if image == nil {
+		t.Fatalf("%s: no REGCTL_IMAGE tag@digest pin found", projectorYAML)
+	}
+	declared := regexp.MustCompile(`ghcr\.io/regclient/regctl@(sha256:[a-f0-9]{64})`).
+		FindStringSubmatch(readText(t, runfilePath(declaredLock)))
+	if declared == nil {
+		t.Fatalf("%s: no regctl image digest declared", declaredLock)
+	}
+	if image[1] != release[1] {
+		t.Fatalf("projector REGCTL_IMAGE is %s but the multitool regctl release pin is %s: move them together", image[1], release[1])
+	}
+	if image[2] != declared[1] {
+		t.Fatalf("projector REGCTL_IMAGE digest %s and the images.declared.lock entry %s differ: the dark haul would carry a different image than the projector fetches", image[2], declared[1])
+	}
+
+	cosignPin := regexp.MustCompile(`ghcr\.io/sigstore/cosign/cosign:v\d+\.\d+\.\d+@sha256:[a-f0-9]{64}`)
+	projectorCosign := cosignPin.FindString(readText(t, runfilePath(projectorYAML)))
+	countersignerCosign := cosignPin.FindString(readText(t, runfilePath(countersignerYAML)))
+	if projectorCosign == "" {
+		t.Fatalf("%s: no COSIGN_IMAGE tag@digest pin found", projectorYAML)
+	}
+	if projectorCosign != countersignerCosign {
+		t.Fatalf("projector COSIGN_IMAGE %s and countersigner COSIGN_IMAGE %s differ: move them together", projectorCosign, countersignerCosign)
+	}
+}
+
 func TestTalmChartTalosVersionAgreesWithInstallerImage(t *testing.T) {
 	chart := extractMinor(t, talmChartRunfile,
 		`talosVersion: "v(\d+)\.(\d+)"`)

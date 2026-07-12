@@ -23,6 +23,7 @@ go_test(
         "multus_resources_test.go",
         "oci_base_conformance_test.go",
         "openbao_conformance_test.go",
+        "release_manifest_test.go",
         "version_skew_test.go",
         "vlogs_streams_test.go",
         "vm_rollup_wiring_test.go",

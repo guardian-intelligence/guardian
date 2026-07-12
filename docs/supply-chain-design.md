@@ -223,10 +223,10 @@ currency; the countersignature is the one Guardian owns outright.
 
 Keyless signatures name GitHub identities. The countersigner is the first
 step off that dependency: every released first-party digest also carries a
-signature by a Guardian-held key. The invariant this builds toward sits at
-the publication boundary — nothing Guardian releases to a public
-marketplace ships without the Guardian signature, enforced by the
-projection reconciler (`docs/registry-design.md`). It is deliberately not
+signature by a Guardian-held key. The invariant sits at the publication
+boundary — nothing Guardian releases to a public marketplace ships without
+a verified Guardian signature, held by the release projector
+(`docs/registry-design.md`). It is deliberately not
 a runtime invariant: no pod is required to run a Guardian-signed image,
 because what runs is already governed by the merge gate and the provenance
 VAP. If Guardian later self-hosts its factory, images born in-cluster sign

@@ -140,7 +140,13 @@
     {
       matchPackageNames: ["sigstore/cosign"],
       prBodyNotes: [
-        "cosign must stay on the same major as the sigstore/cosign-installer pin in the CI workflows — the dark-drive copy verifies what CI signs (docs/supply-chain-design.md). The countersigner's COSIGN_IMAGE pin (deployments/guardian/system/zot-countersigner.yaml) and its images.declared.lock digest ride the same release; TestCountersignerCosignPinsMoveTogether keeps this PR red until they move too.",
+        "cosign must stay on the same major as the sigstore/cosign-installer pin in the CI workflows — the dark-drive copy verifies what CI signs (docs/supply-chain-design.md). The countersigner's and release projector's COSIGN_IMAGE pins (deployments/guardian/system/zot-countersigner.yaml and release-projector.yaml) and the images.declared.lock digest ride the same release; TestCountersignerCosignPinsMoveTogether and TestReleaseProjectorToolPinsMoveTogether keep this PR red until they move too.",
+      ],
+    },
+    {
+      matchPackageNames: ["regclient/regclient"],
+      prBodyNotes: [
+        "The release projector's REGCTL_IMAGE pin (deployments/guardian/system/release-projector.yaml) and its images.declared.lock digest ride the same release; TestReleaseProjectorToolPinsMoveTogether keeps this PR red until they move too.",
       ],
     },
     {

@@ -10,6 +10,18 @@ configMapGenerator:
     namespace: tenant-guardian
     files:
       - ../../../bootstrap/bundle/sigstore-trusted-root.json
+  # The Guardian release-signing public key — the projector's verification
+  # anchor, one copy, projected from the bundle like the trusted root.
+  - name: guardian-images-pub
+    namespace: tenant-guardian
+    files:
+      - ../../../bootstrap/bundle/guardian-images.pub.pem
+  # The reviewable definition of what Guardian releases; the projector's
+  # estate (release-manifest.yaml header).
+  - name: release-manifest
+    namespace: tenant-guardian
+    files:
+      - release-manifest.yaml
 resources:
   - stage-tenants.yaml
   - openbao-listener-tls.yaml
@@ -17,6 +29,7 @@ resources:
   - openbao-networkpolicy.yaml
   - openbao-observability.yaml
   - openbao-rbac.yaml
+  - release-projector.yaml
   - vap-denial-canary.yaml
   - zot-countersigner.yaml
   - zot-helmrelease.yaml

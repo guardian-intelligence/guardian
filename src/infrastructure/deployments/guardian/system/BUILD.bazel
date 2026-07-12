@@ -7,6 +7,8 @@ filegroup(
         "openbao-networkpolicy.yaml",
         "openbao-observability.yaml",
         "openbao-rbac.yaml",
+        "release-manifest.yaml",
+        "release-projector.yaml",
         "stage-tenants.yaml",
         "vap-denial-canary.yaml",
         "zot-countersigner.yaml",
