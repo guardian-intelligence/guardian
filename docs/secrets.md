@@ -140,6 +140,38 @@ Corollaries:
   in-cluster class is convention — reviewers should reject PRs that project
   operator-generated credentials through OpenBao.
 
+## GitHub credentials: one App, short-lived tokens
+
+GitHub-facing automation authenticates as a GitHub App, never with a
+personal access token. The standing identity is `guardian-platform-app`
+(App ID 4276780, installed on the `guardian` repository only). Its RSA
+private key is a custody value like any externally-born secret; every
+consumer mints a one-hour installation token from it on demand (an RS256
+App JWT exchanged at the installation-token endpoint). RS256 is
+`transit/sign`-compatible, so an in-cluster consumer keeps the key in
+Transit under the importer-owned durable-key lifecycle
+(`docs/openbao-design.md`) and plaintext never reaches a pod. Nothing
+long-lived is materialized anywhere: a leaked token dies within the hour,
+and new capabilities are granted by extending the App's permissions with
+org-owner approval, not by minting another credential.
+
+Scope boundary, verified live: installation tokens cover the API plane
+(pull requests, contents, statuses, checks) and ghcr *reads*, private
+repo-linked packages included. They cannot push ghcr organization
+packages — the Packages App permission does not govern container-registry
+writes (create and update both denied for a token carrying
+`packages: write`), and fine-grained PATs do not support Packages at all.
+The single standing exception is therefore ghcr write: a classic PAT with
+`write:packages`, custody-held, its expiry recorded on its importer-plan
+entry where the repo can see it — never only in the minting UI. Re-test
+the App write path on GitHub feature announcements; the PAT exists only
+to be deleted.
+
+Other App keys (the Kargo promotion bot, the Postflight runner App)
+follow the same custody handling. New GitHub automation joins
+`guardian-platform-app` rather than registering another identity, unless
+it genuinely needs a distinct installation boundary.
+
 ## Adding a secret for a third-party integration (routine)
 
 No OpenBao changes. One PR plus one scoped write — full commands in the
