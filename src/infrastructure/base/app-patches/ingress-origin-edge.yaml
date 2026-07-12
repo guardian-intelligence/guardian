@@ -59,6 +59,10 @@ spec:
           # client-settable CF-Connecting-IP. $realip_remote_addr is the TCP peer.
           x-guardian-edge-peer-ip: $realip_remote_addr
         service:
+          externalIPs:
+            - 206.223.228.101
+            - 45.250.254.119
+            - 206.223.228.87
           externalTrafficPolicy: Cluster
         updateStrategy:
           type: RollingUpdate
