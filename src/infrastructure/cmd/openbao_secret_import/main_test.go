@@ -40,12 +40,18 @@ const testGithubAppPEM = "-----BEGIN PRIVATE KEY-----\nnot-a-real-key\n-----END 
 
 const testRunnerAppPEM = "-----BEGIN PRIVATE KEY-----\nnot-a-real-runner-key\n-----END PRIVATE KEY-----\n"
 
+const testOriginCertificatePEM = "-----BEGIN CERTIFICATE-----\nnot-a-real-certificate\n-----END CERTIFICATE-----\n"
+
+const testOriginPrivateKeyPEM = "-----BEGIN EC PRIVATE KEY-----\nnot-a-real-origin-key\n-----END EC PRIVATE KEY-----\n"
+
 func testImportEnv() map[string]string {
 	return map[string]string{
 		"cloudflare_account_id":                  "account",
 		"cloudflare_r2_secret_access_key":        "r2-secret",
 		"cloudflare_r2_s3_api_endpoint":          "r2-endpoint",
 		"cloudflare_r2_access_key_id":            "r2-access",
+		"cloudflare_origin_certificate_b64":      base64.StdEncoding.EncodeToString([]byte(testOriginCertificatePEM)),
+		"cloudflare_origin_private_key_b64":      base64.StdEncoding.EncodeToString([]byte(testOriginPrivateKeyPEM)),
 		"guardian_alerting_ntfy_url":             "https://ntfy.sh/guardian-topic",
 		"platform_admin_password":                "admin-pass",
 		"platform_agent_password":                "agent-pass",
@@ -65,8 +71,8 @@ func TestImportPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 9 {
-		t.Fatalf("plan length = %d, want 9", len(plan))
+	if len(plan) != 10 {
+		t.Fatalf("plan length = %d, want 10", len(plan))
 	}
 	byPath := map[string]secretWrite{}
 	for _, w := range plan {
@@ -84,6 +90,13 @@ func TestImportPlan(t *testing.T) {
 	}
 	if _, ok := r2.Data["cloudflare_r2_api_token"]; ok {
 		t.Fatalf("operator r2 carries cloudflare_r2_api_token: %#v", r2.Data)
+	}
+	originTLS, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-root/cloudflare-origin-tls"]
+	if !ok {
+		t.Fatal("Cloudflare origin TLS write missing")
+	}
+	if originTLS.Data["tls.crt"] != testOriginCertificatePEM || originTLS.Data["tls.key"] != testOriginPrivateKeyPEM {
+		t.Fatal("Cloudflare origin TLS material did not round-trip through base64")
 	}
 	alerting, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-root/alerting"]
 	if !ok {
@@ -188,8 +201,8 @@ func TestImportPlanOptionalKeycloakStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 11 {
-		t.Fatalf("plan length = %d, want 11 (9 base + beta + prod)", len(plan))
+	if len(plan) != 12 {
+		t.Fatalf("plan length = %d, want 12 (10 base + beta + prod)", len(plan))
 	}
 	byPath := map[string]secretWrite{}
 	for _, w := range plan {

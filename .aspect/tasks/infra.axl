@@ -14,6 +14,7 @@ load(
 
 GUARDIAN_MGMT_ROOT = "src/infrastructure/bootstrap/guardian-mgmt"
 GUARDIAN_MGMT_DNS_ROOT = "src/infrastructure/bootstrap/guardian-mgmt-dns"
+GUARDIAN_MGMT_EDGE_POLICY_ROOT = "src/infrastructure/bootstrap/guardian-mgmt-edge-policy"
 GUARDIAN_MGMT_TALM_ROOT = "src/infrastructure/talm"
 GUARDIAN_BACKEND_TFVARS = "src/infrastructure/bootstrap/backend.tfvars"
 TOFU_TARGET = "@multitool//tools/tofu"
@@ -66,14 +67,14 @@ SIGSTORE_TRUSTED_ROOT_PATH = "src/infrastructure/bootstrap/bundle/sigstore-trust
 SUPPLY_CHAIN_REPO = "ghcr.io/guardian-intelligence/supply-chain"
 
 # Gate every bundle build on the Tier-1 invariants that make the projection
-# trustworthy: talm_render_test carries the union-lock derivation checks
+# trustworthy: infrastructure tests carry the union-lock derivation checks
 # (declared well-formed, rendered digest-pinned, disjointness, dark-mirror
 # host coverage), imageset_test the extraction rules, bundle_test the
 # projection contract (digest pinning, determinism).
 BUNDLE_PRECONDITION_TESTS = [
     "//src/infrastructure/cmd/bundle:bundle_test",
     "//src/infrastructure/imageset:imageset_test",
-    "//src/infrastructure/tests:talm_render_test",
+    "//src/infrastructure/tests:tests",
 ]
 
 DB_LOAD_TARGET = "//src/infrastructure/cmd/cozystack_db_load:cozystack_db_load"
@@ -112,6 +113,7 @@ PUBLIC_TALOS_KUBECONFIG_NODE = "206.223.228.87"
 INFRA_FILEGROUPS = [
     "//src/infrastructure/bootstrap/guardian-mgmt:root",
     "//src/infrastructure/bootstrap/guardian-mgmt-dns:root",
+    "//src/infrastructure/bootstrap/guardian-mgmt-edge-policy:root",
     "//src/infrastructure/base/admission:manifests",
     "//src/infrastructure/base/app-patches:manifests",
     "//src/infrastructure/base/platform-patches:manifests",
@@ -139,7 +141,7 @@ INFRA_TESTS = [
     "//src/infrastructure/cmd/openbao_reinit:openbao_reinit_test",
     "//src/infrastructure/cmd/openbao_secret_import:openbao_secret_import_test",
     "//src/infrastructure/cmd/openbao_static_seal_key:openbao_static_seal_key_test",
-    "//src/infrastructure/tests:talm_render_test",
+    "//src/infrastructure/tests:tests",
 ]
 FORBIDDEN_SOURCE_PATHS = [
     ("custody.env", "operator credentials live in the encrypted custody bundle (aspect infra custody), never the repo workspace"),
@@ -272,12 +274,15 @@ def _tofu_backend_roots(ctx, root):
         return [
             (GUARDIAN_MGMT_ROOT, "guardian-mgmt"),
             (GUARDIAN_MGMT_DNS_ROOT, "guardian-mgmt-dns"),
+            (GUARDIAN_MGMT_EDGE_POLICY_ROOT, "guardian-mgmt-edge-policy"),
         ]
     if root == "guardian-mgmt":
         return [(GUARDIAN_MGMT_ROOT, "guardian-mgmt")]
     if root == "guardian-mgmt-dns":
         return [(GUARDIAN_MGMT_DNS_ROOT, "guardian-mgmt-dns")]
-    ctx.std.io.stderr.write("ERROR: --root must be all, guardian-mgmt, or guardian-mgmt-dns\n")
+    if root == "guardian-mgmt-edge-policy":
+        return [(GUARDIAN_MGMT_EDGE_POLICY_ROOT, "guardian-mgmt-edge-policy")]
+    ctx.std.io.stderr.write("ERROR: --root must be all, guardian-mgmt, guardian-mgmt-dns, or guardian-mgmt-edge-policy\n")
     return None
 
 def _tofu_backend_init(ctx, roots, endpoint):
@@ -496,7 +501,7 @@ def _render_kustomizations(ctx):
         rc = _capture_success(
             ctx,
             kubectl,
-            ["kustomize", path],
+            ["kustomize", "--load-restrictor=LoadRestrictionsNone", path],
             cwd = ws_path(ctx),
             label = "kubectl kustomize " + path,
         )
@@ -523,6 +528,7 @@ def _validate_impl(ctx):
     for root, label in [
         (GUARDIAN_MGMT_ROOT, "guardian-mgmt"),
         (GUARDIAN_MGMT_DNS_ROOT, "guardian-mgmt-dns"),
+        (GUARDIAN_MGMT_EDGE_POLICY_ROOT, "guardian-mgmt-edge-policy"),
     ]:
         tofu_env = _tofu_validate_env(ctx, label)
         rc = _tofu_root(ctx, root, ["fmt", "-check"], "tofu fmt -check " + label, env = tofu_env)
@@ -2089,7 +2095,7 @@ tofu_init = task(
     summary = "Initialize OpenTofu S3 backends for management bootstrap roots; endpoint defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars.",
     args = {
         "endpoint": args.string(default = "", description = "Optional S3-compatible backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
-        "root": args.string(default = "all", description = "OpenTofu root to initialize: all, guardian-mgmt, or guardian-mgmt-dns."),
+        "root": args.string(default = "all", description = "OpenTofu root to initialize: all, guardian-mgmt, guardian-mgmt-dns, or guardian-mgmt-edge-policy."),
     },
 )
 

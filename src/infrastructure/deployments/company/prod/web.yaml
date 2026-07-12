@@ -132,16 +132,10 @@ metadata:
   name: company-site
   namespace: tenant-guardian-prod
   annotations:
-    # AOP: request Cloudflare's origin-pull client cert; $ssl_client_verify=
-    # SUCCESS (real chain validation) gates the x-guardian-* header maps.
-    # optional_no_ca, not optional: with zone AOP live, "optional" would 400
-    # the whole site if the presented cert ever fails validation; no_ca
-    # degrades that to empty headers. Flip to "on" (closes direct-to-origin)
-    # only after logs show client_ip_source=cloudflare on all real traffic,
-    # covering the co-hosted prod keycloak Ingress and the :80 path
-    # (X-Forwarded-Proto is client-settable) in the same change.
+    # The Talos firewall admits only Cloudflare's origin-facing ranges, while
+    # this mTLS check makes the edge prove its identity at HTTP termination.
     nginx.ingress.kubernetes.io/auth-tls-secret: tenant-guardian-prod/cloudflare-origin-pull-ca
-    nginx.ingress.kubernetes.io/auth-tls-verify-client: "optional_no_ca"
+    nginx.ingress.kubernetes.io/auth-tls-verify-client: "on"
     nginx.ingress.kubernetes.io/auth-tls-verify-depth: "1"
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
   labels:
