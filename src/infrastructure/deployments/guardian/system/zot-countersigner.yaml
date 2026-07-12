@@ -5,8 +5,10 @@
 # attached to the zot registry as an OCI 1.1 referrer whose bundle embeds
 # the inclusion proof — verifiable with stock cosign defaults online, or
 # fully offline with the plain public key plus the pinned trusted root for
-# the log check. The released set is enumerated from the cluster's workload specs
-# (every release runs here). Level-triggered assurance loop: each run
+# the log check. The released set is enumerated from the release manifest
+# (release-manifest.yaml, the reviewable definition of what Guardian
+# releases — the same mounted definition the release projector enforces
+# against). Level-triggered assurance loop: each run
 # re-verifies every digest's countersignature and signs only what is missing,
 # after first re-verifying the digest's Fulcio signature against its
 # canonical CI identity.
@@ -20,6 +22,7 @@ metadata:
     app.kubernetes.io/part-of: guardian
     guardian.dev/component: registry
     guardian.dev/tenant-id: gi-guardian
+automountServiceAccountToken: false
 ---
 # ESO identity for the tenant-guardian kv scope (guardian-reader-tenant-guardian
 # role). The SA mounts nothing and runs nothing.
@@ -46,39 +49,6 @@ metadata:
     app.kubernetes.io/part-of: guardian
     guardian.dev/tenant-id: gi-guardian
 automountServiceAccountToken: false
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: guardian-countersigner-image-reader
-  labels:
-    app.kubernetes.io/name: zot-countersigner
-    app.kubernetes.io/part-of: guardian
-rules:
-  # Read-only enumeration of the workload specs whose image pins define the
-  # countersigning estate. No pod access, no secrets, no writes.
-  - apiGroups: ["apps"]
-    resources: ["deployments", "statefulsets", "daemonsets"]
-    verbs: ["get", "list"]
-  - apiGroups: ["batch"]
-    resources: ["cronjobs"]
-    verbs: ["get", "list"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: guardian-countersigner-image-reader
-  labels:
-    app.kubernetes.io/name: zot-countersigner
-    app.kubernetes.io/part-of: guardian
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: guardian-countersigner-image-reader
-subjects:
-  - kind: ServiceAccount
-    name: countersigner
-    namespace: tenant-guardian
 ---
 apiVersion: external-secrets.io/v1beta1
 kind: ClusterSecretStore
@@ -233,17 +203,15 @@ data:
       "$ZOT" "$(printf 'countersigner:%s' "$ZOT_PASSWORD" | base64 -w0)" \
       > /tmp/docker/config.json
 
-    # The countersigning estate: released first-party images, enumerated
-    # from the digests the cluster's workload specs actually declare (every
-    # release runs here). Preview namespaces are excluded — previews run
-    # unreviewed PR builds, not releases, and the canonical identity never
-    # signs them (Fulcio verify would rightly refuse them forever).
-    # The no-match grep must not kill the run under pipefail: an empty
-    # estate flows through to the loud total=0 exit below instead of dying
-    # here with nothing pushed and nothing logged.
-    refs="$(kubectl get deployments,statefulsets,daemonsets,cronjobs -A -o json \
-      | jq -r '.items[] | select(.metadata.namespace != "tenant-guardian-previews") | .. | .image? // empty' \
-      | { grep -E '^ghcr\.io/guardian-intelligence/[a-z0-9-]+@sha256:[a-f0-9]{64}$' || true; } \
+    # The countersigning estate: the release manifest's pinned refs — the
+    # same mounted definition the release projector enforces against, so
+    # what gets signed and what gets projected cannot drift. Lane structure
+    # is for reviewers and Kargo, only the refs matter here. The no-match
+    # grep must not kill the run under pipefail: an empty manifest flows
+    # through to the loud total=0 exit below instead of dying here with
+    # nothing pushed and nothing logged.
+    refs="$(cat /release-manifest/release-manifest.yaml \
+      | { grep -Eo 'ghcr\.io/guardian-intelligence/[a-z0-9-]+@sha256:[a-f0-9]{64}' || true; } \
       | sort -u)"
 
     total=0 signed=0 unsigned=0 signed_this_run=0
@@ -321,9 +289,9 @@ data:
     push "guardian_countersigner_countersigned_images $signed"
     push "guardian_countersigner_unsigned_images $unsigned"
     push "guardian_countersigner_signed_this_run $signed_this_run"
-    # An empty estate means enumeration broke (RBAC, jq, apiserver) — the
-    # coverage claim would be hollow, so it fails as loudly as unsigned
-    # digests do.
+    # An empty estate means the manifest mount or the ref grammar broke —
+    # the manifest always names releases — so the coverage claim would be
+    # hollow and it fails as loudly as unsigned digests do.
     test "$total" -gt 0 && test "$unsigned" -eq 0
 ---
 apiVersion: batch/v1
@@ -401,9 +369,6 @@ spec:
               image: docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
               command: ["/bin/bash", "/scripts/countersign.sh"]
               env:
-                # kubectl needs a writable cache dir under restricted PSS.
-                - name: HOME
-                  value: /tmp
                 - name: ZOT_PASSWORD
                   valueFrom:
                     secretKeyRef:
@@ -433,6 +398,9 @@ spec:
                   mountPath: /cosign-bin
                 - name: tmp
                   mountPath: /tmp
+                - name: release-manifest
+                  mountPath: /release-manifest
+                  readOnly: true
                 - name: trusted-root
                   mountPath: /trusted-root
                   readOnly: true
@@ -450,6 +418,9 @@ spec:
               emptyDir: {}
             - name: tmp
               emptyDir: {}
+            - name: release-manifest
+              configMap:
+                name: release-manifest
             - name: trusted-root
               configMap:
                 name: sigstore-trusted-root
@@ -469,7 +440,7 @@ spec:
 ---
 # Egress half. The loop talks to OpenBao for the transit key, zot for all
 # registry content (it proxies ghcr for both subjects and their Fulcio
-# signatures), the apiserver for enumeration, vminsert for the heartbeat —
+# signatures), vminsert for the heartbeat —
 # and one internet path, world:443, for the Rekor transparency-log upload
 # each signature makes. world, not an FQDN allowlist: toFQDNs needs the L7
 # DNS proxy, which the chained datapath rules out (the same call zot-egress
@@ -499,14 +470,6 @@ spec:
             - port: "53"
               protocol: UDP
             - port: "53"
-              protocol: TCP
-    - toEntities:
-        - kube-apiserver
-      toPorts:
-        - ports:
-            - port: "6443"
-              protocol: TCP
-            - port: "443"
               protocol: TCP
     - toEndpoints:
         - matchLabels:
@@ -606,7 +569,7 @@ spec:
             summary: released first-party images are staying uncountersigned; the Guardian release-signature lane is not converging.
             description: >-
               guardian_countersigner_unsigned_images has not touched zero in
-              45m. Rollouts create transient unsigned digests that the next
+              45m. Promotions create transient unsigned digests that the next
               run signs; a persistent count means Fulcio verification is
               failing, a first-party repo is missing from the identity map,
               OpenBao transit signing is unavailable, the Rekor
@@ -616,21 +579,22 @@ spec:
               (failed Jobs age out slowly). Check the newest
               zot-countersigner Job logs in tenant-guardian.
         # Coverage claims are hollow if enumeration returns nothing: zero
-        # first-party images means broken RBAC or a broken filter, not an
-        # empty estate — the cluster always runs first-party workloads.
+        # first-party images means the release-manifest mount or the ref
+        # grammar broke, not an empty estate — the manifest always names
+        # releases.
         - alert: GuardianCountersignerEmptyEstate
           expr: max_over_time(guardian_countersigner_first_party_images[45m]) == 0
           labels:
             severity: critical
             guardian.dev/component: registry
           annotations:
-            summary: the countersigner is enumerating zero first-party images; its coverage signal is meaningless.
+            summary: the countersigner is enumerating zero released images; its coverage signal is meaningless.
             description: >-
               guardian_countersigner_first_party_images has been zero for
-              every run in 45m. Workload enumeration is broken (RBAC, the
-              image filter, or the apiserver path) while the unsigned gauge
-              reads a vacuous zero. Check the newest zot-countersigner Job
-              logs in tenant-guardian.
+              every run in 45m. The release-manifest ConfigMap mount or the
+              ref grammar is broken while the unsigned gauge reads a vacuous
+              zero. Check the newest zot-countersigner Job logs in
+              tenant-guardian.
         - alert: GuardianCountersignerSilent
           expr: absent(guardian_countersigner_unsigned_images)
           for: 30m

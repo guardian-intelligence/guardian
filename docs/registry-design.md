@@ -90,12 +90,13 @@ on the pull path while cache misses fall back silently to upstream).
 ## The countersigner (R2)
 
 `zot-countersigner.yaml`: a level-triggered assurance loop that mints
-Guardian's release signature. Its estate is the released first-party
-images, enumerated from the digests the cluster's workload specs declare —
-every release runs here — with preview namespaces excluded (previews run
-unreviewed PR builds, not releases, which the canonical identity never
-signs). Each run,
-per digest, addressed through the mirror (`10.8.0.201:5000/...@digest`): if
+Guardian's release signature. Its estate is the release manifest
+(`release-manifest.yaml`) — the same reviewable definition of the released
+set the release projector enforces against, mounted into both loops, so
+what gets signed and what gets projected cannot drift; the two gauges
+(`guardian_countersigner_first_party_images`,
+`guardian_projector_release_images`) agreeing is the standing witness. Each
+run, per digest, addressed through the mirror (`10.8.0.201:5000/...@digest`): if
 a countersignature already verifies against the transit key's public half —
 transparency-log inclusion included — done; otherwise verify the digest's
 Fulcio signature against its canonical per-workflow identity (pinned
