@@ -161,11 +161,16 @@ data:
         -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
         -H 'Accept: application/vnd.docker.distribution.manifest.v2+json'
     }
+    # The registry is not trusted: every fetched byte is verified against
+    # the digest that named it, manifests included — the chain from the
+    # pinned digest to the extracted binary has no unverified link.
     fetch_manifest "$DIGEST" > root.json
+    echo "${DIGEST#sha256:}  root.json" | sha256sum -c - >/dev/null
     case "$(jq -r .mediaType root.json)" in
       application/vnd.oci.image.index.v1+json|application/vnd.docker.distribution.manifest.list.v2+json)
         arch_digest="$(jq -r '.manifests[] | select(.platform.os=="linux" and .platform.architecture=="amd64") | .digest' root.json | head -1)"
         fetch_manifest "$arch_digest" > manifest.json
+        echo "${arch_digest#sha256:}  manifest.json" | sha256sum -c - >/dev/null
         ;;
       *)
         cp root.json manifest.json
@@ -278,7 +283,10 @@ data:
     push "guardian_countersigner_countersigned_images $signed"
     push "guardian_countersigner_unsigned_images $unsigned"
     push "guardian_countersigner_signed_this_run $signed_this_run"
-    test "$unsigned" -eq 0
+    # An empty estate means enumeration broke (RBAC, jq, apiserver) — the
+    # coverage claim would be hollow, so it fails as loudly as unsigned
+    # digests do.
+    test "$total" -gt 0 && test "$unsigned" -eq 0
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -545,6 +553,22 @@ spec:
               OpenBao transit signing is unavailable, or zot is rejecting the
               push. Check the newest zot-countersigner Job logs in
               tenant-guardian.
+        # Coverage claims are hollow if enumeration returns nothing: zero
+        # first-party images means broken RBAC or a broken filter, not an
+        # empty estate — the cluster always runs first-party workloads.
+        - alert: GuardianCountersignerEmptyEstate
+          expr: max_over_time(guardian_countersigner_first_party_images[45m]) == 0
+          labels:
+            severity: critical
+            guardian.dev/component: registry
+          annotations:
+            summary: the countersigner is enumerating zero first-party images; its coverage signal is meaningless.
+            description: >-
+              guardian_countersigner_first_party_images has been zero for
+              every run in 45m. Workload enumeration is broken (RBAC, the
+              image filter, or the apiserver path) while the unsigned gauge
+              reads a vacuous zero. Check the newest zot-countersigner Job
+              logs in tenant-guardian.
         - alert: GuardianCountersignerSilent
           expr: absent(guardian_countersigner_unsigned_images)
           for: 30m
