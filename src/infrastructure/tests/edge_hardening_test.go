@@ -89,6 +89,32 @@ func TestTalosPublicEdgeIsCloudflareOnly(t *testing.T) {
 	}
 }
 
+func TestRootIngressHasNarrowPodSecurityExemption(t *testing.T) {
+	valuesPath := runfilePath("src/infrastructure/talm/values.yaml")
+	values := readText(t, valuesPath)
+	templatePath := runfilePath("src/infrastructure/talm/templates/_helpers.tpl")
+	template := readText(t, templatePath)
+	runtimePath := runfilePath("src/infrastructure/base/app-patches/ingress-runtimeclass.yaml")
+	runtime := readText(t, runtimePath)
+
+	for _, want := range []string{
+		"exemptRuntimeClasses:",
+		"guardian-system-ingress",
+		"runtimeClasses:",
+		"toYaml .Values.podSecurity.exemptRuntimeClasses",
+	} {
+		assertTextContains(t, values+template, want, "Talos Pod Security configuration")
+	}
+	for _, want := range []string{
+		"kind: RuntimeClass",
+		"name: guardian-system-ingress",
+		"handler: runc",
+	} {
+		assertTextContains(t, runtime, want, runtimePath)
+	}
+	assertTextNotContains(t, template, "namespaces:\n              - tenant-root", templatePath)
+}
+
 func TestRootIngressNetworkPolicyIsCloudflareOnly(t *testing.T) {
 	path := runfilePath("src/infrastructure/base/app-patches/ingress-origin-networkpolicy.yaml")
 	raw := readText(t, path)
