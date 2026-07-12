@@ -47,6 +47,7 @@ var envNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 type options struct {
 	EnvFile        string
+	ValidateOnly   bool
 	DeleteEnvFile  bool
 	Kubectl        string
 	Kubeconfig     string
@@ -81,6 +82,7 @@ type kubeSecret struct {
 func main() {
 	var opts options
 	flag.StringVar(&opts.EnvFile, "env-file", defaultEnvFile, "local env file to import")
+	flag.BoolVar(&opts.ValidateOnly, "validate-only", false, "parse the env file and construct the import plan, then exit without touching the cluster (the reinit ceremony's pre-wipe gate)")
 	flag.BoolVar(&opts.DeleteEnvFile, "delete-env-file", false, "delete env file after a successful import (custody.env normally lives in the restored custody bundle; wipe the bundle instead)")
 	flag.StringVar(&opts.Kubectl, "kubectl", "", "path to kubectl")
 	flag.StringVar(&opts.Kubeconfig, "kubeconfig", "", "kubeconfig for guardian-mgmt")
@@ -121,6 +123,10 @@ func run(ctx context.Context, opts options) error {
 	writes, err := importPlan(env)
 	if err != nil {
 		return err
+	}
+	if opts.ValidateOnly {
+		fmt.Printf("import plan valid: %d kv writes from %s\n", len(writes), opts.EnvFile)
+		return nil
 	}
 
 	runner := kubectlRunner{
@@ -171,7 +177,7 @@ func run(ctx context.Context, opts options) error {
 }
 
 func validateOptions(opts options) error {
-	if opts.Kubectl == "" {
+	if opts.Kubectl == "" && !opts.ValidateOnly {
 		return errors.New("--kubectl is required")
 	}
 	for label, value := range map[string]string{
@@ -558,8 +564,8 @@ func ensureTransitSigningKey(ctx context.Context, client *baoapi.Client, env map
 
 // printTransitKeyFingerprint records the public half for custody cross-checks
 // (the same role the seal-key fingerprint plays): the operator can compare it
-// against the committed verification key and against what a restore drill
-// reproduces, without any private material leaving OpenBao.
+// against prior importer runs and against what a restore drill reproduces,
+// without any private material leaving OpenBao.
 func printTransitKeyFingerprint(ctx context.Context, client *baoapi.Client) error {
 	key, err := client.Logical().ReadWithContext(ctx, "transit/keys/"+transitSigningKey)
 	if err != nil {

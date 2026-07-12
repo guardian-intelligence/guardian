@@ -832,11 +832,14 @@ spec:
                 # create-and-export on first run (openbao_secret_import). This
                 # block grants only the standing capability: sign, plus the key
                 # read cosign needs to fetch the public half.
+                # The wildcard is load-bearing: cosign signs at
+                # transit/sign/guardian-images/sha2-256 (the hash algorithm
+                # rides the path), which an exact-match rule does not cover.
                 request "write_countersigner_policy" {
                   operation = "update"
                   path = "sys/policies/acl/guardian-countersigner"
                   data = {
-                    policy = "path \"transit/sign/guardian-images\" {\n  capabilities = [\"update\"]\n}\n\npath \"transit/keys/guardian-images\" {\n  capabilities = [\"read\"]\n}\n"
+                    policy = "path \"transit/sign/guardian-images\" {\n  capabilities = [\"update\"]\n}\n\npath \"transit/sign/guardian-images/*\" {\n  capabilities = [\"update\"]\n}\n\npath \"transit/keys/guardian-images\" {\n  capabilities = [\"read\"]\n}\n"
                   }
                 }
 

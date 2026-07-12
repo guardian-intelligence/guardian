@@ -279,6 +279,11 @@ printf 'github_promotions_app_private_key_b64=%s\n' \
   "$(base64 -w0 < "$B/keys/github-promotions-app.private-key.pem")" >> "$B/import.env"
 printf 'github_runner_app_prod_private_key_b64=%s\n' \
   "$(base64 -w0 < "$B/keys/postflight-runner.private-key.pem")" >> "$B/import.env"
+# The reinit validates the importer's whole plan against import.env BEFORE
+# the raft wipe; a custody.env missing a newer required value (e.g.
+# zot_countersigner_password) fails fast here — mint it into custody first
+# (aspect infra custody --action env-set, value on stdin) and rebuild
+# import.env.
 
 # 2. the whole reinit, unattended (consumes and deletes import.env)
 aspect infra openbao-reinit
@@ -304,7 +309,9 @@ each gate:
    historical footgun); the `guardian-system` Kustomization is Ready at that
    same revision, so the raft reset boots into the merged self-init block;
    `tenant-guardian` carries `pod-security.kubernetes.io/enforce=privileged`;
-   and the import env file exists and is non-empty. The Pod Security check
+   and the import env file exists, is non-empty, and satisfies the importer's
+   full plan (`--validate-only`), so a missing custody variable surfaces
+   while the raft is still intact. The Pod Security check
    exists because a Cozystack tenant-chart regeneration can SSA-stomp the
    postRenderer that sets the labels
    (`base/app-patches/tenant-guardian-namespace-pod-security.yaml`); with the
