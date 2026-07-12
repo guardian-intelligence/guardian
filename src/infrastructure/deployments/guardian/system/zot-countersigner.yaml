@@ -231,12 +231,15 @@ data:
       > /tmp/docker/config.json
 
     # The countersigning estate: first-party digests the cluster's workload
-    # specs actually declare.
+    # specs actually declare. Preview namespaces are excluded — previews run
+    # unreviewed PR builds the canonical identity never signs (Fulcio verify
+    # would rightly refuse them forever), and they are outside the DR estate
+    # the sovereignty lane exists for.
     # The no-match grep must not kill the run under pipefail: an empty
     # estate flows through to the loud total=0 exit below instead of dying
     # here with nothing pushed and nothing logged.
     refs="$(kubectl get deployments,statefulsets,daemonsets,cronjobs -A -o json \
-      | jq -r '.. | .image? // empty' \
+      | jq -r '.items[] | select(.metadata.namespace != "tenant-guardian-previews") | .. | .image? // empty' \
       | { grep -E '^ghcr\.io/guardian-intelligence/[a-z0-9-]+@sha256:[a-f0-9]{64}$' || true; } \
       | sort -u)"
 
