@@ -127,8 +127,9 @@ called out explicitly.
   discipline to one more artifact.
 - Non-durable drill keys may be created imperatively during DR verification and
   deleted afterward.
-- The first durable key is `guardian-images` (ecdsa-p256), the image
-  countersigner's signing key. Its stakes are lower than an encryption key's —
+- The first durable key is `guardian-images` (ecdsa-p256), the Guardian
+  release-signing key the image countersigner signs with. Its stakes are
+  lower than an encryption key's —
   loss means re-key and re-sign the estate, not data loss — but it follows the
   same custody model because its material must survive reinits (fresh material
   would orphan every existing countersignature). The bootstrap importer owns

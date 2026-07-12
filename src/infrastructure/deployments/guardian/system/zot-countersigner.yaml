@@ -1,11 +1,12 @@
-# The image countersigner: the sovereignty half of the dual-signature model
-# (docs/supply-chain-design.md). Every first-party image digest the cluster's
-# workload specs declare gets a second signature, minted in-cluster with the
-# OpenBao transit key guardian-images and attached to the zot registry as an
-# OCI 1.1 referrer — so the estate verifies with a plain public key, offline,
-# with no GitHub or Sigstore-TUF coupling. Level-triggered assurance loop:
-# each run re-verifies every digest's countersignature and signs only what is
-# missing, after first re-verifying the digest's Fulcio signature against its
+# The image countersigner: mints Guardian's release signature
+# (docs/supply-chain-design.md). Every released first-party image digest gets
+# a second signature, minted in-cluster with the OpenBao transit key
+# guardian-images and attached to the zot registry as an OCI 1.1 referrer —
+# verifiable with a plain public key, offline, with no GitHub or Sigstore-TUF
+# coupling. The released set is enumerated from the cluster's workload specs
+# (every release runs here). Level-triggered assurance loop: each run
+# re-verifies every digest's countersignature and signs only what is missing,
+# after first re-verifying the digest's Fulcio signature against its
 # canonical CI identity.
 apiVersion: v1
 kind: ServiceAccount
@@ -230,11 +231,11 @@ data:
       "$ZOT" "$(printf 'countersigner:%s' "$ZOT_PASSWORD" | base64 -w0)" \
       > /tmp/docker/config.json
 
-    # The countersigning estate: first-party digests the cluster's workload
-    # specs actually declare. Preview namespaces are excluded — previews run
-    # unreviewed PR builds the canonical identity never signs (Fulcio verify
-    # would rightly refuse them forever), and they are outside the DR estate
-    # the sovereignty lane exists for.
+    # The countersigning estate: released first-party images, enumerated
+    # from the digests the cluster's workload specs actually declare (every
+    # release runs here). Preview namespaces are excluded — previews run
+    # unreviewed PR builds, not releases, and the canonical identity never
+    # signs them (Fulcio verify would rightly refuse them forever).
     # The no-match grep must not kill the run under pipefail: an empty
     # estate flows through to the loud total=0 exit below instead of dying
     # here with nothing pushed and nothing logged.
@@ -573,7 +574,7 @@ spec:
             severity: critical
             guardian.dev/component: registry
           annotations:
-            summary: first-party images are staying uncountersigned; the sovereignty signature lane is not converging.
+            summary: released first-party images are staying uncountersigned; the Guardian release-signature lane is not converging.
             description: >-
               guardian_countersigner_unsigned_images has not touched zero in
               45m. Rollouts create transient unsigned digests that the next
