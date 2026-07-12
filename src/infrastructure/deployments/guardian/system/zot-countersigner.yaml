@@ -278,7 +278,12 @@ data:
       # Never countersign what the canonical CI identity did not sign. The
       # pinned trusted root keeps this verify fully offline (zot proxies the
       # signature material from ghcr; no TUF or Rekor egress).
-      if ! "$COSIGN" verify \
+      # --new-bundle-format=false is load-bearing: CI signatures live in
+      # legacy .sig tags, and once a digest carries any bundle referrer
+      # (the Guardian countersignature) cosign's default discovery inspects
+      # only bundles and never finds the CI signature — every re-sign of an
+      # already-countersigned digest would wrongly fail here.
+      if ! "$COSIGN" verify --new-bundle-format=false \
           --certificate-identity "$identity" \
           --certificate-oidc-issuer https://token.actions.githubusercontent.com \
           --trusted-root /trusted-root/sigstore-trusted-root.json \
