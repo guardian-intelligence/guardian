@@ -69,11 +69,14 @@ spec:
       # serves anonymous read-WRITE. The one writer is the countersigner's
       # htpasswd user, scoped to create/update under guardian-intelligence/**
       # (where its signature referrers land); everything else stays
-      # anonymous read-only. The tag condition bounds a leaked credential's
-      # blast radius: signature referrers are by-digest pushes, and digest
-      # content is self-addressing, so denying tag references denies the
-      # only write that could repoint what nodes actually pull (validated
-      # live: referrer signing works under it, tag pushes 403). htpasswd,
+      # anonymous read-only. The write policy's tag condition bounds a
+      # leaked credential's blast radius: signature referrers are by-digest
+      # pushes, and digest content is self-addressing, so denying tag
+      # references denies the only write that could repoint what nodes
+      # actually pull. The read grant is a separate unconditioned entry —
+      # a condition binds to every action in its policy, and the
+      # countersigner must read legacy .sig TAGS to Fulcio-verify (proven
+      # in prod: a single conditioned policy denied those reads). htpasswd,
       # not bearer OIDC, is deliberate: in this zot version enabling ANY
       # bearer auth makes the bearer handler the exclusive authn middleware
       # with no anonymous fallthrough, which would kill anonymous node
@@ -128,7 +131,11 @@ spec:
                   "policies": [
                     {
                       "users": ["countersigner"],
-                      "actions": ["read", "create", "update"],
+                      "actions": ["read"]
+                    },
+                    {
+                      "users": ["countersigner"],
+                      "actions": ["create", "update"],
                       "conditions": [
                         {
                           "expression": "req.referenceType != 'tag'"
