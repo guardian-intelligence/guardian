@@ -1,6 +1,6 @@
-# Keep one ingress controller on each origin node and keep origin HTTP/2
-# disabled; the current ClusterIP+externalIPs service path requires Cluster
-# traffic policy to remain reachable.
+# Keep one ingress controller on each origin node. Host networking makes the
+# Talos ingress firewall authoritative for public HTTP(S); the service remains
+# cluster-internal for in-cluster clients.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -10,6 +10,9 @@ spec:
   values:
     ingress-nginx:
       controller:
+        hostNetwork: true
+        dnsPolicy: ClusterFirstWithHostNet
+        runtimeClassName: guardian-system-ingress
         extraArgs:
           default-ssl-certificate: tenant-root/cloudflare-origin-tls
         affinity:
@@ -59,10 +62,7 @@ spec:
           # client-settable CF-Connecting-IP. $realip_remote_addr is the TCP peer.
           x-guardian-edge-peer-ip: $realip_remote_addr
         service:
-          externalIPs:
-            - 206.223.228.101
-            - 45.250.254.119
-            - 206.223.228.87
+          externalIPs: []
           externalTrafficPolicy: Cluster
         updateStrategy:
           type: RollingUpdate

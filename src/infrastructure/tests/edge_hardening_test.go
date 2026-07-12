@@ -23,8 +23,13 @@ func TestCloudflareOriginTLSConformance(t *testing.T) {
 	ingressPath := runfilePath("src/infrastructure/base/app-patches/ingress-origin-edge.yaml")
 	ingress := readText(t, ingressPath)
 	assertTextContains(t, ingress, "default-ssl-certificate: tenant-root/cloudflare-origin-tls", ingressPath)
-	for _, originIP := range []string{"206.223.228.101", "45.250.254.119", "206.223.228.87"} {
-		assertTextContains(t, ingress, originIP, ingressPath)
+	for _, want := range []string{
+		"hostNetwork: true",
+		"dnsPolicy: ClusterFirstWithHostNet",
+		"runtimeClassName: guardian-system-ingress",
+		"externalIPs: []",
+	} {
+		assertTextContains(t, ingress, want, ingressPath)
 	}
 
 	edgePolicyPath := runfilePath("src/infrastructure/bootstrap/guardian-mgmt-edge-policy/main.tf")
