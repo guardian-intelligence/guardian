@@ -53,6 +53,42 @@ func TestCloudflareOriginPullIsRequired(t *testing.T) {
 	}
 }
 
+func TestPlatformAgentIsReadOnlyWithMaintenanceExceptions(t *testing.T) {
+	path := runfilePath("src/infrastructure/base/cozystack/platform-admins.yaml")
+	raw := readText(t, path)
+
+	admin := raw[strings.Index(raw, "# platform-admin"):strings.Index(raw, "kind: KeycloakRealmGroup")]
+	assertTextContains(t, admin, "- cozystack-cluster-admin", path)
+
+	agentStart := strings.Index(raw, "# platform-agent")
+	agentEnd := strings.Index(raw[agentStart:], "kind: ClusterRole") + agentStart
+	agent := raw[agentStart:agentEnd]
+	assertTextContains(t, agent, "- guardian-platform-agent", path)
+	assertTextNotContains(t, agent, "cozystack-cluster-admin", path)
+
+	maintenanceStart := agentEnd
+	maintenanceEnd := strings.Index(raw[maintenanceStart:], "kind: ClusterRoleBinding") + maintenanceStart
+	maintenance := raw[maintenanceStart:maintenanceEnd]
+	for _, want := range []string{"- pods", "- jobs", "- pods/portforward", "- delete", "- create"} {
+		assertTextContains(t, maintenance, want, path)
+	}
+	for _, forbidden := range []string{"secrets", "pods/exec", "- update", "- patch", "- \"*\""} {
+		assertTextNotContains(t, maintenance, forbidden, path)
+	}
+
+	for _, want := range []string{
+		"name: guardian-platform-agent-view",
+		"name: view",
+		"name: guardian-platform-agent-readonly",
+		`request.userInfo.username.endsWith("#platform-agent")`,
+		`"guardian-platform-agent" in request.userInfo.groups`,
+		`request.subResource == "portforward"`,
+		`request.resource.resource == "jobs"`,
+	} {
+		assertTextContains(t, raw, want, path)
+	}
+}
+
 func TestTalosPublicEdgeIsCloudflareOnly(t *testing.T) {
 	valuesPath := runfilePath("src/infrastructure/talm/values.yaml")
 	values := readText(t, valuesPath)
