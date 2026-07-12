@@ -89,7 +89,9 @@ on the pull path while cache misses fall back silently to upstream).
 ## The countersigner (R2)
 
 `zot-countersigner.yaml`: a level-triggered assurance loop over the
-first-party image digests the cluster's workload specs declare. Each run,
+first-party image digests the cluster's workload specs declare (preview
+namespaces excluded: previews run unreviewed PR builds the canonical
+identity never signs, and they sit outside the DR estate). Each run,
 per digest, addressed through the mirror (`10.8.0.201:5000/...@digest`): if
 a countersignature already verifies against the transit key's public half,
 done; otherwise verify the digest's Fulcio signature against its canonical
