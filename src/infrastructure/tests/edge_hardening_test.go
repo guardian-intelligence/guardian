@@ -85,3 +85,24 @@ func TestTalosPublicEdgeIsCloudflareOnly(t *testing.T) {
 		assertTextContains(t, values+template, want, "Talos operator access")
 	}
 }
+
+func TestRootIngressNetworkPolicyIsCloudflareOnly(t *testing.T) {
+	path := runfilePath("src/infrastructure/base/app-patches/ingress-origin-networkpolicy.yaml")
+	raw := readText(t, path)
+	for _, want := range []string{
+		"name: root-ingress-cloudflare-or-cluster",
+		"app.kubernetes.io/name: ingress-nginx",
+		"app.kubernetes.io/component: controller",
+		"cidr: 173.245.48.0/20",
+		"cidr: 2c0f:f248::/32",
+		"cidr: 10.8.0.0/24",
+		"cidr: 10.244.0.0/16",
+		"cidr: 100.64.0.0/16",
+		"port: 80",
+		"port: 443",
+	} {
+		assertTextContains(t, raw, want, path)
+	}
+	assertTextNotContains(t, raw, "cidr: 0.0.0.0/0", path)
+	assertTextNotContains(t, raw, "cidr: ::/0", path)
+}
