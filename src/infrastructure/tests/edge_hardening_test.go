@@ -77,6 +77,11 @@ func TestPlatformAgentIsReadOnlyWithMaintenanceExceptions(t *testing.T) {
 	}
 
 	for _, want := range []string{
+		"name: guardian-platform-agent-cluster-view",
+		"- nodes",
+		"- persistentvolumes",
+		"- customresourcedefinitions",
+		"- clusterroles",
 		"name: guardian-platform-agent-view",
 		"name: view",
 		"name: guardian-platform-agent-readonly",
