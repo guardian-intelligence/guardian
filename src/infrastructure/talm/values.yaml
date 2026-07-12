@@ -172,6 +172,12 @@ ingressFirewall:
     - "2c0f:f248::/32"
 
 oidcIssuerUrl: "https://keycloak.guardianintelligence.org/realms/cozy"
+# Pod Security Admission exemptions are cluster-wide, so keep them tied to a
+# named RuntimeClass instead of exempting the whole tenant-root namespace.
+# Only the root ingress controller is assigned this class.
+podSecurity:
+  exemptRuntimeClasses:
+    - guardian-system-ingress
 # Lifetime of admin kubeconfigs minted from the cluster CA (talosctl/talm
 # kubeconfig). CN=admin,O=system:masters is un-revocable in RBAC, so expiry
 # is the only revocation there is: with this set, every breakglass mint dies

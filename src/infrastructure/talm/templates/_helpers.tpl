@@ -266,6 +266,12 @@ cluster:
     extraArgs:
       bind-address: 0.0.0.0
   apiServer:
+    admissionControl:
+      - name: PodSecurity
+        configuration:
+          exemptions:
+            runtimeClasses:
+              {{- toYaml .Values.podSecurity.exemptRuntimeClasses | nindent 14 }}
     {{- if and .Values.oidcIssuerUrl (ne .Values.oidcIssuerUrl "") }}
     extraArgs:
       oidc-issuer-url: "{{ .Values.oidcIssuerUrl }}"

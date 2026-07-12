@@ -7,6 +7,7 @@ resources:
   - cozy-multus-cpu-resources.yaml
   - ingress-origin-edge.yaml
   - ingress-origin-networkpolicy.yaml
+  - ingress-runtimeclass.yaml
   - monitoring-alertmanager-auth.yaml
   - monitoring-agents-kube-pod-not-ready.yaml
   - monitoring-agents-vmagent-resources.yaml
