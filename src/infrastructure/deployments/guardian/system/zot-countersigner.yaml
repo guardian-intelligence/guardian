@@ -1,9 +1,11 @@
 # The image countersigner: mints Guardian's release signature
 # (docs/supply-chain-design.md). Every released first-party image digest gets
 # a second signature, minted in-cluster with the OpenBao transit key
-# guardian-images and attached to the zot registry as an OCI 1.1 referrer —
-# verifiable with a plain public key, offline, with no GitHub or Sigstore-TUF
-# coupling. The released set is enumerated from the cluster's workload specs
+# guardian-images, recorded in the public Rekor transparency log, and
+# attached to the zot registry as an OCI 1.1 referrer whose bundle embeds
+# the inclusion proof — verifiable with stock cosign defaults online, or
+# fully offline with the plain public key plus the pinned trusted root for
+# the log check. The released set is enumerated from the cluster's workload specs
 # (every release runs here). Level-triggered assurance loop: each run
 # re-verifies every digest's countersignature and signs only what is missing,
 # after first re-verifying the digest's Fulcio signature against its
@@ -251,7 +253,11 @@ data:
       name="${name%%@*}"
       digest="${ref##*@}"
       zref="$ZOT/guardian-intelligence/$name@$digest"
-      if "$COSIGN" verify --key /tmp/pub.pem --insecure-ignore-tlog=true \
+      # The trusted root also demands the embedded Rekor inclusion proof, so
+      # a countersignature minted before transparency logging fails this
+      # check and gets re-signed — the estate migrates itself.
+      if "$COSIGN" verify --key /tmp/pub.pem \
+          --trusted-root /trusted-root/sigstore-trusted-root.json \
           --allow-http-registry "$zref" >/dev/null 2>&1; then
         signed=$((signed + 1))
         continue
@@ -281,10 +287,16 @@ data:
         unsigned=$((unsigned + 1))
         continue
       fi
+      # The Rekor URL is pinned and the sign-time TUF fetch disabled: the
+      # only internet dependency is the log upload itself, and a failed
+      # upload fails the sign — unsigned stops converging and pages rather
+      # than silently minting unlogged signatures.
       if "$COSIGN" sign --yes --key openbao://guardian-images \
-          --tlog-upload=false --use-signing-config=false \
+          --tlog-upload=true --rekor-url=https://rekor.sigstore.dev \
+          --use-signing-config=false \
           --allow-http-registry "$zref" \
-          && "$COSIGN" verify --key /tmp/pub.pem --insecure-ignore-tlog=true \
+          && "$COSIGN" verify --key /tmp/pub.pem \
+              --trusted-root /trusted-root/sigstore-trusted-root.json \
               --allow-http-registry "$zref" >/dev/null 2>&1; then
         echo "countersigned $zref"
         signed=$((signed + 1))
@@ -450,13 +462,16 @@ spec:
                       audience: openbao
                       expirationSeconds: 600
 ---
-# Egress half. Everything the loop talks to is in-cluster: OpenBao for the
-# transit key, zot for all registry content (it proxies ghcr for both
-# subjects and their Fulcio signatures), the apiserver for enumeration,
-# vminsert for the heartbeat. No general internet egress exists; the
-# host/remote-node/world entities allowance is port-5000-only,
-# belt-and-braces for datapaths where socket-LB does not translate the zot
-# VIP.
+# Egress half. The loop talks to OpenBao for the transit key, zot for all
+# registry content (it proxies ghcr for both subjects and their Fulcio
+# signatures), the apiserver for enumeration, vminsert for the heartbeat —
+# and one internet path, world:443, for the Rekor transparency-log upload
+# each signature makes. world, not an FQDN allowlist: toFQDNs needs the L7
+# DNS proxy, which the chained datapath rules out (the same call zot-egress
+# makes for ghcr), and Rekor's LB IPs rotate too much to CIDR-pin without
+# inviting a silent signing outage. The host/remote-node entities allowance
+# is port-5000-only, belt-and-braces for datapaths where socket-LB does not
+# translate the zot VIP.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -508,10 +523,17 @@ spec:
     - toEntities:
         - host
         - remote-node
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
+    - toEntities:
         - world
       toPorts:
         - ports:
             - port: "5000"
+              protocol: TCP
+            - port: "443"
               protocol: TCP
     - toEndpoints:
         - matchLabels:
@@ -582,7 +604,8 @@ spec:
               45m. Rollouts create transient unsigned digests that the next
               run signs; a persistent count means Fulcio verification is
               failing, a first-party repo is missing from the identity map,
-              OpenBao transit signing is unavailable, or zot is rejecting the
+              OpenBao transit signing is unavailable, the Rekor
+              transparency-log upload is failing, or zot is rejecting the
               push. The run also exits nonzero, so KubeJobFailed fires first
               on the same Job and can linger up to an hour after recovery
               (failed Jobs age out slowly). Check the newest

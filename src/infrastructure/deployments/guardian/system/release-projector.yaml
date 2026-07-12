@@ -1,8 +1,9 @@
 # The release projector: the single writer at the publication boundary
 # (docs/registry-design.md). For every digest in the release manifest it
 # verifies the Guardian countersignature in zot against the committed public
-# key and projects the image — countersignature referrer and legacy .sig
-# digest-tags included — to the public ghcr path, refusing (and paging)
+# key — transparency-log inclusion included, exactly what a consumer's stock
+# `cosign verify --key` checks — and projects the image with its
+# countersignature referrers to the public ghcr path, refusing (and paging)
 # otherwise. Level-triggered assurance loop: each run re-verifies the whole
 # released set at the target and copies only what is missing, so nothing
 # Guardian releases to a public registry ships without a verified Guardian
@@ -152,8 +153,20 @@ data:
       | { grep -Eo 'ghcr\.io/guardian-intelligence/[a-z0-9-]+@sha256:[a-f0-9]{64}' || true; } \
       | sort -u)"
 
-    verify_countersigned() {
+    # Key validity and transparency are separate gates: a signature that
+    # fails the key is tamper and fails the run, while a valid-but-unlogged
+    # one is only the countersigner's re-sign lag. What the boundary
+    # guarantees is verify_released — the check a consumer's stock
+    # `cosign verify --key` performs, transparency-log inclusion included
+    # (the proof is embedded in the bundle; the pinned trusted root keeps
+    # this offline).
+    verify_key() {
       "$COSIGN" verify --key "$PUBKEY" --insecure-ignore-tlog=true \
+        ${2:+--allow-http-registry} "$1" >/dev/null 2>&1
+    }
+    verify_released() {
+      "$COSIGN" verify --key "$PUBKEY" \
+        --trusted-root /trusted-root/sigstore-trusted-root.json \
         ${2:+--allow-http-registry} "$1" >/dev/null 2>&1
     }
 
@@ -177,13 +190,18 @@ data:
       fi
       # The gate: nothing crosses the boundary without a countersignature
       # that verifies against the committed public key.
-      if ! verify_countersigned "$zref" http; then
+      if ! verify_key "$zref" http; then
         echo "countersignature present but INVALID in zot for $zref; refusing to project"
         unprojected=$((unprojected + 1))
         run_failed=1
         continue
       fi
-      if verify_countersigned "$ref"; then
+      if ! verify_released "$zref" http; then
+        echo "countersignature valid but not yet transparency-logged for $zref; awaiting the countersigner's re-sign"
+        unprojected=$((unprojected + 1))
+        continue
+      fi
+      if verify_released "$ref"; then
         projected=$((projected + 1))
         continue
       fi
@@ -199,7 +217,7 @@ data:
         "$REGCTL" image copy "${zref%%@*}@$bundle" "${ref%%@*}@$bundle" \
           || copied=0
       done
-      if [ "$copied" -eq 1 ] && verify_countersigned "$ref"; then
+      if [ "$copied" -eq 1 ] && verify_released "$ref"; then
         echo "projected $ref"
         projected=$((projected + 1))
         projected_this_run=$((projected_this_run + 1))
@@ -345,6 +363,9 @@ spec:
                 - name: release-trust
                   mountPath: /release-trust
                   readOnly: true
+                - name: trusted-root
+                  mountPath: /trusted-root
+                  readOnly: true
           volumes:
             - name: scripts
               configMap:
@@ -359,6 +380,9 @@ spec:
             - name: release-trust
               configMap:
                 name: guardian-images-pub
+            - name: trusted-root
+              configMap:
+                name: sigstore-trusted-root
 ---
 # Egress half. The projector reads zot (all registry content, anonymous) and
 # writes ghcr — the one deliberate internet path in the registry lane, port
@@ -477,8 +501,9 @@ spec:
               guardian_projector_unprojected_images has not touched zero in
               45m. New releases create transient unprojected digests that the
               next run projects; a persistent count means a countersignature
-              is missing or failing verification in zot, ghcr is rejecting
-              the push, or the guardian-projector credential is broken. Runs
+              is missing, unlogged, or failing verification in zot, ghcr is
+              rejecting the push, or the guardian-projector credential is
+              broken. Runs
               exit nonzero only on verification or copy failures — never on
               a release still awaiting its countersignature — so a
               KubeJobFailed on the same Job means tamper, key drift, or a

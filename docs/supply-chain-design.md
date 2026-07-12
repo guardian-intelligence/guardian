@@ -60,7 +60,7 @@ identity can sign more than one artifact family.
 | `company-site` image | `company-site-image` workflow on main | cosign keyless signature + SPDX SBOM attestation (`--type spdxjson`) | ghcr.io, attached to the digest |
 | `analytics-ingest` image | `analytics-ingest-image` workflow on main | cosign keyless signature + SPDX SBOM attestation (`--type spdxjson`) | ghcr.io, attached to the digest |
 | `alert-relay` image | `alert-relay-image` workflow on main | cosign keyless signature + SPDX SBOM attestation (`--type spdxjson`) | ghcr.io, attached to the digest |
-| every released first-party digest | in-cluster countersigner (`docs/registry-design.md`) | Guardian release countersignature (`openbao://guardian-images`, no tlog) as an OCI 1.1 referrer, minted only after the digest's Fulcio signature re-verifies | zot, attached to the digest |
+| every released first-party digest | in-cluster countersigner (`docs/registry-design.md`) | Guardian release countersignature (`openbao://guardian-images`, Rekor-logged, inclusion proof embedded in the bundle) as an OCI 1.1 referrer, minted only after the digest's Fulcio signature re-verifies | zot, attached to the digest; projected to ghcr by the release projector |
 | union images lock (generated) | `images-lock-sign` workflow on main pushes touching any union input (declared lock, manifest trees, the imageset tool) | derives the union with `//src/infrastructure/cmd/imageset`, then `cosign sign-blob --bundle` (embeds Fulcio cert + Rekor proof), pushed with `oras push` so the layer carries a filename title | `ghcr.io/guardian-intelligence/supply-chain:images.lock-<sha256>` (one tag per union hash, no floating tag; package stays private — only authenticated drive builds fetch it, dark bring-up reads it from the drive) |
 
 The artifact inventory itself is split and mostly generated:
@@ -215,9 +215,12 @@ coupling, no public-runner network path), and its signature states
 something keyless cannot — a Guardian-held key, under the custody model,
 vouches for the digest after re-verifying the Fulcio original. That second
 signature is Guardian's release signature: anything Guardian publishes
-verifies against a plain public key, with no GitHub identity or
-Sigstore-TUF freshness coupling. CI's signatures remain the merge-gate
-currency; the countersignature is the one Guardian owns outright.
+verifies with stock cosign against a plain public key, every signing event
+is recorded in the Rekor transparency log, and the bundle embeds the
+inclusion proof — so fully offline verification (key plus the pinned
+trusted root) needs no GitHub identity or Sigstore-TUF freshness coupling.
+CI's signatures remain the merge-gate currency; the countersignature is
+the one Guardian owns outright.
 
 ## Exit path (sovereignty upgrade)
 

@@ -96,24 +96,33 @@ every release runs here — with preview namespaces excluded (previews run
 unreviewed PR builds, not releases, which the canonical identity never
 signs). Each run,
 per digest, addressed through the mirror (`10.8.0.201:5000/...@digest`): if
-a countersignature already verifies against the transit key's public half,
-done; otherwise verify the digest's Fulcio signature against its canonical
-per-workflow identity (pinned Sigstore trusted root, fully offline — zot
-proxies the signature material from ghcr) and only then sign with
-`openbao://guardian-images` and re-verify. Countersignatures attach as OCI
-1.1 referrers, never legacy `.sig` tags — a tag GET re-triggers on-demand
-sync, which would clobber a locally-modified tag, while sync never touches
-local referrers. Everything the loop talks to is in-cluster (OpenBao, zot,
-apiserver, vminsert); its only entities-scoped allowance is TCP/5000 to the
-zot VIP for non-socket-LB datapaths. The write grant itself carries a tag
-condition: signature referrers are by-digest pushes and digest content is
-self-addressing, so a leaked countersigner credential cannot repoint any
-tag nodes pull.
+a countersignature already verifies against the transit key's public half —
+transparency-log inclusion included — done; otherwise verify the digest's
+Fulcio signature against its canonical per-workflow identity (pinned
+Sigstore trusted root, fully offline — zot proxies the signature material
+from ghcr) and only then sign with `openbao://guardian-images`, uploading
+to the Rekor transparency log, and re-verify. Every signing event is
+publicly logged; the bundle embeds the inclusion proof, so verifying it —
+log check included — needs no network, only the public key and the same
+pinned trusted root. Countersignatures attach as OCI 1.1 referrers, never
+legacy `.sig` tags — a tag GET re-triggers on-demand sync, which would
+clobber a locally-modified tag, while sync never touches local referrers.
+The loop's one internet path is the Rekor upload (world:443 — FQDN
+allowlisting needs the L7 DNS proxy the chained datapath rules out);
+everything else it talks to is in-cluster (OpenBao, zot, apiserver,
+vminsert), and a failed upload fails the sign loudly rather than minting
+an unlogged signature. In dark operation signing therefore pauses while
+verification is unaffected — consistent with the scope ruling that the
+dark bundle carries no signing requirement. The write grant itself carries
+a tag condition: signature referrers are by-digest pushes and digest
+content is self-addressing, so a leaked countersigner credential cannot
+repoint any tag nodes pull.
 
 Loudness: `GuardianCountersignerUnsignedImages` pages when the unsigned
 count fails to touch zero across 45 minutes (Fulcio verification failing,
-an unmapped first-party repo, transit signing unavailable, or the write
-path broken), and `GuardianCountersignerSilent` pages on metric absence.
+an unmapped first-party repo, transit signing unavailable, the Rekor
+upload failing, or the write path broken), and
+`GuardianCountersignerSilent` pages on metric absence.
 A new first-party image is unsigned until its identity is added to the
 script's map — the page is the onboarding reminder.
 
@@ -154,8 +163,12 @@ bumps to the same rule). Per digest it verifies the countersignature in
 zot against the committed public key
 (`bootstrap/bundle/guardian-images.pub.pem` — deliberately independent of
 Transit, so publication verification survives an OpenBao outage and a key
-rotation is a reviewed diff here), then copies the subject and exactly the
-countersignature referrers by digest with regctl, refusing otherwise. The
+rotation is a reviewed diff here) together with its transparency-log
+inclusion — exactly the check a consumer's stock `cosign verify --key`
+performs — then copies the subject and exactly the countersignature
+referrers by digest with regctl, refusing otherwise. A valid-but-unlogged
+countersignature only holds its digest back until the countersigner
+re-signs; an invalid one fails the run. The
 copy is deliberately selective twice over: plain image copies — and
 `cosign copy`, which does not carry bundle-format referrers — silently
 drop the countersignature, while a blanket `--referrers` copy would let
