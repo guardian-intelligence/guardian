@@ -127,7 +127,11 @@ spec:
               and can eventually fill the volume and take down the primary;
               this is the standing guard for ElectricSQL consumers.
         - alert: PGReplicationSlotWALRetained
-          expr: max by (namespace, job, pod, slot_name) (cnpg_pg_replication_slots_pg_wal_lsn_diff) > 2e9
+          expr: >-
+            (max by (namespace, job, pod, slot_name)
+            (cnpg_pg_replication_slots_pg_wal_lsn_diff) > 2e9)
+            and on (namespace, pod)
+            (cnpg_pg_replication_in_recovery == 0)
           for: 10m
           labels:
             severity: critical
