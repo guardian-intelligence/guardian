@@ -44,8 +44,8 @@ func TestClickHouseJobManifest(t *testing.T) {
 		"namespace: tenant-root\n",
 		"guardian.dev/component: clickhouse\n",
 		"image: " + clickhouseBenchImage + "\n",
-		"value: chendpoint-clickhouse-guardian\n",
-		"name: clickhouse-guardian-credentials\n                  key: backup\n",
+		"value: chendpoint-clickhouse-analytics\n",
+		"name: clickhouse-analytics-credentials\n                  key: backup\n",
 		"name: HOME\n              value: /tmp\n",
 		"clickhouse-benchmark --host \"$CLICKHOUSE_HOST\"",
 		"--query \"$CLICKHOUSE_QUERY\"",
@@ -115,7 +115,7 @@ func TestNamespaceAndComponentValidation(t *testing.T) {
 
 func baseConfig(component string) dbLoadConfig {
 	name := "guardian-root-" + component + "-load-test"
-	applicationName := "guardian"
+	applicationName := "analytics"
 	if component == "postgres" {
 		applicationName = "postflight-controlplane"
 	}

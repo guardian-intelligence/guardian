@@ -154,7 +154,7 @@ place that knows the URL today.)
   - gamma: https://gamma.guardianintelligence.org/realms/postflight/broker/github/endpoint
   - prod: https://guardianintelligence.org/realms/postflight/broker/github/endpoint
 - API IDL in Buf/Connect + (AIP-193). Declare each operation's policy surface (e.g. required permission, idempotency key, request-size, rate-limit class, audit level) outside of the core event contract as method-options metadata on the RPC contract. We need to be able to fine tune operational characterstics that don't break the schema. See `src/proto/guardian`. `connect.Interceptor`s enforce it fails-closed.
-* VictoriaLogs for logs. VictoriaMetrics for Metrics. TigerBeetle for financial truth and OLTP (planned). ClickHouse for analytics and Otel correlations/traces/spans. CNPG (single writer per stage, fan out read replicas) for system stage and misc.
+* VictoriaLogs for logs. VictoriaMetrics for Metrics. TigerBeetle for financial truth and OLTP (planned). ClickHouse is product infrastructure, not platform infrastructure: the analytics and timeseries DB for the products (Postflight, website), one consolidated instance (`analytics`) — never per-signal or per-purpose instances; load tests run as scratch tables on the real instance and are dropped afterwards. CNPG (single writer per stage, fan out read replicas) for system stage and misc.
 * Bazel owns the build graph and produces bytes using OCI for layout. `cosign`/SLSA proves that it's authentic Guardian Intelligence LLC software.
 * Runtime technology inventory: what runs is the union of the digest-pinned image refs rendered from the manifest trees and `src/infrastructure/bootstrap/bundle/images.declared.lock` (what runs WITHOUT being rendered: bootstrap artifacts, system images, operator-spawned workloads, Go-tool-referenced job images) — the union lock is generated, never edited; `src/tools/` is what we operate with (pinned CLIs: talm, talosctl, flux, kubectl, hauler, openbao, oras, k6); `MODULE.bazel` is what we build with.
 * Flagger used for blue/green deployments for non-platform Keycloak (see `src/infrastructure/deployments/iam/`). Canary releases for non-tier-1 service components.
@@ -208,7 +208,6 @@ src/
         root-monitoring/
         openbao-kms/
         postgres-service/
-        clickhouse-service/
 
       bootstrap/
         guardian-mgmt/                 # ASH bare-metal/OpenTofu root

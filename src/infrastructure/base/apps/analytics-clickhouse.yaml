@@ -15,8 +15,8 @@
 #   before cutover.
 # - Data PVCs land on the DEFAULT StorageClass (DRBD `replicated`): the
 #   chart's storageClass value is dead code in v1.5.0 — neither template
-#   consumes it (verified against the rendered CHI of the drill-target
-#   app). replicated(3x) under ReplicatedMergeTree(2 replicas) = 6x raw
+#   consumes it (verified against the rendered CHI).
+#   replicated(3x) under ReplicatedMergeTree(2 replicas) = 6x raw
 #   NVMe per byte. Fine at today's volume; REVISIT AT SCALE — when upstream
 #   wires storageClass, recreate onto `local` and recopy (data is TTL'd and
 #   replayable).
@@ -130,6 +130,18 @@ spec:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: guardian-analytics
             guardian.dev/role: analytics-client
+      toPorts:
+        - ports:
+            - port: "8123"
+              protocol: TCP
+            - port: "9000"
+              protocol: TCP
+    # Scratch-table load tests (cozystack_db_load): short-lived Jobs in
+    # tenant-root that create their own tables and drop them on exit.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            guardian.dev/drill: db-load
       toPorts:
         - ports:
             - port: "8123"
