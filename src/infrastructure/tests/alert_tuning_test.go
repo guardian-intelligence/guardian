@@ -91,3 +91,71 @@ func TestPGMetricsAbsentRequiresCurrentCNPGInstance(t *testing.T) {
 		}
 	}
 }
+
+func TestEtcdFragmentationRequiresMaterialReclaimableSpace(t *testing.T) {
+	path := runfilePath("src/infrastructure/base/app-patches/monitoring-agents-etcd-alerts.yaml")
+	patch := singleYAMLDoc(t, path)
+	assertNestedString(t, patch, "VMRule", "kind")
+	assertNestedString(t, patch, "alerts-etcd", "metadata", "name")
+	assertNestedString(t, patch, "cozy-monitoring", "metadata", "namespace")
+	assertNestedString(t, patch, "Override", "metadata", "annotations", "kustomize.toolkit.fluxcd.io/ssa")
+
+	groups := sliceValue(nestedValue(t, patch, "spec", "groups"))
+	if len(groups) != 1 {
+		t.Fatalf("spec.groups has %d entries, want the complete etcd group", len(groups))
+	}
+	group := mapValue(groups[0])
+	assertNestedString(t, group, "etcd", "name")
+
+	wantAlerts := map[string]int{
+		"etcdMembersDown":                    1,
+		"etcdInsufficientMembers":            1,
+		"etcdNoLeader":                       1,
+		"etcdHighNumberOfLeaderChanges":      1,
+		"etcdHighNumberOfFailedGRPCRequests": 2,
+		"etcdGRPCRequestsSlow":               1,
+		"etcdMemberCommunicationSlow":        1,
+		"etcdHighNumberOfFailedProposals":    1,
+		"etcdHighFsyncDurations":             2,
+		"etcdHighCommitDurations":            1,
+		"etcdDatabaseQuotaLowSpace":          1,
+		"etcdExcessiveDatabaseGrowth":        1,
+		"etcdDatabaseHighFragmentationRatio": 1,
+	}
+	var fragmentationRule map[string]interface{}
+	for _, raw := range sliceValue(nestedValue(t, group, "rules")) {
+		rule := mapValue(raw)
+		alert, ok := rule["alert"].(string)
+		if !ok || wantAlerts[alert] == 0 {
+			t.Fatalf("unexpected etcd alert %q", alert)
+		}
+		wantAlerts[alert]--
+		if alert == "etcdDatabaseHighFragmentationRatio" {
+			fragmentationRule = rule
+		}
+	}
+	for alert, remaining := range wantAlerts {
+		if remaining != 0 {
+			t.Fatalf("alert %s appears %d fewer times than required", alert, remaining)
+		}
+	}
+	if fragmentationRule == nil {
+		t.Fatal("etcdDatabaseHighFragmentationRatio rule is missing")
+	}
+	assertNestedString(t, fragmentationRule, "10m", "for")
+	expr := stringValue(fragmentationRule["expr"])
+	for _, want := range []string{
+		"etcd_mvcc_db_total_size_in_use_in_bytes",
+		"etcd_mvcc_db_total_size_in_bytes",
+		"etcd_server_quota_backend_bytes",
+		"< 0.5",
+		"> 0.05",
+	} {
+		if !strings.Contains(expr, want) {
+			t.Fatalf("etcdDatabaseHighFragmentationRatio expression is missing %q: %s", want, expr)
+		}
+	}
+	if strings.Contains(expr, "> 104857600") {
+		t.Fatalf("etcdDatabaseHighFragmentationRatio retains the fixed 100 MiB floor: %s", expr)
+	}
+}

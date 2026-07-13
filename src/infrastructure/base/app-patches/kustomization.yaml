@@ -9,6 +9,7 @@ resources:
   - ingress-origin-networkpolicy.yaml
   - ingress-runtimeclass.yaml
   - monitoring-alertmanager-auth.yaml
+  - monitoring-agents-etcd-alerts.yaml
   - monitoring-agents-kube-client-certificate-expiration.yaml
   - monitoring-agents-kube-pod-not-ready.yaml
   - monitoring-agents-vmagent-resources.yaml
