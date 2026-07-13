@@ -206,16 +206,16 @@
     "binaries": [
       {
         "kind": "archive",
-        "url": "https://github.com/cilium/hubble/releases/download/v1.18.0/hubble-linux-amd64.tar.gz",
-        "sha256": "9f1b8167f1beef3656b96def19a75478582579e8d7702307cc0c0c5330eef969",
+        "url": "https://github.com/cilium/hubble/releases/download/v1.19.4/hubble-linux-amd64.tar.gz",
+        "sha256": "c7c37a5f27ed2ae2d5495c6ddbecc61cebbb841508e77af3c131e96f005ed247",
         "os": "linux",
         "cpu": "x86_64",
         "file": "hubble"
       },
       {
         "kind": "archive",
-        "url": "https://github.com/cilium/hubble/releases/download/v1.18.0/hubble-darwin-arm64.tar.gz",
-        "sha256": "3f54e576cde7cc9313fd991bf27637cac2f2abcc6853e48cdc29dc38c64bed71",
+        "url": "https://github.com/cilium/hubble/releases/download/v1.19.4/hubble-darwin-arm64.tar.gz",
+        "sha256": "7634532a50bae27e83dfaa8a2a8b1971024cd1e778aa15dc59e288daa3af4978",
         "os": "macos",
         "cpu": "arm64",
         "file": "hubble"
