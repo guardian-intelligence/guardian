@@ -5,7 +5,7 @@ The analytics/observability ClickHouse runs as the Cozystack tenant app
 2026-07-05 from a raw Altinity CHI in `guardian-analytics`. Consumers
 (ingest, OTel collector, DDL job) stay in `guardian-analytics` and cross
 the namespace boundary under the Cilium allowlists in
-`base/apps/analytics-clickhouse.yaml`. Schema/DDL remain repo-owned
+`deployments/analytics/system/clickhouse.yaml`. Schema/DDL remain repo-owned
 (`deployments/analytics/system/*-configmap.yaml`, cluster name
 `clickhouse`, 2 replicas). Compression re-verified on the chart's 24.9
 server: 16.67 B/event vs the 16.71 baseline

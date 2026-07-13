@@ -132,8 +132,12 @@ spec:
     - name: guardian-mgmt-storage
   # This slice owns root tenant apps, networking, OpenBao policy, and the Flux
   # entrypoint. The Cozystack platform package and storage classes are separate
-  # apply-only slices, so this inventory can now be pruned safely.
-  prune: true
+  # apply-only slices, so this inventory can normally be pruned safely.
+  # TEMPORARILY apply-only while the analytics ClickHouse app CR hands off to
+  # the guardian-analytics Kustomization: pruning here could race the adoption
+  # and delete the app out from under it. Restore prune: true once
+  # guardian-analytics owns the object (follow-up PR).
+  prune: false
   # Do not wait here: this Kustomization owns the dependent product/tenant
   # Kustomizations, and those children depend on this parent.
   wait: false
@@ -772,12 +776,13 @@ spec:
   prune: true
   wait: false
 ---
-# Analytics ingest plane: the Connect ingest service, OTel collector, DDL
-# job, and ESO wiring for guardian-analytics. ClickHouse itself is the
-# tenant-root Cozystack app and is not managed (or health-gated) here — the
-# stock flux-resources alerts cover its HelmRelease. Depends only on storage
-# classes and the base slice; OpenBao wiring for this namespace arrives with
-# the ingest service's secrets.
+# Analytics plane: the ClickHouse store (a Cozystack app CR that must live in
+# tenant-root — see clickhouse.yaml), the Connect ingest service, OTel
+# collector, DDL job, and ESO wiring for guardian-analytics. The ClickHouse
+# app is not health-gated here (Flux cannot assess the aggregated apps API
+# natively) — the stock flux-resources alerts cover its HelmRelease. Depends
+# on storage classes and the base slice; OpenBao wiring for this namespace
+# arrives with the ingest service's secrets.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
