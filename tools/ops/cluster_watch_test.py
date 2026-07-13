@@ -124,6 +124,40 @@ class ClusterWatchStatusTest(unittest.TestCase):
             {item["reason"] for item in findings},
         )
 
+    def test_observed_revision_stays_satisfied_after_main_advances(self):
+        kustomization = resource(
+            "guardian-system",
+            spec={"sourceRef": {"name": "guardian"}},
+            status={
+                "conditions": [condition("Ready", "False", "Progressing")],
+                "lastAppliedRevision": "main@sha1:requested",
+            },
+        )
+        objects = {
+            "kustomizations.kustomize.toolkit.fluxcd.io": [kustomization],
+            "helmreleases.helm.toolkit.fluxcd.io": [],
+            "stages.kargo.akuity.io": [],
+            "warehouses.kargo.akuity.io": [],
+            "promotions.kargo.akuity.io": [],
+            "canaries.flagger.app": [],
+        }
+        reached = set()
+
+        first = cluster_watch.collect_status(
+            "requested", NOW, fake_get(objects), reached,
+        )
+        self.assertEqual({"Progressing"}, {item["reason"] for item in first})
+        self.assertEqual({"test/guardian-system"}, reached)
+
+        kustomization["status"] = {
+            "conditions": [condition("Ready", "True")],
+            "lastAppliedRevision": "main@sha1:newer",
+        }
+        second = cluster_watch.collect_status(
+            "requested", NOW, fake_get(objects), reached,
+        )
+        self.assertEqual([], second)
+
     def test_old_failed_promotion_does_not_block_forever(self):
         promotion = resource(
             "prod.failed",

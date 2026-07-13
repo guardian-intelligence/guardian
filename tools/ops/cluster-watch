@@ -196,8 +196,11 @@ def timestamp_age_seconds(value, now):
     return (now - created).total_seconds()
 
 
-def collect_status(revision="", now=None, get_json=kubectl_json):
+def collect_status(revision="", now=None, get_json=kubectl_json,
+                   reached_revisions=None):
     now = now or datetime.datetime.now(datetime.timezone.utc)
+    if reached_revisions is None:
+        reached_revisions = set()
     findings = []
 
     flux_kinds = [
@@ -206,22 +209,28 @@ def collect_status(revision="", now=None, get_json=kubectl_json):
     ]
     for resource, kind in flux_kinds:
         for obj in get_json(["get", resource, "-A"]).get("items", []):
+            name = object_name(obj)
+            source = obj.get("spec", {}).get("sourceRef", {})
+            watches_revision = (
+                revision and kind == "Kustomization" and
+                source.get("name") == "guardian"
+            )
+            applied = obj.get("status", {}).get("lastAppliedRevision", "")
+            if watches_revision and revision in applied:
+                reached_revisions.add(name)
+
             status, reason, message = status_condition(obj, "Ready")
             if status != "True":
                 findings.append(finding(kind, obj, status, reason, message))
                 continue
-            source = obj.get("spec", {}).get("sourceRef", {})
-            if (revision and kind == "Kustomization" and
-                    source.get("name") == "guardian"):
-                applied = obj.get("status", {}).get("lastAppliedRevision", "")
-                if revision not in applied:
-                    findings.append(finding(
-                        kind,
-                        obj,
-                        "Unknown",
-                        "RevisionPending",
-                        f"last applied {applied or 'revision unavailable'}",
-                    ))
+            if watches_revision and name not in reached_revisions:
+                findings.append(finding(
+                    kind,
+                    obj,
+                    "Unknown",
+                    "RevisionPending",
+                    f"last applied {applied or 'revision unavailable'}",
+                ))
 
     stages = get_json(["get", "stages.kargo.akuity.io", "-A"]).get("items", [])
     for obj in stages:
@@ -294,9 +303,12 @@ def render_findings(findings, on):
 def watch_status(args):
     on = colour_on(sys.stdout)
     stable = 0
+    reached_revisions = set()
     try:
         while True:
-            findings = collect_status(args.revision)
+            findings = collect_status(
+                args.revision, reached_revisions=reached_revisions,
+            )
             stable = stable + 1 if not findings else 0
             if on:
                 sys.stdout.write("\033[2J\033[H")
