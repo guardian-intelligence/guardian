@@ -24,6 +24,8 @@ var defaultKustomizations = []string{
 	"guardian-mgmt-base",
 	"guardian-mgmt-admission",
 	"guardian-mgmt-app-patches",
+	"guardian-vlogs-hardening-prerequisites",
+	"guardian-vlogs-hardening",
 	"guardian-system",
 	"guardian-mgmt-dns-controller",
 	"guardian-company-prod",

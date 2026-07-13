@@ -201,6 +201,108 @@ spec:
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
+  name: guardian-vlogs-hardening-prerequisites
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/base/vlogs-hardening-prerequisites
+  sourceRef:
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      # Required, not optional: Flux skips substitution entirely when the
+      # variable map is empty, which would leave the ${GUARDIAN_SOURCE_*}
+      # placeholders literal and fail the CRD enum. The bootstrap overlays
+      # always create guardian-source; a missing one should fail loudly.
+      - kind: ConfigMap
+        name: guardian-source
+  dependsOn:
+    - name: guardian-mgmt-base
+    - name: guardian-mgmt-admission
+  prune: true
+  wait: false
+  timeout: 10m
+  healthChecks:
+    - apiVersion: operator.victoriametrics.com/v1
+      kind: VLCluster
+      name: generic
+      namespace: tenant-root
+  healthCheckExprs:
+    - apiVersion: operator.victoriametrics.com/v1
+      kind: VLCluster
+      current: >-
+        has(status) && has(status.observedGeneration) &&
+        status.observedGeneration == metadata.generation &&
+        has(status.updateStatus) &&
+        status.updateStatus == 'operational'
+      failed: >-
+        has(status) &&
+        ((has(status.updateStatus) && status.updateStatus == 'failed') ||
+        (has(status.conditions) &&
+        status.conditions.exists(c, c.type == 'Degraded' && c.status == 'True')))
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: guardian-vlogs-hardening
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/base/vlogs-hardening
+  sourceRef:
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      # Required, not optional: Flux skips substitution entirely when the
+      # variable map is empty, which would leave the ${GUARDIAN_SOURCE_*}
+      # placeholders literal and fail the CRD enum. The bootstrap overlays
+      # always create guardian-source; a missing one should fail loudly.
+      - kind: ConfigMap
+        name: guardian-source
+  serviceAccountName: guardian-vlogs-patcher
+  dependsOn:
+    - name: guardian-vlogs-hardening-prerequisites
+  prune: false
+  wait: false
+  timeout: 15m
+  healthChecks:
+    - apiVersion: operator.victoriametrics.com/v1
+      kind: VLCluster
+      name: generic
+      namespace: tenant-root
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: vlinsert-generic
+      namespace: tenant-root
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: vlselect-generic
+      namespace: tenant-root
+    - apiVersion: apps/v1
+      kind: StatefulSet
+      name: vlstorage-generic
+      namespace: tenant-root
+  healthCheckExprs:
+    - apiVersion: operator.victoriametrics.com/v1
+      kind: VLCluster
+      current: >-
+        has(status) && has(status.observedGeneration) &&
+        status.observedGeneration == metadata.generation &&
+        has(status.updateStatus) &&
+        status.updateStatus == 'operational'
+      failed: >-
+        has(status) &&
+        ((has(status.updateStatus) && status.updateStatus == 'failed') ||
+        (has(status.conditions) &&
+        status.conditions.exists(c, c.type == 'Degraded' && c.status == 'True')))
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
   name: guardian-system
   namespace: cozy-fluxcd
 spec:

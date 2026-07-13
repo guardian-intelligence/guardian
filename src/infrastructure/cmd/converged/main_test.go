@@ -6,6 +6,21 @@ import (
 	"testing"
 )
 
+func TestDefaultKustomizationsIncludeVLogsHardeningSlices(t *testing.T) {
+	positions := make(map[string]int, len(defaultKustomizations))
+	for i, name := range defaultKustomizations {
+		positions[name] = i
+	}
+	prerequisites, hasPrerequisites := positions["guardian-vlogs-hardening-prerequisites"]
+	hardening, hasHardening := positions["guardian-vlogs-hardening"]
+	if !hasPrerequisites || !hasHardening {
+		t.Fatalf("default convergence set is missing VictoriaLogs hardening slices: %#v", defaultKustomizations)
+	}
+	if prerequisites >= hardening {
+		t.Fatalf("VictoriaLogs hardening prerequisites position %d must precede hardening position %d", prerequisites, hardening)
+	}
+}
+
 func TestValidateFluxKustomizations(t *testing.T) {
 	raw := `{"items":[
 		{"metadata":{"name":"guardian-system"},"status":{"lastAppliedRevision":"main@sha1:abc123","conditions":[{"type":"Ready","status":"True","reason":"ReconciliationSucceeded"}]}}

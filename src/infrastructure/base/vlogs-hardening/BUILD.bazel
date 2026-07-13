@@ -1,0 +1,8 @@
+filegroup(
+    name = "manifests",
+    srcs = [
+        "kustomization.yaml",
+        "vlcluster.yaml",
+    ],
+    visibility = ["//visibility:public"],
+)
