@@ -24,6 +24,8 @@ spec:
       guardian.dev/stage: prod
   template:
     metadata:
+      annotations:
+        guardian.dev/rollout-controller: flagger
       labels:
         app.kubernetes.io/name: company-site
         app.kubernetes.io/part-of: guardian
