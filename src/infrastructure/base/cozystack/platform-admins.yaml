@@ -225,6 +225,32 @@ rules:
       - get
       - list
       - watch
+  - apiGroups:
+      - flagger.app
+    resources:
+      - alertproviders
+      - canaries
+      - metrictemplates
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - kargo.akuity.io
+    resources:
+      - clusterconfigs
+      - clusterpromotiontasks
+      - freights
+      - projectconfigs
+      - projects
+      - promotions
+      - promotiontasks
+      - stages
+      - warehouses
+    verbs:
+      - get
+      - list
+      - watch
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole

@@ -27,6 +27,7 @@ bazel_dep(name = "rules_oci", version = "2.3.0")
 bazel_dep(name = "rules_pkg", version = "1.2.0")
 bazel_dep(name = "aspect_rules_js", version = "3.2.2")
 bazel_dep(name = "rules_nodejs", version = "6.7.4")
+bazel_dep(name = "rules_python", version = "1.7.0")
 bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "rules_multitool", version = "1.11.1")
 
@@ -36,6 +37,13 @@ bazel_dep(name = "rules_multitool", version = "1.11.1")
 multitool = use_extension("@rules_multitool//multitool:extension.bzl", "multitool")
 multitool.hub(lockfile = "//src/tools:multitool.lock.json")
 use_repo(multitool, "multitool")
+
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.toolchain(
+    is_default = True,
+    python_version = "3.12.12",
+)
+use_repo(python, "python_3_12_12")
 
 include("//src/tools/restic:restic.MODULE.bazel")
 include("//src/tools/ruby:ruby.MODULE.bazel")

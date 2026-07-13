@@ -82,6 +82,11 @@ func TestPlatformAgentIsReadOnlyWithMaintenanceExceptions(t *testing.T) {
 		"- persistentvolumes",
 		"- customresourcedefinitions",
 		"- clusterroles",
+		"- flagger.app",
+		"- canaries",
+		"- kargo.akuity.io",
+		"- promotions",
+		"- warehouses",
 		"name: guardian-platform-agent-view",
 		"name: view",
 		"name: guardian-platform-agent-readonly",
@@ -92,6 +97,36 @@ func TestPlatformAgentIsReadOnlyWithMaintenanceExceptions(t *testing.T) {
 		`request.resource.resource == "jobs"`,
 	} {
 		assertTextContains(t, raw, want, path)
+	}
+
+	analyticsPath := runfilePath("src/infrastructure/deployments/analytics/system/secrets.yaml")
+	analyticsRaw := readText(t, analyticsPath)
+	roleStart := strings.Index(analyticsRaw, "kind: Role\n")
+	bindingStart := strings.Index(analyticsRaw, "kind: RoleBinding\n")
+	if roleStart < 0 || bindingStart < 0 || bindingStart <= roleStart {
+		t.Fatalf("platform-agent analytics Role and RoleBinding not found in %s", analyticsPath)
+	}
+	analyticsRole := analyticsRaw[roleStart:bindingStart]
+	for _, want := range []string{
+		"name: guardian-platform-agent-analytics-read",
+		"namespace: guardian-analytics",
+		"- secrets",
+		"resourceNames:",
+		"- analytics-ch-ingest",
+		"- get",
+	} {
+		assertTextContains(t, analyticsRole, want, analyticsPath)
+	}
+	for _, forbidden := range []string{"- list", "- watch", "- create", "- update", "- patch", "- delete"} {
+		assertTextNotContains(t, analyticsRole, forbidden, analyticsPath)
+	}
+	analyticsBinding := analyticsRaw[bindingStart:]
+	for _, want := range []string{
+		"name: guardian-platform-agent-analytics-read",
+		"kind: Group",
+		"name: guardian-platform-agent",
+	} {
+		assertTextContains(t, analyticsBinding, want, analyticsPath)
 	}
 }
 
