@@ -201,7 +201,7 @@ Almost every secret change is the routine path. Reinit is rare.
 The scoped namespaces that already exist (no reinit needed to write into them):
 `external-dns`, `company-site`, `guardian-iam`, `guardian-products`,
 `guardian-analytics`, `postflight-runner`, `tenant-root`, `tenant-guardian`,
-and `tenant-guardian-{beta,gamma,prod}`. The `operator/` subtree is the
+and `tenant-guardian-prod`. The `operator/` subtree is the
 exception: custody reference material the importer writes but no standing
 role can read. Confirm the live list against the self-init block's
 reader/writer pairs (pinned by `TestOpenBaoOperationsInventoryConformance`).
@@ -215,8 +215,8 @@ config. One PR, then one scoped write:
    namespace, reading `guardian/guardian-mgmt/<namespace>/<integration>`, and
    extend the importer plan in `openbao_secret_import/main.go` (+ its test) so
    DR re-seeds it. `TestOpenBaoSecretScopeConformance` rejects any remoteRef
-   outside the namespace's own subtree — a beta manifest cannot reference a
-   prod path.
+   outside the namespace's own subtree — one namespace's manifest cannot
+   reference another's path.
 2. **Custody** — `aspect infra custody --action restore`, append the value to
    `/dev/shm/guardian-custody/custody.env` (never echo it), `--action create`,
    `--action wipe`.
@@ -232,11 +232,11 @@ config. One PR, then one scoped write:
    export BAO_ADDR=https://127.0.0.1:18200 BAO_CACERT=$PWD/openbao-ca.crt \
      BAO_TLS_SERVER_NAME=guardian-openbao-active.tenant-guardian.svc
    BAO_TOKEN=$(bao write -field=token auth/kubernetes/login \
-     role=guardian-writer-tenant-guardian-beta \
-     jwt="$(kubectl -n tenant-guardian-beta create token secrets-writer \
+     role=guardian-writer-tenant-guardian-prod \
+     jwt="$(kubectl -n tenant-guardian-prod create token secrets-writer \
        --audience=openbao --duration=10m)")
    BAO_TOKEN=$BAO_TOKEN bao kv put \
-     kv/guardian/guardian-mgmt/tenant-guardian-beta/keycloak/github-oauth \
+     kv/guardian/guardian-mgmt/tenant-guardian-prod/keycloak/github-oauth \
      GITHUB_CLIENT_SECRET=-   # value on stdin
    ```
 
@@ -248,7 +248,7 @@ Crib from these PRs (each is a routine add, no reinit):
 
 - `d34fb5a` — OpenBao-back the Kargo git credential: importer-plan entry +
   ESO wiring for a new secret in an existing namespace.
-- `2a44ca6` — Postflight IAM beta: per-stage secret resolving into env vars,
+- `2a44ca6` — Postflight IAM: per-namespace secret resolving into env vars,
   `substitute: disabled` where `${...}` must survive Flux envsubst.
 
 Watch out for:

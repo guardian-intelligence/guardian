@@ -5,13 +5,12 @@
 # changes the site (only canonically-signed digests exist behind that tag, so
 # discovery and the provenance gate agree by construction).
 #
-# beta auto-promotes on new Freight; the promotion PR still passes branch
+# prod auto-promotes on new Freight; the promotion PR still passes branch
 # protection + CI, and the deploy is then gated in-cluster by Flagger's
-# blue/green rollout. gamma/prod Stages (deliberate promotion after checking
-# the upstream stage's Canary verdict) land with their stage manifests — same
-# policy shape as guardian-iam's ProjectConfig.
+# blue/green rollout before user traffic reaches the new version. Feature
+# blast radius is the flag layer's job, not a pre-prod environment's.
 #
-# The Stages (promotion steps that open the pin-bump PR) land with the git
+# The Stage (promotion steps that open the pin-bump PR) lands with the git
 # credential wiring — a Warehouse needs no credentials against the public
 # package, so this half is verifiable on its own.
 apiVersion: kargo.akuity.io/v1alpha1
@@ -27,7 +26,7 @@ metadata:
 spec:
   promotionPolicies:
     - stageSelector:
-        name: beta
+        name: prod
       autoPromotionEnabled: true
 ---
 apiVersion: kargo.akuity.io/v1alpha1

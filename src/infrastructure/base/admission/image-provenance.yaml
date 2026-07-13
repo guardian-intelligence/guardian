@@ -98,8 +98,6 @@ spec:
           operator: In
           values:
             - tenant-guardian
-            - tenant-guardian-beta
-            - tenant-guardian-gamma
             - tenant-guardian-prod
             - tenant-guardian-previews
             - guardian-analytics

@@ -1,10 +1,9 @@
-# Synthetic probe targets and their alert rules. Two probe classes per
-# stage, every 15s, through blackbox-exporter.yaml:
+# Synthetic probe targets and their alert rules. Two probe classes,
+# every 15s, through blackbox-exporter.yaml:
 #
 #   probe_class=service — the in-cluster apex Service. Isolates the cluster
-#     path; this is what Flagger's analysis metrics and the Kargo promotion
-#     gates read (a Cloudflare blip should not fail a deploy the cluster
-#     served correctly).
+#     path; this is what Flagger's analysis metrics read (a Cloudflare blip
+#     should not fail a deploy the cluster served correctly).
 #   probe_class=edge — the public hostname, hairpinning out through
 #     Cloudflare and back in via the LB to the origin. Whole-path truth:
 #     DNS, edge TLS, LB health, origin ingress, pod. This is the layer that
@@ -18,116 +17,6 @@
 # probe_success, probe_duration_seconds, and
 # probe_http_duration_seconds{phase=resolve|connect|tls|processing|transfer}
 # — phase=processing is time-to-first-byte.
-apiVersion: operator.victoriametrics.com/v1beta1
-kind: VMProbe
-metadata:
-  name: company-site-beta-service
-  namespace: tenant-root
-  labels:
-    app.kubernetes.io/part-of: guardian
-    guardian.dev/component: alerting
-spec:
-  jobName: probe/company-site/beta/service
-  interval: 15s
-  module: http_2xx
-  vmProberSpec:
-    url: blackbox-exporter.tenant-root.svc:9115
-    path: /probe
-  targets:
-    staticConfig:
-      targets:
-        - http://company-site.tenant-guardian-beta.svc/healthz
-        - http://company-site.tenant-guardian-beta.svc/
-        - http://company-site.tenant-guardian-beta.svc/letters
-        - http://company-site.tenant-guardian-beta.svc/letters/dear-shovon
-      labels:
-        probe_class: service
-        probe_namespace: tenant-guardian-beta
-        guardian_surface: company-site
----
-apiVersion: operator.victoriametrics.com/v1beta1
-kind: VMProbe
-metadata:
-  name: company-site-beta-edge
-  namespace: tenant-root
-  labels:
-    app.kubernetes.io/part-of: guardian
-    guardian.dev/component: alerting
-spec:
-  jobName: probe/company-site/beta/edge
-  interval: 15s
-  module: http_2xx
-  vmProberSpec:
-    url: blackbox-exporter.tenant-root.svc:9115
-    path: /probe
-  targets:
-    staticConfig:
-      targets:
-        - https://beta.guardianintelligence.org/healthz
-        - https://beta.guardianintelligence.org/
-        - https://beta.guardianintelligence.org/letters
-        - https://beta.guardianintelligence.org/letters/dear-shovon
-        - https://beta.guardianintelligence.org/electric/v1/shape?table=status_heartbeat&offset=-1
-      labels:
-        probe_class: edge
-        probe_namespace: tenant-guardian-beta
-        guardian_surface: company-site
----
-apiVersion: operator.victoriametrics.com/v1beta1
-kind: VMProbe
-metadata:
-  name: company-site-gamma-service
-  namespace: tenant-root
-  labels:
-    app.kubernetes.io/part-of: guardian
-    guardian.dev/component: alerting
-spec:
-  jobName: probe/company-site/gamma/service
-  interval: 15s
-  module: http_2xx
-  vmProberSpec:
-    url: blackbox-exporter.tenant-root.svc:9115
-    path: /probe
-  targets:
-    staticConfig:
-      targets:
-        - http://company-site.tenant-guardian-gamma.svc/healthz
-        - http://company-site.tenant-guardian-gamma.svc/
-        - http://company-site.tenant-guardian-gamma.svc/letters
-        - http://company-site.tenant-guardian-gamma.svc/letters/dear-shovon
-      labels:
-        probe_class: service
-        probe_namespace: tenant-guardian-gamma
-        guardian_surface: company-site
----
-apiVersion: operator.victoriametrics.com/v1beta1
-kind: VMProbe
-metadata:
-  name: company-site-gamma-edge
-  namespace: tenant-root
-  labels:
-    app.kubernetes.io/part-of: guardian
-    guardian.dev/component: alerting
-spec:
-  jobName: probe/company-site/gamma/edge
-  interval: 15s
-  module: http_2xx
-  vmProberSpec:
-    url: blackbox-exporter.tenant-root.svc:9115
-    path: /probe
-  targets:
-    staticConfig:
-      targets:
-        - https://gamma.guardianintelligence.org/healthz
-        - https://gamma.guardianintelligence.org/
-        - https://gamma.guardianintelligence.org/letters
-        - https://gamma.guardianintelligence.org/letters/dear-shovon
-        - https://gamma.guardianintelligence.org/electric/v1/shape?table=status_heartbeat&offset=-1
-      labels:
-        probe_class: edge
-        probe_namespace: tenant-guardian-gamma
-        guardian_surface: company-site
----
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMProbe
 metadata:
@@ -218,7 +107,7 @@ spec:
               service passes, the problem is between the user and the
               ingress (DNS, Cloudflare, LB, origin ingress).
         - alert: ProbeAbsent
-          # 27 targets x 15s: total silence means the exporter, vmagent, or
+          # 9 targets x 15s: total silence means the exporter, vmagent, or
           # the scrape path broke — not that traffic is slow.
           expr: absent(probe_success)
           for: 10m

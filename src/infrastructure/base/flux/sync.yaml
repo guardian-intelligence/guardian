@@ -547,129 +547,12 @@ spec:
   wait: true
   timeout: 10m
 ---
-# company-site beta stage. Depends on guardian-flagger for the Canary CRD +
-# controller, same as guardian-iam-beta below.
-apiVersion: kustomize.toolkit.fluxcd.io/v1
-kind: Kustomization
-metadata:
-  name: guardian-company-beta
-  namespace: cozy-fluxcd
-spec:
-  interval: 10m
-  retryInterval: 1m
-  path: ./src/infrastructure/deployments/company/beta
-  sourceRef:
-    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
-    name: ${GUARDIAN_SOURCE_NAME:=guardian}
-  postBuild:
-    substituteFrom:
-      # Required, not optional — see guardian-company-prod above.
-      - kind: ConfigMap
-        name: guardian-source
-  dependsOn:
-    - name: guardian-system
-    - name: guardian-flagger
-  prune: true
-  wait: true
-  timeout: 10m
----
-# company-site gamma stage. See guardian-company-beta above.
-apiVersion: kustomize.toolkit.fluxcd.io/v1
-kind: Kustomization
-metadata:
-  name: guardian-company-gamma
-  namespace: cozy-fluxcd
-spec:
-  interval: 10m
-  retryInterval: 1m
-  path: ./src/infrastructure/deployments/company/gamma
-  sourceRef:
-    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
-    name: ${GUARDIAN_SOURCE_NAME:=guardian}
-  postBuild:
-    substituteFrom:
-      # Required, not optional — see guardian-company-prod above.
-      - kind: ConfigMap
-        name: guardian-source
-  dependsOn:
-    - name: guardian-system
-    - name: guardian-flagger
-  prune: true
-  wait: true
-  timeout: 10m
----
-# Postflight IAM beta stage: Keycloak + stage Postgres + ESO wiring + Flagger
+# Postflight IAM prod stage: Keycloak + stage Postgres + ESO wiring + Flagger
 # Canary. Depends on guardian-system (OpenBao roles + kv paths from
 # self-init) and guardian-flagger (Canary CRD + controller). The
 # ExternalSecret healthCheckExprs make the wait real: the stage only reports
 # Ready once ESO can actually read this namespace's OpenBao subtree (kstatus
 # treats ESO CRs as trivially Current otherwise).
-apiVersion: kustomize.toolkit.fluxcd.io/v1
-kind: Kustomization
-metadata:
-  name: guardian-iam-beta
-  namespace: cozy-fluxcd
-spec:
-  interval: 10m
-  retryInterval: 1m
-  path: ./src/infrastructure/deployments/iam/beta
-  sourceRef:
-    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
-    name: ${GUARDIAN_SOURCE_NAME:=guardian}
-  postBuild:
-    substituteFrom:
-      # Required, not optional — see guardian-company-prod above.
-      - kind: ConfigMap
-        name: guardian-source
-  dependsOn:
-    - name: guardian-system
-    - name: guardian-flagger
-  prune: true
-  wait: true
-  timeout: 15m
-  healthCheckExprs:
-    - apiVersion: external-secrets.io/v1beta1
-      kind: ClusterSecretStore
-      current: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'True')
-      failed: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'False')
-    - apiVersion: external-secrets.io/v1beta1
-      kind: ExternalSecret
-      current: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'True')
-      failed: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'False')
----
-apiVersion: kustomize.toolkit.fluxcd.io/v1
-kind: Kustomization
-metadata:
-  name: guardian-iam-gamma
-  namespace: cozy-fluxcd
-spec:
-  interval: 10m
-  retryInterval: 1m
-  path: ./src/infrastructure/deployments/iam/gamma
-  sourceRef:
-    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
-    name: ${GUARDIAN_SOURCE_NAME:=guardian}
-  postBuild:
-    substituteFrom:
-      # Required, not optional — see guardian-company-prod above.
-      - kind: ConfigMap
-        name: guardian-source
-  dependsOn:
-    - name: guardian-system
-    - name: guardian-flagger
-  prune: true
-  wait: true
-  timeout: 15m
-  healthCheckExprs:
-    - apiVersion: external-secrets.io/v1beta1
-      kind: ClusterSecretStore
-      current: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'True')
-      failed: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'False')
-    - apiVersion: external-secrets.io/v1beta1
-      kind: ExternalSecret
-      current: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'True')
-      failed: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'False')
----
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -703,53 +586,10 @@ spec:
       current: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'True')
       failed: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'False')
 ---
-# Shared product Postgres beta stage. The Cozystack app CR is served through
-# the aggregated apps API; Flux cannot health-check it natively. Runtime
-# readiness is watched operationally and by postgres-health alerts.
-apiVersion: kustomize.toolkit.fluxcd.io/v1
-kind: Kustomization
-metadata:
-  name: guardian-products-beta
-  namespace: cozy-fluxcd
-spec:
-  interval: 10m
-  retryInterval: 1m
-  path: ./src/infrastructure/deployments/products/beta
-  sourceRef:
-    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
-    name: ${GUARDIAN_SOURCE_NAME:=guardian}
-  postBuild:
-    substituteFrom:
-      # Required, not optional — see guardian-company-prod above.
-      - kind: ConfigMap
-        name: guardian-source
-  dependsOn:
-    - name: guardian-system
-  prune: true
-  wait: false
----
-apiVersion: kustomize.toolkit.fluxcd.io/v1
-kind: Kustomization
-metadata:
-  name: guardian-products-gamma
-  namespace: cozy-fluxcd
-spec:
-  interval: 10m
-  retryInterval: 1m
-  path: ./src/infrastructure/deployments/products/gamma
-  sourceRef:
-    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
-    name: ${GUARDIAN_SOURCE_NAME:=guardian}
-  postBuild:
-    substituteFrom:
-      # Required, not optional — see guardian-company-prod above.
-      - kind: ConfigMap
-        name: guardian-source
-  dependsOn:
-    - name: guardian-system
-  prune: true
-  wait: false
----
+# Shared product Postgres + Electric, prod stage. The Cozystack app CR is
+# served through the aggregated apps API; Flux cannot health-check it
+# natively. Runtime readiness is watched operationally and by
+# postgres-health alerts.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:

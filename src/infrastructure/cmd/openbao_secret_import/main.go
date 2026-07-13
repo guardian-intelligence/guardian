@@ -409,16 +409,15 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 	}
 
 	// Per-stage Keycloak secrets are optional: unlike the writes above, an
-	// env file may legitimately carry only a subset of stages (e.g.
-	// beta+gamma before a prod OAuth App exists). Everything about the
-	// GitHub OAuth Apps other than the client secret (app name, settings
-	// id, homepage/callback URL, realm, idp alias, client ID) is not
-	// sensitive and is checked into
+	// env file may legitimately carry only a subset of stages. Everything
+	// about the GitHub OAuth Apps other than the client secret (app name,
+	// settings id, homepage/callback URL, realm, idp alias, client ID) is
+	// not sensitive and is checked into
 	// src/infrastructure/deployments/iam/github-oauth-apps.yaml instead.
 	// admin-bootstrap and canary-user are guardian-generated credentials;
 	// they live in custody so a DR re-seed restores values consistent with
 	// the stage's surviving (or re-imported) Keycloak database.
-	for _, stage := range []string{"beta", "gamma", "prod"} {
+	for _, stage := range []string{"prod"} {
 		prefix := strings.ToUpper(stage)
 		base := fmt.Sprintf("kv/data/guardian/guardian-mgmt/tenant-guardian-%s/keycloak", stage)
 		if secret := strings.TrimSpace(env[prefix+"_GITHUB_CLIENT_SECRET"]); secret != "" {

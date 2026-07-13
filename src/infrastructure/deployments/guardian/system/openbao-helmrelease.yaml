@@ -357,8 +357,8 @@ spec:
                 # for routine value loads and rotations (SA secrets-writer in
                 # that namespace — minting its token requires cluster-admin
                 # custody access, and the token can only write that
-                # namespace's subtree, so a beta credential can never land on
-                # a prod path).
+                # namespace's subtree, so one namespace's credential can
+                # never land on another's path).
 
                 request "write_reader_policy_external_dns" {
                   operation = "update"
@@ -439,90 +439,6 @@ spec:
                     bound_service_account_namespaces = ["company-site"]
                     audience = "openbao"
                     token_policies = ["guardian-writer-company-site"]
-                    token_ttl = "600"
-                    token_max_ttl = "600"
-                  }
-                }
-
-                request "write_reader_policy_tenant_guardian_beta" {
-                  operation = "update"
-                  path = "sys/policies/acl/guardian-reader-tenant-guardian-beta"
-                  data = {
-                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-guardian-beta/*\" {\n  capabilities = [\"read\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/tenant-guardian-beta/*\" {\n  capabilities = [\"read\"]\n}\n"
-                  }
-                }
-
-                request "write_reader_role_tenant_guardian_beta" {
-                  operation = "update"
-                  path = "auth/kubernetes/role/guardian-reader-tenant-guardian-beta"
-                  data = {
-                    bound_service_account_names = ["secrets-reader"]
-                    bound_service_account_namespaces = ["tenant-guardian-beta"]
-                    audience = "openbao"
-                    token_policies = ["guardian-reader-tenant-guardian-beta"]
-                    token_ttl = "3600"
-                    token_max_ttl = "3600"
-                  }
-                }
-
-                request "write_writer_policy_tenant_guardian_beta" {
-                  operation = "update"
-                  path = "sys/policies/acl/guardian-writer-tenant-guardian-beta"
-                  data = {
-                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-guardian-beta/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/tenant-guardian-beta/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n"
-                  }
-                }
-
-                request "write_writer_role_tenant_guardian_beta" {
-                  operation = "update"
-                  path = "auth/kubernetes/role/guardian-writer-tenant-guardian-beta"
-                  data = {
-                    bound_service_account_names = ["secrets-writer"]
-                    bound_service_account_namespaces = ["tenant-guardian-beta"]
-                    audience = "openbao"
-                    token_policies = ["guardian-writer-tenant-guardian-beta"]
-                    token_ttl = "600"
-                    token_max_ttl = "600"
-                  }
-                }
-
-                request "write_reader_policy_tenant_guardian_gamma" {
-                  operation = "update"
-                  path = "sys/policies/acl/guardian-reader-tenant-guardian-gamma"
-                  data = {
-                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-guardian-gamma/*\" {\n  capabilities = [\"read\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/tenant-guardian-gamma/*\" {\n  capabilities = [\"read\"]\n}\n"
-                  }
-                }
-
-                request "write_reader_role_tenant_guardian_gamma" {
-                  operation = "update"
-                  path = "auth/kubernetes/role/guardian-reader-tenant-guardian-gamma"
-                  data = {
-                    bound_service_account_names = ["secrets-reader"]
-                    bound_service_account_namespaces = ["tenant-guardian-gamma"]
-                    audience = "openbao"
-                    token_policies = ["guardian-reader-tenant-guardian-gamma"]
-                    token_ttl = "3600"
-                    token_max_ttl = "3600"
-                  }
-                }
-
-                request "write_writer_policy_tenant_guardian_gamma" {
-                  operation = "update"
-                  path = "sys/policies/acl/guardian-writer-tenant-guardian-gamma"
-                  data = {
-                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-guardian-gamma/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/tenant-guardian-gamma/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n"
-                  }
-                }
-
-                request "write_writer_role_tenant_guardian_gamma" {
-                  operation = "update"
-                  path = "auth/kubernetes/role/guardian-writer-tenant-guardian-gamma"
-                  data = {
-                    bound_service_account_names = ["secrets-writer"]
-                    bound_service_account_namespaces = ["tenant-guardian-gamma"]
-                    audience = "openbao"
-                    token_policies = ["guardian-writer-tenant-guardian-gamma"]
                     token_ttl = "600"
                     token_max_ttl = "600"
                   }

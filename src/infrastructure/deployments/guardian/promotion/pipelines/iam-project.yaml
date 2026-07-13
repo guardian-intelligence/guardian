@@ -6,26 +6,14 @@
 # amd64 manifest digest, matching the repo's image lock convention
 # (containerStatuses.imageID), not the multi-arch index digest.
 #
-# beta auto-promotes on new Freight; the promotion PR still passes branch
-# protection + CI, and the deploy is then gated in-cluster by the Flagger
-# blue/green login gate. gamma/prod Stages (deliberate promotion after
-# checking the upstream stage's Canary verdict) land with their stage
-# manifests.
+# No autoPromotionEnabled entry: IAM is mission-critical, so promotion to
+# prod is always a deliberate act (human or agent). The promotion PR still
+# passes branch protection + CI, and the deploy is then gated in-cluster by
+# the Flagger blue/green login gate.
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Project
 metadata:
   name: guardian-iam
----
-apiVersion: kargo.akuity.io/v1alpha1
-kind: ProjectConfig
-metadata:
-  name: guardian-iam
-  namespace: guardian-iam
-spec:
-  promotionPolicies:
-    - stageSelector:
-        name: beta
-      autoPromotionEnabled: true
 ---
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Warehouse
