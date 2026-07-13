@@ -86,8 +86,6 @@ func TestOpenBaoStaticSealTLSAndStorageConformance(t *testing.T) {
 		`token_policies = ["guardian-reader-company-site"]`,
 		`kv/data/guardian/guardian-mgmt/company-site/*`,
 		`kv/data/guardian/guardian-mgmt/guardian-iam/*`,
-		`kv/data/guardian/guardian-mgmt/tenant-guardian-beta/*`,
-		`kv/data/guardian/guardian-mgmt/tenant-guardian-gamma/*`,
 		`kv/data/guardian/guardian-mgmt/tenant-guardian-prod/*`,
 		`request "write_secret_importer_policy"`,
 		`request "write_secret_importer_role"`,
@@ -297,8 +295,6 @@ func TestOpenBaoOperationsInventoryConformance(t *testing.T) {
 		"guardian_products",
 		"tenant_root",
 		"tenant_guardian",
-		"tenant_guardian_beta",
-		"tenant_guardian_gamma",
 		"tenant_guardian_prod",
 		"postflight_runner",
 	} {
@@ -399,15 +395,13 @@ func TestFluxSourceParameterizationConformance(t *testing.T) {
 func TestFluxSubstitutionSafetyConformance(t *testing.T) {
 	// Paths reconciled by a Kustomization that declares postBuild
 	// substitution (guardian-mgmt-base applies all of base/, guardian-system
-	// applies deployments/guardian/system, guardian-iam-beta applies
-	// deployments/iam/beta).
+	// applies deployments/guardian/system, guardian-iam-prod applies
+	// deployments/iam/prod).
 	roots := []string{
 		"src/infrastructure/base",
 		"src/infrastructure/deployments/alerting",
 		"src/infrastructure/deployments/analytics/system",
 		"src/infrastructure/deployments/guardian/system",
-		"src/infrastructure/deployments/iam/beta",
-		"src/infrastructure/deployments/iam/gamma",
 		"src/infrastructure/deployments/iam/prod",
 		"src/infrastructure/deployments/products",
 		"src/infrastructure/deployments/postflight-runner",

@@ -193,27 +193,27 @@ func TestImportPlanRejectsBadGithubKey(t *testing.T) {
 
 func TestImportPlanOptionalKeycloakStages(t *testing.T) {
 	env := testImportEnv()
-	env["BETA_GITHUB_CLIENT_SECRET"] = "beta-secret"
-	env["PROD_GITHUB_CLIENT_SECRET"] = "prod-secret"
-	// gamma deliberately absent: an env file may carry only a subset of stages.
-
+	// PROD_GITHUB_CLIENT_SECRET deliberately absent: an env file may carry
+	// only a subset of the optional Keycloak secrets.
 	plan, err := importPlan(env)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 12 {
-		t.Fatalf("plan length = %d, want 12 (10 base + beta + prod)", len(plan))
+	if len(plan) != 10 {
+		t.Fatalf("plan length = %d, want 10 (base only)", len(plan))
+	}
+
+	env["PROD_GITHUB_CLIENT_SECRET"] = "prod-secret"
+	plan, err = importPlan(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan) != 11 {
+		t.Fatalf("plan length = %d, want 11 (10 base + prod)", len(plan))
 	}
 	byPath := map[string]secretWrite{}
 	for _, w := range plan {
 		byPath[w.APIPath] = w
-	}
-	beta, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-guardian-beta/keycloak/github-oauth"]
-	if !ok {
-		t.Fatal("beta keycloak write missing")
-	}
-	if beta.Data["GITHUB_CLIENT_SECRET"] != "beta-secret" {
-		t.Fatalf("beta GITHUB_CLIENT_SECRET = %q", beta.Data["GITHUB_CLIENT_SECRET"])
 	}
 	prod, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-guardian-prod/keycloak/github-oauth"]
 	if !ok {
@@ -222,17 +222,14 @@ func TestImportPlanOptionalKeycloakStages(t *testing.T) {
 	if prod.Data["GITHUB_CLIENT_SECRET"] != "prod-secret" {
 		t.Fatalf("prod GITHUB_CLIENT_SECRET = %q", prod.Data["GITHUB_CLIENT_SECRET"])
 	}
-	if _, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-guardian-gamma/keycloak/github-oauth"]; ok {
-		t.Fatal("gamma keycloak write present despite no gamma secret in env")
-	}
 }
 
 func TestImportPlanKeycloakGeneratedCredentials(t *testing.T) {
 	env := testImportEnv()
-	env["BETA_KEYCLOAK_ADMIN_BOOTSTRAP_USERNAME"] = "guardian-admin"
-	env["BETA_KEYCLOAK_ADMIN_BOOTSTRAP_PASSWORD"] = "admin-pass"
-	env["BETA_KEYCLOAK_CANARY_USER_USERNAME"] = "canary"
-	env["BETA_KEYCLOAK_CANARY_USER_PASSWORD"] = "canary-pass"
+	env["PROD_KEYCLOAK_ADMIN_BOOTSTRAP_USERNAME"] = "guardian-admin"
+	env["PROD_KEYCLOAK_ADMIN_BOOTSTRAP_PASSWORD"] = "admin-pass"
+	env["PROD_KEYCLOAK_CANARY_USER_USERNAME"] = "canary"
+	env["PROD_KEYCLOAK_CANARY_USER_PASSWORD"] = "canary-pass"
 
 	plan, err := importPlan(env)
 	if err != nil {
@@ -242,16 +239,16 @@ func TestImportPlanKeycloakGeneratedCredentials(t *testing.T) {
 	for _, w := range plan {
 		byPath[w.APIPath] = w
 	}
-	admin, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-guardian-beta/keycloak/admin-bootstrap"]
+	admin, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-guardian-prod/keycloak/admin-bootstrap"]
 	if !ok {
-		t.Fatal("beta admin-bootstrap write missing")
+		t.Fatal("prod admin-bootstrap write missing")
 	}
 	if admin.Data["username"] != "guardian-admin" || admin.Data["password"] != "admin-pass" {
 		t.Fatalf("admin-bootstrap data = %#v", admin.Data)
 	}
-	canary, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-guardian-beta/keycloak/canary-user"]
+	canary, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-guardian-prod/keycloak/canary-user"]
 	if !ok {
-		t.Fatal("beta canary-user write missing")
+		t.Fatal("prod canary-user write missing")
 	}
 	if canary.Data["password"] != "canary-pass" {
 		t.Fatalf("canary-user data = %#v", canary.Data)
@@ -259,7 +256,7 @@ func TestImportPlanKeycloakGeneratedCredentials(t *testing.T) {
 
 	// A username without its password (or vice versa) is a custody file bug,
 	// not a partial import.
-	env["GAMMA_KEYCLOAK_CANARY_USER_USERNAME"] = "canary"
+	delete(env, "PROD_KEYCLOAK_CANARY_USER_PASSWORD")
 	if _, err := importPlan(env); err == nil {
 		t.Fatal("importPlan accepted a username without its password")
 	}

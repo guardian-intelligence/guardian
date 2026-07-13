@@ -164,8 +164,6 @@ spec:
             - key: k8s:io.kubernetes.pod.namespace
               operator: In
               values:
-                - tenant-guardian-beta
-                - tenant-guardian-gamma
                 - tenant-guardian-prod
             - key: k8s:app.kubernetes.io/name
               operator: In
@@ -196,7 +194,6 @@ spec:
 # apiserver — not tenant-root — and tenant-root's generated egress only
 # admits tenant-root-labeled destinations (same depth-2 ancestor-label gap
 # the root ingress compensates for in company/*/root-ingress-networkpolicy.yaml).
-# One clusterwide pair covers all three stages.
 apiVersion: cilium.io/v2
 kind: CiliumClusterwideNetworkPolicy
 metadata:
@@ -210,8 +207,6 @@ spec:
       - key: k8s:io.kubernetes.pod.namespace
         operator: In
         values:
-          - tenant-guardian-beta
-          - tenant-guardian-gamma
           - tenant-guardian-prod
       - key: k8s:app.kubernetes.io/name
         operator: In

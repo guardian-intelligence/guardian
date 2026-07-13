@@ -52,8 +52,6 @@ spec:
             - key: k8s:io.kubernetes.pod.namespace
               operator: In
               values:
-                - tenant-guardian-beta
-                - tenant-guardian-gamma
                 - tenant-guardian-prod
             - key: k8s:app.kubernetes.io/name
               operator: In
@@ -101,11 +99,8 @@ spec:
             - port: "8080"
               protocol: TCP
 ---
-# Ingress half of the metric-analysis path: this was missing entirely until
-# now — the egress rule above (toEndpoints vmselect, port 8481) has existed
-# since Flagger was first stood up, but no Canary referenced a
-# MetricTemplate until company/{beta,gamma,prod}/canary.yaml's
-# analysis.metrics, so the gap was never exercised. Same reason as the alert-relay pair above:
+# Ingress half of the metric-analysis path (company/prod/canary.yaml's
+# analysis.metrics). Same reason as the alert-relay pair above:
 # tenant-root's generated isolation does not admit other namespaces.
 apiVersion: cilium.io/v2
 kind: CiliumClusterwideNetworkPolicy

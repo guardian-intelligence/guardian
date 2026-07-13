@@ -18,16 +18,12 @@ A surface earns "load-tested" by composing these, not by running one of them:
    (`src/infrastructure/deployments/iam/login-canary/login-canary.js`, three
    Keycloak flows), or blackbox_exporter probes on a 15s scrape for HTTP
    surfaces (`deployments/alerting/{blackbox-exporter,synthetic-probes}.yaml`
-   — two classes per stage: in-cluster Service and public-edge hairpin, with
+   — two classes: in-cluster Service and public-edge hairpin, with
    per-phase timing incl. TTFB).
 2. **Deploy-time stress gate** — a k6 arrival-rate run against the *canary
    color* before traffic shifts, thresholds-as-code, wired as a Flagger
    `pre-rollout` webhook. Landing with company-site as first consumer; see
    "Next slice" below.
-3. **Promotion-time assertion** — a Kargo `http` step that reads the source
-   stage's recorded metrics and refuses to promote freight whose stress run
-   did not pass. Live today for company-site:
-   `deployments/guardian/promotion/pipelines/company-stage-gamma.yaml`.
 
 ## Hard rules (enforced by CI)
 
@@ -130,7 +126,7 @@ Point the pinned k6 binary at an in-cluster Service through a port-forward — t
 same script the CronJob runs, minus Kubernetes:
 
 ```
-kubectl port-forward -n tenant-guardian-beta svc/<service> 8080:80
+kubectl port-forward -n tenant-guardian-prod svc/<service> 8080:80
 bazel run @multitool//tools/k6:workspace_root -- run \
   --tag run_source=local --tag surface=<name> --tag scenario=stress \
   -e TARGET_URL=http://127.0.0.1:8080 \
@@ -141,22 +137,12 @@ Local numbers are valid only as before/after A/B on the same machine when you
 are optimizing throughput. Absolute capacity comes from the in-cluster run,
 where CPU, the network path, and replica count are real.
 
-## Gates: where load results block promotion
+## Gates: where load results block a deploy
 
-Execution and assertion are split on purpose:
-
-- **Kargo asserts, it does not execute.** Kargo's native steps cannot run pods,
-  which is why we do not use its `spec.verification`/AnalysisTemplate machinery.
-  A Kargo `http` step queries `vmselect` for the *source stage's* recorded
-  series and fails the promotion if a threshold is unmet. Live pattern:
-  `company-stage-gamma.yaml` checks the service-class `probe_success == 1`
-  and `probe_duration_seconds` p95 ≤ 1.0s for the beta namespace before
-  opening the promotion PR. A stress gate adds an error-rate-under-load and a
-  TPS-floor check in the same shape, keyed on the freight's image digest so the
-  gate proves *this* build was stress-passed.
-- **Flagger executes.** The stress run itself is a Flagger `pre-rollout`
-  webhook against the canary color; a breached threshold fails the webhook and
-  Flagger rolls back and pages, hands-off.
+- **Flagger executes and asserts.** The stress run is a Flagger `pre-rollout`
+  webhook against the canary color in prod; a breached threshold fails the
+  webhook and Flagger rolls back and pages, hands-off. Traffic never shifts
+  to a build that failed its stress run.
 
 ## Next slice (not yet built — do not document as if it exists)
 
@@ -165,8 +151,8 @@ Landing with company-site as the first real consumer:
 - A shared k6 profile library (`smoke` / `stress` / `headroom` arrival-rate
   scenarios + the tag conventions above) so a surface writes only its endpoints,
   request mix, target RPS, and SLOs.
-- The company-site pre-rollout stress webhook + its Kargo TPS-floor gate.
-- A `headroom` CronJob (beta/gamma) that ramps to the latency knee and records
+- The company-site pre-rollout stress webhook.
+- A `headroom` CronJob (off-peak, prod) that ramps to the latency knee and records
   max-sustainable-TPS as a baseline, with a `VMRule` on drift.
 - A conformance test requiring every HTTP surface to carry a stress gate, with a
   Warn+Audit VAP as the out-of-band-apply backstop.

@@ -18,17 +18,9 @@ releases:
     prod:
       image: ghcr.io/guardian-intelligence/analytics-ingest@sha256:720bd0a0d191955bbbe3a229b266d1fdd8f7b26bb5daa1b88fe043dc11ae7899
   cockpit:
-    beta:
-      image: ghcr.io/guardian-intelligence/cockpit@sha256:0589274466069f6c2e6df0f67ab38f7ac1288887d71d73085f80bce2b72e0ca2
-    gamma:
-      image: ghcr.io/guardian-intelligence/cockpit@sha256:0589274466069f6c2e6df0f67ab38f7ac1288887d71d73085f80bce2b72e0ca2
     prod:
       image: ghcr.io/guardian-intelligence/cockpit@sha256:0589274466069f6c2e6df0f67ab38f7ac1288887d71d73085f80bce2b72e0ca2
   company-site:
-    beta:
-      image: ghcr.io/guardian-intelligence/company-site@sha256:f79a61e1b793acf536622b6c1bb30ad203376fa8cf87f2d9f58ed65484275e20
-    gamma:
-      image: ghcr.io/guardian-intelligence/company-site@sha256:3e00b062f2e44ca39d912036bd8d683074d69bf85ccb44ced73d46bf92ca3b69
     prod:
       image: ghcr.io/guardian-intelligence/company-site@sha256:3e00b062f2e44ca39d912036bd8d683074d69bf85ccb44ced73d46bf92ca3b69
   postflight-controlplane:

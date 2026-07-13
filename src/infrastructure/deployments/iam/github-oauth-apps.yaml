@@ -2,8 +2,7 @@
 # Keycloak "Sign in with GitHub" identity provider. Client secrets are NOT
 # here — they live in OpenBao at
 # guardian/guardian-mgmt/tenant-guardian-<stage>/keycloak/github-oauth,
-# projected into each stage's namespace by an ExternalSecret (added alongside
-# the rest of iam/<stage>/ once that stage's workload lands). Client IDs are
+# projected into each stage's namespace by an ExternalSecret. Client IDs are
 # not secret (they're visible in the browser's OAuth authorize redirect) and
 # are recorded here directly.
 #
@@ -11,22 +10,6 @@
 # (settings id 3656712), repointed at the guardianintelligence.org callback —
 # it is not a fresh app.
 stages:
-  beta:
-    githubAppName: "Sign in with Guardian (Beta)"
-    githubAppSettingsID: 3708383
-    homepageURL: https://beta.guardianintelligence.org
-    callbackURL: https://beta.guardianintelligence.org/realms/postflight/broker/github/endpoint
-    keycloakRealm: postflight
-    keycloakIdpAlias: github
-    githubClientID: Ov23liQCzyzCZ0Vr8SCf
-  gamma:
-    githubAppName: "Sign in with Guardian (Gamma)"
-    githubAppSettingsID: 3708386
-    homepageURL: https://gamma.guardianintelligence.org
-    callbackURL: https://gamma.guardianintelligence.org/realms/postflight/broker/github/endpoint
-    keycloakRealm: postflight
-    keycloakIdpAlias: github
-    githubClientID: Ov23liNtFL1mlWORb946
   prod:
     githubAppName: "Sign in with Guardian"
     githubAppSettingsID: 3656712

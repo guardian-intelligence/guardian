@@ -45,7 +45,7 @@ func TestCloudflareOriginTLSConformance(t *testing.T) {
 }
 
 func TestCloudflareOriginPullIsRequired(t *testing.T) {
-	for _, stage := range []string{"beta", "gamma", "prod"} {
+	for _, stage := range []string{"prod"} {
 		path := runfilePath(fmt.Sprintf("src/infrastructure/deployments/company/%s/web.yaml", stage))
 		raw := readText(t, path)
 		assertTextContains(t, raw, `nginx.ingress.kubernetes.io/auth-tls-verify-client: "on"`, path)

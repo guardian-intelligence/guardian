@@ -6,8 +6,6 @@
     - dashboard.guardianintelligence.org
     - grafana.guardianintelligence.org
     - keycloak.guardianintelligence.org
-    - beta.guardianintelligence.org
-    - gamma.guardianintelligence.org
   labels:
     guardian_record_type: A
     guardian_stage: root
