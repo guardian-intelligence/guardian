@@ -19,19 +19,3 @@ spec:
   replicas: 3
   whitelist: []
   cloudflareProxy: true
----
-apiVersion: apps.cozystack.io/v1alpha1
-kind: ClickHouse
-metadata:
-  name: guardian
-  namespace: tenant-root
-spec:
-  replicas: 3
-  shards: 1
-  size: 20Gi
-  storageClass: replicated
-  logStorageSize: 5Gi
-  clickhouseKeeper:
-    enabled: true
-    replicas: 3
-    size: 2Gi
