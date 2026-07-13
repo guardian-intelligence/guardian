@@ -3,14 +3,16 @@
 
 Two read-only views:
 
-  cluster-watch                Live Flux convergence status read straight from
-                               the cluster (needs KUBECONFIG). Refreshes every
-                               few seconds and shows exactly the Kustomizations
-                               and HelmReleases that are not Ready, with reason
-                               and message. This is the fast view for
-                               babysitting a PR: a BuildFailed or
-                               HealthCheckFailed shows in seconds, long before
-                               it would ever page.
+  cluster-watch                Live Flux, Kargo, and Flagger rollout status
+                               read straight from the cluster (needs
+                               KUBECONFIG). Refreshes every few seconds and
+                               shows exactly what is not converged.
+
+  cluster-watch --until-ready  Exit after the requested Git revision and all
+                               rollout resources remain healthy for three
+                               consecutive samples. Use --revision after a
+                               merge so an already-green old revision cannot
+                               satisfy the check.
 
   cluster-watch --stream       Tail the alert stream the cluster publishes to
                                ntfy (VMRule -> Alertmanager -> Alerta ->
@@ -32,6 +34,7 @@ Env:
 """
 
 import argparse
+import datetime
 import json
 import os
 import re
@@ -164,40 +167,159 @@ def kubectl_json(get_args):
     return json.loads(out.stdout)
 
 
-def ready_condition(obj):
+def status_condition(obj, condition_type):
     for c in obj.get("status", {}).get("conditions", []):
-        if c.get("type") == "Ready":
+        if c.get("type") == condition_type:
             return c.get("status"), c.get("reason", ""), c.get("message", "")
     return "Unknown", "NoStatus", ""
 
 
+def object_name(obj):
+    md = obj["metadata"]
+    return f"{md.get('namespace', '<cluster>')}/{md['name']}"
+
+
+def finding(kind, obj, status, reason, message=""):
+    return {
+        "kind": kind,
+        "name": object_name(obj),
+        "status": status,
+        "reason": reason,
+        "message": message,
+    }
+
+
+def timestamp_age_seconds(value, now):
+    if not value:
+        return None
+    created = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return (now - created).total_seconds()
+
+
+def collect_status(revision="", now=None, get_json=kubectl_json):
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    findings = []
+
+    flux_kinds = [
+        ("kustomizations.kustomize.toolkit.fluxcd.io", "Kustomization"),
+        ("helmreleases.helm.toolkit.fluxcd.io", "HelmRelease"),
+    ]
+    for resource, kind in flux_kinds:
+        for obj in get_json(["get", resource, "-A"]).get("items", []):
+            status, reason, message = status_condition(obj, "Ready")
+            if status != "True":
+                findings.append(finding(kind, obj, status, reason, message))
+                continue
+            source = obj.get("spec", {}).get("sourceRef", {})
+            if (revision and kind == "Kustomization" and
+                    source.get("name") == "guardian"):
+                applied = obj.get("status", {}).get("lastAppliedRevision", "")
+                if revision not in applied:
+                    findings.append(finding(
+                        kind,
+                        obj,
+                        "Unknown",
+                        "RevisionPending",
+                        f"last applied {applied or 'revision unavailable'}",
+                    ))
+
+    stages = get_json(["get", "stages.kargo.akuity.io", "-A"]).get("items", [])
+    for obj in stages:
+        status, reason, message = status_condition(obj, "Healthy")
+        if status == "False" or reason == "NoStatus":
+            findings.append(finding("KargoStage", obj, status, reason, message))
+
+    warehouses = get_json([
+        "get", "warehouses.kargo.akuity.io", "-A",
+    ]).get("items", [])
+    for obj in warehouses:
+        for condition_type in ("Ready", "Healthy"):
+            status, reason, message = status_condition(obj, condition_type)
+            if status == "False" or reason == "NoStatus":
+                findings.append(finding(
+                    "KargoWarehouse", obj, status,
+                    f"{condition_type}:{reason}", message,
+                ))
+                break
+
+    promotions = get_json([
+        "get", "promotions.kargo.akuity.io", "-A",
+    ]).get("items", [])
+    latest_promotions = {}
+    for obj in promotions:
+        md = obj["metadata"]
+        key = (md.get("namespace", ""), obj.get("spec", {}).get("stage", ""))
+        current = latest_promotions.get(key)
+        if (current is None or
+                md.get("creationTimestamp", "") >
+                current["metadata"].get("creationTimestamp", "")):
+            latest_promotions[key] = obj
+    for obj in latest_promotions.values():
+        phase = obj.get("status", {}).get("phase", "")
+        age = timestamp_age_seconds(
+            obj["metadata"].get("creationTimestamp", ""), now,
+        )
+        if phase in ("", "Pending", "Running"):
+            findings.append(finding("KargoPromotion", obj, "Unknown", phase or "Pending"))
+        elif phase in ("Failed", "Errored") and (age is None or age < 21600):
+            findings.append(finding(
+                "KargoPromotion", obj, "False", phase,
+                obj.get("status", {}).get("message", ""),
+            ))
+
+    canaries = get_json(["get", "canaries.flagger.app", "-A"]).get("items", [])
+    for obj in canaries:
+        phase = obj.get("status", {}).get("phase", "")
+        if phase != "Succeeded":
+            status = "False" if phase == "Failed" else "Unknown"
+            findings.append(finding("Canary", obj, status, phase or "NoStatus"))
+
+    return findings
+
+
+def render_findings(findings, on):
+    lines = []
+    for item in findings:
+        colour = "\033[1;31m" if item["status"] == "False" else "\033[0;33m"
+        lines.append(paint(
+            f"{item['kind']:15} {item['name']:44} {item['reason']}",
+            colour,
+            on,
+        ))
+        if item["message"]:
+            lines.append(f"  {paint(item['message'].strip()[:200], DIM, on)}")
+    return lines
+
+
 def watch_status(args):
     on = colour_on(sys.stdout)
-    kinds = [("kustomizations.kustomize.toolkit.fluxcd.io", "Kustomization"),
-             ("helmreleases.helm.toolkit.fluxcd.io", "HelmRelease")]
+    stable = 0
     try:
         while True:
-            lines, not_ready = [], 0
-            for resource, kind in kinds:
-                for obj in kubectl_json(["get", resource, "-A"]).get("items", []):
-                    status, reason, message = ready_condition(obj)
-                    if status == "True":
-                        continue
-                    not_ready += 1
-                    md = obj["metadata"]
-                    who = f"{md['namespace']}/{md['name']}"
-                    colour = "\033[1;31m" if status == "False" else "\033[0;33m"
-                    lines.append(paint(f"{kind:13} {who:44} {reason}", colour, on))
-                    if message:
-                        lines.append(f"  {paint(message.strip()[:200], DIM, on)}")
+            findings = collect_status(args.revision)
+            stable = stable + 1 if not findings else 0
             if on:
                 sys.stdout.write("\033[2J\033[H")
-            print(paint(f"cluster-watch --status  {hhmmss(time.time())}  "
-                        f"({not_ready} not converged)", DIM, on))
-            if not_ready == 0:
-                print(paint("  all Kustomizations and HelmReleases Ready", GREEN, on))
+            print(paint(
+                f"cluster-watch --status  {hhmmss(time.time())}  "
+                f"({len(findings)} not converged)",
+                DIM,
+                on,
+            ))
+            if findings:
+                print("\n".join(render_findings(findings, on)))
             else:
-                print("\n".join(lines))
+                print(paint(
+                    "  Flux, Kargo, and Flagger rollout resources healthy",
+                    GREEN,
+                    on,
+                ))
+                if args.until_ready:
+                    print(paint(
+                        f"  stable sample {stable}/{args.stable_samples}", DIM, on,
+                    ))
+            if args.until_ready and stable >= args.stable_samples:
+                return 0
             time.sleep(args.interval)
     except KeyboardInterrupt:
         return 0
@@ -217,7 +339,17 @@ def main():
                    help="ntfy mode: only alerts whose title/body contains this substring")
     p.add_argument("--interval", type=float, default=5.0,
                    help="--status refresh seconds (default 5)")
+    p.add_argument("--revision", default="",
+                   help="Guardian Git revision every Flux Kustomization must have applied")
+    p.add_argument("--stable-samples", type=int, default=3,
+                   help="healthy samples required by --until-ready (default 3)")
+    p.add_argument("--until-ready", action="store_true",
+                   help="exit after the requested revision and rollout resources are stable")
     args = p.parse_args()
+    if (args.stream or args.convergence) and (args.until_ready or args.revision):
+        p.error("--until-ready and --revision apply only to live status")
+    if args.stable_samples < 1:
+        p.error("--stable-samples must be at least 1")
     return watch_ntfy(args) if args.stream or args.convergence else watch_status(args)
 
 

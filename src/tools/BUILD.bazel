@@ -64,6 +64,7 @@ filegroup(
         "@multitool//tools/talosctl",
         "@multitool//tools/tofu",
         "@multitool//tools/velero",
+        "@python_3_12_12//:python3",
         "@ruby_linux_amd64//:ruby",
     ],
     tags = ["manual"],

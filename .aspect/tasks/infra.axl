@@ -1816,6 +1816,10 @@ def _watch_impl(ctx):
         if ctx.args.kubeconfig != "":
             env["KUBECONFIG"] = _kubeconfig_path(ctx)
         watch_args.extend(["--status", "--interval", ctx.args.interval])
+        if ctx.args.until_ready:
+            watch_args.extend(["--until-ready", "--stable-samples", ctx.args.stable_samples])
+        if ctx.args.revision != "":
+            watch_args.extend(["--revision", ctx.args.revision])
     elif ctx.args.mode == "stream":
         watch_args.append("--stream")
     elif ctx.args.mode == "convergence":
@@ -1825,6 +1829,9 @@ def _watch_impl(ctx):
         return 1
 
     if ctx.args.mode != "status":
+        if ctx.args.until_ready or ctx.args.revision != "":
+            ctx.std.io.stderr.write("ERROR: --until-ready and --revision apply only to --mode=status\n")
+            return 1
         watch_args.extend(["--since", ctx.args.since])
         if ctx.args.grep != "":
             watch_args.extend(["--grep", ctx.args.grep])
@@ -2129,13 +2136,16 @@ watch = task(
     implementation = _watch_impl,
     name = "watch",
     group = ["infra"],
-    summary = "Watch live Flux convergence status with repo-pinned kubectl; stream ntfy alerts with --mode=stream or --mode=convergence.",
+    summary = "Watch live Flux, Kargo, and Flagger rollout status with repo-pinned kubectl; exit on a stable revision with --until-ready; stream ntfy alerts with --mode=stream or --mode=convergence.",
     args = {
         "grep": args.string(default = "", description = "Alert stream substring filter. Applies to --mode=stream and --mode=convergence."),
         "interval": args.string(default = "5", description = "Live status refresh seconds."),
         "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
         "mode": args.string(default = "status", description = "Watch mode: status, stream, or convergence."),
+        "revision": args.string(default = "", description = "Guardian Git revision every Flux Kustomization must have applied in status mode."),
         "since": args.string(default = "15m", description = "ntfy backlog window replayed on connect for stream modes."),
+        "stable_samples": args.string(default = "3", description = "Healthy status samples required by --until-ready."),
+        "until_ready": args.boolean(default = False, description = "Exit status mode after the requested revision and rollout resources remain healthy."),
     },
 )
 

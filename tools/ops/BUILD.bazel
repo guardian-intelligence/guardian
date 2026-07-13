@@ -1,4 +1,13 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
 exports_files(
     ["multitool-repin"],
     visibility = ["//src/tools:__pkg__"],
+)
+
+py_test(
+    name = "cluster_watch_test",
+    srcs = ["cluster_watch_test.py"],
+    data = ["cluster-watch"],
+    python_version = "3.12",
 )
