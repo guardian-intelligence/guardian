@@ -51,3 +51,25 @@ spec:
     - /etc/vm/configs/guardian-log-pipeline-vlogs-rules/*.yaml
     - /etc/vm/configs/guardian-trust-vlogs-rules/*.yaml
     - /etc/vm/configs/guardian-talos-vlogs-rules/*.yaml
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: vmalert-vlogs
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: vmalert-vlogs
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: monitoring
+      app.kubernetes.io/instance: vmalert-vlogs
+      app.kubernetes.io/name: vmalert
+      managed-by: vm-operator
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
