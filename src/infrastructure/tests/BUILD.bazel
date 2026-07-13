@@ -4,6 +4,7 @@ go_test(
     name = "tests",
     srcs = [
         "alertmanager_auth_test.go",
+        "alert_tuning_test.go",
         "analytics_ddl_conformance_test.go",
         "cdi_alerts_test.go",
         "cluster_domain_test.go",
