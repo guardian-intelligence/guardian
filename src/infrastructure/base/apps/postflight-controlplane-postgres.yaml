@@ -1,7 +1,7 @@
 # Control-plane Postgres: the delivery ledger + runner-class state. The
 # Cozystack Postgres app CR only renders in a tenant-* namespace (cozy-lib's
 # RBAC helper hard-fails Helm render anywhere else — see
-# analytics-clickhouse.yaml for the same constraint), so the server lives in
+# deployments/analytics/system/clickhouse.yaml for the same constraint), so the server lives in
 # tenant-root while its only consumer, the control plane, stays in
 # postflight-runner and crosses the namespace boundary under the Cilium policy
 # in that namespace's networkpolicy.yaml. The operator generates
