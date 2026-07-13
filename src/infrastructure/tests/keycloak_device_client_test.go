@@ -22,15 +22,21 @@ func TestPlatformAgentDeviceClientConformance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read infra.axl: %v", err)
 	}
+	auth, err := os.ReadFile(runfilePath("src/infrastructure/cmd/guardian_auth/main.go"))
+	if err != nil {
+		t.Fatalf("read guardian_auth: %v", err)
+	}
 	m := regexp.MustCompile(`(?m)^PLATFORM_OIDC_CLIENT_ID = "([^"]+)"`).FindSubmatch(axl)
 	if m == nil {
 		t.Fatalf("infra.axl no longer defines PLATFORM_OIDC_CLIENT_ID; the platform-agent kubelogin flow depends on it")
 	}
 	clientID := string(m[1])
-	assertTextContains(t, string(axl), "--exec-arg=--grant-type=device-code",
-		"infra.axl platform-agent kubelogin flow (device-code is what makes login work headless/over SSH)")
-	assertTextContains(t, string(axl), "--exec-arg=--oidc-extra-scope=offline_access",
-		"infra.axl platform-agent kubelogin flow (offline_access is what keeps agent sessions unattended)")
+	assertTextContains(t, string(axl), "GUARDIAN_AUTH_TARGET",
+		"infra.axl platform-agent flow must delegate to the tested guardian_auth command")
+	assertTextContains(t, string(auth), "--exec-arg=--grant-type=device-code",
+		"guardian_auth platform-agent kubelogin flow (device-code is what makes login work headless/over SSH)")
+	assertTextContains(t, string(auth), "--exec-arg=--oidc-extra-scope=offline_access",
+		"guardian_auth platform-agent kubelogin flow (offline_access is what keeps agent sessions unattended)")
 
 	listed := false
 	for _, doc := range yamlDocs(t, runfilePath("src/infrastructure/base/cozystack/kustomization.yaml")) {

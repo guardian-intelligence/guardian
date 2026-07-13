@@ -34,6 +34,7 @@ COSIGN_TARGET = "@multitool//tools/cosign"
 ORAS_TARGET = "@multitool//tools/oras"
 RESTIC_TARGET = "//src/tools/restic:restic"
 CUSTODY_TARGET = "//src/infrastructure/cmd/custody:custody"
+GUARDIAN_AUTH_TARGET = "//src/infrastructure/cmd/guardian_auth:guardian_auth"
 KUBELOGIN_TARGET = "@multitool//tools/kubectl-oidc_login"
 CURL_TARGET = "@multitool//tools/curl"
 CLUSTER_CA_PATH = "src/infrastructure/bootstrap/guardian-mgmt/cluster-ca.crt"
@@ -138,6 +139,7 @@ INFRA_TESTS = [
     "//src/infrastructure/cmd/converged:converged_test",
     "//src/infrastructure/cmd/cozystack_openbao_drill/baodrill:baodrill_test",
     "//src/infrastructure/cmd/custody:custody_test",
+    "//src/infrastructure/cmd/guardian_auth:guardian_auth_test",
     "//src/infrastructure/cmd/openbao_reinit:openbao_reinit_test",
     "//src/infrastructure/cmd/openbao_secret_import:openbao_secret_import_test",
     "//src/infrastructure/cmd/openbao_static_seal_key:openbao_static_seal_key_test",
@@ -1844,6 +1846,9 @@ def _auth_impl(ctx):
     if ctx.args.platform_agent == ctx.args.platform_admin:
         ctx.std.io.stderr.write("ERROR: pass exactly one of --platform-agent or --platform-admin\n")
         return 1
+    if ctx.args.platform_agent and (ctx.args.endpoints != "" or ctx.args.nodes != ""):
+        ctx.std.io.stderr.write("ERROR: --endpoints and --nodes apply only to --platform-admin; use --kube-api-server for a platform-agent override\n")
+        return 1
 
     target = ctx.args.install_path
     if target == "":
@@ -1852,136 +1857,134 @@ def _auth_impl(ctx):
     if target == None:
         return 1
 
+    guardian_auth = _tool_path(ctx, GUARDIAN_AUTH_TARGET)
+    if guardian_auth == None:
+        return 1
     kubectl = _kubectl_path(ctx)
     if kubectl == None:
         return 1
 
-    target_dir = _capture_stdout(ctx, "dirname", [target], label = "dirname " + target)
-    if target_dir == None:
-        return 1
-    rc = checked_spawn(ctx, "mkdir", ["-p", target_dir], label = "mkdir -p " + target_dir)
-    if rc != 0:
-        return rc
+    use_state = False
+    if ctx.args.platform_agent:
+        use_state = ctx.args.kube_api_server == ""
+    else:
+        use_state = ctx.args.endpoints == "" and ctx.args.nodes == ""
+    if use_state:
+        tofu = _tool_path(ctx, TOFU_TARGET)
+        if tofu == None:
+            return 1
+        endpoint = _tofu_backend_endpoint(ctx, "")
+        if endpoint == None:
+            return 1
+        rc = _tofu_backend_init(ctx, [(GUARDIAN_MGMT_ROOT, "guardian-mgmt")], endpoint)
+        if rc != 0:
+            return rc
+
+    command_args = [
+        "--kubectl",
+        kubectl,
+        "--ca",
+        ws_path(ctx, CLUSTER_CA_PATH),
+        "--kubeconfig",
+        target,
+    ]
+    if use_state:
+        command_args.extend([
+            "--tofu",
+            tofu,
+            "--tofu-root",
+            ws_path(ctx, GUARDIAN_MGMT_ROOT),
+        ])
+    if ctx.args.endpoints != "":
+        command_args.extend(["--endpoints", ctx.args.endpoints])
+    if ctx.args.nodes != "":
+        command_args.extend(["--nodes", ctx.args.nodes])
+    if ctx.args.kube_api_server != "":
+        command_args.extend(["--kube-api-server", ctx.args.kube_api_server])
 
     if ctx.args.platform_agent:
-        return _auth_platform_agent(ctx, kubectl, target)
-    return _auth_platform_admin(ctx, kubectl, target)
+        return _auth_platform_agent(ctx, guardian_auth, command_args)
+    return _auth_platform_admin(ctx, guardian_auth, kubectl, target, command_args)
 
-def _auth_platform_agent(ctx, kubectl, target):
-    ca = ws_path(ctx, CLUSTER_CA_PATH)
-    if not ctx.std.fs.exists(ca):
-        ctx.std.io.stderr.write("ERROR: missing " + CLUSTER_CA_PATH + "; the committed cluster CA is required to bootstrap the OIDC context\n")
-        return 1
-
+def _auth_platform_agent(ctx, guardian_auth, command_args):
     bin_dir = install_bazel_tool_shims(ctx, [("kubectl-oidc_login", KUBELOGIN_TARGET)], ".guardian/tools/bin")
     if bin_dir == "":
         return 1
-    kubelogin = bin_dir + "/kubectl-oidc_login"
 
     home = ctx.std.env.var("HOME") or ""
     if home == "":
         ctx.std.io.stderr.write("ERROR: HOME is not set\n")
         return 1
-    cache_dir = home + "/.kube/cache/oidc-login-platform-agent"
-    server = "https://" + PUBLIC_TALOS_KUBECONFIG_NODE + ":6443"
 
-    # set-credentials appends --exec-arg values to an existing user, so drop
-    # any previous entry to keep reruns idempotent.
-    rc = checked_spawn(
-        ctx,
-        "sh",
-        ["-c", "'" + kubectl + "' --kubeconfig '" + target + "' config unset users.platform-agent >/dev/null 2>&1 || true"],
-        label = "kubeconfig reset platform-agent user",
-    )
-    if rc != 0:
-        return rc
-
-    steps = [
-        (["config", "set-cluster", "guardian-mgmt", "--server=" + server, "--certificate-authority=" + ca, "--embed-certs=true"], "kubeconfig set-cluster guardian-mgmt"),
-        ([
-            "config",
-            "set-credentials",
-            "platform-agent",
-            "--exec-api-version=client.authentication.k8s.io/v1beta1",
-            "--exec-command=" + kubelogin,
-            "--exec-arg=get-token",
-            "--exec-arg=--oidc-issuer-url=" + PLATFORM_OIDC_ISSUER,
-            "--exec-arg=--oidc-client-id=" + PLATFORM_OIDC_CLIENT_ID,
-            # Device grant: no localhost callback listener, so login works
-            # identically on a desktop and over SSH on a headless box.
-            "--exec-arg=--grant-type=device-code",
-            "--exec-arg=--oidc-extra-scope=offline_access",
-            "--exec-arg=--token-cache-dir=" + cache_dir,
-        ], "kubeconfig set-credentials platform-agent"),
-        (["config", "set-context", "platform-agent@guardian-mgmt", "--cluster=guardian-mgmt", "--user=platform-agent"], "kubeconfig set-context platform-agent@guardian-mgmt"),
-        (["config", "use-context", "platform-agent@guardian-mgmt"], "kubeconfig use-context platform-agent@guardian-mgmt"),
-    ]
-    for step_args, label in steps:
-        rc = checked_spawn(ctx, kubectl, ["--kubeconfig", target] + step_args, label = label)
-        if rc != 0:
-            return rc
-    rc = checked_spawn(ctx, "chmod", ["600", target], label = "chmod 600 " + target)
-    if rc != 0:
-        return rc
-
+    args = []
+    args.extend(command_args)
+    args.extend([
+        "--mode",
+        "agent",
+        "--kubelogin",
+        bin_dir + "/kubectl-oidc_login",
+        "--oidc-issuer",
+        PLATFORM_OIDC_ISSUER,
+        "--oidc-client-id",
+        PLATFORM_OIDC_CLIENT_ID,
+        "--oidc-cache-dir",
+        home + "/.kube/cache/oidc-login-platform-agent",
+    ])
     ctx.std.io.stderr.write(
-        "selected platform-agent@guardian-mgmt in " + target + "; verifying (first login prints a device-code URL — open it in a browser on any machine)\n"
+        "authenticating platform-agent@guardian-mgmt (first login prints a device-code URL — open it in a browser on any machine)\n"
         + "IMPORTANT: approve the device login as the platform-agent user (use a private window if another Keycloak session is active); only platform-agent holds the offline_access role, so any other identity fails the exchange with 'not_allowed'\n",
     )
-    rc = checked_spawn(ctx, kubectl, ["--kubeconfig", target, "auth", "whoami"], label = "kubectl auth whoami")
-    if rc != 0:
-        return rc
+    return checked_spawn(ctx, guardian_auth, args, cwd = ws_path(ctx), label = "guardian auth platform-agent")
 
-    cleanup_steps = [
-        (["config", "unset", "users.admin@guardian-mgmt"], "kubeconfig remove breakglass user"),
-        (["config", "unset", "contexts.admin@guardian-mgmt"], "kubeconfig remove breakglass context"),
-    ]
-    for step_args, label in cleanup_steps:
-        rc = checked_spawn(ctx, kubectl, ["--kubeconfig", target] + step_args, label = label)
-        if rc != 0:
-            return rc
-    return 0
-
-def _auth_platform_admin(ctx, kubectl, target):
+def _auth_platform_admin(ctx, guardian_auth, kubectl, target, command_args):
     reason = ctx.args.reason.strip()
     if reason == "":
         ctx.std.io.stderr.write("ERROR: --reason is required: breakglass escalation to system:masters is audit-logged\n")
         return 1
 
-    minted = _mint_custody_kubeconfig(ctx)
-    if minted == None:
-        return 1
-
-    backup = ""
-    if ctx.std.fs.exists(target):
-        stamp = _capture_stdout(ctx, "date", ["+%Y%m%d%H%M%S"], label = "date kubeconfig backup stamp")
-        if stamp == None:
+    root = _workspace_path_if_relative(ctx, ctx.args.root)
+    talosconfig = _workspace_path_if_relative(ctx, ctx.args.talosconfig)
+    cleanup_root = False
+    if not ctx.std.fs.exists(root + "/secrets.yaml"):
+        root = _assemble_mint_root(ctx, root)
+        if root == None:
             return 1
-        backup = target + ".backup-" + stamp
-        rc = checked_spawn(ctx, "cp", [target, backup], label = "backup existing kubeconfig")
+        cleanup_root = True
+    else:
+        rc = _require_talm_operator_state(ctx, root)
         if rc != 0:
             return rc
+    if talosconfig == "":
+        talosconfig = root + "/talosconfig"
 
-    # Merge rather than replace: fresh admin credentials win on conflict
-    # (minted file listed first), every other context survives.
-    tmp = target + ".merge-tmp"
-    rc = checked_spawn(
-        ctx,
-        "sh",
-        ["-c", "umask 077 && '" + kubectl + "' config view --flatten --raw > '" + tmp + "' && mv '" + tmp + "' '" + target + "'"],
-        env = {"KUBECONFIG": minted + ":" + target},
-        label = "merge breakglass admin context into " + target,
-    )
-    # The merge is the only consumer of the minted kubeconfig; shred the staged
-    # bundle-path copy now (its cert is already in target regardless of what
-    # follows). No-op on the tree path.
-    _shred_staged_breakglass_kubeconfig(ctx)
-    if rc != 0:
-        return rc
-    rc = checked_spawn(ctx, kubectl, ["--kubeconfig", target, "config", "use-context", "admin@guardian-mgmt"], label = "kubeconfig use-context admin@guardian-mgmt")
-    if rc != 0:
-        return rc
-    rc = checked_spawn(ctx, "chmod", ["600", target], label = "chmod 600 " + target)
+    talm = _tool_path(ctx, TALM_TARGET)
+    if talm == None:
+        if cleanup_root:
+            _cleanup_mint_root(ctx)
+        return 1
+    talosctl = _tool_path(ctx, TALOSCTL_TARGET)
+    if talosctl == None:
+        if cleanup_root:
+            _cleanup_mint_root(ctx)
+        return 1
+
+    args = []
+    args.extend(command_args)
+    args.extend([
+        "--mode",
+        "admin",
+        "--talm",
+        talm,
+        "--talosctl",
+        talosctl,
+        "--talm-root",
+        root,
+        "--talosconfig",
+        talosconfig,
+    ])
+    rc = checked_spawn(ctx, guardian_auth, args, cwd = ws_path(ctx), label = "guardian auth platform-admin")
+    if cleanup_root:
+        _cleanup_mint_root(ctx)
     if rc != 0:
         return rc
 
@@ -1989,10 +1992,7 @@ def _auth_platform_admin(ctx, kubectl, target):
     if rc != 0:
         return rc
 
-    message = "breakglass: admin@guardian-mgmt (system:masters) selected in " + target
-    if backup != "":
-        message = message + " (backup: " + backup + ")"
-    ctx.std.io.stderr.write(message + "\n")
+    ctx.std.io.stderr.write("breakglass: admin@guardian-mgmt (system:masters) selected in " + target + "\n")
     return 0
 
 def _breakglass_audit(ctx, kubectl, target, reason):
@@ -2158,12 +2158,13 @@ auth = task(
     implementation = _auth_impl,
     name = "auth",
     group = ["infra"],
-    summary = "Authenticate kubectl to guardian-mgmt. --platform-agent installs and selects the OIDC daily-driver context (pinned kubelogin, committed cluster CA, device-code login that works headless/over SSH, 30-day offline token) and removes breakglass credentials. --platform-admin is breakglass: escalated x509 system:masters minted from the Talos custody bundle, requires --reason, and every use is audit-logged (ntfy page + in-cluster ledger + local custody log).",
+    summary = "Authenticate kubectl to guardian-mgmt through the tested guardian_auth binary. OpenTofu control_plane_nodes state supplies the default public access candidates; every Talos endpoint stays paired with its same-node target. Both modes verify a staged kubeconfig before atomically installing it. --platform-agent installs the OIDC daily-driver context; --platform-admin mints breakglass x509 credentials from the existing Talos custody bundle and retains the existing audit behavior.",
     args = {
         "audit_ntfy_url": args.string(default = BREAKGLASS_NTFY_URL, description = "ntfy URL paged with the breakglass reason."),
-        "endpoints": args.string(default = PUBLIC_TALOS_KUBECONFIG_ENDPOINTS, description = "Talos API endpoints used for the breakglass kubeconfig mint."),
+        "endpoints": args.string(default = "", description = "Optional comma-separated Talos endpoints for platform-admin. Must be paired one-for-one with --nodes; defaults to public addresses from OpenTofu control_plane_nodes."),
         "install_path": args.string(default = "", description = "Kubeconfig file to write. Defaults to ~/.kube/config."),
-        "nodes": args.string(default = PUBLIC_TALOS_KUBECONFIG_NODE, description = "Talos node used for the breakglass kubeconfig mint."),
+        "kube_api_server": args.string(default = "", description = "Optional Kubernetes API server override. Defaults to the reachable public node API selected from OpenTofu control_plane_nodes."),
+        "nodes": args.string(default = "", description = "Optional comma-separated Talos targets for platform-admin. Must be paired one-for-one with --endpoints."),
         "platform_admin": args.boolean(default = False, description = "Breakglass: escalated x509 system:masters credentials from the Talos custody bundle (secrets.yaml + talm.key). Audit-logged; requires --reason."),
         "platform_agent": args.boolean(default = False, description = "Daily driver: OIDC via the platform Keycloak with an offline token (30-day idle window, resets on use, revocable in Keycloak); removes any breakglass context and credentials after OIDC verification."),
         "reason": args.string(default = "", description = "Why breakglass escalation is needed. Required with --platform-admin; paged to the operations topic and appended to the breakglass ledgers."),
