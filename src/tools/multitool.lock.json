@@ -226,19 +226,19 @@
     "binaries": [
       {
         "kind": "archive",
-        "url": "https://github.com/grafana/k6/releases/download/v1.7.1/k6-v1.7.1-linux-amd64.tar.gz",
-        "sha256": "cc127a656f734f8ea1e89f8a417777905ae6a93d42f3e763e95313518180655b",
+        "url": "https://github.com/grafana/k6/releases/download/v1.8.0/k6-v1.8.0-linux-amd64.tar.gz",
+        "sha256": "a16c98a1b02a5f96cf834d0d03ceeaa974ab25874531f2a494a76bc975dc78a7",
         "os": "linux",
         "cpu": "x86_64",
-        "file": "k6-v1.7.1-linux-amd64/k6"
+        "file": "k6-v1.8.0-linux-amd64/k6"
       },
       {
         "kind": "archive",
-        "url": "https://github.com/grafana/k6/releases/download/v1.7.1/k6-v1.7.1-macos-arm64.zip",
-        "sha256": "9cace748ebeddb92432f606c6c53d964772176fdf1a0ebb4db5ead3df39ba761",
+        "url": "https://github.com/grafana/k6/releases/download/v1.8.0/k6-v1.8.0-macos-arm64.zip",
+        "sha256": "6869e9ebdf51f7450c9ba160b5d0aa0d7224186d976bc0bc8e7ead91a7104cce",
         "os": "macos",
         "cpu": "arm64",
-        "file": "k6-v1.7.1-macos-arm64/k6"
+        "file": "k6-v1.8.0-macos-arm64/k6"
       }
     ]
   },
