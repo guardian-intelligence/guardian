@@ -10,7 +10,9 @@ spec:
     - name: shortterm
       retentionPeriod: 3d
       deduplicationInterval: 1s
-      storage: 5Gi
+      # Incident-scale Kubernetes churn creates millions of fresh series per
+      # day; the retention window must fit without forcing vmstorage read-only.
+      storage: 20Gi
       storageClassName: replicated
       vminsert:
         minAllowed:
@@ -47,7 +49,9 @@ spec:
     - name: longterm
       retentionPeriod: 14d
       deduplicationInterval: 1m
-      storage: 10Gi
+      # Minute-level deduplication lowers sample volume but not series-index
+      # cardinality, so this tier needs the same index headroom.
+      storage: 20Gi
       storageClassName: replicated
       vminsert:
         minAllowed:
