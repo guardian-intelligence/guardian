@@ -56,6 +56,7 @@ go_test(
         "//src/infrastructure/bootstrap/guardian-mgmt-edge-policy:root",
         "//src/infrastructure/bootstrap/sync-dark:manifests",
         "//src/infrastructure/bootstrap/sync-steady:manifests",
+        "//src/infrastructure/cmd/guardian_auth:sources",
         "//src/infrastructure/deployments/alerting:manifests",
         "//src/infrastructure/deployments/analytics/system:manifests",
         "//src/infrastructure/deployments/cockpit:manifests",
