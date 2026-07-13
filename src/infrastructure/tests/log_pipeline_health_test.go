@@ -171,7 +171,7 @@ func TestLogPipelineCanaryContract(t *testing.T) {
 		"vmalert_config_last_reload_successful",
 		"vmalert_alerting_rules_errors_total",
 		"vmalert_alerts_send_errors_total",
-		`pod=~"vmalert-vlogs.*"`,
+		`job="vmalert-vmalert-vlogs"`,
 	} {
 		assertTextContains(t, string(metricsText), want, path)
 	}
