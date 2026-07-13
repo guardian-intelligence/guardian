@@ -13,6 +13,7 @@ filegroup(
         "monitoring-agents-etcd-alerts.yaml",
         "monitoring-agents-kube-client-certificate-expiration.yaml",
         "monitoring-agents-kube-pod-not-ready.yaml",
+        "monitoring-agents-kubernetes-resources.yaml",
         "monitoring-agents-vmagent-resources.yaml",
         "monitoring-shortterm-vmselect-resources.yaml",
         "tenant-guardian-namespace-pod-security.yaml",
