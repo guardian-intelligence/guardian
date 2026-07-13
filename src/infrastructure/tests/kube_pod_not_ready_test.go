@@ -45,6 +45,7 @@ func TestKubePodNotReadyExcludesTerminalPods(t *testing.T) {
 
 	seen := make(map[string]bool, len(rules))
 	var notReady map[string]interface{}
+	var jobFailed map[string]interface{}
 	for _, raw := range rules {
 		rule := mapValue(raw)
 		alert, ok := rule["alert"].(string)
@@ -57,6 +58,9 @@ func TestKubePodNotReadyExcludesTerminalPods(t *testing.T) {
 		seen[alert] = true
 		if alert == "KubePodNotReady" {
 			notReady = rule
+		}
+		if alert == "KubeJobFailed" {
+			jobFailed = rule
 		}
 	}
 	if notReady == nil {
@@ -72,5 +76,19 @@ func TestKubePodNotReadyExcludesTerminalPods(t *testing.T) {
 	}
 	if strings.Contains(expr, "Failed") {
 		t.Fatalf("KubePodNotReady includes terminal Failed pods: %s", expr)
+	}
+	if jobFailed == nil {
+		t.Fatal("KubeJobFailed rule is missing")
+	}
+	jobExpr := stringValue(jobFailed["expr"])
+	for _, want := range []string{
+		`kube_job_owner{job="kube-state-metrics", owner_kind="CronJob"}`,
+		"topk by (namespace, owner_name, cluster)",
+		`label_replace(`,
+		`"job_name", "$1", "owner_name"`,
+	} {
+		if !strings.Contains(jobExpr, want) {
+			t.Fatalf("KubeJobFailed does not select the latest CronJob run with %q: %s", want, jobExpr)
+		}
 	}
 }
