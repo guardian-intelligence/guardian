@@ -243,11 +243,11 @@ func assertVLClusterHealthExpression(t *testing.T, kustomization map[string]inte
 	expression := mapValue(expressions[0])
 	assertNestedString(t, expression, "operator.victoriametrics.com/v1", "apiVersion")
 	assertNestedString(t, expression, "VLCluster", "kind")
-	wantCurrent := "has(status) && has(status.observedGeneration) && status.observedGeneration == metadata.generation && has(status.updateStatus) && status.updateStatus == 'operational'"
+	wantCurrent := "has(status.observedGeneration) && status.observedGeneration == metadata.generation && has(status.updateStatus) && status.updateStatus == 'operational'"
 	if got := compactWhitespace(stringValue(expression["current"])); got != wantCurrent {
 		t.Fatalf("VLCluster current expression = %q, want %q", got, wantCurrent)
 	}
-	wantFailed := "has(status) && ((has(status.updateStatus) && status.updateStatus == 'failed') || (has(status.conditions) && status.conditions.exists(c, c.type == 'Degraded' && c.status == 'True')))"
+	wantFailed := "(has(status.updateStatus) && status.updateStatus == 'failed') || (has(status.conditions) && status.conditions.exists(c, c.type == 'Degraded' && c.status == 'True'))"
 	if got := compactWhitespace(stringValue(expression["failed"])); got != wantFailed {
 		t.Fatalf("VLCluster failed expression = %q, want %q", got, wantFailed)
 	}

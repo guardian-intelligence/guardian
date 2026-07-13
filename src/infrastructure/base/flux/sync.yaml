@@ -233,15 +233,14 @@ spec:
     - apiVersion: operator.victoriametrics.com/v1
       kind: VLCluster
       current: >-
-        has(status) && has(status.observedGeneration) &&
+        has(status.observedGeneration) &&
         status.observedGeneration == metadata.generation &&
         has(status.updateStatus) &&
         status.updateStatus == 'operational'
       failed: >-
-        has(status) &&
-        ((has(status.updateStatus) && status.updateStatus == 'failed') ||
+        (has(status.updateStatus) && status.updateStatus == 'failed') ||
         (has(status.conditions) &&
-        status.conditions.exists(c, c.type == 'Degraded' && c.status == 'True')))
+        status.conditions.exists(c, c.type == 'Degraded' && c.status == 'True'))
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
@@ -290,15 +289,14 @@ spec:
     - apiVersion: operator.victoriametrics.com/v1
       kind: VLCluster
       current: >-
-        has(status) && has(status.observedGeneration) &&
+        has(status.observedGeneration) &&
         status.observedGeneration == metadata.generation &&
         has(status.updateStatus) &&
         status.updateStatus == 'operational'
       failed: >-
-        has(status) &&
-        ((has(status.updateStatus) && status.updateStatus == 'failed') ||
+        (has(status.updateStatus) && status.updateStatus == 'failed') ||
         (has(status.conditions) &&
-        status.conditions.exists(c, c.type == 'Degraded' && c.status == 'True')))
+        status.conditions.exists(c, c.type == 'Degraded' && c.status == 'True'))
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
