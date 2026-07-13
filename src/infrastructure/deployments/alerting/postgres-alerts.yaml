@@ -90,14 +90,22 @@ spec:
               cnpg_* series, so a failing scrape silently disables all
               database alerting for this instance; treat it with the same
               urgency as the database being down.
-        # Failed scrapes mark a target's series stale immediately, and a
-        # deleted target leaves no series at all -- an == 0 comparison can
-        # never see either case, and the platform's CNPGClusterOffline only
-        # fires when every CNPG target in the cluster is gone at once. The
-        # offset/unless pair is the only shape that pages for one cluster
-        # going dark.
+        # Failed scrapes mark a target's series stale immediately, so an == 0
+        # comparison cannot detect a dark cluster. The offset/unless pair
+        # finds recently visible clusters that have disappeared, while the
+        # current CNPG pod inventory proves the database still exists. This
+        # keeps observability outages and completed decommissions from
+        # multiplying the root-cause alerts.
         - alert: PGMetricsAbsent
-          expr: count by (namespace, job) (cnpg_collector_up offset 1h) unless count by (namespace, job) (cnpg_collector_up)
+          expr: >-
+            (count by (namespace, job) (cnpg_collector_up offset 1h)
+            unless count by (namespace, job) (cnpg_collector_up))
+            and on (namespace, job)
+            label_join(
+              count by (namespace, label_cnpg_io_cluster)
+              (kube_pod_labels{label_cnpg_io_pod_role="instance"}),
+              "job", "/", "namespace", "label_cnpg_io_cluster"
+            )
           for: 15m
           labels:
             severity: critical
@@ -107,10 +115,9 @@ spec:
             description: >-
               {{ $labels.job }} emitted cnpg_* metrics an hour ago and emits
               none now, so every postgres-health rule is blind to it. Causes
-              range from a deleted PodMonitor to vmagent discovery loss to the
-              whole cluster being gone. An intentional decommission pages
-              through this rule for up to an hour after removal; expect and
-              acknowledge that page when deleting an instance.
+              range from a deleted PodMonitor to vmagent discovery loss. A
+              current CNPG instance pod confirms that this is a live database,
+              not a completed decommission or a platform-wide metrics outage.
         - alert: PGReplicationSlotInactive
           expr: (max by (namespace, job, pod, slot_name) (cnpg_pg_replication_slots_active) == 0) and on (namespace, pod) (cnpg_pg_replication_in_recovery == 0)
           for: 15m
