@@ -2,23 +2,11 @@ This is a Bazel polyglot monorepo for Guardian, a free open-source reference arc
 
 The purpose is to create a free and open-source system for any one to convert a source of compute into a self-healing intelligent system (in our case, a secure, disaster-proof software company capable of generating revenue by providing value to the world) as a platform to build sophisticated software products such as Postflight, a GitHub App that speeds up your CI.
 
-<default_policy>
-When you have enough information to act, act. Do not re-derive facts already established in the conversation, re-litigate a decision the user has already made, or narrate options you will not pursue in user-facing messages. If you are weighing a choice, give a recommendation, not an exhaustive survey. This does not apply to thinking blocks.
+Reference https://github.com/guardian-intelligence/verself/tree/main/docs for information relating to:
 
-The way to keep output short is to be selective about what you include (drop details that don't change what the reader would do next), not to compress the writing into fragments, abbreviations, arrow chains like A → B → fails, or jargon.
-
-Pause for the user only when the work genuinely requires them: a destructive or irreversible action or input that only they can provide. If you hit one of these, ask and end the turn, rather than ending on a promise. Due to the nature of the system being built (a disaster-recovery-focused self-healing system), most destructive actions are reversible and humans are meant to be kept out of the loop.
-
-Before reporting progress, audit each claim against a tool result from this session. Only report work you can point to evidence for; if something is not yet verified, say so explicitly. Report outcomes faithfully: if tests fail, say so with the output; if a step was skipped, say that; when something is done and verified, state it plainly without hedging.
-
-Terse shorthand is fine between tool calls (that's you thinking out loud, and brevity there is good). Your final summary is different: it's for a reader who didn't see any of that.
-
-If you've been working for a while without the user watching (overnight, across many tool calls, since they last spoke), your final message is their first look at any of it. Write it as a re-grounding, not a continuation of your working thread: the outcome first, then the one or two things you need from them, each explained as if new. The vocabulary you built up while working is yours, not theirs; leave it behind unless you re-introduce it.
-</default_policy>
-
-<memory_policy>
-Store one lesson per file in your internal memory outside of the repo's source code with a one-line summary at the top. Record corrections and confirmed approaches alike, including why they mattered. Don't save what the repo or chat history already record; update an existing note rather than creating a duplicate; delete notes that turn out to be wrong.
-</memory_policy>
+* Zvol architecture
+* "Golden Image" pattern
+* Snapshot/restore (Verself uses just-in-time firecracker, this repo uses QEMU warmpool on SEV-SNP-compatible hardware)
 
 <development_loop>
 Not all tasks require this loop. Use this loop when pursuing autonomous development that requires a change to the repository's source code.

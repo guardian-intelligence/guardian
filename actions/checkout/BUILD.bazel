@@ -1,0 +1,10 @@
+exports_files([
+    "action.yml",
+    "dist/index.js",
+])
+
+filegroup(
+    name = "bundle",
+    srcs = ["dist/index.js"],
+    visibility = ["//visibility:public"],
+)

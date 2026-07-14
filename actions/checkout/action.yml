@@ -1,0 +1,41 @@
+name: Postflight Checkout
+description: Materialize the current GitHub workflow SHA from the Postflight host mirror without deleting durable build state.
+inputs:
+  repository:
+    description: Repository to check out, formatted as owner/name.
+    required: false
+    default: ${{ github.repository }}
+  ref:
+    description: Full Git ref to fetch, for example refs/heads/main or refs/pull/1/merge.
+    required: false
+    default: ${{ github.ref }}
+  path:
+    description: Checkout path relative to GITHUB_WORKSPACE.
+    required: false
+    default: "."
+  clean:
+    description: Reset tracked files before checkout. Postflight preserves untracked durable build state.
+    required: false
+    default: "false"
+  fetch-depth:
+    description: Accepted for actions/checkout familiarity. Postflight currently materializes one commit.
+    required: false
+    default: "1"
+  persist-credentials:
+    description: Accepted for actions/checkout familiarity. Postflight never persists GitHub credentials.
+    required: false
+    default: "false"
+  token:
+    description: GitHub token used only by the Postflight checkout-bundle endpoint.
+    required: false
+    default: ${{ github.token }}
+outputs:
+  preexisting-head:
+    description: Commit present in the durable workspace before checkout, when available.
+  commit:
+    description: Exact commit SHA checked out and verified by the action.
+  bundle-cache-hit:
+    description: Whether the host-side checkout bundle was already materialized.
+runs:
+  using: node24
+  main: dist/index.js

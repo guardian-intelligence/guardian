@@ -53,6 +53,7 @@ filegroup(
         "pnpm-workspace.yaml",
         "//src/products/viteplus-monorepo/apps/guardianintelligence-web:package_manifest",
         "//src/products/viteplus-monorepo/packages/brand:package_manifest",
+        "//src/products/viteplus-monorepo/packages/postflight-checkout:package_manifest",
     ] + glob(
         [
             ".changeset/*.md",
@@ -76,6 +77,7 @@ filegroup(
         "vite.config.ts",
         "//src/products/viteplus-monorepo/apps/guardianintelligence-web:sources",
         "//src/products/viteplus-monorepo/packages/brand:sources",
+        "//src/products/viteplus-monorepo/packages/postflight-checkout:sources",
     ] + glob(
         [
             ".changeset/*.md",
@@ -140,6 +142,7 @@ genrule(
         ":node_modules/vite-plus",
         "//src/products/viteplus-monorepo/apps/guardianintelligence-web:node_modules",
         "//src/products/viteplus-monorepo/packages/brand:node_modules",
+        "//src/products/viteplus-monorepo/packages/postflight-checkout:node_modules",
     ],
     outs = ["workspace_lint.stamp"],
     cmd = """
@@ -182,6 +185,7 @@ link_node_modules() {
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/node_modules" "$$work/node_modules"
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/apps/guardianintelligence-web/node_modules" "$$work/apps/guardianintelligence-web/node_modules"
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/brand/node_modules" "$$work/packages/brand/node_modules"
+link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/postflight-checkout/node_modules" "$$work/packages/postflight-checkout/node_modules"
 export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
 export NODE_OPTIONS="--preserve-symlinks-main $${NODE_OPTIONS:-}"
 export NODE_PATH="$$execroot/$(BINDIR)/src/products/viteplus-monorepo/node_modules$${NODE_PATH:+:$$NODE_PATH}"
