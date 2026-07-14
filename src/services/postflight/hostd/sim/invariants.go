@@ -2,6 +2,7 @@ package sim
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/agent"
@@ -22,10 +23,23 @@ type WorldState struct {
 	Slots       map[vm.Class]int
 	SealedEver  map[string]bool
 	Reaped      map[string]bool
-	Desired     map[string]agent.DesiredLease
+	// Named is every lease ID the control plane put in the last sync,
+	// whether or not the agent accepted the spec. A named lease's live
+	// resources must survive: rejection is not withdrawal.
+	Named map[string]bool
+	// HadResource records whether a lease ever had a VM or workspace, so the
+	// invariant distinguishes "not started yet" from "collected".
+	HadResource map[string]bool
 	// Resolves reports whether the checkout resolver currently accepts an
 	// (execution, attempt) pair.
 	Resolves func(executionID, attemptID string) bool
+	// Synced reports whether the agent has completed a sync exchange in its
+	// current life; PostTick reports whether this state was observed after a
+	// completed convergence pass (as opposed to right after a sync). Orphan
+	// cleanliness only holds at the tick boundaries of a synced agent —
+	// transient orphans are legal until the next pass collects them.
+	Synced   bool
+	PostTick bool
 }
 
 // Invariant is one property that must hold after every step. Check returns
@@ -39,15 +53,16 @@ type Invariant struct {
 // scenario. Each entry has a matching vacuity proof in vacuity_test.go.
 var Invariants = []Invariant{
 	{Name: "vm-per-lease", Check: checkVMPerLease},
+	{Name: "orphan-vms-collected", Check: checkOrphanVMsCollected},
 	{Name: "slot-bounds", Check: checkSlotBounds},
 	{Name: "sealed-survives", Check: checkSealedSurvives},
 	{Name: "deadline-release", Check: checkDeadlineRelease},
 	{Name: "terminal-never-resolves", Check: checkTerminalNeverResolves},
 	{Name: "failed-holds-no-vm", Check: checkFailedHoldsNoVM},
+	{Name: "desired-not-collected", Check: checkDesiredNotCollected},
 }
 
-// vm-per-lease: no two leases claim the same VM, and every VM that reports
-// a lease is a lease the agent actually tracks in a VM-holding state.
+// vm-per-lease: no two leases claim the same VM.
 func checkVMPerLease(state WorldState) string {
 	owners := map[string]string{}
 	for _, lease := range state.Leases {
@@ -58,6 +73,74 @@ func checkVMPerLease(state WorldState) string {
 			return fmt.Sprintf("vm %s claimed by both %s and %s", lease.VMID, other, lease.LeaseID)
 		}
 		owners[lease.VMID] = lease.LeaseID
+	}
+	return ""
+}
+
+// orphan-vms-collected: at the tick boundary of a synced agent, every VM
+// that reports a lease binding names a lease the agent tracks in a
+// non-terminal state. Crash leftovers and pre-sync restarts legally leave
+// bound VMs the agent does not track yet — but the same pass that syncs
+// them must collect them, so the property holds whenever Synced && PostTick.
+func checkOrphanVMsCollected(state WorldState) string {
+	if !state.Synced || !state.PostTick {
+		return ""
+	}
+	tracked := map[string]agent.LeaseSnapshot{}
+	for _, lease := range state.Leases {
+		tracked[lease.LeaseID] = lease
+	}
+	for _, status := range state.VMs {
+		if status.Lease == "" {
+			continue
+		}
+		lease, ok := tracked[status.Lease]
+		if !ok {
+			return fmt.Sprintf("vm %s bound to untracked lease %s", status.ID, status.Lease)
+		}
+		if agent.Terminal(lease.State) {
+			return fmt.Sprintf("vm %s bound to terminal lease %s", status.ID, status.Lease)
+		}
+	}
+	return ""
+}
+
+// desired-not-collected: no VM or workspace is destroyed while its lease is
+// still in the control plane's last desired set. This is the property that
+// makes a rejected-spec-turned-orphan (a validation failure escalating to
+// destruction of live customer state) a caught regression rather than a
+// silent data-loss bug.
+func checkDesiredNotCollected(state WorldState) string {
+	present := map[string]bool{}
+	for _, status := range state.VMs {
+		if status.Lease != "" {
+			present[status.Lease] = true
+		}
+	}
+	for _, workspace := range state.Workspaces {
+		if lease := workspaceLease(workspace.Name); lease != "" {
+			present[lease] = true
+		}
+	}
+	tracked := map[string]bool{}
+	for _, lease := range state.Leases {
+		tracked[lease.LeaseID] = true
+	}
+	for leaseID := range state.Named {
+		// A lease the control plane named and that once had a resource must
+		// still be tracked or still be backed by a live resource — never
+		// silently reduced to nothing by GC.
+		if state.HadResource[leaseID] && !tracked[leaseID] && !present[leaseID] {
+			return fmt.Sprintf("named lease %s was collected while still wanted", leaseID)
+		}
+	}
+	return ""
+}
+
+// workspaceLease extracts the lease a workspace volume name encodes.
+func workspaceLease(name string) string {
+	if i := strings.LastIndex(name, "/ws/"); i >= 0 {
+		return name[i+len("/ws/"):]
 	}
 	return ""
 }

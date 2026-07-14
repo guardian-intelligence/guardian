@@ -105,6 +105,41 @@ func TestExecLifecycle(t *testing.T) {
 	}
 }
 
+func TestExecSealRetryAfterPartialSeal(t *testing.T) {
+	driver := execDriver(t)
+	ctx := context.Background()
+	if _, err := driver.EnsureWorkspace(ctx, "lease-c", "", 64<<20); err != nil {
+		t.Fatal(err)
+	}
+	// Reproduce the crash window: snapshot, clone, and promote have run but
+	// the @sealed snapshot never landed. A retrying SealWorkspace must
+	// finish the job instead of failing on the second promote.
+	workspace := driver.workspaceDataset("lease-c")
+	genDataset := driver.generationDataset("gen-2")
+	if _, err := driver.run(ctx, "snapshot", workspace+"@seal-gen-2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := driver.run(ctx, "clone", workspace+"@seal-gen-2", genDataset); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := driver.run(ctx, "promote", genDataset); err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := driver.SealWorkspace(ctx, "lease-c", "gen-2")
+	if err != nil {
+		t.Fatalf("seal retry after partial seal: %v", err)
+	}
+	if sealed.Generation != "gen-2" {
+		t.Fatalf("sealed %+v", sealed)
+	}
+	if err := driver.DestroyWorkspace(ctx, "lease-c"); err != nil {
+		t.Fatal(err)
+	}
+	if err := driver.DestroyGeneration(ctx, "gen-2"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestValidateNameRejectsHostileIdentifiers(t *testing.T) {
 	for _, hostile := range []string{"", "../up", "a/b", "a@b", "a b", "-leading", string(make([]byte, 200))} {
 		if err := ValidateName("lease", hostile); err == nil {

@@ -31,8 +31,9 @@ func (a *Agent) collectOrphans(ctx context.Context, vms *vmView) {
 		case err == nil, errors.Is(err, zvol.ErrNotFound):
 			delete(a.leases, id)
 		case errors.Is(err, zvol.ErrBusy):
-			// Still attached somewhere; the VM sweep below clears it and a
-			// later tick retries.
+			// A VM still holds the volume open. stepLease retries the VM
+			// destroy for terminal records every tick, so a later tick
+			// frees the volume and this collection retries.
 		default:
 			a.logger.Error("collecting workspace", "lease", id, "err", err)
 		}
@@ -47,6 +48,9 @@ func (a *Agent) collectOrphans(ctx context.Context, vms *vmView) {
 		}
 		if _, known := a.leases[status.Lease]; known {
 			continue
+		}
+		if a.quarantined[status.Lease] {
+			continue // the control plane still wants it; we just can't parse the spec
 		}
 		if err := a.vms.Destroy(ctx, id); err != nil {
 			a.logger.Error("collecting orphan vm", "vm", id, "err", err)
@@ -72,6 +76,9 @@ func (a *Agent) collectOrphans(ctx context.Context, vms *vmView) {
 		}
 		if _, desired := a.desired[leaseID]; desired {
 			continue
+		}
+		if a.quarantined[leaseID] {
+			continue // rejected spec, not an orphan; preserve the workspace
 		}
 		err := a.zvols.DestroyWorkspace(ctx, zvol.LeaseID(leaseID))
 		if err != nil && !errors.Is(err, zvol.ErrNotFound) && !errors.Is(err, zvol.ErrBusy) {

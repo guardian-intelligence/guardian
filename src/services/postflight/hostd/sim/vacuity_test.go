@@ -30,9 +30,15 @@ func healthyState() WorldState {
 		Slots:       map[vm.Class]int{"c": 4},
 		SealedEver:  map[string]bool{"g1": true},
 		Reaped:      map[string]bool{},
+		Named:       map[string]bool{"l1": true, "l2": true},
+		HadResource: map[string]bool{"l1": true, "l2": true},
 		Resolves: func(executionID, _ string) bool {
 			return executionID == "e1" // only the live lease resolves
 		},
+		// Observed at the tick boundary of a synced agent, so the
+		// boundary-gated invariants are live rather than vacuously skipped.
+		Synced:   true,
+		PostTick: true,
 	}
 }
 
@@ -50,6 +56,11 @@ func TestInvariantVacuity(t *testing.T) {
 		"vm-per-lease": func(state *WorldState) {
 			state.Leases = append(state.Leases, agent.LeaseSnapshot{
 				LeaseID: "l3", State: agent.StateReady, Since: state.Now, VMID: "vm-1",
+			})
+		},
+		"orphan-vms-collected": func(state *WorldState) {
+			state.VMs = append(state.VMs, vm.Status{
+				ID: "vm-orphan", Class: "c", Phase: vm.PhaseReady, Lease: "nobody",
 			})
 		},
 		"slot-bounds": func(state *WorldState) {
@@ -72,6 +83,13 @@ func TestInvariantVacuity(t *testing.T) {
 		},
 		"failed-holds-no-vm": func(state *WorldState) {
 			state.Leases[1].VMID = "vm-9"
+		},
+		"desired-not-collected": func(state *WorldState) {
+			// The control plane still names a lease that once had resources,
+			// but the agent tracks nothing for it and no VM or workspace
+			// remains — it was silently collected while still wanted.
+			state.Named = map[string]bool{"lgone": true}
+			state.HadResource = map[string]bool{"lgone": true}
 		},
 	}
 

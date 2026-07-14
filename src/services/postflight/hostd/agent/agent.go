@@ -50,9 +50,13 @@ type Agent struct {
 	bootID     string
 	metrics    Metrics
 
-	mu          sync.Mutex
-	leases      map[string]*lease
-	desired     map[string]DesiredLease
+	mu      sync.Mutex
+	leases  map[string]*lease
+	desired map[string]DesiredLease
+	// quarantined holds lease IDs the control plane named in the last sync
+	// but whose specs we rejected. They are neither advanced nor collected:
+	// a validation failure must not read as a withdrawal.
+	quarantined map[string]bool
 	reap        []zvol.GenerationID
 	poolTargets map[vm.Class]int
 	// synced gates every destructive action: until the first successful
@@ -79,6 +83,14 @@ func New(cfg Config, zvols zvol.Driver, vms vm.Driver, credential string, hostSe
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
+	// A short secret makes checkout tokens forgeable by anyone who knows the
+	// scheme and the lease IDs; 32 bytes matches the checkout server's floor.
+	if len(hostSecret) < 32 {
+		return nil, fmt.Errorf("agent: host secret must be at least 32 bytes")
+	}
+	if credential == "" {
+		return nil, fmt.Errorf("agent: control-plane credential is required")
+	}
 	agent := &Agent{
 		cfg:         cfg,
 		zvols:       zvols,
@@ -91,6 +103,7 @@ func New(cfg Config, zvols zvol.Driver, vms vm.Driver, credential string, hostSe
 		newID:       options.NewID,
 		leases:      map[string]*lease{},
 		desired:     map[string]DesiredLease{},
+		quarantined: map[string]bool{},
 		poolTargets: map[vm.Class]int{},
 	}
 	if agent.logger == nil {
@@ -119,6 +132,14 @@ func randomID() string {
 
 // Metrics exposes the agent's counters.
 func (a *Agent) Metrics() *Metrics { return &a.metrics }
+
+// Synced reports whether the agent has completed a sync exchange in its
+// current life. Until it has, Tick refuses every destructive action.
+func (a *Agent) Synced() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.synced
+}
 
 // HandleSync applies one desired-state snapshot as if it arrived from the
 // control plane. The sim harness and tests use it in place of syncOnce.

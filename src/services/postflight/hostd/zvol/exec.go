@@ -3,6 +3,7 @@ package zvol
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -101,7 +102,13 @@ func (e *Exec) exists(ctx context.Context, dataset string) (bool, error) {
 	}
 }
 
-func isNotFound(err error) bool { return err != nil && strings.Contains(err.Error(), ErrNotFound.Error()) }
+func isNotFound(err error) bool { return errors.Is(err, ErrNotFound) }
+
+// isAlreadyPromoted recognizes a promote of a dataset that is no longer a
+// clone — the seal completed promotion on a prior, crashed attempt.
+func isAlreadyPromoted(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "not a cloned filesystem")
+}
 
 // EnsureWorkspace implements Driver.
 func (e *Exec) EnsureWorkspace(ctx context.Context, lease LeaseID, generation GenerationID, sizeBytes int64) (WorkspaceVolume, error) {
@@ -192,8 +199,16 @@ func (e *Exec) SealWorkspace(ctx context.Context, lease LeaseID, generation Gene
 	}
 	// Promote flips the clone lineage: the generation owns the history and
 	// the workspace becomes the dependent, so the workspace can die first.
-	if _, err := e.run(ctx, "promote", genDataset); err != nil {
+	// Promote is not idempotent — a retry after a crash between promote and
+	// the @sealed snapshot finds a non-clone and must skip, not fail.
+	origin, err := e.run(ctx, "get", "-H", "-o", "value", "origin", genDataset)
+	if err != nil {
 		return GenerationSnapshot{}, err
+	}
+	if strings.TrimSpace(origin) != "-" {
+		if _, err := e.run(ctx, "promote", genDataset); err != nil && !isAlreadyPromoted(err) {
+			return GenerationSnapshot{}, err
+		}
 	}
 	if _, err := e.run(ctx, "snapshot", sealed); err != nil {
 		return GenerationSnapshot{}, err

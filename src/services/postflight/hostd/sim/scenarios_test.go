@@ -226,6 +226,59 @@ func TestCancelAtEveryStage(t *testing.T) {
 	}
 }
 
+func TestOmittedLiveLeaseIsWithdrawn(t *testing.T) {
+	world := NewWorld(t, slots(2))
+	spec := runLease("l1")
+	driveToReady(t, world, spec)
+	// The control plane stops mentioning the live lease: full-state
+	// semantics make that a withdrawal. Cancel and collection land in the
+	// same tick — one pass leaves no residue at all.
+	deliver(world, 1)
+	world.Tick()
+	if world.HasLease("l1") || world.Zvols.HasWorkspace("l1") {
+		t.Fatal("withdrawn lease left residue")
+	}
+	statuses, _ := world.VMs.List(context.Background())
+	for _, status := range statuses {
+		if status.Lease == "l1" {
+			t.Fatalf("withdrawn lease still holds vm %s", status.ID)
+		}
+	}
+}
+
+func TestRejectedSpecQuarantinesInsteadOfCollects(t *testing.T) {
+	world := NewWorld(t, slots(2))
+	spec := runLease("l1")
+	vmID := driveToReady(t, world, spec)
+
+	// A later sync still names l1 but with a spec this hostd cannot accept
+	// (version skew is the realistic cause). The lease must be neither
+	// advanced nor withdrawn: a validation failure escalating to destruction
+	// of live customer state is the bug the quarantine exists to prevent.
+	corrupt := spec
+	corrupt.Workspace = agent.WorkspaceSpec{Generation: "bad/../name"}
+	deliver(world, 1, corrupt)
+	world.TickN(3)
+
+	if status, _ := world.VMs.Status(context.Background(), vm.ID(vmID)); status.Phase != vm.PhaseReady {
+		t.Fatalf("quarantined lease's vm phase %v, want ready", status.Phase)
+	}
+	if !world.Zvols.HasWorkspace("l1") {
+		t.Fatal("quarantined lease's workspace was collected")
+	}
+	if got := world.Lease("l1").State; got != agent.StateReady {
+		t.Fatalf("quarantined lease advanced to %s", got)
+	}
+
+	// The next parseable sync resumes the lease where it left off.
+	deliver(world, 1, spec)
+	world.VMs.MarkExited(vm.ID(vmID), 0)
+	world.Tick()
+	if got := world.Lease("l1").State; got != agent.StateExited {
+		t.Fatalf("lease did not resume after quarantine: %s", got)
+	}
+}
+
 func TestClaimingDeadlineFailsLease(t *testing.T) {
 	world := NewWorld(t, slots(1))
 	spec := runLease("l1")

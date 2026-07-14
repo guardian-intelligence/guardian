@@ -70,15 +70,44 @@ func (a *Agent) listVMs(ctx context.Context) (*vmView, error) {
 }
 
 func (a *Agent) stepLease(ctx context.Context, record *lease, vms *vmView) {
+	// A terminal lease that still holds a VM had its destroy fail earlier;
+	// retry it every tick until the slot is actually free. Destroy is
+	// idempotent, so this converges without leaking the slot.
 	if record.state.terminal() {
+		if record.vmID != "" {
+			a.destroyLeaseVM(ctx, record)
+		}
 		return
 	}
+
+	// A quarantined lease was named by the control plane but its spec was
+	// rejected this sync. Leave it exactly as it is — neither advance nor
+	// withdraw — so a transient validation failure never mutates it.
+	if a.quarantined[record.spec.LeaseID] {
+		return
+	}
+
 	now := a.now()
 
-	// Cancellation wins over everything except states that hold nothing.
-	if record.spec.State == DesiredCancel {
+	// Cancellation wins over everything. The desired set is full state, so
+	// a live lease the control plane no longer mentions has been withdrawn
+	// — same as an explicit cancel, just less polite.
+	if _, wanted := a.desired[record.spec.LeaseID]; record.spec.State == DesiredCancel || !wanted {
 		a.cancelLease(ctx, record)
 		return
+	}
+
+	// A seal-only lease (its runner already exited on a prior life, or the
+	// control plane is asking us to seal a workspace we still hold) must go
+	// straight to sealing — it must never claim a fresh VM and re-attach the
+	// workspace the control plane asked us to preserve unchanged. If a VM
+	// still carries the lease, fall through and let it exit first.
+	if _, hasVM := vms.byLease[record.spec.LeaseID]; record.spec.State == DesiredSeal && !hasVM {
+		if record.state != StateExited {
+			// Ensure the workspace record is populated for the seal step;
+			// a fresh post-crash record has no device yet.
+			record.enter(StateExited, now)
+		}
 	}
 
 	// Deadline enforcement: a lease stuck in any state releases its slot.

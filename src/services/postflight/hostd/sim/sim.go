@@ -65,9 +65,15 @@ type World struct {
 	SealedEver map[string]bool
 	Reaped     map[string]bool
 
-	// lastDesired mirrors the most recent sync response, for the orphan
-	// invariant.
-	lastDesired map[string]agent.DesiredLease
+	// named is every lease ID the control plane put in the most recent sync,
+	// accepted or rejected; hadResource records leases that ever had a VM or
+	// workspace. The desired-not-collected invariant quantifies over both.
+	named       map[string]bool
+	hadResource map[string]bool
+
+	// postTick is true when the world is being observed right after a
+	// completed convergence pass; orphan cleanliness only holds there.
+	postTick bool
 }
 
 // NewWorld builds a world with the given per-class slot totals.
@@ -81,7 +87,8 @@ func NewWorld(tb testing.TB, slots map[vm.Class]int) *World {
 		hostSecret:  []byte("0123456789abcdef0123456789abcdef"),
 		SealedEver:  map[string]bool{},
 		Reaped:      map[string]bool{},
-		lastDesired: map[string]agent.DesiredLease{},
+		named:       map[string]bool{},
+		hadResource: map[string]bool{},
 	}
 	// Keep attachment state coherent across the two fakes: assigning a VM
 	// holds its workspace volume open; VM death or destruction releases it.
@@ -130,14 +137,17 @@ func (w *World) Restart() {
 // Sync delivers a desired-state snapshot from the scripted control plane
 // and records it in the ledger.
 func (w *World) Sync(response agent.SyncResponse) {
-	w.lastDesired = map[string]agent.DesiredLease{}
+	w.named = map[string]bool{}
 	for _, desired := range response.Leases {
-		w.lastDesired[desired.LeaseID] = desired
+		if desired.LeaseID != "" {
+			w.named[desired.LeaseID] = true
+		}
 	}
 	for _, generation := range response.Reap {
 		w.Reaped[generation] = true
 	}
 	w.Agent.HandleSync(response)
+	w.postTick = false
 	w.CheckInvariants()
 }
 
@@ -155,6 +165,7 @@ func (w *World) Tick() {
 			w.SealedEver[snapshot.SealedGeneration] = true
 		}
 	}
+	w.postTick = true
 	w.CheckInvariants()
 }
 
@@ -227,6 +238,16 @@ func (w *World) observe() WorldState {
 		}
 		return ok
 	}
+	for _, status := range vms {
+		if status.Lease != "" {
+			w.hadResource[status.Lease] = true
+		}
+	}
+	for _, workspace := range workspaces {
+		if lease := workspaceLease(workspace.Name); lease != "" {
+			w.hadResource[lease] = true
+		}
+	}
 	return WorldState{
 		Now:         w.Clock.Now(),
 		Leases:      w.Agent.Snapshot(),
@@ -236,7 +257,10 @@ func (w *World) observe() WorldState {
 		Slots:       w.config.Slots,
 		SealedEver:  w.SealedEver,
 		Reaped:      w.Reaped,
-		Desired:     w.lastDesired,
+		Named:       w.named,
+		HadResource: w.hadResource,
 		Resolves:    resolve,
+		Synced:      w.Agent.Synced(),
+		PostTick:    w.postTick,
 	}
 }

@@ -196,10 +196,19 @@ func (a *Agent) buildReport(ctx context.Context) (SyncRequest, error) {
 func (a *Agent) applyDesired(response SyncResponse) {
 	now := a.now()
 	desired := make(map[string]DesiredLease, len(response.Leases))
+	quarantined := map[string]bool{}
 	for _, d := range response.Leases {
 		if err := d.validate(); err != nil {
+			// The control plane named this lease; we could not understand
+			// the spec (version skew is the realistic cause). Quarantine
+			// its ID so GC never mistakes a lease the control plane still
+			// wants for an orphan and destroys live customer state — a
+			// rejected input must never escalate to destruction.
 			a.logger.Error("rejecting desired lease", "err", err)
 			a.metrics.RejectedLeases.Add(1)
+			if d.LeaseID != "" {
+				quarantined[d.LeaseID] = true
+			}
 			continue
 		}
 		desired[d.LeaseID] = d
@@ -212,6 +221,7 @@ func (a *Agent) applyDesired(response SyncResponse) {
 		a.leases[d.LeaseID] = record
 	}
 	a.desired = desired
+	a.quarantined = quarantined
 
 	a.reap = a.reap[:0]
 	for _, generation := range response.Reap {
@@ -274,7 +284,14 @@ func (a *Agent) syncOnce(ctx context.Context) (time.Duration, error) {
 	a.mu.Unlock()
 
 	if response.PollAfterMillis > 0 {
-		return time.Duration(response.PollAfterMillis) * time.Millisecond, nil
+		// Clamp: a bad or hostile control-plane value must never stall the
+		// tick loop long enough to starve deadline enforcement and exit
+		// collection.
+		poll := time.Duration(response.PollAfterMillis) * time.Millisecond
+		if poll > maxPollAfter {
+			poll = maxPollAfter
+		}
+		return poll, nil
 	}
 	return 0, nil
 }
@@ -282,4 +299,5 @@ func (a *Agent) syncOnce(ctx context.Context) (time.Duration, error) {
 const (
 	syncPath             = "/api/v1/hostd/sync"
 	maxSyncResponseBytes = 4 << 20
+	maxPollAfter         = 30 * time.Second
 )
