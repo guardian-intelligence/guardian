@@ -2,6 +2,8 @@ This is a Bazel polyglot monorepo for Guardian, a free open-source reference arc
 
 The purpose is to create a free and open-source system for any one to convert a source of compute into a self-healing intelligent system (in our case, a secure, disaster-proof software company capable of generating revenue by providing value to the world) as a platform to build sophisticated software products such as Postflight, a GitHub App that speeds up your CI.
 
+Read `docs/TRIBAL_KNOWLEDGE.md` before making changes to this repository.
+
 Reference https://github.com/guardian-intelligence/verself/tree/main/docs for information relating to:
 
 * Zvol architecture

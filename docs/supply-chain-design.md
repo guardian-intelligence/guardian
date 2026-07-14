@@ -128,7 +128,7 @@ and `site-gate` on main, so nothing reaches a pin that CI did not sign
 from main history, whether the PR was opened by a human or the bot. The
 required-checks + allow-auto-merge repo settings are the enforcement's
 load-bearing half and live outside Git — re-assert them when recreating
-the repo (exact commands in TRIBAL_KNOWLEDGE.md).
+the repo (exact commands in [TRIBAL_KNOWLEDGE.md](TRIBAL_KNOWLEDGE.md)).
 
 This deliberately weakens the old invariant "pin == the digest CI builds
 from this same commit" to "pin ∈ digests the canonical identity has
