@@ -31,7 +31,7 @@ catalog:
   "@types/node": ^22.19.17
   "@types/react": ^19
   "@types/react-dom": ^19
-  "@types/three": 0.184.0
+  "@types/three": 0.185.1
   "@vitejs/plugin-react": ^6.0.1
   d3-scale: 4.0.2
   d3-shape: 3.2.0
@@ -45,7 +45,7 @@ catalog:
   react-dom: ^19.0.0
   sigstore: 5.0.0
   tailwindcss: ^4
-  three: 0.184.0
+  three: 0.185.1
   tsx: 4.23.0
   typescript: ^5.9.3
   valibot: 1.4.2
