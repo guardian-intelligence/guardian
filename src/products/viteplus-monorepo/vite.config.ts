@@ -38,7 +38,12 @@ export default {
     ],
   },
   test: {
-    include: ["apps/**/*.test.ts", "apps/**/*.test.tsx"],
+    include: [
+      "apps/**/*.test.ts",
+      "apps/**/*.test.tsx",
+      "packages/**/*.test.ts",
+      "packages/**/*.test.tsx",
+    ],
     exclude: ["**/node_modules/**", ...buildOutputIgnorePatterns],
     environment: "node",
   },
