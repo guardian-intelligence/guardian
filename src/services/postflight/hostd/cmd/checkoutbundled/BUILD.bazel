@@ -1,0 +1,17 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "checkoutbundled_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/hostd/cmd/checkoutbundled",
+    deps = [
+        "//src/services/postflight/hostd/checkoutbundle",
+    ],
+)
+
+go_binary(
+    name = "checkoutbundled",
+    embed = [":checkoutbundled_lib"],
+    pure = "on",
+    visibility = ["//visibility:public"],
+)
