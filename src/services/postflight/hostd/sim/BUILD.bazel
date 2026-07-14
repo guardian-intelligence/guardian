@@ -1,0 +1,31 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "sim",
+    srcs = [
+        "invariants.go",
+        "sim.go",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/hostd/sim",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/services/postflight/hostd/agent",
+        "//src/services/postflight/hostd/vm",
+        "//src/services/postflight/hostd/zvol",
+    ],
+)
+
+go_test(
+    name = "sim_test",
+    srcs = [
+        "scenarios_test.go",
+        "vacuity_test.go",
+    ],
+    embed = [":sim"],
+    deps = [
+        "//src/services/postflight/hostd/agent",
+        "//src/services/postflight/hostd/checkoutbundle",
+        "//src/services/postflight/hostd/vm",
+        "//src/services/postflight/hostd/zvol",
+    ],
+)

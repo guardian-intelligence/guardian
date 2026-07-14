@@ -1,0 +1,18 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "zvol",
+    srcs = [
+        "exec.go",
+        "fake.go",
+        "zvol.go",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/hostd/zvol",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "zvol_test",
+    srcs = ["exec_test.go"],
+    embed = [":zvol"],
+)

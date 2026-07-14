@@ -1,0 +1,11 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "vm",
+    srcs = [
+        "fake.go",
+        "vm.go",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vm",
+    visibility = ["//visibility:public"],
+)

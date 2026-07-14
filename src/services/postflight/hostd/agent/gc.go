@@ -1,0 +1,85 @@
+package agent
+
+import (
+	"context"
+	"errors"
+
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/zvol"
+)
+
+// collectOrphans reclaims derived state whose owner is gone. Three shapes:
+// terminal leases the control plane has acknowledged (by omitting them from
+// the desired set), VMs bound to leases hostd no longer knows, and workspace
+// volumes on disk with no corresponding lease. Sealed generations are never
+// touched here — reaping those is exclusively a control-plane verb.
+//
+// The synced gate in Tick means none of this runs before the first
+// successful exchange after a restart, when "unknown" would still mean "not
+// heard about yet" rather than "orphaned".
+func (a *Agent) collectOrphans(ctx context.Context, vms *vmView) {
+	// Terminal, acknowledged leases: destroy the workspace, forget the lease.
+	for _, id := range sortedLeaseIDs(a.leases) {
+		record := a.leases[id]
+		if !record.state.terminal() {
+			continue
+		}
+		if _, stillDesired := a.desired[id]; stillDesired {
+			continue
+		}
+		err := a.zvols.DestroyWorkspace(ctx, zvol.LeaseID(id))
+		switch {
+		case err == nil, errors.Is(err, zvol.ErrNotFound):
+			delete(a.leases, id)
+		case errors.Is(err, zvol.ErrBusy):
+			// Still attached somewhere; the VM sweep below clears it and a
+			// later tick retries.
+		default:
+			a.logger.Error("collecting workspace", "lease", id, "err", err)
+		}
+	}
+
+	// VMs whose lease hostd does not know: either a crash predates the
+	// lease's terminal report, or the control plane forgot the lease while
+	// the VM lived. The desired set is truth; unknown means destroy.
+	for id, status := range vms.byID {
+		if status.Lease == "" {
+			continue // pool VMs belong to the governor
+		}
+		if _, known := a.leases[status.Lease]; known {
+			continue
+		}
+		if err := a.vms.Destroy(ctx, id); err != nil {
+			a.logger.Error("collecting orphan vm", "vm", id, "err", err)
+			continue
+		}
+		a.metrics.OrphansDestroyed.Add(1)
+	}
+
+	// Workspace volumes with no lease record: leftovers from a crash after
+	// the control plane already forgot the lease.
+	_, workspaces, err := a.zvols.Inventory(ctx)
+	if err != nil {
+		a.logger.Error("inventory for gc", "err", err)
+		return
+	}
+	for _, workspace := range workspaces {
+		leaseID := workspaceLease(workspace.Name)
+		if leaseID == "" {
+			continue
+		}
+		if _, known := a.leases[leaseID]; known {
+			continue
+		}
+		if _, desired := a.desired[leaseID]; desired {
+			continue
+		}
+		err := a.zvols.DestroyWorkspace(ctx, zvol.LeaseID(leaseID))
+		if err != nil && !errors.Is(err, zvol.ErrNotFound) && !errors.Is(err, zvol.ErrBusy) {
+			a.logger.Error("collecting orphan workspace", "workspace", workspace.Name, "err", err)
+			continue
+		}
+		if err == nil {
+			a.metrics.OrphansDestroyed.Add(1)
+		}
+	}
+}
