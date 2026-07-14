@@ -359,15 +359,20 @@ func TestBundleMissingRefFallsBackToSha(t *testing.T) {
 func TestBundleTooLarge(t *testing.T) {
 	requireGit(t)
 	upstreamRoot, sha := makeUpstream(t)
-	service := newTestService(t, upstreamRoot, func(cfg *Config) { cfg.MaxPackBytes = 16 })
+	store := t.TempDir()
+	service := newTestService(t, upstreamRoot, func(cfg *Config) {
+		cfg.StoreDir = store
+		cfg.MaxPackBytes = 16
+	})
 	response := requestBundle(t, service, nil, validBody(sha))
 	if response.status != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status %d, want 413 (body %s)", response.status, response.body)
 	}
 	assertJSONError(t, response)
-	// The failed pack must not have been published to the cache.
-	follow := requestBundle(t, newTestService(t, upstreamRoot, nil), nil, validBody(sha))
-	assertServedPack(t, follow, sha, false)
+	// The failed pack must not have been published to the cache: a service
+	// sharing the same store must rebuild the pack, not serve a cached one.
+	follow := newTestService(t, upstreamRoot, func(cfg *Config) { cfg.StoreDir = store })
+	assertServedPack(t, requestBundle(t, follow, nil, validBody(sha)), sha, false)
 }
 
 func TestBundleThrottled(t *testing.T) {

@@ -239,6 +239,55 @@ describe("checkout control-plane HTTP client", () => {
     });
   });
 
+  it("refuses to follow a redirect instead of re-sending credentials", async () => {
+    let trapRequests = 0;
+    const trap = createServer((_incoming, outgoing) => {
+      trapRequests += 1;
+      outgoing.writeHead(200).end();
+    });
+    await new Promise<void>((resolve, reject) => {
+      trap.once("error", reject);
+      trap.listen(0, "127.0.0.1", resolve);
+    });
+    const trapAddress = trap.address() as AddressInfo;
+    const origin = createServer((_incoming, outgoing) => {
+      outgoing
+        .writeHead(307, {
+          Location: `http://127.0.0.1:${trapAddress.port}/exfiltrate`,
+        })
+        .end();
+    });
+    await new Promise<void>((resolve, reject) => {
+      origin.once("error", reject);
+      origin.listen(0, "127.0.0.1", resolve);
+    });
+
+    try {
+      const address = origin.address() as AddressInfo;
+      await withDestination(async (baseRequest) => {
+        const request = {
+          ...baseRequest,
+          endpoint: new URL(
+            `http://127.0.0.1:${address.port}/internal/sandbox/v1/github-checkout/bundle`,
+          ),
+        };
+        const result = await Effect.runPromise(
+          execute(globalThis.fetch, request).pipe(Effect.either),
+        );
+        expect(Either.isLeft(result)).toBe(true);
+        if (Either.isLeft(result)) expect(result.left._tag).toBe("HostUnavailable");
+        expect(trapRequests).toBe(0);
+      });
+    } finally {
+      for (const server of [origin, trap]) {
+        server.closeAllConnections();
+        await new Promise<void>((resolve, reject) => {
+          server.close((error) => (error === undefined ? resolve() : reject(error)));
+        });
+      }
+    }
+  });
+
   it.each([
     [401, "HostUnauthorized"],
     [403, "HostUnauthorized"],
