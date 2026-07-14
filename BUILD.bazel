@@ -5,7 +5,6 @@ exports_files([
     "MODULE.bazel",
     ".bazelignore",
     "AGENTS.md",
-    "TRIBAL_KNOWLEDGE.md",
 ])
 
 # A workflow using a third-party action ref that the GitHub-side allowlist

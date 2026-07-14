@@ -85,5 +85,3 @@ GHCR exception is documented alongside the App.
 ## Refreshing this inventory
 
 An organization owner with `read:org` can list the installations with:
-
-

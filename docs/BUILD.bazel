@@ -1,4 +1,6 @@
 exports_files([
+    "TRIBAL_KNOWLEDGE.md",
+    "github-apps.md",
     "openbao-design.md",
     "openbao-residue-inventory.md",
     "supply-chain-design.md",
