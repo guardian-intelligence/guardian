@@ -1,0 +1,27 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "checkoutbundle",
+    srcs = [
+        "checkoutbundle.go",
+        "git.go",
+        "handler.go",
+        "identity.go",
+        "reaper.go",
+        "token.go",
+        "validate.go",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/hostd/checkoutbundle",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "checkoutbundle_test",
+    srcs = [
+        "handler_test.go",
+        "reaper_test.go",
+        "token_test.go",
+        "validate_test.go",
+    ],
+    embed = [":checkoutbundle"],
+)
