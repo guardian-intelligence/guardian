@@ -95,6 +95,10 @@ const acquirePack = (fetchImplementation: typeof fetch, request: CheckoutBundleR
           "X-Postflight-Execution-Id": request.executionId,
         },
         method: "POST",
+        // A redirect would re-send the request body — including the GitHub
+        // token — to whatever host the origin names. The control-plane
+        // endpoint never redirects, so treat any redirect as hostile.
+        redirect: "error",
         signal,
       });
 
