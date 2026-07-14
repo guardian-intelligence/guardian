@@ -2,6 +2,7 @@ package checkoutbundle
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -22,10 +23,35 @@ func TestDeriveCheckoutTokenIsDeterministicAndScoped(t *testing.T) {
 			t.Fatalf("token collided under %s", name)
 		}
 	}
-	// The id separator must not be forgeable by shifting bytes between the
-	// two identifiers.
-	if DeriveCheckoutToken(secret, "ab", "c") == DeriveCheckoutToken(secret, "a", "bc") {
-		t.Fatal("identifier boundary is ambiguous")
+	// Length-prefixing makes the identifier boundary unforgeable: shifting
+	// bytes across it — including across a literal colon — cannot alias.
+	for _, pair := range [][4]string{
+		{"ab", "c", "a", "bc"},
+		{"a:b", "c", "a", "b:c"},
+	} {
+		if DeriveCheckoutToken(secret, pair[0], pair[1]) ==
+			DeriveCheckoutToken(secret, pair[2], pair[3]) {
+			t.Fatalf("identifier boundary is ambiguous for (%q,%q) vs (%q,%q)", pair[0], pair[1], pair[2], pair[3])
+		}
+	}
+}
+
+type erroringResolver struct{}
+
+func (erroringResolver) ResolveActiveLease(context.Context, string, string) (LeaseIdentity, bool, error) {
+	return LeaseIdentity{}, false, errors.New("lease store is down")
+}
+
+func TestAuthenticateResolverErrorIsRetryable(t *testing.T) {
+	secret := []byte("0123456789abcdef0123456789abcdef")
+	service := New(Config{StoreDir: t.TempDir(), HostSecret: secret}, erroringResolver{})
+	r := httptest.NewRequest("POST", BundlePath, nil)
+	r.Header.Set(executionIDHeader, "exec-1")
+	r.Header.Set(attemptIDHeader, "attempt-1")
+	r.Header.Set("Authorization", "Bearer "+DeriveCheckoutToken(secret, "exec-1", "attempt-1"))
+	_, err := service.authenticate(context.Background(), r)
+	if !errors.Is(err, errResolverUnavailable) {
+		t.Fatalf("resolver error must surface as retryable, got %v", err)
 	}
 }
 

@@ -82,6 +82,39 @@ func TestSweepBundleBudgetEvictsOldestFirst(t *testing.T) {
 	}
 }
 
+func TestSweepReapsStaleTempPacks(t *testing.T) {
+	service := New(Config{
+		StoreDir:   t.TempDir(),
+		HostSecret: testSecret,
+		BundleTTL:  24 * time.Hour,
+	}, &StaticResolver{})
+	dir := filepath.Join(service.cfg.StoreDir, "bundles", "repoa", strings.Repeat("a", 40))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	staleTmp := filepath.Join(dir, ".checkout-abc123.pack")
+	if err := os.WriteFile(staleTmp, make([]byte, 50), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(staleTmp, old, old); err != nil {
+		t.Fatal(err)
+	}
+	freshTmp := filepath.Join(dir, ".checkout-def456.pack")
+	if err := os.WriteFile(freshTmp, make([]byte, 50), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	service.SweepOnce()
+
+	if _, err := os.Stat(staleTmp); !os.IsNotExist(err) {
+		t.Fatal("stale temp pack survived the sweep")
+	}
+	if _, err := os.Stat(freshTmp); err != nil {
+		t.Fatal("fresh temp pack was reaped prematurely")
+	}
+}
+
 func TestSweepMirrorTTL(t *testing.T) {
 	service := New(Config{
 		StoreDir:   t.TempDir(),
