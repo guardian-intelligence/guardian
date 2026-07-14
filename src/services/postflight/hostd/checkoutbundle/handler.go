@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"os"
 	"strconv"
 	"time"
 )
@@ -32,11 +31,16 @@ func (s *Service) handleBundle(w http.ResponseWriter, r *http.Request) {
 	identity, err := s.authenticate(r.Context(), r)
 	if err != nil {
 		s.Metrics.Rejected.Add(1)
+		status, message := http.StatusUnauthorized, "not authorized"
+		if errors.Is(err, errResolverUnavailable) {
+			status, message = http.StatusServiceUnavailable, "lease lookup is unavailable"
+			w.Header().Set("Retry-After", "2")
+		}
 		s.cfg.Logger.Info("checkout request rejected",
-			"status", http.StatusUnauthorized,
+			"status", status,
 			"execution_id", r.Header.Get(executionIDHeader),
 			"attempt_id", r.Header.Get(attemptIDHeader))
-		writeError(w, http.StatusUnauthorized, "not authorized")
+		writeError(w, status, message)
 		return
 	}
 
@@ -78,13 +82,7 @@ func (s *Service) handleBundle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, message)
 		return
 	}
-
-	file, err := os.Open(bundle.Path)
-	if err != nil {
-		s.Metrics.Rejected.Add(1)
-		writeError(w, http.StatusInternalServerError, "bundle open failed")
-		return
-	}
+	file := bundle.File
 	defer func() { _ = file.Close() }()
 
 	w.Header().Set("Content-Type", packContentType)

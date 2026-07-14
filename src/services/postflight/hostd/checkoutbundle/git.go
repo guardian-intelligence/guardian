@@ -29,9 +29,12 @@ var (
 	errUpstream = errors.New("origin fetch failed")
 )
 
-// preparedBundle describes a servable pack.
+// preparedBundle describes a servable pack. File is opened under the repo
+// lock and owned by the caller, which must close it: holding the descriptor
+// makes the pack immune to a concurrent reap (POSIX keeps the bytes alive
+// until the last handle closes).
 type preparedBundle struct {
-	Path      string
+	File      *os.File
 	SizeBytes int64
 	CacheHit  bool
 }
@@ -49,15 +52,19 @@ func (s *Service) prepareBundle(ctx context.Context, identity LeaseIdentity, spe
 
 	bundlePath := s.bundlePath(repoKey, spec.SHA)
 	s.touchMirrorStamp(repoKey)
-	if stat, err := os.Stat(bundlePath); err == nil && stat.Size() > 0 {
+	if file, size, ok := openIfNonEmpty(bundlePath); ok {
 		now := time.Now()
 		_ = os.Chtimes(bundlePath, now, now) // LRU recency for the reaper
 		s.Metrics.CacheHits.Add(1)
-		return preparedBundle{Path: bundlePath, SizeBytes: stat.Size(), CacheHit: true}, nil
+		return preparedBundle{File: file, SizeBytes: size, CacheHit: true}, nil
 	}
 
 	mirrorDir := s.mirrorDir(repoKey)
-	if err := s.ensureMirror(ctx, mirrorDir, spec.Repository); err != nil {
+	// The clone URL is built from the lease's own repository name, never the
+	// request string: validateRequest already proved the two equal under case
+	// folding, and the lease is the authority on which repository this host may
+	// fetch.
+	if err := s.ensureMirror(ctx, mirrorDir, identity.RepositoryFullName); err != nil {
 		return preparedBundle{}, err
 	}
 	if err := s.fetchCommit(ctx, mirrorDir, spec); err != nil {
@@ -66,11 +73,27 @@ func (s *Service) prepareBundle(ctx context.Context, identity LeaseIdentity, spe
 	if err := s.createBundle(ctx, mirrorDir, bundlePath, spec.SHA); err != nil {
 		return preparedBundle{}, err
 	}
-	stat, err := os.Stat(bundlePath)
-	if err != nil {
-		return preparedBundle{}, err
+	file, size, ok := openIfNonEmpty(bundlePath)
+	if !ok {
+		return preparedBundle{}, fmt.Errorf("bundle disappeared after creation")
 	}
-	return preparedBundle{Path: bundlePath, SizeBytes: stat.Size(), CacheHit: false}, nil
+	return preparedBundle{File: file, SizeBytes: size, CacheHit: false}, nil
+}
+
+// openIfNonEmpty opens the pack and returns its size, reporting false when it
+// is absent or empty. Called under the repo lock so the file cannot be reaped
+// between the open and the size read.
+func openIfNonEmpty(path string) (*os.File, int64, bool) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, 0, false
+	}
+	stat, err := file.Stat()
+	if err != nil || stat.Size() == 0 {
+		_ = file.Close()
+		return nil, 0, false
+	}
+	return file, stat.Size(), true
 }
 
 func (s *Service) mirrorDir(repoKey string) string {
@@ -126,17 +149,18 @@ func (s *Service) ensureMirror(ctx context.Context, mirrorDir, repository string
 // deleted branches, so a ref-fetch failure is logged and not fatal by itself.
 func (s *Service) fetchCommit(ctx context.Context, mirrorDir string, spec checkoutSpec) error {
 	env := credentialEnv(s.remoteHost(), spec.GitHubToken)
-	fetched := false
+	refFetchSucceeded := false
 	if spec.Ref != "" {
-		fetched = true
 		if err := s.runGit(ctx, "fetch_ref", mirrorDir, env,
 			"fetch", "--force", "--no-tags", "origin", "+"+spec.Ref+":"+requestedRef); err != nil {
 			s.cfg.Logger.Info("checkout ref fetch failed; falling back to sha fetch",
 				"ref", spec.Ref, "error", boundedGitError(err))
+		} else {
+			refFetchSucceeded = true
 		}
 	}
 	if err := s.runGit(ctx, "cat_file_ref", mirrorDir, nil, "cat-file", "-e", spec.SHA+"^{commit}"); err == nil {
-		if fetched {
+		if refFetchSucceeded {
 			s.Metrics.MirrorFetches.Add(1)
 		}
 		return nil
@@ -166,7 +190,6 @@ func classifyFetchError(err error) error {
 		"no such remote ref",
 		"unadvertised object",
 		"authentication failed",
-		"could not read from remote repository",
 		"access denied",
 	} {
 		if strings.Contains(message, terminal) {
@@ -209,8 +232,10 @@ func (s *Service) writePack(ctx context.Context, mirrorDir, sha string, out io.W
 
 	revList := exec.CommandContext(ctx, "git", "rev-list", "--objects", "--no-object-names", "-1", sha)
 	revList.Dir = mirrorDir
+	revList.Env = s.gitEnv(nil)
 	packObjects := exec.CommandContext(ctx, "git", "pack-objects", "--stdout")
 	packObjects.Dir = mirrorDir
+	packObjects.Env = s.gitEnv(nil)
 
 	var revErr, packErr strings.Builder
 	revList.Stderr = limitBuilder(&revErr)
@@ -287,6 +312,22 @@ func credentialEnv(host, token string) []string {
 	}
 }
 
+// gitEnv builds a minimal, controlled environment for a git child. It does
+// not inherit the daemon's environment: an inherited GIT_TRACE/GIT_CURL_VERBOSE
+// would print the extraheader token to stderr, and an inherited system/user
+// gitconfig could rewrite URLs or attach an unrelated credential helper to a
+// tenant-driven fetch. Only PATH and the credential vars carry over.
+func (s *Service) gitEnv(extraEnv []string) []string {
+	env := []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + s.cfg.StoreDir,
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_TERMINAL_PROMPT=0",
+	}
+	return append(env, extraEnv...)
+}
+
 // runGit executes one git command under the configured timeout. The label
 // names the step in errors; stderr is captured bounded and only ever
 // surfaces through boundedGitError.
@@ -297,7 +338,7 @@ func (s *Service) runGit(ctx context.Context, label, dir string, extraEnv []stri
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	cmd.Env = append(os.Environ(), extraEnv...)
+	cmd.Env = s.gitEnv(extraEnv)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		bounded := output

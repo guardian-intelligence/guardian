@@ -79,7 +79,10 @@ func run(logger *slog.Logger) error {
 
 	listenAddr := os.Getenv("CHECKOUT_LISTEN_ADDR")
 	if listenAddr == "" {
-		listenAddr = ":8480"
+		// Loopback by default: the endpoint carries tenant GitHub tokens over
+		// plaintext HTTP, so binding beyond the guest-facing bridge must be a
+		// deliberate CHECKOUT_LISTEN_ADDR choice, not a default.
+		listenAddr = "127.0.0.1:8480"
 	}
 	server := &http.Server{
 		Addr:              listenAddr,

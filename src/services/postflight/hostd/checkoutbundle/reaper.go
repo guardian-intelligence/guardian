@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -50,7 +51,19 @@ func (s *Service) sweepBundles() (removed int, freed int64) {
 	root := filepath.Join(s.cfg.StoreDir, "bundles")
 	var entries []bundleEntry
 	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || info.Name() != bundleFilename {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		// Temp packs left by a crash mid-createBundle are otherwise invisible
+		// to TTL and budget forever; count and reap the stale ones.
+		if info.Name() != bundleFilename {
+			if strings.HasPrefix(info.Name(), ".checkout-") &&
+				info.ModTime().Before(time.Now().Add(-s.cfg.BundleTTL)) {
+				if err := os.Remove(path); err == nil {
+					removed++
+					freed += info.Size()
+				}
+			}
 			return nil
 		}
 		entries = append(entries, bundleEntry{path: path, modTime: info.ModTime(), size: info.Size()})
@@ -87,10 +100,10 @@ func (s *Service) sweepBundles() (removed int, freed int64) {
 	return removed, freed
 }
 
-// removeBundle deletes a pack and its per-SHA directory. It does not take
-// the repo lock: the rename-into-place protocol means a concurrent request
-// either sees the pack before removal (and serves the already-open file —
-// POSIX keeps the bytes alive) or misses and rebuilds.
+// removeBundle deletes a pack and its per-SHA directory. It needs no lock: a
+// request that already opened the pack keeps serving it (POSIX holds the bytes
+// until the descriptor closes), and one that has not yet opened it simply
+// misses and rebuilds under the repo lock.
 func (s *Service) removeBundle(path string) bool {
 	if err := os.Remove(path); err != nil {
 		return false

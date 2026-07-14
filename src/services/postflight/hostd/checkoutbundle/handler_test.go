@@ -259,6 +259,23 @@ func TestBundleAuthenticationFailures(t *testing.T) {
 	}
 }
 
+func TestBundleResolverUnavailableIsRetryable(t *testing.T) {
+	service := New(Config{StoreDir: t.TempDir(), HostSecret: testSecret}, erroringResolver{})
+	payload, _ := json.Marshal(validBody(strings.Repeat("a", 40)))
+	r := httptest.NewRequest("POST", BundlePath, bytes.NewReader(payload))
+	r.Header.Set(executionIDHeader, testExecution)
+	r.Header.Set(attemptIDHeader, testAttempt)
+	r.Header.Set("Authorization", "Bearer "+DeriveCheckoutToken(testSecret, testExecution, testAttempt))
+	w := httptest.NewRecorder()
+	service.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status %d, want 503", w.Code)
+	}
+	if w.Header().Get("Retry-After") == "" {
+		t.Fatal("Retry-After missing on 503")
+	}
+}
+
 func TestBundleRepositoryOutsideLease(t *testing.T) {
 	requireGit(t)
 	upstreamRoot, sha := makeUpstream(t)
