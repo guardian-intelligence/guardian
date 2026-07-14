@@ -146,11 +146,15 @@ func (a *Agent) stepLease(ctx context.Context, record *lease, vms *vmView) {
 		}
 		id := candidates[0]
 		vms.warm[class] = candidates[1:]
+		// Bind the VM to the lease before Assign: an ambiguous failure
+		// (delivered guest-side, then timed out) must destroy the VM via the
+		// failure path, never strand a live runner on a lease hostd reports
+		// as failed.
+		record.vmID = string(id)
 		if err := a.vms.Assign(ctx, id, a.assignment(record)); err != nil {
 			a.failLease(ctx, record, "assign: "+err.Error())
 			return
 		}
-		record.vmID = string(id)
 		record.enter(StateAssigning, now)
 
 	case StateAssigning, StateReady:
@@ -173,6 +177,11 @@ func (a *Agent) stepLease(ctx context.Context, record *lease, vms *vmView) {
 		}
 
 	case StateExited:
+		// A failed destroy at exit observation leaves the dead runner's VM
+		// holding a slot; retry until it is actually gone.
+		if record.vmID != "" {
+			a.destroyLeaseVM(ctx, record)
+		}
 		if record.spec.State != DesiredSeal {
 			return // waiting for the control plane's decision
 		}

@@ -26,6 +26,11 @@ func (a *Agent) collectOrphans(ctx context.Context, vms *vmView) {
 		if _, stillDesired := a.desired[id]; stillDesired {
 			continue
 		}
+		if a.quarantined[id] {
+			// The control plane still names this lease; we just could not
+			// parse the spec. Absence from the desired set is not an ack.
+			continue
+		}
 		err := a.zvols.DestroyWorkspace(ctx, zvol.LeaseID(id))
 		switch {
 		case err == nil, errors.Is(err, zvol.ErrNotFound):
@@ -81,12 +86,17 @@ func (a *Agent) collectOrphans(ctx context.Context, vms *vmView) {
 			continue // rejected spec, not an orphan; preserve the workspace
 		}
 		err := a.zvols.DestroyWorkspace(ctx, zvol.LeaseID(leaseID))
-		if err != nil && !errors.Is(err, zvol.ErrNotFound) && !errors.Is(err, zvol.ErrBusy) {
-			a.logger.Error("collecting orphan workspace", "workspace", workspace.Name, "err", err)
-			continue
-		}
-		if err == nil {
+		switch {
+		case err == nil:
 			a.metrics.OrphansDestroyed.Add(1)
+		case errors.Is(err, zvol.ErrNotFound):
+		case errors.Is(err, zvol.ErrBusy):
+			// Nothing hostd knows about should hold an orphan open; a
+			// dependent un-promoted clone from a crashed seal can. Surface it
+			// — this leak is otherwise invisible to inventory.
+			a.logger.Warn("orphan workspace is busy", "workspace", workspace.Name)
+		default:
+			a.logger.Error("collecting orphan workspace", "workspace", workspace.Name, "err", err)
 		}
 	}
 }

@@ -18,6 +18,10 @@ type LeaseSnapshot struct {
 	ExitCode         int
 	Reason           string
 	SealedGeneration string
+	// Quarantined marks a lease whose latest spec was rejected: its
+	// lifecycle (and therefore its deadlines) is frozen until a parseable
+	// spec arrives.
+	Quarantined bool
 }
 
 // Snapshot returns every lease the agent currently tracks, ordered by ID.
@@ -37,6 +41,7 @@ func (a *Agent) Snapshot() []LeaseSnapshot {
 			ExitCode:         record.exit,
 			Reason:           record.reason,
 			SealedGeneration: record.sealGen,
+			Quarantined:      a.quarantined[record.spec.LeaseID],
 		})
 	}
 	sort.Slice(snapshots, func(i, j int) bool { return snapshots[i].LeaseID < snapshots[j].LeaseID })

@@ -36,6 +36,7 @@ func TestSyncExchange(t *testing.T) {
 			t.Errorf("decoding request: %v", err)
 		}
 		json.NewEncoder(w).Encode(SyncResponse{
+			BootID: gotRequest.BootID,
 			Leases: []DesiredLease{{
 				LeaseID:            "l1",
 				State:              DesiredRun,
@@ -88,6 +89,47 @@ func TestSyncRejectsNon200(t *testing.T) {
 	instance.Tick(context.Background())
 	if instance.synced {
 		t.Fatal("agent considers itself synced after a failed exchange")
+	}
+}
+
+func TestSyncDropsResponseWithoutBootIDEcho(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// A default-constructed (or misrouted) full-state response would
+		// cancel every job on the host; the missing echo must reject it.
+		json.NewEncoder(w).Encode(SyncResponse{})
+	}))
+	defer server.Close()
+	instance := testAgent(t, server.URL)
+	if _, err := instance.syncOnce(context.Background()); err == nil {
+		t.Fatal("expected an error on a response without the boot_id echo")
+	}
+	if instance.Synced() {
+		t.Fatal("agent applied a response that was not computed for it")
+	}
+}
+
+func TestSyncClampsPollAfter(t *testing.T) {
+	cases := map[int]time.Duration{
+		1:       minPollAfter,
+		3600000: maxPollAfter,
+	}
+	for millis, want := range cases {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var request SyncRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Errorf("decoding request: %v", err)
+			}
+			json.NewEncoder(w).Encode(SyncResponse{BootID: request.BootID, PollAfterMillis: millis})
+		}))
+		instance := testAgent(t, server.URL)
+		pollAfter, err := instance.syncOnce(context.Background())
+		server.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pollAfter != want {
+			t.Fatalf("poll_after_millis=%d clamped to %v, want %v", millis, pollAfter, want)
+		}
 	}
 }
 

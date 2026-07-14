@@ -179,10 +179,15 @@ func checkSealedSurvives(state WorldState) string {
 }
 
 // deadline-release: no lease sits in a bounded state past its deadline by
-// more than one tick's worth of slack.
+// more than one tick's worth of slack. Quarantined leases are exempt: their
+// lifecycle is deliberately frozen, and the agent resets the deadline clock
+// when a parseable spec lifts the quarantine.
 func checkDeadlineRelease(state WorldState) string {
 	const slack = time.Second
 	for _, lease := range state.Leases {
+		if lease.Quarantined {
+			continue
+		}
 		deadline, bounded := agent.StateDeadline(lease.State)
 		if !bounded {
 			continue

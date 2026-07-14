@@ -53,7 +53,16 @@ type GenerationReport struct {
 }
 
 // SyncResponse is the control plane's full desired state for this host.
+//
+// Full state cuts both ways: an authenticated response with zero leases
+// means "cancel everything on this host", by design — there is no separate
+// drain verb. The BootID echo is the guard that confines that power to
+// responses actually computed for this request: a stale, misrouted, or
+// default-constructed response fails the echo and is dropped whole.
 type SyncResponse struct {
+	// BootID must echo the request's boot_id; syncOnce drops the response
+	// otherwise.
+	BootID string         `json:"boot_id"`
 	Leases []DesiredLease `json:"leases"`
 	// Reap names generations to destroy. Reaping is exclusively a
 	// control-plane decision: node-local generations are the only copy.
@@ -214,6 +223,13 @@ func (a *Agent) applyDesired(response SyncResponse) {
 		desired[d.LeaseID] = d
 		if existing, ok := a.leases[d.LeaseID]; ok {
 			existing.spec = d
+			if a.quarantined[d.LeaseID] {
+				// Quarantine froze the lifecycle; the time it consumed must
+				// not count against the state deadline, or the first
+				// parseable sync would execute a stale deadline against a
+				// healthy job.
+				existing.since = now
+			}
 			continue
 		}
 		record := &lease{spec: d}
@@ -278,18 +294,27 @@ func (a *Agent) syncOnce(ctx context.Context) (time.Duration, error) {
 	if err := decoder.Decode(&response); err != nil {
 		return 0, fmt.Errorf("decoding sync response: %w", err)
 	}
+	if response.BootID != a.bootID {
+		// A full-state response with zero leases cancels every job on this
+		// host, so a response that was not computed for this exact request
+		// must never be applied.
+		return 0, fmt.Errorf("sync: response boot_id %q does not echo %q", response.BootID, a.bootID)
+	}
 
 	a.mu.Lock()
 	a.applyDesired(response)
 	a.mu.Unlock()
 
 	if response.PollAfterMillis > 0 {
-		// Clamp: a bad or hostile control-plane value must never stall the
-		// tick loop long enough to starve deadline enforcement and exit
-		// collection.
+		// Clamp both ways: a bad or hostile control-plane value must neither
+		// stall the tick loop long enough to starve deadline enforcement nor
+		// spin sync exchanges at machine speed.
 		poll := time.Duration(response.PollAfterMillis) * time.Millisecond
 		if poll > maxPollAfter {
 			poll = maxPollAfter
+		}
+		if poll < minPollAfter {
+			poll = minPollAfter
 		}
 		return poll, nil
 	}
@@ -300,4 +325,5 @@ const (
 	syncPath             = "/api/v1/hostd/sync"
 	maxSyncResponseBytes = 4 << 20
 	maxPollAfter         = 30 * time.Second
+	minPollAfter         = 250 * time.Millisecond
 )

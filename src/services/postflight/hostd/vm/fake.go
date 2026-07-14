@@ -16,6 +16,11 @@ type Fake struct {
 
 	// Fail, when non-nil, is consulted before every operation.
 	Fail func(op string, id ID) error
+	// FailAfter, when non-nil, is consulted after an operation has taken
+	// effect: the mutation lands and the call still returns an error. This
+	// is the ambiguous-failure shape real drivers have (a QMP timeout after
+	// the guest acted) that a fail-before-mutating fake cannot model.
+	FailAfter func(op string, id ID) error
 	// OnAttach and OnDetach let the harness mirror attachment state into the
 	// zvol fake so busy-volume semantics stay coherent across the two.
 	OnAttach func(device string)
@@ -82,6 +87,9 @@ func (f *Fake) Assign(_ context.Context, id ID, assignment Assignment) error {
 		f.OnAttach(assignment.WorkspaceDevice)
 	}
 	f.journal("assign %s device=%s", id, assignment.WorkspaceDevice)
+	if f.FailAfter != nil {
+		return f.FailAfter("assign", id)
+	}
 	return nil
 }
 

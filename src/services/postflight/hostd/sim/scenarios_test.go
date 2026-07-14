@@ -2,6 +2,7 @@ package sim
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,8 @@ import (
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vm"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/zvol"
 )
+
+var errAssignTimeout = errors.New("qmp timeout delivering assignment")
 
 const class = "postflight-4cpu-ubuntu-2404"
 
@@ -276,6 +279,113 @@ func TestRejectedSpecQuarantinesInsteadOfCollects(t *testing.T) {
 	world.Tick()
 	if got := world.Lease("l1").State; got != agent.StateExited {
 		t.Fatalf("lease did not resume after quarantine: %s", got)
+	}
+}
+
+func TestRejectedSpecOnTerminalLeaseIsNotCollected(t *testing.T) {
+	world := NewWorld(t, slots(1))
+	spec := runLease("l1")
+	// Starve the claim so the lease fails terminally; its workspace holds
+	// the only copy of whatever the job left behind.
+	world.Sync(agent.SyncResponse{Leases: []agent.DesiredLease{spec}})
+	world.Tick()
+	deadline, _ := agent.StateDeadline(agent.StateClaiming)
+	world.Advance(deadline + time.Second)
+	world.Tick()
+	if got := world.Lease("l1").State; got != agent.StateFailed {
+		t.Fatalf("state %s, want failed", got)
+	}
+
+	// The control plane still names l1, but with a spec this hostd cannot
+	// parse. Terminal + not-in-desired must not read as an ack.
+	corrupt := spec
+	corrupt.Workspace = agent.WorkspaceSpec{Generation: "bad/../name"}
+	deliver(world, 0, corrupt)
+	world.TickN(2)
+	if !world.HasLease("l1") {
+		t.Fatal("quarantined terminal lease was forgotten")
+	}
+	if !world.Zvols.HasWorkspace("l1") {
+		t.Fatal("quarantined terminal lease's workspace was collected")
+	}
+
+	// A genuine ack — the control plane stops naming it — collects it.
+	deliver(world, 0)
+	world.Tick()
+	if world.HasLease("l1") || world.Zvols.HasWorkspace("l1") {
+		t.Fatal("acknowledged terminal lease left residue")
+	}
+}
+
+func TestQuarantineFreezesDeadlines(t *testing.T) {
+	world := NewWorld(t, slots(2))
+	spec := runLease("l1")
+	deliver(world, 1, spec)
+	world.Tick()
+	bootAll(world)
+	world.Tick()
+	if got := world.Lease("l1").State; got != agent.StateAssigning {
+		t.Fatalf("state %s, want assigning", got)
+	}
+
+	// Version skew quarantines the lease for far longer than the assigning
+	// deadline. The guest is healthy the whole time.
+	corrupt := spec
+	corrupt.Workspace = agent.WorkspaceSpec{Generation: "bad/../name"}
+	deliver(world, 1, corrupt)
+	deadline, _ := agent.StateDeadline(agent.StateAssigning)
+	world.Advance(deadline * 3)
+	world.TickN(2)
+	if got := world.Lease("l1"); got.State != agent.StateAssigning {
+		t.Fatalf("quarantined lease moved to %s", got.State)
+	}
+
+	// The first parseable sync must resume the lease, not execute the stale
+	// deadline against a healthy job.
+	deliver(world, 1, spec)
+	world.Tick()
+	snapshot := world.Lease("l1")
+	if snapshot.State != agent.StateAssigning {
+		t.Fatalf("lease did not survive unquarantine: %+v", snapshot)
+	}
+	world.VMs.MarkReady(vm.ID(snapshot.VMID))
+	world.Tick()
+	if got := world.Lease("l1").State; got != agent.StateReady {
+		t.Fatalf("state %s, want ready", got)
+	}
+}
+
+func TestAssignFailureDestroysClaimedVM(t *testing.T) {
+	world := NewWorld(t, slots(2))
+	// Effect-then-error: the assignment lands guest-side (JIT config and
+	// checkout token delivered) and the call still fails — the ambiguous
+	// shape a real QMP timeout produces.
+	world.VMs.FailAfter = func(op string, _ vm.ID) error {
+		if op == "assign" {
+			return errAssignTimeout
+		}
+		return nil
+	}
+	spec := runLease("l1")
+	deliver(world, 1, spec)
+	world.Tick()
+	bootAll(world)
+	world.Tick()
+	snapshot := world.Lease("l1")
+	if snapshot.State != agent.StateFailed || !strings.Contains(snapshot.Reason, "assign") {
+		t.Fatalf("got %+v", snapshot)
+	}
+	// The claimed VM was destroyed through the failure path — an ambiguous
+	// assign must never strand a runner holding a live JIT config and
+	// checkout token on a lease hostd reports as failed.
+	if snapshot.VMID != "" {
+		t.Fatal("failed lease still holds a vm")
+	}
+	statuses, _ := world.VMs.List(context.Background())
+	for _, status := range statuses {
+		if status.Lease == "l1" {
+			t.Fatalf("vm %s still bound to the failed lease", status.ID)
+		}
 	}
 }
 
