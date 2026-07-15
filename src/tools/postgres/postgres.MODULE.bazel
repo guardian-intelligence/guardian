@@ -1,0 +1,32 @@
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+# Pinned relocatable PostgreSQL server binaries (theseus-rs builds of the
+# upstream sources) for hermetic database-backed tests: each test initdbs a
+# throwaway cluster under its own tmpdir and talks to it over a unix socket,
+# so `bazel test` needs no ambient postgres. Major version matches the CNPG
+# v18 clusters the services run against in prod.
+_POSTGRES_BUILD = """
+exports_files(["bin/initdb"])
+
+filegroup(
+    name = "dist",
+    srcs = glob(["**"]),
+    visibility = ["//visibility:public"],
+)
+"""
+
+http_archive(
+    name = "postgresql_linux_amd64",
+    build_file_content = _POSTGRES_BUILD,
+    sha256 = "65c06cf318b9a57525d842d658d6d18cd461d12b3a89b57d6d8ed7cccbe2db53",
+    strip_prefix = "postgresql-18.4.0-x86_64-unknown-linux-gnu",
+    url = "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.4.0/postgresql-18.4.0-x86_64-unknown-linux-gnu.tar.gz",
+)
+
+http_archive(
+    name = "postgresql_darwin_arm64",
+    build_file_content = _POSTGRES_BUILD,
+    sha256 = "1b68828f524b638a24918e258b173d0f16773547a0d3b83d9ba74473b61649f2",
+    strip_prefix = "postgresql-18.4.0-aarch64-apple-darwin",
+    url = "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.4.0/postgresql-18.4.0-aarch64-apple-darwin.tar.gz",
+)

@@ -14,7 +14,7 @@ func (a *Agent) ResolveActiveLease(_ context.Context, executionID, attemptID str
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, record := range a.leases {
-		if record.state.terminal() {
+		if record.state.Terminal() {
 			continue
 		}
 		spec := record.spec
