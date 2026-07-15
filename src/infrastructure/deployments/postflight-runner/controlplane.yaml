@@ -72,6 +72,17 @@ spec:
             # credential.
             - name: GITHUB_APP_INSTALLATION_ID
               value: "123769944"
+            # Setting the sync secret arms /api/v1/hostd/sync; SCHEDULER_ENABLED
+            # turns on demand→lease→JIT. Together they enable the runner data
+            # plane. The secret is relayed into this scope's OpenBao subtree by
+            # an operator; see secrets.yaml's hostd-sync ExternalSecret.
+            - name: HOSTD_SYNC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: hostd-sync
+                  key: HOSTD_SYNC_SECRET
+            - name: SCHEDULER_ENABLED
+              value: "true"
             - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
               value: otel-collector.guardian-analytics.svc.cozy.local:4317
           ports:
