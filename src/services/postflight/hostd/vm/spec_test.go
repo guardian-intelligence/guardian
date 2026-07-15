@@ -64,6 +64,13 @@ func TestArgvUserNetwork(t *testing.T) {
 	if tail != want {
 		t.Fatalf("user NIC argv drifted:\n--- got ---\n%s\n--- want ---\n%s", tail, want)
 	}
+	// The NIC only appends: the base shape must be byte-identical to the
+	// networkless argv, so a user-mode VM measures the same up to its NIC.
+	base := spec
+	base.GuestNetwork = "none"
+	if head := strings.Join(got[:len(got)-4], "\n"); head != strings.Join(base.Argv(), "\n") {
+		t.Fatalf("user NIC changed the base argv shape:\n%s", head)
+	}
 }
 
 // TestArgvNoNetworkByDefault: an unset or none datapath attaches no NIC.

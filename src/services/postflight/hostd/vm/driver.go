@@ -84,6 +84,8 @@ func (c *Config) validate() error {
 		return errors.New("vm: Launcher is required")
 	case c.Guest == nil:
 		return errors.New("vm: Guest is required")
+	case c.GuestNetwork != "" && c.GuestNetwork != "none" && c.GuestNetwork != guestNetworkUser:
+		return fmt.Errorf("vm: unknown GuestNetwork %q", c.GuestNetwork)
 	}
 	for class, shape := range c.Classes {
 		if shape.CPUs <= 0 || shape.MemoryMiB <= 0 || shape.Image == "" {
