@@ -109,10 +109,15 @@ func run(logger *slog.Logger) error {
 
 	go checkout.RunReaper(agentCtx, 0)
 
+	// No WriteTimeout: pack downloads legitimately run long. ReadTimeout is
+	// safe — request bodies are small and read up front — and closes the
+	// slow-drip hold-open vector from untrusted guests.
 	server := &http.Server{
 		Addr:              cfg.checkoutListenAddr,
 		Handler:           checkout.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
 	}
 	failed := make(chan error, 1)
 	go func() {
