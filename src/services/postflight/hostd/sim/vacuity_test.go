@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/agent"
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/syncproto"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vm"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/zvol"
 )
@@ -19,8 +20,8 @@ func healthyState() WorldState {
 	return WorldState{
 		Now: now,
 		Leases: []agent.LeaseSnapshot{
-			{LeaseID: "l1", State: agent.StateReady, Since: now, VMID: "vm-1", ExecutionID: "e1", AttemptID: "a1"},
-			{LeaseID: "l2", State: agent.StateFailed, Since: now, ExecutionID: "e2", AttemptID: "a2"},
+			{LeaseID: "l1", State: syncproto.StateReady, Since: now, VMID: "vm-1", ExecutionID: "e1", AttemptID: "a1"},
+			{LeaseID: "l2", State: syncproto.StateFailed, Since: now, ExecutionID: "e2", AttemptID: "a2"},
 		},
 		VMs: []vm.Status{
 			{ID: "vm-1", Class: "c", Phase: vm.PhaseReady, Lease: "l1"},
@@ -55,7 +56,7 @@ func TestInvariantVacuity(t *testing.T) {
 	violations := map[string]func(*WorldState){
 		"vm-per-lease": func(state *WorldState) {
 			state.Leases = append(state.Leases, agent.LeaseSnapshot{
-				LeaseID: "l3", State: agent.StateReady, Since: state.Now, VMID: "vm-1",
+				LeaseID: "l3", State: syncproto.StateReady, Since: state.Now, VMID: "vm-1",
 			})
 		},
 		"orphan-vms-collected": func(state *WorldState) {
@@ -72,9 +73,9 @@ func TestInvariantVacuity(t *testing.T) {
 			state.Generations = nil // g1 vanished, no reap verb recorded
 		},
 		"deadline-release": func(state *WorldState) {
-			deadline, _ := agent.StateDeadline(agent.StateClaiming)
+			deadline, _ := agent.StateDeadline(syncproto.StateClaiming)
 			state.Leases = append(state.Leases, agent.LeaseSnapshot{
-				LeaseID: "stuck", State: agent.StateClaiming,
+				LeaseID: "stuck", State: syncproto.StateClaiming,
 				Since: state.Now.Add(-deadline - time.Minute),
 			})
 		},

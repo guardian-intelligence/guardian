@@ -1,0 +1,21 @@
+# Host-platform selection over the pinned PostgreSQL archives (pins live in
+# postgres.MODULE.bazel). Tests take :dist as data and locate the tree via
+# $(rootpath :initdb).
+
+alias(
+    name = "initdb",
+    actual = select({
+        "@platforms//os:macos": "@postgresql_darwin_arm64//:bin/initdb",
+        "//conditions:default": "@postgresql_linux_amd64//:bin/initdb",
+    }),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "dist",
+    srcs = select({
+        "@platforms//os:macos": ["@postgresql_darwin_arm64//:dist"],
+        "//conditions:default": ["@postgresql_linux_amd64//:dist"],
+    }),
+    visibility = ["//visibility:public"],
+)

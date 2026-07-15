@@ -98,7 +98,7 @@ func checkOrphanVMsCollected(state WorldState) string {
 		if !ok {
 			return fmt.Sprintf("vm %s bound to untracked lease %s", status.ID, status.Lease)
 		}
-		if agent.Terminal(lease.State) {
+		if lease.State.Terminal() {
 			return fmt.Sprintf("vm %s bound to terminal lease %s", status.ID, status.Lease)
 		}
 	}
@@ -203,7 +203,7 @@ func checkDeadlineRelease(state WorldState) string {
 // terminal lease must not resolve, no matter what token material exists.
 func checkTerminalNeverResolves(state WorldState) string {
 	for _, lease := range state.Leases {
-		if !agent.Terminal(lease.State) || lease.ExecutionID == "" {
+		if !lease.State.Terminal() || lease.ExecutionID == "" {
 			continue
 		}
 		if state.Resolves(lease.ExecutionID, lease.AttemptID) {
@@ -217,7 +217,7 @@ func checkTerminalNeverResolves(state WorldState) string {
 // always release the slot.
 func checkFailedHoldsNoVM(state WorldState) string {
 	for _, lease := range state.Leases {
-		if agent.Terminal(lease.State) && lease.VMID != "" {
+		if lease.State.Terminal() && lease.VMID != "" {
 			return fmt.Sprintf("terminal lease %s still holds vm %s", lease.LeaseID, lease.VMID)
 		}
 	}

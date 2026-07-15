@@ -1,11 +1,49 @@
-load("@rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "vm",
     srcs = [
+        "disks.go",
+        "driver.go",
         "fake.go",
+        "guest.go",
+        "guest_vsock.go",
+        "launcher.go",
+        "launcher_pod.go",
+        "launcher_process.go",
+        "launcher_systemd.go",
+        "qmp.go",
+        "spec.go",
         "vm.go",
     ],
     importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vm",
     visibility = ["//visibility:public"],
+    deps = [
+        "//src/services/postflight/hostd/guestproto",
+        "//src/services/postflight/hostd/vsock",
+        "@io_k8s_sigs_yaml//:yaml",
+    ],
+)
+
+go_test(
+    name = "vm_test",
+    srcs = [
+        "conformance_test.go",
+        "driver_test.go",
+        "fake_test.go",
+        "guest_vsock_loopback_test.go",
+        "guest_vsock_test.go",
+        "launcher_pod_test.go",
+        "launcher_process_test.go",
+        "launcher_systemd_test.go",
+        "qmp_test.go",
+        "spec_test.go",
+    ],
+    embed = [":vm"],
+    deps = [
+        "//src/services/postflight/guestd",
+        "//src/services/postflight/hostd/guestproto",
+        "//src/services/postflight/hostd/vsock",
+        "@org_golang_x_sys//unix",
+    ],
 )

@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/checkoutbundle"
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/guestproto"
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/syncproto"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vm"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/zvol"
 )
@@ -73,7 +76,7 @@ func (a *Agent) stepLease(ctx context.Context, record *lease, vms *vmView) {
 	// A terminal lease that still holds a VM had its destroy fail earlier;
 	// retry it every tick until the slot is actually free. Destroy is
 	// idempotent, so this converges without leaking the slot.
-	if record.state.terminal() {
+	if record.state.Terminal() {
 		if record.vmID != "" {
 			a.destroyLeaseVM(ctx, record)
 		}
@@ -92,7 +95,7 @@ func (a *Agent) stepLease(ctx context.Context, record *lease, vms *vmView) {
 	// Cancellation wins over everything. The desired set is full state, so
 	// a live lease the control plane no longer mentions has been withdrawn
 	// — same as an explicit cancel, just less polite.
-	if _, wanted := a.desired[record.spec.LeaseID]; record.spec.State == DesiredCancel || !wanted {
+	if _, wanted := a.desired[record.spec.LeaseID]; record.spec.State == syncproto.DesiredCancel || !wanted {
 		a.cancelLease(ctx, record)
 		return
 	}
@@ -102,11 +105,11 @@ func (a *Agent) stepLease(ctx context.Context, record *lease, vms *vmView) {
 	// straight to sealing — it must never claim a fresh VM and re-attach the
 	// workspace the control plane asked us to preserve unchanged. If a VM
 	// still carries the lease, fall through and let it exit first.
-	if _, hasVM := vms.byLease[record.spec.LeaseID]; record.spec.State == DesiredSeal && !hasVM {
-		if record.state != StateExited {
+	if _, hasVM := vms.byLease[record.spec.LeaseID]; record.spec.State == syncproto.DesiredSeal && !hasVM {
+		if record.state != syncproto.StateExited {
 			// Ensure the workspace record is populated for the seal step;
 			// a fresh post-crash record has no device yet.
-			record.enter(StateExited, now)
+			record.enter(syncproto.StateExited, now)
 		}
 	}
 
@@ -117,7 +120,7 @@ func (a *Agent) stepLease(ctx context.Context, record *lease, vms *vmView) {
 	}
 
 	switch record.state {
-	case StatePending:
+	case syncproto.StatePending:
 		volume, err := a.zvols.EnsureWorkspace(ctx,
 			zvol.LeaseID(record.spec.LeaseID),
 			zvol.GenerationID(record.spec.Workspace.Generation),
@@ -130,13 +133,13 @@ func (a *Agent) stepLease(ctx context.Context, record *lease, vms *vmView) {
 			return
 		}
 		record.device = volume.Device
-		record.enter(StateClaiming, now)
+		record.enter(syncproto.StateClaiming, now)
 
-	case StateClaiming:
+	case syncproto.StateClaiming:
 		// Crash recovery first: a VM may already carry this lease.
 		if status, ok := vms.byLease[record.spec.LeaseID]; ok {
 			record.vmID = string(status.ID)
-			record.enter(StateAssigning, now)
+			record.enter(syncproto.StateAssigning, now)
 			return
 		}
 		class := vm.Class(record.spec.RunnerClass)
@@ -155,9 +158,9 @@ func (a *Agent) stepLease(ctx context.Context, record *lease, vms *vmView) {
 			a.failLease(ctx, record, "assign: "+err.Error())
 			return
 		}
-		record.enter(StateAssigning, now)
+		record.enter(syncproto.StateAssigning, now)
 
-	case StateAssigning, StateReady:
+	case syncproto.StateAssigning, syncproto.StateReady:
 		status, ok := vms.byID[vm.ID(record.vmID)]
 		if !ok || status.Phase == vm.PhaseGone {
 			a.failLease(ctx, record, "vm disappeared")
@@ -165,24 +168,32 @@ func (a *Agent) stepLease(ctx context.Context, record *lease, vms *vmView) {
 		}
 		switch status.Phase {
 		case vm.PhaseReady:
-			if record.state == StateAssigning {
-				record.enter(StateReady, now)
+			if record.state == syncproto.StateAssigning {
+				record.enter(syncproto.StateReady, now)
 			}
 		case vm.PhaseExited:
 			record.exit = status.ExitCode
-			record.enter(StateExited, now)
+			record.enter(syncproto.StateExited, now)
+			// The workspace is snapshotted after the VM is gone, so the
+			// guest must sync and unmount while it is still alive. A failed
+			// quiesce fails the lease — ambiguity never promotes — and the
+			// failure path still destroys the VM.
+			if err := a.vms.Quiesce(ctx, vm.ID(record.vmID)); err != nil {
+				a.failLease(ctx, record, "quiesce: "+err.Error())
+				return
+			}
 			// Destroy-and-refill: the slot frees as soon as the runner is
 			// done; the workspace volume stays for a possible seal.
 			a.destroyLeaseVM(ctx, record)
 		}
 
-	case StateExited:
+	case syncproto.StateExited:
 		// A failed destroy at exit observation leaves the dead runner's VM
 		// holding a slot; retry until it is actually gone.
 		if record.vmID != "" {
 			a.destroyLeaseVM(ctx, record)
 		}
-		if record.spec.State != DesiredSeal {
+		if record.spec.State != syncproto.DesiredSeal {
 			return // waiting for the control plane's decision
 		}
 		snapshot, err := a.zvols.SealWorkspace(ctx,
@@ -193,7 +204,7 @@ func (a *Agent) stepLease(ctx context.Context, record *lease, vms *vmView) {
 			return
 		}
 		record.sealGen = string(snapshot.Generation)
-		record.enter(StateSealed, now)
+		record.enter(syncproto.StateSealed, now)
 		a.metrics.SealedGenerations.Add(1)
 	}
 }
@@ -204,29 +215,45 @@ func (a *Agent) stepLease(ctx context.Context, record *lease, vms *vmView) {
 // guest's environment.
 func (a *Agent) assignment(record *lease) vm.Assignment {
 	token := checkoutbundle.DeriveCheckoutToken(a.hostSecret, record.spec.ExecutionID, record.spec.AttemptID)
+	mountpoint := workspaceMountpoint(record.spec.RepositoryFullName)
 	return vm.Assignment{
-		Lease:           record.spec.LeaseID,
-		WorkspaceDevice: record.device,
-		JITConfig:       record.spec.JITConfig,
+		Lease:               record.spec.LeaseID,
+		WorkspaceDevice:     record.device,
+		WorkspaceMountpoint: mountpoint,
+		JITConfig:           record.spec.JITConfig,
 		Env: map[string]string{
 			"POSTFLIGHT_HOST_SERVICE_HTTP_ORIGIN": a.cfg.CheckoutGuestOrigin,
 			"POSTFLIGHT_CHECKOUT_PATH":            a.cfg.CheckoutPath,
 			"POSTFLIGHT_CHECKOUT_TOKEN":           token,
 			"POSTFLIGHT_EXECUTION_ID":             record.spec.ExecutionID,
 			"POSTFLIGHT_ATTEMPT_ID":               record.spec.AttemptID,
+			"POSTFLIGHT_WORKSPACE_READY_FILE":     filepath.Join(mountpoint, guestproto.WorkspaceReadyMarker),
 		},
 	}
 }
 
+// runnerWorkRoot mirrors the golden image's runner install: the runner
+// materializes GITHUB_WORKSPACE at _work/<repo>/<repo>, and the workspace
+// zvol must already be mounted there when the runner starts.
+const runnerWorkRoot = "/opt/actions-runner/_work"
+
+func workspaceMountpoint(repositoryFullName string) string {
+	name := repositoryFullName
+	if i := strings.LastIndexByte(name, '/'); i >= 0 {
+		name = name[i+1:]
+	}
+	return runnerWorkRoot + "/" + name + "/" + name
+}
+
 func (a *Agent) cancelLease(ctx context.Context, record *lease) {
 	a.destroyLeaseVM(ctx, record)
-	record.enter(StateCancelled, a.now())
+	record.enter(syncproto.StateCancelled, a.now())
 }
 
 func (a *Agent) failLease(ctx context.Context, record *lease, reason string) {
 	a.destroyLeaseVM(ctx, record)
 	record.reason = reason
-	record.enter(StateFailed, a.now())
+	record.enter(syncproto.StateFailed, a.now())
 	a.metrics.FailedLeases.Add(1)
 	a.logger.Error("lease failed", "lease", record.spec.LeaseID, "reason", reason)
 }

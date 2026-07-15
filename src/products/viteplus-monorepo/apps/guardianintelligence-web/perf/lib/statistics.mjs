@@ -6,8 +6,7 @@ export function median(values) {
 
 export function metricMedians(runs, metrics) {
   if (runs.length === 0) throw new Error("metricMedians needs at least one run");
-  return Object.fromEntries(metrics.map((metric) => [
-    metric,
-    median(runs.map((run) => run[metric])),
-  ]));
+  return Object.fromEntries(
+    metrics.map((metric) => [metric, median(runs.map((run) => run[metric]))]),
+  );
 }

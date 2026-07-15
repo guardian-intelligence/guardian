@@ -138,6 +138,84 @@ func problemProcessingFailed(err error) problem {
 	}
 }
 
+func problemSyncUnauthorized() problem {
+	return problem{
+		Code:    "hostd_sync.unauthorized",
+		Title:   "sync credential rejected",
+		Detail:  "the bearer credential did not match the configured sync secret",
+		Status:  http.StatusUnauthorized,
+		Pointer: "header:Authorization",
+	}
+}
+
+func problemSyncPayloadInvalid(detail string) problem {
+	return problem{
+		Code:    "hostd_sync.payload_invalid",
+		Title:   "invalid sync request",
+		Detail:  detail,
+		Status:  http.StatusBadRequest,
+		Pointer: "body",
+	}
+}
+
+func problemSyncUnavailable() problem {
+	return problem{
+		Code:      "hostd_sync.unavailable",
+		Title:     "sync state unavailable",
+		Detail:    "the sync exchange could not be recorded; the host will retry",
+		Status:    http.StatusServiceUnavailable,
+		Retryable: true,
+	}
+}
+
+func problemCapacityTimeout(class string) problem {
+	return problem{
+		Code:   "lease.capacity_timeout",
+		Title:  "no capacity for runner class",
+		Detail: fmt.Sprintf("no host offering class %q had a free slot before the allocate deadline", class),
+	}
+}
+
+func problemAssignmentTimeout() problem {
+	return problem{
+		Code:   "lease.assignment_timeout",
+		Title:  "runner never became ready",
+		Detail: "the assigned host did not report the runner ready before the assignment deadline",
+	}
+}
+
+func problemJITMintFailed(err error) problem {
+	return problem{
+		Code:   "lease.jit_mint_failed",
+		Title:  "JIT runner config mint failed",
+		Detail: err.Error(),
+	}
+}
+
+func problemHostLost(hostID string) problem {
+	return problem{
+		Code:   "lease.host_lost",
+		Title:  "runner host stopped responding",
+		Detail: fmt.Sprintf("host %q stopped syncing while the runner was registered", hostID),
+	}
+}
+
+func problemRunnerClassUnknown(class string) problem {
+	return problem{
+		Code:   "demand.runner_class_unknown",
+		Title:  "unknown runner class",
+		Detail: fmt.Sprintf("runner class %q is not served by this control plane", class),
+	}
+}
+
+func problemSandboxFailed(reason string) problem {
+	return problem{
+		Code:   "lease.sandbox_failed",
+		Title:  "host reported the lease failed",
+		Detail: reason,
+	}
+}
+
 type problemDoc struct {
 	Type    string       `json:"type"`
 	Title   string       `json:"title"`

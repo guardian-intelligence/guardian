@@ -58,7 +58,10 @@ func (f *Fake) Launch(_ context.Context, id ID, class Class) error {
 	if err := f.fail("launch", id); err != nil {
 		return err
 	}
-	if _, ok := f.vms[id]; ok {
+	if existing, ok := f.vms[id]; ok {
+		if existing.status.Class != class {
+			return fmt.Errorf("vm: %s already exists with class %s", id, existing.status.Class)
+		}
 		return nil
 	}
 	f.vms[id] = &fakeVM{status: Status{ID: id, Class: class, Phase: PhaseBooting}}
@@ -78,7 +81,10 @@ func (f *Fake) Assign(_ context.Context, id ID, assignment Assignment) error {
 		return ErrNotFound
 	}
 	if instance.assignment != nil {
-		return nil // already assigned; idempotent
+		if instance.assignment.Lease != assignment.Lease {
+			return fmt.Errorf("vm: %s already assigned to lease %s", id, instance.assignment.Lease)
+		}
+		return nil // same lease; idempotent
 	}
 	instance.assignment = &assignment
 	instance.status.Phase = PhaseAssigned
@@ -119,6 +125,20 @@ func (f *Fake) List(context.Context) ([]Status, error) {
 		statuses = append(statuses, instance.status)
 	}
 	return statuses, nil
+}
+
+// Quiesce implements Driver.
+func (f *Fake) Quiesce(_ context.Context, id ID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.fail("quiesce", id); err != nil {
+		return err
+	}
+	if _, ok := f.vms[id]; !ok {
+		return ErrNotFound
+	}
+	f.journal("quiesce %s", id)
+	return nil
 }
 
 // Destroy implements Driver.

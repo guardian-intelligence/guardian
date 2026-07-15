@@ -20,7 +20,7 @@ func (a *Agent) collectOrphans(ctx context.Context, vms *vmView) {
 	// Terminal, acknowledged leases: destroy the workspace, forget the lease.
 	for _, id := range sortedLeaseIDs(a.leases) {
 		record := a.leases[id]
-		if !record.state.terminal() {
+		if !record.state.Terminal() {
 			continue
 		}
 		if _, stillDesired := a.desired[id]; stillDesired {

@@ -45,6 +45,7 @@ python.toolchain(
 )
 use_repo(python, "python_3_12_12")
 
+include("//src/tools/postgres:postgres.MODULE.bazel")
 include("//src/tools/restic:restic.MODULE.bazel")
 include("//src/tools/ruby:ruby.MODULE.bazel")
 
@@ -105,6 +106,7 @@ use_repo(
     "org_golang_x_crypto",
     "org_golang_x_crypto_x509roots_fallback",
     "org_golang_x_net",
+    "org_golang_x_sys",
     "org_golang_x_term",
 )
 

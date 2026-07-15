@@ -1,0 +1,19 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "guestd_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/guestd/cmd/guestd",
+    deps = [
+        "//src/services/postflight/guestd",
+        "//src/services/postflight/hostd/guestproto",
+        "//src/services/postflight/hostd/vsock",
+    ],
+)
+
+go_binary(
+    name = "guestd",
+    embed = [":guestd_lib"],
+    pure = "on",
+    visibility = ["//visibility:public"],
+)

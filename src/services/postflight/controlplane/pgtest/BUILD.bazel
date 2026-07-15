@@ -1,0 +1,13 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "pgtest",
+    testonly = True,
+    srcs = ["pgtest.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/controlplane/pgtest",
+    visibility = [
+        "//src/services/postflight:__subpackages__",
+        "//src/tools/postflight-hammer:__pkg__",
+    ],
+    deps = ["@com_github_jackc_pgx_v5//:pgx"],
+)

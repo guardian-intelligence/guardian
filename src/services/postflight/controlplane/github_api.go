@@ -262,11 +262,15 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 type apiWorkflowRun struct {
 	ID           int64  `json:"id"`
 	Event        string `json:"event"`
+	Path         string `json:"path"`
 	HeadBranch   string `json:"head_branch"`
 	HeadSHA      string `json:"head_sha"`
 	RunAttempt   int64  `json:"run_attempt"`
 	PullRequests []struct {
 		Number int64 `json:"number"`
+		Base   struct {
+			Ref string `json:"ref"`
+		} `json:"base"`
 	} `json:"pull_requests"`
 	HeadRepository struct {
 		FullName string `json:"full_name"`
@@ -294,6 +298,9 @@ type apiWorkflowJob struct {
 type apiPullRef struct {
 	Number int64  `json:"number"`
 	State  string `json:"state"`
+	Base   struct {
+		Ref string `json:"ref"`
+	} `json:"base"`
 }
 
 func (c *githubClient) workflowRun(ctx context.Context, repo string, runID int64) (apiWorkflowRun, error) {
@@ -322,6 +329,25 @@ func (c *githubClient) workflowRunAttemptJobs(ctx context.Context, repo string, 
 		}
 	}
 	return jobs, nil
+}
+
+// generateJITConfig mints a single-use, pre-registered runner for one job:
+// POST /orgs/{org}/actions/runners/generate-jitconfig. The returned blob is
+// everything the guest needs to register; it is never persisted anywhere
+// but the lease row it was minted for.
+func (c *githubClient) generateJITConfig(ctx context.Context, org, name string, runnerGroupID int64, labels []string) (string, error) {
+	var out struct {
+		EncodedJITConfig string `json:"encoded_jit_config"`
+	}
+	err := c.doJSON(ctx, http.MethodPost, fmt.Sprintf("/orgs/%s/actions/runners/generate-jitconfig", org),
+		map[string]any{"name": name, "runner_group_id": runnerGroupID, "labels": labels}, &out)
+	if err != nil {
+		return "", err
+	}
+	if out.EncodedJITConfig == "" {
+		return "", errors.New("generate-jitconfig: empty encoded_jit_config in response")
+	}
+	return out.EncodedJITConfig, nil
 }
 
 func (c *githubClient) pullRequestsForCommit(ctx context.Context, repo, sha string) ([]apiPullRef, error) {

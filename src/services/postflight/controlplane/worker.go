@@ -402,7 +402,7 @@ func (w *worker) submitQueuedJob(ctx context.Context, ev jobEvent, deliveryID st
 	}
 
 	// PR resolution is comment plumbing: best-effort, never blocks demand.
-	prNumber, prResolved := w.resolveAndStampPullRequest(ctx, ev.RepositoryFullName, ev.Job.RunID, run, &obs)
+	prNumber, prBaseRef, prResolved := w.resolveAndStampPullRequest(ctx, ev.RepositoryFullName, ev.Job.RunID, run, &obs)
 
 	attrs := eventAttrs{
 		DeliveryID:  deliveryID,
@@ -456,14 +456,16 @@ func (w *worker) submitQueuedJob(ctx context.Context, ev jobEvent, deliveryID st
 		return nil
 	}
 
+	trust := trustClassForRun(obs)
 	if _, err := w.st.EnsureProviderDemand(ctx, demandRow{
 		ProviderJobID:        apiEv.Job.ID,
 		ProviderRepositoryID: ev.RepositoryID,
 		RepositoryFullName:   ev.RepositoryFullName,
 		ProviderRunID:        apiEv.Job.RunID,
 		ProviderRunAttempt:   apiEv.Job.RunAttempt,
-		TrustClass:           trustClassForRun(obs),
+		TrustClass:           trust,
 		RunnerClass:          class,
+		WorkspaceScopeID:     w.resolveWorkspaceScope(ctx, ev.RepositoryFullName, class, trust, run, apiEv.Job.Name, prBaseRef),
 		LastDeliveryID:       deliveryID,
 	}); err != nil {
 		return fmt.Errorf("ensure demand: %w", err)
@@ -537,7 +539,7 @@ func (w *worker) refreshRunAndJobs(ctx context.Context, ev jobEvent, deliveryID 
 		}
 	}
 
-	prNumber, prResolved := w.resolveAndStampPullRequest(ctx, ev.RepositoryFullName, ev.Job.RunID, run, nil)
+	prNumber, _, prResolved := w.resolveAndStampPullRequest(ctx, ev.RepositoryFullName, ev.Job.RunID, run, nil)
 	if ourClassSeen && prResolved && prNumber > 0 {
 		if err := w.st.MarkPRCommentDirty(ctx, ev.RepositoryID, ev.RepositoryFullName, prNumber); err != nil {
 			slog.Error("worker: mark comment dirty", "repo", ev.RepositoryFullName, "pr", prNumber, "err", err)
@@ -553,25 +555,29 @@ func (w *worker) refreshRunAndJobs(ctx context.Context, ev jobEvent, deliveryID 
 // resolveAndStampPullRequest maps a run to its PR (run.pull_requests[0] when
 // GitHub includes it; for fork PRs that array is empty, so fall back to the
 // commit→PRs listing, first open PR) and stamps the answer onto the run's job
-// rows. The fallback is gated on pull_request events: a push-to-main commit
+// rows, also reporting the PR's base (target) branch for scope resolution.
+// The fallback is gated on pull_request events: a push-to-main commit
 // usually has a MERGED PR in that listing and must resolve as "no PR" (0),
 // not resurrect the merged one. Best-effort: a resolution failure is logged
 // and reported unresolved, never an error — comment plumbing must not block
 // or retry deliveries.
-func (w *worker) resolveAndStampPullRequest(ctx context.Context, repo string, runID int64, run apiWorkflowRun, obs *runObservation) (int64, bool) {
+func (w *worker) resolveAndStampPullRequest(ctx context.Context, repo string, runID int64, run apiWorkflowRun, obs *runObservation) (int64, string, bool) {
 	prNumber := int64(0)
+	baseRef := ""
 	switch {
 	case len(run.PullRequests) > 0:
 		prNumber = run.PullRequests[0].Number
+		baseRef = run.PullRequests[0].Base.Ref
 	case (run.Event == "pull_request" || run.Event == "pull_request_target") && run.HeadSHA != "":
 		pulls, err := w.gh.pullRequestsForCommit(ctx, repo, run.HeadSHA)
 		if err != nil {
 			slog.Warn("worker: pull request resolution failed", "repo", repo, "run_id", runID, "err", err)
-			return 0, false
+			return 0, "", false
 		}
 		for _, p := range pulls {
 			if p.State == "open" {
 				prNumber = p.Number
+				baseRef = p.Base.Ref
 				break
 			}
 		}
@@ -581,9 +587,65 @@ func (w *worker) resolveAndStampPullRequest(ctx context.Context, repo string, ru
 	}
 	if err := w.st.SetRunPullRequest(ctx, runID, prNumber); err != nil {
 		slog.Warn("worker: stamp pull request", "repo", repo, "run_id", runID, "err", err)
-		return prNumber, false
+		return prNumber, baseRef, false
 	}
-	return prNumber, true
+	return prNumber, baseRef, true
+}
+
+// resolveWorkspaceScope upserts the job-shape scope this demand reads (and,
+// on branch trust, writes). Best-effort: the workspace cache is
+// acceleration, so a resolution failure records no scope and the job simply
+// runs cold.
+func (w *worker) resolveWorkspaceScope(ctx context.Context, repoFullName, class, trust string, run apiWorkflowRun, jobName, prBaseRef string) string {
+	org, repo, ok := strings.Cut(repoFullName, "/")
+	if !ok {
+		return ""
+	}
+	scopeRef := scopeRefFor(trust, run, prBaseRef)
+	if scopeRef == "" {
+		return ""
+	}
+	name, matrixKey := splitMatrixJobName(jobName)
+	scopeID, err := w.st.EnsureWorkspaceScope(ctx, workspaceScopeKey{
+		Org:          org,
+		Repo:         repo,
+		ScopeRef:     scopeRef,
+		WorkflowPath: run.Path,
+		JobName:      name,
+		MatrixKey:    matrixKey,
+		RunnerClass:  class,
+	})
+	if err != nil {
+		slog.Warn("worker: ensure workspace scope", "repo", repoFullName, "err", err)
+		return ""
+	}
+	return scopeID
+}
+
+// scopeRefFor picks the branch whose lineage a job shares: branch-trust jobs
+// live on their own head branch, PR jobs read the TARGET branch's
+// generations (their writes are never promoted). No resolvable ref — an
+// unclassified event, a PR whose base branch could not be resolved — means
+// no scope: the job runs cold rather than keying a lineage on a
+// head-controlled branch name.
+func scopeRefFor(trust string, run apiWorkflowRun, prBaseRef string) string {
+	switch trust {
+	case trustClassBranch:
+		return run.HeadBranch
+	case trustClassPR, trustClassPRFork:
+		return prBaseRef
+	}
+	return ""
+}
+
+// splitMatrixJobName separates GitHub's rendered matrix suffix — "build
+// (ubuntu, 3.12)" — into the job's own name and the matrix key, so matrix
+// legs get distinct lineages.
+func splitMatrixJobName(name string) (string, string) {
+	if i := strings.Index(name, " ("); i > 0 && strings.HasSuffix(name, ")") {
+		return name[:i], name[i+2 : len(name)-1]
+	}
+	return name, ""
 }
 
 func payloadFromAPIJob(j apiWorkflowJob) workflowJobPayload {
