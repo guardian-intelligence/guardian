@@ -23,6 +23,11 @@ type runObservation struct {
 	PullRequestNumber      int64 // 0 = no associated PR
 }
 
+// trustClassForRun grants branch trust only to an explicit event allowlist.
+// Branch trust is a write capability (branch-trust runs seal workspace
+// generations into their scope's lineage), and unenumerated events —
+// workflow_run, issue_comment, merge_group, ... — are routinely triggered by
+// fork PRs whose head branch is attacker-chosen, so they stay unknown.
 func trustClassForRun(o runObservation) string {
 	fork := o.HeadRepositoryFullName != "" && o.RepositoryFullName != "" &&
 		!strings.EqualFold(o.HeadRepositoryFullName, o.RepositoryFullName)
@@ -33,6 +38,9 @@ func trustClassForRun(o runObservation) string {
 		}
 		return trustClassPR
 	case "push", "workflow_dispatch", "schedule":
+		if fork {
+			return trustClassUnknown
+		}
 		return trustClassBranch
 	}
 	if o.PullRequestNumber > 0 {
@@ -40,9 +48,6 @@ func trustClassForRun(o runObservation) string {
 			return trustClassPRFork
 		}
 		return trustClassPR
-	}
-	if o.HeadSHA != "" || o.HeadBranch != "" {
-		return trustClassBranch
 	}
 	return trustClassUnknown
 }

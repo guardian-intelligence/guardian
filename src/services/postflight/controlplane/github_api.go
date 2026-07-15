@@ -262,11 +262,15 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 type apiWorkflowRun struct {
 	ID           int64  `json:"id"`
 	Event        string `json:"event"`
+	Path         string `json:"path"`
 	HeadBranch   string `json:"head_branch"`
 	HeadSHA      string `json:"head_sha"`
 	RunAttempt   int64  `json:"run_attempt"`
 	PullRequests []struct {
 		Number int64 `json:"number"`
+		Base   struct {
+			Ref string `json:"ref"`
+		} `json:"base"`
 	} `json:"pull_requests"`
 	HeadRepository struct {
 		FullName string `json:"full_name"`
@@ -294,6 +298,9 @@ type apiWorkflowJob struct {
 type apiPullRef struct {
 	Number int64  `json:"number"`
 	State  string `json:"state"`
+	Base   struct {
+		Ref string `json:"ref"`
+	} `json:"base"`
 }
 
 func (c *githubClient) workflowRun(ctx context.Context, repo string, runID int64) (apiWorkflowRun, error) {

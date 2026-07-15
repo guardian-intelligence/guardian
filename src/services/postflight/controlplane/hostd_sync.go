@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"log/slog"
 
@@ -27,9 +28,10 @@ const maxSyncRequestBytes = 4 << 20
 // exchange, and a terminal lease is acknowledged by simply no longer being
 // part of it.
 type syncServer struct {
-	st     *pgStore
-	secret []byte
-	tracer trace.Tracer
+	st          *pgStore
+	secret      []byte
+	sealTimeout time.Duration
+	tracer      trace.Tracer
 }
 
 // authorized does a constant-time bearer comparison via SHA-256 digests so
@@ -122,7 +124,8 @@ func (s *syncServer) applyLeaseReport(ctx context.Context, hostID string, report
 		}
 		return nil
 	case syncproto.StateExited:
-		jobID, completed, err := s.st.CompleteLease(ctx, hostID, report.LeaseID, report.ExitCode)
+		jobID, sealGeneration, completed, err := s.st.CompleteLease(ctx, hostID, report.LeaseID, report.ExitCode,
+			time.Now().Add(s.sealTimeout))
 		if err != nil {
 			return err
 		}
@@ -130,6 +133,25 @@ func (s *syncServer) applyLeaseReport(ctx context.Context, hostID string, report
 			attrs.JobID = jobID
 			attrs.Result, attrs.Reason = "succeeded", fmt.Sprintf("exit_code:%d", report.ExitCode)
 			emitEvent(ctx, evLeaseCompleted, attrs)
+			if sealGeneration != "" {
+				attrs.Generation = sealGeneration
+				emitEvent(ctx, evGenerationSealRequested, attrs)
+			}
+		}
+		return nil
+	case syncproto.StateSealed:
+		if report.SealedGeneration == "" {
+			return nil
+		}
+		jobID, sealed, err := s.st.RecordLeaseSealed(ctx, hostID, report.LeaseID, report.SealedGeneration)
+		if err != nil {
+			return err
+		}
+		if sealed {
+			attrs.JobID = jobID
+			attrs.Generation = report.SealedGeneration
+			attrs.Result = "succeeded"
+			emitEvent(ctx, evLeaseSealed, attrs)
 		}
 		return nil
 	case syncproto.StateFailed, syncproto.StateCancelled:
@@ -146,6 +168,18 @@ func (s *syncServer) applyLeaseReport(ctx context.Context, hostID string, report
 			attrs.JobID = jobID
 			attrs.Result, attrs.Reason = "failed", reason
 			emitEvent(ctx, evLeaseFailed, attrs)
+			return nil
+		}
+		// A failure after the runner already exited green is a lost seal,
+		// not a job failure: discard the candidate and keep the demand's
+		// completed verdict.
+		sealFailed, err := s.st.FailSealingLease(ctx, hostID, report.LeaseID, string(report.State), reason)
+		if err != nil {
+			return err
+		}
+		if sealFailed {
+			attrs.Result, attrs.Reason = "failed", reason
+			emitEvent(ctx, evLeaseSealFailed, attrs)
 		}
 		return nil
 	default:
@@ -163,7 +197,7 @@ func (s *syncServer) desiredState(ctx context.Context, request syncproto.SyncReq
 		return response, err
 	}
 	for _, row := range leases {
-		response.Leases = append(response.Leases, syncproto.DesiredLease{
+		desired := syncproto.DesiredLease{
 			LeaseID:            row.LeaseID,
 			State:              syncproto.DesiredRun,
 			ExecutionID:        row.ExecutionID,
@@ -178,7 +212,12 @@ func (s *syncServer) desiredState(ctx context.Context, request syncproto.SyncReq
 				Generation: row.Generation,
 				SizeBytes:  row.SizeBytes,
 			},
-		})
+		}
+		if row.State == leaseSealing {
+			desired.State = syncproto.DesiredSeal
+			desired.SealGeneration = row.SealGeneration
+		}
+		response.Leases = append(response.Leases, desired)
 	}
 	if response.Reap, err = s.st.ListReapGenerations(ctx, request.HostID); err != nil {
 		return response, err

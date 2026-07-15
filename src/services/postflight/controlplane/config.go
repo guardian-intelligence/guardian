@@ -38,6 +38,14 @@ type config struct {
 	runnerOrg         string
 	allocateTimeout   time.Duration
 	assignmentTimeout time.Duration
+	// sealTimeout bounds how long a lease may wait for its host to confirm
+	// a requested workspace seal before the candidate is discarded.
+	sealTimeout time.Duration
+	// verdictTimeout bounds how long a sealed candidate may wait for its
+	// GitHub verdict to be observed from the API before it is discarded —
+	// a lost completed delivery would otherwise strand the candidate (and
+	// its dataset on the host) forever.
+	verdictTimeout time.Duration
 	// hostOfflineTimeout is how long a host may go without syncing before
 	// its ready leases are failed over (the host is presumed dead).
 	hostOfflineTimeout time.Duration
@@ -109,6 +117,8 @@ func loadConfig() (config, error) {
 		runnerOrg:          envOr("GITHUB_RUNNER_ORG", "guardian-intelligence"),
 		allocateTimeout:    duration("LEASE_ALLOCATE_TIMEOUT", "2s"),
 		assignmentTimeout:  duration("LEASE_ASSIGNMENT_TIMEOUT", "90s"),
+		sealTimeout:        duration("LEASE_SEAL_TIMEOUT", "10m"),
+		verdictTimeout:     duration("GENERATION_VERDICT_TIMEOUT", "1h"),
 		hostOfflineTimeout: duration("HOST_OFFLINE_TIMEOUT", "5m"),
 	}
 	if len(errs) > 0 {

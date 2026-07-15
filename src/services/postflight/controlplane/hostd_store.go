@@ -16,9 +16,22 @@ const (
 	leaseAllocating = "allocating"
 	leaseAssigned   = "assigned"
 	leaseReady      = "ready"
+	leaseSealing    = "sealing"
 	leaseCompleted  = "completed"
 	leaseFailed     = "failed"
 	leaseExpired    = "expired"
+)
+
+// Workspace generation states (workspace_generations.state). The scope
+// pointer only ever references a committed generation; candidates are on
+// their way in, everything else is on its way out.
+const (
+	genCandidate = "candidate"
+	genCommitted = "committed"
+	genRetained  = "retained"
+	genDiscarded = "discarded"
+	genReapable  = "reapable"
+	genReaped    = "reaped"
 )
 
 // Demand states the scheduler advances through (the full vocabulary is in
@@ -94,16 +107,27 @@ ON CONFLICT (generation) DO UPDATE SET
     bytes      = EXCLUDED.bytes,
     updated_at = now()`
 
+// sqlConfirmReapedGenerations: the inventory report is full state, so a
+// reapable generation the host no longer lists has actually been destroyed.
+// Only 'reapable' rows transition on absence — anything else missing from a
+// report is a catalog/host disagreement, not a confirmation.
+const sqlConfirmReapedGenerations = `
+UPDATE workspace_generations SET state = 'reaped', updated_at = now()
+WHERE host_id = $1 AND state = 'reapable' AND generation <> ALL($2::text[])`
+
 func (s *pgStore) ObserveHostGenerations(ctx context.Context, hostID string, generations []syncproto.GenerationReport) error {
+	names := make([]string, 0, len(generations))
 	for _, g := range generations {
 		if g.Generation == "" {
 			continue
 		}
+		names = append(names, g.Generation)
 		if _, err := s.pool.Exec(ctx, sqlObserveGeneration, g.Generation, hostID, g.Bytes); err != nil {
 			return err
 		}
 	}
-	return nil
+	_, err := s.pool.Exec(ctx, sqlConfirmReapedGenerations, hostID, names)
+	return err
 }
 
 const sqlRecordLeaseReportedState = `
@@ -157,32 +181,144 @@ SET state = 'completed', reported_state = 'exited', exit_code = $3, jit_config =
 WHERE lease_id = $1 AND host_id = $2 AND state IN ('assigned', 'ready')
 RETURNING provider_job_id, runner_class`
 
-// CompleteLease is the exited-report transition: terminalize the lease,
-// free its slot, and complete the demand — one transaction, guarded by the
-// lease's current state so a replayed report is a no-op.
-func (s *pgStore) CompleteLease(ctx context.Context, hostID, leaseID string, exitCode int) (int64, bool, error) {
+// sqlLeaseExitContext reads what the exited-report transition needs to
+// decide between plain completion and a seal request. No lock: trust class
+// and scope are immutable after creation, and the guarded transition below
+// is what enforces exactly-once.
+const sqlLeaseExitContext = `
+SELECT l.runner_class, COALESCE(l.workspace_scope_id::text, ''),
+    COALESCE(l.observed_source_generation, ''), COALESCE(d.trust_class, '')
+FROM host_leases l
+LEFT JOIN github_provider_demands d ON d.provider_job_id = l.provider_job_id
+WHERE l.lease_id = $1 AND l.host_id = $2 AND l.state IN ('assigned', 'ready')`
+
+// sqlInsertSealGeneration mints the candidate the seal must produce; the id
+// is a UUID so it is zfs-name safe on the host.
+const sqlInsertSealGeneration = `
+INSERT INTO workspace_generations (generation, host_id, runner_class, state, scope_id, source_generation)
+VALUES (gen_random_uuid()::text, $1, $2, 'candidate', $3::uuid, NULLIF($4, ''))
+RETURNING generation`
+
+// sqlSealLease keeps the lease in the desired set as a seal request. The
+// slot is still released here — occupancy never waits on the seal, let
+// alone on GitHub.
+const sqlSealLease = `
+UPDATE host_leases
+SET state = 'sealing', reported_state = 'exited', exit_code = $3, jit_config = '',
+    seal_generation = $4, seal_deadline_at = $5, updated_at = now()
+WHERE lease_id = $1 AND host_id = $2 AND state IN ('assigned', 'ready')
+RETURNING provider_job_id, runner_class`
+
+// CompleteLease is the exited-report transition: terminalize the lease (or,
+// for a zero exit on a branch-trust lease with a scope, hold it in 'sealing'
+// with a freshly minted candidate generation), free its slot, and complete
+// the demand — one transaction, guarded by the lease's current state so a
+// replayed report is a no-op. Only branch trust ever seals: PR workspaces
+// are read-only borrowers of the target branch's lineage.
+func (s *pgStore) CompleteLease(ctx context.Context, hostID, leaseID string, exitCode int, sealDeadline time.Time) (jobID int64, sealGeneration string, done bool, err error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, "", false, err
+	}
+	defer tx.Rollback(ctx)
+	var class, scopeID, observedSource, trustClass string
+	err = tx.QueryRow(ctx, sqlLeaseExitContext, leaseID, hostID).Scan(&class, &scopeID, &observedSource, &trustClass)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, "", false, nil
+	}
+	if err != nil {
+		return 0, "", false, err
+	}
+	if exitCode == 0 && trustClass == trustClassBranch && scopeID != "" {
+		if err := tx.QueryRow(ctx, sqlInsertSealGeneration, hostID, class, scopeID, observedSource).Scan(&sealGeneration); err != nil {
+			return 0, "", false, err
+		}
+		err = tx.QueryRow(ctx, sqlSealLease, leaseID, hostID, exitCode, sealGeneration, sealDeadline).Scan(&jobID, &class)
+	} else {
+		err = tx.QueryRow(ctx, sqlCompleteLease, leaseID, hostID, exitCode).Scan(&jobID, &class)
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, "", false, nil
+	}
+	if err != nil {
+		return 0, "", false, err
+	}
+	if _, err := tx.Exec(ctx, sqlReleaseHostSlot, hostID, class); err != nil {
+		return 0, "", false, err
+	}
+	if _, err := tx.Exec(ctx, sqlAdvanceDemand, jobID, demandCompleted,
+		[]string{demandCapacityRequested, demandAssigned}); err != nil {
+		return 0, "", false, err
+	}
+	return jobID, sealGeneration, true, tx.Commit(ctx)
+}
+
+const sqlRecordLeaseSealed = `
+UPDATE host_leases
+SET state = 'completed', reported_state = 'sealed', updated_at = now()
+WHERE lease_id = $1 AND host_id = $2 AND state = 'sealing' AND seal_generation = $3
+RETURNING provider_job_id`
+
+const sqlMarkGenerationSealed = `
+UPDATE workspace_generations SET sealed_at = now(), updated_at = now()
+WHERE generation = $1 AND state = 'candidate'`
+
+// RecordLeaseSealed is the sealed-report transition: the host confirmed the
+// exact generation this lease was asked to produce, so the candidate becomes
+// promotable and the lease terminalizes (leaving the desired set, which lets
+// the host collect the workspace volume).
+func (s *pgStore) RecordLeaseSealed(ctx context.Context, hostID, leaseID, sealedGeneration string) (int64, bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, false, err
 	}
 	defer tx.Rollback(ctx)
 	var jobID int64
-	var class string
-	err = tx.QueryRow(ctx, sqlCompleteLease, leaseID, hostID, exitCode).Scan(&jobID, &class)
+	err = tx.QueryRow(ctx, sqlRecordLeaseSealed, leaseID, hostID, sealedGeneration).Scan(&jobID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, false, nil
 	}
 	if err != nil {
 		return 0, false, err
 	}
-	if _, err := tx.Exec(ctx, sqlReleaseHostSlot, hostID, class); err != nil {
-		return 0, false, err
-	}
-	if _, err := tx.Exec(ctx, sqlAdvanceDemand, jobID, demandCompleted,
-		[]string{demandCapacityRequested, demandAssigned}); err != nil {
+	if _, err := tx.Exec(ctx, sqlMarkGenerationSealed, sealedGeneration); err != nil {
 		return 0, false, err
 	}
 	return jobID, true, tx.Commit(ctx)
+}
+
+const sqlFailSealingLease = `
+UPDATE host_leases
+SET state = 'failed', reported_state = $3, reason = $4, updated_at = now()
+WHERE lease_id = $1 AND host_id = $2 AND state = 'sealing'
+RETURNING seal_generation`
+
+const sqlDiscardGeneration = `
+UPDATE workspace_generations SET state = 'discarded', updated_at = now()
+WHERE generation = $1 AND state = 'candidate'`
+
+// FailSealingLease handles a host-reported failure after the runner already
+// exited green: the candidate is discarded and the lease terminalizes. The
+// slot was released at the exited report and the demand already completed —
+// a failed seal is a lost cache write, never a job result change.
+func (s *pgStore) FailSealingLease(ctx context.Context, hostID, leaseID, reported, reason string) (bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+	var sealGeneration string
+	err = tx.QueryRow(ctx, sqlFailSealingLease, leaseID, hostID, reported, reason).Scan(&sealGeneration)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx, sqlDiscardGeneration, sealGeneration); err != nil {
+		return false, err
+	}
+	return true, tx.Commit(ctx)
 }
 
 const sqlFailLeaseFromHost = `
@@ -221,6 +357,7 @@ func (s *pgStore) FailLeaseFromHost(ctx context.Context, hostID, leaseID, report
 // desiredLeaseRow is one lease as projected into a host's desired set.
 type desiredLeaseRow struct {
 	LeaseID            string
+	State              string
 	ExecutionID        string
 	AttemptID          string
 	OrgID              string
@@ -231,13 +368,15 @@ type desiredLeaseRow struct {
 	JITConfig          string
 	Generation         string
 	SizeBytes          int64
+	SealGeneration     string
 }
 
 const sqlListDesiredLeases = `
-SELECT lease_id, execution_id, attempt_id, org_id, installation_id, repository_id,
-    repository_full_name, runner_class, jit_config, workspace_generation, workspace_size_bytes
+SELECT lease_id, state, execution_id, attempt_id, org_id, installation_id, repository_id,
+    repository_full_name, runner_class, jit_config, workspace_generation, workspace_size_bytes,
+    seal_generation
 FROM host_leases
-WHERE host_id = $1 AND state IN ('assigned', 'ready')
+WHERE host_id = $1 AND state IN ('assigned', 'ready', 'sealing')
 ORDER BY created_at, lease_id`
 
 func (s *pgStore) ListDesiredLeases(ctx context.Context, hostID string) ([]desiredLeaseRow, error) {
@@ -249,9 +388,9 @@ func (s *pgStore) ListDesiredLeases(ctx context.Context, hostID string) ([]desir
 	var out []desiredLeaseRow
 	for rows.Next() {
 		var r desiredLeaseRow
-		if err := rows.Scan(&r.LeaseID, &r.ExecutionID, &r.AttemptID, &r.OrgID, &r.InstallationID,
+		if err := rows.Scan(&r.LeaseID, &r.State, &r.ExecutionID, &r.AttemptID, &r.OrgID, &r.InstallationID,
 			&r.RepositoryID, &r.RepositoryFullName, &r.RunnerClass, &r.JITConfig,
-			&r.Generation, &r.SizeBytes); err != nil {
+			&r.Generation, &r.SizeBytes, &r.SealGeneration); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -285,7 +424,7 @@ func (s *pgStore) ListHostPoolTargets(ctx context.Context, hostID string) (map[s
 
 const sqlListReapGenerations = `
 SELECT generation FROM workspace_generations
-WHERE host_id = $1 AND state = 'reaped' AND NOT pinned
+WHERE host_id = $1 AND state = 'reapable' AND NOT pinned
 ORDER BY generation`
 
 func (s *pgStore) ListReapGenerations(ctx context.Context, hostID string) ([]string, error) {
@@ -314,11 +453,13 @@ type schedulableDemand struct {
 	ProviderRunAttempt   int64
 	RunnerClass          string
 	DiskBytes            int64
+	WorkspaceScopeID     string
 }
 
 const sqlListSchedulableDemands = `
 SELECT d.provider_job_id, d.provider_repository_id, d.repository_full_name,
-    d.provider_run_attempt, d.runner_class, rc.disk_bytes
+    d.provider_run_attempt, d.runner_class, rc.disk_bytes,
+    COALESCE(d.workspace_scope_id::text, '')
 FROM github_provider_demands d
 JOIN runner_classes rc ON rc.class = d.runner_class
 WHERE d.state = 'demand_recorded'
@@ -335,7 +476,7 @@ func (s *pgStore) ListSchedulableDemands(ctx context.Context, batch int) ([]sche
 	for rows.Next() {
 		var d schedulableDemand
 		if err := rows.Scan(&d.ProviderJobID, &d.ProviderRepositoryID, &d.RepositoryFullName,
-			&d.ProviderRunAttempt, &d.RunnerClass, &d.DiskBytes); err != nil {
+			&d.ProviderRunAttempt, &d.RunnerClass, &d.DiskBytes, &d.WorkspaceScopeID); err != nil {
 			return nil, err
 		}
 		out = append(out, d)
@@ -381,8 +522,8 @@ const sqlInsertLease = `
 INSERT INTO host_leases (
     provider_job_id, execution_id, attempt_id, org_id, installation_id,
     repository_id, repository_full_name, runner_class, state,
-    workspace_size_bytes, allocate_deadline_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'allocating', $9, $10)
+    workspace_size_bytes, allocate_deadline_at, workspace_scope_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'allocating', $9, $10, NULLIF($11, '')::uuid)
 RETURNING lease_id`
 
 // CreateLeaseForDemand advances a recorded demand to capacity_requested and
@@ -405,7 +546,7 @@ func (s *pgStore) CreateLeaseForDemand(ctx context.Context, d schedulableDemand,
 	if err := tx.QueryRow(ctx, sqlInsertLease,
 		d.ProviderJobID, executionID, attemptID, orgID, installationID,
 		d.ProviderRepositoryID, d.RepositoryFullName, d.RunnerClass,
-		d.DiskBytes, allocateDeadline).Scan(&leaseID); err != nil {
+		d.DiskBytes, allocateDeadline, d.WorkspaceScopeID).Scan(&leaseID); err != nil {
 		return "", false, err
 	}
 	return leaseID, true, tx.Commit(ctx)
@@ -442,20 +583,24 @@ func (s *pgStore) ListAllocatingLeases(ctx context.Context, batch int) ([]alloca
 }
 
 // sqlClaimHostSlot is the CAS slot claim: exactly one free slot on a
-// recently-synced host offering the class is reserved, least-loaded first.
-// FOR UPDATE SKIP LOCKED makes concurrent claimers pick disjoint rows, and
-// the reserved < total guard inside the locked pick makes double-assignment
-// impossible.
+// recently-synced host offering the class is reserved — the lease's scope
+// home host first (a clone is ~free where the source generation lives),
+// then least-loaded. FOR UPDATE SKIP LOCKED makes concurrent claimers pick
+// disjoint rows, and the reserved < total guard inside the locked pick makes
+// double-assignment impossible. FOR UPDATE OF hs keeps the lock off the
+// outer-joined scope row, which PostgreSQL would reject.
 const sqlClaimHostSlot = `
 UPDATE host_slots s
 SET reserved = s.reserved + 1, updated_at = now()
 FROM (
     SELECT hs.host_id, hs.class FROM host_slots hs
     JOIN hosts h ON h.host_id = hs.host_id
+    LEFT JOIN host_leases cl ON cl.lease_id = $2
+    LEFT JOIN workspace_scopes sc ON sc.scope_id = cl.workspace_scope_id
     WHERE hs.class = $1
       AND hs.reserved < hs.total
       AND h.last_sync_at > now() - interval '30 seconds'
-    ORDER BY hs.reserved, hs.host_id
+    ORDER BY (hs.host_id = sc.home_host_id) DESC NULLS LAST, hs.reserved, hs.host_id
     FOR UPDATE OF hs SKIP LOCKED
     LIMIT 1
 ) pick
@@ -463,13 +608,50 @@ WHERE s.host_id = pick.host_id AND s.class = pick.class
 RETURNING s.host_id`
 
 // sqlBindLeaseHost stamps the claimed host onto the allocating lease in the
-// claim's own transaction. The host_id = ” guard makes the binding
-// bind-once: a concurrent scheduler instance (deploy overlap) can never
-// re-place a lease whose claim is mid-mint elsewhere.
+// claim's own transaction, together with the workspace this placement gets:
+// observed_source_generation records the scope pointer as read right now
+// (the promotion CAS guard), and workspace_generation is that pointer only
+// when its generation is resident on the chosen host — anywhere else the
+// clone source does not exist, so the lease runs cold (still correct; cache
+// is acceleration). The host_id = ” guard makes the binding bind-once: a
+// concurrent scheduler instance (deploy overlap) can never re-place a lease
+// whose claim is mid-mint elsewhere.
 const sqlBindLeaseHost = `
-UPDATE host_leases
-SET host_id = $2, updated_at = now()
-WHERE lease_id = $1 AND state = 'allocating' AND host_id = ''`
+UPDATE host_leases l
+SET host_id = $2,
+    observed_source_generation = src.pointer,
+    workspace_generation = COALESCE(src.resident, ''),
+    updated_at = now()
+FROM (
+    SELECT sc.current_generation_id AS pointer,
+        (SELECT g.generation FROM workspace_generations g
+         WHERE g.generation = sc.current_generation_id AND g.host_id = $2) AS resident
+    FROM host_leases cl
+    LEFT JOIN workspace_scopes sc ON sc.scope_id = cl.workspace_scope_id
+    WHERE cl.lease_id = $1
+) src
+WHERE l.lease_id = $1 AND l.state = 'allocating' AND l.host_id = ''`
+
+// sqlLockLeaseScope share-locks the lease's scope row for the rest of the
+// claim transaction. The promotion CAS updates that row, so it cannot commit
+// — and retire the generation the bind below is about to read as the scope
+// pointer — until this transaction's lease references are visible. Without
+// the lock, a promotion plus a retention sweep landing inside the claim's
+// commit window could mark the clone source reapable while no committed row
+// references it yet.
+const sqlLockLeaseScope = `
+SELECT 1 FROM host_leases cl
+JOIN workspace_scopes sc ON sc.scope_id = cl.workspace_scope_id
+WHERE cl.lease_id = $1
+FOR SHARE OF sc`
+
+// sqlTouchCloneSource stamps last_used_at on the generation the bound lease
+// clones (the retention policy's recency input); a cold bind touches nothing.
+const sqlTouchCloneSource = `
+UPDATE workspace_generations g
+SET last_used_at = now(), updated_at = now()
+FROM host_leases l
+WHERE l.lease_id = $1 AND l.workspace_generation = g.generation`
 
 // ClaimHostSlot reserves one free slot for the lease and binds the lease to
 // the chosen host, atomically. The bound lease row is what carries the
@@ -483,12 +665,23 @@ func (s *pgStore) ClaimHostSlot(ctx context.Context, leaseID, class string) (str
 		return "", false, err
 	}
 	defer tx.Rollback(ctx)
+	hostID, claimed, err := claimHostSlotTx(ctx, tx, leaseID, class)
+	if err != nil || !claimed {
+		return "", false, err
+	}
+	return hostID, true, tx.Commit(ctx)
+}
+
+func claimHostSlotTx(ctx context.Context, tx pgx.Tx, leaseID, class string) (string, bool, error) {
 	var hostID string
-	err = tx.QueryRow(ctx, sqlClaimHostSlot, class).Scan(&hostID)
+	err := tx.QueryRow(ctx, sqlClaimHostSlot, class, leaseID).Scan(&hostID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", false, nil
 	}
 	if err != nil {
+		return "", false, err
+	}
+	if _, err := tx.Exec(ctx, sqlLockLeaseScope, leaseID); err != nil {
 		return "", false, err
 	}
 	tag, err := tx.Exec(ctx, sqlBindLeaseHost, leaseID, hostID)
@@ -500,7 +693,10 @@ func (s *pgStore) ClaimHostSlot(ctx context.Context, leaseID, class string) (str
 		// the rollback discards the reservation.
 		return "", false, nil
 	}
-	return hostID, true, tx.Commit(ctx)
+	if _, err := tx.Exec(ctx, sqlTouchCloneSource, leaseID); err != nil {
+		return "", false, err
+	}
+	return hostID, true, nil
 }
 
 // sqlReconcileSlotReservations resets every slot row's reserved counter to
@@ -602,11 +798,12 @@ type overdueLease struct {
 	State         string
 }
 
-// sqlListOverdueLeases sweeps the three ways a lease can be stuck: past its
-// allocate deadline, past its assignment deadline, or ready on a host that
+// sqlListOverdueLeases sweeps the ways a lease can be stuck: past its
+// allocate deadline, past its assignment deadline, ready on a host that
 // stopped syncing (a ready lease has no control-plane deadline of its own —
 // hostd's ready bound only fires if the host is alive, so host death is the
-// absence this sweep must observe).
+// absence this sweep must observe), or sealing past its deadline or on a
+// dead host.
 const sqlListOverdueLeases = `
 SELECT l.lease_id, l.provider_job_id, l.host_id, l.runner_class, l.state
 FROM host_leases l
@@ -615,6 +812,9 @@ WHERE (l.state = 'allocating' AND l.allocate_deadline_at <= now())
    OR (l.state = 'ready' AND EXISTS (
         SELECT 1 FROM hosts h
         WHERE h.host_id = l.host_id AND h.last_sync_at <= $2))
+   OR (l.state = 'sealing' AND (l.seal_deadline_at <= now() OR EXISTS (
+        SELECT 1 FROM hosts h
+        WHERE h.host_id = l.host_id AND h.last_sync_at <= $2)))
 ORDER BY l.updated_at
 LIMIT $1`
 
@@ -641,11 +841,44 @@ SET state = 'expired', reason = $3, jit_config = '', updated_at = now()
 WHERE lease_id = $1 AND state = $2
 RETURNING host_id, runner_class, provider_job_id`
 
+const sqlExpireSealingLease = `
+UPDATE host_leases
+SET state = 'expired', reason = $2, updated_at = now()
+WHERE lease_id = $1 AND state = 'sealing'
+RETURNING seal_generation`
+
+// expireSealingLease terminalizes a seal that was never confirmed and
+// discards its candidate. The slot was released and the demand completed at
+// the exited report, so neither is touched: an unconfirmed seal costs only
+// the cache write.
+func (s *pgStore) expireSealingLease(ctx context.Context, l overdueLease, reason string) (bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+	var sealGeneration string
+	err = tx.QueryRow(ctx, sqlExpireSealingLease, l.LeaseID, reason).Scan(&sealGeneration)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx, sqlDiscardGeneration, sealGeneration); err != nil {
+		return false, err
+	}
+	return true, tx.Commit(ctx)
+}
+
 // ExpireLease terminalizes a stuck lease: the guarded transition, the slot
 // release (any lease bound to a host holds a reservation, including a claimed
 // allocating lease orphaned mid-mint), and the demand failure land in one
 // transaction.
 func (s *pgStore) ExpireLease(ctx context.Context, l overdueLease, reason string, problems []problem) (bool, error) {
+	if l.State == leaseSealing {
+		return s.expireSealingLease(ctx, l, reason)
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return false, err

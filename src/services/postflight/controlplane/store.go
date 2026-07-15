@@ -368,15 +368,17 @@ type workflowJobRow struct {
 
 // sqlUpsertWorkflowJob is last-write-wins on all provider fields;
 // observed_from_api_at is only ever advanced (an API truth never loses its
-// provenance to a later webhook hint), and pr_number is owned by
-// SetRunPullRequest.
+// provenance to a later webhook hint), terminal_observed_from_api_at is set
+// only by API reads that carried the completed status (promotion's truth
+// gate), and pr_number is owned by SetRunPullRequest.
 const sqlUpsertWorkflowJob = `
 INSERT INTO github_workflow_jobs (
     provider_job_id, provider_run_id, provider_run_attempt, provider_repository_id,
     repository_full_name, name, status, conclusion, labels_json, runner_class,
     runner_id, runner_name, head_sha, head_branch, workflow_name,
-    started_at, completed_at, observed_from_api_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+    started_at, completed_at, observed_from_api_at, terminal_observed_from_api_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+    CASE WHEN $18::timestamptz IS NOT NULL AND $7 = 'completed' THEN $18::timestamptz END)
 ON CONFLICT (provider_job_id) DO UPDATE SET
     provider_run_id        = EXCLUDED.provider_run_id,
     provider_run_attempt   = EXCLUDED.provider_run_attempt,
@@ -395,6 +397,7 @@ ON CONFLICT (provider_job_id) DO UPDATE SET
     started_at             = EXCLUDED.started_at,
     completed_at           = EXCLUDED.completed_at,
     observed_from_api_at   = COALESCE(EXCLUDED.observed_from_api_at, github_workflow_jobs.observed_from_api_at),
+    terminal_observed_from_api_at = COALESCE(EXCLUDED.terminal_observed_from_api_at, github_workflow_jobs.terminal_observed_from_api_at),
     updated_at             = now()`
 
 func (s *pgStore) UpsertWorkflowJob(ctx context.Context, j workflowJobRow) error {
@@ -429,6 +432,7 @@ type demandRow struct {
 	ProviderRunAttempt   int64
 	TrustClass           string
 	RunnerClass          string
+	WorkspaceScopeID     string
 	LastDeliveryID       string
 }
 
@@ -438,8 +442,8 @@ const sqlEnsureProviderDemand = `
 INSERT INTO github_provider_demands (
     provider_job_id, provider_repository_id, repository_full_name,
     provider_run_id, provider_run_attempt, trust_class, runner_class,
-    state, last_delivery_id
-) VALUES ($1, $2, $3, $4, $5, $6, $7, 'demand_recorded', $8)
+    workspace_scope_id, state, last_delivery_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, '')::uuid, 'demand_recorded', $9)
 ON CONFLICT (provider_job_id) DO UPDATE SET
     provider_repository_id = EXCLUDED.provider_repository_id,
     repository_full_name   = EXCLUDED.repository_full_name,
@@ -447,6 +451,7 @@ ON CONFLICT (provider_job_id) DO UPDATE SET
     provider_run_attempt   = EXCLUDED.provider_run_attempt,
     trust_class            = COALESCE(NULLIF(EXCLUDED.trust_class, ''), github_provider_demands.trust_class),
     runner_class           = COALESCE(NULLIF(EXCLUDED.runner_class, ''), github_provider_demands.runner_class),
+    workspace_scope_id     = COALESCE(EXCLUDED.workspace_scope_id, github_provider_demands.workspace_scope_id),
     last_delivery_id       = COALESCE(NULLIF(EXCLUDED.last_delivery_id, ''), github_provider_demands.last_delivery_id),
     updated_at             = now()
 RETURNING state`
@@ -455,7 +460,8 @@ func (s *pgStore) EnsureProviderDemand(ctx context.Context, d demandRow) (string
 	var state string
 	err := s.pool.QueryRow(ctx, sqlEnsureProviderDemand,
 		d.ProviderJobID, d.ProviderRepositoryID, d.RepositoryFullName,
-		d.ProviderRunID, d.ProviderRunAttempt, d.TrustClass, d.RunnerClass, d.LastDeliveryID,
+		d.ProviderRunID, d.ProviderRunAttempt, d.TrustClass, d.RunnerClass,
+		d.WorkspaceScopeID, d.LastDeliveryID,
 	).Scan(&state)
 	return state, err
 }

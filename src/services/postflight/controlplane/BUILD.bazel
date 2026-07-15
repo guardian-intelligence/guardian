@@ -22,10 +22,12 @@ go_library(
         "trust.go",
         "webhook.go",
         "worker.go",
+        "workspace_store.go",
     ],
     embedsrcs = [
         "migrations/001_initial.sql",
         "migrations/002_hostd_scheduler.sql",
+        "migrations/003_workspace_generations.sql",
     ],
     importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/controlplane",
     visibility = ["//visibility:private"],
@@ -79,6 +81,7 @@ go_test(
     timeout = "short",
     srcs = [
         "e2e_test.go",
+        "generations_test.go",
         "hostd_store_test.go",
     ],
     data = [

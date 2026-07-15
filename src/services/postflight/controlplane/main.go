@@ -1,11 +1,11 @@
 // postflight-runner control plane: GitHub workflow_job webhook ingest with
 // a durable delivery ledger, an async worker + reconciliation sweeper
 // (webhook payloads are hints, the GitHub API is truth), provider
-// demand/assignment records, a per-PR comment engine, and the
-// scheduler/sync half of the kubelet-inspired split — demand becomes host
-// leases with JIT runner configs, delivered to hostd agents over the
-// level-triggered sync exchange. Workspace-generation cache logic (seal
-// promotion, eviction) is stage (c).
+// demand/assignment records, a per-PR comment engine, the scheduler/sync
+// half of the kubelet-inspired split — demand becomes host leases with JIT
+// runner configs, delivered to hostd agents over the level-triggered sync
+// exchange — and the workspace-generation cache: green branch-trust runs
+// seal generations that promote by CAS against GitHub's observed verdict.
 package main
 
 import (
@@ -139,7 +139,7 @@ func buildMux(cfg config, st *pgStore, ws *webhookServer, tracer trace.Tracer) *
 	// so no method patterns here.
 	mux.HandleFunc("/api/v1/github/webhooks", ws.handleWebhook)
 	if cfg.hostdSyncSecret != "" {
-		ss := &syncServer{st: st, secret: []byte(cfg.hostdSyncSecret), tracer: tracer}
+		ss := &syncServer{st: st, secret: []byte(cfg.hostdSyncSecret), sealTimeout: cfg.sealTimeout, tracer: tracer}
 		mux.HandleFunc(syncproto.SyncPath, ss.handleSync)
 	}
 	health := func(w http.ResponseWriter, r *http.Request) {

@@ -26,6 +26,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -57,18 +58,52 @@ const (
 
 // fakeGitHub scripts the GitHub API surface the loop touches: token mint,
 // run + attempt-jobs reads for the worker, and the JIT config mint for the
-// scheduler.
+// scheduler. Runs and jobs are mutable so a test can move a job to its
+// terminal conclusion and let the refresh path observe it as API truth.
 type fakeGitHub struct {
 	t *testing.T
 
 	mu       sync.Mutex
 	jitMints []jitMintRequest
+	jobs     map[int64]*fakeGitHubJob
+}
+
+type fakeGitHubJob struct {
+	ID         int64
+	RunID      int64
+	Name       string
+	Status     string
+	Conclusion string
 }
 
 type jitMintRequest struct {
 	Name          string   `json:"name"`
 	RunnerGroupID int64    `json:"runner_group_id"`
 	Labels        []string `json:"labels"`
+}
+
+// addQueuedJob registers a queued job (and implicitly its push run).
+func (f *fakeGitHub) addQueuedJob(runID, jobID int64, name string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.jobs[jobID] = &fakeGitHubJob{ID: jobID, RunID: runID, Name: name, Status: "queued"}
+}
+
+// concludeJob moves a job to completed with the given conclusion.
+func (f *fakeGitHub) concludeJob(jobID int64, conclusion string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.jobs[jobID].Status = "completed"
+	f.jobs[jobID].Conclusion = conclusion
+}
+
+func (f *fakeGitHub) jobJSON(j *fakeGitHubJob) map[string]any {
+	return map[string]any{
+		"id": j.ID, "run_id": j.RunID, "run_attempt": 1,
+		"name": j.Name, "status": j.Status, "conclusion": j.Conclusion,
+		"labels":   []string{e2eClass},
+		"head_sha": "abc123", "head_branch": "main", "workflow_name": "ci",
+	}
 }
 
 func (f *fakeGitHub) handler() http.Handler {
@@ -78,23 +113,30 @@ func (f *fakeGitHub) handler() http.Handler {
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(map[string]string{"token": "e2e-installation-token"})
 		})
-	mux.HandleFunc(fmt.Sprintf("GET /repos/%s/actions/runs/%d", e2eRepo, e2eRunID),
+	mux.HandleFunc(fmt.Sprintf("GET /repos/%s/actions/runs/{run}", e2eRepo),
 		func(w http.ResponseWriter, r *http.Request) {
+			runID, _ := strconv.ParseInt(r.PathValue("run"), 10, 64)
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"id": e2eRunID, "event": "push", "head_branch": "main", "head_sha": "abc123",
+				"id": runID, "event": "push", "path": ".github/workflows/ci.yml",
+				"head_branch": "main", "head_sha": "abc123",
 				"run_attempt": 1, "pull_requests": []any{},
 				"head_repository": map[string]any{"full_name": e2eRepo},
 			})
 		})
-	mux.HandleFunc(fmt.Sprintf("GET /repos/%s/actions/runs/%d/attempts/1/jobs", e2eRepo, e2eRunID),
+	mux.HandleFunc(fmt.Sprintf("GET /repos/%s/actions/runs/{run}/attempts/1/jobs", e2eRepo),
 		func(w http.ResponseWriter, r *http.Request) {
+			runID, _ := strconv.ParseInt(r.PathValue("run"), 10, 64)
+			f.mu.Lock()
+			jobs := []map[string]any{}
+			for _, j := range f.jobs {
+				if j.RunID == runID {
+					jobs = append(jobs, f.jobJSON(j))
+				}
+			}
+			f.mu.Unlock()
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"total_count": 1,
-				"jobs": []map[string]any{{
-					"id": e2eJobID, "run_id": e2eRunID, "run_attempt": 1,
-					"name": "build", "status": "queued", "labels": []string{e2eClass},
-					"head_sha": "abc123", "head_branch": "main", "workflow_name": "ci",
-				}},
+				"total_count": len(jobs),
+				"jobs":        jobs,
 			})
 		})
 	mux.HandleFunc("POST /orgs/guardian-intelligence/actions/runners/generate-jitconfig",
@@ -159,7 +201,8 @@ func startControlPlane(t *testing.T) *controlPlane {
 		t.Fatal(err)
 	}
 
-	github := &fakeGitHub{t: t}
+	github := &fakeGitHub{t: t, jobs: map[int64]*fakeGitHubJob{}}
+	github.addQueuedJob(e2eRunID, e2eJobID, "build")
 	githubServer := httptest.NewServer(github.handler())
 	t.Cleanup(githubServer.Close)
 
@@ -179,6 +222,8 @@ func startControlPlane(t *testing.T) *controlPlane {
 		runnerOrg:          "guardian-intelligence",
 		allocateTimeout:    10 * time.Second,
 		assignmentTimeout:  90 * time.Second,
+		sealTimeout:        10 * time.Second,
+		verdictTimeout:     time.Hour,
 		hostOfflineTimeout: 5 * time.Minute,
 	}
 	gh, err := newGitHubClient(cfg)
@@ -311,18 +356,22 @@ func (cp *controlPlane) postWebhook(t *testing.T, deliveryID string, payload []b
 	}
 }
 
-func queuedJobPayload() []byte {
+func workflowJobEventPayload(action string, runID, jobID int64, status string) []byte {
 	payload, _ := json.Marshal(map[string]any{
-		"action":       "queued",
+		"action":       action,
 		"installation": map[string]any{"id": e2eInstallationID},
 		"repository":   map[string]any{"id": e2eRepoID, "full_name": e2eRepo},
 		"workflow_job": map[string]any{
-			"id": e2eJobID, "run_id": e2eRunID, "run_attempt": 1,
-			"name": "build", "status": "queued", "labels": []string{e2eClass},
+			"id": jobID, "run_id": runID, "run_attempt": 1,
+			"name": "build", "status": status, "labels": []string{e2eClass},
 			"head_sha": "abc123", "head_branch": "main", "workflow_name": "ci",
 		},
 	})
 	return payload
+}
+
+func queuedJobPayload() []byte {
+	return workflowJobEventPayload("queued", e2eRunID, e2eJobID, "queued")
 }
 
 func TestHostdSchedulerEndToEnd(t *testing.T) {
@@ -387,6 +436,89 @@ func TestHostdSchedulerEndToEnd(t *testing.T) {
 	waitFor(t, "hostd forgetting the acked lease", func() bool {
 		return len(hostd.Snapshot()) == 0 && !zvols.HasWorkspace(zvol.LeaseID(leaseID))
 	})
+}
+
+// TestWorkspaceGenerationLifecycleEndToEnd drives the cache loop through
+// the real stack twice: the first green run cold-seeds the scope's lineage
+// (seal on the host, promotion once GitHub's success is observed from the
+// API), the second run clones the promoted generation, and its promotion
+// retires the first generation all the way to host-confirmed destruction.
+func TestWorkspaceGenerationLifecycleEndToEnd(t *testing.T) {
+	cp := startControlPlane(t)
+	hostd, vms, zvols := startHostd(t, cp.server.URL, "host-gen")
+
+	waitFor(t, "host slot registration", func() bool {
+		return cp.queryString(t, `SELECT total::text FROM host_slots WHERE host_id = 'host-gen' AND class = $1`, e2eClass) == "2"
+	})
+
+	// runGreenJob dispatches one queued job, walks it to a zero exit, waits
+	// for the host-confirmed seal, then feeds GitHub's success verdict to
+	// the refresh path and waits for the promotion CAS.
+	runGreenJob := func(delivery string, runID, jobID int64) (leaseID, generation string) {
+		t.Helper()
+		cp.github.addQueuedJob(runID, jobID, "build")
+		cp.postWebhook(t, delivery+"-queued", workflowJobEventPayload("queued", runID, jobID, "queued"))
+		waitFor(t, "lease assigned", func() bool {
+			return cp.queryString(t, `SELECT state FROM host_leases WHERE provider_job_id = $1`, jobID) == "assigned"
+		})
+		leaseID = cp.queryString(t, `SELECT lease_id FROM host_leases WHERE provider_job_id = $1`, jobID)
+		var vmID vm.ID
+		waitFor(t, "hostd assigning the lease to a warm VM", func() bool {
+			for _, snapshot := range hostd.Snapshot() {
+				if snapshot.LeaseID == leaseID && snapshot.VMID != "" {
+					vmID = vm.ID(snapshot.VMID)
+					return true
+				}
+			}
+			return false
+		})
+		vms.MarkReady(vmID)
+		waitFor(t, "control plane observing ready", func() bool {
+			return cp.queryString(t, `SELECT state FROM host_leases WHERE lease_id = $1`, leaseID) == "ready"
+		})
+		vms.MarkExited(vmID, 0)
+		waitFor(t, "seal confirmed and lease completed", func() bool {
+			return cp.queryString(t, `SELECT state || ':' || reported_state FROM host_leases WHERE lease_id = $1`, leaseID) == "completed:sealed"
+		})
+		generation = cp.queryString(t, `SELECT seal_generation FROM host_leases WHERE lease_id = $1`, leaseID)
+		if generation == "" {
+			t.Fatal("green branch-trust run completed without a sealed generation")
+		}
+		cp.github.concludeJob(jobID, "success")
+		cp.postWebhook(t, delivery+"-completed", workflowJobEventPayload("completed", runID, jobID, "completed"))
+		waitFor(t, "promotion CAS", func() bool {
+			return cp.queryString(t, `SELECT COALESCE(current_generation_id, '') FROM workspace_scopes`) == generation
+		})
+		return leaseID, generation
+	}
+
+	_, gen1 := runGreenJob("gen-e2e-1", 801, 8101)
+	if got := cp.queryString(t, `SELECT home_host_id FROM workspace_scopes`); got != "host-gen" {
+		t.Fatalf("scope home host = %q, want host-gen", got)
+	}
+	if !zvols.HasGeneration(zvol.GenerationID(gen1)) {
+		t.Fatal("promoted generation is not resident on the host")
+	}
+
+	lease2, gen2 := runGreenJob("gen-e2e-2", 802, 8102)
+	if got := cp.queryString(t, `SELECT workspace_generation FROM host_leases WHERE lease_id = $1`, lease2); got != gen1 {
+		t.Fatalf("second run's workspace cloned %q, want the promoted generation %q", got, gen1)
+	}
+	if got := cp.queryString(t, `SELECT COALESCE(observed_source_generation, '') FROM host_leases WHERE lease_id = $1`, lease2); got != gen1 {
+		t.Fatalf("second run's observed source = %q, want %q", got, gen1)
+	}
+
+	// The displaced generation retires: retained -> reapable -> reap verb ->
+	// host destroys it -> inventory absence confirms 'reaped'.
+	waitFor(t, "displaced generation reaped", func() bool {
+		return cp.queryString(t, `SELECT state FROM workspace_generations WHERE generation = $1`, gen1) == "reaped"
+	})
+	if zvols.HasGeneration(zvol.GenerationID(gen1)) {
+		t.Fatal("reaped generation is still resident on the host")
+	}
+	if !zvols.HasGeneration(zvol.GenerationID(gen2)) {
+		t.Fatal("current generation was destroyed")
+	}
 }
 
 // TestSyncRejectsBadBearer pins the endpoint's auth: a wrong credential is
