@@ -45,6 +45,8 @@ func (s *scheduler) run(ctx context.Context) {
 		s.rejectUnknownClasses(work)
 		s.allocateDemands(work)
 		s.placeLeases(work)
+		s.promoteSealedGenerations(work)
+		s.sweepReapableGenerations(work)
 	}
 }
 
@@ -74,16 +76,21 @@ func (s *scheduler) expireOverdue(ctx context.Context) {
 	}
 	for _, l := range overdue {
 		reason := "allocate deadline exceeded"
-		p := problemCapacityTimeout(l.RunnerClass)
+		problems := []problem{problemCapacityTimeout(l.RunnerClass)}
 		switch l.State {
 		case leaseAssigned:
 			reason = "assignment deadline exceeded"
-			p = problemAssignmentTimeout()
+			problems = []problem{problemAssignmentTimeout()}
 		case leaseReady:
 			reason = "host stopped syncing"
-			p = problemHostLost(l.HostID)
+			problems = []problem{problemHostLost(l.HostID)}
+		case leaseSealing:
+			// The demand already completed at the exited report; an
+			// unconfirmed seal discards its candidate and nothing else.
+			reason = "seal not confirmed"
+			problems = nil
 		}
-		expired, err := s.st.ExpireLease(ctx, l, reason, []problem{p})
+		expired, err := s.st.ExpireLease(ctx, l, reason, problems)
 		if err != nil {
 			slog.Error("scheduler: expire lease", "lease_id", l.LeaseID, "err", err)
 			continue
@@ -202,4 +209,66 @@ func (s *scheduler) placeLease(ctx context.Context, l allocatingLease) {
 	}
 	attrs.Result = "succeeded"
 	emitEvent(ctx, evLeaseAssigned, attrs)
+}
+
+// promoteSealedGenerations classifies every host-confirmed seal whose GitHub
+// verdict has been observed. Only an attempt-matching success promotes;
+// everything else — failure, cancellation, a superseded attempt, an
+// unparseable attempt — discards the candidate and leaves the previous
+// current authoritative. Candidates whose verdict has not been observed yet
+// are not listed at all, so ambiguity never advances anything.
+func (s *scheduler) promoteSealedGenerations(ctx context.Context) {
+	candidates, err := s.st.ListSealedCandidates(ctx, s.cfg.workerBatchSize)
+	if err != nil {
+		slog.Error("scheduler: list sealed candidates", "err", err)
+		return
+	}
+	for _, c := range candidates {
+		attrs := eventAttrs{
+			LeaseID: c.LeaseID, HostID: c.HostID, JobID: c.ProviderJobID, Generation: c.Generation,
+		}
+		attempt, parseErr := strconv.ParseInt(c.LeaseAttemptID, 10, 64)
+		if parseErr != nil || attempt != c.JobRunAttempt || c.JobConclusion != "success" {
+			discarded, err := s.st.DiscardGeneration(ctx, c.Generation)
+			if err != nil {
+				slog.Error("scheduler: discard generation", "generation", c.Generation, "err", err)
+				continue
+			}
+			if discarded {
+				attrs.Result = "failed"
+				attrs.Reason = "conclusion:" + c.JobConclusion
+				if parseErr == nil && attempt != c.JobRunAttempt {
+					attrs.Reason = "stale_attempt"
+				}
+				emitEvent(ctx, evGenerationDiscarded, attrs)
+			}
+			continue
+		}
+		promoted, retained, err := s.st.PromoteGeneration(ctx, c)
+		if err != nil {
+			slog.Error("scheduler: promote generation", "generation", c.Generation, "err", err)
+			continue
+		}
+		switch {
+		case promoted:
+			attrs.Result = "succeeded"
+			emitEvent(ctx, evGenerationPromoted, attrs)
+		case retained:
+			attrs.Result, attrs.Reason = "failed", "lost promotion race"
+			emitEvent(ctx, evGenerationRetained, attrs)
+		}
+	}
+}
+
+// sweepReapableGenerations releases unreferenced retained/discarded
+// generations to the sync response's reap verb.
+func (s *scheduler) sweepReapableGenerations(ctx context.Context) {
+	swept, err := s.st.SweepReapableGenerations(ctx)
+	if err != nil {
+		slog.Error("scheduler: sweep reapable generations", "err", err)
+		return
+	}
+	if swept > 0 {
+		slog.Info("scheduler: generations released for reap", "generations", swept)
+	}
 }

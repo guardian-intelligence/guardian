@@ -264,7 +264,7 @@ func TestTerminalTransitionsScrubJITConfig(t *testing.T) {
 	}
 
 	completed := place(501, time.Now().Add(time.Minute))
-	if _, ok, err := st.CompleteLease(ctx, "host-a", completed, 0); err != nil || !ok {
+	if _, _, ok, err := st.CompleteLease(ctx, "host-a", completed, 0, time.Now().Add(time.Minute)); err != nil || !ok {
 		t.Fatalf("complete: ok=%v err=%v", ok, err)
 	}
 	failed := place(502, time.Now().Add(time.Minute))

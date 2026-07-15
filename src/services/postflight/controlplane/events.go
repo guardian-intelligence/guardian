@@ -49,6 +49,13 @@ const (
 	evLeaseCompleted        = "postflight.lease.completed"
 	evLeaseFailed           = "postflight.lease.failed"
 	evLeaseExpired          = "postflight.lease.expired"
+	evLeaseSealed           = "postflight.lease.sealed"
+	evLeaseSealFailed       = "postflight.lease.seal_failed"
+
+	evGenerationSealRequested = "postflight.generation.seal_requested"
+	evGenerationPromoted      = "postflight.generation.promoted"
+	evGenerationRetained      = "postflight.generation.retained"
+	evGenerationDiscarded     = "postflight.generation.discarded"
 )
 
 // initTracing registers a global tracer exporting to the OTLP gRPC collector
@@ -97,6 +104,7 @@ type eventAttrs struct {
 	RunnerClass string
 	LeaseID     string
 	HostID      string
+	Generation  string
 	Result      string
 	Reason      string
 }
@@ -133,6 +141,9 @@ func emitEvent(ctx context.Context, name string, a eventAttrs) {
 		if a.HostID != "" {
 			attrs = append(attrs, attribute.String("host_id", a.HostID))
 		}
+		if a.Generation != "" {
+			attrs = append(attrs, attribute.String("generation", a.Generation))
+		}
 		if a.Reason != "" {
 			attrs = append(attrs, attribute.String("reason", a.Reason))
 		}
@@ -163,6 +174,9 @@ func emitEvent(ctx context.Context, name string, a eventAttrs) {
 	}
 	if a.HostID != "" {
 		args = append(args, "host_id", a.HostID)
+	}
+	if a.Generation != "" {
+		args = append(args, "generation", a.Generation)
 	}
 	if a.Reason != "" {
 		args = append(args, "reason", a.Reason)
