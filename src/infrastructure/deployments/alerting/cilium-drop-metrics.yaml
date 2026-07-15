@@ -1,0 +1,68 @@
+# Hubble already exports drop counters (the cilium-config hubble-metrics
+# list includes `drop`, plaintext on hostPort 9965) — nothing scraped them,
+# so the 2026-07-15 CNP incident's policy drops were invisible to metrics.
+# The scrape lands in the same vmagent as everything else (cluster-wide
+# discovery); the rule pages on sustained POLICY_DENIED verdicts, the
+# generic detector for "a network policy is eating production traffic".
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: cilium-hubble-metrics
+  namespace: cozy-cilium
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cilium-agent
+  podMetricsEndpoints:
+    - port: hubble-metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: cilium-drops
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: cilium-drops
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  groups:
+    - name: cilium-drops.rules
+      interval: 30s
+      rules:
+        - alert: CiliumPolicyDeniedSustained
+          # The drop metric carries only reason/protocol (labelsContext is
+          # configured for httpV2 only), so this is a cluster-wide tripwire;
+          # attribute with hubble observe or the per-controller status split
+          # in VictoriaLogs. Steady state is near zero — the Talos ingress
+          # firewall absorbs internet scans before Cilium ever sees them.
+          # The CNP incident's SYN retransmits alone ran ~0.5-1 drops/s.
+          expr: >-
+            sum by (protocol) (rate(hubble_drop_total{reason="POLICY_DENIED"}[10m])) > 0.05
+          for: 15m
+          labels:
+            severity: warning
+            guardian_component: cilium-drops
+          annotations:
+            summary: 'Cilium denying {{ $labels.protocol }} traffic at {{ $value | humanize }} drops/s'
+            description: >-
+              POLICY_DENIED drops have been sustained for 15+ minutes.
+              Something a network policy does not admit is retrying against
+              it — recently applied CNP/CCNP changes and hostNetwork
+              (node-identity) sources are the usual suspects.
+        - alert: CiliumDropMetricsAbsent
+          # Three agents x 30s: total silence means the scrape or the
+          # hubble metrics server broke, not that nothing is being dropped.
+          expr: absent(hubble_drop_total)
+          for: 15m
+          labels:
+            severity: warning
+            guardian_component: cilium-drops
+          annotations:
+            summary: No hubble drop metrics are being scraped at all.

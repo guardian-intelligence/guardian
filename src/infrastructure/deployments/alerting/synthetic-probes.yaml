@@ -72,6 +72,38 @@ spec:
         probe_namespace: tenant-guardian-prod
         guardian_surface: company-site
 ---
+# Postflight control-plane routes through the full public path. Both
+# endpoints are POST-only, so the http_405 module treats the router's 405
+# as success — what this watches is the connect path, which is exactly
+# what the 2026-07-15 CNP incident broke (the edge served these routes at
+# ~2/3 failure for 16 hours while every probe above stayed green). No
+# service-class twin: the control-plane CNP admits only node-identity
+# ingress, so an in-cluster prober pod is deliberately not admitted.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMProbe
+metadata:
+  name: postflight-prod-edge
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  jobName: probe/postflight/prod/edge
+  interval: 15s
+  module: http_405
+  vmProberSpec:
+    url: blackbox-exporter.tenant-root.svc:9115
+    path: /probe
+  targets:
+    staticConfig:
+      targets:
+        - https://guardianintelligence.org/api/v1/github/webhooks
+        - https://guardianintelligence.org/api/v1/hostd/sync
+      labels:
+        probe_class: edge
+        probe_namespace: postflight-runner
+        guardian_surface: postflight
+---
 # Detection over the probe series, independent of any pending promotion.
 # Routes through the proven VMRule -> vmalert -> Alertmanager -> Alerta ->
 # relay -> ntfy pipeline.
@@ -107,7 +139,7 @@ spec:
               service passes, the problem is between the user and the
               ingress (DNS, Cloudflare, LB, origin ingress).
         - alert: ProbeAbsent
-          # 9 targets x 15s: total silence means the exporter, vmagent, or
+          # 11 targets x 15s: total silence means the exporter, vmagent, or
           # the scrape path broke — not that traffic is slow.
           expr: absent(probe_success)
           for: 10m
