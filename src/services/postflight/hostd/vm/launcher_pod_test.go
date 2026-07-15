@@ -5,37 +5,73 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"sigs.k8s.io/yaml"
 )
 
-type fakePodAPI struct {
-	mu       sync.Mutex
-	applied  [][]byte
-	pods     map[string]bool
-	deleted  []string
-	aliveErr error
+type fakePod struct {
+	labels map[string]string
+	// gracePolls is how many Alive calls the pod survives after Delete,
+	// simulating the asynchronous termination grace period. -1: not deleted.
+	gracePolls int
 }
 
-func newFakePodAPI() *fakePodAPI { return &fakePodAPI{pods: map[string]bool{}} }
+type fakePodAPI struct {
+	mu      sync.Mutex
+	applied [][]byte
+	pods    map[string]*fakePod
+	deleted []string
+	// deleteGrace is the gracePolls a Delete assigns.
+	deleteGrace int
+	aliveErr    error
+}
+
+func newFakePodAPI() *fakePodAPI { return &fakePodAPI{pods: map[string]*fakePod{}} }
 
 func (a *fakePodAPI) Apply(_ context.Context, manifest []byte) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	var pod podManifest
+	if err := yaml.Unmarshal(manifest, &pod); err != nil {
+		return err
+	}
+	a.pods[pod.Metadata.Namespace+"/"+pod.Metadata.Name] = &fakePod{labels: pod.Metadata.Labels, gracePolls: -1}
 	a.applied = append(a.applied, manifest)
 	return nil
 }
 
-func (a *fakePodAPI) Alive(_ context.Context, namespace, name string) (bool, error) {
+func (a *fakePodAPI) Alive(_ context.Context, namespace, name string) (bool, map[string]string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.pods[namespace+"/"+name], a.aliveErr
+	pod, ok := a.pods[namespace+"/"+name]
+	if !ok {
+		return false, nil, a.aliveErr
+	}
+	if pod.gracePolls >= 0 {
+		if pod.gracePolls == 0 {
+			delete(a.pods, namespace+"/"+name)
+			return false, nil, a.aliveErr
+		}
+		pod.gracePolls--
+	}
+	return true, pod.labels, a.aliveErr
 }
 
 func (a *fakePodAPI) Delete(_ context.Context, namespace, name string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	delete(a.pods, namespace+"/"+name)
+	if pod, ok := a.pods[namespace+"/"+name]; ok {
+		pod.gracePolls = a.deleteGrace
+	}
 	a.deleted = append(a.deleted, namespace+"/"+name)
 	return nil
+}
+
+func (a *fakePodAPI) podAlive(name string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	pod, ok := a.pods[name]
+	return ok && pod.gracePolls != 0
 }
 
 // TestPodManifestGolden pins the rendered pod for a fixture VM. restartPolicy
@@ -65,6 +101,7 @@ kind: Pod
 metadata:
   labels:
     app.kubernetes.io/name: postflight-vm
+    postflight.guardianintelligence.org/argv-sha256: ea34a324a3e7daabbed84bfe6c2cba4d2b445ec32f81029cc1a12d43a7783991
     postflight.guardianintelligence.org/vm-id: pool-0001
   name: postflight-vm-pool-0001
   namespace: postflight-vms
@@ -137,19 +174,70 @@ func TestPodLauncherDelegates(t *testing.T) {
 	if len(api.applied) != 1 || !strings.Contains(string(api.applied[0]), "postflight-vm-vm-a") {
 		t.Fatalf("applied %d manifests: %s", len(api.applied), api.applied)
 	}
-	api.pods["postflight-vms/postflight-vm-vm-a"] = true
-	alive, err := launcher.Alive(ctx, "vm-a", "", nil)
+	alive, err := launcher.Alive(ctx, "vm-a", "", argv)
 	if err != nil || !alive {
 		t.Fatalf("alive=%t err=%v", alive, err)
 	}
-	if err := launcher.Kill(ctx, "vm-a", "", nil); err != nil {
+	if err := launcher.Kill(ctx, "vm-a", "", argv); err != nil {
 		t.Fatal(err)
 	}
-	alive, err = launcher.Alive(ctx, "vm-a", "", nil)
+	alive, err = launcher.Alive(ctx, "vm-a", "", argv)
 	if err != nil || alive {
 		t.Fatalf("alive=%t err=%v after kill", alive, err)
 	}
 	if len(api.deleted) != 1 || api.deleted[0] != "postflight-vms/postflight-vm-vm-a" {
 		t.Fatalf("deleted %v", api.deleted)
+	}
+	// Kill on an absent pod is idempotent and issues no further deletes.
+	if err := launcher.Kill(ctx, "vm-a", "", argv); err != nil {
+		t.Fatal(err)
+	}
+	if len(api.deleted) != 1 {
+		t.Fatalf("deleted %v after idempotent kill", api.deleted)
+	}
+}
+
+// TestPodLauncherKillWaitsForTermination pins the Launcher contract: Kill
+// returns only once the pod is really gone. Pod deletion is asynchronous
+// (default 30s grace), and returning early would let the dying QEMU hold
+// the root zvol and its vsock CID past the driver's cleanup.
+func TestPodLauncherKillWaitsForTermination(t *testing.T) {
+	api := newFakePodAPI()
+	api.deleteGrace = 3 // the pod survives three liveness polls after Delete
+	launcher := &PodLauncher{API: api, Namespace: "postflight-vms", Image: "ghcr.io/guardian-intelligence/postflight-qemu@sha256:aaaa"}
+	ctx := context.Background()
+	argv := []string{"/usr/bin/qemu-system-x86_64", "-nodefaults"}
+	if err := launcher.Start(ctx, "vm-a", "/var/lib/hostd/vms/vm-a", argv); err != nil {
+		t.Fatal(err)
+	}
+	if err := launcher.Kill(ctx, "vm-a", "", argv); err != nil {
+		t.Fatalf("kill: %v", err)
+	}
+	if api.podAlive("postflight-vms/postflight-vm-vm-a") {
+		t.Fatal("kill returned while the pod was still terminating")
+	}
+}
+
+// TestPodLauncherNeverTouchesStrangers: a pod squatting on this VM's name
+// but not carrying its identity labels is neither reported alive nor
+// deleted — the pid-reuse guard's pod-shaped equivalent.
+func TestPodLauncherNeverTouchesStrangers(t *testing.T) {
+	api := newFakePodAPI()
+	launcher := &PodLauncher{API: api, Namespace: "postflight-vms", Image: "ghcr.io/guardian-intelligence/postflight-qemu@sha256:aaaa"}
+	ctx := context.Background()
+	argv := []string{"/usr/bin/qemu-system-x86_64", "-nodefaults"}
+	api.pods["postflight-vms/postflight-vm-vm-a"] = &fakePod{
+		labels:     map[string]string{vmIDLabel: "vm-other", argvHashLabel: "not-our-argv"},
+		gracePolls: -1,
+	}
+	alive, err := launcher.Alive(ctx, "vm-a", "", argv)
+	if err != nil || alive {
+		t.Fatalf("alive=%t err=%v for a stranger pod", alive, err)
+	}
+	if err := launcher.Kill(ctx, "vm-a", "", argv); err == nil {
+		t.Fatal("kill accepted a stranger pod")
+	}
+	if len(api.deleted) != 0 {
+		t.Fatalf("deleted %v; the stranger must survive", api.deleted)
 	}
 }

@@ -363,6 +363,69 @@ func TestConformanceAdoption(t *testing.T) {
 	}
 }
 
+// TestConformanceCorruptMetaRecovery: an externally corrupted meta.json
+// must never wedge the host. Status quarantines the VM, launching anything
+// new is refused while the corrupt VM may hold an unknown vsock CID, and
+// List collects it — QMP quit as the identity-safe kill, the real QEMU
+// process gone, dataset and state dir destroyed — after which launches
+// succeed again.
+func TestConformanceCorruptMetaRecovery(t *testing.T) {
+	driver, _ := conformanceDriver(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	const id = ID("conf-corrupt")
+
+	if err := driver.Launch(ctx, id, testClass); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = driver.Destroy(context.Background(), id) })
+	waitFor(t, "QMP reports running", 60*time.Second, vmRunningViaQMP(ctx, driver, id))
+	record, err := driver.readMeta(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(driver.metaPath(id), []byte(`{"id": "conf-corrupt", "cid": "three`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := driver.Status(ctx, id)
+	if err != nil {
+		t.Fatalf("status on corrupt meta: %v", err)
+	}
+	if status.Phase != PhaseGone {
+		t.Fatalf("phase %s, want gone", status.Phase)
+	}
+	if err := driver.Launch(ctx, "conf-corrupt-2", testClass); err == nil {
+		t.Fatal("launched while a corrupt meta may hold an unknown cid")
+	}
+
+	statuses, err := driver.List(ctx)
+	if err != nil {
+		t.Fatalf("list with corrupt meta present: %v", err)
+	}
+	for _, status := range statuses {
+		if status.ID == id {
+			t.Fatalf("corrupt vm still listed: %+v", status)
+		}
+	}
+	waitFor(t, "qemu process death", 30*time.Second, func() (bool, error) {
+		return scanProcForArgv(record.Argv) == 0, nil
+	})
+	if exists, err := datasetExists(ctx, driver.rootDataset(id)); err != nil || exists {
+		t.Fatalf("root dataset exists=%t err=%v after collection", exists, err)
+	}
+	if _, err := os.Stat(driver.stateDir(id)); !os.IsNotExist(err) {
+		t.Fatalf("state dir survived collection: %v", err)
+	}
+
+	if err := driver.Launch(ctx, "conf-corrupt-2", testClass); err != nil {
+		t.Fatalf("launch after collection: %v", err)
+	}
+	if err := driver.Destroy(ctx, "conf-corrupt-2"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestConformanceCrashCollection: a VM whose QEMU dies out from under the
 // driver is collected by List — leftovers destroyed, nothing reported.
 func TestConformanceCrashCollection(t *testing.T) {

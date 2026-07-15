@@ -29,6 +29,10 @@ import (
 type QEMU struct {
 	cfg   Config
 	disks rootDisks
+	// probeTimeout bounds every per-VM liveness probe (QMP query-status,
+	// Guest.Observe) so one wedged VM can never hold the driver mutex — and
+	// with it every verb on the host — indefinitely.
+	probeTimeout time.Duration
 
 	mu sync.Mutex
 }
@@ -96,7 +100,7 @@ func NewQEMU(cfg Config) (*QEMU, error) {
 	if err := os.MkdirAll(cfg.StateRoot, 0o750); err != nil {
 		return nil, fmt.Errorf("vm: creating state root: %w", err)
 	}
-	return &QEMU{cfg: cfg, disks: zfsDisks{}}, nil
+	return &QEMU{cfg: cfg, disks: zfsDisks{}, probeTimeout: 5 * time.Second}, nil
 }
 
 // meta is a VM's durable identity. It is written before any side effect, so
@@ -115,6 +119,13 @@ type meta struct {
 	// ArgvSHA256 fingerprints the invocation for reports and drift checks.
 	ArgvSHA256 string `json:"argv_sha256"`
 }
+
+// errCorruptMeta marks a meta.json that exists but does not parse (fs
+// damage, schema skew from a version change, a stray writer). Corruption of
+// one VM must never wedge the driver: observation quarantines the VM as
+// dead, destruction proceeds with the identity-safe subset, and CID
+// allocation refuses to run blind.
+var errCorruptMeta = errors.New("vm: corrupt meta")
 
 var idRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$`)
 
@@ -138,7 +149,7 @@ func (q *QEMU) readMeta(id ID) (meta, error) {
 	}
 	var m meta
 	if err := json.Unmarshal(raw, &m); err != nil {
-		return meta{}, fmt.Errorf("vm: parsing meta for %s: %w", id, err)
+		return meta{}, fmt.Errorf("%w for %s: %v", errCorruptMeta, id, err)
 	}
 	return m, nil
 }
@@ -245,7 +256,13 @@ func (q *QEMU) allocateCIDLocked() (uint32, error) {
 		}
 		record, err := q.readMeta(ID(entry.Name()))
 		if err != nil {
-			continue
+			if errors.Is(err, os.ErrNotExist) {
+				continue // a dir with no meta never launched anything
+			}
+			// An unreadable meta may belong to a live QEMU holding an
+			// unknown CID; allocating blind risks a vhost-vsock collision.
+			// List collects the corrupt VM, unblocking the next launch.
+			return 0, fmt.Errorf("vm: cid inventory: %w", err)
 		}
 		used[record.CID] = true
 	}
@@ -430,6 +447,12 @@ func (q *QEMU) observeLocked(ctx context.Context, id ID) (Status, bool, error) {
 	if errors.Is(err, os.ErrNotExist) {
 		return Status{ID: id, Phase: PhaseGone}, false, nil
 	}
+	if errors.Is(err, errCorruptMeta) {
+		// Nothing in the file can be trusted; report the VM dead so List
+		// collects it instead of erroring every verb on the whole host.
+		q.cfg.Logger.Error("quarantining vm with corrupt meta", "vm", id, "err", err)
+		return Status{ID: id, Phase: PhaseGone}, true, nil
+	}
 	if err != nil {
 		return Status{}, false, err
 	}
@@ -449,7 +472,9 @@ func (q *QEMU) observeLocked(ctx context.Context, id ID) (Status, bool, error) {
 		// can be trusted, so report the phase the meta alone supports.
 		return status, false, nil
 	}
-	observation, err := q.cfg.Guest.Observe(ctx, id, record.CID)
+	observeCtx, cancel := context.WithTimeout(ctx, q.probeTimeout)
+	observation, err := q.cfg.Guest.Observe(observeCtx, id, record.CID)
+	cancel()
 	if err != nil {
 		q.cfg.Logger.Warn("guest observation failed", "vm", id, "err", err)
 		return status, false, nil
@@ -472,7 +497,7 @@ func (q *QEMU) observeLocked(ctx context.Context, id ID) (Status, bool, error) {
 
 // vmRunning probes QMP for a running guest.
 func (q *QEMU) vmRunning(ctx context.Context, id ID) bool {
-	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	probeCtx, cancel := context.WithTimeout(ctx, q.probeTimeout)
 	defer cancel()
 	client, err := dialQMP(probeCtx, qmpSocketPath(q.stateDir(id)))
 	if err != nil {
@@ -537,10 +562,11 @@ func (q *QEMU) Destroy(ctx context.Context, id ID) error {
 func (q *QEMU) destroyLocked(ctx context.Context, id ID) error {
 	dir := q.stateDir(id)
 	record, err := q.readMeta(id)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	corrupt := errors.Is(err, errCorruptMeta)
+	if err != nil && !corrupt && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if err == nil {
+	if err == nil || corrupt {
 		// Release the workspace first when QMP still answers: quit would
 		// free it too, but only after the process dies, and the seal that
 		// follows destruction should never race the kernel's zvol release.
@@ -552,10 +578,20 @@ func (q *QEMU) destroyLocked(ctx context.Context, id ID) error {
 			_, _ = client.Execute(ctx, "quit", nil)
 			client.Close()
 		}
-		if err := q.cfg.Launcher.Kill(ctx, id, dir, record.Argv); err != nil {
+		if corrupt {
+			// The meta no longer names the argv the Launcher needs to
+			// identify the process, so the QMP quit above is the only
+			// identity-safe kill. If a live QEMU survived it, the dataset
+			// destroy below fails busy, keeping this dir — and its unknown
+			// CID claim — in place until the process is really gone.
+		} else if err := q.cfg.Launcher.Kill(ctx, id, dir, record.Argv); err != nil {
 			return err
 		}
-		if err := q.disks.Destroy(ctx, record.RootDataset); err != nil {
+		dataset := record.RootDataset
+		if corrupt {
+			dataset = q.rootDataset(id)
+		}
+		if err := q.disks.Destroy(ctx, dataset); err != nil {
 			return err
 		}
 	}

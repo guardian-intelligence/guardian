@@ -353,6 +353,138 @@ func TestCIDAllocation(t *testing.T) {
 	}
 }
 
+// TestCorruptMetaDoesNotWedgeTheDriver: a single unparseable meta.json must
+// never take the whole host's driver down. Status quarantines the VM as
+// gone, List still reports the healthy fleet and collects the corrupt VM
+// (state dir and derived root clone included), and Destroy succeeds.
+func TestCorruptMetaDoesNotWedgeTheDriver(t *testing.T) {
+	root := shortTempDir(t)
+	driver := newTestDriver(t, root)
+	ctx := context.Background()
+	if err := driver.q.Launch(ctx, "vm-a", testClass); err != nil {
+		t.Fatal(err)
+	}
+	if err := driver.q.Launch(ctx, "vm-bad", testClass); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "vm-bad", "meta.json"), []byte(`{"id": "vm-bad", "cl`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := driver.q.Status(ctx, "vm-bad")
+	if err != nil {
+		t.Fatalf("status on corrupt meta: %v", err)
+	}
+	if status.Phase != PhaseGone {
+		t.Fatalf("phase %s, want gone", status.Phase)
+	}
+
+	statuses, err := driver.q.List(ctx)
+	if err != nil {
+		t.Fatalf("list with corrupt meta present: %v", err)
+	}
+	if len(statuses) != 1 || statuses[0].ID != "vm-a" {
+		t.Fatalf("listed %+v, want just vm-a", statuses)
+	}
+	if _, err := os.Stat(filepath.Join(root, "vm-bad")); !os.IsNotExist(err) {
+		t.Fatal("corrupt vm state dir survived collection")
+	}
+	collected := false
+	for _, dataset := range driver.disks.destroyed {
+		if dataset == "tank/postflight/vm-vm-bad" {
+			collected = true
+		}
+	}
+	if !collected {
+		t.Fatalf("corrupt vm root clone not destroyed: %v", driver.disks.destroyed)
+	}
+}
+
+func TestDestroyCorruptMetaSucceeds(t *testing.T) {
+	root := shortTempDir(t)
+	driver := newTestDriver(t, root)
+	ctx := context.Background()
+	if err := driver.q.Launch(ctx, "vm-bad", testClass); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "vm-bad", "meta.json"), []byte(`not json`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := driver.q.Destroy(ctx, "vm-bad"); err != nil {
+		t.Fatalf("destroy with corrupt meta: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "vm-bad")); !os.IsNotExist(err) {
+		t.Fatal("state dir survived destroy")
+	}
+}
+
+// TestLaunchRefusesBlindCIDAllocation: an unreadable meta may belong to a
+// live QEMU holding an unknown vsock CID, so launching anything new must
+// fail until collection has cleared the corruption — never mint a CID that
+// may collide with a running vhost-vsock device.
+func TestLaunchRefusesBlindCIDAllocation(t *testing.T) {
+	root := shortTempDir(t)
+	driver := newTestDriver(t, root)
+	ctx := context.Background()
+	if err := driver.q.Launch(ctx, "vm-bad", testClass); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "vm-bad", "meta.json"), []byte(`{"cid": "three"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := driver.q.Launch(ctx, "vm-new", testClass); err == nil {
+		t.Fatal("launched while a corrupt meta may hold an unknown cid")
+	}
+	if _, err := driver.q.List(ctx); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if err := driver.q.Launch(ctx, "vm-new", testClass); err != nil {
+		t.Fatalf("launch after collection: %v", err)
+	}
+}
+
+// blockingGuest wedges Observe until its context fires, the shape of a
+// vsock channel that accepts but never answers.
+type blockingGuest struct{}
+
+func (blockingGuest) Deliver(context.Context, ID, uint32, guestproto.Assignment) error {
+	return nil
+}
+
+func (blockingGuest) Observe(ctx context.Context, _ ID, _ uint32) (GuestObservation, error) {
+	select {
+	case <-ctx.Done():
+		return GuestObservation{}, ctx.Err()
+	case <-time.After(10 * time.Second):
+		return GuestObservation{Hello: true}, nil
+	}
+}
+
+// TestObserveIsBoundedByProbeTimeout: a wedged guest channel must not hold
+// the driver mutex hostage; the probe times out and Status falls back to
+// the phase the meta alone supports.
+func TestObserveIsBoundedByProbeTimeout(t *testing.T) {
+	driver := newTestDriver(t, shortTempDir(t))
+	driver.q.probeTimeout = 50 * time.Millisecond
+	ctx := context.Background()
+	if err := driver.q.Launch(ctx, "vm-a", testClass); err != nil {
+		t.Fatal(err)
+	}
+	serveQEMU(t, driver, "vm-a", &qemuHandler{running: true})
+	driver.q.cfg.Guest = blockingGuest{}
+	start := time.Now()
+	status, err := driver.q.Status(ctx, "vm-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("status took %s against a wedged guest", elapsed)
+	}
+	if status.Phase != PhaseBooting {
+		t.Fatalf("phase %s, want the meta-supported booting", status.Phase)
+	}
+}
+
 func TestAssignUnknownVM(t *testing.T) {
 	driver := newTestDriver(t, shortTempDir(t))
 	err := driver.q.Assign(context.Background(), "vm-a", Assignment{Lease: "lease-1"})

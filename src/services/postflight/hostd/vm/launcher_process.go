@@ -53,27 +53,57 @@ func (ProcessLauncher) Start(_ context.Context, _ ID, stateDir string, argv []st
 // /proc/<pid>/cmdline still matches the launched argv, so a recycled pid is
 // never mistaken for the VM.
 func (ProcessLauncher) Alive(_ context.Context, _ ID, stateDir string, argv []string) (bool, error) {
-	pid, err := readPidFile(stateDir)
+	pid, err := launchedPid(stateDir, argv)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return false, nil
-		}
 		return false, err
 	}
-	return cmdlineMatches(pid, argv), nil
+	return pid != 0, nil
+}
+
+// launchedPid locates the VM's process: the recorded pid while its cmdline
+// still matches the launched argv, otherwise — the pid file may be missing
+// when Start crashed between the fork and the record landing — a /proc scan
+// for the exact argv, which is unique per VM because it embeds the state
+// dir's socket paths. 0 means the process is gone.
+func launchedPid(stateDir string, argv []string) (int, error) {
+	pid, err := readPidFile(stateDir)
+	if err == nil {
+		if cmdlineMatches(pid, argv) {
+			return pid, nil
+		}
+		return 0, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return 0, err
+	}
+	return scanProcForArgv(argv), nil
+}
+
+func scanProcForArgv(argv []string) int {
+	if len(argv) == 0 {
+		return 0
+	}
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return 0
+	}
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			continue
+		}
+		if cmdlineMatches(pid, argv) {
+			return pid
+		}
+	}
+	return 0
 }
 
 // Kill implements Launcher.
 func (ProcessLauncher) Kill(ctx context.Context, _ ID, stateDir string, argv []string) error {
-	pid, err := readPidFile(stateDir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
+	pid, err := launchedPid(stateDir, argv)
+	if err != nil || pid == 0 {
 		return err
-	}
-	if !cmdlineMatches(pid, argv) {
-		return nil
 	}
 	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
 		return fmt.Errorf("vm: killing pid %d: %w", pid, err)

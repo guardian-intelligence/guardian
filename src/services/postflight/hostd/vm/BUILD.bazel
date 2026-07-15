@@ -27,6 +27,7 @@ go_test(
     srcs = [
         "conformance_test.go",
         "driver_test.go",
+        "fake_test.go",
         "launcher_pod_test.go",
         "launcher_process_test.go",
         "qmp_test.go",

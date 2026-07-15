@@ -3,6 +3,7 @@ package vm
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"sigs.k8s.io/yaml"
 )
@@ -11,11 +12,19 @@ import (
 type PodAPI interface {
 	// Apply submits a rendered pod manifest.
 	Apply(ctx context.Context, manifest []byte) error
-	// Alive reports whether the named pod exists and has not terminated.
-	Alive(ctx context.Context, namespace, name string) (bool, error)
-	// Delete removes the named pod; deleting an absent pod succeeds.
+	// Alive reports whether the named pod exists and has not terminated,
+	// along with its labels (nil when absent) for identity checks.
+	Alive(ctx context.Context, namespace, name string) (bool, map[string]string, error)
+	// Delete asks for the named pod's removal and returns once the deletion
+	// is accepted, not once the pod is gone; deleting an absent pod
+	// succeeds.
 	Delete(ctx context.Context, namespace, name string) error
 }
+
+const (
+	vmIDLabel     = "postflight.guardianintelligence.org/vm-id"
+	argvHashLabel = "postflight.guardianintelligence.org/argv-sha256"
+)
 
 // PodLauncher runs each VM as its own pod on the Host's single-node
 // cluster, which is what makes VM lifetime independent of hostd. The pod is
@@ -44,8 +53,9 @@ func (l *PodLauncher) Manifest(id ID, stateDir string, argv []string) ([]byte, e
 			Name:      podName(id),
 			Namespace: l.Namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/name":                    "postflight-vm",
-				"postflight.guardianintelligence.org/vm-id": string(id),
+				"app.kubernetes.io/name": "postflight-vm",
+				vmIDLabel:                string(id),
+				argvHashLabel:            argvDigest(argv),
 			},
 		},
 		Spec: podSpec{
@@ -82,14 +92,61 @@ func (l *PodLauncher) Start(ctx context.Context, id ID, stateDir string, argv []
 	return l.API.Apply(ctx, manifest)
 }
 
-// Alive implements Launcher.
-func (l *PodLauncher) Alive(ctx context.Context, id ID, _ string, _ []string) (bool, error) {
-	return l.API.Alive(ctx, l.Namespace, podName(id))
+// podOwns reports whether a live pod's labels identify it as this VM's
+// QEMU: the argv digest ties the pod to the exact invocation, so a stranger
+// squatting on the postflight-vm-<id> name is never adopted or killed.
+func podOwns(id ID, argv []string, labels map[string]string) bool {
+	return labels[vmIDLabel] == string(id) && labels[argvHashLabel] == argvDigest(argv)
 }
 
+// Alive implements Launcher.
+func (l *PodLauncher) Alive(ctx context.Context, id ID, _ string, argv []string) (bool, error) {
+	alive, labels, err := l.API.Alive(ctx, l.Namespace, podName(id))
+	if err != nil || !alive {
+		return false, err
+	}
+	return podOwns(id, argv, labels), nil
+}
+
+// podKillWait bounds Kill's wait for the pod to really disappear: deletion
+// is asynchronous with a default 30s grace period, and returning while the
+// dying QEMU still holds the root zvol (and its vsock CID) would let the
+// driver's cleanup race it.
+const podKillWait = 60 * time.Second
+
 // Kill implements Launcher.
-func (l *PodLauncher) Kill(ctx context.Context, id ID, _ string, _ []string) error {
-	return l.API.Delete(ctx, l.Namespace, podName(id))
+func (l *PodLauncher) Kill(ctx context.Context, id ID, _ string, argv []string) error {
+	name := podName(id)
+	alive, labels, err := l.API.Alive(ctx, l.Namespace, name)
+	if err != nil {
+		return err
+	}
+	if !alive {
+		return nil
+	}
+	if !podOwns(id, argv, labels) {
+		return fmt.Errorf("vm: pod %s/%s is not vm %s's qemu; refusing to delete", l.Namespace, name, id)
+	}
+	if err := l.API.Delete(ctx, l.Namespace, name); err != nil {
+		return err
+	}
+	deadline := time.Now().Add(podKillWait)
+	for {
+		alive, _, err := l.API.Alive(ctx, l.Namespace, name)
+		if err != nil {
+			return err
+		}
+		if !alive {
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("vm: pod %s/%s still terminating after %s", l.Namespace, name, podKillWait)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
 }
 
 type podManifest struct {

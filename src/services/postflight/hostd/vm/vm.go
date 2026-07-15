@@ -69,8 +69,10 @@ var ErrNotFound = errors.New("vm: not found")
 
 // Driver is the hypervisor surface hostd needs. Launch and Assign start
 // asynchronous work; the agent advances on observed Status changes, never on
-// call returns. All methods are safe to repeat: Launch with an existing ID
-// and Assign on an already-assigned VM are no-ops.
+// call returns. All methods are safe to repeat: relaunching a live ID with
+// its own class and re-assigning a VM's own lease converge to no-ops, while
+// a class or lease mismatch is an error. A Launch that finds its ID's
+// process dead collects the leftovers and boots fresh.
 type Driver interface {
 	// Launch boots a warm VM of a class under the given ID.
 	Launch(ctx context.Context, id ID, class Class) error

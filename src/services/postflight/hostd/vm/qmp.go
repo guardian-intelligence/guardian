@@ -118,6 +118,24 @@ func (c *qmpClient) read(reader *bufio.Reader) {
 			if waiter != nil {
 				waiter <- message
 			}
+		case message.Error != nil:
+			// QMP answers a request it could not parse far enough to
+			// extract the id with an id-less error. Commands are processed
+			// in order, so it belongs to the oldest in-flight one; dropping
+			// it would burn that Execute's full timeout instead.
+			c.mu.Lock()
+			var waiter chan qmpMessage
+			var oldest uint64
+			for id, pending := range c.pending {
+				if waiter == nil || id < oldest {
+					oldest, waiter = id, pending
+				}
+			}
+			delete(c.pending, oldest)
+			c.mu.Unlock()
+			if waiter != nil {
+				waiter <- message
+			}
 		}
 	}
 	err := scanner.Err()

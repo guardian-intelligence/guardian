@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -63,9 +64,47 @@ func TestProcessLauncherSurvivesArgvMismatch(t *testing.T) {
 
 func TestProcessLauncherAliveWithoutPidFile(t *testing.T) {
 	launcher := ProcessLauncher{}
-	alive, err := launcher.Alive(context.Background(), "vm-a", t.TempDir(), []string{"sleep", "1"})
+	alive, err := launcher.Alive(context.Background(), "vm-a", t.TempDir(), []string{"/nonexistent/qemu-system-x86_64", "-nodefaults"})
 	if err != nil || alive {
-		t.Fatalf("alive=%t err=%v without a pid file", alive, err)
+		t.Fatalf("alive=%t err=%v without a pid file or a matching process", alive, err)
+	}
+}
+
+// TestProcessLauncherFindsOrphanWithoutPidFile: a crash between Start's
+// fork and the pid record landing must not orphan an unsupervised QEMU —
+// Alive and Kill fall back to finding the process by its exact argv, which
+// is unique per VM.
+func TestProcessLauncherFindsOrphanWithoutPidFile(t *testing.T) {
+	sleep, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Skipf("no sleep binary: %v", err)
+	}
+	stateDir := t.TempDir()
+	// A duration no other process on the host would be sleeping for.
+	argv := []string{sleep, "271828"}
+	launcher := ProcessLauncher{}
+	ctx := context.Background()
+	if err := launcher.Start(ctx, "vm-a", stateDir, argv); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if pid := scanProcForArgv(argv); pid != 0 {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	})
+	if err := os.Remove(filepath.Join(stateDir, "launcher.pid")); err != nil {
+		t.Fatal(err)
+	}
+	alive, err := launcher.Alive(ctx, "vm-a", stateDir, argv)
+	if err != nil || !alive {
+		t.Fatalf("alive=%t err=%v; the orphan was not found by argv", alive, err)
+	}
+	if err := launcher.Kill(ctx, "vm-a", stateDir, argv); err != nil {
+		t.Fatalf("kill: %v", err)
+	}
+	alive, err = launcher.Alive(ctx, "vm-a", stateDir, argv)
+	if err != nil || alive {
+		t.Fatalf("alive=%t err=%v after kill", alive, err)
 	}
 }
 

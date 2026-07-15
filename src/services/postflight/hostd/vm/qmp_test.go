@@ -278,6 +278,25 @@ func TestQMPConnectionDiesMidCommand(t *testing.T) {
 	}
 }
 
+// TestQMPErrorWithoutIDFailsTheInflightCommand: QMP answers a request it
+// could not parse far enough to extract the id with an id-less error; the
+// waiting Execute must fail promptly with it, not burn its full timeout.
+func TestQMPErrorWithoutIDFailsTheInflightCommand(t *testing.T) {
+	socket := startQMPServer(t, &qmpServer{handle: func(string, json.RawMessage) ([]string, string) {
+		return nil, `{"error": {"class": "GenericError", "desc": "JSON parse error, invalid keyword"}}`
+	}})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client, err := dialQMP(ctx, socket)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer client.Close()
+	if _, err := client.Execute(ctx, "query-status", nil); err == nil || !strings.Contains(err.Error(), "JSON parse error") {
+		t.Fatalf("error %v, want the server's parse error", err)
+	}
+}
+
 func TestQMPExecuteTimeout(t *testing.T) {
 	socket := startQMPServer(t, &qmpServer{handle: func(string, json.RawMessage) ([]string, string) {
 		return nil, "" // scripted silence
