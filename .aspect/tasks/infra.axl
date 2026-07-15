@@ -271,6 +271,38 @@ def _tofu_backend_endpoint(ctx, value):
         return None
     return "https://" + account_id + ".r2.cloudflarestorage.com"
 
+def _tofu_backend_credentials(ctx):
+    """State-backend credentials for headless runs: when the ambient
+    environment carries no AWS access key, read the cloudflare_r2_* keys from
+    the staged custody bundle's custody.env so auth needs nothing outside the
+    bundle. Returns extra env for the tofu-invoking spawns; empty when the
+    ambient environment already has credentials or no bundle is staged."""
+    if (ctx.std.env.var("AWS_ACCESS_KEY_ID") or "") != "":
+        return {}
+    path = CUSTODY_BUNDLE_DIR + "/custody.env"
+    if not ctx.std.fs.exists(path):
+        return {}
+    values = {}
+    for line in ctx.std.fs.read_to_string(path).split("\n"):
+        item = line.strip()
+        if item == "" or item.startswith("#"):
+            continue
+        parts = item.split("=", 1)
+        if len(parts) != 2:
+            continue
+        value = parts[1].strip()
+        if value.startswith("\"") and value.endswith("\"") and len(value) >= 2:
+            value = value[1:len(value) - 1]
+        values[parts[0].strip()] = value
+    access_key = values.get("cloudflare_r2_access_key_id", "")
+    secret_key = values.get("cloudflare_r2_secret_access_key", "")
+    if access_key == "" or secret_key == "":
+        return {}
+    return {
+        "AWS_ACCESS_KEY_ID": access_key,
+        "AWS_SECRET_ACCESS_KEY": secret_key,
+    }
+
 def _tofu_backend_roots(ctx, root):
     if root == "all":
         return [
@@ -287,7 +319,7 @@ def _tofu_backend_roots(ctx, root):
     ctx.std.io.stderr.write("ERROR: --root must be all, guardian-mgmt, guardian-mgmt-dns, or guardian-mgmt-edge-policy\n")
     return None
 
-def _tofu_backend_init(ctx, roots, endpoint):
+def _tofu_backend_init(ctx, roots, endpoint, env = None):
     for root, label in roots:
         args = [
             "init",
@@ -300,6 +332,7 @@ def _tofu_backend_init(ctx, roots, endpoint):
             root,
             args,
             "tofu init backend " + label,
+            env = env,
         )
         if rc != 0:
             return rc
@@ -1876,6 +1909,7 @@ def _auth_impl(ctx):
         use_state = ctx.args.kube_api_server == ""
     else:
         use_state = ctx.args.endpoints == "" and ctx.args.nodes == ""
+    state_env = {}
     if use_state:
         tofu = _tool_path(ctx, TOFU_TARGET)
         if tofu == None:
@@ -1883,7 +1917,8 @@ def _auth_impl(ctx):
         endpoint = _tofu_backend_endpoint(ctx, "")
         if endpoint == None:
             return 1
-        rc = _tofu_backend_init(ctx, [(GUARDIAN_MGMT_ROOT, "guardian-mgmt")], endpoint)
+        state_env = _tofu_backend_credentials(ctx)
+        rc = _tofu_backend_init(ctx, [(GUARDIAN_MGMT_ROOT, "guardian-mgmt")], endpoint, env = state_env)
         if rc != 0:
             return rc
 
@@ -1910,10 +1945,10 @@ def _auth_impl(ctx):
         command_args.extend(["--kube-api-server", ctx.args.kube_api_server])
 
     if ctx.args.platform_agent:
-        return _auth_platform_agent(ctx, guardian_auth, command_args)
-    return _auth_platform_admin(ctx, guardian_auth, kubectl, target, command_args)
+        return _auth_platform_agent(ctx, guardian_auth, command_args, state_env)
+    return _auth_platform_admin(ctx, guardian_auth, kubectl, target, command_args, state_env)
 
-def _auth_platform_agent(ctx, guardian_auth, command_args):
+def _auth_platform_agent(ctx, guardian_auth, command_args, state_env):
     bin_dir = install_bazel_tool_shims(ctx, [("kubectl-oidc_login", KUBELOGIN_TARGET)], ".guardian/tools/bin")
     if bin_dir == "":
         return 1
@@ -1941,9 +1976,9 @@ def _auth_platform_agent(ctx, guardian_auth, command_args):
         "authenticating platform-agent@guardian-mgmt (first login prints a device-code URL — open it in a browser on any machine)\n"
         + "IMPORTANT: approve the device login as the platform-agent user (use a private window if another Keycloak session is active); only platform-agent holds the offline_access role, so any other identity fails the exchange with 'not_allowed'\n",
     )
-    return checked_spawn(ctx, guardian_auth, args, cwd = ws_path(ctx), label = "guardian auth platform-agent")
+    return checked_spawn(ctx, guardian_auth, args, cwd = ws_path(ctx), env = state_env, label = "guardian auth platform-agent")
 
-def _auth_platform_admin(ctx, guardian_auth, kubectl, target, command_args):
+def _auth_platform_admin(ctx, guardian_auth, kubectl, target, command_args, state_env):
     reason = ctx.args.reason.strip()
     if reason == "":
         ctx.std.io.stderr.write("ERROR: --reason is required: breakglass escalation to system:masters is audit-logged\n")
@@ -1989,7 +2024,7 @@ def _auth_platform_admin(ctx, guardian_auth, kubectl, target, command_args):
         "--talosconfig",
         talosconfig,
     ])
-    rc = checked_spawn(ctx, guardian_auth, args, cwd = ws_path(ctx), label = "guardian auth platform-admin")
+    rc = checked_spawn(ctx, guardian_auth, args, cwd = ws_path(ctx), env = state_env, label = "guardian auth platform-admin")
     if cleanup_root:
         _cleanup_mint_root(ctx)
     if rc != 0:
