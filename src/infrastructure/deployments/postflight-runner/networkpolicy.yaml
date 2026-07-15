@@ -1,7 +1,6 @@
 # Control-plane flows, following the repo's Cilium conventions (selecting an
 # endpoint flips it to default-deny for the selected direction; every rule
-# below is therefore the complete allowed set). Kubelet probes arrive from
-# the reserved host entity, which Cilium admits implicitly. The delivery-ledger
+# below is therefore the complete allowed set). The delivery-ledger
 # CNPG Postgres lives in tenant-root, whose baseline policy is wide-open
 # ingress (see base/apps/core-services.yaml's tenant-root stance) — only the
 # egress half from this namespace needs declaring, below.
@@ -19,13 +18,16 @@ spec:
     matchLabels:
       app.kubernetes.io/name: postflight-controlplane
   ingress:
-    # Webhook deliveries arrive through the tenant-root ingress controller
-    # (the apex Ingress in ingress.yaml).
-    - fromEndpoints:
-        - matchLabels:
-            k8s:io.kubernetes.pod.namespace: tenant-root
-            k8s:app.kubernetes.io/name: ingress-nginx
-            k8s:app.kubernetes.io/component: controller
+    # Webhook deliveries and hostd syncs arrive through the tenant-root
+    # ingress controller (the apex Ingress in ingress.yaml), which runs
+    # hostNetwork: its traffic reaches endpoints with the reserved host
+    # (same node) / remote-node (other nodes) identities, never a pod
+    # identity, so the admit must be entity-based — the same lesson as
+    # containerd pulls in guardian/system/zot-networkpolicy.yaml. Kubelet
+    # probes ride the host entity too.
+    - fromEntities:
+        - host
+        - remote-node
       toPorts:
         - ports:
             - port: "8080"
