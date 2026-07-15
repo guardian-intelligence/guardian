@@ -234,7 +234,7 @@ a verified Guardian signature, held by the release projector
 a runtime invariant: no pod is required to run a Guardian-signed image,
 because what runs is already governed by the merge gate and the provenance
 VAP. If Guardian later self-hosts its factory, images born in-cluster sign
-with the same custody-held key at build time and the countersigner's role
+with the same Transit-held key at build time and the countersigner's role
 collapses into the builder. Old signatures remain valid statements about
 who built what. Until then, registries stay untrusted, Git stays the
 source of truth, and the dark bundle stays the registry-independence tier.

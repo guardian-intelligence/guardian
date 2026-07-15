@@ -75,9 +75,9 @@ on the pull path while cache misses fall back silently to upstream).
   (confirmed in v2.1.18 source; the OIDC bearer support added in v2.1.14 is
   real but all-or-nothing). If node pulls ever authenticate (the ring above
   escalates), bearer SA-token federation becomes the natural replacement for
-  the htpasswd user. The credential is custody-held
-  (`zot_countersigner_password`); the importer derives zot's bcrypt htpasswd
-  line from it, and ESO projects both halves into `zot-countersigner-auth`.
+  the htpasswd user. The credential (`zot_countersigner_password`) and its
+  derived bcrypt htpasswd line live in OpenBao, and ESO projects both halves
+  into `zot-countersigner-auth`.
 - **Humans.** Platform-admin `kubectl` (port-forward/exec) is the R1
   break-glass surface. A Keycloak OpenID client (cozy realm, PR-able via
   the EDP operator) becomes worth wiring only when a human-facing surface
@@ -134,9 +134,8 @@ provenance VAP — and no admission-time signature verification (a verifying
 webhook would put a new SPOF in the pod-create path for a guarantee the
 release boundary already carries).
 
-The signing key's custody model (importer-owned restore-or-create, backup
-blob in custody.env, restore drill before reliance, never rotate casually)
-lives in `docs/openbao-design.md`.
+The signing key's lifecycle (created in Transit, recovered as data through
+raft-snapshot DR, never rotated casually) lives in `docs/openbao-design.md`.
 
 ## Where this goes (the inversion)
 

@@ -116,34 +116,27 @@ called out explicitly.
 - Self-init's `enable_transit_mount` request declares the Transit engine so approved
   key-management consumers can be added without reintroducing a bootstrap control plane.
 - Durable Transit keys are not declared generically. A Transit key that protects
-  durable ciphertext is data-loss-critical. **Decided custody model:** create
-  such keys with `exportable=true` and `allow_plaintext_backup=true`, and export
-  the keyring with `transit/backup` into offline custody at creation time.
-  The export is the full plaintext keyring — holding it means decrypting all
-  ciphertext under that key — so it lives in the same offline custody tier as
-  the static seal key, never in R2, and never co-located with the ciphertext it
-  protects. Exportability does not weaken the boundary: the seal key on node
-  disk is already the root of trust, and the export extends the same custody
-  discipline to one more artifact.
+  durable ciphertext is data-loss-critical: it survives reinit and disaster
+  recovery as data, through the barrier-encrypted raft snapshots continuously
+  shipped to R2 (`docs/secrets.md` §Disaster recovery). No plaintext keyring
+  ever leaves OpenBao — keys are created non-exportable, and the snapshot is
+  unreadable without the custody-held seal key, so R2 holding it violates no
+  boundary.
 - Non-durable drill keys may be created imperatively during DR verification and
   deleted afterward.
 - The first durable key is `guardian-images` (ecdsa-p256), the Guardian
   release-signing key the image countersigner signs with. Its stakes are
   lower than an encryption key's —
-  loss means re-key and re-sign the estate, not data loss — but it follows the
-  same custody model because its material must survive reinits (fresh material
-  would orphan every existing countersignature). The bootstrap importer owns
-  its lifecycle: restore from the `openbao_transit_images_signing_key_backup`
-  custody blob, or create-and-export on first run
-  (`openbao_secret_import/main.go`). Backup-export capability exists only in
-  the importer's self-deleting bootstrap window; the standing
+  loss means re-key and re-sign the estate, not data loss — but its material
+  must equally survive reinits (fresh material would orphan every existing
+  countersignature). The standing
   `guardian-countersigner` policy grants sign plus public-key read only. The
   key must never be casually rotated: cosign's transit verification assumes a
   fixed key version, and old countersignatures verify only against the version
   that made them.
 
 ## Auth & self-init config
-- Kubernetes auth method; ESO and the bootstrap importer authenticate via SA tokens validated
+- Kubernetes auth method; ESO and the writer path authenticate via SA tokens validated
   by TokenReview, bound to namespace + SA + audience, least-privilege policies.
 - **Self-init is the sole source of truth for steady-state OpenBao config.** The `initialize`
   block runs once, at first cluster initialization, with a temporary privileged token OpenBao
@@ -155,20 +148,17 @@ called out explicitly.
 - **Access is scoped per namespace subtree, not per secret path.** Each consumer namespace gets
   `guardian-reader-<ns>` (ESO, SA `secrets-reader`, read-only on
   `kv/guardian/guardian-mgmt/<ns>/*`) and `guardian-writer-<ns>` (SA `secrets-writer`,
-  short-TTL, write-only within the same subtree; minting its token requires custody kubeconfig
-  access). This makes OpenBao config O(1) in the number of integrations: a new secret in an
+  short-TTL, write-only within the same subtree; the platform-agent identity mints its
+  token through a TokenRequest grant scoped to those SAs, so writes are headless while
+  reads stay structurally out of reach). This makes OpenBao config O(1) in the number of integrations: a new secret in an
   existing namespace is a Git-only change (ExternalSecret + workload) plus one scoped value
   write via the official CLI — no policy edit, no re-init. A writer token for one stage
   physically cannot write another stage's paths, so prod/gamma mixups are prevented by the
   server, not by care. `TestOpenBaoSecretScopeConformance` enforces the same invariant at
   review time over every ExternalSecret and SecretStore in the repo.
-- Self-init also creates a temporary `guardian-secret-importer` policy + role (write access to
-  the whole `guardian-mgmt` subtree) used only to move custody credential files into OpenBao at
-  bootstrap or DR re-seed. It deletes its own role and policy after a successful import; its
-  import plan in `openbao_secret_import/main.go` is the authoritative DR re-seed manifest.
 - Only structural config changes (a new consumer namespace, a new mount or auth method) touch
-  the `initialize` block, and they ship as Git edit + re-initialization (raft reset +
-  custody re-import — the same path a cold boot exercises, zero-downtime for consumers because
+  the `initialize` block, and they ship as Git edit + re-initialization (raft-snapshot
+  restore under the new config, zero-downtime for consumers because
   materialized Secrets are Orphan/Retain). Routine integration adds never re-init.
 - ESO is the consumer: SecretStore/ClusterSecretStore → OpenBao KV; ExternalSecrets
   materialize native Secrets. OpenBao is source of truth; the k8s Secret is a synced cache. The
@@ -186,24 +176,16 @@ called out explicitly.
   request path. R2 is not an OpenBao audit device.
 
 ## Disaster recovery
-- Primary cold-start model: rebuild from Git, supply custody-held residue, and
-  verify the system converges. The residue inventory is checked in at
-  `docs/openbao-residue-inventory.md`.
-- Stateful restore model: the primary recovery for durable Transit keys is
-  `transit/restore` from the keyring export taken at key creation. A raft
-  snapshot is the optional second path for non-derivable OpenBao state; it is
-  barrier-encrypted (unreadable without the static seal key, so offsite storage
-  is acceptable) but still sensitive custody material, not an ordinary backup
-  artifact.
+- Primary recovery model: config rebuilds from Git (self-init), data restores
+  from the latest raft snapshot. A cluster CronJob runs
+  `bao operator raft snapshot` and ships the result to R2 continuously; the
+  snapshot is barrier-encrypted (unreadable without the custody-held static
+  seal key, so offsite storage violates no boundary) and carries every KV
+  version and Transit keyring in one artifact.
 - **No recovery keys.** Self-init emits no root token and no recovery keys, and
   none are established afterward. Recovery keys cannot decrypt the barrier;
   they only authorize `generate-root`. Break-glass admin access is regenerate:
-  wipe, cold-start from custody residue, `transit/restore` durable keys.
-- **Snapshot/restore automation is deferred pending Velero research.** Do not add a
-  second backup control plane or a bespoke snapshot CronJob until we decide whether Velero
-  can carry the OpenBao raft/PVC and restore-drill requirements cleanly. Until then, keep
-  manual `bao operator raft snapshot` recovery as the known primitive, and keep it out of
-  day-to-day convergence.
+  wipe, cold-start from Git, restore the snapshot.
 - **WORM on R2 = bucket-lock rule, not S3 Object Lock** (R2 has no per-object retention and
   no write-without-delete token). The uploader gets a **bucket-scoped Object R/W token**; the
   lock rule is created/owned by a **separate admin credential** held out-of-band. The lock,
@@ -254,8 +236,6 @@ Created by the self-init `initialize` block and Ready in the current cluster:
   `TestOpenBaoOperationsInventoryConformance`).
 - The `guardian-countersigner` policy and role (transit sign + key read for the image
   countersigner's SA).
-- Temporary `guardian-secret-importer` policy and role (bootstrap-only; the importer deletes
-  them after a successful import).
 
 Declared alongside self-init:
 - `ClusterSecretStore/external-dns-openbao` and `ExternalSecret/cloudflare-external-dns`.
@@ -271,16 +251,14 @@ Legacy live cruft removed on 2026-06-29:
 Ops resources still needed before OpenBao is the real vault/transit authority:
 - Restore drill for any durable Transit key before that key protects production
   ciphertext or signatures anything verifies. For `guardian-images`: restore
-  the custody blob into a throwaway OpenBao, sign a test digest, and assert
-  the public key matches the production key's fingerprint (printed by the
-  importer on every run).
+  the latest raft snapshot into a throwaway OpenBao, sign a test digest, and
+  assert the public key matches the production key's fingerprint.
 - Durable Transit-key provisioning only when a real consumer requires it.
   Self-init declares mounts/policies/auth roles; durable key material is
-  importer-owned (restore-or-create against custody, the `guardian-images`
-  pattern), never a self-init request — self-init re-runs on every reinit's
-  fresh raft and would mint new material each time — and never a custom
-  operator or CRD.
-- ExternalSecrets for any remaining consumers of imported Cloudflare/R2 credentials beyond
+  data — created imperatively once, recovered through snapshot restore —
+  never a self-init request (re-runs would mint new material each time) and
+  never a custom operator or CRD.
+- ExternalSecrets for any remaining consumers of Cloudflare/R2 credentials beyond
   `external-dns` (the per-namespace roles already cover them; only the Git-side ESO wiring
   is missing).
 - Release/signing, artifact provenance, envelope encryption, or workload key-management
