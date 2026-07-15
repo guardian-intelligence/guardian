@@ -1,0 +1,25 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+exports_files(["hostd.service"])
+
+go_library(
+    name = "hostd_lib",
+    srcs = [
+        "config.go",
+        "main.go",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/hostd/cmd/hostd",
+    deps = [
+        "//src/services/postflight/hostd/agent",
+        "//src/services/postflight/hostd/checkoutbundle",
+        "//src/services/postflight/hostd/vm",
+        "//src/services/postflight/hostd/zvol",
+    ],
+)
+
+go_binary(
+    name = "hostd",
+    embed = [":hostd_lib"],
+    pure = "on",
+    visibility = ["//visibility:public"],
+)

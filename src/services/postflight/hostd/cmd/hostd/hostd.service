@@ -1,0 +1,17 @@
+# Postflight runner host daemon. VMs are not children of this unit: each
+# QEMU lives in its own transient pf-vm-*.scope, so restarting or stopping
+# hostd never kills running jobs — a restarted hostd adopts them from its
+# state dir.
+[Unit]
+Description=Postflight runner host daemon
+Wants=network-online.target
+After=network-online.target zfs.target
+
+[Service]
+EnvironmentFile=/etc/postflight/hostd.env
+ExecStart=/usr/local/bin/hostd
+Restart=on-failure
+RestartSec=2s
+
+[Install]
+WantedBy=multi-user.target
