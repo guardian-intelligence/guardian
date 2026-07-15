@@ -104,6 +104,38 @@
       minimumReleaseAge: null,
     },
 
+    // Third-party actions carry a second pin in .github/actions-allowlist.json
+    // (allowed_actions: selected), which Renovate does not touch. Bumping a
+    // `uses:` digest fails //:actions_allowlist_test until the allowlist entry
+    // moves too, and the merged workflow hits a startup_failure until a repo
+    // admin re-applies the setting. The allowlist edit and the PUT are the
+    // reviewer's two steps; the test keeps the PR red until the first is done.
+    {
+      matchManagers: ["github-actions"],
+      matchPackageNames: ["!actions/**", "!renovatebot/**"],
+      prBodyNotes: [
+        "Third-party action: update the matching digest in .github/actions-allowlist.json in this PR (drop the superseded one) or //:actions_allowlist_test stays red, and after merge re-apply the setting — `gh api -X PUT repos/guardian-intelligence/guardian/actions/permissions/selected-actions --input .github/actions-allowlist.json` — or the next run of any workflow using the new ref dies as a startup_failure. See docs/dependency-management.md.",
+      ],
+    },
+
+    // The @voidzero-dev vite-plus packages are one toolchain but the pnpm
+    // catalog hides them behind aliases — `vite` -> @voidzero-dev/vite-plus-core,
+    // `vitest` -> @voidzero-dev/vite-plus-test, and the plain `vite-plus` meta
+    // package — so Renovate proposes them as unrelated deps in separate PRs
+    // (core landed at 0.2.4 in one PR while the meta package sat at 0.1.24 in
+    // another). Group them so a reviewer sees the whole toolchain move at once
+    // instead of reconstructing it from scattered PRs. Matched by package name,
+    // not the `vite`/`vitest` alias keys, to avoid catching the real vite
+    // bundler catalogued separately as `vite@>=8.0.0 <=8.0.15`.
+    {
+      matchPackageNames: ["@voidzero-dev/**", "vite-plus"],
+      groupName: "vite-plus (voidzero) toolchain",
+      addLabels: ["viteplus-toolchain"],
+      prBodyNotes: [
+        "vite-plus, its `-core` (aliased `vite`), and its `-test` (aliased `vitest`) do not share one version line: `-core` tracks the meta package, but the meta package's minor bumps can be breaking migrations (0.2.x drops the bundled `@voidzero-dev/vite-plus-test` for upstream `vitest`, so the catalog alias must be reworked, not version-bumped). Treat a grouped bump as a migration checkpoint, never an automerge. Also bump the four `@voidzero-dev+vite-plus-linux-x64-gnu@<version>/dir` binding paths hardcoded in src/products/viteplus-monorepo/**/BUILD.bazel — Renovate cannot see them and the build stays red until they match.",
+      ],
+    },
+
     // Every lockfile bump completes itself: repin reconciles asset
     // filenames and archive member paths with the bumped release tag,
     // recomputes the sha256 pairs, and refuses hash changes for unbumped
