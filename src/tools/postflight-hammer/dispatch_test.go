@@ -23,8 +23,37 @@ func testDispatcher(t *testing.T, f *fakeGitHub, cfg dispatchConfig) *dispatcher
 		cfg:          cfg,
 		st:           st,
 		pollInterval: 10 * time.Millisecond,
+		awaitTimeout: 5 * time.Second,
 		rnd:          rand.New(rand.NewSource(1)),
 	}
+}
+
+// completeRun dispatches one run and drives it to completed/success (each
+// run-list read advances the fake one lifecycle step).
+func completeRun(t *testing.T, f *fakeGitHub, workflow string) int64 {
+	t.Helper()
+	c := f.client(t)
+	ctx := context.Background()
+	if err := c.dispatchWorkflow(ctx, "acme/demo", workflow, "main"); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	var id int64
+	for i := 0; i < 2; i++ {
+		runs, err := c.listWorkflowRuns(ctx, "acme/demo", workflow, time.Now().Add(-time.Hour))
+		if err != nil || len(runs) == 0 {
+			t.Fatalf("list: %v (%d runs)", err, len(runs))
+		}
+		for _, r := range runs {
+			if r.ID > id {
+				id = r.ID
+			}
+		}
+	}
+	run := f.runByID(id)
+	if run == nil || run.status != "completed" {
+		t.Fatalf("run %d not completed: %+v", id, run)
+	}
+	return id
 }
 
 func TestBurstPattern(t *testing.T) {
@@ -92,6 +121,59 @@ func TestChurnCancelsAndReruns(t *testing.T) {
 		if run.past[1] != "cancelled" {
 			t.Fatalf("churn run %d: attempt 1 concluded %q, want cancelled", c.RunID, run.past[1])
 		}
+	}
+}
+
+// A battery accumulates patterns into one state file, so churn correlation
+// must never adopt a run an earlier pattern left behind.
+func TestChurnIgnoresPreexistingRuns(t *testing.T) {
+	f := newFakeGitHub(t)
+	oldID := completeRun(t, f, "ci.yml")
+	f.holdInProgress = true
+
+	cfg := dispatchConfig{
+		repo: "acme/demo", workflow: "ci.yml", ref: "main", pattern: "churn", n: 1,
+		churnMaxWait: time.Millisecond,
+		statePath:    filepath.Join(t.TempDir(), "state.json"),
+	}
+	d := testDispatcher(t, f, cfg)
+	if err := d.run(context.Background()); err != nil {
+		t.Fatalf("churn: %v", err)
+	}
+	if len(d.st.Churn) != 1 {
+		t.Fatalf("churn records = %+v", d.st.Churn)
+	}
+	if d.st.Churn[0].RunID == oldID {
+		t.Fatal("churn adopted a pre-existing run")
+	}
+	if !d.st.Churn[0].CancelConfirmed || d.st.Churn[0].RerunAt == nil {
+		t.Fatalf("churn cycle incomplete: %+v", d.st.Churn[0])
+	}
+	if old := f.runByID(oldID); old.attempt != 1 || old.conclusion != "success" {
+		t.Fatalf("pre-existing run was touched: %+v", old)
+	}
+}
+
+// Same accumulation hazard for restart: completed runs from earlier patterns
+// must not count toward the new load being in flight.
+func TestAwaitInFlightIgnoresBaselineRuns(t *testing.T) {
+	f := newFakeGitHub(t)
+	completeRun(t, f, "ci.yml")
+	completeRun(t, f, "ci.yml")
+
+	cfg := dispatchConfig{
+		repo: "acme/demo", workflow: "ci.yml", ref: "main", pattern: "restart", n: 1,
+		statePath: filepath.Join(t.TempDir(), "state.json"),
+	}
+	d := testDispatcher(t, f, cfg)
+	d.awaitTimeout = 100 * time.Millisecond
+	ctx := context.Background()
+	baseline, err := d.knownRunIDs(ctx)
+	if err != nil || len(baseline) != 2 {
+		t.Fatalf("baseline: %v %v", err, baseline)
+	}
+	if err := d.awaitInFlight(ctx, 1, baseline); err == nil {
+		t.Fatal("baseline runs counted as in-flight load")
 	}
 }
 

@@ -193,14 +193,14 @@ func (c *ghClient) dispatchWorkflow(ctx context.Context, repo, workflow, ref str
 }
 
 // listWorkflowRuns lists the workflow's dispatch-triggered runs created at or
-// after since (GitHub's `created` filter has minute granularity, so callers
-// pass a since already backed off past the battery start).
+// after since (callers pass a since already backed off past the battery
+// start, so boundary truncation cannot hide the first run).
 func (c *ghClient) listWorkflowRuns(ctx context.Context, repo, workflow string, since time.Time) ([]ghRun, error) {
 	var runs []ghRun
 	for page := 1; page <= apiMaxPages; page++ {
 		q := url.Values{}
 		q.Set("event", "workflow_dispatch")
-		q.Set("created", ">="+since.UTC().Format("2006-01-02T15:04"))
+		q.Set("created", ">="+since.UTC().Format(time.RFC3339))
 		q.Set("per_page", strconv.Itoa(apiPageSize))
 		q.Set("page", strconv.Itoa(page))
 		var out struct {

@@ -30,6 +30,7 @@ type dispatcher struct {
 	cfg          dispatchConfig
 	st           *stateFile
 	pollInterval time.Duration
+	awaitTimeout time.Duration
 	rnd          *rand.Rand
 }
 
@@ -47,6 +48,7 @@ func runDispatch(ctx context.Context, gh *ghClient, cfg dispatchConfig) error {
 		cfg:          cfg,
 		st:           st,
 		pollInterval: 2 * time.Second,
+		awaitTimeout: 5 * time.Minute,
 		rnd:          rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 	if err := d.captureBaseline(ctx); err != nil {
@@ -140,12 +142,30 @@ func (d *dispatcher) sustained(ctx context.Context) error {
 	return nil
 }
 
+// knownRunIDs snapshots the workflow's currently visible runs, so run
+// correlation only ever matches runs that appear after this point — earlier
+// patterns in the same battery leave runs behind that must never be adopted.
+func (d *dispatcher) knownRunIDs(ctx context.Context) (map[int64]bool, error) {
+	runs, err := d.gh.listWorkflowRuns(ctx, d.cfg.repo, d.cfg.workflow, d.st.StartedAt.Add(-2*time.Minute))
+	if err != nil {
+		return nil, err
+	}
+	known := map[int64]bool{}
+	for _, r := range runs {
+		known[r.ID] = true
+	}
+	return known, nil
+}
+
 // churn dispatches serially so each new run is unambiguously the one just
 // fired, then cancels it at a random point in flight and re-runs it. The
 // cancel/rerun tail runs concurrently per run; the next dispatch only waits
 // for run correlation.
 func (d *dispatcher) churn(ctx context.Context) error {
-	known := map[int64]bool{}
+	known, err := d.knownRunIDs(ctx)
+	if err != nil {
+		return err
+	}
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var errs []error
@@ -213,7 +233,7 @@ func (d *dispatcher) churnOne(ctx context.Context, runID int64, wait time.Durati
 // dispatches serially.
 func (d *dispatcher) awaitNewRun(ctx context.Context, known map[int64]bool) (ghRun, error) {
 	since := d.st.StartedAt.Add(-2 * time.Minute)
-	deadline := time.Now().Add(2 * time.Minute)
+	deadline := time.Now().Add(d.awaitTimeout)
 	for {
 		runs, err := d.gh.listWorkflowRuns(ctx, d.cfg.repo, d.cfg.workflow, since)
 		if err != nil {
@@ -242,7 +262,7 @@ func (d *dispatcher) awaitNewRun(ctx context.Context, known map[int64]bool) (ghR
 }
 
 func (d *dispatcher) awaitRunTerminal(ctx context.Context, runID int64) error {
-	deadline := time.Now().Add(5 * time.Minute)
+	deadline := time.Now().Add(d.awaitTimeout)
 	for {
 		run, err := d.gh.getRun(ctx, d.cfg.repo, runID)
 		if err == nil && run.Status == "completed" {
@@ -260,6 +280,10 @@ func (d *dispatcher) awaitRunTerminal(ctx context.Context, runID int64) error {
 // restart fires a burst, waits for roughly half of it to be visibly in
 // flight, then runs the operator-supplied restart command exactly once.
 func (d *dispatcher) restart(ctx context.Context) error {
+	baseline, err := d.knownRunIDs(ctx)
+	if err != nil {
+		return err
+	}
 	if err := d.burst(ctx, d.cfg.n); err != nil {
 		return err
 	}
@@ -267,7 +291,7 @@ func (d *dispatcher) restart(ctx context.Context) error {
 		fmt.Fprintln(os.Stderr, "hammer: HAMMER_RESTART_CMD is unset; restart pattern dispatched load but skipped the restart")
 		return nil
 	}
-	if err := d.awaitInFlight(ctx, (d.cfg.n+1)/2); err != nil {
+	if err := d.awaitInFlight(ctx, (d.cfg.n+1)/2, baseline); err != nil {
 		return err
 	}
 	cmd := exec.CommandContext(ctx, "sh", "-c", d.cfg.restartCmd)
@@ -280,9 +304,9 @@ func (d *dispatcher) restart(ctx context.Context) error {
 	return nil
 }
 
-func (d *dispatcher) awaitInFlight(ctx context.Context, want int) error {
+func (d *dispatcher) awaitInFlight(ctx context.Context, want int, baseline map[int64]bool) error {
 	since := d.st.StartedAt.Add(-2 * time.Minute)
-	deadline := time.Now().Add(5 * time.Minute)
+	deadline := time.Now().Add(d.awaitTimeout)
 	for {
 		runs, err := d.gh.listWorkflowRuns(ctx, d.cfg.repo, d.cfg.workflow, since)
 		if err != nil {
@@ -290,6 +314,9 @@ func (d *dispatcher) awaitInFlight(ctx context.Context, want int) error {
 		}
 		started := 0
 		for _, r := range runs {
+			if baseline[r.ID] {
+				continue
+			}
 			if r.Status == "in_progress" || r.Status == "completed" {
 				started++
 			}
