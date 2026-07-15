@@ -347,5 +347,19 @@
       ],
       extractVersionTemplate: "^v?(?<version>.*)$",
     },
+
+    // The golden runner image pins (actions/runner, node) — annotated shell
+    // assignments like the bootstrap pivots. The adjacent sha256 pins are
+    // completed by hand from the upstream checksum files; a stale hash fails
+    // the image build on the tracer host. GitHub retires runner versions on
+    // ~30-day windows, so these PRs are the image re-release doorbell.
+    {
+      customType: "regex",
+      managerFilePatterns: ["/^src/services/postflight/image/pins\\.env$/"],
+      matchStrings: [
+        '# renovate: datasource=(?<datasource>[a-z-.]+) depName=(?<depName>[^\\s]+)\\n[A-Z_]+_VERSION="(?<currentValue>[0-9][^"]*)"',
+      ],
+      extractVersionTemplate: "^v?(?<version>.*)$",
+    },
   ],
 }
