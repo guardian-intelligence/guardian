@@ -1,0 +1,51 @@
+# Error-ratio detection over the ingress controller's per-service response
+# metrics. The 2026-07-15 postflight CNP incident served 5xx at ~55% of a
+# production route for 16 hours while every existing alert stayed green —
+# the ingress_nginx_detail series carried the whole signal (366 x 504/hr,
+# labeled by vhost/namespace/service) with no rule evaluating it. Routes
+# through the proven VMRule -> vmalert -> Alertmanager -> Alerta -> relay ->
+# ntfy pipeline.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: ingress-errors
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: ingress-errors
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  groups:
+    - name: ingress-errors.rules
+      interval: 30s
+      rules:
+        - alert: IngressServing5xx
+          # Ratio over a rate floor: 5% of responses failing on a route that
+          # sees at least ~1 request/min. The floor keeps single stray errors
+          # on near-idle routes from paging; a real outage (the CNP incident
+          # ran at ~55%) clears both terms within one window. status is the
+          # response code nginx sent downstream, so upstream connect
+          # failures (504) and app errors (5xx) both count.
+          expr: >-
+            (
+              sum by (vhost, namespace, service)
+                (rate(ingress_nginx_detail_responses_total{status=~"5..", vhost!="_"}[10m]))
+              /
+              sum by (vhost, namespace, service)
+                (rate(ingress_nginx_detail_responses_total{vhost!="_"}[10m]))
+            ) > 0.05
+            and
+            sum by (vhost, namespace, service)
+              (rate(ingress_nginx_detail_responses_total{vhost!="_"}[10m])) > 0.016
+          for: 10m
+          labels:
+            severity: warning
+            guardian_component: ingress-errors
+          annotations:
+            summary: '{{ $labels.vhost }} -> {{ $labels.namespace }}/{{ $labels.service }} serving 5xx ({{ $value | humanizePercentage }})'
+            description: >-
+              More than 5% of responses on this route have been 5xx for 10+
+              minutes. Check the per-controller status split in VictoriaLogs
+              first: same-node-OK / cross-node-dead means a network policy is
+              eating node-identity traffic; uniform failure points at the
+              backend itself.

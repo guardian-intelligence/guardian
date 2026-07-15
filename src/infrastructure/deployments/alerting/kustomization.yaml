@@ -8,11 +8,13 @@ resources:
   - alertmanager-config.yaml
   - audit-alerts.yaml
   - blackbox-exporter.yaml
+  - cilium-drop-metrics.yaml
   - cockpit-events-scrape.yaml
   - cockpit-rollup-scrape.yaml
   - core-metrics-wiring.yaml
   - electric-scrape.yaml
   - etcd-snapshot-alerts.yaml
+  - ingress-error-alerts.yaml
   - log-pipeline-health.yaml
   - postgres-alerts.yaml
   - synthetic-probes.yaml
