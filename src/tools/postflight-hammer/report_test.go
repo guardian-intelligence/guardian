@@ -101,7 +101,7 @@ func TestGreenBatteryPasses(t *testing.T) {
 	if !r.Pass {
 		t.Fatalf("green battery failed: %+v", r.Assertions)
 	}
-	for _, name := range []string{"runs green with full per-step logs", "slot accounting back to baseline", "no leaks beyond deadline horizon", "generation lifecycle invariants"} {
+	for _, name := range []string{"watch ran to completion", "runs green with full per-step logs", "slot accounting back to baseline", "no leaks beyond deadline horizon", "generation lifecycle invariants"} {
 		if a := assertionByName(t, r, name); !a.Pass || a.Skipped {
 			t.Fatalf("%s: %+v", name, a)
 		}
@@ -110,6 +110,55 @@ func TestGreenBatteryPasses(t *testing.T) {
 		if a := assertionByName(t, r, name); !a.Skipped {
 			t.Fatalf("%s should be skipped on this battery: %+v", name, a)
 		}
+	}
+}
+
+func TestReportFailsWithoutCompletedWatch(t *testing.T) {
+	st := greenState()
+	st.WatchDoneAt = nil
+	r := buildReport(st, at(4*time.Minute))
+	if r.Pass {
+		t.Fatal("battery without a completed watch passed")
+	}
+	if a := assertionByName(t, r, "watch ran to completion"); a.Pass || a.Skipped {
+		t.Fatalf("watch-completion assertion = %+v", a)
+	}
+}
+
+func TestReportFailsWhenEveryAssertionSkips(t *testing.T) {
+	done := at(time.Minute)
+	st := &stateFile{
+		Repo: "acme/demo", Workflow: "ci.yml", StartedAt: t0,
+		Runs:        map[string]*runRecord{},
+		WatchDoneAt: &done,
+	}
+	r := buildReport(st, at(4*time.Minute))
+	if r.Pass {
+		t.Fatal("battery that proved nothing passed")
+	}
+}
+
+func TestRunsAssertionCatchesDispatchWithoutRun(t *testing.T) {
+	st := greenState()
+	st.Dispatches = append(st.Dispatches, dispatchRecord{Pattern: "burst", Workflow: "ci.yml", DispatchedAt: at(time.Second)})
+	a := assertionByName(t, buildReport(st, at(4*time.Minute)), "runs green with full per-step logs")
+	if a.Pass || a.Skipped {
+		t.Fatalf("dispatch without a claimed run passed: %+v", a)
+	}
+	if !strings.Contains(a.Detail, "2 dispatches but 1 runs claimed") {
+		t.Fatalf("detail does not name the mismatch: %s", a.Detail)
+	}
+}
+
+func TestLogsAssertionCatchesForeignCancellation(t *testing.T) {
+	st := greenState()
+	st.Runs["500"].Attempts["1"].Conclusion = "cancelled"
+	a := assertionByName(t, buildReport(st, at(4*time.Minute)), "runs green with full per-step logs")
+	if a.Pass || a.Skipped {
+		t.Fatalf("externally cancelled attempt passed: %+v", a)
+	}
+	if !strings.Contains(a.Detail, "outside the battery's churn cycles") {
+		t.Fatalf("detail does not name the foreign cancel: %s", a.Detail)
 	}
 }
 
@@ -153,23 +202,13 @@ func TestSlotAssertionCatchesDrift(t *testing.T) {
 	}
 }
 
-func TestLeakAssertionCatchesStuckDemandAndOrphanReap(t *testing.T) {
+func TestLeakAssertionCatchesStuckDemand(t *testing.T) {
 	st := greenState()
 	st.DB.Final.CapturedAt = at(45 * time.Minute)
 	st.DB.Demands["102"] = demandRow{ProviderJobID: 102, State: "demand_recorded", CreatedAt: at(0), UpdatedAt: at(0)}
 	a := assertionByName(t, buildReport(st, at(46*time.Minute)), "no leaks beyond deadline horizon")
 	if a.Pass {
 		t.Fatalf("stuck demand passed: %+v", a)
-	}
-
-	st = greenState()
-	st.DB.Final.Generations = append(st.DB.Final.Generations, generationRow{
-		Generation: "gen-0", HostID: "h1", RunnerClass: "c4", State: "reaped",
-		CreatedAt: at(0), UpdatedAt: st.DB.Final.CapturedAt.Add(-10 * time.Second),
-	})
-	a = assertionByName(t, buildReport(st, at(4*time.Minute)), "no leaks beyond deadline horizon")
-	if a.Pass {
-		t.Fatalf("reaped-but-observed generation passed: %+v", a)
 	}
 }
 
@@ -271,24 +310,6 @@ func TestGenerationInvariantsCatchDoubleCurrentAndStaleCandidate(t *testing.T) {
 	}
 }
 
-func TestGenerationInvariantsCheckScopePointers(t *testing.T) {
-	st := greenState()
-	st.DB.Final.ScopesKnown = true
-	current := "gen-1"
-	st.DB.Final.Scopes = []scopeRow{{ScopeID: "s1", CurrentGenerationID: &current}}
-	a := assertionByName(t, buildReport(st, at(4*time.Minute)), "generation lifecycle invariants")
-	if !a.Pass {
-		t.Fatalf("consistent pointer failed: %+v", a)
-	}
-
-	missing := "gen-ghost"
-	st.DB.Final.Scopes = []scopeRow{{ScopeID: "s1", CurrentGenerationID: &missing}}
-	a = assertionByName(t, buildReport(st, at(4*time.Minute)), "generation lifecycle invariants")
-	if a.Pass {
-		t.Fatalf("dangling pointer passed: %+v", a)
-	}
-}
-
 func TestMeasurePickupSegments(t *testing.T) {
 	segments := measurePickup(greenState())
 	want := map[string]float64{
@@ -320,10 +341,9 @@ func TestMeasureSealFromObservedTransitions(t *testing.T) {
 
 func TestMeasureNVMeGrowth(t *testing.T) {
 	st := greenState()
-	written := int64(42 << 20)
 	st.DB.Final.Generations = append(st.DB.Final.Generations, generationRow{
 		Generation: "gen-2", HostID: "h1", RunnerClass: "c4", State: "committed",
-		Bytes: 3 << 29, Written: &written, CreatedAt: at(time.Minute), UpdatedAt: at(time.Minute),
+		Bytes: 3 << 29, CreatedAt: at(time.Minute), UpdatedAt: at(time.Minute),
 	})
 	growth := measureNVMe(st)
 	if len(growth) != 1 || len(growth[0].Generations) != 2 {

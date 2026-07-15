@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
@@ -113,8 +114,6 @@ type dbSnapshot struct {
 	CapturedAt  time.Time       `json:"captured_at"`
 	Slots       []slotRow       `json:"slots"`
 	Generations []generationRow `json:"generations"`
-	Scopes      []scopeRow      `json:"scopes,omitempty"`
-	ScopesKnown bool            `json:"scopes_known,omitempty"`
 }
 
 type dbObservations struct {
@@ -181,6 +180,22 @@ func loadOrInitState(path, repo, workflow string, now time.Time) (*stateFile, er
 			path, st.Repo, st.Workflow)
 	}
 	return st, nil
+}
+
+// lockState holds an exclusive advisory lock on the battery for the life of
+// the subcommand. Every subcommand does whole-file load-modify-save, so two
+// running at once (a dispatch fired while a watch still polls) would silently
+// discard each other's records.
+func lockState(path string) (func(), error) {
+	f, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("state file %s is in use by another hammer subcommand", path)
+	}
+	return func() { f.Close() }, nil
 }
 
 func saveState(path string, st *stateFile) error {

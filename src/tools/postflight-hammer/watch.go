@@ -25,12 +25,23 @@ type watcher struct {
 }
 
 func runWatch(ctx context.Context, gh *ghClient, cfg watchConfig) error {
+	unlock, err := lockState(cfg.statePath)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	st, err := loadState(cfg.statePath)
 	if err != nil {
 		return err
 	}
 	if len(st.Dispatches) == 0 {
 		return fmt.Errorf("state file %s records no dispatches; run `postflight-hammer dispatch` first", cfg.statePath)
+	}
+	if len(st.Runs) == 0 {
+		return fmt.Errorf("state file %s records %d dispatches but no correlated runs; the dispatch failed before correlation", cfg.statePath, len(st.Dispatches))
+	}
+	if len(st.Runs) != len(st.Dispatches) {
+		fmt.Fprintf(os.Stderr, "hammer: %d dispatches but %d correlated runs; the report will fail the battery\n", len(st.Dispatches), len(st.Runs))
 	}
 	w := &watcher{gh: gh, cfg: cfg, st: st, now: time.Now}
 	if cfg.dbDSN != "" {
@@ -91,52 +102,41 @@ func (w *watcher) tick(ctx context.Context) (bool, error) {
 	return runsDone && dbDone, nil
 }
 
+// observeGitHub refreshes exactly the runs dispatch claimed: a run someone
+// else fired into the same window is never adopted into the battery, and a
+// claimed run stuck non-terminal keeps the watch open.
 func (w *watcher) observeGitHub(ctx context.Context) (bool, error) {
 	since := w.st.StartedAt.Add(-2 * time.Minute)
-	expected := map[string]int{}
-	for _, d := range w.st.Dispatches {
-		expected[d.Workflow]++
+	workflows := map[string]bool{}
+	for _, rec := range w.st.Runs {
+		workflows[rec.Workflow] = true
 	}
-	seen := map[string]int{}
-	allTerminal := true
-	for workflow := range expected {
+	for workflow := range workflows {
 		runs, err := w.gh.listWorkflowRuns(ctx, w.cfg.repo, workflow, since)
 		if err != nil {
 			return false, err
 		}
 		for _, r := range runs {
-			seen[workflow]++
-			rec := w.recordRun(r, workflow)
-			if err := w.observeAttempts(ctx, rec); err != nil {
-				return false, err
+			rec := w.st.Runs[fmt.Sprintf("%d", r.ID)]
+			if rec == nil {
+				continue
 			}
-			if rec.Status != "completed" {
-				allTerminal = false
-			}
+			rec.CreatedAt = r.CreatedAt
+			rec.LatestAttempt = r.RunAttempt
+			rec.Status = r.Status
+			rec.Conclusion = r.Conclusion
 		}
 	}
-	for workflow, want := range expected {
-		if seen[workflow] < want {
+	allTerminal := true
+	for _, rec := range w.st.Runs {
+		if err := w.observeAttempts(ctx, rec); err != nil {
+			return false, err
+		}
+		if rec.Status != "completed" {
 			allTerminal = false
 		}
 	}
 	return allTerminal, nil
-}
-
-func (w *watcher) recordRun(r ghRun, workflow string) *runRecord {
-	key := fmt.Sprintf("%d", r.ID)
-	rec := w.st.Runs[key]
-	if rec == nil {
-		rec = &runRecord{RunID: r.ID, Attempts: map[string]*attemptRecord{}}
-		w.st.Runs[key] = rec
-	}
-	rec.Workflow = workflow
-	rec.Twin = workflow == w.st.TwinWorkflow && workflow != w.st.Workflow
-	rec.CreatedAt = r.CreatedAt
-	rec.LatestAttempt = r.RunAttempt
-	rec.Status = r.Status
-	rec.Conclusion = r.Conclusion
-	return rec
 }
 
 // observeAttempts refreshes every attempt of the run that is not yet fully

@@ -58,14 +58,14 @@ Reading the report:
     bundle-server byte accounting does not exist yet; when it lands, the assertion
     switches to bytes served per lease.
   - Orphan workspaces and VM state dirs are asserted through their database-visible
-    proxies: slot occupancy returning to baseline and reaped generations disappearing
-    from host sync observation. Host-disk-level leak detection lives in hostd's own
-    GC and simulation tests.
+    proxy: slot occupancy returning to baseline. Host-disk-level leak detection lives
+    in hostd's own GC and simulation tests.
   - Pickup segments marked * are watch observations at poll resolution; unmarked
     boundaries are authoritative timestamps from the ledger, the lease rows, and GitHub.
 
 State: every subcommand shares one state file (-state, default ./postflight-hammer.json).
 Patterns accumulate into it; delete it (or point elsewhere) to start a fresh battery.
+Subcommands hold an exclusive lock on it, so run them one at a time.
 `
 
 func main() {

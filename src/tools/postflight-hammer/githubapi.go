@@ -99,8 +99,20 @@ func (c *ghClient) do(ctx context.Context, method, path string, body any) (*http
 			}
 			continue
 		}
-		return nil, fmt.Errorf("github %s %s: responded %d", method, path, resp.StatusCode)
+		return nil, &ghStatusError{method: method, path: path, status: resp.StatusCode}
 	}
+}
+
+// ghStatusError is a non-2xx API response, so callers can branch on the
+// status (e.g. a cancel losing the race to completion answers 409).
+type ghStatusError struct {
+	method string
+	path   string
+	status int
+}
+
+func (e *ghStatusError) Error() string {
+	return fmt.Sprintf("github %s %s: responded %d", e.method, e.path, e.status)
 }
 
 func (c *ghClient) doJSON(ctx context.Context, method, path string, body, out any) error {

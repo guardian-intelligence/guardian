@@ -127,70 +127,10 @@ func TestQueriesAgainstRealSchema(t *testing.T) {
 	if g.Generation != "gen-1" || g.State != "current" || g.Bytes != 1073741824 {
 		t.Fatalf("generation = %+v", g)
 	}
-	if g.ScopeID != nil || g.Written != nil {
-		t.Fatalf("optional columns should be absent on the base schema: %+v", g)
-	}
-
-	scopes, known, err := db.Scopes(ctx)
-	if err != nil {
-		t.Fatalf("scopes: %v", err)
-	}
-	if known || len(scopes) != 0 {
-		t.Fatalf("scope table should be unknown on the base schema: known=%v %+v", known, scopes)
-	}
 
 	snap, err := db.Snapshot(ctx)
-	if err != nil || len(snap.Slots) != 1 || len(snap.Generations) != 1 || snap.ScopesKnown {
+	if err != nil || len(snap.Slots) != 1 || len(snap.Generations) != 1 {
 		t.Fatalf("snapshot: %v %+v", err, snap)
-	}
-}
-
-// TestQueriesPickUpGenerationLifecycleSchema simulates the workspace-
-// generation migration landing and verifies the hammer reads the size
-// statistics and scope pointers without a code change.
-func TestQueriesPickUpGenerationLifecycleSchema(t *testing.T) {
-	ctx, db, conn := startMigratedDB(t)
-	seedBattery(t, ctx, conn)
-	ddl := []string{
-		`ALTER TABLE workspace_generations
-		     ADD COLUMN scope_id TEXT,
-		     ADD COLUMN used BIGINT,
-		     ADD COLUMN logicalused BIGINT,
-		     ADD COLUMN written BIGINT,
-		     ADD COLUMN compressratio DOUBLE PRECISION,
-		     ADD COLUMN sealed_at TIMESTAMPTZ`,
-		`CREATE TABLE workspace_scopes (
-		     scope_key TEXT PRIMARY KEY,
-		     current_generation_id TEXT,
-		     home_host_id TEXT)`,
-		`UPDATE workspace_generations SET scope_id = 's1', used = 10, logicalused = 20, written = 5,
-		     compressratio = 1.5, sealed_at = now() WHERE generation = 'gen-1'`,
-		`INSERT INTO workspace_scopes (scope_key, current_generation_id, home_host_id) VALUES ('s1', 'gen-1', 'h1')`,
-	}
-	for _, s := range ddl {
-		if _, err := conn.Exec(ctx, s); err != nil {
-			t.Fatalf("ddl: %v\n%s", err, s)
-		}
-	}
-
-	generations, err := db.Generations(ctx)
-	if err != nil || len(generations) != 1 {
-		t.Fatalf("generations: %v %+v", err, generations)
-	}
-	g := generations[0]
-	if g.ScopeID == nil || *g.ScopeID != "s1" {
-		t.Fatalf("scope_id = %+v", g.ScopeID)
-	}
-	if g.Written == nil || *g.Written != 5 || g.CompressRatio == nil || *g.CompressRatio != 1.5 || g.SealedAt == nil {
-		t.Fatalf("size stats = %+v", g)
-	}
-
-	scopes, known, err := db.Scopes(ctx)
-	if err != nil || !known || len(scopes) != 1 {
-		t.Fatalf("scopes: %v known=%v %+v", err, known, scopes)
-	}
-	if scopes[0].ScopeID != "s1" || scopes[0].CurrentGenerationID == nil || *scopes[0].CurrentGenerationID != "gen-1" {
-		t.Fatalf("scope = %+v", scopes[0])
 	}
 }
 

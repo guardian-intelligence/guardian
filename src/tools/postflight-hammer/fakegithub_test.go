@@ -27,6 +27,8 @@ type fakeGitHub struct {
 	// holdInProgress freezes runs at in_progress so a test's cancel always
 	// wins the race against natural completion.
 	holdInProgress bool
+	// cancelStatus, when non-zero, is answered to every cancel request.
+	cancelStatus int
 
 	server *httptest.Server
 }
@@ -242,6 +244,10 @@ func (f *fakeGitHub) attemptLogs(w http.ResponseWriter, r *http.Request) {
 func (f *fakeGitHub) cancel(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.cancelStatus != 0 {
+		w.WriteHeader(f.cancelStatus)
+		return
+	}
 	run := f.pathRun(r)
 	if run == nil {
 		w.WriteHeader(http.StatusNotFound)

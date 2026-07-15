@@ -17,11 +17,6 @@ import (
 // one-line change here.
 const readyDeadlineBound = 30 * time.Minute
 
-// reapObservedWindow: a generation the control plane marked reaped whose row
-// is still being refreshed by host sync observation this close to the final
-// snapshot is still on disk — an orphan the reap verb failed to destroy.
-const reapObservedWindow = 90 * time.Second
-
 type assertionResult struct {
 	Name    string `json:"name"`
 	Pass    bool   `json:"pass"`
@@ -52,14 +47,10 @@ type execStats struct {
 }
 
 type generationStat struct {
-	Generation    string   `json:"generation"`
-	State         string   `json:"state"`
-	Bytes         int64    `json:"bytes"`
-	Used          *int64   `json:"used,omitempty"`
-	LogicalUsed   *int64   `json:"logicalused,omitempty"`
-	Written       *int64   `json:"written,omitempty"`
-	CompressRatio *float64 `json:"compressratio,omitempty"`
-	DeltaBytes    int64    `json:"delta_bytes"`
+	Generation string `json:"generation"`
+	State      string `json:"state"`
+	Bytes      int64  `json:"bytes"`
+	DeltaBytes int64  `json:"delta_bytes"`
 }
 
 type scopeGrowth struct {
@@ -102,6 +93,7 @@ func buildReport(st *stateFile, now time.Time) *report {
 	r.RunsObserved = len(st.Runs)
 
 	r.Assertions = []assertionResult{
+		assertWatchCompleted(st),
 		assertRunsGreenWithLogs(st),
 		assertSlotBaseline(st),
 		assertNoLeaks(st),
@@ -115,12 +107,35 @@ func buildReport(st *stateFile, now time.Time) *report {
 	r.NVMe = measureNVMe(st)
 
 	r.Pass = true
-	for _, a := range r.Assertions {
+	proved := false
+	for i, a := range r.Assertions {
 		if !a.Pass && !a.Skipped {
 			r.Pass = false
 		}
+		if i > 0 && !a.Skipped {
+			proved = true
+		}
+	}
+	// A scoreboard where every assertion skipped proved nothing and must not
+	// print a green standing-health verdict.
+	if !proved {
+		r.Pass = false
 	}
 	return r
+}
+
+// Assertion 0: the state file holds a finished watch. Reporting on a battery
+// whose watch timed out, was interrupted, or never ran would grade partial
+// observations — the skips that follow would read as a pass.
+func assertWatchCompleted(st *stateFile) assertionResult {
+	res := assertionResult{Name: "watch ran to completion"}
+	if st.WatchDoneAt == nil {
+		res.Detail = "no watch completed on this battery (timed out, interrupted, or never ran)"
+		return res
+	}
+	res.Pass = true
+	res.Detail = "watch finalized at " + st.WatchDoneAt.Format(time.RFC3339)
+	return res
 }
 
 // cancelledAttempts returns the set of "runID/attempt" the churn pattern
@@ -145,12 +160,35 @@ func stepLogBytes(a *attemptRecord, jobName string, step int64) (int64, bool) {
 	return 0, false
 }
 
-// Assertion 1: every non-cancelled dispatch reaches success on GitHub and
-// every successful step's log in the attempt archive is non-empty.
+// Assertion 1: every dispatch produced exactly one run the battery claimed,
+// every attempt the churn pattern did not cancel reaches success on GitHub,
+// and every successful step's log in the attempt archive is non-empty.
 func assertRunsGreenWithLogs(st *stateFile) assertionResult {
 	res := assertionResult{Name: "runs green with full per-step logs", Pass: true}
 	exempt := cancelledAttempts(st)
 	var problems []string
+	dispatched, twinDispatched := 0, 0
+	for _, d := range st.Dispatches {
+		if d.Twin {
+			twinDispatched++
+		} else {
+			dispatched++
+		}
+	}
+	runs, twinRuns := 0, 0
+	for _, run := range st.Runs {
+		if run.Twin {
+			twinRuns++
+		} else {
+			runs++
+		}
+	}
+	if runs != dispatched {
+		problems = append(problems, fmt.Sprintf("%d dispatches but %d runs claimed", dispatched, runs))
+	}
+	if twinRuns != twinDispatched {
+		problems = append(problems, fmt.Sprintf("%d twin dispatches but %d twin runs claimed", twinDispatched, twinRuns))
+	}
 	attempts := 0
 	for _, run := range st.Runs {
 		if run.Twin {
@@ -158,7 +196,11 @@ func assertRunsGreenWithLogs(st *stateFile) assertionResult {
 		}
 		for _, a := range run.Attempts {
 			key := fmt.Sprintf("%d/%d", run.RunID, a.Attempt)
-			if exempt[key] || a.Conclusion == "cancelled" {
+			if exempt[key] {
+				continue
+			}
+			if a.Conclusion == "cancelled" {
+				problems = append(problems, fmt.Sprintf("run %d attempt %d: cancelled outside the battery's churn cycles", run.RunID, a.Attempt))
 				continue
 			}
 			attempts++
@@ -184,7 +226,7 @@ func assertRunsGreenWithLogs(st *stateFile) assertionResult {
 			}
 		}
 	}
-	if attempts == 0 {
+	if attempts == 0 && len(problems) == 0 {
 		return assertionResult{Name: res.Name, Skipped: true, Detail: "no non-cancelled attempts observed"}
 	}
 	if len(problems) > 0 {
@@ -238,15 +280,15 @@ func assertSlotBaseline(st *stateFile) assertionResult {
 }
 
 // Assertion 3: nothing leaked — no demand or lease is still non-terminal past
-// the deadline horizon, and no reaped generation is still being observed on a
-// host (the database-visible proxy for an orphan dataset).
+// the deadline horizon. Host-disk orphans (zvols, VM state dirs) have no
+// database-visible signal yet; they are covered by hostd's own GC and
+// simulation tests.
 func assertNoLeaks(st *stateFile) assertionResult {
 	res := assertionResult{Name: "no leaks beyond deadline horizon", Pass: true}
 	if st.DB == nil || st.DB.Final == nil {
 		return assertionResult{Name: res.Name, Skipped: true, Detail: "no database observations (DATABASE_URL unset?)"}
 	}
-	now := st.DB.Final.CapturedAt
-	horizon := now.Add(-readyDeadlineBound)
+	horizon := st.DB.Final.CapturedAt.Add(-readyDeadlineBound)
 	var problems []string
 	for _, d := range st.DB.Demands {
 		if !terminalDemandStates[d.State] && d.CreatedAt.Before(horizon) {
@@ -258,16 +300,11 @@ func assertNoLeaks(st *stateFile) assertionResult {
 			problems = append(problems, fmt.Sprintf("lease %s stuck in %s since %s", l.LeaseID, l.State, l.CreatedAt.Format(time.RFC3339)))
 		}
 	}
-	for _, g := range st.DB.Final.Generations {
-		if g.State == "reaped" && now.Sub(g.UpdatedAt) < reapObservedWindow {
-			problems = append(problems, fmt.Sprintf("generation %s reaped but still observed on host %s", g.Generation, g.HostID))
-		}
-	}
 	if len(problems) > 0 {
 		res.Pass = false
 		res.Detail = summarize(problems)
 	} else {
-		res.Detail = fmt.Sprintf("%d demands, %d leases, %d generations clean", len(st.DB.Demands), len(st.DB.Leases), len(st.DB.Final.Generations))
+		res.Detail = fmt.Sprintf("%d demands, %d leases clean", len(st.DB.Demands), len(st.DB.Leases))
 	}
 	return res
 }
@@ -413,16 +450,11 @@ func assertWarmDelta(st *stateFile) assertionResult {
 }
 
 func generationScope(g generationRow) string {
-	if g.ScopeID != nil && *g.ScopeID != "" {
-		return *g.ScopeID
-	}
 	return g.HostID + "/" + g.RunnerClass
 }
 
 // Assertion 6: generation lifecycle invariants in the final catalog state —
-// at most one current per scope, every candidate resolved within the
-// horizon, and (when the scope pointer table exists) pointers only reference
-// committed-or-current generations, which are exactly the current set.
+// at most one current per scope, every candidate resolved within the horizon.
 func assertGenerationInvariants(st *stateFile) assertionResult {
 	res := assertionResult{Name: "generation lifecycle invariants", Pass: true}
 	if st.DB == nil || st.DB.Final == nil {
@@ -433,9 +465,7 @@ func assertGenerationInvariants(st *stateFile) assertionResult {
 	var problems []string
 
 	currents := map[string][]string{}
-	byName := map[string]generationRow{}
 	for _, g := range final.Generations {
-		byName[g.Generation] = g
 		if g.State == "current" {
 			scope := generationScope(g)
 			currents[scope] = append(currents[scope], g.Generation)
@@ -447,29 +477,6 @@ func assertGenerationInvariants(st *stateFile) assertionResult {
 	for scope, gens := range currents {
 		if len(gens) > 1 {
 			problems = append(problems, fmt.Sprintf("scope %s has %d current generations: %s", scope, len(gens), strings.Join(gens, ", ")))
-		}
-	}
-	if final.ScopesKnown {
-		pointed := map[string]bool{}
-		for _, s := range final.Scopes {
-			if s.CurrentGenerationID == nil || *s.CurrentGenerationID == "" {
-				continue
-			}
-			id := *s.CurrentGenerationID
-			pointed[id] = true
-			g, ok := byName[id]
-			if !ok {
-				problems = append(problems, fmt.Sprintf("scope %s points at unknown generation %s", s.ScopeID, id))
-				continue
-			}
-			if g.State != "committed" && g.State != "current" {
-				problems = append(problems, fmt.Sprintf("scope %s points at generation %s in state %s", s.ScopeID, id, g.State))
-			}
-		}
-		for _, g := range final.Generations {
-			if g.State == "current" && !pointed[g.Generation] {
-				problems = append(problems, fmt.Sprintf("generation %s is current but no scope points at it", g.Generation))
-			}
 		}
 	}
 	if len(problems) > 0 {
@@ -671,13 +678,9 @@ func measureNVMe(st *stateFile) []scopeGrowth {
 		var prev int64
 		for i, g := range gens {
 			stat := generationStat{
-				Generation:    g.Generation,
-				State:         g.State,
-				Bytes:         g.Bytes,
-				Used:          g.Used,
-				LogicalUsed:   g.LogicalUsed,
-				Written:       g.Written,
-				CompressRatio: g.CompressRatio,
+				Generation: g.Generation,
+				State:      g.State,
+				Bytes:      g.Bytes,
 			}
 			if i > 0 {
 				stat.DeltaBytes = g.Bytes - prev
@@ -735,17 +738,10 @@ func printReport(w io.Writer, r *report) {
 	if len(r.NVMe) > 0 {
 		fmt.Fprintf(w, "\nNVMe growth per scope\n")
 		tw = tabwriter.NewWriter(w, 2, 4, 2, ' ', 0)
-		fmt.Fprintln(tw, "SCOPE\tGENERATION\tSTATE\tBYTES\tDELTA\tWRITTEN\tCOMPRESS")
+		fmt.Fprintln(tw, "SCOPE\tGENERATION\tSTATE\tBYTES\tDELTA")
 		for _, sg := range r.NVMe {
 			for _, g := range sg.Generations {
-				written, compress := "-", "-"
-				if g.Written != nil {
-					written = fmt.Sprintf("%d", *g.Written)
-				}
-				if g.CompressRatio != nil {
-					compress = fmt.Sprintf("%.2f", *g.CompressRatio)
-				}
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%+d\t%s\t%s\n", sg.Scope, g.Generation, g.State, g.Bytes, g.DeltaBytes, written, compress)
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%+d\n", sg.Scope, g.Generation, g.State, g.Bytes, g.DeltaBytes)
 			}
 		}
 		tw.Flush()
@@ -759,6 +755,11 @@ func printReport(w io.Writer, r *report) {
 }
 
 func runReport(statePath, jsonPath string) error {
+	unlock, err := lockState(statePath)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	st, err := loadState(statePath)
 	if err != nil {
 		return err

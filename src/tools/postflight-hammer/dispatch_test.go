@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -68,6 +69,9 @@ func TestBurstPattern(t *testing.T) {
 	}
 	if len(d.st.Dispatches) != 3 {
 		t.Fatalf("recorded %d dispatches, want 3", len(d.st.Dispatches))
+	}
+	if len(d.st.Runs) != 3 {
+		t.Fatalf("claimed %d runs, want 3", len(d.st.Runs))
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -154,31 +158,27 @@ func TestChurnIgnoresPreexistingRuns(t *testing.T) {
 	}
 }
 
-// Same accumulation hazard for restart: completed runs from earlier patterns
-// must not count toward the new load being in flight.
-func TestAwaitInFlightIgnoresBaselineRuns(t *testing.T) {
+// The churn pattern must fail loudly when cancels are denied (bad credential,
+// missing actions:write) instead of degrading into a plain burst.
+func TestChurnFailsOnCancelDenied(t *testing.T) {
 	f := newFakeGitHub(t)
-	completeRun(t, f, "ci.yml")
-	completeRun(t, f, "ci.yml")
-
+	f.holdInProgress = true
+	f.cancelStatus = 403
 	cfg := dispatchConfig{
-		repo: "acme/demo", workflow: "ci.yml", ref: "main", pattern: "restart", n: 1,
-		statePath: filepath.Join(t.TempDir(), "state.json"),
+		repo: "acme/demo", workflow: "ci.yml", ref: "main", pattern: "churn", n: 1,
+		churnMaxWait: time.Millisecond,
+		statePath:    filepath.Join(t.TempDir(), "state.json"),
 	}
 	d := testDispatcher(t, f, cfg)
-	d.awaitTimeout = 100 * time.Millisecond
-	ctx := context.Background()
-	baseline, err := d.knownRunIDs(ctx)
-	if err != nil || len(baseline) != 2 {
-		t.Fatalf("baseline: %v %v", err, baseline)
-	}
-	if err := d.awaitInFlight(ctx, 1, baseline); err == nil {
-		t.Fatal("baseline runs counted as in-flight load")
+	err := d.run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "cancel run") {
+		t.Fatalf("denied cancel did not fail the pattern: %v", err)
 	}
 }
 
 func TestRestartPatternRunsCommandOnce(t *testing.T) {
 	f := newFakeGitHub(t)
+	f.holdInProgress = true
 	marker := filepath.Join(t.TempDir(), "restarted")
 	cfg := dispatchConfig{
 		repo: "acme/demo", workflow: "ci.yml", ref: "main", pattern: "restart", n: 2,
@@ -194,6 +194,29 @@ func TestRestartPatternRunsCommandOnce(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatalf("restart command never ran: %v", err)
+	}
+}
+
+// The restart must land while the load is still running; a battery whose
+// runs all completed first has not exercised the scenario and must fail.
+func TestRestartFailsWhenLoadDrainsFirst(t *testing.T) {
+	f := newFakeGitHub(t)
+	marker := filepath.Join(t.TempDir(), "restarted")
+	cfg := dispatchConfig{
+		repo: "acme/demo", workflow: "ci.yml", ref: "main", pattern: "restart", n: 2,
+		restartCmd: "echo restarted > " + marker,
+		statePath:  filepath.Join(t.TempDir(), "state.json"),
+	}
+	d := testDispatcher(t, f, cfg)
+	err := d.run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "completed before the restart") {
+		t.Fatalf("drained load did not fail the pattern: %v", err)
+	}
+	if d.st.RestartAt != nil {
+		t.Fatal("restart fired against an idle host")
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("restart command ran against an idle host")
 	}
 }
 
@@ -238,6 +261,23 @@ func TestTwinDispatches(t *testing.T) {
 	if twins != 2 {
 		t.Fatalf("got %d twin dispatches, want 2", twins)
 	}
+}
+
+func TestStateLockIsExclusive(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	unlock, err := lockState(path)
+	if err != nil {
+		t.Fatalf("lock: %v", err)
+	}
+	if _, err := lockState(path); err == nil {
+		t.Fatal("second lock on a held state file should refuse")
+	}
+	unlock()
+	unlock2, err := lockState(path)
+	if err != nil {
+		t.Fatalf("relock after release: %v", err)
+	}
+	unlock2()
 }
 
 func TestStateFileRefusesForeignBattery(t *testing.T) {

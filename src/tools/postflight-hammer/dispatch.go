@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
+	"net/http"
 	"os"
 	"os/exec"
 	"sync"
@@ -35,6 +37,11 @@ type dispatcher struct {
 }
 
 func runDispatch(ctx context.Context, gh *ghClient, cfg dispatchConfig) error {
+	unlock, err := lockState(cfg.statePath)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	st, err := loadOrInitState(cfg.statePath, cfg.repo, cfg.workflow, time.Now().UTC())
 	if err != nil {
 		return err
@@ -86,7 +93,7 @@ func (d *dispatcher) run(ctx context.Context) error {
 	var err error
 	switch d.cfg.pattern {
 	case "burst":
-		err = d.burst(ctx, d.cfg.n)
+		_, err = d.fireAndCorrelate(ctx, d.cfg.workflow, false, d.cfg.n, 0)
 	case "sustained":
 		err = d.sustained(ctx)
 	case "churn":
@@ -115,38 +122,21 @@ func (d *dispatcher) dispatchOne(ctx context.Context, workflow string, twin bool
 	return nil
 }
 
-func (d *dispatcher) burst(ctx context.Context, n int) error {
-	for i := 0; i < n; i++ {
-		if err := d.dispatchOne(ctx, d.cfg.workflow, false); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (d *dispatcher) sustained(ctx context.Context) error {
 	if d.cfg.ratePerMin <= 0 {
 		return fmt.Errorf("sustained pattern needs -rate > 0")
 	}
 	interval := time.Duration(float64(time.Minute) / d.cfg.ratePerMin)
-	for i := 0; i < d.cfg.n; i++ {
-		if i > 0 {
-			if err := sleepCtx(ctx, interval); err != nil {
-				return err
-			}
-		}
-		if err := d.dispatchOne(ctx, d.cfg.workflow, false); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err := d.fireAndCorrelate(ctx, d.cfg.workflow, false, d.cfg.n, interval)
+	return err
 }
 
-// knownRunIDs snapshots the workflow's currently visible runs, so run
-// correlation only ever matches runs that appear after this point — earlier
-// patterns in the same battery leave runs behind that must never be adopted.
-func (d *dispatcher) knownRunIDs(ctx context.Context) (map[int64]bool, error) {
-	runs, err := d.gh.listWorkflowRuns(ctx, d.cfg.repo, d.cfg.workflow, d.st.StartedAt.Add(-2*time.Minute))
+// knownRunIDs is the set a new-run correlation must never adopt: everything
+// the workflow's run list shows right now, plus every run this battery has
+// already claimed — a run an earlier pattern fired may become visible only
+// after this snapshot, and it must still not be adopted.
+func (d *dispatcher) knownRunIDs(ctx context.Context, workflow string) (map[int64]bool, error) {
+	runs, err := d.gh.listWorkflowRuns(ctx, d.cfg.repo, workflow, d.st.StartedAt.Add(-2*time.Minute))
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +144,51 @@ func (d *dispatcher) knownRunIDs(ctx context.Context) (map[int64]bool, error) {
 	for _, r := range runs {
 		known[r.ID] = true
 	}
+	for _, rec := range d.st.Runs {
+		known[rec.RunID] = true
+	}
 	return known, nil
+}
+
+// claimRun records the run as a member of the battery. Watch refreshes only
+// claimed runs and report asserts dispatch and claim counts match, so a run
+// never claimed here is invisible and a dropped dispatch cannot be masked by
+// someone else's run.
+func (d *dispatcher) claimRun(r ghRun, workflow string, twin bool) {
+	d.st.Runs[fmt.Sprintf("%d", r.ID)] = &runRecord{
+		RunID:         r.ID,
+		Workflow:      workflow,
+		Twin:          twin,
+		CreatedAt:     r.CreatedAt,
+		LatestAttempt: r.RunAttempt,
+		Status:        r.Status,
+		Conclusion:    r.Conclusion,
+		Attempts:      map[string]*attemptRecord{},
+	}
+}
+
+// fireAndCorrelate dispatches n times (interval apart when non-zero), then
+// waits until n runs beyond the known set appear and claims them.
+func (d *dispatcher) fireAndCorrelate(ctx context.Context, workflow string, twin bool, n int, interval time.Duration) ([]ghRun, error) {
+	known, err := d.knownRunIDs(ctx, workflow)
+	if err != nil {
+		return nil, err
+	}
+	for i := 0; i < n; i++ {
+		if i > 0 && interval > 0 {
+			if err := sleepCtx(ctx, interval); err != nil {
+				return nil, err
+			}
+		}
+		if err := d.dispatchOne(ctx, workflow, twin); err != nil {
+			return nil, err
+		}
+	}
+	runs, err := d.awaitNewRuns(ctx, workflow, known, n)
+	for _, r := range runs {
+		d.claimRun(r, workflow, twin)
+	}
+	return runs, err
 }
 
 // churn dispatches serially so each new run is unambiguously the one just
@@ -162,7 +196,7 @@ func (d *dispatcher) knownRunIDs(ctx context.Context) (map[int64]bool, error) {
 // cancel/rerun tail runs concurrently per run; the next dispatch only waits
 // for run correlation.
 func (d *dispatcher) churn(ctx context.Context) error {
-	known, err := d.knownRunIDs(ctx)
+	known, err := d.knownRunIDs(ctx, d.cfg.workflow)
 	if err != nil {
 		return err
 	}
@@ -174,12 +208,13 @@ func (d *dispatcher) churn(ctx context.Context) error {
 			wg.Wait()
 			return err
 		}
-		run, err := d.awaitNewRun(ctx, known)
+		runs, err := d.awaitNewRuns(ctx, d.cfg.workflow, known, 1)
 		if err != nil {
 			wg.Wait()
 			return err
 		}
-		known[run.ID] = true
+		run := runs[0]
+		d.claimRun(run, d.cfg.workflow, false)
 		wait := time.Duration(d.rnd.Int63n(int64(d.cfg.churnMaxWait) + 1))
 		wg.Add(1)
 		go func(runID int64, wait time.Duration) {
@@ -211,9 +246,14 @@ func (d *dispatcher) churnOne(ctx context.Context, runID int64, wait time.Durati
 		rec.CancelAttempt = run.RunAttempt
 	}
 	if err := d.gh.cancelRun(ctx, d.cfg.repo, runID); err != nil {
-		// A cancel that loses the race to natural completion is a valid churn
-		// outcome: nothing to rerun, nothing to assert.
-		return rec, nil
+		// 409 means the cancel lost the race to natural completion — a valid
+		// churn outcome: nothing to rerun, nothing to assert. Anything else
+		// (bad credential, missing scope, outage) must fail the pattern.
+		var se *ghStatusError
+		if errors.As(err, &se) && se.status == http.StatusConflict {
+			return rec, nil
+		}
+		return rec, fmt.Errorf("cancel run %d: %w", runID, err)
 	}
 	rec.CancelConfirmed = true
 	if err := d.awaitRunTerminal(ctx, runID); err != nil {
@@ -227,36 +267,35 @@ func (d *dispatcher) churnOne(ctx context.Context, runID int64, wait time.Durati
 	return rec, nil
 }
 
-// awaitNewRun polls the workflow's run list until a run not yet claimed by a
-// previous dispatch appears. workflow_dispatch returns no run id, so
-// appearance order is the only correlation there is — which is why churn
-// dispatches serially.
-func (d *dispatcher) awaitNewRun(ctx context.Context, known map[int64]bool) (ghRun, error) {
+// awaitNewRuns polls the workflow's run list until want runs beyond the known
+// set have appeared. workflow_dispatch returns no run id, so appearance is
+// the only correlation there is — which is why churn dispatches serially.
+// Runs that did appear are returned alongside a timeout error, so a partially
+// correlated pattern is still recorded.
+func (d *dispatcher) awaitNewRuns(ctx context.Context, workflow string, known map[int64]bool, want int) ([]ghRun, error) {
 	since := d.st.StartedAt.Add(-2 * time.Minute)
 	deadline := time.Now().Add(d.awaitTimeout)
+	var got []ghRun
 	for {
-		runs, err := d.gh.listWorkflowRuns(ctx, d.cfg.repo, d.cfg.workflow, since)
+		runs, err := d.gh.listWorkflowRuns(ctx, d.cfg.repo, workflow, since)
 		if err != nil {
-			return ghRun{}, err
+			return got, err
 		}
-		var newest *ghRun
-		for i := range runs {
-			r := runs[i]
+		for _, r := range runs {
 			if known[r.ID] {
 				continue
 			}
-			if newest == nil || r.CreatedAt.After(newest.CreatedAt) {
-				newest = &r
-			}
+			known[r.ID] = true
+			got = append(got, r)
 		}
-		if newest != nil {
-			return *newest, nil
+		if len(got) >= want {
+			return got, nil
 		}
 		if time.Now().After(deadline) {
-			return ghRun{}, fmt.Errorf("dispatched run never appeared in %s's run list", d.cfg.workflow)
+			return got, fmt.Errorf("only %d of %d dispatched runs appeared in %s's run list", len(got), want, workflow)
 		}
 		if err := sleepCtx(ctx, d.pollInterval); err != nil {
-			return ghRun{}, err
+			return got, err
 		}
 	}
 }
@@ -277,21 +316,18 @@ func (d *dispatcher) awaitRunTerminal(ctx context.Context, runID int64) error {
 	}
 }
 
-// restart fires a burst, waits for roughly half of it to be visibly in
-// flight, then runs the operator-supplied restart command exactly once.
+// restart fires a burst, waits for the load to be visibly in flight, then
+// runs the operator-supplied restart command exactly once.
 func (d *dispatcher) restart(ctx context.Context) error {
-	baseline, err := d.knownRunIDs(ctx)
+	runs, err := d.fireAndCorrelate(ctx, d.cfg.workflow, false, d.cfg.n, 0)
 	if err != nil {
-		return err
-	}
-	if err := d.burst(ctx, d.cfg.n); err != nil {
 		return err
 	}
 	if d.cfg.restartCmd == "" {
 		fmt.Fprintln(os.Stderr, "hammer: HAMMER_RESTART_CMD is unset; restart pattern dispatched load but skipped the restart")
 		return nil
 	}
-	if err := d.awaitInFlight(ctx, (d.cfg.n+1)/2, baseline); err != nil {
+	if err := d.awaitInFlight(ctx, (d.cfg.n+1)/2, runs); err != nil {
 		return err
 	}
 	cmd := exec.CommandContext(ctx, "sh", "-c", d.cfg.restartCmd)
@@ -304,28 +340,43 @@ func (d *dispatcher) restart(ctx context.Context) error {
 	return nil
 }
 
-func (d *dispatcher) awaitInFlight(ctx context.Context, want int, baseline map[int64]bool) error {
+// awaitInFlight returns once enough of the pattern's runs are concurrently
+// in_progress for the restart to land mid-flight — or, when the load is
+// already draining, at the last moment something is still running. All runs
+// completing first means the scenario was never exercised, which is a
+// failure, not a quiet degrade to restart-at-idle.
+func (d *dispatcher) awaitInFlight(ctx context.Context, want int, runs []ghRun) error {
+	ids := map[int64]bool{}
+	for _, r := range runs {
+		ids[r.ID] = true
+	}
 	since := d.st.StartedAt.Add(-2 * time.Minute)
 	deadline := time.Now().Add(d.awaitTimeout)
 	for {
-		runs, err := d.gh.listWorkflowRuns(ctx, d.cfg.repo, d.cfg.workflow, since)
+		list, err := d.gh.listWorkflowRuns(ctx, d.cfg.repo, d.cfg.workflow, since)
 		if err != nil {
 			return err
 		}
-		started := 0
-		for _, r := range runs {
-			if baseline[r.ID] {
+		inFlight, completed := 0, 0
+		for _, r := range list {
+			if !ids[r.ID] {
 				continue
 			}
-			if r.Status == "in_progress" || r.Status == "completed" {
-				started++
+			switch r.Status {
+			case "in_progress":
+				inFlight++
+			case "completed":
+				completed++
 			}
 		}
-		if started >= want {
+		if inFlight >= want || (inFlight > 0 && inFlight+completed == len(ids)) {
 			return nil
 		}
+		if completed == len(ids) {
+			return fmt.Errorf("all %d runs completed before the restart could fire mid-flight", len(ids))
+		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("only %d of %d runs in flight before the restart window closed", started, want)
+			return fmt.Errorf("only %d of %d runs in flight before the restart window closed", inFlight, want)
 		}
 		if err := sleepCtx(ctx, d.pollInterval); err != nil {
 			return err
@@ -337,10 +388,6 @@ func (d *dispatcher) dispatchTwins(ctx context.Context) error {
 	if d.cfg.twinWorkflow == "" || d.cfg.twinN <= 0 {
 		return nil
 	}
-	for i := 0; i < d.cfg.twinN; i++ {
-		if err := d.dispatchOne(ctx, d.cfg.twinWorkflow, true); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err := d.fireAndCorrelate(ctx, d.cfg.twinWorkflow, true, d.cfg.twinN, 0)
+	return err
 }

@@ -65,6 +65,48 @@ func TestWatchRunsToTerminalAndFetchesLogs(t *testing.T) {
 	}
 }
 
+// A run someone else fired into the battery's window must never be adopted:
+// it can neither satisfy dispatch completeness nor fail the scoreboard.
+func TestWatchIgnoresForeignRuns(t *testing.T) {
+	f := newFakeGitHub(t)
+	foreignID := completeRun(t, f, "ci.yml")
+
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	d := testDispatcher(t, f, dispatchConfig{
+		repo: "acme/demo", workflow: "ci.yml", ref: "main", pattern: "burst", n: 1,
+		statePath: statePath,
+	})
+	if err := d.run(context.Background()); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if err := saveState(statePath, d.st); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	cfg := watchConfig{
+		repo:      "acme/demo",
+		statePath: statePath,
+		poll:      10 * time.Millisecond,
+		timeout:   30 * time.Second,
+		settle:    10 * time.Millisecond,
+	}
+	if err := runWatch(context.Background(), f.client(t), cfg); err != nil {
+		t.Fatalf("watch: %v", err)
+	}
+	st, err := loadState(statePath)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if len(st.Runs) != 1 {
+		t.Fatalf("observed %d runs, want 1", len(st.Runs))
+	}
+	for _, run := range st.Runs {
+		if run.RunID == foreignID {
+			t.Fatal("watch adopted a foreign run")
+		}
+	}
+}
+
 func TestWatchRequiresDispatches(t *testing.T) {
 	f := newFakeGitHub(t)
 	statePath := filepath.Join(t.TempDir(), "state.json")
@@ -75,5 +117,13 @@ func TestWatchRequiresDispatches(t *testing.T) {
 	cfg := watchConfig{repo: "acme/demo", statePath: statePath, poll: time.Millisecond, timeout: time.Second, settle: time.Millisecond}
 	if err := runWatch(context.Background(), f.client(t), cfg); err == nil {
 		t.Fatal("watch of an empty battery should refuse")
+	}
+
+	st.Dispatches = []dispatchRecord{{Pattern: "burst", Workflow: "ci.yml", DispatchedAt: time.Now().UTC()}}
+	if err := saveState(statePath, st); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if err := runWatch(context.Background(), f.client(t), cfg); err == nil {
+		t.Fatal("watch of a battery with no correlated runs should refuse")
 	}
 }
