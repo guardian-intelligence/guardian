@@ -24,7 +24,7 @@ import (
 
 // WorkspaceMarker is the file guestd drops at a converged mountpoint's
 // root; the checkout action refuses to run on a workspace without it.
-const WorkspaceMarker = ".postflight-workspace"
+const WorkspaceMarker = guestproto.WorkspaceReadyMarker
 
 // SyntheticFailureExitCode reports a runner that never ran: mounts that
 // would not converge, or an exec that failed. The host destroys the slot
