@@ -13,11 +13,19 @@ const machineType = "pc-q35-8.2"
 
 // workspaceNode names the hot-attached workspace on both sides of the QMP
 // seam: the blockdev node, the qdev id (dev- prefixed), and the SCSI serial
-// the guest mounts by (/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_workspace).
+// the guest mounts by (guestproto.DiskByIDPrefix + workspaceNode).
 const workspaceNode = "workspace"
 
 // workspaceDevice is the qdev id of the workspace's scsi-hd.
 const workspaceDevice = "dev-" + workspaceNode
+
+// workspaceFilesystem is what the guest creates on a blank workspace zvol.
+const workspaceFilesystem = "ext4"
+
+// workspaceMountOptions shape the guest-side mount. discard is load-bearing:
+// TRIM must pass through to the sparse zvol or NVMe accounting measures
+// garbage retention.
+var workspaceMountOptions = []string{"discard", "noatime", "nodev", "nosuid"}
 
 // LaunchSpec is everything that determines one VM's QEMU invocation.
 type LaunchSpec struct {

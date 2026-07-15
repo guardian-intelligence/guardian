@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -14,13 +15,23 @@ func TestRoundTrip(t *testing.T) {
 	messages := []Message{
 		{Kind: KindHello, Hello: &Hello{Version: Version}},
 		{Kind: KindAssignment, Assignment: &Assignment{
-			Lease:           "lease-1",
-			WorkspaceSerial: "workspace",
-			JITConfig:       "opaque-blob",
-			Env:             map[string]string{"POSTFLIGHT_EXECUTION_ID": "exec-1"},
+			Lease: "lease-1",
+			Mounts: []Mount{{
+				Serial:     "workspace",
+				Filesystem: "ext4",
+				Mountpoint: "/opt/actions-runner/_work/widget/widget",
+				Options:    []string{"discard", "noatime", "nodev", "nosuid"},
+			}},
+			JITConfig: "opaque-blob",
+			Env:       map[string]string{"POSTFLIGHT_EXECUTION_ID": "exec-1"},
 		}},
+		{Kind: KindRunnerStatus, RunnerStatus: &RunnerStatus{State: RunnerMounting}},
 		{Kind: KindRunnerStatus, RunnerStatus: &RunnerStatus{State: RunnerRegistered}},
+		{Kind: KindRunnerStatus, RunnerStatus: &RunnerStatus{State: RunnerJobStarted}},
 		{Kind: KindRunnerStatus, RunnerStatus: &RunnerStatus{State: RunnerExited, ExitCode: 42}},
+		{Kind: KindQuiesce, Quiesce: &Quiesce{Mountpoint: "/opt/actions-runner/_work/widget/widget"}},
+		{Kind: KindQuiesced, Quiesced: &Quiesced{}},
+		{Kind: KindQuiesceFailed, QuiesceFailed: &QuiesceFailed{Reason: "target is busy"}},
 	}
 	host, guest := net.Pipe()
 	go func() {
@@ -48,7 +59,7 @@ func TestRoundTrip(t *testing.T) {
 			}
 		case KindAssignment:
 			if got.Assignment.Lease != want.Assignment.Lease ||
-				got.Assignment.WorkspaceSerial != want.Assignment.WorkspaceSerial ||
+				!reflect.DeepEqual(got.Assignment.Mounts, want.Assignment.Mounts) ||
 				got.Assignment.JITConfig != want.Assignment.JITConfig ||
 				got.Assignment.Env["POSTFLIGHT_EXECUTION_ID"] != want.Assignment.Env["POSTFLIGHT_EXECUTION_ID"] {
 				t.Fatalf("assignment %+v, want %+v", got.Assignment, want.Assignment)
@@ -56,6 +67,14 @@ func TestRoundTrip(t *testing.T) {
 		case KindRunnerStatus:
 			if *got.RunnerStatus != *want.RunnerStatus {
 				t.Fatalf("runner status %+v, want %+v", got.RunnerStatus, want.RunnerStatus)
+			}
+		case KindQuiesce:
+			if *got.Quiesce != *want.Quiesce {
+				t.Fatalf("quiesce %+v, want %+v", got.Quiesce, want.Quiesce)
+			}
+		case KindQuiesceFailed:
+			if *got.QuiesceFailed != *want.QuiesceFailed {
+				t.Fatalf("quiesce-failed %+v, want %+v", got.QuiesceFailed, want.QuiesceFailed)
 			}
 		}
 	}

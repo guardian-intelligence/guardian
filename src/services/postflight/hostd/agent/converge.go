@@ -172,6 +172,14 @@ func (a *Agent) stepLease(ctx context.Context, record *lease, vms *vmView) {
 		case vm.PhaseExited:
 			record.exit = status.ExitCode
 			record.enter(syncproto.StateExited, now)
+			// The workspace is snapshotted after the VM is gone, so the
+			// guest must sync and unmount while it is still alive. A failed
+			// quiesce fails the lease — ambiguity never promotes — and the
+			// failure path still destroys the VM.
+			if err := a.vms.Quiesce(ctx, vm.ID(record.vmID)); err != nil {
+				a.failLease(ctx, record, "quiesce: "+err.Error())
+				return
+			}
 			// Destroy-and-refill: the slot frees as soon as the runner is
 			// done; the workspace volume stays for a possible seal.
 			a.destroyLeaseVM(ctx, record)
@@ -206,9 +214,10 @@ func (a *Agent) stepLease(ctx context.Context, record *lease, vms *vmView) {
 func (a *Agent) assignment(record *lease) vm.Assignment {
 	token := checkoutbundle.DeriveCheckoutToken(a.hostSecret, record.spec.ExecutionID, record.spec.AttemptID)
 	return vm.Assignment{
-		Lease:           record.spec.LeaseID,
-		WorkspaceDevice: record.device,
-		JITConfig:       record.spec.JITConfig,
+		Lease:               record.spec.LeaseID,
+		WorkspaceDevice:     record.device,
+		WorkspaceMountpoint: workspaceMountpoint(record.spec.RepositoryFullName),
+		JITConfig:           record.spec.JITConfig,
 		Env: map[string]string{
 			"POSTFLIGHT_HOST_SERVICE_HTTP_ORIGIN": a.cfg.CheckoutGuestOrigin,
 			"POSTFLIGHT_CHECKOUT_PATH":            a.cfg.CheckoutPath,
@@ -217,6 +226,19 @@ func (a *Agent) assignment(record *lease) vm.Assignment {
 			"POSTFLIGHT_ATTEMPT_ID":               record.spec.AttemptID,
 		},
 	}
+}
+
+// runnerWorkRoot mirrors the golden image's runner install: the runner
+// materializes GITHUB_WORKSPACE at _work/<repo>/<repo>, and the workspace
+// zvol must already be mounted there when the runner starts.
+const runnerWorkRoot = "/opt/actions-runner/_work"
+
+func workspaceMountpoint(repositoryFullName string) string {
+	name := repositoryFullName
+	if i := strings.LastIndexByte(name, '/'); i >= 0 {
+		name = name[i+1:]
+	}
+	return runnerWorkRoot + "/" + name + "/" + name
 }
 
 func (a *Agent) cancelLease(ctx context.Context, record *lease) {

@@ -1,0 +1,33 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "guestd",
+    srcs = [
+        "guestd.go",
+        "runner.go",
+        "system.go",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/guestd",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/services/postflight/hostd/guestproto",
+        "//src/services/postflight/hostd/vsock",
+        "@org_golang_x_sys//unix",
+    ],
+)
+
+go_test(
+    name = "guestd_test",
+    srcs = [
+        "guestd_test.go",
+        "runner_test.go",
+        "system_loopback_test.go",
+        "system_test.go",
+    ],
+    embed = [":guestd"],
+    deps = [
+        "//src/services/postflight/hostd/guestproto",
+        "//src/services/postflight/hostd/vsock",
+        "@org_golang_x_sys//unix",
+    ],
+)

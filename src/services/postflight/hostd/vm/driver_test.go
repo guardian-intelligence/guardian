@@ -102,6 +102,8 @@ type scriptedGuest struct {
 	observation map[ID]GuestObservation
 	cids        map[ID]uint32
 	delivered   map[ID][]guestproto.Assignment
+	quiesced    map[ID][]string
+	quiesceErr  error
 }
 
 func newScriptedGuest() *scriptedGuest {
@@ -109,6 +111,7 @@ func newScriptedGuest() *scriptedGuest {
 		observation: map[ID]GuestObservation{},
 		cids:        map[ID]uint32{},
 		delivered:   map[ID][]guestproto.Assignment{},
+		quiesced:    map[ID][]string{},
 	}
 }
 
@@ -127,6 +130,17 @@ func (g *scriptedGuest) Observe(_ context.Context, id ID, cid uint32) (GuestObse
 	return g.observation[id], nil
 }
 
+func (g *scriptedGuest) Quiesce(_ context.Context, id ID, cid uint32, mountpoint string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.cids[id] = cid
+	if g.quiesceErr != nil {
+		return g.quiesceErr
+	}
+	g.quiesced[id] = append(g.quiesced[id], mountpoint)
+	return nil
+}
+
 func (g *scriptedGuest) set(id ID, observation GuestObservation) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -137,6 +151,12 @@ func (g *scriptedGuest) deliveries(id ID) []guestproto.Assignment {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return append([]guestproto.Assignment(nil), g.delivered[id]...)
+}
+
+func (g *scriptedGuest) quiesces(id ID) []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]string(nil), g.quiesced[id]...)
 }
 
 func (g *scriptedGuest) cid(id ID) uint32 {
@@ -451,6 +471,8 @@ func (blockingGuest) Deliver(context.Context, ID, uint32, guestproto.Assignment)
 	return nil
 }
 
+func (blockingGuest) Quiesce(context.Context, ID, uint32, string) error { return nil }
+
 func (blockingGuest) Observe(ctx context.Context, _ ID, _ uint32) (GuestObservation, error) {
 	select {
 	case <-ctx.Done():
@@ -522,10 +544,11 @@ func TestAssignAttachesDeliversAndConverges(t *testing.T) {
 	handler := &qemuHandler{running: true}
 	serveQEMU(t, driver, "vm-a", handler)
 	assignment := Assignment{
-		Lease:           "lease-1",
-		WorkspaceDevice: "/dev/zvol/tank/ws/lease-1",
-		JITConfig:       "jit-blob",
-		Env:             map[string]string{"POSTFLIGHT_EXECUTION_ID": "exec-1"},
+		Lease:               "lease-1",
+		WorkspaceDevice:     "/dev/zvol/tank/ws/lease-1",
+		WorkspaceMountpoint: "/opt/actions-runner/_work/widget/widget",
+		JITConfig:           "jit-blob",
+		Env:                 map[string]string{"POSTFLIGHT_EXECUTION_ID": "exec-1"},
 	}
 	if err := driver.q.Assign(ctx, "vm-a", assignment); err != nil {
 		t.Fatalf("assign: %v", err)
@@ -546,8 +569,25 @@ func TestAssignAttachesDeliversAndConverges(t *testing.T) {
 	if len(deliveries) == 0 {
 		t.Fatal("assignment never delivered")
 	}
-	if deliveries[0].Lease != "lease-1" || deliveries[0].WorkspaceSerial != workspaceNode || deliveries[0].JITConfig != "jit-blob" {
+	if deliveries[0].Lease != "lease-1" || deliveries[0].JITConfig != "jit-blob" {
 		t.Fatalf("delivered %+v", deliveries[0])
+	}
+	if len(deliveries[0].Mounts) != 1 {
+		t.Fatalf("delivered mounts %+v", deliveries[0].Mounts)
+	}
+	mount := deliveries[0].Mounts[0]
+	if mount.Serial != workspaceNode || mount.Filesystem != workspaceFilesystem ||
+		mount.Mountpoint != "/opt/actions-runner/_work/widget/widget" {
+		t.Fatalf("delivered mount %+v", mount)
+	}
+	discard := false
+	for _, option := range mount.Options {
+		if option == "discard" {
+			discard = true
+		}
+	}
+	if !discard {
+		t.Fatalf("mount options %v carry no discard", mount.Options)
 	}
 	record, err := driver.q.readMeta("vm-a")
 	if err != nil {
@@ -558,6 +598,42 @@ func TestAssignAttachesDeliversAndConverges(t *testing.T) {
 	}
 	if err := driver.q.Assign(ctx, "vm-a", Assignment{Lease: "lease-2"}); err == nil {
 		t.Fatal("reassigned a vm to a different lease")
+	}
+}
+
+// TestQuiesceUsesTheAssignedMountpoint: Quiesce reaches the guest with the
+// mountpoint the assignment persisted — including through a driver restart,
+// which only has the meta on disk to go by.
+func TestQuiesceUsesTheAssignedMountpoint(t *testing.T) {
+	root := shortTempDir(t)
+	driver := newTestDriver(t, root)
+	ctx := context.Background()
+	if err := driver.q.Launch(ctx, "vm-a", testClass); err != nil {
+		t.Fatal(err)
+	}
+	if err := driver.q.Quiesce(ctx, "vm-a"); err == nil {
+		t.Fatal("quiesced a vm with no workspace")
+	}
+	if err := driver.q.Quiesce(ctx, "nope"); err != ErrNotFound {
+		t.Fatalf("error %v, want ErrNotFound", err)
+	}
+	serveQEMU(t, driver, "vm-a", &qemuHandler{running: true})
+	assignment := Assignment{
+		Lease:               "lease-1",
+		WorkspaceDevice:     "/dev/zvol/tank/ws/lease-1",
+		WorkspaceMountpoint: "/opt/actions-runner/_work/widget/widget",
+	}
+	if err := driver.q.Assign(ctx, "vm-a", assignment); err != nil {
+		t.Fatal(err)
+	}
+
+	second := newTestDriver(t, root)
+	second.launcher.setAlive("vm-a", true)
+	if err := second.q.Quiesce(ctx, "vm-a"); err != nil {
+		t.Fatalf("quiesce: %v", err)
+	}
+	if got := second.guest.quiesces("vm-a"); len(got) != 1 || got[0] != assignment.WorkspaceMountpoint {
+		t.Fatalf("quiesced %v, want the assigned mountpoint", got)
 	}
 }
 

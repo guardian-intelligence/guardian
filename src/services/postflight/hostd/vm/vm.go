@@ -58,6 +58,9 @@ type Assignment struct {
 	// WorkspaceDevice is the host block device to hot-attach; it appears in
 	// the guest under a stable serial so the mount is deterministic.
 	WorkspaceDevice string
+	// WorkspaceMountpoint is where the guest mounts the workspace, and the
+	// filesystem a later Quiesce syncs and unmounts.
+	WorkspaceMountpoint string
 	// JITConfig is the encoded single-use runner registration blob.
 	JITConfig string
 	// Env is the runner environment (POSTFLIGHT_* checkout variables).
@@ -83,6 +86,10 @@ type Driver interface {
 	Status(ctx context.Context, id ID) (Status, error)
 	// List reports every VM the driver knows on this host.
 	List(ctx context.Context) ([]Status, error)
+	// Quiesce asks the guest to sync and unmount its workspace ahead of the
+	// host-side seal snapshot. Nil only when the guest confirmed; any other
+	// outcome skips the seal — ambiguity never promotes.
+	Quiesce(ctx context.Context, id ID) error
 	// Destroy tears a VM down (destroy-and-refill; never reuse). Idempotent:
 	// destroying an absent VM succeeds.
 	Destroy(ctx context.Context, id ID) error
