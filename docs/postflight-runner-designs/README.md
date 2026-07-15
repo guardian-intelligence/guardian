@@ -63,7 +63,7 @@ plane changes are inert behind the existing `SCHEDULER_ENABLED` /
 - [ ] `cmd/hostd` running under systemd on the tracer host, synced, slots visible in `host_slots`
 - [ ] Demo repo workflow using the custom checkout action
 - [ ] One dispatch → green with zero manual steps (webhook → demand → lease → JIT → VM → checkout → build+test → seal → promote)
-- [ ] Second dispatch of the same job clones the promoted generation (warm checkout, delta fetch only)
+- [ ] Second dispatch of the same job clones the promoted generation (warm checkout, zero bundle bytes served)
 - [ ] Hammer run: ≥50 dispatches across burst/sustained/cancel patterns, all assertions pass
 - [ ] Timings (pickup/exec/seal p50/p90/p100) and per-generation NVMe stats recorded in the hammer report
 - [ ] This directory deleted

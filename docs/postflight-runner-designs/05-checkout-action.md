@@ -13,12 +13,23 @@ the scope's current generation at claim and guestd mounted it at
 `$GITHUB_WORKSPACE` before the runner started (01's convergence invariant).
 So the action is deliberately thin git plumbing, not a mount manager:
 
-1. Assert the workspace is the mounted zvol (guestd writes a marker file;
-   fail loud if absent — this action only supports our runners in this pass).
-2. If `.git` exists (warm lineage): `git fetch` the delta for the job's SHA
-   from the host-local checkout-bundle server (merged `hostd/checkoutbundle`,
-   reachable on the host-local network), then `git checkout --force <sha>`.
-3. Cold (empty zvol): full clone via the same bundle server, checkout `<sha>`.
+1. Assert the workspace is the mounted zvol: guestd writes a marker file
+   after mount convergence and exports its path in the runner env as
+   `POSTFLIGHT_WORKSPACE_READY_FILE` (01 wires it); fail loud if either
+   half is absent — this action only supports our runners in this pass.
+2. If the job's SHA is already in the workspace object store (warm rerun):
+   no network at all, straight to `git checkout --force <sha>`.
+3. Otherwise (cold, or warm at a new SHA): fetch the SHA's single-commit
+   pack closure from the host-local checkout-bundle server (merged
+   `hostd/checkoutbundle` — a per-SHA closure cache; it does not speak the
+   git wire protocol, so there is no client-side delta negotiation — the
+   delta economy lives host-side in the mirror's incremental origin fetch),
+   `git index-pack` it, record the commit in `.git/shallow` when its
+   parents are absent (depth-1 semantics: `git log`/`rev-list`/`describe`
+   behave exactly as under stock `actions/checkout`), then
+   `git checkout --force <sha>`. A foreground `git gc --auto` (pack limit
+   4) after each fetch bounds pack accretion across the sealed lineage;
+   superseded closures age out via git's default expiry.
 4. No cleaning layers beyond `checkout --force` for tracked files. Stale
    generated/ignored files persisting across runs is a **documented customer
    tradeoff** (ruled 2026-07-15): huge time savings, reinvest a little into
@@ -58,5 +69,7 @@ logs in the Actions UI are the observability surface for the pass.
 ## Testing
 
 - Action unit tests run in the demo repo (node, no Bazel).
-- The e2e proof is 06: warm run must show delta-fetch only (bundle server
-  logs + timing), cold run must show full clone, both green.
+- The e2e proof is 06: a warm rerun of an already-fetched SHA must serve
+  zero bundle bytes, a warm run at a new SHA exactly one host-local pack
+  (bundle-server bytes-served + cache-hit counters attest it), a cold run
+  a full closure, all green.
