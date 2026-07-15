@@ -1,0 +1,15 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+sh_test(
+    name = "image_test",
+    size = "small",
+    srcs = ["image_test.sh"],
+    args = [
+        "$(rootpath build.sh)",
+        "$(rootpath pins.env)",
+    ],
+    data = [
+        "build.sh",
+        "pins.env",
+    ],
+)
