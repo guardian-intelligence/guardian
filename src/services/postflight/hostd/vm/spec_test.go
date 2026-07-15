@@ -41,6 +41,48 @@ func TestArgvGolden(t *testing.T) {
 	}
 }
 
+// TestArgvUserNetwork pins the two-arg libslirp NIC appended for the user
+// egress datapath, and that it lands after the vsock device so the base
+// shape is unchanged.
+func TestArgvUserNetwork(t *testing.T) {
+	spec := LaunchSpec{
+		QEMUPath:     "/usr/bin/qemu-system-x86_64",
+		ID:           "pool-0001",
+		CPUs:         4,
+		MemoryMiB:    16384,
+		RootDevice:   "/dev/zvol/tank/postflight/vm-pool-0001",
+		StateDir:     "/var/lib/hostd/vms/pool-0001",
+		VsockCID:     3,
+		GuestNetwork: "user",
+	}
+	got := spec.Argv()
+	tail := strings.Join(got[len(got)-4:], "\n")
+	want := strings.Join([]string{
+		"-netdev", "user,id=net0",
+		"-device", "virtio-net-pci,netdev=net0",
+	}, "\n")
+	if tail != want {
+		t.Fatalf("user NIC argv drifted:\n--- got ---\n%s\n--- want ---\n%s", tail, want)
+	}
+	// The NIC only appends: the base shape must be byte-identical to the
+	// networkless argv, so a user-mode VM measures the same up to its NIC.
+	base := spec
+	base.GuestNetwork = "none"
+	if head := strings.Join(got[:len(got)-4], "\n"); head != strings.Join(base.Argv(), "\n") {
+		t.Fatalf("user NIC changed the base argv shape:\n%s", head)
+	}
+}
+
+// TestArgvNoNetworkByDefault: an unset or none datapath attaches no NIC.
+func TestArgvNoNetworkByDefault(t *testing.T) {
+	for _, mode := range []string{"", "none"} {
+		spec := LaunchSpec{QEMUPath: "q", ID: "x", CPUs: 1, MemoryMiB: 1, RootDevice: "d", StateDir: "s", VsockCID: 1, GuestNetwork: mode}
+		if strings.Contains(strings.Join(spec.Argv(), " "), "netdev") {
+			t.Fatalf("mode %q attached a NIC", mode)
+		}
+	}
+}
+
 // TestArgvDeterminism: same spec, same bytes, every time.
 func TestArgvDeterminism(t *testing.T) {
 	spec := LaunchSpec{

@@ -18,10 +18,17 @@
 //	HOSTD_MEMORY_MIB              memory per VM (default 16384)
 //	HOSTD_QEMU_PATH               QEMU binary (default /usr/bin/qemu-system-x86_64)
 //	HOSTD_SYNC_INTERVAL           sync cadence when the control plane does not suggest one (default 2s)
-//	HOSTD_CHECKOUT_LISTEN_ADDR    checkout endpoint bind (default 127.0.0.1:8480; the endpoint
-//	                              carries tenant GitHub tokens over plaintext HTTP, so binding
-//	                              the guest-facing bridge is a deliberate choice, not a default)
-//	HOSTD_CHECKOUT_GUEST_ORIGIN   the same endpoint as guests reach it, e.g. http://10.77.0.1:8480
+//	HOSTD_GUEST_NETWORK           guest egress datapath: none (default) or user. user is the
+//	                              tracer-only libslirp datapath: unrestricted outbound from the
+//	                              host's network position, and the guest reaches every host
+//	                              loopback service via the 10.0.2.2 gateway. The production lane
+//	                              is a filtered bridge; do not expose untrusted guests under user.
+//	HOSTD_CHECKOUT_LISTEN_ADDR    checkout endpoint bind (default 127.0.0.1:8480). It carries
+//	                              tenant GitHub tokens over plaintext HTTP; under GUEST_NETWORK=user
+//	                              the loopback bind is itself guest-reachable (via 10.0.2.2), which
+//	                              is how the guest checkout action reaches it.
+//	HOSTD_CHECKOUT_GUEST_ORIGIN   the same endpoint as guests reach it, e.g. http://10.0.2.2:8480
+//	                              (user datapath) or the bridge address http://10.77.0.1:8480
 //
 // Install (one-time, per plain-Ubuntu runner host):
 //
@@ -73,13 +80,14 @@ func run(logger *slog.Logger) error {
 	class := vm.Class(cfg.class)
 	image := cfg.pool + "/images/" + cfg.imageID + "@golden"
 	vms, err := vm.NewQEMU(vm.Config{
-		StateRoot:   filepath.Join(cfg.stateDir, "vm"),
-		QEMUPath:    cfg.qemuPath,
-		DatasetRoot: cfg.pool,
-		Classes:     map[vm.Class]vm.ClassConfig{class: {CPUs: cfg.cpus, MemoryMiB: cfg.memoryMiB, Image: image}},
-		Launcher:    vm.NewSystemdLauncher(),
-		Guest:       vm.NewVsockGuest(),
-		Logger:      logger,
+		StateRoot:    filepath.Join(cfg.stateDir, "vm"),
+		QEMUPath:     cfg.qemuPath,
+		DatasetRoot:  cfg.pool,
+		Classes:      map[vm.Class]vm.ClassConfig{class: {CPUs: cfg.cpus, MemoryMiB: cfg.memoryMiB, Image: image}},
+		Launcher:     vm.NewSystemdLauncher(),
+		Guest:        vm.NewVsockGuest(),
+		GuestNetwork: cfg.guestNetwork,
+		Logger:       logger,
 	})
 	if err != nil {
 		return err

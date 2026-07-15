@@ -22,6 +22,10 @@ const workspaceDevice = "dev-" + workspaceNode
 // workspaceFilesystem is what the guest creates on a blank workspace zvol.
 const workspaceFilesystem = "ext4"
 
+// guestNetworkUser is the LaunchSpec.GuestNetwork value selecting a
+// libslirp user-mode NIC.
+const guestNetworkUser = "user"
+
 // workspaceMountOptions shape the guest-side mount. discard is load-bearing:
 // TRIM must pass through to the sparse zvol or NVMe accounting measures
 // garbage retention.
@@ -36,6 +40,12 @@ type LaunchSpec struct {
 	RootDevice string
 	StateDir   string
 	VsockCID   uint32
+	// GuestNetwork selects the guest's egress datapath. "" or "none" attaches
+	// no NIC (the guestd control channel is vsock, which needs none); "user"
+	// attaches a libslirp user-mode NIC giving the runner NAT egress to GitHub
+	// and reaching host services via the 10.0.2.2 gateway. The static shape
+	// keeps argv deterministic.
+	GuestNetwork string
 }
 
 func qmpSocketPath(stateDir string) string { return filepath.Join(stateDir, "qmp.sock") }
@@ -49,7 +59,7 @@ func serialLogPath(stateDir string) string { return filepath.Join(stateDir, "ser
 // (-daemonize, -pidfile) are deliberately absent: the Launcher owns the
 // process lifetime.
 func (s LaunchSpec) Argv() []string {
-	return []string{
+	argv := []string{
 		s.QEMUPath,
 		"-nodefaults",
 		"-machine", machineType + ",accel=kvm",
@@ -67,4 +77,11 @@ func (s LaunchSpec) Argv() []string {
 		"-device", "virtio-rng-pci",
 		"-device", "vhost-vsock-pci,guest-cid=" + strconv.FormatUint(uint64(s.VsockCID), 10),
 	}
+	if s.GuestNetwork == guestNetworkUser {
+		argv = append(argv,
+			"-netdev", "user,id=net0",
+			"-device", "virtio-net-pci,netdev=net0",
+		)
+	}
+	return argv
 }

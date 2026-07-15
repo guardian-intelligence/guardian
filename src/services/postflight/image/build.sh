@@ -297,18 +297,20 @@ in_chroot apt-get -q -y --purge autoremove
 rm -rf "${mnt}/etc/cloud" "${mnt}/var/lib/cloud" "${mnt}/etc/ssh"
 
 # Configuration never arrives over network or metadata, but the runner still
-# needs egress to GitHub, so any NIC the host attaches just DHCPs.
-install -d -m 0755 "${mnt}/etc/netplan"
-cat >"${mnt}/etc/netplan/10-postflight.yaml" <<'EOF'
-network:
-  version: 2
-  ethernets:
-    all:
-      match:
-        name: "en*"
-      dhcp4: true
+# needs egress to GitHub, so any NIC the host attaches just DHCPs. The minimal
+# cloud image ships no netplan, so networkd is configured natively; matching by
+# link type catches the NIC whatever the host names it.
+install -d -m 0755 "${mnt}/etc/systemd/network"
+cat >"${mnt}/etc/systemd/network/10-postflight.network" <<'EOF'
+[Match]
+Type=ether
+
+[Network]
+DHCP=yes
 EOF
-chmod 0600 "${mnt}/etc/netplan/10-postflight.yaml"
+# cloud-init used to bring the stack up; with it purged, networkd (address +
+# routes) and resolved (DNS from the DHCP lease) must be enabled explicitly.
+in_chroot systemctl enable systemd-networkd.service systemd-resolved.service
 
 in_chroot apt-get -q clean
 rm -rf "${mnt}/var/lib/apt/lists/"*
