@@ -193,7 +193,9 @@ func (l *listener) Accept() (net.Conn, error) {
 				remote = Addr{CID: vm.CID, Port: vm.Port}
 			}
 			return true
-		case unix.EAGAIN, unix.EINTR:
+		case unix.EAGAIN, unix.EINTR, unix.ECONNABORTED:
+			// ECONNABORTED: the peer gave up mid-handshake — retry, it must
+			// not surface as a listener failure.
 			return false
 		default:
 			acceptErr = err

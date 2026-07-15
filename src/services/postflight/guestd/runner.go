@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -83,6 +84,12 @@ func ExecRunner(root, username string, logger *slog.Logger) RunRunner {
 				seen[e] = true
 				event(e)
 			}
+		}
+		if err := scanner.Err(); err != nil {
+			// The scan stopped (an over-long line, most likely) but the pipe
+			// must keep draining or the runner blocks on a full buffer.
+			logger.Warn("runner output scan stopped", "err", err)
+			_, _ = io.Copy(io.Discard, read)
 		}
 		read.Close()
 

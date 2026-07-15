@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/guestproto"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vsock"
@@ -46,7 +47,7 @@ func (g *VsockGuest) Deliver(ctx context.Context, id ID, cid uint32, assignment 
 	if err := channel.awaitHello(ctx); err != nil {
 		return fmt.Errorf("vm: guest %s never said hello: %w", id, err)
 	}
-	return channel.write(guestproto.Message{Kind: guestproto.KindAssignment, Assignment: &assignment})
+	return channel.write(ctx, guestproto.Message{Kind: guestproto.KindAssignment, Assignment: &assignment})
 }
 
 // Observe implements Guest.
@@ -75,9 +76,8 @@ func (g *VsockGuest) Quiesce(ctx context.Context, id ID, cid uint32, mountpoint 
 		return fmt.Errorf("vm: quiesce %s: %w", id, err)
 	}
 	message := guestproto.Message{Kind: guestproto.KindQuiesce, Quiesce: &guestproto.Quiesce{Mountpoint: mountpoint}}
-	if err := channel.write(message); err != nil {
-		channel.resolveQuiesce(err)
-		<-reply
+	if err := channel.write(ctx, message); err != nil {
+		channel.abandonQuiesce(reply)
 		return fmt.Errorf("vm: quiesce %s: %w", id, err)
 	}
 	select {
@@ -87,6 +87,9 @@ func (g *VsockGuest) Quiesce(ctx context.Context, id ID, cid uint32, mountpoint 
 		}
 		return nil
 	case <-ctx.Done():
+		// Free the reply slot: the lease is failing anyway, and a stale
+		// claim must not poison a later quiesce on this channel.
+		channel.abandonQuiesce(reply)
 		return fmt.Errorf("vm: quiesce %s: %w", id, ctx.Err())
 	}
 }
@@ -279,13 +282,31 @@ func (c *guestChannel) resolveQuiesce(err error) {
 	}
 }
 
-func (c *guestChannel) write(message guestproto.Message) error {
+// abandonQuiesce releases a claimed reply slot whose waiter gave up; a late
+// reply then resolves into nothing instead of a stale claim blocking the
+// next quiesce.
+func (c *guestChannel) abandonQuiesce(pending chan error) {
+	c.mu.Lock()
+	if c.pending == pending {
+		c.pending = nil
+	}
+	c.mu.Unlock()
+}
+
+// write frames one message under the context's deadline. The bound matters:
+// a guest that stopped reading must not wedge the caller — and with it the
+// driver mutex — on a full socket buffer.
+func (c *guestChannel) write(ctx context.Context, message guestproto.Message) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 	select {
 	case <-c.dead:
 		return c.failed()
 	default:
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = c.conn.SetWriteDeadline(deadline)
+		defer c.conn.SetWriteDeadline(time.Time{})
 	}
 	return guestproto.NewEncoder(c.conn).Write(message)
 }
