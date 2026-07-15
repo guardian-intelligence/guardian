@@ -453,8 +453,14 @@ func generationScope(g generationRow) string {
 	return g.HostID + "/" + g.RunnerClass
 }
 
+func scopeLabel(s scopeRow) string {
+	return fmt.Sprintf("%s (%s/%s %s)", s.ScopeID, s.Org, s.Repo, s.JobName)
+}
+
 // Assertion 6: generation lifecycle invariants in the final catalog state —
-// at most one current per scope, every candidate resolved within the horizon.
+// every scope pointer names a committed generation, every committed
+// generation is exactly one scope's pointer, and every candidate resolved
+// within the horizon.
 func assertGenerationInvariants(st *stateFile) assertionResult {
 	res := assertionResult{Name: "generation lifecycle invariants", Pass: true}
 	if st.DB == nil || st.DB.Final == nil {
@@ -464,19 +470,35 @@ func assertGenerationInvariants(st *stateFile) assertionResult {
 	now := final.CapturedAt
 	var problems []string
 
-	currents := map[string][]string{}
+	states := map[string]string{}
 	for _, g := range final.Generations {
-		if g.State == "current" {
-			scope := generationScope(g)
-			currents[scope] = append(currents[scope], g.Generation)
-		}
+		states[g.Generation] = g.State
 		if g.State == "candidate" && now.Sub(g.CreatedAt) > readyDeadlineBound {
 			problems = append(problems, fmt.Sprintf("generation %s: candidate unresolved since %s", g.Generation, g.CreatedAt.Format(time.RFC3339)))
 		}
 	}
-	for scope, gens := range currents {
-		if len(gens) > 1 {
-			problems = append(problems, fmt.Sprintf("scope %s has %d current generations: %s", scope, len(gens), strings.Join(gens, ", ")))
+	pointers := map[string][]string{}
+	for _, s := range final.Scopes {
+		if s.CurrentGeneration == "" {
+			continue
+		}
+		label := scopeLabel(s)
+		pointers[s.CurrentGeneration] = append(pointers[s.CurrentGeneration], label)
+		switch state, known := states[s.CurrentGeneration]; {
+		case !known:
+			problems = append(problems, fmt.Sprintf("scope %s points at missing generation %s", label, s.CurrentGeneration))
+		case state != "committed":
+			problems = append(problems, fmt.Sprintf("scope %s points at generation %s in state %s", label, s.CurrentGeneration, state))
+		}
+	}
+	for _, g := range final.Generations {
+		if g.State != "committed" {
+			continue
+		}
+		if refs := pointers[g.Generation]; len(refs) == 0 {
+			problems = append(problems, fmt.Sprintf("committed generation %s is no scope's current pointer", g.Generation))
+		} else if len(refs) > 1 {
+			problems = append(problems, fmt.Sprintf("generation %s is the current pointer of %d scopes: %s", g.Generation, len(refs), strings.Join(refs, ", ")))
 		}
 	}
 	if len(problems) > 0 {

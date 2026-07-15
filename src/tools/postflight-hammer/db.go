@@ -59,6 +59,19 @@ type leaseRow struct {
 	UpdatedAt           time.Time `json:"updated_at"`
 }
 
+type scopeRow struct {
+	ScopeID           string `json:"scope_id"`
+	Org               string `json:"org"`
+	Repo              string `json:"repo"`
+	ScopeRef          string `json:"scope_ref"`
+	WorkflowPath      string `json:"workflow_path"`
+	JobName           string `json:"job_name"`
+	MatrixKey         string `json:"matrix_key"`
+	RunnerClass       string `json:"runner_class"`
+	CurrentGeneration string `json:"current_generation"`
+	HomeHostID        string `json:"home_host_id"`
+}
+
 type generationRow struct {
 	Generation  string    `json:"generation"`
 	HostID      string    `json:"host_id"`
@@ -186,6 +199,29 @@ func (d *dbClient) DeliveriesSince(ctx context.Context, since time.Time) (map[st
 	return out, rows.Err()
 }
 
+const sqlScopes = `
+SELECT scope_id, org, repo, scope_ref, workflow_path, job_name, matrix_key,
+    runner_class, COALESCE(current_generation_id, ''), home_host_id
+FROM workspace_scopes ORDER BY org, repo, workflow_path, job_name, matrix_key, runner_class`
+
+func (d *dbClient) Scopes(ctx context.Context) ([]scopeRow, error) {
+	rows, err := d.pool.Query(ctx, sqlScopes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []scopeRow
+	for rows.Next() {
+		var s scopeRow
+		if err := rows.Scan(&s.ScopeID, &s.Org, &s.Repo, &s.ScopeRef, &s.WorkflowPath,
+			&s.JobName, &s.MatrixKey, &s.RunnerClass, &s.CurrentGeneration, &s.HomeHostID); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
 const sqlGenerations = `
 SELECT generation, host_id, runner_class, state, bytes, pinned, created_at, updated_at
 FROM workspace_generations ORDER BY created_at, generation`
@@ -213,6 +249,10 @@ func (d *dbClient) Snapshot(ctx context.Context) (*dbSnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	scopes, err := d.Scopes(ctx)
+	if err != nil {
+		return nil, err
+	}
 	generations, err := d.Generations(ctx)
 	if err != nil {
 		return nil, err
@@ -220,6 +260,7 @@ func (d *dbClient) Snapshot(ctx context.Context) (*dbSnapshot, error) {
 	return &dbSnapshot{
 		CapturedAt:  time.Now().UTC(),
 		Slots:       slots,
+		Scopes:      scopes,
 		Generations: generations,
 	}, nil
 }
