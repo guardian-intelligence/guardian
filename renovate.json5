@@ -118,22 +118,21 @@
       ],
     },
 
-    // The @voidzero-dev vite-plus family ships in lockstep and must share one
-    // version. The pnpm catalog hides three of its packages behind aliases —
-    // `vite` -> @voidzero-dev/vite-plus-core, `vitest` ->
-    // @voidzero-dev/vite-plus-test, and the plain `vite-plus` meta package —
-    // so Renovate sees three independent deps and splits the release across
-    // PRs that land at different times. A split (e.g. core ahead of the meta
-    // package) breaks the genrule build: `vp` cannot find its matching test
-    // package. Group them so one version moves in one PR. Matched by package
-    // name, not the `vite`/`vitest` alias keys, to avoid catching the real
-    // vite bundler catalogued separately as `vite@>=8.0.0 <=8.0.15`.
+    // The @voidzero-dev vite-plus packages are one toolchain but the pnpm
+    // catalog hides them behind aliases — `vite` -> @voidzero-dev/vite-plus-core,
+    // `vitest` -> @voidzero-dev/vite-plus-test, and the plain `vite-plus` meta
+    // package — so Renovate proposes them as unrelated deps in separate PRs
+    // (core landed at 0.2.4 in one PR while the meta package sat at 0.1.24 in
+    // another). Group them so a reviewer sees the whole toolchain move at once
+    // instead of reconstructing it from scattered PRs. Matched by package name,
+    // not the `vite`/`vitest` alias keys, to avoid catching the real vite
+    // bundler catalogued separately as `vite@>=8.0.0 <=8.0.15`.
     {
       matchPackageNames: ["@voidzero-dev/**", "vite-plus"],
       groupName: "vite-plus (voidzero) toolchain",
       addLabels: ["viteplus-toolchain"],
       prBodyNotes: [
-        "The vite-plus family moves as one version. The four `@voidzero-dev+vite-plus-linux-x64-gnu@<version>/dir` binding paths hardcoded in src/products/viteplus-monorepo/**/BUILD.bazel are not lockfile entries — Renovate cannot rewrite them, so bump them to the new version in this PR or the viteplus build stays red.",
+        "vite-plus, its `-core` (aliased `vite`), and its `-test` (aliased `vitest`) do not share one version line: `-core` tracks the meta package, but the meta package's minor bumps can be breaking migrations (0.2.x drops the bundled `@voidzero-dev/vite-plus-test` for upstream `vitest`, so the catalog alias must be reworked, not version-bumped). Treat a grouped bump as a migration checkpoint, never an automerge. Also bump the four `@voidzero-dev+vite-plus-linux-x64-gnu@<version>/dir` binding paths hardcoded in src/products/viteplus-monorepo/**/BUILD.bazel — Renovate cannot see them and the build stays red until they match.",
       ],
     },
 
