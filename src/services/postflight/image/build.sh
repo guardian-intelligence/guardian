@@ -309,6 +309,9 @@ network:
       dhcp4: true
 EOF
 chmod 0600 "${mnt}/etc/netplan/10-postflight.yaml"
+# cloud-init used to bring networkd up; with it purged the renderer must be
+# enabled explicitly or the netplan config never takes effect.
+in_chroot systemctl enable systemd-networkd.service
 
 in_chroot apt-get -q clean
 rm -rf "${mnt}/var/lib/apt/lists/"*

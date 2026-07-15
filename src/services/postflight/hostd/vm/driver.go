@@ -64,8 +64,10 @@ type Config struct {
 	// Launcher supervises the QEMU processes.
 	Launcher Launcher
 	// Guest is the guestd channel seam.
-	Guest  Guest
-	Logger *slog.Logger
+	Guest Guest
+	// GuestNetwork selects every VM's egress datapath (see LaunchSpec).
+	GuestNetwork string
+	Logger       *slog.Logger
 }
 
 func (c *Config) validate() error {
@@ -209,13 +211,14 @@ func (q *QEMU) Launch(ctx context.Context, id ID, class Class) error {
 	dir := q.stateDir(id)
 	dataset := q.rootDataset(id)
 	spec := LaunchSpec{
-		QEMUPath:   q.cfg.QEMUPath,
-		ID:         id,
-		CPUs:       shape.CPUs,
-		MemoryMiB:  shape.MemoryMiB,
-		RootDevice: zvolDevicePath(dataset),
-		StateDir:   dir,
-		VsockCID:   cid,
+		QEMUPath:     q.cfg.QEMUPath,
+		ID:           id,
+		CPUs:         shape.CPUs,
+		MemoryMiB:    shape.MemoryMiB,
+		RootDevice:   zvolDevicePath(dataset),
+		StateDir:     dir,
+		VsockCID:     cid,
+		GuestNetwork: q.cfg.GuestNetwork,
 	}
 	argv := spec.Argv()
 	if err := os.MkdirAll(dir, 0o750); err != nil {

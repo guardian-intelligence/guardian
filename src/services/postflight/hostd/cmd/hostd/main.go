@@ -18,6 +18,8 @@
 //	HOSTD_MEMORY_MIB              memory per VM (default 16384)
 //	HOSTD_QEMU_PATH               QEMU binary (default /usr/bin/qemu-system-x86_64)
 //	HOSTD_SYNC_INTERVAL           sync cadence when the control plane does not suggest one (default 2s)
+//	HOSTD_GUEST_NETWORK           guest egress datapath: none (default) or user (libslirp NAT egress
+//	                              to GitHub, reaching host services via the 10.0.2.2 gateway)
 //	HOSTD_CHECKOUT_LISTEN_ADDR    checkout endpoint bind (default 127.0.0.1:8480; the endpoint
 //	                              carries tenant GitHub tokens over plaintext HTTP, so binding
 //	                              the guest-facing bridge is a deliberate choice, not a default)
@@ -73,13 +75,14 @@ func run(logger *slog.Logger) error {
 	class := vm.Class(cfg.class)
 	image := cfg.pool + "/images/" + cfg.imageID + "@golden"
 	vms, err := vm.NewQEMU(vm.Config{
-		StateRoot:   filepath.Join(cfg.stateDir, "vm"),
-		QEMUPath:    cfg.qemuPath,
-		DatasetRoot: cfg.pool,
-		Classes:     map[vm.Class]vm.ClassConfig{class: {CPUs: cfg.cpus, MemoryMiB: cfg.memoryMiB, Image: image}},
-		Launcher:    vm.NewSystemdLauncher(),
-		Guest:       vm.NewVsockGuest(),
-		Logger:      logger,
+		StateRoot:    filepath.Join(cfg.stateDir, "vm"),
+		QEMUPath:     cfg.qemuPath,
+		DatasetRoot:  cfg.pool,
+		Classes:      map[vm.Class]vm.ClassConfig{class: {CPUs: cfg.cpus, MemoryMiB: cfg.memoryMiB, Image: image}},
+		Launcher:     vm.NewSystemdLauncher(),
+		Guest:        vm.NewVsockGuest(),
+		GuestNetwork: cfg.guestNetwork,
+		Logger:       logger,
 	})
 	if err != nil {
 		return err

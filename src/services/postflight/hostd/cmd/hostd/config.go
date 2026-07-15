@@ -25,6 +25,7 @@ type config struct {
 	memoryMiB      int
 	qemuPath       string
 	syncInterval   time.Duration
+	guestNetwork   string
 
 	checkoutListenAddr  string
 	checkoutGuestOrigin string
@@ -79,8 +80,14 @@ func loadConfig() (config, error) {
 		memoryMiB:           positiveInt("HOSTD_MEMORY_MIB", "16384"),
 		qemuPath:            envOr("HOSTD_QEMU_PATH", "/usr/bin/qemu-system-x86_64"),
 		syncInterval:        duration("HOSTD_SYNC_INTERVAL", "2s"),
+		guestNetwork:        envOr("HOSTD_GUEST_NETWORK", "none"),
 		checkoutListenAddr:  envOr("HOSTD_CHECKOUT_LISTEN_ADDR", "127.0.0.1:8480"),
 		checkoutGuestOrigin: required("HOSTD_CHECKOUT_GUEST_ORIGIN"),
+	}
+	switch cfg.guestNetwork {
+	case "none", "user":
+	default:
+		errs = append(errs, fmt.Errorf("HOSTD_GUEST_NETWORK: %q is not none or user", cfg.guestNetwork))
 	}
 	if len(errs) > 0 {
 		return cfg, errors.Join(errs...)
