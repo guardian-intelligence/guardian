@@ -72,8 +72,8 @@ subscriptions.
 ## guardian-platform-app
 
 This is the default identity for GitHub-facing platform automation. Its
-private key is custody-held, and consumers exchange App JWTs for one-hour
-installation tokens. The credentials and exception policy are documented in
+private key lives in OpenBao, and consumers exchange App JWTs minted by the
+in-cluster minter endpoint for one-hour installation tokens. The credentials and exception policy are documented in
 [GitHub credentials: one App, short-lived tokens](docs/secrets.md#github-credentials-one-app-short-lived-tokens).
 
 No repository consumer currently references this App's ID or private key.

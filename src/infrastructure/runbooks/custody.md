@@ -1,14 +1,14 @@
 # Custody bundle lifecycle
 
-The custody bundle is secret-zero: the set of credentials that controls the
-company and that no system the cluster controls may ever hold in full. Since
-`aspect infra custody` shipped, the **encrypted restic repository is the only
-at-rest form** of these files. Plaintext exists in exactly one place — the
-tmpfs bundle directory `/dev/shm/guardian-custody` — and only between an
-explicit `restore` and an explicit `wipe`. The repo tree and the operator
-home hold no plaintext custody material; the pre-commit and CI secret scans
-treat any custody-shaped file inside the workspace as a failure, gitignored
-or not.
+The custody bundle is the irreducible root of trust: the members whose
+*changes* require reading them, which is exactly why no write-only path can
+replace it. It holds nothing routine — every other secret class lives in a
+tier with an open write path (`docs/secrets.md`). The encrypted restic
+repository is the only at-rest form; plaintext exists in exactly one place —
+the tmpfs bundle directory `/dev/shm/guardian-custody` — and only between an
+explicit `restore` and an explicit `wipe`, during a ceremony. The pre-commit
+and CI secret scans treat any custody-shaped file inside the workspace as a
+failure, gitignored or not.
 
 ## What is in the bundle
 
@@ -16,71 +16,56 @@ The manifest lives in `src/infrastructure/cmd/custody/main.go` and `create`
 fails closed: a bundle missing any required member is refused, because a
 bundle that would be trusted and useless is worse than none.
 
-| bundle path | required | what it is |
-| --- | --- | --- |
-| `talm/secrets.yaml` | yes | Talos genesis secrets (machine/k8s/etcd CAs, service-account keys) |
-| `talm/talm.key` | yes | age key decrypting the `.encrypted` Talm variants |
-| `talm/talosconfig` | yes | Talos API client credentials |
-| `openbao/unseal-<sha256>.key` | yes | OpenBao static-seal key; content hash must match the filename fingerprint |
-| `openbao/metadata.json` | yes | seal-key metadata |
-| `custody.env` | yes | operator env keys (importer source of truth) |
-| `keys/*`, `latitude.token` | no | provider keys — re-issuable through consoles, but their presence sets DR speed |
-
-Not yet in the manifest: OpenBao `transit/backup` keyring exports — none
-exist (no durable Transit consumer ships yet). The cold-boot runbook already
-gates the first durable Transit key on custody replication being in place;
-that PR must add the export as a required manifest member here.
+| bundle path | what it is |
+| --- | --- |
+| `talm/secrets.yaml` | Talos genesis secrets (machine/k8s/etcd CAs, service-account keys) |
+| `talm/talm.key` | age key decrypting the `.encrypted` Talm variants |
+| `talm/talosconfig` | Talos API client credentials |
+| `openbao/unseal-<sha256>.key` | OpenBao static-seal key; content hash must match the filename fingerprint |
+| `openbao/metadata.json` | seal-key metadata |
 
 Deliberately excluded: minted kubeconfigs (re-derivable from `talosconfig`,
 and including them would replicate live credentials), the `.encrypted` Talm
 variants (ciphertext derivable from the plaintext + `talm.key`), drill logs,
 and the custody README (it is the *locations* log and must stay readable
-without the bundle password).
+without the bundle password). Operational values — provider keys, R2
+credentials, integration secrets — live in the bootstrap set and OpenBao
+(`docs/secrets.md`), never here.
+
+## Steady state: sealed
+
+The bundle's resting state is closed, for months at a time. It opens for
+exactly two reasons, and every open pages:
+
+- **Disaster recovery** — the restore chain in `docs/secrets.md` §Disaster
+  recovery and `cold-boot-bootstrap.md`.
+- **Rotation ceremonies** — CA rotation, seal-key rotation: read-modify
+  operations on the root material itself.
+
+`status` nags while a bundle is open; a bundle open outside a ceremony is an
+incident.
 
 ## Lifecycle
 
 All actions run as `aspect infra custody --action <name>`.
 
-- **create** — resolves the manifest (from the open tmpfs bundle if one
-  exists, else from the legacy plaintext locations during
-  migration/genesis), stages on tmpfs, backs up into the repository
-  (`~/.guardian/custody/repo`), runs `restic check`, then closes the loop
-  itself: restores the fresh snapshot to a scratch dir, byte-compares every
-  member against its source, and only on a proven round trip shreds the
-  plaintext sources (including the talm root's minted kubeconfig and
-  `.encrypted` residue). A failed proof leaves every source untouched. Run it after **every custody event**:
-  seal-key rotation, operator-key change, importer env change, CA rotation,
-  new provider key.
+- **create** — stages the manifest on tmpfs, backs it up into the repository
+  (`~/.guardian/custody/repo`), runs `restic check`, restores the fresh
+  snapshot to a scratch dir and byte-compares every member, and only on a
+  proven round trip shreds the plaintext sources. A failed proof leaves
+  every source untouched. It finishes by pushing the repository to the
+  custody prefix of the R2 vault bucket. Run it after every ceremony that
+  changes root material.
 - **verify** — repository integrity plus a fail-closed check that the latest
   snapshot carries every required member. With `--read-data` it re-reads
-  every pack; run that form against each offline copy where it lives
-  (`--repo /media/<usb>/guardian-custody-repo`).
+  every pack; run that form against each pulled copy where it lives.
 - **restore** — puts the latest snapshot back at `/dev/shm/guardian-custody`
-  and refuses to restore over an open bundle. This is how breakglass and DR
-  get their inputs.
+  and refuses to restore over an open bundle.
 - **wipe** — overwrites and removes the tmpfs bundle. Run it the moment the
-  operation that needed plaintext is done. `status` nags while a bundle is
-  open.
-- **status** — latest-snapshot age (warns past 30 days), open-bundle and
-  plaintext-residue warnings.
+  ceremony is done.
+- **status** — latest-snapshot age, open-bundle and plaintext-residue
+  warnings.
 - **key-add** — adds a second repository password.
-- **env-set / env-unset** — atomic single-key `custody.env` edit:
-  restore-latest → edit → snapshot → prove → wipe. Keys must match
-  `^[a-z0-9_]+$`. The value arrives on **stdin**, which costs you both
-  interactive prompts — the repository password (restic reads EOF from
-  the pipe) and the proceed confirmation. The working shape, from a real
-  terminal, with the bundle NOT already open (`env-set` refuses over an
-  open bundle):
-
-  ```sh
-  read -rs RESTIC_PASSWORD; export RESTIC_PASSWORD
-  <emit value> | aspect infra custody --action env-set --env-key <key> --yes
-  unset RESTIC_PASSWORD
-  ```
-
-  The silent pause after enter is `read` waiting for the password.
-  Success prints `env-set <key>: new snapshot <id>` — no snapshot line
-  means no write, whatever else scrolled by.
 
 ## Passwords
 
@@ -93,32 +78,37 @@ run no escrow. Keep **two** keys on the repository:
 
 Both lost means: cluster alive → rescue through the OIDC admin plane
 (cluster-admin can still read in-cluster state and re-export what the
-cluster holds); cluster dead → reimage and restore from R2, forfeiting
-OpenBao contents. That is the loss-math row you chose to live with — see
-`cold-boot-bootstrap.md` § Custody replication.
+cluster holds); cluster dead → rebuild from scratch and re-issue every
+credential from the owning consoles. That is the loss-math row you chose to
+live with.
 
-## Replication (the operator's half)
+## Replication
 
-After every `create`:
+R2 is the primary offsite replica: `create` pushes the encrypted repository
+there, and the bucket carries object versioning with the custody prefix
+excluded from every lifecycle/expiry rule. The operator's half is the pull
+cadence:
 
-1. Copy the repository to at least two offline media:
-   `cp -a ~/.guardian/custody/repo /media/<usb>/guardian-custody-repo`
-2. Verify each copy where it lives:
+1. Regularly download the repository from R2 to local offline media, so
+   access survives losing the R2 account or reaching it going dark.
+2. Verify each pull where it lives:
    `aspect infra custody --action verify --read-data --repo /media/<usb>/guardian-custody-repo`
-3. Store the media in two physical locations, neither the cluster's
-   datacenter, never co-located with raft snapshots, R2 credentials, or
-   anything else the bundle's keys can decrypt.
+3. Keep pulls physically separate from anything the bundle's keys can
+   decrypt — never co-located with raft snapshots or the machines the CAs
+   control.
 4. Record locations and refresh dates — never contents — in
    `~/guardian-custody/README.md`.
+
+Staleness is tolerable: the members rotate rarely, so even an old pull
+usually carries the current root material. `status` warns past 30 days.
 
 ## Genesis (new cluster from this repo)
 
 `talm gen secrets` mints a fresh secrets bundle; the OpenBao static-seal key
-comes from `openbao_static_seal_key`; provider keys come from the consoles.
-Lay them out (or let the legacy resolution find them), run
-`aspect infra custody --action create`, and do the replication steps before
-the first workload ships. A cluster whose custody exists in one place is one
-disk failure away from the bad row of the loss table.
+comes from `openbao_static_seal_key`; run
+`aspect infra custody --action create` and confirm the R2 push and one local
+pull before the first workload ships. A cluster whose custody exists in one
+place is one disk failure away from the bad row of the loss table.
 
 ## Leak response: custody material touched Git or any external system
 
@@ -141,16 +131,13 @@ leaked:
   OIDC logins are untouched, and the custody bundle is stale: refresh the
   local Talm operator state, verify `aspect infra talos` and a fresh
   `aspect infra auth --platform-admin --reason "post-rotation verification"`,
-  then `create` a new snapshot and refresh both offline copies. Rehearse
-  this before it is needed — it is a drill like any other.
+  then `create` a new snapshot. Rehearse this before it is needed — it is a
+  drill like any other.
 - **the unseal key** — rotate the static seal per
   `openbao-static-seal-self-init.md`, then re-bundle.
-- **`custody.env` keys, provider keys** — revoke and re-issue in the owning
-  console (Cloudflare, GitHub, Latitude), re-import via the importer plan,
-  re-bundle.
 - **the restic repository password** — `restic key add` a new key, `restic
-  key remove` the exposed one, and re-copy the repository to the offline
-  media (old media still honor the removed key's ciphertext — refresh them).
+  key remove` the exposed one, re-push to R2, and refresh the local pulls
+  (old media still honor the removed key's ciphertext).
 
 In every case, finish by writing down what leaked, when, and what was
 rotated in `~/guardian-custody/README.md`.
