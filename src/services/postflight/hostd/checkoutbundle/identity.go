@@ -20,13 +20,12 @@ type LeaseIdentity struct {
 // IdentityResolver resolves an execution/attempt pair to an active lease.
 // A false return means "no active lease": expired, terminal, or never issued
 // — the caller cannot distinguish, deliberately. hostd backs this with its
-// live lease table; the standalone server backs it with a static fixture.
+// live lease table.
 type IdentityResolver interface {
 	ResolveActiveLease(ctx context.Context, executionID, attemptID string) (LeaseIdentity, bool, error)
 }
 
-// StaticResolver serves a fixed lease set. It exists for the standalone
-// server and tests; hostd replaces it with the live lease table.
+// StaticResolver serves a fixed lease set for tests.
 type StaticResolver struct {
 	Leases []LeaseIdentity
 }

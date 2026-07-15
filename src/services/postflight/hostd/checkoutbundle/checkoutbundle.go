@@ -9,7 +9,7 @@
 //
 // The package is transport-complete but host-agnostic: lease identity comes
 // through the IdentityResolver seam, which hostd backs with its live lease
-// table and the standalone server backs with a static fixture.
+// table.
 package checkoutbundle
 
 import (
