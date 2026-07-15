@@ -1,9 +1,11 @@
 // Package vm defines the sandbox-VM surface hostd drives: warm-pool
-// launches, workspace hot-attach, runner assignment, and destruction. Only
-// the Fake implementation ships today — the real QEMU driver lands with the
-// golden-image work, where it can be verified against an actual host; its
-// interface is shaped by the tracer-proven flow (pre-booted warm VM, hot
-// attach by stable device serial, destroy-and-refill, never reuse).
+// launches, workspace hot-attach, runner assignment, and destruction. The
+// Driver interface has two implementations: QEMU (real QEMU/KVM processes,
+// shaped by the tracer-proven flow — pre-booted warm VM, hot attach by
+// stable device serial, destroy-and-refill, never reuse) and Fake
+// (in-memory, for the agent core's tests and the sim harness). Everything
+// above the interface is hermetically testable; the QEMU implementation is
+// verified by the conformance suite on a real host.
 package vm
 
 import (
