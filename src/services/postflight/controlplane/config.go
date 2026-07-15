@@ -27,6 +27,17 @@ type config struct {
 	workerBatchSize   int
 	maxDeliveryTries  int32
 	commentInterval   time.Duration
+
+	// Stage (b): the hostd sync endpoint and the scheduler. Both default
+	// inert — an unset sync secret leaves the endpoint unregistered, and the
+	// scheduler only runs when explicitly enabled — so the deploy changes
+	// nothing until each is switched on.
+	hostdSyncSecret   string
+	schedulerEnabled  bool
+	schedulerInterval time.Duration
+	runnerOrg         string
+	allocateTimeout   time.Duration
+	assignmentTimeout time.Duration
 }
 
 func envOr(key, fallback string) string {
@@ -89,6 +100,12 @@ func loadConfig() (config, error) {
 		workerBatchSize:   positiveInt("WORKER_BATCH_SIZE", "16"),
 		maxDeliveryTries:  int32(positiveInt("MAX_DELIVERY_TRIES", "8")),
 		commentInterval:   duration("COMMENT_INTERVAL", "5s"),
+		hostdSyncSecret:   os.Getenv("HOSTD_SYNC_SECRET"),
+		schedulerEnabled:  os.Getenv("SCHEDULER_ENABLED") == "true",
+		schedulerInterval: duration("SCHEDULER_INTERVAL", "500ms"),
+		runnerOrg:         envOr("GITHUB_RUNNER_ORG", "guardian-intelligence"),
+		allocateTimeout:   duration("LEASE_ALLOCATE_TIMEOUT", "2s"),
+		assignmentTimeout: duration("LEASE_ASSIGNMENT_TIMEOUT", "90s"),
 	}
 	if len(errs) > 0 {
 		return cfg, errors.Join(errs...)

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/agent"
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/syncproto"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vm"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/zvol"
 )
@@ -136,7 +137,7 @@ func (w *World) Restart() {
 
 // Sync delivers a desired-state snapshot from the scripted control plane
 // and records it in the ledger.
-func (w *World) Sync(response agent.SyncResponse) {
+func (w *World) Sync(response syncproto.SyncResponse) {
 	w.named = map[string]bool{}
 	for _, desired := range response.Leases {
 		if desired.LeaseID != "" {
@@ -180,7 +181,7 @@ func (w *World) TickN(n int) {
 func (w *World) Advance(d time.Duration) { w.Clock.Advance(d) }
 
 // Report builds the sync request the agent would send now.
-func (w *World) Report() agent.SyncRequest {
+func (w *World) Report() syncproto.SyncRequest {
 	request, err := w.Agent.Report(context.Background())
 	if err != nil {
 		w.tb.Fatalf("building report: %v", err)

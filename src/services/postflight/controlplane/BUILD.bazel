@@ -10,20 +10,27 @@ go_library(
         "config.go",
         "events.go",
         "github_api.go",
+        "hostd_store.go",
+        "hostd_sync.go",
         "main.go",
         "migrations.go",
         "problems.go",
         "reconcile.go",
         "render.go",
+        "scheduler.go",
         "store.go",
         "trust.go",
         "webhook.go",
         "worker.go",
     ],
-    embedsrcs = ["migrations/001_initial.sql"],
+    embedsrcs = [
+        "migrations/001_initial.sql",
+        "migrations/002_hostd_scheduler.sql",
+    ],
     importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/controlplane",
     visibility = ["//visibility:private"],
     deps = [
+        "//src/services/postflight/hostd/syncproto",
         "@com_github_jackc_pgx_v5//:pgx",
         "@com_github_jackc_pgx_v5//pgconn",
         "@com_github_jackc_pgx_v5//pgxpool",
@@ -59,6 +66,31 @@ go_test(
     embed = [":controlplane_lib"],
     deps = [
         "@com_github_jackc_pgx_v5//:pgx",
+        "@io_opentelemetry_go_otel_trace//noop",
+    ],
+)
+
+# The stage-(b) end-to-end loop: the real HTTP surface + worker + scheduler
+# over a hermetic PostgreSQL, exchanging syncs with the real hostd agent on
+# fake substrate drivers. Split from controlplane_test so the unit tests do
+# not fetch or boot the pinned postgres tree.
+go_test(
+    name = "e2e_test",
+    timeout = "short",
+    srcs = ["e2e_test.go"],
+    data = [
+        "//src/tools/postgres:dist",
+        "//src/tools/postgres:initdb",
+    ],
+    embed = [":controlplane_lib"],
+    env = {"PGTEST_INITDB": "$(rootpath //src/tools/postgres:initdb)"},
+    deps = [
+        "//src/services/postflight/controlplane/pgtest",
+        "//src/services/postflight/hostd/agent",
+        "//src/services/postflight/hostd/syncproto",
+        "//src/services/postflight/hostd/vm",
+        "//src/services/postflight/hostd/zvol",
+        "@com_github_jackc_pgx_v5//pgxpool",
         "@io_opentelemetry_go_otel_trace//noop",
     ],
 )

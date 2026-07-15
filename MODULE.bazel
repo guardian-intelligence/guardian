@@ -45,6 +45,7 @@ python.toolchain(
 )
 use_repo(python, "python_3_12_12")
 
+include("//src/tools/postgres:postgres.MODULE.bazel")
 include("//src/tools/restic:restic.MODULE.bazel")
 include("//src/tools/ruby:ruby.MODULE.bazel")
 

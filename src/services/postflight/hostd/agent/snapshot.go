@@ -3,13 +3,15 @@ package agent
 import (
 	"sort"
 	"time"
+
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/syncproto"
 )
 
 // LeaseSnapshot is one lease's full local state, for observability and the
 // sim harness's invariant checks.
 type LeaseSnapshot struct {
 	LeaseID          string
-	State            State
+	State            syncproto.State
 	Since            time.Time
 	VMID             string
 	Device           string
@@ -49,10 +51,7 @@ func (a *Agent) Snapshot() []LeaseSnapshot {
 }
 
 // StateDeadline reports the bound on a state, if it has one.
-func StateDeadline(state State) (time.Duration, bool) {
+func StateDeadline(state syncproto.State) (time.Duration, bool) {
 	deadline, ok := stateDeadlines[state]
 	return deadline, ok
 }
-
-// Terminal reports whether a state is terminal.
-func Terminal(state State) bool { return state.terminal() }

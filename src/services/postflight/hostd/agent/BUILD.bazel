@@ -17,6 +17,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/services/postflight/hostd/checkoutbundle",
+        "//src/services/postflight/hostd/syncproto",
         "//src/services/postflight/hostd/vm",
         "//src/services/postflight/hostd/zvol",
     ],
@@ -27,6 +28,7 @@ go_test(
     srcs = ["sync_test.go"],
     embed = [":agent"],
     deps = [
+        "//src/services/postflight/hostd/syncproto",
         "//src/services/postflight/hostd/vm",
         "//src/services/postflight/hostd/zvol",
     ],

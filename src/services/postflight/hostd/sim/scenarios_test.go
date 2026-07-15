@@ -9,6 +9,7 @@ import (
 
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/agent"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/checkoutbundle"
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/syncproto"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vm"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/zvol"
 )
@@ -19,10 +20,10 @@ const class = "postflight-4cpu-ubuntu-2404"
 
 func slots(n int) map[vm.Class]int { return map[vm.Class]int{class: n} }
 
-func runLease(id string) agent.DesiredLease {
-	return agent.DesiredLease{
+func runLease(id string) syncproto.DesiredLease {
+	return syncproto.DesiredLease{
 		LeaseID:            id,
-		State:              agent.DesiredRun,
+		State:              syncproto.DesiredRun,
 		ExecutionID:        "exec-" + id,
 		AttemptID:          "attempt-" + id,
 		OrgID:              "guardian-intelligence",
@@ -31,34 +32,34 @@ func runLease(id string) agent.DesiredLease {
 		RepositoryFullName: "guardian-intelligence/postflight-tracer",
 		RunnerClass:        class,
 		JITConfig:          "jit-" + id,
-		Workspace:          agent.WorkspaceSpec{SizeBytes: 1 << 30},
+		Workspace:          syncproto.WorkspaceSpec{SizeBytes: 1 << 30},
 	}
 }
 
-func deliver(world *World, targets int, leases ...agent.DesiredLease) {
-	world.Sync(agent.SyncResponse{
+func deliver(world *World, targets int, leases ...syncproto.DesiredLease) {
+	world.Sync(syncproto.SyncResponse{
 		Leases:      leases,
 		PoolTargets: map[string]int{class: targets},
 	})
 }
 
 // driveToReady walks one lease through pending → ready, asserting each hop.
-func driveToReady(t *testing.T, world *World, spec agent.DesiredLease) (vmID string) {
+func driveToReady(t *testing.T, world *World, spec syncproto.DesiredLease) (vmID string) {
 	t.Helper()
 	deliver(world, 1, spec)
 	world.Tick() // materialize; pool launches a warm VM
-	if got := world.Lease(spec.LeaseID).State; got != agent.StateClaiming {
+	if got := world.Lease(spec.LeaseID).State; got != syncproto.StateClaiming {
 		t.Fatalf("after tick 1: state %s, want claiming", got)
 	}
 	bootAll(world)
 	world.Tick() // claim + assign
 	snapshot := world.Lease(spec.LeaseID)
-	if snapshot.State != agent.StateAssigning || snapshot.VMID == "" {
+	if snapshot.State != syncproto.StateAssigning || snapshot.VMID == "" {
 		t.Fatalf("after tick 2: state %s vm %q, want assigning with a vm", snapshot.State, snapshot.VMID)
 	}
 	world.VMs.MarkReady(vm.ID(snapshot.VMID))
 	world.Tick()
-	if got := world.Lease(spec.LeaseID).State; got != agent.StateReady {
+	if got := world.Lease(spec.LeaseID).State; got != syncproto.StateReady {
 		t.Fatalf("after tick 3: state %s, want ready", got)
 	}
 	return snapshot.VMID
@@ -103,7 +104,7 @@ func TestHappyPathRunSealForget(t *testing.T) {
 	world.VMs.MarkExited(vm.ID(vmID), 0)
 	world.Tick()
 	snapshot := world.Lease("l1")
-	if snapshot.State != agent.StateExited || snapshot.ExitCode != 0 {
+	if snapshot.State != syncproto.StateExited || snapshot.ExitCode != 0 {
 		t.Fatalf("after exit: %+v", snapshot)
 	}
 	// Destroy-and-refill freed the slot: the exited VM is gone.
@@ -113,11 +114,11 @@ func TestHappyPathRunSealForget(t *testing.T) {
 
 	// Control plane decides: seal as generation g1.
 	sealed := spec
-	sealed.State = agent.DesiredSeal
+	sealed.State = syncproto.DesiredSeal
 	sealed.SealGeneration = "g1"
 	deliver(world, 1, sealed)
 	world.Tick()
-	if got := world.Lease("l1"); got.State != agent.StateSealed || got.SealedGeneration != "g1" {
+	if got := world.Lease("l1"); got.State != syncproto.StateSealed || got.SealedGeneration != "g1" {
 		t.Fatalf("after seal: %+v", got)
 	}
 	if !world.Zvols.HasGeneration("g1") {
@@ -142,7 +143,7 @@ func TestCacheHitClonesFromGeneration(t *testing.T) {
 	world := NewWorld(t, slots(2))
 	world.SeedGeneration("gen-main", 1<<20)
 	spec := runLease("l1")
-	spec.Workspace = agent.WorkspaceSpec{Generation: "gen-main"}
+	spec.Workspace = syncproto.WorkspaceSpec{Generation: "gen-main"}
 	deliver(world, 1, spec)
 	world.Tick()
 	found := false
@@ -159,11 +160,11 @@ func TestCacheHitClonesFromGeneration(t *testing.T) {
 func TestCloneSourceMissingFailsLease(t *testing.T) {
 	world := NewWorld(t, slots(2))
 	spec := runLease("l1")
-	spec.Workspace = agent.WorkspaceSpec{Generation: "gen-absent"}
+	spec.Workspace = syncproto.WorkspaceSpec{Generation: "gen-absent"}
 	deliver(world, 1, spec)
 	world.Tick()
 	snapshot := world.Lease("l1")
-	if snapshot.State != agent.StateFailed || !strings.Contains(snapshot.Reason, "materialize") {
+	if snapshot.State != syncproto.StateFailed || !strings.Contains(snapshot.Reason, "materialize") {
 		t.Fatalf("inventory drift should fail the lease, got %+v", snapshot)
 	}
 }
@@ -171,25 +172,25 @@ func TestCloneSourceMissingFailsLease(t *testing.T) {
 func TestCancelAtEveryStage(t *testing.T) {
 	stages := []struct {
 		name  string
-		drive func(t *testing.T, world *World, spec agent.DesiredLease)
+		drive func(t *testing.T, world *World, spec syncproto.DesiredLease)
 	}{
-		{"pending", func(t *testing.T, world *World, spec agent.DesiredLease) {
+		{"pending", func(t *testing.T, world *World, spec syncproto.DesiredLease) {
 			deliver(world, 1, spec)
 		}},
-		{"claiming", func(t *testing.T, world *World, spec agent.DesiredLease) {
+		{"claiming", func(t *testing.T, world *World, spec syncproto.DesiredLease) {
 			deliver(world, 1, spec)
 			world.Tick()
 		}},
-		{"assigning", func(t *testing.T, world *World, spec agent.DesiredLease) {
+		{"assigning", func(t *testing.T, world *World, spec syncproto.DesiredLease) {
 			deliver(world, 1, spec)
 			world.Tick()
 			bootAll(world)
 			world.Tick()
 		}},
-		{"ready", func(t *testing.T, world *World, spec agent.DesiredLease) {
+		{"ready", func(t *testing.T, world *World, spec syncproto.DesiredLease) {
 			driveToReady(t, world, spec)
 		}},
-		{"exited", func(t *testing.T, world *World, spec agent.DesiredLease) {
+		{"exited", func(t *testing.T, world *World, spec syncproto.DesiredLease) {
 			vmID := driveToReady(t, world, spec)
 			world.VMs.MarkExited(vm.ID(vmID), 1)
 			world.Tick()
@@ -202,14 +203,14 @@ func TestCancelAtEveryStage(t *testing.T) {
 			stage.drive(t, world, spec)
 
 			cancelled := spec
-			cancelled.State = agent.DesiredCancel
+			cancelled.State = syncproto.DesiredCancel
 			deliver(world, 1, cancelled)
 			world.Tick()
 			snapshot := world.Lease("l1")
 			// A lease that already exited stays exited-shaped in its
 			// terminal report? No: cancel is a withdrawal; from any
 			// non-terminal state it lands in cancelled.
-			if snapshot.State != agent.StateCancelled {
+			if snapshot.State != syncproto.StateCancelled {
 				t.Fatalf("cancel at %s: state %s", stage.name, snapshot.State)
 			}
 			// The slot is free: no VM belongs to this lease anywhere.
@@ -259,7 +260,7 @@ func TestRejectedSpecQuarantinesInsteadOfCollects(t *testing.T) {
 	// advanced nor withdrawn: a validation failure escalating to destruction
 	// of live customer state is the bug the quarantine exists to prevent.
 	corrupt := spec
-	corrupt.Workspace = agent.WorkspaceSpec{Generation: "bad/../name"}
+	corrupt.Workspace = syncproto.WorkspaceSpec{Generation: "bad/../name"}
 	deliver(world, 1, corrupt)
 	world.TickN(3)
 
@@ -269,7 +270,7 @@ func TestRejectedSpecQuarantinesInsteadOfCollects(t *testing.T) {
 	if !world.Zvols.HasWorkspace("l1") {
 		t.Fatal("quarantined lease's workspace was collected")
 	}
-	if got := world.Lease("l1").State; got != agent.StateReady {
+	if got := world.Lease("l1").State; got != syncproto.StateReady {
 		t.Fatalf("quarantined lease advanced to %s", got)
 	}
 
@@ -277,7 +278,7 @@ func TestRejectedSpecQuarantinesInsteadOfCollects(t *testing.T) {
 	deliver(world, 1, spec)
 	world.VMs.MarkExited(vm.ID(vmID), 0)
 	world.Tick()
-	if got := world.Lease("l1").State; got != agent.StateExited {
+	if got := world.Lease("l1").State; got != syncproto.StateExited {
 		t.Fatalf("lease did not resume after quarantine: %s", got)
 	}
 }
@@ -287,19 +288,19 @@ func TestRejectedSpecOnTerminalLeaseIsNotCollected(t *testing.T) {
 	spec := runLease("l1")
 	// Starve the claim so the lease fails terminally; its workspace holds
 	// the only copy of whatever the job left behind.
-	world.Sync(agent.SyncResponse{Leases: []agent.DesiredLease{spec}})
+	world.Sync(syncproto.SyncResponse{Leases: []syncproto.DesiredLease{spec}})
 	world.Tick()
-	deadline, _ := agent.StateDeadline(agent.StateClaiming)
+	deadline, _ := agent.StateDeadline(syncproto.StateClaiming)
 	world.Advance(deadline + time.Second)
 	world.Tick()
-	if got := world.Lease("l1").State; got != agent.StateFailed {
+	if got := world.Lease("l1").State; got != syncproto.StateFailed {
 		t.Fatalf("state %s, want failed", got)
 	}
 
 	// The control plane still names l1, but with a spec this hostd cannot
 	// parse. Terminal + not-in-desired must not read as an ack.
 	corrupt := spec
-	corrupt.Workspace = agent.WorkspaceSpec{Generation: "bad/../name"}
+	corrupt.Workspace = syncproto.WorkspaceSpec{Generation: "bad/../name"}
 	deliver(world, 0, corrupt)
 	world.TickN(2)
 	if !world.HasLease("l1") {
@@ -324,19 +325,19 @@ func TestQuarantineFreezesDeadlines(t *testing.T) {
 	world.Tick()
 	bootAll(world)
 	world.Tick()
-	if got := world.Lease("l1").State; got != agent.StateAssigning {
+	if got := world.Lease("l1").State; got != syncproto.StateAssigning {
 		t.Fatalf("state %s, want assigning", got)
 	}
 
 	// Version skew quarantines the lease for far longer than the assigning
 	// deadline. The guest is healthy the whole time.
 	corrupt := spec
-	corrupt.Workspace = agent.WorkspaceSpec{Generation: "bad/../name"}
+	corrupt.Workspace = syncproto.WorkspaceSpec{Generation: "bad/../name"}
 	deliver(world, 1, corrupt)
-	deadline, _ := agent.StateDeadline(agent.StateAssigning)
+	deadline, _ := agent.StateDeadline(syncproto.StateAssigning)
 	world.Advance(deadline * 3)
 	world.TickN(2)
-	if got := world.Lease("l1"); got.State != agent.StateAssigning {
+	if got := world.Lease("l1"); got.State != syncproto.StateAssigning {
 		t.Fatalf("quarantined lease moved to %s", got.State)
 	}
 
@@ -345,12 +346,12 @@ func TestQuarantineFreezesDeadlines(t *testing.T) {
 	deliver(world, 1, spec)
 	world.Tick()
 	snapshot := world.Lease("l1")
-	if snapshot.State != agent.StateAssigning {
+	if snapshot.State != syncproto.StateAssigning {
 		t.Fatalf("lease did not survive unquarantine: %+v", snapshot)
 	}
 	world.VMs.MarkReady(vm.ID(snapshot.VMID))
 	world.Tick()
-	if got := world.Lease("l1").State; got != agent.StateReady {
+	if got := world.Lease("l1").State; got != syncproto.StateReady {
 		t.Fatalf("state %s, want ready", got)
 	}
 }
@@ -372,7 +373,7 @@ func TestAssignFailureDestroysClaimedVM(t *testing.T) {
 	bootAll(world)
 	world.Tick()
 	snapshot := world.Lease("l1")
-	if snapshot.State != agent.StateFailed || !strings.Contains(snapshot.Reason, "assign") {
+	if snapshot.State != syncproto.StateFailed || !strings.Contains(snapshot.Reason, "assign") {
 		t.Fatalf("got %+v", snapshot)
 	}
 	// The claimed VM was destroyed through the failure path — an ambiguous
@@ -393,16 +394,16 @@ func TestClaimingDeadlineFailsLease(t *testing.T) {
 	world := NewWorld(t, slots(1))
 	spec := runLease("l1")
 	// Pool target zero: no warm VM will ever appear.
-	world.Sync(agent.SyncResponse{Leases: []agent.DesiredLease{spec}})
+	world.Sync(syncproto.SyncResponse{Leases: []syncproto.DesiredLease{spec}})
 	world.Tick()
-	if got := world.Lease("l1").State; got != agent.StateClaiming {
+	if got := world.Lease("l1").State; got != syncproto.StateClaiming {
 		t.Fatalf("state %s, want claiming", got)
 	}
-	deadline, _ := agent.StateDeadline(agent.StateClaiming)
+	deadline, _ := agent.StateDeadline(syncproto.StateClaiming)
 	world.Advance(deadline + time.Second)
 	world.Tick()
 	snapshot := world.Lease("l1")
-	if snapshot.State != agent.StateFailed || !strings.Contains(snapshot.Reason, "deadline") {
+	if snapshot.State != syncproto.StateFailed || !strings.Contains(snapshot.Reason, "deadline") {
 		t.Fatalf("deadline should fail the lease, got %+v", snapshot)
 	}
 }
@@ -410,19 +411,19 @@ func TestClaimingDeadlineFailsLease(t *testing.T) {
 func TestCrashRestartConvergesWithoutDuplicates(t *testing.T) {
 	points := []struct {
 		name  string
-		drive func(t *testing.T, world *World, spec agent.DesiredLease)
+		drive func(t *testing.T, world *World, spec syncproto.DesiredLease)
 	}{
-		{"after-materialize", func(t *testing.T, world *World, spec agent.DesiredLease) {
+		{"after-materialize", func(t *testing.T, world *World, spec syncproto.DesiredLease) {
 			deliver(world, 1, spec)
 			world.Tick()
 		}},
-		{"after-assign", func(t *testing.T, world *World, spec agent.DesiredLease) {
+		{"after-assign", func(t *testing.T, world *World, spec syncproto.DesiredLease) {
 			deliver(world, 1, spec)
 			world.Tick()
 			bootAll(world)
 			world.Tick()
 		}},
-		{"while-ready", func(t *testing.T, world *World, spec agent.DesiredLease) {
+		{"while-ready", func(t *testing.T, world *World, spec syncproto.DesiredLease) {
 			driveToReady(t, world, spec)
 		}},
 	}
@@ -441,7 +442,7 @@ func TestCrashRestartConvergesWithoutDuplicates(t *testing.T) {
 			world.TickN(2)
 
 			snapshot := world.Lease("l1")
-			if snapshot.State == agent.StateClaiming || snapshot.State == agent.StatePending {
+			if snapshot.State == syncproto.StateClaiming || snapshot.State == syncproto.StatePending {
 				t.Fatalf("did not converge after restart: %+v", snapshot)
 			}
 			if snapshot.VMID != "" {
@@ -450,7 +451,7 @@ func TestCrashRestartConvergesWithoutDuplicates(t *testing.T) {
 				world.VMs.MarkExited(vm.ID(snapshot.VMID), 0)
 				world.Tick()
 			}
-			if got := world.Lease("l1").State; got != agent.StateExited {
+			if got := world.Lease("l1").State; got != syncproto.StateExited {
 				t.Fatalf("terminal state %s, want exited", got)
 			}
 
@@ -488,7 +489,7 @@ func TestVMDisappearanceFailsLease(t *testing.T) {
 	}
 	world.Tick()
 	snapshot := world.Lease("l1")
-	if snapshot.State != agent.StateFailed || !strings.Contains(snapshot.Reason, "disappeared") {
+	if snapshot.State != syncproto.StateFailed || !strings.Contains(snapshot.Reason, "disappeared") {
 		t.Fatalf("got %+v", snapshot)
 	}
 }
@@ -497,9 +498,9 @@ func TestReapWaitsForDependentClone(t *testing.T) {
 	world := NewWorld(t, slots(2))
 	world.SeedGeneration("gen-old", 1<<20)
 	spec := runLease("l1")
-	spec.Workspace = agent.WorkspaceSpec{Generation: "gen-old"}
-	world.Sync(agent.SyncResponse{
-		Leases:      []agent.DesiredLease{spec},
+	spec.Workspace = syncproto.WorkspaceSpec{Generation: "gen-old"}
+	world.Sync(syncproto.SyncResponse{
+		Leases:      []syncproto.DesiredLease{spec},
 		Reap:        []string{"gen-old"},
 		PoolTargets: map[string]int{class: 1},
 	})
@@ -510,14 +511,14 @@ func TestReapWaitsForDependentClone(t *testing.T) {
 	// Cancel and acknowledge the lease; the clone goes away, then the reap
 	// lands on a later tick.
 	cancelled := spec
-	cancelled.State = agent.DesiredCancel
-	world.Sync(agent.SyncResponse{
-		Leases:      []agent.DesiredLease{cancelled},
+	cancelled.State = syncproto.DesiredCancel
+	world.Sync(syncproto.SyncResponse{
+		Leases:      []syncproto.DesiredLease{cancelled},
 		Reap:        []string{"gen-old"},
 		PoolTargets: map[string]int{class: 0},
 	})
 	world.Tick()
-	world.Sync(agent.SyncResponse{Reap: []string{"gen-old"}})
+	world.Sync(syncproto.SyncResponse{Reap: []string{"gen-old"}})
 	world.TickN(2)
 	if world.Zvols.HasGeneration("gen-old") {
 		t.Fatal("acknowledged reap never executed")
@@ -548,7 +549,7 @@ func TestHostileLeaseSpecsAreRejected(t *testing.T) {
 	hostile := runLease("l1")
 	hostile.LeaseID = "../../etc" // dataset traversal attempt
 	other := runLease("l2")
-	other.Workspace = agent.WorkspaceSpec{Generation: "also/../bad"}
+	other.Workspace = syncproto.WorkspaceSpec{Generation: "also/../bad"}
 	deliver(world, 0, hostile, other)
 	if world.HasLease("../../etc") || world.HasLease("l2") {
 		t.Fatal("hostile lease specs were accepted")
@@ -573,7 +574,7 @@ func TestZvolFaultFailsLeaseCleanly(t *testing.T) {
 	deliver(world, 1, runLease("l1"))
 	world.Tick()
 	snapshot := world.Lease("l1")
-	if snapshot.State != agent.StateFailed {
+	if snapshot.State != syncproto.StateFailed {
 		t.Fatalf("got %+v", snapshot)
 	}
 	if snapshot.VMID != "" {

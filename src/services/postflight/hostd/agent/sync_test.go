@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/syncproto"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vm"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/zvol"
 )
@@ -28,24 +29,24 @@ func testAgent(t *testing.T, origin string) *Agent {
 
 func TestSyncExchange(t *testing.T) {
 	var gotAuth, gotPath string
-	var gotRequest SyncRequest
+	var gotRequest syncproto.SyncRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		gotPath = r.URL.Path
 		if err := json.NewDecoder(r.Body).Decode(&gotRequest); err != nil {
 			t.Errorf("decoding request: %v", err)
 		}
-		json.NewEncoder(w).Encode(SyncResponse{
+		json.NewEncoder(w).Encode(syncproto.SyncResponse{
 			BootID: gotRequest.BootID,
-			Leases: []DesiredLease{{
+			Leases: []syncproto.DesiredLease{{
 				LeaseID:            "l1",
-				State:              DesiredRun,
+				State:              syncproto.DesiredRun,
 				ExecutionID:        "e1",
 				AttemptID:          "a1",
 				RepositoryFullName: "acme/widget",
 				RunnerClass:        "c",
 				JITConfig:          "jit",
-				Workspace:          WorkspaceSpec{SizeBytes: 1},
+				Workspace:          syncproto.WorkspaceSpec{SizeBytes: 1},
 			}},
 			PoolTargets:     map[string]int{"c": 1},
 			PollAfterMillis: 250,
@@ -61,7 +62,7 @@ func TestSyncExchange(t *testing.T) {
 	if gotAuth != "Bearer cred-abc" {
 		t.Fatalf("authorization %q", gotAuth)
 	}
-	if gotPath != syncPath {
+	if gotPath != syncproto.SyncPath {
 		t.Fatalf("path %q", gotPath)
 	}
 	if gotRequest.HostID != "host-test" || gotRequest.BootID == "" {
@@ -71,7 +72,7 @@ func TestSyncExchange(t *testing.T) {
 		t.Fatalf("pollAfter %v", pollAfter)
 	}
 	snapshots := instance.Snapshot()
-	if len(snapshots) != 1 || snapshots[0].LeaseID != "l1" || snapshots[0].State != StatePending {
+	if len(snapshots) != 1 || snapshots[0].LeaseID != "l1" || snapshots[0].State != syncproto.StatePending {
 		t.Fatalf("desired lease not applied: %+v", snapshots)
 	}
 }
@@ -96,7 +97,7 @@ func TestSyncDropsResponseWithoutBootIDEcho(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		// A default-constructed (or misrouted) full-state response would
 		// cancel every job on the host; the missing echo must reject it.
-		json.NewEncoder(w).Encode(SyncResponse{})
+		json.NewEncoder(w).Encode(syncproto.SyncResponse{})
 	}))
 	defer server.Close()
 	instance := testAgent(t, server.URL)
@@ -115,11 +116,11 @@ func TestSyncClampsPollAfter(t *testing.T) {
 	}
 	for millis, want := range cases {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			var request SyncRequest
+			var request syncproto.SyncRequest
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 				t.Errorf("decoding request: %v", err)
 			}
-			json.NewEncoder(w).Encode(SyncResponse{BootID: request.BootID, PollAfterMillis: millis})
+			json.NewEncoder(w).Encode(syncproto.SyncResponse{BootID: request.BootID, PollAfterMillis: millis})
 		}))
 		instance := testAgent(t, server.URL)
 		pollAfter, err := instance.syncOnce(context.Background())
@@ -134,27 +135,27 @@ func TestSyncClampsPollAfter(t *testing.T) {
 }
 
 func TestDesiredLeaseValidation(t *testing.T) {
-	valid := DesiredLease{
-		LeaseID: "l1", State: DesiredRun, ExecutionID: "e", AttemptID: "a",
+	valid := syncproto.DesiredLease{
+		LeaseID: "l1", State: syncproto.DesiredRun, ExecutionID: "e", AttemptID: "a",
 		RepositoryFullName: "acme/widget", RunnerClass: "c", JITConfig: "j",
 	}
-	if err := valid.validate(); err != nil {
+	if err := validateDesired(valid); err != nil {
 		t.Fatalf("valid lease rejected: %v", err)
 	}
-	cases := map[string]func(*DesiredLease){
-		"empty id":            func(d *DesiredLease) { d.LeaseID = "" },
-		"traversal id":        func(d *DesiredLease) { d.LeaseID = "../evil" },
-		"unknown state":       func(d *DesiredLease) { d.State = "explode" },
-		"seal sans gen":       func(d *DesiredLease) { d.State = DesiredSeal; d.SealGeneration = "" },
-		"run sans identity":   func(d *DesiredLease) { d.ExecutionID = "" },
-		"run sans jit":        func(d *DesiredLease) { d.JITConfig = "" },
-		"run sans repository": func(d *DesiredLease) { d.RepositoryFullName = "" },
-		"bad generation":      func(d *DesiredLease) { d.Workspace.Generation = "a/../b" },
+	cases := map[string]func(*syncproto.DesiredLease){
+		"empty id":            func(d *syncproto.DesiredLease) { d.LeaseID = "" },
+		"traversal id":        func(d *syncproto.DesiredLease) { d.LeaseID = "../evil" },
+		"unknown state":       func(d *syncproto.DesiredLease) { d.State = "explode" },
+		"seal sans gen":       func(d *syncproto.DesiredLease) { d.State = syncproto.DesiredSeal; d.SealGeneration = "" },
+		"run sans identity":   func(d *syncproto.DesiredLease) { d.ExecutionID = "" },
+		"run sans jit":        func(d *syncproto.DesiredLease) { d.JITConfig = "" },
+		"run sans repository": func(d *syncproto.DesiredLease) { d.RepositoryFullName = "" },
+		"bad generation":      func(d *syncproto.DesiredLease) { d.Workspace.Generation = "a/../b" },
 	}
 	for name, mutate := range cases {
 		lease := valid
 		mutate(&lease)
-		if err := lease.validate(); err == nil {
+		if err := validateDesired(lease); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}

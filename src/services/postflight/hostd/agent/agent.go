@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/syncproto"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vm"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/zvol"
 )
@@ -52,7 +53,7 @@ type Agent struct {
 
 	mu      sync.Mutex
 	leases  map[string]*lease
-	desired map[string]DesiredLease
+	desired map[string]syncproto.DesiredLease
 	// quarantined holds lease IDs the control plane named in the last sync
 	// but whose specs we rejected. They are neither advanced nor collected:
 	// a validation failure must not read as a withdrawal.
@@ -102,7 +103,7 @@ func New(cfg Config, zvols zvol.Driver, vms vm.Driver, credential string, hostSe
 		now:         options.Now,
 		newID:       options.NewID,
 		leases:      map[string]*lease{},
-		desired:     map[string]DesiredLease{},
+		desired:     map[string]syncproto.DesiredLease{},
 		quarantined: map[string]bool{},
 		poolTargets: map[vm.Class]int{},
 	}
@@ -143,14 +144,14 @@ func (a *Agent) Synced() bool {
 
 // HandleSync applies one desired-state snapshot as if it arrived from the
 // control plane. The sim harness and tests use it in place of syncOnce.
-func (a *Agent) HandleSync(response SyncResponse) {
+func (a *Agent) HandleSync(response syncproto.SyncResponse) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.applyDesired(response)
 }
 
 // Report builds the sync request the agent would send right now.
-func (a *Agent) Report(ctx context.Context) (SyncRequest, error) {
+func (a *Agent) Report(ctx context.Context) (syncproto.SyncRequest, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.buildReport(ctx)
