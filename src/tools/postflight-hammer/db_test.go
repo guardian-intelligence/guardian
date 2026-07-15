@@ -72,7 +72,7 @@ func seedBattery(t *testing.T, ctx context.Context, conn *pgx.Conn) {
 		 VALUES ('L1', 101, '101', '1', 'postflight-4cpu-ubuntu-2404', 'completed',
 		     'sealed', 'h1', '', 'gen-1', 0, now())`,
 		`INSERT INTO workspace_generations (generation, host_id, runner_class, state, bytes)
-		 VALUES ('gen-1', 'h1', 'postflight-4cpu-ubuntu-2404', 'current', 1073741824)`,
+		 VALUES ('gen-1', 'h1', 'postflight-4cpu-ubuntu-2404', 'committed', 1073741824)`,
 	}
 	for _, s := range stmts {
 		if _, err := conn.Exec(ctx, s); err != nil {
@@ -124,7 +124,7 @@ func TestQueriesAgainstRealSchema(t *testing.T) {
 		t.Fatalf("generations: %v %+v", err, generations)
 	}
 	g := generations[0]
-	if g.Generation != "gen-1" || g.State != "current" || g.Bytes != 1073741824 {
+	if g.Generation != "gen-1" || g.State != "committed" || g.Bytes != 1073741824 {
 		t.Fatalf("generation = %+v", g)
 	}
 
@@ -163,7 +163,7 @@ func TestWatchObservesDatabase(t *testing.T) {
 	if _, ok := st.DB.observedAt("lease", "L1", "reported_state", "sealed"); !ok {
 		t.Fatalf("reported_state transition not recorded: %+v", st.DB.Transitions)
 	}
-	if _, ok := st.DB.observedAt("generation", "gen-1", "state", "current"); !ok {
+	if _, ok := st.DB.observedAt("generation", "gen-1", "state", "committed"); !ok {
 		t.Fatalf("generation transition not recorded: %+v", st.DB.Transitions)
 	}
 
