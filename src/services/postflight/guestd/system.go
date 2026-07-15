@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/guestproto"
 )
 
 // System is the privileged-operation seam: everything guestd does to the
@@ -58,7 +60,7 @@ func (r RealSystem) runnerUser() string {
 // LocateDevice implements System via the udev-published by-id link for the
 // QEMU scsi-hd serial — never by probe order.
 func (RealSystem) LocateDevice(_ context.Context, serial string) (string, error) {
-	link := "/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_" + serial
+	link := guestproto.DiskByIDPrefix + serial
 	device, err := filepath.EvalSymlinks(link)
 	if err != nil {
 		return "", fmt.Errorf("guestd: locating serial %s: %w", serial, err)
@@ -140,13 +142,45 @@ func unescapeMountPath(escaped string) string {
 }
 
 // Mount implements System.
-func (RealSystem) Mount(_ context.Context, device, mountpoint, filesystem string, options []string) error {
-	if err := os.MkdirAll(mountpoint, 0o755); err != nil {
-		return fmt.Errorf("guestd: creating %s: %w", mountpoint, err)
+func (r RealSystem) Mount(_ context.Context, device, mountpoint, filesystem string, options []string) error {
+	if err := r.makeMountpoint(mountpoint); err != nil {
+		return err
 	}
 	flags, data := mountOptions(options)
 	if err := unix.Mount(device, mountpoint, filesystem, flags, data); err != nil {
 		return fmt.Errorf("guestd: mounting %s at %s: %w", device, mountpoint, err)
+	}
+	return nil
+}
+
+// makeMountpoint creates the mountpoint path, handing every directory it
+// creates to the runner user: guestd runs privileged, and a root-owned
+// intermediate (the _work/<repo> layer above the workspace) would wall the
+// runner off from its own pipeline tree.
+func (r RealSystem) makeMountpoint(mountpoint string) error {
+	var created []string
+	for dir := mountpoint; dir != filepath.Dir(dir); dir = filepath.Dir(dir) {
+		if _, err := os.Stat(dir); err == nil {
+			break
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("guestd: probing %s: %w", dir, err)
+		}
+		created = append(created, dir)
+	}
+	if len(created) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(mountpoint, 0o755); err != nil {
+		return fmt.Errorf("guestd: creating %s: %w", mountpoint, err)
+	}
+	uid, gid, err := r.ownership()
+	if err != nil {
+		return err
+	}
+	for _, dir := range created {
+		if err := os.Chown(dir, uid, gid); err != nil {
+			return fmt.Errorf("guestd: owning %s: %w", dir, err)
+		}
 	}
 	return nil
 }
@@ -185,19 +219,28 @@ func (RealSystem) Unmount(mountpoint string) error {
 // Sync implements System.
 func (RealSystem) Sync() { unix.Sync() }
 
-// Adopt implements System.
-func (r RealSystem) Adopt(mountpoint string) error {
+// ownership resolves the runner user's uid and gid.
+func (r RealSystem) ownership() (int, int, error) {
 	account, err := user.Lookup(r.runnerUser())
 	if err != nil {
-		return fmt.Errorf("guestd: looking up %s: %w", r.runnerUser(), err)
+		return 0, 0, fmt.Errorf("guestd: looking up %s: %w", r.runnerUser(), err)
 	}
 	uid, err := strconv.Atoi(account.Uid)
 	if err != nil {
-		return fmt.Errorf("guestd: uid of %s: %w", r.runnerUser(), err)
+		return 0, 0, fmt.Errorf("guestd: uid of %s: %w", r.runnerUser(), err)
 	}
 	gid, err := strconv.Atoi(account.Gid)
 	if err != nil {
-		return fmt.Errorf("guestd: gid of %s: %w", r.runnerUser(), err)
+		return 0, 0, fmt.Errorf("guestd: gid of %s: %w", r.runnerUser(), err)
+	}
+	return uid, gid, nil
+}
+
+// Adopt implements System.
+func (r RealSystem) Adopt(mountpoint string) error {
+	uid, gid, err := r.ownership()
+	if err != nil {
+		return err
 	}
 	if err := os.Chown(mountpoint, uid, gid); err != nil {
 		return fmt.Errorf("guestd: adopting %s: %w", mountpoint, err)

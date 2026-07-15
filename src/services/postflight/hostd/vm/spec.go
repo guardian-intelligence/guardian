@@ -13,7 +13,7 @@ const machineType = "pc-q35-8.2"
 
 // workspaceNode names the hot-attached workspace on both sides of the QMP
 // seam: the blockdev node, the qdev id (dev- prefixed), and the SCSI serial
-// the guest mounts by (/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_workspace).
+// the guest mounts by (guestproto.DiskByIDPrefix + workspaceNode).
 const workspaceNode = "workspace"
 
 // workspaceDevice is the qdev id of the workspace's scsi-hd.

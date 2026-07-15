@@ -86,6 +86,7 @@ func TestVsockLoopbackTransportEndToEnd(t *testing.T) {
 			return 0, nil
 		},
 		RetryInterval: time.Millisecond,
+		HostCID:       vsock.Local,
 		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {

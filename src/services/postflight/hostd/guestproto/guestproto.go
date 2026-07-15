@@ -20,6 +20,12 @@ const Version = 1
 // VM's CID on this port.
 const VsockPort = 1
 
+// DiskByIDPrefix is where udev publishes a QEMU scsi-hd disk inside the
+// guest: this prefix plus the device's serial= attribute. The vendor and
+// product halves are QEMU's fixed scsi-hd inquiry strings, so the link only
+// moves if the host's device model changes with it.
+const DiskByIDPrefix = "/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_"
+
 // MaxMessageBytes bounds one encoded message line. The guest is untrusted:
 // a reader must never buffer an attacker-chosen amount.
 const MaxMessageBytes = 1 << 20

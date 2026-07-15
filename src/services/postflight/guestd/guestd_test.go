@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/guestproto"
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vsock"
 )
 
 // fakeSystem is the hermetic System: devices appear on a schedule, mounts
@@ -149,14 +150,39 @@ func (l *pipeListener) Addr() net.Addr { return &net.UnixAddr{Name: "pipe", Net:
 
 func (l *pipeListener) dial(t *testing.T) *hostConn {
 	t.Helper()
+	return l.dialConn(t, nil)
+}
+
+// dialFrom presents the guest side of the pipe as a vsock peer at cid.
+func (l *pipeListener) dialFrom(t *testing.T, cid uint32) *hostConn {
+	t.Helper()
+	return l.dialConn(t, func(conn net.Conn) net.Conn {
+		return addrConn{Conn: conn, remote: vsock.Addr{CID: cid, Port: 12345}}
+	})
+}
+
+func (l *pipeListener) dialConn(t *testing.T, wrap func(net.Conn) net.Conn) *hostConn {
+	t.Helper()
 	host, guest := net.Pipe()
+	served := net.Conn(guest)
+	if wrap != nil {
+		served = wrap(guest)
+	}
 	select {
-	case l.conns <- guest:
+	case l.conns <- served:
 	case <-time.After(2 * time.Second):
 		t.Fatal("server never accepted")
 	}
 	return &hostConn{t: t, conn: host, decoder: guestproto.NewDecoder(host), encoder: guestproto.NewEncoder(host)}
 }
+
+// addrConn overrides a pipe's remote address so peer checks see a vsock CID.
+type addrConn struct {
+	net.Conn
+	remote net.Addr
+}
+
+func (c addrConn) RemoteAddr() net.Addr { return c.remote }
 
 // hostConn is the test's hostd stand-in on one connection.
 type hostConn struct {
@@ -494,6 +520,51 @@ func TestRunnerExitCodeIsVerbatim(t *testing.T) {
 	host.expectStatus(guestproto.RunnerRegistered)
 	if status := host.expectStatus(guestproto.RunnerExited); status.ExitCode != 42 {
 		t.Fatalf("exit code %d, want 42", status.ExitCode)
+	}
+}
+
+// TestNonHostVsockPeerIsRejected: anything inside the guest (the runner
+// user included) can dial guestd's listener; only the configured host CID
+// may drive privileged verbs, and a rejected peer never supplants the
+// host's live connection.
+func TestNonHostVsockPeerIsRejected(t *testing.T) {
+	w := newWorld(t, nil, nil)
+	w.system.mounted["/work"] = "/dev/sdb"
+
+	host := w.listener.dialFrom(t, vsock.Host)
+	host.expect(guestproto.KindHello)
+
+	intruder := w.listener.dialFrom(t, 3)
+	_ = intruder.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if message, err := intruder.decoder.Read(); err == nil {
+		t.Fatalf("intruder was served %s", message.Kind)
+	}
+
+	// The intruder never reached dispatch: the host connection is intact
+	// and quiesce still works on it.
+	host.send(guestproto.Message{Kind: guestproto.KindQuiesce, Quiesce: &guestproto.Quiesce{Mountpoint: "/work"}})
+	host.expect(guestproto.KindQuiesced)
+}
+
+func TestHostileQuiesceMountpointsAreRefused(t *testing.T) {
+	for name, mountpoint := range map[string]string{
+		"empty":    "",
+		"relative": "work",
+		"unclean":  "/work/../etc",
+		"root":     "/",
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := newWorld(t, nil, nil)
+			w.system.mounted["/work"] = "/dev/sdb"
+
+			host := w.listener.dial(t)
+			host.expect(guestproto.KindHello)
+			host.send(guestproto.Message{Kind: guestproto.KindQuiesce, Quiesce: &guestproto.Quiesce{Mountpoint: mountpoint}})
+			host.expect(guestproto.KindQuiesceFailed)
+			if entries := w.system.entries(); len(entries) != 0 {
+				t.Fatalf("hostile quiesce reached the system: %v", entries)
+			}
+		})
 	}
 }
 

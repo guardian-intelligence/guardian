@@ -15,10 +15,15 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // RunnerRoot is where the golden image installs the actions runner tree.
 const RunnerRoot = "/opt/actions-runner"
+
+// outputDrainGrace is how long buffered runner output may trail the runner's
+// exit before the pipe is severed.
+const outputDrainGrace = 2 * time.Second
 
 // RunnerEvent is a runner lifecycle observation.
 type RunnerEvent int
@@ -74,26 +79,9 @@ func ExecRunner(root, username string, logger *slog.Logger) RunRunner {
 		}
 		write.Close()
 
-		seen := map[RunnerEvent]bool{}
-		scanner := bufio.NewScanner(read)
-		scanner.Buffer(make([]byte, 4096), 1<<20)
-		for scanner.Scan() {
-			line := scanner.Text()
-			logger.Info("runner", "line", line)
-			if e, ok := runnerLineEvent(line); ok && !seen[e] {
-				seen[e] = true
-				event(e)
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			// The scan stopped (an over-long line, most likely) but the pipe
-			// must keep draining or the runner blocks on a full buffer.
-			logger.Warn("runner output scan stopped", "err", err)
-			_, _ = io.Copy(io.Discard, read)
-		}
-		read.Close()
-
+		observer := observeRunnerOutput(read, redactor(jitConfig, env), logger, event)
 		err = cmd.Wait()
+		observer.drain(outputDrainGrace)
 		if err == nil {
 			return 0, nil
 		}
@@ -103,6 +91,78 @@ func ExecRunner(root, username string, logger *slog.Logger) RunRunner {
 		}
 		return 0, fmt.Errorf("guestd: waiting on runner: %w", err)
 	}
+}
+
+// outputObserver mirrors runner output into the log and folds lifecycle
+// lines into events without ever gating the runner's exit on its pipe: a
+// leaked customer child that inherits stdout keeps the pipe open past the
+// runner's death, and the exit report must outrank straggler output.
+type outputObserver struct {
+	read *os.File
+	done chan struct{}
+}
+
+func observeRunnerOutput(read *os.File, redact *strings.Replacer, logger *slog.Logger, event func(RunnerEvent)) *outputObserver {
+	observer := &outputObserver{read: read, done: make(chan struct{})}
+	go func() {
+		defer close(observer.done)
+		seen := map[RunnerEvent]bool{}
+		scanner := bufio.NewScanner(read)
+		scanner.Buffer(make([]byte, 4096), 1<<20)
+		for scanner.Scan() {
+			line := redact.Replace(scanner.Text())
+			logger.Info("runner", "line", line)
+			if e, ok := runnerLineEvent(line); ok && !seen[e] {
+				seen[e] = true
+				event(e)
+			}
+		}
+		if err := scanner.Err(); err != nil && !errors.Is(err, os.ErrClosed) {
+			// The scan stopped (an over-long line, most likely) but the pipe
+			// must keep draining or the runner blocks on a full buffer.
+			logger.Warn("runner output scan stopped", "err", err)
+			_, _ = io.Copy(io.Discard, read)
+		}
+	}()
+	return observer
+}
+
+// drain gives buffered output a bounded window after the runner exits, then
+// severs the pipe. No event fires after drain returns.
+func (o *outputObserver) drain(grace time.Duration) {
+	select {
+	case <-o.done:
+	case <-time.After(grace):
+	}
+	o.read.Close()
+	<-o.done
+}
+
+// redactor scrubs every assignment-provided value from mirrored output. The
+// runner masks GitHub-registered secrets, but the checkout token and JIT
+// blob are ours, and a customer step that prints its environment must not
+// land them in the guest journal.
+func redactor(jitConfig string, env map[string]string) *strings.Replacer {
+	values := make([]string, 0, len(env)+1)
+	if jitConfig != "" {
+		values = append(values, jitConfig)
+	}
+	for _, value := range env {
+		if value != "" {
+			values = append(values, value)
+		}
+	}
+	sort.Slice(values, func(i, j int) bool {
+		if len(values[i]) != len(values[j]) {
+			return len(values[i]) > len(values[j])
+		}
+		return values[i] < values[j]
+	})
+	pairs := make([]string, 0, 2*len(values))
+	for _, value := range values {
+		pairs = append(pairs, value, "[redacted]")
+	}
+	return strings.NewReplacer(pairs...)
 }
 
 // runnerEnviron builds the runner's environment: the account's identity

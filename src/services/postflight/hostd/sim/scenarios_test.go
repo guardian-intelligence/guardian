@@ -195,6 +195,17 @@ func TestQuiesceFailureFailsTheLease(t *testing.T) {
 			t.Fatalf("sealed an unquiesced workspace: %v", world.Zvols.Journal)
 		}
 	}
+
+	// Omission is the ack for the failed lease too: its unsealed workspace
+	// clone is collected, never leaked.
+	deliver(world, 1)
+	world.Tick()
+	if world.HasLease("l1") {
+		t.Fatal("acknowledged failed lease still tracked")
+	}
+	if world.Zvols.HasWorkspace("l1") {
+		t.Fatal("failed lease's workspace survived collection")
+	}
 }
 
 func TestCacheHitClonesFromGeneration(t *testing.T) {

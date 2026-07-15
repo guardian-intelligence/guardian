@@ -14,6 +14,8 @@ import (
 )
 
 const (
+	// Host is the CID every host-originated connection bears inside a guest.
+	Host = unix.VMADDR_CID_HOST
 	// Local is the loopback CID served by the vsock_loopback transport.
 	Local = unix.VMADDR_CID_LOCAL
 	// Any binds every CID on listen.

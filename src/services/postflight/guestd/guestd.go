@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/guestproto"
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vsock"
 )
 
 // WorkspaceMarker is the file guestd drops at a converged mountpoint's
@@ -46,7 +47,11 @@ type Config struct {
 	// QuiesceWindow bounds how long a busy unmount is retried before the
 	// quiesce is reported failed.
 	QuiesceWindow time.Duration
-	Logger        *slog.Logger
+	// HostCID is the only vsock peer CID accepted as the host. Anything in
+	// the guest — the runner user included — can dial this listener, so a
+	// connection from any other CID is dropped before a verb is read.
+	HostCID uint32
+	Logger  *slog.Logger
 }
 
 func (c *Config) validate() error {
@@ -64,6 +69,9 @@ func (c *Config) validate() error {
 	}
 	if c.QuiesceWindow <= 0 {
 		c.QuiesceWindow = 10 * time.Second
+	}
+	if c.HostCID == 0 {
+		c.HostCID = vsock.Host
 	}
 	if c.Logger == nil {
 		c.Logger = slog.Default()
@@ -115,6 +123,11 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 // handle serves one host connection: greet, replay the latest runner
 // status so a reconnecting host catches up, then dispatch inbound verbs.
 func (s *Server) handle(conn net.Conn) {
+	if addr, ok := conn.RemoteAddr().(vsock.Addr); ok && addr.CID != s.cfg.HostCID {
+		s.cfg.Logger.Error("rejected non-host peer", "peer", addr.String())
+		conn.Close()
+		return
+	}
 	s.mu.Lock()
 	old := s.conn
 	s.conn = conn
@@ -266,10 +279,14 @@ func validateMount(mount guestproto.Mount) error {
 		return errors.New("mount without a serial")
 	case mount.Filesystem == "":
 		return errors.New("mount without a filesystem")
-	case !path.IsAbs(mount.Mountpoint) || path.Clean(mount.Mountpoint) != mount.Mountpoint || mount.Mountpoint == "/":
+	case !validMountpoint(mount.Mountpoint):
 		return fmt.Errorf("unsafe mountpoint %q", mount.Mountpoint)
 	}
 	return nil
+}
+
+func validMountpoint(mountpoint string) bool {
+	return path.IsAbs(mountpoint) && path.Clean(mountpoint) == mountpoint && mountpoint != "/"
 }
 
 // convergeMount retries the whole observe-then-act ladder until the mount
@@ -343,8 +360,8 @@ func (s *Server) handleQuiesce(quiesce guestproto.Quiesce) {
 }
 
 func (s *Server) quiesce(mountpoint string) error {
-	if mountpoint == "" {
-		return errors.New("quiesce without a mountpoint")
+	if !validMountpoint(mountpoint) {
+		return fmt.Errorf("unsafe mountpoint %q", mountpoint)
 	}
 	s.cfg.System.Sync()
 	deadline := time.Now().Add(s.cfg.QuiesceWindow)
