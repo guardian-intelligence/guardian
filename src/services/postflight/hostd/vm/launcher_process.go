@@ -17,7 +17,8 @@ import (
 // ProcessLauncher runs QEMU as a direct child in its own session. The VM
 // outlives this process, but not a host reboot and not supervisor-style —
 // it exists for the conformance suite and manual bring-up; production is
-// PodLauncher, where the pod's lifetime is the independence guarantee.
+// PodLauncher or SystemdLauncher, where the pod or scope cgroup is the
+// independence guarantee.
 type ProcessLauncher struct{}
 
 func pidFilePath(stateDir string) string { return filepath.Join(stateDir, "launcher.pid") }

@@ -75,8 +75,13 @@ func greenState() *stateFile {
 			Final: &dbSnapshot{
 				CapturedAt: at(2 * time.Minute),
 				Slots:      slots,
+				Scopes: []scopeRow{
+					{ScopeID: "S1", Org: "acme", Repo: "demo", ScopeRef: "refs/heads/main",
+						WorkflowPath: "ci.yml", JobName: "build", RunnerClass: "c4",
+						CurrentGeneration: "gen-1", HomeHostID: "h1"},
+				},
 				Generations: []generationRow{
-					{Generation: "gen-1", HostID: "h1", RunnerClass: "c4", State: "current",
+					{Generation: "gen-1", HostID: "h1", RunnerClass: "c4", State: "committed",
 						Bytes: 1 << 30, CreatedAt: at(36 * time.Second), UpdatedAt: at(36 * time.Second)},
 				},
 			},
@@ -287,15 +292,29 @@ func TestWarmAssertionCatchesSlowWarmCheckout(t *testing.T) {
 	}
 }
 
-func TestGenerationInvariantsCatchDoubleCurrentAndStaleCandidate(t *testing.T) {
+func TestGenerationInvariantsCatchBrokenPointersAndStaleCandidate(t *testing.T) {
 	st := greenState()
-	st.DB.Final.Generations = append(st.DB.Final.Generations, generationRow{
-		Generation: "gen-2", HostID: "h1", RunnerClass: "c4", State: "current",
-		Bytes: 1 << 30, CreatedAt: at(time.Minute), UpdatedAt: at(time.Minute),
-	})
+	st.DB.Final.Scopes[0].CurrentGeneration = "gen-gone"
 	a := assertionByName(t, buildReport(st, at(4*time.Minute)), "generation lifecycle invariants")
 	if a.Pass {
-		t.Fatalf("two currents in one scope passed: %+v", a)
+		t.Fatalf("pointer at a missing generation passed: %+v", a)
+	}
+
+	st = greenState()
+	st.DB.Final.Generations[0].State = "retained"
+	a = assertionByName(t, buildReport(st, at(4*time.Minute)), "generation lifecycle invariants")
+	if a.Pass {
+		t.Fatalf("pointer at a retained generation passed: %+v", a)
+	}
+
+	st = greenState()
+	st.DB.Final.Generations = append(st.DB.Final.Generations, generationRow{
+		Generation: "gen-2", HostID: "h1", RunnerClass: "c4", State: "committed",
+		Bytes: 1 << 30, CreatedAt: at(time.Minute), UpdatedAt: at(time.Minute),
+	})
+	a = assertionByName(t, buildReport(st, at(4*time.Minute)), "generation lifecycle invariants")
+	if a.Pass {
+		t.Fatalf("committed generation without a scope pointer passed: %+v", a)
 	}
 
 	st = greenState()

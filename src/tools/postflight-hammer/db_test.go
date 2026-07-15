@@ -73,6 +73,10 @@ func seedBattery(t *testing.T, ctx context.Context, conn *pgx.Conn) {
 		     'sealed', 'h1', '', 'gen-1', 0, now())`,
 		`INSERT INTO workspace_generations (generation, host_id, runner_class, state, bytes)
 		 VALUES ('gen-1', 'h1', 'postflight-4cpu-ubuntu-2404', 'committed', 1073741824)`,
+		`INSERT INTO workspace_scopes (org, repo, scope_ref, workflow_path, job_name, runner_class,
+		     current_generation_id, home_host_id)
+		 VALUES ('acme', 'demo', 'refs/heads/main', 'ci.yml', 'build', 'postflight-4cpu-ubuntu-2404',
+		     'gen-1', 'h1')`,
 	}
 	for _, s := range stmts {
 		if _, err := conn.Exec(ctx, s); err != nil {
@@ -128,8 +132,17 @@ func TestQueriesAgainstRealSchema(t *testing.T) {
 		t.Fatalf("generation = %+v", g)
 	}
 
+	scopes, err := db.Scopes(ctx)
+	if err != nil || len(scopes) != 1 {
+		t.Fatalf("scopes: %v %+v", err, scopes)
+	}
+	s := scopes[0]
+	if s.ScopeID == "" || s.Org != "acme" || s.CurrentGeneration != "gen-1" || s.HomeHostID != "h1" {
+		t.Fatalf("scope = %+v", s)
+	}
+
 	snap, err := db.Snapshot(ctx)
-	if err != nil || len(snap.Slots) != 1 || len(snap.Generations) != 1 {
+	if err != nil || len(snap.Slots) != 1 || len(snap.Scopes) != 1 || len(snap.Generations) != 1 {
 		t.Fatalf("snapshot: %v %+v", err, snap)
 	}
 }
@@ -193,7 +206,7 @@ func TestWatchObservesDatabase(t *testing.T) {
 	if err := w.finalize(ctx); err != nil {
 		t.Fatalf("finalize: %v", err)
 	}
-	if st.DB.Final == nil || len(st.DB.Final.Slots) != 1 || len(st.DB.Final.Generations) != 1 {
+	if st.DB.Final == nil || len(st.DB.Final.Slots) != 1 || len(st.DB.Final.Scopes) != 1 || len(st.DB.Final.Generations) != 1 {
 		t.Fatalf("final snapshot = %+v", st.DB.Final)
 	}
 	if st.WatchDoneAt == nil {

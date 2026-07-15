@@ -113,6 +113,7 @@ type stepRecord struct {
 type dbSnapshot struct {
 	CapturedAt  time.Time       `json:"captured_at"`
 	Slots       []slotRow       `json:"slots"`
+	Scopes      []scopeRow      `json:"scopes"`
 	Generations []generationRow `json:"generations"`
 }
 
