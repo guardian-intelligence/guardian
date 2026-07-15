@@ -1,4 +1,5 @@
-# Ingest pods: admit only the root ingress controller; egress only DNS + CH.
+# Ingest pods: admit only node-identity ingress (the public path terminates
+# on the hostNetwork root ingress controller); egress only DNS + CH.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -12,11 +13,13 @@ spec:
     matchLabels:
       app.kubernetes.io/name: analytics-ingest
   ingress:
-    - fromEndpoints:
-        - matchLabels:
-            k8s:io.kubernetes.pod.namespace: tenant-root
-            k8s:app.kubernetes.io/name: ingress-nginx
-            k8s:app.kubernetes.io/component: controller
+    # The root ingress controller runs hostNetwork, so its traffic arrives
+    # with the reserved host/remote-node identities — never a pod identity —
+    # and the admit must be entity-based (zot-networkpolicy.yaml carries the
+    # same lesson for containerd pulls).
+    - fromEntities:
+        - host
+        - remote-node
       toPorts:
         - ports:
             - port: "8080"
@@ -50,37 +53,6 @@ spec:
       toPorts:
         - ports:
             - port: "4317"
-              protocol: TCP
----
-# Egress half for the root ingress controller (its generated egress policy
-# only admits tenant-root-labeled destinations) — same shape as the
-# keycloak-prod pair.
-apiVersion: cilium.io/v2
-kind: CiliumClusterwideNetworkPolicy
-metadata:
-  name: tenant-root-ingress-egress-analytics-ingest
-  labels:
-    app.kubernetes.io/part-of: guardian
-spec:
-  endpointSelector:
-    matchLabels:
-      k8s:io.kubernetes.pod.namespace: tenant-root
-      k8s:app.kubernetes.io/name: ingress-nginx
-      k8s:app.kubernetes.io/component: controller
-  egress:
-    - toEndpoints:
-        - matchExpressions:
-            - key: k8s:io.kubernetes.pod.namespace
-              operator: In
-              values:
-                - guardian-analytics
-            - key: k8s:app.kubernetes.io/name
-              operator: In
-              values:
-                - analytics-ingest
-      toPorts:
-        - ports:
-            - port: "8080"
               protocol: TCP
 ---
 # OTel collector: receives OTLP from in-namespace producers (ingest today;
