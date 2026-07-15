@@ -16,6 +16,13 @@ import (
 // Version is the protocol revision a Hello announces.
 const Version = 1
 
+// WorkspaceReadyMarker is the file guestd drops at a converged workspace
+// mountpoint's root once every declared mount is in place. It is the shared
+// host↔guest↔checkout-action contract: guestd writes it, the host advertises
+// its path as POSTFLIGHT_WORKSPACE_READY_FILE, and the checkout action
+// refuses to run on a workspace without it.
+const WorkspaceReadyMarker = ".postflight-workspace"
+
 // VsockPort is where guestd listens inside every VM; the host dials the
 // VM's CID on this port.
 const VsockPort = 1

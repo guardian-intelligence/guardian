@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/checkoutbundle"
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/guestproto"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/syncproto"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vm"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/zvol"
@@ -213,10 +215,11 @@ func (a *Agent) stepLease(ctx context.Context, record *lease, vms *vmView) {
 // guest's environment.
 func (a *Agent) assignment(record *lease) vm.Assignment {
 	token := checkoutbundle.DeriveCheckoutToken(a.hostSecret, record.spec.ExecutionID, record.spec.AttemptID)
+	mountpoint := workspaceMountpoint(record.spec.RepositoryFullName)
 	return vm.Assignment{
 		Lease:               record.spec.LeaseID,
 		WorkspaceDevice:     record.device,
-		WorkspaceMountpoint: workspaceMountpoint(record.spec.RepositoryFullName),
+		WorkspaceMountpoint: mountpoint,
 		JITConfig:           record.spec.JITConfig,
 		Env: map[string]string{
 			"POSTFLIGHT_HOST_SERVICE_HTTP_ORIGIN": a.cfg.CheckoutGuestOrigin,
@@ -224,6 +227,7 @@ func (a *Agent) assignment(record *lease) vm.Assignment {
 			"POSTFLIGHT_CHECKOUT_TOKEN":           token,
 			"POSTFLIGHT_EXECUTION_ID":             record.spec.ExecutionID,
 			"POSTFLIGHT_ATTEMPT_ID":               record.spec.AttemptID,
+			"POSTFLIGHT_WORKSPACE_READY_FILE":     filepath.Join(mountpoint, guestproto.WorkspaceReadyMarker),
 		},
 	}
 }
