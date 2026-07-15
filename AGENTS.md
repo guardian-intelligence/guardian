@@ -4,6 +4,8 @@ The purpose is to create a free and open-source system for any one to convert a 
 
 Read `docs/TRIBAL_KNOWLEDGE.md` before making changes to this repository.
 
+The management cluster runs Cozystack, variant `isp-full` with opt-in Gateway API.
+
 Reference https://github.com/guardian-intelligence/verself/tree/main/docs for information relating to:
 
 * Zvol architecture
