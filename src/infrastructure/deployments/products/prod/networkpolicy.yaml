@@ -1,3 +1,6 @@
+# The public path terminates on the hostNetwork root ingress controller,
+# whose traffic arrives with the reserved host/remote-node identities —
+# never a pod identity — so the admit is entity-based.
 apiVersion: cilium.io/v2
 kind: CiliumClusterwideNetworkPolicy
 metadata:
@@ -17,40 +20,9 @@ spec:
         values:
           - electric
   ingress:
-    - fromEndpoints:
-        - matchLabels:
-            k8s:io.kubernetes.pod.namespace: tenant-root
-            k8s:app.kubernetes.io/name: ingress-nginx
-            k8s:app.kubernetes.io/component: controller
-      toPorts:
-        - ports:
-            - port: "3000"
-              protocol: TCP
----
-apiVersion: cilium.io/v2
-kind: CiliumClusterwideNetworkPolicy
-metadata:
-  name: tenant-root-ingress-egress-electric-prod
-  labels:
-    app.kubernetes.io/part-of: guardian
-    guardian.dev/product: cockpit
-spec:
-  endpointSelector:
-    matchLabels:
-      k8s:io.kubernetes.pod.namespace: tenant-root
-      k8s:app.kubernetes.io/name: ingress-nginx
-      k8s:app.kubernetes.io/component: controller
-  egress:
-    - toEndpoints:
-        - matchExpressions:
-            - key: k8s:io.kubernetes.pod.namespace
-              operator: In
-              values:
-                - tenant-guardian-prod
-            - key: k8s:app.kubernetes.io/name
-              operator: In
-              values:
-                - electric
+    - fromEntities:
+        - host
+        - remote-node
       toPorts:
         - ports:
             - port: "3000"

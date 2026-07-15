@@ -74,38 +74,6 @@ spec:
             - port: "443"
               protocol: TCP
 ---
-# Egress half for the root ingress controller (its generated egress policy
-# only admits tenant-root-labeled destinations) — same shape as the
-# analytics-ingest and keycloak-prod pairs.
-apiVersion: cilium.io/v2
-kind: CiliumClusterwideNetworkPolicy
-metadata:
-  name: tenant-root-ingress-egress-postflight-controlplane
-  labels:
-    app.kubernetes.io/part-of: guardian
-    guardian.dev/product: postflight
-spec:
-  endpointSelector:
-    matchLabels:
-      k8s:io.kubernetes.pod.namespace: tenant-root
-      k8s:app.kubernetes.io/name: ingress-nginx
-      k8s:app.kubernetes.io/component: controller
-  egress:
-    - toEndpoints:
-        - matchExpressions:
-            - key: k8s:io.kubernetes.pod.namespace
-              operator: In
-              values:
-                - postflight-runner
-            - key: k8s:app.kubernetes.io/name
-              operator: In
-              values:
-                - postflight-controlplane
-      toPorts:
-        - ports:
-            - port: "8080"
-              protocol: TCP
----
 # Ingress half for the analytics OTel collector: its namespaced policy admits
 # guardian.dev/otel: producer endpoints from its OWN namespace only (a
 # fromEndpoints selector without a namespace key never crosses namespaces),
