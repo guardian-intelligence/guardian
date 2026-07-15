@@ -42,6 +42,7 @@ func (s *scheduler) run(ctx context.Context) {
 		}
 		s.reconcileReservations(work)
 		s.expireOverdue(work)
+		s.rejectUnknownClasses(work)
 		s.allocateDemands(work)
 		s.placeLeases(work)
 	}
@@ -62,10 +63,11 @@ func (s *scheduler) reconcileReservations(ctx context.Context) {
 }
 
 // expireOverdue is the deadline reconciler: any lease sitting past its
-// per-state deadline is terminalized and its resources released. The next
-// sync omits it, which is the host-side cancel.
+// per-state deadline — or ready on a host that stopped syncing — is
+// terminalized and its resources released. The next sync omits it, which is
+// the host-side cancel.
 func (s *scheduler) expireOverdue(ctx context.Context) {
-	overdue, err := s.st.ListOverdueLeases(ctx, s.cfg.workerBatchSize)
+	overdue, err := s.st.ListOverdueLeases(ctx, s.cfg.workerBatchSize, time.Now().Add(-s.cfg.hostOfflineTimeout))
 	if err != nil {
 		slog.Error("scheduler: list overdue leases", "err", err)
 		return
@@ -73,9 +75,13 @@ func (s *scheduler) expireOverdue(ctx context.Context) {
 	for _, l := range overdue {
 		reason := "allocate deadline exceeded"
 		p := problemCapacityTimeout(l.RunnerClass)
-		if l.State == leaseAssigned {
+		switch l.State {
+		case leaseAssigned:
 			reason = "assignment deadline exceeded"
 			p = problemAssignmentTimeout()
+		case leaseReady:
+			reason = "host stopped syncing"
+			p = problemHostLost(l.HostID)
 		}
 		expired, err := s.st.ExpireLease(ctx, l, reason, []problem{p})
 		if err != nil {
@@ -88,6 +94,28 @@ func (s *scheduler) expireOverdue(ctx context.Context) {
 				RunnerClass: l.RunnerClass, Result: "failed", Reason: reason,
 			})
 		}
+	}
+}
+
+// rejectUnknownClasses terminalizes recorded demands whose runner class the
+// control plane does not serve, so the job's owner gets a problem doc
+// instead of a silent hang.
+func (s *scheduler) rejectUnknownClasses(ctx context.Context) {
+	demands, err := s.st.ListUnknownClassDemands(ctx, s.cfg.workerBatchSize)
+	if err != nil {
+		slog.Error("scheduler: list unknown-class demands", "err", err)
+		return
+	}
+	for _, d := range demands {
+		if err := s.st.MarkProviderDemandFailed(ctx, d.ProviderJobID,
+			[]problem{problemRunnerClassUnknown(d.RunnerClass)}); err != nil {
+			slog.Error("scheduler: fail unknown-class demand", "job_id", d.ProviderJobID, "err", err)
+			continue
+		}
+		emitEvent(ctx, evDemandFailed, eventAttrs{
+			JobID: d.ProviderJobID, Repo: d.RepositoryFullName, RunnerClass: d.RunnerClass,
+			Result: "failed", Reason: "demand.runner_class_unknown",
+		})
 	}
 }
 
@@ -138,7 +166,7 @@ func (s *scheduler) placeLease(ctx context.Context, l allocatingLease) {
 	))
 	defer span.End()
 
-	hostID, claimed, err := s.st.ClaimHostSlot(ctx, l.RunnerClass)
+	hostID, claimed, err := s.st.ClaimHostSlot(ctx, l.LeaseID, l.RunnerClass)
 	if err != nil {
 		slog.Error("scheduler: claim slot", "lease_id", l.LeaseID, "err", err)
 		return
@@ -150,11 +178,8 @@ func (s *scheduler) placeLease(ctx context.Context, l allocatingLease) {
 	attrs := eventAttrs{LeaseID: l.LeaseID, HostID: hostID, JobID: l.ProviderJobID, RunnerClass: l.RunnerClass}
 	jitConfig, err := s.gh.generateJITConfig(ctx, s.cfg.runnerOrg, l.LeaseID, runnerGroupID, []string{l.RunnerClass})
 	if err != nil {
-		// The slot is returned and the lease terminalized: a mint failure is
-		// a GitHub-side verdict on this job, not a placement retry.
-		if rerr := s.st.ReleaseHostSlot(ctx, hostID, l.RunnerClass); rerr != nil {
-			slog.Error("scheduler: release slot after mint failure", "lease_id", l.LeaseID, "err", rerr)
-		}
+		// The lease is terminalized (which returns the claimed slot): a mint
+		// failure is a GitHub-side verdict on this job, not a placement retry.
 		if _, ferr := s.st.FailAllocatingLease(ctx, l.LeaseID, "jit mint: "+err.Error(),
 			[]problem{problemJITMintFailed(err)}); ferr != nil {
 			slog.Error("scheduler: fail lease after mint failure", "lease_id", l.LeaseID, "err", ferr)
@@ -172,10 +197,7 @@ func (s *scheduler) placeLease(ctx context.Context, l allocatingLease) {
 	}
 	if !assigned {
 		// The lease left 'allocating' concurrently (an expiry raced the
-		// placement); the claim must not leak.
-		if rerr := s.st.ReleaseHostSlot(ctx, hostID, l.RunnerClass); rerr != nil {
-			slog.Error("scheduler: release slot after lost assignment", "lease_id", l.LeaseID, "err", rerr)
-		}
+		// placement); the terminalizing transition released the claim.
 		return
 	}
 	attrs.Result = "succeeded"

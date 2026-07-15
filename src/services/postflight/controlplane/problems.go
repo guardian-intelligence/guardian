@@ -192,6 +192,22 @@ func problemJITMintFailed(err error) problem {
 	}
 }
 
+func problemHostLost(hostID string) problem {
+	return problem{
+		Code:   "lease.host_lost",
+		Title:  "runner host stopped responding",
+		Detail: fmt.Sprintf("host %q stopped syncing while the runner was registered", hostID),
+	}
+}
+
+func problemRunnerClassUnknown(class string) problem {
+	return problem{
+		Code:   "demand.runner_class_unknown",
+		Title:  "unknown runner class",
+		Detail: fmt.Sprintf("runner class %q is not served by this control plane", class),
+	}
+}
+
 func problemSandboxFailed(reason string) problem {
 	return problem{
 		Code:   "lease.sandbox_failed",

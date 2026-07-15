@@ -77,7 +77,10 @@ go_test(
 go_test(
     name = "e2e_test",
     timeout = "short",
-    srcs = ["e2e_test.go"],
+    srcs = [
+        "e2e_test.go",
+        "hostd_store_test.go",
+    ],
     data = [
         "//src/tools/postgres:dist",
         "//src/tools/postgres:initdb",

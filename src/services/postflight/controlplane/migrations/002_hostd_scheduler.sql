@@ -57,11 +57,13 @@ CREATE INDEX idx_host_slots_free
 
 -- One lease = one runner execution on one host. Rows carry the full desired
 -- spec hostd needs plus tenant identity, so the sync response is a straight
--- projection. States: allocating (no host yet) -> assigned (slot claimed,
--- JIT minted, in the host's desired set) -> ready (runner registered) ->
--- completed; failure exits are failed (a named cause) and expired (a
--- deadline sweep). Terminal leases leave the desired set, which is the ack
--- that lets hostd forget them.
+-- projection. States: allocating (the slot claim binds host_id mid-state,
+-- making the reservation visible as lease truth while the JIT config is
+-- minted) -> assigned (JIT minted, in the host's desired set) -> ready
+-- (runner registered) -> completed; failure exits are failed (a named cause)
+-- and expired (a deadline sweep). Terminal leases leave the desired set,
+-- which is the ack that lets hostd forget them, and scrub jit_config so the
+-- registration credential does not accumulate at rest.
 CREATE TABLE host_leases (
     lease_id               TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     provider_job_id        BIGINT NOT NULL,

@@ -164,21 +164,22 @@ func startControlPlane(t *testing.T) *controlPlane {
 	t.Cleanup(githubServer.Close)
 
 	cfg := config{
-		appID:             1,
-		installationID:    e2eInstallationID,
-		webhookSecret:     e2eWebhookSecret,
-		privateKeyPEM:     testRSAKeyPEM(t),
-		apiBaseURL:        githubServer.URL,
-		runnerClassPrefix: "postflight-",
-		workerInterval:    25 * time.Millisecond,
-		workerBatchSize:   16,
-		maxDeliveryTries:  8,
-		hostdSyncSecret:   e2eSyncSecret,
-		schedulerEnabled:  true,
-		schedulerInterval: 25 * time.Millisecond,
-		runnerOrg:         "guardian-intelligence",
-		allocateTimeout:   10 * time.Second,
-		assignmentTimeout: 90 * time.Second,
+		appID:              1,
+		installationID:     e2eInstallationID,
+		webhookSecret:      e2eWebhookSecret,
+		privateKeyPEM:      testRSAKeyPEM(t),
+		apiBaseURL:         githubServer.URL,
+		runnerClassPrefix:  "postflight-",
+		workerInterval:     25 * time.Millisecond,
+		workerBatchSize:    16,
+		maxDeliveryTries:   8,
+		hostdSyncSecret:    e2eSyncSecret,
+		schedulerEnabled:   true,
+		schedulerInterval:  25 * time.Millisecond,
+		runnerOrg:          "guardian-intelligence",
+		allocateTimeout:    10 * time.Second,
+		assignmentTimeout:  90 * time.Second,
+		hostOfflineTimeout: 5 * time.Minute,
 	}
 	gh, err := newGitHubClient(cfg)
 	if err != nil {

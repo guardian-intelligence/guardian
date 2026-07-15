@@ -149,9 +149,11 @@ func failDemandTx(ctx context.Context, tx pgx.Tx, jobID int64, state string, fro
 	return err
 }
 
+// Terminal transitions scrub jit_config: the encoded runner registration
+// credential must not accumulate at rest once the lease can no longer use it.
 const sqlCompleteLease = `
 UPDATE host_leases
-SET state = 'completed', reported_state = 'exited', exit_code = $3, updated_at = now()
+SET state = 'completed', reported_state = 'exited', exit_code = $3, jit_config = '', updated_at = now()
 WHERE lease_id = $1 AND host_id = $2 AND state IN ('assigned', 'ready')
 RETURNING provider_job_id, runner_class`
 
@@ -185,7 +187,7 @@ func (s *pgStore) CompleteLease(ctx context.Context, hostID, leaseID string, exi
 
 const sqlFailLeaseFromHost = `
 UPDATE host_leases
-SET state = 'failed', reported_state = $3, reason = $4, updated_at = now()
+SET state = 'failed', reported_state = $3, reason = $4, jit_config = '', updated_at = now()
 WHERE lease_id = $1 AND host_id = $2 AND state IN ('assigned', 'ready')
 RETURNING provider_job_id, runner_class`
 
@@ -341,6 +343,40 @@ func (s *pgStore) ListSchedulableDemands(ctx context.Context, batch int) ([]sche
 	return out, rows.Err()
 }
 
+// unknownClassDemand is a recorded demand whose runner_class has no
+// runner_classes row: the schedulable join above would filter it out
+// silently forever, so the scheduler terminalizes it with a problem instead.
+type unknownClassDemand struct {
+	ProviderJobID      int64
+	RepositoryFullName string
+	RunnerClass        string
+}
+
+const sqlListUnknownClassDemands = `
+SELECT d.provider_job_id, d.repository_full_name, d.runner_class
+FROM github_provider_demands d
+WHERE d.state = 'demand_recorded'
+  AND NOT EXISTS (SELECT 1 FROM runner_classes rc WHERE rc.class = d.runner_class)
+ORDER BY d.created_at
+LIMIT $1`
+
+func (s *pgStore) ListUnknownClassDemands(ctx context.Context, batch int) ([]unknownClassDemand, error) {
+	rows, err := s.pool.Query(ctx, sqlListUnknownClassDemands, batch)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []unknownClassDemand
+	for rows.Next() {
+		var d unknownClassDemand
+		if err := rows.Scan(&d.ProviderJobID, &d.RepositoryFullName, &d.RunnerClass); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 const sqlInsertLease = `
 INSERT INTO host_leases (
     provider_job_id, execution_id, attempt_id, org_id, installation_id,
@@ -426,26 +462,54 @@ FROM (
 WHERE s.host_id = pick.host_id AND s.class = pick.class
 RETURNING s.host_id`
 
-func (s *pgStore) ClaimHostSlot(ctx context.Context, class string) (string, bool, error) {
+// sqlBindLeaseHost stamps the claimed host onto the allocating lease in the
+// claim's own transaction. The host_id = ” guard makes the binding
+// bind-once: a concurrent scheduler instance (deploy overlap) can never
+// re-place a lease whose claim is mid-mint elsewhere.
+const sqlBindLeaseHost = `
+UPDATE host_leases
+SET host_id = $2, updated_at = now()
+WHERE lease_id = $1 AND state = 'allocating' AND host_id = ''`
+
+// ClaimHostSlot reserves one free slot for the lease and binds the lease to
+// the chosen host, atomically. The bound lease row is what carries the
+// reservation through the JIT mint: every observer (the reconcile sweep, a
+// second control-plane instance) sees the claim as lease truth, and a crash
+// after the claim leaves a bound allocating lease whose allocate-deadline
+// expiry releases the slot.
+func (s *pgStore) ClaimHostSlot(ctx context.Context, leaseID, class string) (string, bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	defer tx.Rollback(ctx)
 	var hostID string
-	err := s.pool.QueryRow(ctx, sqlClaimHostSlot, class).Scan(&hostID)
+	err = tx.QueryRow(ctx, sqlClaimHostSlot, class).Scan(&hostID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", false, nil
 	}
-	return hostID, err == nil, err
-}
-
-func (s *pgStore) ReleaseHostSlot(ctx context.Context, hostID, class string) error {
-	_, err := s.pool.Exec(ctx, sqlReleaseHostSlot, hostID, class)
-	return err
+	if err != nil {
+		return "", false, err
+	}
+	tag, err := tx.Exec(ctx, sqlBindLeaseHost, leaseID, hostID)
+	if err != nil {
+		return "", false, err
+	}
+	if tag.RowsAffected() == 0 {
+		// The lease left 'allocating' (or was bound elsewhere) concurrently;
+		// the rollback discards the reservation.
+		return "", false, nil
+	}
+	return hostID, true, tx.Commit(ctx)
 }
 
 // sqlReconcileSlotReservations resets every slot row's reserved counter to
-// the count of leases actually holding it. The claim/release counters are
-// exact in steady state; this sweep is what makes a crash between the CAS
-// claim and the lease assignment (a reservation with no lease) heal instead
-// of leaking a slot forever. Safe because the single scheduler goroutine
-// runs it at tick start, when no claim is in flight.
+// the count of leases actually holding a claim: assigned/ready leases plus
+// allocating leases bound to the host (a claim mid-JIT-mint). Because the
+// claim binds the lease in the same transaction as the counter bump, this
+// sweep can run at any time — including from an overlapping control-plane
+// instance — without erasing an in-flight claim; it only repairs genuine
+// counter drift (a host slot row replaced mid-lease, a double release).
 const sqlReconcileSlotReservations = `
 UPDATE host_slots s
 SET reserved = active.count, updated_at = now()
@@ -453,7 +517,7 @@ FROM (
     SELECT s2.host_id, s2.class,
         (SELECT COUNT(*) FROM host_leases l
          WHERE l.host_id = s2.host_id AND l.runner_class = s2.class
-           AND l.state IN ('assigned', 'ready')) AS count
+           AND l.state IN ('allocating', 'assigned', 'ready')) AS count
     FROM host_slots s2
 ) active
 WHERE s.host_id = active.host_id AND s.class = active.class
@@ -466,14 +530,14 @@ func (s *pgStore) ReconcileSlotReservations(ctx context.Context) (int64, error) 
 
 const sqlAssignLease = `
 UPDATE host_leases
-SET state = 'assigned', host_id = $2, jit_config = $3,
+SET state = 'assigned', jit_config = $3,
     assignment_deadline_at = $4, updated_at = now()
-WHERE lease_id = $1 AND state = 'allocating'
+WHERE lease_id = $1 AND state = 'allocating' AND host_id = $2
 RETURNING provider_job_id`
 
-// AssignLease binds an allocating lease to its claimed host with the minted
-// JIT config; assigned=false means the lease left 'allocating' concurrently
-// and the caller must release the claimed slot.
+// AssignLease advances a claimed (host-bound) lease to assigned with the
+// minted JIT config; assigned=false means the lease left 'allocating'
+// concurrently — whichever transition took it released the claimed slot.
 func (s *pgStore) AssignLease(ctx context.Context, leaseID, hostID, jitConfig string, assignmentDeadline time.Time) (bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -496,12 +560,13 @@ func (s *pgStore) AssignLease(ctx context.Context, leaseID, hostID, jitConfig st
 
 const sqlFailAllocatingLease = `
 UPDATE host_leases
-SET state = 'failed', reason = $2, updated_at = now()
+SET state = 'failed', reason = $2, jit_config = '', updated_at = now()
 WHERE lease_id = $1 AND state = 'allocating'
-RETURNING provider_job_id`
+RETURNING provider_job_id, host_id, runner_class`
 
-// FailAllocatingLease terminalizes a lease that never reached a host (JIT
-// mint failure) and fails its demand as jit_failed.
+// FailAllocatingLease terminalizes a lease that never reached its host (JIT
+// mint failure), releases the claimed slot if one is bound, and fails the
+// demand as jit_failed — one transaction.
 func (s *pgStore) FailAllocatingLease(ctx context.Context, leaseID, reason string, problems []problem) (bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -509,12 +574,18 @@ func (s *pgStore) FailAllocatingLease(ctx context.Context, leaseID, reason strin
 	}
 	defer tx.Rollback(ctx)
 	var jobID int64
-	err = tx.QueryRow(ctx, sqlFailAllocatingLease, leaseID, reason).Scan(&jobID)
+	var hostID, class string
+	err = tx.QueryRow(ctx, sqlFailAllocatingLease, leaseID, reason).Scan(&jobID, &hostID, &class)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
+	}
+	if hostID != "" {
+		if _, err := tx.Exec(ctx, sqlReleaseHostSlot, hostID, class); err != nil {
+			return false, err
+		}
 	}
 	if err := failDemandTx(ctx, tx, jobID, demandJITFailed,
 		[]string{demandRecorded, demandCapacityRequested}, problems); err != nil {
@@ -531,16 +602,24 @@ type overdueLease struct {
 	State         string
 }
 
+// sqlListOverdueLeases sweeps the three ways a lease can be stuck: past its
+// allocate deadline, past its assignment deadline, or ready on a host that
+// stopped syncing (a ready lease has no control-plane deadline of its own —
+// hostd's ready bound only fires if the host is alive, so host death is the
+// absence this sweep must observe).
 const sqlListOverdueLeases = `
-SELECT lease_id, provider_job_id, host_id, runner_class, state
-FROM host_leases
-WHERE (state = 'allocating' AND allocate_deadline_at <= now())
-   OR (state = 'assigned' AND assignment_deadline_at <= now())
-ORDER BY updated_at
+SELECT l.lease_id, l.provider_job_id, l.host_id, l.runner_class, l.state
+FROM host_leases l
+WHERE (l.state = 'allocating' AND l.allocate_deadline_at <= now())
+   OR (l.state = 'assigned' AND l.assignment_deadline_at <= now())
+   OR (l.state = 'ready' AND EXISTS (
+        SELECT 1 FROM hosts h
+        WHERE h.host_id = l.host_id AND h.last_sync_at <= $2))
+ORDER BY l.updated_at
 LIMIT $1`
 
-func (s *pgStore) ListOverdueLeases(ctx context.Context, batch int) ([]overdueLease, error) {
-	rows, err := s.pool.Query(ctx, sqlListOverdueLeases, batch)
+func (s *pgStore) ListOverdueLeases(ctx context.Context, batch int, hostDeadCutoff time.Time) ([]overdueLease, error) {
+	rows, err := s.pool.Query(ctx, sqlListOverdueLeases, batch, hostDeadCutoff)
 	if err != nil {
 		return nil, err
 	}
@@ -558,13 +637,14 @@ func (s *pgStore) ListOverdueLeases(ctx context.Context, batch int) ([]overdueLe
 
 const sqlExpireLease = `
 UPDATE host_leases
-SET state = 'expired', reason = $3, updated_at = now()
+SET state = 'expired', reason = $3, jit_config = '', updated_at = now()
 WHERE lease_id = $1 AND state = $2
 RETURNING host_id, runner_class, provider_job_id`
 
-// ExpireLease terminalizes a lease stuck past its per-state deadline: the
-// guarded transition, the slot release (assigned leases only), and the
-// demand failure land in one transaction.
+// ExpireLease terminalizes a stuck lease: the guarded transition, the slot
+// release (any lease bound to a host holds a reservation, including a claimed
+// allocating lease orphaned mid-mint), and the demand failure land in one
+// transaction.
 func (s *pgStore) ExpireLease(ctx context.Context, l overdueLease, reason string, problems []problem) (bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -580,16 +660,16 @@ func (s *pgStore) ExpireLease(ctx context.Context, l overdueLease, reason string
 	if err != nil {
 		return false, err
 	}
+	if hostID != "" {
+		if _, err := tx.Exec(ctx, sqlReleaseHostSlot, hostID, class); err != nil {
+			return false, err
+		}
+	}
 	demandState := demandCapacityFailed
 	demandFrom := []string{demandRecorded, demandCapacityRequested}
-	if l.State == leaseAssigned {
+	if l.State == leaseAssigned || l.State == leaseReady {
 		demandState = demandSandboxFailed
 		demandFrom = []string{demandCapacityRequested, demandAssigned}
-		if hostID != "" {
-			if _, err := tx.Exec(ctx, sqlReleaseHostSlot, hostID, class); err != nil {
-				return false, err
-			}
-		}
 	}
 	if err := failDemandTx(ctx, tx, jobID, demandState, demandFrom, problems); err != nil {
 		return false, err

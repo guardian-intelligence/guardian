@@ -38,6 +38,9 @@ type config struct {
 	runnerOrg         string
 	allocateTimeout   time.Duration
 	assignmentTimeout time.Duration
+	// hostOfflineTimeout is how long a host may go without syncing before
+	// its ready leases are failed over (the host is presumed dead).
+	hostOfflineTimeout time.Duration
 }
 
 func envOr(key, fallback string) string {
@@ -88,24 +91,25 @@ func loadConfig() (config, error) {
 	}
 
 	cfg := config{
-		appID:             requiredID("GITHUB_APP_ID"),
-		installationID:    requiredID("GITHUB_APP_INSTALLATION_ID"),
-		webhookSecret:     required("GITHUB_WEBHOOK_SECRET"),
-		privateKeyPEM:     required("GITHUB_APP_PRIVATE_KEY_PEM"),
-		databaseURL:       required("DATABASE_URL"),
-		apiBaseURL:        envOr("GITHUB_API_BASE_URL", "https://api.github.com"),
-		runnerClassPrefix: envOr("RUNNER_CLASS_PREFIX", "postflight-"),
-		listenAddr:        envOr("LISTEN_ADDR", ":8080"),
-		workerInterval:    duration("WORKER_INTERVAL", "500ms"),
-		workerBatchSize:   positiveInt("WORKER_BATCH_SIZE", "16"),
-		maxDeliveryTries:  int32(positiveInt("MAX_DELIVERY_TRIES", "8")),
-		commentInterval:   duration("COMMENT_INTERVAL", "5s"),
-		hostdSyncSecret:   os.Getenv("HOSTD_SYNC_SECRET"),
-		schedulerEnabled:  os.Getenv("SCHEDULER_ENABLED") == "true",
-		schedulerInterval: duration("SCHEDULER_INTERVAL", "500ms"),
-		runnerOrg:         envOr("GITHUB_RUNNER_ORG", "guardian-intelligence"),
-		allocateTimeout:   duration("LEASE_ALLOCATE_TIMEOUT", "2s"),
-		assignmentTimeout: duration("LEASE_ASSIGNMENT_TIMEOUT", "90s"),
+		appID:              requiredID("GITHUB_APP_ID"),
+		installationID:     requiredID("GITHUB_APP_INSTALLATION_ID"),
+		webhookSecret:      required("GITHUB_WEBHOOK_SECRET"),
+		privateKeyPEM:      required("GITHUB_APP_PRIVATE_KEY_PEM"),
+		databaseURL:        required("DATABASE_URL"),
+		apiBaseURL:         envOr("GITHUB_API_BASE_URL", "https://api.github.com"),
+		runnerClassPrefix:  envOr("RUNNER_CLASS_PREFIX", "postflight-"),
+		listenAddr:         envOr("LISTEN_ADDR", ":8080"),
+		workerInterval:     duration("WORKER_INTERVAL", "500ms"),
+		workerBatchSize:    positiveInt("WORKER_BATCH_SIZE", "16"),
+		maxDeliveryTries:   int32(positiveInt("MAX_DELIVERY_TRIES", "8")),
+		commentInterval:    duration("COMMENT_INTERVAL", "5s"),
+		hostdSyncSecret:    os.Getenv("HOSTD_SYNC_SECRET"),
+		schedulerEnabled:   os.Getenv("SCHEDULER_ENABLED") == "true",
+		schedulerInterval:  duration("SCHEDULER_INTERVAL", "500ms"),
+		runnerOrg:          envOr("GITHUB_RUNNER_ORG", "guardian-intelligence"),
+		allocateTimeout:    duration("LEASE_ALLOCATE_TIMEOUT", "2s"),
+		assignmentTimeout:  duration("LEASE_ASSIGNMENT_TIMEOUT", "90s"),
+		hostOfflineTimeout: duration("HOST_OFFLINE_TIMEOUT", "5m"),
 	}
 	if len(errs) > 0 {
 		return cfg, errors.Join(errs...)
