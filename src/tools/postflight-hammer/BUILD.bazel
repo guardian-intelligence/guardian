@@ -1,0 +1,61 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+
+go_library(
+    name = "postflight_hammer_lib",
+    srcs = [
+        "db.go",
+        "dispatch.go",
+        "githubapi.go",
+        "main.go",
+        "report.go",
+        "state.go",
+        "watch.go",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/tools/postflight-hammer",
+    visibility = ["//visibility:private"],
+    deps = [
+        "@com_github_jackc_pgx_v5//pgxpool",
+    ],
+)
+
+go_binary(
+    name = "postflight-hammer",
+    embed = [":postflight_hammer_lib"],
+    pure = "on",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "postflight_hammer_test",
+    srcs = [
+        "dispatch_test.go",
+        "fakegithub_test.go",
+        "githubapi_test.go",
+        "report_test.go",
+        "watch_test.go",
+    ],
+    embed = [":postflight_hammer_lib"],
+)
+
+# Database queries and watch observation against the control plane's real
+# migrations on a hermetic PostgreSQL — split so the pure unit tests do not
+# fetch or boot the pinned postgres tree.
+go_test(
+    name = "db_test",
+    timeout = "short",
+    srcs = ["db_test.go"],
+    data = [
+        "//src/services/postflight/controlplane:migrations",
+        "//src/tools/postgres:dist",
+        "//src/tools/postgres:initdb",
+    ],
+    embed = [":postflight_hammer_lib"],
+    env = {
+        "HAMMER_MIGRATIONS": "$(rootpaths //src/services/postflight/controlplane:migrations)",
+        "PGTEST_INITDB": "$(rootpath //src/tools/postgres:initdb)",
+    },
+    deps = [
+        "//src/services/postflight/controlplane/pgtest",
+        "@com_github_jackc_pgx_v5//:pgx",
+    ],
+)

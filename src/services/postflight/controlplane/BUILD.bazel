@@ -2,6 +2,14 @@ load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load", "oci_push")
 load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 
+# The hammer harness tests its database queries against these exact files so
+# schema drift breaks its build, not a battery run.
+filegroup(
+    name = "migrations",
+    srcs = glob(["migrations/*.sql"]),
+    visibility = ["//src/tools/postflight-hammer:__pkg__"],
+)
+
 go_library(
     name = "controlplane_lib",
     srcs = [
