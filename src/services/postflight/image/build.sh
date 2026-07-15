@@ -13,8 +13,8 @@
 #
 # Every artifact in pins.env is sha256-verified before use; a mismatch
 # aborts the build. Re-runs are idempotent: the image id derives from the
-# pins file and the repo commit, and an @golden snapshot that already exists
-# is left untouched. See README.md for the full runbook.
+# pins file, the guestd binary, and the repo commit, and an @golden snapshot
+# that already exists is left untouched. See README.md for the full runbook.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -53,7 +53,7 @@ die() {
   exit 1
 }
 
-for cmd in blkid chroot curl git modprobe python3 qemu-img qemu-nbd sha256sum tar udevadm xz zfs; do
+for cmd in blkid chroot curl git growpart modprobe python3 qemu-img qemu-nbd resize2fs sha256sum tar udevadm xz zfs; do
   command -v "${cmd}" >/dev/null 2>&1 || die "missing required command: ${cmd}"
 done
 [[ "${EUID}" -eq 0 ]] || die "must run as root (qemu-nbd, chroot, and zfs)"
@@ -69,6 +69,13 @@ done
 pool="${POOL:-tank}"
 work_dir="${WORK_DIR:-/var/tmp/postflight-image}"
 
+# Runner _diag logs, /tmp, and tool caches all land on the root disk at job
+# time — only the job workspace lives on the workspace zvol — and nothing
+# grows the rootfs at boot (cloud-init is purged), so the build grows it and
+# asserts the margin actually materialized.
+rootfs_size="8G"
+rootfs_min_free_bytes=$((4 * 1024 * 1024 * 1024))
+
 ubuntu_image="ubuntu-24.04-minimal-cloudimg-amd64.img"
 ubuntu_url="https://cloud-images.ubuntu.com/minimal/releases/noble/release-${UBUNTU_SERIAL}/${ubuntu_image}"
 runner_tarball="actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"
@@ -77,13 +84,21 @@ node_tarball="node-v${NODE_VERSION}-linux-x64.tar.xz"
 node_url="https://nodejs.org/dist/v${NODE_VERSION}/${node_tarball}"
 
 pins_sha256="$(sha256sum "${script_dir}/pins.env" | awk '{print $1}')"
+guestd_sha256="$(sha256sum "${GUESTD_BIN}" | awk '{print $1}')"
 commit="$(git -C "${script_dir}" rev-parse HEAD)"
 commit_short="${commit:0:12}"
+diff_sha256=""
 if ! git -C "${script_dir}" diff-index --quiet HEAD --; then
+  diff_sha256="$(git -C "${script_dir}" diff HEAD | sha256sum | awk '{print $1}')"
   commit_short="${commit_short}-dirty"
   log "WARNING: building from a dirty tree; the image id records ${commit_short}"
 fi
-image_id="noble-${pins_sha256:0:12}-g${commit_short}"
+# The id binds every direct build input — pins, guestd binary, commit, and
+# the working-tree diff when dirty — so the @golden idempotence
+# short-circuit cannot serve different content under one id.
+input_sha256="$(printf '%s\n' "${pins_sha256}" "${guestd_sha256}" "${commit}" "${diff_sha256}" |
+  sha256sum | awk '{print $1}')"
+image_id="noble-${input_sha256:0:12}-g${commit_short}"
 
 dataset="${pool}/postflight/images/${image_id}"
 scratch="${pool}/postflight/build/${image_id}"
@@ -160,6 +175,7 @@ fetch "${node_url}" "${work_dir}/${node_tarball}" "${NODE_SHA256}"
 work_image="${work_dir}/${image_id}.qcow2"
 rm -f "${work_image}"
 cp --reflink=auto "${work_dir}/${ubuntu_image}" "${work_image}"
+qemu-img resize -q "${work_image}" "${rootfs_size}"
 
 modprobe nbd max_part=16
 # modprobe is a no-op when nbd is already loaded, and with max_part=0 the
@@ -195,9 +211,13 @@ for part in "${nbd}"p*; do
 done
 [[ -n "${root_part}" ]] || die "no cloudimg-rootfs partition on ${nbd}; image layout changed?"
 
+growpart "${nbd}" "${root_part#"${nbd}"p}" >/dev/null
+udevadm settle
+
 mnt="$(mktemp -d "${work_dir}/mnt.XXXXXX")"
 mount "${root_part}" "${mnt}"
 mounted=true
+resize2fs "${root_part}" >/dev/null
 if [[ -n "${boot_part}" ]]; then
   mount "${boot_part}" "${mnt}/boot"
 fi
@@ -234,13 +254,17 @@ in_chroot bash /opt/actions-runner/bin/installdependencies.sh
 in_chroot chown -R runner:runner /opt/actions-runner
 
 log "installing node ${NODE_VERSION}"
-tar -xJf "${work_dir}/${node_tarball}" -C "${mnt}/usr/local" --strip-components=1 \
+# Upstream tarball entries are owned by the build user's uid 1001 — the same
+# uid as the runner user, the identity that executes untrusted job code.
+# Without --no-same-owner, root's tar preserves that and hands the runner
+# write access to /usr/local/bin, the first entry on root's PATH.
+tar -xJf "${work_dir}/${node_tarball}" -C "${mnt}/usr/local" --strip-components=1 --no-same-owner \
   "node-v${NODE_VERSION}-linux-x64/bin" \
   "node-v${NODE_VERSION}-linux-x64/include" \
   "node-v${NODE_VERSION}-linux-x64/lib" \
   "node-v${NODE_VERSION}-linux-x64/share"
 
-log "installing guestd"
+log "installing guestd (sha256 ${guestd_sha256})"
 install -m 0755 "${GUESTD_BIN}" "${mnt}/usr/local/bin/guestd"
 cat >"${mnt}/etc/systemd/system/guestd.service" <<'EOF'
 [Unit]
@@ -278,6 +302,11 @@ chmod 0600 "${mnt}/etc/netplan/10-postflight.yaml"
 
 in_chroot apt-get -q clean
 rm -rf "${mnt}/var/lib/apt/lists/"*
+
+rootfs_free_bytes="$(df --output=avail -B1 "${mnt}" | tail -n 1 | tr -d '[:space:]')"
+[[ "${rootfs_free_bytes}" -ge "${rootfs_min_free_bytes}" ]] ||
+  die "rootfs has ${rootfs_free_bytes} bytes free, need ${rootfs_min_free_bytes}; grow rootfs_size"
+log "rootfs headroom: ${rootfs_free_bytes} bytes free"
 
 : >"${mnt}/etc/machine-id"
 printf '%s\n' "${image_id}" >"${mnt}/etc/postflight-image-release"
