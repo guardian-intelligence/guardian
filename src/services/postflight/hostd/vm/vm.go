@@ -1,9 +1,11 @@
 // Package vm defines the sandbox-VM surface hostd drives: warm-pool
-// launches, workspace hot-attach, runner assignment, and destruction. Only
-// the Fake implementation ships today — the real QEMU driver lands with the
-// golden-image work, where it can be verified against an actual host; its
-// interface is shaped by the tracer-proven flow (pre-booted warm VM, hot
-// attach by stable device serial, destroy-and-refill, never reuse).
+// launches, workspace hot-attach, runner assignment, and destruction. The
+// Driver interface has two implementations: QEMU (real QEMU/KVM processes,
+// shaped by the tracer-proven flow — pre-booted warm VM, hot attach by
+// stable device serial, destroy-and-refill, never reuse) and Fake
+// (in-memory, for the agent core's tests and the sim harness). Everything
+// above the interface is hermetically testable; the QEMU implementation is
+// verified by the conformance suite on a real host.
 package vm
 
 import (
@@ -67,8 +69,10 @@ var ErrNotFound = errors.New("vm: not found")
 
 // Driver is the hypervisor surface hostd needs. Launch and Assign start
 // asynchronous work; the agent advances on observed Status changes, never on
-// call returns. All methods are safe to repeat: Launch with an existing ID
-// and Assign on an already-assigned VM are no-ops.
+// call returns. All methods are safe to repeat: relaunching a live ID with
+// its own class and re-assigning a VM's own lease converge to no-ops, while
+// a class or lease mismatch is an error. A Launch that finds its ID's
+// process dead collects the leftovers and boots fresh.
 type Driver interface {
 	// Launch boots a warm VM of a class under the given ID.
 	Launch(ctx context.Context, id ID, class Class) error
