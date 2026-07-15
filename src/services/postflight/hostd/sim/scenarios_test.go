@@ -139,6 +139,64 @@ func TestHappyPathRunSealForget(t *testing.T) {
 	}
 }
 
+// TestExitQuiescesBeforeDestroy: the workspace is snapshotted after the VM
+// is gone, so the guest must sync and unmount while it is still alive —
+// quiesce strictly precedes the exit-time destroy.
+func TestExitQuiescesBeforeDestroy(t *testing.T) {
+	world := NewWorld(t, slots(2))
+	spec := runLease("l1")
+	vmID := driveToReady(t, world, spec)
+
+	world.VMs.MarkExited(vm.ID(vmID), 0)
+	world.Tick()
+	if got := world.Lease("l1").State; got != syncproto.StateExited {
+		t.Fatalf("state %s, want exited", got)
+	}
+	quiesceAt, destroyAt := -1, -1
+	for i, entry := range world.VMs.Journal {
+		switch entry {
+		case "quiesce " + vmID:
+			quiesceAt = i
+		case "destroy " + vmID:
+			destroyAt = i
+		}
+	}
+	if quiesceAt == -1 || destroyAt == -1 || quiesceAt > destroyAt {
+		t.Fatalf("journal %v: want quiesce before destroy", world.VMs.Journal)
+	}
+}
+
+// TestQuiesceFailureFailsTheLease: an unquiesced workspace is ambiguous —
+// dirty pages may never have reached the zvol — so the lease fails (which
+// skips any seal) and the VM is still destroyed.
+func TestQuiesceFailureFailsTheLease(t *testing.T) {
+	world := NewWorld(t, slots(2))
+	spec := runLease("l1")
+	vmID := driveToReady(t, world, spec)
+
+	world.VMs.Fail = func(op string, _ vm.ID) error {
+		if op == "quiesce" {
+			return errors.New("guest wedged")
+		}
+		return nil
+	}
+	world.VMs.MarkExited(vm.ID(vmID), 0)
+	world.Tick()
+
+	snapshot := world.Lease("l1")
+	if snapshot.State != syncproto.StateFailed || !strings.Contains(snapshot.Reason, "quiesce") {
+		t.Fatalf("after failed quiesce: %+v", snapshot)
+	}
+	if status, _ := world.VMs.Status(context.Background(), vm.ID(vmID)); status.Phase != vm.PhaseGone {
+		t.Fatalf("vm still present after failed quiesce: %v", status.Phase)
+	}
+	for _, entry := range world.Zvols.Journal {
+		if strings.HasPrefix(entry, "seal") {
+			t.Fatalf("sealed an unquiesced workspace: %v", world.Zvols.Journal)
+		}
+	}
+}
+
 func TestCacheHitClonesFromGeneration(t *testing.T) {
 	world := NewWorld(t, slots(2))
 	world.SeedGeneration("gen-main", 1<<20)

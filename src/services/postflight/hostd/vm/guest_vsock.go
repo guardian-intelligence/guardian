@@ -1,0 +1,314 @@
+package vm
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"sync"
+
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/guestproto"
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vsock"
+)
+
+// VsockGuest is the production Guest: one dialed AF_VSOCK connection per
+// VM, guestproto JSON-lines on it, a reader goroutine folding what the
+// guest says into an observation. Connections are dialed lazily — a dial
+// failure is a guest that is not up yet, which Observe reports as the zero
+// observation; the caller's boot deadline owns retries. State lives on the
+// connection, never beyond it: a new connection starts from a fresh hello,
+// so a recycled CID can never inherit a previous guest's runner status.
+type VsockGuest struct {
+	port uint32
+	dial func(ctx context.Context, cid, port uint32) (net.Conn, error)
+
+	mu    sync.Mutex
+	chans map[ID]*guestChannel
+}
+
+var _ Guest = (*VsockGuest)(nil)
+
+// NewVsockGuest wires the transport against the guestd listening port.
+func NewVsockGuest() *VsockGuest {
+	return &VsockGuest{
+		port:  guestproto.VsockPort,
+		dial:  vsock.Dial,
+		chans: map[ID]*guestChannel{},
+	}
+}
+
+// Deliver implements Guest.
+func (g *VsockGuest) Deliver(ctx context.Context, id ID, cid uint32, assignment guestproto.Assignment) error {
+	channel, err := g.channel(ctx, id, cid)
+	if err != nil {
+		return fmt.Errorf("vm: guest channel for %s: %w", id, err)
+	}
+	if err := channel.awaitHello(ctx); err != nil {
+		return fmt.Errorf("vm: guest %s never said hello: %w", id, err)
+	}
+	return channel.write(guestproto.Message{Kind: guestproto.KindAssignment, Assignment: &assignment})
+}
+
+// Observe implements Guest.
+func (g *VsockGuest) Observe(ctx context.Context, id ID, cid uint32) (GuestObservation, error) {
+	channel, err := g.channel(ctx, id, cid)
+	if err != nil {
+		return GuestObservation{}, nil // not up yet: the zero observation
+	}
+	if err := channel.awaitHello(ctx); err != nil {
+		return GuestObservation{}, nil
+	}
+	return channel.snapshot(), nil
+}
+
+// Quiesce implements Guest.
+func (g *VsockGuest) Quiesce(ctx context.Context, id ID, cid uint32, mountpoint string) error {
+	channel, err := g.channel(ctx, id, cid)
+	if err != nil {
+		return fmt.Errorf("vm: guest channel for %s: %w", id, err)
+	}
+	if err := channel.awaitHello(ctx); err != nil {
+		return fmt.Errorf("vm: guest %s never said hello: %w", id, err)
+	}
+	reply, err := channel.registerQuiesce()
+	if err != nil {
+		return fmt.Errorf("vm: quiesce %s: %w", id, err)
+	}
+	message := guestproto.Message{Kind: guestproto.KindQuiesce, Quiesce: &guestproto.Quiesce{Mountpoint: mountpoint}}
+	if err := channel.write(message); err != nil {
+		channel.resolveQuiesce(err)
+		<-reply
+		return fmt.Errorf("vm: quiesce %s: %w", id, err)
+	}
+	select {
+	case err := <-reply:
+		if err != nil {
+			return fmt.Errorf("vm: quiesce %s: %w", id, err)
+		}
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("vm: quiesce %s: %w", id, ctx.Err())
+	}
+}
+
+// channel returns the live channel for a VM, dialing one if needed. Dials
+// for the same ID are single-flighted so concurrent verbs share one
+// connection instead of racing the guest's one-at-a-time accept.
+func (g *VsockGuest) channel(ctx context.Context, id ID, cid uint32) (*guestChannel, error) {
+	for {
+		g.mu.Lock()
+		if existing, ok := g.chans[id]; ok {
+			if existing.cid == cid {
+				g.mu.Unlock()
+				if err := existing.awaitDialed(ctx); err != nil {
+					return nil, err
+				}
+				return existing, nil
+			}
+			// The CID changed: this entry belongs to a previous VM life.
+			delete(g.chans, id)
+			g.mu.Unlock()
+			existing.shutdown(errors.New("vm: superseded guest channel"))
+			continue
+		}
+		channel := newGuestChannel(cid)
+		g.chans[id] = channel
+		g.mu.Unlock()
+
+		conn, err := g.dial(ctx, cid, g.port)
+		if err != nil {
+			g.remove(id, channel)
+			channel.shutdown(err)
+			return nil, err
+		}
+		channel.attach(conn)
+		go g.read(id, channel)
+		return channel, nil
+	}
+}
+
+func (g *VsockGuest) remove(id ID, channel *guestChannel) {
+	g.mu.Lock()
+	if g.chans[id] == channel {
+		delete(g.chans, id)
+	}
+	g.mu.Unlock()
+}
+
+// read consumes the guest's stream until the connection dies, then retires
+// the channel so the next verb dials fresh.
+func (g *VsockGuest) read(id ID, channel *guestChannel) {
+	decoder := guestproto.NewDecoder(channel.conn)
+	for {
+		message, err := decoder.Read()
+		if err != nil {
+			g.remove(id, channel)
+			channel.shutdown(err)
+			return
+		}
+		switch message.Kind {
+		case guestproto.KindHello:
+			channel.markHello()
+		case guestproto.KindRunnerStatus:
+			channel.fold(*message.RunnerStatus)
+		case guestproto.KindQuiesced:
+			channel.resolveQuiesce(nil)
+		case guestproto.KindQuiesceFailed:
+			channel.resolveQuiesce(errors.New(message.QuiesceFailed.Reason))
+		default:
+			// A host-bound stream carrying host→guest verbs is a broken
+			// peer; nothing on this connection can be trusted anymore.
+			g.remove(id, channel)
+			channel.shutdown(fmt.Errorf("vm: guest sent %s", message.Kind))
+			return
+		}
+	}
+}
+
+// guestChannel is one VM's connection state. dialed gates attach (the
+// single-flight latch), hello gates use, dead retires it.
+type guestChannel struct {
+	cid uint32
+
+	dialed chan struct{}
+	conn   net.Conn
+
+	writeMu sync.Mutex
+
+	mu          sync.Mutex
+	helloSeen   bool
+	observation GuestObservation
+	pending     chan error
+	failure     error
+
+	hello chan struct{}
+	dead  chan struct{}
+}
+
+func newGuestChannel(cid uint32) *guestChannel {
+	return &guestChannel{
+		cid:    cid,
+		dialed: make(chan struct{}),
+		hello:  make(chan struct{}),
+		dead:   make(chan struct{}),
+	}
+}
+
+func (c *guestChannel) attach(conn net.Conn) {
+	c.conn = conn
+	close(c.dialed)
+}
+
+// awaitDialed waits out another caller's in-flight dial of this channel.
+func (c *guestChannel) awaitDialed(ctx context.Context) error {
+	select {
+	case <-c.dialed:
+	case <-c.dead:
+		return c.failed()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case <-c.dead:
+		return c.failed()
+	default:
+		return nil
+	}
+}
+
+// awaitHello blocks until the guest announced itself, the channel died, or
+// the context expired — the probe = dial + hello within deadline contract.
+func (c *guestChannel) awaitHello(ctx context.Context) error {
+	select {
+	case <-c.hello:
+		return nil
+	case <-c.dead:
+		return c.failed()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (c *guestChannel) markHello() {
+	c.mu.Lock()
+	c.observation.Hello = true
+	first := !c.helloSeen
+	c.helloSeen = true
+	c.mu.Unlock()
+	if first {
+		close(c.hello)
+	}
+}
+
+func (c *guestChannel) fold(status guestproto.RunnerStatus) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	switch status.State {
+	case guestproto.RunnerRegistered, guestproto.RunnerJobStarted:
+		c.observation.RunnerRegistered = true
+	case guestproto.RunnerExited:
+		c.observation.RunnerExited = true
+		c.observation.ExitCode = status.ExitCode
+	}
+}
+
+func (c *guestChannel) snapshot() GuestObservation {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.observation
+}
+
+// registerQuiesce claims the single quiesce-reply slot.
+func (c *guestChannel) registerQuiesce() (chan error, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.pending != nil {
+		return nil, errors.New("quiesce already in flight")
+	}
+	c.pending = make(chan error, 1)
+	return c.pending, nil
+}
+
+func (c *guestChannel) resolveQuiesce(err error) {
+	c.mu.Lock()
+	pending := c.pending
+	c.pending = nil
+	c.mu.Unlock()
+	if pending != nil {
+		pending <- err
+	}
+}
+
+func (c *guestChannel) write(message guestproto.Message) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	select {
+	case <-c.dead:
+		return c.failed()
+	default:
+	}
+	return guestproto.NewEncoder(c.conn).Write(message)
+}
+
+func (c *guestChannel) failed() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.failure
+}
+
+func (c *guestChannel) shutdown(err error) {
+	c.mu.Lock()
+	alreadyDead := c.failure != nil
+	if !alreadyDead {
+		c.failure = err
+	}
+	c.mu.Unlock()
+	if alreadyDead {
+		return
+	}
+	close(c.dead)
+	c.resolveQuiesce(err)
+	if c.conn != nil {
+		c.conn.Close()
+	}
+}

@@ -127,6 +127,20 @@ func (f *Fake) List(context.Context) ([]Status, error) {
 	return statuses, nil
 }
 
+// Quiesce implements Driver.
+func (f *Fake) Quiesce(_ context.Context, id ID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.fail("quiesce", id); err != nil {
+		return err
+	}
+	if _, ok := f.vms[id]; !ok {
+		return ErrNotFound
+	}
+	f.journal("quiesce %s", id)
+	return nil
+}
+
 // Destroy implements Driver.
 func (f *Fake) Destroy(_ context.Context, id ID) error {
 	f.mu.Lock()

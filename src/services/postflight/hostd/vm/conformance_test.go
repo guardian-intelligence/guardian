@@ -194,10 +194,11 @@ func TestConformanceLifecycle(t *testing.T) {
 		t.Fatalf("cloning workspace: %v", err)
 	}
 	assignment := Assignment{
-		Lease:           "lease-conf",
-		WorkspaceDevice: zvolDevicePath(workspace),
-		JITConfig:       "jit-blob",
-		Env:             map[string]string{"POSTFLIGHT_EXECUTION_ID": "exec-conf"},
+		Lease:               "lease-conf",
+		WorkspaceDevice:     zvolDevicePath(workspace),
+		WorkspaceMountpoint: "/opt/actions-runner/_work/widget/widget",
+		JITConfig:           "jit-blob",
+		Env:                 map[string]string{"POSTFLIGHT_EXECUTION_ID": "exec-conf"},
 	}
 	attachStart := time.Now()
 	if err := driver.Assign(ctx, id, assignment); err != nil {
@@ -223,7 +224,8 @@ func TestConformanceLifecycle(t *testing.T) {
 	client.Close()
 
 	deliveries := guest.deliveries(id)
-	if len(deliveries) == 0 || deliveries[0].WorkspaceSerial != workspaceNode || deliveries[0].Lease != "lease-conf" {
+	if len(deliveries) == 0 || deliveries[0].Lease != "lease-conf" ||
+		len(deliveries[0].Mounts) != 1 || deliveries[0].Mounts[0].Serial != workspaceNode {
 		t.Fatalf("deliveries %+v", deliveries)
 	}
 	status, err = driver.Status(ctx, id)

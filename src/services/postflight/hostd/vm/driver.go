@@ -33,6 +33,8 @@ type QEMU struct {
 	// Guest.Observe) so one wedged VM can never hold the driver mutex — and
 	// with it every verb on the host — indefinitely.
 	probeTimeout time.Duration
+	// quiesceTimeout bounds the guest-side sync+unmount ahead of a seal.
+	quiesceTimeout time.Duration
 
 	mu sync.Mutex
 }
@@ -100,7 +102,7 @@ func NewQEMU(cfg Config) (*QEMU, error) {
 	if err := os.MkdirAll(cfg.StateRoot, 0o750); err != nil {
 		return nil, fmt.Errorf("vm: creating state root: %w", err)
 	}
-	return &QEMU{cfg: cfg, disks: zfsDisks{}, probeTimeout: 5 * time.Second}, nil
+	return &QEMU{cfg: cfg, disks: zfsDisks{}, probeTimeout: 5 * time.Second, quiesceTimeout: 30 * time.Second}, nil
 }
 
 // meta is a VM's durable identity. It is written before any side effect, so
@@ -109,6 +111,9 @@ type meta struct {
 	ID    ID     `json:"id"`
 	Class Class  `json:"class"`
 	Lease string `json:"lease,omitempty"`
+	// WorkspaceMountpoint is where the assignment told the guest to mount
+	// the workspace; Quiesce needs it after a restart.
+	WorkspaceMountpoint string `json:"workspace_mountpoint,omitempty"`
 	// CID is the VM's vsock address for the guestd channel.
 	CID uint32 `json:"cid"`
 	// RootDataset is the per-VM root clone.
@@ -295,6 +300,7 @@ func (q *QEMU) Assign(ctx context.Context, id ID, assignment Assignment) error {
 	}
 	if record.Lease == "" {
 		record.Lease = assignment.Lease
+		record.WorkspaceMountpoint = assignment.WorkspaceMountpoint
 		if err := q.writeMeta(record); err != nil {
 			return err
 		}
@@ -308,12 +314,43 @@ func (q *QEMU) Assign(ctx context.Context, id ID, assignment Assignment) error {
 	if err := q.attachWorkspace(ctx, client, assignment.WorkspaceDevice); err != nil {
 		return err
 	}
-	return q.cfg.Guest.Deliver(ctx, id, record.CID, guestproto.Assignment{
-		Lease:           assignment.Lease,
-		WorkspaceSerial: workspaceNode,
-		JITConfig:       assignment.JITConfig,
-		Env:             assignment.Env,
+	deliverCtx, cancel := context.WithTimeout(ctx, q.probeTimeout)
+	defer cancel()
+	return q.cfg.Guest.Deliver(deliverCtx, id, record.CID, guestproto.Assignment{
+		Lease: assignment.Lease,
+		Mounts: []guestproto.Mount{{
+			Serial:     workspaceNode,
+			Filesystem: workspaceFilesystem,
+			Mountpoint: assignment.WorkspaceMountpoint,
+			Options:    workspaceMountOptions,
+		}},
+		JITConfig: assignment.JITConfig,
+		Env:       assignment.Env,
 	})
+}
+
+// Quiesce implements Driver. The guest call runs outside the driver mutex —
+// a sync of dirty pages can take seconds and must not wedge every other
+// verb on the host — under its own bound.
+func (q *QEMU) Quiesce(ctx context.Context, id ID) error {
+	if err := validateID(id); err != nil {
+		return err
+	}
+	q.mu.Lock()
+	record, err := q.readMeta(id)
+	q.mu.Unlock()
+	if errors.Is(err, os.ErrNotExist) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if record.WorkspaceMountpoint == "" {
+		return fmt.Errorf("vm: %s has no workspace to quiesce", id)
+	}
+	quiesceCtx, cancel := context.WithTimeout(ctx, q.quiesceTimeout)
+	defer cancel()
+	return q.cfg.Guest.Quiesce(quiesceCtx, id, record.CID, record.WorkspaceMountpoint)
 }
 
 // attachWorkspace hot-attaches the workspace device by stable serial,

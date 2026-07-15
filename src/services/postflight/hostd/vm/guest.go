@@ -10,7 +10,7 @@ import (
 // ride the per-VM vsock channel, speaking the guestproto contract. The
 // driver never trusts the guest for anything but its own phase — warm and
 // ready exist only in the guest's vocabulary, so this is where they come
-// from. The vsock-backed implementation lands with the guestd binary.
+// from.
 type Guest interface {
 	// Deliver hands the assignment to guestd. Idempotent per lease: guestd
 	// deduplicates redelivery.
@@ -19,6 +19,10 @@ type Guest interface {
 	// nothing (still booting, channel not up) is the zero observation, not
 	// an error.
 	Observe(ctx context.Context, id ID, cid uint32) (GuestObservation, error)
+	// Quiesce asks guestd to sync and unmount the workspace so the host can
+	// snapshot the zvol while the VM is still alive. Nil only on a quiesced
+	// reply.
+	Quiesce(ctx context.Context, id ID, cid uint32, mountpoint string) error
 }
 
 // GuestObservation is the guest-reported slice of a VM's state.
