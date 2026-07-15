@@ -189,21 +189,29 @@ type SystemdScopes struct {
 const (
 	scopeStartWait      = 15 * time.Second
 	scopeCommandTimeout = 30 * time.Second
+	// scopeStopTimeout caps systemd's own SIGTERM→SIGKILL escalation when
+	// Kill stops the scope. Unset it would be DefaultTimeoutStopSec (90s),
+	// which outlives both the synchronous systemctl stop's command timeout
+	// and Kill's poll-gone wait, so a QEMU wedged past SIGTERM would fail
+	// Kill even though systemd finishes the job later.
+	scopeStopTimeout = 20 * time.Second
 )
 
-// Start implements ScopeAPI. systemd-run is detached into its own session —
-// in scope mode it stays alive as the payload's parent for the payload's
-// whole life, so it must survive hostd exactly like the payload does. The
-// return waits for the payload to be execed inside the scope's cgroup:
-// registration is asynchronous, and a launch systemd rejected must surface
-// here, not as a mystery-dead VM later.
+// Start implements ScopeAPI. In scope mode systemd-run registers the scope,
+// moves itself into its cgroup, and execs the payload in place, so the
+// payload runs as our direct child; the new session plus the scope cgroup
+// are what keep hostd's own stop/restart (and its control group) away from
+// it. The return waits for the payload to be execed inside the scope's
+// cgroup: registration is asynchronous, and a launch systemd rejected must
+// surface here, not as a mystery-dead VM later.
 func (s SystemdScopes) Start(ctx context.Context, unit, stateDir string, argv []string) error {
 	log, err := os.OpenFile(filepath.Join(stateDir, "qemu.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return fmt.Errorf("vm: opening qemu log: %w", err)
 	}
 	defer log.Close()
-	args := []string{"--scope", "--collect", "--quiet", "--unit=" + unit}
+	args := []string{"--scope", "--collect", "--quiet",
+		"--property=TimeoutStopSec=" + scopeStopTimeout.String(), "--unit=" + unit}
 	if s.User {
 		args = append([]string{"--user"}, args...)
 	}
