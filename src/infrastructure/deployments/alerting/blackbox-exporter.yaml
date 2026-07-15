@@ -5,38 +5,10 @@
 # cadence is the scrape interval, a failed probe is a probe_success=0
 # sample, and an exporter outage is up=0 on the scrape itself. No Job pods,
 # no push path that can die before recording (both failure modes of the
-# bash CronJob canaries this replaces).
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: blackbox-exporter
-  namespace: tenant-root
-  labels:
-    app.kubernetes.io/name: blackbox-exporter
-    app.kubernetes.io/part-of: guardian
-    guardian.dev/component: alerting
-data:
-  blackbox.yml: |
-    modules:
-      http_2xx:
-        prober: http
-        timeout: 5s
-        http:
-          preferred_ip_protocol: ip4
-          follow_redirects: true
-      # For POST-only API routes: a GET drawing the router's 405 proves the
-      # whole connect path (edge -> ingress -> network policy -> app) without
-      # needing credentials or a side-effect-free GET handler. Any other
-      # status — including a 2xx from a route contract change — should fail
-      # the probe and force this module choice to be revisited.
-      http_405:
-        prober: http
-        timeout: 5s
-        http:
-          preferred_ip_protocol: ip4
-          follow_redirects: false
-          valid_status_codes: [405]
----
+# bash CronJob canaries this replaces). The exporter reads blackbox.yml
+# only at startup, so the config ships via configMapGenerator (see
+# kustomization.yaml): the name-suffix hash rolls this Deployment on every
+# module change.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
