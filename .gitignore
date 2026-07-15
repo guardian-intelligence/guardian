@@ -5,6 +5,8 @@
 # operator credential env files are never committed - creds come from the
 # operator's secret store (sops/password manager), exported into the environment.
 *.env
+# the golden-image pins file is versions and checksums, never credentials.
+!/src/services/postflight/image/pins.env
 /src/aisucks/aisucks
 /.guardian/
 
