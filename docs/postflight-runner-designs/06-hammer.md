@@ -34,8 +34,11 @@ three subcommands:
    bound (today that bound is the 30m ready deadline — the recorded
    cancellation-propagation follow-up; the assertion encodes whatever the
    current contract is, so tightening it later is a one-line change).
-5. Warm-vs-cold checkout: after the first green run of a scope, subsequent
-   runs fetch deltas only (bundle-server bytes served per lease attests it).
+5. Warm-vs-cold checkout: after the first green run of a scope, a rerun of
+   an already-fetched SHA serves zero bundle bytes, and a new-SHA run
+   serves exactly one single-commit closure over the host-local link
+   (bundle-server bytes-served + cache-hit counters per lease attest it);
+   GitHub egress is only the mirror's incremental fetch.
 6. Generation lifecycle: exactly one `current` per exercised scope, losers
    `retained`, every `sealed` candidate resolved (`committed`/`discarded`),
    invariants 1–5 of 04 hold in the final DB state.

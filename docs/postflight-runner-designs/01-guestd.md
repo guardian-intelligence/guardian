@@ -39,6 +39,13 @@ then execs the runner. A mount that cannot converge within its deadline is
 reported `runner-status: exited` with a synthetic failure code — hostd
 destroys the slot; the job is never started against a partial workspace.
 
+Once every mount has converged (and before the runner starts), guestd writes
+a workspace-ready marker file outside the workspace and injects its path
+into the runner env as `POSTFLIGHT_WORKSPACE_READY_FILE`. That variable name
+is contract with the demo repo's checkout action (05), which hard-fails when
+the variable or the file is absent — it is the action's proof that it is
+running on a converged Postflight mount.
+
 ## Runner execution
 
 - Runner tree is baked into the image at `/opt/actions-runner` (02).
