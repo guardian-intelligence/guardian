@@ -46,6 +46,7 @@ func (s *scheduler) run(ctx context.Context) {
 		s.allocateDemands(work)
 		s.placeLeases(work)
 		s.promoteSealedGenerations(work)
+		s.discardStaleCandidates(work)
 		s.sweepReapableGenerations(work)
 	}
 }
@@ -257,6 +258,20 @@ func (s *scheduler) promoteSealedGenerations(ctx context.Context) {
 			attrs.Result, attrs.Reason = "failed", "lost promotion race"
 			emitEvent(ctx, evGenerationRetained, attrs)
 		}
+	}
+}
+
+// discardStaleCandidates ages out candidates whose GitHub verdict was never
+// observed from the API — a lost delivery leaves nothing else to chase them.
+// The discard costs only the cache write and releases the dataset.
+func (s *scheduler) discardStaleCandidates(ctx context.Context) {
+	discarded, err := s.st.DiscardStaleCandidates(ctx, time.Now().Add(-s.cfg.verdictTimeout))
+	if err != nil {
+		slog.Error("scheduler: discard stale candidates", "err", err)
+		return
+	}
+	if discarded > 0 {
+		slog.Warn("scheduler: candidates discarded with no observed verdict", "generations", discarded)
 	}
 }
 

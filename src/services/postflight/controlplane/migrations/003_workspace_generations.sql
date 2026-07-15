@@ -77,7 +77,7 @@ ALTER TABLE workspace_generations
 -- confirmed the dataset is gone.
 ALTER TABLE workspace_generations DROP CONSTRAINT workspace_generations_state_check;
 ALTER TABLE workspace_generations ADD CONSTRAINT workspace_generations_state_check CHECK (state IN
-    ('candidate', 'committed', 'current', 'retained', 'discarded', 'reapable', 'reaped'));
+    ('candidate', 'committed', 'retained', 'discarded', 'reapable', 'reaped'));
 
 CREATE INDEX idx_workspace_generations_state
     ON workspace_generations (state);

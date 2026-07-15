@@ -632,6 +632,27 @@ FROM (
 ) src
 WHERE l.lease_id = $1 AND l.state = 'allocating' AND l.host_id = ''`
 
+// sqlLockLeaseScope share-locks the lease's scope row for the rest of the
+// claim transaction. The promotion CAS updates that row, so it cannot commit
+// — and retire the generation the bind below is about to read as the scope
+// pointer — until this transaction's lease references are visible. Without
+// the lock, a promotion plus a retention sweep landing inside the claim's
+// commit window could mark the clone source reapable while no committed row
+// references it yet.
+const sqlLockLeaseScope = `
+SELECT 1 FROM host_leases cl
+JOIN workspace_scopes sc ON sc.scope_id = cl.workspace_scope_id
+WHERE cl.lease_id = $1
+FOR SHARE OF sc`
+
+// sqlTouchCloneSource stamps last_used_at on the generation the bound lease
+// clones (the retention policy's recency input); a cold bind touches nothing.
+const sqlTouchCloneSource = `
+UPDATE workspace_generations g
+SET last_used_at = now(), updated_at = now()
+FROM host_leases l
+WHERE l.lease_id = $1 AND l.workspace_generation = g.generation`
+
 // ClaimHostSlot reserves one free slot for the lease and binds the lease to
 // the chosen host, atomically. The bound lease row is what carries the
 // reservation through the JIT mint: every observer (the reconcile sweep, a
@@ -644,12 +665,23 @@ func (s *pgStore) ClaimHostSlot(ctx context.Context, leaseID, class string) (str
 		return "", false, err
 	}
 	defer tx.Rollback(ctx)
+	hostID, claimed, err := claimHostSlotTx(ctx, tx, leaseID, class)
+	if err != nil || !claimed {
+		return "", false, err
+	}
+	return hostID, true, tx.Commit(ctx)
+}
+
+func claimHostSlotTx(ctx context.Context, tx pgx.Tx, leaseID, class string) (string, bool, error) {
 	var hostID string
-	err = tx.QueryRow(ctx, sqlClaimHostSlot, class, leaseID).Scan(&hostID)
+	err := tx.QueryRow(ctx, sqlClaimHostSlot, class, leaseID).Scan(&hostID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", false, nil
 	}
 	if err != nil {
+		return "", false, err
+	}
+	if _, err := tx.Exec(ctx, sqlLockLeaseScope, leaseID); err != nil {
 		return "", false, err
 	}
 	tag, err := tx.Exec(ctx, sqlBindLeaseHost, leaseID, hostID)
@@ -661,7 +693,10 @@ func (s *pgStore) ClaimHostSlot(ctx context.Context, leaseID, class string) (str
 		// the rollback discards the reservation.
 		return "", false, nil
 	}
-	return hostID, true, tx.Commit(ctx)
+	if _, err := tx.Exec(ctx, sqlTouchCloneSource, leaseID); err != nil {
+		return "", false, err
+	}
+	return hostID, true, nil
 }
 
 // sqlReconcileSlotReservations resets every slot row's reserved counter to

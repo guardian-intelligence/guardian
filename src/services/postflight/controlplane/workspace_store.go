@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"time"
 )
 
 // workspaceScopeKey is the job-shape identity of one workspace lineage.
@@ -101,7 +102,7 @@ WHERE generation = $1 AND state = 'candidate'`
 
 	sqlRetireGeneration = `
 UPDATE workspace_generations SET state = 'retained', updated_at = now()
-WHERE generation = $1 AND state IN ('committed', 'current')`
+WHERE generation = $1 AND state = 'committed'`
 )
 
 // PromoteGeneration runs one candidate's CAS. Winner: the pointer advances,
@@ -169,5 +170,26 @@ WHERE g.state IN ('retained', 'discarded')
 
 func (s *pgStore) SweepReapableGenerations(ctx context.Context) (int64, error) {
 	tag, err := s.pool.Exec(ctx, sqlSweepReapableGenerations)
+	return tag.RowsAffected(), err
+}
+
+// sqlDiscardStaleCandidates ages out candidates that have no other exit: a
+// lost completed delivery means no API read ever observes the verdict (the
+// missed-webhook reconciler only chases still-queued jobs), and an
+// inventory-adopted row has no job at all — either would otherwise pin its
+// dataset forever. Candidates still held by a sealing lease are excluded;
+// the seal deadline owns those. Adopted rows (never sealed) age from
+// creation.
+const sqlDiscardStaleCandidates = `
+UPDATE workspace_generations g
+SET state = 'discarded', updated_at = now()
+WHERE g.state = 'candidate'
+  AND COALESCE(g.sealed_at, g.created_at) <= $1
+  AND NOT EXISTS (
+      SELECT 1 FROM host_leases l
+      WHERE l.state = 'sealing' AND l.seal_generation = g.generation)`
+
+func (s *pgStore) DiscardStaleCandidates(ctx context.Context, cutoff time.Time) (int64, error) {
+	tag, err := s.pool.Exec(ctx, sqlDiscardStaleCandidates, cutoff)
 	return tag.RowsAffected(), err
 }

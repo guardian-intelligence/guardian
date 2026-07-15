@@ -601,11 +601,15 @@ func (w *worker) resolveWorkspaceScope(ctx context.Context, repoFullName, class,
 	if !ok {
 		return ""
 	}
+	scopeRef := scopeRefFor(trust, run, prBaseRef)
+	if scopeRef == "" {
+		return ""
+	}
 	name, matrixKey := splitMatrixJobName(jobName)
 	scopeID, err := w.st.EnsureWorkspaceScope(ctx, workspaceScopeKey{
 		Org:          org,
 		Repo:         repo,
-		ScopeRef:     scopeRefFor(trust, run, prBaseRef),
+		ScopeRef:     scopeRef,
 		WorkflowPath: run.Path,
 		JobName:      name,
 		MatrixKey:    matrixKey,
@@ -618,14 +622,20 @@ func (w *worker) resolveWorkspaceScope(ctx context.Context, repoFullName, class,
 	return scopeID
 }
 
-// scopeRefFor picks the branch whose lineage a job shares: PR jobs read the
-// TARGET branch's generations (their writes are never promoted), everything
-// else lives on its own head branch.
+// scopeRefFor picks the branch whose lineage a job shares: branch-trust jobs
+// live on their own head branch, PR jobs read the TARGET branch's
+// generations (their writes are never promoted). No resolvable ref — an
+// unclassified event, a PR whose base branch could not be resolved — means
+// no scope: the job runs cold rather than keying a lineage on a
+// head-controlled branch name.
 func scopeRefFor(trust string, run apiWorkflowRun, prBaseRef string) string {
-	if (trust == trustClassPR || trust == trustClassPRFork) && prBaseRef != "" {
+	switch trust {
+	case trustClassBranch:
+		return run.HeadBranch
+	case trustClassPR, trustClassPRFork:
 		return prBaseRef
 	}
-	return run.HeadBranch
+	return ""
 }
 
 // splitMatrixJobName separates GitHub's rendered matrix suffix — "build

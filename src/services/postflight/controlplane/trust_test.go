@@ -56,12 +56,30 @@ func TestTrustClassForRun(t *testing.T) {
 		{
 			name: "other event with head evidence only",
 			obs:  runObservation{Event: "dynamic", RepositoryFullName: "org/repo", HeadSHA: "abc123"},
-			want: trustClassBranch,
+			want: trustClassUnknown,
 		},
 		{
 			name: "other event with head branch only",
 			obs:  runObservation{Event: "dynamic", RepositoryFullName: "org/repo", HeadBranch: "main"},
-			want: trustClassBranch,
+			want: trustClassUnknown,
+		},
+		{
+			name: "workflow_run from a fork PR never reaches branch trust",
+			obs: runObservation{Event: "workflow_run", RepositoryFullName: "org/repo",
+				HeadRepositoryFullName: "fork/repo", HeadBranch: "main", HeadSHA: "abc123"},
+			want: trustClassUnknown,
+		},
+		{
+			name: "workflow_run same repo stays unknown",
+			obs: runObservation{Event: "workflow_run", RepositoryFullName: "org/repo",
+				HeadRepositoryFullName: "org/repo", HeadBranch: "main", HeadSHA: "abc123"},
+			want: trustClassUnknown,
+		},
+		{
+			name: "push with a fork head repository stays unknown",
+			obs: runObservation{Event: "push", RepositoryFullName: "org/repo",
+				HeadRepositoryFullName: "fork/repo"},
+			want: trustClassUnknown,
 		},
 		{
 			name: "no evidence",

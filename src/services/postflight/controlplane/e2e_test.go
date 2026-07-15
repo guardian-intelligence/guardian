@@ -223,6 +223,7 @@ func startControlPlane(t *testing.T) *controlPlane {
 		allocateTimeout:    10 * time.Second,
 		assignmentTimeout:  90 * time.Second,
 		sealTimeout:        10 * time.Second,
+		verdictTimeout:     time.Hour,
 		hostOfflineTimeout: 5 * time.Minute,
 	}
 	gh, err := newGitHubClient(cfg)

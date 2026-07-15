@@ -21,7 +21,7 @@ import (
 )
 
 func testScheduler(st *pgStore) *scheduler {
-	return &scheduler{st: st, cfg: config{workerBatchSize: 16}, tracer: noop.NewTracerProvider().Tracer("test")}
+	return &scheduler{st: st, cfg: config{workerBatchSize: 16, verdictTimeout: time.Hour}, tracer: noop.NewTracerProvider().Tracer("test")}
 }
 
 func ensureScope(t *testing.T, st *pgStore, jobName string) string {
@@ -109,6 +109,16 @@ func scopePointer(t *testing.T, pool *pgxpool.Pool, scopeID string) (generation,
 		t.Fatal(err)
 	}
 	return generation, homeHost
+}
+
+func generationLastUsedSet(t *testing.T, pool *pgxpool.Pool, generation string) bool {
+	t.Helper()
+	var set bool
+	if err := pool.QueryRow(context.Background(),
+		`SELECT last_used_at IS NOT NULL FROM workspace_generations WHERE generation = $1`, generation).Scan(&set); err != nil {
+		t.Fatal(err)
+	}
+	return set
 }
 
 func generationState(t *testing.T, pool *pgxpool.Pool, generation string) string {
@@ -207,6 +217,10 @@ func TestColdSeedWarmCloneAndRetirement(t *testing.T) {
 	}
 	assertPointerCommitted(t, pool)
 
+	if generationLastUsedSet(t, pool, gen1) {
+		t.Fatal("last_used_at set before any lease cloned the generation")
+	}
+
 	// Warm: the next lease of the scope clones the promoted generation.
 	lease2, host2 := placeAssignedLease(t, st, seedTrustedDemand(t, pool, 102, trustClassBranch, scopeID))
 	if host2 != host1 {
@@ -217,6 +231,9 @@ func TestColdSeedWarmCloneAndRetirement(t *testing.T) {
 	}
 	if got := leaseColumn(t, pool, lease2, "observed_source_generation"); got != gen1 {
 		t.Fatalf("warm claim observed_source = %q, want %q", got, gen1)
+	}
+	if !generationLastUsedSet(t, pool, gen1) {
+		t.Fatal("warm claim did not stamp last_used_at on its clone source")
 	}
 
 	gen2 := exitAndSeal(t, st, host2, lease2)
@@ -527,6 +544,164 @@ func TestReapNeverSelectsReferencedGenerations(t *testing.T) {
 		if !want[g] {
 			t.Fatalf("reap dispatch = %v includes %q, want only %v", reap, g, want)
 		}
+	}
+}
+
+// TestBindHoldsScopeAgainstConcurrentPromotion pins the claim transaction's
+// scope lock: while a bind that read the current pointer is still
+// uncommitted, the promotion that would retire that pointer's generation
+// must wait — and once it lands, the retention sweep must see the bound
+// lease's reference. Without the lock, a promotion plus a sweep committing
+// inside the bind's commit window would reap the clone source out from
+// under the placed lease. The held bind is deliberately COLD (the source is
+// resident on the other host), so the scope lock is the only thing
+// serializing it against the promotion.
+func TestBindHoldsScopeAgainstConcurrentPromotion(t *testing.T) {
+	ctx := context.Background()
+	st, pool := startStore(t)
+	seedHost(t, st, "host-a", 1)
+	seedHost(t, st, "host-b", 1)
+	scopeID := ensureScope(t, st, "build")
+	sched := testScheduler(st)
+
+	// gen1 committed and pointer-referenced on host-a; gen2 sealed and
+	// verdict-observed, ready to displace it.
+	lease1, host1 := placeAssignedLease(t, st, seedTrustedDemand(t, pool, 801, trustClassBranch, scopeID))
+	gen1 := exitAndSeal(t, st, host1, lease1)
+	observeJobConclusion(t, pool, 801, 1, "success")
+	sched.promoteSealedGenerations(ctx)
+	if pointer, homeHost := scopePointer(t, pool, scopeID); pointer != gen1 || homeHost != "host-a" {
+		t.Fatalf("seed promotion: pointer=%q home=%q, want %q on host-a", pointer, homeHost, gen1)
+	}
+	lease2, host2 := placeAssignedLease(t, st, seedTrustedDemand(t, pool, 802, trustClassBranch, scopeID))
+	gen2 := exitAndSeal(t, st, host2, lease2)
+	observeJobConclusion(t, pool, 802, 1, "success")
+
+	// A scope-less filler occupies the home host's only slot, forcing the
+	// next claim off-host.
+	_, fillerHost := placeAssignedLease(t, st, seedTrustedDemand(t, pool, 803, trustClassBranch, ""))
+	if fillerHost != "host-a" {
+		t.Fatalf("filler placed on %q, want host-a", fillerHost)
+	}
+
+	// A third lease's claim, held open mid-transaction after reading gen1 as
+	// the scope pointer — cold, on host-b, so no generation row is touched.
+	lease3 := mustCreateLease(t, st, seedTrustedDemand(t, pool, 804, trustClassBranch, scopeID), time.Now().Add(time.Minute))
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	host3, claimed, err := claimHostSlotTx(ctx, tx, lease3, storeTestClass)
+	if err != nil || !claimed {
+		t.Fatalf("claim in held transaction: claimed=%v err=%v", claimed, err)
+	}
+	if host3 != "host-b" {
+		t.Fatalf("held claim placed on %q, want the cold host-b", host3)
+	}
+
+	promoted := make(chan error, 1)
+	go func() {
+		_, _, err := st.PromoteGeneration(ctx, sealedCandidate{
+			Generation: gen2, ScopeID: scopeID, HostID: host2, ObservedSource: gen1,
+		})
+		promoted <- err
+	}()
+	select {
+	case <-promoted:
+		t.Fatal("promotion committed while a bind reading the displaced pointer was in flight")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	// The pointer generation is untouched, so the sweep has nothing to take.
+	if _, err := st.SweepReapableGenerations(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := generationState(t, pool, gen1); got != genCommitted {
+		t.Fatalf("generation state during held bind = %q, want committed", got)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-promoted:
+		if err != nil {
+			t.Fatalf("promotion after bind commit: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("promotion did not proceed once the bind committed")
+	}
+	if pointer, _ := scopePointer(t, pool, scopeID); pointer != gen2 {
+		t.Fatalf("pointer = %q, want %q", pointer, gen2)
+	}
+
+	// gen1 is retained now, but the committed bind references it: the sweep
+	// must hold until the lease terminalizes.
+	if got := leaseColumn(t, pool, lease3, "observed_source_generation"); got != gen1 {
+		t.Fatalf("held bind observed_source = %q, want %q", got, gen1)
+	}
+	if got := leaseColumn(t, pool, lease3, "workspace_generation"); got != "" {
+		t.Fatalf("held bind workspace_generation = %q, want cold", got)
+	}
+	if _, err := st.SweepReapableGenerations(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := generationState(t, pool, gen1); got != genRetained {
+		t.Fatalf("generation state with live lease reference = %q, want retained", got)
+	}
+	if failed, err := st.FailAllocatingLease(ctx, lease3, "test teardown", nil); err != nil || !failed {
+		t.Fatalf("fail lease: failed=%v err=%v", failed, err)
+	}
+	if _, err := st.SweepReapableGenerations(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := generationState(t, pool, gen1); got != genReapable {
+		t.Fatalf("generation state after last reference dropped = %q, want reapable", got)
+	}
+}
+
+// TestStaleCandidateDiscard: candidates with no path to a verdict — a sealed
+// candidate whose completed delivery was lost, an inventory-adopted row with
+// no job at all — age out to discarded, while candidates still held by a
+// sealing lease are left to the seal deadline.
+func TestStaleCandidateDiscard(t *testing.T) {
+	ctx := context.Background()
+	st, pool := startStore(t)
+	seedHost(t, st, "host-a", 4)
+	scopeID := ensureScope(t, st, "build")
+
+	leaseA, hostA := placeAssignedLease(t, st, seedTrustedDemand(t, pool, 901, trustClassBranch, scopeID))
+	genA := exitAndSeal(t, st, hostA, leaseA)
+
+	leaseB, hostB := placeAssignedLease(t, st, seedTrustedDemand(t, pool, 902, trustClassBranch, scopeID))
+	_, genB, done, err := st.CompleteLease(ctx, hostB, leaseB, 0, time.Now().Add(time.Minute))
+	if err != nil || !done || genB == "" {
+		t.Fatalf("complete: generation=%q done=%v err=%v", genB, done, err)
+	}
+
+	if err := st.ObserveHostGenerations(ctx, "host-a", []syncproto.GenerationReport{{Generation: "gen-adopted", Bytes: 1}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Young candidates are untouched.
+	if n, err := st.DiscardStaleCandidates(ctx, time.Now().Add(-time.Minute)); err != nil || n != 0 {
+		t.Fatalf("discard with young candidates: n=%d err=%v", n, err)
+	}
+
+	// Past the deadline: the unheld candidates discard, the sealing lease's
+	// candidate holds.
+	if n, err := st.DiscardStaleCandidates(ctx, time.Now().Add(time.Second)); err != nil || n != 2 {
+		t.Fatalf("discard stale candidates: n=%d err=%v", n, err)
+	}
+	if got := generationState(t, pool, genA); got != genDiscarded {
+		t.Fatalf("verdict-less candidate state = %q, want discarded", got)
+	}
+	if got := generationState(t, pool, "gen-adopted"); got != genDiscarded {
+		t.Fatalf("adopted candidate state = %q, want discarded", got)
+	}
+	if got := generationState(t, pool, genB); got != genCandidate {
+		t.Fatalf("sealing-held candidate state = %q, want candidate", got)
 	}
 }
 
