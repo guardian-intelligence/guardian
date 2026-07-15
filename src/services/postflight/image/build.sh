@@ -198,6 +198,16 @@ qemu-nbd --connect "${nbd}" --format qcow2 "${work_image}"
 nbd_connected=true
 udevadm settle
 
+# qemu-nbd returns before the kernel finishes scanning the partition table,
+# and settle cannot wait for uevents that have not been queued yet, so the
+# pN device nodes can still be absent on the first look.
+for _ in $(seq 1 50); do
+  [[ -b "${nbd}p1" ]] && break
+  sleep 0.2
+  udevadm settle
+done
+[[ -b "${nbd}p1" ]] || die "nbd partitions never appeared on ${nbd}"
+
 root_part=""
 boot_part=""
 esp_part=""
