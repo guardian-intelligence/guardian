@@ -466,10 +466,11 @@ func TestQuiesceFailureCarriesTheReason(t *testing.T) {
 	}
 }
 
-// TestReconnectReplaysTheLatestStatus: a host that reconnects (hostd
-// restart) is greeted and caught up, so a runner exit observed while no
-// host was connected is never lost.
-func TestReconnectReplaysTheLatestStatus(t *testing.T) {
+// TestReconnectReplaysTheRunnerLadder: a host that reconnects (hostd
+// restart) is greeted and caught up on every status, so a runner exit
+// observed while no host was connected is never lost — and neither is the
+// registration that preceded it.
+func TestReconnectReplaysTheRunnerLadder(t *testing.T) {
 	w := newWorld(t, nil, nil)
 	w.system.devices["workspace"] = "/dev/sdb"
 
@@ -484,9 +485,37 @@ func TestReconnectReplaysTheLatestStatus(t *testing.T) {
 
 	second := w.listener.dial(t)
 	second.expect(guestproto.KindHello)
+	second.expectStatus(guestproto.RunnerMounting)
+	second.expectStatus(guestproto.RunnerRegistered)
+	second.expectStatus(guestproto.RunnerJobStarted)
 	if status := second.expectStatus(guestproto.RunnerExited); status.ExitCode != 0 {
 		t.Fatalf("replayed %+v", status)
 	}
+}
+
+// TestNewerConnectionSupplantsInArrivalOrder: the connection accepted last
+// is the one that carries statuses, even when its predecessor's handler is
+// still alive — a dying dial must never steal the channel back.
+func TestNewerConnectionSupplantsInArrivalOrder(t *testing.T) {
+	w := newWorld(t, nil, nil)
+	w.system.devices["workspace"] = "/dev/sdb"
+
+	first := w.listener.dial(t)
+	first.expect(guestproto.KindHello)
+	second := w.listener.dial(t)
+	second.expect(guestproto.KindHello)
+
+	// The first connection was closed by the supplant.
+	_ = first.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if message, err := first.decoder.Read(); err == nil {
+		t.Fatalf("supplanted connection was served %s", message.Kind)
+	}
+
+	second.send(guestproto.Message{Kind: guestproto.KindAssignment, Assignment: ptr(testAssignment())})
+	second.expectStatus(guestproto.RunnerMounting)
+	second.expectStatus(guestproto.RunnerRegistered)
+	second.expectStatus(guestproto.RunnerJobStarted)
+	second.expectStatus(guestproto.RunnerExited)
 }
 
 func TestRunnerFailureToStartIsSynthetic(t *testing.T) {

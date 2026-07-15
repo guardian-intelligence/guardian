@@ -88,7 +88,7 @@ type Server struct {
 	mu       sync.Mutex
 	conn     net.Conn
 	assigned *guestproto.Assignment
-	latest   *guestproto.RunnerStatus
+	statuses []guestproto.RunnerStatus
 
 	// writeMu serializes frames. It is separate from mu so a slow host —
 	// a blocked status write — can never stall inbound dispatch.
@@ -104,7 +104,10 @@ func New(cfg Config) (*Server, error) {
 }
 
 // Serve accepts host connections until the context ends or the listener
-// fails.
+// fails. Rejection and supplanting happen here, on the accept goroutine:
+// "newer connection wins" is only well defined in arrival order, and a
+// concurrent handler for a dying dial must never get to close a healthy
+// successor.
 func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	stop := context.AfterFunc(ctx, func() { listener.Close() })
 	defer stop()
@@ -116,34 +119,40 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 			}
 			return fmt.Errorf("guestd: accept: %w", err)
 		}
-		go s.handle(conn)
+		if addr, ok := conn.RemoteAddr().(vsock.Addr); ok && addr.CID != s.cfg.HostCID {
+			s.cfg.Logger.Error("rejected non-host peer", "peer", addr.String())
+			conn.Close()
+			continue
+		}
+		go s.handle(conn, s.supplant(conn))
 	}
 }
 
-// handle serves one host connection: greet, replay the latest runner
-// status so a reconnecting host catches up, then dispatch inbound verbs.
-func (s *Server) handle(conn net.Conn) {
-	if addr, ok := conn.RemoteAddr().(vsock.Addr); ok && addr.CID != s.cfg.HostCID {
-		s.cfg.Logger.Error("rejected non-host peer", "peer", addr.String())
-		conn.Close()
-		return
-	}
+// supplant makes conn the current host connection and returns the runner
+// statuses the new host must be caught up on.
+func (s *Server) supplant(conn net.Conn) []guestproto.RunnerStatus {
 	s.mu.Lock()
 	old := s.conn
 	s.conn = conn
-	latest := s.latest
+	replay := append([]guestproto.RunnerStatus(nil), s.statuses...)
 	s.mu.Unlock()
 	if old != nil {
 		old.Close()
 	}
+	return replay
+}
 
+// handle serves one host connection: greet, replay the runner status ladder
+// so a reconnecting host catches up (the latest status alone is not enough —
+// an exit replayed without its registration would un-happen the job on the
+// host's fold), then dispatch inbound verbs.
+func (s *Server) handle(conn net.Conn, replay []guestproto.RunnerStatus) {
 	if err := s.writeTo(conn, guestproto.Message{Kind: guestproto.KindHello, Hello: &guestproto.Hello{Version: guestproto.Version}}); err != nil {
 		s.drop(conn)
 		return
 	}
-	if latest != nil {
-		status := *latest
-		if err := s.writeTo(conn, guestproto.Message{Kind: guestproto.KindRunnerStatus, RunnerStatus: &status}); err != nil {
+	for i := range replay {
+		if err := s.writeTo(conn, guestproto.Message{Kind: guestproto.KindRunnerStatus, RunnerStatus: &replay[i]}); err != nil {
 			s.drop(conn)
 			return
 		}
@@ -202,11 +211,11 @@ func (s *Server) writeTo(conn net.Conn, message guestproto.Message) error {
 	return conn.SetWriteDeadline(time.Time{})
 }
 
-// sendStatus records the latest runner status and streams it if a host is
+// sendStatus records the runner status and streams it if a host is
 // connected.
 func (s *Server) sendStatus(status guestproto.RunnerStatus) {
 	s.mu.Lock()
-	s.latest = &status
+	s.statuses = append(s.statuses, status)
 	s.mu.Unlock()
 	if err := s.send(guestproto.Message{Kind: guestproto.KindRunnerStatus, RunnerStatus: &status}); err != nil {
 		s.cfg.Logger.Warn("runner status not delivered", "state", status.State, "err", err)
