@@ -34,6 +34,19 @@ spec:
         guardian.dev/stage: prod
     spec:
       automountServiceAccountToken: false
+      # Soft spread across nodes: with 3 replicas, maxUnavailable 0 and a
+      # minAvailable-2 PDB, two replicas co-scheduled on one node would let a
+      # single node loss breach the budget. ScheduleAnyway (not DoNotSchedule)
+      # so a degraded cluster can still schedule rollouts.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: company-site
+              app.kubernetes.io/part-of: guardian
+              guardian.dev/stage: prod
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
