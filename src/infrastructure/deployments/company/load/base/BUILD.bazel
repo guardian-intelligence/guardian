@@ -1,6 +1,7 @@
 filegroup(
     name = "manifests",
     srcs = [
+        "canary-load.js",
         "kustomization.yaml",
         "stress.js",
     ],

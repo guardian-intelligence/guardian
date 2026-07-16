@@ -12,3 +12,4 @@ configMapGenerator:
   - name: company-site-stress-gate
     files:
       - stress.js
+      - canary-load.js

@@ -44,9 +44,10 @@ spec:
             - port: "53"
               protocol: TCP
 ---
-# company-site-loadtester: webhook calls arrive from the Flagger controller; the
-# checks it executes go to the company-site pods (canary Service), DNS, and
-# VictoriaMetrics remote-write for the k6 stress gate.
+# company-site-loadtester: webhook calls arrive from the Flagger controller;
+# the checks it executes go to the company-site pods (canary Service, the
+# pre-rollout stress gate), the public edge (the during-analysis canary-load
+# generator), DNS, and VictoriaMetrics remote-write for k6 results.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -98,6 +99,15 @@ spec:
       toPorts:
         - ports:
             - port: "8480"
+              protocol: TCP
+    # canary-load runs through the public edge (Cloudflare -> origin nginx)
+    # so the ingress weight split applies and AOP is satisfied by the edge
+    # terminating the origin-pull handshake.
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
               protocol: TCP
 ---
 # Ingress half of the remote-write path: tenant-root's generated isolation
