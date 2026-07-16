@@ -443,11 +443,26 @@ deleted mid-ingest lost zero acknowledged rows). Cold-boot notes:
 
 ## Aftermath
 
+0. **Apply `guardian-mgmt-cloudflare-tokens` before any lane-root apply.**
+   This root is not in the `aspect infra tofu-init`/`validate` task lists, so
+   it is applied out-of-band; until its declared scope is applied, the
+   dns-lb-provisioner token cannot write DNS records and the
+   `guardian-mgmt-dns` apply 403s. With `CLOUDFLARE_API_TOKEN` set from the
+   custody `cloudflare_token_minter_api_token` key and the R2 state env
+   (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_ENDPOINT_URL_S3` from
+   custody.env):
+
+   ```sh
+   bazelisk run @multitool//tools/tofu:workspace_root -- -chdir=src/infrastructure/bootstrap/guardian-mgmt-cloudflare-tokens init -input=false -reconfigure -backend-config=endpoint=$AWS_ENDPOINT_URL_S3
+   bazelisk run @multitool//tools/tofu:workspace_root -- -chdir=src/infrastructure/bootstrap/guardian-mgmt-cloudflare-tokens plan -input=false -var-file=src/infrastructure/bootstrap/backend.tfvars
+   bazelisk run @multitool//tools/tofu:workspace_root -- -chdir=src/infrastructure/bootstrap/guardian-mgmt-cloudflare-tokens apply -input=false -var-file=src/infrastructure/bootstrap/backend.tfvars
+   ```
+
 1. `aspect infra edge-health` (expect all targets green) and, with
    `CLOUDFLARE_API_TOKEN` set from the dns-lb-provisioner key,
    `aspect infra tofu-init --root guardian-mgmt-dns` followed by
    `bazelisk run @multitool//tools/tofu:workspace_root -- -chdir=src/infrastructure/bootstrap/guardian-mgmt-dns plan -input=false -var-file=src/infrastructure/bootstrap/backend.tfvars`
-   (expect zero infrastructure changes — node IPs are unchanged). Workload
+   (in steady state, zero changes — node IPs are unchanged). Workload
    DNS records are owned by the in-cluster `external-dns` controller, not
    this root; this plan covers the Cloudflare Load Balancer pool/monitor
    objects plus the `k8s.guardianintelligence.org` control-plane A records,

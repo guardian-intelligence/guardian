@@ -110,11 +110,8 @@ resource "cloudflare_load_balancer" "guardian_mgmt_public" {
   }
 }
 
-# The control-plane API name cannot ride the in-cluster ExternalDNS
-# controller (it must resolve while the cluster is down or being rebuilt)
-# and cannot be proxied (Cloudflare does not proxy the API ports), so it
-# lives in this DR root as DNS-only round-robin A records that shadow the
-# wildcard load balancer for this one hostname.
+# Must resolve while the cluster is down, so not in-cluster ExternalDNS;
+# Cloudflare cannot proxy the Kubernetes/Talos API ports, so proxied=false.
 resource "cloudflare_dns_record" "guardian_mgmt_k8s_api" {
   for_each = local.public_ingress_origins
 
