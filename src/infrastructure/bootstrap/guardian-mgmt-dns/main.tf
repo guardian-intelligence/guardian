@@ -31,6 +31,8 @@ locals {
     for name in local.public_ingress_origin_names :
     local.public_ingress_origins[name].public_ipv4
   ]
+
+  k8s_api_hostname = "k8s.${local.cloudflare_zone_name}"
 }
 
 data "cloudflare_zone" "guardianintelligence_org" {
@@ -106,6 +108,20 @@ resource "cloudflare_load_balancer" "guardian_mgmt_public" {
   adaptive_routing = {
     failover_across_pools = false
   }
+}
+
+# Must resolve while the cluster is down, so not in-cluster ExternalDNS;
+# Cloudflare cannot proxy the Kubernetes/Talos API ports, so proxied=false.
+resource "cloudflare_dns_record" "guardian_mgmt_k8s_api" {
+  for_each = local.public_ingress_origins
+
+  zone_id = data.cloudflare_zone.guardianintelligence_org.id
+  name    = local.k8s_api_hostname
+  type    = "A"
+  content = each.value.public_ipv4
+  ttl     = 300
+  proxied = false
+  comment = "guardian-mgmt ${each.key} control-plane API"
 }
 
 check "cloudflare_load_balancer_hostnames" {

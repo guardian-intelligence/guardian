@@ -240,6 +240,11 @@ curl -X POST "https://api.latitude.sh/servers/<server-id>/reinstall" \
 Server IDs: ash-earth `sv_vAPXaMxKM5epz`, ash-water `sv_8mop5gZo8Njxv`,
 ash-wind `sv_nPRbajqEB5koM`.
 
+Node public IPs — the dark-case constants (`k8s.guardianintelligence.org`
+and every other zone name is Cloudflare-hosted DNS, unresolvable while
+dark): ash-earth `206.223.228.101`, ash-wind `45.250.254.119`,
+ash-water `206.223.228.87`.
+
 **The outcome is bimodal — poll BOTH ssh:22 and Talos:50000 and branch:**
 
 - **Ubuntu came up** (ssh answers as `ubuntu@`): identify disks BY SERIAL
@@ -438,15 +443,31 @@ deleted mid-ingest lost zero acknowledged rows). Cold-boot notes:
 
 ## Aftermath
 
+0. **Apply `guardian-mgmt-cloudflare-tokens` before any lane-root apply.**
+   This root is not in the `aspect infra tofu-init`/`validate` task lists, so
+   it is applied out-of-band; until its declared scope is applied, the
+   dns-lb-provisioner token cannot write DNS records and the
+   `guardian-mgmt-dns` apply 403s. With `CLOUDFLARE_API_TOKEN` set from the
+   custody `cloudflare_token_minter_api_token` key and the R2 state env
+   (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_ENDPOINT_URL_S3` from
+   custody.env):
+
+   ```sh
+   bazelisk run @multitool//tools/tofu:workspace_root -- -chdir=src/infrastructure/bootstrap/guardian-mgmt-cloudflare-tokens init -input=false -reconfigure -backend-config=endpoint=$AWS_ENDPOINT_URL_S3
+   bazelisk run @multitool//tools/tofu:workspace_root -- -chdir=src/infrastructure/bootstrap/guardian-mgmt-cloudflare-tokens plan -input=false -var-file=src/infrastructure/bootstrap/backend.tfvars
+   bazelisk run @multitool//tools/tofu:workspace_root -- -chdir=src/infrastructure/bootstrap/guardian-mgmt-cloudflare-tokens apply -input=false -var-file=src/infrastructure/bootstrap/backend.tfvars
+   ```
+
 1. `aspect infra edge-health` (expect all targets green) and, with
    `CLOUDFLARE_API_TOKEN` set from the dns-lb-provisioner key,
    `aspect infra tofu-init --root guardian-mgmt-dns` followed by
    `bazelisk run @multitool//tools/tofu:workspace_root -- -chdir=src/infrastructure/bootstrap/guardian-mgmt-dns plan -input=false -var-file=src/infrastructure/bootstrap/backend.tfvars`
-   (expect zero infrastructure changes — node IPs are unchanged). DNS records
-   themselves are owned by the in-cluster `external-dns` controller, not this
-   root; this plan only covers the Cloudflare Load Balancer pool/monitor
-   objects, which is why it stays raw OpenTofu rather than an `aspect`
-   subcommand. Zone edge policy (AOP, the cache ruleset, bot management) is
+   (in steady state, zero changes — node IPs are unchanged). Workload
+   DNS records are owned by the in-cluster `external-dns` controller, not
+   this root; this plan covers the Cloudflare Load Balancer pool/monitor
+   objects plus the `k8s.guardianintelligence.org` control-plane A records,
+   which is why it stays raw OpenTofu rather than an `aspect` subcommand.
+   Zone edge policy (AOP, the cache ruleset, bot management) is
    the separate `guardian-mgmt-edge-policy` root, applied with the
    edge-policy-provisioner token — verify its plan is empty too when that
    token is at hand.
