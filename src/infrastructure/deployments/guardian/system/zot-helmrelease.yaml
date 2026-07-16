@@ -59,11 +59,16 @@ spec:
     mountConfig: true
     configFiles:
       # Validated against this exact zot build with `zot verify` plus a live
-      # pull-through smoke test before shipping. Two settings are load-bearing
+      # pull-through smoke test before shipping. Three settings are load-bearing
       # for the digest-pinned estate and must never be relaxed:
-      # preserveDigest + http.compat docker2s2. zot's default sync CONVERTS
-      # docker-media-type manifests to OCI, which changes digests and would
-      # break every pinned ref and cosign signature served through the mirror.
+      # preserveDigest + http.compat docker2s2 + syncLegacyCosignTags=false.
+      # zot's default sync converts docker-media-type manifests to OCI, which
+      # changes digests and would break every pinned ref and cosign signature
+      # served through the mirror. Its default referrer sync also enumerates
+      # legacy Cosign tags and compares each signature manifest with its subject
+      # digest, forcing a redundant upstream copy on every OCI referrers read.
+      # The countersigner explicitly requests the one legacy CI signature tag
+      # when needed, so referrer discovery must not sync those tags implicitly.
       #
       # accessControl is the write lock, not an auth system: without it zot
       # serves anonymous read-WRITE. The one writer is the countersigner's
@@ -163,6 +168,7 @@ spec:
                   "onDemand": true,
                   "tlsVerify": true,
                   "preserveDigest": true,
+                  "syncLegacyCosignTags": false,
                   "maxRetries": 3,
                   "retryDelay": "5m"
                 }

@@ -107,7 +107,11 @@ publicly logged; the bundle embeds the inclusion proof, so verifying it —
 log check included — needs no network, only the public key and the same
 pinned trusted root. Countersignatures attach as OCI 1.1 referrers, never
 legacy `.sig` tags — a tag GET re-triggers on-demand sync, which would
-clobber a locally-modified tag, while sync never touches local referrers.
+clobber a locally-modified tag. The mirror disables implicit legacy-tag
+sync during referrer discovery: zot otherwise enumerates and redundantly
+copies the CI `.sig` manifest before returning its local OCI referrers.
+The explicit Fulcio verification still resolves that exact CI signature tag
+on demand when a digest needs countersigning.
 The loop's one internet path is the Rekor upload (world:443 — FQDN
 allowlisting needs the L7 DNS proxy the chained datapath rules out);
 everything else it talks to is in-cluster (OpenBao, zot, apiserver,
