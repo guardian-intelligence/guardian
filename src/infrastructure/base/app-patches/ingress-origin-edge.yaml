@@ -44,14 +44,6 @@ spec:
                       values:
                         - controller
                 topologyKey: kubernetes.io/hostname
-        # Standard per-request controller metrics (10254): the request series
-        # carries a `canary` label distinguishing responses the canary-weight
-        # split routed to an alternative backend — the only exporter that can
-        # attribute weighted-canary traffic (the protobuf detail series labels
-        # by matched route, blind to the split). Scraped by
-        # deployments/alerting/ingress-nginx-observability.yaml.
-        metrics:
-          enabled: true
         config:
           use-http2: "false"
           # x-guardian-* headers exist only on AOP-verified connections
@@ -80,9 +72,12 @@ spec:
           # Not $remote_addr: the realip module rewrites it from the
           # client-settable CF-Connecting-IP. $realip_remote_addr is the TCP peer.
           x-guardian-edge-peer-ip: $realip_remote_addr
+        # externalTrafficPolicy must stay unset: with hostNetwork the Service
+        # is ClusterIP with no externalIPs, and the API rejects the field on
+        # non-externally-accessible Services — any render carrying it wedges
+        # the HelmRelease (upgrade AND rollback both fail validation).
         service:
           externalIPs: []
-          externalTrafficPolicy: Cluster
         updateStrategy:
           type: RollingUpdate
           rollingUpdate:

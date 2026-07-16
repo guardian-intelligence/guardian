@@ -35,3 +35,24 @@ spec:
     address: http://vmselect-shortterm.tenant-root.svc:8481/select/0/prometheus
   query: |
     max(quantile_over_time(0.95, probe_duration_seconds{probe_namespace="{{ namespace }}",probe_class="service"}[{{ interval }}]))
+---
+# Success rate of responses the canary color actually served, from the
+# access-log-derived series vmalert-vlogs records
+# (deployments/alerting/ingress-canary-metrics.yaml) — the only exporter
+# path that can attribute the nginx canary-weight split. The record is
+# already a 1m-windowed count refreshed every 60s, so the template reads
+# the latest sample directly; no rate() over {{ interval }}.
+apiVersion: flagger.app/v1beta1
+kind: MetricTemplate
+metadata:
+  name: canary-request-success-rate
+  namespace: flagger
+spec:
+  provider:
+    type: prometheus
+    address: http://vmselect-shortterm.tenant-root.svc:8481/select/0/prometheus
+  query: |
+    sum(guardian:company_site_canary_responses:count1m{status!~"5.."})
+    /
+    sum(guardian:company_site_canary_responses:count1m)
+    * 100

@@ -19,11 +19,11 @@
 #      AOP admits only edge-terminated connections, so in-cluster traffic
 #      cannot exercise the split; this also guarantees the gate series a
 #      request-volume floor when organic traffic is sparse;
-#   4. per-interval metric checks — Flagger's built-in nginx
-#      request-success-rate reads the controller's canary-labeled request
-#      series, so it scores ONLY responses the canary color served to
-#      weighted traffic; the blackbox probe gates (service class, apex
-#      path) guard overall health alongside it.
+#   4. per-interval metric checks — canary-request-success-rate reads the
+#      access-log-derived series vmalert-vlogs records, so it scores ONLY
+#      responses the canary color served to weighted traffic; the blackbox
+#      probe gates (service class, apex path) guard overall health
+#      alongside it.
 # threshold: 3 failed checks → automatic rollback (weight to 0, canary
 # scaled to zero, primary untouched, status Failed). Post-cutover
 # regressions roll back via Git revert through this same gate.
@@ -66,14 +66,19 @@ spec:
           name: alert-relay
           namespace: flagger
     metrics:
-      # Flagger built-in (provider: nginx): success rate of the responses
-      # the canary color actually served, from the controller's
-      # canary-labeled request series via the global metricsServer
-      # (vmselect). Starts at 95 (tolerant of a single stray 5xx on the
-      # ~60-request windows the 10% step sees); tighten toward 99 once a
-      # few weighted rollouts have soaked. No-data fails the check — by
-      # design: the canary-load webhook is what guarantees the denominator.
-      - name: request-success-rate
+      # Success rate of responses the canary color actually served, via the
+      # access-log recording rule (see the MetricTemplate for why the log is
+      # the only attributable source). Starts at 95 (tolerant of a single
+      # stray 5xx on the ~60-request windows the 10% step sees); tighten
+      # toward 99 once a few weighted rollouts have soaked. No-data fails
+      # the check — by design: the canary-load webhook guarantees the
+      # denominator, and the recording rule's 60s cadence means the FIRST
+      # check after a weight step may legitimately be empty (threshold 3
+      # absorbs it).
+      - name: canary-request-success-rate
+        templateRef:
+          name: canary-request-success-rate
+          namespace: flagger
         thresholdRange:
           min: 95
         interval: 1m
