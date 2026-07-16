@@ -72,12 +72,16 @@ spec:
           # Not $remote_addr: the realip module rewrites it from the
           # client-settable CF-Connecting-IP. $realip_remote_addr is the TCP peer.
           x-guardian-edge-peer-ip: $realip_remote_addr
-        # externalTrafficPolicy must stay unset: with hostNetwork the Service
-        # is ClusterIP with no externalIPs, and the API rejects the field on
-        # non-externally-accessible Services — any render carrying it wedges
-        # the HelmRelease (upgrade AND rollback both fail validation).
         service:
           externalIPs: []
+          # Cozystack's ingress render sets externalTrafficPolicy: Cluster
+          # unconditionally — valid on ITS Service (which carries the
+          # publishing externalIPs) but rejected by the API once externalIPs
+          # is emptied for the hostNetwork edge, wedging every Helm upgrade
+          # AND rollback at Service validation. SSA cannot delete the
+          # parent-owned key from here; empty string makes the chart's
+          # `if` guard omit the field from the render instead.
+          externalTrafficPolicy: ""
         updateStrategy:
           type: RollingUpdate
           rollingUpdate:
