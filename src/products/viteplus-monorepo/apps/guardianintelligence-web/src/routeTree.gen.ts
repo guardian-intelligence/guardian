@@ -32,6 +32,7 @@ import { Route as WorkshopCareersRouteImport } from './routes/_workshop/careers'
 import { Route as WorkshopDesignRouteRouteImport } from './routes/_workshop/design/route'
 import { Route as WorkshopDesignIndexRouteImport } from './routes/_workshop/design/index'
 import { Route as OgLetterSlugRouteImport } from './routes/og/letter/$slug'
+import { Route as WorkshopPostflightDocsRouteImport } from './routes/_workshop/postflight/docs'
 import { Route as WorkshopDesignWorkshopRouteImport } from './routes/_workshop/design/workshop'
 import { Route as WorkshopDesignNewsroomRouteImport } from './routes/_workshop/design/newsroom'
 import { Route as WorkshopDesignLettersRouteImport } from './routes/_workshop/design/letters'
@@ -150,6 +151,11 @@ const OgLetterSlugRoute = OgLetterSlugRouteImport.update({
   path: '/og/letter/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WorkshopPostflightDocsRoute = WorkshopPostflightDocsRouteImport.update({
+  id: '/postflight/docs',
+  path: '/postflight/docs',
+  getParentRoute: () => WorkshopRouteRoute,
+} as any)
 const WorkshopDesignWorkshopRoute = WorkshopDesignWorkshopRouteImport.update({
   id: '/workshop',
   path: '/workshop',
@@ -190,6 +196,7 @@ export interface FileRoutesByFullPath {
   '/design/letters': typeof WorkshopDesignLettersRoute
   '/design/newsroom': typeof WorkshopDesignNewsroomRoute
   '/design/workshop': typeof WorkshopDesignWorkshopRoute
+  '/postflight/docs': typeof WorkshopPostflightDocsRoute
   '/og/letter/$slug': typeof OgLetterSlugRoute
   '/design/': typeof WorkshopDesignIndexRoute
 }
@@ -214,6 +221,7 @@ export interface FileRoutesByTo {
   '/design/letters': typeof WorkshopDesignLettersRoute
   '/design/newsroom': typeof WorkshopDesignNewsroomRoute
   '/design/workshop': typeof WorkshopDesignWorkshopRoute
+  '/postflight/docs': typeof WorkshopPostflightDocsRoute
   '/og/letter/$slug': typeof OgLetterSlugRoute
   '/design': typeof WorkshopDesignIndexRoute
 }
@@ -243,6 +251,7 @@ export interface FileRoutesById {
   '/_workshop/design/letters': typeof WorkshopDesignLettersRoute
   '/_workshop/design/newsroom': typeof WorkshopDesignNewsroomRoute
   '/_workshop/design/workshop': typeof WorkshopDesignWorkshopRoute
+  '/_workshop/postflight/docs': typeof WorkshopPostflightDocsRoute
   '/og/letter/$slug': typeof OgLetterSlugRoute
   '/_workshop/design/': typeof WorkshopDesignIndexRoute
 }
@@ -272,6 +281,7 @@ export interface FileRouteTypes {
     | '/design/letters'
     | '/design/newsroom'
     | '/design/workshop'
+    | '/postflight/docs'
     | '/og/letter/$slug'
     | '/design/'
   fileRoutesByTo: FileRoutesByTo
@@ -296,6 +306,7 @@ export interface FileRouteTypes {
     | '/design/letters'
     | '/design/newsroom'
     | '/design/workshop'
+    | '/postflight/docs'
     | '/og/letter/$slug'
     | '/design'
   id:
@@ -324,6 +335,7 @@ export interface FileRouteTypes {
     | '/_workshop/design/letters'
     | '/_workshop/design/newsroom'
     | '/_workshop/design/workshop'
+    | '/_workshop/postflight/docs'
     | '/og/letter/$slug'
     | '/_workshop/design/'
   fileRoutesById: FileRoutesById
@@ -504,6 +516,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OgLetterSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_workshop/postflight/docs': {
+      id: '/_workshop/postflight/docs'
+      path: '/postflight/docs'
+      fullPath: '/postflight/docs'
+      preLoaderRoute: typeof WorkshopPostflightDocsRouteImport
+      parentRoute: typeof WorkshopRouteRoute
+    }
     '/_workshop/design/workshop': {
       id: '/_workshop/design/workshop'
       path: '/workshop'
@@ -554,6 +573,7 @@ interface WorkshopRouteRouteChildren {
   WorkshopPressRoute: typeof WorkshopPressRoute
   WorkshopSolutionsRoute: typeof WorkshopSolutionsRoute
   WorkshopIndexRoute: typeof WorkshopIndexRoute
+  WorkshopPostflightDocsRoute: typeof WorkshopPostflightDocsRoute
 }
 
 const WorkshopRouteRouteChildren: WorkshopRouteRouteChildren = {
@@ -565,6 +585,7 @@ const WorkshopRouteRouteChildren: WorkshopRouteRouteChildren = {
   WorkshopPressRoute: WorkshopPressRoute,
   WorkshopSolutionsRoute: WorkshopSolutionsRoute,
   WorkshopIndexRoute: WorkshopIndexRoute,
+  WorkshopPostflightDocsRoute: WorkshopPostflightDocsRoute,
 }
 
 const WorkshopRouteRouteWithChildren = WorkshopRouteRoute._addFileChildren(
