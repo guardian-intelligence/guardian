@@ -20,13 +20,13 @@ The loop is: worktree → change → PR/CI → merge → babysit convergence →
 Optional:
 
 * Learn what development tooling exists with `aspect --help`
-* Install tools and confirm access if this is first time setup: `eval "$(scripts/bootstrap.sh path)" && aspect tools install && eval "$(aspect tools path)" && aspect infra auth --platform-agent` (auth required for babysitting your change after merge). All installed tools are available in `./.guardian/tools/bin`.
+* Install tools and confirm access if this is first time setup: `eval "$(scripts/bootstrap.sh path)" && aspect tools install && eval "$(aspect tools path)" && aspect infra auth --platform-agent` (auth required for babysitting your change after merge). Tool shims installed by `aspect tools install` are available in `./.guardian/tools/bin`.
 
 Step by step:
-1. Branch in a git worktree off `origin/main` and make the planned edits.
+1. Branch in a git worktree off `origin/main` and make the planned edits. Run `aspect tidy && bazelisk build //... && bazelisk test //...` to format the repository, build its targets, and run local tests.
 2. Open a PR via `gh` cli, monitor CI, perform adversarial review if needed, address blocking comments if any are posted, and then merge if all green.
-3. Babysit Flux convergence, Kargo promotion, and Flagger deployment rollout: `tools/ops/cluster-watch --status --until-ready --revision <merge-commit>`. `--status` is the fast view while you wait for the merged revision and rollout resources to remain healthy.
-4. If you're making a user-facing change to prod, monitor incoming traffic and query ClickHouse analytics to make sure users are having a good time.
+3. Babysit Flux convergence, Kargo promotion, and Flagger deployment rollout: `tools/ops/cluster-watch --status --until-ready --revision <merge-commit>`.
+4. If you're making a user-facing change to prod, monitor incoming traffic and query ClickHouse analytics to make sure users are having a good time. Also monitor Alerta during this time as most alerts take ~15 minutes to trigger, post Flux convergence.
 5. Report task completion to the user with relevant metrics/logs/traces e.g. "LCP down for route /letters/<slug> from 3.4s to 3.2s based on last 30m of traffic to prod".
 
 Common post-merge issues:
