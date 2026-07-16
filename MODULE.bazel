@@ -93,6 +93,7 @@ use_repo(
     "com_connectrpc_connect",
     "com_connectrpc_otelconnect",
     "com_github_clickhouse_clickhouse_go_v2",
+    "com_github_google_cel_go",
     "com_github_jackc_pgx_v5",
     "com_github_mileusna_useragent",
     "com_github_openbao_openbao_api_v2",
@@ -108,6 +109,14 @@ use_repo(
     "org_golang_x_net",
     "org_golang_x_sys",
     "org_golang_x_term",
+)
+
+# cel-go ships checked-in BUILD files written for WORKSPACE-era rules_go
+# (@io_bazel_rules_go loads, go_default_library targets); regenerate them so
+# the targets follow the importpath naming the rest of the graph uses.
+go_deps.gazelle_override(
+    build_file_generation = "on",
+    path = "github.com/google/cel-go",
 )
 
 # The OpenTelemetry Go modules import each other's internal/ packages across

@@ -9,6 +9,7 @@ require (
 	connectrpc.com/otelconnect v0.9.0
 	github.com/ClickHouse/clickhouse-go/v2 v2.47.0
 	github.com/bazelbuild/rules_go v0.61.1
+	github.com/google/cel-go v0.28.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/openbao/openbao/api/v2 v2.6.0
 	go.opentelemetry.io/otel v1.44.0
@@ -46,7 +47,6 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
-	github.com/google/cel-go v0.28.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
