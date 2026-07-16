@@ -19,10 +19,10 @@
 #      AOP admits only edge-terminated connections, so in-cluster traffic
 #      cannot exercise the split; this also guarantees the gate series a
 #      request-volume floor when organic traffic is sparse;
-#   4. per-interval metric checks — canary-request-success-rate reads the
-#      ingress controller's ingress_nginx_detail_responses_total split by
-#      backend service, so it scores ONLY responses the canary color served
-#      to weighted traffic; the blackbox probe gates (service class, apex
+#   4. per-interval metric checks — Flagger's built-in nginx
+#      request-success-rate reads the controller's canary-labeled request
+#      series, so it scores ONLY responses the canary color served to
+#      weighted traffic; the blackbox probe gates (service class, apex
 #      path) guard overall health alongside it.
 # threshold: 3 failed checks → automatic rollback (weight to 0, canary
 # scaled to zero, primary untouched, status Failed). Post-cutover
@@ -66,15 +66,14 @@ spec:
           name: alert-relay
           namespace: flagger
     metrics:
-      # Success rate of responses the canary color actually served. Starts
-      # at 95 (tolerant of a single stray 5xx on the ~60-request windows the
-      # 10% step sees); tighten toward 99 once a few weighted rollouts have
-      # soaked. No-data fails the check — by design: the canary-load webhook
-      # is what guarantees the denominator.
-      - name: canary-request-success-rate
-        templateRef:
-          name: canary-request-success-rate
-          namespace: flagger
+      # Flagger built-in (provider: nginx): success rate of the responses
+      # the canary color actually served, from the controller's
+      # canary-labeled request series via the global metricsServer
+      # (vmselect). Starts at 95 (tolerant of a single stray 5xx on the
+      # ~60-request windows the 10% step sees); tighten toward 99 once a
+      # few weighted rollouts have soaked. No-data fails the check — by
+      # design: the canary-load webhook is what guarantees the denominator.
+      - name: request-success-rate
         thresholdRange:
           min: 95
         interval: 1m

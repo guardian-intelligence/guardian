@@ -35,25 +35,3 @@ spec:
     address: http://vmselect-shortterm.tenant-root.svc:8481/select/0/prometheus
   query: |
     max(quantile_over_time(0.95, probe_duration_seconds{probe_namespace="{{ namespace }}",probe_class="service"}[{{ interval }}]))
----
-# Success rate of responses served by the canary color during a weighted
-# nginx rollout. ingress_nginx_detail_responses_total (the ingress fork's
-# per-service response series, already proven live by the ingress-errors
-# VMRule) is labeled by the backend Service, and Flagger's cloned canary
-# Ingress is the only route that targets `<target>-canary` — so this scores
-# exactly the weighted-traffic slice, primary traffic excluded. status is
-# the code nginx sent downstream, so upstream connect failures count too.
-apiVersion: flagger.app/v1beta1
-kind: MetricTemplate
-metadata:
-  name: canary-request-success-rate
-  namespace: flagger
-spec:
-  provider:
-    type: prometheus
-    address: http://vmselect-shortterm.tenant-root.svc:8481/select/0/prometheus
-  query: |
-    sum(rate(ingress_nginx_detail_responses_total{namespace="{{ namespace }}",service="{{ target }}-canary",status!~"5.."}[{{ interval }}]))
-    /
-    sum(rate(ingress_nginx_detail_responses_total{namespace="{{ namespace }}",service="{{ target }}-canary"}[{{ interval }}]))
-    * 100
