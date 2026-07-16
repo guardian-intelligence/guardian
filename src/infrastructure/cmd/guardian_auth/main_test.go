@@ -79,88 +79,48 @@ func cloneMap(in map[string]string) map[string]string {
 
 func successfulProbe(context.Context, string, string, time.Duration, fileSystem) error { return nil }
 
-func TestParseControlPlaneNodesSortsAndAtomicallyPairsCandidates(t *testing.T) {
-	raw := []byte(`{
-		"water":{"hostname":"water","public_ipv4":"203.0.113.13","private_ipv4":"10.8.0.13","server_id":"srv-3"},
-		"earth":{"hostname":"earth","public_ipv4":"203.0.113.11","private_ipv4":"10.8.0.11","server_id":"srv-1"},
-		"wind":{"hostname":"wind","public_ipv4":"203.0.113.12","private_ipv4":"10.8.0.12","server_id":"srv-2"}
-	}`)
-	got, err := parseControlPlaneNodes(raw)
+func TestResolveCandidatesDefaultsToStableEndpoint(t *testing.T) {
+	agent := baseAgentConfig(t.TempDir())
+	got, err := resolveCandidates(agent)
 	if err != nil {
-		t.Fatalf("parseControlPlaneNodes() error = %v", err)
+		t.Fatalf("resolveCandidates() error = %v", err)
+	}
+	want := []accessCandidate{{Name: clusterName, KubernetesAPI: defaultKubeAPIServer}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("resolveCandidates(agent) = %#v, want %#v", got, want)
+	}
+
+	admin := baseAdminConfig(t.TempDir())
+	got, err = resolveCandidates(admin)
+	if err != nil {
+		t.Fatalf("resolveCandidates() error = %v", err)
+	}
+	want = []accessCandidate{{
+		Name:          clusterName,
+		TalosEndpoint: defaultTalosEndpoint,
+		TalosTarget:   defaultTalosEndpoint,
+		KubernetesAPI: defaultKubeAPIServer,
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("resolveCandidates(admin) = %#v, want %#v", got, want)
+	}
+}
+
+func TestResolveCandidatesOverridePairsCarryConfiguredAPI(t *testing.T) {
+	cfg := baseAdminConfig(t.TempDir())
+	cfg.Endpoints = "203.0.113.1,203.0.113.2"
+	cfg.Nodes = "10.8.0.11,10.8.0.12"
+	cfg.KubeAPIServer = "https://203.0.113.9:6443"
+	got, err := resolveCandidates(cfg)
+	if err != nil {
+		t.Fatalf("resolveCandidates() error = %v", err)
 	}
 	want := []accessCandidate{
-		{Name: "earth", TalosEndpoint: "203.0.113.11", TalosTarget: "203.0.113.11", KubernetesAPI: "https://203.0.113.11:6443"},
-		{Name: "water", TalosEndpoint: "203.0.113.13", TalosTarget: "203.0.113.13", KubernetesAPI: "https://203.0.113.13:6443"},
-		{Name: "wind", TalosEndpoint: "203.0.113.12", TalosTarget: "203.0.113.12", KubernetesAPI: "https://203.0.113.12:6443"},
+		{Name: "override-1", TalosEndpoint: "203.0.113.1", TalosTarget: "10.8.0.11", KubernetesAPI: "https://203.0.113.9:6443"},
+		{Name: "override-2", TalosEndpoint: "203.0.113.2", TalosTarget: "10.8.0.12", KubernetesAPI: "https://203.0.113.9:6443"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("parseControlPlaneNodes() = %#v, want %#v", got, want)
-	}
-	for _, candidate := range got {
-		if candidate.TalosEndpoint != candidate.TalosTarget {
-			t.Fatalf("candidate %#v split its default Talos endpoint and target", candidate)
-		}
-	}
-}
-
-func TestParseControlPlaneNodesSupportsArbitraryCount(t *testing.T) {
-	for _, raw := range []string{
-		`{"one":{"public_ipv4":"203.0.113.1"}}`,
-		`{"one":{"public_ipv4":"203.0.113.1"},"two":{"public_ipv4":"203.0.113.2"}}`,
-		`{"one":{"public_ipv4":"203.0.113.1"},"two":{"public_ipv4":"203.0.113.2"},"three":{"public_ipv4":"203.0.113.3"},"four":{"public_ipv4":"203.0.113.4"},"five":{"public_ipv4":"203.0.113.5"}}`,
-	} {
-		wantCount := strings.Count(raw, `"public_ipv4"`)
-		got, err := parseControlPlaneNodes([]byte(raw))
-		if err != nil {
-			t.Fatalf("parseControlPlaneNodes(%s) error = %v", raw, err)
-		}
-		if len(got) != wantCount {
-			t.Fatalf("parseControlPlaneNodes(%s) returned %d candidates, want %d", raw, len(got), wantCount)
-		}
-	}
-}
-
-func TestParseControlPlaneNodesRejectsBadState(t *testing.T) {
-	tests := []struct {
-		name string
-		raw  string
-		want string
-	}{
-		{"invalid JSON", `{`, "parse OpenTofu"},
-		{"empty", `{}`, "is empty"},
-		{"missing public address", `{"earth":{"hostname":"earth"}}`, "invalid public_ipv4"},
-		{"malformed public address", `{"earth":{"public_ipv4":"not-an-ip"}}`, "invalid public_ipv4"},
-		{"IPv6 in IPv4 field", `{"earth":{"public_ipv4":"2001:db8::1"}}`, "invalid public_ipv4"},
-		{"duplicate", `{"earth":{"public_ipv4":"203.0.113.1"},"wind":{"public_ipv4":"203.0.113.1"}}`, "duplicate public_ipv4"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := parseControlPlaneNodes([]byte(tt.raw))
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("parseControlPlaneNodes() error = %v, want detail %q", err, tt.want)
-			}
-		})
-	}
-}
-
-func TestCandidatesFromTofuRequestsOnlyNamedNonSecretOutput(t *testing.T) {
-	runner := &fakeRunner{outputFn: func(_ context.Context, bin string, args []string, _ commandOptions) ([]byte, error) {
-		if bin != "/tools/tofu" {
-			t.Fatalf("binary = %q", bin)
-		}
-		want := []string{"-chdir=/repo/bootstrap/guardian-mgmt", "output", "-json", "control_plane_nodes"}
-		if !reflect.DeepEqual(args, want) {
-			t.Fatalf("tofu args = %#v, want %#v", args, want)
-		}
-		return []byte(`{"earth":{"public_ipv4":"203.0.113.1"}}`), nil
-	}}
-	app := application{cfg: config{Tofu: "/tools/tofu", TofuRoot: "/repo/bootstrap/guardian-mgmt"}, runner: runner}
-	if _, err := app.candidatesFromTofu(context.Background()); err != nil {
-		t.Fatalf("candidatesFromTofu() error = %v", err)
-	}
-	if len(runner.calls) != 1 {
-		t.Fatalf("commands = %#v, want only one named output read", runner.calls)
+		t.Fatalf("resolveCandidates() = %#v, want %#v", got, want)
 	}
 }
 
@@ -170,8 +130,8 @@ func TestCandidatesFromOverridesPairsByIndex(t *testing.T) {
 		t.Fatalf("candidatesFromOverrides() error = %v", err)
 	}
 	want := []accessCandidate{
-		{Name: "override-1", TalosEndpoint: "203.0.113.1", TalosTarget: "10.8.0.11", KubernetesAPI: "https://203.0.113.1:6443"},
-		{Name: "override-2", TalosEndpoint: "203.0.113.2", TalosTarget: "10.8.0.12", KubernetesAPI: "https://203.0.113.2:6443"},
+		{Name: "override-1", TalosEndpoint: "203.0.113.1", TalosTarget: "10.8.0.11"},
+		{Name: "override-2", TalosEndpoint: "203.0.113.2", TalosTarget: "10.8.0.12"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("candidatesFromOverrides() = %#v, want %#v", got, want)
@@ -212,26 +172,11 @@ func TestValidateConfigRejectsTalosOverridesInAgentMode(t *testing.T) {
 	}
 }
 
-func TestAgentKubeAPIOverrideAvoidsOpenTofu(t *testing.T) {
+func TestValidateConfigRejectsEmptyKubeAPIServer(t *testing.T) {
 	cfg := baseAgentConfig(t.TempDir())
-	cfg.Tofu = ""
-	cfg.TofuRoot = ""
-	cfg.KubeAPIServer = "https://api.guardian.example:6443"
-	if err := validateConfig(cfg); err != nil {
-		t.Fatalf("validateConfig() error = %v", err)
-	}
-	runner := &fakeRunner{outputFn: func(context.Context, string, []string, commandOptions) ([]byte, error) {
-		t.Fatal("OpenTofu must not be invoked for an explicit agent API override")
-		return nil, nil
-	}}
-	app := application{cfg: cfg, runner: runner}
-	got, err := app.resolveCandidates(context.Background())
-	if err != nil {
-		t.Fatalf("resolveCandidates() error = %v", err)
-	}
-	want := []accessCandidate{{Name: "kube-api-override", KubernetesAPI: cfg.KubeAPIServer}}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("resolveCandidates() = %#v, want %#v", got, want)
+	cfg.KubeAPIServer = ""
+	if err := validateConfig(cfg); err == nil || !strings.Contains(err.Error(), "--kube-api-server") {
+		t.Fatalf("validateConfig() error = %v, want kube-api-server rejection", err)
 	}
 }
 
@@ -799,38 +744,18 @@ func TestRunAdminFinalRenameFailureLeavesDestinationUnchanged(t *testing.T) {
 	assertNoAuthTemps(t, dir)
 }
 
-func TestStateFailureRunsNoMutatingCommand(t *testing.T) {
-	dir := t.TempDir()
-	cfg := baseAdminConfig(dir)
-	runner := &fakeRunner{outputFn: func(_ context.Context, bin string, _ []string, _ commandOptions) ([]byte, error) {
-		if bin == cfg.Tofu {
-			return nil, errors.New("backend unavailable")
-		}
-		return nil, errors.New("unexpected output command")
-	}}
-	app := testApplication(cfg, runner)
-	err := app.run(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "control_plane_nodes") {
-		t.Fatalf("run() error = %v", err)
-	}
-	if len(runner.calls) != 1 || runner.calls[0].kind != "output" || runner.calls[0].bin != cfg.Tofu {
-		t.Fatalf("commands = %#v, want only OpenTofu named-output read", runner.calls)
-	}
-}
-
 func baseAgentConfig(dir string) config {
 	return config{
-		Mode:         "agent",
-		Tofu:         "/tools/tofu",
-		TofuRoot:     "/repo/bootstrap/guardian-mgmt",
-		Kubectl:      "/tools/kubectl",
-		Kubelogin:    "/tools/kubectl-oidc_login",
-		CA:           "/repo/ca.crt",
-		Kubeconfig:   filepath.Join(dir, "config"),
-		OIDCIssuer:   "https://keycloak.example/realms/platform",
-		OIDCClientID: "guardian-platform-agent",
-		OIDCCacheDir: filepath.Join(dir, "oidc-cache"),
-		ProbeTimeout: time.Second,
+		Mode:          "agent",
+		Kubectl:       "/tools/kubectl",
+		Kubelogin:     "/tools/kubectl-oidc_login",
+		CA:            "/repo/ca.crt",
+		Kubeconfig:    filepath.Join(dir, "config"),
+		OIDCIssuer:    "https://keycloak.example/realms/platform",
+		OIDCClientID:  "guardian-platform-agent",
+		OIDCCacheDir:  filepath.Join(dir, "oidc-cache"),
+		KubeAPIServer: defaultKubeAPIServer,
+		ProbeTimeout:  time.Second,
 	}
 }
 
@@ -838,17 +763,16 @@ func baseAdminConfig(dir string) config {
 	talmRoot := filepath.Join(dir, "talm")
 	_ = os.MkdirAll(talmRoot, 0o700)
 	return config{
-		Mode:         "admin",
-		Tofu:         "/tools/tofu",
-		TofuRoot:     "/repo/bootstrap/guardian-mgmt",
-		Kubectl:      "/tools/kubectl",
-		Talm:         "/tools/talm",
-		Talosctl:     "/tools/talosctl",
-		CA:           "/repo/ca.crt",
-		Kubeconfig:   filepath.Join(dir, "config"),
-		TalmRoot:     talmRoot,
-		Talosconfig:  filepath.Join(talmRoot, "talosconfig"),
-		ProbeTimeout: time.Second,
+		Mode:          "admin",
+		Kubectl:       "/tools/kubectl",
+		Talm:          "/tools/talm",
+		Talosctl:      "/tools/talosctl",
+		CA:            "/repo/ca.crt",
+		Kubeconfig:    filepath.Join(dir, "config"),
+		TalmRoot:      talmRoot,
+		Talosconfig:   filepath.Join(talmRoot, "talosconfig"),
+		KubeAPIServer: defaultKubeAPIServer,
+		ProbeTimeout:  time.Second,
 	}
 }
 
