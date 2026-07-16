@@ -327,6 +327,45 @@ subjects:
     kind: Group
     name: guardian-platform-agent
 ---
+# The agent's secret-write lane (docs/secrets.md "Permission model"): a
+# TokenRequest grant pinned to the per-namespace `secrets-writer`
+# ServiceAccounts, whose OpenBao role is write-only within its own subtree.
+# The agent mints these tokens headlessly while staying structurally unable
+# to read a Secret — `view` excludes Secrets and the admission policy below
+# denies everything else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: guardian-platform-agent-secrets-writer-token
+  labels:
+    app.kubernetes.io/name: platform-agent
+    app.kubernetes.io/part-of: guardian
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - serviceaccounts/token
+    resourceNames:
+      - secrets-writer
+    verbs:
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: guardian-platform-agent-secrets-writer-token
+  labels:
+    app.kubernetes.io/name: platform-agent
+    app.kubernetes.io/part-of: guardian
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: guardian-platform-agent-secrets-writer-token
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: guardian-platform-agent
+---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -357,10 +396,15 @@ spec:
           ((request.resource.group == "" && request.resource.resource == "pods") ||
            (request.resource.group == "batch" && request.resource.resource == "jobs"))) ||
         (request.operation == "CONNECT" && request.resource.group == "" &&
-          request.resource.resource == "pods" && request.subResource == "portforward")
+          request.resource.resource == "pods" && request.subResource == "portforward") ||
+        (request.operation == "CREATE" && request.resource.group == "" &&
+          request.resource.resource == "serviceaccounts" &&
+          has(request.subResource) && request.subResource == "token" &&
+          has(request.name) && request.name == "secrets-writer")
       message: >-
-        platform-agent is read-only except for deleting pods and jobs and
-        opening pod port-forwards
+        platform-agent is read-only except for deleting pods and jobs,
+        opening pod port-forwards, and minting secrets-writer
+        ServiceAccount tokens
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

@@ -26,6 +26,7 @@ go_test(
         "multus_resources_test.go",
         "oci_base_conformance_test.go",
         "openbao_conformance_test.go",
+        "platform_agent_admission_test.go",
         "release_manifest_test.go",
         "version_skew_test.go",
         "vlogs_hardening_test.go",
@@ -82,6 +83,7 @@ go_test(
     ],
     deps = [
         "//src/infrastructure/imageset",
+        "@com_github_google_cel_go//cel",
         "@in_gopkg_yaml_v3//:yaml_v3",
         "@rules_go//go/runfiles",
     ],

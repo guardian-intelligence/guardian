@@ -89,14 +89,61 @@ func TestPlatformAgentIsReadOnlyWithMaintenanceExceptions(t *testing.T) {
 		"- warehouses",
 		"name: guardian-platform-agent-view",
 		"name: view",
+		"name: guardian-platform-agent-secrets-writer-token",
 		"name: guardian-platform-agent-readonly",
 		`request.userInfo.username.endsWith("#platform-agent")`,
 		`"guardian-platform-agent" in request.userInfo.groups`,
 		`!has(request.subResource)`,
 		`request.subResource == "portforward"`,
 		`request.resource.resource == "jobs"`,
+		`request.subResource == "token"`,
+		`request.name == "secrets-writer"`,
 	} {
 		assertTextContains(t, raw, want, path)
+	}
+
+	// The token-mint lane must stay pinned to the per-namespace secrets-writer
+	// SAs (write-only OpenBao roles): an unpinned serviceaccounts/token grant
+	// would let the agent mint any SA's token and read Secrets through it, and
+	// no ClusterRole here may grant the secrets resource at all.
+	docs := yamlDocs(t, path)
+	tokenRole := findDoc(t, docs, "ClusterRole", "guardian-platform-agent-secrets-writer-token")
+	tokenRules := sliceValue(tokenRole["rules"])
+	if len(tokenRules) != 1 {
+		t.Fatalf("guardian-platform-agent-secrets-writer-token has %d rules, want exactly 1", len(tokenRules))
+	}
+	tokenRule := mapValue(tokenRules[0])
+	for field, want := range map[string]string{
+		"apiGroups":     "",
+		"resources":     "serviceaccounts/token",
+		"resourceNames": "secrets-writer",
+		"verbs":         "create",
+	} {
+		values := sliceValue(tokenRule[field])
+		if len(values) != 1 || stringValue(values[0]) != want {
+			t.Fatalf("guardian-platform-agent-secrets-writer-token %s = %v, want exactly [%q]", field, values, want)
+		}
+	}
+	tokenBinding := findDoc(t, docs, "ClusterRoleBinding", "guardian-platform-agent-secrets-writer-token")
+	assertNestedString(t, tokenBinding, "guardian-platform-agent-secrets-writer-token", "roleRef", "name")
+	for _, doc := range docs {
+		if stringValue(doc["kind"]) != "ClusterRole" {
+			continue
+		}
+		name := stringValue(mapValue(doc["metadata"])["name"])
+		for _, item := range sliceValue(doc["rules"]) {
+			rule := mapValue(item)
+			for _, resource := range sliceValue(rule["resources"]) {
+				switch stringValue(resource) {
+				case "secrets":
+					t.Fatalf("ClusterRole %s grants secrets; the agent estate must stay structurally unable to read one", name)
+				case "serviceaccounts/token":
+					if name != "guardian-platform-agent-secrets-writer-token" {
+						t.Fatalf("ClusterRole %s grants serviceaccounts/token outside the pinned token-mint lane", name)
+					}
+				}
+			}
+		}
 	}
 
 	analyticsPath := runfilePath("src/infrastructure/deployments/analytics/system/secrets.yaml")
