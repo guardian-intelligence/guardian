@@ -63,6 +63,8 @@ resource "cloudflare_account_token" "dns_lb_provisioner" {
       effect = "allow"
       permission_groups = [
         { id = local.permission_groups.zone_read },
+        { id = local.permission_groups.dns_read },
+        { id = local.permission_groups.dns_write },
         { id = local.permission_groups.load_balancers_read },
         { id = local.permission_groups.load_balancers_write },
       ]
