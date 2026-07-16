@@ -21,4 +21,5 @@ go_test(
     name = "openbao_reinit_test",
     srcs = ["main_test.go"],
     embed = [":openbao_reinit_lib"],
+    deps = ["@com_github_openbao_openbao_api_v2//:api"],
 )

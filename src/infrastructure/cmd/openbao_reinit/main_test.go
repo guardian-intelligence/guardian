@@ -1,13 +1,17 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	baoapi "github.com/openbao/openbao/api/v2"
 )
 
 func TestLocalRevisionProblemRejectsStaleCheckout(t *testing.T) {
@@ -301,6 +305,170 @@ func TestRelayValuesRejectsEmptyValue(t *testing.T) {
 	}
 	if values["ingest"] != "sekrit" {
 		t.Fatalf("relayValues() = %v, want ingest property", values)
+	}
+}
+
+// fakeKV records every read and write it serves, so a test can assert which
+// identity each operation went through.
+type fakeKV struct {
+	writes   map[string]map[string]interface{}
+	reads    []string
+	readBack *baoapi.Secret
+	writeErr error
+	readErr  error
+}
+
+func (f *fakeKV) WriteWithContext(_ context.Context, path string, data map[string]interface{}) (*baoapi.Secret, error) {
+	if f.writes == nil {
+		f.writes = map[string]map[string]interface{}{}
+	}
+	f.writes[path] = data
+	return nil, f.writeErr
+}
+
+func (f *fakeKV) ReadWithContext(_ context.Context, path string) (*baoapi.Secret, error) {
+	f.reads = append(f.reads, path)
+	if f.readErr != nil {
+		return nil, f.readErr
+	}
+	return f.readBack, nil
+}
+
+func kvV2Secret(values map[string]interface{}) *baoapi.Secret {
+	return &baoapi.Secret{Data: map[string]interface{}{"data": values}}
+}
+
+func TestWriteAndVerifyWritesAsWriterVerifiesAsReader(t *testing.T) {
+	writer := &fakeKV{}
+	reader := &fakeKV{readBack: kvV2Secret(map[string]interface{}{"ingest": "sekrit"})}
+	path := "kv/data/guardian/guardian-mgmt/guardian-analytics/clickhouse"
+	if err := writeAndVerify(context.Background(), writer, reader, path, map[string]string{"ingest": "sekrit"}); err != nil {
+		t.Fatalf("writeAndVerify() error = %v", err)
+	}
+	body, ok := writer.writes[path]
+	if !ok || len(writer.writes) != 1 {
+		t.Fatalf("writeAndVerify() writes = %v, want exactly one write to %s via the writer", writer.writes, path)
+	}
+	data, ok := body["data"].(map[string]interface{})
+	if !ok || data["ingest"] != "sekrit" {
+		t.Fatalf("writeAndVerify() wrote body %v, want kv-v2 data with the value", body)
+	}
+	if len(reader.reads) != 1 || reader.reads[0] != path {
+		t.Fatalf("writeAndVerify() reader reads = %v, want exactly one readback of %s via the reader", reader.reads, path)
+	}
+}
+
+func TestWriteAndVerifyNeverReadsThroughTheWriter(t *testing.T) {
+	// The writer fake would happily serve a readback; the assertion is that
+	// writeAndVerify never asks it to.
+	values := map[string]interface{}{"uri": "postgresql://x"}
+	writer := &fakeKV{readBack: kvV2Secret(values)}
+	reader := &fakeKV{readBack: kvV2Secret(values)}
+	if err := writeAndVerify(context.Background(), writer, reader, "kv/data/x", map[string]string{"uri": "postgresql://x"}); err != nil {
+		t.Fatalf("writeAndVerify() error = %v", err)
+	}
+	if len(writer.reads) != 0 {
+		t.Fatalf("writeAndVerify() read through the writer identity (%v); readback must authenticate as the reader role", writer.reads)
+	}
+	if len(reader.writes) != 0 {
+		t.Fatalf("writeAndVerify() wrote through the reader identity (%v)", reader.writes)
+	}
+}
+
+func TestWriteAndVerifyFailsClosedOnReaderReadback(t *testing.T) {
+	values := map[string]string{"ingest": "sekrit"}
+	writer := &fakeKV{}
+	denied := &fakeKV{readErr: errors.New("permission denied")}
+	if err := writeAndVerify(context.Background(), writer, denied, "kv/data/x", values); err == nil {
+		t.Fatalf("writeAndVerify() accepted a write the reader could not read back")
+	}
+	empty := &fakeKV{}
+	if err := writeAndVerify(context.Background(), writer, empty, "kv/data/x", values); err == nil {
+		t.Fatalf("writeAndVerify() accepted an empty readback")
+	}
+	mismatched := &fakeKV{readBack: kvV2Secret(map[string]interface{}{"ingest": "other"})}
+	if err := writeAndVerify(context.Background(), writer, mismatched, "kv/data/x", values); err == nil {
+		t.Fatalf("writeAndVerify() accepted a readback that does not match the written value")
+	}
+}
+
+// fakeMinter stands in for kubectlRunner's token mint. It records every
+// (namespace, serviceAccount) it was asked to mint and fails the pairs named
+// in fail, so a test can prove the pre-wipe gate probes both roles and aborts
+// on a ServiceAccount that cannot be minted.
+type fakeMinter struct {
+	fail   map[string]bool
+	minted []string
+}
+
+func (f *fakeMinter) output(_ context.Context, _ string, args ...string) (string, error) {
+	var namespace, serviceAccount string
+	for i, arg := range args {
+		switch arg {
+		case "-n":
+			if i+1 < len(args) {
+				namespace = args[i+1]
+			}
+		case "token":
+			if i+1 < len(args) {
+				serviceAccount = args[i+1]
+			}
+		}
+	}
+	key := namespace + "/" + serviceAccount
+	f.minted = append(f.minted, key)
+	if f.fail[key] {
+		return "", fmt.Errorf("serviceaccounts %q not found", serviceAccount)
+	}
+	return "fake.jwt.token", nil
+}
+
+func TestEnsureRelayTokensMintablePassesWhenAllSAsMintable(t *testing.T) {
+	minter := &fakeMinter{}
+	if err := ensureRelayTokensMintable(context.Background(), minter, relayPlan()); err != nil {
+		t.Fatalf("ensureRelayTokensMintable() error = %v, want pass when every SA mints", err)
+	}
+	// Both roles must be probed for every distinct relay-target namespace.
+	for _, target := range relayPlan() {
+		for _, sa := range []string{writerServiceAcct, readerServiceAcct} {
+			want := target.ConsumerNamespace + "/" + sa
+			found := false
+			for _, got := range minter.minted {
+				if got == want {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("ensureRelayTokensMintable() did not mint %s; minted=%v", want, minter.minted)
+			}
+		}
+	}
+}
+
+func TestEnsureRelayTokensMintableFailsClosedOnUnmintableReader(t *testing.T) {
+	// The reader SA (the one the readback authenticates as) is renamed/absent
+	// in a relay-target namespace: the gate must abort before the raft wipe.
+	target := relayPlan()[0]
+	minter := &fakeMinter{fail: map[string]bool{
+		target.ConsumerNamespace + "/" + readerServiceAcct: true,
+	}}
+	err := ensureRelayTokensMintable(context.Background(), minter, relayPlan())
+	if err == nil {
+		t.Fatalf("ensureRelayTokensMintable() accepted a plan whose reader SA cannot be minted (would strand the ceremony post-wipe)")
+	}
+	if !strings.Contains(err.Error(), readerServiceAcct) || !strings.Contains(err.Error(), target.ConsumerNamespace) {
+		t.Fatalf("ensureRelayTokensMintable() error = %v, want it to name the unmintable %s in %s", err, readerServiceAcct, target.ConsumerNamespace)
+	}
+}
+
+func TestEnsureRelayTokensMintableFailsClosedOnUnmintableWriter(t *testing.T) {
+	target := relayPlan()[0]
+	minter := &fakeMinter{fail: map[string]bool{
+		target.ConsumerNamespace + "/" + writerServiceAcct: true,
+	}}
+	if err := ensureRelayTokensMintable(context.Background(), minter, relayPlan()); err == nil {
+		t.Fatalf("ensureRelayTokensMintable() accepted a plan whose writer SA cannot be minted")
 	}
 }
 

@@ -37,6 +37,7 @@ const (
 
 	openBaoPodSelector = "app.kubernetes.io/name=openbao"
 	writerServiceAcct  = "secrets-writer"
+	readerServiceAcct  = "secrets-reader"
 	kubernetesAuthPath = "kubernetes"
 )
 
@@ -234,6 +235,11 @@ func checkPreconditions(ctx context.Context, runner kubectlRunner, opts options)
 		return 0, err
 	}
 
+	fmt.Printf("\n## precondition: relay-target ServiceAccount tokens are mintable\n")
+	if err := ensureRelayTokensMintable(ctx, runner, relayPlan()); err != nil {
+		return 0, err
+	}
+
 	fmt.Printf("\n## precondition: custody import env file\n")
 	info, err := os.Stat(opts.EnvFile)
 	if err != nil {
@@ -362,6 +368,28 @@ func ensurePrivilegedPSALabel(ctx context.Context, runner kubectlRunner, opts op
 		}
 		time.Sleep(opts.PollInterval)
 	}
+}
+
+// ensureRelayTokensMintable proves, before the raft wipe, that both the
+// secrets-writer and secrets-reader ServiceAccount tokens can be minted for
+// every relay-target namespace — the same mint the re-relay performs after the
+// wipe. Minting fails on a renamed or missing ServiceAccount, so drift is
+// caught while OpenBao is still intact instead of after import.env is consumed.
+func ensureRelayTokensMintable(ctx context.Context, runner tokenMinter, plan []relayTarget) error {
+	seen := map[string]bool{}
+	for _, target := range plan {
+		if seen[target.ConsumerNamespace] {
+			continue
+		}
+		seen[target.ConsumerNamespace] = true
+		for _, sa := range []string{writerServiceAcct, readerServiceAcct} {
+			if _, err := serviceAccountToken(ctx, runner, target.ConsumerNamespace, sa); err != nil {
+				return fmt.Errorf("cannot mint %s token in %s: %w — the re-relay authenticates as guardian-writer-%s and guardian-reader-%s, so a renamed or missing ServiceAccount would strand the ceremony after the wipe; fix the ServiceAccount before reinit", sa, target.ConsumerNamespace, err, target.ConsumerNamespace, target.ConsumerNamespace)
+			}
+		}
+		fmt.Printf("namespace %s: %s and %s tokens mintable\n", target.ConsumerNamespace, writerServiceAcct, readerServiceAcct)
+	}
+	return nil
 }
 
 func namespaceEnforcesPrivileged(ctx context.Context, runner kubectlRunner, namespace string) (bool, error) {
@@ -659,12 +687,14 @@ func randomFreePort() (int, error) {
 
 // relayTarget re-seeds one kv path the importer does not carry, sourced from a
 // still-materialized Kubernetes Secret (ExternalSecrets are Orphan/Retain, so
-// the projected Secrets survive the raft wipe) and written through that
-// consumer namespace's own guardian-writer role.
+// the projected Secrets survive the raft wipe), written through that consumer
+// namespace's own guardian-writer role, and verified by reading it back as
+// the namespace's guardian-reader role — the identity ESO consumes with.
 type relayTarget struct {
 	Name string
-	// ConsumerNamespace holds the secrets-writer ServiceAccount and names the
-	// guardian-writer-<ns> role; the write is confined to its kv subtree.
+	// ConsumerNamespace holds the secrets-writer and secrets-reader
+	// ServiceAccounts and names the guardian-writer-<ns> and
+	// guardian-reader-<ns> roles; both are confined to its kv subtree.
 	ConsumerNamespace string
 	APIPath           string
 	SourceNamespace   string
@@ -752,18 +782,26 @@ func relayGeneratedValues(ctx context.Context, runner kubectlRunner, opts option
 		if err != nil {
 			return err
 		}
-		jwt, err := writerToken(ctx, runner, target.ConsumerNamespace)
+		writerJWT, err := serviceAccountToken(ctx, runner, target.ConsumerNamespace, writerServiceAcct)
 		if err != nil {
 			return err
 		}
-		client, err := authenticatedOpenBaoClient(ctx, opts, port, caPEM, "guardian-writer-"+target.ConsumerNamespace, jwt)
+		writerClient, err := authenticatedOpenBaoClient(ctx, opts, port, caPEM, "guardian-writer-"+target.ConsumerNamespace, writerJWT)
 		if err != nil {
 			return fmt.Errorf("login as guardian-writer-%s for %s: %w", target.ConsumerNamespace, target.Name, err)
 		}
-		if err := writeAndVerify(ctx, client, target.APIPath, values); err != nil {
+		readerJWT, err := serviceAccountToken(ctx, runner, target.ConsumerNamespace, readerServiceAcct)
+		if err != nil {
+			return err
+		}
+		readerClient, err := authenticatedOpenBaoClient(ctx, opts, port, caPEM, "guardian-reader-"+target.ConsumerNamespace, readerJWT)
+		if err != nil {
+			return fmt.Errorf("login as guardian-reader-%s for %s: %w", target.ConsumerNamespace, target.Name, err)
+		}
+		if err := writeAndVerify(ctx, writerClient.Logical(), readerClient.Logical(), target.APIPath, values); err != nil {
 			return fmt.Errorf("re-relay %s: %w", target.Name, err)
 		}
-		fmt.Printf("re-relayed %s to %s properties: %s\n", target.Name, target.APIPath, strings.Join(sortedKeys(values), ","))
+		fmt.Printf("re-relayed %s to %s properties: %s (readback verified as guardian-reader-%s)\n", target.Name, target.APIPath, strings.Join(sortedKeys(values), ","), target.ConsumerNamespace)
 	}
 	return nil
 }
@@ -817,14 +855,20 @@ func openBaoCA(ctx context.Context, runner kubectlRunner, opts options) ([]byte,
 	return []byte(caPEM), nil
 }
 
-func writerToken(ctx context.Context, runner kubectlRunner, namespace string) (string, error) {
-	out, err := runner.output(ctx, "mint "+writerServiceAcct+" token in "+namespace, "-n", namespace, "create", "token", writerServiceAcct, "--audience=openbao", "--duration=10m")
+// tokenMinter is the subset of kubectlRunner the SA-token mint needs; the
+// pre-wipe mintability probe uses it to run against a fake in tests.
+type tokenMinter interface {
+	output(ctx context.Context, label string, args ...string) (string, error)
+}
+
+func serviceAccountToken(ctx context.Context, runner tokenMinter, namespace, serviceAccount string) (string, error) {
+	out, err := runner.output(ctx, "mint "+serviceAccount+" token in "+namespace, "-n", namespace, "create", "token", serviceAccount, "--audience=openbao", "--duration=10m")
 	if err != nil {
 		return "", err
 	}
 	token := strings.TrimSpace(out)
 	if token == "" {
-		return "", fmt.Errorf("kubectl create token %s -n %s returned an empty token", writerServiceAcct, namespace)
+		return "", fmt.Errorf("kubectl create token %s -n %s returned an empty token", serviceAccount, namespace)
 	}
 	return token, nil
 }
@@ -856,12 +900,24 @@ func authenticatedOpenBaoClient(ctx context.Context, opts options, localPort int
 	return client, nil
 }
 
-func writeAndVerify(ctx context.Context, client *baoapi.Client, apiPath string, values map[string]string) error {
+type kvWriter interface {
+	WriteWithContext(ctx context.Context, path string, data map[string]interface{}) (*baoapi.Secret, error)
+}
+
+type kvReader interface {
+	ReadWithContext(ctx context.Context, path string) (*baoapi.Secret, error)
+}
+
+// writeAndVerify writes through the writer identity and proves the value back
+// through the reader identity — the one ESO reads with — so a verified write
+// is one the consumer can actually materialize. A write that cannot be read
+// back by the reader fails the ceremony.
+func writeAndVerify(ctx context.Context, writer kvWriter, reader kvReader, apiPath string, values map[string]string) error {
 	body := map[string]interface{}{"data": stringMapToInterface(values)}
-	if _, err := client.Logical().WriteWithContext(ctx, apiPath, body); err != nil {
+	if _, err := writer.WriteWithContext(ctx, apiPath, body); err != nil {
 		return fmt.Errorf("write %s: %w", apiPath, err)
 	}
-	secret, err := client.Logical().ReadWithContext(ctx, apiPath)
+	secret, err := reader.ReadWithContext(ctx, apiPath)
 	if err != nil {
 		return fmt.Errorf("verify %s: %w", apiPath, err)
 	}
