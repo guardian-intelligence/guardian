@@ -44,6 +44,14 @@ spec:
                       values:
                         - controller
                 topologyKey: kubernetes.io/hostname
+        # Standard per-request controller metrics (10254): the request series
+        # carries a `canary` label distinguishing responses the canary-weight
+        # split routed to an alternative backend — the only exporter that can
+        # attribute weighted-canary traffic (the protobuf detail series labels
+        # by matched route, blind to the split). Scraped by
+        # deployments/alerting/ingress-nginx-observability.yaml.
+        metrics:
+          enabled: true
         config:
           use-http2: "false"
           # x-guardian-* headers exist only on AOP-verified connections

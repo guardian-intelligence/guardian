@@ -25,6 +25,7 @@ resources:
   - electric-scrape.yaml
   - etcd-snapshot-alerts.yaml
   - ingress-error-alerts.yaml
+  - ingress-nginx-observability.yaml
   - log-pipeline-health.yaml
   - postgres-alerts.yaml
   - synthetic-probes.yaml
