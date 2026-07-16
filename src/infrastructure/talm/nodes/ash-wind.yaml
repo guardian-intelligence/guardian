@@ -5,6 +5,7 @@ machine:
   certSANs:
     - 127.0.0.1
     - api.guardianintelligence.org
+    - k8s.guardianintelligence.org
     - 10.8.0.250
     - 206.223.228.101
     - 45.250.254.119
@@ -114,6 +115,7 @@ cluster:
     certSANs:
       - 127.0.0.1
       - api.guardianintelligence.org
+      - k8s.guardianintelligence.org
       - 10.8.0.250
       - 206.223.228.101
       - 45.250.254.119

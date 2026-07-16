@@ -185,10 +185,13 @@ podSecurity:
 # one custody-gated command (aspect infra auth --platform-admin), so the
 # short window costs nothing — even a long DR just mints again.
 adminKubeconfigCertLifetime: "8h0m0s"
-# Cluster-wide cert SANs: the VLAN VIP (10.8.0.250) plus each node's public IP so
-# the API/Talos stays manageable from a runner off the private VLAN.
+# Cluster-wide cert SANs: the stable API name (k8s.guardianintelligence.org,
+# DNS-only A records over the node public IPs), the VLAN VIP (10.8.0.250), plus
+# each node's public IP so the API/Talos stays manageable from a runner off the
+# private VLAN.
 certSANs:
 - api.guardianintelligence.org
+- k8s.guardianintelligence.org
 - 10.8.0.250
 - 206.223.228.101  # ash-earth
 - 45.250.254.119   # ash-wind
