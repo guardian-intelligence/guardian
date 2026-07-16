@@ -235,6 +235,11 @@ func checkPreconditions(ctx context.Context, runner kubectlRunner, opts options)
 		return 0, err
 	}
 
+	fmt.Printf("\n## precondition: relay-target ServiceAccount tokens are mintable\n")
+	if err := ensureRelayTokensMintable(ctx, runner, relayPlan()); err != nil {
+		return 0, err
+	}
+
 	fmt.Printf("\n## precondition: custody import env file\n")
 	info, err := os.Stat(opts.EnvFile)
 	if err != nil {
@@ -363,6 +368,28 @@ func ensurePrivilegedPSALabel(ctx context.Context, runner kubectlRunner, opts op
 		}
 		time.Sleep(opts.PollInterval)
 	}
+}
+
+// ensureRelayTokensMintable proves, before the raft wipe, that both the
+// secrets-writer and secrets-reader ServiceAccount tokens can be minted for
+// every relay-target namespace — the same mint the re-relay performs after the
+// wipe. Minting fails on a renamed or missing ServiceAccount, so drift is
+// caught while OpenBao is still intact instead of after import.env is consumed.
+func ensureRelayTokensMintable(ctx context.Context, runner tokenMinter, plan []relayTarget) error {
+	seen := map[string]bool{}
+	for _, target := range plan {
+		if seen[target.ConsumerNamespace] {
+			continue
+		}
+		seen[target.ConsumerNamespace] = true
+		for _, sa := range []string{writerServiceAcct, readerServiceAcct} {
+			if _, err := serviceAccountToken(ctx, runner, target.ConsumerNamespace, sa); err != nil {
+				return fmt.Errorf("cannot mint %s token in %s: %w — the re-relay authenticates as guardian-writer-%s and guardian-reader-%s, so a renamed or missing ServiceAccount would strand the ceremony after the wipe; fix the ServiceAccount before reinit", sa, target.ConsumerNamespace, err, target.ConsumerNamespace, target.ConsumerNamespace)
+			}
+		}
+		fmt.Printf("namespace %s: %s and %s tokens mintable\n", target.ConsumerNamespace, writerServiceAcct, readerServiceAcct)
+	}
+	return nil
 }
 
 func namespaceEnforcesPrivileged(ctx context.Context, runner kubectlRunner, namespace string) (bool, error) {
@@ -828,7 +855,13 @@ func openBaoCA(ctx context.Context, runner kubectlRunner, opts options) ([]byte,
 	return []byte(caPEM), nil
 }
 
-func serviceAccountToken(ctx context.Context, runner kubectlRunner, namespace, serviceAccount string) (string, error) {
+// tokenMinter is the subset of kubectlRunner the SA-token mint needs; the
+// pre-wipe mintability probe uses it to run against a fake in tests.
+type tokenMinter interface {
+	output(ctx context.Context, label string, args ...string) (string, error)
+}
+
+func serviceAccountToken(ctx context.Context, runner tokenMinter, namespace, serviceAccount string) (string, error) {
 	out, err := runner.output(ctx, "mint "+serviceAccount+" token in "+namespace, "-n", namespace, "create", "token", serviceAccount, "--audience=openbao", "--duration=10m")
 	if err != nil {
 		return "", err

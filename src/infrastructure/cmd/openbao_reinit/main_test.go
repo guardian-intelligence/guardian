@@ -392,6 +392,86 @@ func TestWriteAndVerifyFailsClosedOnReaderReadback(t *testing.T) {
 	}
 }
 
+// fakeMinter stands in for kubectlRunner's token mint. It records every
+// (namespace, serviceAccount) it was asked to mint and fails the pairs named
+// in fail, so a test can prove the pre-wipe gate probes both roles and aborts
+// on a ServiceAccount that cannot be minted.
+type fakeMinter struct {
+	fail   map[string]bool
+	minted []string
+}
+
+func (f *fakeMinter) output(_ context.Context, _ string, args ...string) (string, error) {
+	var namespace, serviceAccount string
+	for i, arg := range args {
+		switch arg {
+		case "-n":
+			if i+1 < len(args) {
+				namespace = args[i+1]
+			}
+		case "token":
+			if i+1 < len(args) {
+				serviceAccount = args[i+1]
+			}
+		}
+	}
+	key := namespace + "/" + serviceAccount
+	f.minted = append(f.minted, key)
+	if f.fail[key] {
+		return "", fmt.Errorf("serviceaccounts %q not found", serviceAccount)
+	}
+	return "fake.jwt.token", nil
+}
+
+func TestEnsureRelayTokensMintablePassesWhenAllSAsMintable(t *testing.T) {
+	minter := &fakeMinter{}
+	if err := ensureRelayTokensMintable(context.Background(), minter, relayPlan()); err != nil {
+		t.Fatalf("ensureRelayTokensMintable() error = %v, want pass when every SA mints", err)
+	}
+	// Both roles must be probed for every distinct relay-target namespace.
+	for _, target := range relayPlan() {
+		for _, sa := range []string{writerServiceAcct, readerServiceAcct} {
+			want := target.ConsumerNamespace + "/" + sa
+			found := false
+			for _, got := range minter.minted {
+				if got == want {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("ensureRelayTokensMintable() did not mint %s; minted=%v", want, minter.minted)
+			}
+		}
+	}
+}
+
+func TestEnsureRelayTokensMintableFailsClosedOnUnmintableReader(t *testing.T) {
+	// The reader SA (the one the readback authenticates as) is renamed/absent
+	// in a relay-target namespace: the gate must abort before the raft wipe.
+	target := relayPlan()[0]
+	minter := &fakeMinter{fail: map[string]bool{
+		target.ConsumerNamespace + "/" + readerServiceAcct: true,
+	}}
+	err := ensureRelayTokensMintable(context.Background(), minter, relayPlan())
+	if err == nil {
+		t.Fatalf("ensureRelayTokensMintable() accepted a plan whose reader SA cannot be minted (would strand the ceremony post-wipe)")
+	}
+	if !strings.Contains(err.Error(), readerServiceAcct) || !strings.Contains(err.Error(), target.ConsumerNamespace) {
+		t.Fatalf("ensureRelayTokensMintable() error = %v, want it to name the unmintable %s in %s", err, readerServiceAcct, target.ConsumerNamespace)
+	}
+}
+
+func TestEnsureRelayTokensMintableFailsClosedOnUnmintableWriter(t *testing.T) {
+	target := relayPlan()[0]
+	minter := &fakeMinter{fail: map[string]bool{
+		target.ConsumerNamespace + "/" + writerServiceAcct: true,
+	}}
+	if err := ensureRelayTokensMintable(context.Background(), minter, relayPlan()); err == nil {
+		t.Fatalf("ensureRelayTokensMintable() accepted a plan whose writer SA cannot be minted")
+	}
+}
+
 func TestDecodeSecretData(t *testing.T) {
 	raw := fmt.Sprintf(`{"data":{"uri":%q}}`, base64.StdEncoding.EncodeToString([]byte("postgresql://x")))
 	data, err := decodeSecretData(raw)
