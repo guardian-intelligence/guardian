@@ -1,13 +1,17 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	baoapi "github.com/openbao/openbao/api/v2"
 )
 
 func TestLocalRevisionProblemRejectsStaleCheckout(t *testing.T) {
@@ -301,6 +305,90 @@ func TestRelayValuesRejectsEmptyValue(t *testing.T) {
 	}
 	if values["ingest"] != "sekrit" {
 		t.Fatalf("relayValues() = %v, want ingest property", values)
+	}
+}
+
+// fakeKV records every read and write it serves, so a test can assert which
+// identity each operation went through.
+type fakeKV struct {
+	writes   map[string]map[string]interface{}
+	reads    []string
+	readBack *baoapi.Secret
+	writeErr error
+	readErr  error
+}
+
+func (f *fakeKV) WriteWithContext(_ context.Context, path string, data map[string]interface{}) (*baoapi.Secret, error) {
+	if f.writes == nil {
+		f.writes = map[string]map[string]interface{}{}
+	}
+	f.writes[path] = data
+	return nil, f.writeErr
+}
+
+func (f *fakeKV) ReadWithContext(_ context.Context, path string) (*baoapi.Secret, error) {
+	f.reads = append(f.reads, path)
+	if f.readErr != nil {
+		return nil, f.readErr
+	}
+	return f.readBack, nil
+}
+
+func kvV2Secret(values map[string]interface{}) *baoapi.Secret {
+	return &baoapi.Secret{Data: map[string]interface{}{"data": values}}
+}
+
+func TestWriteAndVerifyWritesAsWriterVerifiesAsReader(t *testing.T) {
+	writer := &fakeKV{}
+	reader := &fakeKV{readBack: kvV2Secret(map[string]interface{}{"ingest": "sekrit"})}
+	path := "kv/data/guardian/guardian-mgmt/guardian-analytics/clickhouse"
+	if err := writeAndVerify(context.Background(), writer, reader, path, map[string]string{"ingest": "sekrit"}); err != nil {
+		t.Fatalf("writeAndVerify() error = %v", err)
+	}
+	body, ok := writer.writes[path]
+	if !ok || len(writer.writes) != 1 {
+		t.Fatalf("writeAndVerify() writes = %v, want exactly one write to %s via the writer", writer.writes, path)
+	}
+	data, ok := body["data"].(map[string]interface{})
+	if !ok || data["ingest"] != "sekrit" {
+		t.Fatalf("writeAndVerify() wrote body %v, want kv-v2 data with the value", body)
+	}
+	if len(reader.reads) != 1 || reader.reads[0] != path {
+		t.Fatalf("writeAndVerify() reader reads = %v, want exactly one readback of %s via the reader", reader.reads, path)
+	}
+}
+
+func TestWriteAndVerifyNeverReadsThroughTheWriter(t *testing.T) {
+	// The writer fake would happily serve a readback; the assertion is that
+	// writeAndVerify never asks it to.
+	values := map[string]interface{}{"uri": "postgresql://x"}
+	writer := &fakeKV{readBack: kvV2Secret(values)}
+	reader := &fakeKV{readBack: kvV2Secret(values)}
+	if err := writeAndVerify(context.Background(), writer, reader, "kv/data/x", map[string]string{"uri": "postgresql://x"}); err != nil {
+		t.Fatalf("writeAndVerify() error = %v", err)
+	}
+	if len(writer.reads) != 0 {
+		t.Fatalf("writeAndVerify() read through the writer identity (%v); readback must authenticate as the reader role", writer.reads)
+	}
+	if len(reader.writes) != 0 {
+		t.Fatalf("writeAndVerify() wrote through the reader identity (%v)", reader.writes)
+	}
+}
+
+func TestWriteAndVerifyFailsClosedOnReaderReadback(t *testing.T) {
+	values := map[string]string{"ingest": "sekrit"}
+	writer := &fakeKV{}
+	denied := &fakeKV{readErr: errors.New("permission denied")}
+	if err := writeAndVerify(context.Background(), writer, denied, "kv/data/x", values); err == nil {
+		t.Fatalf("writeAndVerify() accepted a write the reader could not read back")
+	}
+	empty := &fakeKV{}
+	if err := writeAndVerify(context.Background(), writer, empty, "kv/data/x", values); err == nil {
+		t.Fatalf("writeAndVerify() accepted an empty readback")
+	}
+	mismatched := &fakeKV{readBack: kvV2Secret(map[string]interface{}{"ingest": "other"})}
+	if err := writeAndVerify(context.Background(), writer, mismatched, "kv/data/x", values); err == nil {
+		t.Fatalf("writeAndVerify() accepted a readback that does not match the written value")
 	}
 }
 

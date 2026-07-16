@@ -37,6 +37,7 @@ const (
 
 	openBaoPodSelector = "app.kubernetes.io/name=openbao"
 	writerServiceAcct  = "secrets-writer"
+	readerServiceAcct  = "secrets-reader"
 	kubernetesAuthPath = "kubernetes"
 )
 
@@ -659,12 +660,14 @@ func randomFreePort() (int, error) {
 
 // relayTarget re-seeds one kv path the importer does not carry, sourced from a
 // still-materialized Kubernetes Secret (ExternalSecrets are Orphan/Retain, so
-// the projected Secrets survive the raft wipe) and written through that
-// consumer namespace's own guardian-writer role.
+// the projected Secrets survive the raft wipe), written through that consumer
+// namespace's own guardian-writer role, and verified by reading it back as
+// the namespace's guardian-reader role — the identity ESO consumes with.
 type relayTarget struct {
 	Name string
-	// ConsumerNamespace holds the secrets-writer ServiceAccount and names the
-	// guardian-writer-<ns> role; the write is confined to its kv subtree.
+	// ConsumerNamespace holds the secrets-writer and secrets-reader
+	// ServiceAccounts and names the guardian-writer-<ns> and
+	// guardian-reader-<ns> roles; both are confined to its kv subtree.
 	ConsumerNamespace string
 	APIPath           string
 	SourceNamespace   string
@@ -752,18 +755,26 @@ func relayGeneratedValues(ctx context.Context, runner kubectlRunner, opts option
 		if err != nil {
 			return err
 		}
-		jwt, err := writerToken(ctx, runner, target.ConsumerNamespace)
+		writerJWT, err := serviceAccountToken(ctx, runner, target.ConsumerNamespace, writerServiceAcct)
 		if err != nil {
 			return err
 		}
-		client, err := authenticatedOpenBaoClient(ctx, opts, port, caPEM, "guardian-writer-"+target.ConsumerNamespace, jwt)
+		writerClient, err := authenticatedOpenBaoClient(ctx, opts, port, caPEM, "guardian-writer-"+target.ConsumerNamespace, writerJWT)
 		if err != nil {
 			return fmt.Errorf("login as guardian-writer-%s for %s: %w", target.ConsumerNamespace, target.Name, err)
 		}
-		if err := writeAndVerify(ctx, client, target.APIPath, values); err != nil {
+		readerJWT, err := serviceAccountToken(ctx, runner, target.ConsumerNamespace, readerServiceAcct)
+		if err != nil {
+			return err
+		}
+		readerClient, err := authenticatedOpenBaoClient(ctx, opts, port, caPEM, "guardian-reader-"+target.ConsumerNamespace, readerJWT)
+		if err != nil {
+			return fmt.Errorf("login as guardian-reader-%s for %s: %w", target.ConsumerNamespace, target.Name, err)
+		}
+		if err := writeAndVerify(ctx, writerClient.Logical(), readerClient.Logical(), target.APIPath, values); err != nil {
 			return fmt.Errorf("re-relay %s: %w", target.Name, err)
 		}
-		fmt.Printf("re-relayed %s to %s properties: %s\n", target.Name, target.APIPath, strings.Join(sortedKeys(values), ","))
+		fmt.Printf("re-relayed %s to %s properties: %s (readback verified as guardian-reader-%s)\n", target.Name, target.APIPath, strings.Join(sortedKeys(values), ","), target.ConsumerNamespace)
 	}
 	return nil
 }
@@ -817,14 +828,14 @@ func openBaoCA(ctx context.Context, runner kubectlRunner, opts options) ([]byte,
 	return []byte(caPEM), nil
 }
 
-func writerToken(ctx context.Context, runner kubectlRunner, namespace string) (string, error) {
-	out, err := runner.output(ctx, "mint "+writerServiceAcct+" token in "+namespace, "-n", namespace, "create", "token", writerServiceAcct, "--audience=openbao", "--duration=10m")
+func serviceAccountToken(ctx context.Context, runner kubectlRunner, namespace, serviceAccount string) (string, error) {
+	out, err := runner.output(ctx, "mint "+serviceAccount+" token in "+namespace, "-n", namespace, "create", "token", serviceAccount, "--audience=openbao", "--duration=10m")
 	if err != nil {
 		return "", err
 	}
 	token := strings.TrimSpace(out)
 	if token == "" {
-		return "", fmt.Errorf("kubectl create token %s -n %s returned an empty token", writerServiceAcct, namespace)
+		return "", fmt.Errorf("kubectl create token %s -n %s returned an empty token", serviceAccount, namespace)
 	}
 	return token, nil
 }
@@ -856,12 +867,24 @@ func authenticatedOpenBaoClient(ctx context.Context, opts options, localPort int
 	return client, nil
 }
 
-func writeAndVerify(ctx context.Context, client *baoapi.Client, apiPath string, values map[string]string) error {
+type kvWriter interface {
+	WriteWithContext(ctx context.Context, path string, data map[string]interface{}) (*baoapi.Secret, error)
+}
+
+type kvReader interface {
+	ReadWithContext(ctx context.Context, path string) (*baoapi.Secret, error)
+}
+
+// writeAndVerify writes through the writer identity and proves the value back
+// through the reader identity — the one ESO reads with — so a verified write
+// is one the consumer can actually materialize. A write that cannot be read
+// back by the reader fails the ceremony.
+func writeAndVerify(ctx context.Context, writer kvWriter, reader kvReader, apiPath string, values map[string]string) error {
 	body := map[string]interface{}{"data": stringMapToInterface(values)}
-	if _, err := client.Logical().WriteWithContext(ctx, apiPath, body); err != nil {
+	if _, err := writer.WriteWithContext(ctx, apiPath, body); err != nil {
 		return fmt.Errorf("write %s: %w", apiPath, err)
 	}
-	secret, err := client.Logical().ReadWithContext(ctx, apiPath)
+	secret, err := reader.ReadWithContext(ctx, apiPath)
 	if err != nil {
 		return fmt.Errorf("verify %s: %w", apiPath, err)
 	}
