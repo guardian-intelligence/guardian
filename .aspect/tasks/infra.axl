@@ -107,10 +107,7 @@ GUARDIAN_MGMT_API_HOST = "k8s.guardianintelligence.org"
 GUARDIAN_MGMT_KUBE_API = "https://" + GUARDIAN_MGMT_API_HOST + ":6443"
 EXPECTED_KUBE_APIS = [
     GUARDIAN_MGMT_KUBE_API,
-    # Explicit disaster-recovery overrides (dark case: zone DNS is
-    # unresolvable): the private VLAN VIP and the node public APIs from
-    # src/infrastructure/bootstrap/guardian-mgmt/main.tf stay accepted for
-    # validation when the kubeconfig CA is current.
+    # Dark-case DR endpoints: accepted because the zone DNS name is unresolvable while dark.
     "https://10.8.0.250:6443",
     "https://206.223.228.101:6443",
     "https://45.250.254.119:6443",
