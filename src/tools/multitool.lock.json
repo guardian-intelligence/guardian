@@ -444,16 +444,16 @@
     "binaries": [
       {
         "kind": "archive",
-        "url": "https://github.com/opentofu/opentofu/releases/download/v1.12.3/tofu_1.12.3_linux_amd64.zip",
-        "sha256": "46b48c3438c65cf479fc076c9281422ffa2f493548d1e813d154c835c5986a08",
+        "url": "https://github.com/opentofu/opentofu/releases/download/v1.12.4/tofu_1.12.4_linux_amd64.zip",
+        "sha256": "f5d2ae8a0efcddd3722546b3e0f2f2f0648ce5e5a3e411176041adcb7dccc1e8",
         "os": "linux",
         "cpu": "x86_64",
         "file": "tofu"
       },
       {
         "kind": "archive",
-        "url": "https://github.com/opentofu/opentofu/releases/download/v1.12.3/tofu_1.12.3_darwin_arm64.tar.gz",
-        "sha256": "0c8ddee4294f7cea34d82b122fa805febce41d21905a54dc9ce9f79ee8145284",
+        "url": "https://github.com/opentofu/opentofu/releases/download/v1.12.4/tofu_1.12.4_darwin_arm64.tar.gz",
+        "sha256": "7c06e4390d9ccd467773e37ff1c3d833c7ca0c24742cd9e9ad47284bea472247",
         "os": "macos",
         "cpu": "arm64",
         "file": "tofu"
