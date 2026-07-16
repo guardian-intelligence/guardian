@@ -8,12 +8,16 @@ commands).
 
 ## The one principle
 
-**Anyone may write a secret; only the disaster path may read one.** A bad
-write costs at worst an outage; a bad read is a leak. We prefer the outage —
-for customer material above all. Every tier below applies the same asymmetry:
-write paths are open, cheap, and agent-drivable with no human in the loop;
-read paths are scoped to the single consumer that needs the value, or to the
-operator at disaster recovery.
+**Anyone may write a secret; reading one is gated by what it unlocks.** A
+bad write costs at worst an outage; a bad read is a leak. We prefer the
+outage — for customer material above all. Every tier below applies the same
+asymmetry: write paths are open, cheap, and agent-drivable with no human in
+the loop; read paths are classified by the data behind the credential. A
+credential that unlocks PII, customer data, or a privilege escalation is
+readable only by the single consumer that needs the value, or by the
+operator at disaster recovery — never by the agent identity. A credential
+that unlocks only non-PII operational data (telemetry, analytics) may carry
+a narrow, explicit, named read grant for the agent.
 
 ## The four tiers
 
@@ -37,10 +41,13 @@ operator at disaster recovery.
    rotating one is a **blind write**: encrypt to the public key and upload —
    no passphrase, no bundle, no human. Decryption happens at disaster
    recovery and drills, nowhere else.
-4. **OpenBao** — every integration secret: third-party API keys, OAuth client
-   secrets, GitHub App private keys. Written through namespace-scoped
-   write-only tokens, read only by the consumer's ExternalSecret, and
-   recovered as data (raft snapshot), never re-entered by hand.
+4. **OpenBao** — every integration secret: third-party API keys, OAuth
+   client secrets, GitHub App private keys, platform-admin passwords. This
+   is privilege-escalating and customer-integration material wholesale, so
+   the store sits in the no-read class as a unit: written through
+   namespace-scoped write-only tokens, read only by the consumer's
+   ExternalSecret, and recovered as data (raft snapshot), never re-entered
+   by hand.
 
 Compromising the cluster yields tier 4 — revocable, re-issuable material.
 Tiers 1–3 are reachable only through the operator vault, so the cluster can
@@ -91,9 +98,23 @@ never leak the root of trust that rebuilds it.
     tokens itself through a TokenRequest grant scoped to the
     `secrets-writer` SAs (RBAC and admission policy:
     `src/infrastructure/base/cozystack/platform-admins.yaml`), so an agent
-    writes a secret headlessly while remaining structurally unable to read
-    one — the agent identity carries the built-in `view` role, which
-    excludes Secrets, behind a fail-closed ValidatingAdmissionPolicy.
+    writes a secret headlessly while the management store stays unreadable
+    to it: the writer policies grant no read capability, so the
+    mint-token→login→read escalation is closed by the store's no-read
+    classification itself, independent of any other grant. On the
+    Kubernetes side the agent identity carries the built-in `view` role,
+    which excludes Secrets, behind a fail-closed
+    ValidatingAdmissionPolicy.
+- **The agent read boundary is a data classification, not a blanket ban.**
+  Credentials that unlock PII, customer data, or a privilege escalation are
+  never agent-readable — and the OpenBao management store
+  (`kv/guardian/guardian-mgmt/*`) is treated as that class wholesale. An
+  individual Kubernetes Secret that unlocks only non-PII operational data
+  may be granted a narrow, explicit, named read: the Role
+  `guardian-platform-agent-analytics-read`
+  (`src/infrastructure/deployments/analytics/system/secrets.yaml`) grants
+  `get` on `analytics-ch-ingest` alone — ClickHouse holds only non-PII
+  telemetry — and is the precedent for the readable class.
 - OpenBao config is **O(1) in the number of integrations**: a new secret in
   an existing namespace never touches OpenBao config. Only *structural*
   changes (a new consumer namespace, a new mount or auth method) edit the

@@ -150,7 +150,9 @@ called out explicitly.
   `kv/guardian/guardian-mgmt/<ns>/*`) and `guardian-writer-<ns>` (SA `secrets-writer`,
   short-TTL, write-only within the same subtree; the platform-agent identity mints its
   token through a TokenRequest grant scoped to those SAs, so writes are headless while
-  reads stay structurally out of reach). This makes OpenBao config O(1) in the number of integrations: a new secret in an
+  the store stays no-read to the agent — it holds privilege-escalating and
+  customer-integration material wholesale, the never-agent-readable class under the
+  read policy in `docs/secrets.md`). This makes OpenBao config O(1) in the number of integrations: a new secret in an
   existing namespace is a Git-only change (ExternalSecret + workload) plus one scoped value
   write via the official CLI — no policy edit, no re-init. A writer token for one stage
   physically cannot write another stage's paths, so prod/gamma mixups are prevented by the
