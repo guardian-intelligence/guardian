@@ -32,6 +32,7 @@ go_test(
         "vlogs_streams_test.go",
         "vm_rollup_wiring_test.go",
         "vmselect_resources_test.go",
+        "zot_sync_test.go",
     ],
     data = [
         "//:.aspect/tasks/infra.axl",
