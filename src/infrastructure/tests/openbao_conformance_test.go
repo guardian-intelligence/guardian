@@ -310,6 +310,35 @@ func TestOpenBaoOperationsInventoryConformance(t *testing.T) {
 	}
 }
 
+// The write asymmetry is load-bearing: docs/secrets.md "Permission model"
+// has the platform-agent minting secrets-writer tokens headlessly, so the
+// moment a guardian-writer policy carries "read" that identity can read
+// every namespace's secret subtree and escalate to cluster-admin through
+// the platform-admin password. The docs call the agent "structurally
+// unable to read" a secret; this is what makes that true. Each writer
+// subtree must grant exactly create+update on kv/data and kv/metadata,
+// never read; the reader pair is the only read path.
+func TestOpenBaoWriterPoliciesAreWriteOnlyConformance(t *testing.T) {
+	raw := readText(t, runfilePath("src/infrastructure/deployments/guardian/system/openbao-helmrelease.yaml"))
+	for _, ns := range []string{
+		"external-dns",
+		"company-site",
+		"guardian-iam",
+		"guardian-analytics",
+		"guardian-products",
+		"tenant-root",
+		"tenant-guardian",
+		"tenant-guardian-prod",
+		"postflight-runner",
+	} {
+		for _, kvType := range []string{"data", "metadata"} {
+			prefix := `kv/` + kvType + `/guardian/guardian-mgmt/` + ns + `/*\" {\n  capabilities = `
+			assertTextContains(t, raw, prefix+`[\"create\", \"update\"]`, "writer policy "+ns)
+			assertTextNotContains(t, raw, prefix+`[\"create\", \"read\", \"update\"]`, "writer policy "+ns)
+		}
+	}
+}
+
 // Every Flux Kustomization must source from the substitutable placeholders:
 // dark-uplink bring-up flips all sources to the mirror-served OCIRepository
 // via the guardian-source ConfigMap, and a literal sourceRef anywhere would
