@@ -385,7 +385,7 @@ spec:
                   operation = "update"
                   path = "sys/policies/acl/guardian-writer-external-dns"
                   data = {
-                    policy = "path \"kv/data/guardian/guardian-mgmt/external-dns/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/external-dns/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n"
+                    policy = "path \"kv/data/guardian/guardian-mgmt/external-dns/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/external-dns/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n"
                   }
                 }
 
@@ -427,7 +427,7 @@ spec:
                   operation = "update"
                   path = "sys/policies/acl/guardian-writer-company-site"
                   data = {
-                    policy = "path \"kv/data/guardian/guardian-mgmt/company-site/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/company-site/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n"
+                    policy = "path \"kv/data/guardian/guardian-mgmt/company-site/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/company-site/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n"
                   }
                 }
 
@@ -469,7 +469,7 @@ spec:
                   operation = "update"
                   path = "sys/policies/acl/guardian-writer-tenant-guardian-prod"
                   data = {
-                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-guardian-prod/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/tenant-guardian-prod/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n"
+                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-guardian-prod/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/tenant-guardian-prod/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n"
                   }
                 }
 
@@ -511,7 +511,7 @@ spec:
                   operation = "update"
                   path = "sys/policies/acl/guardian-writer-guardian-iam"
                   data = {
-                    policy = "path \"kv/data/guardian/guardian-mgmt/guardian-iam/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/guardian-iam/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n"
+                    policy = "path \"kv/data/guardian/guardian-mgmt/guardian-iam/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/guardian-iam/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n"
                   }
                 }
 
@@ -553,7 +553,7 @@ spec:
                   operation = "update"
                   path = "sys/policies/acl/guardian-writer-guardian-products"
                   data = {
-                    policy = "path \"kv/data/guardian/guardian-mgmt/guardian-products/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/guardian-products/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n"
+                    policy = "path \"kv/data/guardian/guardian-mgmt/guardian-products/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/guardian-products/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n"
                   }
                 }
 
@@ -595,7 +595,7 @@ spec:
                   operation = "update"
                   path = "sys/policies/acl/guardian-writer-tenant-root"
                   data = {
-                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-root/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/tenant-root/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n"
+                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-root/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/tenant-root/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n"
                   }
                 }
 
@@ -637,7 +637,7 @@ spec:
                   operation = "update"
                   path = "sys/policies/acl/guardian-writer-guardian-analytics"
                   data = {
-                    policy = "path \"kv/data/guardian/guardian-mgmt/guardian-analytics/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/guardian-analytics/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n"
+                    policy = "path \"kv/data/guardian/guardian-mgmt/guardian-analytics/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/guardian-analytics/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n"
                   }
                 }
 
@@ -679,7 +679,7 @@ spec:
                   operation = "update"
                   path = "sys/policies/acl/guardian-writer-postflight-runner"
                   data = {
-                    policy = "path \"kv/data/guardian/guardian-mgmt/postflight-runner/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/postflight-runner/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n"
+                    policy = "path \"kv/data/guardian/guardian-mgmt/postflight-runner/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/postflight-runner/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n"
                   }
                 }
 
@@ -721,7 +721,7 @@ spec:
                   operation = "update"
                   path = "sys/policies/acl/guardian-writer-tenant-guardian"
                   data = {
-                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-guardian/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/tenant-guardian/*\" {\n  capabilities = [\"create\", \"read\", \"update\"]\n}\n"
+                    policy = "path \"kv/data/guardian/guardian-mgmt/tenant-guardian/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/tenant-guardian/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n"
                   }
                 }
 
