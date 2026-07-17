@@ -18,19 +18,16 @@ func TestPaymentsRuntimeConformance(t *testing.T) {
 		`value: "false"`,
 		"guardian.dev/otel: producer",
 		"guardian.dev/tigerbeetle-transport-api: mtls-host-ip-v1",
-		"host: 127.0.0.1",
 		"readOnlyRootFilesystem: true",
 		"automountServiceAccountToken: false",
 	} {
 		assertTextContains(t, deployment, want, deploymentPath)
 	}
-	if count := strings.Count(deployment, "host: 127.0.0.1"); count != 2 {
-		t.Fatalf("%s must probe both loopback-only transport listeners, got %d host declarations", deploymentPath, count)
-	}
 	for _, forbidden := range []string{
 		"sk_test_",
 		"rk_test_",
 		"whsec_",
+		"host: 127.0.0.1",
 		"TIGERBEETLE_CLUSTER_ID\n              value: \"1\"",
 		"10.8.0.11:3000",
 	} {
