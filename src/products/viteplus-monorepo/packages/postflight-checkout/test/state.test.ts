@@ -1,4 +1,4 @@
-import { describe, expect, it } from "@effect/vitest";
+import { describe, expect, it } from "vitest";
 import { Option, Schema } from "effect";
 import { CommitSha, RepositoryFullName, parseCheckoutRef } from "../src/domain.ts";
 import { isLegalTransition, nextPhases, type CheckoutPhase } from "../src/state.ts";

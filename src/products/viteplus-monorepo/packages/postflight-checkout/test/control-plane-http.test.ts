@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "@effect/vitest";
+import { describe, expect, it } from "vitest";
 import { Effect, Either, Option, Redacted, Schema } from "effect";
 import {
   AttemptId,
