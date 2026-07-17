@@ -27,6 +27,13 @@ type System interface {
 	LocateDevice(ctx context.Context, serial string) (string, error)
 	// IsBlank reports whether a device carries no filesystem signature.
 	IsBlank(ctx context.Context, device string) (bool, error)
+	// IsLUKS reports whether the device carries a LUKS header.
+	IsLUKS(ctx context.Context, device string) (bool, error)
+	// FormatLUKS initializes a LUKS2 container on the device with key.
+	FormatLUKS(ctx context.Context, device string, key []byte) error
+	// OpenLUKS opens the device's LUKS container under name and returns the
+	// mapper device; a container already open under name is a success.
+	OpenLUKS(ctx context.Context, device, name string, key []byte) (string, error)
 	// MakeFilesystem creates the filesystem on a blank device.
 	MakeFilesystem(ctx context.Context, device, filesystem string) error
 	// IsMounted reports whether something is mounted at the mountpoint.
@@ -100,6 +107,58 @@ func (RealSystem) MakeFilesystem(ctx context.Context, device, filesystem string)
 		return fmt.Errorf("guestd: mkfs.ext4 %s: %s: %w", device, strings.TrimSpace(stderr.String()), err)
 	}
 	return nil
+}
+
+// IsLUKS implements System.
+func (RealSystem) IsLUKS(ctx context.Context, device string) (bool, error) {
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, "cryptsetup", "isLuks", device)
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return false, nil
+	}
+	return false, fmt.Errorf("guestd: cryptsetup isLuks %s: %s: %w", device, strings.TrimSpace(stderr.String()), err)
+}
+
+// FormatLUKS implements System. The key is full-entropy, so argon2's
+// memory-hard slowdown buys nothing and would spend ~1s of the mount
+// deadline at every open; pbkdf2 at the floor iteration count keeps
+// format+open inside the convergence budget.
+func (RealSystem) FormatLUKS(ctx context.Context, device string, key []byte) error {
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, "cryptsetup", "luksFormat",
+		"--batch-mode", "--type", "luks2",
+		"--pbkdf", "pbkdf2", "--pbkdf-force-iterations", "1000",
+		"--key-file", "-", device)
+	cmd.Stdin = bytes.NewReader(key)
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("guestd: luksFormat %s: %s: %w", device, strings.TrimSpace(stderr.String()), err)
+	}
+	return nil
+}
+
+// OpenLUKS implements System. --allow-discards for the same reason the
+// mount options carry discard: TRIM must pass through to the sparse zvol.
+func (RealSystem) OpenLUKS(ctx context.Context, device, name string, key []byte) (string, error) {
+	mapper := "/dev/mapper/" + name
+	if _, err := os.Stat(mapper); err == nil {
+		return mapper, nil
+	}
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, "cryptsetup", "open",
+		"--key-file", "-", "--allow-discards", device, name)
+	cmd.Stdin = bytes.NewReader(key)
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("guestd: cryptsetup open %s: %s: %w", device, strings.TrimSpace(stderr.String()), err)
+	}
+	return mapper, nil
 }
 
 // IsMounted implements System by scanning /proc/self/mounts.

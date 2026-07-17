@@ -6,6 +6,7 @@ go_library(
         "guestd.go",
         "runner.go",
         "system.go",
+        "volkey.go",
     ],
     importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/guestd",
     visibility = ["//visibility:public"],

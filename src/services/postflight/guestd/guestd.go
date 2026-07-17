@@ -47,6 +47,9 @@ type Config struct {
 	// QuiesceWindow bounds how long a busy unmount is retried before the
 	// quiesce is reported failed.
 	QuiesceWindow time.Duration
+	// Encryption is the baked at-rest mode for workspace volumes; the zero
+	// value mounts plaintext. See LoadEncryptionMode.
+	Encryption EncryptionMode
 	// HostCID is the only vsock peer CID accepted as the host. Anything in
 	// the guest — the runner user included — can dial this listener, so a
 	// connection from any other CID is dropped before a verb is read.
@@ -335,6 +338,12 @@ func (s *Server) tryMount(ctx context.Context, mount guestproto.Mount, options [
 		if err != nil {
 			return err
 		}
+		if s.cfg.Encryption.enabled() {
+			device, err = s.openEncrypted(ctx, device, mount.Serial)
+			if err != nil {
+				return err
+			}
+		}
 		blank, err := system.IsBlank(ctx, device)
 		if err != nil {
 			return err
@@ -349,6 +358,36 @@ func (s *Server) tryMount(ctx context.Context, mount guestproto.Mount, options [
 		}
 	}
 	return system.Adopt(mount.Mountpoint)
+}
+
+// openEncrypted converges the device to an open LUKS2 mapper and returns
+// the mapper node the rest of the ladder operates on. A blank device is
+// formatted first; a device carrying anything that is not LUKS is refused —
+// with encryption on, plaintext must never mount.
+func (s *Server) openEncrypted(ctx context.Context, device, serial string) (string, error) {
+	system := s.cfg.System
+	luks, err := system.IsLUKS(ctx, device)
+	if err != nil {
+		return "", err
+	}
+	key, err := workspaceKey(s.cfg.Encryption)
+	if err != nil {
+		return "", err
+	}
+	defer clear(key)
+	if !luks {
+		blank, err := system.IsBlank(ctx, device)
+		if err != nil {
+			return "", err
+		}
+		if !blank {
+			return "", fmt.Errorf("device %s carries a plaintext filesystem; refusing to mount under encryption mode %q", device, s.cfg.Encryption)
+		}
+		if err := system.FormatLUKS(ctx, device, key); err != nil {
+			return "", err
+		}
+	}
+	return system.OpenLUKS(ctx, device, "pf-"+serial, key)
 }
 
 // handleQuiesce syncs and unmounts the workspace, riding out the busy
