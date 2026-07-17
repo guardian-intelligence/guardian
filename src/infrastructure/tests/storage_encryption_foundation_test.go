@@ -83,6 +83,18 @@ func TestCozystackNativeLinstorEncryptionConformance(t *testing.T) {
 	assertTextContains(t, patch, "kustomize.toolkit.fluxcd.io/prune: disabled", patchPath)
 	assertTextContains(t, patch, "linstorPassphraseSecret:", patchPath)
 	assertTextContains(t, patch, "guardian-linstor-master-passphrase", patchPath)
+	for _, setting := range []string{
+		"DrbdOptions/Net/max-buffers",
+		"DrbdOptions/Net/rcvbuf-size",
+		"DrbdOptions/Net/sndbuf-size",
+		"DrbdOptions/PeerDevice/c-fill-target",
+		"DrbdOptions/PeerDevice/c-max-rate",
+		"DrbdOptions/PeerDevice/c-min-rate",
+		"DrbdOptions/PeerDevice/resync-rate",
+		"DrbdOptions/PeerDevice/c-plan-ahead",
+	} {
+		assertTextContains(t, patch, setting, patchPath)
+	}
 
 	canaryPath := runfilePath("src/infrastructure/deployments/guardian/system/storage-encryption-canary.yaml")
 	canary := readText(t, canaryPath)
