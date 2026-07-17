@@ -66,10 +66,12 @@ func TestCozystackNativeLinstorEncryptionFoundationConformance(t *testing.T) {
 		t.Errorf("legacy replicated class must remain default during the foundation phase, got %q", got)
 	}
 
-	patchPath := runfilePath("src/infrastructure/base/app-patches/cozy-linstor-encryption.yaml")
+	patchPath := runfilePath("src/infrastructure/base/storage/linstor-encryption.yaml")
 	patch := readText(t, patchPath)
 	assertTextContains(t, patch, "kind: LinstorCluster", patchPath)
-	assertTextContains(t, patch, "/spec/linstorPassphraseSecret", patchPath)
+	assertTextContains(t, patch, "kustomize.toolkit.fluxcd.io/ssa: Merge", patchPath)
+	assertTextContains(t, patch, "kustomize.toolkit.fluxcd.io/prune: disabled", patchPath)
+	assertTextContains(t, patch, "linstorPassphraseSecret:", patchPath)
 	assertTextContains(t, patch, "guardian-linstor-master-passphrase", patchPath)
 
 	canaryPath := runfilePath("src/infrastructure/deployments/guardian/system/storage-encryption-canary.yaml")

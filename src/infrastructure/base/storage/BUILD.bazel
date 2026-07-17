@@ -3,6 +3,7 @@ filegroup(
     srcs = [
         "kustomization.yaml",
         "linstor-data-pools.yaml",
+        "linstor-encryption.yaml",
         "storageclasses.yaml",
     ],
     visibility = ["//visibility:public"],
