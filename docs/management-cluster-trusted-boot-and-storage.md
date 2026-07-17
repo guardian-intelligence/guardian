@@ -77,7 +77,9 @@ Non-synthetic persistent data uses Cozystack's native encrypted class shape:
 
 These classes set `linstor.csi.linbit.com/encryption: "true"` and carry
 `guardian.dev/encryption-at-rest=linstor-luks`. The replicated encrypted
-class is the cluster default. TigerBeetle and every other system containing
+class is the cluster default. TigerBeetle uses one
+`local-encrypted-retain` volume per replica so its three data files remain
+independent and TigerBeetle owns their replication. Every system containing
 customer transactions, balances, credentials, or business state must use an
 encrypted class; its deployment must not select a `synthetic-*` class.
 
