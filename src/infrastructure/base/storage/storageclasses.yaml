@@ -1,7 +1,9 @@
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
-  name: local
+  name: synthetic-local
+  labels:
+    guardian.dev/data-classification: synthetic
 provisioner: linstor.csi.linbit.com
 parameters:
   linstor.csi.linbit.com/storagePool: data
@@ -14,7 +16,9 @@ reclaimPolicy: Delete
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
-  name: local-retain
+  name: synthetic-local-retain
+  labels:
+    guardian.dev/data-classification: synthetic
 provisioner: linstor.csi.linbit.com
 parameters:
   linstor.csi.linbit.com/storagePool: data
@@ -27,11 +31,30 @@ reclaimPolicy: Retain
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
-  name: openbao-local
+  name: local-encrypted
+  labels:
+    guardian.dev/encryption-at-rest: linstor-luks
 provisioner: linstor.csi.linbit.com
 parameters:
   linstor.csi.linbit.com/storagePool: data
-  linstor.csi.linbit.com/layerList: storage
+  linstor.csi.linbit.com/layerList: luks storage
+  linstor.csi.linbit.com/encryption: "true"
+  linstor.csi.linbit.com/allowRemoteVolumeAccess: "false"
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-encrypted-retain
+  labels:
+    guardian.dev/encryption-at-rest: linstor-luks
+provisioner: linstor.csi.linbit.com
+parameters:
+  linstor.csi.linbit.com/storagePool: data
+  linstor.csi.linbit.com/layerList: luks storage
+  linstor.csi.linbit.com/encryption: "true"
   linstor.csi.linbit.com/allowRemoteVolumeAccess: "false"
 volumeBindingMode: WaitForFirstConsumer
 allowVolumeExpansion: true
@@ -40,9 +63,9 @@ reclaimPolicy: Retain
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
-  name: replicated
-  annotations:
-    storageclass.kubernetes.io/is-default-class: "true"
+  name: synthetic-replicated
+  labels:
+    guardian.dev/data-classification: synthetic
 provisioner: linstor.csi.linbit.com
 parameters:
   linstor.csi.linbit.com/storagePool: data
@@ -59,11 +82,57 @@ reclaimPolicy: Delete
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
-  name: replicated-retain
+  name: synthetic-replicated-retain
+  labels:
+    guardian.dev/data-classification: synthetic
 provisioner: linstor.csi.linbit.com
 parameters:
   linstor.csi.linbit.com/storagePool: data
   linstor.csi.linbit.com/layerList: drbd storage
+  linstor.csi.linbit.com/autoPlace: "3"
+  property.linstor.csi.linbit.com/DrbdOptions/auto-quorum: suspend-io
+  property.linstor.csi.linbit.com/DrbdOptions/Resource/on-no-data-accessible: suspend-io
+  property.linstor.csi.linbit.com/DrbdOptions/Resource/on-suspended-primary-outdated: force-secondary
+  property.linstor.csi.linbit.com/DrbdOptions/Net/rr-conflict: retry-connect
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: replicated-encrypted
+  labels:
+    guardian.dev/encryption-at-rest: linstor-luks
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: linstor.csi.linbit.com
+parameters:
+  linstor.csi.linbit.com/storagePool: data
+  linstor.csi.linbit.com/layerList: drbd luks storage
+  linstor.csi.linbit.com/encryption: "true"
+  linstor.csi.linbit.com/allowRemoteVolumeAccess: "true"
+  linstor.csi.linbit.com/autoPlace: "3"
+  property.linstor.csi.linbit.com/DrbdOptions/auto-quorum: suspend-io
+  property.linstor.csi.linbit.com/DrbdOptions/Resource/on-no-data-accessible: suspend-io
+  property.linstor.csi.linbit.com/DrbdOptions/Resource/on-suspended-primary-outdated: force-secondary
+  property.linstor.csi.linbit.com/DrbdOptions/Net/rr-conflict: retry-connect
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: replicated-encrypted-retain
+  labels:
+    guardian.dev/encryption-at-rest: linstor-luks
+provisioner: linstor.csi.linbit.com
+parameters:
+  linstor.csi.linbit.com/storagePool: data
+  linstor.csi.linbit.com/layerList: drbd luks storage
+  linstor.csi.linbit.com/encryption: "true"
+  linstor.csi.linbit.com/allowRemoteVolumeAccess: "true"
   linstor.csi.linbit.com/autoPlace: "3"
   property.linstor.csi.linbit.com/DrbdOptions/auto-quorum: suspend-io
   property.linstor.csi.linbit.com/DrbdOptions/Resource/on-no-data-accessible: suspend-io

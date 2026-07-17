@@ -318,7 +318,7 @@
         "/^src/infrastructure/bootstrap/bundle/images\\.declared\\.lock$/",
       ],
       matchStrings: [
-        "(?<packageName>ghcr\\.io/cozystack/cozystack/talos):(?<currentValue>v[0-9.]+)@(?<currentDigest>sha256:[a-f0-9]{64})",
+        "(?<packageName>factory\\.talos\\.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5):(?<currentValue>v[0-9.]+)@(?<currentDigest>sha256:[a-f0-9]{64})",
       ],
       datasourceTemplate: "docker",
     },

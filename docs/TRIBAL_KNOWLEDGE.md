@@ -126,7 +126,9 @@ place that knows the URL today.)
 
 <scratchpad>
 * Cluster autorotates CA every 90 days
-* Disk encryption done via TPM 2.0 keyring with Talos paired with M4 SecureBoot.
+* Management nodes boot signed Talos UKIs with UEFI Secure Boot enabled. Talos
+  TPM-LUKS protects STATE/EPHEMERAL; Cozystack-native LINSTOR LUKS protects
+  persistent volumes. See `src/infrastructure/runbooks/storage-encryption.md`.
 * Automated etcd snapshots to R2
 </scratchpad>
 

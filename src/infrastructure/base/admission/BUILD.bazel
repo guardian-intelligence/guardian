@@ -6,6 +6,7 @@ filegroup(
         "kustomization.yaml",
         "openbao-static-seal.yaml",
         "registry-prefixes.txt",
+        "synthetic-storage-classification.yaml",
         "vlogs-patcher-update-only.yaml",
     ],
     visibility = ["//visibility:public"],

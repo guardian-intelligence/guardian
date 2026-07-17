@@ -437,6 +437,33 @@ cluster:
 {{- include "talos.config.machine.common" . }}
 
 {{- include "talos.config.cluster" . }}
+---
+apiVersion: v1alpha1
+kind: VolumeConfig
+name: STATE
+encryption:
+  provider: luks2
+  keys:
+    - slot: 0
+      tpm:
+        checkSecurebootStatusOnEnroll: true
+        options:
+          pcrs:
+            - 7
+---
+apiVersion: v1alpha1
+kind: VolumeConfig
+name: EPHEMERAL
+encryption:
+  provider: luks2
+  keys:
+    - slot: 0
+      tpm:
+        checkSecurebootStatusOnEnroll: true
+        options:
+          pcrs:
+            - 7
+      lockToState: true
 {{- if .Values.darkBundleMirror.enabled }}
 {{- range .Values.darkBundleMirror.registries }}
 ---

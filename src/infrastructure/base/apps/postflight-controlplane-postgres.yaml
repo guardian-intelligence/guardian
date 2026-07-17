@@ -18,7 +18,7 @@ metadata:
 spec:
   replicas: 3
   size: 10Gi
-  storageClass: replicated
+  storageClass: replicated-encrypted
   external: false
   version: v18
   resources:

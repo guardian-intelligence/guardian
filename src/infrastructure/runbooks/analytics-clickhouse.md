@@ -56,7 +56,8 @@ Postgres (see runbooks/postgres-backup-restore.md for the drill pattern).
    platform flow would have used — flipping back later is values-only.
 3. **storageClass is unwired**: the value exists in the schema but no
    template consumes it; data PVCs land on the cluster default (DRBD
-   `replicated`). Accepted at current volume (6x raw at 2 replicas);
+   plus LINSTOR LUKS `replicated-encrypted`). Accepted at current volume
+   (6x raw at 2 replicas);
    revisit at scale or when upstream wires it.
 4. **Service-type recreate abort**: the chart's serviceTemplate omits
    `type`, so the first post-install spec change makes the operator try to

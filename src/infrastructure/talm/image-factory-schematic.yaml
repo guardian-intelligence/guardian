@@ -1,0 +1,22 @@
+# Talos Image Factory schematic for the management-cluster boot chain. The
+# extension set exactly matches Cozystack's Talos v1.13.6 profile. The false
+# value keeps Microsoft and other well-known UEFI roots out of the enrolled
+# database; only the Sidero Labs Talos Secure Boot root is enrolled.
+#
+# Schematic ID: be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5
+# Secure Boot ISO (v1.13.6, amd64) sha256:
+# f62fd4d79492b3a95bc9e99a71adcfe33353ebb9175ee93785393e537dfb6574
+customization:
+  systemExtensions:
+    officialExtensions:
+      - siderolabs/amd-ucode
+      - siderolabs/amdgpu
+      - siderolabs/bnx2-bnx2x
+      - siderolabs/intel-ice-firmware
+      - siderolabs/i915
+      - siderolabs/intel-ucode
+      - siderolabs/qlogic-firmware
+      - siderolabs/drbd
+      - siderolabs/zfs
+  secureboot:
+    includeWellKnownCertificates: false

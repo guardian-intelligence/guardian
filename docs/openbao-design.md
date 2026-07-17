@@ -1,13 +1,10 @@
-# OpenBao secrets platform — design (target state)
+# OpenBao secrets platform — design
 
-Status: **IMPLEMENTATION IN PROGRESS.** The repo now declares static seal,
-self-init, independent cert-manager listener TLS, `openbao-local` retained
-storage, KV, and Transit. The old manual-unseal/operator-bootstrap path, the
-OpenBao-issued listener certificate path, and the custom `openbao-ops-controller`
-operator (with its CRDs and hand-authored operation CRs) have all been removed:
-OpenBao config now lives entirely in the self-init `initialize` block. Remaining
-target-state gaps called out below include the exact `zfsThinPool` substrate,
-hostPath admission enforcement in the live cluster, and tested stateful restore.
+Guardian runs a three-member OpenBao raft cluster with static auto-unseal,
+self-init, independent cert-manager listener TLS, retained encrypted local
+storage, KV, and Transit. OpenBao configuration lives in the self-init
+`initialize` block; the tested platform convergence proof is
+`aspect infra converged`.
 
 Scope: the Guardian tenant OpenBao (3-node raft) secrets platform. OpenBao is
 one bootstrapping component of the system, not the system's end state; the
@@ -21,12 +18,13 @@ called out explicitly.
 ## Topology & storage
 - 3-node raft `StatefulSet` in `tenant-guardian`, one member per node, hard pod + node
   anti-affinity so a single node loss removes exactly one member (quorum 2/3).
-- **Local storage per member** — node-pinned `zfsThinPool` (replica=1) StorageClass, one
-  PVC per pod, for both the raft data volume and the audit volume. **Not `replicated`
-  (LINSTOR).** Raft already replicates at the application layer; replicated block storage
-  underneath multiplies physical copies, adds a network hop to the latency-critical
-  per-entry `fsync`, and introduces double-attach/fencing risk a consensus store exists to
-  avoid. Local storage is HashiCorp's documented model for integrated storage.
+- **Encrypted local storage per member** — `local-encrypted-retain` uses
+  Cozystack's native LINSTOR `luks storage` layer with remote access disabled.
+  Each member has one retained LUKS PVC for raft data and one for audit data.
+  Raft already replicates at the application layer; DRBD underneath would
+  multiply physical copies, add a network hop to the latency-critical per-entry
+  `fsync`, and introduce double-attach/fencing risk a consensus store exists to
+  avoid.
 - The three members are pinned to three **dedicated, tainted, key-bearing nodes**: local PV
   + seal-key placement co-locate on the same three nodes. General workloads are kept off via
   taints; admission blocks any other hostPath/privileged pod from mounting the key directory.
