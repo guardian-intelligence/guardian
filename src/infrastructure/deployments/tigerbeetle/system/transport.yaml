@@ -76,6 +76,7 @@ metadata:
   name: tigerbeetle-transport
   namespace: tenant-guardian
   annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
     reloader.stakater.com/auto: "true"
   labels:
     app.kubernetes.io/name: tigerbeetle
@@ -114,6 +115,41 @@ spec:
         runAsUser: 65532
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        - name: render-envoy-config
+          image: ghcr.io/fluxcd/flagger-loadtester@sha256:f98a35ab7aca0f2efdd8e397b4002e283637f5c9e31e4e2a6c1e97af07c50454 # 0.37.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -ec
+          args:
+            - sed "s/__HOST_IP__/${HOST_IP}/g" /template/envoy.yaml > /generated/envoy.yaml
+          env:
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+          resources:
+            requests:
+              cpu: 5m
+              memory: 8Mi
+              ephemeral-storage: 1Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
+              ephemeral-storage: 8Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: config-template
+              mountPath: /template
+              readOnly: true
+            - name: config
+              mountPath: /generated
       containers:
         - name: envoy
           image: docker.io/envoyproxy/envoy:distroless-v1.36.4@sha256:2f71c5666a5209d6ee1ec519b17877ccb6d17be4d00e34de10f11e020ea8707a
@@ -157,9 +193,12 @@ spec:
               mountPath: /tls
               readOnly: true
       volumes:
-        - name: config
+        - name: config-template
           configMap:
             name: tigerbeetle-transport
+        - name: config
+          emptyDir:
+            sizeLimit: 1Mi
         - name: tls
           secret:
             secretName: tigerbeetle-transport-server-tls
