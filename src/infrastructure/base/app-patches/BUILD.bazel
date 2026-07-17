@@ -4,7 +4,6 @@ filegroup(
         "cozy-kubevirt-cdi-alerts.yaml",
         "cozy-kubevirt-cdi-prometheus-source.yaml",
         "cozy-linstor-drbd-alerts.yaml",
-        "cozy-linstor-encryption.yaml",
         "cozy-multus-cpu-resources.yaml",
         "ingress-origin-edge.yaml",
         "ingress-origin-networkpolicy.yaml",

@@ -1,0 +1,9 @@
+apiVersion: piraeus.io/v1
+kind: LinstorCluster
+metadata:
+  name: linstorcluster
+  annotations:
+    kustomize.toolkit.fluxcd.io/prune: disabled
+    kustomize.toolkit.fluxcd.io/ssa: Merge
+spec:
+  linstorPassphraseSecret: guardian-linstor-master-passphrase
