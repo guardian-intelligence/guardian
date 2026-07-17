@@ -42,13 +42,11 @@ plane changes are inert behind the existing `SCHEDULER_ENABLED` /
 ## Standing rulings that constrain this pass
 
 - **Pre-TEE scope.** Plaintext zvols; generation identity is the ZFS
-  snapshot GUID. The SEV-SNP phase replaces this with guest-side OpenZFS
-  native encryption, one OpenBao-held wrapping key per workspace lineage, an
-  authenticated in-dataset generation marker, and Trustee attestation/key
-  release as resolved in the confidential-computing security policy. Seams are
-  specified where they land; nothing is implemented early.
-- **No vmstate anywhere.** Warmth, when it arrives, is a CRIU image on an
-  ordinary zvol. Out of scope for this pass.
+  snapshot GUID. The SEV-SNP phase keeps that lifecycle and adds guest-side
+  LUKS2 keyed by the PSP-derived, measurement-bound key, per the security
+  model. Seams are specified where they land; nothing is implemented early.
+- **No vmstate anywhere.** Warmth, when it arrives, is a CRIU image inside
+  the encrypted workspace volume. Out of scope for this pass.
 - **Polling shape is accepted.** No interval tuning, no NOTIFY retrofits.
   The full pipeline redesign happens after e2e is proven.
 - **Custom checkout is required for integration.** Stock `actions/checkout`
