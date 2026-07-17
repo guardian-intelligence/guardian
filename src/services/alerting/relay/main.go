@@ -322,12 +322,13 @@ func truncate(s string, n int) string {
 }
 
 type metrics struct {
-	forwarded        atomic.Uint64
-	forwardFailures  atomic.Uint64
-	suppressed       atomic.Uint64
-	coalesced        atomic.Uint64
-	watchdogLastSeen atomic.Int64
-	pipelineSilent   atomic.Int64
+	forwarded         atomic.Uint64
+	forwardFailures   atomic.Uint64
+	selfAlertFailures atomic.Uint64
+	suppressed        atomic.Uint64
+	coalesced         atomic.Uint64
+	watchdogLastSeen  atomic.Int64
+	pipelineSilent    atomic.Int64
 }
 
 func (m *metrics) render(w io.Writer) {
@@ -337,6 +338,9 @@ func (m *metrics) render(w io.Writer) {
 	fmt.Fprintf(w, "# HELP relay_forward_failures_total Alerts that failed delivery after all retries.\n")
 	fmt.Fprintf(w, "# TYPE relay_forward_failures_total counter\n")
 	fmt.Fprintf(w, "relay_forward_failures_total %d\n", m.forwardFailures.Load())
+	fmt.Fprintf(w, "# HELP relay_self_alert_forward_failures_total AlertRelayForwardFailures notifications that failed delivery after all retries.\n")
+	fmt.Fprintf(w, "# TYPE relay_self_alert_forward_failures_total counter\n")
+	fmt.Fprintf(w, "relay_self_alert_forward_failures_total %d\n", m.selfAlertFailures.Load())
 	fmt.Fprintf(w, "# HELP relay_heartbeats_suppressed_total Watchdog/Heartbeat payloads counted but not forwarded.\n")
 	fmt.Fprintf(w, "# TYPE relay_heartbeats_suppressed_total counter\n")
 	fmt.Fprintf(w, "relay_heartbeats_suppressed_total %d\n", m.suppressed.Load())
@@ -733,7 +737,13 @@ func (s *server) handleSlack(w http.ResponseWriter, r *http.Request) {
 		dctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), deliveryBudget)
 		defer cancel()
 		if err := s.out.deliver(dctx, n); err != nil {
-			s.m.forwardFailures.Add(1)
+			// Counting failure to deliver this counter's own alert would keep
+			// the alert firing forever whenever the sink is rate-limited.
+			if ev == "AlertRelayForwardFailures" {
+				s.m.selfAlertFailures.Add(1)
+			} else {
+				s.m.forwardFailures.Add(1)
+			}
 			slog.Error("forward failed", "event", ev, "err", err)
 			return
 		}
