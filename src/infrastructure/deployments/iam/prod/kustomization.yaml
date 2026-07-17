@@ -4,6 +4,7 @@ resources:
   - postgres.yaml
   - secrets.yaml
   - realm-configmap.yaml
+  - realm-reconciler.yaml
   - keycloak.yaml
   - canary.yaml
   - loadtester.yaml

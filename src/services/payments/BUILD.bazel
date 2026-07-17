@@ -1,0 +1,117 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load", "oci_push")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+
+go_library(
+    name = "payments_lib",
+    srcs = [
+        "auth.go",
+        "config.go",
+        "journal.go",
+        "ledger.go",
+        "main.go",
+        "metrics.go",
+        "migrations.go",
+        "projector.go",
+        "server.go",
+        "stripe.go",
+        "tracing.go",
+    ],
+    embedsrcs = ["migrations/001_initial.sql"],
+    importpath = "github.com/guardian-intelligence/guardian/src/services/payments",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//src/services/payments/paymentdb",
+        "@com_github_aws_aws_sdk_go_v2//aws:go_default_library",
+        "@com_github_aws_aws_sdk_go_v2_config//:go_default_library",
+        "@com_github_aws_aws_sdk_go_v2_credentials//:go_default_library",
+        "@com_github_aws_aws_sdk_go_v2_service_s3//:go_default_library",
+        "@com_github_coreos_go_oidc_v3//oidc:go_default_library",
+        "@com_github_jackc_pgx_v5//:go_default_library",
+        "@com_github_jackc_pgx_v5//pgtype:go_default_library",
+        "@com_github_jackc_pgx_v5//pgxpool:go_default_library",
+        "@com_github_prometheus_client_golang//prometheus:go_default_library",
+        "@com_github_prometheus_client_golang//prometheus/promhttp:go_default_library",
+        "@com_github_stripe_stripe_go_v83//:go_default_library",
+        "@com_github_stripe_stripe_go_v83//webhook:go_default_library",
+        "@com_github_tigerbeetle_tigerbeetle_go//:go_default_library",
+        "@io_opentelemetry_go_otel//:go_default_library",
+        "@io_opentelemetry_go_otel//attribute:go_default_library",
+        "@io_opentelemetry_go_otel//codes:go_default_library",
+        "@io_opentelemetry_go_otel//propagation:go_default_library",
+        "@io_opentelemetry_go_otel//semconv/v1.26.0:go_default_library",
+        "@io_opentelemetry_go_otel_exporters_otlp_otlptrace_otlptracegrpc//:go_default_library",
+        "@io_opentelemetry_go_otel_sdk//resource:go_default_library",
+        "@io_opentelemetry_go_otel_sdk//trace:go_default_library",
+        "@io_opentelemetry_go_otel_trace//:go_default_library",
+        "@io_opentelemetry_go_otel_trace//noop:go_default_library",
+    ],
+)
+
+go_binary(
+    name = "payments",
+    embed = [":payments_lib"],
+    pure = "off",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "payments_test",
+    srcs = [
+        "auth_test.go",
+        "payments_test.go",
+    ],
+    data = [
+        "//src/tools/postgres:dist",
+        "//src/tools/postgres:initdb",
+    ],
+    embed = [":payments_lib"],
+    env = {"PGTEST_INITDB": "$(rootpath //src/tools/postgres:initdb)"},
+    deps = [
+        "//src/services/payments/paymentdb",
+        "//src/services/postflight/controlplane/pgtest",
+        "@com_github_jackc_pgx_v5//pgxpool:go_default_library",
+        "@com_github_prometheus_client_golang//prometheus:go_default_library",
+        "@com_github_stripe_stripe_go_v83//:go_default_library",
+        "@com_github_stripe_stripe_go_v83//webhook:go_default_library",
+        "@com_github_tigerbeetle_tigerbeetle_go//:go_default_library",
+    ],
+)
+
+pkg_tar(
+    name = "payments_layer",
+    files = {
+        ":payments": "app/payments",
+    },
+    modes = {
+        "app/payments": "0755",
+    },
+)
+
+oci_image(
+    name = "image",
+    annotations = {
+        "org.opencontainers.image.description": "Guardian Stripe payment control plane and TigerBeetle ledger gateway",
+        "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
+        "org.opencontainers.image.title": "guardian-payments",
+    },
+    base = "@distroless_cc_base_linux_amd64",
+    entrypoint = ["/app/payments"],
+    exposed_ports = ["8080/tcp"],
+    tars = [":payments_layer"],
+    visibility = ["//visibility:public"],
+)
+
+oci_load(
+    name = "load",
+    image = ":image",
+    repo_tags = ["guardian/payments:dev"],
+)
+
+oci_push(
+    name = "push",
+    image = ":image",
+    remote_tags = ["edge"],
+    repository = "ghcr.io/guardian-intelligence/payments",
+    visibility = ["//visibility:public"],
+)

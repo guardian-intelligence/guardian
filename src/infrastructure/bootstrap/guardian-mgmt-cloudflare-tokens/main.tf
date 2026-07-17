@@ -36,6 +36,7 @@ locals {
     dns_lb_provisioner    = "2026-10-06T00:00:00Z"
     external_dns          = "2026-10-06T00:00:00Z"
     edge_policy_provision = "2026-10-06T00:00:00Z"
+    payments_journal      = "2026-10-06T00:00:00Z"
     r2_backups            = "2026-10-06T00:00:00Z"
     r2_state              = "2026-10-06T00:00:00Z"
   }
@@ -132,6 +133,28 @@ resource "cloudflare_account_token" "r2_backups" {
   account_id = var.cloudflare_account_id
   name       = "guardian-r2-backups"
   expires_on = local.expires.r2_backups
+
+  policies = [
+    {
+      effect = "allow"
+      permission_groups = [
+        { id = local.permission_groups.r2_bucket_item_read },
+        { id = local.permission_groups.r2_bucket_item_write },
+      ]
+      resources = jsonencode({ (local.backups_bucket_resource) = "*" })
+    },
+  ]
+}
+
+# Payment-ledger recovery journal credential. It can read and append objects
+# only in guardian-backups; the payments workload never receives the backup
+# controller's credential or access to the credential-bearing guardian-vault
+# state bucket. Journal object keys are further isolated under
+# tenant-guardian-prod/payments-journal.
+resource "cloudflare_account_token" "payments_journal" {
+  account_id = var.cloudflare_account_id
+  name       = "guardian-payments-journal"
+  expires_on = local.expires.payments_journal
 
   policies = [
     {

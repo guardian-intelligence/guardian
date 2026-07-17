@@ -8,12 +8,13 @@ import (
 )
 
 // First-party images ship the binary and the files it dlopens or reads —
-// never a distro userland. The nodes already live by this rule (Talos has no
-// shell or package manager); the app images follow it: static Go binaries run
-// from an empty base, and the only sanctioned external base is the
-// glibc/libstdc++ layer for dynamically linked runtimes (node). A fat base
-// cannot sneak in silently because every external base has exactly one entry
-// point: an oci.pull in MODULE.bazel. This test allowlists those pulls.
+// never a general-purpose distro userland. The nodes already live by this rule
+// (Talos has no shell or package manager); app images follow it: static Go
+// binaries run from an empty base, dynamically linked runtimes use the
+// glibc/libstdc++ layer, and a browser canary may carry its pinned browser
+// runtime as the test subject. A fat base cannot sneak in silently because
+// every external base has exactly one entry point: an oci.pull in MODULE.bazel.
+// This test allowlists those pulls.
 //
 // If this test failed your change: either link the binary statically
 // (go_binary pure = "on") and drop the base (oci_image os/architecture, no
@@ -23,6 +24,7 @@ import (
 // justification comment in MODULE.bazel.
 var allowedOCIPulls = map[string]string{
 	"distroless_cc_base": "gcr.io/distroless/cc-debian12",
+	"playwright":         "mcr.microsoft.com/playwright",
 }
 
 func TestExternalImageBasesAreAllowlisted(t *testing.T) {

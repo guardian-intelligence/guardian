@@ -1,0 +1,116 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-realm-reconciler
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: keycloak-realm-reconciler
+    app.kubernetes.io/part-of: guardian
+    app.kubernetes.io/component: iam
+    guardian.dev/product: postflight
+    guardian.dev/stage: prod
+  annotations:
+    kustomize.toolkit.fluxcd.io/force: Enabled
+spec:
+  backoffLimit: 20
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: keycloak-realm-reconciler
+        app.kubernetes.io/part-of: guardian
+        app.kubernetes.io/component: iam
+        guardian.dev/product: postflight
+        guardian.dev/stage: prod
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: reconcile
+          image: quay.io/keycloak/keycloak@sha256:3e58dc82a9b72f364f37dac17f99fcaf53d0052a3c1ad7f00b069a1ed43201c0 # 26.6.2
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              kcadm=/opt/keycloak/bin/kcadm.sh
+              server=http://keycloak.tenant-guardian-prod.svc
+              "$kcadm" config credentials \
+                --config /tmp/kcadm.config \
+                --server "$server" \
+                --realm master \
+                --user "$KC_ADMIN_USERNAME"
+              "$kcadm" update realms/postflight \
+                --config /tmp/kcadm.config \
+                --set organizationsEnabled=true
+              test "$("$kcadm" get realms/postflight \
+                --config /tmp/kcadm.config \
+                --fields organizationsEnabled \
+                --format csv \
+                --noquotes)" = "true"
+          env:
+            - name: KC_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-admin-bootstrap
+                  key: username
+            - name: KC_CLI_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-admin-bootstrap
+                  key: password
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+              ephemeral-storage: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+              ephemeral-storage: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: keycloak-realm-reconciler
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: keycloak-realm-reconciler
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: keycloak-realm-reconciler
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values:
+                - keycloak
+                - keycloak-primary
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
