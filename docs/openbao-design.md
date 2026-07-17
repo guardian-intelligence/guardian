@@ -1,13 +1,10 @@
-# OpenBao secrets platform — design (target state)
+# OpenBao secrets platform
 
-Status: **IMPLEMENTATION IN PROGRESS.** The repo now declares static seal,
-self-init, independent cert-manager listener TLS, `openbao-local` retained
-storage, KV, and Transit. The old manual-unseal/operator-bootstrap path, the
-OpenBao-issued listener certificate path, and the custom `openbao-ops-controller`
-operator (with its CRDs and hand-authored operation CRs) have all been removed:
-OpenBao config now lives entirely in the self-init `initialize` block. Remaining
-target-state gaps called out below include the exact `zfsThinPool` substrate,
-hostPath admission enforcement in the live cluster, and tested stateful restore.
+Status: **deployed.** The repository declares a three-member Raft cluster,
+static auto-unseal, self-initialization, cert-manager listener TLS,
+`local-encrypted-retain` storage, KV, Transit, audit shipping, and the
+namespace-scoped Kubernetes auth roles used by ESO. OpenBao configuration
+lives in the self-init `initialize` block.
 
 Scope: the Guardian tenant OpenBao (3-node raft) secrets platform. OpenBao is
 one bootstrapping component of the system, not the system's end state; the
@@ -21,15 +18,15 @@ called out explicitly.
 ## Topology & storage
 - 3-node raft `StatefulSet` in `tenant-guardian`, one member per node, hard pod + node
   anti-affinity so a single node loss removes exactly one member (quorum 2/3).
-- **Local storage per member** — node-pinned `zfsThinPool` (replica=1) StorageClass, one
-  PVC per pod, for both the raft data volume and the audit volume. **Not `replicated`
-  (LINSTOR).** Raft already replicates at the application layer; replicated block storage
-  underneath multiplies physical copies, adds a network hop to the latency-critical
-  per-entry `fsync`, and introduces double-attach/fencing risk a consensus store exists to
-  avoid. Local storage is HashiCorp's documented model for integrated storage.
-- The three members are pinned to three **dedicated, tainted, key-bearing nodes**: local PV
-  + seal-key placement co-locate on the same three nodes. General workloads are kept off via
-  taints; admission blocks any other hostPath/privileged pod from mounting the key directory.
+- **Local encrypted storage per member** — node-pinned
+  `local-encrypted-retain` LINSTOR volumes, one PVC per pod for Raft data and
+  one for audit data. The StorageClass uses `luks storage`; the LINSTOR pool
+  itself is backed by Talos' TPM-encrypted
+  `/dev/mapper/luks2-r-guardian-data`. Raft supplies inter-node replication,
+  so OpenBao does not add DRBD beneath its consensus log.
+- The static seal key and local PVCs co-locate on each of the three management
+  nodes. Admission limits the privileged hostPath mount to the declared
+  OpenBao workload.
 - `updateStrategyType: OnDelete`; Flux `upgrade.disableWait: true`, `remediation.retries: 0`
   — Flux never thrashes quorum; pods roll one at a time. (Trade-off: this can mask a
   non-converging release; the drills are the compensating convergence check.)
@@ -214,7 +211,7 @@ called out explicitly.
 
 ---
 
-## Bootstrap ordering (target sequence)
+## Bootstrap ordering
 
 Talos up → break-glass place seal key on the 3 pinned nodes → **cert-manager up** →
 independent cert-manager listener CA creates `guardian-openbao-api-tls` →
@@ -227,7 +224,7 @@ easy to race, so encode the dependency explicitly.
 
 ---
 
-## Remaining Ops Inventory
+## Operations inventory
 
 Created by the self-init `initialize` block and Ready in the current cluster:
 - `kv` mount and tune.
@@ -242,30 +239,13 @@ Created by the self-init `initialize` block and Ready in the current cluster:
 Declared alongside self-init:
 - `ClusterSecretStore/external-dns-openbao` and `ExternalSecret/cloudflare-external-dns`.
 
-Legacy live cruft removed on 2026-06-29:
-- Deleted `tenant-root/ExternalSecret guardian-cnpg-backup-creds`,
-  `tenant-root/ExternalSecret guardian-clickhouse-backup-creds`,
-  `tenant-root/SecretStore openbao`, and `tenant-root/SecretStore openbao-clickhouse-backup`.
-  They pointed at retired `http://openbao-guardian.tenant-root.svc:8200`. Database backups
-  should remain platform-managed (Cozystack backup machinery pointed at off-cluster R2)
-  unless we intentionally reintroduce an OpenBao-backed credential projection.
-
-Ops resources still needed before OpenBao is the real vault/transit authority:
-- Restore drill for any durable Transit key before that key protects production
-  ciphertext or signatures anything verifies. For `guardian-images`: restore
-  the latest raft snapshot into a throwaway OpenBao, sign a test digest, and
-  assert the public key matches the production key's fingerprint.
-- Durable Transit-key provisioning only when a real consumer requires it.
-  Self-init declares mounts/policies/auth roles; durable key material is
-  data — created imperatively once, recovered through snapshot restore —
-  never a self-init request (re-runs would mint new material each time) and
-  never a custom operator or CRD.
-- ExternalSecrets for any remaining consumers of Cloudflare/R2 credentials beyond
-  `external-dns` (the per-namespace roles already cover them; only the Git-side ESO wiring
-  is missing).
-- Release/signing, artifact provenance, envelope encryption, or workload key-management
-  components should use Transit rather than Kubernetes Secrets as the key authority.
-  DNS does not need Transit; it only needs a Cloudflare API token from KV.
+Durable Transit keys are provisioned as data rather than self-init requests.
+Before a durable key protects production ciphertext or signatures, its
+restore drill must recover the latest Raft snapshot into an isolated OpenBao
+cluster and verify the pre-restore artifact with the recovered key. New
+Cloudflare or R2 consumers use namespace-scoped ExternalSecrets; release
+signing, envelope encryption, and workload key management use Transit rather
+than Kubernetes Secrets as their key authority.
 
 ## Key references
 - Integrated storage = local filesystem + consensus; remove-peer / peers.json recovery:
