@@ -47,6 +47,15 @@ spec:
         - ports:
             - port: "8080"
               protocol: TCP
+    # The declarative realm reconciler applies mutable realm settings after
+    # first boot; it uses the same private HTTP service as the login canary.
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: keycloak-realm-reconciler
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
   egress:
     - toEndpoints:
         - matchLabels:

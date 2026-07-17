@@ -11,11 +11,7 @@
 # annotation is mandatory: this manifest is applied by a Flux Kustomization
 # with postBuild substitution, whose envsubst would otherwise blank every
 # ${...} — including the vault expression — before Keycloak ever saw it.
-#
-# Known limitation (deliberate, documented in the plan): --import-realm only
-# imports when the realm does not exist yet. Post-creation realm changes need
-# an idempotent upsert against the Admin REST API — deferred to the
-# iam-service integration, not built speculatively here.
+# realm-reconciler.yaml applies mutable realm settings to an existing realm.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -32,6 +28,7 @@ data:
     {
       "realm": "postflight",
       "enabled": true,
+      "organizationsEnabled": true,
       "sslRequired": "external",
       "registrationAllowed": false,
       "resetPasswordAllowed": false,

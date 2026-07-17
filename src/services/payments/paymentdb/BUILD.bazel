@@ -1,0 +1,21 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "paymentdb",
+    srcs = [
+        "canaries.sql.go",
+        "db.go",
+        "events.sql.go",
+        "ledger.sql.go",
+        "models.go",
+        "orders.sql.go",
+        "querier.go",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/services/payments/paymentdb",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_github_jackc_pgx_v5//:go_default_library",
+        "@com_github_jackc_pgx_v5//pgconn:go_default_library",
+        "@com_github_jackc_pgx_v5//pgtype:go_default_library",
+    ],
+)

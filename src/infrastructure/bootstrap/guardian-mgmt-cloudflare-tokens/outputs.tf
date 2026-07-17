@@ -46,6 +46,17 @@ output "r2_backups_secret_access_key" {
   sensitive   = true
 }
 
+output "payments_journal_access_key_id" {
+  description = "S3 access key id for the payments recovery journal in guardian-backups."
+  value       = cloudflare_account_token.payments_journal.id
+}
+
+output "payments_journal_secret_access_key" {
+  description = "S3 secret access key for the payments recovery journal in guardian-backups."
+  value       = sha256(cloudflare_account_token.payments_journal.value)
+  sensitive   = true
+}
+
 output "r2_state_access_key_id" {
   description = "S3 access key id for the guardian-vault state bucket (custody-mirrored: cloudflare_r2_access_key_id)."
   value       = cloudflare_account_token.r2_state.id
