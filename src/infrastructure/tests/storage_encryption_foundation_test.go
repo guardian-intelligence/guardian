@@ -77,9 +77,12 @@ func TestCozystackNativeLinstorEncryptionConformance(t *testing.T) {
 		if got := stringValue(labels["guardian.dev/encryption-at-rest"]); got != "talos-luks2-raw-volume" {
 			t.Errorf("StorageClass %s encryption label = %q, want talos-luks2-raw-volume", name, got)
 		}
+		if got := stringValue(labels["guardian.dev/linstor-encryption-at-rest"]); got != "disabled" {
+			t.Errorf("StorageClass %s LINSTOR encryption label = %q, want disabled", name, got)
+		}
 		parameters := mapValue(sc["parameters"])
-		if got := stringValue(parameters["linstor.csi.linbit.com/encryption"]); got != "false" {
-			t.Errorf("StorageClass %s LINSTOR encryption = %q, want false", name, got)
+		if got := stringValue(parameters["linstor.csi.linbit.com/encryption"]); got != "" {
+			t.Errorf("StorageClass %s must omit immutable LINSTOR encryption parameter, got %q", name, got)
 		}
 	}
 
