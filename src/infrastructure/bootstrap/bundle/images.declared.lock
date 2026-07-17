@@ -39,7 +39,7 @@ ghcr.io/cozystack/cozystack/talos:v1.13.0@sha256:c2c092ad742e8bdd4af6366c586d95b
 # Cozystack installer Helm chart (OCI)
 ghcr.io/cozystack/cozystack/cozy-installer:1.5.3@sha256:5b1505c953c7d9dbdb130a226d18c2a1d3357a8f79f4640fa97f59c1c332bb5b
 # Cozystack platform packages Flux artifact (pulled by source-controller, NOT containerd)
-ghcr.io/cozystack/cozystack/cozystack-packages@sha256:b2d3fc7a706b6e755d98385dcfc514945610166c4f5e61ba8cdc1a1acd8188e9
+ghcr.io/cozystack/cozystack/cozystack-packages@sha256:41640141999c86a9dee13d6d439a9d6bf215fd6d76b05c85652fd2efc907e781
 
 # --- analytics ClickHouse keeper (spawned for the CHK by the Altinity
 # operator; the server/ingest/otel-collector images are rendered from
