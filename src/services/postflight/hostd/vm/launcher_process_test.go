@@ -80,8 +80,10 @@ func TestProcessLauncherFindsOrphanWithoutPidFile(t *testing.T) {
 		t.Skipf("no sleep binary: %v", err)
 	}
 	stateDir := t.TempDir()
-	// A duration no other process on the host would be sleeping for.
-	argv := []string{sleep, "271828"}
+	// A duration no other process on the host would be sleeping for — pid
+	// suffix included because the /proc scan is host-global and concurrent
+	// runs of this very test would otherwise find each other's stub.
+	argv := []string{sleep, "271828." + strconv.Itoa(os.Getpid())}
 	launcher := ProcessLauncher{}
 	ctx := context.Background()
 	if err := launcher.Start(ctx, "vm-a", stateDir, argv); err != nil {

@@ -1,12 +1,14 @@
 package vm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -181,12 +183,14 @@ func TestSystemdLauncherKillReclaimsZombieScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = cmd.Wait() })
-	// Deliberately unreaped: wait until the child is a zombie (cmdline
-	// reads empty once the process has exited).
+	// Deliberately unreaped: wait until the child is a zombie. The signal
+	// must be /proc/<pid>/stat state Z — an empty cmdline is ambiguous,
+	// because a mid-exec child reads empty too, and under load that window
+	// is wide enough for the probe below to race the exec and see a live,
+	// matching cmdline.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		raw, ok := procCmdline(cmd.Process.Pid)
-		if ok && len(raw) == 0 {
+		if state, ok := procStatState(cmd.Process.Pid); ok && state == 'Z' {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -208,6 +212,25 @@ func TestSystemdLauncherKillReclaimsZombieScope(t *testing.T) {
 	if len(fake.stopped) != 1 {
 		t.Fatalf("stopped %v; the zombie scope must be stopped for teardown", fake.stopped)
 	}
+}
+
+// procStatState reads the state letter from /proc/<pid>/stat; ok is false
+// when the process is gone. The state follows the last ')' so a comm
+// containing parentheses cannot shift the field.
+func procStatState(pid int) (byte, bool) {
+	raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if err != nil {
+		return 0, false
+	}
+	i := bytes.LastIndexByte(raw, ')')
+	if i < 0 {
+		return 0, false
+	}
+	rest := bytes.TrimLeft(raw[i+1:], " ")
+	if len(rest) == 0 {
+		return 0, false
+	}
+	return rest[0], true
 }
 
 func TestSystemdLauncherKillAbsentScope(t *testing.T) {
