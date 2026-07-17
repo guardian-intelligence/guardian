@@ -85,11 +85,12 @@ Synthetic-only classes deliberately omit the per-volume LINSTOR LUKS layer
 to keep the exception visible:
 
 - Their names begin with `synthetic-`.
-- They set `linstor.csi.linbit.com/encryption: "false"`.
+- Their immutable LINSTOR `layerList` omits `luks`.
 - They carry `guardian.dev/data-classification=synthetic`.
 - They carry
   `guardian.dev/encryption-at-rest=talos-luks2-raw-volume`, because their
   backing pool remains inside the Talos-encrypted raw volume.
+- They carry `guardian.dev/linstor-encryption-at-rest=disabled`.
 - A fail-closed admission policy denies a PVC using a `synthetic-*` class
   unless the PVC has the same synthetic-data label.
 
