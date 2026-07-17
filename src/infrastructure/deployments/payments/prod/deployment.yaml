@@ -19,6 +19,8 @@ spec:
       app.kubernetes.io/name: payments
   template:
     metadata:
+      annotations:
+        guardian.dev/tigerbeetle-transport-api: mtls-host-ip-v1
       labels:
         app.kubernetes.io/name: payments
         app.kubernetes.io/part-of: guardian

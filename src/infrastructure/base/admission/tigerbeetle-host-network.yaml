@@ -40,7 +40,8 @@ spec:
         [
           'ghcr.io/tigerbeetle/tigerbeetle:0.17.9@sha256:48f623f9c1e9b6cc44d77ca93634595ae99cce3246ded418763eb1a62eee45e9',
           'quay.io/prometheus/statsd-exporter:v0.30.0@sha256:378cb79c4ac7d6941e5ed71b1f3cd6f4707cf42c72c104ffe81fa4d9026ef659',
-          'docker.io/envoyproxy/envoy:distroless-v1.36.4@sha256:2f71c5666a5209d6ee1ec519b17877ccb6d17be4d00e34de10f11e020ea8707a'
+          'docker.io/envoyproxy/envoy:distroless-v1.36.4@sha256:2f71c5666a5209d6ee1ec519b17877ccb6d17be4d00e34de10f11e020ea8707a',
+          'ghcr.io/fluxcd/flagger-loadtester@sha256:f98a35ab7aca0f2efdd8e397b4002e283637f5c9e31e4e2a6c1e97af07c50454'
         ]
   validations:
     - expression: >-
@@ -90,8 +91,13 @@ spec:
             ) ||
             (
               variables.isTransport &&
-              variables.images.size() == 1 &&
-              variables.images[0] == 'docker.io/envoyproxy/envoy:distroless-v1.36.4@sha256:2f71c5666a5209d6ee1ec519b17877ccb6d17be4d00e34de10f11e020ea8707a'
+              variables.images.size() == 2 &&
+              variables.images.filter(image,
+                image == 'docker.io/envoyproxy/envoy:distroless-v1.36.4@sha256:2f71c5666a5209d6ee1ec519b17877ccb6d17be4d00e34de10f11e020ea8707a'
+              ).size() == 1 &&
+              variables.images.filter(image,
+                image == 'ghcr.io/fluxcd/flagger-loadtester@sha256:f98a35ab7aca0f2efdd8e397b4002e283637f5c9e31e4e2a6c1e97af07c50454'
+              ).size() == 1
             )
           ) &&
           (!has(object.spec.volumes) || object.spec.volumes.all(volume,
@@ -106,7 +112,8 @@ spec:
               variables.isTransport &&
               (
                 (has(volume.configMap) && volume.configMap.name == 'tigerbeetle-transport') ||
-                (has(volume.secret) && volume.secret.secretName == 'tigerbeetle-transport-server-tls')
+                (has(volume.secret) && volume.secret.secretName == 'tigerbeetle-transport-server-tls') ||
+                (has(volume.emptyDir) && volume.name == 'config')
               )
             )
           )) &&
@@ -126,6 +133,26 @@ spec:
             (!has(container.ports) || container.ports.all(port, !has(port.hostPort))) &&
             (!has(container.command) || container.command.all(argument, argument != 'format')) &&
             (!has(container.args) || container.args.all(argument, argument != 'format'))
+          ) &&
+          (
+            !has(object.spec.initContainers) ||
+            object.spec.initContainers.all(container,
+              has(container.securityContext) &&
+              (!has(container.securityContext.privileged) || container.securityContext.privileged == false) &&
+              has(container.securityContext.allowPrivilegeEscalation) &&
+              container.securityContext.allowPrivilegeEscalation == false &&
+              has(container.securityContext.readOnlyRootFilesystem) &&
+              container.securityContext.readOnlyRootFilesystem == true &&
+              has(container.securityContext.capabilities) &&
+              has(container.securityContext.capabilities.drop) &&
+              container.securityContext.capabilities.drop.exists(capability, capability == 'ALL') &&
+              (!has(container.securityContext.capabilities.add) ||
+                container.securityContext.capabilities.add.size() == 0
+              ) &&
+              (!has(container.ports) || container.ports.all(port, !has(port.hostPort))) &&
+              (!has(container.command) || container.command.all(argument, argument != 'format')) &&
+              (!has(container.args) || container.args.all(argument, argument != 'format'))
+            )
           )
         )
       message: TigerBeetle runtime and mTLS transport pods must use the dedicated identity, fixed nodes, exact images and volumes, and hardened non-formatting containers

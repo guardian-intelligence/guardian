@@ -41,5 +41,5 @@ static_resources:
               - endpoint:
                   address:
                     socket_address:
-                      address: 127.0.0.1
+                      address: __HOST_IP__
                       port_value: 3000

@@ -17,6 +17,7 @@ func TestPaymentsRuntimeConformance(t *testing.T) {
 		`name: CUSTOMER_CHECKOUT_ENABLED`,
 		`value: "false"`,
 		"guardian.dev/otel: producer",
+		"guardian.dev/tigerbeetle-transport-api: mtls-host-ip-v1",
 		"readOnlyRootFilesystem: true",
 		"automountServiceAccountToken: false",
 	} {
