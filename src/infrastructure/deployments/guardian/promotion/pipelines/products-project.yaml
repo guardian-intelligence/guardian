@@ -43,9 +43,7 @@ spec:
         repoURL: ghcr.io/guardian-intelligence/payments
         imageSelectionStrategy: Digest
         constraint: edge
-        platform: linux/amd64
     - image:
         repoURL: ghcr.io/guardian-intelligence/payments-canary
         imageSelectionStrategy: Digest
         constraint: edge
-        platform: linux/amd64
