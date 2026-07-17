@@ -33,11 +33,13 @@ Existing verbs: `hello`, `assignment`, `runner-status`.
 guestd locates each disk by its device serial (hostd sets `serial=` on the
 `scsi-hd` device — the tracer recipe), creates the filesystem if the device
 is blank (first generation of a scope arrives as an empty zvol), mounts with
-the requested options **always including `discard`** (TRIM must pass through
-to the sparse zvol or NVMe accounting measures garbage retention), and only
-then execs the runner. A mount that cannot converge within its deadline is
-reported `runner-status: exited` with a synthetic failure code — hostd
-destroys the slot; the job is never started against a partial workspace.
+the requested options **always including `discard`** during this plaintext
+implementation pass (TRIM must pass through to the sparse zvol or NVMe
+accounting measures garbage retention), and only then execs the runner. The
+confidential phase explicitly disables discard/autotrim. A mount that cannot
+converge within its deadline is reported `runner-status: exited` with a
+synthetic failure code — hostd destroys the slot; the job is never started
+against a partial workspace.
 
 Once every mount has converged (and before the runner starts), guestd writes
 a workspace-ready marker file outside the workspace and injects its path
@@ -68,11 +70,18 @@ skips the seal (ambiguity never promotes), and still destroys the VM.
 
 ## TEE seams (specified now, implemented in the SNP phase)
 
-- `quiesce` reply gains `tree_hash` (computed in-guest; host is blind to
-  plaintext under LUKS) and an SNP attestation report with
-  `report_data = hash(generation_id, tree_hash)`.
-- Mount step gains LUKS open with per-generation derived keys — blocked on
-  the dedicated key-handling security review.
+- The host-provided assignment becomes an opaque relay. Trustee attestation
+  binds a guest-generated ephemeral key; the remote control plane binds the
+  same key to an active lease and encrypts the JIT configuration end to end.
+- Mount convergence imports the inner OpenZFS pool without exposing it to the
+  runner, obtains the lineage wrapping key through Trustee/OpenBao, loads the
+  encryption root, and verifies the encrypted generation marker against the
+  remote manifest before creating `POSTFLIGHT_WORKSPACE_READY_FILE`.
+- `quiesce` stops runner access, writes the candidate marker, syncs and exports
+  the pool, and returns the marker digest plus SNP seal evidence bound to the
+  candidate generation. Any ambiguity skips the outer zvol snapshot and CAS.
+- The confidential phase uses `compression=off`, `dedup=off`, and
+  autotrim/discard off. It does not use LUKS or a Guardian-defined tree hash.
 
 ## Testing
 
