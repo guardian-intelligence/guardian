@@ -327,6 +327,12 @@ log "rootfs headroom: ${rootfs_free_bytes} bytes free"
 
 : >"${mnt}/etc/machine-id"
 printf '%s\n' "${image_id}" >"${mnt}/etc/postflight-image-release"
+# The at-rest mode is baked, never host-supplied: the host is the party the
+# encryption is aimed at, so it cannot hold the downgrade lever. A constant
+# (not an env knob) so the image id keeps binding all content. dev-insecure
+# proves the LUKS2 pipeline everywhere; snp lands with SNP guest launch.
+install -d -m 0755 "${mnt}/etc/postflight"
+printf 'dev-insecure\n' >"${mnt}/etc/postflight/workspace-encryption"
 
 rm -f "${mnt}/usr/sbin/policy-rc.d"
 mv -f "${mnt}/etc/resolv.conf.pristine" "${mnt}/etc/resolv.conf"

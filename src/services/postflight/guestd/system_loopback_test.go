@@ -1,6 +1,7 @@
 package guestd
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -147,5 +148,84 @@ func TestRealSystemLoopbackMountConvergence(t *testing.T) {
 	}
 	if mounted, err := system.IsMounted(mountpoint); err != nil || mounted {
 		t.Fatalf("mounted=%v err=%v after unmount, want unmounted", mounted, err)
+	}
+}
+
+// TestRealSystemLoopbackEncryptedConvergence drives the production LUKS2
+// ladder against a real block device: format, open, mkfs on the mapper,
+// mount, adopt — then proves the raw device carries only ciphertext and
+// that a reopen with the same key sees the existing filesystem.
+func TestRealSystemLoopbackEncryptedConvergence(t *testing.T) {
+	device := loopbackDevice(t)
+	if _, err := exec.LookPath("cryptsetup"); err != nil {
+		t.Skip("cryptsetup not available")
+	}
+	ctx := context.Background()
+	system := RealSystem{RunnerUser: "root"}
+	key, err := workspaceKey(EncryptionDev)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if luks, err := system.IsLUKS(ctx, device); err != nil || luks {
+		t.Fatalf("fresh device luks=%v err=%v, want plain", luks, err)
+	}
+	if err := system.FormatLUKS(ctx, device, key); err != nil {
+		t.Fatal(err)
+	}
+	if luks, err := system.IsLUKS(ctx, device); err != nil || !luks {
+		t.Fatalf("formatted device luks=%v err=%v, want luks", luks, err)
+	}
+	name := "pf-loopback-test"
+	mapper, err := system.OpenLUKS(ctx, device, name, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = exec.Command("cryptsetup", "close", name).Run() })
+	if blank, err := system.IsBlank(ctx, mapper); err != nil || !blank {
+		t.Fatalf("fresh mapper blank=%v err=%v, want blank", blank, err)
+	}
+	if err := system.MakeFilesystem(ctx, mapper, "ext4"); err != nil {
+		t.Fatal(err)
+	}
+	mountpoint := filepath.Join(t.TempDir(), "work")
+	if err := system.Mount(ctx, mapper, mountpoint, "ext4", []string{"discard", "noatime"}); err != nil {
+		if errors.Is(err, unix.EPERM) {
+			t.Skipf("mount not permitted here: %v", err)
+		}
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = unix.Unmount(mountpoint, unix.MNT_DETACH) })
+	if err := system.Adopt(mountpoint); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := []byte("postflight-plaintext-sentinel")
+	if err := os.WriteFile(filepath.Join(mountpoint, "sentinel"), sentinel, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	system.Sync()
+	if err := system.Unmount(mountpoint); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("cryptsetup", "close", name).Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	// The raw device must never contain the sentinel plaintext.
+	raw, err := os.ReadFile(device)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, sentinel) {
+		t.Fatal("sentinel plaintext visible on the raw device")
+	}
+
+	// Reopen with the same key: the filesystem is already there.
+	mapper, err = system.OpenLUKS(ctx, device, name, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blank, err := system.IsBlank(ctx, mapper); err != nil || blank {
+		t.Fatalf("reopened mapper blank=%v err=%v, want filesystem", blank, err)
 	}
 }

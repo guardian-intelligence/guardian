@@ -27,6 +27,10 @@ type fakeSystem struct {
 	locateFailures int
 	// blank marks devices carrying no filesystem signature.
 	blank map[string]bool
+	// luks marks devices carrying a LUKS header; luksBlank marks LUKS
+	// devices whose inner volume has no filesystem yet.
+	luks      map[string]bool
+	luksBlank map[string]bool
 	// mounted maps mountpoint -> device.
 	mounted map[string]string
 	// unmountErr, when set, fails every Unmount.
@@ -37,9 +41,11 @@ type fakeSystem struct {
 
 func newFakeSystem() *fakeSystem {
 	return &fakeSystem{
-		devices: map[string]string{},
-		blank:   map[string]bool{},
-		mounted: map[string]string{},
+		devices:   map[string]string{},
+		blank:     map[string]bool{},
+		luks:      map[string]bool{},
+		luksBlank: map[string]bool{},
+		mounted:   map[string]string{},
 	}
 }
 
@@ -73,6 +79,36 @@ func (f *fakeSystem) MakeFilesystem(_ context.Context, device, filesystem string
 	f.blank[device] = false
 	f.log("mkfs %s %s", filesystem, device)
 	return nil
+}
+
+func (f *fakeSystem) IsLUKS(_ context.Context, device string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.luks[device], nil
+}
+
+func (f *fakeSystem) FormatLUKS(_ context.Context, device string, key []byte) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.luks[device] = true
+	f.luksBlank[device] = true
+	f.log("luksFormat %s keylen=%d", device, len(key))
+	return nil
+}
+
+func (f *fakeSystem) OpenLUKS(_ context.Context, device, name string, key []byte) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.luks[device] {
+		return "", errors.New("not a LUKS device")
+	}
+	mapper := "/dev/mapper/" + name
+	if _, ok := f.devices["mapper:"+name]; !ok {
+		f.devices["mapper:"+name] = mapper
+		f.blank[mapper] = f.luksBlank[device]
+		f.log("luksOpen %s as %s keylen=%d", device, name, len(key))
+	}
+	return mapper, nil
 }
 
 func (f *fakeSystem) IsMounted(mountpoint string) (bool, error) {
@@ -344,6 +380,74 @@ func TestWarmWorkspaceIsNotReformatted(t *testing.T) {
 	for _, entry := range w.system.entries() {
 		if strings.HasPrefix(entry, "mkfs") {
 			t.Fatalf("reformatted a warm workspace: %v", w.system.entries())
+		}
+	}
+}
+
+func TestEncryptedColdWorkspaceLifecycle(t *testing.T) {
+	w := newWorld(t, func(c *Config) { c.Encryption = EncryptionDev }, nil)
+	w.system.devices["workspace"] = "/dev/sdb"
+	w.system.blank["/dev/sdb"] = true
+
+	host := w.listener.dial(t)
+	host.expect(guestproto.KindHello)
+	host.send(guestproto.Message{Kind: guestproto.KindAssignment, Assignment: ptr(testAssignment())})
+	host.expectStatus(guestproto.RunnerMounting)
+	host.expectStatus(guestproto.RunnerRegistered)
+	host.expectStatus(guestproto.RunnerJobStarted)
+	if status := host.expectStatus(guestproto.RunnerExited); status.ExitCode != 0 {
+		t.Fatalf("exit code %d", status.ExitCode)
+	}
+
+	entries := w.system.entries()
+	want := []string{
+		"luksFormat /dev/sdb keylen=32",
+		"luksOpen /dev/sdb as pf-workspace keylen=32",
+		"mkfs ext4 /dev/mapper/pf-workspace",
+		"mount /dev/mapper/pf-workspace at /work options=discard,noatime,nodev,nosuid",
+		"adopt /work",
+	}
+	if fmt.Sprint(entries) != fmt.Sprint(want) {
+		t.Fatalf("journal %v, want %v", entries, want)
+	}
+}
+
+func TestEncryptedWarmWorkspaceReopensWithoutReformat(t *testing.T) {
+	w := newWorld(t, func(c *Config) { c.Encryption = EncryptionDev }, nil)
+	w.system.devices["workspace"] = "/dev/sdb"
+	w.system.blank["/dev/sdb"] = false
+	w.system.luks["/dev/sdb"] = true
+
+	host := w.listener.dial(t)
+	host.expect(guestproto.KindHello)
+	host.send(guestproto.Message{Kind: guestproto.KindAssignment, Assignment: ptr(testAssignment())})
+	host.expectStatus(guestproto.RunnerMounting)
+	host.expectStatus(guestproto.RunnerRegistered)
+	host.expectStatus(guestproto.RunnerJobStarted)
+	host.expectStatus(guestproto.RunnerExited)
+
+	for _, entry := range w.system.entries() {
+		if strings.HasPrefix(entry, "mkfs") || strings.HasPrefix(entry, "luksFormat") {
+			t.Fatalf("reformatted a warm encrypted workspace: %v", w.system.entries())
+		}
+	}
+}
+
+func TestPlaintextDeviceIsRefusedUnderEncryption(t *testing.T) {
+	w := newWorld(t, func(c *Config) { c.Encryption = EncryptionDev }, nil)
+	w.system.devices["workspace"] = "/dev/sdb"
+	w.system.blank["/dev/sdb"] = false
+
+	host := w.listener.dial(t)
+	host.expect(guestproto.KindHello)
+	host.send(guestproto.Message{Kind: guestproto.KindAssignment, Assignment: ptr(testAssignment())})
+	host.expectStatus(guestproto.RunnerMounting)
+	if status := host.expectStatus(guestproto.RunnerExited); status.ExitCode != SyntheticFailureExitCode {
+		t.Fatalf("exit code %d, want synthetic failure", status.ExitCode)
+	}
+	for _, entry := range w.system.entries() {
+		if strings.HasPrefix(entry, "mount") || strings.HasPrefix(entry, "luksFormat") {
+			t.Fatalf("plaintext device was touched: %v", w.system.entries())
 		}
 	}
 }

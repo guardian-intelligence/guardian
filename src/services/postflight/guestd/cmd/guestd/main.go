@@ -26,14 +26,20 @@ func main() {
 }
 
 func run(logger *slog.Logger) error {
+	encryption, err := guestd.LoadEncryptionMode(guestd.EncryptionModePath)
+	if err != nil {
+		return err
+	}
 	server, err := guestd.New(guestd.Config{
-		System:    guestd.RealSystem{},
-		RunRunner: guestd.ExecRunner(guestd.RunnerRoot, "runner", logger),
-		Logger:    logger,
+		System:     guestd.RealSystem{},
+		RunRunner:  guestd.ExecRunner(guestd.RunnerRoot, "runner", logger),
+		Encryption: encryption,
+		Logger:     logger,
 	})
 	if err != nil {
 		return err
 	}
+	logger.Info("workspace encryption", "mode", string(encryption))
 	listener, err := vsock.Listen(vsock.Any, guestproto.VsockPort)
 	if err != nil {
 		return err
