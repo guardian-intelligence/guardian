@@ -5,6 +5,11 @@ ADRs are **immutable** — when a decision changes, write a new ADR that superse
 old one and flip the old one's status to Superseded. Never edit an Accepted ADR to
 track reality; ADRs are history, not state. Current truth lives in code and manifests.
 
+**When an ADR and the code disagree, the code is right.** Dismiss the ADR, then fix it
+or supersede it. Every ADR ends with a `Related source` line naming the files that
+embody its decision — that pointer, not the prose, is the document's tether to
+reality: an ADR whose related source no longer exists has expired.
+
 `docs/` has three lanes:
 
 - **`docs/adrs/`** — why a past fork was taken (this directory).

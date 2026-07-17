@@ -12,9 +12,10 @@ source, and no second packaging format of our own.
 
 ## Decision
 
-Hauler: `store save` / `load` / `serve` covers bundle build, transport, and
-mirror-registry serving, and the round-trip is proven byte-identical against our
-lock digests.
+Hauler: a lock-driven pipeline — the union `images.lock` is projected into a
+hauler Images manifest, then `store sync` / `save` / `load` / `serve registry`
+cover bundle build, transport, and mirror-registry serving — with the round-trip
+proven byte-identical against our lock digests.
 
 Rejected:
 
@@ -31,9 +32,15 @@ architecture (lock-driven bundle, serve-as-mirror) survives either swap.
 
 ## Consequences
 
-- Hauler is built from source under `src/tools/hauler` with module isolation; pin
-  and patch rationale live as comments in its `go.mod`.
-- OCI charts and Flux artifacts are added via `add image`, never `add chart` —
-  `add chart` re-packages and breaks the digest the lock pins.
+- Hauler is built from source under `src/tools/hauler` with module isolation —
+  and patched (notably verbatim mirror repo paths, load-bearing for
+  serve-as-mirror); pin rationale lives in its `go.mod`, patch rationale in the
+  patch headers under `src/tools/hauler/patches/`.
+- OCI charts and Flux artifacts enter the bundle as plain image entries in the
+  projected manifest (`src/infrastructure/cmd/bundle`), never via
+  `store add chart` — that re-packages and breaks the digest the lock pins.
 - The bundle's completeness is provable only positively: the cold-boot drill must
   account for every digest the cluster holds via the served registry's access logs.
+
+Related source: `src/infrastructure/cmd/bundle/main.go`,
+`.aspect/tasks/infra.axl`, `src/tools/hauler/go.mod`
