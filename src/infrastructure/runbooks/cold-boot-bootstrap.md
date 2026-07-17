@@ -304,11 +304,21 @@ All from `src/infrastructure/talm/` with the pinned binaries.
    aspect infra kubeconfig --install
    ```
 
-   The task fetches the kubeconfig through a public Talos endpoint, verifies
-   that the rendered Kubernetes server is one of the declared guardian-mgmt API
-   endpoints, backs up any existing `~/.kube/config`, and installs the refreshed
-   `admin@guardian-mgmt` context. Keep an off-VLAN copy OUTSIDE the repo for
-   `--kubeconfig` flags (public IPs are in the cert SANs).
+   The task fetches the kubeconfig through the stable API name
+   `k8s.guardianintelligence.org`; while dark that name is Cloudflare-hosted
+   DNS and does not resolve, so pass the node public IPs instead:
+
+   ```sh
+   aspect infra kubeconfig --install \
+     --endpoints 206.223.228.101,45.250.254.119,206.223.228.87 \
+     --nodes 206.223.228.101
+   ```
+
+   Either way the task verifies that the rendered Kubernetes server is one of
+   the declared guardian-mgmt API endpoints, backs up any existing
+   `~/.kube/config`, and installs the refreshed `admin@guardian-mgmt` context.
+   Keep an off-VLAN copy OUTSIDE the repo for `--kubeconfig` flags (public IPs
+   are in the cert SANs).
 
 ## Seal-key placement
 

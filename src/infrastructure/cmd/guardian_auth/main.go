@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -14,7 +13,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 )
@@ -25,12 +23,13 @@ const (
 	adminContext = "admin@guardian-mgmt"
 	adminUser    = "admin@guardian-mgmt"
 	clusterName  = "guardian-mgmt"
+
+	defaultKubeAPIServer = "https://k8s.guardianintelligence.org:6443"
+	defaultTalosEndpoint = "k8s.guardianintelligence.org"
 )
 
 type config struct {
 	Mode          string
-	Tofu          string
-	TofuRoot      string
 	Kubectl       string
 	Talm          string
 	Talosctl      string
@@ -46,13 +45,6 @@ type config struct {
 	Nodes         string
 	KubeAPIServer string
 	ProbeTimeout  time.Duration
-}
-
-type tofuNode struct {
-	ServerID    string `json:"server_id"`
-	Hostname    string `json:"hostname"`
-	PublicIPv4  string `json:"public_ipv4"`
-	PrivateIPv4 string `json:"private_ipv4"`
 }
 
 // accessCandidate keeps endpoint and target together.  In particular, the
@@ -200,8 +192,6 @@ func main() {
 func parseFlags() config {
 	var cfg config
 	flag.StringVar(&cfg.Mode, "mode", "", "authentication mode: agent or admin")
-	flag.StringVar(&cfg.Tofu, "tofu", "", "path to the OpenTofu binary")
-	flag.StringVar(&cfg.TofuRoot, "tofu-root", "", "OpenTofu root containing guardian-mgmt state")
 	flag.StringVar(&cfg.Kubectl, "kubectl", "", "path to kubectl")
 	flag.StringVar(&cfg.Talm, "talm", "", "path to Talm (admin mode)")
 	flag.StringVar(&cfg.Talosctl, "talosctl", "", "path to talosctl (admin mode)")
@@ -213,9 +203,9 @@ func parseFlags() config {
 	flag.StringVar(&cfg.OIDCIssuer, "oidc-issuer", "", "OIDC issuer URL (agent mode)")
 	flag.StringVar(&cfg.OIDCClientID, "oidc-client-id", "", "OIDC client ID (agent mode)")
 	flag.StringVar(&cfg.OIDCCacheDir, "oidc-cache-dir", "", "kubelogin token cache directory (agent mode)")
-	flag.StringVar(&cfg.Endpoints, "endpoints", "", "optional comma-separated Talos endpoints; requires --nodes")
-	flag.StringVar(&cfg.Nodes, "nodes", "", "optional comma-separated Talos targets paired by index with --endpoints")
-	flag.StringVar(&cfg.KubeAPIServer, "kube-api-server", "", "optional Kubernetes API URL override")
+	flag.StringVar(&cfg.Endpoints, "endpoints", "", "optional comma-separated Talos endpoint overrides (admin mode); requires --nodes; defaults to "+defaultTalosEndpoint)
+	flag.StringVar(&cfg.Nodes, "nodes", "", "optional comma-separated Talos target overrides paired by index with --endpoints (admin mode)")
+	flag.StringVar(&cfg.KubeAPIServer, "kube-api-server", defaultKubeAPIServer, "Kubernetes API server URL")
 	flag.DurationVar(&cfg.ProbeTimeout, "probe-timeout", 5*time.Second, "per-candidate Talos and Kubernetes TLS probe timeout")
 	flag.Parse()
 	return cfg
@@ -230,7 +220,7 @@ func (a *application) run(ctx context.Context) error {
 		return err
 	}
 	a.cfg.Kubeconfig = resolvedKubeconfig
-	candidates, err := a.resolveCandidates(ctx)
+	candidates, err := resolveCandidates(a.cfg)
 	if err != nil {
 		return err
 	}
@@ -285,19 +275,8 @@ func validateConfig(cfg config) error {
 	if cfg.Mode == "agent" && hasEndpoints {
 		return errors.New("--endpoints and --nodes apply only to admin mode; use --kube-api-server for an agent override")
 	}
-	needsState := !hasEndpoints && !(cfg.Mode == "agent" && cfg.KubeAPIServer != "")
-	if needsState {
-		if cfg.Tofu == "" {
-			return errors.New("--tofu is required when explicit endpoint/node pairs are not supplied")
-		}
-		if cfg.TofuRoot == "" {
-			return errors.New("--tofu-root is required when explicit endpoint/node pairs are not supplied")
-		}
-	}
-	if cfg.KubeAPIServer != "" {
-		if err := validateKubernetesAPI(cfg.KubeAPIServer); err != nil {
-			return fmt.Errorf("--kube-api-server: %w", err)
-		}
+	if err := validateKubernetesAPI(cfg.KubeAPIServer); err != nil {
+		return fmt.Errorf("--kube-api-server: %w", err)
 	}
 	if cfg.Mode == "agent" {
 		for _, required := range []struct {
@@ -331,73 +310,23 @@ func validateConfig(cfg config) error {
 	return nil
 }
 
-func (a *application) resolveCandidates(ctx context.Context) ([]accessCandidate, error) {
-	var candidates []accessCandidate
-	var err error
-	if strings.TrimSpace(a.cfg.Endpoints) != "" || strings.TrimSpace(a.cfg.Nodes) != "" {
-		candidates, err = candidatesFromOverrides(a.cfg.Endpoints, a.cfg.Nodes)
-	} else if a.cfg.Mode == "agent" && a.cfg.KubeAPIServer != "" {
-		candidates = []accessCandidate{{Name: "kube-api-override", KubernetesAPI: a.cfg.KubeAPIServer}}
-	} else {
-		candidates, err = a.candidatesFromTofu(ctx)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if a.cfg.KubeAPIServer != "" {
+func resolveCandidates(cfg config) ([]accessCandidate, error) {
+	if strings.TrimSpace(cfg.Endpoints) != "" || strings.TrimSpace(cfg.Nodes) != "" {
+		candidates, err := candidatesFromOverrides(cfg.Endpoints, cfg.Nodes)
+		if err != nil {
+			return nil, err
+		}
 		for i := range candidates {
-			candidates[i].KubernetesAPI = a.cfg.KubeAPIServer
+			candidates[i].KubernetesAPI = cfg.KubeAPIServer
 		}
+		return candidates, nil
 	}
-	return candidates, nil
-}
-
-func (a *application) candidatesFromTofu(ctx context.Context) ([]accessCandidate, error) {
-	args := []string{"-chdir=" + a.cfg.TofuRoot, "output", "-json", "control_plane_nodes"}
-	raw, err := a.runner.Output(ctx, a.cfg.Tofu, args, commandOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("read OpenTofu control_plane_nodes: %w", err)
+	candidate := accessCandidate{Name: clusterName, KubernetesAPI: cfg.KubeAPIServer}
+	if cfg.Mode == "admin" {
+		candidate.TalosEndpoint = defaultTalosEndpoint
+		candidate.TalosTarget = defaultTalosEndpoint
 	}
-	return parseControlPlaneNodes(raw)
-}
-
-func parseControlPlaneNodes(raw []byte) ([]accessCandidate, error) {
-	var nodes map[string]tofuNode
-	if err := json.Unmarshal(raw, &nodes); err != nil {
-		return nil, fmt.Errorf("parse OpenTofu control_plane_nodes: %w", err)
-	}
-	if len(nodes) == 0 {
-		return nil, errors.New("OpenTofu control_plane_nodes is empty")
-	}
-	names := make([]string, 0, len(nodes))
-	for name := range nodes {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	seen := make(map[string]string, len(nodes))
-	candidates := make([]accessCandidate, 0, len(nodes))
-	for _, name := range names {
-		if strings.TrimSpace(name) == "" {
-			return nil, errors.New("OpenTofu control_plane_nodes contains an empty node name")
-		}
-		node := nodes[name]
-		ip := net.ParseIP(strings.TrimSpace(node.PublicIPv4))
-		if ip == nil || ip.To4() == nil {
-			return nil, fmt.Errorf("OpenTofu node %q has invalid public_ipv4 %q", name, node.PublicIPv4)
-		}
-		publicIP := ip.To4().String()
-		if previous, ok := seen[publicIP]; ok {
-			return nil, fmt.Errorf("OpenTofu nodes %q and %q have duplicate public_ipv4 %s", previous, name, publicIP)
-		}
-		seen[publicIP] = name
-		candidates = append(candidates, accessCandidate{
-			Name:          name,
-			TalosEndpoint: publicIP,
-			TalosTarget:   publicIP,
-			KubernetesAPI: apiURLForHost(publicIP),
-		})
-	}
-	return candidates, nil
+	return []accessCandidate{candidate}, nil
 }
 
 func candidatesFromOverrides(endpointCSV, nodeCSV string) ([]accessCandidate, error) {
@@ -427,7 +356,6 @@ func candidatesFromOverrides(endpointCSV, nodeCSV string) ([]accessCandidate, er
 			Name:          fmt.Sprintf("override-%d", i+1),
 			TalosEndpoint: endpoints[i],
 			TalosTarget:   nodes[i],
-			KubernetesAPI: apiURLForHost(endpoints[i]),
 		})
 	}
 	return candidates, nil
@@ -464,10 +392,6 @@ func validateAddress(address string) error {
 		}
 	}
 	return nil
-}
-
-func apiURLForHost(host string) string {
-	return "https://" + net.JoinHostPort(host, "6443")
 }
 
 func validateKubernetesAPI(server string) error {

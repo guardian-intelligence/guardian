@@ -99,17 +99,20 @@ EXCLUDED_KUBE_APIS = [
     # be used for guardian-mgmt operations.
     "https://206.223.228.99:6443",
 ]
+# Stable public name for the Kubernetes and Talos APIs: DNS-only round-robin
+# A records over the control-plane origins, declared in
+# src/infrastructure/bootstrap/guardian-mgmt-dns and carried in the machine
+# and apiserver certSANs.
+GUARDIAN_MGMT_API_HOST = "k8s.guardianintelligence.org"
+GUARDIAN_MGMT_KUBE_API = "https://" + GUARDIAN_MGMT_API_HOST + ":6443"
 EXPECTED_KUBE_APIS = [
-    # Mirrors src/infrastructure/bootstrap/guardian-mgmt/main.tf. The VIP is the
-    # source-of-truth endpoint; public node APIs are accepted for off-VLAN
-    # operator validation when the kubeconfig CA is current.
+    GUARDIAN_MGMT_KUBE_API,
+    # Dark-case DR endpoints: accepted because the zone DNS name is unresolvable while dark.
     "https://10.8.0.250:6443",
     "https://206.223.228.101:6443",
     "https://45.250.254.119:6443",
     "https://206.223.228.87:6443",
 ]
-PUBLIC_TALOS_KUBECONFIG_ENDPOINTS = "206.223.228.87,206.223.228.101,45.250.254.119"
-PUBLIC_TALOS_KUBECONFIG_NODE = "206.223.228.87"
 
 INFRA_FILEGROUPS = [
     "//src/infrastructure/bootstrap/guardian-mgmt:root",
@@ -271,38 +274,6 @@ def _tofu_backend_endpoint(ctx, value):
         return None
     return "https://" + account_id + ".r2.cloudflarestorage.com"
 
-def _tofu_backend_credentials(ctx):
-    """State-backend credentials for headless runs: when the ambient
-    environment carries no AWS access key, read the cloudflare_r2_* keys from
-    the staged custody bundle's custody.env so auth needs nothing outside the
-    bundle. Returns extra env for the tofu-invoking spawns; empty when the
-    ambient environment already has credentials or no bundle is staged."""
-    if (ctx.std.env.var("AWS_ACCESS_KEY_ID") or "") != "":
-        return {}
-    path = CUSTODY_BUNDLE_DIR + "/custody.env"
-    if not ctx.std.fs.exists(path):
-        return {}
-    values = {}
-    for line in ctx.std.fs.read_to_string(path).split("\n"):
-        item = line.strip()
-        if item == "" or item.startswith("#"):
-            continue
-        parts = item.split("=", 1)
-        if len(parts) != 2:
-            continue
-        value = parts[1].strip()
-        if value.startswith("\"") and value.endswith("\"") and len(value) >= 2:
-            value = value[1:len(value) - 1]
-        values[parts[0].strip()] = value
-    access_key = values.get("cloudflare_r2_access_key_id", "")
-    secret_key = values.get("cloudflare_r2_secret_access_key", "")
-    if access_key == "" or secret_key == "":
-        return {}
-    return {
-        "AWS_ACCESS_KEY_ID": access_key,
-        "AWS_SECRET_ACCESS_KEY": secret_key,
-    }
-
 def _tofu_backend_roots(ctx, root):
     if root == "all":
         return [
@@ -319,7 +290,7 @@ def _tofu_backend_roots(ctx, root):
     ctx.std.io.stderr.write("ERROR: --root must be all, guardian-mgmt, guardian-mgmt-dns, or guardian-mgmt-edge-policy\n")
     return None
 
-def _tofu_backend_init(ctx, roots, endpoint, env = None):
+def _tofu_backend_init(ctx, roots, endpoint):
     for root, label in roots:
         args = [
             "init",
@@ -332,7 +303,6 @@ def _tofu_backend_init(ctx, roots, endpoint, env = None):
             root,
             args,
             "tofu init backend " + label,
-            env = env,
         )
         if rc != 0:
             return rc
@@ -488,7 +458,7 @@ def _check_live_context_for(ctx, kubectl, kubeconfig, kube_api_server = ""):
         ctx.std.io.stderr.write("ERROR: refusing to validate against excluded cluster API " + server + "\n")
         return 1
     if not _contains(EXPECTED_KUBE_APIS, server):
-        ctx.std.io.stderr.write("ERROR: kubeconfig points at " + server + "; expected guardian-mgmt API endpoint from src/infrastructure/bootstrap/guardian-mgmt/main.tf\n")
+        ctx.std.io.stderr.write("ERROR: kubeconfig points at " + server + "; expected a declared guardian-mgmt API endpoint (EXPECTED_KUBE_APIS)\n")
         return 1
 
     nodes = _kubectl_capture_for(ctx, kubectl, kubeconfig, ["get", "nodes", "-o", "name"], "kubectl get nodes", kube_api_server)
@@ -800,7 +770,7 @@ def _mint_custody_kubeconfig_from(ctx, root, talosconfig):
     if server == None:
         return None
     if not _contains(EXPECTED_KUBE_APIS, server):
-        ctx.std.io.stderr.write("ERROR: generated kubeconfig points at " + server + "; expected guardian-mgmt API endpoint from src/infrastructure/bootstrap/guardian-mgmt/main.tf\n")
+        ctx.std.io.stderr.write("ERROR: generated kubeconfig points at " + server + "; expected a declared guardian-mgmt API endpoint (EXPECTED_KUBE_APIS)\n")
         return None
 
     ctx.std.io.stderr.write("wrote guardian-mgmt kubeconfig to " + kubeconfig + " (" + server + ")\n")
@@ -1904,24 +1874,6 @@ def _auth_impl(ctx):
     if kubectl == None:
         return 1
 
-    use_state = False
-    if ctx.args.platform_agent:
-        use_state = ctx.args.kube_api_server == ""
-    else:
-        use_state = ctx.args.endpoints == "" and ctx.args.nodes == ""
-    state_env = {}
-    if use_state:
-        tofu = _tool_path(ctx, TOFU_TARGET)
-        if tofu == None:
-            return 1
-        endpoint = _tofu_backend_endpoint(ctx, "")
-        if endpoint == None:
-            return 1
-        state_env = _tofu_backend_credentials(ctx)
-        rc = _tofu_backend_init(ctx, [(GUARDIAN_MGMT_ROOT, "guardian-mgmt")], endpoint, env = state_env)
-        if rc != 0:
-            return rc
-
     command_args = [
         "--kubectl",
         kubectl,
@@ -1930,13 +1882,6 @@ def _auth_impl(ctx):
         "--kubeconfig",
         target,
     ]
-    if use_state:
-        command_args.extend([
-            "--tofu",
-            tofu,
-            "--tofu-root",
-            ws_path(ctx, GUARDIAN_MGMT_ROOT),
-        ])
     if ctx.args.endpoints != "":
         command_args.extend(["--endpoints", ctx.args.endpoints])
     if ctx.args.nodes != "":
@@ -1945,10 +1890,10 @@ def _auth_impl(ctx):
         command_args.extend(["--kube-api-server", ctx.args.kube_api_server])
 
     if ctx.args.platform_agent:
-        return _auth_platform_agent(ctx, guardian_auth, command_args, state_env)
-    return _auth_platform_admin(ctx, guardian_auth, kubectl, target, command_args, state_env)
+        return _auth_platform_agent(ctx, guardian_auth, command_args)
+    return _auth_platform_admin(ctx, guardian_auth, kubectl, target, command_args)
 
-def _auth_platform_agent(ctx, guardian_auth, command_args, state_env):
+def _auth_platform_agent(ctx, guardian_auth, command_args):
     bin_dir = install_bazel_tool_shims(ctx, [("kubectl-oidc_login", KUBELOGIN_TARGET)], ".guardian/tools/bin")
     if bin_dir == "":
         return 1
@@ -1976,9 +1921,9 @@ def _auth_platform_agent(ctx, guardian_auth, command_args, state_env):
         "authenticating platform-agent@guardian-mgmt (first login prints a device-code URL — open it in a browser on any machine)\n"
         + "IMPORTANT: approve the device login as the platform-agent user (use a private window if another Keycloak session is active); only platform-agent holds the offline_access role, so any other identity fails the exchange with 'not_allowed'\n",
     )
-    return checked_spawn(ctx, guardian_auth, args, cwd = ws_path(ctx), env = state_env, label = "guardian auth platform-agent")
+    return checked_spawn(ctx, guardian_auth, args, cwd = ws_path(ctx), label = "guardian auth platform-agent")
 
-def _auth_platform_admin(ctx, guardian_auth, kubectl, target, command_args, state_env):
+def _auth_platform_admin(ctx, guardian_auth, kubectl, target, command_args):
     reason = ctx.args.reason.strip()
     if reason == "":
         ctx.std.io.stderr.write("ERROR: --reason is required: breakglass escalation to system:masters is audit-logged\n")
@@ -2024,7 +1969,7 @@ def _auth_platform_admin(ctx, guardian_auth, kubectl, target, command_args, stat
         "--talosconfig",
         talosconfig,
     ])
-    rc = checked_spawn(ctx, guardian_auth, args, cwd = ws_path(ctx), env = state_env, label = "guardian auth platform-admin")
+    rc = checked_spawn(ctx, guardian_auth, args, cwd = ws_path(ctx), label = "guardian auth platform-admin")
     if cleanup_root:
         _cleanup_mint_root(ctx)
     if rc != 0:
@@ -2190,10 +2135,10 @@ kubeconfig = task(
     group = ["infra"],
     summary = "Refresh the gitignored guardian-mgmt custody kubeconfig from repo-pinned Talm operator state, verify it targets a declared guardian-mgmt API endpoint, and optionally install it with a backup.",
     args = {
-        "endpoints": args.string(default = PUBLIC_TALOS_KUBECONFIG_ENDPOINTS, description = "Talos API endpoints used to fetch kubeconfig. Defaults to public control-plane addresses so off-VLAN operators can refresh custody credentials."),
+        "endpoints": args.string(default = GUARDIAN_MGMT_API_HOST, description = "Talos API endpoints used to fetch kubeconfig. Defaults to the stable cluster name; pass explicit node addresses for disaster recovery."),
         "install": args.boolean(default = False, description = "Install the refreshed kubeconfig as the default kubectl config, backing up any existing file first."),
         "install_path": args.string(default = "", description = "Where --install writes the kubeconfig. Defaults to ~/.kube/config."),
-        "nodes": args.string(default = PUBLIC_TALOS_KUBECONFIG_NODE, description = "Talos node used to fetch kubeconfig. Use 10.8.0.11,10.8.0.12,10.8.0.13 from inside the private VLAN if desired."),
+        "nodes": args.string(default = GUARDIAN_MGMT_API_HOST, description = "Talos node used to fetch kubeconfig. Defaults to the stable cluster name; pass an explicit node address for disaster recovery."),
         "root": args.string(default = GUARDIAN_MGMT_TALM_ROOT, description = "Talm root containing gitignored secrets.yaml and talosconfig."),
         "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
     },
@@ -2203,13 +2148,13 @@ auth = task(
     implementation = _auth_impl,
     name = "auth",
     group = ["infra"],
-    summary = "Authenticate kubectl to guardian-mgmt through the tested guardian_auth binary. OpenTofu control_plane_nodes state supplies the default public access candidates; every Talos endpoint stays paired with its same-node target. Both modes verify a staged kubeconfig before atomically installing it. --platform-agent installs the OIDC daily-driver context; --platform-admin mints breakglass x509 credentials from the existing Talos custody bundle and retains the existing audit behavior.",
+    summary = "Authenticate kubectl to guardian-mgmt through the tested guardian_auth binary against the stable API endpoint " + GUARDIAN_MGMT_KUBE_API + " with the committed cluster CA. Both modes verify a staged kubeconfig before atomically installing it. --platform-agent installs the OIDC daily-driver context; --platform-admin mints breakglass x509 credentials from the Talos custody bundle and retains the audit behavior.",
     args = {
         "audit_ntfy_url": args.string(default = BREAKGLASS_NTFY_URL, description = "ntfy URL paged with the breakglass reason."),
-        "endpoints": args.string(default = "", description = "Optional comma-separated Talos endpoints for platform-admin. Must be paired one-for-one with --nodes; defaults to public addresses from OpenTofu control_plane_nodes."),
+        "endpoints": args.string(default = "", description = "Optional comma-separated Talos endpoint overrides for platform-admin disaster recovery. Must be paired one-for-one with --nodes; defaults to " + GUARDIAN_MGMT_API_HOST + "."),
         "install_path": args.string(default = "", description = "Kubeconfig file to write. Defaults to ~/.kube/config."),
-        "kube_api_server": args.string(default = "", description = "Optional Kubernetes API server override. Defaults to the reachable public node API selected from OpenTofu control_plane_nodes."),
-        "nodes": args.string(default = "", description = "Optional comma-separated Talos targets for platform-admin. Must be paired one-for-one with --endpoints."),
+        "kube_api_server": args.string(default = "", description = "Optional Kubernetes API server override for disaster recovery, e.g. a node public API while zone DNS is dark. Defaults to " + GUARDIAN_MGMT_KUBE_API + "."),
+        "nodes": args.string(default = "", description = "Optional comma-separated Talos target overrides for platform-admin disaster recovery. Must be paired one-for-one with --endpoints."),
         "platform_admin": args.boolean(default = False, description = "Breakglass: escalated x509 system:masters credentials from the Talos custody bundle (secrets.yaml + talm.key). Audit-logged; requires --reason."),
         "platform_agent": args.boolean(default = False, description = "Daily driver: OIDC via the platform Keycloak with an offline token (30-day idle window, resets on use, revocable in Keycloak); removes any breakglass context and credentials after OIDC verification."),
         "reason": args.string(default = "", description = "Why breakglass escalation is needed. Required with --platform-admin; paged to the operations topic and appended to the breakglass ledgers."),
