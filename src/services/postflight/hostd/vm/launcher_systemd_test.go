@@ -165,6 +165,51 @@ func TestSystemdLauncherRefusesStrangerScope(t *testing.T) {
 	}
 }
 
+// TestSystemdLauncherKillReclaimsZombieScope is the just-exited-VM window:
+// QEMU has exited but its parent has not reaped it yet, so the scope's only
+// pid is a zombie with an empty cmdline. That proves nothing about
+// strangers — Kill must reclaim the scope, not refuse and leak the slot
+// until the reap.
+func TestSystemdLauncherKillReclaimsZombieScope(t *testing.T) {
+	sleep, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Skipf("no sleep binary: %v", err)
+	}
+	argv := []string{sleep, "0"}
+	cmd := exec.Command(argv[0], argv[1:]...)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Wait() })
+	// Deliberately unreaped: wait until the child is a zombie (cmdline
+	// reads empty once the process has exited).
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		raw, ok := procCmdline(cmd.Process.Pid)
+		if ok && len(raw) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("stub pid %d never became a zombie", cmd.Process.Pid)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	fake := newFakeScopes()
+	fake.pids[scopeUnit("vm-a")] = []int{cmd.Process.Pid}
+	launcher := &SystemdLauncher{API: fake}
+	ctx := context.Background()
+	if alive, err := launcher.Alive(ctx, "vm-a", "", argv); err != nil || alive {
+		t.Fatalf("alive=%t err=%v for a zombie scope", alive, err)
+	}
+	if err := launcher.Kill(ctx, "vm-a", shortTempDir(t), argv); err != nil {
+		t.Fatalf("kill of a zombie scope: %v", err)
+	}
+	if len(fake.stopped) != 1 {
+		t.Fatalf("stopped %v; the zombie scope must be stopped for teardown", fake.stopped)
+	}
+}
+
 func TestSystemdLauncherKillAbsentScope(t *testing.T) {
 	launcher := &SystemdLauncher{API: newFakeScopes()}
 	if err := launcher.Kill(context.Background(), "vm-a", shortTempDir(t), []string{"/usr/bin/qemu-system-x86_64"}); err != nil {

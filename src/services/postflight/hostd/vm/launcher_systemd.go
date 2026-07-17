@@ -84,23 +84,35 @@ func (l *SystemdLauncher) Start(ctx context.Context, id ID, stateDir string, arg
 // ownedPid locates the VM's QEMU inside its scope. A pid counts only while
 // its /proc cmdline matches the launched argv, so neither a recycled unit
 // name nor a squatter in the scope is ever adopted or killed; strangers
-// reports a scope that is occupied by something that is not this VM.
-func (l *SystemdLauncher) ownedPid(ctx context.Context, unit string, argv []string) (pid int, strangers bool, err error) {
+// reports a scope occupied by something that is provably not this VM. A pid
+// whose cmdline reads empty or not at all proves nothing — a zombie (QEMU
+// exited, parent yet to reap it) and a process mid-exec both look like
+// that — so those are ghosts, not strangers: counting them as strangers
+// made every destroy of a just-exited VM refuse until the zombie was
+// reaped, leaking the slot for the whole window.
+func (l *SystemdLauncher) ownedPid(ctx context.Context, unit string, argv []string) (pid int, strangers, ghosts bool, err error) {
 	pids, err := l.API.Pids(ctx, unit)
 	if err != nil {
-		return 0, false, err
+		return 0, false, false, err
 	}
-	for _, pid := range pids {
-		if cmdlineMatches(pid, argv) {
-			return pid, false, nil
+	want := []byte(strings.Join(argv, "\x00") + "\x00")
+	for _, candidate := range pids {
+		raw, ok := procCmdline(candidate)
+		if !ok || len(raw) == 0 {
+			ghosts = true
+			continue
 		}
+		if bytes.Equal(raw, want) {
+			return candidate, false, false, nil
+		}
+		strangers = true
 	}
-	return 0, len(pids) > 0, nil
+	return 0, strangers, ghosts, nil
 }
 
 // Alive implements Launcher.
 func (l *SystemdLauncher) Alive(ctx context.Context, id ID, _ string, argv []string) (bool, error) {
-	pid, _, err := l.ownedPid(ctx, scopeUnit(id), argv)
+	pid, _, _, err := l.ownedPid(ctx, scopeUnit(id), argv)
 	if err != nil {
 		return false, err
 	}
@@ -113,7 +125,7 @@ func (l *SystemdLauncher) Alive(ctx context.Context, id ID, _ string, argv []str
 // contract the pod launcher established.
 func (l *SystemdLauncher) Kill(ctx context.Context, id ID, stateDir string, argv []string) error {
 	unit := scopeUnit(id)
-	pid, strangers, err := l.ownedPid(ctx, unit, argv)
+	pid, strangers, ghosts, err := l.ownedPid(ctx, unit, argv)
 	if err != nil {
 		return err
 	}
@@ -121,6 +133,12 @@ func (l *SystemdLauncher) Kill(ctx context.Context, id ID, stateDir string, argv
 		return fmt.Errorf("vm: scope %s is not vm %s's qemu; refusing to stop", unit, id)
 	}
 	if pid == 0 {
+		if ghosts {
+			// Only exiting-or-not-yet-exec'd remnants: stop the scope so a
+			// pre-exec QEMU cannot outlive the kill, and let systemd finish
+			// the teardown as the remnants are reaped.
+			return l.API.Stop(ctx, unit)
+		}
 		return nil
 	}
 	if l.qmpQuit(ctx, stateDir) {
@@ -163,7 +181,7 @@ func (l *SystemdLauncher) qmpQuit(ctx context.Context, stateDir string) bool {
 func (l *SystemdLauncher) pollGone(ctx context.Context, unit string, argv []string, wait time.Duration) (bool, error) {
 	deadline := time.Now().Add(wait)
 	for {
-		pid, _, err := l.ownedPid(ctx, unit, argv)
+		pid, _, _, err := l.ownedPid(ctx, unit, argv)
 		if err != nil {
 			return false, err
 		}
