@@ -13,7 +13,7 @@
 releases:
   alert-relay:
     prod:
-      image: ghcr.io/guardian-intelligence/alert-relay@sha256:ca7b3b9ba13a3fa38c735ccce4ee43dcceaced9cd8435d7f4dabcc1b2af87778
+      image: ghcr.io/guardian-intelligence/alert-relay@sha256:9e64d1a5c21d6aa4c0b6bdb6548091a292abd672a4fd854d88958fe506fca6e5
   analytics-ingest:
     prod:
       image: ghcr.io/guardian-intelligence/analytics-ingest@sha256:720bd0a0d191955bbbe3a229b266d1fdd8f7b26bb5daa1b88fe043dc11ae7899
