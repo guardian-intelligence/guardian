@@ -123,6 +123,7 @@ func populateLegacy(t *testing.T, opts *options) string {
 		writeFile(t, filepath.Join(talmRoot, name), name+" contents")
 	}
 	writeFile(t, filepath.Join(opts.custodyDir, envName), "KEY=value")
+	writeFile(t, filepath.Join(opts.custodyDir, "master-passphrase"), "linstor master passphrase")
 	writeUnsealKey(t, opts.custodyDir)
 	return talmRoot
 }
@@ -141,7 +142,7 @@ func TestResolveFromLegacyFailClosed(t *testing.T) {
 	for _, r := range src.resolved {
 		got = append(got, r.bundlePath)
 	}
-	for _, want := range []string{"talm/secrets.yaml", "talm/talm.key", "talm/talosconfig", envName, "openbao/metadata.json"} {
+	for _, want := range []string{"talm/secrets.yaml", "talm/talm.key", "talm/talosconfig", "linstor/master-passphrase", envName, "openbao/metadata.json"} {
 		found := false
 		for _, g := range got {
 			if g == want {
@@ -170,6 +171,49 @@ func TestFindUnsealKeyFingerprintMismatch(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "unseal-"+hex.EncodeToString(sum[:])+".key"), "wrong")
 	if _, err := findUnsealKey(dir); err == nil || !strings.Contains(err.Error(), "fingerprint") {
 		t.Fatalf("want fingerprint mismatch error, got %v", err)
+	}
+}
+
+func TestLinstorGenerateCreatesOnceOnTmpfs(t *testing.T) {
+	fake := &fakeRestic{}
+	opts := testOptions(t, fake)
+	opts.bundleDir = filepath.Join("/dev/shm", fmt.Sprintf("guardian-custody-test-linstor-%d", os.Getpid()))
+	defer os.RemoveAll(opts.bundleDir)
+	if err := os.MkdirAll(opts.bundleDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := cmdLinstorGenerate(opts); err != nil {
+		t.Fatalf("generate LINSTOR passphrase: %v", err)
+	}
+	path := filepath.Join(opts.bundleDir, "linstor", "master-passphrase")
+	first, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 64 {
+		t.Fatalf("passphrase has %d hex bytes, want 64", len(first))
+	}
+	decoded, err := hex.DecodeString(string(first))
+	if err != nil || len(decoded) != 32 {
+		t.Fatalf("passphrase is not a 256-bit lowercase hex value")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("passphrase mode = %o, want 600", got)
+	}
+	if err := cmdLinstorGenerate(opts); err == nil || !strings.Contains(err.Error(), "refusing to replace") {
+		t.Fatalf("second generation must fail closed, got %v", err)
+	}
+	second, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Fatal("failed second generation changed the existing passphrase")
 	}
 }
 
@@ -339,6 +383,7 @@ func TestVerifyFailsWhenRequiredMemberMissingFromSnapshot(t *testing.T) {
 			"ls": []byte(`{"path":"/dev/shm/guardian-custody/talm/secrets.yaml"}
 {"path":"/dev/shm/guardian-custody/talm/talm.key"}
 {"path":"/dev/shm/guardian-custody/talm/talosconfig"}
+{"path":"/dev/shm/guardian-custody/linstor/master-passphrase"}
 {"path":"/dev/shm/guardian-custody/openbao/metadata.json"}
 {"path":"/dev/shm/guardian-custody/openbao/unseal-` + strings.Repeat("ab", 32) + `.key"}
 `),

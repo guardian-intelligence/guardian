@@ -30,6 +30,7 @@ resources:
   - openbao-observability.yaml
   - openbao-rbac.yaml
   - release-projector.yaml
+  - storage-encryption-canary.yaml
   - vap-denial-canary.yaml
   - zot-countersigner.yaml
   - zot-helmrelease.yaml

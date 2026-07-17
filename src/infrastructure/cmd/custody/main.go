@@ -1,5 +1,6 @@
 // Command custody manages the encrypted custody bundle: the secret-zero set
-// (Talos genesis secrets, the OpenBao static-seal key, the operator env) that
+// (Talos genesis secrets, the LINSTOR master passphrase, the OpenBao
+// static-seal key, the operator env) that
 // no system the cluster controls may ever hold in full. The encrypted restic
 // repository is the ONLY at-rest form; plaintext exists solely inside the
 // fixed tmpfs bundle directory between `restore` and `wipe`.
@@ -9,11 +10,13 @@
 // tmpfs), wipe (shred the tmpfs bundle), status (staleness + plaintext
 // residue), key-add (second password for the password-manager recovery flow),
 // env-set/env-unset (atomic single-key custody.env edit: restore, edit,
-// snapshot, wipe).
+// snapshot, wipe), linstor-generate (one-time 256-bit passphrase creation in
+// the restored tmpfs bundle).
 package main
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -65,6 +68,7 @@ var manifest = []member{
 	{"talm/secrets.yaml", true, "Talos genesis secrets (machine/k8s/etcd CAs, service-account keys)"},
 	{"talm/talm.key", true, "age key decrypting the committed-shape .encrypted Talm variants"},
 	{"talm/talosconfig", true, "Talos API client credentials"},
+	{"linstor/master-passphrase", true, "LINSTOR master passphrase for native LUKS volumes"},
 	{"openbao/metadata.json", true, "OpenBao static-seal key metadata"},
 	{envName, true, "operator env keys (importer source of truth)"},
 	{"keys/github-promotions-app.private-key.pem", false, "GitHub promotions App key (re-issuable via GitHub)"},
@@ -107,7 +111,7 @@ func main() {
 
 func realMain(opts *options, argv []string) error {
 	if len(argv) == 0 {
-		return errors.New("usage: custody <create|verify|restore|wipe|status|key-add|env-set|env-unset> [flags]")
+		return errors.New("usage: custody <create|verify|restore|wipe|status|key-add|env-set|env-unset|linstor-generate> [flags]")
 	}
 	sub, rest := argv[0], argv[1:]
 
@@ -146,8 +150,10 @@ func realMain(opts *options, argv []string) error {
 		return cmdEnvSet(opts)
 	case "env-unset":
 		return cmdEnvUnset(opts)
+	case "linstor-generate":
+		return cmdLinstorGenerate(opts)
 	default:
-		return fmt.Errorf("unknown subcommand %q (want create|verify|restore|wipe|status|key-add|env-set|env-unset)", sub)
+		return fmt.Errorf("unknown subcommand %q (want create|verify|restore|wipe|status|key-add|env-set|env-unset|linstor-generate)", sub)
 	}
 }
 
@@ -816,6 +822,42 @@ func cmdWipe(opts *options) error {
 		return err
 	}
 	fmt.Fprintf(opts.stdout, "wiped %s\n", opts.bundleDir)
+	return nil
+}
+
+func cmdLinstorGenerate(opts *options) error {
+	if err := requireTmpfs(opts.bundleDir); err != nil {
+		return err
+	}
+	if _, err := os.Stat(opts.bundleDir); err != nil {
+		return fmt.Errorf("restore the custody bundle at %s before generating the LINSTOR passphrase", opts.bundleDir)
+	}
+	dir := filepath.Join(opts.bundleDir, "linstor")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
+	path := filepath.Join(dir, "master-passphrase")
+	if _, err := os.Stat(path); err == nil {
+		return fmt.Errorf("%s already exists; refusing to replace a passphrase that may protect data", path)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	random := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, random); err != nil {
+		return fmt.Errorf("generate LINSTOR passphrase: %w", err)
+	}
+	passphrase := make([]byte, hex.EncodedLen(len(random)))
+	hex.Encode(passphrase, random)
+	if err := os.WriteFile(path, passphrase, 0o600); err != nil {
+		return err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return err
+	}
+	fmt.Fprintf(opts.stdout, "generated LINSTOR master passphrase at %s; snapshot the custody bundle before provisioning encrypted volumes\n", path)
 	return nil
 }
 

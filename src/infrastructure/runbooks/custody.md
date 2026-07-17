@@ -21,6 +21,7 @@ bundle that would be trusted and useless is worse than none.
 | `talm/secrets.yaml` | Talos genesis secrets (machine/k8s/etcd CAs, service-account keys) |
 | `talm/talm.key` | age key decrypting the `.encrypted` Talm variants |
 | `talm/talosconfig` | Talos API client credentials |
+| `linstor/master-passphrase` | LINSTOR master passphrase; losing it makes every native LUKS volume unrecoverable |
 | `openbao/unseal-<sha256>.key` | OpenBao static-seal key; content hash must match the filename fingerprint |
 | `openbao/metadata.json` | seal-key metadata |
 
@@ -66,6 +67,9 @@ All actions run as `aspect infra custody --action <name>`.
 - **status** — latest-snapshot age, open-bundle and plaintext-residue
   warnings.
 - **key-add** — adds a second repository password.
+- **linstor-generate** — creates the 256-bit LINSTOR master passphrase once at
+  `linstor/master-passphrase` in an already restored tmpfs bundle and refuses
+  to replace it. Snapshot the bundle before provisioning encrypted volumes.
 
 ## Passwords
 
@@ -105,7 +109,8 @@ usually carries the current root material. `status` warns past 30 days.
 ## Genesis (new cluster from this repo)
 
 `talm gen secrets` mints a fresh secrets bundle; the OpenBao static-seal key
-comes from `openbao_static_seal_key`; run
+comes from `openbao_static_seal_key`; `linstor-generate` creates the LINSTOR
+master passphrase in the staged bundle. Run
 `aspect infra custody --action create` and confirm the R2 push and one local
 pull before the first workload ships. A cluster whose custody exists in one
 place is one disk failure away from the bad row of the loss table.

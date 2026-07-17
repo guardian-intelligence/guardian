@@ -29,6 +29,7 @@ go_test(
         "platform_agent_admission_test.go",
         "platform_agent_secrets_writer_invariants_test.go",
         "release_manifest_test.go",
+        "storage_encryption_foundation_test.go",
         "version_skew_test.go",
         "vlogs_hardening_test.go",
         "vlogs_streams_test.go",
