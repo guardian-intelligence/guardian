@@ -3,6 +3,8 @@ kind: CronJob
 metadata:
   name: payments-rail-canary
   namespace: tenant-guardian-prod
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
   labels:
     app.kubernetes.io/name: payments-rail-canary
     app.kubernetes.io/part-of: guardian
@@ -35,7 +37,7 @@ spec:
             - name: canary
               image: ghcr.io/fluxcd/flagger-loadtester@sha256:f98a35ab7aca0f2efdd8e397b4002e283637f5c9e31e4e2a6c1e97af07c50454 # 0.37.0
               command:
-                - /bin/bash
+                - /bin/sh
                 - -ec
                 - |
                   curl -fsS --max-time 80 \

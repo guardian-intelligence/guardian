@@ -84,6 +84,16 @@ func TestPaymentsRolloutAndCanaryConformance(t *testing.T) {
 		assertTextContains(t, browser, want, browserPath)
 	}
 
+	railPath := runfilePath(root + "rail-canary.yaml")
+	rail := readText(t, railPath)
+	for _, want := range []string{
+		"kustomize.toolkit.fluxcd.io/substitute: disabled",
+		"- /bin/sh",
+		`Authorization: Bearer ${PAYMENTS_CANARY_TOKEN}`,
+	} {
+		assertTextContains(t, rail, want, railPath)
+	}
+
 	observabilityPath := runfilePath(root + "observability.yaml")
 	observability := readText(t, observabilityPath)
 	for _, want := range []string{

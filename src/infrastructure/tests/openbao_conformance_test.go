@@ -169,17 +169,19 @@ func TestOpenBaoLocalStorageClassConformance(t *testing.T) {
 }
 
 func TestTenantGuardianPodSecurityConformance(t *testing.T) {
-	path := runfilePath("src/infrastructure/base/app-patches/tenant-guardian-namespace-pod-security.yaml")
-	doc := singleYAMLDoc(t, path)
+	for _, name := range []string{"tenant-guardian", "tenant-guardian-prod"} {
+		path := runfilePath("src/infrastructure/base/app-patches/" + name + "-namespace-pod-security.yaml")
+		doc := singleYAMLDoc(t, path)
 
-	assertNestedString(t, doc, "Namespace", "kind")
-	assertNestedString(t, doc, "tenant-guardian", "metadata", "name")
-	assertNestedString(t, doc, "privileged", "metadata", "labels", "pod-security.kubernetes.io/enforce")
-	assertNestedString(t, doc, "latest", "metadata", "labels", "pod-security.kubernetes.io/enforce-version")
-	assertNestedString(t, doc, "baseline", "metadata", "labels", "pod-security.kubernetes.io/audit")
-	assertNestedString(t, doc, "latest", "metadata", "labels", "pod-security.kubernetes.io/audit-version")
-	assertNestedString(t, doc, "baseline", "metadata", "labels", "pod-security.kubernetes.io/warn")
-	assertNestedString(t, doc, "latest", "metadata", "labels", "pod-security.kubernetes.io/warn-version")
+		assertNestedString(t, doc, "Namespace", "kind")
+		assertNestedString(t, doc, name, "metadata", "name")
+		assertNestedString(t, doc, "privileged", "metadata", "labels", "pod-security.kubernetes.io/enforce")
+		assertNestedString(t, doc, "latest", "metadata", "labels", "pod-security.kubernetes.io/enforce-version")
+		assertNestedString(t, doc, "baseline", "metadata", "labels", "pod-security.kubernetes.io/audit")
+		assertNestedString(t, doc, "latest", "metadata", "labels", "pod-security.kubernetes.io/audit-version")
+		assertNestedString(t, doc, "baseline", "metadata", "labels", "pod-security.kubernetes.io/warn")
+		assertNestedString(t, doc, "latest", "metadata", "labels", "pod-security.kubernetes.io/warn-version")
+	}
 }
 
 func TestOpenBaoStaticSealAdmissionConformance(t *testing.T) {
