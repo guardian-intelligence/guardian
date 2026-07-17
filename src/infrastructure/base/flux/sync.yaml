@@ -383,6 +383,7 @@ spec:
   dependsOn:
     - name: guardian-mgmt-storage
     - name: guardian-mgmt-admission
+    - name: guardian-mgmt-app-patches
   prune: true
   wait: false
   timeout: 30m

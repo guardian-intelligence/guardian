@@ -74,6 +74,8 @@ func TestTigerBeetleRuntimeConformance(t *testing.T) {
 	for _, forbidden := range []string{
 		"format",
 		"privileged: true",
+		"containerPort:",
+		"hostPort:",
 		"\nkind: Service\n",
 		"\nkind: Ingress\n",
 		"\nkind: Gateway\n",
@@ -225,6 +227,7 @@ func TestTigerBeetleFluxRuntimeGate(t *testing.T) {
 		"path: ./src/infrastructure/deployments/tigerbeetle/system",
 		"- name: guardian-mgmt-storage",
 		"- name: guardian-mgmt-admission",
+		"- name: guardian-mgmt-app-patches",
 		"kind: Deployment",
 		"name: tigerbeetle-0",
 		"name: tigerbeetle-1",

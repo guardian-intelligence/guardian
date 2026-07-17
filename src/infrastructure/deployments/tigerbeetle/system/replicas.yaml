@@ -55,19 +55,15 @@ spec:
             - --experimental
             - --statsd=127.0.0.1:8125
             - /data/ledger.tigerbeetle
-          ports:
-            - name: replica
-              containerPort: 3000
-              protocol: TCP
           startupProbe:
             tcpSocket:
-              port: replica
+              port: 3000
             failureThreshold: 720
             periodSeconds: 10
             timeoutSeconds: 2
           readinessProbe:
             tcpSocket:
-              port: replica
+              port: 3000
             failureThreshold: 3
             periodSeconds: 10
             timeoutSeconds: 2
@@ -98,16 +94,9 @@ spec:
             - --statsd.listen-udp=127.0.0.1:8125
             - --statsd.listen-tcp=
             - --web.listen-address=:9102
-          ports:
-            - name: statsd
-              containerPort: 8125
-              protocol: UDP
-            - name: metrics
-              containerPort: 9102
-              protocol: TCP
           readinessProbe:
             tcpSocket:
-              port: metrics
+              port: 9102
             periodSeconds: 10
             timeoutSeconds: 2
           resources:
@@ -185,19 +174,15 @@ spec:
             - --experimental
             - --statsd=127.0.0.1:8125
             - /data/ledger.tigerbeetle
-          ports:
-            - name: replica
-              containerPort: 3000
-              protocol: TCP
           startupProbe:
             tcpSocket:
-              port: replica
+              port: 3000
             failureThreshold: 720
             periodSeconds: 10
             timeoutSeconds: 2
           readinessProbe:
             tcpSocket:
-              port: replica
+              port: 3000
             failureThreshold: 3
             periodSeconds: 10
             timeoutSeconds: 2
@@ -228,16 +213,9 @@ spec:
             - --statsd.listen-udp=127.0.0.1:8125
             - --statsd.listen-tcp=
             - --web.listen-address=:9102
-          ports:
-            - name: statsd
-              containerPort: 8125
-              protocol: UDP
-            - name: metrics
-              containerPort: 9102
-              protocol: TCP
           readinessProbe:
             tcpSocket:
-              port: metrics
+              port: 9102
             periodSeconds: 10
             timeoutSeconds: 2
           resources:
@@ -315,19 +293,15 @@ spec:
             - --experimental
             - --statsd=127.0.0.1:8125
             - /data/ledger.tigerbeetle
-          ports:
-            - name: replica
-              containerPort: 3000
-              protocol: TCP
           startupProbe:
             tcpSocket:
-              port: replica
+              port: 3000
             failureThreshold: 720
             periodSeconds: 10
             timeoutSeconds: 2
           readinessProbe:
             tcpSocket:
-              port: replica
+              port: 3000
             failureThreshold: 3
             periodSeconds: 10
             timeoutSeconds: 2
@@ -358,16 +332,9 @@ spec:
             - --statsd.listen-udp=127.0.0.1:8125
             - --statsd.listen-tcp=
             - --web.listen-address=:9102
-          ports:
-            - name: statsd
-              containerPort: 8125
-              protocol: UDP
-            - name: metrics
-              containerPort: 9102
-              protocol: TCP
           readinessProbe:
             tcpSocket:
-              port: metrics
+              port: 9102
             periodSeconds: 10
             timeoutSeconds: 2
           resources:

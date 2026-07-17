@@ -18,7 +18,7 @@ spec:
   ports:
     - name: metrics
       port: 9102
-      targetPort: metrics
+      targetPort: 9102
       protocol: TCP
 ---
 apiVersion: operator.victoriametrics.com/v1beta1
