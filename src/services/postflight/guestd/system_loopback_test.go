@@ -116,6 +116,9 @@ func TestRealSystemLoopbackMountConvergence(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(mountpoint, WorkspaceMarker)); err != nil {
 		t.Fatalf("workspace marker: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(mountpoint, "lost+found")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("lost+found survived adoption: %v", err)
+	}
 	account, err := user.Lookup(owner)
 	if err != nil {
 		t.Fatal(err)

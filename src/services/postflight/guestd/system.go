@@ -245,6 +245,12 @@ func (r RealSystem) Adopt(mountpoint string) error {
 	if err := os.Chown(mountpoint, uid, gid); err != nil {
 		return fmt.Errorf("guestd: adopting %s: %w", mountpoint, err)
 	}
+	// Jobs run directly in the filesystem root, and toolchains that walk the
+	// whole tree (go vet ./..., pytest collection) die with EACCES on the
+	// root-owned lost+found that mkfs.ext4 seeds there.
+	if err := os.RemoveAll(filepath.Join(mountpoint, "lost+found")); err != nil {
+		return fmt.Errorf("guestd: removing lost+found: %w", err)
+	}
 	marker := filepath.Join(mountpoint, WorkspaceMarker)
 	if err := os.WriteFile(marker, nil, 0o644); err != nil {
 		return fmt.Errorf("guestd: writing marker: %w", err)
