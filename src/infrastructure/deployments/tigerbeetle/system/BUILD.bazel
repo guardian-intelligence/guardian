@@ -1,6 +1,7 @@
 filegroup(
     name = "manifests",
     srcs = glob([
+        "*.envoy",
         "*.yaml",
     ]),
     visibility = ["//visibility:public"],

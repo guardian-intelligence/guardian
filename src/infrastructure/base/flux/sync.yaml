@@ -388,6 +388,21 @@ spec:
   wait: false
   timeout: 30m
   healthChecks:
+    - apiVersion: cert-manager.io/v1
+      kind: ClusterIssuer
+      name: guardian-tigerbeetle-ca
+    - apiVersion: cert-manager.io/v1
+      kind: Certificate
+      name: guardian-tigerbeetle-ca
+      namespace: cozy-cert-manager
+    - apiVersion: cert-manager.io/v1
+      kind: Certificate
+      name: tigerbeetle-transport-server
+      namespace: tenant-guardian
+    - apiVersion: apps/v1
+      kind: DaemonSet
+      name: tigerbeetle-transport
+      namespace: tenant-guardian
     - apiVersion: apps/v1
       kind: Deployment
       name: tigerbeetle-0

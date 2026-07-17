@@ -73,14 +73,16 @@ The runtime network policy permits only:
 
 - root-ingress traffic to the public payments paths;
 - the shared encrypted CNPG `postgres-products` service;
-- TigerBeetle at `10.8.0.11:3000`, `10.8.0.12:3000`, and
-  `10.8.0.13:3000`;
+- mutually authenticated TLS proxies at `10.8.0.11:3001`,
+  `10.8.0.12:3001`, and `10.8.0.13:3001`, each forwarding over node loopback
+  to its TigerBeetle replica;
 - Stripe and R2 over public TLS;
 - OTLP to the in-cluster collector;
 - Flagger and scheduled canary traffic; and
 - VictoriaMetrics scraping.
 
-TigerBeetle is never exposed by a Kubernetes or public Service.
+TigerBeetle is never exposed by a Kubernetes or public Service. The raw
+replica port remains node-only; pods do not receive direct TCP 3000 access.
 
 ## Continuous checkout proof
 

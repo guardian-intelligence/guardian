@@ -13,7 +13,7 @@ func TestPaymentsRuntimeConformance(t *testing.T) {
 	for _, want := range []string{
 		"replicas: 2",
 		"postgres-products-rw.tenant-guardian-prod.svc:5432/payments?sslmode=require",
-		"10.8.0.11:3000,10.8.0.12:3000,10.8.0.13:3000",
+		"127.0.0.1:13000,127.0.0.1:13001,127.0.0.1:13002",
 		`name: CUSTOMER_CHECKOUT_ENABLED`,
 		`value: "false"`,
 		"guardian.dev/otel: producer",
@@ -27,6 +27,7 @@ func TestPaymentsRuntimeConformance(t *testing.T) {
 		"rk_test_",
 		"whsec_",
 		"TIGERBEETLE_CLUSTER_ID\n              value: \"1\"",
+		"10.8.0.11:3000",
 	} {
 		assertTextNotContains(t, deployment, forbidden, deploymentPath)
 	}
@@ -111,8 +112,24 @@ func TestPaymentsRolloutAndCanaryConformance(t *testing.T) {
 		"k8s:app.kubernetes.io/name: otel-collector",
 		"k8s:io.kubernetes.pod.namespace: tenant-guardian-prod",
 		"k8s:app.kubernetes.io/component: payments",
+		`port: "3001"`,
 	} {
 		assertTextContains(t, network, want, networkPath)
+	}
+
+	transportPath := runfilePath(root + "transport.yaml")
+	transport := readText(t, transportPath) + readText(t, runfilePath(root+"client.envoy"))
+	for _, want := range []string{
+		"name: payments-tigerbeetle-client",
+		"name: guardian-tigerbeetle-ca",
+		"guardian-payments.guardian.internal",
+		"10.8.0.11",
+		"10.8.0.12",
+		"10.8.0.13",
+		"port_value: 3001",
+		"tigerbeetle.guardian.internal",
+	} {
+		assertTextContains(t, transport, want, transportPath)
 	}
 }
 

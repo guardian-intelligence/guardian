@@ -1,7 +1,15 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+generatorOptions:
+  disableNameSuffixHash: true
+configMapGenerator:
+  - name: payments-tigerbeetle-transport
+    namespace: tenant-guardian-prod
+    files:
+      - envoy.yaml=client.envoy
 resources:
   - secrets.yaml
+  - transport.yaml
   - deployment.yaml
   - ingress.yaml
   - loadtester.yaml

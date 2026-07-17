@@ -33,6 +33,8 @@ spec:
         runAsNonRoot: true
         runAsUser: 65532
         runAsGroup: 65532
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
         seccompProfile:
           type: RuntimeDefault
       affinity:
@@ -87,7 +89,7 @@ spec:
                   name: payments-stripe
                   key: canary_price_id
             - name: TIGERBEETLE_ADDRESSES
-              value: 10.8.0.11:3000,10.8.0.12:3000,10.8.0.13:3000
+              value: 127.0.0.1:13000,127.0.0.1:13001,127.0.0.1:13002
             - name: TIGERBEETLE_CLUSTER_ID
               value: "0"
             - name: JOURNAL_S3_ENDPOINT
@@ -153,6 +155,53 @@ spec:
               drop:
                 - ALL
             readOnlyRootFilesystem: true
+        - name: tigerbeetle-transport
+          image: docker.io/envoyproxy/envoy:distroless-v1.36.4@sha256:2f71c5666a5209d6ee1ec519b17877ccb6d17be4d00e34de10f11e020ea8707a
+          imagePullPolicy: IfNotPresent
+          args:
+            - -c
+            - /etc/envoy/envoy.yaml
+            - --log-level
+            - warning
+          readinessProbe:
+            tcpSocket:
+              port: 13000
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: 13000
+            periodSeconds: 20
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: tigerbeetle-transport-config
+              mountPath: /etc/envoy
+              readOnly: true
+            - name: tigerbeetle-transport-tls
+              mountPath: /tls
+              readOnly: true
+      volumes:
+        - name: tigerbeetle-transport-config
+          configMap:
+            name: payments-tigerbeetle-transport
+        - name: tigerbeetle-transport-tls
+          secret:
+            secretName: payments-tigerbeetle-client-tls
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget

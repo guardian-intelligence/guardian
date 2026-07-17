@@ -64,13 +64,16 @@ spec:
         - ports:
             - port: "4317"
               protocol: TCP
-    - toCIDR:
-        - 10.8.0.11/32
-        - 10.8.0.12/32
-        - 10.8.0.13/32
+    # The host-network transport proxies authenticate this workload with
+    # mTLS before forwarding over loopback to TigerBeetle. Cilium assigns
+    # node addresses the reserved host/remote-node identities, so CIDR
+    # selectors do not match this path.
+    - toEntities:
+        - host
+        - remote-node
       toPorts:
         - ports:
-            - port: "3000"
+            - port: "3001"
               protocol: TCP
     - toEntities:
         - world

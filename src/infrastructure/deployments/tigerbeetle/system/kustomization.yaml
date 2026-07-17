@@ -1,6 +1,14 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+generatorOptions:
+  disableNameSuffixHash: true
+configMapGenerator:
+  - name: tigerbeetle-transport
+    namespace: tenant-guardian
+    files:
+      - envoy.yaml=server.envoy
 resources:
   - identity.yaml
   - replicas.yaml
+  - transport.yaml
   - observability.yaml

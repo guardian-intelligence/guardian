@@ -11,6 +11,7 @@ quay.io/keycloak/
 quay.io/openbao/
 quay.io/prometheus/
 docker.io/electricsql/
+docker.io/envoyproxy/
 docker.io/library/postgres
 ghcr.io/siderolabs/talos-backup
 cr.fluentbit.io/fluent/fluent-bit
