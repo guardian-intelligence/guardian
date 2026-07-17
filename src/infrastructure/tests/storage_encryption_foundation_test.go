@@ -2,7 +2,7 @@ package tests
 
 import "testing"
 
-func TestCozystackNativeLinstorEncryptionFoundationConformance(t *testing.T) {
+func TestCozystackNativeLinstorEncryptionConformance(t *testing.T) {
 	path := runfilePath("src/infrastructure/base/storage/storageclasses.yaml")
 	classes := map[string]map[string]interface{}{}
 	for _, doc := range yamlDocs(t, path) {
@@ -52,18 +52,25 @@ func TestCozystackNativeLinstorEncryptionFoundationConformance(t *testing.T) {
 		}
 	}
 
-	// Existing names and the old default remain available until every bound
-	// volume has been copied and verified; this foundation change must not
-	// trigger workload recreation or prune a StorageClass during convergence.
 	for _, name := range []string{"local", "local-retain", "openbao-local", "replicated", "replicated-retain"} {
 		if classes[name] == nil {
-			t.Errorf("migration foundation must retain StorageClass %s", name)
+			t.Errorf("storage migration must retain StorageClass %s", name)
 		}
 	}
-	metadata := mapValue(classes["replicated"]["metadata"])
-	annotations := mapValue(metadata["annotations"])
-	if got := stringValue(annotations["storageclass.kubernetes.io/is-default-class"]); got != "true" {
-		t.Errorf("legacy replicated class must remain default during the foundation phase, got %q", got)
+	legacyAnnotations := mapValue(mapValue(classes["replicated"]["metadata"])["annotations"])
+	if got := stringValue(legacyAnnotations["storageclass.kubernetes.io/is-default-class"]); got != "false" {
+		t.Errorf("replicated default annotation = %q, want false", got)
+	}
+	encryptedAnnotations := mapValue(mapValue(classes["replicated-encrypted"]["metadata"])["annotations"])
+	if got := stringValue(encryptedAnnotations["storageclass.kubernetes.io/is-default-class"]); got != "true" {
+		t.Errorf("replicated-encrypted default annotation = %q, want true", got)
+	}
+
+	for _, name := range []string{"synthetic-local", "synthetic-local-retain", "synthetic-replicated", "synthetic-replicated-retain"} {
+		labels := mapValue(mapValue(classes[name]["metadata"])["labels"])
+		if got := stringValue(labels["guardian.dev/data-classification"]); got != "synthetic" {
+			t.Errorf("StorageClass %s classification label = %q, want synthetic", name, got)
+		}
 	}
 
 	patchPath := runfilePath("src/infrastructure/base/storage/linstor-encryption.yaml")
@@ -78,4 +85,22 @@ func TestCozystackNativeLinstorEncryptionFoundationConformance(t *testing.T) {
 	canary := readText(t, canaryPath)
 	assertTextContains(t, canary, "storageClassName: local-encrypted", canaryPath)
 	assertTextContains(t, canary, "storageClassName: replicated-encrypted", canaryPath)
+
+	policyPath := runfilePath("src/infrastructure/base/admission/synthetic-storage-classification.yaml")
+	policy := readText(t, policyPath)
+	assertTextContains(t, policy, "guardian.dev/data-classification", policyPath)
+
+	workloads := map[string]string{
+		"src/infrastructure/base/apps/postflight-controlplane-postgres.yaml":      "storageClass: replicated-encrypted",
+		"src/infrastructure/base/apps/observability.yaml":                         "storageClassName: replicated-encrypted",
+		"src/infrastructure/deployments/guardian/system/openbao-helmrelease.yaml": "storageClass: local-encrypted-retain",
+		"src/infrastructure/deployments/guardian/system/zot-helmrelease.yaml":     "storageClassName: replicated-encrypted",
+		"src/infrastructure/deployments/iam/prod/postgres.yaml":                   "storageClass: replicated-encrypted",
+		"src/infrastructure/deployments/products/prod/electric.yaml":              "storageClassName: replicated-encrypted",
+		"src/infrastructure/deployments/products/prod/postgres.yaml":              "storageClass: replicated-encrypted",
+	}
+	for workloadPath, want := range workloads {
+		raw := readText(t, runfilePath(workloadPath))
+		assertTextContains(t, raw, want, workloadPath)
+	}
 }

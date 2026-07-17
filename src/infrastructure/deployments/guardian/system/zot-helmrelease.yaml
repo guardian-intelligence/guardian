@@ -55,7 +55,7 @@ spec:
       create: true
       accessModes: ["ReadWriteOnce"]
       storage: 128Gi
-      storageClassName: replicated
+      storageClassName: replicated-encrypted
     mountConfig: true
     configFiles:
       # Validated against this exact zot build with `zot verify` plus a live

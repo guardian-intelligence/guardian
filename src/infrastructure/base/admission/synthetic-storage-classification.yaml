@@ -1,0 +1,34 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: guardian-synthetic-storage-classification
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - ""
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - persistentvolumeclaims
+  validations:
+    - expression: >-
+        !has(object.spec.storageClassName) ||
+        !object.spec.storageClassName.startsWith('synthetic-') ||
+        (has(object.metadata.labels) &&
+        'guardian.dev/data-classification' in object.metadata.labels &&
+        object.metadata.labels['guardian.dev/data-classification'] == 'synthetic')
+      message: PVCs using a synthetic-* StorageClass must carry guardian.dev/data-classification=synthetic
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: guardian-synthetic-storage-classification
+spec:
+  policyName: guardian-synthetic-storage-classification
+  validationActions:
+    - Deny
