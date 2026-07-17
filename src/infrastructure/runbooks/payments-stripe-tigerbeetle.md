@@ -26,17 +26,16 @@ retrying, never by inventing a compensating balance.
 
 ## Stripe credentials and resources
 
-Use two restricted sandbox keys:
+The synthetic sandbox uses one restricted key,
+`stripe_e2e_bootstrap_sandbox_key`, for the `guardian-stripe-sandbox`
+OpenTofu root and the runtime canaries. Grant Account Read; Products Write;
+Prices Write; Webhook Endpoints Write; Payment Intents Read and Write;
+Checkout Sessions Read and Write; Charges Read; and Balance Transactions
+Read. The union is confined to a sandbox and cannot access live Stripe
+objects or customer money.
 
-1. `stripe_e2e_provisioner_sandbox_key` is used only by the
-   `guardian-stripe-sandbox` OpenTofu root. Grant Account Read, Products Write,
-   Prices Write, and Webhook Endpoints Write.
-2. `stripe_e2e_bootstrap_sandbox_key` becomes the runtime key. Grant Account
-   Read; Payment Intents Read and Write; Checkout Sessions Read and Write;
-   Charges Read; Balance Transactions Read; and Products and Prices Read.
-
-Neither key is a live-mode key. Do not reuse the provisioner key in the
-workload. The runtime key must not have Webhook Endpoints Write.
+Customer admission requires separately scoped live provisioner and runtime
+identities. A sandbox credential is never promoted or reused for ledger `1`.
 
 The official `stripe/stripe` provider manages the synthetic product, USD price,
 and the single webhook endpoint. The endpoint subscribes only to
