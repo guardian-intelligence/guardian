@@ -89,7 +89,10 @@ uses an `Unconfined` seccomp profile, as does the TigerBeetle server
 container. The exception is limited to the digest-pinned payments container;
 it remains non-root, drops every capability, cannot elevate privileges, has a
 read-only root filesystem, and is confined by the payment network policy.
-The Envoy sidecar remains on `RuntimeDefault`.
+The Envoy sidecar remains on `RuntimeDefault`. Pod Security admission for
+`tenant-guardian-prod` enforces `privileged` so that this declared exception
+can be admitted, while retaining `baseline` audit and warning labels; every
+container continues to declare its own least-privilege security context.
 
 ## Continuous checkout proof
 

@@ -15,4 +15,5 @@ resources:
   - monitoring-agents-kubernetes-resources.yaml
   - monitoring-agents-vmagent-resources.yaml
   - monitoring-shortterm-vmselect-resources.yaml
+  - tenant-guardian-prod-namespace-pod-security.yaml
   - tenant-guardian-namespace-pod-security.yaml
