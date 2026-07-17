@@ -1,5 +1,15 @@
-import { expect, it } from "@effect/vitest";
-import { Deferred, Effect, Fiber, Layer, Option, Redacted, Schema, TestClock } from "effect";
+import { expect, it } from "vitest";
+import {
+  Deferred,
+  Effect,
+  Fiber,
+  Layer,
+  Option,
+  Redacted,
+  Schema,
+  TestClock,
+  TestContext,
+} from "effect";
 import {
   AttemptId,
   BranchRef,
@@ -64,138 +74,143 @@ const actionHarness = () => {
   };
 };
 
-it.effect("retries only retryable pack acquisition failures", () =>
-  Effect.gen(function* () {
-    let attempts = 0;
-    const metadata = new PackMetadata({
-      bytes: Schema.decodeUnknownSync(PackBytes)(4),
-      cacheHit: false,
-      sha: SHA,
-    });
-    const host = Layer.succeed(CheckoutHost, {
-      acquirePack: () =>
-        Effect.suspend(() => {
-          attempts += 1;
-          return attempts < 3
-            ? Effect.fail(new HostUnavailable({ detail: "not ready", status: 503 }))
-            : Effect.succeed(metadata);
+it("retries only retryable pack acquisition failures", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      let attempts = 0;
+      const metadata = new PackMetadata({
+        bytes: Schema.decodeUnknownSync(PackBytes)(4),
+        cacheHit: false,
+        sha: SHA,
+      });
+      const host = Layer.succeed(CheckoutHost, {
+        acquirePack: () =>
+          Effect.suspend(() => {
+            attempts += 1;
+            return attempts < 3
+              ? Effect.fail(new HostUnavailable({ detail: "not ready", status: 503 }))
+              : Effect.succeed(metadata);
+          }),
+      });
+      const prepared = new TargetPrepared({
+        preexistingHead: Option.none(),
+        runtime: {
+          attemptId: Schema.decodeUnknownSync(AttemptId)("attempt-1"),
+          checkoutPath: "/internal/sandbox/v1/github-checkout",
+          checkoutToken: Redacted.make("runner-token"),
+          endpoint: new URL("http://127.0.0.1/bundle"),
+          executionId: Schema.decodeUnknownSync(ExecutionId)("execution-1"),
+          githubToken: Option.none(),
+          workspace: "/tmp",
+        },
+        spec: new CheckoutSpec({
+          clean: "PreserveBuildState",
+          expectedCommit: SHA,
+          fetchDepth: 1,
+          ref: new BranchRef({ name: "main", value: "refs/heads/main" }),
+          repository: Schema.decodeUnknownSync(RepositoryFullName)(
+            "guardian-intelligence/guardian",
+          ),
+          requestedPath: Schema.decodeUnknownSync(CheckoutPathInput)("."),
         }),
-    });
-    const prepared = new TargetPrepared({
-      preexistingHead: Option.none(),
-      runtime: {
-        attemptId: Schema.decodeUnknownSync(AttemptId)("attempt-1"),
-        checkoutPath: "/internal/sandbox/v1/github-checkout",
-        checkoutToken: Redacted.make("runner-token"),
-        endpoint: new URL("http://127.0.0.1/bundle"),
-        executionId: Schema.decodeUnknownSync(ExecutionId)("execution-1"),
-        githubToken: Option.none(),
-        workspace: "/tmp",
-      },
-      spec: new CheckoutSpec({
-        clean: "PreserveBuildState",
-        expectedCommit: SHA,
-        fetchDepth: 1,
-        ref: new BranchRef({ name: "main", value: "refs/heads/main" }),
-        repository: Schema.decodeUnknownSync(RepositoryFullName)("guardian-intelligence/guardian"),
-        requestedPath: Schema.decodeUnknownSync(CheckoutPathInput)("."),
-      }),
-      target: Schema.decodeUnknownSync(CanonicalCheckoutTarget)("/tmp"),
-    });
-    const tempPack: TempPack = {
-      directory: "/tmp",
-      path: Schema.decodeUnknownSync(TempPackPath)("/tmp/checkout.pack"),
-    };
-    const fiber = yield* acquirePack(prepared, tempPack).pipe(Effect.provide(host), Effect.fork);
-    yield* TestClock.adjust("5 seconds");
-    const ready = yield* Fiber.join(fiber);
-    expect(ready.metadata).toEqual(metadata);
-    expect(attempts).toBe(3);
-  }),
-);
+        target: Schema.decodeUnknownSync(CanonicalCheckoutTarget)("/tmp"),
+      });
+      const tempPack: TempPack = {
+        directory: "/tmp",
+        path: Schema.decodeUnknownSync(TempPackPath)("/tmp/checkout.pack"),
+      };
+      const fiber = yield* acquirePack(prepared, tempPack).pipe(Effect.provide(host), Effect.fork);
+      yield* TestClock.adjust("5 seconds");
+      const ready = yield* Fiber.join(fiber);
+      expect(ready.metadata).toEqual(metadata);
+      expect(attempts).toBe(3);
+    }).pipe(Effect.provide(TestContext.TestContext)),
+  ));
 
-it.scoped("removes the temporary pack when checkout is interrupted", () =>
-  Effect.gen(function* () {
-    const entered = yield* Deferred.make<void>();
-    const harness = actionHarness();
-    const host = Layer.succeed(CheckoutHost, {
-      acquirePack: () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never)),
-    });
-    const tempPack: TempPack = {
-      directory: "/tmp/postflight-interruption-test",
-      path: Schema.decodeUnknownSync(TempPackPath)(
-        "/tmp/postflight-interruption-test/checkout.pack",
-      ),
-    };
-    let removed = false;
-    const workspace = Layer.succeed(Workspace, {
-      createTempPack: Effect.succeed(tempPack),
-      prepareTarget: () =>
-        Effect.succeed({
-          target: Schema.decodeUnknownSync(CanonicalCheckoutTarget)("/tmp"),
-          workspace: Schema.decodeUnknownSync(CanonicalWorkspace)("/tmp"),
-        }),
-      removeTempPack: () => Effect.sync(() => void (removed = true)),
-    });
-    const git = Layer.succeed(Git, {
-      checkoutDetached: () => Effect.void,
-      configureOrigin: () => Effect.void,
-      configureSafeDirectory: () => Effect.void,
-      head: () => Effect.succeed(SHA),
-      importPack: () => Effect.void,
-      initialize: () => Effect.void,
-      inspectHead: () => Effect.succeed(Option.none()),
-      markShallow: () => Effect.void,
-      resetTrackedFiles: () => Effect.void,
-      updateCheckoutRef: () => Effect.void,
-    });
-    const fiber = yield* runCheckout(new Received({ inputs: input(), runtime: runtime() })).pipe(
-      Effect.provide(Layer.mergeAll(harness.layer, host, workspace, git)),
-      Effect.fork,
-    );
-    yield* Deferred.await(entered);
-    yield* Fiber.interrupt(fiber);
-    expect(removed).toBe(true);
-    expect(harness.outputs).toEqual([]);
-  }),
-);
+it("removes the temporary pack when checkout is interrupted", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>();
+      const harness = actionHarness();
+      const host = Layer.succeed(CheckoutHost, {
+        acquirePack: () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never)),
+      });
+      const tempPack: TempPack = {
+        directory: "/tmp/postflight-interruption-test",
+        path: Schema.decodeUnknownSync(TempPackPath)(
+          "/tmp/postflight-interruption-test/checkout.pack",
+        ),
+      };
+      let removed = false;
+      const workspace = Layer.succeed(Workspace, {
+        createTempPack: Effect.succeed(tempPack),
+        prepareTarget: () =>
+          Effect.succeed({
+            target: Schema.decodeUnknownSync(CanonicalCheckoutTarget)("/tmp"),
+            workspace: Schema.decodeUnknownSync(CanonicalWorkspace)("/tmp"),
+          }),
+        removeTempPack: () => Effect.sync(() => void (removed = true)),
+      });
+      const git = Layer.succeed(Git, {
+        checkoutDetached: () => Effect.void,
+        configureOrigin: () => Effect.void,
+        configureSafeDirectory: () => Effect.void,
+        head: () => Effect.succeed(SHA),
+        importPack: () => Effect.void,
+        initialize: () => Effect.void,
+        inspectHead: () => Effect.succeed(Option.none()),
+        markShallow: () => Effect.void,
+        resetTrackedFiles: () => Effect.void,
+        updateCheckoutRef: () => Effect.void,
+      });
+      const fiber = yield* runCheckout(new Received({ inputs: input(), runtime: runtime() })).pipe(
+        Effect.provide(Layer.mergeAll(harness.layer, host, workspace, git)),
+        Effect.fork,
+      );
+      yield* Deferred.await(entered);
+      yield* Fiber.interrupt(fiber);
+      expect(removed).toBe(true);
+      expect(harness.outputs).toEqual([]);
+    }).pipe(Effect.scoped, Effect.provide(TestContext.TestContext)),
+  ));
 
-it.effect("never publishes outputs after a pack failure", () =>
-  Effect.gen(function* () {
-    const harness = actionHarness();
-    const host = Layer.succeed(CheckoutHost, {
-      acquirePack: () => Effect.fail(new HostRejected({ status: 422 })),
-    });
-    const tempPack: TempPack = {
-      directory: "/tmp/postflight-failure-test",
-      path: Schema.decodeUnknownSync(TempPackPath)("/tmp/postflight-failure-test/checkout.pack"),
-    };
-    const workspace = Layer.succeed(Workspace, {
-      createTempPack: Effect.succeed(tempPack),
-      prepareTarget: () =>
-        Effect.succeed({
-          target: Schema.decodeUnknownSync(CanonicalCheckoutTarget)("/tmp"),
-          workspace: Schema.decodeUnknownSync(CanonicalWorkspace)("/tmp"),
-        }),
-      removeTempPack: () => Effect.void,
-    });
-    const git = Layer.succeed(Git, {
-      checkoutDetached: () => Effect.void,
-      configureOrigin: () => Effect.void,
-      configureSafeDirectory: () => Effect.void,
-      head: () => Effect.succeed(SHA),
-      importPack: () => Effect.void,
-      initialize: () => Effect.void,
-      inspectHead: () => Effect.succeed(Option.none()),
-      markShallow: () => Effect.void,
-      resetTrackedFiles: () => Effect.void,
-      updateCheckoutRef: () => Effect.void,
-    });
-    const result = yield* runCheckout(new Received({ inputs: input(), runtime: runtime() })).pipe(
-      Effect.provide(Layer.mergeAll(harness.layer, host, workspace, git)),
-      Effect.either,
-    );
-    expect(result._tag).toBe("Left");
-    expect(harness.outputs).toEqual([]);
-  }),
-);
+it("never publishes outputs after a pack failure", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const harness = actionHarness();
+      const host = Layer.succeed(CheckoutHost, {
+        acquirePack: () => Effect.fail(new HostRejected({ status: 422 })),
+      });
+      const tempPack: TempPack = {
+        directory: "/tmp/postflight-failure-test",
+        path: Schema.decodeUnknownSync(TempPackPath)("/tmp/postflight-failure-test/checkout.pack"),
+      };
+      const workspace = Layer.succeed(Workspace, {
+        createTempPack: Effect.succeed(tempPack),
+        prepareTarget: () =>
+          Effect.succeed({
+            target: Schema.decodeUnknownSync(CanonicalCheckoutTarget)("/tmp"),
+            workspace: Schema.decodeUnknownSync(CanonicalWorkspace)("/tmp"),
+          }),
+        removeTempPack: () => Effect.void,
+      });
+      const git = Layer.succeed(Git, {
+        checkoutDetached: () => Effect.void,
+        configureOrigin: () => Effect.void,
+        configureSafeDirectory: () => Effect.void,
+        head: () => Effect.succeed(SHA),
+        importPack: () => Effect.void,
+        initialize: () => Effect.void,
+        inspectHead: () => Effect.succeed(Option.none()),
+        markShallow: () => Effect.void,
+        resetTrackedFiles: () => Effect.void,
+        updateCheckoutRef: () => Effect.void,
+      });
+      const result = yield* runCheckout(new Received({ inputs: input(), runtime: runtime() })).pipe(
+        Effect.provide(Layer.mergeAll(harness.layer, host, workspace, git)),
+        Effect.either,
+      );
+      expect(result._tag).toBe("Left");
+      expect(harness.outputs).toEqual([]);
+    }).pipe(Effect.provide(TestContext.TestContext)),
+  ));
