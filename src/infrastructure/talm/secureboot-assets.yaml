@@ -24,6 +24,12 @@ spec:
     url: https://factory.talos.dev/image/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5/v1.13.6/metal-amd64-secureboot.iso
     sha256: f62fd4d79492b3a95bc9e99a71adcfe33353ebb9175ee93785393e537dfb6574
     sizeBytes: 366260224
+  enrollment:
+    provider: siderolabs
+    includeWellKnownUefiCertificates: false
+    pkAuthSha256: 376357e93a6ec32db748c2eb45656f13c9ee6951af7ab83ee1a8153ae5052f7b # gitleaks:allow -- public enrollment artifact digest
+    kekAuthSha256: d3475be84bbdc6adfe98b5abd26b8ac90fbe4ee227a537713f8c964ae393922e # gitleaks:allow -- public enrollment artifact digest
+    dbAuthSha256: 8fa031d0ecebdab3e4469c7fe95b9b1ed1a390af966e0159093659ecb4d6dff1 # gitleaks:allow -- public enrollment artifact digest
   signatures:
     secureBootCertificateSha256: 1ae5d7c8ac1032eaf0d2c1a2e6a952517342e8db6b5354d32791a9c960a9472e
     pcrSigningPublicSpkiSha256: 9c42059148e157a030f5edc51bd4967a2a3b1bc64cdd48941a3ece3c3fdc032f

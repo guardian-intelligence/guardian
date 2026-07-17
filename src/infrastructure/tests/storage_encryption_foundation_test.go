@@ -66,9 +66,20 @@ func TestCozystackNativeLinstorEncryptionConformance(t *testing.T) {
 	}
 
 	for _, name := range []string{"synthetic-local", "synthetic-local-retain", "synthetic-replicated", "synthetic-replicated-retain"} {
-		labels := mapValue(mapValue(classes[name]["metadata"])["labels"])
+		sc := classes[name]
+		if sc == nil {
+			t.Fatalf("%s missing StorageClass %s", path, name)
+		}
+		labels := mapValue(mapValue(sc["metadata"])["labels"])
 		if got := stringValue(labels["guardian.dev/data-classification"]); got != "synthetic" {
 			t.Errorf("StorageClass %s classification label = %q, want synthetic", name, got)
+		}
+		if got := stringValue(labels["guardian.dev/encryption-at-rest"]); got != "talos-luks2-raw-volume" {
+			t.Errorf("StorageClass %s encryption label = %q, want talos-luks2-raw-volume", name, got)
+		}
+		parameters := mapValue(sc["parameters"])
+		if got := stringValue(parameters["linstor.csi.linbit.com/encryption"]); got != "false" {
+			t.Errorf("StorageClass %s LINSTOR encryption = %q, want false", name, got)
 		}
 	}
 
@@ -130,6 +141,11 @@ func TestTalosSecureBootVolumeEncryptionConformance(t *testing.T) {
 	assertNestedString(t, assets, "be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5", "spec", "schematic", "id")
 	assertNestedString(t, assets, "sha256:c3df0484a3f5f3bb68c77d04998fb977a9df6a5268b93bafdb23f668e6f4ed84", "spec", "installer", "digest")
 	assertNestedString(t, assets, "f62fd4d79492b3a95bc9e99a71adcfe33353ebb9175ee93785393e537dfb6574", "spec", "iso", "sha256")
+	assertNestedString(t, assets, "siderolabs", "spec", "enrollment", "provider")
+	assertNestedBool(t, assets, false, "spec", "enrollment", "includeWellKnownUefiCertificates")
+	assertNestedString(t, assets, "376357e93a6ec32db748c2eb45656f13c9ee6951af7ab83ee1a8153ae5052f7b", "spec", "enrollment", "pkAuthSha256")
+	assertNestedString(t, assets, "d3475be84bbdc6adfe98b5abd26b8ac90fbe4ee227a537713f8c964ae393922e", "spec", "enrollment", "kekAuthSha256")
+	assertNestedString(t, assets, "8fa031d0ecebdab3e4469c7fe95b9b1ed1a390af966e0159093659ecb4d6dff1", "spec", "enrollment", "dbAuthSha256")
 	assertNestedString(t, assets, "1ae5d7c8ac1032eaf0d2c1a2e6a952517342e8db6b5354d32791a9c960a9472e", "spec", "signatures", "secureBootCertificateSha256")
 	assertNestedString(t, assets, "9c42059148e157a030f5edc51bd4967a2a3b1bc64cdd48941a3ece3c3fdc032f", "spec", "signatures", "pcrSigningPublicSpkiSha256")
 

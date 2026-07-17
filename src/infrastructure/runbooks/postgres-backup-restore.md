@@ -86,7 +86,7 @@ kubectl apply -f - <<EOF
 apiVersion: apps.cozystack.io/v1alpha1
 kind: Postgres
 metadata: {name: postflight-controlplane-drill, namespace: tenant-root}
-spec: {replicas: 1, size: 10Gi, storageClass: replicated, external: false, version: v18}
+spec: {replicas: 1, size: 10Gi, storageClass: replicated-encrypted, external: false, version: v18}
 ---
 apiVersion: backups.cozystack.io/v1alpha1
 kind: RestoreJob

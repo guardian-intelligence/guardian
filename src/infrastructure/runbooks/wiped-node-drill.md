@@ -1,145 +1,280 @@
-# Wiped-node drill
+# Encrypted node replacement drill
 
-The remaining M1 drill: prove one node can be lost entirely — ungraceful,
-with etcd-member and Node-object debris left behind — and return to the
-cluster from Git + custody alone, without breaching the 60-second
-public-edge budget.
+This drill replaces one `guardian-mgmt` node while preserving etcd quorum,
+public-edge service, and two current copies of every replicated LINSTOR
+volume. The replacement boots the factory Sidero-signed Talos UKI and
+provisions new TPM-backed LUKS2 containers for `STATE`, `EPHEMERAL`, and
+`r-guardian-data`.
 
-Disk encryption does NOT ride this drill: nodeID-keyed LUKS2 was
-attempted on ash-earth 2026-07-09 and Talos refused it — the Latitude
-boards ship a degenerate SMBIOS machine UUID
-(`00000000-0000-0000-0000-905a…`) and the nodeID key handler fails its
-entropy check, leaving STATE unprovisionable. The boards DO carry TPM
-2.0 (`tpm_tis MSFT0101`, and Talos logs "TPM is ready for disk
-encryption operations"), so encryption at rest returns as TPM keying
-with the M4 SecureBoot work.
+Run exactly one node at a time. Do not begin another replacement until the
+node, etcd, CNI, LINSTOR, OpenBao, and public edge have all passed their
+recovery gates.
 
-One node at a time, by explicit IP, healthiest-cluster-first. Wait for
-full recovery (node Ready, DRBD resynced, public edge steady) before the
-next node. A node whose loss breaches 60s of public-edge disruption is
-load-bearing — stop and fix before continuing.
+Node map:
 
-Node map: ash-earth `206.223.228.101`, ash-wind `45.250.254.119`,
-ash-water `206.223.228.87`. VLAN: .11/.12/.13.
+| Node | Public IP | Private IP |
+|---|---|---|
+| `ash-earth` | `206.223.228.101` | `10.8.0.11` |
+| `ash-wind` | `45.250.254.119` | `10.8.0.12` |
+| `ash-water` | `206.223.228.87` | `10.8.0.13` |
 
 ## Preconditions
 
-- Cluster green (`tools/ops/cluster-watch --status`), etcd 3/3, no
-  degraded DRBD resources (filter to the DRBD layer — STORAGE-only
-  resources report `Created`, never `UpToDate`, and are not replicas):
-  `kubectl get nodes; kubectl -n cozy-linstor exec deploy/linstor-controller -- linstor resource list | grep DRBD | grep -v UpToDate | head`
-- Custody restored (`aspect infra custody --action restore --yes`), mint
-  root assembled per cert-rotation.md step 1.
-- Fresh etcd snapshot exists in R2 (belt and suspenders):
-  `kubectl -n tenant-root create job --from=cronjob/talos-backup pre-drill-$(date +%s)` — wait for Complete.
-- Public-edge watch running in a second terminal, timestamps on:
-  `while :; do printf '%s %s\n' "$(date -u +%FT%T.%3NZ)" "$(curl -so /dev/null -w '%{http_code}' -m 2 https://guardianintelligence.org/)"; sleep 1; done | grep --line-buffered -v ' 200'`
-  (prints only non-200 seconds; the disruption window is the span of that output).
-- For a PLANNED node outage, drain the edge first: measured 2026-07-09,
-  Cloudflare kept sending ~25-30% of requests to a dead origin for
-  ~4m16s before evicting it — the declared 60s monitor plus edge
-  propagation is nowhere near the 60s budget, and a wiped node
-  blackholes SYNs (no RST) so every routed request stalls the full
-  origin-connect timeout. Disable the node's origin in
-  `bootstrap/guardian-mgmt-dns` (origin `enabled = false`), apply, and
-  verify zero non-200s for 60s before wiping; revert after the node
-  rejoins. The unplanned-loss exposure this reveals is a standing
-  finding, not something this runbook can fix.
+1. Restore custody to tmpfs and assemble the Talm mint root described in
+   `cert-rotation.md`.
+2. Confirm all nodes and Flux resources are Ready:
 
-## Execute (per node)
+   ```sh
+   kubectl get nodes
+   tools/ops/cluster-watch --status
+   ```
+
+3. Confirm etcd has three voting members.
+4. Confirm all three LINSTOR satellites are Online, all storage pools are
+   `Ok`, and no DRBD replica is below `UpToDate`:
+
+   ```sh
+   kubectl -n cozy-linstor exec deploy/linstor-controller -- linstor node list
+   kubectl -n cozy-linstor exec deploy/linstor-controller -- linstor storage-pool list
+   kubectl -n cozy-linstor exec deploy/linstor-controller -- linstor resource list --faulty
+   ```
+
+5. Export the target node's LINSTOR assignments. A replicated assignment may
+   be removed only after both other nodes report `UpToDate` for that resource.
+   Record local `LUKS,STORAGE` assignments separately because they are rebuilt
+   empty rather than resynchronized.
+6. Run a fresh `talos-backup` Job and require it to complete.
+7. Disable the target origin in the declared
+   `bootstrap/guardian-mgmt-dns` pool, apply only that pool, and wait until
+   Cloudflare reports the two remaining origins healthy. Run
+   `aspect infra edge-health` before the node operation.
+
+## Remove the node
+
+Set these variables for the one target:
 
 ```sh
 MINT=/dev/shm/guardian-talm-mint
-IP=<node public IP>   # explicit, one node only
-NODE=<k8s node name>
-
-# 1. Ungraceful wipe — this IS the drill: no drain, no etcd leave.
-#    --wipe-mode all zeroes the whole system disk INCLUDING the boot
-#    partition: despite --reboot, the machine comes back with nothing
-#    to boot and goes dark (no ping, no apid) — drilled 2026-07-09 on
-#    ash-earth. Recovery is a Latitude reinstall (step 1b), which is
-#    also what a real dead-node replacement looks like, so the drill
-#    exercises the true path.
-talosctl --talosconfig "$MINT/talosconfig" -e "$IP" -n "$IP" \
-  reset --graceful=false --reboot --wipe-mode all
-
-# 1b. Latitude reinstall to get a bootable substrate back (server IDs:
-#     ash-earth sv_vAPXaMxKM5epz, ash-water sv_8mop5gZo8Njxv, ash-wind
-#     sv_nPRbajqEB5koM). The outcome is bimodal (see
-#     latitude-reimage-behavior notes): either a real Ubuntu install
-#     (ssh:22 opens) or the machine lands netbooted in Talos
-#     maintenance mode (insecure apid :50000). Poll BOTH and branch:
-#     maintenance mode → straight to step 3 with
-#     --skip-resource-validation; Ubuntu → kexec boot-to-talos per
-#     cold-boot-bootstrap.md, then step 3.
-TOK=$(cat /dev/shm/guardian-custody/latitude.token)
-curl -s -X POST -H "Authorization: $TOK" -H "Content-Type: application/json" \
-  "https://api.latitude.sh/servers/<server-id>/reinstall" \
-  -d '{"data":{"type":"reinstalls","attributes":{"operating_system":"ubuntu_24_04_x64_lts","hostname":"<node>","ssh_keys":["ssh_W9EKa3oBbaRoB"]}}}'
-
-# 2. Debris cleanup from a surviving node (the dead member blocks the
-#    rejoin if left):
-talosctl --talosconfig "$MINT/talosconfig" -e <other-IP> -n <other-IP> etcd members
-talosctl --talosconfig "$MINT/talosconfig" -e <other-IP> -n <other-IP> \
-  etcd remove-member <hex-id-of-wiped-node>
-kubectl delete node "$NODE"
-
-# 3. Reapply config from Git + custody (node is in maintenance mode,
-#    Talos API insecure on :50000). The overlay side-patch is NOT
-#    optional: the node file alone renders the discovery-fallback
-#    hostname (talos-<id>) and the wrong link MTU — the overlay carries
-#    the hand-maintained hostname/VLAN/MTU truth.
-talm apply --talosconfig "$MINT/talosconfig" \
-  -f "$MINT/nodes/<node>.yaml" -f "$MINT/nodes/<node>-overlay.yaml" \
-  --insecure
-
-# 4. Watch install + join (volume provisioning is where a config
-#    regression bites — a failed STATE shows `phase: failed` with the
-#    reason in errorMessage):
-talosctl --talosconfig "$MINT/talosconfig" -e "$IP" -n "$IP" get volumestatus
-kubectl wait node "$NODE" --for=condition=Ready --timeout=15m
-
-# 5. Recreate the data volume group — the Latitude reinstall wipes BOTH
-#    NVMe disks, and Piraeus only runs its first-time device prep when
-#    the pool is absent from the LINSTOR db; a wiped node's pool row
-#    survives (state Ok, 0 KiB) so the operator never re-preps. The
-#    node's DRBD resources sit in `Unknown` with lvcreate errors in the
-#    satellite log until the VG exists again. Device by serial from
-#    base/storage/linstor-data-pools.yaml — NEVER by /dev/nvmeXnY name:
-kubectl -n cozy-linstor exec linstor-satellite.<node>-<hash> -c linstor-satellite -- \
-  sh -c 'pvcreate /dev/disk/by-id/<data-disk-serial-id> && vgcreate data /dev/disk/by-id/<data-disk-serial-id>'
-#    LINSTOR's DeviceManager retry loop picks the VG up within a minute
-#    and starts recreating LVs + resync unprompted.
-
-# 6. Re-place the OpenBao static seal key — every node is key-bearing
-#    and the key lived on the wiped disk, so the node's OpenBao replica
-#    crashloops in verify-static-seal-key (Init:Error) until the key is
-#    back. Follow "Seal-key placement" in cold-boot-bootstrap.md
-#    (debug-pod + streamed exec from the custody bundle; only the
-#    fingerprint is ever printed), then delete the replica pod so it
-#    remounts and rejoins raft.
-
-# 7. Wait for replicated storage to heal before calling it done:
-kubectl -n cozy-linstor exec deploy/linstor-controller -- linstor resource list | grep DRBD | grep -v UpToDate
+NODE=<ash-earth|ash-wind|ash-water>
+PUBLIC_IP=<node-public-ip>
+PRIVATE_IP=<node-private-ip>
 ```
 
-Record in the drill log below: wall-clock outage window of the node,
-public-edge disruption seconds (from the edge watch), anything manual
-that was not in this runbook (that is a finding — fix the runbook or the
-system).
+Drain workload traffic, remove the etcd member cleanly, and remove the old
+Kubernetes Node object:
 
-## Latitude gotchas
+```sh
+kubectl cordon "$NODE"
+kubectl drain "$NODE" --ignore-daemonsets --delete-emptydir-data
 
-- A reimage via Latitude instead of `reset --reboot` may land in Talos
-  maintenance mode rather than Ubuntu, and the API can lie about
-  deploy_config — check actual state, not the panel (see
-  latitude-reimage-behavior memory/runbook notes).
-- `install.diskSelector` pins by serial; the discovery comments in each
-  node file carry both NVMe serials. A replaced drive means updating the
-  serial BEFORE step 3.
+talosctl --talosconfig "$MINT/talosconfig" \
+  --endpoints <healthy-public-ip> --nodes "$PRIVATE_IP" etcd leave
 
-## Drill log
+kubectl delete node "$NODE"
+```
 
-| Date | Node | Outage window | Public-edge disruption | Findings |
-|------|------|---------------|------------------------|----------|
-| 2026-07-09 | ash-earth | 01:16Z → ~04:10Z (extended by two findings below) | 4m16s of ~25-30% requests stalling >10s (01:16:28–01:20:44) | (1) `--wipe-mode all` zeroes the boot partition — machine goes dark, recovery is Latitude reinstall (~10min to maintenance mode); (2) CF LB took ~4.5min to evict the dead origin vs 60s declared — pre-drain origins for planned work; (3) nodeID LUKS2 refused: degenerate SMBIOS UUID fails entropy check (STATE `phase: failed`) — recovered by reapplying unencrypted config with `-m reboot`; TPM 2.0 present for the future path. etcd remove-member + Node delete + rejoin from Git+custody worked exactly as written. |
+If the node is already dark, remove its member ID from a healthy Talos
+endpoint with `talosctl etcd remove-member <id>`, then delete the Kubernetes
+Node object.
+
+## Wipe and reprovision
+
+Read the parent device of `r-guardian-data` before resetting:
+
+```sh
+DATA_DISK=$(
+  talosctl --talosconfig "$MINT/talosconfig" \
+    --endpoints "$PUBLIC_IP" --nodes "$PRIVATE_IP" \
+    get volumestatus r-guardian-data -o json |
+    jq -r .spec.parentLocation
+)
+```
+
+Wipe only the encrypted system partitions and the data disk. EFI and META
+remain intact, and the UEFI PK/KEK/`db` enrollment is firmware state rather
+than disk state:
+
+```sh
+talosctl --talosconfig "$MINT/talosconfig" \
+  --endpoints "$PUBLIC_IP" --nodes "$PRIVATE_IP" \
+  reset --graceful=false \
+  --system-labels-to-wipe STATE,EPHEMERAL \
+  --user-disks-to-wipe "$DATA_DISK" \
+  --reboot --wait=false
+```
+
+Apply the complete node configuration in maintenance mode. The overlay is
+required because it owns the node identity, VLAN, MTU, and raw-volume disk
+serial:
+
+```sh
+talm apply --root "$MINT" --talosconfig "$MINT/talosconfig" \
+  --endpoints "$PUBLIC_IP" --nodes "$PUBLIC_IP" \
+  -f "$MINT/nodes/$NODE.yaml" \
+  -f "$MINT/nodes/$NODE-overlay.yaml" \
+  --insecure --skip-resource-validation
+```
+
+The pinned installer is
+`factory.talos.dev/metal-installer-secureboot/...`; a non-Secure-Boot
+installer is not an acceptable substitute.
+
+Wait for the authenticated Talos API and Kubernetes Node readiness. Confirm
+that `securitystate` reports Secure Boot, UKI boot, and module-signature
+enforcement before proceeding:
+
+```sh
+talosctl --talosconfig "$MINT/talosconfig" \
+  --endpoints <healthy-public-ip> --nodes "$PRIVATE_IP" \
+  get securitystate -o yaml
+
+kubectl wait node "$NODE" --for=condition=Ready --timeout=15m
+```
+
+## Reconcile the Kube-OVN node gateway
+
+The node annotation, `ovn0` interface, and OVN northbound logical switch
+port must carry the same MAC and join-subnet IP. This gate is especially
+important when the OVN database has also been restored.
+
+```sh
+NODE_MAC=$(kubectl get node "$NODE" \
+  -o jsonpath='{.metadata.annotations.ovn\.kubernetes\.io/mac_address}')
+NODE_JOIN_IP=$(kubectl get node "$NODE" \
+  -o jsonpath='{.metadata.annotations.ovn\.kubernetes\.io/ip_address}')
+
+OVN_CENTRAL=$(
+  kubectl -n cozy-kubeovn get pod -l app=ovn-central -o name |
+  while read -r pod; do
+    if kubectl -n cozy-kubeovn exec "$pod" -- \
+      ovn-appctl -t /var/run/ovn/ovnnb_db.ctl \
+      cluster/status OVN_Northbound 2>/dev/null |
+      grep -q '^Role: leader$'; then
+      echo "${pod#pod/}"
+      break
+    fi
+  done
+)
+
+kubectl -n cozy-kubeovn exec "$OVN_CENTRAL" -- \
+  ovn-nbctl --no-leader-only \
+  --db=unix:/var/run/ovn/ovnnb_db.sock \
+  lsp-get-addresses "node-$NODE"
+```
+
+If that address differs from `"$NODE_MAC $NODE_JOIN_IP"`, reconcile the
+dynamic OVN port to the Kubernetes Node identity:
+
+```sh
+kubectl -n cozy-kubeovn exec "$OVN_CENTRAL" -- \
+  ovn-nbctl --no-leader-only \
+  --db=unix:/var/run/ovn/ovnnb_db.sock \
+  lsp-set-addresses "node-$NODE" "$NODE_MAC $NODE_JOIN_IP"
+```
+
+Wait for the southbound port binding to report the same address, then prove
+DNS and TCP 443 egress from a pod scheduled on the replacement node before
+allowing database recovery or backup jobs to proceed.
+
+## Recreate the encrypted LINSTOR pool
+
+The LINSTOR controller still records the node's old assignments and storage
+pool, while the underlying LVM metadata was wiped. Reconcile in this order:
+
+1. Require two `UpToDate` copies on the surviving nodes for every replicated
+   resource in the saved inventory.
+2. Toggle each target-node DRBD assignment to diskless:
+
+   ```sh
+   kubectl -n cozy-linstor exec deploy/linstor-controller -- \
+     linstor resource toggle-disk "$NODE" <resource> --diskless
+   ```
+
+3. Delete the target-node assignments for saved local
+   `LUKS,STORAGE` resources. Their application-level recovery procedure owns
+   their contents.
+4. Delete the empty stale pool:
+
+   ```sh
+   kubectl -n cozy-linstor exec deploy/linstor-controller -- \
+     linstor storage-pool delete --quiet "$NODE" data
+   ```
+
+5. Wait for
+   `LinstorSatelliteConfiguration/guardian-data-pool-$NODE` to recreate the
+   `data` volume group and pool on
+   `/dev/mapper/luks2-r-guardian-data`. Do not run `pvcreate` or `vgcreate`
+   against a raw NVMe device.
+6. Reattach DRBD assignments in bounded batches and require every batch to
+   become `UpToDate` before starting the next:
+
+   ```sh
+   kubectl -n cozy-linstor exec deploy/linstor-controller -- \
+     linstor resource toggle-disk "$NODE" <resource> --storage-pool data
+   ```
+
+7. Recreate each local resource assignment on the new pool:
+
+   ```sh
+   kubectl -n cozy-linstor exec deploy/linstor-controller -- \
+     linstor resource create "$NODE" <resource> --storage-pool data
+   ```
+
+Use the Piraeus custom-resource troubleshooting procedure if the operator
+does not recreate the pool:
+<https://cozystack.io/docs/v1.5/operations/troubleshooting/piraeus-custom-resources/>.
+
+## Restore the OpenBao member
+
+OpenBao uses two node-local `local-encrypted-retain` PVCs per ordinal. The
+replacement volumes are empty by design; Raft restores current data from the
+other members.
+
+Place the custodied static seal key using the two-phase debug-pod procedure
+in `cold-boot-bootstrap.md`. Verify only its fingerprint and length, delete
+the debugger pod, and wait for the OpenBao member to become Ready and
+unsealed.
+
+Run:
+
+```sh
+aspect infra openbao-drill --kubeconfig <kubeconfig> \
+  --kube-api-server <reachable-api-server>
+```
+
+## Recovery gates
+
+The node is recovered only when all of the following pass:
+
+- `securitystate`: Secure Boot, UKI, and module-signature enforcement are
+  true.
+- `STATE`, `EPHEMERAL`, and `r-guardian-data`: `ready`, LUKS2, TPM key,
+  PCR 7, signed PCR 11 policy; the latter two are locked to `STATE`.
+- Kubernetes Node Ready and API `/readyz` successful.
+- Kube-OVN CNI and pinger Ready on the node; the Node annotation,
+  `ovn0`, northbound logical switch port, and southbound port binding agree,
+  and pod DNS plus TCP 443 egress succeeds.
+- LINSTOR satellite Online, pool `Ok`, no faulty resources, all restored
+  DRBD assignments `UpToDate`.
+- OpenBao drill passes one shared three-member cluster ID.
+- Flux Kustomizations and HelmReleases Ready.
+- Cloudflare origin re-enabled through the declared pool and reported
+  healthy.
+- `aspect infra edge-health` passes.
+
+## Replacement hardware or a missing EFI partition
+
+Use the exact ISO and hashes in
+`src/infrastructure/talm/secureboot-assets.yaml`. Put a new board in UEFI
+Setup mode, boot the pinned factory Sidero Secure Boot ISO, and let it enroll
+the declared PK/KEK/`db` set. Firmware that already has the declared keys
+does not need re-enrollment.
+
+The managed trust database excludes well-known Microsoft certificates, so a
+provider's Microsoft-signed stock or rescue image is not a recovery
+dependency. Deliver the pinned Sidero-signed ISO through KVM virtual media or
+a minimal iPXE transport. iPXE is transport only; UEFI still verifies the
+Sidero-signed UKI.
+
+Never change firmware or Secure Boot enrollment on two nodes at once. Any
+PCR 7 change can prevent TPM unseal and must be handled as loss of that node.

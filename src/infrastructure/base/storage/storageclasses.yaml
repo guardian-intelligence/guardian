@@ -80,10 +80,12 @@ metadata:
   name: synthetic-local
   labels:
     guardian.dev/data-classification: synthetic
+    guardian.dev/encryption-at-rest: talos-luks2-raw-volume
 provisioner: linstor.csi.linbit.com
 parameters:
   linstor.csi.linbit.com/storagePool: data
   linstor.csi.linbit.com/layerList: storage
+  linstor.csi.linbit.com/encryption: "false"
   linstor.csi.linbit.com/allowRemoteVolumeAccess: "false"
 volumeBindingMode: WaitForFirstConsumer
 allowVolumeExpansion: true
@@ -95,10 +97,12 @@ metadata:
   name: synthetic-local-retain
   labels:
     guardian.dev/data-classification: synthetic
+    guardian.dev/encryption-at-rest: talos-luks2-raw-volume
 provisioner: linstor.csi.linbit.com
 parameters:
   linstor.csi.linbit.com/storagePool: data
   linstor.csi.linbit.com/layerList: storage
+  linstor.csi.linbit.com/encryption: "false"
   linstor.csi.linbit.com/allowRemoteVolumeAccess: "false"
 volumeBindingMode: WaitForFirstConsumer
 allowVolumeExpansion: true
@@ -110,10 +114,12 @@ metadata:
   name: synthetic-replicated
   labels:
     guardian.dev/data-classification: synthetic
+    guardian.dev/encryption-at-rest: talos-luks2-raw-volume
 provisioner: linstor.csi.linbit.com
 parameters:
   linstor.csi.linbit.com/storagePool: data
   linstor.csi.linbit.com/layerList: drbd storage
+  linstor.csi.linbit.com/encryption: "false"
   linstor.csi.linbit.com/autoPlace: "3"
   property.linstor.csi.linbit.com/DrbdOptions/auto-quorum: suspend-io
   property.linstor.csi.linbit.com/DrbdOptions/Resource/on-no-data-accessible: suspend-io
@@ -129,10 +135,12 @@ metadata:
   name: synthetic-replicated-retain
   labels:
     guardian.dev/data-classification: synthetic
+    guardian.dev/encryption-at-rest: talos-luks2-raw-volume
 provisioner: linstor.csi.linbit.com
 parameters:
   linstor.csi.linbit.com/storagePool: data
   linstor.csi.linbit.com/layerList: drbd storage
+  linstor.csi.linbit.com/encryption: "false"
   linstor.csi.linbit.com/autoPlace: "3"
   property.linstor.csi.linbit.com/DrbdOptions/auto-quorum: suspend-io
   property.linstor.csi.linbit.com/DrbdOptions/Resource/on-no-data-accessible: suspend-io
