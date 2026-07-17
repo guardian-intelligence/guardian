@@ -7,6 +7,7 @@ filegroup(
     srcs = glob(
         [
             "Chart.yaml",
+            "secureboot-assets.yaml",
             "values.yaml",
             "nodes/*.yaml",
             "templates/**",

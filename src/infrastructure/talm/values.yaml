@@ -82,7 +82,10 @@ floatingIP: "10.8.0.250"
 # The Latitude Virtual Network (VID 2140) rides the private NIC enp1s0f0; the
 # per-node overlay brings it up with a VLANConfig.
 vipLink: "enp1s0f0.2140"
-image: "ghcr.io/cozystack/cozystack/talos:v1.13.6@sha256:fdf10bfe196d1b02f267b336b9ae11ea7dadbe8106a90d80c8346adb19acdf4a"
+# Talos Image Factory schematic be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5
+# contains the nine system extensions shipped by the Cozystack Talos profile.
+# The Secure Boot ISO and installer share Sidero's UKI and PCR signing lineage.
+image: "factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6@sha256:c3df0484a3f5f3bb68c77d04998fb977a9df6a5268b93bafdb23f668e6f4ed84"
 
 # Dark-uplink bundle mirror, OFF in steady state. Enabling it is a
 # bootstrap-only compromise entered and exited via PRs (pre-drill flip on,
@@ -103,6 +106,7 @@ darkBundleMirror:
     - cr.fluentbit.io
     - docker-registry3.mariadb.com
     - docker.io
+    - factory.talos.dev
     - ghcr.io
     - oci.external-secrets.io
     - quay.io

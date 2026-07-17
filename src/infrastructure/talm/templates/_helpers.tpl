@@ -195,7 +195,7 @@ machine:
         archive = 0
       }
       devices {
-         global_filter = [ "r|^/dev/drbd.*|", "r|^/dev/dm-.*|", "r|^/dev/zd.*|", "r|^/dev/loop.*|" ]
+         global_filter = [ "a|^/dev/mapper/luks2-r-guardian-data$|", "r|^/dev/drbd.*|", "r|^/dev/dm-.*|", "r|^/dev/zd.*|", "r|^/dev/loop.*|" ]
       }
   {{- with .Values.extraMachineFiles }}
   {{- toYaml . | nindent 2 }}
@@ -477,6 +477,33 @@ apiVersion: v1alpha1
 kind: WatchdogTimerConfig
 device: /dev/watchdog0
 timeout: 1m
+---
+apiVersion: v1alpha1
+kind: VolumeConfig
+name: STATE
+encryption:
+  provider: luks2
+  keys:
+    - slot: 0
+      tpm:
+        checkSecurebootStatusOnEnroll: true
+        options:
+          pcrs:
+            - 7
+---
+apiVersion: v1alpha1
+kind: VolumeConfig
+name: EPHEMERAL
+encryption:
+  provider: luks2
+  keys:
+    - slot: 0
+      tpm:
+        checkSecurebootStatusOnEnroll: true
+        options:
+          pcrs:
+            - 7
+      lockToState: true
 ---
 # Host ingress firewall: default-deny. Talos rate-limits ICMP itself but
 # does NOT exempt pod-sourced traffic (proven live: pod→host SYNs arrive
