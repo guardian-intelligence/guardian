@@ -172,3 +172,25 @@ spec:
         - ports:
             - port: "8080"
               protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: guardian-analytics-otel-from-payments
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: guardian-analytics
+      k8s:app.kubernetes.io/name: otel-collector
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-guardian-prod
+            k8s:app.kubernetes.io/component: payments
+      toPorts:
+        - ports:
+            - port: "4317"
+              protocol: TCP

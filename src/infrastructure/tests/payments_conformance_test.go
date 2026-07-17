@@ -102,6 +102,18 @@ func TestPaymentsRolloutAndCanaryConformance(t *testing.T) {
 	if strings.Contains(observability, `outcome="invalid_signature"}[5m]) > 0`) {
 		t.Fatal("one invalid webhook signature must remain below the alert threshold")
 	}
+
+	networkPath := runfilePath(root + "networkpolicy.yaml")
+	network := readText(t, networkPath)
+	for _, want := range []string{
+		"name: guardian-analytics-otel-from-payments",
+		"k8s:io.kubernetes.pod.namespace: guardian-analytics",
+		"k8s:app.kubernetes.io/name: otel-collector",
+		"k8s:io.kubernetes.pod.namespace: tenant-guardian-prod",
+		"k8s:app.kubernetes.io/component: payments",
+	} {
+		assertTextContains(t, network, want, networkPath)
+	}
 }
 
 func TestPaymentsTraceAndFluxConformance(t *testing.T) {
