@@ -2,7 +2,8 @@
 # Build the Postflight golden runner image and template it into ZFS as
 # <pool>/postflight/images/<image-id>@golden. The image carries everything a
 # runner VM needs — Ubuntu 24.04, the pinned actions/runner tree, Node.js,
-# git, guestd — and zero customer bytes; workload always arrives later, via
+# git, a C toolchain, cryptsetup, guestd — and zero customer bytes; workload
+# always arrives later, via
 # the workspace zvol. hostd clones one root disk per slot from @golden and
 # destroys it with the VM.
 #
@@ -251,7 +252,11 @@ chmod 0755 "${mnt}/usr/sbin/policy-rc.d"
 
 log "installing packages"
 in_chroot apt-get -q update
-in_chroot apt-get -q -y --no-install-recommends install git
+# build-essential + pkg-config: cargo/cgo/node-gyp all need a C toolchain to
+# link; GitHub-hosted images carry one, so jobs assume it. cryptsetup-bin:
+# guestd opens the workspace volume with LUKS2 on the confidential tier.
+in_chroot apt-get -q -y --no-install-recommends install \
+  git build-essential pkg-config cryptsetup-bin
 
 log "installing actions/runner ${RUNNER_VERSION}"
 in_chroot useradd --uid 1001 --user-group --create-home --shell /bin/bash runner
