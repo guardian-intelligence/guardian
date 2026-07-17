@@ -135,12 +135,22 @@ func readPidFile(stateDir string) (int, error) {
 }
 
 func cmdlineMatches(pid int, argv []string) bool {
-	raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline")
-	if err != nil {
+	raw, ok := procCmdline(pid)
+	if !ok {
 		return false
 	}
 	want := []byte(strings.Join(argv, "\x00") + "\x00")
 	return bytes.Equal(raw, want)
+}
+
+// procCmdline reads a pid's argv; ok is false when the process is gone or
+// unreadable.
+func procCmdline(pid int) ([]byte, bool) {
+	raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline")
+	if err != nil {
+		return nil, false
+	}
+	return raw, true
 }
 
 // writeFileAtomic lands content under path via a same-directory rename (a
