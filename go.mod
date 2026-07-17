@@ -9,7 +9,7 @@ require (
 	connectrpc.com/otelconnect v0.9.0
 	github.com/ClickHouse/clickhouse-go/v2 v2.47.0
 	github.com/bazelbuild/rules_go v0.61.1
-	github.com/google/cel-go v0.28.0
+	github.com/google/cel-go v0.29.2
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/openbao/openbao/api/v2 v2.6.0
 	go.opentelemetry.io/otel v1.44.0
