@@ -35,7 +35,7 @@
 
 # --- bootstrap artifacts (not pod images) ---
 # Talos installer (machine.install.image)
-ghcr.io/cozystack/cozystack/talos:v1.13.6@sha256:fdf10bfe196d1b02f267b336b9ae11ea7dadbe8106a90d80c8346adb19acdf4a
+factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6@sha256:c3df0484a3f5f3bb68c77d04998fb977a9df6a5268b93bafdb23f668e6f4ed84
 # Cozystack installer Helm chart (OCI)
 ghcr.io/cozystack/cozystack/cozy-installer:1.5.2@sha256:6fab302b90f3a49fb4e5783d14bd696b1308b0f216b7de606e99e021535f1eac
 # Cozystack platform packages Flux artifact (pulled by source-controller, NOT containerd)

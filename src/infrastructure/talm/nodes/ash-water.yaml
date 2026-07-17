@@ -31,7 +31,7 @@ machine:
     #    size: 960 GB
     diskSelector:
       serial: 362510FE3218
-    image: ghcr.io/cozystack/cozystack/talos:v1.13.0@sha256:c2c092ad742e8bdd4af6366c586d95bdf7f73cee6eef8318fb9da6d466f37044
+    image: factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6@sha256:c3df0484a3f5f3bb68c77d04998fb977a9df6a5268b93bafdb23f668e6f4ed84
   files:
     - content: |
         [plugins]
@@ -48,7 +48,7 @@ machine:
           archive = 0
         }
         devices {
-           global_filter = [ "r|^/dev/drbd.*|", "r|^/dev/dm-.*|", "r|^/dev/zd.*|", "r|^/dev/loop.*|" ]
+           global_filter = [ "a|^/dev/mapper/luks2-r-guardian-data$|", "r|^/dev/drbd.*|", "r|^/dev/dm-.*|", "r|^/dev/zd.*|", "r|^/dev/loop.*|" ]
         }
       permissions: 0o644
       path: /etc/lvm/lvm.conf
@@ -168,6 +168,33 @@ apiVersion: v1alpha1
 kind: WatchdogTimerConfig
 device: /dev/watchdog0
 timeout: 1m
+---
+apiVersion: v1alpha1
+kind: VolumeConfig
+name: STATE
+encryption:
+  provider: luks2
+  keys:
+    - slot: 0
+      tpm:
+        checkSecurebootStatusOnEnroll: true
+        options:
+          pcrs:
+            - 7
+---
+apiVersion: v1alpha1
+kind: VolumeConfig
+name: EPHEMERAL
+encryption:
+  provider: luks2
+  keys:
+    - slot: 0
+      tpm:
+        checkSecurebootStatusOnEnroll: true
+        options:
+          pcrs:
+            - 7
+      lockToState: true
 ---
 # Host ingress firewall: default-deny. Talos rate-limits ICMP itself but
 # does NOT exempt pod-sourced traffic (proven live: pod→host SYNs arrive

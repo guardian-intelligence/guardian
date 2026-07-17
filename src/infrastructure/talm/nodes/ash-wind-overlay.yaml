@@ -17,3 +17,22 @@ vlanID: 2140
 mtu: 1420
 addresses:
   - address: 10.8.0.12/24
+---
+apiVersion: v1alpha1
+kind: RawVolumeConfig
+name: guardian-data
+provisioning:
+  diskSelector:
+    match: 'disk.serial == "352410A4E0A6"'
+  minSize: 900GB
+  grow: true
+encryption:
+  provider: luks2
+  keys:
+    - slot: 0
+      tpm:
+        checkSecurebootStatusOnEnroll: true
+        options:
+          pcrs:
+            - 7
+      lockToState: true

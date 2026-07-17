@@ -56,13 +56,9 @@ func TestCozystackNativeLinstorEncryptionConformance(t *testing.T) {
 	}
 
 	for _, name := range []string{"local", "local-retain", "openbao-local", "replicated", "replicated-retain"} {
-		if classes[name] == nil {
-			t.Errorf("storage migration must retain StorageClass %s", name)
+		if classes[name] != nil {
+			t.Errorf("unencrypted StorageClass %s must not remain after migration", name)
 		}
-	}
-	legacyAnnotations := mapValue(mapValue(classes["replicated"]["metadata"])["annotations"])
-	if got := stringValue(legacyAnnotations["storageclass.kubernetes.io/is-default-class"]); got != "false" {
-		t.Errorf("replicated default annotation = %q, want false", got)
 	}
 	encryptedAnnotations := mapValue(mapValue(classes["replicated-encrypted"]["metadata"])["annotations"])
 	if got := stringValue(encryptedAnnotations["storageclass.kubernetes.io/is-default-class"]); got != "true" {
@@ -122,5 +118,67 @@ func TestCozystackNativeLinstorEncryptionConformance(t *testing.T) {
 	electric := readText(t, runfilePath(electricPath))
 	if got := strings.Count(electric, "electric-shape-log-encrypted"); got != 2 {
 		t.Fatalf("%s must declare and mount electric-shape-log-encrypted exactly twice, got %d", electricPath, got)
+	}
+}
+
+func TestTalosSecureBootVolumeEncryptionConformance(t *testing.T) {
+	const installer = "factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6@sha256:c3df0484a3f5f3bb68c77d04998fb977a9df6a5268b93bafdb23f668e6f4ed84"
+
+	assetsPath := runfilePath("src/infrastructure/talm/secureboot-assets.yaml")
+	assets := singleYAMLDoc(t, assetsPath)
+	assertNestedString(t, assets, "TalosSecureBootAssets", "kind")
+	assertNestedString(t, assets, "be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5", "spec", "schematic", "id")
+	assertNestedString(t, assets, "sha256:c3df0484a3f5f3bb68c77d04998fb977a9df6a5268b93bafdb23f668e6f4ed84", "spec", "installer", "digest")
+	assertNestedString(t, assets, "f62fd4d79492b3a95bc9e99a71adcfe33353ebb9175ee93785393e537dfb6574", "spec", "iso", "sha256")
+	assertNestedString(t, assets, "1ae5d7c8ac1032eaf0d2c1a2e6a952517342e8db6b5354d32791a9c960a9472e", "spec", "signatures", "secureBootCertificateSha256")
+	assertNestedString(t, assets, "9c42059148e157a030f5edc51bd4967a2a3b1bc64cdd48941a3ece3c3fdc032f", "spec", "signatures", "pcrSigningPublicSpkiSha256")
+
+	valuesPath := runfilePath("src/infrastructure/talm/values.yaml")
+	values := readText(t, valuesPath)
+	assertTextContains(t, values, `image: "`+installer+`"`, valuesPath)
+	assertTextContains(t, values, "- factory.talos.dev", valuesPath)
+
+	templatePath := runfilePath("src/infrastructure/talm/templates/_helpers.tpl")
+	template := readText(t, templatePath)
+	for _, want := range []string{
+		`"a|^/dev/mapper/luks2-r-guardian-data$|"`,
+		"name: STATE",
+		"name: EPHEMERAL",
+		"provider: luks2",
+		"checkSecurebootStatusOnEnroll: true",
+		"lockToState: true",
+	} {
+		assertTextContains(t, template, want, templatePath)
+	}
+
+	poolsPath := runfilePath("src/infrastructure/base/storage/linstor-data-pools.yaml")
+	pools := readText(t, poolsPath)
+	if got := strings.Count(pools, "/dev/mapper/luks2-r-guardian-data"); got != 3 {
+		t.Fatalf("%s must source all three LINSTOR pools from the Talos encrypted mapper, got %d", poolsPath, got)
+	}
+
+	nodes := map[string]string{
+		"ash-earth": "362510FD7C47",
+		"ash-wind":  "352410A4E0A6",
+		"ash-water": "362510FE3204",
+	}
+	for node, serial := range nodes {
+		overlayPath := "src/infrastructure/talm/nodes/" + node + "-overlay.yaml"
+		overlay := readText(t, runfilePath(overlayPath))
+		for _, want := range []string{
+			"name: guardian-data",
+			`match: 'disk.serial == "` + serial + `"'`,
+			"provider: luks2",
+			"checkSecurebootStatusOnEnroll: true",
+			"lockToState: true",
+		} {
+			assertTextContains(t, overlay, want, overlayPath)
+		}
+
+		nodePath := "src/infrastructure/talm/nodes/" + node + ".yaml"
+		nodeConfig := readText(t, runfilePath(nodePath))
+		assertTextContains(t, nodeConfig, "image: "+installer, nodePath)
+		assertTextContains(t, nodeConfig, "name: STATE", nodePath)
+		assertTextContains(t, nodeConfig, "name: EPHEMERAL", nodePath)
 	}
 }

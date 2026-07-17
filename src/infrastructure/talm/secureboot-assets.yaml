@@ -1,0 +1,29 @@
+apiVersion: guardian.dev/v1alpha1
+kind: TalosSecureBootAssets
+metadata:
+  name: guardian-mgmt
+spec:
+  architecture: amd64
+  talosVersion: v1.13.6
+  schematic:
+    id: be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5
+    systemExtensions:
+      - siderolabs/amd-ucode
+      - siderolabs/amdgpu
+      - siderolabs/bnx2-bnx2x
+      - siderolabs/intel-ice-firmware
+      - siderolabs/i915
+      - siderolabs/intel-ucode
+      - siderolabs/qlogic-firmware
+      - siderolabs/drbd
+      - siderolabs/zfs
+  installer:
+    image: factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6
+    digest: sha256:c3df0484a3f5f3bb68c77d04998fb977a9df6a5268b93bafdb23f668e6f4ed84
+  iso:
+    url: https://factory.talos.dev/image/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5/v1.13.6/metal-amd64-secureboot.iso
+    sha256: f62fd4d79492b3a95bc9e99a71adcfe33353ebb9175ee93785393e537dfb6574
+    sizeBytes: 366260224
+  signatures:
+    secureBootCertificateSha256: 1ae5d7c8ac1032eaf0d2c1a2e6a952517342e8db6b5354d32791a9c960a9472e
+    pcrSigningPublicSpkiSha256: 9c42059148e157a030f5edc51bd4967a2a3b1bc64cdd48941a3ece3c3fdc032f

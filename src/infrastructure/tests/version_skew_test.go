@@ -83,7 +83,7 @@ func TestTalosctlTracksInstallerImage(t *testing.T) {
 	talosctl := extractMinor(t, toolLockRunfile,
 		`siderolabs/talos/releases/download/v(\d+)\.(\d+)\.\d+/talosctl`)
 	installer := extractMinor(t, talmValuesRunfile,
-		`ghcr\.io/cozystack/cozystack/talos:v(\d+)\.(\d+)\.\d+@sha256:`)
+		`image: "[^"]*:v(\d+)\.(\d+)\.\d+@sha256:`)
 
 	if talosctl.major != installer.major {
 		t.Fatalf("talosctl pin v%s and Talos installer image v%s differ in major version", talosctl, installer)
@@ -174,7 +174,7 @@ func TestTalmChartTalosVersionAgreesWithInstallerImage(t *testing.T) {
 	chart := extractMinor(t, talmChartRunfile,
 		`talosVersion: "v(\d+)\.(\d+)"`)
 	installer := extractMinor(t, talmValuesRunfile,
-		`ghcr\.io/cozystack/cozystack/talos:v(\d+)\.(\d+)\.\d+@sha256:`)
+		`image: "[^"]*:v(\d+)\.(\d+)\.\d+@sha256:`)
 
 	if chart != installer {
 		t.Fatalf("talm Chart.yaml talosVersion v%s and the Talos installer image v%s state different substrate versions: they move together in the Talos upgrade runbook", chart, installer)
