@@ -139,7 +139,8 @@ webhook would put a new SPOF in the pod-create path for a guarantee the
 release boundary already carries).
 
 The signing key's lifecycle (created in Transit, recovered as data through
-raft-snapshot DR, never rotated casually) lives in `docs/openbao-design.md`.
+custody-held keyring-export DR, never rotated casually) lives in
+`docs/openbao-design.md`.
 
 ## Where this goes (the inversion)
 

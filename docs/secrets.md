@@ -46,9 +46,10 @@ a narrow, explicit, named read grant for the agent.
    client secrets, GitHub App private keys, platform-admin passwords. This
    is privilege-escalating and customer-integration material wholesale, so
    the store sits in the no-read class as a unit: written through
-   namespace-scoped write-only tokens, read only by the consumer's
-   ExternalSecret, and recovered as data (raft snapshot), never re-entered
-   by hand.
+   namespace-scoped write-only tokens and read only by the consumer's
+   ExternalSecret. Recovery rebuilds OpenBao from Git and reimports the
+   custody/bootstrap sources through the scoped importer; durable Transit
+   keyrings restore from their custody-held `transit/backup` exports.
 
 Compromising the cluster yields tier 4 — revocable, re-issuable material.
 Tiers 1–3 are reachable only through the operator vault, so the cluster can
@@ -76,8 +77,11 @@ never leak the root of trust that rebuilds it.
   config: Kubernetes auth, the `kv`/`transit` mounts, and every policy/role.
   The temporary privileged token is revoked by OpenBao afterward. No root
   token or recovery keys exist.
-- OpenBao's *data* is never re-entered at recovery: a raft snapshot restore
-  brings back every secret, Transit key, and KV version in one step.
+- OpenBao recovery is deterministic reinitialization. The repo-owned importer
+  replays custody/bootstrap values without exposing them on argv, restores the
+  `guardian-images` Transit key from its custody-held keyring export, and then
+  scoped writer identities relay in-cluster-generated values that remain in
+  Orphan/Retain Kubernetes Secrets.
 
 ## Runtime topology
 
@@ -128,27 +132,28 @@ never leak the root of trust that rebuilds it.
 - OpenBao config is **O(1) in the number of integrations**: a new secret in
   an existing namespace never touches OpenBao config. Only *structural*
   changes (a new consumer namespace, a new mount or auth method) edit the
-  self-init block and re-initialize — a raft-snapshot restore plus
-  re-initialization with the new config, zero consumer downtime because
-  materialized Secrets are Orphan/Retain.
+  self-init block and re-initialize, then run the custody importer and scoped
+  re-relays. Materialized Secrets use Orphan/Retain, so consumers continue
+  running while OpenBao is rebuilt.
 - Steady state holds **zero standing admin**: no credential exists that can
   read or write across namespaces.
 
 ## Disaster recovery
 
-- A cluster CronJob continuously ships OpenBao raft snapshots to R2.
-  Snapshots are barrier-encrypted — unreadable without the seal key in the
-  custody bundle — so R2 holds ciphertext while the operator vault holds the
-  keys, and neither alone recovers anything.
-- **Recovery is restore, not re-entry.** The full chain from nothing:
+- OpenBao raft snapshots are not an automated or load-bearing recovery path.
+  No snapshot CronJob or standing OpenBao administrator exists. The static
+  seal key and exported durable Transit keyrings live in offline custody;
+  reimportable integration values live in the custody/bootstrap inputs.
+- **Recovery is rebuild plus scoped reimport.** The full chain from nothing:
   password manager → Cloudflare login → pull the custody repository and
   bootstrap set from R2 (or from the offline pull, if R2 is unreachable) →
   passphrase opens the bundle → Talos genesis and seal key bring the cluster
   up per `cold-boot-bootstrap.md` → the LINSTOR passphrase Secret unlocks
-  encrypted storage → the raft snapshot restore brings back every integration
-  secret.
-- Regular drills decrypt the bootstrap set and exercise the restore path;
-  the drill is the proof the estate recovers.
+  encrypted storage → OpenBao self-init recreates structure → the importer
+  restores integration values and Transit keyrings → scoped writers relay
+  in-cluster-generated values.
+- Regular drills decrypt the bootstrap set, run the reinit/import path, and
+  verify old Transit ciphertext/signatures against the restored key.
 - Accepted worst case, stated up front: offline pulls lost *and* R2
   unreachable *and* cluster dead means rebuild and re-issue every
   integration secret from the owning consoles. Days of outage, no leaked
@@ -170,8 +175,9 @@ never leak the root of trust that rebuilds it.
 - **Values never touch argv or shell history**: writes go through
   `bao kv put ... key=-` (stdin) or `@file.json` under `umask 077`; bootstrap
   set writes pipe plaintext straight into `age`.
-- **DR cannot forget a secret**: snapshots capture the whole estate by
-  construction — there is no per-secret manifest to keep in sync.
+- **DR inventory is executable**: the importer owns the fixed custody input
+  plan, fails closed on missing members, and emits the finite list of scoped
+  re-relays that must be read back before recovery is complete.
 
 ## OpenBao vs a plain Kubernetes Secret
 
@@ -181,9 +187,10 @@ The dividing line is **where the value's source of truth lives** — ask
 - **OpenBao (via ExternalSecret)** — the source of truth is *outside* the
   cluster and the cluster cannot regenerate it: third-party API keys, OAuth
   client secrets, GitHub App private keys, anything a human or agent obtained
-  from an external system. These must survive DR, so they live in OpenBao,
-  recover through snapshot restore, and distribute through the scoped,
-  audited, server-side-enforced permission model.
+  from an external system. These must survive DR, so their reimport sources
+  live in custody/bootstrap storage and their runtime copies live in OpenBao,
+  distributed through the scoped, audited, server-side-enforced permission
+  model.
 - **Operator-generated Kubernetes Secret** — the credential is *born inside*
   the cluster and both ends live here: CNPG role passwords
   (e.g. `postgres-keycloak-app`), ClickHouse users, inter-service tokens

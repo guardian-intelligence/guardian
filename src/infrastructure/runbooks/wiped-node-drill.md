@@ -29,8 +29,9 @@ seconds.
 - The custody repository verifies, its latest snapshot contains
   `linstor/master-passphrase`, and the bundle is restored on tmpfs for the
   duration of the ceremony.
-- Fresh etcd and OpenBao snapshots exist in R2 and have passed their restore
-  preflight.
+- A fresh etcd snapshot exists in R2. The custody snapshot contains the
+  OpenBao static seal key, every required importer input, and each durable
+  Transit `transit/backup` export; the reinit/import drill has passed.
 - The signed Talos recovery ISO matches the SHA-256 recorded in
   `talm/image-factory-schematic.yaml`; its EFI bootloader and UKI signatures
   validate against the enrolled Sidero Labs certificate.
