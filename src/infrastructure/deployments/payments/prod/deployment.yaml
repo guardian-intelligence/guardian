@@ -155,6 +155,8 @@ spec:
               drop:
                 - ALL
             readOnlyRootFilesystem: true
+            seccompProfile:
+              type: Unconfined
         - name: tigerbeetle-transport
           image: docker.io/envoyproxy/envoy:distroless-v1.36.4@sha256:2f71c5666a5209d6ee1ec519b17877ccb6d17be4d00e34de10f11e020ea8707a
           imagePullPolicy: IfNotPresent
