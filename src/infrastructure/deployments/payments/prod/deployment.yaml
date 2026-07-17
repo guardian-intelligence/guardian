@@ -169,12 +169,14 @@ spec:
             - warning
           readinessProbe:
             tcpSocket:
+              host: 127.0.0.1
               port: 13000
             periodSeconds: 10
             timeoutSeconds: 2
             failureThreshold: 3
           livenessProbe:
             tcpSocket:
+              host: 127.0.0.1
               port: 13000
             periodSeconds: 20
             timeoutSeconds: 2
