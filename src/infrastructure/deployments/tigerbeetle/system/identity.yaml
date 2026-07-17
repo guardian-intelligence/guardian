@@ -1,0 +1,76 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tigerbeetle
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: tigerbeetle
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: ledger
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tigerbeetle-data-0
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: tigerbeetle
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: ledger
+    guardian.dev/data-classification: production
+    guardian.dev/replica: "0"
+  annotations:
+    kustomize.toolkit.fluxcd.io/prune: disabled
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: local-encrypted-retain
+  volumeMode: Filesystem
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tigerbeetle-data-1
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: tigerbeetle
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: ledger
+    guardian.dev/data-classification: production
+    guardian.dev/replica: "1"
+  annotations:
+    kustomize.toolkit.fluxcd.io/prune: disabled
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: local-encrypted-retain
+  volumeMode: Filesystem
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tigerbeetle-data-2
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: tigerbeetle
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: ledger
+    guardian.dev/data-classification: production
+    guardian.dev/replica: "2"
+  annotations:
+    kustomize.toolkit.fluxcd.io/prune: disabled
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: local-encrypted-retain
+  volumeMode: Filesystem

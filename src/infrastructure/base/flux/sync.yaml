@@ -362,8 +362,8 @@ spec:
   timeout: 10m
 ---
 # TigerBeetle's financial ledger is isolated in its own reconciliation slice
-# so its one-time data-file bootstrap and steady-state replica health can be
-# gated without coupling unrelated Guardian system services to ledger state.
+# so replica health is gated without coupling unrelated Guardian system
+# services to ledger state.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -387,17 +387,17 @@ spec:
   wait: false
   timeout: 30m
   healthChecks:
-    - apiVersion: batch/v1
-      kind: Job
-      name: tigerbeetle-format-0
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: tigerbeetle-0
       namespace: tenant-guardian
-    - apiVersion: batch/v1
-      kind: Job
-      name: tigerbeetle-format-1
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: tigerbeetle-1
       namespace: tenant-guardian
-    - apiVersion: batch/v1
-      kind: Job
-      name: tigerbeetle-format-2
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: tigerbeetle-2
       namespace: tenant-guardian
 ---
 # Flagger — progressive-delivery controller, no consumers yet (Canary CRs are

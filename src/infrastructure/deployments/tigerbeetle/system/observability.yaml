@@ -1,0 +1,115 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: tigerbeetle-metrics
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: tigerbeetle
+    app.kubernetes.io/component: metrics
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: ledger
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: tigerbeetle
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: ledger
+    guardian.dev/phase: runtime
+  ports:
+    - name: metrics
+      port: 9102
+      targetPort: metrics
+      protocol: TCP
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: tigerbeetle
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: tigerbeetle
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: ledger
+spec:
+  namespaceSelector:
+    matchNames:
+      - tenant-guardian
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tigerbeetle
+      app.kubernetes.io/component: metrics
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 5s
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: tigerbeetle
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: tigerbeetle
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: ledger
+spec:
+  groups:
+    - name: tigerbeetle.rules
+      interval: 15s
+      rules:
+        - alert: TigerBeetleReplicaScrapeDown
+          expr: up{namespace="tenant-guardian",job="tigerbeetle-metrics"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "TigerBeetle replica metrics are unreachable"
+            description: "VictoriaMetrics cannot scrape one TigerBeetle replica's local StatsD bridge."
+        - alert: TigerBeetleReplicaCountDegraded
+          expr: (sum(up{namespace="tenant-guardian",job="tigerbeetle-metrics"}) or vector(0)) < 3
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Fewer than three TigerBeetle replicas are observable"
+            description: "The fixed three-replica ledger topology is degraded. Do not disrupt another node."
+        - alert: TigerBeetleReplicaAbnormal
+          expr: tb_replica_status != 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "TigerBeetle replica is not in normal state"
+            description: "Replica {{ $labels.replica }} in cluster {{ $labels.cluster }} reports status {{ $value }}."
+        - alert: TigerBeetleReplicaSyncing
+          expr: tb_replica_sync_stage != 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "TigerBeetle replica state sync is taking too long"
+            description: "Replica {{ $labels.replica }} in cluster {{ $labels.cluster }} has remained in sync stage {{ $value }}."
+        - alert: TigerBeetleMetricsAbsent
+          expr: absent(tb_replica_status)
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "TigerBeetle status metrics are absent"
+            description: "No replica status metric is reaching VictoriaMetrics."
+        - alert: TigerBeetleProcessRestarted
+          expr: increase(kube_pod_container_status_restarts_total{namespace="tenant-guardian",pod=~"tigerbeetle-[0-2]-.*",container="tigerbeetle"}[15m]) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: "TigerBeetle process restarted"
+            description: "Replica pod {{ $labels.pod }} restarted. Confirm quorum, replica status, and state sync before any node operation."
+        - alert: TigerBeetleVolumeSpaceLow
+          expr: kubelet_volume_stats_available_bytes{namespace="tenant-guardian",persistentvolumeclaim=~"tigerbeetle-data-[0-2]"} / kubelet_volume_stats_capacity_bytes{namespace="tenant-guardian",persistentvolumeclaim=~"tigerbeetle-data-[0-2]"} < 0.20
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "TigerBeetle volume has less than 20% free space"
+            description: "PVC {{ $labels.persistentvolumeclaim }} is below the ledger recovery reserve."

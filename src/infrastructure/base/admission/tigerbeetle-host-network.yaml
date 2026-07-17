@@ -25,6 +25,11 @@ spec:
       expression: >-
         object.spec.containers.map(container, container.image) +
         (has(object.spec.initContainers) ? object.spec.initContainers.map(container, container.image) : [])
+    - name: isRuntime
+      expression: >-
+        variables.isTigerBeetle &&
+        'guardian.dev/phase' in object.metadata.labels &&
+        object.metadata.labels['guardian.dev/phase'] == 'runtime'
     - name: allowedImages
       expression: >-
         [
@@ -46,22 +51,54 @@ spec:
           object.spec.serviceAccountName == 'tigerbeetle' &&
           has(object.spec.automountServiceAccountToken) &&
           object.spec.automountServiceAccountToken == false &&
+          has(object.spec.hostNetwork) &&
+          object.spec.hostNetwork == true &&
           (!has(object.spec.hostPID) || object.spec.hostPID == false) &&
           (!has(object.spec.hostIPC) || object.spec.hostIPC == false) &&
+          has(object.spec.nodeSelector) &&
+          'kubernetes.io/hostname' in object.spec.nodeSelector &&
+          ['ash-earth', 'ash-wind', 'ash-water'].exists(node,
+            node == object.spec.nodeSelector['kubernetes.io/hostname']
+          ) &&
           variables.images.size() > 0 &&
           variables.images.all(image, image in variables.allowedImages) &&
           variables.images.exists(image, image.startsWith('ghcr.io/tigerbeetle/tigerbeetle:0.17.9@sha256:')) &&
-          (!has(object.spec.volumes) || object.spec.volumes.all(volume, !has(volume.hostPath))) &&
+          (!variables.isRuntime ||
+            (
+              variables.images.size() == 2 &&
+              variables.images.filter(image,
+                image.startsWith('ghcr.io/tigerbeetle/tigerbeetle:0.17.9@sha256:')
+              ).size() == 1 &&
+              variables.images.filter(image,
+                image.startsWith('quay.io/prometheus/statsd-exporter:v0.30.0@sha256:')
+              ).size() == 1
+            )
+          ) &&
+          (!has(object.spec.volumes) || object.spec.volumes.all(volume,
+            has(volume.persistentVolumeClaim) &&
+            ['tigerbeetle-data-0', 'tigerbeetle-data-1', 'tigerbeetle-data-2'].exists(claim,
+              claim == volume.persistentVolumeClaim.claimName
+            )
+          )) &&
           object.spec.containers.all(container,
             has(container.securityContext) &&
             (!has(container.securityContext.privileged) || container.securityContext.privileged == false) &&
             has(container.securityContext.allowPrivilegeEscalation) &&
             container.securityContext.allowPrivilegeEscalation == false &&
             has(container.securityContext.readOnlyRootFilesystem) &&
-            container.securityContext.readOnlyRootFilesystem == true
+            container.securityContext.readOnlyRootFilesystem == true &&
+            has(container.securityContext.capabilities) &&
+            has(container.securityContext.capabilities.drop) &&
+            container.securityContext.capabilities.drop.exists(capability, capability == 'ALL') &&
+            (!has(container.securityContext.capabilities.add) ||
+              container.securityContext.capabilities.add.all(capability, capability == 'IPC_LOCK')
+            ) &&
+            (!has(container.ports) || container.ports.all(port, !has(port.hostPort))) &&
+            (!has(container.command) || container.command.all(argument, argument != 'format')) &&
+            (!has(container.args) || container.args.all(argument, argument != 'format'))
           )
         )
-      message: TigerBeetle pods must use the dedicated identity, pinned runtime images, no host paths, and hardened containers
+      message: TigerBeetle pods must use the dedicated identity, fixed nodes, pinned runtime images, retained ledger volumes, and hardened non-formatting containers
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

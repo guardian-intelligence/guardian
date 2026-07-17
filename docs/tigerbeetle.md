@@ -22,21 +22,22 @@ The cluster contract is:
 | 1 | `ash-wind` | `10.8.0.12:3000` | `local-encrypted-retain` |
 | 2 | `ash-water` | `10.8.0.13:3000` | `local-encrypted-retain` |
 
-The ordered address list, a random nonzero 128-bit cluster ID, replica count
-`3`, and replica indices become immutable when the data files are formatted.
-The cluster ID is an identifier, not a secret, and belongs in the declared
-deployment after initialization.
+The data files use cluster ID
+`49532141921164377784457307205600684260`, replica count `3`, and replica
+indices `0`, `1`, and `2`. The cluster ID is an identifier, not a secret.
+All three replicas run TigerBeetle `0.17.9` from the same digest-pinned OCI
+index.
 
-Each replica has required node affinity and required pod anti-affinity. It
-runs on the host network so the address list is independent of pod identity.
-The three data files use separate node-local LINSTOR allocations. They do not
-use `replicated-encrypted`: DRBD underneath TigerBeetle would duplicate
-replication, multiply writes, and collapse the distinction between
-TigerBeetle's independent replica files.
+Each replica is a separate `Recreate` Deployment with a required node
+selector and a dedicated retained PVC. It runs on the host network so the
+address list is independent of pod identity. The three data files use separate
+node-local LINSTOR allocations. They do not use `replicated-encrypted`: DRBD
+underneath TigerBeetle would duplicate replication, multiply writes, and
+collapse the distinction between TigerBeetle's independent replica files.
 
 The volume remains encrypted twice: the LINSTOR allocation uses its native
 LUKS layer and the backing NVMe pool is inside Talos LUKS2. `Retain` prevents
-StatefulSet or PVC deletion from deleting the financial data file.
+workload or PVC deletion from deleting the financial data file.
 
 ## Failure contract
 
@@ -81,12 +82,15 @@ TCP port 3000. The gateway:
 Cilium policy defaults product callers to deny and permits only approved
 workloads to reach the gateway. The host-network replicas are not assumed to
 be covered by pod-level Cilium policy. A ValidatingAdmissionPolicy confines
-host networking to the exact digest-pinned TigerBeetle and gateway workloads,
-their dedicated service accounts, and their namespace. Talos host firewall
-policy permits replica TCP port 3000 only between the three declared
-management-node identities; the host-network gateway mediates product access.
-Replica and gateway traffic must use an encrypted node-to-node path; private
-addressing alone is not transport encryption.
+the current host-network exception to the exact digest-pinned TigerBeetle and
+StatsD images, the dedicated `tigerbeetle` service account, and
+`tenant-guardian`. Talos host firewall policy permits replica TCP port 3000
+only between the three declared management-node identities.
+
+The operational-test runtime uses the dedicated Latitude private VLAN. It has
+no customer data or product-client path. Customer writes remain disabled until
+the gateway and replica address plane use an encrypted node-to-node path;
+private addressing and port isolation alone are not transport encryption.
 
 No personal data belongs in TigerBeetle's immutable fields. `user_data`
 contains opaque identifiers pointing to access-controlled metadata in
@@ -122,46 +126,30 @@ against signed reconciliation checkpoints. This path is not considered valid
 until it succeeds in an isolated full-cluster restore drill using the pinned
 server and client release.
 
-## Runtime and capacity gates
+## Runtime and capacity
 
-Before formatting the production data files:
+Each replica has a 100 Gi local retained PVC, one exclusive requested CPU,
+an 8 Gi memory request and limit, and a 4 Gi grid cache. The container runs as
+non-root with a read-only root filesystem, no service-account token, only the
+`IPC_LOCK` capability, and the seccomp exception required for `io_uring`. It
+has no privileged mode, host path, or raw-device access.
 
-1. Pin the same TigerBeetle server and client release by digest/version,
-   mirror the server image into zot, include it in the dark bundle, and apply
-   the existing signature and provenance controls.
-2. Verify ECC memory from node hardware evidence.
-3. Prove `io_uring`, direct I/O, and memory locking on an encrypted local
-   volume with the intended container runtime.
-4. Grant only `IPC_LOCK` and the minimum seccomp exception demonstrated by
-   the compatibility test. Do not grant a privileged container or raw device
-   access.
-5. Measure current node headroom and reserve a full CPU core plus the chosen
-   cache and process memory on every node. Scheduling must remain safe when
-   ordinary management workloads resettle after one node loss.
-6. Forecast transfer growth, allocate the initial PVC size, and alert before
-   either the filesystem or LINSTOR pool loses its recovery reserve.
-7. Benchmark the double-encrypted ext4 path under expected and burst traffic.
-   Cache size, PVC size, and resource requests come from this evidence.
-
-Formatting is a distinct, reviewable bootstrap deployment. It verifies that
-all three target volumes are empty, formats exactly one replica index per
-node, and is removed from the steady-state manifests after the cluster is
-healthy. Reconciliation must never be able to recreate a format job.
+The reconciled workload contains no `tigerbeetle format` command. Any missing
+or empty data file therefore fails closed. Capacity alerts fire at 20% free
+space; expected-load, burst, one-replica-down, and soak measurements determine
+the first expansion and cache adjustment.
 
 ## Observability and canaries
 
 Each replica emits TigerBeetle StatsD metrics to a local bridge scraped by
-VictoriaMetrics. Alert at minimum on:
+VictoriaMetrics. The current runtime pages or warns on:
 
 - any non-normal replica status;
-- any state-sync stage;
+- a state-sync stage lasting more than 15 minutes;
 - fewer than three reachable replicas;
-- process restart or crash loop;
-- disk and LINSTOR pool capacity;
-- NTP synchronization;
-- memory-lock or direct-I/O startup failure;
-- request latency and error-rate regression; and
-- cache misses indicating an undersized cache.
+- process restart;
+- missing status metrics; and
+- less than 20% free space on any replica PVC.
 
 A continuously running canary uses the dedicated synthetic ledger and
 synthetic accounts, with the same account and transfer code registry as
@@ -175,42 +163,40 @@ journal/TigerBeetle reconciliation lag, and caller identity. Alerts must
 distinguish database unavailability, authorization denial, invalid financial
 input, and off-site journal failure.
 
-## Readiness sequence
+## Customer-write readiness
 
-Customer writes are admitted only after these steps complete in order:
+The financial model, image pin, encrypted retained volumes, fixed-node
+runtime, disruption budget, and initial replica observability are present.
+Customer writes remain disabled until these remaining gates complete in
+order:
 
-1. **Financial model:** implement and prove the accepted asset scales, ledger
-   IDs, account and transfer codes, balance constraints, TigerBeetle
-   pending-transfer lifecycle, correction semantics, and Stripe reconciliation
-   in [`tigerbeetle-financial-model.md`](tigerbeetle-financial-model.md).
-2. **Compatibility:** pass the encrypted-volume `io_uring`, direct-I/O,
+1. **Compatibility:** pass the encrypted-volume `io_uring`, direct-I/O,
    memlock, ECC, capacity, and network-encryption checks on all three nodes.
-3. **Supply chain:** pin and verify the server image and matching client,
-   mirror them into the dark bundle, and test an offline start.
-4. **Runtime:** deploy fixed-address replicas, local retained PVCs, disruption
-   controls, host firewall rules, and fail-closed bootstrap behavior.
-5. **Gateway:** deploy authentication, authorization, idempotency, batching,
+2. **Supply chain:** mirror the pinned server image and matching client into
+   the dark bundle and test an offline start.
+3. **Gateway:** deploy authentication, authorization, idempotency, batching,
    immutable code registries, default-deny Cilium policy, the scoped
    host-network admission rule, and Talos host firewall policy.
-6. **Recovery journal:** make intent and outcome records durable off-site and
+4. **Recovery journal:** make intent and outcome records durable off-site and
    continuously reconcile them with TigerBeetle.
-7. **Observability:** ship replica, host, storage, gateway, and journal metrics;
+5. **Observability:** ship host, LINSTOR-pool, gateway, journal, NTP,
+   request-latency, error-rate, and cache-efficiency metrics;
    prove every critical alert reaches the pager.
-8. **Functional proof:** exercise account creation, linked transfers,
+6. **Functional proof:** exercise account creation, linked transfers,
    pending/post/void, retries after lost replies, corrections, and invariant
    failures.
-9. **Failure proof:** independently stop each replica, partition it, restart
+7. **Failure proof:** independently stop each replica, partition it, restart
    it, and verify zero loss of acknowledged transactions before proceeding to
    the next node.
-10. **Disk-loss proof:** destroy one non-primary test data file, recover it
+8. **Disk-loss proof:** destroy one non-primary test data file, recover it
     with `tigerbeetle recover`, complete state sync, and reconcile every
     balance.
-11. **Full-DR proof:** rebuild all three replicas in isolation from off-site
+9. **Full-DR proof:** rebuild all three replicas in isolation from off-site
     evidence and meet the declared RPO/RTO.
-12. **Performance proof:** run expected load, burst load, one-replica-down
+10. **Performance proof:** run expected load, burst load, one-replica-down
     load, and a sustained soak without violating latency, capacity, or
     reconciliation thresholds.
-13. **Release:** enable customer writes behind a fail-closed feature flag,
+11. **Release:** enable customer writes behind a fail-closed feature flag,
     watch canary and reconciliation signals, and retain an immediate ability
     to stop new writes without modifying historical transactions.
 
