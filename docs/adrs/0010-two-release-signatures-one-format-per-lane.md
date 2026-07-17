@@ -31,7 +31,8 @@ format of its origin:
   layout**: born on ghcr, mirrored inward, aimed at the broadest possible
   verifier base — lowest-common-denominator readability is that lane's job.
 - **The countersigner mints Guardian's release signature** with the
-  custody-held `guardian-images` key in the **bundle layout**, Rekor-logged
+  Transit-held, non-exportable `guardian-images` key (recovered through
+  raft-snapshot DR, never held in custody) in the **bundle layout**, Rekor-logged
   with the inclusion proof embedded: born in zot, where tags are unsafe,
   and verifiable with the committed public key alone — stock cosign
   defaults online, or fully offline with the pinned trusted root.
@@ -62,3 +63,7 @@ has tipped to bundles.
 - Living detail: `docs/supply-chain-design.md` (trust model, who signs
   what, Fulcio identities), `docs/registry-design.md` (countersigner,
   release projector, zot sync constraints).
+
+Related source: `src/infrastructure/deployments/guardian/system/zot-countersigner.yaml`,
+`src/infrastructure/deployments/guardian/system/release-projector.yaml`,
+`src/infrastructure/bootstrap/bundle/guardian-images.pub.pem`

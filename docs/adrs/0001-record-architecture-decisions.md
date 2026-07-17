@@ -14,8 +14,9 @@ decisions, and the reasoning that would otherwise be re-litigated.
 We record architecture decisions as ADRs in `docs/adrs/`, one file per decision,
 named `NNNN-kebab-title.md` with monotonically increasing numbers.
 
-Each ADR has four sections — Context, Decision, Status, Consequences — and is
-immutable once Accepted. A changed decision gets a *new* ADR stating
+Each ADR carries a `Status: … · Date: …` header line, three sections — Context,
+Decision, Consequences — and a closing `Related source` line naming the files that
+embody the decision. ADRs are immutable once Accepted. A changed decision gets a *new* ADR stating
 "Supersedes [NNNN](NNNN-kebab-title.md)"; the old ADR's status becomes
 "Superseded by [MMMM](MMMM-kebab-title.md)". Statuses: Proposed, Accepted,
 Superseded. The index in [README.md](README.md) is updated in the same commit.
@@ -31,3 +32,5 @@ product documents.
 - Writing a new ADR to change course is deliberate friction: reversals leave a trail.
 - The surface area stays small only if we resist migrating narrative docs wholesale;
   each ADR captures the decision core, and the winding material dies with the source.
+
+Related source: [README.md](README.md)

@@ -13,7 +13,9 @@ cluster it exists to resurrect.
 
 ## Decision
 
-All object storage is Cloudflare R2, one bucket per consumer. SeaweedFS is out.
+All object storage is Cloudflare R2, one bucket per purpose: `guardian-backups`
+shared by every backup consumer under per-consumer prefixes, `guardian-vault` for
+state. SeaweedFS is out.
 
 Rejected alongside, with their re-entry conditions:
 
@@ -24,17 +26,28 @@ Rejected alongside, with their re-entry conditions:
 - **OpenBao Transit for backup encryption** — a transit key born in-cluster dies
   with the raft it would be needed to restore. A restore must require only Git, the
   dark bundle, and custody. barman also has no client-side-encryption hook.
-- **Operator-held age key** — viable and SOC2-compatible, but it cannot wrap the
-  barman PITR stream, and key loss equals backup loss, so it demands seal-key-grade
-  escrow. Deferred unless a compliance requirement names client-side encryption;
-  SOC2 audits key management, not the tool.
+- **Custody-held age key as the universal wrapper** — it cannot wrap the barman
+  PITR stream, and key loss equals backup loss, so it demands seal-key-grade
+  escrow. It is used where it fits — etcd/Talos snapshots are age-encrypted
+  client-side before upload — but extending client-side encryption to the
+  database streams is deferred unless a compliance requirement names it; SOC2
+  audits key management, not the tool.
 
 ## Consequences
 
 - Restore paths depend on Cloudflare reachability; the dark bundle remains the
   offline distribution path (ADR 0008), not R2.
 - R2 is not S3: no bucket versioning (state backups are copy-before-apply), and
-  AWS-SDK CRC32 checksums break against it — clients need the checksum knobs
-  turned off (`checksumAlgorithm: ""`, `AWS_REQUEST_CHECKSUM_CALCULATION=when_required`).
-- Backup encryption is server-side at rest plus access control, until a compliance
-  driver forces the escrowed client-side key.
+  newer AWS-SDK CRC32 checksum defaults break against it — a client that hits
+  this needs the checksum knobs turned off (`checksumAlgorithm: ""`,
+  `AWS_REQUEST_CHECKSUM_CALCULATION=when_required`); the shipped backup clients
+  currently run without them.
+- The database backup streams (barman, clickhouse-backup) rely on server-side
+  at-rest encryption plus access control, until a compliance driver forces the
+  escrowed client-side key; etcd snapshots are age-encrypted client-side. Cluster
+  volumes are LINSTOR-LUKS encrypted at rest — a layer that protects local disks
+  and does not follow data offsite.
+
+Related source: `src/infrastructure/base/cozystack/platform.yaml`,
+`src/infrastructure/runbooks/backup-audit.md`,
+`src/infrastructure/base/backup/etcd-snapshots.yaml`

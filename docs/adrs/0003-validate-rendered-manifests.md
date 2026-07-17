@@ -15,6 +15,14 @@ CRD-schema validity, and admission/PSA admissibility.
 Validate the **rendered artifact that ships**, against schema and against a real API
 server's admission — never source templates, never hand-restated field values.
 
+**None of the staged machinery below has been built.** What actually gates merges
+today is `//src/infrastructure/tests`: Go conformance tests asserting hand-restated
+field values against **source** YAML — the exact pattern this ADR condemns — plus
+real CEL evaluation of the ValidatingAdmissionPolicy expressions, and a
+render-success check (`kubectl kustomize`, no schema validation) inside
+`aspect infra validate`. Until the stages exist, this ADR is direction, not
+description. The target design:
+
 - **Stage A** (offline, hermetic, every PR, in `bazel test //...`): per-overlay
   render (`kustomize build` / `flux build`) → `kubeconform -strict` against vendored
   schemas generated from the exact deployed CRDs. Any un-allowlisted skip **fails**,
@@ -41,8 +49,12 @@ which reads live Flux Kustomization conditions.
 
 ## Consequences
 
-- A manifest bug must survive rendering, schema, and real admission to reach the
-  cluster; the test suite can no longer be wrong about a field the manifest changed.
-- CI needs an ephemeral API server per run, and vendored schemas must be regenerated
-  when CRDs move — that regeneration is part of any CRD bump.
+- Until Stage A/B exist, the test suite can still be wrong about a field the
+  manifest changed; the hand-restated tests remain migration debt — remove rather
+  than update them when they block source changes.
+- Building Stage B commits CI to an ephemeral API server per run, and vendored
+  schemas regenerated when CRDs move — that regeneration is part of any CRD bump.
 - Charts using `lookup` must have their lookups seeded exactly or be banned.
+
+Related source: `src/infrastructure/tests/BUILD.bazel`,
+`.aspect/tasks/infra.axl`, `src/infrastructure/cmd/converged/main.go`

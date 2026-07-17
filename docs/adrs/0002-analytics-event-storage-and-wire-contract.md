@@ -37,17 +37,21 @@ findings dominated:
   delete TTL. Result: ~16.7 B/event, 5.6x over a naive typed dump.
 - Clients send only the minimal cross-reference set (event name, path, referrer,
   props, `offset_ms`, batch `sent_at`); the server derives receipt time, IP, UA,
-  geo/ASN, trust tier, and clock skew. Identity is the server-minted HMAC correlation
-  cookie, never a body field. `(correlation_id, session_seq)` is the deterministic
-  dedup key. Ingest enforcement is value-level (event-name registry, batch/props
-  caps, exact 16-byte trace_id) because connect-go discards unknown JSON fields.
+  geo/ASN, trust tier, and clock skew. Identity is the server-minted correlation
+  cookie, never a body field (an unauthenticated UUID until HMAC signing lands with
+  this namespace's OpenBao scope). `(correlation_id, session_seq)` is the declared
+  dedup key and gap/replay detector on the wire; nothing deduplicates at rest today —
+  the engine is plain MergeTree. Ingest enforcement is value-level (event-name
+  registry, batch/props caps, exact 16-byte trace_id) because connect-go discards
+  unknown JSON fields.
 - **Ingest batching is mandatory** (≥100k rows or seconds-scale flush;
   `async_insert` acceptable): per-request inserts are a deploy blocker.
 - **OTLP spans land in the same store** (`guardian_analytics.otel_traces`), exporter
   schema owned by us (`create_schema: false`): ReplicatedMergeTree,
   `ORDER BY (ServiceName, toStartOfHour(Timestamp), TraceId, Timestamp)`, 6-month
-  TTL, trace_id→time-range lookup MV. Same correlation id keys both tables, so
-  analytics→trace is one join.
+  TTL, trace_id→time-range lookup MV. The correlation id lands in both stores — an
+  ORDER BY key in `events`, the `guardian.correlation_id` span attribute in
+  `otel_traces` — so analytics→trace is one join, via the attribute map.
 
 ## Consequences
 
@@ -58,3 +62,7 @@ findings dominated:
 - Revisit triggers: UA distinct-count per part >~100k → demote `ua` to plain
   `String`; active-part counts under real ingest; `props` growth vs the native JSON
   type; traces ORDER BY re-measured on ≥1 week of real production spans.
+
+Related source: `src/infrastructure/analytics/events-table.sql`,
+`src/proto/guardian/analytics/v1/events.proto`,
+`src/infrastructure/deployments/analytics/system/traces-configmap.yaml`

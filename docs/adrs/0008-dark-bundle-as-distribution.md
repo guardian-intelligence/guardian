@@ -19,10 +19,20 @@ platform wants anyway.
 
 ## Consequences
 
-- Bundle completeness and offline verifiability gate releases; the signed lock
-  covers the bundle (see `docs/supply-chain-design.md`).
+- Lock discipline gates every merge (digest-pinned, declared/rendered disjoint,
+  derivable union); offline verifiability is enforced when the bundle is built
+  and at dark bring-up; completeness is provable only positively, by the
+  cold-boot drill. The signed lock covers the bundle (see
+  `docs/supply-chain-design.md`).
 - Proposals to drop or shrink the dark tier for simplicity are rejected by
   default; the burden of proof sits with the cut, not the tier.
-- Registry outages and upstream rate limits are product bugs here only insofar
-  as they break bundle builds — the runtime cluster's independence from them is
-  the point.
+- Registry availability is a first-class runtime concern in its own right:
+  steady-state pulls ride the in-cluster zot pull-through mirror with permanent
+  fallback to upstream, and mirror outages page. The dark bundle is the
+  registry-independence tier — the guarantee that the platform can arrive and
+  boot with no upstream at all — not the everyday pull path (`darkBundleMirror`
+  stays off in steady state).
+
+Related source: `src/infrastructure/bootstrap/bundle/images.declared.lock`,
+`src/infrastructure/tests/images_lock_test.go`,
+`src/infrastructure/talm/values.yaml`
