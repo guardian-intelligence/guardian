@@ -1,0 +1,80 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: guardian-tigerbeetle-runtime
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - ""
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - pods
+  variables:
+    - name: isTigerBeetle
+      expression: >-
+        has(object.metadata.labels) &&
+        'app.kubernetes.io/name' in object.metadata.labels &&
+        object.metadata.labels['app.kubernetes.io/name'] == 'tigerbeetle'
+    - name: images
+      expression: >-
+        object.spec.containers.map(container, container.image) +
+        (has(object.spec.initContainers) ? object.spec.initContainers.map(container, container.image) : [])
+    - name: allowedImages
+      expression: >-
+        [
+          'ghcr.io/tigerbeetle/tigerbeetle:0.17.9@sha256:48f623f9c1e9b6cc44d77ca93634595ae99cce3246ded418763eb1a62eee45e9',
+          'quay.io/prometheus/statsd-exporter:v0.30.0@sha256:378cb79c4ac7d6941e5ed71b1f3cd6f4707cf42c72c104ffe81fa4d9026ef659'
+        ]
+  validations:
+    - expression: >-
+        !has(object.spec.hostNetwork) ||
+        object.spec.hostNetwork == false ||
+        (
+          variables.isTigerBeetle &&
+          object.spec.serviceAccountName == 'tigerbeetle'
+        )
+      message: tenant-guardian host networking is reserved for the TigerBeetle runtime
+    - expression: >-
+        !variables.isTigerBeetle ||
+        (
+          object.spec.serviceAccountName == 'tigerbeetle' &&
+          has(object.spec.automountServiceAccountToken) &&
+          object.spec.automountServiceAccountToken == false &&
+          (!has(object.spec.hostPID) || object.spec.hostPID == false) &&
+          (!has(object.spec.hostIPC) || object.spec.hostIPC == false) &&
+          variables.images.size() > 0 &&
+          variables.images.all(image, image in variables.allowedImages) &&
+          variables.images.exists(image, image.startsWith('ghcr.io/tigerbeetle/tigerbeetle:0.17.9@sha256:')) &&
+          (!has(object.spec.volumes) || object.spec.volumes.all(volume, !has(volume.hostPath))) &&
+          object.spec.containers.all(container,
+            has(container.securityContext) &&
+            (!has(container.securityContext.privileged) || container.securityContext.privileged == false) &&
+            has(container.securityContext.allowPrivilegeEscalation) &&
+            container.securityContext.allowPrivilegeEscalation == false &&
+            has(container.securityContext.readOnlyRootFilesystem) &&
+            container.securityContext.readOnlyRootFilesystem == true
+          )
+        )
+      message: TigerBeetle pods must use the dedicated identity, pinned runtime images, no host paths, and hardened containers
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: guardian-tigerbeetle-runtime
+spec:
+  policyName: guardian-tigerbeetle-runtime
+  validationActions:
+    - Deny
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values:
+            - tenant-guardian

@@ -4,6 +4,9 @@ TigerBeetle is Guardian's financial system of record for customer
 transactions and balances. It works alongside CNPG: TigerBeetle owns accounts,
 transfers, balance constraints, and transaction ordering; Postgres owns
 descriptions, user-facing metadata, and mappings to product entities.
+[The financial model](tigerbeetle-financial-model.md) fixes the production
+asset scale, numeric registry, credit lifecycle, correction semantics, and
+payment-processor reconciliation contract.
 
 The deployment is one production cluster with three replicas. It is not a
 synthetic-only qualification cluster. [ADR 0011](adrs/0011-three-replica-tigerbeetle.md)
@@ -88,7 +91,8 @@ addressing alone is not transport encryption.
 No personal data belongs in TigerBeetle's immutable fields. `user_data`
 contains opaque identifiers pointing to access-controlled metadata in
 Postgres. Ledger IDs, account codes, transfer codes, asset scales, and
-correction codes are append-only registries reviewed as source.
+correction codes are the append-only registry in
+[`tigerbeetle-financial-model.md`](tigerbeetle-financial-model.md).
 
 ## Off-site recovery journal
 
@@ -159,8 +163,9 @@ VictoriaMetrics. Alert at minimum on:
 - request latency and error-rate regression; and
 - cache misses indicating an undersized cache.
 
-A continuously running canary uses dedicated synthetic ledger, account, and
-transfer codes. It creates, reads, retries, posts, voids, and reverses bounded
+A continuously running canary uses the dedicated synthetic ledger and
+synthetic accounts, with the same account and transfer code registry as
+production. It creates, reads, retries, posts, voids, and reverses bounded
 transactions and verifies that balances and idempotency results match. Its
 records remain visibly synthetic even though the cluster also contains
 production data.
@@ -174,9 +179,10 @@ input, and off-site journal failure.
 
 Customer writes are admitted only after these steps complete in order:
 
-1. **Financial model:** approve asset scales, ledger IDs, account and transfer
-   codes, balance constraints, pending-transfer lifecycle, correction
-   semantics, and Stripe reconciliation.
+1. **Financial model:** implement and prove the accepted asset scales, ledger
+   IDs, account and transfer codes, balance constraints, TigerBeetle
+   pending-transfer lifecycle, correction semantics, and Stripe reconciliation
+   in [`tigerbeetle-financial-model.md`](tigerbeetle-financial-model.md).
 2. **Compatibility:** pass the encrypted-volume `io_uring`, direct-I/O,
    memlock, ECC, capacity, and network-encryption checks on all three nodes.
 3. **Supply chain:** pin and verify the server image and matching client,
@@ -217,3 +223,4 @@ References:
 - [TigerBeetle monitoring](https://docs.tigerbeetle.com/operating/monitoring/)
 - [TigerBeetle system architecture](https://docs.tigerbeetle.com/coding/system-architecture/)
 - [Reliable transaction submission](https://docs.tigerbeetle.com/coding/reliable-transaction-submission/)
+- [Guardian financial model](tigerbeetle-financial-model.md)

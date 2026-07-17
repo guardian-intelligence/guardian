@@ -361,6 +361,45 @@ spec:
     # the ZotRegistryDown and mirror-canary pages instead.
   timeout: 10m
 ---
+# TigerBeetle's financial ledger is isolated in its own reconciliation slice
+# so its one-time data-file bootstrap and steady-state replica health can be
+# gated without coupling unrelated Guardian system services to ledger state.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: guardian-tigerbeetle
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/deployments/tigerbeetle/system
+  sourceRef:
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: guardian-source
+  dependsOn:
+    - name: guardian-mgmt-storage
+    - name: guardian-mgmt-admission
+  prune: true
+  wait: false
+  timeout: 30m
+  healthChecks:
+    - apiVersion: batch/v1
+      kind: Job
+      name: tigerbeetle-format-0
+      namespace: tenant-guardian
+    - apiVersion: batch/v1
+      kind: Job
+      name: tigerbeetle-format-1
+      namespace: tenant-guardian
+    - apiVersion: batch/v1
+      kind: Job
+      name: tigerbeetle-format-2
+      namespace: tenant-guardian
+---
 # Flagger — progressive-delivery controller, no consumers yet (Canary CRs are
 # added alongside each workload that adopts blue/green, e.g. iam/*/). Depends
 # only on guardian-system for basic cluster readiness ordering; unlike Kargo
