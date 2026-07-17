@@ -104,10 +104,9 @@ require a schema change mid-flight.
 
 ## Pre-TEE scope
 
-Plaintext zvols; generation identity = ZFS snapshot GUID. The confidential
-phase replaces this with guest-side OpenZFS native encryption, a lineage-scoped
-wrapping key released by Trustee from OpenBao, and an authenticated generation
-marker checked against the remote manifest. The resolved protocol and release
-gates live in the [confidential-computing security
-policy](../postflight-confidential-computing-security-validation.md); 01
-specifies the implementation seams.
+Plaintext zvols; generation identity = ZFS snapshot GUID. The SNP phase
+keeps this lifecycle unchanged and adds guest-side LUKS2 keyed by the
+PSP-derived, measurement-bound key (guestd's `snp` encryption mode), so the
+host snapshots ciphertext. Claims and release gates live in the
+[security model](../postflight-security-model.md); 01 specifies the
+implementation seams.

@@ -43,7 +43,7 @@ Determinism in v0 is best-effort (record every version, verify every
 sha256); byte-reproducibility is the ADR-0010 lane's job. What must be exact
 *now* is the QEMU argv (merged driver, `pc-q35-8.2` pin) and the pins file.
 
-In the confidential phase the mutable disk image is not treated as measured
+In the SNP phase the mutable disk image is not treated as measured
 merely because QEMU launched it. QEMU uses stateless OVMF and direct
 kernel/initramfs boot with `kernel-hashes=on`; the measured command line carries
 the dm-verity root hash for this image. The root mounts read-only, persistent
