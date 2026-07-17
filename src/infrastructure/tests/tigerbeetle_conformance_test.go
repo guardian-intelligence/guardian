@@ -144,6 +144,8 @@ func TestTigerBeetleAdmissionAndNetworkBoundary(t *testing.T) {
 		"object.spec.serviceAccountName == 'tigerbeetle'",
 		"object.spec.hostNetwork == false",
 		"variables.images.all(image, image in variables.allowedImages)",
+		"docker.io/envoyproxy/envoy:distroless-v1.36.4@sha256:2f71c5666a5209d6ee1ec519b17877ccb6d17be4d00e34de10f11e020ea8707a",
+		"variables.isTransport",
 		"object.spec.automountServiceAccountToken == false",
 		"object.spec.hostNetwork == true",
 		"'kubernetes.io/hostname' in object.spec.nodeSelector",
@@ -156,6 +158,27 @@ func TestTigerBeetleAdmissionAndNetworkBoundary(t *testing.T) {
 		"- Deny",
 	} {
 		assertTextContains(t, admission, want, admissionPath)
+	}
+
+	transportPath := runfilePath("src/infrastructure/deployments/tigerbeetle/system/transport.yaml")
+	transport := readText(t, transportPath) + readText(
+		t,
+		runfilePath("src/infrastructure/deployments/tigerbeetle/system/server.envoy"),
+	)
+	for _, want := range []string{
+		"name: guardian-tigerbeetle-ca",
+		"name: tigerbeetle-transport-server",
+		"require_client_certificate: true",
+		"guardian-payments.guardian.internal",
+		"name: tigerbeetle-transport",
+		"kind: DaemonSet",
+		"hostNetwork: true",
+		`node-role.kubernetes.io/control-plane: ""`,
+		"address: 127.0.0.1",
+		"port_value: 3000",
+		"port_value: 3001",
+	} {
+		assertTextContains(t, transport, want, transportPath)
 	}
 	env, err := cel.NewEnv(
 		cel.Variable("object", cel.DynType),
@@ -232,6 +255,9 @@ func TestTigerBeetleFluxRuntimeGate(t *testing.T) {
 		"name: tigerbeetle-0",
 		"name: tigerbeetle-1",
 		"name: tigerbeetle-2",
+		"kind: DaemonSet",
+		"name: tigerbeetle-transport",
+		"name: guardian-tigerbeetle-ca",
 	} {
 		assertTextContains(t, slice, want, path)
 	}

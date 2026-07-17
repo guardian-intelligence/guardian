@@ -79,13 +79,21 @@ TCP port 3000. The gateway:
 - emits an actor- and request-correlated audit record; and
 - exposes no TigerBeetle data-file or administration operation.
 
-Cilium policy defaults product callers to deny and permits only approved
-workloads to reach the gateway. The host-network replicas are not assumed to
-be covered by pod-level Cilium policy. A ValidatingAdmissionPolicy confines
-the current host-network exception to the exact digest-pinned TigerBeetle and
-StatsD images, the dedicated `tigerbeetle` service account, and
-`tenant-guardian`. Talos host firewall policy permits replica TCP port 3000
-only between the three declared management-node identities.
+Cilium policy defaults product callers to deny and permits only the payments
+gateway to reach node TCP port 3001. One digest-pinned Envoy process per node
+requires a client certificate with the payments DNS SAN, verifies it against
+the dedicated TigerBeetle transport CA, and forwards the accepted byte stream
+over loopback to TCP port 3000. The gateway uses three loopback listeners so
+the TigerBeetle client retains one independently authenticated connection per
+replica. The client certificate is mounted only in the payments pods.
+
+The host-network replicas and transport proxies are not assumed to be covered
+by pod-level Cilium policy. A ValidatingAdmissionPolicy confines both
+host-network exceptions to exact digest-pinned images, the dedicated
+`tigerbeetle` service account, `tenant-guardian`, and the three management
+nodes. Talos host firewall policy continues to permit the unencrypted replica
+port 3000 only between the declared management-node identities; pod traffic
+can reach only the mTLS port 3001.
 
 The operational-test runtime uses the dedicated Latitude private VLAN. It has
 no customer data or product-client path. Customer writes remain disabled until

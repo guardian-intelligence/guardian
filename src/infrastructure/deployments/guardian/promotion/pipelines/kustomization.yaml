@@ -13,3 +13,4 @@ resources:
   - products-project.yaml
   - products-secrets.yaml
   - products-stage-prod.yaml
+  - products-payments-stage-prod.yaml

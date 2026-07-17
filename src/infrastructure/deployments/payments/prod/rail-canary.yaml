@@ -1,0 +1,65 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: payments-rail-canary
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: payments-rail-canary
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 90
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: payments-rail-canary
+            app.kubernetes.io/part-of: guardian
+            guardian.dev/stage: prod
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 100
+            runAsGroup: 101
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: canary
+              image: ghcr.io/fluxcd/flagger-loadtester@sha256:f98a35ab7aca0f2efdd8e397b4002e283637f5c9e31e4e2a6c1e97af07c50454 # 0.37.0
+              command:
+                - /bin/bash
+                - -ec
+                - |
+                  curl -fsS --max-time 80 \
+                    -X POST \
+                    -H "Authorization: Bearer ${PAYMENTS_CANARY_TOKEN}" \
+                    http://payments.tenant-guardian-prod/internal/payments/canary/rail \
+                    | grep -q '"status":"passed"'
+              env:
+                - name: PAYMENTS_CANARY_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: payments-canary
+                      key: token
+              resources:
+                requests:
+                  cpu: 25m
+                  memory: 32Mi
+                  ephemeral-storage: 64Mi
+                limits:
+                  cpu: 250m
+                  memory: 128Mi
+                  ephemeral-storage: 128Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL

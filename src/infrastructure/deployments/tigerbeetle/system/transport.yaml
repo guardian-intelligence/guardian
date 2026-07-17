@@ -1,0 +1,164 @@
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: guardian-tigerbeetle-selfsigned
+  labels:
+    app.kubernetes.io/name: tigerbeetle-transport
+    app.kubernetes.io/part-of: guardian
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: guardian-tigerbeetle-ca
+  namespace: cozy-cert-manager
+  labels:
+    app.kubernetes.io/name: tigerbeetle-transport
+    app.kubernetes.io/part-of: guardian
+spec:
+  secretName: guardian-tigerbeetle-ca-tls
+  commonName: Guardian TigerBeetle Transport CA
+  isCA: true
+  duration: 87600h
+  renewBefore: 720h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Never
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: guardian-tigerbeetle-selfsigned
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: guardian-tigerbeetle-ca
+  labels:
+    app.kubernetes.io/name: tigerbeetle-transport
+    app.kubernetes.io/part-of: guardian
+spec:
+  ca:
+    secretName: guardian-tigerbeetle-ca-tls
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: tigerbeetle-transport-server
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: tigerbeetle-transport
+    app.kubernetes.io/part-of: guardian
+spec:
+  secretName: tigerbeetle-transport-server-tls
+  commonName: tigerbeetle.guardian.internal
+  dnsNames:
+    - tigerbeetle.guardian.internal
+  duration: 2160h
+  renewBefore: 360h
+  usages:
+    - digital signature
+    - key encipherment
+    - server auth
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: guardian-tigerbeetle-ca
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: tigerbeetle-transport
+  namespace: tenant-guardian
+  annotations:
+    reloader.stakater.com/auto: "true"
+  labels:
+    app.kubernetes.io/name: tigerbeetle
+    app.kubernetes.io/instance: tigerbeetle-transport
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: ledger
+    guardian.dev/phase: transport
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tigerbeetle
+      app.kubernetes.io/instance: tigerbeetle-transport
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tigerbeetle
+        app.kubernetes.io/instance: tigerbeetle-transport
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/component: ledger
+        guardian.dev/phase: transport
+    spec:
+      automountServiceAccountToken: false
+      dnsPolicy: ClusterFirstWithHostNet
+      hostNetwork: true
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+      serviceAccountName: tigerbeetle
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsGroup: 65532
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: envoy
+          image: docker.io/envoyproxy/envoy:distroless-v1.36.4@sha256:2f71c5666a5209d6ee1ec519b17877ccb6d17be4d00e34de10f11e020ea8707a
+          imagePullPolicy: IfNotPresent
+          args:
+            - -c
+            - /etc/envoy/envoy.yaml
+            - --log-level
+            - warning
+          readinessProbe:
+            tcpSocket:
+              port: 3001
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: 3001
+            periodSeconds: 20
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: config
+              mountPath: /etc/envoy
+              readOnly: true
+            - name: tls
+              mountPath: /tls
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: tigerbeetle-transport
+        - name: tls
+          secret:
+            secretName: tigerbeetle-transport-server-tls

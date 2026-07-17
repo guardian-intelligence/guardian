@@ -13,10 +13,6 @@ spec:
     matchLabels:
       app.kubernetes.io/name: analytics-ingest
   ingress:
-    # The root ingress controller runs hostNetwork, so its traffic arrives
-    # with the reserved host/remote-node identities — never a pod identity —
-    # and the admit must be entity-based (zot-networkpolicy.yaml carries the
-    # same lesson for containerd pulls).
     - fromEntities:
         - host
         - remote-node
@@ -35,7 +31,6 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
-    # Events to the tenant-root Cozystack ClickHouse app.
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: tenant-root
@@ -46,7 +41,6 @@ spec:
               protocol: TCP
             - port: "8123"
               protocol: TCP
-    # Trace export to the in-namespace OTel collector.
     - toEndpoints:
         - matchLabels:
             app.kubernetes.io/name: otel-collector
@@ -55,9 +49,6 @@ spec:
             - port: "4317"
               protocol: TCP
 ---
-# OTel collector: receives OTLP from in-namespace producers (ingest today;
-# web SSR + Keycloak later join by carrying the producer label). Egress is
-# DNS + ClickHouse only (the analytics-client label above admits it there).
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -91,7 +82,6 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
-    # Span writes to the tenant-root Cozystack ClickHouse app.
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: tenant-root
@@ -99,4 +89,42 @@ spec:
       toPorts:
         - ports:
             - port: "9000"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: payments-checkout-canary
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: payments-checkout-canary
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: payments-checkout-canary
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            clickhouse.altinity.com/chi: clickhouse-analytics
+      toPorts:
+        - ports:
+            - port: "8123"
+              protocol: TCP
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
               protocol: TCP

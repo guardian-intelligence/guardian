@@ -1,0 +1,45 @@
+static_resources:
+  listeners:
+    - name: tigerbeetle_mtls
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 3001
+      filter_chains:
+        - transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              require_client_certificate: true
+              common_tls_context:
+                tls_certificates:
+                  - certificate_chain:
+                      filename: /tls/tls.crt
+                    private_key:
+                      filename: /tls/tls.key
+                validation_context:
+                  trusted_ca:
+                    filename: /tls/ca.crt
+                  match_typed_subject_alt_names:
+                    - san_type: DNS
+                      matcher:
+                        exact: guardian-payments.guardian.internal
+          filters:
+            - name: envoy.filters.network.tcp_proxy
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
+                stat_prefix: tigerbeetle_mtls
+                cluster: tigerbeetle_local
+  clusters:
+    - name: tigerbeetle_local
+      connect_timeout: 2s
+      type: STATIC
+      load_assignment:
+        cluster_name: tigerbeetle_local
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: 127.0.0.1
+                      port_value: 3000

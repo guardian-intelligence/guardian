@@ -30,11 +30,17 @@ spec:
         variables.isTigerBeetle &&
         'guardian.dev/phase' in object.metadata.labels &&
         object.metadata.labels['guardian.dev/phase'] == 'runtime'
+    - name: isTransport
+      expression: >-
+        variables.isTigerBeetle &&
+        'guardian.dev/phase' in object.metadata.labels &&
+        object.metadata.labels['guardian.dev/phase'] == 'transport'
     - name: allowedImages
       expression: >-
         [
           'ghcr.io/tigerbeetle/tigerbeetle:0.17.9@sha256:48f623f9c1e9b6cc44d77ca93634595ae99cce3246ded418763eb1a62eee45e9',
-          'quay.io/prometheus/statsd-exporter:v0.30.0@sha256:378cb79c4ac7d6941e5ed71b1f3cd6f4707cf42c72c104ffe81fa4d9026ef659'
+          'quay.io/prometheus/statsd-exporter:v0.30.0@sha256:378cb79c4ac7d6941e5ed71b1f3cd6f4707cf42c72c104ffe81fa4d9026ef659',
+          'docker.io/envoyproxy/envoy:distroless-v1.36.4@sha256:2f71c5666a5209d6ee1ec519b17877ccb6d17be4d00e34de10f11e020ea8707a'
         ]
   validations:
     - expression: >-
@@ -56,15 +62,24 @@ spec:
           (!has(object.spec.hostPID) || object.spec.hostPID == false) &&
           (!has(object.spec.hostIPC) || object.spec.hostIPC == false) &&
           has(object.spec.nodeSelector) &&
-          'kubernetes.io/hostname' in object.spec.nodeSelector &&
-          ['ash-earth', 'ash-wind', 'ash-water'].exists(node,
-            node == object.spec.nodeSelector['kubernetes.io/hostname']
+          (
+            (
+              variables.isRuntime &&
+              'kubernetes.io/hostname' in object.spec.nodeSelector &&
+              ['ash-earth', 'ash-wind', 'ash-water'].exists(node,
+                node == object.spec.nodeSelector['kubernetes.io/hostname']
+              )
+            ) ||
+            (
+              variables.isTransport &&
+              'node-role.kubernetes.io/control-plane' in object.spec.nodeSelector
+            )
           ) &&
           variables.images.size() > 0 &&
           variables.images.all(image, image in variables.allowedImages) &&
-          variables.images.exists(image, image.startsWith('ghcr.io/tigerbeetle/tigerbeetle:0.17.9@sha256:')) &&
-          (!variables.isRuntime ||
+          (
             (
+              variables.isRuntime &&
               variables.images.size() == 2 &&
               variables.images.filter(image,
                 image.startsWith('ghcr.io/tigerbeetle/tigerbeetle:0.17.9@sha256:')
@@ -72,12 +87,27 @@ spec:
               variables.images.filter(image,
                 image.startsWith('quay.io/prometheus/statsd-exporter:v0.30.0@sha256:')
               ).size() == 1
+            ) ||
+            (
+              variables.isTransport &&
+              variables.images.size() == 1 &&
+              variables.images[0] == 'docker.io/envoyproxy/envoy:distroless-v1.36.4@sha256:2f71c5666a5209d6ee1ec519b17877ccb6d17be4d00e34de10f11e020ea8707a'
             )
           ) &&
           (!has(object.spec.volumes) || object.spec.volumes.all(volume,
-            has(volume.persistentVolumeClaim) &&
-            ['tigerbeetle-data-0', 'tigerbeetle-data-1', 'tigerbeetle-data-2'].exists(claim,
-              claim == volume.persistentVolumeClaim.claimName
+            (
+              variables.isRuntime &&
+              has(volume.persistentVolumeClaim) &&
+              ['tigerbeetle-data-0', 'tigerbeetle-data-1', 'tigerbeetle-data-2'].exists(claim,
+                claim == volume.persistentVolumeClaim.claimName
+              )
+            ) ||
+            (
+              variables.isTransport &&
+              (
+                (has(volume.configMap) && volume.configMap.name == 'tigerbeetle-transport') ||
+                (has(volume.secret) && volume.secret.secretName == 'tigerbeetle-transport-server-tls')
+              )
             )
           )) &&
           object.spec.containers.all(container,
@@ -98,7 +128,7 @@ spec:
             (!has(container.args) || container.args.all(argument, argument != 'format'))
           )
         )
-      message: TigerBeetle pods must use the dedicated identity, fixed nodes, pinned runtime images, retained ledger volumes, and hardened non-formatting containers
+      message: TigerBeetle runtime and mTLS transport pods must use the dedicated identity, fixed nodes, exact images and volumes, and hardened non-formatting containers
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

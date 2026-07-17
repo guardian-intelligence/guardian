@@ -1,0 +1,53 @@
+apiVersion: flagger.app/v1beta1
+kind: Canary
+metadata:
+  name: payments
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: payments
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  provider: kubernetes
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: payments
+  progressDeadlineSeconds: 900
+  service:
+    port: 80
+    targetPort: 8080
+  analysis:
+    interval: 30s
+    threshold: 3
+    iterations: 3
+    alerts:
+      - name: ops
+        severity: warn
+        providerRef:
+          name: alert-relay
+          namespace: flagger
+    webhooks:
+      - name: dependency-readiness
+        type: pre-rollout
+        url: http://payments-loadtester.tenant-guardian-prod/
+        timeout: 30s
+        metadata:
+          type: bash
+          cmd: bash /gate/readiness.sh
+      - name: stripe-ledger-gate
+        type: pre-rollout
+        url: http://payments-loadtester.tenant-guardian-prod/
+        timeout: 90s
+        metadata:
+          type: bash
+          cmd: bash /gate/rail.sh
+          logCmdOutput: "true"
+      - name: ready-under-load
+        type: rollout
+        url: http://payments-loadtester.tenant-guardian-prod/
+        timeout: 45s
+        metadata:
+          type: cmd
+          cmd: hey -z 20s -q 10 -c 5 http://payments-canary.tenant-guardian-prod/readyz
+          logCmdOutput: "true"

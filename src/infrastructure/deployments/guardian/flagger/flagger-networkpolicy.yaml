@@ -58,6 +58,7 @@ spec:
               values:
                 - flagger-loadtester
                 - company-site-loadtester
+                - payments-loadtester
       toPorts:
         - ports:
             - port: "8080"

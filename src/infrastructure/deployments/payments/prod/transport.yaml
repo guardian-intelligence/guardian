@@ -1,0 +1,28 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: payments-tigerbeetle-client
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: payments
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  secretName: payments-tigerbeetle-client-tls
+  commonName: guardian-payments.guardian.internal
+  dnsNames:
+    - guardian-payments.guardian.internal
+  duration: 720h
+  renewBefore: 120h
+  usages:
+    - digital signature
+    - key encipherment
+    - client auth
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: guardian-tigerbeetle-ca

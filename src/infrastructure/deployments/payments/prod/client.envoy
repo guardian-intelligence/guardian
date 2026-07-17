@@ -1,0 +1,95 @@
+static_resources:
+  listeners:
+    - name: tigerbeetle_0
+      address:
+        socket_address:
+          address: 127.0.0.1
+          port_value: 13000
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.tcp_proxy
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
+                stat_prefix: tigerbeetle_0
+                cluster: tigerbeetle_0
+    - name: tigerbeetle_1
+      address:
+        socket_address:
+          address: 127.0.0.1
+          port_value: 13001
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.tcp_proxy
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
+                stat_prefix: tigerbeetle_1
+                cluster: tigerbeetle_1
+    - name: tigerbeetle_2
+      address:
+        socket_address:
+          address: 127.0.0.1
+          port_value: 13002
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.tcp_proxy
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
+                stat_prefix: tigerbeetle_2
+                cluster: tigerbeetle_2
+  clusters:
+    - name: tigerbeetle_0
+      connect_timeout: 2s
+      type: STATIC
+      load_assignment:
+        cluster_name: tigerbeetle_0
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: 10.8.0.11
+                      port_value: 3001
+      transport_socket: &tigerbeetle_tls
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          sni: tigerbeetle.guardian.internal
+          common_tls_context:
+            tls_certificates:
+              - certificate_chain:
+                  filename: /tls/tls.crt
+                private_key:
+                  filename: /tls/tls.key
+            validation_context:
+              trusted_ca:
+                filename: /tls/ca.crt
+              match_typed_subject_alt_names:
+                - san_type: DNS
+                  matcher:
+                    exact: tigerbeetle.guardian.internal
+    - name: tigerbeetle_1
+      connect_timeout: 2s
+      type: STATIC
+      load_assignment:
+        cluster_name: tigerbeetle_1
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: 10.8.0.12
+                      port_value: 3001
+      transport_socket: *tigerbeetle_tls
+    - name: tigerbeetle_2
+      connect_timeout: 2s
+      type: STATIC
+      load_assignment:
+        cluster_name: tigerbeetle_2
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: 10.8.0.13
+                      port_value: 3001
+      transport_socket: *tigerbeetle_tls
