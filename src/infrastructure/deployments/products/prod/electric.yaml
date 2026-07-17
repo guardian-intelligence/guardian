@@ -94,12 +94,12 @@ spec:
       volumes:
         - name: shape-log
           persistentVolumeClaim:
-            claimName: electric-shape-log
+            claimName: electric-shape-log-encrypted
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: electric-shape-log
+  name: electric-shape-log-encrypted
   namespace: tenant-guardian-prod
   labels:
     app.kubernetes.io/name: electric
