@@ -1,0 +1,407 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tigerbeetle-0
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: tigerbeetle
+    app.kubernetes.io/instance: tigerbeetle-0
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: ledger
+    guardian.dev/phase: runtime
+    guardian.dev/replica: "0"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tigerbeetle
+      app.kubernetes.io/instance: tigerbeetle-0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tigerbeetle
+        app.kubernetes.io/instance: tigerbeetle-0
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/component: ledger
+        guardian.dev/phase: runtime
+        guardian.dev/replica: "0"
+    spec:
+      automountServiceAccountToken: false
+      dnsPolicy: Default
+      hostNetwork: true
+      nodeSelector:
+        kubernetes.io/hostname: ash-earth
+      serviceAccountName: tigerbeetle
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        runAsGroup: 65532
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: tigerbeetle
+          image: ghcr.io/tigerbeetle/tigerbeetle:0.17.9@sha256:48f623f9c1e9b6cc44d77ca93634595ae99cce3246ded418763eb1a62eee45e9
+          imagePullPolicy: IfNotPresent
+          args:
+            - start
+            - --addresses=10.8.0.11:3000,10.8.0.12:3000,10.8.0.13:3000
+            - --cache-grid=4GiB
+            - --experimental
+            - --statsd=127.0.0.1:8125
+            - /data/ledger.tigerbeetle
+          ports:
+            - name: replica
+              containerPort: 3000
+              protocol: TCP
+          startupProbe:
+            tcpSocket:
+              port: replica
+            failureThreshold: 720
+            periodSeconds: 10
+            timeoutSeconds: 2
+          readinessProbe:
+            tcpSocket:
+              port: replica
+            failureThreshold: 3
+            periodSeconds: 10
+            timeoutSeconds: 2
+          resources:
+            requests:
+              cpu: "1"
+              memory: 8Gi
+            limits:
+              cpu: "1"
+              memory: 8Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              add:
+                - IPC_LOCK
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: Unconfined
+          volumeMounts:
+            - name: data
+              mountPath: /data
+        - name: statsd-exporter
+          image: quay.io/prometheus/statsd-exporter:v0.30.0@sha256:378cb79c4ac7d6941e5ed71b1f3cd6f4707cf42c72c104ffe81fa4d9026ef659
+          imagePullPolicy: IfNotPresent
+          args:
+            - --statsd.listen-udp=127.0.0.1:8125
+            - --statsd.listen-tcp=
+            - --web.listen-address=:9102
+          ports:
+            - name: statsd
+              containerPort: 8125
+              protocol: UDP
+            - name: metrics
+              containerPort: 9102
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: metrics
+            periodSeconds: 10
+            timeoutSeconds: 2
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: tigerbeetle-data-0
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tigerbeetle-1
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: tigerbeetle
+    app.kubernetes.io/instance: tigerbeetle-1
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: ledger
+    guardian.dev/phase: runtime
+    guardian.dev/replica: "1"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tigerbeetle
+      app.kubernetes.io/instance: tigerbeetle-1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tigerbeetle
+        app.kubernetes.io/instance: tigerbeetle-1
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/component: ledger
+        guardian.dev/phase: runtime
+        guardian.dev/replica: "1"
+    spec:
+      automountServiceAccountToken: false
+      dnsPolicy: Default
+      hostNetwork: true
+      nodeSelector:
+        kubernetes.io/hostname: ash-wind
+      serviceAccountName: tigerbeetle
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        runAsGroup: 65532
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: tigerbeetle
+          image: ghcr.io/tigerbeetle/tigerbeetle:0.17.9@sha256:48f623f9c1e9b6cc44d77ca93634595ae99cce3246ded418763eb1a62eee45e9
+          imagePullPolicy: IfNotPresent
+          args:
+            - start
+            - --addresses=10.8.0.11:3000,10.8.0.12:3000,10.8.0.13:3000
+            - --cache-grid=4GiB
+            - --experimental
+            - --statsd=127.0.0.1:8125
+            - /data/ledger.tigerbeetle
+          ports:
+            - name: replica
+              containerPort: 3000
+              protocol: TCP
+          startupProbe:
+            tcpSocket:
+              port: replica
+            failureThreshold: 720
+            periodSeconds: 10
+            timeoutSeconds: 2
+          readinessProbe:
+            tcpSocket:
+              port: replica
+            failureThreshold: 3
+            periodSeconds: 10
+            timeoutSeconds: 2
+          resources:
+            requests:
+              cpu: "1"
+              memory: 8Gi
+            limits:
+              cpu: "1"
+              memory: 8Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              add:
+                - IPC_LOCK
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: Unconfined
+          volumeMounts:
+            - name: data
+              mountPath: /data
+        - name: statsd-exporter
+          image: quay.io/prometheus/statsd-exporter:v0.30.0@sha256:378cb79c4ac7d6941e5ed71b1f3cd6f4707cf42c72c104ffe81fa4d9026ef659
+          imagePullPolicy: IfNotPresent
+          args:
+            - --statsd.listen-udp=127.0.0.1:8125
+            - --statsd.listen-tcp=
+            - --web.listen-address=:9102
+          ports:
+            - name: statsd
+              containerPort: 8125
+              protocol: UDP
+            - name: metrics
+              containerPort: 9102
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: metrics
+            periodSeconds: 10
+            timeoutSeconds: 2
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: tigerbeetle-data-1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tigerbeetle-2
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: tigerbeetle
+    app.kubernetes.io/instance: tigerbeetle-2
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: ledger
+    guardian.dev/phase: runtime
+    guardian.dev/replica: "2"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tigerbeetle
+      app.kubernetes.io/instance: tigerbeetle-2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tigerbeetle
+        app.kubernetes.io/instance: tigerbeetle-2
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/component: ledger
+        guardian.dev/phase: runtime
+        guardian.dev/replica: "2"
+    spec:
+      automountServiceAccountToken: false
+      dnsPolicy: Default
+      hostNetwork: true
+      nodeSelector:
+        kubernetes.io/hostname: ash-water
+      serviceAccountName: tigerbeetle
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        runAsGroup: 65532
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: tigerbeetle
+          image: ghcr.io/tigerbeetle/tigerbeetle:0.17.9@sha256:48f623f9c1e9b6cc44d77ca93634595ae99cce3246ded418763eb1a62eee45e9
+          imagePullPolicy: IfNotPresent
+          args:
+            - start
+            - --addresses=10.8.0.11:3000,10.8.0.12:3000,10.8.0.13:3000
+            - --cache-grid=4GiB
+            - --experimental
+            - --statsd=127.0.0.1:8125
+            - /data/ledger.tigerbeetle
+          ports:
+            - name: replica
+              containerPort: 3000
+              protocol: TCP
+          startupProbe:
+            tcpSocket:
+              port: replica
+            failureThreshold: 720
+            periodSeconds: 10
+            timeoutSeconds: 2
+          readinessProbe:
+            tcpSocket:
+              port: replica
+            failureThreshold: 3
+            periodSeconds: 10
+            timeoutSeconds: 2
+          resources:
+            requests:
+              cpu: "1"
+              memory: 8Gi
+            limits:
+              cpu: "1"
+              memory: 8Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              add:
+                - IPC_LOCK
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: Unconfined
+          volumeMounts:
+            - name: data
+              mountPath: /data
+        - name: statsd-exporter
+          image: quay.io/prometheus/statsd-exporter:v0.30.0@sha256:378cb79c4ac7d6941e5ed71b1f3cd6f4707cf42c72c104ffe81fa4d9026ef659
+          imagePullPolicy: IfNotPresent
+          args:
+            - --statsd.listen-udp=127.0.0.1:8125
+            - --statsd.listen-tcp=
+            - --web.listen-address=:9102
+          ports:
+            - name: statsd
+              containerPort: 8125
+              protocol: UDP
+            - name: metrics
+              containerPort: 9102
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: metrics
+            periodSeconds: 10
+            timeoutSeconds: 2
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: tigerbeetle-data-2
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: tigerbeetle
+  namespace: tenant-guardian
+  labels:
+    app.kubernetes.io/name: tigerbeetle
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: ledger
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tigerbeetle
+      app.kubernetes.io/part-of: guardian
+      guardian.dev/component: ledger
+      guardian.dev/phase: runtime

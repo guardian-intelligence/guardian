@@ -8,14 +8,15 @@ import (
 	"github.com/google/cel-go/cel"
 )
 
-func TestTigerBeetleBootstrapConformance(t *testing.T) {
+func TestTigerBeetleRuntimeConformance(t *testing.T) {
 	const (
-		clusterID = "49532141921164377784457307205600684260"
+		addresses = "--addresses=10.8.0.11:3000,10.8.0.12:3000,10.8.0.13:3000"
 		image     = "ghcr.io/tigerbeetle/tigerbeetle:0.17.9@sha256:48f623f9c1e9b6cc44d77ca93634595ae99cce3246ded418763eb1a62eee45e9"
+		exporter  = "quay.io/prometheus/statsd-exporter:v0.30.0@sha256:378cb79c4ac7d6941e5ed71b1f3cd6f4707cf42c72c104ffe81fa4d9026ef659"
 	)
 
-	path := runfilePath("src/infrastructure/deployments/tigerbeetle/system/bootstrap.yaml")
-	raw := readText(t, path)
+	identityPath := runfilePath("src/infrastructure/deployments/tigerbeetle/system/identity.yaml")
+	identity := readText(t, identityPath)
 
 	for _, want := range []string{
 		"name: tigerbeetle",
@@ -24,52 +25,110 @@ func TestTigerBeetleBootstrapConformance(t *testing.T) {
 		"kustomize.toolkit.fluxcd.io/prune: disabled",
 		"guardian.dev/data-classification: production",
 		"automountServiceAccountToken: false",
+	} {
+		assertTextContains(t, identity, want, identityPath)
+	}
+	for _, forbidden := range []string{
+		"replicated-encrypted",
+		"synthetic-",
+		"\nkind: Job\n",
+		"\nkind: Deployment\n",
+	} {
+		assertTextNotContains(t, identity, forbidden, identityPath)
+	}
+	for value, want := range map[string]int{
+		"kind: PersistentVolumeClaim": 3,
+		"storage: 100Gi":              3,
+	} {
+		if got := strings.Count(identity, value); got != want {
+			t.Fatalf("%s contains %q %d times, want %d", identityPath, value, got, want)
+		}
+	}
+
+	replicasPath := runfilePath("src/infrastructure/deployments/tigerbeetle/system/replicas.yaml")
+	replicas := readText(t, replicasPath)
+	for _, want := range []string{
+		"kind: PodDisruptionBudget",
+		"minAvailable: 2",
+		"strategy:",
+		"type: Recreate",
+		"hostNetwork: true",
+		"dnsPolicy: Default",
+		"automountServiceAccountToken: false",
 		"runAsNonRoot: true",
 		"allowPrivilegeEscalation: false",
 		"readOnlyRootFilesystem: true",
 		"- IPC_LOCK",
 		"type: Unconfined",
-		"--cluster=" + clusterID,
-		"--replica-count=3",
+		"- start",
+		addresses,
+		"--cache-grid=4GiB",
+		"--experimental",
+		"--statsd=127.0.0.1:8125",
+		"failureThreshold: 720",
 		image,
+		exporter,
 	} {
-		assertTextContains(t, raw, want, path)
+		assertTextContains(t, replicas, want, replicasPath)
 	}
 	for _, forbidden := range []string{
-		"replicated-encrypted",
-		"synthetic-",
-		"hostNetwork: true",
+		"format",
 		"privileged: true",
 		"\nkind: Service\n",
 		"\nkind: Ingress\n",
+		"\nkind: Gateway\n",
+		"hostPath:",
 	} {
-		assertTextNotContains(t, raw, forbidden, path)
+		assertTextNotContains(t, replicas, forbidden, replicasPath)
 	}
 	for value, want := range map[string]int{
-		"kind: PersistentVolumeClaim": 3,
-		"storage: 100Gi":              3,
-		"kind: Job":                   3,
-		"--cluster=" + clusterID:      3,
-		"--replica-count=3":           3,
-		image:                         3,
+		"kind: Deployment":           3,
+		"hostNetwork: true":          3,
+		"- start":                    3,
+		addresses:                    3,
+		"--cache-grid=4GiB":          3,
+		image:                        3,
+		exporter:                     3,
+		"claimName: tigerbeetle-data": 3,
 	} {
-		if got := strings.Count(raw, value); got != want {
-			t.Fatalf("%s contains %q %d times, want %d", path, value, got, want)
+		if got := strings.Count(replicas, value); got != want {
+			t.Fatalf("%s contains %q %d times, want %d", replicasPath, value, got, want)
 		}
 	}
-
 	nodes := []string{"ash-earth", "ash-wind", "ash-water"}
 	for replica, node := range nodes {
 		index := fmt.Sprintf("%d", replica)
 		for _, want := range []string{
-			"name: tigerbeetle-data-" + index,
-			"name: tigerbeetle-format-" + index,
+			"name: tigerbeetle-" + index,
 			"kubernetes.io/hostname: " + node,
-			"--replica=" + index,
 			"claimName: tigerbeetle-data-" + index,
 		} {
-			assertTextContains(t, raw, want, path)
+			assertTextContains(t, replicas, want, replicasPath)
 		}
+	}
+
+	observabilityPath := runfilePath("src/infrastructure/deployments/tigerbeetle/system/observability.yaml")
+	observability := readText(t, observabilityPath)
+	for _, want := range []string{
+		"name: tigerbeetle-metrics",
+		"kind: VMServiceScrape",
+		"kind: VMRule",
+		"port: 9102",
+		"tb_replica_status != 0",
+		"tb_replica_sync_stage != 0",
+		"TigerBeetleReplicaCountDegraded",
+		"TigerBeetleProcessRestarted",
+		"TigerBeetleVolumeSpaceLow",
+	} {
+		assertTextContains(t, observability, want, observabilityPath)
+	}
+	for _, forbidden := range []string{
+		"port: 3000",
+		"targetPort: replica",
+		"\nkind: Ingress\n",
+		"\nkind: Gateway\n",
+	} {
+		assertTextNotContains(t, observability, forbidden, observabilityPath)
 	}
 }
 
@@ -84,6 +143,11 @@ func TestTigerBeetleAdmissionAndNetworkBoundary(t *testing.T) {
 		"object.spec.hostNetwork == false",
 		"variables.images.all(image, image in variables.allowedImages)",
 		"object.spec.automountServiceAccountToken == false",
+		"object.spec.hostNetwork == true",
+		"'kubernetes.io/hostname' in object.spec.nodeSelector",
+		"has(volume.persistentVolumeClaim)",
+		"container.securityContext.capabilities.drop.exists",
+		"argument != 'format'",
 		"container.securityContext.allowPrivilegeEscalation == false",
 		"container.securityContext.readOnlyRootFilesystem == true",
 		"validationActions:",
@@ -145,7 +209,7 @@ func TestTigerBeetleAdmissionAndNetworkBoundary(t *testing.T) {
 	}
 }
 
-func TestTigerBeetleFluxBootstrapGate(t *testing.T) {
+func TestTigerBeetleFluxRuntimeGate(t *testing.T) {
 	path := runfilePath("src/infrastructure/base/flux/sync.yaml")
 	raw := readText(t, path)
 	start := strings.Index(raw, "name: guardian-tigerbeetle")
@@ -161,10 +225,13 @@ func TestTigerBeetleFluxBootstrapGate(t *testing.T) {
 		"path: ./src/infrastructure/deployments/tigerbeetle/system",
 		"- name: guardian-mgmt-storage",
 		"- name: guardian-mgmt-admission",
-		"name: tigerbeetle-format-0",
-		"name: tigerbeetle-format-1",
-		"name: tigerbeetle-format-2",
+		"kind: Deployment",
+		"name: tigerbeetle-0",
+		"name: tigerbeetle-1",
+		"name: tigerbeetle-2",
 	} {
 		assertTextContains(t, slice, want, path)
 	}
+	assertTextNotContains(t, slice, "kind: Job", path)
+	assertTextNotContains(t, slice, "tigerbeetle-format", path)
 }
