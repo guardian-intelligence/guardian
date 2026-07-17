@@ -32,3 +32,4 @@ reality: an ADR whose related source no longer exists has expired.
 | [0009](0009-node-local-zfs-not-ceph.md) | VM substrate storage is node-local ZFS, not Ceph | Accepted | 2026-07-11 |
 | [0010](0010-two-release-signatures-one-format-per-lane.md) | Two release signatures, one format per lane | Accepted | 2026-07-12 |
 | [0011](0011-three-replica-tigerbeetle.md) | TigerBeetle uses three production replicas | Accepted | 2026-07-17 |
+| [0012](0012-tigerbeetle-owns-credit-reservations.md) | TigerBeetle owns customer-credit reservations | Accepted | 2026-07-17 |
