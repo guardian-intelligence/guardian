@@ -96,7 +96,7 @@ jobs:
           ISSUER: https://token.actions.githubusercontent.com
         run: |
           pinned="$(grep -o 'ghcr.io/guardian-intelligence/payments-canary@sha256:[a-f0-9]\{64\}' \
-            src/infrastructure/deployments/payments/prod/canary.yaml | cut -d@ -f2)"
+            src/infrastructure/deployments/payments/prod/browser-canary.yaml | cut -d@ -f2)"
           cosign verify --certificate-identity "$IDENTITY" \
             --certificate-oidc-issuer "$ISSUER" \
             "ghcr.io/guardian-intelligence/payments-canary@$pinned" > /dev/null
