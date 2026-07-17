@@ -363,6 +363,31 @@ func TestHandleSlackDeliveryFailure(t *testing.T) {
 	}
 }
 
+func TestHandleSlackSelfAlertDeliveryFailureDoesNotFeedFailureAlert(t *testing.T) {
+	out := &fakeSink{err: errors.New("ntfy down")}
+	s := newTestServer(out)
+	payload := alertaJSON(alertaText(
+		"Open",
+		"PRODUCTION",
+		"Guardian",
+		"Warning",
+		"AlertRelayForwardFailures",
+		"10.244.0.230:8080",
+	))
+	w := httptest.NewRecorder()
+	s.handleSlack(w, httptest.NewRequest("POST", "/slack", strings.NewReader(payload)))
+	if w.Code != 202 {
+		t.Errorf("status = %d, want 202", w.Code)
+	}
+	s.inflight.Wait()
+	if got := s.m.forwardFailures.Load(); got != 0 {
+		t.Errorf("failure counter = %d, want 0", got)
+	}
+	if got := s.m.selfAlertFailures.Load(); got != 1 {
+		t.Errorf("self-alert failure counter = %d, want 1", got)
+	}
+}
+
 // TestHandleSlackSurvivesProducerDisconnect drives the real ntfySink through
 // the handler against a sink that fails twice, and cancels the producer's
 // request context during the first attempt — as Flagger's 5s-timeout,
