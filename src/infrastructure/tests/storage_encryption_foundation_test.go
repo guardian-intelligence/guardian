@@ -1,6 +1,9 @@
 package tests
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestCozystackNativeLinstorEncryptionConformance(t *testing.T) {
 	path := runfilePath("src/infrastructure/base/storage/storageclasses.yaml")
@@ -102,5 +105,10 @@ func TestCozystackNativeLinstorEncryptionConformance(t *testing.T) {
 	for workloadPath, want := range workloads {
 		raw := readText(t, runfilePath(workloadPath))
 		assertTextContains(t, raw, want, workloadPath)
+	}
+	electricPath := "src/infrastructure/deployments/products/prod/electric.yaml"
+	electric := readText(t, runfilePath(electricPath))
+	if got := strings.Count(electric, "electric-shape-log-encrypted"); got != 2 {
+		t.Fatalf("%s must declare and mount electric-shape-log-encrypted exactly twice, got %d", electricPath, got)
 	}
 }
