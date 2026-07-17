@@ -1,0 +1,26 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: payments
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: payments
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 1m
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "65"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "65"
+spec:
+  ingressClassName: tenant-root
+  rules:
+    - host: guardianintelligence.org
+      http:
+        paths:
+          - path: /api/payments
+            pathType: Prefix
+            backend:
+              service:
+                name: payments
+                port:
+                  number: 80

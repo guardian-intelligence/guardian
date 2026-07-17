@@ -48,7 +48,7 @@ jobs:
         id: classify
         run: |
           service_pin_file=src/infrastructure/deployments/payments/prod/deployment.yaml
-          canary_pin_file=src/infrastructure/deployments/payments/prod/canary.yaml
+          canary_pin_file=src/infrastructure/deployments/payments/prod/browser-canary.yaml
           service_re='ghcr.io/guardian-intelligence/payments@sha256:[a-f0-9]\{64\}'
           canary_re='ghcr.io/guardian-intelligence/payments-canary@sha256:[a-f0-9]\{64\}'
           build=false service_pin=false canary_pin=false

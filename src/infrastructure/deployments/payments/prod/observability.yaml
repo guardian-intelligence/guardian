@@ -1,0 +1,160 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: payments-metrics
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: payments
+    app.kubernetes.io/component: metrics
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  selector:
+    app.kubernetes.io/component: payments
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: payments
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: payments
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  namespaceSelector:
+    matchNames:
+      - tenant-guardian-prod
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: payments
+      app.kubernetes.io/component: metrics
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: payments
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: payments
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  groups:
+    - name: payments-prod.rules
+      interval: 30s
+      rules:
+        - alert: PaymentsScrapeDown
+          expr: sum(up{namespace="tenant-guardian-prod",job="payments-metrics"}) < 1 or absent(up{namespace="tenant-guardian-prod",job="payments-metrics"})
+          for: 5m
+          labels:
+            severity: warning
+            guardian_stage: prod
+          annotations:
+            summary: "Payments metrics scrape is down"
+            description: "No payments replica has been scrapeable for five minutes."
+        - alert: PaymentsStripeAccountBindingLost
+          expr: max(guardian_payments_stripe_account_binding) < 1 or absent(guardian_payments_stripe_account_binding)
+          for: 5m
+          labels:
+            severity: critical
+            guardian_stage: prod
+          annotations:
+            summary: "Payments no longer verifies its Stripe sandbox account"
+            description: "The runtime key cannot resolve to the configured sandbox account, or the account ID has drifted."
+        - alert: PaymentsProviderBacklog
+          expr: max(guardian_payments_provider_events_pending) > 0 and max(guardian_payments_oldest_provider_event_age_seconds) > 300
+          for: 5m
+          labels:
+            severity: critical
+            guardian_stage: prod
+          annotations:
+            summary: "Stripe events are not reaching the ledger"
+            description: "At least one durable Stripe event has remained unprojected for more than five minutes."
+        - alert: PaymentsJournalIncomplete
+          expr: max(guardian_payments_journal_incomplete_commands) > 0
+          for: 5m
+          labels:
+            severity: critical
+            guardian_stage: prod
+          annotations:
+            summary: "A TigerBeetle command lacks complete recovery evidence"
+            description: "A payment mutation is missing an immutable intent, accepted result, or outcome journal record."
+        - alert: PaymentsUnmatchedBalanceTransaction
+          expr: max(guardian_payments_unmatched_balance_transactions) > 0
+          for: 5m
+          labels:
+            severity: critical
+            guardian_stage: prod
+          annotations:
+            summary: "Stripe and Guardian payment records do not reconcile"
+            description: "A Stripe balance transaction is still unmatched after the reconciliation grace period."
+        - alert: PaymentsReconciliationStale
+          expr: time() - max(guardian_payments_reconciliation_last_success_timestamp_seconds) > 900 or absent(guardian_payments_reconciliation_last_success_timestamp_seconds)
+          for: 5m
+          labels:
+            severity: critical
+            guardian_stage: prod
+          annotations:
+            summary: "Stripe balance reconciliation is stale"
+            description: "No successful Stripe balance reconciliation has completed in fifteen minutes."
+        - alert: PaymentsRailCanaryStale
+          expr: time() - max(guardian_payments_canary_last_success_timestamp_seconds{lane="rail"}) > 600 or absent(guardian_payments_canary_last_success_timestamp_seconds{lane="rail"})
+          for: 5m
+          labels:
+            severity: critical
+            guardian_stage: prod
+          annotations:
+            summary: "Stripe-to-TigerBeetle rail canary is stale"
+            description: "The synthetic direct-payment rail has not passed in ten minutes."
+        - alert: PaymentsCheckoutCanaryStale
+          expr: time() - max(guardian_payments_canary_last_success_timestamp_seconds{lane="checkout"}) > 600 or absent(guardian_payments_canary_last_success_timestamp_seconds{lane="checkout"})
+          for: 5m
+          labels:
+            severity: critical
+            guardian_stage: prod
+          annotations:
+            summary: "Browser-to-Stripe-to-TigerBeetle checkout canary is stale"
+            description: "The hosted Checkout and trace-verification canary has not passed in ten minutes."
+        - alert: PaymentsCanaryFailed
+          expr: increase(guardian_payments_canary_runs_total{outcome="failed"}[10m]) > 0
+          labels:
+            severity: critical
+            guardian_stage: prod
+          annotations:
+            summary: "A payments end-to-end canary failed"
+            description: "Inspect the lane and the durable canary run for the failure class and trace ID."
+        - alert: PaymentsInvalidSignatureBurst
+          expr: increase(guardian_payments_webhook_receipts_total{outcome="invalid_signature"}[5m]) > 5
+          labels:
+            severity: warning
+            guardian_stage: prod
+          annotations:
+            summary: "Stripe webhook signature failures are elevated"
+            description: "More than five invalid webhook signatures arrived in five minutes; a single probe remains silent."
+        - alert: PaymentsLiveModeEventRejected
+          expr: increase(guardian_payments_webhook_receipts_total{outcome="live_mode_rejected"}[5m]) > 0
+          labels:
+            severity: critical
+            guardian_stage: prod
+          annotations:
+            summary: "A live-mode Stripe event reached the sandbox payment plane"
+            description: "The event was rejected before persistence or ledger mutation."
+        - alert: PaymentsRailCanaryJobFailed
+          expr: kube_job_status_failed{namespace="tenant-guardian-prod",job_name=~"payments-rail-canary-.*"} > 0
+          labels:
+            severity: critical
+            guardian_stage: prod
+          annotations:
+            summary: "The scheduled Stripe-to-TigerBeetle rail canary Job failed"
+            description: "Inspect the latest payments-rail-canary Job logs."

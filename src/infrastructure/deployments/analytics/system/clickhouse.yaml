@@ -54,6 +54,8 @@ spec:
   # section of runbooks/postgres-backup-restore.md's sibling procedure).
   users:
     ingest: {}
+    payments_canary:
+      readonly: true
   # Chart bug workaround #2 (v1.5.0): backup.useSystemBucket is broken for
   # any https external S3 — the platform credentials projector strips the
   # scheme off the projected `endpoint` key (SeaweedFS-era assumption) and

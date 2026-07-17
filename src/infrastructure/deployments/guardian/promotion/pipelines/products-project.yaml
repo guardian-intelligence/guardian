@@ -1,12 +1,21 @@
-# The products promotion pipeline. The Warehouse tracks upstream Electric
-# releases on docker.io directly (SemVer within the pinned major).
-#
-# No autoPromotionEnabled entry: Electric fronts the mission-critical product
-# Postgres, so promotion to prod is always a deliberate act (human or agent).
+# Product-plane promotion. Electric remains deliberate; the two
+# Guardian-built payments images auto-promote together after CI publishes
+# their signed edge digests, then pass branch protection and Flagger.
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Project
 metadata:
   name: guardian-products
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: ProjectConfig
+metadata:
+  name: guardian-products
+  namespace: guardian-products
+spec:
+  promotionPolicies:
+    - stageSelector:
+        name: payments-prod
+      autoPromotionEnabled: true
 ---
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Warehouse
@@ -20,4 +29,23 @@ spec:
         repoURL: docker.io/electricsql/electric
         imageSelectionStrategy: SemVer
         constraint: ">=1.7.6 <2.0.0"
+        platform: linux/amd64
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Warehouse
+metadata:
+  name: payments
+  namespace: guardian-products
+spec:
+  interval: 1m0s
+  subscriptions:
+    - image:
+        repoURL: ghcr.io/guardian-intelligence/payments
+        imageSelectionStrategy: Digest
+        constraint: edge
+        platform: linux/amd64
+    - image:
+        repoURL: ghcr.io/guardian-intelligence/payments-canary
+        imageSelectionStrategy: Digest
+        constraint: edge
         platform: linux/amd64

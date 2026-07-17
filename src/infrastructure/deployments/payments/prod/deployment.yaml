@@ -1,0 +1,169 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: payments
+    app.kubernetes.io/part-of: guardian
+    app.kubernetes.io/component: payments
+    guardian.dev/product: guardian
+    guardian.dev/stage: prod
+  annotations:
+    reloader.stakater.com/auto: "true"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: payments
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: payments
+        app.kubernetes.io/part-of: guardian
+        app.kubernetes.io/component: payments
+        guardian.dev/otel: producer
+        guardian.dev/product: guardian
+        guardian.dev/stage: prod
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/component: payments
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: payments
+          image: ghcr.io/guardian-intelligence/payments@sha256:fa3a0ea98310ed14c652e9c213af16a4b1ac3252d856beba5c9785243c949983
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-products-credentials
+                  key: payments
+            - name: DATABASE_URL
+              value: postgresql://payments:$(PGPASSWORD)@postgres-products-rw.tenant-guardian-prod.svc:5432/payments?sslmode=require
+            - name: PUBLIC_BASE_URL
+              value: https://guardianintelligence.org
+            - name: OIDC_ISSUER
+              value: https://guardianintelligence.org/realms/postflight
+            - name: OIDC_CLIENT_ID
+              value: postflight-web
+            - name: STRIPE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: payments-stripe
+                  key: api_key
+            - name: STRIPE_ACCOUNT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: payments-stripe
+                  key: account_id
+            - name: STRIPE_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: payments-stripe
+                  key: webhook_secret
+            - name: STRIPE_CANARY_PRICE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: payments-stripe
+                  key: canary_price_id
+            - name: TIGERBEETLE_ADDRESSES
+              value: 10.8.0.11:3000,10.8.0.12:3000,10.8.0.13:3000
+            - name: TIGERBEETLE_CLUSTER_ID
+              value: "0"
+            - name: JOURNAL_S3_ENDPOINT
+              value: https://c3eaeffaadf7d4847684d4775c16d598.r2.cloudflarestorage.com
+            - name: JOURNAL_S3_REGION
+              value: auto
+            - name: JOURNAL_S3_BUCKET
+              value: guardian-backups
+            - name: JOURNAL_S3_PREFIX
+              value: tenant-guardian-prod/payments-journal
+            - name: JOURNAL_S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: payments-journal-r2
+                  key: access_key_id
+            - name: JOURNAL_S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: payments-journal-r2
+                  key: secret_access_key
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              value: otel-collector.guardian-analytics.svc.cozy.local:4317
+            - name: PAYMENTS_CANARY_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: payments-canary
+                  key: token
+            - name: CUSTOMER_CHECKOUT_ENABLED
+              value: "false"
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 120
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+              ephemeral-storage: 128Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+              ephemeral-storage: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: payments
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: payments
+    app.kubernetes.io/part-of: guardian
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: payments

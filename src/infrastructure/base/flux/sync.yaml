@@ -699,11 +699,51 @@ spec:
       kind: ExternalSecret
       name: analytics-ch-ingest
       namespace: guardian-analytics
+    - apiVersion: external-secrets.io/v1beta1
+      kind: ExternalSecret
+      name: payments-checkout-canary
+      namespace: guardian-analytics
   healthCheckExprs:
     - apiVersion: external-secrets.io/v1beta1
       kind: ExternalSecret
       current: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
       failed: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'False')
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: guardian-payments-prod
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/deployments/payments/prod
+  sourceRef:
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: guardian-source
+  dependsOn:
+    - name: guardian-products-prod
+    - name: guardian-iam-prod
+    - name: guardian-analytics
+    - name: guardian-tigerbeetle
+    - name: guardian-flagger
+  prune: true
+  wait: true
+  timeout: 15m
+  healthCheckExprs:
+    - apiVersion: external-secrets.io/v1beta1
+      kind: ExternalSecret
+      current: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'True')
+      failed: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'False')
+    - apiVersion: flagger.app/v1beta1
+      kind: Canary
+      current: status.phase == 'Succeeded'
+      inProgress: status.phase in ['Initializing', 'Progressing', 'Promoting', 'Finalising']
+      failed: status.phase in ['Failed', 'Terminating']
 ---
 # Cockpit telemetry plane: the per-node sampler StatefulSet, the hub serving
 # the public homepage stream, Cilium policy, and self-monitoring

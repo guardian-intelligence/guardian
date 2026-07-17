@@ -71,6 +71,13 @@ spec:
           annotations:
             summary: "Analytics ingest metrics scrape is down"
             description: "vmagent cannot scrape analytics-ingest /metrics (or the scrape target was never discovered); the enrichment canary is blind while this fires."
+        - alert: PaymentsCheckoutCanaryJobFailed
+          expr: kube_job_status_failed{namespace="guardian-analytics",job_name=~"payments-checkout-canary-.*"} > 0
+          labels:
+            severity: critical
+          annotations:
+            summary: "The browser-to-Stripe-to-TigerBeetle checkout canary Job failed"
+            description: "Inspect the latest payments-checkout-canary Job; the service alert carries the durable failure class and trace ID."
 ---
 # vmagent scrapes /metrics from cozy-monitoring; the existing ingest CCNP
 # only admits tenant-root (public edge) and ClickHouse egress.

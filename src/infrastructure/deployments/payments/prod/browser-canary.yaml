@@ -1,0 +1,77 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: payments-checkout-canary
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: payments-checkout-canary
+    app.kubernetes.io/part-of: guardian
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 240
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: payments-checkout-canary
+            app.kubernetes.io/part-of: guardian
+            guardian.dev/role: analytics-client
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: canary
+              image: ghcr.io/guardian-intelligence/payments-canary@sha256:e1bd41a9dd00e55dd5d7de920b4c25ef12cabed478c2b211e814e64870f23da7
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: PAYMENTS_PUBLIC_CANARY_URL
+                  value: https://guardianintelligence.org/api/payments/v1/canary
+                - name: PAYMENTS_CANARY_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: payments-checkout-canary
+                      key: token
+                - name: CLICKHOUSE_HTTP_URL
+                  value: http://chendpoint-clickhouse-analytics.tenant-root.svc.cozy.local:8123
+                - name: CLICKHOUSE_USER
+                  value: payments_canary
+                - name: CLICKHOUSE_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: payments-checkout-canary
+                      key: clickhouse_password
+                - name: CANARY_TIMEOUT
+                  value: 3m
+              resources:
+                requests:
+                  cpu: 250m
+                  memory: 512Mi
+                  ephemeral-storage: 512Mi
+                limits:
+                  cpu: "2"
+                  memory: 2Gi
+                  ephemeral-storage: 2Gi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+                readOnlyRootFilesystem: true
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: 1Gi
