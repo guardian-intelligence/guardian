@@ -1,10 +1,13 @@
-# OpenBao secrets platform — design
+# OpenBao secrets platform — design (target state)
 
-Guardian runs a three-member OpenBao raft cluster with static auto-unseal,
-self-init, independent cert-manager listener TLS, retained encrypted local
-storage, KV, and Transit. OpenBao configuration lives in the self-init
-`initialize` block; the tested platform convergence proof is
-`aspect infra converged`.
+Status: **IMPLEMENTATION IN PROGRESS.** The repo now declares static seal,
+self-init, independent cert-manager listener TLS, `openbao-local` retained
+storage, KV, and Transit. The old manual-unseal/operator-bootstrap path, the
+OpenBao-issued listener certificate path, and the custom `openbao-ops-controller`
+operator (with its CRDs and hand-authored operation CRs) have all been removed:
+OpenBao config now lives entirely in the self-init `initialize` block. Remaining
+target-state gaps called out below include the exact `zfsThinPool` substrate,
+hostPath admission enforcement in the live cluster, and tested stateful restore.
 
 Scope: the Guardian tenant OpenBao (3-node raft) secrets platform. OpenBao is
 one bootstrapping component of the system, not the system's end state; the
@@ -18,13 +21,12 @@ called out explicitly.
 ## Topology & storage
 - 3-node raft `StatefulSet` in `tenant-guardian`, one member per node, hard pod + node
   anti-affinity so a single node loss removes exactly one member (quorum 2/3).
-- **Encrypted local storage per member** — `local-encrypted-retain` uses
-  Cozystack's native LINSTOR `luks storage` layer with remote access disabled.
-  Each member has one retained LUKS PVC for raft data and one for audit data.
-  Raft already replicates at the application layer; DRBD underneath would
-  multiply physical copies, add a network hop to the latency-critical per-entry
-  `fsync`, and introduce double-attach/fencing risk a consensus store exists to
-  avoid.
+- **Local storage per member** — node-pinned `zfsThinPool` (replica=1) StorageClass, one
+  PVC per pod, for both the raft data volume and the audit volume. **Not `replicated`
+  (LINSTOR).** Raft already replicates at the application layer; replicated block storage
+  underneath multiplies physical copies, adds a network hop to the latency-critical
+  per-entry `fsync`, and introduces double-attach/fencing risk a consensus store exists to
+  avoid. Local storage is HashiCorp's documented model for integrated storage.
 - The three members are pinned to three **dedicated, tainted, key-bearing nodes**: local PV
   + seal-key placement co-locate on the same three nodes. General workloads are kept off via
   taints; admission blocks any other hostPath/privileged pod from mounting the key directory.
@@ -114,11 +116,12 @@ called out explicitly.
 - Self-init's `enable_transit_mount` request declares the Transit engine so approved
   key-management consumers can be added without reintroducing a bootstrap control plane.
 - Durable Transit keys are not declared generically. A Transit key that protects
-  durable ciphertext is data-loss-critical: create it with `exportable=true`
-  and `allow_plaintext_backup=true`, export the full keyring exactly once through
-  `transit/backup`, and seal that export in offline custody. The export is
-  plaintext key material and must never enter Git, Kubernetes, R2, chat, argv,
-  or storage colocated with OpenBao data.
+  durable ciphertext is data-loss-critical: it survives reinit and disaster
+  recovery as data, through the barrier-encrypted raft snapshots continuously
+  shipped to R2 (`docs/secrets.md` §Disaster recovery). No plaintext keyring
+  ever leaves OpenBao — keys are created non-exportable, and the snapshot is
+  unreadable without the custody-held seal key, so R2 holding it violates no
+  boundary.
 - Non-durable drill keys may be created imperatively during DR verification and
   deleted afterward.
 - The first durable key is `guardian-images` (ecdsa-p256), the Guardian
@@ -156,9 +159,9 @@ called out explicitly.
   server, not by care. `TestOpenBaoSecretScopeConformance` enforces the same invariant at
   review time over every ExternalSecret and SecretStore in the repo.
 - Only structural config changes (a new consumer namespace, a new mount or auth method) touch
-  the `initialize` block, and they ship as Git edit + re-initialization,
-  custody import, and scoped re-relays. Consumers keep running because
-  materialized Secrets are Orphan/Retain. Routine integration adds never re-init.
+  the `initialize` block, and they ship as Git edit + re-initialization (raft-snapshot
+  restore under the new config, zero-downtime for consumers because
+  materialized Secrets are Orphan/Retain). Routine integration adds never re-init.
 - ESO is the consumer: SecretStore/ClusterSecretStore → OpenBao KV; ExternalSecrets
   materialize native Secrets. OpenBao is source of truth; the k8s Secret is a synced cache. The
   `external-dns` ExternalSecret going Ready is the functional proof that self-init created the
@@ -170,38 +173,48 @@ called out explicitly.
 - **No network audit "fallback" device.** A second socket/syslog device *enlarges* the
   blocking surface (a network audit device is more block-prone), so it makes availability
   worse, not better.
-- A sidecar tails the file to stdout, where the cluster log collector ingests it
-  into VictoriaLogs. This path is asynchronous and is not an OpenBao audit
-  device; the local file remains the request-path audit device.
+- A sidecar tails the file and ships rotated logs to **Cloudflare R2 with a bucket-lock rule
+  (WORM)** for tamper-evident offsite retention — strictly async/downstream, never in the
+  request path. R2 is not an OpenBao audit device.
 
 ## Disaster recovery
-- Primary recovery model: self-init rebuilds structure from Git; the importer
-  restores fixed integration inputs from custody/bootstrap storage; scoped
-  writers relay in-cluster-generated Orphan/Retain Secrets; durable Transit
-  keys restore from custody-held `transit/backup` keyring exports.
-- **No recovery keys or standing administrator.** Self-init emits no root token
-  and no recovery keys, and none are established afterward. Recovery keys
-  cannot decrypt the barrier; they only authorize `generate-root`.
-- **The 32-byte static seal key is a first-class custody artifact.** Every member
-  needs the exact key file to start and join the raft cluster. It is stored in
-  the encrypted custody repository and placed out of band on each key-bearing
-  node.
-- **No automated raft snapshots.** No OpenBao snapshot CronJob, uploader, or R2
-  restore dependency is deployed. A manual snapshot is not a migration or DR
-  prerequisite.
-- **Tested recovery:** required before relying on a durable Transit key. The
-  drill cold-starts a throwaway cluster, restores the exported keyring through
-  `transit/restore`, and verifies a pre-recovery ciphertext or signature against
-  the original public-key fingerprint.
+- Primary recovery model: config rebuilds from Git (self-init), data restores
+  from the latest raft snapshot. A cluster CronJob runs
+  `bao operator raft snapshot` and ships the result to R2 continuously; the
+  snapshot is barrier-encrypted (unreadable without the custody-held static
+  seal key, so offsite storage violates no boundary) and carries every KV
+  version and Transit keyring in one artifact.
+- **No recovery keys.** Self-init emits no root token and no recovery keys, and
+  none are established afterward. Recovery keys cannot decrypt the barrier;
+  they only authorize `generate-root`. Break-glass admin access is regenerate:
+  wipe, cold-start from Git, restore the snapshot.
+- **WORM on R2 = bucket-lock rule, not S3 Object Lock** (R2 has no per-object retention and
+  no write-without-delete token). The uploader gets a **bucket-scoped Object R/W token**; the
+  lock rule is created/owned by a **separate admin credential** held out-of-band. The lock,
+  not token scope, is what blocks deletion.
+- **The 32-byte static seal key is a first-class backup artifact.** A snapshot is
+  barrier-encrypted and only restorable with the same seal, so the key must be backed up
+  **separately from the snapshots, under different custody**, and **old key versions retained
+  for as long as any snapshot they encrypted still exists** (this couples seal-key rotation to
+  snapshot retention). Without the key, snapshots are unrecoverable ciphertext.
+- **Restore is whole-cluster only** in OSS (no partial/`inspect`/`recover`). DR = init a fresh
+  3-node cluster with the same static key, `snapshot restore -force`, unseal. Transit
+  keyrings and KV state return intact because they live inside the barrier the
+  snapshot carries.
+- **Tested restores:** required before relying on OpenBao Transit for durable
+  ciphertext. The drill must cold-start a throwaway cluster, `transit/restore`
+  the exported keyring, and assert a Transit decrypt of pre-restore ciphertext;
+  when exercising the snapshot path, the throwaway cluster must start with the
+  same static key and pass the same decrypt check after snapshot restore.
 
 ## Seal-key rotation
-- `previous_key`/`current_key` under a new key-id; roll one pod at a time and
-  keep the previous key until rewrap/seal-migration evidence clears it. Key
-  contents never change without the key-id changing.
+- `previous_key`/`current_key` under a new key-id; roll one pod at a time; keep the previous
+  key until rewrap/seal-migration evidence clears it **and** no retained snapshot still needs
+  it. Key contents never change without the key-id changing.
 
 ---
 
-## Bootstrap ordering
+## Bootstrap ordering (target sequence)
 
 Talos up → break-glass place seal key on the 3 pinned nodes → **cert-manager up** →
 independent cert-manager listener CA creates `guardian-openbao-api-tls` →
@@ -214,7 +227,7 @@ easy to race, so encode the dependency explicitly.
 
 ---
 
-## Operations inventory
+## Remaining Ops Inventory
 
 Created by the self-init `initialize` block and Ready in the current cluster:
 - `kv` mount and tune.
@@ -229,15 +242,30 @@ Created by the self-init `initialize` block and Ready in the current cluster:
 Declared alongside self-init:
 - `ClusterSecretStore/external-dns-openbao` and `ExternalSecret/cloudflare-external-dns`.
 
-The `guardian-images` signing key is created imperatively once and restored
-from its custody-held keyring export. It is never a self-init request, custom
-operator, or CRD. Its recovery drill restores the keyring into a throwaway
-OpenBao, signs a test digest, and verifies both the signature and production
-public-key fingerprint.
+Legacy live cruft removed on 2026-06-29:
+- Deleted `tenant-root/ExternalSecret guardian-cnpg-backup-creds`,
+  `tenant-root/ExternalSecret guardian-clickhouse-backup-creds`,
+  `tenant-root/SecretStore openbao`, and `tenant-root/SecretStore openbao-clickhouse-backup`.
+  They pointed at retired `http://openbao-guardian.tenant-root.svc:8200`. Database backups
+  should remain platform-managed (Cozystack backup machinery pointed at off-cluster R2)
+  unless we intentionally reintroduce an OpenBao-backed credential projection.
 
-Database backup credentials remain platform-managed through Cozystack and the
-`tenant-root/backups-r2` OpenBao projection. Release signing and other online
-key operations use Transit; DNS consumes its Cloudflare API token from KV.
+Ops resources still needed before OpenBao is the real vault/transit authority:
+- Restore drill for any durable Transit key before that key protects production
+  ciphertext or signatures anything verifies. For `guardian-images`: restore
+  the latest raft snapshot into a throwaway OpenBao, sign a test digest, and
+  assert the public key matches the production key's fingerprint.
+- Durable Transit-key provisioning only when a real consumer requires it.
+  Self-init declares mounts/policies/auth roles; durable key material is
+  data — created imperatively once, recovered through snapshot restore —
+  never a self-init request (re-runs would mint new material each time) and
+  never a custom operator or CRD.
+- ExternalSecrets for any remaining consumers of Cloudflare/R2 credentials beyond
+  `external-dns` (the per-namespace roles already cover them; only the Git-side ESO wiring
+  is missing).
+- Release/signing, artifact provenance, envelope encryption, or workload key-management
+  components should use Transit rather than Kubernetes Secrets as the key authority.
+  DNS does not need Transit; it only needs a Cloudflare API token from KV.
 
 ## Key references
 - Integrated storage = local filesystem + consensus; remove-peer / peers.json recovery:
@@ -259,4 +287,7 @@ key operations use Transit; DNS consumes its Cloudflare API token from KV.
 - HA TLS example (shared multi-SAN cert, 8201 self-managed): https://developer.hashicorp.com/vault/docs/deploy/kubernetes/helm/examples/ha-tls
 - Stakater Reloader: https://github.com/stakater/Reloader · trust-manager: https://cert-manager.io/docs/trust/trust-manager/
 - OpenBao ACME TLS listeners (≥2.2): https://openbao.org/docs/rfcs/acme-tls-listeners/
-- OpenBao Transit key backup/restore: https://openbao.org/api-docs/secret/transit/#backup-key
+- `operator raft snapshot` save/restore: https://openbao.org/docs/commands/operator/raft/
+- Vault snapshot restore (`-force`, seal compat): https://developer.hashicorp.com/vault/docs/sysadmin/snapshots/restore
+- OpenBao auto-snapshot gap (Enterprise-only in Vault): https://github.com/openbao/openbao/issues/795
+- R2 bucket locks (WORM): https://developers.cloudflare.com/r2/buckets/bucket-locks/ · R2 tokens: https://developers.cloudflare.com/r2/api/tokens/

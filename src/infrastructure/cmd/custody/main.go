@@ -1,5 +1,6 @@
 // Command custody manages the encrypted custody bundle: the secret-zero set
-// (Talos genesis secrets, the OpenBao static-seal key, the operator env) that
+// (Talos genesis secrets, the LINSTOR master passphrase, the OpenBao
+// static-seal key, the operator env) that
 // no system the cluster controls may ever hold in full. The encrypted restic
 // repository is the ONLY at-rest form; plaintext exists solely inside the
 // fixed tmpfs bundle directory between `restore` and `wipe`.

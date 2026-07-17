@@ -23,31 +23,28 @@ function PostflightDocsPage() {
   return (
     <PageShell kicker="Postflight · Docs" heading="Trust, but verify.">
       <Body>
-        Your workload boots in a secure VM running our thin and light guest agent,
-        designed to ensure your workload&apos;s environment is secure before your code
-        runs. It:
+        Your workload boots in a secure VM running our thin and light guest agent, designed to
+        ensure your workload&apos;s environment is secure before your code runs. It:
       </Body>
       <Item>
-        Runs basic checks on your behalf. You don&apos;t have to trust them — verify the
-        guest agent is the one we published, and verify the environment yourself, from
-        your own workflow:
+        Runs basic checks on your behalf. You don&apos;t have to trust them — verify the guest agent
+        is the one we published, and verify the environment yourself, from your own workflow:
       </Item>
       <Commands />
       <Item>
-        Verifies the attached encrypted volumes — cached from your previous successful
-        runs — pass an integrity check. Your data is unreadable ciphertext, but a
-        compromised host could corrupt it before attaching the volume. A failed check
-        discards the cache and your job runs cold: corruption can cost speed, never
-        confidentiality.
+        Verifies the attached encrypted volumes — cached from your previous successful runs — pass
+        an integrity check. Your data is unreadable ciphertext, but a compromised host could corrupt
+        it before attaching the volume. A failed check discards the cache and your job runs cold:
+        corruption can cost speed, never confidentiality.
       </Item>
       <Body>
-        These protections are designed to keep your workload and data safe even if the
-        entire Guardian platform is compromised — as long as you do your part to keep
-        yourself safe. Trust, but verify.
+        These protections are designed to keep your workload and data safe even if the entire
+        Guardian platform is compromised — as long as you do your part to keep yourself safe. Trust,
+        but verify.
       </Body>
       <Notice>
-        Design preview: the encrypted-volume path is in active development, and the
-        exact verify invocations ship with it.
+        Design preview: the encrypted-volume path is in active development, and the exact verify
+        invocations ship with it.
       </Notice>
     </PageShell>
   );

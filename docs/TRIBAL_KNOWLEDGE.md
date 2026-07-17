@@ -126,9 +126,7 @@ place that knows the URL today.)
 
 <scratchpad>
 * Cluster autorotates CA every 90 days
-* Management nodes boot signed Talos UKIs with UEFI Secure Boot enabled. Talos
-  TPM-LUKS protects STATE/EPHEMERAL; Cozystack-native LINSTOR LUKS protects
-  persistent volumes. See `src/infrastructure/runbooks/storage-encryption.md`.
+* Disk encryption done via TPM 2.0 keyring with Talos paired with M4 SecureBoot.
 * Automated etcd snapshots to R2
 </scratchpad>
 
@@ -164,7 +162,7 @@ place that knows the URL today.)
 * `guardian-mgmt` private API VIP: `https://10.8.0.250:6443`. MetalLB for L2/ARP inside the Latitude VLAN. `10.8.0.200 - 10.8.0.240`. Public edge is `Service.type=LoadBalancer` backed by MetalLB/Cilium allocation and announcement, with Cloudflare Load Balancing in front for WAF, TLS, health checks, and failover. Cloudflare origins are the three Latitude public node IPs, and the public edge must stay stateless so Cloudflare can steer around unhealthy origins per request.
 * Never download unpinned versions of software or set an unpinned version as a dependency. Binaries are versioned, built, packaged, and installed by Bazel declarations.
 * Container images are digest-pinned wherever this repo renders them, with the registry named explicitly (never `grafana/k6`-style default-registry refs). The cold-bootstrap inventory is the GENERATED union of those rendered refs and `images.declared.lock`; the infra conformance tests enforce digest pinning, declared/rendered disjointness, and dark-mirror host coverage. A rendered image change needs no lock edit; only images nothing renders (operator-spawned, bootstrap artifacts) are declared by hand.
-* Cold-bootstrap trust model: the local checkout, its Bazel-built artifacts, the operator vault (Cloudflare account login, custody passphrase, age identity), and the R2-replicated custody artifacts (custody bundle and age-encrypted bootstrap set) are everything a from-nothing bring-up may require — see `docs/secrets.md`. OpenBao rebuilds from Git and reimports custody/bootstrap inputs, including custody-held durable Transit keyring exports. Bootstrap-only compromises are allowed, but the cluster must converge to the declared steady state afterward.
+* Cold-bootstrap trust model: the local checkout, its Bazel-built artifacts, the operator vault (Cloudflare account login, custody passphrase, age identity), and the R2-replicated custody artifacts (custody bundle, age-encrypted bootstrap set, OpenBao raft snapshots) are everything a from-nothing bring-up may require — see `docs/secrets.md`. Bootstrap-only compromises are allowed, but the cluster must converge to the declared steady state afterward.
 * Dev tools: `aspect`. Run `aspect tidy` to format the codebase.
 * Don't use CUE. Avoid custom schemas, protocols, shell scripts, contracts. Lean towards production-ready implementations for CRDs and ensure Flux-operated Kubernetes can converge state without making CLI execution a second control plane.
 * Protobuf governance uses the repo-pinned Buf toolchain through Bazel: linting, formatting, and breaking-change checks run from `rules_buf`; code generation uses local pinned generators only. Do not use Buf remote plugins in build/test/release paths.

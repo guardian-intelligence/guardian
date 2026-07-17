@@ -13,7 +13,7 @@ spec:
       # Incident-scale Kubernetes churn creates millions of fresh series per
       # day; the retention window must fit without forcing vmstorage read-only.
       storage: 20Gi
-      storageClassName: replicated-encrypted
+      storageClassName: replicated
       vminsert:
         minAllowed:
           cpu: 50m
@@ -52,7 +52,7 @@ spec:
       # Minute-level deduplication lowers sample volume but not series-index
       # cardinality, so this tier needs the same index headroom.
       storage: 20Gi
-      storageClassName: replicated-encrypted
+      storageClassName: replicated
       vminsert:
         minAllowed:
           cpu: 50m
@@ -82,7 +82,7 @@ spec:
       # + cluster-wide pod churn); an incident's own log flood must never
       # take out the observability needed to debug it.
       storage: 15Gi
-      storageClassName: replicated-encrypted
+      storageClassName: replicated
   grafana:
     db:
       size: 2Gi
@@ -95,7 +95,7 @@ spec:
         memory: 512Mi
   alerta:
     storage: 2Gi
-    storageClassName: replicated-encrypted
+    storageClassName: replicated
     alerts:
       # Not a Slack credential — the in-cluster alert-relay's URL. Alerta's
       # slack plugin emits Slack-webhook-format JSON; the relay converts it

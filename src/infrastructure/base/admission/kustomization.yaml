@@ -14,5 +14,4 @@ resources:
   - cozystack-app-namespace.yaml
   - image-provenance.yaml
   - openbao-static-seal.yaml
-  - synthetic-storage-classification.yaml
   - vlogs-patcher-update-only.yaml

@@ -55,11 +55,11 @@ spec:
         dataStorage:
           enabled: true
           size: 10Gi
-          storageClass: local-encrypted-retain
+          storageClass: openbao-local
         auditStorage:
           enabled: true
           size: 10Gi
-          storageClass: local-encrypted-retain
+          storageClass: openbao-local
         updateStrategyType: OnDelete
         shareProcessNamespace: true
         nodeSelector:

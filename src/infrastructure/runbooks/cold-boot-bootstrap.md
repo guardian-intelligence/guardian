@@ -192,9 +192,10 @@ place with `--action verify --read-data --repo <mounted-copy>`.
   metadata, the `custody.env` backup, and any `transit/backup` exports —
   on encrypted offline media in two physical locations, neither of them the
   datacenter hosting the cluster.
-- Transit exports are offline-custody only: never in R2, Kubernetes, Git, or
-  on media that also holds the durable ciphertext they protect. A keyring
-  export plus its ciphertext is full data compromise.
+- Never co-locate a copy with raft snapshots or OpenBao ciphertext. Transit
+  exports are offline-custody only: never in R2, and never on the same
+  medium as the R2 credentials that can fetch snapshots — key material plus
+  ciphertext in one place is full OpenBao compromise.
 - Refresh every copy on each custody event (seal-key rotation, operator-key
   change, durable Transit key creation) and record copy locations and
   last-refresh dates — never contents — in the custody directory's README.

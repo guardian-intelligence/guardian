@@ -46,8 +46,8 @@ func TestOpenBaoStaticSealTLSAndStorageConformance(t *testing.T) {
 	assertNestedString(t, server, "OrderedReady", "podManagementPolicy")
 	assertNestedString(t, server, "OnDelete", "updateStrategyType")
 	assertNestedBool(t, server, true, "shareProcessNamespace")
-	assertNestedString(t, server, "local-encrypted-retain", "dataStorage", "storageClass")
-	assertNestedString(t, server, "local-encrypted-retain", "auditStorage", "storageClass")
+	assertNestedString(t, server, "openbao-local", "dataStorage", "storageClass")
+	assertNestedString(t, server, "openbao-local", "auditStorage", "storageClass")
 	assertNestedString(t, server, "true", "nodeSelector", "guardian.dev/openbao-static-seal")
 	assertToleration(t, server, "guardian.dev/openbao-static-seal", "Exists", "NoSchedule")
 	assertHostPathVolume(t, server, "openbao-static-seal", "/var/lib/guardian/openbao/static-seal", "DirectoryOrCreate")
@@ -156,16 +156,15 @@ func TestOpenBaoListenerTLSAndTransitConformance(t *testing.T) {
 	}
 }
 
-func TestOpenBaoEncryptedLocalStorageClassConformance(t *testing.T) {
+func TestOpenBaoLocalStorageClassConformance(t *testing.T) {
 	docs := yamlDocs(t, runfilePath("src/infrastructure/base/storage/storageclasses.yaml"))
-	sc := findDoc(t, docs, "StorageClass", "local-encrypted-retain")
+	sc := findDoc(t, docs, "StorageClass", "openbao-local")
 
 	assertNestedString(t, sc, "linstor.csi.linbit.com", "provisioner")
 	assertNestedString(t, sc, "WaitForFirstConsumer", "volumeBindingMode")
 	assertNestedString(t, sc, "Retain", "reclaimPolicy")
 	assertNestedString(t, sc, "false", "parameters", "linstor.csi.linbit.com/allowRemoteVolumeAccess")
-	assertNestedString(t, sc, "luks storage", "parameters", "linstor.csi.linbit.com/layerList")
-	assertNestedString(t, sc, "true", "parameters", "linstor.csi.linbit.com/encryption")
+	assertNestedString(t, sc, "storage", "parameters", "linstor.csi.linbit.com/layerList")
 }
 
 func TestOpenBaoTenantAllowsStaticSealHostPathConformance(t *testing.T) {

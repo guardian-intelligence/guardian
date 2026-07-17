@@ -1,0 +1,105 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: storage-encryption-canary-local
+  namespace: tenant-guardian
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-encrypted
+  resources:
+    requests:
+      storage: 128Mi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: storage-encryption-canary-replicated
+  namespace: tenant-guardian
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: replicated-encrypted
+  resources:
+    requests:
+      storage: 128Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: storage-encryption-canary
+  namespace: tenant-guardian
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: storage-encryption-canary
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: storage-encryption-canary
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: canary
+          image: docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              for path in /canary/local /canary/replicated; do
+                if [ ! -f "$${path}/sentinel" ]; then
+                  printf 'guardian-linstor-luks-canary\n' > "$${path}/sentinel"
+                  sync "$${path}/sentinel"
+                fi
+                grep -qx 'guardian-linstor-luks-canary' "$${path}/sentinel"
+              done
+              while true; do
+                for path in /canary/local /canary/replicated; do
+                  date -u +%Y-%m-%dT%H:%M:%SZ > "$${path}/heartbeat.tmp"
+                  mv "$${path}/heartbeat.tmp" "$${path}/heartbeat"
+                  sync "$${path}/heartbeat"
+                done
+                sleep 30
+              done
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - >-
+                  grep -qx 'guardian-linstor-luks-canary' /canary/local/sentinel &&
+                  grep -qx 'guardian-linstor-luks-canary' /canary/replicated/sentinel
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: local
+              mountPath: /canary/local
+            - name: replicated
+              mountPath: /canary/replicated
+      securityContext:
+        fsGroup: 65534
+        fsGroupChangePolicy: OnRootMismatch
+      volumes:
+        - name: local
+          persistentVolumeClaim:
+            claimName: storage-encryption-canary-local
+        - name: replicated
+          persistentVolumeClaim:
+            claimName: storage-encryption-canary-replicated

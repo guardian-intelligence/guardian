@@ -7,7 +7,6 @@ filegroup(
     srcs = glob(
         [
             "Chart.yaml",
-            "image-factory-schematic.yaml",
             "values.yaml",
             "nodes/*.yaml",
             "templates/**",

@@ -13,13 +13,13 @@
 #   use nothing newer than 24.9 (traces are the collector's Map schema; the
 #   old CHI header's native-JSON claim was stale). Bench re-run on 24.9
 #   before cutover.
-# - Data PVCs land on the DEFAULT StorageClass (DRBD + LINSTOR LUKS
-#   `replicated-encrypted`): the
+# - Data PVCs land on the DEFAULT StorageClass (DRBD `replicated`): the
 #   chart's storageClass value is dead code in v1.5.0 — neither template
 #   consumes it (verified against the rendered CHI).
-#   Three-way DRBD under ReplicatedMergeTree(2 replicas) = 6x raw
+#   replicated(3x) under ReplicatedMergeTree(2 replicas) = 6x raw
 #   NVMe per byte. Fine at today's volume; REVISIT AT SCALE — when upstream
-#   wires storageClass, revisit the application/block replication split.
+#   wires storageClass, recreate onto `local` and recopy (data is TTL'd and
+#   replayable).
 # - 2 CH replicas (was 3): DRBD already provides block durability; CH
 #   replicas are for serving HA. Cuts the raw amplification 9x → 6x.
 apiVersion: apps.cozystack.io/v1alpha1
