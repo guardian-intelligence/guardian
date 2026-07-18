@@ -109,13 +109,43 @@ func TestPaymentsRolloutAndCanaryConformance(t *testing.T) {
 		"PaymentsRailCanaryStale",
 		"PaymentsCheckoutCanaryStale",
 		"PaymentsCanaryFailed",
-		`outcome="invalid_signature"}[5m]) > 5`,
+		`sum(increase(guardian_payments_webhook_receipts_total{outcome="invalid_signature"}[5m])) > 5`,
 		"PaymentsLiveModeEventRejected",
+		"PaymentsRailCanaryJobFailed",
+		`== on(namespace) group_left()`,
+		`max by(namespace) (kube_job_status_start_time`,
 	} {
 		assertTextContains(t, observability, want, observabilityPath)
 	}
-	if strings.Contains(observability, `outcome="invalid_signature"}[5m]) > 0`) {
+	if strings.Contains(
+		observability,
+		`sum(increase(guardian_payments_webhook_receipts_total{outcome="invalid_signature"}[5m])) > 0`,
+	) {
 		t.Fatal("one invalid webhook signature must remain below the alert threshold")
+	}
+
+	analyticsObservabilityPath := runfilePath(
+		"src/infrastructure/deployments/analytics/system/observability.yaml",
+	)
+	analyticsObservability := readText(t, analyticsObservabilityPath)
+	for _, want := range []string{
+		"PaymentsCheckoutCanaryJobFailed",
+		`== on(namespace) group_left()`,
+		`max by(namespace) (kube_job_status_start_time`,
+	} {
+		assertTextContains(t, analyticsObservability, want, analyticsObservabilityPath)
+	}
+
+	analyticsNetworkPath := runfilePath(
+		"src/infrastructure/deployments/analytics/system/networkpolicy.yaml",
+	)
+	analyticsNetwork := readText(t, analyticsNetworkPath)
+	for _, want := range []string{
+		"name: payments-checkout-canary",
+		`port: "80"`,
+		`port: "443"`,
+	} {
+		assertTextContains(t, analyticsNetwork, want, analyticsNetworkPath)
 	}
 
 	networkPath := runfilePath(root + "networkpolicy.yaml")

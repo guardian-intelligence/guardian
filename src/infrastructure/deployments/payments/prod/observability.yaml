@@ -135,7 +135,7 @@ spec:
             summary: "A payments end-to-end canary failed"
             description: "Inspect the lane and the durable canary run for the failure class and trace ID."
         - alert: PaymentsInvalidSignatureBurst
-          expr: increase(guardian_payments_webhook_receipts_total{outcome="invalid_signature"}[5m]) > 5
+          expr: sum(increase(guardian_payments_webhook_receipts_total{outcome="invalid_signature"}[5m])) > 5
           labels:
             severity: warning
             guardian_stage: prod
@@ -151,7 +151,14 @@ spec:
             summary: "A live-mode Stripe event reached the sandbox payment plane"
             description: "The event was rejected before persistence or ledger mutation."
         - alert: PaymentsRailCanaryJobFailed
-          expr: kube_job_status_failed{namespace="tenant-guardian-prod",job_name=~"payments-rail-canary-.*"} > 0
+          expr: |
+            (kube_job_status_failed{namespace="tenant-guardian-prod",job_name=~"payments-rail-canary-.*"} > 0)
+            and on(namespace, job_name)
+            (
+              kube_job_status_start_time{namespace="tenant-guardian-prod",job_name=~"payments-rail-canary-.*"}
+              == on(namespace) group_left()
+              max by(namespace) (kube_job_status_start_time{namespace="tenant-guardian-prod",job_name=~"payments-rail-canary-.*"})
+            )
           labels:
             severity: critical
             guardian_stage: prod

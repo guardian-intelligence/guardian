@@ -50,7 +50,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
 	defer cancel()
 	if err := run(ctx, cfg); err != nil {
-		slog.Error("checkout canary failed", "error_class", classify(err))
+		slog.Error("checkout canary failed", "error_class", classify(err), "error", err)
 		os.Exit(1)
 	}
 	slog.Info("checkout canary passed")
@@ -193,34 +193,74 @@ func driveStripeCheckout(ctx context.Context, checkoutURL string) error {
 		expirySelector = `input[name="cardExpiry"], input[autocomplete="cc-exp"]`
 		cvcSelector    = `input[name="cardCvc"], input[autocomplete="cc-csc"]`
 		nameSelector   = `input[name="billingName"], input[autocomplete="name"]`
+		postalSelector = `input[name="billingPostalCode"], input[autocomplete="postal-code"]`
 	)
 	if err := chromedp.Run(
 		ctx,
 		chromedp.Navigate(checkoutURL),
 		chromedp.WaitVisible(emailSelector, chromedp.ByQuery),
+	); err != nil {
+		return fmt.Errorf("open Stripe Checkout: %w", err)
+	}
+	if err := chromedp.Run(
+		ctx,
 		chromedp.SendKeys(emailSelector, "guardian-payments-canary@example.com", chromedp.ByQuery),
 		chromedp.WaitVisible(cardSelector, chromedp.ByQuery),
 		chromedp.SendKeys(cardSelector, "4242424242424242", chromedp.ByQuery),
 		chromedp.SendKeys(expirySelector, "1234", chromedp.ByQuery),
 		chromedp.SendKeys(cvcSelector, "123", chromedp.ByQuery),
 		chromedp.SendKeys(nameSelector, "Guardian Canary", chromedp.ByQuery),
+	); err != nil {
+		return fmt.Errorf("fill Stripe Checkout: %w", err)
+	}
+	var postalCodePresent bool
+	if err := chromedp.Run(
+		ctx,
+		chromedp.Evaluate(
+			`Boolean(document.querySelector(`+jsString(postalSelector)+`))`,
+			&postalCodePresent,
+		),
+	); err != nil {
+		return fmt.Errorf("inspect Stripe Checkout: %w", err)
+	}
+	if postalCodePresent {
+		if err := chromedp.Run(
+			ctx,
+			chromedp.SendKeys(postalSelector, "94107", chromedp.ByQuery),
+		); err != nil {
+			return fmt.Errorf("fill Stripe Checkout postal code: %w", err)
+		}
+	}
+	if err := chromedp.Run(
+		ctx,
 		chromedp.Click(`button[type="submit"]`, chromedp.ByQuery),
 	); err != nil {
-		return fmt.Errorf("drive Stripe Checkout: %w", err)
+		return fmt.Errorf("submit Stripe Checkout: %w", err)
 	}
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		var location string
-		if err := chromedp.Run(ctx, chromedp.Location(&location)); err != nil {
-			return err
+		var invalidFields int
+		if err := chromedp.Run(
+			ctx,
+			chromedp.Location(&location),
+			chromedp.Evaluate(
+				`document.querySelectorAll('[aria-invalid="true"]').length`,
+				&invalidFields,
+			),
+		); err != nil {
+			return fmt.Errorf("observe Stripe Checkout completion: %w", err)
 		}
 		if strings.Contains(location, "/payments/complete") {
 			return nil
 		}
+		if invalidFields > 0 {
+			return errors.New("Stripe Checkout rejected one or more form fields")
+		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return fmt.Errorf("Stripe Checkout did not reach the success URL: %w", ctx.Err())
 		case <-ticker.C:
 		}
 	}
