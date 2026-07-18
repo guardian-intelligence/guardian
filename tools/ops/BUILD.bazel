@@ -1,8 +1,11 @@
 load("@rules_python//python:defs.bzl", "py_test")
 
 exports_files(
-    ["multitool-repin"],
-    visibility = ["//src/tools:__pkg__"],
+    [
+        "multitool-repin",
+        "spicedb-qualify",
+    ],
+    visibility = ["//visibility:public"],
 )
 
 py_test(

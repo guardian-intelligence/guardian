@@ -27,6 +27,9 @@ var defaultKustomizations = []string{
 	"guardian-vlogs-hardening-prerequisites",
 	"guardian-vlogs-hardening",
 	"guardian-system",
+	"guardian-authorization-operator",
+	"guardian-authorization-data",
+	"guardian-authorization-prod",
 	"guardian-mgmt-dns-controller",
 	"guardian-company-prod",
 }

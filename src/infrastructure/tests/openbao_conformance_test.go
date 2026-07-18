@@ -524,14 +524,25 @@ func TestOpenBaoSecretScopeConformance(t *testing.T) {
 				}
 				wantPrefix := "guardian/guardian-mgmt/" + namespace + "/"
 				var keys []string
+				generatorSources := 0
 				for _, item := range sliceValue(mapValue(doc["spec"])["data"]) {
-					keys = append(keys, stringValue(mapValue(mapValue(item)["remoteRef"])["key"]))
+					remoteRef := mapValue(mapValue(item)["remoteRef"])
+					if key := stringValue(remoteRef["key"]); key != "" {
+						keys = append(keys, key)
+					}
 				}
 				for _, item := range sliceValue(mapValue(doc["spec"])["dataFrom"]) {
-					keys = append(keys, stringValue(mapValue(mapValue(item)["extract"])["key"]))
+					dataFrom := mapValue(item)
+					if key := stringValue(mapValue(dataFrom["extract"])["key"]); key != "" {
+						keys = append(keys, key)
+					}
+					generatorRef := mapValue(mapValue(dataFrom["sourceRef"])["generatorRef"])
+					if stringValue(generatorRef["kind"]) != "" && stringValue(generatorRef["name"]) != "" {
+						generatorSources++
+					}
 				}
-				if len(keys) == 0 {
-					t.Fatalf("%s: ExternalSecret %s/%s declares no remoteRef keys", path, namespace, name)
+				if len(keys) == 0 && generatorSources == 0 {
+					t.Fatalf("%s: ExternalSecret %s/%s declares neither remoteRef keys nor a generator source", path, namespace, name)
 				}
 				for _, key := range keys {
 					if !strings.HasPrefix(key, wantPrefix) {

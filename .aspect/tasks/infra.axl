@@ -132,6 +132,9 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/bootstrap/sync-dark:manifests",
     "//src/infrastructure/bootstrap/sync-steady:manifests",
     "//src/infrastructure/deployments/guardian/system:manifests",
+    "//src/infrastructure/deployments/authorization/operator:manifests",
+    "//src/infrastructure/deployments/authorization/data:manifests",
+    "//src/infrastructure/deployments/authorization/prod:manifests",
     "//src/infrastructure/deployments/company/prod:manifests",
     "//src/infrastructure/load:http_load_scripts",
     "//src/infrastructure/edge:edge_health_targets",
@@ -148,6 +151,7 @@ INFRA_TESTS = [
     "//src/infrastructure/cmd/openbao_reinit:openbao_reinit_test",
     "//src/infrastructure/cmd/openbao_secret_import:openbao_secret_import_test",
     "//src/infrastructure/cmd/openbao_static_seal_key:openbao_static_seal_key_test",
+    "//src/infrastructure/deployments/authorization/prod:schema_test",
     "//src/infrastructure/tests:tests",
 ]
 FORBIDDEN_SOURCE_PATHS = [

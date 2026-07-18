@@ -1,0 +1,29 @@
+schemaFile: "./guardian.zed"
+relationships: |-
+  guardian_account:alice#owner@principal:alice
+  guardian_account:bob#owner@principal:bob
+  guardian_account:mallory#owner@principal:mallory
+  organization:guardian#owner@guardian_account:alice
+  organization:guardian#member@guardian_account:bob
+  provider_connection:alice-github#account@guardian_account:alice
+  provider_connection:alice-github#organization@organization:guardian
+  github_installation:postflight#organization@organization:guardian
+  github_installation:postflight#installer@guardian_account:alice
+  postflight_repository:guardian#installation@github_installation:postflight
+assertions:
+  assertTrue:
+    - organization:guardian#manage@guardian_account:alice
+    - organization:guardian#view@guardian_account:bob
+    - provider_connection:alice-github#manage@guardian_account:alice
+    - provider_connection:alice-github#view@guardian_account:bob
+    - github_installation:postflight#manage@guardian_account:alice
+    - postflight_repository:guardian#view@guardian_account:bob
+    - postflight_repository:guardian#manage@guardian_account:alice
+  assertFalse:
+    - organization:guardian#manage@guardian_account:bob
+    - organization:guardian#view@guardian_account:mallory
+    - provider_connection:alice-github#manage@guardian_account:bob
+    - provider_connection:alice-github#view@guardian_account:mallory
+    - github_installation:postflight#manage@guardian_account:bob
+    - postflight_repository:guardian#view@guardian_account:mallory
+    - postflight_repository:guardian#manage@guardian_account:mallory
