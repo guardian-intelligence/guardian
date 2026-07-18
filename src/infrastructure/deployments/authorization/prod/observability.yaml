@@ -125,7 +125,7 @@ spec:
             summary: "SpiceDB serving certificate expires within seven days"
             description: "Certificate renewal or reload is not keeping pace with the serving certificate lifetime."
         - alert: SpiceDBAlertPathDrill
-          expr: vector(0)
+          expr: vector(0) == 1
           for: 1m
           labels:
             severity: warning
