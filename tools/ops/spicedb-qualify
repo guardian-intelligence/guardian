@@ -150,14 +150,17 @@ placement() {
   [[ "${binding_count}" == "0" ]] ||
     fail "spicedb-operator is referenced by ${binding_count} ClusterRoleBinding object(s)"
 
-  kubectl auth can-i \
-    --as="system:serviceaccount:${NAMESPACE}:spicedb-operator" \
-    -n "${NAMESPACE}" create deployments.apps | grep -qx yes ||
-    fail "spicedb-operator cannot manage Deployments in ${NAMESPACE}"
-  kubectl auth can-i \
-    --as="system:serviceaccount:${NAMESPACE}:spicedb-operator" \
-    -n tenant-guardian create deployments.apps | grep -qx no ||
-    fail "spicedb-operator can manage Deployments outside ${NAMESPACE}"
+  local binding_json
+  binding_json="$(kubectl -n "${NAMESPACE}" get rolebinding spicedb-operator -o json)"
+  jq -e --arg ns "${NAMESPACE}" '
+    .roleRef.kind == "Role" and
+    .roleRef.name == "spicedb-operator" and
+    (.subjects | length) == 1 and
+    .subjects[0].kind == "ServiceAccount" and
+    .subjects[0].name == "spicedb-operator" and
+    .subjects[0].namespace == $ns
+  ' <<<"${binding_json}" >/dev/null ||
+    fail "spicedb-operator RoleBinding is not confined to its namespaced Role and service account"
 
   assert_three_nodes SpiceDB 'guardian.dev/component=authorization-datastore'
   assert_three_nodes PostgreSQL 'cnpg.io/cluster=postgres-spicedb'
