@@ -102,6 +102,8 @@ func TestSpiceDBProductionTopologyAndSecurity(t *testing.T) {
 		"kustomize.toolkit.fluxcd.io/substitute: disabled",
 		"docker.io/library/postgres:18.1@sha256:1090bc3a8ccfb0b55f78a494d76f8d603434f7e4553543d6e807bc7bd6bbd17f",
 		"sslmode=verify-full",
+		"runAsUser: 101",
+		"runAsGroup: 101",
 		"guardian_restore_drill_marker",
 		"c6139a02-61f9-4e69-98b3-b5ff248f4fa0",
 		"cnpg.io/cluster: postgres-spicedb",
