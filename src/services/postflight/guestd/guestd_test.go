@@ -81,6 +81,14 @@ func (f *fakeSystem) MakeFilesystem(_ context.Context, device, filesystem string
 	return nil
 }
 
+func (f *fakeSystem) Discard(_ context.Context, device string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.blank[device] = true
+	f.log("discard %s", device)
+	return nil
+}
+
 func (f *fakeSystem) IsLUKS(_ context.Context, device string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -401,6 +409,7 @@ func TestEncryptedColdWorkspaceLifecycle(t *testing.T) {
 
 	entries := w.system.entries()
 	want := []string{
+		"discard /dev/sdb",
 		"luksFormat /dev/sdb keylen=32",
 		"luksOpen /dev/sdb as pf-workspace keylen=32",
 		"mkfs ext4 /dev/mapper/pf-workspace",
@@ -452,6 +461,7 @@ func TestPlaintextLineageIsReformattedUnderEncryption(t *testing.T) {
 	}
 	entries := w.system.entries()
 	want := []string{
+		"discard /dev/sdb",
 		"luksFormat /dev/sdb keylen=32",
 		"luksOpen /dev/sdb as pf-workspace keylen=32",
 		"mkfs ext4 /dev/mapper/pf-workspace",

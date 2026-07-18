@@ -375,6 +375,11 @@ func (q *QEMU) attachWorkspace(ctx context.Context, client *qmpClient, device st
 				"filename": device,
 				"cache":    map[string]any{"direct": true},
 				"aio":      "native",
+				// Guest discards must reach the sparse zvol: the mount
+				// options promise TRIM, and the encryption ladder erases
+				// plaintext lineages with a whole-device discard before
+				// formatting. QEMU's default is discard=ignore.
+				"discard": "unmap",
 			},
 		}
 		if _, err := client.Execute(ctx, "blockdev-add", arguments); err != nil {

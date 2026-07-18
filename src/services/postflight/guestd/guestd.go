@@ -384,7 +384,17 @@ func (s *Server) openEncrypted(ctx context.Context, device, serial string) (stri
 			return "", err
 		}
 		if !blank {
-			s.cfg.Logger.Warn("plaintext workspace lineage under encryption; reformatting, cache rebuilds cold", "device", device, "mode", string(s.cfg.Encryption))
+			s.cfg.Logger.Warn("plaintext workspace lineage under encryption; erasing and reformatting, cache rebuilds cold", "device", device, "mode", string(s.cfg.Encryption))
+		}
+		// A LUKS header over unerased blocks is not encryption: every block
+		// the new filesystem has not yet written still reads as the old
+		// plaintext. Discard the whole device first; a lineage that cannot
+		// be erased must never be sealed as ciphertext.
+		if err := system.Discard(ctx, device); err != nil {
+			if !blank {
+				return "", fmt.Errorf("cannot erase plaintext lineage: %w", err)
+			}
+			s.cfg.Logger.Warn("discard failed on a blank device; continuing", "device", device, "err", err)
 		}
 		if err := system.FormatLUKS(ctx, device, key); err != nil {
 			return "", err

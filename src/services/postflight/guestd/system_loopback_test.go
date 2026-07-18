@@ -170,6 +170,9 @@ func TestRealSystemLoopbackEncryptedConvergence(t *testing.T) {
 	if luks, err := system.IsLUKS(ctx, device); err != nil || luks {
 		t.Fatalf("fresh device luks=%v err=%v, want plain", luks, err)
 	}
+	if err := system.Discard(ctx, device); err != nil {
+		t.Fatal(err)
+	}
 	if err := system.FormatLUKS(ctx, device, key); err != nil {
 		t.Fatal(err)
 	}
