@@ -80,10 +80,6 @@ spec:
                           app.kubernetes.io/instance: spicedb-spicedb
               containers:
                 - name: spicedb
-                  lifecycle:
-                    preStop:
-                      sleep:
-                        seconds: 10
                   env:
                     - name: SPICEDB_DATASTORE_PASSWORD
                       valueFrom:

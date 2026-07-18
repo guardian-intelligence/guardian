@@ -129,10 +129,8 @@ operator replaces one replica at a time. Required anti-affinity occupies all
 three nodes, so the Deployment uses no surge and permits one unavailable
 replica while the PDB preserves a two-ready floor. Each replacement must
 remain Ready for 30 seconds before the next replica is removed so endpoint
-propagation and client reconnection settle between replacements. A kubelet
-native 10-second pre-stop sleep removes the terminating endpoint before
-SpiceDB receives its shutdown signal. Merge the change, wait for the merge
-revision, and require:
+propagation and client reconnection settle between replacements. Merge the
+change, wait for the merge revision, and require:
 
 - three Ready replicas at completion on three distinct nodes;
 - no Thumper `wrong permissionship` records;
