@@ -20,6 +20,7 @@ spec:
   template:
     metadata:
       annotations:
+        guardian.dev/tigerbeetle-cluster-id: "49532141921164377784457307205600684260"
         guardian.dev/tigerbeetle-transport-api: mtls-host-ip-v1
       labels:
         app.kubernetes.io/name: payments
