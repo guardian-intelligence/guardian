@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: spicedb-restore-marker-20260718
+  name: spicedb-restore-marker-v2-20260718
   namespace: tenant-guardian-prod
   annotations:
     kustomize.toolkit.fluxcd.io/substitute: disabled
@@ -20,6 +20,8 @@ spec:
       restartPolicy: Never
       automountServiceAccountToken: false
       securityContext:
+        runAsUser: 999
+        runAsGroup: 999
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
@@ -64,6 +66,8 @@ spec:
               drop:
                 - ALL
             readOnlyRootFilesystem: true
+            runAsUser: 999
+            runAsGroup: 999
             runAsNonRoot: true
           volumeMounts:
             - name: database-ca

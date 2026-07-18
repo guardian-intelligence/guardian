@@ -430,7 +430,7 @@ spec:
       namespace: tenant-guardian-prod
     - apiVersion: batch/v1
       kind: Job
-      name: spicedb-restore-marker-20260718
+      name: spicedb-restore-marker-v2-20260718
       namespace: tenant-guardian-prod
     - apiVersion: cert-manager.io/v1
       kind: Certificate
