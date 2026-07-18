@@ -361,9 +361,12 @@ func (s *Server) tryMount(ctx context.Context, mount guestproto.Mount, options [
 }
 
 // openEncrypted converges the device to an open LUKS2 mapper and returns
-// the mapper node the rest of the ladder operates on. A blank device is
-// formatted first; a device carrying anything that is not LUKS is refused —
-// with encryption on, plaintext must never mount.
+// the mapper node the rest of the ladder operates on. Anything that is not
+// already LUKS is formatted — with encryption on, plaintext must never
+// mount, and a workspace only ever carries rebuildable cache, so the right
+// response to a plaintext lineage (a generation sealed before the
+// encryption cutover) is a loud reformat and a cold build, not a wedged
+// slot.
 func (s *Server) openEncrypted(ctx context.Context, device, serial string) (string, error) {
 	system := s.cfg.System
 	luks, err := system.IsLUKS(ctx, device)
@@ -381,7 +384,7 @@ func (s *Server) openEncrypted(ctx context.Context, device, serial string) (stri
 			return "", err
 		}
 		if !blank {
-			return "", fmt.Errorf("device %s carries a plaintext filesystem; refusing to mount under encryption mode %q", device, s.cfg.Encryption)
+			s.cfg.Logger.Warn("plaintext workspace lineage under encryption; reformatting, cache rebuilds cold", "device", device, "mode", string(s.cfg.Encryption))
 		}
 		if err := system.FormatLUKS(ctx, device, key); err != nil {
 			return "", err
