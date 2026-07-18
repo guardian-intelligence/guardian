@@ -101,7 +101,7 @@ spec:
             - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: postgres-spicedb-credentials
+                  name: postgres-spicedb-restore-20260718-credentials
                   key: spicedb
             - name: DATABASE_URL
               value: postgresql://spicedb@postgres-spicedb-restore-20260718-rw:5432/spicedb?sslmode=verify-full&sslrootcert=/tls/ca.crt

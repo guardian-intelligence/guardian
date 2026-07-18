@@ -121,6 +121,7 @@ func TestSpiceDBProductionTopologyAndSecurity(t *testing.T) {
 		"name: spicedb-postgres-restore-baseline-20260718",
 		"targetApplicationRef:",
 		"name: spicedb-restore-verify-20260718",
+		"name: postgres-spicedb-restore-20260718-credentials",
 		"kustomize.toolkit.fluxcd.io/substitute: disabled",
 		"sslmode=verify-full",
 		"guardian_restore_drill_marker",
