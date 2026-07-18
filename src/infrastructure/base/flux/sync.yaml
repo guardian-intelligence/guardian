@@ -448,6 +448,10 @@ spec:
       kind: BackupJob
       name: spicedb-postgres-archive-activation
       namespace: tenant-guardian-prod
+    - apiVersion: backups.cozystack.io/v1alpha1
+      kind: BackupJob
+      name: spicedb-postgres-restore-baseline-20260718
+      namespace: tenant-guardian-prod
   healthCheckExprs:
     - apiVersion: external-secrets.io/v1beta1
       kind: ExternalSecret
