@@ -3,10 +3,12 @@ docker.io/clickhouse/
 docker.io/grafana/
 docker.io/otel/
 ghcr.io/cloudnative-pg/
+ghcr.io/authzed/
 ghcr.io/fluxcd/
 ghcr.io/guardian-intelligence/
 ghcr.io/project-zot/
 ghcr.io/tigerbeetle/
+quay.io/authzed/
 quay.io/keycloak/
 quay.io/openbao/
 quay.io/prometheus/
