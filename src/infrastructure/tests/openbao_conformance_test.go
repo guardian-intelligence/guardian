@@ -420,13 +420,12 @@ func TestFluxSourceParameterizationConformance(t *testing.T) {
 // tls-reloader script being blanked.
 func TestFluxSubstitutionSafetyConformance(t *testing.T) {
 	// Paths reconciled by a Kustomization that declares postBuild
-	// substitution (guardian-mgmt-base applies all of base/, guardian-system
-	// applies deployments/guardian/system, guardian-iam-prod applies
-	// deployments/iam/prod).
+	// substitution.
 	roots := []string{
 		"src/infrastructure/base",
 		"src/infrastructure/deployments/alerting",
 		"src/infrastructure/deployments/analytics/system",
+		"src/infrastructure/deployments/authorization/prod",
 		"src/infrastructure/deployments/guardian/system",
 		"src/infrastructure/deployments/iam/prod",
 		"src/infrastructure/deployments/products",

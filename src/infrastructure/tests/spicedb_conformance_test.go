@@ -185,10 +185,12 @@ func TestSpiceDBSchemaAndLiveAcceptanceGate(t *testing.T) {
 	jobPath := runfilePath("src/infrastructure/deployments/authorization/prod/schema-job.yaml")
 	job := readText(t, jobPath)
 	for _, want := range []string{
-		"name: spicedb-schema-v1",
+		"name: spicedb-schema-v2",
+		"kustomize.toolkit.fluxcd.io/substitute: disabled",
 		"ghcr.io/authzed/zed@sha256:339db064131cfd75c9385938f16fa445bcfa4a82bd9eed73402fd10c00ea374c",
 		"--hostname-override=spicedb.tenant-guardian-prod.svc.cozy.local",
 		"--certificate-path=/tls/ca.crt",
+		"- permission\n            - check\n            - --consistency-full",
 		"--error-on-no-permission",
 		"PERMISSIONSHIP_HAS_PERMISSION",
 		"PERMISSIONSHIP_NO_PERMISSION",
@@ -280,7 +282,7 @@ func TestSpiceDBOperationalQualificationIsGitOpsOnly(t *testing.T) {
 		"- name: guardian-authorization-data",
 		"name: postgres-spicedb-init-job",
 		"name: spicedb-postgres-archive-activation",
-		"name: spicedb-schema-v1",
+		"name: spicedb-schema-v2",
 		"name: spicedb-spicedb",
 		"name: spicedb-server",
 		"kind: SpiceDBCluster",
