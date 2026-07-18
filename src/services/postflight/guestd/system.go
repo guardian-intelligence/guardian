@@ -29,6 +29,9 @@ type System interface {
 	IsBlank(ctx context.Context, device string) (bool, error)
 	// IsLUKS reports whether the device carries a LUKS header.
 	IsLUKS(ctx context.Context, device string) (bool, error)
+	// Discard punches out the device's entire contents (BLKDISCARD), so a
+	// sparse backing volume reads zeros afterwards.
+	Discard(ctx context.Context, device string) error
 	// FormatLUKS initializes a LUKS2 container on the device with key.
 	FormatLUKS(ctx context.Context, device string, key []byte) error
 	// OpenLUKS opens the device's LUKS container under name and returns the
@@ -159,6 +162,17 @@ func (RealSystem) OpenLUKS(ctx context.Context, device, name string, key []byte)
 		return "", fmt.Errorf("guestd: cryptsetup open %s: %s: %w", device, strings.TrimSpace(stderr.String()), err)
 	}
 	return mapper, nil
+}
+
+// Discard implements System.
+func (RealSystem) Discard(ctx context.Context, device string) error {
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, "blkdiscard", "-f", device)
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("guestd: blkdiscard %s: %s: %w", device, strings.TrimSpace(stderr.String()), err)
+	}
+	return nil
 }
 
 // IsMounted implements System by scanning /proc/self/mounts.

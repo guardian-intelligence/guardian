@@ -25,6 +25,7 @@ type loopSystem struct {
 func (s *loopSystem) LocateDevice(context.Context, string) (string, error) { return "/dev/fake", nil }
 func (s *loopSystem) IsBlank(context.Context, string) (bool, error)        { return true, nil }
 func (s *loopSystem) IsLUKS(context.Context, string) (bool, error)         { return false, nil }
+func (s *loopSystem) Discard(context.Context, string) error                { return nil }
 func (s *loopSystem) FormatLUKS(context.Context, string, []byte) error     { return nil }
 func (s *loopSystem) OpenLUKS(_ context.Context, _, name string, _ []byte) (string, error) {
 	return "/dev/mapper/" + name, nil
