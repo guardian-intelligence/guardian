@@ -152,3 +152,21 @@ func TestValidateNameRejectsHostileIdentifiers(t *testing.T) {
 		}
 	}
 }
+
+func TestExecMissingCloneSourceFallsBackCold(t *testing.T) {
+	driver := execDriver(t)
+	ctx := context.Background()
+
+	// The scope pointer can outlive its generation; a missing clone source
+	// must cold-build, not fail the lease.
+	volume, err := driver.EnsureWorkspace(ctx, "lease-cold", "gen-vanished", 64<<20)
+	if err != nil {
+		t.Fatalf("fallback: %v", err)
+	}
+	if volume.Source != "" {
+		t.Fatalf("cold fallback reported source %q", volume.Source)
+	}
+	if ok, err := driver.exists(ctx, volume.Name); err != nil || !ok {
+		t.Fatalf("workspace not created: %v %v", ok, err)
+	}
+}
