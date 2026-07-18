@@ -118,7 +118,7 @@ func TestSpiceDBProductionTopologyAndSecurity(t *testing.T) {
 		"kind: SpiceDBCluster",
 		"channel: stable",
 		"version: v1.52.0",
-		"value: $(SPICEDB_API_TOKEN_SLOT_B),$(SPICEDB_API_TOKEN_SLOT_A)",
+		"value: $(SPICEDB_API_TOKEN_SLOT_A),$(SPICEDB_API_TOKEN_SLOT_B)",
 		"presharedKey:\n      skip: true",
 		"datastoreEngine: postgres",
 		"datastoreTLSSecretName: postgres-spicedb-ca",
@@ -250,6 +250,7 @@ func TestSpiceDBOperationalQualificationIsGitOpsOnly(t *testing.T) {
 		"--insecure=false",
 		"--ca-path=/tls/ca.crt",
 		"--qps=50",
+		"name: spicedb-api-token-slot-a",
 		"SpiceDBThumperErrors",
 		"SpiceDBThumperLatencyHigh",
 	} {
