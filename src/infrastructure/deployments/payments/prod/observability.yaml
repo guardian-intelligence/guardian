@@ -135,7 +135,7 @@ spec:
             summary: "A payments end-to-end canary failed"
             description: "Inspect the lane and the durable canary run for the failure class and trace ID."
         - alert: PaymentsInvalidSignatureBurst
-          expr: increase(guardian_payments_webhook_receipts_total{outcome="invalid_signature"}[5m]) > 5
+          expr: sum(increase(guardian_payments_webhook_receipts_total{outcome="invalid_signature"}[5m])) > 5
           labels:
             severity: warning
             guardian_stage: prod
