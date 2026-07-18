@@ -487,7 +487,7 @@ spec:
     - name: guardian-authorization-data
   prune: true
   wait: false
-  timeout: 30m
+  timeout: 15m
   healthChecks:
     - apiVersion: authzed.com/v1alpha1
       kind: SpiceDBCluster
@@ -499,7 +499,7 @@ spec:
       namespace: tenant-guardian-prod
     - apiVersion: batch/v1
       kind: Job
-      name: spicedb-schema-v1
+      name: spicedb-schema-v2
       namespace: tenant-guardian-prod
     - apiVersion: apps/v1
       kind: Deployment
