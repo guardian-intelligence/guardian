@@ -3,12 +3,17 @@ package main
 import (
 	"errors"
 	"fmt"
+	"math/big"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	tb "github.com/tigerbeetle/tigerbeetle-go"
 )
+
+const acceptedTigerBeetleClusterID = "49532141921164377784457307205600684260"
 
 type config struct {
 	Listen                   string
@@ -22,7 +27,7 @@ type config struct {
 	StripeCanaryPriceID      string
 	StripeAPIBase            string
 	TigerBeetleAddresses     []string
-	TigerBeetleClusterID     uint64
+	TigerBeetleClusterID     tb.Uint128
 	JournalEndpoint          string
 	JournalRegion            string
 	JournalBucket            string
@@ -43,7 +48,7 @@ func loadConfig() (config, error) {
 	if err != nil || publicBase.Scheme != "https" || publicBase.Host == "" {
 		return config{}, errors.New("PUBLIC_BASE_URL must be an absolute https URL")
 	}
-	clusterID, err := strconv.ParseUint(envOr("TIGERBEETLE_CLUSTER_ID", "0"), 10, 64)
+	clusterID, err := parseTigerBeetleClusterID(os.Getenv("TIGERBEETLE_CLUSTER_ID"))
 	if err != nil {
 		return config{}, fmt.Errorf("TIGERBEETLE_CLUSTER_ID: %w", err)
 	}
@@ -119,10 +124,18 @@ func loadConfig() (config, error) {
 	if len(cfg.TigerBeetleAddresses) != 3 {
 		return config{}, errors.New("TIGERBEETLE_ADDRESSES must contain exactly three addresses")
 	}
-	if cfg.TigerBeetleClusterID != 0 {
-		return config{}, errors.New("TIGERBEETLE_CLUSTER_ID must remain 0 for the accepted cluster")
-	}
 	return cfg, nil
+}
+
+func parseTigerBeetleClusterID(value string) (tb.Uint128, error) {
+	clusterID, ok := new(big.Int).SetString(strings.TrimSpace(value), 10)
+	if !ok || clusterID.Sign() < 0 || clusterID.BitLen() > 128 {
+		return tb.Uint128{}, errors.New("must be an unsigned 128-bit decimal integer")
+	}
+	if clusterID.String() != acceptedTigerBeetleClusterID {
+		return tb.Uint128{}, fmt.Errorf("must match the formatted cluster ID %s", acceptedTigerBeetleClusterID)
+	}
+	return tb.BigIntToUint128(clusterID), nil
 }
 
 func envOr(key, fallback string) string {

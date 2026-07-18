@@ -421,7 +421,7 @@ func TestConfigRejectsLiveStripeKeys(t *testing.T) {
 	t.Setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")
 	t.Setenv("STRIPE_CANARY_PRICE_ID", "price_canary")
 	t.Setenv("TIGERBEETLE_ADDRESSES", "10.8.0.11:3000,10.8.0.12:3000,10.8.0.13:3000")
-	t.Setenv("TIGERBEETLE_CLUSTER_ID", "0")
+	t.Setenv("TIGERBEETLE_CLUSTER_ID", acceptedTigerBeetleClusterID)
 	if _, err := loadConfig(); err == nil {
 		t.Fatal("live Stripe key was accepted")
 	}
@@ -430,5 +430,28 @@ func TestConfigRejectsLiveStripeKeys(t *testing.T) {
 	t.Setenv("CUSTOMER_CHECKOUT_ENABLED", "true")
 	if _, err := loadConfig(); err == nil {
 		t.Fatal("customer checkout was admitted before ledger 1 hardening")
+	}
+}
+
+func TestParseTigerBeetleClusterID(t *testing.T) {
+	clusterID, err := parseTigerBeetleClusterID(acceptedTigerBeetleClusterID)
+	if err != nil {
+		t.Fatalf("parse accepted cluster ID: %v", err)
+	}
+	if got := clusterID.BigInt().String(); got != acceptedTigerBeetleClusterID {
+		t.Fatalf("cluster ID = %s, want %s", got, acceptedTigerBeetleClusterID)
+	}
+
+	for _, value := range []string{
+		"",
+		"0",
+		"1",
+		"-1",
+		"not-a-number",
+		"340282366920938463463374607431768211456",
+	} {
+		if _, err := parseTigerBeetleClusterID(value); err == nil {
+			t.Errorf("cluster ID %q was accepted", value)
+		}
 	}
 }

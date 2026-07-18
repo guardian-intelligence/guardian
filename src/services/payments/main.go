@@ -70,7 +70,7 @@ func main() {
 		slog.Error("Stripe sandbox account binding", "error", err)
 		os.Exit(1)
 	}
-	tigerBeetle, err := tb.NewClient(tb.ToUint128(cfg.TigerBeetleClusterID), cfg.TigerBeetleAddresses)
+	tigerBeetle, err := tb.NewClient(cfg.TigerBeetleClusterID, cfg.TigerBeetleAddresses)
 	if err != nil {
 		slog.Error("TigerBeetle client", "error", err)
 		os.Exit(1)
