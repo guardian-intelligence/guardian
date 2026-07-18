@@ -187,6 +187,7 @@ func TestSpiceDBProductionTopologyAndSecurity(t *testing.T) {
 		"refreshInterval: \"0\"",
 		"length: 48",
 		"guardian.dev/rotation: \"initial\"",
+		`force-sync: "20260718-slot-a"`,
 	} {
 		assertTextContains(t, credentials, want, credentialsPath)
 	}
@@ -362,6 +363,8 @@ func TestSpiceDBOperationalQualificationIsGitOpsOnly(t *testing.T) {
 		`jq -er --arg key "${key}" '.data[$key]'`,
 		`logs --follow deployment/spicedb-thumper`,
 		`fail "Thumper log stream exited before the observation completed"`,
+		`spicedb-api-token-slot-${slot}`,
+		"Both API token slots",
 	} {
 		assertTextContains(t, qualify, want, qualifyPath)
 	}
