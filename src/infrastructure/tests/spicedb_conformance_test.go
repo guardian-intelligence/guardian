@@ -133,6 +133,8 @@ func TestSpiceDBProductionTopologyAndSecurity(t *testing.T) {
 		"spicedb-api-token-slot-a",
 		"spicedb-api-token-slot-b",
 		"reloader.stakater.com/auto: \"true\"",
+		"maxSurge: 0",
+		"maxUnavailable: 1",
 		"sslmode=verify-full",
 		"readOnlyRootFilesystem: true",
 	} {
