@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: spicedb-schema-v2
+  name: spicedb-schema-v3
   namespace: tenant-guardian-prod
   annotations:
     kustomize.toolkit.fluxcd.io/substitute: disabled
@@ -124,20 +124,31 @@ spec:
                 -H "${authorization_header}" \
                 -H 'Content-Type: application/json' \
                 --data "${allowed}" "${api}")"
-              test "$(printf '%s' "${allowed_result}" | jq -r .permissionship)" = PERMISSIONSHIP_HAS_PERMISSION
+              allowed_permissionship="$(printf '%s' "${allowed_result}" | jq -r .permissionship)"
+              if [ "${allowed_permissionship}" != PERMISSIONSHIP_HAS_PERMISSION ]; then
+                echo "expected Alice to have manage permission, got ${allowed_permissionship}" >&2
+                exit 1
+              fi
 
               denied_result="$(curl --fail --silent --show-error --cacert /tls/ca.crt \
                 -H "${authorization_header}" \
                 -H 'Content-Type: application/json' \
                 --data "${denied}" "${api}")"
-              test "$(printf '%s' "${denied_result}" | jq -r .permissionship)" = PERMISSIONSHIP_NO_PERMISSION
+              denied_permissionship="$(printf '%s' "${denied_result}" | jq -r .permissionship)"
+              if [ "${denied_permissionship}" != PERMISSIONSHIP_NO_PERMISSION ]; then
+                echo "expected Mallory to have no manage permission, got ${denied_permissionship}" >&2
+                exit 1
+              fi
 
               invalid_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
                 --cacert /tls/ca.crt \
                 -H "${invalid_authorization_header}" \
                 -H 'Content-Type: application/json' \
                 --data "${allowed}" "${api}")"
-              test "${invalid_status}" = 401
+              if [ "${invalid_status}" != 403 ]; then
+                echo "expected invalid token rejection with HTTP 403, got ${invalid_status}" >&2
+                exit 1
+              fi
 
               if curl --fail --silent --show-error --cacert /wrong-ca/ca.crt \
                 -H "${authorization_header}" \

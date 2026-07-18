@@ -499,7 +499,7 @@ spec:
       namespace: tenant-guardian-prod
     - apiVersion: batch/v1
       kind: Job
-      name: spicedb-schema-v2
+      name: spicedb-schema-v3
       namespace: tenant-guardian-prod
     - apiVersion: apps/v1
       kind: Deployment

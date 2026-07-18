@@ -79,7 +79,7 @@ checked-in schema and relationships, then proves:
 - Mallory cannot manage Guardian;
 - the correct CA and service hostname establish TLS;
 - an unrelated CA and a wrong hostname cannot establish TLS; and
-- an invalid bearer token receives HTTP 401.
+- an invalid bearer token receives HTTP 403.
 
 The same checks can be repeated through the gRPC API. The API token is born in
 the cluster and is intentionally unreadable to the normal platform-agent
