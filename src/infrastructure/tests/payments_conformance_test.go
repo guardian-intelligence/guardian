@@ -14,6 +14,7 @@ func TestPaymentsRuntimeConformance(t *testing.T) {
 		"replicas: 2",
 		"postgres-products-rw.tenant-guardian-prod.svc:5432/payments?sslmode=require",
 		"127.0.0.1:13000,127.0.0.1:13001,127.0.0.1:13002",
+		`guardian.dev/tigerbeetle-cluster-id: "49532141921164377784457307205600684260"`,
 		`value: "49532141921164377784457307205600684260"`,
 		`name: CUSTOMER_CHECKOUT_ENABLED`,
 		`value: "false"`,
