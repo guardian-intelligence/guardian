@@ -41,7 +41,7 @@ spec:
       guardian.dev/component: authorization-datastore
       guardian.dev/stage: prod
     extraPodAnnotations:
-      guardian.dev/qualification-restart: "initial"
+      guardian.dev/qualification-restart: "20260718T214500Z"
   patches:
     - kind: Deployment
       patch:
