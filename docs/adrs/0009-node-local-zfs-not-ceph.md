@@ -23,10 +23,12 @@ survive.
   replicate data that must survive; operating a second distributed system
   (mon/OSD quorum, its own failure modes and pager load) to protect data we
   deliberately do not back up inverts the design.
-- **ZFS primitives map 1:1 onto the substrate's contract.** OpenZFS native
-  encryption gives tenant isolation at rest — wrapping keys scoped per tenant
-  and workspace lineage, once the TEE tier lands; pre-TEE zvols are plaintext
-  by declared scope. `clone → promote → @sealed` gives sticky-disk semantics
+- **ZFS primitives map 1:1 onto the substrate's contract.** At-rest
+  protection comes from guest-side encryption on the raw zvol once the SNP
+  tier lands (see the [security model](../postflight-security-model.md));
+  pre-TEE zvols are plaintext by declared scope. The host only ever
+  snapshots and clones opaque block devices, which is exactly ZFS's zvol
+  contract. `clone → promote → @sealed` gives sticky-disk semantics
   with atomic generation promotion; snapshot GUIDs give the content lineage
   that snapshot ABI pinning keys on; dataset `quota` gives the tenant storage
   boundary. All with zero network hops on the lease hot path: measured on
