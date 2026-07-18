@@ -185,7 +185,7 @@ func TestSpiceDBSchemaAndLiveAcceptanceGate(t *testing.T) {
 	jobPath := runfilePath("src/infrastructure/deployments/authorization/prod/schema-job.yaml")
 	job := readText(t, jobPath)
 	for _, want := range []string{
-		"name: spicedb-schema-v2",
+		"name: spicedb-schema-v3",
 		"kustomize.toolkit.fluxcd.io/substitute: disabled",
 		"ghcr.io/authzed/zed@sha256:339db064131cfd75c9385938f16fa445bcfa4a82bd9eed73402fd10c00ea374c",
 		"--hostname-override=spicedb.tenant-guardian-prod.svc.cozy.local",
@@ -195,7 +195,8 @@ func TestSpiceDBSchemaAndLiveAcceptanceGate(t *testing.T) {
 		"PERMISSIONSHIP_HAS_PERMISSION",
 		"PERMISSIONSHIP_NO_PERMISSION",
 		"deliberately-invalid-token",
-		`test "${invalid_status}" = 401`,
+		`401|403) ;;`,
+		`SpiceDB returned HTTP ${invalid_status} for an invalid bearer token`,
 		"SpiceDB accepted an unrelated CA",
 		"SpiceDB accepted an invalid TLS hostname",
 	} {
@@ -282,7 +283,7 @@ func TestSpiceDBOperationalQualificationIsGitOpsOnly(t *testing.T) {
 		"- name: guardian-authorization-data",
 		"name: postgres-spicedb-init-job",
 		"name: spicedb-postgres-archive-activation",
-		"name: spicedb-schema-v2",
+		"name: spicedb-schema-v3",
 		"name: spicedb-spicedb",
 		"name: spicedb-server",
 		"kind: SpiceDBCluster",
