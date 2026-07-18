@@ -185,6 +185,7 @@ func TestSpiceDBSchemaAndLiveAcceptanceGate(t *testing.T) {
 	for _, want := range []string{
 		"guardian.dev/component: authorization-datastore",
 		"app.kubernetes.io/name: spicedb-schema",
+		"authzed.com/cluster-component: migration-job",
 		`port: "50051"`,
 		`port: "50053"`,
 		`port: "8443"`,

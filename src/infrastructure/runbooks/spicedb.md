@@ -150,9 +150,9 @@ SpiceDB accepts independent token slots A and B. Product callers switch slots
 before the old slot changes:
 
 1. confirm every caller is using slot B;
-2. change slot A's Password generator input and
-   `guardian.dev/rotation` annotation, and change the SpiceDB qualification
-   rollout annotation in the same PR;
+2. change slot A's ExternalSecret `guardian.dev/rotation` annotation and the
+   SpiceDB qualification rollout annotation in the same PR; the Password
+   generator's length and character policy remain unchanged;
 3. after Flux convergence, prove the new A and unchanged B credentials work;
 4. move callers to A through their own reviewed rollout;
 5. rotate B in the same way; and
