@@ -38,7 +38,7 @@ spec:
             - --insecure=false
             - --ca-path=/tls/ca.crt
             - --token=$(SPICEDB_TOKEN)
-            - --qps=250
+            - --qps=500
             - --step-timeout=2s
             - --log-format=json
           env:
