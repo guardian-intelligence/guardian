@@ -312,7 +312,14 @@ func TestSpiceDBOperationalQualificationIsGitOpsOnly(t *testing.T) {
 
 	qualifyPath := runfilePath("tools/ops/spicedb-qualify")
 	qualify := readText(t, qualifyPath)
-	assertTextContains(t, qualify, "This tool only reads Kubernetes objects and opens a port-forward", qualifyPath)
+	for _, want := range []string{
+		"This tool only reads Kubernetes objects and opens a port-forward",
+		`bazelisk build "@multitool//tools/${name}"`,
+		`jq -er --arg key "${key}" '.data[$key]'`,
+	} {
+		assertTextContains(t, qualify, want, qualifyPath)
+	}
+	assertTextNotContains(t, qualify, `command -v "${name}"`, qualifyPath)
 
 	manualMutation := regexp.MustCompile(`(?m)^\s*(?:sudo\s+)?kubectl\s+(?:apply|create|delete|edit|exec|patch|replace|rollout|scale|set|taint)\b`)
 	for path, raw := range map[string]string{
