@@ -23,6 +23,8 @@ func TestSpiceDBOperatorIsNamespaceScoped(t *testing.T) {
 		"digest: sha256:1d205e9e98e39d87f9640893a06787c854a77d1ffcc3f7ece5e3293896565aa9",
 		"runAsNonRoot: true",
 		"readOnlyRootFilesystem: true",
+		"memory: 256Mi",
+		"memory: 512Mi",
 		"toEntities:",
 		"- kube-apiserver",
 	} {
