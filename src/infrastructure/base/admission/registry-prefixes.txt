@@ -4,6 +4,7 @@ docker.io/grafana/
 docker.io/otel/
 ghcr.io/cloudnative-pg/
 ghcr.io/authzed/
+quay.io/authzed/
 ghcr.io/fluxcd/
 ghcr.io/guardian-intelligence/
 ghcr.io/project-zot/
