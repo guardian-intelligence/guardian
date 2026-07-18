@@ -433,7 +433,10 @@ func TestEncryptedWarmWorkspaceReopensWithoutReformat(t *testing.T) {
 	}
 }
 
-func TestPlaintextDeviceIsRefusedUnderEncryption(t *testing.T) {
+func TestPlaintextLineageIsReformattedUnderEncryption(t *testing.T) {
+	// A generation sealed before the encryption cutover arrives as a
+	// plaintext filesystem; the workspace is rebuildable cache, so the
+	// ladder reformats it to LUKS and the job cold-builds.
 	w := newWorld(t, func(c *Config) { c.Encryption = EncryptionDev }, nil)
 	w.system.devices["workspace"] = "/dev/sdb"
 	w.system.blank["/dev/sdb"] = false
@@ -442,13 +445,21 @@ func TestPlaintextDeviceIsRefusedUnderEncryption(t *testing.T) {
 	host.expect(guestproto.KindHello)
 	host.send(guestproto.Message{Kind: guestproto.KindAssignment, Assignment: ptr(testAssignment())})
 	host.expectStatus(guestproto.RunnerMounting)
-	if status := host.expectStatus(guestproto.RunnerExited); status.ExitCode != SyntheticFailureExitCode {
-		t.Fatalf("exit code %d, want synthetic failure", status.ExitCode)
+	host.expectStatus(guestproto.RunnerRegistered)
+	host.expectStatus(guestproto.RunnerJobStarted)
+	if status := host.expectStatus(guestproto.RunnerExited); status.ExitCode != 0 {
+		t.Fatalf("exit code %d", status.ExitCode)
 	}
-	for _, entry := range w.system.entries() {
-		if strings.HasPrefix(entry, "mount") || strings.HasPrefix(entry, "luksFormat") {
-			t.Fatalf("plaintext device was touched: %v", w.system.entries())
-		}
+	entries := w.system.entries()
+	want := []string{
+		"luksFormat /dev/sdb keylen=32",
+		"luksOpen /dev/sdb as pf-workspace keylen=32",
+		"mkfs ext4 /dev/mapper/pf-workspace",
+		"mount /dev/mapper/pf-workspace at /work options=discard,noatime,nodev,nosuid",
+		"adopt /work",
+	}
+	if fmt.Sprint(entries) != fmt.Sprint(want) {
+		t.Fatalf("journal %v, want %v", entries, want)
 	}
 }
 

@@ -287,6 +287,11 @@ Description=Postflight guest agent
 
 [Service]
 ExecStart=/usr/local/bin/guestd
+# Mirrored to the serial console: the guest journal dies with the VM, and
+# hostd keeps serial.log — without this, a mount-convergence failure's
+# reason is unrecoverable.
+StandardOutput=journal+console
+StandardError=journal+console
 Restart=no
 
 [Install]
