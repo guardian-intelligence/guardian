@@ -1,0 +1,135 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: spicedb
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  namespaceSelector:
+    matchNames:
+      - tenant-guardian-prod
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: spicedb
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 5s
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: spicedb
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  groups:
+    - name: spicedb.rules
+      interval: 15s
+      rules:
+        - alert: SpiceDBReplicaCountDegraded
+          expr: (sum(up{namespace="tenant-guardian-prod",job="spicedb"}) or vector(0)) < 3
+          for: 2m
+          labels:
+            severity: critical
+            guardian_stage: prod
+          annotations:
+            summary: "Fewer than three SpiceDB replicas are serving"
+            description: "The authorization datastore has fewer than three scrapeable replicas. Preserve the remaining fault-domain capacity."
+        - alert: SpiceDBReplicaPlacementDegraded
+          expr: count(count by (node) (kube_pod_info{namespace="tenant-guardian-prod",pod=~"spicedb-spicedb-.*"})) < 3
+          for: 5m
+          labels:
+            severity: critical
+            guardian_stage: prod
+          annotations:
+            summary: "SpiceDB replicas do not occupy three nodes"
+            description: "The three-replica authorization service has lost node-level fault isolation."
+        - alert: SpiceDBPostgresPlacementDegraded
+          expr: count(count by (node) (kube_pod_info{namespace="tenant-guardian-prod",pod=~"postgres-spicedb-[0-9]+"})) < 3
+          for: 5m
+          labels:
+            severity: critical
+            guardian_stage: prod
+          annotations:
+            summary: "SpiceDB PostgreSQL replicas do not occupy three nodes"
+            description: "The three PostgreSQL instances have lost node-level fault isolation."
+        - alert: SpiceDBRequestErrors
+          expr: |
+            sum(rate(grpc_server_handled_total{namespace="tenant-guardian-prod",job="spicedb",grpc_code!~"OK|NotFound"}[5m]))
+            /
+            clamp_min(sum(rate(grpc_server_handled_total{namespace="tenant-guardian-prod",job="spicedb"}[5m])), 0.001)
+            > 0.01
+          for: 5m
+          labels:
+            severity: critical
+            guardian_stage: prod
+          annotations:
+            summary: "SpiceDB request error ratio exceeds 1%"
+            description: "More than 1% of SpiceDB gRPC requests have failed for five minutes."
+        - alert: SpiceDBP99LatencyHigh
+          expr: |
+            histogram_quantile(
+              0.99,
+              sum by (le) (
+                rate(grpc_server_handling_seconds_bucket{namespace="tenant-guardian-prod",job="spicedb",grpc_method="CheckPermission"}[10m])
+              )
+            ) > 0.1
+          for: 10m
+          labels:
+            severity: warning
+            guardian_stage: prod
+          annotations:
+            summary: "SpiceDB CheckPermission p99 exceeds 100ms"
+            description: "Server-side CheckPermission p99 has exceeded the initial latency budget for ten minutes."
+        - alert: SpiceDBContainerRestarting
+          expr: increase(kube_pod_container_status_restarts_total{namespace="tenant-guardian-prod",container="spicedb"}[15m]) > 0
+          labels:
+            severity: warning
+            guardian_stage: prod
+          annotations:
+            summary: "A SpiceDB process restarted"
+            description: "SpiceDB pod {{ $labels.pod }} restarted. Confirm replica health and datastore connectivity."
+        - alert: SpiceDBMigrationFailed
+          expr: kube_job_status_failed{namespace="tenant-guardian-prod",job_name=~"spicedb-migrate-.*"} > 0
+          for: 2m
+          labels:
+            severity: critical
+            guardian_stage: prod
+          annotations:
+            summary: "A SpiceDB datastore migration failed"
+            description: "The operator's migration job failed. Hold the rollout and inspect the migration logs."
+        - alert: SpiceDBSchemaJobFailed
+          expr: kube_job_status_failed{namespace="tenant-guardian-prod",job_name=~"spicedb-schema-.*"} > 0
+          for: 2m
+          labels:
+            severity: critical
+            guardian_stage: prod
+          annotations:
+            summary: "The versioned SpiceDB schema job failed"
+            description: "The production schema or its positive conformance check did not apply cleanly."
+        - alert: SpiceDBCertificateExpiring
+          expr: certmanager_certificate_expiration_timestamp_seconds{namespace="tenant-guardian-prod",name="spicedb-server"} - time() < 604800
+          for: 15m
+          labels:
+            severity: critical
+            guardian_stage: prod
+          annotations:
+            summary: "SpiceDB serving certificate expires within seven days"
+            description: "Certificate renewal or reload is not keeping pace with the serving certificate lifetime."
+        - alert: SpiceDBAlertPathDrill
+          expr: vector(0)
+          for: 1m
+          labels:
+            severity: warning
+            guardian_stage: prod
+          annotations:
+            summary: "SpiceDB alert delivery drill"
+            description: "This rule is enabled only through a reviewed Git change while rehearsing the alert path."

@@ -479,5 +479,25 @@
         "file": "velero-v1.18.2-darwin-arm64/velero"
       }
     ]
+  },
+  "zed": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/authzed/zed/releases/download/v1.1.1/zed_1.1.1_linux_amd64_gnu.tar.gz",
+        "sha256": "2a0901904302a9f59bf35f96dd904897b7664f79a8cc2eede594422468ceb34b",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "zed"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/authzed/zed/releases/download/v1.1.1/zed_1.1.1_darwin_arm64.tar.gz",
+        "sha256": "67247f0054ea07c12dd1853393f4611ca2f1791319a43ad28e303d0e2bedcedf",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "zed"
+      }
+    ]
   }
 }

@@ -1,0 +1,30 @@
+name: authorization correctness under load
+weight: 1
+steps:
+  - op: WriteRelationships
+    updates:
+      - op: TOUCH
+        resource: postflight_repository:qualification_{{ randomObjectID }}
+        subject: guardian_account:alice
+        relation: admin
+  - op: CheckPermission
+    resource: postflight_repository:qualification_{{ randomObjectID }}
+    subject: guardian_account:alice
+    permission: manage
+    consistency: AtLeastAsFresh
+  - op: CheckPermission
+    resource: postflight_repository:qualification_{{ randomObjectID }}
+    subject: guardian_account:mallory
+    permission: manage
+    expectNoPermission: true
+    consistency: AtLeastAsFresh
+  - op: DeleteRelationships
+    resource: postflight_repository:qualification_{{ randomObjectID }}
+    subject: guardian_account:alice
+    relation: admin
+  - op: CheckPermission
+    resource: postflight_repository:qualification_{{ randomObjectID }}
+    subject: guardian_account:alice
+    permission: manage
+    expectNoPermission: true
+    consistency: AtLeastAsFresh

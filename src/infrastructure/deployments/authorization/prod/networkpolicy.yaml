@@ -1,0 +1,157 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: spicedb
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      guardian.dev/component: authorization-datastore
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            guardian.dev/component: authorization-datastore
+      toPorts:
+        - ports:
+            - port: "50053"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: spicedb-schema
+      toPorts:
+        - ports:
+            - port: "50051"
+              protocol: TCP
+            - port: "8443"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: spicedb-thumper
+      toPorts:
+        - ports:
+            - port: "50051"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            guardian.dev/component: authorization-api
+      toPorts:
+        - ports:
+            - port: "50051"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: vmagent
+            k8s:io.kubernetes.pod.namespace: cozy-monitoring
+      toPorts:
+        - ports:
+            - port: "9090"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: postgres-spicedb
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            guardian.dev/component: authorization-datastore
+      toPorts:
+        - ports:
+            - port: "50053"
+              protocol: TCP
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: spicedb-schema
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb-schema
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: spicedb-schema
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            guardian.dev/component: authorization-datastore
+      toPorts:
+        - ports:
+            - port: "50051"
+              protocol: TCP
+            - port: "8443"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: spicedb-thumper
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb-thumper
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: spicedb-thumper
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: vmagent
+            k8s:io.kubernetes.pod.namespace: cozy-monitoring
+      toPorts:
+        - ports:
+            - port: "9090"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            guardian.dev/component: authorization-datastore
+      toPorts:
+        - ports:
+            - port: "50051"
+              protocol: TCP

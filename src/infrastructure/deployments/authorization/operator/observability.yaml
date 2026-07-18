@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: spicedb-operator-metrics
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb-operator
+    app.kubernetes.io/component: metrics
+    app.kubernetes.io/part-of: guardian
+spec:
+  selector:
+    app.kubernetes.io/name: spicedb-operator
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: metrics
+      protocol: TCP
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: spicedb-operator
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb-operator
+    app.kubernetes.io/part-of: guardian
+spec:
+  namespaceSelector:
+    matchNames:
+      - tenant-guardian-prod
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: spicedb-operator
+      app.kubernetes.io/component: metrics
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: spicedb-operator
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb-operator
+    app.kubernetes.io/part-of: guardian
+spec:
+  groups:
+    - name: spicedb-operator.rules
+      interval: 30s
+      rules:
+        - alert: SpiceDBOperatorDown
+          expr: (sum(up{namespace="tenant-guardian-prod",job="spicedb-operator"}) or vector(0)) < 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "SpiceDB operator is unreachable"
+            description: "The namespace-scoped SpiceDB reconciliation controller has not been scrapeable for five minutes."
+        - alert: SpiceDBOperatorReconcileErrors
+          expr: |
+            spicedb_operator_clusters_status_collector_errors_count{namespace="tenant-guardian-prod",job="spicedb-operator"} > 0
+            or
+            spicedb_operator_clusters_condition_count{namespace="tenant-guardian-prod",job="spicedb-operator",condition=~"ValidatingFailed|PreconditionsFailed|RolloutError|ConfigurationWarning"} > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "SpiceDB operator reconciliation is failing"
+            description: "The SpiceDB operator has recorded reconciliation errors for five minutes."

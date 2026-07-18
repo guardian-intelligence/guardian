@@ -1,0 +1,281 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spicedb-operator-update-graph
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb-operator
+    app.kubernetes.io/part-of: guardian
+data:
+  update-graph.yaml: |
+    imageName: ghcr.io/authzed/spicedb
+    channels:
+      - name: stable
+        metadata:
+          datastore: postgres
+          default: "true"
+        edges:
+          v1.52.0:
+            - v1.54.0
+        nodes:
+          - id: v1.54.0
+            migration: populate-schema-tables
+            digest: sha256:830527f85ac4cb40aaf3d3e8e3fe0b84cdace5ee81ceb43f905b3822ee580b82
+          - id: v1.52.0
+            migration: add-index-for-transaction-gc
+            digest: sha256:1d205e9e98e39d87f9640893a06787c854a77d1ffcc3f7ece5e3293896565aa9
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spicedb-operator
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb-operator
+    app.kubernetes.io/part-of: guardian
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spicedb-operator
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb-operator
+    app.kubernetes.io/part-of: guardian
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - endpoints
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - events
+      - secrets
+      - serviceaccounts
+      - services
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - delete
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - authzed.com
+    resources:
+      - spicedbclusters/status
+    verbs:
+      - get
+      - patch
+      - update
+  - apiGroups:
+      - authzed.com
+    resources:
+      - spicedbclusters
+    verbs:
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - batch
+    resources:
+      - jobs
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - discovery.k8s.io
+    resources:
+      - endpointslices
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - policy
+    resources:
+      - poddisruptionbudgets
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - rolebindings
+      - roles
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spicedb-operator
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb-operator
+    app.kubernetes.io/part-of: guardian
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: spicedb-operator
+subjects:
+  - kind: ServiceAccount
+    name: spicedb-operator
+    namespace: tenant-guardian-prod
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spicedb-operator
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb-operator
+    app.kubernetes.io/part-of: guardian
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: spicedb-operator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: spicedb-operator
+        app.kubernetes.io/part-of: guardian
+    spec:
+      serviceAccountName: spicedb-operator
+      securityContext:
+        runAsUser: 65532
+        runAsGroup: 65532
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: spicedb-operator
+          image: ghcr.io/authzed/spicedb-operator@sha256:b797b1a1f825c9ae5f49cb28401dee8b8abf74cb5902f9c40a01101b94a05754
+          args:
+            - run
+            - -v=2
+            - --crd=false
+            - --config=/opt/operator/update-graph.yaml
+            - --watch-namespaces=tenant-guardian-prod
+          ports:
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            periodSeconds: 2
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 160Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          volumeMounts:
+            - name: update-graph
+              mountPath: /opt/operator
+              readOnly: true
+      volumes:
+        - name: update-graph
+          configMap:
+            name: spicedb-operator-update-graph
+            defaultMode: 0444
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: spicedb-operator
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb-operator
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: spicedb-operator
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: vmagent
+            k8s:io.kubernetes.pod.namespace: cozy-monitoring
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
