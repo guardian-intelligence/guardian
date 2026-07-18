@@ -173,38 +173,39 @@ input, and off-site journal failure.
 
 ## Customer-write readiness
 
-The financial model, image pin, encrypted retained volumes, fixed-node
-runtime, disruption budget, and initial replica observability are present.
+The deployed foundation includes the financial model, signed image pin,
+encrypted retained volumes, fixed-node runtime, disruption budget,
+mutually authenticated gateway, default-deny network policy, PostgreSQL
+intent and outcome records, off-site R2 command journal, Stripe
+reconciliation, replica and gateway observability, and continuous sandbox
+payment canaries. The running replicas prove the required encrypted-volume
+`io_uring`, direct-I/O, memlock, and network-encryption path.
+
 Customer writes remain disabled until these remaining gates complete in
 order:
 
-1. **Compatibility:** pass the encrypted-volume `io_uring`, direct-I/O,
-   memlock, ECC, capacity, and network-encryption checks on all three nodes.
-2. **Supply chain:** mirror the pinned server image and matching client into
-   the dark bundle and test an offline start.
-3. **Gateway:** deploy authentication, authorization, idempotency, batching,
-   immutable code registries, default-deny Cilium policy, the scoped
-   host-network admission rule, and Talos host firewall policy.
-4. **Recovery journal:** make intent and outcome records durable off-site and
-   continuously reconcile them with TigerBeetle.
-5. **Observability:** ship host, LINSTOR-pool, gateway, journal, NTP,
-   request-latency, error-rate, and cache-efficiency metrics;
-   prove every critical alert reaches the pager.
-6. **Functional proof:** exercise account creation, linked transfers,
+1. **Supply-chain recovery:** mirror the pinned server image and matching
+   client into the dark bundle and prove an offline start.
+2. **Journal recovery:** restore the PostgreSQL and R2 evidence into an
+   isolated environment and reconcile it with every accepted TigerBeetle
+   object.
+3. **Alert coverage:** complete the safe rule-expression drills and prove
+   human delivery for every critical payment and ledger condition.
+4. **Functional proof:** exercise account creation, linked transfers,
    pending/post/void, retries after lost replies, corrections, and invariant
    failures.
-7. **Failure proof:** independently stop each replica, partition it, restart
+5. **Failure proof:** independently stop each replica, partition it, restart
    it, and verify zero loss of acknowledged transactions before proceeding to
    the next node.
-8. **Disk-loss proof:** destroy one non-primary test data file, recover it
+6. **Disk-loss proof:** destroy one non-primary test data file, recover it
     with `tigerbeetle recover`, complete state sync, and reconcile every
     balance.
-9. **Full-DR proof:** rebuild all three replicas in isolation from off-site
+7. **Full-DR proof:** rebuild all three replicas in isolation from off-site
     evidence and meet the declared RPO/RTO.
-10. **Performance proof:** run expected load, burst load, one-replica-down
+8. **Performance proof:** run expected load, burst load, one-replica-down
     load, and a sustained soak without violating latency, capacity, or
     reconciliation thresholds.
-11. **Release:** enable customer writes behind a fail-closed feature flag,
+9. **Release:** enable customer writes behind the fail-closed feature flag,
     watch canary and reconciliation signals, and retain an immediate ability
     to stop new writes without modifying historical transactions.
 

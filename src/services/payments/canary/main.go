@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -33,11 +32,11 @@ type config struct {
 }
 
 type checkoutResponse struct {
-	RunID     string `json:"run_id"`
-	OrderID   string `json:"order_id"`
-	SessionID string `json:"session_id"`
-	URL       string `json:"url"`
-	TraceID   string `json:"trace_id"`
+	RunID        string `json:"run_id"`
+	OrderID      string `json:"order_id"`
+	Status       string `json:"status"`
+	FailureClass string `json:"failure_class"`
+	TraceID      string `json:"trace_id"`
 }
 
 func main() {
@@ -97,20 +96,18 @@ func run(ctx context.Context, cfg config) error {
 		return err
 	}
 	traceparent := "00-" + traceID + "-" + parentID + "-01"
-	result, err := browserCheckout(ctx, cfg, traceparent)
+	result, err := browserPayment(ctx, cfg, traceparent)
 	if err != nil {
 		return fmt.Errorf("browser: %w", err)
 	}
 	if result.TraceID != traceID {
-		_ = completeRun(context.WithoutCancel(ctx), cfg, result.RunID, "failed", "trace_context", false)
 		return errors.New("trace_context")
 	}
-	if err := waitForTrace(ctx, cfg, traceID); err != nil {
-		_ = completeRun(context.WithoutCancel(ctx), cfg, result.RunID, "failed", "clickhouse_trace", false)
-		return fmt.Errorf("clickhouse_trace: %w", err)
+	if result.Status != "passed" {
+		return fmt.Errorf("stripe_rail: %s", result.FailureClass)
 	}
-	if err := completeRun(ctx, cfg, result.RunID, "passed", "", true); err != nil {
-		return fmt.Errorf("completion: %w", err)
+	if err := waitForTrace(ctx, cfg, traceID); err != nil {
+		return fmt.Errorf("clickhouse_trace: %w", err)
 	}
 	slog.Info(
 		"checkout canary evidence",
@@ -121,7 +118,7 @@ func run(ctx context.Context, cfg config) error {
 	return nil
 }
 
-func browserCheckout(
+func browserPayment(
 	ctx context.Context,
 	cfg config,
 	traceparent string,
@@ -145,7 +142,7 @@ func browserCheckout(
 	); err != nil {
 		return checkoutResponse{}, fmt.Errorf("open canary page: %w", err)
 	}
-	createURL := strings.TrimSuffix(cfg.PublicPageURL, "/") + "/checkout-session"
+	createURL := strings.TrimSuffix(cfg.PublicPageURL, "/") + "/checkout"
 	script := fmt.Sprintf(
 		`(async () => {
 			const response = await fetch(%s, {
@@ -156,7 +153,7 @@ func browserCheckout(
 				}
 			});
 			const body = await response.text();
-			if (!response.ok) throw new Error("checkout session HTTP " + response.status);
+			if (!response.ok) throw new Error("checkout canary HTTP " + response.status);
 			return JSON.parse(body);
 		})()`,
 		jsString(createURL),
@@ -173,97 +170,13 @@ func browserCheckout(
 				return params.WithAwaitPromise(true)
 			},
 		),
-	); err != nil {
-		return checkoutResponse{}, fmt.Errorf("create checkout session in browser: %w", err)
+		); err != nil {
+		return checkoutResponse{}, fmt.Errorf("execute checkout canary in browser: %w", err)
 	}
-	if result.RunID == "" || result.URL == "" || result.TraceID == "" {
-		return checkoutResponse{}, errors.New("checkout session response was incomplete")
-	}
-	if err := driveStripeCheckout(browserCtx, result.URL); err != nil {
-		_ = completeRun(context.WithoutCancel(ctx), cfg, result.RunID, "failed", "browser_checkout", false)
-		return checkoutResponse{}, err
+	if result.RunID == "" || result.OrderID == "" || result.TraceID == "" || result.Status == "" {
+		return checkoutResponse{}, errors.New("checkout canary response was incomplete")
 	}
 	return result, nil
-}
-
-func driveStripeCheckout(ctx context.Context, checkoutURL string) error {
-	const (
-		emailSelector  = `input[type="email"], input[name="email"]`
-		cardSelector   = `input[name="cardNumber"], input[autocomplete="cc-number"]`
-		expirySelector = `input[name="cardExpiry"], input[autocomplete="cc-exp"]`
-		cvcSelector    = `input[name="cardCvc"], input[autocomplete="cc-csc"]`
-		nameSelector   = `input[name="billingName"], input[autocomplete="name"]`
-		postalSelector = `input[name="billingPostalCode"], input[autocomplete="postal-code"]`
-	)
-	if err := chromedp.Run(
-		ctx,
-		chromedp.Navigate(checkoutURL),
-		chromedp.WaitVisible(emailSelector, chromedp.ByQuery),
-	); err != nil {
-		return fmt.Errorf("open Stripe Checkout: %w", err)
-	}
-	if err := chromedp.Run(
-		ctx,
-		chromedp.SendKeys(emailSelector, "guardian-payments-canary@example.com", chromedp.ByQuery),
-		chromedp.WaitVisible(cardSelector, chromedp.ByQuery),
-		chromedp.SendKeys(cardSelector, "4242424242424242", chromedp.ByQuery),
-		chromedp.SendKeys(expirySelector, "1234", chromedp.ByQuery),
-		chromedp.SendKeys(cvcSelector, "123", chromedp.ByQuery),
-		chromedp.SendKeys(nameSelector, "Guardian Canary", chromedp.ByQuery),
-	); err != nil {
-		return fmt.Errorf("fill Stripe Checkout: %w", err)
-	}
-	var postalCodePresent bool
-	if err := chromedp.Run(
-		ctx,
-		chromedp.Evaluate(
-			`Boolean(document.querySelector(`+jsString(postalSelector)+`))`,
-			&postalCodePresent,
-		),
-	); err != nil {
-		return fmt.Errorf("inspect Stripe Checkout: %w", err)
-	}
-	if postalCodePresent {
-		if err := chromedp.Run(
-			ctx,
-			chromedp.SendKeys(postalSelector, "94107", chromedp.ByQuery),
-		); err != nil {
-			return fmt.Errorf("fill Stripe Checkout postal code: %w", err)
-		}
-	}
-	if err := chromedp.Run(
-		ctx,
-		chromedp.Click(`button[type="submit"]`, chromedp.ByQuery),
-	); err != nil {
-		return fmt.Errorf("submit Stripe Checkout: %w", err)
-	}
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		var location string
-		var invalidFields int
-		if err := chromedp.Run(
-			ctx,
-			chromedp.Location(&location),
-			chromedp.Evaluate(
-				`document.querySelectorAll('[aria-invalid="true"]').length`,
-				&invalidFields,
-			),
-		); err != nil {
-			return fmt.Errorf("observe Stripe Checkout completion: %w", err)
-		}
-		if strings.Contains(location, "/payments/complete") {
-			return nil
-		}
-		if invalidFields > 0 {
-			return errors.New("Stripe Checkout rejected one or more form fields")
-		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("Stripe Checkout did not reach the success URL: %w", ctx.Err())
-		case <-ticker.C:
-		}
-	}
 }
 
 func waitForTrace(ctx context.Context, cfg config, traceID string) error {
@@ -294,8 +207,8 @@ func waitForTrace(ctx context.Context, cfg config, traceID string) error {
 func traceComplete(ctx context.Context, cfg config, traceID string) (bool, error) {
 	query := fmt.Sprintf(
 		`SELECT
-countIf(SpanName = 'POST /api/payments/v1/canary/checkout-session'),
-countIf(SpanName = 'checkout.create_session'),
+countIf(SpanName = 'POST /api/payments/v1/canary/checkout'),
+countIf(SpanName = 'canary.browser_to_tigerbeetle'),
 countIf(SpanName = 'stripe.payment_intent.succeeded'),
 countIf(SpanName = 'tigerbeetle.project_payment')
 FROM guardian_analytics.otel_traces
@@ -343,49 +256,6 @@ FORMAT TSV`,
 	return true, nil
 }
 
-func completeRun(
-	ctx context.Context,
-	cfg config,
-	runID string,
-	status string,
-	failureClass string,
-	traceVerified bool,
-) error {
-	if runID == "" {
-		return nil
-	}
-	body, err := json.Marshal(map[string]any{
-		"status":         status,
-		"failure_class":  failureClass,
-		"trace_verified": traceVerified,
-	})
-	if err != nil {
-		return err
-	}
-	completionURL := strings.TrimSuffix(cfg.PublicPageURL, "/") + "/runs/" + url.PathEscape(runID) + "/complete"
-	request, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodPost,
-		completionURL,
-		bytes.NewReader(body),
-	)
-	if err != nil {
-		return err
-	}
-	request.Header.Set("Authorization", "Bearer "+cfg.CanaryToken)
-	request.Header.Set("Content-Type", "application/json")
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
-	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("completion HTTP %d", response.StatusCode)
-	}
-	return nil
-}
-
 func newTraceContext() (string, string, error) {
 	var traceBytes [16]byte
 	var parentBytes [8]byte
@@ -420,7 +290,7 @@ func classify(err error) string {
 		"browser",
 		"clickhouse_trace",
 		"trace_context",
-		"completion",
+		"stripe_rail",
 	} {
 		if strings.Contains(message, class) {
 			return class

@@ -126,9 +126,5 @@ spec:
         - world
       toPorts:
         - ports:
-            # Browser PKI checks and connectivity probes use HTTP while the
-            # checkout and payment data remain protected by Stripe HTTPS.
-            - port: "80"
-              protocol: TCP
             - port: "443"
               protocol: TCP

@@ -125,7 +125,7 @@ spec:
             guardian_stage: prod
           annotations:
             summary: "Browser-to-Stripe-to-TigerBeetle checkout canary is stale"
-            description: "The hosted Checkout and trace-verification canary has not passed in ten minutes."
+            description: "The browser-originated sandbox payment and trace-verification canary has not passed in ten minutes."
         - alert: PaymentsCanaryFailed
           expr: increase(guardian_payments_canary_runs_total{outcome="failed"}[10m]) > 0
           labels:
