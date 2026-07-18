@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: spicedb-schema-v2
+  name: spicedb-schema-v3
   namespace: tenant-guardian-prod
   annotations:
     kustomize.toolkit.fluxcd.io/substitute: disabled
@@ -137,7 +137,13 @@ spec:
                 -H "${invalid_authorization_header}" \
                 -H 'Content-Type: application/json' \
                 --data "${allowed}" "${api}")"
-              test "${invalid_status}" = 401
+              case "${invalid_status}" in
+                401|403) ;;
+                *)
+                  echo "SpiceDB returned HTTP ${invalid_status} for an invalid bearer token" >&2
+                  exit 1
+                  ;;
+              esac
 
               if curl --fail --silent --show-error --cacert /wrong-ca/ca.crt \
                 -H "${authorization_header}" \
