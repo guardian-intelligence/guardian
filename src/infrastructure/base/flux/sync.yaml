@@ -428,6 +428,10 @@ spec:
       kind: Job
       name: postgres-spicedb-init-job
       namespace: tenant-guardian-prod
+    - apiVersion: batch/v1
+      kind: Job
+      name: spicedb-restore-marker-20260718
+      namespace: tenant-guardian-prod
     - apiVersion: cert-manager.io/v1
       kind: Certificate
       name: spicedb-ca

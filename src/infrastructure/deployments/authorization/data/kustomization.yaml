@@ -4,3 +4,4 @@ resources:
   - credentials.yaml
   - certificates.yaml
   - postgres.yaml
+  - restore-marker.yaml
