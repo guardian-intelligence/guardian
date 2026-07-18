@@ -41,7 +41,7 @@ spec:
       guardian.dev/component: authorization-datastore
       guardian.dev/stage: prod
     extraPodAnnotations:
-      guardian.dev/qualification-restart: "20260718T231500Z"
+      guardian.dev/qualification-restart: "20260718-token-slot-a"
   patches:
     - kind: Deployment
       patch:

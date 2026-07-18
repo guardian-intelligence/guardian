@@ -188,28 +188,33 @@ verify() {
   local ca_path="${temporary_directory}/ca.crt"
   local wrong_ca_path="${temporary_directory}/wrong-ca.crt"
   local port_forward_log="${temporary_directory}/port-forward.log"
+  local slot
   local token
 
   secret_value spicedb-server-tls ca.crt >"${ca_path}"
   secret_value postgres-spicedb-ca ca.crt >"${wrong_ca_path}"
-  token="$(secret_value spicedb-api-token-slot-b password)"
   start_port_forward "${port_forward_log}" "${SERVICE}" "${LOCAL_GRPC_PORT}" 50051
 
-  local zed_common=(
-    "--endpoint=127.0.0.1:${LOCAL_GRPC_PORT}"
-    "--hostname-override=${TLS_HOSTNAME}"
-    "--certificate-path=${ca_path}"
-    "--token=${token}"
-    --skip-version-check
-  )
+  for slot in a b; do
+    token="$(secret_value "spicedb-api-token-slot-${slot}" password)"
+    local zed_common=(
+      "--endpoint=127.0.0.1:${LOCAL_GRPC_PORT}"
+      "--hostname-override=${TLS_HOSTNAME}"
+      "--certificate-path=${ca_path}"
+      "--token=${token}"
+      --skip-version-check
+    )
 
-  "${zed_bin}" "${zed_common[@]}" permission check --error-on-no-permission \
-    organization:guardian manage guardian_account:alice >/dev/null
+    "${zed_bin}" "${zed_common[@]}" permission check --error-on-no-permission \
+      organization:guardian manage guardian_account:alice >/dev/null
 
-  if "${zed_bin}" "${zed_common[@]}" permission check --error-on-no-permission \
-    organization:guardian manage guardian_account:mallory >/dev/null 2>&1; then
-    fail "negative authorization check unexpectedly allowed mallory"
-  fi
+    if "${zed_bin}" "${zed_common[@]}" permission check --error-on-no-permission \
+      organization:guardian manage guardian_account:mallory >/dev/null 2>&1; then
+      fail "negative authorization check unexpectedly allowed mallory with token slot ${slot}"
+    fi
+  done
+
+  token="$(secret_value spicedb-api-token-slot-b password)"
 
   if "${zed_bin}" \
     "--endpoint=127.0.0.1:${LOCAL_GRPC_PORT}" \
@@ -229,7 +234,7 @@ verify() {
     fail "SpiceDB accepted an invalid API token"
   fi
 
-  printf 'Positive/negative decisions, TLS verification, and invalid-token rejection passed.\n'
+  printf 'Both API token slots, positive/negative decisions, TLS verification, and invalid-token rejection passed.\n'
 }
 
 classify_thumper_outcomes() {
