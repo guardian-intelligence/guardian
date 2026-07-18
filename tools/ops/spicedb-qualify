@@ -11,6 +11,7 @@ readonly TLS_HOSTNAME="spicedb.${NAMESPACE}.svc.cozy.local"
 PATH="${ROOT}/.guardian/tools/bin:${PATH}"
 
 port_forward_pid=""
+log_stream_pid=""
 temporary_directory=""
 
 usage() {
@@ -62,6 +63,10 @@ resolve_pinned_tool() {
 }
 
 cleanup() {
+  if [[ -n "${log_stream_pid}" ]] && kill -0 "${log_stream_pid}" 2>/dev/null; then
+    kill "${log_stream_pid}" 2>/dev/null || true
+    wait "${log_stream_pid}" 2>/dev/null || true
+  fi
   if [[ -n "${port_forward_pid}" ]] && kill -0 "${port_forward_pid}" 2>/dev/null; then
     kill "${port_forward_pid}" 2>/dev/null || true
     wait "${port_forward_pid}" 2>/dev/null || true
@@ -267,11 +272,21 @@ load() {
   curl --fail --silent "http://127.0.0.1:${LOCAL_METRICS_PORT}/metrics" >"${metrics_before}"
   local started_at
   started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  kubectl -n "${NAMESPACE}" logs --follow deployment/spicedb-thumper \
+    --since-time="${started_at}" >"${thumper_log}" 2>&1 &
+  log_stream_pid="$!"
   printf 'Observing the Flux-deployed Thumper at %s QPS for %s.\n' "${qps}" "${duration}"
   sleep "${duration}"
 
   curl --fail --silent "http://127.0.0.1:${LOCAL_METRICS_PORT}/metrics" >"${metrics_path}"
-  kubectl -n "${NAMESPACE}" logs deployment/spicedb-thumper --since-time="${started_at}" >"${thumper_log}"
+  if ! kill -0 "${log_stream_pid}" 2>/dev/null; then
+    wait "${log_stream_pid}" || true
+    log_stream_pid=""
+    fail "Thumper log stream exited before the observation completed"
+  fi
+  kill "${log_stream_pid}" 2>/dev/null || true
+  wait "${log_stream_pid}" 2>/dev/null || true
+  log_stream_pid=""
 
   local incorrect_decisions
   local step_errors

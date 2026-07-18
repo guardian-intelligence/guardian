@@ -50,7 +50,7 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: spicedb-restore-verify-20260718
+  name: spicedb-restore-verify-v2-20260718
   namespace: tenant-guardian-prod
   annotations:
     kustomize.toolkit.fluxcd.io/substitute: disabled
@@ -101,7 +101,7 @@ spec:
             - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: postgres-spicedb-restore-20260718-credentials
+                  name: postgres-spicedb-credentials
                   key: spicedb
             - name: DATABASE_URL
               value: postgresql://spicedb@postgres-spicedb-restore-20260718-rw:5432/spicedb?sslmode=verify-full&sslrootcert=/tls/ca.crt
