@@ -36,16 +36,16 @@
     "binaries": [
       {
         "kind": "archive",
-        "url": "https://github.com/cilium/cilium-cli/releases/download/v0.19.5/cilium-linux-amd64.tar.gz",
-        "sha256": "67e59489b7ad17dea8eb8cc930435105dff3a4575643ad62567fb2c5ae80d246",
+        "url": "https://github.com/cilium/cilium-cli/releases/download/v0.19.6/cilium-linux-amd64.tar.gz",
+        "sha256": "65ae7592ab873acc0b242b8e679e0a0a856255e34fdd0082e7b048b6285a9842",
         "os": "linux",
         "cpu": "x86_64",
         "file": "cilium"
       },
       {
         "kind": "archive",
-        "url": "https://github.com/cilium/cilium-cli/releases/download/v0.19.5/cilium-darwin-arm64.tar.gz",
-        "sha256": "7a059b65e9eb50d57fb0f3be1e84a9f7872e8eb9237a608e584245d6c36fe0ca",
+        "url": "https://github.com/cilium/cilium-cli/releases/download/v0.19.6/cilium-darwin-arm64.tar.gz",
+        "sha256": "363e6f050eaf64f8dd648806ebd3e371bcdc8ef4a5aebe7301cce4c2f28463ca",
         "os": "macos",
         "cpu": "arm64",
         "file": "cilium"
