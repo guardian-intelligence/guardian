@@ -139,6 +139,16 @@ func (e *Exec) EnsureWorkspace(ctx context.Context, lease LeaseID, generation Ge
 	}
 	snapshot := e.generationDataset(generation) + "@sealed"
 	if _, err := e.run(ctx, "clone", snapshot, dataset); err != nil {
+		// The control plane's scope pointer can outlive its generation
+		// (reaped, lost with a pool, retired by an operator). A missing
+		// clone source must degrade to a cold build, not wedge every
+		// future lease of the scope; the next seal advances the pointer.
+		if strings.Contains(err.Error(), "does not exist") && sizeBytes > 0 {
+			if _, cerr := e.run(ctx, "create", "-s", "-V", strconv.FormatInt(sizeBytes, 10), dataset); cerr != nil {
+				return WorkspaceVolume{}, cerr
+			}
+			return WorkspaceVolume{Name: dataset, Device: devicePath(dataset)}, nil
+		}
 		return WorkspaceVolume{}, err
 	}
 	return WorkspaceVolume{Name: dataset, Device: devicePath(dataset), Source: generation}, nil
