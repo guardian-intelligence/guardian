@@ -181,6 +181,7 @@ func TestSpiceDBProductionTopologyAndSecurity(t *testing.T) {
 		"name: spicedb-server",
 		"secretName: spicedb-server-tls",
 		"spicedb.tenant-guardian-prod.svc.cozy.local",
+		"spicedb-rehearsal-20260718.tenant-guardian-prod.svc.cozy.local",
 		"rotationPolicy: Always",
 		"usages:",
 		"- server auth",
