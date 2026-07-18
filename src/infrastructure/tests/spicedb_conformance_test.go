@@ -90,6 +90,7 @@ func TestSpiceDBProductionTopologyAndSecurity(t *testing.T) {
 		"kind: Plan",
 		"kind: BackupJob",
 		"name: spicedb-postgres-archive-activation",
+		"name: spicedb-postgres-restore-baseline-20260718",
 	} {
 		assertTextContains(t, postgres, want, postgresPath)
 	}
@@ -226,7 +227,7 @@ func TestSpiceDBOperationalQualificationIsGitOpsOnly(t *testing.T) {
 		"quay.io/authzed/thumper:v0.1.0@sha256:65a4d2e5a5a2e532331f86812793c31a320f4c77991520f7c2c4f0ea5700089a",
 		"--insecure=false",
 		"--ca-path=/tls/ca.crt",
-		"--qps=25",
+		"--qps=50",
 		"SpiceDBThumperErrors",
 		"SpiceDBThumperLatencyHigh",
 	} {
@@ -283,6 +284,7 @@ func TestSpiceDBOperationalQualificationIsGitOpsOnly(t *testing.T) {
 		"- name: guardian-authorization-data",
 		"name: postgres-spicedb-init-job",
 		"name: spicedb-postgres-archive-activation",
+		"name: spicedb-postgres-restore-baseline-20260718",
 		"name: spicedb-schema-v3",
 		"name: spicedb-spicedb",
 		"name: spicedb-server",
