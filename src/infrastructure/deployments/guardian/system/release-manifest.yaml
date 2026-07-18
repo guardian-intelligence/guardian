@@ -31,4 +31,4 @@ releases:
       image: ghcr.io/guardian-intelligence/payments@sha256:322bdc13f57983d4f3c04f02e092d32a9204207d93918d4114a7b2f6a8fc4790
   payments-canary:
     prod:
-      image: ghcr.io/guardian-intelligence/payments-canary@sha256:e1bd41a9dd00e55dd5d7de920b4c25ef12cabed478c2b211e814e64870f23da7
+      image: ghcr.io/guardian-intelligence/payments-canary@sha256:5a8fe424f708c96065b0bc81e675728aa72594cc66a592ae3bcd94f7dfb898b7
