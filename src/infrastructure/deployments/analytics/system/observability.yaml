@@ -72,7 +72,14 @@ spec:
             summary: "Analytics ingest metrics scrape is down"
             description: "vmagent cannot scrape analytics-ingest /metrics (or the scrape target was never discovered); the enrichment canary is blind while this fires."
         - alert: PaymentsCheckoutCanaryJobFailed
-          expr: kube_job_status_failed{namespace="guardian-analytics",job_name=~"payments-checkout-canary-.*"} > 0
+          expr: |
+            (kube_job_status_failed{namespace="guardian-analytics",job_name=~"payments-checkout-canary-.*"} > 0)
+            and on(namespace, job_name)
+            (
+              kube_job_status_start_time{namespace="guardian-analytics",job_name=~"payments-checkout-canary-.*"}
+              == on(namespace) group_left()
+              max by(namespace) (kube_job_status_start_time{namespace="guardian-analytics",job_name=~"payments-checkout-canary-.*"})
+            )
           labels:
             severity: critical
           annotations:
