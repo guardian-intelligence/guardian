@@ -45,7 +45,7 @@ spec:
             - name: SPICEDB_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: spicedb-api-token-slot-b
+                  name: spicedb-api-token-slot-a
                   key: password
           ports:
             - name: metrics

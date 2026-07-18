@@ -270,6 +270,7 @@ func TestSpiceDBOperationalQualificationIsGitOpsOnly(t *testing.T) {
 		"--insecure=false",
 		"--ca-path=/tls/ca.crt",
 		"--qps=50",
+		"name: spicedb-api-token-slot-a",
 		"SpiceDBThumperErrors",
 		"SpiceDBThumperLatencyHigh",
 	} {
