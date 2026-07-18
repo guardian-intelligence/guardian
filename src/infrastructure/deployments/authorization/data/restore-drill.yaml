@@ -1,0 +1,165 @@
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Postgres
+metadata:
+  name: spicedb-restore-20260718
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb-restore-drill
+    app.kubernetes.io/part-of: guardian
+spec:
+  replicas: 1
+  size: 20Gi
+  storageClass: replicated-encrypted
+  external: false
+  version: v18
+  resources:
+    cpu: 2
+    memory: 2Gi
+  postgresql:
+    parameters:
+      max_connections: 100
+      shared_buffers: 512MB
+      effective_cache_size: 1536MB
+      statement_timeout: 120s
+      idle_in_transaction_session_timeout: 300s
+      lock_timeout: 10s
+  users:
+    spicedb: {}
+  databases:
+    spicedb:
+      roles:
+        admin:
+          - spicedb
+---
+apiVersion: backups.cozystack.io/v1alpha1
+kind: RestoreJob
+metadata:
+  name: spicedb-r2-restore-20260718
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb-restore-drill
+    app.kubernetes.io/part-of: guardian
+spec:
+  backupRef:
+    name: spicedb-postgres-restore-baseline-20260718
+  targetApplicationRef:
+    apiGroup: apps.cozystack.io
+    kind: Postgres
+    name: spicedb-restore-20260718
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: spicedb-restore-verify-20260718
+  namespace: tenant-guardian-prod
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+  labels:
+    app.kubernetes.io/name: spicedb-restore-drill
+    app.kubernetes.io/part-of: guardian
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 1800
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: spicedb-restore-drill
+        app.kubernetes.io/part-of: guardian
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 999
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: verify
+          image: docker.io/library/postgres:18.1@sha256:1090bc3a8ccfb0b55f78a494d76f8d603434f7e4553543d6e807bc7bd6bbd17f
+          command:
+            - /bin/sh
+            - -uc
+          args:
+            - |
+              attempts=0
+              while [ "${attempts}" -lt 180 ]; do
+                if marker="$(
+                  psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -Atc \
+                    "SELECT id || '|' || marked_at FROM guardian_restore_drill_marker WHERE id = 'c6139a02-61f9-4e69-98b3-b5ff248f4fa0'" \
+                    2>/dev/null
+                )" && [ -n "${marker}" ]; then
+                  printf 'restored_marker=%s\n' "${marker}"
+                  exit 0
+                fi
+                attempts=$((attempts + 1))
+                sleep 10
+              done
+              printf 'restore marker was not recovered within 30 minutes\n' >&2
+              exit 1
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-spicedb-restore-20260718-credentials
+                  key: spicedb
+            - name: DATABASE_URL
+              value: postgresql://spicedb@postgres-spicedb-restore-20260718-rw:5432/spicedb?sslmode=verify-full&sslrootcert=/tls/ca.crt
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsUser: 999
+            runAsGroup: 999
+            runAsNonRoot: true
+          volumeMounts:
+            - name: database-ca
+              mountPath: /tls
+              readOnly: true
+      volumes:
+        - name: database-ca
+          secret:
+            secretName: postgres-spicedb-restore-20260718-ca
+            items:
+              - key: ca.crt
+                path: ca.crt
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: spicedb-restore-copy
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb-restore-drill
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: spicedb-restore-drill
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: postgres-spicedb-restore-20260718
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
