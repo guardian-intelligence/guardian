@@ -186,18 +186,24 @@ func TestSpiceDBSchemaAndLiveAcceptanceGate(t *testing.T) {
 	job := readText(t, jobPath)
 	for _, want := range []string{
 		"name: spicedb-schema-v1",
+		"kustomize.toolkit.fluxcd.io/force: enabled",
 		"ghcr.io/authzed/zed@sha256:339db064131cfd75c9385938f16fa445bcfa4a82bd9eed73402fd10c00ea374c",
 		"--hostname-override=spicedb.tenant-guardian-prod.svc.cozy.local",
 		"--certificate-path=/tls/ca.crt",
+		"--consistency-full",
 		"--error-on-no-permission",
+		`authorization_header="Authorization: Bearer $${SPICEDB_TOKEN}"`,
 		"PERMISSIONSHIP_HAS_PERMISSION",
 		"PERMISSIONSHIP_NO_PERMISSION",
 		"deliberately-invalid-token",
-		`test "${invalid_status}" = 401`,
+		`test "$${invalid_status}" = 401`,
 		"SpiceDB accepted an unrelated CA",
 		"SpiceDB accepted an invalid TLS hostname",
 	} {
 		assertTextContains(t, job, want, jobPath)
+	}
+	if regexp.MustCompile(`(^|[^$])\$\{`).FindString(job) != "" {
+		t.Fatalf("%s contains a shell variable that Flux post-build substitution will consume", jobPath)
 	}
 
 	networkPath := runfilePath("src/infrastructure/deployments/authorization/prod/networkpolicy.yaml")

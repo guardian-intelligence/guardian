@@ -3,6 +3,8 @@ kind: Job
 metadata:
   name: spicedb-schema-v1
   namespace: tenant-guardian-prod
+  annotations:
+    kustomize.toolkit.fluxcd.io/force: enabled
   labels:
     app.kubernetes.io/name: spicedb-schema
     app.kubernetes.io/part-of: guardian
@@ -76,6 +78,7 @@ spec:
             - --skip-version-check
             - permission
             - check
+            - --consistency-full
             - --error-on-no-permission
             - organization:guardian
             - manage
@@ -114,41 +117,41 @@ spec:
               api=https://spicedb:8443/v1/permissions/check
               allowed='{"resource":{"objectType":"organization","objectId":"guardian"},"permission":"manage","subject":{"object":{"objectType":"guardian_account","objectId":"alice"}},"consistency":{"fullyConsistent":true}}'
               denied='{"resource":{"objectType":"organization","objectId":"guardian"},"permission":"manage","subject":{"object":{"objectType":"guardian_account","objectId":"mallory"}},"consistency":{"fullyConsistent":true}}'
-              authorization_header="Authorization: Bearer ${SPICEDB_TOKEN}" # gitleaks:allow -- runtime value from the mounted generated Secret
+              authorization_header="Authorization: Bearer $${SPICEDB_TOKEN}" # gitleaks:allow -- runtime value from the mounted generated Secret
               invalid_authorization_header='Authorization: Bearer deliberately-invalid-token' # gitleaks:allow -- deliberately invalid test input
 
               allowed_result="$(curl --fail --silent --show-error --cacert /tls/ca.crt \
-                -H "${authorization_header}" \
+                -H "$${authorization_header}" \
                 -H 'Content-Type: application/json' \
-                --data "${allowed}" "${api}")"
-              test "$(printf '%s' "${allowed_result}" | jq -r .permissionship)" = PERMISSIONSHIP_HAS_PERMISSION
+                --data "$${allowed}" "$${api}")"
+              test "$(printf '%s' "$${allowed_result}" | jq -r .permissionship)" = PERMISSIONSHIP_HAS_PERMISSION
 
               denied_result="$(curl --fail --silent --show-error --cacert /tls/ca.crt \
-                -H "${authorization_header}" \
+                -H "$${authorization_header}" \
                 -H 'Content-Type: application/json' \
-                --data "${denied}" "${api}")"
-              test "$(printf '%s' "${denied_result}" | jq -r .permissionship)" = PERMISSIONSHIP_NO_PERMISSION
+                --data "$${denied}" "$${api}")"
+              test "$(printf '%s' "$${denied_result}" | jq -r .permissionship)" = PERMISSIONSHIP_NO_PERMISSION
 
               invalid_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
                 --cacert /tls/ca.crt \
-                -H "${invalid_authorization_header}" \
+                -H "$${invalid_authorization_header}" \
                 -H 'Content-Type: application/json' \
-                --data "${allowed}" "${api}")"
-              test "${invalid_status}" = 401
+                --data "$${allowed}" "$${api}")"
+              test "$${invalid_status}" = 401
 
               if curl --fail --silent --show-error --cacert /wrong-ca/ca.crt \
-                -H "${authorization_header}" \
+                -H "$${authorization_header}" \
                 -H 'Content-Type: application/json' \
-                --data "${allowed}" "${api}"; then
+                --data "$${allowed}" "$${api}"; then
                 echo "SpiceDB accepted an unrelated CA" >&2
                 exit 1
               fi
 
               if curl --fail --silent --show-error --cacert /tls/ca.crt \
                 --connect-to wrong.invalid:8443:spicedb:8443 \
-                -H "${authorization_header}" \
+                -H "$${authorization_header}" \
                 -H 'Content-Type: application/json' \
-                --data "${allowed}" https://wrong.invalid:8443/v1/permissions/check; then
+                --data "$${allowed}" https://wrong.invalid:8443/v1/permissions/check; then
                 echo "SpiceDB accepted an invalid TLS hostname" >&2
                 exit 1
               fi
