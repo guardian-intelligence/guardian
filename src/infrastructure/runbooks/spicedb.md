@@ -220,10 +220,12 @@ The drill is non-destructive and is built as a sequence of small PRs:
 3. wait at least one `archive_timeout`, then merge a one-replica scratch
    `Postgres/spicedb-restore-<date>`, a `RestoreJob` referencing the trusted
    BackupJob, and a verification Job;
-4. the verification Job connects with the scratch application's generated
-   credentials and succeeds only if the post-base-backup marker is present;
-5. calculate RPO from the latest verified source marker represented in the
-   copy and RTO from RestoreJob creation to successful verification; and
+4. the verification Job connects with the source application's credential
+   because physical recovery preserves the source role's password hash, and
+   succeeds only if the post-base-backup marker is present;
+5. prove the latest source WAL segment available when the restore began was
+   replayed, calculate RPO from that segment's archive time, and calculate RTO
+   from RestoreJob creation to successful verification; and
 6. remove the scratch application, RestoreJob, and verification Job from
    source in a cleanup PR, then wait for Flux to prune them.
 
