@@ -14,6 +14,7 @@ func TestPaymentsRuntimeConformance(t *testing.T) {
 		"replicas: 2",
 		"postgres-products-rw.tenant-guardian-prod.svc:5432/payments?sslmode=require",
 		"127.0.0.1:13000,127.0.0.1:13001,127.0.0.1:13002",
+		`value: "49532141921164377784457307205600684260"`,
 		`name: CUSTOMER_CHECKOUT_ENABLED`,
 		`value: "false"`,
 		"guardian.dev/otel: producer",
@@ -28,7 +29,7 @@ func TestPaymentsRuntimeConformance(t *testing.T) {
 		"rk_test_",
 		"whsec_",
 		"host: 127.0.0.1",
-		"TIGERBEETLE_CLUSTER_ID\n              value: \"1\"",
+		"TIGERBEETLE_CLUSTER_ID\n              value: \"0\"",
 		"10.8.0.11:3000",
 	} {
 		assertTextNotContains(t, deployment, forbidden, deploymentPath)
