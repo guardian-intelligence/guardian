@@ -135,6 +135,9 @@ func TestSpiceDBProductionTopologyAndSecurity(t *testing.T) {
 		"reloader.stakater.com/auto: \"true\"",
 		"maxSurge: 0",
 		"maxUnavailable: 1",
+		"minReadySeconds: 30",
+		"preStop:",
+		"seconds: 10",
 		"sslmode=verify-full",
 		"readOnlyRootFilesystem: true",
 	} {

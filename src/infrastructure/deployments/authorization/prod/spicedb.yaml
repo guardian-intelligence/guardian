@@ -41,7 +41,7 @@ spec:
       guardian.dev/component: authorization-datastore
       guardian.dev/stage: prod
     extraPodAnnotations:
-      guardian.dev/qualification-restart: "20260718T214500Z"
+      guardian.dev/qualification-restart: "20260718T231500Z"
   patches:
     - kind: Deployment
       patch:
@@ -49,6 +49,7 @@ spec:
           annotations:
             reloader.stakater.com/auto: "true"
         spec:
+          minReadySeconds: 30
           strategy:
             type: RollingUpdate
             rollingUpdate:
@@ -79,6 +80,10 @@ spec:
                           app.kubernetes.io/instance: spicedb-spicedb
               containers:
                 - name: spicedb
+                  lifecycle:
+                    preStop:
+                      sleep:
+                        seconds: 10
                   env:
                     - name: SPICEDB_DATASTORE_PASSWORD
                       valueFrom:
