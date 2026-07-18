@@ -106,15 +106,18 @@ tools/ops/spicedb-qualify load 10m 500
 
 The command never starts an ad-hoc workload or changes the Deployment. It
 refuses to measure a QPS value other than the one reconciled from Git and
-requires the deployed client to verify both the CA and hostname. Thumper sends
-a 90/10 mix of expected allow and expected deny checks with full consistency.
-The qualifier reads logs from VictoriaLogs and histogram increases from
+requires the deployed client to verify both the CA and hostname. Each Thumper
+lifecycle writes a relationship, makes one expected-allow and two expected-deny
+checks at least as fresh as that write, then deletes the relationship. The
+qualifier reads logs from VictoriaLogs and histogram increases from
 VictoriaMetrics over the closed observation interval, so evidence remains
 complete when the Thumper pod is replaced. The raw decision log and summary
 land under `.guardian/evidence/spicedb/`, which is deliberately ignored source
 state.
 Record achieved QPS, p50/p95/p99, error ratio, CPU, memory, PostgreSQL
-connections, and saturation in the rollout PR. An unexpected allow or deny is
+connections, and saturation in the rollout PR. The qualifier records the
+closed interval and those resource measurements in the same summary as the
+decision results. An unexpected allow or deny is
 an unconditional failure. A transport error during a deliberate failover is
 reported separately and does not hide an incorrect decision.
 

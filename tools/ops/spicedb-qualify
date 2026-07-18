@@ -390,6 +390,13 @@ load() {
   local p50
   local p95
   local p99
+  local spicedb_cpu_cores_average
+  local spicedb_cpu_cores_max
+  local spicedb_memory_working_set_bytes_max_per_replica
+  local spicedb_memory_working_set_bytes_sum_max
+  local postgres_backends_max
+  local thumper_cpu_cores_average
+  local thumper_memory_working_set_bytes_max
   local request_selector
   local histogram_selector
   classification="$(classify_thumper_outcomes "${thumper_log}")"
@@ -428,14 +435,51 @@ load() {
     prometheus_value \
       "histogram_quantile(0.99, sum by (le) (increase(grpc_client_handling_seconds_bucket{${histogram_selector}}[${duration}])))"
   )"
+  spicedb_cpu_cores_average="$(
+    prometheus_value \
+      "avg_over_time((sum(rate(container_cpu_usage_seconds_total{namespace=\"${NAMESPACE}\",pod=~\"spicedb-spicedb-.*\",container=\"spicedb\"}[1m])))[${duration}:30s])"
+  )"
+  spicedb_cpu_cores_max="$(
+    prometheus_value \
+      "max_over_time((sum(rate(container_cpu_usage_seconds_total{namespace=\"${NAMESPACE}\",pod=~\"spicedb-spicedb-.*\",container=\"spicedb\"}[1m])))[${duration}:30s])"
+  )"
+  spicedb_memory_working_set_bytes_max_per_replica="$(
+    prometheus_value \
+      "max(max_over_time(container_memory_working_set_bytes{namespace=\"${NAMESPACE}\",pod=~\"spicedb-spicedb-.*\",container=\"spicedb\"}[${duration}]))"
+  )"
+  spicedb_memory_working_set_bytes_sum_max="$(
+    prometheus_value \
+      "max_over_time((sum(container_memory_working_set_bytes{namespace=\"${NAMESPACE}\",pod=~\"spicedb-spicedb-.*\",container=\"spicedb\"}))[${duration}:30s])"
+  )"
+  postgres_backends_max="$(
+    prometheus_value \
+      "max_over_time((sum(cnpg_backends_total{namespace=\"${NAMESPACE}\",job=\"${NAMESPACE}/postgres-spicedb\"}))[${duration}:30s])"
+  )"
+  thumper_cpu_cores_average="$(
+    prometheus_value \
+      "avg_over_time((sum(rate(container_cpu_usage_seconds_total{namespace=\"${NAMESPACE}\",pod=~\"spicedb-thumper-.*\",container=\"thumper\"}[1m])))[${duration}:30s])"
+  )"
+  thumper_memory_working_set_bytes_max="$(
+    prometheus_value \
+      "max(max_over_time(container_memory_working_set_bytes{namespace=\"${NAMESPACE}\",pod=~\"spicedb-thumper-.*\",container=\"thumper\"}[${duration}]))"
+  )"
 
   {
+    printf 'started_at=%s\n' "${started_at}"
+    printf 'ended_at=%s\n' "${ended_at}"
     printf 'duration=%s\n' "${duration}"
     printf 'target_qps=%s\n' "${qps}"
     printf 'completed_check_permission_requests=%s\n' "${completed_requests}"
     printf 'check_permission_p50_seconds=%s\n' "${p50}"
     printf 'check_permission_p95_seconds=%s\n' "${p95}"
     printf 'check_permission_p99_seconds=%s\n' "${p99}"
+    printf 'spicedb_cpu_cores_average=%s\n' "${spicedb_cpu_cores_average}"
+    printf 'spicedb_cpu_cores_max=%s\n' "${spicedb_cpu_cores_max}"
+    printf 'spicedb_memory_working_set_bytes_max_per_replica=%s\n' "${spicedb_memory_working_set_bytes_max_per_replica}"
+    printf 'spicedb_memory_working_set_bytes_sum_max=%s\n' "${spicedb_memory_working_set_bytes_sum_max}"
+    printf 'postgres_backends_max=%s\n' "${postgres_backends_max}"
+    printf 'thumper_cpu_cores_average=%s\n' "${thumper_cpu_cores_average}"
+    printf 'thumper_memory_working_set_bytes_max=%s\n' "${thumper_memory_working_set_bytes_max}"
     printf 'step_errors=%s\n' "${step_errors}"
     printf 'request_errors=%s\n' "${request_errors}"
     printf 'wrong_permissionship_events=%s\n' "${wrong_permissionship_events}"
