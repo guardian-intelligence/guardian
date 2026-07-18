@@ -13,9 +13,6 @@ configMapGenerator:
     files:
       - qualification.yaml=thumper/qualification.yaml
 resources:
-  - credentials.yaml
-  - certificates.yaml
-  - postgres.yaml
   - spicedb.yaml
   - schema-job.yaml
   - thumper.yaml

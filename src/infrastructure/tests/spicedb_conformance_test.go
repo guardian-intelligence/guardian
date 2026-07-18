@@ -52,7 +52,7 @@ func TestSpiceDBOperatorIsNamespaceScoped(t *testing.T) {
 }
 
 func TestSpiceDBProductionTopologyAndSecurity(t *testing.T) {
-	postgresPath := runfilePath("src/infrastructure/deployments/authorization/prod/postgres.yaml")
+	postgresPath := runfilePath("src/infrastructure/deployments/authorization/data/postgres.yaml")
 	postgres := readText(t, postgresPath)
 	for _, want := range []string{
 		"kind: Postgres",
@@ -109,7 +109,7 @@ func TestSpiceDBProductionTopologyAndSecurity(t *testing.T) {
 		assertTextNotContains(t, spicedb, forbidden, spicedbPath)
 	}
 
-	credentialsPath := runfilePath("src/infrastructure/deployments/authorization/prod/credentials.yaml")
+	credentialsPath := runfilePath("src/infrastructure/deployments/authorization/data/credentials.yaml")
 	credentials := readText(t, credentialsPath)
 	counts := map[string]int{}
 	for _, doc := range yamlDocs(t, credentialsPath) {
@@ -129,7 +129,7 @@ func TestSpiceDBProductionTopologyAndSecurity(t *testing.T) {
 		assertTextContains(t, credentials, want, credentialsPath)
 	}
 
-	certPath := runfilePath("src/infrastructure/deployments/authorization/prod/certificates.yaml")
+	certPath := runfilePath("src/infrastructure/deployments/authorization/data/certificates.yaml")
 	certs := readText(t, certPath)
 	for _, want := range []string{
 		"name: spicedb-ca",
@@ -252,9 +252,13 @@ func TestSpiceDBOperationalQualificationIsGitOpsOnly(t *testing.T) {
 	for _, want := range []string{
 		"name: guardian-authorization-operator",
 		"path: ./src/infrastructure/deployments/authorization/operator",
+		"name: guardian-authorization-data",
+		"path: ./src/infrastructure/deployments/authorization/data",
 		"name: guardian-authorization-prod",
 		"path: ./src/infrastructure/deployments/authorization/prod",
 		"- name: guardian-authorization-operator",
+		"- name: guardian-authorization-data",
+		"name: postgres-spicedb-init-job",
 		"name: spicedb-postgres-archive-activation",
 		"name: spicedb-schema-v1",
 		"name: spicedb-spicedb",

@@ -21,6 +21,22 @@ func TestDefaultKustomizationsIncludeVLogsHardeningSlices(t *testing.T) {
 	}
 }
 
+func TestDefaultKustomizationsOrderAuthorizationFoundation(t *testing.T) {
+	positions := make(map[string]int, len(defaultKustomizations))
+	for i, name := range defaultKustomizations {
+		positions[name] = i
+	}
+	operator, hasOperator := positions["guardian-authorization-operator"]
+	data, hasData := positions["guardian-authorization-data"]
+	prod, hasProd := positions["guardian-authorization-prod"]
+	if !hasOperator || !hasData || !hasProd {
+		t.Fatalf("default convergence set is missing authorization slices: %#v", defaultKustomizations)
+	}
+	if operator >= data || data >= prod {
+		t.Fatalf("authorization slices must be ordered operator (%d), data (%d), prod (%d)", operator, data, prod)
+	}
+}
+
 func TestValidateFluxKustomizations(t *testing.T) {
 	raw := `{"items":[
 		{"metadata":{"name":"guardian-system"},"status":{"lastAppliedRevision":"main@sha1:abc123","conditions":[{"type":"Ready","status":"True","reason":"ReconciliationSucceeded"}]}}

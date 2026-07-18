@@ -10,8 +10,10 @@ slots through their own workload Secret wiring.
 The source of truth is:
 
 - `deployments/authorization/operator` for the CRD and operator;
-- `deployments/authorization/prod` for PostgreSQL, certificates, credentials,
-  schema, networking, SpiceDB, and alerting;
+- `deployments/authorization/data` for PostgreSQL, certificates, credentials,
+  and backup activation;
+- `deployments/authorization/prod` for schema, networking, SpiceDB, load, and
+  alerting;
 - `load/spicedb-checks.yaml` for the expected allow and deny decisions; and
 - `tools/ops/spicedb-qualify` for read-only evidence collection.
 
@@ -57,9 +59,10 @@ tools/ops/spicedb-qualify placement
 
 The initial `BackupJob` activates CNPG's archive configuration. Do not treat
 its artifact as restorable. Once it succeeds, merge a second, uniquely named
-`BackupJob` into `postgres.yaml` and wait for that revision before accepting
-the backup gate. The second base backup is the first restore source whose WAL
-range is wholly inside the configured archive era.
+`BackupJob` into `deployments/authorization/data/postgres.yaml` and wait for
+that revision before accepting the backup gate. The second base backup is the
+first restore source whose WAL range is wholly inside the configured archive
+era.
 
 Inspecting objects, status, events, metrics, and logs is read-only and is
 permitted. Any correction is a new reviewed commit and another Flux

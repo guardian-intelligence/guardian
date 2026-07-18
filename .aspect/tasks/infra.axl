@@ -133,6 +133,7 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/bootstrap/sync-steady:manifests",
     "//src/infrastructure/deployments/guardian/system:manifests",
     "//src/infrastructure/deployments/authorization/operator:manifests",
+    "//src/infrastructure/deployments/authorization/data:manifests",
     "//src/infrastructure/deployments/authorization/prod:manifests",
     "//src/infrastructure/deployments/company/prod:manifests",
     "//src/infrastructure/load:http_load_scripts",

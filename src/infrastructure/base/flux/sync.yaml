@@ -392,19 +392,19 @@ spec:
       name: spicedb-operator
       namespace: tenant-guardian-prod
 ---
-# The authorization data plane owns its PostgreSQL app, initial R2 backup,
-# serving certificates, and versioned schema acceptance job. Generated CNPG
-# and SpiceDB workloads are explicit health gates even though the operators,
-# rather than Flux inventory, create them.
+# PostgreSQL initialization, archive activation, serving certificates, and API
+# credentials must all be healthy before the SpiceDB CR exists. In particular,
+# the Cozystack-generated init Job creates the database role that the SpiceDB
+# migration Job needs.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
-  name: guardian-authorization-prod
+  name: guardian-authorization-data
   namespace: cozy-fluxcd
 spec:
   interval: 10m
   retryInterval: 1m
-  path: ./src/infrastructure/deployments/authorization/prod
+  path: ./src/infrastructure/deployments/authorization/data
   sourceRef:
     kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
     name: ${GUARDIAN_SOURCE_NAME:=guardian}
@@ -423,6 +423,10 @@ spec:
       kind: Cluster
       name: postgres-spicedb
       namespace: tenant-guardian-prod
+    - apiVersion: batch/v1
+      kind: Job
+      name: postgres-spicedb-init-job
+      namespace: tenant-guardian-prod
     - apiVersion: cert-manager.io/v1
       kind: Certificate
       name: spicedb-ca
@@ -439,6 +443,51 @@ spec:
       kind: ExternalSecret
       name: spicedb-api-token-slot-b
       namespace: tenant-guardian-prod
+    - apiVersion: backups.cozystack.io/v1alpha1
+      kind: BackupJob
+      name: spicedb-postgres-archive-activation
+      namespace: tenant-guardian-prod
+  healthCheckExprs:
+    - apiVersion: external-secrets.io/v1beta1
+      kind: ExternalSecret
+      current: >-
+        has(status.conditions) &&
+        status.conditions.exists(e,
+        e.type == 'Ready' && e.status == 'True')
+      failed: >-
+        has(status.conditions) &&
+        status.conditions.exists(e,
+        e.type == 'Ready' && e.status == 'False')
+    - apiVersion: backups.cozystack.io/v1alpha1
+      kind: BackupJob
+      current: status.phase == 'Succeeded'
+      failed: status.phase == 'Failed'
+---
+# The authorization service starts only after its data dependencies are
+# functional. Generated SpiceDB workloads remain explicit health gates even
+# though the operator, rather than Flux inventory, creates them.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: guardian-authorization-prod
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/deployments/authorization/prod
+  sourceRef:
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: guardian-source
+  dependsOn:
+    - name: guardian-authorization-data
+  prune: true
+  wait: false
+  timeout: 30m
+  healthChecks:
     - apiVersion: authzed.com/v1alpha1
       kind: SpiceDBCluster
       name: spicedb
@@ -454,10 +503,6 @@ spec:
     - apiVersion: apps/v1
       kind: Deployment
       name: spicedb-thumper
-      namespace: tenant-guardian-prod
-    - apiVersion: backups.cozystack.io/v1alpha1
-      kind: BackupJob
-      name: spicedb-postgres-archive-activation
       namespace: tenant-guardian-prod
   healthCheckExprs:
     - apiVersion: authzed.com/v1alpha1
@@ -479,20 +524,6 @@ spec:
         (c.status == 'False' &&
         c.type == 'Migrating' &&
         c.reason == 'MigrationFailed'))
-    - apiVersion: external-secrets.io/v1beta1
-      kind: ExternalSecret
-      current: >-
-        has(status.conditions) &&
-        status.conditions.exists(e,
-        e.type == 'Ready' && e.status == 'True')
-      failed: >-
-        has(status.conditions) &&
-        status.conditions.exists(e,
-        e.type == 'Ready' && e.status == 'False')
-    - apiVersion: backups.cozystack.io/v1alpha1
-      kind: BackupJob
-      current: status.phase == 'Succeeded'
-      failed: status.phase == 'Failed'
 ---
 # TigerBeetle's financial ledger is isolated in its own reconciliation slice
 # so replica health is gated without coupling unrelated Guardian system
