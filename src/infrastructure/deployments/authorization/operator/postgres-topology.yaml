@@ -30,6 +30,7 @@ spec:
         expression: >-
           Object{
             spec: Object.spec{
+              primaryUpdateMethod: "switchover",
               affinity: Object.spec.affinity{
                 enablePodAntiAffinity: true,
                 podAntiAffinityType: "required",
