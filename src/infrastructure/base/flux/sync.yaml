@@ -382,6 +382,7 @@ spec:
         name: guardian-source
   dependsOn:
     - name: guardian-mgmt-admission
+    - name: guardian-mgmt-storage
     - name: guardian-system
   prune: true
   wait: true

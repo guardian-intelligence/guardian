@@ -9,7 +9,8 @@ slots through their own workload Secret wiring.
 
 The source of truth is:
 
-- `deployments/authorization/operator` for the CRD and operator;
+- `deployments/authorization/operator` for the CRD, operator, and the
+  exact-name PostgreSQL topology policy;
 - `deployments/authorization/data` for PostgreSQL, certificates, credentials,
   and backup activation;
 - `deployments/authorization/prod` for schema, networking, SpiceDB, load, and
@@ -41,8 +42,9 @@ keeps the maximum at 64 against PostgreSQL's limit of 100.
 
 The Flux graph installs in this order:
 
-1. the namespace-scoped operator CRD, Role, RoleBinding, Deployment, and
-   observability;
+1. the namespace-scoped operator CRD, Role, RoleBinding, Deployment,
+   observability, and the admission policy that makes node anti-affinity
+   required only for `tenant-guardian-prod/postgres-spicedb`;
 2. the PostgreSQL application, backup plan, two generated API credential
    slots, and the certificate chain;
 3. the `SpiceDBCluster`; then
