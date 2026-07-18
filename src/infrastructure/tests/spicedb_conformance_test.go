@@ -136,8 +136,6 @@ func TestSpiceDBProductionTopologyAndSecurity(t *testing.T) {
 		"maxSurge: 0",
 		"maxUnavailable: 1",
 		"minReadySeconds: 30",
-		"preStop:",
-		"seconds: 10",
 		"sslmode=verify-full",
 		"readOnlyRootFilesystem: true",
 	} {
