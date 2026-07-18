@@ -142,11 +142,11 @@ func TestPaymentsRolloutAndCanaryConformance(t *testing.T) {
 	analyticsNetwork := readText(t, analyticsNetworkPath)
 	for _, want := range []string{
 		"name: payments-checkout-canary",
-		`port: "80"`,
 		`port: "443"`,
 	} {
 		assertTextContains(t, analyticsNetwork, want, analyticsNetworkPath)
 	}
+	assertTextNotContains(t, analyticsNetwork, `port: "80"`, analyticsNetworkPath)
 
 	networkPath := runfilePath(root + "networkpolicy.yaml")
 	network := readText(t, networkPath)

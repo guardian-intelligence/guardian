@@ -3,6 +3,7 @@ exports_files([
     "github-apps.md",
     "openbao-design.md",
     "openbao-residue-inventory.md",
+    "payments.md",
     "supply-chain-design.md",
     "tigerbeetle-financial-model.md",
     "tigerbeetle.md",

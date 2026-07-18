@@ -18,6 +18,16 @@ func TestTraceCompleteRequiresEverySpan(t *testing.T) {
 		if !strings.Contains(r.URL.Query().Get("query"), "0123456789abcdef0123456789abcdef") {
 			t.Fatal("trace query did not bind the expected trace ID")
 		}
+		for _, span := range []string{
+			"POST /api/payments/v1/canary/checkout",
+			"canary.browser_to_tigerbeetle",
+			"stripe.payment_intent.succeeded",
+			"tigerbeetle.project_payment",
+		} {
+			if !strings.Contains(r.URL.Query().Get("query"), span) {
+				t.Fatalf("trace query does not require %q", span)
+			}
+		}
 		_, _ = w.Write([]byte(counts))
 	}))
 	defer server.Close()

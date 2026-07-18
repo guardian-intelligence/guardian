@@ -390,6 +390,20 @@ func TestMemoryJournalRejectsChangedRetry(t *testing.T) {
 	}
 }
 
+func TestBrowserCanaryRequiresScopedToken(t *testing.T) {
+	server := &paymentServer{cfg: config{CanaryToken: "canary-secret"}}
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/payments/v1/canary/checkout",
+		nil,
+	)
+	response := httptest.NewRecorder()
+	server.handler().ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("browser canary without scoped token status = %d", response.Code)
+	}
+}
+
 func TestConfigRejectsLiveStripeKeys(t *testing.T) {
 	keys := []string{
 		"DATABASE_URL",

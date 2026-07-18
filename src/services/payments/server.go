@@ -55,6 +55,7 @@ func (s *paymentServer) handler() http.Handler {
 		"POST /api/payments/v1/canary/checkout-session",
 		s.handleCheckoutCanarySession,
 	)
+	mux.HandleFunc("POST /api/payments/v1/canary/checkout", s.handleCheckoutCanary)
 	mux.HandleFunc(
 		"POST /api/payments/v1/canary/runs/{id}/complete",
 		s.handleCompleteCanary,
@@ -334,21 +335,37 @@ func (s *paymentServer) handleStripeWebhook(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusOK)
 }
 
+func (s *paymentServer) handleCheckoutCanary(w http.ResponseWriter, r *http.Request) {
+	s.handlePaymentCanary(w, r, "checkout")
+}
+
 func (s *paymentServer) handleRailCanary(w http.ResponseWriter, r *http.Request) {
+	s.handlePaymentCanary(w, r, "rail")
+}
+
+func (s *paymentServer) handlePaymentCanary(
+	w http.ResponseWriter,
+	r *http.Request,
+	lane string,
+) {
 	if !s.authorizeCanary(r) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), s.cfg.CanaryCompletionDeadline)
 	defer cancel()
-	ctx, span := otel.Tracer(paymentsServiceName).Start(ctx, "canary.stripe_to_tigerbeetle")
+	spanName := "canary.stripe_to_tigerbeetle"
+	if lane == "checkout" {
+		spanName = "canary.browser_to_tigerbeetle"
+	}
+	ctx, span := otel.Tracer(paymentsServiceName).Start(ctx, spanName)
 	defer span.End()
 	traceID := traceIDFromContext(ctx)
 	runID := tb.ID().String()
 	run, err := s.queries.StartCanaryRun(ctx, paymentdb.StartCanaryRunParams{
 		ID:      runID,
 		TraceID: traceID,
-		Lane:    "rail",
+		Lane:    lane,
 	})
 	if err != nil {
 		http.Error(w, "canary unavailable", http.StatusServiceUnavailable)
@@ -414,10 +431,10 @@ func (s *paymentServer) handleRailCanary(w http.ResponseWriter, r *http.Request)
 		httpStatus = http.StatusServiceUnavailable
 		status = "failed"
 	}
-	s.metrics.canaryRuns.WithLabelValues("rail", status).Inc()
+	s.metrics.canaryRuns.WithLabelValues(lane, status).Inc()
 	if status == "passed" {
-		s.metrics.canaryLastSuccess.WithLabelValues("rail").SetToCurrentTime()
-		s.metrics.endToEndSeconds.WithLabelValues("rail").Observe(time.Since(started).Seconds())
+		s.metrics.canaryLastSuccess.WithLabelValues(lane).SetToCurrentTime()
+		s.metrics.endToEndSeconds.WithLabelValues(lane).Observe(time.Since(started).Seconds())
 	}
 	writeJSON(w, httpStatus, map[string]any{
 		"run_id":        run.ID,
