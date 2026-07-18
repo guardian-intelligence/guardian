@@ -100,6 +100,7 @@ func TestSpiceDBProductionTopologyAndSecurity(t *testing.T) {
 		"kind: SpiceDBCluster",
 		"channel: stable",
 		"version: v1.52.0",
+		"presharedKey:\n      skip: true",
 		"datastoreEngine: postgres",
 		"datastoreTLSSecretName: postgres-spicedb-ca",
 		"tlsSecretName: spicedb-server-tls",

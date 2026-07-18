@@ -13,8 +13,7 @@ spec:
     datastoreURI:
       skip: true
     presharedKey:
-      secretName: spicedb-api-token-slot-a
-      key: password
+      skip: true
     migrationSecrets:
       skip: true
   config:
