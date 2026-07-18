@@ -52,8 +52,10 @@ spec:
           strategy:
             type: RollingUpdate
             rollingUpdate:
-              maxSurge: 1
-              maxUnavailable: 0
+              # Required anti-affinity fills all three nodes, so a surge pod
+              # cannot schedule until one replica leaves its node.
+              maxSurge: 0
+              maxUnavailable: 1
           template:
             spec:
               terminationGracePeriodSeconds: 60

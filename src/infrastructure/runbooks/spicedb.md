@@ -125,7 +125,9 @@ links.
 
 Change `guardian.dev/qualification-restart` under
 `spec.config.extraPodAnnotations` to a new UTC rehearsal identifier. The
-operator produces a surge-first Deployment rollout. Merge the change, wait for
+operator replaces one replica at a time. Required anti-affinity occupies all
+three nodes, so the Deployment uses no surge and permits one unavailable
+replica while the PDB preserves a two-ready floor. Merge the change, wait for
 the merge revision, and require:
 
 - three Ready replicas at completion on three distinct nodes;
@@ -172,7 +174,7 @@ it.
 The leaf key is ECDSA and `rotationPolicy: Always`. To rehearse renewal, add a
 unique, valid DNS SAN to `Certificate/spicedb-server` in a reviewed PR.
 cert-manager issues a new key and leaf while the CA remains stable. The
-declarative secret reloader triggers the same surge-first SpiceDB rollout used
+declarative secret reloader triggers the same one-at-a-time SpiceDB rollout used
 for other planned changes.
 
 Keep Thumper running, wait for the Certificate's observed generation and
@@ -192,7 +194,7 @@ schema tables; it does not remove the v1.52.0 tables. Under Thumper load:
 
 1. take and verify the pre-upgrade R2 copy;
 2. change `spec.version` to `v1.54.0`, merge, wait for the migration and
-   surge-first rollout, and run the complete functional gate;
+   one-at-a-time rollout, and run the complete functional gate;
 3. rehearse the explicitly bounded rollback by temporarily setting
    `config.image` to the checked v1.52.0 digest, `config.skipMigrations: true`,
    and `config.datastoreAllowedMigrations: populate-schema-tables`;
