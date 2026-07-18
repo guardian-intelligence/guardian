@@ -54,10 +54,6 @@ require_command() {
 resolve_pinned_tool() {
   local name="$1"
   local output
-  if command -v "${name}" >/dev/null 2>&1; then
-    command -v "${name}"
-    return
-  fi
   require_command bazelisk
   bazelisk build "@multitool//tools/${name}" >/dev/null
   output="$(bazelisk cquery --output=files "@multitool//tools/${name}" 2>/dev/null)"
@@ -106,8 +102,9 @@ start_port_forward() {
 secret_value() {
   local secret_name="$1"
   local key="$2"
-  kubectl -n "${NAMESPACE}" get secret "${secret_name}" \
-    -o "jsonpath={.data.${key}}" | base64 -d
+  kubectl -n "${NAMESPACE}" get secret "${secret_name}" -o json |
+    jq -er --arg key "${key}" '.data[$key]' |
+    base64 -d
 }
 
 assert_three_nodes() {
