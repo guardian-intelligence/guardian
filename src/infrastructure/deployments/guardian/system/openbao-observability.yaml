@@ -105,7 +105,7 @@ spec:
           annotations:
             summary: Guardian OpenBao audit logging is failing.
         - alert: OpenBaoAuditLogSilent
-          expr: sum(increase(vault_audit_log_request_count{namespace="tenant-guardian",job="guardian-openbao-metrics"}[15m])) < 1 or absent(vault_audit_log_request_count{namespace="tenant-guardian",job="guardian-openbao-metrics"})
+          expr: sum(increase(vault_audit_log_request_count{namespace="tenant-guardian",job="guardian-openbao-metrics"}[65m])) < 1 or absent(vault_audit_log_request_count{namespace="tenant-guardian",job="guardian-openbao-metrics"})
           for: 5m
           labels:
             severity: critical
