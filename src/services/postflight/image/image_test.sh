@@ -26,6 +26,8 @@ grep -Fq "cryptsetup-bin" "${build_sh}" ||
   fail "build.sh does not install the Postflight runtime package"
 grep -Fq 'rootfs_size="80G"' "${build_sh}" ||
   fail "build.sh does not provision the 4-vCPU root-disk size"
+grep -Fq '[[ "${growpart_output}" != NOCHANGE:* ]]' "${build_sh}" ||
+  fail "build.sh does not accept an already-expanded runner-images partition"
 grep -Fq 'rootfs_min_free_bytes=$((17 * 1024 * 1024 * 1024))' "${build_sh}" ||
   fail "build.sh does not preserve runner-images free-space headroom"
 grep -Fq "runner ALL=(ALL:ALL) NOPASSWD: ALL" "${build_sh}" ||
