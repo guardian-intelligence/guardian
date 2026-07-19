@@ -271,4 +271,16 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 		"Guardian login canary must not use a password grant")
 	assertTextNotContains(t, string(canary), `KC_ADMIN`,
 		"Guardian login canary must not use Keycloak administration")
+
+	promotion, err := os.ReadFile(runfilePath(
+		"src/infrastructure/deployments/guardian/promotion/pipelines/iam-login-canary-stage-prod.yaml",
+	))
+	if err != nil {
+		t.Fatalf("read Guardian login canary promotion: %v", err)
+	}
+	assertTextContains(t, string(promotion),
+		`path: ./repo/src/infrastructure/deployments/iam/prod/login-canary.yaml`,
+		"login canary promotion must update the CronJob image")
+	assertTextContains(t, string(promotion), `key: releases.login-canary.prod.image`,
+		"login canary promotion must update the release manifest")
 }
