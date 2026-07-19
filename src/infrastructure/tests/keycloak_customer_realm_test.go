@@ -10,6 +10,7 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 	t.Parallel()
 
 	const root = "src/infrastructure/deployments/iam/prod/"
+	const realmDataKey = "guardianintelligence.org-realm.json"
 	listed := false
 	for _, doc := range yamlDocs(t, runfilePath(root+"kustomization.yaml")) {
 		for _, resource := range sliceValue(doc["resources"]) {
@@ -50,7 +51,7 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 	}
 	for _, doc := range yamlDocs(t, runfilePath(root+"realm-configmap.yaml")) {
 		data := mapValue(doc["data"])
-		if raw := stringValue(data["guardian-realm.json"]); raw != "" {
+		if raw := stringValue(data[realmDataKey]); raw != "" {
 			if err := json.Unmarshal([]byte(raw), &realm); err != nil {
 				t.Fatalf("decode Guardian realm JSON: %v", err)
 			}
@@ -63,6 +64,9 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 	}
 	if realm.Realm != "guardianintelligence.org" {
 		t.Fatalf("realm = %q", realm.Realm)
+	}
+	if realmDataKey != realm.Realm+"-realm.json" {
+		t.Fatalf("realm import filename = %q, want %q", realmDataKey, realm.Realm+"-realm.json")
 	}
 	if realm.OrganizationsEnabled != nil {
 		t.Fatal("login realm must not embed organization authorization")
