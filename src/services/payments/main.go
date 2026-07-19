@@ -116,11 +116,12 @@ func main() {
 	go metrics.refreshLoop(rootCtx, queries, 15*time.Second)
 
 	server := &paymentServer{
-		cfg:      cfg,
-		queries:  queries,
-		stripe:   stripeClient,
-		verifier: verifier,
-		metrics:  metrics,
+		cfg:        cfg,
+		queries:    queries,
+		stripe:     stripeClient,
+		verifier:   verifier,
+		authorizer: newAuthorizationChecker(cfg.AuthorizationAPIURL, cfg.AuthorizationCheckToken),
+		metrics:    metrics,
 		databaseReady: func(ctx context.Context) error {
 			return pool.Ping(ctx)
 		},

@@ -3,16 +3,19 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
+	"connectrpc.com/connect"
 	"github.com/coreos/go-oidc/v3/oidc"
+
+	authorizationv1 "github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/authorization/v1"
+	"github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/authorization/v1/authorizationv1connect"
 )
 
 type customerIdentity struct {
-	Subject  string
-	TenantID string
+	Subject string
 }
 
 type tokenVerifier interface {
@@ -37,37 +40,61 @@ func (v *oidcVerifier) Verify(ctx context.Context, raw string) (customerIdentity
 		return customerIdentity{}, err
 	}
 	var claims struct {
-		Subject      string                         `json:"sub"`
-		Organization map[string]organizationDetails `json:"organization"`
+		Subject string `json:"sub"`
 	}
 	if err := token.Claims(&claims); err != nil {
-		return customerIdentity{}, err
-	}
-	tenantID, err := organizationID(claims.Organization)
-	if err != nil {
 		return customerIdentity{}, err
 	}
 	if claims.Subject == "" {
 		return customerIdentity{}, errors.New("token lacks subject claim")
 	}
-	return customerIdentity{Subject: claims.Subject, TenantID: tenantID}, nil
+	return customerIdentity{Subject: claims.Subject}, nil
 }
 
-type organizationDetails struct {
-	ID string `json:"id"`
+type authorizationChecker interface {
+	CheckOrganization(context.Context, string, string, string) (bool, error)
 }
 
-func organizationID(organizations map[string]organizationDetails) (string, error) {
-	if len(organizations) != 1 {
-		return "", fmt.Errorf("token must contain exactly one organization, got %d", len(organizations))
+type connectAuthorizationChecker struct {
+	client authorizationv1connect.AuthorizationServiceClient
+	token  string
+}
+
+func newAuthorizationChecker(baseURL, token string) *connectAuthorizationChecker {
+	return &connectAuthorizationChecker{
+		client: authorizationv1connect.NewAuthorizationServiceClient(
+			&http.Client{Timeout: 5 * time.Second},
+			baseURL,
+		),
+		token:  token,
 	}
-	for _, organization := range organizations {
-		if strings.TrimSpace(organization.ID) == "" {
-			return "", errors.New("organization claim lacks id")
-		}
-		return organization.ID, nil
+}
+
+func (c *connectAuthorizationChecker) CheckOrganization(
+	ctx context.Context,
+	subject string,
+	organizationID string,
+	permission string,
+) (bool, error) {
+	request := connect.NewRequest(&authorizationv1.CheckRequest{
+		Resource: &authorizationv1.ObjectReference{
+			Type: "organization",
+			Id:   organizationID,
+		},
+		Permission: permission,
+		Subject: &authorizationv1.SubjectReference{
+			Object: &authorizationv1.ObjectReference{
+				Type: "guardian_account",
+				Id:   subject,
+			},
+		},
+	})
+	request.Header().Set("Authorization", "Bearer "+c.token)
+	response, err := c.client.Check(ctx, request)
+	if err != nil {
+		return false, err
 	}
-	panic("unreachable")
+	return response.Msg.GetAllowed(), nil
 }
 
 func bearerToken(r *http.Request) (string, error) {

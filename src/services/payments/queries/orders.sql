@@ -1,6 +1,6 @@
 -- name: CreateOrder :one
 INSERT INTO payment_orders (
-    id, tenant_id, provider, provider_account_id, currency, amount_cents,
+    id, organization_id, provider, provider_account_id, currency, amount_cents,
     synthetic, status, trace_id
 ) VALUES (
     $1, $2, 'stripe', $3, $4, $5, true, 'created', $6

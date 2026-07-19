@@ -27,17 +27,17 @@ func (q *Queries) CountStaleOrders(ctx context.Context, olderThan pgtype.Interva
 
 const createOrder = `-- name: CreateOrder :one
 INSERT INTO payment_orders (
-    id, tenant_id, provider, provider_account_id, currency, amount_cents,
+    id, organization_id, provider, provider_account_id, currency, amount_cents,
     synthetic, status, trace_id
 ) VALUES (
     $1, $2, 'stripe', $3, $4, $5, true, 'created', $6
 )
-RETURNING id, tenant_id, provider, provider_account_id, currency, amount_cents, synthetic, status, trace_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id, stripe_balance_transaction_id, failure_class, created_at, updated_at, paid_at, ledger_posted_at
+RETURNING id, organization_id, provider, provider_account_id, currency, amount_cents, synthetic, status, trace_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id, stripe_balance_transaction_id, failure_class, created_at, updated_at, paid_at, ledger_posted_at
 `
 
 type CreateOrderParams struct {
 	ID                string `db:"id" json:"id"`
-	TenantID          string `db:"tenant_id" json:"tenant_id"`
+	OrganizationID    string `db:"organization_id" json:"organization_id"`
 	ProviderAccountID string `db:"provider_account_id" json:"provider_account_id"`
 	Currency          string `db:"currency" json:"currency"`
 	AmountCents       int64  `db:"amount_cents" json:"amount_cents"`
@@ -47,7 +47,7 @@ type CreateOrderParams struct {
 func (q *Queries) CreateOrder(ctx context.Context, arg CreateOrderParams) (PaymentOrder, error) {
 	row := q.db.QueryRow(ctx, createOrder,
 		arg.ID,
-		arg.TenantID,
+		arg.OrganizationID,
 		arg.ProviderAccountID,
 		arg.Currency,
 		arg.AmountCents,
@@ -56,7 +56,7 @@ func (q *Queries) CreateOrder(ctx context.Context, arg CreateOrderParams) (Payme
 	var i PaymentOrder
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
+		&i.OrganizationID,
 		&i.Provider,
 		&i.ProviderAccountID,
 		&i.Currency,
@@ -78,7 +78,7 @@ func (q *Queries) CreateOrder(ctx context.Context, arg CreateOrderParams) (Payme
 }
 
 const getOrder = `-- name: GetOrder :one
-SELECT id, tenant_id, provider, provider_account_id, currency, amount_cents, synthetic, status, trace_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id, stripe_balance_transaction_id, failure_class, created_at, updated_at, paid_at, ledger_posted_at FROM payment_orders WHERE id = $1
+SELECT id, organization_id, provider, provider_account_id, currency, amount_cents, synthetic, status, trace_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id, stripe_balance_transaction_id, failure_class, created_at, updated_at, paid_at, ledger_posted_at FROM payment_orders WHERE id = $1
 `
 
 func (q *Queries) GetOrder(ctx context.Context, id string) (PaymentOrder, error) {
@@ -86,7 +86,7 @@ func (q *Queries) GetOrder(ctx context.Context, id string) (PaymentOrder, error)
 	var i PaymentOrder
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
+		&i.OrganizationID,
 		&i.Provider,
 		&i.ProviderAccountID,
 		&i.Currency,
@@ -108,7 +108,7 @@ func (q *Queries) GetOrder(ctx context.Context, id string) (PaymentOrder, error)
 }
 
 const getOrderByBalanceTransaction = `-- name: GetOrderByBalanceTransaction :one
-SELECT id, tenant_id, provider, provider_account_id, currency, amount_cents, synthetic, status, trace_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id, stripe_balance_transaction_id, failure_class, created_at, updated_at, paid_at, ledger_posted_at FROM payment_orders WHERE stripe_balance_transaction_id = $1
+SELECT id, organization_id, provider, provider_account_id, currency, amount_cents, synthetic, status, trace_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id, stripe_balance_transaction_id, failure_class, created_at, updated_at, paid_at, ledger_posted_at FROM payment_orders WHERE stripe_balance_transaction_id = $1
 `
 
 func (q *Queries) GetOrderByBalanceTransaction(ctx context.Context, stripeBalanceTransactionID pgtype.Text) (PaymentOrder, error) {
@@ -116,7 +116,7 @@ func (q *Queries) GetOrderByBalanceTransaction(ctx context.Context, stripeBalanc
 	var i PaymentOrder
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
+		&i.OrganizationID,
 		&i.Provider,
 		&i.ProviderAccountID,
 		&i.Currency,
@@ -138,7 +138,7 @@ func (q *Queries) GetOrderByBalanceTransaction(ctx context.Context, stripeBalanc
 }
 
 const getOrderByPaymentIntent = `-- name: GetOrderByPaymentIntent :one
-SELECT id, tenant_id, provider, provider_account_id, currency, amount_cents, synthetic, status, trace_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id, stripe_balance_transaction_id, failure_class, created_at, updated_at, paid_at, ledger_posted_at FROM payment_orders WHERE stripe_payment_intent_id = $1
+SELECT id, organization_id, provider, provider_account_id, currency, amount_cents, synthetic, status, trace_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id, stripe_balance_transaction_id, failure_class, created_at, updated_at, paid_at, ledger_posted_at FROM payment_orders WHERE stripe_payment_intent_id = $1
 `
 
 func (q *Queries) GetOrderByPaymentIntent(ctx context.Context, stripePaymentIntentID pgtype.Text) (PaymentOrder, error) {
@@ -146,7 +146,7 @@ func (q *Queries) GetOrderByPaymentIntent(ctx context.Context, stripePaymentInte
 	var i PaymentOrder
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
+		&i.OrganizationID,
 		&i.Provider,
 		&i.ProviderAccountID,
 		&i.Currency,
@@ -173,7 +173,7 @@ SET status = 'failed',
     failure_class = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, tenant_id, provider, provider_account_id, currency, amount_cents, synthetic, status, trace_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id, stripe_balance_transaction_id, failure_class, created_at, updated_at, paid_at, ledger_posted_at
+RETURNING id, organization_id, provider, provider_account_id, currency, amount_cents, synthetic, status, trace_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id, stripe_balance_transaction_id, failure_class, created_at, updated_at, paid_at, ledger_posted_at
 `
 
 type MarkOrderFailedParams struct {
@@ -186,7 +186,7 @@ func (q *Queries) MarkOrderFailed(ctx context.Context, arg MarkOrderFailedParams
 	var i PaymentOrder
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
+		&i.OrganizationID,
 		&i.Provider,
 		&i.ProviderAccountID,
 		&i.Currency,
@@ -213,7 +213,7 @@ SET status = 'ledger_posted',
     ledger_posted_at = COALESCE(ledger_posted_at, now()),
     updated_at = now()
 WHERE id = $1
-RETURNING id, tenant_id, provider, provider_account_id, currency, amount_cents, synthetic, status, trace_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id, stripe_balance_transaction_id, failure_class, created_at, updated_at, paid_at, ledger_posted_at
+RETURNING id, organization_id, provider, provider_account_id, currency, amount_cents, synthetic, status, trace_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id, stripe_balance_transaction_id, failure_class, created_at, updated_at, paid_at, ledger_posted_at
 `
 
 func (q *Queries) MarkOrderLedgerPosted(ctx context.Context, id string) (PaymentOrder, error) {
@@ -221,7 +221,7 @@ func (q *Queries) MarkOrderLedgerPosted(ctx context.Context, id string) (Payment
 	var i PaymentOrder
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
+		&i.OrganizationID,
 		&i.Provider,
 		&i.ProviderAccountID,
 		&i.Currency,
@@ -251,7 +251,7 @@ SET stripe_payment_intent_id = $2,
     paid_at = COALESCE(paid_at, now()),
     updated_at = now()
 WHERE id = $1
-RETURNING id, tenant_id, provider, provider_account_id, currency, amount_cents, synthetic, status, trace_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id, stripe_balance_transaction_id, failure_class, created_at, updated_at, paid_at, ledger_posted_at
+RETURNING id, organization_id, provider, provider_account_id, currency, amount_cents, synthetic, status, trace_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id, stripe_balance_transaction_id, failure_class, created_at, updated_at, paid_at, ledger_posted_at
 `
 
 type MarkOrderProviderPaidParams struct {
@@ -271,7 +271,7 @@ func (q *Queries) MarkOrderProviderPaid(ctx context.Context, arg MarkOrderProvid
 	var i PaymentOrder
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
+		&i.OrganizationID,
 		&i.Provider,
 		&i.ProviderAccountID,
 		&i.Currency,
@@ -298,7 +298,7 @@ SET stripe_checkout_session_id = $2,
     status = 'checkout_open',
     updated_at = now()
 WHERE id = $1
-RETURNING id, tenant_id, provider, provider_account_id, currency, amount_cents, synthetic, status, trace_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id, stripe_balance_transaction_id, failure_class, created_at, updated_at, paid_at, ledger_posted_at
+RETURNING id, organization_id, provider, provider_account_id, currency, amount_cents, synthetic, status, trace_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id, stripe_balance_transaction_id, failure_class, created_at, updated_at, paid_at, ledger_posted_at
 `
 
 type SetOrderCheckoutSessionParams struct {
@@ -311,7 +311,7 @@ func (q *Queries) SetOrderCheckoutSession(ctx context.Context, arg SetOrderCheck
 	var i PaymentOrder
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
+		&i.OrganizationID,
 		&i.Provider,
 		&i.ProviderAccountID,
 		&i.Currency,
@@ -337,7 +337,7 @@ UPDATE payment_orders
 SET stripe_payment_intent_id = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, tenant_id, provider, provider_account_id, currency, amount_cents, synthetic, status, trace_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id, stripe_balance_transaction_id, failure_class, created_at, updated_at, paid_at, ledger_posted_at
+RETURNING id, organization_id, provider, provider_account_id, currency, amount_cents, synthetic, status, trace_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id, stripe_balance_transaction_id, failure_class, created_at, updated_at, paid_at, ledger_posted_at
 `
 
 type SetOrderPaymentIntentParams struct {
@@ -350,7 +350,7 @@ func (q *Queries) SetOrderPaymentIntent(ctx context.Context, arg SetOrderPayment
 	var i PaymentOrder
 	err := row.Scan(
 		&i.ID,
-		&i.TenantID,
+		&i.OrganizationID,
 		&i.Provider,
 		&i.ProviderAccountID,
 		&i.Currency,

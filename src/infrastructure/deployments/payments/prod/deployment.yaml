@@ -71,6 +71,13 @@ spec:
               value: https://guardianintelligence.org/realms/postflight
             - name: OIDC_CLIENT_ID
               value: postflight-web
+            - name: AUTHORIZATION_API_URL
+              value: http://authorization.tenant-guardian-prod.svc
+            - name: AUTHORIZATION_CHECK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: authorization-check-token
+                  key: password
             - name: STRIPE_API_KEY
               valueFrom:
                 secretKeyRef:

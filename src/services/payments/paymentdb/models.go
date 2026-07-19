@@ -49,7 +49,7 @@ type PaymentCanaryRun struct {
 
 type PaymentOrder struct {
 	ID                         string             `db:"id" json:"id"`
-	TenantID                   string             `db:"tenant_id" json:"tenant_id"`
+	OrganizationID             string             `db:"organization_id" json:"organization_id"`
 	Provider                   string             `db:"provider" json:"provider"`
 	ProviderAccountID          string             `db:"provider_account_id" json:"provider_account_id"`
 	Currency                   string             `db:"currency" json:"currency"`
