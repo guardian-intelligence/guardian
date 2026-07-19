@@ -2,6 +2,7 @@ package zvol
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"testing"
@@ -51,6 +52,9 @@ func TestExecLifecycle(t *testing.T) {
 	}
 	if again, err := driver.EnsureWorkspace(ctx, "lease-a", "", 64<<20); err != nil || again.Name != first.Name {
 		t.Fatalf("ensure not idempotent: %v %v", again, err)
+	}
+	if _, err := os.Stat(first.Device); err != nil {
+		t.Fatalf("workspace device is not ready: %v", err)
 	}
 
 	// Seal it as a generation; sealing twice is a no-op.
@@ -150,6 +154,34 @@ func TestValidateNameRejectsHostileIdentifiers(t *testing.T) {
 		if err := ValidateName("lease", fine); err != nil {
 			t.Errorf("rejected %q: %v", fine, err)
 		}
+	}
+}
+
+func TestReadyWorkspaceWaitsForDevicePublication(t *testing.T) {
+	path := t.TempDir() + "/device"
+	driver := &Exec{Timeout: time.Second}
+	published := make(chan error, 1)
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		published <- os.WriteFile(path, nil, 0o600)
+	}()
+
+	if err := driver.waitForDevice(context.Background(), path); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-published; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReadyWorkspaceHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	driver := &Exec{Root: "missing", Timeout: time.Second}
+
+	err := driver.waitForDevice(ctx, t.TempDir()+"/missing")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("readyWorkspace() error = %v, want context cancellation", err)
 	}
 }
 

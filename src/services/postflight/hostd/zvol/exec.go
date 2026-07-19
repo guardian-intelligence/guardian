@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -110,6 +111,35 @@ func isAlreadyPromoted(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "not a cloned filesystem")
 }
 
+func (e *Exec) waitForDevice(ctx context.Context, device string) error {
+	ctx, cancel := context.WithTimeout(ctx, e.timeout())
+	defer cancel()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if _, err := os.Stat(device); err == nil {
+			return nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("zvol: stat device %s: %w", device, err)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("zvol: device %s was not published: %w", device, ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+func (e *Exec) readyWorkspace(ctx context.Context, dataset string, source GenerationID, guid string) (WorkspaceVolume, error) {
+	device := devicePath(dataset)
+	if err := e.waitForDevice(ctx, device); err != nil {
+		return WorkspaceVolume{}, err
+	}
+	return WorkspaceVolume{
+		Name: dataset, Device: device, Source: source, SourceSnapshotGUID: guid,
+	}, nil
+}
+
 // EnsureWorkspace implements Driver.
 func (e *Exec) EnsureWorkspace(ctx context.Context, lease LeaseID, generation GenerationID, sizeBytes int64) (WorkspaceVolume, error) {
 	if err := ValidateName("lease", string(lease)); err != nil {
@@ -127,7 +157,7 @@ func (e *Exec) EnsureWorkspace(ctx context.Context, lease LeaseID, generation Ge
 		if err != nil {
 			return WorkspaceVolume{}, err
 		}
-		return WorkspaceVolume{Name: dataset, Device: devicePath(dataset), Source: origin, SourceSnapshotGUID: guid}, nil
+		return e.readyWorkspace(ctx, dataset, origin, guid)
 	}
 	if generation == "" {
 		if sizeBytes <= 0 {
@@ -136,7 +166,7 @@ func (e *Exec) EnsureWorkspace(ctx context.Context, lease LeaseID, generation Ge
 		if _, err := e.run(ctx, "create", "-s", "-V", strconv.FormatInt(sizeBytes, 10), dataset); err != nil {
 			return WorkspaceVolume{}, err
 		}
-		return WorkspaceVolume{Name: dataset, Device: devicePath(dataset)}, nil
+		return e.readyWorkspace(ctx, dataset, "", "")
 	}
 	if err := ValidateName("generation", string(generation)); err != nil {
 		return WorkspaceVolume{}, err
@@ -151,7 +181,7 @@ func (e *Exec) EnsureWorkspace(ctx context.Context, lease LeaseID, generation Ge
 			if _, cerr := e.run(ctx, "create", "-s", "-V", strconv.FormatInt(sizeBytes, 10), dataset); cerr != nil {
 				return WorkspaceVolume{}, cerr
 			}
-			return WorkspaceVolume{Name: dataset, Device: devicePath(dataset)}, nil
+			return e.readyWorkspace(ctx, dataset, "", "")
 		}
 		return WorkspaceVolume{}, err
 	}
@@ -159,7 +189,7 @@ func (e *Exec) EnsureWorkspace(ctx context.Context, lease LeaseID, generation Ge
 	if err != nil {
 		return WorkspaceVolume{}, err
 	}
-	return WorkspaceVolume{Name: dataset, Device: devicePath(dataset), Source: generation, SourceSnapshotGUID: guid}, nil
+	return e.readyWorkspace(ctx, dataset, generation, guid)
 }
 
 func (e *Exec) sourceSnapshotGUID(ctx context.Context, generation GenerationID) (string, error) {
