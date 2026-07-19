@@ -38,7 +38,7 @@ jobs:
           token: ${{ steps.app.outputs.token }}
           # -full ships the package managers preinstalled; the slim image
           # would install Go/pnpm on every run just to update lockfiles.
-          renovate-version: 43.265.1-full
+          renovate-version: 43.265.2-full
         env:
           RENOVATE_AUTODISCOVER: "false"
           RENOVATE_REPOSITORIES: ${{ github.repository }}
