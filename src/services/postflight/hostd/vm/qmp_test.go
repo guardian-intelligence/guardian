@@ -167,6 +167,26 @@ func TestQMPExecute(t *testing.T) {
 	}
 }
 
+func TestQMPExecutePrefersQueuedResponseOverConnectionClose(t *testing.T) {
+	done := make(chan struct{})
+	close(done)
+	waiter := make(chan qmpMessage, 1)
+	waiter <- qmpMessage{Return: json.RawMessage(`{"acknowledged":true}`)}
+	client := &qmpClient{
+		done:    done,
+		readErr: errors.New("qmp: connection closed"),
+		pending: map[uint64]chan qmpMessage{1: waiter},
+	}
+
+	result, err := client.awaitResponse(context.Background(), "quit", 1, waiter)
+	if err != nil {
+		t.Fatalf("acknowledged quit reported close error: %v", err)
+	}
+	if string(result) != `{"acknowledged":true}` {
+		t.Fatalf("result = %s", result)
+	}
+}
+
 func TestQMPEventsReachTheEventChannel(t *testing.T) {
 	server := &qmpServer{handle: func(command string, _ json.RawMessage) ([]string, string) {
 		return []string{`{"event": "DEVICE_DELETED", "data": {"device": "dev-workspace"}, "timestamp": {"seconds": 1, "microseconds": 3}}`},

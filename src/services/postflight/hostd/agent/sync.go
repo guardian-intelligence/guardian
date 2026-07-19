@@ -53,11 +53,13 @@ func validateDesired(d syncproto.DesiredLease) error {
 		if d.RepositoryFullName == "" {
 			return fmt.Errorf("lease %s: missing repository", d.LeaseID)
 		}
-		if d.ProviderRunID <= 0 || d.ProviderJobID <= 0 || d.ProviderRunAttempt <= 0 {
-			return fmt.Errorf("lease %s: missing provider identity", d.LeaseID)
-		}
-		if d.RendezvousAuthorized && d.AssignedRunnerName == "" {
-			return fmt.Errorf("lease %s: authorized without an assigned runner", d.LeaseID)
+		if d.RendezvousAuthorized {
+			if d.ProviderRunID <= 0 || d.ProviderJobID <= 0 || d.ProviderRunAttempt <= 0 {
+				return fmt.Errorf("lease %s: authorized without provider identity", d.LeaseID)
+			}
+			if d.AssignedRunnerName == "" {
+				return fmt.Errorf("lease %s: authorized without an assigned runner", d.LeaseID)
+			}
 		}
 	}
 	return nil

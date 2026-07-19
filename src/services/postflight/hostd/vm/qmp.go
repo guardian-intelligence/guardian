@@ -194,13 +194,29 @@ func (c *qmpClient) Execute(ctx context.Context, command string, arguments any) 
 		return nil, fmt.Errorf("qmp: sending %s: %w", command, err)
 	}
 
-	select {
-	case response := <-waiter:
+	return c.awaitResponse(ctx, command, id, waiter)
+}
+
+func (c *qmpClient) awaitResponse(ctx context.Context, command string, id uint64, waiter chan qmpMessage) (json.RawMessage, error) {
+	result := func(response qmpMessage) (json.RawMessage, error) {
 		if response.Error != nil {
 			return nil, fmt.Errorf("qmp: executing %s: %w", command, response.Error)
 		}
 		return response.Return, nil
+	}
+	select {
+	case response := <-waiter:
+		return result(response)
 	case <-c.done:
+		// QEMU closes QMP immediately after replying to quit. The reader
+		// queues that matching response before it closes done, so both
+		// cases can be ready here. Preserve the acknowledged command
+		// instead of randomly reporting the subsequent EOF.
+		select {
+		case response := <-waiter:
+			return result(response)
+		default:
+		}
 		c.mu.Lock()
 		err := c.readErr
 		delete(c.pending, id)

@@ -142,18 +142,38 @@ func TestDesiredLeaseValidation(t *testing.T) {
 		LeaseID: "l1", State: syncproto.DesiredRun, ExecutionID: "e", AttemptID: "a",
 		RepositoryFullName: "acme/widget", RunnerClass: "c", JITConfig: "j",
 		ProviderRunID: 10, ProviderJobID: 11, ProviderRunAttempt: 1,
+		AssignedRunnerName: "l1", RendezvousAuthorized: true,
 	}
 	if err := validateDesired(valid); err != nil {
 		t.Fatalf("valid lease rejected: %v", err)
 	}
+	preAssignment := valid
+	preAssignment.ProviderRunID = 0
+	preAssignment.ProviderJobID = 0
+	preAssignment.ProviderRunAttempt = 0
+	preAssignment.AssignedRunnerName = ""
+	preAssignment.RendezvousAuthorized = false
+	if err := validateDesired(preAssignment); err != nil {
+		t.Fatalf("generic pre-assignment listener rejected: %v", err)
+	}
 	cases := map[string]func(*syncproto.DesiredLease){
-		"empty id":            func(d *syncproto.DesiredLease) { d.LeaseID = "" },
-		"traversal id":        func(d *syncproto.DesiredLease) { d.LeaseID = "../evil" },
-		"unknown state":       func(d *syncproto.DesiredLease) { d.State = "explode" },
-		"seal sans gen":       func(d *syncproto.DesiredLease) { d.State = syncproto.DesiredSeal; d.SealGeneration = "" },
-		"run sans identity":   func(d *syncproto.DesiredLease) { d.ExecutionID = "" },
-		"run sans repository": func(d *syncproto.DesiredLease) { d.RepositoryFullName = "" },
-		"bad generation":      func(d *syncproto.DesiredLease) { d.Workspace.Generation = "a/../b" },
+		"empty id":        func(d *syncproto.DesiredLease) { d.LeaseID = "" },
+		"traversal id":    func(d *syncproto.DesiredLease) { d.LeaseID = "../evil" },
+		"unknown state":   func(d *syncproto.DesiredLease) { d.State = "explode" },
+		"seal sans gen":   func(d *syncproto.DesiredLease) { d.State = syncproto.DesiredSeal; d.SealGeneration = "" },
+		"run sans identity": func(d *syncproto.DesiredLease) {
+			d.ExecutionID = ""
+		},
+		"run sans repository": func(d *syncproto.DesiredLease) {
+			d.RepositoryFullName = ""
+		},
+		"authorized sans provider identity": func(d *syncproto.DesiredLease) {
+			d.ProviderRunAttempt = 0
+		},
+		"authorized sans runner": func(d *syncproto.DesiredLease) {
+			d.AssignedRunnerName = ""
+		},
+		"bad generation": func(d *syncproto.DesiredLease) { d.Workspace.Generation = "a/../b" },
 	}
 	for name, mutate := range cases {
 		lease := valid
