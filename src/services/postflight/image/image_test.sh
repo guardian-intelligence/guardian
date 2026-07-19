@@ -15,6 +15,12 @@ fail() {
 }
 
 bash -n "${build_sh}" || fail "build.sh does not parse"
+grep -Fq "git build-essential pkg-config cryptsetup-bin sudo" "${build_sh}" ||
+  fail "build.sh does not install sudo"
+grep -Fq "runner ALL=(ALL:ALL) NOPASSWD: ALL" "${build_sh}" ||
+  fail "build.sh does not grant the runner passwordless sudo"
+grep -Fq 'chmod 0440 "${mnt}/etc/sudoers.d/runner"' "${build_sh}" ||
+  fail "runner sudoers policy does not have the required mode"
 
 help_out="$(bash "${build_sh}" --help 2>&1)" || fail "build.sh --help exited non-zero"
 grep -q "usage:" <<<"${help_out}" || fail "build.sh --help printed no usage"

@@ -256,10 +256,16 @@ in_chroot apt-get -q update
 # link; GitHub-hosted images carry one, so jobs assume it. cryptsetup-bin:
 # guestd opens the workspace volume with LUKS2 on the confidential tier.
 in_chroot apt-get -q -y --no-install-recommends install \
-  git build-essential pkg-config cryptsetup-bin
+  git build-essential pkg-config cryptsetup-bin sudo
 
 log "installing actions/runner ${RUNNER_VERSION}"
 in_chroot useradd --uid 1001 --user-group --create-home --shell /bin/bash runner
+# GitHub-hosted runners let workflows install their declared system
+# prerequisites. The guest root disk is single-job and destroyed on release,
+# so matching that contract does not persist privilege across tenants.
+install -d -m 0750 "${mnt}/etc/sudoers.d"
+printf 'runner ALL=(ALL:ALL) NOPASSWD: ALL\n' >"${mnt}/etc/sudoers.d/runner"
+chmod 0440 "${mnt}/etc/sudoers.d/runner"
 install -d -m 0755 "${mnt}/opt/actions-runner"
 tar -xzf "${work_dir}/${runner_tarball}" -C "${mnt}/opt/actions-runner"
 # The marker file makes the runner refuse to self-update: image releases

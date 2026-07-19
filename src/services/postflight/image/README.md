@@ -2,7 +2,8 @@
 
 One root disk image containing everything a runner VM needs and zero
 customer bytes: Ubuntu 24.04, the pinned `actions/runner` tree, Node.js,
-git, and guestd. Workload always arrives later, via the workspace zvol.
+git, passwordless `sudo` for the single-job runner user, and guestd. Workload
+always arrives later, via the workspace zvol.
 Explicitly absent: docker, cloud-init, ssh (no ingress path into a runner
 VM at all), k8s anything.
 
