@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -357,6 +358,24 @@ func testRendezvous() guestproto.Rendezvous {
 			Options:    []string{"discard", "noatime", "nodev", "nosuid"},
 		}},
 		Env: map[string]string{"POSTFLIGHT_EXECUTION_ID": "exec-1"},
+	}
+}
+
+func TestResetRendezvousDirOverridesProcessUmask(t *testing.T) {
+	oldUmask := syscall.Umask(0o077)
+	defer syscall.Umask(oldUmask)
+
+	dir := filepath.Join(t.TempDir(), "rendezvous")
+	server := Server{cfg: Config{RendezvousDir: dir}}
+	if err := server.resetRendezvousDir(); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o733 {
+		t.Fatalf("rendezvous directory mode = %04o, want 0733", got)
 	}
 }
 

@@ -291,7 +291,10 @@ func (s *Server) resetRendezvousDir() error {
 	if err := os.RemoveAll(s.cfg.RendezvousDir); err != nil {
 		return err
 	}
-	return os.MkdirAll(s.cfg.RendezvousDir, 0o733)
+	if err := os.MkdirAll(s.cfg.RendezvousDir, 0o733); err != nil {
+		return err
+	}
+	return os.Chmod(s.cfg.RendezvousDir, 0o733)
 }
 
 func (s *Server) observeBlockedHook(lease string) {
