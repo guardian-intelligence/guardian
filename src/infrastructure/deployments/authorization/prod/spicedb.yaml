@@ -17,6 +17,9 @@ spec:
     migrationSecrets:
       skip: true
   config:
+    image: ghcr.io/authzed/spicedb@sha256:1d205e9e98e39d87f9640893a06787c854a77d1ffcc3f7ece5e3293896565aa9
+    skipMigrations: true
+    datastoreAllowedMigrations: populate-schema-tables
     datastoreEngine: postgres
     datastoreTLSSecretName: postgres-spicedb-ca
     replicas: 3
