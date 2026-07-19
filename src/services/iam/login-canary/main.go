@@ -41,6 +41,7 @@ type oauthPageState struct {
 	Path             string `json:"path"`
 	HasTOTP          bool   `json:"hasTOTP"`
 	CanGrant         bool   `json:"canGrant"`
+	GrantBlocked     bool   `json:"grantBlocked"`
 	HasReviewProfile bool   `json:"hasReviewProfile"`
 	HasCollision     bool   `json:"hasCollision"`
 	HasError         bool   `json:"hasError"`
@@ -189,7 +190,7 @@ func selectGitHubProvider(ctx context.Context) error {
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		var state struct {
-			OnGitHub   bool `json:"onGitHub"`
+			OnGitHub    bool `json:"onGitHub"`
 			HasProvider bool `json:"hasProvider"`
 		}
 		if err := chromedp.Run(ctx, chromedp.Evaluate(
@@ -229,6 +230,8 @@ func finishGitHubAuthorization(ctx context.Context, cfg config) error {
 	}
 	deadline := time.Now().Add(75 * time.Second)
 	totpSent := false
+	grantSent := false
+	profileSent := false
 	for time.Now().Before(deadline) {
 		var state oauthPageState
 		if err := chromedp.Run(ctx, chromedp.Evaluate(
@@ -236,10 +239,17 @@ func finishGitHubAuthorization(ctx context.Context, cfg config) error {
 				host: location.hostname,
 				path: location.pathname,
 				hasTOTP: Boolean(document.querySelector("input[name=otp], input[name=app_otp], input#app_totp")),
-				canGrant: Boolean(document.querySelector("button[name=authorize], input[name=authorize], button[value=authorize]")),
+				canGrant: Boolean(document.querySelector("button[name=authorize][value='1']:not([disabled]), input[name=authorize][value='1']:not([disabled]), button[value=authorize]:not([disabled])")),
+				grantBlocked: Boolean(document.querySelector("button[name=authorize][value='1'][disabled], input[name=authorize][value='1'][disabled], button[value=authorize][disabled]")),
 				hasReviewProfile: Boolean(document.querySelector("form#kc-idp-review-profile-form")),
 				hasCollision: Boolean(document.querySelector("#linkAccount, #instruction1")),
-				hasError: Boolean(document.querySelector(".flash-error, [data-test-selector=auth-error], #kc-error-message, .pf-m-danger"))
+				hasError: Array.from(document.querySelectorAll(".flash-error, [data-test-selector=auth-error], #kc-error-message, .pf-m-danger"))
+					.some(element => {
+						const style = getComputedStyle(element);
+						const rect = element.getBoundingClientRect();
+						return style.display !== "none" && style.visibility !== "hidden" &&
+							rect.width > 0 && rect.height > 0;
+					})
 			}))()`,
 			&state,
 		)); err != nil {
@@ -254,7 +264,12 @@ func finishGitHubAuthorization(ctx context.Context, cfg config) error {
 			return nil
 		case oauthSubmitTOTP:
 			if totpSent {
-				return errors.New("GitHub requested TOTP more than once")
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(250 * time.Millisecond):
+				}
+				continue
 			}
 			if delay := totpBoundaryDelay(time.Now()); delay > 0 {
 				select {
@@ -279,19 +294,37 @@ func finishGitHubAuthorization(ctx context.Context, cfg config) error {
 			}
 			totpSent = true
 		case oauthGrant:
+			if grantSent {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(250 * time.Millisecond):
+				}
+				continue
+			}
 			if err := chromedp.Run(ctx, chromedp.Click(
-				"button[name=authorize], input[name=authorize], button[value=authorize]",
+				"button[name=authorize][value='1']:not([disabled]), input[name=authorize][value='1']:not([disabled]), button[value=authorize]:not([disabled])",
 				chromedp.ByQuery,
 			)); err != nil {
 				return fmt.Errorf("GitHub OAuth grant: %w", err)
 			}
+			grantSent = true
 		case oauthReviewProfile:
+			if profileSent {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(250 * time.Millisecond):
+				}
+				continue
+			}
 			if err := chromedp.Run(ctx, chromedp.Click(
 				"form#kc-idp-review-profile-form input[type=submit], form#kc-idp-review-profile-form button[type=submit]",
 				chromedp.ByQuery,
 			)); err != nil {
 				return fmt.Errorf("submit Guardian first-login profile: %w", err)
 			}
+			profileSent = true
 		case oauthWait:
 			select {
 			case <-ctx.Done():
@@ -322,6 +355,9 @@ func classifyOAuthPage(state oauthPageState, postflightHost string) (oauthPageAc
 	case "github.com":
 		if state.HasError {
 			return oauthWait, errors.New("GitHub rejected the canary login")
+		}
+		if state.GrantBlocked {
+			return oauthWait, errors.New("GitHub OAuth authorization is disabled; verify the canary email and account readiness")
 		}
 		if state.HasTOTP {
 			return oauthSubmitTOTP, nil
