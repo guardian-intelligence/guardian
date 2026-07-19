@@ -293,7 +293,7 @@ func TestSpiceDBOperationalQualificationIsGitOpsOnly(t *testing.T) {
 		"SpiceDBSchemaJobFailed",
 		"SpiceDBCertificateExpiring",
 		"SpiceDBAlertPathDrill",
-		"expr: vector(0) == 1",
+		"expr: vector(1) == 1",
 	} {
 		assertTextContains(t, observability, want, observabilityPath)
 	}
