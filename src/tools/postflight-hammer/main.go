@@ -18,7 +18,7 @@ import (
 const usage = `postflight-hammer — load harness and standing health proof for the Postflight runner.
 
 Subcommands:
-  dispatch   Fire workflow_dispatch load in a pattern (burst, sustained, churn, restart).
+  dispatch   Fire workflow_dispatch load in a pattern (burst, serial, sustained, churn, restart).
   watch      Poll GitHub and the control-plane database until every run and row is terminal.
   report     Join both sources, print the scoreboard, and write the JSON report.
 
@@ -40,6 +40,11 @@ Runbook:
     postflight-hammer dispatch -repo <org/repo> -workflow <file.yml> -pattern burst -n 5
     postflight-hammer watch    -repo <org/repo>
     postflight-hammer report
+  Cold-to-warm benchmark (inputs are repeatable):
+    postflight-hammer dispatch -repo <org/repo> -workflow <file.yml> -pattern serial -n 5 \
+      -ref bench/cohort-1 \
+      -input lane=postflight -input profile=smoke -input cache_epoch=cohort-1 \
+      -await-promotion
   Full battery (>=50 across all patterns, one state file):
     dispatch -pattern burst -n 20, then -pattern sustained -n 15 -rate 10,
     then -pattern churn -n 10, then -pattern restart -n 5 (with HAMMER_RESTART_CMD set,
@@ -111,15 +116,20 @@ func cmdDispatch(ctx context.Context, args []string) error {
 	cfg := dispatchConfig{
 		restartCmd: os.Getenv("HAMMER_RESTART_CMD"),
 		dbDSN:      os.Getenv("DATABASE_URL"),
+		inputs:     workflowInputs{},
+		twinInputs: workflowInputs{},
 	}
 	fs.StringVar(&cfg.repo, "repo", "guardian-intelligence/postflight-nextjs-demo", "target owner/repo")
 	fs.StringVar(&cfg.workflow, "workflow", "", "workflow file name to dispatch (required)")
 	fs.StringVar(&cfg.ref, "ref", "main", "git ref to dispatch against")
-	fs.StringVar(&cfg.pattern, "pattern", "burst", "dispatch pattern: burst, sustained, churn, restart")
+	fs.StringVar(&cfg.pattern, "pattern", "burst", "dispatch pattern: burst, serial, sustained, churn, restart")
 	fs.IntVar(&cfg.n, "n", 5, "number of dispatches")
 	fs.Float64Var(&cfg.ratePerMin, "rate", 10, "sustained pattern: dispatches per minute")
+	fs.Var(cfg.inputs, "input", "workflow_dispatch input as key=value (repeatable)")
 	fs.StringVar(&cfg.twinWorkflow, "twin-workflow", "", "GitHub-hosted twin workflow for the exec comparison")
 	fs.IntVar(&cfg.twinN, "twin-n", 5, "twin dispatches (when -twin-workflow is set)")
+	fs.Var(cfg.twinInputs, "twin-input", "twin workflow_dispatch input as key=value (repeatable)")
+	fs.BoolVar(&cfg.awaitPromotion, "await-promotion", false, "serial pattern: wait for each Postflight seal to become the scope's current generation (requires DATABASE_URL)")
 	fs.DurationVar(&cfg.churnMaxWait, "churn-max-wait", time.Minute, "churn pattern: cancel at a random point within this window")
 	fs.StringVar(&cfg.statePath, "state", "postflight-hammer.json", "battery state file shared by all subcommands")
 	if err := fs.Parse(args); err != nil {
@@ -130,6 +140,12 @@ func cmdDispatch(ctx context.Context, args []string) error {
 	}
 	if cfg.n <= 0 {
 		return fmt.Errorf("-n must be positive")
+	}
+	if cfg.awaitPromotion && cfg.pattern != "serial" {
+		return fmt.Errorf("-await-promotion requires -pattern serial")
+	}
+	if cfg.awaitPromotion && cfg.dbDSN == "" {
+		return fmt.Errorf("-await-promotion requires DATABASE_URL")
 	}
 	gh, err := newGHClient(apiBase(), os.Getenv("GITHUB_TOKEN"))
 	if err != nil {

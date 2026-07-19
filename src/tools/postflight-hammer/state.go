@@ -34,10 +34,11 @@ type stateFile struct {
 }
 
 type dispatchRecord struct {
-	Pattern      string    `json:"pattern"`
-	Workflow     string    `json:"workflow"`
-	Twin         bool      `json:"twin,omitempty"`
-	DispatchedAt time.Time `json:"dispatched_at"`
+	Pattern      string            `json:"pattern"`
+	Workflow     string            `json:"workflow"`
+	Inputs       map[string]string `json:"inputs,omitempty"`
+	Twin         bool              `json:"twin,omitempty"`
+	DispatchedAt time.Time         `json:"dispatched_at"`
 }
 
 // churnRecord tracks one dispatch that was cancelled mid-flight and re-run.
@@ -52,6 +53,7 @@ type churnRecord struct {
 type runRecord struct {
 	RunID         int64                     `json:"run_id"`
 	Workflow      string                    `json:"workflow"`
+	Inputs        map[string]string         `json:"inputs,omitempty"`
 	Twin          bool                      `json:"twin,omitempty"`
 	CreatedAt     time.Time                 `json:"created_at"`
 	LatestAttempt int64                     `json:"latest_attempt"`
