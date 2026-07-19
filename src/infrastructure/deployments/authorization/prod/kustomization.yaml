@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+generatorOptions:
+  disableNameSuffixHash: true
+configMapGenerator:
+  - name: guardian-authorization-schema-v1
+    namespace: tenant-guardian-prod
+    files:
+      - guardian.zed=schema/guardian.zed
+      - validation.yaml=schema/validation.yaml
+  - name: spicedb-thumper
+    namespace: tenant-guardian-prod
+    files:
+      - qualification.yaml=thumper/qualification.yaml
+resources:
+  - spicedb.yaml
+  - schema-job.yaml
+  - thumper.yaml
+  - observability.yaml
+  - networkpolicy.yaml

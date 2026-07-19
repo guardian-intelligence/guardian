@@ -12,6 +12,13 @@ Reference https://github.com/guardian-intelligence/verself/tree/main/docs for in
 * "Golden Image" pattern
 * Snapshot/restore (Verself uses just-in-time firecracker, this repo uses QEMU warmpool on SEV-SNP-compatible hardware)
 
+<operations_guidelines>
+* GitOps: never maintain manual configuration, apply changes through IaC. Things that don't belong in git: Secrets, data, cluster/node state.
+* Roll Forward, not Backward: avoid data corruption/security issues by root-causing issues and rolling the cluster forward to a known good state.
+* Feature Flag client code, not services: it's impossible to reason about how a service will behave with a runtime configuration change. Prefer rolling restarts with a different OCI and direct traffic safely.
+* Traces, Logs, and Metrics describe how the system works, not code. Commit/OCI hashes are useful for orienting yourself in time and space.
+</operations_guidelines>
+
 <development_loop>
 Not all tasks require this loop. Use this loop when pursuing autonomous development that requires a change to the repository's source code.
 
@@ -57,7 +64,6 @@ One proposer per pin: Renovate proposes source-plane pins, Kargo proposes render
 * Do not use GitHub Actions workflow YAMLs as a second control plane. Prefer to move tasks including but not limited to: generating Preview Deployments, generating/signing images, scheduled jobs, and so on, into the source code, rather than hairpinning cluster administration through GitHub.
 </coding_guidelines>
 
-Planned Product Surfaces:
+Product Surfaces:
 
-- Postflight - GitHub App (20x faster CI than GitHub Actions; running untrusted customer CI requires TEE on the rs4 workload nodes first). (In Progress)
-- Empire - Software Company from an API call or web surface; host come-up tooling only prepares machines for the management cluster. (Not Yet Implemented)
+- Postflight - GitHub App, Blacksmith.sh but using QEMU warm pool, CRIU, on SEV-SNP hardware, ZFS for caching build artifacts and memory snapshots to create a "golden image" per repo. (In Progress)

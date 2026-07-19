@@ -1,0 +1,521 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+readonly NAMESPACE="${SPICEDB_NAMESPACE:-tenant-guardian-prod}"
+readonly SERVICE="${SPICEDB_SERVICE:-spicedb}"
+readonly LOCAL_GRPC_PORT="${SPICEDB_LOCAL_GRPC_PORT:-15051}"
+readonly OBSERVABILITY_NAMESPACE="${SPICEDB_OBSERVABILITY_NAMESPACE:-tenant-root}"
+readonly LOCAL_LOGS_QUERY_PORT="${SPICEDB_LOCAL_LOGS_QUERY_PORT:-19471}"
+readonly LOCAL_METRICS_QUERY_PORT="${SPICEDB_LOCAL_METRICS_QUERY_PORT:-18481}"
+readonly TLS_HOSTNAME="spicedb.${NAMESPACE}.svc.cozy.local"
+
+PATH="${ROOT}/.guardian/tools/bin:${PATH}"
+
+port_forward_pid=""
+observability_port_forward_pids=()
+temporary_directory=""
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  tools/ops/spicedb-qualify placement
+  tools/ops/spicedb-qualify verify
+  tools/ops/spicedb-qualify load [duration] [qps] [evidence-directory]
+  tools/ops/spicedb-qualify classify-log <thumper-log>
+
+placement
+  Proves namespace-scoped operator RBAC and three-node placement for SpiceDB
+  and PostgreSQL. This needs only the platform-agent read-only role.
+
+verify
+  Proves the checked-in positive and negative authorization decisions, valid
+  TLS trust, rejection of an unrelated CA, and invalid-token rejection. The
+  generated API credential is a Kubernetes Secret, so authenticate explicitly
+  for Secret read before running this mode.
+
+load
+  Observes the Flux-deployed, verified-TLS Thumper profile for the requested
+  duration (default 10m) and expected QPS (default 50), while writing logs,
+  request counts, and latency quantiles from the centralized observability
+  stores to the evidence directory. Change QPS in Git; this command refuses to
+  measure a different deployed value.
+
+classify-log
+  Classifies Thumper permission mismatches. A check after an unsuccessful
+  relationship mutation has an indeterminate prerequisite and is not an
+  incorrect authorization decision.
+
+This tool only reads Kubernetes objects and opens a port-forward. All rollout,
+failover, rotation, upgrade, restore, and alert-drill changes belong in Git and
+must be reconciled by Flux.
+USAGE
+}
+
+fail() {
+  printf 'ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || fail "missing required command: $1 (run: aspect tools install)"
+}
+
+resolve_pinned_tool() {
+  local name="$1"
+  local output
+  require_command bazelisk
+  bazelisk build "@multitool//tools/${name}" >/dev/null
+  output="$(bazelisk cquery --output=files "@multitool//tools/${name}" 2>/dev/null)"
+  [[ -n "${output}" ]] || fail "could not resolve repo-pinned ${name}"
+  printf '%s/%s\n' "${ROOT}" "${output}"
+}
+
+cleanup() {
+  if [[ -n "${port_forward_pid}" ]] && kill -0 "${port_forward_pid}" 2>/dev/null; then
+    kill "${port_forward_pid}" 2>/dev/null || true
+    wait "${port_forward_pid}" 2>/dev/null || true
+  fi
+  local pid
+  for pid in "${observability_port_forward_pids[@]}"; do
+    if kill -0 "${pid}" 2>/dev/null; then
+      kill "${pid}" 2>/dev/null || true
+      wait "${pid}" 2>/dev/null || true
+    fi
+  done
+  if [[ -n "${temporary_directory}" ]]; then
+    rm -rf "${temporary_directory}"
+  fi
+}
+trap cleanup EXIT
+
+wait_for_port_forward() {
+  local pid="$1"
+  local log_path="$2"
+  local description="$3"
+  for _ in $(seq 1 100); do
+    if ! kill -0 "${pid}" 2>/dev/null; then
+      cat "${log_path}" >&2
+      fail "${description} port-forward exited before becoming ready"
+    fi
+    if grep -q 'Forwarding from 127.0.0.1' "${log_path}"; then
+      return
+    fi
+    sleep 0.1
+  done
+  cat "${log_path}" >&2
+  fail "timed out waiting for the ${description} port-forward"
+}
+
+start_port_forward() {
+  local log_path="$1"
+  local service="$2"
+  local local_port="$3"
+  local remote_port="$4"
+  kubectl -n "${NAMESPACE}" port-forward --address 127.0.0.1 \
+    "svc/${service}" "${local_port}:${remote_port}" >"${log_path}" 2>&1 &
+  port_forward_pid="$!"
+  wait_for_port_forward "${port_forward_pid}" "${log_path}" SpiceDB
+}
+
+start_observability_port_forward() {
+  local log_path="$1"
+  local service="$2"
+  local local_port="$3"
+  local remote_port="$4"
+  kubectl -n "${OBSERVABILITY_NAMESPACE}" port-forward --address 127.0.0.1 \
+    "svc/${service}" "${local_port}:${remote_port}" >"${log_path}" 2>&1 &
+  local pid="$!"
+  observability_port_forward_pids+=("${pid}")
+  wait_for_port_forward "${pid}" "${log_path}" "${service}"
+}
+
+secret_value() {
+  local secret_name="$1"
+  local key="$2"
+  kubectl -n "${NAMESPACE}" get secret "${secret_name}" -o json |
+    jq -er --arg key "${key}" '.data[$key]' |
+    base64 -d
+}
+
+assert_three_nodes() {
+  local description="$1"
+  local selector="$2"
+  local pods_json
+  local ready_count
+  local nodes
+
+  pods_json="$(kubectl -n "${NAMESPACE}" get pods -l "${selector}" -o json)"
+  ready_count="$(jq '[.items[] | select(any(.status.conditions[]?; .type == "Ready" and .status == "True"))] | length' <<<"${pods_json}")"
+  nodes="$(jq -r '.items[].spec.nodeName // empty' <<<"${pods_json}" | sort -u)"
+
+  [[ "${ready_count}" == "3" ]] || fail "${description} has ${ready_count} Ready pods; expected 3"
+  [[ "$(wc -l <<<"${nodes}" | tr -d ' ')" == "3" ]] ||
+    fail "${description} does not occupy three distinct nodes: ${nodes//$'\n'/, }"
+  printf '%s nodes:\n%s\n' "${description}" "${nodes}"
+}
+
+placement() {
+  require_command kubectl
+  require_command jq
+
+  kubectl -n "${NAMESPACE}" get role spicedb-operator >/dev/null
+  kubectl -n "${NAMESPACE}" get rolebinding spicedb-operator >/dev/null
+
+  local binding_count
+  binding_count="$(
+    kubectl get clusterrolebindings -o json |
+      jq --arg ns "${NAMESPACE}" '
+        [.items[] |
+          select(any(.subjects[]?;
+            .kind == "ServiceAccount" and
+            .namespace == $ns and
+            .name == "spicedb-operator"
+          ))
+        ] | length
+      '
+  )"
+  [[ "${binding_count}" == "0" ]] ||
+    fail "spicedb-operator is referenced by ${binding_count} ClusterRoleBinding object(s)"
+
+  local binding_json
+  binding_json="$(kubectl -n "${NAMESPACE}" get rolebinding spicedb-operator -o json)"
+  jq -e --arg ns "${NAMESPACE}" '
+    .roleRef.kind == "Role" and
+    .roleRef.name == "spicedb-operator" and
+    (.subjects | length) == 1 and
+    .subjects[0].kind == "ServiceAccount" and
+    .subjects[0].name == "spicedb-operator" and
+    .subjects[0].namespace == $ns
+  ' <<<"${binding_json}" >/dev/null ||
+    fail "spicedb-operator RoleBinding is not confined to its namespaced Role and service account"
+
+  assert_three_nodes SpiceDB 'guardian.dev/component=authorization-datastore'
+  assert_three_nodes PostgreSQL 'cnpg.io/cluster=postgres-spicedb'
+  printf 'Operator RBAC is namespace-scoped.\n'
+}
+
+verify() {
+  require_command kubectl
+  require_command jq
+  local zed_bin
+  zed_bin="$(resolve_pinned_tool zed)"
+
+  kubectl auth can-i -n "${NAMESPACE}" get secrets | grep -qx yes ||
+    fail "Secret read is required for this explicit qualification; authenticate with an audited role first"
+
+  temporary_directory="$(mktemp -d)"
+  local ca_path="${temporary_directory}/ca.crt"
+  local wrong_ca_path="${temporary_directory}/wrong-ca.crt"
+  local port_forward_log="${temporary_directory}/port-forward.log"
+  local slot
+  local token
+
+  secret_value spicedb-server-tls ca.crt >"${ca_path}"
+  secret_value postgres-spicedb-ca ca.crt >"${wrong_ca_path}"
+  start_port_forward "${port_forward_log}" "${SERVICE}" "${LOCAL_GRPC_PORT}" 50051
+
+  for slot in a b; do
+    token="$(secret_value "spicedb-api-token-slot-${slot}" password)"
+    local zed_common=(
+      "--endpoint=127.0.0.1:${LOCAL_GRPC_PORT}"
+      "--hostname-override=${TLS_HOSTNAME}"
+      "--certificate-path=${ca_path}"
+      "--token=${token}"
+      --skip-version-check
+    )
+
+    "${zed_bin}" "${zed_common[@]}" permission check --error-on-no-permission \
+      organization:guardian manage guardian_account:alice >/dev/null
+
+    if "${zed_bin}" "${zed_common[@]}" permission check --error-on-no-permission \
+      organization:guardian manage guardian_account:mallory >/dev/null 2>&1; then
+      fail "negative authorization check unexpectedly allowed mallory with token slot ${slot}"
+    fi
+  done
+
+  token="$(secret_value spicedb-api-token-slot-b password)"
+
+  if "${zed_bin}" \
+    "--endpoint=127.0.0.1:${LOCAL_GRPC_PORT}" \
+    "--hostname-override=${TLS_HOSTNAME}" \
+    "--certificate-path=${wrong_ca_path}" \
+    "--token=${token}" \
+    --skip-version-check schema read >/dev/null 2>&1; then
+    fail "SpiceDB accepted an unrelated certificate authority"
+  fi
+
+  if "${zed_bin}" \
+    "--endpoint=127.0.0.1:${LOCAL_GRPC_PORT}" \
+    "--hostname-override=${TLS_HOSTNAME}" \
+    "--certificate-path=${ca_path}" \
+    --token=deliberately-invalid-token \
+    --skip-version-check schema read >/dev/null 2>&1; then
+    fail "SpiceDB accepted an invalid API token"
+  fi
+
+  printf 'Both API token slots, positive/negative decisions, TLS verification, and invalid-token rejection passed.\n'
+}
+
+classify_thumper_outcomes() {
+  local log_path="$1"
+  [[ -f "${log_path}" ]] || fail "Thumper log does not exist: ${log_path}"
+  require_command jq
+
+  jq -r '
+    select(
+      .message == "executing script step" or
+      .message == "error calling script step"
+    ) |
+    [
+      (.worker | tostring),
+      (.step | tostring),
+      .op,
+      .message,
+      (.error // "")
+    ] |
+    @tsv
+  ' "${log_path}" |
+    awk -F '\t' '
+      $4 == "executing script step" {
+        if ($2 == "0") {
+          write_failed[$1] = 0
+        } else if ($2 == "3") {
+          delete_failed[$1] = 0
+        }
+        next
+      }
+
+      $4 == "error calling script step" {
+        step_errors++
+
+        if (index($5, "wrong permissionship") > 0) {
+          wrong_permissionship_events++
+          if (($2 == "1" && write_failed[$1]) ||
+              ($2 == "4" && delete_failed[$1])) {
+            indeterminate_decisions++
+          } else {
+            incorrect_decisions++
+          }
+          next
+        }
+
+        request_errors++
+        if ($2 == "0" && $3 == "WriteRelationships") {
+          write_failed[$1] = 1
+        } else if ($2 == "3" && $3 == "DeleteRelationships") {
+          delete_failed[$1] = 1
+        }
+      }
+
+      END {
+        printf "step_errors=%d\n", step_errors
+        printf "request_errors=%d\n", request_errors
+        printf "wrong_permissionship_events=%d\n", wrong_permissionship_events
+        printf "indeterminate_decisions=%d\n", indeterminate_decisions
+        printf "incorrect_decisions=%d\n", incorrect_decisions
+      }
+    '
+}
+
+load() {
+  local duration="${1:-10m}"
+  local qps="${2:-50}"
+  local evidence_directory="${3:-${ROOT}/.guardian/evidence/spicedb/$(date -u +%Y%m%dT%H%M%SZ)}"
+
+  require_command kubectl
+  require_command curl
+  require_command jq
+
+  [[ "${duration}" =~ ^[1-9][0-9]*(s|m|h)$ ]] ||
+    fail "duration must be a positive integer followed by s, m, or h"
+  [[ "${qps}" =~ ^[1-9][0-9]*$ ]] || fail "QPS must be a positive integer"
+
+  mkdir -p "${evidence_directory}"
+  local logs_port_forward_log="${evidence_directory}/logs-port-forward.log"
+  local metrics_port_forward_log="${evidence_directory}/metrics-port-forward.log"
+  local thumper_log="${evidence_directory}/thumper.log"
+  local summary_path="${evidence_directory}/summary.txt"
+  local deployment_json
+  local args
+  local declared_qps
+
+  deployment_json="$(kubectl -n "${NAMESPACE}" get deployment spicedb-thumper -o json)"
+  args="$(jq -r '.spec.template.spec.containers[] | select(.name == "thumper") | .args[]' <<<"${deployment_json}")"
+  declared_qps="$(sed -n 's/^--qps=//p' <<<"${args}")"
+  [[ "${declared_qps}" == "${qps}" ]] ||
+    fail "deployed Thumper QPS is ${declared_qps:-unset}, not ${qps}; change thumper.yaml through Git and wait for Flux"
+  grep -qx -- '--insecure=false' <<<"${args}" ||
+    fail "deployed Thumper does not require TLS"
+  grep -qx -- '--ca-path=/tls/ca.crt' <<<"${args}" ||
+    fail "deployed Thumper does not verify the serving CA"
+  if grep -qx -- '--no-verify-ca' <<<"${args}"; then
+    fail "deployed Thumper disables certificate verification"
+  fi
+
+  local started_at
+  local ended_at
+  started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf 'Observing the Flux-deployed Thumper at %s QPS for %s.\n' "${qps}" "${duration}"
+  sleep "${duration}"
+  ended_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  start_observability_port_forward \
+    "${logs_port_forward_log}" vlselect-generic "${LOCAL_LOGS_QUERY_PORT}" 9471
+  start_observability_port_forward \
+    "${metrics_port_forward_log}" vmselect-shortterm "${LOCAL_METRICS_QUERY_PORT}" 8481
+
+  # Allow the final records in the closed interval to reach the centralized
+  # stores before taking the immutable evidence snapshot.
+  sleep 5
+
+  local logs_query
+  logs_query="_stream:{kubernetes_namespace_name=\"${NAMESPACE}\",kubernetes_container_name=\"thumper\"} | sort by (_time) | fields _msg"
+  curl --fail --silent --show-error \
+    "http://127.0.0.1:${LOCAL_LOGS_QUERY_PORT}/select/logsql/query" \
+    --data-urlencode "query=${logs_query}" \
+    --data-urlencode "start=${started_at}" \
+    --data-urlencode "end=${ended_at}" |
+    jq -er '._msg' >"${thumper_log}"
+  [[ -s "${thumper_log}" ]] ||
+    fail "centralized Thumper log query returned no records"
+
+  local classification
+  local incorrect_decisions
+  local indeterminate_decisions
+  local request_errors
+  local step_errors
+  local wrong_permissionship_events
+  local completed_requests
+  local p50
+  local p95
+  local p99
+  local spicedb_cpu_cores_average
+  local spicedb_cpu_cores_max
+  local spicedb_memory_working_set_bytes_max_per_replica
+  local spicedb_memory_working_set_bytes_sum_max
+  local postgres_backends_max
+  local thumper_cpu_cores_average
+  local thumper_memory_working_set_bytes_max
+  local request_selector
+  local histogram_selector
+  classification="$(classify_thumper_outcomes "${thumper_log}")"
+  step_errors="$(sed -n 's/^step_errors=//p' <<<"${classification}")"
+  request_errors="$(sed -n 's/^request_errors=//p' <<<"${classification}")"
+  wrong_permissionship_events="$(sed -n 's/^wrong_permissionship_events=//p' <<<"${classification}")"
+  indeterminate_decisions="$(sed -n 's/^indeterminate_decisions=//p' <<<"${classification}")"
+  incorrect_decisions="$(sed -n 's/^incorrect_decisions=//p' <<<"${classification}")"
+
+  prometheus_value() {
+    local query="$1"
+    curl --fail --silent --show-error \
+      "http://127.0.0.1:${LOCAL_METRICS_QUERY_PORT}/select/0/prometheus/api/v1/query" \
+      --get \
+      --data-urlencode "query=${query}" \
+      --data-urlencode "time=${ended_at}" |
+      jq -er '.data.result[0].value[1]'
+  }
+
+  request_selector="namespace=\"${NAMESPACE}\",service=\"spicedb-thumper\",grpc_service=\"authzed.api.v1.PermissionsService\",grpc_method=\"CheckPermission\""
+  histogram_selector="${request_selector}"
+  completed_requests="$(
+    prometheus_value \
+      "sum(increase(grpc_client_handled_total{${request_selector}}[${duration}]))" |
+      awk '{ printf "%.0f", $1 }'
+  )"
+  p50="$(
+    prometheus_value \
+      "histogram_quantile(0.50, sum by (le) (increase(grpc_client_handling_seconds_bucket{${histogram_selector}}[${duration}])))"
+  )"
+  p95="$(
+    prometheus_value \
+      "histogram_quantile(0.95, sum by (le) (increase(grpc_client_handling_seconds_bucket{${histogram_selector}}[${duration}])))"
+  )"
+  p99="$(
+    prometheus_value \
+      "histogram_quantile(0.99, sum by (le) (increase(grpc_client_handling_seconds_bucket{${histogram_selector}}[${duration}])))"
+  )"
+  spicedb_cpu_cores_average="$(
+    prometheus_value \
+      "avg_over_time((sum(rate(container_cpu_usage_seconds_total{namespace=\"${NAMESPACE}\",pod=~\"spicedb-spicedb-.*\",container=\"spicedb\"}[1m])))[${duration}:30s])"
+  )"
+  spicedb_cpu_cores_max="$(
+    prometheus_value \
+      "max_over_time((sum(rate(container_cpu_usage_seconds_total{namespace=\"${NAMESPACE}\",pod=~\"spicedb-spicedb-.*\",container=\"spicedb\"}[1m])))[${duration}:30s])"
+  )"
+  spicedb_memory_working_set_bytes_max_per_replica="$(
+    prometheus_value \
+      "max(max_over_time(container_memory_working_set_bytes{namespace=\"${NAMESPACE}\",pod=~\"spicedb-spicedb-.*\",container=\"spicedb\"}[${duration}]))"
+  )"
+  spicedb_memory_working_set_bytes_sum_max="$(
+    prometheus_value \
+      "max_over_time((sum(container_memory_working_set_bytes{namespace=\"${NAMESPACE}\",pod=~\"spicedb-spicedb-.*\",container=\"spicedb\"}))[${duration}:30s])"
+  )"
+  postgres_backends_max="$(
+    prometheus_value \
+      "max_over_time((sum(cnpg_backends_total{namespace=\"${NAMESPACE}\",job=\"${NAMESPACE}/postgres-spicedb\"}))[${duration}:30s])"
+  )"
+  thumper_cpu_cores_average="$(
+    prometheus_value \
+      "avg_over_time((sum(rate(container_cpu_usage_seconds_total{namespace=\"${NAMESPACE}\",pod=~\"spicedb-thumper-.*\",container=\"thumper\"}[1m])))[${duration}:30s])"
+  )"
+  thumper_memory_working_set_bytes_max="$(
+    prometheus_value \
+      "max(max_over_time(container_memory_working_set_bytes{namespace=\"${NAMESPACE}\",pod=~\"spicedb-thumper-.*\",container=\"thumper\"}[${duration}]))"
+  )"
+
+  {
+    printf 'started_at=%s\n' "${started_at}"
+    printf 'ended_at=%s\n' "${ended_at}"
+    printf 'duration=%s\n' "${duration}"
+    printf 'target_qps=%s\n' "${qps}"
+    printf 'completed_check_permission_requests=%s\n' "${completed_requests}"
+    printf 'check_permission_p50_seconds=%s\n' "${p50}"
+    printf 'check_permission_p95_seconds=%s\n' "${p95}"
+    printf 'check_permission_p99_seconds=%s\n' "${p99}"
+    printf 'spicedb_cpu_cores_average=%s\n' "${spicedb_cpu_cores_average}"
+    printf 'spicedb_cpu_cores_max=%s\n' "${spicedb_cpu_cores_max}"
+    printf 'spicedb_memory_working_set_bytes_max_per_replica=%s\n' "${spicedb_memory_working_set_bytes_max_per_replica}"
+    printf 'spicedb_memory_working_set_bytes_sum_max=%s\n' "${spicedb_memory_working_set_bytes_sum_max}"
+    printf 'postgres_backends_max=%s\n' "${postgres_backends_max}"
+    printf 'thumper_cpu_cores_average=%s\n' "${thumper_cpu_cores_average}"
+    printf 'thumper_memory_working_set_bytes_max=%s\n' "${thumper_memory_working_set_bytes_max}"
+    printf 'step_errors=%s\n' "${step_errors}"
+    printf 'request_errors=%s\n' "${request_errors}"
+    printf 'wrong_permissionship_events=%s\n' "${wrong_permissionship_events}"
+    printf 'indeterminate_decisions=%s\n' "${indeterminate_decisions}"
+    printf 'incorrect_decisions=%s\n' "${incorrect_decisions}"
+  } | tee "${summary_path}"
+
+  [[ "${incorrect_decisions}" == "0" ]] ||
+    fail "Thumper observed ${incorrect_decisions} incorrect authorization decision(s); see ${thumper_log}"
+  [[ "${completed_requests}" -gt 0 ]] ||
+    fail "Thumper did not complete any CheckPermission requests"
+
+  printf 'Evidence written to %s\n' "${evidence_directory}"
+}
+
+case "${1:---help}" in
+  placement)
+    placement
+    ;;
+  verify)
+    verify
+    ;;
+  load)
+    shift
+    load "$@"
+    ;;
+  classify-log)
+    shift
+    [[ "$#" == "1" ]] || fail "classify-log requires exactly one Thumper log path"
+    classify_thumper_outcomes "$1"
+    ;;
+  -h | --help)
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

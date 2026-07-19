@@ -1,0 +1,18 @@
+{"severity":"debug","step":0,"worker":0,"op":"WriteRelationships","message":"executing script step"}
+{"severity":"warn","step":0,"worker":0,"op":"WriteRelationships","error":"transport failed","message":"error calling script step"}
+{"severity":"debug","step":1,"worker":0,"op":"CheckPermission","message":"executing script step"}
+{"severity":"warn","step":1,"worker":0,"op":"CheckPermission","error":"CheckPermission returned wrong permissionship: expected permission","message":"error calling script step"}
+{"severity":"debug","step":0,"worker":1,"op":"WriteRelationships","message":"executing script step"}
+{"severity":"debug","step":1,"worker":1,"op":"CheckPermission","message":"executing script step"}
+{"severity":"warn","step":1,"worker":1,"op":"CheckPermission","error":"CheckPermission returned wrong permissionship: expected permission","message":"error calling script step"}
+{"severity":"debug","step":3,"worker":2,"op":"DeleteRelationships","message":"executing script step"}
+{"severity":"warn","step":3,"worker":2,"op":"DeleteRelationships","error":"transport failed","message":"error calling script step"}
+{"severity":"debug","step":4,"worker":2,"op":"CheckPermission","message":"executing script step"}
+{"severity":"warn","step":4,"worker":2,"op":"CheckPermission","error":"CheckPermission returned wrong permissionship: expected no permission","message":"error calling script step"}
+{"severity":"debug","step":2,"worker":3,"op":"CheckPermission","message":"executing script step"}
+{"severity":"warn","step":2,"worker":3,"op":"CheckPermission","error":"CheckPermission returned wrong permissionship: unrelated subject allowed","message":"error calling script step"}
+{"severity":"debug","step":0,"worker":4,"op":"WriteRelationships","message":"executing script step"}
+{"severity":"warn","step":0,"worker":4,"op":"WriteRelationships","error":"transport failed","message":"error calling script step"}
+{"severity":"debug","step":0,"worker":4,"op":"WriteRelationships","message":"executing script step"}
+{"severity":"debug","step":1,"worker":4,"op":"CheckPermission","message":"executing script step"}
+{"severity":"warn","step":1,"worker":4,"op":"CheckPermission","error":"CheckPermission returned wrong permissionship: expected permission","message":"error calling script step"}

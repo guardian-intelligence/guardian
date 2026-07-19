@@ -1,0 +1,76 @@
+apiVersion: apps.cozystack.io/v1alpha1
+kind: Postgres
+metadata:
+  name: spicedb
+  namespace: tenant-guardian-prod
+spec:
+  replicas: 3
+  size: 20Gi
+  storageClass: replicated-encrypted
+  external: false
+  version: v18
+  resources:
+    cpu: 2
+    memory: 2Gi
+  postgresql:
+    parameters:
+      max_connections: 100
+      shared_buffers: 512MB
+      effective_cache_size: 1536MB
+      statement_timeout: 120s
+      idle_in_transaction_session_timeout: 300s
+      lock_timeout: 10s
+      archive_timeout: 300s
+      track_commit_timestamp: "on"
+  users:
+    spicedb: {}
+  databases:
+    spicedb:
+      roles:
+        admin:
+          - spicedb
+  quorum:
+    minSyncReplicas: 1
+    maxSyncReplicas: 2
+  backup:
+    enabled: true
+    useSystemBucket: true
+---
+apiVersion: backups.cozystack.io/v1alpha1
+kind: Plan
+metadata:
+  name: spicedb-postgres-nightly
+  namespace: tenant-guardian-prod
+spec:
+  applicationRef:
+    apiGroup: apps.cozystack.io
+    kind: Postgres
+    name: spicedb
+  backupClassName: cozy-default
+  schedule:
+    type: cron
+    cron: "0 4 * * *"
+---
+apiVersion: backups.cozystack.io/v1alpha1
+kind: BackupJob
+metadata:
+  name: spicedb-postgres-archive-activation
+  namespace: tenant-guardian-prod
+spec:
+  applicationRef:
+    apiGroup: apps.cozystack.io
+    kind: Postgres
+    name: spicedb
+  backupClassName: cozy-default
+---
+apiVersion: backups.cozystack.io/v1alpha1
+kind: BackupJob
+metadata:
+  name: spicedb-postgres-restore-baseline-20260718
+  namespace: tenant-guardian-prod
+spec:
+  applicationRef:
+    apiGroup: apps.cozystack.io
+    kind: Postgres
+    name: spicedb
+  backupClassName: cozy-default

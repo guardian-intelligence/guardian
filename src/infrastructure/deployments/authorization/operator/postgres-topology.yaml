@@ -1,0 +1,50 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicy
+metadata:
+  name: spicedb-postgres-topology.guardian.dev
+  labels:
+    app.kubernetes.io/name: spicedb
+    app.kubernetes.io/part-of: guardian
+spec:
+  failurePolicy: Fail
+  reinvocationPolicy: IfNeeded
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - postgresql.cnpg.io
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - clusters
+  matchConditions:
+    - name: spicedb-cluster-only
+      expression: >-
+        request.namespace == "tenant-guardian-prod" &&
+        object.metadata.name == "postgres-spicedb"
+  mutations:
+    - patchType: ApplyConfiguration
+      applyConfiguration:
+        expression: >-
+          Object{
+            spec: Object.spec{
+              primaryUpdateMethod: "switchover",
+              affinity: Object.spec.affinity{
+                enablePodAntiAffinity: true,
+                podAntiAffinityType: "required",
+                topologyKey: "kubernetes.io/hostname"
+              }
+            }
+          }
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicyBinding
+metadata:
+  name: spicedb-postgres-topology.guardian.dev
+  labels:
+    app.kubernetes.io/name: spicedb
+    app.kubernetes.io/part-of: guardian
+spec:
+  policyName: spicedb-postgres-topology.guardian.dev

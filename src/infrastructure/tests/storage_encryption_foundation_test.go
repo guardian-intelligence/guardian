@@ -118,6 +118,7 @@ func TestCozystackNativeLinstorEncryptionConformance(t *testing.T) {
 	workloads := map[string]string{
 		"src/infrastructure/base/apps/postflight-controlplane-postgres.yaml":      "storageClass: replicated-encrypted",
 		"src/infrastructure/base/apps/observability.yaml":                         "storageClassName: replicated-encrypted",
+		"src/infrastructure/deployments/authorization/data/postgres.yaml":         "storageClass: replicated-encrypted",
 		"src/infrastructure/deployments/guardian/system/openbao-helmrelease.yaml": "storageClass: local-encrypted-retain",
 		"src/infrastructure/deployments/guardian/system/zot-helmrelease.yaml":     "storageClassName: replicated-encrypted",
 		"src/infrastructure/deployments/iam/prod/postgres.yaml":                   "storageClass: replicated-encrypted",

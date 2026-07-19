@@ -1,0 +1,113 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: spicedb-restore-marker-v3-20260719
+  namespace: tenant-guardian-prod
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+  labels:
+    app.kubernetes.io/name: spicedb-restore-drill
+    app.kubernetes.io/part-of: guardian
+spec:
+  backoffLimit: 6
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: spicedb-restore-drill
+        app.kubernetes.io/part-of: guardian
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 999
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: marker
+          image: docker.io/library/postgres:18.1@sha256:1090bc3a8ccfb0b55f78a494d76f8d603434f7e4553543d6e807bc7bd6bbd17f
+          command:
+            - /bin/sh
+            - -euc
+          args:
+            - |
+              psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 <<'SQL'
+              CREATE TABLE IF NOT EXISTS guardian_restore_drill_marker (
+                id uuid PRIMARY KEY,
+                marked_at timestamptz NOT NULL DEFAULT clock_timestamp()
+              );
+              INSERT INTO guardian_restore_drill_marker (id)
+              VALUES ('0a90ea81-fcaf-437b-a34f-d1da44c720f6')
+              ON CONFLICT (id) DO NOTHING;
+              SELECT id, marked_at
+              FROM guardian_restore_drill_marker
+              WHERE id = '0a90ea81-fcaf-437b-a34f-d1da44c720f6';
+              SQL
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-spicedb-credentials
+                  key: spicedb
+            - name: DATABASE_URL
+              value: postgresql://spicedb@postgres-spicedb-rw:5432/spicedb?sslmode=verify-full&sslrootcert=/tls/ca.crt
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsUser: 999
+            runAsGroup: 999
+            runAsNonRoot: true
+          volumeMounts:
+            - name: database-ca
+              mountPath: /tls
+              readOnly: true
+      volumes:
+        - name: database-ca
+          secret:
+            secretName: postgres-spicedb-ca
+            items:
+              - key: ca.crt
+                path: ca.crt
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: spicedb-restore-drill
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb-restore-drill
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: spicedb-restore-drill
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: postgres-spicedb
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP

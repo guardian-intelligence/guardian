@@ -1,0 +1,73 @@
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: spicedb-selfsigned
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb
+    app.kubernetes.io/part-of: guardian
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: spicedb-ca
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb
+    app.kubernetes.io/part-of: guardian
+spec:
+  secretName: spicedb-ca
+  commonName: guardian-spicedb-ca
+  duration: 8760h
+  renewBefore: 720h
+  isCA: true
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    group: cert-manager.io
+    kind: Issuer
+    name: spicedb-selfsigned
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: spicedb-ca
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb
+    app.kubernetes.io/part-of: guardian
+spec:
+  ca:
+    secretName: spicedb-ca
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: spicedb-server
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb
+    app.kubernetes.io/part-of: guardian
+spec:
+  secretName: spicedb-server-tls
+  duration: 720h
+  renewBefore: 168h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages:
+    - server auth
+  dnsNames:
+    - spicedb
+    - spicedb.tenant-guardian-prod
+    - spicedb.tenant-guardian-prod.svc
+    - spicedb.tenant-guardian-prod.svc.cozy.local
+  issuerRef:
+    group: cert-manager.io
+    kind: Issuer
+    name: spicedb-ca

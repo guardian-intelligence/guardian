@@ -1,0 +1,150 @@
+apiVersion: authzed.com/v1alpha1
+kind: SpiceDBCluster
+metadata:
+  name: spicedb
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb
+    app.kubernetes.io/part-of: guardian
+spec:
+  channel: stable
+  version: v1.52.0
+  credentials:
+    datastoreURI:
+      skip: true
+    presharedKey:
+      skip: true
+    migrationSecrets:
+      skip: true
+  config:
+    datastoreEngine: postgres
+    datastoreTLSSecretName: postgres-spicedb-ca
+    replicas: 3
+    dispatchEnabled: true
+    tlsSecretName: spicedb-server-tls
+    dispatchUpstreamCASecretName: spicedb-server-tls
+    dispatchUpstreamCAFilePath: ca.crt
+    datastoreConnPoolReadMinOpen: 2
+    datastoreConnPoolReadMaxOpen: 12
+    datastoreConnPoolWriteMinOpen: 1
+    datastoreConnPoolWriteMaxOpen: 4
+    grpcShutdownGracePeriod: 30s
+    httpEnabled: true
+    logFormat: json
+    logLevel: info
+    skipReleaseCheck: true
+    telemetryEndpoint: ""
+    pdb:
+      minAvailable: "2"
+    extraPodLabels:
+      app.kubernetes.io/part-of: guardian
+      guardian.dev/component: authorization-datastore
+      guardian.dev/stage: prod
+    extraPodAnnotations:
+      guardian.dev/qualification-restart: "20260719-token-slot-a-rehearsal"
+  patches:
+    - kind: Deployment
+      patch:
+        metadata:
+          annotations:
+            reloader.stakater.com/auto: "true"
+        spec:
+          minReadySeconds: 30
+          strategy:
+            type: RollingUpdate
+            rollingUpdate:
+              # Required anti-affinity fills all three nodes, so a surge pod
+              # cannot schedule until one replica leaves its node.
+              maxSurge: 0
+              maxUnavailable: 1
+          template:
+            spec:
+              terminationGracePeriodSeconds: 60
+              securityContext:
+                runAsNonRoot: true
+                seccompProfile:
+                  type: RuntimeDefault
+              topologySpreadConstraints:
+                - maxSkew: 1
+                  topologyKey: kubernetes.io/hostname
+                  whenUnsatisfiable: DoNotSchedule
+                  labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/instance: spicedb-spicedb
+              affinity:
+                podAntiAffinity:
+                  requiredDuringSchedulingIgnoredDuringExecution:
+                    - topologyKey: kubernetes.io/hostname
+                      labelSelector:
+                        matchLabels:
+                          app.kubernetes.io/instance: spicedb-spicedb
+              containers:
+                - name: spicedb
+                  env:
+                    - name: SPICEDB_DATASTORE_PASSWORD
+                      valueFrom:
+                        secretKeyRef:
+                          name: postgres-spicedb-credentials
+                          key: spicedb
+                    - name: SPICEDB_API_TOKEN_SLOT_A
+                      valueFrom:
+                        secretKeyRef:
+                          name: spicedb-api-token-slot-a
+                          key: password
+                    - name: SPICEDB_API_TOKEN_SLOT_B
+                      valueFrom:
+                        secretKeyRef:
+                          name: spicedb-api-token-slot-b
+                          key: password
+                    - name: SPICEDB_GRPC_PRESHARED_KEY
+                      value: $(SPICEDB_API_TOKEN_SLOT_A),$(SPICEDB_API_TOKEN_SLOT_B)
+                    - name: SPICEDB_DATASTORE_CONN_URI
+                      value: postgresql://spicedb:$(SPICEDB_DATASTORE_PASSWORD)@postgres-spicedb-rw:5432/spicedb?sslmode=verify-full&sslrootcert=/spicedb-db-tls/ca.crt
+                  resources:
+                    requests:
+                      cpu: 250m
+                      memory: 256Mi
+                    limits:
+                      cpu: "2"
+                      memory: 1Gi
+                  securityContext:
+                    allowPrivilegeEscalation: false
+                    capabilities:
+                      drop:
+                        - ALL
+                    readOnlyRootFilesystem: true
+                    runAsNonRoot: true
+    - kind: Job
+      patch:
+        spec:
+          backoffLimit: 6
+          template:
+            spec:
+              securityContext:
+                runAsNonRoot: true
+                seccompProfile:
+                  type: RuntimeDefault
+              containers:
+                - name: migrate
+                  env:
+                    - name: SPICEDB_DATASTORE_PASSWORD
+                      valueFrom:
+                        secretKeyRef:
+                          name: postgres-spicedb-credentials
+                          key: spicedb
+                    - name: SPICEDB_DATASTORE_CONN_URI
+                      value: postgresql://spicedb:$(SPICEDB_DATASTORE_PASSWORD)@postgres-spicedb-rw:5432/spicedb?sslmode=verify-full&sslrootcert=/spicedb-db-tls/ca.crt
+                  resources:
+                    requests:
+                      cpu: 100m
+                      memory: 128Mi
+                    limits:
+                      cpu: "1"
+                      memory: 512Mi
+                  securityContext:
+                    allowPrivilegeEscalation: false
+                    capabilities:
+                      drop:
+                        - ALL
+                    readOnlyRootFilesystem: true
+                    runAsNonRoot: true

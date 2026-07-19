@@ -361,6 +361,183 @@ spec:
     # the ZotRegistryDown and mirror-canary pages instead.
   timeout: 10m
 ---
+# SpiceDB's CRD and controller are isolated from the authorization data plane
+# so a cold install cannot race custom-resource discovery. The controller
+# watches and mutates only tenant-guardian-prod through a namespaced Role.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: guardian-authorization-operator
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/deployments/authorization/operator
+  sourceRef:
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: guardian-source
+  dependsOn:
+    - name: guardian-mgmt-admission
+    - name: guardian-mgmt-storage
+    - name: guardian-system
+  prune: true
+  wait: true
+  timeout: 10m
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: spicedb-operator
+      namespace: tenant-guardian-prod
+---
+# PostgreSQL initialization, archive activation, serving certificates, and API
+# credentials must all be healthy before the SpiceDB CR exists. In particular,
+# the Cozystack-generated init Job creates the database role that the SpiceDB
+# migration Job needs.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: guardian-authorization-data
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/deployments/authorization/data
+  sourceRef:
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: guardian-source
+  dependsOn:
+    - name: guardian-authorization-operator
+    - name: guardian-mgmt-storage
+  prune: true
+  wait: false
+  timeout: 30m
+  healthChecks:
+    - apiVersion: postgresql.cnpg.io/v1
+      kind: Cluster
+      name: postgres-spicedb
+      namespace: tenant-guardian-prod
+    - apiVersion: batch/v1
+      kind: Job
+      name: postgres-spicedb-init-job
+      namespace: tenant-guardian-prod
+    - apiVersion: batch/v1
+      kind: Job
+      name: spicedb-restore-marker-v3-20260719
+      namespace: tenant-guardian-prod
+    - apiVersion: cert-manager.io/v1
+      kind: Certificate
+      name: spicedb-ca
+      namespace: tenant-guardian-prod
+    - apiVersion: cert-manager.io/v1
+      kind: Certificate
+      name: spicedb-server
+      namespace: tenant-guardian-prod
+    - apiVersion: external-secrets.io/v1beta1
+      kind: ExternalSecret
+      name: spicedb-api-token-slot-a
+      namespace: tenant-guardian-prod
+    - apiVersion: external-secrets.io/v1beta1
+      kind: ExternalSecret
+      name: spicedb-api-token-slot-b
+      namespace: tenant-guardian-prod
+    - apiVersion: backups.cozystack.io/v1alpha1
+      kind: BackupJob
+      name: spicedb-postgres-archive-activation
+      namespace: tenant-guardian-prod
+    - apiVersion: backups.cozystack.io/v1alpha1
+      kind: BackupJob
+      name: spicedb-postgres-restore-baseline-20260718
+      namespace: tenant-guardian-prod
+  healthCheckExprs:
+    - apiVersion: external-secrets.io/v1beta1
+      kind: ExternalSecret
+      current: >-
+        has(status.conditions) &&
+        status.conditions.exists(e,
+        e.type == 'Ready' && e.status == 'True')
+      failed: >-
+        has(status.conditions) &&
+        status.conditions.exists(e,
+        e.type == 'Ready' && e.status == 'False')
+    - apiVersion: backups.cozystack.io/v1alpha1
+      kind: BackupJob
+      current: status.phase == 'Succeeded'
+      failed: status.phase == 'Failed'
+    - apiVersion: backups.cozystack.io/v1alpha1
+      kind: RestoreJob
+      current: status.phase == 'Succeeded'
+      failed: status.phase == 'Failed'
+---
+# The authorization service starts only after its data dependencies are
+# functional. Generated SpiceDB workloads remain explicit health gates even
+# though the operator, rather than Flux inventory, creates them.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: guardian-authorization-prod
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/deployments/authorization/prod
+  sourceRef:
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: guardian-source
+  dependsOn:
+    - name: guardian-authorization-data
+  prune: true
+  wait: false
+  timeout: 15m
+  healthChecks:
+    - apiVersion: authzed.com/v1alpha1
+      kind: SpiceDBCluster
+      name: spicedb
+      namespace: tenant-guardian-prod
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: spicedb-spicedb
+      namespace: tenant-guardian-prod
+    - apiVersion: batch/v1
+      kind: Job
+      name: spicedb-schema-v3
+      namespace: tenant-guardian-prod
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: spicedb-thumper
+      namespace: tenant-guardian-prod
+  healthCheckExprs:
+    - apiVersion: authzed.com/v1alpha1
+      kind: SpiceDBCluster
+      current: >-
+        has(status.observedGeneration) &&
+        status.observedGeneration == metadata.generation &&
+        has(status.currentMigrationHash) &&
+        has(status.targetMigrationHash) &&
+        status.currentMigrationHash == status.targetMigrationHash &&
+        (!has(status.conditions) ||
+        status.conditions.all(c, c.status != 'True'))
+      failed: >-
+        has(status.conditions) &&
+        status.conditions.exists(c,
+        (c.status == 'True' &&
+        c.type in ['ValidatingFailed', 'PreconditionsFailed',
+        'RolloutError', 'ConfigurationWarning']) ||
+        (c.status == 'False' &&
+        c.type == 'Migrating' &&
+        c.reason == 'MigrationFailed'))
+---
 # TigerBeetle's financial ledger is isolated in its own reconciliation slice
 # so replica health is gated without coupling unrelated Guardian system
 # services to ledger state.

@@ -1,0 +1,168 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spicedb-thumper
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb-thumper
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: authorization-qualification
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: spicedb-thumper
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: spicedb-thumper
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/component: authorization-qualification
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: 65532
+        runAsGroup: 65532
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: thumper
+          image: quay.io/authzed/thumper:v0.1.0@sha256:65a4d2e5a5a2e532331f86812793c31a320f4c77991520f7c2c4f0ea5700089a
+          args:
+            - run
+            - /load/qualification.yaml
+            - --endpoint=spicedb:50051
+            - --insecure=false
+            - --ca-path=/tls/ca.crt
+            - --token=$(SPICEDB_TOKEN)
+            - --qps=100
+            - --step-timeout=2s
+            - --log-format=json
+          env:
+            - name: SPICEDB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: spicedb-api-token-slot-a
+                  key: password
+          ports:
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 12
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          volumeMounts:
+            - name: load
+              mountPath: /load
+              readOnly: true
+            - name: tls
+              mountPath: /tls
+              readOnly: true
+      volumes:
+        - name: load
+          configMap:
+            name: spicedb-thumper
+        - name: tls
+          secret:
+            secretName: spicedb-server-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spicedb-thumper
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb-thumper
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: authorization-qualification
+spec:
+  selector:
+    app.kubernetes.io/name: spicedb-thumper
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: spicedb-thumper
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb-thumper
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: authorization-qualification
+spec:
+  namespaceSelector:
+    matchNames:
+      - tenant-guardian-prod
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: spicedb-thumper
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 5s
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: spicedb-thumper
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: spicedb-thumper
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: authorization-qualification
+spec:
+  groups:
+    - name: spicedb-thumper.rules
+      interval: 15s
+      rules:
+        - alert: SpiceDBThumperErrors
+          expr: sum(rate(grpc_client_handled_total{namespace="tenant-guardian-prod",job="spicedb-thumper",grpc_code!="OK"}[5m])) > 0
+          for: 2m
+          labels:
+            severity: critical
+            guardian_stage: prod
+          annotations:
+            summary: "Thumper is observing SpiceDB request failures"
+            description: "The authorization qualification load has sustained non-OK gRPC responses."
+        - alert: SpiceDBThumperLatencyHigh
+          expr: >-
+            histogram_quantile(0.99,
+            sum by (grpc_method, le)
+            (rate(grpc_client_handling_seconds_bucket{namespace="tenant-guardian-prod",job="spicedb-thumper"}[10m])))
+            > 0.1
+          for: 10m
+          labels:
+            severity: warning
+            guardian_stage: prod
+          annotations:
+            summary: "Thumper SpiceDB p99 exceeds 100ms"
+            description: "Client-observed authorization latency has exceeded the initial p99 budget for ten minutes."
