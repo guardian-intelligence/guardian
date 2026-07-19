@@ -17,3 +17,4 @@ resources:
   - synthetic-storage-classification.yaml
   - tigerbeetle-host-network.yaml
   - vlogs-patcher-update-only.yaml
+  - workload-priority.yaml

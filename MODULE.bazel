@@ -109,6 +109,9 @@ use_repo(
     "com_github_prometheus_client_golang",
     "com_github_stripe_stripe_go_v83",
     "com_github_tigerbeetle_tigerbeetle_go",
+    "io_k8s_api",
+    "io_k8s_apimachinery",
+    "io_k8s_apiserver",
     "io_k8s_sigs_yaml",
     "io_opentelemetry_go_otel",
     "io_opentelemetry_go_otel_exporters_otlp_otlptrace_otlptracegrpc",
@@ -130,6 +133,29 @@ go_deps.gazelle_override(
     path = "github.com/google/cel-go",
 )
 
+# The k8s.io staging modules ship .proto sources next to pregenerated Go
+# marshalers; gazelle's proto rules for them emit cross-module proto imports
+# that don't resolve, and the Go packages are complete without them.
+go_deps.gazelle_override(
+    directives = ["gazelle:proto disable"],
+    path = "k8s.io/api",
+)
+go_deps.gazelle_override(
+    directives = ["gazelle:proto disable"],
+    path = "k8s.io/apimachinery",
+)
+go_deps.gazelle_override(
+    directives = ["gazelle:proto disable"],
+    path = "k8s.io/apiserver",
+)
+go_deps.gazelle_override(
+    directives = ["gazelle:proto disable"],
+    path = "k8s.io/client-go",
+)
+go_deps.gazelle_override(
+    directives = ["gazelle:proto disable"],
+    path = "k8s.io/component-base",
+)
 # The OpenTelemetry Go modules import each other's internal/ packages across
 # module boundaries (e.g. the otlptracegrpc and sdk modules pull
 # go.opentelemetry.io/otel/internal/global). gazelle scopes generated
