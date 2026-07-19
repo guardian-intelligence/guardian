@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # Build the Postflight golden runner image and template it into ZFS as
 # <pool>/postflight/images/<image-id>@golden. The image carries everything a
-# runner VM needs — Ubuntu 24.04, the pinned actions/runner tree, Node.js,
-# git, a C toolchain, cryptsetup, guestd — and zero customer bytes; workload
-# always arrives later, via
-# the workspace zvol. hostd clones one root disk per slot from @golden and
-# destroys it with the VM.
+# runner VM needs — the pinned GitHub runner-images Ubuntu 24.04 userspace,
+# the pinned actions/runner tree, cryptsetup, guestd — and zero customer
+# bytes; workload always arrives later via the workspace zvol. hostd clones
+# one root disk per slot from @golden and destroys it with the VM.
 #
 # Runs as root on a plain Ubuntu host with qemu-utils and zfsutils-linux:
 #
@@ -29,6 +28,9 @@ environment:
   POOL        zpool that receives the image dataset (default: tank)
   WORK_DIR    download cache + scratch space (default: /var/tmp/postflight-image)
   NBD_DEVICE  nbd device to attach the image to (default: first free /dev/nbdN)
+
+build-upstream.sh also accepts QEMU_ACCELERATOR, QEMU_CPUS,
+QEMU_MEMORY_MIB, QEMU_BINARY, and PACKER_TIMEOUT.
 EOF
 }
 
@@ -54,7 +56,7 @@ die() {
   exit 1
 }
 
-for cmd in blkid chroot curl git growpart modprobe python3 qemu-img qemu-nbd resize2fs sha256sum tar udevadm xz zfs; do
+for cmd in blkid chroot curl git growpart modprobe python3 qemu-img qemu-nbd resize2fs sha256sum tar udevadm zfs; do
   command -v "${cmd}" >/dev/null 2>&1 || die "missing required command: ${cmd}"
 done
 [[ "${EUID}" -eq 0 ]] || die "must run as root (qemu-nbd, chroot, and zfs)"
@@ -63,26 +65,24 @@ done
 
 # shellcheck source=pins.env
 source "${script_dir}/pins.env"
-for var in UBUNTU_SERIAL UBUNTU_SHA256 RUNNER_VERSION RUNNER_SHA256 NODE_VERSION NODE_SHA256; do
+for var in RUNNER_IMAGES_REF RUNNER_IMAGES_VERSION RUNNER_IMAGES_COMMIT UBUNTU_SERIAL UBUNTU_SHA256 \
+  PACKER_VERSION PACKER_SHA256 PACKER_QEMU_PLUGIN_VERSION PACKER_QEMU_PLUGIN_SHA256 \
+  RUNNER_VERSION RUNNER_SHA256; do
   [[ -n "${!var:-}" ]] || die "pins.env is missing ${var}"
 done
 
 pool="${POOL:-tank}"
 work_dir="${WORK_DIR:-/var/tmp/postflight-image}"
 
-# Runner _diag logs, /tmp, and tool caches all land on the root disk at job
-# time — only the job workspace lives on the workspace zvol — and nothing
-# grows the rootfs at boot (cloud-init is purged), so the build grows it to
-# the 4-vCPU class's root-disk size and asserts the margin materialized.
+# Match Blacksmith's 4-vCPU root-disk size. GitHub's full runner image is
+# intentionally large; its own validation requires 17 GiB free, which we
+# preserve after adding the Postflight runtime. The durable workspace zvol is
+# separate.
 rootfs_size="80G"
-rootfs_min_free_bytes=$((64 * 1024 * 1024 * 1024))
+rootfs_min_free_bytes=$((17 * 1024 * 1024 * 1024))
 
-ubuntu_image="ubuntu-24.04-minimal-cloudimg-amd64.img"
-ubuntu_url="https://cloud-images.ubuntu.com/minimal/releases/noble/release-${UBUNTU_SERIAL}/${ubuntu_image}"
 runner_tarball="actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"
 runner_url="https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/${runner_tarball}"
-node_tarball="node-v${NODE_VERSION}-linux-x64.tar.xz"
-node_url="https://nodejs.org/dist/v${NODE_VERSION}/${node_tarball}"
 
 pins_sha256="$(sha256sum "${script_dir}/pins.env" | awk '{print $1}')"
 guestd_sha256="$(sha256sum "${GUESTD_BIN}" | awk '{print $1}')"
@@ -167,15 +167,17 @@ in_chroot() {
 }
 
 mkdir -p "${work_dir}"
-fetch "${ubuntu_url}" "${work_dir}/${ubuntu_image}" "${UBUNTU_SHA256}"
 fetch "${runner_url}" "${work_dir}/${runner_tarball}" "${RUNNER_SHA256}"
-fetch "${node_url}" "${work_dir}/${node_tarball}" "${NODE_SHA256}"
+base_image="$(
+  WORK_DIR="${work_dir}" "${script_dir}/build-upstream.sh"
+)"
+[[ -f "${base_image}" ]] || die "runner-images builder returned no image: ${base_image}"
 
 # Always start from the pristine download: a crashed run leaves a
 # half-modified working copy behind, and re-entering it would compound edits.
 work_image="${work_dir}/${image_id}.qcow2"
 rm -f "${work_image}"
-cp --reflink=auto "${work_dir}/${ubuntu_image}" "${work_image}"
+cp --reflink=auto "${base_image}" "${work_image}"
 qemu-img resize -q "${work_image}" "${rootfs_size}"
 
 modprobe nbd max_part=16
@@ -250,16 +252,19 @@ cp /etc/resolv.conf "${mnt}/etc/resolv.conf"
 printf '#!/bin/sh\nexit 101\n' >"${mnt}/usr/sbin/policy-rc.d"
 chmod 0755 "${mnt}/usr/sbin/policy-rc.d"
 
-log "installing packages"
+log "installing Postflight runtime dependencies"
 in_chroot apt-get -q update
-# build-essential + pkg-config: cargo/cgo/node-gyp all need a C toolchain to
-# link; GitHub-hosted images carry one, so jobs assume it. cryptsetup-bin:
-# guestd opens the workspace volume with LUKS2 on the confidential tier.
+# The upstream image supplies the customer-facing toolchain. cryptsetup-bin
+# is the one Postflight-specific package: guestd opens the workspace volume
+# with LUKS2 on the confidential tier.
 in_chroot apt-get -q -y --no-install-recommends install \
-  git build-essential pkg-config cryptsetup-bin sudo unzip
+  cryptsetup-bin
 
 log "installing actions/runner ${RUNNER_VERSION}"
 in_chroot useradd --uid 1001 --user-group --create-home --shell /bin/bash runner
+if in_chroot getent group docker >/dev/null; then
+  in_chroot usermod -aG docker runner
+fi
 # GitHub-hosted runners let workflows install their declared system
 # prerequisites. The guest root disk is single-job and destroyed on release,
 # so matching that contract does not persist privilege across tenants.
@@ -273,17 +278,12 @@ tar -xzf "${work_dir}/${runner_tarball}" -C "${mnt}/opt/actions-runner"
 touch "${mnt}/opt/actions-runner/.disableupdate"
 in_chroot bash /opt/actions-runner/bin/installdependencies.sh
 in_chroot chown -R runner:runner /opt/actions-runner
-
-log "installing node ${NODE_VERSION}"
-# Upstream tarball entries are owned by the build user's uid 1001 — the same
-# uid as the runner user, the identity that executes untrusted job code.
-# Without --no-same-owner, root's tar preserves that and hands the runner
-# write access to /usr/local/bin, the first entry on root's PATH.
-tar -xJf "${work_dir}/${node_tarball}" -C "${mnt}/usr/local" --strip-components=1 --no-same-owner \
-  "node-v${NODE_VERSION}-linux-x64/bin" \
-  "node-v${NODE_VERSION}-linux-x64/include" \
-  "node-v${NODE_VERSION}-linux-x64/lib" \
-  "node-v${NODE_VERSION}-linux-x64/share"
+# Homebrew is the one upstream tool installed outside /opt or /usr/local as
+# the temporary Packer user. GitHub's runtime user inherits that install;
+# transfer it explicitly because Postflight fixes runner at UID 1001.
+if [[ -d "${mnt}/home/linuxbrew" ]]; then
+  in_chroot chown -R runner:runner /home/linuxbrew
+fi
 
 log "installing guestd (sha256 ${guestd_sha256})"
 install -m 0755 "${GUESTD_BIN}" "${mnt}/usr/local/bin/guestd"
@@ -341,15 +341,21 @@ install -d -m 0755 "${mnt}/etc/systemd/system/multi-user.target.wants"
 ln -sf /etc/systemd/system/guestd.service \
   "${mnt}/etc/systemd/system/multi-user.target.wants/guestd.service"
 
-log "removing cloud-init and ssh"
-in_chroot apt-get -q -y purge cloud-init openssh-server
+log "removing image-build ingress"
+in_chroot apt-get -q -y purge cloud-init openssh-server walinuxagent
 in_chroot apt-get -q -y --purge autoremove
-rm -rf "${mnt}/etc/cloud" "${mnt}/var/lib/cloud" "${mnt}/etc/ssh"
+in_chroot userdel --remove packer
+# Keep OpenSSH's client configuration and upstream known_hosts; only the
+# server package, server configuration, and host identity are ingress.
+rm -rf "${mnt}/etc/cloud" "${mnt}/var/lib/cloud" "${mnt}/var/lib/waagent"
+rm -f "${mnt}"/etc/ssh/ssh_host_* "${mnt}/etc/ssh/sshd_config"
+rm -rf "${mnt}/etc/ssh/sshd_config.d"
 
 # Configuration never arrives over network or metadata, but the runner still
-# needs egress to GitHub, so any NIC the host attaches just DHCPs. The minimal
-# cloud image ships no netplan, so networkd is configured natively; matching by
+# needs egress to GitHub, so any NIC the host attaches just DHCPs. Remove the
+# build VM's cloud-init netplan and configure networkd natively; matching by
 # link type catches the NIC whatever the host names it.
+rm -f "${mnt}/etc/netplan/50-cloud-init.yaml"
 install -d -m 0755 "${mnt}/etc/systemd/network"
 cat >"${mnt}/etc/systemd/network/10-postflight.network" <<'EOF'
 [Match]
