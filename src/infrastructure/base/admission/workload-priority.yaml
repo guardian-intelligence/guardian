@@ -1,0 +1,75 @@
+# Workload priority floor: no Guardian workload runs unprioritized. The
+# mutation defaults priorityClassName on workload pod templates that don't
+# set one; critical data planes opt up to guardian-critical explicitly in
+# their manifests. guardian-standard never preempts — it buys queue position
+# and eviction ordering without letting a preview evict someone else's pod.
+#
+# The classes live in this file so the same Flux apply that activates the
+# mutation guarantees the class it injects: a pod referencing a missing
+# PriorityClass is rejected at admission.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: guardian-standard
+value: 10000
+preemptionPolicy: Never
+description: Floor for Guardian workloads; injected by guardian-workload-priority when a template sets no class.
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: guardian-critical
+value: 100000
+preemptionPolicy: PreemptLowerPriority
+description: User-facing Guardian data planes; set explicitly in the workload manifest, never injected.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicy
+metadata:
+  name: guardian-workload-priority
+spec:
+  failurePolicy: Fail
+  reinvocationPolicy: Never
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["deployments", "statefulsets", "daemonsets"]
+  matchConditions:
+    - name: no-explicit-priority
+      expression: >-
+        !has(object.spec.template.spec.priorityClassName)
+  mutations:
+    - patchType: ApplyConfiguration
+      applyConfiguration:
+        expression: >-
+          Object{
+            spec: Object.spec{
+              template: Object.spec.template{
+                spec: Object.spec.template.spec{
+                  priorityClassName: "guardian-standard"
+                }
+              }
+            }
+          }
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicyBinding
+metadata:
+  name: guardian-workload-priority
+spec:
+  policyName: guardian-workload-priority
+  # Previews only for now: injecting priorityClassName is a pod-template
+  # change, and Flux applies a namespace's workloads in one wave — in
+  # tenant-guardian that wave includes the TigerBeetle replica Deployments
+  # (Recreate strategy), which must never restart together. Widening order:
+  # stateful data planes set explicit classes first (the matchCondition then
+  # skips them), then this list grows.
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values:
+            - tenant-guardian-previews

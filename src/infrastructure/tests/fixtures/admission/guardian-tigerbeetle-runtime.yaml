@@ -1,0 +1,49 @@
+# Pods-only policy (no bare Pods render): host networking in tenant-guardian
+# belongs to the TigerBeetle identity alone, and a TigerBeetle-labeled pod
+# must be the full hardened shape — a minimal impostor fails it.
+policy: guardian-tigerbeetle-runtime
+cases:
+  - name: ordinary pod without host networking
+    resource: {group: "", version: v1, resource: pods}
+    object:
+      apiVersion: v1
+      kind: Pod
+      metadata: {name: worker, namespace: tenant-guardian}
+      spec:
+        containers:
+          - name: main
+            image: busybox
+    expect: allow
+  - name: host networking without the tigerbeetle identity
+    resource: {group: "", version: v1, resource: pods}
+    object:
+      apiVersion: v1
+      kind: Pod
+      metadata: {name: snooper, namespace: tenant-guardian}
+      spec:
+        hostNetwork: true
+        serviceAccountName: default
+        containers:
+          - name: main
+            image: busybox
+    expect: deny
+  - name: tigerbeetle-labeled pod that formats the ledger
+    resource: {group: "", version: v1, resource: pods}
+    object:
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: rogue-replica
+        namespace: tenant-guardian
+        labels:
+          app.kubernetes.io/name: tigerbeetle
+          guardian.dev/phase: runtime
+      spec:
+        hostNetwork: true
+        serviceAccountName: tigerbeetle
+        automountServiceAccountToken: false
+        containers:
+          - name: tigerbeetle
+            image: ghcr.io/tigerbeetle/tigerbeetle:0.17.9@sha256:48f623f9c1e9b6cc44d77ca93634595ae99cce3246ded418763eb1a62eee45e9
+            args: [format, --cluster=0]
+    expect: deny

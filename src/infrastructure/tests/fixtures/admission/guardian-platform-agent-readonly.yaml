@@ -1,0 +1,126 @@
+# The platform-agent write allowlist is failurePolicy Fail: a carve-out that
+# quietly widens hands the agent identity new writes, one that narrows locks
+# it out. These cases pin the boundary from both sides.
+policy: guardian-platform-agent-readonly
+cases:
+  - name: delete pod
+    operation: DELETE
+    resource: {group: "", version: v1, resource: pods}
+    objectName: some-pod
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: allow
+  - name: delete job
+    operation: DELETE
+    resource: {group: batch, version: v1, resource: jobs}
+    objectName: some-job
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: allow
+  - name: pod port-forward
+    operation: CONNECT
+    resource: {group: "", version: v1, resource: pods}
+    subResource: portforward
+    objectName: some-pod
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: allow
+  - name: agent matched by group not username
+    operation: DELETE
+    resource: {group: "", version: v1, resource: pods}
+    objectName: some-pod
+    user: {username: "keycloak:cozy#other", groups: ["guardian-platform-agent", "system:authenticated"]}
+    expect: allow
+  - name: mint secrets-writer token
+    operation: CREATE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    subResource: token
+    objectName: secrets-writer
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: allow
+  - name: mint secrets-reader token
+    operation: CREATE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    subResource: token
+    objectName: secrets-reader
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: deny
+  - name: mint default serviceaccount token
+    operation: CREATE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    subResource: token
+    objectName: default
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: deny
+  - name: mint token without a name
+    operation: CREATE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    subResource: token
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: deny
+  - name: create serviceaccount named secrets-writer
+    operation: CREATE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    objectName: secrets-writer
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: deny
+  - name: update serviceaccounts token subresource
+    operation: UPDATE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    subResource: token
+    objectName: secrets-writer
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: deny
+  - name: delete serviceaccounts token subresource
+    operation: DELETE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    subResource: token
+    objectName: secrets-writer
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: deny
+  - name: create secret
+    operation: CREATE
+    resource: {group: "", version: v1, resource: secrets}
+    objectName: stolen
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: deny
+  - name: create pod via generateName
+    operation: CREATE
+    resource: {group: "", version: v1, resource: pods}
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: deny
+  - name: create pod eviction
+    operation: CREATE
+    resource: {group: "", version: v1, resource: pods}
+    subResource: eviction
+    objectName: some-pod
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: deny
+  - name: update pod
+    operation: UPDATE
+    resource: {group: "", version: v1, resource: pods}
+    objectName: some-pod
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: deny
+  - name: pod exec
+    operation: CONNECT
+    resource: {group: "", version: v1, resource: pods}
+    subResource: exec
+    objectName: some-pod
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: deny
+  - name: delete deployment
+    operation: DELETE
+    resource: {group: apps, version: v1, resource: deployments}
+    objectName: some-deployment
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: deny
+  - name: human admin is not matched
+    operation: DELETE
+    resource: {group: "", version: v1, resource: pods}
+    objectName: some-pod
+    user: {username: "keycloak:cozy#platform-admin", groups: ["cozystack-cluster-admin", "system:authenticated"]}
+    expect: no-match
+  - name: controller service account is not matched
+    operation: DELETE
+    resource: {group: "", version: v1, resource: pods}
+    objectName: some-pod
+    user: {username: "system:serviceaccount:tenant-root:flux", groups: ["system:serviceaccounts", "system:authenticated"]}
+    expect: no-match
