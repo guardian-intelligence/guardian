@@ -38,7 +38,7 @@ spec:
             - --insecure=false
             - --ca-path=/tls/ca.crt
             - --token=$(SPICEDB_TOKEN)
-            - --qps=1000
+            - --qps=2000
             - --step-timeout=2s
             - --log-format=json
           env:
@@ -60,11 +60,11 @@ spec:
             failureThreshold: 12
           resources:
             requests:
-              cpu: 100m
-              memory: 64Mi
+              cpu: 500m
+              memory: 512Mi
             limits:
-              cpu: "1"
-              memory: 256Mi
+              cpu: "2"
+              memory: 2Gi
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
