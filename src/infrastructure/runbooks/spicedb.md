@@ -170,9 +170,9 @@ sides know. Product callers switch slots before the old slot changes:
 
 1. confirm every caller is using slot B and the server order is B, A;
 2. change slot A's ExternalSecret `guardian.dev/rotation` audit identity and
-   `force-sync` annotation, plus the SpiceDB qualification rollout annotation,
-   in the same PR; the Password generator's length and character policy remain
-   unchanged;
+   `force-sync` annotation in the same PR; the Password generator's length and
+   character policy remain unchanged, and the secret reloader owns the single
+   server rollout;
 3. after Flux convergence, prove the new A and unchanged B credentials work;
 4. move callers to A and change the server order to A, B through the same
    reviewed rollout;
