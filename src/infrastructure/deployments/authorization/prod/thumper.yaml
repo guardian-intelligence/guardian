@@ -152,7 +152,7 @@ spec:
             guardian_stage: prod
           annotations:
             summary: "Thumper is observing SpiceDB request failures"
-            description: "The authorization qualification load has sustained non-OK gRPC responses."
+            description: "The raw no-retry authorization canary has observed non-OK gRPC responses. This alert is expected during a declared SpiceDB rolling replacement and must resolve after the rollout; outside that window it is an incident."
         - alert: SpiceDBThumperLatencyHigh
           expr: >-
             histogram_quantile(0.99,
