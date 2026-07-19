@@ -225,6 +225,7 @@ func TestSpiceDBSchemaAndLiveAcceptanceGate(t *testing.T) {
 	job := readText(t, jobPath)
 	for _, want := range []string{
 		"name: spicedb-schema-v4",
+		"kustomize.toolkit.fluxcd.io/force: Enabled",
 		"kustomize.toolkit.fluxcd.io/substitute: disabled",
 		"ghcr.io/authzed/zed@sha256:339db064131cfd75c9385938f16fa445bcfa4a82bd9eed73402fd10c00ea374c",
 		"--hostname-override=spicedb.tenant-guardian-prod.svc.cozy.local",

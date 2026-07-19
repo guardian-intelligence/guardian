@@ -4,6 +4,7 @@ metadata:
   name: spicedb-schema-v4
   namespace: tenant-guardian-prod
   annotations:
+    kustomize.toolkit.fluxcd.io/force: Enabled
     kustomize.toolkit.fluxcd.io/substitute: disabled
   labels:
     app.kubernetes.io/name: spicedb-schema
