@@ -1,4 +1,5 @@
 load("@rules_python//python:defs.bzl", "py_test")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 exports_files(
     [
@@ -6,6 +7,19 @@ exports_files(
         "spicedb-qualify",
     ],
     visibility = ["//visibility:public"],
+)
+
+sh_test(
+    name = "spicedb_qualify_classifier_test",
+    srcs = ["spicedb-qualify-classifier-test"],
+    args = [
+        "$(location spicedb-qualify)",
+        "$(location testdata/spicedb-thumper-mutation-uncertainty.log)",
+    ],
+    data = [
+        "spicedb-qualify",
+        "testdata/spicedb-thumper-mutation-uncertainty.log",
+    ],
 )
 
 py_test(

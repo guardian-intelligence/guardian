@@ -115,6 +115,13 @@ connections, and saturation in the rollout PR. An unexpected allow or deny is
 an unconditional failure. A transport error during a deliberate failover is
 reported separately and does not hide an incorrect decision.
 
+The scenario writes and deletes a relationship around its permission checks.
+If either mutation returns an error, the server-side outcome is unknown and
+the dependent check is classified as indeterminate rather than correct or
+incorrect. The qualifier preserves the raw mismatch count, reports these
+indeterminate outcomes separately, and fails on every mismatch whose
+prerequisite mutation succeeded.
+
 For a disruptive rehearsal, start a longer load command in one terminal and
 merge exactly one drill change from another. Keep the traffic running from
 before the new revision is observed until the cluster has returned to steady

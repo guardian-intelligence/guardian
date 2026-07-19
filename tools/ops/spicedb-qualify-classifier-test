@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+qualifier="$1"
+fixture="$2"
+
+actual="$("${qualifier}" classify-log "${fixture}")"
+expected=$'step_errors=8\nrequest_errors=3\nwrong_permissionship_events=5\nindeterminate_decisions=2\nincorrect_decisions=3'
+
+if [[ "${actual}" != "${expected}" ]]; then
+  printf 'unexpected classification\nexpected:\n%s\nactual:\n%s\n' "${expected}" "${actual}" >&2
+  exit 1
+fi

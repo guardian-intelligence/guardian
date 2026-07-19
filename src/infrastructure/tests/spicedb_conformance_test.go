@@ -340,6 +340,8 @@ func TestSpiceDBOperationalQualificationIsGitOpsOnly(t *testing.T) {
 		`bazelisk build "@multitool//tools/${name}"`,
 		`jq -er --arg key "${key}" '.data[$key]'`,
 		`logs --follow deployment/spicedb-thumper`,
+		`indeterminate_decisions`,
+		`wrong_permissionship_events`,
 		`fail "Thumper log stream exited before the observation completed"`,
 	} {
 		assertTextContains(t, qualify, want, qualifyPath)

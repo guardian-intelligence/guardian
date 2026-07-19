@@ -20,6 +20,7 @@ Usage:
   tools/ops/spicedb-qualify placement
   tools/ops/spicedb-qualify verify
   tools/ops/spicedb-qualify load [duration] [qps] [evidence-directory]
+  tools/ops/spicedb-qualify classify-log <thumper-log>
 
 placement
   Proves namespace-scoped operator RBAC and three-node placement for SpiceDB
@@ -36,6 +37,11 @@ load
   duration (default 10m) and expected QPS (default 50), while writing logs,
   metric deltas, and latency quantiles to the evidence directory. Change QPS
   in Git; this command refuses to measure a different deployed value.
+
+classify-log
+  Classifies Thumper permission mismatches. A check after an unsuccessful
+  relationship mutation has an indeterminate prerequisite and is not an
+  incorrect authorization decision.
 
 This tool only reads Kubernetes objects and opens a port-forward. All rollout,
 failover, rotation, upgrade, restore, and alert-drill changes belong in Git and
@@ -226,6 +232,67 @@ verify() {
   printf 'Positive/negative decisions, TLS verification, and invalid-token rejection passed.\n'
 }
 
+classify_thumper_outcomes() {
+  local log_path="$1"
+  [[ -f "${log_path}" ]] || fail "Thumper log does not exist: ${log_path}"
+  require_command jq
+
+  jq -r '
+    select(
+      .message == "executing script step" or
+      .message == "error calling script step"
+    ) |
+    [
+      (.worker | tostring),
+      (.step | tostring),
+      .op,
+      .message,
+      (.error // "")
+    ] |
+    @tsv
+  ' "${log_path}" |
+    awk -F '\t' '
+      $4 == "executing script step" {
+        if ($2 == "0") {
+          write_failed[$1] = 0
+        } else if ($2 == "3") {
+          delete_failed[$1] = 0
+        }
+        next
+      }
+
+      $4 == "error calling script step" {
+        step_errors++
+
+        if (index($5, "wrong permissionship") > 0) {
+          wrong_permissionship_events++
+          if (($2 == "1" && write_failed[$1]) ||
+              ($2 == "4" && delete_failed[$1])) {
+            indeterminate_decisions++
+          } else {
+            incorrect_decisions++
+          }
+          next
+        }
+
+        request_errors++
+        if ($2 == "0" && $3 == "WriteRelationships") {
+          write_failed[$1] = 1
+        } else if ($2 == "3" && $3 == "DeleteRelationships") {
+          delete_failed[$1] = 1
+        }
+      }
+
+      END {
+        printf "step_errors=%d\n", step_errors
+        printf "request_errors=%d\n", request_errors
+        printf "wrong_permissionship_events=%d\n", wrong_permissionship_events
+        printf "indeterminate_decisions=%d\n", indeterminate_decisions
+        printf "incorrect_decisions=%d\n", incorrect_decisions
+      }
+    '
+}
+
 load() {
   local duration="${1:-10m}"
   local qps="${2:-50}"
@@ -288,14 +355,22 @@ load() {
   wait "${log_stream_pid}" 2>/dev/null || true
   log_stream_pid=""
 
+  local classification
   local incorrect_decisions
+  local indeterminate_decisions
+  local request_errors
   local step_errors
+  local wrong_permissionship_events
   local completed_requests
   local p50
   local p95
   local p99
-  incorrect_decisions="$(grep -c 'wrong permissionship' "${thumper_log}" || true)"
-  step_errors="$(grep -c 'error calling script step' "${thumper_log}" || true)"
+  classification="$(classify_thumper_outcomes "${thumper_log}")"
+  step_errors="$(sed -n 's/^step_errors=//p' <<<"${classification}")"
+  request_errors="$(sed -n 's/^request_errors=//p' <<<"${classification}")"
+  wrong_permissionship_events="$(sed -n 's/^wrong_permissionship_events=//p' <<<"${classification}")"
+  indeterminate_decisions="$(sed -n 's/^indeterminate_decisions=//p' <<<"${classification}")"
+  incorrect_decisions="$(sed -n 's/^incorrect_decisions=//p' <<<"${classification}")"
   completed_requests="$(
     awk '
       FNR == NR {
@@ -378,6 +453,9 @@ load() {
     printf 'check_permission_p95_seconds=%s\n' "${p95}"
     printf 'check_permission_p99_seconds=%s\n' "${p99}"
     printf 'step_errors=%s\n' "${step_errors}"
+    printf 'request_errors=%s\n' "${request_errors}"
+    printf 'wrong_permissionship_events=%s\n' "${wrong_permissionship_events}"
+    printf 'indeterminate_decisions=%s\n' "${indeterminate_decisions}"
     printf 'incorrect_decisions=%s\n' "${incorrect_decisions}"
   } | tee "${summary_path}"
 
@@ -399,6 +477,11 @@ case "${1:---help}" in
   load)
     shift
     load "$@"
+    ;;
+  classify-log)
+    shift
+    [[ "$#" == "1" ]] || fail "classify-log requires exactly one Thumper log path"
+    classify_thumper_outcomes "$1"
     ;;
   -h | --help)
     usage
