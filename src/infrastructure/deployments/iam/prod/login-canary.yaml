@@ -35,7 +35,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: browser
-              image: ghcr.io/guardian-intelligence/login-canary@sha256:82edb2afdb41de399d936a25d6b18cf9406a5aee836a4f6723d46eaf07c24cc5
+              image: ghcr.io/guardian-intelligence/login-canary@sha256:7471eafc7d0eb955ebee6f9b7512e8fffcd0dc0a04f5bf5a62bbae28e24a9dc1
               imagePullPolicy: IfNotPresent
               env:
                 - name: POSTFLIGHT_URL
