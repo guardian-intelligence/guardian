@@ -3,6 +3,8 @@ kind: Deployment
 metadata:
   name: company-site
   namespace: tenant-guardian-prod
+  annotations:
+    reloader.stakater.com/auto: "true"
   labels:
     app.kubernetes.io/name: company-site
     app.kubernetes.io/part-of: guardian

@@ -163,7 +163,7 @@ metadata:
   name: tenant-guardian-prod-allow-root-ingress-keycloak
   labels:
     app.kubernetes.io/part-of: guardian
-    guardian.dev/product: postflight
+    app.kubernetes.io/component: iam
 spec:
   endpointSelector:
     matchExpressions:

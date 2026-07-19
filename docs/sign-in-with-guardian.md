@@ -71,6 +71,19 @@ for the browser procedures.
    repository action additionally calls the Authorization API with the
    Guardian subject and typed resource permission.
 
+## Realm reconciliation
+
+An empty database is initialized from the checked-in Guardian realm import.
+Steady state is enforced through the Keycloak Admin REST API by the
+`guardian-realm-reconciler` service account inside that realm. Its roles are
+limited to realm settings, clients, and identity providers; it cannot manage
+users, delete other realms, or administer the master realm.
+
+The reconciler and confidential product clients use Keycloak Vault SPI
+references backed by mounted Kubernetes Secrets. Their usable credentials do
+not enter the Keycloak database or its backups. Temporary bootstrap
+administrators are recovery artifacts, not runtime dependencies.
+
 ## Canary
 
 The production canary is a fresh Chromium profile that performs the same
@@ -81,5 +94,10 @@ session, sign out, and verify the local session is gone. It does not use a
 direct grant or Keycloak admin API and it does not simulate a broker callback.
 
 The machine account is permanent and has no organization privileges. Its
-password and TOTP seed live only in the production OpenBao scope. The staging
-canary uses a separate GitHub organization and the staging registrations.
+password and TOTP seed live only in the production OpenBao scope. Its first
+run completes Keycloak's broker-profile enrollment; an email collision or
+account-linking prompt fails the canary instead of linking automatically.
+
+The separate `digital-guardian-software` organization exercises the staging
+Postflight GitHub App and CI runner path. It is not part of the customer-login
+canary and grants the login machine account no organization access.

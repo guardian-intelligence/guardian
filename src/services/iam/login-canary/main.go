@@ -36,6 +36,26 @@ type sessionResponse struct {
 	} `json:"user"`
 }
 
+type oauthPageState struct {
+	Host             string `json:"host"`
+	Path             string `json:"path"`
+	HasTOTP          bool   `json:"hasTOTP"`
+	CanGrant         bool   `json:"canGrant"`
+	HasReviewProfile bool   `json:"hasReviewProfile"`
+	HasCollision     bool   `json:"hasCollision"`
+	HasError         bool   `json:"hasError"`
+}
+
+type oauthPageAction int
+
+const (
+	oauthWait oauthPageAction = iota
+	oauthComplete
+	oauthSubmitTOTP
+	oauthGrant
+	oauthReviewProfile
+)
+
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	cfg, err := loadConfig()
@@ -203,34 +223,46 @@ func selectGitHubProvider(ctx context.Context) error {
 }
 
 func finishGitHubAuthorization(ctx context.Context, cfg config) error {
+	postflightURL, err := url.Parse(cfg.PageURL)
+	if err != nil {
+		return fmt.Errorf("parse Postflight URL: %w", err)
+	}
 	deadline := time.Now().Add(75 * time.Second)
 	totpSent := false
 	for time.Now().Before(deadline) {
-		var state struct {
-			URL      string `json:"url"`
-			HasTOTP  bool   `json:"hasTOTP"`
-			CanGrant bool   `json:"canGrant"`
-			HasError bool   `json:"hasError"`
-		}
+		var state oauthPageState
 		if err := chromedp.Run(ctx, chromedp.Evaluate(
 			`(() => ({
-				url: location.href,
+				host: location.hostname,
+				path: location.pathname,
 				hasTOTP: Boolean(document.querySelector("input[name=otp], input[name=app_otp], input#app_totp")),
 				canGrant: Boolean(document.querySelector("button[name=authorize], input[name=authorize], button[value=authorize]")),
-				hasError: Boolean(document.querySelector(".flash-error, [data-test-selector=auth-error]"))
+				hasReviewProfile: Boolean(document.querySelector("form#kc-idp-review-profile-form")),
+				hasCollision: Boolean(document.querySelector("#linkAccount, #instruction1")),
+				hasError: Boolean(document.querySelector(".flash-error, [data-test-selector=auth-error], #kc-error-message, .pf-m-danger"))
 			}))()`,
 			&state,
 		)); err != nil {
 			return fmt.Errorf("inspect GitHub authorization: %w", err)
 		}
-		if strings.HasPrefix(state.URL, cfg.PageURL) {
+		action, err := classifyOAuthPage(state, postflightURL.Hostname())
+		if err != nil {
+			return err
+		}
+		switch action {
+		case oauthComplete:
 			return nil
-		}
-		if state.HasError {
-			return errors.New("GitHub rejected the canary login")
-		}
-		switch {
-		case state.HasTOTP && !totpSent:
+		case oauthSubmitTOTP:
+			if totpSent {
+				return errors.New("GitHub requested TOTP more than once")
+			}
+			if delay := totpBoundaryDelay(time.Now()); delay > 0 {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(delay):
+				}
+			}
 			code, err := totp(cfg.GitHubTOTPSeed, time.Now())
 			if err != nil {
 				return err
@@ -246,14 +278,21 @@ func finishGitHubAuthorization(ctx context.Context, cfg config) error {
 				return fmt.Errorf("GitHub TOTP: %w", err)
 			}
 			totpSent = true
-		case state.CanGrant:
+		case oauthGrant:
 			if err := chromedp.Run(ctx, chromedp.Click(
 				"button[name=authorize], input[name=authorize], button[value=authorize]",
 				chromedp.ByQuery,
 			)); err != nil {
 				return fmt.Errorf("GitHub OAuth grant: %w", err)
 			}
-		default:
+		case oauthReviewProfile:
+			if err := chromedp.Run(ctx, chromedp.Click(
+				"form#kc-idp-review-profile-form input[type=submit], form#kc-idp-review-profile-form button[type=submit]",
+				chromedp.ByQuery,
+			)); err != nil {
+				return fmt.Errorf("submit Guardian first-login profile: %w", err)
+			}
+		case oauthWait:
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -262,6 +301,47 @@ func finishGitHubAuthorization(ctx context.Context, cfg config) error {
 		}
 	}
 	return errors.New("GitHub OAuth flow did not return to Postflight")
+}
+
+func classifyOAuthPage(state oauthPageState, postflightHost string) (oauthPageAction, error) {
+	switch state.Host {
+	case postflightHost:
+		if strings.HasPrefix(state.Path, "/postflight") {
+			return oauthComplete, nil
+		}
+		if state.HasCollision {
+			return oauthWait, errors.New("Guardian refused automatic linking for an existing account")
+		}
+		if state.HasError {
+			return oauthWait, errors.New("Guardian rejected the brokered login")
+		}
+		if state.HasReviewProfile {
+			return oauthReviewProfile, nil
+		}
+		return oauthWait, fmt.Errorf("unexpected Guardian login page %q", state.Path)
+	case "github.com":
+		if state.HasError {
+			return oauthWait, errors.New("GitHub rejected the canary login")
+		}
+		if state.HasTOTP {
+			return oauthSubmitTOTP, nil
+		}
+		if state.CanGrant {
+			return oauthGrant, nil
+		}
+		return oauthWait, nil
+	default:
+		return oauthWait, fmt.Errorf("OAuth flow reached unexpected host %q", state.Host)
+	}
+}
+
+func totpBoundaryDelay(now time.Time) time.Duration {
+	const guard = 5 * time.Second
+	remaining := 30*time.Second - time.Duration(now.UnixNano()%int64(30*time.Second))
+	if remaining <= guard {
+		return remaining + time.Second
+	}
+	return 0
 }
 
 func totp(seed string, now time.Time) (string, error) {

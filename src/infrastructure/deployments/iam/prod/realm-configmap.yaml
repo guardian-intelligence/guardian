@@ -69,8 +69,150 @@ data:
           "attributes": {
             "oauth2.device.authorization.grant.enabled": "true"
           }
+        },
+        {
+          "clientId": "guardian-realm-reconciler",
+          "name": "Guardian realm reconciler",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": false,
+          "clientAuthenticatorType": "client-secret",
+          "secret": "${REALM_RECONCILER_CLIENT_SECRET}",
+          "standardFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "implicitFlowEnabled": false,
+          "serviceAccountsEnabled": true,
+          "fullScopeAllowed": true,
+          "redirectUris": [],
+          "webOrigins": []
+        }
+      ],
+      "users": [
+        {
+          "username": "service-account-guardian-realm-reconciler",
+          "enabled": true,
+          "serviceAccountClientId": "guardian-realm-reconciler",
+          "clientRoles": {
+            "realm-management": [
+              "manage-realm",
+              "view-realm",
+              "manage-clients",
+              "view-clients",
+              "query-clients",
+              "manage-identity-providers",
+              "view-identity-providers"
+            ]
+          }
         }
       ]
+    }
+---
+# Startup import creates the complete realm on an empty database. This
+# settings-only document is the steady-state Admin REST payload because a
+# realm update does not reconcile its nested clients or users.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-realm-settings
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  guardianintelligence.org.json: |
+    {
+      "realm": "guardianintelligence.org",
+      "displayName": "Guardian",
+      "enabled": true,
+      "sslRequired": "external",
+      "registrationAllowed": false,
+      "resetPasswordAllowed": false,
+      "rememberMe": false,
+      "loginWithEmailAllowed": false,
+      "duplicateEmailsAllowed": false,
+      "bruteForceProtected": true,
+      "permanentLockout": false,
+      "failureFactor": 10,
+      "waitIncrementSeconds": 60,
+      "maxFailureWaitSeconds": 900,
+      "accessTokenLifespan": 300,
+      "ssoSessionIdleTimeout": 1800,
+      "ssoSessionMaxLifespan": 36000,
+      "revokeRefreshToken": true,
+      "refreshTokenMaxReuse": 0
+    }
+---
+# Clients are reconciled independently because Keycloak's realm update API
+# does not apply nested client representations. Confidential client secrets
+# are Vault SPI references, so database backups contain no usable secret.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-clients
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  postflight-web.json: |
+    {
+      "clientId": "postflight-web",
+      "name": "Postflight web",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${vault.postflight-client-secret}",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "https://guardianintelligence.org/postflight/auth/callback"
+      ],
+      "webOrigins": [],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "https://guardianintelligence.org/postflight"
+      }
+    }
+  guardian-cli.json: |
+    {
+      "clientId": "guardian-cli",
+      "name": "Guardian CLI",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "attributes": {
+        "oauth2.device.authorization.grant.enabled": "true"
+      }
+    }
+  guardian-realm-reconciler.json: |
+    {
+      "clientId": "guardian-realm-reconciler",
+      "name": "Guardian realm reconciler",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${vault.realm-reconciler-client-secret}",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": true,
+      "redirectUris": [],
+      "webOrigins": []
     }
 ---
 # One file per broker makes provider onboarding a data change. The first

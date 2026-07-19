@@ -408,9 +408,7 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 	// settings id, homepage/callback URL, realm, idp alias, client ID) is
 	// not sensitive and is checked into
 	// src/infrastructure/deployments/iam/github-oauth-apps.yaml instead.
-	// The bootstrap administrator lives in custody so a DR re-seed restores
-	// a value consistent with the stage's surviving Keycloak database. The
-	// browser canary credentials belong to a dedicated GitHub machine account.
+	// Browser canary credentials belong to a dedicated GitHub machine account.
 	for _, stage := range []string{"staging", "prod"} {
 		prefix := strings.ToUpper(stage)
 		base := fmt.Sprintf("kv/data/guardian/guardian-mgmt/tenant-guardian-%s/keycloak", stage)
@@ -419,20 +417,6 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 				APIPath: base + "/github-oauth",
 				Data: map[string]string{
 					"GITHUB_CLIENT_SECRET": secret,
-				},
-			})
-		}
-		username := strings.TrimSpace(env[prefix+"_KEYCLOAK_ADMIN_BOOTSTRAP_USERNAME"])
-		password := strings.TrimSpace(env[prefix+"_KEYCLOAK_ADMIN_BOOTSTRAP_PASSWORD"])
-		if username != "" || password != "" {
-			if username == "" || password == "" {
-				return nil, fmt.Errorf("%s_KEYCLOAK_ADMIN_BOOTSTRAP_USERNAME and %s_KEYCLOAK_ADMIN_BOOTSTRAP_PASSWORD must be set together", prefix, prefix)
-			}
-			writes = append(writes, secretWrite{
-				APIPath: base + "/admin-bootstrap",
-				Data: map[string]string{
-					"username": username,
-					"password": password,
 				},
 			})
 		}

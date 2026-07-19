@@ -7,7 +7,6 @@ metadata:
     app.kubernetes.io/name: keycloak-realm-reconciler
     app.kubernetes.io/part-of: guardian
     app.kubernetes.io/component: iam
-    guardian.dev/product: postflight
     guardian.dev/stage: prod
   annotations:
     kustomize.toolkit.fluxcd.io/force: Enabled
@@ -18,12 +17,11 @@ spec:
   template:
     metadata:
       annotations:
-        checksum/realm-config: 888e23af74742457c3aa2a36f90c80059abbf8c43c80ca3ce6a20aeaef9998b7
+        checksum/realm-config: 36540236f67384b0b5a8c5a214766864ec45606e57e1bf7340a1757964336d48
       labels:
         app.kubernetes.io/name: keycloak-realm-reconciler
         app.kubernetes.io/part-of: guardian
         app.kubernetes.io/component: iam
-        guardian.dev/product: postflight
         guardian.dev/stage: prod
     spec:
       restartPolicy: OnFailure
@@ -45,19 +43,32 @@ spec:
               config=/tmp/kcadm.config
               server=http://keycloak.tenant-guardian-prod.svc
               realm=guardianintelligence.org
+              trap 'rm -f "$config"' EXIT
 
               "$kcadm" config credentials \
                 --config "$config" \
                 --server "$server" \
-                --realm master \
-                --user "$KC_ADMIN_USERNAME"
+                --realm "$realm" \
+                --client guardian-realm-reconciler
 
               "$kcadm" update "realms/$realm" \
                 --config "$config" \
-                --set enabled=true \
-                --set registrationAllowed=false \
-                --set loginWithEmailAllowed=false \
-                --set duplicateEmailsAllowed=false
+                -f "/realm/$realm.json"
+
+              for client in /clients/*.json; do
+                client_id="${client##*/}"
+                client_id="${client_id%.json}"
+                internal_id="$("$kcadm" get clients \
+                  --config "$config" --realm "$realm" \
+                  -q "clientId=$client_id" --fields id --format csv --noquotes)"
+                if test -n "$internal_id"; then
+                  "$kcadm" update "clients/$internal_id" \
+                    --config "$config" --realm "$realm" -f "$client"
+                else
+                  "$kcadm" create clients \
+                    --config "$config" --realm "$realm" -f "$client"
+                fi
+              done
 
               desired_providers=""
               for provider in /providers/*.json; do
@@ -83,37 +94,11 @@ spec:
                     --config "$config" --realm "$realm" ;;
                 esac
               done
-
-              client_id="$("$kcadm" get clients \
-                --config "$config" --realm "$realm" \
-                -q clientId=postflight-web --fields id --format csv --noquotes)"
-              test -n "$client_id"
-              "$kcadm" update "clients/$client_id" \
-                --config "$config" --realm "$realm" \
-                --set secret="$POSTFLIGHT_CLIENT_SECRET"
-
-              for configured_realm in $("$kcadm" get realms \
-                  --config "$config" --fields realm --format csv --noquotes); do
-                case "$configured_realm" in
-                  master|guardianintelligence.org) ;;
-                  *) "$kcadm" delete "realms/$configured_realm" --config "$config" ;;
-                esac
-              done
           env:
-            - name: KC_ADMIN_USERNAME
+            - name: KC_CLI_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: keycloak-admin-bootstrap
-                  key: username
-            - name: KC_CLI_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: keycloak-admin-bootstrap
-                  key: password
-            - name: POSTFLIGHT_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: postflight-oidc-client
+                  name: keycloak-realm-reconciler-client
                   key: password
           resources:
             requests:
@@ -130,10 +115,22 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: realm
+              mountPath: /realm
+              readOnly: true
+            - name: clients
+              mountPath: /clients
+              readOnly: true
             - name: providers
               mountPath: /providers
               readOnly: true
       volumes:
+        - name: realm
+          configMap:
+            name: keycloak-realm-settings
+        - name: clients
+          configMap:
+            name: keycloak-clients
         - name: providers
           configMap:
             name: keycloak-identity-providers

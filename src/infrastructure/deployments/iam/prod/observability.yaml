@@ -15,7 +15,6 @@ spec:
   type: ClusterIP
   selector:
     app.kubernetes.io/component: iam
-    guardian.dev/product: postflight
   ports:
     - name: management
       port: 9000
