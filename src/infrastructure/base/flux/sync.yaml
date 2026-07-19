@@ -432,10 +432,6 @@ spec:
       kind: Job
       name: spicedb-restore-marker-v2-20260718
       namespace: tenant-guardian-prod
-    - apiVersion: helm.toolkit.fluxcd.io/v2
-      kind: HelmRelease
-      name: postgres-spicedb-restore-20260718
-      namespace: tenant-guardian-prod
     - apiVersion: cert-manager.io/v1
       kind: Certificate
       name: spicedb-ca
