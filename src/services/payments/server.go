@@ -34,6 +34,7 @@ type paymentServer struct {
 	queries          *paymentdb.Queries
 	stripe           stripeRail
 	verifier         tokenVerifier
+	authorizer       authorizationChecker
 	metrics          *paymentMetrics
 	databaseReady    func(context.Context) error
 	tigerBeetleReady func() error
@@ -128,8 +129,9 @@ func (s *paymentServer) handleCanaryPage(w http.ResponseWriter, _ *http.Request)
 }
 
 type createCheckoutBody struct {
-	AmountCents int64  `json:"amount_cents"`
-	Currency    string `json:"currency"`
+	OrganizationID string `json:"organization_id"`
+	AmountCents    int64  `json:"amount_cents"`
+	Currency       string `json:"currency"`
 }
 
 func (s *paymentServer) handleCustomerCheckout(w http.ResponseWriter, r *http.Request) {
@@ -155,9 +157,27 @@ func (s *paymentServer) handleCustomerCheckout(w http.ResponseWriter, r *http.Re
 		http.Error(w, "invalid amount or currency", http.StatusBadRequest)
 		return
 	}
+	if strings.TrimSpace(body.OrganizationID) == "" {
+		http.Error(w, "organization_id is required", http.StatusBadRequest)
+		return
+	}
+	allowed, err := s.authorizer.CheckOrganization(
+		r.Context(),
+		identity.Subject,
+		body.OrganizationID,
+		"manage_billing",
+	)
+	if err != nil {
+		http.Error(w, "authorization unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if !allowed {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
 	result, err := s.createCheckout(
 		r.Context(),
-		identity.TenantID,
+		body.OrganizationID,
 		body.AmountCents,
 		"customer",
 	)
@@ -180,12 +200,26 @@ func (s *paymentServer) handleCustomerOrder(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	order, err := s.queries.GetOrder(r.Context(), r.PathValue("id"))
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && order.TenantID != identity.TenantID) {
+	if errors.Is(err, pgx.ErrNoRows) {
 		http.NotFound(w, r)
 		return
 	}
 	if err != nil {
 		http.Error(w, "order unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	allowed, err := s.authorizer.CheckOrganization(
+		r.Context(),
+		identity.Subject,
+		order.OrganizationID,
+		"view",
+	)
+	if err != nil {
+		http.Error(w, "authorization unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if !allowed {
+		http.NotFound(w, r)
 		return
 	}
 	writeOrder(w, order)
@@ -198,7 +232,7 @@ type checkoutResult struct {
 
 func (s *paymentServer) createCheckout(
 	ctx context.Context,
-	tenantID string,
+	organizationID string,
 	amount int64,
 	lane string,
 ) (checkoutResult, error) {
@@ -211,7 +245,7 @@ func (s *paymentServer) createCheckout(
 	}
 	order, err := s.queries.CreateOrder(ctx, paymentdb.CreateOrderParams{
 		ID:                orderID,
-		TenantID:          tenantID,
+		OrganizationID:    organizationID,
 		ProviderAccountID: s.cfg.StripeAccountID,
 		Currency:          "usd",
 		AmountCents:       amount,
@@ -375,7 +409,7 @@ func (s *paymentServer) handlePaymentCanary(
 	orderID := tb.ID().String()
 	order, err := s.queries.CreateOrder(ctx, paymentdb.CreateOrderParams{
 		ID:                orderID,
-		TenantID:          "synthetic-canary",
+		OrganizationID:    "synthetic-canary",
 		ProviderAccountID: s.cfg.StripeAccountID,
 		Currency:          "usd",
 		AmountCents:       s.cfg.CanaryAmountCents,

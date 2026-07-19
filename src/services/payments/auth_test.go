@@ -1,57 +1,135 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
 
-func TestOrganizationID(t *testing.T) {
+	"google.golang.org/protobuf/proto"
+
+	authorizationv1 "github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/authorization/v1"
+)
+
+type staticTokenVerifier struct {
+	identity customerIdentity
+	err      error
+}
+
+func (v staticTokenVerifier) Verify(context.Context, string) (customerIdentity, error) {
+	return v.identity, v.err
+}
+
+type staticAuthorizationChecker struct {
+	allowed bool
+	err     error
+}
+
+func (c staticAuthorizationChecker) CheckOrganization(
+	context.Context,
+	string,
+	string,
+	string,
+) (bool, error) {
+	return c.allowed, c.err
+}
+
+func TestAuthorizationCheckerUsesGuardianSubject(t *testing.T) {
 	t.Parallel()
+	var body string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Errorf("Authorization = %q", got)
+		}
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+		}
+		body = string(raw)
+		response, err := proto.Marshal(&authorizationv1.CheckResponse{
+			Allowed:        true,
+			CheckedAtToken: "revision",
+		})
+		if err != nil {
+			t.Error(err)
+		}
+		w.Header().Set("Content-Type", "application/proto")
+		_, _ = w.Write(response)
+	}))
+	defer server.Close()
 
+	allowed, err := newAuthorizationChecker(server.URL, "test-token").CheckOrganization(
+		t.Context(),
+		"guardian-subject",
+		"guardian",
+		"manage_billing",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !allowed {
+		t.Fatal("authorization decision was not allowed")
+	}
+	for _, expected := range []string{"guardian-subject", "guardian", "manage_billing"} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("request body %q lacks %q", body, expected)
+		}
+	}
+}
+
+func TestCustomerCheckoutFailsClosedOnAuthorizationDecision(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
-		name          string
-		organizations map[string]organizationDetails
-		want          string
-		wantError     bool
+		name       string
+		checker    staticAuthorizationChecker
+		wantStatus int
 	}{
 		{
-			name: "one active organization",
-			organizations: map[string]organizationDetails{
-				"guardian": {ID: "8ee8b358-71b7-4fd8-955a-936d26b725b1"},
-			},
-			want: "8ee8b358-71b7-4fd8-955a-936d26b725b1",
-		},
-		{name: "missing organization", wantError: true},
-		{
-			name: "ambiguous organizations",
-			organizations: map[string]organizationDetails{
-				"guardian": {ID: "8ee8b358-71b7-4fd8-955a-936d26b725b1"},
-				"customer": {ID: "67856697-6f4a-4517-862b-84e3bd3f49e5"},
-			},
-			wantError: true,
+			name:       "denied",
+			checker:    staticAuthorizationChecker{},
+			wantStatus: http.StatusForbidden,
 		},
 		{
-			name: "empty organization id",
-			organizations: map[string]organizationDetails{
-				"guardian": {},
+			name: "authorization unavailable",
+			checker: staticAuthorizationChecker{
+				err: errors.New("authorization unavailable"),
 			},
-			wantError: true,
+			wantStatus: http.StatusServiceUnavailable,
 		},
 	}
-
 	for _, test := range tests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := organizationID(test.organizations)
-			if test.wantError {
-				if err == nil {
-					t.Fatalf("organizationID() = %q, want error", got)
-				}
-				return
+			server := &paymentServer{
+				cfg: config{CustomerCheckoutEnabled: true},
+				verifier: staticTokenVerifier{
+					identity: customerIdentity{Subject: "guardian-subject"},
+				},
+				authorizer: test.checker,
 			}
-			if err != nil {
-				t.Fatalf("organizationID() error = %v", err)
-			}
-			if got != test.want {
-				t.Fatalf("organizationID() = %q, want %q", got, test.want)
+			request := httptest.NewRequest(
+				http.MethodPost,
+				"/api/payments/v1/checkout-sessions",
+				strings.NewReader(
+					`{"organization_id":"guardian","amount_cents":50,"currency":"usd"}`,
+				),
+			)
+			request.Header.Set("Authorization", "Bearer customer-token")
+			response := httptest.NewRecorder()
+
+			server.handleCustomerCheckout(response, request)
+
+			if response.Code != test.wantStatus {
+				t.Fatalf(
+					"status = %d, want %d; body=%q",
+					response.Code,
+					test.wantStatus,
+					response.Body.String(),
+				)
 			}
 		})
 	}

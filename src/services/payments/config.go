@@ -21,6 +21,8 @@ type config struct {
 	PublicBaseURL            *url.URL
 	OIDCIssuer               string
 	OIDCClientID             string
+	AuthorizationAPIURL      string
+	AuthorizationCheckToken  string
 	StripeAPIKey             string
 	StripeAccountID          string
 	StripeWebhookSecret      string
@@ -69,6 +71,8 @@ func loadConfig() (config, error) {
 		PublicBaseURL:            publicBase,
 		OIDCIssuer:               strings.TrimSuffix(os.Getenv("OIDC_ISSUER"), "/"),
 		OIDCClientID:             os.Getenv("OIDC_CLIENT_ID"),
+		AuthorizationAPIURL:      strings.TrimSuffix(os.Getenv("AUTHORIZATION_API_URL"), "/"),
+		AuthorizationCheckToken:  os.Getenv("AUTHORIZATION_CHECK_TOKEN"),
 		StripeAPIKey:             os.Getenv("STRIPE_API_KEY"),
 		StripeAccountID:          os.Getenv("STRIPE_ACCOUNT_ID"),
 		StripeWebhookSecret:      os.Getenv("STRIPE_WEBHOOK_SECRET"),
@@ -94,6 +98,8 @@ func loadConfig() (config, error) {
 		"DATABASE_URL":                 cfg.DatabaseURL,
 		"OIDC_ISSUER":                  cfg.OIDCIssuer,
 		"OIDC_CLIENT_ID":               cfg.OIDCClientID,
+		"AUTHORIZATION_API_URL":        cfg.AuthorizationAPIURL,
+		"AUTHORIZATION_CHECK_TOKEN":    cfg.AuthorizationCheckToken,
 		"STRIPE_API_KEY":               cfg.StripeAPIKey,
 		"STRIPE_ACCOUNT_ID":            cfg.StripeAccountID,
 		"STRIPE_WEBHOOK_SECRET":        cfg.StripeWebhookSecret,
@@ -111,6 +117,10 @@ func loadConfig() (config, error) {
 	}
 	if !strings.HasPrefix(cfg.StripeAccountID, "acct_") {
 		return config{}, errors.New("STRIPE_ACCOUNT_ID must start with acct_")
+	}
+	authorizationURL, err := url.Parse(cfg.AuthorizationAPIURL)
+	if err != nil || authorizationURL.Scheme != "http" || authorizationURL.Host == "" {
+		return config{}, errors.New("AUTHORIZATION_API_URL must be an absolute internal HTTP URL")
 	}
 	if !strings.HasPrefix(cfg.StripeWebhookSecret, "whsec_") {
 		return config{}, errors.New("STRIPE_WEBHOOK_SECRET must start with whsec_")

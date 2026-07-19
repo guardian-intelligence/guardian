@@ -942,6 +942,7 @@ spec:
   dependsOn:
     - name: guardian-products-prod
     - name: guardian-iam-prod
+    - name: guardian-authorization-prod
     - name: guardian-analytics
     - name: guardian-tigerbeetle
     - name: guardian-flagger

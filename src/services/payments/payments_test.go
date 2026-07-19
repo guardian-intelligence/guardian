@@ -202,7 +202,7 @@ func createTestOrder(t *testing.T, queries *paymentdb.Queries) paymentdb.Payment
 	t.Helper()
 	order, err := queries.CreateOrder(context.Background(), paymentdb.CreateOrderParams{
 		ID:                tb.ID().String(),
-		TenantID:          "synthetic-canary",
+		OrganizationID:    "synthetic-canary",
 		ProviderAccountID: "acct_sandbox",
 		Currency:          "usd",
 		AmountCents:       50,
@@ -410,6 +410,8 @@ func TestConfigRejectsLiveStripeKeys(t *testing.T) {
 		"PUBLIC_BASE_URL",
 		"OIDC_ISSUER",
 		"OIDC_CLIENT_ID",
+		"AUTHORIZATION_API_URL",
+		"AUTHORIZATION_CHECK_TOKEN",
 		"STRIPE_API_KEY",
 		"STRIPE_ACCOUNT_ID",
 		"STRIPE_WEBHOOK_SECRET",
@@ -430,6 +432,7 @@ func TestConfigRejectsLiveStripeKeys(t *testing.T) {
 	t.Setenv("PUBLIC_BASE_URL", "https://guardianintelligence.org")
 	t.Setenv("OIDC_ISSUER", "https://guardianintelligence.org/realms/postflight")
 	t.Setenv("OIDC_CLIENT_ID", "postflight-web")
+	t.Setenv("AUTHORIZATION_API_URL", "http://authorization-api")
 	t.Setenv("STRIPE_API_KEY", "sk_live_not_allowed")
 	t.Setenv("STRIPE_ACCOUNT_ID", "acct_sandbox")
 	t.Setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")

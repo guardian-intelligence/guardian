@@ -17,11 +17,17 @@ go_library(
         "stripe.go",
         "tracing.go",
     ],
-    embedsrcs = ["migrations/001_initial.sql"],
+    embedsrcs = [
+        "migrations/001_initial.sql",
+        "migrations/002_organization_authority.sql",
+    ],
     importpath = "github.com/guardian-intelligence/guardian/src/services/payments",
     visibility = ["//visibility:private"],
     deps = [
+        "//src/proto/gen/go/guardian/authorization/v1:authorizationv1",
+        "//src/proto/gen/go/guardian/authorization/v1/authorizationv1connect",
         "//src/services/payments/paymentdb",
+        "@com_connectrpc_connect//:connect",
         "@com_github_aws_aws_sdk_go_v2//aws:go_default_library",
         "@com_github_aws_aws_sdk_go_v2_config//:go_default_library",
         "@com_github_aws_aws_sdk_go_v2_credentials//:go_default_library",
@@ -68,6 +74,7 @@ go_test(
     embed = [":payments_lib"],
     env = {"PGTEST_INITDB": "$(rootpath //src/tools/postgres:initdb)"},
     deps = [
+        "//src/proto/gen/go/guardian/authorization/v1:authorizationv1",
         "//src/services/payments/paymentdb",
         "//src/services/postflight/controlplane/pgtest",
         "@com_github_jackc_pgx_v5//pgxpool:go_default_library",
@@ -75,6 +82,7 @@ go_test(
         "@com_github_stripe_stripe_go_v83//:go_default_library",
         "@com_github_stripe_stripe_go_v83//webhook:go_default_library",
         "@com_github_tigerbeetle_tigerbeetle_go//:go_default_library",
+        "@org_golang_google_protobuf//proto:go_default_library",
     ],
 )
 
