@@ -31,6 +31,10 @@ import { Route as WorkshopChangelogRouteImport } from './routes/_workshop/change
 import { Route as WorkshopCareersRouteImport } from './routes/_workshop/careers'
 import { Route as WorkshopDesignRouteRouteImport } from './routes/_workshop/design/route'
 import { Route as WorkshopDesignIndexRouteImport } from './routes/_workshop/design/index'
+import { Route as PostflightAuthSessionRouteImport } from './routes/postflight.auth.session'
+import { Route as PostflightAuthLogoutRouteImport } from './routes/postflight.auth.logout'
+import { Route as PostflightAuthLoginRouteImport } from './routes/postflight.auth.login'
+import { Route as PostflightAuthCallbackRouteImport } from './routes/postflight.auth.callback'
 import { Route as OgLetterSlugRouteImport } from './routes/og/letter/$slug'
 import { Route as WorkshopPostflightDocsRouteImport } from './routes/_workshop/postflight/docs'
 import { Route as WorkshopDesignWorkshopRouteImport } from './routes/_workshop/design/workshop'
@@ -146,6 +150,26 @@ const WorkshopDesignIndexRoute = WorkshopDesignIndexRouteImport.update({
   path: '/',
   getParentRoute: () => WorkshopDesignRouteRoute,
 } as any)
+const PostflightAuthSessionRoute = PostflightAuthSessionRouteImport.update({
+  id: '/auth/session',
+  path: '/auth/session',
+  getParentRoute: () => PostflightRoute,
+} as any)
+const PostflightAuthLogoutRoute = PostflightAuthLogoutRouteImport.update({
+  id: '/auth/logout',
+  path: '/auth/logout',
+  getParentRoute: () => PostflightRoute,
+} as any)
+const PostflightAuthLoginRoute = PostflightAuthLoginRouteImport.update({
+  id: '/auth/login',
+  path: '/auth/login',
+  getParentRoute: () => PostflightRoute,
+} as any)
+const PostflightAuthCallbackRoute = PostflightAuthCallbackRouteImport.update({
+  id: '/auth/callback',
+  path: '/auth/callback',
+  getParentRoute: () => PostflightRoute,
+} as any)
 const OgLetterSlugRoute = OgLetterSlugRouteImport.update({
   id: '/og/letter/$slug',
   path: '/og/letter/$slug',
@@ -179,7 +203,7 @@ export interface FileRoutesByFullPath {
   '/healthz': typeof HealthzRoute
   '/livez': typeof LivezRoute
   '/metrics': typeof MetricsRoute
-  '/postflight': typeof PostflightRoute
+  '/postflight': typeof PostflightRouteWithChildren
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/design': typeof WorkshopDesignRouteRouteWithChildren
   '/careers': typeof WorkshopCareersRoute
@@ -198,13 +222,17 @@ export interface FileRoutesByFullPath {
   '/design/workshop': typeof WorkshopDesignWorkshopRoute
   '/postflight/docs': typeof WorkshopPostflightDocsRoute
   '/og/letter/$slug': typeof OgLetterSlugRoute
+  '/postflight/auth/callback': typeof PostflightAuthCallbackRoute
+  '/postflight/auth/login': typeof PostflightAuthLoginRoute
+  '/postflight/auth/logout': typeof PostflightAuthLogoutRoute
+  '/postflight/auth/session': typeof PostflightAuthSessionRoute
   '/design/': typeof WorkshopDesignIndexRoute
 }
 export interface FileRoutesByTo {
   '/healthz': typeof HealthzRoute
   '/livez': typeof LivezRoute
   '/metrics': typeof MetricsRoute
-  '/postflight': typeof PostflightRoute
+  '/postflight': typeof PostflightRouteWithChildren
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/careers': typeof WorkshopCareersRoute
   '/changelog': typeof WorkshopChangelogRoute
@@ -223,6 +251,10 @@ export interface FileRoutesByTo {
   '/design/workshop': typeof WorkshopDesignWorkshopRoute
   '/postflight/docs': typeof WorkshopPostflightDocsRoute
   '/og/letter/$slug': typeof OgLetterSlugRoute
+  '/postflight/auth/callback': typeof PostflightAuthCallbackRoute
+  '/postflight/auth/login': typeof PostflightAuthLoginRoute
+  '/postflight/auth/logout': typeof PostflightAuthLogoutRoute
+  '/postflight/auth/session': typeof PostflightAuthSessionRoute
   '/design': typeof WorkshopDesignIndexRoute
 }
 export interface FileRoutesById {
@@ -233,7 +265,7 @@ export interface FileRoutesById {
   '/healthz': typeof HealthzRoute
   '/livez': typeof LivezRoute
   '/metrics': typeof MetricsRoute
-  '/postflight': typeof PostflightRoute
+  '/postflight': typeof PostflightRouteWithChildren
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/_workshop/design': typeof WorkshopDesignRouteRouteWithChildren
   '/_workshop/careers': typeof WorkshopCareersRoute
@@ -253,6 +285,10 @@ export interface FileRoutesById {
   '/_workshop/design/workshop': typeof WorkshopDesignWorkshopRoute
   '/_workshop/postflight/docs': typeof WorkshopPostflightDocsRoute
   '/og/letter/$slug': typeof OgLetterSlugRoute
+  '/postflight/auth/callback': typeof PostflightAuthCallbackRoute
+  '/postflight/auth/login': typeof PostflightAuthLoginRoute
+  '/postflight/auth/logout': typeof PostflightAuthLogoutRoute
+  '/postflight/auth/session': typeof PostflightAuthSessionRoute
   '/_workshop/design/': typeof WorkshopDesignIndexRoute
 }
 export interface FileRouteTypes {
@@ -283,6 +319,10 @@ export interface FileRouteTypes {
     | '/design/workshop'
     | '/postflight/docs'
     | '/og/letter/$slug'
+    | '/postflight/auth/callback'
+    | '/postflight/auth/login'
+    | '/postflight/auth/logout'
+    | '/postflight/auth/session'
     | '/design/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -308,6 +348,10 @@ export interface FileRouteTypes {
     | '/design/workshop'
     | '/postflight/docs'
     | '/og/letter/$slug'
+    | '/postflight/auth/callback'
+    | '/postflight/auth/login'
+    | '/postflight/auth/logout'
+    | '/postflight/auth/session'
     | '/design'
   id:
     | '__root__'
@@ -337,6 +381,10 @@ export interface FileRouteTypes {
     | '/_workshop/design/workshop'
     | '/_workshop/postflight/docs'
     | '/og/letter/$slug'
+    | '/postflight/auth/callback'
+    | '/postflight/auth/login'
+    | '/postflight/auth/logout'
+    | '/postflight/auth/session'
     | '/_workshop/design/'
   fileRoutesById: FileRoutesById
 }
@@ -347,7 +395,7 @@ export interface RootRouteChildren {
   HealthzRoute: typeof HealthzRoute
   LivezRoute: typeof LivezRoute
   MetricsRoute: typeof MetricsRoute
-  PostflightRoute: typeof PostflightRoute
+  PostflightRoute: typeof PostflightRouteWithChildren
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   OgSlugRoute: typeof OgSlugRoute
   OgLetterSlugRoute: typeof OgLetterSlugRoute
@@ -509,6 +557,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkshopDesignIndexRouteImport
       parentRoute: typeof WorkshopDesignRouteRoute
     }
+    '/postflight/auth/session': {
+      id: '/postflight/auth/session'
+      path: '/auth/session'
+      fullPath: '/postflight/auth/session'
+      preLoaderRoute: typeof PostflightAuthSessionRouteImport
+      parentRoute: typeof PostflightRoute
+    }
+    '/postflight/auth/logout': {
+      id: '/postflight/auth/logout'
+      path: '/auth/logout'
+      fullPath: '/postflight/auth/logout'
+      preLoaderRoute: typeof PostflightAuthLogoutRouteImport
+      parentRoute: typeof PostflightRoute
+    }
+    '/postflight/auth/login': {
+      id: '/postflight/auth/login'
+      path: '/auth/login'
+      fullPath: '/postflight/auth/login'
+      preLoaderRoute: typeof PostflightAuthLoginRouteImport
+      parentRoute: typeof PostflightRoute
+    }
+    '/postflight/auth/callback': {
+      id: '/postflight/auth/callback'
+      path: '/auth/callback'
+      fullPath: '/postflight/auth/callback'
+      preLoaderRoute: typeof PostflightAuthCallbackRouteImport
+      parentRoute: typeof PostflightRoute
+    }
     '/og/letter/$slug': {
       id: '/og/letter/$slug'
       path: '/og/letter/$slug'
@@ -620,6 +696,24 @@ const NewsRouteRouteWithChildren = NewsRouteRoute._addFileChildren(
   NewsRouteRouteChildren,
 )
 
+interface PostflightRouteChildren {
+  PostflightAuthCallbackRoute: typeof PostflightAuthCallbackRoute
+  PostflightAuthLoginRoute: typeof PostflightAuthLoginRoute
+  PostflightAuthLogoutRoute: typeof PostflightAuthLogoutRoute
+  PostflightAuthSessionRoute: typeof PostflightAuthSessionRoute
+}
+
+const PostflightRouteChildren: PostflightRouteChildren = {
+  PostflightAuthCallbackRoute: PostflightAuthCallbackRoute,
+  PostflightAuthLoginRoute: PostflightAuthLoginRoute,
+  PostflightAuthLogoutRoute: PostflightAuthLogoutRoute,
+  PostflightAuthSessionRoute: PostflightAuthSessionRoute,
+}
+
+const PostflightRouteWithChildren = PostflightRoute._addFileChildren(
+  PostflightRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   WorkshopRouteRoute: WorkshopRouteRouteWithChildren,
   LettersRouteRoute: LettersRouteRouteWithChildren,
@@ -627,7 +721,7 @@ const rootRouteChildren: RootRouteChildren = {
   HealthzRoute: HealthzRoute,
   LivezRoute: LivezRoute,
   MetricsRoute: MetricsRoute,
-  PostflightRoute: PostflightRoute,
+  PostflightRoute: PostflightRouteWithChildren,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
   OgSlugRoute: OgSlugRoute,
   OgLetterSlugRoute: OgLetterSlugRoute,
