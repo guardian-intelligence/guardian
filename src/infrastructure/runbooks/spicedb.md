@@ -123,6 +123,11 @@ decision results. An unexpected allow or deny is
 an unconditional failure. A transport error during a deliberate failover is
 reported separately and does not hide an incorrect decision.
 
+Distinguish load-generator saturation from datastore saturation. If Thumper
+hits its CPU or memory limit, record that boundary and raise only the
+Flux-managed Thumper resources in the next reviewed stress step before
+attributing a ceiling to SpiceDB.
+
 The scenario writes and deletes a relationship around its permission checks.
 If either mutation returns an error, the server-side outcome is unknown and
 the dependent check is classified as indeterminate rather than correct or
