@@ -133,3 +133,82 @@ spec:
           annotations:
             summary: "SpiceDB alert delivery drill"
             description: "This rule is enabled only through a reviewed Git change while rehearsing the alert path."
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: authorization
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: authorization
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  namespaceSelector:
+    matchNames:
+      - tenant-guardian-prod
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: authorization
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 5s
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: authorization
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: authorization
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  groups:
+    - name: authorization.rules
+      interval: 15s
+      rules:
+        - alert: AuthorizationAPIReplicaCountDegraded
+          expr: (sum(up{namespace="tenant-guardian-prod",job="authorization"}) or vector(0)) < 3
+          for: 2m
+          labels:
+            severity: critical
+            guardian_stage: prod
+          annotations:
+            summary: "Fewer than three authorization API replicas are serving"
+            description: "The typed authorization boundary has lost replica capacity."
+        - alert: AuthorizationAPICheckErrors
+          expr: sum(rate(guardian_authorization_checks_total{decision="error"}[5m])) > 0
+          for: 2m
+          labels:
+            severity: critical
+            guardian_stage: prod
+          annotations:
+            summary: "Authorization checks are failing"
+            description: "The authorization API is rejecting valid contract traffic or cannot reach SpiceDB."
+        - alert: AuthorizationAPIRelationshipWriteErrors
+          expr: sum(rate(guardian_authorization_relationship_writes_total{result="error"}[5m])) > 0
+          for: 2m
+          labels:
+            severity: critical
+            guardian_stage: prod
+          annotations:
+            summary: "Authorization relationship writes are failing"
+            description: "Relationship mutation traffic is failing at the typed authorization boundary."
+        - alert: AuthorizationAPIP99LatencyHigh
+          expr: |
+            histogram_quantile(
+              0.99,
+              sum by (le) (
+                rate(guardian_authorization_request_duration_seconds_bucket{method="check"}[10m])
+              )
+            ) > 0.1
+          for: 10m
+          labels:
+            severity: warning
+            guardian_stage: prod
+          annotations:
+            summary: "Authorization check p99 exceeds 100ms"
+            description: "End-to-end authorization check latency has exceeded the initial p99 budget for ten minutes."

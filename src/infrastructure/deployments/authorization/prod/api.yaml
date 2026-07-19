@@ -1,0 +1,154 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authorization
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: authorization
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: authorization-api
+    guardian.dev/stage: prod
+  annotations:
+    reloader.stakater.com/auto: "true"
+spec:
+  replicas: 3
+  revisionHistoryLimit: 3
+  minReadySeconds: 15
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: authorization
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: authorization
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/component: authorization-api
+        guardian.dev/stage: prod
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsUser: 65532
+        runAsGroup: 65532
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: authorization
+      containers:
+        - name: authorization
+          image: ghcr.io/guardian-intelligence/authorization@sha256:1ec7c52e497e3d3f378075cddd42d1929de073fc5a2e0af689b1daef8cda31df
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: SPICEDB_HTTP_URL
+              value: https://spicedb:8443
+            - name: SPICEDB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: spicedb-api-token-slot-a
+                  key: password
+            - name: SPICEDB_CA_FILE
+              value: /tls/ca.crt
+            - name: AUTHORIZATION_CHECK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: authorization-check-token
+                  key: password
+            - name: AUTHORIZATION_WRITE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: authorization-write-token
+                  key: password
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          volumeMounts:
+            - name: spicedb-tls
+              mountPath: /tls
+              readOnly: true
+      volumes:
+        - name: spicedb-tls
+          secret:
+            secretName: spicedb-server-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: authorization
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: authorization
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: authorization-api
+    guardian.dev/stage: prod
+spec:
+  selector:
+    app.kubernetes.io/name: authorization
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: authorization
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: authorization
+    app.kubernetes.io/part-of: guardian
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: authorization

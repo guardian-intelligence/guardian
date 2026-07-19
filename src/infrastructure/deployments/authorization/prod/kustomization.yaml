@@ -3,7 +3,7 @@ kind: Kustomization
 generatorOptions:
   disableNameSuffixHash: true
 configMapGenerator:
-  - name: guardian-authorization-schema-v1
+  - name: guardian-authorization-schema-v2
     namespace: tenant-guardian-prod
     files:
       - guardian.zed=schema/guardian.zed
@@ -13,6 +13,8 @@ configMapGenerator:
     files:
       - qualification.yaml=thumper/qualification.yaml
 resources:
+  - api-secrets.yaml
+  - api.yaml
   - spicedb.yaml
   - schema-job.yaml
   - thumper.yaml

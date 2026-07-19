@@ -39,7 +39,7 @@ spec:
             guardian.dev/component: authorization-api
       toPorts:
         - ports:
-            - port: "50051"
+            - port: "8443"
               protocol: TCP
     - fromEndpoints:
         - matchLabels:
@@ -81,6 +81,53 @@ spec:
             - port: "443"
               protocol: TCP
             - port: "6443"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: authorization-api
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: authorization
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      guardian.dev/component: authorization-api
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/component: payments
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: vmagent
+            k8s:io.kubernetes.pod.namespace: cozy-monitoring
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            guardian.dev/component: authorization-datastore
+      toPorts:
+        - ports:
+            - port: "8443"
               protocol: TCP
 ---
 apiVersion: cilium.io/v2

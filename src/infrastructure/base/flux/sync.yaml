@@ -511,11 +511,23 @@ spec:
       namespace: tenant-guardian-prod
     - apiVersion: batch/v1
       kind: Job
-      name: spicedb-schema-v3
+      name: spicedb-schema-v4
       namespace: tenant-guardian-prod
     - apiVersion: apps/v1
       kind: Deployment
       name: spicedb-thumper
+      namespace: tenant-guardian-prod
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: authorization
+      namespace: tenant-guardian-prod
+    - apiVersion: external-secrets.io/v1beta1
+      kind: ExternalSecret
+      name: authorization-check-token
+      namespace: tenant-guardian-prod
+    - apiVersion: external-secrets.io/v1beta1
+      kind: ExternalSecret
+      name: authorization-write-token
       namespace: tenant-guardian-prod
   healthCheckExprs:
     - apiVersion: authzed.com/v1alpha1
@@ -537,6 +549,16 @@ spec:
         (c.status == 'False' &&
         c.type == 'Migrating' &&
         c.reason == 'MigrationFailed'))
+    - apiVersion: external-secrets.io/v1beta1
+      kind: ExternalSecret
+      current: >-
+        has(status.conditions) &&
+        status.conditions.exists(e,
+        e.type == 'Ready' && e.status == 'True')
+      failed: >-
+        has(status.conditions) &&
+        status.conditions.exists(e,
+        e.type == 'Ready' && e.status == 'False')
 ---
 # TigerBeetle's financial ledger is isolated in its own reconciliation slice
 # so replica health is gated without coupling unrelated Guardian system

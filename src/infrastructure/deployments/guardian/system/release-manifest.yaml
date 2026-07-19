@@ -17,6 +17,9 @@ releases:
   analytics-ingest:
     prod:
       image: ghcr.io/guardian-intelligence/analytics-ingest@sha256:720bd0a0d191955bbbe3a229b266d1fdd8f7b26bb5daa1b88fe043dc11ae7899
+  authorization:
+    prod:
+      image: ghcr.io/guardian-intelligence/authorization@sha256:1ec7c52e497e3d3f378075cddd42d1929de073fc5a2e0af689b1daef8cda31df
   cockpit:
     prod:
       image: ghcr.io/guardian-intelligence/cockpit@sha256:0589274466069f6c2e6df0f67ab38f7ac1288887d71d73085f80bce2b72e0ca2

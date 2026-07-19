@@ -208,8 +208,10 @@ func TestSpiceDBSchemaAndLiveAcceptanceGate(t *testing.T) {
 	for _, want := range []string{
 		"assertTrue:",
 		"assertFalse:",
-		"organization:guardian#manage@guardian_account:alice",
+		"organization:guardian#manage_members@guardian_account:alice",
+		"organization:guardian#manage_integrations@guardian_account:bob",
 		"organization:guardian#view@guardian_account:mallory",
+		"postflight_repository:guardian#run_job@guardian_account:bob",
 		"postflight_repository:guardian#manage@guardian_account:alice",
 		"postflight_repository:guardian#manage@guardian_account:mallory",
 	} {
@@ -222,7 +224,7 @@ func TestSpiceDBSchemaAndLiveAcceptanceGate(t *testing.T) {
 	jobPath := runfilePath("src/infrastructure/deployments/authorization/prod/schema-job.yaml")
 	job := readText(t, jobPath)
 	for _, want := range []string{
-		"name: spicedb-schema-v3",
+		"name: spicedb-schema-v4",
 		"kustomize.toolkit.fluxcd.io/substitute: disabled",
 		"ghcr.io/authzed/zed@sha256:339db064131cfd75c9385938f16fa445bcfa4a82bd9eed73402fd10c00ea374c",
 		"--hostname-override=spicedb.tenant-guardian-prod.svc.cozy.local",
@@ -282,7 +284,7 @@ func TestSpiceDBOperationalQualificationIsGitOpsOnly(t *testing.T) {
 		"WriteRelationships",
 		"DeleteRelationships",
 		"randomObjectID",
-		"permission: manage",
+		"permission: manage_members",
 		"expectNoPermission: true",
 		"consistency: AtLeastAsFresh",
 	} {
@@ -325,7 +327,7 @@ func TestSpiceDBOperationalQualificationIsGitOpsOnly(t *testing.T) {
 		"name: postgres-spicedb-init-job",
 		"name: spicedb-postgres-archive-activation",
 		"name: spicedb-postgres-restore-baseline-20260718",
-		"name: spicedb-schema-v3",
+		"name: spicedb-schema-v4",
 		"name: spicedb-spicedb",
 		"name: spicedb-server",
 		"kind: SpiceDBCluster",
