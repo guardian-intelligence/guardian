@@ -14,7 +14,7 @@ import (
 )
 
 // Version is the protocol revision a Hello announces.
-const Version = 1
+const Version = 2
 
 // WorkspaceReadyMarker is the file guestd drops at a converged workspace
 // mountpoint's root once every declared mount is in place. It is the shared
@@ -43,9 +43,12 @@ type Kind string
 const (
 	// KindHello (guest → host): guestd is up and idle.
 	KindHello Kind = "hello"
-	// KindAssignment (host → guest): everything the guest needs to become a
-	// job runner.
-	KindAssignment Kind = "assignment"
+	// KindPrepare (host → guest): register a runner without attaching any
+	// customer volume or revealing customer identity.
+	KindPrepare Kind = "prepare"
+	// KindRendezvous (host → guest): mount the exact generation tuple for
+	// the job GitHub assigned, then release the blocked job-start hook.
+	KindRendezvous Kind = "rendezvous"
 	// KindRunnerStatus (guest → host): the runner lifecycle advanced.
 	KindRunnerStatus Kind = "runner-status"
 	// KindQuiesce (host → guest): sync and unmount the workspace ahead of
@@ -63,7 +66,8 @@ const (
 type Message struct {
 	Kind          Kind           `json:"kind"`
 	Hello         *Hello         `json:"hello,omitempty"`
-	Assignment    *Assignment    `json:"assignment,omitempty"`
+	Prepare       *Prepare       `json:"prepare,omitempty"`
+	Rendezvous    *Rendezvous    `json:"rendezvous,omitempty"`
 	RunnerStatus  *RunnerStatus  `json:"runner_status,omitempty"`
 	Quiesce       *Quiesce       `json:"quiesce,omitempty"`
 	Quiesced      *Quiesced      `json:"quiesced,omitempty"`
@@ -75,19 +79,25 @@ type Hello struct {
 	Version int `json:"version"`
 }
 
-// Assignment carries the runner assignment down to the guest.
-type Assignment struct {
-	// Lease names the lease this assignment serves; guestd deduplicates
-	// redelivery on it.
+// Prepare carries the single-use runner registration down to an idle VM.
+type Prepare struct {
+	// Lease names the listener. It is deliberately opaque to the guest.
 	Lease string `json:"lease"`
-	// Mounts are converged, every one, before the runner starts.
-	Mounts []Mount `json:"mounts"`
 	// JITConfig is the encoded single-use runner registration blob. It
 	// exists only in guest RAM and the runner's process environment, never
 	// on any disk.
 	JITConfig string `json:"jit_config"`
-	// Env is the runner environment.
+	// Env contains only pool/listener configuration. Customer-specific
+	// values arrive in Rendezvous after GitHub's assignment is observed.
 	Env map[string]string `json:"env,omitempty"`
+}
+
+// Rendezvous carries the customer volumes and per-job environment after the
+// synchronous job-start hook has reported the runner GitHub actually chose.
+type Rendezvous struct {
+	Lease  string            `json:"lease"`
+	Mounts []Mount           `json:"mounts"`
+	Env    map[string]string `json:"env,omitempty"`
 }
 
 // Mount is one hot-attached disk the guest converges before any customer
@@ -125,20 +135,46 @@ type QuiesceFailed struct {
 type RunnerState string
 
 const (
-	// RunnerMounting: guestd is converging the assignment's mounts.
-	RunnerMounting RunnerState = "mounting"
 	// RunnerRegistered: the runner registered and is listening for its job.
 	RunnerRegistered RunnerState = "registered"
-	// RunnerJobStarted: the runner picked up its job.
-	RunnerJobStarted RunnerState = "job-started"
+	// RunnerHookBlocked: GitHub assigned a job and its synchronous start
+	// hook is waiting for the host to bind the resolved generation tuple.
+	RunnerHookBlocked RunnerState = "hook-blocked"
+	// RunnerMountsReady: every declared device is mounted and the clock
+	// sample was taken, but the hook is still blocked.
+	RunnerMountsReady RunnerState = "mounts-ready"
+	// RunnerReleased: the job-start hook was released.
+	RunnerReleased RunnerState = "released"
 	// RunnerExited: the runner finished; ExitCode is meaningful.
 	RunnerExited RunnerState = "exited"
 )
 
 // RunnerStatus reports the runner lifecycle up to the host.
 type RunnerStatus struct {
-	State    RunnerState `json:"state"`
-	ExitCode int         `json:"exit_code,omitempty"`
+	State    RunnerState  `json:"state"`
+	ExitCode int          `json:"exit_code,omitempty"`
+	Identity *JobIdentity `json:"identity,omitempty"`
+	Clock    *ClockSample `json:"clock,omitempty"`
+}
+
+// JobIdentity is the identity GitHub exposes to the synchronous runner hook.
+// GitHub does not expose the numeric provider job id there; the control plane
+// joins this tuple to its independently observed runner assignment.
+type JobIdentity struct {
+	RunID       string `json:"run_id"`
+	RunAttempt  int    `json:"run_attempt"`
+	RunnerName  string `json:"runner_name"`
+	Repository  string `json:"repository"`
+	WorkflowJob string `json:"workflow_job"`
+}
+
+// ClockSample is taken after mounts (and a future memory restore) and before
+// the hook is released. Host samples bracket it outside the VM.
+type ClockSample struct {
+	UnixNS       int64  `json:"unix_ns"`
+	Synchronized bool   `json:"synchronized"`
+	Clocksource  string `json:"clocksource"`
+	AfterRestore bool   `json:"after_restore"`
 }
 
 // Validate rejects frames whose payload does not match their kind, so a
@@ -146,7 +182,7 @@ type RunnerStatus struct {
 func (m Message) Validate() error {
 	payloads := 0
 	for _, present := range []bool{
-		m.Hello != nil, m.Assignment != nil, m.RunnerStatus != nil,
+		m.Hello != nil, m.Prepare != nil, m.Rendezvous != nil, m.RunnerStatus != nil,
 		m.Quiesce != nil, m.Quiesced != nil, m.QuiesceFailed != nil,
 	} {
 		if present {
@@ -157,8 +193,10 @@ func (m Message) Validate() error {
 	switch m.Kind {
 	case KindHello:
 		matched = m.Hello != nil
-	case KindAssignment:
-		matched = m.Assignment != nil
+	case KindPrepare:
+		matched = m.Prepare != nil
+	case KindRendezvous:
+		matched = m.Rendezvous != nil
 	case KindRunnerStatus:
 		matched = m.RunnerStatus != nil
 	case KindQuiesce:

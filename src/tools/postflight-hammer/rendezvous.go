@@ -217,6 +217,10 @@ func readRendezvousTrace(r io.Reader) ([]rendezvousEvent, error) {
 }
 
 func validateRendezvousTrace(events []rendezvousEvent) *rendezvousTraceReport {
+	return validateRendezvousTraceScope(events, false)
+}
+
+func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool) *rendezvousTraceReport {
 	report := &rendezvousTraceReport{
 		SchemaVersion: rendezvousTraceSchema,
 		Events:        len(events),
@@ -407,7 +411,7 @@ func validateRendezvousTrace(events []rendezvousEvent) *rendezvousTraceReport {
 	}
 
 	if explicit == nil || explicit.Outcome == outcomePass || explicit.Outcome == outcomeConcern {
-		for _, required := range []string{
+		requiredEvents := []string{
 			eventPoolReady,
 			eventAssignmentObserved,
 			eventJobHookBlocked,
@@ -417,10 +421,15 @@ func validateRendezvousTrace(events []rendezvousEvent) *rendezvousTraceReport {
 			eventMountsReady,
 			eventClockChecked,
 			eventJobHookReleased,
-			eventRunnerExited,
-			eventSnapshotDecided,
-			eventProviderConclusionObserved,
-		} {
+		}
+		if !throughRelease {
+			requiredEvents = append(requiredEvents,
+				eventRunnerExited,
+				eventSnapshotDecided,
+				eventProviderConclusionObserved,
+			)
+		}
+		for _, required := range requiredEvents {
 			if !seen[required] {
 				violate("complete trace is missing %s", required)
 			}
@@ -758,9 +767,11 @@ func printRendezvousTraceReport(w io.Writer, report *rendezvousTraceReport) {
 
 func cmdValidateRendezvous(args []string) error {
 	var tracePath, jsonPath string
+	var throughRelease bool
 	fs := flag.NewFlagSet("validate-rendezvous", flag.ContinueOnError)
 	fs.StringVar(&tracePath, "trace", "", "JSONL rendezvous trace to validate (required)")
 	fs.StringVar(&jsonPath, "json", "", "JSON report output path (default <trace>.report.json)")
+	fs.BoolVar(&throughRelease, "through-release", false, "validate the assignment-first rendezvous through job_hook_released without requiring post-job lifecycle evidence")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -779,7 +790,7 @@ func cmdValidateRendezvous(args []string) error {
 	if err != nil {
 		return err
 	}
-	report := validateRendezvousTrace(events)
+	report := validateRendezvousTraceScope(events, throughRelease)
 	printRendezvousTraceReport(os.Stdout, report)
 	raw, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {

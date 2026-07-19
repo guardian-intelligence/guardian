@@ -46,6 +46,9 @@ func TestSyncExchange(t *testing.T) {
 				RepositoryFullName: "acme/widget",
 				RunnerClass:        "c",
 				JITConfig:          "jit",
+				ProviderRunID:      10,
+				ProviderJobID:      11,
+				ProviderRunAttempt: 1,
 				Workspace:          syncproto.WorkspaceSpec{SizeBytes: 1},
 			}},
 			PoolTargets:     map[string]int{"c": 1},
@@ -138,6 +141,7 @@ func TestDesiredLeaseValidation(t *testing.T) {
 	valid := syncproto.DesiredLease{
 		LeaseID: "l1", State: syncproto.DesiredRun, ExecutionID: "e", AttemptID: "a",
 		RepositoryFullName: "acme/widget", RunnerClass: "c", JITConfig: "j",
+		ProviderRunID: 10, ProviderJobID: 11, ProviderRunAttempt: 1,
 	}
 	if err := validateDesired(valid); err != nil {
 		t.Fatalf("valid lease rejected: %v", err)
@@ -148,7 +152,6 @@ func TestDesiredLeaseValidation(t *testing.T) {
 		"unknown state":       func(d *syncproto.DesiredLease) { d.State = "explode" },
 		"seal sans gen":       func(d *syncproto.DesiredLease) { d.State = syncproto.DesiredSeal; d.SealGeneration = "" },
 		"run sans identity":   func(d *syncproto.DesiredLease) { d.ExecutionID = "" },
-		"run sans jit":        func(d *syncproto.DesiredLease) { d.JITConfig = "" },
 		"run sans repository": func(d *syncproto.DesiredLease) { d.RepositoryFullName = "" },
 		"bad generation":      func(d *syncproto.DesiredLease) { d.Workspace.Generation = "a/../b" },
 	}

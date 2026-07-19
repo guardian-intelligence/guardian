@@ -160,6 +160,20 @@ const sqlAdvanceDemand = `
 UPDATE github_provider_demands SET state = $2, updated_at = now()
 WHERE provider_job_id = $1 AND state = ANY($3)`
 
+const sqlResetDisplacedListenerDemand = `
+UPDATE host_leases listener
+SET state = 'expired', reported_state = 'capacity-displaced',
+    reason = 'GitHub assigned another job to this listener',
+    jit_config = '', updated_at = now()
+WHERE listener.lease_id = $1
+  AND listener.provider_job_id <> $2
+  AND listener.state IN ('assigned', 'ready')
+  AND NOT EXISTS (
+      SELECT 1 FROM github_job_assignments assignment
+      WHERE assignment.provider_job_id = listener.provider_job_id
+  )
+RETURNING listener.provider_job_id`
+
 // failDemandTx moves a demand to a terminal failure state (guarded by its
 // current state) and appends the failure problems.
 func failDemandTx(ctx context.Context, tx pgx.Tx, jobID int64, state string, from []string, problems []problem) error {
@@ -177,20 +191,30 @@ func failDemandTx(ctx context.Context, tx pgx.Tx, jobID int64, state string, fro
 // credential must not accumulate at rest once the lease can no longer use it.
 const sqlCompleteLease = `
 UPDATE host_leases
-SET state = 'completed', reported_state = 'exited', exit_code = $3, jit_config = '', updated_at = now()
-WHERE lease_id = $1 AND host_id = $2 AND state IN ('assigned', 'ready')
+SET state = 'completed', reported_state = 'exited', exit_code = $2, jit_config = '', updated_at = now()
+WHERE lease_id = $1 AND state IN ('assigned', 'ready')
 RETURNING provider_job_id, runner_class`
 
-// sqlLeaseExitContext reads what the exited-report transition needs to
-// decide between plain completion and a seal request. No lock: trust class
-// and scope are immutable after creation, and the guarded transition below
-// is what enforces exactly-once.
+// sqlLeaseExitContext validates that the reporting listener belongs to this
+// host and either owns the execution directly or is GitHub's observed runner
+// for it. The execution row supplies job/cache policy; the listener row
+// supplies the physical slot being released.
 const sqlLeaseExitContext = `
-SELECT l.runner_class, COALESCE(l.workspace_scope_id::text, ''),
-    COALESCE(l.observed_source_generation, ''), COALESCE(d.trust_class, '')
-FROM host_leases l
-LEFT JOIN github_provider_demands d ON d.provider_job_id = l.provider_job_id
-WHERE l.lease_id = $1 AND l.host_id = $2 AND l.state IN ('assigned', 'ready')`
+SELECT listener.runner_class, COALESCE(execution.workspace_scope_id::text, ''),
+    COALESCE(execution.observed_source_generation, ''), COALESCE(demand.trust_class, '')
+FROM host_leases listener
+JOIN host_leases execution ON execution.lease_id = $3
+LEFT JOIN github_job_assignments assignment
+    ON assignment.provider_job_id = execution.provider_job_id
+    AND assignment.runner_name = listener.lease_id
+LEFT JOIN github_provider_demands demand
+    ON demand.provider_job_id = execution.provider_job_id
+WHERE listener.lease_id = $1
+  AND listener.host_id = $2
+  AND listener.runner_class = execution.runner_class
+  AND execution.state IN ('assigned', 'ready')
+  AND (execution.lease_id = listener.lease_id OR assignment.provider_job_id IS NOT NULL)
+FOR UPDATE OF listener, execution`
 
 // sqlInsertSealGeneration mints the candidate the seal must produce; the id
 // is a UUID so it is zfs-name safe on the host.
@@ -204,9 +228,9 @@ RETURNING generation`
 // alone on GitHub.
 const sqlSealLease = `
 UPDATE host_leases
-SET state = 'sealing', reported_state = 'exited', exit_code = $3, jit_config = '',
-    seal_generation = $4, seal_deadline_at = $5, updated_at = now()
-WHERE lease_id = $1 AND host_id = $2 AND state IN ('assigned', 'ready')
+SET state = 'sealing', reported_state = 'exited', exit_code = $2, jit_config = '',
+    seal_generation = $3, seal_deadline_at = $4, updated_at = now()
+WHERE lease_id = $1 AND state IN ('assigned', 'ready')
 RETURNING provider_job_id, runner_class`
 
 // CompleteLease is the exited-report transition: terminalize the lease (or,
@@ -216,13 +240,22 @@ RETURNING provider_job_id, runner_class`
 // replayed report is a no-op. Only branch trust ever seals: PR workspaces
 // are read-only borrowers of the target branch's lineage.
 func (s *pgStore) CompleteLease(ctx context.Context, hostID, leaseID string, exitCode int, sealDeadline time.Time) (jobID int64, sealGeneration string, done bool, err error) {
+	return s.CompleteRoutedLease(ctx, hostID, leaseID, leaseID, exitCode, sealDeadline)
+}
+
+// CompleteRoutedLease completes the execution GitHub actually sent to a
+// listener, while releasing that listener's physical slot. The two lease
+// IDs differ under same-label displacement.
+func (s *pgStore) CompleteRoutedLease(ctx context.Context, hostID, listenerLeaseID, executionLeaseID string, exitCode int, sealDeadline time.Time) (jobID int64, sealGeneration string, done bool, err error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, "", false, err
 	}
 	defer tx.Rollback(ctx)
 	var class, scopeID, observedSource, trustClass string
-	err = tx.QueryRow(ctx, sqlLeaseExitContext, leaseID, hostID).Scan(&class, &scopeID, &observedSource, &trustClass)
+	err = tx.QueryRow(ctx, sqlLeaseExitContext,
+		listenerLeaseID, hostID, executionLeaseID).
+		Scan(&class, &scopeID, &observedSource, &trustClass)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, "", false, nil
 	}
@@ -233,9 +266,12 @@ func (s *pgStore) CompleteLease(ctx context.Context, hostID, leaseID string, exi
 		if err := tx.QueryRow(ctx, sqlInsertSealGeneration, hostID, class, scopeID, observedSource).Scan(&sealGeneration); err != nil {
 			return 0, "", false, err
 		}
-		err = tx.QueryRow(ctx, sqlSealLease, leaseID, hostID, exitCode, sealGeneration, sealDeadline).Scan(&jobID, &class)
+		err = tx.QueryRow(ctx, sqlSealLease,
+			executionLeaseID, exitCode, sealGeneration, sealDeadline).
+			Scan(&jobID, &class)
 	} else {
-		err = tx.QueryRow(ctx, sqlCompleteLease, leaseID, hostID, exitCode).Scan(&jobID, &class)
+		err = tx.QueryRow(ctx, sqlCompleteLease,
+			executionLeaseID, exitCode).Scan(&jobID, &class)
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, "", false, nil
@@ -246,8 +282,26 @@ func (s *pgStore) CompleteLease(ctx context.Context, hostID, leaseID string, exi
 	if _, err := tx.Exec(ctx, sqlReleaseHostSlot, hostID, class); err != nil {
 		return 0, "", false, err
 	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE host_leases SET jit_config = '', updated_at = now() WHERE lease_id = $1`,
+		listenerLeaseID); err != nil {
+		return 0, "", false, err
+	}
 	if _, err := tx.Exec(ctx, sqlAdvanceDemand, jobID, demandCompleted,
 		[]string{demandCapacityRequested, demandAssigned}); err != nil {
+		return 0, "", false, err
+	}
+	var displacedJobID int64
+	err = tx.QueryRow(ctx, sqlResetDisplacedListenerDemand,
+		listenerLeaseID, jobID).Scan(&displacedJobID)
+	switch {
+	case err == nil:
+		if _, err := tx.Exec(ctx, sqlAdvanceDemand, displacedJobID, demandRecorded,
+			[]string{demandCapacityRequested, demandAssigned}); err != nil {
+			return 0, "", false, err
+		}
+	case errors.Is(err, pgx.ErrNoRows):
+	default:
 		return 0, "", false, err
 	}
 	return jobID, sealGeneration, true, tx.Commit(ctx)
@@ -256,8 +310,22 @@ func (s *pgStore) CompleteLease(ctx context.Context, hostID, leaseID string, exi
 const sqlRecordLeaseSealed = `
 UPDATE host_leases
 SET state = 'completed', reported_state = 'sealed', updated_at = now()
-WHERE lease_id = $1 AND host_id = $2 AND state = 'sealing' AND seal_generation = $3
+WHERE lease_id = $1 AND state = 'sealing' AND seal_generation = $2
 RETURNING provider_job_id`
+
+const sqlLeaseSealContext = `
+SELECT 1
+FROM host_leases listener
+JOIN host_leases execution ON execution.lease_id = $3
+LEFT JOIN github_job_assignments assignment
+    ON assignment.provider_job_id = execution.provider_job_id
+    AND assignment.runner_name = listener.lease_id
+WHERE listener.lease_id = $1
+  AND listener.host_id = $2
+  AND listener.runner_class = execution.runner_class
+  AND execution.state = 'sealing'
+  AND (execution.lease_id = listener.lease_id OR assignment.provider_job_id IS NOT NULL)
+FOR UPDATE OF listener, execution`
 
 const sqlMarkGenerationSealed = `
 UPDATE workspace_generations SET sealed_at = now(), updated_at = now()
@@ -268,13 +336,27 @@ WHERE generation = $1 AND state = 'candidate'`
 // promotable and the lease terminalizes (leaving the desired set, which lets
 // the host collect the workspace volume).
 func (s *pgStore) RecordLeaseSealed(ctx context.Context, hostID, leaseID, sealedGeneration string) (int64, bool, error) {
+	return s.RecordRoutedLeaseSealed(ctx, hostID, leaseID, leaseID, sealedGeneration)
+}
+
+func (s *pgStore) RecordRoutedLeaseSealed(ctx context.Context, hostID, listenerLeaseID, executionLeaseID, sealedGeneration string) (int64, bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, false, err
 	}
 	defer tx.Rollback(ctx)
+	var valid int
+	err = tx.QueryRow(ctx, sqlLeaseSealContext,
+		listenerLeaseID, hostID, executionLeaseID).Scan(&valid)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
 	var jobID int64
-	err = tx.QueryRow(ctx, sqlRecordLeaseSealed, leaseID, hostID, sealedGeneration).Scan(&jobID)
+	err = tx.QueryRow(ctx, sqlRecordLeaseSealed,
+		executionLeaseID, sealedGeneration).Scan(&jobID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, false, nil
 	}
@@ -289,8 +371,8 @@ func (s *pgStore) RecordLeaseSealed(ctx context.Context, hostID, leaseID, sealed
 
 const sqlFailSealingLease = `
 UPDATE host_leases
-SET state = 'failed', reported_state = $3, reason = $4, updated_at = now()
-WHERE lease_id = $1 AND host_id = $2 AND state = 'sealing'
+SET state = 'failed', reported_state = $2, reason = $3, updated_at = now()
+WHERE lease_id = $1 AND state = 'sealing'
 RETURNING seal_generation`
 
 const sqlDiscardGeneration = `
@@ -302,13 +384,27 @@ WHERE generation = $1 AND state = 'candidate'`
 // slot was released at the exited report and the demand already completed —
 // a failed seal is a lost cache write, never a job result change.
 func (s *pgStore) FailSealingLease(ctx context.Context, hostID, leaseID, reported, reason string) (bool, error) {
+	return s.FailRoutedSealingLease(ctx, hostID, leaseID, leaseID, reported, reason)
+}
+
+func (s *pgStore) FailRoutedSealingLease(ctx context.Context, hostID, listenerLeaseID, executionLeaseID, reported, reason string) (bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer tx.Rollback(ctx)
+	var valid int
+	err = tx.QueryRow(ctx, sqlLeaseSealContext,
+		listenerLeaseID, hostID, executionLeaseID).Scan(&valid)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
 	var sealGeneration string
-	err = tx.QueryRow(ctx, sqlFailSealingLease, leaseID, hostID, reported, reason).Scan(&sealGeneration)
+	err = tx.QueryRow(ctx, sqlFailSealingLease,
+		executionLeaseID, reported, reason).Scan(&sealGeneration)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -323,21 +419,35 @@ func (s *pgStore) FailSealingLease(ctx context.Context, hostID, leaseID, reporte
 
 const sqlFailLeaseFromHost = `
 UPDATE host_leases
-SET state = 'failed', reported_state = $3, reason = $4, jit_config = '', updated_at = now()
-WHERE lease_id = $1 AND host_id = $2 AND state IN ('assigned', 'ready')
+SET state = 'failed', reported_state = $2, reason = $3, jit_config = '', updated_at = now()
+WHERE lease_id = $1 AND state IN ('assigned', 'ready')
 RETURNING provider_job_id, runner_class`
 
 // FailLeaseFromHost is the failed/cancelled-report transition: terminalize,
 // free the slot, and fail the demand as sandbox_failed.
 func (s *pgStore) FailLeaseFromHost(ctx context.Context, hostID, leaseID, reported, reason string, problems []problem) (int64, bool, error) {
+	return s.FailRoutedLeaseFromHost(ctx, hostID, leaseID, leaseID, reported, reason, problems)
+}
+
+func (s *pgStore) FailRoutedLeaseFromHost(ctx context.Context, hostID, listenerLeaseID, executionLeaseID, reported, reason string, problems []problem) (int64, bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, false, err
 	}
 	defer tx.Rollback(ctx)
 	var jobID int64
-	var class string
-	err = tx.QueryRow(ctx, sqlFailLeaseFromHost, leaseID, hostID, reported, reason).Scan(&jobID, &class)
+	var class, scopeID, observedSource, trustClass string
+	err = tx.QueryRow(ctx, sqlLeaseExitContext,
+		listenerLeaseID, hostID, executionLeaseID).
+		Scan(&class, &scopeID, &observedSource, &trustClass)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	err = tx.QueryRow(ctx, sqlFailLeaseFromHost,
+		executionLeaseID, reported, reason).Scan(&jobID, &class)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, false, nil
 	}
@@ -347,8 +457,26 @@ func (s *pgStore) FailLeaseFromHost(ctx context.Context, hostID, leaseID, report
 	if _, err := tx.Exec(ctx, sqlReleaseHostSlot, hostID, class); err != nil {
 		return 0, false, err
 	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE host_leases SET jit_config = '', updated_at = now() WHERE lease_id = $1`,
+		listenerLeaseID); err != nil {
+		return 0, false, err
+	}
 	if err := failDemandTx(ctx, tx, jobID, demandSandboxFailed,
 		[]string{demandCapacityRequested, demandAssigned}, problems); err != nil {
+		return 0, false, err
+	}
+	var displacedJobID int64
+	err = tx.QueryRow(ctx, sqlResetDisplacedListenerDemand,
+		listenerLeaseID, jobID).Scan(&displacedJobID)
+	switch {
+	case err == nil:
+		if _, err := tx.Exec(ctx, sqlAdvanceDemand, displacedJobID, demandRecorded,
+			[]string{demandCapacityRequested, demandAssigned}); err != nil {
+			return 0, false, err
+		}
+	case errors.Is(err, pgx.ErrNoRows):
+	default:
 		return 0, false, err
 	}
 	return jobID, true, tx.Commit(ctx)
@@ -356,28 +484,73 @@ func (s *pgStore) FailLeaseFromHost(ctx context.Context, hostID, leaseID, report
 
 // desiredLeaseRow is one lease as projected into a host's desired set.
 type desiredLeaseRow struct {
-	LeaseID            string
-	State              string
-	ExecutionID        string
-	AttemptID          string
-	OrgID              string
-	InstallationID     int64
-	RepositoryID       int64
-	RepositoryFullName string
-	RunnerClass        string
-	JITConfig          string
-	Generation         string
-	SizeBytes          int64
-	SealGeneration     string
+	LeaseID              string
+	ExecutionLeaseID     string
+	State                string
+	ExecutionID          string
+	AttemptID            string
+	OrgID                string
+	InstallationID       int64
+	RepositoryID         int64
+	RepositoryFullName   string
+	RunnerClass          string
+	JITConfig            string
+	Generation           string
+	SizeBytes            int64
+	SealGeneration       string
+	ProviderRunID        int64
+	ProviderJobID        int64
+	ProviderRunAttempt   int64
+	AssignedRunnerName   string
+	RendezvousAuthorized bool
 }
 
 const sqlListDesiredLeases = `
-SELECT lease_id, state, execution_id, attempt_id, org_id, installation_id, repository_id,
-    repository_full_name, runner_class, jit_config, workspace_generation, workspace_size_bytes,
-    seal_generation
-FROM host_leases
-WHERE host_id = $1 AND state IN ('assigned', 'ready', 'sealing')
-ORDER BY created_at, lease_id`
+SELECT listener.lease_id,
+    COALESCE(execution.lease_id, listener.lease_id),
+    COALESCE(execution.state, listener.state),
+    COALESCE(execution.execution_id, listener.execution_id),
+    COALESCE(execution.attempt_id, listener.attempt_id),
+    COALESCE(execution.org_id, listener.org_id),
+    COALESCE(execution.installation_id, listener.installation_id),
+    COALESCE(execution.repository_id, listener.repository_id),
+    COALESCE(execution.repository_full_name, listener.repository_full_name),
+    listener.runner_class,
+    listener.jit_config,
+    COALESCE(execution.workspace_generation, listener.workspace_generation),
+    COALESCE(execution.workspace_size_bytes, listener.workspace_size_bytes),
+    COALESCE(execution.seal_generation, listener.seal_generation),
+    job.provider_run_id,
+    COALESCE(execution.provider_job_id, listener.provider_job_id),
+    job.provider_run_attempt,
+    CASE WHEN execution.runner_class = listener.runner_class THEN assignment.runner_name ELSE '' END,
+    COALESCE(
+        assignment.runner_name = listener.lease_id
+        AND execution.lease_id IS NOT NULL
+        AND execution.runner_class = listener.runner_class,
+        false
+    )
+FROM host_leases listener
+LEFT JOIN github_job_assignments assignment
+    ON assignment.runner_name = listener.lease_id
+LEFT JOIN LATERAL (
+    SELECT candidate.*
+    FROM host_leases candidate
+    WHERE candidate.provider_job_id = assignment.provider_job_id
+      AND candidate.runner_class = listener.runner_class
+    ORDER BY
+        (candidate.state IN ('allocating', 'assigned', 'ready', 'sealing')) DESC,
+        candidate.created_at DESC
+    LIMIT 1
+) execution ON true
+JOIN github_workflow_jobs job
+    ON job.provider_job_id = COALESCE(execution.provider_job_id, listener.provider_job_id)
+WHERE listener.host_id = $1
+  AND (
+      (execution.lease_id IS NULL AND listener.state IN ('assigned', 'ready', 'sealing'))
+      OR execution.state IN ('assigned', 'ready', 'sealing')
+  )
+ORDER BY listener.created_at, listener.lease_id`
 
 func (s *pgStore) ListDesiredLeases(ctx context.Context, hostID string) ([]desiredLeaseRow, error) {
 	rows, err := s.pool.Query(ctx, sqlListDesiredLeases, hostID)
@@ -388,9 +561,12 @@ func (s *pgStore) ListDesiredLeases(ctx context.Context, hostID string) ([]desir
 	var out []desiredLeaseRow
 	for rows.Next() {
 		var r desiredLeaseRow
-		if err := rows.Scan(&r.LeaseID, &r.State, &r.ExecutionID, &r.AttemptID, &r.OrgID, &r.InstallationID,
+		if err := rows.Scan(&r.LeaseID, &r.ExecutionLeaseID, &r.State,
+			&r.ExecutionID, &r.AttemptID, &r.OrgID, &r.InstallationID,
 			&r.RepositoryID, &r.RepositoryFullName, &r.RunnerClass, &r.JITConfig,
-			&r.Generation, &r.SizeBytes, &r.SealGeneration); err != nil {
+			&r.Generation, &r.SizeBytes, &r.SealGeneration, &r.ProviderRunID,
+			&r.ProviderJobID, &r.ProviderRunAttempt, &r.AssignedRunnerName,
+			&r.RendezvousAuthorized); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -711,9 +887,32 @@ UPDATE host_slots s
 SET reserved = active.count, updated_at = now()
 FROM (
     SELECT s2.host_id, s2.class,
-        (SELECT COUNT(*) FROM host_leases l
-         WHERE l.host_id = s2.host_id AND l.runner_class = s2.class
-           AND l.state IN ('allocating', 'assigned', 'ready')) AS count
+        (
+            SELECT COUNT(*)
+            FROM host_leases listener
+            LEFT JOIN github_job_assignments assignment
+                ON assignment.runner_name = listener.lease_id
+            LEFT JOIN LATERAL (
+                SELECT candidate.*
+                FROM host_leases candidate
+                WHERE candidate.provider_job_id = assignment.provider_job_id
+                  AND candidate.runner_class = listener.runner_class
+                ORDER BY
+                    (candidate.state IN ('allocating', 'assigned', 'ready', 'sealing')) DESC,
+                    candidate.created_at DESC
+                LIMIT 1
+            ) execution ON true
+            WHERE listener.host_id = s2.host_id
+              AND listener.runner_class = s2.class
+              AND (
+                  listener.state = 'allocating'
+                  OR (
+                      execution.lease_id IS NULL
+                      AND listener.state IN ('assigned', 'ready')
+                  )
+                  OR execution.state IN ('assigned', 'ready')
+              )
+        ) AS count
     FROM host_slots s2
 ) active
 WHERE s.host_id = active.host_id AND s.class = active.class

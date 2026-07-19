@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -83,15 +85,27 @@ func TestVsockLoopbackTransportEndToEnd(t *testing.T) {
 
 	system := &loopSystem{mounted: map[string]bool{}}
 	ran := make(chan string, 1)
+	gateDir := filepath.Join(t.TempDir(), "rendezvous")
 	server, err := guestd.New(guestd.Config{
 		System: system,
 		RunRunner: func(_ context.Context, jitConfig string, _ map[string]string, event func(guestd.RunnerEvent)) (int, error) {
 			ran <- jitConfig
 			event(guestd.EventListening)
 			event(guestd.EventJobStarted)
+			request := []byte("run_id=1\nrun_attempt=1\nrunner_name=lease-loop\nrepository=acme/widget\nworkflow_job=test\n")
+			if err := os.WriteFile(filepath.Join(gateDir, "request"), request, 0o600); err != nil {
+				return 0, err
+			}
+			for {
+				if _, err := os.Stat(filepath.Join(gateDir, "release")); err == nil {
+					break
+				}
+				time.Sleep(time.Millisecond)
+			}
 			return 0, nil
 		},
 		RetryInterval: time.Millisecond,
+		RendezvousDir: gateDir,
 		HostCID:       vsock.Local,
 		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
@@ -125,13 +139,22 @@ func TestVsockLoopbackTransportEndToEnd(t *testing.T) {
 
 	deliverCtx, deliverCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer deliverCancel()
-	assignment := guestproto.Assignment{
-		Lease:     "lease-loop",
-		Mounts:    []guestproto.Mount{{Serial: "workspace", Filesystem: "ext4", Mountpoint: "/work", Options: []string{"discard"}}},
-		JITConfig: "jit-blob",
+	prepare := guestproto.Prepare{Lease: "lease-loop", JITConfig: "jit-blob"}
+	if err := transport.Prepare(deliverCtx, id, vsock.Local, prepare); err != nil {
+		t.Fatalf("prepare: %v", err)
 	}
-	if err := transport.Deliver(deliverCtx, id, vsock.Local, assignment); err != nil {
-		t.Fatalf("deliver: %v", err)
+	waitFor(t, "blocked hook over loopback", 10*time.Second, func() (bool, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		observed, err := transport.Observe(ctx, id, vsock.Local)
+		return observed.HookBlocked, err
+	})
+	rendezvous := guestproto.Rendezvous{
+		Lease:  "lease-loop",
+		Mounts: []guestproto.Mount{{Serial: "workspace", Filesystem: "ext4", Mountpoint: "/work", Options: []string{"discard"}}},
+	}
+	if err := transport.Rendezvous(deliverCtx, id, vsock.Local, rendezvous); err != nil {
+		t.Fatalf("rendezvous: %v", err)
 	}
 
 	waitFor(t, "runner exit over loopback", 10*time.Second, func() (bool, error) {
@@ -141,7 +164,7 @@ func TestVsockLoopbackTransportEndToEnd(t *testing.T) {
 		if err != nil {
 			return false, err
 		}
-		return observed.RunnerRegistered && observed.RunnerExited && observed.ExitCode == 0, nil
+		return observed.Released && observed.RunnerExited && observed.ExitCode == 0, nil
 	})
 	if got := <-ran; got != "jit-blob" {
 		t.Fatalf("runner ran with jit %q", got)

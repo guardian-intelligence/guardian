@@ -3,7 +3,9 @@
 > **EPHEMERAL.** Delete with this directory when the implementation pass completes.
 
 The agent inside every runner VM. It is the only process that talks to the
-host, and the runner never starts until guestd says the guest is ready.
+host. It starts a generic runner listener while the VM has no customer
+volumes, then holds GitHub's synchronous job-start hook until the exact
+assigned job's volumes are mounted and ready.
 
 ## Shape
 
@@ -18,41 +20,48 @@ host, and the runner never starts until guestd says the guest is ready.
 
 ## Protocol (extends merged `hostd/guestproto`)
 
-Existing verbs: `hello`, `assignment`, `runner-status`.
+Protocol version 2 separates generic listener preparation from customer
+rendezvous.
 
 | Verb | Direction | Payload | Semantics |
 | - | - | - | - |
 | `hello` | guest→host on accept | guestd version, boot id | Liveness + identity probe |
-| `assignment` | host→guest | JIT config blob, env map, mounts: `[{serial, fstype, mountpoint, options}]` | Idempotent. guestd converges every mount, writes env, then execs the runner. Re-delivery after a partial apply must converge, not error. |
-| `runner-status` | guest→host, streamed | phase: `mounting` / `listening` / `job-started` / `exited{code}` | hostd folds these into lease reports |
+| `prepare` | host→guest | listener lease, JIT config blob, pool env | Idempotently starts a generic runner with no customer identity or volume attached. |
+| `rendezvous` | host→guest | execution lease, job env, mounts: `[{serial, fstype, mountpoint, options}]` | After the hook reports the actual assignment, guestd converges the exact mounts, writes the job env exchange, records clock evidence, and releases the hook. Re-delivery after a partial apply converges rather than creating a second execution. |
+| `runner-status` | guest→host, streamed | state: `registered` / `hook-blocked` / `mounts-ready` / `released` / `exited{code}` | hostd folds these into listener and execution-lease reports. The blocked and later states carry the hook's GitHub identity. |
 | `quiesce` | host→guest | `{mountpoint}` | `sync` + unmount the workspace filesystem; reply `quiesced` or `quiesce-failed{reason}`. Precedes the host-side seal snapshot. |
 
 ## Mount convergence (the invariant)
 
-**No customer step runs until every mount in the assignment has converged.**
+**No customer step runs until every mount in the rendezvous has converged.**
 guestd locates each disk by its device serial (hostd sets `serial=` on the
 `scsi-hd` device — the tracer recipe), creates the filesystem if the device
 is blank (first generation of a scope arrives as an empty zvol), mounts with
 the requested options **always including `discard`** (TRIM must pass through
 to the sparse zvol or NVMe accounting measures garbage retention; the SNP
-phase preserves it with `--allow-discards`), and only then execs the runner.
-A mount that cannot
+phase preserves it with `--allow-discards`), and only then releases the
+blocked hook. A mount that cannot
 converge within its deadline is reported `runner-status: exited` with a
 synthetic failure code — hostd destroys the slot; the job is never started
 against a partial workspace.
 
-Once every mount has converged (and before the runner starts), guestd writes
-a workspace-ready marker file outside the workspace and injects its path
-into the runner env as `POSTFLIGHT_WORKSPACE_READY_FILE`. That variable name
-is contract with the demo repo's checkout action (05), which hard-fails when
-the variable or the file is absent — it is the action's proof that it is
-running on a converged Postflight mount.
+Once every mount has converged, guestd writes
+`.postflight-workspace` at the mounted workspace root and exposes its path
+to the job as `POSTFLIGHT_WORKSPACE_READY_FILE`. That variable name is the
+contract with the demo repo's checkout action (05), which hard-fails when
+the variable or the file is absent — it proves the action is running on the
+resolved Postflight mount rather than the image's underlying directory.
 
 ## Runner execution
 
 - Runner tree is baked into the image at `/opt/actions-runner` (02).
-- guestd writes the env map to the runner's environment, drops privileges to
-  the `runner` user, and execs `run.sh --jitconfig <blob>`.
+- `prepare` writes only pool configuration to the runner's environment,
+  drops privileges to the `runner` user, and execs
+  `run.sh --jitconfig <blob>`.
+- The baked `ACTIONS_RUNNER_HOOK_JOB_STARTED` script atomically reports the
+  job identity to guestd, waits for `rendezvous`, imports its job env, and
+  exits only after mounts and clock evidence are ready. GitHub cannot start
+  the first customer step while this hook is blocked.
 - The JIT config exists only in guest RAM and the runner's process
   environment. It is never written to any disk, including the workspace.
 - Runner exit code is reported verbatim in `runner-status: exited`. Exit 0
@@ -87,5 +96,6 @@ skips the seal (ambiguity never promotes), and still destroys the VM.
   convergence against a loopback block device with injected failures
   (blank device, wrong fs, busy unmount).
 - Conformance (tracer host): real vsock end-to-end with 03's transport —
-  assignment → mounted → runner stub exec → exit → quiesce → host snapshot
-  succeeds and the snapshot mounts clean on the host.
+  prepare → registered → hook blocked → rendezvous → mounted → released →
+  runner exit → quiesce → host snapshot succeeds and the snapshot mounts
+  clean on the host.

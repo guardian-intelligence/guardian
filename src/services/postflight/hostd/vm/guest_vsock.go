@@ -38,8 +38,8 @@ func NewVsockGuest() *VsockGuest {
 	}
 }
 
-// Deliver implements Guest.
-func (g *VsockGuest) Deliver(ctx context.Context, id ID, cid uint32, assignment guestproto.Assignment) error {
+// Prepare implements Guest.
+func (g *VsockGuest) Prepare(ctx context.Context, id ID, cid uint32, prepare guestproto.Prepare) error {
 	channel, err := g.channel(ctx, id, cid)
 	if err != nil {
 		return fmt.Errorf("vm: guest channel for %s: %w", id, err)
@@ -47,7 +47,19 @@ func (g *VsockGuest) Deliver(ctx context.Context, id ID, cid uint32, assignment 
 	if err := channel.awaitHello(ctx); err != nil {
 		return fmt.Errorf("vm: guest %s never said hello: %w", id, err)
 	}
-	return channel.write(ctx, guestproto.Message{Kind: guestproto.KindAssignment, Assignment: &assignment})
+	return channel.write(ctx, guestproto.Message{Kind: guestproto.KindPrepare, Prepare: &prepare})
+}
+
+// Rendezvous implements Guest.
+func (g *VsockGuest) Rendezvous(ctx context.Context, id ID, cid uint32, rendezvous guestproto.Rendezvous) error {
+	channel, err := g.channel(ctx, id, cid)
+	if err != nil {
+		return fmt.Errorf("vm: guest channel for %s: %w", id, err)
+	}
+	if err := channel.awaitHello(ctx); err != nil {
+		return fmt.Errorf("vm: guest %s never said hello: %w", id, err)
+	}
+	return channel.write(ctx, guestproto.Message{Kind: guestproto.KindRendezvous, Rendezvous: &rendezvous})
 }
 
 // Observe implements Guest.
@@ -151,6 +163,13 @@ func (g *VsockGuest) read(id ID, channel *guestChannel) {
 		}
 		switch message.Kind {
 		case guestproto.KindHello:
+			if message.Hello.Version != guestproto.Version {
+				g.remove(id, channel)
+				channel.shutdown(fmt.Errorf(
+					"vm: guest protocol version %d, want %d",
+					message.Hello.Version, guestproto.Version))
+				return
+			}
 			channel.markHello()
 		case guestproto.KindRunnerStatus:
 			channel.fold(*message.RunnerStatus)
@@ -247,8 +266,35 @@ func (c *guestChannel) fold(status guestproto.RunnerStatus) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	switch status.State {
-	case guestproto.RunnerRegistered, guestproto.RunnerJobStarted:
+	case guestproto.RunnerRegistered:
 		c.observation.RunnerRegistered = true
+	case guestproto.RunnerHookBlocked:
+		c.observation.RunnerRegistered = true
+		c.observation.HookBlocked = true
+		if status.Identity != nil {
+			c.observation.Identity = *status.Identity
+		}
+	case guestproto.RunnerMountsReady:
+		c.observation.RunnerRegistered = true
+		c.observation.HookBlocked = true
+		c.observation.MountsReady = true
+		if status.Identity != nil {
+			c.observation.Identity = *status.Identity
+		}
+		if status.Clock != nil {
+			c.observation.Clock = *status.Clock
+		}
+	case guestproto.RunnerReleased:
+		c.observation.RunnerRegistered = true
+		c.observation.HookBlocked = true
+		c.observation.MountsReady = true
+		c.observation.Released = true
+		if status.Identity != nil {
+			c.observation.Identity = *status.Identity
+		}
+		if status.Clock != nil {
+			c.observation.Clock = *status.Clock
+		}
 	case guestproto.RunnerExited:
 		c.observation.RunnerExited = true
 		c.observation.ExitCode = status.ExitCode

@@ -114,6 +114,7 @@ func NewQEMU(cfg Config) (*QEMU, error) {
 type meta struct {
 	ID    ID     `json:"id"`
 	Class Class  `json:"class"`
+	Image string `json:"image,omitempty"`
 	Lease string `json:"lease,omitempty"`
 	// WorkspaceMountpoint is where the assignment told the guest to mount
 	// the workspace; Quiesce needs it after a restart.
@@ -229,6 +230,7 @@ func (q *QEMU) Launch(ctx context.Context, id ID, class Class) error {
 	record := meta{
 		ID:          id,
 		Class:       class,
+		Image:       shape.Image,
 		CID:         cid,
 		RootDataset: dataset,
 		Argv:        argv,
@@ -283,11 +285,9 @@ func (q *QEMU) allocateCIDLocked() (uint32, error) {
 	return cid, nil
 }
 
-// Assign implements Driver. The lease binding is persisted before the
-// hot-attach: an ambiguous failure (attached or delivered, then an error)
-// must leave a VM that still names its lease, so recovery destroys it
-// through the lease's failure path instead of stranding a live runner.
-func (q *QEMU) Assign(ctx context.Context, id ID, assignment Assignment) error {
+// Prepare implements Driver. The opaque listener lease is persisted before
+// delivery so recovery never mistakes a registered runner for an idle VM.
+func (q *QEMU) Prepare(ctx context.Context, id ID, preparation Preparation) error {
 	if err := validateID(id); err != nil {
 		return err
 	}
@@ -300,15 +300,47 @@ func (q *QEMU) Assign(ctx context.Context, id ID, assignment Assignment) error {
 	if err != nil {
 		return err
 	}
-	if record.Lease != "" && record.Lease != assignment.Lease {
+	if record.Lease != "" && record.Lease != preparation.Lease {
 		return fmt.Errorf("vm: %s already assigned to lease %s", id, record.Lease)
 	}
 	if record.Lease == "" {
-		record.Lease = assignment.Lease
-		record.WorkspaceMountpoint = assignment.WorkspaceMountpoint
+		record.Lease = preparation.Lease
 		if err := q.writeMeta(record); err != nil {
 			return err
 		}
+	}
+	deliverCtx, cancel := context.WithTimeout(ctx, q.probeTimeout)
+	defer cancel()
+	return q.cfg.Guest.Prepare(deliverCtx, id, record.CID, guestproto.Prepare{
+		Lease: preparation.Lease, JITConfig: preparation.JITConfig, Env: preparation.Env,
+	})
+}
+
+// Rendezvous implements Driver. The workspace is hot-attached only after the
+// selected runner's synchronous job-start hook has reported identity.
+func (q *QEMU) Rendezvous(ctx context.Context, id ID, rendezvous Rendezvous) error {
+	if err := validateID(id); err != nil {
+		return err
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	record, err := q.readMeta(id)
+	if errors.Is(err, os.ErrNotExist) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if record.Lease != rendezvous.Lease {
+		return fmt.Errorf("vm: %s carries lease %s, not %s", id, record.Lease, rendezvous.Lease)
+	}
+	if record.WorkspaceMountpoint == "" {
+		record.WorkspaceMountpoint = rendezvous.WorkspaceMountpoint
+		if err := q.writeMeta(record); err != nil {
+			return err
+		}
+	} else if record.WorkspaceMountpoint != rendezvous.WorkspaceMountpoint {
+		return fmt.Errorf("vm: %s already bound at %s", id, record.WorkspaceMountpoint)
 	}
 
 	client, err := dialQMP(ctx, qmpSocketPath(q.stateDir(id)))
@@ -316,21 +348,20 @@ func (q *QEMU) Assign(ctx context.Context, id ID, assignment Assignment) error {
 		return err
 	}
 	defer client.Close()
-	if err := q.attachWorkspace(ctx, client, assignment.WorkspaceDevice); err != nil {
+	if err := q.attachWorkspace(ctx, client, rendezvous.WorkspaceDevice); err != nil {
 		return err
 	}
 	deliverCtx, cancel := context.WithTimeout(ctx, q.probeTimeout)
 	defer cancel()
-	return q.cfg.Guest.Deliver(deliverCtx, id, record.CID, guestproto.Assignment{
-		Lease: assignment.Lease,
+	return q.cfg.Guest.Rendezvous(deliverCtx, id, record.CID, guestproto.Rendezvous{
+		Lease: rendezvous.Lease,
 		Mounts: []guestproto.Mount{{
 			Serial:     workspaceNode,
 			Filesystem: workspaceFilesystem,
-			Mountpoint: assignment.WorkspaceMountpoint,
+			Mountpoint: rendezvous.WorkspaceMountpoint,
 			Options:    workspaceMountOptions,
 		}},
-		JITConfig: assignment.JITConfig,
-		Env:       assignment.Env,
+		Env: rendezvous.Env,
 	})
 }
 
@@ -503,7 +534,10 @@ func (q *QEMU) observeLocked(ctx context.Context, id ID) (Status, bool, error) {
 	if err != nil {
 		return Status{}, false, err
 	}
-	status := Status{ID: id, Class: record.Class, Phase: PhaseBooting, Lease: record.Lease}
+	status := Status{
+		ID: id, Class: record.Class, Image: record.Image,
+		Phase: PhaseBooting, Lease: record.Lease,
+	}
 	if record.Lease != "" {
 		status.Phase = PhaseAssigned
 	}
@@ -512,7 +546,10 @@ func (q *QEMU) observeLocked(ctx context.Context, id ID) (Status, bool, error) {
 		return Status{}, false, err
 	}
 	if !alive {
-		return Status{ID: id, Class: record.Class, Phase: PhaseGone, Lease: record.Lease}, true, nil
+		return Status{
+			ID: id, Class: record.Class, Image: record.Image,
+			Phase: PhaseGone, Lease: record.Lease,
+		}, true, nil
 	}
 	if !q.vmRunning(ctx, id) {
 		// QEMU exists but is not (yet) running the guest; nothing further
@@ -530,8 +567,26 @@ func (q *QEMU) observeLocked(ctx context.Context, id ID) (Status, bool, error) {
 	case observation.RunnerExited:
 		status.Phase = PhaseExited
 		status.ExitCode = observation.ExitCode
-	case observation.RunnerRegistered:
+	case observation.Released:
 		status.Phase = PhaseReady
+		status.Identity = JobIdentity{
+			RunID: observation.Identity.RunID, RunAttempt: observation.Identity.RunAttempt,
+			RunnerName: observation.Identity.RunnerName, Repository: observation.Identity.Repository,
+			WorkflowJob: observation.Identity.WorkflowJob,
+		}
+		status.Clock = ClockSample{
+			UnixNS: observation.Clock.UnixNS, Synchronized: observation.Clock.Synchronized,
+			Clocksource: observation.Clock.Clocksource, AfterRestore: observation.Clock.AfterRestore,
+		}
+	case observation.HookBlocked:
+		status.Phase = PhaseHookBlocked
+		status.Identity = JobIdentity{
+			RunID: observation.Identity.RunID, RunAttempt: observation.Identity.RunAttempt,
+			RunnerName: observation.Identity.RunnerName, Repository: observation.Identity.Repository,
+			WorkflowJob: observation.Identity.WorkflowJob,
+		}
+	case observation.RunnerRegistered:
+		status.Phase = PhaseListening
 	case record.Lease != "":
 		status.Phase = PhaseAssigned
 	case observation.Hello:

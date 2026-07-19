@@ -24,6 +24,12 @@ func validateDesired(d syncproto.DesiredLease) error {
 	if err := zvol.ValidateName("lease", d.LeaseID); err != nil {
 		return err
 	}
+	if d.ExecutionLeaseID == "" {
+		d.ExecutionLeaseID = d.LeaseID
+	}
+	if err := zvol.ValidateName("execution lease", d.ExecutionLeaseID); err != nil {
+		return err
+	}
 	if d.Workspace.Generation != "" {
 		if err := zvol.ValidateName("generation", d.Workspace.Generation); err != nil {
 			return err
@@ -41,11 +47,17 @@ func validateDesired(d syncproto.DesiredLease) error {
 		if d.ExecutionID == "" || d.AttemptID == "" {
 			return fmt.Errorf("lease %s: missing execution identity", d.LeaseID)
 		}
-		if d.RunnerClass == "" || d.JITConfig == "" {
-			return fmt.Errorf("lease %s: missing runner class or jit config", d.LeaseID)
+		if d.RunnerClass == "" {
+			return fmt.Errorf("lease %s: missing runner class", d.LeaseID)
 		}
 		if d.RepositoryFullName == "" {
 			return fmt.Errorf("lease %s: missing repository", d.LeaseID)
+		}
+		if d.ProviderRunID <= 0 || d.ProviderJobID <= 0 || d.ProviderRunAttempt <= 0 {
+			return fmt.Errorf("lease %s: missing provider identity", d.LeaseID)
+		}
+		if d.RendezvousAuthorized && d.AssignedRunnerName == "" {
+			return fmt.Errorf("lease %s: authorized without an assigned runner", d.LeaseID)
 		}
 	}
 	return nil
@@ -89,7 +101,7 @@ func (a *Agent) buildReport(ctx context.Context) (syncproto.SyncRequest, error) 
 		switch status.Phase {
 		case vm.PhaseBooting, vm.PhaseWarm:
 			slot.Warm++
-		case vm.PhaseAssigned, vm.PhaseReady, vm.PhaseExited:
+		case vm.PhaseAssigned, vm.PhaseListening, vm.PhaseHookBlocked, vm.PhaseReady, vm.PhaseExited:
 			slot.Used++
 		}
 	}
@@ -106,6 +118,13 @@ func (a *Agent) applyDesired(response syncproto.SyncResponse) {
 	desired := make(map[string]syncproto.DesiredLease, len(response.Leases))
 	quarantined := map[string]bool{}
 	for _, d := range response.Leases {
+		if existing, ok := a.leases[d.LeaseID]; ok && d.JITConfig == "" {
+			// A crossed job can complete the database row that originally
+			// minted this listener while the listener is still executing a
+			// different routed job. Its consumed JIT credential is scrubbed
+			// at rest; the running host keeps only its in-memory copy.
+			d.JITConfig = existing.spec.JITConfig
+		}
 		if err := validateDesired(d); err != nil {
 			// The control plane named this lease; we could not understand
 			// the spec (version skew is the realistic cause). Quarantine
@@ -121,6 +140,17 @@ func (a *Agent) applyDesired(response syncproto.SyncResponse) {
 		}
 		desired[d.LeaseID] = d
 		if existing, ok := a.leases[d.LeaseID]; ok {
+			if executionLeaseID(existing.spec) != executionLeaseID(d) &&
+				existing.volume.Name != "" {
+				a.logger.Error("rejecting execution reassignment after volume resolution",
+					"listener", d.LeaseID,
+					"from", executionLeaseID(existing.spec),
+					"to", executionLeaseID(d))
+				a.metrics.RejectedLeases.Add(1)
+				quarantined[d.LeaseID] = true
+				delete(desired, d.LeaseID)
+				continue
+			}
 			existing.spec = d
 			if a.quarantined[d.LeaseID] {
 				// Quarantine froze the lifecycle; the time it consumed must

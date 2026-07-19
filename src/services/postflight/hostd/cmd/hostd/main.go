@@ -47,8 +47,10 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -97,8 +99,11 @@ func run(logger *slog.Logger) error {
 		HostID:              cfg.hostID,
 		ControlPlaneOrigin:  cfg.syncURL,
 		Slots:               map[vm.Class]int{class: cfg.slots},
+		Images:              map[vm.Class]string{class: image},
 		SyncInterval:        cfg.syncInterval,
 		CheckoutGuestOrigin: cfg.checkoutGuestOrigin,
+		TraceDir:            filepath.Join(cfg.stateDir, "rendezvous"),
+		Platform:            platformFingerprint(cfg),
 	}, &zvol.Exec{Root: cfg.pool}, vms, cfg.syncSecret, hostSecret, agent.Options{Logger: logger})
 	if err != nil {
 		return err
@@ -156,4 +161,25 @@ func run(logger *slog.Logger) error {
 	defer shutdownCancel()
 	_ = server.Shutdown(shutdownCtx)
 	return exitErr
+}
+
+func platformFingerprint(cfg config) agent.PlatformFingerprint {
+	qemuRaw, _ := exec.Command(cfg.qemuPath, "--version").CombinedOutput()
+	kernelRaw, _ := os.ReadFile("/proc/sys/kernel/osrelease")
+	cpuRaw, _ := os.ReadFile("/proc/cpuinfo")
+	cpuModel := ""
+	for _, line := range strings.Split(string(cpuRaw), "\n") {
+		if key, value, ok := strings.Cut(line, ":"); ok && strings.TrimSpace(key) == "model name" {
+			cpuModel = strings.TrimSpace(value)
+			break
+		}
+	}
+	qemuVersion := strings.TrimSpace(string(qemuRaw))
+	if line, _, ok := strings.Cut(qemuVersion, "\n"); ok {
+		qemuVersion = line
+	}
+	return agent.PlatformFingerprint{
+		QEMUVersion: qemuVersion, KernelRelease: strings.TrimSpace(string(kernelRaw)),
+		OSImageID: cfg.imageID, MachineType: vm.MachineType, CPUModel: cpuModel,
+	}
 }

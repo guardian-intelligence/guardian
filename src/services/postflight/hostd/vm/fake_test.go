@@ -25,13 +25,13 @@ func TestFakeMirrorsRealDriverMismatchErrors(t *testing.T) {
 	if !fake.AdvanceBoot("vm-a") {
 		t.Fatal("advance boot")
 	}
-	if err := fake.Assign(ctx, "vm-a", Assignment{Lease: "lease-1"}); err != nil {
+	if err := fake.Prepare(ctx, "vm-a", Preparation{Lease: "lease-1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := fake.Assign(ctx, "vm-a", Assignment{Lease: "lease-1"}); err != nil {
-		t.Fatalf("repeat assign: %v", err)
+	if err := fake.Prepare(ctx, "vm-a", Preparation{Lease: "lease-1"}); err != nil {
+		t.Fatalf("repeat prepare: %v", err)
 	}
-	if err := fake.Assign(ctx, "vm-a", Assignment{Lease: "lease-2"}); err == nil {
+	if err := fake.Prepare(ctx, "vm-a", Preparation{Lease: "lease-2"}); err == nil {
 		t.Fatal("reassigned a vm to a different lease")
 	}
 }

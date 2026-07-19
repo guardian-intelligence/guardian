@@ -5,11 +5,11 @@ import (
 	"strconv"
 )
 
-// machineType is the pinned guest platform. A versioned q35 keeps the device
+// MachineType is the pinned guest platform. A versioned q35 keeps the device
 // model identical across QEMU upgrades: argv determinism is load-bearing —
 // the same class must produce byte-identical argv on every host, because the
 // launch configuration feeds attestation measurement stability.
-const machineType = "pc-q35-8.2"
+const MachineType = "pc-q35-8.2"
 
 // workspaceNode names the hot-attached workspace on both sides of the QMP
 // seam: the blockdev node, the qdev id (dev- prefixed), and the SCSI serial
@@ -62,7 +62,7 @@ func (s LaunchSpec) Argv() []string {
 	argv := []string{
 		s.QEMUPath,
 		"-nodefaults",
-		"-machine", machineType + ",accel=kvm",
+		"-machine", MachineType + ",accel=kvm",
 		"-cpu", "host",
 		"-smp", strconv.Itoa(s.CPUs),
 		"-m", strconv.Itoa(s.MemoryMiB),

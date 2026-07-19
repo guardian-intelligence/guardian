@@ -111,9 +111,13 @@ func (s *syncServer) applyLeaseReport(ctx context.Context, hostID string, report
 	if report.LeaseID == "" {
 		return nil
 	}
-	attrs := eventAttrs{LeaseID: report.LeaseID, HostID: hostID}
+	executionLeaseID := report.ExecutionLeaseID
+	if executionLeaseID == "" {
+		executionLeaseID = report.LeaseID
+	}
+	attrs := eventAttrs{LeaseID: executionLeaseID, HostID: hostID}
 	switch report.State {
-	case syncproto.StateReady:
+	case syncproto.StateListening, syncproto.StateReady:
 		ready, err := s.st.MarkLeaseReady(ctx, hostID, report.LeaseID)
 		if err != nil {
 			return err
@@ -123,9 +127,18 @@ func (s *syncServer) applyLeaseReport(ctx context.Context, hostID string, report
 			emitEvent(ctx, evLeaseReady, attrs)
 		}
 		return nil
+	case syncproto.StateHookBlocked:
+		if report.Identity != nil {
+			slog.Info("postflight.rendezvous.hook_blocked",
+				"lease_id", report.LeaseID, "host_id", hostID,
+				"run_id", report.Identity.RunID, "run_attempt", report.Identity.RunAttempt,
+				"runner_name", report.Identity.RunnerName, "repo", report.Identity.Repository)
+		}
+		return nil
 	case syncproto.StateExited:
-		jobID, sealGeneration, completed, err := s.st.CompleteLease(ctx, hostID, report.LeaseID, report.ExitCode,
-			time.Now().Add(s.sealTimeout))
+		jobID, sealGeneration, completed, err := s.st.CompleteRoutedLease(
+			ctx, hostID, report.LeaseID, executionLeaseID,
+			report.ExitCode, time.Now().Add(s.sealTimeout))
 		if err != nil {
 			return err
 		}
@@ -143,7 +156,9 @@ func (s *syncServer) applyLeaseReport(ctx context.Context, hostID string, report
 		if report.SealedGeneration == "" {
 			return nil
 		}
-		jobID, sealed, err := s.st.RecordLeaseSealed(ctx, hostID, report.LeaseID, report.SealedGeneration)
+		jobID, sealed, err := s.st.RecordRoutedLeaseSealed(
+			ctx, hostID, report.LeaseID, executionLeaseID,
+			report.SealedGeneration)
 		if err != nil {
 			return err
 		}
@@ -159,7 +174,9 @@ func (s *syncServer) applyLeaseReport(ctx context.Context, hostID string, report
 		if reason == "" {
 			reason = string(report.State) + " on host"
 		}
-		jobID, failed, err := s.st.FailLeaseFromHost(ctx, hostID, report.LeaseID, string(report.State), reason,
+		jobID, failed, err := s.st.FailRoutedLeaseFromHost(
+			ctx, hostID, report.LeaseID, executionLeaseID,
+			string(report.State), reason,
 			[]problem{problemSandboxFailed(reason)})
 		if err != nil {
 			return err
@@ -173,7 +190,9 @@ func (s *syncServer) applyLeaseReport(ctx context.Context, hostID string, report
 		// A failure after the runner already exited green is a lost seal,
 		// not a job failure: discard the candidate and keep the demand's
 		// completed verdict.
-		sealFailed, err := s.st.FailSealingLease(ctx, hostID, report.LeaseID, string(report.State), reason)
+		sealFailed, err := s.st.FailRoutedSealingLease(
+			ctx, hostID, report.LeaseID, executionLeaseID,
+			string(report.State), reason)
 		if err != nil {
 			return err
 		}
@@ -198,16 +217,22 @@ func (s *syncServer) desiredState(ctx context.Context, request syncproto.SyncReq
 	}
 	for _, row := range leases {
 		desired := syncproto.DesiredLease{
-			LeaseID:            row.LeaseID,
-			State:              syncproto.DesiredRun,
-			ExecutionID:        row.ExecutionID,
-			AttemptID:          row.AttemptID,
-			OrgID:              row.OrgID,
-			InstallationID:     row.InstallationID,
-			RepositoryID:       row.RepositoryID,
-			RepositoryFullName: row.RepositoryFullName,
-			RunnerClass:        row.RunnerClass,
-			JITConfig:          row.JITConfig,
+			LeaseID:              row.LeaseID,
+			ExecutionLeaseID:     row.ExecutionLeaseID,
+			State:                syncproto.DesiredRun,
+			ExecutionID:          row.ExecutionID,
+			AttemptID:            row.AttemptID,
+			OrgID:                row.OrgID,
+			InstallationID:       row.InstallationID,
+			RepositoryID:         row.RepositoryID,
+			RepositoryFullName:   row.RepositoryFullName,
+			RunnerClass:          row.RunnerClass,
+			JITConfig:            row.JITConfig,
+			ProviderRunID:        row.ProviderRunID,
+			ProviderJobID:        row.ProviderJobID,
+			ProviderRunAttempt:   int(row.ProviderRunAttempt),
+			AssignedRunnerName:   row.AssignedRunnerName,
+			RendezvousAuthorized: row.RendezvousAuthorized,
 			Workspace: syncproto.WorkspaceSpec{
 				Generation: row.Generation,
 				SizeBytes:  row.SizeBytes,

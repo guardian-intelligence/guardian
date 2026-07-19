@@ -13,8 +13,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"path"
+	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -47,6 +51,12 @@ type Config struct {
 	// QuiesceWindow bounds how long a busy unmount is retried before the
 	// quiesce is reported failed.
 	QuiesceWindow time.Duration
+	// RendezvousDir is the root-owned exchange directory shared with the
+	// runner's synchronous job-start hook.
+	RendezvousDir string
+	// HookDeadline bounds a hook that GitHub itself would otherwise allow
+	// to block forever.
+	HookDeadline time.Duration
 	// Encryption is the baked at-rest mode for workspace volumes; the zero
 	// value mounts plaintext. See LoadEncryptionMode.
 	Encryption EncryptionMode
@@ -73,6 +83,15 @@ func (c *Config) validate() error {
 	if c.QuiesceWindow <= 0 {
 		c.QuiesceWindow = 10 * time.Second
 	}
+	if c.RendezvousDir == "" {
+		c.RendezvousDir = "/run/postflight-rendezvous"
+	}
+	if !path.IsAbs(c.RendezvousDir) || path.Clean(c.RendezvousDir) != c.RendezvousDir {
+		return fmt.Errorf("guestd: unsafe rendezvous directory %q", c.RendezvousDir)
+	}
+	if c.HookDeadline <= 0 {
+		c.HookDeadline = 2 * time.Minute
+	}
 	if c.HostCID == 0 {
 		c.HostCID = vsock.Host
 	}
@@ -88,10 +107,12 @@ func (c *Config) validate() error {
 type Server struct {
 	cfg Config
 
-	mu       sync.Mutex
-	conn     net.Conn
-	assigned *guestproto.Assignment
-	statuses []guestproto.RunnerStatus
+	mu         sync.Mutex
+	conn       net.Conn
+	prepared   *guestproto.Prepare
+	rendezvous *guestproto.Rendezvous
+	identity   *guestproto.JobIdentity
+	statuses   []guestproto.RunnerStatus
 
 	// writeMu serializes frames. It is separate from mu so a slow host —
 	// a blocked status write — can never stall inbound dispatch.
@@ -169,8 +190,10 @@ func (s *Server) handle(conn net.Conn, replay []guestproto.RunnerStatus) {
 			return
 		}
 		switch message.Kind {
-		case guestproto.KindAssignment:
-			s.handleAssignment(*message.Assignment)
+		case guestproto.KindPrepare:
+			s.handlePrepare(*message.Prepare)
+		case guestproto.KindRendezvous:
+			s.handleRendezvous(*message.Rendezvous)
 		case guestproto.KindQuiesce:
 			s.handleQuiesce(*message.Quiesce)
 		default:
@@ -225,52 +248,198 @@ func (s *Server) sendStatus(status guestproto.RunnerStatus) {
 	}
 }
 
-// handleAssignment starts the assignment exactly once; redelivery of the
-// same lease (the host converging after a partial apply) is a no-op, a
-// different lease is a protocol violation on a single-use VM.
-func (s *Server) handleAssignment(assignment guestproto.Assignment) {
+// handlePrepare starts one generic runner listener without customer mounts.
+func (s *Server) handlePrepare(prepare guestproto.Prepare) {
 	s.mu.Lock()
-	if s.assigned != nil {
-		duplicate := s.assigned.Lease == assignment.Lease
+	if s.prepared != nil {
+		duplicate := s.prepared.Lease == prepare.Lease
 		s.mu.Unlock()
 		if !duplicate {
-			s.cfg.Logger.Error("conflicting assignment ignored", "lease", assignment.Lease)
+			s.cfg.Logger.Error("conflicting preparation ignored", "lease", prepare.Lease)
 		}
 		return
 	}
-	claimed := assignment
-	s.assigned = &claimed
+	claimed := prepare
+	s.prepared = &claimed
 	s.mu.Unlock()
-	go s.run(assignment)
-}
-
-// run is the assignment's life: converge every mount, then the runner.
-func (s *Server) run(assignment guestproto.Assignment) {
-	s.sendStatus(guestproto.RunnerStatus{State: guestproto.RunnerMounting})
-
-	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.MountDeadline)
-	err := s.convergeMounts(ctx, assignment.Mounts)
-	cancel()
-	if err != nil {
-		s.cfg.Logger.Error("mount convergence failed", "lease", assignment.Lease, "err", err)
+	if err := s.resetRendezvousDir(); err != nil {
+		s.cfg.Logger.Error("rendezvous directory preparation failed", "lease", prepare.Lease, "err", err)
 		s.sendStatus(guestproto.RunnerStatus{State: guestproto.RunnerExited, ExitCode: SyntheticFailureExitCode})
 		return
 	}
+	go s.run(prepare)
+}
 
-	code, err := s.cfg.RunRunner(context.Background(), assignment.JITConfig, assignment.Env, func(event RunnerEvent) {
+func (s *Server) run(prepare guestproto.Prepare) {
+	code, err := s.cfg.RunRunner(context.Background(), prepare.JITConfig, prepare.Env, func(event RunnerEvent) {
 		switch event {
 		case EventListening:
 			s.sendStatus(guestproto.RunnerStatus{State: guestproto.RunnerRegistered})
 		case EventJobStarted:
-			s.sendStatus(guestproto.RunnerStatus{State: guestproto.RunnerJobStarted})
+			go s.observeBlockedHook(prepare.Lease)
 		}
 	})
 	if err != nil {
-		s.cfg.Logger.Error("runner failed to run", "lease", assignment.Lease, "err", err)
+		s.cfg.Logger.Error("runner failed to run", "lease", prepare.Lease, "err", err)
 		s.sendStatus(guestproto.RunnerStatus{State: guestproto.RunnerExited, ExitCode: SyntheticFailureExitCode})
 		return
 	}
 	s.sendStatus(guestproto.RunnerStatus{State: guestproto.RunnerExited, ExitCode: code})
+}
+
+func (s *Server) resetRendezvousDir() error {
+	if err := os.RemoveAll(s.cfg.RendezvousDir); err != nil {
+		return err
+	}
+	return os.MkdirAll(s.cfg.RendezvousDir, 0o733)
+}
+
+func (s *Server) observeBlockedHook(lease string) {
+	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.HookDeadline)
+	defer cancel()
+	request := filepath.Join(s.cfg.RendezvousDir, "request")
+	var lastErr error
+	for {
+		raw, err := os.ReadFile(request)
+		if err == nil {
+			identity, parseErr := parseHookIdentity(raw)
+			if parseErr != nil {
+				lastErr = parseErr
+			} else {
+				s.mu.Lock()
+				if s.prepared == nil || s.prepared.Lease != lease {
+					s.mu.Unlock()
+					return
+				}
+				captured := identity
+				s.identity = &captured
+				s.mu.Unlock()
+				s.sendStatus(guestproto.RunnerStatus{State: guestproto.RunnerHookBlocked, Identity: &identity})
+				return
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			lastErr = err
+		}
+		select {
+		case <-ctx.Done():
+			s.cfg.Logger.Error("job-start hook did not report valid identity", "lease", lease, "err", lastErr)
+			return
+		case <-time.After(s.cfg.RetryInterval):
+		}
+	}
+}
+
+func parseHookIdentity(raw []byte) (guestproto.JobIdentity, error) {
+	values := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if !ok || key == "" || value == "" {
+			return guestproto.JobIdentity{}, fmt.Errorf("invalid hook identity line")
+		}
+		if _, duplicate := values[key]; duplicate {
+			return guestproto.JobIdentity{}, fmt.Errorf("duplicate hook identity key %q", key)
+		}
+		values[key] = value
+	}
+	for key := range values {
+		switch key {
+		case "run_id", "run_attempt", "runner_name", "repository", "workflow_job":
+		default:
+			return guestproto.JobIdentity{}, fmt.Errorf("unknown hook identity key %q", key)
+		}
+	}
+	attempt, err := strconv.Atoi(values["run_attempt"])
+	if err != nil || attempt <= 0 {
+		return guestproto.JobIdentity{}, fmt.Errorf("invalid run attempt")
+	}
+	identity := guestproto.JobIdentity{
+		RunID: values["run_id"], RunAttempt: attempt, RunnerName: values["runner_name"],
+		Repository: values["repository"], WorkflowJob: values["workflow_job"],
+	}
+	if identity.RunID == "" || identity.RunnerName == "" || identity.Repository == "" || identity.WorkflowJob == "" {
+		return guestproto.JobIdentity{}, fmt.Errorf("incomplete hook identity")
+	}
+	return identity, nil
+}
+
+func (s *Server) handleRendezvous(rendezvous guestproto.Rendezvous) {
+	s.mu.Lock()
+	if s.prepared == nil || s.prepared.Lease != rendezvous.Lease || s.identity == nil {
+		s.mu.Unlock()
+		s.cfg.Logger.Error("rendezvous arrived before matching blocked hook", "lease", rendezvous.Lease)
+		return
+	}
+	if s.rendezvous != nil {
+		duplicate := s.rendezvous.Lease == rendezvous.Lease
+		s.mu.Unlock()
+		if !duplicate {
+			s.cfg.Logger.Error("conflicting rendezvous ignored", "lease", rendezvous.Lease)
+		}
+		return
+	}
+	claimed := rendezvous
+	identity := *s.identity
+	s.rendezvous = &claimed
+	s.mu.Unlock()
+	go s.bindAndRelease(rendezvous, identity)
+}
+
+func (s *Server) bindAndRelease(rendezvous guestproto.Rendezvous, identity guestproto.JobIdentity) {
+	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.MountDeadline)
+	err := s.convergeMounts(ctx, rendezvous.Mounts)
+	cancel()
+	if err != nil {
+		s.cfg.Logger.Error("mount convergence failed", "lease", rendezvous.Lease, "err", err)
+		s.abortHook(err)
+		return
+	}
+	if err := writeJobEnvironment(filepath.Join(s.cfg.RendezvousDir, "job-env"), rendezvous.Env); err != nil {
+		s.cfg.Logger.Error("writing rendezvous job environment", "lease", rendezvous.Lease, "err", err)
+		s.abortHook(err)
+		return
+	}
+	clock := sampleClock()
+	s.sendStatus(guestproto.RunnerStatus{
+		State: guestproto.RunnerMountsReady, Identity: &identity, Clock: &clock,
+	})
+	if err := os.WriteFile(filepath.Join(s.cfg.RendezvousDir, "release"), []byte("ready\n"), 0o644); err != nil {
+		s.cfg.Logger.Error("releasing job-start hook", "lease", rendezvous.Lease, "err", err)
+		s.abortHook(err)
+		return
+	}
+	s.sendStatus(guestproto.RunnerStatus{
+		State: guestproto.RunnerReleased, Identity: &identity, Clock: &clock,
+	})
+}
+
+func (s *Server) abortHook(reason error) {
+	message := strings.ReplaceAll(reason.Error(), "\n", " ")
+	_ = os.WriteFile(filepath.Join(s.cfg.RendezvousDir, "abort"), []byte(message+"\n"), 0o644)
+}
+
+func writeJobEnvironment(path string, env map[string]string) error {
+	keys := make([]string, 0, len(env))
+	for key, value := range env {
+		if key == "" || strings.ContainsAny(key, "=\r\n") || strings.ContainsAny(value, "\r\n") {
+			return fmt.Errorf("unsafe job environment entry")
+		}
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	var out strings.Builder
+	for _, key := range keys {
+		fmt.Fprintf(&out, "%s=%s\n", key, env[key])
+	}
+	return os.WriteFile(path, []byte(out.String()), 0o644)
+}
+
+func sampleClock() guestproto.ClockSample {
+	source, _ := os.ReadFile("/sys/devices/system/clocksource/clocksource0/current_clocksource")
+	_, err := os.Stat("/run/systemd/timesync/synchronized")
+	return guestproto.ClockSample{
+		UnixNS: time.Now().UnixNano(), Synchronized: err == nil,
+		Clocksource: strings.TrimSpace(string(source)),
+	}
 }
 
 func (s *Server) convergeMounts(ctx context.Context, mounts []guestproto.Mount) error {
