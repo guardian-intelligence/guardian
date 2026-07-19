@@ -500,15 +500,18 @@ func validatePlatform(platform *platformEvidence, violate func(string, ...any)) 
 		violate("pool_ready requires a platform fingerprint")
 		return
 	}
-	for name, value := range map[string]string{
-		"qemu_version":   platform.QEMUVersion,
-		"kernel_release": platform.KernelRelease,
-		"os_image_id":    platform.OSImageID,
-		"machine_type":   platform.MachineType,
-		"cpu_model":      platform.CPUModel,
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{"qemu_version", platform.QEMUVersion},
+		{"kernel_release", platform.KernelRelease},
+		{"os_image_id", platform.OSImageID},
+		{"machine_type", platform.MachineType},
+		{"cpu_model", platform.CPUModel},
 	} {
-		if value == "" {
-			violate("platform fingerprint has no %s", name)
+		if field.value == "" {
+			violate("platform fingerprint has no %s", field.name)
 		}
 	}
 }
@@ -695,9 +698,9 @@ func validateSnapshotSeal(event rendezvousEvent, generationSet string, bound []v
 			violate("snapshot sealed %s volume without dataset, snapshot_guid, or generation", volume.Role)
 		}
 	}
-	for role := range boundRoles {
-		if !sealedRoles[role] {
-			violate("snapshot did not seal bound %s volume", role)
+	for _, volume := range bound {
+		if !sealedRoles[volume.Role] {
+			violate("snapshot did not seal bound %s volume", volume.Role)
 		}
 	}
 }
