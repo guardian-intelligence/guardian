@@ -15,6 +15,7 @@ environment:
   QEMU_ACCELERATOR  Packer QEMU accelerator (default: kvm)
   QEMU_BINARY       QEMU binary (default: /usr/bin/qemu-system-x86_64)
   QEMU_CPUS         image-build vCPUs (default: 4)
+  QEMU_CPU_MODEL    image-build CPU model (default: host, or max for TCG)
   QEMU_MEMORY_MIB   image-build memory MiB (default: 16384)
   PACKER_TIMEOUT    hard build timeout (default: 8h)
 EOF
@@ -57,12 +58,20 @@ work_dir="${WORK_DIR:-/var/tmp/postflight-image}"
 qemu_accelerator="${QEMU_ACCELERATOR:-kvm}"
 qemu_binary="${QEMU_BINARY:-/usr/bin/qemu-system-x86_64}"
 qemu_cpus="${QEMU_CPUS:-4}"
+qemu_cpu_model="${QEMU_CPU_MODEL:-}"
 qemu_memory_mib="${QEMU_MEMORY_MIB:-16384}"
 packer_timeout="${PACKER_TIMEOUT:-8h}"
 
 [[ -x "${qemu_binary}" ]] || die "QEMU binary is not executable: ${qemu_binary}"
 [[ "${qemu_cpus}" =~ ^[1-9][0-9]*$ ]] || die "QEMU_CPUS must be a positive integer"
 [[ "${qemu_memory_mib}" =~ ^[1-9][0-9]*$ ]] || die "QEMU_MEMORY_MIB must be a positive integer"
+if [[ -z "${qemu_cpu_model}" ]]; then
+  if [[ "${qemu_accelerator}" == "tcg" ]]; then
+    qemu_cpu_model="max"
+  else
+    qemu_cpu_model="host"
+  fi
+fi
 if [[ "${qemu_accelerator}" == "kvm" && ! -r /dev/kvm ]]; then
   die "/dev/kvm is unavailable (set QEMU_ACCELERATOR=tcg only for template smoke tests)"
 fi
@@ -206,6 +215,7 @@ log "validating runner-images QEMU template"
   -var "qemu_accelerator=${qemu_accelerator}" \
   -var "qemu_binary=${qemu_binary}" \
   -var "qemu_cpus=${qemu_cpus}" \
+  -var "qemu_cpu_model=${qemu_cpu_model}" \
   -var "qemu_memory_mib=${qemu_memory_mib}" \
   -var "source_image_sha256=${UBUNTU_SHA256}" \
   -var "source_image_url=${ubuntu_url}" \
@@ -222,6 +232,7 @@ if ! timeout --foreground "${packer_timeout}" \
   -var "qemu_accelerator=${qemu_accelerator}" \
   -var "qemu_binary=${qemu_binary}" \
   -var "qemu_cpus=${qemu_cpus}" \
+  -var "qemu_cpu_model=${qemu_cpu_model}" \
   -var "qemu_memory_mib=${qemu_memory_mib}" \
   -var "source_image_sha256=${UBUNTU_SHA256}" \
   -var "source_image_url=${ubuntu_url}" \
