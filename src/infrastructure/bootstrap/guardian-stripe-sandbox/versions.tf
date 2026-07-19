@@ -4,7 +4,7 @@ terraform {
   required_providers {
     stripe = {
       source  = "stripe/stripe"
-      version = "= 0.2.2"
+      version = "0.2.3"
     }
   }
 
