@@ -265,6 +265,8 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 		"Guardian login canary must run the signed browser image")
 	assertTextContains(t, string(canary), `value: https://guardianintelligence.org/postflight`,
 		"Guardian login canary must start at the public Postflight route")
+	assertTextContains(t, string(canary), `schedule: "*/15 * * * *"`,
+		"Guardian login canary must stay below GitHub's per-user OAuth token issuance limit")
 	assertTextContains(t, string(canary), `name: GITHUB_CANARY_TOTP_SECRET`,
 		"Guardian login canary must exercise GitHub MFA")
 	assertTextNotContains(t, string(canary), `grant_type=password`,

@@ -19,11 +19,15 @@ description: Create and secure the GitHub machine account used by the Sign in wi
 6. Remove every organization membership, repository grant, token, SSH key, GPG key, billing method, and GitHub App installation from the account.
 7. Sign out, then prove a fresh-profile login with `USERNAME`, the password,
    and a current TOTP code.
-8. Store `USERNAME`, the password, and the TOTP setup key as
+8. In that fresh profile, open `https://guardianintelligence.org/postflight`,
+   choose **Sign in with Guardian** and GitHub, approve **Sign in with
+   Guardian** once, complete the Postflight callback, and verify the App is
+   listed under GitHub's **Settings → Applications → Authorized OAuth Apps**.
+9. Store `USERNAME`, the password, and the TOTP setup key as
    `PROD_GITHUB_LOGIN_CANARY_USERNAME`,
    `PROD_GITHUB_LOGIN_CANARY_PASSWORD`, and
    `PROD_GITHUB_LOGIN_CANARY_TOTP_SECRET` in custody. Store recovery codes
    only in custody; never transmit credentials or recovery codes in chat.
-9. Import the three canary values to
+10. Import the three canary values to
    `guardian/guardian-mgmt/tenant-guardian-prod/keycloak/login-canary-github`
    and wipe the restored custody workspace immediately.

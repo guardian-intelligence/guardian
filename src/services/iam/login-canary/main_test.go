@@ -56,7 +56,7 @@ func TestClassifyOAuthPage(t *testing.T) {
 		{
 			name:    "GitHub disabled consent",
 			state:   oauthPageState{Host: "github.com", Path: "/login/oauth/authorize", GrantBlocked: true},
-			errText: "verify the canary email",
+			errText: "persisted app grant",
 		},
 		{
 			name:    "GitHub visible error",

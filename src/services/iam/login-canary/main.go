@@ -357,7 +357,7 @@ func classifyOAuthPage(state oauthPageState, postflightHost string) (oauthPageAc
 			return oauthWait, errors.New("GitHub rejected the canary login")
 		}
 		if state.GrantBlocked {
-			return oauthWait, errors.New("GitHub OAuth authorization is disabled; verify the canary email and account readiness")
+			return oauthWait, errors.New("GitHub OAuth authorization is disabled; verify account readiness, the persisted app grant, and OAuth token cadence")
 		}
 		if state.HasTOTP {
 			return oauthSubmitTOTP, nil

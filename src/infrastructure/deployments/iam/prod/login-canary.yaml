@@ -8,7 +8,9 @@ metadata:
     app.kubernetes.io/part-of: guardian
     guardian.dev/stage: prod
 spec:
-  schedule: "*/5 * * * *"
+  # GitHub limits one user/application/scope combination to ten OAuth tokens
+  # per hour and forces interactive reauthorization when the limit is crossed.
+  schedule: "*/15 * * * *"
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 120
   successfulJobsHistoryLimit: 1

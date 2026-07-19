@@ -88,10 +88,18 @@ administrators are recovery artifacts, not runtime dependencies.
 
 The production canary is a fresh Chromium profile that performs the same
 journey as a user: open Postflight, click **Sign in with Guardian**, enter the
-GitHub machine account credentials and TOTP, approve the OAuth App when GitHub
-asks, return through the OIDC callback, verify an authenticated Postflight
-session, sign out, and verify the local session is gone. It does not use a
-direct grant or Keycloak admin API and it does not simulate a broker callback.
+GitHub machine account credentials and TOTP, return through the OIDC callback,
+verify an authenticated Postflight session, sign out, and verify the local
+session is gone. It does not use a direct grant or Keycloak admin API and it
+does not simulate a broker callback.
+
+An operator approves the OAuth App once in an interactive browser during
+machine-account enrollment and verifies that it appears under the account's
+authorized OAuth Apps. Scheduled runs use a fresh browser profile and fail if
+GitHub unexpectedly requires interactive consent again. The canary runs every
+15 minutes because GitHub limits a user/application/scope combination to ten
+OAuth tokens per hour and deliberately forces reauthorization above that
+limit.
 
 The machine account is permanent and has no organization privileges. Its
 password and TOTP seed live only in the production OpenBao scope. Its first
