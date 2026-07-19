@@ -2,8 +2,8 @@
 
 One root disk image containing everything a runner VM needs and zero
 customer bytes: Ubuntu 24.04, the pinned `actions/runner` tree, Node.js,
-git, passwordless `sudo` for the single-job runner user, and guestd. Workload
-always arrives later, via the workspace zvol.
+git, archive extraction, passwordless `sudo` for the single-job runner user,
+and guestd. Workload always arrives later, via the workspace zvol.
 Explicitly absent: docker, cloud-init, ssh (no ingress path into a runner
 VM at all), k8s anything.
 
@@ -37,12 +37,14 @@ sudo env POOL=tank \
 The script prints the image id on stdout and logs everything else to
 stderr. Every artifact is fetched into `WORK_DIR` (default
 `/var/tmp/postflight-image`) and sha256-verified against `pins.env` before
-use; any mismatch aborts. The rootfs is grown to 8GiB during the build
-(nothing grows it at boot) and the script fails unless at least 4GiB
-remains free after installs. Re-runs are idempotent: downloads are cached
-by checksum, modification always restarts from the pristine cloud image,
-the final dataset appears atomically (`zfs send | zfs recv`), and an
-`@golden` snapshot that already exists is left untouched.
+use; any mismatch aborts. The rootfs is grown to 80GiB during the build
+(nothing grows it at boot) and the script fails unless at least 64GiB
+remains free after installs. This ephemeral root disk is separate from the
+80GiB durable workspace zvol configured for the 4-vCPU runner class.
+Re-runs are idempotent: downloads are cached by checksum, modification
+always restarts from the pristine cloud image, the final dataset appears
+atomically (`zfs send | zfs recv`), and an `@golden` snapshot that already
+exists is left untouched.
 
 ## Verify
 
