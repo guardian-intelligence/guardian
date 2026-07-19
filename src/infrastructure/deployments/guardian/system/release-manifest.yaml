@@ -25,7 +25,7 @@ releases:
       image: ghcr.io/guardian-intelligence/cockpit@sha256:0589274466069f6c2e6df0f67ab38f7ac1288887d71d73085f80bce2b72e0ca2
   company-site:
     prod:
-      image: ghcr.io/guardian-intelligence/company-site@sha256:8505510d2386c1d4c7e2599f3fdd15c3fdbd1d108e259d147d54be69a6118fe1
+      image: ghcr.io/guardian-intelligence/company-site@sha256:7a4644d8147f39632dd84f0061844846a3e6deb55ac524b7e44eef1d84c1fd04
   postflight-controlplane:
     prod:
       image: ghcr.io/guardian-intelligence/postflight-controlplane@sha256:479e86928558377f66b462c4d2f95d89ab2e215a5b00ba01ca8fb96256a3bb16
