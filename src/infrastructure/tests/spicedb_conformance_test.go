@@ -98,12 +98,12 @@ func TestSpiceDBProductionTopologyAndSecurity(t *testing.T) {
 	markerPath := runfilePath("src/infrastructure/deployments/authorization/data/restore-marker.yaml")
 	marker := readText(t, markerPath)
 	for _, want := range []string{
-		"name: spicedb-restore-marker-v2-20260718",
+		"name: spicedb-restore-marker-v3-20260719",
 		"kustomize.toolkit.fluxcd.io/substitute: disabled",
 		"docker.io/library/postgres:18.1@sha256:1090bc3a8ccfb0b55f78a494d76f8d603434f7e4553543d6e807bc7bd6bbd17f",
 		"sslmode=verify-full",
 		"guardian_restore_drill_marker",
-		"c6139a02-61f9-4e69-98b3-b5ff248f4fa0",
+		"0a90ea81-fcaf-437b-a34f-d1da44c720f6",
 		"cnpg.io/cluster: postgres-spicedb",
 		"runAsUser: 999",
 		"runAsGroup: 999",
