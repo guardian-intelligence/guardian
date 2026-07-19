@@ -6,10 +6,14 @@ sh_test(
     srcs = ["image_test.sh"],
     args = [
         "$(rootpath build.sh)",
+        "$(rootpath build-upstream.sh)",
+        "$(rootpath render-qemu-template.py)",
         "$(rootpath pins.env)",
     ],
     data = [
         "build.sh",
+        "build-upstream.sh",
         "pins.env",
+        "render-qemu-template.py",
     ],
 )

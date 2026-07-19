@@ -1,11 +1,18 @@
 # Postflight golden runner image
 
 One root disk image containing everything a runner VM needs and zero
-customer bytes: Ubuntu 24.04, the pinned `actions/runner` tree, Node.js,
-git, archive extraction, passwordless `sudo` for the single-job runner user,
-and guestd. Workload always arrives later, via the workspace zvol.
-Explicitly absent: docker, cloud-init, ssh (no ingress path into a runner
-VM at all), k8s anything.
+customer bytes. `build-upstream.sh` checks out a pinned
+`actions/runner-images` Ubuntu 24.04 release and runs its original Packer
+provisioners and toolset in their original order, changing only the
+Azure machine builder and Azure-agent deprovisioner. The result is cached
+as a QEMU qcow2 by upstream commit. `build.sh` layers the pinned
+`actions/runner`, cryptsetup, the single-job `runner` user, and guestd onto
+that image, removes the temporary image-build ingress, and imports it into
+ZFS. Workload always arrives later via the workspace zvol.
+
+The customer-facing toolchain, Docker, and `/opt/hostedtoolcache` therefore
+come from the same source release as GitHub-hosted runners. Explicitly
+absent from the final image: cloud-init and ssh.
 
 `build.sh` templates the image into ZFS as
 `<pool>/postflight/images/<image-id>@golden`. hostd clones one root disk
@@ -17,14 +24,13 @@ a new image identity.
 
 ## Build (on the tracer host)
 
-Prerequisites: root, `qemu-utils`, `zfsutils-linux`, `cloud-guest-utils`
-(growpart), `curl`, `git`, `python3`, `xz-utils`, the target zpool
-imported, and network egress to cloud-images.ubuntu.com, github.com, and
-nodejs.org.
+Prerequisites: root, KVM, QEMU, `qemu-utils`, `zfsutils-linux`,
+`cloud-guest-utils` (growpart), `genisoimage`, `curl`, `git`, `python3`,
+`unzip`, the target zpool imported, and network egress to
+cloud-images.ubuntu.com, github.com, HashiCorp releases, and every source
+used by the upstream runner-images provisioners.
 
-guestd is not in the repo yet, so the build cannot run end-to-end until it
-lands (`build.sh` fails closed without `GUESTD_BIN`). The intended
-invocation once `//src/services/postflight/guestd` exists:
+Build guestd for the target architecture, then pass its path explicitly:
 
 ```sh
 eval "$(scripts/bootstrap.sh path)"
@@ -35,16 +41,23 @@ sudo env POOL=tank \
 ```
 
 The script prints the image id on stdout and logs everything else to
-stderr. Every artifact is fetched into `WORK_DIR` (default
-`/var/tmp/postflight-image`) and sha256-verified against `pins.env` before
-use; any mismatch aborts. The rootfs is grown to 80GiB during the build
-(nothing grows it at boot) and the script fails unless at least 64GiB
-remains free after installs. This ephemeral root disk is separate from the
-80GiB durable workspace zvol configured for the 4-vCPU runner class.
-Re-runs are idempotent: downloads are cached by checksum, modification
-always restarts from the pristine cloud image, the final dataset appears
-atomically (`zfs send | zfs recv`), and an `@golden` snapshot that already
-exists is left untouched.
+stderr. Every direct artifact is fetched into `WORK_DIR` (default
+`/var/tmp/postflight-image`) and sha256-verified against `pins.env`; the
+upstream repository is fetched by full commit. The expensive upstream
+qcow2 cache binds the full pin set and QEMU adapter, and is checked with
+`qemu-img` before reuse. The release tag is also required to resolve to the
+pinned commit.
+The Packer build has an eight-hour hard timeout by default and retains its
+log and any incomplete output Packer leaves for diagnosis on failure. The
+rootfs is 80GiB, matching Blacksmith's 4-vCPU runner, and must retain the
+17GiB free-space floor enforced by runner-images itself. This ephemeral
+root disk is separate from the 80GiB durable workspace zvol.
+
+Re-runs are idempotent: modification always restarts from the cached,
+pristine upstream image, the final dataset appears atomically
+(`zfs send | zfs recv`), and an `@golden` snapshot that already exists is
+left untouched. Failed upstream build directories are deliberately not
+deleted during this tracer phase.
 
 ## Verify
 
@@ -61,11 +74,8 @@ sudo env \
 ```
 
 The suite injects a scripted guest seam, so it proves the image boots to
-userspace but exercises nothing guest-side. The full smoke — guestd's
-`hello` over vsock within the probe deadline and the runner reporting its
-version — becomes an additional conformance case once guestd and the vsock
-transport exist; until then the spot-check below is the only guestd
-coverage, and it is static.
+userspace but does not exercise guestd. Until the conformance suite speaks
+the real vsock protocol, the spot-check below is the static guestd coverage.
 
 Spot-check the contents without booting (`volmode=full`, unlike the `dev`
 that templates and per-slot clones use, surfaces the partition device
@@ -80,7 +90,9 @@ cat /mnt/opt/actions-runner/.disableupdate     # exists, empty
 test -x /mnt/usr/local/bin/guestd
 test -L /mnt/etc/systemd/system/multi-user.target.wants/guestd.service
 /mnt/usr/local/bin/node --version
-test ! -e /mnt/etc/ssh && test ! -e /mnt/etc/cloud && echo "no ssh, no cloud-init"
+test ! -e /mnt/usr/sbin/sshd && test ! -e /mnt/etc/cloud && echo "no ssh server, no cloud-init"
+test -x /mnt/usr/bin/docker
+test -d /mnt/opt/hostedtoolcache
 sudo umount /mnt && sudo zfs destroy tank/postflight/verify
 ```
 
@@ -95,11 +107,11 @@ so the fleet converges within one job cycle.
 ## Re-release cadence
 
 GitHub enforces a minimum runner version and retires old ones on ~30-day
-windows, so the image is re-released on GitHub's cadence, not ours: a stale
-image is a liveness failure (GitHub silently stops assigning jobs).
-Renovate proposes the `RUNNER_VERSION` and `NODE_VERSION` bumps in
-`pins.env`; the adjacent sha256 pins are completed by hand from the release
-notes checksum table (`actions/runner`) and `SHASUMS256.txt` (Node.js). The
-Ubuntu serial is bumped by hand from
-`cloud-images.ubuntu.com/minimal/releases/noble/` alongside its
-`SHA256SUMS` entry. Rebuilding and re-templating is one script run.
+windows, so the image is re-released on GitHub's cadence, not ours. Bump the
+runner-images tag, image version, and full commit together, then bump the
+Canonical server image serial/checksum to the release underlying that
+image. Renovate proposes the `RUNNER_VERSION` bump; its adjacent sha256 is
+completed from the release checksum table. Rebuilding and re-templating is
+one script run. Setting `HOSTD_IMAGE_ID` to the printed ID makes the pool
+governor destroy idle slots on older images and refill them from the new
+`@golden`; active jobs drain normally.
