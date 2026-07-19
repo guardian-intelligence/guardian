@@ -28,50 +28,6 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       initContainers:
-        - name: remove-obsolete-relationships
-          image: docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
-          command:
-            - /bin/sh
-            - -ec
-          args:
-            - |
-              api=https://spicedb:8443/v1/relationships/delete
-              authorization_header="Authorization: Bearer ${SPICEDB_TOKEN}" # gitleaks:allow -- runtime value from the mounted generated Secret
-              delete_relationships() {
-                curl --fail --silent --show-error --cacert /tls/ca.crt \
-                  -H "${authorization_header}" \
-                  -H 'Content-Type: application/json' \
-                  --data "$1" "${api}" |
-                  jq -e '.deletionProgress == "DELETION_PROGRESS_COMPLETE"' >/dev/null
-              }
-
-              delete_relationships '{"relationshipFilter":{"resourceType":"guardian_account","optionalRelation":"owner"}}'
-              delete_relationships '{"relationshipFilter":{"resourceType":"provider_connection"}}'
-              delete_relationships '{"relationshipFilter":{"resourceType":"github_installation","optionalRelation":"installer"}}'
-          env:
-            - name: SPICEDB_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: spicedb-api-token-slot-b
-                  key: password
-          resources:
-            requests:
-              cpu: 20m
-              memory: 32Mi
-            limits:
-              cpu: 250m
-              memory: 128Mi
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-          volumeMounts:
-            - name: tls
-              mountPath: /tls
-              readOnly: true
         - name: import
           image: ghcr.io/authzed/zed@sha256:339db064131cfd75c9385938f16fa445bcfa4a82bd9eed73402fd10c00ea374c
           args:
