@@ -72,10 +72,10 @@ work_dir="${WORK_DIR:-/var/tmp/postflight-image}"
 
 # Runner _diag logs, /tmp, and tool caches all land on the root disk at job
 # time — only the job workspace lives on the workspace zvol — and nothing
-# grows the rootfs at boot (cloud-init is purged), so the build grows it and
-# asserts the margin actually materialized.
-rootfs_size="8G"
-rootfs_min_free_bytes=$((4 * 1024 * 1024 * 1024))
+# grows the rootfs at boot (cloud-init is purged), so the build grows it to
+# the 4-vCPU class's root-disk size and asserts the margin materialized.
+rootfs_size="80G"
+rootfs_min_free_bytes=$((64 * 1024 * 1024 * 1024))
 
 ubuntu_image="ubuntu-24.04-minimal-cloudimg-amd64.img"
 ubuntu_url="https://cloud-images.ubuntu.com/minimal/releases/noble/release-${UBUNTU_SERIAL}/${ubuntu_image}"
@@ -256,7 +256,7 @@ in_chroot apt-get -q update
 # link; GitHub-hosted images carry one, so jobs assume it. cryptsetup-bin:
 # guestd opens the workspace volume with LUKS2 on the confidential tier.
 in_chroot apt-get -q -y --no-install-recommends install \
-  git build-essential pkg-config cryptsetup-bin sudo
+  git build-essential pkg-config cryptsetup-bin sudo unzip
 
 log "installing actions/runner ${RUNNER_VERSION}"
 in_chroot useradd --uid 1001 --user-group --create-home --shell /bin/bash runner

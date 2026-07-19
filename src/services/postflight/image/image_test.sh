@@ -15,8 +15,12 @@ fail() {
 }
 
 bash -n "${build_sh}" || fail "build.sh does not parse"
-grep -Fq "git build-essential pkg-config cryptsetup-bin sudo" "${build_sh}" ||
-  fail "build.sh does not install sudo"
+grep -Fq "git build-essential pkg-config cryptsetup-bin sudo unzip" "${build_sh}" ||
+  fail "build.sh does not install the runner bootstrap packages"
+grep -Fq 'rootfs_size="80G"' "${build_sh}" ||
+  fail "build.sh does not provision the 4-vCPU root-disk size"
+grep -Fq 'rootfs_min_free_bytes=$((64 * 1024 * 1024 * 1024))' "${build_sh}" ||
+  fail "build.sh does not enforce rootfs free-space headroom"
 grep -Fq "runner ALL=(ALL:ALL) NOPASSWD: ALL" "${build_sh}" ||
   fail "build.sh does not grant the runner passwordless sudo"
 grep -Fq 'chmod 0440 "${mnt}/etc/sudoers.d/runner"' "${build_sh}" ||
