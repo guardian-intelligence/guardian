@@ -143,10 +143,9 @@ role and policy when it finishes). Its import plan — `importPlan` in
 `src/infrastructure/cmd/openbao_secret_import/main.go` — is the DR re-seed
 manifest: the authoritative list of every secret the system needs after a
 raft wipe, keyed by custody env variables. Read the plan in the code, not a
-prose mirror of it: as of this writing it carries eight always-written paths
-plus up to nine optional per-stage Keycloak writes (imported only when the
-env file carries that stage's values), and each entry's comment explains its
-consumer.
+prose mirror of it: its optional Keycloak writes are imported only when the
+env file carries that environment's values, and each entry's comment explains
+its consumer.
 
 Beyond the kv plan, the importer also owns the `guardian-images` transit
 signing key (the image countersigner's key). A reinit recreates the transit

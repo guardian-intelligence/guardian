@@ -1,4 +1,4 @@
-# Keycloak for the Postflight IAM prod stage. Hand-rolled Deployment (not the
+# Keycloak for Guardian customer identity. Hand-rolled Deployment (not the
 # official Operator or keycloakx chart — both render StatefulSets, and
 # Flagger's targetRef only supports Deployment/DaemonSet). Durable state is
 # the stage's CNPG Postgres; multi-pod cache clustering uses the Quarkus
@@ -144,13 +144,6 @@ spec:
               value: file
             - name: KC_VAULT_DIR
               value: /opt/keycloak/data/vault
-            # Consumed by the canary-password placeholder in the realm import
-            # JSON; the value lands in the database only as a password hash.
-            - name: KEYCLOAK_CANARY_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: keycloak-canary-user
-                  key: password
           startupProbe:
             httpGet:
               path: /health/started
@@ -195,17 +188,15 @@ spec:
       volumes:
         - name: realm-import
           configMap:
-            name: keycloak-realm-postflight
+            name: keycloak-realm-guardian
         # The file name follows the file-vault provider's REALM_UNDERSCORE_KEY
-        # convention (<realm>_<key>); the Secret keeps its existing key and the
-        # mount does the renaming, so the ExternalSecret and any pod still
-        # running the previous spec are untouched.
+        # convention (<realm>_<key>).
         - name: vault
           secret:
             secretName: keycloak-github-oauth
             items:
               - key: GITHUB_CLIENT_SECRET
-                path: postflight_github-client-secret
+                path: guardianintelligence.org_github-client-secret
 ---
 # Per-color JGroups discovery targets (DNS_PING). publishNotReadyAddresses is
 # required: pods must find each other before they report Ready.

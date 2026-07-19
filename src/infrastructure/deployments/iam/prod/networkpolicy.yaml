@@ -38,8 +38,7 @@ spec:
         - ports:
             - port: "7800"
               protocol: TCP
-    # flagger-loadtester runs the login gate and hey load against the canary
-    # Service during Flagger analysis.
+    # flagger-loadtester checks and loads the canary Service during analysis.
     - fromEndpoints:
         - matchLabels:
             app.kubernetes.io/name: flagger-loadtester
@@ -52,6 +51,17 @@ spec:
     - fromEndpoints:
         - matchLabels:
             app.kubernetes.io/name: keycloak-realm-reconciler
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    - fromEndpoints:
+        - matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values:
+                - company-site
+                - company-site-primary
       toPorts:
         - ports:
             - port: "8080"
@@ -97,7 +107,7 @@ spec:
               protocol: TCP
 ---
 # flagger-loadtester: webhook calls arrive from the Flagger controller; the
-# checks it executes go to the Keycloak pods (canary Service) plus DNS.
+# probes it executes go to the Keycloak pods (canary Service) plus DNS.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:

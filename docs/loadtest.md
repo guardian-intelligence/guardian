@@ -13,13 +13,12 @@ JS engine). It is the only load tool in the repo; do not add another.
 A surface earns "load-tested" by composing these, not by running one of them:
 
 1. **Continuous correctness canary** — a continuous assertion that the real
-   user flows work, alerting when the surface is broken. Two shapes: a
-   `CronJob` running real flows for logic-bearing surfaces
-   (`src/infrastructure/deployments/iam/login-canary/login-canary.js`, three
-   Keycloak flows), or blackbox_exporter probes on a 15s scrape for HTTP
-   surfaces (`deployments/alerting/{blackbox-exporter,synthetic-probes}.yaml`
-   — two classes: in-cluster Service and public-edge hairpin, with
-   per-phase timing incl. TTFB).
+   user flow works, alerting when the surface is broken. The Guardian login
+   canary is a digest-pinned Chromium `CronJob` that signs in through the
+   public Postflight page, Guardian, and GitHub, verifies the BFF session,
+   logs out, and verifies session destruction. Simpler HTTP surfaces use
+   blackbox_exporter probes on a 15s scrape
+   (`deployments/alerting/{blackbox-exporter,synthetic-probes}.yaml`).
 2. **Deploy-time stress gate** — a k6 arrival-rate run against the *canary
    color* before traffic shifts, thresholds-as-code, wired as a Flagger
    `pre-rollout` webhook. Landing with company-site as first consumer; see
@@ -55,10 +54,9 @@ Two more rules the platform depends on (keep them or the results are wrong):
 
 ## Adding a test to a surface
 
-1. **Write the script** next to the surface's deployment, e.g.
-   `deployments/<vertical>/load/<name>.js`. If every stage runs the identical
-   script, put it in one shared directory and render it per stage — see how
-   `deployments/iam/login-canary/` feeds all three stages from one file.
+1. **Write the k6 script** next to the surface's deployment, e.g.
+   `deployments/<vertical>/load/<name>.js`. If multiple stages run an
+   identical script, keep one shared file and render it into each stage.
 
 2. **Tag every metric** so gates and dashboards can find the series:
    ```js
@@ -86,7 +84,7 @@ Two more rules the platform depends on (keep them or the results are wrong):
          - <name>.js=../load/<name>.js
    ```
 
-4. **Remote-write results** to VictoriaMetrics from the CronJob/Job:
+4. **Remote-write k6 results** to VictoriaMetrics from the CronJob/Job:
    ```yaml
    args: [run, --tag, stage=<stage>, -o, experimental-prometheus-rw, /scripts/<name>.js]
    env:
@@ -103,6 +101,11 @@ Two more rules the platform depends on (keep them or the results are wrong):
    `Failing` rule on the failure/error series and an `Absent` rule so a canary
    that stops running still pages. Note one-shot runs emit a single sample per
    series, so use `sum_over_time`/presence, not `rate()`, over canary counters.
+
+Non-k6 journey canaries expose their health through Kubernetes Job state. Alert
+on the owning CronJob's last successful run and on the CronJob disappearing
+from kube-state-metrics; keep the detailed failure reason in structured Job
+logs.
 
 ## Recording and reading results
 

@@ -4,16 +4,8 @@
 # Deployment to keycloak-primary; the Ingress points at the apex Service.
 #
 # Gate stack (user traffic never touches the canary color; cutover is atomic
-# after analysis passes):
-#   1. readiness — pods must pass /health/ready (DB + migration) within
-#      progressDeadlineSeconds or the rollout fails;
-#   2. login-gate (pre-rollout, once) — OIDC discovery + a real direct-grant
-#      login against the canary Service, executed by flagger-loadtester;
-#   3. login-iterate (every iteration) — the same login, repeated; flaky
-#      under warm-up fails here;
-#   4. load-tps (every iteration) — hey drives sustained load at the canary
-#      and logs raw throughput/latency (logCmdOutput → loadtester logs), so
-#      every promotion produces TPS data.
+# after readiness, OIDC discovery, and sustained discovery load pass).
+# The public browser canary validates the complete user journey continuously.
 # threshold: 3 failed checks → automatic rollback (canary scaled to zero,
 # primary untouched, status Failed). Post-cutover regressions roll back via
 # Git revert through this same gate.
@@ -40,7 +32,7 @@ spec:
     interval: 30s
     threshold: 3
     # Deliberately tight for the initial stand-up (Shovon, 2026-07-05): a
-    # single passing iteration (one login-gate + one load run after the
+    # single passing iteration (one discovery gate + one load run after the
     # pre-rollout gate) promotes. Raise toward an industry-standard soak
     # (e.g. iterations: 120 at 30s ~= 1h of steady canary successes) once
     # the k6 canary and SLO metrics are feeding analysis.
@@ -54,25 +46,25 @@ spec:
           name: alert-relay
           namespace: flagger
     webhooks:
-      - name: login-gate
+      - name: discovery-gate
         type: pre-rollout
         url: http://flagger-loadtester.tenant-guardian-prod/
         timeout: 60s
         metadata:
           type: bash
-          cmd: bash /gate/login-gate.sh
-      - name: login-iterate
+          cmd: bash /gate/discovery-gate.sh
+      - name: discovery-iterate
         type: rollout
         url: http://flagger-loadtester.tenant-guardian-prod/
         timeout: 60s
         metadata:
           type: bash
-          cmd: bash /gate/login-gate.sh
+          cmd: bash /gate/discovery-gate.sh
       - name: load-tps
         type: rollout
         url: http://flagger-loadtester.tenant-guardian-prod/
         timeout: 45s
         metadata:
           type: cmd
-          cmd: "hey -z 20s -q 20 -c 10 -disable-keepalive http://keycloak-canary.tenant-guardian-prod/realms/postflight/.well-known/openid-configuration"
+          cmd: "hey -z 20s -q 20 -c 10 -disable-keepalive http://keycloak-canary.tenant-guardian-prod/realms/guardianintelligence.org/.well-known/openid-configuration"
           logCmdOutput: "true"

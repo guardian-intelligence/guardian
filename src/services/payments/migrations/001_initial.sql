@@ -1,6 +1,6 @@
 CREATE TABLE payment_orders (
     id text PRIMARY KEY,
-    tenant_id text NOT NULL,
+    organization_id text NOT NULL,
     provider text NOT NULL CHECK (provider = 'stripe'),
     provider_account_id text NOT NULL,
     currency text NOT NULL CHECK (currency = lower(currency) AND length(currency) = 3),

@@ -1,21 +1,11 @@
-# postflight realm, imported at first boot via --import-realm. Two placeholder
-# mechanisms, deliberately different:
-# - The canary password placeholder is resolved by Keycloak FROM THE
-#   CONTAINER'S ENVIRONMENT at import time (documented startup-import
-#   behavior); the value reaches the database only as a password hash.
-# - The IdP clientSecret is a vault expression: Keycloak stores it VERBATIM
-#   at import and resolves it at use time through the file-vault provider
-#   (KC_VAULT=file in keycloak.yaml), so the GitHub OAuth secret never
-#   enters the database — database backups carry no live credential.
-# No secret value ever lands in this ConfigMap. The substitute:disabled
-# annotation is mandatory: this manifest is applied by a Flux Kustomization
-# with postBuild substitution, whose envsubst would otherwise blank every
-# ${...} — including the vault expression — before Keycloak ever saw it.
-# realm-reconciler.yaml applies mutable realm settings to an existing realm.
+# Guardian's customer identity realm. Login creates a stable Guardian account;
+# upstream providers are brokered connections, never the account identifier.
+# Provider credentials use Keycloak's file-vault expressions and remain out of
+# the realm database and its backups.
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: keycloak-realm-postflight
+  name: keycloak-realm-guardian
   namespace: tenant-guardian-prod
   labels:
     app.kubernetes.io/name: keycloak
@@ -24,11 +14,11 @@ metadata:
   annotations:
     kustomize.toolkit.fluxcd.io/substitute: disabled
 data:
-  postflight-realm.json: |
+  guardian-realm.json: |
     {
-      "realm": "postflight",
+      "realm": "guardianintelligence.org",
+      "displayName": "Guardian",
       "enabled": true,
-      "organizationsEnabled": true,
       "sslRequired": "external",
       "registrationAllowed": false,
       "resetPasswordAllowed": false,
@@ -45,49 +35,30 @@ data:
       "ssoSessionMaxLifespan": 36000,
       "revokeRefreshToken": true,
       "refreshTokenMaxReuse": 0,
-      "identityProviders": [
-        {
-          "alias": "github",
-          "providerId": "github",
-          "enabled": true,
-          "trustEmail": false,
-          "storeToken": false,
-          "firstBrokerLoginFlowAlias": "first broker login",
-          "config": {
-            "clientId": "Ov23li9wlYzzt3mcfJ7V",
-            "clientSecret": "${vault.github-client-secret}",
-            "defaultScope": "read:user user:email"
-          }
-        }
-      ],
       "clients": [
         {
           "clientId": "postflight-web",
-          "name": "Postflight web (placeholder OOBE)",
+          "name": "Postflight web",
           "enabled": true,
           "protocol": "openid-connect",
-          "publicClient": true,
+          "publicClient": false,
+          "clientAuthenticatorType": "client-secret",
           "standardFlowEnabled": true,
           "directAccessGrantsEnabled": false,
           "implicitFlowEnabled": false,
           "serviceAccountsEnabled": false,
-          "redirectUris": ["https://guardianintelligence.org/postflight", "https://guardianintelligence.org/postflight/*"],
-          "webOrigins": ["https://guardianintelligence.org"]
-        },
-        {
-          "clientId": "canary",
-          "name": "Synthetic login checks (Flagger gate + k6 canary)",
-          "enabled": true,
-          "protocol": "openid-connect",
-          "publicClient": true,
-          "directAccessGrantsEnabled": true,
-          "standardFlowEnabled": false,
-          "implicitFlowEnabled": false,
-          "serviceAccountsEnabled": false
+          "redirectUris": [
+            "https://guardianintelligence.org/postflight/auth/callback"
+          ],
+          "webOrigins": [],
+          "attributes": {
+            "pkce.code.challenge.method": "S256",
+            "post.logout.redirect.uris": "https://guardianintelligence.org/postflight"
+          }
         },
         {
           "clientId": "guardian-cli",
-          "name": "Guardian CLI (device authorization grant)",
+          "name": "Guardian CLI",
           "enabled": true,
           "protocol": "openid-connect",
           "publicClient": true,
@@ -99,22 +70,38 @@ data:
             "oauth2.device.authorization.grant.enabled": "true"
           }
         }
-      ],
-      "users": [
-        {
-          "username": "canary",
-          "enabled": true,
-          "email": "canary@guardianintelligence.org",
-          "emailVerified": true,
-          "firstName": "Synthetic",
-          "lastName": "Canary",
-          "credentials": [
-            {
-              "type": "password",
-              "value": "${KEYCLOAK_CANARY_PASSWORD}",
-              "temporary": false
-            }
-          ]
-        }
       ]
+    }
+---
+# One file per broker makes provider onboarding a data change. The first
+# broker flow never trusts or automatically links an upstream email address:
+# a collision must prove control of the existing Guardian account.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-identity-providers
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  github.json: |
+    {
+      "alias": "github",
+      "displayName": "GitHub",
+      "providerId": "github",
+      "enabled": true,
+      "trustEmail": false,
+      "storeToken": false,
+      "linkOnly": false,
+      "firstBrokerLoginFlowAlias": "first broker login",
+      "config": {
+        "clientId": "Ov23li9wlYzzt3mcfJ7V",
+        "clientSecret": "${vault.github-client-secret}",
+        "defaultScope": "read:user user:email",
+        "syncMode": "IMPORT"
+      }
     }

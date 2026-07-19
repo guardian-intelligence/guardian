@@ -69,6 +69,26 @@ spec:
           env:
             - name: GUARDIAN_SITE
               value: prod
+            - name: POSTFLIGHT_PUBLIC_URL
+              value: https://guardianintelligence.org
+            - name: POSTFLIGHT_AUTH_ENABLED
+              value: "true"
+            - name: POSTFLIGHT_OIDC_ISSUER
+              value: https://guardianintelligence.org/realms/guardianintelligence.org
+            - name: POSTFLIGHT_OIDC_INTERNAL_URL
+              value: http://keycloak.tenant-guardian-prod.svc/realms/guardianintelligence.org
+            - name: POSTFLIGHT_OIDC_CLIENT_ID
+              value: postflight-web
+            - name: POSTFLIGHT_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: postflight-oidc-client
+                  key: password
+            - name: POSTFLIGHT_SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: postflight-session-seal
+                  key: password
             - name: GUARDIAN_DEPLOY_ID
               valueFrom:
                 fieldRef:

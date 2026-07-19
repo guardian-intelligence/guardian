@@ -1,28 +1,26 @@
-# Minutely synthetic login canary (k6). The script is maintained at
-# ../login-canary/login-canary.js (flow docs live there) and rendered into
-# the keycloak-login-canary ConfigMap by this stage's configMapGenerator.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: keycloak-login-canary
+  name: guardian-login-canary
   namespace: tenant-guardian-prod
   labels:
-    app.kubernetes.io/name: keycloak-login-canary
+    app.kubernetes.io/name: guardian-login-canary
     app.kubernetes.io/part-of: guardian
     guardian.dev/stage: prod
 spec:
-  schedule: "* * * * *"
+  schedule: "*/5 * * * *"
   concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
   successfulJobsHistoryLimit: 1
-  failedJobsHistoryLimit: 0
+  failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
       backoffLimit: 0
-      activeDeadlineSeconds: 55
+      activeDeadlineSeconds: 180
       template:
         metadata:
           labels:
-            app.kubernetes.io/name: keycloak-login-canary
+            app.kubernetes.io/name: guardian-login-canary
             app.kubernetes.io/part-of: guardian
             guardian.dev/stage: prod
         spec:
@@ -32,87 +30,69 @@ spec:
             runAsNonRoot: true
             runAsUser: 12345
             runAsGroup: 12345
+            fsGroup: 12345
             seccompProfile:
               type: RuntimeDefault
           containers:
-            - name: k6
-              image: docker.io/grafana/k6@sha256:68e78d94140704ec4ee0cb7c5cf6cd12a32b7d310a6f98d94931ee9b0b9dc629 # 2.1.0
+            - name: browser
+              image: ghcr.io/guardian-intelligence/login-canary@sha256:04fe397bdbfa9898e8046105b010fed3e29735d6b438f3814251061ac2319244
               imagePullPolicy: IfNotPresent
-              args:
-                - run
-                - --tag
-                - stage=prod
-                - -o
-                - experimental-prometheus-rw
-                - /scripts/login-canary.js
               env:
-                - name: KC_INTERNAL
-                  value: http://keycloak.tenant-guardian-prod.svc
-                - name: PUBLIC_BASE
-                  value: https://guardianintelligence.org
-                - name: OOBE_URL
+                - name: POSTFLIGHT_URL
                   value: https://guardianintelligence.org/postflight
-                - name: K6_PROMETHEUS_RW_SERVER_URL
-                  value: http://vminsert-shortterm.tenant-root.svc:8480/insert/0/prometheus/api/v1/write
-                - name: CANARY_USERNAME
+                - name: CANARY_TIMEOUT
+                  value: 2m30s
+                - name: GITHUB_CANARY_USERNAME
                   valueFrom:
                     secretKeyRef:
-                      name: keycloak-canary-user
+                      name: guardian-login-canary-github
                       key: username
-                - name: CANARY_PASSWORD
+                - name: GITHUB_CANARY_PASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: keycloak-canary-user
+                      name: guardian-login-canary-github
                       key: password
-                - name: KC_ADMIN_USERNAME
+                - name: GITHUB_CANARY_TOTP_SECRET
                   valueFrom:
                     secretKeyRef:
-                      name: keycloak-admin-bootstrap
-                      key: username
-                - name: KC_ADMIN_PASSWORD
-                  valueFrom:
-                    secretKeyRef:
-                      name: keycloak-admin-bootstrap
-                      key: password
+                      name: guardian-login-canary-github
+                      key: totp_secret
               resources:
                 requests:
-                  cpu: 50m
-                  memory: 128Mi
-                  ephemeral-storage: 128Mi
+                  cpu: 250m
+                  memory: 512Mi
+                  ephemeral-storage: 512Mi
                 limits:
-                  cpu: 500m
-                  memory: 256Mi
-                  ephemeral-storage: 256Mi
+                  cpu: "2"
+                  memory: 1Gi
+                  ephemeral-storage: 1Gi
               securityContext:
                 allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
                 capabilities:
                   drop:
                     - ALL
               volumeMounts:
-                - name: scripts
-                  mountPath: /scripts
-                  readOnly: true
+                - name: browser-state
+                  mountPath: /tmp
           volumes:
-            - name: scripts
-              configMap:
-                name: keycloak-login-canary
+            - name: browser-state
+              emptyDir:
+                sizeLimit: 512Mi
 ---
-# Canary pod flows: keycloak in-namespace, the public edge (auth page,
-# OOBE placeholder, broker cancel callback — all through Cloudflare), DNS,
-# and the VictoriaMetrics remote-write ingester in tenant-root.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
-  name: keycloak-login-canary
+  name: guardian-login-canary
   namespace: tenant-guardian-prod
   labels:
-    app.kubernetes.io/name: keycloak-login-canary
+    app.kubernetes.io/name: guardian-login-canary
     app.kubernetes.io/part-of: guardian
     guardian.dev/stage: prod
 spec:
   endpointSelector:
     matchLabels:
-      app.kubernetes.io/name: keycloak-login-canary
+      app.kubernetes.io/name: guardian-login-canary
   egress:
     - toEndpoints:
         - matchLabels:
@@ -124,53 +104,9 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
-    - toEndpoints:
-        - matchExpressions:
-            - key: app.kubernetes.io/name
-              operator: In
-              values:
-                - keycloak
-                - keycloak-primary
-      toPorts:
-        - ports:
-            - port: "8080"
-              protocol: TCP
-    - toEndpoints:
-        - matchLabels:
-            k8s:io.kubernetes.pod.namespace: tenant-root
-            k8s:app.kubernetes.io/name: vminsert
-      toPorts:
-        - ports:
-            - port: "8480"
-              protocol: TCP
     - toEntities:
         - world
       toPorts:
         - ports:
             - port: "443"
-              protocol: TCP
----
-# Ingress half of the remote-write path: tenant-root's generated isolation
-# does not admit grandchild-tenant namespaces (same reason as the
-# root-ingress pair); admit exactly the canary pods to vminsert.
-apiVersion: cilium.io/v2
-kind: CiliumClusterwideNetworkPolicy
-metadata:
-  name: tenant-root-vminsert-from-keycloak-login-canary-prod
-  labels:
-    app.kubernetes.io/part-of: guardian
-    guardian.dev/product: postflight
-spec:
-  endpointSelector:
-    matchLabels:
-      k8s:io.kubernetes.pod.namespace: tenant-root
-      k8s:app.kubernetes.io/name: vminsert
-  ingress:
-    - fromEndpoints:
-        - matchLabels:
-            k8s:io.kubernetes.pod.namespace: tenant-guardian-prod
-            k8s:app.kubernetes.io/name: keycloak-login-canary
-      toPorts:
-        - ports:
-            - port: "8480"
               protocol: TCP

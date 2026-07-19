@@ -17,10 +17,7 @@ go_library(
         "stripe.go",
         "tracing.go",
     ],
-    embedsrcs = [
-        "migrations/001_initial.sql",
-        "migrations/002_organization_authority.sql",
-    ],
+    embedsrcs = ["migrations/001_initial.sql"],
     importpath = "github.com/guardian-intelligence/guardian/src/services/payments",
     visibility = ["//visibility:private"],
     deps = [

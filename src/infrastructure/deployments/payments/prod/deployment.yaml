@@ -68,7 +68,7 @@ spec:
             - name: PUBLIC_BASE_URL
               value: https://guardianintelligence.org
             - name: OIDC_ISSUER
-              value: https://guardianintelligence.org/realms/postflight
+              value: https://guardianintelligence.org/realms/guardianintelligence.org
             - name: OIDC_CLIENT_ID
               value: postflight-web
             - name: AUTHORIZATION_API_URL

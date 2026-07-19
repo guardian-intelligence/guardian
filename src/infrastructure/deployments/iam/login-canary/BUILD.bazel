@@ -1,5 +1,0 @@
-filegroup(
-    name = "script",
-    srcs = ["login-canary.js"],
-    visibility = ["//visibility:public"],
-)

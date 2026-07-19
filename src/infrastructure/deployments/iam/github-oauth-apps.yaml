@@ -1,20 +1,28 @@
-# Static (non-secret) registry of the GitHub OAuth Apps backing each stage's
-# Keycloak "Sign in with GitHub" identity provider. Client secrets are NOT
-# here — they live in OpenBao at
+# Static (non-secret) registry of the GitHub social-provider registrations
+# backing each Guardian stage. Client secrets are NOT here — they live in
+# OpenBao at
 # guardian/guardian-mgmt/tenant-guardian-<stage>/keycloak/github-oauth,
 # projected into each stage's namespace by an ExternalSecret. Client IDs are
 # not secret (they're visible in the browser's OAuth authorize redirect) and
 # are recorded here directly.
 #
-# prod reuses the pre-existing "Sign in with Guardian" GitHub OAuth App
-# (settings id 3656712), repointed at the guardianintelligence.org callback —
-# it is not a fresh app.
+# Registration procedure:
+# computer-use-instructions/sign-in-with-guardian-oauth-app.md.
 stages:
+  staging:
+    githubAppName: "Sign in with Guardian (Staging)"
+    githubAppSettingsID: 3708383
+    homepageURL: https://staging.guardianintelligence.org
+    callbackURL: https://staging.guardianintelligence.org/realms/guardianintelligence.org/broker/github/endpoint
+    keycloakRealm: guardianintelligence.org
+    keycloakIdpAlias: github
+    githubClientID: Ov23liQCzyzCZ0Vr8SCf
+    status: active
   prod:
     githubAppName: "Sign in with Guardian"
     githubAppSettingsID: 3656712
     homepageURL: https://guardianintelligence.org
-    callbackURL: https://guardianintelligence.org/realms/postflight/broker/github/endpoint
-    keycloakRealm: postflight
+    callbackURL: https://guardianintelligence.org/realms/guardianintelligence.org/broker/github/endpoint
+    keycloakRealm: guardianintelligence.org
     keycloakIdpAlias: github
     githubClientID: Ov23li9wlYzzt3mcfJ7V

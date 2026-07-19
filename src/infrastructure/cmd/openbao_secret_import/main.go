@@ -257,9 +257,7 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 		"platform_agent_password",
 		"github_promotions_app_private_key_b64",
 		"github_runner_app_prod_app_id",
-		"github_runner_app_prod_client_id",
 		"github_runner_app_prod_webhook_secret",
-		"github_runner_app_prod_client_secret",
 		"github_runner_app_prod_private_key_b64",
 		"github_projector_pat",
 		"zot_countersigner_password",
@@ -364,18 +362,14 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 				"githubAppPrivateKey": githubAppKey,
 			},
 		},
-		// Postflight Runner GitHub App (prod): webhook HMAC secret, OAuth
-		// client secret, and the App private key that signs the JWTs
-		// installation tokens are minted from. appId/clientId are public
-		// identity, not secrets; they ride along so the projected Secret is
-		// a complete client configuration.
+		// Postflight Runner GitHub App (prod): webhook HMAC secret and the App
+		// private key that signs the JWTs installation tokens are minted from.
+		// The public App ID rides along because the control plane consumes it.
 		{
 			APIPath: "kv/data/guardian/guardian-mgmt/postflight-runner/github-app",
 			Data: map[string]string{
 				"appId":               env["github_runner_app_prod_app_id"],
-				"clientId":            env["github_runner_app_prod_client_id"],
 				"webhookSecret":       env["github_runner_app_prod_webhook_secret"],
-				"clientSecret":        env["github_runner_app_prod_client_secret"],
 				"githubAppPrivateKey": runnerAppKey,
 			},
 		},
@@ -414,10 +408,10 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 	// settings id, homepage/callback URL, realm, idp alias, client ID) is
 	// not sensitive and is checked into
 	// src/infrastructure/deployments/iam/github-oauth-apps.yaml instead.
-	// admin-bootstrap and canary-user are guardian-generated credentials;
-	// they live in custody so a DR re-seed restores values consistent with
-	// the stage's surviving (or re-imported) Keycloak database.
-	for _, stage := range []string{"prod"} {
+	// The bootstrap administrator lives in custody so a DR re-seed restores
+	// a value consistent with the stage's surviving Keycloak database. The
+	// browser canary credentials belong to a dedicated GitHub machine account.
+	for _, stage := range []string{"staging", "prod"} {
 		prefix := strings.ToUpper(stage)
 		base := fmt.Sprintf("kv/data/guardian/guardian-mgmt/tenant-guardian-%s/keycloak", stage)
 		if secret := strings.TrimSpace(env[prefix+"_GITHUB_CLIENT_SECRET"]); secret != "" {
@@ -428,23 +422,33 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 				},
 			})
 		}
-		for name, envSuffix := range map[string]string{
-			"admin-bootstrap": "_KEYCLOAK_ADMIN_BOOTSTRAP",
-			"canary-user":     "_KEYCLOAK_CANARY_USER",
-		} {
-			username := strings.TrimSpace(env[prefix+envSuffix+"_USERNAME"])
-			password := strings.TrimSpace(env[prefix+envSuffix+"_PASSWORD"])
-			if username == "" && password == "" {
-				continue
-			}
+		username := strings.TrimSpace(env[prefix+"_KEYCLOAK_ADMIN_BOOTSTRAP_USERNAME"])
+		password := strings.TrimSpace(env[prefix+"_KEYCLOAK_ADMIN_BOOTSTRAP_PASSWORD"])
+		if username != "" || password != "" {
 			if username == "" || password == "" {
-				return nil, fmt.Errorf("%s%s_USERNAME and %s%s_PASSWORD must be set together", prefix, envSuffix, prefix, envSuffix)
+				return nil, fmt.Errorf("%s_KEYCLOAK_ADMIN_BOOTSTRAP_USERNAME and %s_KEYCLOAK_ADMIN_BOOTSTRAP_PASSWORD must be set together", prefix, prefix)
 			}
 			writes = append(writes, secretWrite{
-				APIPath: base + "/" + name,
+				APIPath: base + "/admin-bootstrap",
 				Data: map[string]string{
 					"username": username,
 					"password": password,
+				},
+			})
+		}
+		canaryUsername := strings.TrimSpace(env[prefix+"_GITHUB_LOGIN_CANARY_USERNAME"])
+		canaryPassword := env[prefix+"_GITHUB_LOGIN_CANARY_PASSWORD"]
+		canaryTOTP := strings.TrimSpace(env[prefix+"_GITHUB_LOGIN_CANARY_TOTP_SECRET"])
+		if canaryUsername != "" || canaryPassword != "" || canaryTOTP != "" {
+			if canaryUsername == "" || canaryPassword == "" || canaryTOTP == "" {
+				return nil, fmt.Errorf("%s_GITHUB_LOGIN_CANARY_USERNAME, %s_GITHUB_LOGIN_CANARY_PASSWORD, and %s_GITHUB_LOGIN_CANARY_TOTP_SECRET must be set together", prefix, prefix, prefix)
+			}
+			writes = append(writes, secretWrite{
+				APIPath: base + "/login-canary-github",
+				Data: map[string]string{
+					"username":    canaryUsername,
+					"password":    canaryPassword,
+					"totp_secret": canaryTOTP,
 				},
 			})
 		}

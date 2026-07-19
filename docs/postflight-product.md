@@ -213,7 +213,10 @@ WarpBuild's playbook: straight to SOC 2 Type II — 3-month window, ~$8–10k, ~
 
 **Scale ceilings to instrument now, worry about later:** org runner-registration 1,500/5min (~5 job-starts/sec/org); installation-token quotas (5,000/hr base; ≤900 points/min/endpoint). Track rate-limit headers from day one.
 
-**GitHub App manifest:** Actions (repo): read + Self-hosted runners (org): read&write + Metadata: read + `workflow_job` webhook. Org-scope registration always. Runner group with "Allow public repositories" OFF (default; structural safety net).
+**GitHub App manifest:** Actions (repo): read + Pull requests (repo):
+read&write + Self-hosted runners (org): read&write + Metadata: read +
+`workflow_job` webhook. Org-scope registration always. Runner group with
+"Allow public repositories" OFF (default; structural safety net).
 
 ## 13. The product ladder ⚙
 
