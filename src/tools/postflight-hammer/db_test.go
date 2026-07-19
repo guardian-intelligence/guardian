@@ -147,6 +147,30 @@ func TestQueriesAgainstRealSchema(t *testing.T) {
 	}
 }
 
+func TestRunPromotedAgainstRealSchema(t *testing.T) {
+	ctx, db, conn := startMigratedDB(t)
+	seedBattery(t, ctx, conn)
+
+	promoted, detail, err := runPromoted(ctx, db, time.Now().Add(-time.Hour), 500)
+	if err != nil {
+		t.Fatalf("runPromoted: %v", err)
+	}
+	if !promoted || detail != "" {
+		t.Fatalf("run not promoted: promoted=%v detail=%q", promoted, detail)
+	}
+
+	if _, err := conn.Exec(ctx, `UPDATE workspace_scopes SET current_generation_id = NULL`); err != nil {
+		t.Fatalf("clear scope pointer: %v", err)
+	}
+	promoted, detail, err = runPromoted(ctx, db, time.Now().Add(-time.Hour), 500)
+	if err != nil {
+		t.Fatalf("runPromoted without pointer: %v", err)
+	}
+	if promoted || !strings.Contains(detail, "not current") {
+		t.Fatalf("unpointed generation accepted: promoted=%v detail=%q", promoted, detail)
+	}
+}
+
 // TestWatchObservesDatabase drives one watch tick cycle against the real
 // schema: transitions recorded, quiescence detected, final snapshot taken.
 func TestWatchObservesDatabase(t *testing.T) {

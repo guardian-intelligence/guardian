@@ -11,7 +11,8 @@ func TestDispatchListAndAttemptReads(t *testing.T) {
 	c := f.client(t)
 	ctx := context.Background()
 
-	if err := c.dispatchWorkflow(ctx, "acme/demo", "ci.yml", "main"); err != nil {
+	inputs := map[string]string{"lane": "postflight", "profile": "smoke"}
+	if err := c.dispatchWorkflow(ctx, "acme/demo", "ci.yml", "main", inputs); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	runs, err := c.listWorkflowRuns(ctx, "acme/demo", "ci.yml", time.Now().Add(-time.Hour))
@@ -23,6 +24,10 @@ func TestDispatchListAndAttemptReads(t *testing.T) {
 	}
 	if runs[0].Status != "in_progress" {
 		t.Fatalf("first list should observe in_progress, got %s", runs[0].Status)
+	}
+	dispatched := f.runByID(runs[0].ID)
+	if dispatched.ref != "main" || dispatched.inputs["lane"] != "postflight" || dispatched.inputs["profile"] != "smoke" {
+		t.Fatalf("workflow_dispatch payload = ref %q inputs %+v", dispatched.ref, dispatched.inputs)
 	}
 	if _, err := c.listWorkflowRuns(ctx, "acme/demo", "ci.yml", time.Now().Add(-time.Hour)); err != nil {
 		t.Fatalf("second list: %v", err)
@@ -63,7 +68,7 @@ func TestCancelAndRerun(t *testing.T) {
 	c := f.client(t)
 	ctx := context.Background()
 
-	if err := c.dispatchWorkflow(ctx, "acme/demo", "ci.yml", "main"); err != nil {
+	if err := c.dispatchWorkflow(ctx, "acme/demo", "ci.yml", "main", nil); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	runs, err := c.listWorkflowRuns(ctx, "acme/demo", "ci.yml", time.Now().Add(-time.Hour))

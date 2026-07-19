@@ -198,10 +198,14 @@ type ghStep struct {
 	CompletedAt *time.Time `json:"completed_at"`
 }
 
-func (c *ghClient) dispatchWorkflow(ctx context.Context, repo, workflow, ref string) error {
+func (c *ghClient) dispatchWorkflow(ctx context.Context, repo, workflow, ref string, inputs map[string]string) error {
+	body := map[string]any{"ref": ref}
+	if len(inputs) > 0 {
+		body["inputs"] = inputs
+	}
 	return c.doJSON(ctx, http.MethodPost,
 		fmt.Sprintf("/repos/%s/actions/workflows/%s/dispatches", repo, url.PathEscape(workflow)),
-		map[string]any{"ref": ref}, nil)
+		body, nil)
 }
 
 // listWorkflowRuns lists the workflow's dispatch-triggered runs created at or

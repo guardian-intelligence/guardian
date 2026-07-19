@@ -29,6 +29,10 @@ type fakeGitHub struct {
 	holdInProgress bool
 	// cancelStatus, when non-zero, is answered to every cancel request.
 	cancelStatus int
+	// advanceOnGet lets serial-pattern tests drive a run to completion while
+	// polling the run endpoint.
+	advanceOnGet bool
+	overlapped   bool
 
 	server *httptest.Server
 }
@@ -41,6 +45,8 @@ type fakeRun struct {
 	attempt    int64
 	createdAt  time.Time
 	startedAt  time.Time
+	ref        string
+	inputs     map[string]string
 	// concluded attempts by number (rerun bumps attempt and re-queues).
 	past map[int64]string
 }
@@ -92,6 +98,19 @@ func (f *fakeGitHub) pathRun(r *http.Request) *fakeRun {
 func (f *fakeGitHub) dispatch(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	var payload struct {
+		Ref    string            `json:"ref"`
+		Inputs map[string]string `json:"inputs"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	for _, existing := range f.runs {
+		if existing.status != "completed" {
+			f.overlapped = true
+		}
+	}
 	f.nextID++
 	run := &fakeRun{
 		id:        f.nextID,
@@ -99,6 +118,8 @@ func (f *fakeGitHub) dispatch(w http.ResponseWriter, r *http.Request) {
 		status:    "queued",
 		attempt:   1,
 		createdAt: time.Now().UTC(),
+		ref:       payload.Ref,
+		inputs:    payload.Inputs,
 		past:      map[int64]string{},
 	}
 	f.runs[run.id] = run
@@ -160,6 +181,9 @@ func (f *fakeGitHub) getRun(w http.ResponseWriter, r *http.Request) {
 	if run == nil {
 		w.WriteHeader(http.StatusNotFound)
 		return
+	}
+	if f.advanceOnGet {
+		f.advanceLocked(run)
 	}
 	writeJSON(w, f.runJSON(run, 0))
 }

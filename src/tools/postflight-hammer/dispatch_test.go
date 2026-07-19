@@ -35,7 +35,7 @@ func completeRun(t *testing.T, f *fakeGitHub, workflow string) int64 {
 	t.Helper()
 	c := f.client(t)
 	ctx := context.Background()
-	if err := c.dispatchWorkflow(ctx, "acme/demo", workflow, "main"); err != nil {
+	if err := c.dispatchWorkflow(ctx, "acme/demo", workflow, "main", nil); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	var id int64
@@ -93,6 +93,36 @@ func TestSustainedPattern(t *testing.T) {
 	}
 	if len(d.st.Dispatches) != 3 {
 		t.Fatalf("recorded %d dispatches, want 3", len(d.st.Dispatches))
+	}
+}
+
+func TestSerialPatternWaitsForEachRun(t *testing.T) {
+	f := newFakeGitHub(t)
+	f.advanceOnGet = true
+	cfg := dispatchConfig{
+		repo: "acme/demo", workflow: "ci.yml", ref: "main", pattern: "serial", n: 3,
+		inputs:    workflowInputs{"lane": "postflight", "cache_epoch": "cohort-1"},
+		statePath: filepath.Join(t.TempDir(), "state.json"),
+	}
+	d := testDispatcher(t, f, cfg)
+	if err := d.run(context.Background()); err != nil {
+		t.Fatalf("serial: %v", err)
+	}
+	if f.overlapped {
+		t.Fatal("serial pattern dispatched a successor before its predecessor completed")
+	}
+	if len(d.st.Dispatches) != 3 || len(d.st.Runs) != 3 {
+		t.Fatalf("serial recorded %d dispatches and %d runs", len(d.st.Dispatches), len(d.st.Runs))
+	}
+	for _, rec := range d.st.Dispatches {
+		if rec.Inputs["lane"] != "postflight" || rec.Inputs["cache_epoch"] != "cohort-1" {
+			t.Fatalf("dispatch inputs not retained: %+v", rec.Inputs)
+		}
+	}
+	for _, run := range d.st.Runs {
+		if run.Inputs["lane"] != "postflight" || run.Inputs["cache_epoch"] != "cohort-1" {
+			t.Fatalf("run inputs not retained: %+v", run.Inputs)
+		}
 	}
 }
 
@@ -243,7 +273,9 @@ func TestTwinDispatches(t *testing.T) {
 	cfg := dispatchConfig{
 		repo: "acme/demo", workflow: "ci.yml", ref: "main", pattern: "burst", n: 1,
 		twinWorkflow: "twin.yml", twinN: 2,
-		statePath: filepath.Join(t.TempDir(), "state.json"),
+		inputs:     workflowInputs{"lane": "postflight"},
+		twinInputs: workflowInputs{"lane": "github"},
+		statePath:  filepath.Join(t.TempDir(), "state.json"),
 	}
 	d := testDispatcher(t, f, cfg)
 	if err := d.run(context.Background()); err != nil {
@@ -256,6 +288,11 @@ func TestTwinDispatches(t *testing.T) {
 			if rec.Workflow != "twin.yml" {
 				t.Fatalf("twin dispatch on %s", rec.Workflow)
 			}
+			if rec.Inputs["lane"] != "github" {
+				t.Fatalf("twin inputs = %+v", rec.Inputs)
+			}
+		} else if rec.Inputs["lane"] != "postflight" {
+			t.Fatalf("primary inputs = %+v", rec.Inputs)
 		}
 	}
 	if twins != 2 {

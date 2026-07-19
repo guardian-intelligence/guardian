@@ -13,7 +13,10 @@ number the design promised gets measured instead of estimated.
 three subcommands:
 
 - `dispatch` — fire `workflow_dispatch` on `postflight-nextjs-demo` via the
-  App installation token. Patterns: `burst N` (all at once), `sustained N/m`
+  operator token. Repeatable `-input key=value` flags select benchmark lanes
+  and cohorts and are retained in the state artifact. Patterns: `burst N`
+  (all at once), `serial N` (wait for each run, and optionally its workspace
+  generation promotion, before firing the next), `sustained N/m`
   (steady rate), `churn` (dispatch, cancel at a random point, re-run),
   `restart` (dispatch load, then `systemctl restart hostd` mid-flight).
 - `watch` — poll GitHub (runs/jobs, attempt-specific conclusions) and the

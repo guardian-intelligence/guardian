@@ -13,18 +13,21 @@ import (
 )
 
 type dispatchConfig struct {
-	repo         string
-	workflow     string
-	ref          string
-	pattern      string
-	n            int
-	ratePerMin   float64
-	twinWorkflow string
-	twinN        int
-	churnMaxWait time.Duration
-	restartCmd   string
-	dbDSN        string
-	statePath    string
+	repo           string
+	workflow       string
+	ref            string
+	pattern        string
+	n              int
+	ratePerMin     float64
+	inputs         workflowInputs
+	twinWorkflow   string
+	twinN          int
+	twinInputs     workflowInputs
+	awaitPromotion bool
+	churnMaxWait   time.Duration
+	restartCmd     string
+	dbDSN          string
+	statePath      string
 }
 
 type dispatcher struct {
@@ -94,6 +97,8 @@ func (d *dispatcher) run(ctx context.Context) error {
 	switch d.cfg.pattern {
 	case "burst":
 		_, err = d.fireAndCorrelate(ctx, d.cfg.workflow, false, d.cfg.n, 0)
+	case "serial":
+		err = d.serial(ctx, d.cfg.workflow, false, d.cfg.n, d.cfg.awaitPromotion)
 	case "sustained":
 		err = d.sustained(ctx)
 	case "churn":
@@ -101,7 +106,7 @@ func (d *dispatcher) run(ctx context.Context) error {
 	case "restart":
 		err = d.restart(ctx)
 	default:
-		return fmt.Errorf("unknown pattern %q (want burst, sustained, churn, or restart)", d.cfg.pattern)
+		return fmt.Errorf("unknown pattern %q (want burst, serial, sustained, churn, or restart)", d.cfg.pattern)
 	}
 	if err != nil {
 		return err
@@ -110,15 +115,54 @@ func (d *dispatcher) run(ctx context.Context) error {
 }
 
 func (d *dispatcher) dispatchOne(ctx context.Context, workflow string, twin bool) error {
-	if err := d.gh.dispatchWorkflow(ctx, d.cfg.repo, workflow, d.cfg.ref); err != nil {
+	inputs := d.cfg.inputs
+	if twin {
+		inputs = d.cfg.twinInputs
+	}
+	if err := d.gh.dispatchWorkflow(ctx, d.cfg.repo, workflow, d.cfg.ref, inputs); err != nil {
 		return err
 	}
 	d.st.Dispatches = append(d.st.Dispatches, dispatchRecord{
 		Pattern:      d.cfg.pattern,
 		Workflow:     workflow,
+		Inputs:       cloneInputs(inputs),
 		Twin:         twin,
 		DispatchedAt: time.Now().UTC(),
 	})
+	return nil
+}
+
+// serial waits for each run to complete before dispatching its successor.
+// For Postflight cache benchmarks, awaitPromotion additionally proves the
+// completed run's sealed generation is current before the next lease begins.
+func (d *dispatcher) serial(ctx context.Context, workflow string, twin bool, n int, awaitPromotion bool) error {
+	known, err := d.knownRunIDs(ctx, workflow)
+	if err != nil {
+		return err
+	}
+	for i := 0; i < n; i++ {
+		if err := d.dispatchOne(ctx, workflow, twin); err != nil {
+			return err
+		}
+		runs, err := d.awaitNewRuns(ctx, workflow, known, 1)
+		if err != nil {
+			return err
+		}
+		run := runs[0]
+		d.claimRun(run, workflow, twin)
+		run, err = d.awaitRunTerminal(ctx, run.ID)
+		if err != nil {
+			return err
+		}
+		if run.Conclusion != "success" {
+			return fmt.Errorf("run %d completed with conclusion %q", run.ID, run.Conclusion)
+		}
+		if awaitPromotion {
+			if err := d.awaitRunPromotion(ctx, run.ID); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
@@ -155,9 +199,14 @@ func (d *dispatcher) knownRunIDs(ctx context.Context, workflow string) (map[int6
 // never claimed here is invisible and a dropped dispatch cannot be masked by
 // someone else's run.
 func (d *dispatcher) claimRun(r ghRun, workflow string, twin bool) {
+	inputs := d.cfg.inputs
+	if twin {
+		inputs = d.cfg.twinInputs
+	}
 	d.st.Runs[fmt.Sprintf("%d", r.ID)] = &runRecord{
 		RunID:         r.ID,
 		Workflow:      workflow,
+		Inputs:        cloneInputs(inputs),
 		Twin:          twin,
 		CreatedAt:     r.CreatedAt,
 		LatestAttempt: r.RunAttempt,
@@ -256,7 +305,7 @@ func (d *dispatcher) churnOne(ctx context.Context, runID int64, wait time.Durati
 		return rec, fmt.Errorf("cancel run %d: %w", runID, err)
 	}
 	rec.CancelConfirmed = true
-	if err := d.awaitRunTerminal(ctx, runID); err != nil {
+	if _, err := d.awaitRunTerminal(ctx, runID); err != nil {
 		return rec, err
 	}
 	if err := d.gh.rerunRun(ctx, d.cfg.repo, runID); err != nil {
@@ -300,20 +349,106 @@ func (d *dispatcher) awaitNewRuns(ctx context.Context, workflow string, known ma
 	}
 }
 
-func (d *dispatcher) awaitRunTerminal(ctx context.Context, runID int64) error {
+func (d *dispatcher) awaitRunTerminal(ctx context.Context, runID int64) (ghRun, error) {
 	deadline := time.Now().Add(d.awaitTimeout)
 	for {
 		run, err := d.gh.getRun(ctx, d.cfg.repo, runID)
 		if err == nil && run.Status == "completed" {
+			return run, nil
+		}
+		if time.Now().After(deadline) {
+			return ghRun{}, fmt.Errorf("run %d never reached a terminal status", runID)
+		}
+		if err := sleepCtx(ctx, d.pollInterval); err != nil {
+			return ghRun{}, err
+		}
+	}
+}
+
+func (d *dispatcher) awaitRunPromotion(ctx context.Context, runID int64) error {
+	db, err := openDB(ctx, d.cfg.dbDSN)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	deadline := time.Now().Add(d.awaitTimeout)
+	for {
+		promoted, detail, err := runPromoted(ctx, db, d.st.StartedAt.Add(-2*time.Minute), runID)
+		if err != nil {
+			return err
+		}
+		if promoted {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("run %d never reached a terminal status after cancel", runID)
+			return fmt.Errorf("run %d did not promote a generation: %s", runID, detail)
 		}
 		if err := sleepCtx(ctx, d.pollInterval); err != nil {
 			return err
 		}
 	}
+}
+
+func runPromoted(ctx context.Context, db *dbClient, since time.Time, runID int64) (bool, string, error) {
+	demands, err := db.DemandsSince(ctx, since)
+	if err != nil {
+		return false, "", err
+	}
+	var jobIDs []int64
+	for _, demand := range demands {
+		if demand.ProviderRunID == runID {
+			jobIDs = append(jobIDs, demand.ProviderJobID)
+		}
+	}
+	if len(jobIDs) == 0 {
+		return false, "no provider demand observed", nil
+	}
+
+	leases, err := db.LeasesSince(ctx, since)
+	if err != nil {
+		return false, "", err
+	}
+	byJob := make(map[int64]leaseRow, len(leases))
+	for _, lease := range leases {
+		byJob[lease.ProviderJobID] = lease
+	}
+	scopes, err := db.Scopes(ctx)
+	if err != nil {
+		return false, "", err
+	}
+	current := map[string]bool{}
+	for _, scope := range scopes {
+		current[scope.CurrentGeneration] = true
+	}
+	generations, err := db.Generations(ctx)
+	if err != nil {
+		return false, "", err
+	}
+	states := map[string]string{}
+	for _, generation := range generations {
+		states[generation.Generation] = generation.State
+	}
+
+	for _, jobID := range jobIDs {
+		lease, ok := byJob[jobID]
+		if !ok {
+			return false, fmt.Sprintf("job %d has no lease", jobID), nil
+		}
+		if lease.State != "completed" || lease.ReportedState != "sealed" {
+			return false, fmt.Sprintf("lease %s is %s/%s", lease.LeaseID, lease.State, lease.ReportedState), nil
+		}
+		if lease.SealGeneration == "" {
+			return false, fmt.Sprintf("lease %s has no seal generation", lease.LeaseID), nil
+		}
+		if states[lease.SealGeneration] != "committed" {
+			return false, fmt.Sprintf("generation %s is %q", lease.SealGeneration, states[lease.SealGeneration]), nil
+		}
+		if !current[lease.SealGeneration] {
+			return false, fmt.Sprintf("generation %s is not current", lease.SealGeneration), nil
+		}
+	}
+	return true, "", nil
 }
 
 // restart fires a burst, waits for the load to be visibly in flight, then
@@ -387,6 +522,9 @@ func (d *dispatcher) awaitInFlight(ctx context.Context, want int, runs []ghRun) 
 func (d *dispatcher) dispatchTwins(ctx context.Context) error {
 	if d.cfg.twinWorkflow == "" || d.cfg.twinN <= 0 {
 		return nil
+	}
+	if d.cfg.pattern == "serial" {
+		return d.serial(ctx, d.cfg.twinWorkflow, true, d.cfg.twinN, false)
 	}
 	_, err := d.fireAndCorrelate(ctx, d.cfg.twinWorkflow, true, d.cfg.twinN, 0)
 	return err
