@@ -48,37 +48,46 @@ spec:
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMRule
 metadata:
-  name: keycloak-login-canary
+  name: guardian-login-canary
   namespace: tenant-guardian-prod
   labels:
-    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/name: guardian-login-canary
     app.kubernetes.io/part-of: guardian
     guardian.dev/stage: prod
 spec:
   groups:
-    - name: keycloak-login-canary-prod.rules
+    - name: guardian-login-canary-prod.rules
       interval: 30s
       rules:
-        - alert: KeycloakLoginCanaryFailing
-          expr: increase(k6_canary_failures_total{stage="prod"}[10m]) > 0
-          for: 5m
+        - alert: GuardianLoginCanaryStale
+          expr: |
+            (
+              time() - max(kube_cronjob_status_last_successful_time{namespace="tenant-guardian-prod",cronjob="guardian-login-canary"}) > 600
+            )
+            or
+            (
+              max(kube_cronjob_status_last_schedule_time{namespace="tenant-guardian-prod",cronjob="guardian-login-canary"}) > 0
+              unless
+              max(kube_cronjob_status_last_successful_time{namespace="tenant-guardian-prod",cronjob="guardian-login-canary"}) > 0
+            )
+          for: 2m
           labels:
             severity: warning
             guardian_stage: prod
-            exported_instance: 'prod/login-canary/{{ $labels.flow }}/{{ $labels.scenario }}'
+            exported_instance: prod/login-canary
           annotations:
-            summary: "IAM login canary is failing in prod"
-            description: "One or more synthetic login flows (existing-user, new-user, cancellation) have failed for 5m+. Check the keycloak-login-canary pod logs for tenant-guardian-prod in VictoriaLogs."
-        - alert: KeycloakLoginCanaryAbsent
-          expr: absent(k6_canary_success_total{stage="prod"})
+            summary: "Sign in with Guardian is failing in prod"
+            description: "The last successful browser journey through Postflight, Guardian, GitHub, the OIDC callback, the BFF session, and logout is more than 10 minutes old. Check guardian-login-canary Job logs in tenant-guardian-prod."
+        - alert: GuardianLoginCanaryAbsent
+          expr: absent(kube_cronjob_status_last_schedule_time{namespace="tenant-guardian-prod",cronjob="guardian-login-canary"})
           for: 15m
           labels:
             severity: warning
             guardian_stage: prod
             exported_instance: prod/login-canary
           annotations:
-            summary: "IAM login canary has stopped reporting in prod"
-            description: "No k6 canary metrics for 15m — the CronJob is not running or cannot remote-write to VictoriaMetrics."
+            summary: "Sign in with Guardian canary is missing in prod"
+            description: "kube-state-metrics has not reported the guardian-login-canary CronJob for 15 minutes."
         - alert: KeycloakScrapeDown
           expr: up{namespace="tenant-guardian-prod",job="keycloak-metrics"} == 0
           for: 5m

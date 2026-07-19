@@ -18,6 +18,7 @@ gh api apps/<app-slug>
 | App | App ID | Installation ID | Repository access | Purpose |
 | - | -: | -: | - | - |
 | [Postflight by Guardian](https://github.com/apps/postflight-by-guardian) | `3370540` | `123769944` | Selected repositories | Postflight's GitHub control plane: receives `workflow_job` webhooks and manages the Actions and runner resources needed to execute customer CI. |
+| Postflight (Staging) | Pending owner creation | Canary organization only | Selected repositories | Exercises installation, webhook, Actions, and runner flows without using production App credentials. |
 | [Guardian Promotions](https://github.com/apps/guardian-promotions) | `4206397` | `144138265` | All repositories | Gives Kargo a distinct bot identity for opening promotion PRs and arming their automerge. |
 | [guardian-renovate](https://github.com/apps/guardian-renovate) | `4260384` | `145549950` | Selected repositories | Runs Renovate as a distinct bot identity so dependency commits and PRs trigger the normal validation workflows. |
 | [guardian-platform-app](https://github.com/apps/guardian-platform-app) | `4276780` | `145993975` | Selected repositories | Shared non-human identity for GitHub API automation that does not need its own installation boundary. Consumers mint short-lived installation tokens instead of using personal access tokens. |
@@ -25,19 +26,22 @@ gh api apps/<app-slug>
 ## Postflight by Guardian
 
 The deployed control plane verifies GitHub webhooks, records deliveries, and
-calls the GitHub API. The installation ID in the deployment matches the live
-organization installation.
+calls the GitHub API. Each signed delivery carries its installation identity;
+that identity follows the job through token minting, scheduling, JIT runner
+configuration, reconciliation, and PR comments.
 
 - [Control-plane source](src/services/postflight/controlplane/)
 - [Webhook handling](src/services/postflight/controlplane/webhook.go)
 - [GitHub API client](src/services/postflight/controlplane/github_api.go)
-- [Deployment and installation ID](src/infrastructure/deployments/postflight-runner/controlplane.yaml)
+- [Deployment](src/infrastructure/deployments/postflight-runner/controlplane.yaml)
 - [OpenBao-backed App credentials](src/infrastructure/deployments/postflight-runner/secrets.yaml)
 - [Product and GitHub App contract](docs/postflight-product.md)
 
 Live permissions are Actions, checks, contents, pull requests, workflows, and
 organization self-hosted runners read/write as applicable; organization
 members and metadata read. The App subscribes to `workflow_job` events.
+Production and staging use distinct GitHub Apps and installation sets. There
+is no general-purpose Guardian App in the Postflight product boundary.
 
 ## Guardian Promotions
 

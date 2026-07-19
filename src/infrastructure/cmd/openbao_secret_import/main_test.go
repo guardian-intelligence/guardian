@@ -228,8 +228,9 @@ func TestImportPlanKeycloakGeneratedCredentials(t *testing.T) {
 	env := testImportEnv()
 	env["PROD_KEYCLOAK_ADMIN_BOOTSTRAP_USERNAME"] = "guardian-admin"
 	env["PROD_KEYCLOAK_ADMIN_BOOTSTRAP_PASSWORD"] = "admin-pass"
-	env["PROD_KEYCLOAK_CANARY_USER_USERNAME"] = "canary"
-	env["PROD_KEYCLOAK_CANARY_USER_PASSWORD"] = "canary-pass"
+	env["PROD_GITHUB_LOGIN_CANARY_USERNAME"] = "guardian-canary"
+	env["PROD_GITHUB_LOGIN_CANARY_PASSWORD"] = "canary-pass"
+	env["PROD_GITHUB_LOGIN_CANARY_TOTP_SECRET"] = "JBSWY3DPEHPK3PXP"
 
 	plan, err := importPlan(env)
 	if err != nil {
@@ -246,19 +247,17 @@ func TestImportPlanKeycloakGeneratedCredentials(t *testing.T) {
 	if admin.Data["username"] != "guardian-admin" || admin.Data["password"] != "admin-pass" {
 		t.Fatalf("admin-bootstrap data = %#v", admin.Data)
 	}
-	canary, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-guardian-prod/keycloak/canary-user"]
+	canary, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-guardian-prod/keycloak/login-canary-github"]
 	if !ok {
-		t.Fatal("prod canary-user write missing")
+		t.Fatal("prod login-canary-github write missing")
 	}
-	if canary.Data["password"] != "canary-pass" {
-		t.Fatalf("canary-user data = %#v", canary.Data)
+	if canary.Data["password"] != "canary-pass" || canary.Data["totp_secret"] != "JBSWY3DPEHPK3PXP" {
+		t.Fatalf("login-canary-github data = %#v", canary.Data)
 	}
 
-	// A username without its password (or vice versa) is a custody file bug,
-	// not a partial import.
-	delete(env, "PROD_KEYCLOAK_CANARY_USER_PASSWORD")
+	delete(env, "PROD_GITHUB_LOGIN_CANARY_PASSWORD")
 	if _, err := importPlan(env); err == nil {
-		t.Fatal("importPlan accepted a username without its password")
+		t.Fatal("importPlan accepted incomplete GitHub canary credentials")
 	}
 }
 

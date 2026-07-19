@@ -46,7 +46,7 @@
     guardian_stage: root
     guardian_expected_statuses: "503"
 - targets:
-    - https://guardianintelligence.org/realms/postflight/.well-known/openid-configuration
+    - https://guardianintelligence.org/realms/guardianintelligence.org/.well-known/openid-configuration
   labels:
     guardian_surface: iam
     guardian_stage: prod

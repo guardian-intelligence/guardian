@@ -430,7 +430,7 @@ func TestConfigRejectsLiveStripeKeys(t *testing.T) {
 	}
 	t.Setenv("DATABASE_URL", "postgres://example")
 	t.Setenv("PUBLIC_BASE_URL", "https://guardianintelligence.org")
-	t.Setenv("OIDC_ISSUER", "https://guardianintelligence.org/realms/postflight")
+	t.Setenv("OIDC_ISSUER", "https://guardianintelligence.org/realms/guardianintelligence.org")
 	t.Setenv("OIDC_CLIENT_ID", "postflight-web")
 	t.Setenv("AUTHORIZATION_API_URL", "http://authorization-api")
 	t.Setenv("STRIPE_API_KEY", "sk_live_not_allowed")

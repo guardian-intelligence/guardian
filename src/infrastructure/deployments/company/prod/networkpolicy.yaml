@@ -3,8 +3,8 @@
 # direction; every rule below is therefore the complete allowed set).
 # Both selectors match BOTH app label values because Flagger's primary
 # clone suffixes the selector label value with -primary. company-site is a
-# stateless static-site server (no clustering, no DB, no outbound API
-# calls at request time), so egress here is DNS only.
+# stateless server; the Postflight OIDC callback exchanges authorization
+# codes with Keycloak over the namespace-local service.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -42,6 +42,17 @@ spec:
             - port: "53"
               protocol: UDP
             - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values:
+                - keycloak
+                - keycloak-primary
+      toPorts:
+        - ports:
+            - port: "8080"
               protocol: TCP
 ---
 # company-site-loadtester: webhook calls arrive from the Flagger controller;

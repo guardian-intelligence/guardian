@@ -67,11 +67,6 @@ spec:
                 secretKeyRef:
                   name: github-app
                   key: GITHUB_APP_PRIVATE_KEY_PEM
-            # Stage (a) is single-tenant: one pinned installation. The id is
-            # public identity (visible in any App-authored PR comment), not a
-            # credential.
-            - name: GITHUB_APP_INSTALLATION_ID
-              value: "123769944"
             # Setting the sync secret arms /api/v1/hostd/sync; SCHEDULER_ENABLED
             # turns on demand→lease→JIT. Together they enable the runner data
             # plane. The secret is relayed into this scope's OpenBao subtree by

@@ -11,6 +11,7 @@ metadata:
     guardian.dev/stage: prod
   annotations:
     kustomize.toolkit.fluxcd.io/force: Enabled
+    kustomize.toolkit.fluxcd.io/substitute: disabled
 spec:
   backoffLimit: 20
   activeDeadlineSeconds: 600
@@ -39,20 +40,63 @@ spec:
             - -ec
             - |
               kcadm=/opt/keycloak/bin/kcadm.sh
+              config=/tmp/kcadm.config
               server=http://keycloak.tenant-guardian-prod.svc
+              realm=guardianintelligence.org
+
               "$kcadm" config credentials \
-                --config /tmp/kcadm.config \
+                --config "$config" \
                 --server "$server" \
                 --realm master \
                 --user "$KC_ADMIN_USERNAME"
-              "$kcadm" update realms/postflight \
-                --config /tmp/kcadm.config \
-                --set organizationsEnabled=true
-              test "$("$kcadm" get realms/postflight \
-                --config /tmp/kcadm.config \
-                --fields organizationsEnabled \
-                --format csv \
-                --noquotes)" = "true"
+
+              "$kcadm" update "realms/$realm" \
+                --config "$config" \
+                --set enabled=true \
+                --set registrationAllowed=false \
+                --set loginWithEmailAllowed=false \
+                --set duplicateEmailsAllowed=false
+
+              desired_providers=""
+              for provider in /providers/*.json; do
+                alias="${provider##*/}"
+                alias="${alias%.json}"
+                desired_providers="$desired_providers $alias"
+                if "$kcadm" get "identity-provider/instances/$alias" \
+                    --config "$config" --realm "$realm" >/dev/null 2>&1; then
+                  "$kcadm" update "identity-provider/instances/$alias" \
+                    --config "$config" --realm "$realm" -f "$provider"
+                else
+                  "$kcadm" create identity-provider/instances \
+                    --config "$config" --realm "$realm" -f "$provider"
+                fi
+              done
+
+              for configured_provider in $("$kcadm" get identity-provider/instances \
+                  --config "$config" --realm "$realm" \
+                  --fields alias --format csv --noquotes); do
+                case " $desired_providers " in
+                  *" $configured_provider "*) ;;
+                  *) "$kcadm" delete "identity-provider/instances/$configured_provider" \
+                    --config "$config" --realm "$realm" ;;
+                esac
+              done
+
+              client_id="$("$kcadm" get clients \
+                --config "$config" --realm "$realm" \
+                -q clientId=postflight-web --fields id --format csv --noquotes)"
+              test -n "$client_id"
+              "$kcadm" update "clients/$client_id" \
+                --config "$config" --realm "$realm" \
+                --set secret="$POSTFLIGHT_CLIENT_SECRET"
+
+              for configured_realm in $("$kcadm" get realms \
+                  --config "$config" --fields realm --format csv --noquotes); do
+                case "$configured_realm" in
+                  master|guardianintelligence.org) ;;
+                  *) "$kcadm" delete "realms/$configured_realm" --config "$config" ;;
+                esac
+              done
           env:
             - name: KC_ADMIN_USERNAME
               valueFrom:
@@ -63,6 +107,11 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: keycloak-admin-bootstrap
+                  key: password
+            - name: POSTFLIGHT_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: postflight-oidc-client
                   key: password
           resources:
             requests:
@@ -78,6 +127,14 @@ spec:
             capabilities:
               drop:
                 - ALL
+          volumeMounts:
+            - name: providers
+              mountPath: /providers
+              readOnly: true
+      volumes:
+        - name: providers
+          configMap:
+            name: keycloak-identity-providers
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
