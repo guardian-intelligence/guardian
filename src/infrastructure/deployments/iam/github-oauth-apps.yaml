@@ -7,7 +7,7 @@
 # are recorded here directly.
 #
 # Registration procedure:
-# computer-use-instructions/sign-in-with-guardian-oauth-app.md.
+# docs/skills/configure-guardian-github-oauth/SKILL.md.
 stages:
   staging:
     githubAppName: "Sign in with Guardian (Staging)"

@@ -44,7 +44,7 @@ Production and staging use distinct GitHub Apps and installation sets. There
 is no general-purpose Guardian App in the Postflight product boundary.
 The exact environment template and least-privilege registration procedure are
 in
-[`computer-use-instructions/postflight-github-app.md`](../computer-use-instructions/postflight-github-app.md).
+[`configure-postflight-github-app`](skills/configure-postflight-github-app/SKILL.md).
 
 ## Guardian Promotions
 
