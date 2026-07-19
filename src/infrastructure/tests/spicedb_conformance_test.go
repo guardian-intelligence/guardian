@@ -53,7 +53,7 @@ func TestSpiceDBOperatorIsNamespaceScoped(t *testing.T) {
 	}
 }
 
-func TestSpiceDBPostgresUsesRequiredNodeAntiAffinity(t *testing.T) {
+func TestSpiceDBPostgresUsesSwitchoverAndRequiredNodeAntiAffinity(t *testing.T) {
 	path := runfilePath("src/infrastructure/deployments/authorization/operator/postgres-topology.yaml")
 	policy := readText(t, path)
 	for _, want := range []string{
@@ -61,6 +61,7 @@ func TestSpiceDBPostgresUsesRequiredNodeAntiAffinity(t *testing.T) {
 		"kind: MutatingAdmissionPolicyBinding",
 		"request.namespace == \"tenant-guardian-prod\"",
 		"object.metadata.name == \"postgres-spicedb\"",
+		"primaryUpdateMethod: \"switchover\"",
 		"enablePodAntiAffinity: true",
 		"podAntiAffinityType: \"required\"",
 		"topologyKey: \"kubernetes.io/hostname\"",
