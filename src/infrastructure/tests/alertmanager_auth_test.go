@@ -25,6 +25,7 @@ func TestAlertmanagerUsesHeaderAuthentication(t *testing.T) {
 		"credentials_file: /etc/vm/secrets/alerta/alerta-api-key",
 		"send_resolved: true",
 		"send_resolved: false",
+		"repeat_interval: 2m",
 	} {
 		if !strings.Contains(config, want) {
 			t.Fatalf("alertmanager config is missing %q", want)
