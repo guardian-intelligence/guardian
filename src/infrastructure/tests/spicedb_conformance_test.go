@@ -251,7 +251,7 @@ func TestSpiceDBOperationalQualificationIsGitOpsOnly(t *testing.T) {
 		"quay.io/authzed/thumper:v0.1.0@sha256:65a4d2e5a5a2e532331f86812793c31a320f4c77991520f7c2c4f0ea5700089a",
 		"--insecure=false",
 		"--ca-path=/tls/ca.crt",
-		"--qps=500",
+		"--qps=1000",
 		"name: spicedb-api-token-slot-a",
 		"SpiceDBThumperErrors",
 		"SpiceDBThumperLatencyHigh",

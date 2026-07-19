@@ -102,6 +102,8 @@ tools/ops/spicedb-qualify load 10m 50
 tools/ops/spicedb-qualify load 10m 100
 tools/ops/spicedb-qualify load 10m 250
 tools/ops/spicedb-qualify load 10m 500
+tools/ops/spicedb-qualify load 10m 1000
+tools/ops/spicedb-qualify load 10m 2000
 ```
 
 The command never starts an ad-hoc workload or changes the Deployment. It
