@@ -60,11 +60,16 @@ metadata:
   name: guardian-workload-priority
 spec:
   policyName: guardian-workload-priority
+  # Previews only for now: injecting priorityClassName is a pod-template
+  # change, and Flux applies a namespace's workloads in one wave — in
+  # tenant-guardian that wave includes the TigerBeetle replica Deployments
+  # (Recreate strategy), which must never restart together. Widening order:
+  # stateful data planes set explicit classes first (the matchCondition then
+  # skips them), then this list grows.
   matchResources:
     namespaceSelector:
       matchExpressions:
         - key: kubernetes.io/metadata.name
           operator: In
           values:
-            - tenant-guardian
             - tenant-guardian-previews

@@ -94,7 +94,10 @@ shrink to their combination-invariant core; everything else converts or dies.
 Shared YAML helpers move to a neutral file before `openbao_conformance_test.go`
 shrinks.
 
-Phase 4 — widen the workload-priority binding from the canary namespaces to
-all Guardian namespaces once prod has observed a full promotion cycle, and
-opt critical data planes (`guardian-critical`) up explicitly in their
-manifests.
+Phase 4 — widen the workload-priority binding beyond previews in strict
+order: first set explicit priorityClassName on every stateful data plane
+(TigerBeetle, PostgreSQL, OpenBao — `guardian-critical`), so the mutation's
+`!has(...)` condition never touches a workload whose restart timing matters;
+only then add `tenant-guardian` and later the prod namespaces to the
+binding. An injected template field is a rolling restart on the next Flux
+apply — never widen onto a namespace whose workloads can't absorb one.
