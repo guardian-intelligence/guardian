@@ -14,3 +14,4 @@ resources:
   - products-secrets.yaml
   - products-stage-prod.yaml
   - products-payments-stage-prod.yaml
+  - products-postflight-stage-prod.yaml

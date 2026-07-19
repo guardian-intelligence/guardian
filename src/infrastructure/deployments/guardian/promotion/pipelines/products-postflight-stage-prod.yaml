@@ -1,0 +1,63 @@
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: postflight-controlplane-prod
+  namespace: guardian-products
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+spec:
+  requestedFreight:
+    - origin:
+        kind: Warehouse
+        name: postflight-controlplane
+      sources:
+        direct: true
+  promotionTemplate:
+    spec:
+      vars:
+        - name: repoURL
+          value: https://github.com/guardian-intelligence/guardian.git
+        - name: imageRepo
+          value: ghcr.io/guardian-intelligence/postflight-controlplane
+      steps:
+        - uses: git-clone
+          config:
+            repoURL: ${{ vars.repoURL }}
+            checkout:
+              - branch: main
+                path: ./repo
+        - uses: yaml-update
+          config:
+            path: ./repo/src/infrastructure/deployments/postflight-runner/controlplane.yaml
+            updates:
+              - key: spec.template.spec.containers.0.image
+                value: ${{ vars.imageRepo }}@${{ imageFrom(vars.imageRepo).Digest }}
+        - uses: yaml-update
+          config:
+            path: ./repo/src/infrastructure/deployments/guardian/system/release-manifest.yaml
+            updates:
+              - key: releases.postflight-controlplane.prod.image
+                value: ${{ vars.imageRepo }}@${{ imageFrom(vars.imageRepo).Digest }}
+        - uses: git-commit
+          as: commit
+          config:
+            path: ./repo
+            message: promote postflight-controlplane (prod) to ${{ imageFrom(vars.imageRepo).Digest }}
+        - uses: git-push
+          as: push
+          config:
+            path: ./repo
+            generateTargetBranch: true
+        - uses: git-open-pr
+          as: open-pr
+          config:
+            repoURL: ${{ vars.repoURL }}
+            provider: github
+            sourceBranch: ${{ outputs.push.branch }}
+            targetBranch: main
+            title: promote postflight-controlplane (prod) to ${{ imageFrom(vars.imageRepo).Digest }}
+        - uses: git-wait-for-pr
+          if: ${{ status('open-pr') == 'Succeeded' }}
+          config:
+            repoURL: ${{ vars.repoURL }}
+            prNumber: ${{ outputs['open-pr'].pr.id }}
