@@ -52,7 +52,7 @@ spec:
       interval: 30s
       rules:
         - alert: SpiceDBOperatorDown
-          expr: (sum(up{namespace="tenant-guardian-prod",job="spicedb-operator"}) or vector(0)) < 1
+          expr: (sum(up{namespace="tenant-guardian-prod",job="spicedb-operator-metrics"}) or vector(0)) < 1
           for: 5m
           labels:
             severity: critical
@@ -61,9 +61,9 @@ spec:
             description: "The namespace-scoped SpiceDB reconciliation controller has not been scrapeable for five minutes."
         - alert: SpiceDBOperatorReconcileErrors
           expr: |
-            spicedb_operator_clusters_status_collector_errors_count{namespace="tenant-guardian-prod",job="spicedb-operator"} > 0
+            spicedb_operator_clusters_status_collector_errors_count{namespace="tenant-guardian-prod",job="spicedb-operator-metrics"} > 0
             or
-            spicedb_operator_clusters_condition_count{namespace="tenant-guardian-prod",job="spicedb-operator",condition=~"ValidatingFailed|PreconditionsFailed|RolloutError|ConfigurationWarning"} > 0
+            spicedb_operator_clusters_condition_count{namespace="tenant-guardian-prod",job="spicedb-operator-metrics",condition=~"ValidatingFailed|PreconditionsFailed|RolloutError|ConfigurationWarning"} > 0
           for: 5m
           labels:
             severity: warning

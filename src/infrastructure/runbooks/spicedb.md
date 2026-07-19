@@ -27,6 +27,7 @@ drills, and cleanup are reviewed source changes. Flux is the only writer.
 | Objective | Target |
 | --- | --- |
 | Authorization availability | Three replicas; two available during planned work |
+| Customer-visible rollout failures | Zero; product clients retry transient gRPC failures |
 | PostgreSQL data loss | At most 5 minutes for an idle database; active WAL normally archives sooner |
 | PostgreSQL copy-restore | Ready and verified within 30 minutes |
 | CheckPermission latency | Establish p50/p95/p99 at 50, 100, 250, and 500 QPS; alert initially at 100 ms p99 |
@@ -141,6 +142,51 @@ before the new revision is observed until the cluster has returned to steady
 state. Preserve the Thumper evidence directory with the PR and cluster-watch
 links.
 
+## Client availability contract
+
+The Kubernetes Service distributes new connections across Ready SpiceDB
+replicas, but it cannot replay an RPC whose connection was interrupted while a
+replica drained. Do not put a shared retry proxy in front of SpiceDB. That
+would add another availability tier and make retry ownership ambiguous.
+Guardian product services own the SpiceDB gRPC connection and apply the
+AuthZed-recommended retry policy to every method through the gRPC Service
+Config:
+
+```json
+{
+  "methodConfig": [
+    {
+      "name": [{}],
+      "waitForReady": true,
+      "retryPolicy": {
+        "maxAttempts": 3,
+        "initialBackoff": "1s",
+        "maxBackoff": "4s",
+        "backoffMultiplier": 2,
+        "retryableStatusCodes": [
+          "UNAVAILABLE",
+          "RESOURCE_EXHAUSTED",
+          "DEADLINE_EXCEEDED",
+          "ABORTED"
+        ]
+      }
+    }
+  ]
+}
+```
+
+Every caller also sets an end-to-end deadline that fits inside its user
+request budget. The retry policy follows
+https://authzed.com/docs/spicedb/ops/resilience and is part of the product
+client conformance gate when the first caller ships.
+
+Thumper intentionally does not retry. It measures raw datastore availability,
+while product canaries measure the customer-visible result after the required
+client policy. `SpiceDBThumperErrors` is therefore expected to fire during a
+declared rolling replacement. It must resolve after the final replica becomes
+Ready. Any firing event outside a declared rollout, failure to resolve, or
+incorrect authorization decision is an incident.
+
 ## Rolling SpiceDB restart
 
 Change `guardian.dev/qualification-restart` under
@@ -155,7 +201,9 @@ change, wait for the merge revision, and require:
 - three Ready replicas at completion on three distinct nodes;
 - no Thumper `wrong permissionship` records;
 - at least two Ready replicas throughout the rollout; and
-- no sustained alert other than the expected restart warning.
+- a firing and resolved `SpiceDBThumperErrors` notification for any raw
+  reconnect failures, with zero failures surfaced by retrying product
+  canaries.
 
 Reusing an old annotation value is not a drill. Never remove a pod to provoke
 this path.

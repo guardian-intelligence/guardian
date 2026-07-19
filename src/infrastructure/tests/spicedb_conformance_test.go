@@ -42,6 +42,18 @@ func TestSpiceDBOperatorIsNamespaceScoped(t *testing.T) {
 		assertTextNotContains(t, operator, forbidden, operatorPath)
 	}
 
+	operatorObservabilityPath := runfilePath("src/infrastructure/deployments/authorization/operator/observability.yaml")
+	operatorObservability := readText(t, operatorObservabilityPath)
+	for _, want := range []string{
+		"name: spicedb-operator-metrics",
+		"job=\"spicedb-operator-metrics\"",
+		"SpiceDBOperatorDown",
+		"SpiceDBOperatorReconcileErrors",
+	} {
+		assertTextContains(t, operatorObservability, want, operatorObservabilityPath)
+	}
+	assertTextNotContains(t, operatorObservability, `job="spicedb-operator"`, operatorObservabilityPath)
+
 	crdPath := runfilePath("src/infrastructure/deployments/authorization/operator/crd.yaml")
 	crd := readText(t, crdPath)
 	for _, want := range []string{
@@ -257,6 +269,7 @@ func TestSpiceDBOperationalQualificationIsGitOpsOnly(t *testing.T) {
 		"name: spicedb-api-token-slot-a",
 		"SpiceDBThumperErrors",
 		"SpiceDBThumperLatencyHigh",
+		"This alert is expected during a declared SpiceDB rolling replacement and must resolve after the rollout",
 	} {
 		assertTextContains(t, thumper, want, thumperPath)
 	}
@@ -334,6 +347,11 @@ func TestSpiceDBOperationalQualificationIsGitOpsOnly(t *testing.T) {
 		"Minor upgrade and rollback",
 		"R2 copy-restore drill",
 		"Alert delivery",
+		"Client availability contract",
+		"Do not put a shared retry proxy in front of SpiceDB",
+		"Thumper intentionally does not retry",
+		`"maxAttempts": 3`,
+		`"UNAVAILABLE"`,
 		"RPO at or below five minutes",
 		"RTO below thirty minutes",
 	} {
