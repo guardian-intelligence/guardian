@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	authorizationv1 "github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/authorization/v1"
 	"github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/authorization/v1/authorizationv1connect"
@@ -84,13 +86,18 @@ func main() {
 			},
 		},
 	}
-	service := &authorizationService{spice: spice}
+	registry := prometheus.NewRegistry()
+	service := &authorizationService{
+		spice:   spice,
+		metrics: newAuthorizationMetrics(registry),
+	}
 	mux := http.NewServeMux()
 	path, handler := authorizationv1connect.NewAuthorizationServiceHandler(service)
 	mux.Handle(path, authenticate(cfg.checkToken, cfg.writeToken, handler))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
+	mux.Handle("GET /metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 		defer cancel()
@@ -154,21 +161,30 @@ func tokenEqual(presented, token string) bool {
 
 type authorizationService struct {
 	authorizationv1connect.UnimplementedAuthorizationServiceHandler
-	spice *spiceDBClient
+	spice   *spiceDBClient
+	metrics *authorizationMetrics
 }
 
 func (s *authorizationService) Check(
 	ctx context.Context,
 	request *connect.Request[authorizationv1.CheckRequest],
 ) (*connect.Response[authorizationv1.CheckResponse], error) {
+	started := time.Now()
 	input, err := checkedCheckInput(request.Msg)
 	if err != nil {
+		s.metrics.observeCheck(started, "error")
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	result, err := s.spice.check(ctx, input)
 	if err != nil {
+		s.metrics.observeCheck(started, "error")
 		return nil, connect.NewError(connect.CodeUnavailable, err)
 	}
+	decision := "deny"
+	if result.Allowed {
+		decision = "allow"
+	}
+	s.metrics.observeCheck(started, decision)
 	return connect.NewResponse(&authorizationv1.CheckResponse{
 		Allowed:        result.Allowed,
 		CheckedAtToken: result.Token,
@@ -179,21 +195,26 @@ func (s *authorizationService) WriteRelationships(
 	ctx context.Context,
 	request *connect.Request[authorizationv1.WriteRelationshipsRequest],
 ) (*connect.Response[authorizationv1.WriteRelationshipsResponse], error) {
+	started := time.Now()
 	if len(request.Msg.GetUpdates()) == 0 || len(request.Msg.GetUpdates()) > 100 {
+		s.metrics.observeWrite(started, "error")
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("updates must contain between 1 and 100 relationships"))
 	}
 	updates := make([]relationshipUpdate, 0, len(request.Msg.GetUpdates()))
 	for _, update := range request.Msg.GetUpdates() {
 		checked, err := checkedRelationship(update)
 		if err != nil {
+			s.metrics.observeWrite(started, "error")
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
 		updates = append(updates, checked)
 	}
 	token, err := s.spice.write(ctx, updates)
 	if err != nil {
+		s.metrics.observeWrite(started, "error")
 		return nil, connect.NewError(connect.CodeUnavailable, err)
 	}
+	s.metrics.observeWrite(started, "success")
 	return connect.NewResponse(&authorizationv1.WriteRelationshipsResponse{WrittenAtToken: token}), nil
 }
 
