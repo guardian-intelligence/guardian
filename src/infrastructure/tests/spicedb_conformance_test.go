@@ -111,6 +111,22 @@ func TestSpiceDBProductionTopologyAndSecurity(t *testing.T) {
 		assertTextContains(t, marker, want, markerPath)
 	}
 
+	reclaimPath := runfilePath("src/infrastructure/deployments/authorization/data/restore-release-reclaim.yaml")
+	reclaim := readText(t, reclaimPath)
+	for _, want := range []string{
+		"kind: HelmRelease",
+		"name: postgres-spicedb-restore-20260718",
+		"sharding.fluxcd.io/key: shard0",
+		"name: cozystack-postgres-application-default-postgres",
+		"name: cozystack-values",
+		"enabled: true",
+		"oldName: tenant-guardian-prod-spicedb",
+		"serverName: tenant-guardian-prod-spicedb",
+		"storageClass: replicated-encrypted",
+	} {
+		assertTextContains(t, reclaim, want, reclaimPath)
+	}
+
 	spicedbPath := runfilePath("src/infrastructure/deployments/authorization/prod/spicedb.yaml")
 	spicedb := readText(t, spicedbPath)
 	for _, want := range []string{

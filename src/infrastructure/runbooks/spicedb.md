@@ -227,7 +227,13 @@ The drill is non-destructive and is built as a sequence of small PRs:
    replayed, calculate RPO from that segment's archive time, and calculate RTO
    from RestoreJob creation to successful verification; and
 6. remove the scratch application, RestoreJob, and verification Job from
-   source in a cleanup PR, then wait for Flux to prune them.
+   source in a cleanup PR, then wait for Flux to prune them; and
+7. if the application deletion leaves its Helm release storage and CNPG
+   resources behind, re-adopt that exact release as a direct, shard-labelled
+   Flux `HelmRelease`, wait for it to become Ready with
+   `finalizers.fluxcd.io`, then remove it in a second PR so helm-controller
+   performs the uninstall. Verify that the CNPG cluster, pods, PVCs, release
+   secrets, credentials, and certificates are all absent.
 
 Require RPO at or below five minutes and RTO below thirty minutes. Never use an
 in-place RestoreJob in a rehearsal. The source remains serving throughout.
