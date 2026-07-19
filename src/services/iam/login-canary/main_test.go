@@ -54,6 +54,16 @@ func TestClassifyOAuthPage(t *testing.T) {
 			action: oauthGrant,
 		},
 		{
+			name:    "GitHub disabled consent",
+			state:   oauthPageState{Host: "github.com", Path: "/login/oauth/authorize", GrantBlocked: true},
+			errText: "verify the canary email",
+		},
+		{
+			name:    "GitHub visible error",
+			state:   oauthPageState{Host: "github.com", Path: "/login", HasError: true},
+			errText: "rejected the canary login",
+		},
+		{
 			name:   "GitHub redirect without consent",
 			state:  oauthPageState{Host: "github.com", Path: "/login/oauth/authorize"},
 			action: oauthWait,
