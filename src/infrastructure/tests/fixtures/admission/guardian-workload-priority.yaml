@@ -1,0 +1,41 @@
+# Preview workloads render from a Helm chart template, not plain YAML, so
+# the mutation's behavior is pinned here: templates without a priority class
+# get the floor, templates that chose one are untouched.
+policy: guardian-workload-priority
+cases:
+  - name: deployment without a priority class gets the floor
+    resource: {group: apps, version: v1, resource: deployments}
+    object:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: {name: preview-site, namespace: tenant-guardian-previews}
+      spec:
+        selector:
+          matchLabels: {app: preview-site}
+        template:
+          metadata:
+            labels: {app: preview-site}
+          spec:
+            containers:
+              - name: site
+                image: ghcr.io/guardian-intelligence/company-site@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    expect: mutate
+    expectField: {path: spec.template.spec.priorityClassName, value: guardian-standard}
+  - name: explicit priority class is untouched
+    resource: {group: apps, version: v1, resource: deployments}
+    object:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: {name: pinned, namespace: tenant-guardian-previews}
+      spec:
+        selector:
+          matchLabels: {app: pinned}
+        template:
+          metadata:
+            labels: {app: pinned}
+          spec:
+            priorityClassName: guardian-critical
+            containers:
+              - name: main
+                image: ghcr.io/guardian-intelligence/company-site@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    expect: no-match

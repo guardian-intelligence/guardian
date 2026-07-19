@@ -511,6 +511,7 @@ func TestAdmissionPoliciesAgainstRenderedManifests(t *testing.T) {
 	}
 
 	evaluated := 0
+	exercised := map[string]int{}
 	for _, rendered := range u.objects {
 		obj, versioned, gvr, namespace := admissionInputs(rendered.doc)
 		source := fmt.Sprintf("%s (%s/%s)", filepath.Base(rendered.path), obj.GetKind(), obj.GetName())
@@ -527,12 +528,17 @@ func TestAdmissionPoliciesAgainstRenderedManifests(t *testing.T) {
 					continue
 				}
 				params := u.paramObject(t, binding.Spec.ParamRef)
+				if compiled.policy.Spec.ParamKind != nil && params == nil {
+					t.Logf("%s: policy %s params %v not resolvable in a checkout; skipping mutation", source, compiled.policy.Name, binding.Spec.ParamRef)
+					continue
+				}
 				if !matchesForEval(t, compiled.matcher, versioned, params, namespace) {
 					continue
 				}
 				if mutated := compiled.mutateObject(t, source, versioned, gvr, namespace, params); mutated != nil {
 					versioned = versionedFrom(mutated, versioned)
 					evaluated++
+					exercised[compiled.policy.Name]++
 				}
 				break
 			}
@@ -559,6 +565,7 @@ func TestAdmissionPoliciesAgainstRenderedManifests(t *testing.T) {
 				}
 				compiled.validateObject(t, u, source, versioned, gvr, namespace, params)
 				evaluated++
+				exercised[compiled.policy.Name]++
 				break
 			}
 		}
@@ -566,116 +573,273 @@ func TestAdmissionPoliciesAgainstRenderedManifests(t *testing.T) {
 	if evaluated == 0 {
 		t.Fatal("no rendered object matched any policy; the harness matching logic is wrong")
 	}
+
+	// Every policy must be exercised somewhere — by rendered manifests here,
+	// or by fixtures (request-shaped policies, deny cases, policies whose
+	// subjects only exist at runtime). A policy exercised by neither is
+	// invisible to CI: a matching bug, a binding typo, or a missing fixture.
+	fixtureCases := loadFixtureCoverage(t)
+	for _, compiled := range vaps {
+		t.Logf("policy %s: %d rendered matches, %d fixture cases", compiled.policy.Name, exercised[compiled.policy.Name], fixtureCases[compiled.policy.Name])
+		if exercised[compiled.policy.Name] == 0 && fixtureCases[compiled.policy.Name] == 0 {
+			t.Errorf("policy %s is exercised by neither rendered manifests nor fixtures; add fixture cases or fix harness matching", compiled.policy.Name)
+		}
+	}
+	for _, compiled := range maps {
+		t.Logf("policy %s: %d rendered matches, %d fixture cases", compiled.policy.Name, exercised[compiled.policy.Name], fixtureCases[compiled.policy.Name])
+		if exercised[compiled.policy.Name] == 0 && fixtureCases[compiled.policy.Name] == 0 {
+			t.Errorf("policy %s is exercised by neither rendered manifests nor fixtures; add fixture cases or fix harness matching", compiled.policy.Name)
+		}
+	}
 	t.Logf("evaluated %d policy×object matches", evaluated)
 }
 
-// Fixture format for request-shaped policies whose behavior cannot be
-// derived from rendered manifests (identity carve-outs, subresources):
+// Fixture format for policies whose behavior cannot be derived from rendered
+// manifests: request-shaped rules (identity carve-outs, subresources), deny
+// cases (the rendered tree is compliant by construction), and mutations
+// whose subjects only exist at runtime:
 //
 //	policy: <policy name>
 //	cases:
 //	  - name: <case name>
-//	    operation: CREATE | UPDATE | DELETE | CONNECT
+//	    operation: CREATE | UPDATE | DELETE | CONNECT   # default CREATE
 //	    resource: {group: "", version: v1, resource: pods}
 //	    subResource: exec        # optional
 //	    objectName: some-pod     # optional
-//	    user: {username: "...", groups: ["..."]}
-//	    expect: allow | deny | no-match
-type policyFixture struct {
-	Policy string `json:"policy"`
-	Cases  []struct {
-		Name        string `json:"name"`
-		Operation   string `json:"operation"`
-		Resource    struct {
-			Group    string `json:"group"`
-			Version  string `json:"version"`
-			Resource string `json:"resource"`
-		} `json:"resource"`
-		SubResource string `json:"subResource"`
-		ObjectName  string `json:"objectName"`
-		User        struct {
-			Username string   `json:"username"`
-			Groups   []string `json:"groups"`
-		} `json:"user"`
-		Expect string `json:"expect"`
-	} `json:"cases"`
+//	    user: {username: "...", groups: ["..."]}        # optional
+//	    object: {<full object YAML>}                    # optional
+//	    expect: allow | deny | no-match | mutate
+//	    expectField: {path: spec.x.y, value: "z"}       # with expect: mutate
+type fixtureCase struct {
+	Name        string `json:"name"`
+	Operation   string `json:"operation"`
+	Resource    struct {
+		Group    string `json:"group"`
+		Version  string `json:"version"`
+		Resource string `json:"resource"`
+	} `json:"resource"`
+	SubResource string                 `json:"subResource"`
+	ObjectName  string                 `json:"objectName"`
+	Object      map[string]interface{} `json:"object"`
+	User        struct {
+		Username string   `json:"username"`
+		Groups   []string `json:"groups"`
+	} `json:"user"`
+	Expect      string `json:"expect"`
+	ExpectField struct {
+		Path  string `json:"path"`
+		Value string `json:"value"`
+	} `json:"expectField"`
 }
 
-func TestAdmissionPolicyFixtures(t *testing.T) {
-	u := loadPolicyUniverse(t)
+type policyFixture struct {
+	Policy string        `json:"policy"`
+	Cases  []fixtureCase `json:"cases"`
+}
+
+func loadFixtures(t *testing.T) []policyFixture {
+	t.Helper()
 
 	fixturesDir := runfilePath("src/infrastructure/tests/fixtures/admission")
 	entries, err := os.ReadDir(fixturesDir)
 	if err != nil {
 		t.Fatalf("read fixtures dir: %v", err)
 	}
-	if len(entries) == 0 {
-		t.Fatal("no admission fixtures found")
-	}
-
+	var fixtures []policyFixture
 	for _, entry := range entries {
-		payload := readText(t, filepath.Join(fixturesDir, entry.Name()))
 		var fixture policyFixture
-		if err := sigsyaml.UnmarshalStrict([]byte(payload), &fixture); err != nil {
+		if err := sigsyaml.UnmarshalStrict([]byte(readText(t, filepath.Join(fixturesDir, entry.Name()))), &fixture); err != nil {
 			t.Fatalf("%s: %v", entry.Name(), err)
 		}
-
-		compiled := compileFixturePolicy(t, u, entry.Name(), fixture.Policy)
-		for _, tc := range fixture.Cases {
-			gvr := schema.GroupVersionResource{Group: tc.Resource.Group, Version: tc.Resource.Version, Resource: tc.Resource.Resource}
-			attrs := admission.NewAttributesRecord(
-				nil, nil, schema.GroupVersionKind{Version: tc.Resource.Version},
-				"", tc.ObjectName, gvr, tc.SubResource,
-				admission.Operation(tc.Operation), nil, false,
-				&user.DefaultInfo{Name: tc.User.Username, Groups: tc.User.Groups},
-			)
-			versioned := &admission.VersionedAttributes{Attributes: attrs, VersionedKind: attrs.GetKind()}
-
-			matched := matchesForEval(t, compiled.matcher, versioned, nil, nil)
-			if tc.Expect == "no-match" {
-				if matched {
-					t.Errorf("%s/%s: matched, want no-match", fixture.Policy, tc.Name)
-				}
-				continue
-			}
-			if !matched {
-				t.Errorf("%s/%s: did not match, want %s", fixture.Policy, tc.Name, tc.Expect)
-				continue
-			}
-
-			request := plugincel.CreateAdmissionRequest(versioned.Attributes, metav1.GroupVersionResource(gvr), metav1.GroupVersionKind(versioned.VersionedKind))
-			results, _, err := compiled.validation.ForInput(context.Background(), versioned, request, plugincel.OptionalVariableBindings{Authorizer: denyAllAuthorizer{}}, nil, celconfig.RuntimeCELCostBudget)
-			if err != nil {
-				t.Errorf("%s/%s: evaluation error: %v", fixture.Policy, tc.Name, err)
-				continue
-			}
-			allowed := true
-			for _, result := range results {
-				// An eval error under failurePolicy Fail denies — but an
-				// expression that errors instead of returning false is a
-				// latent lockout, so no fixture may produce one.
-				if result.Error != nil {
-					t.Errorf("%s/%s: validation error (latent lockout): %v", fixture.Policy, tc.Name, result.Error)
-				}
-				if verdict, ok := result.EvalResult.Value().(bool); !ok || !verdict {
-					allowed = false
-				}
-			}
-			if want := tc.Expect == "allow"; allowed != want {
-				t.Errorf("%s/%s: allowed=%v, want %s", fixture.Policy, tc.Name, allowed, tc.Expect)
-			}
+		if fixture.Policy == "" || len(fixture.Cases) == 0 {
+			t.Fatalf("%s: fixture has no policy or no cases", entry.Name())
 		}
+		fixtures = append(fixtures, fixture)
+	}
+	if len(fixtures) == 0 {
+		t.Fatal("no admission fixtures found")
+	}
+	return fixtures
+}
+
+func loadFixtureCoverage(t *testing.T) map[string]int {
+	t.Helper()
+
+	coverage := map[string]int{}
+	for _, fixture := range loadFixtures(t) {
+		coverage[fixture.Policy] += len(fixture.Cases)
+	}
+	return coverage
+}
+
+// fixtureInputs builds admission attributes for one fixture case; the object
+// is optional (request-shaped policies never read it).
+func fixtureInputs(tc fixtureCase) (*admission.VersionedAttributes, schema.GroupVersionResource, *corev1.Namespace) {
+	gvr := schema.GroupVersionResource{Group: tc.Resource.Group, Version: tc.Resource.Version, Resource: tc.Resource.Resource}
+	operation := admission.Create
+	if tc.Operation != "" {
+		operation = admission.Operation(tc.Operation)
+	}
+	username := tc.User.Username
+	if username == "" {
+		username = "fixture"
+	}
+
+	var obj runtime.Object
+	gvk := schema.GroupVersionKind{Version: tc.Resource.Version}
+	name, ns := tc.ObjectName, ""
+	namespace := &corev1.Namespace{}
+	if tc.Object != nil {
+		unstructuredObj := &unstructured.Unstructured{Object: tc.Object}
+		obj = unstructuredObj
+		gvk = unstructuredObj.GroupVersionKind()
+		if name == "" {
+			name = unstructuredObj.GetName()
+		}
+		ns = unstructuredObj.GetNamespace()
+		if ns != "" {
+			namespace.Name = ns
+			namespace.Labels = map[string]string{"kubernetes.io/metadata.name": ns}
+		}
+	}
+
+	attrs := admission.NewAttributesRecord(
+		obj, nil, gvk, ns, name, gvr, tc.SubResource, operation, nil, false,
+		&user.DefaultInfo{Name: username, Groups: tc.User.Groups},
+	)
+	versioned := &admission.VersionedAttributes{Attributes: attrs, VersionedKind: gvk, VersionedObject: obj}
+	return versioned, gvr, namespace
+}
+
+func firstBindingParams(t *testing.T, u *policyUniverse, policyName string) runtime.Object {
+	t.Helper()
+
+	for _, binding := range u.validatingBinds {
+		if binding.Spec.PolicyName == policyName && binding.Spec.ParamRef != nil {
+			return u.paramObject(t, binding.Spec.ParamRef)
+		}
+	}
+	return nil
+}
+
+func TestAdmissionPolicyFixtures(t *testing.T) {
+	u := loadPolicyUniverse(t)
+
+	for _, fixture := range loadFixtures(t) {
+		if vap := findVAP(u, fixture.Policy); vap != nil {
+			compiled := compileVAP(t, u, *vap)
+			params := firstBindingParams(t, u, fixture.Policy)
+			for _, tc := range fixture.Cases {
+				runValidatingFixture(t, fixture.Policy, compiled, tc, params)
+			}
+			continue
+		}
+		if mapPolicy := findMAP(u, fixture.Policy); mapPolicy != nil {
+			compiled := compileMAP(t, u, *mapPolicy)
+			for _, tc := range fixture.Cases {
+				runMutatingFixture(t, fixture.Policy, compiled, tc)
+			}
+			continue
+		}
+		t.Errorf("fixture references policy %s, which no rendered manifest defines", fixture.Policy)
 	}
 }
 
-func compileFixturePolicy(t *testing.T, u *policyUniverse, fixtureName, policyName string) *compiledVAP {
-	t.Helper()
-
-	for _, policy := range u.validating {
-		if policy.Name == policyName {
-			return compileVAP(t, u, policy)
+func findVAP(u *policyUniverse, name string) *admissionregistrationv1.ValidatingAdmissionPolicy {
+	for i := range u.validating {
+		if u.validating[i].Name == name {
+			return &u.validating[i]
 		}
 	}
-	t.Fatalf("%s: policy %s not found in rendered manifests", fixtureName, policyName)
 	return nil
+}
+
+func findMAP(u *policyUniverse, name string) *admissionregistrationv1.MutatingAdmissionPolicy {
+	for i := range u.mutating {
+		if u.mutating[i].Name == name {
+			return &u.mutating[i]
+		}
+	}
+	return nil
+}
+
+func runValidatingFixture(t *testing.T, policyName string, compiled *compiledVAP, tc fixtureCase, params runtime.Object) {
+	t.Helper()
+
+	versioned, gvr, namespace := fixtureInputs(tc)
+	matched := matchesForEval(t, compiled.matcher, versioned, params, namespace)
+	if tc.Expect == "no-match" {
+		if matched {
+			t.Errorf("%s/%s: matched, want no-match", policyName, tc.Name)
+		}
+		return
+	}
+	if !matched {
+		t.Errorf("%s/%s: did not match, want %s", policyName, tc.Name, tc.Expect)
+		return
+	}
+
+	request := plugincel.CreateAdmissionRequest(versioned.Attributes, metav1.GroupVersionResource(gvr), metav1.GroupVersionKind(versioned.VersionedKind))
+	results, _, err := compiled.validation.ForInput(context.Background(), versioned, request, plugincel.OptionalVariableBindings{VersionedParams: params, Authorizer: denyAllAuthorizer{}}, namespace, celconfig.RuntimeCELCostBudget)
+	if err != nil {
+		t.Errorf("%s/%s: evaluation error: %v", policyName, tc.Name, err)
+		return
+	}
+	allowed := true
+	for _, result := range results {
+		// An eval error under failurePolicy Fail denies — but an expression
+		// that errors instead of returning false is a latent lockout, so no
+		// fixture may produce one.
+		if result.Error != nil {
+			t.Errorf("%s/%s: validation error (latent lockout): %v", policyName, tc.Name, result.Error)
+			continue
+		}
+		if verdict, ok := result.EvalResult.Value().(bool); !ok || !verdict {
+			allowed = false
+		}
+	}
+	if want := tc.Expect == "allow"; allowed != want {
+		t.Errorf("%s/%s: allowed=%v, want %s", policyName, tc.Name, allowed, tc.Expect)
+	}
+}
+
+func runMutatingFixture(t *testing.T, policyName string, compiled *compiledMAP, tc fixtureCase) {
+	t.Helper()
+
+	if tc.Object == nil {
+		t.Errorf("%s/%s: mutation fixtures need an object", policyName, tc.Name)
+		return
+	}
+	versioned, gvr, namespace := fixtureInputs(tc)
+	matched := matchesForEval(t, compiled.matcher, versioned, nil, namespace)
+	if tc.Expect == "no-match" {
+		if matched {
+			t.Errorf("%s/%s: matched, want no-match", policyName, tc.Name)
+		}
+		return
+	}
+	if !matched {
+		t.Errorf("%s/%s: did not match, want %s", policyName, tc.Name, tc.Expect)
+		return
+	}
+	if tc.Expect != "mutate" {
+		t.Errorf("%s/%s: mutating fixtures expect mutate or no-match, got %q", policyName, tc.Name, tc.Expect)
+		return
+	}
+
+	source := fmt.Sprintf("fixture %s", tc.Name)
+	mutated := compiled.mutateObject(t, source, versioned, gvr, namespace, nil)
+	if mutated == nil {
+		return
+	}
+	if tc.ExpectField.Path != "" {
+		value, found, err := unstructured.NestedFieldNoCopy(mutated.Object, strings.Split(tc.ExpectField.Path, ".")...)
+		if err != nil || !found {
+			t.Errorf("%s/%s: mutated object has no %s (err=%v)", policyName, tc.Name, tc.ExpectField.Path, err)
+			return
+		}
+		if got := fmt.Sprintf("%v", value); got != tc.ExpectField.Value {
+			t.Errorf("%s/%s: %s = %q, want %q", policyName, tc.Name, tc.ExpectField.Path, got, tc.ExpectField.Value)
+		}
+	}
 }
