@@ -1,41 +1,40 @@
-definition principal {}
-
-definition guardian_account {
-  relation owner: principal
-
-  permission manage = owner
-}
+definition guardian_account {}
 
 definition organization {
   relation owner: guardian_account
   relation admin: guardian_account
   relation member: guardian_account
 
-  permission manage = owner + admin
-  permission view = manage + member
-  permission connect_provider = manage
-}
-
-definition provider_connection {
-  relation account: guardian_account
-  relation organization: organization
-
-  permission view = account + organization->view
-  permission manage = account + organization->manage
+  permission manage_members = owner
+  permission manage_billing = owner
+  permission manage_integrations = owner + admin
+  permission configure_repository = owner + admin
+  permission run_job = owner + admin + member
+  permission view = run_job
 }
 
 definition github_installation {
   relation organization: organization
-  relation installer: guardian_account
 
-  permission view = installer + organization->view
-  permission manage = installer + organization->manage
+  permission view = organization->view
+  permission manage = organization->manage_integrations
+}
+
+definition postflight_project {
+  relation organization: organization
+
+  permission view = organization->view
+  permission manage = organization->configure_repository
+  permission run_job = organization->run_job
 }
 
 definition postflight_repository {
+  relation project: postflight_project
   relation installation: github_installation
   relation admin: guardian_account
 
-  permission view = admin + installation->view
-  permission manage = admin + installation->manage
+  permission view = admin + project->view
+  permission manage = admin + project->manage
+  permission configure = admin + project->manage
+  permission run_job = admin + project->run_job
 }
