@@ -6,15 +6,18 @@
 # not secret (they're visible in the browser's OAuth authorize redirect) and
 # are recorded here directly.
 #
-# prod reuses the pre-existing "Sign in with Guardian" GitHub OAuth App
-# (settings id 3656712), repointed at the guardianintelligence.org callback —
-# it is not a fresh app.
+# Registration procedure:
+# computer-use-instructions/sign-in-with-guardian-oauth-app.md.
 stages:
   staging:
     githubAppName: "Sign in with Guardian (Staging)"
     githubAppSettingsID: 3708383
+    homepageURL: https://staging.guardianintelligence.org
+    callbackURL: https://staging.guardianintelligence.org/realms/guardianintelligence.org/broker/github/endpoint
+    keycloakRealm: guardianintelligence.org
+    keycloakIdpAlias: github
     githubClientID: Ov23liQCzyzCZ0Vr8SCf
-    status: reserved
+    status: active
   prod:
     githubAppName: "Sign in with Guardian"
     githubAppSettingsID: 3656712

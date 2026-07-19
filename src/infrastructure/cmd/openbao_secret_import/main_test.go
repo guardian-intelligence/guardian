@@ -57,9 +57,7 @@ func testImportEnv() map[string]string {
 		"platform_agent_password":                "agent-pass",
 		"github_promotions_app_private_key_b64":  base64.StdEncoding.EncodeToString([]byte(testGithubAppPEM)),
 		"github_runner_app_prod_app_id":          "3370540",
-		"github_runner_app_prod_client_id":       "Iv23xxxx",
 		"github_runner_app_prod_webhook_secret":  "runner-webhook",
-		"github_runner_app_prod_client_secret":   "runner-client",
 		"github_runner_app_prod_private_key_b64": base64.StdEncoding.EncodeToString([]byte(testRunnerAppPEM)),
 		"zot_countersigner_password":             "zot-push-pass",
 		"github_projector_pat":                   "ghp-projector-pat",
@@ -135,11 +133,17 @@ func TestImportPlan(t *testing.T) {
 	if !ok {
 		t.Fatal("postflight-runner write missing")
 	}
-	if runner.Data["webhookSecret"] != "runner-webhook" || runner.Data["clientSecret"] != "runner-client" {
+	if runner.Data["webhookSecret"] != "runner-webhook" {
 		t.Fatalf("postflight-runner secrets = %#v", runner.Data)
 	}
-	if runner.Data["appId"] != "3370540" || runner.Data["clientId"] != "Iv23xxxx" {
+	if runner.Data["appId"] != "3370540" {
 		t.Fatalf("postflight-runner identity = %#v", runner.Data)
+	}
+	if _, ok := runner.Data["clientSecret"]; ok {
+		t.Fatalf("postflight-runner carries unused OAuth clientSecret: %#v", runner.Data)
+	}
+	if _, ok := runner.Data["clientId"]; ok {
+		t.Fatalf("postflight-runner carries unused OAuth clientId: %#v", runner.Data)
 	}
 	if runner.Data["githubAppPrivateKey"] != testRunnerAppPEM {
 		t.Fatal("postflight-runner githubAppPrivateKey did not round-trip through base64")
@@ -221,6 +225,26 @@ func TestImportPlanOptionalKeycloakStages(t *testing.T) {
 	}
 	if prod.Data["GITHUB_CLIENT_SECRET"] != "prod-secret" {
 		t.Fatalf("prod GITHUB_CLIENT_SECRET = %q", prod.Data["GITHUB_CLIENT_SECRET"])
+	}
+
+	env["STAGING_GITHUB_CLIENT_SECRET"] = "staging-secret"
+	plan, err = importPlan(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan) != 12 {
+		t.Fatalf("plan length = %d, want 12 (10 base + two environments)", len(plan))
+	}
+	byPath = map[string]secretWrite{}
+	for _, w := range plan {
+		byPath[w.APIPath] = w
+	}
+	staging, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-guardian-staging/keycloak/github-oauth"]
+	if !ok {
+		t.Fatal("staging keycloak write missing")
+	}
+	if staging.Data["GITHUB_CLIENT_SECRET"] != "staging-secret" {
+		t.Fatalf("staging GITHUB_CLIENT_SECRET = %q", staging.Data["GITHUB_CLIENT_SECRET"])
 	}
 }
 

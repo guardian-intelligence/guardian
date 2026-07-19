@@ -257,9 +257,7 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 		"platform_agent_password",
 		"github_promotions_app_private_key_b64",
 		"github_runner_app_prod_app_id",
-		"github_runner_app_prod_client_id",
 		"github_runner_app_prod_webhook_secret",
-		"github_runner_app_prod_client_secret",
 		"github_runner_app_prod_private_key_b64",
 		"github_projector_pat",
 		"zot_countersigner_password",
@@ -364,18 +362,14 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 				"githubAppPrivateKey": githubAppKey,
 			},
 		},
-		// Postflight Runner GitHub App (prod): webhook HMAC secret, OAuth
-		// client secret, and the App private key that signs the JWTs
-		// installation tokens are minted from. appId/clientId are public
-		// identity, not secrets; they ride along so the projected Secret is
-		// a complete client configuration.
+		// Postflight Runner GitHub App (prod): webhook HMAC secret and the App
+		// private key that signs the JWTs installation tokens are minted from.
+		// The public App ID rides along because the control plane consumes it.
 		{
 			APIPath: "kv/data/guardian/guardian-mgmt/postflight-runner/github-app",
 			Data: map[string]string{
 				"appId":               env["github_runner_app_prod_app_id"],
-				"clientId":            env["github_runner_app_prod_client_id"],
 				"webhookSecret":       env["github_runner_app_prod_webhook_secret"],
-				"clientSecret":        env["github_runner_app_prod_client_secret"],
 				"githubAppPrivateKey": runnerAppKey,
 			},
 		},
@@ -417,7 +411,7 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 	// The bootstrap administrator lives in custody so a DR re-seed restores
 	// a value consistent with the stage's surviving Keycloak database. The
 	// browser canary credentials belong to a dedicated GitHub machine account.
-	for _, stage := range []string{"prod"} {
+	for _, stage := range []string{"staging", "prod"} {
 		prefix := strings.ToUpper(stage)
 		base := fmt.Sprintf("kv/data/guardian/guardian-mgmt/tenant-guardian-%s/keycloak", stage)
 		if secret := strings.TrimSpace(env[prefix+"_GITHUB_CLIENT_SECRET"]); secret != "" {

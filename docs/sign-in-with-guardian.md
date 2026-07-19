@@ -30,23 +30,28 @@ connections to a Guardian account; they are not the account model.
 
 | Surface | Production | Staging | Boundary |
 | - | - | - | - |
-| Sign in with Guardian GitHub OAuth App | Settings ID `3656712`, client ID `Ov23li9wlYzzt3mcfJ7V` | Settings ID `3708383`, client ID `Ov23liQCzyzCZ0Vr8SCf`; reserve and rename the existing registration to `Sign in with Guardian (Staging)` after its endpoint is selected | GitHub social login for the Guardian realm |
-| Postflight GitHub App | [Postflight by Guardian](https://github.com/apps/postflight-by-guardian), App ID `3370540` | A dedicated `Postflight (Staging)` App installed only in the canary organization | Webhooks, Actions API, and runner JIT configuration |
+| Sign in with Guardian GitHub OAuth App | Settings ID `3656712`, client ID `Ov23li9wlYzzt3mcfJ7V` | Settings ID `3708383`, client ID `Ov23liQCzyzCZ0Vr8SCf` | GitHub social login for the Guardian realm |
+| Postflight GitHub App | [Postflight by Guardian](https://github.com/apps/postflight-by-guardian), App ID `3370540` | A dedicated `Postflight by Guardian (Staging)` App installed only in the canary organization | Webhooks, Actions API, and runner JIT configuration |
 
 Before production activation:
 
 - OAuth App settings ID `3656712` has homepage
   `https://guardianintelligence.org` and the single callback
   `https://guardianintelligence.org/realms/guardianintelligence.org/broker/github/endpoint`.
+- OAuth App settings ID `3708383` has homepage
+  `https://staging.guardianintelligence.org` and the single callback
+  `https://staging.guardianintelligence.org/realms/guardianintelligence.org/broker/github/endpoint`.
 - The GitHub machine account username, password, and TOTP seed exist at
   `guardian/guardian-mgmt/tenant-guardian-prod/keycloak/login-canary-github`
   in OpenBao.
-- OAuth App settings ID `3708383` is the only staging registration, and
-  settings ID `3708386` is retired.
+- OAuth App settings ID `3708383` is the only staging registration. Settings
+  ID `3708386` is retired.
 - The Postflight staging GitHub App is installed only in the canary
   organization.
 
 There is no general-purpose Guardian GitHub App in this product boundary.
+The repeatable browser procedures for these registrations and the canary
+account are in [`computer-use-instructions`](../computer-use-instructions/).
 
 ## Request path
 
