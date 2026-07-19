@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const rendezvousTraceSchema = 1
+const rendezvousTraceSchema = 2
 
 const (
 	eventPoolReady                  = "pool_ready"
@@ -115,11 +115,12 @@ type rendezvousEvent struct {
 }
 
 type volumeEvidence struct {
-	Role         string `json:"role"`
-	Dataset      string `json:"dataset"`
-	SnapshotGUID string `json:"snapshot_guid"`
-	Generation   string `json:"generation"`
-	DeviceSerial string `json:"device_serial"`
+	Role            string `json:"role"`
+	Dataset         string `json:"dataset"`
+	Materialization string `json:"materialization"`
+	SnapshotGUID    string `json:"snapshot_guid"`
+	Generation      string `json:"generation"`
+	DeviceSerial    string `json:"device_serial"`
 }
 
 type platformEvidence struct {
@@ -537,8 +538,25 @@ func validateVolumes(volumes []volumeEvidence, platform *platformEvidence, requi
 		if volume.Role != volumeWorkspace && volume.Role != volumeToolchain && volume.Role != volumeData && volume.Role != volumeMemory {
 			violate("rendezvous contains unknown volume role %q", volume.Role)
 		}
-		if volume.Dataset == "" || volume.SnapshotGUID == "" || volume.Generation == "" {
-			violate("rendezvous %s volume lacks dataset, snapshot_guid, or generation", volume.Role)
+		if volume.Dataset == "" {
+			violate("rendezvous %s volume lacks dataset", volume.Role)
+		}
+		switch volume.Materialization {
+		case "empty":
+			if volume.Generation != "" || volume.SnapshotGUID != "" {
+				violate("empty rendezvous %s volume names a source generation or snapshot_guid", volume.Role)
+			}
+			if volume.Role == volumeMemory {
+				violate("memory volume cannot use empty materialization")
+			}
+		case "clone":
+			if volume.Generation == "" || volume.SnapshotGUID == "" {
+				violate("cloned rendezvous %s volume lacks generation or snapshot_guid", volume.Role)
+			}
+		case "":
+			violate("rendezvous %s volume lacks materialization", volume.Role)
+		default:
+			violate("rendezvous %s volume has unknown materialization %q", volume.Role, volume.Materialization)
 		}
 		if datasets[volume.Dataset] {
 			violate("rendezvous contains duplicate dataset %q", volume.Dataset)
@@ -580,6 +598,7 @@ func compareVolumes(event string, expected, observed []volumeEvidence, violate f
 			continue
 		}
 		if volume.Dataset != want.Dataset ||
+			volume.Materialization != want.Materialization ||
 			volume.SnapshotGUID != want.SnapshotGUID ||
 			volume.Generation != want.Generation {
 			violate("%s %s volume does not match the resolved generation tuple", event, volume.Role)

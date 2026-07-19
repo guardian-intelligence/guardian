@@ -29,6 +29,7 @@ go_test(
     name = "agent_test",
     srcs = [
         "pool_test.go",
+        "rendezvous_trace_test.go",
         "sync_test.go",
     ],
     embed = [":agent"],
