@@ -180,9 +180,10 @@ sides know. Product callers switch slots before the old slot changes:
 6. repeat the functional gate.
 
 Keep Thumper running across each server-order, caller, and credential rollout.
-Because the active token remains valid throughout these transitions, require
-zero request errors, zero indeterminate decisions, and zero incorrect
-decisions.
+Because the active token remains valid throughout these transitions, any
+`invalid token` response fails the drill. Retryable transport errors must be
+bounded to one gRPC shutdown-grace window per replica replacement and recover
+without an incorrect decision.
 
 At no point is the generated value committed, copied to OpenBao, or printed in
 review evidence. A slot is not retired until metrics show that no caller uses
