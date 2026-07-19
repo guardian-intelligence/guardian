@@ -120,8 +120,8 @@ func TestSpiceDBProductionTopologyAndSecurity(t *testing.T) {
 		"name: spicedb-r2-restore-20260718",
 		"name: spicedb-postgres-restore-baseline-20260718",
 		"targetApplicationRef:",
-		"name: spicedb-restore-verify-20260718",
-		"name: postgres-spicedb-restore-20260718-credentials",
+		"name: spicedb-restore-verify-v2-20260718",
+		"name: postgres-spicedb-credentials",
 		"kustomize.toolkit.fluxcd.io/substitute: disabled",
 		"sslmode=verify-full",
 		"guardian_restore_drill_marker",
@@ -360,6 +360,8 @@ func TestSpiceDBOperationalQualificationIsGitOpsOnly(t *testing.T) {
 		"This tool only reads Kubernetes objects and opens a port-forward",
 		`bazelisk build "@multitool//tools/${name}"`,
 		`jq -er --arg key "${key}" '.data[$key]'`,
+		`logs --follow deployment/spicedb-thumper`,
+		`fail "Thumper log stream exited before the observation completed"`,
 	} {
 		assertTextContains(t, qualify, want, qualifyPath)
 	}
