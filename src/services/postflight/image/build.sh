@@ -228,7 +228,13 @@ for part in "${nbd}"p*; do
 done
 [[ -n "${root_part}" ]] || die "no cloudimg-rootfs partition on ${nbd}; image layout changed?"
 
-growpart "${nbd}" "${root_part#"${nbd}"p}" >/dev/null
+growpart_output=""
+if ! growpart_output="$(growpart "${nbd}" "${root_part#"${nbd}"p}" 2>&1)"; then
+  if [[ "${growpart_output}" != NOCHANGE:* ]]; then
+    die "growpart failed: ${growpart_output}"
+  fi
+  log "${growpart_output}"
+fi
 udevadm settle
 
 mnt="$(mktemp -d "${work_dir}/mnt.XXXXXX")"
