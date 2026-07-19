@@ -34,9 +34,9 @@ Build guestd for the target architecture, then pass its path explicitly:
 
 ```sh
 eval "$(scripts/bootstrap.sh path)"
-bazel build //src/services/postflight/guestd
+bazel build //src/services/postflight/guestd/cmd/guestd
 sudo env POOL=tank \
-  GUESTD_BIN="$(bazel cquery --output=files //src/services/postflight/guestd)" \
+  GUESTD_BIN="$(bazel cquery --output=files //src/services/postflight/guestd/cmd/guestd)" \
   src/services/postflight/image/build.sh
 ```
 

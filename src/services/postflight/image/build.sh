@@ -56,12 +56,16 @@ die() {
   exit 1
 }
 
-for cmd in blkid chroot curl git growpart modprobe python3 qemu-img qemu-nbd resize2fs sha256sum tar udevadm zfs; do
+for cmd in blkid chroot curl file git growpart modprobe python3 qemu-img qemu-nbd resize2fs sha256sum tar udevadm zfs; do
   command -v "${cmd}" >/dev/null 2>&1 || die "missing required command: ${cmd}"
 done
 [[ "${EUID}" -eq 0 ]] || die "must run as root (qemu-nbd, chroot, and zfs)"
 [[ -n "${GUESTD_BIN:-}" ]] || die "set GUESTD_BIN to the guestd binary to bake in"
 [[ -f "${GUESTD_BIN}" ]] || die "GUESTD_BIN not found: ${GUESTD_BIN}"
+[[ -x "${GUESTD_BIN}" ]] || die "GUESTD_BIN is not executable: ${GUESTD_BIN}"
+guestd_description="$(LC_ALL=C file -b "${GUESTD_BIN}")"
+[[ "${guestd_description}" == "ELF 64-bit LSB executable, x86-64,"* ]] ||
+  die "GUESTD_BIN is not a linux/amd64 executable: ${guestd_description}"
 
 # shellcheck source=pins.env
 source "${script_dir}/pins.env"
