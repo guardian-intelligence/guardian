@@ -50,8 +50,12 @@ Before production activation:
   organization.
 
 There is no general-purpose Guardian GitHub App in this product boundary.
-The repeatable browser procedures for these registrations and the canary
-account are in [`computer-use-instructions`](../computer-use-instructions/).
+Use
+[`create-github-login-canary`](skills/create-github-login-canary/SKILL.md),
+[`configure-guardian-github-oauth`](skills/configure-guardian-github-oauth/SKILL.md),
+and
+[`configure-postflight-github-app`](skills/configure-postflight-github-app/SKILL.md)
+for the browser procedures.
 
 ## Request path
 
