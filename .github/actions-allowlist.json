@@ -6,6 +6,6 @@
     "bazelbuild/setup-bazelisk@b39c379c82683a5f25d34f0d062761f62693e0b2",
     "anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610",
     "oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d",
-    "renovatebot/github-action@b50d2ba2bd928235abdcc14d06dfafc217f1c565"
+    "renovatebot/github-action@22e0a16091fc706b04affe6ae53d5e3358ac4023"
   ]
 }
