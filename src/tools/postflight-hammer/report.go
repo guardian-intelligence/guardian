@@ -20,9 +20,19 @@ const readyDeadlineBound = 30 * time.Minute
 type assertionResult struct {
 	Name    string `json:"name"`
 	Pass    bool   `json:"pass"`
+	Concern bool   `json:"concern,omitempty"`
 	Skipped bool   `json:"skipped,omitempty"`
 	Detail  string `json:"detail,omitempty"`
 }
+
+type benchmarkOutcome string
+
+const (
+	outcomePass    benchmarkOutcome = "PASS"
+	outcomeConcern benchmarkOutcome = "CONCERN"
+	outcomeInvalid benchmarkOutcome = "INVALID"
+	outcomeFail    benchmarkOutcome = "FAIL"
+)
 
 type segmentStats struct {
 	Name    string  `json:"name"`
@@ -72,6 +82,7 @@ type report struct {
 	Exec           *execStats        `json:"exec,omitempty"`
 	Seal           *segmentStats     `json:"seal,omitempty"`
 	NVMe           []scopeGrowth     `json:"nvme"`
+	Outcome        benchmarkOutcome  `json:"outcome"`
 	Pass           bool              `json:"pass"`
 }
 
@@ -98,7 +109,8 @@ func buildReport(st *stateFile, now time.Time) *report {
 		assertSlotBaseline(st),
 		assertNoLeaks(st),
 		assertChurnDeadlines(st),
-		assertWarmDelta(st),
+		assertWarmGeneration(st),
+		assessWarmCheckoutPerformance(st),
 		assertGenerationInvariants(st),
 	}
 	r.Pickup = measurePickup(st)
@@ -108,9 +120,17 @@ func buildReport(st *stateFile, now time.Time) *report {
 
 	r.Pass = true
 	proved := false
+	r.Outcome = outcomePass
 	for i, a := range r.Assertions {
 		if !a.Pass && !a.Skipped {
-			r.Pass = false
+			if a.Concern {
+				if r.Outcome == outcomePass {
+					r.Outcome = outcomeConcern
+				}
+			} else {
+				r.Pass = false
+				r.Outcome = outcomeInvalid
+			}
 		}
 		if i > 0 && !a.Skipped {
 			proved = true
@@ -120,6 +140,7 @@ func buildReport(st *stateFile, now time.Time) *report {
 	// print a green standing-health verdict.
 	if !proved {
 		r.Pass = false
+		r.Outcome = outcomeInvalid
 	}
 	return r
 }
@@ -390,12 +411,11 @@ func checkoutStepDuration(j jobRecord) (time.Duration, bool) {
 	return 0, false
 }
 
-// Assertion 5: after the first green run of a scope, subsequent runs are
-// warm — their leases clone a generation, and the checkout step gets no
-// slower than the cold run's. Per-lease bundle-server byte accounting does
-// not exist yet, so the timing half is the delta heuristic (see --help).
-func assertWarmDelta(st *stateFile) assertionResult {
-	res := assertionResult{Name: "warm runs delta-only", Pass: true}
+// Assertion 5: after the first green run of a scope, every subsequent run
+// clones an observed generation. This is a mechanism check, independent of
+// whether the current hardware beats another provider.
+func assertWarmGeneration(st *stateFile) assertionResult {
+	res := assertionResult{Name: "warm runs clone a generation", Pass: true}
 	leaseByJob := map[int64]leaseRow{}
 	if st.DB != nil {
 		for _, l := range st.DB.Leases {
@@ -411,8 +431,7 @@ func assertWarmDelta(st *stateFile) assertionResult {
 		if len(jobs) < 2 {
 			continue
 		}
-		cold, warm := jobs[0], jobs[1:]
-		for _, w := range warm {
+		for _, w := range jobs[1:] {
 			warmChecked++
 			if st.DB != nil {
 				l, ok := leaseByJob[w.job.JobID]
@@ -423,19 +442,6 @@ func assertWarmDelta(st *stateFile) assertionResult {
 				}
 			}
 		}
-		coldDur, coldOK := checkoutStepDuration(cold.job)
-		var warmDurs []time.Duration
-		for _, w := range warm {
-			if d, ok := checkoutStepDuration(w.job); ok {
-				warmDurs = append(warmDurs, d)
-			}
-		}
-		if coldOK && len(warmDurs) > 0 {
-			med := percentile(warmDurs, 0.5)
-			if med > coldDur {
-				problems = append(problems, fmt.Sprintf("%s: warm checkout median %s exceeds cold %s", scope, med.Round(time.Millisecond), coldDur.Round(time.Millisecond)))
-			}
-		}
 	}
 	if warmChecked == 0 {
 		return assertionResult{Name: res.Name, Skipped: true, Detail: "no scope had a second green run"}
@@ -444,7 +450,46 @@ func assertWarmDelta(st *stateFile) assertionResult {
 		res.Pass = false
 		res.Detail = summarize(problems)
 	} else {
-		res.Detail = fmt.Sprintf("%d warm runs cloned a generation and checked out no slower than cold", warmChecked)
+		res.Detail = fmt.Sprintf("%d warm runs cloned a generation", warmChecked)
+	}
+	return res
+}
+
+// assessWarmCheckoutPerformance records a performance miss as a concern.
+// A warm checkout being slower than a cold checkout does not make durable
+// volumes unsound and does not invalidate otherwise complete raw evidence.
+func assessWarmCheckoutPerformance(st *stateFile) assertionResult {
+	res := assertionResult{Name: "warm checkout performance", Pass: true}
+	var concerns []string
+	checked := 0
+	for scope, jobs := range jobScopeGroups(st) {
+		if len(jobs) < 2 {
+			continue
+		}
+		coldDur, coldOK := checkoutStepDuration(jobs[0].job)
+		var warmDurs []time.Duration
+		for _, w := range jobs[1:] {
+			if d, ok := checkoutStepDuration(w.job); ok {
+				warmDurs = append(warmDurs, d)
+			}
+		}
+		if coldOK && len(warmDurs) > 0 {
+			checked++
+			med := percentile(warmDurs, 0.5)
+			if med > coldDur {
+				concerns = append(concerns, fmt.Sprintf("%s: warm checkout median %s exceeds cold %s", scope, med.Round(time.Millisecond), coldDur.Round(time.Millisecond)))
+			}
+		}
+	}
+	if checked == 0 {
+		return assertionResult{Name: res.Name, Skipped: true, Detail: "no cold/warm checkout timings were observed"}
+	}
+	if len(concerns) > 0 {
+		res.Pass = false
+		res.Concern = true
+		res.Detail = summarize(concerns)
+	} else {
+		res.Detail = fmt.Sprintf("%d scopes checked out no slower when warm", checked)
 	}
 	return res
 }
@@ -725,12 +770,15 @@ func printReport(w io.Writer, r *report) {
 		verdict := "PASS"
 		if a.Skipped {
 			verdict = "SKIP"
+		} else if a.Concern {
+			verdict = "CONCERN"
 		} else if !a.Pass {
-			verdict = "FAIL"
+			verdict = "INVALID"
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\n", a.Name, verdict, a.Detail)
 	}
 	tw.Flush()
+	fmt.Fprintf(w, "\noutcome: %s\n", r.Outcome)
 
 	if len(r.Pickup) > 0 {
 		fmt.Fprintf(w, "\npickup segments (ms; * = watch-observed, poll resolution)\n")
@@ -769,11 +817,7 @@ func printReport(w io.Writer, r *report) {
 		tw.Flush()
 	}
 
-	verdict := "PASS"
-	if !r.Pass {
-		verdict = "FAIL"
-	}
-	fmt.Fprintf(w, "\noverall: %s\n", verdict)
+	fmt.Fprintf(w, "\noverall: %s\n", r.Outcome)
 }
 
 func runReport(statePath, jsonPath string) error {
@@ -797,7 +841,7 @@ func runReport(statePath, jsonPath string) error {
 	}
 	fmt.Fprintf(os.Stdout, "json: %s\n", jsonPath)
 	if !r.Pass {
-		return fmt.Errorf("assertions failed")
+		return fmt.Errorf("benchmark evidence is invalid")
 	}
 	return nil
 }

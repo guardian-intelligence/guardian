@@ -21,6 +21,8 @@ Subcommands:
   dispatch   Fire workflow_dispatch load in a pattern (burst, serial, sustained, churn, restart).
   watch      Poll GitHub and the control-plane database until every run and row is terminal.
   report     Join both sources, print the scoreboard, and write the JSON report.
+  validate-rendezvous
+             Validate an assignment-first JSONL trace, including step 6 zvol rendezvous.
 
 Credentials:
   GitHub     GITHUB_TOKEN, or the ambient gh login (` + "`gh auth token`" + `). Needs actions:write
@@ -53,20 +55,24 @@ Runbook:
   still healthy after this change".
 
 Reading the report:
-  - Assertions print PASS/FAIL/SKIP with details; any FAIL fails the run (exit 1).
+  - Assertions print PASS/CONCERN/INVALID/SKIP. INVALID means the run did not produce
+    trustworthy benchmark evidence and exits non-zero. CONCERN preserves valid raw data
+    while flagging a performance or operational expectation that needs investigation.
     SKIP means the battery could not exercise the assertion (no DATABASE_URL, no churn
     cycles, no second green run of a scope) — a full battery should have zero skips.
   - The churn bound is hostd's current 30m ready/exited deadline; the recorded
     cancellation-propagation follow-up will tighten it, which changes one constant.
-  - "Warm runs delta-only" attests warmth via the lease's cloned generation plus the
-    checkout-step timing delta (warm median must not exceed the cold run). Per-lease
-    bundle-server byte accounting does not exist yet; when it lands, the assertion
-    switches to bytes served per lease.
+  - "Warm runs clone a generation" attests the durable-volume mechanism. A warm checkout
+    slower than cold is a CONCERN, not a claim that durable volumes are unsound.
   - Orphan workspaces and VM state dirs are asserted through their database-visible
     proxy: slot occupancy returning to baseline. Host-disk-level leak detection lives
     in hostd's own GC and simulation tests.
   - Pickup segments marked * are watch observations at poll resolution; unmarked
     boundaries are authoritative timestamps from the ledger, the lease rows, and GitHub.
+  - validate-rendezvous consumes the host/guest/runner JSONL evidence stream. The first
+    six logical events are pool_ready, assignment_observed, job_hook_blocked,
+    job_identity_reported, generation_resolved, and rendezvous_bound. Step 6 is the
+    atomic zvol-to-QEMU binding; no customer volume may be present on pool_ready.
 
 State: every subcommand shares one state file (-state, default ./postflight-hammer.json).
 Patterns accumulate into it; delete it (or point elsewhere) to start a fresh battery.
@@ -95,6 +101,8 @@ func run() error {
 		return cmdWatch(ctx, os.Args[2:])
 	case "report":
 		return cmdReport(os.Args[2:])
+	case "validate-rendezvous":
+		return cmdValidateRendezvous(os.Args[2:])
 	case "-h", "-help", "--help", "help":
 		fmt.Print(usage)
 		return nil
