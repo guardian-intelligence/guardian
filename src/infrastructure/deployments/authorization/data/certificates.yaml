@@ -67,7 +67,6 @@ spec:
     - spicedb.tenant-guardian-prod
     - spicedb.tenant-guardian-prod.svc
     - spicedb.tenant-guardian-prod.svc.cozy.local
-    - spicedb-rehearsal-20260718.tenant-guardian-prod.svc.cozy.local
   issuerRef:
     group: cert-manager.io
     kind: Issuer
