@@ -112,6 +112,23 @@ func TestValidAssignmentFirstRendezvousPasses(t *testing.T) {
 	}
 }
 
+func TestThroughReleaseValidationProvesRendezvousWithoutPostJobLifecycle(t *testing.T) {
+	events := validRendezvousTrace()[:9]
+	report := validateRendezvousTraceScope(events, true)
+	if !report.TraceValid || report.Outcome != outcomePass {
+		t.Fatalf("through-release trace = %+v", report)
+	}
+	if report.Events != 9 || events[5].Event != eventRendezvousBound ||
+		events[5].Seq != 6 {
+		t.Fatalf("step-6 evidence is not the sixth event: %+v", events[5])
+	}
+
+	full := validateRendezvousTrace(events)
+	if full.TraceValid || full.Outcome != outcomeInvalid {
+		t.Fatalf("partial lifecycle passed full validation: %+v", full)
+	}
+}
+
 func TestRendezvousBindsOnlyTheActuallyAssignedJob(t *testing.T) {
 	events := validRendezvousTrace()
 	events[5].JobID = 99

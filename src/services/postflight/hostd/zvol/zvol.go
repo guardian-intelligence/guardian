@@ -30,6 +30,9 @@ type WorkspaceVolume struct {
 	// Source is the generation the volume was cloned from; empty for a
 	// cache-miss (empty) workspace.
 	Source GenerationID
+	// SourceSnapshotGUID is ZFS's immutable GUID for Source's @sealed
+	// snapshot. It is empty for a cold workspace.
+	SourceSnapshotGUID string
 }
 
 // GenerationSnapshot is one sealed generation as observed on this host.

@@ -28,10 +28,15 @@ const (
 	PhaseBooting Phase = "booting"
 	// PhaseWarm: booted and idle in the pool.
 	PhaseWarm Phase = "warm"
-	// PhaseAssigned: workspace attached and runner env delivered; the guest
-	// is bringing the runner up.
+	// PhaseAssigned: the generic runner registration was delivered.
 	PhaseAssigned Phase = "assigned"
-	// PhaseReady: the runner inside is registered and listening for its job.
+	// PhaseListening: the runner is registered and carries no customer
+	// volume or identity.
+	PhaseListening Phase = "listening"
+	// PhaseHookBlocked: GitHub assigned the runner and its start hook is
+	// blocked before customer steps.
+	PhaseHookBlocked Phase = "hook-blocked"
+	// PhaseReady: the exact generation tuple is mounted and the hook released.
 	PhaseReady Phase = "ready"
 	// PhaseExited: the runner finished (or died); ExitCode is meaningful.
 	PhaseExited Phase = "exited"
@@ -43,17 +48,43 @@ const (
 type Status struct {
 	ID    ID
 	Class Class
+	// Image identifies the immutable golden snapshot this VM's root cloned.
+	// The pool governor uses it to roll idle listeners after an image change.
+	Image string
 	Phase Phase
 	// Lease is the lease this VM is assigned to, empty for pool VMs. The
 	// driver persists it with the VM (the real driver keeps it in the
 	// per-VM state dir) so a restarted hostd can rebind instead of leaking.
 	Lease    string
 	ExitCode int
+	Identity JobIdentity
+	Clock    ClockSample
 }
 
-// Assignment carries everything a warm VM needs to become a job runner.
-type Assignment struct {
-	// Lease is the lease this assignment serves; surfaced back via Status.
+type JobIdentity struct {
+	RunID       string
+	RunAttempt  int
+	RunnerName  string
+	Repository  string
+	WorkflowJob string
+}
+
+type ClockSample struct {
+	UnixNS       int64
+	Synchronized bool
+	Clocksource  string
+	AfterRestore bool
+}
+
+// Preparation turns a warm VM into a generic GitHub listener.
+type Preparation struct {
+	Lease     string
+	JITConfig string
+	Env       map[string]string
+}
+
+// Rendezvous carries everything bound only after GitHub's actual assignment.
+type Rendezvous struct {
 	Lease string
 	// WorkspaceDevice is the host block device to hot-attach; it appears in
 	// the guest under a stable serial so the mount is deterministic.
@@ -61,9 +92,7 @@ type Assignment struct {
 	// WorkspaceMountpoint is where the guest mounts the workspace, and the
 	// filesystem a later Quiesce syncs and unmounts.
 	WorkspaceMountpoint string
-	// JITConfig is the encoded single-use runner registration blob.
-	JITConfig string
-	// Env is the runner environment (POSTFLIGHT_* checkout variables).
+	// Env is written into the job environment by the still-blocked hook.
 	Env map[string]string
 }
 
@@ -79,9 +108,10 @@ var ErrNotFound = errors.New("vm: not found")
 type Driver interface {
 	// Launch boots a warm VM of a class under the given ID.
 	Launch(ctx context.Context, id ID, class Class) error
-	// Assign hot-attaches the workspace and delivers the runner assignment
-	// to a warm VM.
-	Assign(ctx context.Context, id ID, assignment Assignment) error
+	// Prepare registers the generic runner without customer volumes.
+	Prepare(ctx context.Context, id ID, preparation Preparation) error
+	// Rendezvous hot-attaches the assigned job's workspace and releases it.
+	Rendezvous(ctx context.Context, id ID, rendezvous Rendezvous) error
 	// Status reports one VM. Phase is PhaseGone for unknown IDs.
 	Status(ctx context.Context, id ID) (Status, error)
 	// List reports every VM the driver knows on this host.

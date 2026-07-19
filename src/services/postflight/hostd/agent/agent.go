@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -50,6 +51,7 @@ type Agent struct {
 	newID      func() string
 	bootID     string
 	metrics    Metrics
+	started    time.Time
 
 	mu      sync.Mutex
 	leases  map[string]*lease
@@ -119,6 +121,12 @@ func New(cfg Config, zvols zvol.Driver, vms vm.Driver, credential string, hostSe
 	if agent.newID == nil {
 		agent.newID = randomID
 	}
+	if cfg.TraceDir != "" {
+		if err := os.MkdirAll(cfg.TraceDir, 0o750); err != nil {
+			return nil, fmt.Errorf("agent: create trace directory: %w", err)
+		}
+	}
+	agent.started = time.Now()
 	agent.bootID = agent.newID()
 	return agent, nil
 }

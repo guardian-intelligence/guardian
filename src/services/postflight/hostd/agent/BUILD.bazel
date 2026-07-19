@@ -10,6 +10,7 @@ go_library(
         "gc.go",
         "lease.go",
         "pool.go",
+        "rendezvous_trace.go",
         "snapshot.go",
         "sync.go",
     ],
@@ -26,7 +27,10 @@ go_library(
 
 go_test(
     name = "agent_test",
-    srcs = ["sync_test.go"],
+    srcs = [
+        "pool_test.go",
+        "sync_test.go",
+    ],
     embed = [":agent"],
     deps = [
         "//src/services/postflight/hostd/syncproto",

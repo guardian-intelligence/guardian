@@ -281,6 +281,40 @@ tar -xJf "${work_dir}/${node_tarball}" -C "${mnt}/usr/local" --strip-components=
 
 log "installing guestd (sha256 ${guestd_sha256})"
 install -m 0755 "${GUESTD_BIN}" "${mnt}/usr/local/bin/guestd"
+install -d -m 0755 "${mnt}/usr/local/libexec"
+cat >"${mnt}/usr/local/libexec/postflight-job-started.sh" <<'EOF'
+#!/bin/sh
+set -eu
+
+dir="${POSTFLIGHT_RENDEZVOUS_DIR:?}"
+tmp="${dir}/request.$$"
+umask 077
+{
+  printf 'run_id=%s\n' "${GITHUB_RUN_ID:?}"
+  printf 'run_attempt=%s\n' "${GITHUB_RUN_ATTEMPT:?}"
+  printf 'runner_name=%s\n' "${RUNNER_NAME:?}"
+  printf 'repository=%s\n' "${GITHUB_REPOSITORY:?}"
+  printf 'workflow_job=%s\n' "${GITHUB_JOB:?}"
+} >"${tmp}"
+mv "${tmp}" "${dir}/request"
+
+deadline=$(($(date +%s) + 120))
+while [ ! -f "${dir}/release" ]; do
+  if [ -f "${dir}/abort" ]; then
+    cat "${dir}/abort" >&2
+    exit 125
+  fi
+  if [ "$(date +%s)" -ge "${deadline}" ]; then
+    echo "postflight rendezvous timed out" >&2
+    exit 124
+  fi
+  sleep 0.1
+done
+
+test -f "${dir}/job-env"
+cat "${dir}/job-env" >>"${GITHUB_ENV:?}"
+EOF
+chmod 0755 "${mnt}/usr/local/libexec/postflight-job-started.sh"
 cat >"${mnt}/etc/systemd/system/guestd.service" <<'EOF'
 [Unit]
 Description=Postflight guest agent

@@ -123,7 +123,11 @@ func (e *Exec) EnsureWorkspace(ctx context.Context, lease LeaseID, generation Ge
 		if err != nil {
 			return WorkspaceVolume{}, err
 		}
-		return WorkspaceVolume{Name: dataset, Device: devicePath(dataset), Source: origin}, nil
+		guid, err := e.sourceSnapshotGUID(ctx, origin)
+		if err != nil {
+			return WorkspaceVolume{}, err
+		}
+		return WorkspaceVolume{Name: dataset, Device: devicePath(dataset), Source: origin, SourceSnapshotGUID: guid}, nil
 	}
 	if generation == "" {
 		if sizeBytes <= 0 {
@@ -151,7 +155,27 @@ func (e *Exec) EnsureWorkspace(ctx context.Context, lease LeaseID, generation Ge
 		}
 		return WorkspaceVolume{}, err
 	}
-	return WorkspaceVolume{Name: dataset, Device: devicePath(dataset), Source: generation}, nil
+	guid, err := e.sourceSnapshotGUID(ctx, generation)
+	if err != nil {
+		return WorkspaceVolume{}, err
+	}
+	return WorkspaceVolume{Name: dataset, Device: devicePath(dataset), Source: generation, SourceSnapshotGUID: guid}, nil
+}
+
+func (e *Exec) sourceSnapshotGUID(ctx context.Context, generation GenerationID) (string, error) {
+	if generation == "" {
+		return "", nil
+	}
+	out, err := e.run(ctx, "get", "-H", "-p", "-o", "value", "guid",
+		e.generationDataset(generation)+"@sealed")
+	if err != nil {
+		return "", err
+	}
+	guid := strings.TrimSpace(out)
+	if guid == "" || guid == "-" {
+		return "", fmt.Errorf("zvol: generation %s has no snapshot guid", generation)
+	}
+	return guid, nil
 }
 
 // origin resolves which generation a workspace was cloned from, if any.
@@ -328,10 +352,15 @@ func (e *Exec) listWorkspaces(ctx context.Context) ([]WorkspaceVolume, error) {
 			}
 			source = GenerationID(name)
 		}
+		guid, err := e.sourceSnapshotGUID(ctx, source)
+		if err != nil {
+			return nil, err
+		}
 		workspaces = append(workspaces, WorkspaceVolume{
-			Name:   fields[0],
-			Device: devicePath(fields[0]),
-			Source: source,
+			Name:               fields[0],
+			Device:             devicePath(fields[0]),
+			Source:             source,
+			SourceSnapshotGUID: guid,
 		})
 	}
 	return workspaces, nil

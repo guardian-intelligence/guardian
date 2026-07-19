@@ -117,6 +117,9 @@ func (f *Fake) EnsureWorkspace(_ context.Context, lease LeaseID, generation Gene
 		Device: "/dev/zvol/fake/ws/" + string(lease),
 		Source: generation,
 	}
+	if generation != "" {
+		volume.SourceSnapshotGUID = "guid-" + string(generation)
+	}
 	f.workspaces[lease] = volume
 	f.journal("ensure-workspace %s from=%q size=%d", lease, generation, sizeBytes)
 	return volume, nil

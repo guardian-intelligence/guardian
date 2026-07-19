@@ -14,6 +14,9 @@ type Fake struct {
 	mu  sync.Mutex
 	vms map[ID]*fakeVM
 
+	// Images supplies the immutable image identity recorded for new VMs.
+	Images map[Class]string
+
 	// Fail, when non-nil, is consulted before every operation.
 	Fail func(op string, id ID) error
 	// FailAfter, when non-nil, is consulted after an operation has taken
@@ -31,13 +34,14 @@ type Fake struct {
 }
 
 type fakeVM struct {
-	status     Status
-	assignment *Assignment
+	status      Status
+	preparation *Preparation
+	rendezvous  *Rendezvous
 }
 
 // NewFake returns an empty fake hypervisor.
 func NewFake() *Fake {
-	return &Fake{vms: map[ID]*fakeVM{}}
+	return &Fake{vms: map[ID]*fakeVM{}, Images: map[Class]string{}}
 }
 
 func (f *Fake) fail(op string, id ID) error {
@@ -64,37 +68,67 @@ func (f *Fake) Launch(_ context.Context, id ID, class Class) error {
 		}
 		return nil
 	}
-	f.vms[id] = &fakeVM{status: Status{ID: id, Class: class, Phase: PhaseBooting}}
+	f.vms[id] = &fakeVM{status: Status{
+		ID: id, Class: class, Image: f.Images[class], Phase: PhaseBooting,
+	}}
 	f.journal("launch %s class=%s", id, class)
 	return nil
 }
 
-// Assign implements Driver.
-func (f *Fake) Assign(_ context.Context, id ID, assignment Assignment) error {
+// Prepare implements Driver.
+func (f *Fake) Prepare(_ context.Context, id ID, preparation Preparation) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := f.fail("assign", id); err != nil {
+	if err := f.fail("prepare", id); err != nil {
 		return err
 	}
 	instance, ok := f.vms[id]
 	if !ok {
 		return ErrNotFound
 	}
-	if instance.assignment != nil {
-		if instance.assignment.Lease != assignment.Lease {
-			return fmt.Errorf("vm: %s already assigned to lease %s", id, instance.assignment.Lease)
+	if instance.preparation != nil {
+		if instance.preparation.Lease != preparation.Lease {
+			return fmt.Errorf("vm: %s already assigned to lease %s", id, instance.preparation.Lease)
 		}
 		return nil // same lease; idempotent
 	}
-	instance.assignment = &assignment
+	instance.preparation = &preparation
 	instance.status.Phase = PhaseAssigned
-	instance.status.Lease = assignment.Lease
-	if f.OnAttach != nil {
-		f.OnAttach(assignment.WorkspaceDevice)
-	}
-	f.journal("assign %s device=%s", id, assignment.WorkspaceDevice)
+	instance.status.Lease = preparation.Lease
+	f.journal("prepare %s", id)
 	if f.FailAfter != nil {
-		return f.FailAfter("assign", id)
+		return f.FailAfter("prepare", id)
+	}
+	return nil
+}
+
+// Rendezvous implements Driver.
+func (f *Fake) Rendezvous(_ context.Context, id ID, rendezvous Rendezvous) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.fail("rendezvous", id); err != nil {
+		return err
+	}
+	instance, ok := f.vms[id]
+	if !ok {
+		return ErrNotFound
+	}
+	if instance.preparation == nil || instance.preparation.Lease != rendezvous.Lease {
+		return fmt.Errorf("vm: %s is not prepared for lease %s", id, rendezvous.Lease)
+	}
+	if instance.rendezvous != nil {
+		if instance.rendezvous.Lease != rendezvous.Lease {
+			return fmt.Errorf("vm: %s already rendezvoused for lease %s", id, instance.rendezvous.Lease)
+		}
+		return nil
+	}
+	instance.rendezvous = &rendezvous
+	if f.OnAttach != nil {
+		f.OnAttach(rendezvous.WorkspaceDevice)
+	}
+	f.journal("rendezvous %s device=%s", id, rendezvous.WorkspaceDevice)
+	if f.FailAfter != nil {
+		return f.FailAfter("rendezvous", id)
 	}
 	return nil
 }
@@ -152,8 +186,8 @@ func (f *Fake) Destroy(_ context.Context, id ID) error {
 	if !ok {
 		return nil
 	}
-	if instance.assignment != nil && f.OnDetach != nil {
-		f.OnDetach(instance.assignment.WorkspaceDevice)
+	if instance.rendezvous != nil && f.OnDetach != nil {
+		f.OnDetach(instance.rendezvous.WorkspaceDevice)
 	}
 	delete(f.vms, id)
 	f.journal("destroy %s", id)
@@ -163,23 +197,54 @@ func (f *Fake) Destroy(_ context.Context, id ID) error {
 // AdvanceBoot moves a booting VM to warm.
 func (f *Fake) AdvanceBoot(id ID) bool { return f.advance(id, PhaseBooting, PhaseWarm) }
 
-// MarkReady moves an assigned VM to ready (runner registered).
-func (f *Fake) MarkReady(id ID) bool { return f.advance(id, PhaseAssigned, PhaseReady) }
+// MarkListening moves an assigned VM to a registered listener.
+func (f *Fake) MarkListening(id ID) bool { return f.advance(id, PhaseAssigned, PhaseListening) }
+
+// MarkHookBlocked records GitHub's selected listener and hook identity.
+func (f *Fake) MarkHookBlocked(id ID, identity JobIdentity) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	instance, ok := f.vms[id]
+	if !ok || instance.status.Phase != PhaseListening {
+		return false
+	}
+	instance.status.Phase = PhaseHookBlocked
+	instance.status.Identity = identity
+	f.journal("phase %s %s->%s", id, PhaseListening, PhaseHookBlocked)
+	return true
+}
+
+// MarkReady moves a rendezvoused VM to ready after hook release.
+func (f *Fake) MarkReady(id ID, clock ClockSample) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	instance, ok := f.vms[id]
+	if !ok || instance.status.Phase != PhaseHookBlocked || instance.rendezvous == nil {
+		return false
+	}
+	instance.status.Phase = PhaseReady
+	instance.status.Clock = clock
+	f.journal("phase %s %s->%s", id, PhaseHookBlocked, PhaseReady)
+	return true
+}
 
 // MarkExited moves a ready or assigned VM to exited with a code.
 func (f *Fake) MarkExited(id ID, code int) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	instance, ok := f.vms[id]
-	if !ok || (instance.status.Phase != PhaseReady && instance.status.Phase != PhaseAssigned) {
+	if !ok || (instance.status.Phase != PhaseReady &&
+		instance.status.Phase != PhaseHookBlocked &&
+		instance.status.Phase != PhaseListening &&
+		instance.status.Phase != PhaseAssigned) {
 		return false
 	}
 	instance.status.Phase = PhaseExited
 	instance.status.ExitCode = code
-	if instance.assignment != nil && f.OnDetach != nil {
+	if instance.rendezvous != nil && f.OnDetach != nil {
 		// The guest is dead; the workspace device is no longer held open.
-		f.OnDetach(instance.assignment.WorkspaceDevice)
-		instance.assignment = nil
+		f.OnDetach(instance.rendezvous.WorkspaceDevice)
+		instance.rendezvous = nil
 	}
 	f.journal("exited %s code=%d", id, code)
 	return true
@@ -198,12 +263,23 @@ func (f *Fake) advance(id ID, from, to Phase) bool {
 }
 
 // Assignment returns the assignment a VM holds, for scenario assertions.
-func (f *Fake) Assignment(id ID) (Assignment, bool) {
+func (f *Fake) Preparation(id ID) (Preparation, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	instance, ok := f.vms[id]
-	if !ok || instance.assignment == nil {
-		return Assignment{}, false
+	if !ok || instance.preparation == nil {
+		return Preparation{}, false
 	}
-	return *instance.assignment, true
+	return *instance.preparation, true
+}
+
+// RendezvousFor returns the rendezvous a VM holds.
+func (f *Fake) RendezvousFor(id ID) (Rendezvous, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	instance, ok := f.vms[id]
+	if !ok || instance.rendezvous == nil {
+		return Rendezvous{}, false
+	}
+	return *instance.rendezvous, true
 }

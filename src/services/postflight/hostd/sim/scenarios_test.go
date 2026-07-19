@@ -22,17 +22,22 @@ func slots(n int) map[vm.Class]int { return map[vm.Class]int{class: n} }
 
 func runLease(id string) syncproto.DesiredLease {
 	return syncproto.DesiredLease{
-		LeaseID:            id,
-		State:              syncproto.DesiredRun,
-		ExecutionID:        "exec-" + id,
-		AttemptID:          "attempt-" + id,
-		OrgID:              "guardian-intelligence",
-		InstallationID:     42,
-		RepositoryID:       4242,
-		RepositoryFullName: "guardian-intelligence/postflight-tracer",
-		RunnerClass:        class,
-		JITConfig:          "jit-" + id,
-		Workspace:          syncproto.WorkspaceSpec{SizeBytes: 1 << 30},
+		LeaseID:              id,
+		State:                syncproto.DesiredRun,
+		ExecutionID:          "exec-" + id,
+		AttemptID:            "attempt-" + id,
+		OrgID:                "guardian-intelligence",
+		InstallationID:       42,
+		RepositoryID:         4242,
+		RepositoryFullName:   "guardian-intelligence/postflight-tracer",
+		RunnerClass:          class,
+		JITConfig:            "jit-" + id,
+		ProviderRunID:        101,
+		ProviderJobID:        201,
+		ProviderRunAttempt:   1,
+		AssignedRunnerName:   id,
+		RendezvousAuthorized: true,
+		Workspace:            syncproto.WorkspaceSpec{SizeBytes: 1 << 30},
 	}
 }
 
@@ -57,12 +62,77 @@ func driveToReady(t *testing.T, world *World, spec syncproto.DesiredLease) (vmID
 	if snapshot.State != syncproto.StateAssigning || snapshot.VMID == "" {
 		t.Fatalf("after tick 2: state %s vm %q, want assigning with a vm", snapshot.State, snapshot.VMID)
 	}
-	world.VMs.MarkReady(vm.ID(snapshot.VMID))
-	world.Tick()
+	completeRendezvous(t, world, spec, snapshot.VMID)
 	if got := world.Lease(spec.LeaseID).State; got != syncproto.StateReady {
-		t.Fatalf("after tick 3: state %s, want ready", got)
+		t.Fatalf("after rendezvous: state %s, want ready", got)
 	}
 	return snapshot.VMID
+}
+
+func completeRendezvous(t *testing.T, world *World, spec syncproto.DesiredLease, vmID string) {
+	t.Helper()
+	world.VMs.MarkListening(vm.ID(vmID))
+	world.Tick()
+	if got := world.Lease(spec.LeaseID).State; got != syncproto.StateListening {
+		t.Fatalf("after tick 3: state %s, want listening", got)
+	}
+	identity := vm.JobIdentity{
+		RunID: "101", RunAttempt: 1, RunnerName: spec.LeaseID,
+		Repository: spec.RepositoryFullName, WorkflowJob: "test",
+	}
+	world.VMs.MarkHookBlocked(vm.ID(vmID), identity)
+	world.Tick() // observe blocked hook
+	world.Tick() // bind workspace
+	world.VMs.MarkReady(vm.ID(vmID), vm.ClockSample{
+		UnixNS: time.Now().UnixNano(), Synchronized: true, Clocksource: "kvm-clock",
+	})
+	world.Tick()
+}
+
+func driveToHookBlocked(t *testing.T, world *World, spec syncproto.DesiredLease) string {
+	t.Helper()
+	deliver(world, 1, spec)
+	world.Tick()
+	bootAll(world)
+	world.Tick()
+	snapshot := world.Lease(spec.LeaseID)
+	world.VMs.MarkListening(vm.ID(snapshot.VMID))
+	world.Tick()
+	world.VMs.MarkHookBlocked(vm.ID(snapshot.VMID), vm.JobIdentity{
+		RunID: "101", RunAttempt: 1, RunnerName: spec.LeaseID,
+		Repository: spec.RepositoryFullName, WorkflowJob: "test",
+	})
+	world.Tick()
+	return snapshot.VMID
+}
+
+func driveExistingToReady(t *testing.T, world *World, spec syncproto.DesiredLease, vmID string) {
+	t.Helper()
+	status, err := world.VMs.Status(context.Background(), vm.ID(vmID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := vm.JobIdentity{
+		RunID: "101", RunAttempt: 1, RunnerName: spec.LeaseID,
+		Repository: spec.RepositoryFullName, WorkflowJob: "test",
+	}
+	switch status.Phase {
+	case vm.PhaseAssigned:
+		world.VMs.MarkListening(vm.ID(vmID))
+		world.Tick()
+		fallthrough
+	case vm.PhaseListening:
+		world.VMs.MarkHookBlocked(vm.ID(vmID), identity)
+		world.Tick()
+		fallthrough
+	case vm.PhaseHookBlocked:
+		world.Tick()
+		world.VMs.MarkReady(vm.ID(vmID), vm.ClockSample{
+			UnixNS: time.Now().UnixNano(), Synchronized: true, Clocksource: "kvm-clock",
+		})
+		world.Tick()
+	case vm.PhaseReady:
+	}
 }
 
 // bootAll flips every booting VM to warm.
@@ -82,18 +152,22 @@ func TestHappyPathRunSealForget(t *testing.T) {
 
 	// The assignment the guest received carries the workspace device, the
 	// JIT blob, and a checkout token derived from this host's secret.
-	assignment, ok := world.VMs.Assignment(vm.ID(vmID))
+	preparation, ok := world.VMs.Preparation(vm.ID(vmID))
 	if !ok {
-		t.Fatal("assigned vm holds no assignment")
+		t.Fatal("assigned vm holds no preparation")
 	}
-	if assignment.WorkspaceDevice != "/dev/zvol/fake/ws/l1" {
-		t.Fatalf("workspace device %q", assignment.WorkspaceDevice)
+	rendezvous, ok := world.VMs.RendezvousFor(vm.ID(vmID))
+	if !ok {
+		t.Fatal("assigned vm holds no rendezvous")
 	}
-	if assignment.JITConfig != "jit-l1" {
-		t.Fatalf("jit config %q", assignment.JITConfig)
+	if rendezvous.WorkspaceDevice != "/dev/zvol/fake/ws/l1" {
+		t.Fatalf("workspace device %q", rendezvous.WorkspaceDevice)
+	}
+	if preparation.JITConfig != "jit-l1" {
+		t.Fatalf("jit config %q", preparation.JITConfig)
 	}
 	wantToken := checkoutbundle.DeriveCheckoutToken([]byte("0123456789abcdef0123456789abcdef"), "exec-l1", "attempt-l1")
-	if assignment.Env["POSTFLIGHT_CHECKOUT_TOKEN"] != wantToken {
+	if rendezvous.Env["POSTFLIGHT_CHECKOUT_TOKEN"] != wantToken {
 		t.Fatal("checkout token does not match host-secret derivation")
 	}
 	// While the lease is live, its token resolves.
@@ -213,7 +287,7 @@ func TestCacheHitClonesFromGeneration(t *testing.T) {
 	world.SeedGeneration("gen-main", 1<<20)
 	spec := runLease("l1")
 	spec.Workspace = syncproto.WorkspaceSpec{Generation: "gen-main"}
-	deliver(world, 1, spec)
+	driveToHookBlocked(t, world, spec)
 	world.Tick()
 	found := false
 	for _, entry := range world.Zvols.Journal {
@@ -230,7 +304,7 @@ func TestCloneSourceMissingFailsLease(t *testing.T) {
 	world := NewWorld(t, slots(2))
 	spec := runLease("l1")
 	spec.Workspace = syncproto.WorkspaceSpec{Generation: "gen-absent"}
-	deliver(world, 1, spec)
+	driveToHookBlocked(t, world, spec)
 	world.Tick()
 	snapshot := world.Lease("l1")
 	if snapshot.State != syncproto.StateFailed || !strings.Contains(snapshot.Reason, "materialize") {
@@ -358,6 +432,9 @@ func TestRejectedSpecOnTerminalLeaseIsNotCollected(t *testing.T) {
 	// Starve the claim so the lease fails terminally; its workspace holds
 	// the only copy of whatever the job left behind.
 	world.Sync(syncproto.SyncResponse{Leases: []syncproto.DesiredLease{spec}})
+	if _, err := world.Zvols.EnsureWorkspace(context.Background(), "l1", "", 1); err != nil {
+		t.Fatal(err)
+	}
 	world.Tick()
 	deadline, _ := agent.StateDeadline(syncproto.StateClaiming)
 	world.Advance(deadline + time.Second)
@@ -418,20 +495,19 @@ func TestQuarantineFreezesDeadlines(t *testing.T) {
 	if snapshot.State != syncproto.StateAssigning {
 		t.Fatalf("lease did not survive unquarantine: %+v", snapshot)
 	}
-	world.VMs.MarkReady(vm.ID(snapshot.VMID))
-	world.Tick()
+	completeRendezvous(t, world, spec, snapshot.VMID)
 	if got := world.Lease("l1").State; got != syncproto.StateReady {
 		t.Fatalf("state %s, want ready", got)
 	}
 }
 
-func TestAssignFailureDestroysClaimedVM(t *testing.T) {
+func TestPrepareFailureDestroysClaimedVM(t *testing.T) {
 	world := NewWorld(t, slots(2))
 	// Effect-then-error: the assignment lands guest-side (JIT config and
 	// checkout token delivered) and the call still fails — the ambiguous
 	// shape a real QMP timeout produces.
 	world.VMs.FailAfter = func(op string, _ vm.ID) error {
-		if op == "assign" {
+		if op == "prepare" {
 			return errAssignTimeout
 		}
 		return nil
@@ -442,7 +518,7 @@ func TestAssignFailureDestroysClaimedVM(t *testing.T) {
 	bootAll(world)
 	world.Tick()
 	snapshot := world.Lease("l1")
-	if snapshot.State != syncproto.StateFailed || !strings.Contains(snapshot.Reason, "assign") {
+	if snapshot.State != syncproto.StateFailed || !strings.Contains(snapshot.Reason, "prepare") {
 		t.Fatalf("got %+v", snapshot)
 	}
 	// The claimed VM was destroyed through the failure path — an ambiguous
@@ -515,8 +591,7 @@ func TestCrashRestartConvergesWithoutDuplicates(t *testing.T) {
 				t.Fatalf("did not converge after restart: %+v", snapshot)
 			}
 			if snapshot.VMID != "" {
-				world.VMs.MarkReady(vm.ID(snapshot.VMID))
-				world.Tick()
+				driveExistingToReady(t, world, spec, snapshot.VMID)
 				world.VMs.MarkExited(vm.ID(snapshot.VMID), 0)
 				world.Tick()
 			}
@@ -535,14 +610,14 @@ func TestCrashRestartConvergesWithoutDuplicates(t *testing.T) {
 			if creates != 1 {
 				t.Fatalf("workspace created %d times across crash", creates)
 			}
-			assigns := 0
+			prepares := 0
 			for _, entry := range world.VMs.Journal {
-				if strings.HasPrefix(entry, "assign ") {
-					assigns++
+				if strings.HasPrefix(entry, "prepare ") {
+					prepares++
 				}
 			}
-			if assigns > 1 {
-				t.Fatalf("assignment delivered %d times across crash", assigns)
+			if prepares > 1 {
+				t.Fatalf("preparation delivered %d times across crash", prepares)
 			}
 		})
 	}
@@ -640,7 +715,8 @@ func TestZvolFaultFailsLeaseCleanly(t *testing.T) {
 		}
 		return nil
 	}
-	deliver(world, 1, runLease("l1"))
+	spec := runLease("l1")
+	driveToHookBlocked(t, world, spec)
 	world.Tick()
 	snapshot := world.Lease("l1")
 	if snapshot.State != syncproto.StateFailed {
@@ -660,7 +736,7 @@ func TestOrphanVMAndWorkspaceAreCollected(t *testing.T) {
 		t.Fatal(err)
 	}
 	world.VMs.AdvanceBoot("vm-zombie")
-	if err := world.VMs.Assign(context.Background(), "vm-zombie", vm.Assignment{Lease: "ghost", WorkspaceDevice: "/dev/zvol/fake/ws/ghost"}); err != nil {
+	if err := world.VMs.Prepare(context.Background(), "vm-zombie", vm.Preparation{Lease: "ghost"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := world.Zvols.EnsureWorkspace(context.Background(), "stale", "", 1); err != nil {

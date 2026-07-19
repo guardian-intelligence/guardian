@@ -56,9 +56,10 @@ generation-set identity,
 a pool VM that already knows customer identity or carries customer volumes,
 a bound or mounted tuple that differs from the resolved snapshots, a missing
 workspace, a memory snapshot without its workspace, duplicate volume roles,
-and hook release before mounts and post-restore clock evidence. This models
-deterministic assignment without claiming the current reactive JIT path
-already implements it.
+and hook release before mounts and post-restore clock evidence. Deterministic
+assignment means reacting to GitHub's observed runner mapping, including
+same-label listener displacement; it does not mean predicting which JIT
+registration GitHub will select.
 
 ## Snapshot discipline
 

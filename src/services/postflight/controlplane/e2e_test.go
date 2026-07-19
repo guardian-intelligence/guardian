@@ -74,6 +74,8 @@ type fakeGitHubJob struct {
 	Name       string
 	Status     string
 	Conclusion string
+	RunnerID   int64
+	RunnerName string
 }
 
 type jitMintRequest struct {
@@ -89,6 +91,16 @@ func (f *fakeGitHub) addQueuedJob(runID, jobID int64, name string) {
 	f.jobs[jobID] = &fakeGitHubJob{ID: jobID, RunID: runID, Name: name, Status: "queued"}
 }
 
+// assignJob records GitHub's authoritative runner selection as returned by
+// the attempt-jobs API.
+func (f *fakeGitHub) assignJob(jobID int64, runnerName string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.jobs[jobID].Status = "in_progress"
+	f.jobs[jobID].RunnerID = 7
+	f.jobs[jobID].RunnerName = runnerName
+}
+
 // concludeJob moves a job to completed with the given conclusion.
 func (f *fakeGitHub) concludeJob(jobID int64, conclusion string) {
 	f.mu.Lock()
@@ -101,8 +113,10 @@ func (f *fakeGitHub) jobJSON(j *fakeGitHubJob) map[string]any {
 	return map[string]any{
 		"id": j.ID, "run_id": j.RunID, "run_attempt": 1,
 		"name": j.Name, "status": j.Status, "conclusion": j.Conclusion,
-		"labels":   []string{e2eClass},
-		"head_sha": "abc123", "head_branch": "main", "workflow_name": "ci",
+		"labels":      []string{e2eClass},
+		"runner_id":   j.RunnerID,
+		"runner_name": j.RunnerName,
+		"head_sha":    "abc123", "head_branch": "main", "workflow_name": "ci",
 	}
 }
 
@@ -403,9 +417,9 @@ func TestHostdSchedulerEndToEnd(t *testing.T) {
 		}
 		return false
 	})
-	assignment, ok := vms.Assignment(vmID)
-	if !ok || assignment.JITConfig != e2eJITBlob {
-		t.Fatalf("assignment did not carry the minted jit config: %+v (ok=%v)", assignment, ok)
+	preparation, ok := vms.Preparation(vmID)
+	if !ok || preparation.JITConfig != e2eJITBlob {
+		t.Fatalf("preparation did not carry the minted jit config: %+v (ok=%v)", preparation, ok)
 	}
 	mints := cp.github.mints()
 	if len(mints) != 1 || mints[0].Name != leaseID || mints[0].RunnerGroupID != 1 ||
@@ -413,8 +427,46 @@ func TestHostdSchedulerEndToEnd(t *testing.T) {
 		t.Fatalf("jit mint request: %+v", mints)
 	}
 
-	// Runner registers: hostd reports ready, the control plane records it.
-	vms.MarkReady(vmID)
+	// The generic listener registers without customer state. GitHub then
+	// assigns this exact runner; only that API-observed association permits
+	// the workspace bind and release of the blocked job-start hook.
+	if !vms.MarkListening(vmID) {
+		t.Fatal("prepared VM did not enter listening")
+	}
+	waitFor(t, "control plane observing generic listener", func() bool {
+		return cp.queryString(t, `SELECT state FROM host_leases WHERE lease_id = $1`, leaseID) == "ready"
+	})
+	cp.github.assignJob(e2eJobID, leaseID)
+	cp.postWebhook(t, "e2e-delivery-assigned",
+		workflowJobEventPayload("in_progress", e2eRunID, e2eJobID, "in_progress"))
+	waitFor(t, "GitHub assignment observation", func() bool {
+		return cp.queryString(t, `SELECT runner_name FROM github_job_assignments WHERE provider_job_id = $1`, e2eJobID) == leaseID
+	})
+	if !vms.MarkHookBlocked(vmID, vm.JobIdentity{
+		RunID:       strconv.FormatInt(e2eRunID, 10),
+		RunAttempt:  1,
+		RunnerName:  leaseID,
+		Repository:  e2eRepo,
+		WorkflowJob: "build",
+	}) {
+		t.Fatal("listening VM did not report a blocked job-start hook")
+	}
+	var rendezvous vm.Rendezvous
+	waitFor(t, "hostd binding the authorized workspace", func() bool {
+		var found bool
+		rendezvous, found = vms.RendezvousFor(vmID)
+		return found
+	})
+	if rendezvous.Lease != leaseID || rendezvous.WorkspaceDevice == "" {
+		t.Fatalf("rendezvous did not bind the lease workspace: %+v", rendezvous)
+	}
+	if !vms.MarkReady(vmID, vm.ClockSample{
+		UnixNS:       time.Now().UnixNano(),
+		Synchronized: true,
+		Clocksource:  "kvm-clock",
+	}) {
+		t.Fatal("rendezvoused VM did not become ready")
+	}
 	waitFor(t, "control plane observing ready", func() bool {
 		return cp.queryString(t, `SELECT state FROM host_leases WHERE lease_id = $1`, leaseID) == "ready"
 	})
@@ -435,6 +487,115 @@ func TestHostdSchedulerEndToEnd(t *testing.T) {
 	})
 	waitFor(t, "hostd forgetting the acked lease", func() bool {
 		return len(hostd.Snapshot()) == 0 && !zvols.HasWorkspace(zvol.LeaseID(leaseID))
+	})
+}
+
+// TestCrossedAssignmentsBindActualJobs proves the displacement case that a
+// serial test cannot expose: GitHub is free to send each same-label job to
+// the listener minted in response to the other job. The listener/VM identity
+// stays fixed while the execution lease and workspace follow GitHub's
+// observed assignment.
+func TestCrossedAssignmentsBindActualJobs(t *testing.T) {
+	const (
+		run2 = int64(778)
+		job2 = int64(9002)
+	)
+	cp := startControlPlane(t)
+	cp.github.addQueuedJob(run2, job2, "build")
+	hostd, vms, _ := startHostd(t, cp.server.URL, "host-crossed")
+
+	waitFor(t, "host slot registration", func() bool {
+		return cp.queryString(t, `SELECT total::text FROM host_slots WHERE host_id = 'host-crossed' AND class = $1`, e2eClass) == "2"
+	})
+	cp.postWebhook(t, "crossed-1-queued", queuedJobPayload())
+	cp.postWebhook(t, "crossed-2-queued",
+		workflowJobEventPayload("queued", run2, job2, "queued"))
+	waitFor(t, "both leases assigned", func() bool {
+		return cp.queryString(t, `SELECT count(*)::text FROM host_leases WHERE provider_job_id IN ($1, $2) AND state = 'assigned'`, e2eJobID, job2) == "2"
+	})
+	lease1 := cp.queryString(t, `SELECT lease_id FROM host_leases WHERE provider_job_id = $1`, e2eJobID)
+	lease2 := cp.queryString(t, `SELECT lease_id FROM host_leases WHERE provider_job_id = $1`, job2)
+
+	vmByListener := map[string]vm.ID{}
+	waitFor(t, "both listeners prepared", func() bool {
+		for _, snapshot := range hostd.Snapshot() {
+			if snapshot.VMID != "" {
+				vmByListener[snapshot.LeaseID] = vm.ID(snapshot.VMID)
+			}
+		}
+		return vmByListener[lease1] != "" && vmByListener[lease2] != ""
+	})
+	for listener, vmID := range vmByListener {
+		if !vms.MarkListening(vmID) {
+			t.Fatalf("listener %s did not become ready", listener)
+		}
+	}
+	waitFor(t, "both generic listeners observed", func() bool {
+		return cp.queryString(t, `SELECT count(*)::text FROM host_leases WHERE provider_job_id IN ($1, $2) AND state = 'ready'`, e2eJobID, job2) == "2"
+	})
+
+	// Cross the jobs: listener 1 receives job 2 and listener 2 receives job 1.
+	cp.github.assignJob(e2eJobID, lease2)
+	cp.github.assignJob(job2, lease1)
+	cp.postWebhook(t, "crossed-1-assigned",
+		workflowJobEventPayload("in_progress", e2eRunID, e2eJobID, "in_progress"))
+	cp.postWebhook(t, "crossed-2-assigned",
+		workflowJobEventPayload("in_progress", run2, job2, "in_progress"))
+	waitFor(t, "crossed GitHub assignments observed", func() bool {
+		return cp.queryString(t, `SELECT count(*)::text FROM github_job_assignments WHERE (provider_job_id = $1 AND runner_name = $3) OR (provider_job_id = $2 AND runner_name = $4)`, e2eJobID, job2, lease2, lease1) == "2"
+	})
+
+	if !vms.MarkHookBlocked(vmByListener[lease1], vm.JobIdentity{
+		RunID: strconv.FormatInt(run2, 10), RunAttempt: 1,
+		RunnerName: lease1, Repository: e2eRepo, WorkflowJob: "build",
+	}) {
+		t.Fatal("listener 1 did not report job 2")
+	}
+	if !vms.MarkHookBlocked(vmByListener[lease2], vm.JobIdentity{
+		RunID: strconv.FormatInt(e2eRunID, 10), RunAttempt: 1,
+		RunnerName: lease2, Repository: e2eRepo, WorkflowJob: "build",
+	}) {
+		t.Fatal("listener 2 did not report job 1")
+	}
+
+	var rendezvous1, rendezvous2 vm.Rendezvous
+	waitFor(t, "crossed workspaces bound", func() bool {
+		var ok1, ok2 bool
+		rendezvous1, ok1 = vms.RendezvousFor(vmByListener[lease1])
+		rendezvous2, ok2 = vms.RendezvousFor(vmByListener[lease2])
+		return ok1 && ok2
+	})
+	if !strings.HasSuffix(rendezvous1.WorkspaceDevice, "/ws/"+lease2) {
+		t.Fatalf("listener %s bound %+v, want execution lease %s", lease1, rendezvous1, lease2)
+	}
+	if !strings.HasSuffix(rendezvous2.WorkspaceDevice, "/ws/"+lease1) {
+		t.Fatalf("listener %s bound %+v, want execution lease %s", lease2, rendezvous2, lease1)
+	}
+	clock := vm.ClockSample{
+		UnixNS: time.Now().UnixNano(), Synchronized: true, Clocksource: "kvm-clock",
+	}
+	if !vms.MarkReady(vmByListener[lease1], clock) ||
+		!vms.MarkReady(vmByListener[lease2], clock) {
+		t.Fatal("crossed rendezvous did not release both hooks")
+	}
+	vms.MarkExited(vmByListener[lease1], 1)
+	waitFor(t, "first crossed execution completed", func() bool {
+		return cp.queryString(t, `SELECT state FROM host_leases WHERE provider_job_id = $1`, job2) == "completed"
+	})
+	waitFor(t, "second crossed listener survives credential scrub", func() bool {
+		for _, snapshot := range hostd.Snapshot() {
+			if snapshot.LeaseID == lease2 {
+				return snapshot.State == syncproto.StateReady
+			}
+		}
+		return false
+	})
+	vms.MarkExited(vmByListener[lease2], 1)
+	waitFor(t, "actual execution leases completed", func() bool {
+		return cp.queryString(t, `SELECT count(*)::text FROM host_leases WHERE provider_job_id IN ($1, $2) AND state = 'completed' AND exit_code = 1`, e2eJobID, job2) == "2"
+	})
+	waitFor(t, "both physical listener slots released", func() bool {
+		return cp.queryString(t, `SELECT reserved::text FROM host_slots WHERE host_id = 'host-crossed' AND class = $1`, e2eClass) == "0"
 	})
 }
 
@@ -472,7 +633,38 @@ func TestWorkspaceGenerationLifecycleEndToEnd(t *testing.T) {
 			}
 			return false
 		})
-		vms.MarkReady(vmID)
+		if !vms.MarkListening(vmID) {
+			t.Fatal("prepared VM did not enter listening")
+		}
+		waitFor(t, "control plane observing generic listener", func() bool {
+			return cp.queryString(t, `SELECT state FROM host_leases WHERE lease_id = $1`, leaseID) == "ready"
+		})
+		cp.github.assignJob(jobID, leaseID)
+		cp.postWebhook(t, delivery+"-assigned",
+			workflowJobEventPayload("in_progress", runID, jobID, "in_progress"))
+		waitFor(t, "GitHub assignment observation", func() bool {
+			return cp.queryString(t, `SELECT runner_name FROM github_job_assignments WHERE provider_job_id = $1`, jobID) == leaseID
+		})
+		if !vms.MarkHookBlocked(vmID, vm.JobIdentity{
+			RunID:       strconv.FormatInt(runID, 10),
+			RunAttempt:  1,
+			RunnerName:  leaseID,
+			Repository:  e2eRepo,
+			WorkflowJob: "build",
+		}) {
+			t.Fatal("listening VM did not report a blocked job-start hook")
+		}
+		waitFor(t, "hostd binding the authorized workspace", func() bool {
+			_, found := vms.RendezvousFor(vmID)
+			return found
+		})
+		if !vms.MarkReady(vmID, vm.ClockSample{
+			UnixNS:       time.Now().UnixNano(),
+			Synchronized: true,
+			Clocksource:  "kvm-clock",
+		}) {
+			t.Fatal("rendezvoused VM did not become ready")
+		}
 		waitFor(t, "control plane observing ready", func() bool {
 			return cp.queryString(t, `SELECT state FROM host_leases WHERE lease_id = $1`, leaseID) == "ready"
 		})

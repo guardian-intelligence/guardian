@@ -11,6 +11,7 @@ import (
 // sim harness's invariant checks.
 type LeaseSnapshot struct {
 	LeaseID          string
+	ExecutionLeaseID string
 	State            syncproto.State
 	Since            time.Time
 	VMID             string
@@ -34,6 +35,7 @@ func (a *Agent) Snapshot() []LeaseSnapshot {
 	for _, record := range a.leases {
 		snapshots = append(snapshots, LeaseSnapshot{
 			LeaseID:          record.spec.LeaseID,
+			ExecutionLeaseID: executionLeaseID(record.spec),
 			State:            record.state,
 			Since:            record.since,
 			VMID:             record.vmID,

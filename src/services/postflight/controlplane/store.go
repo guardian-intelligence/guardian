@@ -544,6 +544,20 @@ ON CONFLICT (provider_job_id) DO UPDATE SET
     delivery_id   = EXCLUDED.delivery_id,
     observed_at   = EXCLUDED.observed_at,
     updated_at    = now()`
+
+sqlAdoptAssignedExecution = `
+UPDATE host_leases execution
+SET state = 'ready', reported_state = 'assignment-routed',
+    assignment_deadline_at = NULL, updated_at = now()
+WHERE execution.provider_job_id = $1 AND execution.state = 'allocating'
+  AND EXISTS (
+      SELECT 1 FROM host_leases listener
+      WHERE listener.lease_id = $2
+        AND listener.host_id <> ''
+        AND listener.state IN ('assigned', 'ready')
+        AND listener.runner_class = execution.runner_class
+  )
+RETURNING host_id, runner_class`
 )
 
 func (s *pgStore) UpsertJobAssignment(ctx context.Context, a jobAssignment) error {
@@ -556,6 +570,27 @@ func (s *pgStore) UpsertJobAssignment(ctx context.Context, a jobAssignment) erro
 		return err
 	}
 	if _, err := tx.Exec(ctx, sqlUpsertJobAssignment, a.ProviderJobID, a.RunnerName, a.RunnerID, a.DeliveryID); err != nil {
+		return err
+	}
+	var hostID, class string
+	err = tx.QueryRow(ctx, sqlAdoptAssignedExecution,
+		a.ProviderJobID, a.RunnerName).Scan(&hostID, &class)
+	switch {
+	case err == nil:
+		// The job consumed an already-online listener before its own demand
+		// could claim capacity. Any in-flight claim on its execution row is
+		// returned; the selected listener's row already owns the real slot.
+		if hostID != "" {
+			if _, err := tx.Exec(ctx, sqlReleaseHostSlot, hostID, class); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(ctx, sqlAdvanceDemand, a.ProviderJobID, demandAssigned,
+			[]string{demandRecorded, demandCapacityRequested}); err != nil {
+			return err
+		}
+	case errors.Is(err, pgx.ErrNoRows):
+	default:
 		return err
 	}
 	return tx.Commit(ctx)

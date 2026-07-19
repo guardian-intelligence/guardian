@@ -50,7 +50,14 @@ func TestVsockGuestProbeIsHelloWithinDeadline(t *testing.T) {
 		sendHello(t, conn)
 		encoder := guestproto.NewEncoder(conn)
 		_ = encoder.Write(guestproto.Message{Kind: guestproto.KindRunnerStatus, RunnerStatus: &guestproto.RunnerStatus{State: guestproto.RunnerRegistered}})
-		_ = encoder.Write(guestproto.Message{Kind: guestproto.KindRunnerStatus, RunnerStatus: &guestproto.RunnerStatus{State: guestproto.RunnerJobStarted}})
+		_ = encoder.Write(guestproto.Message{Kind: guestproto.KindRunnerStatus, RunnerStatus: &guestproto.RunnerStatus{
+			State:    guestproto.RunnerHookBlocked,
+			Identity: &guestproto.JobIdentity{RunID: "1", RunAttempt: 1, RunnerName: "r", Repository: "acme/widget"},
+		}})
+		_ = encoder.Write(guestproto.Message{Kind: guestproto.KindRunnerStatus, RunnerStatus: &guestproto.RunnerStatus{
+			State: guestproto.RunnerReleased,
+			Clock: &guestproto.ClockSample{UnixNS: 1, Clocksource: "kvm-clock"},
+		}})
 		_ = encoder.Write(guestproto.Message{Kind: guestproto.KindRunnerStatus, RunnerStatus: &guestproto.RunnerStatus{State: guestproto.RunnerExited, ExitCode: 7}})
 	})
 	if got := observation(t, transport, "vm-a", 3); !got.Hello {
@@ -60,6 +67,24 @@ func TestVsockGuestProbeIsHelloWithinDeadline(t *testing.T) {
 		got := observation(t, transport, "vm-a", 3)
 		return got.RunnerRegistered && got.RunnerExited && got.ExitCode == 7, nil
 	})
+}
+
+func TestVsockGuestRejectsOldProtocol(t *testing.T) {
+	transport, _ := pipeDialer(func(conn net.Conn) {
+		defer conn.Close()
+		_ = guestproto.NewEncoder(conn).Write(guestproto.Message{
+			Kind: guestproto.KindHello,
+			Hello: &guestproto.Hello{
+				Version: guestproto.Version - 1,
+			},
+		})
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := transport.Prepare(ctx, "vm-old", 3, guestproto.Prepare{Lease: "l1"}); err == nil ||
+		!strings.Contains(err.Error(), "protocol version") {
+		t.Fatalf("old protocol prepare error = %v", err)
+	}
 }
 
 func TestVsockGuestDialFailureIsTheZeroObservation(t *testing.T) {
@@ -77,8 +102,8 @@ func TestVsockGuestDialFailureIsTheZeroObservation(t *testing.T) {
 		t.Fatalf("observation %+v, want zero", observed)
 	}
 
-	// Deliver, by contrast, must surface the failure.
-	if err := transport.Deliver(ctx, "vm-a", 3, guestproto.Assignment{Lease: "l1"}); err == nil {
+	// Prepare, by contrast, must surface the failure.
+	if err := transport.Prepare(ctx, "vm-a", 3, guestproto.Prepare{Lease: "l1"}); err == nil {
 		t.Fatal("delivered over a dead channel")
 	}
 }
@@ -102,8 +127,8 @@ func TestVsockGuestSilentGuestObservesZeroWithinDeadline(t *testing.T) {
 	}
 }
 
-func TestVsockGuestDeliverWritesTheAssignment(t *testing.T) {
-	received := make(chan guestproto.Assignment, 1)
+func TestVsockGuestPrepareWritesTheListener(t *testing.T) {
+	received := make(chan guestproto.Prepare, 1)
 	transport, _ := pipeDialer(func(conn net.Conn) {
 		sendHello(t, conn)
 		decoder := guestproto.NewDecoder(conn)
@@ -112,29 +137,25 @@ func TestVsockGuestDeliverWritesTheAssignment(t *testing.T) {
 			t.Errorf("guest read: %v", err)
 			return
 		}
-		if message.Kind != guestproto.KindAssignment {
-			t.Errorf("guest got %s, want assignment", message.Kind)
+		if message.Kind != guestproto.KindPrepare {
+			t.Errorf("guest got %s, want prepare", message.Kind)
 			return
 		}
-		received <- *message.Assignment
+		received <- *message.Prepare
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	assignment := guestproto.Assignment{
-		Lease:     "lease-1",
-		Mounts:    []guestproto.Mount{{Serial: "workspace", Filesystem: "ext4", Mountpoint: "/opt/actions-runner/_work/w/w", Options: []string{"discard"}}},
-		JITConfig: "jit-blob",
-	}
-	if err := transport.Deliver(ctx, "vm-a", 3, assignment); err != nil {
-		t.Fatalf("deliver: %v", err)
+	prepare := guestproto.Prepare{Lease: "lease-1", JITConfig: "jit-blob"}
+	if err := transport.Prepare(ctx, "vm-a", 3, prepare); err != nil {
+		t.Fatalf("prepare: %v", err)
 	}
 	select {
 	case got := <-received:
-		if got.Lease != assignment.Lease || len(got.Mounts) != 1 || got.Mounts[0].Serial != "workspace" {
+		if got.Lease != prepare.Lease || got.JITConfig != "jit-blob" {
 			t.Fatalf("guest received %+v", got)
 		}
 	case <-ctx.Done():
-		t.Fatal("assignment never reached the guest")
+		t.Fatal("preparation never reached the guest")
 	}
 }
 

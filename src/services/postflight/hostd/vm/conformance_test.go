@@ -193,20 +193,23 @@ func TestConformanceLifecycle(t *testing.T) {
 	if err := driver.disks.Ensure(ctx, workspace, driver.cfg.Classes[testClass].Image); err != nil {
 		t.Fatalf("cloning workspace: %v", err)
 	}
-	assignment := Assignment{
+	preparation := Preparation{Lease: "lease-conf", JITConfig: "jit-blob"}
+	rendezvous := Rendezvous{
 		Lease:               "lease-conf",
 		WorkspaceDevice:     zvolDevicePath(workspace),
 		WorkspaceMountpoint: "/opt/actions-runner/_work/widget/widget",
-		JITConfig:           "jit-blob",
 		Env:                 map[string]string{"POSTFLIGHT_EXECUTION_ID": "exec-conf"},
 	}
 	attachStart := time.Now()
-	if err := driver.Assign(ctx, id, assignment); err != nil {
-		t.Fatalf("assign: %v", err)
+	if err := driver.Prepare(ctx, id, preparation); err != nil {
+		t.Fatalf("prepare: %v", err)
 	}
-	t.Logf("assign (hot-attach + deliver) in %s", time.Since(attachStart))
-	if err := driver.Assign(ctx, id, assignment); err != nil {
-		t.Fatalf("repeat assign: %v", err)
+	if err := driver.Rendezvous(ctx, id, rendezvous); err != nil {
+		t.Fatalf("rendezvous: %v", err)
+	}
+	t.Logf("rendezvous (hot-attach + deliver) in %s", time.Since(attachStart))
+	if err := driver.Rendezvous(ctx, id, rendezvous); err != nil {
+		t.Fatalf("repeat rendezvous: %v", err)
 	}
 
 	client, err := dialQMP(ctx, qmpSocketPath(driver.stateDir(id)))
@@ -223,7 +226,7 @@ func TestConformanceLifecycle(t *testing.T) {
 	}
 	client.Close()
 
-	deliveries := guest.deliveries(id)
+	deliveries := guest.rendezvouses(id)
 	if len(deliveries) == 0 || deliveries[0].Lease != "lease-conf" ||
 		len(deliveries[0].Mounts) != 1 || deliveries[0].Mounts[0].Serial != workspaceNode {
 		t.Fatalf("deliveries %+v", deliveries)
@@ -237,8 +240,8 @@ func TestConformanceLifecycle(t *testing.T) {
 	}
 
 	guest.set(id, GuestObservation{Hello: true, RunnerRegistered: true})
-	if status, _ = driver.Status(ctx, id); status.Phase != PhaseReady {
-		t.Fatalf("phase %s, want ready", status.Phase)
+	if status, _ = driver.Status(ctx, id); status.Phase != PhaseListening {
+		t.Fatalf("phase %s, want listening", status.Phase)
 	}
 	guest.set(id, GuestObservation{Hello: true, RunnerExited: true, ExitCode: 7})
 	if status, _ = driver.Status(ctx, id); status.Phase != PhaseExited || status.ExitCode != 7 {
@@ -310,7 +313,7 @@ func TestConformanceAdoption(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = first.disks.Destroy(context.Background(), workspace) })
-	if err := first.Assign(ctx, id, Assignment{Lease: "lease-adopt", WorkspaceDevice: zvolDevicePath(workspace)}); err != nil {
+	if err := first.Prepare(ctx, id, Preparation{Lease: "lease-adopt", JITConfig: "jit"}); err != nil {
 		t.Fatal(err)
 	}
 	originalMeta, err := first.readMeta(id)

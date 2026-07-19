@@ -16,6 +16,35 @@ func (a *Agent) reconcilePool(ctx context.Context, vms *vmView) {
 		if target > total {
 			target = total
 		}
+		// An image rollout never offers stale idle capacity to a lease. Old
+		// metadata predating the image field also compares unequal and is
+		// replaced. Assigned VMs finish under the image they started with.
+		if image := a.cfg.Images[class]; image != "" {
+			for id, status := range vms.byID {
+				if status.Class != class || status.Lease != "" || status.Image == image {
+					continue
+				}
+				if status.Phase != vm.PhaseWarm && status.Phase != vm.PhaseBooting {
+					continue
+				}
+				if err := a.vms.Destroy(ctx, id); err != nil {
+					a.logger.Error("destroying stale-image pool vm",
+						"vm", id, "have", status.Image, "want", image, "err", err)
+					continue
+				}
+				delete(vms.byID, id)
+				vms.countByCl[class]--
+				if status.Phase == vm.PhaseWarm {
+					ids := vms.warm[class]
+					for i, warmID := range ids {
+						if warmID == id {
+							vms.warm[class] = append(ids[:i], ids[i+1:]...)
+							break
+						}
+					}
+				}
+			}
+		}
 		// vms.warm reflects claims made earlier in this same tick; booting
 		// VMs count toward the target because they are refills in flight.
 		warmish := len(vms.warm[class])

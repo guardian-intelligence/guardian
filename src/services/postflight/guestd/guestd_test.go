@@ -7,6 +7,8 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -282,14 +284,28 @@ type world struct {
 func newWorld(t *testing.T, configure func(*Config), runner RunRunner) *world {
 	t.Helper()
 	w := &world{system: newFakeSystem(), listener: newPipeListener(), runs: make(chan runnerCall, 4)}
+	gateDir := filepath.Join(t.TempDir(), "rendezvous")
 	if runner == nil {
 		runner = func(_ context.Context, jitConfig string, env map[string]string, event func(RunnerEvent)) (int, error) {
-			if mounted, _ := w.system.IsMounted("/work"); !mounted {
-				t.Error("runner started before the workspace mount converged")
+			if mounted, _ := w.system.IsMounted("/work"); mounted {
+				t.Error("generic listener started with a customer workspace")
 			}
 			w.runs <- runnerCall{jitConfig: jitConfig, env: env}
 			event(EventListening)
 			event(EventJobStarted)
+			request := []byte("run_id=101\nrun_attempt=1\nrunner_name=lease-1\nrepository=acme/widget\nworkflow_job=test\n")
+			if err := os.WriteFile(filepath.Join(gateDir, "request"), request, 0o600); err != nil {
+				return 0, err
+			}
+			for {
+				if _, err := os.Stat(filepath.Join(gateDir, "release")); err == nil {
+					break
+				}
+				if _, err := os.Stat(filepath.Join(gateDir, "abort")); err == nil {
+					return SyntheticFailureExitCode, nil
+				}
+				time.Sleep(time.Millisecond)
+			}
 			return 0, nil
 		}
 	}
@@ -299,6 +315,8 @@ func newWorld(t *testing.T, configure func(*Config), runner RunRunner) *world {
 		MountDeadline: 2 * time.Second,
 		RetryInterval: time.Millisecond,
 		QuiesceWindow: 20 * time.Millisecond,
+		RendezvousDir: gateDir,
+		HookDeadline:  2 * time.Second,
 		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 	if configure != nil {
@@ -322,8 +340,15 @@ func newWorld(t *testing.T, configure func(*Config), runner RunRunner) *world {
 	return w
 }
 
-func testAssignment() guestproto.Assignment {
-	return guestproto.Assignment{
+func testPrepare() guestproto.Prepare {
+	return guestproto.Prepare{
+		Lease: "lease-1", JITConfig: "jit-blob",
+		Env: map[string]string{"POSTFLIGHT_RENDEZVOUS_DIR": "/run/postflight-rendezvous"},
+	}
+}
+
+func testRendezvous() guestproto.Rendezvous {
+	return guestproto.Rendezvous{
 		Lease: "lease-1",
 		Mounts: []guestproto.Mount{{
 			Serial:     "workspace",
@@ -331,9 +356,17 @@ func testAssignment() guestproto.Assignment {
 			Mountpoint: "/work",
 			Options:    []string{"discard", "noatime", "nodev", "nosuid"},
 		}},
-		JITConfig: "jit-blob",
-		Env:       map[string]string{"POSTFLIGHT_EXECUTION_ID": "exec-1"},
+		Env: map[string]string{"POSTFLIGHT_EXECUTION_ID": "exec-1"},
 	}
+}
+
+func sendRendezvousLifecycle(host *hostConn) {
+	host.send(guestproto.Message{Kind: guestproto.KindPrepare, Prepare: ptr(testPrepare())})
+	host.expectStatus(guestproto.RunnerRegistered)
+	host.expectStatus(guestproto.RunnerHookBlocked)
+	host.send(guestproto.Message{Kind: guestproto.KindRendezvous, Rendezvous: ptr(testRendezvous())})
+	host.expectStatus(guestproto.RunnerMountsReady)
+	host.expectStatus(guestproto.RunnerReleased)
 }
 
 func TestColdWorkspaceLifecycle(t *testing.T) {
@@ -343,17 +376,13 @@ func TestColdWorkspaceLifecycle(t *testing.T) {
 
 	host := w.listener.dial(t)
 	host.expect(guestproto.KindHello)
-	host.send(guestproto.Message{Kind: guestproto.KindAssignment, Assignment: ptr(testAssignment())})
-
-	host.expectStatus(guestproto.RunnerMounting)
-	host.expectStatus(guestproto.RunnerRegistered)
-	host.expectStatus(guestproto.RunnerJobStarted)
+	sendRendezvousLifecycle(host)
 	if status := host.expectStatus(guestproto.RunnerExited); status.ExitCode != 0 {
 		t.Fatalf("exit code %d", status.ExitCode)
 	}
 
 	run := <-w.runs
-	if run.jitConfig != "jit-blob" || run.env["POSTFLIGHT_EXECUTION_ID"] != "exec-1" {
+	if run.jitConfig != "jit-blob" || run.env["POSTFLIGHT_RENDEZVOUS_DIR"] == "" {
 		t.Fatalf("runner ran with %+v", run)
 	}
 	entries := w.system.entries()
@@ -379,10 +408,7 @@ func TestWarmWorkspaceIsNotReformatted(t *testing.T) {
 
 	host := w.listener.dial(t)
 	host.expect(guestproto.KindHello)
-	host.send(guestproto.Message{Kind: guestproto.KindAssignment, Assignment: ptr(testAssignment())})
-	host.expectStatus(guestproto.RunnerMounting)
-	host.expectStatus(guestproto.RunnerRegistered)
-	host.expectStatus(guestproto.RunnerJobStarted)
+	sendRendezvousLifecycle(host)
 	host.expectStatus(guestproto.RunnerExited)
 
 	for _, entry := range w.system.entries() {
@@ -399,10 +425,7 @@ func TestEncryptedColdWorkspaceLifecycle(t *testing.T) {
 
 	host := w.listener.dial(t)
 	host.expect(guestproto.KindHello)
-	host.send(guestproto.Message{Kind: guestproto.KindAssignment, Assignment: ptr(testAssignment())})
-	host.expectStatus(guestproto.RunnerMounting)
-	host.expectStatus(guestproto.RunnerRegistered)
-	host.expectStatus(guestproto.RunnerJobStarted)
+	sendRendezvousLifecycle(host)
 	if status := host.expectStatus(guestproto.RunnerExited); status.ExitCode != 0 {
 		t.Fatalf("exit code %d", status.ExitCode)
 	}
@@ -429,10 +452,7 @@ func TestEncryptedWarmWorkspaceReopensWithoutReformat(t *testing.T) {
 
 	host := w.listener.dial(t)
 	host.expect(guestproto.KindHello)
-	host.send(guestproto.Message{Kind: guestproto.KindAssignment, Assignment: ptr(testAssignment())})
-	host.expectStatus(guestproto.RunnerMounting)
-	host.expectStatus(guestproto.RunnerRegistered)
-	host.expectStatus(guestproto.RunnerJobStarted)
+	sendRendezvousLifecycle(host)
 	host.expectStatus(guestproto.RunnerExited)
 
 	for _, entry := range w.system.entries() {
@@ -452,10 +472,7 @@ func TestPlaintextLineageIsReformattedUnderEncryption(t *testing.T) {
 
 	host := w.listener.dial(t)
 	host.expect(guestproto.KindHello)
-	host.send(guestproto.Message{Kind: guestproto.KindAssignment, Assignment: ptr(testAssignment())})
-	host.expectStatus(guestproto.RunnerMounting)
-	host.expectStatus(guestproto.RunnerRegistered)
-	host.expectStatus(guestproto.RunnerJobStarted)
+	sendRendezvousLifecycle(host)
 	if status := host.expectStatus(guestproto.RunnerExited); status.ExitCode != 0 {
 		t.Fatalf("exit code %d", status.ExitCode)
 	}
@@ -481,10 +498,7 @@ func TestMountConvergesThroughUdevLag(t *testing.T) {
 
 	host := w.listener.dial(t)
 	host.expect(guestproto.KindHello)
-	host.send(guestproto.Message{Kind: guestproto.KindAssignment, Assignment: ptr(testAssignment())})
-	host.expectStatus(guestproto.RunnerMounting)
-	host.expectStatus(guestproto.RunnerRegistered)
-	host.expectStatus(guestproto.RunnerJobStarted)
+	sendRendezvousLifecycle(host)
 	if status := host.expectStatus(guestproto.RunnerExited); status.ExitCode != 0 {
 		t.Fatalf("exit code %d", status.ExitCode)
 	}
@@ -496,30 +510,39 @@ func TestMountThatCannotConvergeReportsSyntheticExit(t *testing.T) {
 
 	host := w.listener.dial(t)
 	host.expect(guestproto.KindHello)
-	host.send(guestproto.Message{Kind: guestproto.KindAssignment, Assignment: ptr(testAssignment())})
-	host.expectStatus(guestproto.RunnerMounting)
+	host.send(guestproto.Message{Kind: guestproto.KindPrepare, Prepare: ptr(testPrepare())})
+	host.expectStatus(guestproto.RunnerRegistered)
+	host.expectStatus(guestproto.RunnerHookBlocked)
+	host.send(guestproto.Message{Kind: guestproto.KindRendezvous, Rendezvous: ptr(testRendezvous())})
 	if status := host.expectStatus(guestproto.RunnerExited); status.ExitCode != SyntheticFailureExitCode {
 		t.Fatalf("exit code %d, want the synthetic %d", status.ExitCode, SyntheticFailureExitCode)
 	}
-	select {
-	case run := <-w.runs:
-		t.Fatalf("runner ran against a partial workspace: %+v", run)
-	default:
+	run := <-w.runs
+	if run.env["POSTFLIGHT_EXECUTION_ID"] != "" {
+		t.Fatalf("generic listener received customer environment: %+v", run)
+	}
+	if _, err := os.Stat(filepath.Join(w.server.cfg.RendezvousDir, "release")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed rendezvous released the job hook: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(w.server.cfg.RendezvousDir, "abort")); err != nil {
+		t.Fatalf("failed rendezvous did not abort the job hook: %v", err)
 	}
 }
 
 func TestDiscardIsEnforcedOnTheMount(t *testing.T) {
 	w := newWorld(t, nil, nil)
 	w.system.devices["workspace"] = "/dev/sdb"
-	assignment := testAssignment()
-	assignment.Mounts[0].Options = []string{"noatime"}
+	rendezvous := testRendezvous()
+	rendezvous.Mounts[0].Options = []string{"noatime"}
 
 	host := w.listener.dial(t)
 	host.expect(guestproto.KindHello)
-	host.send(guestproto.Message{Kind: guestproto.KindAssignment, Assignment: &assignment})
-	host.expectStatus(guestproto.RunnerMounting)
+	host.send(guestproto.Message{Kind: guestproto.KindPrepare, Prepare: ptr(testPrepare())})
 	host.expectStatus(guestproto.RunnerRegistered)
-	host.expectStatus(guestproto.RunnerJobStarted)
+	host.expectStatus(guestproto.RunnerHookBlocked)
+	host.send(guestproto.Message{Kind: guestproto.KindRendezvous, Rendezvous: &rendezvous})
+	host.expectStatus(guestproto.RunnerMountsReady)
+	host.expectStatus(guestproto.RunnerReleased)
 	host.expectStatus(guestproto.RunnerExited)
 
 	found := false
@@ -533,22 +556,25 @@ func TestDiscardIsEnforcedOnTheMount(t *testing.T) {
 	}
 }
 
-func TestAssignmentRedeliveryIsDeduped(t *testing.T) {
+func TestPreparationAndRendezvousRedeliveryAreDeduped(t *testing.T) {
 	w := newWorld(t, nil, nil)
 	w.system.devices["workspace"] = "/dev/sdb"
 
 	host := w.listener.dial(t)
 	host.expect(guestproto.KindHello)
-	host.send(guestproto.Message{Kind: guestproto.KindAssignment, Assignment: ptr(testAssignment())})
-	host.send(guestproto.Message{Kind: guestproto.KindAssignment, Assignment: ptr(testAssignment())})
+	host.send(guestproto.Message{Kind: guestproto.KindPrepare, Prepare: ptr(testPrepare())})
+	host.send(guestproto.Message{Kind: guestproto.KindPrepare, Prepare: ptr(testPrepare())})
 	// A different lease on a single-use VM is ignored, not executed.
-	conflicting := testAssignment()
+	conflicting := testPrepare()
 	conflicting.Lease = "lease-2"
-	host.send(guestproto.Message{Kind: guestproto.KindAssignment, Assignment: &conflicting})
+	host.send(guestproto.Message{Kind: guestproto.KindPrepare, Prepare: &conflicting})
 
-	host.expectStatus(guestproto.RunnerMounting)
 	host.expectStatus(guestproto.RunnerRegistered)
-	host.expectStatus(guestproto.RunnerJobStarted)
+	host.expectStatus(guestproto.RunnerHookBlocked)
+	host.send(guestproto.Message{Kind: guestproto.KindRendezvous, Rendezvous: ptr(testRendezvous())})
+	host.send(guestproto.Message{Kind: guestproto.KindRendezvous, Rendezvous: ptr(testRendezvous())})
+	host.expectStatus(guestproto.RunnerMountsReady)
+	host.expectStatus(guestproto.RunnerReleased)
 	host.expectStatus(guestproto.RunnerExited)
 	<-w.runs
 	select {
@@ -601,18 +627,16 @@ func TestReconnectReplaysTheRunnerLadder(t *testing.T) {
 
 	host := w.listener.dial(t)
 	host.expect(guestproto.KindHello)
-	host.send(guestproto.Message{Kind: guestproto.KindAssignment, Assignment: ptr(testAssignment())})
-	host.expectStatus(guestproto.RunnerMounting)
-	host.expectStatus(guestproto.RunnerRegistered)
-	host.expectStatus(guestproto.RunnerJobStarted)
+	sendRendezvousLifecycle(host)
 	host.expectStatus(guestproto.RunnerExited)
 	host.conn.Close()
 
 	second := w.listener.dial(t)
 	second.expect(guestproto.KindHello)
-	second.expectStatus(guestproto.RunnerMounting)
 	second.expectStatus(guestproto.RunnerRegistered)
-	second.expectStatus(guestproto.RunnerJobStarted)
+	second.expectStatus(guestproto.RunnerHookBlocked)
+	second.expectStatus(guestproto.RunnerMountsReady)
+	second.expectStatus(guestproto.RunnerReleased)
 	if status := second.expectStatus(guestproto.RunnerExited); status.ExitCode != 0 {
 		t.Fatalf("replayed %+v", status)
 	}
@@ -636,10 +660,7 @@ func TestNewerConnectionSupplantsInArrivalOrder(t *testing.T) {
 		t.Fatalf("supplanted connection was served %s", message.Kind)
 	}
 
-	second.send(guestproto.Message{Kind: guestproto.KindAssignment, Assignment: ptr(testAssignment())})
-	second.expectStatus(guestproto.RunnerMounting)
-	second.expectStatus(guestproto.RunnerRegistered)
-	second.expectStatus(guestproto.RunnerJobStarted)
+	sendRendezvousLifecycle(second)
 	second.expectStatus(guestproto.RunnerExited)
 }
 
@@ -652,8 +673,7 @@ func TestRunnerFailureToStartIsSynthetic(t *testing.T) {
 
 	host := w.listener.dial(t)
 	host.expect(guestproto.KindHello)
-	host.send(guestproto.Message{Kind: guestproto.KindAssignment, Assignment: ptr(testAssignment())})
-	host.expectStatus(guestproto.RunnerMounting)
+	host.send(guestproto.Message{Kind: guestproto.KindPrepare, Prepare: ptr(testPrepare())})
 	if status := host.expectStatus(guestproto.RunnerExited); status.ExitCode != SyntheticFailureExitCode {
 		t.Fatalf("exit code %d, want the synthetic %d", status.ExitCode, SyntheticFailureExitCode)
 	}
@@ -669,8 +689,7 @@ func TestRunnerExitCodeIsVerbatim(t *testing.T) {
 
 	host := w.listener.dial(t)
 	host.expect(guestproto.KindHello)
-	host.send(guestproto.Message{Kind: guestproto.KindAssignment, Assignment: ptr(testAssignment())})
-	host.expectStatus(guestproto.RunnerMounting)
+	host.send(guestproto.Message{Kind: guestproto.KindPrepare, Prepare: ptr(testPrepare())})
 	host.expectStatus(guestproto.RunnerRegistered)
 	if status := host.expectStatus(guestproto.RunnerExited); status.ExitCode != 42 {
 		t.Fatalf("exit code %d, want 42", status.ExitCode)
@@ -734,16 +753,16 @@ func TestHostileMountSpecsNeverReachTheSystem(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			w := newWorld(t, func(cfg *Config) { cfg.MountDeadline = 20 * time.Millisecond }, nil)
 			w.system.devices["workspace"] = "/dev/sdb"
-			assignment := testAssignment()
-			mutate(&assignment.Mounts[0])
+			rendezvous := testRendezvous()
+			mutate(&rendezvous.Mounts[0])
 
 			host := w.listener.dial(t)
 			host.expect(guestproto.KindHello)
-			host.send(guestproto.Message{Kind: guestproto.KindAssignment, Assignment: &assignment})
-			host.expectStatus(guestproto.RunnerMounting)
-			if status := host.expectStatus(guestproto.RunnerExited); status.ExitCode != SyntheticFailureExitCode {
-				t.Fatalf("exit code %d, want the synthetic %d", status.ExitCode, SyntheticFailureExitCode)
-			}
+			host.send(guestproto.Message{Kind: guestproto.KindPrepare, Prepare: ptr(testPrepare())})
+			host.expectStatus(guestproto.RunnerRegistered)
+			host.expectStatus(guestproto.RunnerHookBlocked)
+			host.send(guestproto.Message{Kind: guestproto.KindRendezvous, Rendezvous: &rendezvous})
+			time.Sleep(30 * time.Millisecond)
 			if entries := w.system.entries(); len(entries) != 0 {
 				t.Fatalf("hostile spec reached the system: %v", entries)
 			}

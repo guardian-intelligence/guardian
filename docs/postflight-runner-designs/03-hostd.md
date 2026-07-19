@@ -51,14 +51,31 @@ supervision properties, different cage:
 ## Lease execution path (composition, mostly existing)
 
 ```
-sync: lease allocating
-  → clone workspace zvol (04 decides source generation; empty if none)
-  → claim a warm VM (pool.go), hot-attach workspace (merged disks.go)
-  → assignment over vsock (JIT config, env, mounts)         [01]
-  → runner-status stream → lease reports (ready / exited)
+sync: listener lease allocating
+  → claim an already-running warm VM (pool.go)
+  → prepare over vsock (JIT config and pool env; no customer data)
+  → generic runner registered and listening
+  → observe GitHub's actual job-to-runner assignment
+  → join that assignment to the selected listener lease
+  → synchronous job-start hook reports and blocks on the same identity
+  → resolve the actual execution lease's immutable generation tuple
+  → clone its workspace zvol (04; empty if no generation exists)
+  → QMP hot-attach every resolved zvol to that same QEMU
+  → rendezvous over vsock (execution lease, job env, mounts) [01]
+  → guest mounts, samples clock, and releases the hook
+  → runner-status stream → listener/execution reports
   → on exit 0: quiesce → zfs snapshot (seal candidate)      [04]
   → destroy VM, release slot, refill pool
 ```
+
+The listener lease identifies the physical VM and runner name. The execution
+lease identifies the job, workspace, and completion being run there. These
+are deliberately distinct: GitHub may assign two concurrent same-label jobs
+to each other's JIT listeners. hostd reacts to the observed runner name and
+routes the actual execution lease to that listener instead of predicting
+which registration GitHub will choose. The control plane accepts the route
+only for a live internal listener of the same runner class and preserves
+capacity accounting for displaced jobs.
 
 The checkout-bundle server (`checkoutbundle`, merged) is wired in as-is:
 it serves repo bundles on the host-local network for the checkout action's

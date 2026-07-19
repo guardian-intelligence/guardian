@@ -56,7 +56,15 @@ const (
 	// StateAssigning: assignment delivered; the guest is bringing the
 	// runner up.
 	StateAssigning State = "assigning"
-	// StateReady: the runner is registered and listening for its job.
+	// StateListening: the runner is registered without customer state.
+	StateListening State = "listening"
+	// StateHookBlocked: GitHub assigned the runner and the synchronous hook
+	// is waiting for an authorized bind.
+	StateHookBlocked State = "hook-blocked"
+	// StateBinding: the host attached the resolved zvol tuple and is waiting
+	// for guest mount, clock, and release evidence.
+	StateBinding State = "binding"
+	// StateReady: the rendezvous is complete and customer steps may run.
 	StateReady State = "ready"
 	// StateExited: the runner finished; ExitCode is meaningful. The VM is
 	// destroyed on observation; the workspace volume is retained for a
@@ -78,12 +86,26 @@ func (s State) Terminal() bool {
 
 // LeaseReport is one lease's status line in the sync request.
 type LeaseReport struct {
-	LeaseID  string `json:"lease_id"`
-	State    State  `json:"state"`
-	ExitCode int    `json:"exit_code,omitempty"`
-	Reason   string `json:"reason,omitempty"`
+	// LeaseID is the stable generic listener and VM identity.
+	LeaseID string `json:"lease_id"`
+	// ExecutionLeaseID owns the actual job, workspace, and completion. It
+	// can differ when GitHub routes a job to a listener minted for another
+	// queued job with the same labels.
+	ExecutionLeaseID string `json:"execution_lease_id"`
+	State            State  `json:"state"`
+	ExitCode         int    `json:"exit_code,omitempty"`
+	Reason           string `json:"reason,omitempty"`
 	// SealedGeneration confirms which generation a seal produced.
-	SealedGeneration string `json:"sealed_generation,omitempty"`
+	SealedGeneration string             `json:"sealed_generation,omitempty"`
+	Identity         *JobIdentityReport `json:"identity,omitempty"`
+}
+
+type JobIdentityReport struct {
+	RunID       string `json:"run_id"`
+	RunAttempt  int    `json:"run_attempt"`
+	RunnerName  string `json:"runner_name"`
+	Repository  string `json:"repository"`
+	WorkflowJob string `json:"workflow_job"`
 }
 
 // SyncResponse is the control plane's full desired state for one host.
@@ -121,8 +143,13 @@ const (
 
 // DesiredLease is one lease as the control plane wants it on a host.
 type DesiredLease struct {
-	LeaseID string       `json:"lease_id"`
-	State   DesiredState `json:"state"`
+	// LeaseID is the stable generic listener and VM identity.
+	LeaseID string `json:"lease_id"`
+	// ExecutionLeaseID owns the actual GitHub job and its durable volumes.
+	// Before assignment it equals LeaseID; after assignment it is routed
+	// from GitHub's observed runner_name.
+	ExecutionLeaseID string       `json:"execution_lease_id"`
+	State            DesiredState `json:"state"`
 
 	// Identity, forwarded into the checkout endpoint's lease table.
 	ExecutionID        string `json:"execution_id"`
@@ -136,6 +163,14 @@ type DesiredLease struct {
 	// JITConfig is the encoded single-use runner registration blob, minted
 	// by the control plane.
 	JITConfig string `json:"jit_config"`
+
+	// Provider identity and RendezvousAuthorized are populated only from the
+	// control plane's independently observed GitHub assignment.
+	ProviderRunID        int64  `json:"provider_run_id,omitempty"`
+	ProviderJobID        int64  `json:"provider_job_id,omitempty"`
+	ProviderRunAttempt   int    `json:"provider_run_attempt,omitempty"`
+	AssignedRunnerName   string `json:"assigned_runner_name,omitempty"`
+	RendezvousAuthorized bool   `json:"rendezvous_authorized,omitempty"`
 
 	Workspace WorkspaceSpec `json:"workspace"`
 	// SealGeneration names the generation a seal must produce; set when

@@ -142,6 +142,78 @@ func TestReconcilePreservesInFlightClaim(t *testing.T) {
 	}
 }
 
+func TestObservedAssignmentAdoptsCapacityDisplacedJob(t *testing.T) {
+	ctx := context.Background()
+	st, pool := startStore(t)
+	seedHost(t, st, "host-a", 1)
+
+	listenerJob := int64(111)
+	actualJob := int64(112)
+	listener := mustCreateLease(t, st,
+		seedDemand(t, pool, listenerJob, storeTestClass),
+		time.Now().Add(time.Minute))
+	if _, claimed, err := st.ClaimHostSlot(ctx, listener, storeTestClass); err != nil || !claimed {
+		t.Fatalf("listener claim: claimed=%v err=%v", claimed, err)
+	}
+	if assigned, err := st.AssignLease(ctx, listener, "host-a", "jit-listener", time.Now().Add(time.Minute)); err != nil || !assigned {
+		t.Fatalf("listener assign: assigned=%v err=%v", assigned, err)
+	}
+	if ready, err := st.MarkLeaseReady(ctx, "host-a", listener); err != nil || !ready {
+		t.Fatalf("listener ready: ready=%v err=%v", ready, err)
+	}
+
+	execution := mustCreateLease(t, st,
+		seedDemand(t, pool, actualJob, storeTestClass),
+		time.Now().Add(time.Minute))
+	if _, claimed, err := st.ClaimHostSlot(ctx, execution, storeTestClass); err != nil {
+		t.Fatal(err)
+	} else if claimed {
+		t.Fatal("actual job unexpectedly claimed capacity before displacement")
+	}
+
+	if err := st.UpsertJobAssignment(ctx, jobAssignment{
+		ProviderJobID: actualJob,
+		RunnerName:    listener,
+		RunnerID:      7,
+		DeliveryID:    "assignment-112",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := leaseColumn(t, pool, execution, "state"); got != leaseReady {
+		t.Fatalf("routed execution state = %q, want ready", got)
+	}
+	if got := reservedCount(t, pool, "host-a"); got != 1 {
+		t.Fatalf("routed execution changed listener reservation to %d, want 1", got)
+	}
+	desired, err := st.ListDesiredLeases(ctx, "host-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(desired) != 1 || desired[0].LeaseID != listener ||
+		desired[0].ExecutionLeaseID != execution ||
+		desired[0].ProviderJobID != actualJob ||
+		!desired[0].RendezvousAuthorized {
+		t.Fatalf("routed desired lease = %+v", desired)
+	}
+
+	if _, _, completed, err := st.CompleteRoutedLease(
+		ctx, "host-a", listener, execution, 1, time.Now().Add(time.Minute)); err != nil || !completed {
+		t.Fatalf("routed completion: completed=%v err=%v", completed, err)
+	}
+	if got := reservedCount(t, pool, "host-a"); got != 0 {
+		t.Fatalf("completed routed listener left %d reservations", got)
+	}
+	if got := demandState(t, pool, actualJob); got != demandCompleted {
+		t.Fatalf("actual demand state = %q, want completed", got)
+	}
+	if got := demandState(t, pool, listenerJob); got != demandRecorded {
+		t.Fatalf("displaced demand state = %q, want recorded for retry", got)
+	}
+	if got := leaseColumn(t, pool, listener, "state"); got != leaseExpired {
+		t.Fatalf("consumed listener execution state = %q, want expired", got)
+	}
+}
+
 // TestClaimBindsLeaseOnce: two instances racing to place the same lease can
 // claim at most one slot between them.
 func TestClaimBindsLeaseOnce(t *testing.T) {

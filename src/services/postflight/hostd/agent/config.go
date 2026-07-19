@@ -20,6 +20,9 @@ type Config struct {
 	// Warm VM ≡ slot; the pool governor and scheduler both operate within
 	// these totals.
 	Slots map[vm.Class]int
+	// Images maps each class to its immutable golden snapshot. Idle VMs from
+	// another image are destroyed and refilled before they can be leased.
+	Images map[vm.Class]string
 	// SyncInterval is the default exchange cadence when the control plane
 	// does not suggest one.
 	SyncInterval time.Duration
@@ -29,6 +32,20 @@ type Config struct {
 	CheckoutGuestOrigin string
 	// CheckoutPath is the checkout endpoint's path prefix.
 	CheckoutPath string
+
+	// TraceDir receives one append-only JSONL rendezvous trace per listener.
+	// Empty disables evidence recording (tests and simulations).
+	TraceDir string
+	Platform PlatformFingerprint
+}
+
+type PlatformFingerprint struct {
+	QEMUVersion   string
+	KernelRelease string
+	OSImageID     string
+	MachineType   string
+	CPUModel      string
+	CRIUVersion   string
 }
 
 const defaultCheckoutPath = "/internal/sandbox/v1/github-checkout"

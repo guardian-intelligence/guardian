@@ -31,7 +31,8 @@ func (a *Agent) collectOrphans(ctx context.Context, vms *vmView) {
 			// parse the spec. Absence from the desired set is not an ack.
 			continue
 		}
-		err := a.zvols.DestroyWorkspace(ctx, zvol.LeaseID(id))
+		executionID := executionLeaseID(record.spec)
+		err := a.zvols.DestroyWorkspace(ctx, zvol.LeaseID(executionID))
 		switch {
 		case err == nil, errors.Is(err, zvol.ErrNotFound):
 			delete(a.leases, id)
@@ -40,7 +41,8 @@ func (a *Agent) collectOrphans(ctx context.Context, vms *vmView) {
 			// destroy for terminal records every tick, so a later tick
 			// frees the volume and this collection retries.
 		default:
-			a.logger.Error("collecting workspace", "lease", id, "err", err)
+			a.logger.Error("collecting workspace",
+				"listener", id, "execution_lease", executionID, "err", err)
 		}
 	}
 
@@ -71,15 +73,19 @@ func (a *Agent) collectOrphans(ctx context.Context, vms *vmView) {
 		a.logger.Error("inventory for gc", "err", err)
 		return
 	}
+	knownExecutions := map[string]bool{}
+	for _, record := range a.leases {
+		knownExecutions[executionLeaseID(record.spec)] = true
+	}
+	for _, desired := range a.desired {
+		knownExecutions[executionLeaseID(desired)] = true
+	}
 	for _, workspace := range workspaces {
 		leaseID := workspaceLease(workspace.Name)
 		if leaseID == "" {
 			continue
 		}
-		if _, known := a.leases[leaseID]; known {
-			continue
-		}
-		if _, desired := a.desired[leaseID]; desired {
+		if knownExecutions[leaseID] {
 			continue
 		}
 		if a.quarantined[leaseID] {
