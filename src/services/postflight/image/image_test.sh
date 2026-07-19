@@ -36,6 +36,8 @@ grep -Fq 'PACKER_TIMEOUT' "${build_upstream_sh}" ||
   fail "upstream image build has no hard timeout"
 grep -Fq 'qemu-img check -q "${cached_image}"' "${build_upstream_sh}" ||
   fail "upstream image cache is not integrity checked"
+grep -Fq 'cpu_model            = var.qemu_cpu_model' "${renderer}" ||
+  fail "QEMU image builds do not expose the hardware CPU feature set"
 grep -Fq 'ELF 64-bit LSB executable, x86-64,' "${build_sh}" ||
   fail "build.sh does not reject a non-executable or wrong-architecture guestd input"
 

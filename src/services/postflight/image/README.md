@@ -53,6 +53,10 @@ rootfs is 80GiB, matching Blacksmith's 4-vCPU runner, and must retain the
 17GiB free-space floor enforced by runner-images itself. This ephemeral
 root disk is separate from the 80GiB durable workspace zvol.
 
+KVM image builds expose the host CPU model. QEMU's default `qemu64` omits
+SSSE3, which is below the instruction-set baseline required by the upstream
+Homebrew install. TCG template smoke tests use the emulated `max` CPU model.
+
 Re-runs are idempotent: modification always restarts from the cached,
 pristine upstream image, the final dataset appears atomically
 (`zfs send | zfs recv`), and an `@golden` snapshot that already exists is

@@ -49,6 +49,7 @@ variable "cloud_init_user_data" { type = string }
 variable "qemu_binary" { type = string }
 variable "qemu_accelerator" { type = string }
 variable "qemu_cpus" { type = number }
+variable "qemu_cpu_model" { type = string }
 variable "qemu_memory_mib" { type = number }
 
 variable "helper_script_folder" {
@@ -81,6 +82,7 @@ source "qemu" "image" {
   cd_files             = [var.cloud_init_meta_data, var.cloud_init_user_data]
   cd_label             = "cidata"
   cpus                 = var.qemu_cpus
+  cpu_model            = var.qemu_cpu_model
   disk_compression     = true
   disk_discard         = "unmap"
   disk_image           = true
