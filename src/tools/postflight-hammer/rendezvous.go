@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const rendezvousTraceSchema = 2
+const rendezvousTraceSchema = 3
 
 const (
 	eventPoolReady                  = "pool_ready"
@@ -89,7 +89,7 @@ var failCodes = map[string]bool{
 // within Source and is never compared across machines.
 type rendezvousEvent struct {
 	SchemaVersion int       `json:"schema_version"`
-	RunID         string    `json:"run_id"`
+	RunID         string    `json:"run_id,omitempty"`
 	Event         string    `json:"event"`
 	Seq           uint64    `json:"seq"`
 	Source        string    `json:"source"`
@@ -105,6 +105,9 @@ type rendezvousEvent struct {
 	GenerationSet string `json:"generation_set,omitempty"`
 	Conclusion    string `json:"conclusion,omitempty"`
 	ExitCode      *int   `json:"exit_code,omitempty"`
+
+	ListenerLeaseID  string `json:"listener_lease_id,omitempty"`
+	ExecutionLeaseID string `json:"execution_lease_id,omitempty"`
 
 	Volumes        []volumeEvidence        `json:"volumes,omitempty"`
 	Platform       *platformEvidence       `json:"platform,omitempty"`
@@ -171,20 +174,22 @@ type classificationEvidence struct {
 }
 
 type rendezvousTraceReport struct {
-	SchemaVersion int              `json:"schema_version"`
-	RunID         string           `json:"run_id"`
-	Repo          string           `json:"repo,omitempty"`
-	Lane          string           `json:"lane,omitempty"`
-	JobID         int64            `json:"job_id,omitempty"`
-	RunAttempt    int              `json:"run_attempt,omitempty"`
-	RunnerName    string           `json:"runner_name,omitempty"`
-	VMID          string           `json:"vm_id,omitempty"`
-	GenerationSet string           `json:"generation_set,omitempty"`
-	Events        int              `json:"events"`
-	Outcome       benchmarkOutcome `json:"outcome"`
-	TraceValid    bool             `json:"trace_valid"`
-	Violations    []string         `json:"violations,omitempty"`
-	Concerns      []string         `json:"concerns,omitempty"`
+	SchemaVersion    int              `json:"schema_version"`
+	RunID            string           `json:"run_id"`
+	Repo             string           `json:"repo,omitempty"`
+	Lane             string           `json:"lane,omitempty"`
+	JobID            int64            `json:"job_id,omitempty"`
+	RunAttempt       int              `json:"run_attempt,omitempty"`
+	RunnerName       string           `json:"runner_name,omitempty"`
+	VMID             string           `json:"vm_id,omitempty"`
+	GenerationSet    string           `json:"generation_set,omitempty"`
+	ListenerLeaseID  string           `json:"listener_lease_id,omitempty"`
+	ExecutionLeaseID string           `json:"execution_lease_id,omitempty"`
+	Events           int              `json:"events"`
+	Outcome          benchmarkOutcome `json:"outcome"`
+	TraceValid       bool             `json:"trace_valid"`
+	Violations       []string         `json:"violations,omitempty"`
+	Concerns         []string         `json:"concerns,omitempty"`
 }
 
 func readRendezvousTrace(r io.Reader) ([]rendezvousEvent, error) {
@@ -277,13 +282,18 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 		if event.WallTime.IsZero() {
 			violate("event %s at seq %d has no wall_time", event.Event, event.Seq)
 		}
-		if event.RunID == "" {
-			violate("event %s at seq %d has no run_id", event.Event, event.Seq)
-		}
-		if report.RunID == "" {
-			report.RunID = event.RunID
-		} else if event.RunID != report.RunID {
-			violate("event %s names run %q, want %q", event.Event, event.RunID, report.RunID)
+		if event.Event == eventPoolReady {
+			if event.RunID != "" {
+				violate("pool_ready names run %q before assignment", event.RunID)
+			}
+		} else {
+			if event.RunID == "" {
+				violate("event %s at seq %d has no run_id", event.Event, event.Seq)
+			} else if report.RunID == "" {
+				report.RunID = event.RunID
+			} else if event.RunID != report.RunID {
+				violate("event %s names run %q, want %q", event.Event, event.RunID, report.RunID)
+			}
 		}
 		mergeTraceIdentity(report, event, violate)
 		if seen[event.Event] && event.Event != eventIssueObserved {
@@ -292,10 +302,15 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 
 		switch event.Event {
 		case eventPoolReady:
-			if event.RunnerName == "" || event.VMID == "" {
-				violate("pool_ready requires runner_name and vm_id")
+			if event.RunnerName == "" || event.VMID == "" || event.ListenerLeaseID == "" {
+				violate("pool_ready requires runner_name, vm_id, and listener_lease_id")
 			}
-			if event.Repo != "" || event.JobID != 0 || event.RunAttempt != 0 || event.GenerationSet != "" {
+			if event.RunnerName != event.ListenerLeaseID {
+				violate("pool_ready runner_name %q does not match listener_lease_id %q",
+					event.RunnerName, event.ListenerLeaseID)
+			}
+			if event.Repo != "" || event.JobID != 0 || event.RunAttempt != 0 ||
+				event.GenerationSet != "" || event.ExecutionLeaseID != "" {
 				violate("pool_ready VM %s already carries customer identity", event.VMID)
 			}
 			if len(event.Volumes) != 0 {
@@ -306,8 +321,13 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 
 		case eventAssignmentObserved:
 			requireSeen(event, eventPoolReady)
-			if event.JobID <= 0 || event.RunAttempt <= 0 || event.RunnerName == "" {
-				violate("assignment_observed requires the provider job_id, run_attempt, and actual runner_name")
+			if event.JobID <= 0 || event.RunAttempt <= 0 || event.RunnerName == "" ||
+				event.ListenerLeaseID == "" || event.ExecutionLeaseID == "" {
+				violate("assignment_observed requires the provider job_id, run_attempt, actual runner_name, listener_lease_id, and execution_lease_id")
+			}
+			if event.RunnerName != event.ListenerLeaseID {
+				violate("assignment_observed runner_name %q does not match listener_lease_id %q",
+					event.RunnerName, event.ListenerLeaseID)
 			}
 
 		case eventJobHookBlocked:
@@ -328,6 +348,7 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 				violate("generation_resolved requires job_id, run_attempt, runner_name, repo, and generation_set")
 			}
 			validateVolumes(event.Volumes, platform, false, violate)
+			validateExecutionVolumes(event.ExecutionLeaseID, event.Volumes, violate)
 			resolvedVolumes = append([]volumeEvidence(nil), event.Volumes...)
 
 		case eventRendezvousBound:
@@ -479,6 +500,8 @@ func mergeTraceIdentity(report *rendezvousTraceReport, event rendezvousEvent, vi
 		{"runner_name", event.RunnerName, &report.RunnerName},
 		{"vm_id", event.VMID, &report.VMID},
 		{"generation_set", event.GenerationSet, &report.GenerationSet},
+		{"listener_lease_id", event.ListenerLeaseID, &report.ListenerLeaseID},
+		{"execution_lease_id", event.ExecutionLeaseID, &report.ExecutionLeaseID},
 	} {
 		if field.got == "" {
 			continue
@@ -501,6 +524,26 @@ func mergeTraceIdentity(report *rendezvousTraceReport, event rendezvousEvent, vi
 			report.RunAttempt = event.RunAttempt
 		} else if report.RunAttempt != event.RunAttempt {
 			violate("event %s changes run_attempt from %d to %d", event.Event, report.RunAttempt, event.RunAttempt)
+		}
+	}
+}
+
+func validateExecutionVolumes(executionLeaseID string, volumes []volumeEvidence, violate func(string, ...any)) {
+	if executionLeaseID == "" {
+		violate("generation_resolved has no execution_lease_id")
+		return
+	}
+	for _, volume := range volumes {
+		if volume.Role != volumeWorkspace {
+			continue
+		}
+		datasetLeaseID := volume.Dataset
+		if separator := strings.LastIndexByte(datasetLeaseID, '/'); separator >= 0 {
+			datasetLeaseID = datasetLeaseID[separator+1:]
+		}
+		if datasetLeaseID != executionLeaseID {
+			violate("workspace dataset %q belongs to execution lease %q, want %q",
+				volume.Dataset, datasetLeaseID, executionLeaseID)
 		}
 	}
 }
@@ -773,8 +816,9 @@ func abs64(value int64) int64 {
 
 func printRendezvousTraceReport(w io.Writer, report *rendezvousTraceReport) {
 	fmt.Fprintf(w, "postflight rendezvous trace — run %s\n", report.RunID)
-	fmt.Fprintf(w, "job=%d attempt=%d runner=%s vm=%s generation_set=%s events=%d\n",
-		report.JobID, report.RunAttempt, report.RunnerName, report.VMID, report.GenerationSet, report.Events)
+	fmt.Fprintf(w, "job=%d attempt=%d runner=%s listener=%s execution=%s vm=%s generation_set=%s events=%d\n",
+		report.JobID, report.RunAttempt, report.RunnerName, report.ListenerLeaseID,
+		report.ExecutionLeaseID, report.VMID, report.GenerationSet, report.Events)
 	fmt.Fprintf(w, "outcome: %s (trace_valid=%t)\n", report.Outcome, report.TraceValid)
 	for _, violation := range report.Violations {
 		fmt.Fprintf(w, "INVALID: %s\n", violation)

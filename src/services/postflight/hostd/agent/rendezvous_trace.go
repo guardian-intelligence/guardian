@@ -9,11 +9,11 @@ import (
 	"time"
 )
 
-const rendezvousTraceSchema = 2
+const rendezvousTraceSchema = 3
 
 type traceEvent struct {
 	SchemaVersion int       `json:"schema_version"`
-	RunID         string    `json:"run_id"`
+	RunID         string    `json:"run_id,omitempty"`
 	Event         string    `json:"event"`
 	Seq           uint64    `json:"seq"`
 	Source        string    `json:"source"`
@@ -26,6 +26,9 @@ type traceEvent struct {
 	RunnerName    string `json:"runner_name,omitempty"`
 	VMID          string `json:"vm_id,omitempty"`
 	GenerationSet string `json:"generation_set,omitempty"`
+
+	ListenerLeaseID  string `json:"listener_lease_id,omitempty"`
+	ExecutionLeaseID string `json:"execution_lease_id,omitempty"`
 
 	Volumes  []traceVolume  `json:"volumes,omitempty"`
 	Platform *tracePlatform `json:"platform,omitempty"`
@@ -65,15 +68,8 @@ func (a *Agent) appendTrace(record *lease, event string, enrich func(*traceEvent
 		return
 	}
 	record.traceSeq++
-	observation := traceEvent{
-		SchemaVersion: rendezvousTraceSchema,
-		RunID:         strconv.FormatInt(record.spec.ProviderRunID, 10),
-		Event:         event,
-		Seq:           record.traceSeq,
-		Source:        "host:" + a.cfg.HostID,
-		MonotonicNS:   time.Since(a.started).Nanoseconds() + 1,
-		WallTime:      time.Now().UTC(),
-	}
+	observation := a.newTraceEvent(record, event)
+	observation.Seq = record.traceSeq
 	if enrich != nil {
 		enrich(&observation)
 	}
@@ -100,6 +96,22 @@ func (a *Agent) appendTrace(record *lease, event string, enrich func(*traceEvent
 		return
 	}
 	a.logger.Info("rendezvous evidence", "lease", record.spec.LeaseID, "event", event, "seq", record.traceSeq)
+}
+
+func (a *Agent) newTraceEvent(record *lease, event string) traceEvent {
+	observation := traceEvent{
+		SchemaVersion:   rendezvousTraceSchema,
+		Event:           event,
+		Source:          "host:" + a.cfg.HostID,
+		MonotonicNS:     time.Since(a.started).Nanoseconds() + 1,
+		WallTime:        time.Now().UTC(),
+		ListenerLeaseID: record.spec.LeaseID,
+	}
+	if event != "pool_ready" {
+		observation.RunID = strconv.FormatInt(record.spec.ProviderRunID, 10)
+		observation.ExecutionLeaseID = executionLeaseID(record.spec)
+	}
+	return observation
 }
 
 func (a *Agent) platformEvidence() *tracePlatform {
