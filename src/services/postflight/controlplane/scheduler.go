@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"strconv"
+	"strings"
 	"time"
 
 	"log/slog"
@@ -136,9 +137,14 @@ func (s *scheduler) allocateDemands(ctx context.Context) {
 		return
 	}
 	for _, d := range demands {
+		org, _, ok := strings.Cut(d.RepositoryFullName, "/")
+		if !ok || org == "" {
+			slog.Error("scheduler: invalid repository name", "job_id", d.ProviderJobID, "repo", d.RepositoryFullName)
+			continue
+		}
 		leaseID, created, err := s.st.CreateLeaseForDemand(ctx, d,
 			strconv.FormatInt(d.ProviderJobID, 10), strconv.FormatInt(d.ProviderRunAttempt, 10),
-			s.cfg.runnerOrg, s.cfg.installationID, time.Now().Add(s.cfg.allocateTimeout))
+			org, d.ProviderInstallationID, time.Now().Add(s.cfg.allocateTimeout))
 		if err != nil {
 			slog.Error("scheduler: create lease", "job_id", d.ProviderJobID, "err", err)
 			continue
@@ -184,7 +190,7 @@ func (s *scheduler) placeLease(ctx context.Context, l allocatingLease) {
 	}
 
 	attrs := eventAttrs{LeaseID: l.LeaseID, HostID: hostID, JobID: l.ProviderJobID, RunnerClass: l.RunnerClass}
-	jitConfig, err := s.gh.generateJITConfig(ctx, s.cfg.runnerOrg, l.LeaseID, runnerGroupID, []string{l.RunnerClass})
+	jitConfig, err := s.gh.generateJITConfig(ctx, l.InstallationID, l.OrgID, l.LeaseID, runnerGroupID, []string{l.RunnerClass})
 	if err != nil {
 		// The lease is terminalized (which returns the claimed slot): a mint
 		// failure is a GitHub-side verdict on this job, not a placement retry.

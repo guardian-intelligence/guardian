@@ -346,24 +346,25 @@ func (s *pgStore) MarkDeliveryFailed(ctx context.Context, deliveryID string, pro
 }
 
 type workflowJobRow struct {
-	ProviderJobID        int64
-	ProviderRunID        int64
-	ProviderRunAttempt   int64
-	ProviderRepositoryID int64
-	RepositoryFullName   string
-	Name                 string
-	Status               string
-	Conclusion           string
-	Labels               []string
-	RunnerClass          string
-	RunnerID             int64
-	RunnerName           string
-	HeadSHA              string
-	HeadBranch           string
-	WorkflowName         string
-	StartedAt            *time.Time
-	CompletedAt          *time.Time
-	ObservedFromAPIAt    *time.Time // nil for webhook-hint writes
+	ProviderJobID          int64
+	ProviderInstallationID int64
+	ProviderRunID          int64
+	ProviderRunAttempt     int64
+	ProviderRepositoryID   int64
+	RepositoryFullName     string
+	Name                   string
+	Status                 string
+	Conclusion             string
+	Labels                 []string
+	RunnerClass            string
+	RunnerID               int64
+	RunnerName             string
+	HeadSHA                string
+	HeadBranch             string
+	WorkflowName           string
+	StartedAt              *time.Time
+	CompletedAt            *time.Time
+	ObservedFromAPIAt      *time.Time // nil for webhook-hint writes
 }
 
 // sqlUpsertWorkflowJob is last-write-wins on all provider fields;
@@ -373,13 +374,14 @@ type workflowJobRow struct {
 // gate), and pr_number is owned by SetRunPullRequest.
 const sqlUpsertWorkflowJob = `
 INSERT INTO github_workflow_jobs (
-    provider_job_id, provider_run_id, provider_run_attempt, provider_repository_id,
+    provider_job_id, provider_installation_id, provider_run_id, provider_run_attempt, provider_repository_id,
     repository_full_name, name, status, conclusion, labels_json, runner_class,
     runner_id, runner_name, head_sha, head_branch, workflow_name,
     started_at, completed_at, observed_from_api_at, terminal_observed_from_api_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-    CASE WHEN $18::timestamptz IS NOT NULL AND $7 = 'completed' THEN $18::timestamptz END)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+    CASE WHEN $19::timestamptz IS NOT NULL AND $8 = 'completed' THEN $19::timestamptz END)
 ON CONFLICT (provider_job_id) DO UPDATE SET
+    provider_installation_id = EXCLUDED.provider_installation_id,
     provider_run_id        = EXCLUDED.provider_run_id,
     provider_run_attempt   = EXCLUDED.provider_run_attempt,
     provider_repository_id = EXCLUDED.provider_repository_id,
@@ -406,7 +408,7 @@ func (s *pgStore) UpsertWorkflowJob(ctx context.Context, j workflowJobRow) error
 		return err
 	}
 	_, err = s.pool.Exec(ctx, sqlUpsertWorkflowJob,
-		j.ProviderJobID, j.ProviderRunID, j.ProviderRunAttempt, j.ProviderRepositoryID,
+		j.ProviderJobID, j.ProviderInstallationID, j.ProviderRunID, j.ProviderRunAttempt, j.ProviderRepositoryID,
 		j.RepositoryFullName, j.Name, j.Status, j.Conclusion, string(labels), j.RunnerClass,
 		j.RunnerID, j.RunnerName, j.HeadSHA, j.HeadBranch, j.WorkflowName,
 		j.StartedAt, j.CompletedAt, j.ObservedFromAPIAt)
@@ -425,26 +427,28 @@ func (s *pgStore) SetRunPullRequest(ctx context.Context, runID, prNumber int64) 
 }
 
 type demandRow struct {
-	ProviderJobID        int64
-	ProviderRepositoryID int64
-	RepositoryFullName   string
-	ProviderRunID        int64
-	ProviderRunAttempt   int64
-	TrustClass           string
-	RunnerClass          string
-	WorkspaceScopeID     string
-	LastDeliveryID       string
+	ProviderJobID          int64
+	ProviderInstallationID int64
+	ProviderRepositoryID   int64
+	RepositoryFullName     string
+	ProviderRunID          int64
+	ProviderRunAttempt     int64
+	TrustClass             string
+	RunnerClass            string
+	WorkspaceScopeID       string
+	LastDeliveryID         string
 }
 
 // sqlEnsureProviderDemand refreshes envelope fields on conflict but NEVER
 // touches state: a redelivered webhook cannot reset a demand's progress.
 const sqlEnsureProviderDemand = `
 INSERT INTO github_provider_demands (
-    provider_job_id, provider_repository_id, repository_full_name,
+    provider_job_id, provider_installation_id, provider_repository_id, repository_full_name,
     provider_run_id, provider_run_attempt, trust_class, runner_class,
     workspace_scope_id, state, last_delivery_id
-) VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, '')::uuid, 'demand_recorded', $9)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid, 'demand_recorded', $10)
 ON CONFLICT (provider_job_id) DO UPDATE SET
+    provider_installation_id = EXCLUDED.provider_installation_id,
     provider_repository_id = EXCLUDED.provider_repository_id,
     repository_full_name   = EXCLUDED.repository_full_name,
     provider_run_id        = EXCLUDED.provider_run_id,
@@ -459,7 +463,7 @@ RETURNING state`
 func (s *pgStore) EnsureProviderDemand(ctx context.Context, d demandRow) (string, error) {
 	var state string
 	err := s.pool.QueryRow(ctx, sqlEnsureProviderDemand,
-		d.ProviderJobID, d.ProviderRepositoryID, d.RepositoryFullName,
+		d.ProviderJobID, d.ProviderInstallationID, d.ProviderRepositoryID, d.RepositoryFullName,
 		d.ProviderRunID, d.ProviderRunAttempt, d.TrustClass, d.RunnerClass,
 		d.WorkspaceScopeID, d.LastDeliveryID,
 	).Scan(&state)
@@ -597,14 +601,15 @@ func (s *pgStore) UpsertJobAssignment(ctx context.Context, a jobAssignment) erro
 }
 
 type queuedJob struct {
-	ProviderJobID        int64
-	ProviderRunID        int64
-	ProviderRunAttempt   int64
-	ProviderRepositoryID int64
-	RepositoryFullName   string
-	Name                 string
-	RunnerClass          string
-	Labels               []string
+	ProviderJobID          int64
+	ProviderInstallationID int64
+	ProviderRunID          int64
+	ProviderRunAttempt     int64
+	ProviderRepositoryID   int64
+	RepositoryFullName     string
+	Name                   string
+	RunnerClass            string
+	Labels                 []string
 }
 
 // sqlListQueuedJobsForReconcile: the missed-webhook sweeper's candidate set —
@@ -614,7 +619,7 @@ type queuedJob struct {
 // stage-(a) API-read throttle (see reconcileQuietPeriod).
 const sqlListQueuedJobsForReconcile = `
 SELECT DISTINCT ON (j.provider_repository_id, j.runner_class)
-    j.provider_job_id, j.provider_run_id, j.provider_run_attempt,
+    j.provider_job_id, j.provider_installation_id, j.provider_run_id, j.provider_run_attempt,
     j.provider_repository_id, j.repository_full_name, j.name,
     j.runner_class, j.labels_json::text
 FROM github_workflow_jobs j
@@ -638,7 +643,7 @@ func (s *pgStore) ListQueuedJobsForReconcile(ctx context.Context, batch int, qui
 	for rows.Next() {
 		var j queuedJob
 		var labels string
-		if err := rows.Scan(&j.ProviderJobID, &j.ProviderRunID, &j.ProviderRunAttempt,
+		if err := rows.Scan(&j.ProviderJobID, &j.ProviderInstallationID, &j.ProviderRunID, &j.ProviderRunAttempt,
 			&j.ProviderRepositoryID, &j.RepositoryFullName, &j.Name, &j.RunnerClass, &labels); err != nil {
 			return nil, err
 		}
@@ -691,12 +696,13 @@ func (s *pgStore) TryJobLock(ctx context.Context, jobID int64) (release func(), 
 }
 
 type prCommentRow struct {
-	ProviderRepositoryID int64
-	RepositoryFullName   string
-	PRNumber             int64
-	ProviderCommentID    int64
-	LastRenderedSHA256   string
-	AttemptCount         int32
+	ProviderRepositoryID   int64
+	ProviderInstallationID int64
+	RepositoryFullName     string
+	PRNumber               int64
+	ProviderCommentID      int64
+	LastRenderedSHA256     string
+	AttemptCount           int32
 	// UpdatedAt as read by ListDirtyPRComments. The posted/clean statements
 	// compare against it: a MarkPRCommentDirty landing mid-sync bumps
 	// updated_at, so the clear leaves dirty=true and the newer state renders
@@ -705,20 +711,21 @@ type prCommentRow struct {
 }
 
 const sqlMarkPRCommentDirty = `
-INSERT INTO pr_comment_state (provider_repository_id, pr_number, repository_full_name, dirty)
-VALUES ($1, $2, $3, true)
+INSERT INTO pr_comment_state (provider_repository_id, provider_installation_id, pr_number, repository_full_name, dirty)
+VALUES ($1, $2, $3, $4, true)
 ON CONFLICT (provider_repository_id, pr_number) DO UPDATE SET
     dirty = true,
+    provider_installation_id = EXCLUDED.provider_installation_id,
     repository_full_name = EXCLUDED.repository_full_name,
     updated_at = now()`
 
-func (s *pgStore) MarkPRCommentDirty(ctx context.Context, repositoryID int64, repositoryFullName string, prNumber int64) error {
-	_, err := s.pool.Exec(ctx, sqlMarkPRCommentDirty, repositoryID, prNumber, repositoryFullName)
+func (s *pgStore) MarkPRCommentDirty(ctx context.Context, repositoryID, installationID int64, repositoryFullName string, prNumber int64) error {
+	_, err := s.pool.Exec(ctx, sqlMarkPRCommentDirty, repositoryID, installationID, prNumber, repositoryFullName)
 	return err
 }
 
 const sqlListDirtyPRComments = `
-SELECT provider_repository_id, repository_full_name, pr_number,
+SELECT provider_repository_id, provider_installation_id, repository_full_name, pr_number,
     provider_comment_id, last_rendered_sha256, attempt_count, updated_at
 FROM pr_comment_state
 WHERE dirty AND (next_attempt_at IS NULL OR next_attempt_at <= now())
@@ -734,7 +741,7 @@ func (s *pgStore) ListDirtyPRComments(ctx context.Context, batch int) ([]prComme
 	var out []prCommentRow
 	for rows.Next() {
 		var r prCommentRow
-		if err := rows.Scan(&r.ProviderRepositoryID, &r.RepositoryFullName, &r.PRNumber,
+		if err := rows.Scan(&r.ProviderRepositoryID, &r.ProviderInstallationID, &r.RepositoryFullName, &r.PRNumber,
 			&r.ProviderCommentID, &r.LastRenderedSHA256, &r.AttemptCount, &r.UpdatedAt); err != nil {
 			return nil, err
 		}

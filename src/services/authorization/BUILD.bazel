@@ -1,0 +1,78 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load", "oci_push")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+
+go_library(
+    name = "authorization_lib",
+    srcs = [
+        "contract.go",
+        "main.go",
+        "metrics.go",
+        "spicedb.go",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/services/authorization",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//src/proto/gen/go/guardian/authorization/v1:authorizationv1",
+        "//src/proto/gen/go/guardian/authorization/v1/authorizationv1connect",
+        "@com_connectrpc_connect//:connect",
+        "@com_github_prometheus_client_golang//prometheus:go_default_library",
+        "@com_github_prometheus_client_golang//prometheus/promhttp:go_default_library",
+    ],
+)
+
+go_binary(
+    name = "authorization",
+    embed = [":authorization_lib"],
+    pure = "on",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "authorization_test",
+    srcs = ["authorization_test.go"],
+    embed = [":authorization_lib"],
+    deps = [
+        "//src/proto/gen/go/guardian/authorization/v1:authorizationv1",
+        "@com_connectrpc_connect//:connect",
+        "@com_github_prometheus_client_golang//prometheus:go_default_library",
+    ],
+)
+
+pkg_tar(
+    name = "authorization_layer",
+    files = {
+        ":authorization": "app/authorization",
+    },
+    modes = {
+        "app/authorization": "0755",
+    },
+)
+
+oci_image(
+    name = "image",
+    annotations = {
+        "org.opencontainers.image.description": "Guardian typed authorization API",
+        "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
+        "org.opencontainers.image.title": "guardian-authorization",
+    },
+    base = "@distroless_cc_base_linux_amd64",
+    entrypoint = ["/app/authorization"],
+    exposed_ports = ["8080/tcp"],
+    tars = [":authorization_layer"],
+    visibility = ["//visibility:public"],
+)
+
+oci_load(
+    name = "load",
+    image = ":image",
+    repo_tags = ["guardian/authorization:dev"],
+)
+
+oci_push(
+    name = "push",
+    image = ":image",
+    remote_tags = ["edge"],
+    repository = "ghcr.io/guardian-intelligence/authorization",
+    visibility = ["//visibility:public"],
+)

@@ -11,6 +11,7 @@ package(default_visibility = ["//visibility:public"])
 exports_files([
     "buf.yaml",
     "testdata/buf/analytics-events.binpb",
+    "testdata/buf/authorization.binpb",
     "testdata/buf/cockpit.binpb",
 ])
 
@@ -108,4 +109,41 @@ guardian_go_proto_codegen_check(
         "buf/validate/validate.proto",
         "@protobuf//:well_known_protos",
     ],
+)
+
+proto_library(
+    name = "authorization_proto",
+    srcs = ["guardian/authorization/v1/authorization.proto"],
+    strip_import_prefix = "/src/proto",
+)
+
+guardian_buf_lint_test(
+    name = "authorization_buf_lint_test",
+    module = ".",
+    targets = [":authorization_proto"],
+)
+
+guardian_buf_breaking_test(
+    name = "authorization_buf_breaking_test",
+    against = "testdata/buf/authorization.binpb",
+    module = ".",
+    targets = [":authorization_proto"],
+)
+
+filegroup(
+    name = "authorization_gen_go",
+    srcs = [
+        "//src/proto/gen/go/guardian/authorization/v1:sources",
+        "//src/proto/gen/go/guardian/authorization/v1/authorizationv1connect:sources",
+    ],
+)
+
+guardian_go_proto_codegen_check(
+    name = "authorization_go_codegen_check",
+    generated_root = "src/proto/gen/go",
+    generated_sources = ":authorization_gen_go",
+    go_module = "github.com/guardian-intelligence/guardian/src/proto/gen/go",
+    proto_files = ["guardian/authorization/v1/authorization.proto"],
+    proto_path = "src/proto",
+    proto_srcs = ["guardian/authorization/v1/authorization.proto"],
 )

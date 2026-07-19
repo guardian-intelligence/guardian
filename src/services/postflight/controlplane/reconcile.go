@@ -57,7 +57,7 @@ func (w *worker) reconcileJob(ctx context.Context, j queuedJob) {
 
 	ev := jobEvent{
 		Action:             "queued",
-		InstallationID:     w.cfg.installationID,
+		InstallationID:     j.ProviderInstallationID,
 		RepositoryID:       j.ProviderRepositoryID,
 		RepositoryFullName: j.RepositoryFullName,
 		Job: workflowJobPayload{

@@ -104,14 +104,6 @@ func problemUnsupportedEvent(event string) problem {
 	}
 }
 
-func problemInstallationMismatch(got int64) problem {
-	return problem{
-		Code:   "provider_webhook.installation_mismatch",
-		Title:  "installation not configured",
-		Detail: fmt.Sprintf("delivery is for installation %d, not the configured one", got),
-	}
-}
-
 func problemProcessingStale() problem {
 	return problem{
 		Code:      "provider_webhook.processing_stale",

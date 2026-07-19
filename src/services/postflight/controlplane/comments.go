@@ -86,7 +86,7 @@ func (c *commenter) sync(ctx context.Context, row prCommentRow) {
 	if commentID == 0 {
 		commentID, postErr = c.createOrAdoptComment(ctx, row, body)
 	} else {
-		postErr = c.gh.updateIssueComment(ctx, row.RepositoryFullName, commentID, body)
+		postErr = c.gh.updateIssueComment(ctx, row.ProviderInstallationID, row.RepositoryFullName, commentID, body)
 	}
 	if postErr != nil {
 		next := time.Now().Add(retryDelay(row.AttemptCount + 1))
@@ -119,12 +119,12 @@ func (c *commenter) sync(ctx context.Context, row prCommentRow) {
 // marker-quoting comment from a human (or a hostile fork PR description
 // pasted into a comment) from being adopted and overwritten.
 func (c *commenter) createOrAdoptComment(ctx context.Context, row prCommentRow, body string) (int64, error) {
-	existing, err := c.gh.findMarkerComment(ctx, row.RepositoryFullName, row.PRNumber, commentMarker)
+	existing, err := c.gh.findMarkerComment(ctx, row.ProviderInstallationID, row.RepositoryFullName, row.PRNumber, commentMarker)
 	if err != nil {
 		return 0, err
 	}
 	if existing != 0 {
-		return existing, c.gh.updateIssueComment(ctx, row.RepositoryFullName, existing, body)
+		return existing, c.gh.updateIssueComment(ctx, row.ProviderInstallationID, row.RepositoryFullName, existing, body)
 	}
-	return c.gh.createIssueComment(ctx, row.RepositoryFullName, row.PRNumber, body)
+	return c.gh.createIssueComment(ctx, row.ProviderInstallationID, row.RepositoryFullName, row.PRNumber, body)
 }

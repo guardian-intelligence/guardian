@@ -9,14 +9,8 @@ import (
 )
 
 // config is the full environment surface of the control plane.
-//
-// Stage (a) is single-tenant: one GitHub App installation, pinned here.
-// FIXME(multi-tenant): the pinned installation id is what replaces postflight's
-// installation/repository binding lookup; multi-tenancy reintroduces the
-// mirror tables and drops this field.
 type config struct {
 	appID             int64
-	installationID    int64
 	webhookSecret     string
 	privateKeyPEM     string
 	apiBaseURL        string
@@ -35,7 +29,6 @@ type config struct {
 	hostdSyncSecret   string
 	schedulerEnabled  bool
 	schedulerInterval time.Duration
-	runnerOrg         string
 	allocateTimeout   time.Duration
 	assignmentTimeout time.Duration
 	// sealTimeout bounds how long a lease may wait for its host to confirm
@@ -100,7 +93,6 @@ func loadConfig() (config, error) {
 
 	cfg := config{
 		appID:              requiredID("GITHUB_APP_ID"),
-		installationID:     requiredID("GITHUB_APP_INSTALLATION_ID"),
 		webhookSecret:      required("GITHUB_WEBHOOK_SECRET"),
 		privateKeyPEM:      required("GITHUB_APP_PRIVATE_KEY_PEM"),
 		databaseURL:        required("DATABASE_URL"),
@@ -114,7 +106,6 @@ func loadConfig() (config, error) {
 		hostdSyncSecret:    os.Getenv("HOSTD_SYNC_SECRET"),
 		schedulerEnabled:   os.Getenv("SCHEDULER_ENABLED") == "true",
 		schedulerInterval:  duration("SCHEDULER_INTERVAL", "500ms"),
-		runnerOrg:          envOr("GITHUB_RUNNER_ORG", "guardian-intelligence"),
 		allocateTimeout:    duration("LEASE_ALLOCATE_TIMEOUT", "2s"),
 		assignmentTimeout:  duration("LEASE_ASSIGNMENT_TIMEOUT", "90s"),
 		sealTimeout:        duration("LEASE_SEAL_TIMEOUT", "10m"),
