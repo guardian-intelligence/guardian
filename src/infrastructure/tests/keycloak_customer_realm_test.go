@@ -1,8 +1,12 @@
 package tests
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
+	"sort"
+	"strings"
 	"testing"
 )
 
@@ -30,12 +34,12 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 		LoginWithEmail       bool   `json:"loginWithEmailAllowed"`
 		DuplicateEmails      bool   `json:"duplicateEmailsAllowed"`
 		Clients              []struct {
-			ClientID                 string            `json:"clientId"`
-			PublicClient             bool              `json:"publicClient"`
-			StandardFlowEnabled      bool              `json:"standardFlowEnabled"`
+			ClientID                  string            `json:"clientId"`
+			PublicClient              bool              `json:"publicClient"`
+			StandardFlowEnabled       bool              `json:"standardFlowEnabled"`
 			DirectAccessGrantsEnabled bool              `json:"directAccessGrantsEnabled"`
-			RedirectURIs             []string          `json:"redirectUris"`
-			Attributes               map[string]string `json:"attributes"`
+			RedirectURIs              []string          `json:"redirectUris"`
+			Attributes                map[string]string `json:"attributes"`
 		} `json:"clients"`
 		Users []json.RawMessage `json:"users"`
 	}
@@ -49,14 +53,18 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 			SyncMode string `json:"syncMode"`
 		} `json:"config"`
 	}
+	var realmJSON string
+	providerJSON := map[string]string{}
 	for _, doc := range yamlDocs(t, runfilePath(root+"realm-configmap.yaml")) {
 		data := mapValue(doc["data"])
 		if raw := stringValue(data[realmDataKey]); raw != "" {
+			realmJSON = raw
 			if err := json.Unmarshal([]byte(raw), &realm); err != nil {
 				t.Fatalf("decode Guardian realm JSON: %v", err)
 			}
 		}
 		if raw := stringValue(data["github.json"]); raw != "" {
+			providerJSON["github.json"] = raw
 			if err := json.Unmarshal([]byte(raw), &github); err != nil {
 				t.Fatalf("decode GitHub broker JSON: %v", err)
 			}
@@ -105,6 +113,21 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 	reconciler, err := os.ReadFile(runfilePath(root + "realm-reconciler.yaml"))
 	if err != nil {
 		t.Fatalf("read realm reconciler: %v", err)
+	}
+	providerNames := make([]string, 0, len(providerJSON))
+	for name := range providerJSON {
+		providerNames = append(providerNames, name)
+	}
+	sort.Strings(providerNames)
+	providers := make([]string, 0, len(providerNames))
+	for _, name := range providerNames {
+		providers = append(providers, name+"\x00"+providerJSON[name])
+	}
+	sum := sha256.Sum256([]byte(realmJSON + "\x00" + strings.Join(providers, "\x00")))
+	job := findDoc(t, yamlDocs(t, runfilePath(root+"realm-reconciler.yaml")), "Job", "keycloak-realm-reconciler")
+	checksum := stringValue(nestedValue(t, job, "spec", "template", "metadata", "annotations", "checksum/realm-config"))
+	if want := hex.EncodeToString(sum[:]); checksum != want {
+		t.Fatalf("realm reconciler config checksum = %q, want %q", checksum, want)
 	}
 	assertTextContains(t, string(reconciler), `realm=guardianintelligence.org`,
 		"realm reconciler must target the Guardian realm")

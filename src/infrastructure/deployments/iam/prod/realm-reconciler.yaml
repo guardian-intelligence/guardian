@@ -17,6 +17,8 @@ spec:
   activeDeadlineSeconds: 600
   template:
     metadata:
+      annotations:
+        checksum/realm-config: 888e23af74742457c3aa2a36f90c80059abbf8c43c80ca3ce6a20aeaef9998b7
       labels:
         app.kubernetes.io/name: keycloak-realm-reconciler
         app.kubernetes.io/part-of: guardian
