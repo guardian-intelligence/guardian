@@ -11,13 +11,15 @@ var rendezvousT0 = time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
 
 func traceEvent(seq uint64, event string) rendezvousEvent {
 	return rendezvousEvent{
-		SchemaVersion: rendezvousTraceSchema,
-		RunID:         "run-1",
-		Event:         event,
-		Seq:           seq,
-		Source:        "collector",
-		MonotonicNS:   int64(seq) * int64(time.Millisecond),
-		WallTime:      rendezvousT0.Add(time.Duration(seq) * time.Millisecond),
+		SchemaVersion:    rendezvousTraceSchema,
+		RunID:            "run-1",
+		Event:            event,
+		Seq:              seq,
+		Source:           "collector",
+		MonotonicNS:      int64(seq) * int64(time.Millisecond),
+		WallTime:         rendezvousT0.Add(time.Duration(seq) * time.Millisecond),
+		ListenerLeaseID:  "warm-runner-3",
+		ExecutionLeaseID: "job-42",
 	}
 }
 
@@ -49,8 +51,10 @@ func validRendezvousTrace() []rendezvousEvent {
 		traceEvent(12, eventProviderConclusionObserved),
 	}
 	events[0].Lane = "postflight"
+	events[0].RunID = ""
 	events[0].RunnerName = "warm-runner-3"
 	events[0].VMID = "pool-vm-3"
+	events[0].ExecutionLeaseID = ""
 	events[0].Platform = &platformEvidence{
 		QEMUVersion:   "10.1.0",
 		KernelRelease: "6.8.0-64-generic",
@@ -110,6 +114,48 @@ func TestValidAssignmentFirstRendezvousPasses(t *testing.T) {
 	}
 	if report.JobID != 42 || report.RunnerName != "warm-runner-3" || report.VMID != "pool-vm-3" {
 		t.Fatalf("identity = %+v", report)
+	}
+	if report.ListenerLeaseID != "warm-runner-3" || report.ExecutionLeaseID != "job-42" {
+		t.Fatalf("routed leases = %+v", report)
+	}
+}
+
+func TestCrossedListenerBindsTheActualExecutionWorkspace(t *testing.T) {
+	events := validRendezvousTrace()
+	for index := 1; index < len(events); index++ {
+		events[index].ExecutionLeaseID = "job-99"
+	}
+	for _, index := range []int{4, 5, 6} {
+		events[index].Volumes[0].Dataset = "tank/postflight/ws/job-99"
+	}
+
+	report := validateRendezvousTrace(events)
+	if !report.TraceValid || report.Outcome != outcomePass {
+		t.Fatalf("crossed listener trace = %+v", report)
+	}
+	if report.ListenerLeaseID != "warm-runner-3" || report.ExecutionLeaseID != "job-99" {
+		t.Fatalf("crossed identity = %+v", report)
+	}
+}
+
+func TestPoolReadyCannotPredictAJob(t *testing.T) {
+	events := validRendezvousTrace()
+	events[0].RunID = "predicted-run"
+	events[0].ExecutionLeaseID = "predicted-execution"
+	report := validateRendezvousTrace(events)
+	if report.TraceValid ||
+		!containsDetail(report.Violations, "before assignment") ||
+		!containsDetail(report.Violations, "already carries customer identity") {
+		t.Fatalf("owned pool listener passed: %+v", report)
+	}
+}
+
+func TestWorkspaceMustBelongToExecutionLease(t *testing.T) {
+	events := validRendezvousTrace()
+	events[4].Volumes[0].Dataset = "tank/postflight/ws/foreign-job"
+	report := validateRendezvousTrace(events)
+	if report.TraceValid || !containsDetail(report.Violations, "belongs to execution lease") {
+		t.Fatalf("foreign execution workspace passed: %+v", report)
 	}
 }
 

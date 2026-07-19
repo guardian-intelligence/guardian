@@ -2,9 +2,37 @@ package agent
 
 import (
 	"testing"
+	"time"
 
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/syncproto"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/zvol"
 )
+
+func TestPoolTraceIsUnownedUntilAssignment(t *testing.T) {
+	agent := &Agent{
+		cfg:     Config{HostID: "host-1"},
+		started: time.Now().Add(-time.Second),
+	}
+	record := &lease{spec: syncproto.DesiredLease{
+		LeaseID:            "listener-1",
+		ExecutionLeaseID:   "execution-2",
+		ProviderRunID:      123,
+		ProviderJobID:      456,
+		ProviderRunAttempt: 1,
+	}}
+
+	pool := agent.newTraceEvent(record, "pool_ready")
+	if pool.RunID != "" || pool.ExecutionLeaseID != "" ||
+		pool.ListenerLeaseID != "listener-1" {
+		t.Fatalf("pool trace carries job ownership: %+v", pool)
+	}
+
+	assigned := agent.newTraceEvent(record, "assignment_observed")
+	if assigned.RunID != "123" || assigned.ExecutionLeaseID != "execution-2" ||
+		assigned.ListenerLeaseID != "listener-1" {
+		t.Fatalf("assignment trace lacks routed identity: %+v", assigned)
+	}
+}
 
 func TestColdWorkspaceTraceNamesEmptyMaterialization(t *testing.T) {
 	record := &lease{volume: zvol.WorkspaceVolume{Name: "tank/postflight/ws/lease-1"}}

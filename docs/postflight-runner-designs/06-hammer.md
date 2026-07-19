@@ -34,9 +34,11 @@ monotonic timestamps are compared only within one source, never between the
 host, guest, and GitHub.
 
 1. `pool_ready`: the QEMU VM is running and its generic runner is listening.
-   It carries no customer volume.
+   It names only the listener lease, runner, and VM; it carries no run,
+   execution lease, or customer volume.
 2. `assignment_observed`: GitHub's actual numeric job id, run attempt, and
-   selected runner name are observed.
+   selected runner name are observed. The trace now names the selected
+   listener lease and the job-owned execution lease separately.
 3. `job_hook_blocked`: the synchronous job-start hook holds the runner before
    any customer step.
 4. `job_identity_reported`: the hook reports runner, job, and repository
@@ -51,9 +53,10 @@ host, guest, and GitHub.
    realtime sample after memory restore when applicable.
 8. `job_hook_released`: only now may the Actions runner execute the job.
 
-The validator rejects a changed job, run attempt, runner, VM, or
-generation-set identity,
+The validator rejects a changed job, run attempt, runner, listener lease,
+execution lease, VM, or generation-set identity,
 a pool VM that already knows customer identity or carries customer volumes,
+a workspace dataset that does not belong to the routed execution lease,
 a bound or mounted tuple that differs from the resolved snapshots, a missing
 workspace, a memory snapshot without its workspace, duplicate volume roles,
 and hook release before mounts and post-restore clock evidence. Deterministic
