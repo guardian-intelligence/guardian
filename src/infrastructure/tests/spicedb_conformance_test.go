@@ -111,6 +111,29 @@ func TestSpiceDBProductionTopologyAndSecurity(t *testing.T) {
 		assertTextContains(t, marker, want, markerPath)
 	}
 
+	restorePath := runfilePath("src/infrastructure/deployments/authorization/data/restore-drill.yaml")
+	restore := readText(t, restorePath)
+	for _, want := range []string{
+		"name: spicedb-restore-20260719",
+		"storageClass: replicated-encrypted",
+		"kind: RestoreJob",
+		"name: spicedb-r2-restore-v2-20260719",
+		"name: spicedb-postgres-restore-baseline-20260718",
+		"targetApplicationRef:",
+		"name: spicedb-restore-verify-v3-20260719",
+		"name: postgres-spicedb-credentials",
+		"activeDeadlineSeconds: 600",
+		"kustomize.toolkit.fluxcd.io/substitute: disabled",
+		"sslmode=verify-full",
+		"guardian_restore_drill_marker",
+		"0a90ea81-fcaf-437b-a34f-d1da44c720f6",
+		"cnpg.io/cluster: postgres-spicedb-restore-20260719",
+		"runAsUser: 999",
+		"runAsGroup: 999",
+	} {
+		assertTextContains(t, restore, want, restorePath)
+	}
+
 	spicedbPath := runfilePath("src/infrastructure/deployments/authorization/prod/spicedb.yaml")
 	spicedb := readText(t, spicedbPath)
 	for _, want := range []string{

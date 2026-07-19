@@ -5,3 +5,4 @@ resources:
   - certificates.yaml
   - postgres.yaml
   - restore-marker.yaml
+  - restore-drill.yaml

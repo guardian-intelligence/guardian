@@ -432,6 +432,14 @@ spec:
       kind: Job
       name: spicedb-restore-marker-v3-20260719
       namespace: tenant-guardian-prod
+    - apiVersion: postgresql.cnpg.io/v1
+      kind: Cluster
+      name: postgres-spicedb-restore-20260719
+      namespace: tenant-guardian-prod
+    - apiVersion: batch/v1
+      kind: Job
+      name: spicedb-restore-verify-v3-20260719
+      namespace: tenant-guardian-prod
     - apiVersion: cert-manager.io/v1
       kind: Certificate
       name: spicedb-ca
@@ -455,6 +463,10 @@ spec:
     - apiVersion: backups.cozystack.io/v1alpha1
       kind: BackupJob
       name: spicedb-postgres-restore-baseline-20260718
+      namespace: tenant-guardian-prod
+    - apiVersion: backups.cozystack.io/v1alpha1
+      kind: RestoreJob
+      name: spicedb-r2-restore-v2-20260719
       namespace: tenant-guardian-prod
   healthCheckExprs:
     - apiVersion: external-secrets.io/v1beta1
