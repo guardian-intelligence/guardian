@@ -162,18 +162,27 @@ primary pod or invoke a CNPG promotion command for this drill.
 
 ## API credential rotation
 
-SpiceDB accepts independent token slots A and B. Product callers switch slots
-before the old slot changes:
+SpiceDB accepts independent token slots A and B. The first configured token is
+also the credential SpiceDB uses for peer dispatch, so the active caller token
+must be listed first. During a rollout every replica accepts both tokens, while
+old and new replicas continue authenticating peer dispatch with a token both
+sides know. Product callers switch slots before the old slot changes:
 
-1. confirm every caller is using slot B;
+1. confirm every caller is using slot B and the server order is B, A;
 2. change slot A's ExternalSecret `guardian.dev/rotation` audit identity and
    `force-sync` annotation, plus the SpiceDB qualification rollout annotation,
    in the same PR; the Password generator's length and character policy remain
    unchanged;
 3. after Flux convergence, prove the new A and unchanged B credentials work;
-4. move callers to A through their own reviewed rollout;
+4. move callers to A and change the server order to A, B through the same
+   reviewed rollout;
 5. rotate B in the same way; and
 6. repeat the functional gate.
+
+Keep Thumper running across each server-order, caller, and credential rollout.
+Because the active token remains valid throughout these transitions, require
+zero request errors, zero indeterminate decisions, and zero incorrect
+decisions.
 
 At no point is the generated value committed, copied to OpenBao, or printed in
 review evidence. A slot is not retired until metrics show that no caller uses
