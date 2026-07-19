@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const rendezvousTraceSchema = 1
+const rendezvousTraceSchema = 2
 
 type traceEvent struct {
 	SchemaVersion int       `json:"schema_version"`
@@ -33,11 +33,12 @@ type traceEvent struct {
 }
 
 type traceVolume struct {
-	Role         string `json:"role"`
-	Dataset      string `json:"dataset"`
-	SnapshotGUID string `json:"snapshot_guid"`
-	Generation   string `json:"generation"`
-	DeviceSerial string `json:"device_serial,omitempty"`
+	Role            string `json:"role"`
+	Dataset         string `json:"dataset"`
+	Materialization string `json:"materialization"`
+	SnapshotGUID    string `json:"snapshot_guid"`
+	Generation      string `json:"generation"`
+	DeviceSerial    string `json:"device_serial,omitempty"`
 }
 
 type tracePlatform struct {
@@ -118,6 +119,9 @@ func traceIdentity(record *lease, event *traceEvent) {
 }
 
 func generationSet(record *lease) string {
+	if record.volume.Source == "" {
+		return "workspace:empty"
+	}
 	return "workspace:" + string(record.volume.Source) + ":" + record.volume.SourceSnapshotGUID
 }
 
@@ -126,9 +130,13 @@ func traceVolumes(record *lease, bound bool) []traceVolume {
 	if bound {
 		serial = "workspace"
 	}
+	materialization := "empty"
+	if record.volume.Source != "" {
+		materialization = "clone"
+	}
 	return []traceVolume{{
-		Role: "workspace", Dataset: record.volume.Name,
-		SnapshotGUID: record.volume.SourceSnapshotGUID,
-		Generation:   string(record.volume.Source), DeviceSerial: serial,
+		Role: "workspace", Dataset: record.volume.Name, Materialization: materialization,
+		SnapshotGUID: record.volume.SourceSnapshotGUID, Generation: string(record.volume.Source),
+		DeviceSerial: serial,
 	}}
 }

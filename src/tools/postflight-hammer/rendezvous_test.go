@@ -23,11 +23,12 @@ func traceEvent(seq uint64, event string) rendezvousEvent {
 
 func workspaceVolume() volumeEvidence {
 	return volumeEvidence{
-		Role:         volumeWorkspace,
-		Dataset:      "tank/postflight/ws/job-42",
-		SnapshotGUID: "9123456789012345678",
-		Generation:   "workspace-gen-7",
-		DeviceSerial: "postflight-workspace",
+		Role:            volumeWorkspace,
+		Dataset:         "tank/postflight/ws/job-42",
+		Materialization: "clone",
+		SnapshotGUID:    "9123456789012345678",
+		Generation:      "workspace-gen-7",
+		DeviceSerial:    "postflight-workspace",
 	}
 }
 
@@ -168,6 +169,52 @@ func TestRendezvousBindsTheResolvedGenerationTuple(t *testing.T) {
 	}
 }
 
+func TestColdRendezvousExplicitlyBindsAnEmptyWorkspace(t *testing.T) {
+	events := validRendezvousTrace()
+	cold := workspaceVolume()
+	cold.Materialization = "empty"
+	cold.SnapshotGUID = ""
+	cold.Generation = ""
+	for _, index := range []int{4, 5, 6} {
+		events[index].GenerationSet = "workspace:empty"
+		events[index].Volumes = []volumeEvidence{cold}
+	}
+
+	report := validateRendezvousTrace(events)
+	if !report.TraceValid || report.Outcome != outcomePass {
+		t.Fatalf("explicit cold rendezvous = %+v", report)
+	}
+}
+
+func TestColdRendezvousWithoutMaterializationEvidenceIsInvalid(t *testing.T) {
+	events := validRendezvousTrace()
+	cold := workspaceVolume()
+	cold.Materialization = ""
+	cold.SnapshotGUID = ""
+	cold.Generation = ""
+	for _, index := range []int{4, 5, 6} {
+		events[index].GenerationSet = "workspace:empty"
+		events[index].Volumes = []volumeEvidence{cold}
+	}
+
+	report := validateRendezvousTrace(events)
+	if report.TraceValid || !containsDetail(report.Violations, "lacks materialization") {
+		t.Fatalf("ambiguous cold rendezvous passed: %+v", report)
+	}
+}
+
+func TestMaterializationMustMatchAcrossRendezvous(t *testing.T) {
+	events := validRendezvousTrace()
+	events[5].Volumes[0].Materialization = "empty"
+	events[5].Volumes[0].SnapshotGUID = ""
+	events[5].Volumes[0].Generation = ""
+
+	report := validateRendezvousTrace(events)
+	if report.TraceValid || !containsDetail(report.Violations, "does not match the resolved generation tuple") {
+		t.Fatalf("mismatched materialization passed: %+v", report)
+	}
+}
+
 func TestGuestMountsEveryBoundVolume(t *testing.T) {
 	events := validRendezvousTrace()
 	events[6].Volumes = nil
@@ -180,11 +227,12 @@ func TestGuestMountsEveryBoundVolume(t *testing.T) {
 func TestMemorySnapshotWithoutWorkspaceIsInvalid(t *testing.T) {
 	events := validRendezvousTrace()
 	events[5].Volumes = []volumeEvidence{{
-		Role:         volumeMemory,
-		Dataset:      "tank/postflight/mem/job-42",
-		SnapshotGUID: "8123456789012345678",
-		Generation:   "memory-gen-7",
-		DeviceSerial: "postflight-memory",
+		Role:            volumeMemory,
+		Dataset:         "tank/postflight/mem/job-42",
+		Materialization: "clone",
+		SnapshotGUID:    "8123456789012345678",
+		Generation:      "memory-gen-7",
+		DeviceSerial:    "postflight-memory",
 	}}
 	report := validateRendezvousTrace(events)
 	if report.TraceValid || !containsDetail(report.Violations, "memory snapshot without its workspace") {
@@ -195,11 +243,12 @@ func TestMemorySnapshotWithoutWorkspaceIsInvalid(t *testing.T) {
 func TestMemoryRendezvousChecksClockAfterRestore(t *testing.T) {
 	events := validRendezvousTrace()
 	memory := volumeEvidence{
-		Role:         volumeMemory,
-		Dataset:      "tank/postflight/mem/job-42",
-		SnapshotGUID: "8123456789012345678",
-		Generation:   "memory-gen-7",
-		DeviceSerial: "postflight-memory",
+		Role:            volumeMemory,
+		Dataset:         "tank/postflight/mem/job-42",
+		Materialization: "clone",
+		SnapshotGUID:    "8123456789012345678",
+		Generation:      "memory-gen-7",
+		DeviceSerial:    "postflight-memory",
 	}
 	for _, index := range []int{4, 5, 6} {
 		events[index].Volumes = append(events[index].Volumes, memory)
@@ -317,11 +366,12 @@ func TestProtectedMainSnapshotPromotesOnlyAfterSuccess(t *testing.T) {
 func TestSnapshotSealsTheWholeBoundGenerationSet(t *testing.T) {
 	events := validRendezvousTrace()[:10]
 	toolchain := volumeEvidence{
-		Role:         volumeToolchain,
-		Dataset:      "tank/postflight/tools/acme",
-		SnapshotGUID: "7123456789012345678",
-		Generation:   "toolchain-gen-3",
-		DeviceSerial: "postflight-toolchain",
+		Role:            volumeToolchain,
+		Dataset:         "tank/postflight/tools/acme",
+		Materialization: "clone",
+		SnapshotGUID:    "7123456789012345678",
+		Generation:      "toolchain-gen-3",
+		DeviceSerial:    "postflight-toolchain",
 	}
 	for _, index := range []int{4, 5, 6} {
 		events[index].Volumes = append(events[index].Volumes, toolchain)
