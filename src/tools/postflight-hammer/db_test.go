@@ -60,13 +60,14 @@ func seedBattery(t *testing.T, ctx context.Context, conn *pgx.Conn) {
 		`INSERT INTO host_slots (host_id, class, total, warm, used, reserved)
 		 VALUES ('h1', 'postflight-4cpu-ubuntu-2404', 4, 4, 0, 0)`,
 		`INSERT INTO github_webhook_deliveries (delivery_id, event_name, state, payload_sha256, payload_json,
-		     provider_job_id, provider_run_id, received_at, verified_at)
-		 VALUES ('d1', 'workflow_job', 'processed', 'sha', '{}'::jsonb, 101, 500, now() - interval '30 seconds', now() - interval '30 seconds')`,
-		`INSERT INTO github_workflow_jobs (provider_job_id, provider_run_id, provider_run_attempt, status, conclusion)
-		 VALUES (101, 500, 1, 'completed', 'success')`,
+		     provider_installation_id, provider_job_id, provider_run_id, received_at, verified_at)
+		 VALUES ('d1', 'workflow_job', 'processed', 'sha', '{}'::jsonb, 42, 101, 500, now() - interval '30 seconds', now() - interval '30 seconds')`,
+		`INSERT INTO github_workflow_jobs (provider_job_id, provider_installation_id, provider_run_id,
+		     provider_run_attempt, status, conclusion)
+		 VALUES (101, 42, 500, 1, 'completed', 'success')`,
 		`INSERT INTO github_provider_demands (provider_job_id, provider_repository_id, repository_full_name,
-		     provider_run_id, provider_run_attempt, runner_class, state)
-		 VALUES (101, 9, 'acme/demo', 500, 1, 'postflight-4cpu-ubuntu-2404', 'completed')`,
+		     provider_installation_id, provider_run_id, provider_run_attempt, runner_class, state)
+		 VALUES (101, 9, 'acme/demo', 42, 500, 1, 'postflight-4cpu-ubuntu-2404', 'completed')`,
 		`INSERT INTO host_leases (lease_id, provider_job_id, execution_id, attempt_id, runner_class, state,
 		     reported_state, host_id, workspace_generation, seal_generation, exit_code, allocate_deadline_at)
 		 VALUES ('L1', 101, '101', '1', 'postflight-4cpu-ubuntu-2404', 'completed',
