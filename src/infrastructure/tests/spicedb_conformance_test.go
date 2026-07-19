@@ -117,7 +117,7 @@ func TestSpiceDBProductionTopologyAndSecurity(t *testing.T) {
 	for _, want := range []string{
 		"kind: SpiceDBCluster",
 		"channel: stable",
-		"version: v1.52.0",
+		"version: v1.54.0",
 		"value: $(SPICEDB_API_TOKEN_SLOT_A),$(SPICEDB_API_TOKEN_SLOT_B)",
 		"presharedKey:\n      skip: true",
 		"datastoreEngine: postgres",
