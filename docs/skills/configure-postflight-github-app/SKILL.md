@@ -9,16 +9,12 @@ description: Create or update the Postflight GitHub App for production or stagin
 2. Set the name to `Postflight by Guardian${SUFFIX}`, homepage to
    `https://${HOST}/postflight`, and webhook URL to
    `https://${HOST}/api/v1/github/webhooks`.
-3. Generate `/tmp/postflight-${ENV}.png` as a 512×512 PNG on `#0E0E0E`. Use
-   `src/products/viteplus-monorepo/apps/guardianintelligence-web/public/favicon.svg`
-   as the immutable mark source; preserve its exact viewBox, wings path, and
-   aspect ratio. Render it 320×320, centered at `(256,176)`, without
-   nonuniform scaling. Add `POSTFLIGHT` centered below it in uppercase white
-   Geist Semibold with `0.14em` tracking; add a second `STAGING` line only
-   when `ENV=staging`. Verify every label and the square dimensions.
+3. Generate `/tmp/postflight-${ENV}.png` as a 512×512 PNG on `#0E0E0E`.
+   Refer to the design packet at `https://guardianintelligence.org/design`
+   for assets and branding.
 4. Sign in as an owner of `guardian-intelligence`. Open the existing GitHub
    App settings page or **Organization settings → Developer settings → GitHub
-   Apps → New GitHub App**.
+   Apps → New GitHub App** if the app doesn't exist.
 5. Enter the exact name and homepage from step 2. Leave callback and setup
    URLs empty; disable user authorization during installation and device
    flow.
