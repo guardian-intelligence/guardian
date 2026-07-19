@@ -32,9 +32,6 @@ var permissionContract = map[string]map[string]struct{}{
 }
 
 var relationContract = map[string]map[string]string{
-	"guardian_account": {
-		"owner": "principal",
-	},
 	"organization": {
 		"owner":  "guardian_account",
 		"admin":  "guardian_account",

@@ -67,6 +67,21 @@ func TestRelationshipContractRejectsProviderIdentity(t *testing.T) {
 	}
 }
 
+func TestRelationshipContractDoesNotProvisionLoginAccounts(t *testing.T) {
+	t.Parallel()
+	_, err := checkedRelationship(&authorizationv1.RelationshipUpdate{
+		Operation: authorizationv1.RelationshipOperation_RELATIONSHIP_OPERATION_TOUCH,
+		Resource:  &authorizationv1.ObjectReference{Type: "guardian_account", Id: "subject"},
+		Relation:  "owner",
+		Subject: &authorizationv1.SubjectReference{
+			Object: &authorizationv1.ObjectReference{Type: "principal", Id: "subject"},
+		},
+	})
+	if err == nil {
+		t.Fatal("login account provisioning relationship was accepted")
+	}
+}
+
 func TestRelationshipContractAcceptsRepositoryParent(t *testing.T) {
 	t.Parallel()
 	update, err := checkedRelationship(&authorizationv1.RelationshipUpdate{
