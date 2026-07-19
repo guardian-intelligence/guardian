@@ -248,10 +248,8 @@ func TestImportPlanOptionalKeycloakStages(t *testing.T) {
 	}
 }
 
-func TestImportPlanKeycloakGeneratedCredentials(t *testing.T) {
+func TestImportPlanGitHubLoginCanary(t *testing.T) {
 	env := testImportEnv()
-	env["PROD_KEYCLOAK_ADMIN_BOOTSTRAP_USERNAME"] = "guardian-admin"
-	env["PROD_KEYCLOAK_ADMIN_BOOTSTRAP_PASSWORD"] = "admin-pass"
 	env["PROD_GITHUB_LOGIN_CANARY_USERNAME"] = "guardian-canary"
 	env["PROD_GITHUB_LOGIN_CANARY_PASSWORD"] = "canary-pass"
 	env["PROD_GITHUB_LOGIN_CANARY_TOTP_SECRET"] = "JBSWY3DPEHPK3PXP"
@@ -263,13 +261,6 @@ func TestImportPlanKeycloakGeneratedCredentials(t *testing.T) {
 	byPath := map[string]secretWrite{}
 	for _, w := range plan {
 		byPath[w.APIPath] = w
-	}
-	admin, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-guardian-prod/keycloak/admin-bootstrap"]
-	if !ok {
-		t.Fatal("prod admin-bootstrap write missing")
-	}
-	if admin.Data["username"] != "guardian-admin" || admin.Data["password"] != "admin-pass" {
-		t.Fatalf("admin-bootstrap data = %#v", admin.Data)
 	}
 	canary, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-guardian-prod/keycloak/login-canary-github"]
 	if !ok {

@@ -7,9 +7,9 @@ for admitted customer value after operational hardening.
 
 ## Identity and configuration
 
-- The `postflight` Keycloak realm provides product-level multitenancy through
-  Keycloak Organizations. Browser customer APIs validate realm tokens and
-  derive tenant identity from verified claims.
+- Browser customer APIs validate tokens from the Guardian customer identity
+  realm and persist only its subject. Product multitenancy and permissions are
+  enforced through the typed Authorization API backed by SpiceDB.
 - CNPG provides the three-replica `products` PostgreSQL cluster and its scoped
   database roles. CNPG is not a second customer identity provider.
 - Stripe sandbox product, price, and webhook resources are managed by

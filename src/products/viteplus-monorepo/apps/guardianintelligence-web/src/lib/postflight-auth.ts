@@ -37,6 +37,7 @@ type IDTokenClaims = {
   readonly nonce: string;
   readonly preferred_username?: string;
   readonly email?: string;
+  readonly email_verified?: boolean;
   readonly name?: string;
 };
 
@@ -338,7 +339,7 @@ export async function completePostflightLogin(request: Request): Promise<Respons
   const session: SealedPostflightSession = {
     subject: claims.sub,
     username: claims.preferred_username || claims.sub,
-    ...(claims.email ? { email: claims.email } : {}),
+    ...(claims.email && claims.email_verified === true ? { email: claims.email } : {}),
     ...(claims.name ? { name: claims.name } : {}),
     expiresAt: Date.now() + 30 * 60 * 1000,
     idToken: tokens.id_token,

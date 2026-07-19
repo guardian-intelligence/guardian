@@ -124,6 +124,8 @@ describe("Postflight OIDC BFF", () => {
       iat: Math.floor(Date.now() / 1000),
       nonce,
       preferred_username: "canary",
+      email: "untrusted@example.com",
+      email_verified: false,
     });
     const signingInput = `${header}.${claims}`;
     const signature = await crypto.subtle.sign(
@@ -168,6 +170,7 @@ describe("Postflight OIDC BFF", () => {
       authenticated: true,
       user: { subject: "guardian-subject", username: "canary" },
     });
+    expect(body.user).not.toHaveProperty("email");
     expect(JSON.stringify(body)).not.toContain(idToken);
 
     const logoutResponse = await endPostflightSession(

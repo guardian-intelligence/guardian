@@ -6,14 +6,24 @@
 # amd64 manifest digest, matching the repo's image lock convention
 # (containerStatuses.imageID), not the multi-arch index digest.
 #
-# No autoPromotionEnabled entry: IAM is mission-critical, so promotion to
-# prod is always a deliberate act (human or agent). The promotion PR still
-# passes branch protection + CI, and the deploy is then gated in-cluster by
-# the Flagger blue/green login gate.
+# Keycloak promotions remain deliberate because they migrate the shared IAM
+# database. The Guardian-built browser canary has its own auto-promoted Stage:
+# it must follow the user journey continuously as canary fixes are published.
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Project
 metadata:
   name: guardian-iam
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: ProjectConfig
+metadata:
+  name: guardian-iam
+  namespace: guardian-iam
+spec:
+  promotionPolicies:
+    - stageSelector:
+        name: login-canary-prod
+      autoPromotionEnabled: true
 ---
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Warehouse
@@ -28,3 +38,16 @@ spec:
         imageSelectionStrategy: SemVer
         constraint: 26.6.x
         platform: linux/amd64
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Warehouse
+metadata:
+  name: login-canary
+  namespace: guardian-iam
+spec:
+  interval: 1m0s
+  subscriptions:
+    - image:
+        repoURL: ghcr.io/guardian-intelligence/login-canary
+        imageSelectionStrategy: Digest
+        constraint: edge
