@@ -106,12 +106,15 @@ func TestGreenBatteryPasses(t *testing.T) {
 	if !r.Pass {
 		t.Fatalf("green battery failed: %+v", r.Assertions)
 	}
+	if r.Outcome != outcomePass {
+		t.Fatalf("outcome = %s, want %s", r.Outcome, outcomePass)
+	}
 	for _, name := range []string{"watch ran to completion", "runs green with full per-step logs", "slot accounting back to baseline", "no leaks beyond deadline horizon", "generation lifecycle invariants"} {
 		if a := assertionByName(t, r, name); !a.Pass || a.Skipped {
 			t.Fatalf("%s: %+v", name, a)
 		}
 	}
-	for _, name := range []string{"churn terminal within deadline bound", "warm runs delta-only"} {
+	for _, name := range []string{"churn terminal within deadline bound", "warm runs clone a generation", "warm checkout performance"} {
 		if a := assertionByName(t, r, name); !a.Skipped {
 			t.Fatalf("%s should be skipped on this battery: %+v", name, a)
 		}
@@ -246,6 +249,9 @@ func TestChurnAssertionBoundsTerminalization(t *testing.T) {
 // generation the first run sealed.
 func warmState() *stateFile {
 	st := greenState()
+	st.Dispatches = append(st.Dispatches, dispatchRecord{
+		Pattern: "serial", Workflow: "ci.yml", DispatchedAt: at(time.Minute),
+	})
 	st.Runs["501"] = &runRecord{
 		RunID: 501, Workflow: "ci.yml", CreatedAt: at(time.Minute), LatestAttempt: 1,
 		Status: "completed", Conclusion: "success",
@@ -266,9 +272,13 @@ func warmState() *stateFile {
 }
 
 func TestWarmAssertionPassesOnClonedFasterRun(t *testing.T) {
-	a := assertionByName(t, buildReport(warmState(), at(4*time.Minute)), "warm runs delta-only")
+	a := assertionByName(t, buildReport(warmState(), at(4*time.Minute)), "warm runs clone a generation")
 	if !a.Pass || a.Skipped {
 		t.Fatalf("warm run should pass: %+v", a)
+	}
+	a = assertionByName(t, buildReport(warmState(), at(4*time.Minute)), "warm checkout performance")
+	if !a.Pass || a.Concern || a.Skipped {
+		t.Fatalf("warm performance should pass: %+v", a)
 	}
 }
 
@@ -277,18 +287,22 @@ func TestWarmAssertionCatchesColdSecondRun(t *testing.T) {
 	l := st.DB.Leases["L2"]
 	l.WorkspaceGeneration = ""
 	st.DB.Leases["L2"] = l
-	a := assertionByName(t, buildReport(st, at(4*time.Minute)), "warm runs delta-only")
+	a := assertionByName(t, buildReport(st, at(4*time.Minute)), "warm runs clone a generation")
 	if a.Pass {
 		t.Fatalf("uncloned warm run passed: %+v", a)
 	}
 }
 
-func TestWarmAssertionCatchesSlowWarmCheckout(t *testing.T) {
+func TestSlowWarmCheckoutIsAConcern(t *testing.T) {
 	st := warmState()
 	st.Runs["501"].Attempts["1"].Jobs = []jobRecord{greenJob(102, time.Minute+5*time.Second, 10*time.Second)}
-	a := assertionByName(t, buildReport(st, at(4*time.Minute)), "warm runs delta-only")
-	if a.Pass {
-		t.Fatalf("slow warm checkout passed: %+v", a)
+	r := buildReport(st, at(4*time.Minute))
+	a := assertionByName(t, r, "warm checkout performance")
+	if a.Pass || !a.Concern {
+		t.Fatalf("slow warm checkout was not a concern: %+v", a)
+	}
+	if !r.Pass || r.Outcome != outcomeConcern {
+		t.Fatalf("performance concern invalidated the battery: pass=%t outcome=%s", r.Pass, r.Outcome)
 	}
 }
 
