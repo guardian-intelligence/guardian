@@ -167,7 +167,7 @@ func TestSpiceDBProductionTopologyAndSecurity(t *testing.T) {
 		"refreshInterval: \"0\"",
 		"length: 48",
 		"guardian.dev/rotation: \"initial\"",
-		`force-sync: "20260718-slot-a"`,
+		`force-sync: "20260719-slot-a-rehearsal"`,
 	} {
 		assertTextContains(t, credentials, want, credentialsPath)
 	}
