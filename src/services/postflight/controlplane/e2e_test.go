@@ -153,7 +153,7 @@ func (f *fakeGitHub) handler() http.Handler {
 				"jobs":        jobs,
 			})
 		})
-	mux.HandleFunc("POST /orgs/guardian-intelligence/actions/runners/generate-jitconfig",
+	mux.HandleFunc("POST /orgs/acme/actions/runners/generate-jitconfig",
 		func(w http.ResponseWriter, r *http.Request) {
 			var mint jitMintRequest
 			if err := json.NewDecoder(r.Body).Decode(&mint); err != nil {
@@ -222,7 +222,6 @@ func startControlPlane(t *testing.T) *controlPlane {
 
 	cfg := config{
 		appID:              1,
-		installationID:     e2eInstallationID,
 		webhookSecret:      e2eWebhookSecret,
 		privateKeyPEM:      testRSAKeyPEM(t),
 		apiBaseURL:         githubServer.URL,
@@ -233,7 +232,6 @@ func startControlPlane(t *testing.T) *controlPlane {
 		hostdSyncSecret:    e2eSyncSecret,
 		schedulerEnabled:   true,
 		schedulerInterval:  25 * time.Millisecond,
-		runnerOrg:          "guardian-intelligence",
 		allocateTimeout:    10 * time.Second,
 		assignmentTimeout:  90 * time.Second,
 		sealTimeout:        10 * time.Second,

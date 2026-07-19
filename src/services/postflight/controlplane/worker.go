@@ -305,12 +305,6 @@ func (w *worker) handleWorkflowJob(ctx context.Context, d lockedDelivery) error 
 	if !validRepoFullName(payload.Repository.FullName) {
 		return terminalError{problemPayloadInvalid("repository.full_name is not a valid owner/name")}
 	}
-	// FIXME(multi-tenant): postflight resolved installation+repository bindings
-	// here (lookupRuntimeBinding); stage (a) verifies against the single
-	// config-pinned installation instead.
-	if payload.Installation.ID != w.cfg.installationID {
-		return ignoredError{problemInstallationMismatch(payload.Installation.ID)}
-	}
 
 	ev := jobEvent{
 		Action:             firstNonEmpty(payload.Action, d.Action),
@@ -360,7 +354,7 @@ func (w *worker) handleWorkflowJob(ctx context.Context, d lockedDelivery) error 
 // are re-read from the API before any demand is recorded, and the API
 // version replaces the payload.
 func (w *worker) submitQueuedJob(ctx context.Context, ev jobEvent, deliveryID string) error {
-	run, err := w.gh.workflowRun(ctx, ev.RepositoryFullName, ev.Job.RunID)
+	run, err := w.gh.workflowRun(ctx, ev.InstallationID, ev.RepositoryFullName, ev.Job.RunID)
 	if err != nil {
 		return fmt.Errorf("fetch workflow run: %w", err)
 	}
@@ -372,7 +366,7 @@ func (w *worker) submitQueuedJob(ctx context.Context, ev jobEvent, deliveryID st
 		HeadSHA:                run.HeadSHA,
 	}
 
-	jobs, err := w.gh.workflowRunAttemptJobs(ctx, ev.RepositoryFullName, ev.Job.RunID, ev.Job.RunAttempt)
+	jobs, err := w.gh.workflowRunAttemptJobs(ctx, ev.InstallationID, ev.RepositoryFullName, ev.Job.RunID, ev.Job.RunAttempt)
 	if err != nil {
 		return fmt.Errorf("fetch run attempt jobs: %w", err)
 	}
@@ -402,7 +396,7 @@ func (w *worker) submitQueuedJob(ctx context.Context, ev jobEvent, deliveryID st
 	}
 
 	// PR resolution is comment plumbing: best-effort, never blocks demand.
-	prNumber, prBaseRef, prResolved := w.resolveAndStampPullRequest(ctx, ev.RepositoryFullName, ev.Job.RunID, run, &obs)
+	prNumber, prBaseRef, prResolved := w.resolveAndStampPullRequest(ctx, ev.InstallationID, ev.RepositoryFullName, ev.Job.RunID, run, &obs)
 
 	attrs := eventAttrs{
 		DeliveryID:  deliveryID,
@@ -430,7 +424,7 @@ func (w *worker) submitQueuedJob(ctx context.Context, ev jobEvent, deliveryID st
 		if class == "" || !prResolved || prNumber <= 0 {
 			return
 		}
-		if err := w.st.MarkPRCommentDirty(ctx, ev.RepositoryID, ev.RepositoryFullName, prNumber); err != nil {
+		if err := w.st.MarkPRCommentDirty(ctx, ev.RepositoryID, ev.InstallationID, ev.RepositoryFullName, prNumber); err != nil {
 			slog.Error("worker: mark comment dirty", "repo", ev.RepositoryFullName, "pr", prNumber, "err", err)
 		}
 	}
@@ -458,15 +452,16 @@ func (w *worker) submitQueuedJob(ctx context.Context, ev jobEvent, deliveryID st
 
 	trust := trustClassForRun(obs)
 	if _, err := w.st.EnsureProviderDemand(ctx, demandRow{
-		ProviderJobID:        apiEv.Job.ID,
-		ProviderRepositoryID: ev.RepositoryID,
-		RepositoryFullName:   ev.RepositoryFullName,
-		ProviderRunID:        apiEv.Job.RunID,
-		ProviderRunAttempt:   apiEv.Job.RunAttempt,
-		TrustClass:           trust,
-		RunnerClass:          class,
-		WorkspaceScopeID:     w.resolveWorkspaceScope(ctx, ev.RepositoryFullName, class, trust, run, apiEv.Job.Name, prBaseRef),
-		LastDeliveryID:       deliveryID,
+		ProviderJobID:          apiEv.Job.ID,
+		ProviderInstallationID: ev.InstallationID,
+		ProviderRepositoryID:   ev.RepositoryID,
+		RepositoryFullName:     ev.RepositoryFullName,
+		ProviderRunID:          apiEv.Job.RunID,
+		ProviderRunAttempt:     apiEv.Job.RunAttempt,
+		TrustClass:             trust,
+		RunnerClass:            class,
+		WorkspaceScopeID:       w.resolveWorkspaceScope(ctx, ev.RepositoryFullName, class, trust, run, apiEv.Job.Name, prBaseRef),
+		LastDeliveryID:         deliveryID,
 	}); err != nil {
 		return fmt.Errorf("ensure demand: %w", err)
 	}
@@ -492,11 +487,11 @@ func (w *worker) refreshRunAndJobs(ctx context.Context, ev jobEvent, deliveryID 
 	a.Result = "started"
 	emitEvent(ctx, evRefreshStarted, a)
 
-	run, err := w.gh.workflowRun(ctx, ev.RepositoryFullName, ev.Job.RunID)
+	run, err := w.gh.workflowRun(ctx, ev.InstallationID, ev.RepositoryFullName, ev.Job.RunID)
 	if err != nil {
 		return fmt.Errorf("fetch workflow run: %w", err)
 	}
-	jobs, err := w.gh.workflowRunAttemptJobs(ctx, ev.RepositoryFullName, ev.Job.RunID, ev.Job.RunAttempt)
+	jobs, err := w.gh.workflowRunAttemptJobs(ctx, ev.InstallationID, ev.RepositoryFullName, ev.Job.RunID, ev.Job.RunAttempt)
 	if err != nil {
 		return fmt.Errorf("fetch run attempt jobs: %w", err)
 	}
@@ -539,9 +534,9 @@ func (w *worker) refreshRunAndJobs(ctx context.Context, ev jobEvent, deliveryID 
 		}
 	}
 
-	prNumber, _, prResolved := w.resolveAndStampPullRequest(ctx, ev.RepositoryFullName, ev.Job.RunID, run, nil)
+	prNumber, _, prResolved := w.resolveAndStampPullRequest(ctx, ev.InstallationID, ev.RepositoryFullName, ev.Job.RunID, run, nil)
 	if ourClassSeen && prResolved && prNumber > 0 {
-		if err := w.st.MarkPRCommentDirty(ctx, ev.RepositoryID, ev.RepositoryFullName, prNumber); err != nil {
+		if err := w.st.MarkPRCommentDirty(ctx, ev.RepositoryID, ev.InstallationID, ev.RepositoryFullName, prNumber); err != nil {
 			slog.Error("worker: mark comment dirty", "repo", ev.RepositoryFullName, "pr", prNumber, "err", err)
 		}
 	}
@@ -561,7 +556,7 @@ func (w *worker) refreshRunAndJobs(ctx context.Context, ev jobEvent, deliveryID 
 // not resurrect the merged one. Best-effort: a resolution failure is logged
 // and reported unresolved, never an error — comment plumbing must not block
 // or retry deliveries.
-func (w *worker) resolveAndStampPullRequest(ctx context.Context, repo string, runID int64, run apiWorkflowRun, obs *runObservation) (int64, string, bool) {
+func (w *worker) resolveAndStampPullRequest(ctx context.Context, installationID int64, repo string, runID int64, run apiWorkflowRun, obs *runObservation) (int64, string, bool) {
 	prNumber := int64(0)
 	baseRef := ""
 	switch {
@@ -569,7 +564,7 @@ func (w *worker) resolveAndStampPullRequest(ctx context.Context, repo string, ru
 		prNumber = run.PullRequests[0].Number
 		baseRef = run.PullRequests[0].Base.Ref
 	case (run.Event == "pull_request" || run.Event == "pull_request_target") && run.HeadSHA != "":
-		pulls, err := w.gh.pullRequestsForCommit(ctx, repo, run.HeadSHA)
+		pulls, err := w.gh.pullRequestsForCommit(ctx, installationID, repo, run.HeadSHA)
 		if err != nil {
 			slog.Warn("worker: pull request resolution failed", "repo", repo, "run_id", runID, "err", err)
 			return 0, "", false
@@ -677,24 +672,25 @@ func jobRowFrom(ev jobEvent, runnerClass string, observedFromAPIAt *time.Time) w
 		labels = []string{}
 	}
 	return workflowJobRow{
-		ProviderJobID:        ev.Job.ID,
-		ProviderRunID:        ev.Job.RunID,
-		ProviderRunAttempt:   ev.Job.RunAttempt,
-		ProviderRepositoryID: ev.RepositoryID,
-		RepositoryFullName:   ev.RepositoryFullName,
-		Name:                 ev.Job.Name,
-		Status:               firstNonEmpty(ev.Job.Status, ev.Action),
-		Conclusion:           ev.Job.Conclusion,
-		Labels:               labels,
-		RunnerClass:          runnerClass,
-		RunnerID:             ev.Job.RunnerID,
-		RunnerName:           ev.Job.RunnerName,
-		HeadSHA:              ev.Job.HeadSHA,
-		HeadBranch:           ev.Job.HeadBranch,
-		WorkflowName:         ev.Job.WorkflowName,
-		StartedAt:            timePtr(ev.Job.StartedAt),
-		CompletedAt:          timePtr(ev.Job.CompletedAt),
-		ObservedFromAPIAt:    observedFromAPIAt,
+		ProviderJobID:          ev.Job.ID,
+		ProviderInstallationID: ev.InstallationID,
+		ProviderRunID:          ev.Job.RunID,
+		ProviderRunAttempt:     ev.Job.RunAttempt,
+		ProviderRepositoryID:   ev.RepositoryID,
+		RepositoryFullName:     ev.RepositoryFullName,
+		Name:                   ev.Job.Name,
+		Status:                 firstNonEmpty(ev.Job.Status, ev.Action),
+		Conclusion:             ev.Job.Conclusion,
+		Labels:                 labels,
+		RunnerClass:            runnerClass,
+		RunnerID:               ev.Job.RunnerID,
+		RunnerName:             ev.Job.RunnerName,
+		HeadSHA:                ev.Job.HeadSHA,
+		HeadBranch:             ev.Job.HeadBranch,
+		WorkflowName:           ev.Job.WorkflowName,
+		StartedAt:              timePtr(ev.Job.StartedAt),
+		CompletedAt:            timePtr(ev.Job.CompletedAt),
+		ObservedFromAPIAt:      observedFromAPIAt,
 	}
 }
 

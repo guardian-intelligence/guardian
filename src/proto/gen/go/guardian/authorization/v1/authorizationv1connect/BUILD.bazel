@@ -1,0 +1,18 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "authorizationv1connect",
+    srcs = ["authorization.connect.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/authorization/v1/authorizationv1connect",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/proto/gen/go/guardian/authorization/v1:authorizationv1",
+        "@com_connectrpc_connect//:connect",
+    ],
+)
+
+filegroup(
+    name = "sources",
+    srcs = glob(["*.go"]),
+    visibility = ["//src/proto:__pkg__"],
+)

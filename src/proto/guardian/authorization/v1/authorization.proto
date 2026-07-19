@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package guardian.authorization.v1;
+
+option go_package = "github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/authorization/v1;authorizationv1";
+
+// AuthorizationService is the only application-facing interface to the
+// Guardian permissions graph. Callers authenticate a Guardian principal
+// before invoking it; social-provider identities never enter this contract.
+service AuthorizationService {
+  rpc Check(CheckRequest) returns (CheckResponse);
+  rpc WriteRelationships(WriteRelationshipsRequest) returns (WriteRelationshipsResponse);
+}
+
+message ObjectReference {
+  string type = 1;
+  string id = 2;
+}
+
+message SubjectReference {
+  ObjectReference object = 1;
+  string optional_relation = 2;
+}
+
+message CheckRequest {
+  ObjectReference resource = 1;
+  string permission = 2;
+  SubjectReference subject = 3;
+  string at_least_as_fresh_token = 4;
+}
+
+message CheckResponse {
+  bool allowed = 1;
+  string checked_at_token = 2;
+}
+
+enum RelationshipOperation {
+  RELATIONSHIP_OPERATION_UNSPECIFIED = 0;
+  RELATIONSHIP_OPERATION_TOUCH = 1;
+  RELATIONSHIP_OPERATION_DELETE = 2;
+}
+
+message RelationshipUpdate {
+  RelationshipOperation operation = 1;
+  ObjectReference resource = 2;
+  string relation = 3;
+  SubjectReference subject = 4;
+}
+
+message WriteRelationshipsRequest {
+  repeated RelationshipUpdate updates = 1;
+}
+
+message WriteRelationshipsResponse {
+  string written_at_token = 1;
+}

@@ -623,17 +623,18 @@ func (s *pgStore) ListReapGenerations(ctx context.Context, hostID string) ([]str
 // schedulableDemand is one recorded demand whose class the control plane
 // serves (the runner_classes join is the class allowlist).
 type schedulableDemand struct {
-	ProviderJobID        int64
-	ProviderRepositoryID int64
-	RepositoryFullName   string
-	ProviderRunAttempt   int64
-	RunnerClass          string
-	DiskBytes            int64
-	WorkspaceScopeID     string
+	ProviderJobID          int64
+	ProviderInstallationID int64
+	ProviderRepositoryID   int64
+	RepositoryFullName     string
+	ProviderRunAttempt     int64
+	RunnerClass            string
+	DiskBytes              int64
+	WorkspaceScopeID       string
 }
 
 const sqlListSchedulableDemands = `
-SELECT d.provider_job_id, d.provider_repository_id, d.repository_full_name,
+SELECT d.provider_job_id, d.provider_installation_id, d.provider_repository_id, d.repository_full_name,
     d.provider_run_attempt, d.runner_class, rc.disk_bytes,
     COALESCE(d.workspace_scope_id::text, '')
 FROM github_provider_demands d
@@ -651,7 +652,7 @@ func (s *pgStore) ListSchedulableDemands(ctx context.Context, batch int) ([]sche
 	var out []schedulableDemand
 	for rows.Next() {
 		var d schedulableDemand
-		if err := rows.Scan(&d.ProviderJobID, &d.ProviderRepositoryID, &d.RepositoryFullName,
+		if err := rows.Scan(&d.ProviderJobID, &d.ProviderInstallationID, &d.ProviderRepositoryID, &d.RepositoryFullName,
 			&d.ProviderRunAttempt, &d.RunnerClass, &d.DiskBytes, &d.WorkspaceScopeID); err != nil {
 			return nil, err
 		}
@@ -729,13 +730,15 @@ func (s *pgStore) CreateLeaseForDemand(ctx context.Context, d schedulableDemand,
 }
 
 type allocatingLease struct {
-	LeaseID       string
-	ProviderJobID int64
-	RunnerClass   string
+	LeaseID        string
+	ProviderJobID  int64
+	RunnerClass    string
+	OrgID          string
+	InstallationID int64
 }
 
 const sqlListAllocatingLeases = `
-SELECT lease_id, provider_job_id, runner_class
+SELECT lease_id, provider_job_id, runner_class, org_id, installation_id
 FROM host_leases
 WHERE state = 'allocating'
 ORDER BY created_at
@@ -750,7 +753,7 @@ func (s *pgStore) ListAllocatingLeases(ctx context.Context, batch int) ([]alloca
 	var out []allocatingLease
 	for rows.Next() {
 		var l allocatingLease
-		if err := rows.Scan(&l.LeaseID, &l.ProviderJobID, &l.RunnerClass); err != nil {
+		if err := rows.Scan(&l.LeaseID, &l.ProviderJobID, &l.RunnerClass, &l.OrgID, &l.InstallationID); err != nil {
 			return nil, err
 		}
 		out = append(out, l)

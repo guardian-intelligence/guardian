@@ -34,20 +34,23 @@ const (
 	apiMaxPages      = 10
 )
 
-// githubClient is the GitHub App API client: app JWT (RS256 via stdlib
-// crypto, no JWT dependency), one cached installation token, and rate-limit
-// awareness on every call.
-type githubClient struct {
-	baseURL        string
-	appID          int64
-	installationID int64
-	key            *rsa.PrivateKey
-	httpClient     *http.Client
-	now            func() time.Time
+type installationToken struct {
+	value    string
+	mintedAt time.Time
+}
 
-	mu            sync.Mutex
-	token         string
-	tokenMintedAt time.Time
+// githubClient is the GitHub App API client: app JWT (RS256 via stdlib
+// crypto, no JWT dependency), a token cache keyed by installation, and
+// rate-limit awareness on every call.
+type githubClient struct {
+	baseURL    string
+	appID      int64
+	key        *rsa.PrivateKey
+	httpClient *http.Client
+	now        func() time.Time
+
+	mu     sync.Mutex
+	tokens map[int64]installationToken
 }
 
 func newGitHubClient(cfg config) (*githubClient, error) {
@@ -56,12 +59,12 @@ func newGitHubClient(cfg config) (*githubClient, error) {
 		return nil, err
 	}
 	return &githubClient{
-		baseURL:        strings.TrimRight(cfg.apiBaseURL, "/"),
-		appID:          cfg.appID,
-		installationID: cfg.installationID,
-		key:            key,
-		httpClient:     &http.Client{Timeout: 30 * time.Second},
-		now:            time.Now,
+		baseURL:    strings.TrimRight(cfg.apiBaseURL, "/"),
+		appID:      cfg.appID,
+		key:        key,
+		httpClient: &http.Client{Timeout: 30 * time.Second},
+		now:        time.Now,
+		tokens:     make(map[int64]installationToken),
 	}, nil
 }
 
@@ -103,17 +106,25 @@ func (c *githubClient) appJWT(now time.Time) (string, error) {
 // installationToken returns the cached installation token, minting a fresh
 // one via POST /app/installations/{id}/access_tokens once the cache is 45m
 // old. The mutex intentionally serializes concurrent mints.
-func (c *githubClient) installationToken(ctx context.Context) (string, error) {
+func (c *githubClient) installationAccessToken(ctx context.Context, installationID int64) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.token != "" && c.now().Sub(c.tokenMintedAt) < installationTokenRefreshAge {
-		return c.token, nil
+	if installationID <= 0 {
+		return "", errors.New("GitHub installation id must be positive")
+	}
+	if cached := c.tokens[installationID]; cached.value != "" && c.now().Sub(cached.mintedAt) < installationTokenRefreshAge {
+		return cached.value, nil
+	}
+	for id, cached := range c.tokens {
+		if c.now().Sub(cached.mintedAt) >= time.Hour {
+			delete(c.tokens, id)
+		}
 	}
 	jwt, err := c.appJWT(c.now())
 	if err != nil {
 		return "", err
 	}
-	url := fmt.Sprintf("%s/app/installations/%d/access_tokens", c.baseURL, c.installationID)
+	url := fmt.Sprintf("%s/app/installations/%d/access_tokens", c.baseURL, installationID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
 	if err != nil {
 		return "", err
@@ -140,14 +151,13 @@ func (c *githubClient) installationToken(ctx context.Context) (string, error) {
 	if out.Token == "" {
 		return "", errors.New("mint installation token: empty token in response")
 	}
-	c.token = out.Token
-	c.tokenMintedAt = c.now()
-	return c.token, nil
+	c.tokens[installationID] = installationToken{value: out.Token, mintedAt: c.now()}
+	return out.Token, nil
 }
 
-func (c *githubClient) invalidateToken() {
+func (c *githubClient) invalidateToken(installationID int64) {
 	c.mu.Lock()
-	c.token = ""
+	delete(c.tokens, installationID)
 	c.mu.Unlock()
 }
 
@@ -162,7 +172,7 @@ func (c *githubClient) invalidateToken() {
 // THE single sweeper goroutine, so a rate-limit wait stalls all delivery
 // processing for up to rateLimitWaitMax; waits longer than that fail fast
 // and fall back to the ledger's backoff instead.
-func (c *githubClient) doJSON(ctx context.Context, method, path string, body, out any) error {
+func (c *githubClient) doJSON(ctx context.Context, installationID int64, method, path string, body, out any) error {
 	var payload []byte
 	if body != nil {
 		var err error
@@ -172,7 +182,7 @@ func (c *githubClient) doJSON(ctx context.Context, method, path string, body, ou
 	}
 	reminted, rateWaited := false, false
 	for {
-		token, err := c.installationToken(ctx)
+		token, err := c.installationAccessToken(ctx, installationID)
 		if err != nil {
 			return err
 		}
@@ -210,7 +220,7 @@ func (c *githubClient) doJSON(ctx context.Context, method, path string, body, ou
 		resp.Body.Close()
 		if resp.StatusCode == http.StatusUnauthorized && !reminted {
 			reminted = true
-			c.invalidateToken()
+			c.invalidateToken(installationID)
 			continue
 		}
 		if wait, ok := rateLimitWait(resp, c.now()); ok && !rateWaited {
@@ -303,15 +313,15 @@ type apiPullRef struct {
 	} `json:"base"`
 }
 
-func (c *githubClient) workflowRun(ctx context.Context, repo string, runID int64) (apiWorkflowRun, error) {
+func (c *githubClient) workflowRun(ctx context.Context, installationID int64, repo string, runID int64) (apiWorkflowRun, error) {
 	var run apiWorkflowRun
-	err := c.doJSON(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/actions/runs/%d", repo, runID), nil, &run)
+	err := c.doJSON(ctx, installationID, http.MethodGet, fmt.Sprintf("/repos/%s/actions/runs/%d", repo, runID), nil, &run)
 	return run, err
 }
 
 // workflowRunAttemptJobs lists the jobs of the EXACT run attempt (terminal
 // evidence is attempt-scoped; retried runs must not be conflated).
-func (c *githubClient) workflowRunAttemptJobs(ctx context.Context, repo string, runID, attempt int64) ([]apiWorkflowJob, error) {
+func (c *githubClient) workflowRunAttemptJobs(ctx context.Context, installationID int64, repo string, runID, attempt int64) ([]apiWorkflowJob, error) {
 	var jobs []apiWorkflowJob
 	for page := 1; page <= apiMaxPages; page++ {
 		var out struct {
@@ -320,7 +330,7 @@ func (c *githubClient) workflowRunAttemptJobs(ctx context.Context, repo string, 
 		}
 		path := fmt.Sprintf("/repos/%s/actions/runs/%d/attempts/%d/jobs?per_page=%d&page=%d",
 			repo, runID, attempt, apiPageSize, page)
-		if err := c.doJSON(ctx, http.MethodGet, path, nil, &out); err != nil {
+		if err := c.doJSON(ctx, installationID, http.MethodGet, path, nil, &out); err != nil {
 			return nil, err
 		}
 		jobs = append(jobs, out.Jobs...)
@@ -335,11 +345,11 @@ func (c *githubClient) workflowRunAttemptJobs(ctx context.Context, repo string, 
 // POST /orgs/{org}/actions/runners/generate-jitconfig. The returned blob is
 // everything the guest needs to register; it is never persisted anywhere
 // but the lease row it was minted for.
-func (c *githubClient) generateJITConfig(ctx context.Context, org, name string, runnerGroupID int64, labels []string) (string, error) {
+func (c *githubClient) generateJITConfig(ctx context.Context, installationID int64, org, name string, runnerGroupID int64, labels []string) (string, error) {
 	var out struct {
 		EncodedJITConfig string `json:"encoded_jit_config"`
 	}
-	err := c.doJSON(ctx, http.MethodPost, fmt.Sprintf("/orgs/%s/actions/runners/generate-jitconfig", org),
+	err := c.doJSON(ctx, installationID, http.MethodPost, fmt.Sprintf("/orgs/%s/actions/runners/generate-jitconfig", org),
 		map[string]any{"name": name, "runner_group_id": runnerGroupID, "labels": labels}, &out)
 	if err != nil {
 		return "", err
@@ -350,23 +360,23 @@ func (c *githubClient) generateJITConfig(ctx context.Context, org, name string, 
 	return out.EncodedJITConfig, nil
 }
 
-func (c *githubClient) pullRequestsForCommit(ctx context.Context, repo, sha string) ([]apiPullRef, error) {
+func (c *githubClient) pullRequestsForCommit(ctx context.Context, installationID int64, repo, sha string) ([]apiPullRef, error) {
 	var pulls []apiPullRef
-	err := c.doJSON(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/commits/%s/pulls", repo, sha), nil, &pulls)
+	err := c.doJSON(ctx, installationID, http.MethodGet, fmt.Sprintf("/repos/%s/commits/%s/pulls", repo, sha), nil, &pulls)
 	return pulls, err
 }
 
-func (c *githubClient) createIssueComment(ctx context.Context, repo string, issueNumber int64, body string) (int64, error) {
+func (c *githubClient) createIssueComment(ctx context.Context, installationID int64, repo string, issueNumber int64, body string) (int64, error) {
 	var out struct {
 		ID int64 `json:"id"`
 	}
-	err := c.doJSON(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/issues/%d/comments", repo, issueNumber),
+	err := c.doJSON(ctx, installationID, http.MethodPost, fmt.Sprintf("/repos/%s/issues/%d/comments", repo, issueNumber),
 		map[string]string{"body": body}, &out)
 	return out.ID, err
 }
 
-func (c *githubClient) updateIssueComment(ctx context.Context, repo string, commentID int64, body string) error {
-	return c.doJSON(ctx, http.MethodPatch, fmt.Sprintf("/repos/%s/issues/comments/%d", repo, commentID),
+func (c *githubClient) updateIssueComment(ctx context.Context, installationID int64, repo string, commentID int64, body string) error {
+	return c.doJSON(ctx, installationID, http.MethodPatch, fmt.Sprintf("/repos/%s/issues/comments/%d", repo, commentID),
 		map[string]string{"body": body}, nil)
 }
 
@@ -375,7 +385,7 @@ func (c *githubClient) updateIssueComment(ctx context.Context, repo string, comm
 // comment id (create succeeded, the posted-state write failed): adopt instead
 // of creating a duplicate. Bot-authored + marker-prefix so a human comment
 // merely quoting the marker is never adopted (and PATCHed over).
-func (c *githubClient) findMarkerComment(ctx context.Context, repo string, issueNumber int64, marker string) (int64, error) {
+func (c *githubClient) findMarkerComment(ctx context.Context, installationID int64, repo string, issueNumber int64, marker string) (int64, error) {
 	for page := 1; page <= apiMaxPages; page++ {
 		var comments []struct {
 			ID   int64  `json:"id"`
@@ -386,7 +396,7 @@ func (c *githubClient) findMarkerComment(ctx context.Context, repo string, issue
 		}
 		path := fmt.Sprintf("/repos/%s/issues/%d/comments?per_page=%d&page=%d",
 			repo, issueNumber, apiPageSize, page)
-		if err := c.doJSON(ctx, http.MethodGet, path, nil, &comments); err != nil {
+		if err := c.doJSON(ctx, installationID, http.MethodGet, path, nil, &comments); err != nil {
 			return 0, err
 		}
 		for _, cm := range comments {

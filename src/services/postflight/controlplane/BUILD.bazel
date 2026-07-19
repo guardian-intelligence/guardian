@@ -36,6 +36,7 @@ go_library(
         "migrations/001_initial.sql",
         "migrations/002_hostd_scheduler.sql",
         "migrations/003_workspace_generations.sql",
+        "migrations/004_provider_installations.sql",
     ],
     importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/controlplane",
     visibility = ["//visibility:private"],
@@ -67,6 +68,7 @@ go_test(
     name = "controlplane_test",
     srcs = [
         "class_test.go",
+        "github_api_test.go",
         "render_test.go",
         "store_test.go",
         "trust_test.go",

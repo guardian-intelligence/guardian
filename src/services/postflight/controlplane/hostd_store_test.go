@@ -22,6 +22,69 @@ import (
 
 const storeTestClass = "postflight-4cpu-ubuntu-2404"
 
+func TestProviderInstallationMigrationBackfillsExistingRows(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, pgtest.Start(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if _, err := pool.Exec(ctx, `CREATE TABLE schema_migrations (
+		version TEXT PRIMARY KEY,
+		applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, migration := range []string{
+		"001_initial.sql",
+		"002_hostd_scheduler.sql",
+		"003_workspace_generations.sql",
+	} {
+		if err := applyMigration(ctx, pool, migration); err != nil {
+			t.Fatalf("apply %s: %v", migration, err)
+		}
+	}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO github_webhook_deliveries (
+			delivery_id, event_name, state, payload_sha256, payload_json,
+			provider_installation_id, provider_repository_id, provider_job_id,
+			received_at, verified_at
+		) VALUES ('delivery-1', 'workflow_job', 'processed', 'sha', '{}', 321, 77, 88, now(), now());
+		INSERT INTO github_workflow_jobs (
+			provider_job_id, provider_repository_id, repository_full_name
+		) VALUES (88, 77, 'acme/widget');
+		INSERT INTO github_provider_demands (
+			provider_job_id, provider_repository_id, repository_full_name, state
+		) VALUES (88, 77, 'acme/widget', 'demand_recorded');
+		INSERT INTO pr_comment_state (
+			provider_repository_id, pr_number, repository_full_name
+		) VALUES (77, 9, 'acme/widget');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyMigration(ctx, pool, "004_provider_installations.sql"); err != nil {
+		t.Fatal(err)
+	}
+
+	for table, where := range map[string]string{
+		"github_workflow_jobs":    "provider_job_id = 88",
+		"github_provider_demands": "provider_job_id = 88",
+		"pr_comment_state":        "provider_repository_id = 77 AND pr_number = 9",
+	} {
+		var installationID int64
+		if err := pool.QueryRow(ctx,
+			`SELECT provider_installation_id FROM `+table+` WHERE `+where,
+		).Scan(&installationID); err != nil {
+			t.Fatalf("%s: %v", table, err)
+		}
+		if installationID != 321 {
+			t.Fatalf("%s installation = %d, want 321", table, installationID)
+		}
+	}
+}
+
 func startStore(t *testing.T) (*pgStore, *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
@@ -48,18 +111,18 @@ func seedDemand(t *testing.T, pool *pgxpool.Pool, jobID int64, class string) sch
 	t.Helper()
 	ctx := context.Background()
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO github_workflow_jobs (provider_job_id, runner_class) VALUES ($1, $2)`,
+		`INSERT INTO github_workflow_jobs (provider_job_id, provider_installation_id, runner_class) VALUES ($1, 1, $2)`,
 		jobID, class); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO github_provider_demands (provider_job_id, repository_full_name, provider_run_attempt, runner_class, state)
-		 VALUES ($1, 'acme/widget', 1, $2, 'demand_recorded')`,
+		`INSERT INTO github_provider_demands (provider_job_id, provider_installation_id, repository_full_name, provider_run_attempt, runner_class, state)
+		 VALUES ($1, 1, 'acme/widget', 1, $2, 'demand_recorded')`,
 		jobID, class); err != nil {
 		t.Fatal(err)
 	}
 	return schedulableDemand{
-		ProviderJobID: jobID, ProviderRepositoryID: 1, RepositoryFullName: "acme/widget",
+		ProviderJobID: jobID, ProviderInstallationID: 1, ProviderRepositoryID: 1, RepositoryFullName: "acme/widget",
 		ProviderRunAttempt: 1, RunnerClass: class, DiskBytes: 1 << 30,
 	}
 }

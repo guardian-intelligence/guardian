@@ -41,19 +41,19 @@ func seedTrustedDemand(t *testing.T, pool *pgxpool.Pool, jobID int64, trust, sco
 	t.Helper()
 	ctx := context.Background()
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO github_workflow_jobs (provider_job_id, provider_run_attempt, runner_class) VALUES ($1, 1, $2)`,
+		`INSERT INTO github_workflow_jobs (provider_job_id, provider_installation_id, provider_run_attempt, runner_class) VALUES ($1, 1, 1, $2)`,
 		jobID, storeTestClass); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO github_provider_demands (provider_job_id, repository_full_name, provider_run_attempt,
+		`INSERT INTO github_provider_demands (provider_job_id, provider_installation_id, repository_full_name, provider_run_attempt,
 		     trust_class, runner_class, workspace_scope_id, state)
-		 VALUES ($1, 'acme/widget', 1, $2, $3, NULLIF($4, '')::uuid, 'demand_recorded')`,
+		 VALUES ($1, 1, 'acme/widget', 1, $2, $3, NULLIF($4, '')::uuid, 'demand_recorded')`,
 		jobID, trust, storeTestClass, scopeID); err != nil {
 		t.Fatal(err)
 	}
 	return schedulableDemand{
-		ProviderJobID: jobID, ProviderRepositoryID: 1, RepositoryFullName: "acme/widget",
+		ProviderJobID: jobID, ProviderInstallationID: 1, ProviderRepositoryID: 1, RepositoryFullName: "acme/widget",
 		ProviderRunAttempt: 1, RunnerClass: storeTestClass, DiskBytes: 1 << 30, WorkspaceScopeID: scopeID,
 	}
 }
