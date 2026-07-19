@@ -166,8 +166,10 @@ func TestSpiceDBProductionTopologyAndSecurity(t *testing.T) {
 	for _, want := range []string{
 		"refreshInterval: \"0\"",
 		"length: 48",
-		"guardian.dev/rotation: \"initial\"",
+		`guardian.dev/rotation: "20260719-slot-a-rehearsal"`,
+		`guardian.dev/rotation: "20260719-slot-b-rehearsal"`,
 		`force-sync: "20260719-slot-a-rehearsal"`,
+		`force-sync: "20260719-slot-b-rehearsal"`,
 	} {
 		assertTextContains(t, credentials, want, credentialsPath)
 	}
@@ -342,10 +344,13 @@ func TestSpiceDBOperationalQualificationIsGitOpsOnly(t *testing.T) {
 		"This tool only reads Kubernetes objects and opens a port-forward",
 		`bazelisk build "@multitool//tools/${name}"`,
 		`jq -er --arg key "${key}" '.data[$key]'`,
-		`logs --follow deployment/spicedb-thumper`,
+		`vlselect-generic`,
+		`vmselect-shortterm`,
+		`sort by (_time)`,
+		`sum(increase(grpc_client_handled_total`,
 		`indeterminate_decisions`,
 		`wrong_permissionship_events`,
-		`fail "Thumper log stream exited before the observation completed"`,
+		`centralized Thumper log query returned no records`,
 		`spicedb-api-token-slot-${slot}`,
 		"Both API token slots",
 	} {
