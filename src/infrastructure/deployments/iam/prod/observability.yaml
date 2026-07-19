@@ -61,7 +61,7 @@ spec:
         - alert: GuardianLoginCanaryStale
           expr: |
             (
-              time() - max(kube_cronjob_status_last_successful_time{namespace="tenant-guardian-prod",cronjob="guardian-login-canary"}) > 600
+              time() - max(kube_cronjob_status_last_successful_time{namespace="tenant-guardian-prod",cronjob="guardian-login-canary"}) > 1200
             )
             or
             (
@@ -76,7 +76,7 @@ spec:
             exported_instance: prod/login-canary
           annotations:
             summary: "Sign in with Guardian is failing in prod"
-            description: "The last successful browser journey through Postflight, Guardian, GitHub, the OIDC callback, the BFF session, and logout is more than 10 minutes old. Check guardian-login-canary Job logs in tenant-guardian-prod."
+            description: "The last successful browser journey through Postflight, Guardian, GitHub, the OIDC callback, the BFF session, and logout is more than 20 minutes old. Check guardian-login-canary Job logs in tenant-guardian-prod."
         - alert: GuardianLoginCanaryAbsent
           expr: absent(kube_cronjob_status_last_schedule_time{namespace="tenant-guardian-prod",cronjob="guardian-login-canary"})
           for: 15m
