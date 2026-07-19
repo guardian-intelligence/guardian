@@ -4,7 +4,7 @@
     "binaries": [
       {
         "kind": "archive",
-        "url": "https://github.com/openbao/openbao/releases/download/v2.5.5/bao_2.5.5_Linux_x86_64.tar.gz",
+        "url": "https://github.com/openbao/openbao/releases/download/v2.6.0/bao_2.5.5_Linux_x86_64.tar.gz",
         "sha256": "2c5577707e97fc95c2086950f39880ead5e45b356c94388e5cb606f5a5c2b697",
         "os": "linux",
         "cpu": "x86_64",
@@ -12,7 +12,7 @@
       },
       {
         "kind": "archive",
-        "url": "https://github.com/openbao/openbao/releases/download/v2.5.5/bao_2.5.5_Darwin_arm64.tar.gz",
+        "url": "https://github.com/openbao/openbao/releases/download/v2.6.0/bao_2.5.5_Darwin_arm64.tar.gz",
         "sha256": "944c8f18068305944edaa7d4a8b1d2895d2f2e7b0b09a2635210b0e5b4de84c9",
         "os": "macos",
         "cpu": "arm64",
