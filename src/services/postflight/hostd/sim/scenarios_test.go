@@ -213,6 +213,23 @@ func TestHappyPathRunSealForget(t *testing.T) {
 	}
 }
 
+func TestReadyLeaseAllowsLongRunningJob(t *testing.T) {
+	world := NewWorld(t, slots(1))
+	spec := runLease("long-running")
+	vmID := driveToReady(t, world, spec)
+
+	world.Advance(24 * time.Hour)
+	world.Tick()
+
+	snapshot := world.Lease(spec.LeaseID)
+	if snapshot.State != syncproto.StateReady {
+		t.Fatalf("state after 24h is %s, want ready", snapshot.State)
+	}
+	if snapshot.VMID != vmID {
+		t.Fatalf("vm after 24h is %q, want %q", snapshot.VMID, vmID)
+	}
+}
+
 // TestExitQuiescesBeforeDestroy: the workspace is snapshotted after the VM
 // is gone, so the guest must sync and unmount while it is still alive —
 // quiesce strictly precedes the exit-time destroy.

@@ -11,11 +11,9 @@ import (
 	"time"
 )
 
-// readyDeadlineBound is the current cancellation-propagation contract: a
-// churned job must be terminal within hostd's ready/exited state deadline
-// (see hostd/agent stateDeadlines). Tightening the contract later is a
-// one-line change here.
-const readyDeadlineBound = 30 * time.Minute
+// cleanupDeadlineBound is the current cancellation-propagation and cleanup
+// reporting horizon. It does not bound the runtime of a live customer job.
+const cleanupDeadlineBound = 30 * time.Minute
 
 type assertionResult struct {
 	Name    string `json:"name"`
@@ -309,7 +307,7 @@ func assertNoLeaks(st *stateFile) assertionResult {
 	if st.DB == nil || st.DB.Final == nil {
 		return assertionResult{Name: res.Name, Skipped: true, Detail: "no database observations (DATABASE_URL unset?)"}
 	}
-	horizon := st.DB.Final.CapturedAt.Add(-readyDeadlineBound)
+	horizon := st.DB.Final.CapturedAt.Add(-cleanupDeadlineBound)
 	var problems []string
 	for _, d := range st.DB.Demands {
 		if !terminalDemandStates[d.State] && d.CreatedAt.Before(horizon) {
@@ -355,8 +353,8 @@ func assertChurnDeadlines(st *stateFile) assertionResult {
 				problems = append(problems, fmt.Sprintf("run %d job %d: demand still %s after cancel", c.RunID, d.ProviderJobID, d.State))
 				continue
 			}
-			if lag := d.UpdatedAt.Sub(c.CancelledAt); lag > readyDeadlineBound {
-				problems = append(problems, fmt.Sprintf("run %d job %d: terminal %s after cancel (bound %s)", c.RunID, d.ProviderJobID, lag.Round(time.Second), readyDeadlineBound))
+			if lag := d.UpdatedAt.Sub(c.CancelledAt); lag > cleanupDeadlineBound {
+				problems = append(problems, fmt.Sprintf("run %d job %d: terminal %s after cancel (bound %s)", c.RunID, d.ProviderJobID, lag.Round(time.Second), cleanupDeadlineBound))
 			}
 		}
 	}
@@ -367,7 +365,7 @@ func assertChurnDeadlines(st *stateFile) assertionResult {
 		res.Pass = false
 		res.Detail = summarize(problems)
 	} else {
-		res.Detail = fmt.Sprintf("%d cancelled-job demands terminal within %s", checked, readyDeadlineBound)
+		res.Detail = fmt.Sprintf("%d cancelled-job demands terminal within %s", checked, cleanupDeadlineBound)
 	}
 	return res
 }
@@ -518,7 +516,7 @@ func assertGenerationInvariants(st *stateFile) assertionResult {
 	states := map[string]string{}
 	for _, g := range final.Generations {
 		states[g.Generation] = g.State
-		if g.State == "candidate" && now.Sub(g.CreatedAt) > readyDeadlineBound {
+		if g.State == "candidate" && now.Sub(g.CreatedAt) > cleanupDeadlineBound {
 			problems = append(problems, fmt.Sprintf("generation %s: candidate unresolved since %s", g.Generation, g.CreatedAt.Format(time.RFC3339)))
 		}
 	}

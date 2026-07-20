@@ -7,10 +7,9 @@ import (
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/zvol"
 )
 
-// stateDeadlines bounds how long a lease may sit in each non-terminal state
-// before hostd fails it and releases its resources. StateReady is bounded
-// because an ephemeral runner that never receives its job must not hold a
-// slot forever; the control plane sets the job-level deadline tighter.
+// stateDeadlines bounds transitional states before hostd fails the lease and
+// releases its resources. A ready lease is executing customer code and is
+// bounded by GitHub's job lifecycle, not by a host-local stall deadline.
 var stateDeadlines = map[syncproto.State]time.Duration{
 	syncproto.StatePending:     30 * time.Second,
 	syncproto.StateClaiming:    5 * time.Minute,
@@ -18,7 +17,6 @@ var stateDeadlines = map[syncproto.State]time.Duration{
 	syncproto.StateListening:   30 * time.Minute,
 	syncproto.StateHookBlocked: 2 * time.Minute,
 	syncproto.StateBinding:     2 * time.Minute,
-	syncproto.StateReady:       30 * time.Minute,
 	syncproto.StateExited:      30 * time.Minute,
 }
 
