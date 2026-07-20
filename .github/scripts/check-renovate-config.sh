@@ -8,4 +8,4 @@ set -euo pipefail
 
 npx="$1"
 export HOME="$TEST_TMPDIR"
-"$npx" --yes -p renovate@43.265.2 renovate-config-validator --strict renovate.json5
+"$npx" --yes -p renovate@43.265.4 renovate-config-validator --strict renovate.json5
