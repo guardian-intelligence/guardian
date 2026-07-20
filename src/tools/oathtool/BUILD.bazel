@@ -1,0 +1,26 @@
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "configure_make")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+package(default_visibility = ["//visibility:private"])
+
+configure_make(
+    name = "oathtool",
+    configure_options = [
+        "--disable-dependency-tracking",
+        "--disable-pam",
+        "--disable-pskc",
+        "--disable-shared",
+        "--enable-static",
+    ],
+    lib_source = "@oath_toolkit_source//:all_srcs",
+    out_binaries = ["oathtool"],
+    out_include_dir = "",
+    visibility = ["//visibility:public"],
+)
+
+sh_test(
+    name = "oathtool_test",
+    srcs = ["oathtool_test.sh"],
+    args = ["$(location :oathtool)"],
+    data = [":oathtool"],
+)

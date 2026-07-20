@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""Complete or verify the OATH Toolkit source pin after a version change."""
+
+import hashlib
+import re
+import subprocess
+import sys
+import urllib.request
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[2]
+PIN = REPO / "src/tools/oathtool/oathtool.MODULE.bazel"
+PIN_REPO_PATH = "src/tools/oathtool/oathtool.MODULE.bazel"
+VERSION = re.compile(r'_OATH_TOOLKIT_VERSION = "(?P<version>[0-9.]+)"')
+SHA256 = re.compile(r'(?P<prefix>    sha256 = ")(?P<sha>[0-9a-f]{64})(?P<suffix>",)')
+
+
+def fields(text):
+    version_match = VERSION.search(text)
+    sha_match = SHA256.search(text)
+    if not version_match or not sha_match:
+        raise ValueError(f"cannot parse version and sha256 from {PIN_REPO_PATH}")
+    return version_match.group("version"), sha_match.group("sha")
+
+
+def committed_fields():
+    result = subprocess.run(
+        ["git", "-C", str(REPO), "show", f"HEAD:{PIN_REPO_PATH}"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None, None
+    return fields(result.stdout)
+
+
+def upstream_sha256(version):
+    url = (
+        "https://download.savannah.nongnu.org/releases/oath-toolkit/"
+        f"oath-toolkit-{version}.tar.gz"
+    )
+    request = urllib.request.Request(url, headers={"User-Agent": "guardian-oathtool-repin"})
+    digest = hashlib.sha256()
+    with urllib.request.urlopen(request, timeout=60) as response:
+        while chunk := response.read(1 << 20):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def main():
+    check = "--check" in sys.argv[1:]
+    text = PIN.read_text()
+    version, pinned_sha = fields(text)
+    committed_version, _ = committed_fields()
+    actual_sha = upstream_sha256(version)
+
+    if pinned_sha == actual_sha:
+        print(f"oath-toolkit {version}: pin verified", file=sys.stderr)
+        return 0
+    if committed_version == version:
+        print(
+            f"oath-toolkit {version}: content changed under an unchanged version "
+            f"({pinned_sha} -> {actual_sha}); refusing to launder the pin",
+            file=sys.stderr,
+        )
+        return 1
+    if check:
+        print(
+            f"oath-toolkit {version}: sha256 is stale ({pinned_sha} -> {actual_sha}); "
+            "run tools/ops/oathtool-repin",
+            file=sys.stderr,
+        )
+        return 1
+
+    PIN.write_text(SHA256.sub(rf"\g<prefix>{actual_sha}\g<suffix>", text, count=1))
+    print(f"oath-toolkit {version}: repinned to {actual_sha}", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

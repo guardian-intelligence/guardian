@@ -4,6 +4,7 @@ load("@rules_shell//shell:sh_test.bzl", "sh_test")
 exports_files(
     [
         "multitool-repin",
+        "oathtool-repin",
         "spicedb-qualify",
     ],
     visibility = ["//visibility:public"],
