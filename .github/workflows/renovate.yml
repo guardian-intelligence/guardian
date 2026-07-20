@@ -42,7 +42,7 @@ jobs:
         env:
           RENOVATE_AUTODISCOVER: "false"
           RENOVATE_REPOSITORIES: ${{ github.repository }}
-          # Permits the lockfile postUpgradeTasks repin (renovate.json5);
+          # Permits the tool-pin postUpgradeTasks repins (renovate.json5);
           # commands not on this list are refused by the runner.
-          RENOVATE_ALLOWED_COMMANDS: '["tools/ops/multitool-repin"]'
+          RENOVATE_ALLOWED_COMMANDS: '["tools/ops/multitool-repin","tools/ops/oathtool-repin"]'
           LOG_LEVEL: info

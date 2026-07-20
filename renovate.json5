@@ -39,12 +39,12 @@
     "src/infrastructure/deployments/products/**",
   ],
 
-  // The bespoke tool pins (restic, ruby) live in
-  // src/tools/<tool>/<tool>.MODULE.bazel as http_archive/http_file. Only the
-  // legacy `bazel` manager parses those rules (and recomputes sha256 on
-  // bump); `bazel-module` matches the same files but reads
-  // bazel_dep/overrides only. Patterns add to the manager's defaults, they
-  // do not replace them.
+  // The bespoke tool pins (oathtool, restic, ruby) live in
+  // src/tools/<tool>/<tool>.MODULE.bazel as http_archive/http_file. The
+  // legacy `bazel` manager handles GitHub release URLs; the custom manager
+  // below handles OATH Toolkit's Savannah archive and completes its hash
+  // through a post-upgrade task. `bazel-module` matches the same files but
+  // reads bazel_dep/overrides only. Patterns add to the manager's defaults.
   bazel: {
     managerFilePatterns: ["/\\.MODULE\\.bazel$/"],
   },
@@ -147,6 +147,15 @@
       postUpgradeTasks: {
         commands: ["tools/ops/multitool-repin"],
         fileFilters: ["src/tools/multitool.lock.json"],
+        executionMode: "branch",
+      },
+    },
+
+    {
+      matchPackageNames: ["oath-toolkit/oath-toolkit"],
+      postUpgradeTasks: {
+        commands: ["tools/ops/oathtool-repin"],
+        fileFilters: ["src/tools/oathtool/oathtool.MODULE.bazel"],
         executionMode: "branch",
       },
     },
@@ -254,6 +263,16 @@
   ],
 
   customManagers: [
+    {
+      customType: "regex",
+      managerFilePatterns: ["/^src/tools/oathtool/oathtool\\.MODULE\\.bazel$/"],
+      matchStrings: ['_OATH_TOOLKIT_VERSION = "(?<currentValue>[0-9.]+)"'],
+      depNameTemplate: "oath-toolkit/oath-toolkit",
+      datasourceTemplate: "gitlab-tags",
+      registryUrlTemplate: "https://gitlab.com",
+      extractVersionTemplate: "^v(?<version>[0-9.]+)$",
+    },
+
     // Host-CLI lockfile, GitHub-hosted tools: the release tag in each
     // download URL is the version, and the per-platform URLs of one tool
     // share a tag, so a bump moves them together. Only the tag segment is

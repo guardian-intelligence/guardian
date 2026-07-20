@@ -33,6 +33,7 @@ filegroup(
     name = "pins",
     srcs = [
         "//src/tools/hauler",
+        "//src/tools/oathtool",
         "//src/tools/restic",
         # Both restic archives directly: the genrule's platform select() only
         # pulls the host's half, so without these the darwin pin would merge

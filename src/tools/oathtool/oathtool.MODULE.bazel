@@ -1,0 +1,11 @@
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+_OATH_TOOLKIT_VERSION = "2.6.14"
+
+http_archive(
+    name = "oath_toolkit_source",
+    build_file = "//src/tools/oathtool:source.BUILD.bazel",
+    sha256 = "8b1da365759f1249be57a82aec6e107f7b57dc77d813f96dc0aaf81624f28971",
+    strip_prefix = "oath-toolkit-" + _OATH_TOOLKIT_VERSION,
+    url = "https://download.savannah.nongnu.org/releases/oath-toolkit/oath-toolkit-" + _OATH_TOOLKIT_VERSION + ".tar.gz",
+)

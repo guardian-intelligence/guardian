@@ -7,6 +7,7 @@ bazel_dep(name = "platforms", version = "1.0.0")
 bazel_dep(name = "protobuf", version = "33.4")
 bazel_dep(name = "rules_buf", version = "0.5.4")
 bazel_dep(name = "rules_cc", version = "0.2.17")
+bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
 bazel_dep(name = "rules_go", version = "0.59.0")
 bazel_dep(name = "gazelle", version = "0.40.0")
 
@@ -46,6 +47,7 @@ python.toolchain(
 )
 use_repo(python, "python_3_12_12")
 
+include("//src/tools/oathtool:oathtool.MODULE.bazel")
 include("//src/tools/postgres:postgres.MODULE.bazel")
 include("//src/tools/restic:restic.MODULE.bazel")
 include("//src/tools/ruby:ruby.MODULE.bazel")
