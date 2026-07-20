@@ -32,11 +32,11 @@ stringData:
             - 'alertname=~"CDIDefaultStorageClassDegraded|CDINoDefaultStorageClass"'
     inhibit_rules:
       - source_matchers:
-          - 'alertname="VMAgentDown"'
+          - 'alertname=~"VMAgentDown|VMAgentCrashLooping"'
         target_matchers:
           - 'prometheus="cozy-monitoring/vmagent"'
       - source_matchers:
-          - 'alertname="VMAgentDown"'
+          - 'alertname=~"VMAgentDown|VMAgentCrashLooping"'
         target_matchers:
           - 'alertname=~"CadvisorRecordingsAbsent|EtcdGRPCLatencyMetricsAbsent|EtcdMetricsAbsent|FluxResourceMetricsAbsent|GuardianLoginCanaryAbsent|GuardianLoginCanaryStale|KubeAggregatedAPIDown|KubeAggregatedAPIErrors|KubeAPIDown|KubeJobFailed|KubeStateMetricsSelfMetricsAbsent|KubeStateObjectMetricsAbsent|KubernetesFluentBitCollectorsMissing|OpenBaoAuditLogSilent|PaymentsCheckoutCanaryStale|PaymentsRailCanaryStale|ZotRegistryScrapeAbsent|etcdHighNumberOfLeaderChanges"'
     receivers:

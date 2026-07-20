@@ -27,7 +27,7 @@ func TestAlertmanagerUsesHeaderAuthentication(t *testing.T) {
 		"send_resolved: false",
 		"repeat_interval: 2m",
 		"inhibit_rules:",
-		`alertname="VMAgentDown"`,
+		`alertname=~"VMAgentDown|VMAgentCrashLooping"`,
 		`prometheus="cozy-monitoring/vmagent"`,
 		"GuardianLoginCanaryStale",
 		"KubeAggregatedAPIErrors",

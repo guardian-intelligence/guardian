@@ -44,6 +44,7 @@ func TestCoreMetricsWiringConformance(t *testing.T) {
 	rules := readText(t, wiringPath)
 	for _, alert := range []string{
 		"VMAgentDown",
+		"VMAgentCrashLooping",
 		"EtcdMetricsAbsent",
 		"EtcdGRPCLatencyMetricsAbsent",
 		"KubeStateMetricsSelfMetricsAbsent",
@@ -72,6 +73,34 @@ func TestCoreMetricsWiringConformance(t *testing.T) {
 	assertNestedString(t, vmagentDown, "critical", "labels", "severity")
 	if expr := stringValue(vmagentDown["expr"]); !strings.Contains(expr, `absent(up{namespace="cozy-monitoring",job="vmagent-vmagent"})`) {
 		t.Fatalf("VMAgentDown expression does not watch the self-scrape: %s", expr)
+	}
+
+	var vmagentCrashLooping map[string]interface{}
+	for _, rawGroup := range groups {
+		for _, rawRule := range sliceValue(mapValue(rawGroup)["rules"]) {
+			rule := mapValue(rawRule)
+			if rule["alert"] == "VMAgentCrashLooping" {
+				vmagentCrashLooping = rule
+			}
+		}
+	}
+	if vmagentCrashLooping == nil {
+		t.Fatal("VMAgentCrashLooping rule is missing")
+	}
+	assertNestedString(t, vmagentCrashLooping, "5m", "for")
+	assertNestedString(t, vmagentCrashLooping, "15m", "keep_firing_for")
+	assertNestedString(t, vmagentCrashLooping, "critical", "labels", "severity")
+	crashLoopExpr := stringValue(vmagentCrashLooping["expr"])
+	for _, want := range []string{
+		"kube_pod_container_status_restarts_total",
+		`namespace="cozy-monitoring"`,
+		`container="vmagent"`,
+		"[15m]",
+		"> 2",
+	} {
+		if !strings.Contains(crashLoopExpr, want) {
+			t.Fatalf("VMAgentCrashLooping expression is missing %q: %s", want, crashLoopExpr)
+		}
 	}
 }
 
