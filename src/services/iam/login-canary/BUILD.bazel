@@ -7,7 +7,10 @@ go_library(
     srcs = ["main.go"],
     importpath = "github.com/guardian-intelligence/guardian/src/services/iam/login-canary",
     visibility = ["//visibility:private"],
-    deps = ["@com_github_chromedp_chromedp//:go_default_library"],
+    deps = [
+        "@com_github_chromedp_cdproto//runtime:go_default_library",
+        "@com_github_chromedp_chromedp//:go_default_library",
+    ],
 )
 
 go_binary(
@@ -21,6 +24,7 @@ go_test(
     name = "login_canary_test",
     srcs = ["main_test.go"],
     embed = [":login_canary_lib"],
+    deps = ["@com_github_chromedp_cdproto//runtime:go_default_library"],
 )
 
 pkg_tar(

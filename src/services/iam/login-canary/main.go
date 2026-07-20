@@ -6,7 +6,6 @@ import (
 	"crypto/sha1"
 	"encoding/base32"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -16,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
 
@@ -147,20 +147,17 @@ func run(ctx context.Context, cfg config) error {
 		return fmt.Errorf("Postflight callback landing: %w", err)
 	}
 
-	var raw string
-	if err := chromedp.Run(browserCtx, chromedp.Evaluate(
-		`fetch("/postflight/auth/session", {credentials:"same-origin"})
-			.then(async response => JSON.stringify({status: response.status, body: await response.json()}))`,
-		&raw,
-	)); err != nil {
-		return fmt.Errorf("read BFF session: %w", err)
-	}
 	var envelope struct {
 		Status int             `json:"status"`
 		Body   sessionResponse `json:"body"`
 	}
-	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
-		return fmt.Errorf("decode BFF session: %w", err)
+	if err := chromedp.Run(browserCtx, chromedp.Evaluate(
+		`fetch("/postflight/auth/session", {credentials:"same-origin"})
+			.then(async response => ({status: response.status, body: await response.json()}))`,
+		&envelope,
+		awaitPromise,
+	)); err != nil {
+		return fmt.Errorf("read BFF session: %w", err)
 	}
 	if envelope.Status != 200 || !envelope.Body.Authenticated ||
 		envelope.Body.User.Subject == "" || envelope.Body.User.Username == "" {
@@ -177,6 +174,7 @@ func run(ctx context.Context, cfg config) error {
 	if err := chromedp.Run(browserCtx, chromedp.Evaluate(
 		`fetch("/postflight/auth/session", {credentials:"same-origin"}).then(response => response.status)`,
 		&envelope.Status,
+		awaitPromise,
 	)); err != nil {
 		return fmt.Errorf("verify logout: %w", err)
 	}
@@ -184,6 +182,10 @@ func run(ctx context.Context, cfg config) error {
 		return errors.New("BFF session survived logout")
 	}
 	return nil
+}
+
+func awaitPromise(params *runtime.EvaluateParams) *runtime.EvaluateParams {
+	return params.WithAwaitPromise(true)
 }
 
 func selectGitHubProvider(ctx context.Context) error {
