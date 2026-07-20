@@ -57,6 +57,22 @@ spec:
             description: >-
               vmagent has not published its self-scrape for five minutes.
               Metrics-backed alerts are blind until collection recovers.
+        - alert: VMAgentCrashLooping
+          expr: >-
+            sum(increase(kube_pod_container_status_restarts_total{
+              namespace="cozy-monitoring",container="vmagent"
+            }[15m])) > 2
+          for: 5m
+          keep_firing_for: 15m
+          labels:
+            severity: critical
+            guardian_component: observability
+            exported_instance: guardian-mgmt/vmagent
+          annotations:
+            summary: the cluster metrics collector is crash-looping
+            description: >-
+              vmagent has restarted more than twice in 15 minutes.
+              Metrics-backed alerts are unreliable until collection stabilizes.
         - alert: EtcdMetricsAbsent
           expr: absent(up{job=~".*etcd.*"})
           for: 15m
