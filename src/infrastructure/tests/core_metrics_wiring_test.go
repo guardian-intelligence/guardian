@@ -1,6 +1,9 @@
 package tests
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestCoreMetricsWiringConformance(t *testing.T) {
 	talmValuesPath := runfilePath("src/infrastructure/talm/values.yaml")
@@ -40,6 +43,7 @@ func TestCoreMetricsWiringConformance(t *testing.T) {
 
 	rules := readText(t, wiringPath)
 	for _, alert := range []string{
+		"VMAgentDown",
 		"EtcdMetricsAbsent",
 		"EtcdGRPCLatencyMetricsAbsent",
 		"KubeStateMetricsSelfMetricsAbsent",
@@ -49,4 +53,31 @@ func TestCoreMetricsWiringConformance(t *testing.T) {
 	} {
 		assertTextContains(t, rules, "alert: "+alert, wiringPath)
 	}
+
+	groups := sliceValue(nestedValue(t, presence, "spec", "groups"))
+	var vmagentDown map[string]interface{}
+	for _, rawGroup := range groups {
+		for _, rawRule := range sliceValue(mapValue(rawGroup)["rules"]) {
+			rule := mapValue(rawRule)
+			if rule["alert"] == "VMAgentDown" {
+				vmagentDown = rule
+			}
+		}
+	}
+	if vmagentDown == nil {
+		t.Fatal("VMAgentDown rule is missing")
+	}
+	assertNestedString(t, vmagentDown, "5m", "for")
+	assertNestedString(t, vmagentDown, "15m", "keep_firing_for")
+	assertNestedString(t, vmagentDown, "critical", "labels", "severity")
+	if expr := stringValue(vmagentDown["expr"]); !strings.Contains(expr, `absent(up{namespace="cozy-monitoring",job="vmagent-vmagent"})`) {
+		t.Fatalf("VMAgentDown expression does not watch the self-scrape: %s", expr)
+	}
+}
+
+func TestVMAgentHasColdStartMemoryHeadroom(t *testing.T) {
+	path := runfilePath("src/infrastructure/base/app-patches/monitoring-agents-vmagent-resources.yaml")
+	vmagent := singleYAMLDoc(t, path)
+	assertNestedString(t, vmagent, "512Mi", "spec", "resources", "requests", "memory")
+	assertNestedString(t, vmagent, "1Gi", "spec", "resources", "limits", "memory")
 }

@@ -1,8 +1,9 @@
-# The monitoring-agents chart renders an empty resource block, which leaves
-# the generated pod at the operator's 200m CPU limit. Its cAdvisor scrape is
-# labelled job="cadvisor", while the chart's kube-prometheus recording rules
-# select job="kubelet" plus metrics_path="/metrics/cadvisor". The global
-# relabel fixes that contract once before both remote-write destinations.
+# The single collector cold-starts every target and writes to both metrics
+# stores, so its resource envelope must cover the concurrent scrape and
+# remote-write peak. Its cAdvisor scrape is labelled job="cadvisor", while
+# the chart's kube-prometheus recording rules select job="kubelet" plus
+# metrics_path="/metrics/cadvisor". The global relabel fixes that contract
+# once before both remote-write destinations.
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMAgent
 metadata:
@@ -18,7 +19,7 @@ spec:
   resources:
     requests:
       cpu: 100m
-      memory: 200Mi
+      memory: 512Mi
     limits:
       cpu: 500m
-      memory: 500Mi
+      memory: 1Gi

@@ -26,6 +26,12 @@ func TestAlertmanagerUsesHeaderAuthentication(t *testing.T) {
 		"send_resolved: true",
 		"send_resolved: false",
 		"repeat_interval: 2m",
+		"inhibit_rules:",
+		`alertname="VMAgentDown"`,
+		`prometheus="cozy-monitoring/vmagent"`,
+		"GuardianLoginCanaryStale",
+		"KubeAggregatedAPIErrors",
+		"OpenBaoAuditLogSilent",
 	} {
 		if !strings.Contains(config, want) {
 			t.Fatalf("alertmanager config is missing %q", want)

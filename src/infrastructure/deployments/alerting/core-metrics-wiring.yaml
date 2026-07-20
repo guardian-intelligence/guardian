@@ -44,6 +44,19 @@ spec:
     - name: cozystack-core-metrics-presence.rules
       interval: 30s
       rules:
+        - alert: VMAgentDown
+          expr: absent(up{namespace="cozy-monitoring",job="vmagent-vmagent"})
+          for: 5m
+          keep_firing_for: 15m
+          labels:
+            severity: critical
+            guardian_component: observability
+            exported_instance: guardian-mgmt/vmagent
+          annotations:
+            summary: the cluster metrics collector is down
+            description: >-
+              vmagent has not published its self-scrape for five minutes.
+              Metrics-backed alerts are blind until collection recovers.
         - alert: EtcdMetricsAbsent
           expr: absent(up{job=~".*etcd.*"})
           for: 15m
