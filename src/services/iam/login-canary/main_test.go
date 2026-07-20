@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/chromedp/cdproto/runtime"
 )
 
 func TestTOTPMatchesRFC6238SHA1Vector(t *testing.T) {
@@ -102,5 +104,13 @@ func TestTOTPBoundaryDelay(t *testing.T) {
 	}
 	if delay := totpBoundaryDelay(time.Unix(29, 0)); delay != 2*time.Second {
 		t.Fatalf("delay at boundary = %s, want 2s", delay)
+	}
+}
+
+func TestAwaitPromise(t *testing.T) {
+	t.Parallel()
+	params := awaitPromise(runtime.Evaluate("Promise.resolve(true)"))
+	if !params.AwaitPromise {
+		t.Fatal("awaitPromise did not enable CDP promise awaiting")
 	}
 }
