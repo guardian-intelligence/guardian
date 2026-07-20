@@ -229,7 +229,7 @@ func TestChurnAssertionBoundsTerminalization(t *testing.T) {
 	}
 
 	d := st.DB.Demands["101"]
-	d.UpdatedAt = at(5*time.Second + readyDeadlineBound + time.Minute)
+	d.UpdatedAt = at(5*time.Second + cleanupDeadlineBound + time.Minute)
 	st.DB.Demands["101"] = d
 	a = assertionByName(t, buildReport(st, at(4*time.Minute)), "churn terminal within deadline bound")
 	if a.Pass {

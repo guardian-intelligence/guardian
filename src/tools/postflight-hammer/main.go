@@ -60,8 +60,8 @@ Reading the report:
     while flagging a performance or operational expectation that needs investigation.
     SKIP means the battery could not exercise the assertion (no DATABASE_URL, no churn
     cycles, no second green run of a scope) — a full battery should have zero skips.
-  - The churn bound is hostd's current 30m ready/exited deadline; the recorded
-    cancellation-propagation follow-up will tighten it, which changes one constant.
+  - The churn bound is the current 30m cancellation-propagation reporting
+    contract; it does not bound the runtime of a live customer job.
   - "Warm runs clone a generation" attests the durable-volume mechanism. A warm checkout
     slower than cold is a CONCERN, not a claim that durable volumes are unsound.
   - Orphan workspaces and VM state dirs are asserted through their database-visible
