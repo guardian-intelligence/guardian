@@ -208,6 +208,9 @@ func TestHappyPathRunSealForget(t *testing.T) {
 	if preparation.JITConfig != "jit-l1" {
 		t.Fatalf("jit config %q", preparation.JITConfig)
 	}
+	if preparation.Env["GITHUB_ACTIONS_RUNNER_CHANNEL_TIMEOUT"] != "300" {
+		t.Fatal("runner worker channel can expire before the restore deadline")
+	}
 	wantToken := checkoutbundle.DeriveCheckoutToken([]byte("0123456789abcdef0123456789abcdef"), "exec-l1", "attempt-l1")
 	authorization, ok := world.VMs.AuthorizationFor(vm.ID(vmID))
 	if !ok || authorization.Env["POSTFLIGHT_CHECKOUT_TOKEN"] != wantToken {

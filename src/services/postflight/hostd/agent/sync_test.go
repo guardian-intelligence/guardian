@@ -174,6 +174,16 @@ func TestDesiredLeaseValidation(t *testing.T) {
 			d.AssignedRunnerName = ""
 		},
 		"bad generation": func(d *syncproto.DesiredLease) { d.Workspace.Generation = "a/../b" },
+		"checkpoint sans version": func(d *syncproto.DesiredLease) {
+			d.Workspace.Generation = "generation-1"
+			d.Process.Generation = "generation-1"
+			d.Process.ExpectedDigest = "sha256:checkpoint"
+		},
+		"checkpoint sans digest": func(d *syncproto.DesiredLease) {
+			d.Workspace.Generation = "generation-1"
+			d.Process.Generation = "generation-1"
+			d.Process.ExpectedVersion = "Version: 4.2"
+		},
 	}
 	for name, mutate := range cases {
 		lease := valid
@@ -215,6 +225,7 @@ func TestDesiredProjectionPreservesLocallyRoutedExecution(t *testing.T) {
 	projected.LeaseID = listener.LeaseID
 	projected.JITConfig = ""
 	projected.Process.ExpectedDigest = "sha256:new-checkpoint"
+	projected.Process.ExpectedVersion = "Version: 4.2"
 	projected.Process.Generation = "generation-1"
 	projected.Workspace.Generation = "generation-1"
 	instance.applyDesired(syncproto.SyncResponse{Leases: []syncproto.DesiredLease{projected}})
@@ -231,5 +242,8 @@ func TestDesiredProjectionPreservesLocallyRoutedExecution(t *testing.T) {
 	}
 	if got.execution.Process.ExpectedDigest != "sha256:new-checkpoint" {
 		t.Fatal("routed execution did not accept the control-plane generation update")
+	}
+	if got.execution.Process.ExpectedVersion != "Version: 4.2" {
+		t.Fatal("routed execution did not accept the control-plane checkpoint version")
 	}
 }

@@ -30,6 +30,7 @@ func TestRoundTrip(t *testing.T) {
 		{Kind: KindAuthorize, Authorize: &Authorize{
 			Lease: "lease-1", Env: map[string]string{"POSTFLIGHT_EXECUTION_ID": "exec-1"},
 		}},
+		{Kind: KindRunnerStatus, RunnerStatus: &RunnerStatus{State: RunnerProgress}},
 		{Kind: KindRunnerStatus, RunnerStatus: &RunnerStatus{State: RunnerRegistered}},
 		{Kind: KindRunnerStatus, RunnerStatus: &RunnerStatus{
 			State: RunnerHookBlocked,

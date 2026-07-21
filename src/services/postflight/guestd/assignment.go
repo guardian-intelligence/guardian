@@ -42,9 +42,9 @@ type localReply struct {
 	Error string            `json:"error,omitempty"`
 }
 
-// ServeAssignments accepts the two synchronous runner-side gates. The
-// listener gate runs before Runner.Worker exists; the validation gate runs
-// from GitHub's documented job-start hook before any customer step.
+// ServeAssignments accepts the runner-side assignment handoff and gates. The
+// listener publishes identity before Runner.Worker exists; the privileged
+// worker trampoline and documented job-start hook block customer execution.
 func (s *Server) ServeAssignments(ctx context.Context, socketPath string) error {
 	if socketPath == "" {
 		socketPath = AssignmentSocketPath
@@ -100,7 +100,9 @@ func (s *Server) handleLocal(ctx context.Context, conn net.Conn) {
 	var reply localReply
 	switch request.Kind {
 	case "assigned":
-		reply = s.awaitAssignment(requestCtx, request.Assignment)
+		reply = s.publishAssignment(request.Assignment)
+	case "worker-ready":
+		reply = s.awaitWorker(requestCtx)
 	case "validate":
 		reply = s.validateAssignment(request.Identity)
 	case "hook-released":
@@ -145,7 +147,7 @@ func (s *Server) runnerWorkerFailed(reason string) localReply {
 	return localReply{Ready: true}
 }
 
-func (s *Server) awaitAssignment(ctx context.Context, assignment *guestproto.Assignment) localReply {
+func (s *Server) publishAssignment(assignment *guestproto.Assignment) localReply {
 	if assignment == nil || assignment.RequestID == "" || assignment.JobID == "" || assignment.RunnerName == "" ||
 		assignment.JobDisplayName == "" || assignment.Identity == nil || assignment.Identity.RunID == "" ||
 		assignment.Identity.RunAttempt <= 0 || assignment.Identity.RunnerName != assignment.RunnerName ||
@@ -160,23 +162,51 @@ func (s *Server) awaitAssignment(ctx context.Context, assignment *guestproto.Ass
 		if !duplicate {
 			return localReply{Error: "conflicting assignment"}
 		}
+		return localReply{Ready: true}
 	} else {
 		captured := *assignment
 		captured.Timing = append([]guestproto.TimingPoint(nil), assignment.Timing...)
 		s.assignment = &captured
 		s.mu.Unlock()
 		if err := s.send(guestproto.Message{Kind: guestproto.KindAssignment, Assignment: &captured}); err != nil {
-			s.cfg.Logger.Warn("assignment not delivered", "request_id", assignment.RequestID, "err", err)
+			return localReply{Error: "assignment was not delivered to hostd: " + err.Error()}
 		}
 	}
+	published := guestTiming(s.cfg.Timing.Point("guest_assignment_published"))
+	s.sendStatus(guestproto.RunnerStatus{
+		State: guestproto.RunnerProgress, Timing: []guestproto.TimingPoint{published},
+	})
+	return localReply{Ready: true}
+}
+
+func (s *Server) awaitWorker(ctx context.Context) localReply {
+	s.mu.Lock()
+	assignment := s.assignment
+	s.mu.Unlock()
+	if assignment == nil {
+		return localReply{Error: "worker arrived before assignment publication"}
+	}
+	entered := guestTiming(s.cfg.Timing.Point("runner_worker_gate_entered"))
+	s.sendStatus(guestproto.RunnerStatus{
+		State: guestproto.RunnerProgress, Timing: []guestproto.TimingPoint{entered},
+	})
 	select {
 	case <-s.workerGate:
 		s.mu.Lock()
 		err := s.gateErr
+		authorized := s.authorized
+		clock := s.clock
 		s.mu.Unlock()
 		if err != nil {
 			return localReply{Error: err.Error()}
 		}
+		if authorized == nil || authorized.Identity == nil || clock == nil {
+			return localReply{Error: "worker gate opened without authorization"}
+		}
+		completed := guestTiming(s.cfg.Timing.Point("runner_worker_gate_completed"))
+		s.sendStatus(guestproto.RunnerStatus{
+			State: guestproto.RunnerProgress, Timing: []guestproto.TimingPoint{completed},
+		})
 		return localReply{Ready: true}
 	case <-ctx.Done():
 		return localReply{Error: ctx.Err().Error()}
@@ -362,10 +392,16 @@ func callLocal(request localRequest, replyOut *localReply) error {
 	return callLocalAt(ctx, AssignmentSocketPath, request, replyOut)
 }
 
-// AwaitRunnerAssignment is the listener's synchronous pre-worker gate. The
-// CLI wrapper and transport conformance test share this implementation.
-func AwaitRunnerAssignment(ctx context.Context, socketPath string, assignment guestproto.Assignment) error {
+// PublishRunnerAssignment is the listener's synchronous assignment handoff.
+// The CLI wrapper and transport conformance test share this implementation.
+func PublishRunnerAssignment(ctx context.Context, socketPath string, assignment guestproto.Assignment) error {
 	return callLocalAt(ctx, socketPath, localRequest{Kind: "assigned", Assignment: &assignment}, nil)
+}
+
+// AwaitRunnerWorker blocks the privileged trampoline until hostd has restored
+// and authorized the generation selected for the published assignment.
+func AwaitRunnerWorker(ctx context.Context, socketPath string) error {
+	return callLocalAt(ctx, socketPath, localRequest{Kind: "worker-ready"}, nil)
 }
 
 // ValidateRunnerAssignment is the job-start hook's defense-in-depth gate.
@@ -472,6 +508,9 @@ func RunRunnerWorkerExec(args []string) error {
 		if err := syscall.Fstat(fd, &stat); err != nil || stat.Mode&syscall.S_IFMT != syscall.S_IFIFO {
 			return fmt.Errorf("guestd: Runner.Worker descriptor %d is not an inherited pipe", fd)
 		}
+	}
+	if err := callLocal(localRequest{Kind: "worker-ready"}, nil); err != nil {
+		return fmt.Errorf("guestd: wait for restored worker capsule: %w", err)
 	}
 	raw, err := os.ReadFile(CapsulePIDPath)
 	if err != nil {

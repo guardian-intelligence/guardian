@@ -66,6 +66,7 @@ func validRendezvousTrace(warm, full bool) []rendezvousEvent {
 		{eventAssignmentUpdateReceived, "hostd-agent"}, {eventHostAssignmentObserved, "hostd-qemu"},
 		{eventRunnerAssignmentReceived, "runner-listener"}, {eventGuestAssignmentReceived, "guestd"},
 		{eventVsockAssignmentReceived, "hostd-vsock"},
+		{eventGuestAssignmentPublished, "guestd"}, {eventRunnerWorkerGateEntered, "guestd"},
 		{eventAssignmentObserved, "hostd-agent"}, {eventGenerationMaterializationStarted, "hostd-agent"},
 		{eventGenerationResolved, "hostd-agent"}, {eventRendezvousDispatched, "hostd-agent"},
 		{eventQMPRendezvousStarted, "hostd-qemu"}, {eventQMPConnected, "hostd-qemu"},
@@ -77,6 +78,12 @@ func validRendezvousTrace(warm, full bool) []rendezvousEvent {
 	}
 	if warm {
 		b.add(eventCRIURestoreStarted, "guestd")
+		b.add(eventRestoreVersionStarted, "guestd")
+		b.add(eventRestoreVersionCompleted, "guestd")
+		b.add(eventRestoreDigestStarted, "guestd")
+		b.add(eventRestoreDigestCompleted, "guestd")
+		b.add(eventRestoreCRIUStarted, "guestd")
+		b.add(eventRestoreCRIUCompleted, "guestd")
 		b.add(eventCRIURestoreCompleted, "guestd")
 	} else {
 		b.add(eventColdCapsuleStartStarted, "guestd")
@@ -85,7 +92,8 @@ func validRendezvousTrace(warm, full bool) []rendezvousEvent {
 	for _, item := range [][2]string{
 		{eventGenerationRestoreCompleted, "guestd"}, {eventMountsReady, "hostd-agent"},
 		{eventClockChecked, "hostd-agent"}, {eventWorkerAuthorizationSent, "hostd-agent"},
-		{eventRunnerWorkerReleased, "guestd"}, {eventRunnerWorkerExecStarted, "guestd"},
+		{eventRunnerWorkerReleased, "guestd"}, {eventRunnerWorkerGateCompleted, "guestd"},
+		{eventRunnerWorkerExecStarted, "guestd"},
 		{eventJobHookValidated, "guestd"},
 		{eventCustomerStepsReleased, "guestd"}, {eventJobHookReleased, "hostd-agent"},
 	} {
@@ -124,7 +132,12 @@ func validRendezvousTrace(warm, full bool) []rendezvousEvent {
 		{eventRunnerExited, "guestd"}, {eventRunnerExitObserved, "hostd-agent"},
 		{eventCheckpointStarted, "hostd-agent"}, {eventQuiesceRPCStarted, "hostd-qemu"},
 		{eventQuiesceReceived, "guestd"}, {eventQuiesceMountsChecked, "guestd"},
-		{eventCheckpointDumpStarted, "guestd"}, {eventCheckpointDumpCompleted, "guestd"},
+		{eventCheckpointDumpStarted, "guestd"},
+		{eventCheckpointCapsulePrepareStarted, "guestd"}, {eventCheckpointCapsulePrepareCompleted, "guestd"},
+		{eventCheckpointVersionStarted, "guestd"}, {eventCheckpointVersionCompleted, "guestd"},
+		{eventCheckpointCRIUDumpStarted, "guestd"}, {eventCheckpointCRIUDumpCompleted, "guestd"},
+		{eventCheckpointDigestStarted, "guestd"}, {eventCheckpointDigestCompleted, "guestd"},
+		{eventCheckpointDumpCompleted, "guestd"},
 		{eventFilesystemSyncStarted, "guestd"}, {eventFilesystemSyncCompleted, "guestd"},
 		{eventQuiesceRPCCompleted, "hostd-qemu"}, {eventCheckpointCompleted, "hostd-agent"},
 		{eventVMDestroyStarted, "hostd-agent"}, {eventVMDestroyCompleted, "hostd-agent"},
@@ -162,7 +175,11 @@ func TestValidWarmRendezvousAndCheckpointPasses(t *testing.T) {
 	if !report.TraceValid || report.Outcome != outcomePass || report.RestoreMode != "warm" {
 		t.Fatalf("valid warm trace = %+v", report)
 	}
-	for _, duration := range []string{"criu_restore", "checkpoint_dump", "snapshot_seal"} {
+	for _, duration := range []string{
+		"criu_restore", "restore_version_validation", "restore_digest_validation", "restore_criu",
+		"worker_gate", "checkpoint_dump", "checkpoint_capsule_prepare", "checkpoint_version",
+		"checkpoint_criu_dump", "checkpoint_digest", "snapshot_seal",
+	} {
 		if report.DurationsNS[duration] <= 0 {
 			t.Fatalf("missing %s duration: %+v", duration, report.DurationsNS)
 		}

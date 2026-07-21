@@ -15,64 +15,83 @@ import (
 const rendezvousTraceSchema = 5
 
 const (
-	eventVMLaunchStarted                  = "vm_launch_started"
-	eventQEMUStarted                      = "qemu_started"
-	eventGuestHelloObserved               = "guest_hello_observed"
-	eventListenerPrepareStarted           = "listener_prepare_started"
-	eventListenerPrepareSent              = "listener_prepare_sent"
-	eventListenerPrepareReceived          = "listener_prepare_received"
-	eventRunnerRegistered                 = "runner_registered"
-	eventPoolReady                        = "pool_ready"
-	eventRunnerAssignmentReceived         = "runner_assignment_received"
-	eventGuestAssignmentReceived          = "guest_assignment_received"
-	eventVsockAssignmentReceived          = "vsock_assignment_received"
-	eventHostAssignmentObserved           = "host_assignment_observed"
-	eventAssignmentUpdateReceived         = "assignment_update_received"
-	eventAssignmentObserved               = "assignment_observed"
-	eventGenerationMaterializationStarted = "generation_materialization_started"
-	eventGenerationResolved               = "generation_resolved"
-	eventQMPRendezvousStarted             = "qmp_rendezvous_started"
-	eventQMPConnected                     = "qmp_connected"
-	eventWorkspaceDeviceAttached          = "workspace_device_attached"
-	eventProcessDeviceAttached            = "process_device_attached"
-	eventGuestRendezvousSent              = "guest_rendezvous_sent"
-	eventRendezvousDispatched             = "rendezvous_dispatched"
-	eventGuestRendezvousReceived          = "guest_rendezvous_received"
-	eventMountConvergenceStarted          = "mount_convergence_started"
-	eventMountConvergenceCompleted        = "mount_convergence_completed"
-	eventCRIURestoreStarted               = "criu_restore_started"
-	eventCRIURestoreCompleted             = "criu_restore_completed"
-	eventColdCapsuleStartStarted          = "cold_capsule_start_started"
-	eventColdCapsuleStartCompleted        = "cold_capsule_start_completed"
-	eventGenerationRestoreCompleted       = "generation_restore_completed"
-	eventMountsReady                      = "mounts_ready"
-	eventClockChecked                     = "clock_checked"
-	eventWorkerAuthorizationSent          = "worker_authorization_sent"
-	eventRunnerWorkerReleased             = "runner_worker_released"
-	eventRunnerWorkerExecStarted          = "runner_worker_exec_started"
-	eventRunnerWorkerExecFailed           = "runner_worker_exec_failed"
-	eventJobHookValidated                 = "job_hook_validated"
-	eventCustomerStepsReleased            = "customer_steps_released"
-	eventJobHookReleased                  = "job_hook_released"
-	eventRunnerExited                     = "runner_exited"
-	eventRunnerExitObserved               = "runner_exit_observed"
-	eventLeaseFailed                      = "lease_failed"
-	eventCheckpointStarted                = "checkpoint_started"
-	eventQuiesceRPCStarted                = "quiesce_rpc_started"
-	eventQuiesceReceived                  = "quiesce_received"
-	eventQuiesceMountsChecked             = "quiesce_mounts_checked"
-	eventCheckpointDumpStarted            = "checkpoint_dump_started"
-	eventCheckpointDumpCompleted          = "checkpoint_dump_completed"
-	eventFilesystemSyncStarted            = "filesystem_sync_started"
-	eventFilesystemSyncCompleted          = "filesystem_sync_completed"
-	eventQuiesceRPCCompleted              = "quiesce_rpc_completed"
-	eventCheckpointCompleted              = "checkpoint_completed"
-	eventVMDestroyStarted                 = "vm_destroy_started"
-	eventVMDestroyCompleted               = "vm_destroy_completed"
-	eventSnapshotSealStarted              = "snapshot_seal_started"
-	eventSnapshotSealCompleted            = "snapshot_seal_completed"
-	eventIssueObserved                    = "issue_observed"
-	eventClassified                       = "classified"
+	eventVMLaunchStarted                   = "vm_launch_started"
+	eventQEMUStarted                       = "qemu_started"
+	eventGuestHelloObserved                = "guest_hello_observed"
+	eventListenerPrepareStarted            = "listener_prepare_started"
+	eventListenerPrepareSent               = "listener_prepare_sent"
+	eventListenerPrepareReceived           = "listener_prepare_received"
+	eventRunnerRegistered                  = "runner_registered"
+	eventPoolReady                         = "pool_ready"
+	eventRunnerAssignmentReceived          = "runner_assignment_received"
+	eventGuestAssignmentReceived           = "guest_assignment_received"
+	eventGuestAssignmentPublished          = "guest_assignment_published"
+	eventVsockAssignmentReceived           = "vsock_assignment_received"
+	eventHostAssignmentObserved            = "host_assignment_observed"
+	eventAssignmentUpdateReceived          = "assignment_update_received"
+	eventAssignmentObserved                = "assignment_observed"
+	eventGenerationMaterializationStarted  = "generation_materialization_started"
+	eventGenerationResolved                = "generation_resolved"
+	eventQMPRendezvousStarted              = "qmp_rendezvous_started"
+	eventQMPConnected                      = "qmp_connected"
+	eventWorkspaceDeviceAttached           = "workspace_device_attached"
+	eventProcessDeviceAttached             = "process_device_attached"
+	eventGuestRendezvousSent               = "guest_rendezvous_sent"
+	eventRendezvousDispatched              = "rendezvous_dispatched"
+	eventGuestRendezvousReceived           = "guest_rendezvous_received"
+	eventMountConvergenceStarted           = "mount_convergence_started"
+	eventMountConvergenceCompleted         = "mount_convergence_completed"
+	eventCRIURestoreStarted                = "criu_restore_started"
+	eventRestoreVersionStarted             = "restore_version_started"
+	eventRestoreVersionCompleted           = "restore_version_completed"
+	eventRestoreDigestStarted              = "restore_digest_started"
+	eventRestoreDigestCompleted            = "restore_digest_completed"
+	eventRestoreCRIUStarted                = "restore_criu_started"
+	eventRestoreCRIUCompleted              = "restore_criu_completed"
+	eventCRIURestoreCompleted              = "criu_restore_completed"
+	eventColdCapsuleStartStarted           = "cold_capsule_start_started"
+	eventColdCapsuleStartCompleted         = "cold_capsule_start_completed"
+	eventGenerationRestoreCompleted        = "generation_restore_completed"
+	eventGenerationRestoreFailed           = "generation_restore_failed"
+	eventMountsReady                       = "mounts_ready"
+	eventClockChecked                      = "clock_checked"
+	eventWorkerAuthorizationSent           = "worker_authorization_sent"
+	eventRunnerWorkerReleased              = "runner_worker_released"
+	eventRunnerWorkerGateEntered           = "runner_worker_gate_entered"
+	eventRunnerWorkerGateCompleted         = "runner_worker_gate_completed"
+	eventRunnerWorkerExecStarted           = "runner_worker_exec_started"
+	eventRunnerWorkerExecFailed            = "runner_worker_exec_failed"
+	eventJobHookValidated                  = "job_hook_validated"
+	eventCustomerStepsReleased             = "customer_steps_released"
+	eventJobHookReleased                   = "job_hook_released"
+	eventRunnerExited                      = "runner_exited"
+	eventRunnerExitObserved                = "runner_exit_observed"
+	eventLeaseFailed                       = "lease_failed"
+	eventCheckpointStarted                 = "checkpoint_started"
+	eventQuiesceRPCStarted                 = "quiesce_rpc_started"
+	eventQuiesceReceived                   = "quiesce_received"
+	eventQuiesceMountsChecked              = "quiesce_mounts_checked"
+	eventCheckpointDumpStarted             = "checkpoint_dump_started"
+	eventCheckpointCapsulePrepareStarted   = "checkpoint_capsule_prepare_started"
+	eventCheckpointCapsulePrepareCompleted = "checkpoint_capsule_prepare_completed"
+	eventCheckpointVersionStarted          = "checkpoint_version_started"
+	eventCheckpointVersionCompleted        = "checkpoint_version_completed"
+	eventCheckpointCRIUDumpStarted         = "checkpoint_criu_dump_started"
+	eventCheckpointCRIUDumpCompleted       = "checkpoint_criu_dump_completed"
+	eventCheckpointDigestStarted           = "checkpoint_digest_started"
+	eventCheckpointDigestCompleted         = "checkpoint_digest_completed"
+	eventCheckpointDumpCompleted           = "checkpoint_dump_completed"
+	eventFilesystemSyncStarted             = "filesystem_sync_started"
+	eventFilesystemSyncCompleted           = "filesystem_sync_completed"
+	eventQuiesceRPCCompleted               = "quiesce_rpc_completed"
+	eventQuiesceRPCFailed                  = "quiesce_rpc_failed"
+	eventCheckpointCompleted               = "checkpoint_completed"
+	eventVMDestroyStarted                  = "vm_destroy_started"
+	eventVMDestroyCompleted                = "vm_destroy_completed"
+	eventSnapshotSealStarted               = "snapshot_seal_started"
+	eventSnapshotSealCompleted             = "snapshot_seal_completed"
+	eventIssueObserved                     = "issue_observed"
+	eventClassified                        = "classified"
 )
 
 const (
@@ -86,8 +105,9 @@ var allowedTraceEvents = map[string]bool{
 	eventListenerPrepareSent: true, eventListenerPrepareReceived: true,
 	eventRunnerRegistered: true, eventPoolReady: true,
 	eventRunnerAssignmentReceived: true, eventGuestAssignmentReceived: true,
-	eventVsockAssignmentReceived: true,
-	eventHostAssignmentObserved: true, eventAssignmentUpdateReceived: true,
+	eventGuestAssignmentPublished: true,
+	eventVsockAssignmentReceived:  true,
+	eventHostAssignmentObserved:   true, eventAssignmentUpdateReceived: true,
 	eventAssignmentObserved: true, eventGenerationMaterializationStarted: true,
 	eventGenerationResolved: true, eventQMPRendezvousStarted: true,
 	eventQMPConnected: true, eventWorkspaceDeviceAttached: true,
@@ -95,20 +115,31 @@ var allowedTraceEvents = map[string]bool{
 	eventRendezvousDispatched: true, eventGuestRendezvousReceived: true,
 	eventMountConvergenceStarted: true, eventMountConvergenceCompleted: true,
 	eventCRIURestoreStarted: true, eventCRIURestoreCompleted: true,
+	eventRestoreVersionStarted: true, eventRestoreVersionCompleted: true,
+	eventRestoreDigestStarted: true, eventRestoreDigestCompleted: true,
+	eventRestoreCRIUStarted: true, eventRestoreCRIUCompleted: true,
 	eventColdCapsuleStartStarted: true, eventColdCapsuleStartCompleted: true,
-	eventGenerationRestoreCompleted: true, eventMountsReady: true,
+	eventGenerationRestoreCompleted: true, eventGenerationRestoreFailed: true,
+	eventMountsReady:  true,
 	eventClockChecked: true, eventWorkerAuthorizationSent: true,
-	eventRunnerWorkerReleased: true, eventRunnerWorkerExecStarted: true,
+	eventRunnerWorkerReleased: true, eventRunnerWorkerGateEntered: true,
+	eventRunnerWorkerGateCompleted: true, eventRunnerWorkerExecStarted: true,
 	eventRunnerWorkerExecFailed: true, eventJobHookValidated: true,
 	eventCustomerStepsReleased: true, eventJobHookReleased: true,
 	eventRunnerExited: true, eventRunnerExitObserved: true,
 	eventLeaseFailed:       true,
 	eventCheckpointStarted: true, eventQuiesceRPCStarted: true,
 	eventQuiesceReceived: true, eventQuiesceMountsChecked: true,
-	eventCheckpointDumpStarted: true, eventCheckpointDumpCompleted: true,
-	eventFilesystemSyncStarted: true, eventFilesystemSyncCompleted: true,
-	eventQuiesceRPCCompleted: true, eventCheckpointCompleted: true,
-	eventVMDestroyStarted: true, eventVMDestroyCompleted: true,
+	eventCheckpointDumpStarted:           true,
+	eventCheckpointCapsulePrepareStarted: true, eventCheckpointCapsulePrepareCompleted: true,
+	eventCheckpointVersionStarted: true, eventCheckpointVersionCompleted: true,
+	eventCheckpointCRIUDumpStarted: true, eventCheckpointCRIUDumpCompleted: true,
+	eventCheckpointDigestStarted: true, eventCheckpointDigestCompleted: true,
+	eventCheckpointDumpCompleted: true,
+	eventFilesystemSyncStarted:   true, eventFilesystemSyncCompleted: true,
+	eventQuiesceRPCCompleted: true, eventQuiesceRPCFailed: true,
+	eventCheckpointCompleted: true,
+	eventVMDestroyStarted:    true, eventVMDestroyCompleted: true,
 	eventSnapshotSealStarted: true, eventSnapshotSealCompleted: true,
 	eventIssueObserved: true, eventClassified: true,
 }
@@ -731,12 +762,21 @@ func deriveDurations(out map[string]int64, seen map[string]*rendezvousEvent) {
 		"qmp_rendezvous":                     {eventQMPRendezvousStarted, eventGuestRendezvousSent},
 		"guest_mount_convergence":            {eventMountConvergenceStarted, eventMountConvergenceCompleted},
 		"criu_restore":                       {eventCRIURestoreStarted, eventCRIURestoreCompleted},
+		"restore_version_validation":         {eventRestoreVersionStarted, eventRestoreVersionCompleted},
+		"restore_digest_validation":          {eventRestoreDigestStarted, eventRestoreDigestCompleted},
+		"restore_criu":                       {eventRestoreCRIUStarted, eventRestoreCRIUCompleted},
 		"cold_capsule_start":                 {eventColdCapsuleStartStarted, eventColdCapsuleStartCompleted},
+		"assignment_publication":             {eventGuestAssignmentReceived, eventGuestAssignmentPublished},
 		"assignment_to_worker_authorization": {eventAssignmentObserved, eventWorkerAuthorizationSent},
+		"worker_gate":                        {eventRunnerWorkerGateEntered, eventRunnerWorkerGateCompleted},
 		"worker_exec_dispatch":               {eventRunnerWorkerReleased, eventRunnerWorkerExecStarted},
 		"worker_to_job_hook":                 {eventRunnerWorkerExecStarted, eventJobHookValidated},
 		"job_hook_gate":                      {eventJobHookValidated, eventCustomerStepsReleased},
 		"checkpoint_dump":                    {eventCheckpointDumpStarted, eventCheckpointDumpCompleted},
+		"checkpoint_capsule_prepare":         {eventCheckpointCapsulePrepareStarted, eventCheckpointCapsulePrepareCompleted},
+		"checkpoint_version":                 {eventCheckpointVersionStarted, eventCheckpointVersionCompleted},
+		"checkpoint_criu_dump":               {eventCheckpointCRIUDumpStarted, eventCheckpointCRIUDumpCompleted},
+		"checkpoint_digest":                  {eventCheckpointDigestStarted, eventCheckpointDigestCompleted},
 		"filesystem_sync":                    {eventFilesystemSyncStarted, eventFilesystemSyncCompleted},
 		"quiesce_rpc":                        {eventQuiesceRPCStarted, eventQuiesceRPCCompleted},
 		"checkpoint_lifecycle":               {eventCheckpointStarted, eventCheckpointCompleted},

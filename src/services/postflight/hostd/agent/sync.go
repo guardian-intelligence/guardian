@@ -40,9 +40,12 @@ func validateDesired(d syncproto.DesiredLease) error {
 			return err
 		}
 	}
-	if d.Process.ExpectedDigest != "" {
+	if d.Process.ExpectedDigest != "" || d.Process.ExpectedVersion != "" {
+		if d.Process.ExpectedDigest == "" || d.Process.ExpectedVersion == "" {
+			return fmt.Errorf("lease %s: incomplete process checkpoint identity", d.LeaseID)
+		}
 		if d.Process.Generation == "" {
-			return fmt.Errorf("lease %s: checkpoint digest without a process generation", d.LeaseID)
+			return fmt.Errorf("lease %s: checkpoint identity without a process generation", d.LeaseID)
 		}
 		if d.Process.Generation != d.Workspace.Generation {
 			return fmt.Errorf("lease %s: workspace and process generations differ", d.LeaseID)

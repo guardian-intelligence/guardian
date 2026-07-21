@@ -276,6 +276,7 @@ func (s *syncServer) desiredState(ctx context.Context, request syncproto.SyncReq
 		if row.ProcessDigest != "" && row.ProcessVersion != "" {
 			desired.Process.Generation = row.Generation
 			desired.Process.ExpectedDigest = row.ProcessDigest
+			desired.Process.ExpectedVersion = row.ProcessVersion
 		}
 		if row.State == leaseSealing {
 			desired.State = syncproto.DesiredSeal

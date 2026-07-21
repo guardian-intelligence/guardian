@@ -122,10 +122,24 @@ func (c CRIU) dumpObserved(ctx context.Context, capsule Capsule, observer checkp
 	return CheckpointArtifact{Digest: digest, Version: version}, nil
 }
 
-func (c CRIU) Restore(ctx context.Context, capsule Capsule, expectedDigest string) (int, error) {
+func (c CRIU) Restore(ctx context.Context, capsule Capsule, expectedDigest, expectedVersion string) (int, error) {
+	return c.restoreObserved(ctx, capsule, expectedDigest, expectedVersion, nil)
+}
+
+func (c CRIU) restoreObserved(ctx context.Context, capsule Capsule, expectedDigest, expectedVersion string, observer checkpointObserver) (int, error) {
 	if err := c.validate(capsule, false); err != nil {
 		return 0, err
 	}
+	observeCheckpoint(observer, "restore_version_started")
+	version, err := c.Version(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if version != expectedVersion {
+		return 0, fmt.Errorf("guestd: CRIU version %q does not match checkpoint version %q", version, expectedVersion)
+	}
+	observeCheckpoint(observer, "restore_version_completed")
+	observeCheckpoint(observer, "restore_digest_started")
 	digest, err := digestDirectory(capsule.ImagesDir)
 	if err != nil {
 		return 0, err
@@ -133,6 +147,7 @@ func (c CRIU) Restore(ctx context.Context, capsule Capsule, expectedDigest strin
 	if digest != expectedDigest {
 		return 0, fmt.Errorf("guestd: CRIU artifact digest %s does not match %s", digest, expectedDigest)
 	}
+	observeCheckpoint(observer, "restore_digest_completed")
 	workDir, err := c.workDir("restore")
 	if err != nil {
 		return 0, err
@@ -154,9 +169,11 @@ func (c CRIU) Restore(ctx context.Context, capsule Capsule, expectedDigest strin
 	for _, mount := range sortedMounts(capsule.ExternalMounts) {
 		args = append(args, "--external", "mnt["+mount.Key+"]:"+mount.Path)
 	}
+	observeCheckpoint(observer, "restore_criu_started")
 	if _, err := c.runRestore(ctx, args...); err != nil {
 		return 0, err
 	}
+	observeCheckpoint(observer, "restore_criu_completed")
 	raw, err := os.ReadFile(pidfile)
 	if err != nil {
 		return 0, fmt.Errorf("guestd: reading restored root pid: %w", err)

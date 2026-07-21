@@ -14,7 +14,7 @@ import (
 )
 
 // Version is the protocol revision a Hello announces.
-const Version = 7
+const Version = 8
 
 // WorkspaceReadyMarker is the file guestd drops at a converged workspace
 // mountpoint's root once every declared mount is in place. It is the shared
@@ -50,7 +50,7 @@ const (
 	// by the local assignment before Runner.Worker is released.
 	KindRendezvous Kind = "rendezvous"
 	// KindAssignment (guest → host): the already-connected GitHub listener
-	// received a job and is blocked before it spawns Runner.Worker.
+	// received a job before it asks JobDispatcher to spawn Runner.Worker.
 	KindAssignment Kind = "assignment"
 	// KindAuthorize (host → guest): the local assignment matches a staged
 	// execution; release Runner.Worker into the restored capsule.
@@ -104,8 +104,9 @@ type Prepare struct {
 
 // Assignment is emitted at the earliest authoritative local boundary: after
 // Runner.Listener has received the encrypted GitHub job message and before it
-// asks JobDispatcher to create Runner.Worker. RequestID is GitHub's opaque
-// runner request identifier; it contains no job credential.
+// asks JobDispatcher to create Runner.Worker. The privileged worker trampoline
+// remains blocked until host authorization. RequestID is GitHub's opaque runner
+// request identifier; it contains no job credential.
 type Assignment struct {
 	RequestID      string        `json:"request_id"`
 	JobID          string        `json:"job_id"`
@@ -117,7 +118,7 @@ type Assignment struct {
 
 // Rendezvous carries the generation selected for the job that the local
 // listener actually received. It restores the process capsule before the
-// blocked listener is allowed to spawn Runner.Worker.
+// Runner.Worker trampoline is allowed to enter it.
 type Rendezvous struct {
 	Lease      string             `json:"lease"`
 	Mounts     []Mount            `json:"mounts"`
@@ -148,6 +149,7 @@ type TimingPoint struct {
 type CheckpointRestore struct {
 	ImagesDir       string `json:"images_dir"`
 	ExpectedDigest  string `json:"expected_digest"`
+	ExpectedVersion string `json:"expected_version"`
 	ExternalMountAt string `json:"external_mount_at"`
 }
 
@@ -202,6 +204,8 @@ type QuiesceFailed struct {
 type RunnerState string
 
 const (
+	// RunnerProgress carries a timing point without changing lifecycle state.
+	RunnerProgress RunnerState = "progress"
 	// RunnerRegistered: the runner registered and is listening for its job.
 	RunnerRegistered RunnerState = "registered"
 	// RunnerHookBlocked: GitHub assigned a job and its synchronous start
@@ -209,10 +213,10 @@ const (
 	RunnerHookBlocked RunnerState = "hook-blocked"
 	// RunnerMountsReady: every declared device is mounted, the process
 	// generation is restored, and its clock sample was taken. Runner.Worker
-	// remains blocked in the listener gate.
+	// remains blocked in the privileged worker trampoline.
 	RunnerMountsReady RunnerState = "mounts-ready"
-	// RunnerWorkerReady: the generation is restored and the outer listener
-	// may spawn Runner.Worker inside the capsule.
+	// RunnerWorkerReady: the generation is restored and Runner.Worker's
+	// privileged trampoline may enter the capsule.
 	RunnerWorkerReady RunnerState = "worker-ready"
 	// RunnerWorkerStarted: the privileged trampoline is entering the restored
 	// PID and mount namespaces before it executes the official worker.

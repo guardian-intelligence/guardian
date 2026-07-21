@@ -246,11 +246,16 @@ func (h *hostConn) expect(kind guestproto.Kind) guestproto.Message {
 
 func (h *hostConn) expectStatus(state guestproto.RunnerState) guestproto.RunnerStatus {
 	h.t.Helper()
-	message := h.expect(guestproto.KindRunnerStatus)
-	if message.RunnerStatus.State != state {
-		h.t.Fatalf("runner state %s, want %s", message.RunnerStatus.State, state)
+	for {
+		message := h.expect(guestproto.KindRunnerStatus)
+		if message.RunnerStatus.State == guestproto.RunnerProgress {
+			continue
+		}
+		if message.RunnerStatus.State != state {
+			h.t.Fatalf("runner state %s, want %s", message.RunnerStatus.State, state)
+		}
+		return *message.RunnerStatus
 	}
-	return *message.RunnerStatus
 }
 
 func (h *hostConn) send(message guestproto.Message) {
@@ -281,7 +286,10 @@ func newWorld(t *testing.T, configure func(*Config), runner RunRunner) *world {
 		runner = func(_ context.Context, jitConfig string, env map[string]string, event func(RunnerEvent)) (int, error) {
 			w.runs <- runnerCall{jitConfig: jitConfig, env: env}
 			event(EventListening)
-			if reply := w.server.awaitAssignment(context.Background(), ptr(testAssignment())); reply.Error != "" {
+			if reply := w.server.publishAssignment(ptr(testAssignment())); reply.Error != "" {
+				return 0, errors.New(reply.Error)
+			}
+			if reply := w.server.awaitWorker(context.Background()); reply.Error != "" {
 				return 0, errors.New(reply.Error)
 			}
 			if reply := w.server.validateAssignment(testAuthorize().Identity); reply.Error != "" {

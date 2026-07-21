@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,7 +14,7 @@ import (
 	"github.com/guardian-intelligence/guardian/src/services/postflight/timing"
 )
 
-func TestLocalAssignmentGateBlocksWorkerUntilHostRelease(t *testing.T) {
+func TestLocalAssignmentPublishesBeforeWorkerGateReleases(t *testing.T) {
 	recorder, err := timing.New("guestd-test", "boot-test")
 	if err != nil {
 		t.Fatal(err)
@@ -28,6 +29,13 @@ func TestLocalAssignmentGateBlocksWorkerUntilHostRelease(t *testing.T) {
 		},
 		workerGate: make(chan struct{}),
 	}
+	host, guest := net.Pipe()
+	server.conn = guest
+	go func() { _, _ = io.Copy(io.Discard, host) }()
+	t.Cleanup(func() {
+		host.Close()
+		guest.Close()
+	})
 	socket := filepath.Join(t.TempDir(), "assignment.sock")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -58,10 +66,9 @@ func TestLocalAssignmentGateBlocksWorkerUntilHostRelease(t *testing.T) {
 			Sequence: 1, MonotonicNS: 10, UnixNS: 20,
 		}},
 	}
-	released := make(chan error, 1)
-	go func() {
-		released <- callLocalAt(context.Background(), socket, localRequest{Kind: "assigned", Assignment: assignment}, nil)
-	}()
+	if err := callLocalAt(context.Background(), socket, localRequest{Kind: "assigned", Assignment: assignment}, nil); err != nil {
+		t.Fatal(err)
+	}
 
 	deadline := time.After(time.Second)
 	for {
@@ -75,22 +82,34 @@ func TestLocalAssignmentGateBlocksWorkerUntilHostRelease(t *testing.T) {
 			break
 		}
 		select {
-		case err := <-released:
-			t.Fatalf("gate released before host authorization: %v", err)
 		case <-deadline:
 			t.Fatal("guestd did not observe local assignment")
 		default:
 			time.Sleep(time.Millisecond)
 		}
 	}
+	released := make(chan error, 1)
+	go func() {
+		released <- callLocalAt(context.Background(), socket, localRequest{Kind: "worker-ready"}, nil)
+	}()
 	select {
 	case err := <-released:
-		t.Fatalf("gate released before host authorization: %v", err)
+		t.Fatalf("worker gate released before host authorization: %v", err)
 	default:
 	}
+	server.mu.Lock()
+	server.authorized = &guestproto.Authorize{Identity: assignment.Identity}
+	server.clock = &guestproto.ClockSample{UnixNS: 1}
+	server.mu.Unlock()
 	server.gateOnce.Do(func() { close(server.workerGate) })
 	if err := <-released; err != nil {
 		t.Fatal(err)
+	}
+	if len(server.statuses) != 3 ||
+		server.statuses[0].Timing[0].Event != "guest_assignment_published" ||
+		server.statuses[1].Timing[0].Event != "runner_worker_gate_entered" ||
+		server.statuses[2].Timing[0].Event != "runner_worker_gate_completed" {
+		t.Fatalf("assignment/worker timing = %#v", server.statuses)
 	}
 }
 
