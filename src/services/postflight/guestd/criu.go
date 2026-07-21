@@ -44,6 +44,14 @@ type CheckpointArtifact struct {
 	Version string
 }
 
+type checkpointObserver func(string)
+
+func observeCheckpoint(observer checkpointObserver, event string) {
+	if observer != nil {
+		observer(event)
+	}
+}
+
 func (c CRIU) Check(ctx context.Context) error {
 	_, err := c.run(ctx, "check")
 	return err
@@ -65,9 +73,19 @@ func (c CRIU) Version(ctx context.Context) (string, error) {
 // caller must either atomically seal every coupled volume or retire the donor;
 // resuming it and publishing the images would fork one logical generation.
 func (c CRIU) Dump(ctx context.Context, capsule Capsule) (CheckpointArtifact, error) {
+	return c.dumpObserved(ctx, capsule, nil)
+}
+
+func (c CRIU) dumpObserved(ctx context.Context, capsule Capsule, observer checkpointObserver) (CheckpointArtifact, error) {
 	if err := c.validate(capsule, true); err != nil {
 		return CheckpointArtifact{}, err
 	}
+	observeCheckpoint(observer, "checkpoint_version_started")
+	version, err := c.Version(ctx)
+	if err != nil {
+		return CheckpointArtifact{}, err
+	}
+	observeCheckpoint(observer, "checkpoint_version_completed")
 	if err := os.RemoveAll(capsule.ImagesDir); err != nil {
 		return CheckpointArtifact{}, fmt.Errorf("guestd: clearing CRIU images: %w", err)
 	}
@@ -90,17 +108,17 @@ func (c CRIU) Dump(ctx context.Context, capsule Capsule) (CheckpointArtifact, er
 	for _, mount := range sortedMounts(capsule.ExternalMounts) {
 		args = append(args, "--external", "mnt["+mount.Path+"]:"+mount.Key)
 	}
+	observeCheckpoint(observer, "checkpoint_criu_dump_started")
 	if _, err := c.run(ctx, args...); err != nil {
 		return CheckpointArtifact{}, err
 	}
+	observeCheckpoint(observer, "checkpoint_criu_dump_completed")
+	observeCheckpoint(observer, "checkpoint_digest_started")
 	digest, err := digestDirectory(capsule.ImagesDir)
 	if err != nil {
 		return CheckpointArtifact{}, err
 	}
-	version, err := c.Version(ctx)
-	if err != nil {
-		return CheckpointArtifact{}, err
-	}
+	observeCheckpoint(observer, "checkpoint_digest_completed")
 	return CheckpointArtifact{Digest: digest, Version: version}, nil
 }
 
@@ -200,7 +218,7 @@ func (c CRIU) run(ctx context.Context, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, c.Path, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("guestd: CRIU %s failed; encrypted diagnostic retained: %w", args[0], err)
+		return "", fmt.Errorf("guestd: CRIU %s failed: %w", args[0], err)
 	}
 	return string(output), nil
 }
@@ -225,7 +243,7 @@ func RunRestorePrivate(ctx context.Context, path string, args ...string) (string
 	cmd := exec.CommandContext(ctx, "/usr/bin/unshare", commandArgs...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("private mount restore failed; encrypted diagnostic retained: %w", err)
+		return "", fmt.Errorf("private mount restore failed: %w", err)
 	}
 	return string(output), nil
 }

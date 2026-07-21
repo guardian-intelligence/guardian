@@ -583,11 +583,11 @@ func (a *Agent) finishRunner(ctx context.Context, record *lease, status vm.Statu
 			event.GenerationSet = generationSet(record)
 		})
 		artifact, err := a.vms.Quiesce(ctx, vm.ID(record.vmID))
+		a.appendOriginTiming(record, artifact.Timing)
 		if err != nil {
 			a.failLease(ctx, record, "quiesce: "+err.Error())
 			return
 		}
-		a.appendOriginTiming(record, artifact.Timing)
 		record.checkpoint = &syncproto.CheckpointArtifact{Digest: artifact.Digest, Version: artifact.Version}
 		a.appendTrace(record, "checkpoint_completed", func(event *traceEvent) {
 			traceIdentity(record, event)

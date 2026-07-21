@@ -40,9 +40,20 @@ esac
 	images := filepath.Join(imagesRoot, "generation-1")
 	engine := CRIU{Path: bin, ImagesRoot: imagesRoot, WorkRoot: filepath.Join(imagesRoot, "work")}
 	capsule := Capsule{RootPID: 123, ImagesDir: images, ExternalMounts: []ExternalMount{{Key: "workspace", Path: "/workspace"}}}
-	artifact, err := engine.Dump(context.Background(), capsule)
+	var stages []string
+	artifact, err := engine.dumpObserved(context.Background(), capsule, func(event string) {
+		stages = append(stages, event)
+	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	wantStages := []string{
+		"checkpoint_version_started", "checkpoint_version_completed",
+		"checkpoint_criu_dump_started", "checkpoint_criu_dump_completed",
+		"checkpoint_digest_started", "checkpoint_digest_completed",
+	}
+	if strings.Join(stages, ",") != strings.Join(wantStages, ",") {
+		t.Fatalf("checkpoint stages = %v, want %v", stages, wantStages)
 	}
 	if artifact.Version != "Version: 4.2" || !strings.HasPrefix(artifact.Digest, "sha256:") {
 		t.Fatalf("artifact = %+v", artifact)

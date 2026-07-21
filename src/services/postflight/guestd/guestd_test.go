@@ -630,6 +630,9 @@ func TestQuiesceFailureCarriesTheReason(t *testing.T) {
 	if !strings.Contains(message.QuiesceFailed.Reason, "required volume is not mounted") {
 		t.Fatalf("reason %q", message.QuiesceFailed.Reason)
 	}
+	if len(message.QuiesceFailed.Timing) != 1 || message.QuiesceFailed.Timing[0].Event != "quiesce_received" {
+		t.Fatalf("failure timing %+v", message.QuiesceFailed.Timing)
+	}
 }
 
 func TestCheckpointRefusesAnIncompleteGenerationTuple(t *testing.T) {

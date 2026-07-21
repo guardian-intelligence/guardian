@@ -48,7 +48,7 @@ func TestRoundTrip(t *testing.T) {
 		{Kind: KindRunnerStatus, RunnerStatus: &RunnerStatus{State: RunnerExited, ExitCode: 42}},
 		{Kind: KindQuiesce, Quiesce: &Quiesce{Mountpoints: []string{"/opt/actions-runner/_work/widget/widget"}}},
 		{Kind: KindQuiesced, Quiesced: &Quiesced{}},
-		{Kind: KindQuiesceFailed, QuiesceFailed: &QuiesceFailed{Reason: "target is busy"}},
+		{Kind: KindQuiesceFailed, QuiesceFailed: &QuiesceFailed{Reason: "target is busy", Timing: []TimingPoint{{Event: "checkpoint_criu_dump_started"}}}},
 	}
 	host, guest := net.Pipe()
 	go func() {
@@ -95,7 +95,7 @@ func TestRoundTrip(t *testing.T) {
 				t.Fatalf("quiesce %+v, want %+v", got.Quiesce, want.Quiesce)
 			}
 		case KindQuiesceFailed:
-			if *got.QuiesceFailed != *want.QuiesceFailed {
+			if !reflect.DeepEqual(got.QuiesceFailed, want.QuiesceFailed) {
 				t.Fatalf("quiesce-failed %+v, want %+v", got.QuiesceFailed, want.QuiesceFailed)
 			}
 		}
