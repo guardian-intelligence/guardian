@@ -55,7 +55,7 @@ fetch_sha512 "${sdk_url}" "${sdk_archive}" "${DOTNET_SDK_SHA512}"
 if [[ ! -f "${source_root}/.postflight-patched" ]]; then
   mkdir -p "${source_root}"
   tar -xzf "${source_archive}" -C "${source_root}" --strip-components=1
-  patch --directory="${source_root}" --strip=1 <"${script_dir}/runner-listener.patch"
+  patch --directory="${source_root}" --strip=1 <"${script_dir}/runner-listener.patch" >&2
   touch "${source_root}/.postflight-patched"
 fi
 if [[ ! -x "${sdk_root}/dotnet" ]]; then
@@ -66,7 +66,7 @@ mkdir -p "${output_root}"
 "${sdk_root}/dotnet" build "${source_root}/src/Runner.Listener/Runner.Listener.csproj" \
   --configuration Release --runtime linux-x64 \
   -p:RunnerVersion="${RUNNER_VERSION}" -p:PackageRuntime=linux-x64 \
-  -o "${output_root}"
+  -o "${output_root}" >&2
 
 artifact="${output_root}/Runner.Listener.dll"
 [[ -f "${artifact}" ]] || { echo "build.sh: Runner.Listener.dll was not produced" >&2; exit 1; }
