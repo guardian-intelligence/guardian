@@ -741,12 +741,15 @@ func TestRendezvousAttachesDeliversAndConverges(t *testing.T) {
 	if len(deliveries[0].Mounts) != 3 {
 		t.Fatalf("delivered mounts %+v", deliveries[0].Mounts)
 	}
+	if runnerState := deliveries[0].Mounts[0]; runnerState.Serial != toolNode || runnerState.Mountpoint != runnerStateMountpoint {
+		t.Fatalf("runner-state mount %+v", runnerState)
+	}
 	if deliveries[0].Checkpoint == nil ||
 		deliveries[0].Checkpoint.ExpectedDigest != rendezvous.CheckpointDigest ||
 		deliveries[0].Checkpoint.ExpectedVersion != rendezvous.CheckpointVersion {
 		t.Fatalf("delivered checkpoint %+v", deliveries[0].Checkpoint)
 	}
-	mount := deliveries[0].Mounts[0]
+	mount := deliveries[0].Mounts[1]
 	if mount.Serial != workspaceNode || mount.Filesystem != workspaceFilesystem ||
 		mount.Mountpoint != "/opt/actions-runner/_work/widget/widget" {
 		t.Fatalf("delivered mount %+v", mount)
@@ -816,7 +819,7 @@ func TestQuiesceUsesTheAssignedMountpoint(t *testing.T) {
 	if got := strings.Join(events, ","); got != "quiesce_rpc_started,checkpoint_dump_completed,quiesce_rpc_completed" {
 		t.Fatalf("quiesce timing %s", got)
 	}
-	if got := second.guest.quiesces("vm-a"); len(got) != 1 || len(got[0].Mountpoints) != 3 || got[0].Mountpoints[0] != rendezvous.WorkspaceMountpoint || got[0].Mountpoints[1] != toolMountpoint || got[0].Mountpoints[2] != processMountpoint {
+	if got := second.guest.quiesces("vm-a"); len(got) != 1 || len(got[0].Mountpoints) != 3 || got[0].Mountpoints[0] != runnerStateMountpoint || got[0].Mountpoints[1] != rendezvous.WorkspaceMountpoint || got[0].Mountpoints[2] != processMountpoint {
 		t.Fatalf("quiesced %v, want the assigned mountpoint", got)
 	}
 

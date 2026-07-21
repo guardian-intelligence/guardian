@@ -415,7 +415,7 @@ func (q *QEMU) Rendezvous(ctx context.Context, id ID, rendezvous Rendezvous) err
 	}
 	if record.WorkspaceMountpoint == "" {
 		record.WorkspaceMountpoint = rendezvous.WorkspaceMountpoint
-		record.ToolMountpoint = toolMountpoint
+		record.ToolMountpoint = runnerStateMountpoint
 		record.ProcessMountpoint = processMountpoint
 		if err := q.writeMeta(record); err != nil {
 			return err
@@ -448,15 +448,15 @@ func (q *QEMU) Rendezvous(ctx context.Context, id ID, rendezvous Rendezvous) err
 		Lease: rendezvous.Lease,
 		Mounts: []guestproto.Mount{
 			{
+				Serial:     toolNode,
+				Filesystem: workspaceFilesystem,
+				Mountpoint: runnerStateMountpoint,
+				Options:    toolMountOptions,
+			}, {
 				Serial:     workspaceNode,
 				Filesystem: workspaceFilesystem,
 				Mountpoint: rendezvous.WorkspaceMountpoint,
 				Options:    workspaceMountOptions,
-			}, {
-				Serial:     toolNode,
-				Filesystem: workspaceFilesystem,
-				Mountpoint: toolMountpoint,
-				Options:    toolMountOptions,
 			}, {
 				Serial:     processNode,
 				Filesystem: workspaceFilesystem,
@@ -470,7 +470,7 @@ func (q *QEMU) Rendezvous(ctx context.Context, id ID, rendezvous Rendezvous) err
 			ExpectedVersion: rendezvous.CheckpointVersion,
 			ExternalMounts: []guestproto.CheckpointMount{
 				{Key: workspaceNode, Path: rendezvous.WorkspaceMountpoint},
-				{Key: toolNode, Path: toolMountpoint},
+				{Key: toolNode, Path: runnerStateMountpoint},
 			},
 		}
 	}
@@ -536,12 +536,12 @@ func (q *QEMU) Quiesce(ctx context.Context, id ID) (CheckpointArtifact, error) {
 	quiesceCtx, cancel := context.WithTimeout(ctx, q.quiesceTimeout)
 	defer cancel()
 	reply, err := q.cfg.Guest.Quiesce(quiesceCtx, id, record.CID, guestproto.Quiesce{
-		Mountpoints: []string{record.WorkspaceMountpoint, toolMountpoint, processMountpoint},
+		Mountpoints: []string{runnerStateMountpoint, record.WorkspaceMountpoint, processMountpoint},
 		Checkpoint: &guestproto.CheckpointDump{
 			ImagesDir: processImagesDir,
 			ExternalMounts: []guestproto.CheckpointMount{
 				{Key: workspaceNode, Path: record.WorkspaceMountpoint},
-				{Key: toolNode, Path: toolMountpoint},
+				{Key: toolNode, Path: runnerStateMountpoint},
 			},
 		},
 	})
