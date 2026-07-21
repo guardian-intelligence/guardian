@@ -78,6 +78,15 @@ spec:
               value: "true"
             - name: KC_METRICS_ENABLED
               value: "true"
+            # Sign-in SLO source: per-realm user event counters on the
+            # management /metrics endpoint. Events and tags are pinned to
+            # keep series cardinality bounded.
+            - name: KC_EVENT_METRICS_USER_ENABLED
+              value: "true"
+            - name: KC_EVENT_METRICS_USER_EVENTS
+              value: login,login_error,logout,logout_error,code_to_token,code_to_token_error
+            - name: KC_EVENT_METRICS_USER_TAGS
+              value: realm,idp,clientId
             - name: KC_DB
               value: postgres
             - name: KC_DB_URL_HOST

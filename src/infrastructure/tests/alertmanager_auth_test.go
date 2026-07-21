@@ -29,7 +29,7 @@ func TestAlertmanagerUsesHeaderAuthentication(t *testing.T) {
 		"inhibit_rules:",
 		`alertname=~"VMAgentDown|VMAgentCrashLooping"`,
 		`prometheus="cozy-monitoring/vmagent"`,
-		"GuardianLoginCanaryStale",
+		"GuardianSignInStale",
 		"KubeAggregatedAPIErrors",
 		"OpenBaoAuditLogSilent",
 	} {

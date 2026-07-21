@@ -38,7 +38,7 @@ stringData:
       - source_matchers:
           - 'alertname=~"VMAgentDown|VMAgentCrashLooping"'
         target_matchers:
-          - 'alertname=~"CadvisorRecordingsAbsent|EtcdGRPCLatencyMetricsAbsent|EtcdMetricsAbsent|FluxResourceMetricsAbsent|GuardianLoginCanaryAbsent|GuardianLoginCanaryStale|KubeAggregatedAPIDown|KubeAggregatedAPIErrors|KubeAPIDown|KubeJobFailed|KubeStateMetricsSelfMetricsAbsent|KubeStateObjectMetricsAbsent|KubernetesFluentBitCollectorsMissing|OpenBaoAuditLogSilent|PaymentsCheckoutCanaryStale|PaymentsRailCanaryStale|ZotRegistryScrapeAbsent|etcdHighNumberOfLeaderChanges"'
+          - 'alertname=~"CadvisorRecordingsAbsent|EtcdGRPCLatencyMetricsAbsent|EtcdMetricsAbsent|FluxResourceMetricsAbsent|GuardianLoginCanaryAbsent|GuardianSignInStale|KubeAggregatedAPIDown|KubeAggregatedAPIErrors|KubeAPIDown|KubeJobFailed|KubeStateMetricsSelfMetricsAbsent|KubeStateObjectMetricsAbsent|KubernetesFluentBitCollectorsMissing|OpenBaoAuditLogSilent|PaymentsCheckoutCanaryStale|PaymentsRailCanaryStale|ZotRegistryScrapeAbsent|etcdHighNumberOfLeaderChanges"'
     receivers:
       - name: blackhole
       - name: alerta
