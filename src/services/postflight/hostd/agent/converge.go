@@ -27,17 +27,35 @@ func (a *Agent) Tick(ctx context.Context) {
 	if !a.synced {
 		return
 	}
+	started := time.Now()
+	vmListStarted := time.Now()
 	vms, err := a.listVMs(ctx)
 	if err != nil {
 		a.logger.Error("listing vms", "err", err)
 		return
 	}
+	vmListElapsed := time.Since(vmListStarted)
+	leaseStarted := time.Now()
 	for _, id := range sortedLeaseIDs(a.leases) {
 		a.stepLease(ctx, a.leases[id], vms)
 	}
+	leaseElapsed := time.Since(leaseStarted)
+	reapStarted := time.Now()
 	a.reapGenerations(ctx)
+	reapElapsed := time.Since(reapStarted)
+	poolStarted := time.Now()
 	a.reconcilePool(ctx, vms)
+	poolElapsed := time.Since(poolStarted)
+	gcStarted := time.Now()
 	a.collectOrphans(ctx, vms)
+	a.logger.Info("hostd.convergence.completed",
+		"duration_ns", time.Since(started).Nanoseconds(),
+		"vm_list_ns", vmListElapsed.Nanoseconds(),
+		"leases_ns", leaseElapsed.Nanoseconds(),
+		"reap_ns", reapElapsed.Nanoseconds(),
+		"pool_ns", poolElapsed.Nanoseconds(),
+		"gc_ns", time.Since(gcStarted).Nanoseconds(),
+		"vms", len(vms.byID), "leases", len(a.leases))
 }
 
 // vmView indexes one List call so a Tick makes consistent decisions.

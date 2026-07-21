@@ -84,14 +84,19 @@ func validateDesired(d syncproto.DesiredLease) error {
 // buildReport assembles the sync request from current state. Callers hold
 // the agent lock.
 func (a *Agent) buildReport(ctx context.Context) (syncproto.SyncRequest, error) {
+	started := time.Now()
+	inventoryStarted := time.Now()
 	generations, workspaces, err := a.zvols.Inventory(ctx)
 	if err != nil {
 		return syncproto.SyncRequest{}, fmt.Errorf("inventory: %w", err)
 	}
+	inventoryElapsed := time.Since(inventoryStarted)
+	vmListStarted := time.Now()
 	vms, err := a.vms.List(ctx)
 	if err != nil {
 		return syncproto.SyncRequest{}, fmt.Errorf("listing vms: %w", err)
 	}
+	vmListElapsed := time.Since(vmListStarted)
 
 	request := syncproto.SyncRequest{HostID: a.cfg.HostID, BootID: a.bootID}
 	for _, g := range generations {
@@ -127,6 +132,12 @@ func (a *Agent) buildReport(ctx context.Context) (syncproto.SyncRequest, error) 
 	for _, slot := range occupancy {
 		request.Slots = append(request.Slots, *slot)
 	}
+	a.logger.Info("hostd.report.built",
+		"duration_ns", time.Since(started).Nanoseconds(),
+		"inventory_ns", inventoryElapsed.Nanoseconds(),
+		"vm_list_ns", vmListElapsed.Nanoseconds(),
+		"generations", len(generations), "workspaces", len(workspaces),
+		"vms", len(vms), "leases", len(a.leases))
 	return request, nil
 }
 
@@ -215,13 +226,16 @@ func (a *Agent) applyDesired(response syncproto.SyncResponse) {
 
 // syncOnce performs one report/desire exchange with the control plane.
 func (a *Agent) syncOnce(ctx context.Context) (time.Duration, error) {
+	started := time.Now()
 	a.mu.Lock()
 	request, err := a.buildReport(ctx)
 	a.mu.Unlock()
 	if err != nil {
 		return 0, err
 	}
+	reportElapsed := time.Since(started)
 
+	encodeStarted := time.Now()
 	body, err := json.Marshal(request)
 	if err != nil {
 		return 0, fmt.Errorf("encoding sync request: %w", err)
@@ -232,7 +246,9 @@ func (a *Agent) syncOnce(ctx context.Context) (time.Duration, error) {
 	}
 	httpRequest.Header.Set("Authorization", "Bearer "+a.credential)
 	httpRequest.Header.Set("Content-Type", "application/json")
+	encodeElapsed := time.Since(encodeStarted)
 
+	roundTripStarted := time.Now()
 	httpResponse, err := a.httpClient.Do(httpRequest)
 	if err != nil {
 		return 0, fmt.Errorf("sync: %w", err)
@@ -254,10 +270,21 @@ func (a *Agent) syncOnce(ctx context.Context) (time.Duration, error) {
 		// must never be applied.
 		return 0, fmt.Errorf("sync: response boot_id %q does not echo %q", response.BootID, a.bootID)
 	}
+	roundTripElapsed := time.Since(roundTripStarted)
 
+	applyStarted := time.Now()
 	a.mu.Lock()
 	a.applyDesired(response)
 	a.mu.Unlock()
+	applyElapsed := time.Since(applyStarted)
+	a.logger.Info("hostd.sync.completed",
+		"duration_ns", time.Since(started).Nanoseconds(),
+		"report_ns", reportElapsed.Nanoseconds(),
+		"encode_ns", encodeElapsed.Nanoseconds(),
+		"round_trip_ns", roundTripElapsed.Nanoseconds(),
+		"apply_ns", applyElapsed.Nanoseconds(),
+		"request_bytes", len(body), "desired_leases", len(response.Leases),
+		"poll_after_ms", response.PollAfterMillis)
 
 	if response.PollAfterMillis > 0 {
 		// Clamp both ways: a bad or hostile control-plane value must neither
