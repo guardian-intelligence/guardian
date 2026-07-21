@@ -47,6 +47,7 @@ func (s *syncServer) authorized(r *http.Request) bool {
 }
 
 func (s *syncServer) handleSync(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
 	ctx, span := s.tracer.Start(r.Context(), "hostd.sync")
 	defer span.End()
 
@@ -60,6 +61,7 @@ func (s *syncServer) handleSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	decodeStarted := time.Now()
 	var request syncproto.SyncRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, maxSyncRequestBytes)).Decode(&request); err != nil {
 		writeProblems(w, []problem{problemSyncPayloadInvalid("sync request does not parse: " + err.Error())})
@@ -73,17 +75,23 @@ func (s *syncServer) handleSync(w http.ResponseWriter, r *http.Request) {
 		attribute.String("host_id", request.HostID),
 		attribute.Int("leases", len(request.Leases)),
 	)
+	decodeElapsed := time.Since(decodeStarted)
 
+	hostIngestStarted := time.Now()
 	if err := s.st.UpsertHostSync(ctx, request.HostID, request.BootID, request.Slots); err != nil {
 		slog.Error("hostd sync: host ingest", "host_id", request.HostID, "err", err)
 		writeProblems(w, []problem{problemSyncUnavailable()})
 		return
 	}
+	hostIngestElapsed := time.Since(hostIngestStarted)
+	generationIngestStarted := time.Now()
 	if err := s.st.ObserveHostGenerations(ctx, request.HostID, request.Generations); err != nil {
 		slog.Error("hostd sync: generation ingest", "host_id", request.HostID, "err", err)
 		writeProblems(w, []problem{problemSyncUnavailable()})
 		return
 	}
+	generationIngestElapsed := time.Since(generationIngestStarted)
+	leaseReportStarted := time.Now()
 	for _, report := range request.Leases {
 		if err := s.applyLeaseReport(ctx, request.HostID, report); err != nil {
 			slog.Error("hostd sync: lease report", "host_id", request.HostID, "lease_id", report.LeaseID, "err", err)
@@ -91,16 +99,41 @@ func (s *syncServer) handleSync(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	leaseReportElapsed := time.Since(leaseReportStarted)
 
+	desiredStarted := time.Now()
 	response, err := s.desiredState(ctx, request)
 	if err != nil {
 		slog.Error("hostd sync: desired state", "host_id", request.HostID, "err", err)
 		writeProblems(w, []problem{problemSyncUnavailable()})
 		return
 	}
+	desiredElapsed := time.Since(desiredStarted)
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
+	encodeStarted := time.Now()
 	_ = json.NewEncoder(w).Encode(response)
+	encodeElapsed := time.Since(encodeStarted)
+	totalElapsed := time.Since(started)
+	span.SetAttributes(
+		attribute.Int64("postflight.decode_ns", decodeElapsed.Nanoseconds()),
+		attribute.Int64("postflight.host_ingest_ns", hostIngestElapsed.Nanoseconds()),
+		attribute.Int64("postflight.generation_ingest_ns", generationIngestElapsed.Nanoseconds()),
+		attribute.Int64("postflight.lease_reports_ns", leaseReportElapsed.Nanoseconds()),
+		attribute.Int64("postflight.desired_state_ns", desiredElapsed.Nanoseconds()),
+		attribute.Int64("postflight.encode_ns", encodeElapsed.Nanoseconds()),
+	)
+	slog.Info("postflight.controlplane.hostd_sync.completed",
+		"host_id", request.HostID,
+		"duration_ns", totalElapsed.Nanoseconds(),
+		"decode_ns", decodeElapsed.Nanoseconds(),
+		"host_ingest_ns", hostIngestElapsed.Nanoseconds(),
+		"generation_ingest_ns", generationIngestElapsed.Nanoseconds(),
+		"lease_reports_ns", leaseReportElapsed.Nanoseconds(),
+		"desired_state_ns", desiredElapsed.Nanoseconds(),
+		"encode_ns", encodeElapsed.Nanoseconds(),
+		"reported_leases", len(request.Leases),
+		"desired_leases", len(response.Leases))
 }
 
 // applyLeaseReport advances the control plane's lease record on one host
