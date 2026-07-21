@@ -54,7 +54,7 @@ jobs:
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       HOST: pr-${{ github.event.pull_request.number }}.guardianintelligence.org
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - uses: bazelbuild/setup-bazelisk@b39c379c82683a5f25d34f0d062761f62693e0b2 # v3.0.0
 
@@ -75,7 +75,7 @@ jobs:
         run: bazelisk run //src/products/viteplus-monorepo/apps/guardianintelligence-web/site:push_preview
 
       - name: Check out previews branch
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: previews
           path: .previews
