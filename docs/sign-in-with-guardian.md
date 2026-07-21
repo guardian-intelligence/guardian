@@ -146,3 +146,17 @@ account-linking prompt fails the canary instead of linking automatically.
 The separate `digital-guardian-software` organization exercises the staging
 Postflight GitHub App and CI runner path. It is not part of the customer-login
 canary and grants the login machine account no organization access.
+
+## Alerting
+
+Sign-in health is alerted on at the funnel, not on the canary Job: Keycloak's
+per-realm user event metrics (`keycloak_user_events_total`) count every login
+attempt — real users and the canary alike. Prod pages `critical` when a
+majority of recent attempts fail (`GuardianSignInFailing`) or when no attempt
+has succeeded for 35 minutes (`GuardianSignInStale`, two canary cycles). The
+canary's role in this scheme is a traffic floor: it guarantees at least one
+authentic journey per 15 minutes so the staleness alert stays meaningful with
+zero user traffic, and a single flaked run never pages. With today's
+canary-only traffic the staleness alert bounds detection at roughly 37
+minutes; the failure-rate alert takes over at minutes-scale as real login
+volume grows.
