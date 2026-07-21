@@ -67,6 +67,51 @@ func TestPoolReplacesStaleImageBeforeLeasing(t *testing.T) {
 	}
 }
 
+func TestPoolReapsIdleVMFromUnconfiguredClass(t *testing.T) {
+	ctx := context.Background()
+	vms := vm.NewFake()
+	vms.Images["legacy"] = "tank/images/legacy@golden"
+	vms.Images["confidential"] = "tank/images/confidential@golden"
+	if err := vms.Launch(ctx, "legacy-idle", "legacy"); err != nil {
+		t.Fatal(err)
+	}
+	if !vms.AdvanceBoot("legacy-idle") {
+		t.Fatal("legacy VM did not become warm")
+	}
+
+	instance, err := New(Config{
+		HostID:              "host-test",
+		ControlPlaneOrigin:  "https://control.invalid",
+		Slots:               map[vm.Class]int{"confidential": 1},
+		Images:              map[vm.Class]string{"confidential": "tank/images/confidential@golden"},
+		CheckoutGuestOrigin: "http://198.51.100.1:8480",
+	}, zvol.NewFake(), vms, "credential",
+		[]byte("0123456789abcdef0123456789abcdef"),
+		Options{NewID: func() string { return "replacement" }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance.HandleSync(syncproto.SyncResponse{
+		BootID: instance.bootID, PoolTargets: map[string]int{"confidential": 1},
+	})
+	instance.Tick(ctx)
+
+	legacy, err := vms.Status(ctx, "legacy-idle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacy.Phase != vm.PhaseGone {
+		t.Fatalf("legacy VM phase = %s, want gone", legacy.Phase)
+	}
+	replacement, err := vms.Status(ctx, "pool-replacement")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replacement.Phase != vm.PhaseBooting || replacement.Class != "confidential" {
+		t.Fatalf("replacement = %+v", replacement)
+	}
+}
+
 func TestVMUpdateAdvancesOnlyAssignedVM(t *testing.T) {
 	ctx := context.Background()
 	vms := vm.NewFake()
