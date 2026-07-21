@@ -54,8 +54,6 @@ func (p ProcessCheckpoints) restoreObserved(ctx context.Context, imagesDir, expe
 	pid, err := p.CRIU.restoreObserved(ctx, Capsule{
 		ImagesDir: imagesDir,
 		ExternalMounts: []ExternalMount{
-			{Key: "process", Path: p.ImagesRoot},
-			{Key: "root", Path: "/"},
 			{Key: "workspace", Path: externalMount},
 		},
 	}, expectedDigest, expectedVersion, observer)
@@ -89,8 +87,6 @@ func (p ProcessCheckpoints) dumpObserved(ctx context.Context, imagesDir, externa
 		RootPID:   rootPID,
 		ImagesDir: imagesDir,
 		ExternalMounts: []ExternalMount{
-			{Key: "process", Path: p.ImagesRoot},
-			{Key: "root", Path: "/"},
 			{Key: "workspace", Path: externalMount},
 		},
 	}, observer)
