@@ -41,9 +41,12 @@ const (
 // The exit code is meaningful only when err is nil.
 type RunRunner func(ctx context.Context, jitConfig string, env map[string]string, event func(RunnerEvent)) (int, error)
 
-// ExecRunner is the production RunRunner: run.sh under the runner user,
-// output scanned for the lifecycle lines. The JIT blob exists only in this
-// process and the runner's argv/environment — never on any disk.
+// ExecRunner is the production RunRunner: the one-job Listener under the
+// runner user, with output scanned for lifecycle lines. Running Listener
+// directly is important: run.sh retries Listener exit code 2 forever, which
+// would hide a pre-Worker protocol rejection from hostd and occupy the slot
+// until its listening deadline. The JIT blob exists only in this process and
+// the runner's argv/environment — never on any disk.
 func ExecRunner(root, username string, logger *slog.Logger) RunRunner {
 	return func(ctx context.Context, jitConfig string, env map[string]string, event func(RunnerEvent)) (int, error) {
 		account, err := user.Lookup(username)
@@ -59,7 +62,7 @@ func ExecRunner(root, username string, logger *slog.Logger) RunRunner {
 			return 0, fmt.Errorf("guestd: gid of %s: %w", username, err)
 		}
 
-		cmd := exec.CommandContext(ctx, filepath.Join(root, "run.sh"), "--jitconfig", jitConfig)
+		cmd := runnerCommand(ctx, root, jitConfig)
 		cmd.Dir = root
 		cmd.SysProcAttr = &syscall.SysProcAttr{
 			Credential: &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid)},
@@ -91,6 +94,10 @@ func ExecRunner(root, username string, logger *slog.Logger) RunRunner {
 		}
 		return 0, fmt.Errorf("guestd: waiting on runner: %w", err)
 	}
+}
+
+func runnerCommand(ctx context.Context, root, jitConfig string) *exec.Cmd {
+	return exec.CommandContext(ctx, filepath.Join(root, "bin", "Runner.Listener"), "run", "--jitconfig", jitConfig)
 }
 
 // outputObserver mirrors runner output into the log and folds lifecycle
