@@ -14,7 +14,7 @@ import (
 )
 
 // Version is the protocol revision a Hello announces.
-const Version = 8
+const Version = 9
 
 // WorkspaceReadyMarker is the file guestd drops at a converged workspace
 // mountpoint's root once every declared mount is in place. It is the shared
@@ -147,10 +147,15 @@ type TimingPoint struct {
 // CheckpointRestore selects the authenticated process artifact already on
 // the encrypted process volume. Empty means workspace-only cold fallback.
 type CheckpointRestore struct {
-	ImagesDir       string `json:"images_dir"`
-	ExpectedDigest  string `json:"expected_digest"`
-	ExpectedVersion string `json:"expected_version"`
-	ExternalMountAt string `json:"external_mount_at"`
+	ImagesDir       string            `json:"images_dir"`
+	ExpectedDigest  string            `json:"expected_digest"`
+	ExpectedVersion string            `json:"expected_version"`
+	ExternalMounts  []CheckpointMount `json:"external_mounts"`
+}
+
+type CheckpointMount struct {
+	Key  string `json:"key"`
+	Path string `json:"path"`
 }
 
 // Mount is one hot-attached disk the guest converges before any customer
@@ -171,15 +176,15 @@ type Mount struct {
 
 // Quiesce asks the guest to prove the selected volumes are mounted,
 // checkpoint the process capsule, and flush the filesystems. The host then
-// destroys QEMU before it snapshots either zvol.
+// destroys QEMU before it snapshots the generation zvols.
 type Quiesce struct {
 	Mountpoints []string        `json:"mountpoints"`
 	Checkpoint  *CheckpointDump `json:"checkpoint,omitempty"`
 }
 
 type CheckpointDump struct {
-	ImagesDir       string `json:"images_dir"`
-	ExternalMountAt string `json:"external_mount_at"`
+	ImagesDir      string            `json:"images_dir"`
+	ExternalMounts []CheckpointMount `json:"external_mounts"`
 }
 
 // Quiesced acknowledges a completed quiesce.

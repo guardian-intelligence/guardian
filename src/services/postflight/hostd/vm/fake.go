@@ -142,6 +142,7 @@ func (f *Fake) Rendezvous(_ context.Context, id ID, rendezvous Rendezvous) error
 	instance.status.Lease = rendezvous.Lease
 	if f.OnAttach != nil {
 		f.OnAttach(rendezvous.WorkspaceDevice)
+		f.OnAttach(rendezvous.ToolDevice)
 		f.OnAttach(rendezvous.ProcessDevice)
 	}
 	f.journal("rendezvous %s device=%s", id, rendezvous.WorkspaceDevice)
@@ -234,6 +235,7 @@ func (f *Fake) Destroy(_ context.Context, id ID) error {
 	}
 	if instance.rendezvous != nil && f.OnDetach != nil {
 		f.OnDetach(instance.rendezvous.WorkspaceDevice)
+		f.OnDetach(instance.rendezvous.ToolDevice)
 		f.OnDetach(instance.rendezvous.ProcessDevice)
 	}
 	delete(f.vms, id)
@@ -331,6 +333,7 @@ func (f *Fake) MarkExited(id ID, code int) bool {
 	if instance.rendezvous != nil && f.OnDetach != nil {
 		// The guest is dead; its devices are no longer held open.
 		f.OnDetach(instance.rendezvous.WorkspaceDevice)
+		f.OnDetach(instance.rendezvous.ToolDevice)
 		f.OnDetach(instance.rendezvous.ProcessDevice)
 		instance.rendezvous = nil
 	}

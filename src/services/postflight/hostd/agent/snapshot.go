@@ -16,6 +16,7 @@ type LeaseSnapshot struct {
 	Since            time.Time
 	VMID             string
 	Device           string
+	ToolDevice       string
 	ProcessDevice    string
 	ExecutionID      string
 	AttemptID        string
@@ -42,6 +43,7 @@ func (a *Agent) Snapshot() []LeaseSnapshot {
 			Since:            record.since,
 			VMID:             record.vmID,
 			Device:           record.device,
+			ToolDevice:       record.toolDevice,
 			ProcessDevice:    record.processDevice,
 			ExecutionID:      execution.ExecutionID,
 			AttemptID:        execution.AttemptID,

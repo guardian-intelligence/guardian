@@ -103,7 +103,7 @@ func (c CRIU) dumpObserved(ctx context.Context, capsule Capsule, observer checkp
 		"--log-file", "criu.log",
 		"--leave-stopped", "--file-locks", "--shell-job", "--tcp-close",
 		"--manage-cgroups=ignore",
-		"--external", "mnt[]",
+		"--ext-mount-map", "auto", "--enable-external-masters",
 	}
 	for _, mount := range sortedMounts(capsule.ExternalMounts) {
 		args = append(args, "--external", "mnt["+mount.Path+"]:"+mount.Key)
@@ -164,14 +164,14 @@ func (c CRIU) restoreObserved(ctx context.Context, capsule Capsule, expectedDige
 		"--root", "/",
 		"--file-locks", "--shell-job", "--tcp-close",
 		"--manage-cgroups=ignore",
-		"--external", "mnt[]",
+		"--ext-mount-map", "auto", "--enable-external-masters",
 	}
 	for _, mount := range sortedMounts(capsule.ExternalMounts) {
 		args = append(args, "--external", "mnt["+mount.Key+"]:"+mount.Path)
 	}
 	observeCheckpoint(observer, "restore_criu_started")
 	if _, err := c.runRestore(ctx, args...); err != nil {
-		return 0, err
+		return 0, c.restoreFailure(workDir, err)
 	}
 	observeCheckpoint(observer, "restore_criu_completed")
 	raw, err := os.ReadFile(pidfile)
@@ -183,6 +183,53 @@ func (c CRIU) restoreObserved(ctx context.Context, capsule Capsule, expectedDige
 		return 0, errors.New("guestd: CRIU returned an invalid root pid")
 	}
 	return pid, nil
+}
+
+func (c CRIU) restoreFailure(workDir string, restoreErr error) error {
+	file, err := os.Open(filepath.Join(workDir, "criu.log"))
+	if err != nil {
+		return restoreErr
+	}
+	defer file.Close()
+	const diagnosticTailBytes = 64 << 10
+	if info, err := file.Stat(); err == nil && info.Size() > diagnosticTailBytes {
+		_, _ = file.Seek(info.Size()-diagnosticTailBytes, io.SeekStart)
+	}
+	raw, err := io.ReadAll(io.LimitReader(file, diagnosticTailBytes))
+	if err != nil {
+		return restoreErr
+	}
+	var diagnostics []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if !strings.Contains(line, "Error (") {
+			continue
+		}
+		diagnostics = append(diagnostics, safeCRIUError(line))
+		if len(diagnostics) > 8 {
+			diagnostics = diagnostics[len(diagnostics)-8:]
+		}
+	}
+	if len(diagnostics) == 0 {
+		return restoreErr
+	}
+	return fmt.Errorf("%w; CRIU diagnostics: %s", restoreErr, strings.Join(diagnostics, " | "))
+}
+
+func safeCRIUError(line string) string {
+	if offset := strings.Index(line, "Error ("); offset >= 0 {
+		line = line[offset:]
+	}
+	fields := strings.Fields(line)
+	for index, field := range fields {
+		if strings.Contains(field, "/") && !strings.HasPrefix(field, "(criu/") {
+			fields[index] = "<path>"
+		}
+	}
+	line = strings.Join(fields, " ")
+	if len(line) > 512 {
+		line = line[:512]
+	}
+	return line
 }
 
 func (c CRIU) validate(capsule Capsule, requireRoot bool) error {

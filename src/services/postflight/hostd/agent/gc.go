@@ -111,5 +111,8 @@ func (a *Agent) destroyExecutionVolumes(ctx context.Context, lease zvol.LeaseID)
 	if err := a.zvols.DestroyProcess(ctx, lease); err != nil && !errors.Is(err, zvol.ErrNotFound) {
 		return err
 	}
+	if err := a.zvols.DestroyTool(ctx, lease); err != nil && !errors.Is(err, zvol.ErrNotFound) {
+		return err
+	}
 	return a.zvols.DestroyWorkspace(ctx, lease)
 }

@@ -256,10 +256,10 @@ func TestHappyPathRunSealForget(t *testing.T) {
 	deliver(world, 1)
 	world.Tick()
 	if world.HasLease("l1") {
-		t.Fatalf("acknowledged lease still tracked: snapshot=%+v process=%t attached=%t journal=%v", world.Lease("l1"), world.Zvols.HasProcess("l1"), world.Zvols.ProcessAttached("l1"), world.Zvols.Journal)
+		t.Fatalf("acknowledged lease still tracked: snapshot=%+v tool=%t process=%t tool-attached=%t process-attached=%t journal=%v", world.Lease("l1"), world.Zvols.HasTool("l1"), world.Zvols.HasProcess("l1"), world.Zvols.ToolAttached("l1"), world.Zvols.ProcessAttached("l1"), world.Zvols.Journal)
 	}
-	if world.Zvols.HasWorkspace("l1") {
-		t.Fatal("workspace survived collection")
+	if world.Zvols.HasWorkspace("l1") || world.Zvols.HasTool("l1") || world.Zvols.HasProcess("l1") {
+		t.Fatal("durable volume set survived collection")
 	}
 	if !world.Zvols.HasGeneration("g1") {
 		t.Fatal("generation destroyed without a reap verb")
@@ -468,10 +468,10 @@ func TestQuiesceFailureFailsTheLease(t *testing.T) {
 	deliver(world, 1)
 	world.Tick()
 	if world.HasLease("l1") {
-		t.Fatalf("acknowledged failed lease still tracked: snapshot=%+v process=%t attached=%t journal=%v", world.Lease("l1"), world.Zvols.HasProcess("l1"), world.Zvols.ProcessAttached("l1"), world.Zvols.Journal)
+		t.Fatalf("acknowledged failed lease still tracked: snapshot=%+v tool=%t process=%t tool-attached=%t process-attached=%t journal=%v", world.Lease("l1"), world.Zvols.HasTool("l1"), world.Zvols.HasProcess("l1"), world.Zvols.ToolAttached("l1"), world.Zvols.ProcessAttached("l1"), world.Zvols.Journal)
 	}
-	if world.Zvols.HasWorkspace("l1") {
-		t.Fatal("failed lease's workspace survived collection")
+	if world.Zvols.HasWorkspace("l1") || world.Zvols.HasTool("l1") || world.Zvols.HasProcess("l1") {
+		t.Fatal("failed lease's durable volume set survived collection")
 	}
 }
 
@@ -559,7 +559,7 @@ func TestCancelAtEveryStage(t *testing.T) {
 			// Omission collects the workspace.
 			deliver(world, 1)
 			world.TickN(2)
-			if world.HasLease("l1") || world.Zvols.HasWorkspace("l1") {
+			if world.HasLease("l1") || world.Zvols.HasWorkspace("l1") || world.Zvols.HasTool("l1") || world.Zvols.HasProcess("l1") {
 				t.Fatalf("cancel at %s: leftovers after ack", stage.name)
 			}
 		})
@@ -575,7 +575,7 @@ func TestOmittedLiveLeaseIsWithdrawn(t *testing.T) {
 	// same tick — one pass leaves no residue at all.
 	deliver(world, 1)
 	world.Tick()
-	if world.HasLease("l1") || world.Zvols.HasWorkspace("l1") {
+	if world.HasLease("l1") || world.Zvols.HasWorkspace("l1") || world.Zvols.HasTool("l1") || world.Zvols.HasProcess("l1") {
 		t.Fatal("withdrawn lease left residue")
 	}
 	statuses, _ := world.VMs.List(context.Background())
@@ -652,7 +652,7 @@ func TestRejectedSpecOnTerminalLeaseIsNotCollected(t *testing.T) {
 	// A genuine ack — the control plane stops naming it — collects it.
 	deliver(world, 0)
 	world.Tick()
-	if world.HasLease("l1") || world.Zvols.HasWorkspace("l1") {
+	if world.HasLease("l1") || world.Zvols.HasWorkspace("l1") || world.Zvols.HasTool("l1") || world.Zvols.HasProcess("l1") {
 		t.Fatal("acknowledged terminal lease left residue")
 	}
 }
@@ -935,7 +935,7 @@ func TestOrphanVMAndWorkspaceAreCollected(t *testing.T) {
 	world.VMs.MarkListening("vm-zombie")
 	world.VMs.MarkAssigned("vm-zombie", vm.Assignment{RequestID: "request-ghost", RunnerName: "ghost"})
 	if err := world.VMs.Rendezvous(context.Background(), "vm-zombie", vm.Rendezvous{
-		Lease: "ghost", WorkspaceDevice: "/dev/zvol/ghost-workspace", WorkspaceMountpoint: "/work", ProcessDevice: "/dev/zvol/ghost-process",
+		Lease: "ghost", WorkspaceDevice: "/dev/zvol/ghost-workspace", WorkspaceMountpoint: "/work", ToolDevice: "/dev/zvol/ghost-tool", ProcessDevice: "/dev/zvol/ghost-process",
 	}); err != nil {
 		t.Fatal(err)
 	}

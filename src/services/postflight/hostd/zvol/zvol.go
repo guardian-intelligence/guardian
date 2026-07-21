@@ -40,6 +40,11 @@ type WorkspaceVolume struct {
 // a process artifact can be sized independently.
 type ProcessVolume = WorkspaceVolume
 
+// ToolVolume holds workflow-installed toolchains that a restored process may
+// still have mapped or open. It is generation-coupled to the workspace and
+// process image instead of living on the disposable VM root disk.
+type ToolVolume = WorkspaceVolume
+
 // GenerationSnapshot is one sealed generation as observed on this host.
 type GenerationSnapshot struct {
 	Generation GenerationID
@@ -49,9 +54,10 @@ type GenerationSnapshot struct {
 	Bytes int64
 }
 
-// GenerationPair is the indivisible filesystem/process generation tuple.
-type GenerationPair struct {
+// GenerationSet is the indivisible workspace/tool/process generation tuple.
+type GenerationSet struct {
 	Workspace GenerationSnapshot
+	Tool      GenerationSnapshot
 	Process   GenerationSnapshot
 }
 
@@ -80,21 +86,24 @@ type Driver interface {
 	// the workspace. A missing process generation is a cold process cache,
 	// just as a missing workspace generation is a cold filesystem cache.
 	EnsureProcess(ctx context.Context, lease LeaseID, generation GenerationID, sizeBytes int64) (ProcessVolume, error)
+	EnsureTool(ctx context.Context, lease LeaseID, generation GenerationID, sizeBytes int64) (ToolVolume, error)
 
-	// SealPair takes the workspace and stopped-process source snapshots in one
-	// ZFS transaction, then promotes both lineages. A generation can never be
-	// published from source snapshots taken at different points in time.
-	SealPair(ctx context.Context, lease LeaseID, generation GenerationID) (GenerationPair, error)
+	// SealSet takes the workspace, tool, and stopped-process source snapshots
+	// in one ZFS transaction, then promotes every lineage. A generation can
+	// never be published from snapshots taken at different points in time.
+	SealSet(ctx context.Context, lease LeaseID, generation GenerationID) (GenerationSet, error)
 
 	// DestroyWorkspace removes a lease's workspace volume. ErrNotFound if
 	// already gone; ErrBusy if still attached.
 	DestroyWorkspace(ctx context.Context, lease LeaseID) error
+	DestroyTool(ctx context.Context, lease LeaseID) error
 	DestroyProcess(ctx context.Context, lease LeaseID) error
 
 	// DestroyGeneration removes a sealed generation and its snapshot. Only
 	// ever called on a control-plane reap verb. ErrBusy if clones depend on
 	// it.
 	DestroyGeneration(ctx context.Context, generation GenerationID) error
+	DestroyToolGeneration(ctx context.Context, generation GenerationID) error
 	DestroyProcessGeneration(ctx context.Context, generation GenerationID) error
 
 	// Inventory lists the generations and workspace volumes present on this

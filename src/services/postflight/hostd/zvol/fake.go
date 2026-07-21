@@ -22,6 +22,7 @@ type Fake struct {
 	// generation with clones refuses DestroyGeneration with ErrBusy.
 	clones  map[GenerationID]int
 	process *Fake
+	tool    *Fake
 	prefix  string
 
 	// Fail, when non-nil, is consulted before every operation with an
@@ -37,6 +38,7 @@ type Fake struct {
 func NewFake() *Fake {
 	f := newFakeVolumeTree("fake")
 	f.process = newFakeVolumeTree("fake/process-state")
+	f.tool = newFakeVolumeTree("fake/tool-state")
 	return f
 }
 
@@ -74,6 +76,9 @@ func (f *Fake) SeedGeneration(generation GenerationID, bytes int64) {
 	if f.process != nil {
 		f.process.SeedGeneration(generation, bytes)
 	}
+	if f.tool != nil {
+		f.tool.SeedGeneration(generation, bytes)
+	}
 }
 
 func (f *Fake) EnsureProcess(ctx context.Context, lease LeaseID, generation GenerationID, sizeBytes int64) (ProcessVolume, error) {
@@ -87,6 +92,22 @@ func (f *Fake) EnsureProcess(ctx context.Context, lease LeaseID, generation Gene
 	if err == nil {
 		f.mu.Lock()
 		f.journal("ensure-process %s from=%q size=%d", lease, generation, sizeBytes)
+		f.mu.Unlock()
+	}
+	return volume, err
+}
+
+func (f *Fake) EnsureTool(ctx context.Context, lease LeaseID, generation GenerationID, sizeBytes int64) (ToolVolume, error) {
+	f.mu.Lock()
+	err := f.fail("ensure-tool", string(lease))
+	f.mu.Unlock()
+	if err != nil {
+		return ToolVolume{}, err
+	}
+	volume, err := f.tool.EnsureWorkspace(ctx, lease, generation, sizeBytes)
+	if err == nil {
+		f.mu.Lock()
+		f.journal("ensure-tool %s from=%q size=%d", lease, generation, sizeBytes)
 		f.mu.Unlock()
 	}
 	return volume, err
@@ -108,6 +129,22 @@ func (f *Fake) DestroyProcess(ctx context.Context, lease LeaseID) error {
 	return err
 }
 
+func (f *Fake) DestroyTool(ctx context.Context, lease LeaseID) error {
+	f.mu.Lock()
+	err := f.fail("destroy-tool", string(lease))
+	f.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	err = f.tool.DestroyWorkspace(ctx, lease)
+	if err == nil {
+		f.mu.Lock()
+		f.journal("destroy-tool %s", lease)
+		f.mu.Unlock()
+	}
+	return err
+}
+
 func (f *Fake) DestroyProcessGeneration(ctx context.Context, generation GenerationID) error {
 	f.mu.Lock()
 	err := f.fail("destroy-process-generation", string(generation))
@@ -119,6 +156,22 @@ func (f *Fake) DestroyProcessGeneration(ctx context.Context, generation Generati
 	if err == nil {
 		f.mu.Lock()
 		f.journal("destroy-process-generation %s", generation)
+		f.mu.Unlock()
+	}
+	return err
+}
+
+func (f *Fake) DestroyToolGeneration(ctx context.Context, generation GenerationID) error {
+	f.mu.Lock()
+	err := f.fail("destroy-tool-generation", string(generation))
+	f.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	err = f.tool.DestroyGeneration(ctx, generation)
+	if err == nil {
+		f.mu.Lock()
+		f.journal("destroy-tool-generation %s", generation)
 		f.mu.Unlock()
 	}
 	return err
@@ -137,6 +190,10 @@ func (f *Fake) SetProcessAttached(lease LeaseID, attached bool) {
 	f.process.SetAttached(lease, attached)
 }
 
+func (f *Fake) SetToolAttached(lease LeaseID, attached bool) {
+	f.tool.SetAttached(lease, attached)
+}
+
 // HasWorkspace reports whether a lease's workspace volume exists.
 func (f *Fake) HasWorkspace(lease LeaseID) bool {
 	f.mu.Lock()
@@ -150,11 +207,21 @@ func (f *Fake) HasProcess(lease LeaseID) bool {
 	return f.process.HasWorkspace(lease)
 }
 
+func (f *Fake) HasTool(lease LeaseID) bool {
+	return f.tool.HasWorkspace(lease)
+}
+
 // ProcessAttached reports whether a process volume is held by a VM.
 func (f *Fake) ProcessAttached(lease LeaseID) bool {
 	f.process.mu.Lock()
 	defer f.process.mu.Unlock()
 	return f.process.attached[lease]
+}
+
+func (f *Fake) ToolAttached(lease LeaseID) bool {
+	f.tool.mu.Lock()
+	defer f.tool.mu.Unlock()
+	return f.tool.attached[lease]
 }
 
 // HasGeneration reports whether a generation is resident.
@@ -202,34 +269,40 @@ func (f *Fake) EnsureWorkspace(_ context.Context, lease LeaseID, generation Gene
 	return volume, nil
 }
 
-// SealPair implements Driver.
-func (f *Fake) SealPair(_ context.Context, lease LeaseID, generation GenerationID) (GenerationPair, error) {
+// SealSet implements Driver.
+func (f *Fake) SealSet(_ context.Context, lease LeaseID, generation GenerationID) (GenerationSet, error) {
 	if err := ValidateName("lease", string(lease)); err != nil {
-		return GenerationPair{}, err
+		return GenerationSet{}, err
 	}
 	if err := ValidateName("generation", string(generation)); err != nil {
-		return GenerationPair{}, err
+		return GenerationSet{}, err
 	}
 	f.mu.Lock()
+	f.tool.mu.Lock()
 	f.process.mu.Lock()
 	defer f.process.mu.Unlock()
+	defer f.tool.mu.Unlock()
 	defer f.mu.Unlock()
-	if err := f.fail("seal-pair", string(generation)); err != nil {
-		return GenerationPair{}, err
+	if err := f.fail("seal-set", string(generation)); err != nil {
+		return GenerationSet{}, err
 	}
 	workspaceGeneration, workspaceExists := f.generations[generation]
+	toolGeneration, toolExists := f.tool.generations[generation]
 	processGeneration, processExists := f.process.generations[generation]
-	if workspaceExists != processExists {
-		return GenerationPair{}, fmt.Errorf("zvol: incomplete paired seal")
+	if workspaceExists != toolExists || workspaceExists != processExists {
+		return GenerationSet{}, fmt.Errorf("zvol: incomplete generation seal")
 	}
 	if workspaceExists {
-		return GenerationPair{Workspace: workspaceGeneration, Process: processGeneration}, nil
+		return GenerationSet{Workspace: workspaceGeneration, Tool: toolGeneration, Process: processGeneration}, nil
 	}
 	if _, ok := f.workspaces[lease]; !ok {
-		return GenerationPair{}, fmt.Errorf("workspace %s: %w", lease, ErrNotFound)
+		return GenerationSet{}, fmt.Errorf("workspace %s: %w", lease, ErrNotFound)
+	}
+	if _, ok := f.tool.workspaces[lease]; !ok {
+		return GenerationSet{}, fmt.Errorf("tool workspace %s: %w", lease, ErrNotFound)
 	}
 	if _, ok := f.process.workspaces[lease]; !ok {
-		return GenerationPair{}, fmt.Errorf("process workspace %s: %w", lease, ErrNotFound)
+		return GenerationSet{}, fmt.Errorf("process workspace %s: %w", lease, ErrNotFound)
 	}
 	workspaceGeneration = GenerationSnapshot{
 		Generation: generation,
@@ -241,10 +314,16 @@ func (f *Fake) SealPair(_ context.Context, lease LeaseID, generation GenerationI
 		Snapshot:   f.process.prefix + "/gen/" + string(generation) + "@sealed",
 		Bytes:      1,
 	}
+	toolGeneration = GenerationSnapshot{
+		Generation: generation,
+		Snapshot:   f.tool.prefix + "/gen/" + string(generation) + "@sealed",
+		Bytes:      1,
+	}
 	f.generations[generation] = workspaceGeneration
+	f.tool.generations[generation] = toolGeneration
 	f.process.generations[generation] = processGeneration
-	f.journal("seal-pair %s generation=%s", lease, generation)
-	return GenerationPair{Workspace: workspaceGeneration, Process: processGeneration}, nil
+	f.journal("seal-set %s generation=%s", lease, generation)
+	return GenerationSet{Workspace: workspaceGeneration, Tool: toolGeneration, Process: processGeneration}, nil
 }
 
 // DestroyWorkspace implements Driver.

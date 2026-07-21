@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const rendezvousTraceSchema = 5
+const rendezvousTraceSchema = 6
 
 const (
 	eventVMLaunchStarted                   = "vm_launch_started"
@@ -35,6 +35,7 @@ const (
 	eventQMPRendezvousStarted              = "qmp_rendezvous_started"
 	eventQMPConnected                      = "qmp_connected"
 	eventWorkspaceDeviceAttached           = "workspace_device_attached"
+	eventToolDeviceAttached                = "tool_device_attached"
 	eventProcessDeviceAttached             = "process_device_attached"
 	eventGuestRendezvousSent               = "guest_rendezvous_sent"
 	eventRendezvousDispatched              = "rendezvous_dispatched"
@@ -96,6 +97,7 @@ const (
 
 const (
 	volumeWorkspace = "workspace"
+	volumeTool      = "tool"
 	volumeProcess   = "process"
 )
 
@@ -111,6 +113,7 @@ var allowedTraceEvents = map[string]bool{
 	eventAssignmentObserved: true, eventGenerationMaterializationStarted: true,
 	eventGenerationResolved: true, eventQMPRendezvousStarted: true,
 	eventQMPConnected: true, eventWorkspaceDeviceAttached: true,
+	eventToolDeviceAttached:    true,
 	eventProcessDeviceAttached: true, eventGuestRendezvousSent: true,
 	eventRendezvousDispatched: true, eventGuestRendezvousReceived: true,
 	eventMountConvergenceStarted: true, eventMountConvergenceCompleted: true,
@@ -412,7 +415,7 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 		}
 	}
 
-	if len(boundVolumes) == 2 {
+	if len(boundVolumes) == 3 {
 		if boundVolumes[0].Materialization == "clone" {
 			report.RestoreMode = "warm"
 		} else if boundVolumes[0].Materialization == "empty" {
@@ -431,7 +434,7 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 			eventHostAssignmentObserved, eventAssignmentUpdateReceived,
 			eventAssignmentObserved, eventGenerationMaterializationStarted,
 			eventGenerationResolved, eventQMPRendezvousStarted,
-			eventQMPConnected, eventWorkspaceDeviceAttached,
+			eventQMPConnected, eventWorkspaceDeviceAttached, eventToolDeviceAttached,
 			eventProcessDeviceAttached, eventGuestRendezvousSent,
 			eventRendezvousDispatched, eventGuestRendezvousReceived,
 			eventMountConvergenceStarted, eventMountConvergenceCompleted,
@@ -456,7 +459,7 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 				}
 			}
 		default:
-			violate("rendezvous does not prove a paired cold or warm generation")
+			violate("rendezvous does not prove a complete cold or warm generation")
 		}
 		if !throughRelease {
 			required = append(required,
@@ -599,7 +602,7 @@ func validateVolumes(volumes []volumeEvidence, platform *platformEvidence, requi
 	datasets := map[string]bool{}
 	serials := map[string]bool{}
 	for _, volume := range volumes {
-		if volume.Role != volumeWorkspace && volume.Role != volumeProcess {
+		if volume.Role != volumeWorkspace && volume.Role != volumeTool && volume.Role != volumeProcess {
 			violate("rendezvous contains unknown volume role %q", volume.Role)
 		}
 		if _, ok := byRole[volume.Role]; ok {
@@ -646,16 +649,17 @@ func validateVolumes(volumes []volumeEvidence, platform *platformEvidence, requi
 		}
 	}
 	workspace, haveWorkspace := byRole[volumeWorkspace]
+	tool, haveTool := byRole[volumeTool]
 	process, haveProcess := byRole[volumeProcess]
-	if !haveWorkspace || !haveProcess || len(volumes) != 2 {
-		violate("rendezvous must contain exactly one workspace and one process volume")
+	if !haveWorkspace || !haveTool || !haveProcess || len(volumes) != 3 {
+		violate("rendezvous must contain exactly one workspace, tool, and process volume")
 		return
 	}
-	if workspace.Materialization != process.Materialization {
-		violate("workspace and process volumes have different materialization modes")
+	if workspace.Materialization != tool.Materialization || workspace.Materialization != process.Materialization {
+		violate("workspace, tool, and process volumes have different materialization modes")
 	}
-	if workspace.Materialization == "clone" && workspace.Generation != process.Generation {
-		violate("workspace and process volumes do not share one generation")
+	if workspace.Materialization == "clone" && (workspace.Generation != tool.Generation || workspace.Generation != process.Generation) {
+		violate("workspace, tool, and process volumes do not share one generation")
 	}
 	if workspace.Materialization == "clone" && (platform == nil || platform.CRIUVersion == "") {
 		violate("warm rendezvous has no CRIU version in the platform fingerprint")
@@ -760,6 +764,10 @@ func deriveDurations(out map[string]int64, seen map[string]*rendezvousEvent) {
 		"generation_materialization":         {eventGenerationMaterializationStarted, eventGenerationResolved},
 		"assignment_to_rendezvous_dispatch":  {eventAssignmentObserved, eventRendezvousDispatched},
 		"qmp_rendezvous":                     {eventQMPRendezvousStarted, eventGuestRendezvousSent},
+		"qmp_to_workspace_attach":            {eventQMPConnected, eventWorkspaceDeviceAttached},
+		"workspace_to_tool_attach":           {eventWorkspaceDeviceAttached, eventToolDeviceAttached},
+		"tool_to_process_attach":             {eventToolDeviceAttached, eventProcessDeviceAttached},
+		"process_attach_to_guest_dispatch":   {eventProcessDeviceAttached, eventGuestRendezvousSent},
 		"guest_mount_convergence":            {eventMountConvergenceStarted, eventMountConvergenceCompleted},
 		"criu_restore":                       {eventCRIURestoreStarted, eventCRIURestoreCompleted},
 		"restore_version_validation":         {eventRestoreVersionStarted, eventRestoreVersionCompleted},
@@ -860,7 +868,7 @@ func cmdValidateRendezvous(args []string) error {
 	fs := flag.NewFlagSet("validate-rendezvous", flag.ContinueOnError)
 	fs.StringVar(&tracePath, "trace", "", "JSONL rendezvous trace to validate (required)")
 	fs.StringVar(&jsonPath, "json", "", "JSON report output path (default <trace>.report.json)")
-	fs.BoolVar(&throughRelease, "through-release", false, "validate exact assignment, paired rendezvous, restore, and customer-step release without requiring post-job checkpoint/seal evidence")
+	fs.BoolVar(&throughRelease, "through-release", false, "validate exact assignment, generation rendezvous, restore, and customer-step release without requiring post-job checkpoint/seal evidence")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

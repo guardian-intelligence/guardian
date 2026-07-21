@@ -177,6 +177,7 @@ type meta struct {
 	// WorkspaceMountpoint is where the assignment told the guest to mount
 	// the workspace; Quiesce needs it after a restart.
 	WorkspaceMountpoint string `json:"workspace_mountpoint,omitempty"`
+	ToolMountpoint      string `json:"tool_mountpoint,omitempty"`
 	ProcessMountpoint   string `json:"process_mountpoint,omitempty"`
 	// CID is the VM's vsock address for the guestd channel.
 	CID uint32 `json:"cid"`
@@ -387,11 +388,11 @@ func (q *QEMU) Rendezvous(ctx context.Context, id ID, rendezvous Rendezvous) err
 	if err := validateID(id); err != nil {
 		return err
 	}
-	if rendezvous.WorkspaceDevice == "" || rendezvous.ProcessDevice == "" || rendezvous.WorkspaceMountpoint == "" {
-		return errors.New("vm: rendezvous requires workspace device, process device, and workspace mountpoint")
+	if rendezvous.WorkspaceDevice == "" || rendezvous.ToolDevice == "" || rendezvous.ProcessDevice == "" || rendezvous.WorkspaceMountpoint == "" {
+		return errors.New("vm: rendezvous requires workspace, tool, and process devices plus a workspace mountpoint")
 	}
-	if rendezvous.WorkspaceDevice == rendezvous.ProcessDevice {
-		return errors.New("vm: workspace and process devices must be distinct")
+	if rendezvous.WorkspaceDevice == rendezvous.ToolDevice || rendezvous.WorkspaceDevice == rendezvous.ProcessDevice || rendezvous.ToolDevice == rendezvous.ProcessDevice {
+		return errors.New("vm: workspace, tool, and process devices must be distinct")
 	}
 	if (rendezvous.CheckpointDigest == "") != (rendezvous.CheckpointVersion == "") {
 		return errors.New("vm: checkpoint digest and version must be supplied together")
@@ -414,6 +415,7 @@ func (q *QEMU) Rendezvous(ctx context.Context, id ID, rendezvous Rendezvous) err
 	}
 	if record.WorkspaceMountpoint == "" {
 		record.WorkspaceMountpoint = rendezvous.WorkspaceMountpoint
+		record.ToolMountpoint = toolMountpoint
 		record.ProcessMountpoint = processMountpoint
 		if err := q.writeMeta(record); err != nil {
 			return err
@@ -432,6 +434,10 @@ func (q *QEMU) Rendezvous(ctx context.Context, id ID, rendezvous Rendezvous) err
 		return err
 	}
 	q.recordTiming(id, "workspace_device_attached")
+	if err := q.attachVolume(ctx, client, toolNode, toolDevice, rendezvous.ToolDevice); err != nil {
+		return err
+	}
+	q.recordTiming(id, "tool_device_attached")
 	if err := q.attachVolume(ctx, client, processNode, processDevice, rendezvous.ProcessDevice); err != nil {
 		return err
 	}
@@ -447,6 +453,11 @@ func (q *QEMU) Rendezvous(ctx context.Context, id ID, rendezvous Rendezvous) err
 				Mountpoint: rendezvous.WorkspaceMountpoint,
 				Options:    workspaceMountOptions,
 			}, {
+				Serial:     toolNode,
+				Filesystem: workspaceFilesystem,
+				Mountpoint: toolMountpoint,
+				Options:    toolMountOptions,
+			}, {
 				Serial:     processNode,
 				Filesystem: workspaceFilesystem,
 				Mountpoint: processMountpoint,
@@ -457,7 +468,10 @@ func (q *QEMU) Rendezvous(ctx context.Context, id ID, rendezvous Rendezvous) err
 		request.Checkpoint = &guestproto.CheckpointRestore{
 			ImagesDir: processImagesDir, ExpectedDigest: rendezvous.CheckpointDigest,
 			ExpectedVersion: rendezvous.CheckpointVersion,
-			ExternalMountAt: rendezvous.WorkspaceMountpoint,
+			ExternalMounts: []guestproto.CheckpointMount{
+				{Key: workspaceNode, Path: rendezvous.WorkspaceMountpoint},
+				{Key: toolNode, Path: toolMountpoint},
+			},
 		}
 	}
 	if err := q.cfg.Guest.Rendezvous(deliverCtx, id, record.CID, request); err != nil {
@@ -522,9 +536,13 @@ func (q *QEMU) Quiesce(ctx context.Context, id ID) (CheckpointArtifact, error) {
 	quiesceCtx, cancel := context.WithTimeout(ctx, q.quiesceTimeout)
 	defer cancel()
 	reply, err := q.cfg.Guest.Quiesce(quiesceCtx, id, record.CID, guestproto.Quiesce{
-		Mountpoints: []string{record.WorkspaceMountpoint, processMountpoint},
+		Mountpoints: []string{record.WorkspaceMountpoint, toolMountpoint, processMountpoint},
 		Checkpoint: &guestproto.CheckpointDump{
-			ImagesDir: processImagesDir, ExternalMountAt: record.WorkspaceMountpoint,
+			ImagesDir: processImagesDir,
+			ExternalMounts: []guestproto.CheckpointMount{
+				{Key: workspaceNode, Path: record.WorkspaceMountpoint},
+				{Key: toolNode, Path: toolMountpoint},
+			},
 		},
 	})
 	q.mu.Lock()
@@ -914,6 +932,9 @@ func (q *QEMU) destroyLocked(ctx context.Context, id ID) error {
 		if client, dialErr := dialQMP(ctx, qmpSocketPath(dir)); dialErr == nil {
 			if detachErr := q.detachVolume(ctx, client, workspaceNode, workspaceDevice); detachErr != nil {
 				q.cfg.Logger.Warn("workspace detach during destroy", "vm", id, "err", detachErr)
+			}
+			if detachErr := q.detachVolume(ctx, client, toolNode, toolDevice); detachErr != nil {
+				q.cfg.Logger.Warn("tool volume detach during destroy", "vm", id, "err", detachErr)
 			}
 			if detachErr := q.detachVolume(ctx, client, processNode, processDevice); detachErr != nil {
 				q.cfg.Logger.Warn("process volume detach during destroy", "vm", id, "err", detachErr)

@@ -11,9 +11,12 @@ import (
 
 func TestCRIUDumpAndRestoreContract(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("CRIU_ARGS_DIR", root)
 	bin := filepath.Join(root, "criu")
 	script := `#!/bin/sh
 set -eu
+operation="$1"
+printf '%s\n' "$@" >"$CRIU_ARGS_DIR/$operation.args"
 case "$1" in
   --version) echo 'Version: 4.2' ;;
   check) echo 'Looks good.' ;;
@@ -39,7 +42,10 @@ esac
 	imagesRoot := filepath.Join(root, "encrypted")
 	images := filepath.Join(imagesRoot, "generation-1")
 	engine := CRIU{Path: bin, ImagesRoot: imagesRoot, WorkRoot: filepath.Join(imagesRoot, "work")}
-	capsule := Capsule{RootPID: 123, ImagesDir: images, ExternalMounts: []ExternalMount{{Key: "workspace", Path: "/workspace"}}}
+	capsule := Capsule{RootPID: 123, ImagesDir: images, ExternalMounts: []ExternalMount{
+		{Key: "workspace", Path: "/workspace"},
+		{Key: "tool", Path: "/opt/actions-runner/_work/_tool"},
+	}}
 	var stages []string
 	artifact, err := engine.dumpObserved(context.Background(), capsule, func(event string) {
 		stages = append(stages, event)
@@ -54,6 +60,17 @@ esac
 	}
 	if strings.Join(stages, ",") != strings.Join(wantStages, ",") {
 		t.Fatalf("checkpoint stages = %v, want %v", stages, wantStages)
+	}
+	dumpArgs, err := os.ReadFile(filepath.Join(root, "dump.args"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(dumpArgs), "--ext-mount-map\nauto\n") ||
+		!strings.Contains(string(dumpArgs), "--enable-external-masters\n") ||
+		!strings.Contains(string(dumpArgs), "mnt[/opt/actions-runner/_work/_tool]:tool\n") ||
+		!strings.Contains(string(dumpArgs), "mnt[/workspace]:workspace\n") ||
+		strings.Contains(string(dumpArgs), "mnt[]") {
+		t.Fatalf("dump args do not carry the proven external-mount contract:\n%s", dumpArgs)
 	}
 	if artifact.Version != "Version: 4.2" || !strings.HasPrefix(artifact.Digest, "sha256:") {
 		t.Fatalf("artifact = %+v", artifact)
@@ -76,11 +93,59 @@ esac
 	if strings.Join(restoreStages, ",") != strings.Join(wantRestoreStages, ",") {
 		t.Fatalf("restore stages = %v, want %v", restoreStages, wantRestoreStages)
 	}
+	restoreArgs, err := os.ReadFile(filepath.Join(root, "restore.args"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(restoreArgs), "--ext-mount-map\nauto\n") ||
+		!strings.Contains(string(restoreArgs), "--enable-external-masters\n") ||
+		!strings.Contains(string(restoreArgs), "mnt[tool]:/opt/actions-runner/_work/_tool\n") ||
+		!strings.Contains(string(restoreArgs), "mnt[workspace]:/workspace\n") ||
+		strings.Contains(string(restoreArgs), "mnt[]") {
+		t.Fatalf("restore args do not carry the proven external-mount contract:\n%s", restoreArgs)
+	}
 	if _, err := engine.Restore(context.Background(), capsule, "sha256:"+strings.Repeat("0", 64), artifact.Version); err == nil {
 		t.Fatal("tampered artifact restored")
 	}
 	if _, err := engine.Restore(context.Background(), capsule, artifact.Digest, "Version: 4.1"); err == nil || !strings.Contains(err.Error(), "does not match checkpoint version") {
 		t.Fatalf("mismatched CRIU version error = %v", err)
+	}
+}
+
+func TestCRIURestoreFailureReportsBoundedRedactedDiagnostics(t *testing.T) {
+	root := t.TempDir()
+	imagesRoot := filepath.Join(root, "encrypted")
+	images := filepath.Join(imagesRoot, "images")
+	if err := os.MkdirAll(images, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(images, "inventory.img"), []byte("image"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	versionBin := filepath.Join(root, "criu")
+	if err := os.WriteFile(versionBin, []byte("#!/bin/sh\necho 'Version: 4.2'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	engine := CRIU{
+		Path: versionBin, ImagesRoot: imagesRoot, WorkRoot: filepath.Join(imagesRoot, "work"),
+		RestoreRun: func(_ context.Context, _ string, _ ...string) (string, error) {
+			log := filepath.Join(imagesRoot, "work", "restore", "criu.log")
+			if err := os.WriteFile(log, []byte("(0.1) Error (criu/mount.c:123): mnt: Can't open /tenant/private/value\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return "", os.ErrInvalid
+		},
+	}
+	digest, err := digestDirectory(images)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = engine.Restore(context.Background(), Capsule{ImagesDir: images}, digest, "Version: 4.2")
+	if err == nil || !strings.Contains(err.Error(), "(criu/mount.c:123)") || !strings.Contains(err.Error(), "<path>") {
+		t.Fatalf("restore diagnostics = %v", err)
+	}
+	if strings.Contains(err.Error(), "/tenant/private/value") {
+		t.Fatalf("restore diagnostics exposed a guest path: %v", err)
 	}
 }
 

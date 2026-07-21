@@ -86,15 +86,16 @@ func TestBootstrapOriginTimingRemainsUnownedAfterAssignment(t *testing.T) {
 func TestColdWorkspaceTraceNamesEmptyMaterialization(t *testing.T) {
 	record := &lease{
 		volume:        zvol.WorkspaceVolume{Name: "tank/postflight/ws/lease-1"},
+		toolVolume:    zvol.ToolVolume{Name: "tank/postflight/tool-state/ws/lease-1"},
 		processVolume: zvol.ProcessVolume{Name: "tank/postflight/process-state/ws/lease-1"},
 	}
 
-	if got := generationSet(record); got != "workspace:empty,process:empty" {
-		t.Fatalf("generationSet() = %q, want paired empty generations", got)
+	if got := generationSet(record); got != "workspace:empty,tool:empty,process:empty" {
+		t.Fatalf("generationSet() = %q, want an empty generation set", got)
 	}
 	volumes := traceVolumes(record, true)
-	if len(volumes) != 2 {
-		t.Fatalf("traceVolumes() returned %d volumes, want 2", len(volumes))
+	if len(volumes) != 3 {
+		t.Fatalf("traceVolumes() returned %d volumes, want 3", len(volumes))
 	}
 	volume := volumes[0]
 	if volume.Materialization != "empty" || volume.Generation != "" ||
@@ -108,13 +109,17 @@ func TestWarmWorkspaceTraceNamesCloneMaterialization(t *testing.T) {
 		Name:               "tank/postflight/ws/lease-1",
 		Source:             "generation-1",
 		SourceSnapshotGUID: "123456789",
+	}, toolVolume: zvol.ToolVolume{
+		Name:               "tank/postflight/tool-state/ws/lease-1",
+		Source:             "generation-1",
+		SourceSnapshotGUID: "555555555",
 	}, processVolume: zvol.ProcessVolume{
 		Name:               "tank/postflight/process-state/ws/lease-1",
 		Source:             "generation-1",
 		SourceSnapshotGUID: "987654321",
 	}}
 
-	if got := generationSet(record); got != "workspace:generation-1:123456789,process:generation-1:987654321" {
+	if got := generationSet(record); got != "workspace:generation-1:123456789,tool:generation-1:555555555,process:generation-1:987654321" {
 		t.Fatalf("generationSet() = %q", got)
 	}
 	volume := traceVolumes(record, false)[0]

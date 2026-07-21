@@ -178,10 +178,15 @@ func RunCapsuleEnter(args []string) error {
 	if err := syscall.Mount("", "/", "", syscall.MS_REC|syscall.MS_PRIVATE, ""); err != nil {
 		return fmt.Errorf("guestd: making capsule mounts private: %w", err)
 	}
-	for _, mountpoint := range []string{"/boot/efi", "/boot"} {
+	// CRIU images must stay outside the captured tree, while a private tmpfs
+	// keeps process-backed temporary mappings available in the next guest.
+	for _, mountpoint := range []string{ProcessMountpoint, "/boot/efi", "/boot", "/tmp"} {
 		if err := syscall.Unmount(mountpoint, syscall.MNT_DETACH); err != nil && !errors.Is(err, syscall.EINVAL) && !errors.Is(err, syscall.ENOENT) {
 			return fmt.Errorf("guestd: detaching capsule mount %s: %w", mountpoint, err)
 		}
+	}
+	if err := syscall.Mount("tmpfs", "/tmp", "tmpfs", syscall.MS_NOSUID|syscall.MS_NODEV, "mode=1777"); err != nil {
+		return fmt.Errorf("guestd: mounting capsule tmpfs: %w", err)
 	}
 	if err := syscall.Mount("proc", "/proc", "proc", syscall.MS_NOSUID|syscall.MS_NODEV|syscall.MS_NOEXEC, ""); err != nil {
 		return fmt.Errorf("guestd: mounting capsule procfs: %w", err)

@@ -38,6 +38,7 @@ go_library(
         "migrations/003_workspace_generations.sql",
         "migrations/004_provider_installations.sql",
 		"migrations/005_confidential_generations.sql",
+		"migrations/006_durable_tool_generations.sql",
     ],
     importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/controlplane",
     visibility = ["//visibility:private"],
