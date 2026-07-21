@@ -15,14 +15,16 @@ func TestArgvGolden(t *testing.T) {
 		CPUs:       4,
 		MemoryMiB:  16384,
 		RootDevice: "/dev/zvol/tank/postflight/vm-pool-0001",
+		Firmware:   "/usr/share/postflight/OVMF.fd",
 		StateDir:   "/var/lib/hostd/vms/pool-0001",
 		VsockCID:   3,
 	}
 	golden := strings.Join([]string{
 		"/usr/bin/qemu-system-x86_64",
 		"-nodefaults",
-		"-machine", "pc-q35-8.2,accel=kvm",
-		"-cpu", "host",
+		"-machine", "pc-q35-11.0,accel=kvm,confidential-guest-support=sev0",
+		"-object", "sev-snp-guest,id=sev0,cbitpos=51,reduced-phys-bits=1,policy=0x30000",
+		"-cpu", "EPYC-v4",
 		"-smp", "4",
 		"-m", "16384",
 		"-name", "postflight-vm-pool-0001",
@@ -30,6 +32,7 @@ func TestArgvGolden(t *testing.T) {
 		"-display", "none",
 		"-serial", "file:/var/lib/hostd/vms/pool-0001/serial.log",
 		"-qmp", "unix:/var/lib/hostd/vms/pool-0001/qmp.sock,server=on,wait=off",
+		"-bios", "/usr/share/postflight/OVMF.fd",
 		"-device", "virtio-scsi-pci,id=scsi0",
 		"-blockdev", "driver=raw,node-name=root,file.driver=host_device,file.filename=/dev/zvol/tank/postflight/vm-pool-0001,file.cache.direct=on,file.aio=native",
 		"-device", "scsi-hd,bus=scsi0.0,drive=root,serial=root,bootindex=0",
@@ -51,6 +54,7 @@ func TestArgvUserNetwork(t *testing.T) {
 		CPUs:         4,
 		MemoryMiB:    16384,
 		RootDevice:   "/dev/zvol/tank/postflight/vm-pool-0001",
+		Firmware:     "/usr/share/postflight/OVMF.fd",
 		StateDir:     "/var/lib/hostd/vms/pool-0001",
 		VsockCID:     3,
 		GuestNetwork: "user",
@@ -76,7 +80,7 @@ func TestArgvUserNetwork(t *testing.T) {
 // TestArgvNoNetworkByDefault: an unset or none datapath attaches no NIC.
 func TestArgvNoNetworkByDefault(t *testing.T) {
 	for _, mode := range []string{"", "none"} {
-		spec := LaunchSpec{QEMUPath: "q", ID: "x", CPUs: 1, MemoryMiB: 1, RootDevice: "d", StateDir: "s", VsockCID: 1, GuestNetwork: mode}
+		spec := LaunchSpec{QEMUPath: "q", ID: "x", CPUs: 1, MemoryMiB: 1, RootDevice: "d", Firmware: "f", StateDir: "s", VsockCID: 1, GuestNetwork: mode}
 		if strings.Contains(strings.Join(spec.Argv(), " "), "netdev") {
 			t.Fatalf("mode %q attached a NIC", mode)
 		}
@@ -91,6 +95,7 @@ func TestArgvDeterminism(t *testing.T) {
 		CPUs:       2,
 		MemoryMiB:  2048,
 		RootDevice: "/dev/zvol/tank/postflight/vm-pool-0002",
+		Firmware:   "/usr/share/postflight/OVMF.fd",
 		StateDir:   "/var/lib/hostd/vms/pool-0002",
 		VsockCID:   4,
 	}

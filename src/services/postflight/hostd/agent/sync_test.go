@@ -157,10 +157,10 @@ func TestDesiredLeaseValidation(t *testing.T) {
 		t.Fatalf("generic pre-assignment listener rejected: %v", err)
 	}
 	cases := map[string]func(*syncproto.DesiredLease){
-		"empty id":        func(d *syncproto.DesiredLease) { d.LeaseID = "" },
-		"traversal id":    func(d *syncproto.DesiredLease) { d.LeaseID = "../evil" },
-		"unknown state":   func(d *syncproto.DesiredLease) { d.State = "explode" },
-		"seal sans gen":   func(d *syncproto.DesiredLease) { d.State = syncproto.DesiredSeal; d.SealGeneration = "" },
+		"empty id":      func(d *syncproto.DesiredLease) { d.LeaseID = "" },
+		"traversal id":  func(d *syncproto.DesiredLease) { d.LeaseID = "../evil" },
+		"unknown state": func(d *syncproto.DesiredLease) { d.State = "explode" },
+		"seal sans gen": func(d *syncproto.DesiredLease) { d.State = syncproto.DesiredSeal; d.SealGeneration = "" },
 		"run sans identity": func(d *syncproto.DesiredLease) {
 			d.ExecutionID = ""
 		},
@@ -181,5 +181,55 @@ func TestDesiredLeaseValidation(t *testing.T) {
 		if err := validateDesired(lease); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+func TestDesiredProjectionPreservesLocallyRoutedExecution(t *testing.T) {
+	instance := testAgent(t, "http://control.invalid")
+	listener := syncproto.DesiredLease{
+		LeaseID: "listener-1", ExecutionLeaseID: "listener-1", State: syncproto.DesiredRun,
+		ExecutionID: "execution-listener", AttemptID: "attempt-listener",
+		RepositoryFullName: "acme/listener", RunnerClass: "c", JITConfig: "consumed-jit",
+		ProviderRunID: 10, ProviderJobID: 11, ProviderRunAttempt: 1, JobDisplayName: "build",
+	}
+	execution := syncproto.DesiredLease{
+		LeaseID: "execution-2", ExecutionLeaseID: "execution-2", State: syncproto.DesiredRun,
+		ExecutionID: "execution-actual", AttemptID: "attempt-actual",
+		RepositoryFullName: "acme/actual", RunnerClass: "c", JITConfig: "other-jit",
+		ProviderRunID: 20, ProviderJobID: 21, ProviderRunAttempt: 1, JobDisplayName: "build",
+	}
+	instance.applyDesired(syncproto.SyncResponse{Leases: []syncproto.DesiredLease{listener, execution}})
+	record := instance.leases[listener.LeaseID]
+	record.volume = zvol.WorkspaceVolume{Name: "listener-1", Device: "/dev/listener-1"}
+	captured := execution
+	record.execution = &captured
+	instance.applyDesired(syncproto.SyncResponse{Leases: []syncproto.DesiredLease{listener, execution}})
+	if instance.quarantined[listener.LeaseID] || len(instance.desired) != 2 {
+		t.Fatal("stale control-plane projection displaced the authoritative local route")
+	}
+	if got := instance.leases[listener.LeaseID].executionLeaseID(); got != execution.LeaseID {
+		t.Fatalf("stale projection changed local execution to %q, want %q", got, execution.LeaseID)
+	}
+
+	projected := execution
+	projected.LeaseID = listener.LeaseID
+	projected.JITConfig = ""
+	projected.Process.ExpectedDigest = "sha256:new-checkpoint"
+	projected.Process.Generation = "generation-1"
+	projected.Workspace.Generation = "generation-1"
+	instance.applyDesired(syncproto.SyncResponse{Leases: []syncproto.DesiredLease{projected}})
+
+	if instance.quarantined[listener.LeaseID] {
+		t.Fatal("control-plane confirmation of the local route quarantined the live listener")
+	}
+	got := instance.leases[listener.LeaseID]
+	if got.executionLeaseID() != execution.LeaseID {
+		t.Fatalf("execution lease = %q, want %q", got.executionLeaseID(), execution.LeaseID)
+	}
+	if got.spec.JITConfig != "consumed-jit" {
+		t.Fatal("consumed listener credential was not retained in memory")
+	}
+	if got.execution.Process.ExpectedDigest != "sha256:new-checkpoint" {
+		t.Fatal("routed execution did not accept the control-plane generation update")
 	}
 }

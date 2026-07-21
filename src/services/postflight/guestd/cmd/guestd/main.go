@@ -6,9 +6,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
+	"os/user"
+	"strconv"
 	"syscall"
 
 	"github.com/guardian-intelligence/guardian/src/services/postflight/guestd"
@@ -17,6 +20,30 @@ import (
 )
 
 func main() {
+	if guestd.IsRunnerWorkerExec(os.Args) {
+		if err := guestd.RunRunnerWorkerExec(os.Args); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
+	if guestd.IsRunnerAssigned(os.Args) {
+		if err := guestd.RunRunnerAssigned(os.Args); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
+	if guestd.IsValidateAssignment(os.Args) {
+		if err := guestd.RunValidateAssignment(os.Args); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
+	if guestd.IsCapsuleEnter(os.Args) {
+		if err := guestd.RunCapsuleEnter(os.Args); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 	if err := run(logger); err != nil {
@@ -26,15 +53,45 @@ func main() {
 }
 
 func run(logger *slog.Logger) error {
+	binary, err := os.Executable()
+	if err != nil {
+		return err
+	}
 	encryption, err := guestd.LoadEncryptionMode(guestd.EncryptionModePath)
 	if err != nil {
 		return err
 	}
+	capsules := &guestd.CapsuleManager{
+		BinaryPath: binary,
+		InitPath:   "/usr/bin/tini",
+		SleepPath:  "/usr/bin/sleep",
+		RunnerRoot: guestd.RunnerRoot,
+	}
+	checkpoints := &guestd.ProcessCheckpoints{
+		Capsules:   capsules,
+		ImagesRoot: guestd.ProcessMountpoint,
+		CRIU: guestd.CRIU{
+			Path: "/usr/sbin/criu", ImagesRoot: guestd.ProcessMountpoint,
+			WorkRoot:   guestd.ProcessMountpoint + "/work",
+			RestoreRun: guestd.RunRestorePrivate,
+		},
+	}
+	runner, err := user.Lookup("runner")
+	if err != nil {
+		return fmt.Errorf("lookup runner account: %w", err)
+	}
+	runnerGID, err := strconv.Atoi(runner.Gid)
+	if err != nil {
+		return fmt.Errorf("parse runner gid: %w", err)
+	}
 	server, err := guestd.New(guestd.Config{
-		System:     guestd.RealSystem{},
-		RunRunner:  guestd.ExecRunner(guestd.RunnerRoot, "runner", logger),
-		Encryption: encryption,
-		Logger:     logger,
+		System:               guestd.RealSystem{},
+		RunRunner:            guestd.ExecRunner(guestd.RunnerRoot, "runner", logger),
+		Checkpoints:          checkpoints,
+		Encryption:           encryption,
+		AssignmentSocketMode: 0o660,
+		AssignmentSocketGID:  runnerGID,
+		Logger:               logger,
 	})
 	if err != nil {
 		return err
@@ -48,7 +105,14 @@ func run(logger *slog.Logger) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	if err := server.Serve(ctx, listener); err != nil && ctx.Err() == nil {
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	errs := make(chan error, 2)
+	go func() { errs <- server.Serve(runCtx, listener) }()
+	go func() { errs <- server.ServeAssignments(runCtx, guestd.AssignmentSocketPath) }()
+	err = <-errs
+	cancel()
+	if err != nil && ctx.Err() == nil {
 		return err
 	}
 	return nil

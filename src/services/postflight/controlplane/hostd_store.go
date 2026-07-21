@@ -229,7 +229,8 @@ RETURNING generation`
 const sqlSealLease = `
 UPDATE host_leases
 SET state = 'sealing', reported_state = 'exited', exit_code = $2, jit_config = '',
-    seal_generation = $3, seal_deadline_at = $4, updated_at = now()
+    seal_generation = $3, seal_deadline_at = $4,
+    checkpoint_digest = $5, checkpoint_version = $6, updated_at = now()
 WHERE lease_id = $1 AND state IN ('assigned', 'ready')
 RETURNING provider_job_id, runner_class`
 
@@ -239,14 +240,14 @@ RETURNING provider_job_id, runner_class`
 // the demand — one transaction, guarded by the lease's current state so a
 // replayed report is a no-op. Only branch trust ever seals: PR workspaces
 // are read-only borrowers of the target branch's lineage.
-func (s *pgStore) CompleteLease(ctx context.Context, hostID, leaseID string, exitCode int, sealDeadline time.Time) (jobID int64, sealGeneration string, done bool, err error) {
-	return s.CompleteRoutedLease(ctx, hostID, leaseID, leaseID, exitCode, sealDeadline)
+func (s *pgStore) CompleteLease(ctx context.Context, hostID, leaseID string, exitCode int, checkpoint *syncproto.CheckpointArtifact, sealDeadline time.Time) (jobID int64, sealGeneration string, done bool, err error) {
+	return s.CompleteRoutedLease(ctx, hostID, leaseID, leaseID, exitCode, checkpoint, sealDeadline)
 }
 
 // CompleteRoutedLease completes the execution GitHub actually sent to a
 // listener, while releasing that listener's physical slot. The two lease
 // IDs differ under same-label displacement.
-func (s *pgStore) CompleteRoutedLease(ctx context.Context, hostID, listenerLeaseID, executionLeaseID string, exitCode int, sealDeadline time.Time) (jobID int64, sealGeneration string, done bool, err error) {
+func (s *pgStore) CompleteRoutedLease(ctx context.Context, hostID, listenerLeaseID, executionLeaseID string, exitCode int, checkpoint *syncproto.CheckpointArtifact, sealDeadline time.Time) (jobID int64, sealGeneration string, done bool, err error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, "", false, err
@@ -262,12 +263,13 @@ func (s *pgStore) CompleteRoutedLease(ctx context.Context, hostID, listenerLease
 	if err != nil {
 		return 0, "", false, err
 	}
-	if exitCode == 0 && trustClass == trustClassBranch && scopeID != "" {
+	if exitCode == 0 && trustClass == trustClassBranch && scopeID != "" && checkpoint != nil && checkpoint.Digest != "" && checkpoint.Version != "" {
 		if err := tx.QueryRow(ctx, sqlInsertSealGeneration, hostID, class, scopeID, observedSource).Scan(&sealGeneration); err != nil {
 			return 0, "", false, err
 		}
 		err = tx.QueryRow(ctx, sqlSealLease,
-			executionLeaseID, exitCode, sealGeneration, sealDeadline).
+			executionLeaseID, exitCode, sealGeneration, sealDeadline,
+			checkpoint.Digest, checkpoint.Version).
 			Scan(&jobID, &class)
 	} else {
 		err = tx.QueryRow(ctx, sqlCompleteLease,
@@ -311,6 +313,7 @@ const sqlRecordLeaseSealed = `
 UPDATE host_leases
 SET state = 'completed', reported_state = 'sealed', updated_at = now()
 WHERE lease_id = $1 AND state = 'sealing' AND seal_generation = $2
+  AND checkpoint_digest = $3 AND checkpoint_version = $4
 RETURNING provider_job_id`
 
 const sqlLeaseSealContext = `
@@ -328,18 +331,22 @@ WHERE listener.lease_id = $1
 FOR UPDATE OF listener, execution`
 
 const sqlMarkGenerationSealed = `
-UPDATE workspace_generations SET sealed_at = now(), updated_at = now()
+UPDATE workspace_generations
+SET sealed_at = now(), process_digest = $2, criu_version = $3, updated_at = now()
 WHERE generation = $1 AND state = 'candidate'`
 
 // RecordLeaseSealed is the sealed-report transition: the host confirmed the
 // exact generation this lease was asked to produce, so the candidate becomes
 // promotable and the lease terminalizes (leaving the desired set, which lets
 // the host collect the workspace volume).
-func (s *pgStore) RecordLeaseSealed(ctx context.Context, hostID, leaseID, sealedGeneration string) (int64, bool, error) {
-	return s.RecordRoutedLeaseSealed(ctx, hostID, leaseID, leaseID, sealedGeneration)
+func (s *pgStore) RecordLeaseSealed(ctx context.Context, hostID, leaseID, sealedGeneration string, checkpoint *syncproto.CheckpointArtifact) (int64, bool, error) {
+	return s.RecordRoutedLeaseSealed(ctx, hostID, leaseID, leaseID, sealedGeneration, checkpoint)
 }
 
-func (s *pgStore) RecordRoutedLeaseSealed(ctx context.Context, hostID, listenerLeaseID, executionLeaseID, sealedGeneration string) (int64, bool, error) {
+func (s *pgStore) RecordRoutedLeaseSealed(ctx context.Context, hostID, listenerLeaseID, executionLeaseID, sealedGeneration string, checkpoint *syncproto.CheckpointArtifact) (int64, bool, error) {
+	if checkpoint == nil || checkpoint.Digest == "" || checkpoint.Version == "" {
+		return 0, false, nil
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, false, err
@@ -356,14 +363,14 @@ func (s *pgStore) RecordRoutedLeaseSealed(ctx context.Context, hostID, listenerL
 	}
 	var jobID int64
 	err = tx.QueryRow(ctx, sqlRecordLeaseSealed,
-		executionLeaseID, sealedGeneration).Scan(&jobID)
+		executionLeaseID, sealedGeneration, checkpoint.Digest, checkpoint.Version).Scan(&jobID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, false, nil
 	}
 	if err != nil {
 		return 0, false, err
 	}
-	if _, err := tx.Exec(ctx, sqlMarkGenerationSealed, sealedGeneration); err != nil {
+	if _, err := tx.Exec(ctx, sqlMarkGenerationSealed, sealedGeneration, checkpoint.Digest, checkpoint.Version); err != nil {
 		return 0, false, err
 	}
 	return jobID, true, tx.Commit(ctx)
@@ -497,10 +504,16 @@ type desiredLeaseRow struct {
 	JITConfig            string
 	Generation           string
 	SizeBytes            int64
+	ProcessSizeBytes     int64
+	ProcessDigest        string
+	ProcessVersion       string
 	SealGeneration       string
+	SealProcessDigest    string
+	SealProcessVersion   string
 	ProviderRunID        int64
 	ProviderJobID        int64
 	ProviderRunAttempt   int64
+	JobDisplayName       string
 	AssignedRunnerName   string
 	RendezvousAuthorized bool
 }
@@ -519,10 +532,16 @@ SELECT listener.lease_id,
     listener.jit_config,
     COALESCE(execution.workspace_generation, listener.workspace_generation),
     COALESCE(execution.workspace_size_bytes, listener.workspace_size_bytes),
+    class.process_disk_bytes,
+    COALESCE(source.process_digest, ''),
+    COALESCE(source.criu_version, ''),
     COALESCE(execution.seal_generation, listener.seal_generation),
+    COALESCE(execution.checkpoint_digest, listener.checkpoint_digest),
+    COALESCE(execution.checkpoint_version, listener.checkpoint_version),
     job.provider_run_id,
     COALESCE(execution.provider_job_id, listener.provider_job_id),
     job.provider_run_attempt,
+    job.name,
     CASE WHEN execution.runner_class = listener.runner_class THEN assignment.runner_name ELSE '' END,
     COALESCE(
         assignment.runner_name = listener.lease_id
@@ -545,6 +564,9 @@ LEFT JOIN LATERAL (
 ) execution ON true
 JOIN github_workflow_jobs job
     ON job.provider_job_id = COALESCE(execution.provider_job_id, listener.provider_job_id)
+JOIN runner_classes class ON class.class = listener.runner_class
+LEFT JOIN workspace_generations source
+    ON source.generation = COALESCE(execution.workspace_generation, listener.workspace_generation)
 WHERE listener.host_id = $1
   AND (
       (execution.lease_id IS NULL AND listener.state IN ('assigned', 'ready', 'sealing'))
@@ -564,8 +586,10 @@ func (s *pgStore) ListDesiredLeases(ctx context.Context, hostID string) ([]desir
 		if err := rows.Scan(&r.LeaseID, &r.ExecutionLeaseID, &r.State,
 			&r.ExecutionID, &r.AttemptID, &r.OrgID, &r.InstallationID,
 			&r.RepositoryID, &r.RepositoryFullName, &r.RunnerClass, &r.JITConfig,
-			&r.Generation, &r.SizeBytes, &r.SealGeneration, &r.ProviderRunID,
-			&r.ProviderJobID, &r.ProviderRunAttempt, &r.AssignedRunnerName,
+			&r.Generation, &r.SizeBytes, &r.ProcessSizeBytes, &r.ProcessDigest,
+			&r.ProcessVersion, &r.SealGeneration, &r.SealProcessDigest,
+			&r.SealProcessVersion, &r.ProviderRunID,
+			&r.ProviderJobID, &r.ProviderRunAttempt, &r.JobDisplayName, &r.AssignedRunnerName,
 			&r.RendezvousAuthorized); err != nil {
 			return nil, err
 		}

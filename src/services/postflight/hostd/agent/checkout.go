@@ -17,7 +17,7 @@ func (a *Agent) ResolveActiveLease(_ context.Context, executionID, attemptID str
 		if record.state.Terminal() {
 			continue
 		}
-		spec := record.spec
+		spec := record.executionSpec()
 		if spec.ExecutionID != executionID || spec.AttemptID != attemptID {
 			continue
 		}
@@ -29,7 +29,7 @@ func (a *Agent) ResolveActiveLease(_ context.Context, executionID, attemptID str
 			RepositoryID:       spec.RepositoryID,
 			RepositoryFullName: spec.RepositoryFullName,
 			RunnerClass:        spec.RunnerClass,
-			RunnerName:         spec.LeaseID,
+			RunnerName:         record.spec.LeaseID,
 		}, true, nil
 	}
 	return checkoutbundle.LeaseIdentity{}, false, nil

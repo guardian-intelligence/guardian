@@ -1,5 +1,7 @@
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
+exports_files(["pins.env"])
+
 sh_test(
     name = "image_test",
     size = "small",

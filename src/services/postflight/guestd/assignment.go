@@ -1,0 +1,348 @@
+package guestd
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/guestproto"
+	"github.com/guardian-intelligence/guardian/src/services/postflight/timing"
+)
+
+const (
+	AssignmentSocketPath = "/run/postflight/assignment.sock"
+	CapsulePIDPath       = "/run/postflight/capsule.pid"
+	RunnerWorkerReal     = "/opt/actions-runner/bin/Runner.Worker.real"
+	localMessageLimit    = 1 << 20
+)
+
+type localRequest struct {
+	Kind       string                  `json:"kind"`
+	Assignment *guestproto.Assignment  `json:"assignment,omitempty"`
+	Identity   *guestproto.JobIdentity `json:"identity,omitempty"`
+}
+
+type localReply struct {
+	Ready bool              `json:"ready"`
+	Env   map[string]string `json:"env,omitempty"`
+	Error string            `json:"error,omitempty"`
+}
+
+// ServeAssignments accepts the two synchronous runner-side gates. The
+// listener gate runs before Runner.Worker exists; the validation gate runs
+// from GitHub's documented job-start hook before any customer step.
+func (s *Server) ServeAssignments(ctx context.Context, socketPath string) error {
+	if socketPath == "" {
+		socketPath = AssignmentSocketPath
+	}
+	if !filepath.IsAbs(socketPath) || filepath.Clean(socketPath) != socketPath {
+		return fmt.Errorf("guestd: unsafe assignment socket %q", socketPath)
+	}
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {
+		return err
+	}
+	if err := os.Remove(socketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+	defer os.Remove(socketPath)
+	if err := os.Chmod(socketPath, s.cfg.AssignmentSocketMode); err != nil {
+		return err
+	}
+	if s.cfg.AssignmentSocketGID >= 0 {
+		if err := os.Chown(socketPath, -1, s.cfg.AssignmentSocketGID); err != nil {
+			return err
+		}
+	}
+	stop := context.AfterFunc(ctx, func() { listener.Close() })
+	defer stop()
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return err
+		}
+		go s.handleLocal(ctx, conn)
+	}
+}
+
+func (s *Server) handleLocal(ctx context.Context, conn net.Conn) {
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(s.cfg.HookDeadline))
+	requestCtx, cancel := context.WithTimeout(ctx, s.cfg.HookDeadline)
+	defer cancel()
+	decoder := json.NewDecoder(io.LimitReader(conn, localMessageLimit))
+	var request localRequest
+	if err := decoder.Decode(&request); err != nil {
+		_ = json.NewEncoder(conn).Encode(localReply{Error: "invalid request"})
+		return
+	}
+	var reply localReply
+	switch request.Kind {
+	case "assigned":
+		reply = s.awaitAssignment(requestCtx, request.Assignment)
+	case "validate":
+		reply = s.validateAssignment(request.Identity)
+	default:
+		reply.Error = "unknown request"
+	}
+	_ = json.NewEncoder(conn).Encode(reply)
+}
+
+func (s *Server) awaitAssignment(ctx context.Context, assignment *guestproto.Assignment) localReply {
+	if assignment == nil || assignment.RequestID == "" || assignment.JobID == "" || assignment.RunnerName == "" ||
+		assignment.JobDisplayName == "" || assignment.Identity == nil || assignment.Identity.RunID == "" ||
+		assignment.Identity.RunAttempt <= 0 || assignment.Identity.RunnerName != assignment.RunnerName ||
+		assignment.Identity.Repository == "" || assignment.Identity.WorkflowJob == "" {
+		return localReply{Error: "incomplete assignment"}
+	}
+	assignment.Timing = append(assignment.Timing, guestTiming(s.cfg.Timing.Point("guest_assignment_received")))
+	s.mu.Lock()
+	if s.assignment != nil {
+		duplicate := s.assignment.RequestID == assignment.RequestID && s.assignment.RunnerName == assignment.RunnerName
+		s.mu.Unlock()
+		if !duplicate {
+			return localReply{Error: "conflicting assignment"}
+		}
+	} else {
+		captured := *assignment
+		captured.Timing = append([]guestproto.TimingPoint(nil), assignment.Timing...)
+		s.assignment = &captured
+		s.mu.Unlock()
+		if err := s.send(guestproto.Message{Kind: guestproto.KindAssignment, Assignment: &captured}); err != nil {
+			s.cfg.Logger.Warn("assignment not delivered", "request_id", assignment.RequestID, "err", err)
+		}
+	}
+	select {
+	case <-s.workerGate:
+		s.mu.Lock()
+		err := s.gateErr
+		s.mu.Unlock()
+		if err != nil {
+			return localReply{Error: err.Error()}
+		}
+		return localReply{Ready: true}
+	case <-ctx.Done():
+		return localReply{Error: ctx.Err().Error()}
+	}
+}
+
+func (s *Server) validateAssignment(identity *guestproto.JobIdentity) localReply {
+	if identity == nil {
+		return localReply{Error: "missing identity"}
+	}
+	s.mu.Lock()
+	authorized := s.authorized
+	clock := s.clock
+	s.mu.Unlock()
+	if authorized == nil || authorized.Identity == nil || clock == nil {
+		return localReply{Error: "worker was not authorized"}
+	}
+	if *authorized.Identity != *identity {
+		return localReply{Error: "job identity does not match assignment"}
+	}
+	blocked := guestTiming(s.cfg.Timing.Point("job_hook_validated"))
+	s.sendStatus(guestproto.RunnerStatus{
+		State: guestproto.RunnerHookBlocked, Identity: identity, Clock: clock,
+		Timing: []guestproto.TimingPoint{blocked},
+	})
+	released := guestTiming(s.cfg.Timing.Point("customer_steps_released"))
+	s.sendStatus(guestproto.RunnerStatus{
+		State: guestproto.RunnerReleased, Identity: identity, Clock: clock,
+		Timing: []guestproto.TimingPoint{released},
+	})
+	return localReply{Ready: true, Env: authorized.Env}
+}
+
+func guestTiming(point timing.Point) guestproto.TimingPoint {
+	return guestproto.TimingPoint{
+		Event: point.Event, Source: point.Source, BootID: point.BootID,
+		Sequence: point.Sequence, MonotonicNS: point.MonotonicNS, UnixNS: point.UnixNS,
+	}
+}
+
+// IsRunnerAssigned reports the short-lived command invoked by the patched
+// Runner.Listener before it dispatches the job to Runner.Worker.
+func IsRunnerAssigned(args []string) bool {
+	return len(args) == 10 && args[1] == "runner-assigned"
+}
+
+func RunRunnerAssigned(args []string) error {
+	if !IsRunnerAssigned(args) {
+		return errors.New("guestd: invalid runner-assigned invocation")
+	}
+	requestID, jobID, runnerName := args[2], args[3], args[4]
+	runID, rawAttempt, repository, workflowJob, jobDisplayName := args[5], args[6], args[7], args[8], args[9]
+	attempt, err := strconv.Atoi(rawAttempt)
+	if err != nil || attempt <= 0 ||
+		strings.ContainsAny(strings.Join(args[2:], ""), "\x00\r\n") ||
+		requestID == "" || jobID == "" || runnerName == "" || runID == "" || repository == "" || workflowJob == "" || jobDisplayName == "" {
+		return errors.New("guestd: unsafe assignment identity")
+	}
+	recorder, err := commandRecorder("runner-listener:" + runnerName)
+	if err != nil {
+		return err
+	}
+	assignment := &guestproto.Assignment{
+		RequestID: requestID, JobID: jobID, RunnerName: runnerName, JobDisplayName: jobDisplayName,
+		Identity: &guestproto.JobIdentity{
+			RunID: runID, RunAttempt: attempt, RunnerName: runnerName,
+			Repository: repository, WorkflowJob: workflowJob,
+		},
+		Timing: []guestproto.TimingPoint{guestTiming(recorder.Point("runner_assignment_received"))},
+	}
+	return callLocal(localRequest{Kind: "assigned", Assignment: assignment}, nil)
+}
+
+func IsValidateAssignment(args []string) bool {
+	return len(args) == 2 && args[1] == "validate-assignment"
+}
+
+func RunValidateAssignment(args []string) error {
+	if !IsValidateAssignment(args) {
+		return errors.New("guestd: invalid validate-assignment invocation")
+	}
+	attempt, err := strconv.Atoi(os.Getenv("GITHUB_RUN_ATTEMPT"))
+	if err != nil || attempt <= 0 {
+		return errors.New("guestd: invalid GITHUB_RUN_ATTEMPT")
+	}
+	identity := &guestproto.JobIdentity{
+		RunID: os.Getenv("GITHUB_RUN_ID"), RunAttempt: attempt,
+		RunnerName: os.Getenv("RUNNER_NAME"), Repository: os.Getenv("GITHUB_REPOSITORY"),
+		WorkflowJob: os.Getenv("GITHUB_JOB"),
+	}
+	var reply localReply
+	if err := callLocal(localRequest{Kind: "validate", Identity: identity}, &reply); err != nil {
+		return err
+	}
+	envPath := os.Getenv("GITHUB_ENV")
+	if envPath == "" {
+		return errors.New("guestd: GITHUB_ENV is missing")
+	}
+	return appendJobEnvironment(envPath, reply.Env)
+}
+
+func callLocal(request localRequest, replyOut *localReply) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	return callLocalAt(ctx, AssignmentSocketPath, request, replyOut)
+}
+
+// AwaitRunnerAssignment is the listener's synchronous pre-worker gate. The
+// CLI wrapper and transport conformance test share this implementation.
+func AwaitRunnerAssignment(ctx context.Context, socketPath string, assignment guestproto.Assignment) error {
+	return callLocalAt(ctx, socketPath, localRequest{Kind: "assigned", Assignment: &assignment}, nil)
+}
+
+// ValidateRunnerAssignment is the job-start hook's defense-in-depth gate.
+func ValidateRunnerAssignment(ctx context.Context, socketPath string, identity guestproto.JobIdentity) (map[string]string, error) {
+	var reply localReply
+	if err := callLocalAt(ctx, socketPath, localRequest{Kind: "validate", Identity: &identity}, &reply); err != nil {
+		return nil, err
+	}
+	return reply.Env, nil
+}
+
+func callLocalAt(ctx context.Context, socketPath string, request localRequest, replyOut *localReply) error {
+	dialer := net.Dialer{Timeout: 2 * time.Second}
+	conn, err := dialer.DialContext(ctx, "unix", socketPath)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	}
+	if err := json.NewEncoder(conn).Encode(request); err != nil {
+		return err
+	}
+	var reply localReply
+	if err := json.NewDecoder(io.LimitReader(conn, localMessageLimit)).Decode(&reply); err != nil {
+		return err
+	}
+	if reply.Error != "" {
+		return errors.New(reply.Error)
+	}
+	if !reply.Ready {
+		return errors.New("guestd: assignment was not released")
+	}
+	if replyOut != nil {
+		*replyOut = reply
+	}
+	return nil
+}
+
+func appendJobEnvironment(path string, env map[string]string) error {
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	keys := make([]string, 0, len(env))
+	for key, value := range env {
+		if key == "" || strings.ContainsAny(key, "=\r\n") || strings.ContainsAny(value, "\r\n") {
+			return errors.New("guestd: unsafe job environment")
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		value := env[key]
+		if _, err := fmt.Fprintf(file, "%s=%s\n", key, value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func commandRecorder(source string) (*timing.Recorder, error) {
+	raw, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	if err != nil {
+		return nil, err
+	}
+	return timing.New(source, strings.TrimSpace(string(raw)))
+}
+
+// IsRunnerWorkerExec detects the Runner.Worker path replaced by the image
+// builder. The wrapper preserves GitHub's inherited IPC descriptors while
+// nsenter forks the real worker into the restored PID and mount namespaces.
+func IsRunnerWorkerExec(args []string) bool {
+	return filepath.Base(args[0]) == "Runner.Worker" && len(args) >= 2 && args[1] == "spawnclient"
+}
+
+func RunRunnerWorkerExec(args []string) error {
+	if !IsRunnerWorkerExec(args) {
+		return errors.New("guestd: invalid Runner.Worker invocation")
+	}
+	raw, err := os.ReadFile(CapsulePIDPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return syscall.Exec(RunnerWorkerReal, append([]string{RunnerWorkerReal}, args[1:]...), os.Environ())
+	}
+	if err != nil {
+		return fmt.Errorf("guestd: read capsule pid: %w", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil || pid <= 1 {
+		return errors.New("guestd: invalid capsule pid")
+	}
+	nsenter := "/usr/bin/nsenter"
+	nsenterArgs := []string{nsenter, "--target", strconv.Itoa(pid), "--pid", "--mount", "--", RunnerWorkerReal}
+	nsenterArgs = append(nsenterArgs, args[1:]...)
+	return syscall.Exec(nsenter, nsenterArgs, os.Environ())
+}

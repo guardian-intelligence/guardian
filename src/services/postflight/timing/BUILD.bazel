@@ -1,0 +1,15 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "timing",
+    srcs = ["timing.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/timing",
+    visibility = ["//src/services/postflight:__subpackages__"],
+    deps = ["@org_golang_x_sys//unix"],
+)
+
+go_test(
+    name = "timing_test",
+    srcs = ["timing_test.go"],
+    embed = [":timing"],
+)

@@ -47,6 +47,22 @@ func (e *Exec) generationDataset(generation GenerationID) string {
 	return e.Root + "/gen/" + string(generation)
 }
 
+func (e *Exec) processDriver() *Exec {
+	return &Exec{Root: e.Root + "/process-state", Timeout: e.Timeout}
+}
+
+func (e *Exec) EnsureProcess(ctx context.Context, lease LeaseID, generation GenerationID, sizeBytes int64) (ProcessVolume, error) {
+	return e.processDriver().EnsureWorkspace(ctx, lease, generation, sizeBytes)
+}
+
+func (e *Exec) DestroyProcess(ctx context.Context, lease LeaseID) error {
+	return e.processDriver().DestroyWorkspace(ctx, lease)
+}
+
+func (e *Exec) DestroyProcessGeneration(ctx context.Context, generation GenerationID) error {
+	return e.processDriver().DestroyGeneration(ctx, generation)
+}
+
 func devicePath(dataset string) string {
 	return "/dev/zvol/" + dataset
 }
@@ -226,8 +242,7 @@ func (e *Exec) origin(ctx context.Context, dataset string) (GenerationID, error)
 	return GenerationID(name), nil
 }
 
-// SealWorkspace implements Driver.
-func (e *Exec) SealWorkspace(ctx context.Context, lease LeaseID, generation GenerationID) (GenerationSnapshot, error) {
+func (e *Exec) sealPreparedVolume(ctx context.Context, lease LeaseID, generation GenerationID) (GenerationSnapshot, error) {
 	if err := ValidateName("lease", string(lease)); err != nil {
 		return GenerationSnapshot{}, err
 	}
@@ -250,8 +265,10 @@ func (e *Exec) SealWorkspace(ctx context.Context, lease LeaseID, generation Gene
 	if ok, err := e.exists(ctx, sealSnap); err != nil {
 		return GenerationSnapshot{}, err
 	} else if !ok {
-		if _, err := e.run(ctx, "snapshot", sealSnap); err != nil {
-			return GenerationSnapshot{}, err
+		if genExists, genErr := e.exists(ctx, genDataset); genErr != nil {
+			return GenerationSnapshot{}, genErr
+		} else if !genExists {
+			return GenerationSnapshot{}, errors.New("zvol: paired source snapshot is missing")
 		}
 	}
 	if ok, err := e.exists(ctx, genDataset); err != nil {
@@ -282,6 +299,62 @@ func (e *Exec) SealWorkspace(ctx context.Context, lease LeaseID, generation Gene
 		return GenerationSnapshot{}, err
 	}
 	return GenerationSnapshot{Generation: generation, Snapshot: sealed, Bytes: bytes}, nil
+}
+
+func (e *Exec) sealProgress(ctx context.Context, lease LeaseID, generation GenerationID) (bool, error) {
+	for _, candidate := range []string{
+		e.workspaceDataset(lease) + "@seal-" + string(generation),
+		e.generationDataset(generation),
+		e.generationDataset(generation) + "@sealed",
+	} {
+		ok, err := e.exists(ctx, candidate)
+		if err != nil {
+			return false, err
+		}
+		if ok {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// SealPair implements Driver. The first ZFS command is a multi-dataset
+// snapshot, which OpenZFS commits under one transaction group.
+func (e *Exec) SealPair(ctx context.Context, lease LeaseID, generation GenerationID) (GenerationPair, error) {
+	if err := ValidateName("lease", string(lease)); err != nil {
+		return GenerationPair{}, err
+	}
+	if err := ValidateName("generation", string(generation)); err != nil {
+		return GenerationPair{}, err
+	}
+	process := e.processDriver()
+	workspaceProgress, err := e.sealProgress(ctx, lease, generation)
+	if err != nil {
+		return GenerationPair{}, err
+	}
+	processProgress, err := process.sealProgress(ctx, lease, generation)
+	if err != nil {
+		return GenerationPair{}, err
+	}
+	switch {
+	case !workspaceProgress && !processProgress:
+		workspaceSnapshot := e.workspaceDataset(lease) + "@seal-" + string(generation)
+		processSnapshot := process.workspaceDataset(lease) + "@seal-" + string(generation)
+		if _, err := e.run(ctx, "snapshot", workspaceSnapshot, processSnapshot); err != nil {
+			return GenerationPair{}, err
+		}
+	case workspaceProgress != processProgress:
+		return GenerationPair{}, errors.New("zvol: incomplete paired seal")
+	}
+	workspace, err := e.sealPreparedVolume(ctx, lease, generation)
+	if err != nil {
+		return GenerationPair{}, err
+	}
+	processSnapshot, err := process.sealPreparedVolume(ctx, lease, generation)
+	if err != nil {
+		return GenerationPair{}, err
+	}
+	return GenerationPair{Workspace: workspace, Process: processSnapshot}, nil
 }
 
 func (e *Exec) referenced(ctx context.Context, snapshot string) (int64, error) {

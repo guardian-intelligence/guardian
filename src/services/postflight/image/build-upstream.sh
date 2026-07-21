@@ -134,7 +134,16 @@ tag_commit="$(
 # could silently reuse bytes created by an older build recipe.
 cache_input_sha256="$(
   {
-    sha256sum "${script_dir}/pins.env" | awk '{print $1}'
+	printf '%s\n' \
+	  "RUNNER_IMAGES_REF=${RUNNER_IMAGES_REF}" \
+	  "RUNNER_IMAGES_VERSION=${RUNNER_IMAGES_VERSION}" \
+	  "RUNNER_IMAGES_COMMIT=${RUNNER_IMAGES_COMMIT}" \
+	  "UBUNTU_SERIAL=${UBUNTU_SERIAL}" \
+	  "UBUNTU_SHA256=${UBUNTU_SHA256}" \
+	  "PACKER_VERSION=${PACKER_VERSION}" \
+	  "PACKER_SHA256=${PACKER_SHA256}" \
+	  "PACKER_QEMU_PLUGIN_VERSION=${PACKER_QEMU_PLUGIN_VERSION}" \
+	  "PACKER_QEMU_PLUGIN_SHA256=${PACKER_QEMU_PLUGIN_SHA256}"
     sha256sum "${script_dir}/render-qemu-template.py" | awk '{print $1}'
   } | sha256sum | awk '{print $1}'
 )"

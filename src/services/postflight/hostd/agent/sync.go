@@ -35,6 +35,19 @@ func validateDesired(d syncproto.DesiredLease) error {
 			return err
 		}
 	}
+	if d.Process.Generation != "" {
+		if err := zvol.ValidateName("process generation", d.Process.Generation); err != nil {
+			return err
+		}
+	}
+	if d.Process.ExpectedDigest != "" {
+		if d.Process.Generation == "" {
+			return fmt.Errorf("lease %s: checkpoint digest without a process generation", d.LeaseID)
+		}
+		if d.Process.Generation != d.Workspace.Generation {
+			return fmt.Errorf("lease %s: workspace and process generations differ", d.LeaseID)
+		}
+	}
 	switch d.State {
 	case syncproto.DesiredRun, syncproto.DesiredSeal, syncproto.DesiredCancel:
 	default:
@@ -42,6 +55,9 @@ func validateDesired(d syncproto.DesiredLease) error {
 	}
 	if d.State == syncproto.DesiredSeal && d.SealGeneration == "" {
 		return fmt.Errorf("lease %s: seal without a generation", d.LeaseID)
+	}
+	if d.State == syncproto.DesiredSeal && (d.SealCheckpoint == nil || d.SealCheckpoint.Digest == "" || d.SealCheckpoint.Version == "") {
+		return fmt.Errorf("lease %s: seal without a process checkpoint", d.LeaseID)
 	}
 	if d.State == syncproto.DesiredRun {
 		if d.ExecutionID == "" || d.AttemptID == "" {
@@ -103,7 +119,8 @@ func (a *Agent) buildReport(ctx context.Context) (syncproto.SyncRequest, error) 
 		switch status.Phase {
 		case vm.PhaseBooting, vm.PhaseWarm:
 			slot.Warm++
-		case vm.PhaseAssigned, vm.PhaseListening, vm.PhaseHookBlocked, vm.PhaseReady, vm.PhaseExited:
+		case vm.PhaseAssigned, vm.PhaseListening, vm.PhaseJobAssigned, vm.PhaseBound,
+			vm.PhaseWorkerReady, vm.PhaseHookBlocked, vm.PhaseReady, vm.PhaseExited:
 			slot.Used++
 		}
 	}
@@ -142,8 +159,10 @@ func (a *Agent) applyDesired(response syncproto.SyncResponse) {
 		}
 		desired[d.LeaseID] = d
 		if existing, ok := a.leases[d.LeaseID]; ok {
-			if executionLeaseID(existing.spec) != executionLeaseID(d) &&
-				existing.volume.Name != "" {
+			incomingExecutionID := executionLeaseID(d)
+			currentExecutionID := existing.executionLeaseID()
+			controlPlaneLagsLocalRoute := existing.execution != nil && incomingExecutionID == d.LeaseID
+			if currentExecutionID != incomingExecutionID && !controlPlaneLagsLocalRoute && existing.volume.Name != "" {
 				a.logger.Error("rejecting execution reassignment after volume resolution",
 					"listener", d.LeaseID,
 					"from", executionLeaseID(existing.spec),
@@ -154,6 +173,10 @@ func (a *Agent) applyDesired(response syncproto.SyncResponse) {
 				continue
 			}
 			existing.spec = d
+			if existing.execution != nil && !controlPlaneLagsLocalRoute {
+				captured := d
+				existing.execution = &captured
+			}
 			if a.quarantined[d.LeaseID] {
 				// Quarantine froze the lifecycle; the time it consumed must
 				// not count against the state deadline, or the first

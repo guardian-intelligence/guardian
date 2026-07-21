@@ -16,6 +16,7 @@ type LeaseSnapshot struct {
 	Since            time.Time
 	VMID             string
 	Device           string
+	ProcessDevice    string
 	ExecutionID      string
 	AttemptID        string
 	ExitCode         int
@@ -33,15 +34,17 @@ func (a *Agent) Snapshot() []LeaseSnapshot {
 	defer a.mu.Unlock()
 	snapshots := make([]LeaseSnapshot, 0, len(a.leases))
 	for _, record := range a.leases {
+		execution := record.executionSpec()
 		snapshots = append(snapshots, LeaseSnapshot{
 			LeaseID:          record.spec.LeaseID,
-			ExecutionLeaseID: executionLeaseID(record.spec),
+			ExecutionLeaseID: record.executionLeaseID(),
 			State:            record.state,
 			Since:            record.since,
 			VMID:             record.vmID,
 			Device:           record.device,
-			ExecutionID:      record.spec.ExecutionID,
-			AttemptID:        record.spec.AttemptID,
+			ProcessDevice:    record.processDevice,
+			ExecutionID:      execution.ExecutionID,
+			AttemptID:        execution.AttemptID,
 			ExitCode:         record.exit,
 			Reason:           record.reason,
 			SealedGeneration: record.sealGen,

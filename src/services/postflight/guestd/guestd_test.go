@@ -7,11 +7,8 @@ import (
 	"io"
 	"log/slog"
 	"net"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -36,10 +33,8 @@ type fakeSystem struct {
 	luksBlank map[string]bool
 	// mounted maps mountpoint -> device.
 	mounted map[string]string
-	// unmountErr, when set, fails every Unmount.
-	unmountErr error
-	syncs      int
-	journal    []string
+	syncs   int
+	journal []string
 }
 
 func newFakeSystem() *fakeSystem {
@@ -140,9 +135,6 @@ func (f *fakeSystem) Mount(_ context.Context, device, mountpoint, filesystem str
 func (f *fakeSystem) Unmount(mountpoint string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.unmountErr != nil {
-		return f.unmountErr
-	}
 	delete(f.mounted, mountpoint)
 	f.log("unmount %s", mountpoint)
 	return nil
@@ -285,27 +277,15 @@ type world struct {
 func newWorld(t *testing.T, configure func(*Config), runner RunRunner) *world {
 	t.Helper()
 	w := &world{system: newFakeSystem(), listener: newPipeListener(), runs: make(chan runnerCall, 4)}
-	gateDir := filepath.Join(t.TempDir(), "rendezvous")
 	if runner == nil {
 		runner = func(_ context.Context, jitConfig string, env map[string]string, event func(RunnerEvent)) (int, error) {
-			if mounted, _ := w.system.IsMounted("/work"); mounted {
-				t.Error("generic listener started with a customer workspace")
-			}
 			w.runs <- runnerCall{jitConfig: jitConfig, env: env}
 			event(EventListening)
-			event(EventJobStarted)
-			request := []byte("run_id=101\nrun_attempt=1\nrunner_name=lease-1\nrepository=acme/widget\nworkflow_job=test\n")
-			if err := os.WriteFile(filepath.Join(gateDir, "request"), request, 0o600); err != nil {
-				return 0, err
+			if reply := w.server.awaitAssignment(context.Background(), ptr(testAssignment())); reply.Error != "" {
+				return 0, errors.New(reply.Error)
 			}
-			for {
-				if _, err := os.Stat(filepath.Join(gateDir, "release")); err == nil {
-					break
-				}
-				if _, err := os.Stat(filepath.Join(gateDir, "abort")); err == nil {
-					return SyntheticFailureExitCode, nil
-				}
-				time.Sleep(time.Millisecond)
+			if reply := w.server.validateAssignment(testAuthorize().Identity); reply.Error != "" {
+				return 0, errors.New(reply.Error)
 			}
 			return 0, nil
 		}
@@ -316,7 +296,6 @@ func newWorld(t *testing.T, configure func(*Config), runner RunRunner) *world {
 		MountDeadline: 2 * time.Second,
 		RetryInterval: time.Millisecond,
 		QuiesceWindow: 20 * time.Millisecond,
-		RendezvousDir: gateDir,
 		HookDeadline:  2 * time.Second,
 		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
@@ -344,7 +323,14 @@ func newWorld(t *testing.T, configure func(*Config), runner RunRunner) *world {
 func testPrepare() guestproto.Prepare {
 	return guestproto.Prepare{
 		Lease: "lease-1", JITConfig: "jit-blob",
-		Env: map[string]string{"POSTFLIGHT_RENDEZVOUS_DIR": "/run/postflight-rendezvous"},
+		Env: map[string]string{"POSTFLIGHT_POOL": "fixture"},
+	}
+}
+
+func testAssignment() guestproto.Assignment {
+	return guestproto.Assignment{
+		RequestID: "request-1", JobID: "job-1", RunnerName: "lease-1", JobDisplayName: "test",
+		Identity: testAuthorize().Identity,
 	}
 }
 
@@ -357,34 +343,32 @@ func testRendezvous() guestproto.Rendezvous {
 			Mountpoint: "/work",
 			Options:    []string{"discard", "noatime", "nodev", "nosuid"},
 		}},
-		Env: map[string]string{"POSTFLIGHT_EXECUTION_ID": "exec-1"},
 	}
 }
 
-func TestResetRendezvousDirOverridesProcessUmask(t *testing.T) {
-	oldUmask := syscall.Umask(0o077)
-	defer syscall.Umask(oldUmask)
-
-	dir := filepath.Join(t.TempDir(), "rendezvous")
-	server := Server{cfg: Config{RendezvousDir: dir}}
-	if err := server.resetRendezvousDir(); err != nil {
-		t.Fatal(err)
-	}
-	info, err := os.Stat(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := info.Mode().Perm(); got != 0o733 {
-		t.Fatalf("rendezvous directory mode = %04o, want 0733", got)
+func testAuthorize() guestproto.Authorize {
+	return guestproto.Authorize{
+		Lease: "lease-1", RequestID: "request-1",
+		Identity: &guestproto.JobIdentity{
+			RunID: "101", RunAttempt: 1, RunnerName: "lease-1",
+			Repository: "acme/widget", WorkflowJob: "test",
+		},
+		Env: map[string]string{"POSTFLIGHT_EXECUTION_ID": "exec-1"},
 	}
 }
 
 func sendRendezvousLifecycle(host *hostConn) {
 	host.send(guestproto.Message{Kind: guestproto.KindPrepare, Prepare: ptr(testPrepare())})
 	host.expectStatus(guestproto.RunnerRegistered)
-	host.expectStatus(guestproto.RunnerHookBlocked)
+	assignment := host.expect(guestproto.KindAssignment)
+	if assignment.Assignment.RequestID != testAssignment().RequestID {
+		host.t.Fatalf("assignment = %#v", assignment.Assignment)
+	}
 	host.send(guestproto.Message{Kind: guestproto.KindRendezvous, Rendezvous: ptr(testRendezvous())})
 	host.expectStatus(guestproto.RunnerMountsReady)
+	host.send(guestproto.Message{Kind: guestproto.KindAuthorize, Authorize: ptr(testAuthorize())})
+	host.expectStatus(guestproto.RunnerWorkerReady)
+	host.expectStatus(guestproto.RunnerHookBlocked)
 	host.expectStatus(guestproto.RunnerReleased)
 }
 
@@ -401,7 +385,7 @@ func TestColdWorkspaceLifecycle(t *testing.T) {
 	}
 
 	run := <-w.runs
-	if run.jitConfig != "jit-blob" || run.env["POSTFLIGHT_RENDEZVOUS_DIR"] == "" {
+	if run.jitConfig != "jit-blob" || run.env["POSTFLIGHT_POOL"] == "" {
 		t.Fatalf("runner ran with %+v", run)
 	}
 	entries := w.system.entries()
@@ -531,20 +515,16 @@ func TestMountThatCannotConvergeReportsSyntheticExit(t *testing.T) {
 	host.expect(guestproto.KindHello)
 	host.send(guestproto.Message{Kind: guestproto.KindPrepare, Prepare: ptr(testPrepare())})
 	host.expectStatus(guestproto.RunnerRegistered)
-	host.expectStatus(guestproto.RunnerHookBlocked)
+	host.expect(guestproto.KindAssignment)
 	host.send(guestproto.Message{Kind: guestproto.KindRendezvous, Rendezvous: ptr(testRendezvous())})
 	if status := host.expectStatus(guestproto.RunnerExited); status.ExitCode != SyntheticFailureExitCode {
 		t.Fatalf("exit code %d, want the synthetic %d", status.ExitCode, SyntheticFailureExitCode)
 	}
-	run := <-w.runs
-	if run.env["POSTFLIGHT_EXECUTION_ID"] != "" {
-		t.Fatalf("generic listener received customer environment: %+v", run)
-	}
-	if _, err := os.Stat(filepath.Join(w.server.cfg.RendezvousDir, "release")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("failed rendezvous released the job hook: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(w.server.cfg.RendezvousDir, "abort")); err != nil {
-		t.Fatalf("failed rendezvous did not abort the job hook: %v", err)
+	w.server.mu.Lock()
+	gateErr := w.server.gateErr
+	w.server.mu.Unlock()
+	if gateErr == nil {
+		t.Fatal("failed rendezvous did not reject Runner.Worker")
 	}
 }
 
@@ -558,9 +538,12 @@ func TestDiscardIsEnforcedOnTheMount(t *testing.T) {
 	host.expect(guestproto.KindHello)
 	host.send(guestproto.Message{Kind: guestproto.KindPrepare, Prepare: ptr(testPrepare())})
 	host.expectStatus(guestproto.RunnerRegistered)
-	host.expectStatus(guestproto.RunnerHookBlocked)
+	host.expect(guestproto.KindAssignment)
 	host.send(guestproto.Message{Kind: guestproto.KindRendezvous, Rendezvous: &rendezvous})
 	host.expectStatus(guestproto.RunnerMountsReady)
+	host.send(guestproto.Message{Kind: guestproto.KindAuthorize, Authorize: ptr(testAuthorize())})
+	host.expectStatus(guestproto.RunnerWorkerReady)
+	host.expectStatus(guestproto.RunnerHookBlocked)
 	host.expectStatus(guestproto.RunnerReleased)
 	host.expectStatus(guestproto.RunnerExited)
 
@@ -589,10 +572,13 @@ func TestPreparationAndRendezvousRedeliveryAreDeduped(t *testing.T) {
 	host.send(guestproto.Message{Kind: guestproto.KindPrepare, Prepare: &conflicting})
 
 	host.expectStatus(guestproto.RunnerRegistered)
-	host.expectStatus(guestproto.RunnerHookBlocked)
+	host.expect(guestproto.KindAssignment)
 	host.send(guestproto.Message{Kind: guestproto.KindRendezvous, Rendezvous: ptr(testRendezvous())})
 	host.send(guestproto.Message{Kind: guestproto.KindRendezvous, Rendezvous: ptr(testRendezvous())})
 	host.expectStatus(guestproto.RunnerMountsReady)
+	host.send(guestproto.Message{Kind: guestproto.KindAuthorize, Authorize: ptr(testAuthorize())})
+	host.expectStatus(guestproto.RunnerWorkerReady)
+	host.expectStatus(guestproto.RunnerHookBlocked)
 	host.expectStatus(guestproto.RunnerReleased)
 	host.expectStatus(guestproto.RunnerExited)
 	<-w.runs
@@ -603,36 +589,64 @@ func TestPreparationAndRendezvousRedeliveryAreDeduped(t *testing.T) {
 	}
 }
 
-func TestQuiesceSyncsAndUnmounts(t *testing.T) {
+func TestQuiesceRequiresMountedVolumesAndSyncs(t *testing.T) {
 	w := newWorld(t, nil, nil)
 	w.system.mounted["/work"] = "/dev/sdb"
 
 	host := w.listener.dial(t)
 	host.expect(guestproto.KindHello)
-	host.send(guestproto.Message{Kind: guestproto.KindQuiesce, Quiesce: &guestproto.Quiesce{Mountpoint: "/work"}})
-	host.expect(guestproto.KindQuiesced)
-	if mounted, _ := w.system.IsMounted("/work"); mounted {
-		t.Fatal("workspace still mounted after quiesce")
+	host.send(guestproto.Message{Kind: guestproto.KindQuiesce, Quiesce: &guestproto.Quiesce{Mountpoints: []string{"/work"}}})
+	message := host.expect(guestproto.KindQuiesced)
+	wantTiming := []string{"quiesce_received", "quiesce_mounts_checked", "filesystem_sync_started", "filesystem_sync_completed"}
+	if len(message.Quiesced.Timing) != len(wantTiming) {
+		t.Fatalf("quiesce timing %+v, want %v", message.Quiesced.Timing, wantTiming)
+	}
+	for i, want := range wantTiming {
+		if got := message.Quiesced.Timing[i]; got.Event != want || got.MonotonicNS <= 0 || got.UnixNS <= 0 {
+			t.Fatalf("quiesce timing[%d] %+v, want %s with clocks", i, got, want)
+		}
+	}
+	if mounted, _ := w.system.IsMounted("/work"); !mounted {
+		t.Fatal("workspace was unmounted before QEMU teardown")
 	}
 	if w.system.syncs == 0 {
 		t.Fatal("quiesce never synced")
 	}
-	// A retried quiesce (already unmounted) converges to success.
-	host.send(guestproto.Message{Kind: guestproto.KindQuiesce, Quiesce: &guestproto.Quiesce{Mountpoint: "/work"}})
+	// A retried quiesce remains idempotent while the VM is alive.
+	host.send(guestproto.Message{Kind: guestproto.KindQuiesce, Quiesce: &guestproto.Quiesce{Mountpoints: []string{"/work"}}})
 	host.expect(guestproto.KindQuiesced)
 }
 
 func TestQuiesceFailureCarriesTheReason(t *testing.T) {
 	w := newWorld(t, nil, nil)
-	w.system.mounted["/work"] = "/dev/sdb"
-	w.system.unmountErr = errors.New("target is busy")
 
 	host := w.listener.dial(t)
 	host.expect(guestproto.KindHello)
-	host.send(guestproto.Message{Kind: guestproto.KindQuiesce, Quiesce: &guestproto.Quiesce{Mountpoint: "/work"}})
+	host.send(guestproto.Message{Kind: guestproto.KindQuiesce, Quiesce: &guestproto.Quiesce{Mountpoints: []string{"/work"}}})
 	message := host.expect(guestproto.KindQuiesceFailed)
-	if !strings.Contains(message.QuiesceFailed.Reason, "target is busy") {
+	if !strings.Contains(message.QuiesceFailed.Reason, "required volume is not mounted") {
 		t.Fatalf("reason %q", message.QuiesceFailed.Reason)
+	}
+}
+
+func TestCheckpointRefusesAnIncompleteGenerationTuple(t *testing.T) {
+	w := newWorld(t, nil, nil)
+	w.system.mounted["/work"] = "/dev/sdb"
+
+	host := w.listener.dial(t)
+	host.expect(guestproto.KindHello)
+	host.send(guestproto.Message{Kind: guestproto.KindQuiesce, Quiesce: &guestproto.Quiesce{
+		Mountpoints: []string{"/work", ProcessMountpoint},
+		Checkpoint: &guestproto.CheckpointDump{
+			ImagesDir: ProcessImagesDir, ExternalMountAt: "/work",
+		},
+	}})
+	message := host.expect(guestproto.KindQuiesceFailed)
+	if !strings.Contains(message.QuiesceFailed.Reason, "required volume is not mounted at "+ProcessMountpoint) {
+		t.Fatalf("reason %q", message.QuiesceFailed.Reason)
+	}
+	if w.system.syncs != 0 {
+		t.Fatal("incomplete generation was flushed as sealable")
 	}
 }
 
@@ -652,9 +666,11 @@ func TestReconnectReplaysTheRunnerLadder(t *testing.T) {
 
 	second := w.listener.dial(t)
 	second.expect(guestproto.KindHello)
+	second.expect(guestproto.KindAssignment)
 	second.expectStatus(guestproto.RunnerRegistered)
-	second.expectStatus(guestproto.RunnerHookBlocked)
 	second.expectStatus(guestproto.RunnerMountsReady)
+	second.expectStatus(guestproto.RunnerWorkerReady)
+	second.expectStatus(guestproto.RunnerHookBlocked)
 	second.expectStatus(guestproto.RunnerReleased)
 	if status := second.expectStatus(guestproto.RunnerExited); status.ExitCode != 0 {
 		t.Fatalf("replayed %+v", status)
@@ -734,7 +750,7 @@ func TestNonHostVsockPeerIsRejected(t *testing.T) {
 
 	// The intruder never reached dispatch: the host connection is intact
 	// and quiesce still works on it.
-	host.send(guestproto.Message{Kind: guestproto.KindQuiesce, Quiesce: &guestproto.Quiesce{Mountpoint: "/work"}})
+	host.send(guestproto.Message{Kind: guestproto.KindQuiesce, Quiesce: &guestproto.Quiesce{Mountpoints: []string{"/work"}}})
 	host.expect(guestproto.KindQuiesced)
 }
 
@@ -751,7 +767,7 @@ func TestHostileQuiesceMountpointsAreRefused(t *testing.T) {
 
 			host := w.listener.dial(t)
 			host.expect(guestproto.KindHello)
-			host.send(guestproto.Message{Kind: guestproto.KindQuiesce, Quiesce: &guestproto.Quiesce{Mountpoint: mountpoint}})
+			host.send(guestproto.Message{Kind: guestproto.KindQuiesce, Quiesce: &guestproto.Quiesce{Mountpoints: []string{mountpoint}}})
 			host.expect(guestproto.KindQuiesceFailed)
 			if entries := w.system.entries(); len(entries) != 0 {
 				t.Fatalf("hostile quiesce reached the system: %v", entries)
@@ -779,7 +795,7 @@ func TestHostileMountSpecsNeverReachTheSystem(t *testing.T) {
 			host.expect(guestproto.KindHello)
 			host.send(guestproto.Message{Kind: guestproto.KindPrepare, Prepare: ptr(testPrepare())})
 			host.expectStatus(guestproto.RunnerRegistered)
-			host.expectStatus(guestproto.RunnerHookBlocked)
+			host.expect(guestproto.KindAssignment)
 			host.send(guestproto.Message{Kind: guestproto.KindRendezvous, Rendezvous: &rendezvous})
 			time.Sleep(30 * time.Millisecond)
 			if entries := w.system.entries(); len(entries) != 0 {

@@ -35,6 +35,11 @@ type WorkspaceVolume struct {
 	SourceSnapshotGUID string
 }
 
+// ProcessVolume is the encrypted CRIU image volume paired with a workspace.
+// It uses the same lifecycle and provenance shape but a separate ZFS tree so
+// a process artifact can be sized independently.
+type ProcessVolume = WorkspaceVolume
+
 // GenerationSnapshot is one sealed generation as observed on this host.
 type GenerationSnapshot struct {
 	Generation GenerationID
@@ -42,6 +47,12 @@ type GenerationSnapshot struct {
 	Snapshot string
 	// Bytes is the logical referenced size, for inventory reporting.
 	Bytes int64
+}
+
+// GenerationPair is the indivisible filesystem/process generation tuple.
+type GenerationPair struct {
+	Workspace GenerationSnapshot
+	Process   GenerationSnapshot
 }
 
 // Errors the agent's convergence logic branches on. Exec wraps zfs stderr
@@ -65,20 +76,26 @@ type Driver interface {
 	// again with the same arguments returns the existing volume.
 	EnsureWorkspace(ctx context.Context, lease LeaseID, generation GenerationID, sizeBytes int64) (WorkspaceVolume, error)
 
-	// SealWorkspace snapshots a lease's workspace as a generation candidate
-	// and promotes it to a first-class generation dataset, so the workspace
-	// volume itself can be destroyed independently later. Idempotent: if the
-	// generation snapshot already exists it returns it.
-	SealWorkspace(ctx context.Context, lease LeaseID, generation GenerationID) (GenerationSnapshot, error)
+	// EnsureProcess materializes the writable CRIU image volume paired with
+	// the workspace. A missing process generation is a cold process cache,
+	// just as a missing workspace generation is a cold filesystem cache.
+	EnsureProcess(ctx context.Context, lease LeaseID, generation GenerationID, sizeBytes int64) (ProcessVolume, error)
+
+	// SealPair takes the workspace and stopped-process source snapshots in one
+	// ZFS transaction, then promotes both lineages. A generation can never be
+	// published from source snapshots taken at different points in time.
+	SealPair(ctx context.Context, lease LeaseID, generation GenerationID) (GenerationPair, error)
 
 	// DestroyWorkspace removes a lease's workspace volume. ErrNotFound if
 	// already gone; ErrBusy if still attached.
 	DestroyWorkspace(ctx context.Context, lease LeaseID) error
+	DestroyProcess(ctx context.Context, lease LeaseID) error
 
 	// DestroyGeneration removes a sealed generation and its snapshot. Only
 	// ever called on a control-plane reap verb. ErrBusy if clones depend on
 	// it.
 	DestroyGeneration(ctx context.Context, generation GenerationID) error
+	DestroyProcessGeneration(ctx context.Context, generation GenerationID) error
 
 	// Inventory lists the generations and workspace volumes present on this
 	// host, for the sync report.

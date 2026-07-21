@@ -31,8 +31,8 @@ func (a *Agent) collectOrphans(ctx context.Context, vms *vmView) {
 			// parse the spec. Absence from the desired set is not an ack.
 			continue
 		}
-		executionID := executionLeaseID(record.spec)
-		err := a.zvols.DestroyWorkspace(ctx, zvol.LeaseID(executionID))
+		executionID := record.executionLeaseID()
+		err := a.destroyExecutionVolumes(ctx, zvol.LeaseID(executionID))
 		switch {
 		case err == nil, errors.Is(err, zvol.ErrNotFound):
 			delete(a.leases, id)
@@ -75,7 +75,7 @@ func (a *Agent) collectOrphans(ctx context.Context, vms *vmView) {
 	}
 	knownExecutions := map[string]bool{}
 	for _, record := range a.leases {
-		knownExecutions[executionLeaseID(record.spec)] = true
+		knownExecutions[record.executionLeaseID()] = true
 	}
 	for _, desired := range a.desired {
 		knownExecutions[executionLeaseID(desired)] = true
@@ -91,7 +91,7 @@ func (a *Agent) collectOrphans(ctx context.Context, vms *vmView) {
 		if a.quarantined[leaseID] {
 			continue // rejected spec, not an orphan; preserve the workspace
 		}
-		err := a.zvols.DestroyWorkspace(ctx, zvol.LeaseID(leaseID))
+		err := a.destroyExecutionVolumes(ctx, zvol.LeaseID(leaseID))
 		switch {
 		case err == nil:
 			a.metrics.OrphansDestroyed.Add(1)
@@ -105,4 +105,11 @@ func (a *Agent) collectOrphans(ctx context.Context, vms *vmView) {
 			a.logger.Error("collecting orphan workspace", "workspace", workspace.Name, "err", err)
 		}
 	}
+}
+
+func (a *Agent) destroyExecutionVolumes(ctx context.Context, lease zvol.LeaseID) error {
+	if err := a.zvols.DestroyProcess(ctx, lease); err != nil && !errors.Is(err, zvol.ErrNotFound) {
+		return err
+	}
+	return a.zvols.DestroyWorkspace(ctx, lease)
 }

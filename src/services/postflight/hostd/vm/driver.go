@@ -11,10 +11,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/guestproto"
+	"github.com/guardian-intelligence/guardian/src/services/postflight/timing"
 )
 
 // QEMU is the real Driver: one QEMU/KVM process per VM, root disk cloned
@@ -29,17 +31,25 @@ import (
 type QEMU struct {
 	cfg   Config
 	disks rootDisks
-	// probeTimeout bounds every per-VM liveness probe (QMP query-status,
-	// Guest.Observe) so one wedged VM can never hold the driver mutex — and
-	// with it every verb on the host — indefinitely.
-	probeTimeout time.Duration
-	// quiesceTimeout bounds the guest-side sync+unmount ahead of a seal.
+	// probeTimeout bounds QMP control operations. guestProbeTimeout is much
+	// shorter because List probes every pool member serially and an absent
+	// guest agent is an expected state while firmware is booting.
+	probeTimeout      time.Duration
+	guestProbeTimeout time.Duration
+	// bootTimeout bounds the interval from QEMU launch to the first guestd
+	// hello. A live QEMU process parked in firmware is not a usable worker and
+	// must be collected so the pool controller can replace it.
+	bootTimeout time.Duration
+	// quiesceTimeout bounds the guest-side checkpoint and flush ahead of a seal.
 	quiesceTimeout time.Duration
 
-	mu sync.Mutex
+	mu      sync.Mutex
+	timing  *timing.Recorder
+	timings map[ID][]TimingPoint
 }
 
 var _ Driver = (*QEMU)(nil)
+var _ UpdateSource = (*QEMU)(nil)
 
 // ClassConfig is one runner class's shape on this host.
 type ClassConfig struct {
@@ -56,6 +66,8 @@ type Config struct {
 	StateRoot string
 	// QEMUPath is the QEMU binary to launch.
 	QEMUPath string
+	// Firmware is the pinned AmdSev OVMF.fd used by every confidential VM.
+	Firmware string
 	// DatasetRoot is the parent dataset for per-VM root clones
 	// (<DatasetRoot>/vm-<id>). It must exist.
 	DatasetRoot string
@@ -68,6 +80,7 @@ type Config struct {
 	// GuestNetwork selects every VM's egress datapath (see LaunchSpec).
 	GuestNetwork string
 	Logger       *slog.Logger
+	Timing       *timing.Recorder
 }
 
 func (c *Config) validate() error {
@@ -76,6 +89,8 @@ func (c *Config) validate() error {
 		return errors.New("vm: StateRoot is required")
 	case c.QEMUPath == "":
 		return errors.New("vm: QEMUPath is required")
+	case c.Firmware == "":
+		return errors.New("vm: Firmware is required")
 	case c.DatasetRoot == "":
 		return errors.New("vm: DatasetRoot is required")
 	case len(c.Classes) == 0:
@@ -95,6 +110,16 @@ func (c *Config) validate() error {
 	if c.Logger == nil {
 		c.Logger = slog.Default()
 	}
+	if c.Timing == nil {
+		bootID, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+		if err != nil {
+			return fmt.Errorf("vm: read boot id: %w", err)
+		}
+		c.Timing, err = timing.New("hostd-qemu", strings.TrimSpace(string(bootID)))
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -106,19 +131,53 @@ func NewQEMU(cfg Config) (*QEMU, error) {
 	if err := os.MkdirAll(cfg.StateRoot, 0o750); err != nil {
 		return nil, fmt.Errorf("vm: creating state root: %w", err)
 	}
-	return &QEMU{cfg: cfg, disks: zfsDisks{}, probeTimeout: 5 * time.Second, quiesceTimeout: 30 * time.Second}, nil
+	return &QEMU{
+		cfg: cfg, disks: zfsDisks{}, probeTimeout: 5 * time.Second,
+		guestProbeTimeout: 250 * time.Millisecond, bootTimeout: 2 * time.Minute,
+		quiesceTimeout: 30 * time.Second,
+		timing:         cfg.Timing, timings: map[ID][]TimingPoint{},
+	}, nil
+}
+
+func (q *QEMU) recordTiming(id ID, event string) {
+	point := q.timing.Point(event)
+	q.timings[id] = append(q.timings[id], TimingPoint{
+		Event: point.Event, Source: point.Source, BootID: point.BootID,
+		Sequence: point.Sequence, MonotonicNS: point.MonotonicNS, UnixNS: point.UnixNS,
+	})
+}
+
+func (q *QEMU) recordTimingOnce(id ID, event string) {
+	for _, point := range q.timings[id] {
+		if point.Event == event {
+			return
+		}
+	}
+	q.recordTiming(id, event)
+}
+
+// Updates delegates guest-local lifecycle edges. QMP-only transitions are
+// initiated by hostd itself and are observed by the convergence pass that
+// follows the verb.
+func (q *QEMU) Updates() <-chan ID {
+	if source, ok := q.cfg.Guest.(UpdateSource); ok {
+		return source.Updates()
+	}
+	return nil
 }
 
 // meta is a VM's durable identity. It is written before any side effect, so
 // everything the driver ever created is discoverable from disk alone.
 type meta struct {
-	ID    ID     `json:"id"`
-	Class Class  `json:"class"`
-	Image string `json:"image,omitempty"`
-	Lease string `json:"lease,omitempty"`
+	ID            ID     `json:"id"`
+	Class         Class  `json:"class"`
+	Image         string `json:"image,omitempty"`
+	Lease         string `json:"lease,omitempty"`
+	CreatedUnixNS int64  `json:"created_unix_ns,omitempty"`
 	// WorkspaceMountpoint is where the assignment told the guest to mount
 	// the workspace; Quiesce needs it after a restart.
 	WorkspaceMountpoint string `json:"workspace_mountpoint,omitempty"`
+	ProcessMountpoint   string `json:"process_mountpoint,omitempty"`
 	// CID is the VM's vsock address for the guestd channel.
 	CID uint32 `json:"cid"`
 	// RootDataset is the per-VM root clone.
@@ -219,6 +278,7 @@ func (q *QEMU) Launch(ctx context.Context, id ID, class Class) error {
 		CPUs:         shape.CPUs,
 		MemoryMiB:    shape.MemoryMiB,
 		RootDevice:   zvolDevicePath(dataset),
+		Firmware:     q.cfg.Firmware,
 		StateDir:     dir,
 		VsockCID:     cid,
 		GuestNetwork: q.cfg.GuestNetwork,
@@ -228,21 +288,21 @@ func (q *QEMU) Launch(ctx context.Context, id ID, class Class) error {
 		return fmt.Errorf("vm: creating state dir for %s: %w", id, err)
 	}
 	record := meta{
-		ID:          id,
-		Class:       class,
-		Image:       shape.Image,
-		CID:         cid,
-		RootDataset: dataset,
-		Argv:        argv,
-		ArgvSHA256:  argvDigest(argv),
+		ID: id, Class: class, Image: shape.Image, CreatedUnixNS: time.Now().UnixNano(),
+		CID: cid, RootDataset: dataset, Argv: argv, ArgvSHA256: argvDigest(argv),
 	}
+	q.recordTiming(id, "vm_launch_started")
 	if err := q.writeMeta(record); err != nil {
 		return err
 	}
 	if err := q.disks.Ensure(ctx, dataset, shape.Image); err != nil {
 		return err
 	}
-	return q.cfg.Launcher.Start(ctx, id, dir, argv)
+	if err := q.cfg.Launcher.Start(ctx, id, dir, argv); err != nil {
+		return err
+	}
+	q.recordTiming(id, "qemu_started")
+	return nil
 }
 
 func argvDigest(argv []string) string {
@@ -311,19 +371,31 @@ func (q *QEMU) Prepare(ctx context.Context, id ID, preparation Preparation) erro
 	}
 	deliverCtx, cancel := context.WithTimeout(ctx, q.probeTimeout)
 	defer cancel()
-	return q.cfg.Guest.Prepare(deliverCtx, id, record.CID, guestproto.Prepare{
+	q.recordTimingOnce(id, "listener_prepare_started")
+	if err := q.cfg.Guest.Prepare(deliverCtx, id, record.CID, guestproto.Prepare{
 		Lease: preparation.Lease, JITConfig: preparation.JITConfig, Env: preparation.Env,
-	})
+	}); err != nil {
+		return err
+	}
+	q.recordTimingOnce(id, "listener_prepare_sent")
+	return nil
 }
 
-// Rendezvous implements Driver. The workspace is hot-attached only after the
-// selected runner's synchronous job-start hook has reported identity.
+// Rendezvous implements Driver. The repository-scoped generation is attached
+// and restored after local assignment and before Runner.Worker is released.
 func (q *QEMU) Rendezvous(ctx context.Context, id ID, rendezvous Rendezvous) error {
 	if err := validateID(id); err != nil {
 		return err
 	}
+	if rendezvous.WorkspaceDevice == "" || rendezvous.ProcessDevice == "" || rendezvous.WorkspaceMountpoint == "" {
+		return errors.New("vm: rendezvous requires workspace device, process device, and workspace mountpoint")
+	}
+	if rendezvous.WorkspaceDevice == rendezvous.ProcessDevice {
+		return errors.New("vm: workspace and process devices must be distinct")
+	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	q.recordTiming(id, "qmp_rendezvous_started")
 	record, err := q.readMeta(id)
 	if errors.Is(err, os.ErrNotExist) {
 		return ErrNotFound
@@ -331,11 +403,15 @@ func (q *QEMU) Rendezvous(ctx context.Context, id ID, rendezvous Rendezvous) err
 	if err != nil {
 		return err
 	}
-	if record.Lease != rendezvous.Lease {
+	if record.Lease != "" && record.Lease != rendezvous.Lease {
 		return fmt.Errorf("vm: %s carries lease %s, not %s", id, record.Lease, rendezvous.Lease)
+	}
+	if record.Lease == "" {
+		record.Lease = rendezvous.Lease
 	}
 	if record.WorkspaceMountpoint == "" {
 		record.WorkspaceMountpoint = rendezvous.WorkspaceMountpoint
+		record.ProcessMountpoint = processMountpoint
 		if err := q.writeMeta(record); err != nil {
 			return err
 		}
@@ -348,59 +424,134 @@ func (q *QEMU) Rendezvous(ctx context.Context, id ID, rendezvous Rendezvous) err
 		return err
 	}
 	defer client.Close()
-	if err := q.attachWorkspace(ctx, client, rendezvous.WorkspaceDevice); err != nil {
+	q.recordTiming(id, "qmp_connected")
+	if err := q.attachVolume(ctx, client, workspaceNode, workspaceDevice, rendezvous.WorkspaceDevice); err != nil {
 		return err
 	}
+	q.recordTiming(id, "workspace_device_attached")
+	if err := q.attachVolume(ctx, client, processNode, processDevice, rendezvous.ProcessDevice); err != nil {
+		return err
+	}
+	q.recordTiming(id, "process_device_attached")
 	deliverCtx, cancel := context.WithTimeout(ctx, q.probeTimeout)
 	defer cancel()
-	return q.cfg.Guest.Rendezvous(deliverCtx, id, record.CID, guestproto.Rendezvous{
+	request := guestproto.Rendezvous{
 		Lease: rendezvous.Lease,
-		Mounts: []guestproto.Mount{{
-			Serial:     workspaceNode,
-			Filesystem: workspaceFilesystem,
-			Mountpoint: rendezvous.WorkspaceMountpoint,
-			Options:    workspaceMountOptions,
-		}},
-		Env: rendezvous.Env,
-	})
+		Mounts: []guestproto.Mount{
+			{
+				Serial:     workspaceNode,
+				Filesystem: workspaceFilesystem,
+				Mountpoint: rendezvous.WorkspaceMountpoint,
+				Options:    workspaceMountOptions,
+			}, {
+				Serial:     processNode,
+				Filesystem: workspaceFilesystem,
+				Mountpoint: processMountpoint,
+				Options:    processMountOptions,
+			}},
+	}
+	if rendezvous.CheckpointDigest != "" {
+		request.Checkpoint = &guestproto.CheckpointRestore{
+			ImagesDir: processImagesDir, ExpectedDigest: rendezvous.CheckpointDigest,
+			ExternalMountAt: rendezvous.WorkspaceMountpoint,
+		}
+	}
+	if err := q.cfg.Guest.Rendezvous(deliverCtx, id, record.CID, request); err != nil {
+		return err
+	}
+	q.recordTiming(id, "guest_rendezvous_sent")
+	return nil
 }
 
-// Quiesce implements Driver. The guest call runs outside the driver mutex —
-// a sync of dirty pages can take seconds and must not wedge every other
-// verb on the host — under its own bound.
-func (q *QEMU) Quiesce(ctx context.Context, id ID) error {
+// Authorize implements Driver.
+func (q *QEMU) Authorize(ctx context.Context, id ID, authorization Authorization) error {
 	if err := validateID(id); err != nil {
 		return err
 	}
 	q.mu.Lock()
+	defer q.mu.Unlock()
 	record, err := q.readMeta(id)
-	q.mu.Unlock()
 	if errors.Is(err, os.ErrNotExist) {
 		return ErrNotFound
 	}
 	if err != nil {
 		return err
 	}
+	if record.Lease != authorization.Lease || record.WorkspaceMountpoint == "" {
+		return fmt.Errorf("vm: %s is not generation-bound for lease %s", id, authorization.Lease)
+	}
+	deliverCtx, cancel := context.WithTimeout(ctx, q.probeTimeout)
+	defer cancel()
+	return q.cfg.Guest.Authorize(deliverCtx, id, record.CID, guestproto.Authorize{
+		Lease: authorization.Lease, RequestID: authorization.RequestID,
+		Identity: &guestproto.JobIdentity{
+			RunID: authorization.Identity.RunID, RunAttempt: authorization.Identity.RunAttempt,
+			RunnerName: authorization.Identity.RunnerName, Repository: authorization.Identity.Repository,
+			WorkflowJob: authorization.Identity.WorkflowJob,
+		},
+		Env: authorization.Env,
+	})
+}
+
+// Quiesce implements Driver. The guest call runs outside the driver mutex —
+// a sync of dirty pages can take seconds and must not wedge every other
+// verb on the host — under its own bound.
+func (q *QEMU) Quiesce(ctx context.Context, id ID) (CheckpointArtifact, error) {
+	if err := validateID(id); err != nil {
+		return CheckpointArtifact{}, err
+	}
+	q.mu.Lock()
+	record, err := q.readMeta(id)
+	if err == nil {
+		q.recordTiming(id, "quiesce_rpc_started")
+	}
+	q.mu.Unlock()
+	if errors.Is(err, os.ErrNotExist) {
+		return CheckpointArtifact{}, ErrNotFound
+	}
+	if err != nil {
+		return CheckpointArtifact{}, err
+	}
 	if record.WorkspaceMountpoint == "" {
-		return fmt.Errorf("vm: %s has no workspace to quiesce", id)
+		return CheckpointArtifact{}, fmt.Errorf("vm: %s has no workspace to quiesce", id)
 	}
 	quiesceCtx, cancel := context.WithTimeout(ctx, q.quiesceTimeout)
 	defer cancel()
-	return q.cfg.Guest.Quiesce(quiesceCtx, id, record.CID, record.WorkspaceMountpoint)
+	reply, err := q.cfg.Guest.Quiesce(quiesceCtx, id, record.CID, guestproto.Quiesce{
+		Mountpoints: []string{record.WorkspaceMountpoint, processMountpoint},
+		Checkpoint: &guestproto.CheckpointDump{
+			ImagesDir: processImagesDir, ExternalMountAt: record.WorkspaceMountpoint,
+		},
+	})
+	if err != nil {
+		return CheckpointArtifact{}, err
+	}
+	q.mu.Lock()
+	q.timings[id] = append(q.timings[id], timingPoints(reply.Timing)...)
+	q.recordTiming(id, "quiesce_rpc_completed")
+	checkpointTiming := append([]TimingPoint(nil), q.timings[id]...)
+	q.mu.Unlock()
+	if reply.Checkpoint == nil {
+		return CheckpointArtifact{}, errors.New("vm: guest quiesced without a checkpoint artifact")
+	}
+	return CheckpointArtifact{
+		Digest: reply.Checkpoint.Digest, Version: reply.Checkpoint.Version,
+		Timing: checkpointTiming,
+	}, nil
 }
 
-// attachWorkspace hot-attaches the workspace device by stable serial,
+// attachVolume hot-attaches a device by stable serial,
 // observing before acting on both the blockdev and qdev layers so a
 // repeated Assign converges instead of erroring.
-func (q *QEMU) attachWorkspace(ctx context.Context, client *qmpClient, device string) error {
-	attached, err := workspaceBlockdevPresent(ctx, client)
+func (q *QEMU) attachVolume(ctx context.Context, client *qmpClient, node, qdev, device string) error {
+	attached, err := blockdevPresent(ctx, client, node)
 	if err != nil {
 		return err
 	}
 	if !attached {
 		arguments := map[string]any{
 			"driver":    "raw",
-			"node-name": workspaceNode,
+			"node-name": node,
 			"file": map[string]any{
 				"driver":   "host_device",
 				"filename": device,
@@ -417,17 +568,17 @@ func (q *QEMU) attachWorkspace(ctx context.Context, client *qmpClient, device st
 			return err
 		}
 	}
-	present, err := workspaceDevicePresent(ctx, client)
+	present, err := devicePresent(ctx, client, qdev)
 	if err != nil {
 		return err
 	}
 	if !present {
 		arguments := map[string]any{
 			"driver": "scsi-hd",
-			"id":     workspaceDevice,
-			"drive":  workspaceNode,
+			"id":     qdev,
+			"drive":  node,
 			"bus":    "scsi0.0",
-			"serial": workspaceNode,
+			"serial": node,
 		}
 		if _, err := client.Execute(ctx, "device_add", arguments); err != nil {
 			return err
@@ -436,7 +587,7 @@ func (q *QEMU) attachWorkspace(ctx context.Context, client *qmpClient, device st
 	return nil
 }
 
-func workspaceBlockdevPresent(ctx context.Context, client *qmpClient) (bool, error) {
+func blockdevPresent(ctx context.Context, client *qmpClient, expected string) (bool, error) {
 	result, err := client.Execute(ctx, "query-named-block-nodes", nil)
 	if err != nil {
 		return false, err
@@ -448,14 +599,14 @@ func workspaceBlockdevPresent(ctx context.Context, client *qmpClient) (bool, err
 		return false, fmt.Errorf("vm: parsing block nodes: %w", err)
 	}
 	for _, node := range nodes {
-		if node.NodeName == workspaceNode {
+		if node.NodeName == expected {
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
-func workspaceDevicePresent(ctx context.Context, client *qmpClient) (bool, error) {
+func devicePresent(ctx context.Context, client *qmpClient, expected string) (bool, error) {
 	result, err := client.Execute(ctx, "qom-list", map[string]any{"path": "/machine/peripheral"})
 	if err != nil {
 		return false, err
@@ -467,27 +618,27 @@ func workspaceDevicePresent(ctx context.Context, client *qmpClient) (bool, error
 		return false, fmt.Errorf("vm: parsing peripherals: %w", err)
 	}
 	for _, property := range properties {
-		if property.Name == workspaceDevice {
+		if property.Name == expected {
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
-// detachWorkspace unplugs the workspace and releases its zvol. The guest
+// detachVolume unplugs a volume and releases its zvol. The guest
 // acks the SCSI unplug asynchronously, so blockdev-del reports "in use"
 // until it does — typically one to three seconds.
-func (q *QEMU) detachWorkspace(ctx context.Context, client *qmpClient) error {
-	present, err := workspaceDevicePresent(ctx, client)
+func (q *QEMU) detachVolume(ctx context.Context, client *qmpClient, node, qdev string) error {
+	present, err := devicePresent(ctx, client, qdev)
 	if err != nil {
 		return err
 	}
 	if present {
-		if _, err := client.Execute(ctx, "device_del", map[string]any{"id": workspaceDevice}); err != nil {
+		if _, err := client.Execute(ctx, "device_del", map[string]any{"id": qdev}); err != nil {
 			return err
 		}
 	}
-	attached, err := workspaceBlockdevPresent(ctx, client)
+	attached, err := blockdevPresent(ctx, client, node)
 	if err != nil {
 		return err
 	}
@@ -496,7 +647,7 @@ func (q *QEMU) detachWorkspace(ctx context.Context, client *qmpClient) error {
 	}
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		_, err := client.Execute(ctx, "blockdev-del", map[string]any{"node-name": workspaceNode})
+		_, err := client.Execute(ctx, "blockdev-del", map[string]any{"node-name": node})
 		if err == nil {
 			return nil
 		}
@@ -504,7 +655,7 @@ func (q *QEMU) detachWorkspace(ctx context.Context, client *qmpClient) error {
 			return ctx.Err()
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("vm: workspace never released: %w", err)
+			return fmt.Errorf("vm: volume %s never released: %w", node, err)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -554,14 +705,34 @@ func (q *QEMU) observeLocked(ctx context.Context, id ID) (Status, bool, error) {
 	if !q.vmRunning(ctx, id) {
 		// QEMU exists but is not (yet) running the guest; nothing further
 		// can be trusted, so report the phase the meta alone supports.
+		if record.Lease == "" && q.bootExpired(id, record) {
+			q.cfg.Logger.Error("guest boot deadline exceeded", "vm", id, "deadline", q.bootTimeout)
+			return Status{ID: id, Class: record.Class, Image: record.Image, Phase: PhaseGone}, true, nil
+		}
+		status.Timing = append(status.Timing, q.timings[id]...)
 		return status, false, nil
 	}
-	observeCtx, cancel := context.WithTimeout(ctx, q.probeTimeout)
+	observeCtx, cancel := context.WithTimeout(ctx, q.guestProbeTimeout)
 	observation, err := q.cfg.Guest.Observe(observeCtx, id, record.CID)
 	cancel()
 	if err != nil {
 		q.cfg.Logger.Warn("guest observation failed", "vm", id, "err", err)
+		if record.Lease == "" && q.bootExpired(id, record) {
+			q.cfg.Logger.Error("guest boot deadline exceeded", "vm", id, "deadline", q.bootTimeout)
+			return Status{ID: id, Class: record.Class, Image: record.Image, Phase: PhaseGone}, true, nil
+		}
+		status.Timing = append(status.Timing, q.timings[id]...)
 		return status, false, nil
+	}
+	if observation.Hello {
+		q.recordTimingOnce(id, "guest_hello_observed")
+	} else if record.Lease == "" && q.bootExpired(id, record) {
+		q.cfg.Logger.Error("guest boot deadline exceeded", "vm", id, "deadline", q.bootTimeout)
+		return Status{ID: id, Class: record.Class, Image: record.Image, Phase: PhaseGone}, true, nil
+	}
+	if observation.Assignment != nil {
+		q.recordTimingOnce(id, "host_assignment_observed")
+		status.Assignment = assignment(*observation.Assignment)
 	}
 	switch {
 	case observation.RunnerExited:
@@ -580,11 +751,17 @@ func (q *QEMU) observeLocked(ctx context.Context, id ID) (Status, bool, error) {
 		}
 	case observation.HookBlocked:
 		status.Phase = PhaseHookBlocked
-		status.Identity = JobIdentity{
-			RunID: observation.Identity.RunID, RunAttempt: observation.Identity.RunAttempt,
-			RunnerName: observation.Identity.RunnerName, Repository: observation.Identity.Repository,
-			WorkflowJob: observation.Identity.WorkflowJob,
-		}
+		status.Identity = jobIdentity(observation.Identity)
+	case observation.WorkerReady:
+		status.Phase = PhaseWorkerReady
+		status.Identity = jobIdentity(observation.Identity)
+		status.Clock = clockSample(observation.Clock)
+	case observation.MountsReady:
+		status.Phase = PhaseBound
+		status.Clock = clockSample(observation.Clock)
+	case observation.Assignment != nil:
+		status.Phase = PhaseJobAssigned
+		status.Assignment = assignment(*observation.Assignment)
 	case observation.RunnerRegistered:
 		status.Phase = PhaseListening
 	case record.Lease != "":
@@ -594,7 +771,60 @@ func (q *QEMU) observeLocked(ctx context.Context, id ID) (Status, bool, error) {
 	default:
 		status.Phase = PhaseBooting
 	}
+	status.Timing = append(status.Timing, q.timings[id]...)
+	status.Timing = append(status.Timing, timingPoints(observation.Timing)...)
 	return status, false, nil
+}
+
+func (q *QEMU) bootExpired(id ID, record meta) bool {
+	created := time.Unix(0, record.CreatedUnixNS)
+	if record.CreatedUnixNS == 0 {
+		// Metadata written by a previous hostd predates CreatedUnixNS. Its
+		// mtime is the closest durable launch boundary and lets an upgraded
+		// host collect a worker that was already stuck before the restart.
+		info, err := os.Stat(q.metaPath(id))
+		if err != nil {
+			return false
+		}
+		created = info.ModTime()
+	}
+	return time.Since(created) > q.bootTimeout
+}
+
+func jobIdentity(identity guestproto.JobIdentity) JobIdentity {
+	return JobIdentity{
+		RunID: identity.RunID, RunAttempt: identity.RunAttempt, RunnerName: identity.RunnerName,
+		Repository: identity.Repository, WorkflowJob: identity.WorkflowJob,
+	}
+}
+
+func clockSample(clock guestproto.ClockSample) ClockSample {
+	return ClockSample{
+		UnixNS: clock.UnixNS, Synchronized: clock.Synchronized,
+		Clocksource: clock.Clocksource, AfterRestore: clock.AfterRestore,
+	}
+}
+
+func assignment(value guestproto.Assignment) Assignment {
+	result := Assignment{
+		RequestID: value.RequestID, JobID: value.JobID, RunnerName: value.RunnerName,
+		JobDisplayName: value.JobDisplayName,
+	}
+	if value.Identity != nil {
+		result.Identity = jobIdentity(*value.Identity)
+	}
+	return result
+}
+
+func timingPoints(points []guestproto.TimingPoint) []TimingPoint {
+	out := make([]TimingPoint, 0, len(points))
+	for _, point := range points {
+		out = append(out, TimingPoint{
+			Event: point.Event, Source: point.Source, BootID: point.BootID,
+			Sequence: point.Sequence, MonotonicNS: point.MonotonicNS, UnixNS: point.UnixNS,
+		})
+	}
+	return out
 }
 
 // vmRunning probes QMP for a running guest.
@@ -673,8 +903,11 @@ func (q *QEMU) destroyLocked(ctx context.Context, id ID) error {
 		// free it too, but only after the process dies, and the seal that
 		// follows destruction should never race the kernel's zvol release.
 		if client, dialErr := dialQMP(ctx, qmpSocketPath(dir)); dialErr == nil {
-			if detachErr := q.detachWorkspace(ctx, client); detachErr != nil {
+			if detachErr := q.detachVolume(ctx, client, workspaceNode, workspaceDevice); detachErr != nil {
 				q.cfg.Logger.Warn("workspace detach during destroy", "vm", id, "err", detachErr)
+			}
+			if detachErr := q.detachVolume(ctx, client, processNode, processDevice); detachErr != nil {
+				q.cfg.Logger.Warn("process volume detach during destroy", "vm", id, "err", detachErr)
 			}
 			// QEMU may exit before acknowledging quit; that is success.
 			_, _ = client.Execute(ctx, "quit", nil)
@@ -700,5 +933,6 @@ func (q *QEMU) destroyLocked(ctx context.Context, id ID) error {
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("vm: removing state dir for %s: %w", id, err)
 	}
+	delete(q.timings, id)
 	return nil
 }

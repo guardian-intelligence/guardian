@@ -25,7 +25,7 @@ func execDriver(t *testing.T) *Exec {
 	}
 	ctx := context.Background()
 	driver := &Exec{Root: root, Timeout: time.Minute}
-	for _, child := range []string{root + "/ws", root + "/gen"} {
+	for _, child := range []string{root + "/ws", root + "/gen", root + "/process-state/ws", root + "/process-state/gen"} {
 		if ok, err := driver.exists(ctx, child); err != nil {
 			t.Fatal(err)
 		} else if !ok {
@@ -37,6 +37,7 @@ func execDriver(t *testing.T) *Exec {
 	t.Cleanup(func() {
 		_, _ = driver.run(context.Background(), "destroy", "-r", root+"/ws")
 		_, _ = driver.run(context.Background(), "destroy", "-r", root+"/gen")
+		_, _ = driver.run(context.Background(), "destroy", "-r", root+"/process-state")
 	})
 	return driver
 }
@@ -56,19 +57,25 @@ func TestExecLifecycle(t *testing.T) {
 	if _, err := os.Stat(first.Device); err != nil {
 		t.Fatalf("workspace device is not ready: %v", err)
 	}
+	if _, err := driver.EnsureProcess(ctx, "lease-a", "", 64<<20); err != nil {
+		t.Fatalf("empty process volume: %v", err)
+	}
 
-	// Seal it as a generation; sealing twice is a no-op.
-	sealed, err := driver.SealWorkspace(ctx, "lease-a", "gen-1")
+	// Seal the pair as a generation; sealing twice is a no-op.
+	sealed, err := driver.SealPair(ctx, "lease-a", "gen-1")
 	if err != nil {
 		t.Fatalf("seal: %v", err)
 	}
-	if again, err := driver.SealWorkspace(ctx, "lease-a", "gen-1"); err != nil || again.Snapshot != sealed.Snapshot {
+	if again, err := driver.SealPair(ctx, "lease-a", "gen-1"); err != nil || again.Workspace.Snapshot != sealed.Workspace.Snapshot || again.Process.Snapshot != sealed.Process.Snapshot {
 		t.Fatalf("seal not idempotent: %v %v", again, err)
 	}
 
 	// The sealed workspace can die first (that is what promote buys).
 	if err := driver.DestroyWorkspace(ctx, "lease-a"); err != nil {
 		t.Fatalf("destroying sealed-from workspace: %v", err)
+	}
+	if err := driver.DestroyProcess(ctx, "lease-a"); err != nil {
+		t.Fatalf("destroying sealed-from process volume: %v", err)
 	}
 
 	// Clone the generation into a new workspace (cache hit).
@@ -78,6 +85,9 @@ func TestExecLifecycle(t *testing.T) {
 	}
 	if clone.Source != "gen-1" {
 		t.Fatalf("clone source %q", clone.Source)
+	}
+	if _, err := driver.EnsureProcess(ctx, "lease-b", "gen-1", 0); err != nil {
+		t.Fatalf("process clone: %v", err)
 	}
 
 	// A generation with a live clone refuses to die.
@@ -101,8 +111,14 @@ func TestExecLifecycle(t *testing.T) {
 	if err := driver.DestroyWorkspace(ctx, "lease-b"); err != nil {
 		t.Fatal(err)
 	}
+	if err := driver.DestroyProcess(ctx, "lease-b"); err != nil {
+		t.Fatal(err)
+	}
 	if err := driver.DestroyGeneration(ctx, "gen-1"); err != nil {
 		t.Fatalf("reap after clone removal: %v", err)
+	}
+	if err := driver.DestroyProcessGeneration(ctx, "gen-1"); err != nil {
+		t.Fatalf("reap process generation: %v", err)
 	}
 	if err := driver.DestroyWorkspace(ctx, "lease-b"); !isNotFound(err) {
 		t.Fatalf("second destroy: %v", err)
@@ -115,12 +131,16 @@ func TestExecSealRetryAfterPartialSeal(t *testing.T) {
 	if _, err := driver.EnsureWorkspace(ctx, "lease-c", "", 64<<20); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := driver.EnsureProcess(ctx, "lease-c", "", 64<<20); err != nil {
+		t.Fatal(err)
+	}
 	// Reproduce the crash window: snapshot, clone, and promote have run but
-	// the @sealed snapshot never landed. A retrying SealWorkspace must
+	// the @sealed snapshot never landed. A retrying SealPair must
 	// finish the job instead of failing on the second promote.
 	workspace := driver.workspaceDataset("lease-c")
+	processWorkspace := driver.processDriver().workspaceDataset("lease-c")
 	genDataset := driver.generationDataset("gen-2")
-	if _, err := driver.run(ctx, "snapshot", workspace+"@seal-gen-2"); err != nil {
+	if _, err := driver.run(ctx, "snapshot", workspace+"@seal-gen-2", processWorkspace+"@seal-gen-2"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := driver.run(ctx, "clone", workspace+"@seal-gen-2", genDataset); err != nil {
@@ -129,17 +149,23 @@ func TestExecSealRetryAfterPartialSeal(t *testing.T) {
 	if _, err := driver.run(ctx, "promote", genDataset); err != nil {
 		t.Fatal(err)
 	}
-	sealed, err := driver.SealWorkspace(ctx, "lease-c", "gen-2")
+	sealed, err := driver.SealPair(ctx, "lease-c", "gen-2")
 	if err != nil {
 		t.Fatalf("seal retry after partial seal: %v", err)
 	}
-	if sealed.Generation != "gen-2" {
+	if sealed.Workspace.Generation != "gen-2" || sealed.Process.Generation != "gen-2" {
 		t.Fatalf("sealed %+v", sealed)
 	}
 	if err := driver.DestroyWorkspace(ctx, "lease-c"); err != nil {
 		t.Fatal(err)
 	}
+	if err := driver.DestroyProcess(ctx, "lease-c"); err != nil {
+		t.Fatal(err)
+	}
 	if err := driver.DestroyGeneration(ctx, "gen-2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := driver.DestroyProcessGeneration(ctx, "gen-2"); err != nil {
 		t.Fatal(err)
 	}
 }

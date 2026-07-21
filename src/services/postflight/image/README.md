@@ -6,7 +6,7 @@ customer bytes. `build-upstream.sh` checks out a pinned
 provisioners and toolset in their original order, changing only the
 Azure machine builder and Azure-agent deprovisioner. The result is cached
 as a QEMU qcow2 by upstream commit. `build.sh` layers the pinned
-`actions/runner`, cryptsetup, the single-job `runner` user, and guestd onto
+`actions/runner`, the pinned CRIU release, cryptsetup, the single-job `runner` user, and guestd onto
 that image, removes the temporary image-build ingress, and imports it into
 ZFS. Workload always arrives later via the workspace zvol.
 
@@ -30,13 +30,16 @@ Prerequisites: root, KVM, QEMU, `qemu-utils`, `zfsutils-linux`,
 cloud-images.ubuntu.com, github.com, HashiCorp releases, and every source
 used by the upstream runner-images provisioners.
 
-Build guestd for the target architecture, then pass its path explicitly:
+Build guestd and the source-pinned Runner.Listener patch, then pass both
+paths explicitly:
 
 ```sh
 eval "$(scripts/bootstrap.sh path)"
 bazel build //src/services/postflight/guestd/cmd/guestd
+listener="$(src/services/postflight/runner/build.sh)"
 sudo env POOL=tank \
   GUESTD_BIN="$(bazel cquery --output=files //src/services/postflight/guestd/cmd/guestd)" \
+  RUNNER_LISTENER_DLL="${listener}" \
   src/services/postflight/image/build.sh
 ```
 

@@ -1,0 +1,296 @@
+package guestd
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+)
+
+const (
+	capsuleEnterArgument = "capsule-enter"
+)
+
+// CapsuleManager owns one checkpointable PID namespace. Its init never reads
+// a runner credential. Runner.Worker enters the namespace only after hostd
+// authorizes the locally observed assignment; when it exits, namespace init
+// adopts surviving build daemons and forms one generic CRIU tree.
+type CapsuleManager struct {
+	BinaryPath string
+	InitPath   string
+	SleepPath  string
+	RunnerRoot string
+
+	mu        sync.Mutex
+	rootPID   int
+	rootReady bool
+	command   *exec.Cmd
+}
+
+func (m *CapsuleManager) validate() error {
+	switch {
+	case m == nil:
+		return errors.New("guestd: capsule manager is nil")
+	case m.BinaryPath == "" || m.BinaryPath[0] != '/':
+		return errors.New("guestd: capsule binary path must be absolute")
+	case m.InitPath == "" || m.InitPath[0] != '/':
+		return errors.New("guestd: capsule init path must be absolute")
+	case m.SleepPath == "" || m.SleepPath[0] != '/':
+		return errors.New("guestd: capsule sleep path must be absolute")
+	case m.RunnerRoot == "" || m.RunnerRoot[0] != '/':
+		return errors.New("guestd: capsule runner root must be absolute")
+	}
+	return nil
+}
+
+// Start creates the initial secretless namespace init for a cold generation.
+func (m *CapsuleManager) Start(ctx context.Context) error {
+	if err := m.validate(); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	if m.rootPID > 1 && m.rootReady {
+		m.mu.Unlock()
+		return nil
+	}
+	if m.rootPID != 0 {
+		m.mu.Unlock()
+		return errors.New("guestd: runner capsule is already starting")
+	}
+	m.rootPID = -1
+	m.mu.Unlock()
+	cmd := exec.Command(m.BinaryPath, capsuleEnterArgument, m.InitPath, m.SleepPath)
+	cmd.Env = []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: syscall.CLONE_NEWPID | syscall.CLONE_NEWNS, Setsid: true}
+	if err := cmd.Start(); err != nil {
+		m.mu.Lock()
+		m.rootPID = 0
+		m.mu.Unlock()
+		return fmt.Errorf("guestd: starting runner capsule: %w", err)
+	}
+	m.mu.Lock()
+	m.rootPID = cmd.Process.Pid
+	m.command = cmd
+	m.mu.Unlock()
+	done := make(chan error, 1)
+	go func(pid int) {
+		err := cmd.Wait()
+		m.mu.Lock()
+		if m.rootPID == pid {
+			m.rootPID = 0
+			m.rootReady = false
+			m.command = nil
+		}
+		m.mu.Unlock()
+		done <- err
+	}(cmd.Process.Pid)
+	if err := waitCapsuleInit(ctx, cmd.Process.Pid, filepath.Base(m.InitPath), done); err != nil {
+		_ = cmd.Process.Kill()
+		return fmt.Errorf("guestd: starting runner capsule: %w", err)
+	}
+	m.mu.Lock()
+	if m.rootPID != cmd.Process.Pid {
+		m.mu.Unlock()
+		return errors.New("guestd: runner capsule exited during startup")
+	}
+	m.rootReady = true
+	m.mu.Unlock()
+	return nil
+}
+
+func waitCapsuleInit(ctx context.Context, pid int, name string, done <-chan error) error {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		raw, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "status"))
+		if err == nil && processIsNamespaceInit(raw, name) {
+			return nil
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case err := <-done:
+			return fmt.Errorf("native init exited: %w", err)
+		case <-ticker.C:
+		}
+	}
+}
+
+func processIsNamespaceInit(status []byte, name string) bool {
+	seenName := false
+	seenPIDOne := false
+	zombie := false
+	for _, line := range strings.Split(string(status), "\n") {
+		if value, ok := strings.CutPrefix(line, "Name:\t"); ok {
+			seenName = strings.TrimSpace(value) == name
+		}
+		if value, ok := strings.CutPrefix(line, "NSpid:\t"); ok {
+			fields := strings.Fields(value)
+			seenPIDOne = len(fields) >= 2 && fields[len(fields)-1] == "1"
+		}
+		if value, ok := strings.CutPrefix(line, "State:\t"); ok {
+			zombie = strings.HasPrefix(strings.TrimSpace(value), "Z")
+		}
+	}
+	return seenName && seenPIDOne && !zombie
+}
+
+// RootPID returns the host-visible root of the donor capsule after the
+// one-shot runner exits. CRIU addresses this PID from guestd's namespace.
+func (m *CapsuleManager) RootPID() (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.rootPID <= 1 || !m.rootReady {
+		return 0, errors.New("guestd: no runner capsule is available")
+	}
+	if err := syscall.Kill(m.rootPID, 0); err != nil {
+		return 0, fmt.Errorf("guestd: runner capsule is not alive: %w", err)
+	}
+	return m.rootPID, nil
+}
+
+// IsCapsuleEnter reports the short-lived namespace setup mode. The helper is
+// replaced by the native init before any checkpoint is possible.
+func IsCapsuleEnter(args []string) bool {
+	return len(args) == 4 && args[1] == capsuleEnterArgument
+}
+
+// RunCapsuleEnter gives the PID namespace a matching procfs, then replaces
+// the Go runtime with the native init so no guestd runtime state is captured.
+func RunCapsuleEnter(args []string) error {
+	if !IsCapsuleEnter(args) {
+		return errors.New("guestd: invalid capsule-enter invocation")
+	}
+	initPath, sleepPath := args[2], args[3]
+	if !filepath.IsAbs(initPath) || !filepath.IsAbs(sleepPath) {
+		return errors.New("guestd: capsule-enter paths must be absolute")
+	}
+	if err := syscall.Mount("", "/", "", syscall.MS_REC|syscall.MS_PRIVATE, ""); err != nil {
+		return fmt.Errorf("guestd: making capsule mounts private: %w", err)
+	}
+	for _, mountpoint := range []string{"/boot/efi", "/boot"} {
+		if err := syscall.Unmount(mountpoint, syscall.MNT_DETACH); err != nil && !errors.Is(err, syscall.EINVAL) && !errors.Is(err, syscall.ENOENT) {
+			return fmt.Errorf("guestd: detaching capsule mount %s: %w", mountpoint, err)
+		}
+	}
+	if err := syscall.Mount("proc", "/proc", "proc", syscall.MS_NOSUID|syscall.MS_NODEV|syscall.MS_NOEXEC, ""); err != nil {
+		return fmt.Errorf("guestd: mounting capsule procfs: %w", err)
+	}
+	null, err := os.OpenFile("/dev/null", os.O_RDWR, 0)
+	if err != nil {
+		return fmt.Errorf("guestd: opening capsule null device: %w", err)
+	}
+	defer null.Close()
+	for descriptor := 0; descriptor <= 2; descriptor++ {
+		if err := syscall.Dup2(int(null.Fd()), descriptor); err != nil {
+			return fmt.Errorf("guestd: redirecting capsule descriptor %d: %w", descriptor, err)
+		}
+	}
+	return syscall.Exec(initPath, []string{initPath, "-s", "--", sleepPath, "infinity"}, []string{
+		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+	})
+}
+
+// UseRestored adopts a capsule restored before a fresh runner is launched.
+func (m *CapsuleManager) UseRestored(_ context.Context, restoredRoot int) error {
+	if restoredRoot <= 1 {
+		return errors.New("guestd: invalid restored capsule root")
+	}
+	if err := syscall.Kill(restoredRoot, 0); err != nil {
+		return fmt.Errorf("guestd: restored capsule is not alive: %w", err)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.rootPID != 0 {
+		return errors.New("guestd: capsule already exists before restore")
+	}
+	m.rootPID = restoredRoot
+	m.rootReady = true
+	return nil
+}
+
+// PrepareForCheckpoint force-removes any GitHub runner processes while
+// preserving arbitrary workload daemons in the capsule. A checkpoint is
+// rejected unless the credential-bearing runner is provably absent.
+func (m *CapsuleManager) PrepareForCheckpoint(ctx context.Context) error {
+	if err := m.validate(); err != nil {
+		return err
+	}
+	rootPID, err := m.RootPID()
+	if err != nil {
+		return err
+	}
+	for {
+		pids, err := m.runnerProcesses(rootPID)
+		if err != nil {
+			return err
+		}
+		if len(pids) == 0 {
+			return nil
+		}
+		for _, pid := range pids {
+			if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+				return fmt.Errorf("guestd: killing runner process %d: %w", pid, err)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("guestd: runner processes survived forced termination: %w", ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func (m *CapsuleManager) runnerProcesses(rootPID int) ([]int, error) {
+	namespace, err := os.Readlink(filepath.Join("/proc", strconv.Itoa(rootPID), "ns", "pid"))
+	if err != nil {
+		return nil, fmt.Errorf("guestd: reading capsule PID namespace: %w", err)
+	}
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil, err
+	}
+	var pids []int
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid == rootPID {
+			continue
+		}
+		candidateNamespace, err := os.Readlink(filepath.Join("/proc", entry.Name(), "ns", "pid"))
+		if err != nil || candidateNamespace != namespace {
+			continue
+		}
+		executable, err := os.Readlink(filepath.Join("/proc", entry.Name(), "exe"))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("guestd: reading process %d executable: %w", pid, err)
+		}
+		cmdline, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "cmdline"))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("guestd: reading process %d command line: %w", pid, err)
+		}
+		if executable == m.RunnerRoot || strings.HasPrefix(executable, m.RunnerRoot+string(filepath.Separator)) ||
+			commandUsesPath(cmdline, m.RunnerRoot) {
+			pids = append(pids, pid)
+		}
+	}
+	return pids, nil
+}
+
+func commandUsesPath(cmdline []byte, root string) bool {
+	for _, argument := range strings.Split(string(cmdline), "\x00") {
+		if argument == root || strings.HasPrefix(argument, root+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}

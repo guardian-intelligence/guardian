@@ -124,7 +124,12 @@ func (w *World) newAgent() *agent.Agent {
 func (w *World) setAttached(device string, attached bool) {
 	// Devices look like /dev/zvol/fake/ws/<lease>.
 	if i := strings.LastIndex(device, "/ws/"); i >= 0 {
-		w.Zvols.SetAttached(zvol.LeaseID(device[i+len("/ws/"):]), attached)
+		lease := zvol.LeaseID(device[i+len("/ws/"):])
+		if strings.Contains(device[:i], "/process-state") {
+			w.Zvols.SetProcessAttached(lease, attached)
+		} else {
+			w.Zvols.SetAttached(lease, attached)
+		}
 	}
 }
 

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -85,27 +84,30 @@ func TestVsockLoopbackTransportEndToEnd(t *testing.T) {
 
 	system := &loopSystem{mounted: map[string]bool{}}
 	ran := make(chan string, 1)
-	gateDir := filepath.Join(t.TempDir(), "rendezvous")
-	server, err := guestd.New(guestd.Config{
+	assignmentSocket := filepath.Join(t.TempDir(), "assignment.sock")
+	identity := guestproto.JobIdentity{
+		RunID: "1", RunAttempt: 1, RunnerName: "lease-loop",
+		Repository: "acme/widget", WorkflowJob: "test",
+	}
+	var server *guestd.Server
+	server, err = guestd.New(guestd.Config{
 		System: system,
 		RunRunner: func(_ context.Context, jitConfig string, _ map[string]string, event func(guestd.RunnerEvent)) (int, error) {
 			ran <- jitConfig
 			event(guestd.EventListening)
-			event(guestd.EventJobStarted)
-			request := []byte("run_id=1\nrun_attempt=1\nrunner_name=lease-loop\nrepository=acme/widget\nworkflow_job=test\n")
-			if err := os.WriteFile(filepath.Join(gateDir, "request"), request, 0o600); err != nil {
+			assignment := guestproto.Assignment{
+				RequestID: "request-loop", JobID: "job-loop", RunnerName: "lease-loop",
+				JobDisplayName: "test", Identity: &identity,
+			}
+			if err := guestd.AwaitRunnerAssignment(context.Background(), assignmentSocket, assignment); err != nil {
 				return 0, err
 			}
-			for {
-				if _, err := os.Stat(filepath.Join(gateDir, "release")); err == nil {
-					break
-				}
-				time.Sleep(time.Millisecond)
+			if _, err := guestd.ValidateRunnerAssignment(context.Background(), assignmentSocket, identity); err != nil {
+				return 0, err
 			}
 			return 0, nil
 		},
 		RetryInterval: time.Millisecond,
-		RendezvousDir: gateDir,
 		HostCID:       vsock.Local,
 		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
@@ -118,9 +120,15 @@ func TestVsockLoopbackTransportEndToEnd(t *testing.T) {
 		defer close(served)
 		_ = server.Serve(serveCtx, listener)
 	}()
+	assignmentServed := make(chan struct{})
+	go func() {
+		defer close(assignmentServed)
+		_ = server.ServeAssignments(serveCtx, assignmentSocket)
+	}()
 	t.Cleanup(func() {
 		cancel()
 		<-served
+		<-assignmentServed
 	})
 
 	transport := NewVsockGuest()
@@ -143,11 +151,11 @@ func TestVsockLoopbackTransportEndToEnd(t *testing.T) {
 	if err := transport.Prepare(deliverCtx, id, vsock.Local, prepare); err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
-	waitFor(t, "blocked hook over loopback", 10*time.Second, func() (bool, error) {
+	waitFor(t, "local assignment over loopback", 10*time.Second, func() (bool, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		observed, err := transport.Observe(ctx, id, vsock.Local)
-		return observed.HookBlocked, err
+		return observed.Assignment != nil && observed.Assignment.RequestID == "request-loop", err
 	})
 	rendezvous := guestproto.Rendezvous{
 		Lease:  "lease-loop",
@@ -155,6 +163,17 @@ func TestVsockLoopbackTransportEndToEnd(t *testing.T) {
 	}
 	if err := transport.Rendezvous(deliverCtx, id, vsock.Local, rendezvous); err != nil {
 		t.Fatalf("rendezvous: %v", err)
+	}
+	waitFor(t, "generation restore over loopback", 10*time.Second, func() (bool, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		observed, err := transport.Observe(ctx, id, vsock.Local)
+		return observed.MountsReady, err
+	})
+	if err := transport.Authorize(deliverCtx, id, vsock.Local, guestproto.Authorize{
+		Lease: "lease-loop", RequestID: "request-loop", Identity: &identity,
+	}); err != nil {
+		t.Fatalf("authorize: %v", err)
 	}
 
 	waitFor(t, "runner exit over loopback", 10*time.Second, func() (bool, error) {
@@ -175,10 +194,10 @@ func TestVsockLoopbackTransportEndToEnd(t *testing.T) {
 
 	quiesceCtx, quiesceCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer quiesceCancel()
-	if err := transport.Quiesce(quiesceCtx, id, vsock.Local, "/work"); err != nil {
+	if _, err := transport.Quiesce(quiesceCtx, id, vsock.Local, guestproto.Quiesce{Mountpoints: []string{"/work"}}); err != nil {
 		t.Fatalf("quiesce: %v", err)
 	}
-	if mounted, _ := system.IsMounted("/work"); mounted {
-		t.Fatal("workspace still mounted after quiesce")
+	if mounted, _ := system.IsMounted("/work"); !mounted {
+		t.Fatal("workspace was unmounted before VM teardown")
 	}
 }
