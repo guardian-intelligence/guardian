@@ -105,6 +105,9 @@ func TestVsockLoopbackTransportEndToEnd(t *testing.T) {
 			if _, err := guestd.ValidateRunnerAssignment(context.Background(), assignmentSocket, identity); err != nil {
 				return 0, err
 			}
+			if err := guestd.ReleaseRunnerAssignment(context.Background(), assignmentSocket, identity); err != nil {
+				return 0, err
+			}
 			return 0, nil
 		},
 		RetryInterval: time.Millisecond,

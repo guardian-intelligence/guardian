@@ -103,6 +103,8 @@ func (s *Server) handleLocal(ctx context.Context, conn net.Conn) {
 		reply = s.awaitAssignment(requestCtx, request.Assignment)
 	case "validate":
 		reply = s.validateAssignment(request.Identity)
+	case "hook-released":
+		reply = s.releaseAssignment(request.Identity)
 	case "worker-starting":
 		reply = s.runnerWorkerStarting()
 	case "worker-failed":
@@ -188,24 +190,86 @@ func (s *Server) validateAssignment(identity *guestproto.JobIdentity) localReply
 	s.mu.Lock()
 	authorized := s.authorized
 	clock := s.clock
+	alreadyValidated := s.hookValidated
 	s.mu.Unlock()
 	if authorized == nil || authorized.Identity == nil || clock == nil {
 		return localReply{Error: "worker was not authorized"}
 	}
-	if *authorized.Identity != *identity {
-		return localReply{Error: "job identity does not match assignment"}
+	if mismatch := identityMismatch(authorized.Identity, identity); mismatch != "" {
+		return localReply{Error: "job identity does not match assignment: " + mismatch}
 	}
+	if alreadyValidated {
+		return localReply{Ready: true, Env: authorized.Env}
+	}
+	s.mu.Lock()
+	if s.hookValidated {
+		s.mu.Unlock()
+		return localReply{Ready: true, Env: authorized.Env}
+	}
+	s.hookValidated = true
+	s.mu.Unlock()
 	blocked := guestTiming(s.cfg.Timing.Point("job_hook_validated"))
 	s.sendStatus(guestproto.RunnerStatus{
 		State: guestproto.RunnerHookBlocked, Identity: identity, Clock: clock,
 		Timing: []guestproto.TimingPoint{blocked},
 	})
+	return localReply{Ready: true, Env: authorized.Env}
+}
+
+func (s *Server) releaseAssignment(identity *guestproto.JobIdentity) localReply {
+	if identity == nil {
+		return localReply{Error: "missing identity"}
+	}
+	s.mu.Lock()
+	authorized := s.authorized
+	clock := s.clock
+	validated := s.hookValidated
+	alreadyReleased := s.hookReleased
+	s.mu.Unlock()
+	if authorized == nil || authorized.Identity == nil || clock == nil {
+		return localReply{Error: "worker was not authorized"}
+	}
+	if mismatch := identityMismatch(authorized.Identity, identity); mismatch != "" {
+		return localReply{Error: "job identity does not match assignment: " + mismatch}
+	}
+	if !validated {
+		return localReply{Error: "job hook was not validated"}
+	}
+	if alreadyReleased {
+		return localReply{Ready: true}
+	}
+	s.mu.Lock()
+	if s.hookReleased {
+		s.mu.Unlock()
+		return localReply{Ready: true}
+	}
+	s.hookReleased = true
+	s.mu.Unlock()
 	released := guestTiming(s.cfg.Timing.Point("customer_steps_released"))
 	s.sendStatus(guestproto.RunnerStatus{
 		State: guestproto.RunnerReleased, Identity: identity, Clock: clock,
 		Timing: []guestproto.TimingPoint{released},
 	})
-	return localReply{Ready: true, Env: authorized.Env}
+	return localReply{Ready: true}
+}
+
+func identityMismatch(expected, actual *guestproto.JobIdentity) string {
+	switch {
+	case expected == nil || actual == nil:
+		return "missing identity"
+	case expected.RunID != actual.RunID:
+		return "run_id"
+	case expected.RunAttempt != actual.RunAttempt:
+		return "run_attempt"
+	case expected.RunnerName != actual.RunnerName:
+		return "runner_name"
+	case expected.Repository != actual.Repository:
+		return "repository"
+	case expected.WorkflowJob != actual.WorkflowJob:
+		return "workflow_job"
+	default:
+		return ""
+	}
 }
 
 func guestTiming(point timing.Point) guestproto.TimingPoint {
@@ -258,7 +322,9 @@ func RunValidateAssignment(args []string) error {
 	}
 	attempt, err := strconv.Atoi(os.Getenv("GITHUB_RUN_ATTEMPT"))
 	if err != nil || attempt <= 0 {
-		return errors.New("guestd: invalid GITHUB_RUN_ATTEMPT")
+		err := errors.New("guestd: invalid GITHUB_RUN_ATTEMPT")
+		ReportRunnerWorkerFailure(err)
+		return err
 	}
 	identity := &guestproto.JobIdentity{
 		RunID: os.Getenv("GITHUB_RUN_ID"), RunAttempt: attempt,
@@ -267,13 +333,27 @@ func RunValidateAssignment(args []string) error {
 	}
 	var reply localReply
 	if err := callLocal(localRequest{Kind: "validate", Identity: identity}, &reply); err != nil {
+		err = fmt.Errorf("guestd: validate job-start hook: %w", err)
+		ReportRunnerWorkerFailure(err)
 		return err
 	}
 	envPath := os.Getenv("GITHUB_ENV")
 	if envPath == "" {
-		return errors.New("guestd: GITHUB_ENV is missing")
+		err := errors.New("guestd: GITHUB_ENV is missing")
+		ReportRunnerWorkerFailure(err)
+		return err
 	}
-	return appendJobEnvironment(envPath, reply.Env)
+	if err := appendJobEnvironment(envPath, reply.Env); err != nil {
+		err = fmt.Errorf("guestd: write job environment: %w", err)
+		ReportRunnerWorkerFailure(err)
+		return err
+	}
+	if err := callLocal(localRequest{Kind: "hook-released", Identity: identity}, nil); err != nil {
+		err = fmt.Errorf("guestd: release job-start hook: %w", err)
+		ReportRunnerWorkerFailure(err)
+		return err
+	}
+	return nil
 }
 
 func callLocal(request localRequest, replyOut *localReply) error {
@@ -295,6 +375,12 @@ func ValidateRunnerAssignment(ctx context.Context, socketPath string, identity g
 		return nil, err
 	}
 	return reply.Env, nil
+}
+
+// ReleaseRunnerAssignment records the point after the job-start hook has
+// installed hostd's environment and immediately before it exits successfully.
+func ReleaseRunnerAssignment(ctx context.Context, socketPath string, identity guestproto.JobIdentity) error {
+	return callLocalAt(ctx, socketPath, localRequest{Kind: "hook-released", Identity: &identity}, nil)
 }
 
 func callLocalAt(ctx context.Context, socketPath string, request localRequest, replyOut *localReply) error {

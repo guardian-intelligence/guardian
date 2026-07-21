@@ -36,18 +36,21 @@ func main() {
 	}
 	if guestd.IsRunnerAssigned(os.Args) {
 		if err := guestd.RunRunnerAssigned(os.Args); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 		return
 	}
 	if guestd.IsValidateAssignment(os.Args) {
 		if err := guestd.RunValidateAssignment(os.Args); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 		return
 	}
 	if guestd.IsCapsuleEnter(os.Args) {
 		if err := guestd.RunCapsuleEnter(os.Args); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 		return
