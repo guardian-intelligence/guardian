@@ -79,6 +79,13 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("read host secret: %w", err)
 	}
+	storage := &zvol.Exec{Root: cfg.pool}
+	storageCtx, cancelStorage := context.WithTimeout(context.Background(), 30*time.Second)
+	err = storage.Prepare(storageCtx)
+	cancelStorage()
+	if err != nil {
+		return fmt.Errorf("prepare zvol namespace: %w", err)
+	}
 
 	class := vm.Class(cfg.class)
 	image := cfg.pool + "/images/" + cfg.imageID + "@golden"
@@ -106,7 +113,7 @@ func run(logger *slog.Logger) error {
 		CheckoutGuestOrigin: cfg.checkoutGuestOrigin,
 		TraceDir:            filepath.Join(cfg.stateDir, "rendezvous"),
 		Platform:            platformFingerprint(cfg),
-	}, &zvol.Exec{Root: cfg.pool}, vms, cfg.syncSecret, hostSecret, agent.Options{Logger: logger})
+	}, storage, vms, cfg.syncSecret, hostSecret, agent.Options{Logger: logger})
 	if err != nil {
 		return err
 	}

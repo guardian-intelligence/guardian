@@ -32,6 +32,47 @@ type Exec struct {
 
 const defaultTimeout = 30 * time.Second
 
+// Prepare creates the fixed dataset hierarchy owned by hostd. It runs once
+// during daemon startup so namespace checks never enter the assignment path.
+func (e *Exec) Prepare(ctx context.Context) error {
+	if e.Root == "" {
+		return errors.New("zvol: root is required")
+	}
+	exists, err := e.exists(ctx, e.Root)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("zvol: root %s: %w", e.Root, ErrNotFound)
+	}
+	for _, dataset := range []string{
+		e.Root + "/ws",
+		e.Root + "/gen",
+		e.Root + "/process-state",
+		e.Root + "/process-state/ws",
+		e.Root + "/process-state/gen",
+	} {
+		exists, err := e.exists(ctx, dataset)
+		if err != nil {
+			return err
+		}
+		if exists {
+			continue
+		}
+		if _, err := e.run(ctx, "create", dataset); err != nil {
+			if !errors.Is(err, ErrBusy) {
+				return err
+			}
+			if exists, checkErr := e.exists(ctx, dataset); checkErr != nil {
+				return checkErr
+			} else if !exists {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (e *Exec) timeout() time.Duration {
 	if e.Timeout > 0 {
 		return e.Timeout
