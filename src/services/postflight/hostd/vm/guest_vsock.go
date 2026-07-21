@@ -134,7 +134,7 @@ func (g *VsockGuest) Quiesce(ctx context.Context, id ID, cid uint32, request gue
 	select {
 	case result := <-reply:
 		if result.err != nil {
-			return guestproto.Quiesced{}, fmt.Errorf("vm: quiesce %s: %w", id, result.err)
+			return result.reply, fmt.Errorf("vm: quiesce %s: %w", id, result.err)
 		}
 		return result.reply, nil
 	case <-ctx.Done():
@@ -224,7 +224,7 @@ func (g *VsockGuest) read(id ID, channel *guestChannel) {
 		case guestproto.KindQuiesced:
 			channel.resolveQuiesce(*message.Quiesced, nil)
 		case guestproto.KindQuiesceFailed:
-			channel.resolveQuiesce(guestproto.Quiesced{}, errors.New(message.QuiesceFailed.Reason))
+			channel.resolveQuiesce(guestproto.Quiesced{Timing: message.QuiesceFailed.Timing}, errors.New(message.QuiesceFailed.Reason))
 		default:
 			// A host-bound stream carrying host→guest verbs is a broken
 			// peer; nothing on this connection can be trusted anymore.

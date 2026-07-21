@@ -62,17 +62,23 @@ func (p ProcessCheckpoints) Restore(ctx context.Context, imagesDir, expectedDige
 }
 
 func (p ProcessCheckpoints) Dump(ctx context.Context, imagesDir, externalMount string) (CheckpointArtifact, error) {
+	return p.dumpObserved(ctx, imagesDir, externalMount, nil)
+}
+
+func (p ProcessCheckpoints) dumpObserved(ctx context.Context, imagesDir, externalMount string, observer checkpointObserver) (CheckpointArtifact, error) {
 	if err := p.validate(imagesDir, externalMount); err != nil {
 		return CheckpointArtifact{}, err
 	}
+	observeCheckpoint(observer, "checkpoint_capsule_prepare_started")
 	if err := p.Capsules.PrepareForCheckpoint(ctx); err != nil {
 		return CheckpointArtifact{}, fmt.Errorf("guestd: preparing capsule for checkpoint: %w", err)
 	}
+	observeCheckpoint(observer, "checkpoint_capsule_prepare_completed")
 	rootPID, err := p.Capsules.RootPID()
 	if err != nil {
 		return CheckpointArtifact{}, err
 	}
-	return p.CRIU.Dump(ctx, Capsule{
+	return p.CRIU.dumpObserved(ctx, Capsule{
 		RootPID:   rootPID,
 		ImagesDir: imagesDir,
 		ExternalMounts: []ExternalMount{
@@ -80,5 +86,5 @@ func (p ProcessCheckpoints) Dump(ctx context.Context, imagesDir, externalMount s
 			{Key: "root", Path: "/"},
 			{Key: "workspace", Path: externalMount},
 		},
-	})
+	}, observer)
 }

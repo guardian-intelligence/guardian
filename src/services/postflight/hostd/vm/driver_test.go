@@ -99,14 +99,15 @@ func (d *fakeDisks) Destroy(_ context.Context, dataset string) error {
 // scriptedGuest is the guestd seam for tests: observations are set by the
 // test, deliveries are recorded.
 type scriptedGuest struct {
-	mu           sync.Mutex
-	observation  map[ID]GuestObservation
-	cids         map[ID]uint32
-	prepared     map[ID][]guestproto.Prepare
-	rendezvoused map[ID][]guestproto.Rendezvous
-	authorized   map[ID][]guestproto.Authorize
-	quiesced     map[ID][]guestproto.Quiesce
-	quiesceErr   error
+	mu                   sync.Mutex
+	observation          map[ID]GuestObservation
+	cids                 map[ID]uint32
+	prepared             map[ID][]guestproto.Prepare
+	rendezvoused         map[ID][]guestproto.Rendezvous
+	authorized           map[ID][]guestproto.Authorize
+	quiesced             map[ID][]guestproto.Quiesce
+	quiesceErr           error
+	quiesceFailureTiming []guestproto.TimingPoint
 }
 
 func newScriptedGuest() *scriptedGuest {
@@ -156,7 +157,7 @@ func (g *scriptedGuest) Quiesce(_ context.Context, id ID, cid uint32, request gu
 	defer g.mu.Unlock()
 	g.cids[id] = cid
 	if g.quiesceErr != nil {
-		return guestproto.Quiesced{}, g.quiesceErr
+		return guestproto.Quiesced{Timing: g.quiesceFailureTiming}, g.quiesceErr
 	}
 	g.quiesced[id] = append(g.quiesced[id], request)
 	return guestproto.Quiesced{Checkpoint: &guestproto.CheckpointArtifact{
@@ -787,6 +788,24 @@ func TestQuiesceUsesTheAssignedMountpoint(t *testing.T) {
 	}
 	if got := second.guest.quiesces("vm-a"); len(got) != 1 || len(got[0].Mountpoints) != 2 || got[0].Mountpoints[0] != rendezvous.WorkspaceMountpoint || got[0].Mountpoints[1] != processMountpoint {
 		t.Fatalf("quiesced %v, want the assigned mountpoint", got)
+	}
+
+	second.guest.quiesceErr = errors.New("dump timed out")
+	second.guest.quiesceFailureTiming = []guestproto.TimingPoint{{
+		Event: "checkpoint_criu_dump_started", Source: "guestd", BootID: "guest-boot",
+		Sequence: 8, MonotonicNS: 13, UnixNS: 14,
+	}}
+	failed, err := second.q.Quiesce(ctx, "vm-a")
+	if err == nil || !strings.Contains(err.Error(), "dump timed out") {
+		t.Fatalf("failed quiesce error = %v", err)
+	}
+	events = events[:0]
+	for _, point := range failed.Timing {
+		events = append(events, point.Event)
+	}
+	wantSuffix := "quiesce_rpc_started,checkpoint_criu_dump_started,quiesce_rpc_failed"
+	if got := strings.Join(events[len(events)-3:], ","); got != wantSuffix {
+		t.Fatalf("failed quiesce timing suffix %s, want %s", got, wantSuffix)
 	}
 }
 

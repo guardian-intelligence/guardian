@@ -88,7 +88,7 @@ func (c *Config) validate() error {
 		c.RetryInterval = 200 * time.Millisecond
 	}
 	if c.QuiesceWindow <= 0 {
-		c.QuiesceWindow = 10 * time.Second
+		c.QuiesceWindow = 5 * time.Minute
 	}
 	if c.HookDeadline <= 0 {
 		c.HookDeadline = 2 * time.Minute
@@ -604,13 +604,13 @@ func (s *Server) openEncrypted(ctx context.Context, device, serial string) (stri
 func (s *Server) handleQuiesce(quiesce guestproto.Quiesce) {
 	points := []guestproto.TimingPoint{guestTiming(s.cfg.Timing.Point("quiesce_received"))}
 	if len(quiesce.Mountpoints) == 0 {
-		s.quiesceFailed(errors.New("quiesce requires at least one mounted volume"))
+		s.quiesceFailed(errors.New("quiesce requires at least one mounted volume"), points)
 		return
 	}
 	for _, mountpoint := range quiesce.Mountpoints {
 		if err := s.requireMounted(mountpoint); err != nil {
 			s.cfg.Logger.Error("quiesce failed", "mountpoint", mountpoint, "err", err)
-			s.quiesceFailed(err)
+			s.quiesceFailed(err, points)
 			return
 		}
 	}
@@ -618,24 +618,26 @@ func (s *Server) handleQuiesce(quiesce guestproto.Quiesce) {
 	var artifact *guestproto.CheckpointArtifact
 	if quiesce.Checkpoint != nil {
 		if s.cfg.Checkpoints == nil {
-			s.quiesceFailed(errors.New("process checkpoint requested but guest support is disabled"))
+			s.quiesceFailed(errors.New("process checkpoint requested but guest support is disabled"), points)
 			return
 		}
 		checkpoint := quiesce.Checkpoint
 		if !slices.Contains(quiesce.Mountpoints, checkpoint.ExternalMountAt) {
-			s.quiesceFailed(errors.New("checkpoint external mount is not in the generation tuple"))
+			s.quiesceFailed(errors.New("checkpoint external mount is not in the generation tuple"), points)
 			return
 		}
 		if !slices.Contains(quiesce.Mountpoints, s.cfg.Checkpoints.ImagesRoot) {
-			s.quiesceFailed(errors.New("checkpoint process volume is not in the generation tuple"))
+			s.quiesceFailed(errors.New("checkpoint process volume is not in the generation tuple"), points)
 			return
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), s.cfg.QuiesceWindow)
 		points = append(points, guestTiming(s.cfg.Timing.Point("checkpoint_dump_started")))
-		result, err := s.cfg.Checkpoints.Dump(ctx, checkpoint.ImagesDir, checkpoint.ExternalMountAt)
+		result, err := s.cfg.Checkpoints.dumpObserved(ctx, checkpoint.ImagesDir, checkpoint.ExternalMountAt, func(event string) {
+			points = append(points, guestTiming(s.cfg.Timing.Point(event)))
+		})
 		cancel()
 		if err != nil {
-			s.quiesceFailed(fmt.Errorf("checkpoint dump: %w", err))
+			s.quiesceFailed(fmt.Errorf("checkpoint dump: %w", err), points)
 			return
 		}
 		points = append(points, guestTiming(s.cfg.Timing.Point("checkpoint_dump_completed")))
@@ -655,9 +657,11 @@ func (s *Server) handleQuiesce(quiesce guestproto.Quiesce) {
 	}
 }
 
-func (s *Server) quiesceFailed(reason error) {
+func (s *Server) quiesceFailed(reason error, points []guestproto.TimingPoint) {
 	s.cfg.Logger.Error("quiesce failed", "err", reason)
-	reply := guestproto.Message{Kind: guestproto.KindQuiesceFailed, QuiesceFailed: &guestproto.QuiesceFailed{Reason: reason.Error()}}
+	reply := guestproto.Message{Kind: guestproto.KindQuiesceFailed, QuiesceFailed: &guestproto.QuiesceFailed{
+		Reason: reason.Error(), Timing: points,
+	}}
 	if err := s.send(reply); err != nil {
 		s.cfg.Logger.Warn("quiesce-failed not delivered", "err", err)
 	}

@@ -134,7 +134,7 @@ func NewQEMU(cfg Config) (*QEMU, error) {
 	return &QEMU{
 		cfg: cfg, disks: zfsDisks{}, probeTimeout: 5 * time.Second,
 		guestProbeTimeout: 250 * time.Millisecond, bootTimeout: 2 * time.Minute,
-		quiesceTimeout: 30 * time.Second,
+		quiesceTimeout: 5*time.Minute + 30*time.Second,
 		timing:         cfg.Timing, timings: map[ID][]TimingPoint{},
 	}, nil
 }
@@ -523,11 +523,14 @@ func (q *QEMU) Quiesce(ctx context.Context, id ID) (CheckpointArtifact, error) {
 			ImagesDir: processImagesDir, ExternalMountAt: record.WorkspaceMountpoint,
 		},
 	})
-	if err != nil {
-		return CheckpointArtifact{}, err
-	}
 	q.mu.Lock()
 	q.timings[id] = append(q.timings[id], timingPoints(reply.Timing)...)
+	if err != nil {
+		q.recordTiming(id, "quiesce_rpc_failed")
+		checkpointTiming := append([]TimingPoint(nil), q.timings[id]...)
+		q.mu.Unlock()
+		return CheckpointArtifact{Timing: checkpointTiming}, err
+	}
 	q.recordTiming(id, "quiesce_rpc_completed")
 	checkpointTiming := append([]TimingPoint(nil), q.timings[id]...)
 	q.mu.Unlock()

@@ -194,7 +194,8 @@ type CheckpointArtifact struct {
 // QuiesceFailed reports a quiesce that could not complete; the host skips
 // the seal (ambiguity never promotes) and destroys the VM.
 type QuiesceFailed struct {
-	Reason string `json:"reason"`
+	Reason string        `json:"reason"`
+	Timing []TimingPoint `json:"timing,omitempty"`
 }
 
 // RunnerState is the runner lifecycle as guestd observes it.
