@@ -171,7 +171,7 @@ func (c CRIU) restoreObserved(ctx context.Context, capsule Capsule, expectedDige
 	}
 	observeCheckpoint(observer, "restore_criu_started")
 	if _, err := c.runRestore(ctx, args...); err != nil {
-		return 0, c.restoreFailure(workDir, err)
+		return 0, c.restoreFailure(workDir, capsule.ExternalMounts, err)
 	}
 	observeCheckpoint(observer, "restore_criu_completed")
 	raw, err := os.ReadFile(pidfile)
@@ -185,7 +185,7 @@ func (c CRIU) restoreObserved(ctx context.Context, capsule Capsule, expectedDige
 	return pid, nil
 }
 
-func (c CRIU) restoreFailure(workDir string, restoreErr error) error {
+func (c CRIU) restoreFailure(workDir string, externalMounts []ExternalMount, restoreErr error) error {
 	file, err := os.Open(filepath.Join(workDir, "criu.log"))
 	if err != nil {
 		return restoreErr
@@ -204,7 +204,7 @@ func (c CRIU) restoreFailure(workDir string, restoreErr error) error {
 		if !strings.Contains(line, "Error (") {
 			continue
 		}
-		diagnostics = append(diagnostics, safeCRIUError(line))
+		diagnostics = append(diagnostics, safeCRIUError(line, externalMounts))
 		if len(diagnostics) > 8 {
 			diagnostics = diagnostics[len(diagnostics)-8:]
 		}
@@ -215,14 +215,14 @@ func (c CRIU) restoreFailure(workDir string, restoreErr error) error {
 	return fmt.Errorf("%w; CRIU diagnostics: %s", restoreErr, strings.Join(diagnostics, " | "))
 }
 
-func safeCRIUError(line string) string {
+func safeCRIUError(line string, externalMounts []ExternalMount) string {
 	if offset := strings.Index(line, "Error ("); offset >= 0 {
 		line = line[offset:]
 	}
 	fields := strings.Fields(line)
 	for index, field := range fields {
 		if strings.Contains(field, "/") && !strings.HasPrefix(field, "(criu/") {
-			fields[index] = "<path>"
+			fields[index] = classifyCRIUPath(field, externalMounts)
 		}
 	}
 	line = strings.Join(fields, " ")
@@ -230,6 +230,39 @@ func safeCRIUError(line string) string {
 		line = line[:512]
 	}
 	return line
+}
+
+func classifyCRIUPath(field string, externalMounts []ExternalMount) string {
+	path := strings.Trim(field, "<>[](){}\"',:")
+	matchedKey := ""
+	matchedLength := -1
+	for _, mount := range externalMounts {
+		if (path == mount.Path || strings.HasPrefix(path, mount.Path+"/")) && len(mount.Path) > matchedLength {
+			matchedKey = mount.Key
+			matchedLength = len(mount.Path)
+		}
+	}
+	if matchedKey != "" {
+		return "<external:" + matchedKey + ">"
+	}
+	for _, class := range []struct {
+		root string
+		name string
+	}{
+		{root: "/tmp", name: "capsule-tmp"},
+		{root: "/opt/actions-runner/_work", name: "runner-work"},
+		{root: "/opt/actions-runner", name: "runner-image"},
+		{root: "/home/runner", name: "runner-home"},
+		{root: ProcessMountpoint, name: "process-volume"},
+	} {
+		if path == class.root || strings.HasPrefix(path, class.root+"/") {
+			return "<" + class.name + ">"
+		}
+	}
+	if filepath.IsAbs(path) {
+		return "<guest-root>"
+	}
+	return "<relative-path>"
 }
 
 func (c CRIU) validate(capsule Capsule, requireRoot bool) error {

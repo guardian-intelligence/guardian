@@ -141,11 +141,39 @@ func TestCRIURestoreFailureReportsBoundedRedactedDiagnostics(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = engine.Restore(context.Background(), Capsule{ImagesDir: images}, digest, "Version: 4.2")
-	if err == nil || !strings.Contains(err.Error(), "(criu/mount.c:123)") || !strings.Contains(err.Error(), "<path>") {
+	if err == nil || !strings.Contains(err.Error(), "(criu/mount.c:123)") || !strings.Contains(err.Error(), "<guest-root>") {
 		t.Fatalf("restore diagnostics = %v", err)
 	}
 	if strings.Contains(err.Error(), "/tenant/private/value") {
 		t.Fatalf("restore diagnostics exposed a guest path: %v", err)
+	}
+}
+
+func TestCRIUPathDiagnosticsClassifyWithoutDisclosingPaths(t *testing.T) {
+	mounts := []ExternalMount{
+		{Key: "tool", Path: "/opt/actions-runner/_work"},
+		{Key: "workspace", Path: "/opt/actions-runner/_work/widget/widget"},
+	}
+	for name, test := range map[string]struct {
+		field string
+		want  string
+	}{
+		"workspace":    {field: "</opt/actions-runner/_work/widget/widget/private.txt>", want: "<external:workspace>"},
+		"runner image": {field: "/opt/actions-runner/bin/Runner.Worker", want: "<runner-image>"},
+		"runner home":  {field: "/home/runner/.cache/secret", want: "<runner-home>"},
+		"capsule tmp":  {field: "/tmp/private", want: "<capsule-tmp>"},
+		"guest root":   {field: "/tenant/private/value", want: "<guest-root>"},
+		"relative":     {field: "tenant/private/value", want: "<relative-path>"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := classifyCRIUPath(test.field, mounts)
+			if got != test.want {
+				t.Fatalf("class = %q, want %q", got, test.want)
+			}
+			if strings.Contains(got, "private") || strings.Contains(got, "secret") {
+				t.Fatalf("classification disclosed input: %q", got)
+			}
+		})
 	}
 }
 

@@ -241,7 +241,7 @@ func TestConformanceLifecycle(t *testing.T) {
 
 	deliveries := guest.rendezvouses(id)
 	if len(deliveries) == 0 || deliveries[0].Lease != "lease-conf" ||
-		len(deliveries[0].Mounts) != 3 || deliveries[0].Mounts[0].Serial != workspaceNode || deliveries[0].Mounts[1].Serial != toolNode || deliveries[0].Mounts[2].Serial != processNode {
+		len(deliveries[0].Mounts) != 3 || deliveries[0].Mounts[0].Serial != toolNode || deliveries[0].Mounts[1].Serial != workspaceNode || deliveries[0].Mounts[2].Serial != processNode {
 		t.Fatalf("deliveries %+v", deliveries)
 	}
 	status, err = driver.Status(ctx, id)
