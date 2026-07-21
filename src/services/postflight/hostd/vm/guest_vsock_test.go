@@ -14,9 +14,13 @@ import (
 
 // pipeDialer swaps the AF_VSOCK dial for an in-memory pipe served by a
 // scripted guest, so every transport behavior is testable without a kernel.
-func pipeDialer(serve func(conn net.Conn)) (*VsockGuest, *atomic.Int32) {
+func pipeDialer(t *testing.T, serve func(conn net.Conn)) (*VsockGuest, *atomic.Int32) {
+	t.Helper()
 	dials := &atomic.Int32{}
-	transport := NewVsockGuest()
+	transport, err := NewVsockGuest()
+	if err != nil {
+		t.Fatal(err)
+	}
 	transport.dial = func(_ context.Context, _, _ uint32) (net.Conn, error) {
 		dials.Add(1)
 		host, guest := net.Pipe()
@@ -46,7 +50,7 @@ func observation(t *testing.T, transport *VsockGuest, id ID, cid uint32) GuestOb
 }
 
 func TestVsockGuestProbeIsHelloWithinDeadline(t *testing.T) {
-	transport, _ := pipeDialer(func(conn net.Conn) {
+	transport, _ := pipeDialer(t, func(conn net.Conn) {
 		sendHello(t, conn)
 		encoder := guestproto.NewEncoder(conn)
 		_ = encoder.Write(guestproto.Message{Kind: guestproto.KindRunnerStatus, RunnerStatus: &guestproto.RunnerStatus{State: guestproto.RunnerRegistered}})
@@ -73,7 +77,7 @@ func TestVsockGuestProbeIsHelloWithinDeadline(t *testing.T) {
 }
 
 func TestVsockGuestFoldsWorkerTrampolineFailure(t *testing.T) {
-	transport, _ := pipeDialer(func(conn net.Conn) {
+	transport, _ := pipeDialer(t, func(conn net.Conn) {
 		sendHello(t, conn)
 		_ = guestproto.NewEncoder(conn).Write(guestproto.Message{
 			Kind: guestproto.KindRunnerStatus,
@@ -89,8 +93,37 @@ func TestVsockGuestFoldsWorkerTrampolineFailure(t *testing.T) {
 	})
 }
 
+func TestVsockGuestRecordsAssignmentReceiptOnHostClock(t *testing.T) {
+	transport, _ := pipeDialer(t, func(conn net.Conn) {
+		sendHello(t, conn)
+		_ = guestproto.NewEncoder(conn).Write(guestproto.Message{
+			Kind: guestproto.KindAssignment,
+			Assignment: &guestproto.Assignment{
+				RequestID: "request-1", JobID: "job-1", RunnerName: "runner-1",
+				JobDisplayName: "benchmark",
+				Identity: &guestproto.JobIdentity{
+					RunID: "1", RunAttempt: 1, RunnerName: "runner-1",
+					Repository: "acme/widget", WorkflowJob: "benchmark",
+				},
+			},
+		})
+	})
+	waitFor(t, "assignment receipt timing", 2*time.Second, func() (bool, error) {
+		got := observation(t, transport, "vm-a", 3)
+		for _, point := range got.Timing {
+			if point.Event == "vsock_assignment_received" {
+				if point.Source != "hostd-vsock" || point.BootID == "" || point.MonotonicNS <= 0 || point.UnixNS <= 0 {
+					t.Fatalf("assignment receipt timing = %+v", point)
+				}
+				return got.Assignment != nil, nil
+			}
+		}
+		return false, nil
+	})
+}
+
 func TestVsockGuestRejectsOldProtocol(t *testing.T) {
-	transport, _ := pipeDialer(func(conn net.Conn) {
+	transport, _ := pipeDialer(t, func(conn net.Conn) {
 		defer conn.Close()
 		_ = guestproto.NewEncoder(conn).Write(guestproto.Message{
 			Kind: guestproto.KindHello,
@@ -108,7 +141,10 @@ func TestVsockGuestRejectsOldProtocol(t *testing.T) {
 }
 
 func TestVsockGuestDialFailureIsTheZeroObservation(t *testing.T) {
-	transport := NewVsockGuest()
+	transport, err := NewVsockGuest()
+	if err != nil {
+		t.Fatal(err)
+	}
 	transport.dial = func(context.Context, uint32, uint32) (net.Conn, error) {
 		return nil, errors.New("connect: no such device")
 	}
@@ -129,7 +165,7 @@ func TestVsockGuestDialFailureIsTheZeroObservation(t *testing.T) {
 }
 
 func TestVsockGuestSilentGuestObservesZeroWithinDeadline(t *testing.T) {
-	transport, _ := pipeDialer(func(conn net.Conn) {
+	transport, _ := pipeDialer(t, func(conn net.Conn) {
 		// Accepts and says nothing — a guest that is not guestd yet.
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -149,7 +185,7 @@ func TestVsockGuestSilentGuestObservesZeroWithinDeadline(t *testing.T) {
 
 func TestVsockGuestPrepareWritesTheListener(t *testing.T) {
 	received := make(chan guestproto.Prepare, 1)
-	transport, _ := pipeDialer(func(conn net.Conn) {
+	transport, _ := pipeDialer(t, func(conn net.Conn) {
 		sendHello(t, conn)
 		decoder := guestproto.NewDecoder(conn)
 		message, err := decoder.Read()
@@ -189,7 +225,7 @@ func TestVsockGuestQuiesceRoundTrip(t *testing.T) {
 	}
 	for name, reply := range replies {
 		t.Run(name, func(t *testing.T) {
-			transport, _ := pipeDialer(func(conn net.Conn) {
+			transport, _ := pipeDialer(t, func(conn net.Conn) {
 				sendHello(t, conn)
 				decoder := guestproto.NewDecoder(conn)
 				message, err := decoder.Read()
@@ -224,7 +260,7 @@ func TestVsockGuestQuiesceRoundTrip(t *testing.T) {
 }
 
 func TestVsockGuestRedialsAfterConnectionLoss(t *testing.T) {
-	transport, dials := pipeDialer(func(conn net.Conn) {
+	transport, dials := pipeDialer(t, func(conn net.Conn) {
 		sendHello(t, conn)
 		conn.Close()
 	})
@@ -240,7 +276,10 @@ func TestVsockGuestRedialsAfterConnectionLoss(t *testing.T) {
 }
 
 func TestVsockGuestNewCIDSupersedesTheChannel(t *testing.T) {
-	transport := NewVsockGuest()
+	transport, err := NewVsockGuest()
+	if err != nil {
+		t.Fatal(err)
+	}
 	var dials atomic.Int32
 	transport.dial = func(context.Context, uint32, uint32) (net.Conn, error) {
 		life := dials.Add(1)

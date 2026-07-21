@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/guestproto"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vsock"
+	"github.com/guardian-intelligence/guardian/src/services/postflight/timing"
 )
 
 // VsockGuest is the production Guest: one dialed AF_VSOCK connection per
@@ -26,18 +29,28 @@ type VsockGuest struct {
 	mu      sync.Mutex
 	chans   map[ID]*guestChannel
 	updates chan ID
+	timing  *timing.Recorder
 }
 
 var _ Guest = (*VsockGuest)(nil)
 
 // NewVsockGuest wires the transport against the guestd listening port.
-func NewVsockGuest() *VsockGuest {
+func NewVsockGuest() (*VsockGuest, error) {
+	bootID, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	if err != nil {
+		return nil, fmt.Errorf("vm: read host boot id: %w", err)
+	}
+	recorder, err := timing.New("hostd-vsock", strings.TrimSpace(string(bootID)))
+	if err != nil {
+		return nil, err
+	}
 	return &VsockGuest{
 		port:    guestproto.VsockPort,
 		dial:    vsock.Dial,
 		chans:   map[ID]*guestChannel{},
 		updates: make(chan ID, 256),
-	}
+		timing:  recorder,
+	}, nil
 }
 
 // Updates emits a coalescible hint whenever guestd advances a VM's level
@@ -199,7 +212,11 @@ func (g *VsockGuest) read(id ID, channel *guestChannel) {
 			channel.markHello()
 			g.notify(id)
 		case guestproto.KindAssignment:
-			channel.foldAssignment(*message.Assignment)
+			point := g.timing.Point("vsock_assignment_received")
+			channel.foldAssignment(*message.Assignment, guestproto.TimingPoint{
+				Event: point.Event, Source: point.Source, BootID: point.BootID,
+				Sequence: point.Sequence, MonotonicNS: point.MonotonicNS, UnixNS: point.UnixNS,
+			})
 			g.notify(id)
 		case guestproto.KindRunnerStatus:
 			channel.fold(*message.RunnerStatus)
@@ -345,7 +362,7 @@ func (c *guestChannel) fold(status guestproto.RunnerStatus) {
 	c.observation.Timing = append(c.observation.Timing, status.Timing...)
 }
 
-func (c *guestChannel) foldAssignment(assignment guestproto.Assignment) {
+func (c *guestChannel) foldAssignment(assignment guestproto.Assignment, received guestproto.TimingPoint) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	captured := assignment
@@ -356,6 +373,7 @@ func (c *guestChannel) foldAssignment(assignment guestproto.Assignment) {
 	}
 	c.observation.Assignment = &captured
 	c.observation.Timing = append(c.observation.Timing, assignment.Timing...)
+	c.observation.Timing = append(c.observation.Timing, received)
 }
 
 func (c *guestChannel) snapshot() GuestObservation {

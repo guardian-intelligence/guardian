@@ -89,6 +89,10 @@ func run(logger *slog.Logger) error {
 
 	class := vm.Class(cfg.class)
 	image := cfg.pool + "/images/" + cfg.imageID + "@golden"
+	guest, err := vm.NewVsockGuest()
+	if err != nil {
+		return err
+	}
 	vms, err := vm.NewQEMU(vm.Config{
 		StateRoot:    filepath.Join(cfg.stateDir, "vm"),
 		QEMUPath:     cfg.qemuPath,
@@ -96,7 +100,7 @@ func run(logger *slog.Logger) error {
 		DatasetRoot:  cfg.pool,
 		Classes:      map[vm.Class]vm.ClassConfig{class: {CPUs: cfg.cpus, MemoryMiB: cfg.memoryMiB, Image: image}},
 		Launcher:     vm.NewSystemdLauncher(),
-		Guest:        vm.NewVsockGuest(),
+		Guest:        guest,
 		GuestNetwork: cfg.guestNetwork,
 		Logger:       logger,
 	})

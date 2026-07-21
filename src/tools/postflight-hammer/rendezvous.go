@@ -25,6 +25,7 @@ const (
 	eventPoolReady                        = "pool_ready"
 	eventRunnerAssignmentReceived         = "runner_assignment_received"
 	eventGuestAssignmentReceived          = "guest_assignment_received"
+	eventVsockAssignmentReceived          = "vsock_assignment_received"
 	eventHostAssignmentObserved           = "host_assignment_observed"
 	eventAssignmentUpdateReceived         = "assignment_update_received"
 	eventAssignmentObserved               = "assignment_observed"
@@ -85,6 +86,7 @@ var allowedTraceEvents = map[string]bool{
 	eventListenerPrepareSent: true, eventListenerPrepareReceived: true,
 	eventRunnerRegistered: true, eventPoolReady: true,
 	eventRunnerAssignmentReceived: true, eventGuestAssignmentReceived: true,
+	eventVsockAssignmentReceived: true,
 	eventHostAssignmentObserved: true, eventAssignmentUpdateReceived: true,
 	eventAssignmentObserved: true, eventGenerationMaterializationStarted: true,
 	eventGenerationResolved: true, eventQMPRendezvousStarted: true,
@@ -743,6 +745,17 @@ func deriveDurations(out map[string]int64, seen map[string]*rendezvousEvent) {
 	} {
 		start, end := seen[pair[0]], seen[pair[1]]
 		if start == nil || end == nil || start.Source != end.Source || start.BootID != end.BootID || end.MonotonicNS < start.MonotonicNS {
+			continue
+		}
+		out[name] = end.MonotonicNS - start.MonotonicNS
+	}
+	for name, pair := range map[string][2]string{
+		"vsock_to_assignment_update":   {eventVsockAssignmentReceived, eventAssignmentUpdateReceived},
+		"vsock_to_assignment_observed": {eventVsockAssignmentReceived, eventAssignmentObserved},
+	} {
+		start, end := seen[pair[0]], seen[pair[1]]
+		if start == nil || end == nil || start.BootID != end.BootID || end.MonotonicNS < start.MonotonicNS ||
+			!strings.HasPrefix(start.Source, "hostd-") || !strings.HasPrefix(end.Source, "hostd-") {
 			continue
 		}
 		out[name] = end.MonotonicNS - start.MonotonicNS
