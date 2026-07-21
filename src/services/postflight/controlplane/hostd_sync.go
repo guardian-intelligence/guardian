@@ -271,6 +271,10 @@ func (s *syncServer) desiredState(ctx context.Context, request syncproto.SyncReq
 				Generation: row.Generation,
 				SizeBytes:  row.SizeBytes,
 			},
+			Tool: syncproto.WorkspaceSpec{
+				Generation: row.Generation,
+				SizeBytes:  row.ToolSizeBytes,
+			},
 			Process: syncproto.ProcessSpec{SizeBytes: row.ProcessSizeBytes},
 		}
 		if row.ProcessDigest != "" && row.ProcessVersion != "" {

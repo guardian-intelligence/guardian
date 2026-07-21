@@ -200,11 +200,16 @@ func TestConformanceLifecycle(t *testing.T) {
 	if err := driver.disks.Ensure(ctx, process, driver.cfg.Classes[testClass].Image); err != nil {
 		t.Fatalf("cloning process volume: %v", err)
 	}
+	tool := driver.cfg.DatasetRoot + "/tool-conf-lifecycle"
+	if err := driver.disks.Ensure(ctx, tool, driver.cfg.Classes[testClass].Image); err != nil {
+		t.Fatalf("cloning tool volume: %v", err)
+	}
 	preparation := Preparation{Lease: "lease-conf", JITConfig: "jit-blob"}
 	rendezvous := Rendezvous{
 		Lease:               "lease-conf",
 		WorkspaceDevice:     zvolDevicePath(workspace),
 		WorkspaceMountpoint: "/opt/actions-runner/_work/widget/widget",
+		ToolDevice:          zvolDevicePath(tool),
 		ProcessDevice:       zvolDevicePath(process),
 	}
 	attachStart := time.Now()
@@ -236,7 +241,7 @@ func TestConformanceLifecycle(t *testing.T) {
 
 	deliveries := guest.rendezvouses(id)
 	if len(deliveries) == 0 || deliveries[0].Lease != "lease-conf" ||
-		len(deliveries[0].Mounts) != 2 || deliveries[0].Mounts[0].Serial != workspaceNode || deliveries[0].Mounts[1].Serial != processNode {
+		len(deliveries[0].Mounts) != 3 || deliveries[0].Mounts[0].Serial != workspaceNode || deliveries[0].Mounts[1].Serial != toolNode || deliveries[0].Mounts[2].Serial != processNode {
 		t.Fatalf("deliveries %+v", deliveries)
 	}
 	status, err = driver.Status(ctx, id)

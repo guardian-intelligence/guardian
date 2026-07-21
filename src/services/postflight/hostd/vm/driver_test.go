@@ -257,7 +257,7 @@ func (h *qemuHandler) handle(command string, arguments json.RawMessage) ([]strin
 		return nil, fmt.Sprintf(`{"return": {"status": "running", "running": %t}, "id": %%d}`, h.running)
 	case "query-named-block-nodes":
 		nodes := []string{`{"node-name":"root"}`}
-		for _, node := range []string{workspaceNode, processNode} {
+		for _, node := range []string{workspaceNode, toolNode, processNode} {
 			if h.blockdev[node] {
 				nodes = append(nodes, fmt.Sprintf(`{"node-name":%q}`, node))
 			}
@@ -265,7 +265,7 @@ func (h *qemuHandler) handle(command string, arguments json.RawMessage) ([]strin
 		return nil, `{"return":[` + strings.Join(nodes, ",") + `],"id":%d}`
 	case "qom-list":
 		devices := []string{}
-		for _, device := range []string{workspaceDevice, processDevice} {
+		for _, device := range []string{workspaceDevice, toolDevice, processDevice} {
 			if _, ok := h.qdev[device]; ok {
 				devices = append(devices, fmt.Sprintf(`{"name":%q,"type":"child<scsi-hd>"}`, device))
 			}
@@ -660,7 +660,7 @@ func TestPreparePersistsLeaseBeforeRendezvous(t *testing.T) {
 	// durable — the ambiguous-failure shape the agent's failure path needs.
 	if err := driver.q.Rendezvous(ctx, "vm-a", Rendezvous{
 		Lease: "lease-1", WorkspaceDevice: "/dev/zvol/tank/ws/lease-1",
-		ProcessDevice: "/dev/zvol/tank/process/lease-1", WorkspaceMountpoint: "/work",
+		ToolDevice: "/dev/zvol/tank/tool/lease-1", ProcessDevice: "/dev/zvol/tank/process/lease-1", WorkspaceMountpoint: "/work",
 	}); err == nil {
 		t.Fatal("rendezvous succeeded without a QMP endpoint")
 	}
@@ -677,7 +677,7 @@ func TestRendezvousRejectsIncompleteCheckpointIdentity(t *testing.T) {
 	driver := newTestDriver(t, shortTempDir(t))
 	base := Rendezvous{
 		Lease: "lease-1", WorkspaceDevice: "/dev/zvol/tank/ws/lease-1",
-		ProcessDevice: "/dev/zvol/tank/process/lease-1", WorkspaceMountpoint: "/work",
+		ToolDevice: "/dev/zvol/tank/tool/lease-1", ProcessDevice: "/dev/zvol/tank/process/lease-1", WorkspaceMountpoint: "/work",
 	}
 	for name, mutate := range map[string]func(*Rendezvous){
 		"digest only":  func(r *Rendezvous) { r.CheckpointDigest = "sha256:checkpoint" },
@@ -707,6 +707,7 @@ func TestRendezvousAttachesDeliversAndConverges(t *testing.T) {
 		Lease:               "lease-1",
 		WorkspaceDevice:     "/dev/zvol/tank/ws/lease-1",
 		WorkspaceMountpoint: "/opt/actions-runner/_work/widget/widget",
+		ToolDevice:          "/dev/zvol/tank/tool/lease-1",
 		ProcessDevice:       "/dev/zvol/tank/process/lease-1",
 		CheckpointDigest:    "sha256:checkpoint",
 		CheckpointVersion:   "Version: 4.2",
@@ -726,7 +727,7 @@ func TestRendezvousAttachesDeliversAndConverges(t *testing.T) {
 			adds++
 		}
 	}
-	if adds != 4 {
+	if adds != 6 {
 		t.Fatalf("attach commands ran %d times, want one blockdev-add and device_add per volume", adds)
 	}
 	preparations := driver.guest.preparations("vm-a")
@@ -737,7 +738,7 @@ func TestRendezvousAttachesDeliversAndConverges(t *testing.T) {
 	if len(deliveries) == 0 {
 		t.Fatal("rendezvous never delivered")
 	}
-	if len(deliveries[0].Mounts) != 2 {
+	if len(deliveries[0].Mounts) != 3 {
 		t.Fatalf("delivered mounts %+v", deliveries[0].Mounts)
 	}
 	if deliveries[0].Checkpoint == nil ||
@@ -792,6 +793,7 @@ func TestQuiesceUsesTheAssignedMountpoint(t *testing.T) {
 		Lease:               "lease-1",
 		WorkspaceDevice:     "/dev/zvol/tank/ws/lease-1",
 		WorkspaceMountpoint: "/opt/actions-runner/_work/widget/widget",
+		ToolDevice:          "/dev/zvol/tank/tool/lease-1",
 		ProcessDevice:       "/dev/zvol/tank/process/lease-1",
 	}
 	if err := driver.q.Prepare(ctx, "vm-a", Preparation{Lease: "lease-1", JITConfig: "jit"}); err != nil {
@@ -814,7 +816,7 @@ func TestQuiesceUsesTheAssignedMountpoint(t *testing.T) {
 	if got := strings.Join(events, ","); got != "quiesce_rpc_started,checkpoint_dump_completed,quiesce_rpc_completed" {
 		t.Fatalf("quiesce timing %s", got)
 	}
-	if got := second.guest.quiesces("vm-a"); len(got) != 1 || len(got[0].Mountpoints) != 2 || got[0].Mountpoints[0] != rendezvous.WorkspaceMountpoint || got[0].Mountpoints[1] != processMountpoint {
+	if got := second.guest.quiesces("vm-a"); len(got) != 1 || len(got[0].Mountpoints) != 3 || got[0].Mountpoints[0] != rendezvous.WorkspaceMountpoint || got[0].Mountpoints[1] != toolMountpoint || got[0].Mountpoints[2] != processMountpoint {
 		t.Fatalf("quiesced %v, want the assigned mountpoint", got)
 	}
 
@@ -1033,7 +1035,7 @@ func TestDestroyDetachesBeforeQuit(t *testing.T) {
 	}
 	if err := driver.q.Rendezvous(ctx, "vm-a", Rendezvous{
 		Lease: "lease-1", WorkspaceDevice: "/dev/zvol/tank/ws/lease-1",
-		ProcessDevice: "/dev/zvol/tank/process/lease-1", WorkspaceMountpoint: "/work",
+		ToolDevice: "/dev/zvol/tank/tool/lease-1", ProcessDevice: "/dev/zvol/tank/process/lease-1", WorkspaceMountpoint: "/work",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1047,7 +1049,7 @@ func TestDestroyDetachesBeforeQuit(t *testing.T) {
 			sequence = append(sequence, command)
 		}
 	}
-	want := []string{"device_del", "blockdev-del", "device_del", "blockdev-del", "quit"}
+	want := []string{"device_del", "blockdev-del", "device_del", "blockdev-del", "device_del", "blockdev-del", "quit"}
 	if len(sequence) < len(want) {
 		t.Fatalf("teardown sequence %v, want %v", sequence, want)
 	}
@@ -1075,7 +1077,7 @@ func TestDetachWaitsOutTheGuestAck(t *testing.T) {
 	}
 	if err := driver.q.Rendezvous(ctx, "vm-a", Rendezvous{
 		Lease: "lease-1", WorkspaceDevice: "/dev/zvol/tank/ws/lease-1",
-		ProcessDevice: "/dev/zvol/tank/process/lease-1", WorkspaceMountpoint: "/work",
+		ToolDevice: "/dev/zvol/tank/tool/lease-1", ProcessDevice: "/dev/zvol/tank/process/lease-1", WorkspaceMountpoint: "/work",
 	}); err != nil {
 		t.Fatal(err)
 	}

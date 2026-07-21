@@ -123,7 +123,10 @@ type Rendezvous struct {
 	// WorkspaceMountpoint is where the guest mounts the workspace, and the
 	// filesystem a later Quiesce checkpoints and flushes.
 	WorkspaceMountpoint string
-	// ProcessDevice is the paired encrypted CRIU image zvol.
+	// ToolDevice carries workflow-installed toolchains across disposable VM
+	// roots and is part of the same generation as the workspace.
+	ToolDevice string
+	// ProcessDevice is the encrypted CRIU image zvol in the generation.
 	ProcessDevice string
 	// CheckpointDigest selects a restorable process generation. Empty is a
 	// deliberate workspace-only cold fallback.
@@ -170,8 +173,8 @@ type Driver interface {
 	Status(ctx context.Context, id ID) (Status, error)
 	// List reports every VM the driver knows on this host.
 	List(ctx context.Context) ([]Status, error)
-	// Quiesce asks the guest to checkpoint and flush the paired generation.
-	// The VM must be destroyed successfully before either volume is sealed;
+	// Quiesce asks the guest to checkpoint and flush the durable generation.
+	// The VM must be destroyed successfully before the generation is sealed;
 	// any ambiguous outcome skips the seal.
 	Quiesce(ctx context.Context, id ID) (CheckpointArtifact, error)
 	// Destroy tears a VM down (destroy-and-refill; never reuse). Idempotent:

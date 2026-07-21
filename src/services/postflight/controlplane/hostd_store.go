@@ -504,6 +504,7 @@ type desiredLeaseRow struct {
 	JITConfig            string
 	Generation           string
 	SizeBytes            int64
+	ToolSizeBytes        int64
 	ProcessSizeBytes     int64
 	ProcessDigest        string
 	ProcessVersion       string
@@ -532,6 +533,7 @@ SELECT listener.lease_id,
     listener.jit_config,
     COALESCE(execution.workspace_generation, listener.workspace_generation),
     COALESCE(execution.workspace_size_bytes, listener.workspace_size_bytes),
+    class.tool_disk_bytes,
     class.process_disk_bytes,
     COALESCE(source.process_digest, ''),
     COALESCE(source.criu_version, ''),
@@ -586,7 +588,7 @@ func (s *pgStore) ListDesiredLeases(ctx context.Context, hostID string) ([]desir
 		if err := rows.Scan(&r.LeaseID, &r.ExecutionLeaseID, &r.State,
 			&r.ExecutionID, &r.AttemptID, &r.OrgID, &r.InstallationID,
 			&r.RepositoryID, &r.RepositoryFullName, &r.RunnerClass, &r.JITConfig,
-			&r.Generation, &r.SizeBytes, &r.ProcessSizeBytes, &r.ProcessDigest,
+			&r.Generation, &r.SizeBytes, &r.ToolSizeBytes, &r.ProcessSizeBytes, &r.ProcessDigest,
 			&r.ProcessVersion, &r.SealGeneration, &r.SealProcessDigest,
 			&r.SealProcessVersion, &r.ProviderRunID,
 			&r.ProviderJobID, &r.ProviderRunAttempt, &r.JobDisplayName, &r.AssignedRunnerName,

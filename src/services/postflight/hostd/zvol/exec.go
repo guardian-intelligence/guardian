@@ -16,8 +16,10 @@ import (
 //
 // Layout under Root (e.g. "guardian/postflight"):
 //
-//	<root>/ws/<lease>    writable workspace zvols
-//	<root>/gen/<gen>     sealed generations, each with an @sealed snapshot
+//	<root>/ws/<lease>              writable workspace zvols
+//	<root>/gen/<gen>               sealed workspace generations
+//	<root>/tool-state/{ws,gen}/... durable tool generations
+//	<root>/process-state/{ws,gen}  encrypted CRIU generations
 //
 // Sealing promotes the generation clone (zfs promote) so the generation owns
 // the data lineage and the workspace volume can be destroyed independently —
@@ -51,6 +53,9 @@ func (e *Exec) Prepare(ctx context.Context) error {
 		e.Root + "/process-state",
 		e.Root + "/process-state/ws",
 		e.Root + "/process-state/gen",
+		e.Root + "/tool-state",
+		e.Root + "/tool-state/ws",
+		e.Root + "/tool-state/gen",
 	} {
 		exists, err := e.exists(ctx, dataset)
 		if err != nil {
@@ -92,16 +97,32 @@ func (e *Exec) processDriver() *Exec {
 	return &Exec{Root: e.Root + "/process-state", Timeout: e.Timeout}
 }
 
+func (e *Exec) toolDriver() *Exec {
+	return &Exec{Root: e.Root + "/tool-state", Timeout: e.Timeout}
+}
+
 func (e *Exec) EnsureProcess(ctx context.Context, lease LeaseID, generation GenerationID, sizeBytes int64) (ProcessVolume, error) {
 	return e.processDriver().EnsureWorkspace(ctx, lease, generation, sizeBytes)
+}
+
+func (e *Exec) EnsureTool(ctx context.Context, lease LeaseID, generation GenerationID, sizeBytes int64) (ToolVolume, error) {
+	return e.toolDriver().EnsureWorkspace(ctx, lease, generation, sizeBytes)
 }
 
 func (e *Exec) DestroyProcess(ctx context.Context, lease LeaseID) error {
 	return e.processDriver().DestroyWorkspace(ctx, lease)
 }
 
+func (e *Exec) DestroyTool(ctx context.Context, lease LeaseID) error {
+	return e.toolDriver().DestroyWorkspace(ctx, lease)
+}
+
 func (e *Exec) DestroyProcessGeneration(ctx context.Context, generation GenerationID) error {
 	return e.processDriver().DestroyGeneration(ctx, generation)
+}
+
+func (e *Exec) DestroyToolGeneration(ctx context.Context, generation GenerationID) error {
+	return e.toolDriver().DestroyGeneration(ctx, generation)
 }
 
 func devicePath(dataset string) string {
@@ -309,7 +330,7 @@ func (e *Exec) sealPreparedVolume(ctx context.Context, lease LeaseID, generation
 		if genExists, genErr := e.exists(ctx, genDataset); genErr != nil {
 			return GenerationSnapshot{}, genErr
 		} else if !genExists {
-			return GenerationSnapshot{}, errors.New("zvol: paired source snapshot is missing")
+			return GenerationSnapshot{}, errors.New("zvol: generation source snapshot is missing")
 		}
 	}
 	if ok, err := e.exists(ctx, genDataset); err != nil {
@@ -359,43 +380,53 @@ func (e *Exec) sealProgress(ctx context.Context, lease LeaseID, generation Gener
 	return false, nil
 }
 
-// SealPair implements Driver. The first ZFS command is a multi-dataset
+// SealSet implements Driver. The first ZFS command is a multi-dataset
 // snapshot, which OpenZFS commits under one transaction group.
-func (e *Exec) SealPair(ctx context.Context, lease LeaseID, generation GenerationID) (GenerationPair, error) {
+func (e *Exec) SealSet(ctx context.Context, lease LeaseID, generation GenerationID) (GenerationSet, error) {
 	if err := ValidateName("lease", string(lease)); err != nil {
-		return GenerationPair{}, err
+		return GenerationSet{}, err
 	}
 	if err := ValidateName("generation", string(generation)); err != nil {
-		return GenerationPair{}, err
+		return GenerationSet{}, err
 	}
 	process := e.processDriver()
+	tool := e.toolDriver()
 	workspaceProgress, err := e.sealProgress(ctx, lease, generation)
 	if err != nil {
-		return GenerationPair{}, err
+		return GenerationSet{}, err
 	}
 	processProgress, err := process.sealProgress(ctx, lease, generation)
 	if err != nil {
-		return GenerationPair{}, err
+		return GenerationSet{}, err
+	}
+	toolProgress, err := tool.sealProgress(ctx, lease, generation)
+	if err != nil {
+		return GenerationSet{}, err
 	}
 	switch {
-	case !workspaceProgress && !processProgress:
+	case !workspaceProgress && !toolProgress && !processProgress:
 		workspaceSnapshot := e.workspaceDataset(lease) + "@seal-" + string(generation)
+		toolSnapshot := tool.workspaceDataset(lease) + "@seal-" + string(generation)
 		processSnapshot := process.workspaceDataset(lease) + "@seal-" + string(generation)
-		if _, err := e.run(ctx, "snapshot", workspaceSnapshot, processSnapshot); err != nil {
-			return GenerationPair{}, err
+		if _, err := e.run(ctx, "snapshot", workspaceSnapshot, toolSnapshot, processSnapshot); err != nil {
+			return GenerationSet{}, err
 		}
-	case workspaceProgress != processProgress:
-		return GenerationPair{}, errors.New("zvol: incomplete paired seal")
+	case !(workspaceProgress && toolProgress && processProgress):
+		return GenerationSet{}, errors.New("zvol: incomplete generation seal")
 	}
 	workspace, err := e.sealPreparedVolume(ctx, lease, generation)
 	if err != nil {
-		return GenerationPair{}, err
+		return GenerationSet{}, err
+	}
+	toolSnapshot, err := tool.sealPreparedVolume(ctx, lease, generation)
+	if err != nil {
+		return GenerationSet{}, err
 	}
 	processSnapshot, err := process.sealPreparedVolume(ctx, lease, generation)
 	if err != nil {
-		return GenerationPair{}, err
+		return GenerationSet{}, err
 	}
-	return GenerationPair{Workspace: workspace, Process: processSnapshot}, nil
+	return GenerationSet{Workspace: workspace, Tool: toolSnapshot, Process: processSnapshot}, nil
 }
 
 func (e *Exec) referenced(ctx context.Context, snapshot string) (int64, error) {

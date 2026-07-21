@@ -652,7 +652,8 @@ func TestCheckpointRefusesAnIncompleteGenerationTuple(t *testing.T) {
 	host.send(guestproto.Message{Kind: guestproto.KindQuiesce, Quiesce: &guestproto.Quiesce{
 		Mountpoints: []string{"/work", ProcessMountpoint},
 		Checkpoint: &guestproto.CheckpointDump{
-			ImagesDir: ProcessImagesDir, ExternalMountAt: "/work",
+			ImagesDir:      ProcessImagesDir,
+			ExternalMounts: []guestproto.CheckpointMount{{Key: "workspace", Path: "/work"}},
 		},
 	}})
 	message := host.expect(guestproto.KindQuiesceFailed)

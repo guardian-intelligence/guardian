@@ -106,8 +106,8 @@ type LeaseReport struct {
 	Identity         *JobIdentityReport  `json:"identity,omitempty"`
 }
 
-// CheckpointArtifact identifies the process image paired with a workspace
-// generation. The digest covers the complete CRIU image directory.
+// CheckpointArtifact identifies the process image in one durable generation.
+// The digest covers the complete CRIU image directory.
 type CheckpointArtifact struct {
 	Digest  string `json:"digest"`
 	Version string `json:"version"`
@@ -187,6 +187,7 @@ type DesiredLease struct {
 	RendezvousAuthorized bool   `json:"rendezvous_authorized,omitempty"`
 
 	Workspace WorkspaceSpec `json:"workspace"`
+	Tool      WorkspaceSpec `json:"tool"`
 	Process   ProcessSpec   `json:"process"`
 	// SealGeneration names the generation a seal must produce; set when
 	// State is DesiredSeal.

@@ -10,7 +10,7 @@ import (
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vm"
 )
 
-const rendezvousTraceSchema = 5
+const rendezvousTraceSchema = 6
 
 type traceEvent struct {
 	SchemaVersion int       `json:"schema_version"`
@@ -228,13 +228,17 @@ func traceAssignment(record *lease, event *traceEvent) {
 
 func generationSet(record *lease) string {
 	if record.volume.Source == "" {
-		return "workspace:empty,process:empty"
+		return "workspace:empty,tool:empty,process:empty"
+	}
+	tool := "tool:empty"
+	if record.toolVolume.Source != "" {
+		tool = "tool:" + string(record.toolVolume.Source) + ":" + record.toolVolume.SourceSnapshotGUID
 	}
 	process := "process:empty"
 	if record.processVolume.Source != "" {
 		process = "process:" + string(record.processVolume.Source) + ":" + record.processVolume.SourceSnapshotGUID
 	}
-	return "workspace:" + string(record.volume.Source) + ":" + record.volume.SourceSnapshotGUID + "," + process
+	return "workspace:" + string(record.volume.Source) + ":" + record.volume.SourceSnapshotGUID + "," + tool + "," + process
 }
 
 func traceVolumes(record *lease, bound bool) []traceVolume {
@@ -254,10 +258,22 @@ func traceVolumes(record *lease, bound bool) []traceVolume {
 	if record.processVolume.Source != "" {
 		processMaterialization = "clone"
 	}
+	toolSerial := ""
+	if bound {
+		toolSerial = "tool"
+	}
+	toolMaterialization := "empty"
+	if record.toolVolume.Source != "" {
+		toolMaterialization = "clone"
+	}
 	return []traceVolume{{
 		Role: "workspace", Dataset: record.volume.Name, Materialization: materialization,
 		SnapshotGUID: record.volume.SourceSnapshotGUID, Generation: string(record.volume.Source),
 		DeviceSerial: serial,
+	}, {
+		Role: "tool", Dataset: record.toolVolume.Name, Materialization: toolMaterialization,
+		SnapshotGUID: record.toolVolume.SourceSnapshotGUID, Generation: string(record.toolVolume.Source),
+		DeviceSerial: toolSerial,
 	}, {
 		Role: "process", Dataset: record.processVolume.Name, Materialization: processMaterialization,
 		SnapshotGUID: record.processVolume.SourceSnapshotGUID, Generation: string(record.processVolume.Source),

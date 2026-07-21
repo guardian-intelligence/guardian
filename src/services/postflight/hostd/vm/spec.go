@@ -29,10 +29,14 @@ const workspaceNode = "workspace"
 
 const processNode = "process"
 
+const toolNode = "tool"
+
 // workspaceDevice is the qdev id of the workspace's scsi-hd.
 const workspaceDevice = "dev-" + workspaceNode
 
 const processDevice = "dev-" + processNode
+
+const toolDevice = "dev-" + toolNode
 
 // workspaceFilesystem is what the guest creates on a blank workspace zvol.
 const workspaceFilesystem = "ext4"
@@ -48,9 +52,12 @@ var workspaceMountOptions = []string{"discard", "noatime", "nodev", "nosuid"}
 
 var processMountOptions = []string{"discard", "noatime", "nodev", "noexec", "nosuid"}
 
+var toolMountOptions = []string{"discard", "noatime", "nodev", "nosuid"}
+
 const (
 	processMountpoint = "/var/lib/postflight/process"
 	processImagesDir  = processMountpoint + "/images"
+	toolMountpoint    = "/opt/actions-runner/_work/_tool"
 )
 
 // LaunchSpec is everything that determines one VM's QEMU invocation.

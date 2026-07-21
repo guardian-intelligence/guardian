@@ -392,7 +392,7 @@ func (s *Server) bindGeneration(rendezvous guestproto.Rendezvous) {
 			return
 		}
 		checkpoint := rendezvous.Checkpoint
-		if _, err := s.cfg.Checkpoints.restoreObserved(ctx, checkpoint.ImagesDir, checkpoint.ExpectedDigest, checkpoint.ExpectedVersion, checkpoint.ExternalMountAt, func(event string) {
+		if _, err := s.cfg.Checkpoints.restoreObserved(ctx, checkpoint.ImagesDir, checkpoint.ExpectedDigest, checkpoint.ExpectedVersion, checkpointMounts(checkpoint.ExternalMounts), func(event string) {
 			emit(event)
 		}); err != nil {
 			fail("checkpoint restore failed", err)
@@ -635,9 +635,15 @@ func (s *Server) handleQuiesce(quiesce guestproto.Quiesce) {
 			return
 		}
 		checkpoint := quiesce.Checkpoint
-		if !slices.Contains(quiesce.Mountpoints, checkpoint.ExternalMountAt) {
-			s.quiesceFailed(errors.New("checkpoint external mount is not in the generation tuple"), points)
+		if len(checkpoint.ExternalMounts) == 0 {
+			s.quiesceFailed(errors.New("checkpoint has no external mounts"), points)
 			return
+		}
+		for _, mount := range checkpoint.ExternalMounts {
+			if !slices.Contains(quiesce.Mountpoints, mount.Path) {
+				s.quiesceFailed(errors.New("checkpoint external mount is not in the generation tuple"), points)
+				return
+			}
 		}
 		if !slices.Contains(quiesce.Mountpoints, s.cfg.Checkpoints.ImagesRoot) {
 			s.quiesceFailed(errors.New("checkpoint process volume is not in the generation tuple"), points)
@@ -645,7 +651,7 @@ func (s *Server) handleQuiesce(quiesce guestproto.Quiesce) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), s.cfg.QuiesceWindow)
 		points = append(points, guestTiming(s.cfg.Timing.Point("checkpoint_dump_started")))
-		result, err := s.cfg.Checkpoints.dumpObserved(ctx, checkpoint.ImagesDir, checkpoint.ExternalMountAt, func(event string) {
+		result, err := s.cfg.Checkpoints.dumpObserved(ctx, checkpoint.ImagesDir, checkpointMounts(checkpoint.ExternalMounts), func(event string) {
 			points = append(points, guestTiming(s.cfg.Timing.Point(event)))
 		})
 		cancel()
@@ -656,7 +662,7 @@ func (s *Server) handleQuiesce(quiesce guestproto.Quiesce) {
 		points = append(points, guestTiming(s.cfg.Timing.Point("checkpoint_dump_completed")))
 		artifact = &guestproto.CheckpointArtifact{Digest: result.Digest, Version: result.Version}
 	}
-	// CRIU has stopped every process in the capsule. Flush both mounted
+	// CRIU has stopped every process in the capsule. Flush every mounted
 	// filesystems, then let the host destroy the VM before it snapshots the
 	// zvols. Keeping the mounts attached until QEMU exits avoids a busy
 	// unmount caused by the deliberately stopped process tree.
@@ -668,6 +674,14 @@ func (s *Server) handleQuiesce(quiesce guestproto.Quiesce) {
 	}}); err != nil {
 		s.cfg.Logger.Warn("quiesced not delivered", "err", err)
 	}
+}
+
+func checkpointMounts(mounts []guestproto.CheckpointMount) []ExternalMount {
+	external := make([]ExternalMount, 0, len(mounts))
+	for _, mount := range mounts {
+		external = append(external, ExternalMount{Key: mount.Key, Path: mount.Path})
+	}
+	return external
 }
 
 func (s *Server) quiesceFailed(reason error, points []guestproto.TimingPoint) {

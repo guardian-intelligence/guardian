@@ -26,6 +26,14 @@ func TestRoundTrip(t *testing.T) {
 				Mountpoint: "/opt/actions-runner/_work/widget/widget",
 				Options:    []string{"discard", "noatime", "nodev", "nosuid"},
 			}},
+			Checkpoint: &CheckpointRestore{
+				ImagesDir: "/var/lib/postflight/process/images", ExpectedDigest: "sha256:abc",
+				ExpectedVersion: "Version: 4.2",
+				ExternalMounts: []CheckpointMount{
+					{Key: "workspace", Path: "/opt/actions-runner/_work/widget/widget"},
+					{Key: "tool", Path: "/opt/actions-runner/_work/_tool"},
+				},
+			},
 		}},
 		{Kind: KindAuthorize, Authorize: &Authorize{
 			Lease: "lease-1", Env: map[string]string{"POSTFLIGHT_EXECUTION_ID": "exec-1"},

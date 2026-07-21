@@ -127,6 +127,8 @@ func (w *World) setAttached(device string, attached bool) {
 		lease := zvol.LeaseID(device[i+len("/ws/"):])
 		if strings.Contains(device[:i], "/process-state") {
 			w.Zvols.SetProcessAttached(lease, attached)
+		} else if strings.Contains(device[:i], "/tool-state") {
+			w.Zvols.SetToolAttached(lease, attached)
 		} else {
 			w.Zvols.SetAttached(lease, attached)
 		}

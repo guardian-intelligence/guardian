@@ -21,7 +21,7 @@ type ProcessCheckpoints struct {
 	ImagesRoot string
 }
 
-func (p ProcessCheckpoints) validate(imagesDir, externalMount string) error {
+func (p ProcessCheckpoints) validate(imagesDir string, externalMounts []ExternalMount) error {
 	switch {
 	case p.Capsules == nil:
 		return errors.New("guestd: capsule manager is required")
@@ -31,18 +31,23 @@ func (p ProcessCheckpoints) validate(imagesDir, externalMount string) error {
 		return errors.New("guestd: CRIU and checkpoint image roots differ")
 	case !beneath(p.ImagesRoot, imagesDir):
 		return errors.New("guestd: checkpoint images escape the process volume")
-	case !validMountpoint(externalMount):
-		return fmt.Errorf("guestd: unsafe checkpoint external mount %q", externalMount)
+	case len(externalMounts) == 0:
+		return errors.New("guestd: checkpoint requires an external mount")
+	}
+	for _, mount := range externalMounts {
+		if !validMountpoint(mount.Path) {
+			return fmt.Errorf("guestd: unsafe checkpoint external mount %q", mount.Path)
+		}
 	}
 	return nil
 }
 
-func (p ProcessCheckpoints) Restore(ctx context.Context, imagesDir, expectedDigest, expectedVersion, externalMount string) (int, error) {
-	return p.restoreObserved(ctx, imagesDir, expectedDigest, expectedVersion, externalMount, nil)
+func (p ProcessCheckpoints) Restore(ctx context.Context, imagesDir, expectedDigest, expectedVersion string, externalMounts []ExternalMount) (int, error) {
+	return p.restoreObserved(ctx, imagesDir, expectedDigest, expectedVersion, externalMounts, nil)
 }
 
-func (p ProcessCheckpoints) restoreObserved(ctx context.Context, imagesDir, expectedDigest, expectedVersion, externalMount string, observer checkpointObserver) (int, error) {
-	if err := p.validate(imagesDir, externalMount); err != nil {
+func (p ProcessCheckpoints) restoreObserved(ctx context.Context, imagesDir, expectedDigest, expectedVersion string, externalMounts []ExternalMount, observer checkpointObserver) (int, error) {
+	if err := p.validate(imagesDir, externalMounts); err != nil {
 		return 0, err
 	}
 	if expectedDigest == "" {
@@ -52,10 +57,8 @@ func (p ProcessCheckpoints) restoreObserved(ctx context.Context, imagesDir, expe
 		return 0, errors.New("guestd: checkpoint restore has no expected version")
 	}
 	pid, err := p.CRIU.restoreObserved(ctx, Capsule{
-		ImagesDir: imagesDir,
-		ExternalMounts: []ExternalMount{
-			{Key: "workspace", Path: externalMount},
-		},
+		ImagesDir:      imagesDir,
+		ExternalMounts: externalMounts,
 	}, expectedDigest, expectedVersion, observer)
 	if err != nil {
 		return 0, err
@@ -66,12 +69,12 @@ func (p ProcessCheckpoints) restoreObserved(ctx context.Context, imagesDir, expe
 	return pid, nil
 }
 
-func (p ProcessCheckpoints) Dump(ctx context.Context, imagesDir, externalMount string) (CheckpointArtifact, error) {
-	return p.dumpObserved(ctx, imagesDir, externalMount, nil)
+func (p ProcessCheckpoints) Dump(ctx context.Context, imagesDir string, externalMounts []ExternalMount) (CheckpointArtifact, error) {
+	return p.dumpObserved(ctx, imagesDir, externalMounts, nil)
 }
 
-func (p ProcessCheckpoints) dumpObserved(ctx context.Context, imagesDir, externalMount string, observer checkpointObserver) (CheckpointArtifact, error) {
-	if err := p.validate(imagesDir, externalMount); err != nil {
+func (p ProcessCheckpoints) dumpObserved(ctx context.Context, imagesDir string, externalMounts []ExternalMount, observer checkpointObserver) (CheckpointArtifact, error) {
+	if err := p.validate(imagesDir, externalMounts); err != nil {
 		return CheckpointArtifact{}, err
 	}
 	observeCheckpoint(observer, "checkpoint_capsule_prepare_started")
@@ -84,10 +87,8 @@ func (p ProcessCheckpoints) dumpObserved(ctx context.Context, imagesDir, externa
 		return CheckpointArtifact{}, err
 	}
 	return p.CRIU.dumpObserved(ctx, Capsule{
-		RootPID:   rootPID,
-		ImagesDir: imagesDir,
-		ExternalMounts: []ExternalMount{
-			{Key: "workspace", Path: externalMount},
-		},
+		RootPID:        rootPID,
+		ImagesDir:      imagesDir,
+		ExternalMounts: externalMounts,
 	}, observer)
 }

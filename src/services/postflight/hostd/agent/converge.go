@@ -387,17 +387,17 @@ func (a *Agent) stepLease(ctx context.Context, record *lease, vms *vmView) {
 				Digest: record.checkpoint.Digest, Version: record.checkpoint.Version,
 			}
 		})
-		pair, err := a.zvols.SealPair(ctx,
+		set, err := a.zvols.SealSet(ctx,
 			zvol.LeaseID(record.executionLeaseID()),
 			zvol.GenerationID(record.spec.SealGeneration))
 		if err != nil {
 			a.failLease(ctx, record, "seal: "+err.Error())
 			return
 		}
-		record.sealGen = string(pair.Workspace.Generation)
+		record.sealGen = string(set.Workspace.Generation)
 		a.appendTrace(record, "snapshot_seal_completed", func(event *traceEvent) {
 			traceIdentity(record, event)
-			event.GenerationSet = "workspace:" + string(pair.Workspace.Generation) + ",process:" + string(pair.Process.Generation)
+			event.GenerationSet = "workspace:" + string(set.Workspace.Generation) + ",tool:" + string(set.Tool.Generation) + ",process:" + string(set.Process.Generation)
 			event.Checkpoint = &traceCheckpoint{
 				Digest: record.checkpoint.Digest, Version: record.checkpoint.Version,
 			}
@@ -427,6 +427,7 @@ func (a *Agent) rendezvous(record *lease) vm.Rendezvous {
 		Lease:               record.spec.LeaseID,
 		WorkspaceDevice:     record.device,
 		WorkspaceMountpoint: mountpoint,
+		ToolDevice:          record.toolDevice,
 		ProcessDevice:       record.processDevice,
 		CheckpointDigest:    execution.Process.ExpectedDigest,
 		CheckpointVersion:   execution.Process.ExpectedVersion,
@@ -549,6 +550,12 @@ func (a *Agent) materialize(ctx context.Context, record *lease, execution syncpr
 	if err != nil {
 		return fmt.Errorf("workspace: %w", err)
 	}
+	toolVolume, err := a.zvols.EnsureTool(ctx,
+		zvol.LeaseID(executionLeaseID(execution)),
+		zvol.GenerationID(execution.Tool.Generation), toolVolumeSize(execution.Tool.SizeBytes))
+	if err != nil {
+		return fmt.Errorf("tool: %w", err)
+	}
 	processGeneration := zvol.GenerationID("")
 	if execution.Process.ExpectedDigest != "" {
 		processGeneration = zvol.GenerationID(execution.Process.Generation)
@@ -563,6 +570,7 @@ func (a *Agent) materialize(ctx context.Context, record *lease, execution syncpr
 		return fmt.Errorf("process: %w", err)
 	}
 	record.device, record.volume = volume.Device, volume
+	record.toolDevice, record.toolVolume = toolVolume.Device, toolVolume
 	record.processDevice, record.processVolume = processVolume.Device, processVolume
 	return nil
 }
@@ -621,6 +629,15 @@ const runnerWorkRoot = "/opt/actions-runner/_work"
 // The single initial product class has 16 GiB RAM. CRIU images are often
 // sparse, but the volume must accommodate a worst-case dump plus metadata.
 const defaultProcessVolumeSizeBytes int64 = 24 << 30
+
+const defaultToolVolumeSizeBytes int64 = 32 << 30
+
+func toolVolumeSize(configured int64) int64 {
+	if configured > 0 {
+		return configured
+	}
+	return defaultToolVolumeSizeBytes
+}
 
 func workspaceMountpoint(repositoryFullName string) string {
 	name := repositoryFullName
@@ -686,6 +703,12 @@ func (a *Agent) reapGenerations(ctx context.Context) {
 			continue
 		}
 		err := a.zvols.DestroyProcessGeneration(ctx, generation)
+		if errors.Is(err, zvol.ErrNotFound) {
+			err = nil
+		}
+		if err == nil {
+			err = a.zvols.DestroyToolGeneration(ctx, generation)
+		}
 		if errors.Is(err, zvol.ErrNotFound) {
 			err = nil
 		}

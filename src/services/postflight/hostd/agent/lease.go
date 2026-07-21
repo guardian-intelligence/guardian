@@ -34,6 +34,7 @@ type lease struct {
 	since            time.Time // entry time of the current state, for deadlines
 	vmID             string    // assigned VM, from claim onward
 	device           string    // workspace block device
+	toolDevice       string    // durable tool-cache block device
 	processDevice    string    // CRIU image block device
 	exit             int       // runner exit code, valid from StateExited
 	reason           string    // failure reason, valid in StateFailed
@@ -41,6 +42,7 @@ type lease struct {
 	identity         *syncproto.JobIdentityReport
 	hostBeforeUnixNS int64
 	volume           zvol.WorkspaceVolume
+	toolVolume       zvol.ToolVolume
 	processVolume    zvol.ProcessVolume
 	checkpoint       *syncproto.CheckpointArtifact
 	traceSeq         uint64

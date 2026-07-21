@@ -56,6 +56,17 @@ func processVolume(warm, bound bool) volumeEvidence {
 	return volume
 }
 
+func toolVolume(warm, bound bool) volumeEvidence {
+	volume := volumeEvidence{Role: volumeTool, Dataset: "tank/postflight/tool-state/ws/job-42", Materialization: "empty"}
+	if warm {
+		volume.Materialization, volume.Generation, volume.SnapshotGUID = "clone", "generation-7", "7123456789012345678"
+	}
+	if bound {
+		volume.DeviceSerial = "tool"
+	}
+	return volume
+}
+
 func validRendezvousTrace(warm, full bool) []rendezvousEvent {
 	b := &traceBuilder{originSeq: map[string]uint64{}}
 	for _, item := range [][2]string{
@@ -70,7 +81,8 @@ func validRendezvousTrace(warm, full bool) []rendezvousEvent {
 		{eventAssignmentObserved, "hostd-agent"}, {eventGenerationMaterializationStarted, "hostd-agent"},
 		{eventGenerationResolved, "hostd-agent"}, {eventRendezvousDispatched, "hostd-agent"},
 		{eventQMPRendezvousStarted, "hostd-qemu"}, {eventQMPConnected, "hostd-qemu"},
-		{eventWorkspaceDeviceAttached, "hostd-qemu"}, {eventProcessDeviceAttached, "hostd-qemu"},
+		{eventWorkspaceDeviceAttached, "hostd-qemu"}, {eventToolDeviceAttached, "hostd-qemu"},
+		{eventProcessDeviceAttached, "hostd-qemu"},
 		{eventGuestRendezvousSent, "hostd-qemu"}, {eventGuestRendezvousReceived, "guestd"},
 		{eventMountConvergenceStarted, "guestd"}, {eventMountConvergenceCompleted, "guestd"},
 	} {
@@ -104,8 +116,8 @@ func validRendezvousTrace(warm, full bool) []rendezvousEvent {
 		OSImageID: "noble-1f782d295df9-g07c10dda9277", MachineType: "pc-q35-11.0",
 		CPUModel: "EPYC-v4", CRIUVersion: "4.2",
 	}
-	resolved := []volumeEvidence{workspaceVolume(warm, false), processVolume(warm, false)}
-	bound := []volumeEvidence{workspaceVolume(warm, true), processVolume(warm, true)}
+	resolved := []volumeEvidence{workspaceVolume(warm, false), toolVolume(warm, false), processVolume(warm, false)}
+	bound := []volumeEvidence{workspaceVolume(warm, true), toolVolume(warm, true), processVolume(warm, true)}
 	for index := range b.events {
 		switch b.events[index].Event {
 		case eventGenerationResolved:
@@ -154,9 +166,9 @@ func validRendezvousTrace(warm, full bool) []rendezvousEvent {
 
 func generationSetForTest(warm bool) string {
 	if warm {
-		return "workspace:generation-7:9123456789012345678,process:generation-7:8123456789012345678"
+		return "workspace:generation-7:9123456789012345678,tool:generation-7:7123456789012345678,process:generation-7:8123456789012345678"
 	}
-	return "workspace:empty,process:empty"
+	return "workspace:empty,tool:empty,process:empty"
 }
 
 func TestValidColdRendezvousThroughRelease(t *testing.T) {
@@ -177,6 +189,8 @@ func TestValidWarmRendezvousAndCheckpointPasses(t *testing.T) {
 	}
 	for _, duration := range []string{
 		"criu_restore", "restore_version_validation", "restore_digest_validation", "restore_criu",
+		"qmp_to_workspace_attach", "workspace_to_tool_attach", "tool_to_process_attach",
+		"process_attach_to_guest_dispatch",
 		"worker_gate", "checkpoint_dump", "checkpoint_capsule_prepare", "checkpoint_version",
 		"checkpoint_criu_dump", "checkpoint_digest", "snapshot_seal",
 	} {
@@ -313,7 +327,7 @@ func TestUnsupportedWorkloadRequiresBothSupportedFallbacks(t *testing.T) {
 }
 
 func TestTraceReaderRejectsUnknownFieldsAndMultipleValues(t *testing.T) {
-	base := `{"schema_version":5,"run_id":"r","event":"classified","seq":1,"source":"collector","boot_id":"boot","origin_seq":1,"monotonic_ns":1,"wall_time":"2026-07-21T12:00:00Z"`
+	base := `{"schema_version":6,"run_id":"r","event":"classified","seq":1,"source":"collector","boot_id":"boot","origin_seq":1,"monotonic_ns":1,"wall_time":"2026-07-21T12:00:00Z"`
 	if _, err := readRendezvousTrace(strings.NewReader(base + `,"surprise":true}`)); err == nil {
 		t.Fatal("unknown trace field was accepted")
 	}

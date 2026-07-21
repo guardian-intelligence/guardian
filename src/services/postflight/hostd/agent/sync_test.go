@@ -228,6 +228,7 @@ func TestDesiredProjectionPreservesLocallyRoutedExecution(t *testing.T) {
 	projected.Process.ExpectedVersion = "Version: 4.2"
 	projected.Process.Generation = "generation-1"
 	projected.Workspace.Generation = "generation-1"
+	projected.Tool.Generation = "generation-1"
 	instance.applyDesired(syncproto.SyncResponse{Leases: []syncproto.DesiredLease{projected}})
 
 	if instance.quarantined[listener.LeaseID] {

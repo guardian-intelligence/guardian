@@ -35,6 +35,14 @@ func validateDesired(d syncproto.DesiredLease) error {
 			return err
 		}
 	}
+	if d.Tool.Generation != "" {
+		if err := zvol.ValidateName("tool generation", d.Tool.Generation); err != nil {
+			return err
+		}
+		if d.Tool.Generation != d.Workspace.Generation {
+			return fmt.Errorf("lease %s: workspace and tool generations differ", d.LeaseID)
+		}
+	}
 	if d.Process.Generation != "" {
 		if err := zvol.ValidateName("process generation", d.Process.Generation); err != nil {
 			return err
@@ -49,6 +57,9 @@ func validateDesired(d syncproto.DesiredLease) error {
 		}
 		if d.Process.Generation != d.Workspace.Generation {
 			return fmt.Errorf("lease %s: workspace and process generations differ", d.LeaseID)
+		}
+		if d.Tool.Generation != d.Workspace.Generation {
+			return fmt.Errorf("lease %s: checkpoint identity without the matching tool generation", d.LeaseID)
 		}
 	}
 	switch d.State {

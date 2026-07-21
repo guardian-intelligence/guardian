@@ -42,7 +42,10 @@ esac
 	imagesRoot := filepath.Join(root, "encrypted")
 	images := filepath.Join(imagesRoot, "generation-1")
 	engine := CRIU{Path: bin, ImagesRoot: imagesRoot, WorkRoot: filepath.Join(imagesRoot, "work")}
-	capsule := Capsule{RootPID: 123, ImagesDir: images, ExternalMounts: []ExternalMount{{Key: "workspace", Path: "/workspace"}}}
+	capsule := Capsule{RootPID: 123, ImagesDir: images, ExternalMounts: []ExternalMount{
+		{Key: "workspace", Path: "/workspace"},
+		{Key: "tool", Path: "/opt/actions-runner/_work/_tool"},
+	}}
 	var stages []string
 	artifact, err := engine.dumpObserved(context.Background(), capsule, func(event string) {
 		stages = append(stages, event)
@@ -64,6 +67,8 @@ esac
 	}
 	if !strings.Contains(string(dumpArgs), "--ext-mount-map\nauto\n") ||
 		!strings.Contains(string(dumpArgs), "--enable-external-masters\n") ||
+		!strings.Contains(string(dumpArgs), "mnt[/opt/actions-runner/_work/_tool]:tool\n") ||
+		!strings.Contains(string(dumpArgs), "mnt[/workspace]:workspace\n") ||
 		strings.Contains(string(dumpArgs), "mnt[]") {
 		t.Fatalf("dump args do not carry the proven external-mount contract:\n%s", dumpArgs)
 	}
@@ -94,6 +99,8 @@ esac
 	}
 	if !strings.Contains(string(restoreArgs), "--ext-mount-map\nauto\n") ||
 		!strings.Contains(string(restoreArgs), "--enable-external-masters\n") ||
+		!strings.Contains(string(restoreArgs), "mnt[tool]:/opt/actions-runner/_work/_tool\n") ||
+		!strings.Contains(string(restoreArgs), "mnt[workspace]:/workspace\n") ||
 		strings.Contains(string(restoreArgs), "mnt[]") {
 		t.Fatalf("restore args do not carry the proven external-mount contract:\n%s", restoreArgs)
 	}

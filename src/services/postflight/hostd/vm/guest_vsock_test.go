@@ -242,7 +242,10 @@ func TestVsockGuestQuiesceRoundTrip(t *testing.T) {
 			defer cancel()
 			got, err := transport.Quiesce(ctx, "vm-a", 3, guestproto.Quiesce{
 				Mountpoints: []string{"/work"},
-				Checkpoint:  &guestproto.CheckpointDump{ImagesDir: "/process/images", ExternalMountAt: "/work"},
+				Checkpoint: &guestproto.CheckpointDump{
+					ImagesDir:      "/process/images",
+					ExternalMounts: []guestproto.CheckpointMount{{Key: "workspace", Path: "/work"}},
+				},
 			})
 			if name == "ok" && err != nil {
 				t.Fatalf("quiesce: %v", err)

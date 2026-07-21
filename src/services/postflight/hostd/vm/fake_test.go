@@ -41,7 +41,7 @@ func TestFakeMirrorsRealDriverMismatchErrors(t *testing.T) {
 		t.Fatal("mark assigned")
 	}
 	if err := fake.Rendezvous(ctx, "vm-a", Rendezvous{
-		Lease: "lease-1", WorkspaceDevice: "/dev/ws", WorkspaceMountpoint: "/work", ProcessDevice: "/dev/process",
+		Lease: "lease-1", WorkspaceDevice: "/dev/ws", WorkspaceMountpoint: "/work", ToolDevice: "/dev/tool", ProcessDevice: "/dev/process",
 	}); err != nil {
 		t.Fatal(err)
 	}
