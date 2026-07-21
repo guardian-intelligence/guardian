@@ -57,10 +57,11 @@ var toolMountOptions = []string{"discard", "noatime", "nodev", "nosuid"}
 const (
 	processMountpoint = "/var/lib/postflight/process"
 	processImagesDir  = processMountpoint + "/images"
-	// The tool generation owns the runner's mutable work root, including
-	// _actions, _temp, and _tool. The repository workspace is a nested mount
-	// and must be mounted after this parent during rendezvous.
-	runnerStateMountpoint = "/opt/actions-runner/_work"
+	// The tool generation owns the runner's full home, including language
+	// caches and the _work tree reached through /opt/actions-runner/_work.
+	// The repository workspace is a nested mount and must be mounted after
+	// this parent during rendezvous.
+	runnerStateMountpoint = "/home/runner"
 )
 
 // LaunchSpec is everything that determines one VM's QEMU invocation.

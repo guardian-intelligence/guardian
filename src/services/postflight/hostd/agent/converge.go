@@ -621,10 +621,11 @@ func (a *Agent) finishRunner(ctx context.Context, record *lease, status vm.Statu
 	}
 }
 
-// runnerWorkRoot mirrors the golden image's runner install: the runner
-// materializes GITHUB_WORKSPACE at _work/<repo>/<repo>, and the workspace
-// zvol must already be mounted there when the runner starts.
-const runnerWorkRoot = "/opt/actions-runner/_work"
+// runnerWorkRoot is the durable target behind the golden image's
+// /opt/actions-runner/_work symlink. Keeping it under the runner-home volume
+// couples user caches and runner-generated _actions/_temp/_tool state to the
+// same generation while the repository workspace remains a nested zvol.
+const runnerWorkRoot = "/home/runner/_work"
 
 // The single initial product class has 16 GiB RAM. CRIU images are often
 // sparse, but the volume must accommodate a worst-case dump plus metadata.

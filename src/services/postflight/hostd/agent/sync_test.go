@@ -248,3 +248,9 @@ func TestDesiredProjectionPreservesLocallyRoutedExecution(t *testing.T) {
 		t.Fatal("routed execution did not accept the control-plane checkpoint version")
 	}
 }
+
+func TestWorkspaceMountpointLivesUnderDurableRunnerHome(t *testing.T) {
+	if got, want := workspaceMountpoint("guardian-intelligence/widget"), "/home/runner/_work/widget/widget"; got != want {
+		t.Fatalf("workspace mountpoint = %q, want %q", got, want)
+	}
+}

@@ -52,6 +52,8 @@ grep -Fq "runner ALL=(ALL:ALL) NOPASSWD: ALL" "${build_sh}" ||
   fail "build.sh does not grant the runner passwordless sudo"
 grep -Fq 'chmod 0440 "${mnt}/etc/sudoers.d/runner"' "${build_sh}" ||
   fail "runner sudoers policy does not have the required mode"
+grep -Fq 'ln -s /home/runner/_work "${mnt}/opt/actions-runner/_work"' "${build_sh}" ||
+  fail "runner work root is not backed by the durable runner-home volume"
 grep -Fq 'PACKER_TIMEOUT' "${build_upstream_sh}" ||
   fail "upstream image build has no hard timeout"
 grep -Fq 'qemu-img check -q "${cached_image}"' "${build_upstream_sh}" ||
