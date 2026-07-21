@@ -17,7 +17,7 @@ spec:
   template:
     metadata:
       annotations:
-        checksum/realm-config: b52546f2b76c9a8d461823403e74d907da890f12c659d33bec4aff608b53d9d3
+        checksum/realm-config: 058e5488a053fda779d3d1ea7f0ff095ebb387257b5682d5a51130db3a48d456
       labels:
         app.kubernetes.io/name: keycloak-realm-reconciler
         app.kubernetes.io/part-of: guardian
@@ -131,6 +131,111 @@ spec:
                     --config "$config" --realm "$realm" ;;
                 esac
               done
+
+              # Broker mappers have no representation-level or realm-update
+              # path, and the mapper PUT requires its id in the body, so
+              # desired state is applied as delete-then-create per mapper.
+              for mapper in /provider-mappers/*.json; do
+                file="${mapper##*/}"
+                alias="${file%%--*}"
+                mapper_name="${file#*--}"
+                mapper_name="${mapper_name%.json}"
+                existing_id="$("$kcadm" get "identity-provider/instances/$alias/mappers" \
+                  --config "$config" --realm "$realm" \
+                  --fields id,name --format csv --noquotes \
+                  | grep ",$mapper_name\$" | cut -d, -f1)"
+                if test -n "$existing_id"; then
+                  "$kcadm" delete "identity-provider/instances/$alias/mappers/$existing_id" \
+                    --config "$config" --realm "$realm"
+                fi
+                "$kcadm" create "identity-provider/instances/$alias/mappers" \
+                  --config "$config" --realm "$realm" -f "$mapper"
+              done
+
+              # The canary group's id is pinned in the realm import, but the
+              # groups API ignores ids on create, so the live path creates it
+              # by name and resolves whichever id exists.
+              group=canary-principals
+              group_id() {
+                "$kcadm" get groups --config "$config" --realm "$realm" \
+                  -q "search=$group" -q exact=true \
+                  --fields id --format csv --noquotes | head -n 1
+              }
+              gid="$(group_id)"
+              if test -z "$gid"; then
+                "$kcadm" create groups --config "$config" --realm "$realm" \
+                  -b "{\"name\":\"$group\"}"
+                gid="$(group_id)"
+              fi
+              if test -z "$gid"; then
+                echo "group $group could not be resolved" >&2
+                exit 1
+              fi
+
+              # The janitor's grant shape IS the least-privilege boundary:
+              # manage-members permits deleting members, manage-membership
+              # (never granted) would permit adding a real user before
+              # deletion. Policy and permission are rewritten every run so a
+              # drifted grant heals on the next reconcile. Permissions are
+              # policies to the query API, so lookups filter by type.
+              ap_id="$("$kcadm" get clients --config "$config" --realm "$realm" \
+                -q clientId=admin-permissions --fields id --format csv --noquotes)"
+              janitor_id="$("$kcadm" get clients --config "$config" --realm "$realm" \
+                -q clientId=guardian-canary-janitor --fields id --format csv --noquotes)"
+              if test -z "$ap_id" || test -z "$janitor_id"; then
+                echo "admin-permissions or canary-janitor client missing" >&2
+                exit 1
+              fi
+              policy=canary-janitor
+              policy_id() {
+                "$kcadm" get "clients/$ap_id/authz/resource-server/policy" \
+                  --config "$config" --realm "$realm" \
+                  -q "name=$policy" -q type=client \
+                  --fields id --format csv --noquotes | head -n 1
+              }
+              policy_body="{\"name\":\"$policy\",\"clients\":[\"$janitor_id\"]}"
+              pid="$(policy_id)"
+              if test -z "$pid"; then
+                "$kcadm" create "clients/$ap_id/authz/resource-server/policy/client" \
+                  --config "$config" --realm "$realm" -b "$policy_body"
+                pid="$(policy_id)"
+              else
+                "$kcadm" update "clients/$ap_id/authz/resource-server/policy/client/$pid" \
+                  --config "$config" --realm "$realm" -b "$policy_body"
+              fi
+              permission=canary-janitor-manage-canary-principals
+              permission_id() {
+                "$kcadm" get "clients/$ap_id/authz/resource-server/permission" \
+                  --config "$config" --realm "$realm" \
+                  -q "name=$permission" -q type=scope \
+                  --fields id --format csv --noquotes | head -n 1
+              }
+              permission_body="{\"name\":\"$permission\",\"resourceType\":\"Groups\",\"resources\":[\"$gid\"],\"scopes\":[\"view-members\",\"manage-members\"],\"policies\":[\"$pid\"]}"
+              perm_id="$(permission_id)"
+              if test -z "$perm_id"; then
+                "$kcadm" create "clients/$ap_id/authz/resource-server/permission/scope" \
+                  --config "$config" --realm "$realm" -b "$permission_body"
+              else
+                "$kcadm" update "clients/$ap_id/authz/resource-server/permission/scope/$perm_id" \
+                  --config "$config" --realm "$realm" -b "$permission_body"
+              fi
+
+              # Workflows are invisible to realm import/export and the
+              # workflow PUT does not update steps, so each one is replaced
+              # by name. The group stanza above must run first: join-group
+              # resolves its target when the workflow is created.
+              for workflow in /workflows/*.json; do
+                file="${workflow##*/}"
+                workflow_name="${file%.json}"
+                wid="$("$kcadm" get workflows --config "$config" --realm "$realm" \
+                  -q "search=$workflow_name" -q exact=true \
+                  --fields id --format csv --noquotes | head -n 1)"
+                if test -n "$wid"; then
+                  "$kcadm" delete "workflows/$wid" --config "$config" --realm "$realm"
+                fi
+                "$kcadm" create workflows --config "$config" --realm "$realm" \
+                  -f "$workflow"
+              done
           env:
             - name: KC_CLI_CLIENT_SECRET
               valueFrom:
@@ -161,6 +266,12 @@ spec:
             - name: providers
               mountPath: /providers
               readOnly: true
+            - name: provider-mappers
+              mountPath: /provider-mappers
+              readOnly: true
+            - name: workflows
+              mountPath: /workflows
+              readOnly: true
       volumes:
         - name: realm
           configMap:
@@ -171,6 +282,12 @@ spec:
         - name: providers
           configMap:
             name: keycloak-identity-providers
+        - name: provider-mappers
+          configMap:
+            name: keycloak-identity-provider-mappers
+        - name: workflows
+          configMap:
+            name: keycloak-workflows
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy

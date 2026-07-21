@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -41,13 +42,20 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 	}
 
 	var realm struct {
-		Realm                string `json:"realm"`
-		OrganizationsEnabled *bool  `json:"organizationsEnabled"`
-		RegistrationAllowed  bool   `json:"registrationAllowed"`
-		LoginWithEmail       bool   `json:"loginWithEmailAllowed"`
-		DuplicateEmails      bool   `json:"duplicateEmailsAllowed"`
-		Clients              []keycloakClientRepresentation `json:"clients"`
-		AuthenticationFlows  []struct {
+		Realm                   string `json:"realm"`
+		OrganizationsEnabled    *bool  `json:"organizationsEnabled"`
+		RegistrationAllowed     bool   `json:"registrationAllowed"`
+		LoginWithEmail          bool   `json:"loginWithEmailAllowed"`
+		DuplicateEmails         bool   `json:"duplicateEmailsAllowed"`
+		AdminPermissionsEnabled bool   `json:"adminPermissionsEnabled"`
+		AdminEventsEnabled      bool   `json:"adminEventsEnabled"`
+		Groups                  []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+			Path string `json:"path"`
+		} `json:"groups"`
+		Clients             []keycloakClientRepresentation `json:"clients"`
+		AuthenticationFlows []struct {
 			Alias      string `json:"alias"`
 			ProviderID string `json:"providerId"`
 			TopLevel   bool   `json:"topLevel"`
@@ -84,6 +92,8 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 	settingsFiles := map[string]string{}
 	clientJSON := map[string]string{}
 	providerJSON := map[string]string{}
+	mapperJSON := map[string]string{}
+	workflowJSON := map[string]string{}
 	for _, doc := range yamlDocs(t, runfilePath(root+"realm-configmap.yaml")) {
 		name := stringValue(mapValue(doc["metadata"])["name"])
 		data := mapValue(doc["data"])
@@ -109,6 +119,14 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 			if err := json.Unmarshal([]byte(providerJSON["github.json"]), &github); err != nil {
 				t.Fatalf("decode GitHub broker JSON: %v", err)
 			}
+		case "keycloak-identity-provider-mappers":
+			for key, value := range data {
+				mapperJSON[key] = stringValue(value)
+			}
+		case "keycloak-workflows":
+			for key, value := range data {
+				workflowJSON[key] = stringValue(value)
+			}
 		}
 	}
 	if realm.Realm != "guardianintelligence.org" {
@@ -123,6 +141,16 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 	if realm.RegistrationAllowed || realm.LoginWithEmail || realm.DuplicateEmails {
 		t.Fatal("Guardian realm must not register, resolve, or merge accounts by email")
 	}
+	if !realm.AdminPermissionsEnabled {
+		t.Fatal("fine-grained admin permissions scope the canary janitor and must stay enabled")
+	}
+	if !realm.AdminEventsEnabled {
+		t.Fatal("admin events are the audit trail for user-store administration and must stay enabled")
+	}
+	if len(realm.Groups) != 1 || realm.Groups[0].Name != "canary-principals" ||
+		realm.Groups[0].Path != "/canary-principals" || realm.Groups[0].ID == "" {
+		t.Fatalf("realm groups = %#v, want only canary-principals with a pinned id", realm.Groups)
+	}
 
 	var importedSettings, desiredSettings map[string]any
 	if err := json.Unmarshal([]byte(realmJSON), &importedSettings); err != nil {
@@ -135,6 +163,7 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 	delete(importedSettings, "clients")
 	delete(importedSettings, "components")
 	delete(importedSettings, "users")
+	delete(importedSettings, "groups")
 	if !reflect.DeepEqual(importedSettings, desiredSettings) {
 		t.Fatal("startup realm settings differ from steady-state realm settings")
 	}
@@ -170,8 +199,12 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 	}
 	var profile struct {
 		Attributes []struct {
-			Name     string          `json:"name"`
-			Required json.RawMessage `json:"required"`
+			Name        string          `json:"name"`
+			Required    json.RawMessage `json:"required"`
+			Permissions struct {
+				View []string `json:"view"`
+				Edit []string `json:"edit"`
+			} `json:"permissions"`
 		} `json:"attributes"`
 	}
 	if err := json.Unmarshal([]byte(settingsFiles["up-config.json"]), &profile); err != nil {
@@ -183,8 +216,15 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 		if (attribute.Name == "firstName" || attribute.Name == "lastName") && attribute.Required != nil {
 			t.Fatalf("%s must be optional: a brokered GitHub account has no guaranteed name", attribute.Name)
 		}
+		if attribute.Name == "github_id" {
+			for _, role := range append(attribute.Permissions.View, attribute.Permissions.Edit...) {
+				if role != "admin" {
+					t.Fatal("github_id selects canary-fleet identities: a user-writable value would let anyone impersonate the fleet at signup")
+				}
+			}
+		}
 	}
-	for _, name := range []string{"username", "email", "firstName", "lastName"} {
+	for _, name := range []string{"username", "email", "firstName", "lastName", "github_id"} {
 		if !names[name] {
 			t.Fatalf("user profile is missing attribute %q", name)
 		}
@@ -194,8 +234,8 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 	for _, client := range realm.Clients {
 		importedClients[client.ClientID] = client
 	}
-	if len(importedClients) != 4 || len(clientJSON) != 4 {
-		t.Fatalf("managed clients: import=%d steady-state=%d, want 4", len(importedClients), len(clientJSON))
+	if len(importedClients) != 5 || len(clientJSON) != 5 {
+		t.Fatalf("managed clients: import=%d steady-state=%d, want 5", len(importedClients), len(clientJSON))
 	}
 	for filename, raw := range clientJSON {
 		var desired keycloakClientRepresentation
@@ -236,22 +276,33 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 		!reconcilerClient.ServiceAccountsEnabled || !reconcilerClient.FullScopeAllowed {
 		t.Fatal("realm reconciler must cold-import as a scoped confidential service account")
 	}
+	janitor := importedClients["guardian-canary-janitor"]
+	if janitor.Secret != "${CANARY_JANITOR_CLIENT_SECRET}" || janitor.PublicClient ||
+		!janitor.ServiceAccountsEnabled || janitor.FullScopeAllowed ||
+		janitor.StandardFlowEnabled || janitor.DirectAccessGrantsEnabled {
+		t.Fatal("canary janitor must be a confidential service account with no login flows")
+	}
+	var janitorDesired keycloakClientRepresentation
+	if err := json.Unmarshal([]byte(clientJSON["guardian-canary-janitor.json"]), &janitorDesired); err != nil {
+		t.Fatal(err)
+	}
+	if janitorDesired.Secret != "${vault.canary-janitor-client-secret}" {
+		t.Fatal("canary janitor client secret must remain a Vault SPI reference")
+	}
+	// The janitor's entire admin capability is the fine-grained grant the
+	// reconciler maintains on the canary group; a realm-management role here
+	// would widen it to the whole user store.
 	if len(realm.Users) != 1 ||
 		realm.Users[0].Username != "service-account-guardian-realm-reconciler" ||
 		realm.Users[0].ServiceAccountClientID != "guardian-realm-reconciler" {
-		t.Fatalf("realm service accounts = %#v", realm.Users)
+		t.Fatalf("realm service accounts = %#v, want only the reconciler: every other service account starts with zero roles", realm.Users)
 	}
+	// The workflows admin API hard-requires the realm-admin composite
+	// (WorkflowsResource calls auth.requireRealmAdmin()); no set of
+	// individual realm-management roles satisfies it.
 	gotRoles := append([]string(nil), realm.Users[0].ClientRoles["realm-management"]...)
 	sort.Strings(gotRoles)
-	wantRoles := []string{
-		"manage-clients",
-		"manage-identity-providers",
-		"manage-realm",
-		"query-clients",
-		"view-clients",
-		"view-identity-providers",
-		"view-realm",
-	}
+	wantRoles := []string{"realm-admin"}
 	if !reflect.DeepEqual(gotRoles, wantRoles) {
 		t.Fatalf("realm reconciler roles = %#v, want %#v", gotRoles, wantRoles)
 	}
@@ -266,6 +317,69 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 		realm.Realm != stringValue(prod["keycloakRealm"]) ||
 		github.Alias != stringValue(prod["keycloakIdpAlias"]) {
 		t.Fatal("production GitHub provider differs from the OAuth App registry")
+	}
+
+	var idMapper struct {
+		Name   string `json:"name"`
+		Alias  string `json:"identityProviderAlias"`
+		Mapper string `json:"identityProviderMapper"`
+		Config struct {
+			JSONField     string `json:"jsonField"`
+			UserAttribute string `json:"userAttribute"`
+			SyncMode      string `json:"syncMode"`
+		} `json:"config"`
+	}
+	if err := json.Unmarshal([]byte(mapperJSON["github--github-id.json"]), &idMapper); err != nil {
+		t.Fatalf("decode github-id broker mapper: %v", err)
+	}
+	if idMapper.Name != "github-id" || idMapper.Alias != "github" ||
+		idMapper.Mapper != "github-user-attribute-mapper" {
+		t.Fatalf("github-id broker mapper = %#v", idMapper)
+	}
+	if idMapper.Config.JSONField != "id" || idMapper.Config.UserAttribute != "github_id" {
+		t.Fatal("fleet identity must key on GitHub's immutable numeric id: logins are re-registrable")
+	}
+	if idMapper.Config.SyncMode != "FORCE" {
+		t.Fatal("github_id must re-stamp at every sign-in so existing users backfill")
+	}
+	for name, raw := range mapperJSON {
+		alias, _, ok := strings.Cut(name, "--")
+		if !ok {
+			t.Fatalf("broker mapper file %q must be named <alias>--<name>.json", name)
+		}
+		if _, exists := providerJSON[alias+".json"]; !exists {
+			t.Fatalf("broker mapper file %q targets undeclared provider %q", name, alias)
+		}
+		_ = raw
+	}
+
+	var enrollment struct {
+		Name  string `json:"name"`
+		On    string `json:"on"`
+		If    string `json:"if"`
+		Steps []struct {
+			Uses string `json:"uses"`
+			With struct {
+				Group string `json:"group"`
+			} `json:"with"`
+		} `json:"steps"`
+	}
+	if err := json.Unmarshal([]byte(workflowJSON["enroll-canary-principals.json"]), &enrollment); err != nil {
+		t.Fatalf("decode enrollment workflow: %v", err)
+	}
+	if enrollment.Name != "enroll-canary-principals" || enrollment.On != "user-created" {
+		t.Fatalf("enrollment workflow = %#v", enrollment)
+	}
+	fleetOnly := regexp.MustCompile(`^has-user-attribute\(github_id:[0-9]+\)( or has-user-attribute\(github_id:[0-9]+\))*$`)
+	if !fleetOnly.MatchString(enrollment.If) {
+		t.Fatalf("enrollment condition %q must be an or-chain of numeric github_id terms and nothing else", enrollment.If)
+	}
+	if len(enrollment.Steps) != 1 || enrollment.Steps[0].Uses != "join-group" ||
+		enrollment.Steps[0].With.Group != "canary-principals" {
+		t.Fatalf("enrollment workflow steps = %#v, want exactly one join-group into canary-principals", enrollment.Steps)
+	}
+	if len(workflowJSON) != 1 {
+		t.Fatalf("realm workflows = %d files: each new workflow needs its own conformance ruling", len(workflowJSON))
 	}
 
 	// Denying the GitHub authorize prompt returns access_denied to the broker
@@ -296,6 +410,12 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 	}
 	for name, raw := range providerJSON {
 		stateFiles["providers/"+name] = raw
+	}
+	for name, raw := range mapperJSON {
+		stateFiles["provider-mappers/"+name] = raw
+	}
+	for name, raw := range workflowJSON {
+		stateFiles["workflows/"+name] = raw
 	}
 	stateNames := make([]string, 0, len(stateFiles))
 	for name := range stateFiles {
@@ -329,6 +449,16 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 		"realm reconciler must guard the flow execution independently of the flow so a run that died between the creates converges on retry")
 	assertTextContains(t, string(reconciler), `update users/profile`,
 		"realm reconciler must reconcile the user profile, which no realm update carries")
+	assertTextContains(t, string(reconciler), `for mapper in /provider-mappers/*.json`,
+		"realm reconciler must apply broker mappers from data files: no realm update or provider representation carries them")
+	assertTextContains(t, string(reconciler), `for workflow in /workflows/*.json`,
+		"realm reconciler must sync workflows from data files: they are invisible to realm import and export")
+	assertTextContains(t, string(reconciler), `create groups`,
+		"realm reconciler must converge the canary group on the live realm, which no realm update creates")
+	assertTextContains(t, string(reconciler), `\"scopes\":[\"view-members\",\"manage-members\"]`,
+		"the janitor grant must be exactly view-members and manage-members: manage-membership would open the add-then-delete escalation")
+	assertTextContains(t, string(reconciler), `permission/scope/$perm_id`,
+		"realm reconciler must rewrite the janitor grant every run so a drifted grant shape self-heals")
 	assertTextContains(t, string(reconciler), `name: KC_CLI_CLIENT_SECRET`,
 		"realm reconciler must pass its service-account secret through Keycloak CLI's environment")
 	assertTextContains(t, string(reconciler), `--client guardian-realm-reconciler`,
@@ -352,6 +482,8 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 	}
 	assertTextContains(t, string(secrets), `name: keycloak-realm-reconciler-client`,
 		"realm reconciler must have a generated steady-state client secret")
+	assertTextContains(t, string(secrets), `name: keycloak-canary-janitor-client`,
+		"canary janitor must have a generated steady-state client secret")
 	assertTextNotContains(t, string(secrets), `keycloak-admin-bootstrap`,
 		"temporary Keycloak bootstrap administrators must not be steady-state secrets")
 
