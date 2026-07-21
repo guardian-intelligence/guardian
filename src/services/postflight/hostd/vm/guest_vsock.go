@@ -345,6 +345,9 @@ func (c *guestChannel) fold(status guestproto.RunnerStatus) {
 		c.observation.RunnerExited = true
 		c.observation.ExitCode = status.ExitCode
 		c.observation.FailureReason = status.Reason
+	case guestproto.RunnerRecycleRequired:
+		c.observation.RecycleRequired = true
+		c.observation.FailureReason = status.Reason
 	case guestproto.RunnerReleased:
 		c.observation.RunnerRegistered = true
 		c.observation.HookBlocked = true
@@ -359,6 +362,10 @@ func (c *guestChannel) fold(status guestproto.RunnerStatus) {
 	case guestproto.RunnerExited:
 		c.observation.RunnerExited = true
 		c.observation.ExitCode = status.ExitCode
+	}
+	if status.Restore != nil {
+		restore := *status.Restore
+		c.observation.Restore = &restore
 	}
 	c.observation.Timing = append(c.observation.Timing, status.Timing...)
 }
@@ -382,6 +389,10 @@ func (c *guestChannel) snapshot() GuestObservation {
 	defer c.mu.Unlock()
 	copy := c.observation
 	copy.Timing = append([]guestproto.TimingPoint(nil), c.observation.Timing...)
+	if c.observation.Restore != nil {
+		restore := *c.observation.Restore
+		copy.Restore = &restore
+	}
 	if c.observation.Assignment != nil {
 		assignment := *c.observation.Assignment
 		assignment.Timing = append([]guestproto.TimingPoint(nil), c.observation.Assignment.Timing...)

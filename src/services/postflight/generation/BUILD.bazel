@@ -5,6 +5,7 @@ go_library(
     srcs = [
         "machine.go",
         "manifest.go",
+        "restore.go",
     ],
     importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/generation",
     visibility = ["//visibility:public"],

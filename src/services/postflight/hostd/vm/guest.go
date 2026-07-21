@@ -49,8 +49,10 @@ type GuestObservation struct {
 	WorkerReady bool
 	WorkerStarted bool
 	WorkerFailed bool
+	RecycleRequired bool
 	Released    bool
 	Clock       guestproto.ClockSample
+	Restore     *guestproto.RestoreStatus
 	Timing      []guestproto.TimingPoint
 	// RunnerExited: the runner finished; ExitCode is meaningful.
 	RunnerExited bool

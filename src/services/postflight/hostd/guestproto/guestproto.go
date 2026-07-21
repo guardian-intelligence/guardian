@@ -14,7 +14,7 @@ import (
 )
 
 // Version is the protocol revision a Hello announces.
-const Version = 9
+const Version = 10
 
 // WorkspaceReadyMarker is the file guestd drops at a converged workspace
 // mountpoint's root once every declared mount is in place. It is the shared
@@ -229,6 +229,10 @@ const (
 	// RunnerWorkerFailed: the trampoline could not enter the capsule or
 	// execute the official worker. The job never reached customer code.
 	RunnerWorkerFailed RunnerState = "worker-failed"
+	// RunnerRecycleRequired: restore evidence is unsafe or cleanup could not
+	// prove the capsule empty. Worker remains blocked while hostd destroys the
+	// VM; GitHub may requeue the disconnected job to another pool member.
+	RunnerRecycleRequired RunnerState = "recycle-required"
 	// RunnerReleased: the job-start hook validated the actual workflow
 	// identity and customer steps may run.
 	RunnerReleased RunnerState = "released"
@@ -243,7 +247,26 @@ type RunnerStatus struct {
 	Reason   string        `json:"reason,omitempty"`
 	Identity *JobIdentity  `json:"identity,omitempty"`
 	Clock    *ClockSample  `json:"clock,omitempty"`
+	Restore  *RestoreStatus `json:"restore,omitempty"`
 	Timing   []TimingPoint `json:"timing,omitempty"`
+}
+
+type RestoreOutcome string
+
+const (
+	RestoreNotRequested RestoreOutcome = "not-requested"
+	RestoreSucceeded    RestoreOutcome = "restored"
+	RestoreColdFallback RestoreOutcome = "cold-fallback"
+	RestoreUnsafe       RestoreOutcome = "unsafe"
+)
+
+// RestoreStatus is durable evidence about the process component selected for
+// this assignment. FailureCode is a bounded machine code, never raw CRIU text.
+type RestoreStatus struct {
+	Outcome             RestoreOutcome `json:"outcome"`
+	ProcessInvalidated  bool           `json:"process_invalidated,omitempty"`
+	FailureClass        string         `json:"failure_class,omitempty"`
+	FailureCode         string         `json:"failure_code,omitempty"`
 }
 
 // JobIdentity is the identity GitHub exposes to the synchronous runner hook.

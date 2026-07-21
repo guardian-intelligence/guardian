@@ -11,6 +11,8 @@ package vm
 import (
 	"context"
 	"errors"
+
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/guestproto"
 )
 
 // ID names one VM instance on this host.
@@ -49,6 +51,9 @@ const (
 	PhaseReady Phase = "ready"
 	// PhaseExited: the runner finished (or died); ExitCode is meaningful.
 	PhaseExited Phase = "exited"
+	// PhaseRecycleRequired means the guest kept Worker blocked because restore
+	// evidence was unsafe. The only valid action is VM destruction.
+	PhaseRecycleRequired Phase = "recycle-required"
 	// PhaseGone: the VM no longer exists.
 	PhaseGone Phase = "gone"
 )
@@ -72,6 +77,7 @@ type Status struct {
 	Assignment            Assignment
 	Clock                 ClockSample
 	Timing                []TimingPoint
+	Restore               *guestproto.RestoreStatus
 }
 
 type Assignment struct {

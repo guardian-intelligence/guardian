@@ -518,7 +518,7 @@ func TestMountConvergesThroughUdevLag(t *testing.T) {
 	}
 }
 
-func TestMountThatCannotConvergeReportsSyntheticExit(t *testing.T) {
+func TestMountThatCannotConvergeKeepsWorkerBlockedForRecycle(t *testing.T) {
 	w := newWorld(t, func(cfg *Config) { cfg.MountDeadline = 30 * time.Millisecond }, nil)
 	// No device ever appears.
 
@@ -528,14 +528,14 @@ func TestMountThatCannotConvergeReportsSyntheticExit(t *testing.T) {
 	host.expectStatus(guestproto.RunnerRegistered)
 	host.expect(guestproto.KindAssignment)
 	host.send(guestproto.Message{Kind: guestproto.KindRendezvous, Rendezvous: ptr(testRendezvous())})
-	if status := host.expectStatus(guestproto.RunnerExited); status.ExitCode != SyntheticFailureExitCode {
-		t.Fatalf("exit code %d, want the synthetic %d", status.ExitCode, SyntheticFailureExitCode)
+	status := host.expectStatus(guestproto.RunnerRecycleRequired)
+	if status.Reason == "" {
+		t.Fatal("recycle request has no diagnostic")
 	}
-	w.server.mu.Lock()
-	gateErr := w.server.gateErr
-	w.server.mu.Unlock()
-	if gateErr == nil {
-		t.Fatal("failed rendezvous did not reject Runner.Worker")
+	select {
+	case <-w.server.workerGate:
+		t.Fatal("unsafe rendezvous released Runner.Worker")
+	default:
 	}
 }
 

@@ -3,6 +3,7 @@ package generation
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"testing"
 )
 
@@ -18,6 +19,26 @@ func testManifest() Manifest {
 		Platform:     Platform{RunnerClass: RunnerClass, OperatingSystem: OperatingSystem, OperatingSystemVersion: OperatingSystemVersion, GuestImageDigest: digest, KernelDigest: digest, QEMUVersion: "11.0.2", CRIUVersion: "4.1", MachineType: "pc-q35-8.2", CPUModel: "host", CPUIDDigest: digest},
 		Confidential: ConfidentialPolicy{Technology: ConfidentialTechnology, Measurement: digest, MinimumTCB: TCB{Bootloader: 10, TEE: 1, SNP: 25, Microcode: 84}},
 		WrappedDEK:   make([]byte, 48), SignerKeyID: "generation-signer-1",
+	}
+}
+
+func TestRestoreFailurePolicy(t *testing.T) {
+	cause := errors.New("redacted CRIU failure")
+	recoverable := NewRestoreFailure(RestoreIncompatible, "kernel-feature", cause)
+	if !IsColdFallback(recoverable) {
+		t.Fatal("ordinary incompatibility did not permit cold fallback")
+	}
+	class, code := RestoreFailureDetails(recoverable)
+	if class != RestoreIncompatible || code != "kernel-feature" || !errors.Is(recoverable, cause) {
+		t.Fatalf("recoverable details = %s/%s, error = %v", class, code, recoverable)
+	}
+	for _, class := range []RestoreFailureClass{RestoreIntegrity, RestoreCleanup} {
+		if IsColdFallback(NewRestoreFailure(class, "unsafe", cause)) {
+			t.Fatalf("%s failure permitted cold fallback", class)
+		}
+	}
+	if class, code := RestoreFailureDetails(cause); class != RestoreCleanup || code != "unclassified" {
+		t.Fatalf("untyped failure = %s/%s", class, code)
 	}
 }
 

@@ -759,7 +759,14 @@ func (q *QEMU) observeLocked(ctx context.Context, id ID) (Status, bool, error) {
 		q.recordTimingOnce(id, "host_assignment_observed")
 		status.Assignment = assignment(*observation.Assignment)
 	}
+	if observation.Restore != nil {
+		restore := *observation.Restore
+		status.Restore = &restore
+	}
 	switch {
+	case observation.RecycleRequired:
+		status.Phase = PhaseRecycleRequired
+		status.FailureReason = observation.FailureReason
 	case observation.RunnerExited:
 		status.Phase = PhaseExited
 		status.ExitCode = observation.ExitCode

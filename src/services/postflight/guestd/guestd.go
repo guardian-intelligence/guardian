@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/guardian-intelligence/guardian/src/services/postflight/generation"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/guestproto"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vsock"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/timing"
@@ -364,14 +365,13 @@ func (s *Server) bindGeneration(rendezvous guestproto.Rendezvous) {
 		})
 		return point
 	}
-	fail := func(stage string, err error) {
+	recycle := func(stage string, err error, restore *guestproto.RestoreStatus) {
 		cancel()
 		s.cfg.Logger.Error(stage, "lease", rendezvous.Lease, "err", err)
-		s.failWorkerGate(err)
-		failed := guestTiming(s.cfg.Timing.Point("generation_restore_failed"))
+		failed := guestTiming(s.cfg.Timing.Point("generation_recycle_required"))
 		s.sendStatus(guestproto.RunnerStatus{
-			State: guestproto.RunnerExited, ExitCode: SyntheticFailureExitCode,
-			Reason: err.Error(), Timing: []guestproto.TimingPoint{failed},
+			State: guestproto.RunnerRecycleRequired, Reason: err.Error(), Restore: restore,
+			Timing: []guestproto.TimingPoint{failed},
 		})
 	}
 	received := emit("guest_rendezvous_received")
@@ -379,31 +379,51 @@ func (s *Server) bindGeneration(rendezvous guestproto.Rendezvous) {
 	s.cfg.Logger.Info("rendezvous timing", "event", received.Event, "monotonic_ns", received.MonotonicNS)
 	err := s.convergeMounts(ctx, rendezvous.Mounts)
 	if err != nil {
-		fail("mount convergence failed", err)
+		recycle("mount convergence failed", err, nil)
 		return
 	}
 	emit("mount_convergence_completed")
 	restored := false
+	restoreStatus := &guestproto.RestoreStatus{Outcome: guestproto.RestoreNotRequested}
 	if rendezvous.Checkpoint != nil {
 		emit("criu_restore_started")
 		if s.cfg.Checkpoints == nil {
 			err := errors.New("process checkpoint requested but guest support is disabled")
-			fail("checkpoint restore failed", err)
+			recycle("checkpoint restore failed", err, &guestproto.RestoreStatus{
+				Outcome: guestproto.RestoreUnsafe, FailureClass: string(generation.RestoreCleanup),
+				FailureCode: "checkpoint-support-disabled",
+			})
 			return
 		}
 		checkpoint := rendezvous.Checkpoint
-		if _, err := s.cfg.Checkpoints.restoreObserved(ctx, checkpoint.ImagesDir, checkpoint.ExpectedDigest, checkpoint.ExpectedVersion, checkpointMounts(checkpoint.ExternalMounts), func(event string) {
+		result, err := s.cfg.Checkpoints.RestoreOrCold(ctx, checkpoint.ImagesDir, checkpoint.ExpectedDigest, checkpoint.ExpectedVersion, checkpointMounts(checkpoint.ExternalMounts), func(event string) {
 			emit(event)
-		}); err != nil {
-			fail("checkpoint restore failed", err)
+		})
+		if err != nil {
+			class, code := generation.RestoreFailureDetails(err)
+			recycle("checkpoint restore failed", err, &guestproto.RestoreStatus{
+				Outcome: guestproto.RestoreUnsafe, ProcessInvalidated: true,
+				FailureClass: string(class), FailureCode: code,
+			})
 			return
 		}
-		restored = true
-		emit("criu_restore_completed")
+		restored = result.Restored
+		if result.Restored {
+			restoreStatus = &guestproto.RestoreStatus{Outcome: guestproto.RestoreSucceeded}
+			emit("criu_restore_completed")
+		} else {
+			restoreStatus = &guestproto.RestoreStatus{
+				Outcome: guestproto.RestoreColdFallback, ProcessInvalidated: result.ProcessInvalidated,
+				FailureClass: string(result.FailureClass), FailureCode: result.FailureCode,
+			}
+		}
 	} else if s.cfg.Checkpoints != nil {
 		emit("cold_capsule_start_started")
 		if err := s.cfg.Checkpoints.Capsules.Start(ctx); err != nil {
-			fail("cold capsule start failed", err)
+			recycle("cold capsule start failed", err, &guestproto.RestoreStatus{
+				Outcome: guestproto.RestoreUnsafe, FailureClass: string(generation.RestoreCleanup),
+				FailureCode: "cold-capsule-start",
+			})
 			return
 		}
 		emit("cold_capsule_start_completed")
@@ -417,7 +437,7 @@ func (s *Server) bindGeneration(rendezvous guestproto.Rendezvous) {
 	s.mu.Unlock()
 	ready := guestTiming(s.cfg.Timing.Point("generation_restore_completed"))
 	s.sendStatus(guestproto.RunnerStatus{
-		State: guestproto.RunnerMountsReady, Clock: &clock,
+		State: guestproto.RunnerMountsReady, Clock: &clock, Restore: restoreStatus,
 		Timing: []guestproto.TimingPoint{ready},
 	})
 }

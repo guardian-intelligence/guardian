@@ -15,6 +15,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
+
+	"github.com/guardian-intelligence/guardian/src/services/postflight/generation"
+	"golang.org/x/sys/unix"
 )
 
 // CRIU is the one checkpoint implementation for the initial confidential
@@ -128,33 +132,33 @@ func (c CRIU) Restore(ctx context.Context, capsule Capsule, expectedDigest, expe
 
 func (c CRIU) restoreObserved(ctx context.Context, capsule Capsule, expectedDigest, expectedVersion string, observer checkpointObserver) (int, error) {
 	if err := c.validate(capsule, false); err != nil {
-		return 0, err
+		return 0, generation.NewRestoreFailure(generation.RestoreIntegrity, "invalid-restore-request", err)
 	}
 	observeCheckpoint(observer, "restore_version_started")
 	version, err := c.Version(ctx)
 	if err != nil {
-		return 0, err
+		return 0, generation.NewRestoreFailure(generation.RestoreIncompatible, "criu-unavailable", err)
 	}
 	if version != expectedVersion {
-		return 0, fmt.Errorf("guestd: CRIU version %q does not match checkpoint version %q", version, expectedVersion)
+		return 0, generation.NewRestoreFailure(generation.RestoreIncompatible, "criu-version", fmt.Errorf("guestd: CRIU version %q does not match checkpoint version %q", version, expectedVersion))
 	}
 	observeCheckpoint(observer, "restore_version_completed")
 	observeCheckpoint(observer, "restore_digest_started")
 	digest, err := digestDirectory(capsule.ImagesDir)
 	if err != nil {
-		return 0, err
+		return 0, generation.NewRestoreFailure(generation.RestoreIncompatible, "artifact-unreadable", err)
 	}
 	if digest != expectedDigest {
-		return 0, fmt.Errorf("guestd: CRIU artifact digest %s does not match %s", digest, expectedDigest)
+		return 0, generation.NewRestoreFailure(generation.RestoreIntegrity, "artifact-digest", fmt.Errorf("guestd: CRIU artifact digest %s does not match %s", digest, expectedDigest))
 	}
 	observeCheckpoint(observer, "restore_digest_completed")
 	workDir, err := c.workDir("restore")
 	if err != nil {
-		return 0, err
+		return 0, generation.NewRestoreFailure(generation.RestoreIncompatible, "restore-workdir", err)
 	}
 	pidfile := filepath.Join(workDir, "root.pid")
 	if err := os.Remove(pidfile); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return 0, err
+		return 0, generation.NewRestoreFailure(generation.RestoreIncompatible, "restore-pidfile", err)
 	}
 	args := []string{
 		"restore", "--images-dir", capsule.ImagesDir,
@@ -171,16 +175,16 @@ func (c CRIU) restoreObserved(ctx context.Context, capsule Capsule, expectedDige
 	}
 	observeCheckpoint(observer, "restore_criu_started")
 	if _, err := c.runRestore(ctx, args...); err != nil {
-		return 0, c.restoreFailure(workDir, capsule.ExternalMounts, err)
+		return 0, generation.NewRestoreFailure(generation.RestoreIncompatible, "criu-rejected", c.restoreFailure(workDir, capsule.ExternalMounts, err))
 	}
 	observeCheckpoint(observer, "restore_criu_completed")
 	raw, err := os.ReadFile(pidfile)
 	if err != nil {
-		return 0, fmt.Errorf("guestd: reading restored root pid: %w", err)
+		return 0, generation.NewRestoreFailure(generation.RestoreCleanup, "restored-pid-missing", fmt.Errorf("guestd: reading restored root pid: %w", err))
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
 	if err != nil || pid <= 1 {
-		return 0, errors.New("guestd: CRIU returned an invalid root pid")
+		return 0, generation.NewRestoreFailure(generation.RestoreCleanup, "restored-pid-invalid", errors.New("guestd: CRIU returned an invalid root pid"))
 	}
 	return pid, nil
 }
@@ -336,18 +340,26 @@ func (c CRIU) runRestore(ctx context.Context, args ...string) (string, error) {
 	return output, nil
 }
 
-// RunRestorePrivate gives CRIU a disposable copy of the guest mount table.
-// Its mount reconstruction may then detach inherited system mounts without
-// altering the base VM namespace that keeps guestd alive.
-func RunRestorePrivate(ctx context.Context, path string, args ...string) (string, error) {
-	commandArgs := []string{"--mount", "--propagation", "private", "--", path}
-	commandArgs = append(commandArgs, args...)
-	cmd := exec.CommandContext(ctx, "/usr/bin/unshare", commandArgs...)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("private mount restore failed: %w", err)
+// RunRestorePrivateInCgroup gives CRIU a disposable copy of the mount table
+// and atomically starts it in the capsule cgroup. Restored descendants inherit
+// both boundaries, so a failed attempt has one externally provable kill set.
+func RunRestorePrivateInCgroup(cgroupPath string) func(context.Context, string, ...string) (string, error) {
+	return func(ctx context.Context, path string, args ...string) (string, error) {
+		fd, err := unix.Open(cgroupPath, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+		if err != nil {
+			return "", fmt.Errorf("opening restore cgroup: %w", err)
+		}
+		defer unix.Close(fd)
+		commandArgs := []string{"--mount", "--propagation", "private", "--", path}
+		commandArgs = append(commandArgs, args...)
+		cmd := exec.CommandContext(ctx, "/usr/bin/unshare", commandArgs...)
+		cmd.SysProcAttr = &syscall.SysProcAttr{UseCgroupFD: true, CgroupFD: fd}
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return "", fmt.Errorf("private mount restore failed: %w", err)
+		}
+		return string(output), nil
 	}
-	return string(output), nil
 }
 
 func sortedMounts(mounts []ExternalMount) []ExternalMount {

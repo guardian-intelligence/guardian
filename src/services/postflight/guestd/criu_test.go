@@ -2,12 +2,33 @@ package guestd
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/guardian-intelligence/guardian/src/services/postflight/generation"
 )
+
+type fakeCapsules struct {
+	journal  []string
+	resetErr error
+	startErr error
+}
+
+func (f *fakeCapsules) Start(context.Context) error {
+	f.journal = append(f.journal, "start")
+	return f.startErr
+}
+func (f *fakeCapsules) Reset(context.Context) error {
+	f.journal = append(f.journal, "reset")
+	return f.resetErr
+}
+func (f *fakeCapsules) UseRestored(context.Context, int) error { return nil }
+func (f *fakeCapsules) RootPID() (int, error)                 { return 123, nil }
+func (f *fakeCapsules) PrepareForCheckpoint(context.Context) error { return nil }
 
 func TestCRIUDumpAndRestoreContract(t *testing.T) {
 	root := t.TempDir()
@@ -109,6 +130,70 @@ esac
 	}
 	if _, err := engine.Restore(context.Background(), capsule, artifact.Digest, "Version: 4.1"); err == nil || !strings.Contains(err.Error(), "does not match checkpoint version") {
 		t.Fatalf("mismatched CRIU version error = %v", err)
+	}
+}
+
+func TestProcessRestoreFallsBackColdOnlyAfterCleanup(t *testing.T) {
+	root := t.TempDir()
+	imagesRoot := filepath.Join(root, "encrypted")
+	images := filepath.Join(imagesRoot, "images")
+	if err := os.MkdirAll(images, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(images, "inventory.img"), []byte("image"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	versionBin := filepath.Join(root, "criu")
+	if err := os.WriteFile(versionBin, []byte("#!/bin/sh\necho 'Version: 4.2'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := digestDirectory(images)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capsules := &fakeCapsules{}
+	checkpoints := ProcessCheckpoints{
+		Capsules: capsules, ImagesRoot: imagesRoot,
+		CRIU: CRIU{
+			Path: versionBin, ImagesRoot: imagesRoot, WorkRoot: filepath.Join(imagesRoot, "work"),
+			RestoreRun: func(context.Context, string, ...string) (string, error) {
+				return "", errors.New("unsupported descriptor")
+			},
+		},
+	}
+	result, err := checkpoints.RestoreOrCold(context.Background(), images, digest, "Version: 4.2", []ExternalMount{{Key: "workspace", Path: "/work"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.ColdFallback || !result.ProcessInvalidated || result.FailureCode != "criu-rejected" {
+		t.Fatalf("fallback result = %+v", result)
+	}
+	if strings.Join(capsules.journal, ",") != "reset,start" {
+		t.Fatalf("capsule operations = %v", capsules.journal)
+	}
+
+	capsules.journal = nil
+	_, err = checkpoints.RestoreOrCold(context.Background(), images, "sha256:"+strings.Repeat("0", 64), "Version: 4.2", []ExternalMount{{Key: "workspace", Path: "/work"}}, nil)
+	class, code := generation.RestoreFailureDetails(err)
+	if class != generation.RestoreIntegrity || code != "artifact-digest" {
+		t.Fatalf("integrity result = %s/%s: %v", class, code, err)
+	}
+	if strings.Join(capsules.journal, ",") != "reset" {
+		t.Fatalf("integrity failure capsule operations = %v", capsules.journal)
+	}
+}
+
+func TestProcessRestoreCleanupFailureNeverStartsCold(t *testing.T) {
+	capsules := &fakeCapsules{resetErr: errors.New("still populated")}
+	checkpoints := ProcessCheckpoints{Capsules: capsules}
+	checkpoints.CRIU = CRIU{Path: "/missing", ImagesRoot: "/encrypted", WorkRoot: "/encrypted/work"}
+	_, err := checkpoints.RestoreOrCold(context.Background(), "/encrypted/images", "sha256:"+strings.Repeat("0", 64), "Version: 4.2", []ExternalMount{{Key: "workspace", Path: "/work"}}, nil)
+	class, code := generation.RestoreFailureDetails(err)
+	if class != generation.RestoreCleanup || code != "capsule-not-empty" {
+		t.Fatalf("cleanup result = %s/%s: %v", class, code, err)
+	}
+	if strings.Join(capsules.journal, ",") != "reset" {
+		t.Fatalf("cleanup failure capsule operations = %v", capsules.journal)
 	}
 }
 

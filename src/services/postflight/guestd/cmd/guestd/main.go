@@ -77,6 +77,7 @@ func run(logger *slog.Logger) error {
 		InitPath:   "/usr/bin/tini",
 		SleepPath:  "/usr/bin/sleep",
 		RunnerRoot: guestd.RunnerRoot,
+		CgroupPath: "/sys/fs/cgroup/postflight/capsule",
 	}
 	checkpoints := &guestd.ProcessCheckpoints{
 		Capsules:   capsules,
@@ -84,7 +85,7 @@ func run(logger *slog.Logger) error {
 		CRIU: guestd.CRIU{
 			Path: "/usr/sbin/criu", ImagesRoot: guestd.ProcessMountpoint,
 			WorkRoot:   guestd.ProcessMountpoint + "/work",
-			RestoreRun: guestd.RunRestorePrivate,
+			RestoreRun: guestd.RunRestorePrivateInCgroup(capsules.CgroupPath),
 		},
 	}
 	runner, err := user.Lookup("runner")
