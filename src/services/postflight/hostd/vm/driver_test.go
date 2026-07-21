@@ -827,7 +827,10 @@ func TestStatusPhaseLadder(t *testing.T) {
 		Identity: guestproto.JobIdentity{RunID: "1", RunAttempt: 1, RunnerName: "lease-1", Repository: "acme/widget"},
 	})
 	expect(PhaseHookBlocked, 0)
-	driver.guest.set("vm-a", GuestObservation{Hello: true, RunnerExited: true, ExitCode: 7})
+	driver.guest.set("vm-a", GuestObservation{
+		Hello: true, Released: true, RunnerExited: true, ExitCode: 7,
+		FailureReason: "worker transport closed",
+	})
 	expect(PhaseExited, 7)
 
 	status, err := driver.q.Status(ctx, "vm-a")
@@ -836,6 +839,9 @@ func TestStatusPhaseLadder(t *testing.T) {
 	}
 	if status.Lease != "lease-1" {
 		t.Fatalf("lease %q, want lease-1", status.Lease)
+	}
+	if !status.CustomerStepsReleased || status.FailureReason != "worker transport closed" {
+		t.Fatalf("exit lifecycle evidence = %+v", status)
 	}
 }
 

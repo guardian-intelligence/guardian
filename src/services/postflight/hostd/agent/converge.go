@@ -542,11 +542,19 @@ func (a *Agent) materialize(ctx context.Context, record *lease, execution syncpr
 
 func (a *Agent) finishRunner(ctx context.Context, record *lease, status vm.Status) {
 	record.exit = status.ExitCode
-	record.enter(syncproto.StateExited, a.now())
 	a.appendTrace(record, "runner_exit_observed", func(event *traceEvent) {
 		traceIdentity(record, event)
 		event.GenerationSet = generationSet(record)
 	})
+	if !status.CustomerStepsReleased {
+		reason := "runner exited before the job-start hook released customer steps"
+		if status.FailureReason != "" {
+			reason += ": " + status.FailureReason
+		}
+		a.failLease(ctx, record, reason)
+		return
+	}
+	record.enter(syncproto.StateExited, a.now())
 	if record.device != "" {
 		a.appendTrace(record, "checkpoint_started", func(event *traceEvent) {
 			traceIdentity(record, event)

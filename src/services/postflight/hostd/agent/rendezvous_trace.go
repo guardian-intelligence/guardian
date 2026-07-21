@@ -10,7 +10,7 @@ import (
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vm"
 )
 
-const rendezvousTraceSchema = 4
+const rendezvousTraceSchema = 5
 
 type traceEvent struct {
 	SchemaVersion int       `json:"schema_version"`

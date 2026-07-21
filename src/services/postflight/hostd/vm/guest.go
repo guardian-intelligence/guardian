@@ -47,10 +47,13 @@ type GuestObservation struct {
 	// once MountsReady is true.
 	MountsReady bool
 	WorkerReady bool
+	WorkerStarted bool
+	WorkerFailed bool
 	Released    bool
 	Clock       guestproto.ClockSample
 	Timing      []guestproto.TimingPoint
 	// RunnerExited: the runner finished; ExitCode is meaningful.
 	RunnerExited bool
 	ExitCode     int
+	FailureReason string
 }

@@ -402,6 +402,31 @@ func TestExitQuiescesBeforeDestroy(t *testing.T) {
 	}
 }
 
+func TestExitBeforeCustomerStepsSkipsCheckpointAndSeal(t *testing.T) {
+	world := NewWorld(t, slots(2))
+	spec := runLease("l1")
+	vmID := driveToHookBlocked(t, world, spec)
+
+	world.VMs.MarkExited(vm.ID(vmID), 0)
+	world.Tick()
+
+	snapshot := world.Lease("l1")
+	if snapshot.State != syncproto.StateFailed ||
+		!strings.Contains(snapshot.Reason, "before the job-start hook released customer steps") {
+		t.Fatalf("early worker exit = %+v, want failed without customer release", snapshot)
+	}
+	for _, entry := range world.VMs.Journal {
+		if entry == "quiesce "+vmID {
+			t.Fatalf("early worker exit was checkpointed: %v", world.VMs.Journal)
+		}
+	}
+	for _, entry := range world.Zvols.Journal {
+		if strings.HasPrefix(entry, "seal") {
+			t.Fatalf("early worker exit was sealed: %v", world.Zvols.Journal)
+		}
+	}
+}
+
 // TestQuiesceFailureFailsTheLease: an unquiesced workspace is ambiguous —
 // dirty pages may never have reached the zvol — so the lease fails (which
 // skips any seal) and the VM is still destroyed.

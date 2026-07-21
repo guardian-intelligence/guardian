@@ -95,6 +95,7 @@ sudo mount /dev/zvol/tank/postflight/verify-part1 /mnt
 cat /mnt/etc/postflight-image-release          # the image id build.sh printed
 cat /mnt/opt/actions-runner/.disableupdate     # exists, empty
 test -x /mnt/usr/local/bin/guestd
+test "$(stat -c '%U:%G %a' /mnt/opt/actions-runner/bin/Runner.Worker)" = "root:root 4755"
 test -L /mnt/etc/systemd/system/multi-user.target.wants/guestd.service
 /mnt/usr/local/bin/node --version
 test ! -e /mnt/usr/sbin/sshd && test ! -e /mnt/etc/cloud && echo "no ssh server, no cloud-init"

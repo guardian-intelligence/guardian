@@ -738,6 +738,7 @@ func (q *QEMU) observeLocked(ctx context.Context, id ID) (Status, bool, error) {
 	case observation.RunnerExited:
 		status.Phase = PhaseExited
 		status.ExitCode = observation.ExitCode
+		status.FailureReason = observation.FailureReason
 	case observation.Released:
 		status.Phase = PhaseReady
 		status.Identity = JobIdentity{
@@ -773,6 +774,7 @@ func (q *QEMU) observeLocked(ctx context.Context, id ID) (Status, bool, error) {
 	}
 	status.Timing = append(status.Timing, q.timings[id]...)
 	status.Timing = append(status.Timing, timingPoints(observation.Timing)...)
+	status.CustomerStepsReleased = observation.Released
 	return status, false, nil
 }
 

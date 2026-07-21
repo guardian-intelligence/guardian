@@ -84,7 +84,8 @@ func validRendezvousTrace(warm, full bool) []rendezvousEvent {
 	for _, item := range [][2]string{
 		{eventGenerationRestoreCompleted, "guestd"}, {eventMountsReady, "hostd-agent"},
 		{eventClockChecked, "hostd-agent"}, {eventWorkerAuthorizationSent, "hostd-agent"},
-		{eventRunnerWorkerReleased, "guestd"}, {eventJobHookValidated, "guestd"},
+		{eventRunnerWorkerReleased, "guestd"}, {eventRunnerWorkerExecStarted, "guestd"},
+		{eventJobHookValidated, "guestd"},
 		{eventCustomerStepsReleased, "guestd"}, {eventJobHookReleased, "hostd-agent"},
 	} {
 		b.add(item[0], item[1])
@@ -293,7 +294,7 @@ func TestUnsupportedWorkloadRequiresBothSupportedFallbacks(t *testing.T) {
 }
 
 func TestTraceReaderRejectsUnknownFieldsAndMultipleValues(t *testing.T) {
-	base := `{"schema_version":4,"run_id":"r","event":"classified","seq":1,"source":"collector","boot_id":"boot","origin_seq":1,"monotonic_ns":1,"wall_time":"2026-07-21T12:00:00Z"`
+	base := `{"schema_version":5,"run_id":"r","event":"classified","seq":1,"source":"collector","boot_id":"boot","origin_seq":1,"monotonic_ns":1,"wall_time":"2026-07-21T12:00:00Z"`
 	if _, err := readRendezvousTrace(strings.NewReader(base + `,"surprise":true}`)); err == nil {
 		t.Fatal("unknown trace field was accepted")
 	}
