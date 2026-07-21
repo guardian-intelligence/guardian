@@ -17,7 +17,16 @@ connections to a Guardian account; they are not the account model.
   authorization request pins the GitHub broker with `kc_idp_hint`, first
   broker login creates the Guardian account with no user-facing steps and
   fails closed on any collision, and sign-out is RP-initiated with
-  `id_token_hint` so no confirmation page appears.
+  `id_token_hint` so no confirmation page appears. A sign-out without a
+  recoverable ID token (expired or unsealable session cookie) clears the
+  local session and returns to Postflight without visiting Keycloak, because
+  Keycloak demands a confirmation page when the hint is missing.
+- Known phase-1 exception: denying the GitHub authorize prompt returns
+  `error=access_denied` to the broker endpoint, and Keycloak answers by
+  rendering its own login page — a dead end, since the realm has no password
+  or registration path. The realm conformance test tracks this exception;
+  closing it requires a realm login theme (or equivalent) that returns the
+  user to Postflight.
 - Every web relying party is confidential, uses authorization code flow with
   PKCE S256, an exact callback, a server-side token exchange, and an encrypted
   HttpOnly `Secure` `SameSite=Lax` session cookie.
@@ -78,9 +87,14 @@ for the browser procedures.
    repository action additionally calls the Authorization API with the
    Guardian subject and typed resource permission.
 5. Sign-out is RP-initiated: the logout endpoint refuses cross-site
-   triggers, then sends the stored ID token as `id_token_hint` with the
-   registered `post_logout_redirect_uri` and `client_id`, so Keycloak ends
-   the SSO session and returns to Postflight without a confirmation page.
+   triggers (by Fetch Metadata, falling back to an Origin/Referer
+   same-origin check for browsers that send neither), then sends the stored
+   ID token as `id_token_hint` with the registered
+   `post_logout_redirect_uri` and `client_id`, so Keycloak ends the SSO
+   session and returns to Postflight without a confirmation page. When no
+   ID token is recoverable, the endpoint clears the local session and
+   returns straight to Postflight; the orphaned SSO session ends at its
+   idle timeout.
 
 ## Realm reconciliation
 
@@ -93,7 +107,9 @@ users, delete other realms, or administer the master realm.
 A realm update binds authentication flows by alias but never creates them,
 and no realm update carries the user profile, so the reconciler asserts the
 headless `broker-create-user-only` flow before the provider loop binds it and
-applies the user profile through its dedicated endpoint. The user profile
+applies the user profile through its dedicated endpoint. The flow and its
+execution are guarded independently, so a run that dies between the two
+creates converges on retry instead of wedging on the half-made flow. The user profile
 keeps `firstName` and `lastName` optional: a brokered GitHub account has no
 guaranteed name, and a required name would let Keycloak demand one on its own
 pages.

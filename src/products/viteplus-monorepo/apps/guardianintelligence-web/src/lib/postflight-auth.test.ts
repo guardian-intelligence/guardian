@@ -198,4 +198,39 @@ describe("Postflight OIDC BFF", () => {
     expect(response.status).toBe(403);
     expect(response.headers.get("set-cookie")).toBeNull();
   });
+
+  it("refuses a cross-origin logout navigation from a browser without Fetch Metadata", async () => {
+    const response = await endPostflightSession(
+      new Request(`${publicURL}/postflight/auth/logout`, {
+        headers: { referer: "https://evil.example/logout-trap" },
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("accepts a same-origin logout navigation from a browser without Fetch Metadata", async () => {
+    const response = await endPostflightSession(
+      new Request(`${publicURL}/postflight/auth/logout`, {
+        headers: { referer: `${publicURL}/postflight/console` },
+      }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(`${publicURL}/postflight`);
+  });
+
+  it("signs out locally without visiting Keycloak when no ID token is recoverable", async () => {
+    const response = await endPostflightSession(
+      new Request(`${publicURL}/postflight/auth/logout`, {
+        headers: { cookie: `${SESSION_COOKIE}=not-a-sealed-session` },
+      }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(`${publicURL}/postflight`);
+    expect(response.headers.get("set-cookie")).toContain(`${SESSION_COOKIE}=`);
+    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+  });
 });

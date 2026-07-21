@@ -39,6 +39,7 @@ go_test(
         "//:.aspect/tasks/infra.axl",
         "//:MODULE.bazel",
         "//docs:openbao-design.md",
+        "//docs:sign-in-with-guardian.md",
         "//src/infrastructure/analytics:events_table_sql",
         "//src/infrastructure/base:kustomization",
         "//src/infrastructure/base/admission:manifests",

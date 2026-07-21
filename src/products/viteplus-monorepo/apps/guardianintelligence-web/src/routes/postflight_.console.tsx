@@ -66,7 +66,7 @@ function PostflightConsolePage() {
   );
 }
 
-export const Route = createFileRoute("/postflight/console")({
+export const Route = createFileRoute("/postflight_/console")({
   component: PostflightConsolePage,
   loader: async () => {
     const session = await consoleSession();

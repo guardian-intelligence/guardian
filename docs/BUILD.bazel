@@ -4,6 +4,7 @@ exports_files([
     "openbao-design.md",
     "openbao-residue-inventory.md",
     "payments.md",
+    "sign-in-with-guardian.md",
     "supply-chain-design.md",
     "tigerbeetle-financial-model.md",
     "tigerbeetle.md",

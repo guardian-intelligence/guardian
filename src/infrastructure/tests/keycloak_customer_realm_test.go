@@ -268,6 +268,23 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 		t.Fatal("production GitHub provider differs from the OAuth App registry")
 	}
 
+	// Denying the GitHub authorize prompt returns access_denied to the broker
+	// endpoint; Keycloak forwards the error into the browser flow, which
+	// skips the kc_idp_hint redirector and renders Keycloak's own login page
+	// as a dead end. The canary only ever grants, so the gap is tracked here:
+	// it must stay documented until a realm login theme (or equivalent)
+	// closes it, and shipping that theme must retire both the documented
+	// exception and this probe.
+	signInDoc, err := os.ReadFile(runfilePath("docs/sign-in-with-guardian.md"))
+	if err != nil {
+		t.Fatalf("read sign-in doc: %v", err)
+	}
+	assertTextContains(t, string(signInDoc), "error=access_denied",
+		"the GitHub deny dead end is an accepted phase-1 gap and must stay documented until it is closed")
+	if strings.Contains(realmJSON, "loginTheme") {
+		t.Fatal("the realm now ships a login theme: close the GitHub-deny dead end and remove the documented phase-1 exception")
+	}
+
 	stateFiles := map[string]string{
 		"realm/" + realmDataKey: realmJSON,
 	}
@@ -308,6 +325,8 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 		"realm reconciler must reconcile providers from data files")
 	assertTextContains(t, string(reconciler), `create authentication/flows`,
 		"realm reconciler must create the headless first-broker-login flow before the provider loop binds it")
+	assertTextContains(t, string(reconciler), `if test -z "$exec_id"`,
+		"realm reconciler must guard the flow execution independently of the flow so a run that died between the creates converges on retry")
 	assertTextContains(t, string(reconciler), `update users/profile`,
 		"realm reconciler must reconcile the user profile, which no realm update carries")
 	assertTextContains(t, string(reconciler), `name: KC_CLI_CLIENT_SECRET`,
