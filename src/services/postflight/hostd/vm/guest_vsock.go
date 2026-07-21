@@ -320,6 +320,13 @@ func (c *guestChannel) fold(status guestproto.RunnerStatus) {
 		if status.Clock != nil {
 			c.observation.Clock = *status.Clock
 		}
+	case guestproto.RunnerWorkerStarted:
+		c.observation.WorkerStarted = true
+	case guestproto.RunnerWorkerFailed:
+		c.observation.WorkerFailed = true
+		c.observation.RunnerExited = true
+		c.observation.ExitCode = status.ExitCode
+		c.observation.FailureReason = status.Reason
 	case guestproto.RunnerReleased:
 		c.observation.RunnerRegistered = true
 		c.observation.HookBlocked = true

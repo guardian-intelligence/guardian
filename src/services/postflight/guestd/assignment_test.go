@@ -122,10 +122,39 @@ func TestValidateAssignmentRequiresExactIdentity(t *testing.T) {
 }
 
 func TestRunnerWorkerInvocationContract(t *testing.T) {
-	if !IsRunnerWorkerExec([]string{"/opt/actions-runner/bin/Runner.Worker", "spawnclient", "1", "2"}) {
+	if !IsRunnerWorkerExec([]string{"/opt/actions-runner/bin/Runner.Worker", "spawnclient", "10", "11"}) {
 		t.Fatal("official spawnclient invocation was not detected")
 	}
-	if IsRunnerWorkerExec([]string{"/opt/actions-runner/bin/Runner.Worker", "run"}) {
-		t.Fatal("unknown worker invocation was accepted")
+	for _, args := range [][]string{
+		{"/opt/actions-runner/bin/Runner.Worker", "run"},
+		{"/opt/actions-runner/bin/Runner.Worker", "spawnclient", "1"},
+		{"/opt/actions-runner/bin/Runner.Worker", "spawnclient", "1", "2", "3"},
+		{"/opt/actions-runner/bin/Runner.Worker", "spawnclient", "not-a-fd", "2"},
+	} {
+		if IsRunnerWorkerExec(args) {
+			t.Fatalf("unsafe worker invocation was accepted: %q", args)
+		}
+	}
+}
+
+func TestRunnerWorkerStatusReportsStartAndFailure(t *testing.T) {
+	recorder, err := timing.New("guestd-test", "boot-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := &guestproto.JobIdentity{RunID: "42", RunAttempt: 1, RunnerName: "runner-2"}
+	server := &Server{
+		cfg: Config{Timing: recorder, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))},
+		authorized: &guestproto.Authorize{Identity: identity},
+	}
+	if reply := server.runnerWorkerStarting(); !reply.Ready {
+		t.Fatalf("worker start reply = %#v", reply)
+	}
+	if reply := server.runnerWorkerFailed("nsenter failed"); !reply.Ready {
+		t.Fatalf("worker failure reply = %#v", reply)
+	}
+	if len(server.statuses) != 2 || server.statuses[0].State != guestproto.RunnerWorkerStarted ||
+		server.statuses[1].State != guestproto.RunnerWorkerFailed || server.statuses[1].Reason != "nsenter failed" {
+		t.Fatalf("worker statuses = %#v", server.statuses)
 	}
 }

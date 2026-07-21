@@ -43,6 +43,8 @@ func TestRoundTrip(t *testing.T) {
 			Clock: &ClockSample{UnixNS: 1, Synchronized: true, Clocksource: "kvm-clock"},
 		}},
 		{Kind: KindRunnerStatus, RunnerStatus: &RunnerStatus{State: RunnerReleased}},
+		{Kind: KindRunnerStatus, RunnerStatus: &RunnerStatus{State: RunnerWorkerStarted}},
+		{Kind: KindRunnerStatus, RunnerStatus: &RunnerStatus{State: RunnerWorkerFailed, ExitCode: 1, Reason: "nsenter failed"}},
 		{Kind: KindRunnerStatus, RunnerStatus: &RunnerStatus{State: RunnerExited, ExitCode: 42}},
 		{Kind: KindQuiesce, Quiesce: &Quiesce{Mountpoints: []string{"/opt/actions-runner/_work/widget/widget"}}},
 		{Kind: KindQuiesced, Quiesced: &Quiesced{}},

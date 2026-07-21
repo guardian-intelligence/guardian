@@ -542,11 +542,19 @@ func (a *Agent) materialize(ctx context.Context, record *lease, execution syncpr
 
 func (a *Agent) finishRunner(ctx context.Context, record *lease, status vm.Status) {
 	record.exit = status.ExitCode
-	record.enter(syncproto.StateExited, a.now())
 	a.appendTrace(record, "runner_exit_observed", func(event *traceEvent) {
 		traceIdentity(record, event)
 		event.GenerationSet = generationSet(record)
 	})
+	if !status.CustomerStepsReleased {
+		reason := "runner exited before the job-start hook released customer steps"
+		if status.FailureReason != "" {
+			reason += ": " + status.FailureReason
+		}
+		a.failLease(ctx, record, reason)
+		return
+	}
+	record.enter(syncproto.StateExited, a.now())
 	if record.device != "" {
 		a.appendTrace(record, "checkpoint_started", func(event *traceEvent) {
 			traceIdentity(record, event)
@@ -601,7 +609,24 @@ func (a *Agent) cancelLease(ctx context.Context, record *lease) {
 }
 
 func (a *Agent) failLease(ctx context.Context, record *lease, reason string) {
+	a.appendTrace(record, "lease_failed", func(event *traceEvent) {
+		traceIdentity(record, event)
+		event.GenerationSet = generationSet(record)
+		event.FailureReason = reason
+	})
+	destroyedVMID := record.vmID
+	if destroyedVMID != "" {
+		a.appendTrace(record, "vm_destroy_started", func(event *traceEvent) {
+			traceIdentity(record, event)
+		})
+	}
 	a.destroyLeaseVM(ctx, record)
+	if destroyedVMID != "" && record.vmID == "" {
+		a.appendTrace(record, "vm_destroy_completed", func(event *traceEvent) {
+			traceIdentity(record, event)
+			event.VMID = destroyedVMID
+		})
+	}
 	record.reason = reason
 	record.enter(syncproto.StateFailed, a.now())
 	a.metrics.FailedLeases.Add(1)

@@ -14,7 +14,7 @@ import (
 )
 
 // Version is the protocol revision a Hello announces.
-const Version = 6
+const Version = 7
 
 // WorkspaceReadyMarker is the file guestd drops at a converged workspace
 // mountpoint's root once every declared mount is in place. It is the shared
@@ -213,6 +213,12 @@ const (
 	// RunnerWorkerReady: the generation is restored and the outer listener
 	// may spawn Runner.Worker inside the capsule.
 	RunnerWorkerReady RunnerState = "worker-ready"
+	// RunnerWorkerStarted: the privileged trampoline is entering the restored
+	// PID and mount namespaces before it executes the official worker.
+	RunnerWorkerStarted RunnerState = "worker-started"
+	// RunnerWorkerFailed: the trampoline could not enter the capsule or
+	// execute the official worker. The job never reached customer code.
+	RunnerWorkerFailed RunnerState = "worker-failed"
 	// RunnerReleased: the job-start hook validated the actual workflow
 	// identity and customer steps may run.
 	RunnerReleased RunnerState = "released"
@@ -224,6 +230,7 @@ const (
 type RunnerStatus struct {
 	State    RunnerState   `json:"state"`
 	ExitCode int           `json:"exit_code,omitempty"`
+	Reason   string        `json:"reason,omitempty"`
 	Identity *JobIdentity  `json:"identity,omitempty"`
 	Clock    *ClockSample  `json:"clock,omitempty"`
 	Timing   []TimingPoint `json:"timing,omitempty"`

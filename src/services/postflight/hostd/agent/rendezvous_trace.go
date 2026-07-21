@@ -10,7 +10,7 @@ import (
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vm"
 )
 
-const rendezvousTraceSchema = 4
+const rendezvousTraceSchema = 5
 
 type traceEvent struct {
 	SchemaVersion int       `json:"schema_version"`
@@ -31,6 +31,7 @@ type traceEvent struct {
 	RunnerJobID   string `json:"runner_job_id,omitempty"`
 	VMID          string `json:"vm_id,omitempty"`
 	GenerationSet string `json:"generation_set,omitempty"`
+	FailureReason string `json:"failure_reason,omitempty"`
 
 	ListenerLeaseID  string `json:"listener_lease_id,omitempty"`
 	ExecutionLeaseID string `json:"execution_lease_id,omitempty"`

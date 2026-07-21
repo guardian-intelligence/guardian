@@ -34,6 +34,8 @@ grep -Fq 'RUNNER_LISTENER_DLL' "${build_sh}" ||
   fail "build.sh does not require the patched runner listener"
 grep -Fq 'Runner.Worker.real' "${build_sh}" ||
   fail "build.sh does not preserve the official worker behind the capsule wrapper"
+grep -Fq 'install -o root -g root -m 4755 "${GUESTD_BIN}" "${mnt}/opt/actions-runner/bin/Runner.Worker"' "${build_sh}" ||
+  fail "Runner.Worker trampoline is not installed with the namespace-entry privilege"
 grep -Fq 'guestd validate-assignment' "${build_sh}" ||
   fail "job-start hook does not perform assignment validation"
 grep -Fq '"tini=${TINI_VERSION}"' "${build_sh}" ||

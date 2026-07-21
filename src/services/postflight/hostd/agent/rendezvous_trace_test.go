@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -119,5 +121,38 @@ func TestWarmWorkspaceTraceNamesCloneMaterialization(t *testing.T) {
 	if volume.Materialization != "clone" || volume.Generation != "generation-1" ||
 		volume.SnapshotGUID != "123456789" || volume.DeviceSerial != "" {
 		t.Fatalf("warm volume = %+v", volume)
+	}
+}
+
+func TestFailureTraceIncludesReasonAndVMDestroy(t *testing.T) {
+	agent := testAgent(t, "http://control.invalid")
+	agent.cfg.TraceDir = t.TempDir()
+	record := &lease{
+		spec: syncproto.DesiredLease{LeaseID: "listener-1"},
+		vmID: "vm-1",
+	}
+	agent.failLease(context.Background(), record, "worker namespace entry failed")
+
+	file, err := os.Open(filepath.Join(agent.cfg.TraceDir, "listener-1.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	var events []traceEvent
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		var event traceEvent
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			t.Fatal(err)
+		}
+		events = append(events, event)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 3 || events[0].Event != "lease_failed" ||
+		events[0].FailureReason != "worker namespace entry failed" ||
+		events[1].Event != "vm_destroy_started" || events[2].Event != "vm_destroy_completed" {
+		t.Fatalf("failure trace = %+v", events)
 	}
 }

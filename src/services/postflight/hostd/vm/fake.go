@@ -306,6 +306,7 @@ func (f *Fake) MarkReady(id ID, clock ClockSample) bool {
 	}
 	instance.status.Phase = PhaseReady
 	instance.status.Clock = clock
+	instance.status.CustomerStepsReleased = true
 	f.journal("phase %s %s->%s", id, PhaseHookBlocked, PhaseReady)
 	f.notify(id)
 	return true

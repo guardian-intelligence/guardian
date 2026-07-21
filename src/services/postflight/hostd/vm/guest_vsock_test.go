@@ -55,6 +55,9 @@ func TestVsockGuestProbeIsHelloWithinDeadline(t *testing.T) {
 			Identity: &guestproto.JobIdentity{RunID: "1", RunAttempt: 1, RunnerName: "r", Repository: "acme/widget"},
 		}})
 		_ = encoder.Write(guestproto.Message{Kind: guestproto.KindRunnerStatus, RunnerStatus: &guestproto.RunnerStatus{
+			State: guestproto.RunnerWorkerStarted,
+		}})
+		_ = encoder.Write(guestproto.Message{Kind: guestproto.KindRunnerStatus, RunnerStatus: &guestproto.RunnerStatus{
 			State: guestproto.RunnerReleased,
 			Clock: &guestproto.ClockSample{UnixNS: 1, Clocksource: "kvm-clock"},
 		}})
@@ -65,7 +68,24 @@ func TestVsockGuestProbeIsHelloWithinDeadline(t *testing.T) {
 	}
 	waitFor(t, "runner statuses folded", 2*time.Second, func() (bool, error) {
 		got := observation(t, transport, "vm-a", 3)
-		return got.RunnerRegistered && got.RunnerExited && got.ExitCode == 7, nil
+		return got.RunnerRegistered && got.WorkerStarted && got.Released && got.RunnerExited && got.ExitCode == 7, nil
+	})
+}
+
+func TestVsockGuestFoldsWorkerTrampolineFailure(t *testing.T) {
+	transport, _ := pipeDialer(func(conn net.Conn) {
+		sendHello(t, conn)
+		_ = guestproto.NewEncoder(conn).Write(guestproto.Message{
+			Kind: guestproto.KindRunnerStatus,
+			RunnerStatus: &guestproto.RunnerStatus{
+				State: guestproto.RunnerWorkerFailed, ExitCode: 1, Reason: "namespace entry failed",
+			},
+		})
+	})
+	waitFor(t, "worker failure folded", 2*time.Second, func() (bool, error) {
+		got := observation(t, transport, "vm-a", 3)
+		return got.WorkerFailed && got.RunnerExited && got.ExitCode == 1 &&
+			got.FailureReason == "namespace entry failed", nil
 	})
 }
 

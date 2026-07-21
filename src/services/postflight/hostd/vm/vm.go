@@ -64,12 +64,14 @@ type Status struct {
 	// Lease is the lease this VM is assigned to, empty for pool VMs. The
 	// driver persists it with the VM (the real driver keeps it in the
 	// per-VM state dir) so a restarted hostd can rebind instead of leaking.
-	Lease      string
-	ExitCode   int
-	Identity   JobIdentity
-	Assignment Assignment
-	Clock      ClockSample
-	Timing     []TimingPoint
+	Lease                 string
+	ExitCode              int
+	FailureReason         string
+	CustomerStepsReleased bool
+	Identity              JobIdentity
+	Assignment            Assignment
+	Clock                 ClockSample
+	Timing                []TimingPoint
 }
 
 type Assignment struct {

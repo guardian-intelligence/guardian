@@ -23,6 +23,9 @@ const (
 	AssignmentSocketPath = "/run/postflight/assignment.sock"
 	CapsulePIDPath       = "/run/postflight/capsule.pid"
 	RunnerWorkerReal     = "/opt/actions-runner/bin/Runner.Worker.real"
+	RunnerWorkerWrapper  = "/opt/actions-runner/bin/Runner.Worker"
+	RunnerUID            = 1001
+	RunnerGID            = 1001
 	localMessageLimit    = 1 << 20
 )
 
@@ -30,6 +33,7 @@ type localRequest struct {
 	Kind       string                  `json:"kind"`
 	Assignment *guestproto.Assignment  `json:"assignment,omitempty"`
 	Identity   *guestproto.JobIdentity `json:"identity,omitempty"`
+	Failure    string                  `json:"failure,omitempty"`
 }
 
 type localReply struct {
@@ -99,10 +103,44 @@ func (s *Server) handleLocal(ctx context.Context, conn net.Conn) {
 		reply = s.awaitAssignment(requestCtx, request.Assignment)
 	case "validate":
 		reply = s.validateAssignment(request.Identity)
+	case "worker-starting":
+		reply = s.runnerWorkerStarting()
+	case "worker-failed":
+		reply = s.runnerWorkerFailed(request.Failure)
 	default:
 		reply.Error = "unknown request"
 	}
 	_ = json.NewEncoder(conn).Encode(reply)
+}
+
+func (s *Server) runnerWorkerStarting() localReply {
+	s.mu.Lock()
+	authorized := s.authorized
+	s.mu.Unlock()
+	if authorized == nil || authorized.Identity == nil {
+		return localReply{Error: "worker was not authorized"}
+	}
+	point := guestTiming(s.cfg.Timing.Point("runner_worker_exec_started"))
+	s.sendStatus(guestproto.RunnerStatus{
+		State: guestproto.RunnerWorkerStarted, Identity: authorized.Identity,
+		Timing: []guestproto.TimingPoint{point},
+	})
+	return localReply{Ready: true}
+}
+
+func (s *Server) runnerWorkerFailed(reason string) localReply {
+	if reason == "" {
+		reason = "worker trampoline failed"
+	}
+	if len(reason) > 512 {
+		reason = reason[:512]
+	}
+	point := guestTiming(s.cfg.Timing.Point("runner_worker_exec_failed"))
+	s.sendStatus(guestproto.RunnerStatus{
+		State: guestproto.RunnerWorkerFailed, ExitCode: SyntheticFailureExitCode,
+		Reason: reason, Timing: []guestproto.TimingPoint{point},
+	})
+	return localReply{Ready: true}
 }
 
 func (s *Server) awaitAssignment(ctx context.Context, assignment *guestproto.Assignment) localReply {
@@ -323,17 +361,33 @@ func commandRecorder(source string) (*timing.Recorder, error) {
 // builder. The wrapper preserves GitHub's inherited IPC descriptors while
 // nsenter forks the real worker into the restored PID and mount namespaces.
 func IsRunnerWorkerExec(args []string) bool {
-	return filepath.Base(args[0]) == "Runner.Worker" && len(args) >= 2 && args[1] == "spawnclient"
+	if len(args) != 4 || filepath.Base(args[0]) != "Runner.Worker" || args[1] != "spawnclient" {
+		return false
+	}
+	for _, raw := range args[2:] {
+		fd, err := strconv.Atoi(raw)
+		if err != nil || fd < 3 {
+			return false
+		}
+	}
+	return true
 }
 
 func RunRunnerWorkerExec(args []string) error {
 	if !IsRunnerWorkerExec(args) {
 		return errors.New("guestd: invalid Runner.Worker invocation")
 	}
-	raw, err := os.ReadFile(CapsulePIDPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return syscall.Exec(RunnerWorkerReal, append([]string{RunnerWorkerReal}, args[1:]...), os.Environ())
+	if os.Getuid() != RunnerUID || os.Getgid() != RunnerGID || os.Geteuid() != 0 {
+		return errors.New("guestd: Runner.Worker trampoline has invalid credentials")
 	}
+	for _, raw := range args[2:] {
+		fd, _ := strconv.Atoi(raw)
+		var stat syscall.Stat_t
+		if err := syscall.Fstat(fd, &stat); err != nil || stat.Mode&syscall.S_IFMT != syscall.S_IFIFO {
+			return fmt.Errorf("guestd: Runner.Worker descriptor %d is not an inherited pipe", fd)
+		}
+	}
+	raw, err := os.ReadFile(CapsulePIDPath)
 	if err != nil {
 		return fmt.Errorf("guestd: read capsule pid: %w", err)
 	}
@@ -341,8 +395,25 @@ func RunRunnerWorkerExec(args []string) error {
 	if err != nil || pid <= 1 {
 		return errors.New("guestd: invalid capsule pid")
 	}
+	if err := syscall.Setgroups([]int{}); err != nil {
+		return fmt.Errorf("guestd: clear Runner.Worker supplementary groups: %w", err)
+	}
+	if err := callLocal(localRequest{Kind: "worker-starting"}, nil); err != nil {
+		return fmt.Errorf("guestd: report Runner.Worker start: %w", err)
+	}
 	nsenter := "/usr/bin/nsenter"
-	nsenterArgs := []string{nsenter, "--target", strconv.Itoa(pid), "--pid", "--mount", "--", RunnerWorkerReal}
+	nsenterArgs := []string{
+		nsenter, "--target", strconv.Itoa(pid), "--pid", "--mount",
+		"--setuid=" + strconv.Itoa(RunnerUID), "--setgid=" + strconv.Itoa(RunnerGID),
+		"--", RunnerWorkerReal,
+	}
 	nsenterArgs = append(nsenterArgs, args[1:]...)
 	return syscall.Exec(nsenter, nsenterArgs, os.Environ())
+}
+
+func ReportRunnerWorkerFailure(err error) {
+	if err == nil {
+		return
+	}
+	_ = callLocal(localRequest{Kind: "worker-failed", Failure: err.Error()}, nil)
 }

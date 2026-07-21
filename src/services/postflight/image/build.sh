@@ -345,7 +345,11 @@ install -m 0755 "${GUESTD_BIN}" "${mnt}/usr/local/bin/guestd"
 # The wrapper enters the restored capsule and execs the untouched official
 # apphost, preserving those descriptors across the namespace boundary.
 mv "${mnt}/opt/actions-runner/bin/Runner.Worker" "${mnt}/opt/actions-runner/bin/Runner.Worker.real"
-install -m 0755 "${GUESTD_BIN}" "${mnt}/opt/actions-runner/bin/Runner.Worker"
+# Entering another mount and PID namespace requires privilege. This copy is
+# a fail-closed trampoline: it accepts only the official spawnclient argv,
+# fixed capsule PID file, inherited pipe descriptors, and fixed real worker;
+# it drops to the runner UID/GID before the worker executes.
+install -o root -g root -m 4755 "${GUESTD_BIN}" "${mnt}/opt/actions-runner/bin/Runner.Worker"
 install -d -m 0755 "${mnt}/usr/local/libexec"
 cat >"${mnt}/usr/local/libexec/postflight-job-started.sh" <<'EOF'
 #!/bin/sh

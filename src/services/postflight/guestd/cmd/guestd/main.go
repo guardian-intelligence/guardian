@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"os/user"
+	"path/filepath"
 	"strconv"
 	"syscall"
 
@@ -20,8 +21,15 @@ import (
 )
 
 func main() {
-	if guestd.IsRunnerWorkerExec(os.Args) {
+	binary, err := os.Executable()
+	if os.Geteuid() != os.Getuid() && (err != nil || filepath.Clean(binary) != guestd.RunnerWorkerWrapper) {
+		_, _ = fmt.Fprintln(os.Stderr, "guestd: privileged execution is restricted to the Runner.Worker trampoline")
+		os.Exit(1)
+	}
+	if err == nil && filepath.Clean(binary) == guestd.RunnerWorkerWrapper {
 		if err := guestd.RunRunnerWorkerExec(os.Args); err != nil {
+			guestd.ReportRunnerWorkerFailure(err)
+			_, _ = fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 		return

@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const rendezvousTraceSchema = 4
+const rendezvousTraceSchema = 5
 
 const (
 	eventVMLaunchStarted                  = "vm_launch_started"
@@ -48,11 +48,14 @@ const (
 	eventClockChecked                     = "clock_checked"
 	eventWorkerAuthorizationSent          = "worker_authorization_sent"
 	eventRunnerWorkerReleased             = "runner_worker_released"
+	eventRunnerWorkerExecStarted          = "runner_worker_exec_started"
+	eventRunnerWorkerExecFailed           = "runner_worker_exec_failed"
 	eventJobHookValidated                 = "job_hook_validated"
 	eventCustomerStepsReleased            = "customer_steps_released"
 	eventJobHookReleased                  = "job_hook_released"
 	eventRunnerExited                     = "runner_exited"
 	eventRunnerExitObserved               = "runner_exit_observed"
+	eventLeaseFailed                      = "lease_failed"
 	eventCheckpointStarted                = "checkpoint_started"
 	eventQuiesceRPCStarted                = "quiesce_rpc_started"
 	eventQuiesceReceived                  = "quiesce_received"
@@ -93,9 +96,11 @@ var allowedTraceEvents = map[string]bool{
 	eventColdCapsuleStartStarted: true, eventColdCapsuleStartCompleted: true,
 	eventGenerationRestoreCompleted: true, eventMountsReady: true,
 	eventClockChecked: true, eventWorkerAuthorizationSent: true,
-	eventRunnerWorkerReleased: true, eventJobHookValidated: true,
+	eventRunnerWorkerReleased: true, eventRunnerWorkerExecStarted: true,
+	eventRunnerWorkerExecFailed: true, eventJobHookValidated: true,
 	eventCustomerStepsReleased: true, eventJobHookReleased: true,
 	eventRunnerExited: true, eventRunnerExitObserved: true,
+	eventLeaseFailed:       true,
 	eventCheckpointStarted: true, eventQuiesceRPCStarted: true,
 	eventQuiesceReceived: true, eventQuiesceMountsChecked: true,
 	eventCheckpointDumpStarted: true, eventCheckpointDumpCompleted: true,
@@ -149,6 +154,7 @@ type rendezvousEvent struct {
 	RunnerJobID   string `json:"runner_job_id,omitempty"`
 	VMID          string `json:"vm_id,omitempty"`
 	GenerationSet string `json:"generation_set,omitempty"`
+	FailureReason string `json:"failure_reason,omitempty"`
 
 	ListenerLeaseID  string `json:"listener_lease_id,omitempty"`
 	ExecutionLeaseID string `json:"execution_lease_id,omitempty"`
@@ -398,6 +404,7 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 			eventMountConvergenceStarted, eventMountConvergenceCompleted,
 			eventGenerationRestoreCompleted, eventMountsReady, eventClockChecked,
 			eventWorkerAuthorizationSent, eventRunnerWorkerReleased,
+			eventRunnerWorkerExecStarted,
 			eventJobHookValidated, eventCustomerStepsReleased, eventJobHookReleased,
 		}
 		switch report.RestoreMode {
@@ -688,7 +695,8 @@ func validateCollectorOrder(seen map[string]*rendezvousEvent, throughRelease boo
 		eventPoolReady, eventAssignmentUpdateReceived, eventAssignmentObserved,
 		eventGenerationMaterializationStarted, eventGenerationResolved,
 		eventRendezvousDispatched, eventMountsReady, eventClockChecked,
-		eventWorkerAuthorizationSent, eventJobHookReleased,
+		eventWorkerAuthorizationSent, eventRunnerWorkerExecStarted,
+		eventJobHookReleased,
 	}}
 	if !throughRelease {
 		chains = append(chains, []string{
@@ -723,6 +731,8 @@ func deriveDurations(out map[string]int64, seen map[string]*rendezvousEvent) {
 		"criu_restore":                       {eventCRIURestoreStarted, eventCRIURestoreCompleted},
 		"cold_capsule_start":                 {eventColdCapsuleStartStarted, eventColdCapsuleStartCompleted},
 		"assignment_to_worker_authorization": {eventAssignmentObserved, eventWorkerAuthorizationSent},
+		"worker_exec_dispatch":               {eventRunnerWorkerReleased, eventRunnerWorkerExecStarted},
+		"worker_to_job_hook":                 {eventRunnerWorkerExecStarted, eventJobHookValidated},
 		"job_hook_gate":                      {eventJobHookValidated, eventCustomerStepsReleased},
 		"checkpoint_dump":                    {eventCheckpointDumpStarted, eventCheckpointDumpCompleted},
 		"filesystem_sync":                    {eventFilesystemSyncStarted, eventFilesystemSyncCompleted},
