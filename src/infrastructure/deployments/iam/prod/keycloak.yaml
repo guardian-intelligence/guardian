@@ -141,6 +141,11 @@ spec:
                 secretKeyRef:
                   name: keycloak-realm-reconciler-client
                   key: password
+            - name: TOKEN_GATE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-token-gate
+                  key: password
             # File-vault provider: the realm's GitHub IdP clientSecret is a
             # vault expression resolved at USE time from the mounted file
             # below, so the OAuth secret never enters the Keycloak database —
@@ -216,6 +221,11 @@ spec:
                   items:
                     - key: password
                       path: guardianintelligence.org_realm-reconciler-client-secret
+              - secret:
+                  name: keycloak-token-gate
+                  items:
+                    - key: password
+                      path: guardianintelligence.org_token-gate-client-secret
 ---
 # Per-color JGroups discovery targets (DNS_PING). publishNotReadyAddresses is
 # required: pods must find each other before they report Ready.

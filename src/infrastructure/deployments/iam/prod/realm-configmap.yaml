@@ -115,6 +115,22 @@ data:
           "fullScopeAllowed": true,
           "redirectUris": [],
           "webOrigins": []
+        },
+        {
+          "clientId": "token-gate",
+          "name": "Token issuance gate",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": false,
+          "clientAuthenticatorType": "client-secret",
+          "secret": "${TOKEN_GATE_CLIENT_SECRET}",
+          "standardFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "implicitFlowEnabled": false,
+          "serviceAccountsEnabled": true,
+          "fullScopeAllowed": false,
+          "redirectUris": [],
+          "webOrigins": []
         }
       ],
       "users": [
@@ -284,6 +300,23 @@ data:
       "implicitFlowEnabled": false,
       "serviceAccountsEnabled": true,
       "fullScopeAllowed": true,
+      "redirectUris": [],
+      "webOrigins": []
+    }
+  token-gate.json: |
+    {
+      "clientId": "token-gate",
+      "name": "Token issuance gate",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${vault.token-gate-client-secret}",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
       "redirectUris": [],
       "webOrigins": []
     }

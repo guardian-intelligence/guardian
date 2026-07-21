@@ -56,3 +56,24 @@ spec:
     /
     sum(guardian:company_site_canary_responses:count1m)
     * 100
+---
+# Authentication errors Keycloak itself recorded on the canary color
+# (deployments/iam/prod/canary.yaml). Scoped by pod name because both
+# colors share one metrics Service: the Flagger clone is keycloak-primary,
+# so everything else under the target's name is the canary color. The
+# vector(0) arm makes an errorless window read as 0 rather than no-data —
+# these counters only exist on a color once a first error has occurred.
+# The 5m lookback covers the whole soak regardless of the per-check
+# interval.
+apiVersion: flagger.app/v1beta1
+kind: MetricTemplate
+metadata:
+  name: keycloak-auth-errors
+  namespace: flagger
+spec:
+  provider:
+    type: prometheus
+    address: http://vmselect-shortterm.tenant-root.svc:8481/select/0/prometheus
+  query: |
+    sum(increase(keycloak_user_events_total{namespace="{{ namespace }}",event=~"login_error|client_login_error",pod=~"{{ target }}-.*",pod!~"{{ target }}-primary-.*"}[5m]))
+    or on() vector(0)

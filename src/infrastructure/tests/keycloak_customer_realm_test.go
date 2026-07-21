@@ -194,8 +194,8 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 	for _, client := range realm.Clients {
 		importedClients[client.ClientID] = client
 	}
-	if len(importedClients) != 3 || len(clientJSON) != 3 {
-		t.Fatalf("managed clients: import=%d steady-state=%d, want 3", len(importedClients), len(clientJSON))
+	if len(importedClients) != 4 || len(clientJSON) != 4 {
+		t.Fatalf("managed clients: import=%d steady-state=%d, want 4", len(importedClients), len(clientJSON))
 	}
 	for filename, raw := range clientJSON {
 		var desired keycloakClientRepresentation

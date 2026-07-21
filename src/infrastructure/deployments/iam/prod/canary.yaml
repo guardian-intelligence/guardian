@@ -31,12 +31,12 @@ spec:
   analysis:
     interval: 30s
     threshold: 3
-    # Deliberately tight for the initial stand-up (Shovon, 2026-07-05): a
-    # single passing iteration (one discovery gate + one load run after the
-    # pre-rollout gate) promotes. Raise toward an industry-standard soak
-    # (e.g. iterations: 120 at 30s ~= 1h of steady canary successes) once
-    # the k6 canary and SLO metrics are feeding analysis.
-    iterations: 1
+    # 5-minute soak: every iteration re-runs OIDC discovery, sustained
+    # discovery load, and a real client-credentials token issuance against
+    # the canary color, with the auth-error metric asserting Keycloak
+    # recorded no failed authentication meanwhile. Lengthen toward an
+    # hour-scale soak once weighted SLO metrics justify the rollout latency.
+    iterations: 10
     # severity warn: failed checks and rollbacks page through the alert-relay;
     # routine info-level promotion events do not.
     alerts:
@@ -45,6 +45,19 @@ spec:
         providerRef:
           name: alert-relay
           namespace: flagger
+    metrics:
+      # Zero authentication errors recorded by the canary color during
+      # analysis. Only gate traffic reaches that color pre-cutover, so any
+      # error means an attempt failed inside Keycloak even where the HTTP
+      # path looked healthy. No-data reads as 0 by design: error series
+      # only exist on a color after its first failure.
+      - name: keycloak-auth-errors
+        templateRef:
+          name: keycloak-auth-errors
+          namespace: flagger
+        thresholdRange:
+          max: 0
+        interval: 30s
     webhooks:
       - name: discovery-gate
         type: pre-rollout
@@ -53,6 +66,13 @@ spec:
         metadata:
           type: bash
           cmd: bash /gate/discovery-gate.sh
+      - name: token-gate
+        type: pre-rollout
+        url: http://flagger-loadtester.tenant-guardian-prod/
+        timeout: 150s
+        metadata:
+          type: bash
+          cmd: bash /gate/token-gate.sh
       - name: discovery-iterate
         type: rollout
         url: http://flagger-loadtester.tenant-guardian-prod/
@@ -68,3 +88,10 @@ spec:
           type: cmd
           cmd: "hey -z 20s -q 20 -c 10 -disable-keepalive http://keycloak-canary.tenant-guardian-prod/realms/guardianintelligence.org/.well-known/openid-configuration"
           logCmdOutput: "true"
+      - name: token-iterate
+        type: rollout
+        url: http://flagger-loadtester.tenant-guardian-prod/
+        timeout: 30s
+        metadata:
+          type: bash
+          cmd: bash /gate/token-gate.sh
