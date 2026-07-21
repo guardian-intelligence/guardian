@@ -336,6 +336,7 @@ in_chroot chown -R runner:runner /opt/actions-runner
 # install root, while the physical _work tree lives on the encrypted durable
 # runner-home volume. The repository workspace is mounted beneath that
 # target before Runner.Worker is released.
+in_chroot install -d -o runner -g runner -m 0755 /home/runner/_work
 rm -rf "${mnt}/opt/actions-runner/_work"
 ln -s /home/runner/_work "${mnt}/opt/actions-runner/_work"
 # Homebrew is the one upstream tool installed outside /opt or /usr/local as
