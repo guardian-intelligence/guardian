@@ -55,6 +55,7 @@ const (
 	eventJobHookReleased                  = "job_hook_released"
 	eventRunnerExited                     = "runner_exited"
 	eventRunnerExitObserved               = "runner_exit_observed"
+	eventLeaseFailed                      = "lease_failed"
 	eventCheckpointStarted                = "checkpoint_started"
 	eventQuiesceRPCStarted                = "quiesce_rpc_started"
 	eventQuiesceReceived                  = "quiesce_received"
@@ -99,6 +100,7 @@ var allowedTraceEvents = map[string]bool{
 	eventRunnerWorkerExecFailed: true, eventJobHookValidated: true,
 	eventCustomerStepsReleased: true, eventJobHookReleased: true,
 	eventRunnerExited: true, eventRunnerExitObserved: true,
+	eventLeaseFailed:       true,
 	eventCheckpointStarted: true, eventQuiesceRPCStarted: true,
 	eventQuiesceReceived: true, eventQuiesceMountsChecked: true,
 	eventCheckpointDumpStarted: true, eventCheckpointDumpCompleted: true,
@@ -152,6 +154,7 @@ type rendezvousEvent struct {
 	RunnerJobID   string `json:"runner_job_id,omitempty"`
 	VMID          string `json:"vm_id,omitempty"`
 	GenerationSet string `json:"generation_set,omitempty"`
+	FailureReason string `json:"failure_reason,omitempty"`
 
 	ListenerLeaseID  string `json:"listener_lease_id,omitempty"`
 	ExecutionLeaseID string `json:"execution_lease_id,omitempty"`

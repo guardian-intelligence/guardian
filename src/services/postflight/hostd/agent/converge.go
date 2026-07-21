@@ -609,7 +609,24 @@ func (a *Agent) cancelLease(ctx context.Context, record *lease) {
 }
 
 func (a *Agent) failLease(ctx context.Context, record *lease, reason string) {
+	a.appendTrace(record, "lease_failed", func(event *traceEvent) {
+		traceIdentity(record, event)
+		event.GenerationSet = generationSet(record)
+		event.FailureReason = reason
+	})
+	destroyedVMID := record.vmID
+	if destroyedVMID != "" {
+		a.appendTrace(record, "vm_destroy_started", func(event *traceEvent) {
+			traceIdentity(record, event)
+		})
+	}
 	a.destroyLeaseVM(ctx, record)
+	if destroyedVMID != "" && record.vmID == "" {
+		a.appendTrace(record, "vm_destroy_completed", func(event *traceEvent) {
+			traceIdentity(record, event)
+			event.VMID = destroyedVMID
+		})
+	}
 	record.reason = reason
 	record.enter(syncproto.StateFailed, a.now())
 	a.metrics.FailedLeases.Add(1)
