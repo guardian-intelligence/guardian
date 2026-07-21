@@ -11,6 +11,26 @@ import (
 // whole vocabulary: it launches fresh VMs and destroys idle ones, never
 // touches an assigned VM, and never reuses anything.
 func (a *Agent) reconcilePool(ctx context.Context, vms *vmView) {
+	// A host configuration can stop serving a class while idle VMs from its
+	// previous configuration still exist on disk. They are no longer counted
+	// against any configured slot total, so collect them before refilling the
+	// active classes. Assigned VMs are allowed to finish under their original
+	// class and are reclaimed by their lease lifecycle.
+	for id, status := range vms.byID {
+		if _, configured := a.cfg.Slots[status.Class]; configured || status.Lease != "" {
+			continue
+		}
+		if status.Phase != vm.PhaseWarm && status.Phase != vm.PhaseBooting {
+			continue
+		}
+		if err := a.vms.Destroy(ctx, id); err != nil {
+			a.logger.Error("destroying obsolete-class pool vm", "vm", id, "class", status.Class, "err", err)
+			continue
+		}
+		delete(vms.byID, id)
+		vms.countByCl[status.Class]--
+	}
+
 	for class, total := range a.cfg.Slots {
 		target := a.poolTargets[class]
 		if target > total {
