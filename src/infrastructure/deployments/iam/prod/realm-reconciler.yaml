@@ -17,7 +17,7 @@ spec:
   template:
     metadata:
       annotations:
-        checksum/realm-config: 36540236f67384b0b5a8c5a214766864ec45606e57e1bf7340a1757964336d48
+        checksum/realm-config: 7f41efed85c18be38637db6b05a06979c1613fe36efd5e4e83c07f1697a674da
       labels:
         app.kubernetes.io/name: keycloak-realm-reconciler
         app.kubernetes.io/part-of: guardian
@@ -54,6 +54,43 @@ spec:
               "$kcadm" update "realms/$realm" \
                 --config "$config" \
                 -f "/realm/$realm.json"
+
+              # A realm update binds flows by alias but never creates them,
+              # and the broker update below rejects an unresolved
+              # firstBrokerLoginFlowAlias, so the flow must exist first. The
+              # flow and its execution are guarded independently: the
+              # executions endpoint answers an existing empty flow with 200,
+              # so a run that died between the two creates must converge by
+              # creating only the missing execution on retry.
+              flow=broker-create-user-only
+              if ! "$kcadm" get "authentication/flows/$flow/executions" \
+                  --config "$config" --realm "$realm" >/dev/null 2>&1; then
+                "$kcadm" create authentication/flows \
+                  --config "$config" --realm "$realm" \
+                  -b "{\"alias\":\"$flow\",\"description\":\"First broker login with no user-facing steps\",\"providerId\":\"basic-flow\",\"topLevel\":true,\"builtIn\":false}"
+              fi
+              first_execution_id() {
+                "$kcadm" get "authentication/flows/$flow/executions" \
+                  --config "$config" --realm "$realm" \
+                  --fields id --format csv --noquotes | head -n 1
+              }
+              exec_id="$(first_execution_id)"
+              if test -z "$exec_id"; then
+                "$kcadm" create "authentication/flows/$flow/executions/execution" \
+                  --config "$config" --realm "$realm" \
+                  -b '{"provider":"idp-create-user-if-unique"}'
+                exec_id="$(first_execution_id)"
+              fi
+              if test -z "$exec_id"; then
+                echo "flow $flow has no execution to require" >&2
+                exit 1
+              fi
+              "$kcadm" update "authentication/flows/$flow/executions" \
+                --config "$config" --realm "$realm" \
+                -b "{\"id\":\"$exec_id\",\"requirement\":\"REQUIRED\"}"
+
+              "$kcadm" update users/profile \
+                --config "$config" --realm "$realm" -f /realm/up-config.json
 
               for client in /clients/*.json; do
                 client_id="${client##*/}"

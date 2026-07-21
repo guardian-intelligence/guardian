@@ -476,6 +476,71 @@
   outline-offset: 3px;
 }
 
+.postflight-console {
+  max-width: 720px;
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 152px 24px 104px;
+}
+
+.postflight-console h1 {
+  margin: 0 0 6px;
+  font-size: 34px;
+  font-weight: 560;
+  letter-spacing: -0.045em;
+}
+
+.postflight-console-user {
+  margin: 0 0 40px;
+  color: #77717e;
+  font-size: 13px;
+}
+
+.postflight-console p {
+  color: rgb(255 255 255 / 0.72);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.postflight-console-code {
+  display: block;
+  margin: 14px 0 26px;
+  padding: 16px 20px;
+  border: 1px solid #37313d;
+  border-radius: 10px;
+  background: #111014;
+  color: #bbb5c1;
+  font-family: "Geist Mono", monospace;
+  font-size: 14px;
+}
+
+.postflight-console-copies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.postflight-copy-button {
+  border: 1px solid rgb(255 255 255 / 0.28);
+  border-radius: 8px;
+  padding: 10px 16px;
+  background: rgb(255 255 255 / 0.06);
+  color: var(--pf-white);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.postflight-copy-button:hover {
+  filter: brightness(1.2);
+}
+
+.postflight-copy-button:focus-visible {
+  outline: 2px solid white;
+  outline-offset: 3px;
+}
+
 @media (max-width: 760px) {
   .postflight-nav {
     padding: 18px 20px;

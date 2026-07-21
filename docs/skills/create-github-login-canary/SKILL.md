@@ -20,9 +20,10 @@ description: Create and secure the GitHub machine account used by the Sign in wi
 7. Sign out, then prove a fresh-profile login with `USERNAME`, the password,
    and a current TOTP code.
 8. In that fresh profile, open `https://guardianintelligence.org/postflight`,
-   choose **Sign in with Guardian** and GitHub, approve **Sign in with
-   Guardian** once, complete the Postflight callback, and verify the App is
-   listed under GitHub's **Settings → Applications → Authorized OAuth Apps**.
+   choose **Sign in with GitHub** (the browser goes straight to github.com —
+   no Keycloak page renders), approve **Sign in with Guardian** once, land on
+   the Postflight console, and verify the App is listed under GitHub's
+   **Settings → Applications → Authorized OAuth Apps**.
 9. Store `USERNAME`, the password, and the TOTP setup key as
    `PROD_GITHUB_LOGIN_CANARY_USERNAME`,
    `PROD_GITHUB_LOGIN_CANARY_PASSWORD`, and

@@ -47,7 +47,23 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 		LoginWithEmail       bool   `json:"loginWithEmailAllowed"`
 		DuplicateEmails      bool   `json:"duplicateEmailsAllowed"`
 		Clients              []keycloakClientRepresentation `json:"clients"`
-		Users                []struct {
+		AuthenticationFlows  []struct {
+			Alias      string `json:"alias"`
+			ProviderID string `json:"providerId"`
+			TopLevel   bool   `json:"topLevel"`
+			BuiltIn    bool   `json:"builtIn"`
+			Executions []struct {
+				Authenticator     string `json:"authenticator"`
+				Requirement       string `json:"requirement"`
+				AuthenticatorFlow bool   `json:"authenticatorFlow"`
+				UserSetupAllowed  bool   `json:"userSetupAllowed"`
+			} `json:"authenticationExecutions"`
+		} `json:"authenticationFlows"`
+		Components map[string][]struct {
+			ProviderID string              `json:"providerId"`
+			Config     map[string][]string `json:"config"`
+		} `json:"components"`
+		Users []struct {
 			Username               string              `json:"username"`
 			ServiceAccountClientID string              `json:"serviceAccountClientId"`
 			ClientRoles            map[string][]string `json:"clientRoles"`
@@ -65,6 +81,7 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 		} `json:"config"`
 	}
 	var realmJSON, settingsJSON string
+	settingsFiles := map[string]string{}
 	clientJSON := map[string]string{}
 	providerJSON := map[string]string{}
 	for _, doc := range yamlDocs(t, runfilePath(root+"realm-configmap.yaml")) {
@@ -78,6 +95,9 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 			}
 		case "keycloak-realm-settings":
 			settingsJSON = stringValue(data["guardianintelligence.org.json"])
+			for key, value := range data {
+				settingsFiles[key] = stringValue(value)
+			}
 		case "keycloak-clients":
 			for key, value := range data {
 				clientJSON[key] = stringValue(value)
@@ -111,10 +131,63 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 	if err := json.Unmarshal([]byte(settingsJSON), &desiredSettings); err != nil {
 		t.Fatalf("decode steady-state realm settings: %v", err)
 	}
+	delete(importedSettings, "authenticationFlows")
 	delete(importedSettings, "clients")
+	delete(importedSettings, "components")
 	delete(importedSettings, "users")
 	if !reflect.DeepEqual(importedSettings, desiredSettings) {
 		t.Fatal("startup realm settings differ from steady-state realm settings")
+	}
+
+	if len(realm.AuthenticationFlows) != 1 {
+		t.Fatalf("imported authentication flows = %d, want only the headless first-broker-login flow", len(realm.AuthenticationFlows))
+	}
+	flow := realm.AuthenticationFlows[0]
+	if flow.Alias != "broker-create-user-only" || flow.ProviderID != "basic-flow" || !flow.TopLevel || flow.BuiltIn {
+		t.Fatalf("headless first-broker-login flow = %#v", flow)
+	}
+	if len(flow.Executions) != 1 ||
+		flow.Executions[0].Authenticator != "idp-create-user-if-unique" ||
+		flow.Executions[0].Requirement != "REQUIRED" ||
+		flow.Executions[0].AuthenticatorFlow || flow.Executions[0].UserSetupAllowed {
+		t.Fatalf("first broker login must only create-user-if-unique as REQUIRED, got %#v", flow.Executions)
+	}
+
+	profileComponents := realm.Components["org.keycloak.userprofile.UserProfileProvider"]
+	if len(profileComponents) != 1 || profileComponents[0].ProviderID != "declarative-user-profile" ||
+		len(profileComponents[0].Config["kc.user.profile.config"]) != 1 {
+		t.Fatalf("imported user profile components = %#v", profileComponents)
+	}
+	var importedProfile, desiredProfile map[string]any
+	if err := json.Unmarshal([]byte(profileComponents[0].Config["kc.user.profile.config"][0]), &importedProfile); err != nil {
+		t.Fatalf("decode imported user profile: %v", err)
+	}
+	if err := json.Unmarshal([]byte(settingsFiles["up-config.json"]), &desiredProfile); err != nil {
+		t.Fatalf("decode steady-state user profile: %v", err)
+	}
+	if !reflect.DeepEqual(importedProfile, desiredProfile) {
+		t.Fatal("startup user profile differs from steady-state user profile")
+	}
+	var profile struct {
+		Attributes []struct {
+			Name     string          `json:"name"`
+			Required json.RawMessage `json:"required"`
+		} `json:"attributes"`
+	}
+	if err := json.Unmarshal([]byte(settingsFiles["up-config.json"]), &profile); err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	for _, attribute := range profile.Attributes {
+		names[attribute.Name] = true
+		if (attribute.Name == "firstName" || attribute.Name == "lastName") && attribute.Required != nil {
+			t.Fatalf("%s must be optional: a brokered GitHub account has no guaranteed name", attribute.Name)
+		}
+	}
+	for _, name := range []string{"username", "email", "firstName", "lastName"} {
+		if !names[name] {
+			t.Fatalf("user profile is missing attribute %q", name)
+		}
 	}
 
 	importedClients := map[string]keycloakClientRepresentation{}
@@ -184,7 +257,7 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 	}
 
 	if github.Alias != "github" || github.TrustEmail || github.StoreToken || github.LinkOnly ||
-		github.FirstBrokerLoginFlow != "first broker login" || github.Config.SyncMode != "IMPORT" {
+		github.FirstBrokerLoginFlow != "broker-create-user-only" || github.Config.SyncMode != "IMPORT" {
 		t.Fatalf("GitHub broker = %#v", github)
 	}
 	registry := yamlDocs(t, runfilePath("src/infrastructure/deployments/iam/github-oauth-apps.yaml"))[0]
@@ -195,9 +268,28 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 		t.Fatal("production GitHub provider differs from the OAuth App registry")
 	}
 
+	// Denying the GitHub authorize prompt returns access_denied to the broker
+	// endpoint; Keycloak forwards the error into the browser flow, which
+	// skips the kc_idp_hint redirector and renders Keycloak's own login page
+	// as a dead end. The canary only ever grants, so the gap is tracked here:
+	// it must stay documented until a realm login theme (or equivalent)
+	// closes it, and shipping that theme must retire both the documented
+	// exception and this probe.
+	signInDoc, err := os.ReadFile(runfilePath("docs/sign-in-with-guardian.md"))
+	if err != nil {
+		t.Fatalf("read sign-in doc: %v", err)
+	}
+	assertTextContains(t, string(signInDoc), "error=access_denied",
+		"the GitHub deny dead end is an accepted phase-1 gap and must stay documented until it is closed")
+	if strings.Contains(realmJSON, "loginTheme") {
+		t.Fatal("the realm now ships a login theme: close the GitHub-deny dead end and remove the documented phase-1 exception")
+	}
+
 	stateFiles := map[string]string{
-		"realm/" + realmDataKey:                       realmJSON,
-		"settings/guardianintelligence.org.json":      settingsJSON,
+		"realm/" + realmDataKey: realmJSON,
+	}
+	for name, raw := range settingsFiles {
+		stateFiles["settings/"+name] = raw
 	}
 	for name, raw := range clientJSON {
 		stateFiles["clients/"+name] = raw
@@ -231,6 +323,12 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 		"realm reconciler must reconcile clients from data files")
 	assertTextContains(t, string(reconciler), `for provider in /providers/*.json`,
 		"realm reconciler must reconcile providers from data files")
+	assertTextContains(t, string(reconciler), `create authentication/flows`,
+		"realm reconciler must create the headless first-broker-login flow before the provider loop binds it")
+	assertTextContains(t, string(reconciler), `if test -z "$exec_id"`,
+		"realm reconciler must guard the flow execution independently of the flow so a run that died between the creates converges on retry")
+	assertTextContains(t, string(reconciler), `update users/profile`,
+		"realm reconciler must reconcile the user profile, which no realm update carries")
 	assertTextContains(t, string(reconciler), `name: KC_CLI_CLIENT_SECRET`,
 		"realm reconciler must pass its service-account secret through Keycloak CLI's environment")
 	assertTextContains(t, string(reconciler), `--client guardian-realm-reconciler`,

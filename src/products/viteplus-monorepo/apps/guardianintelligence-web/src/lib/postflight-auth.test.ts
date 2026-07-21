@@ -46,7 +46,7 @@ describe("Postflight OIDC BFF", () => {
     }
   });
 
-  it("uses state, nonce, PKCE S256, and an encrypted host-only transaction", async () => {
+  it("uses state, nonce, PKCE S256, a pinned GitHub broker, and an encrypted host-only transaction", async () => {
     const response = await beginPostflightLogin(
       new Request(`${publicURL}/postflight/auth/login?return_to=/postflight?from=canary`),
     );
@@ -59,7 +59,7 @@ describe("Postflight OIDC BFF", () => {
     expect(location.searchParams.get("code_challenge")).toHaveLength(43);
     expect(location.searchParams.get("state")).toHaveLength(43);
     expect(location.searchParams.get("nonce")).toHaveLength(43);
-    expect(location.searchParams.has("kc_idp_hint")).toBe(false);
+    expect(location.searchParams.get("kc_idp_hint")).toBe("github");
     expect(response.headers.get("set-cookie")).toContain(`${AUTH_TRANSACTION_COOKIE}=`);
     expect(response.headers.get("set-cookie")).toContain("HttpOnly; Secure; SameSite=Lax");
   });
@@ -156,7 +156,7 @@ describe("Postflight OIDC BFF", () => {
       }),
     );
     expect(callbackResponse.status).toBe(303);
-    expect(callbackResponse.headers.get("location")).toBe("/postflight");
+    expect(callbackResponse.headers.get("location")).toBe("/postflight/console");
     const session = cookieFrom(callbackResponse, SESSION_COOKIE);
 
     const sessionResponse = await postflightSessionResponse(
@@ -180,8 +180,57 @@ describe("Postflight OIDC BFF", () => {
     );
     const logoutURL = new URL(logoutResponse.headers.get("location") || "");
     expect(logoutResponse.status).toBe(303);
+    expect(logoutURL.origin + logoutURL.pathname).toBe(`${issuer}/protocol/openid-connect/logout`);
     expect(logoutURL.searchParams.get("id_token_hint")).toBe(idToken);
+    expect(logoutURL.searchParams.get("client_id")).toBe("postflight-web");
+    expect(logoutURL.searchParams.get("post_logout_redirect_uri")).toBe(`${publicURL}/postflight`);
     expect(logoutResponse.headers.get("set-cookie")).toContain(`${SESSION_COOKIE}=`);
     expect(logoutResponse.headers.get("set-cookie")).toContain("Max-Age=0");
+  });
+
+  it("refuses a cross-site logout trigger", async () => {
+    const response = await endPostflightSession(
+      new Request(`${publicURL}/postflight/auth/logout`, {
+        headers: { "sec-fetch-site": "cross-site" },
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("refuses a cross-origin logout navigation from a browser without Fetch Metadata", async () => {
+    const response = await endPostflightSession(
+      new Request(`${publicURL}/postflight/auth/logout`, {
+        headers: { referer: "https://evil.example/logout-trap" },
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("accepts a same-origin logout navigation from a browser without Fetch Metadata", async () => {
+    const response = await endPostflightSession(
+      new Request(`${publicURL}/postflight/auth/logout`, {
+        headers: { referer: `${publicURL}/postflight/console` },
+      }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(`${publicURL}/postflight`);
+  });
+
+  it("signs out locally without visiting Keycloak when no ID token is recoverable", async () => {
+    const response = await endPostflightSession(
+      new Request(`${publicURL}/postflight/auth/logout`, {
+        headers: { cookie: `${SESSION_COOKIE}=not-a-sealed-session` },
+      }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(`${publicURL}/postflight`);
+    expect(response.headers.get("set-cookie")).toContain(`${SESSION_COOKIE}=`);
+    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
   });
 });

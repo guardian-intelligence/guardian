@@ -7,6 +7,10 @@ export const SESSION_COOKIE = "__Host-postflight-session";
 const transactionPurpose = "postflight:oidc-transaction:v1";
 const sessionPurpose = "postflight:session:v1";
 
+// Server-side constant, never derived from request input: pinning the realm's
+// single broker keeps Keycloak from rendering its own login page.
+const identityProviderHint = "github";
+
 type AuthTransaction = {
   readonly state: string;
   readonly nonce: string;
@@ -155,7 +159,7 @@ function safeReturnTo(value: string | null): string {
       value.startsWith("/postflight?")
     )
   ) {
-    return "/postflight";
+    return "/postflight/console";
   }
   return value;
 }
@@ -201,6 +205,7 @@ export async function beginPostflightLogin(request: Request): Promise<Response> 
     nonce: transaction.nonce,
     code_challenge: base64URL(await digest(verifier)),
     code_challenge_method: "S256",
+    kc_idp_hint: identityProviderHint,
   }).toString();
 
   const sealed = await seal(transaction, transactionPurpose, cfg.sessionSecret);
@@ -390,13 +395,32 @@ export async function postflightSessionResponse(request: Request): Promise<Respo
   );
 }
 
+function isCrossSiteLogout(request: Request, publicOrigin: string): boolean {
+  const fetchSite = request.headers.get("sec-fetch-site");
+  if (fetchSite) return fetchSite === "cross-site";
+  // Clients without Fetch Metadata (e.g. Safari before 16.4) still send
+  // Origin or Referer on the navigations that carry the SameSite=Lax
+  // session cookie, so a present value must be same-origin.
+  for (const header of ["origin", "referer"]) {
+    const value = request.headers.get(header);
+    if (!value) continue;
+    try {
+      return new URL(value).origin !== publicOrigin;
+    } catch {
+      return true;
+    }
+  }
+  return false;
+}
+
 export async function endPostflightSession(request: Request): Promise<Response> {
   const cfg = configuration();
-  const logoutURL = new URL(`${cfg.issuer}/protocol/openid-connect/logout`);
-  const params = new URLSearchParams({
-    client_id: cfg.clientID,
-    post_logout_redirect_uri: `${cfg.publicURL}/postflight`,
-  });
+  // CSRF guard: logout is reachable by top-level navigation, so a
+  // cross-site trigger must not end the session.
+  if (isCrossSiteLogout(request, new URL(cfg.publicURL).origin)) {
+    return new Response(null, { status: 403, headers: securityHeaders() });
+  }
+  let idToken: string | undefined;
   const sealedSession = cookieValue(request, SESSION_COOKIE);
   if (sealedSession) {
     try {
@@ -405,15 +429,27 @@ export async function endPostflightSession(request: Request): Promise<Response> 
         sessionPurpose,
         cfg.sessionSecret,
       );
-      if (session.idToken) params.set("id_token_hint", session.idToken);
+      idToken = session.idToken || undefined;
     } catch {}
   }
-  logoutURL.search = params.toString();
+  // Without an ID token hint Keycloak renders a logout confirmation page
+  // whenever an SSO session is still alive, so sign out locally instead;
+  // any orphaned SSO session ends at its idle timeout.
+  let location = `${cfg.publicURL}/postflight`;
+  if (idToken) {
+    const logoutURL = new URL(`${cfg.issuer}/protocol/openid-connect/logout`);
+    logoutURL.search = new URLSearchParams({
+      client_id: cfg.clientID,
+      post_logout_redirect_uri: `${cfg.publicURL}/postflight`,
+      id_token_hint: idToken,
+    }).toString();
+    location = logoutURL.toString();
+  }
   return new Response(null, {
     status: 303,
     headers: {
       ...securityHeaders(),
-      location: logoutURL.toString(),
+      location,
       "set-cookie": clearCookie(SESSION_COOKIE),
     },
   });

@@ -36,9 +36,14 @@ func TestClassifyOAuthPage(t *testing.T) {
 			action: oauthComplete,
 		},
 		{
-			name:   "first Guardian enrollment",
-			state:  oauthPageState{Host: "guardianintelligence.org", Path: "/realms/guardianintelligence.org/broker/github/endpoint", HasReviewProfile: true},
-			action: oauthReviewProfile,
+			name:   "broker redirect pass-through",
+			state:  oauthPageState{Host: "guardianintelligence.org", Path: "/realms/guardianintelligence.org/broker/github/endpoint"},
+			action: oauthWait,
+		},
+		{
+			name:    "rendered Keycloak page",
+			state:   oauthPageState{Host: "guardianintelligence.org", Path: "/realms/guardianintelligence.org/login-actions/first-broker-login", HasKeycloakPage: true},
+			errText: "Keycloak rendered a page",
 		},
 		{
 			name:    "email collision never auto-links",
