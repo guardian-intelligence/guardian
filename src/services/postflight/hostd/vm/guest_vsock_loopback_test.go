@@ -134,7 +134,10 @@ func TestVsockLoopbackTransportEndToEnd(t *testing.T) {
 		<-assignmentServed
 	})
 
-	transport := NewVsockGuest()
+	transport, err := NewVsockGuest()
+	if err != nil {
+		t.Fatal(err)
+	}
 	transport.port = port
 	const id = ID("vm-loop")
 

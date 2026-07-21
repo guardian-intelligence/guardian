@@ -216,16 +216,20 @@ func (a *Agent) Run(ctx context.Context) error {
 // must not re-probe every QEMU in the pool. Periodic Tick remains the
 // level-triggered repair path for dropped/coalesced hints and pool governance.
 func (a *Agent) HandleVMUpdate(ctx context.Context, id vm.ID) {
+	started := time.Now()
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	lockElapsed := time.Since(started)
 	if !a.synced {
 		return
 	}
+	statusStarted := time.Now()
 	status, err := a.vms.Status(ctx, id)
 	if err != nil {
 		a.logger.Error("observing updated vm", "vm", id, "err", err)
 		return
 	}
+	statusElapsed := time.Since(statusStarted)
 	record := a.leases[status.Lease]
 	if record == nil || record.vmID != string(id) {
 		return
@@ -248,5 +252,12 @@ func (a *Agent) HandleVMUpdate(ctx context.Context, id vm.ID) {
 	if status.Lease != "" {
 		view.byLease[status.Lease] = status
 	}
+	stepStarted := time.Now()
 	a.stepLease(ctx, record, view)
+	a.logger.Info("hostd.vm_update.completed",
+		"duration_ns", time.Since(started).Nanoseconds(),
+		"lock_wait_ns", lockElapsed.Nanoseconds(),
+		"status_ns", statusElapsed.Nanoseconds(),
+		"step_ns", time.Since(stepStarted).Nanoseconds(),
+		"vm", id, "lease", status.Lease, "phase", status.Phase)
 }

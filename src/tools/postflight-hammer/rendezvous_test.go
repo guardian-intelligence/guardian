@@ -65,6 +65,7 @@ func validRendezvousTrace(warm, full bool) []rendezvousEvent {
 		{eventRunnerRegistered, "guestd"}, {eventPoolReady, "hostd-agent"},
 		{eventAssignmentUpdateReceived, "hostd-agent"}, {eventHostAssignmentObserved, "hostd-qemu"},
 		{eventRunnerAssignmentReceived, "runner-listener"}, {eventGuestAssignmentReceived, "guestd"},
+		{eventVsockAssignmentReceived, "hostd-vsock"},
 		{eventAssignmentObserved, "hostd-agent"}, {eventGenerationMaterializationStarted, "hostd-agent"},
 		{eventGenerationResolved, "hostd-agent"}, {eventRendezvousDispatched, "hostd-agent"},
 		{eventQMPRendezvousStarted, "hostd-qemu"}, {eventQMPConnected, "hostd-qemu"},
@@ -150,7 +151,8 @@ func TestValidColdRendezvousThroughRelease(t *testing.T) {
 	if !report.TraceValid || report.Outcome != outcomePass || report.RestoreMode != "cold" {
 		t.Fatalf("valid cold trace = %+v", report)
 	}
-	if report.DurationsNS["generation_materialization"] <= 0 || report.DurationsNS["cold_capsule_start"] <= 0 {
+	if report.DurationsNS["generation_materialization"] <= 0 || report.DurationsNS["cold_capsule_start"] <= 0 ||
+		report.DurationsNS["vsock_to_assignment_update"] <= 0 {
 		t.Fatalf("high-resolution durations = %+v", report.DurationsNS)
 	}
 }

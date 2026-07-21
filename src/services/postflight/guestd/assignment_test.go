@@ -171,6 +171,23 @@ func TestRunnerWorkerInvocationContract(t *testing.T) {
 	}
 }
 
+func TestAppendJobEnvironmentPreservesEmptyValue(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "github-env")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := appendJobEnvironment(path, map[string]string{"RUNNER_TRACKING_ID": ""}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "RUNNER_TRACKING_ID=\n" {
+		t.Fatalf("job environment = %q", raw)
+	}
+}
+
 func TestRunnerWorkerStatusReportsStartAndFailure(t *testing.T) {
 	recorder, err := timing.New("guestd-test", "boot-test")
 	if err != nil {

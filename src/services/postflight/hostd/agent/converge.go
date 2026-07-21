@@ -27,17 +27,35 @@ func (a *Agent) Tick(ctx context.Context) {
 	if !a.synced {
 		return
 	}
+	started := time.Now()
+	vmListStarted := time.Now()
 	vms, err := a.listVMs(ctx)
 	if err != nil {
 		a.logger.Error("listing vms", "err", err)
 		return
 	}
+	vmListElapsed := time.Since(vmListStarted)
+	leaseStarted := time.Now()
 	for _, id := range sortedLeaseIDs(a.leases) {
 		a.stepLease(ctx, a.leases[id], vms)
 	}
+	leaseElapsed := time.Since(leaseStarted)
+	reapStarted := time.Now()
 	a.reapGenerations(ctx)
+	reapElapsed := time.Since(reapStarted)
+	poolStarted := time.Now()
 	a.reconcilePool(ctx, vms)
+	poolElapsed := time.Since(poolStarted)
+	gcStarted := time.Now()
 	a.collectOrphans(ctx, vms)
+	a.logger.Info("hostd.convergence.completed",
+		"duration_ns", time.Since(started).Nanoseconds(),
+		"vm_list_ns", vmListElapsed.Nanoseconds(),
+		"leases_ns", leaseElapsed.Nanoseconds(),
+		"reap_ns", reapElapsed.Nanoseconds(),
+		"pool_ns", poolElapsed.Nanoseconds(),
+		"gc_ns", time.Since(gcStarted).Nanoseconds(),
+		"vms", len(vms.byID), "leases", len(a.leases))
 }
 
 // vmView indexes one List call so a Tick makes consistent decisions.
@@ -424,6 +442,10 @@ func (a *Agent) authorization(record *lease) vm.Authorization {
 			"POSTFLIGHT_EXECUTION_ID":             execution.ExecutionID,
 			"POSTFLIGHT_ATTEMPT_ID":               execution.AttemptID,
 			"POSTFLIGHT_WORKSPACE_READY_FILE":     filepath.Join(mountpoint, guestproto.WorkspaceReadyMarker),
+			// GitHub Runner kills job-spawned processes carrying its tracking
+			// marker. The capsule must retain arbitrary workload daemons for
+			// the post-job CRIU checkpoint while still removing Runner itself.
+			"RUNNER_TRACKING_ID": "",
 		},
 	}
 }
