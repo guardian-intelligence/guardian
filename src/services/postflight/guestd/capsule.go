@@ -278,17 +278,25 @@ func (m *CapsuleManager) runnerProcesses(rootPID int) ([]int, error) {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("guestd: reading process %d command line: %w", pid, err)
 		}
-		if executable == m.RunnerRoot || strings.HasPrefix(executable, m.RunnerRoot+string(filepath.Separator)) ||
-			commandUsesPath(cmdline, m.RunnerRoot) {
+		if isRunnerProcess(executable, cmdline, m.RunnerRoot) {
 			pids = append(pids, pid)
 		}
 	}
 	return pids, nil
 }
 
-func commandUsesPath(cmdline []byte, root string) bool {
+func isRunnerProcess(executable string, cmdline []byte, root string) bool {
+	runnerExecutables := map[string]bool{
+		filepath.Join(root, "bin", "Runner.Listener"):    true,
+		filepath.Join(root, "bin", "Runner.Worker"):      true,
+		filepath.Join(root, "bin", "Runner.Worker.real"): true,
+		filepath.Join(root, "bin", "Runner.PluginHost"):  true,
+	}
+	if runnerExecutables[executable] {
+		return true
+	}
 	for _, argument := range strings.Split(string(cmdline), "\x00") {
-		if argument == root || strings.HasPrefix(argument, root+string(filepath.Separator)) {
+		if runnerExecutables[argument] {
 			return true
 		}
 	}

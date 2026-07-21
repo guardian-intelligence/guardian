@@ -20,11 +20,50 @@ func TestProcessIsNamespaceInit(t *testing.T) {
 	}
 }
 
-func TestRunnerCommandRecognitionUsesPathBoundaries(t *testing.T) {
-	if !commandUsesPath([]byte("/bin/bash\x00/opt/actions-runner/run.sh\x00"), "/opt/actions-runner") {
-		t.Fatal("runner script was not recognized")
+func TestRunnerProcessRecognitionPreservesWorkloadDaemons(t *testing.T) {
+	root := "/opt/actions-runner"
+	for name, process := range map[string]struct {
+		executable string
+		cmdline    []byte
+	}{
+		"worker": {
+			executable: "/opt/actions-runner/bin/Runner.Worker.real",
+		},
+		"worker trampoline": {
+			executable: "/usr/bin/nsenter",
+			cmdline:    []byte("/usr/bin/nsenter\x00--\x00/opt/actions-runner/bin/Runner.Worker.real\x00"),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !isRunnerProcess(process.executable, process.cmdline, root) {
+				t.Fatal("runner process was not recognized")
+			}
+		})
 	}
-	if commandUsesPath([]byte("/opt/actions-runner-hostile/tool\x00"), "/opt/actions-runner") {
-		t.Fatal("prefix collision was recognized as a runner")
+
+	for name, process := range map[string]struct {
+		executable string
+		cmdline    []byte
+	}{
+		"Gradle daemon using installed toolcache": {
+			executable: "/opt/actions-runner/_work/_tool/Java_Temurin-Hotspot_jdk/25/bin/java",
+			cmdline:    []byte("java\x00-javaagent:/opt/actions-runner/_work/gradle/gradle/gradle-agent.jar\x00org.gradle.launcher.daemon.bootstrap.GradleDaemon\x00"),
+		},
+		"workspace script": {
+			executable: "/bin/bash",
+			cmdline:    []byte("/bin/bash\x00/opt/actions-runner/_work/repo/repo/server.sh\x00"),
+		},
+		"action runtime": {
+			executable: "/opt/actions-runner/externals/node24/bin/node",
+		},
+		"prefix collision": {
+			executable: "/opt/actions-runner-hostile/bin/Runner.Worker.real",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if isRunnerProcess(process.executable, process.cmdline, root) {
+				t.Fatal("workload process was classified as a runner")
+			}
+		})
 	}
 }
