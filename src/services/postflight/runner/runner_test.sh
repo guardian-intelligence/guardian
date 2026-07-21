@@ -9,6 +9,7 @@ grep -Fq 'WaitForPostflightAssignmentAsync(jobMessage.RequestId' "${patch_file}"
 grep -Fq 'WaitForPostflightAssignmentAsync(messageRef.RunnerRequestId' "${patch_file}"
 grep -Fq 'jobDispatcher.Run(jobMessage' "${patch_file}"
 grep -Fq 'jobDispatcher.Run(jobRequestMessage' "${patch_file}"
+grep -Fq 'GitHubContext("job")' "${patch_file}"
 grep -Fq 'RUNNER_SOURCE_COMMIT=' "${pins}"
 grep -Fq 'DOTNET_SDK_SHA512=' "${pins}"
 bash "${build_sh}" --help >/dev/null

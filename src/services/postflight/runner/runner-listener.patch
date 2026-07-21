@@ -48,7 +48,7 @@ index e20eb62..8ca004d 100644
 +                GitHubContext("run_id"),
 +                GitHubContext("run_attempt"),
 +                GitHubContext("repository"),
-+                jobMessage.JobName,
++                GitHubContext("job"),
 +                jobMessage.JobDisplayName,
 +            })
 +            {

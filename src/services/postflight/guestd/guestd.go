@@ -124,18 +124,20 @@ func (c *Config) validate() error {
 type Server struct {
 	cfg Config
 
-	mu         sync.Mutex
-	conn       net.Conn
-	prepared   *guestproto.Prepare
-	rendezvous *guestproto.Rendezvous
-	authorized *guestproto.Authorize
-	clock      *guestproto.ClockSample
-	bound      bool
-	statuses   []guestproto.RunnerStatus
-	assignment *guestproto.Assignment
-	workerGate chan struct{}
-	gateOnce   sync.Once
-	gateErr    error
+	mu            sync.Mutex
+	conn          net.Conn
+	prepared      *guestproto.Prepare
+	rendezvous    *guestproto.Rendezvous
+	authorized    *guestproto.Authorize
+	clock         *guestproto.ClockSample
+	bound         bool
+	statuses      []guestproto.RunnerStatus
+	assignment    *guestproto.Assignment
+	hookValidated bool
+	hookReleased  bool
+	workerGate    chan struct{}
+	gateOnce      sync.Once
+	gateErr       error
 
 	// writeMu serializes frames. It is separate from mu so a slow host —
 	// a blocked status write — can never stall inbound dispatch.

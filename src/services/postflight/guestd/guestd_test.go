@@ -287,6 +287,9 @@ func newWorld(t *testing.T, configure func(*Config), runner RunRunner) *world {
 			if reply := w.server.validateAssignment(testAuthorize().Identity); reply.Error != "" {
 				return 0, errors.New(reply.Error)
 			}
+			if reply := w.server.releaseAssignment(testAuthorize().Identity); reply.Error != "" {
+				return 0, errors.New(reply.Error)
+			}
 			return 0, nil
 		}
 	}

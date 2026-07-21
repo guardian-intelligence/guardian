@@ -109,14 +109,48 @@ func TestValidateAssignmentRequiresExactIdentity(t *testing.T) {
 
 	wrong := *identity
 	wrong.RunAttempt = 2
-	if reply := server.validateAssignment(&wrong); reply.Error == "" {
-		t.Fatal("mismatched identity was released")
+	if reply := server.validateAssignment(&wrong); reply.Error != "job identity does not match assignment: run_attempt" {
+		t.Fatalf("mismatched identity reply = %#v", reply)
 	}
 	reply := server.validateAssignment(identity)
 	if !reply.Ready || reply.Env["POSTFLIGHT_EXECUTION_ID"] != "execution-42" {
 		t.Fatalf("valid identity reply = %#v", reply)
 	}
+	if len(server.statuses) != 1 || server.statuses[0].State != guestproto.RunnerHookBlocked {
+		t.Fatalf("pre-release status ladder = %#v", server.statuses)
+	}
+	if reply := server.releaseAssignment(identity); !reply.Ready {
+		t.Fatalf("release identity reply = %#v", reply)
+	}
 	if len(server.statuses) != 2 || server.statuses[0].State != guestproto.RunnerHookBlocked || server.statuses[1].State != guestproto.RunnerReleased {
+		t.Fatalf("status ladder = %#v", server.statuses)
+	}
+}
+
+func TestReleaseAssignmentRequiresValidatedExactIdentity(t *testing.T) {
+	recorder, err := timing.New("guestd-test", "boot-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := &guestproto.JobIdentity{
+		RunID: "42", RunAttempt: 1, RunnerName: "runner-2",
+		Repository: "guardian-intelligence/turborepo-tuned", WorkflowJob: "benchmark",
+	}
+	server := &Server{cfg: Config{Timing: recorder, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}, authorized: &guestproto.Authorize{
+		Identity: identity,
+	}, clock: &guestproto.ClockSample{UnixNS: 1}}
+	if reply := server.releaseAssignment(identity); reply.Error != "job hook was not validated" {
+		t.Fatalf("release before validation reply = %#v", reply)
+	}
+	if reply := server.validateAssignment(identity); !reply.Ready {
+		t.Fatalf("validation reply = %#v", reply)
+	}
+	wrong := *identity
+	wrong.WorkflowJob = "different"
+	if reply := server.releaseAssignment(&wrong); reply.Error != "job identity does not match assignment: workflow_job" {
+		t.Fatalf("wrong release identity reply = %#v", reply)
+	}
+	if len(server.statuses) != 1 || server.statuses[0].State != guestproto.RunnerHookBlocked {
 		t.Fatalf("status ladder = %#v", server.statuses)
 	}
 }
@@ -144,7 +178,7 @@ func TestRunnerWorkerStatusReportsStartAndFailure(t *testing.T) {
 	}
 	identity := &guestproto.JobIdentity{RunID: "42", RunAttempt: 1, RunnerName: "runner-2"}
 	server := &Server{
-		cfg: Config{Timing: recorder, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))},
+		cfg:        Config{Timing: recorder, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))},
 		authorized: &guestproto.Authorize{Identity: identity},
 	}
 	if reply := server.runnerWorkerStarting(); !reply.Ready {
