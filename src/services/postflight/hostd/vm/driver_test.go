@@ -673,6 +673,27 @@ func TestPreparePersistsLeaseBeforeRendezvous(t *testing.T) {
 	}
 }
 
+func TestRendezvousRejectsIncompleteCheckpointIdentity(t *testing.T) {
+	driver := newTestDriver(t, shortTempDir(t))
+	base := Rendezvous{
+		Lease: "lease-1", WorkspaceDevice: "/dev/zvol/tank/ws/lease-1",
+		ProcessDevice: "/dev/zvol/tank/process/lease-1", WorkspaceMountpoint: "/work",
+	}
+	for name, mutate := range map[string]func(*Rendezvous){
+		"digest only":  func(r *Rendezvous) { r.CheckpointDigest = "sha256:checkpoint" },
+		"version only": func(r *Rendezvous) { r.CheckpointVersion = "Version: 4.2" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			rendezvous := base
+			mutate(&rendezvous)
+			if err := driver.q.Rendezvous(context.Background(), "vm-a", rendezvous); err == nil ||
+				!strings.Contains(err.Error(), "digest and version") {
+				t.Fatalf("incomplete checkpoint error = %v", err)
+			}
+		})
+	}
+}
+
 func TestRendezvousAttachesDeliversAndConverges(t *testing.T) {
 	driver := newTestDriver(t, shortTempDir(t))
 	ctx := context.Background()
@@ -687,6 +708,8 @@ func TestRendezvousAttachesDeliversAndConverges(t *testing.T) {
 		WorkspaceDevice:     "/dev/zvol/tank/ws/lease-1",
 		WorkspaceMountpoint: "/opt/actions-runner/_work/widget/widget",
 		ProcessDevice:       "/dev/zvol/tank/process/lease-1",
+		CheckpointDigest:    "sha256:checkpoint",
+		CheckpointVersion:   "Version: 4.2",
 	}
 	if err := driver.q.Prepare(ctx, "vm-a", preparation); err != nil {
 		t.Fatalf("prepare: %v", err)
@@ -716,6 +739,11 @@ func TestRendezvousAttachesDeliversAndConverges(t *testing.T) {
 	}
 	if len(deliveries[0].Mounts) != 2 {
 		t.Fatalf("delivered mounts %+v", deliveries[0].Mounts)
+	}
+	if deliveries[0].Checkpoint == nil ||
+		deliveries[0].Checkpoint.ExpectedDigest != rendezvous.CheckpointDigest ||
+		deliveries[0].Checkpoint.ExpectedVersion != rendezvous.CheckpointVersion {
+		t.Fatalf("delivered checkpoint %+v", deliveries[0].Checkpoint)
 	}
 	mount := deliveries[0].Mounts[0]
 	if mount.Serial != workspaceNode || mount.Filesystem != workspaceFilesystem ||

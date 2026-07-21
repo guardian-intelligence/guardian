@@ -314,6 +314,7 @@ func (c *guestChannel) fold(status guestproto.RunnerStatus) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	switch status.State {
+	case guestproto.RunnerProgress:
 	case guestproto.RunnerRegistered:
 		c.observation.RunnerRegistered = true
 	case guestproto.RunnerHookBlocked:

@@ -99,7 +99,10 @@ func TestVsockLoopbackTransportEndToEnd(t *testing.T) {
 				RequestID: "request-loop", JobID: "job-loop", RunnerName: "lease-loop",
 				JobDisplayName: "test", Identity: &identity,
 			}
-			if err := guestd.AwaitRunnerAssignment(context.Background(), assignmentSocket, assignment); err != nil {
+			if err := guestd.PublishRunnerAssignment(context.Background(), assignmentSocket, assignment); err != nil {
+				return 0, err
+			}
+			if err := guestd.AwaitRunnerWorker(context.Background(), assignmentSocket); err != nil {
 				return 0, err
 			}
 			if _, err := guestd.ValidateRunnerAssignment(context.Background(), assignmentSocket, identity); err != nil {

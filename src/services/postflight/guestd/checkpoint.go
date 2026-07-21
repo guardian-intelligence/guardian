@@ -37,21 +37,28 @@ func (p ProcessCheckpoints) validate(imagesDir, externalMount string) error {
 	return nil
 }
 
-func (p ProcessCheckpoints) Restore(ctx context.Context, imagesDir, expectedDigest, externalMount string) (int, error) {
+func (p ProcessCheckpoints) Restore(ctx context.Context, imagesDir, expectedDigest, expectedVersion, externalMount string) (int, error) {
+	return p.restoreObserved(ctx, imagesDir, expectedDigest, expectedVersion, externalMount, nil)
+}
+
+func (p ProcessCheckpoints) restoreObserved(ctx context.Context, imagesDir, expectedDigest, expectedVersion, externalMount string, observer checkpointObserver) (int, error) {
 	if err := p.validate(imagesDir, externalMount); err != nil {
 		return 0, err
 	}
 	if expectedDigest == "" {
 		return 0, errors.New("guestd: checkpoint restore has no expected digest")
 	}
-	pid, err := p.CRIU.Restore(ctx, Capsule{
+	if expectedVersion == "" {
+		return 0, errors.New("guestd: checkpoint restore has no expected version")
+	}
+	pid, err := p.CRIU.restoreObserved(ctx, Capsule{
 		ImagesDir: imagesDir,
 		ExternalMounts: []ExternalMount{
 			{Key: "process", Path: p.ImagesRoot},
 			{Key: "root", Path: "/"},
 			{Key: "workspace", Path: externalMount},
 		},
-	}, expectedDigest)
+	}, expectedDigest, expectedVersion, observer)
 	if err != nil {
 		return 0, err
 	}

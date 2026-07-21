@@ -290,9 +290,9 @@ func (s *Server) sendStatus(status guestproto.RunnerStatus) {
 	}
 }
 
-// handlePrepare starts the outer one-job listener in an empty warm VM. The
-// listener itself is never checkpointed and blocks at the assignment gate
-// before Runner.Worker is created.
+// handlePrepare starts the one-job listener in an empty warm VM. The listener
+// itself is never checkpointed and publishes the assignment before
+// Runner.Worker is created.
 func (s *Server) handlePrepare(prepare guestproto.Prepare) {
 	s.mu.Lock()
 	if s.prepared != nil {
@@ -357,43 +357,56 @@ func (s *Server) handleRendezvous(rendezvous guestproto.Rendezvous) {
 
 func (s *Server) bindGeneration(rendezvous guestproto.Rendezvous) {
 	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.MountDeadline)
+	emit := func(event string) guestproto.TimingPoint {
+		point := guestTiming(s.cfg.Timing.Point(event))
+		s.sendStatus(guestproto.RunnerStatus{
+			State: guestproto.RunnerProgress, Timing: []guestproto.TimingPoint{point},
+		})
+		return point
+	}
 	fail := func(stage string, err error) {
 		cancel()
 		s.cfg.Logger.Error(stage, "lease", rendezvous.Lease, "err", err)
 		s.failWorkerGate(err)
-		s.sendStatus(guestproto.RunnerStatus{State: guestproto.RunnerExited, ExitCode: SyntheticFailureExitCode})
+		failed := guestTiming(s.cfg.Timing.Point("generation_restore_failed"))
+		s.sendStatus(guestproto.RunnerStatus{
+			State: guestproto.RunnerExited, ExitCode: SyntheticFailureExitCode,
+			Reason: err.Error(), Timing: []guestproto.TimingPoint{failed},
+		})
 	}
-	received := guestTiming(s.cfg.Timing.Point("guest_rendezvous_received"))
-	points := []guestproto.TimingPoint{received, guestTiming(s.cfg.Timing.Point("mount_convergence_started"))}
+	received := emit("guest_rendezvous_received")
+	emit("mount_convergence_started")
 	s.cfg.Logger.Info("rendezvous timing", "event", received.Event, "monotonic_ns", received.MonotonicNS)
 	err := s.convergeMounts(ctx, rendezvous.Mounts)
 	if err != nil {
 		fail("mount convergence failed", err)
 		return
 	}
-	points = append(points, guestTiming(s.cfg.Timing.Point("mount_convergence_completed")))
+	emit("mount_convergence_completed")
 	restored := false
 	if rendezvous.Checkpoint != nil {
-		points = append(points, guestTiming(s.cfg.Timing.Point("criu_restore_started")))
+		emit("criu_restore_started")
 		if s.cfg.Checkpoints == nil {
 			err := errors.New("process checkpoint requested but guest support is disabled")
 			fail("checkpoint restore failed", err)
 			return
 		}
 		checkpoint := rendezvous.Checkpoint
-		if _, err := s.cfg.Checkpoints.Restore(ctx, checkpoint.ImagesDir, checkpoint.ExpectedDigest, checkpoint.ExternalMountAt); err != nil {
+		if _, err := s.cfg.Checkpoints.restoreObserved(ctx, checkpoint.ImagesDir, checkpoint.ExpectedDigest, checkpoint.ExpectedVersion, checkpoint.ExternalMountAt, func(event string) {
+			emit(event)
+		}); err != nil {
 			fail("checkpoint restore failed", err)
 			return
 		}
 		restored = true
-		points = append(points, guestTiming(s.cfg.Timing.Point("criu_restore_completed")))
+		emit("criu_restore_completed")
 	} else if s.cfg.Checkpoints != nil {
-		points = append(points, guestTiming(s.cfg.Timing.Point("cold_capsule_start_started")))
+		emit("cold_capsule_start_started")
 		if err := s.cfg.Checkpoints.Capsules.Start(ctx); err != nil {
 			fail("cold capsule start failed", err)
 			return
 		}
-		points = append(points, guestTiming(s.cfg.Timing.Point("cold_capsule_start_completed")))
+		emit("cold_capsule_start_completed")
 	}
 	cancel()
 	clock := sampleClock()
@@ -403,9 +416,9 @@ func (s *Server) bindGeneration(rendezvous guestproto.Rendezvous) {
 	s.clock = &clock
 	s.mu.Unlock()
 	ready := guestTiming(s.cfg.Timing.Point("generation_restore_completed"))
-	points = append(points, ready)
 	s.sendStatus(guestproto.RunnerStatus{
-		State: guestproto.RunnerMountsReady, Clock: &clock, Timing: points,
+		State: guestproto.RunnerMountsReady, Clock: &clock,
+		Timing: []guestproto.TimingPoint{ready},
 	})
 }
 

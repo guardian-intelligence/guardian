@@ -412,6 +412,10 @@ func (a *Agent) preparation(record *lease) vm.Preparation {
 		Lease: record.spec.LeaseID, JITConfig: record.spec.JITConfig,
 		Env: map[string]string{
 			"ACTIONS_RUNNER_HOOK_JOB_STARTED": "/usr/local/libexec/postflight-job-started.sh",
+			// JobDispatcher opens its process channel before the privileged
+			// worker trampoline waits for restore. Use the runner's maximum
+			// handshake timeout; guestd owns the tighter restore deadline.
+			"GITHUB_ACTIONS_RUNNER_CHANNEL_TIMEOUT": "300",
 		},
 	}
 }
@@ -425,6 +429,7 @@ func (a *Agent) rendezvous(record *lease) vm.Rendezvous {
 		WorkspaceMountpoint: mountpoint,
 		ProcessDevice:       record.processDevice,
 		CheckpointDigest:    execution.Process.ExpectedDigest,
+		CheckpointVersion:   execution.Process.ExpectedVersion,
 	}
 }
 

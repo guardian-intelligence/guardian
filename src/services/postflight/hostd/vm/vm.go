@@ -42,8 +42,8 @@ const (
 	// PhaseHookBlocked: the job-start hook validated the assigned identity and
 	// is blocked before customer steps.
 	PhaseHookBlocked Phase = "hook-blocked"
-	// PhaseWorkerReady: the restored capsule has been selected and the outer
-	// listener was released to create Runner.Worker inside it.
+	// PhaseWorkerReady: the restored capsule has been selected and the
+	// Runner.Worker trampoline was released to enter it.
 	PhaseWorkerReady Phase = "worker-ready"
 	// PhaseReady: the exact generation tuple is mounted and the hook released.
 	PhaseReady Phase = "ready"
@@ -128,6 +128,9 @@ type Rendezvous struct {
 	// CheckpointDigest selects a restorable process generation. Empty is a
 	// deliberate workspace-only cold fallback.
 	CheckpointDigest string
+	// CheckpointVersion is the exact CRIU format identity recorded with the
+	// generation. It is verified inside the guest before CRIU reads images.
+	CheckpointVersion string
 }
 
 type Authorization struct {

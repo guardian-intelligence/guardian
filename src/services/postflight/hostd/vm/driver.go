@@ -393,6 +393,9 @@ func (q *QEMU) Rendezvous(ctx context.Context, id ID, rendezvous Rendezvous) err
 	if rendezvous.WorkspaceDevice == rendezvous.ProcessDevice {
 		return errors.New("vm: workspace and process devices must be distinct")
 	}
+	if (rendezvous.CheckpointDigest == "") != (rendezvous.CheckpointVersion == "") {
+		return errors.New("vm: checkpoint digest and version must be supplied together")
+	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.recordTiming(id, "qmp_rendezvous_started")
@@ -453,6 +456,7 @@ func (q *QEMU) Rendezvous(ctx context.Context, id ID, rendezvous Rendezvous) err
 	if rendezvous.CheckpointDigest != "" {
 		request.Checkpoint = &guestproto.CheckpointRestore{
 			ImagesDir: processImagesDir, ExpectedDigest: rendezvous.CheckpointDigest,
+			ExpectedVersion: rendezvous.CheckpointVersion,
 			ExternalMountAt: rendezvous.WorkspaceMountpoint,
 		}
 	}

@@ -58,15 +58,29 @@ esac
 	if artifact.Version != "Version: 4.2" || !strings.HasPrefix(artifact.Digest, "sha256:") {
 		t.Fatalf("artifact = %+v", artifact)
 	}
-	pid, err := engine.Restore(context.Background(), capsule, artifact.Digest)
+	var restoreStages []string
+	pid, err := engine.restoreObserved(context.Background(), capsule, artifact.Digest, artifact.Version, func(event string) {
+		restoreStages = append(restoreStages, event)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if pid != 4321 {
 		t.Fatalf("pid = %d", pid)
 	}
-	if _, err := engine.Restore(context.Background(), capsule, "sha256:"+strings.Repeat("0", 64)); err == nil {
+	wantRestoreStages := []string{
+		"restore_version_started", "restore_version_completed",
+		"restore_digest_started", "restore_digest_completed",
+		"restore_criu_started", "restore_criu_completed",
+	}
+	if strings.Join(restoreStages, ",") != strings.Join(wantRestoreStages, ",") {
+		t.Fatalf("restore stages = %v, want %v", restoreStages, wantRestoreStages)
+	}
+	if _, err := engine.Restore(context.Background(), capsule, "sha256:"+strings.Repeat("0", 64), artifact.Version); err == nil {
 		t.Fatal("tampered artifact restored")
+	}
+	if _, err := engine.Restore(context.Background(), capsule, artifact.Digest, "Version: 4.1"); err == nil || !strings.Contains(err.Error(), "does not match checkpoint version") {
+		t.Fatalf("mismatched CRIU version error = %v", err)
 	}
 }
 

@@ -7,14 +7,14 @@ index e20eb62..8ca004d 100644
 +using System.Globalization;
 @@ -670,2 +673,3 @@ namespace GitHub.Runner.Listener
                                      var jobMessage = StringUtil.ConvertFromJson<Pipelines.AgentJobRequestMessage>(message.Body);
-+                                    await WaitForPostflightAssignmentAsync(jobMessage.RequestId.ToString(CultureInfo.InvariantCulture), jobMessage, settings, messageQueueLoopTokenSource.Token);
++                                    await PublishPostflightAssignmentAsync(jobMessage.RequestId.ToString(CultureInfo.InvariantCulture), jobMessage, settings, messageQueueLoopTokenSource.Token);
                                      jobDispatcher.Run(jobMessage, runOnce);
 @@ -754,2 +758,3 @@ namespace GitHub.Runner.Listener
                                      // Dispatch
-+                                    await WaitForPostflightAssignmentAsync(messageRef.RunnerRequestId, jobRequestMessage, settings, messageQueueLoopTokenSource.Token);
++                                    await PublishPostflightAssignmentAsync(messageRef.RunnerRequestId, jobRequestMessage, settings, messageQueueLoopTokenSource.Token);
                                      jobDispatcher.Run(jobRequestMessage, runOnce);
 @@ -886,0 +891,80 @@ namespace GitHub.Runner.Listener
-+        private async Task WaitForPostflightAssignmentAsync(
++        private async Task PublishPostflightAssignmentAsync(
 +            string requestId,
 +            Pipelines.AgentJobRequestMessage jobMessage,
 +            RunnerSettings settings,
@@ -73,7 +73,7 @@ index e20eb62..8ca004d 100644
 +                startInfo.ArgumentList.Add(argument);
 +            }
 +
-+            Trace.Info($"Blocking Runner.Worker for Postflight request '{requestId}' and job '{jobMessage.JobId}'");
++            Trace.Info($"Publishing Postflight request '{requestId}' and job '{jobMessage.JobId}' before Runner.Worker dispatch");
 +            using var gate = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start Postflight assignment gate");
 +            try
 +            {
@@ -91,6 +91,6 @@ index e20eb62..8ca004d 100644
 +            {
 +                throw new InvalidOperationException($"Postflight assignment gate exited {gate.ExitCode}");
 +            }
-+            Trace.Info($"Postflight released Runner.Worker for request '{requestId}'");
++            Trace.Info($"Published Postflight request '{requestId}' before Runner.Worker dispatch");
 +        }
 +

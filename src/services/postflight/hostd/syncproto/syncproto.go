@@ -206,11 +206,12 @@ type WorkspaceSpec struct {
 }
 
 // ProcessSpec says how to materialize the encrypted CRIU image volume.
-// A restore is selected only when Generation and ExpectedDigest are both
-// present; otherwise hostd creates an empty process volume and performs a
-// cold process start on the warm VM.
+// A restore is selected only when Generation, ExpectedDigest, and
+// ExpectedVersion are all present; otherwise hostd creates an empty process
+// volume and performs a cold process start on the warm VM.
 type ProcessSpec struct {
-	Generation     string `json:"generation,omitempty"`
-	SizeBytes      int64  `json:"size_bytes,omitempty"`
-	ExpectedDigest string `json:"expected_digest,omitempty"`
+	Generation      string `json:"generation,omitempty"`
+	SizeBytes       int64  `json:"size_bytes,omitempty"`
+	ExpectedDigest  string `json:"expected_digest,omitempty"`
+	ExpectedVersion string `json:"expected_version,omitempty"`
 }
