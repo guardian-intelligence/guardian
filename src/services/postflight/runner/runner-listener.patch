@@ -13,7 +13,7 @@ index e20eb62..8ca004d 100644
                                      // Dispatch
 +                                    await WaitForPostflightAssignmentAsync(messageRef.RunnerRequestId, jobRequestMessage, settings, messageQueueLoopTokenSource.Token);
                                      jobDispatcher.Run(jobRequestMessage, runOnce);
-@@ -886,0 +891,66 @@ namespace GitHub.Runner.Listener
+@@ -886,0 +891,80 @@ namespace GitHub.Runner.Listener
 +        private async Task WaitForPostflightAssignmentAsync(
 +            string requestId,
 +            Pipelines.AgentJobRequestMessage jobMessage,
@@ -35,6 +35,20 @@ index e20eb62..8ca004d 100644
 +                throw new InvalidOperationException($"Postflight assignment is missing github.{key}");
 +            }
 +
++            string SystemVariable(string key)
++            {
++                if (jobMessage.Variables != null &&
++                    jobMessage.Variables.TryGetValue(key, out var variable) &&
++                    variable != null &&
++                    !variable.IsSecret &&
++                    !string.IsNullOrEmpty(variable.Value))
++                {
++                    return variable.Value;
++                }
++
++                throw new InvalidOperationException($"Postflight assignment is missing {key}");
++            }
++
 +            var startInfo = new ProcessStartInfo("/usr/local/bin/guestd")
 +            {
 +                UseShellExecute = false,
@@ -48,7 +62,7 @@ index e20eb62..8ca004d 100644
 +                GitHubContext("run_id"),
 +                GitHubContext("run_attempt"),
 +                GitHubContext("repository"),
-+                GitHubContext("job"),
++                SystemVariable("system.github.job"),
 +                jobMessage.JobDisplayName,
 +            })
 +            {
