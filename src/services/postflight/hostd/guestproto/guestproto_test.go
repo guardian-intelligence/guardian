@@ -26,7 +26,9 @@ func TestRoundTrip(t *testing.T) {
 				Mountpoint: "/opt/actions-runner/_work/widget/widget",
 				Options:    []string{"discard", "noatime", "nodev", "nosuid"},
 			}},
-			Env: map[string]string{"POSTFLIGHT_EXECUTION_ID": "exec-1"},
+		}},
+		{Kind: KindAuthorize, Authorize: &Authorize{
+			Lease: "lease-1", Env: map[string]string{"POSTFLIGHT_EXECUTION_ID": "exec-1"},
 		}},
 		{Kind: KindRunnerStatus, RunnerStatus: &RunnerStatus{State: RunnerRegistered}},
 		{Kind: KindRunnerStatus, RunnerStatus: &RunnerStatus{
@@ -42,7 +44,7 @@ func TestRoundTrip(t *testing.T) {
 		}},
 		{Kind: KindRunnerStatus, RunnerStatus: &RunnerStatus{State: RunnerReleased}},
 		{Kind: KindRunnerStatus, RunnerStatus: &RunnerStatus{State: RunnerExited, ExitCode: 42}},
-		{Kind: KindQuiesce, Quiesce: &Quiesce{Mountpoint: "/opt/actions-runner/_work/widget/widget"}},
+		{Kind: KindQuiesce, Quiesce: &Quiesce{Mountpoints: []string{"/opt/actions-runner/_work/widget/widget"}}},
 		{Kind: KindQuiesced, Quiesced: &Quiesced{}},
 		{Kind: KindQuiesceFailed, QuiesceFailed: &QuiesceFailed{Reason: "target is busy"}},
 	}
@@ -78,12 +80,16 @@ func TestRoundTrip(t *testing.T) {
 			if !reflect.DeepEqual(got.Rendezvous, want.Rendezvous) {
 				t.Fatalf("rendezvous %+v, want %+v", got.Rendezvous, want.Rendezvous)
 			}
+		case KindAuthorize:
+			if !reflect.DeepEqual(got.Authorize, want.Authorize) {
+				t.Fatalf("authorize %+v, want %+v", got.Authorize, want.Authorize)
+			}
 		case KindRunnerStatus:
 			if !reflect.DeepEqual(got.RunnerStatus, want.RunnerStatus) {
 				t.Fatalf("runner status %+v, want %+v", got.RunnerStatus, want.RunnerStatus)
 			}
 		case KindQuiesce:
-			if *got.Quiesce != *want.Quiesce {
+			if !reflect.DeepEqual(got.Quiesce, want.Quiesce) {
 				t.Fatalf("quiesce %+v, want %+v", got.Quiesce, want.Quiesce)
 			}
 		case KindQuiesceFailed:

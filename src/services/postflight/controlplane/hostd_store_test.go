@@ -260,7 +260,7 @@ func TestObservedAssignmentAdoptsCapacityDisplacedJob(t *testing.T) {
 	}
 
 	if _, _, completed, err := st.CompleteRoutedLease(
-		ctx, "host-a", listener, execution, 1, time.Now().Add(time.Minute)); err != nil || !completed {
+		ctx, "host-a", listener, execution, 1, testCheckpoint(), time.Now().Add(time.Minute)); err != nil || !completed {
 		t.Fatalf("routed completion: completed=%v err=%v", completed, err)
 	}
 	if got := reservedCount(t, pool, "host-a"); got != 0 {
@@ -399,7 +399,7 @@ func TestTerminalTransitionsScrubJITConfig(t *testing.T) {
 	}
 
 	completed := place(501, time.Now().Add(time.Minute))
-	if _, _, ok, err := st.CompleteLease(ctx, "host-a", completed, 0, time.Now().Add(time.Minute)); err != nil || !ok {
+	if _, _, ok, err := st.CompleteLease(ctx, "host-a", completed, 0, testCheckpoint(), time.Now().Add(time.Minute)); err != nil || !ok {
 		t.Fatalf("complete: ok=%v err=%v", ok, err)
 	}
 	failed := place(502, time.Now().Add(time.Minute))

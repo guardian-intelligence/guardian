@@ -24,6 +24,13 @@ func testScheduler(st *pgStore) *scheduler {
 	return &scheduler{st: st, cfg: config{workerBatchSize: 16, verdictTimeout: time.Hour}, tracer: noop.NewTracerProvider().Tracer("test")}
 }
 
+func testCheckpoint() *syncproto.CheckpointArtifact {
+	return &syncproto.CheckpointArtifact{
+		Digest:  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Version: "Version: 4.2",
+	}
+}
+
 func ensureScope(t *testing.T, st *pgStore, jobName string) string {
 	t.Helper()
 	scopeID, err := st.EnsureWorkspaceScope(context.Background(), workspaceScopeKey{
@@ -78,11 +85,11 @@ func placeAssignedLease(t *testing.T, st *pgStore, d schedulableDemand) (leaseID
 func exitAndSeal(t *testing.T, st *pgStore, hostID, leaseID string) string {
 	t.Helper()
 	ctx := context.Background()
-	_, generation, done, err := st.CompleteLease(ctx, hostID, leaseID, 0, time.Now().Add(time.Minute))
+	_, generation, done, err := st.CompleteLease(ctx, hostID, leaseID, 0, testCheckpoint(), time.Now().Add(time.Minute))
 	if err != nil || !done || generation == "" {
 		t.Fatalf("exit-0 branch-trust lease did not request a seal: generation=%q done=%v err=%v", generation, done, err)
 	}
-	if _, sealed, err := st.RecordLeaseSealed(ctx, hostID, leaseID, generation); err != nil || !sealed {
+	if _, sealed, err := st.RecordLeaseSealed(ctx, hostID, leaseID, generation, testCheckpoint()); err != nil || !sealed {
 		t.Fatalf("record sealed: sealed=%v err=%v", sealed, err)
 	}
 	return generation
@@ -170,7 +177,7 @@ func TestColdSeedWarmCloneAndRetirement(t *testing.T) {
 	// Exit 0 on branch trust: the lease holds in 'sealing' with a minted
 	// candidate, the slot frees, and the demand completes without waiting
 	// on GitHub.
-	_, gen1, done, err := st.CompleteLease(ctx, host1, lease1, 0, time.Now().Add(time.Minute))
+	_, gen1, done, err := st.CompleteLease(ctx, host1, lease1, 0, testCheckpoint(), time.Now().Add(time.Minute))
 	if err != nil || !done || gen1 == "" {
 		t.Fatalf("complete: generation=%q done=%v err=%v", gen1, done, err)
 	}
@@ -193,7 +200,7 @@ func TestColdSeedWarmCloneAndRetirement(t *testing.T) {
 		t.Fatalf("desired projection = %+v, want a seal request for %s", desired[0], gen1)
 	}
 
-	if _, sealed, err := st.RecordLeaseSealed(ctx, host1, lease1, gen1); err != nil || !sealed {
+	if _, sealed, err := st.RecordLeaseSealed(ctx, host1, lease1, gen1, testCheckpoint()); err != nil || !sealed {
 		t.Fatalf("record sealed: sealed=%v err=%v", sealed, err)
 	}
 	if got := leaseColumn(t, pool, lease1, "state"); got != leaseCompleted {
@@ -327,7 +334,7 @@ func TestPRTrustNeverSeals(t *testing.T) {
 	for _, trust := range []string{trustClassPR, trustClassPRFork, trustClassUnknown} {
 		jobID++
 		leaseID, hostID := placeAssignedLease(t, st, seedTrustedDemand(t, pool, jobID, trust, scopeID))
-		_, generation, done, err := st.CompleteLease(ctx, hostID, leaseID, 0, time.Now().Add(time.Minute))
+		_, generation, done, err := st.CompleteLease(ctx, hostID, leaseID, 0, testCheckpoint(), time.Now().Add(time.Minute))
 		if err != nil || !done {
 			t.Fatalf("%s: complete: done=%v err=%v", trust, done, err)
 		}
@@ -360,7 +367,7 @@ func TestFailedRunNeverSeals(t *testing.T) {
 	scopeID := ensureScope(t, st, "build")
 
 	leaseID, hostID := placeAssignedLease(t, st, seedTrustedDemand(t, pool, 401, trustClassBranch, scopeID))
-	_, generation, done, err := st.CompleteLease(ctx, hostID, leaseID, 1, time.Now().Add(time.Minute))
+	_, generation, done, err := st.CompleteLease(ctx, hostID, leaseID, 1, testCheckpoint(), time.Now().Add(time.Minute))
 	if err != nil || !done || generation != "" {
 		t.Fatalf("exit-1 complete: generation=%q done=%v err=%v, want plain completion", generation, done, err)
 	}
@@ -436,7 +443,7 @@ func TestSealFailureAndExpiryDiscard(t *testing.T) {
 
 	// Host reports failed while sealing.
 	leaseA, hostA := placeAssignedLease(t, st, seedTrustedDemand(t, pool, 601, trustClassBranch, scopeID))
-	_, genA, _, err := st.CompleteLease(ctx, hostA, leaseA, 0, time.Now().Add(time.Minute))
+	_, genA, _, err := st.CompleteLease(ctx, hostA, leaseA, 0, testCheckpoint(), time.Now().Add(time.Minute))
 	if err != nil || genA == "" {
 		t.Fatalf("complete: generation=%q err=%v", genA, err)
 	}
@@ -453,7 +460,7 @@ func TestSealFailureAndExpiryDiscard(t *testing.T) {
 
 	// Seal deadline passes with no confirmation.
 	leaseB, hostB := placeAssignedLease(t, st, seedTrustedDemand(t, pool, 602, trustClassBranch, scopeID))
-	_, genB, _, err := st.CompleteLease(ctx, hostB, leaseB, 0, time.Now().Add(-time.Second))
+	_, genB, _, err := st.CompleteLease(ctx, hostB, leaseB, 0, testCheckpoint(), time.Now().Add(-time.Second))
 	if err != nil || genB == "" {
 		t.Fatalf("complete: generation=%q err=%v", genB, err)
 	}
@@ -525,7 +532,7 @@ func TestReapNeverSelectsReferencedGenerations(t *testing.T) {
 	mustExec(`UPDATE host_leases SET workspace_generation = 'gen-lease', observed_source_generation = 'gen-lease'
 	          WHERE lease_id = $1`, leaseID)
 	sweepAndAssert("gen-lease", genRetained, "a live lease")
-	if _, _, done, err := st.CompleteLease(ctx, hostID, leaseID, 1, time.Now().Add(time.Minute)); err != nil || !done {
+	if _, _, done, err := st.CompleteLease(ctx, hostID, leaseID, 1, testCheckpoint(), time.Now().Add(time.Minute)); err != nil || !done {
 		t.Fatalf("complete: done=%v err=%v", done, err)
 	}
 	sweepAndAssert("gen-lease", genReapable, "nothing")
@@ -675,7 +682,7 @@ func TestStaleCandidateDiscard(t *testing.T) {
 	genA := exitAndSeal(t, st, hostA, leaseA)
 
 	leaseB, hostB := placeAssignedLease(t, st, seedTrustedDemand(t, pool, 902, trustClassBranch, scopeID))
-	_, genB, done, err := st.CompleteLease(ctx, hostB, leaseB, 0, time.Now().Add(time.Minute))
+	_, genB, done, err := st.CompleteLease(ctx, hostB, leaseB, 0, testCheckpoint(), time.Now().Add(time.Minute))
 	if err != nil || !done || genB == "" {
 		t.Fatalf("complete: generation=%q done=%v err=%v", genB, done, err)
 	}

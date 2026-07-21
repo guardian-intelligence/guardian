@@ -1,0 +1,17 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "generation",
+    srcs = [
+        "machine.go",
+        "manifest.go",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/generation",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "generation_test",
+    srcs = ["generation_test.go"],
+    embed = [":generation"],
+)

@@ -11,12 +11,13 @@
 //	HOSTD_HOST_SECRET_FILE        >=32 random bytes keying checkout tokens; per host, never shared
 //	HOSTD_STATE_DIR               root for VM state dirs and the checkout store, e.g. /var/lib/postflight
 //	HOSTD_POOL                    hostd-managed dataset subtree, e.g. tank/postflight
-//	HOSTD_CLASS                   runner class this host serves, e.g. postflight-4cpu-ubuntu-2404
+//	HOSTD_CLASS                   runner class this host serves, e.g. postflight-4-ubuntu-24.04-github-confidential
 //	HOSTD_IMAGE_ID                golden image id; root disks clone <pool>/images/<id>@golden
 //	HOSTD_SLOTS                   per-class slot count (default 4; warm VM = slot, no overcommit)
 //	HOSTD_CPUS                    vCPUs per VM (default 4)
 //	HOSTD_MEMORY_MIB              memory per VM (default 16384)
 //	HOSTD_QEMU_PATH               QEMU binary (default /usr/bin/qemu-system-x86_64)
+//	HOSTD_CRIU_VERSION            exact version baked into the guest, e.g. Version: 4.2
 //	HOSTD_SYNC_INTERVAL           sync cadence when the control plane does not suggest one (default 2s)
 //	HOSTD_GUEST_NETWORK           guest egress datapath: none (default) or user. user is the
 //	                              tracer-only libslirp datapath: unrestricted outbound from the
@@ -84,6 +85,7 @@ func run(logger *slog.Logger) error {
 	vms, err := vm.NewQEMU(vm.Config{
 		StateRoot:    filepath.Join(cfg.stateDir, "vm"),
 		QEMUPath:     cfg.qemuPath,
+		Firmware:     cfg.firmwarePath,
 		DatasetRoot:  cfg.pool,
 		Classes:      map[vm.Class]vm.ClassConfig{class: {CPUs: cfg.cpus, MemoryMiB: cfg.memoryMiB, Image: image}},
 		Launcher:     vm.NewSystemdLauncher(),
@@ -181,5 +183,6 @@ func platformFingerprint(cfg config) agent.PlatformFingerprint {
 	return agent.PlatformFingerprint{
 		QEMUVersion: qemuVersion, KernelRelease: strings.TrimSpace(string(kernelRaw)),
 		OSImageID: cfg.imageID, MachineType: vm.MachineType, CPUModel: cpuModel,
+		CRIUVersion: cfg.criuVersion,
 	}
 }

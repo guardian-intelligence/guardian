@@ -14,7 +14,7 @@ import (
 )
 
 // Version is the protocol revision a Hello announces.
-const Version = 2
+const Version = 6
 
 // WorkspaceReadyMarker is the file guestd drops at a converged workspace
 // mountpoint's root once every declared mount is in place. It is the shared
@@ -43,18 +43,25 @@ type Kind string
 const (
 	// KindHello (guest → host): guestd is up and idle.
 	KindHello Kind = "hello"
-	// KindPrepare (host → guest): register a runner without attaching any
-	// customer volume or revealing customer identity.
+	// KindPrepare (host → guest): register a listener on a generic warm VM
+	// without attaching tenant state.
 	KindPrepare Kind = "prepare"
-	// KindRendezvous (host → guest): mount the exact generation tuple for
-	// the job GitHub assigned, then release the blocked job-start hook.
+	// KindRendezvous (host → guest): mount and restore the generation selected
+	// by the local assignment before Runner.Worker is released.
 	KindRendezvous Kind = "rendezvous"
+	// KindAssignment (guest → host): the already-connected GitHub listener
+	// received a job and is blocked before it spawns Runner.Worker.
+	KindAssignment Kind = "assignment"
+	// KindAuthorize (host → guest): the local assignment matches a staged
+	// execution; release Runner.Worker into the restored capsule.
+	KindAuthorize Kind = "authorize"
 	// KindRunnerStatus (guest → host): the runner lifecycle advanced.
 	KindRunnerStatus Kind = "runner-status"
-	// KindQuiesce (host → guest): sync and unmount the workspace ahead of
-	// the host-side seal snapshot.
+	// KindQuiesce (host → guest): checkpoint and flush the generation
+	// ahead of the host-side seal snapshot.
 	KindQuiesce Kind = "quiesce"
-	// KindQuiesced (guest → host): the workspace is synced and unmounted.
+	// KindQuiesced (guest → host): the generation is checkpointed and
+	// flushed; the host must destroy QEMU before sealing it.
 	KindQuiesced Kind = "quiesced"
 	// KindQuiesceFailed (guest → host): the workspace could not be
 	// quiesced; Reason says why.
@@ -68,6 +75,8 @@ type Message struct {
 	Hello         *Hello         `json:"hello,omitempty"`
 	Prepare       *Prepare       `json:"prepare,omitempty"`
 	Rendezvous    *Rendezvous    `json:"rendezvous,omitempty"`
+	Assignment    *Assignment    `json:"assignment,omitempty"`
+	Authorize     *Authorize     `json:"authorize,omitempty"`
 	RunnerStatus  *RunnerStatus  `json:"runner_status,omitempty"`
 	Quiesce       *Quiesce       `json:"quiesce,omitempty"`
 	Quiesced      *Quiesced      `json:"quiesced,omitempty"`
@@ -79,7 +88,8 @@ type Hello struct {
 	Version int `json:"version"`
 }
 
-// Prepare carries the single-use runner registration down to an idle VM.
+// Prepare carries a single-use runner registration into an otherwise empty
+// warm VM. The listener connects before any customer generation is attached.
 type Prepare struct {
 	// Lease names the listener. It is deliberately opaque to the guest.
 	Lease string `json:"lease"`
@@ -88,16 +98,57 @@ type Prepare struct {
 	// on any disk.
 	JITConfig string `json:"jit_config"`
 	// Env contains only pool/listener configuration. Customer-specific
-	// values arrive in Rendezvous after GitHub's assignment is observed.
+	// values arrive in Authorize after GitHub's assignment is observed.
 	Env map[string]string `json:"env,omitempty"`
 }
 
-// Rendezvous carries the customer volumes and per-job environment after the
-// synchronous job-start hook has reported the runner GitHub actually chose.
+// Assignment is emitted at the earliest authoritative local boundary: after
+// Runner.Listener has received the encrypted GitHub job message and before it
+// asks JobDispatcher to create Runner.Worker. RequestID is GitHub's opaque
+// runner request identifier; it contains no job credential.
+type Assignment struct {
+	RequestID      string        `json:"request_id"`
+	JobID          string        `json:"job_id"`
+	RunnerName     string        `json:"runner_name"`
+	JobDisplayName string        `json:"job_display_name"`
+	Identity       *JobIdentity  `json:"identity"`
+	Timing         []TimingPoint `json:"timing,omitempty"`
+}
+
+// Rendezvous carries the generation selected for the job that the local
+// listener actually received. It restores the process capsule before the
+// blocked listener is allowed to spawn Runner.Worker.
 type Rendezvous struct {
-	Lease  string            `json:"lease"`
-	Mounts []Mount           `json:"mounts"`
-	Env    map[string]string `json:"env,omitempty"`
+	Lease      string             `json:"lease"`
+	Mounts     []Mount            `json:"mounts"`
+	Checkpoint *CheckpointRestore `json:"checkpoint,omitempty"`
+}
+
+type Authorize struct {
+	Lease     string            `json:"lease"`
+	RequestID string            `json:"request_id"`
+	Identity  *JobIdentity      `json:"identity,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+}
+
+// TimingPoint preserves the originating process's high-resolution clock.
+// MonotonicNS is CLOCK_BOOTTIME and is compared only within Source/BootID;
+// UnixNS exists solely for cross-machine clock brackets and log correlation.
+type TimingPoint struct {
+	Event       string `json:"event"`
+	Source      string `json:"source"`
+	BootID      string `json:"boot_id"`
+	Sequence    uint64 `json:"sequence"`
+	MonotonicNS int64  `json:"monotonic_ns"`
+	UnixNS      int64  `json:"unix_ns"`
+}
+
+// CheckpointRestore selects the authenticated process artifact already on
+// the encrypted process volume. Empty means workspace-only cold fallback.
+type CheckpointRestore struct {
+	ImagesDir       string `json:"images_dir"`
+	ExpectedDigest  string `json:"expected_digest"`
+	ExternalMountAt string `json:"external_mount_at"`
 }
 
 // Mount is one hot-attached disk the guest converges before any customer
@@ -116,14 +167,29 @@ type Mount struct {
 	Options []string `json:"options,omitempty"`
 }
 
-// Quiesce asks the guest to sync and unmount the workspace filesystem so
-// the host can snapshot the zvol while the VM is still alive.
+// Quiesce asks the guest to prove the selected volumes are mounted,
+// checkpoint the process capsule, and flush the filesystems. The host then
+// destroys QEMU before it snapshots either zvol.
 type Quiesce struct {
-	Mountpoint string `json:"mountpoint"`
+	Mountpoints []string        `json:"mountpoints"`
+	Checkpoint  *CheckpointDump `json:"checkpoint,omitempty"`
+}
+
+type CheckpointDump struct {
+	ImagesDir       string `json:"images_dir"`
+	ExternalMountAt string `json:"external_mount_at"`
 }
 
 // Quiesced acknowledges a completed quiesce.
-type Quiesced struct{}
+type Quiesced struct {
+	Checkpoint *CheckpointArtifact `json:"checkpoint,omitempty"`
+	Timing     []TimingPoint       `json:"timing,omitempty"`
+}
+
+type CheckpointArtifact struct {
+	Digest  string `json:"digest"`
+	Version string `json:"version"`
+}
 
 // QuiesceFailed reports a quiesce that could not complete; the host skips
 // the seal (ambiguity never promotes) and destroys the VM.
@@ -138,12 +204,17 @@ const (
 	// RunnerRegistered: the runner registered and is listening for its job.
 	RunnerRegistered RunnerState = "registered"
 	// RunnerHookBlocked: GitHub assigned a job and its synchronous start
-	// hook is waiting for the host to bind the resolved generation tuple.
+	// hook is performing the defense-in-depth identity check.
 	RunnerHookBlocked RunnerState = "hook-blocked"
-	// RunnerMountsReady: every declared device is mounted and the clock
-	// sample was taken, but the hook is still blocked.
+	// RunnerMountsReady: every declared device is mounted, the process
+	// generation is restored, and its clock sample was taken. Runner.Worker
+	// remains blocked in the listener gate.
 	RunnerMountsReady RunnerState = "mounts-ready"
-	// RunnerReleased: the job-start hook was released.
+	// RunnerWorkerReady: the generation is restored and the outer listener
+	// may spawn Runner.Worker inside the capsule.
+	RunnerWorkerReady RunnerState = "worker-ready"
+	// RunnerReleased: the job-start hook validated the actual workflow
+	// identity and customer steps may run.
 	RunnerReleased RunnerState = "released"
 	// RunnerExited: the runner finished; ExitCode is meaningful.
 	RunnerExited RunnerState = "exited"
@@ -151,10 +222,11 @@ const (
 
 // RunnerStatus reports the runner lifecycle up to the host.
 type RunnerStatus struct {
-	State    RunnerState  `json:"state"`
-	ExitCode int          `json:"exit_code,omitempty"`
-	Identity *JobIdentity `json:"identity,omitempty"`
-	Clock    *ClockSample `json:"clock,omitempty"`
+	State    RunnerState   `json:"state"`
+	ExitCode int           `json:"exit_code,omitempty"`
+	Identity *JobIdentity  `json:"identity,omitempty"`
+	Clock    *ClockSample  `json:"clock,omitempty"`
+	Timing   []TimingPoint `json:"timing,omitempty"`
 }
 
 // JobIdentity is the identity GitHub exposes to the synchronous runner hook.
@@ -168,8 +240,8 @@ type JobIdentity struct {
 	WorkflowJob string `json:"workflow_job"`
 }
 
-// ClockSample is taken after mounts (and a future memory restore) and before
-// the hook is released. Host samples bracket it outside the VM.
+// ClockSample is taken after mounts and process restore and before
+// Runner.Worker is released. Host samples bracket it outside the VM.
 type ClockSample struct {
 	UnixNS       int64  `json:"unix_ns"`
 	Synchronized bool   `json:"synchronized"`
@@ -182,7 +254,7 @@ type ClockSample struct {
 func (m Message) Validate() error {
 	payloads := 0
 	for _, present := range []bool{
-		m.Hello != nil, m.Prepare != nil, m.Rendezvous != nil, m.RunnerStatus != nil,
+		m.Hello != nil, m.Prepare != nil, m.Rendezvous != nil, m.Assignment != nil, m.Authorize != nil, m.RunnerStatus != nil,
 		m.Quiesce != nil, m.Quiesced != nil, m.QuiesceFailed != nil,
 	} {
 		if present {
@@ -197,6 +269,10 @@ func (m Message) Validate() error {
 		matched = m.Prepare != nil
 	case KindRendezvous:
 		matched = m.Rendezvous != nil
+	case KindAssignment:
+		matched = m.Assignment != nil
+	case KindAuthorize:
+		matched = m.Authorize != nil
 	case KindRunnerStatus:
 		matched = m.RunnerStatus != nil
 	case KindQuiesce:

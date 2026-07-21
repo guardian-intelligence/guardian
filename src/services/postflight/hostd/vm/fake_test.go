@@ -34,4 +34,18 @@ func TestFakeMirrorsRealDriverMismatchErrors(t *testing.T) {
 	if err := fake.Prepare(ctx, "vm-a", Preparation{Lease: "lease-2"}); err == nil {
 		t.Fatal("reassigned a vm to a different lease")
 	}
+	if !fake.MarkListening("vm-a") {
+		t.Fatal("mark listening")
+	}
+	if !fake.MarkAssigned("vm-a", Assignment{RequestID: "request-1", RunnerName: "lease-1"}) {
+		t.Fatal("mark assigned")
+	}
+	if err := fake.Rendezvous(ctx, "vm-a", Rendezvous{
+		Lease: "lease-1", WorkspaceDevice: "/dev/ws", WorkspaceMountpoint: "/work", ProcessDevice: "/dev/process",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !fake.MarkBound("vm-a") {
+		t.Fatal("mark bound")
+	}
 }

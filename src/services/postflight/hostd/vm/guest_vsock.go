@@ -23,8 +23,9 @@ type VsockGuest struct {
 	port uint32
 	dial func(ctx context.Context, cid, port uint32) (net.Conn, error)
 
-	mu    sync.Mutex
-	chans map[ID]*guestChannel
+	mu      sync.Mutex
+	chans   map[ID]*guestChannel
+	updates chan ID
 }
 
 var _ Guest = (*VsockGuest)(nil)
@@ -32,9 +33,22 @@ var _ Guest = (*VsockGuest)(nil)
 // NewVsockGuest wires the transport against the guestd listening port.
 func NewVsockGuest() *VsockGuest {
 	return &VsockGuest{
-		port:  guestproto.VsockPort,
-		dial:  vsock.Dial,
-		chans: map[ID]*guestChannel{},
+		port:    guestproto.VsockPort,
+		dial:    vsock.Dial,
+		chans:   map[ID]*guestChannel{},
+		updates: make(chan ID, 256),
+	}
+}
+
+// Updates emits a coalescible hint whenever guestd advances a VM's level
+// state. hostd immediately re-observes through List instead of waiting for
+// its control-plane polling interval.
+func (g *VsockGuest) Updates() <-chan ID { return g.updates }
+
+func (g *VsockGuest) notify(id ID) {
+	select {
+	case g.updates <- id:
+	default:
 	}
 }
 
@@ -62,6 +76,18 @@ func (g *VsockGuest) Rendezvous(ctx context.Context, id ID, cid uint32, rendezvo
 	return channel.write(ctx, guestproto.Message{Kind: guestproto.KindRendezvous, Rendezvous: &rendezvous})
 }
 
+// Authorize implements Guest.
+func (g *VsockGuest) Authorize(ctx context.Context, id ID, cid uint32, authorize guestproto.Authorize) error {
+	channel, err := g.channel(ctx, id, cid)
+	if err != nil {
+		return fmt.Errorf("vm: guest channel for %s: %w", id, err)
+	}
+	if err := channel.awaitHello(ctx); err != nil {
+		return fmt.Errorf("vm: guest %s never said hello: %w", id, err)
+	}
+	return channel.write(ctx, guestproto.Message{Kind: guestproto.KindAuthorize, Authorize: &authorize})
+}
+
 // Observe implements Guest.
 func (g *VsockGuest) Observe(ctx context.Context, id ID, cid uint32) (GuestObservation, error) {
 	channel, err := g.channel(ctx, id, cid)
@@ -75,34 +101,34 @@ func (g *VsockGuest) Observe(ctx context.Context, id ID, cid uint32) (GuestObser
 }
 
 // Quiesce implements Guest.
-func (g *VsockGuest) Quiesce(ctx context.Context, id ID, cid uint32, mountpoint string) error {
+func (g *VsockGuest) Quiesce(ctx context.Context, id ID, cid uint32, request guestproto.Quiesce) (guestproto.Quiesced, error) {
 	channel, err := g.channel(ctx, id, cid)
 	if err != nil {
-		return fmt.Errorf("vm: guest channel for %s: %w", id, err)
+		return guestproto.Quiesced{}, fmt.Errorf("vm: guest channel for %s: %w", id, err)
 	}
 	if err := channel.awaitHello(ctx); err != nil {
-		return fmt.Errorf("vm: guest %s never said hello: %w", id, err)
+		return guestproto.Quiesced{}, fmt.Errorf("vm: guest %s never said hello: %w", id, err)
 	}
 	reply, err := channel.registerQuiesce()
 	if err != nil {
-		return fmt.Errorf("vm: quiesce %s: %w", id, err)
+		return guestproto.Quiesced{}, fmt.Errorf("vm: quiesce %s: %w", id, err)
 	}
-	message := guestproto.Message{Kind: guestproto.KindQuiesce, Quiesce: &guestproto.Quiesce{Mountpoint: mountpoint}}
+	message := guestproto.Message{Kind: guestproto.KindQuiesce, Quiesce: &request}
 	if err := channel.write(ctx, message); err != nil {
 		channel.abandonQuiesce(reply)
-		return fmt.Errorf("vm: quiesce %s: %w", id, err)
+		return guestproto.Quiesced{}, fmt.Errorf("vm: quiesce %s: %w", id, err)
 	}
 	select {
-	case err := <-reply:
-		if err != nil {
-			return fmt.Errorf("vm: quiesce %s: %w", id, err)
+	case result := <-reply:
+		if result.err != nil {
+			return guestproto.Quiesced{}, fmt.Errorf("vm: quiesce %s: %w", id, result.err)
 		}
-		return nil
+		return result.reply, nil
 	case <-ctx.Done():
 		// Free the reply slot: the lease is failing anyway, and a stale
 		// claim must not poison a later quiesce on this channel.
 		channel.abandonQuiesce(reply)
-		return fmt.Errorf("vm: quiesce %s: %w", id, ctx.Err())
+		return guestproto.Quiesced{}, fmt.Errorf("vm: quiesce %s: %w", id, ctx.Err())
 	}
 }
 
@@ -171,12 +197,17 @@ func (g *VsockGuest) read(id ID, channel *guestChannel) {
 				return
 			}
 			channel.markHello()
+			g.notify(id)
+		case guestproto.KindAssignment:
+			channel.foldAssignment(*message.Assignment)
+			g.notify(id)
 		case guestproto.KindRunnerStatus:
 			channel.fold(*message.RunnerStatus)
+			g.notify(id)
 		case guestproto.KindQuiesced:
-			channel.resolveQuiesce(nil)
+			channel.resolveQuiesce(*message.Quiesced, nil)
 		case guestproto.KindQuiesceFailed:
-			channel.resolveQuiesce(errors.New(message.QuiesceFailed.Reason))
+			channel.resolveQuiesce(guestproto.Quiesced{}, errors.New(message.QuiesceFailed.Reason))
 		default:
 			// A host-bound stream carrying host→guest verbs is a broken
 			// peer; nothing on this connection can be trusted anymore.
@@ -200,7 +231,7 @@ type guestChannel struct {
 	mu          sync.Mutex
 	helloSeen   bool
 	observation GuestObservation
-	pending     chan error
+	pending     chan quiesceResult
 	failure     error
 
 	hello chan struct{}
@@ -275,9 +306,14 @@ func (c *guestChannel) fold(status guestproto.RunnerStatus) {
 			c.observation.Identity = *status.Identity
 		}
 	case guestproto.RunnerMountsReady:
-		c.observation.RunnerRegistered = true
-		c.observation.HookBlocked = true
 		c.observation.MountsReady = true
+		if status.Clock != nil {
+			c.observation.Clock = *status.Clock
+		}
+	case guestproto.RunnerWorkerReady:
+		c.observation.RunnerRegistered = true
+		c.observation.MountsReady = true
+		c.observation.WorkerReady = true
 		if status.Identity != nil {
 			c.observation.Identity = *status.Identity
 		}
@@ -299,39 +335,69 @@ func (c *guestChannel) fold(status guestproto.RunnerStatus) {
 		c.observation.RunnerExited = true
 		c.observation.ExitCode = status.ExitCode
 	}
+	c.observation.Timing = append(c.observation.Timing, status.Timing...)
+}
+
+func (c *guestChannel) foldAssignment(assignment guestproto.Assignment) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	captured := assignment
+	captured.Timing = append([]guestproto.TimingPoint(nil), assignment.Timing...)
+	if assignment.Identity != nil {
+		identity := *assignment.Identity
+		captured.Identity = &identity
+	}
+	c.observation.Assignment = &captured
+	c.observation.Timing = append(c.observation.Timing, assignment.Timing...)
 }
 
 func (c *guestChannel) snapshot() GuestObservation {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.observation
+	copy := c.observation
+	copy.Timing = append([]guestproto.TimingPoint(nil), c.observation.Timing...)
+	if c.observation.Assignment != nil {
+		assignment := *c.observation.Assignment
+		assignment.Timing = append([]guestproto.TimingPoint(nil), c.observation.Assignment.Timing...)
+		if c.observation.Assignment.Identity != nil {
+			identity := *c.observation.Assignment.Identity
+			assignment.Identity = &identity
+		}
+		copy.Assignment = &assignment
+	}
+	return copy
 }
 
 // registerQuiesce claims the single quiesce-reply slot.
-func (c *guestChannel) registerQuiesce() (chan error, error) {
+type quiesceResult struct {
+	reply guestproto.Quiesced
+	err   error
+}
+
+func (c *guestChannel) registerQuiesce() (chan quiesceResult, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.pending != nil {
 		return nil, errors.New("quiesce already in flight")
 	}
-	c.pending = make(chan error, 1)
+	c.pending = make(chan quiesceResult, 1)
 	return c.pending, nil
 }
 
-func (c *guestChannel) resolveQuiesce(err error) {
+func (c *guestChannel) resolveQuiesce(reply guestproto.Quiesced, err error) {
 	c.mu.Lock()
 	pending := c.pending
 	c.pending = nil
 	c.mu.Unlock()
 	if pending != nil {
-		pending <- err
+		pending <- quiesceResult{reply: reply, err: err}
 	}
 }
 
 // abandonQuiesce releases a claimed reply slot whose waiter gave up; a late
 // reply then resolves into nothing instead of a stale claim blocking the
 // next quiesce.
-func (c *guestChannel) abandonQuiesce(pending chan error) {
+func (c *guestChannel) abandonQuiesce(pending chan quiesceResult) {
 	c.mu.Lock()
 	if c.pending == pending {
 		c.pending = nil
@@ -374,7 +440,7 @@ func (c *guestChannel) shutdown(err error) {
 		return
 	}
 	close(c.dead)
-	c.resolveQuiesce(err)
+	c.resolveQuiesce(guestproto.Quiesced{}, err)
 	if c.conn != nil {
 		c.conn.Close()
 	}

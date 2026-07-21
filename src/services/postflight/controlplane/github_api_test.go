@@ -47,8 +47,8 @@ func TestInstallationTokensAreCachedPerInstallation(t *testing.T) {
 		Bytes: x509.MarshalPKCS1PrivateKey(key),
 	})
 	client, err := newGitHubClient(config{
-		appID:          1,
-		apiBaseURL:     server.URL,
+		appID:         1,
+		apiBaseURL:    server.URL,
 		privateKeyPEM: string(privateKey),
 	})
 	if err != nil {

@@ -2,7 +2,8 @@
 // that talks to the host. It accepts the host's vsock connection, converges
 // the assignment's mounts (no customer step runs before every mount is up),
 // execs the actions runner as the runner user, streams the runner lifecycle
-// back, and quiesces the workspace ahead of the host-side seal snapshot.
+// back, and checkpoints and flushes the attached generation ahead of the
+// host-side seal snapshot.
 // A dead guestd is a dead VM by design: the host's probe fails and the slot
 // is destroyed and refilled, so nothing here ever restarts itself.
 package guestd
@@ -15,7 +16,6 @@ import (
 	"net"
 	"os"
 	"path"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -24,6 +24,7 @@ import (
 
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/guestproto"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vsock"
+	"github.com/guardian-intelligence/guardian/src/services/postflight/timing"
 )
 
 // WorkspaceMarker is the file guestd drops at a converged mountpoint's
@@ -46,25 +47,31 @@ type Config struct {
 	// mount that cannot converge within it reports a synthetic failure exit
 	// and the job never starts against a partial workspace.
 	MountDeadline time.Duration
-	// RetryInterval paces convergence and quiesce retries.
+	// RetryInterval paces mount convergence retries.
 	RetryInterval time.Duration
-	// QuiesceWindow bounds how long a busy unmount is retried before the
-	// quiesce is reported failed.
+	// QuiesceWindow bounds the process checkpoint operation.
 	QuiesceWindow time.Duration
-	// RendezvousDir is the root-owned exchange directory shared with the
-	// runner's synchronous job-start hook.
-	RendezvousDir string
 	// HookDeadline bounds a hook that GitHub itself would otherwise allow
 	// to block forever.
 	HookDeadline time.Duration
+	// AssignmentSocketMode and AssignmentSocketGID restrict the runner's
+	// local synchronous assignment gate. Production uses 0660 and the
+	// runner account's primary group; tests default to the current process.
+	AssignmentSocketMode os.FileMode
+	AssignmentSocketGID  int
 	// Encryption is the baked at-rest mode for workspace volumes; the zero
 	// value mounts plaintext. See LoadEncryptionMode.
 	Encryption EncryptionMode
+	// Checkpoints is the single generic process checkpoint implementation.
+	// Nil disables process restore while retaining workspace-only behavior.
+	Checkpoints *ProcessCheckpoints
 	// HostCID is the only vsock peer CID accepted as the host. Anything in
 	// the guest — the runner user included — can dial this listener, so a
 	// connection from any other CID is dropped before a verb is read.
 	HostCID uint32
-	Logger  *slog.Logger
+	// Timing is the process-local high-resolution event recorder.
+	Timing *timing.Recorder
+	Logger *slog.Logger
 }
 
 func (c *Config) validate() error {
@@ -83,17 +90,27 @@ func (c *Config) validate() error {
 	if c.QuiesceWindow <= 0 {
 		c.QuiesceWindow = 10 * time.Second
 	}
-	if c.RendezvousDir == "" {
-		c.RendezvousDir = "/run/postflight-rendezvous"
-	}
-	if !path.IsAbs(c.RendezvousDir) || path.Clean(c.RendezvousDir) != c.RendezvousDir {
-		return fmt.Errorf("guestd: unsafe rendezvous directory %q", c.RendezvousDir)
-	}
 	if c.HookDeadline <= 0 {
 		c.HookDeadline = 2 * time.Minute
 	}
+	if c.AssignmentSocketMode == 0 {
+		c.AssignmentSocketMode = 0o600
+	}
+	if c.AssignmentSocketGID == 0 {
+		c.AssignmentSocketGID = -1
+	}
 	if c.HostCID == 0 {
 		c.HostCID = vsock.Host
+	}
+	if c.Timing == nil {
+		bootID, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+		if err != nil {
+			return fmt.Errorf("guestd: read boot id: %w", err)
+		}
+		c.Timing, err = timing.New("guestd", strings.TrimSpace(string(bootID)))
+		if err != nil {
+			return err
+		}
 	}
 	if c.Logger == nil {
 		c.Logger = slog.Default()
@@ -111,8 +128,14 @@ type Server struct {
 	conn       net.Conn
 	prepared   *guestproto.Prepare
 	rendezvous *guestproto.Rendezvous
-	identity   *guestproto.JobIdentity
+	authorized *guestproto.Authorize
+	clock      *guestproto.ClockSample
+	bound      bool
 	statuses   []guestproto.RunnerStatus
+	assignment *guestproto.Assignment
+	workerGate chan struct{}
+	gateOnce   sync.Once
+	gateErr    error
 
 	// writeMu serializes frames. It is separate from mu so a slow host —
 	// a blocked status write — can never stall inbound dispatch.
@@ -124,7 +147,7 @@ func New(cfg Config) (*Server, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-	return &Server{cfg: cfg}, nil
+	return &Server{cfg: cfg, workerGate: make(chan struct{})}, nil
 }
 
 // Serve accepts host connections until the context ends or the listener
@@ -152,13 +175,22 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	}
 }
 
+type replayState struct {
+	assignment *guestproto.Assignment
+	statuses   []guestproto.RunnerStatus
+}
+
 // supplant makes conn the current host connection and returns the runner
 // statuses the new host must be caught up on.
-func (s *Server) supplant(conn net.Conn) []guestproto.RunnerStatus {
+func (s *Server) supplant(conn net.Conn) replayState {
 	s.mu.Lock()
 	old := s.conn
 	s.conn = conn
-	replay := append([]guestproto.RunnerStatus(nil), s.statuses...)
+	replay := replayState{statuses: append([]guestproto.RunnerStatus(nil), s.statuses...)}
+	if s.assignment != nil {
+		captured := *s.assignment
+		replay.assignment = &captured
+	}
 	s.mu.Unlock()
 	if old != nil {
 		old.Close()
@@ -170,13 +202,19 @@ func (s *Server) supplant(conn net.Conn) []guestproto.RunnerStatus {
 // so a reconnecting host catches up (the latest status alone is not enough —
 // an exit replayed without its registration would un-happen the job on the
 // host's fold), then dispatch inbound verbs.
-func (s *Server) handle(conn net.Conn, replay []guestproto.RunnerStatus) {
+func (s *Server) handle(conn net.Conn, replay replayState) {
 	if err := s.writeTo(conn, guestproto.Message{Kind: guestproto.KindHello, Hello: &guestproto.Hello{Version: guestproto.Version}}); err != nil {
 		s.drop(conn)
 		return
 	}
-	for i := range replay {
-		if err := s.writeTo(conn, guestproto.Message{Kind: guestproto.KindRunnerStatus, RunnerStatus: &replay[i]}); err != nil {
+	if replay.assignment != nil {
+		if err := s.writeTo(conn, guestproto.Message{Kind: guestproto.KindAssignment, Assignment: replay.assignment}); err != nil {
+			s.drop(conn)
+			return
+		}
+	}
+	for i := range replay.statuses {
+		if err := s.writeTo(conn, guestproto.Message{Kind: guestproto.KindRunnerStatus, RunnerStatus: &replay.statuses[i]}); err != nil {
 			s.drop(conn)
 			return
 		}
@@ -194,6 +232,8 @@ func (s *Server) handle(conn net.Conn, replay []guestproto.RunnerStatus) {
 			s.handlePrepare(*message.Prepare)
 		case guestproto.KindRendezvous:
 			s.handleRendezvous(*message.Rendezvous)
+		case guestproto.KindAuthorize:
+			s.handleAuthorize(*message.Authorize)
 		case guestproto.KindQuiesce:
 			s.handleQuiesce(*message.Quiesce)
 		default:
@@ -248,7 +288,9 @@ func (s *Server) sendStatus(status guestproto.RunnerStatus) {
 	}
 }
 
-// handlePrepare starts one generic runner listener without customer mounts.
+// handlePrepare starts the outer one-job listener in an empty warm VM. The
+// listener itself is never checkpointed and blocks at the assignment gate
+// before Runner.Worker is created.
 func (s *Server) handlePrepare(prepare guestproto.Prepare) {
 	s.mu.Lock()
 	if s.prepared != nil {
@@ -262,114 +304,39 @@ func (s *Server) handlePrepare(prepare guestproto.Prepare) {
 	claimed := prepare
 	s.prepared = &claimed
 	s.mu.Unlock()
-	if err := s.resetRendezvousDir(); err != nil {
-		s.cfg.Logger.Error("rendezvous directory preparation failed", "lease", prepare.Lease, "err", err)
-		s.sendStatus(guestproto.RunnerStatus{State: guestproto.RunnerExited, ExitCode: SyntheticFailureExitCode})
-		return
-	}
-	go s.run(prepare)
+	started := guestTiming(s.cfg.Timing.Point("listener_prepare_received"))
+	go s.run(prepare, started)
 }
 
-func (s *Server) run(prepare guestproto.Prepare) {
+func (s *Server) run(prepare guestproto.Prepare, started guestproto.TimingPoint) {
 	code, err := s.cfg.RunRunner(context.Background(), prepare.JITConfig, prepare.Env, func(event RunnerEvent) {
 		switch event {
 		case EventListening:
-			s.sendStatus(guestproto.RunnerStatus{State: guestproto.RunnerRegistered})
-		case EventJobStarted:
-			go s.observeBlockedHook(prepare.Lease)
+			point := guestTiming(s.cfg.Timing.Point("runner_registered"))
+			s.sendStatus(guestproto.RunnerStatus{State: guestproto.RunnerRegistered, Timing: []guestproto.TimingPoint{started, point}})
 		}
 	})
 	if err != nil {
 		s.cfg.Logger.Error("runner failed to run", "lease", prepare.Lease, "err", err)
-		s.sendStatus(guestproto.RunnerStatus{State: guestproto.RunnerExited, ExitCode: SyntheticFailureExitCode})
+		point := guestTiming(s.cfg.Timing.Point("runner_exited"))
+		s.sendStatus(guestproto.RunnerStatus{
+			State: guestproto.RunnerExited, ExitCode: SyntheticFailureExitCode,
+			Timing: []guestproto.TimingPoint{point},
+		})
 		return
 	}
-	s.sendStatus(guestproto.RunnerStatus{State: guestproto.RunnerExited, ExitCode: code})
-}
-
-func (s *Server) resetRendezvousDir() error {
-	if err := os.RemoveAll(s.cfg.RendezvousDir); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(s.cfg.RendezvousDir, 0o733); err != nil {
-		return err
-	}
-	return os.Chmod(s.cfg.RendezvousDir, 0o733)
-}
-
-func (s *Server) observeBlockedHook(lease string) {
-	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.HookDeadline)
-	defer cancel()
-	request := filepath.Join(s.cfg.RendezvousDir, "request")
-	var lastErr error
-	for {
-		raw, err := os.ReadFile(request)
-		if err == nil {
-			identity, parseErr := parseHookIdentity(raw)
-			if parseErr != nil {
-				lastErr = parseErr
-			} else {
-				s.mu.Lock()
-				if s.prepared == nil || s.prepared.Lease != lease {
-					s.mu.Unlock()
-					return
-				}
-				captured := identity
-				s.identity = &captured
-				s.mu.Unlock()
-				s.sendStatus(guestproto.RunnerStatus{State: guestproto.RunnerHookBlocked, Identity: &identity})
-				return
-			}
-		} else if !errors.Is(err, os.ErrNotExist) {
-			lastErr = err
-		}
-		select {
-		case <-ctx.Done():
-			s.cfg.Logger.Error("job-start hook did not report valid identity", "lease", lease, "err", lastErr)
-			return
-		case <-time.After(s.cfg.RetryInterval):
-		}
-	}
-}
-
-func parseHookIdentity(raw []byte) (guestproto.JobIdentity, error) {
-	values := map[string]string{}
-	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
-		key, value, ok := strings.Cut(line, "=")
-		if !ok || key == "" || value == "" {
-			return guestproto.JobIdentity{}, fmt.Errorf("invalid hook identity line")
-		}
-		if _, duplicate := values[key]; duplicate {
-			return guestproto.JobIdentity{}, fmt.Errorf("duplicate hook identity key %q", key)
-		}
-		values[key] = value
-	}
-	for key := range values {
-		switch key {
-		case "run_id", "run_attempt", "runner_name", "repository", "workflow_job":
-		default:
-			return guestproto.JobIdentity{}, fmt.Errorf("unknown hook identity key %q", key)
-		}
-	}
-	attempt, err := strconv.Atoi(values["run_attempt"])
-	if err != nil || attempt <= 0 {
-		return guestproto.JobIdentity{}, fmt.Errorf("invalid run attempt")
-	}
-	identity := guestproto.JobIdentity{
-		RunID: values["run_id"], RunAttempt: attempt, RunnerName: values["runner_name"],
-		Repository: values["repository"], WorkflowJob: values["workflow_job"],
-	}
-	if identity.RunID == "" || identity.RunnerName == "" || identity.Repository == "" || identity.WorkflowJob == "" {
-		return guestproto.JobIdentity{}, fmt.Errorf("incomplete hook identity")
-	}
-	return identity, nil
+	point := guestTiming(s.cfg.Timing.Point("runner_exited"))
+	s.sendStatus(guestproto.RunnerStatus{
+		State: guestproto.RunnerExited, ExitCode: code,
+		Timing: []guestproto.TimingPoint{point},
+	})
 }
 
 func (s *Server) handleRendezvous(rendezvous guestproto.Rendezvous) {
 	s.mu.Lock()
-	if s.prepared == nil || s.prepared.Lease != rendezvous.Lease || s.identity == nil {
+	if s.assignment == nil || s.prepared == nil || s.prepared.Lease != rendezvous.Lease {
 		s.mu.Unlock()
-		s.cfg.Logger.Error("rendezvous arrived before matching blocked hook", "lease", rendezvous.Lease)
+		s.cfg.Logger.Error("rendezvous arrived before local assignment", "lease", rendezvous.Lease)
 		return
 	}
 	if s.rendezvous != nil {
@@ -381,59 +348,112 @@ func (s *Server) handleRendezvous(rendezvous guestproto.Rendezvous) {
 		return
 	}
 	claimed := rendezvous
-	identity := *s.identity
 	s.rendezvous = &claimed
 	s.mu.Unlock()
-	go s.bindAndRelease(rendezvous, identity)
+	go s.bindGeneration(rendezvous)
 }
 
-func (s *Server) bindAndRelease(rendezvous guestproto.Rendezvous, identity guestproto.JobIdentity) {
+func (s *Server) bindGeneration(rendezvous guestproto.Rendezvous) {
 	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.MountDeadline)
+	fail := func(stage string, err error) {
+		cancel()
+		s.cfg.Logger.Error(stage, "lease", rendezvous.Lease, "err", err)
+		s.failWorkerGate(err)
+		s.sendStatus(guestproto.RunnerStatus{State: guestproto.RunnerExited, ExitCode: SyntheticFailureExitCode})
+	}
+	received := guestTiming(s.cfg.Timing.Point("guest_rendezvous_received"))
+	points := []guestproto.TimingPoint{received, guestTiming(s.cfg.Timing.Point("mount_convergence_started"))}
+	s.cfg.Logger.Info("rendezvous timing", "event", received.Event, "monotonic_ns", received.MonotonicNS)
 	err := s.convergeMounts(ctx, rendezvous.Mounts)
-	cancel()
 	if err != nil {
-		s.cfg.Logger.Error("mount convergence failed", "lease", rendezvous.Lease, "err", err)
-		s.abortHook(err)
+		fail("mount convergence failed", err)
 		return
 	}
-	if err := writeJobEnvironment(filepath.Join(s.cfg.RendezvousDir, "job-env"), rendezvous.Env); err != nil {
-		s.cfg.Logger.Error("writing rendezvous job environment", "lease", rendezvous.Lease, "err", err)
-		s.abortHook(err)
-		return
-	}
-	clock := sampleClock()
-	s.sendStatus(guestproto.RunnerStatus{
-		State: guestproto.RunnerMountsReady, Identity: &identity, Clock: &clock,
-	})
-	if err := os.WriteFile(filepath.Join(s.cfg.RendezvousDir, "release"), []byte("ready\n"), 0o644); err != nil {
-		s.cfg.Logger.Error("releasing job-start hook", "lease", rendezvous.Lease, "err", err)
-		s.abortHook(err)
-		return
-	}
-	s.sendStatus(guestproto.RunnerStatus{
-		State: guestproto.RunnerReleased, Identity: &identity, Clock: &clock,
-	})
-}
-
-func (s *Server) abortHook(reason error) {
-	message := strings.ReplaceAll(reason.Error(), "\n", " ")
-	_ = os.WriteFile(filepath.Join(s.cfg.RendezvousDir, "abort"), []byte(message+"\n"), 0o644)
-}
-
-func writeJobEnvironment(path string, env map[string]string) error {
-	keys := make([]string, 0, len(env))
-	for key, value := range env {
-		if key == "" || strings.ContainsAny(key, "=\r\n") || strings.ContainsAny(value, "\r\n") {
-			return fmt.Errorf("unsafe job environment entry")
+	points = append(points, guestTiming(s.cfg.Timing.Point("mount_convergence_completed")))
+	restored := false
+	if rendezvous.Checkpoint != nil {
+		points = append(points, guestTiming(s.cfg.Timing.Point("criu_restore_started")))
+		if s.cfg.Checkpoints == nil {
+			err := errors.New("process checkpoint requested but guest support is disabled")
+			fail("checkpoint restore failed", err)
+			return
 		}
-		keys = append(keys, key)
+		checkpoint := rendezvous.Checkpoint
+		if _, err := s.cfg.Checkpoints.Restore(ctx, checkpoint.ImagesDir, checkpoint.ExpectedDigest, checkpoint.ExternalMountAt); err != nil {
+			fail("checkpoint restore failed", err)
+			return
+		}
+		restored = true
+		points = append(points, guestTiming(s.cfg.Timing.Point("criu_restore_completed")))
+	} else if s.cfg.Checkpoints != nil {
+		points = append(points, guestTiming(s.cfg.Timing.Point("cold_capsule_start_started")))
+		if err := s.cfg.Checkpoints.Capsules.Start(ctx); err != nil {
+			fail("cold capsule start failed", err)
+			return
+		}
+		points = append(points, guestTiming(s.cfg.Timing.Point("cold_capsule_start_completed")))
 	}
-	slices.Sort(keys)
-	var out strings.Builder
-	for _, key := range keys {
-		fmt.Fprintf(&out, "%s=%s\n", key, env[key])
+	cancel()
+	clock := sampleClock()
+	clock.AfterRestore = restored
+	s.mu.Lock()
+	s.bound = true
+	s.clock = &clock
+	s.mu.Unlock()
+	ready := guestTiming(s.cfg.Timing.Point("generation_restore_completed"))
+	points = append(points, ready)
+	s.sendStatus(guestproto.RunnerStatus{
+		State: guestproto.RunnerMountsReady, Clock: &clock, Timing: points,
+	})
+}
+
+func (s *Server) handleAuthorize(authorize guestproto.Authorize) {
+	s.mu.Lock()
+	if s.prepared == nil || s.prepared.Lease != authorize.Lease || s.assignment == nil ||
+		s.assignment.RequestID != authorize.RequestID || authorize.Identity == nil || !s.bound || s.clock == nil {
+		s.mu.Unlock()
+		s.cfg.Logger.Error("authorization arrived before matching restored assignment", "lease", authorize.Lease)
+		return
 	}
-	return os.WriteFile(path, []byte(out.String()), 0o644)
+	if s.authorized != nil {
+		duplicate := s.authorized.Lease == authorize.Lease
+		s.mu.Unlock()
+		if !duplicate {
+			s.cfg.Logger.Error("conflicting authorization ignored", "lease", authorize.Lease)
+		}
+		return
+	}
+	claimed := authorize
+	clock := *s.clock
+	s.authorized = &claimed
+	s.mu.Unlock()
+	if s.cfg.Checkpoints != nil {
+		rootPID, err := s.cfg.Checkpoints.Capsules.RootPID()
+		if err != nil {
+			s.failWorkerGate(fmt.Errorf("locating restored capsule: %w", err))
+			return
+		}
+		if err := os.WriteFile(CapsulePIDPath, []byte(strconv.Itoa(rootPID)+"\n"), 0o644); err != nil {
+			s.failWorkerGate(fmt.Errorf("publishing restored capsule: %w", err))
+			return
+		}
+	} else if err := os.Remove(CapsulePIDPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		s.failWorkerGate(fmt.Errorf("selecting workspace-only worker: %w", err))
+		return
+	}
+	point := guestTiming(s.cfg.Timing.Point("runner_worker_released"))
+	s.sendStatus(guestproto.RunnerStatus{
+		State: guestproto.RunnerWorkerReady, Identity: authorize.Identity, Clock: &clock,
+		Timing: []guestproto.TimingPoint{point},
+	})
+	s.gateOnce.Do(func() { close(s.workerGate) })
+}
+
+func (s *Server) failWorkerGate(err error) {
+	s.mu.Lock()
+	s.gateErr = err
+	s.mu.Unlock()
+	s.gateOnce.Do(func() { close(s.workerGate) })
 }
 
 func sampleClock() guestproto.ClockSample {
@@ -575,44 +595,82 @@ func (s *Server) openEncrypted(ctx context.Context, device, serial string) (stri
 	return system.OpenLUKS(ctx, device, "pf-"+serial, key)
 }
 
-// handleQuiesce syncs and unmounts the workspace, riding out the busy
-// window of exiting stragglers, and reports the outcome. A workspace that
-// is already unmounted (a retried quiesce) is a success.
+// handleQuiesce proves that every member of the selected generation is
+// mounted, checkpoints the capsule, flushes the filesystems, and reports the
+// artifact. The host destroys QEMU before sealing the zvols, which releases
+// the mounted devices without thawing the deliberately stopped capsule.
 func (s *Server) handleQuiesce(quiesce guestproto.Quiesce) {
-	if err := s.quiesce(quiesce.Mountpoint); err != nil {
-		s.cfg.Logger.Error("quiesce failed", "mountpoint", quiesce.Mountpoint, "err", err)
-		reply := guestproto.Message{Kind: guestproto.KindQuiesceFailed, QuiesceFailed: &guestproto.QuiesceFailed{Reason: err.Error()}}
-		if err := s.send(reply); err != nil {
-			s.cfg.Logger.Warn("quiesce-failed not delivered", "err", err)
-		}
+	points := []guestproto.TimingPoint{guestTiming(s.cfg.Timing.Point("quiesce_received"))}
+	if len(quiesce.Mountpoints) == 0 {
+		s.quiesceFailed(errors.New("quiesce requires at least one mounted volume"))
 		return
 	}
-	if err := s.send(guestproto.Message{Kind: guestproto.KindQuiesced, Quiesced: &guestproto.Quiesced{}}); err != nil {
+	for _, mountpoint := range quiesce.Mountpoints {
+		if err := s.requireMounted(mountpoint); err != nil {
+			s.cfg.Logger.Error("quiesce failed", "mountpoint", mountpoint, "err", err)
+			s.quiesceFailed(err)
+			return
+		}
+	}
+	points = append(points, guestTiming(s.cfg.Timing.Point("quiesce_mounts_checked")))
+	var artifact *guestproto.CheckpointArtifact
+	if quiesce.Checkpoint != nil {
+		if s.cfg.Checkpoints == nil {
+			s.quiesceFailed(errors.New("process checkpoint requested but guest support is disabled"))
+			return
+		}
+		checkpoint := quiesce.Checkpoint
+		if !slices.Contains(quiesce.Mountpoints, checkpoint.ExternalMountAt) {
+			s.quiesceFailed(errors.New("checkpoint external mount is not in the generation tuple"))
+			return
+		}
+		if !slices.Contains(quiesce.Mountpoints, s.cfg.Checkpoints.ImagesRoot) {
+			s.quiesceFailed(errors.New("checkpoint process volume is not in the generation tuple"))
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), s.cfg.QuiesceWindow)
+		points = append(points, guestTiming(s.cfg.Timing.Point("checkpoint_dump_started")))
+		result, err := s.cfg.Checkpoints.Dump(ctx, checkpoint.ImagesDir, checkpoint.ExternalMountAt)
+		cancel()
+		if err != nil {
+			s.quiesceFailed(fmt.Errorf("checkpoint dump: %w", err))
+			return
+		}
+		points = append(points, guestTiming(s.cfg.Timing.Point("checkpoint_dump_completed")))
+		artifact = &guestproto.CheckpointArtifact{Digest: result.Digest, Version: result.Version}
+	}
+	// CRIU has stopped every process in the capsule. Flush both mounted
+	// filesystems, then let the host destroy the VM before it snapshots the
+	// zvols. Keeping the mounts attached until QEMU exits avoids a busy
+	// unmount caused by the deliberately stopped process tree.
+	points = append(points, guestTiming(s.cfg.Timing.Point("filesystem_sync_started")))
+	s.cfg.System.Sync()
+	points = append(points, guestTiming(s.cfg.Timing.Point("filesystem_sync_completed")))
+	if err := s.send(guestproto.Message{Kind: guestproto.KindQuiesced, Quiesced: &guestproto.Quiesced{
+		Checkpoint: artifact, Timing: points,
+	}}); err != nil {
 		s.cfg.Logger.Warn("quiesced not delivered", "err", err)
 	}
 }
 
-func (s *Server) quiesce(mountpoint string) error {
+func (s *Server) quiesceFailed(reason error) {
+	s.cfg.Logger.Error("quiesce failed", "err", reason)
+	reply := guestproto.Message{Kind: guestproto.KindQuiesceFailed, QuiesceFailed: &guestproto.QuiesceFailed{Reason: reason.Error()}}
+	if err := s.send(reply); err != nil {
+		s.cfg.Logger.Warn("quiesce-failed not delivered", "err", err)
+	}
+}
+
+func (s *Server) requireMounted(mountpoint string) error {
 	if !validMountpoint(mountpoint) {
 		return fmt.Errorf("unsafe mountpoint %q", mountpoint)
 	}
-	s.cfg.System.Sync()
-	deadline := time.Now().Add(s.cfg.QuiesceWindow)
-	for {
-		mounted, err := s.cfg.System.IsMounted(mountpoint)
-		if err != nil {
-			return err
-		}
-		if !mounted {
-			return nil
-		}
-		err = s.cfg.System.Unmount(mountpoint)
-		if err == nil {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return err
-		}
-		time.Sleep(s.cfg.RetryInterval)
+	mounted, err := s.cfg.System.IsMounted(mountpoint)
+	if err != nil {
+		return err
 	}
+	if !mounted {
+		return fmt.Errorf("required volume is not mounted at %s", mountpoint)
+	}
+	return nil
 }

@@ -24,6 +24,22 @@ grep -Fq '"${script_dir}/build-upstream.sh"' "${build_sh}" ||
   fail "build.sh does not consume the cached runner-images qcow2"
 grep -Fq "cryptsetup-bin" "${build_sh}" ||
   fail "build.sh does not install the Postflight runtime package"
+grep -Fq 'CRIU_SHA256=' "${pins_env}" ||
+  fail "pins.env does not pin the CRIU archive"
+grep -Fq 'TINI_VERSION=' "${pins_env}" ||
+  fail "pins.env does not pin the native capsule init"
+grep -Fq 'RUNNER_SOURCE_COMMIT=' "${pins_env}" ||
+  fail "pins.env does not pin the patched runner source"
+grep -Fq 'RUNNER_LISTENER_DLL' "${build_sh}" ||
+  fail "build.sh does not require the patched runner listener"
+grep -Fq 'Runner.Worker.real' "${build_sh}" ||
+  fail "build.sh does not preserve the official worker behind the capsule wrapper"
+grep -Fq 'guestd validate-assignment' "${build_sh}" ||
+  fail "job-start hook does not perform assignment validation"
+grep -Fq '"tini=${TINI_VERSION}"' "${build_sh}" ||
+  fail "build.sh does not install the pinned native capsule init"
+grep -Fq 'NETWORK_LOCK_DEFAULT=NETWORK_LOCK_SKIP' "${build_sh}" ||
+  fail "build.sh does not build the pinned CRIU network policy"
 grep -Fq 'rootfs_size="80G"' "${build_sh}" ||
   fail "build.sh does not provision the 4-vCPU root-disk size"
 grep -Fq '[[ "${growpart_output}" != NOCHANGE:* ]]' "${build_sh}" ||
@@ -99,14 +115,21 @@ fi
   source "${pins_env}"
   for var in RUNNER_IMAGES_REF RUNNER_IMAGES_VERSION RUNNER_IMAGES_COMMIT UBUNTU_SERIAL UBUNTU_SHA256 \
     PACKER_VERSION PACKER_SHA256 PACKER_QEMU_PLUGIN_VERSION PACKER_QEMU_PLUGIN_SHA256 \
-    RUNNER_VERSION RUNNER_SHA256; do
+    RUNNER_VERSION RUNNER_SHA256 RUNNER_SOURCE_COMMIT RUNNER_SOURCE_SHA256 DOTNET_SDK_VERSION DOTNET_SDK_SHA512 \
+    CRIU_VERSION CRIU_COMMIT CRIU_SHA256 TINI_VERSION; do
     [[ -n "${!var:-}" ]] || fail "pins.env is missing ${var}"
   done
-  for var in UBUNTU_SHA256 PACKER_SHA256 PACKER_QEMU_PLUGIN_SHA256 RUNNER_SHA256; do
+  for var in UBUNTU_SHA256 PACKER_SHA256 PACKER_QEMU_PLUGIN_SHA256 RUNNER_SHA256 RUNNER_SOURCE_SHA256 CRIU_SHA256; do
     [[ "${!var}" =~ ^[0-9a-f]{64}$ ]] || fail "${var} is not a lowercase sha256"
   done
   [[ "${RUNNER_IMAGES_COMMIT}" =~ ^[0-9a-f]{40}$ ]] ||
     fail "RUNNER_IMAGES_COMMIT is not a full lowercase commit"
+  [[ "${RUNNER_SOURCE_COMMIT}" =~ ^[0-9a-f]{40}$ ]] ||
+    fail "RUNNER_SOURCE_COMMIT is not a full lowercase commit"
+  [[ "${DOTNET_SDK_SHA512}" =~ ^[0-9a-f]{128}$ ]] ||
+    fail "DOTNET_SDK_SHA512 is not a lowercase sha512"
+  [[ "${CRIU_COMMIT}" =~ ^[0-9a-f]{40}$ ]] ||
+    fail "CRIU_COMMIT is not a full lowercase commit"
   [[ "${RUNNER_IMAGES_REF}" =~ ^ubuntu24/[0-9]{8}\.[0-9]+$ ]] ||
     fail "RUNNER_IMAGES_REF is not an Ubuntu 24 release tag"
   [[ "${RUNNER_IMAGES_VERSION}" =~ ^[0-9]{8}\.[0-9]+\.[0-9]+$ ]] ||
@@ -116,6 +139,8 @@ fi
   [[ "${PACKER_QEMU_PLUGIN_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
     fail "PACKER_QEMU_PLUGIN_VERSION is not x.y.z"
   [[ "${RUNNER_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "RUNNER_VERSION is not x.y.z"
+  [[ "${CRIU_VERSION}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || fail "CRIU_VERSION is not numeric"
+  [[ "${TINI_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$ ]] || fail "TINI_VERSION is not an Ubuntu package version"
 )
 
 echo "golden-image inputs OK"

@@ -1,0 +1,17 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+sh_test(
+    name = "runner_test",
+    size = "small",
+    srcs = ["runner_test.sh"],
+    args = [
+        "$(rootpath build.sh)",
+        "$(rootpath runner-listener.patch)",
+        "$(rootpath //src/services/postflight/image:pins.env)",
+    ],
+    data = [
+        "build.sh",
+        "runner-listener.patch",
+        "//src/services/postflight/image:pins.env",
+    ],
+)

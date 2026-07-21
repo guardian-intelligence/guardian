@@ -21,6 +21,7 @@ go_library(
     deps = [
         "//src/services/postflight/hostd/guestproto",
         "//src/services/postflight/hostd/vsock",
+        "//src/services/postflight/timing",
         "@io_k8s_sigs_yaml//:yaml",
     ],
 )

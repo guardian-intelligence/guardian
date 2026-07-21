@@ -22,6 +22,7 @@ go_library(
         "//src/services/postflight/hostd/syncproto",
         "//src/services/postflight/hostd/vm",
         "//src/services/postflight/hostd/zvol",
+		"//src/services/postflight/timing",
     ],
 )
 

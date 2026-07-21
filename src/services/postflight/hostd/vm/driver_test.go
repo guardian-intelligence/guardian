@@ -3,6 +3,7 @@ package vm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -103,7 +104,8 @@ type scriptedGuest struct {
 	cids         map[ID]uint32
 	prepared     map[ID][]guestproto.Prepare
 	rendezvoused map[ID][]guestproto.Rendezvous
-	quiesced     map[ID][]string
+	authorized   map[ID][]guestproto.Authorize
+	quiesced     map[ID][]guestproto.Quiesce
 	quiesceErr   error
 }
 
@@ -113,7 +115,8 @@ func newScriptedGuest() *scriptedGuest {
 		cids:         map[ID]uint32{},
 		prepared:     map[ID][]guestproto.Prepare{},
 		rendezvoused: map[ID][]guestproto.Rendezvous{},
-		quiesced:     map[ID][]string{},
+		authorized:   map[ID][]guestproto.Authorize{},
+		quiesced:     map[ID][]guestproto.Quiesce{},
 	}
 }
 
@@ -133,6 +136,14 @@ func (g *scriptedGuest) Rendezvous(_ context.Context, id ID, cid uint32, rendezv
 	return nil
 }
 
+func (g *scriptedGuest) Authorize(_ context.Context, id ID, cid uint32, authorize guestproto.Authorize) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.cids[id] = cid
+	g.authorized[id] = append(g.authorized[id], authorize)
+	return nil
+}
+
 func (g *scriptedGuest) Observe(_ context.Context, id ID, cid uint32) (GuestObservation, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -140,15 +151,21 @@ func (g *scriptedGuest) Observe(_ context.Context, id ID, cid uint32) (GuestObse
 	return g.observation[id], nil
 }
 
-func (g *scriptedGuest) Quiesce(_ context.Context, id ID, cid uint32, mountpoint string) error {
+func (g *scriptedGuest) Quiesce(_ context.Context, id ID, cid uint32, request guestproto.Quiesce) (guestproto.Quiesced, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.cids[id] = cid
 	if g.quiesceErr != nil {
-		return g.quiesceErr
+		return guestproto.Quiesced{}, g.quiesceErr
 	}
-	g.quiesced[id] = append(g.quiesced[id], mountpoint)
-	return nil
+	g.quiesced[id] = append(g.quiesced[id], request)
+	return guestproto.Quiesced{Checkpoint: &guestproto.CheckpointArtifact{
+		Digest:  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Version: "Version: 4.2",
+	}, Timing: []guestproto.TimingPoint{{
+		Event: "checkpoint_dump_completed", Source: "guestd", BootID: "guest-boot",
+		Sequence: 7, MonotonicNS: 11, UnixNS: 12,
+	}}}, nil
 }
 
 func (g *scriptedGuest) set(id ID, observation GuestObservation) {
@@ -169,10 +186,10 @@ func (g *scriptedGuest) rendezvouses(id ID) []guestproto.Rendezvous {
 	return append([]guestproto.Rendezvous(nil), g.rendezvoused[id]...)
 }
 
-func (g *scriptedGuest) quiesces(id ID) []string {
+func (g *scriptedGuest) quiesces(id ID) []guestproto.Quiesce {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return append([]string(nil), g.quiesced[id]...)
+	return append([]guestproto.Quiesce(nil), g.quiesced[id]...)
 }
 
 func (g *scriptedGuest) cid(id ID) uint32 {
@@ -197,6 +214,7 @@ func newTestDriver(t *testing.T, stateRoot string) *testDriver {
 	q, err := NewQEMU(Config{
 		StateRoot:   stateRoot,
 		QEMUPath:    "/usr/bin/qemu-system-x86_64",
+		Firmware:    "/usr/share/postflight/OVMF.fd",
 		DatasetRoot: "tank/postflight",
 		Classes: map[Class]ClassConfig{
 			testClass: {CPUs: 4, MemoryMiB: 16384, Image: "tank/postflight/golden/noble@sealed"},
@@ -218,42 +236,73 @@ func newTestDriver(t *testing.T, stateRoot string) *testDriver {
 type qemuHandler struct {
 	mu       sync.Mutex
 	running  bool
-	blockdev bool
-	qdev     bool
+	blockdev map[string]bool
+	qdev     map[string]string
 	commands []string
 }
 
-func (h *qemuHandler) handle(command string, _ json.RawMessage) ([]string, string) {
+func (h *qemuHandler) handle(command string, arguments json.RawMessage) ([]string, string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.blockdev == nil {
+		h.blockdev = map[string]bool{}
+	}
+	if h.qdev == nil {
+		h.qdev = map[string]string{}
+	}
 	h.commands = append(h.commands, command)
 	switch command {
 	case "query-status":
 		return nil, fmt.Sprintf(`{"return": {"status": "running", "running": %t}, "id": %%d}`, h.running)
 	case "query-named-block-nodes":
-		if h.blockdev {
-			return nil, `{"return": [{"node-name": "workspace"}, {"node-name": "root"}], "id": %d}`
+		nodes := []string{`{"node-name":"root"}`}
+		for _, node := range []string{workspaceNode, processNode} {
+			if h.blockdev[node] {
+				nodes = append(nodes, fmt.Sprintf(`{"node-name":%q}`, node))
+			}
 		}
-		return nil, `{"return": [{"node-name": "root"}], "id": %d}`
+		return nil, `{"return":[` + strings.Join(nodes, ",") + `],"id":%d}`
 	case "qom-list":
-		if h.qdev {
-			return nil, `{"return": [{"name": "dev-workspace", "type": "child<scsi-hd>"}], "id": %d}`
+		devices := []string{}
+		for _, device := range []string{workspaceDevice, processDevice} {
+			if _, ok := h.qdev[device]; ok {
+				devices = append(devices, fmt.Sprintf(`{"name":%q,"type":"child<scsi-hd>"}`, device))
+			}
 		}
-		return nil, `{"return": [], "id": %d}`
+		return nil, `{"return":[` + strings.Join(devices, ",") + `],"id":%d}`
 	case "blockdev-add":
-		h.blockdev = true
+		var request struct {
+			Node string `json:"node-name"`
+		}
+		_ = json.Unmarshal(arguments, &request)
+		h.blockdev[request.Node] = true
 		return nil, `{"return": {}, "id": %d}`
 	case "device_add":
-		h.qdev = true
+		var request struct {
+			ID    string `json:"id"`
+			Drive string `json:"drive"`
+		}
+		_ = json.Unmarshal(arguments, &request)
+		h.qdev[request.ID] = request.Drive
 		return nil, `{"return": {}, "id": %d}`
 	case "device_del":
-		h.qdev = false
+		var request struct {
+			ID string `json:"id"`
+		}
+		_ = json.Unmarshal(arguments, &request)
+		delete(h.qdev, request.ID)
 		return nil, `{"return": {}, "id": %d}`
 	case "blockdev-del":
-		if h.qdev {
-			return nil, `{"error": {"class": "GenericError", "desc": "Node 'workspace' is busy"}, "id": %d}`
+		var request struct {
+			Node string `json:"node-name"`
 		}
-		h.blockdev = false
+		_ = json.Unmarshal(arguments, &request)
+		for _, node := range h.qdev {
+			if node == request.Node {
+				return nil, `{"error": {"class": "GenericError", "desc": "Node is busy"}, "id": %d}`
+			}
+		}
+		delete(h.blockdev, request.Node)
 		return nil, `{"return": {}, "id": %d}`
 	case "quit":
 		return nil, `{"return": {}, "id": %d}`
@@ -491,7 +540,13 @@ func (blockingGuest) Rendezvous(context.Context, ID, uint32, guestproto.Rendezvo
 	return nil
 }
 
-func (blockingGuest) Quiesce(context.Context, ID, uint32, string) error { return nil }
+func (blockingGuest) Authorize(context.Context, ID, uint32, guestproto.Authorize) error {
+	return nil
+}
+
+func (blockingGuest) Quiesce(context.Context, ID, uint32, guestproto.Quiesce) (guestproto.Quiesced, error) {
+	return guestproto.Quiesced{}, nil
+}
 
 func (blockingGuest) Observe(ctx context.Context, _ ID, _ uint32) (GuestObservation, error) {
 	select {
@@ -507,7 +562,7 @@ func (blockingGuest) Observe(ctx context.Context, _ ID, _ uint32) (GuestObservat
 // the phase the meta alone supports.
 func TestObserveIsBoundedByProbeTimeout(t *testing.T) {
 	driver := newTestDriver(t, shortTempDir(t))
-	driver.q.probeTimeout = 50 * time.Millisecond
+	driver.q.guestProbeTimeout = 50 * time.Millisecond
 	ctx := context.Background()
 	if err := driver.q.Launch(ctx, "vm-a", testClass); err != nil {
 		t.Fatal(err)
@@ -524,6 +579,62 @@ func TestObserveIsBoundedByProbeTimeout(t *testing.T) {
 	}
 	if status.Phase != PhaseBooting {
 		t.Fatalf("phase %s, want the meta-supported booting", status.Phase)
+	}
+}
+
+func TestListCollectsQEMUThatNeverReachesGuestHello(t *testing.T) {
+	driver := newTestDriver(t, shortTempDir(t))
+	driver.q.bootTimeout = time.Nanosecond
+	ctx := context.Background()
+	if err := driver.q.Launch(ctx, "vm-a", testClass); err != nil {
+		t.Fatal(err)
+	}
+	serveQEMU(t, driver, "vm-a", &qemuHandler{running: true})
+
+	statuses, err := driver.q.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(statuses) != 0 {
+		t.Fatalf("statuses = %+v, want failed boot omitted", statuses)
+	}
+	if driver.launcher.alive["vm-a"] {
+		t.Fatal("failed boot process was not killed")
+	}
+	if _, err := os.Stat(driver.q.stateDir("vm-a")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("state dir remains after failed boot: %v", err)
+	}
+	if got := driver.disks.destroyed; len(got) != 1 || got[0] != driver.q.rootDataset("vm-a") {
+		t.Fatalf("destroyed datasets = %v", got)
+	}
+}
+
+func TestBootDeadlineAdoptsMetadataWithoutCreatedTimestamp(t *testing.T) {
+	driver := newTestDriver(t, shortTempDir(t))
+	driver.q.bootTimeout = time.Second
+	ctx := context.Background()
+	if err := driver.q.Launch(ctx, "vm-a", testClass); err != nil {
+		t.Fatal(err)
+	}
+	record, err := driver.q.readMeta("vm-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.CreatedUnixNS = 0
+	if err := driver.q.writeMeta(record); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Minute)
+	if err := os.Chtimes(driver.q.metaPath("vm-a"), old, old); err != nil {
+		t.Fatal(err)
+	}
+	serveQEMU(t, driver, "vm-a", &qemuHandler{running: true})
+	statuses, err := driver.q.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(statuses) != 0 {
+		t.Fatalf("statuses = %+v, want stale adopted boot omitted", statuses)
 	}
 }
 
@@ -546,7 +657,10 @@ func TestPreparePersistsLeaseBeforeRendezvous(t *testing.T) {
 	}
 	// No QMP server is running: the bind fails after the listener claim is
 	// durable — the ambiguous-failure shape the agent's failure path needs.
-	if err := driver.q.Rendezvous(ctx, "vm-a", Rendezvous{Lease: "lease-1", WorkspaceDevice: "/dev/zvol/tank/ws/lease-1"}); err == nil {
+	if err := driver.q.Rendezvous(ctx, "vm-a", Rendezvous{
+		Lease: "lease-1", WorkspaceDevice: "/dev/zvol/tank/ws/lease-1",
+		ProcessDevice: "/dev/zvol/tank/process/lease-1", WorkspaceMountpoint: "/work",
+	}); err == nil {
 		t.Fatal("rendezvous succeeded without a QMP endpoint")
 	}
 	record, err := driver.q.readMeta("vm-a")
@@ -571,7 +685,7 @@ func TestRendezvousAttachesDeliversAndConverges(t *testing.T) {
 		Lease:               "lease-1",
 		WorkspaceDevice:     "/dev/zvol/tank/ws/lease-1",
 		WorkspaceMountpoint: "/opt/actions-runner/_work/widget/widget",
-		Env:                 map[string]string{"POSTFLIGHT_EXECUTION_ID": "exec-1"},
+		ProcessDevice:       "/dev/zvol/tank/process/lease-1",
 	}
 	if err := driver.q.Prepare(ctx, "vm-a", preparation); err != nil {
 		t.Fatalf("prepare: %v", err)
@@ -588,8 +702,8 @@ func TestRendezvousAttachesDeliversAndConverges(t *testing.T) {
 			adds++
 		}
 	}
-	if adds != 2 {
-		t.Fatalf("attach commands ran %d times, want exactly one blockdev-add and one device_add", adds)
+	if adds != 4 {
+		t.Fatalf("attach commands ran %d times, want one blockdev-add and device_add per volume", adds)
 	}
 	preparations := driver.guest.preparations("vm-a")
 	if len(preparations) == 0 || preparations[0].JITConfig != "jit-blob" {
@@ -599,7 +713,7 @@ func TestRendezvousAttachesDeliversAndConverges(t *testing.T) {
 	if len(deliveries) == 0 {
 		t.Fatal("rendezvous never delivered")
 	}
-	if len(deliveries[0].Mounts) != 1 {
+	if len(deliveries[0].Mounts) != 2 {
 		t.Fatalf("delivered mounts %+v", deliveries[0].Mounts)
 	}
 	mount := deliveries[0].Mounts[0]
@@ -638,10 +752,10 @@ func TestQuiesceUsesTheAssignedMountpoint(t *testing.T) {
 	if err := driver.q.Launch(ctx, "vm-a", testClass); err != nil {
 		t.Fatal(err)
 	}
-	if err := driver.q.Quiesce(ctx, "vm-a"); err == nil {
+	if _, err := driver.q.Quiesce(ctx, "vm-a"); err == nil {
 		t.Fatal("quiesced a vm with no workspace")
 	}
-	if err := driver.q.Quiesce(ctx, "nope"); err != ErrNotFound {
+	if _, err := driver.q.Quiesce(ctx, "nope"); err != ErrNotFound {
 		t.Fatalf("error %v, want ErrNotFound", err)
 	}
 	serveQEMU(t, driver, "vm-a", &qemuHandler{running: true})
@@ -649,6 +763,7 @@ func TestQuiesceUsesTheAssignedMountpoint(t *testing.T) {
 		Lease:               "lease-1",
 		WorkspaceDevice:     "/dev/zvol/tank/ws/lease-1",
 		WorkspaceMountpoint: "/opt/actions-runner/_work/widget/widget",
+		ProcessDevice:       "/dev/zvol/tank/process/lease-1",
 	}
 	if err := driver.q.Prepare(ctx, "vm-a", Preparation{Lease: "lease-1", JITConfig: "jit"}); err != nil {
 		t.Fatal(err)
@@ -659,10 +774,18 @@ func TestQuiesceUsesTheAssignedMountpoint(t *testing.T) {
 
 	second := newTestDriver(t, root)
 	second.launcher.setAlive("vm-a", true)
-	if err := second.q.Quiesce(ctx, "vm-a"); err != nil {
+	artifact, err := second.q.Quiesce(ctx, "vm-a")
+	if err != nil {
 		t.Fatalf("quiesce: %v", err)
 	}
-	if got := second.guest.quiesces("vm-a"); len(got) != 1 || got[0] != rendezvous.WorkspaceMountpoint {
+	var events []string
+	for _, point := range artifact.Timing {
+		events = append(events, point.Event)
+	}
+	if got := strings.Join(events, ","); got != "quiesce_rpc_started,checkpoint_dump_completed,quiesce_rpc_completed" {
+		t.Fatalf("quiesce timing %s", got)
+	}
+	if got := second.guest.quiesces("vm-a"); len(got) != 1 || len(got[0].Mountpoints) != 2 || got[0].Mountpoints[0] != rendezvous.WorkspaceMountpoint || got[0].Mountpoints[1] != processMountpoint {
 		t.Fatalf("quiesced %v, want the assigned mountpoint", got)
 	}
 }
@@ -855,7 +978,10 @@ func TestDestroyDetachesBeforeQuit(t *testing.T) {
 	if err := driver.q.Prepare(ctx, "vm-a", Preparation{Lease: "lease-1", JITConfig: "jit"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := driver.q.Rendezvous(ctx, "vm-a", Rendezvous{Lease: "lease-1", WorkspaceDevice: "/dev/zvol/tank/ws/lease-1", WorkspaceMountpoint: "/work"}); err != nil {
+	if err := driver.q.Rendezvous(ctx, "vm-a", Rendezvous{
+		Lease: "lease-1", WorkspaceDevice: "/dev/zvol/tank/ws/lease-1",
+		ProcessDevice: "/dev/zvol/tank/process/lease-1", WorkspaceMountpoint: "/work",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := driver.q.Destroy(ctx, "vm-a"); err != nil {
@@ -868,7 +994,7 @@ func TestDestroyDetachesBeforeQuit(t *testing.T) {
 			sequence = append(sequence, command)
 		}
 	}
-	want := []string{"device_del", "blockdev-del", "quit"}
+	want := []string{"device_del", "blockdev-del", "device_del", "blockdev-del", "quit"}
 	if len(sequence) < len(want) {
 		t.Fatalf("teardown sequence %v, want %v", sequence, want)
 	}
@@ -894,7 +1020,10 @@ func TestDetachWaitsOutTheGuestAck(t *testing.T) {
 	if err := driver.q.Prepare(ctx, "vm-a", Preparation{Lease: "lease-1", JITConfig: "jit"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := driver.q.Rendezvous(ctx, "vm-a", Rendezvous{Lease: "lease-1", WorkspaceDevice: "/dev/zvol/tank/ws/lease-1", WorkspaceMountpoint: "/work"}); err != nil {
+	if err := driver.q.Rendezvous(ctx, "vm-a", Rendezvous{
+		Lease: "lease-1", WorkspaceDevice: "/dev/zvol/tank/ws/lease-1",
+		ProcessDevice: "/dev/zvol/tank/process/lease-1", WorkspaceMountpoint: "/work",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	client, err := dialQMP(ctx, qmpSocketPath(stateDir))
@@ -904,7 +1033,7 @@ func TestDetachWaitsOutTheGuestAck(t *testing.T) {
 	defer client.Close()
 	deadline, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if err := driver.q.detachWorkspace(deadline, client); err != nil {
+	if err := driver.q.detachVolume(deadline, client, workspaceNode, workspaceDevice); err != nil {
 		t.Fatalf("detach: %v", err)
 	}
 	if got := handler.deleteAttempts(); got < 3 {

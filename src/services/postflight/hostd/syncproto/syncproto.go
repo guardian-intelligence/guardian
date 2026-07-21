@@ -51,19 +51,24 @@ type State string
 const (
 	// StatePending: accepted from the control plane, nothing done yet.
 	StatePending State = "pending"
-	// StateClaiming: workspace materialized; waiting for a warm VM.
+	// StateClaiming: waiting to claim a generic warm VM without tenant state.
 	StateClaiming State = "claiming"
-	// StateAssigning: assignment delivered; the guest is bringing the
-	// runner up.
+	// StateAssigning: listener configuration was delivered and the guest is
+	// bringing the fresh runner up without tenant state.
 	StateAssigning State = "assigning"
-	// StateListening: the runner is registered without customer state.
+	// StateListening: the fresh runner is registered and waiting for GitHub;
+	// no repository generation has been selected or attached.
 	StateListening State = "listening"
-	// StateHookBlocked: GitHub assigned the runner and the synchronous hook
-	// is waiting for an authorized bind.
+	// StateHookBlocked: the job-start hook validated GitHub's identity and is
+	// waiting for hostd to observe the evidence before customer steps run.
 	StateHookBlocked State = "hook-blocked"
-	// StateBinding: the host attached the resolved zvol tuple and is waiting
-	// for guest mount, clock, and release evidence.
+	// StateBinding: local assignment selected one execution; the host is
+	// materializing and attaching its zvol tuple, then waiting for guest mount,
+	// process restore, and clock evidence.
 	StateBinding State = "binding"
+	// StateAuthorizing: bind/restore succeeded and the exact assignment was
+	// released to Runner.Worker; hostd is waiting for the job-start hook.
+	StateAuthorizing State = "authorizing"
 	// StateReady: the rendezvous is complete and customer steps may run.
 	StateReady State = "ready"
 	// StateExited: the runner finished; ExitCode is meaningful. The VM is
@@ -96,8 +101,16 @@ type LeaseReport struct {
 	ExitCode         int    `json:"exit_code,omitempty"`
 	Reason           string `json:"reason,omitempty"`
 	// SealedGeneration confirms which generation a seal produced.
-	SealedGeneration string             `json:"sealed_generation,omitempty"`
-	Identity         *JobIdentityReport `json:"identity,omitempty"`
+	SealedGeneration string              `json:"sealed_generation,omitempty"`
+	Checkpoint       *CheckpointArtifact `json:"checkpoint,omitempty"`
+	Identity         *JobIdentityReport  `json:"identity,omitempty"`
+}
+
+// CheckpointArtifact identifies the process image paired with a workspace
+// generation. The digest covers the complete CRIU image directory.
+type CheckpointArtifact struct {
+	Digest  string `json:"digest"`
+	Version string `json:"version"`
 }
 
 type JobIdentityReport struct {
@@ -169,13 +182,18 @@ type DesiredLease struct {
 	ProviderRunID        int64  `json:"provider_run_id,omitempty"`
 	ProviderJobID        int64  `json:"provider_job_id,omitempty"`
 	ProviderRunAttempt   int    `json:"provider_run_attempt,omitempty"`
+	JobDisplayName       string `json:"job_display_name,omitempty"`
 	AssignedRunnerName   string `json:"assigned_runner_name,omitempty"`
 	RendezvousAuthorized bool   `json:"rendezvous_authorized,omitempty"`
 
 	Workspace WorkspaceSpec `json:"workspace"`
+	Process   ProcessSpec   `json:"process"`
 	// SealGeneration names the generation a seal must produce; set when
 	// State is DesiredSeal.
 	SealGeneration string `json:"seal_generation,omitempty"`
+	// SealCheckpoint echoes the candidate reported at runner exit. It lets a
+	// restarted hostd finish sealing without trusting process-local memory.
+	SealCheckpoint *CheckpointArtifact `json:"seal_checkpoint,omitempty"`
 }
 
 // WorkspaceSpec says how to materialize the workspace volume.
@@ -185,4 +203,14 @@ type WorkspaceSpec struct {
 	Generation string `json:"generation,omitempty"`
 	// SizeBytes for an empty volume; ignored for clones.
 	SizeBytes int64 `json:"size_bytes,omitempty"`
+}
+
+// ProcessSpec says how to materialize the encrypted CRIU image volume.
+// A restore is selected only when Generation and ExpectedDigest are both
+// present; otherwise hostd creates an empty process volume and performs a
+// cold process start on the warm VM.
+type ProcessSpec struct {
+	Generation     string `json:"generation,omitempty"`
+	SizeBytes      int64  `json:"size_bytes,omitempty"`
+	ExpectedDigest string `json:"expected_digest,omitempty"`
 }

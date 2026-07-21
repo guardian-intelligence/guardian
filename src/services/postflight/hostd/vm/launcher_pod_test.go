@@ -89,6 +89,7 @@ func TestPodManifestGolden(t *testing.T) {
 		CPUs:       4,
 		MemoryMiB:  16384,
 		RootDevice: "/dev/zvol/tank/postflight/vm-pool-0001",
+		Firmware:   "/usr/share/postflight/OVMF.fd",
 		StateDir:   "/var/lib/hostd/vms/pool-0001",
 		VsockCID:   3,
 	}
@@ -101,7 +102,7 @@ kind: Pod
 metadata:
   labels:
     app.kubernetes.io/name: postflight-vm
-    postflight.guardianintelligence.org/argv-sha256: ea34a324a3e7daabbed84bfe6c2cba4d2b445ec32f81029cc1a12d43a7783991
+    postflight.guardianintelligence.org/argv-sha256: 5011beb7587e14d2b15f5dad27ce6d878f8d1e2f1f70ae4ac73162d442edc113
     postflight.guardianintelligence.org/vm-id: pool-0001
   name: postflight-vm-pool-0001
   namespace: postflight-vms
@@ -111,9 +112,11 @@ spec:
     - /usr/bin/qemu-system-x86_64
     - -nodefaults
     - -machine
-    - pc-q35-8.2,accel=kvm
+    - pc-q35-11.0,accel=kvm,confidential-guest-support=sev0
+    - -object
+    - sev-snp-guest,id=sev0,cbitpos=51,reduced-phys-bits=1,policy=0x30000
     - -cpu
-    - host
+    - EPYC-v4
     - -smp
     - "4"
     - -m
@@ -128,6 +131,8 @@ spec:
     - file:/var/lib/hostd/vms/pool-0001/serial.log
     - -qmp
     - unix:/var/lib/hostd/vms/pool-0001/qmp.sock,server=on,wait=off
+    - -bios
+    - /usr/share/postflight/OVMF.fd
     - -device
     - virtio-scsi-pci,id=scsi0
     - -blockdev

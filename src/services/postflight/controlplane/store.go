@@ -549,7 +549,7 @@ ON CONFLICT (provider_job_id) DO UPDATE SET
     observed_at   = EXCLUDED.observed_at,
     updated_at    = now()`
 
-sqlAdoptAssignedExecution = `
+	sqlAdoptAssignedExecution = `
 UPDATE host_leases execution
 SET state = 'ready', reported_state = 'assignment-routed',
     assignment_deadline_at = NULL, updated_at = now()

@@ -3,6 +3,10 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "guestd",
     srcs = [
+        "assignment.go",
+        "capsule.go",
+        "checkpoint.go",
+        "criu.go",
         "guestd.go",
         "runner.go",
         "system.go",
@@ -13,6 +17,7 @@ go_library(
     deps = [
         "//src/services/postflight/hostd/guestproto",
         "//src/services/postflight/hostd/vsock",
+        "//src/services/postflight/timing",
         "@org_golang_x_sys//unix",
     ],
 )
@@ -20,6 +25,9 @@ go_library(
 go_test(
     name = "guestd_test",
     srcs = [
+        "assignment_test.go",
+        "capsule_test.go",
+        "criu_test.go",
         "guestd_test.go",
         "runner_test.go",
         "system_loopback_test.go",

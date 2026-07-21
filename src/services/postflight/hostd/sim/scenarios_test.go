@@ -3,6 +3,7 @@ package sim
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +36,7 @@ func runLease(id string) syncproto.DesiredLease {
 		ProviderRunID:        101,
 		ProviderJobID:        201,
 		ProviderRunAttempt:   1,
+		JobDisplayName:       "test",
 		AssignedRunnerName:   id,
 		RendezvousAuthorized: true,
 		Workspace:            syncproto.WorkspaceSpec{SizeBytes: 1 << 30},
@@ -57,7 +59,7 @@ func driveToReady(t *testing.T, world *World, spec syncproto.DesiredLease) (vmID
 		t.Fatalf("after tick 1: state %s, want claiming", got)
 	}
 	bootAll(world)
-	world.Tick() // claim + assign
+	world.Tick() // claim the warm VM and prepare the listener
 	snapshot := world.Lease(spec.LeaseID)
 	if snapshot.State != syncproto.StateAssigning || snapshot.VMID == "" {
 		t.Fatalf("after tick 2: state %s vm %q, want assigning with a vm", snapshot.State, snapshot.VMID)
@@ -74,15 +76,31 @@ func completeRendezvous(t *testing.T, world *World, spec syncproto.DesiredLease,
 	world.VMs.MarkListening(vm.ID(vmID))
 	world.Tick()
 	if got := world.Lease(spec.LeaseID).State; got != syncproto.StateListening {
-		t.Fatalf("after tick 3: state %s, want listening", got)
+		t.Fatalf("after registration: state %s, want listening", got)
 	}
 	identity := vm.JobIdentity{
 		RunID: "101", RunAttempt: 1, RunnerName: spec.LeaseID,
 		Repository: spec.RepositoryFullName, WorkflowJob: "test",
 	}
+	world.VMs.MarkAssigned(vm.ID(vmID), vm.Assignment{
+		RequestID: "request-" + spec.LeaseID, JobID: "runner-job-" + spec.LeaseID,
+		RunnerName: spec.LeaseID, JobDisplayName: spec.JobDisplayName, Identity: identity,
+	})
+	world.Tick()
+	if got := world.Lease(spec.LeaseID).State; got != syncproto.StateBinding {
+		t.Fatalf("after local assignment: state %s, want binding", got)
+	}
+	world.VMs.MarkBound(vm.ID(vmID))
+	world.Tick()
+	if got := world.Lease(spec.LeaseID).State; got != syncproto.StateAuthorizing {
+		t.Fatalf("after restore: state %s, want authorizing", got)
+	}
+	world.VMs.MarkWorkerReady(vm.ID(vmID), vm.ClockSample{
+		UnixNS: time.Now().UnixNano(), Synchronized: true, Clocksource: "kvm-clock",
+	})
+	world.Tick()
 	world.VMs.MarkHookBlocked(vm.ID(vmID), identity)
-	world.Tick() // observe blocked hook
-	world.Tick() // bind workspace
+	world.Tick()
 	world.VMs.MarkReady(vm.ID(vmID), vm.ClockSample{
 		UnixNS: time.Now().UnixNano(), Synchronized: true, Clocksource: "kvm-clock",
 	})
@@ -98,10 +116,20 @@ func driveToHookBlocked(t *testing.T, world *World, spec syncproto.DesiredLease)
 	snapshot := world.Lease(spec.LeaseID)
 	world.VMs.MarkListening(vm.ID(snapshot.VMID))
 	world.Tick()
-	world.VMs.MarkHookBlocked(vm.ID(snapshot.VMID), vm.JobIdentity{
+	identity := vm.JobIdentity{
 		RunID: "101", RunAttempt: 1, RunnerName: spec.LeaseID,
 		Repository: spec.RepositoryFullName, WorkflowJob: "test",
+	}
+	world.VMs.MarkAssigned(vm.ID(snapshot.VMID), vm.Assignment{
+		RequestID: "request-" + spec.LeaseID, JobID: "runner-job-" + spec.LeaseID,
+		RunnerName: spec.LeaseID, JobDisplayName: spec.JobDisplayName, Identity: identity,
 	})
+	world.Tick()
+	world.VMs.MarkBound(vm.ID(snapshot.VMID))
+	world.Tick()
+	world.VMs.MarkWorkerReady(vm.ID(snapshot.VMID), vm.ClockSample{})
+	world.Tick()
+	world.VMs.MarkHookBlocked(vm.ID(snapshot.VMID), identity)
 	world.Tick()
 	return snapshot.VMID
 }
@@ -122,11 +150,25 @@ func driveExistingToReady(t *testing.T, world *World, spec syncproto.DesiredLeas
 		world.Tick()
 		fallthrough
 	case vm.PhaseListening:
+		world.VMs.MarkAssigned(vm.ID(vmID), vm.Assignment{
+			RequestID: "request-" + spec.LeaseID, JobID: "runner-job-" + spec.LeaseID,
+			RunnerName: spec.LeaseID, JobDisplayName: spec.JobDisplayName, Identity: identity,
+		})
+		world.Tick()
+		fallthrough
+	case vm.PhaseJobAssigned:
+		world.VMs.MarkBound(vm.ID(vmID))
+		world.Tick()
+		fallthrough
+	case vm.PhaseBound:
+		world.VMs.MarkWorkerReady(vm.ID(vmID), vm.ClockSample{})
+		world.Tick()
+		fallthrough
+	case vm.PhaseWorkerReady:
 		world.VMs.MarkHookBlocked(vm.ID(vmID), identity)
 		world.Tick()
 		fallthrough
 	case vm.PhaseHookBlocked:
-		world.Tick()
 		world.VMs.MarkReady(vm.ID(vmID), vm.ClockSample{
 			UnixNS: time.Now().UnixNano(), Synchronized: true, Clocksource: "kvm-clock",
 		})
@@ -167,7 +209,8 @@ func TestHappyPathRunSealForget(t *testing.T) {
 		t.Fatalf("jit config %q", preparation.JITConfig)
 	}
 	wantToken := checkoutbundle.DeriveCheckoutToken([]byte("0123456789abcdef0123456789abcdef"), "exec-l1", "attempt-l1")
-	if rendezvous.Env["POSTFLIGHT_CHECKOUT_TOKEN"] != wantToken {
+	authorization, ok := world.VMs.AuthorizationFor(vm.ID(vmID))
+	if !ok || authorization.Env["POSTFLIGHT_CHECKOUT_TOKEN"] != wantToken {
 		t.Fatal("checkout token does not match host-secret derivation")
 	}
 	// While the lease is live, its token resolves.
@@ -190,6 +233,10 @@ func TestHappyPathRunSealForget(t *testing.T) {
 	sealed := spec
 	sealed.State = syncproto.DesiredSeal
 	sealed.SealGeneration = "g1"
+	sealed.SealCheckpoint = &syncproto.CheckpointArtifact{
+		Digest:  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Version: "Version: 4.2",
+	}
 	deliver(world, 1, sealed)
 	world.Tick()
 	if got := world.Lease("l1"); got.State != syncproto.StateSealed || got.SealedGeneration != "g1" {
@@ -203,13 +250,111 @@ func TestHappyPathRunSealForget(t *testing.T) {
 	deliver(world, 1)
 	world.Tick()
 	if world.HasLease("l1") {
-		t.Fatal("acknowledged lease still tracked")
+		t.Fatalf("acknowledged lease still tracked: snapshot=%+v process=%t attached=%t journal=%v", world.Lease("l1"), world.Zvols.HasProcess("l1"), world.Zvols.ProcessAttached("l1"), world.Zvols.Journal)
 	}
 	if world.Zvols.HasWorkspace("l1") {
 		t.Fatal("workspace survived collection")
 	}
 	if !world.Zvols.HasGeneration("g1") {
 		t.Fatal("generation destroyed without a reap verb")
+	}
+}
+
+func TestSixListenerPoolRoutesCrossedAssignmentsLocally(t *testing.T) {
+	world := NewWorld(t, slots(6))
+	repos := []string{
+		"guardian-intelligence/turborepo-tuned",
+		"guardian-intelligence/cilium-tuned",
+		"guardian-intelligence/envoy-tuned",
+		"guardian-intelligence/calcom-tuned",
+		"guardian-intelligence/gradle-tuned",
+		"guardian-intelligence/llvm-tuned",
+	}
+	specs := make([]syncproto.DesiredLease, 6)
+	for i := range specs {
+		specs[i] = runLease("listener-" + string(rune('a'+i)))
+		specs[i].ExecutionLeaseID = specs[i].LeaseID
+		specs[i].ExecutionID = "execution-" + specs[i].LeaseID
+		specs[i].AttemptID = "attempt-" + specs[i].LeaseID
+		specs[i].RepositoryFullName = repos[i]
+		specs[i].ProviderRunID = int64(1001 + i)
+		specs[i].ProviderJobID = int64(2001 + i)
+		specs[i].JobDisplayName = "benchmark"
+	}
+	deliver(world, 6, specs...)
+	world.Tick()
+	bootAll(world)
+	world.Tick()
+
+	vmByListener := map[string]vm.ID{}
+	statuses, err := world.VMs.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range statuses {
+		if status.Lease != "" {
+			vmByListener[status.Lease] = status.ID
+			if !world.VMs.MarkListening(status.ID) {
+				t.Fatalf("listener %s did not register", status.Lease)
+			}
+		}
+	}
+	world.Tick()
+
+	// Rotate the jobs one position. Every listener receives a different
+	// execution than the one whose demand caused its registration.
+	for i, listener := range specs {
+		target := specs[(i+1)%len(specs)]
+		id := vmByListener[listener.LeaseID]
+		identity := vm.JobIdentity{
+			RunID: strconv.FormatInt(target.ProviderRunID, 10), RunAttempt: target.ProviderRunAttempt,
+			RunnerName: listener.LeaseID, Repository: target.RepositoryFullName, WorkflowJob: "benchmark",
+		}
+		if !world.VMs.MarkAssigned(id, vm.Assignment{
+			RequestID: "request-" + target.LeaseID, JobID: "runner-job-" + target.LeaseID,
+			RunnerName: listener.LeaseID, JobDisplayName: target.JobDisplayName, Identity: identity,
+		}) {
+			t.Fatalf("listener %s did not observe assignment", listener.LeaseID)
+		}
+	}
+	world.Tick()
+
+	for i, listener := range specs {
+		target := specs[(i+1)%len(specs)]
+		id := vmByListener[listener.LeaseID]
+		rendezvous, ok := world.VMs.RendezvousFor(id)
+		if !ok {
+			t.Fatalf("listener %s has no rendezvous", listener.LeaseID)
+		}
+		wantDevice := "/dev/zvol/fake/ws/" + target.LeaseID
+		if rendezvous.WorkspaceDevice != wantDevice {
+			t.Fatalf("listener %s bound %s, want %s", listener.LeaseID, rendezvous.WorkspaceDevice, wantDevice)
+		}
+		world.VMs.MarkBound(id)
+	}
+	world.Tick()
+
+	for i, listener := range specs {
+		target := specs[(i+1)%len(specs)]
+		id := vmByListener[listener.LeaseID]
+		authorization, ok := world.VMs.AuthorizationFor(id)
+		if !ok || authorization.RequestID != "request-"+target.LeaseID {
+			t.Fatalf("listener %s authorization = %#v", listener.LeaseID, authorization)
+		}
+		world.VMs.MarkWorkerReady(id, vm.ClockSample{})
+		world.Tick()
+		world.VMs.MarkHookBlocked(id, authorization.Identity)
+		world.Tick()
+		world.VMs.MarkReady(id, vm.ClockSample{})
+	}
+	world.Tick()
+
+	for i, listener := range specs {
+		target := specs[(i+1)%len(specs)]
+		snapshot := world.Lease(listener.LeaseID)
+		if snapshot.State != syncproto.StateReady || snapshot.ExecutionLeaseID != target.LeaseID {
+			t.Fatalf("listener %s snapshot = %+v, want execution %s ready", listener.LeaseID, snapshot, target.LeaseID)
+		}
 	}
 }
 
@@ -230,8 +375,8 @@ func TestReadyLeaseAllowsLongRunningJob(t *testing.T) {
 	}
 }
 
-// TestExitQuiescesBeforeDestroy: the workspace is snapshotted after the VM
-// is gone, so the guest must sync and unmount while it is still alive —
+// TestExitQuiescesBeforeDestroy: the generation is snapshotted after the VM
+// is gone, so the guest must checkpoint and flush while it is still alive;
 // quiesce strictly precedes the exit-time destroy.
 func TestExitQuiescesBeforeDestroy(t *testing.T) {
 	world := NewWorld(t, slots(2))
@@ -292,7 +437,7 @@ func TestQuiesceFailureFailsTheLease(t *testing.T) {
 	deliver(world, 1)
 	world.Tick()
 	if world.HasLease("l1") {
-		t.Fatal("acknowledged failed lease still tracked")
+		t.Fatalf("acknowledged failed lease still tracked: snapshot=%+v process=%t attached=%t journal=%v", world.Lease("l1"), world.Zvols.HasProcess("l1"), world.Zvols.ProcessAttached("l1"), world.Zvols.Journal)
 	}
 	if world.Zvols.HasWorkspace("l1") {
 		t.Fatal("failed lease's workspace survived collection")
@@ -324,7 +469,7 @@ func TestCloneSourceMissingFailsLease(t *testing.T) {
 	driveToHookBlocked(t, world, spec)
 	world.Tick()
 	snapshot := world.Lease("l1")
-	if snapshot.State != syncproto.StateFailed || !strings.Contains(snapshot.Reason, "materialize") {
+	if snapshot.State != syncproto.StateFailed || !strings.Contains(snapshot.Reason, "rendezvous") {
 		t.Fatalf("inventory drift should fail the lease, got %+v", snapshot)
 	}
 }
@@ -756,6 +901,14 @@ func TestOrphanVMAndWorkspaceAreCollected(t *testing.T) {
 	if err := world.VMs.Prepare(context.Background(), "vm-zombie", vm.Preparation{Lease: "ghost"}); err != nil {
 		t.Fatal(err)
 	}
+	world.VMs.MarkListening("vm-zombie")
+	world.VMs.MarkAssigned("vm-zombie", vm.Assignment{RequestID: "request-ghost", RunnerName: "ghost"})
+	if err := world.VMs.Rendezvous(context.Background(), "vm-zombie", vm.Rendezvous{
+		Lease: "ghost", WorkspaceDevice: "/dev/zvol/ghost-workspace", WorkspaceMountpoint: "/work", ProcessDevice: "/dev/zvol/ghost-process",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	world.VMs.MarkBound("vm-zombie")
 	if _, err := world.Zvols.EnsureWorkspace(context.Background(), "stale", "", 1); err != nil {
 		t.Fatal(err)
 	}

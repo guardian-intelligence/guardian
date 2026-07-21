@@ -24,6 +24,8 @@ type config struct {
 	cpus           int
 	memoryMiB      int
 	qemuPath       string
+	firmwarePath   string
+	criuVersion    string
 	syncInterval   time.Duration
 	guestNetwork   string
 
@@ -79,6 +81,8 @@ func loadConfig() (config, error) {
 		cpus:                positiveInt("HOSTD_CPUS", "4"),
 		memoryMiB:           positiveInt("HOSTD_MEMORY_MIB", "16384"),
 		qemuPath:            envOr("HOSTD_QEMU_PATH", "/usr/bin/qemu-system-x86_64"),
+		firmwarePath:        required("HOSTD_FIRMWARE_PATH"),
+		criuVersion:         required("HOSTD_CRIU_VERSION"),
 		syncInterval:        duration("HOSTD_SYNC_INTERVAL", "2s"),
 		guestNetwork:        envOr("HOSTD_GUEST_NETWORK", "none"),
 		checkoutListenAddr:  envOr("HOSTD_CHECKOUT_LISTEN_ADDR", "127.0.0.1:8480"),

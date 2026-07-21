@@ -98,7 +98,7 @@ func TestVsockGuestDialFailureIsTheZeroObservation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("observe: %v", err)
 	}
-	if observed != (GuestObservation{}) {
+	if observed.Hello || observed.Assignment != nil || observed.RunnerRegistered || observed.RunnerExited || len(observed.Timing) != 0 {
 		t.Fatalf("observation %+v, want zero", observed)
 	}
 
@@ -161,7 +161,10 @@ func TestVsockGuestPrepareWritesTheListener(t *testing.T) {
 
 func TestVsockGuestQuiesceRoundTrip(t *testing.T) {
 	replies := map[string]guestproto.Message{
-		"ok":     {Kind: guestproto.KindQuiesced, Quiesced: &guestproto.Quiesced{}},
+		"ok": {Kind: guestproto.KindQuiesced, Quiesced: &guestproto.Quiesced{Checkpoint: &guestproto.CheckpointArtifact{
+			Digest:  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			Version: "Version: 4.2",
+		}}},
 		"failed": {Kind: guestproto.KindQuiesceFailed, QuiesceFailed: &guestproto.QuiesceFailed{Reason: "target is busy"}},
 	}
 	for name, reply := range replies {
@@ -174,16 +177,22 @@ func TestVsockGuestQuiesceRoundTrip(t *testing.T) {
 					t.Errorf("guest got %v (err %v), want quiesce", message.Kind, err)
 					return
 				}
-				if message.Quiesce.Mountpoint != "/work" {
-					t.Errorf("quiesce mountpoint %q", message.Quiesce.Mountpoint)
+				if len(message.Quiesce.Mountpoints) != 1 || message.Quiesce.Mountpoints[0] != "/work" {
+					t.Errorf("quiesce mountpoints %q", message.Quiesce.Mountpoints)
 				}
 				_ = guestproto.NewEncoder(conn).Write(reply)
 			})
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
-			err := transport.Quiesce(ctx, "vm-a", 3, "/work")
+			got, err := transport.Quiesce(ctx, "vm-a", 3, guestproto.Quiesce{
+				Mountpoints: []string{"/work"},
+				Checkpoint:  &guestproto.CheckpointDump{ImagesDir: "/process/images", ExternalMountAt: "/work"},
+			})
 			if name == "ok" && err != nil {
 				t.Fatalf("quiesce: %v", err)
+			}
+			if name == "ok" && (got.Checkpoint == nil || got.Checkpoint.Version != "Version: 4.2") {
+				t.Fatalf("quiesce reply %+v", got)
 			}
 			if name == "failed" {
 				if err == nil || !strings.Contains(err.Error(), "target is busy") {

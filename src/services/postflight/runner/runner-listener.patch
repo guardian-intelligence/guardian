@@ -1,0 +1,82 @@
+diff --git a/src/Runner.Listener/Runner.cs b/src/Runner.Listener/Runner.cs
+index e20eb62..8ca004d 100644
+--- a/src/Runner.Listener/Runner.cs
++++ b/src/Runner.Listener/Runner.cs
+@@ -3,0 +4,2 @@ using System.Collections.Generic;
++using System.Diagnostics;
++using System.Globalization;
+@@ -670,2 +673,3 @@ namespace GitHub.Runner.Listener
+                                     var jobMessage = StringUtil.ConvertFromJson<Pipelines.AgentJobRequestMessage>(message.Body);
++                                    await WaitForPostflightAssignmentAsync(jobMessage.RequestId.ToString(CultureInfo.InvariantCulture), jobMessage, settings, messageQueueLoopTokenSource.Token);
+                                     jobDispatcher.Run(jobMessage, runOnce);
+@@ -754,2 +758,3 @@ namespace GitHub.Runner.Listener
+                                     // Dispatch
++                                    await WaitForPostflightAssignmentAsync(messageRef.RunnerRequestId, jobRequestMessage, settings, messageQueueLoopTokenSource.Token);
+                                     jobDispatcher.Run(jobRequestMessage, runOnce);
+@@ -886,0 +891,66 @@ namespace GitHub.Runner.Listener
++        private async Task WaitForPostflightAssignmentAsync(
++            string requestId,
++            Pipelines.AgentJobRequestMessage jobMessage,
++            RunnerSettings settings,
++            CancellationToken cancellationToken)
++        {
++            string GitHubContext(string key)
++            {
++                if (jobMessage.ContextData != null &&
++                    jobMessage.ContextData.TryGetValue("github", out var context) &&
++                    context is Pipelines.ContextData.DictionaryContextData github &&
++                    github.TryGetValue(key, out var value) &&
++                    value is Pipelines.ContextData.StringContextData text &&
++                    !string.IsNullOrEmpty(text.Value))
++                {
++                    return text.Value;
++                }
++
++                throw new InvalidOperationException($"Postflight assignment is missing github.{key}");
++            }
++
++            var startInfo = new ProcessStartInfo("/usr/local/bin/guestd")
++            {
++                UseShellExecute = false,
++            };
++            foreach (var argument in new[]
++            {
++                "runner-assigned",
++                requestId,
++                jobMessage.JobId.ToString("D"),
++                settings.AgentName,
++                GitHubContext("run_id"),
++                GitHubContext("run_attempt"),
++                GitHubContext("repository"),
++                jobMessage.JobName,
++                jobMessage.JobDisplayName,
++            })
++            {
++                if (string.IsNullOrEmpty(argument))
++                {
++                    throw new InvalidOperationException("Postflight assignment contains an empty identity field");
++                }
++                startInfo.ArgumentList.Add(argument);
++            }
++
++            Trace.Info($"Blocking Runner.Worker for Postflight request '{requestId}' and job '{jobMessage.JobId}'");
++            using var gate = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start Postflight assignment gate");
++            try
++            {
++                await gate.WaitForExitAsync(cancellationToken);
++            }
++            catch
++            {
++                if (!gate.HasExited)
++                {
++                    gate.Kill(entireProcessTree: true);
++                }
++                throw;
++            }
++            if (gate.ExitCode != 0)
++            {
++                throw new InvalidOperationException($"Postflight assignment gate exited {gate.ExitCode}");
++            }
++            Trace.Info($"Postflight released Runner.Worker for request '{requestId}'");
++        }
++

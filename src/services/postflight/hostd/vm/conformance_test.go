@@ -21,6 +21,7 @@ import (
 //	HOSTD_QEMU_TEST_ROOT   scratch dataset root (created and destroyed)
 //	HOSTD_QEMU_TEST_IMAGE  bootable golden snapshot, e.g. tank/vm-golden@gold
 //	HOSTD_QEMU_TEST_QEMU   QEMU binary, e.g. /usr/bin/qemu-system-x86_64
+//	HOSTD_QEMU_TEST_FIRMWARE pinned AmdSev OVMF.fd
 //
 // and run the package tests as root.
 func conformanceDriver(t *testing.T) (*QEMU, *scriptedGuest) {
@@ -28,8 +29,9 @@ func conformanceDriver(t *testing.T) (*QEMU, *scriptedGuest) {
 	root := os.Getenv("HOSTD_QEMU_TEST_ROOT")
 	image := os.Getenv("HOSTD_QEMU_TEST_IMAGE")
 	qemuPath := os.Getenv("HOSTD_QEMU_TEST_QEMU")
-	if root == "" || image == "" || qemuPath == "" {
-		t.Skip("set HOSTD_QEMU_TEST_{ROOT,IMAGE,QEMU} to run the QEMU conformance suite")
+	firmware := os.Getenv("HOSTD_QEMU_TEST_FIRMWARE")
+	if root == "" || image == "" || qemuPath == "" || firmware == "" {
+		t.Skip("set HOSTD_QEMU_TEST_{ROOT,IMAGE,QEMU,FIRMWARE} to run the QEMU conformance suite")
 	}
 	if _, err := exec.LookPath("zfs"); err != nil {
 		t.Skip("zfs binary not available")
@@ -50,6 +52,7 @@ func conformanceDriver(t *testing.T) (*QEMU, *scriptedGuest) {
 	driver, err := NewQEMU(Config{
 		StateRoot:   shortTempDir(t),
 		QEMUPath:    qemuPath,
+		Firmware:    firmware,
 		DatasetRoot: root,
 		Classes: map[Class]ClassConfig{
 			testClass: {CPUs: 2, MemoryMiB: 2048, Image: image},
@@ -193,17 +196,18 @@ func TestConformanceLifecycle(t *testing.T) {
 	if err := driver.disks.Ensure(ctx, workspace, driver.cfg.Classes[testClass].Image); err != nil {
 		t.Fatalf("cloning workspace: %v", err)
 	}
+	process := driver.cfg.DatasetRoot + "/process-conf-lifecycle"
+	if err := driver.disks.Ensure(ctx, process, driver.cfg.Classes[testClass].Image); err != nil {
+		t.Fatalf("cloning process volume: %v", err)
+	}
 	preparation := Preparation{Lease: "lease-conf", JITConfig: "jit-blob"}
 	rendezvous := Rendezvous{
 		Lease:               "lease-conf",
 		WorkspaceDevice:     zvolDevicePath(workspace),
 		WorkspaceMountpoint: "/opt/actions-runner/_work/widget/widget",
-		Env:                 map[string]string{"POSTFLIGHT_EXECUTION_ID": "exec-conf"},
+		ProcessDevice:       zvolDevicePath(process),
 	}
 	attachStart := time.Now()
-	if err := driver.Prepare(ctx, id, preparation); err != nil {
-		t.Fatalf("prepare: %v", err)
-	}
 	if err := driver.Rendezvous(ctx, id, rendezvous); err != nil {
 		t.Fatalf("rendezvous: %v", err)
 	}
@@ -211,16 +215,20 @@ func TestConformanceLifecycle(t *testing.T) {
 	if err := driver.Rendezvous(ctx, id, rendezvous); err != nil {
 		t.Fatalf("repeat rendezvous: %v", err)
 	}
+	guest.set(id, GuestObservation{Hello: true, MountsReady: true})
+	if err := driver.Prepare(ctx, id, preparation); err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
 
 	client, err := dialQMP(ctx, qmpSocketPath(driver.stateDir(id)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	attached, err := workspaceBlockdevPresent(ctx, client)
+	attached, err := blockdevPresent(ctx, client, workspaceNode)
 	if err != nil || !attached {
 		t.Fatalf("workspace blockdev present=%t err=%v", attached, err)
 	}
-	present, err := workspaceDevicePresent(ctx, client)
+	present, err := devicePresent(ctx, client, workspaceDevice)
 	if err != nil || !present {
 		t.Fatalf("workspace qdev present=%t err=%v", present, err)
 	}
@@ -228,7 +236,7 @@ func TestConformanceLifecycle(t *testing.T) {
 
 	deliveries := guest.rendezvouses(id)
 	if len(deliveries) == 0 || deliveries[0].Lease != "lease-conf" ||
-		len(deliveries[0].Mounts) != 1 || deliveries[0].Mounts[0].Serial != workspaceNode {
+		len(deliveries[0].Mounts) != 2 || deliveries[0].Mounts[0].Serial != workspaceNode || deliveries[0].Mounts[1].Serial != processNode {
 		t.Fatalf("deliveries %+v", deliveries)
 	}
 	status, err = driver.Status(ctx, id)
@@ -255,11 +263,11 @@ func TestConformanceLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	detachStart := time.Now()
-	if err := driver.detachWorkspace(ctx, client); err != nil {
+	if err := driver.detachVolume(ctx, client, workspaceNode, workspaceDevice); err != nil {
 		t.Fatalf("detach: %v", err)
 	}
 	t.Logf("detach in %s", time.Since(detachStart))
-	if attached, err := workspaceBlockdevPresent(ctx, client); err != nil || attached {
+	if attached, err := blockdevPresent(ctx, client, workspaceNode); err != nil || attached {
 		t.Fatalf("workspace blockdev present=%t err=%v after detach", attached, err)
 	}
 	client.Close()
@@ -327,6 +335,7 @@ func TestConformanceAdoption(t *testing.T) {
 	second, err := NewQEMU(Config{
 		StateRoot:   first.cfg.StateRoot,
 		QEMUPath:    first.cfg.QEMUPath,
+		Firmware:    first.cfg.Firmware,
 		DatasetRoot: first.cfg.DatasetRoot,
 		Classes:     first.cfg.Classes,
 		Launcher:    ProcessLauncher{},

@@ -138,7 +138,7 @@ func (s *syncServer) applyLeaseReport(ctx context.Context, hostID string, report
 	case syncproto.StateExited:
 		jobID, sealGeneration, completed, err := s.st.CompleteRoutedLease(
 			ctx, hostID, report.LeaseID, executionLeaseID,
-			report.ExitCode, time.Now().Add(s.sealTimeout))
+			report.ExitCode, report.Checkpoint, time.Now().Add(s.sealTimeout))
 		if err != nil {
 			return err
 		}
@@ -158,7 +158,7 @@ func (s *syncServer) applyLeaseReport(ctx context.Context, hostID string, report
 		}
 		jobID, sealed, err := s.st.RecordRoutedLeaseSealed(
 			ctx, hostID, report.LeaseID, executionLeaseID,
-			report.SealedGeneration)
+			report.SealedGeneration, report.Checkpoint)
 		if err != nil {
 			return err
 		}
@@ -231,16 +231,25 @@ func (s *syncServer) desiredState(ctx context.Context, request syncproto.SyncReq
 			ProviderRunID:        row.ProviderRunID,
 			ProviderJobID:        row.ProviderJobID,
 			ProviderRunAttempt:   int(row.ProviderRunAttempt),
+			JobDisplayName:       row.JobDisplayName,
 			AssignedRunnerName:   row.AssignedRunnerName,
 			RendezvousAuthorized: row.RendezvousAuthorized,
 			Workspace: syncproto.WorkspaceSpec{
 				Generation: row.Generation,
 				SizeBytes:  row.SizeBytes,
 			},
+			Process: syncproto.ProcessSpec{SizeBytes: row.ProcessSizeBytes},
+		}
+		if row.ProcessDigest != "" && row.ProcessVersion != "" {
+			desired.Process.Generation = row.Generation
+			desired.Process.ExpectedDigest = row.ProcessDigest
 		}
 		if row.State == leaseSealing {
 			desired.State = syncproto.DesiredSeal
 			desired.SealGeneration = row.SealGeneration
+			desired.SealCheckpoint = &syncproto.CheckpointArtifact{
+				Digest: row.SealProcessDigest, Version: row.SealProcessVersion,
+			}
 		}
 		response.Leases = append(response.Leases, desired)
 	}

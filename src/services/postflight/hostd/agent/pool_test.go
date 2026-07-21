@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/syncproto"
@@ -63,5 +64,64 @@ func TestPoolReplacesStaleImageBeforeLeasing(t *testing.T) {
 	if replacement.Phase != vm.PhaseBooting ||
 		replacement.Image != "tank/images/new@golden" {
 		t.Fatalf("replacement = %+v", replacement)
+	}
+}
+
+func TestVMUpdateAdvancesOnlyAssignedVM(t *testing.T) {
+	ctx := context.Background()
+	vms := vm.NewFake()
+	vms.Images["c"] = "tank/images/current@golden"
+	if err := vms.Launch(ctx, "vm-a", "c"); err != nil {
+		t.Fatal(err)
+	}
+	if !vms.AdvanceBoot("vm-a") {
+		t.Fatal("VM did not become warm")
+	}
+	volumes := zvol.NewFake()
+	instance, err := New(Config{
+		HostID: "host-test", ControlPlaneOrigin: "https://control.invalid",
+		Slots: map[vm.Class]int{"c": 1}, Images: map[vm.Class]string{"c": "tank/images/current@golden"},
+		CheckoutGuestOrigin: "http://198.51.100.1:8480",
+	}, volumes, vms, "credential", []byte("0123456789abcdef0123456789abcdef"), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease := syncproto.DesiredLease{
+		LeaseID: "listener-1", ExecutionLeaseID: "listener-1", State: syncproto.DesiredRun,
+		ExecutionID: "execution-1", AttemptID: "attempt-1", RepositoryFullName: "acme/widget",
+		RunnerClass: "c", JITConfig: "jit", ProviderRunID: 10, ProviderJobID: 11,
+		ProviderRunAttempt: 1, JobDisplayName: "build", Workspace: syncproto.WorkspaceSpec{SizeBytes: 1 << 20},
+	}
+	instance.HandleSync(syncproto.SyncResponse{
+		BootID: instance.bootID, Leases: []syncproto.DesiredLease{lease}, PoolTargets: map[string]int{"c": 1},
+	})
+	instance.Tick(ctx) // pending -> claiming
+	instance.Tick(ctx) // claim the already-warm VM
+	if !vms.MarkListening("vm-a") {
+		t.Fatal("prepared VM did not become listening")
+	}
+	instance.HandleVMUpdate(ctx, "vm-a")
+	if got := instance.leases[lease.LeaseID].state; got != syncproto.StateListening {
+		t.Fatalf("state = %s, want listening", got)
+	}
+	assignment := vm.Assignment{
+		RequestID: "request-1", JobID: "runner-job-1", RunnerName: lease.LeaseID, JobDisplayName: "build",
+		Identity: vm.JobIdentity{RunID: "10", RunAttempt: 1, RunnerName: lease.LeaseID, Repository: "acme/widget", WorkflowJob: "build"},
+	}
+	if !vms.MarkAssigned("vm-a", assignment) {
+		t.Fatal("listener did not accept assignment")
+	}
+	vms.Fail = func(op string, _ vm.ID) error {
+		if op == "list" {
+			return fmt.Errorf("full pool scan reached assignment hot path")
+		}
+		return nil
+	}
+	instance.HandleVMUpdate(ctx, "vm-a")
+	if got := instance.leases[lease.LeaseID].state; got != syncproto.StateBinding {
+		t.Fatalf("state = %s, want binding", got)
+	}
+	if _, ok := vms.RendezvousFor("vm-a"); !ok {
+		t.Fatal("assignment update did not dispatch rendezvous")
 	}
 }
