@@ -424,6 +424,10 @@ func (a *Agent) authorization(record *lease) vm.Authorization {
 			"POSTFLIGHT_EXECUTION_ID":             execution.ExecutionID,
 			"POSTFLIGHT_ATTEMPT_ID":               execution.AttemptID,
 			"POSTFLIGHT_WORKSPACE_READY_FILE":     filepath.Join(mountpoint, guestproto.WorkspaceReadyMarker),
+			// GitHub Runner kills job-spawned processes carrying its tracking
+			// marker. The capsule must retain arbitrary workload daemons for
+			// the post-job CRIU checkpoint while still removing Runner itself.
+			"RUNNER_TRACKING_ID": "",
 		},
 	}
 }

@@ -213,6 +213,9 @@ func TestHappyPathRunSealForget(t *testing.T) {
 	if !ok || authorization.Env["POSTFLIGHT_CHECKOUT_TOKEN"] != wantToken {
 		t.Fatal("checkout token does not match host-secret derivation")
 	}
+	if value, ok := authorization.Env["RUNNER_TRACKING_ID"]; !ok || value != "" {
+		t.Fatal("workload daemons are still marked for GitHub Runner cleanup")
+	}
 	// While the lease is live, its token resolves.
 	if _, ok, _ := world.Agent.ResolveActiveLease(context.Background(), "exec-l1", "attempt-l1"); !ok {
 		t.Fatal("live lease does not resolve for checkout")
