@@ -1,10 +1,17 @@
 package agent
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/syncproto"
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vm"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/zvol"
 )
 
@@ -27,10 +34,50 @@ func TestPoolTraceIsUnownedUntilAssignment(t *testing.T) {
 		t.Fatalf("pool trace carries job ownership: %+v", pool)
 	}
 
+	unassigned := agent.newTraceEvent(record, "assignment_observed")
+	if unassigned.RunID != "" || unassigned.ExecutionLeaseID != "" {
+		t.Fatalf("unassigned trace carries job ownership: %+v", unassigned)
+	}
+	record.assignment = &vm.Assignment{RequestID: "request-1"}
+	record.execution = &syncproto.DesiredLease{
+		ExecutionLeaseID: "execution-2", ProviderRunID: 123,
+	}
 	assigned := agent.newTraceEvent(record, "assignment_observed")
 	if assigned.RunID != "123" || assigned.ExecutionLeaseID != "execution-2" ||
 		assigned.ListenerLeaseID != "listener-1" {
 		t.Fatalf("assignment trace lacks routed identity: %+v", assigned)
+	}
+}
+
+func TestBootstrapOriginTimingRemainsUnownedAfterAssignment(t *testing.T) {
+	agent := &Agent{
+		cfg: Config{HostID: "host-1"}, started: time.Now().Add(-time.Second),
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	record := &lease{
+		spec: syncproto.DesiredLease{LeaseID: "listener-1"}, vmID: "vm-1",
+		assignment: &vm.Assignment{RequestID: "request-1"},
+		execution: &syncproto.DesiredLease{
+			ExecutionLeaseID: "execution-2", ProviderRunID: 123,
+		},
+	}
+	var observed traceEvent
+	agent.cfg.TraceDir = t.TempDir()
+	agent.traceFiles = map[string]*os.File{}
+	agent.appendOriginTiming(record, []vm.TimingPoint{{
+		Event: "qemu_started", Source: "hostd-qemu", BootID: "boot-1",
+		Sequence: 2, MonotonicNS: 20, UnixNS: time.Now().UnixNano(),
+	}})
+	raw, err := os.ReadFile(filepath.Join(agent.cfg.TraceDir, "listener-1.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(raw), &observed); err != nil {
+		t.Fatal(err)
+	}
+	if observed.RunID != "" || observed.ExecutionLeaseID != "" ||
+		observed.RunnerName != "listener-1" || observed.VMID != "vm-1" {
+		t.Fatalf("bootstrap timing carries job ownership: %+v", observed)
 	}
 }
 

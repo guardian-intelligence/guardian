@@ -254,9 +254,11 @@ func (a *Agent) stepLease(ctx context.Context, record *lease, vms *vmView) {
 		}
 		switch status.Phase {
 		case vm.PhaseJobAssigned:
-			if err := a.routeAssignment(record, status.Assignment); err != nil {
-				a.failLease(ctx, record, "local assignment: "+err.Error())
-				return
+			if record.assignment == nil {
+				if err := a.routeAssignment(record, status.Assignment); err != nil {
+					a.failLease(ctx, record, "local assignment: "+err.Error())
+					return
+				}
 			}
 			a.appendTrace(record, "assignment_observed", func(event *traceEvent) {
 				traceAssignment(record, event)

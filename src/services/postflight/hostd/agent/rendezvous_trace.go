@@ -50,8 +50,26 @@ func (a *Agent) appendOriginTiming(record *lease, points []vm.TimingPoint) {
 			event.OriginSeq = point.Sequence
 			event.MonotonicNS = point.MonotonicNS
 			event.WallTime = time.Unix(0, point.UnixNS).UTC()
-			traceAssignment(record, event)
+			if preAssignmentTiming(point.Event) {
+				event.RunID = ""
+				event.ExecutionLeaseID = ""
+				event.RunnerName = record.spec.LeaseID
+				event.VMID = record.vmID
+			} else {
+				traceAssignment(record, event)
+			}
 		})
+	}
+}
+
+func preAssignmentTiming(event string) bool {
+	switch event {
+	case "vm_launch_started", "qemu_started", "guest_hello_observed",
+		"listener_prepare_started", "listener_prepare_sent",
+		"listener_prepare_received", "runner_registered":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -170,7 +188,7 @@ func (a *Agent) newTraceEvent(record *lease, event string) traceEvent {
 		WallTime:        wallTime,
 		ListenerLeaseID: record.spec.LeaseID,
 	}
-	if event != "pool_ready" {
+	if event != "pool_ready" && record.assignment != nil {
 		execution := record.executionSpec()
 		observation.RunID = strconv.FormatInt(execution.ProviderRunID, 10)
 		observation.ExecutionLeaseID = record.executionLeaseID()

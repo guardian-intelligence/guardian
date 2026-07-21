@@ -8,91 +8,135 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
 	"strings"
 	"time"
 )
 
-const rendezvousTraceSchema = 3
+const rendezvousTraceSchema = 4
 
 const (
-	eventPoolReady                  = "pool_ready"
-	eventAssignmentObserved         = "assignment_observed"
-	eventJobHookBlocked             = "job_hook_blocked"
-	eventJobIdentityReported        = "job_identity_reported"
-	eventGenerationResolved         = "generation_resolved"
-	eventRendezvousBound            = "rendezvous_bound"
-	eventMountsReady                = "mounts_ready"
-	eventClockChecked               = "clock_checked"
-	eventJobHookReleased            = "job_hook_released"
-	eventRunnerExited               = "runner_exited"
-	eventSnapshotDecided            = "snapshot_decided"
-	eventSnapshotSealed             = "snapshot_sealed"
-	eventProviderConclusionObserved = "provider_conclusion_observed"
-	eventGenerationPromoted         = "generation_promoted"
-	eventGenerationDiscarded        = "generation_discarded"
-	eventIssueObserved              = "issue_observed"
-	eventClassified                 = "classified"
+	eventVMLaunchStarted                  = "vm_launch_started"
+	eventQEMUStarted                      = "qemu_started"
+	eventGuestHelloObserved               = "guest_hello_observed"
+	eventListenerPrepareStarted           = "listener_prepare_started"
+	eventListenerPrepareSent              = "listener_prepare_sent"
+	eventListenerPrepareReceived          = "listener_prepare_received"
+	eventRunnerRegistered                 = "runner_registered"
+	eventPoolReady                        = "pool_ready"
+	eventRunnerAssignmentReceived         = "runner_assignment_received"
+	eventGuestAssignmentReceived          = "guest_assignment_received"
+	eventHostAssignmentObserved           = "host_assignment_observed"
+	eventAssignmentUpdateReceived         = "assignment_update_received"
+	eventAssignmentObserved               = "assignment_observed"
+	eventGenerationMaterializationStarted = "generation_materialization_started"
+	eventGenerationResolved               = "generation_resolved"
+	eventQMPRendezvousStarted             = "qmp_rendezvous_started"
+	eventQMPConnected                     = "qmp_connected"
+	eventWorkspaceDeviceAttached          = "workspace_device_attached"
+	eventProcessDeviceAttached            = "process_device_attached"
+	eventGuestRendezvousSent              = "guest_rendezvous_sent"
+	eventRendezvousDispatched             = "rendezvous_dispatched"
+	eventGuestRendezvousReceived          = "guest_rendezvous_received"
+	eventMountConvergenceStarted          = "mount_convergence_started"
+	eventMountConvergenceCompleted        = "mount_convergence_completed"
+	eventCRIURestoreStarted               = "criu_restore_started"
+	eventCRIURestoreCompleted             = "criu_restore_completed"
+	eventColdCapsuleStartStarted          = "cold_capsule_start_started"
+	eventColdCapsuleStartCompleted        = "cold_capsule_start_completed"
+	eventGenerationRestoreCompleted       = "generation_restore_completed"
+	eventMountsReady                      = "mounts_ready"
+	eventClockChecked                     = "clock_checked"
+	eventWorkerAuthorizationSent          = "worker_authorization_sent"
+	eventRunnerWorkerReleased             = "runner_worker_released"
+	eventJobHookValidated                 = "job_hook_validated"
+	eventCustomerStepsReleased            = "customer_steps_released"
+	eventJobHookReleased                  = "job_hook_released"
+	eventRunnerExited                     = "runner_exited"
+	eventRunnerExitObserved               = "runner_exit_observed"
+	eventCheckpointStarted                = "checkpoint_started"
+	eventQuiesceRPCStarted                = "quiesce_rpc_started"
+	eventQuiesceReceived                  = "quiesce_received"
+	eventQuiesceMountsChecked             = "quiesce_mounts_checked"
+	eventCheckpointDumpStarted            = "checkpoint_dump_started"
+	eventCheckpointDumpCompleted          = "checkpoint_dump_completed"
+	eventFilesystemSyncStarted            = "filesystem_sync_started"
+	eventFilesystemSyncCompleted          = "filesystem_sync_completed"
+	eventQuiesceRPCCompleted              = "quiesce_rpc_completed"
+	eventCheckpointCompleted              = "checkpoint_completed"
+	eventVMDestroyStarted                 = "vm_destroy_started"
+	eventVMDestroyCompleted               = "vm_destroy_completed"
+	eventSnapshotSealStarted              = "snapshot_seal_started"
+	eventSnapshotSealCompleted            = "snapshot_seal_completed"
+	eventIssueObserved                    = "issue_observed"
+	eventClassified                       = "classified"
 )
 
 const (
 	volumeWorkspace = "workspace"
-	volumeToolchain = "toolchain"
-	volumeData      = "data"
-	volumeMemory    = "memory"
+	volumeProcess   = "process"
 )
 
 var allowedTraceEvents = map[string]bool{
-	eventPoolReady:                  true,
-	eventAssignmentObserved:         true,
-	eventJobHookBlocked:             true,
-	eventJobIdentityReported:        true,
-	eventGenerationResolved:         true,
-	eventRendezvousBound:            true,
-	eventMountsReady:                true,
-	eventClockChecked:               true,
-	eventJobHookReleased:            true,
-	eventRunnerExited:               true,
-	eventSnapshotDecided:            true,
-	eventSnapshotSealed:             true,
-	eventProviderConclusionObserved: true,
-	eventGenerationPromoted:         true,
-	eventGenerationDiscarded:        true,
-	eventIssueObserved:              true,
-	eventClassified:                 true,
+	eventVMLaunchStarted: true, eventQEMUStarted: true,
+	eventGuestHelloObserved: true, eventListenerPrepareStarted: true,
+	eventListenerPrepareSent: true, eventListenerPrepareReceived: true,
+	eventRunnerRegistered: true, eventPoolReady: true,
+	eventRunnerAssignmentReceived: true, eventGuestAssignmentReceived: true,
+	eventHostAssignmentObserved: true, eventAssignmentUpdateReceived: true,
+	eventAssignmentObserved: true, eventGenerationMaterializationStarted: true,
+	eventGenerationResolved: true, eventQMPRendezvousStarted: true,
+	eventQMPConnected: true, eventWorkspaceDeviceAttached: true,
+	eventProcessDeviceAttached: true, eventGuestRendezvousSent: true,
+	eventRendezvousDispatched: true, eventGuestRendezvousReceived: true,
+	eventMountConvergenceStarted: true, eventMountConvergenceCompleted: true,
+	eventCRIURestoreStarted: true, eventCRIURestoreCompleted: true,
+	eventColdCapsuleStartStarted: true, eventColdCapsuleStartCompleted: true,
+	eventGenerationRestoreCompleted: true, eventMountsReady: true,
+	eventClockChecked: true, eventWorkerAuthorizationSent: true,
+	eventRunnerWorkerReleased: true, eventJobHookValidated: true,
+	eventCustomerStepsReleased: true, eventJobHookReleased: true,
+	eventRunnerExited: true, eventRunnerExitObserved: true,
+	eventCheckpointStarted: true, eventQuiesceRPCStarted: true,
+	eventQuiesceReceived: true, eventQuiesceMountsChecked: true,
+	eventCheckpointDumpStarted: true, eventCheckpointDumpCompleted: true,
+	eventFilesystemSyncStarted: true, eventFilesystemSyncCompleted: true,
+	eventQuiesceRPCCompleted: true, eventCheckpointCompleted: true,
+	eventVMDestroyStarted: true, eventVMDestroyCompleted: true,
+	eventSnapshotSealStarted: true, eventSnapshotSealCompleted: true,
+	eventIssueObserved: true, eventClassified: true,
+}
+
+var preAssignmentEvents = map[string]bool{
+	eventVMLaunchStarted: true, eventQEMUStarted: true,
+	eventGuestHelloObserved: true, eventListenerPrepareStarted: true,
+	eventListenerPrepareSent: true, eventListenerPrepareReceived: true,
+	eventRunnerRegistered: true, eventPoolReady: true,
 }
 
 var concernCodes = map[string]bool{
-	"clock_skew":             true,
-	"lifecycle_overhead":     true,
-	"platform_bug":           true,
-	"slower_than_blacksmith": true,
-	"snapshot_discarded":     true,
-	"temporary_hardware":     true,
+	"clock_skew": true, "lifecycle_overhead": true, "platform_bug": true,
+	"slower_than_blacksmith": true, "snapshot_discarded": true,
+	"temporary_hardware": true,
 }
 
 var invalidCodes = map[string]bool{
-	"assignment_model_not_deployed": true,
-	"evidence_incomplete":           true,
-	"missing_tool":                  true,
-	"preflight_failed":              true,
-	"workload_misconfigured":        true,
+	"assignment_model_not_deployed": true, "evidence_incomplete": true,
+	"missing_tool": true, "preflight_failed": true,
+	"workload_misconfigured": true,
 }
 
 var failCodes = map[string]bool{
-	"durable_volume_unsound": true,
-	"workload_unsupported":   true,
+	"durable_volume_unsound": true, "workload_unsupported": true,
 }
 
-// rendezvousEvent is one append-only observation from the runner, guest, or
-// host. Seq is the collector's logical order. MonotonicNS is meaningful only
-// within Source and is never compared across machines.
 type rendezvousEvent struct {
 	SchemaVersion int       `json:"schema_version"`
 	RunID         string    `json:"run_id,omitempty"`
 	Event         string    `json:"event"`
 	Seq           uint64    `json:"seq"`
 	Source        string    `json:"source"`
+	BootID        string    `json:"boot_id"`
+	OriginSeq     uint64    `json:"origin_seq"`
 	MonotonicNS   int64     `json:"monotonic_ns"`
 	WallTime      time.Time `json:"wall_time"`
 
@@ -101,10 +145,10 @@ type rendezvousEvent struct {
 	JobID         int64  `json:"job_id,omitempty"`
 	RunAttempt    int    `json:"run_attempt,omitempty"`
 	RunnerName    string `json:"runner_name,omitempty"`
+	RequestID     string `json:"request_id,omitempty"`
+	RunnerJobID   string `json:"runner_job_id,omitempty"`
 	VMID          string `json:"vm_id,omitempty"`
 	GenerationSet string `json:"generation_set,omitempty"`
-	Conclusion    string `json:"conclusion,omitempty"`
-	ExitCode      *int   `json:"exit_code,omitempty"`
 
 	ListenerLeaseID  string `json:"listener_lease_id,omitempty"`
 	ExecutionLeaseID string `json:"execution_lease_id,omitempty"`
@@ -112,7 +156,7 @@ type rendezvousEvent struct {
 	Volumes        []volumeEvidence        `json:"volumes,omitempty"`
 	Platform       *platformEvidence       `json:"platform,omitempty"`
 	Clock          *clockEvidence          `json:"clock,omitempty"`
-	Snapshot       *snapshotEvidence       `json:"snapshot,omitempty"`
+	Checkpoint     *checkpointEvidence     `json:"checkpoint,omitempty"`
 	Issue          *issueEvidence          `json:"issue,omitempty"`
 	Classification *classificationEvidence `json:"classification,omitempty"`
 }
@@ -123,7 +167,7 @@ type volumeEvidence struct {
 	Materialization string `json:"materialization"`
 	SnapshotGUID    string `json:"snapshot_guid"`
 	Generation      string `json:"generation"`
-	DeviceSerial    string `json:"device_serial"`
+	DeviceSerial    string `json:"device_serial,omitempty"`
 }
 
 type platformEvidence struct {
@@ -132,12 +176,9 @@ type platformEvidence struct {
 	OSImageID     string `json:"os_image_id"`
 	MachineType   string `json:"machine_type"`
 	CPUModel      string `json:"cpu_model"`
-	CRIUVersion   string `json:"criu_version,omitempty"`
+	CRIUVersion   string `json:"criu_version"`
 }
 
-// clockEvidence brackets one guest realtime sample with host samples. The
-// validator uses midpoint offset plus half the round-trip as a conservative
-// skew bound; durations elsewhere come from monotonic clocks.
 type clockEvidence struct {
 	HostBeforeUnixNS  int64  `json:"host_before_unix_ns"`
 	HostAfterUnixNS   int64  `json:"host_after_unix_ns"`
@@ -148,16 +189,9 @@ type clockEvidence struct {
 	AfterRestore      bool   `json:"after_restore"`
 }
 
-type snapshotEvidence struct {
-	Policy               string   `json:"policy"`
-	Decision             string   `json:"decision"`
-	Reason               string   `json:"reason,omitempty"`
-	TrustedRef           bool     `json:"trusted_ref"`
-	RunnerExited         bool     `json:"runner_exited"`
-	RunnerMemoryIncluded bool     `json:"runner_memory_included"`
-	FilesystemsQuiesced  bool     `json:"filesystems_quiesced"`
-	AllowedProcesses     []string `json:"allowed_processes,omitempty"`
-	CapturedProcesses    []string `json:"captured_processes,omitempty"`
+type checkpointEvidence struct {
+	Digest  string `json:"digest"`
+	Version string `json:"version"`
 }
 
 type issueEvidence struct {
@@ -185,7 +219,10 @@ type rendezvousTraceReport struct {
 	GenerationSet    string           `json:"generation_set,omitempty"`
 	ListenerLeaseID  string           `json:"listener_lease_id,omitempty"`
 	ExecutionLeaseID string           `json:"execution_lease_id,omitempty"`
+	RestoreMode      string           `json:"restore_mode,omitempty"`
 	Events           int              `json:"events"`
+	DurationsNS      map[string]int64 `json:"durations_ns,omitempty"`
+	ClockSkewBoundNS int64            `json:"clock_skew_bound_ns,omitempty"`
 	Outcome          benchmarkOutcome `json:"outcome"`
 	TraceValid       bool             `json:"trace_valid"`
 	Violations       []string         `json:"violations,omitempty"`
@@ -228,20 +265,16 @@ func validateRendezvousTrace(events []rendezvousEvent) *rendezvousTraceReport {
 
 func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool) *rendezvousTraceReport {
 	report := &rendezvousTraceReport{
-		SchemaVersion: rendezvousTraceSchema,
-		Events:        len(events),
-		Outcome:       outcomePass,
-		TraceValid:    true,
+		SchemaVersion: rendezvousTraceSchema, Events: len(events),
+		DurationsNS: map[string]int64{}, Outcome: outcomePass, TraceValid: true,
 	}
-	seen := map[string]bool{}
-	monotonicBySource := map[string]int64{}
-	var volumes []volumeEvidence
-	var resolvedVolumes []volumeEvidence
-	var explicit *classificationEvidence
-	var runnerExitCode *int
+	seen := map[string]*rendezvousEvent{}
+	lastMonotonic := map[string]int64{}
+	lastOriginSeq := map[string]uint64{}
+	var resolvedVolumes, boundVolumes []volumeEvidence
 	var platform *platformEvidence
-	var snapshotDecision string
-	var providerConclusion string
+	var checkpoint *checkpointEvidence
+	var explicit *classificationEvidence
 
 	violate := func(format string, args ...any) {
 		report.Violations = append(report.Violations, fmt.Sprintf(format, args...))
@@ -249,16 +282,10 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 	concern := func(format string, args ...any) {
 		report.Concerns = append(report.Concerns, fmt.Sprintf(format, args...))
 	}
-	requireSeen := func(event rendezvousEvent, prerequisites ...string) {
-		for _, prerequisite := range prerequisites {
-			if !seen[prerequisite] {
-				violate("event %s at seq %d requires prior %s", event.Event, event.Seq, prerequisite)
-			}
-		}
-	}
 
 	var previousSeq uint64
-	for index, event := range events {
+	for index := range events {
+		event := &events[index]
 		if event.SchemaVersion != rendezvousTraceSchema {
 			violate("event %d uses schema_version %d, want %d", index+1, event.SchemaVersion, rendezvousTraceSchema)
 		}
@@ -270,35 +297,30 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 			violate("event %s has seq %d after %d; collector order must be strictly increasing", event.Event, event.Seq, previousSeq)
 		}
 		previousSeq = event.Seq
-		if event.Source == "" {
-			violate("event %s at seq %d has no source", event.Event, event.Seq)
-		} else if event.MonotonicNS <= 0 {
-			violate("event %s at seq %d has no positive monotonic_ns", event.Event, event.Seq)
-		} else if previous, ok := monotonicBySource[event.Source]; ok && event.MonotonicNS < previous {
-			violate("source %s monotonic_ns moved backward from %d to %d", event.Source, previous, event.MonotonicNS)
+		if event.Source == "" || event.BootID == "" || event.OriginSeq == 0 || event.MonotonicNS <= 0 {
+			violate("event %s at seq %d lacks a complete source/boot/origin/monotonic clock tuple", event.Event, event.Seq)
 		} else {
-			monotonicBySource[event.Source] = event.MonotonicNS
+			domain := event.Source + "\x00" + event.BootID
+			if lastOriginSeq[domain] >= event.OriginSeq {
+				violate("clock domain %s/%s origin_seq moved from %d to %d", event.Source, event.BootID, lastOriginSeq[domain], event.OriginSeq)
+			}
+			if lastMonotonic[domain] > event.MonotonicNS {
+				violate("clock domain %s/%s monotonic_ns moved backward from %d to %d", event.Source, event.BootID, lastMonotonic[domain], event.MonotonicNS)
+			}
+			lastOriginSeq[domain], lastMonotonic[domain] = event.OriginSeq, event.MonotonicNS
 		}
 		if event.WallTime.IsZero() {
 			violate("event %s at seq %d has no wall_time", event.Event, event.Seq)
 		}
-		if event.Event == eventPoolReady {
-			if event.RunID != "" {
-				violate("pool_ready names run %q before assignment", event.RunID)
-			}
-		} else {
-			if event.RunID == "" {
-				violate("event %s at seq %d has no run_id", event.Event, event.Seq)
-			} else if report.RunID == "" {
-				report.RunID = event.RunID
-			} else if event.RunID != report.RunID {
-				violate("event %s names run %q, want %q", event.Event, event.RunID, report.RunID)
-			}
-		}
-		mergeTraceIdentity(report, event, violate)
-		if seen[event.Event] && event.Event != eventIssueObserved {
+		if seen[event.Event] != nil && event.Event != eventIssueObserved {
 			violate("event %s appears more than once", event.Event)
+		} else if event.Event != eventIssueObserved {
+			seen[event.Event] = event
 		}
+		if preAssignmentEvents[event.Event] {
+			validateUnownedBootstrap(*event, violate)
+		}
+		mergeTraceIdentity(report, *event, preAssignmentEvents[event.Event], violate)
 
 		switch event.Event {
 		case eventPoolReady:
@@ -306,112 +328,33 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 				violate("pool_ready requires runner_name, vm_id, and listener_lease_id")
 			}
 			if event.RunnerName != event.ListenerLeaseID {
-				violate("pool_ready runner_name %q does not match listener_lease_id %q",
-					event.RunnerName, event.ListenerLeaseID)
-			}
-			if event.Repo != "" || event.JobID != 0 || event.RunAttempt != 0 ||
-				event.GenerationSet != "" || event.ExecutionLeaseID != "" {
-				violate("pool_ready VM %s already carries customer identity", event.VMID)
-			}
-			if len(event.Volumes) != 0 {
-				violate("pool_ready VM %s already carries customer volumes", event.VMID)
+				violate("pool_ready runner_name %q does not match listener_lease_id %q", event.RunnerName, event.ListenerLeaseID)
 			}
 			validatePlatform(event.Platform, violate)
 			platform = event.Platform
-
-		case eventAssignmentObserved:
-			requireSeen(event, eventPoolReady)
-			if event.JobID <= 0 || event.RunAttempt <= 0 || event.RunnerName == "" ||
-				event.ListenerLeaseID == "" || event.ExecutionLeaseID == "" {
-				violate("assignment_observed requires the provider job_id, run_attempt, actual runner_name, listener_lease_id, and execution_lease_id")
-			}
-			if event.RunnerName != event.ListenerLeaseID {
-				violate("assignment_observed runner_name %q does not match listener_lease_id %q",
-					event.RunnerName, event.ListenerLeaseID)
-			}
-
-		case eventJobHookBlocked:
-			requireSeen(event, eventAssignmentObserved)
-			if event.JobID <= 0 || event.RunAttempt <= 0 || event.RunnerName == "" {
-				violate("job_hook_blocked requires job_id, run_attempt, and runner_name")
-			}
-
-		case eventJobIdentityReported:
-			requireSeen(event, eventJobHookBlocked)
-			if event.JobID <= 0 || event.RunAttempt <= 0 || event.RunnerName == "" || event.Repo == "" {
-				violate("job_identity_reported requires job_id, run_attempt, runner_name, and repo")
-			}
-
+		case eventAssignmentUpdateReceived, eventAssignmentObserved:
+			validateExactAssignment(*event, violate)
 		case eventGenerationResolved:
-			requireSeen(event, eventJobIdentityReported)
-			if event.JobID <= 0 || event.RunAttempt <= 0 || event.RunnerName == "" || event.Repo == "" || event.GenerationSet == "" {
-				violate("generation_resolved requires job_id, run_attempt, runner_name, repo, and generation_set")
+			if event.Repo == "" || event.GenerationSet == "" {
+				violate("generation_resolved requires repo and generation_set")
 			}
-			validateVolumes(event.Volumes, platform, false, violate)
-			validateExecutionVolumes(event.ExecutionLeaseID, event.Volumes, violate)
+			validateVolumes(event.Volumes, platform, false, event.ExecutionLeaseID, violate)
 			resolvedVolumes = append([]volumeEvidence(nil), event.Volumes...)
-
-		case eventRendezvousBound:
-			requireSeen(event, eventGenerationResolved)
-			if event.Seq != 6 {
-				violate("rendezvous_bound is logical step 6 and must have seq 6, got %d", event.Seq)
-			}
-			if event.JobID <= 0 || event.RunAttempt <= 0 || event.RunnerName == "" || event.VMID == "" || event.GenerationSet == "" {
-				violate("rendezvous_bound requires job_id, run_attempt, runner_name, vm_id, and generation_set")
-			}
-			validateVolumes(event.Volumes, platform, true, violate)
-			compareVolumes("rendezvous_bound", resolvedVolumes, event.Volumes, violate)
-			volumes = append([]volumeEvidence(nil), event.Volumes...)
-
+		case eventRendezvousDispatched:
+			validateExactAssignment(*event, violate)
+			validateVolumes(event.Volumes, platform, true, event.ExecutionLeaseID, violate)
+			compareVolumes(event.Event, resolvedVolumes, event.Volumes, violate)
+			boundVolumes = append([]volumeEvidence(nil), event.Volumes...)
 		case eventMountsReady:
-			requireSeen(event, eventRendezvousBound)
-			validateVolumes(event.Volumes, platform, true, violate)
-			compareVolumes("mounts_ready", volumes, event.Volumes, violate)
-
-		case eventClockChecked:
-			requireSeen(event, eventMountsReady)
-			validateClock(event.Clock, hasVolumeRole(volumes, volumeMemory), concern, violate)
-
-		case eventJobHookReleased:
-			requireSeen(event, eventClockChecked)
-
-		case eventRunnerExited:
-			requireSeen(event, eventJobHookReleased)
-			if event.ExitCode == nil {
-				violate("runner_exited requires exit_code")
-			} else {
-				code := *event.ExitCode
-				runnerExitCode = &code
+			validateVolumes(event.Volumes, platform, true, event.ExecutionLeaseID, violate)
+			compareVolumes(event.Event, boundVolumes, event.Volumes, violate)
+		case eventCheckpointCompleted, eventSnapshotSealStarted, eventSnapshotSealCompleted:
+			validateCheckpoint(event.Event, event.Checkpoint, violate)
+			if checkpoint == nil {
+				checkpoint = event.Checkpoint
+			} else if event.Checkpoint != nil && *checkpoint != *event.Checkpoint {
+				violate("%s checkpoint artifact differs from checkpoint_completed", event.Event)
 			}
-
-		case eventSnapshotDecided:
-			requireSeen(event, eventRunnerExited)
-			validateSnapshotDecision(event, report.GenerationSet, runnerExitCode, violate)
-			if event.Snapshot != nil {
-				snapshotDecision = event.Snapshot.Decision
-			}
-
-		case eventSnapshotSealed:
-			requireSeen(event, eventSnapshotDecided)
-			validateSnapshotSeal(event, report.GenerationSet, volumes, violate)
-
-		case eventProviderConclusionObserved:
-			requireSeen(event, eventRunnerExited)
-			if event.JobID <= 0 || event.RunAttempt <= 0 || event.Conclusion == "" {
-				violate("provider_conclusion_observed requires job_id, run_attempt, and conclusion")
-			} else {
-				providerConclusion = event.Conclusion
-			}
-
-		case eventGenerationPromoted:
-			requireSeen(event, eventSnapshotSealed, eventProviderConclusionObserved)
-			if providerConclusion != "success" {
-				violate("generation_promoted requires the attempt-scoped success conclusion")
-			}
-
-		case eventGenerationDiscarded:
-			requireSeen(event, eventSnapshotDecided)
-
 		case eventIssueObserved:
 			if event.Issue == nil || event.Issue.Code == "" || event.Issue.Detail == "" {
 				violate("issue_observed requires issue.code and issue.detail")
@@ -420,7 +363,6 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 			} else {
 				concern("%s: %s", event.Issue.Code, event.Issue.Detail)
 			}
-
 		case eventClassified:
 			if event.Classification == nil {
 				violate("classified requires classification")
@@ -429,47 +371,76 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 				explicit = event.Classification
 			}
 		}
-		seen[event.Event] = true
+	}
+
+	if len(boundVolumes) == 2 {
+		if boundVolumes[0].Materialization == "clone" {
+			report.RestoreMode = "warm"
+		} else if boundVolumes[0].Materialization == "empty" {
+			report.RestoreMode = "cold"
+		}
+	}
+	if clock := seen[eventClockChecked]; clock != nil {
+		report.ClockSkewBoundNS = validateClock(clock.Clock, report.RestoreMode == "warm", concern, violate)
 	}
 
 	if explicit == nil || explicit.Outcome == outcomePass || explicit.Outcome == outcomeConcern {
-		requiredEvents := []string{
-			eventPoolReady,
-			eventAssignmentObserved,
-			eventJobHookBlocked,
-			eventJobIdentityReported,
-			eventGenerationResolved,
-			eventRendezvousBound,
-			eventMountsReady,
-			eventClockChecked,
-			eventJobHookReleased,
+		required := []string{
+			eventVMLaunchStarted, eventQEMUStarted, eventGuestHelloObserved,
+			eventListenerPrepareStarted, eventListenerPrepareSent,
+			eventListenerPrepareReceived, eventRunnerRegistered, eventPoolReady,
+			eventRunnerAssignmentReceived, eventGuestAssignmentReceived,
+			eventHostAssignmentObserved, eventAssignmentUpdateReceived,
+			eventAssignmentObserved, eventGenerationMaterializationStarted,
+			eventGenerationResolved, eventQMPRendezvousStarted,
+			eventQMPConnected, eventWorkspaceDeviceAttached,
+			eventProcessDeviceAttached, eventGuestRendezvousSent,
+			eventRendezvousDispatched, eventGuestRendezvousReceived,
+			eventMountConvergenceStarted, eventMountConvergenceCompleted,
+			eventGenerationRestoreCompleted, eventMountsReady, eventClockChecked,
+			eventWorkerAuthorizationSent, eventRunnerWorkerReleased,
+			eventJobHookValidated, eventCustomerStepsReleased, eventJobHookReleased,
+		}
+		switch report.RestoreMode {
+		case "cold":
+			required = append(required, eventColdCapsuleStartStarted, eventColdCapsuleStartCompleted)
+			for _, forbidden := range []string{eventCRIURestoreStarted, eventCRIURestoreCompleted} {
+				if seen[forbidden] != nil {
+					violate("cold rendezvous unexpectedly contains %s", forbidden)
+				}
+			}
+		case "warm":
+			required = append(required, eventCRIURestoreStarted, eventCRIURestoreCompleted)
+			for _, forbidden := range []string{eventColdCapsuleStartStarted, eventColdCapsuleStartCompleted} {
+				if seen[forbidden] != nil {
+					violate("warm rendezvous unexpectedly contains %s", forbidden)
+				}
+			}
+		default:
+			violate("rendezvous does not prove a paired cold or warm generation")
 		}
 		if !throughRelease {
-			requiredEvents = append(requiredEvents,
-				eventRunnerExited,
-				eventSnapshotDecided,
-				eventProviderConclusionObserved,
+			required = append(required,
+				eventRunnerExited, eventRunnerExitObserved, eventCheckpointStarted,
+				eventQuiesceRPCStarted, eventQuiesceReceived,
+				eventQuiesceMountsChecked, eventCheckpointDumpStarted,
+				eventCheckpointDumpCompleted, eventFilesystemSyncStarted,
+				eventFilesystemSyncCompleted, eventQuiesceRPCCompleted,
+				eventCheckpointCompleted, eventVMDestroyStarted,
+				eventVMDestroyCompleted, eventSnapshotSealStarted,
+				eventSnapshotSealCompleted,
 			)
 		}
-		for _, required := range requiredEvents {
-			if !seen[required] {
-				violate("complete trace is missing %s", required)
+		for _, name := range required {
+			if seen[name] == nil {
+				violate("complete trace is missing %s", name)
 			}
 		}
-		if snapshotDecision == "generate" {
-			if !seen[eventSnapshotSealed] {
-				violate("generated snapshot candidate is missing snapshot_sealed")
-			}
-			if !seen[eventGenerationPromoted] && !seen[eventGenerationDiscarded] {
-				violate("generated snapshot candidate was neither promoted nor discarded")
-			}
-			if providerConclusion == "success" && !seen[eventGenerationPromoted] {
-				violate("successful generated snapshot candidate was not promoted")
-			}
-			if providerConclusion != "" && providerConclusion != "success" && !seen[eventGenerationDiscarded] {
-				violate("unsuccessful generated snapshot candidate was not discarded")
-			}
-		}
+		validateCollectorOrder(seen, throughRelease, violate)
+	}
+	deriveDurations(report.DurationsNS, seen)
+	if len(report.DurationsNS) == 0 {
+		report.DurationsNS = nil
 	}
 
 	if len(report.Violations) > 0 {
@@ -480,27 +451,60 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 	if explicit != nil {
 		report.Outcome = explicit.Outcome
 	}
-	if runnerExitCode != nil && *runnerExitCode != 0 && report.Outcome != outcomeFail {
-		report.Outcome = outcomeInvalid
-	}
 	if report.Outcome == outcomePass && len(report.Concerns) > 0 {
 		report.Outcome = outcomeConcern
 	}
 	return report
 }
 
-func mergeTraceIdentity(report *rendezvousTraceReport, event rendezvousEvent, violate func(string, ...any)) {
+func validateUnownedBootstrap(event rendezvousEvent, violate func(string, ...any)) {
+	if event.RunID != "" || event.Repo != "" || event.JobID != 0 || event.RunAttempt != 0 ||
+		event.RequestID != "" || event.RunnerJobID != "" || event.ExecutionLeaseID != "" ||
+		event.GenerationSet != "" || len(event.Volumes) != 0 {
+		violate("pre-assignment event %s carries customer identity or volumes", event.Event)
+	}
+}
+
+func validateExactAssignment(event rendezvousEvent, violate func(string, ...any)) {
+	if event.RunID == "" || event.JobID <= 0 || event.RunAttempt <= 0 || event.RunnerName == "" ||
+		event.RequestID == "" || event.RunnerJobID == "" || event.ListenerLeaseID == "" ||
+		event.ExecutionLeaseID == "" || event.VMID == "" {
+		violate("%s requires exact provider, listener, execution, request, runner-job, and VM identity", event.Event)
+	}
+	if event.RunnerName != event.ListenerLeaseID {
+		violate("%s runner_name %q does not match listener_lease_id %q", event.Event, event.RunnerName, event.ListenerLeaseID)
+	}
+}
+
+func mergeTraceIdentity(report *rendezvousTraceReport, event rendezvousEvent, bootstrap bool, violate func(string, ...any)) {
 	for _, field := range []struct {
 		name string
 		got  string
 		dst  *string
 	}{
-		{"repo", event.Repo, &report.Repo},
 		{"lane", event.Lane, &report.Lane},
 		{"runner_name", event.RunnerName, &report.RunnerName},
 		{"vm_id", event.VMID, &report.VMID},
-		{"generation_set", event.GenerationSet, &report.GenerationSet},
 		{"listener_lease_id", event.ListenerLeaseID, &report.ListenerLeaseID},
+	} {
+		if field.got == "" {
+			continue
+		}
+		if *field.dst == "" {
+			*field.dst = field.got
+		} else if *field.dst != field.got {
+			violate("event %s changes %s from %q to %q", event.Event, field.name, *field.dst, field.got)
+		}
+	}
+	if bootstrap {
+		return
+	}
+	for _, field := range []struct {
+		name string
+		got  string
+		dst  *string
+	}{
+		{"run_id", event.RunID, &report.RunID}, {"repo", event.Repo, &report.Repo},
 		{"execution_lease_id", event.ExecutionLeaseID, &report.ExecutionLeaseID},
 	} {
 		if field.got == "" {
@@ -510,6 +514,13 @@ func mergeTraceIdentity(report *rendezvousTraceReport, event rendezvousEvent, vi
 			*field.dst = field.got
 		} else if *field.dst != field.got {
 			violate("event %s changes %s from %q to %q", event.Event, field.name, *field.dst, field.got)
+		}
+	}
+	if event.GenerationSet != "" && event.Event != eventSnapshotSealCompleted {
+		if report.GenerationSet == "" {
+			report.GenerationSet = event.GenerationSet
+		} else if report.GenerationSet != event.GenerationSet {
+			violate("event %s changes generation_set from %q to %q", event.Event, report.GenerationSet, event.GenerationSet)
 		}
 	}
 	if event.JobID > 0 {
@@ -528,40 +539,15 @@ func mergeTraceIdentity(report *rendezvousTraceReport, event rendezvousEvent, vi
 	}
 }
 
-func validateExecutionVolumes(executionLeaseID string, volumes []volumeEvidence, violate func(string, ...any)) {
-	if executionLeaseID == "" {
-		violate("generation_resolved has no execution_lease_id")
-		return
-	}
-	for _, volume := range volumes {
-		if volume.Role != volumeWorkspace {
-			continue
-		}
-		datasetLeaseID := volume.Dataset
-		if separator := strings.LastIndexByte(datasetLeaseID, '/'); separator >= 0 {
-			datasetLeaseID = datasetLeaseID[separator+1:]
-		}
-		if datasetLeaseID != executionLeaseID {
-			violate("workspace dataset %q belongs to execution lease %q, want %q",
-				volume.Dataset, datasetLeaseID, executionLeaseID)
-		}
-	}
-}
-
 func validatePlatform(platform *platformEvidence, violate func(string, ...any)) {
 	if platform == nil {
 		violate("pool_ready requires a platform fingerprint")
 		return
 	}
-	for _, field := range []struct {
-		name  string
-		value string
-	}{
-		{"qemu_version", platform.QEMUVersion},
-		{"kernel_release", platform.KernelRelease},
-		{"os_image_id", platform.OSImageID},
-		{"machine_type", platform.MachineType},
-		{"cpu_model", platform.CPUModel},
+	for _, field := range []struct{ name, value string }{
+		{"qemu_version", platform.QEMUVersion}, {"kernel_release", platform.KernelRelease},
+		{"os_image_id", platform.OSImageID}, {"machine_type", platform.MachineType},
+		{"cpu_model", platform.CPUModel}, {"criu_version", platform.CRIUVersion},
 	} {
 		if field.value == "" {
 			violate("platform fingerprint has no %s", field.name)
@@ -569,28 +555,37 @@ func validatePlatform(platform *platformEvidence, violate func(string, ...any)) 
 	}
 }
 
-func validateVolumes(volumes []volumeEvidence, platform *platformEvidence, requireDeviceSerial bool, violate func(string, ...any)) {
-	roles := map[string]bool{}
+func validateVolumes(volumes []volumeEvidence, platform *platformEvidence, requireSerial bool, executionLeaseID string, violate func(string, ...any)) {
+	byRole := map[string]volumeEvidence{}
 	datasets := map[string]bool{}
-	deviceSerials := map[string]bool{}
+	serials := map[string]bool{}
 	for _, volume := range volumes {
-		if roles[volume.Role] {
-			violate("rendezvous contains duplicate %s volume", volume.Role)
-		}
-		roles[volume.Role] = true
-		if volume.Role != volumeWorkspace && volume.Role != volumeToolchain && volume.Role != volumeData && volume.Role != volumeMemory {
+		if volume.Role != volumeWorkspace && volume.Role != volumeProcess {
 			violate("rendezvous contains unknown volume role %q", volume.Role)
 		}
+		if _, ok := byRole[volume.Role]; ok {
+			violate("rendezvous contains duplicate %s volume", volume.Role)
+		}
+		byRole[volume.Role] = volume
 		if volume.Dataset == "" {
 			violate("rendezvous %s volume lacks dataset", volume.Role)
+		} else if datasets[volume.Dataset] {
+			violate("rendezvous contains duplicate dataset %q", volume.Dataset)
+		}
+		datasets[volume.Dataset] = true
+		if executionLeaseID != "" && volume.Dataset != "" {
+			lease := volume.Dataset
+			if separator := strings.LastIndexByte(lease, '/'); separator >= 0 {
+				lease = lease[separator+1:]
+			}
+			if lease != executionLeaseID {
+				violate("%s dataset %q belongs to execution lease %q, want %q", volume.Role, volume.Dataset, lease, executionLeaseID)
+			}
 		}
 		switch volume.Materialization {
 		case "empty":
 			if volume.Generation != "" || volume.SnapshotGUID != "" {
 				violate("empty rendezvous %s volume names a source generation or snapshot_guid", volume.Role)
-			}
-			if volume.Role == volumeMemory {
-				violate("memory volume cannot use empty materialization")
 			}
 		case "clone":
 			if volume.Generation == "" || volume.SnapshotGUID == "" {
@@ -601,28 +596,30 @@ func validateVolumes(volumes []volumeEvidence, platform *platformEvidence, requi
 		default:
 			violate("rendezvous %s volume has unknown materialization %q", volume.Role, volume.Materialization)
 		}
-		if datasets[volume.Dataset] {
-			violate("rendezvous contains duplicate dataset %q", volume.Dataset)
-		}
-		datasets[volume.Dataset] = true
-		if requireDeviceSerial && volume.DeviceSerial == "" {
+		if requireSerial && volume.DeviceSerial == "" {
 			violate("rendezvous %s volume lacks device_serial", volume.Role)
 		}
 		if volume.DeviceSerial != "" {
-			if deviceSerials[volume.DeviceSerial] {
+			if serials[volume.DeviceSerial] {
 				violate("rendezvous contains duplicate device_serial %q", volume.DeviceSerial)
 			}
-			deviceSerials[volume.DeviceSerial] = true
+			serials[volume.DeviceSerial] = true
 		}
 	}
-	if !roles[volumeWorkspace] {
-		violate("rendezvous has no workspace volume")
+	workspace, haveWorkspace := byRole[volumeWorkspace]
+	process, haveProcess := byRole[volumeProcess]
+	if !haveWorkspace || !haveProcess || len(volumes) != 2 {
+		violate("rendezvous must contain exactly one workspace and one process volume")
+		return
 	}
-	if roles[volumeMemory] && !roles[volumeWorkspace] {
-		violate("memory snapshot without its workspace is not a valid rendezvous")
+	if workspace.Materialization != process.Materialization {
+		violate("workspace and process volumes have different materialization modes")
 	}
-	if roles[volumeMemory] && (platform == nil || platform.CRIUVersion == "") {
-		violate("memory snapshot rendezvous has no CRIU version in the platform fingerprint")
+	if workspace.Materialization == "clone" && workspace.Generation != process.Generation {
+		violate("workspace and process volumes do not share one generation")
+	}
+	if workspace.Materialization == "clone" && (platform == nil || platform.CRIUVersion == "") {
+		violate("warm rendezvous has no CRIU version in the platform fingerprint")
 	}
 }
 
@@ -640,139 +637,106 @@ func compareVolumes(event string, expected, observed []volumeEvidence, violate f
 			violate("%s observed unexpected %s volume", event, volume.Role)
 			continue
 		}
-		if volume.Dataset != want.Dataset ||
-			volume.Materialization != want.Materialization ||
-			volume.SnapshotGUID != want.SnapshotGUID ||
-			volume.Generation != want.Generation {
+		if volume.Dataset != want.Dataset || volume.Materialization != want.Materialization ||
+			volume.SnapshotGUID != want.SnapshotGUID || volume.Generation != want.Generation {
 			violate("%s %s volume does not match the resolved generation tuple", event, volume.Role)
 		}
 		if want.DeviceSerial != "" && volume.DeviceSerial != want.DeviceSerial {
-			violate("%s %s volume device_serial %q does not match %q",
-				event, volume.Role, volume.DeviceSerial, want.DeviceSerial)
+			violate("%s %s volume device_serial %q does not match %q", event, volume.Role, volume.DeviceSerial, want.DeviceSerial)
 		}
 	}
 }
 
-func hasVolumeRole(volumes []volumeEvidence, role string) bool {
-	return slices.ContainsFunc(volumes, func(volume volumeEvidence) bool {
-		return volume.Role == role
-	})
-}
-
-func validateClock(clock *clockEvidence, afterMemoryRestore bool, concern, violate func(string, ...any)) {
+func validateClock(clock *clockEvidence, afterRestore bool, concern, violate func(string, ...any)) int64 {
 	if clock == nil {
 		violate("clock_checked requires clock evidence")
-		return
+		return 0
 	}
 	if clock.HostBeforeUnixNS <= 0 || clock.HostAfterUnixNS <= 0 || clock.GuestUnixNS <= 0 {
 		violate("clock evidence requires positive host and guest realtime samples")
-		return
+		return 0
 	}
 	if clock.HostAfterUnixNS < clock.HostBeforeUnixNS {
 		violate("clock host bracket moved backward")
-		return
+		return 0
 	}
-	if clock.MaxSkewNS <= 0 {
-		violate("clock evidence requires a positive max_skew_ns")
+	if clock.MaxSkewNS <= 0 || clock.Clocksource == "" {
+		violate("clock evidence requires max_skew_ns and guest clocksource")
 	}
-	if clock.Clocksource == "" {
-		violate("clock evidence requires the guest clocksource")
-	}
-	if afterMemoryRestore && !clock.AfterRestore {
-		violate("memory rendezvous requires clock evidence collected after restore")
+	if clock.AfterRestore != afterRestore {
+		violate("clock after_restore=%t does not match %s rendezvous", clock.AfterRestore, map[bool]string{true: "warm", false: "cold"}[afterRestore])
 	}
 	midpoint := clock.HostBeforeUnixNS + (clock.HostAfterUnixNS-clock.HostBeforeUnixNS)/2
 	uncertainty := (clock.HostAfterUnixNS - clock.HostBeforeUnixNS) / 2
 	bound := abs64(clock.GuestUnixNS-midpoint) + uncertainty
-	if bound > clock.MaxSkewNS {
-		concern("clock_skew: conservative offset bound %s exceeds %s",
-			time.Duration(bound), time.Duration(clock.MaxSkewNS))
+	if clock.MaxSkewNS > 0 && bound > clock.MaxSkewNS {
+		concern("clock_skew: conservative offset bound %s exceeds %s", time.Duration(bound), time.Duration(clock.MaxSkewNS))
 	}
 	if !clock.GuestSynchronized {
 		concern("clock_skew: guest time synchronization was not healthy")
 	}
+	return bound
 }
 
-func validateSnapshotDecision(event rendezvousEvent, generationSet string, exitCode *int, violate func(string, ...any)) {
-	snapshot := event.Snapshot
-	if snapshot == nil {
-		violate("snapshot_decided requires snapshot evidence")
-		return
+func validateCheckpoint(event string, checkpoint *checkpointEvidence, violate func(string, ...any)) {
+	if checkpoint == nil || checkpoint.Digest == "" || checkpoint.Version == "" {
+		violate("%s requires checkpoint digest and version", event)
 	}
-	if snapshot.Decision != "generate" && snapshot.Decision != "skip" {
-		violate("snapshot decision %q is neither generate nor skip", snapshot.Decision)
-		return
+}
+
+func validateCollectorOrder(seen map[string]*rendezvousEvent, throughRelease bool, violate func(string, ...any)) {
+	chains := [][]string{{
+		eventPoolReady, eventAssignmentUpdateReceived, eventAssignmentObserved,
+		eventGenerationMaterializationStarted, eventGenerationResolved,
+		eventRendezvousDispatched, eventMountsReady, eventClockChecked,
+		eventWorkerAuthorizationSent, eventJobHookReleased,
+	}}
+	if !throughRelease {
+		chains = append(chains, []string{
+			eventRunnerExitObserved, eventCheckpointStarted, eventCheckpointCompleted,
+			eventVMDestroyStarted, eventVMDestroyCompleted,
+			eventSnapshotSealStarted, eventSnapshotSealCompleted,
+		})
 	}
-	if snapshot.Decision == "skip" {
-		if snapshot.Reason == "" {
-			violate("skipped snapshot decision requires a reason")
-		}
-		return
-	}
-	if snapshot.Policy != "protected_main" && snapshot.Policy != "benchmark_seed" {
-		violate("snapshot generation policy %q is not protected_main or benchmark_seed", snapshot.Policy)
-	}
-	if !snapshot.TrustedRef {
-		violate("snapshot generation requires a trusted protected ref or explicit benchmark seed")
-	}
-	if exitCode == nil || *exitCode != 0 {
-		violate("snapshot generation requires a locally successful runner exit")
-	}
-	if !snapshot.RunnerExited {
-		violate("snapshot generation began before the Actions runner exited")
-	}
-	if snapshot.RunnerMemoryIncluded {
-		violate("Actions runner memory must never enter a snapshot")
-	}
-	if event.GenerationSet == "" || event.GenerationSet != generationSet {
-		violate("snapshot decision generation_set %q does not match rendezvous %q", event.GenerationSet, generationSet)
-	}
-	for _, process := range snapshot.CapturedProcesses {
-		if !slices.Contains(snapshot.AllowedProcesses, process) {
-			violate("snapshot captures process %q outside the allowlist", process)
+	for _, chain := range chains {
+		var previous *rendezvousEvent
+		for _, name := range chain {
+			current := seen[name]
+			if current == nil {
+				continue
+			}
+			if previous != nil && current.Seq <= previous.Seq {
+				violate("collector observed %s at seq %d before %s at seq %d", current.Event, current.Seq, previous.Event, previous.Seq)
+			}
+			previous = current
 		}
 	}
 }
 
-func validateSnapshotSeal(event rendezvousEvent, generationSet string, bound []volumeEvidence, violate func(string, ...any)) {
-	snapshot := event.Snapshot
-	if snapshot == nil || snapshot.Decision != "generate" {
-		violate("snapshot_sealed requires generate snapshot evidence")
-		return
-	}
-	if event.GenerationSet != generationSet {
-		violate("sealed generation_set %q does not match rendezvous %q", event.GenerationSet, generationSet)
-	}
-	if !snapshot.FilesystemsQuiesced {
-		violate("snapshot sealed without quiescing its durable filesystems")
-	}
-	if snapshot.RunnerMemoryIncluded {
-		violate("sealed snapshot includes Actions runner memory")
-	}
-	if len(event.Volumes) == 0 {
-		violate("snapshot_sealed records no volume snapshots")
-	}
-	boundRoles := map[string]bool{}
-	for _, volume := range bound {
-		boundRoles[volume.Role] = true
-	}
-	sealedRoles := map[string]bool{}
-	for _, volume := range event.Volumes {
-		if sealedRoles[volume.Role] {
-			violate("snapshot sealed duplicate %s volume", volume.Role)
+func deriveDurations(out map[string]int64, seen map[string]*rendezvousEvent) {
+	for name, pair := range map[string][2]string{
+		"qemu_process_start":                 {eventVMLaunchStarted, eventQEMUStarted},
+		"assignment_observation":             {eventAssignmentUpdateReceived, eventAssignmentObserved},
+		"generation_materialization":         {eventGenerationMaterializationStarted, eventGenerationResolved},
+		"assignment_to_rendezvous_dispatch":  {eventAssignmentObserved, eventRendezvousDispatched},
+		"qmp_rendezvous":                     {eventQMPRendezvousStarted, eventGuestRendezvousSent},
+		"guest_mount_convergence":            {eventMountConvergenceStarted, eventMountConvergenceCompleted},
+		"criu_restore":                       {eventCRIURestoreStarted, eventCRIURestoreCompleted},
+		"cold_capsule_start":                 {eventColdCapsuleStartStarted, eventColdCapsuleStartCompleted},
+		"assignment_to_worker_authorization": {eventAssignmentObserved, eventWorkerAuthorizationSent},
+		"job_hook_gate":                      {eventJobHookValidated, eventCustomerStepsReleased},
+		"checkpoint_dump":                    {eventCheckpointDumpStarted, eventCheckpointDumpCompleted},
+		"filesystem_sync":                    {eventFilesystemSyncStarted, eventFilesystemSyncCompleted},
+		"quiesce_rpc":                        {eventQuiesceRPCStarted, eventQuiesceRPCCompleted},
+		"checkpoint_lifecycle":               {eventCheckpointStarted, eventCheckpointCompleted},
+		"vm_destroy":                         {eventVMDestroyStarted, eventVMDestroyCompleted},
+		"snapshot_seal":                      {eventSnapshotSealStarted, eventSnapshotSealCompleted},
+	} {
+		start, end := seen[pair[0]], seen[pair[1]]
+		if start == nil || end == nil || start.Source != end.Source || start.BootID != end.BootID || end.MonotonicNS < start.MonotonicNS {
+			continue
 		}
-		sealedRoles[volume.Role] = true
-		if !boundRoles[volume.Role] {
-			violate("snapshot sealed unbound %s volume", volume.Role)
-		}
-		if volume.Dataset == "" || volume.SnapshotGUID == "" || volume.Generation == "" {
-			violate("snapshot sealed %s volume without dataset, snapshot_guid, or generation", volume.Role)
-		}
-	}
-	for _, volume := range bound {
-		if !sealedRoles[volume.Role] {
-			violate("snapshot did not seal bound %s volume", volume.Role)
-		}
+		out[name] = end.MonotonicNS - start.MonotonicNS
 	}
 }
 
@@ -816,9 +780,9 @@ func abs64(value int64) int64 {
 
 func printRendezvousTraceReport(w io.Writer, report *rendezvousTraceReport) {
 	fmt.Fprintf(w, "postflight rendezvous trace — run %s\n", report.RunID)
-	fmt.Fprintf(w, "job=%d attempt=%d runner=%s listener=%s execution=%s vm=%s generation_set=%s events=%d\n",
+	fmt.Fprintf(w, "job=%d attempt=%d runner=%s listener=%s execution=%s vm=%s generation_set=%s restore=%s events=%d\n",
 		report.JobID, report.RunAttempt, report.RunnerName, report.ListenerLeaseID,
-		report.ExecutionLeaseID, report.VMID, report.GenerationSet, report.Events)
+		report.ExecutionLeaseID, report.VMID, report.GenerationSet, report.RestoreMode, report.Events)
 	fmt.Fprintf(w, "outcome: %s (trace_valid=%t)\n", report.Outcome, report.TraceValid)
 	for _, violation := range report.Violations {
 		fmt.Fprintf(w, "INVALID: %s\n", violation)
@@ -834,7 +798,7 @@ func cmdValidateRendezvous(args []string) error {
 	fs := flag.NewFlagSet("validate-rendezvous", flag.ContinueOnError)
 	fs.StringVar(&tracePath, "trace", "", "JSONL rendezvous trace to validate (required)")
 	fs.StringVar(&jsonPath, "json", "", "JSON report output path (default <trace>.report.json)")
-	fs.BoolVar(&throughRelease, "through-release", false, "validate the assignment-first rendezvous through job_hook_released without requiring post-job lifecycle evidence")
+	fs.BoolVar(&throughRelease, "through-release", false, "validate exact assignment, paired rendezvous, restore, and customer-step release without requiring post-job checkpoint/seal evidence")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

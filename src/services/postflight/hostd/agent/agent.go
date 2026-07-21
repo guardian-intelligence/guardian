@@ -231,6 +231,12 @@ func (a *Agent) HandleVMUpdate(ctx context.Context, id vm.ID) {
 		return
 	}
 	if status.Assignment.RequestID != "" {
+		if record.assignment == nil {
+			if err := a.routeAssignment(record, status.Assignment); err != nil {
+				a.failLease(ctx, record, "local assignment: "+err.Error())
+				return
+			}
+		}
 		a.appendTrace(record, "assignment_update_received", func(event *traceEvent) {
 			traceAssignment(record, event)
 		})
