@@ -2,6 +2,7 @@ package guestd
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
 	"os"
 	"strings"
@@ -9,6 +10,22 @@ import (
 	"testing"
 	"time"
 )
+
+func TestRunnerCommandBypassesRetryingShellWrapper(t *testing.T) {
+	cmd := runnerCommand(context.Background(), "/opt/actions-runner", "jit-test")
+	if cmd.Path != "/opt/actions-runner/bin/Runner.Listener" {
+		t.Fatalf("runner path = %q", cmd.Path)
+	}
+	want := []string{"/opt/actions-runner/bin/Runner.Listener", "run", "--jitconfig", "jit-test"}
+	if len(cmd.Args) != len(want) {
+		t.Fatalf("runner args = %q, want %q", cmd.Args, want)
+	}
+	for i := range want {
+		if cmd.Args[i] != want[i] {
+			t.Fatalf("runner args = %q, want %q", cmd.Args, want)
+		}
+	}
+}
 
 // syncedBuffer captures log output safely across the observer goroutine.
 type syncedBuffer struct {
