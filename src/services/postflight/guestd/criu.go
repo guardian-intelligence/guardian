@@ -234,6 +234,14 @@ func safeCRIUError(line string, externalMounts []ExternalMount) string {
 
 func classifyCRIUPath(field string, externalMounts []ExternalMount) string {
 	path := strings.Trim(field, "<>[](){}\"',:")
+	// CRIU's regular-file image stores paths relative to the owning mount
+	// namespace root and prints that representation in restore diagnostics.
+	// Normalize it before classification so a path such as
+	// opt/actions-runner/_work/... is attributed to the durable runner-state
+	// mount without disclosing tenant-controlled path components.
+	if !filepath.IsAbs(path) {
+		path = filepath.Clean("/" + strings.TrimPrefix(path, "./"))
+	}
 	matchedKey := ""
 	matchedLength := -1
 	for _, mount := range externalMounts {
@@ -259,10 +267,7 @@ func classifyCRIUPath(field string, externalMounts []ExternalMount) string {
 			return "<" + class.name + ">"
 		}
 	}
-	if filepath.IsAbs(path) {
-		return "<guest-root>"
-	}
-	return "<relative-path>"
+	return "<guest-root>"
 }
 
 func (c CRIU) validate(capsule Capsule, requireRoot bool) error {

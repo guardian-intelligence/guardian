@@ -163,7 +163,9 @@ func TestCRIUPathDiagnosticsClassifyWithoutDisclosingPaths(t *testing.T) {
 		"runner home":  {field: "/home/runner/.cache/secret", want: "<runner-home>"},
 		"capsule tmp":  {field: "/tmp/private", want: "<capsule-tmp>"},
 		"guest root":   {field: "/tenant/private/value", want: "<guest-root>"},
-		"relative":     {field: "tenant/private/value", want: "<relative-path>"},
+		"relative workspace": {field: "opt/actions-runner/_work/widget/widget/private.txt", want: "<external:workspace>"},
+		"relative runner":    {field: "opt/actions-runner/_work/_actions/private.txt", want: "<external:tool>"},
+		"relative guest root": {field: "tenant/private/value", want: "<guest-root>"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := classifyCRIUPath(test.field, mounts)
