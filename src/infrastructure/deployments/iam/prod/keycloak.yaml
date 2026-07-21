@@ -83,8 +83,10 @@ spec:
             # keep series cardinality bounded.
             - name: KC_EVENT_METRICS_USER_ENABLED
               value: "true"
+            # Failed attempts are counted under the same event value with a
+            # non-empty error tag, never as *_error event types.
             - name: KC_EVENT_METRICS_USER_EVENTS
-              value: login,login_error,logout,logout_error,code_to_token,code_to_token_error
+              value: login,logout,code_to_token,client_login
             - name: KC_EVENT_METRICS_USER_TAGS
               value: realm,idp,clientId
             - name: KC_DB
