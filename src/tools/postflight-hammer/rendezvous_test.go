@@ -166,6 +166,23 @@ func TestValidWarmRendezvousAndCheckpointPasses(t *testing.T) {
 	}
 }
 
+func TestAdoptedWarmVMDoesNotRequireInMemoryLaunchTiming(t *testing.T) {
+	events := validRendezvousTrace(false, false)
+	filtered := events[:0]
+	for _, event := range events {
+		if event.Event != eventVMLaunchStarted && event.Event != eventQEMUStarted {
+			filtered = append(filtered, event)
+		}
+	}
+	for index := range filtered {
+		filtered[index].Seq = uint64(index + 1)
+	}
+	report := validateRendezvousTraceScope(filtered, true)
+	if !report.TraceValid || report.Outcome != outcomePass {
+		t.Fatalf("adopted VM trace = %+v", report)
+	}
+}
+
 func TestBootstrapCannotPredictCustomerIdentity(t *testing.T) {
 	events := validRendezvousTrace(false, false)
 	events[0].RunID = "1001"

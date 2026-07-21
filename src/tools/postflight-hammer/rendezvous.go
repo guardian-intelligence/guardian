@@ -386,8 +386,7 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 
 	if explicit == nil || explicit.Outcome == outcomePass || explicit.Outcome == outcomeConcern {
 		required := []string{
-			eventVMLaunchStarted, eventQEMUStarted, eventGuestHelloObserved,
-			eventListenerPrepareStarted, eventListenerPrepareSent,
+			eventGuestHelloObserved, eventListenerPrepareStarted, eventListenerPrepareSent,
 			eventListenerPrepareReceived, eventRunnerRegistered, eventPoolReady,
 			eventRunnerAssignmentReceived, eventGuestAssignmentReceived,
 			eventHostAssignmentObserved, eventAssignmentUpdateReceived,
