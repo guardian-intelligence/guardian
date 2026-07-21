@@ -35,6 +35,17 @@ data:
       "ssoSessionMaxLifespan": 36000,
       "revokeRefreshToken": true,
       "refreshTokenMaxReuse": 0,
+      "adminPermissionsEnabled": true,
+      "eventsEnabled": true,
+      "adminEventsEnabled": true,
+      "adminEventsDetailsEnabled": true,
+      "groups": [
+        {
+          "id": "39e0b10d-a81e-48c3-be07-eb99b742bf92",
+          "name": "canary-principals",
+          "path": "/canary-principals"
+        }
+      ],
       "authenticationFlows": [
         {
           "alias": "broker-create-user-only",
@@ -60,7 +71,7 @@ data:
             "providerId": "declarative-user-profile",
             "subComponents": {},
             "config": {
-              "kc.user.profile.config": ["{\"attributes\":[{\"name\":\"username\",\"displayName\":\"${username}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"validations\":{\"length\":{\"min\":3,\"max\":255},\"username-prohibited-characters\":{},\"up-username-not-idn-homograph\":{}}},{\"name\":\"email\",\"displayName\":\"${email}\",\"required\":{\"roles\":[\"user\"]},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"validations\":{\"email\":{},\"length\":{\"max\":255}}},{\"name\":\"firstName\",\"displayName\":\"${firstName}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"validations\":{\"length\":{\"max\":255},\"person-name-prohibited-characters\":{}}},{\"name\":\"lastName\",\"displayName\":\"${lastName}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"validations\":{\"length\":{\"max\":255},\"person-name-prohibited-characters\":{}}}],\"groups\":[{\"name\":\"user-metadata\",\"displayHeader\":\"User metadata\",\"displayDescription\":\"Attributes, which refer to user metadata\"}]}"]
+              "kc.user.profile.config": ["{\"attributes\":[{\"name\":\"username\",\"displayName\":\"${username}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"validations\":{\"length\":{\"min\":3,\"max\":255},\"username-prohibited-characters\":{},\"up-username-not-idn-homograph\":{}}},{\"name\":\"email\",\"displayName\":\"${email}\",\"required\":{\"roles\":[\"user\"]},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"validations\":{\"email\":{},\"length\":{\"max\":255}}},{\"name\":\"firstName\",\"displayName\":\"${firstName}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"validations\":{\"length\":{\"max\":255},\"person-name-prohibited-characters\":{}}},{\"name\":\"lastName\",\"displayName\":\"${lastName}\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"validations\":{\"length\":{\"max\":255},\"person-name-prohibited-characters\":{}}},{\"name\":\"github_id\",\"displayName\":\"GitHub user id\",\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]},\"validations\":{\"pattern\":{\"pattern\":\"^[0-9]{1,20}$\"}}}],\"groups\":[{\"name\":\"user-metadata\",\"displayHeader\":\"User metadata\",\"displayDescription\":\"Attributes, which refer to user metadata\"}]}"]
             }
           }
         ]
@@ -131,6 +142,22 @@ data:
           "fullScopeAllowed": false,
           "redirectUris": [],
           "webOrigins": []
+        },
+        {
+          "clientId": "guardian-canary-janitor",
+          "name": "Guardian canary janitor",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": false,
+          "clientAuthenticatorType": "client-secret",
+          "secret": "${CANARY_JANITOR_CLIENT_SECRET}",
+          "standardFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "implicitFlowEnabled": false,
+          "serviceAccountsEnabled": true,
+          "fullScopeAllowed": false,
+          "redirectUris": [],
+          "webOrigins": []
         }
       ],
       "users": [
@@ -140,13 +167,7 @@ data:
           "serviceAccountClientId": "guardian-realm-reconciler",
           "clientRoles": {
             "realm-management": [
-              "manage-realm",
-              "view-realm",
-              "manage-clients",
-              "view-clients",
-              "query-clients",
-              "manage-identity-providers",
-              "view-identity-providers"
+              "realm-admin"
             ]
           }
         }
@@ -190,7 +211,11 @@ data:
       "ssoSessionIdleTimeout": 1800,
       "ssoSessionMaxLifespan": 36000,
       "revokeRefreshToken": true,
-      "refreshTokenMaxReuse": 0
+      "refreshTokenMaxReuse": 0,
+      "adminPermissionsEnabled": true,
+      "eventsEnabled": true,
+      "adminEventsEnabled": true,
+      "adminEventsDetailsEnabled": true
     }
   up-config.json: |
     {
@@ -223,6 +248,12 @@ data:
           "displayName": "${lastName}",
           "permissions": {"view": ["admin", "user"], "edit": ["admin", "user"]},
           "validations": {"length": {"max": 255}, "person-name-prohibited-characters": {}}
+        },
+        {
+          "name": "github_id",
+          "displayName": "GitHub user id",
+          "permissions": {"view": ["admin"], "edit": ["admin"]},
+          "validations": {"pattern": {"pattern": "^[0-9]{1,20}$"}}
         }
       ],
       "groups": [
@@ -320,6 +351,23 @@ data:
       "redirectUris": [],
       "webOrigins": []
     }
+  guardian-canary-janitor.json: |
+    {
+      "clientId": "guardian-canary-janitor",
+      "name": "Guardian canary janitor",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${vault.canary-janitor-client-secret}",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "redirectUris": [],
+      "webOrigins": []
+    }
 ---
 # One file per broker makes provider onboarding a data change. The first
 # broker flow never trusts or automatically links an upstream email address:
@@ -352,4 +400,67 @@ data:
         "defaultScope": "read:user user:email",
         "syncMode": "IMPORT"
       }
+    }
+---
+# Broker mappers cannot ride the identity-provider representation or a realm
+# update; the reconciler applies each <alias>--<name>.json through the mapper
+# endpoint. The github_id attribute carries GitHub's immutable numeric id
+# (logins are re-registrable); FORCE re-stamps it at every sign-in, so
+# existing users backfill on their next visit.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-identity-provider-mappers
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  github--github-id.json: |
+    {
+      "name": "github-id",
+      "identityProviderAlias": "github",
+      "identityProviderMapper": "github-user-attribute-mapper",
+      "config": {
+        "jsonField": "id",
+        "userAttribute": "github_id",
+        "syncMode": "FORCE"
+      }
+    }
+---
+# Enrollment into the canary group is config-only: a realm workflow joins a
+# brokered signup to canary-principals when its github_id is in the declared
+# fleet, so no runtime credential exists anywhere in the enrollment chain.
+# github_id:0 matches no GitHub account (real ids start at 1); the workflow
+# ships inert until fleet ids land here via reviewed PR. Workflows are
+# invisible to realm import/export, so the reconciler syncs them through the
+# /workflows API.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-workflows
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  enroll-canary-principals.json: |
+    {
+      "name": "enroll-canary-principals",
+      "on": "user-created",
+      "if": "has-user-attribute(github_id:0)",
+      "steps": [
+        {
+          "uses": "join-group",
+          "with": {
+            "group": "canary-principals"
+          }
+        }
+      ]
     }
