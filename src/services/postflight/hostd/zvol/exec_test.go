@@ -25,14 +25,18 @@ func execDriver(t *testing.T) *Exec {
 	}
 	ctx := context.Background()
 	driver := &Exec{Root: root, Timeout: time.Minute}
-	for _, child := range []string{root + "/ws", root + "/gen", root + "/process-state/ws", root + "/process-state/gen"} {
-		if ok, err := driver.exists(ctx, child); err != nil {
+	if ok, err := driver.exists(ctx, root); err != nil {
+		t.Fatal(err)
+	} else if !ok {
+		if _, err := driver.run(ctx, "create", "-p", root); err != nil {
 			t.Fatal(err)
-		} else if !ok {
-			if _, err := driver.run(ctx, "create", "-p", child); err != nil {
-				t.Fatal(err)
-			}
 		}
+	}
+	if err := driver.Prepare(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := driver.Prepare(ctx); err != nil {
+		t.Fatalf("second prepare: %v", err)
 	}
 	t.Cleanup(func() {
 		_, _ = driver.run(context.Background(), "destroy", "-r", root+"/ws")
