@@ -17,7 +17,7 @@ spec:
   template:
     metadata:
       annotations:
-        checksum/realm-config: 36540236f67384b0b5a8c5a214766864ec45606e57e1bf7340a1757964336d48
+        checksum/realm-config: 7f41efed85c18be38637db6b05a06979c1613fe36efd5e4e83c07f1697a674da
       labels:
         app.kubernetes.io/name: keycloak-realm-reconciler
         app.kubernetes.io/part-of: guardian
@@ -54,6 +54,28 @@ spec:
               "$kcadm" update "realms/$realm" \
                 --config "$config" \
                 -f "/realm/$realm.json"
+
+              # A realm update binds flows by alias but never creates them,
+              # and the broker update below rejects an unresolved
+              # firstBrokerLoginFlowAlias, so the flow must exist first.
+              flow=broker-create-user-only
+              if ! "$kcadm" get "authentication/flows/$flow/executions" \
+                  --config "$config" --realm "$realm" >/dev/null 2>&1; then
+                "$kcadm" create authentication/flows \
+                  --config "$config" --realm "$realm" \
+                  -b "{\"alias\":\"$flow\",\"description\":\"First broker login with no user-facing steps\",\"providerId\":\"basic-flow\",\"topLevel\":true,\"builtIn\":false}"
+                "$kcadm" create "authentication/flows/$flow/executions/execution" \
+                  --config "$config" --realm "$realm" \
+                  -b '{"provider":"idp-create-user-if-unique"}'
+              fi
+              exec_id="$("$kcadm" get "authentication/flows/$flow/executions" \
+                --config "$config" --realm "$realm" --fields id --format csv --noquotes)"
+              "$kcadm" update "authentication/flows/$flow/executions" \
+                --config "$config" --realm "$realm" \
+                -b "{\"id\":\"$exec_id\",\"requirement\":\"REQUIRED\"}"
+
+              "$kcadm" update users/profile \
+                --config "$config" --realm "$realm" -f /realm/up-config.json
 
               for client in /clients/*.json; do
                 client_id="${client##*/}"

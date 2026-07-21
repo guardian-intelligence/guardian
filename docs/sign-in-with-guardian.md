@@ -13,6 +13,11 @@ connections to a Guardian account; they are not the account model.
 - Broker email is untrusted. An email collision never links accounts
   automatically; linking requires an authenticated Guardian session or proof
   of control of the existing account.
+- Keycloak never renders a page on the login or logout path. The
+  authorization request pins the GitHub broker with `kc_idp_hint`, first
+  broker login creates the Guardian account with no user-facing steps and
+  fails closed on any collision, and sign-out is RP-initiated with
+  `id_token_hint` so no confirmation page appears.
 - Every web relying party is confidential, uses authorization code flow with
   PKCE S256, an exact callback, a server-side token exchange, and an encrypted
   HttpOnly `Secure` `SameSite=Lax` session cookie.
@@ -61,15 +66,21 @@ for the browser procedures.
 
 1. Postflight creates an encrypted ten-minute login transaction containing
    state, nonce, PKCE verifier, and a local return path.
-2. The browser enters the Guardian realm and the user chooses a configured
-   social provider. Keycloak runs the provider broker flow and resolves or
-   creates the Guardian account.
+2. The authorization request pins the GitHub broker with `kc_idp_hint`, so
+   Keycloak redirects straight to GitHub without rendering a page. The
+   headless first-broker-login flow resolves or creates the Guardian account
+   and fails closed on any collision.
 3. The exact Postflight callback exchanges the code from the server, verifies
-   the ID token signature and claims against Keycloak JWKS, and issues a
-   thirty-minute encrypted local session.
+   the ID token signature and claims against Keycloak JWKS, issues a
+   thirty-minute encrypted local session, and lands the browser on the
+   Postflight console at `/postflight/console`.
 4. Product APIs validate the Guardian issuer and audience. An organization or
    repository action additionally calls the Authorization API with the
    Guardian subject and typed resource permission.
+5. Sign-out is RP-initiated: the logout endpoint refuses cross-site
+   triggers, then sends the stored ID token as `id_token_hint` with the
+   registered `post_logout_redirect_uri` and `client_id`, so Keycloak ends
+   the SSO session and returns to Postflight without a confirmation page.
 
 ## Realm reconciliation
 
@@ -79,6 +90,14 @@ Steady state is enforced through the Keycloak Admin REST API by the
 limited to realm settings, clients, and identity providers; it cannot manage
 users, delete other realms, or administer the master realm.
 
+A realm update binds authentication flows by alias but never creates them,
+and no realm update carries the user profile, so the reconciler asserts the
+headless `broker-create-user-only` flow before the provider loop binds it and
+applies the user profile through its dedicated endpoint. The user profile
+keeps `firstName` and `lastName` optional: a brokered GitHub account has no
+guaranteed name, and a required name would let Keycloak demand one on its own
+pages.
+
 The reconciler and confidential product clients use Keycloak Vault SPI
 references backed by mounted Kubernetes Secrets. Their usable credentials do
 not enter the Keycloak database or its backups. Temporary bootstrap
@@ -87,11 +106,13 @@ administrators are recovery artifacts, not runtime dependencies.
 ## Canary
 
 The production canary is a fresh Chromium profile that performs the same
-journey as a user: open Postflight, click **Sign in with Guardian**, enter the
-GitHub machine account credentials and TOTP, return through the OIDC callback,
-verify an authenticated Postflight session, sign out, and verify the local
-session is gone. It does not use a direct grant or Keycloak admin API and it
-does not simulate a broker callback.
+journey as a user: open Postflight, click **Sign in with GitHub**, land
+directly on github.com, enter the GitHub machine account credentials and
+TOTP, return through the OIDC callback to the Postflight console, verify an
+authenticated Postflight session, sign out, and verify the local session is
+gone. Any rendered Keycloak page at any step fails the run. It does not use
+a direct grant or Keycloak admin API and it does not simulate a broker
+callback.
 
 An operator approves the OAuth App once in an interactive browser during
 machine-account enrollment and verifies that it appears under the account's
@@ -103,7 +124,7 @@ limit.
 
 The machine account is permanent and has no organization privileges. Its
 password and TOTP seed live only in the production OpenBao scope. Its first
-run completes Keycloak's broker-profile enrollment; an email collision or
+run creates the Guardian account headlessly; an email collision or
 account-linking prompt fails the canary instead of linking automatically.
 
 The separate `digital-guardian-software` organization exercises the staging

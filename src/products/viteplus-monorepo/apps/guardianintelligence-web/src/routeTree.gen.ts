@@ -20,6 +20,7 @@ import { Route as WorkshopRouteRouteImport } from './routes/_workshop/route'
 import { Route as NewsIndexRouteImport } from './routes/news/index'
 import { Route as LettersIndexRouteImport } from './routes/letters/index'
 import { Route as WorkshopIndexRouteImport } from './routes/_workshop/index'
+import { Route as PostflightConsoleRouteImport } from './routes/postflight.console'
 import { Route as OgSlugRouteImport } from './routes/og/$slug'
 import { Route as NewsSlugRouteImport } from './routes/news/$slug'
 import { Route as LettersSlugRouteImport } from './routes/letters/$slug'
@@ -94,6 +95,11 @@ const WorkshopIndexRoute = WorkshopIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => WorkshopRouteRoute,
+} as any)
+const PostflightConsoleRoute = PostflightConsoleRouteImport.update({
+  id: '/console',
+  path: '/console',
+  getParentRoute: () => PostflightRoute,
 } as any)
 const OgSlugRoute = OgSlugRouteImport.update({
   id: '/og/$slug',
@@ -215,6 +221,7 @@ export interface FileRoutesByFullPath {
   '/letters/$slug': typeof LettersSlugRoute
   '/news/$slug': typeof NewsSlugRoute
   '/og/$slug': typeof OgSlugRoute
+  '/postflight/console': typeof PostflightConsoleRoute
   '/letters/': typeof LettersIndexRoute
   '/news/': typeof NewsIndexRoute
   '/design/letters': typeof WorkshopDesignLettersRoute
@@ -243,6 +250,7 @@ export interface FileRoutesByTo {
   '/letters/$slug': typeof LettersSlugRoute
   '/news/$slug': typeof NewsSlugRoute
   '/og/$slug': typeof OgSlugRoute
+  '/postflight/console': typeof PostflightConsoleRoute
   '/': typeof WorkshopIndexRoute
   '/letters': typeof LettersIndexRoute
   '/news': typeof NewsIndexRoute
@@ -277,6 +285,7 @@ export interface FileRoutesById {
   '/letters/$slug': typeof LettersSlugRoute
   '/news/$slug': typeof NewsSlugRoute
   '/og/$slug': typeof OgSlugRoute
+  '/postflight/console': typeof PostflightConsoleRoute
   '/_workshop/': typeof WorkshopIndexRoute
   '/letters/': typeof LettersIndexRoute
   '/news/': typeof NewsIndexRoute
@@ -312,6 +321,7 @@ export interface FileRouteTypes {
     | '/letters/$slug'
     | '/news/$slug'
     | '/og/$slug'
+    | '/postflight/console'
     | '/letters/'
     | '/news/'
     | '/design/letters'
@@ -340,6 +350,7 @@ export interface FileRouteTypes {
     | '/letters/$slug'
     | '/news/$slug'
     | '/og/$slug'
+    | '/postflight/console'
     | '/'
     | '/letters'
     | '/news'
@@ -373,6 +384,7 @@ export interface FileRouteTypes {
     | '/letters/$slug'
     | '/news/$slug'
     | '/og/$slug'
+    | '/postflight/console'
     | '/_workshop/'
     | '/letters/'
     | '/news/'
@@ -479,6 +491,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof WorkshopIndexRouteImport
       parentRoute: typeof WorkshopRouteRoute
+    }
+    '/postflight/console': {
+      id: '/postflight/console'
+      path: '/console'
+      fullPath: '/postflight/console'
+      preLoaderRoute: typeof PostflightConsoleRouteImport
+      parentRoute: typeof PostflightRoute
     }
     '/og/$slug': {
       id: '/og/$slug'
@@ -697,6 +716,7 @@ const NewsRouteRouteWithChildren = NewsRouteRoute._addFileChildren(
 )
 
 interface PostflightRouteChildren {
+  PostflightConsoleRoute: typeof PostflightConsoleRoute
   PostflightAuthCallbackRoute: typeof PostflightAuthCallbackRoute
   PostflightAuthLoginRoute: typeof PostflightAuthLoginRoute
   PostflightAuthLogoutRoute: typeof PostflightAuthLogoutRoute
@@ -704,6 +724,7 @@ interface PostflightRouteChildren {
 }
 
 const PostflightRouteChildren: PostflightRouteChildren = {
+  PostflightConsoleRoute: PostflightConsoleRoute,
   PostflightAuthCallbackRoute: PostflightAuthCallbackRoute,
   PostflightAuthLoginRoute: PostflightAuthLoginRoute,
   PostflightAuthLogoutRoute: PostflightAuthLogoutRoute,

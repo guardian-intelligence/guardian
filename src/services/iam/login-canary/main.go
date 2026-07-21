@@ -37,14 +37,14 @@ type sessionResponse struct {
 }
 
 type oauthPageState struct {
-	Host             string `json:"host"`
-	Path             string `json:"path"`
-	HasTOTP          bool   `json:"hasTOTP"`
-	CanGrant         bool   `json:"canGrant"`
-	GrantBlocked     bool   `json:"grantBlocked"`
-	HasReviewProfile bool   `json:"hasReviewProfile"`
-	HasCollision     bool   `json:"hasCollision"`
-	HasError         bool   `json:"hasError"`
+	Host            string `json:"host"`
+	Path            string `json:"path"`
+	HasTOTP         bool   `json:"hasTOTP"`
+	CanGrant        bool   `json:"canGrant"`
+	GrantBlocked    bool   `json:"grantBlocked"`
+	HasKeycloakPage bool   `json:"hasKeycloakPage"`
+	HasCollision    bool   `json:"hasCollision"`
+	HasError        bool   `json:"hasError"`
 }
 
 type oauthPageAction int
@@ -54,8 +54,12 @@ const (
 	oauthComplete
 	oauthSubmitTOTP
 	oauthGrant
-	oauthReviewProfile
 )
+
+// A rendered Keycloak document. Redirect pass-throughs under /realms/ are
+// legitimate and carry none of this DOM, so the probe never keys on the URL.
+const keycloakRenderedPageJS = `Boolean(document.querySelector(` +
+	`"#kc-page-title, #kc-header, .login-pf-page, #kc-error-message, form#kc-idp-review-profile-form"))`
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
@@ -124,7 +128,7 @@ func run(ctx context.Context, cfg config) error {
 	); err != nil {
 		return fmt.Errorf("open Guardian login: %w", err)
 	}
-	if err := selectGitHubProvider(browserCtx); err != nil {
+	if err := awaitGitHubRedirect(browserCtx); err != nil {
 		return err
 	}
 	if err := chromedp.Run(
@@ -140,11 +144,13 @@ func run(ctx context.Context, cfg config) error {
 	if err := finishGitHubAuthorization(browserCtx, cfg); err != nil {
 		return err
 	}
-	if err := chromedp.Run(
+	if err := awaitPostflightLanding(
 		browserCtx,
-		chromedp.WaitVisible("[data-postflight-oobe=ready]", chromedp.ByQuery),
+		"/postflight/console",
+		"[data-postflight-console=ready]",
+		"Postflight console landing",
 	); err != nil {
-		return fmt.Errorf("Postflight callback landing: %w", err)
+		return err
 	}
 
 	var envelope struct {
@@ -167,9 +173,16 @@ func run(ctx context.Context, cfg config) error {
 	if err := chromedp.Run(
 		browserCtx,
 		chromedp.Navigate(strings.TrimSuffix(cfg.PageURL, "/")+"/auth/logout"),
-		chromedp.WaitVisible("[data-postflight-oobe=ready]", chromedp.ByQuery),
 	); err != nil {
 		return fmt.Errorf("logout: %w", err)
+	}
+	if err := awaitPostflightLanding(
+		browserCtx,
+		"/postflight",
+		"[data-postflight-oobe=ready]",
+		"logout landing",
+	); err != nil {
+		return err
 	}
 	if err := chromedp.Run(browserCtx, chromedp.Evaluate(
 		`fetch("/postflight/auth/session", {credentials:"same-origin"}).then(response => response.status)`,
@@ -188,33 +201,27 @@ func awaitPromise(params *runtime.EvaluateParams) *runtime.EvaluateParams {
 	return params.WithAwaitPromise(true)
 }
 
-func selectGitHubProvider(ctx context.Context) error {
+func awaitGitHubRedirect(ctx context.Context) error {
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		var state struct {
-			OnGitHub    bool `json:"onGitHub"`
-			HasProvider bool `json:"hasProvider"`
+			OnGitHub     bool `json:"onGitHub"`
+			KeycloakPage bool `json:"keycloakPage"`
 		}
 		if err := chromedp.Run(ctx, chromedp.Evaluate(
 			`(() => ({
 				onGitHub: location.hostname === "github.com",
-				hasProvider: Boolean(document.querySelector("#social-github, a[href*='/broker/github/login']"))
+				keycloakPage: `+keycloakRenderedPageJS+`
 			}))()`,
 			&state,
 		)); err != nil {
-			return fmt.Errorf("inspect Guardian provider selection: %w", err)
+			return fmt.Errorf("inspect GitHub redirect: %w", err)
 		}
 		if state.OnGitHub {
 			return nil
 		}
-		if state.HasProvider {
-			if err := chromedp.Run(ctx, chromedp.Click(
-				"#social-github, a[href*='/broker/github/login']",
-				chromedp.ByQuery,
-			)); err != nil {
-				return fmt.Errorf("select GitHub provider: %w", err)
-			}
-			continue
+		if state.KeycloakPage {
+			return errors.New("Keycloak rendered a page instead of redirecting to GitHub")
 		}
 		select {
 		case <-ctx.Done():
@@ -222,7 +229,44 @@ func selectGitHubProvider(ctx context.Context) error {
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
-	return errors.New("Guardian did not offer the GitHub provider")
+	return errors.New("Guardian login did not reach GitHub")
+}
+
+func awaitPostflightLanding(ctx context.Context, wantPath, marker, step string) error {
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		var state struct {
+			Path         string `json:"path"`
+			Ready        bool   `json:"ready"`
+			KeycloakPage bool   `json:"keycloakPage"`
+		}
+		if err := chromedp.Run(ctx, chromedp.Evaluate(
+			fmt.Sprintf(`(() => ({
+				path: location.pathname,
+				ready: Boolean(document.querySelector(%q)),
+				keycloakPage: %s
+			}))()`, marker, keycloakRenderedPageJS),
+			&state,
+		)); err != nil {
+			return fmt.Errorf("%s: %w", step, err)
+		}
+		if state.KeycloakPage {
+			return fmt.Errorf("%s: Keycloak rendered a page", step)
+		}
+		if state.Path == wantPath && state.Ready {
+			return nil
+		}
+		if state.Path != wantPath && strings.HasPrefix(state.Path, "/postflight") &&
+			!strings.HasPrefix(state.Path, "/postflight/auth/") {
+			return fmt.Errorf("%s: landed on %q, want %q", step, state.Path, wantPath)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+	return fmt.Errorf("%s: %q did not render", step, wantPath)
 }
 
 func finishGitHubAuthorization(ctx context.Context, cfg config) error {
@@ -233,7 +277,6 @@ func finishGitHubAuthorization(ctx context.Context, cfg config) error {
 	deadline := time.Now().Add(75 * time.Second)
 	totpSent := false
 	grantSent := false
-	profileSent := false
 	for time.Now().Before(deadline) {
 		var state oauthPageState
 		if err := chromedp.Run(ctx, chromedp.Evaluate(
@@ -243,7 +286,7 @@ func finishGitHubAuthorization(ctx context.Context, cfg config) error {
 				hasTOTP: Boolean(document.querySelector("input[name=otp], input[name=app_otp], input#app_totp")),
 				canGrant: Boolean(document.querySelector("button[name=authorize][value='1']:not([disabled]), input[name=authorize][value='1']:not([disabled]), button[value=authorize]:not([disabled])")),
 				grantBlocked: Boolean(document.querySelector("button[name=authorize][value='1'][disabled], input[name=authorize][value='1'][disabled], button[value=authorize][disabled]")),
-				hasReviewProfile: Boolean(document.querySelector("form#kc-idp-review-profile-form")),
+				hasKeycloakPage: `+keycloakRenderedPageJS+`,
 				hasCollision: Boolean(document.querySelector("#linkAccount, #instruction1")),
 				hasError: Array.from(document.querySelectorAll(".flash-error, [data-test-selector=auth-error], #kc-error-message, .pf-m-danger"))
 					.some(element => {
@@ -311,22 +354,6 @@ func finishGitHubAuthorization(ctx context.Context, cfg config) error {
 				return fmt.Errorf("GitHub OAuth grant: %w", err)
 			}
 			grantSent = true
-		case oauthReviewProfile:
-			if profileSent {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-time.After(250 * time.Millisecond):
-				}
-				continue
-			}
-			if err := chromedp.Run(ctx, chromedp.Click(
-				"form#kc-idp-review-profile-form input[type=submit], form#kc-idp-review-profile-form button[type=submit]",
-				chromedp.ByQuery,
-			)); err != nil {
-				return fmt.Errorf("submit Guardian first-login profile: %w", err)
-			}
-			profileSent = true
 		case oauthWait:
 			select {
 			case <-ctx.Done():
@@ -350,10 +377,10 @@ func classifyOAuthPage(state oauthPageState, postflightHost string) (oauthPageAc
 		if state.HasError {
 			return oauthWait, errors.New("Guardian rejected the brokered login")
 		}
-		if state.HasReviewProfile {
-			return oauthReviewProfile, nil
+		if state.HasKeycloakPage {
+			return oauthWait, errors.New("Keycloak rendered a page during the brokered login")
 		}
-		return oauthWait, fmt.Errorf("unexpected Guardian login page %q", state.Path)
+		return oauthWait, nil
 	case "github.com":
 		if state.HasError {
 			return oauthWait, errors.New("GitHub rejected the canary login")

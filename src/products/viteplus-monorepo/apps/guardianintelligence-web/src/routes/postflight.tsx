@@ -62,17 +62,14 @@ function LoginCard({
         }
       >
         {!signedIn && <PostflightMark small />}
-        {signedIn ? "Sign out" : authEnabled ? "Sign in with Guardian" : "Coming soon"}
+        {signedIn ? "Sign out" : authEnabled ? "Sign in with GitHub" : "Coming soon"}
       </a>
       {signedIn && authEnabled ? (
-        <a
-          className="postflight-account-link"
-          href="/realms/guardianintelligence.org/account/#/linked-accounts"
-        >
-          Manage connected accounts
+        <a className="postflight-account-link" href="/postflight/console">
+          Open the Postflight console
         </a>
       ) : (
-        <small>Use a social account connected to Guardian.</small>
+        <small>Signing in connects your GitHub account to Guardian.</small>
       )}
     </div>
   );
@@ -180,7 +177,7 @@ function PostflightPage() {
           <PostflightMark />
           <h2>Ship while the context is still warm.</h2>
           <a aria-disabled={!authEnabled} href={authEnabled ? "/postflight/auth/login" : undefined}>
-            {authEnabled ? "Sign in with Guardian" : "Coming soon"}
+            {authEnabled ? "Sign in with GitHub" : "Coming soon"}
           </a>
         </section>
       </main>

@@ -7,6 +7,10 @@ export const SESSION_COOKIE = "__Host-postflight-session";
 const transactionPurpose = "postflight:oidc-transaction:v1";
 const sessionPurpose = "postflight:session:v1";
 
+// Server-side constant, never derived from request input: pinning the realm's
+// single broker keeps Keycloak from rendering its own login page.
+const identityProviderHint = "github";
+
 type AuthTransaction = {
   readonly state: string;
   readonly nonce: string;
@@ -155,7 +159,7 @@ function safeReturnTo(value: string | null): string {
       value.startsWith("/postflight?")
     )
   ) {
-    return "/postflight";
+    return "/postflight/console";
   }
   return value;
 }
@@ -201,6 +205,7 @@ export async function beginPostflightLogin(request: Request): Promise<Response> 
     nonce: transaction.nonce,
     code_challenge: base64URL(await digest(verifier)),
     code_challenge_method: "S256",
+    kc_idp_hint: identityProviderHint,
   }).toString();
 
   const sealed = await seal(transaction, transactionPurpose, cfg.sessionSecret);
@@ -391,6 +396,11 @@ export async function postflightSessionResponse(request: Request): Promise<Respo
 }
 
 export async function endPostflightSession(request: Request): Promise<Response> {
+  // Fetch-metadata CSRF guard: logout is reachable by top-level navigation,
+  // so a cross-site trigger must not end the session.
+  if (request.headers.get("sec-fetch-site") === "cross-site") {
+    return new Response(null, { status: 403, headers: securityHeaders() });
+  }
   const cfg = configuration();
   const logoutURL = new URL(`${cfg.issuer}/protocol/openid-connect/logout`);
   const params = new URLSearchParams({
