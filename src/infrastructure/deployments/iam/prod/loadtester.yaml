@@ -43,6 +43,12 @@ spec:
             - -port=8080
             - -log-level=info
             - -timeout=1h
+          env:
+            - name: TOKEN_GATE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-token-gate
+                  key: password
           livenessProbe:
             httpGet:
               path: /healthz
@@ -107,6 +113,8 @@ metadata:
     app.kubernetes.io/name: flagger-loadtester
     app.kubernetes.io/part-of: guardian
     guardian.dev/stage: prod
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
 data:
   discovery-gate.sh: |
     #!/usr/bin/env bash
@@ -117,3 +125,29 @@ data:
       "$base/realms/guardianintelligence.org/.well-known/openid-configuration" \
       | grep -q '"authorization_endpoint"'
     echo "discovery-gate: OK"
+  token-gate.sh: |
+    #!/usr/bin/env bash
+    set -euo pipefail
+    base="http://keycloak-canary.tenant-guardian-prod"
+    realm="guardianintelligence.org"
+
+    # The token-gate client is realm data owned by the realm reconciler; a
+    # rollout that ships the client and this gate together may reach the
+    # pre-rollout check while the reconciler Job is still converging, so the
+    # gate retries across its webhook window instead of failing the canary
+    # on a not-yet-reconciled client.
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      token="$(curl -fsS --max-time 10 \
+        -d grant_type=client_credentials \
+        -d client_id=token-gate \
+        --data-urlencode "client_secret=${TOKEN_GATE_CLIENT_SECRET}" \
+        "$base/realms/$realm/protocol/openid-connect/token" \
+        | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p' || true)"
+      if test -n "$token"; then
+        echo "token-gate: OK"
+        exit 0
+      fi
+      sleep 10
+    done
+    echo "token-gate: canary color issued no token" >&2
+    exit 1
