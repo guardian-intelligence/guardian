@@ -100,14 +100,23 @@ for the browser procedures.
 
 An empty database is initialized from the checked-in Guardian realm import.
 Steady state is enforced through the Keycloak Admin REST API by the
-`guardian-realm-reconciler` service account inside that realm. Its roles are
-limited to realm settings, clients, and identity providers; it cannot manage
-users, delete other realms, or administer the master realm.
+`guardian-realm-reconciler` service account inside that realm. It holds the
+realm's `realm-admin` composite — the workflows admin API accepts nothing
+less — making it the realm's configuration root of trust, applied only
+through reviewed configuration; it cannot delete other realms or administer
+the master realm. The only other administrative principal is the canary
+janitor, whose entire capability is a fine-grained grant on the
+`canary-principals` group with scopes exactly `view-members` and
+`manage-members`. The reconciler rewrites that grant on every run, so a
+drifted grant shape heals at the next reconcile, and admin events stay
+enabled as the audit trail for all user-store administration.
 
 A realm update binds authentication flows by alias but never creates them,
-and no realm update carries the user profile, so the reconciler asserts the
-headless `broker-create-user-only` flow before the provider loop binds it and
-applies the user profile through its dedicated endpoint. The flow and its
+and no realm update carries the user profile, broker mappers, groups, or
+workflows — workflows are invisible even to realm import and export — so the
+reconciler asserts the headless `broker-create-user-only` flow before the
+provider loop binds it and applies each of the other surfaces through its
+dedicated endpoint. The flow and its
 execution are guarded independently, so a run that dies between the two
 creates converges on retry instead of wedging on the half-made flow. The user profile
 keeps `firstName` and `lastName` optional: a brokered GitHub account has no
