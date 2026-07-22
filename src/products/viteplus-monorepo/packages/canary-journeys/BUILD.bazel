@@ -1,5 +1,6 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load", "oci_push")
 
 npm_link_all_packages()
 
@@ -80,4 +81,71 @@ cd "$$work/packages/canary-journeys"
 "$$node" "$$vp" test run --config vitest.config.ts
 printf 'canary-journeys checks ok\\n' > "$$execroot/$@"
 """,
+)
+
+genrule(
+    name = "journey_runtime",
+    srcs = [
+        ":sources",
+        "//src/products/viteplus-monorepo:.aspect_rules_js/node_modules/@playwright+test@1.61.0/dir",
+        "//src/products/viteplus-monorepo:.aspect_rules_js/node_modules/playwright@1.61.0/dir",
+        "//src/products/viteplus-monorepo:.aspect_rules_js/node_modules/playwright-core@1.61.0/dir",
+    ],
+    outs = ["journey-runtime.tar"],
+    cmd = """
+set -euo pipefail
+execroot="$$(pwd)"
+work="$$(mktemp -d)"
+trap 'rm -rf "$$work"' EXIT
+app="$$work/app"
+mkdir -p "$$app/node_modules/@playwright"
+for f in $(locations :sources); do
+  rel="$${f#src/products/viteplus-monorepo/packages/canary-journeys/}"
+  mkdir -p "$$app/$$(dirname "$$rel")"
+  cp "$$f" "$$app/$$rel"
+done
+cp -RL "$$execroot/$(location //src/products/viteplus-monorepo:.aspect_rules_js/node_modules/@playwright+test@1.61.0/dir)" "$$app/node_modules/@playwright/test"
+cp -RL "$$execroot/$(location //src/products/viteplus-monorepo:.aspect_rules_js/node_modules/playwright@1.61.0/dir)" "$$app/node_modules/playwright"
+cp -RL "$$execroot/$(location //src/products/viteplus-monorepo:.aspect_rules_js/node_modules/playwright-core@1.61.0/dir)" "$$app/node_modules/playwright-core"
+chmod -R u+w "$$work"
+tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \\
+  -cf "$$execroot/$@" -C "$$work" app
+""",
+)
+
+oci_image(
+    name = "image",
+    annotations = {
+        "org.opencontainers.image.description": "Guardian Playwright user-journey canaries",
+        "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
+        "org.opencontainers.image.title": "guardian-canary-journeys",
+    },
+    base = "@playwright_linux_amd64",
+    entrypoint = [
+        "node",
+        "/app/node_modules/@playwright/test/cli.js",
+        "test",
+        "--config",
+        "/app/playwright.config.ts",
+    ],
+    env = {
+        "HOME": "/tmp/home",
+    },
+    tars = [":journey_runtime"],
+    visibility = ["//visibility:public"],
+    workdir = "/app",
+)
+
+oci_load(
+    name = "load",
+    image = ":image",
+    repo_tags = ["guardian/canary-journeys:dev"],
+)
+
+oci_push(
+    name = "push",
+    image = ":image",
+    remote_tags = ["edge"],
+    repository = "ghcr.io/guardian-intelligence/canary-journeys",
+    visibility = ["//visibility:public"],
 )
