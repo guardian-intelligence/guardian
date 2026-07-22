@@ -15,10 +15,7 @@ func (a *Agent) reconcilePool(ctx context.Context, vms *vmView) {
 	// previous configuration still exist on disk. Busy members finish under
 	// their original class and are reclaimed by their assignment lifecycle.
 	for id, status := range vms.byID {
-		if _, configured := a.cfg.Slots[status.Class]; configured || status.MemberID != "" {
-			continue
-		}
-		if status.Phase != vm.PhaseWarm && status.Phase != vm.PhaseBooting {
+		if _, configured := a.cfg.Slots[status.Class]; configured || !a.poolVMCanRecycle(status) {
 			continue
 		}
 		if err := a.vms.Destroy(ctx, id); err != nil {
@@ -39,10 +36,7 @@ func (a *Agent) reconcilePool(ctx context.Context, vms *vmView) {
 		// replaced. Busy members finish under the image they started with.
 		if image := a.cfg.Images[class]; image != "" {
 			for id, status := range vms.byID {
-				if status.Class != class || status.MemberID != "" || status.Image == image {
-					continue
-				}
-				if status.Phase != vm.PhaseWarm && status.Phase != vm.PhaseBooting {
+				if status.Class != class || status.Image == image || !a.poolVMCanRecycle(status) {
 					continue
 				}
 				if err := a.vms.Destroy(ctx, id); err != nil {
@@ -100,5 +94,17 @@ func (a *Agent) reconcilePool(ctx context.Context, vms *vmView) {
 				vms.countByCl[class]--
 			}
 		}
+	}
+}
+
+func (a *Agent) poolVMCanRecycle(status vm.Status) bool {
+	if status.Assignment.RequestID != "" || a.assignmentOwnsMember(status.MemberID) {
+		return false
+	}
+	switch status.Phase {
+	case vm.PhaseBooting, vm.PhaseWarm, vm.PhaseAssigned, vm.PhaseListening:
+		return true
+	default:
+		return false
 	}
 }
