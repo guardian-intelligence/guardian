@@ -102,17 +102,17 @@ spec:
             exported_instance: prod/sign-in
           annotations:
             summary: "Sign in with Guardian is failing in prod"
-            description: "No successful login through the Guardian realm for 35 minutes — at least two consecutive browser-canary journeys have not completed. Check guardian-login-canary Job logs in tenant-guardian-prod and keycloak_user_events_total{event=\"login\",error!=\"\"} for the failing step."
-        - alert: GuardianLoginCanaryAbsent
-          expr: absent(kube_cronjob_status_last_schedule_time{namespace="tenant-guardian-prod",cronjob="guardian-login-canary"})
+            description: "No successful login through the Guardian realm for 35 minutes — at least two consecutive browser-canary journeys have not completed. Check guardian-journey-canary Job logs in tenant-guardian-prod and keycloak_user_events_total{event=\"login\",error!=\"\"} for the failing step."
+        - alert: GuardianJourneyCanaryAbsent
+          expr: absent(kube_cronjob_status_last_schedule_time{namespace="tenant-guardian-prod",cronjob="guardian-journey-canary"})
           for: 15m
           labels:
             severity: warning
             guardian_stage: prod
-            exported_instance: prod/login-canary
+            exported_instance: prod/journey-canary
           annotations:
             summary: "Sign in with Guardian canary is missing in prod"
-            description: "kube-state-metrics has not reported the guardian-login-canary CronJob for 15 minutes."
+            description: "kube-state-metrics has not reported the guardian-journey-canary CronJob for 15 minutes."
         - alert: KeycloakScrapeDown
           expr: up{namespace="tenant-guardian-prod",job="keycloak-metrics"} == 0
           for: 5m

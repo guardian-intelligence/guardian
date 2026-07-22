@@ -137,7 +137,14 @@ TOTP, return through the OIDC callback to the Postflight console, verify an
 authenticated Postflight session, sign out, and verify the local session is
 gone. Any rendered Keycloak page at any step fails the run. It does not use
 a direct grant or Keycloak admin API and it does not simulate a broker
-callback.
+callback. The journey is a Playwright spec in
+`src/products/viteplus-monorepo/packages/canary-journeys/` (general canary
+principles: `docs/canaries.md`); it runs as the `guardian-journey-canary`
+CronJob, treats its credentials as critical data (captures off, output
+scrubbed by known value, a honeytoken self-test on every run), and its
+structured page classification fails closed on the same negative cases the
+journey has always held: no rendered Keycloak page, no automatic account
+linking on email collision.
 
 An operator approves the OAuth App once in an interactive browser during
 machine-account enrollment and verifies that it appears under the account's

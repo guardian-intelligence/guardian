@@ -7,7 +7,6 @@ on:
     branches: [main]
     paths:
       - "src/services/authorization/**"
-      - "src/services/iam/login-canary/**"
       - "src/products/viteplus-monorepo/packages/canary-journeys/**"
       - "src/products/viteplus-monorepo/pnpm-lock.yaml"
       - "src/products/viteplus-monorepo/pnpm-workspace.yaml"
@@ -50,26 +49,21 @@ jobs:
         id: classify
         run: |
           authorization_pin_file=src/infrastructure/deployments/authorization/prod/api.yaml
-          canary_pin_file=src/infrastructure/deployments/iam/prod/login-canary.yaml
           journeys_pin_file=src/infrastructure/deployments/iam/prod/journey-canary.yaml
           authorization_re='ghcr.io/guardian-intelligence/authorization@sha256:[a-f0-9]\{64\}'
-          canary_re='ghcr.io/guardian-intelligence/login-canary@sha256:[a-f0-9]\{64\}'
           journeys_re='ghcr.io/guardian-intelligence/canary-journeys@sha256:[a-f0-9]\{64\}'
-          build=false authorization_pin=false canary_pin=false journeys_pin=false
+          build=false authorization_pin=false journeys_pin=false
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             base="origin/$GITHUB_BASE_REF"
             while IFS= read -r f; do
               case "$f" in
-                src/services/authorization/*|src/services/iam/login-canary/*|src/products/viteplus-monorepo/packages/canary-journeys/*|src/products/viteplus-monorepo/pnpm-lock.yaml|src/products/viteplus-monorepo/pnpm-workspace.yaml|src/proto/guardian/authorization/*|src/proto/gen/go/guardian/authorization/*|src/proto/BUILD.bazel|src/proto/testdata/buf/authorization.binpb|go.mod|go.sum|.github/workflows/identity-services-image.yml|MODULE.bazel|MODULE.bazel.lock|.bazelrc|.bazelversion)
+                src/services/authorization/*|src/products/viteplus-monorepo/packages/canary-journeys/*|src/products/viteplus-monorepo/pnpm-lock.yaml|src/products/viteplus-monorepo/pnpm-workspace.yaml|src/proto/guardian/authorization/*|src/proto/gen/go/guardian/authorization/*|src/proto/BUILD.bazel|src/proto/testdata/buf/authorization.binpb|go.mod|go.sum|.github/workflows/identity-services-image.yml|MODULE.bazel|MODULE.bazel.lock|.bazelrc|.bazelversion)
                   build=true ;;
               esac
             done < <(git diff --name-only "$base"...HEAD)
             pinned="$(grep -o "$authorization_re" "$authorization_pin_file" 2>/dev/null | cut -d@ -f2 || true)"
             base_pinned="$(git show "$base:$authorization_pin_file" 2>/dev/null | grep -o "$authorization_re" | cut -d@ -f2 || true)"
             if [[ "$pinned" != "$base_pinned" ]]; then authorization_pin=true; fi
-            pinned="$(grep -o "$canary_re" "$canary_pin_file" 2>/dev/null | cut -d@ -f2 || true)"
-            base_pinned="$(git show "$base:$canary_pin_file" 2>/dev/null | grep -o "$canary_re" | cut -d@ -f2 || true)"
-            if [[ "$pinned" != "$base_pinned" ]]; then canary_pin=true; fi
             pinned="$(grep -o "$journeys_re" "$journeys_pin_file" 2>/dev/null | cut -d@ -f2 || true)"
             base_pinned="$(git show "$base:$journeys_pin_file" 2>/dev/null | grep -o "$journeys_re" | cut -d@ -f2 || true)"
             if [[ "$pinned" != "$base_pinned" ]]; then journeys_pin=true; fi
@@ -78,12 +72,11 @@ jobs:
           fi
           echo "build=$build" >> "$GITHUB_OUTPUT"
           echo "authorization_pin=$authorization_pin" >> "$GITHUB_OUTPUT"
-          echo "canary_pin=$canary_pin" >> "$GITHUB_OUTPUT"
           echo "journeys_pin=$journeys_pin" >> "$GITHUB_OUTPUT"
-          echo "classified: build=$build authorization_pin=$authorization_pin canary_pin=$canary_pin journeys_pin=$journeys_pin"
+          echo "classified: build=$build authorization_pin=$authorization_pin journeys_pin=$journeys_pin"
 
       - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
-        if: steps.classify.outputs.authorization_pin == 'true' || steps.classify.outputs.canary_pin == 'true' || steps.classify.outputs.journeys_pin == 'true' || github.event_name == 'push'
+        if: steps.classify.outputs.authorization_pin == 'true' || steps.classify.outputs.journeys_pin == 'true' || github.event_name == 'push'
 
       - name: Verify the changed authorization pin is canonically signed
         if: steps.classify.outputs.authorization_pin == 'true' && github.event_name == 'pull_request'
@@ -96,18 +89,6 @@ jobs:
           cosign verify --certificate-identity "$IDENTITY" \
             --certificate-oidc-issuer "$ISSUER" \
             "ghcr.io/guardian-intelligence/authorization@$pinned" > /dev/null
-
-      - name: Verify the changed canary pin is canonically signed
-        if: steps.classify.outputs.canary_pin == 'true' && github.event_name == 'pull_request'
-        env:
-          IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/identity-services-image.yml@refs/heads/main
-          ISSUER: https://token.actions.githubusercontent.com
-        run: |
-          pinned="$(grep -o 'ghcr.io/guardian-intelligence/login-canary@sha256:[a-f0-9]\{64\}' \
-            src/infrastructure/deployments/iam/prod/login-canary.yaml | cut -d@ -f2)"
-          cosign verify --certificate-identity "$IDENTITY" \
-            --certificate-oidc-issuer "$ISSUER" \
-            "ghcr.io/guardian-intelligence/login-canary@$pinned" > /dev/null
 
       - name: Verify the changed journeys pin is canonically signed
         if: steps.classify.outputs.journeys_pin == 'true' && github.event_name == 'pull_request'
@@ -132,8 +113,7 @@ jobs:
             //src/proto:authorization_buf_breaking_test \
             //src/proto:authorization_buf_lint_test \
             //src/proto:authorization_go_codegen_check \
-            //src/services/authorization:authorization_test \
-            //src/services/iam/login-canary:login_canary_test
+            //src/services/authorization:authorization_test
           bazelisk build //src/products/viteplus-monorepo/packages/canary-journeys:checked
 
       - name: Build images
@@ -141,7 +121,6 @@ jobs:
         run: |
           bazelisk build \
             //src/services/authorization:image \
-            //src/services/iam/login-canary:image \
             //src/products/viteplus-monorepo/packages/canary-journeys:image
 
       - name: Compute digests
@@ -149,13 +128,10 @@ jobs:
         id: digest
         run: |
           authorization="$(jq -r '.manifests[0].digest' bazel-bin/src/services/authorization/image/index.json)"
-          canary="$(jq -r '.manifests[0].digest' bazel-bin/src/services/iam/login-canary/image/index.json)"
           journeys="$(jq -r '.manifests[0].digest' bazel-bin/src/products/viteplus-monorepo/packages/canary-journeys/image/index.json)"
           echo "authorization=$authorization" >> "$GITHUB_OUTPUT"
-          echo "canary=$canary" >> "$GITHUB_OUTPUT"
           echo "journeys=$journeys" >> "$GITHUB_OUTPUT"
           echo "authorization: $authorization"
-          echo "login canary: $canary"
           echo "canary journeys: $journeys"
 
       - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
@@ -169,13 +145,9 @@ jobs:
             oci-dir:bazel-bin/src/services/authorization/image \
             -o spdx-json=authorization.spdx.json
           "${{ steps.syft.outputs.cmd }}" scan \
-            oci-dir:bazel-bin/src/services/iam/login-canary/image \
-            -o spdx-json=login-canary.spdx.json
-          "${{ steps.syft.outputs.cmd }}" scan \
             oci-dir:bazel-bin/src/products/viteplus-monorepo/packages/canary-journeys/image \
             -o spdx-json=canary-journeys.spdx.json
           test -s authorization.spdx.json
-          test -s login-canary.spdx.json
           test -s canary-journeys.spdx.json
 
       - name: Log in to ghcr.io
@@ -186,20 +158,16 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           bazelisk run //src/services/authorization:push
-          bazelisk run //src/services/iam/login-canary:push
           bazelisk run //src/products/viteplus-monorepo/packages/canary-journeys:push
 
       - name: Sign images and attest SBOMs
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           authorization="ghcr.io/guardian-intelligence/authorization@${{ steps.digest.outputs.authorization }}"
-          canary="ghcr.io/guardian-intelligence/login-canary@${{ steps.digest.outputs.canary }}"
           journeys="ghcr.io/guardian-intelligence/canary-journeys@${{ steps.digest.outputs.journeys }}"
           cosign sign --yes "$authorization"
-          cosign sign --yes "$canary"
           cosign sign --yes "$journeys"
           cosign attest --yes --type spdxjson --predicate authorization.spdx.json "$authorization"
-          cosign attest --yes --type spdxjson --predicate login-canary.spdx.json "$canary"
           cosign attest --yes --type spdxjson --predicate canary-journeys.spdx.json "$journeys"
 
       - name: Verify signatures and SBOM attestations
@@ -210,7 +178,6 @@ jobs:
         run: |
           for image in \
             "ghcr.io/guardian-intelligence/authorization@${{ steps.digest.outputs.authorization }}" \
-            "ghcr.io/guardian-intelligence/login-canary@${{ steps.digest.outputs.canary }}" \
             "ghcr.io/guardian-intelligence/canary-journeys@${{ steps.digest.outputs.journeys }}"; do
             cosign verify --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" "$image" > /dev/null
             cosign verify-attestation --type spdxjson \

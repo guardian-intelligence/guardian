@@ -22,9 +22,6 @@ metadata:
 spec:
   promotionPolicies:
     - stageSelector:
-        name: login-canary-prod
-      autoPromotionEnabled: true
-    - stageSelector:
         name: journey-canary-prod
       autoPromotionEnabled: true
 ---
@@ -41,19 +38,6 @@ spec:
         imageSelectionStrategy: SemVer
         constraint: 26.6.x
         platform: linux/amd64
----
-apiVersion: kargo.akuity.io/v1alpha1
-kind: Warehouse
-metadata:
-  name: login-canary
-  namespace: guardian-iam
-spec:
-  interval: 1m0s
-  subscriptions:
-    - image:
-        repoURL: ghcr.io/guardian-intelligence/login-canary
-        imageSelectionStrategy: Digest
-        constraint: edge
 ---
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Warehouse
