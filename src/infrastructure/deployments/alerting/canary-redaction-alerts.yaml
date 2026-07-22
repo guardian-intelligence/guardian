@@ -1,0 +1,42 @@
+# Redaction tripwire, fed by container logs. Every journey-canary run
+# deliberately routes a fixed honeytoken marker (CANARY_HONEYTOKEN in
+# journey-canary.yaml) through the harness redaction registry before
+# emitting it; a healthy scrubber only ever ships [REDACTED:honeytoken].
+# The raw marker appearing in ANY log stream means redact-by-known-value
+# broke — treat exactly like a credential leak in the canary's output,
+# because the next leak through the same hole is the real password. A
+# scrubber nobody is testing should be assumed broken (docs/canaries.md
+# principles 4 and 6); this alert is the test.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: guardian-canary-redaction-vlogs-rules
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: vmalert-vlogs
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+data:
+  canary-redaction.yaml: |
+    groups:
+      - name: guardian-canary-redaction
+        type: vlogs
+        interval: 60s
+        rules:
+          - alert: CanaryRedactionBroken
+            expr: |
+              log_source:container_log "guardian-canary-honeytoken-9f2e6c81d4b7" -kubernetes_pod_name:vmalert-vlogs*
+              | stats by (kubernetes_namespace_name, kubernetes_pod_name) count() as hits
+            keep_firing_for: 30m
+            labels:
+              severity: critical
+              guardian_component: canary
+              exported_instance: '{{ $labels.kubernetes_namespace_name }}/{{ $labels.kubernetes_pod_name }}'
+            annotations:
+              summary: 'canary redaction broken: raw honeytoken reached the log sink from {{ $labels.kubernetes_namespace_name }}/{{ $labels.kubernetes_pod_name }}'
+              description: >-
+                The journey canary's redaction self-test leaked the raw
+                honeytoken marker into VictoriaLogs. The redact-by-known-value
+                registry in packages/canary-journeys is not scrubbing output;
+                real credentials take the same path. Fix the scrubber before
+                trusting any canary log emitted since the first hit.

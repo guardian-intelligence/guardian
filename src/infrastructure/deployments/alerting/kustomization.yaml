@@ -31,5 +31,6 @@ resources:
   - synthetic-probes.yaml
   - talos-host-log-alerts.yaml
   - trust-alerts.yaml
+  - canary-redaction-alerts.yaml
   - tsdb-alerts.yaml
   - vmalert-vlogs.yaml

@@ -85,8 +85,8 @@ func (s *eventService) Publish(
 			SchemaVersion: schemaVersion,
 			CorrelationID: meta.corrID,
 			SessionSeq:    e.GetSessionSeq(),
-			Path:          e.GetPath(),
-			Referrer:      e.GetReferrer(),
+			Path:          redactCredentialShapes(e.GetPath()),
+			Referrer:      redactCredentialShapes(e.GetReferrer()),
 			UA:            meta.ctx.UA,
 			DeviceClass:   meta.ctx.DeviceClass,
 			OSFamily:      meta.ctx.OSFamily,
@@ -98,7 +98,7 @@ func (s *eventService) Publish(
 			ClientSkewMs:  skew,
 			VitalName:     e.GetVitalName(),
 			VitalValue:    e.GetVitalValue(),
-			Props:         e.GetPropsJson(),
+			Props:         redactCredentialShapes(e.GetPropsJson()),
 		}
 		copy(row.TraceID[:], e.GetTraceId())
 		rows = append(rows, row)

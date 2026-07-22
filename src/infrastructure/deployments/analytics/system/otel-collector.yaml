@@ -25,6 +25,23 @@ data:
         check_interval: 1s
         limit_percentage: 80
         spike_limit_percentage: 20
+      # Credential shapes never reach ClickHouse: span/resource/log attribute
+      # VALUES matching these patterns are masked in flight. Keys stay
+      # untouched (allow_all_keys) — the block list is the value patterns.
+      redaction:
+        allow_all_keys: true
+        blocked_values:
+          # GitHub tokens (classic, fine-grained, app installation/user)
+          - "gh[pousr]_[A-Za-z0-9]{20,255}"
+          - "github_pat_[A-Za-z0-9_]{20,255}"
+          # Bearer/JWT material
+          - "[Bb]earer\\s+[A-Za-z0-9._~+/=-]{16,}"
+          - "eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9._-]{10,}"
+          # Credential assignments in freeform strings
+          - "(?i)(password|passwd|secret|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|totp[_-]?(seed|secret))\\s*[=:]\\s*[^\\s&\"']{6,}"
+          # OAuth authorization codes / state in query strings
+          - "(?i)[?&](code|state|access_token|id_token)=[^\\s&\"']{6,}"
+        summary: info
       batch:
         timeout: 5s
         send_batch_size: 10000
@@ -52,7 +69,7 @@ data:
       pipelines:
         traces:
           receivers: [otlp]
-          processors: [memory_limiter, batch]
+          processors: [memory_limiter, redaction, batch]
           exporters: [clickhouse]
 ---
 apiVersion: apps/v1
@@ -80,7 +97,7 @@ spec:
         # Writes to ClickHouse — the CH Cilium policy admits this label.
         guardian.dev/role: analytics-client
       annotations:
-        checksum/config: "rev3"
+        checksum/config: "rev4"
     spec:
       securityContext:
         runAsNonRoot: true
