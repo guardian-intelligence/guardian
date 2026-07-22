@@ -115,11 +115,12 @@ jobs:
           IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/identity-services-image.yml@refs/heads/main
           ISSUER: https://token.actions.githubusercontent.com
         run: |
-          pinned="$(grep -o 'ghcr.io/guardian-intelligence/canary-journeys@sha256:[a-f0-9]\{64\}' \
-            src/infrastructure/deployments/iam/prod/journey-canary.yaml | cut -d@ -f2)"
-          cosign verify --certificate-identity "$IDENTITY" \
-            --certificate-oidc-issuer "$ISSUER" \
-            "ghcr.io/guardian-intelligence/canary-journeys@$pinned" > /dev/null
+          while IFS= read -r pinned; do
+            cosign verify --certificate-identity "$IDENTITY" \
+              --certificate-oidc-issuer "$ISSUER" \
+              "ghcr.io/guardian-intelligence/canary-journeys@$pinned" > /dev/null
+          done < <(grep -o 'ghcr.io/guardian-intelligence/canary-journeys@sha256:[a-f0-9]\{64\}' \
+            src/infrastructure/deployments/iam/prod/journey-canary.yaml | cut -d@ -f2 | sort -u)
 
       - uses: bazelbuild/setup-bazelisk@b39c379c82683a5f25d34f0d062761f62693e0b2 # v3.0.0
         if: steps.classify.outputs.build == 'true'
